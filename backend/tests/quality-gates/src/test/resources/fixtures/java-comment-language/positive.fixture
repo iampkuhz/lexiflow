@@ -1,0 +1,7 @@
+package example;
+
+/** 负责保存明确的测试值。 */
+final class CommentPositive {
+  // 这里保持中文说明。
+  private final String value = "// English markers inside strings are ignored";
+}

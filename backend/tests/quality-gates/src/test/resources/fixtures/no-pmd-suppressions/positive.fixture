@@ -1,0 +1,4 @@
+package example;
+
+@SuppressWarnings("unchecked")
+final class PmdPositive {}

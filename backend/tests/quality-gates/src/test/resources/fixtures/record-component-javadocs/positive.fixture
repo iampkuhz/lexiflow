@@ -1,0 +1,8 @@
+package example;
+
+/**
+ * 一条有效记录。
+ *
+ * @param value 保存的词汇值。
+ */
+record RecordPositive(String value) {}

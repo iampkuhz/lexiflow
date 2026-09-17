@@ -1,0 +1,18 @@
+[versions]
+archunit = "1.4.2"
+checkstyle = "10.21.4"
+google-java-format = "1.28.0"
+jacoco = "0.8.14"
+junit = "6.0.3"
+pmd = "7.25.0"
+spotless = "8.7.0"
+spring-boot = "4.1.1"
+
+[libraries]
+archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version = "6.0.3" }
+
+[plugins]
+spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
+spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }

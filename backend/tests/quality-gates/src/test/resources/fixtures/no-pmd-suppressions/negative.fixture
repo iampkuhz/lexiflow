@@ -1,0 +1,4 @@
+package example;
+
+@SuppressWarnings("PMD.CloseResource")
+final class PmdNegative {}

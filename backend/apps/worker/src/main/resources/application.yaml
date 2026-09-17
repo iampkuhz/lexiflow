@@ -1,0 +1,8 @@
+spring:
+  application:
+    name: lexiflow-worker
+  main:
+    web-application-type: none
+  threads:
+    virtual:
+      enabled: true

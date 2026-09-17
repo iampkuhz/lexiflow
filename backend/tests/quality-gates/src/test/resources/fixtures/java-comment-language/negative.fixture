@@ -1,0 +1,4 @@
+package example;
+
+// Read cached execution result from local storage.
+final class CommentNegative {}

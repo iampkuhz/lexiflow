@@ -1,0 +1,8 @@
+package example;
+
+/**
+ * 一条无效记录。
+ *
+ * @param value stored value
+ */
+record RecordNegative(String value) {}

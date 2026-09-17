@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: lexiflow-api
+  threads:
+    virtual:
+      enabled: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
