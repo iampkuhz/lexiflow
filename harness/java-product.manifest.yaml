@@ -1,0 +1,48 @@
+schema_version: lexiflow.java-product.v1
+status: active
+backend:
+  language: java
+  java_release: 25
+  distribution: Eclipse Temurin
+  build:
+    tool: gradle-wrapper
+    version: 9.7.1
+    dsl: kotlin
+  framework:
+    name: spring-boot
+    version: 4.1.1
+    allowed_layers: [composition-root, inbound-adapter, outbound-adapter]
+    forbidden_layers: [domain, application]
+  runtimes: [api, worker]
+source_policy:
+  product_roots:
+  - backend/apps
+  - backend/application
+  - backend/modules
+  - backend/platform
+  allowed_product_source_extensions: [.java]
+  forbidden_product_source_extensions: [.py, .kt, .scala, .groovy]
+python_scope:
+  allowed: [scripts, harness, gates, generators, audit, tests-for-python-tooling]
+  forbidden: [product-domain, product-application, product-api, product-worker]
+verification:
+  launcher: python3 scripts/toolchain/java_gradle.py
+  jdk_resolution: explicit-lexiflow-home-then-repository-local-then-exact-java-home
+  execution_owner: gradle-java
+  gate_orchestration: receipt-only
+  incremental_delivery: python3 scripts/toolchain/java_gradle.py check
+  full_delivery: python3 scripts/toolchain/java_gradle.py deliveryFull
+  gate_selection:
+    incremental: [check]
+    full: [deliveryFull]
+    excluded_diagnostics: [architectureTest, verifyProductLanguage]
+  diagnostic_targets:
+    architecture: python3 scripts/toolchain/java_gradle.py architectureTest
+    language_boundary: python3 scripts/toolchain/java_gradle.py verifyProductLanguage
+  rule_owners:
+    formatting: Spotless
+    style: Checkstyle
+    static_analysis: PMD
+    java_source_policy: javaSourceGates
+    architecture: ArchUnit-and-Gradle-dependency-guard
+    behavior: JUnit-and-Spring-test-suites

@@ -1,0 +1,470 @@
+schemaVersion: 1
+protected_roots:
+- .codex/
+- .qoder/
+- harness/
+- scripts/
+- openspec/
+- planning/
+- backend/
+- clients/chrome-extension/**
+- AGENTS.md
+context_hygiene:
+  shared_rule_locations:
+  - AGENTS.md
+  - harness/
+  platform_configs_are_entry_points: true
+  runtime_state_in_harness: false
+privacy:
+  forbidden_inputs:
+  - secrets
+  - tokens
+  - real-user-captions
+  - viewing-history
+  - vocabulary-profiles
+  - unredacted-model-payloads
+  - runtime-cache
+  - personal-config
+git_safety:
+  forbidden_actions:
+  - stash
+  - reset
+  - force
+  - rebase
+  - unauthorized-push
+  integration_requires_explicit_user_choice: true
+architecture:
+  style: modular-monolith
+  dependency_rules:
+  - composition-root -> application
+  - composition-root -> concrete-inbound-adapters
+  - composition-root -> concrete-outbound-adapters
+  - inbound-adapters -> application
+  - outbound-adapters -> domain-ports
+  - application -> domain-and-ports
+  forbidden:
+  - domain-depends-on-framework
+  - domain-depends-on-concrete-adapter
+  - application-depends-on-concrete-adapter
+  - inbound-adapter-depends-on-outbound-adapter
+  - cross-domain-table-access
+  - extension-as-profile-source-of-truth
+  - english-caption-waits-for-model
+subagent_protocol:
+  codex_model_policy:
+    default_model: gpt-5.6-luna
+    routine_model: gpt-5.6-luna
+    routine_reasoning_effort: low
+    applies_to: codex-sub-agent
+    explicit_model_argument_required: true
+    routine_routing:
+      decision_owner: parent-agent
+      classification_scope: whole-work-package
+      eligible_routine_must_use_routine_model: true
+      role_does_not_pin_model: true
+      prompt_text_does_not_select_model: true
+      required_conditions:
+      - frozen-contract-and-acceptance
+      - bounded-coherent-work-package
+      - deterministic-direct-validation
+      eligible_examples:
+      - fixture-and-repetitive-test-expansion
+      - approved-document-and-example-synchronization
+      - frozen-dto-mapping-and-client-type-adaptation
+      - presentation-only-extension-components
+      - complete-module-slice-with-known-contracts
+      - source-bound-review-and-targeted-validation
+      frequency_or_agent_name_alone_is_not_eligibility: true
+      deterministic_single_command_or_small_fix: main-agent-no-dispatch
+      selection_record: existing-parent-dispatch-note-class-model-reason
+      luna_blocker_policy: stop-and-compact-callback-parent-checks-failure-layer-before-escalation
+      default_dispatch: luna-first
+      complex_mixed_or_unclassified: use-default-model-with-default-reasoning
+      category_alone_does_not_escalate: true
+      escalation_record: existing-parent-dispatch-note-specific-evidence-and-decision
+    allowed_escalation_models:
+    - gpt-5.6-terra
+    - gpt-5.6-sol
+    user_only_models:
+    - gpt-6-astra
+    escalation_requires:
+    - stable_task_id
+    - parent_decision
+    - specific_failure_or_uncovered_risk_evidence
+    escalation_reasons:
+    - luna_acceptance_blocked
+    - specific_uncovered_risk
+    - terra_insufficient
+    - explicit_user_requirement
+    qoder_model_policy: separate-runner-controlled
+    default_reasoning_effort: medium
+    sol_escalation_requirement: terra_insufficiency_or_predeclared_high_risk_reason
+  status_values:
+  - PASS
+  - FAIL
+  - BLOCKED
+  completion_signal:
+    callback_first: true
+    max_blocking_findings: 3
+    allowed_fields:
+    - status
+    - work_package_id
+    - task_ids
+    - run_id
+    - artifact_locators
+    - validation_commands
+    - blocking_findings
+    allowed_fields_applies_to: qoder-task-signal
+    qoder_task_allowed_fields:
+    - status
+    - work_package_id
+    - task_ids
+    - run_id
+    - artifact_locators
+    - validation_commands
+    - blocking_findings
+    codex_work_package_allowed_fields:
+    - status
+    - work_package_id
+    - task_ids
+    - run_id
+    - artifact_locators
+    - validation_commands
+    - blocking_findings
+    full_context_or_logs_in_callback: forbidden
+    main_agent_confirmation: verify-canonical-artifact-hashes-and-run-risk-selected-validation
+  task_sizing_minutes:
+    applies_to: catalog-task-not-agent-session
+    min: 20
+    max: 90
+  delegation_work_package:
+    unit: coherent-set-of-catalog-tasks
+    identity_fields:
+    - work_package_id
+    - task_ids
+    work_package_id_rule: caller-stable-non-run-identity
+    task_ids_rule: exact-ordered-catalog-task-identities
+    per_task_outcome_evidence_required: true
+    preferred_minutes:
+      min: 120
+      max: 360
+    minimum_total_estimated_minutes: 120
+    target_maximum_total_estimated_minutes: 360
+    minimum_catalog_tasks: 2
+    must_share:
+    - primary_owner
+    - contract_boundary
+    - compatible_write_scope
+    required_outcomes:
+    - implementation_or_design
+    - direct_validation
+    - acceptance_evidence
+    main_agent_only_when:
+    - single_file_fix
+    - single_command_validation
+    - isolated_read_only_review
+    turn_or_token_count_is_not_acceptance_evidence: true
+  identity_rules:
+  - Every Qoder handoff has one stable work_package_id and at least two ordered Task ids.
+  - Every Codex work package has one stable work_package_id and an exact ordered task_ids list.
+  - Every run has a unique agent_id and run_id.
+  - Parallel writers have non-overlapping ownership.
+  - Main Agent independently validates delegated output.
+  skipped_semantics: skipped, not-run, unavailable, excluded, queued, acknowledged and exit-zero are not
+    PASS.
+  caller_required_input_applies_to: qoder-task-handoff
+  caller_required_input:
+  - goal
+  - task_id
+  - task_source
+  - task_version
+  - change_version
+  - work_package_id
+  - task_ids
+  - task_versions
+  - change_versions
+  - estimated_minutes
+  - primary_owner
+  - contract_boundary
+  - agent_profile
+  - harness_manifest
+  - allowed_files
+  - forbidden_files
+  - required_context
+  - expected_output
+  - acceptance_criteria
+  - acceptance_evidence
+  - validation_command
+  - failure_policy
+  - parent_client
+  codex_work_package_caller_required_input:
+  - goal
+  - work_package_id
+  - task_ids
+  - task_versions
+  - change_versions
+  - estimated_minutes
+  - primary_owner
+  - contract_boundary
+  - allowed_files
+  - forbidden_files
+  - required_context
+  - expected_outputs_by_task
+  - acceptance_by_task
+  - validation_commands
+  - failure_policy
+  - parent_client
+  codex_work_package_runner_identity:
+    parent_session_id: runtime-bound-parent-session
+    agent_id: codex-runtime-bound-stable-actor
+    run_id: subagent-generated-once
+    session_id: codex-runtime-bound
+    client: exact-string-codex
+    parent_client: exact-string-codex
+    caller_must_omit:
+    - parent_session_id
+    - agent_id
+    - run_id
+    - session_id
+    - client
+  codex_work_package_result:
+    schema_version: lexiflow.codex-work-package-result.v1
+    schema_locator: harness/codex-work-package-result.schema.json
+    publisher: scripts/harness/codex_work_package.py
+    layout: tmp/quality/codex-work-packages/{run_id}/tasks/{task_id}/{task-projection,outcome,completion,signal}.json
+    completion_locator: tmp/quality/codex-work-packages/{run_id}/package-completion.json
+    task_keyset: exact-task-ids
+    aggregation: FAIL-over-BLOCKED-over-PASS
+    publication: immutable-completion-before-signal
+    legacy_layout_fallback: forbidden
+    subprocess_or_log_result_inference: forbidden
+    verify_command: python3 -m scripts.harness.codex_work_package verify --run-id <run_id> --root .
+  codex_work_package_task_projection:
+    schema_version: lexiflow.codex-work-package-task-projection.v1
+    unit: one-immutable-raw-task-per-target-catalog-task
+    exact_top_level_fields:
+    - schema_version
+    - work_package_id
+    - task_ids
+    - target_task_id
+    - task_id
+    - task_source
+    - task_version
+    - change_version
+    - allowed_files
+    - forbidden_files
+    - expected_output
+    - acceptance_criteria
+    - acceptance_evidence
+    - validation_command
+    - caller_contract
+    - parent_session_id
+    - agent_id
+    - run_id
+    - session_id
+    - client
+    - parent_client
+    caller_contract_exact_fields:
+    - goal
+    - work_package_id
+    - task_ids
+    - task_versions
+    - change_versions
+    - estimated_minutes
+    - primary_owner
+    - contract_boundary
+    - allowed_files
+    - forbidden_files
+    - required_context
+    - expected_outputs_by_task
+    - acceptance_by_task
+    - validation_commands
+    - failure_policy
+    - parent_client
+    task_ids_rule: exact-ordered-unique-minimum-two
+    target_rule: target_task_id-equals-task_id-and-is-member-of-task_ids
+    per_task_maps_rule: exact-keyset-equals-task_ids-and-target-values-match-projection
+    current_catalog_rule: all-task-versions-owner-outputs-acceptance-validation-and-package-scope-must-match-current-catalog
+    qoder_only_fields_forbidden:
+    - permission_mode
+    - _resume_mode
+    - title
+    raw_json_rule: duplicate-keys-rejected-noncanonical-whitespace-accepted-and-hash-bound
+  runner_bound_identity:
+    parent_session_id:
+      source: caller-or-CODEX_THREAD_ID
+      required_in_persisted_task: true
+    agent_id:
+      source: runner-generated-at-dispatch
+      caller_must_omit: true
+    run_id:
+      source: runner-generated-at-dispatch
+      caller_must_omit: true
+    session_id:
+      source: runner-generated-or-resume-record
+      caller_must_omit_on_start: true
+    client:
+      source: runner-forced
+      value: qoder
+  result_required_output:
+  - status
+  - work_package_id
+  - task_ids
+  - task_versions
+  - change_versions
+  - run_id
+  - outcomes
+  - changed_files
+  - validation
+  - acceptance_evidence
+  - effect_checks
+  - risks
+  current_runner_adapter:
+    enforced_caller_fields:
+    - goal
+    - task_id
+    - task_source
+    - task_version
+    - change_version
+    - work_package_id
+    - task_ids
+    - task_versions
+    - change_versions
+    - estimated_minutes
+    - primary_owner
+    - contract_boundary
+    - agent_profile
+    - harness_manifest
+    - allowed_files
+    - forbidden_files
+    - required_context
+    - expected_output
+    - acceptance_criteria
+    - acceptance_evidence
+    - validation_command
+    - failure_policy
+    - parent_client
+    target_schema_enforced: true
+    runtime_identity_enforced: true
+    result_fields_required_in_prompt: true
+    agent_profile_cli_binding: true
+    harness_manifest_preflight: true
+    catalog_package_preflight: true
+    catalog_estimate_rule: exact-sum-180-to-360
+    structured_result_required: true
+    implementation_status: IMPLEMENTED
+    conformance_test: tests/harness/test_qoder_runner.py
+    owner_task: LF-TSK-QLT-0006
+    owner_task_version: 2
+    owner_change_version: 2.0.0
+  caller_field_schema:
+    goal: non-empty-string
+    task_id: stable-task-id-string
+    task_source: non-empty-string
+    task_version: positive-integer
+    change_version: semver-string
+    work_package_id: stable-work-package-id-string
+    task_ids: ordered-unique-list-minimum-two
+    task_versions: exact-task-id-to-positive-integer-map
+    change_versions: exact-task-id-to-semver-map
+    estimated_minutes: integer-180-to-360
+    primary_owner: non-empty-string
+    contract_boundary: non-empty-string
+    agent_profile: project-qoder-agent-name
+    harness_manifest: repository-relative-hash-bound-json
+    allowed_files: non-empty-string
+    forbidden_files: non-empty-string
+    required_context: non-empty-string
+    expected_output: non-empty-string
+    acceptance_criteria: non-empty-list-of-strings
+    acceptance_evidence: non-empty-list-of-strings
+    validation_command: non-empty-string
+    failure_policy: non-empty-string
+    parent_client: exact-string-codex
+  codex_runtime_binding:
+    schema_version: lexiflow.codex-runtime-binding.v1
+    implementation: scripts/harness/codex_runtime.py
+    actor_source: trusted-host-or-orchestrator-agent-instance
+    actor_stability: same-actual-agent-across-runs-and-attestations
+    session_source: actual-CODEX-SESSION-ID-or-CODEX-THREAD-ID
+    parent_source: runner-bound-exact-parent-route
+    shared_host_session: permitted-for-distinct-verified-actors
+    caller_identity_injection: forbidden
+    missing_or_fabricated_runtime: FAIL
+    binding_publication: immutable-before-projection-and-completion
+    identity_authentication: trusted-host-boundary-not-JSON-structure-or-self-report
+  canonical_gate_materialization:
+    implementation: scripts/harness/codex_work_package.py
+    source: fixed-current-canonical-run-and-target-task
+    validator_owner: scripts/gates/evidence_packet.py
+    inputs: explicit-Main-attestation-snapshot-diff-test-descriptors
+    subprocess_log_inference_or_legacy_fallback: forbidden
+    formal_receipt_issuance: public-gate-cli-only
+  codex_main_task_projection:
+    schema_version: lexiflow.codex-main-task-projection.v1
+    executor: trusted-runtime-proven-main-agent
+    canonical_actor_id: /root
+    cardinality: one-current-catalog-task
+    delegated_projection: mutually-exclusive-minimum-two-tasks-unchanged
+    caller_identity_or_executor_kind_authority: forbidden
+    identity_source: same-immutable-codex-runtime-binding
+    self-validation-or-self-review: forbidden
+    materializer: scripts/harness/codex_work_package.py
+qoder_delegation:
+  default_implementer: qoder
+  default_permission_mode: bypass_permissions
+  max_active_runs: 1
+  scheduling:
+    overflow: queue
+    next_run_requires_confirmed_completion: true
+    unknown_status_blocks_dispatch: true
+    codex_independent_work_allowed: true
+    integration_validation: serial
+  max_rework_rounds: 1
+  max_total_runs_per_task_before_main_review: 2
+  max_prompt_characters: 8000
+  work_package:
+    estimated_minutes:
+      min: 180
+      max: 360
+    estimated_minutes_source: exact-sum-of-current-catalog-task-estimates
+    minimum_catalog_tasks: 2
+    must_share:
+    - primary_owner
+    - contract_boundary
+    package_scope_source: exact-union-of-current-catalog-task-scopes
+    package_claims_source: exact-union-of-current-catalog-task-claims
+    task_permission_source: each-current-catalog-task
+    execution_within_run: sequential
+    per_task_outcome_evidence_required: true
+  harness_preflight:
+    agent_profile_bound_with_cli: true
+    manifest_schema: lexiflow.qoder-harness.v1
+    required:
+    - hashed-context
+    - required-tools
+    - argv-validation-commands
+    - exact-package-identity
+    - current-catalog-owner-version-size-and-scope
+  structured_result:
+    schema: lexiflow.qoder-work-package-result.v1
+    result_json_required_before_completion: true
+    exit_zero_without_valid_result: failed
+  prompt_context_policy: Use bounded file locators; do not repeat design documents in the handoff.
+  recursive_delegation: forbidden
+  completion_callback:
+    transport: codex-queue
+    target: exact-parent-session-uuid
+    completion_record_first: true
+    queued_is_delivery_proof: false
+  lifecycle:
+    llm_polling_forbidden: true
+    llm_fallback_first_probe_after_seconds: 300
+    llm_fallback_min_subsequent_probe_interval_seconds: 600
+    watchdog_initial_delay_seconds: 300
+    watchdog_interval_seconds: 600
+    watchdog_max_lifetime_seconds: 86400
+    watchdog_no_llm: true
+    explicit_ack_required: true
+    ack_is_not_pass: true
+    result_and_status_read_only: true

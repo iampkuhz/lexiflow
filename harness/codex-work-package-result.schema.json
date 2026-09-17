@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lexiflow.codex-work-package-result.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "work_package_id", "task_ids", "task_versions", "change_versions", "identity", "status", "tasks", "validation_summary"],
+  "properties": {
+    "schema_version": {"const": "lexiflow.codex-work-package-result.v1"},
+    "work_package_id": {"type": "string", "minLength": 1},
+    "task_ids": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string"}},
+    "task_versions": {"type": "object", "minProperties": 2, "additionalProperties": {"type": "integer", "minimum": 1}},
+    "change_versions": {"type": "object", "minProperties": 2, "additionalProperties": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"}},
+    "identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["parent_session_id", "agent_id", "run_id", "session_id", "client", "parent_client"],
+      "properties": {
+        "parent_session_id": {"$ref": "#/$defs/uuid"},
+        "session_id": {"$ref": "#/$defs/uuid"},
+        "run_id": {"$ref": "#/$defs/uuid"},
+        "agent_id": {"type": "string", "minLength": 1},
+        "client": {"const": "codex"}, "parent_client": {"const": "codex"}
+      }
+    },
+    "status": {"enum": ["PASS", "BLOCKED", "FAIL"]},
+    "tasks": {"type": "object", "minProperties": 2, "additionalProperties": {"$ref": "#/$defs/task"}},
+    "validation_summary": {"type": "object", "minProperties": 2, "additionalProperties": {"$ref": "#/$defs/validation"}}
+  },
+  "$defs": {
+    "uuid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"},
+    "descriptor": {
+      "type": "object", "additionalProperties": false, "required": ["locator", "sha256", "bytes"],
+      "properties": {
+        "locator": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "task": {
+      "type": "object", "additionalProperties": false, "required": ["status", "artifacts"],
+      "properties": {
+        "status": {"enum": ["PASS", "BLOCKED", "FAIL"]},
+        "artifacts": {
+          "type": "object", "additionalProperties": false,
+          "required": ["task_projection", "outcome", "completion", "signal"],
+          "properties": {
+            "task_projection": {"$ref": "#/$defs/descriptor"}, "outcome": {"$ref": "#/$defs/descriptor"},
+            "completion": {"$ref": "#/$defs/descriptor"}, "signal": {"$ref": "#/$defs/descriptor"}
+          }
+        }
+      }
+    },
+    "validation": {
+      "type": "object", "required": ["command", "exit_code"],
+      "properties": {
+        "command": {"type": "string", "minLength": 1},
+        "exit_code": {"type": ["integer", "null"]}
+      }
+    }
+  }
+}

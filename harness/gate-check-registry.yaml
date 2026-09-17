@@ -1,0 +1,1459 @@
+schema_version: lexiflow.gate-check-registry.v1
+owner: LF-WS-QLT
+registry_version: 3
+execution:
+  owner: python-control-plane
+  executor: python3
+  source_scan: forbidden
+  task_validation: executes-selected-checks
+  independent_review: consumes-immutable-receipts
+  catalog_decision: consumes-immutable-receipts
+entries:
+- check_id: g1.arch.0001.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/product/product-brief.md
+    terminal: true
+  - path: docs/architecture/phase-1.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0001
+  command_id: g1.arch.0001.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-ARCH-0001
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/product/product-brief.md
+  - docs/architecture/phase-1.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-ARCH-0001.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-ARCH-0001
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: 0cfb72027c9dea56ff5a4b444408c1c91712ee41e911e6d0742ae54475792f99
+- check_id: g1.arch.0002.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/architecture/phase-1.md
+    terminal: true
+  - path: harness/module-boundaries.yaml
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0002
+  command_id: g1.arch.0002.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-ARCH-0002
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/architecture/phase-1.md
+  - harness/module-boundaries.yaml
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-ARCH-0002.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-ARCH-0002
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: a8ecf3a09e4ad6421fca2e6d3c27525e4ab0f82019677510b9ae8704cdee7af2
+- check_id: g1.arch.0003.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/architecture/phase-1.md
+    terminal: true
+  - path: harness/module-boundaries.yaml
+    terminal: true
+  - path: docs/references/feipi-session-browser-java.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0003
+  command_id: g1.arch.0003.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-ARCH-0003
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/architecture/phase-1.md
+  - harness/module-boundaries.yaml
+  - docs/references/feipi-session-browser-java.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-ARCH-0003.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-ARCH-0003
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: ea715f75a8d7aad8e213bacb82b8292fc39f499a00d3a45ff6e1bd606ba8ba83
+- check_id: g1.arch.0004.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/architecture/phase-1.md
+    terminal: true
+  - path: docs/reviews/phase-1-checklist.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0004
+  command_id: g1.arch.0004.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-ARCH-0004
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/architecture/phase-1.md
+  - docs/reviews/phase-1-checklist.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-ARCH-0004.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-ARCH-0004
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: dd49a392e284fc3413634263e05f5e922676d17934f29de5d33236ed76f7edc6
+- check_id: g1.arch.0005.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/architecture/phase-1.md
+    terminal: true
+  - path: docs/reviews/phase-1-checklist.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0005
+  command_id: g1.arch.0005.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-ARCH-0005
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/architecture/phase-1.md
+  - docs/reviews/phase-1-checklist.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-ARCH-0005.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-ARCH-0005
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: 93d7ac0eb99eadf6eaa05335975cfd334af1a9c12dd7ae7f4435bf8d5cc92ba3
+- check_id: g1.arch.0006.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/architecture/phase-1.md
+    terminal: true
+  - path: docs/reviews/phase-1-checklist.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0006
+  command_id: g1.arch.0006.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-ARCH-0006
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/architecture/phase-1.md
+  - docs/reviews/phase-1-checklist.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-ARCH-0006.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-ARCH-0006
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: 60fff1e36c8d0066971b869bbdbc1d2da9cc02ec769931726d0bf427e13e17a1
+- check_id: g1.arch.0007.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/architecture/decisions.md
+    terminal: true
+  - path: docs/reviews/g1-decision-package.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0007
+  command_id: g1.arch.0007.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-ARCH-0007
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/architecture/decisions.md
+  - docs/reviews/g1-decision-package.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-ARCH-0007.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-ARCH-0007
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: 16ffd0052c240456bea8e7c07a0100aafefb4da08fa4a60d54365e912a940a26
+- check_id: g1.arch.0008.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/reviews/g1-decision-package.md
+    terminal: true
+  - path: docs/reviews/phase-1-checklist.md
+    terminal: true
+  - path: docs/reviews/g1-bootstrap-variance.md
+    terminal: true
+  - path: docs/reviews/g1-task-evidence-map.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0008
+  command_id: g1.arch.0008.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-ARCH-0008
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/reviews/g1-decision-package.md
+  - docs/reviews/phase-1-checklist.md
+  - docs/reviews/g1-bootstrap-variance.md
+  - docs/reviews/g1-task-evidence-map.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-ARCH-0008.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-ARCH-0008
+  subject_task_version: 5
+  subject_change_version: 2.2.0
+  entry_hash: f38f59ae0f377ba706703262b5906b3a27e6af0f22c7b6e79e2a37ba19d6ecc8
+- check_id: g1.qlt.0001.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: planning/task-template.yaml
+    terminal: true
+  - path: planning/workstreams.yaml
+    terminal: true
+  - path: harness/agent-policy.manifest.yaml
+    terminal: true
+  - path: harness/agent-runtime.manifest.yaml
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-QLT-0001
+  command_id: g1.qlt.0001.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-QLT-0001
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - planning/task-template.yaml
+  - planning/workstreams.yaml
+  - harness/agent-policy.manifest.yaml
+  - harness/agent-runtime.manifest.yaml
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-QLT-0001.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-QLT-0001
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: c416b5b3ce3874619a1c466f1eabaa13ce97d2f00c9d216ea80a3f0fc5ae9390
+- check_id: qlt.planning.validate
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: scripts/gates/planning/**
+    terminal: true
+  - path: planning/**
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.planning --root .
+  command_id: qlt.planning.validate.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.planning
+  - --root
+  - .
+  cwd: .
+  timeout_seconds: 120
+  consumed_inputs:
+  - planning/workstreams.yaml
+  - planning/task-template.yaml
+  - harness/agent-policy.manifest.yaml
+  - harness/agent-runtime.manifest.yaml
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-QLT-0002.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  entry_hash: 62fb796e8d2e0a1490f6f482eaa74a5119cef1e414c6d5ba2cc2921b72d32c3c
+  subject_task_id: LF-TSK-QLT-0002
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+- check_id: g1.qlt.0003.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/development/gate-control-plane-design.md
+    terminal: true
+  - path: docs/development/current-execution-evidence.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-QLT-0003
+  command_id: g1.qlt.0003.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-QLT-0003
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/development/gate-control-plane-design.md
+  - docs/development/current-execution-evidence.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-QLT-0003.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-QLT-0003
+  subject_task_version: 4
+  subject_change_version: 2.2.0
+  entry_hash: c50ed8dcf91aa6280e9dc3414cbcd3600715f677784ad8074a328f85da6de013
+- check_id: g1.qlt.0004.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/acceptance-cases/phase-1.md
+    terminal: true
+  - path: openspec/changes/establish-lexiflow-foundation/tasks.md
+    terminal: true
+  - path: planning/workstreams.yaml
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-QLT-0004
+  command_id: g1.qlt.0004.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-QLT-0004
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/acceptance-cases/phase-1.md
+  - openspec/changes/establish-lexiflow-foundation/tasks.md
+  - planning/workstreams.yaml
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-QLT-0004.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-QLT-0004
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: 44d7b1cab9fe2b97ba4beb158bb58c54440ab9757e932ab625dd3caf0150c7f1
+- check_id: qlt.evidence.validate
+  check_version: 3
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: scripts/gates/evidence_packet.py
+    terminal: true
+  - path: tests/gates/test_evidence_packet.py
+    terminal: true
+  - path: scripts/harness/codex_work_package.py
+    terminal: true
+  - path: tests/harness/test_codex_work_package.py
+    terminal: true
+  - path: harness/codex-work-package-result.schema.json
+    terminal: true
+  - path: scripts/harness/codex_runtime.py
+    terminal: true
+  - path: tests/harness/test_codex_runtime.py
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m unittest tests.gates.test_evidence_packet tests.harness.test_codex_work_package
+    tests.harness.test_codex_runtime
+  command_id: qlt.evidence.validate.v3
+  fixed_argv:
+  - python3
+  - -m
+  - unittest
+  - tests.gates.test_evidence_packet
+  - tests.harness.test_codex_work_package
+  - tests.harness.test_codex_runtime
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - scripts/gates/evidence_packet.py
+  - tests/gates/test_evidence_packet.py
+  - scripts/harness/codex_work_package.py
+  - tests/harness/test_codex_work_package.py
+  - harness/codex-work-package-result.schema.json
+  - scripts/harness/codex_runtime.py
+  - tests/harness/test_codex_runtime.py
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-GATE-EVIDENCE-001
+  effect_check_ids:
+  - behavior
+  - regression
+  entry_hash: e999ccb7c94951aa9349f914e79b11ea41cb58eb71222e22b242f3b3877c19d5
+  subject_task_id: LF-TSK-QLT-0007
+  subject_task_version: 3
+  subject_change_version: 1.2.0
+- check_id: qlt.issuer.validate
+  check_version: 3
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: scripts/gates/issuer_packet.py
+    terminal: true
+  - path: tests/gates/test_issuer_packet.py
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m unittest discover -s tests/gates -p 'test_issuer_packet.py'
+  command_id: qlt.issuer.validate.v3
+  fixed_argv:
+  - python3
+  - -m
+  - unittest
+  - discover
+  - -s
+  - tests/gates
+  - -p
+  - test_issuer_packet.py
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - scripts/gates/issuer_packet.py
+  - tests/gates/test_issuer_packet.py
+  - harness/gate-issuer-authorities.yaml
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-GATE-ISSUER-001
+  effect_check_ids:
+  - behavior
+  - regression
+  entry_hash: a57644a5fee2daf537deb9a5e44021e4aa9e1638abdb9aecb9e5124666e1ba60
+  subject_task_id: LF-TSK-QLT-0014
+  subject_task_version: 3
+  subject_change_version: 3.0.0
+- check_id: qlt.planner.validate
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: scripts/gates/planner.py
+    terminal: true
+  - path: tests/gates/test_gate_planner.py
+    terminal: true
+  - path: harness/gate-check-registry.yaml
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m unittest discover -s tests/gates -p 'test_gate_planner.py'
+  command_id: qlt.planner.validate.v1
+  fixed_argv:
+  - python3
+  - -m
+  - unittest
+  - discover
+  - -s
+  - tests/gates
+  - -p
+  - test_gate_planner.py
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - scripts/gates/planner.py
+  - tests/gates/test_gate_planner.py
+  - harness/gate-check-registry.yaml
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-GATE-PLAN-001
+  effect_check_ids:
+  - behavior
+  - regression
+  entry_hash: 8580390afceaba3a01e2eb965043b518ac810605f555e1c444b4f54ec263db31
+  subject_task_id: LF-TSK-QLT-0008
+  subject_task_version: 4
+  subject_change_version: 2.2.0
+- check_id: qlt.executor.validate
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: scripts/gates/executor.py
+    terminal: true
+  - path: tests/gates/test_gate_executor.py
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m unittest discover -s tests/gates -p 'test_gate_executor.py'
+  command_id: qlt.executor.validate.v1
+  fixed_argv:
+  - python3
+  - -m
+  - unittest
+  - discover
+  - -s
+  - tests/gates
+  - -p
+  - test_gate_executor.py
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - scripts/gates/executor.py
+  - tests/gates/test_gate_executor.py
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-GATE-CHECK-001
+  effect_check_ids:
+  - behavior
+  - regression
+  entry_hash: aec88ddc7e0038d4bd26e9cec4de20534158a582bf0efaa15d2a909c1d4b0995
+  subject_task_id: LF-TSK-QLT-0009
+  subject_task_version: 4
+  subject_change_version: 1.3.0
+- check_id: qlt.lifecycle.validate
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: scripts/gates/cli.py
+    terminal: true
+  - path: scripts/gates/receipt_store.py
+    terminal: true
+  - path: tests/gates/test_gate_lifecycle.py
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m unittest discover -s tests/gates -p 'test_gate_lifecycle.py'
+  command_id: qlt.lifecycle.validate.v1
+  fixed_argv:
+  - python3
+  - -m
+  - unittest
+  - discover
+  - -s
+  - tests/gates
+  - -p
+  - test_gate_lifecycle.py
+  cwd: .
+  timeout_seconds: 240
+  consumed_inputs:
+  - scripts/gates/cli.py
+  - scripts/gates/receipt_store.py
+  - tests/gates/test_gate_lifecycle.py
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-GATE-VALIDATION-001
+  effect_check_ids:
+  - behavior
+  - regression
+  entry_hash: 614ea5214e7435413e7297577f1c09de820b2c69a2930d8d695b237896517a82
+  subject_task_id: LF-TSK-QLT-0010
+  subject_task_version: 4
+  subject_change_version: 2.2.0
+- check_id: qlt.independent-review.validate
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: scripts/gates/independent_review.py
+    terminal: true
+  - path: scripts/gates/cli.py
+    terminal: true
+  - path: tests/gates/test_independent_review.py
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m unittest discover -s tests/gates -p 'test_independent_review.py'
+  command_id: qlt.independent-review.validate.v1
+  fixed_argv:
+  - python3
+  - -m
+  - unittest
+  - discover
+  - -s
+  - tests/gates
+  - -p
+  - test_independent_review.py
+  cwd: .
+  timeout_seconds: 240
+  consumed_inputs:
+  - scripts/gates/independent_review.py
+  - scripts/gates/cli.py
+  - tests/gates/test_independent_review.py
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-GATE-REVIEW-001
+  effect_check_ids:
+  - behavior
+  - regression
+  entry_hash: bda992c36b7cd3d29acdd899b6350aae7ffdcc6de252b1f5129ba71db28eec26
+  subject_task_id: LF-TSK-QLT-0011
+  subject_task_version: 4
+  subject_change_version: 2.2.0
+- check_id: qlt.hash-dag.validate
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: scripts/gates/hash_dag.py
+    terminal: true
+  - path: tests/gates/test_hash_dag.py
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m unittest discover -s tests/gates -p 'test_hash_dag.py'
+  command_id: qlt.hash-dag.validate.v1
+  fixed_argv:
+  - python3
+  - -m
+  - unittest
+  - discover
+  - -s
+  - tests/gates
+  - -p
+  - test_hash_dag.py
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - scripts/gates/hash_dag.py
+  - tests/gates/test_hash_dag.py
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-GATE-HASH-001
+  effect_check_ids:
+  - behavior
+  - regression
+  entry_hash: 042621ed19c4067d694e477a7f31f7d96a4883e8a6878c7f79a107785dcc9450
+  subject_task_id: LF-TSK-QLT-0012
+  subject_task_version: 4
+  subject_change_version: 1.3.0
+- check_id: qlt.catalog-decision.validate
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: scripts/gates/catalog_decision.py
+    terminal: true
+  - path: scripts/gates/cli.py
+    terminal: true
+  - path: tests/gates/test_catalog_decision.py
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m unittest discover -s tests/gates -p 'test_catalog_decision.py'
+  command_id: qlt.catalog-decision.validate.v1
+  fixed_argv:
+  - python3
+  - -m
+  - unittest
+  - discover
+  - -s
+  - tests/gates
+  - -p
+  - test_catalog_decision.py
+  cwd: .
+  timeout_seconds: 240
+  consumed_inputs:
+  - scripts/gates/catalog_decision.py
+  - scripts/gates/cli.py
+  - tests/gates/test_catalog_decision.py
+  - docs/acceptance-cases/phase-1.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-GATE-CATALOG-001
+  effect_check_ids:
+  - behavior
+  - regression
+  entry_hash: b6157a130d0d46065088a9def170354f03819d16f102b5b952a54425c570f277
+  subject_task_id: LF-TSK-QLT-0013
+  subject_task_version: 4
+  subject_change_version: 2.2.0
+- check_id: qlt.dispatch-preflight.validate
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: scripts/gates/dispatch_preflight.py
+    terminal: true
+  - path: tests/gates/test_dispatch_preflight.py
+    terminal: true
+  - path: docs/development/dispatch-preflight-design.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m unittest discover -s tests/gates -p 'test_dispatch_preflight.py'
+  command_id: qlt.dispatch-preflight.validate.v1
+  fixed_argv:
+  - python3
+  - -m
+  - unittest
+  - discover
+  - -s
+  - tests/gates
+  - -p
+  - test_dispatch_preflight.py
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - scripts/gates/dispatch_preflight.py
+  - tests/gates/test_dispatch_preflight.py
+  - docs/development/dispatch-preflight-design.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-GATE-DISPATCH-001
+  effect_check_ids:
+  - behavior
+  - regression
+  entry_hash: e70b55ca02d7eaa103a7076ba50c5aafcdd8f5af5feda5e06d8cde82c202e6b2
+  subject_task_id: LF-TSK-QLT-0005
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+- check_id: qlt.runner.validate
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: scripts/harness/qoder_task.py
+    terminal: true
+  - path: scripts/harness/qoder_task_lifecycle.py
+    terminal: true
+  - path: tests/harness/test_qoder_runner.py
+    terminal: true
+  - path: harness/agent-policy.manifest.yaml
+    terminal: true
+  - path: harness/agent-runtime.manifest.yaml
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m unittest discover -s tests/harness -p 'test_qoder_runner.py'
+  command_id: qlt.runner.validate.v1
+  fixed_argv:
+  - python3
+  - -m
+  - unittest
+  - discover
+  - -s
+  - tests/harness
+  - -p
+  - test_qoder_runner.py
+  cwd: .
+  timeout_seconds: 240
+  consumed_inputs:
+  - scripts/harness/qoder_task.py
+  - scripts/harness/qoder_task_lifecycle.py
+  - tests/harness/test_qoder_runner.py
+  - harness/agent-policy.manifest.yaml
+  - harness/agent-runtime.manifest.yaml
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-QLT-0006.acceptance_criteria[0]
+  - LF-TSK-QLT-0006.acceptance_criteria[1]
+  - LF-TSK-QLT-0006.acceptance_criteria[2]
+  - LF-TSK-QLT-0006.acceptance_criteria[3]
+  - LF-TSK-QLT-0006.acceptance_criteria[4]
+  - LF-TSK-QLT-0006.acceptance_criteria[5]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-QLT-0006
+  subject_task_version: 4
+  subject_change_version: 2.2.0
+  entry_hash: 164412f4e27c7ea097480a63bf2484cf44de54c8d0dac2e6a5214a272ebd2791
+- check_id: g1.prd.0001.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/product/product-brief.md
+    terminal: true
+  - path: docs/architecture/phase-1.md
+    terminal: true
+  - path: docs/reviews/phase-1-user-requirement-traceability.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-PRD-0001
+  command_id: g1.prd.0001.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-PRD-0001
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/product/product-brief.md
+  - docs/architecture/phase-1.md
+  - docs/reviews/phase-1-user-requirement-traceability.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-PRD-0001.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-PRD-0001
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: 477a8f316374141f9569f0bb4c8c65f6a6e8ac03015c6f6543eeefd3afa801b6
+- check_id: g1.sem.0001.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/architecture/phase-1-cross-cutting-contracts.md
+    terminal: true
+  - path: openspec/specs/product-architecture/spec.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-SEM-0001
+  command_id: g1.sem.0001.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-SEM-0001
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/architecture/phase-1-cross-cutting-contracts.md
+  - openspec/specs/product-architecture/spec.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-SEM-0001.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-SEM-0001
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: 63be771ad45728e5eed405f0a83cf4e52dd9462f59cd7608f6340075a8c5b4e5
+- check_id: g1.sem.0002.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/architecture/phase-1-cross-cutting-contracts.md
+    terminal: true
+  - path: openspec/specs/product-architecture/spec.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-SEM-0002
+  command_id: g1.sem.0002.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-SEM-0002
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/architecture/phase-1-cross-cutting-contracts.md
+  - openspec/specs/product-architecture/spec.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-SEM-0002.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-SEM-0002
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: e3f47201a6f0aa185b2a72c30efbc26b5ed6f79e572633047915d3a46510c89d
+- check_id: g1.prf.0002.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/architecture/phase-1-cross-cutting-contracts.md
+    terminal: true
+  - path: docs/reviews/phase-1-checklist.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-PRF-0002
+  command_id: g1.prf.0002.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-PRF-0002
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/architecture/phase-1-cross-cutting-contracts.md
+  - docs/reviews/phase-1-checklist.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-PRF-0002.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-PRF-0002
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: b7fd8a98543c94396e73f1b005e65b991ada8a5a1dcd20d0d8aa435c99052fc6
+- check_id: g1.sec.0001.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/architecture/phase-1-cross-cutting-contracts.md
+    terminal: true
+  - path: openspec/specs/product-architecture/spec.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-SEC-0001
+  command_id: g1.sec.0001.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-SEC-0001
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/architecture/phase-1-cross-cutting-contracts.md
+  - openspec/specs/product-architecture/spec.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-SEC-0001.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-SEC-0001
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: 778b1642a93b7d042de8670704432dd4ccf478b39c502f7ecc2648cf10174b19
+- check_id: g1.obs.0001.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/architecture/phase-1-cross-cutting-contracts.md
+    terminal: true
+  - path: docs/reviews/phase-1-checklist.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-OBS-0001
+  command_id: g1.obs.0001.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-OBS-0001
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/architecture/phase-1-cross-cutting-contracts.md
+  - docs/reviews/phase-1-checklist.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-OBS-0001.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-OBS-0001
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: 5622406c8c89d3d0e6a1bf46db4b3d7bb20630d2cc96d883c0f39499bc12b2f6
+- check_id: g1.ops.0001.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/architecture/decisions.md
+    terminal: true
+  - path: docs/references/feipi-session-browser-java.md
+    terminal: true
+  - path: docs/development/post-approval-toolchain-verification.md
+    terminal: true
+  - path: docs/reviews/g1-decision-package.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-OPS-0001
+  command_id: g1.ops.0001.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-OPS-0001
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/architecture/decisions.md
+  - docs/references/feipi-session-browser-java.md
+  - docs/development/post-approval-toolchain-verification.md
+  - docs/reviews/g1-decision-package.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-OPS-0001.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-OPS-0001
+  subject_task_version: 2
+  subject_change_version: 1.1.0
+  entry_hash: a34a0a64c61ea8be7589ad1ccfaca1fe812962fff2caa208e243f605e432a173
+- check_id: g1.adp.0001.contract
+  check_version: 1
+  owner: LF-WS-QLT
+  modes:
+  - incremental
+  - full
+  triggers:
+  - path: harness/g1-task-contract-profiles.yaml
+    terminal: true
+  - path: scripts/gates/task_contracts.py
+    terminal: true
+  - path: docs/architecture/phase-1-cross-cutting-contracts.md
+    terminal: true
+  - path: openspec/specs/product-architecture/spec.md
+    terminal: true
+  required: true
+  declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ADP-0001
+  command_id: g1.adp.0001.contract.v1
+  fixed_argv:
+  - python3
+  - -m
+  - scripts.gates.task_contracts
+  - --task-id
+  - LF-TSK-ADP-0001
+  cwd: .
+  timeout_seconds: 180
+  consumed_inputs:
+  - harness/g1-task-contract-profiles.yaml
+  - scripts/gates/task_contracts.py
+  - docs/architecture/phase-1-cross-cutting-contracts.md
+  - openspec/specs/product-architecture/spec.md
+  outcome_contract:
+    schema: lexiflow.check-outcome.v1
+    required_fields:
+    - exit_code
+    - stdout_locator
+    - stderr_locator
+    - typed_result
+  acceptance_criterion_ids:
+  - LF-TSK-ADP-0001.acceptance_criteria[0]
+  effect_check_ids:
+  - behavior
+  - regression
+  subject_task_id: LF-TSK-ADP-0001
+  subject_task_version: 1
+  subject_change_version: 1.0.0
+  entry_hash: a96dd2776d7d8e09dde67fa9445218ead983e1986e43445623d0ee589a14b28e

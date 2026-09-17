@@ -1,0 +1,34 @@
+{
+  "schema_version": "lexiflow.qoder-harness.v1",
+  "identity": {
+    "work_package_id": "LF-WP-<DOMAIN>-NNN",
+    "task_ids": ["LF-TSK-<DOMAIN>-NNN1", "LF-TSK-<DOMAIN>-NNN2"],
+    "task_versions": {"LF-TSK-<DOMAIN>-NNN1": 1, "LF-TSK-<DOMAIN>-NNN2": 1},
+    "change_versions": {"LF-TSK-<DOMAIN>-NNN1": "1.0.0", "LF-TSK-<DOMAIN>-NNN2": "1.0.0"},
+    "agent_profile": "backend-implementer"
+  },
+  "required_context": [
+    {"path": "AGENTS.md", "sha256": "<lowercase-sha256>"},
+    {"path": ".qoder/AGENTS.md", "sha256": "<lowercase-sha256>"},
+    {"path": ".qoder/agents/backend-implementer.md", "sha256": "<lowercase-sha256>"},
+    {"path": "planning/workstreams.yaml", "sha256": "<lowercase-sha256>"},
+    {"path": "harness/agent-policy.manifest.yaml", "sha256": "<lowercase-sha256>"},
+    {"path": "harness/agent-runtime.manifest.yaml", "sha256": "<lowercase-sha256>"},
+    {"path": "harness/java-product.manifest.yaml", "sha256": "<lowercase-sha256>"}
+  ],
+  "required_tools": [
+    {
+      "name": "java-25",
+      "probe_argv": [".local/toolchains/jdk-25/Contents/Home/bin/java", "-version"],
+      "expected_output_regex": "version \\\"25\\.",
+      "timeout_seconds": 10
+    }
+  ],
+  "validation_commands": [
+    {
+      "argv": ["python3", "scripts/toolchain/java_gradle.py", "check"],
+      "cwd": ".",
+      "timeout_seconds": 1800
+    }
+  ]
+}

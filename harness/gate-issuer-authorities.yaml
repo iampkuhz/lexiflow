@@ -1,0 +1,65 @@
+schema_version: lexiflow.gate-issuer-authorities.v1
+owner: LF-WS-QLT
+packet_store_locator: tmp/quality/issuers
+attestation_max_age_seconds: 900
+attestation_audience: lexiflow-gate
+authorities:
+  qoder:
+    available: true
+    authority_id: lexiflow.qoder-runner
+    verifier_id: qoder.runner-provenance.v1
+    verifier_abi: 1
+    evidence_roots:
+    - tmp/qoder-tasks
+    role: gate-receipt-issuer
+    authorized_receipt_kinds:
+    - TASK_VALIDATION
+    - INDEPENDENT_REVIEW
+  codex:
+    available: true
+    authority_id: lexiflow.codex-desktop-host
+    verifier_id: codex.current-session.v1
+    verifier_abi: 1
+    evidence_roots:
+    - tmp/quality/authority/codex
+    role: gate-receipt-issuer
+    authorized_receipt_kinds:
+    - TASK_VALIDATION
+    - INDEPENDENT_REVIEW
+    - CATALOG_DECISION
+  human:
+    available: true
+    authority_id: lexiflow.authenticated-operators
+    verifier_id: human.operator-record.v1
+    verifier_abi: 1
+    evidence_roots:
+    - tmp/quality/authority/human
+    actors:
+      lexiflow-maintainer:
+        revoked: false
+        role: gate-receipt-issuer
+        key_id: lexiflow-human-gate-v1
+        authorized_receipt_kinds:
+        - TASK_VALIDATION
+        - INDEPENDENT_REVIEW
+        - CATALOG_DECISION
+  ci:
+    available: true
+    authority_id: lexiflow.ci-workloads
+    verifier_id: ci.workload-identity.v1
+    verifier_abi: 1
+    evidence_roots:
+    - tmp/quality/authority/ci
+    workloads:
+      lexiflow-gate-ci:
+        revoked: false
+        role: gate-receipt-issuer
+        key_id: lexiflow-ci-gate-v1
+        repository: iampkuhz/lexiflow
+        allowed_ref_prefixes:
+        - refs/heads/
+        - refs/pull/
+        environment: lexiflow-gate
+        authorized_receipt_kinds:
+        - TASK_VALIDATION
+        - CATALOG_DECISION

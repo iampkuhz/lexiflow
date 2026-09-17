@@ -1,0 +1,73 @@
+# LexiFlow repository ignore policy
+# 路径以 / 开头时限定仓库根目录；目录规则以 / 结尾；白名单紧跟忽略规则。
+# 只忽略本机配置、构建产物和运行时数据；源码、文档、Harness 与 OpenSpec 必须可提交。
+
+# ── 操作系统与编辑器 ───────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+/.idea/
+/.vscode/
+*.iml
+
+# ── 本机配置、环境变量与凭据 ───────────────────────────────────────
+.env
+.env.*
+!.env.example
+!.env.*.example
+/.mcp.json
+
+# ── 本地运行数据、临时目录与报告 ───────────────────────────────────
+/.local/
+/tmp/
+/output/
+/data/
+/secrets/
+/harness/reports/
+/.qoder/task-packs/
+
+# ── OpenSpec 本地变更草稿 ──────────────────────────────────────────
+# 长期规范与项目说明仍需提交；changes/ 仅作为本地变更工作区。
+/openspec/changes/
+
+# ── Java / Gradle 构建产物 ─────────────────────────────────────────
+.gradle/
+**/build/
+**/out/
+**/target/
+*.class
+hs_err_pid*
+replay_pid*
+
+# ── Python 缓存、虚拟环境与测试报告 ────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ── Node / Extension 依赖与缓存 ────────────────────────────────────
+node_modules/
+.npm/
+.parcel-cache/
+.vite/
+**/dist/
+**/coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── 本地数据库与日志 ───────────────────────────────────────────────
+*.sqlite
+*.sqlite3
+*.log

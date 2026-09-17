@@ -1,0 +1,82 @@
+schemaVersion: 1
+project:
+  name: lexiflow
+  type: modular-monolith-product
+  description: Context-aware, personalized English annotations for streaming content.
+
+architecture:
+  deployment_units: [api, worker]
+  source_of_truth: postgresql
+  rebuildable_state: [redis, browser-cache, projections]
+  first_client: chrome-extension
+  first_content_adapter: youtube
+
+agent_contract:
+  policy_manifest: harness/agent-policy.manifest.yaml
+  runtime_manifest: harness/agent-runtime.manifest.yaml
+  module_boundaries: harness/module-boundaries.yaml
+  gate_check_registry: harness/gate-check-registry.yaml
+  g1_task_contract_profiles: harness/g1-task-contract-profiles.yaml
+  java_product: harness/java-product.manifest.yaml
+  qoder_harness_schema: harness/qoder-harness.schema.json
+  qoder_result_schema: harness/qoder-result.schema.json
+  validation_mode: explicit
+  planning_system: openspec
+  platform_entries:
+    codex_agents: .codex/agents/
+    qoder_agents: .qoder/agents/
+
+public_executables:
+  quality_gate: python3 scripts/gates/cli.py
+  java_gradle: python3 scripts/toolchain/java_gradle.py
+  task_contract_check: python3 -m scripts.gates.task_contracts --task-id LF-TSK-...
+  registry_profile_check: python3 -m scripts.gates.registry_profiles --root . --check
+  qoder_task: python3 scripts/harness/qoder_task.py
+
+quality:
+  delivery_command: python3 scripts/gates/cli.py run --mode incremental
+  full_command: python3 scripts/gates/cli.py run --mode full
+  layering:
+    task_validation: executes-frozen-selected-checks
+    independent_review: consumes-task-validation-receipt
+    catalog_decision: consumes-validation-and-review-receipts
+    java_delivery_executor: gradle-java
+  result_values: [PASS, BLOCKED, FAIL]
+
+docs:
+  - docs/README.md
+  - docs/product/product-brief.md
+  - docs/architecture/phase-1.md
+  - docs/architecture/phase-1-cross-cutting-contracts.md
+  - docs/architecture/decisions.md
+  - docs/roadmap/master-plan.md
+  - docs/roadmap/phase-1-status.md
+  - docs/reviews/phase-1-checklist.md
+  - docs/reviews/g1-decision-package.md
+  - docs/reviews/g1-bootstrap-variance.md
+  - docs/reviews/g1-task-evidence-map.md
+  - docs/reviews/qlt-0002-run-1-review.md
+  - docs/reviews/qlt-0002-rework-1-review.md
+  - docs/reviews/qlt-0002-final-review.md
+  - docs/development/gate-control-plane-design.md
+  - docs/reviews/gate-control-plane-design-review.md
+  - docs/reviews/gate-jit-task-draft-review.md
+  - docs/reviews/gate-jit-catalog-activation-review.md
+  - docs/reviews/qlt-0007-implementation-review.md
+  - docs/reviews/qlt-0014-implementation-review.md
+  - docs/development/dispatch-preflight-design.md
+  - docs/reviews/dispatch-preflight-design-review.md
+  - docs/acceptance-cases/README.md
+  - docs/acceptance-cases/phase-1.md
+  - docs/development/agent-subtasks.md
+  - docs/development/post-approval-toolchain-verification.md
+  - docs/references/feipi-session-browser-java.md
+  - openspec/specs/product-architecture/spec.md
+  - openspec/specs/agent-execution/spec.md
+
+local_only:
+  - .env
+  - .local/
+  - tmp/
+  - data/
+  - secrets/

@@ -1,0 +1,13 @@
+# Project-local coordination and Sub-Agent defaults; root model and credentials stay user-owned.
+model_instructions_file = "./model-instructions.md"
+project_doc_max_bytes = 4000
+
+[features]
+multi_agent = true
+
+[agents]
+max_concurrent_threads_per_session = 1
+default_subagent_model = "gpt-5.6-luna"
+default_subagent_reasoning_effort = "medium"
+max_depth = 2
+job_max_runtime_seconds = 7200

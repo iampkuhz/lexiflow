@@ -1,0 +1,268 @@
+schemaVersion: 1
+protected_roots:
+- .codex/
+- .qoder/
+- harness/
+- scripts/
+- openspec/
+- planning/
+- backend/
+- clients/chrome-extension/**
+- AGENTS.md
+lifecycle:
+  owner: client
+  checkout: client-selected
+  repository_state_required_for_read_or_write: false
+  branch_commit: explicit
+  branch_integration: explicit-user-action
+  platform_event_bindings: []
+  forbidden_git_actions:
+  - stash
+  - reset
+  - force
+  - rebase
+  - auto-push
+validation:
+  invocation: explicit
+  delivery_command: python3 scripts/gates/cli.py run --mode incremental
+  passing_requires_success: true
+  non_passing_results:
+  - BLOCKED
+  - FAIL
+architecture_contract:
+  source: harness/agent-policy.manifest.yaml
+  dependency_rules:
+  - composition-root -> application
+  - composition-root -> concrete-inbound-adapters
+  - composition-root -> concrete-outbound-adapters
+  - inbound-adapters -> application
+  - outbound-adapters -> domain-ports
+  - application -> domain-and-ports
+  forbidden:
+  - application-depends-on-concrete-adapter
+subagent_protocol:
+  source: harness/agent-policy.manifest.yaml
+  codex_model_policy:
+    default_model: gpt-5.6-luna
+    routine_model: gpt-5.6-luna
+    routine_reasoning_effort: low
+    routing_source: harness/agent-policy.manifest.yaml#subagent_protocol.codex_model_policy
+    applies_to: codex-sub-agent
+    explicit_model_argument_required: true
+    allowed_escalation_models:
+    - gpt-5.6-terra
+    - gpt-5.6-sol
+    user_only_models:
+    - gpt-6-astra
+    escalation_requires:
+    - stable_task_id
+    - parent_decision
+    - specific_failure_or_uncovered_risk_evidence
+    escalation_reasons:
+    - luna_acceptance_blocked
+    - specific_uncovered_risk
+    - terra_insufficient
+    - explicit_user_requirement
+    qoder_model_policy: separate-runner-controlled
+    default_reasoning_effort: medium
+    sol_escalation_requirement: terra_insufficiency_or_predeclared_high_risk_reason
+  status_values:
+  - PASS
+  - FAIL
+  - BLOCKED
+  task_sizing_minutes:
+    applies_to: catalog-task-not-agent-session
+    min: 20
+    max: 90
+  delegation_work_package:
+    source: harness/agent-policy.manifest.yaml
+    identity_fields: [work_package_id, task_ids]
+    preferred_minutes: {min: 120, max: 360}
+    minimum_total_estimated_minutes: 120
+    target_maximum_total_estimated_minutes: 360
+    minimum_catalog_tasks: 2
+    per_task_outcome_evidence_required: true
+    completion_callback: compact-signal-only
+  caller_required_input_applies_to: qoder-task-handoff
+  caller_required_input:
+  - goal
+  - task_id
+  - task_source
+  - task_version
+  - change_version
+  - work_package_id
+  - task_ids
+  - task_versions
+  - change_versions
+  - estimated_minutes
+  - primary_owner
+  - contract_boundary
+  - agent_profile
+  - harness_manifest
+  - allowed_files
+  - forbidden_files
+  - required_context
+  - expected_output
+  - acceptance_criteria
+  - acceptance_evidence
+  - validation_command
+  - failure_policy
+  - parent_client
+  codex_work_package_caller_required_input:
+  - goal
+  - work_package_id
+  - task_ids
+  - task_versions
+  - change_versions
+  - estimated_minutes
+  - primary_owner
+  - contract_boundary
+  - allowed_files
+  - forbidden_files
+  - required_context
+  - expected_outputs_by_task
+  - acceptance_by_task
+  - validation_commands
+  - failure_policy
+  - parent_client
+  codex_work_package_runner_identity:
+    parent_session_id: runtime-bound-parent-session
+    agent_id: codex-runtime-bound-stable-actor
+    run_id: subagent-generated-once
+    session_id: codex-runtime-bound
+    client: exact-string-codex
+    parent_client: exact-string-codex
+    caller_must_omit: [parent_session_id, agent_id, run_id, session_id, client]
+  codex_work_package_task_projection:
+    schema_version: lexiflow.codex-work-package-task-projection.v1
+    unit: one-immutable-raw-task-per-target-catalog-task
+    exact_top_level_fields: [schema_version, work_package_id, task_ids, target_task_id, task_id, task_source,
+      task_version, change_version, allowed_files, forbidden_files, expected_output, acceptance_criteria,
+      acceptance_evidence, validation_command, caller_contract, parent_session_id, agent_id, run_id, session_id,
+      client, parent_client]
+    caller_contract_exact_fields: [goal, work_package_id, task_ids, task_versions, change_versions,
+      estimated_minutes, primary_owner, contract_boundary, allowed_files, forbidden_files, required_context,
+      expected_outputs_by_task, acceptance_by_task, validation_commands, failure_policy, parent_client]
+    task_ids_rule: exact-ordered-unique-minimum-two
+    target_rule: target_task_id-equals-task_id-and-is-member-of-task_ids
+    per_task_maps_rule: exact-keyset-equals-task_ids-and-target-values-match-projection
+    current_catalog_rule: all-task-versions-owner-outputs-acceptance-validation-and-package-scope-must-match-current-catalog
+    qoder_only_fields_forbidden: [permission_mode, _resume_mode, title]
+    raw_json_rule: duplicate-keys-rejected-noncanonical-whitespace-accepted-and-hash-bound
+  runner_bound_identity:
+    parent_session_id:
+      source: caller-or-CODEX_THREAD_ID
+      required_in_persisted_task: true
+    agent_id:
+      source: runner-generated-at-dispatch
+      caller_must_omit: true
+    run_id:
+      source: runner-generated-at-dispatch
+      caller_must_omit: true
+    session_id:
+      source: runner-generated-or-resume-record
+      caller_must_omit_on_start: true
+    client:
+      source: runner-forced
+      value: qoder
+  result_required_output:
+  - status
+  - work_package_id
+  - task_ids
+  - task_versions
+  - change_versions
+  - run_id
+  - outcomes
+  - changed_files
+  - validation
+  - acceptance_evidence
+  - effect_checks
+  - risks
+  current_runner_adapter:
+    enforced_caller_fields:
+    - goal
+    - task_id
+    - task_source
+    - task_version
+    - change_version
+    - work_package_id
+    - task_ids
+    - task_versions
+    - change_versions
+    - estimated_minutes
+    - primary_owner
+    - contract_boundary
+    - agent_profile
+    - harness_manifest
+    - allowed_files
+    - forbidden_files
+    - required_context
+    - expected_output
+    - acceptance_criteria
+    - acceptance_evidence
+    - validation_command
+    - failure_policy
+    - parent_client
+    target_schema_enforced: true
+    runtime_identity_enforced: true
+    result_fields_required_in_prompt: true
+    agent_profile_cli_binding: true
+    harness_manifest_preflight: true
+    catalog_package_preflight: true
+    catalog_estimate_rule: exact-sum-180-to-360
+    structured_result_required: true
+    implementation_status: IMPLEMENTED
+    conformance_test: tests/harness/test_qoder_runner.py
+    owner_task: LF-TSK-QLT-0006
+    owner_task_version: 2
+    owner_change_version: 2.0.0
+  caller_field_schema:
+    goal: non-empty-string
+    task_id: stable-task-id-string
+    task_source: non-empty-string
+    task_version: positive-integer
+    change_version: semver-string
+    work_package_id: stable-work-package-id-string
+    task_ids: ordered-unique-list-minimum-two
+    task_versions: exact-task-id-to-positive-integer-map
+    change_versions: exact-task-id-to-semver-map
+    estimated_minutes: integer-180-to-360
+    primary_owner: non-empty-string
+    contract_boundary: non-empty-string
+    agent_profile: project-qoder-agent-name
+    harness_manifest: repository-relative-hash-bound-json
+    allowed_files: non-empty-string
+    forbidden_files: non-empty-string
+    required_context: non-empty-string
+    expected_output: non-empty-string
+    acceptance_criteria: non-empty-list-of-strings
+    acceptance_evidence: non-empty-list-of-strings
+    validation_command: non-empty-string
+    failure_policy: non-empty-string
+    parent_client: exact-string-codex
+callback_and_fallback:
+  completion_record_first: true
+  callback_target: exact-parent-session-uuid
+  main_llm_poll_loop_forbidden: true
+  llm_fallback_first_probe_after_seconds: 300
+  llm_fallback_min_subsequent_probe_interval_seconds: 600
+  no_llm_watchdog:
+    initial_delay_seconds: 300
+    interval_seconds: 600
+    unchanged_state_is_silent: true
+runtime_data:
+  committed: false
+  paths:
+  - tmp/
+  - .local/
+  - data/
+  - secrets/
+platforms:
+  codex:
+    config_files:
+    - .codex/config.toml
+    agents_dir: .codex/agents
+  qoder:
+    config_files:
+    - .qoder/AGENTS.md
+    agents_dir: .qoder/agents

@@ -1,0 +1,73 @@
+schemaVersion: 1
+status: phase-1-proposed
+
+dependency_rules:
+  - composition roots may depend on application use cases and adapters
+  - application use cases may depend on domain models and inward-facing ports
+  - adapters may depend on the ports they implement and contract value objects
+  - domain models and policies may depend only on the minimal foundation
+  - no module may access another domain's persistence implementation or tables
+  - no core module may depend on Chrome, YouTube, HTTP, Redis, PostgreSQL or a concrete model provider
+
+shared_kernel:
+  foundation:
+    owns: [stable-identities, time-contracts, version-contracts]
+    may_depend_on: []
+
+bounded_contexts:
+  identity-access:
+    kind: supporting-domain
+    owns: [accounts, devices, sessions, user-preferences]
+    may_depend_on: [foundation]
+  content:
+    kind: supporting-domain
+    owns: [content-identity, normalized-caption, context-window, source-location]
+    may_depend_on: [foundation]
+  global-lexicon:
+    kind: supporting-domain
+    owns: [terms, phrases, senses, frequency, cefr, domain-metadata]
+    may_depend_on: [foundation]
+  vocabulary-profile:
+    kind: core-domain
+    owns: [vocabulary-profile, familiarity, learning-state, profile-version]
+    may_depend_on: [foundation]
+  learning:
+    kind: core-domain
+    owns: [learning-events, evidence, projection-policy]
+    may_depend_on: [foundation, content, vocabulary-profile]
+  semantic:
+    kind: supporting-domain
+    owns: [semantic-capability-port, routing-policy, contextual-meaning]
+    may_depend_on: [foundation, content, global-lexicon]
+  enrichment:
+    kind: core-domain
+    owns: [candidate-pipeline, need-hint-policy, annotation-decision, durable-annotation-result]
+    may_depend_on: [foundation, content, global-lexicon, vocabulary-profile, semantic]
+
+application_modules:
+  client-delivery-sync:
+    owns: [incremental-delivery, delivery-status, cache-version-contract, event-upload, profile-sync]
+    may_depend_on: [foundation, identity-access, content, vocabulary-profile, learning, enrichment]
+  workflow-application:
+    owns: [enrich-caption-use-case, ingest-learning-event-use-case, delivery-coordination]
+    may_depend_on: [foundation, identity-access, content, global-lexicon, vocabulary-profile, learning, semantic, enrichment, client-delivery-sync]
+
+adapter_groups:
+  platform:
+    owns: [postgres-adapters, redis-adapters, model-provider-adapters, job-runtime, observability]
+    may_depend_on: [foundation, identity-access, content, global-lexicon, vocabulary-profile, learning, semantic, enrichment, client-delivery-sync]
+
+composition_roots:
+  api:
+    includes: [application-use-cases, inbound-http, required-adapters]
+  worker:
+    includes: [background-use-cases, job-runtime, required-adapters]
+
+client_adapters:
+  chrome-extension:
+    source_of_truth: false
+    first_content_source: youtube
+  future-web:
+    source_of_truth: false
+  future-app:
+    source_of_truth: false
