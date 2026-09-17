@@ -1,0 +1,42 @@
+@startmindmap
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+<style>
+mindmapDiagram {
+  node {
+    FontColor #1E293B
+    FontSize 14
+    LineColor #94A3B8
+    LineThickness 1
+    RoundCorner 12
+    Padding 10
+    Margin 8
+    MaximumWidth 180
+  }
+  rootNode {
+    FontSize 18
+    FontStyle bold
+    LineColor #475569
+  }
+  arrow {
+    LineColor #94A3B8
+    LineThickness 1.2
+  }
+}
+</style>
+
+title 先理解整体，再逐层展开
+*[#DBEAFE] LexiFlow 架构
+**[#DBEAFE] 第一层：整体认识
+***[#DBEAFE] 产品目标与系统边界
+***[#DBEAFE] 快慢路径与事实来源
+**[#DCFCE7] 第二层：专题解释
+***[#DCFCE7] 模块与依赖
+***[#DCFCE7] 字幕与学习流程
+***[#DCFCE7] 取消、投递、冲突、删除
+***[#DCFCE7] 决策与工程交付
+**[#F3E8FF] 第三层：详细合同
+***[#F3E8FF] Semantic 能力与结果
+***[#F3E8FF] 缓存与来源适配
+***[#F3E8FF] 信任、隐私与观测
+@endmindmap

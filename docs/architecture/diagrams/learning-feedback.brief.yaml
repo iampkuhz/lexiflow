@@ -1,0 +1,104 @@
+diagram_id: learning-feedback
+diagram_type: sequence
+title: 一次显式学习动作如何更新服务端 Profile
+summary: 一次显式学习动作如何更新服务端 Profile，仅表达第一阶段的架构责任与保证，不代表产品实现已交付。
+numbering_scheme: process_s
+participants:
+- id: ext
+  name: Extension
+  type: participant
+  description: Extension在本流程的公开责任
+- id: api
+  name: API use case
+  type: participant
+  description: API use case在本流程的公开责任
+- id: learning
+  name: Learning
+  type: participant
+  description: Learning在本流程的公开责任
+- id: profile
+  name: Vocabulary Profile
+  type: participant
+  description: Vocabulary Profile在本流程的公开责任
+- id: worker
+  name: worker
+  type: participant
+  description: worker在本流程的公开责任
+messages:
+- id: S1
+  from: ext
+  to: api
+  description: 提交 known 或 unknown 意图
+  type: sync
+- id: S2
+  from: api
+  to: learning
+  description: 条件接受并幂等持久接收
+  type: sync
+- id: S3
+  from: learning
+  to: learning
+  description: 提交 event 与 accepted revision
+  type: sync
+- id: S4
+  from: learning
+  to: profile
+  description: 尝试同步应用 evidence
+  type: sync
+- id: S5
+  from: profile
+  to: api
+  description: 投影成功、缓存失效与 version
+  type: return
+- id: S6
+  from: api
+  to: ext
+  description: 一次最终响应 accepted 与 version
+  type: return
+- id: S7
+  from: profile
+  to: api
+  description: 投影失败但 event 已接受
+  type: return
+- id: S8
+  from: api
+  to: ext
+  description: 一次最终响应 projection pending
+  type: return
+- id: S9
+  from: worker
+  to: learning
+  description: 从 durable event 恢复归约
+  type: sync
+- id: S10
+  from: learning
+  to: profile
+  description: 幂等应用仍有效的 evidence
+  type: sync
+- id: S11
+  from: profile
+  to: profile
+  description: 推进投影并失效旧服务端缓存
+  type: sync
+- id: S12
+  from: api
+  to: profile
+  description: 后续提示读取已提交 snapshot
+  type: sync
+layout:
+  direction: top_to_bottom
+  include_legend: false
+groups:
+- id: client
+  name: 客户端
+  participants:
+  - ext
+- id: server
+  name: 服务端公开协作
+  participants:
+  - api
+  - learning
+  - profile
+  - worker
+out_of_scope:
+- 存储实现、传输协议与具体超时数值

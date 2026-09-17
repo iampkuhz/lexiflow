@@ -1,9 +1,21 @@
-# Phase 1 lifecycle guarantees
+# 生命周期与一致性：谁在什么条件下还能提交效果
 
-> 状态：`Proposed`。这是 ADR-003、ADR-005、ADR-006 和 ADR-008 的补充提案，随 G1 等待用户决定。
-> 范围：确定 owner、可观察结果和必须保持的不变量；不指定 SQL、HTTP、传输、lease 秒数、重试次数或模型 Provider。
+正常时序解释系统如何工作；生命周期解释异常时仍必须成立什么。**工作可重试但提交资格不能复用，结果可重投但不能冒充实际显示，事实可重放但不能复活已删除主体**。
+
+按四个问题阅读：工作是否仍有效；投递是否真实可见；用户意图是否已被更新；个人数据是否已被撤销。它们分别由 Workflow/Enrichment、Delivery/Extension、Learning/Vocabulary 和 Identity/各 Domain 负责。
+
+> Proposed。补充 ADR-003/005/006/008，随 G1 等待用户决定。原保证保留；不指定 SQL、HTTP、lease 秒数、重试次数、Provider 或法律保留策略。
+
 
 ## Durable work、取消与租约
+
+工作是稳定需求，attempt 是一次执行；能否提交由 owner 的资格与 fencing generation 决定。先看状态，再看竞争与恢复规则。
+
+![Durable work、取消与租约的 PlantUML 图解](diagrams/work-lifecycle.png)
+
+[PlantUML 源码](diagrams/work-lifecycle.puml) · [矢量图](diagrams/work-lifecycle.svg)
+
+<!-- retained-lifecycle:start -->
 
 Workflow Application 通过公开 contract 提交 durable work；工作状态由 PostgreSQL 中的 workflow coordination 持有。Semantic 只执行有界 attempt，Enrichment 拥有 annotation result，Delivery 只拥有投递状态。部署为 api/worker 不改变这些业务 owner。
 
@@ -23,7 +35,19 @@ lease 到期后可由新的 attempt 恢复同一未终止 work，沿用 work ide
 
 重试必须有有限总 deadline、attempt/cost budget，并区分 retryable failure 与不可重试的拒绝、输入不合法、取消及过期。Phase 2/7 决定具体 claim、退避和预算配置；配置缺失不得变成无限重试。网络提交确认丢失只能用原稳定 identity 查询或幂等重试，不能断言 no-pending 再另开工作；API 同步等待仍有界，英文与已有 fast result 始终继续。
 
+<!-- retained-lifecycle:end -->
+
 ## 投递确认与显示事实
+
+发送、收到、真正显示和点击是不同观察。重投同一 revision 修复 ACK，不重新调用模型；学习计数来自实际显示 observation。
+
+![投递确认与显示事实的 PlantUML 图解](diagrams/delivery-lifecycle.png)
+
+[PlantUML 源码](diagrams/delivery-lifecycle.puml) · [矢量图](diagrams/delivery-lifecycle.svg)
+
+图展示观察间的因果关系，不是合并所有 owner 的单一持久状态机。生成 result 属于 Enrichment，投递观察属于 Delivery，显示/点击来自客户端事实。
+
+<!-- retained-lifecycle:start -->
 
 | 观察结果 | Delivery / Extension 的处理 | 不允许推断的事实 |
 |---|---|---|
@@ -37,7 +61,13 @@ lease 到期后可由新的 attempt 恢复同一未终止 work，沿用 work ide
 
 Delivery 与观看订阅脱钩的 durable result 仍由 Enrichment 管理，但其“曾生成”不意味着可永远重投。重投时也需重新鉴权和校验当前 profile/annotation/content version。失效通知只是加速机制，读取及显示时校验仍是最后防线。
 
+<!-- retained-lifecycle:end -->
+
 ## Learning 顺序与显式冲突
+
+Learning 的 accepted intent revision 决定意图顺序；Profile 的 projection version 描述应用进度。陈旧设备不能静默反转更新意图。
+
+<!-- retained-lifecycle:start -->
 
 Learning 负责原始事实、幂等接收结果和服务端 canonical intake order；Vocabulary Profile 负责应用 evidence 与生成自己的 projection version。客户端时间、视频位置和 correlation 只是事实背景，不能作为跨设备更新顺序或授权来源。隐式事实可乱序接收，其归约必须可按服务端稳定顺序重放，并保留 reducer version 与因果引用。
 
@@ -55,7 +85,19 @@ Learning 负责原始事实、幂等接收结果和服务端 canonical intake or
 
 重放保留 canonical order、accepted/conflict 区分、最新显式意图和 reducer version。新 projection 在验证后切换，不能用一次 replay 重新接受旧 conflict，也不能让已删除主体重新出现。
 
+<!-- retained-lifecycle:end -->
+
 ## 删除屏障与不可复活
+
+清除已有个人数据之外，还要拒绝旧 generation 的后来写入；否则 replay、缓存刷新和离线补传可能重新创建刚删除的状态。
+
+![删除屏障与不可复活的 PlantUML 图解](diagrams/delete-barrier.png)
+
+[PlantUML 源码](diagrams/delete-barrier.puml) · [矢量图](diagrams/delete-barrier.svg)
+
+图中的在线撤销与离线 expiry/重连是两种收敛路径；不能把无法触达的离线设备算作已即时清除。各 owner 的在线存储、备份和 telemetry 完成项分别报告。
+
+<!-- retained-lifecycle:start -->
 
 “Learning 事实不可变”约束正常归约与重放，不是禁止用户删除或无限保留的承诺。账号/数据删除由 Identity & Access 授权并建立服务端可信的撤销/删除 generation；各 Domain 仅通过自己的公开 contract 清除其拥有的数据。协调者不得横向直接删其他模块的表。
 
@@ -65,7 +107,13 @@ Learning 负责原始事实、幂等接收结果和服务端 canonical intake or
 
 Phase 2 的 SEC-0002 必须比较物理删除、去标识化与 tombstone，定义哪些个人事实/派生数据必须清除、最小屏障元数据及其保留期限，并确定可观察的删除完成结果；Phase 7 验证各存储、备份、日志及离线设备的清除时限。Phase 1 仅固定不可复活、owner 隔离、主动 purge 与不虚报完成保证，不提前选择具体法律保留策略或声称已完成物理清除。
 
+<!-- retained-lifecycle:end -->
+
 ## 后续必须验证的场景
+
+用并发、崩溃、晚到和确认丢失证明前面的保证；下表仍是预期验证，不是已执行产品测试。
+
+<!-- retained-lifecycle:start -->
 
 这些是设计层的预期，不是已经执行的产品测试：
 
@@ -82,3 +130,5 @@ Phase 2 的 SEC-0002 必须比较物理删除、去标识化与 tombstone，定�
 | 删除与 replay、缓存刷新、离线补传并发 | 删除屏障拒绝旧 generation 的写入与投递；清除完成项如实区分。 | Identity / SEC / 各 Domain，P2、P7 |
 
 本提案被用户修改或拒绝时，应同时修订相关 ADR、事实/port 合同和这些场景，再生成新的 current source 与分层验收；不能修改历史 PASS 或给跳过的检查补签通过。
+
+<!-- retained-lifecycle:end -->

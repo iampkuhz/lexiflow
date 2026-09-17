@@ -1,0 +1,65 @@
+diagram_id: system-context
+diagram_type: architecture
+title: LexiFlow 的系统边界
+summary: LexiFlow 的系统边界，仅表达第一阶段的架构责任与保证，不代表产品实现已交付。
+layers:
+- id: client
+  name: 观看环境
+  description: 观看环境的架构职责
+  color: '#DBEAFE'
+- id: service
+  name: LexiFlow 服务
+  description: LexiFlow 服务的架构职责
+  color: '#DCFCE7'
+- id: external
+  name: 事实与外部能力
+  description: 事实与外部能力的架构职责
+  color: '#FEF3C7'
+components:
+- id: youtube
+  name: YouTube 英文字幕
+  layer: client
+  type: cloud
+  description: YouTube 英文字幕的公开架构边界
+- id: extension
+  name: Chrome Extension
+  layer: client
+  type: component
+  description: Chrome Extension的公开架构边界
+- id: backend
+  name: 模块化单体
+  layer: service
+  type: component
+  description: 模块化单体的公开架构边界
+- id: postgres
+  name: PostgreSQL
+  layer: external
+  type: database
+  description: PostgreSQL的公开架构边界
+- id: provider
+  name: Semantic Provider
+  layer: external
+  type: cloud
+  description: Semantic Provider的公开架构边界
+flows:
+- id: S1
+  from: youtube
+  to: extension
+  description: 提供英文片段
+- id: S2
+  from: extension
+  to: backend
+  description: 请求提示与提交行为
+- id: S3
+  from: backend
+  to: postgres
+  description: 保存权威事实
+- id: S4
+  from: backend
+  to: provider
+  description: 异步获取语义证据
+layout:
+  direction: top_to_bottom
+  include_legend: true
+out_of_scope:
+- 具体数据表、HTTP 路径、Prompt 和部署编排

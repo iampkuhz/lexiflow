@@ -1,0 +1,40 @@
+diagram_id: semantic-outcome
+diagram_type: activity
+title: 合格语义请求的标准处理职责
+summary: 合格语义请求的标准处理职责，仅表达第一阶段的架构责任与保证，不代表产品实现已交付。
+steps:
+- id: S1
+  name: 接收有界请求
+- id: S2
+  name: 校验能力与预算
+- id: S3
+  name: 选择兼容适配器
+- id: S4
+  name: 执行有界尝试
+- id: S5
+  name: 归一并验证结果
+- id: S6
+  name: 返回标准 outcome
+transitions:
+- from: S1
+  to: S2
+- from: S2
+  to: S3
+- from: S3
+  to: S4
+- from: S4
+  to: S5
+- from: S5
+  to: S6
+narrative_step_ids:
+- S1
+- S2
+- S3
+- S4
+- S5
+- S6
+layout:
+  direction: top_to_bottom
+  include_legend: false
+out_of_scope:
+- SQL、事务实现与具体预算参数

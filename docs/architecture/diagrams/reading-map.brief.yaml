@@ -1,0 +1,45 @@
+diagram_id: reading-map
+diagram_type: mindmap
+title: 先理解整体，再逐层展开
+nodes:
+- id: root
+  parent: ''
+  label: LexiFlow 架构
+- id: whole
+  parent: root
+  label: 第一层：整体认识
+- id: goal
+  parent: whole
+  label: 产品目标与系统边界
+- id: rules
+  parent: whole
+  label: 快慢路径与事实来源
+- id: topics
+  parent: root
+  label: 第二层：专题解释
+- id: modules
+  parent: topics
+  label: 模块与依赖
+- id: flows
+  parent: topics
+  label: 字幕与学习流程
+- id: life
+  parent: topics
+  label: 取消、投递、冲突、删除
+- id: choices
+  parent: topics
+  label: 决策与工程交付
+- id: details
+  parent: root
+  label: 第三层：详细合同
+- id: semantic
+  parent: details
+  label: Semantic 能力与结果
+- id: cache
+  parent: details
+  label: 缓存与来源适配
+- id: privacy
+  parent: details
+  label: 信任、隐私与观测
+layout:
+  direction: right

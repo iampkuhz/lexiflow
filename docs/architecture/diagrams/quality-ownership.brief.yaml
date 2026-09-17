@@ -1,0 +1,70 @@
+diagram_id: quality-ownership
+diagram_type: architecture
+title: Java 产品规则与 Python 治理规则各有 owner
+summary: Java 产品规则与 Python 治理规则各有 owner，仅表达第一阶段的架构责任与保证，不代表产品实现已交付。
+layers:
+- id: inputs
+  name: 两类输入
+  description: 两类输入的架构职责
+  color: '#DBEAFE'
+- id: owners
+  name: 唯一执法工具
+  description: 唯一执法工具的架构职责
+  color: '#DCFCE7'
+- id: reports
+  name: 各自产物
+  description: 各自产物的架构职责
+  color: '#FEF3C7'
+components:
+- id: java
+  name: Java main 与 test
+  layer: inputs
+  type: component
+  description: Java main 与 test的公开架构边界
+- id: governance
+  name: Task 合同与 evidence
+  layer: inputs
+  type: component
+  description: Task 合同与 evidence的公开架构边界
+- id: gradle
+  name: Gradle 与 Java 工具
+  layer: owners
+  type: component
+  description: Gradle 与 Java 工具的公开架构边界
+- id: control
+  name: Python Gate 控制面
+  layer: owners
+  type: component
+  description: Python Gate 控制面的公开架构边界
+- id: jvm_reports
+  name: Java 报告与 Boot jars
+  layer: reports
+  type: component
+  description: Java 报告与 Boot jars的公开架构边界
+- id: receipts
+  name: validation review catalog
+  layer: reports
+  type: component
+  description: validation review catalog的公开架构边界
+flows:
+- id: S1
+  from: java
+  to: gradle
+  description: 执行产品确定性规则
+- id: S2
+  from: governance
+  to: control
+  description: 执行规划与证据治理
+- id: S3
+  from: gradle
+  to: jvm_reports
+  description: 形成直接工程验证
+- id: S4
+  from: control
+  to: receipts
+  description: 签发分层不可覆盖收据
+layout:
+  direction: top_to_bottom
+  include_legend: true
+out_of_scope:
+- 具体数据表、HTTP 路径、Prompt 和部署编排

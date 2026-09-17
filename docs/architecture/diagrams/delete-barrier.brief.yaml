@@ -1,0 +1,99 @@
+diagram_id: delete-barrier
+diagram_type: sequence
+title: 删除屏障阻止旧工作复活个人状态
+summary: 删除屏障阻止旧工作复活个人状态，仅表达第一阶段的架构责任与保证，不代表产品实现已交付。
+numbering_scheme: process_s
+participants:
+- id: identity
+  name: Identity and Access
+  type: participant
+  description: Identity and Access在本流程的公开责任
+- id: owner
+  name: 各 Domain owner
+  type: participant
+  description: 各 Domain owner在本流程的公开责任
+- id: worker
+  name: 旧 attempt 或 replay
+  type: participant
+  description: 旧 attempt 或 replay在本流程的公开责任
+- id: delivery
+  name: Delivery
+  type: participant
+  description: Delivery在本流程的公开责任
+- id: ext
+  name: Extension
+  type: participant
+  description: Extension在本流程的公开责任
+messages:
+- id: S1
+  from: identity
+  to: identity
+  description: 授权并建立删除 generation
+  type: sync
+- id: S2
+  from: identity
+  to: owner
+  description: 通过公开合同清除各自个人数据
+  type: sync
+- id: S3
+  from: owner
+  to: owner
+  description: 建立屏障并主动清除所拥有数据
+  type: sync
+- id: S4
+  from: worker
+  to: owner
+  description: 旧 generation 尝试提交
+  type: sync
+- id: S5
+  from: owner
+  to: worker
+  description: 拒绝旧个人效果
+  type: return
+- id: S6
+  from: delivery
+  to: owner
+  description: 重验订阅与当前 generation
+  type: sync
+- id: S7
+  from: owner
+  to: delivery
+  description: 拒绝旧资格的投递
+  type: return
+- id: S8
+  from: identity
+  to: ext
+  description: 通知在线客户端撤销并清除 L1
+  type: sync
+- id: S9
+  from: ext
+  to: ext
+  description: 离线客户端按 hard expiry 收敛
+  type: sync
+- id: S10
+  from: ext
+  to: identity
+  description: 重连时鉴权并检查 generation
+  type: sync
+- id: S11
+  from: owner
+  to: identity
+  description: 报告各自可观察清除完成项
+  type: return
+layout:
+  direction: top_to_bottom
+  include_legend: false
+groups:
+- id: client
+  name: 客户端
+  participants:
+  - ext
+- id: server
+  name: 服务端公开协作
+  participants:
+  - identity
+  - owner
+  - worker
+  - delivery
+out_of_scope:
+- 存储实现、传输协议与具体超时数值

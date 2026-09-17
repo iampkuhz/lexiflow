@@ -1,0 +1,37 @@
+@startuml
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam nodesep 48
+skinparam ranksep 52
+skinparam defaultFontName "Noto Sans CJK SC"
+skinparam defaultFontSize 14
+skinparam ArrowColor #475569
+skinparam roundcorner 12
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+skinparam noteBackgroundColor #FFF7DB
+skinparam noteBorderColor #D4B45D
+skinparam sequenceMessageAlign center
+title Java 产品规则与 Python 治理规则各有 owner
+top to bottom direction
+package "两类输入" #DBEAFE {
+  component "Java main 与 test" as java
+  component "Task 合同与 evidence" as governance
+}
+package "唯一执法工具" #DCFCE7 {
+  component "Gradle 与 Java 工具" as gradle
+  component "Python Gate 控制面" as control
+}
+package "各自产物" #FEF3C7 {
+  component "Java 报告与 Boot jars" as jvm_reports
+  component "validation review catalog" as receipts
+}
+java --> gradle : S1 执行产品确定性规则
+governance --> control : S2 执行规划与证据治理
+gradle --> jvm_reports : S3 形成直接工程验证
+control --> receipts : S4 签发分层不可覆盖收据
+legend bottom
+  实线：本图标注的公开交互或依赖
+  第一阶段提案；实现状态见工程审查
+endlegend
+@enduml

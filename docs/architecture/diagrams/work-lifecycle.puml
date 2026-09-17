@@ -1,0 +1,45 @@
+@startuml
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName "Noto Sans CJK SC"
+skinparam defaultFontSize 14
+skinparam ArrowColor #475569
+skinparam roundcorner 12
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+skinparam noteBackgroundColor #FFF7DB
+skinparam noteBorderColor #D4B45D
+skinparam sequenceMessageAlign center
+title 工作状态与提交资格分开管理
+top to bottom direction
+skinparam nodesep 48
+skinparam ranksep 52
+hide empty description
+state "Pending" as pending #DBEAFE
+state "Running" as running #DCFCE7
+state "终态：不能恢复为 Pending" as terminal {
+  state "Completed" as completed #E0E7FF
+  state "Cancelled" as cancelled #FEE2E2
+  state "Expired" as expired #FEF3C7
+  state "Failed" as failed #FEE2E2
+}
+[*] --> pending : durable commit 已确认
+pending --> running : claim 当前 attempt / fencing generation
+running --> pending : 合法可重试，仍在总预算内
+running --> completed : 当前资格下提交关联 durable result
+pending --> cancelled : 取消先提交
+running --> cancelled : 取消先提交
+pending --> expired : 总 deadline 到期
+running --> expired : 总 deadline 到期
+running --> failed : 不可重试或预算耗尽
+note right of running
+  work identity 保持稳定
+  attempt 与 fencing generation 会变化
+  进程存活不等于有提交资格
+end note
+note bottom of terminal
+  Provider 晚到不能恢复终态
+  完成先提交的合法结果可保留
+  随后取消仅撤销该观看订阅资格
+end note
+@enduml

@@ -1,0 +1,54 @@
+diagram_id: annotation-selection
+diagram_type: activity
+title: 一条候选提示如何进入快慢路径
+summary: 一条候选提示如何进入快慢路径，仅表达第一阶段的架构责任与保证，不代表产品实现已交付。
+steps:
+- id: S1
+  name: 渲染英文字幕
+- id: S2
+  name: 归一化有限片段
+- id: S3
+  name: 读取词库与状态
+- id: S4
+  name: 评估提示需求
+- id: S5
+  name: 查询语境缓存
+- id: S6
+  name: 形成快速提示
+- id: S7
+  name: 形成语义工作意图
+- id: S8
+  name: 返回空提示
+transitions:
+- from: S1
+  to: S2
+- from: S2
+  to: S3
+- from: S3
+  to: S4
+- from: S4
+  to: S5
+  description: 是
+- from: S4
+  to: S8
+  description: 否
+- from: S5
+  to: S6
+  description: 是
+- from: S5
+  to: S7
+  description: 否
+narrative_step_ids:
+- S1
+- S2
+- S3
+- S4
+- S5
+- S6
+- S7
+- S8
+layout:
+  direction: top_to_bottom
+  include_legend: false
+out_of_scope:
+- SQL、事务实现与具体预算参数

@@ -1,0 +1,39 @@
+@startuml
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam nodesep 48
+skinparam ranksep 52
+skinparam defaultFontName "Noto Sans CJK SC"
+skinparam defaultFontSize 14
+skinparam ArrowColor #475569
+skinparam roundcorner 12
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+skinparam noteBackgroundColor #FFF7DB
+skinparam noteBorderColor #D4B45D
+skinparam sequenceMessageAlign center
+title 同一应用的两个进程与外部依赖
+top to bottom direction
+node "用户设备" as client_zone {
+  node "Chrome Extension" as extension
+}
+node "LexiFlow 服务区" as server_zone {
+  node "api process" as api
+  node "worker process" as worker
+  database "PostgreSQL" as postgres
+  database "Redis cache" as redis
+}
+node "外部能力区" as provider_zone {
+  node "Model Provider" as provider
+}
+extension --> api : E1
+api --> postgres : E2
+worker --> postgres : E3
+api --> redis : E4
+worker --> provider : E5
+legend bottom
+  E1 浏览器请求；E2/E3 事实与工作
+  E4 缓存；E5 外部模型
+  运行责任图，不承诺具体部署编排
+endlegend
+@enduml

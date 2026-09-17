@@ -1,0 +1,43 @@
+@startuml
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam nodesep 48
+skinparam ranksep 52
+skinparam defaultFontName "Noto Sans CJK SC"
+skinparam defaultFontSize 14
+skinparam ArrowColor #475569
+skinparam roundcorner 12
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+skinparam noteBackgroundColor #FFF7DB
+skinparam noteBorderColor #D4B45D
+skinparam sequenceMessageAlign center
+title 一次显式学习动作如何更新服务端 Profile
+hide footbox
+box "客户端" #DBEAFE
+participant "Extension" as ext
+endbox
+box "服务端公开协作" #DCFCE7
+participant "API use case" as api
+participant "Learning" as learning
+participant "Vocabulary Profile" as profile
+participant "worker" as worker
+endbox
+ext -> api : S1 提交 known 或 unknown 意图
+api -> learning : S2 条件接受并幂等持久接收
+learning -> learning : S3 提交 event 与 accepted revision
+learning -> profile : S4 尝试同步应用 evidence
+alt 同步投影成功
+profile --> api : S5 投影成功、缓存失效与 version
+api --> ext : S6 一次最终响应 accepted 与 version
+else 同步投影失败
+profile --> api : S7 投影失败但 event 已接受
+api --> ext : S8 一次最终响应 projection pending
+end
+opt accepted event 仍有待修复投影
+worker -> learning : S9 从 durable event 恢复归约
+learning -> profile : S10 幂等应用仍有效的 evidence
+profile -> profile : S11 推进投影并失效旧服务端缓存
+end
+api -> profile : S12 后续提示读取已提交 snapshot
+@enduml

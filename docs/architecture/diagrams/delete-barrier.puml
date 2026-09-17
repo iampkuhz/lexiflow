@@ -1,0 +1,37 @@
+@startuml
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam nodesep 48
+skinparam ranksep 52
+skinparam defaultFontName "Noto Sans CJK SC"
+skinparam defaultFontSize 14
+skinparam ArrowColor #475569
+skinparam roundcorner 12
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+skinparam noteBackgroundColor #FFF7DB
+skinparam noteBorderColor #D4B45D
+skinparam sequenceMessageAlign center
+title 删除屏障阻止旧工作复活个人状态
+hide footbox
+box "客户端" #DBEAFE
+participant "Extension" as ext
+endbox
+box "服务端公开协作" #DCFCE7
+participant "Identity and Access" as identity
+participant "各 Domain owner" as owner
+participant "旧 attempt 或 replay" as worker
+participant "Delivery" as delivery
+endbox
+identity -> identity : S1 授权并建立删除 generation
+identity -> owner : S2 通过公开合同清除各自个人数据
+owner -> owner : S3 建立屏障并主动清除所拥有数据
+worker -> owner : S4 旧 generation 尝试提交
+owner --> worker : S5 拒绝旧个人效果
+delivery -> owner : S6 重验订阅与当前 generation
+owner --> delivery : S7 拒绝旧资格的投递
+identity -> ext : S8 通知在线客户端撤销并清除 L1
+ext -> ext : S9 离线客户端按 hard expiry 收敛
+ext -> identity : S10 重连时鉴权并检查 generation
+owner --> identity : S11 报告各自可观察清除完成项
+@enduml
