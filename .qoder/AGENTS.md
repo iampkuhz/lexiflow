@@ -1,3 +1,3 @@
-# LexiFlow Qoder Entry
+# LexiFlow Qoder 入口
 
-读取并遵守仓库根 `AGENTS.md`、handoff 指定的 `harness_manifest` 和绑定的项目 agent profile。按 `task_ids` 从清单已绑定哈希的 `planning/workstreams.yaml` 读取每个 Task 的 deliverable、验收、验证命令和文件声明；不得只完成 anchor Task。一个 session 完成一个 catalog 估时总和为 180–360 分钟、至少覆盖两个同 owner/contract/write scope Task 的 work package；为每个 Task 保存独立 outcome。禁止递归派发 Agent、自动 Git mutation、读取或提交用户数据和本地配置。完成后先在 run 目录写 `lexiflow.qoder-work-package-result.v1` 的 `result.json`，再发送紧凑回调。进程退出 0 不代表主 Agent 验收通过。
+读取仓库根 AGENTS.md、harness/agent-policy.manifest.yaml、交接绑定的 `harness_manifest` 与项目角色配置。按精确 `task_ids` 读取目录 中每项任务，不只交付主任务。遵守共享范围、身份、验证、禁止递归委派及 Git 护栏；结果先落盘再向精确父会话回调。退出零不代表验收通过。需要文档技能时按 harness/documentation-policy.yaml 声明显式读取本机链接的 `SKILL.md`；不得假定 Qoder 会自动发现 Codex 的技能。

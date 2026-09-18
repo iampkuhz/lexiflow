@@ -16,30 +16,37 @@ shared_kernel:
 
 bounded_contexts:
   identity-access:
+    display_name: 账号与设备权限
     kind: supporting-domain
     owns: [accounts, devices, sessions, user-preferences]
     may_depend_on: [foundation]
   content:
+    display_name: 字幕与播放上下文
     kind: supporting-domain
     owns: [content-identity, normalized-caption, context-window, source-location]
     may_depend_on: [foundation]
   global-lexicon:
+    display_name: 中英词汇语料库
     kind: supporting-domain
     owns: [terms, phrases, senses, frequency, cefr, domain-metadata]
     may_depend_on: [foundation]
   vocabulary-profile:
+    display_name: 个人词汇掌握档案
     kind: core-domain
     owns: [vocabulary-profile, familiarity, learning-state, profile-version]
     may_depend_on: [foundation]
   learning:
+    display_name: 学习行为与证据
     kind: core-domain
     owns: [learning-events, evidence, projection-policy]
     may_depend_on: [foundation, content, vocabulary-profile]
   semantic:
+    display_name: 语境释义与模型调用
     kind: supporting-domain
     owns: [semantic-capability-port, routing-policy, contextual-meaning]
     may_depend_on: [foundation, content, global-lexicon]
   enrichment:
+    display_name: 个性化字幕提示
     kind: core-domain
     owns: [candidate-pipeline, need-hint-policy, annotation-decision, durable-annotation-result]
     may_depend_on: [foundation, content, global-lexicon, vocabulary-profile, semantic]

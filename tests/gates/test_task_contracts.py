@@ -32,23 +32,34 @@ class TaskContractTests(unittest.TestCase):
                 self.assertTrue(result["assertions"])
 
     def test_missing_semantic_term_is_blocked(self):
+        profile = load_profiles(REPO)["LF-TSK-ARCH-0001"]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for locator in (
-                "harness/g1-task-contract-profiles.yaml",
-                "docs/product/product-brief.md",
-                "docs/architecture/phase-1.md",
-            ):
+            for locator in ["harness/g1-task-contract-profiles.yaml", *profile["required_inputs"]]:
                 destination = root / locator
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(REPO / locator, destination)
-            phase = root / "docs/architecture/phase-1.md"
-            phase.write_text(phase.read_text().replace("English first", "removed marker"))
+            for locator in profile["required_inputs"]:
+                source = root / locator
+                source.write_text(source.read_text().replace("英文优先", "已移除的约束"))
             result = evaluate_task(root, "LF-TSK-ARCH-0001")
 
         self.assertEqual(result["status"], "BLOCKED")
         blocked = [item for item in result["assertions"] if item["status"] == "BLOCKED"]
-        self.assertEqual(blocked[0]["missing_terms"], ["english first"])
+        self.assertEqual(blocked[0]["missing_terms"], ["英文优先"])
+
+    def test_merged_contracts_are_bound_inputs(self):
+        profiles = load_profiles(REPO)
+        required = {
+            "LF-TSK-ARCH-0002": "docs/architecture/modules-and-dependencies.md",
+            "LF-TSK-ARCH-0003": "docs/architecture/modules-and-dependencies.md",
+            "LF-TSK-ARCH-0004": "docs/architecture/caption-and-learning-flows.md",
+            "LF-TSK-ARCH-0005": "docs/architecture/caption-and-learning-flows.md",
+        }
+        for task, source in required.items():
+            with self.subTest(task=task):
+                self.assertIn(source, profiles[task]["required_inputs"])
+                self.assertIn(source, {item["locator"] for item in evaluate_task(REPO, task)["inputs"]})
 
     def test_g1_exit_requires_explicit_approval_marker(self):
         profiles = load_profiles(REPO)

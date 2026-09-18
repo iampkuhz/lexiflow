@@ -1,49 +1,16 @@
-# Phase 1 Delivery Status
+# 第一阶段交付状态
 
-> Change: `establish-lexiflow-foundation`  
-> Updated: 2026-09-17
+> 更新日期：2026-09-18。文档和共享策略输入已发生变化；原收据仅证明原冻结版本。
 
-The table below preserves historical change-local delivery evidence. Its `PASS` entries are limited to the named document or implementation slice, rather than current catalog acceptance. The current state in the next section supersedes older active-package and missing-receipt descriptions.
+## 当前验收状态
 
-## Current acceptance state
+第一阶段正式验收保持 **BLOCKED**。本轮只精简最新版文档与文档治理，不激活第二阶段，不把文档可读性或工程测试当作用户批准。
 
-Phase 1 is `BLOCKED` for formal acceptance. Its architecture proposal is available in [the decision package](../reviews/g1-decision-package.md), with the six requested outputs mapped in [the requirement traceability table](../reviews/phase-1-user-requirement-traceability.md). Ten ADRs remain `Proposed`; the latency and quality targets remain future experiment thresholds.
-
-| Layer | Current evidence | Meaning and remaining work |
+| 层次 | 当前结论 | 下一步 |
 |---|---|---|
-| Source preparation | All 29 prerequisite sources are current again after refreshing the 15 lifecycle-affected design records. Each complete source DAG and current subject snapshot has been verified. | Source readiness only; old packets and the earlier stale/readiness snapshots remain historical. No Task acceptance is inferred. |
-| Task validation | Twenty-one Tasks have current independently issued PASS receipts: all fourteen QLT Tasks and ARCH-0001 through ARCH-0007. The latest three QLT receipts each contain the three required shared-CLI checks; Main verified actual immutable plans and current subjects with no delivery rerun. | Eight prerequisite validations remain. Keyword-based document checks establish structure only; semantic review is separate. Review and catalog consume execution evidence without rerunning delivery checks. |
-| Independent review | Seven current formal architecture review receipts are accepted: ARCH-0001 through ARCH-0007. Main verified the complete issuance graph, current original subjects, actual reviewer independence and zero-check plans. | Other prerequisite reviews remain. Luna051's earlier findings and all noneligible records remain historical. ADR acceptance and exact Phase 2/7 parameters are excluded from pre-decision blockers. |
-| Catalog decision | No current formal catalog decision has been accepted. | Current receipt versions and dependency chains must close before requesting the G1 decision. |
-| User decision | Pending the preceding evidence layers. | Explicit approval precedes ARCH-0008's final exit receipt and Phase 2 Data Model work. |
+| 架构设计 | 十项架构决策仍为 `Proposed`；业务未因本轮重构而交付 | 审阅[决策包](../reviews/g1-decision-package.md)及[需求追踪](../reviews/phase-1-user-requirement-traceability.md) |
+| 文档与工具验证 | 40 篇文档的链接/锚点检查通过；Harness 94 项、Gate 工具 552 项测试通过；18 项文档合同诊断通过 | 这些是静态检查与工具回归，不是业务旅程或正式阶段收据 |
+| 正式任务验收 | 公开增量 Gate 返回 `FAIL/missing-evidence-context`；本轮未签发正式收据 | 取得受信证据上下文后，基于新输入核对验证、独立审阅及依赖链 |
+| 用户阶段决定 | 未由本轮任务提供 | 前置证据闭合后请求明确批准，再签发退出收据 |
 
-New Codex dispatches explicitly select Luna, using low reasoning for routine packages and medium for other bounded packages. Terra requires a specific evidenced escalation decision. Luna060's seven formal architecture reviews completed with zero delivery checks. The three receipt-lifecycle validations completed using Luna/low; their formal receipt graphs PASS, while noncanonical ancillary preflight copies remain excluded from acceptance. Exactly one new Luna/low child is validating eight cross-cutting source contracts; the existing QLT registry owns this read-only workflow and all seven business owners remain preserved in their original Source projections. No cross-owner source publication or source mutation is permitted. The catalog estimate totals 360 minutes and does not prescribe actual validator runtime. No Qoder has been started. Main recorded one premature output-directory inventory probe in the earlier semantic-review run and excluded active child folders from further general inventory. Subsequent completion/correction callbacks arrived actively; no restart occurred. Qoder's previously observed CLI failure remains a separate runtime blocker. Scheduled fallback remains no earlier than 300 seconds initially and at least 600 seconds between later probes.
-
-The 29-source readiness snapshot, current validation/review proofs and 29-Task dependency closure order are private local verification artifacts under `tmp/quality/activation/`; they are excluded from version control. Earlier source snapshots, the 14-current/15-stale impact proof and terminal BLOCKED completions are preserved as historical evidence. The older receipt chains and callbacks remain historical evidence. Historical JSON bytes are preserved as immutable archive leaves rather than active dependencies on obsolete working-tree hashes. No existing Gate schema or Java quality rule was changed to achieve source readiness.
-
-The new [lifecycle guarantees](../architecture/phase-1-lifecycle-guarantees.md) propose cancellation/commit fencing, ACK versus display facts, three explicit-intent conflict options, canonical ordering and deletion barriers. Exact event schema, claim/retry parameters, deletion completion and production conformance remain later-phase work. These are design proposals, not executed product behaviors.
-
-## Historical delivery slices
-
-| Task | Status | Evidence |
-|---|---|---|
-| `LF-DISC-001` | PASS | Product brief and attachment analysis incorporated into product/architecture docs. |
-| `LF-REF-001` | PASS | Reference audit recorded in `docs/references/feipi-session-browser-java.md`. |
-| `LF-ARCH-P1-001` | PASS | Independent semantic re-review passed after durable-pending, explicit-intent ACK, cache invalidation, ownership and dependency corrections. |
-| `LF-SEM-PORT-P1-001` / `LF-SEM-RESULT-P1-001` | PASS | Provider-neutral capability and structured-result document slices passed independent owner, failure, privacy and scope review; catalog receipts remain pending. |
-| `LF-CACHE-P1-001` / `LF-THREAT-P1-001` | PASS | Cache correctness/privacy and trust-boundary document slices passed independent review; implementation fixtures and catalog receipts remain pending. |
-| `LF-TELEMETRY-P1-001` / `LF-SOURCE-P1-001` | PASS | Correlation/redaction and source-adapter document slices passed independent review; implementation fixtures and catalog receipts remain pending. |
-| `LF-PLAN-001` | PASS | 18 workstreams, 41 capabilities, 113 tasks, 256 typed dependencies, 13 producer contracts and phase-entry rules pass the current planning validator after the reviewed Gate-task activation. |
-| `LF-GOV-001` | PASS | Agent entries, OpenSpec mappings, machine policies, owner coverage and acceptance registry are present and cross-checked. |
-| `LF-HARNESS-BOOT-001` | PASS | The runner contract includes full-path process detection, prompt/rework limits and compact completion signals. The only preserved `QLT-0009` run reached an identity-matched terminal completion, passed Main-Agent validation and was ACKed without starting another Qoder. Historical overlap cannot be retroactively proven away; see the [incident review](../reviews/qoder-concurrency-incident.md) and [token audit](../reviews/agent-token-usage-audit.md). |
-| `LF-OPS-P1-001` | PASS | ADR-010 and the reproducibility plan passed document review. The repository now has the Temurin 25 launcher, Gradle Wrapper, strict dependency locks, Java quality tools and Architecture Test, and the local clean build passed; the current-input catalog receipt remains pending; clean external-environment reproduction belongs to the post-approval plan. |
-| `LF-GATE-001` | PASS | The change-local implementation passed after all three Qoder implementations were rejected and the exhausted task was transferred to a bounded Codex takeover. Main Agent and independent review then passed 86 tests, the 113-task current catalog, and baseline plus 41 mutation probes. `LF-TSK-QLT-0002` catalog receipt remains pending until the control plane exists. |
-| `LF-DISPATCH-P1-001` | IN-PROGRESS | Pure-input implementation and direct fixtures cover finite path grammar, owner/claim reconciliation, write overlap, case/symlink safety, active provenance and contract-writer conflicts. `QLT-0005` has full catalog identity, acceptance mapping and a fixed-command entry in the version-3 30-entry registry. Layered Gate contract migration invalidated prior current-input receipts; fresh independent review and catalog closure remain pending. |
-| `LF-REVIEW-P1-001` | IN-PROGRESS | Four frozen reviews successively found and closed formal-root/executable/source, UUIDv7 provenance and read-only review-plan reachability defects; the fourth ran 15 commands and 494 Gate tests with `PASS`. Main-Agent then followed the real Qoder activation path and found that planner's hermetic raw task fixture contained three catalog-only fields while omitting runner-persisted `permission_mode`; an actual Qoder `task.json` could not compile. Planner and fixture now bind the exact runner shape, keep owner/discovery/claims catalog-owned and reject caller smuggling. `ARCH-0008` remains `BLOCKED` until explicit user approval. Current validation, a focused closure review and the immutable receipt chain remain pending. |
-| `LF-DECISION-P1-001` | PENDING-GATE | User review opens after the 29 prerequisite Tasks have current receipts and the decision package is reviewable; the exit receipt requiring user approval is issued afterwards. |
-
-Task planning state and validation result are separate. Repository validation results remain restricted to `PASS`, `BLOCKED`, or `FAIL` as defined by Harness.
-
-Historical execution evidence slice (019): TASK_VALIDATION owns checker execution and review/catalog consume receipts with zero delivery checks. The coherent 180-minute Terra package implemented canonical Codex artifact publication and instance-based issuer separation; Main strengthened verification and passed 60 focused tests. That slice targeted ARCH-0008@4/2.1.0. Java remains exact JDK 25 with one Gradle/Java rule owner. The observed child shares the parent session and its original outcome omits source changes, so its package is diagnostic evidence only. The 14 historical catalog receipts are superseded and current count remains zero. The required public incremental Gate returned FAIL/missing-evidence-context; formal G1 remains BLOCKED pending a truthful current packet and authenticated independent issuer.
-
-Historical runtime-bound slice (020): ARCH-0008@5/2.2.0 and trusted issuer semantic contract 3.0.0 were pinned while actual actor binding, canonical-to-Gate materialization and an explicit Main-only singleton source were integrated. That Terra package is no longer active. Main corrected the 29-prerequisite → user decision → final exit receipt order and the post-approval reproduction boundary. The current acceptance counts and Luna-only active dispatch are recorded above; this historical paragraph does not describe current scheduling.
+本页直接更新当前结论，不建立日期快照；原始运行证据仍保持不可变。

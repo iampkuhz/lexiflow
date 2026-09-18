@@ -1,4 +1,4 @@
-# Project-local coordination and Sub-Agent defaults; root model and credentials stay user-owned.
+# 项目内协调与子代理默认值；主模型和凭据由用户管理。
 model_instructions_file = "./model-instructions.md"
 project_doc_max_bytes = 4000
 

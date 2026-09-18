@@ -1,0 +1,23 @@
+schema_version: 1
+language: zh-CN
+preserve_verbatim: [commands, paths, APIs, identifiers, schema_fields, status_enums, source_examples]
+root_instruction_budget_bytes: 4000
+canonical_diagram_source: markdown-plantuml-fence
+local_artifact_root: tmp/
+forbidden_diagram_link_extensions: [.puml, .svg, .png]
+skill_source: CODEX_HOME/skills
+skill_default_source: ~/.codex/skills
+skill_links: .agents/skills
+skills:
+  - name: feipi-plantuml-generate-diagram
+    purpose: PlantUML 图表生成与校验
+    trigger: 新建或修改内嵌图源，或执行图表校验时读取完整 SKILL.md
+  - name: feipi-skill-govern
+    purpose: skill 工程治理
+    trigger: 仅在创建、重构或审计 skill 本身时读取完整 SKILL.md
+skill_missing: BLOCKED
+maintenance:
+  mode: latest-only
+  forbidden_directory_names: [history, archive, archives]
+  rule: 每个主题只维护最新版；直接更新或合并删除旧页，不建立历史目录、日期快照或复审副本。
+  evidence: 原始运行收据和日志留在忽略目录且不可改写；不把历史通过结果当作最新版文档的验收。

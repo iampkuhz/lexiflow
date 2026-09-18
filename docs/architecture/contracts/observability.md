@@ -1,125 +1,137 @@
 # 可观测性与脱敏合同
 
-> Proposed。先读 [横切合同导读](../phase-1-cross-cutting-contracts.md)。
+> Proposed。先读 [横切合同导读](README.md)。
 
 记录阶段、结果与延迟，避免把学习内容变成诊断数据。
 
 ## 精确语义与后续证据
 
-下面保留原合同的任务映射、Must/Should/Later、conformance、验收和未决假设。它们约束后续实现，不能从文档存在推断产品通过。
+下面保留原合同的任务映射、必须/应当/后续条件、符合性、验收和未决假设。它们约束后续实现，不能从文档存在推断产品通过。
 
 <!-- retained-contract:start -->
 **对应任务：`LF-TSK-OBS-0001`**
 
-可观测性必须回答一次 caption 为什么得到、没有得到或拒绝了某个 hint，也必须在不保存用户学习内容的前提下回答性能、成本和可靠性问题。
+可观测性必须回答一次字幕为什么得到、没有得到或拒绝了某个提示，也必须在不保存用户学习内容的前提下回答性能、成本和可靠性问题。
 
-### 6.1 Correlation model
+<a id="61-correlation-model"></a>
 
-**Must**
+### 6.1 关联模型
 
-- API 为每个外部用例建立服务端可信的 correlation identity。可接受客户端 correlation 作为上游 hint，但必须限制格式/长度，且不能作为授权、幂等或 owner identity。
-- durable work 拥有独立且稳定的 work identity；每次执行拥有 attempt identity。API trace 与 worker trace 通过 durable work link 关联，而不是假装为同一个同步 span。
-- annotation result/revision、delivery attempt、`HintDisplayed`/`HintClicked` event 与 profile evidence 使用各自 Domain identity，并通过允许的引用链关联；correlation identity 不能替代这些业务 identity。
-- 一次重试沿用原 work identity、产生新 attempt identity；重复 delivery 或 Learning event 可以从 telemetry 识别，但不能产生重复业务效果。
-- correlation 传播越过 Extension、API、durable handoff、worker、Enrichment result、Delivery 和 Learning 时，只携带最小非敏感标识与受控版本；不得传播 caption 文本、term、Profile 内容或 token。
+**必须**
 
-**Should**
+- API 为每个外部用例建立服务端可信的关联身份。可接受客户端关联作为上游提示，但必须限制格式/长度，且不能作为授权、幂等或负责人身份。
+- 持久工作拥有独立且稳定的工作身份；每次执行拥有尝试身份。API 追踪与工作进程追踪通过持久工作关联，而不是假装为同一个同步追踪区段。
+- 提示注释结果/修订号、投递尝试、`HintDisplayed`/`HintClicked` 事件与个人档案证据使用各自领域身份，并通过允许的引用链关联；关联身份不能替代这些业务身份。
+- 一次重试沿用原工作身份、产生新尝试身份；重复投递或学习归约事件可以从遥测识别，但不能产生重复业务效果。
+- 关联传播越过扩展、API、持久交接、工作进程、提示编排结果、投递和学习归约时，只携带最小非敏感标识与受控版本；不得传播字幕文本、词项、个人档案内容或令牌。
 
-- Extension 本地 English paint、L1 lookup、network request 和 stale discard 使用同一客户端 journey identity；服务端另生成可信 correlation 并记录二者的受控关联。
-- profile projection/replay 使用 batch/replay identity，并把来源 evidence 数量作为 metric，而不把全部 event identity 放入日志。
+**应当**
 
-**Later**
+- 扩展本地英文首屏绘制、L1 查询、网络请求和陈旧丢弃使用同一客户端旅程身份；服务端另生成可信关联并记录二者的受控关联。
+- 个人档案投影/重放使用批处理/重放身份，并把来源证据数量作为指标，而不把全部事件身份放入日志。
 
-- Phase 3 固定 transport propagation；Phase 5 固定 browser performance 采集；Phase 7 固定跨环境 trace backend 与采样配置。
+**后续条件**
 
-### 6.2 Structured log contract
+- 阶段 3 固定传输传播；阶段 5 固定浏览器性能采集；阶段 7 固定跨环境追踪后端与采样配置。
 
-每个结构化事件使用受控事件类型，而不是自由文本拼接。事件至少表达：发生阶段、outcome、标准 reason、受控版本、耗时/数量（如适用）和非敏感 correlation。具体字段名与日志框架留给实现阶段。
+<a id="62-structured-log-contract"></a>
 
-**Must**
+### 6.2 结构化日志合同
 
-- 记录生命周期事实：API 接收/拒绝、fast lane 完成、durable commit 成功/失败、worker claim/attempt/completion、Semantic outcome、annotation generated/delivered/stale-discard、Learning intake/projection。
-- outcome 只使用合同定义的稳定类别；Provider 原始错误消息、响应体和 stack 中的输入数据不能直接进入日志。
-- 日志不包含原始 caption/transcript、term/phrase、中文 hint、Vocabulary Profile、观看/点击明细、session/token/secret、Provider 输入输出或可逆内容摘要。
-- 用户、设备、content、caption、job 等高基数业务 identity 默认不进入常规日志；确需诊断引用时使用短期、受控、不可逆且不复用作授权的诊断标识。
-- 同一个业务事实只由 owner 发出权威 lifecycle event；adapter 可记录 transport 状态，但不得冒充 `displayed`、`learned` 或 profile update。
+每个结构化事件使用受控事件类型，而不是自由文本拼接。事件至少表达：发生阶段、结果、标准原因、受控版本、耗时/数量（如适用）和非敏感关联。具体字段名与日志框架留给实现阶段。
 
-**Should**
+**必须**
 
-- 正常高频路径采用聚合指标和采样日志；拒绝、contract mismatch、数据删除失败等安全/正确性事件保留可操作证据。
-- log schema/version 受 contract test 管理；未知属性默认不输出，而不是默认放行。
+- 记录生命周期事实：API 接收/拒绝、快速通道完成、持久提交成功/失败、工作进程认领/尝试/完成记录、语义结果、提示注释已生成/已投递/过期丢弃、学习归约接收/投影。
+- 结果只使用合同定义的稳定类别；供应商原始错误消息、响应体和调用栈中的输入数据不能直接进入日志。
+- 日志不包含原始字幕/转写、词项/短语、中文提示、个人词汇档案、观看/点击明细、会话/令牌/密钥、供应商输入输出或可逆内容摘要。
+- 用户、设备、内容、字幕、作业等高基数业务身份默认不进入常规日志；确需诊断引用时使用短期、受控、不可逆且不复用作授权的诊断标识。
+- 同一个业务事实只由负责人发出权威生命周期事件；适配器可记录传输状态，但不得冒充 `displayed`、`learned` 或个人档案更新。
 
-### 6.3 Metrics contract
+**应当**
 
-**Must**
+- 正常高频路径采用聚合指标和采样日志；拒绝、合同不匹配、数据删除失败等安全/正确性事件保留可操作证据。
+- 日志结构定义/版本受合同测试管理；未知属性默认不输出，而不是默认放行。
 
-- 使用 counter 表达 outcome/reason 数量，histogram 表达阶段延迟、queue wait、result age 和 projection lag，gauge 只表达可瞬时采样的 backlog/资源状态。
-- 至少覆盖 English paint、Extension L1、API fast lane、durable handoff、worker queue/attempt、Semantic outcome/provider latency、各 cache tier、delivery/stale discard、Learning intake/projection。
-- labels 仅使用有限 allowlist，如环境、runtime、capability、cache tier、outcome、reason、受控 provider/model family 和 contract version。
-- 用户、设备、content/video、caption、term、correlation、job/attempt、任意错误文本和任意 URL 不得成为 metric label。
-- `PASS`/健康不能由“进程存在”或“调用退出 0”推断；required journey/check 未运行必须显式呈现未验证或 `BLOCKED`。
+<a id="63-metrics-contract"></a>
 
-**Should**
+### 6.3 指标合同
 
-- cache hit 同时观察 stale reject、version reject 与 fallback，避免高 hit rate 掩盖错误复用。
-- Provider 指标分开 timeout、refusal、malformed、rate limited、budget exhausted 和 contract mismatch，并观察重试放大率与单位成功成本。
+**必须**
 
-**Later**
+- 使用计数器表达结果/原因数量，直方图表达阶段延迟、队列等待、结果年龄和投影滞后，瞬时值只表达可瞬时采样的积压/资源状态。
+- 至少覆盖英文首屏绘制、扩展 L1、API 快速通道、持久交接、工作进程队列/尝试、语义结果/供应商时延、各缓存层级、投递/陈旧丢弃、学习归约接收/投影。
+- 标签仅使用有限允许列表，如环境、运行时、能力、缓存层级、结果、原因、受控供应商/模型系列和合同版本。
+- 用户、设备、内容/视频、字幕、词项、关联、作业/尝试、任意错误文本和任意 URL 不得成为指标标签。
+- `PASS`/健康不能由“进程存在”或“调用退出 0”推断；必需用户旅程/检查未运行必须显式呈现未验证或 `BLOCKED`。
 
-- Phase 3/4 用 `LF-TSK-PRF-0001` 的预算确定 SLI/SLO 阈值；Phase 7 再固定 dashboard 与 alert。
+**应当**
 
-### 6.4 Trace contract
+- 缓存命中同时观察陈旧拒绝、版本拒绝与兜底，避免高命中速率掩盖错误复用。
+- 供应商指标分开超时、拒绝、格式错误、速率受限、预算耗尽和合同不匹配，并观察重试放大率与单位成功成本。
 
-**Must**
+**后续条件**
 
-- API 同步 span 在 durable handoff commit 或明确 no-pending 响应处结束，不等待 worker。
-- Worker 从 durable work 建立新 trace，并以 link 关联提交方；claim、queue wait、Provider attempt、validation、Enrichment persistence 与 delivery publish 具有可区分阶段。
-- span attribute 遵守与日志相同的 allowlist/redaction；trace baggage 不携带内容、个人状态、token 或 Provider payload。
-- sampling 不影响正确性。未采样 trace 仍通过 metrics 和 durable business state 保留必要的 outcome。
-- late/cancel/stale result 保持可观察，但不能为了 trace 完整而继续展示或写入 Learning 暴露。
+- 阶段 3/4 用 `LF-TSK-PRF-0001` 的预算确定 SLI/SLO 阈值；阶段 7 再固定看板与告警。
 
-**Should**
+<a id="64-trace-contract"></a>
 
-- 错误采样可提高，但先 redaction 后采样；采样策略不能把敏感 payload 当调试附件。
-- 对 fan-out Provider attempt 使用 sibling spans/links，使总预算与获胜结果可解释。
+### 6.4 追踪合同
 
-[Lifecycle guarantees](../phase-1-lifecycle-guarantees.md) 进一步区分 work/attempt/fencing、取消后的提交权限与 delivery ACK/实际显示事实；trace 的成功 span 不得代替这些 owner 的 durable 状态。Learning canonical intent order、投影 pending 及删除 generation 也只传播最小非敏感关联，不扩展为内容日志。
+**必须**
 
-### 6.5 Redaction 与保留
+- API 同步追踪区段在持久交接提交或明确无待处理任务响应处结束，不等待工作进程。
+- 工作进程从持久工作建立新追踪，并以关联提交方；声明、队列等待、供应商尝试、验证、提示编排持久化与投递发布具有可区分阶段。
+- 追踪区段属性遵守与日志相同的允许列表/脱敏；追踪随链路传播的数据不携带内容、个人状态、令牌或供应商载荷。
+- 采样不影响正确性。未采样追踪仍通过指标和持久化业务状态保留必要的结果。
+- 迟到/取消/陈旧结果保持可观察，但不能为了追踪完整而继续展示或写入学习归约暴露。
 
-| 分类 | 示例 | Telemetry policy |
+**应当**
+
+- 错误采样可提高，但先脱敏后采样；采样策略不能把敏感载荷当调试附件。
+- 对扇出供应商尝试使用同级追踪区段/关联，使总预算与获胜结果可解释。
+
+[生命周期保证](../phase-1-lifecycle-guarantees.md) 进一步区分工作/尝试/隔离屏障、取消后的提交权限与投递 ACK/实际显示事实；追踪的成功追踪区段不得代替这些负责人的持久化状态。学习归约规范意图顺序、投影待处理及删除代次也只传播最小非敏感关联，不扩展为内容日志。
+
+<a id="65-redaction-与保留"></a>
+
+### 6.5 脱敏与保留
+
+| 分类 | 示例 | 遥测策略 |
 |---|---|---|
-| Secret | auth/session token、Provider key、cookie | 永不采集；检测到即删除并触发安全事件。 |
-| User learning data | Vocabulary Profile、行为明细、显式认识/不认识 | 不进入通用 logs/traces；只输出聚合 outcome。 |
-| Content data | caption、transcript、term、hint、URL/标题 | 不进入通用 logs/metrics/traces；测试使用合成 fixture。 |
-| Stable personal identifier | user/device/account identity | 不作为 label；诊断用途只用受控 pseudonymous reference 和有限保留。 |
-| Operational metadata | runtime、capability、outcome、reason、受控版本、duration | allowlist 后可采集；仍受 retention policy 管理。 |
+| 密钥 | 鉴权/会话令牌、供应商键、会话会话 Cookie | 永不采集；检测到即删除并触发安全事件。 |
+| 用户学习归约数据 | 个人词汇档案、行为明细、显式认识/不认识 | 不进入通用日志/追踪；只输出聚合结果。 |
+| 内容数据 | 字幕、转写、词项、提示、URL/标题 | 不进入通用日志/指标/追踪；测试使用合成测试样例。 |
+| 稳定个人标识符 | 用户/设备/账号身份 | 不作为标签；诊断用途只用受控假名化参考和有限保留。 |
+| 运行元数据 | 运行时、能力、结果、原因、受控版本、时长 | 允许列表后可采集；仍受保留策略管理。 |
 
-**Must**
+**必须**
 
-- redaction 在事件离开进程前执行；不能依赖下游日志平台补救。
-- exception、Provider SDK metadata、HTTP metadata 和 cache key 经过同一 allowlist，未知值默认移除。
-- telemetry retention 与产品事实 retention 分离；删除 telemetry 不改变 Domain 状态，删除 Domain 数据也不能假设 TTL 会自动清除所有 telemetry。
+- 脱敏在事件离开进程前执行；不能依赖下游日志平台补救。
+- 异常、供应商 SDK 元数据、HTTP 元数据和缓存键经过同一允许列表，未知值默认移除。
+- 遥测保留与产品事实保留分离；删除遥测不改变领域状态，删除领域数据也不能假设存活时间会自动清除所有遥测。
 
-**Later**
+**后续条件**
 
-- Phase 7 决定每类 telemetry 的保留时长、访问审计与紧急诊断流程。
+- 阶段 7 决定每类遥测的保留时长、访问审计与紧急诊断流程。
 
-### 6.6 Acceptance evidence
+<a id="66-acceptance-evidence"></a>
+
+### 6.6 验收证据
 
 `LF-TSK-OBS-0001` 的 `PASS` 证据至少包括：
 
-1. 一条 caption journey correlation fixture，从 Extension English paint 经 API、durable work、worker、Semantic、Enrichment、Delivery 到 Learning；证明异步 trace 使用 link 且 identity 不混用。
-2. structured event catalog，逐事件标明 owner、outcome/reason allowlist、必需版本和禁止内容。
-3. metric cardinality review，证明所有 label 来自有限集合，用户/content/caption/term/correlation/job 不进入 labels。
-4. redaction fixtures，向 caption、URL、token、Provider error、Profile 和 stack 注入 canary，证明 logs/metrics/traces 均不出现 canary。
-5. failure journey，证明 timeout、malformed、refusal、enqueue failure、stale discard 和 projection lag 可分别定位，同时英文字幕不受影响。
+1. 一条字幕旅程关联测试样例，从扩展英文首屏绘制经 API、持久工作、工作进程、语义、提示编排、投递到学习归约；证明异步追踪使用关联且身份不混用。
+2. 结构化事件目录，逐事件标明负责人、结果/原因允许列表、必需版本和禁止内容。
+3. 指标基数审查，证明所有标签来自有限集合，用户/内容/字幕/词项/关联/作业不进入标签。
+4. 脱敏测试样例，向字幕、URL、令牌、供应商错误、个人档案和调用栈注入泄漏探测标记，证明日志/指标/追踪均不出现泄漏探测标记。
+5. 失败旅程，证明超时、格式错误、拒绝、入队失败、陈旧丢弃和投影滞后可分别定位，同时英文字幕不受影响。
 
 ### 6.7 未决假设
 
-| ID | Assumption | 验证时机/owner |
+| ID | 假设 | 验证时机/负责人 |
 |---|---|---|
-| OBS-A1 | 异步 trace link 加稳定 work identity 足以诊断大多数跨 runtime 问题。 | Phase 3/4 failure injection。 |
-| OBS-A2 | 内容零采集的通用 telemetry 仍能定位主要质量问题。 | Phase 4 运营演练；必要时设计受控、显式授权的独立诊断流程。 |
-| OBS-A3 | provider/model family 的受控枚举不会造成不可接受的 label cardinality。 | Phase 4 adapter inventory。 |
+| OBS-A1 | 异步追踪关联加稳定工作身份足以诊断大多数跨运行时问题。 | 阶段 3/4 失败注入。 |
+| OBS-A2 | 内容零采集的通用遥测仍能定位主要质量问题。 | 阶段 4 运营演练；必要时设计受控、显式授权的独立诊断流程。 |
+| OBS-A3 | 供应商/模型系列的受控枚举不会造成不可接受的标签基数。 | 阶段 4 适配器清单。 |
 <!-- retained-contract:end -->

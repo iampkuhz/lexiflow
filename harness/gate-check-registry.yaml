@@ -24,6 +24,8 @@ entries:
     terminal: true
   - path: docs/architecture/phase-1.md
     terminal: true
+  - path: docs/architecture/contracts/architecture-invariants.md
+    terminal: true
   required: true
   declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0001
   command_id: g1.arch.0001.contract.v1
@@ -40,6 +42,7 @@ entries:
   - scripts/gates/task_contracts.py
   - docs/product/product-brief.md
   - docs/architecture/phase-1.md
+  - docs/architecture/contracts/architecture-invariants.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -55,7 +58,7 @@ entries:
   subject_task_id: LF-TSK-ARCH-0001
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 0cfb72027c9dea56ff5a4b444408c1c91712ee41e911e6d0742ae54475792f99
+  entry_hash: 29d44b617e4055aed01f616969bfaac2e83e99f389e1964e3f328f2867399650
 - check_id: g1.arch.0002.contract
   check_version: 1
   owner: LF-WS-QLT
@@ -70,6 +73,8 @@ entries:
   - path: docs/architecture/phase-1.md
     terminal: true
   - path: harness/module-boundaries.yaml
+    terminal: true
+  - path: docs/architecture/modules-and-dependencies.md
     terminal: true
   required: true
   declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0002
@@ -87,6 +92,7 @@ entries:
   - scripts/gates/task_contracts.py
   - docs/architecture/phase-1.md
   - harness/module-boundaries.yaml
+  - docs/architecture/modules-and-dependencies.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -102,7 +108,7 @@ entries:
   subject_task_id: LF-TSK-ARCH-0002
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: a8ecf3a09e4ad6421fca2e6d3c27525e4ab0f82019677510b9ae8704cdee7af2
+  entry_hash: f4cd59d18a95b6a0ca58c062eee2262226c679a749c58317c06801f2def8ff6a
 - check_id: g1.arch.0003.contract
   check_version: 1
   owner: LF-WS-QLT
@@ -119,6 +125,8 @@ entries:
   - path: harness/module-boundaries.yaml
     terminal: true
   - path: docs/references/feipi-session-browser-java.md
+    terminal: true
+  - path: docs/architecture/modules-and-dependencies.md
     terminal: true
   required: true
   declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0003
@@ -137,6 +145,7 @@ entries:
   - docs/architecture/phase-1.md
   - harness/module-boundaries.yaml
   - docs/references/feipi-session-browser-java.md
+  - docs/architecture/modules-and-dependencies.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -152,7 +161,7 @@ entries:
   subject_task_id: LF-TSK-ARCH-0003
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: ea715f75a8d7aad8e213bacb82b8292fc39f499a00d3a45ff6e1bd606ba8ba83
+  entry_hash: 1d104cdcc9213ffdb9773e4199e812756e1327a5fbeae76bca63b869a8b4b92d
 - check_id: g1.arch.0004.contract
   check_version: 1
   owner: LF-WS-QLT
@@ -167,6 +176,10 @@ entries:
   - path: docs/architecture/phase-1.md
     terminal: true
   - path: docs/reviews/phase-1-checklist.md
+    terminal: true
+  - path: docs/architecture/caption-and-learning-flows.md
+    terminal: true
+  - path: docs/architecture/phase-1-lifecycle-guarantees.md
     terminal: true
   required: true
   declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0004
@@ -184,6 +197,8 @@ entries:
   - scripts/gates/task_contracts.py
   - docs/architecture/phase-1.md
   - docs/reviews/phase-1-checklist.md
+  - docs/architecture/caption-and-learning-flows.md
+  - docs/architecture/phase-1-lifecycle-guarantees.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -199,7 +214,7 @@ entries:
   subject_task_id: LF-TSK-ARCH-0004
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: dd49a392e284fc3413634263e05f5e922676d17934f29de5d33236ed76f7edc6
+  entry_hash: 1b09f36ea9612ac81857bf8422b601c484d6298222fa5de6af19e055fe4ecc13
 - check_id: g1.arch.0005.contract
   check_version: 1
   owner: LF-WS-QLT
@@ -214,6 +229,10 @@ entries:
   - path: docs/architecture/phase-1.md
     terminal: true
   - path: docs/reviews/phase-1-checklist.md
+    terminal: true
+  - path: docs/architecture/caption-and-learning-flows.md
+    terminal: true
+  - path: docs/architecture/phase-1-lifecycle-guarantees.md
     terminal: true
   required: true
   declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0005
@@ -231,6 +250,8 @@ entries:
   - scripts/gates/task_contracts.py
   - docs/architecture/phase-1.md
   - docs/reviews/phase-1-checklist.md
+  - docs/architecture/caption-and-learning-flows.md
+  - docs/architecture/phase-1-lifecycle-guarantees.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -246,7 +267,7 @@ entries:
   subject_task_id: LF-TSK-ARCH-0005
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 93d7ac0eb99eadf6eaa05335975cfd334af1a9c12dd7ae7f4435bf8d5cc92ba3
+  entry_hash: c4ea21d8bc20a368dcd7d4f78e11e9f9e60ec6b9852f889640292627d5eeea28
 - check_id: g1.arch.0006.contract
   check_version: 1
   owner: LF-WS-QLT
@@ -261,6 +282,10 @@ entries:
   - path: docs/architecture/phase-1.md
     terminal: true
   - path: docs/reviews/phase-1-checklist.md
+    terminal: true
+  - path: docs/architecture/contracts/architecture-invariants.md
+    terminal: true
+  - path: docs/architecture/phase-1-lifecycle-guarantees.md
     terminal: true
   required: true
   declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0006
@@ -278,6 +303,8 @@ entries:
   - scripts/gates/task_contracts.py
   - docs/architecture/phase-1.md
   - docs/reviews/phase-1-checklist.md
+  - docs/architecture/contracts/architecture-invariants.md
+  - docs/architecture/phase-1-lifecycle-guarantees.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -293,7 +320,7 @@ entries:
   subject_task_id: LF-TSK-ARCH-0006
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 60fff1e36c8d0066971b869bbdbc1d2da9cc02ec769931726d0bf427e13e17a1
+  entry_hash: 5799d6fd665cb4adf78975ff2a97eeaf98e79a10cdc8d228eb0508fb6bdff6d1
 - check_id: g1.arch.0007.contract
   check_version: 1
   owner: LF-WS-QLT
@@ -356,7 +383,7 @@ entries:
     terminal: true
   - path: docs/reviews/phase-1-checklist.md
     terminal: true
-  - path: docs/reviews/g1-bootstrap-variance.md
+  - path: docs/development/gate-control-plane-design.md
     terminal: true
   - path: docs/reviews/g1-task-evidence-map.md
     terminal: true
@@ -376,7 +403,7 @@ entries:
   - scripts/gates/task_contracts.py
   - docs/reviews/g1-decision-package.md
   - docs/reviews/phase-1-checklist.md
-  - docs/reviews/g1-bootstrap-variance.md
+  - docs/development/gate-control-plane-design.md
   - docs/reviews/g1-task-evidence-map.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
@@ -393,7 +420,7 @@ entries:
   subject_task_id: LF-TSK-ARCH-0008
   subject_task_version: 5
   subject_change_version: 2.2.0
-  entry_hash: f38f59ae0f377ba706703262b5906b3a27e6af0f22c7b6e79e2a37ba19d6ecc8
+  entry_hash: f690da61404d1fff58b83294b62690d6783413cfe68eb009265068b1f1e4eb5f
 - check_id: g1.qlt.0001.contract
   check_version: 1
   owner: LF-WS-QLT
@@ -503,8 +530,6 @@ entries:
     terminal: true
   - path: docs/development/gate-control-plane-design.md
     terminal: true
-  - path: docs/development/current-execution-evidence.md
-    terminal: true
   required: true
   declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-QLT-0003
   command_id: g1.qlt.0003.contract.v1
@@ -520,7 +545,6 @@ entries:
   - harness/g1-task-contract-profiles.yaml
   - scripts/gates/task_contracts.py
   - docs/development/gate-control-plane-design.md
-  - docs/development/current-execution-evidence.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -536,7 +560,7 @@ entries:
   subject_task_id: LF-TSK-QLT-0003
   subject_task_version: 4
   subject_change_version: 2.2.0
-  entry_hash: c50ed8dcf91aa6280e9dc3414cbcd3600715f677784ad8074a328f85da6de013
+  entry_hash: 87c462913cd5781fed577625a5e4a4487cf6d97ffc9da289fd23981071c5a6ce
 - check_id: g1.qlt.0004.contract
   check_version: 1
   owner: LF-WS-QLT
@@ -609,8 +633,8 @@ entries:
   - path: tests/harness/test_codex_runtime.py
     terminal: true
   required: true
-  declared_validation_command: python3 -m unittest tests.gates.test_evidence_packet tests.harness.test_codex_work_package
-    tests.harness.test_codex_runtime
+  declared_validation_command: python3 -m unittest tests.gates.test_evidence_packet
+    tests.harness.test_codex_work_package tests.harness.test_codex_runtime
   command_id: qlt.evidence.validate.v3
   fixed_argv:
   - python3
@@ -1133,9 +1157,11 @@ entries:
     terminal: true
   - path: scripts/gates/task_contracts.py
     terminal: true
-  - path: docs/architecture/phase-1-cross-cutting-contracts.md
+  - path: docs/architecture/contracts/README.md
     terminal: true
   - path: openspec/specs/product-architecture/spec.md
+    terminal: true
+  - path: docs/architecture/contracts/semantic-capability.md
     terminal: true
   required: true
   declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-SEM-0001
@@ -1151,8 +1177,9 @@ entries:
   consumed_inputs:
   - harness/g1-task-contract-profiles.yaml
   - scripts/gates/task_contracts.py
-  - docs/architecture/phase-1-cross-cutting-contracts.md
+  - docs/architecture/contracts/README.md
   - openspec/specs/product-architecture/spec.md
+  - docs/architecture/contracts/semantic-capability.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -1168,7 +1195,7 @@ entries:
   subject_task_id: LF-TSK-SEM-0001
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 63be771ad45728e5eed405f0a83cf4e52dd9462f59cd7608f6340075a8c5b4e5
+  entry_hash: cf27892f7f5cd14e03a9c5d2960e4181c286c2789fb319a78703ad97918d43af
 - check_id: g1.sem.0002.contract
   check_version: 1
   owner: LF-WS-QLT
@@ -1180,9 +1207,11 @@ entries:
     terminal: true
   - path: scripts/gates/task_contracts.py
     terminal: true
-  - path: docs/architecture/phase-1-cross-cutting-contracts.md
+  - path: docs/architecture/contracts/README.md
     terminal: true
   - path: openspec/specs/product-architecture/spec.md
+    terminal: true
+  - path: docs/architecture/contracts/semantic-result.md
     terminal: true
   required: true
   declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-SEM-0002
@@ -1198,8 +1227,9 @@ entries:
   consumed_inputs:
   - harness/g1-task-contract-profiles.yaml
   - scripts/gates/task_contracts.py
-  - docs/architecture/phase-1-cross-cutting-contracts.md
+  - docs/architecture/contracts/README.md
   - openspec/specs/product-architecture/spec.md
+  - docs/architecture/contracts/semantic-result.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -1215,7 +1245,7 @@ entries:
   subject_task_id: LF-TSK-SEM-0002
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: e3f47201a6f0aa185b2a72c30efbc26b5ed6f79e572633047915d3a46510c89d
+  entry_hash: e9935f1894e19d27a68c540044896d1394d5bc1413f08ece19585999a6158d88
 - check_id: g1.prf.0002.contract
   check_version: 1
   owner: LF-WS-QLT
@@ -1227,9 +1257,11 @@ entries:
     terminal: true
   - path: scripts/gates/task_contracts.py
     terminal: true
-  - path: docs/architecture/phase-1-cross-cutting-contracts.md
+  - path: docs/architecture/contracts/README.md
     terminal: true
   - path: docs/reviews/phase-1-checklist.md
+    terminal: true
+  - path: docs/architecture/contracts/cache.md
     terminal: true
   required: true
   declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-PRF-0002
@@ -1245,8 +1277,9 @@ entries:
   consumed_inputs:
   - harness/g1-task-contract-profiles.yaml
   - scripts/gates/task_contracts.py
-  - docs/architecture/phase-1-cross-cutting-contracts.md
+  - docs/architecture/contracts/README.md
   - docs/reviews/phase-1-checklist.md
+  - docs/architecture/contracts/cache.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -1262,7 +1295,7 @@ entries:
   subject_task_id: LF-TSK-PRF-0002
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: b7fd8a98543c94396e73f1b005e65b991ada8a5a1dcd20d0d8aa435c99052fc6
+  entry_hash: c7d97b0ee350c1f4339364a606aa38357b5c314d50be5c7671dc5e77ef8ad04b
 - check_id: g1.sec.0001.contract
   check_version: 1
   owner: LF-WS-QLT
@@ -1274,9 +1307,13 @@ entries:
     terminal: true
   - path: scripts/gates/task_contracts.py
     terminal: true
-  - path: docs/architecture/phase-1-cross-cutting-contracts.md
+  - path: docs/architecture/contracts/README.md
     terminal: true
   - path: openspec/specs/product-architecture/spec.md
+    terminal: true
+  - path: docs/architecture/contracts/trust-boundaries.md
+    terminal: true
+  - path: docs/architecture/contracts/observability.md
     terminal: true
   required: true
   declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-SEC-0001
@@ -1292,8 +1329,10 @@ entries:
   consumed_inputs:
   - harness/g1-task-contract-profiles.yaml
   - scripts/gates/task_contracts.py
-  - docs/architecture/phase-1-cross-cutting-contracts.md
+  - docs/architecture/contracts/README.md
   - openspec/specs/product-architecture/spec.md
+  - docs/architecture/contracts/trust-boundaries.md
+  - docs/architecture/contracts/observability.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -1309,7 +1348,7 @@ entries:
   subject_task_id: LF-TSK-SEC-0001
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 778b1642a93b7d042de8670704432dd4ccf478b39c502f7ecc2648cf10174b19
+  entry_hash: c5b21fd001298cd1653ef2f4f5b560d819c158769a297f886e3ec84fd2a2a7e5
 - check_id: g1.obs.0001.contract
   check_version: 1
   owner: LF-WS-QLT
@@ -1321,9 +1360,11 @@ entries:
     terminal: true
   - path: scripts/gates/task_contracts.py
     terminal: true
-  - path: docs/architecture/phase-1-cross-cutting-contracts.md
+  - path: docs/architecture/contracts/README.md
     terminal: true
   - path: docs/reviews/phase-1-checklist.md
+    terminal: true
+  - path: docs/architecture/contracts/observability.md
     terminal: true
   required: true
   declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-OBS-0001
@@ -1339,8 +1380,9 @@ entries:
   consumed_inputs:
   - harness/g1-task-contract-profiles.yaml
   - scripts/gates/task_contracts.py
-  - docs/architecture/phase-1-cross-cutting-contracts.md
+  - docs/architecture/contracts/README.md
   - docs/reviews/phase-1-checklist.md
+  - docs/architecture/contracts/observability.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -1356,7 +1398,7 @@ entries:
   subject_task_id: LF-TSK-OBS-0001
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 5622406c8c89d3d0e6a1bf46db4b3d7bb20630d2cc96d883c0f39499bc12b2f6
+  entry_hash: 778c4447b270fcde8b1fb80460e3d8c82b07b04edf6e57a7f7614630e5403df4
 - check_id: g1.ops.0001.contract
   check_version: 1
   owner: LF-WS-QLT
@@ -1421,9 +1463,11 @@ entries:
     terminal: true
   - path: scripts/gates/task_contracts.py
     terminal: true
-  - path: docs/architecture/phase-1-cross-cutting-contracts.md
+  - path: docs/architecture/contracts/README.md
     terminal: true
   - path: openspec/specs/product-architecture/spec.md
+    terminal: true
+  - path: docs/architecture/contracts/source-adapters.md
     terminal: true
   required: true
   declared_validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ADP-0001
@@ -1439,8 +1483,9 @@ entries:
   consumed_inputs:
   - harness/g1-task-contract-profiles.yaml
   - scripts/gates/task_contracts.py
-  - docs/architecture/phase-1-cross-cutting-contracts.md
+  - docs/architecture/contracts/README.md
   - openspec/specs/product-architecture/spec.md
+  - docs/architecture/contracts/source-adapters.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -1456,4 +1501,4 @@ entries:
   subject_task_id: LF-TSK-ADP-0001
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: a96dd2776d7d8e09dde67fa9445218ead983e1986e43445623d0ee589a14b28e
+  entry_hash: 314e695292c44251da6675ec0200d58ebd419a3343d56bd34bcfaf582e9f54dc

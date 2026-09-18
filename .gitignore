@@ -28,6 +28,11 @@ Thumbs.db
 /harness/reports/
 /.qoder/task-packs/
 
+# ── 文档 PlantUML 中间产物：真源在 Markdown 代码块 ────────────────
+# diagrams/ 只跟踪 Markdown 图源索引；其余文件/子目录均为本地中间产物。
+/docs/**/diagrams/*
+!/docs/**/diagrams/*.md
+
 # ── OpenSpec 本地变更草稿 ──────────────────────────────────────────
 # 长期规范与项目说明仍需提交；changes/ 仅作为本地变更工作区。
 /openspec/changes/
@@ -71,3 +76,6 @@ pnpm-debug.log*
 *.sqlite
 *.sqlite3
 *.log
+
+# 仓库 skill 只链接本机安装；共享声明由 Harness 跟踪。
+/.agents/skills/

@@ -1,38 +1,39 @@
-# 架构图源与阅读位置
+# PlantUML 图源索引
 
-图以“一张图回答一个问题”为原则：上下文、组件、静态依赖和部署使用不同箭头语义；时序解释交互，活动解释选择，状态解释异常，概念关系区分事实与投影。
+所有文档图源直接写在正文的 `plantuml` 围栏代码块中。**Markdown 是唯一真源**；打开下表的正文锚点即可查看与修改，不依赖预生成 PNG/SVG。支持 PlantUML 的阅读器可按代码渲染；普通 Markdown 阅读器会展示源码，不能据此声称阅读器已经渲染。
 
-正文使用 PNG，便于 Markdown 直接阅读；同名 SVG 支持放大，`.puml` 是可编辑真源。已注册 profile 的 `.brief.yaml` 记录图的边界与覆盖要求。
+## 从问题找到代码块
 
-## 从问题找到图
+| 问题 | 正文内图源 | 类型 |
+|---|---|---|
+| 应该先看什么？ | [阅读地图](../README.md#diagram-reading-map) | 思维导图 |
+| 谁与 LexiFlow 交互？ | [系统上下文](../phase-1.md#diagram-system-context) | 系统上下文 |
+| 谁维护中英语料、提示与学习状态？ | [业务职责](../modules-and-dependencies.md#diagram-domain-responsibility) | 业务组件 |
+| 当前 Java 模块实际声明哪些依赖？ | [Java 模块依赖](../modules-and-dependencies.md#diagram-java-module-dependencies) | Gradle 模块架构 |
+| 目标代码依赖朝哪里收敛？ | [目标依赖方向](../modules-and-dependencies.md#diagram-dependency-direction) | 目标分层架构 |
+| 哪些工作在哪里执行？ | [运行部署](../phase-1.md#diagram-runtime-deployment) | 部署 |
+| 候选如何选择快慢路径？ | [提示选择](../caption-and-learning-flows.md#diagram-annotation-selection) | 活动 |
+| 已提交慢路结果如何到客户端？ | [异步提示](../caption-and-learning-flows.md#diagram-annotation-async) | 时序 |
+| 显式动作的版本与待处理有何区别？ | [学习反馈](../caption-and-learning-flows.md#diagram-learning-feedback) | 时序 |
+| 事实、证据与状态分别是什么？ | [学习概念](../caption-and-learning-flows.md#diagram-learning-concepts) | 概念类图 |
+| 合格语义请求有哪些职责？ | [语义职责](../contracts/semantic-capability.md#diagram-semantic-outcome) | 活动 |
+| 取消和重试还能不能提交？ | [工作生命周期](../phase-1-lifecycle-guarantees.md#diagram-work-lifecycle) | 状态 |
+| 收到、显示与点击能否互推？ | [投递观察关系](../phase-1-lifecycle-guarantees.md#diagram-delivery-lifecycle) | 观察状态关系 |
+| 旧任务为什么不能复活删除数据？ | [删除屏障](../phase-1-lifecycle-guarantees.md#diagram-delete-barrier) | 时序 |
+| 十项 ADR 回答什么？ | [架构决策地图](../decisions.md#diagram-decision-map) | 思维导图 |
+| Java / Python 工具分别负责什么？ | [质量工具归属](../../development/quality-gate-layering.md#diagram-quality-ownership) | 工具架构 |
+| 交付、复核、目录决定如何分层？ | [分层验收](../../development/quality-gate-layering.md#diagram-gate-layers) | 活动 |
 
-| 问题 | 图源 / SVG | 类型 | 正文 |
-|---|---|---|---|
-| 应该先看什么？ | [reading-map.puml](reading-map.puml) / [SVG](reading-map.svg) | 思维导图 | [架构入口](../README.md) |
-| 谁与 LexiFlow 交互？ | [system-context.puml](system-context.puml) / [SVG](system-context.svg) | 系统上下文 | [总览](../phase-1.md) |
-| 哪个领域拥有什么？ | [domain-responsibility.puml](domain-responsibility.puml) / [SVG](domain-responsibility.svg) | 组件 | [模块与依赖](../modules-and-dependencies.md) |
-| 代码可以依赖谁？ | [dependency-direction.puml](dependency-direction.puml) / [SVG](dependency-direction.svg) | 静态依赖分层 | [模块与依赖](../modules-and-dependencies.md) |
-| 哪些工作在哪里执行？ | [runtime-deployment.puml](runtime-deployment.puml) / [SVG](runtime-deployment.svg) | 部署 | [总览](../phase-1.md) |
-| 一个候选如何选择快慢路径？ | [annotation-selection.puml](annotation-selection.puml) / [SVG](annotation-selection.svg) | 活动 | [核心流程](../caption-and-learning-flows.md) |
-| 已提交慢路结果如何到达客户端？ | [annotation-async.puml](annotation-async.puml) / [SVG](annotation-async.svg) | 时序 | [核心流程](../caption-and-learning-flows.md) |
-| 显式动作成功与投影 pending 有何区别？ | [learning-feedback.puml](learning-feedback.puml) / [SVG](learning-feedback.svg) | 时序 | [核心流程](../caption-and-learning-flows.md) |
-| 事实、证据与状态分别是什么？ | [learning-concepts.puml](learning-concepts.puml) / [SVG](learning-concepts.svg) | 概念类图 | [核心流程](../caption-and-learning-flows.md) |
-| 合格语义请求有哪些标准职责？ | [semantic-outcome.puml](semantic-outcome.puml) / [SVG](semantic-outcome.svg) | 活动 | [Semantic 能力](../contracts/semantic-capability.md) |
-| 取消和重试还能不能提交？ | [work-lifecycle.puml](work-lifecycle.puml) / [SVG](work-lifecycle.svg) | 状态 | [生命周期](../phase-1-lifecycle-guarantees.md) |
-| 收到、显示和点击能否互推？ | [delivery-lifecycle.puml](delivery-lifecycle.puml) / [SVG](delivery-lifecycle.svg) | 观察状态关系 | [生命周期](../phase-1-lifecycle-guarantees.md) |
-| 旧任务为何不能复活删除数据？ | [delete-barrier.puml](delete-barrier.puml) / [SVG](delete-barrier.svg) | 时序 | [生命周期](../phase-1-lifecycle-guarantees.md) |
-| 十项 ADR 共同回答什么？ | [decision-map.puml](decision-map.puml) / [SVG](decision-map.svg) | 思维导图 | [架构决策](../decisions.md) |
-| Java 与 Python 工具谁检查什么？ | [quality-ownership.puml](quality-ownership.puml) / [SVG](quality-ownership.svg) | 工具责任分层 | [工程交付](../engineering-and-delivery.md) |
-| 交付、独立复核、目录决定怎样分层？ | [gate-layers.puml](gate-layers.puml) / [SVG](gate-layers.svg) | 活动 | [工程交付](../engineering-and-delivery.md) |
+图的一次定义位于上述架构正文；其他手册优先链接该代码块，避免复制后发生漂移。业务协作、Java 编译依赖、部署连接与状态观察分别有不同箭头含义，图下解释及完整合同不能省略。
 
-## 如何理解验证范围
+## 修改与本地校验顺序
 
-16 张图均由本地 PlantUML 实际渲染。13 张使用已注册 typed profiles，经过 brief、coverage、layout、SVG 和 artifact hash 验证；概念类图与两张状态图走 skill 的 fallback，**没有 typed coverage/layout 证明**，结构与语义由视觉/正文审阅核对。
+1. 先修改正文解释与同页代码块，记录图型、问题、范围和稳定图标识。
+2. 将代码块提取到新的被忽略的 `tmp/` 图包，必要时为注册图型准备图表需求；它们是输入/校验中间文件，不是第二份源代码。
+3. 通过 `feipi-plantuml-generate-diagram` 的统一入口校验；每批次一次渲染器预检，未变成功包复用，失败按既有修复上限处理。
+4. 本地查看 SVG/PNG 核对中文、分支、箭头、终态与布局；确认回执的来源哈希对应当前代码块。
+5. 将修改后的 Markdown 交付。PUML 导出、图表需求、渲染图、校验回执和预览留在本地，不提交，不在正文链接这些文件。
 
-同一图的组件箭头、编译依赖、部署连接不能混用。图下正文说明正常路径、省略范围和结论；完整 owner、失败、授权、版本和幂等条件仍以 [详细合同](../contracts/README.md) 为准。图片不包含真实字幕、学习历史、模型 payload 或本地运行数据。
+类型化图型配置的覆盖与布局证明、兜底的视觉与语义证明分别校验。没有渲染器、需求或必需产物时保持 BLOCKED；旧图成功不能证明修改后的图源。
 
-## 后续修改顺序
-
-先改正文所解释的问题及对应 brief，再编辑 `.puml`；用 `feipi-plantuml-generate-diagram` 的统一入口校验一次，最后更新 SVG/PNG 并做视觉复核。源码不依赖远程 include/theme；renderer preflight、校验回执和调试日志保留在本地 tmp，不把它们当架构正文。
-
-本次检查与收据影响见 [重构审查](../../reviews/architecture-documentation-restructure.md)。
+规则唯一入口是 [AGENTS.md](../../../AGENTS.md)，中间产物忽略范围见 [.gitignore](../../../.gitignore)。外部工具不是本仓库公共 CLI，缺失时不伪造渲染成功。

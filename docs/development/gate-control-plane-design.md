@@ -1,27 +1,31 @@
-# LexiFlow Gate Control Plane 设计合同
+<a id="lexiflow-gate-control-plane-设计合同"></a>
 
-> Catalog task: `LF-TSK-QLT-0003@4` / change `2.1.0`
-> Deliverable: Architecture Gate contract
-> Evidence: frozen-input plan and immutable receipt example
-> Status: current design contract; implementation and catalog receipts remain separately validated
+# LexiFlow 验收控制面设计合同
+
+> 合同任务：`LF-TSK-QLT-0003`；版本和依赖以当前目录为准。
+> 交付物: 架构 Gate 合同
+> 证据: 冻结输入计划与不可变收据示例
+> 状态: 当前设计合同; 实现与目录收据分别验证
 
 ## 1. 任务边界
 
-本文只定义 G1 所需的 Gate 控制面合同：唯一 CLI、纯 plan compiler、显式 registry、`run` 与 `status` 语义、三态聚合、不可覆盖 receipt、issuer provenance，以及 current-input evidence chain。它给后续原子实现任务提供稳定接口，不在 `LF-TSK-QLT-0003@4` 内交付 CLI、store、checker、review workflow 或 bootstrap migration。V3 保持唯一执行层，并通过 current execution evidence contract 采用实例身份隔离：`TASK_VALIDATION` 执行交付检查，`INDEPENDENT_REVIEW` 与 `CATALOG_DECISION` 只消费不可变 evidence/receipt。
+本文只定义 G1 所需的 Gate 控制面合同：唯一 CLI、纯计划编译器、显式注册表、`run` 与 `status` 语义、三态聚合、不可覆盖收据、签发者来源证明，以及当前输入证据链。它给实现任务提供稳定接口，不在 `LF-TSK-QLT-0003@4` 内交付 CLI、存储、检查器、审查工作流协调或引导迁移。V3 保持唯一执行层，并通过当前执行证据合同采用实例身份隔离：`TASK_VALIDATION` 执行交付检查，`INDEPENDENT_REVIEW` 与 `CATALOG_DECISION` 只消费不可变证据/收据。
 
-当前 catalog 对本任务的要求是 45 分钟的“Define G1 plan, run, status, and receipt semantics”，唯一 hard dependency 为 `LF-TSK-QLT-0001@1/1.0.0`。本任务的完成证据是本文中的合同、最小完整 frozen-input plan 示例和 immutable receipt 示例，不是一个可执行控制面。
+本合同的证明对象是设计语义、冻结输入计划和不可变收据示例；可执行控制面及其正式验收由对应实现任务提供独立证据。
 
-本文不改变 Harness handoff schema，不实现 Qoder runner，不做 dispatch 并发判断，也不进入 Phase 2+ 产品设计。现有职责保持：
+本文不改变 Harness 交接结构定义，不实现 Qoder 运行器，不做派发并发判断，也不进入阶段 2+ 产品设计。现有职责保持：
 
-- `LF-TSK-QLT-0002`：planning catalog 的 schema、ID、owner、typed dependency 与 DAG 验证；
-- `LF-TSK-QLT-0004`：acceptance-case traceability contract；
-- `LF-TSK-QLT-0005`：派发前 candidate 与 active task 的 owner、file claim、write overlap 与 contract writer 冲突判定；
-- `LF-TSK-QLT-0006@3/2.1.0`：runner identity、raw completion lifecycle、completion-before-callback、单 Qoder run 与 300/600 秒 watchdog；它不负责把 Qoder 输出解释为六个结果字段；
-- 后续 JIT Gate tasks：本文定义的 compiler、registry、execution、receipt store、review chain 与 G1 integration。
+- `LF-TSK-QLT-0002`：规划目录的结构定义、ID、负责人、类型化依赖与 DAG 验证；
+- `LF-TSK-QLT-0004`：验收案例可追溯性合同；
+- `LF-TSK-QLT-0005`：派发前候选与活动任务的负责人、文件声明、写入重叠与合同写入者冲突判定；
+- `LF-TSK-QLT-0006@3/2.1.0`：运行器身份、原始完成记录生命周期、完成记录先于回调、单 Qoder 运行与 按共享策略执行的守护检查器；它不负责把 Qoder 输出解释为六个结果字段；
+- Gate 实现任务：本文定义的编译器、注册表、执行、收据存储、审查链与 G1 集成。
 
 ## 2. 唯一 CLI 与控制流
 
-### 2.1 Public surface
+<a id="21-public-surface"></a>
+
+### 2.1 公开接口
 
 唯一公开入口固定为：
 
@@ -31,23 +35,25 @@ python3 scripts/gates/cli.py run --mode incremental|full [--evidence-packet <rep
 python3 scripts/gates/cli.py status --run-id <uuid>
 ```
 
-`plan` 与 `run` 必须获得两个显式 packet locator。调用方可以传 flags，也可以由受信 Main Agent/CI launcher 各绑定一个环境变量：`LEXIFLOW_GATE_EVIDENCE_PACKET` 与 `LEXIFLOW_GATE_ISSUER_PACKET`。值只能是单个 repo-relative path；flag 与环境同时出现时必须逐字相等，否则 `FAIL/evidence-context-conflict`；任一 locator 缺失时 `FAIL/missing-evidence-context`。不得从 `latest`、目录扫描、文件时间、多个候选或进程身份推断 packet。这样 `harness/manifest.yaml` 与 `AGENTS.md` 已声明的精确 `run --mode incremental` 命令可由 launcher 注入本次 locator 后执行，同时 CLI flags 为人工复现保留可见路径。Compiler 冻结两个 packet 的 locator/hash，run 再把同一 issuer packet 绑定到 process identity。
+`plan` 与 `run` 必须获得两个显式证据包定位。调用方可以传参数，也可以由受信主代理/CI 启动器各绑定一个环境变量：`LEXIFLOW_GATE_EVIDENCE_PACKET` 与 `LEXIFLOW_GATE_ISSUER_PACKET`。值只能是单个仓库相对路径；参数与环境同时出现时必须逐字相等，否则 `FAIL/evidence-context-conflict`；任一定位缺失时 `FAIL/missing-evidence-context`。不得从 `latest`、目录扫描、文件时间、多个候选或进程身份推断证据包。这样 `harness/manifest.yaml` 与 `AGENTS.md` 已声明的精确 `run --mode incremental` 命令可由启动器注入本次定位后执行，同时 CLI 参数为人工复现保留可见路径。编译器冻结两个证据包的定位/哈希，运行再把同一签发者证据包绑定到进程身份。
 
-`--receipt-kind TASK_VALIDATION|INDEPENDENT_REVIEW|CATALOG_DECISION` 可显式指定；省略时为 `TASK_VALIDATION`。内部 checker 不提供第二套交付入口，只能通过显式 registry 由 `run` 调用。Main Agent/CI 先通过 `QLT-0007` 与 `QLT-0014` materializers 得到本次不可变 packet paths，再绑定环境或传入 flags；不同 receipt kind 使用对应授权的 issuer packet。
+`--receipt-kind TASK_VALIDATION|INDEPENDENT_REVIEW|CATALOG_DECISION` 可显式指定；省略时为 `TASK_VALIDATION`。内部检查器不提供第二套交付入口，只能通过显式注册表由 `run` 调用。主代理/CI 先通过 `QLT-0007` 与 `QLT-0014` 物化器得到本次不可变证据包路径，再绑定环境或传入参数；不同收据种类使用对应授权的签发者证据包。
 
-实现按 dependency 串行扩展同一个入口：`QLT-0010` 先交付稳定的 receipt-kind handler/store 接口和 `TASK_VALIDATION` route，尚未安装的 kind 明确 `FAIL/unsupported-receipt-kind`；`QLT-0011` 在其 current dependency PASS 后向同一 `cli.py` 安装 `INDEPENDENT_REVIEW` route；`QLT-0013` 最后安装 `CATALOG_DECISION` route。三个 task 对 `cli.py` 的 write claim 因 hard/contract dependency 严格串行，dispatch preflight 必须拒绝并发 claim；不得创建第二个 CLI 或靠 import side effect 注册。
+实现按依赖串行扩展同一个入口：`QLT-0010` 先交付稳定的收据种类处理器/存储接口和 `TASK_VALIDATION` 路由，尚未安装的种类明确 `FAIL/unsupported-receipt-kind`；`QLT-0011` 在其当前依赖 PASS 后向同一 `cli.py` 安装 `INDEPENDENT_REVIEW` 路由；`QLT-0013` 最后安装 `CATALOG_DECISION` 路由。三个任务对 `cli.py` 的写入声明因硬性/合同依赖严格串行，派发预检必须拒绝并发声明；不得创建第二个 CLI 或靠导入副作用注册。
 
 | 命令 | 副作用 | 身份 | 输出 |
 |---|---|---|---|
-| `plan` | 零副作用；不写 plan、receipt、pointer、event 或 lifecycle 文件，不执行 checker | 不生成 `plan_id` 或 `run_id` | stdout 输出 canonical plan JSON 与 `content_fingerprint` |
-| `run` | 复用同一个纯 plan compiler并持久化实际 plan；只有 `TASK_VALIDATION` 执行 selected checks，review/catalog 只验证不可变 evidence/receipt | 每次生成新的 `run_id` | `PASS`、`BLOCKED` 或 `FAIL` |
-| `status` | 单次只读；不等待、不 retry、不 resume、不重新判定 | 必须显式提供 `run_id` | 根据 start event 或 final receipt 返回 `RUNNING` 或 `FINALIZED` |
+| `plan` | 零副作用；不写计划、收据、指针、事件或生命周期文件，不执行检查器 | 不生成 `plan_id` 或 `run_id` | stdout 输出规范计划 JSON 与 `content_fingerprint` |
+| `run` | 复用同一个纯计划编译器并持久化实际计划；只有 `TASK_VALIDATION` 执行选定的检查，审查/目录只验证不可变证据/收据 | 每次生成新的 `run_id` | `PASS`、`BLOCKED` 或 `FAIL` |
+| `status` | 单次只读；不等待、不重试、不 resume、不重新判定 | 必须显式提供 `run_id` | 根据 start 事件或最终收据返回 `RUNNING` 或 `FINALIZED` |
 
-本合同不保留 `run --plan-file`，因此没有 mode/plan-file 歧义，也没有按 ID 复用 plan 的路径。将来若增加 `--plan-file`，它必须与 `--mode` 互斥，并在执行前验证其 `content_fingerprint` 与 current inputs；该扩展需单独 version CLI contract。
+本合同不保留 `run --plan-file`，因此没有模式/plan-file 歧义，也没有按 ID 复用计划的路径。将来若增加 `--plan-file`，它必须与 `--mode` 互斥，并在执行前验证其 `content_fingerprint` 与当前输入；该扩展需单独版本 CLI 合同。
 
-### 2.2 `plan` 与 `run` 使用同一 compiler
+<a id="22-plan-与-run-使用同一-compiler"></a>
 
-解析出唯一的 `E`/`P` 后，`plan --mode X` 和 `run --mode X` 必须调用同一个无写入的 `compile_plan(mode, receipt_kind, evidence_packet=E, issuer_packet=P)`。两个显式 packet 完整闭合 context；compiler 返回 canonical payload 与 fingerprint：
+### 2.2 `plan` 与 `run` 使用同一编译器
+
+解析出唯一的 `E`/`P` 后，`plan --mode X` 和 `run --mode X` 必须调用同一个无写入的 `compile_plan(mode, receipt_kind, evidence_packet=E, issuer_packet=P)`。两个显式证据包完整闭合上下文；编译器返回规范载荷与指纹：
 
 ```text
 same inputs + same registry + same policy -> same canonical plan
@@ -55,48 +61,52 @@ same canonical plan                       -> same content_fingerprint
 each run                                  -> new run_id
 ```
 
-`content_fingerprint` 是对 RFC 8785 JSON Canonicalization Scheme 产生的 UTF-8 payload 计算的 SHA-256。计算投影排除 fingerprint 自身、生成时间、输出位置和所有 Gate run identity。`run_id` 只标识一次执行，不进入 fingerprint；不得用 fingerprint 充当 run identity，也不得用 run ID 改变相同内容的 fingerprint。
+`content_fingerprint` 是对 RFC 8785 JSON 规范化方案产生的 UTF-8 载荷计算的 SHA-256。计算投影排除指纹自身、生成时间、输出位置和所有 Gate 运行身份。`run_id` 只标识一次执行，不进入指纹；不得用指纹充当运行身份，也不得用运行 ID 改变相同内容的指纹。
 
 ### 2.3 `run` 的可观察顺序
 
 `run --mode X --evidence-packet E --issuer-packet P` 的合同顺序为：
 
-1. 使用纯 compiler 生成本次实际 canonical plan；
-2. 验证 plan 与 current inputs，生成唯一 `run_id`；
-3. 在该 run 下持久化实际 plan 的精确 bytes；
-4. 在启动任何 checker **之前**，写入并 flush 一个结构化 start event；
-5. 将同一 `START` event 的 `run_id` 与 event locator 以单行 JSON 写到 stderr 并 flush，使调用方在 checker 开始前取得 `status --run-id` 的精确地址；
-6. 两次 flush 均成功后，`TASK_VALIDATION` 才按 frozen registry 执行 required checks；`INDEPENDENT_REVIEW` 与 `CATALOG_DECISION` 必须保持零 selected checks，并直接进入 evidence-consumption verifier；
-7. 聚合交付检查结果或证据复核结果，并创建不可覆盖 final receipt。
+1. 使用纯编译器生成本次实际规范计划；
+2. 验证计划与当前输入，生成唯一 `run_id`；
+3. 在该运行下持久化实际计划的精确字节；
+4. 在启动任何检查器 **之前**，写入并刷新一个结构化 start 事件；
+5. 将同一 `START` 事件的 `run_id` 与事件定位以单行 JSON 写到 stderr 并刷新，使调用方在检查器开始前取得 `status --run-id` 的精确地址；
+6. 两次刷新均成功后，`TASK_VALIDATION` 才按冻结注册表执行必需检查；`INDEPENDENT_REVIEW` 与 `CATALOG_DECISION` 必须保持零选定的检查，并直接进入证据消费核验器；
+7. 聚合交付检查结果或证据复核结果，并创建不可覆盖最终收据。
 
-Run store 使用确定性目录 `tmp/quality/runs/{run_id}/`；实际 plan、start event 与 final receipt 的唯一 locator 分别为 `plan.json`、`start.json`、`receipt.json`。`status --run-id` 只把经 UUID 验证的 ID 代入这三个固定路径，不扫描目录、不解析 `latest`、不跟随目录外 symlink。
+运行存储使用确定性目录 `tmp/quality/runs/{run_id}/`；实际计划、start 事件与最终收据的唯一定位分别为 `plan.json`、`start.json`、`receipt.json`。`status --run-id` 只把经 UUID 验证的 ID 代入这三个固定路径，不扫描目录、不解析 `latest`、不跟随目录外符号链接。
 
-Start event 至少包含 `schema_version`、`run_id`、`receipt_kind`、`content_fingerprint`、persisted plan locator/hash、trusted issuer packet locator/hash、process identity 和 `started_at`。stderr 的 `START` JSON 至少包含 `schema_version`、`event=START`、`run_id`、start-event locator/hash；不得输出 packet 内容或敏感值。无法持久化/flush disk event，或无法 emit/flush 调用方 event 时，均不得启动 checker，命令以 `FAIL/start-event-unavailable` 结束。调用方可以在同步 `run` 尚未返回时，用已收到的 `run_id` 单次查询状态；不需要扫描 run 目录。
+Start 事件至少包含 `schema_version`、`run_id`、`receipt_kind`、`content_fingerprint`、已持久化的计划定位/哈希、受信签发者证据包定位/哈希、进程身份和 `started_at`。stderr 的 `START` JSON 至少包含 `schema_version`、`event=START`、`run_id`、启动事件定位/哈希；不得输出证据包内容或敏感值。无法持久化/刷新磁盘事件，或无法发出/刷新调用方事件时，均不得启动检查器，命令以 `FAIL/start-event-unavailable` 结束。调用方可以在同步 `run` 尚未返回时，用已收到的 `run_id` 单次查询状态；不需要扫描运行目录。
 
-`status --run-id` 先查 final receipt；存在且完整时返回 `FINALIZED` 与三态结果。否则读取已 flush 的 start event 并返回 `RUNNING`，不根据 PID、日志或时间推测结果。找不到、损坏或 identity/hash 不一致时 CLI 失败。本文不定义持久化 `PLANNED` 状态。
+`status --run-id` 先查最终收据；存在且完整时返回 `FINALIZED` 与三态结果。否则读取已刷新的 start 事件并返回 `RUNNING`，不根据 PID、日志或时间推测结果。找不到、损坏或身份/哈希不一致时 CLI 失败。本文不定义持久化 `PLANNED` 状态。
 
-## 3. Frozen-input plan 合同
+<a id="3-frozen-input-plan-合同"></a>
+
+## 3. 冻结输入计划合同
 
 ### 3.1 V1 必需字段
 
-Schema 名称为 `lexiflow.gate-plan.v1`。Canonical payload 必须完整冻结：
+结构定义名称为 `lexiflow.gate-plan.v1`。规范载荷必须完整冻结：
 
 1. `schema_version`、`mode` 与 `receipt_kind`；
-2. 精确 `task_id`、`task_version`、`change_version` 与 `task_source` locator/hash；
-3. generic explicit evidence packet locator/hash，以及它分别绑定的 raw task、raw completion、stdout、stderr、diff 和 test evidence hashes；
-4. packet 中由 Main Agent 显式核对的六个 result fields 与 subject identity；
-5. raw caller `allowed_files`/`forbidden_files` strings、normalized arrays、canonical file claims 和 changed/allowed/forbidden/claims 三方 reconciliation；
-6. trusted issuer packet locator/hash；
-7. consumed source、policy、agent/runtime manifest、task template、acceptance-case registry 与 registry entry locator/hash；
-8. `execution.layer`、`checker_execution` 与 `source`；`TASK_VALIDATION` 还冻结 selected checks 的稳定 ID/version、owner、required 属性、selection reasons、declared command、command ID、fixed argv 与 registry entry hash，review/catalog 的 `checks` 必须为空；
-9. acceptance criteria/evidence、effect checks 与 risks 的逐项预期映射；
-10. 对以上 canonical payload 的 `content_fingerprint`。
+2. 精确 `task_id`、`task_version`、`change_version` 与 `task_source` 定位/哈希；
+3. 通用显式证据包定位/哈希，以及它分别绑定的原始任务、原始完成记录、stdout、stderr、差异和测试证据哈希；
+4. 证据包中由主代理显式核对的六个结果字段与受验对象身份；
+5. 原始调用者 `allowed_files`/`forbidden_files` 字符串、规范化的数组、规范文件声明和变化的/允许范围/禁止范围/声明三方对账；
+6. 受信签发者证据包定位/哈希；
+7. 已消费来源、策略、代理/运行时清单、任务模板、验收案例注册表与注册表入口定位/哈希；
+8. `execution.layer`、`checker_execution` 与 `source`；`TASK_VALIDATION` 还冻结选定的检查的稳定 ID/版本、负责人、必需属性、选择原因、声明的命令、命令 ID、固定参数序列与注册表入口哈希，审查/目录的 `checks` 必须为空；
+9. 验收条件/证据、效果检查与风险的逐项预期映射；
+10. 对以上规范载荷的 `content_fingerprint`。
 
-路径使用 repo-relative POSIX 形式。输入必须保存存在状态与 SHA-256；目录输入展开为稳定排序的文件清单。Compiler 必须同时保存 caller 原始 scope strings 和解析后的 normalized arrays，canonical claims 也单独保存。Reconciliation 对 changed files、allowed/forbidden arrays 与 claims 做三方检查：每个 changed file 必须 allowed、不得 forbidden、且必须有 claim；每个 claim 必须完全落在 allowed scope 内且不与 forbidden scope 相交。`claims_outside_allowed` 或 `claims_intersecting_forbidden` 非空就是 caller scope 与 claims 冲突，plan 为 FAIL。`run` 针对 plan 中冻结的 bytes 执行，current bytes 与 hash 不一致时为 `FAIL/input-drift`。
+路径使用仓库相对 POSIX 形式。输入必须保存存在状态与 SHA-256；目录输入展开为稳定排序的文件清单。编译器必须同时保存调用者原始范围字符串和解析后的规范化的数组，规范声明也单独保存。对账对变化的文件、允许范围/禁止范围数组与声明做三方检查：每个变化的文件必须允许、不得禁止、且必须有声明；每个声明必须完全落在允许范围内且不与禁止范围相交。`claims_outside_allowed` 或 `claims_intersecting_forbidden` 非空就是调用者范围与声明冲突，计划为 FAIL。`run` 针对计划中冻结的字节执行，当前字节与哈希不一致时为 `FAIL/input-drift`。
 
-### 3.2 Generic explicit evidence packet
+<a id="32-generic-explicit-evidence-packet"></a>
 
-Gate 不改变 Qoder Harness 的 14 个 caller fields。Qoder caller schema 保持：
+### 3.2 通用显式证据包
+
+Gate 不改变 Qoder Harness 的 14 个调用者字段。Qoder 调用者结构定义保持：
 
 ```text
 goal, task_id, task_source, task_version, change_version,
@@ -105,35 +115,37 @@ acceptance_criteria, acceptance_evidence, validation_command,
 failure_policy, parent_client
 ```
 
-Codex Sub-Agent 不伪装成 Qoder Task。一个工作包仍使用 `harness/agent-policy.manifest.yaml` 已声明的 package caller contract；进入 Gate 时，为包内每个目标 Task 保存一个 `lexiflow.codex-work-package-task-projection.v1` raw task。投影顶层精确绑定 `work_package_id`、原顺序且至少两项的 `task_ids[]`、`target_task_id == task_id`、目标 Task/version/source/scope/acceptance/validation、完整嵌套 `caller_contract` 和 runner identity。`task_versions`、`change_versions`、`expected_outputs_by_task`、`acceptance_by_task` 与 `validation_commands` 的 keyset 必须精确等于 `task_ids[]`，目标项必须和顶层投影一致。Caller contract 不含 runner identity；`parent_session_id`、`agent_id`、`run_id`、`session_id` 与 `client=codex` 只在运行时绑定。精确字段集拒绝 `permission_mode`、`_resume_mode`、`title` 或其他 Qoder 字段夹带。
+Codex 子代理不伪装成 Qoder 任务。一个工作包仍使用 `harness/agent-policy.manifest.yaml` 已声明的工作包调用者合同；进入 Gate 时，为包内每个目标任务保存一个 `lexiflow.codex-work-package-task-projection.v1` 原始任务。投影顶层精确绑定 `work_package_id`、原顺序且至少两项的 `task_ids[]`、`target_task_id == task_id`、目标任务/版本/来源/范围/验收/验证、完整嵌套 `caller_contract` 和运行器身份。`task_versions`、`change_versions`、`expected_outputs_by_task`、`acceptance_by_task` 与 `validation_commands` 的键集合必须精确等于 `task_ids[]`，目标项必须和顶层投影一致。调用者合同不含运行器身份；`parent_session_id`、`agent_id`、`run_id`、`session_id` 与 `client=codex` 只在运行时绑定。精确字段集拒绝 `permission_mode`、`_resume_mode`、`title` 或其他 Qoder 字段夹带。
 
-Materializer 接受 `client=qoder|codex` 并拒绝其他 client。两种 client 都必须通过相同 raw task/completion、packet identity 和 task identity 对账；Codex raw task 另外验证稳定 package identity、ordered Task membership、target、caller/target mapping 和 scope containment。Raw runner JSON 可以保留 runner 的 pretty/noncanonical whitespace，但 duplicate key 必须在任何层级失败，实际 bytes 仍由 locator/hash 冻结。Planner 再按 client 使用互斥的 required/optional 字段集合：Qoder initial/resume 合同不变；Codex 只读取上述版本化投影，并将 package task/version/owner/output/acceptance/validation/package scope 与 current catalog 全量对账。Plan 中的 owner、`discovered_from`、file claims 和目标 scope 仍只来自 current catalog，不能由 caller 投影注入。
+物化器接受 `client=qoder|codex` 并拒绝其他客户端。两种客户端都必须通过相同原始任务/完成记录、证据包身份和任务身份对账；Codex 原始任务另外验证稳定工作包身份、有序任务成员关系、目标、调用者/目标映射和范围包含关系。原始运行器 JSON 可以保留运行器的格式化/非规范空白字符，但重复键必须在任何层级失败，实际字节仍由定位/哈希冻结。规划器再按客户端使用互斥的必需/可选字段集合：Qoder 初始/resume 合同不变；Codex 只读取上述版本化投影，并将工作包任务/版本/负责人/输出/验收/验证/工作包范围与当前目录全量对账。计划中的负责人、`discovered_from`、文件声明和目标范围仍只来自当前目录，不能由调用者投影注入。
 
-`LF-TSK-QLT-0006` 只提供 raw task/completion lifecycle 和 runner-bound identity；其 completion contract 不承诺包含六个结果字段。后续首个 JIT task `LF-TSK-QLT-0007` 提供 generic explicit evidence packet materializer。Materializer 不解释 Agent 自然语言，而是要求 Main Agent 显式核对并提交：
+`LF-TSK-QLT-0006` 只提供原始任务/完成记录生命周期和运行器绑定的身份；其完成记录合同不承诺包含六个结果字段。后续首个 JIT 任务 `LF-TSK-QLT-0007` 提供通用显式证据包物化器。物化器不解释代理自然语言，而是要求主代理显式核对并提交：
 
 - 六个结果字段：`status`、`changed_files`、`validation`、`acceptance_evidence`、`effect_checks`、`risks`；
-- raw task packet locator/hash；
-- raw completion locator/hash；
-- raw stdout 与 stderr 各自的 locator/hash；
-- reviewed diff locator/hash；
-- executed test evidence locators/hashes；
-- Main Agent attestation identity、核对时间和逐字段 source bindings。
+- 原始任务证据包定位/哈希；
+- 原始完成记录定位/哈希；
+- 原始 stdout 与 stderr 各自的定位/哈希；
+- 经审阅的差异定位/哈希；
+- 已执行的测试证据定位/哈希；
+- 主代理证明身份、核对时间和逐字段来源绑定。
 
-Materializer 把这些结构化输入写为一个不可变 explicit evidence packet。它禁止从 Qoder final answer、callback、stdout/stderr、日志或任何 free text 自动猜测、抽取或补齐六字段。Raw artifacts 只被 hash 绑定；字段值来自 Main Agent 的显式核对。缺任一字段、raw locator/hash、diff/test evidence、attestation 或 identity reconciliation 时为 `FAIL/evidence-packet-incomplete`。
+物化器把这些结构化输入写为一个不可变显式证据包。它禁止从 Qoder 最终回答、回调、stdout/stderr、日志或任何自由文本自动猜测、抽取或补齐六字段。原始产物只被哈希绑定；字段值来自主代理的显式核对。缺任一字段、原始定位/哈希、差异/测试证据、证明或身份对账时为 `FAIL/evidence-packet-incomplete`。
 
-同一个 generic packet contract 还必须表达可验证的零写入：只读 review/catalog 路径使用 `changed_files: []`、空 `snapshot.files` 与零字节 diff，三者仍须精确相等，raw task/completion/tests、scope/claims 与 Main-Agent attestation 仍完整绑定。Planner 只允许 `INDEPENDENT_REVIEW` 或 `CATALOG_DECISION` 消费这种零写入 packet；`TASK_VALIDATION` 必须保留非空 subject changed-file snapshot。这样空集合来自 hash-bound packet，而不是 reviewer 在运行时自报，也不会放宽 validation subject 的 current-byte 证明。
+同一个通用证据包合同还必须表达可验证的零写入：只读审查/目录路径使用 `changed_files: []`、空 `snapshot.files` 与零字节差异，三者仍须精确相等，原始任务/完成记录/测试、范围/声明与主代理证明仍完整绑定。规划器只允许 `INDEPENDENT_REVIEW` 或 `CATALOG_DECISION` 消费这种零写入证据包；`TASK_VALIDATION` 必须保留非空受验对象变更文件快照。这样空集合来自哈希绑定证据包，而不是审阅者在运行时自报，也不会放宽验证受验对象的当前字节证明。
 
-因此，已耗尽 Qoder initial/correction 配额的 Task 可以由一个不同 actor 的 Codex 工作包产生零写入 review subject：每个 Task 仍保留自己的 evidence/plan outcome，包身份不会折叠成一个 catalog outcome。Reviewer issuer 仍必须和 producer 独立。`client` 只标识工具类型，两个 Codex 实例可以共享真实 session，但必须具有不同的 verified actor；相同 actor/agent/run/instance 或 replay identity 不能借工作包投影绕过 issuer/review independence。
+因此，已耗尽 Qoder 初始/修正配额的任务可以由一个不同执行者的 Codex 工作包产生零写入审查受验对象：每个任务仍保留自己的证据/计划结果，包身份不会折叠成一个目录结果。审阅者签发者仍必须和生产者独立。`client` 只标识工具类型，两个 Codex 实例可以共享真实会话，但必须具有不同的经核验的执行者；相同执行者/代理/运行/实例或重放身份不能借工作包投影绕过签发者/审查独立性。
 
-`QLT-0007` 只 materialize generic explicit result evidence packet，不创建或信任 issuer identity。独立的 `QLT-0014` 为人工、Qoder、Codex reviewer 或 CI actor materialize trusted issuer packet。两项只共享基础 identity 格式；schema、信任来源、负例、locator/hash 和验收结果彼此独立。
+`QLT-0007` 只物化通用显式结果证据包，不创建或信任签发者身份。独立的 `QLT-0014` 为人工、Qoder、Codex 审阅者或 CI 执行者物化受信签发者证据包。两项只共享基础身份格式；结构定义、信任来源、负例、定位/哈希和验收结果彼此独立。
 
-`QLT-0014` 只调用 `harness/gate-issuer-authorities.yaml` 中固定注册且由 QLT owner 管理的 verifier；请求 payload 不得选择 verifier 或 authority。Qoder verifier 核对 runner-owned task/completion provenance，Codex verifier 核对 desktop host 绑定的当前 parent/session context，人工 verifier 核对 registry operator record 与 authenticated attestation，CI verifier 核对 workload registry entry 与 attestation。未知 verifier、authority unavailable、自报 actor/role、stale/replayed attestation 或 receipt-kind authorization 不匹配均为 FAIL。Planner `QLT-0008` 只冻结已经 materialized 的 explicit evidence packet 和 issuer packet，不直接解释 QLT-0006 completion。
+`QLT-0014` 只调用 `harness/gate-issuer-authorities.yaml` 中固定注册且由 QLT 负责人管理的核验器；请求载荷不得选择核验器或权限来源。Qoder 核验器核对运行器拥有的任务/完成记录来源证明，Codex 核验器核对桌面端宿主绑定的当前父级/会话上下文，人工核验器核对注册表操作员记录与已认证的证明，CI 核验器核对工作负载注册表入口与证明。未知核验器、权限来源不可用、自报执行者/角色、陈旧/重放的证明或收据种类授权不匹配均为 FAIL。规划器 `QLT-0008` 只冻结已经已物化的的显式证据包和签发者证据包，不直接解释 QLT-0006 完成记录。
 
-运行时身份和本地生成身份采用不同版本约束：来自 Codex、Qoder、人工或 CI authority 的 `session_id`、`parent_session_id` 与 Qoder `run_id` 必须是 canonical、non-nil、RFC variant UUID v1–v8，以兼容当前 Desktop/runner 发出的 UUIDv7；LexiFlow 自己生成并负责防重放的 `issuer_instance_id`、`attestation_id`、`nonce` 及 replay claim 仍必须是 canonical UUIDv4。放宽外部来源版本不得放宽 packet namespace 或 nonce 的 UUIDv4 约束。
+运行时身份和本地生成身份采用不同版本约束：来自 Codex、Qoder、人工或 CI 权限来源的 `session_id`、`parent_session_id` 与 Qoder `run_id` 必须是规范、非零、RFC 变体 UUID v1–v8，以兼容当前桌面端/运行器发出的 UUIDv7；LexiFlow 自己生成并负责防重放的 `issuer_instance_id`、`attestation_id`、`nonce` 及重放声明仍必须是规范 UUIDv4。放宽外部来源版本不得放宽证据包命名空间或 nonce 的 UUIDv4 约束。
 
-### 3.3 最小完整 plan JSON 示例
+<a id="33-最小完整-plan-json-示例"></a>
 
-下面是 `lexiflow.gate-plan.v1` 的最小 schema-complete illustrative fixture。除明确说明为对显示内容实算的 canonical hash 外，重复数字形式的 64 位十六进制值只是 schema placeholder；引用的 artifact 不要求在仓库存在，也没有被当前 verifier 解析。它不是当前仓库的 PASS 证据。
+### 3.3 最小完整计划 JSON 示例
+
+下面是 `lexiflow.gate-plan.v1` 的最小结构完整示意测试样例。除明确说明为对显示内容实算的规范哈希外，重复数字形式的 64 位十六进制值只是结构定义占位符；引用的产物不要求在仓库存在，也没有被当前核验器解析。它不是当前仓库的 PASS 证据。
 
 ```json
 {
@@ -356,13 +368,15 @@ Materializer 把这些结构化输入写为一个不可变 explicit evidence pac
 }
 ```
 
-## 4. 显式 registry 与命令安全
+<a id="4-显式-registry-与命令安全"></a>
 
-Registry 是 versioned、显式、有序的声明，不做目录扫描、entry-point 自动发现或 import side effect。每个 check entry 至少定义稳定 `check_id`/version、owner、mode、有限 trigger patterns、required/advisory、`declared_validation_command`、独立 `command_id`、fixed argv、repo-relative cwd、timeout、consumed inputs、typed outcome contract、acceptance/effect mappings 和 canonical entry hash。
+## 4. 显式注册表与命令安全
 
-Harness 的 caller `validation_command` 保持原有“声明的完整命令字符串”语义。Compiler 只做一次完整 string equality：caller value 必须与 registry entry 的 `declared_validation_command` 精确相等。它不把该字符串当作 command ID，不 tokenize、不插值，也绝不执行它。
+注册表是版本化的、显式、有序的声明，不做目录扫描、入口自动发现或导入副作用。每个检查入口至少定义稳定 `check_id`/版本、负责人、模式、有限触发条件模式、必需/建议性、`declared_validation_command`、独立 `command_id`、固定参数序列、仓库相对 cwd、超时、已消费输入、类型化结果合同、验收/效果映射和规范入口哈希。
 
-执行时 `run` 使用同一 registry entry 中独立的 `command_id` 和 fixed argv。Caller 不能提供或覆盖 command ID/argv。真实 planning validator entry 为：
+Harness 的调用者 `validation_command` 保持原有“声明的完整命令字符串”语义。编译器只做一次完整字符串相等比较：调用者值必须与注册表入口的 `declared_validation_command` 精确相等。它不把该字符串当作命令 ID，不分词、不插值，也绝不执行它。
+
+执行时 `run` 使用同一注册表入口中独立的 `command_id` 和固定参数序列。调用者不能提供或覆盖命令 ID/argv。真实规划验证器入口为：
 
 ```json
 {
@@ -387,48 +401,56 @@ Harness 的 caller `validation_command` 保持原有“声明的完整命令字�
 }
 ```
 
-声明字符串不匹配、未知 command ID、argv override、registry entry hash 漂移或尝试 shell 执行均为 `FAIL/registry-mismatch`。需要不同参数时必须新增并 version registry entry。
+声明字符串不匹配、未知命令 ID、argv 覆盖、注册表入口哈希漂移或尝试 shell 执行均为 `FAIL/registry-mismatch`。需要不同参数时必须新增并版本注册表入口。
 
-## 5. 三态与 receipt contracts
+<a id="5-三态与-receipt-contracts"></a>
+
+## 5. 三态与收据合同
 
 ### 5.1 三态
 
 Gate 验证结果只允许：
 
-| Result | 含义 |
+| 结果 | 含义 |
 |---|---|
-| `PASS` | `TASK_VALIDATION` 的 required checks 已实际运行且全部通过，或 review/catalog 的 required immutable evidence/receipt 已完整验证且全部通过 |
+| `PASS` | `TASK_VALIDATION` 的必需检查已实际运行且全部通过，或审查/目录的必需不可变证据/收据已完整验证且全部通过 |
 | `BLOCKED` | 检查可信完成，但发现被验收内容不满足规则或验收条件 |
-| `FAIL` | 无法可信完成验证，例如输入无效、required check 未运行、输出损坏、identity/hash 不一致或证据不完整 |
+| `FAIL` | 无法可信完成验证，例如输入无效、必需检查未运行、输出损坏、身份/哈希不一致或证据不完整 |
 
-聚合固定为 `FAIL > BLOCKED > PASS`。`queued`、`acknowledged`、未触发、未运行、跳过、unavailable、callback delivered 或 exit `0` 都不是 PASS。`TASK_VALIDATION` 的 required check 缺失或集合为空时为 FAIL；review/catalog 反而必须拒绝非空 delivery check 集合，并以 kind-specific evidence completeness 决定结果。
+聚合固定为 `FAIL > BLOCKED > PASS`。`queued`、`acknowledged`、未触发、未运行、跳过、不可用、回调已投递或退出 `0` 都不是 PASS。`TASK_VALIDATION` 的必需检查缺失或集合为空时为 FAIL；审查/目录反而必须拒绝非空交付检查集合，并以按种类划分的证据完整性决定结果。
 
-### 5.2 所有 receipt 的共同必需字段
+<a id="52-所有-receipt-的共同必需字段"></a>
 
-Schema 名称为 `lexiflow.gate-receipt.v1`。每份 receipt 都包含：
+### 5.2 所有收据的共同必需字段
 
-- `schema_version`、`receipt_kind`、唯一 `run_id`、plan locator/hash 与 `content_fingerprint`；
-- trusted issuer packet locator/hash、actor identity 与 Gate process identity；
-- `started_at`、`finished_at`、task/change identity 与 current source fingerprint；
-- artifact manifest locator/hash；
-- kind-specific completeness result；
-- canonical rerun argv、最终 `result` 与 reason codes。
+结构定义名称为 `lexiflow.gate-receipt.v1`。每份收据都包含：
 
-不同 receipt kind 的必需 payload 为：
+- `schema_version`、`receipt_kind`、唯一 `run_id`、计划定位/哈希与 `content_fingerprint`；
+- 受信签发者证据包定位/哈希、执行者身份与 Gate 进程身份；
+- `started_at`、`finished_at`、任务/变更身份与当前来源指纹；
+- 产物清单定位/哈希；
+- 按种类划分的完整性结果；
+- 规范重跑 argv、最终 `result` 与原因代码。
 
-| Receipt kind | 必需内容 | PASS 条件 |
+不同收据种类的必需载荷为：
+
+| 收据种类 | 必需内容 | PASS 条件 |
 |---|---|---|
-| `TASK_VALIDATION` | explicit evidence packet locator/hash及其 raw task/completion/output/diff/tests bindings；Main Agent 六字段 attestation；subject identity；三方 scope reconciliation；每个 required check 的 declared command、command ID、fixed argv registry hash、process fact、typed outcome 与 evidence locator/hash；逐项 acceptance/effect/risk evidence | evidence packet/subject identity/hash 一致；subject changed-file snapshot 非空；所有 required checks 实际执行且 PASS；Main Agent attestation、raw bindings及 acceptance/effect/risk evidence 完整 |
-| `INDEPENDENT_REVIEW` | 被审 validation receipt locator/hash；reviewer trusted issuer packet 与 reviewer identity；零 delivery-check execution record；结构化 independence assertions；review scope/source/diff hashes；review plan 中 hash-bound write-set reconciliation；重新读取 validation packet 绑定的 changed-file snapshot 并与仓库当前 subject bytes 对账；逐项 findings、rerun evidence 与 decision | subject validation PASS；reviewer independence 可证明；plan 为 evidence-consumption 且 `checks=[]`；零写入 snapshot/diff/changed-files 来自已验证 packet；subject snapshot 在 review 与 catalog closure 时均重新验证 current；reviewed/current inputs 一致；kind-specific evidence 完整 |
-| `CATALOG_DECISION` | validation 与 independent-review receipts locator/hash；零 delivery-check execution record；current task/change/source/registry/policy locator/hash；acceptance-case registry locator/hash及 orphan/duplicate/current-mapping 结果；required dependency receipts locator/hash；每份前序/依赖 receipt 的 trusted issuer packet 与 current authority registry verification；reviewer independence verification；freshness reconciliation；catalog result | plan 为 evidence-consumption 且 `checks=[]`；两份前序 receipts PASS；review 独立；acceptance registry 完整且 current；全部 versions、canonical locators 与 hashes 对 current inputs 一致；每份前序/依赖 receipt 的 issuer authority 重新验证；全部 required dependencies 为 current-input PASS |
+| `TASK_VALIDATION` | 显式证据包定位/哈希及其原始任务/完成记录/输出/差异/测试绑定；主代理六字段证明；受验对象身份；三方范围对账；每个必需检查的声明的命令、命令 ID、固定参数序列注册表哈希、进程事实、类型化结果与证据定位/哈希；逐项验收/效果/风险证据 | 证据包/受验对象身份/哈希一致；受验对象变更文件快照非空；所有必需检查实际执行且 PASS；主代理证明、原始绑定及验收/效果/风险证据完整 |
+| `INDEPENDENT_REVIEW` | 被审验证收据定位/哈希；审阅者受信签发者证据包与审阅者身份；零交付检查执行记录；结构化独立性断言；审查范围/来源/差异哈希；审查计划中哈希绑定写入集合对账；重新读取验证证据包绑定的变更文件快照并与仓库当前受验对象字节对账；逐项发现、重跑证据与决定 | 受验对象验证 PASS；审阅者独立性可证明；计划为证据消费且 `checks=[]`；零写入快照/差异/changed-files 来自已验证证据包；受验对象快照在审查与目录闭包时均重新验证当前；经审阅的/当前输入一致；按种类划分的证据完整 |
+| `CATALOG_DECISION` | 验证与独立审阅收据定位/哈希；零交付检查执行记录；当前任务/变更/来源/注册表/策略定位/哈希；验收案例注册表定位/哈希及孤立/重复/current-mapping 结果；必需依赖收据定位/哈希；每份前序/依赖收据的受信签发者证据包与当前权限来源注册表核验；审阅者独立性核验；新鲜度对账；目录结果 | 计划为证据消费且 `checks=[]`；两份前序收据 PASS；审查独立；验收注册表完整且当前；全部版本、规范定位与哈希对当前输入一致；每份前序/依赖收据的签发者权限来源重新验证；全部必需依赖为当前输入 PASS |
 
-缺少该 kind 任一 required field、locator 无法解析、canonical locator 不一致、artifact hash 不匹配、issuer authority 未重新验证，或只靠 free text/调用方自报声明时为 `FAIL/evidence-incomplete`。
+缺少该种类任一必需字段、定位无法解析、规范定位不一致、产物哈希不匹配、签发者权限来源未重新验证，或只靠自由文本/调用方自报声明时为 `FAIL/evidence-incomplete`。
 
-## 6. Issuer identity 与 reviewer independence
+<a id="6-issuer-identity-与-reviewer-independence"></a>
 
-### 6.1 Trusted issuer packet
+## 6. 签发者身份与审阅者独立性
 
-Subject identity 和 receipt issuer identity 是两条不同链。每次 `plan`/`run` 都从显式 flag 或受信 launcher 的单值环境绑定消费一个不可变 trusted issuer packet。`QLT-0014` issuer materializer 核对 runner provenance，或由 Main Agent 把人工、当前 Codex 或 CI actor 绑定到上述可信身份来源；QLT-0006 本身不产出该 packet，QLT-0007 也不授权 issuer。下面的 packet 与第 7 节 `CATALOG_DECISION` receipt fixture 是同一个 issuer，字段必须逐项一致：
+<a id="61-trusted-issuer-packet"></a>
+
+### 6.1 受信签发者证据包
+
+受验对象身份和收据签发者身份是两条不同链。每次 `plan`/`run` 都从显式参数或受信启动器的单值环境绑定消费一个不可变受信签发者证据包。`QLT-0014` 签发者物化器核对运行器来源证明，或由主代理把人工、当前 Codex 或 CI 执行者绑定到上述可信身份来源；QLT-0006 本身不产出该证据包，QLT-0007 也不授权签发者。下面的证据包与第 7 节 `CATALOG_DECISION` 收据测试样例是同一个签发者，字段必须逐项一致：
 
 ```json
 {
@@ -455,13 +477,15 @@ Subject identity 和 receipt issuer identity 是两条不同链。每次 `plan`/
 }
 ```
 
-Receipt 保存 packet locator/hash 和经验证的 actor fields。每个 invocation 必须获得经 host/runner verifier 验证的 issuer instance、actor/session identity 与授权 receipt kinds；禁止复制 subject 的 `agent_id`、`run_id` 或 issuer instance 来填 issuer。共享 `client` 或实际 host session 本身不是复制 actor identity。Host verifier 仍必须认证实际执行 actor，actor 不因重新签发 attestation/run 改变。独立 review 仍同时排除 subject producer 与 validation issuer。无法取得 trusted packet 时为 `FAIL/issuer-untrusted`。
+收据保存证据包定位/哈希和经验证的执行者字段。每个调用必须获得经宿主/运行器核验器验证的签发者实例、执行者/会话身份与授权收据种类；禁止复制受验对象的 `agent_id`、`run_id` 或签发者实例来填签发者。共享 `client` 或实际宿主会话本身不是复制执行者身份。宿主核验器仍必须认证实际执行者，执行者不因重新签发身份凭证/运行改变。独立审查仍同时排除受验对象生产者与验证签发者。无法取得受信证据包时为 `FAIL/issuer-untrusted`。
 
-Qoder authority provenance 直接绑定 runner 实际持久化的 `task.json` 与 `completion.json` bytes。Runner 使用稳定 pretty JSON，因此 issuer materializer 与 Planner 都按 strict JSON 解析并拒绝 duplicate key、非法数字和 identity drift，同时允许 whitespace/noncanonical serialization；locator/hash 仍冻结原始 bytes。Issuer packet 自身、Codex/human/CI attestation 与正式 receipt 继续要求 canonical JSON。
+Qoder 权限来源来源证明直接绑定运行器实际持久化的 `task.json` 与 `completion.json` 字节。运行器使用稳定格式化 JSON，因此签发者物化器与规划器都按严格 JSON 解析并拒绝重复键、非法数字和身份漂移，同时允许空白字符/非规范序列化；定位/哈希仍冻结原始字节。签发者证据包自身、Codex/人工/CI 证明与正式收据继续要求规范 JSON。
 
-### 6.2 Gate process identity
+<a id="62-gate-process-identity"></a>
 
-`run` 生成独立 process identity，并在 start event 与 final receipt 中一致保存：
+### 6.2 Gate 进程身份
+
+`run` 生成独立进程身份，并在 start 事件与最终收据中一致保存：
 
 ```json
 {
@@ -473,23 +497,27 @@ Qoder authority provenance 直接绑定 runner 实际持久化的 `task.json` �
 }
 ```
 
-`gate_run_id` 必须等于 receipt `run_id`，process identity 必须绑定 issuer packet hash。Gate process identity 不冒充 actor，也不复用 subject run ID。
+`gate_run_id` 必须等于收据 `run_id`，进程身份必须绑定签发者证据包哈希。Gate 进程身份不冒充执行者，也不复用受验对象运行 ID。
 
-### 6.3 Reviewer independence
+<a id="63-reviewer-independence"></a>
+
+### 6.3 审阅者独立性
 
 `INDEPENDENT_REVIEW` 至少结构化证明：
 
-1. reviewer actor/issuer instance 与 subject producer 不同；
-2. review Gate run ID 与 subject run、validation run 均不同；
-3. reviewer 没有写入 subject changed files；
-4. review 只引用已完成且不可覆盖的 subject receipt locator/hash，不回写该 receipt；
-5. actor、process 与 subject 三条 identity chain 可分别追溯，不能只写 `independent=true`。
+1. 审阅者执行者/签发者实例与受验对象生产者不同；
+2. 审查 Gate 运行 ID 与受验对象运行、验证运行均不同；
+3. 审阅者没有写入受验对象变化的文件；
+4. 审查只引用已完成且不可覆盖的受验对象收据定位/哈希，不回写该收据；
+5. 执行者、进程与受验对象三条身份链可分别追溯，不能只写 `independent=true`。
 
-任一比较缺失或同一 producer 自审时为 `FAIL/reviewer-not-independent`。`CATALOG_DECISION` 必须重新验证 review receipt 的 packet hash、reviewer identity 与 independence evidence。
+任一比较缺失或同一生产者自审时为 `FAIL/reviewer-not-independent`。`CATALOG_DECISION` 必须重新验证审查收据的证据包哈希、审阅者身份与独立性证据。
 
-## 7. 最小完整 immutable receipt JSON 示例
+<a id="7-最小完整-immutable-receipt-json-示例"></a>
 
-下面是 `CATALOG_DECISION` 的最小 schema-complete illustrative fixture。重复数字形式的 hashes 与前序 locators 是 schema placeholders；对应 artifact 不要求存在，也没有在当前仓库被 verifier 解析。另一个 `lexiflow.gate-plan.v1` 代码块的 `content_fingerprint` 和显示的 trusted issuer packet 对象 hash 在文档审阅时根据各自显示内容实算；本 receipt block 内的重复数字 hash 仍是 placeholder。它不是当前仓库的 PASS 证据。
+## 7. 最小完整不可变收据 JSON 示例
+
+下面是 `CATALOG_DECISION` 的最小结构完整示意测试样例。重复数字形式的哈希与前序定位是结构定义占位符；对应产物不要求存在，也没有在当前仓库被核验器解析。另一个 `lexiflow.gate-plan.v1` 代码块的 `content_fingerprint` 和显示的受信签发者证据包对象哈希在文档审阅时根据各自显示内容实算；本收据块内的重复数字哈希仍是占位符。它不是当前仓库的 PASS 证据。
 
 ```json
 {
@@ -623,9 +651,13 @@ Qoder authority provenance 直接绑定 runner 实际持久化的 `task.json` �
 }
 ```
 
-## 8. Current-input evidence chain 与 hash DAG
+<a id="8-current-input-evidence-chain-与-hash-dag"></a>
 
-### 8.1 Evidence chain
+## 8. 当前输入证据链与哈希 DAG
+
+<a id="81-evidence-chain"></a>
+
+### 8.1 证据链
 
 ```text
 explicit evidence packet + trusted issuer packet + current inputs
@@ -640,13 +672,15 @@ explicit evidence packet + trusted issuer packet + current inputs
                            CATALOG_DECISION
 ```
 
-Review receipt 冻结 validation receipt locator/hash，并把 reviewer 声明的 write-set 与 review plan 对账；no-write 结论还必须重新读取 validation packet 的 changed-file snapshot，对每个 subject file 的 current bytes/state 做验证，因此调用方自报列表或 plan 列表都不能单独建立 independence。Catalog decision 冻结前两份 receipt locator/hash，并再次重验全部前序链中的 validation subject snapshots，再冻结 current task/change/source/registry/policy/dependency 的 canonical locator/hash；同字节 alias 也不是 current input。它还必须重新验证每份前序/依赖 receipt 引用的 trusted issuer packet 与 current authority registry/provenance，而不是信任 receipt 内自报的 issuer 或 semantic PASS 字段。任一前序 receipt 修改、版本改变、canonical locator 漂移、issuer authority 无法验证、subject snapshot 不再 current、required dependency receipt 过期或 review 不独立时，catalog decision 为 FAIL。
+审查收据冻结验证收据定位/哈希，并把审阅者声明的写入集合与审查计划对账；零写入结论还必须重新读取验证证据包的变更文件快照，对每个受验对象文件的当前字节/状态做验证，因此调用方自报列表或计划列表都不能单独建立独立性。目录决策冻结前两份收据定位/哈希，并再次重验全部前序链中的验证受验对象快照，再冻结当前任务/变更/来源/注册表/策略/依赖的规范定位/哈希；同字节别名也不是当前输入。它还必须重新验证每份前序/依赖收据引用的受信签发者证据包与当前权限来源注册表/来源证明，而不是信任收据内自报的签发者或语义 PASS 字段。任一前序收据修改、版本改变、规范定位漂移、签发者权限来源无法验证、受验对象快照不再当前、必需依赖收据过期或审查不独立时，目录决策为 FAIL。
 
-Validation PASS 只证明检查结果，review PASS 只证明独立复核。只有 current-input `CATALOG_DECISION` 可把 catalog task 标为 PASS。用户 Phase Gate approval 是另一类显式证据，Gate 不能生成或推断用户批准。
+验证 PASS 只证明检查结果，审查 PASS 只证明独立复核。只有当前输入 `CATALOG_DECISION` 可把目录任务标为 PASS。用户阶段 Gate 批准是另一类显式证据，Gate 不能生成或推断用户批准。
 
-### 8.2 Artifact manifest hash DAG
+<a id="82-artifact-manifest-hash-dag"></a>
 
-Hash 引用边表示“左侧 artifact 包含右侧 locator/hash”，必须形成 DAG：
+### 8.2 产物清单哈希 DAG
+
+哈希引用边表示“左侧产物包含右侧定位/哈希”，必须形成 DAG：
 
 ```text
 current receipt
@@ -658,133 +692,150 @@ current receipt
        -> their earlier manifests and leaves
 ```
 
-`content_fingerprint` 排除自身；manifest 不列自己或 current receipt；current receipt 不嵌入自身 hash；current receipt 只指向已存在 prior receipts；prior receipts 不反向引用 current receipt；`latest` 等 alias 不参与验收。Self-reference、同 identity 不同 bytes 或任何环均为 `FAIL/hash-graph-invalid`。
+`content_fingerprint` 排除自身；清单不列自己或当前收据；当前收据不嵌入自身哈希；当前收据只指向已存在前序收据；前序收据不反向引用当前收据；`latest` 等别名不参与验收。自引用、同身份不同字节或任何环均为 `FAIL/hash-graph-invalid`。
 
-Manifest 的 `subject:*`、`check:*` 等 artifact role identity 只在该 manifest 的 `run_id` 内唯一；hash-DAG 使用 run namespace 对账，同一 run 的 identity/bytes 冲突仍失败。Receipt、plan、packet 的 schema identity 继续全局对账。Executor 的输入观察记录必须精确包含 `locator`、相等的 `expected_sha256`/`actual_sha256` 与 `status: verified`，它不是引用边；plan 已冻结对应输入边。命令流与日志是 hash-bound 原始字节，不因内容恰好是 JSON 而递归解析。`.json` 原始/辅助证据可以保留 whitespace，但必须严格拒绝 duplicate key 和非有限数字，并继续追踪其中的 locator/hash 引用；正式 receipt、manifest、plan、packet 与 review/catalog evidence 节点仍要求 canonical bytes。
+清单的 `subject:*`、`check:*` 等产物角色身份只在该清单的 `run_id` 内唯一；哈希依赖图使用运行命名空间对账，同一运行的身份/字节冲突仍失败。收据、计划、证据包的结构定义身份继续全局对账。执行器的输入观察记录必须精确包含 `locator`、相等的 `expected_sha256`/`actual_sha256` 与 `status: verified`，它不是引用边；计划已冻结对应输入边。命令流与日志是哈希绑定原始字节，不因内容恰好是 JSON 而递归解析。`.json` 原始/辅助证据可以保留空白字符，但必须严格拒绝重复键和非有限数字，并继续追踪其中的定位/哈希引用；正式收据、清单、计划、证据包与审查/目录证据节点仍要求规范字节。
 
-Runner 的 pre-state 可以用精确的 `{locator, state: absent}` 记录文件在写入前不存在；该记录没有可跟随的 bytes，因此不是 hash 引用边，但承载它的辅助 artifact 仍由父节点绑定。`state: present` 或其他无 `sha256` 的 locator 结构必须 fail closed，防止用状态字段绕过真实 artifact 边。
+运行器的之前状态可以用精确的 `{locator, state: absent}` 记录文件在写入前不存在；该记录没有可跟随的字节，因此不是哈希引用边，但承载它的辅助产物仍由父节点绑定。`state: present` 或其他无 `sha256` 的定位结构必须失败即拒绝，防止用状态字段绕过真实产物边。
 
-## 9. Self-host bootstrap 与正式 receipt 拓扑
+<a id="9-self-host-bootstrap-与正式-receipt-拓扑"></a>
 
-### 9.1 Bootstrap provenance 三规则
+## 9. 自举引导与正式收据拓扑
 
-1. 原 bootstrap artifact 保持原样；后续证据只保存 locator、原始 bytes hash 与真实 observed time；
-2. bootstrap evidence 永远不能被回填、改写或升级为 catalog PASS，也不能伪造历史 READY 或早于控制面建立的 Gate time；
-3. 每个对应 task 必须针对 current inputs 按正式依赖拓扑重新取得 validation、independent review 与 catalog decision，才能成为 catalog PASS。
+<a id="91-bootstrap-provenance-三规则"></a>
 
-普通 dispatch 的绝对规则是：每个 hard dependency 必须在 dispatch 前具有精确 task/change version、`required_result=PASS` 和 current-input catalog receipt；contract dependency 必须解析到声明 producer/version 的 current immutable artifact。唯一例外是一次、边界固定的 Gate self-host bootstrap variance：它只覆盖建立首个控制面所必需的 `QLT-0001` 至 `QLT-0014` 中实际需要 bootstrap 的 runs，统一登记在 [`g1-bootstrap-variance`](../reviews/g1-bootstrap-variance.md)，只产生 non-READY provenance。该例外不是 PASS、不满足 dependency，也不扩展到业务任务；`QLT-0013` 首次可用后立即关闭，后续不得复用或创建第二个同类例外。
+### 9.1 引导来源证明的三项规则
 
-本文不定义 bootstrap migration command、自动导入或 backfill 实现。
+1. 原引导产物保持原样；后续证据只保存定位、原始字节哈希与真实观察到的时间；
+2. 引导证据永远不能被回填、改写或升级为目录 PASS，也不能伪造历史 READY 或早于控制面建立的 Gate 时间；
+3. 每个对应任务必须针对当前输入按正式依赖拓扑重新取得验证、独立审阅与目录决策，才能成为目录 PASS。
 
-### 9.1.1 G1 current-input activation profile
+普通派发的绝对规则是：每个硬依赖必须在派发前具有精确任务/变更版本、`required_result=PASS` 和当前输入目录收据；合同依赖必须解析到声明生产者/版本的当前不可变产物。唯一例外是一次、边界固定的 Gate 自举引导差异：它只覆盖建立首个控制面所必需的 `QLT-0001` 至 `QLT-0014` 中实际需要引导的运行，只产生 non-READY 来源证明；偏差绑定在原始不可变运行证据中，不另建历史文档。该例外不是 PASS、不满足依赖，也不扩展到业务任务；`QLT-0013` 首次可用后立即关闭，后续不得复用或创建第二个同类例外。
 
-首轮集成复核证明，正式 receipt 拓扑仅有依赖图还不够：closure 中每个 Task 还必须具备非空 `validation_command`、`allowed_files`、`forbidden_files` 与 `file_claims`，并在 registry 中拥有唯一、按 catalog 排序的 subject。当前 G1 closure 因此使用 [`harness/g1-task-contract-profiles.yaml`](../../harness/g1-task-contract-profiles.yaml) 激活 21 个原文档型 Task；原先已有专用实现测试的 Task 保留专用命令。
+本文不定义引导迁移命令、自动导入或补录实现。
 
-Profile 只声明稳定 Task、owner、单一 evidence-file claim、current required inputs 和封闭的语义断言。命令由 [`scripts/gates/registry_profiles.py`](../../scripts/gates/registry_profiles.py) 从 Task id 派生，调用方不能选择 argv。最终 [`harness/gate-check-registry.yaml`](../../harness/gate-check-registry.yaml) 仍是版本化、hash-bound 的运行输入；`--check` 必须证明它与 catalog/profile 的确定性投影完全相同。新增这些执行元数据不改变既有 deliverable、acceptance criteria、dependency result 或 produced contract，因此保持既有 task/change version；若未来改变任何上述业务合同，仍须正常升版并同步全部精确 pins。
+<a id="911-g1-current-input-activation-profile"></a>
 
-Planner 消费的 raw `task.json` 必须精确遵守 Qoder runner 实际落盘合同：14 个 caller handoff 字段、runner 绑定身份、`parent_session_id` 与 `permission_mode` 为必需字段；只允许 runner 已定义的非空 `title` 和值为 `true` 的 `_resume_mode` 作为可选字段。Runner 使用稳定 pretty JSON 持久化 raw task/completion；它们以原始 bytes hash 绑定并做 duplicate-key/字段语义检查，但不伪装成 canonical JSON。Evidence packet、plan 与 receipt 自身仍必须 canonical。`owner`、`discovered_from` 和 `file_claims` 只从 canonical current catalog 取得，并分别与 owner resolution、packet claims 和 registry 对账；它们不得由 caller 塞入 raw task。这样 initial/resume 的 hermetic fixture 与真实 runner artifact 使用同一形状和序列化，避免测试专用 bytes 掩盖正式激活失败。
+### 9.1.1 G1 当前输入激活配置档案
 
-文档型检查不能只以文件存在判 `PASS`。[`scripts/gates/task_contracts.py`](../../scripts/gates/task_contracts.py) 对每个 required input 做安全读取与 SHA-256 记录，再执行 profile 中的稳定语义断言。缺少当前输入或 profile 非法为 `FAIL`；语义断言不满足为 `BLOCKED`。`LF-TSK-ARCH-0008` 还要求决策包出现精确 `G1 user decision: APPROVED` 标记；在用户明确批准前，它必须保持 `BLOCKED`。
+首轮集成复核证明，正式收据拓扑仅有依赖图还不够：闭包中每个任务还必须具备非空 `validation_command`、`allowed_files`、`forbidden_files` 与 `file_claims`，并在注册表中拥有唯一、按目录排序的受验对象。当前 G1 闭包因此使用 [`harness/g1-task-contract-profiles.yaml`](../../harness/g1-task-contract-profiles.yaml) 激活 21 个原文档型任务；原先已有专用实现测试的任务保留专用命令。
 
-每个激活 Task 的 changed-file scope 是 owner 专属的 `tmp/quality/task-evidence/<DOMAIN>/<task-id>/result.json`。这些 ignored 文件只承载本次正式验证 attestation；真实设计/代码输入由 frozen plan 的 `consumed_inputs` 绑定。这样既不把历史文档伪装成本次写入，也允许当前 artifact 漂移使验证失效。
+配置档案只声明稳定任务、负责人、单一证据文件声明、当前必需输入和封闭的语义断言。命令由 [`scripts/gates/registry_profiles.py`](../../scripts/gates/registry_profiles.py) 从任务 id 派生，调用方不能选择 argv。最终 [`harness/gate-check-registry.yaml`](../../harness/gate-check-registry.yaml) 仍是版本化、哈希绑定的运行输入；`--check` 必须证明它与目录/配置档案的确定性投影完全相同。新增这些执行元数据不改变既有交付物、验收条件、依赖结果或产出的合同，因此保持既有任务/变更版本；若未来改变任何上述业务合同，仍须正常升版并同步全部精确版本固定项。
 
-### 9.2 正式 current-input 拓扑
+规划器消费的原始 `task.json` 必须精确遵守 Qoder 运行器实际落盘合同：14 个调用者交接字段、运行器绑定身份、`parent_session_id` 与 `permission_mode` 为必需字段；只允许运行器已定义的非空 `title` 和值为 `true` 的 `_resume_mode` 作为可选字段。运行器使用稳定格式化 JSON 持久化原始任务/完成记录；它们以原始字节哈希绑定并做 duplicate-key/字段语义检查，但不伪装成规范 JSON。证据包、计划与收据自身仍必须规范。`owner`、`discovered_from` 和 `file_claims` 只从规范当前目录取得，并分别与负责人解析、证据包声明和注册表对账；它们不得由调用者塞入原始任务。这样初始/resume 的封闭隔离测试样例与真实运行器产物使用同一形状和序列化，避免测试专用字节掩盖正式激活失败。
 
-控制面首轮实现完成后，正式 receipts 必须从 `QLT-0001` 开始按以下 DAG 签发；“并列”表示 dependency 已满足后可独立验证，不表示突破单 Qoder run 限制：
+文档型检查不能只以文件存在判 `PASS`。[`scripts/gates/task_contracts.py`](../../scripts/gates/task_contracts.py) 对每个必需输入做安全读取与 SHA-256 记录，再执行配置档案中的稳定语义断言。缺少当前输入或配置档案非法为 `FAIL`；语义断言不满足为 `BLOCKED`。`LF-TSK-ARCH-0008` 还要求决策包出现精确 `G1 user decision: APPROVED` 标记；在用户明确批准前，它必须保持 `BLOCKED`。
 
-```mermaid
-flowchart TD
-    Q1[QLT-0001 catalog contract] -->|hard| Q2[QLT-0002 planning validator]
-    Q1 -->|hard| Q3[QLT-0003 Gate design contract]
-    Q1 -->|hard| Q6[QLT-0006 v2 runner]
-    Q1 -->|hard| Q7[QLT-0007 explicit evidence materializer]
-    Q6 -->|hard| Q7
-    Q1 -->|hard| Q14[QLT-0014 trusted issuer materializer]
-    Q6 -->|hard| Q14
-    Q2 -->|hard| Q4[QLT-0004 traceability]
-    Q2 -->|hard| Q5[QLT-0005 dispatch preflight]
-    Q2 -->|hard| Q8[QLT-0008 planner + registry]
-    Q3 -->|hard| Q8
-    Q7 -->|contract| Q8
-    Q14 -->|contract| Q8
-    Q8 -->|contract| Q9[QLT-0009 checker outcome]
-    Q7 -->|contract| Q10[QLT-0010 TASK_VALIDATION store + status]
-    Q8 -->|contract| Q10
-    Q9 -->|contract| Q10
-    Q14 -->|contract| Q10
-    Q7 -->|contract| Q11[QLT-0011 independent review]
-    Q10 -->|contract| Q11
-    Q14 -->|contract| Q11
-    Q10 -->|contract| Q12[QLT-0012 hash DAG verifier]
-    Q11 -->|contract| Q12
-    Q4 -->|hard| Q13[QLT-0013 catalog closure]
-    Q7 -->|contract| Q13
-    Q8 -->|contract| Q13
-    Q10 -->|contract| Q13
-    Q11 -->|contract| Q13
-    Q12 -->|contract| Q13
-    Q14 -->|contract| Q13
-    A7[ARCH-0007] -->|existing hard| A8[ARCH-0008 G1 integration and user decision]
-    Q3 -->|existing hard| A8
-    Q5 -->|existing hard| A8
-    Q6 -->|existing hard| A8
-    O1[OPS-0001] -->|existing hard| A8
-    Q13 -->|contract| A8
-```
+每个激活任务的变更文件范围是负责人专属的 `tmp/quality/task-evidence/<DOMAIN>/<task-id>/result.json`。这些忽略的文件只承载本次正式验证证明；真实设计/代码输入由冻结计划的 `consumed_inputs` 绑定。这样既不把历史文档伪装成本次写入，也允许当前产物漂移使验证失效。
 
-`QLT-0002`、`QLT-0003`、`QLT-0006@2/2.0.0` 在 `QLT-0001` PASS 后可并列验证；QLT-0007 和 QLT-0014 分别 hard-consume QLT-0001/0006，独立产出 explicit evidence packet 与 trusted issuer packet contracts。QLT-0004/0005 从 QLT-0002 分支。QLT-0013 不直接消费 raw QLT-0009 checker outcome；它消费 QLT-0010 已封装的 validation receipt，避免跨层旁路。
+<a id="92-正式-current-input-拓扑"></a>
 
-`ARCH-0008` 保留现有五个 direct hard dependencies：`ARCH-0007`、`QLT-0003`、`QLT-0005`、`QLT-0006@2/2.0.0`、`OPS-0001@2/1.1.0`，并新增对 `QLT-0013` produced contract 的 contract edge。其他 G1 tasks 继续通过这五个 exits 的 hard closure 进入 ARCH-0008。G1 evidence integration、review 和用户决定仍由 ARCH-0008 拥有；QLT-0013 只产出 catalog closure contract，不判断或请求用户批准。
+### 9.2 正式当前输入拓扑
 
-当前 catalog 的 current execution evidence 迁移为 `QLT-0003/0006/0008/0010/0011/0013@3/2.1.0`、`QLT-0009/0012@3/1.2.0`、`QLT-0007@2/1.1.0` 和 `QLT-0014@2/2.0.0`。`trusted-gate-issuer-packet` 语义合同升为 `2.0.0`，packet 结构 schema 仍为 v1。`ARCH-0008` 升为 `4/2.1.0`，所有 exact dependency 与 phase-entry pins 已同步迁移。Canonical publisher 和同客户端不同 verified 实例的边界见 [`current-execution-evidence.md`](current-execution-evidence.md)；旧 receipt 不得推断 current。
+控制面首轮实现完成后，正式收据必须从 `QLT-0001` 开始按以下 DAG 签发；“并列”表示依赖已满足后可独立验证，不表示突破单 Qoder 运行限制：
 
-正式 planning 采用此设计时，预期 inventory 为 113 tasks、256 edges（231 hard、24 contract、1 soft）、13 produced contracts，ARCH-0008 closure 为 30 tasks/60 edges（41 hard、19 contract）。这里是待落 catalog 的一致性目标，不表示 planning 已修改。
+精确依赖由 [任务目录](../../planning/workstreams.yaml) 维护，下表保留本设计的验收顺序；不再另画与目录重复的依赖图。
+
+| 任务 | 硬依赖来源 | 合同依赖来源 |
+|---|---|---|
+| `QLT-0001` | 无 | 无 |
+| `QLT-0002` | `QLT-0001` | 无 |
+| `QLT-0003` | `QLT-0001` | 无 |
+| `QLT-0006` | `QLT-0001` | 无 |
+| `QLT-0007` | `QLT-0001`、`QLT-0006` | 无 |
+| `QLT-0014` | `QLT-0001`、`QLT-0006` | 无 |
+| `QLT-0004` | `QLT-0002` | 无 |
+| `QLT-0005` | `QLT-0002` | 无 |
+| `QLT-0008` | `QLT-0002`、`QLT-0003` | `QLT-0007`、`QLT-0014` |
+| `QLT-0009` | 无 | `QLT-0008` |
+| `QLT-0010` | 无 | `QLT-0007`、`QLT-0008`、`QLT-0009`、`QLT-0014` |
+| `QLT-0011` | 无 | `QLT-0007`、`QLT-0010`、`QLT-0014` |
+| `QLT-0012` | 无 | `QLT-0010`、`QLT-0011` |
+| `QLT-0013` | `QLT-0004` | `QLT-0007`、`QLT-0008`、`QLT-0010`、`QLT-0011`、`QLT-0012`、`QLT-0014` |
+| `ARCH-0007` | 无 | 无 |
+| `ARCH-0008` | `ARCH-0007`、`QLT-0003`、`QLT-0005`、`QLT-0006`、`OPS-0001` | `QLT-0013` |
+| `OPS-0001` | 无 | 无 |
+
+`QLT-0002`、`QLT-0003`、`QLT-0006@2/2.0.0` 在 `QLT-0001` PASS 后可并列验证；QLT-0007 和 QLT-0014 分别通过硬依赖消费 QLT-0001/0006，独立产出显式证据包与受信签发者证据包合同。QLT-0004/0005 从 QLT-0002 分支。QLT-0013 不直接消费原始 QLT-0009 检查器结果；它消费 QLT-0010 已封装的验证收据，避免跨层旁路。
+
+`ARCH-0008` 保留现有五个直接硬依赖：`ARCH-0007`、`QLT-0003`、`QLT-0005`、`QLT-0006@2/2.0.0`、`OPS-0001@2/1.1.0`，并新增对 `QLT-0013` 产出的合同的合同边。其他 G1 任务继续通过这五个出口的硬依赖闭包进入 ARCH-0008。G1 证据集成、审查和用户决定仍由 ARCH-0008 拥有；QLT-0013 只产出目录闭包合同，不判断或请求用户批准。
+
+任务及合同版本以当前目录和注册表为准；本页不保留版本迁移流水账。规范产物与签发身份边界见下节，旧收据不得证明当前输入。
+
+正式规划采用此设计时，预期清单为 113 任务、256 边（231 硬依赖、24 合同、1 软依赖）、13 产出的合同，ARCH-0008 闭包为 30 任务/60 边（41 硬依赖、19 合同）。这里是待落目录的一致性目标，不表示规划已修改。
 
 ## 10. 方案比较与推荐
 
-### 方案 A：纯 compiler + `run --mode` + 显式 registry + immutable chain
+<a id="方案-a纯-compiler--run---mode--显式-registry--immutable-chain"></a>
 
-`plan` 零副作用；`run --mode` 从 flags 或受信 launcher 的单值环境绑定获得两个 packet locator，复用 compiler、持久化本次实际 plan、向 disk 和调用方 flush start event；TASK_VALIDATION 再执行 fixed argv，review 与 catalog decision 只消费前序 receipt/evidence 并追加新 receipt。它兼容现有命令文本，接口窄且可复现。
+### 方案 A：纯编译器 + `run --mode` + 显式注册表 + 不可变链
 
-### 方案 B：持久化 plan service + reusable plan ID
+`plan` 零副作用；`run --mode` 从参数或受信启动器的单值环境绑定获得两个证据包定位，复用编译器、持久化本次实际计划、向磁盘和调用方刷新 start 事件；TASK_VALIDATION 再执行固定参数序列，审查与目录决策只消费前序收据/证据并追加新收据。它兼容现有命令文本，接口窄且可复现。
 
-Plan service 引入额外生命周期、过期、并发和权限语义，并混淆 content identity 与 execution identity，不适合当前 45 分钟设计任务。
+<a id="方案-b持久化-plan-service--reusable-plan-id"></a>
 
-### 方案 C：直接执行 caller validation string
+### 方案 B：持久化计划服务 + 可复用计划 ID
 
-实现短，但不能证明 argv 与 registry 一致，并允许任意 command text 进入执行路径，不满足安全与审计要求。
+计划服务引入额外生命周期、过期、并发和权限语义，并混淆内容身份与执行身份，不符合当前窄接口与确定性目标。
 
-推荐方案 A。它保留 `plan/run/status`、`run --mode incremental|full`、显式 registry、三态、不可覆盖 receipt 和 current-input chain，并把实现分到明确依赖的 JIT tasks。
+<a id="方案-c直接执行-caller-validation-string"></a>
 
-## 11. 后续 JIT 原子实现任务候选
+### 方案 C：直接执行调用者验证字符串
 
-以下是已激活 implementation ownership map。每项保持稳定 task/change version、20–90 分钟估算、单 owner/outcome、file claims、1–5 条验收和精确 dependencies。
+实现短，但不能证明 argv 与注册表一致，并允许任意命令文本进入执行路径，不满足安全与审计要求。
 
-| 候选 | 单一 outcome | 建议 blocking dependencies | 核心验收 |
-|---|---|---|---|
-| `LF-TSK-QLT-0007` explicit evidence packet materializer | 由 Main Agent 显式核对六字段并绑定 raw task/completion/output/diff/tests hashes | hard `QLT-0001`, hard `QLT-0006@2/2.0.0` | 禁止 free-text inference；packet fields/hash/subject identity 齐全；不建立 issuer 信任 |
-| `LF-TSK-QLT-0014` trusted issuer packet materializer | 将 Qoder、Codex、人工或 CI actor 绑定到可验证 provenance，生成分离 issuer packet | hard `QLT-0001`, hard `QLT-0006@2/2.0.0` | 调用者自报 actor/role 不能建立信任；packet authorization/identity/hash 齐全；伪造身份 FAIL |
-| `LF-TSK-QLT-0008@4` planner + registry | 纯 compiler 冻结 QLT-0007/0014 packets、canonical scope/reconciliation/fingerprint、execution layer 与 declared-command/fixed-argv registry | hard `QLT-0002`, hard `QLT-0003@3`, contracts `QLT-0007`, `QLT-0014` | `plan` 零写入；TASK_VALIDATION 选择 checks，review/catalog 零 checks；相同输入 fingerprint 相同；未知、漂移或 kind/layer mismatch FAIL |
-| `LF-TSK-QLT-0009` checker outcome | fixed argv execution、typed outcome adapter 与三态聚合 | contract `QLT-0008` | required skip/not-run/empty 非 PASS；process fact 不冒充断言；聚合矩阵通过 |
-| `LF-TSK-QLT-0010@4` TASK_VALIDATION store/status | stable kind-handler/store、actual-plan persistence、pre-check disk/caller 双 flush、validation receipt、execution-layer guard 与 read-only status | contracts `QLT-0007`, `QLT-0008@3`, `QLT-0009@2`, `QLT-0014` | 调用方 checker 前收到 run_id/event locator；任一 flush 失败不启动 checker；只有 validation route 可调用 executor；kind/layer mismatch FAIL |
-| `LF-TSK-QLT-0011@4` independent review | 串行安装唯一 CLI review route，以零-check evidence-consumption plan 发布不可覆盖 review receipt | contracts `QLT-0007`, `QLT-0010@3`, `QLT-0014` | producer 自审、subject hash 漂移或非空 delivery checks FAIL；review 不回写 subject且不重跑交付命令 |
-| `LF-TSK-QLT-0012` hash DAG verifier | 只验证 plan/receipt/manifest/prior-receipt hash graph | contracts `QLT-0010`, `QLT-0011` | self-edge、back-edge、alias 与 cycle fixtures FAIL；合法 DAG PASS |
-| `LF-TSK-QLT-0013@4` catalog closure | 串行安装唯一 CLI catalog route，以零-check evidence-consumption plan执行 acceptance registry、current-input/dependency/review reconciliation并发布 decision receipt | hard `QLT-0004`; contracts `QLT-0007`, `QLT-0008@3`, `QLT-0010@3`, `QLT-0011@3`, `QLT-0012@3`, `QLT-0014` | 不调用 delivery executor；核对 acceptance registry、issuer、freshness 与完整 receipt DAG；只有完整 current chain 可 catalog PASS |
+推荐方案 A。它保留 `plan/run/status`、`run --mode incremental|full`、显式注册表、三态、不可覆盖收据和当前输入链，并把实现分到明确依赖的 JIT 任务。
 
-Codex work-package per-Task projection 不新增或合并 catalog outcome：`QLT-0006` 拥有 caller/runner identity 分层和版本化 persisted projection contract；`QLT-0007` 拥有 `qoder|codex` generic packet identity reconciliation；`QLT-0008` 拥有按 client 分支的纯 current-catalog compile；`QLT-0011` 消费由不同 actor 签发的零写入 Codex review plan。四项各自保留 outcome evidence，工作包的一个 `run_id` 只表达执行实例，不替代四个 Task identity。
+## 11. 实现归属与直接证明
 
-Hash verification、catalog closure 和 ARCH-0008 G1 integration 分属 QLT-0012、QLT-0013 与既有 ARCH-0008，不能合并为跨 outcome task。若还需要 crash recovery、并发锁、symlink/path hardening、privacy/redaction 或远端 evidence storage，应另建 JIT tasks，不能塞入 `QLT-0003@1` 或上述原子 outcome。
+任务、估时、版本和精确依赖只由[目录](../../planning/workstreams.yaml)维护；跨文档导航见[任务证据索引](../reviews/g1-task-evidence-map.md)。本表仅解释控制面各组件的结果与拒绝条件，不保存旧任务草案。
 
-## 12. Review coverage checklist（非 catalog acceptance）
+| 实现责任 | 单一结果 | 核心验收 |
+|---|---|---|
+| `LF-TSK-QLT-0007` 显式证据包物化器 | 由主代理显式核对六字段并绑定原始任务/完成记录/输出/差异/测试哈希 | 禁止自由文本推断；证据包字段/哈希/受验对象身份齐全；不建立签发者信任 |
+| `LF-TSK-QLT-0014` 受信签发者证据包物化器 | 将 Qoder、Codex、人工或 CI 执行者绑定到可验证来源证明，生成分离签发者证据包 | 调用者自报执行者/角色不能建立信任；证据包授权/身份/哈希齐全；伪造身份 FAIL |
+| `LF-TSK-QLT-0008` 规划器 + 注册表 | 纯编译器冻结 QLT-0007/0014 证据包、规范范围/对账/指纹、执行层次与 declared-command/固定参数序列注册表 | `plan` 零写入；TASK_VALIDATION 选择检查，审查/目录零检查；相同输入指纹相同；未知、漂移或种类/层次不匹配 FAIL |
+| `LF-TSK-QLT-0009` 检查器结果 | 固定参数序列执行、类型化结果适配器与三态聚合 | 必需跳过/未运行/空非 PASS；进程事实不冒充断言；聚合矩阵通过 |
+| `LF-TSK-QLT-0010` TASK_VALIDATION 存储/状态 | 稳定种类处理器/存储、实际计划持久化、预检查磁盘/调用者双刷新、验证收据、执行层护栏与只读状态 | 调用方检查器前收到 run_id/事件定位；任一刷新失败不启动检查器；只有验证路由可调用执行器；种类/层次不匹配 FAIL |
+| `LF-TSK-QLT-0011` 独立审阅 | 串行安装唯一 CLI 审查路由，以零-check 证据消费计划发布不可覆盖审查收据 | 生产者自审、受验对象哈希漂移或非空交付检查 FAIL；审查不回写受验对象且不重跑交付命令 |
+| `LF-TSK-QLT-0012` 哈希 DAG 核验器 | 只验证计划/收据/清单/prior-receipt 哈希图 | 自环、回边、别名与环测试样例 FAIL；合法 DAG PASS |
+| `LF-TSK-QLT-0013` 目录闭包 | 串行安装唯一 CLI 目录路由，以零-check 证据消费计划执行验收注册表、当前输入/依赖/审查对账并发布决定收据 | 不调用交付执行器；核对验收注册表、签发者、新鲜度与完整收据 DAG；只有完整当前链可目录 PASS |
 
-Catalog 对 `LF-TSK-QLT-0003@4` 只有一个 acceptance criterion，覆盖 frozen plan、run/status/receipt 以及唯一 delivery-execution layer。以下五项帮助 reviewer 覆盖该 criterion，不新增 acceptance criteria：
+Codex 工作包逐任务投影不新增或合并目录结果：`QLT-0006` 拥有调用者/运行器身份分层和版本化已持久化的投影合同；`QLT-0007` 拥有 `qoder|codex` 通用证据包身份对账；`QLT-0008` 拥有按客户端分支的纯当前目录编译；`QLT-0011` 消费由不同执行者签发的零写入 Codex 审查计划。四项各自保留结果证据，工作包的一个 `run_id` 只表达执行实例，不替代四个任务身份。
 
-1. CLI 保留 `run --mode incremental|full`；flags 或受信 launcher 的两个单值环境绑定显式提供 packet paths，缺失/冲突 context 负例 FAIL；`plan` 零副作用；run 复用纯 compiler、持久化实际 plan，并在 checker 前向 disk 与调用方双 flush `START` event。
-2. Plan/receipt JSON fixtures 覆盖 V1 必需字段；fingerprint 可重算；raw caller scope、normalized arrays、canonical claims 与三方 reconciliation 无冲突；真实 planning command/runtime path 正确。
-3. QLT-0006 不被描述为六字段来源；QLT-0007 由 Main Agent 显式核对六字段并绑定 raw task/completion/output/diff/tests hashes，禁止从 free text 猜测；QLT-0014 独立验证 issuer trust；issuer/actor/process identity 内部一致。
-4. 三态、kind completeness、review independence、current-input chain、不可覆盖 receipt 与无环 hash graph 可从合同推导；bootstrap 只有一次 non-READY variance，绝不 backfill。
-5. 已激活任务的 hard/contract edges 与 direct-consumption DAG 一致；ARCH-0008@3/2.0.0 保留五个 hard dependencies、消费 QLT-0013@2 contract，并继续独占 G1 integration/review/user decision；所有 task consumers 与 phase-entry exit pins 同步升级。
+哈希核验、目录闭包和 ARCH-0008 G1 集成分属 QLT-0012、QLT-0013 与既有 ARCH-0008，不能合并为跨结果任务。若还需要崩溃恢复、并发锁、符号链接/路径加固、隐私/脱敏或远端证据存储，应另建 JIT 任务，不能塞入 `QLT-0003@1` 或上述原子结果。
 
-本文通过文档审阅只能证明设计合同满足 `QLT-0003@2` 的 declared outcome。CLI、tests、真实 receipts、planning DAG 变更、各 catalog task current-input PASS、`LF-TSK-ARCH-0008` G1 review 与用户 Phase 1 决定仍需独立证据。
+<a id="12-review-coverage-checklist非-catalog-acceptance"></a>
 
-当前 runtime-bound materialization 与 actor/host-session 边界由 [connect-runtime-bound-gate-evidence](../../openspec/changes/connect-runtime-bound-gate-evidence/design.md) 定义；trusted issuer 的语义 contract 当前为 3.0.0，packet 结构 schema 仍为 v1。前置验收与用户决定的执行顺序见 [Phase 1 acceptance order](phase-1-acceptance-order.md)。
+## 12. 审查覆盖检查清单（非目录验收）
+
+目录对 `LF-TSK-QLT-0003@4` 只有一个验收条件，覆盖冻结计划、运行/状态/收据以及唯一交付执行层次。以下五项帮助审阅者覆盖该条件，不新增验收条件：
+
+1. CLI 保留 `run --mode incremental|full`；参数或受信启动器的两个单值环境绑定显式提供证据包路径，缺失/冲突上下文负例 FAIL；`plan` 零副作用；运行复用纯编译器、持久化实际计划，并在检查器前向磁盘与调用方双刷新 `START` 事件。
+2. 计划/收据 JSON 测试样例覆盖 V1 必需字段；指纹可重算；原始调用者范围、规范化的数组、规范声明与三方对账无冲突；真实规划命令/运行时路径正确。
+3. QLT-0006 不被描述为六字段来源；QLT-0007 由主代理显式核对六字段并绑定原始任务/完成记录/输出/差异/测试哈希，禁止从自由文本猜测；QLT-0014 独立验证签发者信任；签发者/执行者/进程身份内部一致。
+4. 三态、种类完整性、审查独立性、当前输入链、不可覆盖收据与无环哈希图可从合同推导；引导只有一次 non-READY 差异，绝不补录。
+5. 已激活任务的硬性/合同边与当前目录一致；ARCH-0008 独占 G1 集成、审查与用户决定。修改任务版本时，相关消费方与阶段入口/退出绑定同步更新。
+
+文档审阅只能证明当前设计合同满足声明的要求。CLI、测试、真实收据、规划 DAG 变更、各目录任务当前输入 PASS、`LF-TSK-ARCH-0008` G1 审查与用户阶段 1 决定仍需独立证据。
+
+运行时绑定与签发边界见下节；语义版本以目录合同为准，冻结证据包结构仍为 v1。阶段审批按[手册步骤 6](validation/06-phase1-decision.md)执行。
+
+
+## 工作包规范产物与运行时签发边界
+
+<a id="current-execution-evidence"></a>
+
+工作包结果结构以 [共享策略](../../harness/agent-policy.manifest.yaml) 为准：调用者提供稳定任务/变更版本、范围、验收与失败策略；运行器绑定真实父级、会话、客户端和执行者，生成唯一运行 ID。缺运行时会话不得用随机 UUID 替代；每任务保留独立投影、六字段结果、完成记录与信号，聚合完成记录只索引精确逐任务产物和哈希。
+
+规范发布器只发布显式结构化数据，不运行子进程、不解析日志推断成功、不签发正式收据、不回退旧布局。发布器校验结构与绑定，不认证宿主；宿主核验器才是身份认证边界。
+
+`verify` 复核逐任务键集合、固定定位、当前目录投影、六字段结果、外部证据哈希/字节及聚合状态；PASS 只证明规范产物完整性，不等于正式任务验收。唯一操作命令见[手册步骤 4](validation/04-harness-and-dispatch.md)。
+
+`client` 是工具类型，不是唯一执行者。同客户端的不同实例须具有不同且经宿主认证的执行者/代理、运行/签发者实例，真实协作会话可以共享。独立审查排除生产者和验证签发者，保持零受验对象写入；同执行者/代理/运行/实例、伪造宿主、重放身份和越权签发继续拒绝。
+
+<a id="codex-issuer-调用边界"></a>
+
+`IssuerPacketMaterializer(..., trusted_codex_context=...)` 要求运行器提供精确的 `actor_id`、`session_id`、`parent_session_id`、`client` 四字段映射。从真实运行时绑定派生时，`actor_id` 对应 `identity.agent_id`，其他三字段取实际值；不能直接传入含 `run_id`、`agent_id`、`parent_client` 的完整绑定。`_derive_codex_expected` 比较完整映射，额外字段会触发 `identity-drift`。证明也必须使用同一实际宿主身份，不能用随机会话代替。
+
+源完整性 PASS 不能替代正式 Gate 收据；源作者不能签发自己的任务验证或独立审阅。

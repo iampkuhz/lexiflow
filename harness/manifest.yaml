@@ -2,7 +2,7 @@ schemaVersion: 1
 project:
   name: lexiflow
   type: modular-monolith-product
-  description: Context-aware, personalized English annotations for streaming content.
+  description: 面向流媒体内容的个性化英文语境提示。
 
 architecture:
   deployment_units: [api, worker]
@@ -18,6 +18,8 @@ agent_contract:
   gate_check_registry: harness/gate-check-registry.yaml
   g1_task_contract_profiles: harness/g1-task-contract-profiles.yaml
   java_product: harness/java-product.manifest.yaml
+  documentation_policy: harness/documentation-policy.yaml
+  policy_projections: harness/policy-projections.yaml
   qoder_harness_schema: harness/qoder-harness.schema.json
   qoder_result_schema: harness/qoder-result.schema.json
   validation_mode: explicit
@@ -27,6 +29,9 @@ agent_contract:
     qoder_agents: .qoder/agents/
 
 public_executables:
+  docs_check: python3 -m scripts.harness.docs_check
+  policy_projection: python3 -m scripts.harness.policy_projection
+  local_skills: python3 -m scripts.harness.local_skills
   quality_gate: python3 scripts/gates/cli.py
   java_gradle: python3 scripts/toolchain/java_gradle.py
   task_contract_check: python3 -m scripts.gates.task_contracts --task-id LF-TSK-...
@@ -47,28 +52,17 @@ docs:
   - docs/README.md
   - docs/product/product-brief.md
   - docs/architecture/phase-1.md
-  - docs/architecture/phase-1-cross-cutting-contracts.md
+  - docs/architecture/contracts/README.md
   - docs/architecture/decisions.md
   - docs/roadmap/master-plan.md
   - docs/roadmap/phase-1-status.md
   - docs/reviews/phase-1-checklist.md
   - docs/reviews/g1-decision-package.md
-  - docs/reviews/g1-bootstrap-variance.md
   - docs/reviews/g1-task-evidence-map.md
-  - docs/reviews/qlt-0002-run-1-review.md
-  - docs/reviews/qlt-0002-rework-1-review.md
-  - docs/reviews/qlt-0002-final-review.md
   - docs/development/gate-control-plane-design.md
-  - docs/reviews/gate-control-plane-design-review.md
-  - docs/reviews/gate-jit-task-draft-review.md
-  - docs/reviews/gate-jit-catalog-activation-review.md
-  - docs/reviews/qlt-0007-implementation-review.md
-  - docs/reviews/qlt-0014-implementation-review.md
   - docs/development/dispatch-preflight-design.md
-  - docs/reviews/dispatch-preflight-design-review.md
-  - docs/acceptance-cases/README.md
   - docs/acceptance-cases/phase-1.md
-  - docs/development/agent-subtasks.md
+  - docs/development/validation/04-harness-and-dispatch.md
   - docs/development/post-approval-toolchain-verification.md
   - docs/references/feipi-session-browser-java.md
   - openspec/specs/product-architecture/spec.md

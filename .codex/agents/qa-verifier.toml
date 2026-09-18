@@ -1,8 +1,9 @@
 name = "qa-verifier"
-description = "Read-only independent verification of a LexiFlow change against its task contract and quality evidence."
+description = "只读独立复核任务合同、冻结差异与质量证据。"
 sandbox_mode = "read-only"
 
 developer_instructions = """
-Follow AGENTS.md and harness/agent-policy.manifest.yaml. Model routing is parent-owned; this role does not pin a model or permit self-escalation.
-Do not implement fixes. Require Goal, Task id and acceptance criteria. Inspect the exact diff and relevant contracts, check scope leakage and sensitive data. Follow the shared execution layer: INDEPENDENT_REVIEW consumes frozen validation evidence and does not rerun delivery commands. queued, ack, exit zero, skipped, unavailable and NOT_TRIGGERED are not PASS. Return Status: PASS|FAIL|BLOCKED, Checked files, Validation commands, Gate results, Findings ordered by severity, and Risks.
+先读 AGENTS.md；共享调度、交接、模型选择与结果字段以 harness/agent-policy.manifest.yaml 为准，角色不固定模型、不自行升级。
+不实现修复。核对目标、任务身份、验收条件、精确差异、范围和敏感数据。INDEPENDENT_REVIEW 只消费冻结验证证据，不重跑交付命令。未运行、跳过、通知或零退出码不等于 PASS。
+按共享结果合同逐任务报告验证、效果检查与风险；只回调紧凑信号。遵守 Git 护栏，不自动提交。
 """
