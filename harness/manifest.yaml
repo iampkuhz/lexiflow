@@ -3,14 +3,17 @@ project:
   name: lexiflow
   type: modular-monolith-product
   description: 面向流媒体内容的个性化英文语境提示。
-
 architecture:
-  deployment_units: [api, worker]
+  deployment_units:
+  - api
+  - worker
   source_of_truth: postgresql
-  rebuildable_state: [redis, browser-cache, projections]
+  rebuildable_state:
+  - redis
+  - browser-cache
+  - projections
   first_client: chrome-extension
   first_content_adapter: youtube
-
 agent_contract:
   policy_manifest: harness/agent-policy.manifest.yaml
   runtime_manifest: harness/agent-runtime.manifest.yaml
@@ -27,7 +30,6 @@ agent_contract:
   platform_entries:
     codex_agents: .codex/agents/
     qoder_agents: .qoder/agents/
-
 public_executables:
   docs_check: python3 -m scripts.harness.docs_check
   policy_projection: python3 -m scripts.harness.policy_projection
@@ -37,7 +39,6 @@ public_executables:
   task_contract_check: python3 -m scripts.gates.task_contracts --task-id LF-TSK-...
   registry_profile_check: python3 -m scripts.gates.registry_profiles --root . --check
   qoder_task: python3 scripts/harness/qoder_task.py
-
 quality:
   delivery_command: python3 scripts/gates/cli.py run --mode incremental
   full_command: python3 scripts/gates/cli.py run --mode full
@@ -46,31 +47,31 @@ quality:
     independent_review: consumes-task-validation-receipt
     catalog_decision: consumes-validation-and-review-receipts
     java_delivery_executor: gradle-java
-  result_values: [PASS, BLOCKED, FAIL]
-
+  result_values:
+  - PASS
+  - BLOCKED
+  - FAIL
 docs:
-  - docs/README.md
-  - docs/product/product-brief.md
-  - docs/architecture/phase-1.md
-  - docs/architecture/contracts/README.md
-  - docs/architecture/decisions.md
-  - docs/roadmap/master-plan.md
-  - docs/roadmap/phase-1-status.md
-  - docs/reviews/phase-1-checklist.md
-  - docs/reviews/g1-decision-package.md
-  - docs/reviews/g1-task-evidence-map.md
-  - docs/development/gate-control-plane-design.md
-  - docs/development/dispatch-preflight-design.md
-  - docs/acceptance-cases/phase-1.md
-  - docs/development/validation/04-harness-and-dispatch.md
-  - docs/development/post-approval-toolchain-verification.md
-  - docs/references/feipi-session-browser-java.md
-  - openspec/specs/product-architecture/spec.md
-  - openspec/specs/agent-execution/spec.md
-
+- docs/README.md
+- docs/product/product-brief.md
+- docs/architecture/overview.md
+- docs/architecture/boundaries.md
+- docs/architecture/flows.md
+- docs/architecture/semantic-contract.md
+- docs/architecture/runtime-safety.md
+- docs/architecture/source-contract.md
+- docs/architecture/decisions.md
+- docs/development/validation.md
+- docs/development/gate-control-plane.md
+- docs/development/dispatch-preflight.md
+- docs/development/toolchain-reproduction.md
+- docs/roadmap/master-plan.md
+- docs/roadmap/phase-1-status.md
+- openspec/specs/product-architecture/spec.md
+- openspec/specs/agent-execution/spec.md
 local_only:
-  - .env
-  - .local/
-  - tmp/
-  - data/
-  - secrets/
+- .env
+- .local/
+- tmp/
+- data/
+- secrets/

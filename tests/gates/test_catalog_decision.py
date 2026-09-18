@@ -66,7 +66,7 @@ class CatalogFixture:
         self.policy = self.write_bytes("harness/agent-policy.manifest.yaml", b"policy: 1\n")
         self.registry = self.write_bytes("harness/gate-check-registry.yaml", b"registry: 1\n")
         self.acceptance = self.write_bytes(
-            "docs/acceptance-cases/phase-1.md",
+            "docs/product/product-brief.md",
             b"# Cases\n\n## LF-CASE-001 - Current\n\n- **Status:** implementation-reviewed\n",
         )
         catalog = {

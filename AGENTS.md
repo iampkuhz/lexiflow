@@ -6,10 +6,11 @@
 
 - 中文沟通；标识符、命令、路径与 API 使用英文。
 - 先搜索定位，只读取必要上下文；不覆盖或回滚他人改动。
-- 不提交密钥、token、真实用户字幕、观看历史、Vocabulary Profile、模型输入输出或本地运行数据。
+- 不提交密钥、token、真实字幕、观看历史、模型输入输出或本地运行数据。
 - 非平凡产品、agent、harness、gate 或跨模块变更先创建或复用 `openspec/changes/<id>/`。
 - 共享规则只在 `AGENTS.md` 与 `harness/` 维护；客户端配置只保留入口。
-- 文档中的 PlantUML 图直接写在 Markdown 的 fenced `plantuml` 代码块中，以该代码块为唯一图源。导出的 `.puml`、brief、SVG/PNG、校验回执与预览均为中间产物，放在 ignored `tmp/` 或 `docs/**/diagrams/` 中，不进入 Git 跟踪；正文不得依赖生成图片或本地中间文件链接。
+- 图源只在 Markdown 的 fenced `plantuml`；先在 ignored `tmp/diagrams/` 校验/预览，再原样复制正文。禁止提交调试产物或由正文链接它们。
+- 文档只留最新版；除非路径和标题均明确为 comparison/diff，禁止用当前、目标、改前/后等作版本对照或写迁移历史；执行状态只在状态页。
 
 ## 架构约束
 
@@ -17,7 +18,7 @@
 - 采用 Modular Monolith；部署可为 `api` 与 `worker` 两个进程，业务边界不得因此拆成微服务。
 - 依赖由组合根指向 application，再指向 domain/ports；domain 不依赖 HTTP、数据库、缓存或具体模型 Provider。
 - 模块不得直接读写其他 Domain 拥有的数据；跨模块只通过公开 contract。
-- Chrome Extension 保持薄，服务端 Vocabulary Profile 是跨设备事实来源。
+- Chrome Extension 保持薄；产品不维护账号、多人档案、学习行为归约或跨设备状态同步。
 - 英文字幕渲染不得等待后端或模型；Rules 决定是否提示，Models 决定语境含义。
 - PostgreSQL 是事实存储；Redis、浏览器缓存和投影均可重建。
 

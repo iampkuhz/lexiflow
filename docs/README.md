@@ -1,18 +1,28 @@
-# 文档阅读路线
+# 1. LexiFlow 文档
 
-术语：MVP 是最小可用产品，ADR 是架构决策记录，Gate 是验收关卡，Harness 是工程约束与执行框架，SLO 是服务目标。命令、路径、API、标识符与状态枚举保留英文。
+文档只维护最新版。图表以正文内 `plantuml` 围栏为唯一图源；草稿、渲染和预览仅在 ignored 的 `tmp/diagrams/` 中存在。
 
-## 按问题找唯一入口
+| 区域 | 责任 | 入口 |
+| --- | --- | --- |
+| 产品 | 目标、范围和第一阶段验收案例 | [产品简介](product/product-brief.md) |
+| 架构 | 边界、流程、合同和决策 | [架构总览](architecture/overview.md) |
+| 开发 | 方针与边界在根页；详细操作在同名子目录 | [开发与校验](development/validation.md) |
+| 路线图 | 长期计划与阶段状态 | [主计划](roadmap/master-plan.md) |
 
-| 问题 | 入口 | 内容边界 |
-|---|---|---|
-| 产品解决什么问题？ | [产品说明](product/product-brief.md) | 目标、用户体验、范围与非目标 |
-| 系统怎么工作？ | [架构入口](architecture/README.md) | 总览、模块、流程、一致性与决策 |
-| 实现必须遵守什么？ | [合同索引](architecture/contracts/README.md) | 专题精确语义与组合验收 |
-| 如何开发和校验？ | [校验手册](development/validation/README.md) | 命令、报告、失败定位；设计原理见[质量分层](development/quality-gate-layering.md) |
-| 什么行为算正确？ | [验收案例](acceptance-cases/phase-1.md) | 稳定案例 ID、前提、动作和预期结果 |
-| 评审什么、证据在哪里？ | [评审材料](reviews/README.md) | 决策包、检查清单、需求与任务映射，不保存历次复审报告 |
-| 后续做什么、现在到哪？ | [长期计划](roadmap/master-plan.md)、[阶段状态](roadmap/phase-1-status.md) | 路线与当前状态分开维护 |
-| 借鉴了哪些外部经验？ | [参考映射](references/feipi-session-browser-java.md) | 可复用的工程边界，不继承外部业务与开发机配置 |
+## 1.1. 架构专题
 
-每个主题只维护最新版；合并后删除旧页，不保留历史目录、日期快照或复审副本。原始运行收据在忽略目录中保持不可变，不随仓库提供，也不自动证明修改后的文档。
+- [模块边界与 Java 模块](architecture/boundaries.md)
+- [字幕提示流程](architecture/flows.md)
+- [语义能力与结果合同](architecture/semantic-contract.md)
+- [运行安全：缓存、信任与可观测性](architecture/runtime-safety.md)
+- [来源适配合同](architecture/source-contract.md)
+- [架构决策](architecture/decisions.md)
+
+## 1.2. 开发专题
+
+开发根页保留确定结论、核心模型和责任边界；仅在确有必要时，命令、字段、示例与诊断才进入同名子目录，拆分数量由主题决定。
+
+- [校验手册](development/validation.md)
+- [Gate 控制面](development/gate-control-plane.md)
+- [派发预检](development/dispatch-preflight.md)
+- [工具链复现](development/toolchain-reproduction.md)

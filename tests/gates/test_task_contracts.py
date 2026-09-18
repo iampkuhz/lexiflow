@@ -18,7 +18,7 @@ REPO = Path(__file__).resolve().parents[2]
 class TaskContractTests(unittest.TestCase):
     def test_current_profile_is_closed_and_has_expected_outcomes(self):
         profiles = load_profiles(REPO)
-        self.assertEqual(len(profiles), 21)
+        self.assertEqual(len(profiles), 20)
         for task_id, profile in profiles.items():
             with self.subTest(task_id=task_id):
                 if profile["runner"] == "external":
@@ -51,10 +51,9 @@ class TaskContractTests(unittest.TestCase):
     def test_merged_contracts_are_bound_inputs(self):
         profiles = load_profiles(REPO)
         required = {
-            "LF-TSK-ARCH-0002": "docs/architecture/modules-and-dependencies.md",
-            "LF-TSK-ARCH-0003": "docs/architecture/modules-and-dependencies.md",
-            "LF-TSK-ARCH-0004": "docs/architecture/caption-and-learning-flows.md",
-            "LF-TSK-ARCH-0005": "docs/architecture/caption-and-learning-flows.md",
+            "LF-TSK-ARCH-0002": "docs/architecture/boundaries.md",
+            "LF-TSK-ARCH-0003": "docs/architecture/boundaries.md",
+            "LF-TSK-ARCH-0004": "docs/architecture/flows.md",
         }
         for task, source in required.items():
             with self.subTest(task=task):
@@ -71,7 +70,7 @@ class TaskContractTests(unittest.TestCase):
                 destination = root / locator
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(REPO / locator, destination)
-            decision = root / "docs/reviews/g1-decision-package.md"
+            decision = root / "docs/roadmap/phase-1-status.md"
             decision.write_text(decision.read_text() + "\nG1 user decision: APPROVED\n")
             result = evaluate_task(root, task_id)
 

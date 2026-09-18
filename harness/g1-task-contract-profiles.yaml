@@ -1,14 +1,14 @@
 schema_version: lexiflow.g1-task-contract-profiles.v1
 owner: LF-WS-QLT
-profile_version: 3
+profile_version: 4
 profiles:
   LF-TSK-ARCH-0001:
     owner: LF-WS-ARCH
     evidence_file: tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0001/result.json
     required_inputs:
     - docs/product/product-brief.md
-    - docs/architecture/phase-1.md
-    - docs/architecture/contracts/architecture-invariants.md
+    - docs/architecture/overview.md
+    - docs/architecture/boundaries.md
     runner: task-contract
     assertions:
     - id: assumptions-and-non-goals-present
@@ -22,9 +22,9 @@ profiles:
     owner: LF-WS-ARCH
     evidence_file: tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0002/result.json
     required_inputs:
-    - docs/architecture/phase-1.md
+    - docs/architecture/overview.md
     - harness/module-boundaries.yaml
-    - docs/architecture/modules-and-dependencies.md
+    - docs/architecture/boundaries.md
     runner: task-contract
     assertions:
     - id: bounded-contexts-have-owners
@@ -38,16 +38,15 @@ profiles:
     owner: LF-WS-ARCH
     evidence_file: tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0003/result.json
     required_inputs:
-    - docs/architecture/phase-1.md
+    - docs/architecture/overview.md
     - harness/module-boundaries.yaml
-    - docs/references/feipi-session-browser-java.md
-    - docs/architecture/modules-and-dependencies.md
+    - docs/architecture/decisions.md
+    - docs/architecture/boundaries.md
     runner: task-contract
     assertions:
-    - id: dependency-graph-acyclic
+    - id: dependency-graph-and-forbidden-edges-defined
       contains_all:
       - 静态依赖方向
-      - feipi-session-browser-java
     - id: forbidden-edges-declared
       contains_all:
       - 禁止
@@ -55,10 +54,9 @@ profiles:
     owner: LF-WS-ARCH
     evidence_file: tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0004/result.json
     required_inputs:
-    - docs/architecture/phase-1.md
-    - docs/reviews/phase-1-checklist.md
-    - docs/architecture/caption-and-learning-flows.md
-    - docs/architecture/phase-1-lifecycle-guarantees.md
+    - docs/architecture/overview.md
+    - docs/architecture/decisions.md
+    - docs/architecture/flows.md
     runner: task-contract
     assertions:
     - id: caption-flow-covers-fast-slow-timeout-cache-and-fallback
@@ -67,43 +65,28 @@ profiles:
       - 快速路径
       - 超时
       - 缓存
-  LF-TSK-ARCH-0005:
-    owner: LF-WS-ARCH
-    evidence_file: tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0005/result.json
-    required_inputs:
-    - docs/architecture/phase-1.md
-    - docs/reviews/phase-1-checklist.md
-    - docs/architecture/caption-and-learning-flows.md
-    - docs/architecture/phase-1-lifecycle-guarantees.md
-    runner: task-contract
-    assertions:
-    - id: learning-flow-covers-idempotency-replay-and-eventual-consistency
-      contains_all:
-      - 幂等
-      - 重放
-      - 最终一致
   LF-TSK-ARCH-0006:
     owner: LF-WS-ARCH
     evidence_file: tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0006/result.json
     required_inputs:
-    - docs/architecture/phase-1.md
-    - docs/reviews/phase-1-checklist.md
-    - docs/architecture/contracts/architecture-invariants.md
-    - docs/architecture/phase-1-lifecycle-guarantees.md
+    - docs/architecture/overview.md
+    - docs/architecture/decisions.md
+    - docs/architecture/boundaries.md
+    - docs/architecture/flows.md
     runner: task-contract
     assertions:
-    - id: sync-async-boundaries-have-latency-timeout-and-degradation-budgets
+    - id: async-boundaries-have-timeout-and-degradation-budgets
       contains_all:
-      - 同步与异步边界
-      - 截止时间
+      - 异步
+      - pending
       - 降级
   LF-TSK-PRD-0001:
     owner: LF-WS-PRD
     evidence_file: tmp/quality/task-evidence/PRD/LF-TSK-PRD-0001/result.json
     required_inputs:
     - docs/product/product-brief.md
-    - docs/architecture/phase-1.md
-    - docs/reviews/phase-1-user-requirement-traceability.md
+    - docs/architecture/overview.md
+    - docs/architecture/decisions.md
     runner: task-contract
     assertions:
     - id: english-first-never-waits-for-backend
@@ -118,7 +101,6 @@ profiles:
     evidence_file: tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0007/result.json
     required_inputs:
     - docs/architecture/decisions.md
-    - docs/reviews/g1-decision-package.md
     runner: task-contract
     assertions:
     - id: material-decisions-compare-options
@@ -132,9 +114,9 @@ profiles:
     owner: LF-WS-SEM
     evidence_file: tmp/quality/task-evidence/SEM/LF-TSK-SEM-0001/result.json
     required_inputs:
-    - docs/architecture/contracts/README.md
+    - docs/architecture/runtime-safety.md
     - openspec/specs/product-architecture/spec.md
-    - docs/architecture/contracts/semantic-capability.md
+    - docs/architecture/semantic-contract.md
     runner: task-contract
     assertions:
     - id: four-semantic-capabilities-are-provider-neutral
@@ -148,9 +130,9 @@ profiles:
     owner: LF-WS-SEM
     evidence_file: tmp/quality/task-evidence/SEM/LF-TSK-SEM-0002/result.json
     required_inputs:
-    - docs/architecture/contracts/README.md
+    - docs/architecture/runtime-safety.md
     - openspec/specs/product-architecture/spec.md
-    - docs/architecture/contracts/semantic-result.md
+    - docs/architecture/semantic-contract.md
     runner: task-contract
     assertions:
     - id: result-timeout-confidence-malformed-refusal-semantics-defined
@@ -163,9 +145,8 @@ profiles:
     owner: LF-WS-PRF
     evidence_file: tmp/quality/task-evidence/PRF/LF-TSK-PRF-0002/result.json
     required_inputs:
-    - docs/architecture/contracts/README.md
-    - docs/reviews/phase-1-checklist.md
-    - docs/architecture/contracts/cache.md
+    - docs/architecture/runtime-safety.md
+    - docs/architecture/decisions.md
     runner: task-contract
     assertions:
     - id: cache-key-version-ttl-invalidation-privacy-defined
@@ -178,10 +159,8 @@ profiles:
     owner: LF-WS-SEC
     evidence_file: tmp/quality/task-evidence/SEC/LF-TSK-SEC-0001/result.json
     required_inputs:
-    - docs/architecture/contracts/README.md
+    - docs/architecture/runtime-safety.md
     - openspec/specs/product-architecture/spec.md
-    - docs/architecture/contracts/trust-boundaries.md
-    - docs/architecture/contracts/observability.md
     runner: task-contract
     assertions:
     - id: trust-boundaries-and-abuse-cases-defined
@@ -195,23 +174,22 @@ profiles:
     owner: LF-WS-OBS
     evidence_file: tmp/quality/task-evidence/OBS/LF-TSK-OBS-0001/result.json
     required_inputs:
-    - docs/architecture/contracts/README.md
-    - docs/reviews/phase-1-checklist.md
-    - docs/architecture/contracts/observability.md
+    - docs/architecture/runtime-safety.md
+    - docs/architecture/decisions.md
     runner: task-contract
     assertions:
     - id: correlation-and-redaction-contract-defined
       contains_all:
       - 关联
       - 脱敏
-      - 个人词汇档案
+      - 原始字幕
   LF-TSK-ADP-0001:
     owner: LF-WS-ADP
     evidence_file: tmp/quality/task-evidence/ADP/LF-TSK-ADP-0001/result.json
     required_inputs:
-    - docs/architecture/contracts/README.md
+    - docs/architecture/runtime-safety.md
     - openspec/specs/product-architecture/spec.md
-    - docs/architecture/contracts/source-adapters.md
+    - docs/architecture/source-contract.md
     runner: task-contract
     assertions:
     - id: youtube-web-pdf-audio-adapter-conformance-defined
@@ -256,7 +234,7 @@ profiles:
     owner: LF-WS-QLT
     evidence_file: tmp/quality/task-evidence/QLT/LF-TSK-QLT-0003/result.json
     required_inputs:
-    - docs/development/gate-control-plane-design.md
+    - docs/development/gate-control-plane.md
     runner: task-contract
     assertions:
     - id: plan-run-status-receipt-semantics-current
@@ -269,7 +247,7 @@ profiles:
     owner: LF-WS-QLT
     evidence_file: tmp/quality/task-evidence/QLT/LF-TSK-QLT-0004/result.json
     required_inputs:
-    - docs/acceptance-cases/phase-1.md
+    - docs/product/product-brief.md
     - openspec/changes/establish-lexiflow-foundation/tasks.md
     - planning/workstreams.yaml
     runner: task-contract
@@ -302,9 +280,7 @@ profiles:
     evidence_file: tmp/quality/task-evidence/OPS/LF-TSK-OPS-0001/result.json
     required_inputs:
     - docs/architecture/decisions.md
-    - docs/references/feipi-session-browser-java.md
-    - docs/development/post-approval-toolchain-verification.md
-    - docs/reviews/g1-decision-package.md
+    - docs/development/toolchain-reproduction.md
     runner: task-contract
     assertions:
     - id: toolchain-options-version-policy-and-post-approval-plan-defined
@@ -319,10 +295,9 @@ profiles:
     owner: LF-WS-ARCH
     evidence_file: tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0008/result.json
     required_inputs:
-    - docs/reviews/g1-decision-package.md
-    - docs/reviews/phase-1-checklist.md
-    - docs/development/gate-control-plane-design.md
-    - docs/reviews/g1-task-evidence-map.md
+    - docs/architecture/decisions.md
+    - docs/roadmap/phase-1-status.md
+    - docs/development/gate-control-plane.md
     runner: task-contract
     assertions:
     - id: all-direct-receipts-current
@@ -335,6 +310,6 @@ profiles:
       contains_all:
       - lf-tsk-arch-0008
     approval_gate:
-      locator: docs/reviews/g1-decision-package.md
+      locator: docs/roadmap/phase-1-status.md
       approved_marker: 'G1 user decision: APPROVED'
       assertion_id: user-approval-recorded

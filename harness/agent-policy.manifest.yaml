@@ -21,7 +21,6 @@ privacy:
   - tokens
   - real-user-captions
   - viewing-history
-  - vocabulary-profiles
   - unredacted-model-payloads
   - runtime-cache
   - personal-config
@@ -48,7 +47,7 @@ architecture:
   - application-depends-on-concrete-adapter
   - inbound-adapter-depends-on-outbound-adapter
   - cross-domain-table-access
-  - extension-as-profile-source-of-truth
+  - extension-as-service-source-of-truth
   - english-caption-waits-for-model
 subagent_protocol:
   codex_model_policy:

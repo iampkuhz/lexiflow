@@ -29,7 +29,7 @@ Thumbs.db
 /.qoder/task-packs/
 
 # ── 文档 PlantUML 中间产物：真源在 Markdown 代码块 ────────────────
-# diagrams/ 只跟踪 Markdown 图源索引；其余文件/子目录均为本地中间产物。
+# 新图的草稿、渲染和回执只写 /tmp/diagrams/；下列规则只防止旧目录遗留物误提交。
 /docs/**/diagrams/*
 !/docs/**/diagrams/*.md
 

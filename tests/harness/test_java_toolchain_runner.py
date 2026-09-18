@@ -109,8 +109,25 @@ class TestJavaToolchainRunner(unittest.TestCase):
         self.assertEqual(backend, self.fixture.root / "backend")
         self.assertEqual(
             command,
-            [str(wrapper), "-p", str(self.fixture.root / "backend"), "clean", "check", "--rerun-tasks", "--no-build-cache"],
+            [str(wrapper), "-p", str(self.fixture.root / "backend"), "--console=colored", "clean", "check", "--rerun-tasks", "--no-build-cache"],
         )
+
+    def test_explicit_console_modes_are_forwarded_without_another_default(self) -> None:
+        wrapper = self.fixture.wrapper()
+        for options in (
+            ["--console=plain"],
+            ["--console", "rich"],
+            ["--console=auto"],
+            ["--console=colored"],
+            ["-Dorg.gradle.console=plain"],
+            ["-D", "org.gradle.console=plain"],
+        ):
+            with self.subTest(options=options):
+                _, command = gradle_invocation(self.fixture.root, ["help", *options])
+                self.assertEqual(
+                    command,
+                    [str(wrapper), "-p", str(self.fixture.root / "backend"), "help", *options],
+                )
 
     def test_delivery_aggregates_force_current_execution_once(self) -> None:
         self.fixture.wrapper()
@@ -143,14 +160,16 @@ class TestJavaToolchainRunner(unittest.TestCase):
             result = main(
                 ["check"],
                 repo_root=self.fixture.root,
-                environ={"LEXIFLOW_JAVA_HOME": str(java_home), "PATH": "/usr/bin"},
+                environ={"LEXIFLOW_JAVA_HOME": str(java_home), "PATH": "/usr/bin", "NO_COLOR": "1"},
             )
         self.assertEqual(result, 127)
         command, argv, environment = execve.call_args.args
         self.assertEqual(command, str(wrapper))
         self.assertEqual(argv[-3:], ["check", "--rerun-tasks", "--no-build-cache"])
+        self.assertIn("--console=colored", argv)
         self.assertEqual(environment["JAVA_HOME"], str(java_home.resolve()))
         self.assertEqual(environment["PATH"].split(os.pathsep)[0], str(java_home.resolve() / "bin"))
+        self.assertEqual(environment["NO_COLOR"], "1")
 
 
 if __name__ == "__main__":

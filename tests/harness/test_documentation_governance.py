@@ -10,6 +10,45 @@ from scripts.harness import docs_check, local_skills, policy_projection
 
 
 class DocumentationTests(unittest.TestCase):
+    def test_diagram_workflow_uses_tmp_drafts_and_markdown_final_source(self):
+        root = Path(__file__).resolve().parents[2]
+        policy = yaml.safe_load((root / 'harness/documentation-policy.yaml').read_text())
+        workflow = policy['diagram_workflow']
+        self.assertEqual(policy['canonical_diagram_source'], 'markdown-plantuml-fence')
+        self.assertEqual(policy['local_artifact_root'], 'tmp/diagrams/')
+        self.assertEqual(workflow['draft_root'], 'tmp/diagrams/')
+        self.assertEqual(workflow['draft_source'], 'source.puml')
+        self.assertEqual(workflow['final_source'], 'markdown-plantuml-fence')
+        self.assertEqual(len(workflow['required_order']), 5)
+        self.assertIn('不得存放新的 PUML', workflow['docs_artifact_rule'])
+        self.assertIn('/tmp/', (root / '.gitignore').read_text())
+
+    def test_documentation_policy_leaves_detail_shape_to_the_subject(self):
+        root = Path(__file__).resolve().parents[2]
+        policy = yaml.safe_load((root / 'harness/documentation-policy.yaml').read_text())
+        architecture = policy['information_architecture']
+        self.assertEqual(architecture['detail_placement'],
+                         'sibling-directory-with-parent-stem-when-needed')
+        self.assertNotIn('overview_roots', architecture)
+        self.assertNotIn('overview_max_bytes', architecture)
+        self.assertIn('不设固定模板、数量或字节预算', architecture['rule'])
+
+    def test_documentation_rejects_candidate_solution_headings(self):
+        policy = {'selected_solution_only': {
+            'documentation_roots': ['docs'],
+            'prohibited_heading_patterns': ['(?:候选|替代)方案', '方案比较', '方案\\s*[A-Z]'],
+            'prohibited_prose_patterns': ['(?:候选|替代)方案', '方案\\s*[A-Z]\\s*[：:]', '^\\s*\\|\\s*方案\\s*\\|']}}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            document = root / 'docs/design.md'
+            document.parent.mkdir()
+            document.write_text('# 1. 方案比较\n')
+            self.assertEqual(len(docs_check.check_selected_solution_only(root, policy)), 1)
+            document.write_text('# 1. 已确定的合同\n| 方案 | 说明 |\n| --- | --- |\n')
+            self.assertEqual(len(docs_check.check_selected_solution_only(root, policy)), 1)
+            document.write_text('# 1. 已确定的合同\n')
+            self.assertEqual(docs_check.check_selected_solution_only(root, policy), [])
+
     def test_latest_only_rejects_history_and_dated_snapshots(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
@@ -27,6 +66,24 @@ class DocumentationTests(unittest.TestCase):
             (root / 'tmp/history/receipt-20260918.json').write_text('{}')
             self.assertEqual(docs_check.check_latest_only(root, policy), [])
 
+    def test_version_comparison_requires_comparison_path_and_title(self):
+        policy = {'maintenance': {'version_comparison': {
+            'documentation_roots': ['docs'],
+            'allowed_path_tokens': ['comparison', 'diff'],
+            'allowed_title_tokens': ['对比', '差异', 'comparison', 'diff'],
+            'prohibited_phrases': ['待审核目标', '改前', '改后']}}}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / 'docs').mkdir()
+            ordinary = root / 'docs/architecture.md'
+            ordinary.write_text('# 1. 架构\n待审核目标\n')
+            self.assertEqual(len(docs_check.check_version_comparisons(root, policy)), 1)
+            comparison = root / 'docs/comparison/module-comparison.md'
+            comparison.parent.mkdir()
+            comparison.write_text('# 1. 模块对比\n改前与改后\n')
+            ordinary.write_text('# 1. 架构\n最新版结论\n')
+            self.assertEqual(docs_check.check_version_comparisons(root, policy), [])
+
     def test_latest_docs_and_current_input_bindings(self):
         root = Path(__file__).resolve().parents[2]
         self.assertEqual(docs_check.run(root)['issues'], [])
@@ -36,8 +93,17 @@ class DocumentationTests(unittest.TestCase):
                 if locator.startswith('docs/'):
                     self.assertNotIn('/history/', locator)
                     self.assertTrue((root / locator).is_file(), locator)
-        self.assertIn('docs/development/gate-control-plane-design.md',
+        self.assertIn('docs/roadmap/phase-1-status.md',
                       profile['profiles']['LF-TSK-ARCH-0008']['required_inputs'])
+
+    def test_docs_headings_require_hierarchical_numbers(self):
+        policy = {'heading_numbering': {'required': True}}
+        with tempfile.TemporaryDirectory() as d:
+            file = Path(d) / 'doc.md'
+            file.write_text('# 1. 总览\n## 1.1. 细节\n```text\n# 不检查代码\n```\n')
+            self.assertEqual(docs_check.check_heading_numbering(file, policy), [])
+            file.write_text('# 总览\n## 1.1. 细节\n')
+            self.assertEqual(len(docs_check.check_heading_numbering(file, policy)), 1)
 
     def test_fences_and_anchors(self):
         text = '# 中文标题\n\n<a id="stable"></a>\n```plantuml\n@startuml\nA -> B\n@enduml\n```\n'

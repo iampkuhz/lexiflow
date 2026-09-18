@@ -1225,9 +1225,9 @@ def compile_plan(repo_root: str | os.PathLike[str], *, mode: str, receipt_kind: 
         raise PlannerError("non-current-task-version", f"task not current: {task_id}")
     raw, dependencies = _raw_task(inputs, evidence, record, tasks, owners)
     for locator in ("planning/task-template.yaml", "harness/agent-policy.manifest.yaml",
-            "harness/agent-runtime.manifest.yaml", "harness/manifest.yaml", "docs/acceptance-cases/phase-1.md"):
+            "harness/agent-runtime.manifest.yaml", "harness/manifest.yaml", "docs/product/product-brief.md"):
         inputs.get(locator)
-    acceptance_bytes = inputs.data["docs/acceptance-cases/phase-1.md"]
+    acceptance_bytes = inputs.data["docs/product/product-brief.md"]
     try: case_list = _CASE.findall(acceptance_bytes.decode("utf-8"))
     except UnicodeDecodeError as exc: raise PlannerError("invalid-mapping", f"acceptance registry not UTF-8: {exc}") from None
     if not case_list or len(case_list) != len(set(case_list)):

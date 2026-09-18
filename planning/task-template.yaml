@@ -82,7 +82,7 @@ produced_contracts:
 contract_producer_rule: "Every contract edge must resolve to exactly one producer declaration whose name and version exactly match contract_name and required_contract_version."
 
 phase_entry_prerequisite:
-  applies_to: "P2-P7 entry tasks only"
+  applies_to: "P2-P6 entry tasks only"
   previous_gate_id: "G<N-1>"
   previous_gate_exit_task_id: "LF-TSK-<DOMAIN>-NNNN"
   required_exit_task_version: 1

@@ -30,19 +30,12 @@ dependencyLocking {
 
 val productProjectPaths = listOf(
     ":modules:foundation",
-    ":modules:identity",
     ":modules:lexicon",
-    ":modules:vocabulary",
     ":modules:content",
-    ":modules:learning",
     ":modules:semantic",
     ":modules:enrichment",
-    ":application:client-delivery",
     ":application:workflow",
-    ":platform:persistence",
-    ":platform:cache",
-    ":platform:security",
-    ":platform:observability",
+    ":platform:adapters",
 )
 val appProjectPaths = listOf(":apps:api", ":apps:worker")
 val leafProjects = subprojects.filter { it.childProjects.isEmpty() }

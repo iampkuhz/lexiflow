@@ -3,6 +3,8 @@
 This launcher keeps Java selection out of agent prompts and shell profiles. It
 accepts only the Java release and distribution declared by the product harness,
 then replaces the current process with the checked Gradle wrapper invocation.
+Colored output is the default even when a caller captures stdout; explicit
+console options and Gradle's NO_COLOR handling remain authoritative.
 """
 
 from __future__ import annotations
@@ -108,6 +110,19 @@ def gradle_invocation(repo_root: Path, arguments: Sequence[str]) -> tuple[Path, 
         for argument in arguments
     )
     execution_arguments = list(arguments)
+    console_configured = any(
+        argument == "--console"
+        or argument.startswith(("--console=", "-Dorg.gradle.console="))
+        or argument == "-Dorg.gradle.console"
+        or (
+            argument == "-D"
+            and index + 1 < len(arguments)
+            and arguments[index + 1].split("=", 1)[0] == "org.gradle.console"
+        )
+        for index, argument in enumerate(arguments)
+    )
+    if not console_configured:
+        execution_arguments.insert(0, "--console=colored")
     if delivery:
         if any(argument.split("=", 1)[0] in {
             "-x", "--exclude-task", "-m", "--dry-run", "--tests", "--build-cache"

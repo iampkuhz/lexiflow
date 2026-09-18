@@ -2,9 +2,26 @@ schema_version: 1
 language: zh-CN
 preserve_verbatim: [commands, paths, APIs, identifiers, schema_fields, status_enums, source_examples]
 root_instruction_budget_bytes: 4000
+heading_numbering:
+  scope: docs
+  style: hierarchical-decimal
+  required: true
+  rule: 每个 Markdown 标题使用与层级一致的十进制序号；重排时保留仍被引用的旧锚点。
 canonical_diagram_source: markdown-plantuml-fence
-local_artifact_root: tmp/
+local_artifact_root: tmp/diagrams/
 forbidden_diagram_link_extensions: [.puml, .svg, .png]
+diagram_workflow:
+  draft_root: tmp/diagrams/
+  draft_layout: tmp/diagrams/<document-slug>/<diagram-id>/
+  draft_source: source.puml
+  final_source: markdown-plantuml-fence
+  required_order:
+    - 在 draft_layout 写入或修改 source.puml，不直接编辑正文图源。
+    - 按 PlantUML skill 校验并渲染 source.puml；渲染、brief、回执和预览留在同一临时目录。
+    - 人工核对中文、箭头、分支、终态与布局；不能预览则记 BLOCKED。
+    - 将已校验 source.puml 的完整内容原样复制到目标 Markdown 的 plantuml 围栏。
+    - 对复制后的 Markdown 代码块复核定界符和来源哈希；图源改变后从第一步重新执行。
+  docs_artifact_rule: docs/**/diagrams/ 不得存放新的 PUML、brief、SVG、PNG、回执或预览；已有 Markdown 索引仅作导航，不是调试目录。
 skill_source: CODEX_HOME/skills
 skill_default_source: ~/.codex/skills
 skill_links: .agents/skills
@@ -16,8 +33,27 @@ skills:
     purpose: skill 工程治理
     trigger: 仅在创建、重构或审计 skill 本身时读取完整 SKILL.md
 skill_missing: BLOCKED
+information_architecture:
+  detail_placement: sibling-directory-with-parent-stem-when-needed
+  rule: 方针、原则和大功能模块的父页保留目的、核心模型、边界和确定结论；只有确有步骤、字段、命令、示例或诊断需要展开时，才在同名子目录补充细节。子目录的文件数量、拆分主题与篇幅按信息复杂度决定，不设固定模板、数量或字节预算；细节页只保留执行或核对所必需的信息，不重复父页背景、不机械保留旧正文。
+selected_solution_only:
+  documentation_roots: [docs]
+  prohibited_heading_patterns:
+    - '(?:候选|替代)方案'
+    - '方案比较'
+    - '方案\s*[A-ZＡ-Ｚ]'
+  prohibited_prose_patterns:
+    - '(?:候选|替代)方案'
+    - '方案\s*[A-ZＡ-Ｚ]\s*[：:]'
+    - '^\s*\|\s*方案\s*\|'
+  rule: 文档陈述已经确定的最佳方案及其边界，供读者校验；不得以候选方案清单、方案比较或 A/B/C 选项把未决选择转嫁给读者。需要重新决策时先在 OpenSpec 变更中完成决策，再更新文档中的唯一结论。
 maintenance:
   mode: latest-only
+  version_comparison:
+    documentation_roots: [docs, openspec]
+    allowed_path_tokens: [comparison, diff]
+    allowed_title_tokens: [对比, 差异, comparison, diff]
+    prohibited_phrases: [待审核目标, 收敛后的明确去处, 改前, 改后, 当前版本, 目标版本]
   forbidden_directory_names: [history, archive, archives]
   rule: 每个主题只维护最新版；直接更新或合并删除旧页，不建立历史目录、日期快照或复审副本。
   evidence: 原始运行收据和日志留在忽略目录且不可改写；不把历史通过结果当作最新版文档的验收。

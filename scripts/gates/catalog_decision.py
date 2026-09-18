@@ -380,7 +380,7 @@ def verify_catalog_decision(
         _fail("evidence-incomplete", "current plan lacks policy input")
     policy = _current_descriptor(repo_root, policy_input, "current policy")
     acceptance = _current_descriptor(repo_root, evidence["acceptance_case_registry"], "acceptance registry")
-    if acceptance["locator"] != "docs/acceptance-cases/phase-1.md":
+    if acceptance["locator"] != "docs/product/product-brief.md":
         _fail("unsafe-locator", "unexpected acceptance registry locator")
     catalog_content = read_bound_bytes(repo_root, source["locator"])
     acceptance_content = read_bound_bytes(repo_root, acceptance["locator"])

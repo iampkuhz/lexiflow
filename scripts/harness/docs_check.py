@@ -112,6 +112,48 @@ def check_file(root, file, forbidden_extensions=('.puml', '.svg', '.png')):
     return issues, len(diagrams)
 
 
+def check_heading_numbering(file, policy):
+    """Require every rendered Markdown heading in docs/ to use hierarchical decimals."""
+    numbering = policy.get('heading_numbering', {})
+    if not numbering.get('required'):
+        return []
+    issues = []
+    counters = [0] * 7
+    for line_number, line in parse(file.read_text())[0]:
+        match = re.match(r'^(#{1,6})\s+(.+?)(?:\s+#+)?$', line)
+        if not match:
+            continue
+        level = len(match[1])
+        counters[level] += 1
+        for index in range(level + 1, 7):
+            counters[index] = 0
+        expected = '.'.join(str(counters[index]) for index in range(1, level + 1)) + '.'
+        if not match[2].startswith(expected + ' '):
+            issues.append(f'第 {line_number} 行标题缺少层级序号，应以 {expected} 开头')
+    return issues
+
+
+def check_selected_solution_only(root, policy):
+    """Reject headings that turn a documentation page into an options catalog."""
+    config = policy.get('selected_solution_only', {})
+    heading_patterns = [re.compile(pattern, re.I)
+                        for pattern in config.get('prohibited_heading_patterns', [])]
+    prose_patterns = [re.compile(pattern, re.I)
+                      for pattern in config.get('prohibited_prose_patterns', [])]
+    issues = []
+    for relative_root in config.get('documentation_roots', []):
+        directory = root / relative_root
+        if not directory.is_dir():
+            continue
+        for file in sorted(directory.rglob('*.md')):
+            for line_number, line in parse(file.read_text())[0]:
+                match = re.match(r'^#{1,6}\s+(.+?)(?:\s+#+)?$', line)
+                if match and any(pattern.search(match.group(1)) for pattern in heading_patterns):
+                    issues.append(f'{file.relative_to(root)}: 第 {line_number} 行标题不得列出候选方案')
+                elif any(pattern.search(line) for pattern in prose_patterns):
+                    issues.append(f'{file.relative_to(root)}: 第 {line_number} 行不得列出候选方案')
+    return issues
+
 def check_latest_only(root, policy):
     """拒绝历史目录与日期快照；不读取或修改本地运行收据。"""
     maintenance = policy.get('maintenance', {})
@@ -128,9 +170,38 @@ def check_latest_only(root, policy):
     return issues
 
 
+def check_version_comparisons(root, policy):
+    """拒绝普通文档中的版本对照；只有路径和标题均明确的对比页可例外。"""
+    config = policy.get('maintenance', {}).get('version_comparison', {})
+    roots = config.get('documentation_roots', [])
+    phrases = config.get('prohibited_phrases', [])
+    path_tokens = tuple(token.casefold() for token in config.get('allowed_path_tokens', []))
+    title_tokens = tuple(token.casefold() for token in config.get('allowed_title_tokens', []))
+    issues = []
+    for relative_root in roots:
+        directory = root / relative_root
+        if not directory.is_dir():
+            continue
+        for file in sorted(directory.rglob('*.md')):
+            outside, _, _ = parse(file.read_text())
+            prose = '\n'.join(line for _, line in outside)
+            title = next((match.group(1) for _, line in outside
+                          if (match := re.match(r'^#\s+(.+?)(?:\s+#+)?$', line))), '')
+            path_allowed = any(token in str(file.relative_to(root)).casefold() for token in path_tokens)
+            title_allowed = any(token in title.casefold() for token in title_tokens)
+            if path_allowed and title_allowed:
+                continue
+            for phrase in phrases:
+                if phrase in prose:
+                    issues.append(f'{file.relative_to(root)}: 普通文档禁止版本对照用语：{phrase}')
+    return issues
+
+
 def run(root):
     policy = yaml.safe_load((root / 'harness/documentation-policy.yaml').read_text())
-    issues = check_latest_only(root, policy)
+    issues = check_selected_solution_only(root, policy)
+    issues.extend(check_latest_only(root, policy))
+    issues.extend(check_version_comparisons(root, policy))
     count = 0
     files = sorted((root / 'docs').rglob('*.md'))
     files += [root / 'AGENTS.md', root / 'README.md', root / 'harness/README.md']
@@ -138,6 +209,8 @@ def run(root):
         errors, diagrams = check_file(root, file, policy['forbidden_diagram_link_extensions'])
         count += diagrams
         issues.extend(f'{file.relative_to(root)}: {x}' for x in errors)
+        if file.is_relative_to(root / 'docs'):
+            issues.extend(f'{file.relative_to(root)}: {x}' for x in check_heading_numbering(file, policy))
     if (root / 'AGENTS.md').stat().st_size > policy['root_instruction_budget_bytes']:
         issues.append('AGENTS.md 超出读取预算')
     if (root / '.git').exists():

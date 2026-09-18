@@ -20,8 +20,8 @@ class RegistryProfileTests(unittest.TestCase):
     def test_current_registry_is_exact_profile_projection(self):
         result = check_registry(REPO)
         self.assertEqual(result["status"], "PASS")
-        self.assertEqual(result["entry_count"], 30)
-        self.assertEqual(result["profile_count"], 21)
+        self.assertEqual(result["entry_count"], 29)
+        self.assertEqual(result["profile_count"], 20)
         current = yaml.safe_load((REPO / "harness/gate-check-registry.yaml").read_text())
         self.assertEqual(current["registry_version"], 3)
         self.assertEqual(current["execution"]["source_scan"], "forbidden")
