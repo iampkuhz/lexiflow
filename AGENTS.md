@@ -10,7 +10,7 @@
 - 非平凡产品、agent、harness、gate 或跨模块变更先创建或复用 `openspec/changes/<id>/`。
 - 共享规则只在 `AGENTS.md` 与 `harness/` 维护；客户端配置只保留入口。
 - 图源只在 Markdown 的 fenced `plantuml`；先在 ignored `tmp/diagrams/` 校验/预览，再原样复制正文。禁止提交调试产物或由正文链接它们。
-- 文档只留最新版；除非路径和标题均明确为 comparison/diff，禁止用当前、目标、改前/后等作版本对照或写迁移历史；执行状态只在状态页。
+- 文档只留最新版；路径和标题非 comparison/diff 时禁止版本对照或迁移历史；执行状态只在状态页。
 
 ## 架构约束
 
@@ -18,7 +18,7 @@
 - 采用 Modular Monolith；部署可为 `api` 与 `worker` 两个进程，业务边界不得因此拆成微服务。
 - 依赖由组合根指向 application，再指向 domain/ports；domain 不依赖 HTTP、数据库、缓存或具体模型 Provider。
 - 模块不得直接读写其他 Domain 拥有的数据；跨模块只通过公开 contract。
-- Chrome Extension 保持薄；产品不维护账号、多人档案、学习行为归约或跨设备状态同步。
+- Chrome Extension 保持薄；仅允许用户显式、本机私有的词段抑制偏好，不上传、不推断熟悉度、无账号或同步。
 - 英文字幕渲染不得等待后端或模型；Rules 决定是否提示，Models 决定语境含义。
 - PostgreSQL 是事实存储；Redis、浏览器缓存和投影均可重建。
 

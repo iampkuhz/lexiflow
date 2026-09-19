@@ -44,5 +44,6 @@ verification:
     style: Checkstyle
     static_analysis: PMD
     java_source_policy: javaSourceGates
+    public_api_javadoc_contract: javaSourceGates
     architecture: ArchUnit-and-Gradle-dependency-guard
     behavior: JUnit-and-Spring-test-suites

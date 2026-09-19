@@ -69,6 +69,13 @@ _ACTOR_VERIFIERS = MappingProxyType({
     "human": ("human.operator-record.v1", 1),
     "ci": ("ci.workload-identity.v1", 1),
 })
+
+
+def _allowed_verifier(actor_type: str, binding: tuple[str, int]) -> bool:
+    return binding == _ACTOR_VERIFIERS[actor_type] or (
+        actor_type == "codex" and binding == ("codex.local-session.v1", 1)
+    )
+
 REASON_CODES = frozenset(
     {
         "authority-unavailable",
@@ -527,7 +534,7 @@ class IssuerPacketMaterializer:
         expected_binding = configuration.verifier_bindings[actor_type]
         if (
             (verifier_id, verifier_abi) != expected_binding
-            or expected_binding != _ACTOR_VERIFIERS[actor_type]
+            or not _allowed_verifier(actor_type, expected_binding)
         ):
             raise IssuerPacketError(
                 "unknown-verifier",
@@ -536,6 +543,7 @@ class IssuerPacketMaterializer:
         verifier = {
             ("qoder.runner-provenance.v1", 1): self._verify_qoder,
             ("codex.current-session.v1", 1): self._verify_codex,
+            ("codex.local-session.v1", 1): self._verify_codex,
             ("human.operator-record.v1", 1): self._verify_human,
             ("ci.workload-identity.v1", 1): self._verify_ci,
         }.get((verifier_id, verifier_abi))
@@ -588,7 +596,7 @@ class IssuerPacketMaterializer:
                 "identity-drift",
                 "fixed verifier output is not bound to the parsed authority evidence",
             )
-        expected_verifier = _ACTOR_VERIFIERS[actor_type]
+        expected_verifier = configuration.verifier_bindings[actor_type]
         if (
             verified.actor_type != actor_type
             or verified.verifier_id != expected_verifier[0]
@@ -624,7 +632,8 @@ class IssuerPacketMaterializer:
             expected_claims = verified.replay_claims
             if actor_type == "codex":
                 expected_source = authority
-                expected_provenance_kinds = ("host-session-attestation",)
+                local = "runtime_proof" in _json_object(evidence, evidence_locator)
+                expected_provenance_kinds = ("local-session-attestation" if local else "host-session-attestation",)
             elif actor_type == "human":
                 expected_source = self._registry_record(
                     authority, "actors", verified.actor_id
@@ -717,7 +726,7 @@ class IssuerPacketMaterializer:
             if binding in verifier_bindings:
                 raise IssuerPacketError("invalid-authority-registry", "duplicate verifier binding")
             verifier_bindings.add(binding)
-            if binding != expected_verifier:
+            if not _allowed_verifier(actor_type, binding):
                 raise IssuerPacketError(
                     "unknown-verifier", f"unexpected verifier binding for {actor_type}"
                 )
@@ -1178,9 +1187,21 @@ class IssuerPacketMaterializer:
             "parent_session_id": parent_session_id,
             "client": data.get("client"),
         }
-        if not self.trusted_codex_context:
+        context = self.trusted_codex_context
+        local = authority["verifier_id"] == "codex.local-session.v1"
+        if local != ("runtime_proof" in data):
+            raise IssuerPacketError("invalid-attestation", "runtime proof must match the configured Codex verifier")
+        if local:
+            from scripts.harness.local_codex_runtime import discover, verify_proof
+            from scripts.harness.codex_runtime import CodexRuntimeError
+            try:
+                verify_proof(self.repo_root, data["runtime_proof"], observed)
+                context = discover(self.repo_root).context
+            except CodexRuntimeError as exc:
+                raise IssuerPacketError("authority-unavailable", str(exc)) from None
+        if not context:
             raise IssuerPacketError("authority-unavailable", "current Codex host context is unavailable")
-        if data.get("client") != "codex" or observed != self.trusted_codex_context:
+        if data.get("client") != "codex" or observed != context:
             raise IssuerPacketError("identity-drift", "Codex attestation is not the current host session")
         return _VerifiedIssuer(
             "codex",
@@ -1195,7 +1216,8 @@ class IssuerPacketMaterializer:
             str(authority["authority_id"]),
             None,
             (("attestation-id", attestation_id), ("nonce", nonce)),
-            ({"kind": "host-session-attestation", "locator": locator, "sha256": evidence_sha},),
+            ({"kind": "local-session-attestation" if local else "host-session-attestation",
+              "locator": locator, "sha256": evidence_sha},),
         )
 
     def _derive_human_expected(
@@ -1340,8 +1362,13 @@ class IssuerPacketMaterializer:
         if not isinstance(subject, Mapping):
             raise IssuerPacketError("invalid-request", "subject_identity must be an object")
         subject_actor_ids = {subject.get("actor_id"), subject.get("agent_id")}
+        local_same_session = (
+            any(item["kind"] == "local-session-attestation" for item in issuer.provenance)
+            and subject.get("client") == "codex"
+            and issuer.session_id == subject.get("session_id")
+        )
         if (
-            issuer.actor_id in subject_actor_ids
+            local_same_session or issuer.actor_id in subject_actor_ids
             or issuer_instance_id == subject.get("run_id")
             or issuer.actor_run_id == subject.get("run_id")
             or any(issuer_instance_id == value for _kind, value in issuer.replay_claims)

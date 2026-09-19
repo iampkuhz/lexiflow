@@ -20,7 +20,7 @@ class JavaSourceGateRunnerTest {
     var second = JavaSourceGateRunner.evaluate(context);
 
     assertEquals(GateStatus.PASS, first.status());
-    assertEquals(3, first.evaluations().size());
+    assertEquals(4, first.evaluations().size());
     assertEquals(first, second);
     assertEquals(first.toJson(), second.toJson());
   }

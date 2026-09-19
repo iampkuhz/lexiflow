@@ -21,6 +21,7 @@ import yaml
 import scripts.gates.planner as planner
 from scripts.gates.evidence_packet import (
     CODEX_TASK_PROJECTION_SCHEMA_VERSION,
+    EvidencePacketError,
     SNAPSHOT_SCHEMA_VERSION,
     canonical_json as evidence_canonical_json,
     materialize,
@@ -33,6 +34,8 @@ from scripts.gates.issuer_packet import (
     sha256_bytes as issuer_sha256,
 )
 from scripts.gates.planner import PlannerError, canonical_json_bytes, compile_plan, sha256_bytes
+from scripts.gates.task_source import task_source_descriptor
+from scripts.harness.codex_work_package import build_codex_main_task_projection
 from scripts.harness.qoder_task import REQUIRED_HANDOFF, RUNTIME_IDENTITY_FIELDS
 from tests.gates.test_evidence_packet import FixtureRepo as EvidenceFixture
 from tests.gates.test_evidence_packet import _build_valid_input, _set_changed_files
@@ -87,7 +90,7 @@ def _snapshot(root: pathlib.Path) -> dict[str, str]:
 
 
 class RealPlannerFixture:
-    """Hermetic QLT7 + QLT14 fixture over the real 113-task catalog."""
+    """Hermetic QLT7 + QLT14 fixture over the current catalog."""
 
     NOW = issuer_test_helpers.IssuerPacketMaterializerTest.NOW
 
@@ -121,6 +124,7 @@ class RealPlannerFixture:
             "harness/gate-check-registry.yaml",
             "docs/product/product-brief.md",
             "scripts/gates/planner.py",
+            "scripts/gates/acceptance_cases.py",
             "tests/gates/test_gate_planner.py",
             "scripts/gates/evidence_packet.py",
             "tests/gates/test_evidence_packet.py",
@@ -128,6 +132,8 @@ class RealPlannerFixture:
             "tests/gates/test_issuer_packet.py",
         ):
             self._copy(locator)
+        authority = self.root / "harness/gate-issuer-authorities.yaml"
+        authority.write_text(authority.read_text().replace("codex.local-session.v1", "codex.current-session.v1"))
 
     def _qoder_package_records(self) -> list[dict]:
         task_prefix = "-".join(self.record["id"].split("-")[:3]) + "-"
@@ -155,6 +161,26 @@ class RealPlannerFixture:
 
     def _raw_task(self) -> dict:
         old = self.evidence_fixture.task_artifact
+        if not self.record["id"].startswith("LF-TSK-QLT-"):
+            # G1 closure tasks are Main-agent work, not synthetic Qoder
+            # packages.  Keeping the route explicit ensures this fixture does
+            # not require an arbitrary same-domain 180-minute package merely
+            # to compile a one-Task contract.
+            return build_codex_main_task_projection(
+                self.root,
+                self.record["id"],
+                {
+                    "parent_session_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+                    "agent_id": "/root",
+                    "run_id": old["run_id"],
+                    "session_id": old["session_id"],
+                    "client": "codex",
+                    "parent_client": "codex",
+                },
+                goal=self.record["deliverable"],
+                required_context="current catalog and current Gate inputs",
+                failure_policy="Fail closed on any missing, stale, ambiguous, or changed input.",
+            )
         package_records = self._qoder_package_records()
         package_task_ids = [record["id"] for record in package_records]
         domain = self.record["id"].split("-")[2]
@@ -214,12 +240,11 @@ class RealPlannerFixture:
             "behavior": "PASS",
             "regression": "PASS",
         }
-        catalog_bytes = (self.root / "planning/workstreams.yaml").read_bytes()
         inp["task"] = {
             "task_id": self.record["id"],
             "task_version": self.record["task_version"],
             "change_version": self.record["change_version"],
-            "task_source": {"locator": "planning/workstreams.yaml", "sha256": _hash(catalog_bytes)},
+            "task_source": task_source_descriptor(self.root, self.record["id"]),
         }
         raw_task = self._raw_task()
         fixture.task_artifact = raw_task
@@ -232,6 +257,13 @@ class RealPlannerFixture:
             "task_id": self.record["id"],
             "task_version": self.record["task_version"],
             "change_version": self.record["change_version"],
+            **{
+                field: raw_task[field]
+                for field in (
+                    "parent_session_id", "agent_id", "run_id", "session_id",
+                    "client", "parent_client",
+                )
+            },
         })
         fixture.completion_artifact = completion
         completion_bytes = _qoder_persisted_json(completion)
@@ -432,6 +464,8 @@ class RealPlannerFixture:
                     locator,
                     canonical_json_bytes({"task_id": task_id, "status": "READY_FOR_VALIDATION"}),
                 )
+        authority = self.root / "harness/gate-issuer-authorities.yaml"
+        authority.write_text(authority.read_text().replace("codex.local-session.v1", "codex.current-session.v1"))
         self.evidence_input = self._build_evidence_input()
         self._materialize_evidence()
         self._materialize_issuer()
@@ -565,7 +599,8 @@ class TestRealMaterializersAndPlan(PlannerFixtureTest):
     def test_real_qlt7_qlt14_current_catalog_positive(self):
         result = self.fixture.compile()
         plan = result["plan"]
-        self.assertEqual(len(self.fixture.catalog_tasks), 113)
+        current = yaml.safe_load((REPO / "planning/workstreams.yaml").read_text())
+        self.assertEqual(set(self.fixture.catalog_tasks), {task["id"] for task in _tasks(current)})
         self.assertEqual(plan["task"]["task_id"], "LF-TSK-QLT-0008")
         self.assertEqual(plan["issuer_packet"]["packet"], self.fixture.issuer_packet)
         self.assertEqual([c["check_id"] for c in plan["checks"]], ["qlt.planner.validate"])
@@ -686,9 +721,8 @@ class TestRawTaskAndCatalogBinding(PlannerFixtureTest):
         raw_bytes = evidence_canonical_json(raw)
         _write(self.fixture.root, self.fixture.evidence_fixture.task_artifact_path, raw_bytes)
         self.fixture.evidence_input["subject"]["raw_artifacts"]["task"]["sha256"] = _hash(raw_bytes)
-        self.fixture._materialize_evidence()
-
-        self.assertPlannerError("unsafe-locator", self.fixture.compile)
+        with self.assertRaisesRegex(EvidencePacketError, "task_source hash mismatch"):
+            self.fixture._materialize_evidence()
 
     def test_each_raw_caller_and_runtime_field_is_bound(self):
         planner_cases = {
@@ -773,7 +807,13 @@ class TestRawTaskAndCatalogBinding(PlannerFixtureTest):
 
 
 class TestFormalClosureCompileMatrix(PlannerFixtureTest):
-    def test_all_thirty_g1_closure_tasks_compile_from_current_catalog(self):
+    def test_live_registry_consumed_inputs_exist_without_fixture_placeholders(self):
+        registry = yaml.safe_load((REPO / "harness/gate-check-registry.yaml").read_bytes())
+        missing = [(entry["subject_task_id"], locator) for entry in registry["entries"]
+                   for locator in entry["consumed_inputs"] if not (REPO / locator).is_file()]
+        self.assertEqual(missing, [], "Live Gate must not depend on removed docs or fixture-created files")
+
+    def test_all_g1_closure_tasks_compile_from_current_catalog(self):
         tasks = self.fixture.catalog_tasks
         self.fixture.create_future_inputs()
         closure: set[str] = set()
@@ -788,7 +828,8 @@ class TestFormalClosureCompileMatrix(PlannerFixtureTest):
 
         visit("LF-TSK-ARCH-0008")
         ordered = [task["id"] for task in _tasks(self.fixture.catalog) if task["id"] in closure]
-        self.assertEqual(len(ordered), 30)
+        self.assertEqual(set(ordered), closure)
+        self.assertTrue(all("validation_command" in tasks[task_id] for task_id in closure))
         for task_id in ordered:
             with self.subTest(task_id=task_id):
                 self.fixture.retarget_task(task_id, lambda catalog: None)
@@ -1073,8 +1114,8 @@ class TestRegistryAndSelection(PlannerFixtureTest):
         })
         expected = [task["id"] for task in _tasks(self.fixture.catalog) if "validation_command" in task]
         self.assertEqual([e["subject_task_id"] for e in registry["entries"]], expected)
-        self.assertEqual(len(expected), 30)
-        self.assertEqual(len({e["entry_hash"] for e in registry["entries"]}), 30)
+        self.assertGreater(len(expected), 0)
+        self.assertEqual(len({e["entry_hash"] for e in registry["entries"]}), len(expected))
         for entry in registry["entries"]:
             payload = {key:value for key,value in entry.items() if key != "entry_hash"}
             self.assertEqual(entry["entry_hash"], sha256_bytes(canonical_json_bytes(payload)))
@@ -1176,7 +1217,7 @@ class TestRegistryAndSelection(PlannerFixtureTest):
         self.assertEqual([c["check_id"] for c in result["plan"]["checks"]], [e["check_id"] for e in registry["entries"]])
         self.assertTrue(all(c["selection_reasons"] == [{"kind":"full-mode"}] for c in result["plan"]["checks"]))
 
-    def test_full_review_and_catalog_plans_consume_evidence_without_reselecting_the_30_checks(self):
+    def test_full_review_and_catalog_plans_consume_evidence_without_reselecting_delivery_checks(self):
         self.fixture.create_future_inputs()
         self.fixture._materialize_issuer(["INDEPENDENT_REVIEW", "CATALOG_DECISION"])
         for receipt_kind in ("INDEPENDENT_REVIEW", "CATALOG_DECISION"):

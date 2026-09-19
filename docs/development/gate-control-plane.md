@@ -1,25 +1,32 @@
 # 1. Gate 控制面
 
-Gate 控制面的核心是把“这次检查了什么、由谁检查、基于哪些输入、得到什么结论”固定为可复核的链，而不是把检查命令拼成一次临时脚本。它采用**唯一 CLI、纯计划编译、显式注册表和不可变收据链**；这是已确定的方案。
+Gate 以唯一 CLI、纯计划编译、显式注册表和不可变收据链固定“检查内容、输入、身份和结论”。
+`plan` 与 `run` 对相同模式、任务、目录、策略和证据包生成相同规范计划及 `content_fingerprint`；
+`run` 在计划冻结后执行并写入新的 `run_id`，`status` 只读取该运行的固定产物。
 
-## 1.1. 核心执行模型
+## 1.1. 唯一入口与计划
 
-`plan` 与 `run` 使用同一个纯编译器：对相同模式、任务、目录、策略和证据包，得到相同的规范计划及其 `content_fingerprint`。`run` 只在计划冻结后执行，生成新的 `run_id`，保存实际计划、开始事件和最终收据。`status` 只读取该运行的固定产物，不从目录扫描、时间或进程状态猜测结果。
+```text
+python3 scripts/gates/cli.py plan --mode incremental|full --evidence-packet <repo-relative-path> --issuer-packet <repo-relative-path>
+python3 scripts/gates/cli.py run  --mode incremental|full --evidence-packet <repo-relative-path> [--issuer-packet <repo-relative-path>]
+python3 scripts/gates/cli.py doctor
+python3 scripts/gates/cli.py prepare-issuer --evidence-packet <repo-relative-path> --receipt-kind TASK_VALIDATION
+python3 scripts/gates/cli.py status --run-id <uuid>
+```
 
-注册表是可执行检查的唯一来源。没有登记的命令不能被 Gate 调用；输入、检查选择、签发者与收据哈希都必须显式记录，因此调用者不能以“latest”、环境推断或 Qoder 输出替代本次证据。
+必需路径缺失、冲突或不是单一仓库相对路径为 `FAIL`。只有注册表中的检查可执行；冻结输入漂移为
+`FAIL/input-drift`。`plan` 零写入，`doctor` 只诊断 runtime readiness。
 
-## 1.2. 分层与责任
+## 1.2. 分层、收据与边界
 
-`TASK_VALIDATION` 执行冻结的交付检查；`INDEPENDENT_REVIEW` 只复核冻结 diff 和 validation evidence；`CATALOG_DECISION` 只验证收据与依赖哈希 DAG。三层严格串行，后两层不得重跑交付命令。三态只有 `PASS`、`BLOCKED`、`FAIL`；零退出码、完成信号或旧收据不能跨层解释为 `PASS`。
+| 层 | 做什么 | 不做什么 |
+|---|---|---|
+| `TASK_VALIDATION` | 执行冻结交付检查并签发 validation receipt | 不独立审查或作目录决定。 |
+| `INDEPENDENT_REVIEW` | 复核冻结 diff 与 validation evidence | 不重跑交付命令。 |
+| `CATALOG_DECISION` | 核验 validation/review/dependency receipt 的哈希 DAG | 不执行交付或审查命令。 |
 
-Gate 不承担任务目录结构验证、Qoder 生命周期或派发重叠判断；这些分别归 planning、runner 和[派发预检](dispatch-preflight.md)。
+三层严格串行，结果只有 `PASS`、`BLOCKED`、`FAIL`。收据绑定运行、任务、变更、冻结计划、输入/证据哈希、
+实际检查、签发者和时间；退出码、回调或旧收据不代表 `PASS`。任一定位、身份、哈希或依赖不一致为 `FAIL`，
+必需证据缺失为 `BLOCKED`。
 
-## 1.3. 详细合同入口
-
-- [CLI、冻结计划、注册表与命令安全](gate-control-plane/interface-and-plan.md)
-- [三态、收据、签发者与当前输入链](gate-control-plane/receipts-and-trust.md)
-- [实现归属、验收场景与执行顺序](gate-control-plane/delivery-boundaries.md)
-
-## 1.4. 边界
-
-本页定义控制面的核心语义，不重复 JSON 字段、收据示例和逐任务操作。变更 Gate 前先更新对应 OpenSpec 变更；交付前运行公开 incremental Gate。
+Gate 不负责任务目录、Qoder 生命周期或派发并发；这些归 planning、runner 与[派发预检](dispatch-preflight.md)。

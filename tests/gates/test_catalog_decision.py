@@ -18,6 +18,7 @@ from scripts.gates.issuer_packet import (
     sha256_bytes as issuer_sha256_bytes,
 )
 from scripts.gates.receipt_store import canonical_json_bytes, read_bound_bytes, sha256_bytes
+from scripts.gates.task_source import task_source_descriptor
 
 
 VALIDATION_RUN = "11111111-1111-4111-8111-111111111111"
@@ -61,7 +62,8 @@ class CatalogFixture:
         )
         self.write_bytes(
             "harness/gate-issuer-authorities.yaml",
-            (REPO / "harness/gate-issuer-authorities.yaml").read_bytes(),
+            (REPO / "harness/gate-issuer-authorities.yaml").read_bytes().replace(
+                b"codex.local-session.v1", b"codex.current-session.v1"),
         )
         self.policy = self.write_bytes("harness/agent-policy.manifest.yaml", b"policy: 1\n")
         self.registry = self.write_bytes("harness/gate-check-registry.yaml", b"registry: 1\n")
@@ -89,28 +91,30 @@ class CatalogFixture:
             }],
         }
         self.source = self.write_bytes("planning/workstreams.yaml", yaml.safe_dump(catalog, sort_keys=False).encode())
+        self.task_source = task_source_descriptor(self.root, self.task_id)
+        self.dep_source = task_source_descriptor(self.root, self.dep_id)
         self.validation = self.make_receipt(
             VALIDATION_RUN, "TASK_VALIDATION", self.task_id,
-            "2026-09-16T00:00:00Z", "2026-09-16T00:00:01Z",
+            "2026-09-16T00:00:00Z", "2026-09-16T00:00:01Z", source=self.task_source,
         )
         self.review = self.make_receipt(
             REVIEW_RUN, "INDEPENDENT_REVIEW", self.task_id,
             "2026-09-16T00:01:00Z", "2026-09-16T00:01:01Z",
-            validation=self.validation,
+            validation=self.validation, source=self.task_source,
         )
         self.dep_validation = self.make_receipt(
             DEP_VALIDATION_RUN, "TASK_VALIDATION", self.dep_id,
-            "2026-09-16T00:00:10Z", "2026-09-16T00:00:11Z",
+            "2026-09-16T00:00:10Z", "2026-09-16T00:00:11Z", source=self.dep_source,
         )
         self.dep_review = self.make_receipt(
             DEP_REVIEW_RUN, "INDEPENDENT_REVIEW", self.dep_id,
             "2026-09-16T00:01:10Z", "2026-09-16T00:01:11Z",
-            validation=self.dep_validation,
+            validation=self.dep_validation, source=self.dep_source,
         )
         self.dependency = self.make_receipt(
             DEPENDENCY_RUN, "CATALOG_DECISION", self.dep_id,
             "2026-09-16T00:02:00Z", "2026-09-16T00:02:01Z",
-            validation=self.dep_validation, review=self.dep_review,
+            validation=self.dep_validation, review=self.dep_review, source=self.dep_source,
         )
         self.plan = self.make_current_plan()
         self.evidence = {
@@ -200,7 +204,7 @@ class CatalogFixture:
         )
         return {"locator": result.locator, "sha256": result.sha256}, result.packet, subject_identity
 
-    def make_receipt(self, run_id, kind, task_id, started, finished, validation=None, review=None, result="PASS"):
+    def make_receipt(self, run_id, kind, task_id, started, finished, validation=None, review=None, result="PASS", source=None):
         issuer_descriptor, issuer_packet, subject_identity = self.make_issuer(run_id, kind)
         actor_fields = (
             "issuer_instance_id", "actor_type", "actor_id", "parent_session_id",
@@ -224,7 +228,7 @@ class CatalogFixture:
             "task": {"task_id": task_id, "task_version": 1, "change_version": "1.0.0"},
             "current_inputs": {
                 "source_snapshot_fingerprint": "b" * 64,
-                "task_source": dict(self.source), "registry": dict(self.registry), "policy": dict(self.policy),
+                "task_source": dict(source or self.source), "registry": dict(self.registry), "policy": dict(self.policy),
             },
             "artifact_manifest": self.make_manifest(run_id),
             "completeness": {"status": "PASS"}, "result": result, "reasons": [],
@@ -279,7 +283,7 @@ class CatalogFixture:
             },
             "task": {
                 "task_id": self.task_id, "task_version": 1, "change_version": "1.0.0",
-                "task_source": dict(self.source),
+                "task_source": dict(self.task_source),
                 "dependencies": [{
                     "task_id": self.dep_id, "type": "hard", "required_task_version": 1,
                     "required_change_version": "1.0.0", "required_result": "PASS",
@@ -360,6 +364,17 @@ class TestCatalogDecision(unittest.TestCase):
         evidence = copy.deepcopy(self.fixture.evidence)
         evidence["required_dependency_receipts"][0]["task_version"] = 2
         with self.assertRaisesRegex(CatalogDecisionError, "stale-dependency"):
+            self.fixture.verify(evidence=evidence)
+
+    def test_dependency_receipt_must_bind_its_own_task_projection(self):
+        dependency_path = self.fixture.root / self.fixture.dependency["locator"]
+        dependency = json.loads(dependency_path.read_bytes())
+        dependency["current_inputs"]["task_source"] = dict(self.fixture.task_source)
+        content = canonical_json_bytes(dependency)
+        dependency_path.write_bytes(content)
+        evidence = copy.deepcopy(self.fixture.evidence)
+        evidence["required_dependency_receipts"][0]["sha256"] = sha256_bytes(content)
+        with self.assertRaisesRegex(CatalogDecisionError, r"dependency\[LF-TSK-QLT-0098\] source is stale"):
             self.fixture.verify(evidence=evidence)
 
     def test_subject_identity_and_stale_input_fail(self):

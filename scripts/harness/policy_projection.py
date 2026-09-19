@@ -31,7 +31,8 @@ def replace_block(text, path, value):
             raise ValueError(f'投影目标缺失：{path}')
         key_node, node = pair
     start = key_node.start_mark.line
-    end = node.end_mark.line + (1 if node.end_mark.column else 0)
+    # Block collection ends at the next sibling token, not after that sibling's line.
+    end = node.end_mark.line + (1 if isinstance(node, yaml.ScalarNode) or node.flow_style else 0)
     indent = key_node.start_mark.column
     block = yaml.safe_dump({key: value}, sort_keys=False, allow_unicode=True, width=100)
     rendered = ''.join(' ' * indent + line + '\n' for line in block.splitlines())

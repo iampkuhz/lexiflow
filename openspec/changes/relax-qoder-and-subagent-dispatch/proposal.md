@@ -11,7 +11,7 @@ Catalog 或文件范围变更也会阻断已具备核心目标、范围、验收
 - Qoder 和 Codex 子任务均以超过十分钟的独立工作为主动派发评估阈值。
 - Qoder 允许一个自包含任务；Catalog 在存在且一致时提供额外核对，但不再是启动前提。
 - 保留身份、受限写入范围、验收、验证命令、agent profile、核心规则上下文、单活跃运行和回调确认。
-- 让 schema、runner、测试和入口规则使用同一阈值与可选 Catalog 语义。
+- 让 schema、runner、测试、运行时投影和文档使用同一阈值与可选 Catalog 语义。
 
 ## Non-goals
 

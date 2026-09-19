@@ -87,7 +87,7 @@ class DocumentationTests(unittest.TestCase):
     def test_latest_docs_and_current_input_bindings(self):
         root = Path(__file__).resolve().parents[2]
         self.assertEqual(docs_check.run(root)['issues'], [])
-        profile = yaml.safe_load((root / 'harness/g1-task-contract-profiles.yaml').read_text())
+        profile = yaml.safe_load((root / 'harness/phase-task-contract-profiles.yaml').read_text())
         for entry in profile['profiles'].values():
             for locator in entry['required_inputs']:
                 if locator.startswith('docs/'):
@@ -236,6 +236,12 @@ class DocumentationTests(unittest.TestCase):
     def test_repository_projections_match(self):
         root = Path(__file__).resolve().parents[2]
         self.assertEqual(policy_projection.run(root), [])
+
+    def test_projection_preserves_indented_sibling_after_block_mapping(self):
+        source = 'execution:\n  model:\n    name: old\n  caller_field_schema:\n    goal: string\n'
+        updated = policy_projection.replace_block(source, 'execution.model', {'name': 'new'})
+        self.assertEqual(yaml.safe_load(updated), {'execution': {
+            'model': {'name': 'new'}, 'caller_field_schema': {'goal': 'string'}}})
 
 
 if __name__ == '__main__':

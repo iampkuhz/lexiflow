@@ -1,0 +1,17 @@
+{
+  "name": "lexiflow-chrome-extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "e2e": "npm run build && node tests/translation-e2e.mjs"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.40",
+    "playwright": "1.59.1",
+    "typescript": "5.9.3",
+    "esbuild": "^0.25.0"
+  }
+}

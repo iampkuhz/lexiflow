@@ -13,20 +13,20 @@
 - **则** 客户端保持英文字幕可见。
 - **并且** 系统静默降级或仅使用已缓存的通用提示。
 
-### 1.2. 模块化单体拥有明确领域
+### 1.2. 模块化单体拥有明确边界
 
-Content、Lexicon、Semantic、Enrichment、Client Delivery 与 Platform 必须有明确 owner；模块不得直接读写其他 Domain 拥有的数据。
+Lexicon 与 Enrichment 是业务领域；`workflow` 是应用协调层；`:platform:adapters` 承接具体技术集成；`api` 和 `worker` 是组合根。`CaptionContext`、语义任务和语义结果是 Enrichment 的合同，不是独立领域或 Gradle 项目。模块不得直接读写其他领域拥有的数据。
 
 #### 场景：提示编排查询词汇材料
 
-- **假定** Enrichment 需要判断一个候选 span 是否值得提示。
+- **假定** Enrichment 需要判断一个候选词段是否值得提示。
 - **当** 它读取词频、词义或短语资料。
-- **则** 它通过 Lexicon 的公开 contract 获取版本化材料。
+- **则** 它通过 Lexicon 的公开合同获取版本化材料。
 - **并且** 不直接查询 Lexicon 的持久化表。
 
 ### 1.3. Rules 与 Models 分离
 
-确定性策略负责是否值得提示；Semantic Provider 负责上下文消歧和中文表达。提示决策不得依赖账号、设备、个人档案、行为反馈或用户学习状态。
+确定性策略负责是否值得提示；Enrichment 的语义任务负责上下文消歧和中文表达，`:platform:adapters` 实现供应商调用。提示决策不依赖账号、设备、服务端个人档案或自动行为归约。
 
 #### 场景：常见词语
 
@@ -35,16 +35,16 @@ Content、Lexicon、Semantic、Enrichment、Client Delivery 与 Platform 必须�
 - **则** NeedHintPolicy 可直接抑制该候选。
 - **并且** 不为该决策强制调用远端模型。
 
-### 1.4. 生成、投递与展示分离
+### 1.4. 本机显式学习反馈
 
-Annotation 生成与投递不得自动产生 `HintDisplayed` 或 `HintClicked`。首版不采集展示、点击、known/unknown 或其他个人学习行为。
+扩展只在用户明确选择“不再提示”时，以词段和词库版本写入本机 `SuppressedTermPreference`。它只过滤同一浏览器安装中的后续匹配提示；不得上传该动作、从显示/点击/停留推断熟悉度，或形成服务端个人档案、账号和同步状态。
 
-#### 场景：慢语义结果到达已切换的字幕
+#### 场景：用户抑制已熟悉词段
 
-- **假定** worker 已生成并投递一个 hint。
-- **当** 客户端发现原 caption 已失效而没有渲染它。
-- **则** 客户端丢弃该提示。
-- **并且** 不上报展示或点击事件。
+- **假定** 当前提示与一个已定位词段、词库版本匹配。
+- **当** 用户明确选择“不再提示”。
+- **则** 扩展在本机写入该词段的抑制偏好。
+- **并且** 同一安装后续得到相同匹配结果时不渲染该提示。
 
 ### 1.5. Pending work 有持久证据
 
@@ -57,12 +57,13 @@ Enrichment fast result 可以标示语义结果 pending，但只有 durable hand
 - **则** fast result 仍可返回英文安全的确定性结果。
 - **并且** 不声称存在已排队的 slow completion。
 
-### 1.6. YouTube 是 Content Adapter
+### 1.6. YouTube 是唯一 P1 来源合同
 
-YouTube 特有字幕与播放器细节必须停留在客户端/适配器边界，核心 Enrichment 与 Semantic 使用平台无关 contract。
+YouTube 特有字幕与播放器细节必须停留在客户端/来源适配器边界，适配器只产生 Enrichment 的平台无关 `CaptionContext`。P1 不要求网页、PDF、播客或其他来源的合同、示例或实现。
 
-#### 场景：接入 PDF
+#### 场景：字幕不可用
 
-- **假定** 后续提供一个 PDF Content Adapter。
-- **当** 它产生规范化内容片段和上下文。
-- **则** 现有 Lexicon、Semantic 与 Enrichment 核心可以复用。
+- **假定** 来源无法提供可靠的英文字幕、位置或修订。
+- **当** 来源适配器准备构造 `CaptionContext`。
+- **则** 它不伪造转写、位置或提示。
+- **并且** 客户端安全降级为仅英文。

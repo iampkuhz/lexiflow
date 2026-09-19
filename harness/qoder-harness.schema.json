@@ -20,7 +20,7 @@
     },
     "required_context": {
       "type": "array",
-      "minItems": 4,
+      "minItems": 3,
       "items": {
         "type": "object",
         "additionalProperties": false,

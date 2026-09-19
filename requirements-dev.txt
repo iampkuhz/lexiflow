@@ -1,0 +1,2 @@
+# Gate/catalog parsing is a declared runtime dependency, not an implicit local installation.
+PyYAML>=6.0,<7

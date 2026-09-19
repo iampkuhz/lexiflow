@@ -96,17 +96,10 @@ decision_record:
   required: false
   required_when:
     - "The task makes a material architecture, contract, security, data, or cost choice."
-    - "A phase Gate requires an alternatives and trade-off record."
-  options:
-    - name: "Option A"
-      description: "<approach>"
-      benefits: ["<benefit>"]
-      costs: ["<cost or risk>"]
-    - name: "Option B"
-      description: "<approach>"
-      benefits: ["<benefit>"]
-      costs: ["<cost or risk>"]
-  recommendation: "<recommended option and reason>"
+    - "A phase Gate requires selected decisions with trade-off rationale and revisit conditions."
+  selected_decision: "<the single decided approach>"
+  trade_off_rationale: "<accepted cost or boundary and why it is appropriate>"
+  revisit_condition: "<observable condition that requires a new OpenSpec decision>"
   user_confirmation_required: false
   user_confirmation_required_when:
     - "The task is a phase Gate."
@@ -151,9 +144,11 @@ execution:
     max_total_runs_per_task_before_main_review: 2
     max_prompt_characters: 8000
     dispatch_unit: "coherent-work-package"
-    work_package_estimated_minutes: {min: 180, max: 360}
-    work_package_estimate_source: "exact-sum-of-current-catalog-task-estimates"
-    minimum_catalog_tasks: 2
+    work_package_estimated_minutes:
+      min: 10
+      max: 360
+    work_package_estimate_source: caller-declared-estimate-or-exact-current-catalog-sum-when-catalog-is-used
+    minimum_catalog_tasks: 1
     agent_profile_required: true
     harness_manifest_required: true
     structured_result_required: true
@@ -185,17 +180,35 @@ execution:
     full_context_or_logs_in_callback: false
     delegation_work_package:
       unit: coherent-set-of-catalog-tasks
-      identity_fields: [work_package_id, task_ids]
+      identity_fields:
+      - work_package_id
+      - task_ids
       work_package_id_rule: caller-stable-non-run-identity
       task_ids_rule: exact-ordered-catalog-task-identities
       per_task_outcome_evidence_required: true
-      preferred_minutes: {min: 120, max: 360}
-      minimum_total_estimated_minutes: 120
+      preferred_minutes:
+        min: 10
+        max: 360
+      minimum_total_estimated_minutes: 10
       target_maximum_total_estimated_minutes: 360
-      minimum_catalog_tasks: 2
-      must_share: [primary_owner, contract_boundary, compatible_write_scope]
-      required_outcomes: [implementation_or_design, direct_validation, acceptance_evidence]
-      main_agent_only_when: [single_file_fix, single_command_validation, isolated_read_only_review]
+      minimum_catalog_tasks: 1
+      must_share:
+      - primary_owner
+      - contract_boundary
+      - compatible_write_scope
+      required_outcomes:
+      - implementation_or_design
+      - direct_validation
+      - acceptance_evidence
+      proactive_dispatch:
+        threshold_minutes: 10
+        prefer_when:
+        - isolated-subtask-requires-large-new-context
+        - acceptance-is-confirmable-by-compact-result-or-deterministic-command
+        - non-overlapping-write-scope
+      main_agent_only_when:
+      - deterministic-task-at-or-under-10-minutes
+      - isolated_read_only_review
       turn_or_token_count_is_not_acceptance_evidence: true
   main_session:
     callback_first: true
@@ -260,45 +273,67 @@ handoff_contract:
   - effect_checks
   - risks
   current_runner_adapter:
-    enforced_caller_fields: ["goal", "task_id", "task_source", "task_version", "change_version", "work_package_id", "task_ids", "task_versions", "change_versions", "estimated_minutes", "primary_owner", "contract_boundary", "agent_profile", "harness_manifest", "allowed_files", "forbidden_files", "required_context", "expected_output", "acceptance_criteria", "acceptance_evidence", "validation_command", "failure_policy", "parent_client"]
+    enforced_caller_fields:
+    - goal
+    - task_id
+    - task_source
+    - task_version
+    - change_version
+    - work_package_id
+    - task_ids
+    - task_versions
+    - change_versions
+    - estimated_minutes
+    - primary_owner
+    - contract_boundary
+    - agent_profile
+    - harness_manifest
+    - allowed_files
+    - forbidden_files
+    - required_context
+    - expected_output
+    - acceptance_criteria
+    - acceptance_evidence
+    - validation_command
+    - failure_policy
+    - parent_client
     target_schema_enforced: true
     runtime_identity_enforced: true
     result_fields_required_in_prompt: true
     agent_profile_cli_binding: true
     harness_manifest_preflight: true
-    catalog_package_preflight: true
-    catalog_estimate_rule: "exact-sum-180-to-360"
+    catalog_package_preflight: advisory-when-present
+    catalog_estimate_rule: caller-10-to-360-or-exact-current-catalog-sum-when-catalog-is-used
     structured_result_required: true
-    implementation_status: "IMPLEMENTED"
-    conformance_test: "tests/harness/test_qoder_runner.py"
-    owner_task: "LF-TSK-QLT-0006"
+    implementation_status: IMPLEMENTED
+    conformance_test: tests/harness/test_qoder_runner.py
+    owner_task: LF-TSK-QLT-0006
     owner_task_version: 2
-    owner_change_version: "2.0.0"
+    owner_change_version: 2.0.0
   caller_field_schema:
-    goal: "non-empty-string"
-    task_id: "stable-task-id-string"
-    task_source: "non-empty-string"
-    task_version: "positive-integer"
-    change_version: "semver-string"
-    work_package_id: "stable-work-package-id-string"
-    task_ids: "ordered-unique-list-minimum-two"
-    task_versions: "exact-task-id-to-positive-integer-map"
-    change_versions: "exact-task-id-to-semver-map"
-    estimated_minutes: "integer-180-to-360"
-    primary_owner: "non-empty-string"
-    contract_boundary: "non-empty-string"
-    agent_profile: "project-qoder-agent-name"
-    harness_manifest: "repository-relative-hash-bound-json"
-    allowed_files: "non-empty-string"
-    forbidden_files: "non-empty-string"
-    required_context: "non-empty-string"
-    expected_output: "non-empty-string"
-    acceptance_criteria: "non-empty-list-of-strings"
-    acceptance_evidence: "non-empty-list-of-strings"
-    validation_command: "non-empty-string"
-    failure_policy: "non-empty-string"
-    parent_client: "exact-string-codex"
-
+    goal: non-empty-string
+    task_id: stable-task-id-string
+    task_source: non-empty-string
+    task_version: positive-integer
+    change_version: semver-string
+    work_package_id: stable-work-package-id-string
+    task_ids: ordered-unique-list-minimum-one
+    task_versions: exact-task-id-to-positive-integer-map
+    change_versions: exact-task-id-to-semver-map
+    estimated_minutes: integer-10-to-360
+    primary_owner: non-empty-string
+    contract_boundary: non-empty-string
+    agent_profile: project-qoder-agent-name
+    harness_manifest: repository-relative-hash-bound-json
+    allowed_files: non-empty-string
+    forbidden_files: non-empty-string
+    required_context: non-empty-string
+    expected_output: non-empty-string
+    acceptance_criteria: non-empty-list-of-strings
+    acceptance_evidence: non-empty-list-of-strings
+    validation_command: non-empty-string
+    failure_policy: non-empty-string
+    parent_client: exact-string-codex
 change_control:
   dispatched_scope_is_immutable: true
   version_rules:

@@ -36,16 +36,18 @@ application_modules:
   workflow-application:
     owns:
     - enrich-caption-use-case
-    - durable-work
-    - delivery-coordination
-    - incremental-delivery
-    - delivery-status
-    - cache-version-contract
     may_depend_on:
     - lexicon
     - enrichment
+  lexicon-application:
+    owns:
+    - lexicon-import-service
+    - version-aware-lexicon-query-service
+    - lexicon-repository-contract
+    may_depend_on:
+    - lexicon
 infrastructure_modules:
-  platform-infrastructure:
+  platform-adapters:
     owns:
     - postgres-integration
     - redis-integration
@@ -57,6 +59,7 @@ infrastructure_modules:
     - lexicon
     - enrichment
     - workflow-application
+    - lexicon-application
 composition_roots:
   api:
     includes:
@@ -72,7 +75,10 @@ client_adapters:
   chrome-extension:
     source_of_truth: false
     first_content_source: youtube
-  future-web:
-    source_of_truth: false
-  future-app:
-    source_of_truth: false
+    owns:
+    - local-suppressed-term-preference
+    constraints:
+    - explicit-user-action-only
+    - local-only-no-upload
+    - no-auto-familiarity-inference
+    - no-account-or-cross-device-sync

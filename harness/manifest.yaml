@@ -19,7 +19,7 @@ agent_contract:
   runtime_manifest: harness/agent-runtime.manifest.yaml
   module_boundaries: harness/module-boundaries.yaml
   gate_check_registry: harness/gate-check-registry.yaml
-  g1_task_contract_profiles: harness/g1-task-contract-profiles.yaml
+  task_contract_profiles: harness/phase-task-contract-profiles.yaml
   java_product: harness/java-product.manifest.yaml
   documentation_policy: harness/documentation-policy.yaml
   policy_projections: harness/policy-projections.yaml
@@ -34,8 +34,10 @@ public_executables:
   docs_check: python3 -m scripts.harness.docs_check
   policy_projection: python3 -m scripts.harness.policy_projection
   local_skills: python3 -m scripts.harness.local_skills
+  local_codex_runtime: python3 -m scripts.harness.local_codex_runtime
   quality_gate: python3 scripts/gates/cli.py
   java_gradle: python3 scripts/toolchain/java_gradle.py
+  postgres_test: python3 scripts/toolchain/postgres_test.py verify --scope all
   task_contract_check: python3 -m scripts.gates.task_contracts --task-id LF-TSK-...
   registry_profile_check: python3 -m scripts.gates.registry_profiles --root . --check
   qoder_task: python3 scripts/harness/qoder_task.py
@@ -58,6 +60,10 @@ docs:
 - docs/architecture/boundaries.md
 - docs/architecture/flows.md
 - docs/architecture/semantic-contract.md
+- docs/architecture/data-model.md
+- docs/architecture/lexicon-contract.md
+- docs/architecture/caption-contract.md
+- docs/architecture/data-contracts.md
 - docs/architecture/runtime-safety.md
 - docs/architecture/source-contract.md
 - docs/architecture/decisions.md
@@ -67,6 +73,7 @@ docs:
 - docs/development/toolchain-reproduction.md
 - docs/roadmap/master-plan.md
 - docs/roadmap/phase-1-status.md
+- docs/roadmap/phase-2-status.md
 - openspec/specs/product-architecture/spec.md
 - openspec/specs/agent-execution/spec.md
 local_only:

@@ -3,6 +3,16 @@ schema_version: 1
 source: harness/agent-policy.manifest.yaml
 projections:
 - file: harness/agent-runtime.manifest.yaml
+  target: callback_and_fallback
+  fields:
+    completion_record_first: qoder_delegation.completion_callback.completion_record_first
+    callback_target: qoder_delegation.completion_callback.target
+    main_llm_poll_loop_forbidden: qoder_delegation.lifecycle.llm_polling_forbidden
+    parent_after_dispatch: qoder_delegation.lifecycle.parent_after_dispatch
+    llm_fallback_probes: qoder_delegation.lifecycle.llm_fallback_probes
+    pending_result_query: qoder_delegation.lifecycle.pending_result_query
+    no_llm_watchdog: qoder_delegation.lifecycle.no_llm_watchdog
+- file: harness/agent-runtime.manifest.yaml
   target: subagent_protocol.status_values
   source: subagent_protocol.status_values
 - file: harness/agent-runtime.manifest.yaml

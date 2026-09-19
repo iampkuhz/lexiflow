@@ -6,15 +6,102 @@
 - `agent-runtime.manifest.yaml`：客户端拥有 Session/checkout 的最小运行契约。
 - `agent-policy.manifest.yaml`：隐私、Git、子任务、Qoder 调度和结果语义。
 - `gate-check-registry.yaml`：按 catalog 顺序冻结的 fixed-command 检查清单。
-- `g1-task-contract-profiles.yaml`：G1 文档型任务的封闭输入与语义断言；不包含自由命令。
+- `phase-task-contract-profiles.yaml`：阶段文档型任务的封闭输入与语义断言；不包含自由命令。
 
 `python3 -m scripts.gates.registry_profiles --root . --check` 验证 profile、catalog 与
 registry 的确定性投影。`python3 -m scripts.gates.task_contracts --task-id <exact-id>`
 只接受 profile 中的稳定 Task；`LF-TSK-ARCH-0008` 在缺少精确用户批准标记时返回
 `BLOCKED`。
 
+## Python 运行环境
+
+Gate 使用 PyYAML；不要依赖系统 `python3` 恰好已安装。首次在本机执行：
+
+```bash
+python3 -m venv .local/lexiflow-python
+.local/lexiflow-python/bin/pip install -r requirements-dev.txt
+```
+
+之后将上述解释器替换为命令前缀，例如
+`.local/lexiflow-python/bin/python -m scripts.gates.planning --root .`。`.local/` 是忽略的本机运行环境，不是 Gate evidence。
+
 运行证据写入 ignored 的 `tmp/quality/runs/<run-id>/`；Qoder 任务写入
 `tmp/qoder-tasks/<run-id>/`。Harness 不保存产品运行状态，也不把 active change 当成普通写入的权限令牌。
+
+## 执行请求与启动诊断
+
+执行请求的收尾与接手规则见 `agent-policy.manifest.yaml.execution_progress` 和
+`qoder_delegation.exhausted_budget_recovery`。预计超过 10 分钟且写入范围可隔离的任务，
+应优先评估 Qoder；需要加载大量新上下文、但可由少量产物或确定性命令验收的子任务也应优先派发。
+`qoder_task.py preflight --task <task.json>`
+同时检查静态输入与只读的 `start` 资格快照；已知阻塞输出 `BLOCKED` 和
+`blocking_findings`，非零退出。预检不创建运行、不证明在线账号健康或实际启动。
+`start/resume` 仍在锁内复查；派发后按明确 run id 核对启动和回调，不能用预检
+或“下一步会启动”替代实际进展。`planning/workstreams.yaml` 中的 Catalog 是项目任务清单；
+它存在且与 handoff 一致时会提供 owner、版本、估时和文件范围的额外核对，但不是派发前提。
+核心 handoff 已具备身份、受限写入范围、验收、验证命令、agent profile 与规则上下文时，
+无关 Catalog 漂移或非核心范围冲突不得阻断派发。预算耗尽与阶段出口缺收据分别处理，不通过
+改 Task identity 重置预算，也不把 Qoder 无法执行误判为必须停止整个 Task。
+
+Runner 加载 Qoder 的 `user,project,local` 配置源，保留用户已配置的模型/provider；
+仓库 profile、禁止递归委派和显式权限参数仍由 runner 绑定。历史账号失败不是当前
+健康探测；用户确认恢复后，`preflight` 与 `start/resume` 均接受
+`--runtime-recovery-confirmed`。预检确认不持久化为启动授权，实际启动须再次显式传入，
+且不跳过尝试预算、并发或未知运行护栏。
+Qoder 落盘后用 `qoder_task.py validate-result <run-id>` 检查结果结构再结束；
+此命令只验证 schema/identity，不结束运行、不发布 Gate、不将结果中的 PASS 当作验收。
+派发时 runner 会在同一 run 目录写入 `result.template.json`：它已绑定身份并保留
+`task_ids` 顺序的 `outcomes` 数组。Qoder 必须复制为 `result.json` 后再填写事实；模板
+本身不是 result、不构成完成或验收，也不会让未写 `result.json` 的零退出通过。
+
+`start/resume` 以 JSON 返回 `run_id`、`AWAITING_CALLBACK` 和 continuation 路径。
+主线程收到 `end-current-turn-await-callback` 后立即结束本轮，不以 sleep、时钟、
+status/result 或读取日志等待；只有终态回调唤醒后才核对产物并 ack。新运行未终态时
+status/result 返回交接状态并退出 3；终态未 ack 不允许在该仓库继续派发。旧重复回调
+若已经 ack/superseded，直接结束，不再验证或派发。Python runner 不能代替宿主终止
+LLM 回合；结束回合是主 Agent 必须执行的交接动作。
+
+同一 OS 用户所有 checkout 共用 `~/.cache/lexiflow/qoder-cli.lock`，锁由 dispatcher
+传递给 worker 和 CLI，直到真实 CLI 退出；不把仓库锁或 ps 快照当作跨 checkout 互斥。
+该机制覆盖本 Harness，外部直接启动的 Qoder 仅能通过进程预检发现。
+
+## 本机 Gate 身份与收据入口
+
+先在当前仓库的 Codex 任务中运行 `python3 scripts/gates/cli.py doctor`。它只核对本机
+runtime 与 authority 配置，不运行交付检查、不签发验收。默认 adapter 读取 Codex
+session metadata 首行并核对实际 session、用户和 workspace；环境变量仅用于定位。
+这是**信任本机用户的来源校验**，不是平台加密认证，不能抵御同一用户恶意改写记录。
+同一 session 始终是同一 actor；同宿主无独立 session 的子代理不能充当独立签发者。
+
+1. 产物执行者先完成当前 Task，保存真实 diff、snapshot、测试记录及完整结果。
+   Main singleton 可用 `python3 -m scripts.harness.local_codex_runtime --task-id <exact-id>`
+   绑定真实身份和当前合同；该命令只生成 binding/projection，不声称工作完成。
+2. 执行者使用 `scripts/harness/codex_work_package.py` / `scripts/gates/evidence_packet.py`
+   现有 materializer 冻结完整来源，明确交付唯一 evidence packet locator。
+   `LEXIFLOW_GATE_EVIDENCE_PACKET` 只是这个路径的传递方式，不是用户编写的 identity JSON。
+3. 在**不同真实 Codex 任务会话**执行
+   `python3 scripts/gates/cli.py run --mode incremental --evidence-packet <locator>`。
+   未传 issuer 时，由 adapter 自动生成一次新鲜 authority evidence 与 issuer；显式传入的
+   过期 issuer 不会偷偷替换，旧文件也不会更新时间。该命令实际执行 TASK_VALIDATION。
+4. 独立 reviewer 消费 validation receipt、冻结 diff 和只读 review evidence；随后按原有
+   INDEPENDENT_REVIEW、CATALOG_DECISION 合同串行发布收据，后两层不得重跑交付命令。
+   Reviewer 必须同时独立于产物执行者和 validation issuer，不能只换 actor 名称。
+   review/catalog 的 typed evidence 先用
+   `python3 scripts/gates/evidence_packet.py publish-layer-evidence --input <canonical-json> --publication-id <uuid-v4>`
+   发布成不可变 descriptor，再由 `prepare-layer` 绑定到本层 packet；该命令只保存 reviewer
+   已明确给出的 decision/findings/receipt descriptors，绝不默认 PASS 或签发 Gate。
+5. G1 闭包及出口的三层收据全部 current/PASS，且用户批准有效，才可更新阶段状态。
+   `doctor`、绑定成功或静态检查 PASS 均不能替代该条件。
+
+需要先审阅纯 plan 时，先显式运行
+`python3 scripts/gates/cli.py prepare-issuer --evidence-packet <locator> --receipt-kind TASK_VALIDATION`，
+再把返回的 issuer locator 传给 `plan --issuer-packet`。`plan` 本身仍然零写入。
+缺 subject evidence、真实来源失效、输入漂移或自审均应停止并报告具体缺项；不再要求
+用户提供本仓库未接入的 Desktop 受保护 attestation 服务，也不扫描旧目录猜测本次 evidence。
+
+`planning/workstreams.yaml` 是全量 catalog。Task receipt 的 `task_source.sha256` 是目标 Task
+加所属 workstream 的 canonical projection hash，而不是整份 YAML 的 hash；因此其他 Task 的
+新增、版本更新或状态改动不会使该 Task 的 receipt 过期，目标 Task 自身、owner 或依赖改动仍会。
 
 ## 共享策略与文档治理
 

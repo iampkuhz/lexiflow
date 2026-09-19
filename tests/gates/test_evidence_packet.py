@@ -70,7 +70,16 @@ class FixtureRepo:
 
     def _build(self):
         self.task_source_path = "planning/workstreams.yaml"
-        self.task_source_content = b"# LF-TSK-QLT-0007 fixture\n"
+        self.task_source_content = b"""schema_version: lexiflow.workstreams.v1
+workstreams:
+- id: LF-WS-QLT
+  epics:
+  - capabilities:
+    - seed_tasks:
+      - id: LF-TSK-QLT-0007
+        task_version: 1
+        change_version: 1.0.0
+"""
         _write_file(os.path.join(self.root, self.task_source_path), self.task_source_content)
         self.task_source_sha = _hash_bytes(self.task_source_content)
 
@@ -881,6 +890,20 @@ class TestSymlinkAncestors(unittest.TestCase):
                 os.rmdir(real_parent)
             except OSError:
                 pass
+
+    def test_only_macos_var_compatibility_alias_is_exempt(self):
+        with (
+            mock.patch.object(evidence_packet.sys, "platform", "darwin"),
+            mock.patch.object(evidence_packet.os.path, "islink", side_effect=lambda path: path == "/var"),
+            mock.patch.object(evidence_packet.os, "readlink", return_value="private/var"),
+        ):
+            evidence_packet._check_path_components_for_symlinks("/var/folders/repository")
+        with (
+            mock.patch.object(evidence_packet.sys, "platform", "darwin"),
+            mock.patch.object(evidence_packet.os.path, "islink", side_effect=lambda path: path == "/custom"),
+        ):
+            with self.assertRaisesRegex(EvidencePacketError, "symlink in path: /custom"):
+                evidence_packet._check_path_components_for_symlinks("/custom/repository")
 
     def test_artifact_ancestor_swap_cannot_read_outside_repository(self):
         inp = _build_valid_input(self.fixture)
@@ -2918,6 +2941,150 @@ class TestCodexWorkPackageProjection(unittest.TestCase):
         with self.assertRaises(EvidencePacketError) as raised:
             self._materialize()
         self.assertEqual(raised.exception.code, "IDENTITY_DRIFT")
+
+
+class LayerPacketTest(unittest.TestCase):
+    def setUp(self):
+        from tests.gates.test_gate_planner import RealPlannerFixture
+        from tests.gates.test_local_issuer import host_record
+        from unittest.mock import patch
+        self.fixture = RealPlannerFixture()
+        self.addCleanup(self.fixture.cleanup)
+        self.root = self.fixture.root
+        self.home = self.root / 'host'
+        self.sid = str(uuid.uuid4())
+        host_record(self.home, self.root, self.sid)
+        env = patch.dict(os.environ, CODEX_HOME=str(self.home), CODEX_THREAD_ID=self.sid,
+                         CODEX_SESSION_ID=self.sid)
+        env.start(); self.addCleanup(env.stop)
+        source = self.fixture.evidence_packet
+        self.validation = {
+            'receipt_kind': 'TASK_VALIDATION',
+            'task': {k: source['task'][k] for k in ('task_id', 'task_version', 'change_version')},
+            'validation': {'raw_artifacts': copy.deepcopy(source['subject']['raw_artifacts'])},
+        }
+        self.validation_ref = self.write('tmp/layer/validation.json', self.validation)
+        self.evidence = {'schema_version': 'lexiflow.independent-review-evidence.v1',
+                         'validation_receipt': self.validation_ref, 'review_scope': {},
+                         'reviewer_changed_files': [], 'findings': [],
+                         'rerun_evidence': [self.validation_ref], 'decision': 'BLOCKED'}
+        self.write('tmp/layer/kind.json', self.evidence)
+        self.write('tmp/layer/snapshot.json', {'schema_version': 'lexiflow.changed-file-snapshot.v1', 'files': {}})
+        (self.root / 'tmp/layer/review.diff').write_bytes(b'')
+
+    def write(self, locator, value):
+        data = evidence_packet.canonical_json(value); p = self.root / locator
+        p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(data)
+        return {'locator': locator, 'sha256': _hash_bytes(data)}
+
+    def prepare(self):
+        return evidence_packet.prepare_layer_packet(self.root, subject_packet=self.fixture.evidence_locator,
+                       kind_evidence='tmp/layer/kind.json', snapshot='tmp/layer/snapshot.json',
+                       diff='tmp/layer/review.diff')
+
+    def test_keeps_producer_and_explicit_blocked_review_without_issuance(self):
+        before = (self.root / 'tmp/layer/kind.json').read_bytes()
+        result = self.prepare()
+        packet = verify_packet_strict(self.root, result['locator'], result['sha256'])
+        self.assertEqual(packet['subject']['identity'], self.fixture.evidence_packet['subject']['identity'])
+        self.assertEqual(packet['scope']['changed_files'], [])
+        self.assertEqual(packet['subject']['raw_artifacts']['tests'][0]['locator'], 'tmp/layer/kind.json')
+        self.assertEqual(before, (self.root / 'tmp/layer/kind.json').read_bytes())
+        self.assertEqual(packet['subject']['main_agent_attestation']['actor_id'], 'codex-session-' + self.sid)
+        self.assertFalse((self.root / 'tmp/quality/runs').exists())
+
+    def test_no_implicit_decision_wrong_kind_or_forged_scope(self):
+        for update in ({'decision': None}, {'schema_version': 'TASK_VALIDATION'}, {'reviewer_changed_files': ['subject.py']}):
+            with self.subTest(update=update):
+                self.write('tmp/layer/kind.json', {**self.evidence, **update})
+                with self.assertRaises(ValueError): self.prepare()
+
+    def test_rejects_malformed_rerun_descriptor_before_immutable_publication(self):
+        malformed = copy.deepcopy(self.evidence)
+        malformed['review_scope'] = {
+            'source_snapshot_fingerprint': 'a' * 64,
+            'registry_sha256': 'b' * 64,
+            'policy_sha256': 'c' * 64,
+            'source': self.validation_ref,
+            'diff': self.validation_ref,
+            'changed_files': [],
+        }
+        malformed['rerun_evidence'] = [{**self.validation_ref, 'kind': 'not-a-descriptor'}]
+        self.write('tmp/layer/kind.json', malformed)
+        with self.assertRaisesRegex(ValueError, 'rerun_evidence\\[0\\] must be an exact descriptor'):
+            evidence_packet.publish_layer_evidence(
+                self.root, input_path='tmp/layer/kind.json', publication_id=str(uuid.uuid4())
+            )
+
+    def test_validation_identity_or_hash_drift_rejected(self):
+        for changed in ('hash', 'task'):
+            with self.subTest(changed=changed):
+                evidence = copy.deepcopy(self.evidence)
+                if changed == 'hash': evidence['validation_receipt']['sha256'] = '0' * 64
+                else:
+                    value = copy.deepcopy(self.validation); value['task']['task_id'] = 'LF-TSK-QLT-9999'
+                    evidence['validation_receipt'] = self.write('tmp/layer/other.json', value)
+                self.write('tmp/layer/kind.json', evidence)
+                with self.assertRaises(ValueError): self.prepare()
+
+    def test_catalog_evidence_carrier_does_not_decide_pass(self):
+        self.write('tmp/layer/kind.json', {'schema_version': 'lexiflow.catalog-decision-evidence.v1',
+                   'task_validation': self.validation_ref, 'independent_review': self.validation_ref,
+                   'required_dependency_receipts': [], 'acceptance_case_registry': self.validation_ref})
+        result = self.prepare()
+        self.assertTrue(result['locator'].startswith('tmp/quality/evidence/'))
+        # A carrier is not a receipt: real publisher will reject invalid kind refs.
+        self.assertFalse((self.root / 'tmp/quality/runs').exists())
+
+    def test_catalog_layer_evidence_accepts_identity_bound_dependency_descriptor(self):
+        catalog = {
+            'schema_version': 'lexiflow.catalog-decision-evidence.v1',
+            'task_validation': self.validation_ref,
+            'independent_review': self.validation_ref,
+            'required_dependency_receipts': [{
+                'task_id': 'LF-TSK-QLT-0001', 'task_version': 1, 'change_version': '1.0.0',
+                **self.validation_ref,
+            }],
+            'acceptance_case_registry': self.validation_ref,
+        }
+        self.write('tmp/layer/catalog.json', catalog)
+        published = evidence_packet.publish_layer_evidence(
+            self.root, input_path='tmp/layer/catalog.json', publication_id=str(uuid.uuid4())
+        )
+        self.assertTrue(published['locator'].startswith('tmp/quality/layer-evidence/'))
+
+    def test_canonical_evidence_and_explicit_empty_diff_required(self):
+        (self.root / 'tmp/layer/kind.json').write_text(json.dumps(self.evidence, indent=2))
+        with self.assertRaisesRegex(ValueError, 'canonical'): self.prepare()
+        self.write('tmp/layer/kind.json', self.evidence)
+        (self.root / 'tmp/layer/review.diff').write_text('not an observed empty diff')
+        with self.assertRaisesRegex(ValueError, 'read-only'): self.prepare()
+
+    def test_review_template_narrows_catalog_source_to_review_descriptor(self):
+        receipt = {
+            'receipt_kind': 'TASK_VALIDATION',
+            'result': 'PASS',
+            'current_inputs': {
+                'source_snapshot_fingerprint': 'a' * 64,
+                'task_source': {
+                    'locator': 'planning/workstreams.yaml', 'sha256': 'b' * 64,
+                    'catalog_value': 'bounded fixture', 'raw_value': 'planning/workstreams.yaml',
+                },
+                'registry': {'sha256': 'c' * 64},
+                'policy': {'sha256': 'd' * 64},
+            },
+            'validation': {
+                'scope_reconciliation': {'changed_files': ['result.json']},
+                'raw_artifacts': {'diff': {'locator': 'diff', 'sha256': 'e' * 64}},
+            },
+        }
+        self.write('tmp/layer/template-validation.json', receipt)
+        template = evidence_packet.review_evidence_template(
+            self.root, validation_receipt='tmp/layer/template-validation.json'
+        )
+        self.assertEqual(template['review_scope']['source'], {
+            'locator': 'planning/workstreams.yaml', 'sha256': 'b' * 64,
+        })
 
 
 if __name__ == "__main__":

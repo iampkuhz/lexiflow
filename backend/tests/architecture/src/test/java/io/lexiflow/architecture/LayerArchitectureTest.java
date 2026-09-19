@@ -110,6 +110,25 @@ class LayerArchitectureTest {
   }
 
   @Test
+  void modelsAndApplicationDoNotLeakPersistenceDoOrDaoTypes() {
+    noClasses()
+        .that()
+        .resideInAnyPackage(
+            "..domain..", "..application..", "io.lexiflow.api..", "io.lexiflow.worker..")
+        .should()
+        .dependOnClassesThat()
+        .haveSimpleNameEndingWith("DO")
+        .check(PRODUCT_CLASSES);
+    noClasses()
+        .that()
+        .resideOutsideOfPackage("..platform..")
+        .should()
+        .dependOnClassesThat()
+        .haveSimpleNameEndingWith("Dao")
+        .check(PRODUCT_CLASSES);
+  }
+
+  @Test
   void springDependenciesStayInsideAppsAndPlatformAdapters() {
     var selected =
         PRODUCT_CLASSES.stream()

@@ -12,6 +12,7 @@ from scripts.gates.hash_dag import (
     verify_hash_dag_result,
 )
 from scripts.gates.receipt_store import canonical_json_bytes, sha256_bytes
+from scripts.gates.task_source import task_source_descriptor
 
 
 class GraphFixture:
@@ -62,6 +63,115 @@ class GraphFixture:
 
 
 class TestHashDag(unittest.TestCase):
+    @staticmethod
+    def _catalog(task_title="target", extra_task_title="unrelated"):
+        return f"""schema_version: lexiflow.workstreams.v1
+workstreams:
+  - id: LF-WS-QLT
+    epics:
+      - capabilities:
+          - seed_tasks:
+              - id: LF-TSK-QLT-0001
+                title: {task_title}
+              - id: LF-TSK-QLT-0002
+                title: {extra_task_title}
+""".encode()
+
+    def test_task_projection_is_verified_without_becoming_raw_catalog_edge(self):
+        fixture = GraphFixture()
+        self.addCleanup(fixture.cleanup)
+        catalog = fixture.write_bytes("planning/workstreams.yaml", self._catalog())
+        projected = task_source_descriptor(fixture.root, "LF-TSK-QLT-0001")
+        leaf = fixture.write_bytes("tmp/leaf.txt", b"subject")
+        root = fixture.write_json("tmp/evidence.json", {
+            "schema_version": "lexiflow.explicit-evidence-packet.v1",
+            "publication_id": "publication",
+            "task": {"task_id": "LF-TSK-QLT-0001", "task_source": projected},
+            "subject": leaf,
+        })
+        self.assertEqual(verify_hash_dag(str(fixture.root), root)["result"], "PASS")
+
+        # A different task's catalog edit does not stale this task projection.
+        (fixture.root / catalog["locator"]).write_bytes(self._catalog(extra_task_title="changed"))
+        self.assertEqual(verify_hash_dag(str(fixture.root), root)["result"], "PASS")
+
+        # Editing the named task does stale it, even though no raw catalog edge
+        # is followed for the projected descriptor.
+        (fixture.root / catalog["locator"]).write_bytes(self._catalog(task_title="changed"))
+        with self.assertRaisesRegex(HashDagError, "task source projection is stale"):
+            verify_hash_dag(str(fixture.root), root)
+
+    def test_plan_keeps_explicit_raw_catalog_consumed_input_as_byte_edge(self):
+        fixture = GraphFixture()
+        self.addCleanup(fixture.cleanup)
+        catalog = fixture.write_bytes("planning/workstreams.yaml", self._catalog())
+        projected = task_source_descriptor(fixture.root, "LF-TSK-QLT-0001")
+        root = fixture.write_json("tmp/plan.json", {
+            "schema_version": "lexiflow.gate-plan.v1",
+            "task": {"task_id": "LF-TSK-QLT-0001", "task_source": projected},
+            "consumed_inputs": [catalog],
+        })
+        self.assertEqual(verify_hash_dag(str(fixture.root), root)["result"], "PASS")
+        (fixture.root / catalog["locator"]).write_bytes(self._catalog(extra_task_title="changed"))
+        with self.assertRaisesRegex(HashDagError, "changed node bytes: planning/workstreams.yaml"):
+            verify_hash_dag(str(fixture.root), root)
+
+    def test_historical_verification_preserves_frozen_plan_inputs_only(self):
+        fixture = GraphFixture()
+        self.addCleanup(fixture.cleanup)
+        document = fixture.write_bytes("docs/control.md", b"issued input")
+        evidence = fixture.write_bytes("tmp/evidence.txt", b"immutable evidence")
+        root = fixture.write_json("tmp/plan.json", {
+            "schema_version": "lexiflow.gate-plan.v1",
+            "task": {"task_id": "LF-TSK-QLT-0001"},
+            "consumed_inputs": [document],
+            "subject": {"raw_artifacts": {"stdout": evidence}},
+        })
+        (fixture.root / document["locator"]).write_bytes(b"next phase input")
+        with self.assertRaisesRegex(HashDagError, "changed node bytes: docs/control.md"):
+            verify_hash_dag(str(fixture.root), root)
+        self.assertEqual(
+            verify_hash_dag(
+                str(fixture.root), root, historical_workspace_inputs=True,
+            )["result"],
+            "PASS",
+        )
+        (fixture.root / evidence["locator"]).write_bytes(b"mutated evidence")
+        with self.assertRaisesRegex(HashDagError, "changed node bytes: tmp/evidence.txt"):
+            verify_hash_dag(
+                str(fixture.root), root, historical_workspace_inputs=True,
+            )
+
+    def test_historical_verification_does_not_reread_receipt_workspace_metadata(self):
+        fixture = GraphFixture()
+        self.addCleanup(fixture.cleanup)
+        registry = fixture.write_bytes("harness/gate-check-registry.yaml", b"issued registry")
+        policy = fixture.write_bytes("harness/agent-policy.manifest.yaml", b"issued policy")
+        root = fixture.receipt(
+            "44444444-4444-4444-8444-444444444444",
+            "2026-09-16T00:00:00Z", "2026-09-16T00:00:01Z",
+        )
+        receipt = json.loads((fixture.root / root["locator"]).read_bytes())
+        receipt["current_inputs"] = {"registry": registry, "policy": policy}
+        root = self._store_receipt(fixture, root["locator"], receipt)
+        (fixture.root / registry["locator"]).write_bytes(b"next-phase registry")
+        (fixture.root / policy["locator"]).write_bytes(b"next-phase policy")
+        with self.assertRaisesRegex(HashDagError, "changed node bytes: harness/(agent-policy\\.manifest|gate-check-registry\\.yaml)"):
+            verify_hash_dag(str(fixture.root), root)
+        self.assertEqual(
+            verify_hash_dag(
+                str(fixture.root), root, historical_workspace_inputs=True,
+            )["result"],
+            "PASS",
+        )
+        manifest = json.loads((fixture.root / receipt["artifact_manifest"]["locator"]).read_bytes())
+        leaf = manifest["artifacts"][0]
+        (fixture.root / leaf["locator"]).write_bytes(b"tampered immutable evidence")
+        with self.assertRaisesRegex(HashDagError, "changed node bytes: tmp/quality/runs"):
+            verify_hash_dag(
+                str(fixture.root), root, historical_workspace_inputs=True,
+            )
+
     def test_repository_schema_is_hash_bound_opaque_source(self):
         fixture = GraphFixture()
         self.addCleanup(fixture.cleanup)
@@ -76,6 +186,74 @@ class TestHashDag(unittest.TestCase):
         (fixture.root / schema["locator"]).write_bytes(b"changed")
         with self.assertRaisesRegex(HashDagError, "changed node bytes"):
             verify_hash_dag(str(fixture.root), root)
+
+    def test_task_registry_entry_projection_ignores_unrelated_registry_edits(self):
+        fixture = GraphFixture()
+        self.addCleanup(fixture.cleanup)
+        task_id = "LF-TSK-QLT-0010"
+
+        def entry(subject, command):
+            value = {"subject_task_id": subject, "command": command}
+            return {**value, "entry_hash": sha256_bytes(canonical_json_bytes(value))}
+
+        selected = entry(task_id, "selected")
+        registry_locator = "harness/gate-check-registry.yaml"
+        fixture.write_json(registry_locator, {
+            "schema_version": "lexiflow.gate-check-registry.v1",
+            "entries": [selected, entry("LF-TSK-QLT-0001", "other")],
+        })
+        root = fixture.receipt(
+            "55555555-5555-4555-8555-555555555555",
+            "2026-09-16T00:00:00Z", "2026-09-16T00:00:01Z",
+        )
+        receipt = json.loads((fixture.root / root["locator"]).read_bytes())
+        receipt["task"] = {"task_id": task_id}
+        receipt["current_inputs"] = {
+            "registry": {"locator": registry_locator, "sha256": selected["entry_hash"]},
+        }
+        root = self._store_receipt(fixture, root["locator"], receipt)
+        self.assertEqual(verify_hash_dag(str(fixture.root), root)["result"], "PASS")
+
+        # A different Task's entry is not part of this Task's projection.
+        fixture.write_json(registry_locator, {
+            "schema_version": "lexiflow.gate-check-registry.v1",
+            "entries": [selected, entry("LF-TSK-QLT-0001", "changed")],
+        })
+        self.assertEqual(verify_hash_dag(str(fixture.root), root)["result"], "PASS")
+
+        # A changed named entry must still invalidate the receipt.
+        fixture.write_json(registry_locator, {
+            "schema_version": "lexiflow.gate-check-registry.v1",
+            "entries": [entry(task_id, "changed"), entry("LF-TSK-QLT-0001", "changed")],
+        })
+        with self.assertRaisesRegex(HashDagError, "task registry projection is stale"):
+            verify_hash_dag(str(fixture.root), root)
+
+    def test_plan_uses_its_subject_registry_entry_not_registry_file_bytes(self):
+        fixture = GraphFixture()
+        self.addCleanup(fixture.cleanup)
+        task_id = "LF-TSK-QLT-0001"
+
+        def entry(subject, command):
+            value = {"subject_task_id": subject, "command": command}
+            return {**value, "entry_hash": sha256_bytes(canonical_json_bytes(value))}
+
+        selected = entry(task_id, "selected")
+        registry = fixture.write_json("harness/gate-check-registry.yaml", {
+            "schema_version": "lexiflow.gate-check-registry.v1",
+            "entries": [selected, entry("LF-TSK-QLT-0002", "other")],
+        })
+        root = fixture.write_json("tmp/plan.json", {
+            "schema_version": "lexiflow.gate-plan.v1",
+            "task": {"task_id": task_id},
+            "registry": {**registry, "subject_entry_sha256": selected["entry_hash"]},
+        })
+        self.assertEqual(verify_hash_dag(str(fixture.root), root)["result"], "PASS")
+        fixture.write_json("harness/gate-check-registry.yaml", {
+            "schema_version": "lexiflow.gate-check-registry.v1",
+            "entries": [selected, entry("LF-TSK-QLT-0002", "changed")],
+        })
+        self.assertEqual(verify_hash_dag(str(fixture.root), root)["result"], "PASS")
 
     def test_schema_suffix_does_not_hide_runner_evidence(self):
         fixture = GraphFixture()
@@ -262,6 +440,7 @@ class TestHashDag(unittest.TestCase):
         first = _extract_edges(manifest("first"))[0].identity
         second = _extract_edges(manifest("second"))[0].identity
         self.assertNotEqual(first, second)
+
 
 
 if __name__ == "__main__":

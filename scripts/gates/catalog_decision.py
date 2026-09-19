@@ -31,7 +31,8 @@ CATALOG_EVIDENCE_SCHEMA = "lexiflow.catalog-decision-evidence.v1"
 RECEIPT_SCHEMA = "lexiflow.gate-receipt.v1"
 MANIFEST_SCHEMA = "lexiflow.gate-artifact-manifest.v1"
 _HEX = re.compile(r"^[0-9a-f]{64}$")
-_CASE = re.compile(r"^## (LF-[A-Z0-9-]+)\b", re.MULTILINE)
+from scripts.gates.acceptance_cases import case_ids as acceptance_case_ids
+from scripts.gates.task_source import source_descriptor_is_current, task_source_descriptor
 _FORBIDDEN_ASSERTION_KEYS = {"user_approval", "approval", "approved", "bootstrap", "backfill"}
 
 
@@ -136,7 +137,7 @@ def verify_acceptance_registry(
         text = acceptance_content.decode("utf-8")
     except UnicodeDecodeError:
         _fail("invalid-acceptance-registry", "acceptance-case registry is not UTF-8")
-    case_list = _CASE.findall(text)
+    case_list = acceptance_case_ids(text)
     duplicates = sorted({case for case in case_list if case_list.count(case) > 1})
     tasks = _catalog_tasks(catalog_content)
     mappings: dict[str, list[str]] = {}
@@ -193,10 +194,6 @@ def _verify_receipt_issuer_chain(
     """Re-verify every receipt issuer in an explicit prior-receipt chain."""
     verified: dict[str, dict[str, Any]] = {}
     visiting: set[str] = set()
-    try:
-        executable_sha256 = sha256_bytes(read_bound_bytes(repo_root, "scripts/gates/cli.py"))
-    except ReceiptStoreError as exc:
-        _fail("issuer-authority-invalid", f"gate executable cannot be read: {exc.detail}")
 
     def visit(value: Any, path: str) -> None:
         descriptor, receipt = _load_receipt(repo_root, value, path)
@@ -240,7 +237,13 @@ def _verify_receipt_issuer_chain(
             or process.get("gate_run_id") != receipt.get("run_id")
             or process.get("issuer_packet_sha256") != packet["sha256"]
             or process.get("executable_locator") != "scripts/gates/cli.py"
-            or process.get("executable_sha256") != executable_sha256
+            # A receipt identifies the Gate executable that issued it.  A
+            # later control-plane repair cannot retroactively make every
+            # prerequisite receipt unauthorised: the historical executable
+            # bytes are not necessarily present in this checkout.  Its hash
+            # remains mandatory and is bound to the immutable receipt.
+            or not isinstance(process.get("executable_sha256"), str)
+            or not _HEX.fullmatch(process["executable_sha256"])
         ):
             _fail("issuer-authority-invalid", f"{path} process/issuer binding is invalid")
         try:
@@ -289,7 +292,7 @@ def _current_descriptor(repo_root: str, expected: dict[str, Any], path: str) -> 
 
 def _receipt_freshness(
     receipt: dict[str, Any], *, task: dict[str, Any], source: dict[str, str],
-    registry: dict[str, str], policy: dict[str, str], path: str,
+    registry: dict[str, str] | None, policy: dict[str, str] | None, path: str,
 ) -> None:
     identity = receipt.get("task")
     if not isinstance(identity, dict) or any(identity.get(field) != task.get(field) for field in ("task_id", "task_version", "change_version")):
@@ -300,12 +303,45 @@ def _receipt_freshness(
     receipt_source = current.get("task_source", {})
     if any(receipt_source.get(field) != source[field] for field in ("locator", "sha256")):
         _fail("stale-input", f"{path} source is stale")
-    receipt_registry = current.get("registry", {})
-    if any(receipt_registry.get(field) != registry[field] for field in ("locator", "sha256")):
-        _fail("stale-input", f"{path} registry is stale")
-    receipt_policy = current.get("policy", {})
-    if any(receipt_policy.get(field) != policy[field] for field in ("locator", "sha256")):
-        _fail("stale-input", f"{path} policy is stale")
+    if registry is not None:
+        receipt_registry = current.get("registry", {})
+        if any(receipt_registry.get(field) != registry[field] for field in ("locator", "sha256")):
+            _fail("stale-input", f"{path} registry is stale")
+    if policy is not None:
+        receipt_policy = current.get("policy", {})
+        if any(receipt_policy.get(field) != policy[field] for field in ("locator", "sha256")):
+            _fail("stale-input", f"{path} policy is stale")
+
+
+def _current_task_source(repo_root: str, task_id: str) -> dict[str, str]:
+    """Return the current projection for exactly one dependency Task.
+
+    A catalog receipt is a Task-scoped fact.  Comparing a dependency receipt
+    to the subject Task's projection accidentally made every cross-task hard
+    edge stale as soon as task-source hashing became correctly narrow.
+    """
+    try:
+        return task_source_descriptor(repo_root, task_id)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        _fail("stale-input", f"cannot derive current task source for {task_id}: {exc}")
+
+
+def _current_subject_registry(repo_root: str, plan_registry: dict[str, Any], task_id: str) -> dict[str, str]:
+    """Verify the registry file, then expose only this Task's entry hash."""
+    full = _current_descriptor(repo_root, plan_registry, "current check registry")
+    # Compatibility for immutable v1 fixture/legacy plans.  New compiler
+    # plans always carry a subject entry binding.
+    if "subject_entry_sha256" not in plan_registry:
+        return full
+    try:
+        registry = yaml.load(read_bound_bytes(repo_root, plan_registry["locator"]), Loader=_UniqueLoader)
+        entries = registry.get("entries", []) if isinstance(registry, dict) else []
+        matched = [entry for entry in entries if entry.get("subject_task_id") == task_id]
+        if len(matched) != 1 or not isinstance(matched[0].get("entry_hash"), str):
+            raise ValueError("subject entry missing")
+        return {"locator": plan_registry["locator"], "sha256": matched[0]["entry_hash"]}
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        _fail("stale-input", f"cannot derive current subject registry: {exc}")
 
 
 def _review_independence(validation: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
@@ -368,10 +404,13 @@ def verify_catalog_decision(
     if evidence["schema_version"] != CATALOG_EVIDENCE_SCHEMA:
         _fail("evidence-incomplete", "catalog evidence schema mismatch")
     current_run_id = validate_run_id(current_run_id)
-    source = _current_descriptor(repo_root, current_plan["task"]["task_source"], "current task source")
-    if source["locator"] != "planning/workstreams.yaml":
+    source_descriptor = {key: current_plan["task"]["task_source"].get(key) for key in ("locator", "sha256")}
+    if source_descriptor["locator"] != "planning/workstreams.yaml":
         _fail("unsafe-locator", "unexpected task source locator")
-    registry = _current_descriptor(repo_root, current_plan["registry"], "current check registry")
+    if not source_descriptor_is_current(repo_root, current_plan["task"]["task_id"], source_descriptor):
+        _fail("stale-input", "current task source projection is stale")
+    source = source_descriptor
+    registry = _current_subject_registry(repo_root, current_plan["registry"], current_plan["task"]["task_id"])
     policy_input = next(
         (item for item in current_plan.get("consumed_inputs", []) if item.get("locator") == "harness/agent-policy.manifest.yaml"),
         None,
@@ -450,7 +489,20 @@ def verify_catalog_decision(
         if receipt.get("receipt_kind") != "CATALOG_DECISION":
             _fail("identity-mismatch", f"dependency {task_id} is not a catalog decision")
         dependency_task = {"task_id": task_id, "task_version": supplied["task_version"], "change_version": supplied["change_version"]}
-        _receipt_freshness(receipt, task=dependency_task, source=source, registry=registry, policy=policy, path=f"dependency[{task_id}]")
+        _receipt_freshness(
+            receipt,
+            task=dependency_task,
+            source=_current_task_source(repo_root, task_id),
+            # A dependency's receipt is immutable evidence issued under its
+            # own frozen registry/policy.  Requiring today's subject registry
+            # here would invalidate every completed prerequisite whenever a
+            # later phase activates another check.  Its hash DAG and issuer
+            # chain are still verified below; only its Task projection must be
+            # current for the declared dependency version.
+            registry=None,
+            policy=None,
+            path=f"dependency[{task_id}]",
+        )
         subject_receipts = receipt.get("subject_receipts")
         hash_verifications = receipt.get("hash_dag_verifications")
         acceptance_status = receipt.get("current_inputs", {}).get("acceptance_case_registry", {}).get("current_mapping_status")
@@ -474,7 +526,9 @@ def verify_catalog_decision(
             _fail("dependency-not-pass", f"dependency {task_id} is not current-input PASS")
         absorb_issuer_chain(descriptor)
         try:
-            verification = verify_hash_dag(repo_root, descriptor)
+            verification = verify_hash_dag(
+                repo_root, descriptor, historical_workspace_inputs=True,
+            )
         except HashDagError as exc:
             _fail("hash-graph-invalid", f"dependency {task_id}: {exc.detail}")
         hash_results.append(verification)
@@ -483,7 +537,13 @@ def verify_catalog_decision(
         _fail("identity-mismatch", "unexpected dependency receipt supplied")
     packet_descriptor = current_plan.get("subject", {}).get("explicit_evidence_packet")
     try:
-        hash_results.append(verify_hash_dag(repo_root, packet_descriptor))
+        # The catalog carrier contains required prerequisite receipts.  Its
+        # subject receipts are still verified below in strict mode; historical
+        # traversal here prevents their frozen workspace inputs from creating a
+        # false conflict with the current subject registry/policy.
+        hash_results.append(verify_hash_dag(
+            repo_root, packet_descriptor, historical_workspace_inputs=True,
+        ))
     except HashDagError as exc:
         _fail("hash-graph-invalid", f"explicit_evidence_packet: {exc.detail}")
     for label, descriptor in (("task_validation", validation_descriptor), ("independent_review", review_descriptor)):

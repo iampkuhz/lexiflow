@@ -61,7 +61,7 @@ Codex Sub-Agent 同时 MUST 最多一个。一个 Codex 工作包 MUST 聚合至
 
 ### Requirement: Qoder 单运行
 
-Qoder 同时 MUST 最多运行一个任务；前一 run 未确认终态或状态未知时 SHALL NOT 启动下一 run。
+同一宿主 OS 用户的所有 checkout 通过 Harness 派发的 Qoder 同时 MUST 最多运行一个任务；从派发到 CLI 退出 SHALL 连续持有同一文件锁，worker/CLI SHALL 继承该锁。前一 run 未确认终态或回调未 ack 时 SHALL NOT 启动下一 run。外部直接启动 CLI 不受该锁强制控制，进程预检 SHALL 对已观察到的外部运行 fail closed。
 
 #### Scenario: 前一 run 状态未知
 
@@ -72,7 +72,7 @@ Qoder 同时 MUST 最多运行一个任务；前一 run 未确认终态或状态
 
 ### Requirement: 主 Agent 无 busy wait
 
-完成通知 SHALL 优先通过 callback；主 LLM MUST NOT 循环查询。任何兜底检查第一次不得早于 300 秒，后续间隔不得短于 600 秒。
+派发后 SHALL 保存 continuation 并立即交还控制权；主 LLM MUST 结束当前回合，仅由终态 callback 续办。主 LLM MUST NOT sleep、查询时钟、轮询 status/result、进程或日志；不存在 300/600 秒后允许主 LLM 探测的特例。计时探测只属于非 LLM watchdog。新运行未终态的 status/result SHALL 返回交接状态及非零退出码，不提供活跃日志供轮询。Python runner 不能终止宿主 LLM 回合，主 Agent SHALL 遵守返回的 end-current-turn 动作。
 
 #### Scenario: 任务仍在运行
 
@@ -80,6 +80,25 @@ Qoder 同时 MUST 最多运行一个任务；前一 run 未确认终态或状态
 - **When** watchdog 到达检查时点
 - **Then** 非 LLM watchdog MAY 执行一次有界检查
 - **And** 主 LLM SHALL NOT 因无状态变化被反复唤醒
+
+### Requirement: 执行请求与启动资格
+
+明确的启动或继续请求 MUST 以实际派发、同步交付或可核验阻塞收尾，MUST NOT 只承诺下一步后结束。Qoder 预检 MUST 检查静态输入及只读启动资格快照；已知历史、预算、访问或进程阻塞 MUST 返回非零退出的 `BLOCKED`。预检 MUST NOT 分配 run、代表账号健康或代替派发锁内复查。具体执行与接手策略只在共享 policy 中维护。
+
+#### Scenario: 预算耗尽且存在已知访问阻塞
+
+- **Given** 稳定 Task 的 Qoder 尝试预算耗尽，历史终态还记录访问失败
+- **When** 调用启动预检
+- **Then** SHALL 同时报告预算与访问阻塞，不再建议已耗尽的 resume
+- **And** SHALL 保留历史与稳定 Task identity，由 Main 复核后按共享策略选择合规接手
+- **And** SHALL NOT 以新建同义 Task、改名或版本变化重置预算
+
+#### Scenario: 只完成预检或派发
+
+- **Given** 预检返回 PASS，或 start 只返回 run id
+- **When** 主 Agent 汇报执行状态
+- **Then** SHALL 区分预检通过、已派发与已启动
+- **And** SHALL 只使用匹配身份的 started.json 确认 CLI 启动，不以计划或下一步说明替代启动证据
 
 ### Requirement: 真实验收
 
@@ -105,7 +124,11 @@ Main-only singleton 来源 MUST 使用显式 `lexiflow.codex-main-task-projectio
 
 Qoder issuer provenance MUST 接受真实 runner 的 pretty/noncanonical JSON whitespace，并按 locator/hash 冻结原始 task/completion bytes；materializer 与 Planner MUST 同时拒绝 duplicate key、非法 JSON number、identity/version drift、非终态 completion 与 stale authority evidence。Issuer packet、非 Qoder attestation 和 receipt 的 canonical JSON 规则不变。
 
-`client` MUST 只表示工具类型，MUST NOT 单独作为 copied-subject identity 的判据。同客户端或共享真实宿主 session 的不同 verified actor MAY 成为 subject 与 trusted issuer；相同 actor/agent、run、instance 或 replay identity MUST 被拒绝。Actor MUST 在同一真实执行实例的连续 run/attestation 间稳定，MUST NOT 通过更换 nonce/run 伪装独立 reviewer。Session MUST 保留真实会话/路由含义，MUST NOT 随机生成来绕过独立性检查。独立 review MUST 同时排除 subject producer 与 validation issuer，并保持 current input、hash 与零 subject write-set 验证。
+`client` MUST 只表示工具类型，MUST NOT 单独作为 copied-subject identity 的判据。同客户端的不同 verified actor MAY 成为 subject 与 trusted issuer；本地 adapter MUST 以实际 session 为最小独立性单位，同 session 的不同名称 MUST NOT 构成独立 issuer。只有显式受保护 host 集成能够另行证明不同 actor 时，才可共享宿主 session；相同 actor/agent、run、instance 或 replay identity MUST 被拒绝。Actor MUST 在同一真实执行实例的连续 run/attestation 间稳定，MUST NOT 通过更换 nonce/run 伪装独立 reviewer。Session MUST 保留真实会话/路由含义，MUST NOT 随机生成来绕过独立性检查。独立 review MUST 同时排除 subject producer 与 validation issuer，并保持 current input、hash 与零 subject write-set 验证。
+
+本机默认 Codex authority MUST 使用 `codex.local-session.v1`：读取 owned、非共享可写、非 symlink 的当前 session metadata，核对 workspace 与 runtime route，并派生稳定 `codex-session-<session-id>` actor。环境变量只定位来源，MUST NOT 单独证明身份。该模式信任本机用户，MUST NOT 宣称平台加密认证或防御同一用户的恶意改写。共享 session 且无独立来源的子代理 MUST NOT 用于本地独立签发。
+
+公开 `doctor` MUST 只读报告 runtime readiness；`run --evidence-packet` 在没有显式 issuer 时 MUST 从当前独立 session 创建新鲜 authority evidence 与 issuer，再交给原有纯 planner。历史 attestation/receipt MUST NOT 改写、更新时间或自动升级为 current。显式 issuer 仍须严格验证，MUST NOT 隐式替换失效输入；缺少 subject evidence MUST 给出可操作错误而不是要求用户构造 identity JSON。`plan` MUST 保持零写入并要求显式 issuer。
 
 Gate planner MUST 零写入并只选择 versioned registry 中声明的 fixed argv。Run MUST 在任何 checker 执行前先持久化并 flush `START`，再向调用方 flush 包含唯一 `run_id` 和固定 event locator 的可见 `START`；任一 START 步骤失败时 checker MUST NOT 运行。
 

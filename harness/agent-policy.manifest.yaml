@@ -15,6 +15,11 @@ context_hygiene:
   - harness/
   platform_configs_are_entry_points: true
   runtime_state_in_harness: false
+execution_progress:
+  rule: 用户明确要求启动或继续时，在授权范围内实际执行到派发、同步交付或可核验阻塞；不得仅阅读配置、描述下一步后结束，也不得暗示回合结束后会自动继续。
+  dispatch_evidence: start 返回 run_id 仅表示已派发；只有匹配身份的 started.json 才证明 CLI 已启动。预检 PASS、计划和预计动作均不是启动证据。
+  blocked_handoff: 报告实际失败层、阻塞证据与可执行接手路径；可自行完成的准备或合规接手应继续执行，只有缺用户决定、外部恢复或真实执行能力时才交还控制权。
+  asynchronous_dispatch_handoff: Qoder start/resume 返回 AWAITING_CALLBACK 后必须立即结束当前主线程回合；这是实际派发后的控制权交接，不属于只承诺不执行。不得 sleep、查时钟、探测进程/日志或以其他工作保持本轮活跃等待完成。只由终态 callback 续办；重复已 ack/superseded 回调直接结束。
 privacy:
   forbidden_inputs:
   - secrets
@@ -388,15 +393,20 @@ subagent_protocol:
   codex_runtime_binding:
     schema_version: lexiflow.codex-runtime-binding.v1
     implementation: scripts/harness/codex_runtime.py
-    actor_source: trusted-host-or-orchestrator-agent-instance
+    actor_source: owned-local-session-metadata-cross-checked-with-runtime-route
+    local_adapter: scripts/harness/local_codex_runtime.py
+    local_trust_boundary: trusted-local-user-not-platform-cryptographic-attestation
+    local_actor_id: codex-session-<actual-session-uuid>
     actor_stability: same-actual-agent-across-runs-and-attestations
-    session_source: actual-CODEX-SESSION-ID-or-CODEX-THREAD-ID
-    parent_source: runner-bound-exact-parent-route
-    shared_host_session: permitted-for-distinct-verified-actors
+    session_source: actual-session-metadata-id-matching-CODEX-SESSION-ID-or-CODEX-THREAD-ID
+    parent_source: local-root-task-session-or-explicit-protected-host-route
+    shared_host_session: forbidden-for-local-issuer-independence
+    protected_host_adapter: explicit-integration-only-not-default-local-CLI
     caller_identity_injection: forbidden
-    missing_or_fabricated_runtime: FAIL
+    missing_runtime: BLOCKED
+    fabricated_or_conflicting_runtime: FAIL
     binding_publication: immutable-before-projection-and-completion
-    identity_authentication: trusted-host-boundary-not-JSON-structure-or-self-report
+    identity_authentication: local-source-provenance-not-JSON-structure-or-self-report
   canonical_gate_materialization:
     implementation: scripts/harness/codex_work_package.py
     source: fixed-current-canonical-run-and-target-task
@@ -406,8 +416,9 @@ subagent_protocol:
     formal_receipt_issuance: public-gate-cli-only
   codex_main_task_projection:
     schema_version: lexiflow.codex-main-task-projection.v1
-    executor: trusted-runtime-proven-main-agent
-    canonical_actor_id: /root
+    executor: runtime-bound-main-task
+    canonical_actor_id: codex-session-<actual-session-uuid>
+    protected_host_actor_id: /root
     cardinality: one-current-catalog-task
     delegated_projection: mutually-exclusive-minimum-two-tasks-unchanged
     caller_identity_or_executor_kind_authority: forbidden
@@ -418,6 +429,8 @@ qoder_delegation:
   default_implementer: qoder
   default_permission_mode: bypass_permissions
   max_active_runs: 1
+  concurrency_scope: host-os-user-all-checkouts
+  concurrency_enforcement: inherited-exclusive-host-file-lock-through-cli-exit
   scheduling:
     overflow: queue
     next_run_requires_confirmed_completion: true
@@ -426,6 +439,10 @@ qoder_delegation:
     integration_validation: serial
   max_rework_rounds: 1
   max_total_runs_per_task_before_main_review: 2
+  exhausted_budget_recovery:
+    rule: 预算耗尽先由 Main 只读复核历史完成记录与当前输入；这不是整个 Catalog Task 永久禁止推进，也不是再次 Qoder 派发许可。
+    continuation: 复核后保持原稳定 Task identity 与历史数据，按既有规模和身份合同选择 Main 或 Codex 接手；委派遵守当前模型策略，接手者不得自签 validation/review。
+    forbidden: 不得为重置预算而新建同义 Task、改 anchor/package/version、删除运行数据或伪造恢复确认；只有范围真实改变才按变更合同更新版本。
   max_prompt_characters: 8000
   work_package:
     estimated_minutes:
@@ -450,7 +467,9 @@ qoder_delegation:
     - argv-validation-commands
     - exact-package-identity
     - core-handoff-identity-scope-acceptance-and-validation
+    - start-readiness-snapshot-of-terminal-history-attempt-budget-known-access-blockers-and-processes
     catalog_reconciliation: advisory-when-present-not-a-dispatch-prerequisite
+    readiness_boundary: 只读快照不分配 run、不占锁、不验证在线账号健康；BLOCKED 非零退出，start/resume 必须在派发锁内重新检查。
   structured_result:
     schema: lexiflow.qoder-work-package-result.v1
     result_json_required_before_completion: true
@@ -464,11 +483,14 @@ qoder_delegation:
     queued_is_delivery_proof: false
   lifecycle:
     llm_polling_forbidden: true
-    llm_fallback_first_probe_after_seconds: 300
-    llm_fallback_min_subsequent_probe_interval_seconds: 600
-    watchdog_initial_delay_seconds: 300
-    watchdog_interval_seconds: 600
-    watchdog_max_lifetime_seconds: 86400
+    parent_after_dispatch: end-current-turn-await-callback
+    llm_fallback_probes: forbidden
+    pending_result_query: refuse-with-continuation-and-exit-3
+    no_llm_watchdog:
+      initial_delay_seconds: 300
+      interval_seconds: 600
+      max_lifetime_seconds: 86400
+      unchanged_state_is_silent: true
     watchdog_no_llm: true
     explicit_ack_required: true
     ack_is_not_pass: true

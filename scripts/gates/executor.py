@@ -65,7 +65,19 @@ _UNITTEST_COMMAND_IDS = frozenset({
     "qlt.dispatch-preflight.validate.v1",
     "qlt.runner.validate.v1",
 })
-_TASK_CONTRACT_COMMAND_RE = re.compile(r"^g1\.[a-z]+\.\d{4}\.contract\.v1$")
+# Closed document-contract profiles are phase-neutral.  Keep the historical
+# G1 command id readable for old immutable plans while routing all new phases
+# through the stable task-contract namespace.
+_TASK_CONTRACT_COMMAND_RE = re.compile(
+    r"^(?:g1\.[a-z]+\.\d{4}\.contract\.v1|task-contract\.[a-z]+\.\d{4}\.v1)$"
+)
+_POSTGRES_TEST_COMMANDS = {
+    "external.dat.0003.v1": ("python3", "scripts/toolchain/postgres_test.py", "verify", "--scope", "indexes"),
+    "external.dat.0004.v1": ("python3", "scripts/toolchain/postgres_test.py", "verify", "--scope", "all"),
+}
+_LOCAL_STACK_COMMANDS = {
+    "external.ops.0002.v1": ("python3", "scripts/toolchain/local_stack.py", "verify-runtime"),
+}
 
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _TASK_ID_RE = re.compile(r"^LF-TSK-[A-Z]+-\d{4}$")
@@ -177,7 +189,10 @@ def _safe_locator(locator: str) -> str:
 
 def _safe_read_file(repo_root: str, locator: str) -> bytes:
     locator = _safe_locator(locator)
-    root = os.path.abspath(repo_root)
+    # The repository root is the caller's trust anchor.  Canonicalize host
+    # aliases such as macOS `/var` before walking it with `O_NOFOLLOW`, while
+    # retaining the no-symlink rule for every repository descendant.
+    root = os.path.realpath(repo_root)
     dflags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     fflags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
     dirs: list[int] = []
@@ -346,7 +361,10 @@ def _verify_executable_binding(binding: ExecutableBinding) -> bool:
 def _resolve_cwd(repo_root: str, cwd: str) -> str:
     if not isinstance(cwd, str) or not cwd or _CONTROL_RE.search(cwd):
         raise ExecutorError("invalid-cwd", "cwd must be a non-empty string")
-    root = os.path.abspath(repo_root)
+    # See `_safe_read_file`: system aliases above the trusted repository root
+    # must not turn an otherwise regular repository into an invalid cwd.
+    display_root = os.path.abspath(repo_root)
+    root = os.path.realpath(repo_root)
     if "\\" in cwd or os.path.isabs(cwd) or cwd.endswith("/") or "//" in cwd:
         raise ExecutorError("invalid-cwd", f"cwd is not normalized repo-relative POSIX: {cwd}")
     if cwd == ".":
@@ -394,7 +412,7 @@ def _resolve_cwd(repo_root: str, cwd: str) -> str:
                 os.close(descriptor)
             except OSError:
                 pass
-    return root if not relative_parts else os.path.join(root, *relative_parts)
+    return display_root if not relative_parts else os.path.join(display_root, *relative_parts)
 
 
 def _terminate_process_group(pid: int) -> None:
@@ -900,9 +918,37 @@ def _adapt_task_contract(result: ProcessResult, check: dict) -> dict:
     return _fail_outcome("malformed-output", None, None, None, None, None, evidence)
 
 
+def _adapt_controlled_runtime(result: ProcessResult, check: dict) -> dict:
+    """Accept only a canonical terminal record from a registered local runtime."""
+    try:
+        value = json.loads(result.stdout.decode("utf-8", errors="strict"))
+        stderr = result.stderr.decode("utf-8", errors="strict")
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return _fail_outcome("malformed-output", None, None, None, None, None, {})
+    if stderr or not isinstance(value, dict) or value.get("status") not in {"PASS", "BLOCKED", "FAIL"}:
+        return _fail_outcome("malformed-output", None, None, None, None, None, {})
+    if value["status"] == "PASS" and result.return_code == 0:
+        return _pass_outcome(1, 1, 0, 0, 0, extra_evidence={"controlled_runtime": value})
+    if value["status"] == "BLOCKED" and result.return_code != 0:
+        return _blocked_outcome(
+            1, 1, 0, 0, 0, extra_evidence={"controlled_runtime": value}
+        )
+    if value["status"] == "FAIL" and result.return_code != 0:
+        return _fail_outcome(
+            "verification-failed", 1, 1, 1, 0, 0, {"controlled_runtime": value}
+        )
+    return _fail_outcome(
+        "status-exit-mismatch", None, None, None, None, None, {"controlled_runtime": value}
+    )
+
+
 def _select_adapter(argv: list[str], command_id: str) -> Callable | None:
     if not argv:
         return None
+    if command_id in _POSTGRES_TEST_COMMANDS and tuple(argv) == _POSTGRES_TEST_COMMANDS[command_id]:
+        return _adapt_controlled_runtime
+    if command_id in _LOCAL_STACK_COMMANDS and tuple(argv) == _LOCAL_STACK_COMMANDS[command_id]:
+        return _adapt_controlled_runtime
     if len(argv) >= 3 and argv[1] == "-m":
         executable = argv[0]
         if executable == "python3":
@@ -1392,6 +1438,16 @@ def execute_checks(
 
     checks = plan["checks"]
     env = _build_child_environment()
+    # Registered local runtime checks invoke separately declared external tools.
+    # runtime.  Preserve PATH only for a plan that contains one of those exact
+    # fixed commands; the Python executable itself remains hash-bound.
+    if any(
+        check.get("command_id") in (_POSTGRES_TEST_COMMANDS | _LOCAL_STACK_COMMANDS)
+        for check in checks
+    ):
+        host_path = os.environ.get("PATH")
+        if host_path:
+            env["PATH"] = host_path
     env_fingerprint = _environment_fingerprint(env)
 
     results: list[dict] = []

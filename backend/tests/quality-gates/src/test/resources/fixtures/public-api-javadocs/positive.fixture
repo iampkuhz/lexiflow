@@ -1,0 +1,12 @@
+package example;
+
+/** 公开接口说明。 */
+public interface ApiPositive {
+  /**
+   * 根据输入生成稳定结果。
+   *
+   * @param count 含义：待处理项目数量。取值范围：0 至 100。
+   * @return 固定格式的结果。
+   */
+  String render(int count);
+}

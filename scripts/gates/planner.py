@@ -11,6 +11,7 @@ import os
 import re
 import shlex
 import stat
+import sys
 import unicodedata
 import uuid
 from pathlib import PurePosixPath
@@ -18,6 +19,8 @@ from typing import Any
 
 import yaml
 
+from scripts.gates.acceptance_cases import case_ids as acceptance_case_ids
+from scripts.gates.task_source import task_source_hash_from_catalog
 from scripts.gates.evidence_packet import (
     AGENT_ID_PATTERN,
     CODEX_MAIN_TASK_PROJECTION_SCHEMA_VERSION,
@@ -52,7 +55,6 @@ _RFC3339_UTC = re.compile(
     r"T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?Z$"
 )
 _TASK_CRITERION = re.compile(r"^(LF-TSK-[A-Z]+-\d{4})\.acceptance_criteria\[(0|[1-9]\d*)\]$")
-_CASE = re.compile(r"^## (LF-[A-Z0-9-]+)\b", re.MULTILINE)
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 _MAX_SAFE_INT = 9007199254740991
 _LEGACY_REGISTRY_COMMANDS = {
@@ -192,20 +194,35 @@ def _hash(value: Any, path: str) -> str:
     return value
 
 
+def _is_macos_var_compatibility_alias(path: str) -> bool:
+    """Allow only the OS-managed `/var -> /private/var` compatibility alias."""
+    if sys.platform != "darwin" or os.path.normpath(path) != "/var":
+        return False
+    try:
+        return os.readlink(path) in ("private/var", "/private/var")
+    except OSError:
+        return False
+
+
 def _open_root(root: str, expected_inode: tuple[int, int] | None = None) -> int:
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     current: int | None = None
     try:
         current = os.open(os.path.sep, flags)
+        current_path = os.path.sep
         for part in (part for part in os.path.abspath(root).split(os.path.sep) if part):
+            current_path = os.path.join(current_path, part)
             before = os.stat(part, dir_fd=current, follow_symlinks=False)
             if stat.S_ISLNK(before.st_mode):
-                raise PlannerError("symlink-unsafe", f"symlink repository ancestor: {root}")
+                if not _is_macos_var_compatibility_alias(current_path):
+                    raise PlannerError("symlink-unsafe", f"symlink repository ancestor: {root}")
             if not stat.S_ISDIR(before.st_mode):
-                raise PlannerError("unsafe-locator", f"non-directory repository ancestor: {root}")
-            child = os.open(part, flags, dir_fd=current)
+                if not _is_macos_var_compatibility_alias(current_path):
+                    raise PlannerError("unsafe-locator", f"non-directory repository ancestor: {root}")
+            platform_alias = _is_macos_var_compatibility_alias(current_path)
+            child = os.open("/private/var", flags) if platform_alias else os.open(part, flags, dir_fd=current)
             after = os.fstat(child)
-            if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+            if not platform_alias and (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
                 os.close(child)
                 raise PlannerError("input-drift", "repository ancestor changed while opening")
             os.close(current)
@@ -516,12 +533,14 @@ def _authority(packet: dict, registry: dict) -> tuple[dict, dict, list[str]]:
     return authority, actor, allowed
 
 
-def _attestation(packet: dict, evidence: dict, registry: dict, actor: dict) -> str:
+def _attestation(packet: dict, evidence: dict, registry: dict, actor: dict, repo_root: str) -> str:
     actor_type = packet["actor_type"]
     common = {"schema_version", "actor_type", "attestation_id", "audience", "nonce",
               "issued_at", "expires_at", "session_id", "client"}
     if actor_type == "codex":
         expected_keys = common | {"actor_id", "parent_session_id"}
+        if packet["authority"]["verifier_id"] == "codex.local-session.v1":
+            expected_keys.add("runtime_proof")
     elif actor_type == "human":
         expected_keys = common | {"operator_id", "signature"}
     else:
@@ -537,6 +556,16 @@ def _attestation(packet: dict, evidence: dict, registry: dict, actor: dict) -> s
     if actor_type == "codex":
         if evidence.get("actor_id") != packet["actor_id"] or evidence.get("parent_session_id") != packet["parent_session_id"]:
             raise PlannerError("invalid-issuer-packet", "Codex evidence identity mismatch")
+        if "runtime_proof" in evidence:
+            from scripts.harness.local_codex_runtime import verify_proof
+            from scripts.harness.codex_runtime import CodexRuntimeError
+            try:
+                verify_proof(repo_root, evidence["runtime_proof"], {
+                    key: evidence[key] for key in ("actor_id", "session_id", "parent_session_id", "client")
+                })
+            except (CodexRuntimeError, OSError) as exc:
+                raise PlannerError("invalid-issuer-packet", str(exc)) from None
+            return "local-session-attestation"
         return "host-session-attestation"
     field = "operator_id" if actor_type == "human" else "workload_id"
     if evidence.get(field) != packet["actor_id"]:
@@ -641,7 +670,7 @@ def _freeze_issuer(inputs: _Inputs, locator: str, expected: str, receipt_kind: s
             raise PlannerError("invalid-issuer-packet", "qoder run identity mismatch")
     else:
         evidence = _json(evidence_bytes, "authority_evidence", canonical=True)
-        expected_kind = _attestation(packet, evidence, registry, actor)
+        expected_kind = _attestation(packet, evidence, registry, actor, inputs.root)
         expected_provenance = [{"kind": expected_kind, "locator": evidence_locator, "sha256": evidence_hash}]
     if frozen != expected_provenance:
         raise PlannerError("invalid-issuer-packet", "issuer provenance set/order mismatch")
@@ -1209,14 +1238,32 @@ def compile_plan(repo_root: str | os.PathLike[str], *, mode: str, receipt_kind: 
         for descriptor in value if isinstance(value,list) else [value]:
             inputs.get(descriptor["locator"], descriptor["sha256"], mismatch="evidence-drift")
     _, frozen_issuer = _freeze_issuer(inputs, issuer_packet_locator, issuer_packet_sha256, receipt_kind)
+    if frozen_issuer["packet"]["authority"]["verifier_id"] == "codex.local-session.v1":
+        subject_identity = evidence["subject"]["identity"]
+        if (subject_identity["agent_id"] == frozen_issuer["packet"]["actor_id"]
+                or subject_identity["client"] == "codex"
+                and subject_identity["session_id"] == frozen_issuer["packet"]["session_id"]):
+            raise PlannerError("invalid-issuer-packet", "local producer cannot issue its own validation/review")
     source = evidence["task"]["task_source"]
     if source["locator"] != "planning/workstreams.yaml":
         raise PlannerError("unsafe-locator", "task source must use the canonical planning/workstreams.yaml locator")
-    catalog_bytes, catalog_hash = inputs.get(source["locator"], source["sha256"], mismatch="task-source-drift")
+    # ``task_source.sha256`` is deliberately a task projection hash, not the
+    # whole catalog file hash.  Read the catalog as a plan input, then verify
+    # the named task's own canonical projection.
+    catalog_bytes, catalog_hash = inputs.get(source["locator"])
     tasks, owners, expected_subjects = _catalog(_yaml(catalog_bytes, "planning/workstreams.yaml"))
     task_id = evidence["task"]["task_id"]
     if task_id not in tasks: raise PlannerError("missing-task", f"task missing: {task_id}")
     record = tasks[task_id]
+    try:
+        current_task_hash = task_source_hash_from_catalog(_yaml(catalog_bytes, "planning/workstreams.yaml"), task_id)
+    except ValueError as exc:
+        raise PlannerError("invalid-task", str(exc)) from None
+    # New packets bind the named Task projection. A legacy packet may bind the
+    # complete catalog, but only while that exact frozen catalog byte hash is
+    # still current; it cannot conceal a catalog change.
+    if source["sha256"] not in (current_task_hash, catalog_hash):
+        raise PlannerError("task-source-drift", "current task source projection is stale")
     if isinstance(record.get("task_version"), bool) or not isinstance(record.get("task_version"), int) or record["task_version"] <= 0:
         raise PlannerError("invalid-task", "current catalog task_version is invalid")
     if not isinstance(record.get("change_version"), str) or not _SEMVER.fullmatch(record["change_version"]):
@@ -1228,7 +1275,7 @@ def compile_plan(repo_root: str | os.PathLike[str], *, mode: str, receipt_kind: 
             "harness/agent-runtime.manifest.yaml", "harness/manifest.yaml", "docs/product/product-brief.md"):
         inputs.get(locator)
     acceptance_bytes = inputs.data["docs/product/product-brief.md"]
-    try: case_list = _CASE.findall(acceptance_bytes.decode("utf-8"))
+    try: case_list = acceptance_case_ids(acceptance_bytes.decode("utf-8"))
     except UnicodeDecodeError as exc: raise PlannerError("invalid-mapping", f"acceptance registry not UTF-8: {exc}") from None
     if not case_list or len(case_list) != len(set(case_list)):
         raise PlannerError("invalid-mapping", "acceptance registry is empty or has duplicate cases")
@@ -1296,7 +1343,7 @@ def compile_plan(repo_root: str | os.PathLike[str], *, mode: str, receipt_kind: 
             "source": "selected-registry-checks" if delivery_execution else "prior-immutable-receipts",
         },
         "task":{"task_id":task_id, "task_version":evidence["task"]["task_version"], "change_version":evidence["task"]["change_version"],
-            "task_source":{"locator":source["locator"],"sha256":catalog_hash,"raw_value":raw["task_source"],"catalog_value":record.get("task_source")},
+            "task_source":{"locator":source["locator"],"sha256":current_task_hash,"raw_value":raw["task_source"],"catalog_value":record.get("task_source")},
             "goal":raw["goal"],"required_context":raw["required_context"],"expected_output":raw["expected_output"],"failure_policy":raw["failure_policy"],
             "owner":owners[task_id],"discovered_from":record.get("discovered_from"),"validation_command":raw["validation_command"],
             "allowed_files":copy.deepcopy(record.get("allowed_files")),"forbidden_files":copy.deepcopy(record.get("forbidden_files")),
@@ -1308,7 +1355,7 @@ def compile_plan(repo_root: str | os.PathLike[str], *, mode: str, receipt_kind: 
         "issuer_packet":frozen_issuer,"scope":copy.deepcopy(evidence["scope"]),"consumed_inputs":inputs.descriptors(),"checks":checks,
         "expectations":{"acceptance":acceptance_expectations,"effect_checks":effect_expectations,
             "attested_effect_checks":copy.deepcopy(explicit_effects),"risks":risk_expectations},
-        "registry":{"locator":registry_locator,"sha256":registry_hash,"schema_version":registry_value["schema_version"],
+        "registry":{"locator":registry_locator,"sha256":registry_hash,"subject_entry_sha256":matches[0]["entry_hash"],"schema_version":registry_value["schema_version"],
             "registry_version":registry_value["registry_version"],"owner":registry_value["owner"],
             "execution":copy.deepcopy(registry_value["execution"])},"content_fingerprint":""}
     if (evidence["subject"]["identity"]["client"] == "codex"

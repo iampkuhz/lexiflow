@@ -96,6 +96,8 @@ def _check_no_symlink_ancestors(path: Path) -> None:
     abs_path = path.absolute()
     for component in [abs_path, *abs_path.parents]:
         if component.is_symlink():
+            if component == Path("/var") and component.resolve() == Path("/private/var"):
+                continue
             raise ValueError(f"symlink in path: {component}")
 
 

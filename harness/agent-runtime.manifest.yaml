@@ -76,11 +76,15 @@ subagent_protocol:
     max: 90
   delegation_work_package:
     source: harness/agent-policy.manifest.yaml
-    identity_fields: [work_package_id, task_ids]
-    preferred_minutes: {min: 120, max: 360}
-    minimum_total_estimated_minutes: 120
+    identity_fields:
+    - work_package_id
+    - task_ids
+    preferred_minutes:
+      min: 10
+      max: 360
+    minimum_total_estimated_minutes: 10
     target_maximum_total_estimated_minutes: 360
-    minimum_catalog_tasks: 2
+    minimum_catalog_tasks: 1
     per_task_outcome_evidence_required: true
     completion_callback: compact-signal-only
   caller_required_input_applies_to: qoder-task-handoff
@@ -208,8 +212,8 @@ subagent_protocol:
     result_fields_required_in_prompt: true
     agent_profile_cli_binding: true
     harness_manifest_preflight: true
-    catalog_package_preflight: true
-    catalog_estimate_rule: exact-sum-180-to-360
+    catalog_package_preflight: advisory-when-present
+    catalog_estimate_rule: caller-10-to-360-or-exact-current-catalog-sum-when-catalog-is-used
     structured_result_required: true
     implementation_status: IMPLEMENTED
     conformance_test: tests/harness/test_qoder_runner.py
@@ -223,10 +227,10 @@ subagent_protocol:
     task_version: positive-integer
     change_version: semver-string
     work_package_id: stable-work-package-id-string
-    task_ids: ordered-unique-list-minimum-two
+    task_ids: ordered-unique-list-minimum-one
     task_versions: exact-task-id-to-positive-integer-map
     change_versions: exact-task-id-to-semver-map
-    estimated_minutes: integer-180-to-360
+    estimated_minutes: integer-10-to-360
     primary_owner: non-empty-string
     contract_boundary: non-empty-string
     agent_profile: project-qoder-agent-name
@@ -244,11 +248,13 @@ callback_and_fallback:
   completion_record_first: true
   callback_target: exact-parent-session-uuid
   main_llm_poll_loop_forbidden: true
-  llm_fallback_first_probe_after_seconds: 300
-  llm_fallback_min_subsequent_probe_interval_seconds: 600
+  parent_after_dispatch: end-current-turn-await-callback
+  llm_fallback_probes: forbidden
+  pending_result_query: refuse-with-continuation-and-exit-3
   no_llm_watchdog:
     initial_delay_seconds: 300
     interval_seconds: 600
+    max_lifetime_seconds: 86400
     unchanged_state_is_silent: true
 runtime_data:
   committed: false

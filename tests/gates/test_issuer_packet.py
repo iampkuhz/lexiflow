@@ -40,6 +40,8 @@ class IssuerPacketMaterializerTest(unittest.TestCase):
         target = self.root / "harness/gate-issuer-authorities.yaml"
         target.parent.mkdir(parents=True)
         shutil.copyfile(source, target)
+        # 此组验证旧的显式宿主注入 API；本地生产入口另有端到端测试。
+        target.write_text(target.read_text().replace("codex.local-session.v1", "codex.current-session.v1"))
         self.counter = 1
         self.codex_context = {
             "actor_id": "codex-main",

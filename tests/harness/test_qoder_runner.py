@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import hashlib
 import os
@@ -121,6 +122,14 @@ class FakeClock:
 
 
 class QoderRunnerContractTest(unittest.TestCase):
+    def setUp(self):
+        self.host_temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.host_temp.cleanup)
+        self.host_lock = Path(self.host_temp.name) / "host" / "qoder-cli.lock"
+        patcher = patch.object(qoder_task, "_host_lock_path", return_value=self.host_lock)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _write_catalog(self, root: Path, task: dict[str, Any]) -> None:
         anchor = {
             "id": task["task_ids"][0],
@@ -403,7 +412,28 @@ class QoderRunnerContractTest(unittest.TestCase):
         self.assertIn("Work package id: LF-WP-TEST-001", prompt)
         self.assertIn("Required result fields: schema_version, status, work_package_id", prompt)
         self.assertIn("acceptance_evidence, effect_checks, risks", prompt)
+        self.assertIn("outcomes MUST be an array in task_ids order", prompt)
+        self.assertIn("result.template.json", prompt)
+        self.assertIn("replace its BLOCKED placeholders with factual results", prompt)
+        self.assertIn("validate-result 00000000-0000-4000-8000-000000000001", prompt)
         self.assertIn("Run id: 00000000-0000-4000-8000-000000000001", prompt)
+
+    def test_result_template_is_run_bound_and_preserves_ordered_outcomes(self) -> None:
+        task = valid_task()
+        task.update(
+            agent_id="agent_test001",
+            run_id="00000000-0000-4000-8000-000000000001",
+            session_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            client="qoder",
+        )
+        template = qoder_task._result_template(task)
+        self.assertEqual(template["run_id"], task["run_id"])
+        self.assertEqual(template["task_ids"], task["task_ids"])
+        self.assertEqual(
+            [outcome["task_id"] for outcome in template["outcomes"]], task["task_ids"]
+        )
+        self.assertTrue(all(outcome["status"] == "BLOCKED" for outcome in template["outcomes"]))
+        self.assertEqual(template["schema_version"], "lexiflow.qoder-work-package-result.v1")
 
     def test_qoder_cli_is_bound_to_project_agent_profile(self) -> None:
         task = valid_task()
@@ -416,7 +446,8 @@ class QoderRunnerContractTest(unittest.TestCase):
         with patch.object(qoder_task, "_find_qoder_cli", return_value=Path("/bin/qodercli")):
             args = qoder_task._build_qodercli_args(task, Path("/repo"))
         self.assertEqual(args[args.index("--agent") + 1], "quality-verifier")
-        self.assertEqual(args[args.index("--setting-sources") + 1], "project")
+        self.assertEqual(args[args.index("--setting-sources") + 1], "user,project,local")
+        self.assertNotIn("--model", args)  # Preserve the user's configured provider/model.
         self.assertEqual(args[args.index("--disallowed-tools") + 1], "Agent")
 
     def test_harness_preflight_binds_context_tools_commands_and_identity(self) -> None:
@@ -456,10 +487,7 @@ class QoderRunnerContractTest(unittest.TestCase):
                 context_path = root / locator
                 context_path.parent.mkdir(parents=True, exist_ok=True)
                 context_path.write_text(content, encoding="utf-8")
-                context.append({
-                    "path": locator,
-                    "sha256": hashlib.sha256(context_path.read_bytes()).hexdigest(),
-                })
+                context.append({"path": locator, "sha256": hashlib.sha256(context_path.read_bytes()).hexdigest()})
             manifest = {
                 "schema_version": "lexiflow.qoder-harness.v1",
                 "identity": {
@@ -476,13 +504,12 @@ class QoderRunnerContractTest(unittest.TestCase):
                     "expected_output_regex": "Python 3",
                     "timeout_seconds": 10,
                 }],
-                "validation_commands": [{
-                    "argv": ["python3", "-V"], "cwd": ".", "timeout_seconds": 30,
-                }],
+                "validation_commands": [{"argv": ["python3", "-V"], "cwd": ".", "timeout_seconds": 30}],
             }
             manifest_path = root / task["harness_manifest"]
             manifest_path.parent.mkdir(parents=True, exist_ok=True)
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
             self.assertIsNone(qoder_task._resolve_catalog_package(task, root))
             self.assertEqual(
                 task["work_package_id"],
@@ -667,6 +694,7 @@ class QoderRunnerContractTest(unittest.TestCase):
             with (
                 patch.object(Path, "cwd", return_value=root),
                 patch.object(qoder_task, "_find_qoder_cli", return_value=Path("/bin/qodercli")),
+                patch.object(qoder_task, "_check_qoder_idle"),
                 patch("builtins.print") as output,
             ):
                 qoder_task.cmd_preflight(args)
@@ -676,7 +704,233 @@ class QoderRunnerContractTest(unittest.TestCase):
             self.assertEqual(result["context_count"], 7)
             self.assertFalse(result["model_access_checked"])
             self.assertIn("not account/model availability", result["scope"])
+            self.assertEqual(result["dispatch_action"], "start")
+            self.assertEqual(result["blocking_findings"], [])
             self.assertFalse((root / "tmp/qoder-tasks").exists())
+
+    def test_preflight_reports_budget_and_access_without_spawn_or_history_writes(self) -> None:
+        task = valid_task()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".git").mkdir()
+            self._write_catalog(root, task)
+            self._write_harness_manifest(root, task)
+            task_path = root / "task.json"
+            task_path.write_text(json.dumps(task))
+            task_dir = root / "tmp/qoder-tasks"
+            task_dir.mkdir()
+            first = write_resumable_run(task_dir)
+            second = write_resumable_run(task_dir, "00000000-0000-4000-8000-000000000002")
+            qoder_task._atomic_write_json(second / "completion.json", {
+                **terminal_completion(second.name, "failed"),
+                "failure": {"category": "quota", "result_error_code": 118},
+            })
+            os.utime(first / "completion.json", (1, 1))
+            os.utime(second / "completion.json", (2, 2))
+            before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+            with (
+                patch.object(Path, "cwd", return_value=root),
+                patch.object(qoder_task, "_find_qoder_cli", return_value=Path("/bin/qodercli")),
+                patch.object(qoder_task, "_check_qoder_idle"),
+                patch.object(qoder_task.subprocess, "Popen") as spawn,
+                patch.object(qoder_task.subprocess, "run", return_value=subprocess.CompletedProcess(
+                    ["python3", "--version"], 0, stdout="Python 3.12", stderr="")),
+                patch("builtins.print") as output,
+            ):
+                with self.assertRaises(SystemExit) as stopped:
+                    qoder_task.cmd_preflight(MagicMock(task=str(task_path)))
+            self.assertEqual(stopped.exception.code, 1)
+            result = json.loads(output.call_args.args[0])
+            self.assertEqual(result["status"], "BLOCKED")
+            self.assertEqual([item["code"] for item in result["blocking_findings"]],
+                             ["ATTEMPT_BUDGET", "RUNTIME_BLOCKED"])
+            self.assertIn("Main", result["blocking_findings"][0]["message"])
+            self.assertNotIn("显式 resume", result["blocking_findings"][0]["message"])
+            spawn.assert_not_called()
+            self.assertEqual(before, {p.relative_to(root): p.read_bytes()
+                                      for p in root.rglob("*") if p.is_file()})
+
+    def test_readiness_unknown_history_blocks_without_inferring_budget(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            task_dir = Path(directory)
+            (task_dir / "unfinished").mkdir()
+            with patch.object(qoder_task, "_assert_dispatch_budget") as budget:
+                result = qoder_task._start_readiness_blockers(task_dir, valid_task())
+            self.assertEqual(result[0]["code"], "BUSY")
+            budget.assert_not_called()
+            self.assertFalse((task_dir / ".dispatch.lock").exists())
+
+    def test_preflight_cli_forwards_explicit_runtime_recovery(self) -> None:
+        with patch.object(qoder_task, "cmd_preflight") as command:
+            self.assertEqual(qoder_task.main([
+                "preflight", "--task", "task.json", "--runtime-recovery-confirmed",
+            ]), 0)
+        self.assertIs(command.call_args.args[0].runtime_recovery_confirmed, True)
+
+    def test_host_lease_blocks_a_different_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with qoder_task._dispatch_lock(root / 'one'), qoder_task._host_lease():
+                with qoder_task._dispatch_lock(root / 'two'):
+                    with self.assertRaisesRegex(ValueError, 'host-wide Qoder lease'):
+                        with qoder_task._host_lease():
+                            self.fail('second checkout acquired the lease')
+            with qoder_task._host_lease():
+                pass
+
+    def test_cli_inherits_host_lease_after_dispatcher_and_worker_exit(self) -> None:
+        # Only Python fixture processes. No Qoder CLI/model call or timed polling.
+        worker = """
+import subprocess,sys
+fd=int(sys.argv[1])
+child=subprocess.Popen([sys.executable,'-c',"print('CLI_READY',flush=True); input()"],
+                       stdin=sys.stdin,stdout=sys.stdout,pass_fds=(fd,))
+print('WORKER_EXIT',flush=True)
+"""
+        with qoder_task._host_lease() as fd:
+            proc = subprocess.Popen([sys.executable, '-c', worker, str(fd)],
+                                    pass_fds=(fd,), stdin=subprocess.PIPE,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            self.assertEqual(proc.wait(timeout=5), 0)  # dispatcher/worker both released their copies
+            with self.assertRaisesRegex(ValueError, 'host-wide Qoder lease'):
+                qoder_task._assert_host_idle()
+        finally:
+            output, error = proc.communicate(input='release\n', timeout=5)
+        self.assertIn('CLI_READY', output, error)
+        self.assertIn('WORKER_EXIT', output)
+        qoder_task._assert_host_idle()
+
+    def test_host_preflight_does_not_create_lock_and_rejects_symlinks(self) -> None:
+        qoder_task._assert_host_idle()
+        self.assertFalse(self.host_lock.exists())
+        self.host_lock.parent.mkdir()
+        target = self.host_lock.with_name('target'); target.write_text('')
+        self.host_lock.symlink_to(target)
+        with self.assertRaisesRegex(ValueError, 'symlink'):
+            with qoder_task._host_lease():
+                pass
+
+    def test_pending_status_and_result_refuse_main_thread_polling(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); (root / '.git').mkdir()
+            run_id = '00000000-0000-4000-8000-000000000001'
+            run = root / 'tmp/qoder-tasks' / run_id; run.mkdir(parents=True)
+            qoder_task._write_continuation(run_id, run)
+            before = {p.name: p.read_bytes() for p in run.iterdir()}
+            for command in (qoder_task.cmd_status, qoder_task.cmd_result):
+                with patch.object(Path, 'cwd', return_value=root), patch('builtins.print') as output:
+                    with self.assertRaises(SystemExit) as stopped:
+                        command(argparse.Namespace(run_id=run_id))
+                self.assertEqual(stopped.exception.code, 3)
+                self.assertEqual(json.loads(output.call_args.args[0])['next_action'],
+                                 'end-current-turn-await-callback')
+            self.assertEqual(before, {p.name: p.read_bytes() for p in run.iterdir()})
+
+    def test_terminal_new_run_requires_callback_ack_before_next_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); run = write_resumable_run(root)
+            qoder_task._write_continuation(run.name, run)
+            with self.assertRaisesRegex(ValueError, 'not consumed/acknowledged'):
+                qoder_task._assert_no_unfinished_runs(root)
+            task = json.loads((run / 'task.json').read_text())
+            lifecycle.ack_run(root, run.name, task['parent_session_id'],
+                              codex_thread_id=task['parent_session_id'])
+            qoder_task._assert_no_unfinished_runs(root)
+
+    def test_shared_policy_requires_end_turn_without_llm_fallback(self) -> None:
+        root = Path(qoder_task.__file__).resolve().parents[2]
+        policy = yaml.safe_load((root / 'harness/agent-policy.manifest.yaml').read_text())
+        lifecycle_policy = policy['qoder_delegation']['lifecycle']
+        self.assertEqual(lifecycle_policy['parent_after_dispatch'], 'end-current-turn-await-callback')
+        self.assertEqual(lifecycle_policy['llm_fallback_probes'], 'forbidden')
+        self.assertNotIn('llm_fallback_first_probe_after_seconds', lifecycle_policy)
+        self.assertNotIn('llm_fallback_min_subsequent_probe_interval_seconds', lifecycle_policy)
+
+    def test_validate_result_is_read_only_and_does_not_promote_task_status(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".git").mkdir()
+            run_id = "00000000-0000-4000-8000-000000000001"
+            run = root / "tmp/qoder-tasks" / run_id
+            run.mkdir(parents=True)
+            task = valid_task(); task["run_id"] = run_id
+            result = valid_result(run_id); result["status"] = "BLOCKED"
+            (run / "task.json").write_text(json.dumps(task))
+            (run / "result.json").write_text(json.dumps(result))
+            before = {p.name: p.read_bytes() for p in run.iterdir()}
+            with patch.object(Path, "cwd", return_value=root), patch("builtins.print") as output:
+                self.assertEqual(qoder_task.main(["validate-result", run_id]), 0)
+            summary = json.loads(output.call_args.args[0])
+            self.assertEqual(summary["result_status"], "BLOCKED")
+            self.assertEqual(summary["scope"], "result-structure-only-not-task-acceptance")
+            self.assertEqual(before, {p.name: p.read_bytes() for p in run.iterdir()})
+            result["outcomes"] = {x["task_id"]: x for x in result["outcomes"]}
+            (run / "result.json").write_text(json.dumps(result))
+            with patch.object(Path, "cwd", return_value=root), patch("builtins.print"):
+                self.assertEqual(qoder_task.main(["validate-result", run_id]), 1)
+            self.assertFalse((run / "completion.json").exists())
+
+    def test_recovery_preflight_keeps_budget_and_does_not_mutate_history(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            task_dir = Path(directory)
+            run = write_resumable_run(task_dir)
+            qoder_task._atomic_write_json(run / "completion.json", {
+                **terminal_completion(run.name, "failed"),
+                "failure": {"category": "quota", "result_error_code": 118},
+            })
+            before = {p.name: p.read_bytes() for p in run.iterdir() if p.is_file()}
+            with patch.object(qoder_task, "_check_qoder_idle"):
+                result = qoder_task._start_readiness_blockers(
+                    task_dir, valid_task(), runtime_recovery_confirmed=True,
+                )
+            self.assertEqual([x["code"] for x in result], ["ATTEMPT_BUDGET"])
+            self.assertEqual(before, {p.name: p.read_bytes() for p in run.iterdir() if p.is_file()})
+
+    def test_preflight_passes_recovery_to_readiness(self) -> None:
+        task = valid_task()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".git").mkdir()
+            self._write_catalog(root, task)
+            self._write_harness_manifest(root, task)
+            task_path = root / "task.json"
+            task_path.write_text(json.dumps(task))
+            with (
+                patch.object(Path, "cwd", return_value=root),
+                patch.object(qoder_task, "_find_qoder_cli", return_value=Path("/bin/qodercli")),
+                patch.object(qoder_task, "_start_readiness_blockers", return_value=[]) as readiness,
+                patch("builtins.print") as output,
+            ):
+                qoder_task.cmd_preflight(argparse.Namespace(
+                    task=str(task_path), runtime_recovery_confirmed=True,
+                ))
+            readiness.assert_called_once_with(root / "tmp/qoder-tasks", qoder_task._validate_task(task),
+                                              runtime_recovery_confirmed=True)
+            result = json.loads(output.call_args.args[0])
+            self.assertTrue(result["runtime_recovery_asserted"])
+            self.assertFalse(result["model_access_checked"])
+
+    def test_readiness_reports_one_correction_but_does_not_perform_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            task_dir = Path(directory)
+            write_resumable_run(task_dir)
+            with patch.object(qoder_task, "_check_qoder_idle"):
+                result = qoder_task._start_readiness_blockers(task_dir, valid_task())
+            self.assertEqual(len(result), 1)
+            self.assertIn("显式 resume", result[0]["message"])
+            self.assertNotIn("使用完", result[0]["message"])
+
+    def test_readiness_process_busy_and_probe_failure_are_not_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            task_dir = Path(directory) / "absent"
+            with patch.object(qoder_task, "_check_qoder_idle", side_effect=ValueError("BUSY: qodercli")):
+                result = qoder_task._start_readiness_blockers(task_dir, valid_task())
+            self.assertEqual(result[0]["code"], "BUSY")
+            with patch.object(qoder_task, "_check_qoder_idle", side_effect=ValueError("cannot inspect processes")):
+                with self.assertRaisesRegex(ValueError, "cannot inspect processes"):
+                    qoder_task._start_readiness_blockers(task_dir, valid_task())
+            self.assertFalse(task_dir.exists())
 
     def test_prompt_budget_rejects_repeated_design_payload(self) -> None:
         task = valid_task()
@@ -726,11 +980,12 @@ class QoderRunnerContractTest(unittest.TestCase):
 
             with (
                 patch.object(qoder_task, "_build_qodercli_args", return_value=["qodercli"]),
-                patch.object(qoder_task.subprocess, "Popen", return_value=process),
+                patch.object(qoder_task.subprocess, "Popen", return_value=process) as spawn,
                 patch.object(lifecycle, "record_started"),
                 patch.object(qoder_task, "_attempt_codex_callback", side_effect=observe_callback),
             ):
                 qoder_task._worker_entry(task_dir, run_id, Path(directory))
+            self.assertEqual(len(spawn.call_args.kwargs['pass_fds']), 1)
 
             completion = json.loads((run_dir / "completion.json").read_text())
             self.assertEqual(completion["status"], "finished")
@@ -786,14 +1041,16 @@ class QoderRunnerContractTest(unittest.TestCase):
             task.update(task_id="LF-TEST-002", work_package_id="LF-WP-RENAMED", task_version=2,
                         change_version="2.0.0", task_versions={x: 2 for x in task["task_ids"]},
                         change_versions={x: "2.0.0" for x in task["task_ids"]})
-            with self.assertRaisesRegex(ValueError, "ATTEMPT_BUDGET.*explicit resume"):
+            with self.assertRaisesRegex(ValueError, "ATTEMPT_BUDGET.*显式 resume"):
                 qoder_task._assert_dispatch_budget(task_dir, task, correction=False)
             qoder_task._assert_dispatch_budget(task_dir, task, correction=True)
             second = write_resumable_run(task_dir, "00000000-0000-4000-8000-000000000002")
             c["run_id"] = second.name
             qoder_task._atomic_write_json(second / "completion.json", c)
-            with self.assertRaisesRegex(ValueError, "ATTEMPT_BUDGET.*exhausted"):
+            with self.assertRaisesRegex(ValueError, "ATTEMPT_BUDGET.*使用完"):
                 qoder_task._assert_dispatch_budget(task_dir, task, correction=True)
+            with self.assertRaisesRegex(ValueError, "ATTEMPT_BUDGET.*Main"):
+                qoder_task._assert_dispatch_budget(task_dir, task, correction=False)
 
     def test_recovery_assertion_cannot_bypass_initial_budget_before_probes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -914,10 +1171,14 @@ class QoderRunnerContractTest(unittest.TestCase):
                   patch.object(qoder_task, "_validate_catalog_package"),
                   patch.object(qoder_task, "_validate_harness_manifest", return_value=harness),
                   patch.object(qoder_task, "_maybe_start_watchdog"),
-                  patch.object(qoder_task.subprocess, "Popen", return_value=MagicMock(pid=12345)),
+                  patch.object(qoder_task.subprocess, "Popen", return_value=MagicMock(pid=12345)) as spawn,
                   patch("builtins.print") as output):
                 qoder_task.cmd_resume(args)
-            new_run = task_dir / output.call_args.args[0]
+            self.assertEqual(spawn.call_args.args[0][-1], str(spawn.call_args.kwargs['pass_fds'][0]))
+            handoff = json.loads(output.call_args.args[0])
+            self.assertEqual(handoff["next_action"], "end-current-turn-await-callback")
+            new_run = task_dir / handoff["run_id"]
+            self.assertTrue((new_run / "continuation.json").exists())
             note = json.loads((new_run / "runtime-recovery.json").read_text())
             self.assertEqual(note["from_run_id"], old.name)
             self.assertFalse(note["account_access_verified"])
@@ -1121,11 +1382,15 @@ raise SystemExit(1)
                 patch.object(qoder_task, "_validate_catalog_package"),
                 patch.object(qoder_task, "_validate_harness_manifest", return_value=harness),
                 patch.object(qoder_task, "_maybe_start_watchdog") as watchdog,
-                patch.object(qoder_task.subprocess, "Popen", return_value=MagicMock(pid=12345)),
+                patch.object(qoder_task.subprocess, "Popen", return_value=MagicMock(pid=12345)) as spawn,
                 patch("builtins.print") as output,
             ):
                 qoder_task.cmd_start(args)
-            run_id = output.call_args.args[0]
+            self.assertEqual(spawn.call_args.args[0][-1], str(spawn.call_args.kwargs['pass_fds'][0]))
+            handoff = json.loads(output.call_args.args[0])
+            self.assertEqual(handoff["next_action"], "end-current-turn-await-callback")
+            self.assertEqual(handoff["llm_polling"], "forbidden")
+            run_id = handoff["run_id"]
             self.assertTrue(qoder_task._is_valid_uuid(run_id))
             persisted = json.loads(
                 (repo_root / "tmp/qoder-tasks" / run_id / "task.json").read_text()

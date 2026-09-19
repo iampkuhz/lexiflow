@@ -11,6 +11,7 @@ public final class JavaSourceGateRunner {
       List.of(
           new JavaCommentLanguageGate(),
           new RecordComponentJavadocGate(),
+          new PublicApiJavadocGate(),
           new NoPmdSuppressionsGate());
 
   private JavaSourceGateRunner() {}

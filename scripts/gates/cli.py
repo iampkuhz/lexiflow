@@ -92,7 +92,12 @@ def _revalidate_plan_bindings(repo_root: str | os.PathLike[str], plan: dict[str,
     descriptors.extend(plan.get("consumed_inputs", []))
     task_source = plan.get("task", {}).get("task_source")
     if isinstance(task_source, dict):
-        descriptors.append(task_source)
+        # Task source is a task-projection fingerprint, not a raw file digest.
+        from scripts.gates.task_source import source_descriptor_is_current
+        if not source_descriptor_is_current(repo_root, plan["task"]["task_id"], {
+            key: task_source.get(key) for key in ("locator", "sha256")
+        }):
+            raise GateCliError("task-source-drift", "task source projection changed during Gate execution")
     if isinstance(plan.get("registry"), dict):
         descriptors.append(plan["registry"])
     subject = plan.get("subject", {})
@@ -461,7 +466,10 @@ def _build_task_validation_receipt(
         "current_inputs": {
             "source_snapshot_fingerprint": snapshot.get("sha256"),
             "task_source": copy.deepcopy(plan["task"]["task_source"]),
-            "registry": copy.deepcopy(plan["registry"]),
+            # The full registry remains revalidated during execution, but a
+            # Task receipt is fresh against its own frozen registry entry.
+            # Later unrelated Task registrations must not invalidate it.
+            "registry": {"locator": plan["registry"]["locator"], "sha256": plan["registry"].get("subject_entry_sha256", plan["registry"]["sha256"])},
             "policy": policy,
         },
         "validation": {
@@ -687,16 +695,41 @@ def _parser() -> argparse.ArgumentParser:
         current.add_argument("--receipt-kind", choices=RECEIPT_KINDS, default="TASK_VALIDATION")
     status = sub.add_parser("status")
     status.add_argument("--run-id", required=True)
+    sub.add_parser("doctor", help="Read-only local runtime readiness, not Task acceptance")
+    issuer = sub.add_parser("prepare-issuer", help="Prepare fresh issuer from this independent Codex task")
+    issuer.add_argument("--evidence-packet", required=True)
+    issuer.add_argument("--receipt-kind", choices=RECEIPT_KINDS, required=True)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
+    from scripts.gates.evidence_packet import EvidencePacketError
+    from scripts.gates.issuer_packet import IssuerPacketError
+    from scripts.gates.local_issuer import local_authority, prepare
+    from scripts.harness.codex_runtime import CodexRuntimeError
+    from scripts.harness.local_codex_runtime import discover
+
     args = _parser().parse_args(argv)
     repo_root = Path(args.repo_root).resolve() if args.repo_root else Path(__file__).resolve().parents[2]
     try:
-        if args.command == "status":
+        if args.command == "doctor":
+            runtime = discover(repo_root)
+            local_authority(repo_root)
+            value = {"result": "PASS", "scope": "local-runtime-readiness-only-not-gate-acceptance",
+                     "trust_boundary": "trusted-local-user-not-platform-cryptographic-attestation",
+                     "identity": runtime.context,
+                     "next_action": "Supply current --evidence-packet from a different producer; run prepares its issuer automatically."}
+        elif args.command == "prepare-issuer":
+            prepared = prepare(repo_root, args.evidence_packet, args.receipt_kind)
+            value = {"result": "PASS", "scope": "issuer-preparation-only-not-gate-acceptance",
+                     "issuer_packet": {"locator": prepared.locator, "sha256": prepared.sha256}}
+        elif args.command == "status":
             value = read_status(repo_root, args.run_id)
         else:
+            # plan 仍然零写入；只有 run 的显式 evidence 输入可触发新鲜 issuer 准备。
+            if args.command == "run" and args.issuer_packet is None and "LEXIFLOW_GATE_ISSUER_PACKET" not in os.environ:
+                evidence = _resolve_locator(args.evidence_packet, "LEXIFLOW_GATE_EVIDENCE_PACKET", os.environ)
+                args.issuer_packet = prepare(repo_root, evidence, args.receipt_kind).locator
             evidence, issuer = resolve_context(
                 evidence_packet=args.evidence_packet, issuer_packet=args.issuer_packet
             )
@@ -715,12 +748,16 @@ def main(argv: list[str] | None = None) -> int:
         if isinstance(value, dict) and value.get("result") == "BLOCKED":
             return 2
         return 0 if not isinstance(value, dict) or value.get("result") != "FAIL" else 1
-    except (GateCliError, ReceiptStoreError, PlannerError) as exc:
+    except (GateCliError, ReceiptStoreError, PlannerError, IssuerPacketError, EvidencePacketError, CodexRuntimeError) as exc:
         code = getattr(exc, "code", "gate-failure")
         detail = getattr(exc, "detail", str(exc))
-        sys.stdout.write(canonical_json_bytes({"result": "FAIL", "reasons": [code], "detail": detail}).decode("utf-8") + "\n")
+        result = getattr(exc, "status", "FAIL")
+        value = {"result": result, "reasons": [code], "detail": detail}
+        if code == "missing-evidence-context":
+            value["next_action"] = "Run doctor; materialize current subject evidence, then run --evidence-packet <locator> in an independent task. No Desktop attestation service is required."
+        sys.stdout.write(canonical_json_bytes(value).decode("utf-8") + "\n")
         sys.stdout.flush()
-        return 1
+        return 2 if result == "BLOCKED" else 1
 
 
 if __name__ == "__main__":

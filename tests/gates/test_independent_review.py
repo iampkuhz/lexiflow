@@ -3,9 +3,14 @@ import io
 import json
 import unittest
 import uuid
+from unittest.mock import patch
 
 from scripts.gates import cli
-from scripts.gates.independent_review import IndependentReviewError, verify_independent_review
+from scripts.gates.independent_review import (
+    IndependentReviewError,
+    _verify_current_task_source,
+    verify_independent_review,
+)
 from scripts.gates.receipt_store import canonical_json_bytes, read_bound_bytes, sha256_bytes
 from tests.gates.test_gate_lifecycle import Fixture, PROCESS_ID, RUN_ID, descriptor
 from tests.gates.test_evidence_packet import _set_changed_files
@@ -133,6 +138,16 @@ class TestIndependentReview(unittest.TestCase):
         args["reviewer_identity"] = copy.deepcopy(self.fixture.validation["issuer"]["actor_identity"])
         with self.assertRaisesRegex(IndependentReviewError, "reviewer-not-independent"):
             verify_independent_review(**args)
+
+    def test_task_scoped_source_is_checked_as_a_projection(self):
+        source = {"locator": "planning/workstreams.yaml", "sha256": "a" * 64}
+        with patch("scripts.gates.independent_review.source_descriptor_is_current", return_value=True) as current:
+            _verify_current_task_source(str(self.fixture.root), "LF-TSK-QLT-0007", source)
+        current.assert_called_once_with(str(self.fixture.root), "LF-TSK-QLT-0007", source)
+
+        with patch("scripts.gates.independent_review.source_descriptor_is_current", return_value=False):
+            with self.assertRaisesRegex(IndependentReviewError, "stale-subject"):
+                _verify_current_task_source(str(self.fixture.root), "LF-TSK-QLT-0007", source)
 
     def test_distinct_verified_actor_can_share_validation_host_session(self):
         args = self.fixture.verification_args()

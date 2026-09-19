@@ -17,6 +17,11 @@ import sys
 import unicodedata
 import uuid
 
+try:  # Support both ``python -m`` and this module's documented script entrypoint.
+    from scripts.gates.task_source import source_descriptor_is_current, task_source_descriptor
+except ModuleNotFoundError:  # pragma: no cover - exercised by subprocess CLI tests.
+    from task_source import source_descriptor_is_current, task_source_descriptor
+
 SCHEMA_VERSION = "lexiflow.explicit-evidence-packet.v1"
 SNAPSHOT_SCHEMA_VERSION = "lexiflow.changed-file-snapshot.v1"
 CODEX_TASK_PROJECTION_SCHEMA_VERSION = (
@@ -189,19 +194,33 @@ def sha256_bytes(data):
 
 
 def _check_path_components_for_symlinks(path):
-    parts = path.split(os.sep)
+    """Reject every path alias except macOS's fixed ``/var`` compatibility link."""
+    parts = os.path.abspath(os.fspath(path)).split(os.sep)
     current = ""
     for part in parts:
         if not part:
             current = os.sep
             continue
         current = os.path.join(current, part)
-        if os.path.islink(current):
-            raise EvidencePacketError("LOCATOR_SYMLINK_ANCESTOR", f"symlink in path: {current}")
+        if not os.path.islink(current):
+            continue
+        if _is_macos_var_compatibility_alias(current):
+            continue
+        raise EvidencePacketError("LOCATOR_SYMLINK_ANCESTOR", f"symlink in path: {current}")
+
+
+def _is_macos_var_compatibility_alias(path):
+    """Allow only the OS-managed `/var -> /private/var` compatibility alias."""
+    if sys.platform != "darwin" or os.path.normpath(path) != "/var":
+        return False
+    try:
+        return os.readlink(path) in ("private/var", "/private/var")
+    except OSError:
+        return False
 
 
 def _open_directory_path_strict(path):
-    """Open an absolute directory path without following any component symlink."""
+    """Open an absolute directory path without following custom aliases."""
     absolute = os.path.abspath(os.fspath(path))
     flags = (
         os.O_RDONLY
@@ -210,9 +229,14 @@ def _open_directory_path_strict(path):
         | getattr(os, "O_CLOEXEC", 0)
     )
     current_fd = os.open(os.path.sep, flags)
+    current_path = os.path.sep
     try:
         for component in (part for part in absolute.split(os.path.sep) if part):
-            next_fd = os.open(component, flags, dir_fd=current_fd)
+            current_path = os.path.join(current_path, component)
+            if _is_macos_var_compatibility_alias(current_path):
+                next_fd = os.open("/private/var", flags)
+            else:
+                next_fd = os.open(component, flags, dir_fd=current_fd)
             os.close(current_fd)
             current_fd = next_fd
         return current_fd
@@ -1574,9 +1598,9 @@ def validate_codex_main_task_projection(raw_task, path="raw task"):
     _validate_identity(raw_task, path)
     if raw_task["client"] != "codex" or raw_task["parent_client"] != "codex":
         raise EvidencePacketError("CODEX_PROJECTION_INVALID", f"{path} must be host-routed Codex")
-    if raw_task["agent_id"] != "/root":
+    if raw_task["agent_id"] not in {"/root", "codex-session-" + raw_task["session_id"]}:
         raise EvidencePacketError(
-            "CODEX_PROJECTION_INVALID", f"{path} must bind the canonical Main actor /root"
+            "CODEX_PROJECTION_INVALID", f"{path} must bind the canonical Main actor /root or its local session identity"
         )
     for field in ("task_source", "expected_output", "validation_command", "goal", "required_context", "failure_policy"):
         _validate_nonempty_string(raw_task[field], f"{path}.{field}")
@@ -1702,8 +1726,15 @@ def validate_locators_strict(inp):
 
 def verify_artifact_hashes_strict(repo_root, inp, root_identity=None):
     ts = inp["task"]["task_source"]
-    actual = sha256_file_strict(repo_root, ts["locator"], root_identity)
-    if actual != ts["sha256"]:
+    # New packets use a task-scoped catalog projection; legacy packets use the
+    # raw catalog digest.  Both forms are verified through one helper, never by
+    # comparing a projection hash to the bytes of the whole YAML file.
+    # Preserve the fd/root-identity check even for a task projection; the
+    # projection branch below must not become a symlink-race bypass.
+    raw_catalog_hash = sha256_file_strict(repo_root, ts["locator"], root_identity)
+    if raw_catalog_hash != ts["sha256"] and not source_descriptor_is_current(
+        repo_root, inp["task"]["task_id"], ts
+    ):
         raise EvidencePacketError("HASH_MISMATCH", f"task_source hash mismatch: {ts['locator']}")
 
     raw = inp["subject"]["raw_artifacts"]
@@ -2167,10 +2198,18 @@ def _best_effort_rollback_at(dir_fd, output_name, tmp_name, expected):
     return errors
 
 
-def _assert_directory_binding(output_dir, expected):
+def _assert_directory_binding(repo_root, output_dir, expected):
     binding_fd = None
     try:
-        binding_fd = _open_directory_path_strict(output_dir)
+        relative = os.path.relpath(output_dir, repo_root)
+        if relative == os.pardir or relative.startswith(os.pardir + os.sep):
+            raise EvidencePacketError("PUBLISH_DIR_DRIFT", "publication directory is outside repository")
+        binding_fd = _open_directory_path_strict(repo_root)
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        for component in relative.split(os.sep):
+            next_fd = os.open(component, flags, dir_fd=binding_fd)
+            os.close(binding_fd)
+            binding_fd = next_fd
         st = os.fstat(binding_fd)
         identity = (st.st_dev, st.st_ino, st.st_mode)
     except BaseException as exc:
@@ -2262,7 +2301,7 @@ def publish_packet_atomic(
             if not stat.S_ISDIR(dir_stat.st_mode):
                 raise EvidencePacketError("PUBLISH_DIR_INVALID", "publication directory is not a directory")
             dir_identity = (dir_stat.st_dev, dir_stat.st_ino, dir_stat.st_mode)
-            _assert_directory_binding(output_dir, dir_identity)
+            _assert_directory_binding(repo_root, output_dir, dir_identity)
             if _entry_identity(dir_fd, output_name) is not None:
                 raise EvidencePacketError("PUBLISH_EXISTS", f"packet already exists: {output_name}")
         except EvidencePacketError:
@@ -2354,7 +2393,7 @@ def publish_packet_atomic(
             raise EvidencePacketError("PUBLISH_WRITE_FAILED", f"temp write/fsync/close failed: {write_error}")
 
         try:
-            _assert_directory_binding(output_dir, dir_identity)
+            _assert_directory_binding(repo_root, output_dir, dir_identity)
             validate_semantics(
                 repo_root,
                 inp,
@@ -2394,9 +2433,9 @@ def publish_packet_atomic(
             raise EvidencePacketError("PUBLISH_OWNERSHIP_LOST", "hardlink did not create the owned final packet")
 
         try:
-            _assert_directory_binding(output_dir, dir_identity)
+            _assert_directory_binding(repo_root, output_dir, dir_identity)
             _verify_published_file_at(dir_fd, output_name, tmp_identity, packet_sha256)
-            _assert_directory_binding(output_dir, dir_identity)
+            _assert_directory_binding(repo_root, output_dir, dir_identity)
             validate_semantics(
                 repo_root,
                 inp,
@@ -2419,16 +2458,16 @@ def publish_packet_atomic(
             raise EvidencePacketError("PUBLISH_TMP_CLEANUP_FAILED", f"temp cleanup failed: {exc}")
 
         try:
-            _assert_directory_binding(output_dir, dir_identity)
+            _assert_directory_binding(repo_root, output_dir, dir_identity)
             os.fsync(dir_fd)
         except BaseException as exc:
             _best_effort_rollback_at(dir_fd, output_name, tmp_name, tmp_identity)
             raise EvidencePacketError("PUBLISH_DIR_FSYNC_FAILED", f"directory fsync failed: {exc}")
 
         try:
-            _assert_directory_binding(output_dir, dir_identity)
+            _assert_directory_binding(repo_root, output_dir, dir_identity)
             _verify_published_file_at(dir_fd, output_name, tmp_identity, packet_sha256)
-            _assert_directory_binding(output_dir, dir_identity)
+            _assert_directory_binding(repo_root, output_dir, dir_identity)
             _assert_repo_binding(repo_root, root_identity)
         except BaseException as exc:
             _best_effort_rollback_at(dir_fd, output_name, tmp_name, tmp_identity)
@@ -2500,7 +2539,9 @@ def materialize_codex_main_task_evidence(
             "task": {
                 "task_id": projection["task_id"], "task_version": projection["task_version"],
                 "change_version": projection["change_version"],
-                "task_source": {"locator": "planning/workstreams.yaml", "sha256": sha256_file_strict(repo_root, "planning/workstreams.yaml")},
+                # The catalog file contains every phase.  Bind this task's canonical
+                # projection, so an unrelated task does not stale the producer.
+                "task_source": task_source_descriptor(repo_root, projection["task_id"]),
             },
             "subject": {
                 "raw_artifacts": raw_artifacts, "main_agent_attestation": main_agent_attestation,
@@ -2585,6 +2626,265 @@ def verify_packet_strict(repo_root, packet_locator, packet_sha256):
         raise EvidencePacketError("VERIFY_INVALID", f"packet verification failed: {exc}")
 
 
+LAYER_EVIDENCE_SCHEMAS = {
+    'lexiflow.independent-review-evidence.v1': {
+        'schema_version', 'validation_receipt', 'review_scope', 'reviewer_changed_files',
+        'findings', 'rerun_evidence', 'decision',
+    },
+    'lexiflow.catalog-decision-evidence.v1': {
+        'schema_version', 'task_validation', 'independent_review',
+        'required_dependency_receipts', 'acceptance_case_registry',
+    },
+}
+
+
+def _layer_descriptor(value: object, path: str) -> None:
+    """Reject malformed nested layer references before publishing evidence.
+
+    Layer evidence is immutable once published.  Checking only its top-level
+    schema meant an otherwise unusable review artifact could be made durable
+    and would fail much later, after a reviewer had already completed a turn.
+    This is structural validation only: it does not assess the review decision
+    or replace the receipt-layer semantic verifier.
+    """
+    if not isinstance(value, dict) or set(value) != {"locator", "sha256"}:
+        raise ValueError(f"{path} must be an exact descriptor")
+    if not isinstance(value["locator"], str) or not value["locator"]:
+        raise ValueError(f"{path}.locator must be a non-empty string")
+    _check_sha256_lowercase_hex(value["sha256"], f"{path}.sha256")
+
+
+def _validate_layer_evidence_structure(value: dict) -> None:
+    """Validate nested typed-layer evidence without deciding its outcome."""
+    schema = value["schema_version"]
+    if schema == "lexiflow.independent-review-evidence.v1":
+        _layer_descriptor(value["validation_receipt"], "validation_receipt")
+        scope = value["review_scope"]
+        expected_scope = {
+            "source_snapshot_fingerprint", "registry_sha256", "policy_sha256",
+            "source", "diff", "changed_files",
+        }
+        if not isinstance(scope, dict) or set(scope) != expected_scope:
+            raise ValueError("review_scope fields do not match its exact schema")
+        _layer_descriptor(scope["source"], "review_scope.source")
+        _layer_descriptor(scope["diff"], "review_scope.diff")
+        if (not isinstance(scope["changed_files"], list)
+                or any(not isinstance(item, str) for item in scope["changed_files"])):
+            raise ValueError("review_scope.changed_files must be a string list")
+        if (not isinstance(value["reviewer_changed_files"], list)
+                or any(not isinstance(item, str) for item in value["reviewer_changed_files"])):
+            raise ValueError("reviewer_changed_files must be a string list")
+        if value["decision"] not in {"PASS", "BLOCKED", "FAIL"}:
+            raise ValueError("review decision is invalid")
+        if not isinstance(value["findings"], list):
+            raise ValueError("review findings must be a list")
+        for index, finding in enumerate(value["findings"]):
+            expected_finding = {"finding_id", "severity", "code", "evidence"}
+            if not isinstance(finding, dict) or set(finding) != expected_finding:
+                raise ValueError(f"findings[{index}] fields do not match its exact schema")
+            if not isinstance(finding["evidence"], list) or not finding["evidence"]:
+                raise ValueError(f"findings[{index}].evidence must be a non-empty list")
+            for evidence_index, descriptor in enumerate(finding["evidence"]):
+                _layer_descriptor(descriptor, f"findings[{index}].evidence[{evidence_index}]")
+        if not isinstance(value["rerun_evidence"], list) or not value["rerun_evidence"]:
+            raise ValueError("rerun_evidence must be a non-empty list")
+        for index, descriptor in enumerate(value["rerun_evidence"]):
+            _layer_descriptor(descriptor, f"rerun_evidence[{index}]")
+        return
+
+    # Catalog evidence is still semantically verified by catalog_decision;
+    # bind its nested receipt references now so malformed evidence cannot be
+    # published as a delayed, opaque failure.
+    for field in ("task_validation", "independent_review", "acceptance_case_registry"):
+        _layer_descriptor(value[field], field)
+    if not isinstance(value["required_dependency_receipts"], list):
+        raise ValueError("required_dependency_receipts must be a list")
+    for index, dependency in enumerate(value["required_dependency_receipts"]):
+        expected_dependency = {
+            "task_id", "task_version", "change_version", "locator", "sha256",
+        }
+        if not isinstance(dependency, dict) or set(dependency) != expected_dependency:
+            raise ValueError(
+                f"required_dependency_receipts[{index}] must bind task identity and descriptor"
+            )
+        _layer_descriptor(
+            {field: dependency[field] for field in ("locator", "sha256")},
+            f"required_dependency_receipts[{index}]",
+        )
+
+
+def publish_layer_evidence(root, *, input_path: str, publication_id: str) -> dict:
+    """Publish one canonical review/catalog evidence object.
+
+    Layer gates consume a deliberately small, typed object.  Previously callers
+    had to guess where and how to create it, so a valid validation receipt still
+    stopped at ``missing evidence``.  This helper is only a serializer and
+    descriptor binder: it neither chooses PASS nor signs a receipt.
+    """
+    from pathlib import Path
+    from scripts.gates.receipt_store import canonical_json_bytes, read_bound_bytes, sha256_bytes
+
+    root = Path(root).resolve()
+    raw = read_bound_bytes(root, input_path)
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"layer evidence input must be JSON: {exc}") from None
+    if not isinstance(value, dict) or value.get("schema_version") not in LAYER_EVIDENCE_SCHEMAS:
+        raise ValueError("layer evidence must declare INDEPENDENT_REVIEW or CATALOG_DECISION schema")
+    if set(value) != LAYER_EVIDENCE_SCHEMAS[value["schema_version"]]:
+        raise ValueError("layer evidence fields do not match its exact schema")
+    _validate_layer_evidence_structure(value)
+    canonical = canonical_json_bytes(value)
+    if raw != canonical:
+        raise ValueError("layer evidence input must already be canonical JSON")
+    if not UUID_V4_PATTERN.fullmatch(publication_id):
+        raise ValueError("layer evidence publication id must be UUIDv4")
+    locator = f"tmp/quality/layer-evidence/{publication_id}.json"
+    destination = root / locator
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with destination.open("xb") as stream:
+            stream.write(canonical)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except FileExistsError:
+        raise ValueError("layer evidence publication already exists") from None
+    return {"locator": locator, "sha256": sha256_bytes(canonical)}
+
+
+def review_evidence_template(root, *, validation_receipt: str) -> dict:
+    """Derive the non-discretionary fields for an independent review.
+
+    This is intentionally a stdout-only template.  It does not create evidence,
+    choose a decision, or make a reviewer appear to have reviewed anything.
+    """
+    from pathlib import Path
+    from scripts.gates.receipt_store import read_bound_bytes, sha256_bytes
+
+    root = Path(root).resolve()
+    content = read_bound_bytes(root, validation_receipt)
+    try:
+        receipt = json.loads(content)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"validation receipt must be JSON: {exc}") from None
+    if not isinstance(receipt, dict) or receipt.get("receipt_kind") != "TASK_VALIDATION" or receipt.get("result") != "PASS":
+        raise ValueError("template requires a PASS TASK_VALIDATION receipt")
+    current = receipt.get("current_inputs", {})
+    validation = receipt.get("validation", {})
+    raw = validation.get("raw_artifacts", {})
+    changed = validation.get("scope_reconciliation", {}).get("changed_files")
+    required = ("source_snapshot_fingerprint", "task_source", "registry", "policy")
+    if not all(key in current for key in required) or not isinstance(changed, list) or not isinstance(raw.get("diff"), dict):
+        raise ValueError("validation receipt lacks canonical review bindings")
+    task_source = current["task_source"]
+    if not isinstance(task_source, dict) or not all(
+        isinstance(task_source.get(key), str) and task_source[key]
+        for key in ("locator", "sha256")
+    ):
+        raise ValueError("validation receipt task source lacks a descriptor")
+    return {
+        "schema_version": "lexiflow.layer-evidence-template.v1",
+        "kind": "INDEPENDENT_REVIEW",
+        "validation_receipt": {"locator": validation_receipt, "sha256": sha256_bytes(content)},
+        "review_scope": {
+            "source_snapshot_fingerprint": current["source_snapshot_fingerprint"],
+            "registry_sha256": current["registry"]["sha256"],
+            "policy_sha256": current["policy"]["sha256"],
+            # Validation receipts retain catalog metadata here, while the review
+            # verifier deliberately accepts a strict two-field descriptor.
+            "source": {key: task_source[key] for key in ("locator", "sha256")},
+            "diff": raw["diff"],
+            "changed_files": changed,
+        },
+        "reviewer_changed_files": [],
+        "reviewer_must_supply": {
+            "decision": ["PASS", "BLOCKED", "FAIL"],
+            "findings": "explicit typed findings; PASS findings must still cite evidence",
+            "rerun_evidence": "at least one immutable descriptor from the reviewer",
+        },
+    }
+
+
+def prepare_layer_packet(root, *, subject_packet: str, kind_evidence: str,
+            snapshot: str, diff: str) -> dict:
+    """Keep original producer provenance; bind caller-supplied review writes/evidence.
+
+    This carrier's collector is the real local session, not the independent issuer.
+    Existing layer publishers remain responsible for semantic/independence checks.
+    No directory search, default PASS, test execution or issuer materialization.
+    """
+    from pathlib import Path
+    from scripts.gates.receipt_store import canonical_json_bytes, read_bound_bytes, sha256_bytes
+    from scripts.harness.local_codex_runtime import discover
+
+    root = Path(root).resolve()
+
+    def read(locator):
+        content = read_bound_bytes(root, locator)
+        return {'locator': locator, 'sha256': sha256_bytes(content)}, content
+
+    source_ref, source_bytes = read(subject_packet)
+    source = verify_packet_strict(root, source_ref['locator'], source_ref['sha256'])
+    evidence_ref, evidence_bytes = read(kind_evidence)
+    evidence = json.loads(evidence_bytes)
+    if not isinstance(evidence, dict) or evidence.get('schema_version') not in LAYER_EVIDENCE_SCHEMAS:
+        raise ValueError('explicit INDEPENDENT_REVIEW or CATALOG_DECISION evidence required')
+    schema = evidence['schema_version']
+    if set(evidence) != LAYER_EVIDENCE_SCHEMAS[schema] or canonical_json_bytes(evidence) != evidence_bytes:
+        raise ValueError('kind evidence must use canonical JSON and exact schema fields')
+    validation_ref = evidence.get('validation_receipt', evidence.get('task_validation'))
+    if not isinstance(validation_ref, dict) or set(validation_ref) != {'locator', 'sha256'}:
+        raise ValueError('explicit validation receipt descriptor required')
+    actual_ref, validation_bytes = read(validation_ref['locator'])
+    if actual_ref != validation_ref:
+        raise ValueError('validation receipt hash drift')
+    validation = json.loads(validation_bytes)
+    if (validation.get('receipt_kind') != 'TASK_VALIDATION'
+            or validation.get('task') != {k: source['task'][k]
+                                         for k in ('task_id', 'task_version', 'change_version')}
+            or validation.get('validation', {}).get('raw_artifacts') != source['subject']['raw_artifacts']):
+        raise ValueError('validation receipt does not bind the supplied subject packet')
+    snapshot_ref, snapshot_bytes = read(snapshot)
+    diff_ref, diff_bytes = read(diff)
+    # This entry point is explicitly read-only. Nonempty review writes need a
+    # separately reconciled generic materialization, never an inferred empty set.
+    if (json.loads(snapshot_bytes) != {'schema_version': 'lexiflow.changed-file-snapshot.v1', 'files': {}}
+            or diff_bytes != b'' or evidence.get('reviewer_changed_files', []) != []):
+        raise ValueError('read-only layer requires explicit empty write snapshot and diff')
+    if schema == 'lexiflow.independent-review-evidence.v1':
+        if evidence['decision'] not in {'PASS', 'BLOCKED', 'FAIL'}:
+            raise ValueError('reviewer must supply an explicit decision')
+        if not isinstance(evidence['findings'], list):
+            raise ValueError('reviewer findings must be an explicit list')
+    runtime = discover(root)
+    data = {k: copy.deepcopy(source[k]) for k in ('task', 'subject', 'scope')}
+    raw = data['subject']['raw_artifacts']
+    raw.update(tests=[evidence_ref], changed_file_snapshot=snapshot_ref, diff=diff_ref)
+    data['scope']['changed_files'] = []
+    data['scope']['three_way_reconciliation'] = {
+        'status': 'PASS', 'changed_matching_forbidden': [], 'changed_outside_allowed': [],
+        'changed_without_claim': [], 'claims_intersecting_forbidden': [], 'claims_outside_allowed': [],
+    }
+    att = data['subject']['main_agent_attestation']
+    att['actor_id'] = runtime.context['actor_id']
+    att['reviewed_at'] = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    # PASS here describes carrier integrity only; kind evidence is preserved byte
+    # for byte. It can contain BLOCKED/FAIL and will be judged by the layer gate.
+    att['result_fields'] = {
+        'status': 'PASS', 'changed_files': [],
+        'validation': {'status': 'PASS', 'evidence_locator': kind_evidence},
+        'acceptance_evidence': [kind_evidence],
+        'effect_checks': {'behavior': 'PASS', 'regression': 'PASS'},
+        'risks': ['Carrier integrity only: no delivery tests, independent review or catalog PASS is asserted.'],
+    }
+    for ref in (source_ref, evidence_ref, snapshot_ref, diff_ref, validation_ref):
+        if read(ref['locator'])[0] != ref:
+            raise ValueError('input drift before layer packet publication')
+    return materialize(root, data, str(uuid.uuid4()))['publication']
+
+
+
 def main():
     parser = argparse.ArgumentParser(description="Strict explicit evidence packet materializer")
     sub = parser.add_subparsers(dest="command")
@@ -2599,9 +2899,44 @@ def main():
     ver.add_argument("--packet-locator", required=True, help="Packet file locator")
     ver.add_argument("--packet-sha256", required=True, help="Expected packet SHA-256")
 
+    layer = sub.add_parser("prepare-layer", help="Freeze explicit read-only review/catalog evidence, not acceptance")
+    layer.add_argument("--repo-root", default=".")
+    for flag in ("subject-packet", "kind-evidence", "snapshot", "diff"):
+        layer.add_argument("--" + flag, required=True)
+
+    layer_evidence = sub.add_parser("publish-layer-evidence", help="Publish canonical typed review/catalog evidence; does not decide or sign")
+    layer_evidence.add_argument("--repo-root", default=".")
+    layer_evidence.add_argument("--input", required=True)
+    layer_evidence.add_argument("--publication-id", required=True)
+
+    template = sub.add_parser("review-evidence-template", help="Derive review bindings from a PASS validation receipt; stdout only")
+    template.add_argument("--repo-root", default=".")
+    template.add_argument("--validation-receipt", required=True)
+
     args = parser.parse_args()
 
-    if args.command == "materialize":
+    if args.command == "review-evidence-template":
+        try:
+            print(json.dumps(review_evidence_template(args.repo_root, validation_receipt=args.validation_receipt), ensure_ascii=False, sort_keys=True))
+        except (ValueError, OSError) as exc:
+            print(json.dumps({"status": "BLOCKED", "scope": "review-template-only", "error": str(exc)}))
+            sys.exit(1)
+    elif args.command == "publish-layer-evidence":
+        try:
+            result = publish_layer_evidence(args.repo_root, input_path=args.input, publication_id=args.publication_id)
+            print(json.dumps({"status": "PASS", "scope": "typed-layer-evidence-only-not-review-or-catalog-acceptance", "evidence": result}))
+        except (ValueError, OSError) as exc:
+            print(json.dumps({"status": "BLOCKED", "scope": "typed-layer-evidence-only", "error": str(exc)}))
+            sys.exit(1)
+    elif args.command == "prepare-layer":
+        try:
+            result = prepare_layer_packet(args.repo_root, subject_packet=args.subject_packet,
+                kind_evidence=args.kind_evidence, snapshot=args.snapshot, diff=args.diff)
+            print(json.dumps({"status": "PASS", "scope": "layer-packet-only-not-acceptance", "packet": result}))
+        except (ValueError, OSError) as exc:
+            print(json.dumps({"status": "BLOCKED", "scope": "layer-packet-only", "error": str(exc)}))
+            sys.exit(1)
+    elif args.command == "materialize":
         try:
             try:
                 with open(args.input, "rb") as stream:

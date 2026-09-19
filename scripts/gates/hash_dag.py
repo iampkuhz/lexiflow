@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any
+
+import yaml
 
 from scripts.gates.receipt_store import (
     ReceiptStoreError,
@@ -16,12 +19,16 @@ from scripts.gates.receipt_store import (
     safe_locator,
     sha256_bytes,
 )
+from scripts.gates.task_source import source_descriptor_is_current
 
 
 VERIFICATION_SCHEMA = "lexiflow.evidence-hash-dag-verification.v1"
 RECEIPT_SCHEMA = "lexiflow.gate-receipt.v1"
 MANIFEST_SCHEMA = "lexiflow.gate-artifact-manifest.v1"
 PLAN_SCHEMA = "lexiflow.gate-plan.v1"
+EVIDENCE_PACKET_SCHEMA = "lexiflow.explicit-evidence-packet.v1"
+INDEPENDENT_REVIEW_EVIDENCE_SCHEMA = "lexiflow.independent-review-evidence.v1"
+REGISTRY_LOCATOR = "harness/gate-check-registry.yaml"
 _HEX = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -225,8 +232,189 @@ def _required_receipt_edges(receipt: dict[str, Any], locator: str) -> None:
             _descriptor(dependency, f"{locator}.required_dependency_receipts[{index}]")
 
 
+def _task_id(value: Any, path: str) -> str:
+    if not isinstance(value, str) or not value:
+        _invalid(f"{path} is not a non-empty task id")
+    return value
+
+
+def _verify_task_source(
+    repo_root: str, task_id: str, value: Any, path: str,
+) -> None:
+    """Verify a task projection without pretending it is a file-byte edge.
+
+    ``planning/workstreams.yaml`` carries the full task catalog.  Newer Gate
+    packets deliberately bind one canonical task projection, whose digest is
+    not the digest of that YAML file.  The generic descriptor walker must not
+    feed such a projection to ``read_bound_bytes``.  It remains current only
+    when it is the current projection for the named task (legacy full-file
+    descriptors are accepted by ``source_descriptor_is_current``).
+    """
+    descriptor = _descriptor(value, path)
+    current = {"locator": descriptor.locator, "sha256": descriptor.sha256}
+    if not source_descriptor_is_current(repo_root, task_id, current):
+        _invalid(f"task source projection is stale at {path}")
+
+
+def _verify_task_registry(
+    repo_root: str, task_id: str, value: Any, path: str,
+) -> bool:
+    """Verify a Task registry-entry projection and report whether it is typed.
+
+    New task-validation receipts bind the selected registry entry's
+    ``entry_hash`` rather than bytes of the shared registry file.  This keeps
+    an unrelated Task registration from staling an existing Task receipt.  A
+    legacy receipt still binds raw file bytes and remains a normal graph edge.
+    """
+    descriptor = _descriptor(value, path)
+    if descriptor.locator != REGISTRY_LOCATOR:
+        return False
+    try:
+        content = read_bound_bytes(repo_root, descriptor.locator)
+    except ReceiptStoreError as exc:
+        _invalid(f"missing or unsafe task registry {descriptor.locator}: {exc.detail}")
+    if sha256_bytes(content) == descriptor.sha256:
+        return False
+    try:
+        registry = yaml.safe_load(content)
+    except (UnicodeDecodeError, yaml.YAMLError) as exc:
+        _invalid(f"task registry is unreadable at {path}: {exc}")
+    if not isinstance(registry, dict) or registry.get("schema_version") != "lexiflow.gate-check-registry.v1":
+        _invalid(f"task registry schema mismatch at {path}")
+    entries = registry.get("entries")
+    if not isinstance(entries, list):
+        _invalid(f"task registry entries malformed at {path}")
+    matches = [entry for entry in entries if isinstance(entry, dict) and entry.get("subject_task_id") == task_id]
+    if len(matches) != 1:
+        _invalid(f"task registry subject is missing or duplicated at {path}")
+    entry = matches[0]
+    entry_hash = entry.get("entry_hash")
+    if not isinstance(entry_hash, str) or not _HEX.fullmatch(entry_hash):
+        _invalid(f"task registry entry hash is invalid at {path}")
+    computed = sha256_bytes(canonical_json_bytes({key: item for key, item in entry.items() if key != "entry_hash"}))
+    if computed != entry_hash:
+        _invalid(f"task registry entry hash mismatch at {path}")
+    if entry_hash != descriptor.sha256:
+        _invalid(f"task registry projection is stale at {path}")
+    return True
+
+
+def _validation_task_id(repo_root: str, reference: Any, path: str) -> str:
+    """Read only the immutable validation reference needed to type review scope."""
+    edge = _descriptor(reference, path)
+    try:
+        content = read_bound_bytes(repo_root, edge.locator)
+    except ReceiptStoreError as exc:
+        _invalid(f"missing or unsafe validation receipt {edge.locator}: {exc.detail}")
+    if sha256_bytes(content) != edge.sha256:
+        _invalid(f"changed validation receipt bytes: {edge.locator}")
+    value = _parse_json(content, edge.locator)
+    if not isinstance(value, dict) or value.get("schema_version") != RECEIPT_SCHEMA:
+        _invalid(f"validation receipt schema mismatch at {edge.locator}")
+    return _task_id(value.get("task", {}).get("task_id"), f"{edge.locator}.task.task_id")
+
+
+def _structured_edges(
+    repo_root: str, value: Any, locator: str, *, historical_workspace_inputs: bool = False,
+) -> list[_Edge]:
+    """Extract graph edges with schema-specific handling for task projections.
+
+    All ordinary descriptor-shaped values remain byte edges.  The only omitted
+    values are the typed task-source projections whose validity is checked
+    above; this prevents a broad descriptor exemption from hiding artifacts or
+    source drift.
+    """
+    if not isinstance(value, dict):
+        return _extract_edges(value, locator)
+    schema = value.get("schema_version")
+    view = deepcopy(value)
+    if schema == EVIDENCE_PACKET_SCHEMA:
+        task = value.get("task")
+        if not isinstance(task, dict):
+            _invalid(f"{locator}.task is not an object")
+        if "task_source" in task:
+            _verify_task_source(repo_root, _task_id(task.get("task_id"), f"{locator}.task.task_id"),
+                                task.get("task_source"), f"{locator}.task.task_source")
+            view["task"].pop("task_source", None)
+    elif schema == PLAN_SCHEMA:
+        task = value.get("task")
+        if not isinstance(task, dict):
+            _invalid(f"{locator}.task is not an object")
+        task_id = _task_id(task.get("task_id"), f"{locator}.task.task_id")
+        if "task_source" in task:
+            _verify_task_source(repo_root, task_id, task.get("task_source"), f"{locator}.task.task_source")
+            view["task"].pop("task_source", None)
+        registry = value.get("registry")
+        if isinstance(registry, dict) and "subject_entry_sha256" in registry:
+            typed_registry = {
+                "locator": registry.get("locator"),
+                "sha256": registry.get("subject_entry_sha256"),
+            }
+            if _verify_task_registry(repo_root, task_id, typed_registry, f"{locator}.registry"):
+                view.pop("registry", None)
+        if historical_workspace_inputs:
+            # A completed prerequisite is immutable evidence of the inputs it
+            # was checked against.  Its plan retains every input digest, but a
+            # later phase must not reread mutable workspace configuration or
+            # documentation as if those historical bytes still existed.  Run
+            # artifacts, issuer packets, subject evidence and manifests remain
+            # normal strict graph edges.
+            view.pop("consumed_inputs", None)
+            view.pop("registry", None)
+            for check in view.get("checks", []):
+                if isinstance(check, dict):
+                    check.pop("consumed_inputs", None)
+    elif schema == RECEIPT_SCHEMA:
+        current_inputs = value.get("current_inputs")
+        # Historical receipts predate task-scoped projections.  Preserve their
+        # normal generic traversal; only typed receipts that carry this field
+        # receive the projection-specific treatment.
+        if isinstance(current_inputs, dict) and "task_source" in current_inputs:
+            task_id = _task_id(value.get("task", {}).get("task_id"), f"{locator}.task.task_id")
+            _verify_task_source(repo_root, task_id, current_inputs.get("task_source"),
+                                f"{locator}.current_inputs.task_source")
+            view["current_inputs"].pop("task_source", None)
+        if historical_workspace_inputs and isinstance(current_inputs, dict):
+            # A completed prerequisite's recorded registry/policy are facts
+            # about the historical decision environment.  Its caller derives
+            # and verifies the current named Task projection separately; do
+            # not reinterpret a legacy whole-file registry digest as a new
+            # typed entry projection during historical traversal.
+            view["current_inputs"].pop("registry", None)
+            view["current_inputs"].pop("policy", None)
+        elif isinstance(current_inputs, dict) and "registry" in current_inputs:
+            receipt_task = value.get("task")
+            task_id = receipt_task.get("task_id") if isinstance(receipt_task, dict) else None
+            # Historical v1 fixtures/receipts had no Task identity in the
+            # receipt body.  They cannot claim a typed projection, so retain
+            # their registry as the ordinary byte edge they originally used.
+            if isinstance(task_id, str) and task_id:
+                if _verify_task_registry(repo_root, task_id, current_inputs.get("registry"),
+                                         f"{locator}.current_inputs.registry"):
+                    view["current_inputs"].pop("registry", None)
+        review_scope = value.get("review_scope")
+        if isinstance(review_scope, dict) and "source" in review_scope:
+            task_id = _task_id(value.get("task", {}).get("task_id"), f"{locator}.task.task_id")
+            _verify_task_source(repo_root, task_id, review_scope.get("source"),
+                                f"{locator}.review_scope.source")
+            view["review_scope"].pop("source", None)
+        elif review_scope is not None and not isinstance(review_scope, dict):
+            _invalid(f"{locator}.review_scope is not an object")
+    elif schema == INDEPENDENT_REVIEW_EVIDENCE_SCHEMA:
+        review_scope = value.get("review_scope")
+        if not isinstance(review_scope, dict):
+            _invalid(f"{locator}.review_scope is not an object")
+        task_id = _validation_task_id(repo_root, value.get("validation_receipt"),
+                                      f"{locator}.validation_receipt")
+        _verify_task_source(repo_root, task_id, review_scope.get("source"),
+                            f"{locator}.review_scope.source")
+        view["review_scope"].pop("source", None)
+    return _extract_edges(view, locator)
+
+
 def verify_hash_dag(
     repo_root: str, root_receipt: dict[str, str], *, max_nodes: int = 10000,
+    historical_workspace_inputs: bool = False,
 ) -> dict[str, Any]:
     """Verify a complete finite graph from one explicit immutable root receipt."""
     root = _descriptor(root_receipt, "root_receipt")
@@ -281,7 +469,13 @@ def verify_hash_dag(
             if finished < started:
                 _invalid(f"receipt finished before it started: {edge.locator}")
             receipt_times[edge.locator] = (started, finished)
-        children = _extract_edges(value, edge.locator) if value is not None else []
+        children = (
+            _structured_edges(
+                repo_root, value, edge.locator,
+                historical_workspace_inputs=historical_workspace_inputs,
+            )
+            if value is not None else []
+        )
         seen_child: set[tuple[str, str, str | None]] = set()
         graph[edge.locator] = []
         for child in children:

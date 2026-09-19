@@ -1,24 +1,20 @@
 # 1. 第一阶段交付状态
 
-> 更新日期：2026-09-18。文档和共享策略输入已发生变化；原收据仅证明原冻结版本。
-
 ## 1.1. 当前验收状态
 
-第一阶段正式验收保持 **BLOCKED**。本轮只精简最新版文档与文档治理，不激活第二阶段，不把文档可读性或工程测试当作用户批准。
+第一阶段正式验收为 **PASS**。G1 以当前 `LF-TSK-ARCH-0008@6/3.0.0` 的完整三层 Gate 链为准；
+早期失败收据不参与阶段判断。
 
-| 层次 | 当前结论 | 下一步 |
+| 层次 | 当前结论 | 必要条件 |
 |---|---|---|
-| 架构设计 | 十项架构决策仍为 `Proposed`；业务未因本轮重构而交付 | 审阅[架构决策](../architecture/decisions.md)和[长期计划的 G1 出口](master-plan.md#p1--architecture) |
-| 文档与工具验证 | 40 篇文档的链接/锚点检查通过；Harness 94 项、Gate 工具 552 项测试通过；18 项文档合同诊断通过 | 这些是静态检查与工具回归，不是业务旅程或正式阶段收据 |
-| 正式任务验收 | 公开增量 Gate 返回 `FAIL/missing-evidence-context`；本轮未签发正式收据 | 取得受信证据上下文后，基于新输入核对验证、独立审阅及依赖链 |
-| 用户阶段决定 | 未由本轮任务提供 | 前置证据闭合后请求明确批准，再签发退出收据 |
+| 架构基线 | PASS | `TASK_VALIDATION`：`3c5a28ee-5a62-4e15-b985-c5406627c5f7` |
+| 独立审阅 | PASS | `INDEPENDENT_REVIEW`：`23a5f57f-b96d-483c-a8b7-101f89c24a91` |
+| 目录决策 | PASS | `CATALOG_DECISION`：`6a49b89c-fefc-4b22-bc21-a60201e1421b` |
+| 用户阶段决定 | 已批准 | `G1 user decision: APPROVED`，但不替代三层 Gate receipt |
 
-本页直接更新当前结论，不建立日期快照；原始运行证据仍保持不可变。
+## 1.2. G1 退出条件
 
-
-## 1.2. G1 退出状态
-
-- 退出任务：`LF-TSK-ARCH-0008`。
-- 当前用户阶段决定：未记录；因此出口保持 `BLOCKED`。
-- 批准后只在本页追加机器合同要求的明确标记；在此之前，架构正文、测试结果或口头结论都不能替代用户决定。
-- 计划出口条件见[长期计划](master-plan.md#p1--architecture)，具体证据操作见[校验手册](../development/validation.md)。
+- 唯一退出任务：`LF-TSK-ARCH-0008@6/3.0.0`。
+- 必须依次取得当前 `TASK_VALIDATION`、`INDEPENDENT_REVIEW`、`CATALOG_DECISION` 的 `PASS` receipt。
+- 用户批准标记必须保留：`G1 user decision: APPROVED`。
+- 上述条件已满足；G2 可从 `LF-TSK-DAT-0001` 开始。

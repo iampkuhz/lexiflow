@@ -20,6 +20,13 @@ from typing import Any, Mapping
 
 import yaml
 
+# See local_codex_runtime: the user-facing script entrypoint must retain the
+# same package imports as the module entrypoint.
+if __package__ in {None, ""}:
+    repository_root = Path(__file__).resolve().parents[2]
+    if str(repository_root) not in sys.path:
+        sys.path.insert(0, str(repository_root))
+
 from scripts.gates.evidence_packet import (
     CODEX_MAIN_TASK_PROJECTION_SCHEMA_VERSION,
     CODEX_TASK_PROJECTION_SCHEMA_VERSION,
@@ -486,7 +493,7 @@ class CodexWorkPackagePublisher:
             raise CodexWorkPackageError("evidence-input-invalid", "scope must be explicit and complete")
         source_locator = "planning/workstreams.yaml"
         evidence_input = {
-            "task": {"task_id": task_id, "task_version": projection["task_version"], "change_version": projection["change_version"], "task_source": {"locator": source_locator, "sha256": sha256_file_strict(self.repo_root, source_locator)}},
+        "task": {"task_id": task_id, "task_version": projection["task_version"], "change_version": projection["change_version"], "task_source": __import__("scripts.gates.task_source", fromlist=["task_source_descriptor"]).task_source_descriptor(self.repo_root, task_id)},
             "subject": {"raw_artifacts": {"task": entry["artifacts"]["task_projection"], "completion": entry["artifacts"]["completion"], **reviewed}, "main_agent_attestation": dict(main_agent_attestation), "identity": projection_identity(projection)},
             "scope": dict(scope),
         }

@@ -14,10 +14,12 @@ import yaml
 from scripts.gates.receipt_store import ReceiptStoreError, read_bound_bytes, safe_locator
 
 SCHEMA_VERSION = "lexiflow.task-contract-check.v1"
-PROFILE_SCHEMA = "lexiflow.g1-task-contract-profiles.v1"
-PROFILE_LOCATOR = "harness/g1-task-contract-profiles.yaml"
+PROFILE_SCHEMA = "lexiflow.phase-task-contract-profiles.v1"
+PROFILE_LOCATOR = "harness/phase-task-contract-profiles.yaml"
 _TASK_ID = re.compile(r"^LF-TSK-[A-Z]+-\d{4}$")
 _ASSERTION_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_MARKDOWN_HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$")
+_FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 
 
 class TaskContractError(ValueError):
@@ -34,6 +36,47 @@ def _exact_object(value: Any, keys: set[str], path: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != keys:
         raise TaskContractError("invalid-profile", f"{path} keys differ from {sorted(keys)}")
     return value
+
+
+def _nonempty_strings(value: Any, path: str) -> list[str]:
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(not isinstance(item, str) or not item.strip() for item in value)
+        or len(set(value)) != len(value)
+    ):
+        raise TaskContractError("invalid-profile", f"{path} must be unique non-empty strings")
+    return value
+
+
+def _markdown_headings(text: str) -> set[str]:
+    """Return headings outside fenced code; body prose is deliberately ignored."""
+    result: set[str] = set()
+    fence: str | None = None
+    for line in text.splitlines():
+        marker = _FENCE.match(line)
+        if marker:
+            token = marker[1]
+            if fence is None:
+                fence = token
+            elif token[0] == fence[0] and len(token) >= len(fence) and not line[marker.end():].strip():
+                fence = None
+            continue
+        if fence is None:
+            heading = _MARKDOWN_HEADING.match(line)
+            if heading:
+                result.add(heading[1])
+    return result
+
+
+def _yaml_path_exists(value: Any, path: str) -> bool:
+    """Resolve a dot path through mappings only; list searching is never implicit."""
+    current = value
+    for part in path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return False
+        current = current[part]
+    return True
 
 
 def load_profiles(repo_root: str | Path) -> dict[str, dict[str, Any]]:
@@ -55,7 +98,7 @@ def load_profiles(repo_root: str | Path) -> dict[str, dict[str, Any]]:
         if not isinstance(task_id, str) or not _TASK_ID.fullmatch(task_id):
             raise TaskContractError("invalid-profile", f"invalid task id: {task_id!r}")
         required = {"owner", "evidence_file", "required_inputs", "runner", "assertions"}
-        optional = {"validation_command", "approval_gate"}
+        optional = {"validation_command", "approval_gate", "fixed_argv", "timeout_seconds"}
         if not isinstance(raw, dict) or not required.issubset(raw) or set(raw) - required - optional:
             raise TaskContractError("invalid-profile", f"{task_id} fields are invalid")
         owner = raw["owner"]
@@ -76,7 +119,20 @@ def load_profiles(repo_root: str | Path) -> dict[str, dict[str, Any]]:
             command = raw.get("validation_command")
             if not isinstance(command, str) or not command:
                 raise TaskContractError("invalid-profile", f"{task_id} external command missing")
-        elif "validation_command" in raw:
+            argv = raw.get("fixed_argv")
+            timeout = raw.get("timeout_seconds")
+            if argv is not None:
+                if (
+                    not isinstance(argv, list)
+                    or not argv
+                    or any(not isinstance(item, str) or not item for item in argv)
+                ):
+                    raise TaskContractError("invalid-profile", f"{task_id} external fixed argv invalid")
+                if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+                    raise TaskContractError("invalid-profile", f"{task_id} external timeout invalid")
+            elif timeout is not None:
+                raise TaskContractError("invalid-profile", f"{task_id} external timeout requires fixed argv")
+        elif any(field in raw for field in ("validation_command", "fixed_argv", "timeout_seconds")):
             raise TaskContractError("invalid-profile", f"{task_id} task-contract runner cannot override command")
         locators = raw["required_inputs"]
         if (
@@ -95,17 +151,28 @@ def load_profiles(repo_root: str | Path) -> dict[str, dict[str, Any]]:
             raise TaskContractError("invalid-profile", f"{task_id} assertions missing")
         seen: set[str] = set()
         for index, assertion in enumerate(assertions):
-            assertion = _exact_object(assertion, {"id", "contains_all"}, f"{task_id}.assertions[{index}]")
+            if not isinstance(assertion, dict) or not isinstance(assertion.get("type"), str):
+                raise TaskContractError("invalid-profile", f"{task_id} assertion type is missing")
             assertion_id = assertion["id"]
-            terms = assertion["contains_all"]
             if not isinstance(assertion_id, str) or not _ASSERTION_ID.fullmatch(assertion_id) or assertion_id in seen:
                 raise TaskContractError("invalid-profile", f"{task_id} assertion id invalid")
-            if (
-                not isinstance(terms, list) or not terms
-                or any(not isinstance(term, str) or not term.strip() for term in terms)
-                or len({term.casefold() for term in terms}) != len(terms)
-            ):
-                raise TaskContractError("invalid-profile", f"{task_id} assertion terms invalid")
+            assertion_type = assertion["type"]
+            if assertion_type == "markdown-headings":
+                assertion = _exact_object(assertion, {"id", "type", "locator", "headings"}, f"{task_id}.assertions[{index}]")
+                if assertion["locator"] not in locators:
+                    raise TaskContractError("invalid-profile", f"{task_id} heading locator is not a required input")
+                _nonempty_strings(assertion["headings"], f"{task_id} assertion headings")
+            elif assertion_type == "yaml-paths":
+                assertion = _exact_object(assertion, {"id", "type", "locator", "paths"}, f"{task_id}.assertions[{index}]")
+                if assertion["locator"] not in locators or not assertion["locator"].endswith((".yaml", ".yml")):
+                    raise TaskContractError("invalid-profile", f"{task_id} YAML locator is not a declared YAML input")
+                _nonempty_strings(assertion["paths"], f"{task_id} assertion paths")
+            elif assertion_type == "file-present":
+                assertion = _exact_object(assertion, {"id", "type", "locator"}, f"{task_id}.assertions[{index}]")
+                if assertion["locator"] not in locators:
+                    raise TaskContractError("invalid-profile", f"{task_id} file locator is not a required input")
+            else:
+                raise TaskContractError("invalid-profile", f"{task_id} assertion type invalid")
             seen.add(assertion_id)
         gate = raw.get("approval_gate")
         if gate is not None:
@@ -133,6 +200,7 @@ def evaluate_task(repo_root: str | Path, task_id: str) -> dict[str, Any]:
         raise TaskContractError("external-runner-required", f"{task_id} uses its registered external validator")
 
     texts: list[str] = []
+    content_by_locator: dict[str, str] = {}
     inputs: list[dict[str, Any]] = []
     for locator in profile["required_inputs"]:
         try:
@@ -143,21 +211,42 @@ def evaluate_task(repo_root: str | Path, task_id: str) -> dict[str, Any]:
         if not text.strip():
             raise TaskContractError("invalid-current-input", f"{locator} is empty")
         texts.append(text.casefold())
+        content_by_locator[locator] = text
         inputs.append({
             "locator": locator,
             "sha256": hashlib.sha256(content).hexdigest(),
             "bytes": len(content),
         })
-    corpus = "\n".join(texts)
     assertions: list[dict[str, Any]] = []
     for assertion in profile["assertions"]:
-        missing = [term for term in assertion["contains_all"] if term.casefold() not in corpus]
-        assertions.append({
-            "id": assertion["id"],
-            "status": "PASS" if not missing else "BLOCKED",
-            "required_terms": list(assertion["contains_all"]),
-            "missing_terms": missing,
-        })
+        if assertion["type"] == "markdown-headings":
+            found = _markdown_headings(content_by_locator[assertion["locator"]])
+            missing = [heading for heading in assertion["headings"] if heading not in found]
+            assertions.append({
+                "id": assertion["id"], "type": assertion["type"], "locator": assertion["locator"],
+                "status": "PASS" if not missing else "BLOCKED",
+                "required_headings": list(assertion["headings"]),
+                "found_headings": [heading for heading in assertion["headings"] if heading in found],
+                "missing_headings": missing,
+            })
+        elif assertion["type"] == "yaml-paths":
+            try:
+                parsed = yaml.safe_load(content_by_locator[assertion["locator"]])
+            except yaml.YAMLError as exc:
+                raise TaskContractError("invalid-current-input", f"{assertion['locator']}: invalid YAML: {exc}") from None
+            missing = [path for path in assertion["paths"] if not _yaml_path_exists(parsed, path)]
+            assertions.append({
+                "id": assertion["id"], "type": assertion["type"], "locator": assertion["locator"],
+                "status": "PASS" if not missing else "BLOCKED",
+                "required_paths": list(assertion["paths"]),
+                "found_paths": [path for path in assertion["paths"] if path not in missing],
+                "missing_paths": missing,
+            })
+        else:
+            assertions.append({
+                "id": assertion["id"], "type": assertion["type"], "locator": assertion["locator"],
+                "status": "PASS", "evidence": "declared-required-input-is-readable",
+            })
     gate = profile.get("approval_gate")
     if gate is not None:
         gate_content = texts[profile["required_inputs"].index(gate["locator"])]

@@ -17,12 +17,10 @@ rootProject.name = "lexiflow-backend"
 includeBuild("gradle/build-logic")
 
 mapOf(
-    ":modules:foundation" to "modules/foundation",
     ":modules:lexicon" to "modules/lexicon",
-    ":modules:content" to "modules/content",
-    ":modules:semantic" to "modules/semantic",
     ":modules:enrichment" to "modules/enrichment",
     ":application:workflow" to "application/workflow",
+    ":application:lexicon-application" to "application/lexicon",
     ":platform:adapters" to "platform/adapters",
     ":apps:api" to "apps/api",
     ":apps:worker" to "apps/worker",

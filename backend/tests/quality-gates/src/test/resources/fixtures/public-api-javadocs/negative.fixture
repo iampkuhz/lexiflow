@@ -1,0 +1,27 @@
+package example;
+
+/** 公开类型说明。 */
+public final class ApiNegative {
+  /** 单行文档。 @param value 含义：待处理值。 */
+  public void singleLine(int value) {}
+
+  /**
+   *
+   * @param value 含义：待处理值。取值范围：0 至 10。
+   */
+  public void missingParameter(int value) {}
+
+  /**
+   * 参数标签不完整。
+   *
+   * @param value 取值范围：0 至 10。
+   */
+  public void missingMeaning(int value) {}
+
+  /**
+   * 参数标签不完整。
+   *
+   * @param value 含义：待处理值。
+   */
+  public void missingRange(int value) {}
+}

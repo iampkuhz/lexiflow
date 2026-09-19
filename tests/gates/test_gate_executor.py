@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -28,6 +29,7 @@ from scripts.gates.executor import (
     ExternalInterruption,
     ProcessRequest,
     ProcessResult,
+    _adapt_controlled_runtime,
     _adapt_planning_validator,
     _adapt_task_contract,
     _adapt_unittest,
@@ -614,6 +616,7 @@ class TestUnittestAdapter(unittest.TestCase):
         self.assertEqual(outcome["status"], "FAIL")
         self.assertEqual(outcome["reason"], "unproved-exit-zero")
 
+
     def test_exit_zero_without_ok_is_fail(self):
         r = self._result(rc=0, stdout=b"Ran 3 tests\n", stderr=b"")
         outcome = _adapt_unittest(r, {})
@@ -707,6 +710,26 @@ class TestUnittestAdapter(unittest.TestCase):
         outcome = _adapt_unittest(self._result(stdout=b"\xffRan 3 tests\nOK\n"), {})
         self.assertEqual(outcome["status"], "FAIL")
         self.assertEqual(outcome["reason"], "malformed-output")
+
+
+class TestControlledRuntimeAdapter(unittest.TestCase):
+    def _result(self, status, return_code):
+        return _make_process_result(
+            return_code=return_code,
+            stdout=json.dumps({"status": status}, sort_keys=True).encode() + b"\n",
+            stderr=b"",
+            argv=["python3", "scripts/toolchain/postgres_test.py", "verify", "--scope", "all"],
+        )
+
+    def test_blocked_runtime_is_preserved(self):
+        outcome = _adapt_controlled_runtime(self._result("BLOCKED", 1), {})
+
+        self.assertEqual("BLOCKED", outcome["status"])
+
+    def test_pass_runtime_requires_zero_exit(self):
+        outcome = _adapt_controlled_runtime(self._result("PASS", 0), {})
+
+        self.assertEqual("PASS", outcome["status"])
 
 
 class TestPlanningValidatorAdapter(unittest.TestCase):
@@ -1271,10 +1294,24 @@ class TestAggregation(unittest.TestCase):
 
 class TestDefaultProcessRunner(unittest.TestCase):
     def test_real_profile_backed_task_contract_pass_and_user_gate_blocked(self):
-        repo = Path(__file__).resolve().parents[2]
-        registry = yaml.safe_load((repo / "harness/gate-check-registry.yaml").read_text())
+        source = Path(__file__).resolve().parents[2]
+        registry = yaml.safe_load((source / "harness/gate-check-registry.yaml").read_text())
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        repo = Path(temporary.name)
+        selected = {"LF-TSK-PRD-0001", "LF-TSK-ARCH-0008"}
+        locators = {"scripts/gates/receipt_store.py"}
+        for entry in registry["entries"]:
+            if entry["subject_task_id"] in selected:
+                locators.update(entry["consumed_inputs"])
+        for locator in locators:
+            target = repo / locator
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source / locator, target)
+        decision = repo / "docs/roadmap/phase-1-status.md"
+        decision.write_text(decision.read_text().replace("G1 user decision: APPROVED", "G1 user decision: PENDING"))
         for task_id, expected in (
-            ("LF-TSK-ARCH-0001", "PASS"),
+            ("LF-TSK-PRD-0001", "PASS"),
             ("LF-TSK-ARCH-0008", "BLOCKED"),
         ):
             with self.subTest(task_id=task_id):
@@ -1292,7 +1329,7 @@ class TestDefaultProcessRunner(unittest.TestCase):
                     subject_task_id=task_id,
                     subject_task_version=entry["subject_task_version"],
                     subject_change_version=entry["subject_change_version"],
-                    subject_owner="LF-WS-ARCH",
+                    subject_owner=entry["owner"],
                 )
                 result = execute_checks(_make_plan(checks=[check]), repo_root=str(repo))
                 self.assertEqual(result["run_status"], expected)

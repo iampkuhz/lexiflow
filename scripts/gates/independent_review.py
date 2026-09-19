@@ -23,6 +23,7 @@ from scripts.gates.receipt_store import (
     sha256_bytes,
     validate_run_id,
 )
+from scripts.gates.task_source import source_descriptor_is_current
 
 
 REVIEW_EVIDENCE_SCHEMA = "lexiflow.independent-review-evidence.v1"
@@ -159,7 +160,7 @@ def _current_review_scope(plan: dict[str, Any], validation: dict[str, Any], scop
         _fail("stale-subject", "source snapshot fingerprint drift")
     if scope["registry_sha256"] != validation.get("current_inputs", {}).get("registry", {}).get("sha256"):
         _fail("stale-subject", "registry hash drift")
-    if scope["registry_sha256"] != plan.get("registry", {}).get("sha256"):
+    if scope["registry_sha256"] != plan.get("registry", {}).get("subject_entry_sha256", plan.get("registry", {}).get("sha256")):
         _fail("stale-subject", "registry is not current")
     policy = next((item for item in plan.get("consumed_inputs", []) if item.get("locator") == "harness/agent-policy.manifest.yaml"), None)
     if not policy or scope["policy_sha256"] != policy.get("sha256") or scope["policy_sha256"] != validation.get("current_inputs", {}).get("policy", {}).get("sha256"):
@@ -172,6 +173,12 @@ def _current_review_scope(plan: dict[str, Any], validation: dict[str, Any], scop
     if diff != validation_diff:
         _fail("stale-subject", "reviewed diff descriptor differs from validation")
     return {**copy.deepcopy(scope), "source": source, "diff": diff}
+
+
+def _verify_current_task_source(repo_root: str, task_id: str, source: dict[str, str]) -> None:
+    """Validate a task-scoped source projection without treating it as file bytes."""
+    if not source_descriptor_is_current(repo_root, task_id, source):
+        _fail("stale-subject", "review source task projection is not current")
 
 
 def verify_independent_review(
@@ -227,7 +234,7 @@ def verify_independent_review(
         _fail("reviewer-not-independent", f"reviewer wrote subject files: {overlap}")
 
     scope = _current_review_scope(current_plan, validation, review_scope)
-    _read_descriptor(repo_root, scope["source"], "review_scope.source")
+    _verify_current_task_source(repo_root, current_plan["task"]["task_id"], scope["source"])
     _read_descriptor(repo_root, scope["diff"], "review_scope.diff")
     if decision not in ("PASS", "BLOCKED", "FAIL"):
         _fail("evidence-incomplete", "review decision is invalid")

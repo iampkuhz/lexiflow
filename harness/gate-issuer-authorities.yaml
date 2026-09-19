@@ -17,8 +17,8 @@ authorities:
     - INDEPENDENT_REVIEW
   codex:
     available: true
-    authority_id: lexiflow.codex-desktop-host
-    verifier_id: codex.current-session.v1
+    authority_id: lexiflow.codex-local-session
+    verifier_id: codex.local-session.v1
     verifier_abi: 1
     evidence_roots:
     - tmp/quality/authority/codex

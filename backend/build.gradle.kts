@@ -4,6 +4,7 @@ import io.lexiflow.buildlogic.VerifyProjectDependenciesTask
 import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.api.tasks.diagnostics.DependencyReportTask
 import org.gradle.api.tasks.testing.Test
+import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.testing.jacoco.tasks.JacocoReport
 
 plugins {
@@ -28,15 +29,10 @@ dependencyLocking {
     lockMode.set(LockMode.STRICT)
 }
 
-val productProjectPaths = listOf(
-    ":modules:foundation",
-    ":modules:lexicon",
-    ":modules:content",
-    ":modules:semantic",
-    ":modules:enrichment",
-    ":application:workflow",
-    ":platform:adapters",
-)
+val domainProjectPaths = listOf(":modules:lexicon", ":modules:enrichment")
+val applicationProjectPaths = listOf(":application:workflow", ":application:lexicon-application")
+val platformProjectPaths = listOf(":platform:adapters")
+val productProjectPaths = domainProjectPaths + applicationProjectPaths + platformProjectPaths
 val appProjectPaths = listOf(":apps:api", ":apps:worker")
 val leafProjects = subprojects.filter { it.childProjects.isEmpty() }
 val junitPlatformLauncher = libs.junit.platform.launcher
@@ -48,6 +44,7 @@ configure(leafProjects) {
     group = rootProject.group
     version = rootProject.version
     pluginManager.apply("lexiflow.java-library")
+    dependencies.add("testImplementation", junitJupiter)
     dependencies.add("testRuntimeOnly", junitPlatformLauncher)
 }
 
@@ -57,12 +54,68 @@ configure(appProjectPaths.map(::project)) {
         add("implementation", platform(springBootBom))
         add("implementation", "org.springframework.boot:spring-boot-starter-actuator")
         add("testImplementation", "org.springframework.boot:spring-boot-starter-test")
-        productProjectPaths.forEach { path -> add("implementation", project(path)) }
+        (domainProjectPaths + applicationProjectPaths + platformProjectPaths).forEach { path ->
+            add("implementation", dependencies.project(path))
+        }
+    }
+}
+
+listOf(":application:workflow", ":application:lexicon-application").forEach { applicationPath ->
+    project(applicationPath) {
+        dependencies {
+            domainProjectPaths.forEach { path -> add("implementation", dependencies.project(path)) }
+        }
+    }
+}
+
+project(":modules:enrichment") {
+    dependencies.add("implementation", dependencies.project(":modules:lexicon"))
+}
+
+project(":platform:adapters") {
+    dependencies {
+        add("implementation", platform(springBootBom))
+        add("implementation", "org.springframework.boot:spring-boot-starter-jdbc")
+        add("runtimeOnly", "org.postgresql:postgresql")
+        (domainProjectPaths + applicationProjectPaths).forEach { path ->
+            add("implementation", dependencies.project(path))
+        }
+    }
+    val platformSourceSets = extensions.getByType<SourceSetContainer>()
+    tasks.named<Test>("test") {
+        useJUnitPlatform {
+            excludeTags("postgres")
+        }
+    }
+    tasks.register<Test>("postgresIntegrationTest") {
+        group = LifecycleBasePlugin.VERIFICATION_GROUP
+        description = "Runs PostgreSQL-backed persistence integration tests."
+        testClassesDirs = platformSourceSets["test"].output.classesDirs
+        classpath = platformSourceSets["test"].runtimeClasspath
+        useJUnitPlatform {
+            includeTags("postgres")
+        }
+        systemProperty(
+            "lexiflow.postgres.test.jdbcUrl",
+            providers.environmentVariable("LEXIFLOW_POSTGRES_TEST_JDBC_URL").getOrElse(""),
+        )
+    }
+    tasks.register<JavaExec>("lexiconImport") {
+        group = "application"
+        description = "Runs the offline LexiFlow lexicon importer."
+        classpath = platformSourceSets["main"].runtimeClasspath
+        mainClass.set("io.lexiflow.lexicon.platform.importer.LexiconImportMain")
+        workingDir(rootProject.projectDir.parentFile)
+        providers.gradleProperty("lexiconImportArgs").orNull?.let { raw ->
+            args(raw.split("\u001f"))
+        }
     }
 }
 
 project(":apps:api") {
     dependencies.add("implementation", "org.springframework.boot:spring-boot-starter-webmvc")
+    dependencies.add("implementation", "org.springframework.boot:spring-boot-starter-jdbc")
+    dependencies.add("runtimeOnly", "org.postgresql:postgresql")
 }
 
 project(":tests:architecture") {
@@ -70,9 +123,11 @@ project(":tests:architecture") {
         add("testImplementation", junitJupiter)
         add("testImplementation", archunitJunit5)
         add("testImplementation", platform(springBootBom))
+        add("testImplementation", "org.springframework.boot:spring-boot-autoconfigure")
+        add("testImplementation", "org.springframework.boot:spring-boot-jdbc")
         add("testImplementation", "org.springframework:spring-context")
         (productProjectPaths + appProjectPaths).forEach { path ->
-            add("testImplementation", project(path))
+            add("testImplementation", dependencies.project(path))
         }
     }
     tasks.withType<Test>().configureEach {

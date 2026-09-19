@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "LexiFlow Caption Hints",
+  "version": "0.1.0",
+  "description": "Keep YouTube English captions visible and add bounded Chinese hints.",
+  "host_permissions": ["http://127.0.0.1:18080/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  }
+}

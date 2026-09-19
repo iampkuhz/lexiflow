@@ -3,8 +3,8 @@ program:
   id: LF-PRG-001
   name: LexiFlow contextual English learning
   status: ACTIVE
-  current_phase: P1
-  current_gate: G1
+  current_phase: P2
+  current_gate: G2
   phase_2_to_6_dispatch_requires_g1_user_approval: true
   source_brief: docs/product/product-brief.md
   reference_repository: /Users/zhehan/Documents/tools/llm/feipi-session-browser-java
@@ -46,7 +46,8 @@ domain_codes:
   OPS: build, deployment, release, backup, and operations
   ADP: future content adapters
 priority_policy:
-  P0: Required by the active gate or milestone; truth, core path, security, or data integrity.
+  P0: Required by the active gate or milestone; truth, core path, security, or data
+    integrity.
   P1: Material quality, performance, operability, or primary experience.
   P2: Useful improvement with a documented fallback.
   P3: Exploration or future expansion; expand only when evidence triggers it.
@@ -100,8 +101,8 @@ decomposition_policy:
   keep_together:
   - Implementation and its direct tests.
   - A small sequence sharing one owner, file claim, risk, and acceptance result.
-  discovery_rule: New independent scope receives a new task ID and discovered_from edge; never silently
-    broaden a dispatched task.
+  discovery_rule: New independent scope receives a new task ID and discovered_from
+    edge; never silently broaden a dispatched task.
   scale_model:
     current_seed_capabilities: 41
     activation_atomic_tasks:
@@ -137,8 +138,8 @@ dependency_edge_schema:
     required_fields:
     - name
     - version
-    uniqueness: A producer task declares each contract name once; name and version must exactly match
-      every contract consumer edge.
+    uniqueness: A producer task declares each contract name once; name and version
+      must exactly match every contract consumer edge.
   version_rules:
     required_task_version: Exact positive integer producer task version.
     required_change_version: Exact producer change SemVer.
@@ -167,14 +168,15 @@ orchestration_policy:
     max_total_runs_per_task_before_main_review: 2
     max_prompt_characters: 8000
     work_package_estimated_minutes:
-      min: 180
+      min: 10
       max: 360
-    work_package_estimate_source: exact-sum-of-current-catalog-task-estimates
-    minimum_catalog_tasks_per_work_package: 2
+    work_package_estimate_source: caller-declared-estimate-or-exact-current-catalog-sum-when-catalog-is-used
+    minimum_catalog_tasks_per_work_package: 1
     required_agent_profile: true
     required_harness_manifest: lexiflow.qoder-harness.v1
     required_result_schema: lexiflow.qoder-work-package-result.v1
-    prompt_context_policy: Use bounded file locators; do not repeat design documents in the handoff.
+    prompt_context_policy: Use bounded file locators; do not repeat design documents
+      in the handoff.
     rework_reuses_session_and_creates_new_run: true
   codex_subagents:
     model_policy:
@@ -220,11 +222,11 @@ orchestration_policy:
       task_ids_rule: exact-ordered-catalog-task-identities
       per_task_outcome_evidence_required: true
       preferred_minutes:
-        min: 120
+        min: 10
         max: 360
-      minimum_total_estimated_minutes: 120
+      minimum_total_estimated_minutes: 10
       target_maximum_total_estimated_minutes: 360
-      minimum_catalog_tasks: 2
+      minimum_catalog_tasks: 1
       must_share:
       - primary_owner
       - contract_boundary
@@ -233,9 +235,14 @@ orchestration_policy:
       - implementation_or_design
       - direct_validation
       - acceptance_evidence
+      proactive_dispatch:
+        threshold_minutes: 10
+        prefer_when:
+        - isolated-subtask-requires-large-new-context
+        - acceptance-is-confirmable-by-compact-result-or-deterministic-command
+        - non-overlapping-write-scope
       main_agent_only_when:
-      - single_file_fix
-      - single_command_validation
+      - deterministic-task-at-or-under-10-minutes
       - isolated_read_only_review
       turn_or_token_count_is_not_acceptance_evidence: true
   main_agent:
@@ -337,8 +344,8 @@ orchestration_policy:
       result_fields_required_in_prompt: true
       agent_profile_cli_binding: true
       harness_manifest_preflight: true
-      catalog_package_preflight: true
-      catalog_estimate_rule: exact-sum-180-to-360
+      catalog_package_preflight: advisory-when-present
+      catalog_estimate_rule: caller-10-to-360-or-exact-current-catalog-sum-when-catalog-is-used
       structured_result_required: true
       implementation_status: IMPLEMENTED
       conformance_test: tests/harness/test_qoder_runner.py
@@ -352,10 +359,10 @@ orchestration_policy:
       task_version: positive-integer
       change_version: semver-string
       work_package_id: stable-work-package-id-string
-      task_ids: ordered-unique-list-minimum-two
+      task_ids: ordered-unique-list-minimum-one
       task_versions: exact-task-id-to-positive-integer-map
       change_versions: exact-task-id-to-semver-map
-      estimated_minutes: integer-180-to-360
+      estimated_minutes: integer-10-to-360
       primary_owner: non-empty-string
       contract_boundary: non-empty-string
       agent_profile: project-qoder-agent-name
@@ -438,20 +445,20 @@ phase_capacity_budget:
     - independent-review
     - gate-verification
     - rework
-    counting_rule: Runs are task-level design, implementation, test, review, gate, or rework evidence
-      attempts. They are not Sub-Agent sessions, agent instances, capabilities, or independent feature
-      tasks; one 2-6 hour delegated work package normally covers multiple atomic tasks and therefore multiple
-      runs.
+    counting_rule: Runs are task-level design, implementation, test, review, gate,
+      or rework evidence attempts. They are not Sub-Agent sessions, agent instances,
+      capabilities, or independent feature tasks; one 2-6 hour delegated work package
+      normally covers multiple atomic tasks and therefore multiple runs.
   activation_rules:
-  - Add a task only when it has one owner, one outcome, typed dependencies, file claims, acceptance criteria,
-    and evidence.
-  - Keep the 113 existing seed tasks atomic; activate 262 additional real tasks across capability gaps
-    to reach 375.
+  - Add a task only when it has one owner, one outcome, typed dependencies, file claims,
+    acceptance criteria, and evidence.
+  - Keep the 113 existing seed tasks atomic; activate 262 additional real tasks across
+    capability gaps to reach 375.
   - Do not reserve or generate empty task IDs to meet capacity.
-  - Implementation and its direct tests stay in one atomic task; independent review and gate checks are
-    runs, not feature tasks.
-  - Phase Gates assess the activated scope; being below the capacity envelope is normal during JIT decomposition
-    and only requires a variance reason and coverage evidence.
+  - Implementation and its direct tests stay in one atomic task; independent review
+    and gate checks are runs, not feature tasks.
+  - Phase Gates assess the activated scope; being below the capacity envelope is normal
+    during JIT decomposition and only requires a variance reason and coverage evidence.
   validator_rules:
   - Sum of current_seed_tasks equals current_seed_atomic_tasks.
   - Sum of additional_tasks_to_activate equals additional_activation_tasks.
@@ -459,9 +466,10 @@ phase_capacity_budget:
   - Sum of target_atomic_tasks equals activation_target_atomic_tasks.
   - activation_target_atomic_tasks * maximum runs/task equals 3000.
   - minimum_project_atomic_tasks * baseline runs/task equals 1500.
-  - Every activated task resolves to one capability but capability IDs are never counted as tasks.
-  - Gate readiness validates active-scope completeness and recorded variance; it does not require target_atomic_tasks
-    to be reached.
+  - Every activated task resolves to one capability but capability IDs are never counted
+    as tasks.
+  - Gate readiness validates active-scope completeness and recorded variance; it does
+    not require target_atomic_tasks to be reached.
   current_seed_atomic_tasks: 94
   additional_activation_tasks: 241
   nature: Fully-expanded capacity envelope for planning, not a mechanical Gate minimum.
@@ -480,8 +488,8 @@ phase_capacity_budget:
     - coverage_evidence
     normal_jit_variance_requires_user_exception: false
 path_ownership:
-  resolution: Most-specific logical scope wins. Logical scopes are authoritative until G1 binds physical
-    paths.
+  resolution: Most-specific logical scope wins. Logical scopes are authoritative until
+    G1 binds physical paths.
   scopes:
   - scope: governance.roadmap
     owner: LF-WS-ARCH
@@ -556,6 +564,11 @@ path_ownership:
     proposed_paths:
     - backend/platform/adapters/src/main/java/io/lexiflow/persistence/**
     - db/**
+    - infra/postgres/**
+    - scripts/toolchain/postgres_migrations.py
+    - tests/toolchain/test_postgres_migrations.py
+    - tests/toolchain/__init__.py
+    - scripts/toolchain/local_stack.py
   - scope: client.chrome
     owner: LF-WS-EXT
     proposed_paths:
@@ -586,6 +599,7 @@ path_ownership:
     - ops/**
     - scripts/release/**
     - .github/**
+    - infra/local/**
   - scope: adapter.future
     owner: LF-WS-ADP
     proposed_paths:
@@ -647,29 +661,34 @@ path_ownership:
     owner: LF-WS-SEM
     proposed_paths:
     - tmp/quality/task-evidence/SEM/**
+  - scope: governance.python-tooling
+    owner: LF-WS-QLT
+    proposed_paths:
+    - requirements-dev.txt
   current_path_claims_are_enforced: true
   path_field: proposed_paths
 phase_entry_validation:
   effective_phase: task.phase overrides capability.phase
-  entry_task_definition: A P2-P6 task with no blocking hard/contract dependency in the same effective
-    phase before the previous-gate edge is applied.
+  entry_task_definition: A P2-P6 task with no blocking hard/contract dependency in
+    the same effective phase before the previous-gate edge is applied.
   approval_evidence_inheritance:
     source: phase_gates[].entry_requires.approval_evidence_type
     target: matching P2-P6 entry tasks
     task_level_override_allowed: false
   rules:
-  - Every declared phase entry task has a direct hard dependency on the immediately previous Gate exit
-    task.
+  - Every declared phase entry task has a direct hard dependency on the immediately
+    previous Gate exit task.
   - The direct edge pins required_task_version, required_change_version, and required_result=PASS.
-  - phase_entry_prerequisite pins previous_gate_id, exit task/version, required_gate_result=PASS, and
-    required_user_approval=APPROVED.
-  - Entry tasks inherit approval_evidence_type from the matching phase_gates[].entry_requires; task-level
-    phase_entry_prerequisite must not redeclare or override it.
-  - READY validation fails unless both the exit-task receipt and explicit approval receipt resolve.
-  - Every non-entry P2-P6 task has a transitive blocking ancestry path to at least one valid entry task
-    in its own phase.
-  - The phase Gate exit task has transitive blocking ancestry to every P0 entry task in that phase, or
-    a versioned exception approved by the user.
+  - phase_entry_prerequisite pins previous_gate_id, exit task/version, required_gate_result=PASS,
+    and required_user_approval=APPROVED.
+  - Entry tasks inherit approval_evidence_type from the matching phase_gates[].entry_requires;
+    task-level phase_entry_prerequisite must not redeclare or override it.
+  - READY validation fails unless both the exit-task receipt and explicit approval
+    receipt resolve.
+  - Every non-entry P2-P6 task has a transitive blocking ancestry path to at least
+    one valid entry task in its own phase.
+  - The phase Gate exit task has transitive blocking ancestry to every P0 entry task
+    in that phase, or a versioned exception approved by the user.
   entry_tasks:
     P2: &id001
     - LF-TSK-DAT-0001
@@ -691,7 +710,7 @@ phase_entry_validation:
     P5: &id004
     - LF-TSK-PRD-0003
     - LF-TSK-EXT-0001
-    P6: &id006
+    P6: &id005
     - LF-TSK-OBS-0003
     - LF-TSK-OPS-0003
     - LF-TSK-ADP-0003
@@ -701,7 +720,7 @@ phase_gates:
 - id: G1
   phase: P1
   name: Architecture Accepted
-  status: ACTIVE
+  status: COMPLETED
   approval: explicit-user-confirmation
   exit_task: LF-TSK-ARCH-0008
   required_outputs:
@@ -713,21 +732,20 @@ phase_gates:
   - sync-async-boundary
   - trade-off-records
   entry_tasks:
-  - LF-TSK-ARCH-0001
-  - LF-TSK-QLT-0001
+  - LF-TSK-ARCH-0008
   entry_requires: null
 - id: G2
   phase: P2
   name: Data Contract Accepted
-  status: DRAFT
+  status: ACTIVE
   approval: explicit-user-confirmation
   exit_task: LF-TSK-DAT-0006
   entry_tasks: *id001
   entry_requires:
     previous_gate_id: G1
     previous_gate_exit_task_id: LF-TSK-ARCH-0008
-    required_exit_task_version: 5
-    required_exit_change_version: 2.2.0
+    required_exit_task_version: 6
+    required_exit_change_version: 3.0.0
     required_gate_result: PASS
     required_user_approval: APPROVED
     approval_evidence_type: phase-gate-approval-receipt
@@ -782,7 +800,7 @@ phase_gates:
   status: DRAFT
   approval: explicit-user-confirmation
   exit_task: LF-TSK-OPS-0008
-  entry_tasks: *id006
+  entry_tasks: *id005
   entry_requires:
     previous_gate_id: G5
     previous_gate_exit_task_id: LF-TSK-EXT-0008
@@ -793,7 +811,8 @@ phase_gates:
     approval_evidence_type: phase-gate-approval-receipt
 milestones:
 - id: MVP
-  goal: YouTube flow with immediate English captions and sparse contextual hints; no account, profile, or synchronization.
+  goal: YouTube flow with immediate English captions and sparse contextual hints;
+    no account, profile, or synchronization.
   required_gates:
   - G1
   - G2
@@ -803,7 +822,8 @@ milestones:
   required_slices:
   - OPS.minimum-safe-deployment
 - id: ALPHA
-  goal: Controlled product usage with provider fallback, cost visibility, and restore drill; no account or profile synchronization.
+  goal: Controlled product usage with provider fallback, cost visibility, and restore
+    drill; no account or profile synchronization.
   required_gates:
   - G1
   - G2
@@ -815,8 +835,8 @@ milestones:
   - P0
   - P1-targeted
 - id: BETA
-  goal: Controlled external release with privacy, capacity, compatibility, recovery, and release support
-    evidence.
+  goal: Controlled external release with privacy, capacity, compatibility, recovery,
+    and release support evidence.
   required_gates:
   - G1
   - G2
@@ -829,7 +849,8 @@ workstreams:
 - id: LF-WS-ARCH
   code: ARCH
   name: Architecture and decisions
-  mission: Own bounded contexts, dependency direction, cross-domain flows, ADRs, and architecture gates.
+  mission: Own bounded contexts, dependency direction, cross-domain flows, ADRs, and
+    architecture gates.
   epics:
   - id: LF-EP-ARCH-001
     name: Modular monolith architecture
@@ -837,285 +858,33 @@ workstreams:
     - id: LF-CP-ARCH-001
       name: Product assumptions and domain map
       phase: P1
-      seed_tasks:
-      - id: LF-TSK-ARCH-0001
-        title: Freeze assumptions, invariants, and non-goals
-        priority: P0
-        depends_on: []
-        deliverable: Architecture assumption register
-        evidence: Reviewed assumption table
-        task_version: 1
-        change_version: 1.0.0
-        estimated_task_minutes: 45
-        acceptance_criteria:
-        - 'Complete the declared outcome: Freeze assumptions, invariants, and non-goals'
-        acceptance_evidence:
-        - Reviewed assumption table
-        phase: P1
-        task_source: G1 current-input receipt closure activation
-        discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
-        owner: LF-WS-ARCH
-        allowed_files:
-        - tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0001/result.json
-        forbidden_files:
-        - secrets/**
-        - data/**
-        file_claims:
-        - path: tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0001/result.json
-          mode: write
-          owner: LF-WS-ARCH
-        validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0001
-      - id: LF-TSK-ARCH-0002
-        title: Define bounded contexts and responsibilities
-        priority: P0
-        depends_on:
-        - task_id: LF-TSK-ARCH-0001
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
-        deliverable: Domain map
-        evidence: Responsibility and ownership matrix
-        task_version: 1
-        change_version: 1.0.0
-        estimated_task_minutes: 45
-        acceptance_criteria:
-        - 'Complete the declared outcome: Define bounded contexts and responsibilities'
-        acceptance_evidence:
-        - Responsibility and ownership matrix
-        phase: P1
-        task_source: G1 current-input receipt closure activation
-        discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
-        owner: LF-WS-ARCH
-        allowed_files:
-        - tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0002/result.json
-        forbidden_files:
-        - secrets/**
-        - data/**
-        file_claims:
-        - path: tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0002/result.json
-          mode: write
-          owner: LF-WS-ARCH
-        validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0002
+      seed_tasks: []
     - id: LF-CP-ARCH-002
       name: Dependency and execution boundaries
       phase: P1
-      seed_tasks:
-      - id: LF-TSK-ARCH-0003
-        title: Define module dependency direction and ports
-        priority: P0
-        depends_on:
-        - task_id: LF-TSK-ARCH-0002
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
-        deliverable: Acyclic dependency diagram
-        evidence: DAG validation and forbidden-edge list
-        task_version: 1
-        change_version: 1.0.0
-        estimated_task_minutes: 45
-        acceptance_criteria:
-        - 'Complete the declared outcome: Define module dependency direction and ports'
-        acceptance_evidence:
-        - DAG validation and forbidden-edge list
-        phase: P1
-        task_source: G1 current-input receipt closure activation
-        discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
-        owner: LF-WS-ARCH
-        allowed_files:
-        - tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0003/result.json
-        forbidden_files:
-        - secrets/**
-        - data/**
-        file_claims:
-        - path: tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0003/result.json
-          mode: write
-          owner: LF-WS-ARCH
-        validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0003
-      - id: LF-TSK-ARCH-0004
-        title: Design caption-to-annotation core flow
-        priority: P0
-        depends_on:
-        - task_id: LF-TSK-ARCH-0002
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
-        deliverable: End-to-end annotation flow
-        evidence: Happy, timeout, cache-hit, and fallback paths
-        task_version: 1
-        change_version: 1.0.0
-        estimated_task_minutes: 45
-        acceptance_criteria:
-        - 'Complete the declared outcome: Design caption-to-annotation core flow'
-        acceptance_evidence:
-        - Happy, timeout, cache-hit, and fallback paths
-        phase: P1
-        task_source: G1 current-input receipt closure activation
-        discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
-        owner: LF-WS-ARCH
-        allowed_files:
-        - tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0004/result.json
-        forbidden_files:
-        - secrets/**
-        - data/**
-        file_claims:
-        - path: tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0004/result.json
-          mode: write
-          owner: LF-WS-ARCH
-        validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0004
-      - id: LF-TSK-ARCH-0006
-        title: Freeze synchronous and asynchronous boundaries
-        priority: P0
-        depends_on:
-        - task_id: LF-TSK-ARCH-0004
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
-        deliverable: Execution-boundary decision
-        evidence: Latency, timeout, retry, and degradation budgets
-        task_version: 1
-        change_version: 1.0.0
-        estimated_task_minutes: 45
-        acceptance_criteria:
-        - 'Complete the declared outcome: Freeze synchronous and asynchronous boundaries'
-        acceptance_evidence:
-        - Latency, timeout, retry, and degradation budgets
-        phase: P1
-        task_source: G1 current-input receipt closure activation
-        discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
-        owner: LF-WS-ARCH
-        allowed_files:
-        - tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0006/result.json
-        forbidden_files:
-        - secrets/**
-        - data/**
-        file_claims:
-        - path: tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0006/result.json
-          mode: write
-          owner: LF-WS-ARCH
-        validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0006
+      seed_tasks: []
     - id: LF-CP-ARCH-003
       name: Architecture acceptance
       phase: P1
       seed_tasks:
-      - id: LF-TSK-ARCH-0007
-        title: Compare alternatives and publish P1 ADR package
-        priority: P0
-        depends_on:
-        - task_id: LF-TSK-ARCH-0003
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
-        - task_id: LF-TSK-ARCH-0006
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
-        - task_id: LF-TSK-PRD-0001
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
-        - task_id: LF-TSK-SEM-0002
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
-        - task_id: LF-TSK-PRF-0002
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
-        - task_id: LF-TSK-SEC-0001
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
-        - task_id: LF-TSK-OBS-0001
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
-        - task_id: LF-TSK-ADP-0001
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
-        deliverable: Trade-off and recommendation package
-        evidence: Two or three options per material decision
-        task_version: 1
-        change_version: 1.0.0
-        estimated_task_minutes: 45
-        acceptance_criteria:
-        - 'Complete the declared outcome: Compare alternatives and publish P1 ADR package'
-        acceptance_evidence:
-        - Two or three options per material decision
-        phase: P1
-        task_source: G1 current-input receipt closure activation
-        discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
-        owner: LF-WS-ARCH
-        allowed_files:
-        - tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0007/result.json
-        forbidden_files:
-        - secrets/**
-        - data/**
-        file_claims:
-        - path: tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0007/result.json
-          mode: write
-          owner: LF-WS-ARCH
-        validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0007
       - id: LF-TSK-ARCH-0008
-        title: Run G1 architecture review and request user decision
+        title: Accept G1 architecture baseline and record user decision
         priority: P0
-        depends_on:
-        - task_id: LF-TSK-ARCH-0007
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
-        - task_id: LF-TSK-QLT-0003
-          type: hard
-          required_task_version: 4
-          required_change_version: 2.2.0
-          required_result: PASS
-        - task_id: LF-TSK-QLT-0005
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
-        - task_id: LF-TSK-QLT-0006
-          type: hard
-          required_task_version: 4
-          required_change_version: 2.2.0
-          required_result: PASS
-        - task_id: LF-TSK-OPS-0001
-          type: hard
-          required_task_version: 2
-          required_change_version: 1.1.0
-          required_result: PASS
-        - task_id: LF-TSK-QLT-0013
-          type: contract
-          required_task_version: 4
-          required_change_version: 2.2.0
-          required_result: PASS
-          contract_name: catalog-decision-receipt
-          required_contract_version: 2.0.0
-        deliverable: G1 receipt
-        evidence: PASS, FAIL, or BLOCKED with user decision
-        task_version: 5
-        change_version: 2.2.0
-        estimated_task_minutes: 45
+        depends_on: []
+        deliverable: G1 architecture acceptance receipt
+        evidence: Current validation, independent review, catalog decision, and user
+          decision
+        task_version: 6
+        change_version: 3.0.0
+        estimated_task_minutes: 90
         acceptance_criteria:
-        - 'Complete the declared outcome: Run G1 architecture review and request user decision'
+        - 'Complete the declared outcome: Accept G1 architecture baseline and record
+          user decision'
         acceptance_evidence:
-        - PASS, FAIL, or BLOCKED with user decision
+        - Current three-layer Gate receipt chain and explicit G1 user decision
         phase: P1
-        task_source: G1 current-input receipt closure activation
-        discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
+        task_source: G1 architecture baseline acceptance
+        discovered_from: G1 debt retirement
         owner: LF-WS-ARCH
         allowed_files:
         - tmp/quality/task-evidence/ARCH/LF-TSK-ARCH-0008/result.json
@@ -1130,8 +899,8 @@ workstreams:
 - id: LF-WS-QLT
   code: QLT
   name: Harness and quality gates
-  mission: Own machine-readable planning, task dispatch contracts, traceability, gate planning, and immutable
-    receipts.
+  mission: Own machine-readable planning, task dispatch contracts, traceability, gate
+    planning, and immutable receipts.
   epics:
   - id: LF-EP-QLT-001
     name: Agent execution harness
@@ -1154,7 +923,7 @@ workstreams:
         acceptance_evidence:
         - Schema fixtures and validation
         phase: P1
-        task_source: G1 current-input receipt closure activation
+        task_source: Phase baseline design contract
         discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
         owner: LF-WS-QLT
         allowed_files:
@@ -1186,7 +955,7 @@ workstreams:
         acceptance_evidence:
         - Duplicate, missing, owner-conflict, and cycle tests
         phase: P1
-        task_source: G1 current-input receipt closure activation
+        task_source: Phase baseline design contract
         discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
         owner: LF-WS-QLT
         allowed_files:
@@ -1218,13 +987,13 @@ workstreams:
         change_version: 2.2.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - Define frozen plan and receipt execution layers so TASK_VALIDATION alone executes selected checks
-          while INDEPENDENT_REVIEW and CATALOG_DECISION consume immutable evidence without rerunning delivery
-          commands.
+        - Define frozen plan and receipt execution layers so TASK_VALIDATION alone
+          executes selected checks while INDEPENDENT_REVIEW and CATALOG_DECISION consume
+          immutable evidence without rerunning delivery commands.
         acceptance_evidence:
         - Frozen-input plan and immutable receipt example
         phase: P1
-        task_source: G1 current-input receipt closure activation
+        task_source: Phase baseline design contract
         discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
         owner: LF-WS-QLT
         allowed_files:
@@ -1256,7 +1025,7 @@ workstreams:
         acceptance_evidence:
         - Orphan and duplicate detection
         phase: P1
-        task_source: G1 current-input receipt closure activation
+        task_source: Phase baseline design contract
         discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
         owner: LF-WS-QLT
         allowed_files:
@@ -1283,9 +1052,10 @@ workstreams:
           required_task_version: 4
           required_change_version: 2.2.0
           required_result: PASS
-        deliverable: Generic result evidence packet materializer and canonical Codex work-package publisher
-        evidence: Explicit six-field packet, subject identity/hash/claim negative fixtures, and no-free-text-inference
-          tests
+        deliverable: Generic result evidence packet materializer and canonical Codex
+          work-package publisher
+        evidence: Explicit six-field packet, subject identity/hash/claim negative
+          fixtures, and no-free-text-inference tests
         produced_contracts:
         - name: gate-evidence-packet
           version: 1.0.0
@@ -1293,18 +1063,19 @@ workstreams:
         change_version: 1.2.0
         estimated_task_minutes: 90
         acceptance_criteria:
-        - Materialize all six result fields only from Main-Agent supplied structured values; never infer
-          a result from stdout, callback text, exit code, or prose.
-        - Bind packet identity to exact task, completion, stdout/stderr, changed-file snapshot, diff,
-          and validation artifact locators and SHA-256 values.
-        - Reject missing fields, subject identity drift, claim mismatch, unsafe locators, changed bytes,
-          and duplicate packet identity.
-        - Publish each result packet under a unique immutable identity and keep issuer trust outside this
-          task.
-        - Publish immutable canonical Codex per-Task projections/outcomes/completions/signals with trusted
-          runtime actor binding, real shared host session, precise current Task contracts, structured
-          six-field results and verified artifact hashes; materialize fixed explicit Gate inputs by reusing
-          the evidence packet validator without subprocesses, log inference or legacy layout fallback.
+        - Materialize all six result fields only from Main-Agent supplied structured
+          values; never infer a result from stdout, callback text, exit code, or prose.
+        - Bind packet identity to exact task, completion, stdout/stderr, changed-file
+          snapshot, diff, and validation artifact locators and SHA-256 values.
+        - Reject missing fields, subject identity drift, claim mismatch, unsafe locators,
+          changed bytes, and duplicate packet identity.
+        - Publish each result packet under a unique immutable identity and keep issuer
+          trust outside this task.
+        - Publish immutable canonical Codex per-Task projections/outcomes/completions/signals
+          with trusted runtime actor binding, real shared host session, precise current
+          Task contracts, structured six-field results and verified artifact hashes;
+          materialize fixed explicit Gate inputs by reusing the evidence packet validator
+          without subprocesses, log inference or legacy layout fallback.
         phase: P1
         task_source: LF-TSK-QLT-0003 Gate control-plane design outcome
         discovered_from: LF-TSK-QLT-0003
@@ -1351,13 +1122,12 @@ workstreams:
         acceptance_evidence:
         - LF-GATE-EVIDENCE-001 -> tests/gates/test_evidence_packet.py
         - tmp/quality/runs/{run_id}/receipt.json
-        - Canonical runtime binding, artifact publication and explicit Gate materialization API regressions
-          for caller identity rejection, stable actor across runs, missing runtime, exact Task/outcome
-          aggregation, immutable collisions, current scope/version/hash drift and real planner integration.
+        - Canonical runtime binding, artifact publication and explicit Gate materialization
+          API regressions for caller identity rejection, stable actor across runs,
+          missing runtime, exact Task/outcome aggregation, immutable collisions, current
+          scope/version/hash drift and real planner integration.
         validation_command: python3 -m unittest tests.gates.test_evidence_packet tests.harness.test_codex_work_package
           tests.harness.test_codex_runtime
-        acceptance_case_ids:
-        - LF-GATE-EVIDENCE-001
       - id: LF-TSK-QLT-0014
         title: Materialize trusted Gate issuer packets
         priority: P0
@@ -1373,8 +1143,8 @@ workstreams:
           required_change_version: 2.2.0
           required_result: PASS
         deliverable: Immutable trusted issuer packet materializer
-        evidence: Qoder runner, current Codex session, authenticated human operator, CI workload, authorization,
-          forgery, and identity-drift fixtures
+        evidence: Qoder runner, current Codex session, authenticated human operator,
+          CI workload, authorization, forgery, and identity-drift fixtures
         produced_contracts:
         - name: trusted-gate-issuer-packet
           version: 3.0.0
@@ -1382,16 +1152,19 @@ workstreams:
         change_version: 3.0.0
         estimated_task_minutes: 90
         acceptance_criteria:
-        - Resolve every Qoder, Codex, human, or CI issuer through a fixed verifier registered in harness/gate-issuer-authorities.yaml
-          and bind only verified runner, host-session, operator-record, or workload-identity provenance.
-        - Reject caller-selected authority/verifier, self-asserted actor/role, copied actor/agent/run/issuer-instance
-          or replay identity, unsupported receipt authorization, unavailable authority and identity drift.
-          Shared client or host session alone is not copied actor identity; distinct actors remain host-verified,
-          and changing run or attestation never makes the same actor independent.
-        - Publish a schema-complete packet with unique issuer instance, actor/session provenance, authorized
-          receipt kinds, immutable locator, and SHA-256.
-        - Keep issuer authorization independent from result evidence materialization and prove valid and
-          forged fixtures for every supported actor type.
+        - Resolve every Qoder, Codex, human, or CI issuer through a fixed verifier
+          registered in harness/gate-issuer-authorities.yaml and bind only verified
+          runner, host-session, operator-record, or workload-identity provenance.
+        - Reject caller-selected authority/verifier, self-asserted actor/role, copied
+          actor/agent/run/issuer-instance or replay identity, unsupported receipt
+          authorization, unavailable authority and identity drift. Shared client or
+          host session alone is not copied actor identity; distinct actors remain
+          host-verified, and changing run or attestation never makes the same actor
+          independent.
+        - Publish a schema-complete packet with unique issuer instance, actor/session
+          provenance, authorized receipt kinds, immutable locator, and SHA-256.
+        - Keep issuer authorization independent from result evidence materialization
+          and prove valid and forged fixtures for every supported actor type.
         phase: P1
         task_source: LF-TSK-QLT-0003 Gate control-plane design outcome
         discovered_from: LF-TSK-QLT-0003
@@ -1433,17 +1206,18 @@ workstreams:
             evidence: runner-owned task/completion identity from LF-TSK-QLT-0006
           codex:
             verifier_id: codex.current-session.v1
-            evidence: desktop-host bound current parent/session context, not task payload
+            evidence: desktop-host bound current parent/session context, not task
+              payload
           human:
             verifier_id: human.operator-record.v1
-            evidence: authority-registry operator record plus authenticated attestation locator/hash
+            evidence: authority-registry operator record plus authenticated attestation
+              locator/hash
           ci:
             verifier_id: ci.workload-identity.v1
-            evidence: authority-registry workload entry plus verified CI attestation locator/hash
-          fail_closed: Unknown verifier, unavailable authority, caller-selected verifier, stale/replayed
-            attestation, or authorization mismatch is FAIL.
-        acceptance_case_ids:
-        - LF-GATE-ISSUER-001
+            evidence: authority-registry workload entry plus verified CI attestation
+              locator/hash
+          fail_closed: Unknown verifier, unavailable authority, caller-selected verifier,
+            stale/replayed attestation, or authorization mismatch is FAIL.
       - id: LF-TSK-QLT-0008
         title: Implement pure Gate planner and fixed-command registry
         priority: P0
@@ -1473,8 +1247,8 @@ workstreams:
           contract_name: trusted-gate-issuer-packet
           required_contract_version: 3.0.0
         deliverable: Zero-side-effect plan compiler and ordered fixed-command registry
-        evidence: Determinism, zero-write, execution-layer, registry drift, command override, and current-version
-          fixtures
+        evidence: Determinism, zero-write, execution-layer, registry drift, command
+          override, and current-version fixtures
         produced_contracts:
         - name: gate-plan-registry
           version: 2.0.0
@@ -1482,16 +1256,19 @@ workstreams:
         change_version: 2.2.0
         estimated_task_minutes: 85
         acceptance_criteria:
-        - Produce the same canonical content fingerprint for the same normalized current inputs while
-          creating no file, plan identity, run identity, or lifecycle state.
-        - Freeze exact task/change/dependency identity, explicit result and trusted issuer packet locators
-          and hashes, source hashes, normalized scope and claims, execution layer, required checks, selection
-          reasons, and acceptance/effect/risk mappings.
-        - Match the caller's full validation command string to one declared registry value; select fixed
-          argv only for TASK_VALIDATION, freeze zero checks for INDEPENDENT_REVIEW and CATALOG_DECISION,
-          and reject unknown commands, overrides, or receipt-kind/execution-layer mismatch.
-        - Reject missing or stale packets, registry drift, invalid owners/triggers/mappings, and non-current
-          task or dependency versions.
+        - Produce the same canonical content fingerprint for the same normalized current
+          inputs while creating no file, plan identity, run identity, or lifecycle
+          state.
+        - Freeze exact task/change/dependency identity, explicit result and trusted
+          issuer packet locators and hashes, source hashes, normalized scope and claims,
+          execution layer, required checks, selection reasons, and acceptance/effect/risk
+          mappings.
+        - Match the caller's full validation command string to one declared registry
+          value; select fixed argv only for TASK_VALIDATION, freeze zero checks for
+          INDEPENDENT_REVIEW and CATALOG_DECISION, and reject unknown commands, overrides,
+          or receipt-kind/execution-layer mismatch.
+        - Reject missing or stale packets, registry drift, invalid owners/triggers/mappings,
+          and non-current task or dependency versions.
         phase: P1
         task_source: LF-TSK-QLT-0003 Gate control-plane design outcome
         discovered_from: LF-TSK-QLT-0003
@@ -1523,8 +1300,6 @@ workstreams:
         - LF-GATE-PLAN-001 -> tests/gates/test_gate_planner.py
         - tmp/quality/runs/{run_id}/receipt.json
         validation_command: python3 -m unittest discover -s tests/gates -p 'test_gate_planner.py'
-        acceptance_case_ids:
-        - LF-GATE-PLAN-001
       - id: LF-TSK-QLT-0009
         title: Execute frozen Gate checks and aggregate typed outcomes
         priority: P0
@@ -1537,7 +1312,8 @@ workstreams:
           contract_name: gate-plan-registry
           required_contract_version: 2.0.0
         deliverable: Fixed-argv checker execution and fail-closed three-state aggregation
-        evidence: Process, typed-outcome, required-skip, empty-suite, continuation, and aggregation fixtures
+        evidence: Process, typed-outcome, required-skip, empty-suite, continuation,
+          and aggregation fixtures
         produced_contracts:
         - name: gate-check-outcome
           version: 1.0.0
@@ -1545,14 +1321,14 @@ workstreams:
         change_version: 1.3.0
         estimated_task_minutes: 70
         acceptance_criteria:
-        - Execute only the fixed argv and cwd frozen by the registry and record process facts separately
-          from typed checker outcomes.
-        - Classify required skipped, not-run, unavailable, empty, malformed, timed-out, signaled, or unproved
-          exit-zero checks as FAIL.
-        - Continue independent checks after a domain BLOCKED outcome and retain every executed or not-run
-          required member.
-        - Aggregate every invocation, checker, and run strictly as FAIL over BLOCKED over PASS, with no
-          unknown or empty set producing PASS.
+        - Execute only the fixed argv and cwd frozen by the registry and record process
+          facts separately from typed checker outcomes.
+        - Classify required skipped, not-run, unavailable, empty, malformed, timed-out,
+          signaled, or unproved exit-zero checks as FAIL.
+        - Continue independent checks after a domain BLOCKED outcome and retain every
+          executed or not-run required member.
+        - Aggregate every invocation, checker, and run strictly as FAIL over BLOCKED
+          over PASS, with no unknown or empty set producing PASS.
         phase: P1
         task_source: LF-TSK-QLT-0003 Gate control-plane design outcome
         discovered_from: LF-TSK-QLT-0003
@@ -1580,8 +1356,6 @@ workstreams:
         - LF-GATE-CHECK-001 -> tests/gates/test_gate_executor.py
         - tmp/quality/runs/{run_id}/receipt.json
         validation_command: python3 -m unittest discover -s tests/gates -p 'test_gate_executor.py'
-        acceptance_case_ids:
-        - LF-GATE-CHECK-001
       - id: LF-TSK-QLT-0010
         title: Publish atomic task-validation receipts and read-only status
         priority: P0
@@ -1614,10 +1388,10 @@ workstreams:
           required_result: PASS
           contract_name: trusted-gate-issuer-packet
           required_contract_version: 3.0.0
-        deliverable: Run lifecycle, stable receipt-kind handler/store interface, immutable TASK_VALIDATION
-          publication, and single-read status
-        evidence: Start-before-check, immutable publication, collision, crash, path, kind-completeness,
-          and status fixtures
+        deliverable: Run lifecycle, stable receipt-kind handler/store interface, immutable
+          TASK_VALIDATION publication, and single-read status
+        evidence: Start-before-check, immutable publication, collision, crash, path,
+          kind-completeness, and status fixtures
         produced_contracts:
         - name: task-validation-receipt
           version: 2.0.0
@@ -1625,17 +1399,19 @@ workstreams:
         change_version: 2.2.0
         estimated_task_minutes: 85
         acceptance_criteria:
-        - Resolve one explicit result packet and one trusted issuer packet from matching flags or trusted
-          single-value launcher bindings; reject missing/conflicting context, then generate a unique run
-          ID, persist the frozen plan, and flush a disk START event plus caller-visible run ID/event locator
-          before any checker.
-        - Publish a schema-complete TASK_VALIDATION receipt through a stable kind-handler and generic
-          immutable-store interface; validate that its plan requires selected checks, and never invoke
-          the delivery executor for evidence-consumption receipt kinds.
-        - Use exclusive atomic publication so collisions, interruption, unsafe paths, partial staging,
-          or changed inputs never produce a final PASS receipt or overwrite prior evidence.
-        - Return RUNNING or FINALIZED only from an explicit run ID in a single read, without waiting,
-          retrying, resuming, re-executing, or using latest as evidence.
+        - Resolve one explicit result packet and one trusted issuer packet from matching
+          flags or trusted single-value launcher bindings; reject missing/conflicting
+          context, then generate a unique run ID, persist the frozen plan, and flush
+          a disk START event plus caller-visible run ID/event locator before any checker.
+        - Publish a schema-complete TASK_VALIDATION receipt through a stable kind-handler
+          and generic immutable-store interface; validate that its plan requires selected
+          checks, and never invoke the delivery executor for evidence-consumption
+          receipt kinds.
+        - Use exclusive atomic publication so collisions, interruption, unsafe paths,
+          partial staging, or changed inputs never produce a final PASS receipt or
+          overwrite prior evidence.
+        - Return RUNNING or FINALIZED only from an explicit run ID in a single read,
+          without waiting, retrying, resuming, re-executing, or using latest as evidence.
         phase: P1
         task_source: LF-TSK-QLT-0003 Gate control-plane design outcome
         discovered_from: LF-TSK-QLT-0003
@@ -1667,8 +1443,6 @@ workstreams:
         - LF-GATE-VALIDATION-001 -> tests/gates/test_gate_lifecycle.py
         - tmp/quality/runs/{run_id}/receipt.json
         validation_command: python3 -m unittest discover -s tests/gates -p 'test_gate_lifecycle.py'
-        acceptance_case_ids:
-        - LF-GATE-VALIDATION-001
       - id: LF-TSK-QLT-0011
         title: Publish immutable independent-review evidence chains
         priority: P0
@@ -1694,8 +1468,10 @@ workstreams:
           required_result: PASS
           contract_name: trusted-gate-issuer-packet
           required_contract_version: 3.0.0
-        deliverable: INDEPENDENT_REVIEW receipt and immutable reviewed-validation chain
-        evidence: Reviewer identity, self-review, scope, stale subject, tamper, and no-rewrite fixtures
+        deliverable: INDEPENDENT_REVIEW receipt and immutable reviewed-validation
+          chain
+        evidence: Reviewer identity, self-review, scope, stale subject, tamper, and
+          no-rewrite fixtures
         produced_contracts:
         - name: independent-review-receipt
           version: 2.0.0
@@ -1703,16 +1479,18 @@ workstreams:
         change_version: 2.2.0
         estimated_task_minutes: 70
         acceptance_criteria:
-        - Install the INDEPENDENT_REVIEW handler in the single scripts/gates/cli.py route, consume a zero-check
-          evidence plan without invoking the delivery executor, then freeze the reviewed validation receipt
-          path/hash, reviewer packet, source/diff scope, rerun evidence, structured findings, and decision
+        - Install the INDEPENDENT_REVIEW handler in the single scripts/gates/cli.py
+          route, consume a zero-check evidence plan without invoking the delivery
+          executor, then freeze the reviewed validation receipt path/hash, reviewer
+          packet, source/diff scope, rerun evidence, structured findings, and decision
           in a new review receipt.
-        - Reject missing identity, producer self-review, reviewer writes to subject files, stale inputs,
-          unsafe locators, and subject receipt or artifact hash drift.
-        - Never mutate the subject validation receipt; every re-review receives a new review run and immutable
-          receipt.
-        - Demonstrate PASS, BLOCKED, and FAIL review outcomes with structured independence assertions
-          and current-input evidence.
+        - Reject missing identity, producer self-review, reviewer writes to subject
+          files, stale inputs, unsafe locators, and subject receipt or artifact hash
+          drift.
+        - Never mutate the subject validation receipt; every re-review receives a
+          new review run and immutable receipt.
+        - Demonstrate PASS, BLOCKED, and FAIL review outcomes with structured independence
+          assertions and current-input evidence.
         phase: P1
         task_source: LF-TSK-QLT-0003 Gate control-plane design outcome
         discovered_from: LF-TSK-QLT-0003
@@ -1744,10 +1522,9 @@ workstreams:
         - LF-GATE-REVIEW-001 -> tests/gates/test_independent_review.py
         - tmp/quality/runs/{run_id}/receipt.json
         validation_command: python3 -m unittest discover -s tests/gates -p 'test_independent_review.py'
-        serial_shared_claim: scripts/gates/cli.py may be revised only after the prior CLI-owning dependency
-          has a current PASS receipt; dispatch preflight must reject concurrent claims.
-        acceptance_case_ids:
-        - LF-GATE-REVIEW-001
+        serial_shared_claim: scripts/gates/cli.py may be revised only after the prior
+          CLI-owning dependency has a current PASS receipt; dispatch preflight must
+          reject concurrent claims.
       - id: LF-TSK-QLT-0012
         title: Verify the evidence hash graph is acyclic and immutable
         priority: P0
@@ -1767,8 +1544,8 @@ workstreams:
           contract_name: independent-review-receipt
           required_contract_version: 2.0.0
         deliverable: Pure-read evidence hash DAG verifier
-        evidence: Valid graph, self-edge, back-edge, alias, duplicate-identity, cycle, and changed-leaf
-          fixtures
+        evidence: Valid graph, self-edge, back-edge, alias, duplicate-identity, cycle,
+          and changed-leaf fixtures
         produced_contracts:
         - name: evidence-hash-dag-verification
           version: 1.0.0
@@ -1776,14 +1553,14 @@ workstreams:
         change_version: 1.3.0
         estimated_task_minutes: 60
         acceptance_criteria:
-        - Verify the receipt-to-manifest-to-leaf and current-to-prior-receipt topology without writing
-          or repairing evidence.
-        - Reject self-reference, back-reference, latest or alias locators, duplicate identity with different
-          bytes, missing nodes, and every detected cycle.
-        - Reject any leaf, manifest, plan, packet, or prior receipt whose bytes no longer match its recorded
-          hash.
-        - Produce a typed PASS only for a complete finite DAG whose identities, locators, and hashes all
-          reconcile.
+        - Verify the receipt-to-manifest-to-leaf and current-to-prior-receipt topology
+          without writing or repairing evidence.
+        - Reject self-reference, back-reference, latest or alias locators, duplicate
+          identity with different bytes, missing nodes, and every detected cycle.
+        - Reject any leaf, manifest, plan, packet, or prior receipt whose bytes no
+          longer match its recorded hash.
+        - Produce a typed PASS only for a complete finite DAG whose identities, locators,
+          and hashes all reconcile.
         phase: P1
         task_source: LF-TSK-QLT-0003 Gate control-plane design outcome
         discovered_from: LF-TSK-QLT-0003
@@ -1811,8 +1588,6 @@ workstreams:
         - LF-GATE-HASH-001 -> tests/gates/test_hash_dag.py
         - tmp/quality/runs/{run_id}/receipt.json
         validation_command: python3 -m unittest discover -s tests/gates -p 'test_hash_dag.py'
-        acceptance_case_ids:
-        - LF-GATE-HASH-001
       - id: LF-TSK-QLT-0013
         title: Close current-input catalog decisions from immutable evidence
         priority: P0
@@ -1865,8 +1640,8 @@ workstreams:
           contract_name: trusted-gate-issuer-packet
           required_contract_version: 3.0.0
         deliverable: Immutable CATALOG_DECISION receipt for one current catalog task
-        evidence: Complete, stale, missing dependency, identity mismatch, tamper, self-reference, and
-          forged-approval fixtures
+        evidence: Complete, stale, missing dependency, identity mismatch, tamper,
+          self-reference, and forged-approval fixtures
         produced_contracts:
         - name: catalog-decision-receipt
           version: 2.0.0
@@ -1874,16 +1649,18 @@ workstreams:
         change_version: 2.2.0
         estimated_task_minutes: 90
         acceptance_criteria:
-        - Verify the current acceptance-case registry hash, reject orphan or duplicate cases, reconcile
-          every current acceptance mapping, then reconcile task/change/source/registry/policy hashes,
-          validation/review receipts, and every required dependency receipt.
-        - Permit catalog PASS only when all kind-specific evidence, reviewer independence, hash-DAG verification,
-          freshness, and required current-input dependency results are PASS.
-        - Aggregate prior BLOCKED or FAIL results without promotion; classify missing, stale, malformed,
-          unsafe, or unverified evidence as FAIL.
-        - Install the CATALOG_DECISION handler in the single scripts/gates/cli.py route, consume a zero-check
-          evidence plan without invoking the delivery executor, and publish a new immutable decision receipt
-          with no self-reference, latest dependency, bootstrap backfill, or inferred user approval.
+        - Verify the current acceptance-case registry hash, reject orphan or duplicate
+          cases, reconcile every current acceptance mapping, then reconcile task/change/source/registry/policy
+          hashes, validation/review receipts, and every required dependency receipt.
+        - Permit catalog PASS only when all kind-specific evidence, reviewer independence,
+          hash-DAG verification, freshness, and required current-input dependency
+          results are PASS.
+        - Aggregate prior BLOCKED or FAIL results without promotion; classify missing,
+          stale, malformed, unsafe, or unverified evidence as FAIL.
+        - Install the CATALOG_DECISION handler in the single scripts/gates/cli.py
+          route, consume a zero-check evidence plan without invoking the delivery
+          executor, and publish a new immutable decision receipt with no self-reference,
+          latest dependency, bootstrap backfill, or inferred user approval.
         phase: P1
         task_source: LF-TSK-QLT-0003 Gate control-plane design outcome
         discovered_from: LF-TSK-QLT-0003
@@ -1915,10 +1692,9 @@ workstreams:
         - LF-GATE-CATALOG-001 -> tests/gates/test_catalog_decision.py
         - tmp/quality/runs/{run_id}/receipt.json
         validation_command: python3 -m unittest discover -s tests/gates -p 'test_catalog_decision.py'
-        serial_shared_claim: scripts/gates/cli.py may be revised only after the prior CLI-owning dependency
-          has a current PASS receipt; dispatch preflight must reject concurrent claims.
-        acceptance_case_ids:
-        - LF-GATE-CATALOG-001
+        serial_shared_claim: scripts/gates/cli.py may be revised only after the prior
+          CLI-owning dependency has a current PASS receipt; dispatch preflight must
+          reject concurrent claims.
     - id: LF-CP-QLT-003
       name: Multi-agent scheduling safety
       phase: P1
@@ -1938,7 +1714,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement file claims and single-owner dispatch checks'
+        - 'Complete the declared outcome: Implement file claims and single-owner dispatch
+          checks'
         phase: P1
         task_source: establish-lexiflow-foundation / LF-DISPATCH-P1-001
         owner: LF-WS-QLT
@@ -1963,8 +1740,6 @@ workstreams:
         - LF-GATE-DISPATCH-001 -> tests/gates/test_dispatch_preflight.py
         - tmp/quality/runs/{run_id}/receipt.json
         validation_command: python3 -m unittest discover -s tests/gates -p 'test_dispatch_preflight.py'
-        acceptance_case_ids:
-        - LF-GATE-DISPATCH-001
         discovered_from: LF-TSK-QLT-0003 Gate control-plane design outcome
       - id: LF-TSK-QLT-0006
         title: Implement callback-first run lifecycle and bounded watchdog
@@ -1975,33 +1750,37 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
-        deliverable: Versioned layered handoff adapter and callback-first run lifecycle controller
-        evidence: Full handoff-schema, caller-identity rejection, completion-before-callback, single-run, and 300/600-second
-          watchdog tests
+        deliverable: Versioned layered handoff adapter and callback-first run lifecycle
+          controller
+        evidence: Full handoff-schema, caller-identity rejection, completion-before-callback,
+          single-run, and 300/600-second watchdog tests
         task_version: 4
         change_version: 2.2.0
         estimated_task_minutes: 90
         acceptance_criteria:
-        - Enforce the complete caller handoff schema, including task/change versions, acceptance criteria/evidence, and
-          parent_client.
-        - Reject caller-supplied agent_id, run_id, session_id, or client at first dispatch; bind and persist runner-generated
-          identity.
-        - Write a terminal completion record with task/change/run identity before callback delivery to the exact parent
-          session; require the six result fields in the Qoder prompt for main-agent validation.
-        - Prevent a second Qoder run while a run is active or unknown, without recursive delegation or LLM busy-waiting.
-        - Enforce callback-first recovery with the first fallback probe no earlier than 300 seconds and later probes at
-          least 600 seconds apart.
-        - Derive the exact package scope and claims from current same-owner Task contracts, retain each Task permission,
-          and reject omitted/extra paths, out-of-scope claims and allow/forbid conflicts before tool probes.
+        - Enforce the complete caller handoff schema, including task/change versions,
+          acceptance criteria/evidence, and parent_client.
+        - Reject caller-supplied agent_id, run_id, session_id, or client at first
+          dispatch; bind and persist runner-generated identity.
+        - Write a terminal completion record with task/change/run identity before
+          callback delivery to the exact parent session; require the six result fields
+          in the Qoder prompt for main-agent validation.
+        - Prevent a second Qoder run while a run is active or unknown, without recursive
+          delegation or LLM busy-waiting.
+        - Enforce callback-first recovery with the first fallback probe no earlier
+          than 300 seconds and later probes at least 600 seconds apart.
+        - Derive the exact package scope and claims from current same-owner Task contracts,
+          retain each Task permission, and reject omitted/extra paths, out-of-scope
+          claims and allow/forbid conflicts before tool probes.
         acceptance_evidence:
-        - Automated tests covering every caller field and rejection of caller-owned runtime identity.
-        - Completion identity/version verification, result-field prompt contract, and completion-before-callback ordering
-          tests.
-        - One-active-or-unknown-Qoder-run fixtures and 300/600-second no-busy-wait watchdog tests.
-        acceptance_case_ids:
-        - LF-AGENT-001
+        - Automated tests covering every caller field and rejection of caller-owned
+          runtime identity.
+        - Completion identity/version verification, result-field prompt contract,
+          and completion-before-callback ordering tests.
+        - One-active-or-unknown-Qoder-run fixtures and 300/600-second no-busy-wait
+          watchdog tests.
         phase: P1
-        task_source: G1 current-input receipt closure activation
+        task_source: Phase baseline design contract
         discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
         owner: LF-WS-QLT
         allowed_files:
@@ -2029,7 +1808,8 @@ workstreams:
 - id: LF-WS-PRD
   code: PRD
   name: Product experience
-  mission: Own user journeys, annotation interaction, accessibility, and explainability expectations.
+  mission: Own user journeys, annotation interaction, accessibility, and explainability
+    expectations.
   epics:
   - id: LF-EP-PRD-001
     name: Low-interruption learning experience
@@ -2042,10 +1822,10 @@ workstreams:
         title: Define English-first viewing journey and interruption budget
         priority: P0
         depends_on:
-        - task_id: LF-TSK-ARCH-0001
+        - task_id: LF-TSK-ARCH-0008
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 6
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: User journey and UX invariants
         evidence: Scenario review
@@ -2053,11 +1833,12 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define English-first viewing journey and interruption budget'
+        - 'Complete the declared outcome: Define English-first viewing journey and
+          interruption budget'
         acceptance_evidence:
         - Scenario review
         phase: P1
-        task_source: G1 current-input receipt closure activation
+        task_source: Phase baseline design contract
         discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
         owner: LF-WS-PRD
         allowed_files:
@@ -2119,7 +1900,8 @@ workstreams:
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Specify explanation expansion and dismissal controls'
+        - 'Complete the declared outcome: Specify explanation expansion and dismissal
+          controls'
         acceptance_evidence:
         - Interaction acceptance cases
       - id: LF-TSK-PRD-0004
@@ -2137,14 +1919,15 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Validate keyboard, screen-reader, and contrast behavior'
+        - 'Complete the declared outcome: Validate keyboard, screen-reader, and contrast
+          behavior'
         acceptance_evidence:
         - Automated and manual accessibility checks
 - id: LF-WS-DAT
   code: DAT
   name: Data and persistence
-  mission: Own PostgreSQL source-of-truth models, event persistence, migrations, indexing, retention,
-    and retention.
+  mission: Own PostgreSQL source-of-truth models, event persistence, migrations, indexing,
+    retention, and retention.
   epics:
   - id: LF-EP-DAT-001
     name: Versioned persistence model
@@ -2159,8 +1942,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-ARCH-0008
           type: hard
-          required_task_version: 5
-          required_change_version: 2.2.0
+          required_task_version: 6
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: Conceptual and logical data model
         evidence: Aggregate invariant review
@@ -2169,17 +1952,36 @@ workstreams:
         phase_entry_prerequisite:
           previous_gate_id: G1
           previous_gate_exit_task_id: LF-TSK-ARCH-0008
-          required_exit_task_version: 5
-          required_exit_change_version: 2.2.0
+          required_exit_task_version: 6
+          required_exit_change_version: 3.0.0
           required_gate_result: PASS
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Model content, lexicon, annotation, and semantic-result aggregates'
+        - 'Complete the declared outcome: Model content, lexicon, annotation, and
+          semantic-result aggregates'
         acceptance_evidence:
         - Aggregate invariant review
+        validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-DAT-0001
+        owner: LF-WS-DAT
+        discovered_from: G2 entry activation
+        allowed_files:
+        - docs/architecture/data-model.md
+        - tmp/quality/task-evidence/DAT/LF-TSK-DAT-0001/result.json
+        forbidden_files:
+        - secrets/**
+        - data/**
+        file_claims:
+        - path: docs/architecture/data-model.md
+          mode: write
+          owner: LF-WS-DAT
+        - path: tmp/quality/task-evidence/DAT/LF-TSK-DAT-0001/result.json
+          mode: write
+          owner: LF-WS-DAT
       - id: LF-TSK-DAT-0002
-        title: Define annotation-work envelope, idempotency, ordering, and recovery contract
+        owner: LF-WS-DAT
+        title: Define annotation-work envelope, idempotency, ordering, and recovery
+          contract
         priority: P0
         depends_on:
         - task_id: LF-TSK-DAT-0001
@@ -2193,14 +1995,31 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define annotation-work envelope, idempotency, ordering, and recovery contract'
+        - 'Complete the declared outcome: Define annotation-work envelope, idempotency,
+          ordering, and recovery contract'
         acceptance_evidence:
         - Duplicate and out-of-order work fixtures
+        validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-DAT-0002
+        discovered_from: G2 data contract completion
+        allowed_files:
+        - docs/architecture/data-contracts.md
+        - tmp/quality/task-evidence/DAT/LF-TSK-DAT-0002/result.json
+        forbidden_files:
+        - secrets/**
+        - data/**
+        file_claims:
+        - path: docs/architecture/data-contracts.md
+          mode: write
+          owner: LF-WS-DAT
+        - path: tmp/quality/task-evidence/DAT/LF-TSK-DAT-0002/result.json
+          mode: write
+          owner: LF-WS-DAT
     - id: LF-CP-DAT-002
       name: Migration and query readiness
       phase: P2
       seed_tasks:
       - id: LF-TSK-DAT-0003
+        owner: LF-WS-DAT
         title: Design indexes from target access patterns
         priority: P1
         depends_on:
@@ -2218,7 +2037,35 @@ workstreams:
         - 'Complete the declared outcome: Design indexes from target access patterns'
         acceptance_evidence:
         - EXPLAIN baseline plan
+        validation_command: python3 scripts/toolchain/postgres_test.py verify --scope indexes
+        discovered_from: G2 data contract completion
+        allowed_files:
+        - docs/architecture/data-contracts.md
+        - infra/postgres/migrations/V002__query_indexes.sql
+        - scripts/toolchain/postgres_test.py
+        - tests/toolchain/test_postgres_migrations.py
+        - tmp/quality/task-evidence/DAT/LF-TSK-DAT-0003/result.json
+        forbidden_files:
+        - secrets/**
+        - data/**
+        file_claims:
+        - path: docs/architecture/data-contracts.md
+          mode: write
+          owner: LF-WS-DAT
+        - path: infra/postgres/migrations/V002__query_indexes.sql
+          mode: write
+          owner: LF-WS-DAT
+        - path: scripts/toolchain/postgres_test.py
+          mode: write
+          owner: LF-WS-DAT
+        - path: tests/toolchain/test_postgres_migrations.py
+          mode: write
+          owner: LF-WS-DAT
+        - path: tmp/quality/task-evidence/DAT/LF-TSK-DAT-0003/result.json
+          mode: write
+          owner: LF-WS-DAT
       - id: LF-TSK-DAT-0004
+        owner: LF-WS-DAT
         title: Implement migration versioning and rollback policy
         priority: P0
         depends_on:
@@ -2233,11 +2080,57 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement migration versioning and rollback policy'
+        - 'Complete the declared outcome: Implement migration versioning and rollback
+          policy'
         acceptance_evidence:
         - Fresh, upgrade, and rollback tests
+        validation_command: python3 scripts/toolchain/postgres_test.py verify --scope all
+        discovered_from: G2 data contract completion
+        allowed_files:
+        - infra/postgres/migrations/V001__core_data_contract.sql
+        - infra/postgres/migrations/V002__query_indexes.sql
+        - scripts/toolchain/postgres_migrations.py
+        - scripts/toolchain/postgres_test.py
+        - tests/toolchain/test_postgres_migrations.py
+        - backend/build.gradle.kts
+        - backend/platform/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconEntryDao.java
+        - backend/platform/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconRepositoryIntegrationTest.java
+        - tmp/quality/task-evidence/DAT/LF-TSK-DAT-0004/result.json
+        forbidden_files:
+        - secrets/**
+        - data/**
+        file_claims:
+        - path: infra/postgres/migrations/V001__core_data_contract.sql
+          mode: write
+          owner: LF-WS-DAT
+        - path: infra/postgres/migrations/V002__query_indexes.sql
+          mode: write
+          owner: LF-WS-DAT
+        - path: scripts/toolchain/postgres_migrations.py
+          mode: write
+          owner: LF-WS-DAT
+        - path: scripts/toolchain/postgres_test.py
+          mode: write
+          owner: LF-WS-DAT
+        - path: tests/toolchain/test_postgres_migrations.py
+          mode: write
+          owner: LF-WS-DAT
+        - path: backend/build.gradle.kts
+          mode: write
+          owner: LF-WS-DAT
+        - path: backend/platform/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconEntryDao.java
+          mode: write
+          owner: LF-WS-DAT
+        - path: backend/platform/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconRepositoryIntegrationTest.java
+          mode: write
+          owner: LF-WS-DAT
+        - path: tmp/quality/task-evidence/DAT/LF-TSK-DAT-0004/result.json
+          mode: write
+          owner: LF-WS-DAT
       - id: LF-TSK-DAT-0005
-        title: Define content and result retention, deletion, export, and recovery snapshots
+        owner: LF-WS-DAT
+        title: Define content and result retention, deletion, export, and recovery
+          snapshots
         priority: P1
         depends_on:
         - task_id: LF-TSK-DAT-0002
@@ -2256,9 +2149,25 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define content and result retention, deletion, export, and recovery snapshots'
+        - 'Complete the declared outcome: Define content and result retention, deletion,
+          export, and recovery snapshots'
         acceptance_evidence:
         - Deletion and recovery consistency checks
+        validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-DAT-0005
+        discovered_from: G2 data contract completion
+        allowed_files:
+        - docs/architecture/data-contracts.md
+        - tmp/quality/task-evidence/DAT/LF-TSK-DAT-0005/result.json
+        forbidden_files:
+        - secrets/**
+        - data/**
+        file_claims:
+        - path: docs/architecture/data-contracts.md
+          mode: write
+          owner: LF-WS-DAT
+        - path: tmp/quality/task-evidence/DAT/LF-TSK-DAT-0005/result.json
+          mode: write
+          owner: LF-WS-DAT
       - id: LF-TSK-DAT-0006
         title: Run G2 data contract review
         priority: P0
@@ -2312,10 +2221,23 @@ workstreams:
         - 'Complete the declared outcome: Run G2 data contract review'
         acceptance_evidence:
         - Schema, migration, recovery, and privacy PASS
+        validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-DAT-0006
+        discovered_from: G2 data contract completion
+        owner: LF-WS-DAT
+        allowed_files:
+        - tmp/quality/task-evidence/DAT/LF-TSK-DAT-0006/result.json
+        forbidden_files:
+        - secrets/**
+        - data/**
+        file_claims:
+        - path: tmp/quality/task-evidence/DAT/LF-TSK-DAT-0006/result.json
+          mode: write
+          owner: LF-WS-DAT
 - id: LF-WS-LEX
   code: LEX
   name: Global lexicon
-  mission: Own lemma, phrase, meaning, frequency, CEFR, domain, technicality, aliases, and provenance.
+  mission: Own lemma, phrase, meaning, frequency, CEFR, domain, technicality, aliases,
+    and provenance.
   epics:
   - id: LF-EP-LEX-001
     name: Shared lexical knowledge
@@ -2325,13 +2247,14 @@ workstreams:
       phase: P2
       seed_tasks:
       - id: LF-TSK-LEX-0001
+        owner: LF-WS-LEX
         title: Define word, lemma, phrase, sense, alias, and inflection model
         priority: P0
         depends_on:
         - task_id: LF-TSK-ARCH-0008
           type: hard
-          required_task_version: 5
-          required_change_version: 2.2.0
+          required_task_version: 6
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: Lexicon domain contract
         evidence: Ambiguity and phrase fixtures
@@ -2340,16 +2263,61 @@ workstreams:
         phase_entry_prerequisite:
           previous_gate_id: G1
           previous_gate_exit_task_id: LF-TSK-ARCH-0008
-          required_exit_task_version: 5
-          required_exit_change_version: 2.2.0
+          required_exit_task_version: 6
+          required_exit_change_version: 3.0.0
           required_gate_result: PASS
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define word, lemma, phrase, sense, alias, and inflection model'
+        - 'Complete the declared outcome: Define word, lemma, phrase, sense, alias,
+          and inflection model'
         acceptance_evidence:
         - Ambiguity and phrase fixtures
+        validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-LEX-0001
+        discovered_from: G2 data contract completion
+        allowed_files:
+        - docs/architecture/lexicon-contract.md
+        - backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/domain/LexiconEntry.java
+        - backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/domain/LexiconEntryKind.java
+        - backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/domain/LexiconSense.java
+        - backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/domain/LexiconAlias.java
+        - backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/domain/LexiconInflection.java
+        - backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/domain/LexiconProvenance.java
+        - backend/modules/lexicon/src/test/java/io/lexiflow/lexicon/domain/LexiconEntryTest.java
+        - tmp/quality/task-evidence/LEX/LF-TSK-LEX-0001/result.json
+        forbidden_files:
+        - secrets/**
+        - data/**
+        file_claims:
+        - path: docs/architecture/lexicon-contract.md
+          mode: write
+          owner: LF-WS-LEX
+        - path: backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/domain/LexiconEntry.java
+          mode: write
+          owner: LF-WS-LEX
+        - path: backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/domain/LexiconEntryKind.java
+          mode: write
+          owner: LF-WS-LEX
+        - path: backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/domain/LexiconSense.java
+          mode: write
+          owner: LF-WS-LEX
+        - path: backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/domain/LexiconAlias.java
+          mode: write
+          owner: LF-WS-LEX
+        - path: backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/domain/LexiconInflection.java
+          mode: write
+          owner: LF-WS-LEX
+        - path: backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/domain/LexiconProvenance.java
+          mode: write
+          owner: LF-WS-LEX
+        - path: backend/modules/lexicon/src/test/java/io/lexiflow/lexicon/domain/LexiconEntryTest.java
+          mode: write
+          owner: LF-WS-LEX
+        - path: tmp/quality/task-evidence/LEX/LF-TSK-LEX-0001/result.json
+          mode: write
+          owner: LF-WS-LEX
       - id: LF-TSK-LEX-0002
+        owner: LF-WS-LEX
         title: Define source provenance, license, normalization, and update policy
         priority: P0
         depends_on:
@@ -2364,10 +2332,25 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define source provenance, license, normalization, and update
-          policy'
+        - 'Complete the declared outcome: Define source provenance, license, normalization,
+          and update policy'
         acceptance_evidence:
         - Provenance and replacement audit
+        validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-LEX-0002
+        discovered_from: G2 data contract completion
+        allowed_files:
+        - docs/architecture/lexicon-contract.md
+        - tmp/quality/task-evidence/LEX/LF-TSK-LEX-0002/result.json
+        forbidden_files:
+        - secrets/**
+        - data/**
+        file_claims:
+        - path: docs/architecture/lexicon-contract.md
+          mode: write
+          owner: LF-WS-LEX
+        - path: tmp/quality/task-evidence/LEX/LF-TSK-LEX-0002/result.json
+          mode: write
+          owner: LF-WS-LEX
     - id: LF-CP-LEX-002
       name: Difficulty and domain metadata
       phase: P4
@@ -2404,7 +2387,8 @@ workstreams:
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement frequency, CEFR, technicality, and domain lookup'
+        - 'Complete the declared outcome: Implement frequency, CEFR, technicality,
+          and domain lookup'
         acceptance_evidence:
         - Curated lookup contract tests
       - id: LF-TSK-LEX-0004
@@ -2428,8 +2412,8 @@ workstreams:
 - id: LF-WS-CNT
   code: CNT
   name: Content and captions
-  mission: Own normalized content, caption timelines, context windows, provenance, and source-adapter
-    ports.
+  mission: Own normalized content, caption timelines, context windows, provenance,
+    and source-adapter ports.
   epics:
   - id: LF-EP-CNT-001
     name: Source-neutral content model
@@ -2439,13 +2423,14 @@ workstreams:
       phase: P2
       seed_tasks:
       - id: LF-TSK-CNT-0001
+        owner: LF-WS-CNT
         title: Define content, segment, caption, timeline, and provenance model
         priority: P0
         depends_on:
         - task_id: LF-TSK-ARCH-0008
           type: hard
-          required_task_version: 5
-          required_change_version: 2.2.0
+          required_task_version: 6
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: Content domain contract
         evidence: YouTube and future-source examples
@@ -2454,16 +2439,45 @@ workstreams:
         phase_entry_prerequisite:
           previous_gate_id: G1
           previous_gate_exit_task_id: LF-TSK-ARCH-0008
-          required_exit_task_version: 5
-          required_exit_change_version: 2.2.0
+          required_exit_task_version: 6
+          required_exit_change_version: 3.0.0
           required_gate_result: PASS
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define content, segment, caption, timeline, and provenance model'
+        - 'Complete the declared outcome: Define content, segment, caption, timeline,
+          and provenance model'
         acceptance_evidence:
         - YouTube and future-source examples
+        validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-CNT-0001
+        discovered_from: G2 data contract completion
+        allowed_files:
+        - docs/architecture/caption-contract.md
+        - backend/modules/enrichment/src/main/java/io/lexiflow/enrichment/domain/CaptionSegment.java
+        - backend/modules/enrichment/src/main/java/io/lexiflow/enrichment/domain/ContentRevision.java
+        - backend/modules/enrichment/src/test/java/io/lexiflow/enrichment/domain/ContentRevisionTest.java
+        - tmp/quality/task-evidence/CNT/LF-TSK-CNT-0001/result.json
+        forbidden_files:
+        - secrets/**
+        - data/**
+        file_claims:
+        - path: docs/architecture/caption-contract.md
+          mode: write
+          owner: LF-WS-CNT
+        - path: backend/modules/enrichment/src/main/java/io/lexiflow/enrichment/domain/CaptionSegment.java
+          mode: write
+          owner: LF-WS-CNT
+        - path: backend/modules/enrichment/src/main/java/io/lexiflow/enrichment/domain/ContentRevision.java
+          mode: write
+          owner: LF-WS-CNT
+        - path: backend/modules/enrichment/src/test/java/io/lexiflow/enrichment/domain/ContentRevisionTest.java
+          mode: write
+          owner: LF-WS-CNT
+        - path: tmp/quality/task-evidence/CNT/LF-TSK-CNT-0001/result.json
+          mode: write
+          owner: LF-WS-CNT
       - id: LF-TSK-CNT-0002
+        owner: LF-WS-CNT
         title: Define stable normalization and segment identity
         priority: P0
         depends_on:
@@ -2478,9 +2492,25 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define stable normalization and segment identity'
+        - 'Complete the declared outcome: Define stable normalization and segment
+          identity'
         acceptance_evidence:
         - Punctuation, overlap, and revision fixtures
+        validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-CNT-0002
+        discovered_from: G2 data contract completion
+        allowed_files:
+        - docs/architecture/caption-contract.md
+        - tmp/quality/task-evidence/CNT/LF-TSK-CNT-0002/result.json
+        forbidden_files:
+        - secrets/**
+        - data/**
+        file_claims:
+        - path: docs/architecture/caption-contract.md
+          mode: write
+          owner: LF-WS-CNT
+        - path: tmp/quality/task-evidence/CNT/LF-TSK-CNT-0002/result.json
+          mode: write
+          owner: LF-WS-CNT
     - id: LF-CP-CNT-002
       name: Context assembly
       phase: P4
@@ -2512,7 +2542,8 @@ workstreams:
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement previous-current-next context window assembly'
+        - 'Complete the declared outcome: Implement previous-current-next context
+          window assembly'
         acceptance_evidence:
         - Boundary and missing-segment tests
       - id: LF-TSK-CNT-0004
@@ -2547,14 +2578,15 @@ workstreams:
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement content deduplication and revision handling'
+        - 'Complete the declared outcome: Implement content deduplication and revision
+          handling'
         acceptance_evidence:
         - Duplicate and revised-caption tests
 - id: LF-WS-ENR
   code: ENR
   name: Enrichment engine
-  mission: Own candidate generation, need-hint decisions, contextual meaning assembly, and annotation
-    output.
+  mission: Own candidate generation, need-hint decisions, contextual meaning assembly,
+    and annotation output.
   epics:
   - id: LF-EP-ENR-001
     name: Rule-and-model enrichment pipeline
@@ -2631,7 +2663,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement dictionary lookup for generic hinting'
+        - 'Complete the declared outcome: Implement dictionary lookup for generic
+          hinting'
         acceptance_evidence:
         - Common-term suppression and contextual-term retention tests
     - id: LF-CP-ENR-002
@@ -2730,7 +2763,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Build contextual word, phrase, idiom, and term gold set'
+        - 'Complete the declared outcome: Build contextual word, phrase, idiom, and
+          term gold set'
         acceptance_evidence:
         - Provenance and reviewer agreement
       - id: LF-TSK-ENR-0008
@@ -2758,7 +2792,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Measure precision, recall, density, meaning quality, and latency'
+        - 'Complete the declared outcome: Measure precision, recall, density, meaning
+          quality, and latency'
         acceptance_evidence:
         - Immutable benchmark receipt
       - id: LF-TSK-ENR-0009
@@ -2840,7 +2875,8 @@ workstreams:
 - id: LF-WS-SEM
   code: SEM
   name: Semantic providers
-  mission: Own provider-neutral semantic capabilities, routing, structured output, safety, and fallback.
+  mission: Own provider-neutral semantic capabilities, routing, structured output,
+    safety, and fallback.
   epics:
   - id: LF-EP-SEM-001
     name: Provider abstraction and routing
@@ -2850,13 +2886,14 @@ workstreams:
       phase: P1
       seed_tasks:
       - id: LF-TSK-SEM-0001
-        title: Define disambiguate, translateInContext, extractPhrase, and explainSentence ports
+        title: Define disambiguate, translateInContext, extractPhrase, and explainSentence
+          ports
         priority: P0
         depends_on:
-        - task_id: LF-TSK-ARCH-0002
+        - task_id: LF-TSK-ARCH-0008
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 6
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: Provider capability contract
         evidence: Provider-neutral type review
@@ -2864,12 +2901,12 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define disambiguate, translateInContext, extractPhrase, and
-          explainSentence ports'
+        - 'Complete the declared outcome: Define disambiguate, translateInContext,
+          extractPhrase, and explainSentence ports'
         acceptance_evidence:
         - Provider-neutral type review
         phase: P1
-        task_source: G1 current-input receipt closure activation
+        task_source: Phase baseline design contract
         discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
         owner: LF-WS-SEM
         allowed_files:
@@ -2900,11 +2937,12 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define structured output, confidence, timeout, and error semantics'
+        - 'Complete the declared outcome: Define structured output, confidence, timeout,
+          and error semantics'
         acceptance_evidence:
         - Malformed, low-confidence, timeout, and refusal cases
         phase: P1
-        task_source: G1 current-input receipt closure activation
+        task_source: Phase baseline design contract
         discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
         owner: LF-WS-SEM
         allowed_files:
@@ -2953,7 +2991,8 @@ workstreams:
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement task-aware model router and fallback chain'
+        - 'Complete the declared outcome: Implement task-aware model router and fallback
+          chain'
         acceptance_evidence:
         - Route, timeout, budget, and fallback tests
       - id: LF-TSK-SEM-0004
@@ -3006,13 +3045,15 @@ workstreams:
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement deterministic fake and local-provider adapter'
+        - 'Complete the declared outcome: Implement deterministic fake and local-provider
+          adapter'
         acceptance_evidence:
         - Deterministic integration tests
 - id: LF-WS-API
   code: API
   name: API and client contracts
-  mission: Own versioned annotation contracts, errors, idempotency, and client compatibility APIs.
+  mission: Own versioned annotation contracts, errors, idempotency, and client compatibility
+    APIs.
   epics:
   - id: LF-EP-API-001
     name: Stable client-facing API
@@ -3027,8 +3068,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-ARCH-0008
           type: hard
-          required_task_version: 5
-          required_change_version: 2.2.0
+          required_task_version: 6
+          required_change_version: 3.0.0
           required_result: PASS
         - task_id: LF-TSK-DAT-0006
           type: hard
@@ -3048,8 +3089,8 @@ workstreams:
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define versioning, error, request identity, and compatibility
-          rules'
+        - 'Complete the declared outcome: Define versioning, error, request identity,
+          and compatibility rules'
         acceptance_evidence:
         - Compatibility and error fixtures
       - id: LF-TSK-API-0002
@@ -3082,11 +3123,13 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define enrichment request and incremental response contract'
+        - 'Complete the declared outcome: Define enrichment request and incremental
+          response contract'
         acceptance_evidence:
         - Contract tests including partial and timeout results
       - id: LF-TSK-API-0005
-        title: Implement contract-test harness and generated client compatibility check
+        title: Implement contract-test harness and generated client compatibility
+          check
         priority: P0
         depends_on:
         - task_id: LF-TSK-API-0002
@@ -3100,8 +3143,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement contract-test harness and generated client compatibility
-          check'
+        - 'Complete the declared outcome: Implement contract-test harness and generated
+          client compatibility check'
         acceptance_evidence:
         - Producer-consumer compatibility matrix
       - id: LF-TSK-API-0006
@@ -3138,8 +3181,8 @@ workstreams:
 - id: LF-WS-EXT
   code: EXT
   name: Chrome Extension
-  mission: Own YouTube caption acquisition, player context, overlays, local cache, annotation API adapter,
-    and browser lifecycle.
+  mission: Own YouTube caption acquisition, player context, overlays, local cache,
+    annotation API adapter, and browser lifecycle.
   epics:
   - id: LF-EP-EXT-001
     name: YouTube viewing client
@@ -3154,8 +3197,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-ARCH-0008
           type: hard
-          required_task_version: 5
-          required_change_version: 2.2.0
+          required_task_version: 6
+          required_change_version: 3.0.0
           required_result: PASS
         - task_id: LF-TSK-ENR-0010
           type: hard
@@ -3175,8 +3218,8 @@ workstreams:
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Spike supported YouTube caption and player-context acquisition
-          paths'
+        - 'Complete the declared outcome: Spike supported YouTube caption and player-context
+          acquisition paths'
         acceptance_evidence:
         - Fixture and failure-mode evidence
       - id: LF-TSK-EXT-0002
@@ -3199,7 +3242,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement caption acquisition and timeline normalization'
+        - 'Complete the declared outcome: Implement caption acquisition and timeline
+          normalization'
         acceptance_evidence:
         - Navigation, caption revision, and language tests
       - id: LF-TSK-EXT-0003
@@ -3256,7 +3300,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Render English caption immediately and patch annotations incrementally'
+        - 'Complete the declared outcome: Render English caption immediately and patch
+          annotations incrementally'
         acceptance_evidence:
         - No-annotation-blocking browser test
         acceptance_case_ids:
@@ -3299,7 +3344,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement L1 cache, reconnect, timeout, and stale-result guards'
+        - 'Complete the declared outcome: Implement L1 cache, reconnect, timeout,
+          and stale-result guards'
         acceptance_evidence:
         - Offline, late response, video switch, and cache tests
     - id: LF-CP-EXT-003
@@ -3342,8 +3388,8 @@ workstreams:
 - id: LF-WS-PRF
   code: PRF
   name: Performance and resilience
-  mission: Own L1/L2/cache semantics, latency budgets, prefetch, backpressure, failure policy, capacity,
-    and model cost budgets.
+  mission: Own L1/L2/cache semantics, latency budgets, prefetch, backpressure, failure
+    policy, capacity, and model cost budgets.
   epics:
   - id: LF-EP-PRF-001
     name: Real-time annotation path
@@ -3356,10 +3402,10 @@ workstreams:
         title: Define English-render and annotation P50/P95/P99 budgets
         priority: P0
         depends_on:
-        - task_id: LF-TSK-ARCH-0004
+        - task_id: LF-TSK-ARCH-0008
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 6
+          required_change_version: 3.0.0
           required_result: PASS
         - task_id: LF-TSK-PRD-0001
           type: hard
@@ -3372,17 +3418,18 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define English-render and annotation P50/P95/P99 budgets'
+        - 'Complete the declared outcome: Define English-render and annotation P50/P95/P99
+          budgets'
         acceptance_evidence:
         - Stage budget and measurement points
       - id: LF-TSK-PRF-0002
         title: Define L1, Redis, PostgreSQL, semantic, and context-cache contracts
         priority: P0
         depends_on:
-        - task_id: LF-TSK-ARCH-0006
+        - task_id: LF-TSK-ARCH-0008
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 6
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: Cache consistency decision
         evidence: Key, version, TTL, invalidation, and privacy analysis
@@ -3390,11 +3437,12 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define L1, Redis, PostgreSQL, semantic, and context-cache contracts'
+        - 'Complete the declared outcome: Define L1, Redis, PostgreSQL, semantic,
+          and context-cache contracts'
         acceptance_evidence:
         - Key, version, TTL, invalidation, and privacy analysis
         phase: P1
-        task_source: G1 current-input receipt closure activation
+        task_source: Phase baseline design contract
         discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
         owner: LF-WS-PRF
         allowed_files:
@@ -3471,8 +3519,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement timeout, circuit breaking, backpressure, and prefetch
-          policy'
+        - 'Complete the declared outcome: Implement timeout, circuit breaking, backpressure,
+          and prefetch policy'
         acceptance_evidence:
         - Failure injection tests
       - id: LF-TSK-PRF-0005
@@ -3529,8 +3577,8 @@ workstreams:
 - id: LF-WS-SEC
   code: SEC
   name: Security and privacy
-  mission: Own threat model, least privilege, data isolation, secrets, provider data handling, deletion,
-    and abuse controls.
+  mission: Own threat model, least privilege, data isolation, secrets, provider data
+    handling, deletion, and abuse controls.
   epics:
   - id: LF-EP-SEC-001
     name: User and content protection
@@ -3543,10 +3591,10 @@ workstreams:
         title: Threat-model Extension, API, worker, stores, and providers
         priority: P0
         depends_on:
-        - task_id: LF-TSK-ARCH-0002
+        - task_id: LF-TSK-ARCH-0008
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 6
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: Threat model
         evidence: Trust boundaries and abuse cases
@@ -3554,11 +3602,12 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Threat-model Extension, API, worker, stores, and providers'
+        - 'Complete the declared outcome: Threat-model Extension, API, worker, stores,
+          and providers'
         acceptance_evidence:
         - Trust boundaries and abuse cases
         phase: P1
-        task_source: G1 current-input receipt closure activation
+        task_source: Phase baseline design contract
         discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
         owner: LF-WS-SEC
         allowed_files:
@@ -3572,6 +3621,7 @@ workstreams:
           owner: LF-WS-SEC
         validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-SEC-0001
       - id: LF-TSK-SEC-0002
+        owner: LF-WS-SEC
         title: Define content minimization, retention, deletion, and export controls
         phase: P2
         priority: P0
@@ -3581,15 +3631,10 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
-        - task_id: LF-TSK-ARCH-0002
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
         - task_id: LF-TSK-ARCH-0008
           type: hard
-          required_task_version: 5
-          required_change_version: 2.2.0
+          required_task_version: 6
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: Security and privacy contract
         evidence: Data-flow matrix and privacy lifecycle review
@@ -3598,15 +3643,31 @@ workstreams:
         phase_entry_prerequisite:
           previous_gate_id: G1
           previous_gate_exit_task_id: LF-TSK-ARCH-0008
-          required_exit_task_version: 5
-          required_exit_change_version: 2.2.0
+          required_exit_task_version: 6
+          required_exit_change_version: 3.0.0
           required_gate_result: PASS
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define content minimization, retention, deletion, and export controls'
+        - 'Complete the declared outcome: Define content minimization, retention,
+          deletion, and export controls'
         acceptance_evidence:
         - Data-flow matrix and privacy lifecycle review
+        validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-SEC-0002
+        discovered_from: G2 data contract completion
+        allowed_files:
+        - docs/architecture/data-contracts.md
+        - tmp/quality/task-evidence/SEC/LF-TSK-SEC-0002/result.json
+        forbidden_files:
+        - secrets/**
+        - data/**
+        file_claims:
+        - path: docs/architecture/data-contracts.md
+          mode: write
+          owner: LF-WS-SEC
+        - path: tmp/quality/task-evidence/SEC/LF-TSK-SEC-0002/result.json
+          mode: write
+          owner: LF-WS-SEC
     - id: LF-CP-SEC-002
       name: Operational security
       phase: P6
@@ -3639,7 +3700,8 @@ workstreams:
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement secret references and provider data-handling controls'
+        - 'Complete the declared outcome: Implement secret references and provider
+          data-handling controls'
         acceptance_evidence:
         - Credential leak and redacted-log tests
       - id: LF-TSK-SEC-0004
@@ -3662,7 +3724,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement rate limits, quotas, and abuse detection'
+        - 'Complete the declared outcome: Implement rate limits, quotas, and abuse
+          detection'
         acceptance_evidence:
         - Burst, global quota, and bypass tests
       - id: LF-TSK-SEC-0005
@@ -3690,15 +3753,15 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Run dependency, extension-permission, and data-flow security
-          review'
+        - 'Complete the declared outcome: Run dependency, extension-permission, and
+          data-flow security review'
         acceptance_evidence:
         - SAST, dependency, permission, and manual review
 - id: LF-WS-OBS
   code: OBS
   name: Observability and analytics
-  mission: Own structured logs, metrics, traces, progress, privacy-safe product analytics, dashboards,
-    and alert evidence.
+  mission: Own structured logs, metrics, traces, progress, privacy-safe product analytics,
+    dashboards, and alert evidence.
   epics:
   - id: LF-EP-OBS-001
     name: Evidence-producing operations
@@ -3708,13 +3771,14 @@ workstreams:
       phase: P1
       seed_tasks:
       - id: LF-TSK-OBS-0001
-        title: Define correlation, structured logging, metrics, tracing, and redaction contract
+        title: Define correlation, structured logging, metrics, tracing, and redaction
+          contract
         priority: P1
         depends_on:
-        - task_id: LF-TSK-ARCH-0006
+        - task_id: LF-TSK-ARCH-0008
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 6
+          required_change_version: 3.0.0
           required_result: PASS
         - task_id: LF-TSK-SEC-0001
           type: hard
@@ -3727,12 +3791,12 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define correlation, structured logging, metrics, tracing, and
-          redaction contract'
+        - 'Complete the declared outcome: Define correlation, structured logging,
+          metrics, tracing, and redaction contract'
         acceptance_evidence:
         - Cross-flow correlation and forbidden-field review
         phase: P1
-        task_source: G1 current-input receipt closure activation
+        task_source: Phase baseline design contract
         discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
         owner: LF-WS-OBS
         allowed_files:
@@ -3766,7 +3830,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement latency, cache, queue, provider, and error instrumentation'
+        - 'Complete the declared outcome: Implement latency, cache, queue, provider,
+          and error instrumentation'
         acceptance_evidence:
         - Metric and trace contract tests
     - id: LF-CP-OBS-002
@@ -3805,7 +3870,8 @@ workstreams:
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement SLO dashboards and actionable alerts'
+        - 'Complete the declared outcome: Implement SLO dashboards and actionable
+          alerts'
         acceptance_evidence:
         - Alert injection and runbook linkage
       - id: LF-TSK-OBS-0004
@@ -3841,14 +3907,15 @@ workstreams:
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement privacy-safe service and cost analytics'
+        - 'Complete the declared outcome: Implement privacy-safe service and cost
+          analytics'
         acceptance_evidence:
         - Aggregation and deletion tests
 - id: LF-WS-OPS
   code: OPS
   name: Delivery and operations
-  mission: Own reproducible environments, build, migration execution, health, deployment, backup, restore,
-    release, and rollback.
+  mission: Own reproducible environments, build, migration execution, health, deployment,
+    backup, restore, release, and rollback.
   epics:
   - id: LF-EP-OPS-001
     name: Reproducible product delivery
@@ -3861,30 +3928,32 @@ workstreams:
         title: Freeze runtime, build, dependency-lock, and repository layout decision
         priority: P0
         depends_on:
-        - task_id: LF-TSK-ARCH-0007
+        - task_id: LF-TSK-ARCH-0008
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 6
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: Toolchain ADR
-        evidence: Alternatives, official compatibility and version policy, reference-wrapper audit, local-runtime
-          inventory, and a post-approval reproducibility check plan
+        evidence: Alternatives, official compatibility and version policy, reference-wrapper
+          audit, local-runtime inventory, and a post-approval reproducibility check
+          plan
         task_version: 2
         change_version: 1.1.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - Publish a Phase 1 toolchain ADR that compares at least three viable stacks, recommends runtime/build/lock/repository
-          boundaries, cites current compatibility evidence, records local environment gaps, and defines
-          the exact post-approval reproducibility checks without creating product code or build files.
+        - Publish a Phase 1 toolchain ADR that compares at least three viable stacks,
+          recommends runtime/build/lock/repository boundaries, cites current compatibility
+          evidence, records local environment gaps, and defines the exact post-approval
+          reproducibility checks without creating product code or build files.
         acceptance_evidence:
-        - ADR alternatives, trade-offs, recommendation, version policy, compatibility sources, and revisit
-          triggers.
-        - Reference-wrapper audit and local runtime inventory with any mismatch reported as a future bootstrap
-          prerequisite.
-        - Post-approval checklist for wrapper, dependency locks, toolchain resolution, clean build, and
-          architecture-test reproducibility.
+        - ADR alternatives, trade-offs, recommendation, version policy, compatibility
+          sources, and revisit triggers.
+        - Reference-wrapper audit and local runtime inventory with any mismatch reported
+          as a future bootstrap prerequisite.
+        - Post-approval checklist for wrapper, dependency locks, toolchain resolution,
+          clean build, and architecture-test reproducibility.
         phase: P1
-        task_source: G1 current-input receipt closure activation
+        task_source: Phase baseline design contract
         discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
         owner: LF-WS-OPS
         allowed_files:
@@ -3898,6 +3967,7 @@ workstreams:
           owner: LF-WS-OPS
         validation_command: python3 -m scripts.gates.task_contracts --task-id LF-TSK-OPS-0001
       - id: LF-TSK-OPS-0002
+        owner: LF-WS-OPS
         title: Implement reproducible local api, worker, PostgreSQL, and Redis environment
         phase: P2
         priority: P0
@@ -3918,10 +3988,33 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement reproducible local api, worker, PostgreSQL, and Redis
-          environment'
+        - 'Complete the declared outcome: Implement reproducible local api, worker,
+          PostgreSQL, and Redis environment'
         acceptance_evidence:
         - Clean-machine startup and health checks
+        validation_command: python3 scripts/toolchain/local_stack.py verify-runtime
+        discovered_from: G2 data contract completion
+        allowed_files:
+        - infra/local/compose.yaml
+        - scripts/toolchain/local_stack.py
+        - docs/development/toolchain-reproduction/local-stack.md
+        - tmp/quality/task-evidence/OPS/LF-TSK-OPS-0002/result.json
+        forbidden_files:
+        - secrets/**
+        - data/**
+        file_claims:
+        - path: infra/local/compose.yaml
+          mode: write
+          owner: LF-WS-OPS
+        - path: scripts/toolchain/local_stack.py
+          mode: write
+          owner: LF-WS-OPS
+        - path: docs/development/toolchain-reproduction/local-stack.md
+          mode: write
+          owner: LF-WS-OPS
+        - path: tmp/quality/task-evidence/OPS/LF-TSK-OPS-0002/result.json
+          mode: write
+          owner: LF-WS-OPS
     - id: LF-CP-OPS-002
       name: Production safety
       phase: P6
@@ -3958,8 +4051,8 @@ workstreams:
           required_user_approval: APPROVED
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement environment-specific configuration and health/readiness
-          checks'
+        - 'Complete the declared outcome: Implement environment-specific configuration
+          and health/readiness checks'
         acceptance_evidence:
         - Dev, test, and production fixture checks
       - id: LF-TSK-OPS-0004
@@ -3982,7 +4075,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement backup, restore, and point-in-time recovery drill'
+        - 'Complete the declared outcome: Implement backup, restore, and point-in-time
+          recovery drill'
         acceptance_evidence:
         - Timed restore receipt and data consistency check
       - id: LF-TSK-OPS-0005
@@ -4005,7 +4099,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Implement release manifest, migration sequencing, and rollback'
+        - 'Complete the declared outcome: Implement release manifest, migration sequencing,
+          and rollback'
         acceptance_evidence:
         - Upgrade and rollback rehearsal
       - id: LF-TSK-OPS-0006
@@ -4033,7 +4128,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Run production capacity and fault-injection suite'
+        - 'Complete the declared outcome: Run production capacity and fault-injection
+          suite'
         acceptance_evidence:
         - Load, dependency outage, and recovery budgets
       - id: LF-TSK-OPS-0007
@@ -4056,7 +4152,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Assemble release candidate and traceability manifest'
+        - 'Complete the declared outcome: Assemble release candidate and traceability
+          manifest'
         acceptance_evidence:
         - Task-to-contract-to-test-to-artifact mapping
       - id: LF-TSK-OPS-0008
@@ -4090,8 +4187,8 @@ workstreams:
 - id: LF-WS-ADP
   code: ADP
   name: Future content adapters
-  mission: Validate that web, PDF, Podcast, and other video sources can use the content port without contaminating
-    core domains.
+  mission: Validate that web, PDF, Podcast, and other video sources can use the content
+    port without contaminating core domains.
   epics:
   - id: LF-EP-ADP-001
     name: Source expansion
@@ -4104,15 +4201,10 @@ workstreams:
         title: Define source-adapter port and conformance fixtures
         priority: P1
         depends_on:
-        - task_id: LF-TSK-ARCH-0002
+        - task_id: LF-TSK-ARCH-0008
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
-          required_result: PASS
-        - task_id: LF-TSK-ARCH-0003
-          type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 6
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: Source adapter contract
         evidence: YouTube, web, PDF, and audio examples
@@ -4120,11 +4212,12 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Define source-adapter port and conformance fixtures'
+        - 'Complete the declared outcome: Define source-adapter port and conformance
+          fixtures'
         acceptance_evidence:
         - YouTube, web, PDF, and audio examples
         phase: P1
-        task_source: G1 current-input receipt closure activation
+        task_source: Phase baseline design contract
         discovered_from: LF-TSK-QLT-0013 integrated control-plane review remediation
         owner: LF-WS-ADP
         allowed_files:
@@ -4163,7 +4256,8 @@ workstreams:
         change_version: 1.0.0
         estimated_task_minutes: 45
         acceptance_criteria:
-        - 'Complete the declared outcome: Prove core domains do not depend on YouTube-specific types'
+        - 'Complete the declared outcome: Prove core domains do not depend on YouTube-specific
+          types'
         acceptance_evidence:
         - Dependency rule check
         acceptance_case_ids:

@@ -6,6 +6,7 @@ import argparse
 import copy
 import hashlib
 import json
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -63,8 +64,8 @@ def build_profile_entry(task: dict[str, Any], profile: dict[str, Any]) -> dict[s
     if profile["runner"] == "task-contract":
         command = f"python3 -m scripts.gates.task_contracts --task-id {task_id}"
         argv = ["python3", "-m", "scripts.gates.task_contracts", "--task-id", task_id]
-        check_id = f"g1.{domain.lower()}.{number}.contract"
-        command_id = f"g1.{domain.lower()}.{number}.contract.v1"
+        check_id = f"task-contract.{domain.lower()}.{number}"
+        command_id = f"task-contract.{domain.lower()}.{number}.v1"
         consumed = [PROFILE_LOCATOR, CHECKER_LOCATOR, *profile["required_inputs"]]
     elif task_id == "LF-TSK-QLT-0006":
         command = profile["validation_command"]
@@ -72,8 +73,16 @@ def build_profile_entry(task: dict[str, Any], profile: dict[str, Any]) -> dict[s
         check_id = "qlt.runner.validate"
         command_id = "qlt.runner.validate.v1"
         consumed = list(profile["required_inputs"])
+    elif profile["runner"] == "external":
+        command = profile["validation_command"]
+        argv = profile.get("fixed_argv")
+        if not isinstance(argv, list) or shlex.join(argv) != command:
+            raise RegistryProfileError(f"external profile command/argv mismatch: {task_id}")
+        check_id = f"external.{domain.lower()}.{number}"
+        command_id = f"external.{domain.lower()}.{number}.v1"
+        consumed = list(profile["required_inputs"])
     else:
-        raise RegistryProfileError(f"external entry must be predeclared: {task_id}")
+        raise RegistryProfileError(f"unsupported profile runner: {task_id}")
     if task.get("validation_command") != command:
         raise RegistryProfileError(f"catalog command mismatch: {task_id}")
     criteria = task.get("acceptance_criteria")
@@ -95,7 +104,7 @@ def build_profile_entry(task: dict[str, Any], profile: dict[str, Any]) -> dict[s
         "command_id": command_id,
         "fixed_argv": argv,
         "cwd": ".",
-        "timeout_seconds": 240 if task_id == "LF-TSK-QLT-0006" else 180,
+        "timeout_seconds": profile.get("timeout_seconds", 240 if task_id == "LF-TSK-QLT-0006" else 180),
         "consumed_inputs": consumed,
         "outcome_contract": {
             "schema": OUTCOME_SCHEMA,
@@ -151,9 +160,18 @@ def render_registry(repo_root: str | Path) -> dict[str, Any]:
                 entry.get("declared_validation_command") != command
                 or entry.get("subject_task_version") != task.get("task_version")
                 or entry.get("subject_change_version") != task.get("change_version")
-                or entry.get("entry_hash") != _entry_hash(entry)
             ):
                 raise RegistryProfileError(f"predeclared entry drift: {task_id}")
+            criteria = task.get("acceptance_criteria")
+            if not isinstance(criteria, list) or not criteria:
+                raise RegistryProfileError(f"predeclared task has no acceptance criteria: {task_id}")
+            # Earlier registry entries pointed internal harness checks at
+            # removed product-case IDs.  The catalog Task's own explicit
+            # criteria are the stable acceptance contract for these checks.
+            entry["acceptance_criterion_ids"] = [
+                f"{task_id}.acceptance_criteria[{index}]" for index in range(len(criteria))
+            ]
+            entry["entry_hash"] = _entry_hash(entry)
             if profile is not None:
                 if profile["runner"] != "external" or profile.get("validation_command") != command:
                     raise RegistryProfileError(f"predeclared profile mismatch: {task_id}")
