@@ -7,13 +7,13 @@
     "schema_version": {"const": "lexiflow.qoder-work-package-result.v1"},
     "status": {"enum": ["PASS", "BLOCKED", "FAIL"]},
     "work_package_id": {"type": "string", "minLength": 1},
-    "task_ids": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string"}},
+    "task_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
     "task_versions": {"type": "object"},
     "change_versions": {"type": "object"},
     "run_id": {"type": "string", "format": "uuid"},
     "outcomes": {
       "type": "array",
-      "minItems": 2,
+      "minItems": 1,
       "items": {
         "type": "object",
         "required": ["task_id", "status", "acceptance_evidence"],

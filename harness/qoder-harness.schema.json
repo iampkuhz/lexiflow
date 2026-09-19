@@ -12,7 +12,7 @@
       "required": ["work_package_id", "task_ids", "task_versions", "change_versions", "agent_profile"],
       "properties": {
         "work_package_id": {"type": "string", "minLength": 1},
-        "task_ids": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string"}},
+        "task_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
         "task_versions": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 1}},
         "change_versions": {"type": "object", "additionalProperties": {"type": "string"}},
         "agent_profile": {"type": "string", "minLength": 1}
@@ -20,7 +20,7 @@
     },
     "required_context": {
       "type": "array",
-      "minItems": 6,
+      "minItems": 4,
       "items": {
         "type": "object",
         "additionalProperties": false,

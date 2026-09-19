@@ -25,7 +25,7 @@
 ## 按需加载共享规则
 
 - 开始任务先读 `harness/README.md` 与 `harness/manifest.yaml`，按工作类型加载对应合同；长期规范在 `openspec/specs/`，当前变更在 `openspec/changes/`。
-- 子任务派发前必须读取当前 `harness/agent-policy.manifest.yaml` 的 `subagent_protocol` 与 `qoder_delegation`；模型按其中 `codex_model_policy` 选择并显式传参，不以角色或继承模型替代。规模、范围、身份、结果布局、回调和并发均遵守该合同。
+- 子任务前读 `harness/agent-policy.manifest.yaml` 的 `subagent_protocol` 与 `qoder_delegation`；超过 10 分钟且范围可隔离、或需大量新上下文而可简洁验收的任务优先派发。模型显式按 `codex_model_policy` 选择，遵守范围、身份、回调和并发合同。
 - 客户端运行边界见 `harness/agent-runtime.manifest.yaml`。共享字段为 policy 的确定性投影，不手工维护副本；更新后运行 `python3 -m scripts.harness.policy_projection --check`。
 - 调用者不伪造 runner 身份；实现者不能自行签发 validation/review；完成信号与进程退出零不等于验收通过。集成验证串行，不覆盖其他写入者的修改。
 - 修改文档时读取 `harness/documentation-policy.yaml`；图表生成/校验按其中 skill 声明加载 `feipi-plantuml-generate-diagram`，仅 skill 工程维护加载 `feipi-skill-govern`。缺少工具不得假装已执行；本机接入见 `harness/README.md`。

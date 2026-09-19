@@ -80,9 +80,9 @@ RUNTIME_IDENTITY_FIELDS: tuple[str, ...] = (
 DEFAULT_PERMISSION_MODE = "bypass_permissions"
 VALID_PERMISSION_MODES = frozenset({"default", "accept_edits", "dont_ask", DEFAULT_PERMISSION_MODE})
 MAX_PROMPT_CHARACTERS = 8000
-MIN_QODER_PACKAGE_MINUTES = 180
+MIN_QODER_PACKAGE_MINUTES = 10
 MAX_QODER_PACKAGE_MINUTES = 360
-MIN_QODER_PACKAGE_TASKS = 2
+MIN_QODER_PACKAGE_TASKS = 1
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 _SEMVER_RE = re.compile(
@@ -339,15 +339,13 @@ def _validate_harness_manifest(
         "AGENTS.md",
         ".qoder/AGENTS.md",
         str(profile.relative_to(repo_root)),
-        "planning/workstreams.yaml",
         "harness/agent-policy.manifest.yaml",
-        "harness/agent-runtime.manifest.yaml",
     }
     if not mandatory.issubset(seen):
-        raise ValueError("Qoder harness context is missing mandatory project policy or catalog files")
-    catalog = catalog_package if catalog_package is not None else _validate_catalog_package(task, repo_root)
+        raise ValueError("Qoder harness context is missing mandatory project policy")
+    catalog = catalog_package
     context_hashes = {entry["path"]: entry["sha256"] for entry in required_context}
-    if catalog["catalog_sha256"] != context_hashes["planning/workstreams.yaml"]:
+    if catalog is not None and catalog["catalog_sha256"] != context_hashes.get("planning/workstreams.yaml"):
         raise ValueError("Qoder catalog changed after package normalization")
     commands = manifest.get("validation_commands")
     if not isinstance(commands, list) or not commands:
@@ -372,7 +370,13 @@ def _validate_harness_manifest(
                 raise ValueError(f"Qoder validation executable unavailable: {executable}")
         elif shutil.which(executable) is None:
             raise ValueError(f"Qoder validation executable unavailable: {executable}")
-    expected = list(dict.fromkeys(tuple(argv) for argv in catalog["validation_argv_by_task"].values()))
+    if catalog is None:
+        try:
+            expected = [tuple(shlex.split(task["validation_command"]))]
+        except ValueError as exc:
+            raise ValueError("Qoder validation command malformed") from exc
+    else:
+        expected = list(dict.fromkeys(tuple(argv) for argv in catalog["validation_argv_by_task"].values()))
     observed = [tuple(command["argv"]) for command in commands]
     if observed != expected:
         raise ValueError("Qoder validation commands must exactly cover unique current Task argv in package order")
@@ -550,11 +554,24 @@ def _validate_catalog_package(task: dict[str, Any], repo_root: Path) -> dict[str
     }
 
 
+def _resolve_catalog_package(task: dict[str, Any], repo_root: Path) -> dict[str, Any] | None:
+    """尽力使用 Catalog 增强核对；自包含 handoff 不因其缺失或漂移而失去派发资格。"""
+    try:
+        return _validate_catalog_package(task, repo_root)
+    except (FileNotFoundError, ValueError, yaml.YAMLError):
+        return None
+
+
 def _check_no_symlink_ancestors(path: Path) -> None:
     """拒绝路径或其任何祖先为符号链接。检查未解析的绝对路径各级。"""
     abs_path = path.absolute()
     for component in [abs_path, *abs_path.parents]:
         if component.is_symlink():
+            # macOS exposes the physical temporary hierarchy through the
+            # system-owned `/var` compatibility alias. It is above every
+            # caller-selected repository root, so it is not a repository path escape.
+            if component == Path("/var") and component.resolve() == Path("/private/var"):
+                continue
             raise ValueError(f"symlink in path: {component}")
 
 
@@ -1289,7 +1306,7 @@ def cmd_start(args: argparse.Namespace) -> None:
     run_id = str(uuid.uuid4())
     task["run_id"] = run_id
     _validate_task(task, runtime_bound=True)
-    catalog = _validate_catalog_package(task, repo_root)
+    catalog = _resolve_catalog_package(task, repo_root)
     _validate_prompt_budget(task)
     run_dir = task_dir / run_id
     worker_spawned = False
@@ -1386,16 +1403,16 @@ def cmd_preflight(args: argparse.Namespace) -> None:
         "status": "PASS",
         "work_package_id": task["work_package_id"],
         "task_ids": task["task_ids"],
-        "estimated_minutes": catalog["total_minutes"],
+        "estimated_minutes": task["estimated_minutes"],
         "primary_owner": task["primary_owner"],
         "agent_profile": task["agent_profile"],
-        "catalog_sha256": catalog["catalog_sha256"],
+        "catalog_sha256": None if catalog is None else catalog["catalog_sha256"],
         "harness_manifest_sha256": harness["_manifest_sha256"],
         "context_count": len(harness["required_context"]),
         "required_tools": [item["name"] for item in harness["required_tools"]],
         "validation_command_count": len(harness["validation_commands"]),
         "model_access_checked": False,
-        "scope": "catalog-context-tools-only; PASS is not account/model availability",
+        "scope": "core-handoff-context-tools; Catalog is advisory; PASS is not account/model availability",
     }, ensure_ascii=False))
 
 
@@ -1624,7 +1641,7 @@ def cmd_resume(args: argparse.Namespace) -> None:
         new_task["run_id"] = new_run_id
         _validate_task(new_task, runtime_bound=True)
         _assert_dispatch_budget(task_dir, new_task, correction=True)
-        catalog = _validate_catalog_package(new_task, repo_root)
+        catalog = _resolve_catalog_package(new_task, repo_root)
         _validate_prompt_budget(new_task)
         harness = _validate_harness_manifest(new_task, repo_root, catalog_package=catalog)
         new_task["harness_manifest_sha256"] = harness["_manifest_sha256"]

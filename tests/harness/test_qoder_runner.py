@@ -216,10 +216,10 @@ class QoderRunnerContractTest(unittest.TestCase):
             self.assertEqual(contract["max_rework_rounds"], 1)
             self.assertEqual(contract["max_total_runs_per_task_before_main_review"], 2)
             self.assertEqual(contract["max_prompt_characters"], qoder_task.MAX_PROMPT_CHARACTERS)
-        self.assertEqual(policy["qoder_delegation"]["work_package"]["estimated_minutes"], {"min": 180, "max": 360})
-        self.assertEqual(policy["qoder_delegation"]["work_package"]["minimum_catalog_tasks"], 2)
-        self.assertEqual(workstreams["orchestration_policy"]["qoder"]["work_package_estimated_minutes"], {"min": 180, "max": 360})
-        self.assertEqual(template["execution"]["qoder"]["work_package_estimated_minutes"], {"min": 180, "max": 360})
+        self.assertEqual(policy["qoder_delegation"]["work_package"]["estimated_minutes"], {"min": 10, "max": 360})
+        self.assertEqual(policy["qoder_delegation"]["work_package"]["minimum_catalog_tasks"], 1)
+        self.assertEqual(workstreams["orchestration_policy"]["qoder"]["work_package_estimated_minutes"], {"min": 10, "max": 360})
+        self.assertEqual(template["execution"]["qoder"]["work_package_estimated_minutes"], {"min": 10, "max": 360})
         self.assertEqual(
             policy["subagent_protocol"]["caller_required_input"],
             runtime["subagent_protocol"]["caller_required_input"],
@@ -292,10 +292,10 @@ class QoderRunnerContractTest(unittest.TestCase):
             self.assertEqual(package, policy_package)
             self.assertEqual(package["identity_fields"], ["work_package_id", "task_ids"])
             self.assertTrue(package["per_task_outcome_evidence_required"])
-            self.assertEqual(package["preferred_minutes"], {"min": 120, "max": 360})
-            self.assertEqual(package["minimum_total_estimated_minutes"], 120)
+            self.assertEqual(package["preferred_minutes"], {"min": 10, "max": 360})
+            self.assertEqual(package["minimum_total_estimated_minutes"], 10)
             self.assertEqual(package["target_maximum_total_estimated_minutes"], 360)
-            self.assertGreaterEqual(package["minimum_catalog_tasks"], 2)
+            self.assertEqual(package["minimum_catalog_tasks"], 1)
 
         runtime_package = runtime["subagent_protocol"]["delegation_work_package"]
         self.assertEqual(runtime_package["source"], "harness/agent-policy.manifest.yaml")
@@ -432,6 +432,62 @@ class QoderRunnerContractTest(unittest.TestCase):
             manifest_path.write_text(json.dumps(altered), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "stale"):
                 qoder_task._validate_harness_manifest(task, root)
+
+    def test_self_contained_ten_minute_package_does_not_require_catalog(self) -> None:
+        task = valid_task()
+        task.update(
+            task_source="openspec/changes/example/proposal.md",
+            task_ids=["LF-TEST-001"],
+            task_versions={"LF-TEST-001": 1},
+            change_versions={"LF-TEST-001": "1.0.0"},
+            estimated_minutes=10,
+        )
+        qoder_task._validate_task(task)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            files = {
+                "AGENTS.md": "root rules\n",
+                ".qoder/AGENTS.md": "qoder rules\n",
+                ".qoder/agents/quality-verifier.md": "profile rules\n",
+                "harness/agent-policy.manifest.yaml": "schema_version: test\n",
+            }
+            context = []
+            for locator, content in files.items():
+                context_path = root / locator
+                context_path.parent.mkdir(parents=True, exist_ok=True)
+                context_path.write_text(content, encoding="utf-8")
+                context.append({
+                    "path": locator,
+                    "sha256": hashlib.sha256(context_path.read_bytes()).hexdigest(),
+                })
+            manifest = {
+                "schema_version": "lexiflow.qoder-harness.v1",
+                "identity": {
+                    "work_package_id": task["work_package_id"],
+                    "task_ids": task["task_ids"],
+                    "task_versions": task["task_versions"],
+                    "change_versions": task["change_versions"],
+                    "agent_profile": task["agent_profile"],
+                },
+                "required_context": context,
+                "required_tools": [{
+                    "name": "python",
+                    "probe_argv": ["python3", "--version"],
+                    "expected_output_regex": "Python 3",
+                    "timeout_seconds": 10,
+                }],
+                "validation_commands": [{
+                    "argv": ["python3", "-V"], "cwd": ".", "timeout_seconds": 30,
+                }],
+            }
+            manifest_path = root / task["harness_manifest"]
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            self.assertIsNone(qoder_task._resolve_catalog_package(task, root))
+            self.assertEqual(
+                task["work_package_id"],
+                qoder_task._validate_harness_manifest(task, root)["identity"]["work_package_id"],
+            )
 
     def test_catalog_preflight_binds_actual_size_owner_versions_and_scope(self) -> None:
         task = valid_task()

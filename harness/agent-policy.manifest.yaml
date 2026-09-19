@@ -145,11 +145,11 @@ subagent_protocol:
     task_ids_rule: exact-ordered-catalog-task-identities
     per_task_outcome_evidence_required: true
     preferred_minutes:
-      min: 120
+      min: 10
       max: 360
-    minimum_total_estimated_minutes: 120
+    minimum_total_estimated_minutes: 10
     target_maximum_total_estimated_minutes: 360
-    minimum_catalog_tasks: 2
+    minimum_catalog_tasks: 1
     must_share:
     - primary_owner
     - contract_boundary
@@ -158,13 +158,18 @@ subagent_protocol:
     - implementation_or_design
     - direct_validation
     - acceptance_evidence
+    proactive_dispatch:
+      threshold_minutes: 10
+      prefer_when:
+      - isolated-subtask-requires-large-new-context
+      - acceptance-is-confirmable-by-compact-result-or-deterministic-command
+      - non-overlapping-write-scope
     main_agent_only_when:
-    - single_file_fix
-    - single_command_validation
+    - deterministic-task-at-or-under-10-minutes
     - isolated_read_only_review
     turn_or_token_count_is_not_acceptance_evidence: true
   identity_rules:
-  - Every Qoder handoff has one stable work_package_id and at least two ordered Task ids.
+  - Every Qoder handoff has one stable work_package_id and at least one ordered Task id.
   - Every Codex work package has one stable work_package_id and an exact ordered task_ids list.
   - Every run has a unique agent_id and run_id.
   - Parallel writers have non-overlapping ownership.
@@ -348,8 +353,8 @@ subagent_protocol:
     result_fields_required_in_prompt: true
     agent_profile_cli_binding: true
     harness_manifest_preflight: true
-    catalog_package_preflight: true
-    catalog_estimate_rule: exact-sum-180-to-360
+    catalog_package_preflight: advisory-when-present
+    catalog_estimate_rule: caller-10-to-360-or-exact-current-catalog-sum-when-catalog-is-used
     structured_result_required: true
     implementation_status: IMPLEMENTED
     conformance_test: tests/harness/test_qoder_runner.py
@@ -363,10 +368,10 @@ subagent_protocol:
     task_version: positive-integer
     change_version: semver-string
     work_package_id: stable-work-package-id-string
-    task_ids: ordered-unique-list-minimum-two
+    task_ids: ordered-unique-list-minimum-one
     task_versions: exact-task-id-to-positive-integer-map
     change_versions: exact-task-id-to-semver-map
-    estimated_minutes: integer-180-to-360
+    estimated_minutes: integer-10-to-360
     primary_owner: non-empty-string
     contract_boundary: non-empty-string
     agent_profile: project-qoder-agent-name
@@ -424,16 +429,16 @@ qoder_delegation:
   max_prompt_characters: 8000
   work_package:
     estimated_minutes:
-      min: 180
+      min: 10
       max: 360
-    estimated_minutes_source: exact-sum-of-current-catalog-task-estimates
-    minimum_catalog_tasks: 2
+    estimated_minutes_source: caller-declared-estimate-or-exact-current-catalog-sum-when-catalog-is-used
+    minimum_catalog_tasks: 1
     must_share:
     - primary_owner
     - contract_boundary
-    package_scope_source: exact-union-of-current-catalog-task-scopes
-    package_claims_source: exact-union-of-current-catalog-task-claims
-    task_permission_source: each-current-catalog-task
+    package_scope_source: caller-declared-scope-or-exact-current-catalog-union-when-catalog-is-used
+    package_claims_source: caller-declared-scope-or-current-catalog-claims-when-catalog-is-used
+    task_permission_source: declared-core-handoff-and-current-catalog-when-catalog-is-used
     execution_within_run: sequential
     per_task_outcome_evidence_required: true
   harness_preflight:
@@ -444,7 +449,8 @@ qoder_delegation:
     - required-tools
     - argv-validation-commands
     - exact-package-identity
-    - current-catalog-owner-version-size-and-scope
+    - core-handoff-identity-scope-acceptance-and-validation
+    catalog_reconciliation: advisory-when-present-not-a-dispatch-prerequisite
   structured_result:
     schema: lexiflow.qoder-work-package-result.v1
     result_json_required_before_completion: true
