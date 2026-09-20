@@ -9,7 +9,9 @@ from pathlib import Path
 
 import yaml
 
-from scripts.gates.registry_profiles import RegistryProfileError, check_registry, render_registry
+from scripts.gates.registry_profiles import (
+    RegistryProfileError, check_registry, render_registry, validate_input_locators,
+)
 from scripts.gates.task_contracts import load_profiles
 
 
@@ -23,7 +25,7 @@ class RegistryProfileTests(unittest.TestCase):
         self.assertEqual(result["entry_count"], 35)
         self.assertEqual(result["profile_count"], 26)
         current = yaml.safe_load((REPO / "harness/gate-check-registry.yaml").read_text())
-        self.assertEqual(current["registry_version"], 3)
+        self.assertEqual(current["registry_version"], 4)
         self.assertEqual(current["execution"]["source_scan"], "forbidden")
         self.assertEqual(current, render_registry(REPO))
 
@@ -115,7 +117,7 @@ class RegistryProfileTests(unittest.TestCase):
             registry = yaml.safe_load(registry_path.read_text())
             registry["registry_version"] = 1
             registry_path.write_text(yaml.safe_dump(registry, sort_keys=False))
-            with self.assertRaisesRegex(RegistryProfileError, "version must be 3"):
+            with self.assertRaisesRegex(RegistryProfileError, "version must be 4"):
                 render_registry(root)
 
     def test_execution_contract_mutation_is_rejected(self):
@@ -135,6 +137,27 @@ class RegistryProfileTests(unittest.TestCase):
             registry_path.write_text(yaml.safe_dump(registry, sort_keys=False))
             with self.assertRaisesRegex(RegistryProfileError, "execution contract mismatch"):
                 render_registry(root)
+
+    def test_missing_registry_consumed_input_is_reported_before_planning(self):
+        registry = {"entries": [{
+            "check_id": "example", "triggers": [{"path": "AGENTS.md"}],
+            "consumed_inputs": ["docs/missing.md"],
+        }]}
+        with self.assertRaisesRegex(RegistryProfileError, "example consumed_inputs docs/missing.md"):
+            validate_input_locators(REPO, registry, {})
+
+    def test_missing_registry_trigger_is_reported_before_planning(self):
+        registry = {"entries": [{
+            "check_id": "example", "triggers": [{"path": "docs/missing/**"}],
+            "consumed_inputs": ["AGENTS.md"],
+        }]}
+        with self.assertRaisesRegex(RegistryProfileError, "example triggers.path docs/missing/\\*\\*"):
+            validate_input_locators(REPO, registry, {})
+
+    def test_missing_profile_required_input_is_reported_before_planning(self):
+        profiles = {"LF-TSK-EXAMPLE-0001": {"required_inputs": ["docs/missing.md"]}}
+        with self.assertRaisesRegex(RegistryProfileError, "LF-TSK-EXAMPLE-0001 profile.required_inputs docs/missing.md"):
+            validate_input_locators(REPO, {"entries": []}, profiles)
 
 
 if __name__ == "__main__":

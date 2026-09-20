@@ -236,7 +236,9 @@ def _verify_receipt_issuer_chain(
             not isinstance(process, dict)
             or process.get("gate_run_id") != receipt.get("run_id")
             or process.get("issuer_packet_sha256") != packet["sha256"]
-            or process.get("executable_locator") != "scripts/gates/cli.py"
+            or process.get("executable_locator") not in {
+                "scripts/gates/cli.py", "scripts/gates/formal_gate.py"
+            }
             # A receipt identifies the Gate executable that issued it.  A
             # later control-plane repair cannot retroactively make every
             # prerequisite receipt unauthorised: the historical executable
@@ -660,7 +662,7 @@ def publish_catalog_decision(
         "completeness": {"required_fields_checked": True, "kind_specific_fields_checked": True, "status": "PASS"},
         "canonical_rerun": {
             "argv": [
-                "python3", "scripts/gates/cli.py", "run", "--mode", plan["mode"],
+                "python3", "scripts/gates/formal_gate.py", "run", "--mode", plan["mode"],
                 "--evidence-packet", plan["subject"]["explicit_evidence_packet"]["locator"],
                 "--issuer-packet", packet["locator"], "--receipt-kind", "CATALOG_DECISION",
             ]

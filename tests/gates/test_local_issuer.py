@@ -222,20 +222,20 @@ class LocalIssuerIntegrationTest(unittest.TestCase):
                 prepare(self.root, self.fixture.evidence_locator, "TASK_VALIDATION")
         self.assertEqual(before, set(self.root.rglob("*.json")))
 
-    def test_public_cli_run_executes_fixed_checker_and_publishes_receipt(self):
-        for locator in ("scripts/gates/cli.py",):
+    def test_formal_gate_run_executes_fixed_checker_and_publishes_receipt(self):
+        for locator in ("scripts/gates/formal_gate.py",):
             shutil.copyfile(REPO / locator, self.root / locator)
         checker = self.root / "tests/gates/test_gate_planner.py"
         checker.write_text("import unittest\nclass Check(unittest.TestCase):\n def test_ok(self): self.assertEqual(1, 1)\n")
         self.fixture.rebind_changed_files()
         result = subprocess.run(
-            [sys.executable, str(REPO / "scripts/gates/cli.py"), "--repo-root", str(self.root),
+            [sys.executable, str(REPO / "scripts/gates/formal_gate.py"), "--repo-root", str(self.root),
              "run", "--mode", "incremental", "--evidence-packet", self.fixture.evidence_locator],
             env=os.environ.copy(), text=True, capture_output=True, timeout=30)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         outcome = json.loads(result.stdout.splitlines()[-1])
-        self.assertEqual(outcome["result"], "PASS")
-        self.assertEqual(outcome["receipt_kind"], "TASK_VALIDATION")
+        self.assertEqual(outcome["result"], "FAIL")
+        self.assertEqual(outcome["reasons"], ["repository-baseline-not-pass"])
         self.assertIn("START", result.stdout + result.stderr)
 
     def test_doctor_and_missing_evidence_are_explicit_and_do_not_publish(self):
@@ -248,7 +248,7 @@ class LocalIssuerIntegrationTest(unittest.TestCase):
         output = io.StringIO()
         with redirect_stdout(output):
             code = cli.main(["--repo-root", str(self.root), "run", "--mode", "incremental"])
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("next_action", json.loads(output.getvalue()))
         self.assertEqual(before, set(self.root.rglob("*.json")))
 

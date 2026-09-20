@@ -24,7 +24,8 @@ lifecycle:
   - auto-push
 validation:
   invocation: explicit
-  delivery_command: python3 scripts/gates/cli.py run --mode incremental
+  delivery_command: python3 scripts/gates/change_verify.py
+  repository_baseline_command: python3 scripts/gates/repository_verify.py run
   passing_requires_success: true
   non_passing_results:
   - BLOCKED

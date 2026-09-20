@@ -1399,14 +1399,11 @@ workstreams:
         change_version: 2.2.0
         estimated_task_minutes: 85
         acceptance_criteria:
-        - Resolve one explicit result packet and one trusted issuer packet from matching
-          flags or trusted single-value launcher bindings; reject missing/conflicting
-          context, then generate a unique run ID, persist the frozen plan, and flush
-          a disk START event plus caller-visible run ID/event locator before any checker.
-        - Publish a schema-complete TASK_VALIDATION receipt through a stable kind-handler
-          and generic immutable-store interface; validate that its plan requires selected
-          checks, and never invoke the delivery executor for evidence-consumption
-          receipt kinds.
+        - Keep formal packet and issuer resolution explicit, and provide separate Change Verify,
+          Repository Verify, readiness remediation and subject-submission entries without using
+          them as edit or commit gates.
+        - Require TASK_VALIDATION to obtain an independent PASS Repository Verify on the same
+          frozen input before it can publish PASS; review/catalog consume receipts without rerunning checks.
         - Use exclusive atomic publication so collisions, interruption, unsafe paths,
           partial staging, or changed inputs never produce a final PASS receipt or
           overwrite prior evidence.
@@ -1418,8 +1415,23 @@ workstreams:
         owner: LF-WS-QLT
         allowed_files:
         - scripts/gates/cli.py
+        - scripts/gates/formal_gate.py
         - scripts/gates/receipt_store.py
         - tests/gates/test_gate_lifecycle.py
+        - scripts/gates/change_context.py
+        - scripts/gates/change_verify.py
+        - scripts/gates/repository_verify.py
+        - scripts/gates/certify_submit.py
+        - scripts/gates/local_verify.py
+        - scripts/gates/registry_profiles.py
+        - tests/gates/test_change_context.py
+        - tests/gates/test_change_verify.py
+        - tests/gates/test_repository_verify.py
+        - tests/gates/test_registry_profiles.py
+        - scripts/harness/hooks.py
+        - tests/harness/test_hooks.py
+        - .githooks/pre-commit
+        - .githooks/post-commit
         forbidden_files:
         - planning/**
         - openspec/**
@@ -1433,16 +1445,61 @@ workstreams:
         - path: scripts/gates/cli.py
           mode: write
           owner: LF-WS-QLT
+        - path: scripts/gates/formal_gate.py
+          mode: write
+          owner: LF-WS-QLT
         - path: scripts/gates/receipt_store.py
           mode: write
           owner: LF-WS-QLT
         - path: tests/gates/test_gate_lifecycle.py
           mode: write
           owner: LF-WS-QLT
+        - path: scripts/gates/change_context.py
+          mode: write
+          owner: LF-WS-QLT
+        - path: scripts/gates/change_verify.py
+          mode: write
+          owner: LF-WS-QLT
+        - path: scripts/gates/repository_verify.py
+          mode: write
+          owner: LF-WS-QLT
+        - path: scripts/gates/certify_submit.py
+          mode: write
+          owner: LF-WS-QLT
+        - path: scripts/gates/local_verify.py
+          mode: write
+          owner: LF-WS-QLT
+        - path: scripts/harness/hooks.py
+          mode: write
+          owner: LF-WS-QLT
+        - path: tests/harness/test_hooks.py
+          mode: write
+          owner: LF-WS-QLT
+        - path: scripts/gates/registry_profiles.py
+          mode: write
+          owner: LF-WS-QLT
+        - path: tests/gates/test_change_context.py
+          mode: write
+          owner: LF-WS-QLT
+        - path: tests/gates/test_change_verify.py
+          mode: write
+          owner: LF-WS-QLT
+        - path: tests/gates/test_repository_verify.py
+          mode: write
+          owner: LF-WS-QLT
+        - path: tests/gates/test_registry_profiles.py
+          mode: write
+          owner: LF-WS-QLT
+        - path: .githooks/pre-commit
+          mode: write
+          owner: LF-WS-QLT
+        - path: .githooks/post-commit
+          mode: write
+          owner: LF-WS-QLT
         acceptance_evidence:
         - LF-GATE-VALIDATION-001 -> tests/gates/test_gate_lifecycle.py
         - tmp/quality/runs/{run_id}/receipt.json
-        validation_command: python3 -m unittest discover -s tests/gates -p 'test_gate_lifecycle.py'
+        validation_command: python3 -m unittest tests.gates.test_gate_lifecycle tests.gates.test_change_context tests.gates.test_change_verify tests.gates.test_repository_verify tests.gates.test_registry_profiles tests.harness.test_hooks
       - id: LF-TSK-QLT-0011
         title: Publish immutable independent-review evidence chains
         priority: P0
@@ -1479,7 +1536,7 @@ workstreams:
         change_version: 2.2.0
         estimated_task_minutes: 70
         acceptance_criteria:
-        - Install the INDEPENDENT_REVIEW handler in the single scripts/gates/cli.py
+        - Install the INDEPENDENT_REVIEW handler in the formal Gate command family
           route, consume a zero-check evidence plan without invoking the delivery
           executor, then freeze the reviewed validation receipt path/hash, reviewer
           packet, source/diff scope, rerun evidence, structured findings, and decision
@@ -1498,7 +1555,7 @@ workstreams:
         allowed_files:
         - scripts/gates/independent_review.py
         - tests/gates/test_independent_review.py
-        - scripts/gates/cli.py
+        - scripts/gates/formal_gate.py
         forbidden_files:
         - planning/**
         - openspec/**
@@ -1515,14 +1572,14 @@ workstreams:
         - path: tests/gates/test_independent_review.py
           mode: write
           owner: LF-WS-QLT
-        - path: scripts/gates/cli.py
+        - path: scripts/gates/formal_gate.py
           mode: write
           owner: LF-WS-QLT
         acceptance_evidence:
         - LF-GATE-REVIEW-001 -> tests/gates/test_independent_review.py
         - tmp/quality/runs/{run_id}/receipt.json
         validation_command: python3 -m unittest discover -s tests/gates -p 'test_independent_review.py'
-        serial_shared_claim: scripts/gates/cli.py may be revised only after the prior
+        serial_shared_claim: scripts/gates/formal_gate.py may be revised only after the prior
           CLI-owning dependency has a current PASS receipt; dispatch preflight must
           reject concurrent claims.
       - id: LF-TSK-QLT-0012
@@ -1657,7 +1714,7 @@ workstreams:
           results are PASS.
         - Aggregate prior BLOCKED or FAIL results without promotion; classify missing,
           stale, malformed, unsafe, or unverified evidence as FAIL.
-        - Install the CATALOG_DECISION handler in the single scripts/gates/cli.py
+        - Install the CATALOG_DECISION handler in the formal Gate command family
           route, consume a zero-check evidence plan without invoking the delivery
           executor, and publish a new immutable decision receipt with no self-reference,
           latest dependency, bootstrap backfill, or inferred user approval.
@@ -1668,7 +1725,7 @@ workstreams:
         allowed_files:
         - scripts/gates/catalog_decision.py
         - tests/gates/test_catalog_decision.py
-        - scripts/gates/cli.py
+        - scripts/gates/formal_gate.py
         forbidden_files:
         - planning/**
         - openspec/**
@@ -1685,14 +1742,14 @@ workstreams:
         - path: tests/gates/test_catalog_decision.py
           mode: write
           owner: LF-WS-QLT
-        - path: scripts/gates/cli.py
+        - path: scripts/gates/formal_gate.py
           mode: write
           owner: LF-WS-QLT
         acceptance_evidence:
         - LF-GATE-CATALOG-001 -> tests/gates/test_catalog_decision.py
         - tmp/quality/runs/{run_id}/receipt.json
         validation_command: python3 -m unittest discover -s tests/gates -p 'test_catalog_decision.py'
-        serial_shared_claim: scripts/gates/cli.py may be revised only after the prior
+        serial_shared_claim: scripts/gates/formal_gate.py may be revised only after the prior
           CLI-owning dependency has a current PASS receipt; dispatch preflight must
           reject concurrent claims.
     - id: LF-CP-QLT-003
@@ -3997,7 +4054,7 @@ workstreams:
         allowed_files:
         - infra/local/compose.yaml
         - scripts/toolchain/local_stack.py
-        - docs/development/toolchain-reproduction/local-stack.md
+        - docs/development/toolchain-reproduction.md
         - tmp/quality/task-evidence/OPS/LF-TSK-OPS-0002/result.json
         forbidden_files:
         - secrets/**
@@ -4009,7 +4066,7 @@ workstreams:
         - path: scripts/toolchain/local_stack.py
           mode: write
           owner: LF-WS-OPS
-        - path: docs/development/toolchain-reproduction/local-stack.md
+        - path: docs/development/toolchain-reproduction.md
           mode: write
           owner: LF-WS-OPS
         - path: tmp/quality/task-evidence/OPS/LF-TSK-OPS-0002/result.json

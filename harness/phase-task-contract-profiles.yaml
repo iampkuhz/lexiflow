@@ -416,7 +416,7 @@ profiles:
     owner: LF-WS-OPS
     evidence_file: tmp/quality/task-evidence/OPS/LF-TSK-OPS-0002/result.json
     required_inputs:
-    - docs/development/toolchain-reproduction/local-stack.md
+    - docs/development/toolchain-reproduction.md
     - infra/local/compose.yaml
     - scripts/toolchain/local_stack.py
     - scripts/toolchain/postgres_migrations.py

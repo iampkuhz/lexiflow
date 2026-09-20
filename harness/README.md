@@ -28,6 +28,18 @@ python3 -m venv .local/lexiflow-python
 运行证据写入 ignored 的 `tmp/quality/runs/<run-id>/`；Qoder 任务写入
 `tmp/qoder-tasks/<run-id>/`。Harness 不保存产品运行状态，也不把 active change 当成普通写入的权限令牌。
 
+日常 Verify 不是变更锁或 commit 准入。完成时运行：
+
+```bash
+python3 scripts/gates/change_verify.py
+python3 scripts/gates/repository_verify.py run
+```
+
+前者按最终 diff 执行 `change-targeted` checks，并输出 advisory `scope_review`；可选 change context 只帮助记录预期目录，范围变化和缺 context 均不阻断。后者不读取 diff/evidence，执行当前 checkout 的所有 `repository-baseline` checks 以及 registry/profile/planning 完整性。它的 `BLOCKED repository-readiness` 带稳定 remediation ID 和 doctor/bootstrap 入口，归属于仓库准备度。两类本地产物都在 ignored `tmp/quality/`，不构成正式 Gate receipt。
+
+`python3 -m scripts.harness.hooks install` 只安装非阻断提醒；它不自动执行 Verify，也不修改 change context。CI 必须独立调用 `repository_verify.py run`，不能信任 hook 是否运行。
+
+
 ## 执行请求与启动诊断
 
 执行请求的收尾与接手规则见 `agent-policy.manifest.yaml.execution_progress` 和
@@ -67,20 +79,18 @@ LLM 回合；结束回合是主 Agent 必须执行的交接动作。
 
 ## 本机 Gate 身份与收据入口
 
-先在当前仓库的 Codex 任务中运行 `python3 scripts/gates/cli.py doctor`。它只核对本机
+先在当前仓库的 Codex 任务中运行 `python3 scripts/gates/formal_gate.py doctor`。它只核对本机
 runtime 与 authority 配置，不运行交付检查、不签发验收。默认 adapter 读取 Codex
 session metadata 首行并核对实际 session、用户和 workspace；环境变量仅用于定位。
 这是**信任本机用户的来源校验**，不是平台加密认证，不能抵御同一用户恶意改写记录。
 同一 session 始终是同一 actor；同宿主无独立 session 的子代理不能充当独立签发者。
 
-1. 产物执行者先完成当前 Task，保存真实 diff、snapshot、测试记录及完整结果。
-   Main singleton 可用 `python3 -m scripts.harness.local_codex_runtime --task-id <exact-id>`
-   绑定真实身份和当前合同；该命令只生成 binding/projection，不声称工作完成。
+1. 产物执行者先完成当前 Task，运行 Change Verify 并阅读 scope review，再运行 Repository Verify。确认 scope review 后，运行 `python3 scripts/gates/certify_submit.py --task-id <exact-id> --run-id <change-verify-run-id> --confirm-scope-review <same-id>` 自动绑定当前 diff、snapshot、测试记录与真实 producer runtime。它只生成 subject evidence，不生成 issuer 或 validation receipt。Main singleton 可用 `python3 -m scripts.harness.local_codex_runtime --task-id <exact-id>` 绑定真实身份和当前合同；该命令只生成 binding/projection，不声称工作完成。
 2. 执行者使用 `scripts/harness/codex_work_package.py` / `scripts/gates/evidence_packet.py`
    现有 materializer 冻结完整来源，明确交付唯一 evidence packet locator。
    `LEXIFLOW_GATE_EVIDENCE_PACKET` 只是这个路径的传递方式，不是用户编写的 identity JSON。
 3. 在**不同真实 Codex 任务会话**执行
-   `python3 scripts/gates/cli.py run --mode incremental --evidence-packet <locator>`。
+   `python3 scripts/gates/formal_gate.py run --mode incremental --evidence-packet <locator>`。
    未传 issuer 时，由 adapter 自动生成一次新鲜 authority evidence 与 issuer；显式传入的
    过期 issuer 不会偷偷替换，旧文件也不会更新时间。该命令实际执行 TASK_VALIDATION。
 4. 独立 reviewer 消费 validation receipt、冻结 diff 和只读 review evidence；随后按原有
@@ -94,7 +104,7 @@ session metadata 首行并核对实际 session、用户和 workspace；环境变
    `doctor`、绑定成功或静态检查 PASS 均不能替代该条件。
 
 需要先审阅纯 plan 时，先显式运行
-`python3 scripts/gates/cli.py prepare-issuer --evidence-packet <locator> --receipt-kind TASK_VALIDATION`，
+`python3 scripts/gates/formal_gate.py prepare-issuer --evidence-packet <locator> --receipt-kind TASK_VALIDATION`，
 再把返回的 issuer locator 传给 `plan --issuer-packet`。`plan` 本身仍然零写入。
 缺 subject evidence、真实来源失效、输入漂移或自审均应停止并报告具体缺项；不再要求
 用户提供本仓库未接入的 Desktop 受保护 attestation 服务，也不扫描旧目录猜测本次 evidence。

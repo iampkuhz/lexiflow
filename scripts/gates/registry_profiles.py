@@ -8,6 +8,7 @@ import hashlib
 import json
 import shlex
 from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Any
 
 import yaml
@@ -15,7 +16,7 @@ import yaml
 from scripts.gates.task_contracts import PROFILE_LOCATOR, load_profiles
 
 REGISTRY_SCHEMA = "lexiflow.gate-check-registry.v1"
-REGISTRY_VERSION = 3
+REGISTRY_VERSION = 4
 REGISTRY_EXECUTION = {
     "owner": "python-control-plane",
     "executor": "python3",
@@ -58,6 +59,54 @@ def _entry_hash(entry: dict[str, Any]) -> str:
     return hashlib.sha256(canonical_json_bytes(projected)).hexdigest()
 
 
+def _validate_locator(root: Path, *, check_id: str, field: str, locator: Any,
+                      allow_glob: bool = False) -> None:
+    """Reject a registry dependency that cannot be read from this checkout.
+
+    A trigger may deliberately be a glob.  A consumed input and a profile
+    required input are frozen bytes, so they must name one regular file.  This
+    is a control-plane integrity check, not a best-effort planner fallback.
+    """
+    if not isinstance(locator, str) or not locator:
+        raise RegistryProfileError(f"registry input invalid: {check_id} {field} {locator!r}")
+    path = PurePosixPath(locator)
+    if path.is_absolute() or "\\" in locator or any(part in {"", ".", ".."} for part in path.parts):
+        raise RegistryProfileError(f"registry input unsafe: {check_id} {field} {locator!r}")
+    is_glob = any(token in locator for token in ("*", "?", "["))
+    if is_glob:
+        if not allow_glob:
+            raise RegistryProfileError(f"registry input glob forbidden: {check_id} {field} {locator}")
+        # ``directory/**`` is a valid terminal trigger whose glob expansion
+        # may list only directories.  Its static prefix must still exist.
+        prefix = locator.split("*", 1)[0].split("?", 1)[0].split("[", 1)[0].rstrip("/")
+        if not prefix or not (root / prefix).exists():
+            raise RegistryProfileError(f"registry input missing: {check_id} {field} {locator}")
+        return
+    candidate = root / locator
+    if not candidate.is_file():
+        raise RegistryProfileError(f"registry input missing: {check_id} {field} {locator}")
+
+
+def validate_input_locators(repo_root: str | Path, registry: dict[str, Any],
+                            profiles: dict[str, dict[str, Any]]) -> None:
+    """Validate every declared byte dependency before planner selection.
+
+    This keeps a deleted or renamed documentation input from surfacing later as
+    an opaque ``consumed-input-missing`` planner failure.
+    """
+    root = Path(repo_root)
+    for entry in registry.get("entries", []):
+        check_id = entry.get("check_id", "<unknown-check>")
+        for trigger in entry.get("triggers", []):
+            locator = trigger.get("path") if isinstance(trigger, dict) else None
+            _validate_locator(root, check_id=check_id, field="triggers.path", locator=locator, allow_glob=True)
+        for locator in entry.get("consumed_inputs", []):
+            _validate_locator(root, check_id=check_id, field="consumed_inputs", locator=locator)
+    for task_id, profile in profiles.items():
+        for locator in profile.get("required_inputs", []):
+            _validate_locator(root, check_id=task_id, field="profile.required_inputs", locator=locator)
+
+
 def build_profile_entry(task: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
     task_id = task["id"]
     domain, number = task_id.split("-")[2:]
@@ -98,6 +147,11 @@ def build_profile_entry(task: dict[str, Any], profile: dict[str, Any]) -> dict[s
         "check_version": 1,
         "owner": "LF-WS-QLT",
         "modes": ["incremental", "full"],
+        # A check can serve a final-diff self-review and/or the repository
+        # health baseline.  Formal validation selects delivery checks through
+        # its own frozen-evidence planner; it does not infer independence from
+        # a local run.
+        "verification_scopes": ["change-targeted", "repository-baseline"],
         "triggers": triggers,
         "required": True,
         "declared_validation_command": command,
@@ -171,6 +225,7 @@ def render_registry(repo_root: str | Path) -> dict[str, Any]:
             entry["acceptance_criterion_ids"] = [
                 f"{task_id}.acceptance_criteria[{index}]" for index in range(len(criteria))
             ]
+            entry["verification_scopes"] = ["change-targeted", "repository-baseline"]
             entry["entry_hash"] = _entry_hash(entry)
             if profile is not None:
                 if profile["runner"] != "external" or profile.get("validation_command") != command:
@@ -203,6 +258,7 @@ def check_registry(repo_root: str | Path) -> dict[str, Any]:
     current = yaml.safe_load((root / "harness/gate-check-registry.yaml").read_text(encoding="utf-8"))
     if current != rendered:
         raise RegistryProfileError("registry differs from deterministic profile rendering")
+    validate_input_locators(root, rendered, load_profiles(root))
     return {
         "schema_version": "lexiflow.registry-profile-check.v1",
         "status": "PASS",

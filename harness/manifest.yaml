@@ -35,15 +35,20 @@ public_executables:
   policy_projection: python3 -m scripts.harness.policy_projection
   local_skills: python3 -m scripts.harness.local_skills
   local_codex_runtime: python3 -m scripts.harness.local_codex_runtime
-  quality_gate: python3 scripts/gates/cli.py
+  quality_gate: python3 scripts/gates/formal_gate.py
+  change_verify: python3 scripts/gates/change_verify.py
+  repository_verify: python3 scripts/gates/repository_verify.py run
+  repository_readiness_doctor: python3 scripts/gates/repository_verify.py doctor
+  certify_submit: python3 scripts/gates/certify_submit.py
   java_gradle: python3 scripts/toolchain/java_gradle.py
   postgres_test: python3 scripts/toolchain/postgres_test.py verify --scope all
   task_contract_check: python3 -m scripts.gates.task_contracts --task-id LF-TSK-...
   registry_profile_check: python3 -m scripts.gates.registry_profiles --root . --check
   qoder_task: python3 scripts/harness/qoder_task.py
 quality:
-  delivery_command: python3 scripts/gates/cli.py run --mode incremental
-  full_command: python3 scripts/gates/cli.py run --mode full
+  delivery_command: python3 scripts/gates/change_verify.py
+  repository_baseline_command: python3 scripts/gates/repository_verify.py run
+  full_command: python3 scripts/gates/formal_gate.py run --mode full
   layering:
     task_validation: executes-frozen-selected-checks
     independent_review: consumes-task-validation-receipt

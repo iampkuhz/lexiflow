@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts.gates import cli
+from scripts.gates import formal_gate as cli
 from scripts.gates.catalog_decision import CatalogDecisionError, verify_catalog_decision
 from scripts.gates.issuer_packet import (
     ATTESTATION_SCHEMA,
@@ -37,7 +37,7 @@ class CatalogFixture:
         self.root = Path(self.temp.name)
         self.task_id = "LF-TSK-QLT-0099"
         self.dep_id = "LF-TSK-QLT-0098"
-        self.write_bytes("scripts/gates/cli.py", b"# fixture cli\n")
+        self.write_bytes("scripts/gates/formal_gate.py", b"# fixture cli\n")
         self.write_bytes("subject.py", b"current subject\n")
         self.subject_diff = self.write_bytes(
             "tmp/evidence/subject.diff",
@@ -219,8 +219,8 @@ class CatalogFixture:
                 "process_identity": {
                     "process_instance_id": self.derived_uuid(run_id, 7),
                     "gate_run_id": run_id,
-                    "executable_locator": "scripts/gates/cli.py",
-                    "executable_sha256": sha256_bytes((self.root / "scripts/gates/cli.py").read_bytes()),
+                    "executable_locator": "scripts/gates/formal_gate.py",
+                    "executable_sha256": sha256_bytes((self.root / "scripts/gates/formal_gate.py").read_bytes()),
                     "issuer_packet_sha256": issuer_descriptor["sha256"],
                 },
             },

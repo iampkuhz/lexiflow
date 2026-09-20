@@ -5,7 +5,7 @@ import unittest
 import uuid
 from unittest.mock import patch
 
-from scripts.gates import cli
+from scripts.gates import formal_gate as cli
 from scripts.gates.independent_review import (
     IndependentReviewError,
     _verify_current_task_source,
@@ -187,7 +187,7 @@ class TestIndependentReview(unittest.TestCase):
 
     def test_self_reported_empty_write_set_cannot_hide_current_subject_mutation(self):
         self.assertEqual(self.fixture.review_evidence["reviewer_changed_files"], [])
-        (self.fixture.root / "scripts/gates/cli.py").write_bytes(b"reviewer mutation\n")
+        (self.fixture.root / "scripts/gates/formal_gate.py").write_bytes(b"reviewer mutation\n")
         with self.assertRaisesRegex(IndependentReviewError, "stale-subject"):
             verify_independent_review(**self.fixture.verification_args())
 

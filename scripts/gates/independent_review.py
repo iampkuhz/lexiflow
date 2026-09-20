@@ -387,7 +387,7 @@ def publish_independent_review(
         "completeness": {"required_fields_checked": True, "kind_specific_fields_checked": True, "status": "PASS"},
         "canonical_rerun": {
             "argv": [
-                "python3", "scripts/gates/cli.py", "run", "--mode", plan["mode"],
+                "python3", "scripts/gates/formal_gate.py", "run", "--mode", plan["mode"],
                 "--evidence-packet", plan["subject"]["explicit_evidence_packet"]["locator"],
                 "--issuer-packet", packet["locator"], "--receipt-kind", "INDEPENDENT_REVIEW",
             ]

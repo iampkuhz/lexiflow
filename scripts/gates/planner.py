@@ -1066,7 +1066,7 @@ def _registry(value: Any, tasks: dict[str, dict], owners: dict[str, str], expect
     if not isinstance(entries, list) or not entries: raise PlannerError("invalid-registry", "registry entries missing")
     checks, commands, declared, subjects, output = set(), set(), set(), set(), []
     expected_keys = {"check_id", "check_version", "owner", "subject_task_id", "subject_task_version",
-        "subject_change_version", "modes", "triggers", "required",
+        "subject_change_version", "modes", "verification_scopes", "triggers", "required",
         "declared_validation_command", "command_id", "fixed_argv", "cwd", "timeout_seconds",
         "consumed_inputs", "outcome_contract", "acceptance_criterion_ids", "effect_check_ids", "entry_hash"}
     for i, original in enumerate(entries):
@@ -1104,6 +1104,12 @@ def _registry(value: Any, tasks: dict[str, dict], owners: dict[str, str], expect
         except PlannerError as exc:
             raise PlannerError("invalid-mode", str(exc)) from exc
         if any(mode not in VALID_MODES for mode in modes): raise PlannerError("invalid-mode", f"entry {check} mode invalid")
+        try:
+            verification_scopes = _strings(entry["verification_scopes"], f"entry {check} verification scopes")
+        except PlannerError as exc:
+            raise PlannerError("invalid-verification-scope", str(exc)) from exc
+        if any(scope not in {"change-targeted", "repository-baseline", "formal-only"} for scope in verification_scopes):
+            raise PlannerError("invalid-verification-scope", f"entry {check} verification scope invalid")
         triggers = entry["triggers"]
         if not isinstance(triggers, list) or not triggers: raise PlannerError("invalid-trigger", f"entry {check} triggers missing")
         trigger_set = set()

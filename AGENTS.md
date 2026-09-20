@@ -35,5 +35,5 @@
 - Java 源码格式、静态分析、注释、架构和测试规则由 Gradle 下的 Spotless、Checkstyle、PMD、Java quality gate、ArchUnit、JUnit 与 JaCoCo 唯一执行；Python Gate 只负责规划、编排、证据、收据和跨产物治理，不得重复扫描 Java 源码实现同义规则。
 - 功能交付只在 `TASK_VALIDATION` 执行确定性检查和业务测试；`INDEPENDENT_REVIEW` 只复核冻结 diff 与 validation evidence；`CATALOG_DECISION` 只验证 validation/review/dependency receipt 和 hash DAG。后两层不得重跑交付命令。
 - 结果只使用 `PASS`、`BLOCKED`、`FAIL`；必需检查未运行或跳过不得称 `PASS`。
-- 交接前显式运行 `python3 scripts/gates/cli.py run --mode incremental`；业务代码还需运行其产品测试。
+- 完成前运行 Change/Repository Verify；不限制编辑或 commit。独立 Formal Gate 须取得同输入 Repository Verify PASS；业务代码还需产品测试。
 - 禁止自动 stage、commit、merge、rebase、reset、stash、force 或 push。Git 集成与发布只按用户明确指令执行。

@@ -1,6 +1,6 @@
 schema_version: lexiflow.gate-check-registry.v1
 owner: LF-WS-QLT
-registry_version: 3
+registry_version: 4
 execution:
   owner: python-control-plane
   executor: python3
@@ -15,6 +15,9 @@ entries:
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -64,13 +67,16 @@ entries:
   subject_task_id: LF-TSK-ARCH-0008
   subject_task_version: 6
   subject_change_version: 3.0.0
-  entry_hash: af53635e4c6a6f868a977db839c2d1de66e169465747369b3953cbd788e92220
+  entry_hash: 68b504bbc0769811eef1abb8e2429ecbcf0bd50d773ccf7ac2cff2a3aef759c7
 - check_id: task-contract.qlt.0001
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -117,7 +123,7 @@ entries:
   subject_task_id: LF-TSK-QLT-0001
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 4842d4bdbe5200ad0fabc8b82b2a928da17b5455eec93045b209bb4065c25d82
+  entry_hash: ecacf026665decbe783e95ebe7a03d319d35ccd77aec1c8f8fd606a529cbabb2
 - check_id: qlt.planning.validate
   check_version: 1
   owner: LF-WS-QLT
@@ -157,16 +163,22 @@ entries:
   effect_check_ids:
   - behavior
   - regression
-  entry_hash: 62fb796e8d2e0a1490f6f482eaa74a5119cef1e414c6d5ba2cc2921b72d32c3c
+  entry_hash: bf683c5f7d4e18d0ec1794614314aa266dad4abac4f8d5109d7e2241fe648b86
   subject_task_id: LF-TSK-QLT-0002
   subject_task_version: 1
   subject_change_version: 1.0.0
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
 - check_id: task-contract.qlt.0003
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -204,13 +216,16 @@ entries:
   subject_task_id: LF-TSK-QLT-0003
   subject_task_version: 4
   subject_change_version: 2.2.0
-  entry_hash: 298400b7bf71222dd4532741f60f6ade2816fd5ff2050224336e7cd0332db7a2
+  entry_hash: 1839c686156497cbfdbcbecf87355b1e8cb03d4e33590d8ed9539052dc7eac81
 - check_id: task-contract.qlt.0004
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -254,7 +269,7 @@ entries:
   subject_task_id: LF-TSK-QLT-0004
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 52fdb52b92c2be35375ef4fe72b33091148d7abb80495fdd6179c54604095efb
+  entry_hash: a8ab52c0f81189b7fb70f28b9dd31924c6b774d7e838df9a7405468870f68a58
 - check_id: qlt.evidence.validate
   check_version: 3
   owner: LF-WS-QLT
@@ -313,10 +328,13 @@ entries:
   effect_check_ids:
   - behavior
   - regression
-  entry_hash: 78d375526402ca4f35c58a136704cf5a7cc8a527d85fdc3b24f4ef814ae66ef9
+  entry_hash: 52084c0c0a2f7d7c4802767b3e029c0cee4bd96db9fceda6aa29a71ea0115f8a
   subject_task_id: LF-TSK-QLT-0007
   subject_task_version: 3
   subject_change_version: 1.2.0
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
 - check_id: qlt.issuer.validate
   check_version: 3
   owner: LF-WS-QLT
@@ -361,10 +379,13 @@ entries:
   effect_check_ids:
   - behavior
   - regression
-  entry_hash: a5697a49883c7439b689665c472fad756afd075613cb9e1654690148635aabc4
+  entry_hash: 0713f0dac63714960906c3cccd3d1abc93d79e545effa901f3bfa7e466e00c5c
   subject_task_id: LF-TSK-QLT-0014
   subject_task_version: 3
   subject_change_version: 3.0.0
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
 - check_id: qlt.planner.validate
   check_version: 1
   owner: LF-WS-QLT
@@ -411,10 +432,13 @@ entries:
   effect_check_ids:
   - behavior
   - regression
-  entry_hash: aad1ef5f73dddeeb6b56ee35494cf82388b50c6de367e3ccdd7da77fbc62d3c8
+  entry_hash: 65575dadc56e10635398f7bfd6babdbcceb1f4e6deb0ff263840d2329e33ba4c
   subject_task_id: LF-TSK-QLT-0008
   subject_task_version: 4
   subject_change_version: 2.2.0
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
 - check_id: qlt.executor.validate
   check_version: 1
   owner: LF-WS-QLT
@@ -458,10 +482,13 @@ entries:
   effect_check_ids:
   - behavior
   - regression
-  entry_hash: 01d8769bf8b17afccb8a1d1dc5b02ec00f718608f3a853bb39943b35d28ff483
+  entry_hash: e78c76a5cd7c5ced264012a5a139c53fa75d173a90264d864786bffbad9bea43
   subject_task_id: LF-TSK-QLT-0009
   subject_task_version: 4
   subject_change_version: 1.3.0
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
 - check_id: qlt.lifecycle.validate
   check_version: 1
   owner: LF-WS-QLT
@@ -471,28 +498,76 @@ entries:
   triggers:
   - path: scripts/gates/cli.py
     terminal: true
+  - path: scripts/gates/formal_gate.py
+    terminal: true
   - path: scripts/gates/receipt_store.py
     terminal: true
   - path: tests/gates/test_gate_lifecycle.py
     terminal: true
+  - path: scripts/gates/change_context.py
+    terminal: true
+  - path: scripts/gates/change_verify.py
+    terminal: true
+  - path: scripts/gates/repository_verify.py
+    terminal: true
+  - path: scripts/gates/certify_submit.py
+    terminal: true
+  - path: scripts/gates/local_verify.py
+    terminal: true
+  - path: scripts/gates/registry_profiles.py
+    terminal: true
+  - path: tests/gates/test_change_context.py
+    terminal: true
+  - path: tests/gates/test_change_verify.py
+    terminal: true
+  - path: tests/gates/test_repository_verify.py
+    terminal: true
+  - path: tests/gates/test_registry_profiles.py
+    terminal: true
+  - path: scripts/harness/hooks.py
+    terminal: true
+  - path: tests/harness/test_hooks.py
+    terminal: true
+  - path: .githooks/pre-commit
+    terminal: true
+  - path: .githooks/post-commit
+    terminal: true
   required: true
-  declared_validation_command: python3 -m unittest discover -s tests/gates -p 'test_gate_lifecycle.py'
+  declared_validation_command: python3 -m unittest tests.gates.test_gate_lifecycle
+    tests.gates.test_change_context tests.gates.test_change_verify tests.gates.test_repository_verify
+    tests.gates.test_registry_profiles tests.harness.test_hooks
   command_id: qlt.lifecycle.validate.v1
   fixed_argv:
   - python3
   - -m
   - unittest
-  - discover
-  - -s
-  - tests/gates
-  - -p
-  - test_gate_lifecycle.py
+  - tests.gates.test_gate_lifecycle
+  - tests.gates.test_change_context
+  - tests.gates.test_change_verify
+  - tests.gates.test_repository_verify
+  - tests.gates.test_registry_profiles
+  - tests.harness.test_hooks
   cwd: .
   timeout_seconds: 240
   consumed_inputs:
   - scripts/gates/cli.py
+  - scripts/gates/formal_gate.py
   - scripts/gates/receipt_store.py
   - tests/gates/test_gate_lifecycle.py
+  - scripts/gates/change_context.py
+  - scripts/gates/change_verify.py
+  - scripts/gates/repository_verify.py
+  - scripts/gates/certify_submit.py
+  - scripts/gates/local_verify.py
+  - scripts/gates/registry_profiles.py
+  - tests/gates/test_change_context.py
+  - tests/gates/test_change_verify.py
+  - tests/gates/test_repository_verify.py
+  - tests/gates/test_registry_profiles.py
+  - scripts/harness/hooks.py
+  - tests/harness/test_hooks.py
+  - .githooks/pre-commit
+  - .githooks/post-commit
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -508,10 +583,13 @@ entries:
   effect_check_ids:
   - behavior
   - regression
-  entry_hash: d313bdf6259c518881a8c0c290dabfe95770ef47d8aa9b5602ae7f744b7015ff
+  entry_hash: c15a63d72633a792ec805bb08fbf35034ea45ee212c5271c649368db86923582
   subject_task_id: LF-TSK-QLT-0010
   subject_task_version: 4
   subject_change_version: 2.2.0
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
 - check_id: qlt.independent-review.validate
   check_version: 1
   owner: LF-WS-QLT
@@ -521,7 +599,7 @@ entries:
   triggers:
   - path: scripts/gates/independent_review.py
     terminal: true
-  - path: scripts/gates/cli.py
+  - path: scripts/gates/formal_gate.py
     terminal: true
   - path: tests/gates/test_independent_review.py
     terminal: true
@@ -541,7 +619,7 @@ entries:
   timeout_seconds: 240
   consumed_inputs:
   - scripts/gates/independent_review.py
-  - scripts/gates/cli.py
+  - scripts/gates/formal_gate.py
   - tests/gates/test_independent_review.py
   outcome_contract:
     schema: lexiflow.check-outcome.v1
@@ -558,10 +636,13 @@ entries:
   effect_check_ids:
   - behavior
   - regression
-  entry_hash: 4c80abe7487f084283a49f58007b34f7533c2cb27b566261a40b7bf642f17f01
+  entry_hash: bd9e756ec6948fc9b940e23838731d39b716c7bf3f37600788b1a6309aa49a0d
   subject_task_id: LF-TSK-QLT-0011
   subject_task_version: 4
   subject_change_version: 2.2.0
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
 - check_id: qlt.hash-dag.validate
   check_version: 1
   owner: LF-WS-QLT
@@ -605,10 +686,13 @@ entries:
   effect_check_ids:
   - behavior
   - regression
-  entry_hash: f07e9299da640b9e272957192e368320d455fb082b15ff86da8263deecb70fc3
+  entry_hash: 3cb53c857bf37164357f1e56bebd58543f2732963e417e626c2c6354e865369b
   subject_task_id: LF-TSK-QLT-0012
   subject_task_version: 4
   subject_change_version: 1.3.0
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
 - check_id: qlt.catalog-decision.validate
   check_version: 1
   owner: LF-WS-QLT
@@ -618,7 +702,7 @@ entries:
   triggers:
   - path: scripts/gates/catalog_decision.py
     terminal: true
-  - path: scripts/gates/cli.py
+  - path: scripts/gates/formal_gate.py
     terminal: true
   - path: tests/gates/test_catalog_decision.py
     terminal: true
@@ -638,9 +722,8 @@ entries:
   timeout_seconds: 240
   consumed_inputs:
   - scripts/gates/catalog_decision.py
-  - scripts/gates/cli.py
+  - scripts/gates/formal_gate.py
   - tests/gates/test_catalog_decision.py
-  - docs/acceptance-cases/phase-1.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -656,10 +739,13 @@ entries:
   effect_check_ids:
   - behavior
   - regression
-  entry_hash: ff10226b48a0383db215350abad3c5b0268b93fc417a95ca615eb6d23f22b00e
+  entry_hash: 401738f9aa483b55b4cc50060904d3507275b6dc613bb287f0b56768446e47c8
   subject_task_id: LF-TSK-QLT-0013
   subject_task_version: 4
   subject_change_version: 2.2.0
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
 - check_id: qlt.dispatch-preflight.validate
   check_version: 1
   owner: LF-WS-QLT
@@ -671,7 +757,7 @@ entries:
     terminal: true
   - path: tests/gates/test_dispatch_preflight.py
     terminal: true
-  - path: docs/development/dispatch-preflight-design.md
+  - path: docs/development/dispatch-preflight.md
     terminal: true
   required: true
   declared_validation_command: python3 -m unittest discover -s tests/gates -p 'test_dispatch_preflight.py'
@@ -690,7 +776,7 @@ entries:
   consumed_inputs:
   - scripts/gates/dispatch_preflight.py
   - tests/gates/test_dispatch_preflight.py
-  - docs/development/dispatch-preflight-design.md
+  - docs/development/dispatch-preflight.md
   outcome_contract:
     schema: lexiflow.check-outcome.v1
     required_fields:
@@ -703,16 +789,22 @@ entries:
   effect_check_ids:
   - behavior
   - regression
-  entry_hash: e673414b597d052744e8b4c4fb054ece87fcf362e9ef18c1a3c054df1ac8e502
+  entry_hash: 9205dbca23be3e4ec3ada29e6dc2cb68ac399892e9910c193feed2e8c4962e70
   subject_task_id: LF-TSK-QLT-0005
   subject_task_version: 1
   subject_change_version: 1.0.0
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
 - check_id: qlt.runner.validate
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: scripts/harness/qoder_task.py
     terminal: true
@@ -764,13 +856,16 @@ entries:
   subject_task_id: LF-TSK-QLT-0006
   subject_task_version: 4
   subject_change_version: 2.2.0
-  entry_hash: 164412f4e27c7ea097480a63bf2484cf44de54c8d0dac2e6a5214a272ebd2791
+  entry_hash: 8a3b7bf82005ec19d0defe18051f4ec6afcf081d99b6747a65062fcdb205eb86
 - check_id: task-contract.prd.0001
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -814,13 +909,16 @@ entries:
   subject_task_id: LF-TSK-PRD-0001
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 88bb1b8b1c7885003c2c92c7495ca2fd9908846c632ae9f5a34b6bf7f48f3d0a
+  entry_hash: 0e82181ad2a8bc44a9c728760d3104398db03ceb0d13dd19977c323ef12ba5bc
 - check_id: task-contract.dat.0001
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -861,13 +959,16 @@ entries:
   subject_task_id: LF-TSK-DAT-0001
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: d9ec4912c10648b21e9c043eb0eb7681462daf37846c851ac896103fc6d6251c
+  entry_hash: c1449ff0384148654566102af5872022274f058bcfac5ab63812c0a3d00d4dd0
 - check_id: task-contract.dat.0002
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -908,13 +1009,16 @@ entries:
   subject_task_id: LF-TSK-DAT-0002
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 1329018eef767d4419e201af9b9698bfe8f4de45afe514a2085bbef9ca4e98d6
+  entry_hash: 498c79a881caa89e3d47cd7fb902635378bfa42594d25ef5dd2a5c1c5188ec22
 - check_id: external.dat.0003
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: docs/architecture/data-contracts.md
     terminal: true
@@ -971,13 +1075,16 @@ entries:
   subject_task_id: LF-TSK-DAT-0003
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 90cd276555a0ab874f07349593de4eda1d33ee20d1e5ef588a79004562a1d36f
+  entry_hash: 67f994b2337f224c5111e1d1d2b876b6726bb3cd27ac3e63c67d0d959865389c
 - check_id: external.dat.0004
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: docs/architecture/data-contracts.md
     terminal: true
@@ -1043,13 +1150,16 @@ entries:
   subject_task_id: LF-TSK-DAT-0004
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 2757d62912f863d5b1531d20b0cad8cd550ec21c60e7418f5e3141cf681367e1
+  entry_hash: 5da1da7de64a70af209493f1722175846b7be775f181406aa085c6da0a04f763
 - check_id: task-contract.dat.0005
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -1090,13 +1200,16 @@ entries:
   subject_task_id: LF-TSK-DAT-0005
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 841566385874900e4b98d88b85b1792cf8fdd15e4961f23affa14d6462ced237
+  entry_hash: 5e2fa052f48ff3d034cbcaf5755d8bb1c93183795158c1ab7076eff1933ad11e
 - check_id: task-contract.dat.0006
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -1137,13 +1250,16 @@ entries:
   subject_task_id: LF-TSK-DAT-0006
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: f726a3d9cf91d0467aed94fe52dfa35068721a4178b008646b01830137cc858c
+  entry_hash: f3d7df83d8de87a932e7a72c0c816410e68fe19f5e5639e900b1a990ae5bafa7
 - check_id: task-contract.lex.0001
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -1184,13 +1300,16 @@ entries:
   subject_task_id: LF-TSK-LEX-0001
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 9e67be2e3d4fbc14b8c95c6c06fb2dd9231ee684b354db84d6d1472ecc020c05
+  entry_hash: 8dcae9d25071b749ccf0587b41222a9352eb82b4ede2831a01b088afb246f0c9
 - check_id: task-contract.lex.0002
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -1228,13 +1347,16 @@ entries:
   subject_task_id: LF-TSK-LEX-0002
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 483df0be785d73475b0d1910395909f114831040b5447b33cd74b0ed9de1f2e0
+  entry_hash: f83a0a8fd3555dcb7cb7d8c64055f7bc68bfbe067283bcabece8826f56ee3ff5
 - check_id: task-contract.cnt.0001
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -1275,13 +1397,16 @@ entries:
   subject_task_id: LF-TSK-CNT-0001
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 3e7bcd16e848cf878da297db5ed4c6e318655cc50a8a54921ee408012793d869
+  entry_hash: 064be8ef5f270fdda8761265832d17a92df951f2628dba130ef9f35c29217052
 - check_id: task-contract.cnt.0002
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -1319,13 +1444,16 @@ entries:
   subject_task_id: LF-TSK-CNT-0002
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: b583582c5e46f838061db99ee5e601a35dd26ea75be87b57188ab10d4d6d6481
+  entry_hash: e6298431de3184c9e272a9b33166d8926ba4a3041af2f6406c2eaf54a92f5aae
 - check_id: task-contract.sem.0001
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -1369,13 +1497,16 @@ entries:
   subject_task_id: LF-TSK-SEM-0001
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 776c5fc0310d16ecb432766707174df4e811fa1b610e809acb1c293c9b463cd3
+  entry_hash: 501782d13b7b8b785aeffb5d45e24f1f736a25773f7ac9924ab233677390bd15
 - check_id: task-contract.sem.0002
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -1419,13 +1550,16 @@ entries:
   subject_task_id: LF-TSK-SEM-0002
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 44e78a614f22ea4999f9099c4e690500124e444c57b613ddb44385fb2f1758b2
+  entry_hash: 38373ada438f45cf1f18fe1c03818936ee15a728f289972d855aa16468442be7
 - check_id: task-contract.prf.0002
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -1466,13 +1600,16 @@ entries:
   subject_task_id: LF-TSK-PRF-0002
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: df48d8ed39b6f35b757f0da1450d45bcf606c536b6175a48dee1bb90abf2c419
+  entry_hash: 3147a7869cf383ac873635b23aa09c72201d83b86c595b85c3dd35f782456524
 - check_id: task-contract.sec.0001
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -1513,13 +1650,16 @@ entries:
   subject_task_id: LF-TSK-SEC-0001
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: b0536911f030e1e104a1f714dcf960da99cb6fc4eae77d89e2ac392742b750d3
+  entry_hash: 92b96fd58fc88406bfa9f60ecd607e9e56cc832fbd352bed13a3b864044a4399
 - check_id: task-contract.sec.0002
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -1560,13 +1700,16 @@ entries:
   subject_task_id: LF-TSK-SEC-0002
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 2248e86eafbb84566ae48dd6efe59fa80e0fea9f08b74acd82b827080bdab2c8
+  entry_hash: 28fbda41607b7593b08083663af12a8a634789a3d3ba05f16e0bc5865931d727
 - check_id: task-contract.obs.0001
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -1607,13 +1750,16 @@ entries:
   subject_task_id: LF-TSK-OBS-0001
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 7e05313c8e74fdc584c0fae8f5924ce31e2bea3fdbf3163e12be3c25e01d693a
+  entry_hash: 47482f56f7ae6d2653b2372593326cf06c2b4569ce80bb03fdf9dbf7d015a28a
 - check_id: task-contract.ops.0001
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -1654,15 +1800,18 @@ entries:
   subject_task_id: LF-TSK-OPS-0001
   subject_task_version: 2
   subject_change_version: 1.1.0
-  entry_hash: c12a3d31aa8828bef628799adebb089e254a5a12f4ddd2f2dabed744afa182b1
+  entry_hash: 41a288312af6ddc1752525be48a9977293925ec8c5aeda77ab024836e9e58e6e
 - check_id: external.ops.0002
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
-  - path: docs/development/toolchain-reproduction/local-stack.md
+  - path: docs/development/toolchain-reproduction.md
     terminal: true
   - path: infra/local/compose.yaml
     terminal: true
@@ -1688,7 +1837,7 @@ entries:
   cwd: .
   timeout_seconds: 300
   consumed_inputs:
-  - docs/development/toolchain-reproduction/local-stack.md
+  - docs/development/toolchain-reproduction.md
   - infra/local/compose.yaml
   - scripts/toolchain/local_stack.py
   - scripts/toolchain/postgres_migrations.py
@@ -1711,13 +1860,16 @@ entries:
   subject_task_id: LF-TSK-OPS-0002
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 2ad517cf7ebc74582ce3e76d0674740593951f4079fb8e05e972c12702bc4dbd
+  entry_hash: a1637f28187b8e8ff43ead4b56957814080ffa5305a3ae767eb9ab3e32dbce10
 - check_id: task-contract.adp.0001
   check_version: 1
   owner: LF-WS-QLT
   modes:
   - incremental
   - full
+  verification_scopes:
+  - change-targeted
+  - repository-baseline
   triggers:
   - path: harness/phase-task-contract-profiles.yaml
     terminal: true
@@ -1761,4 +1913,4 @@ entries:
   subject_task_id: LF-TSK-ADP-0001
   subject_task_version: 1
   subject_change_version: 1.0.0
-  entry_hash: 80ee5bd401adf629b18a4c216a54d080bb6e87d20c3fede369c2c9347b22ef97
+  entry_hash: 93e7d37526e760b2e2b78530697e20c911f0213b66a2d7bac3995cef5d7edaa5

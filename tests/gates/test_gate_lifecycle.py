@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
-from scripts.gates import cli
+from scripts.gates import formal_gate as cli
 from scripts.gates import receipt_store
 from scripts.gates.receipt_store import (
     ImmutableReceiptStore,
@@ -32,7 +32,7 @@ class Fixture:
     def __init__(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        self.write("scripts/gates/cli.py", b"# fixture cli\n")
+        self.write("scripts/gates/formal_gate.py", b"# fixture cli\n")
         self.evidence = self.write("tmp/quality/evidence/e.json", b"{}")
         self.issuer = self.write("tmp/quality/issuers/i.json", b"{}")
         source = self.write("planning/workstreams.yaml", b"workstreams: []\n")
@@ -43,9 +43,9 @@ class Fixture:
             raw[name] = self.write(f"tmp/evidence/{name}.json", (name + "\n").encode())
         raw["diff"] = self.write(
             "tmp/evidence/diff.patch",
-            b"diff --git a/scripts/gates/cli.py b/scripts/gates/cli.py\n"
-            b"--- a/scripts/gates/cli.py\n"
-            b"+++ b/scripts/gates/cli.py\n"
+            b"diff --git a/scripts/gates/formal_gate.py b/scripts/gates/formal_gate.py\n"
+            b"--- a/scripts/gates/formal_gate.py\n"
+            b"+++ b/scripts/gates/formal_gate.py\n"
             b"@@ -1 +1 @@\n"
             b"-old\n"
             b"+# fixture cli\n",
@@ -55,9 +55,9 @@ class Fixture:
             canonical_json_bytes({
                 "schema_version": "lexiflow.changed-file-snapshot.v1",
                 "files": {
-                    "scripts/gates/cli.py": {
+                    "scripts/gates/formal_gate.py": {
                         "state": "present",
-                        "sha256": sha256_bytes((self.root / "scripts/gates/cli.py").read_bytes()),
+                        "sha256": sha256_bytes((self.root / "scripts/gates/formal_gate.py").read_bytes()),
                     }
                 },
             }),
@@ -82,7 +82,7 @@ class Fixture:
                 "main_agent_attestation": {
                     "actor_id": "main", "reviewed_at": "2026-09-16T00:00:00Z",
                     "result_fields": {
-                        "status": "PASS", "changed_files": ["scripts/gates/cli.py"],
+                        "status": "PASS", "changed_files": ["scripts/gates/formal_gate.py"],
                         "validation": {"status": "PASS", "evidence_locator": raw["tests"][0]["locator"]},
                         "acceptance_evidence": [raw["tests"][0]["locator"]],
                         "effect_checks": {"behavior": "PASS"}, "risks": ["none"],
@@ -106,7 +106,7 @@ class Fixture:
                     "client": "codex", "role": "gate-receipt-issuer",
                 },
             },
-            "scope": {"changed_files": ["scripts/gates/cli.py"], "three_way_reconciliation": {"status": "PASS"}},
+            "scope": {"changed_files": ["scripts/gates/formal_gate.py"], "three_way_reconciliation": {"status": "PASS"}},
             "consumed_inputs": [
                 {**policy, "state": "present"}
             ],
@@ -181,7 +181,7 @@ class TestGateLifecycle(unittest.TestCase):
         self.fixture = Fixture()
         self.addCleanup(self.fixture.temp.cleanup)
 
-    def run_gate(self, executor=None, stderr=None):
+    def run_gate(self, executor=None, stderr=None, repository_verifier=None):
         ids = iter((uuid.UUID(RUN_ID), uuid.UUID(PROCESS_ID)))
         return cli.run_gate(
             self.fixture.root, mode="incremental", receipt_kind="TASK_VALIDATION",
@@ -189,6 +189,7 @@ class TestGateLifecycle(unittest.TestCase):
             compiler=self.fixture.compiler, executor=executor or self.fixture.execution,
             uuid_factory=lambda: next(ids), stderr=stderr or io.StringIO(),
             now=lambda: "2026-09-16T00:00:02Z",
+            repository_verifier=repository_verifier,
         )
 
     def test_start_is_durable_and_caller_visible_before_checker(self):
@@ -248,7 +249,7 @@ class TestGateLifecycle(unittest.TestCase):
             return {"result": "PASS"}
 
         ids = iter((uuid.UUID(RUN_ID), uuid.UUID(PROCESS_ID)))
-        with mock.patch("scripts.gates.cli._installed_handler", return_value=handler):
+        with mock.patch("scripts.gates.formal_gate._installed_handler", return_value=handler):
             receipt = cli.run_gate(
                 self.fixture.root, mode="incremental", receipt_kind="INDEPENDENT_REVIEW",
                 evidence_packet=self.fixture.evidence["locator"], issuer_packet=self.fixture.issuer["locator"],
@@ -292,6 +293,7 @@ class TestGateLifecycle(unittest.TestCase):
         receipt = self.run_gate()
         self.assertEqual(receipt["receipt_kind"], "TASK_VALIDATION")
         self.assertEqual(receipt["completeness"]["status"], "PASS")
+        self.assertEqual(receipt["validation"]["repository_verification"]["result"], "PASS")
         self.assertEqual(receipt["validation"]["checks"][0]["typed_outcome"]["status"], "PASS")
         store = ImmutableReceiptStore(self.fixture.root, RUN_ID)
         store._created = True
@@ -339,6 +341,16 @@ class TestGateLifecycle(unittest.TestCase):
                     now=lambda: "2026-09-16T00:00:02Z",
                 )
                 self.assertEqual(receipt["result"], status)
+
+    def test_repository_baseline_is_required_before_delivery_execution(self):
+        executor = mock.Mock()
+        receipt = self.run_gate(
+            executor=executor,
+            repository_verifier=lambda _: {"result": "BLOCKED", "blocking_scope": "repository-readiness"},
+        )
+        self.assertEqual(receipt["result"], "BLOCKED")
+        self.assertEqual(receipt["reasons"], ["repository-baseline-not-pass"])
+        executor.assert_not_called()
 
     def test_executor_payload_must_match_frozen_plan(self):
         def drifted(plan, repo_root):

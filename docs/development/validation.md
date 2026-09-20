@@ -10,12 +10,10 @@
 
 ## 1.2. 最小闭环
 
-1. 固定受验输入，记录改动归属和范围。
-2. 运行该范围的交付检查；业务代码同时运行产品测试。
-3. 读取实际报告，区分已执行、未执行、阻断与失败。
-4. 交接前运行 `python3 scripts/gates/cli.py run --mode incremental`；正式验收再按三层顺序消费新鲜证据。
-
-这套顺序避免用更宽泛、更昂贵或历史的检查掩盖真正缺失的证明。
+1. 实现完成后运行 `python3 scripts/gates/change_verify.py`，阅读最终 diff 的 `execution_result` 与 `scope_review`；预期外文件需要自审，但不会阻断提交。
+2. 运行 `python3 scripts/gates/repository_verify.py run`，确认当前 checkout 的完整确定性基线。`BLOCKED repository-readiness` 要按 stable remediation ID 用 doctor/bootstrap 交给仓库维护修复，不归因于本次业务改动。
+3. 正式认证前，执行者明确确认 scope review，并以 `certify_submit.py` 生成 subject evidence。
+4. 不同真实 Codex task/session 运行 Formal Gate 的 `TASK_VALIDATION`；它必须在同冻结输入取得 Repository Verify PASS。之后独立 review 与 catalog 仅消费 receipts。
 
 ## 1.3. 详细流程入口
 
