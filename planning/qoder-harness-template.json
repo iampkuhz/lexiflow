@@ -26,7 +26,7 @@
   ],
   "validation_commands": [
     {
-      "argv": ["python3", "scripts/toolchain/java_gradle.py", "check"],
+      "argv": ["python3", "-m", "scripts.environment.java_exec", "backend/gradlew", "-p", "backend", "check"],
       "cwd": ".",
       "timeout_seconds": 1800
     }

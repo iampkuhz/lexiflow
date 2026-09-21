@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -12,12 +13,27 @@ const repositoryRoot = resolve(extensionRoot, "..");
 const extensionPath = resolve(extensionRoot, "dist");
 const apiBase = "http://127.0.0.1:18080";
 
+class ApiResourceUnavailable extends Error {}
+
+function assertApiResources() {
+  if (!existsSync(resolve(repositoryRoot, "backend/gradlew")) || !existsSync(resolve(repositoryRoot, "scripts/environment/java_exec.py"))) {
+    throw new ApiResourceUnavailable("api-launcher-resource-unavailable");
+  }
+  const java = spawnSync("python3", ["-c", "from pathlib import Path; from scripts.environment.java_runtime import resolve_java_home; import os; resolve_java_home(Path('.'), os.environ)"], {
+    cwd: repositoryRoot,
+    stdio: "ignore"
+  });
+  if (java.error || java.status !== 0) throw new ApiResourceUnavailable("api-java-runtime-unavailable");
+}
+
 function startApi() {
-  return spawn("python3", ["scripts/toolchain/java_gradle.py", "--no-daemon", ":apps:api:bootRun", "--args=--server.port=18080"], {
+  const child = spawn("python3", ["-m", "scripts.environment.java_exec", "backend/gradlew", "-p", "backend", "--no-daemon", ":apps:api:bootRun", "--args=--server.port=18080"], {
     cwd: repositoryRoot,
     detached: true,
     stdio: ["ignore", "pipe", "pipe"]
   });
+  child.once("error", (error) => { child.launchError = error; });
+  return child;
 }
 
 async function isApiHealthy() {
@@ -33,6 +49,7 @@ async function waitForApi(process) {
   process.stdout.on("data", (chunk) => (logs += chunk));
   process.stderr.on("data", (chunk) => (logs += chunk));
   for (let attempt = 0; attempt < 90; attempt += 1) {
+    if (process.launchError) throw new ApiResourceUnavailable("api-launcher-resource-unavailable");
     if (process.exitCode !== null) throw new Error(`API stopped before readiness:\n${logs}`);
     try {
       if ((await fetch(`${apiBase}/actuator/health`)).ok) return;
@@ -104,13 +121,15 @@ async function waitForState(page, state) {
 }
 
 let api;
-if (!(await isApiHealthy())) {
-  api = startApi();
-  await waitForApi(api);
-}
-const userDataDir = await mkdtemp(resolve(tmpdir(), "lexiflow-extension-e2e-"));
+let userDataDir;
 let context;
 try {
+  assertApiResources();
+  if (!(await isApiHealthy())) {
+    api = startApi();
+    await waitForApi(api);
+  }
+  userDataDir = await mkdtemp(resolve(tmpdir(), "lexiflow-extension-e2e-"));
   context = await chromium.launchPersistentContext(userDataDir, {
     headless: false,
     args: [`--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`]
@@ -160,9 +179,16 @@ try {
   assert.equal(await page.locator(".ytp-caption-segment").textContent(), "We need reliable captions.");
   assert.equal(await overlayText(page), "");
 
-  console.log("PASS extension E2E: simulated subtitle stream, stale-result rejection, bounded input, and API-failure English-only fallback");
+  process.stdout.write(`${JSON.stringify({ status: "PASS", browser_smoke: 1, api_smoke: 1, reason: "" })}\n`);
+} catch (error) {
+  const blocked = error instanceof ApiResourceUnavailable;
+  process.stdout.write(`${JSON.stringify({ status: blocked ? "BLOCKED" : "FAIL", browser_smoke: 0, api_smoke: 0, reason: blocked ? error.message : "browser-api-smoke-assertion-failed" })}\n`);
+  if (!blocked) {
+    process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
+    process.exitCode = 1;
+  }
 } finally {
   await context?.close();
   if (api !== undefined) await stop(api);
-  await rm(userDataDir, { recursive: true, force: true });
+  if (userDataDir !== undefined) await rm(userDataDir, { recursive: true, force: true });
 }

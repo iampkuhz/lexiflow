@@ -21,7 +21,7 @@ Shadow DOM 覆盖层中仅显示 API 已确认的中文词段释义。因此页�
 在一个终端启动 API：
 
 ```bash
-python3 scripts/toolchain/java_gradle.py :apps:api:bootRun --args=--server.port=18080
+python3 -m scripts.environment.java_exec backend/gradlew -p backend :apps:api:bootRun --args=--server.port=18080
 ```
 
 在另一个终端构建扩展：

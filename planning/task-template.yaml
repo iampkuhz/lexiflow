@@ -131,6 +131,27 @@ acceptance:
   skipped_semantics: "skipped, not-run, unavailable, or excluded can never produce PASS"
 
 execution:
+  agent_dispatch:
+    primary: qoder
+    fallback_model: gpt-5.6-terra
+    fallback_reasoning_effort: high
+    model_selection_basis: explicit-user-required-terra-fallback
+    max_consecutive_failures: 3
+    failure_unit: qoder-and-terra-both-unavailable-in-one-dispatch-attempt
+    success_effect: reset-consecutive-failures-preserve-history
+    identity: current-parent-repo-work-package-ordered-task-versions
+    replay_effect: no-new-attempt-or-counter-increment
+    unknown_start_effect: preserve-attempt-no-fallback-no-redispatch
+    execution_and_review_failures: separate-from-dispatch-failures
+    stop_effect: stop-package-dispatch-no-fourth-attempt-not-goal-status-change
+    host_wait_policy: reject-active-or-unknown-goal-without-supported-wait-adapter
+    host_wait_evidence: current-runtime-derived-read-only-goal-state
+    host_wait_caller_override: forbidden
+    host_mutations: forbidden
+    fallback_execution_owner: current-parent-native-codex-collaboration-tool
+    fallback_result_evidence: identity-bound-native-tool-result-not-self-reported-pass
+    codex_wait: native-collaboration-events-not-qoder-terminal-callback
+    safety_preconditions: identity-write-scope-no-duplicate-execution
   preferred_implementer: "qoder"
   fallback_implementer: "main-agent"
   estimated_task_minutes: 45
@@ -306,7 +327,7 @@ handoff_contract:
     catalog_estimate_rule: caller-10-to-360-or-exact-current-catalog-sum-when-catalog-is-used
     structured_result_required: true
     implementation_status: IMPLEMENTED
-    conformance_test: tests/harness/test_qoder_runner.py
+    conformance_test: tests/agents/test_qoder_runner.py
     owner_task: LF-TSK-QLT-0006
     owner_task_version: 2
     owner_change_version: 2.0.0

@@ -84,8 +84,12 @@ lemma,chinese_gloss,definition,aliases,inflections,frequency_zipf,frequency_sour
 export STARDICT_CSV=/absolute/path/stardict.csv
 shasum -a 256 "$STARDICT_CSV"
 head -n 1 "$STARDICT_CSV"
-python3 scripts/toolchain/lexicon_import.py validate --input "$STARDICT_CSV"
-python3 scripts/toolchain/lexicon_import.py prewarm-report --input "$STARDICT_CSV" --limit 2000
+LEXICON_ARGS=$(printf 'validate\037--input\037%s' "$STARDICT_CSV")
+python3 -m scripts.environment.java_exec backend/gradlew -p backend \
+  :platform:adapters:lexiconImport "-PlexiconImportArgs=$LEXICON_ARGS"
+LEXICON_ARGS=$(printf 'prewarm-report\037--input\037%s\037--limit\0372000' "$STARDICT_CSV")
+python3 -m scripts.environment.java_exec backend/gradlew -p backend \
+  :platform:adapters:lexiconImport "-PlexiconImportArgs=$LEXICON_ARGS"
 ```
 
 `validate` 流式扫描原始 CSV，输出 `entries`、归并的派生词数和跳过原因；它不连接数据库，也不会将
@@ -94,13 +98,14 @@ python3 scripts/toolchain/lexicon_import.py prewarm-report --input "$STARDICT_CS
 确认上述输出后启动本机 PostgreSQL 并发布：
 
 ```bash
-python3 scripts/toolchain/local_stack.py up
-python3 scripts/toolchain/postgres_migrations.py --database-url postgresql://postgres@127.0.0.1:15432/lexiflow
-python3 scripts/toolchain/lexicon_import.py publish \
-  --input "$STARDICT_CSV" \
-  --database-url postgresql://postgres@127.0.0.1:15432/lexiflow \
-  --batch-source-id ecdict-stardict \
-  --batch-license-id MIT
+podman compose -f infra/local/compose.yaml up -d
+JDBC_URL='jdbc:postgresql://127.0.0.1:15432/lexiflow?user=postgres'
+MIGRATION_ARGS=$(printf '%s\037%s' "$JDBC_URL" "$PWD/infra/postgres/migrations")
+python3 -m scripts.environment.java_exec backend/gradlew -p backend \
+  :platform:adapters:postgresMigrate "-PpostgresMigrateArgs=$MIGRATION_ARGS"
+LEXICON_ARGS=$(printf 'publish\037--input\037%s\037--database-url\037%s\037--batch-source-id\037ecdict-stardict\037--batch-license-id\037MIT' "$STARDICT_CSV" "$JDBC_URL")
+python3 -m scripts.environment.java_exec backend/gradlew -p backend \
+  :platform:adapters:lexiconImport "-PlexiconImportArgs=$LEXICON_ARGS"
 ```
 
 发布以 500 条为一个已提交的 `STAGED` 分块；任意已发布版本在整个扫描期间继续可查询。中断后以相同

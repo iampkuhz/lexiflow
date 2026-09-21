@@ -26,19 +26,19 @@ python_scope:
   allowed: [scripts, harness, gates, generators, audit, tests-for-python-tooling]
   forbidden: [product-domain, product-application, product-api, product-worker]
 verification:
-  launcher: python3 scripts/toolchain/java_gradle.py
+  launcher: python3 -m scripts.environment.java_exec
   jdk_resolution: explicit-lexiflow-home-then-repository-local-then-exact-java-home
   execution_owner: gradle-java
   gate_orchestration: receipt-only
-  incremental_delivery: python3 scripts/toolchain/java_gradle.py check
-  full_delivery: python3 scripts/toolchain/java_gradle.py deliveryFull
+  incremental_delivery: python3 -m scripts.environment.java_exec backend/gradlew -p backend check
+  full_delivery: python3 -m scripts.environment.java_exec backend/gradlew -p backend deliveryFull
   gate_selection:
     incremental: [check]
     full: [deliveryFull]
     excluded_diagnostics: [architectureTest, verifyProductLanguage]
   diagnostic_targets:
-    architecture: python3 scripts/toolchain/java_gradle.py architectureTest
-    language_boundary: python3 scripts/toolchain/java_gradle.py verifyProductLanguage
+    architecture: python3 -m scripts.environment.java_exec backend/gradlew -p backend architectureTest
+    language_boundary: python3 -m scripts.environment.java_exec backend/gradlew -p backend verifyProductLanguage
   rule_owners:
     formatting: Spotless
     style: Checkstyle

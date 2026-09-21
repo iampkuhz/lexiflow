@@ -1,0 +1,63 @@
+"""Change verification CLI entry point.
+
+Runs checks selected by git diff and reports results with scope
+review advisory.  This is a thin wrapper over
+``scripts.verification.verify_changes``.
+
+Usage::
+
+    python3 scripts/check_changes.py [--repo-root .] [--base COMMIT]
+        [--expected-path DIR ...]
+
+Does NOT import scripts.gates or scripts.harness.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.verification import verify_changes, persist_report
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="scripts/check_changes.py",
+        description="Run checks selected by git diff.",
+    )
+    parser.add_argument(
+        "--repo-root", default=".",
+        help="Repository root directory (default: .)",
+    )
+    parser.add_argument(
+        "--base", default=None,
+        help="Explicit base commit for diff comparison",
+    )
+    parser.add_argument(
+        "--expected-path", action="append", default=[],
+        dest="expected_paths",
+        help="Expected changed directory (repeatable; advisory self-review)",
+    )
+    args = parser.parse_args(argv)
+
+    report = verify_changes(
+        args.repo_root,
+        base=args.base,
+        expected_paths=tuple(args.expected_paths),
+    )
+    try:
+        report["publication"] = persist_report(args.repo_root, report)
+    except ValueError as exc:
+        report = {**report, "result": "FAIL", "reason": "report-publication-failed", "detail": str(exc)}
+    print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+
+    result = report.get("result", "FAIL")
+    return {"PASS": 0, "BLOCKED": 2, "FAIL": 1}.get(result, 1)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

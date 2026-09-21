@@ -25,7 +25,7 @@ G2 的唯一退出任务是 `LF-TSK-DAT-0006`。其 DAT、LEX、CNT 与 SEC 依�
 已知词段返回版本绑定的中文释义。未知词返回 `NO_PENDING`，不创建虚假的异步工作，也不调用
 模型、供应商、持久化状态或浏览器来源数据。
 
-2026-09-19 已运行 `python3 scripts/toolchain/java_gradle.py deliveryFull` 并通过；随后以
+2026-09-19 已运行 `python3 -m scripts.environment.java_exec backend/gradlew -p backend deliveryFull` 并通过；随后以
 合成英文字幕在本机 `127.0.0.1:18080` 进行了 API smoke：已知词返回 `READY` 与中文释义，
 未知词返回 `NO_PENDING`，越界范围返回 HTTP `400`。该切片是后续真实数据存储、异步语义和
 客户端集成的可替换基础，不改变 G2 的完成边界。

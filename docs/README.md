@@ -27,5 +27,5 @@
 
 - [校验手册](development/validation.md)
 - [Gate 控制面](development/gate-control-plane.md)
-- [派发预检](development/dispatch-preflight.md)
+- [仓库术语表](development/repository-glossary.md)
 - [工具链复现](development/toolchain-reproduction.md)

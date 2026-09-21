@@ -1,0 +1,1002 @@
+schema_version: lexiflow.module-checks.v1
+description: Closed module-owned checks. Every engineering module exposes a structured completeness result; zero tests, skips,
+  missing results, and unexecuted checks cannot PASS. Product delivery remains native Gradle/npm.
+checks:
+- check_id: eng.verification.module-tests
+  module: verification
+  command:
+  - python3
+  - tests/verification/module_check_adapter.py
+  - --root
+  - .
+  - --mode
+  - verification-tests
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: repository-baseline
+  triggers:
+  - path: scripts/verification/
+  - path: scripts/environment/
+  - path: tests/verification/
+  - path: scripts/check_changes.py
+  - path: scripts/check_repository.py
+  - path: tests/__init__.py
+  - path: requirements-dev.txt
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  input_paths:
+  - scripts/verification
+  - scripts/environment
+  - scripts/check_changes.py
+  - scripts/check_repository.py
+  - tests/verification
+  - tests/__init__.py
+  - requirements-dev.txt
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.verification.module-tests-on-change
+  module: verification-change
+  command:
+  - python3
+  - tests/verification/module_check_adapter.py
+  - --root
+  - .
+  - --mode
+  - verification-tests
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: change-targeted
+  triggers:
+  - path: scripts/verification/
+  - path: scripts/environment/
+  - path: tests/verification/
+  - path: scripts/check_changes.py
+  - path: scripts/check_repository.py
+  - path: tests/__init__.py
+  - path: requirements-dev.txt
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  input_paths:
+  - scripts/verification
+  - scripts/environment
+  - scripts/check_changes.py
+  - scripts/check_repository.py
+  - tests/verification
+  - tests/__init__.py
+  - requirements-dev.txt
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.agents.module-tests
+  module: agents
+  command:
+  - python3
+  - -m
+  - scripts.agents.quality
+  - --root
+  - .
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: repository-baseline
+  triggers:
+  - path: scripts/agents/
+  - path: tests/agents/
+  - path: .codex/
+  - path: .qoder/
+  - path: harness/agent-policy.manifest.yaml
+  - path: harness/agent-runtime.manifest.yaml
+  - path: harness/qoder-harness.schema.json
+  - path: harness/qoder-result.schema.json
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  input_paths:
+  - scripts/agents
+  - tests/agents
+  - harness/agent-policy.manifest.yaml
+  - harness/agent-runtime.manifest.yaml
+  - harness/qoder-harness.schema.json
+  - harness/qoder-result.schema.json
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.agents.module-tests-on-change
+  module: agents-change
+  command:
+  - python3
+  - -m
+  - scripts.agents.quality
+  - --root
+  - .
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: change-targeted
+  triggers:
+  - path: scripts/agents/
+  - path: tests/agents/
+  - path: .codex/
+  - path: .qoder/
+  - path: harness/agent-policy.manifest.yaml
+  - path: harness/agent-runtime.manifest.yaml
+  - path: harness/qoder-harness.schema.json
+  - path: harness/qoder-result.schema.json
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  input_paths:
+  - scripts/agents
+  - tests/agents
+  - harness/agent-policy.manifest.yaml
+  - harness/agent-runtime.manifest.yaml
+  - harness/qoder-harness.schema.json
+  - harness/qoder-result.schema.json
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.acceptance.module-tests
+  module: acceptance
+  command:
+  - python3
+  - -m
+  - scripts.acceptance.quality
+  - --root
+  - .
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: repository-baseline
+  triggers:
+  - path: scripts/acceptance/
+  - path: tests/acceptance/
+  - path: harness/acceptance-records.schema.json
+  - path: harness/module-checks.yaml
+  module_dependencies:
+  - verification
+  - agents
+  required_environment:
+  - python3
+  input_paths:
+  - scripts/acceptance
+  - tests/acceptance
+  - harness/acceptance-records.schema.json
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.acceptance.module-tests-on-change
+  module: acceptance-change
+  command:
+  - python3
+  - -m
+  - scripts.acceptance.quality
+  - --root
+  - .
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: change-targeted
+  triggers:
+  - path: scripts/acceptance/
+  - path: tests/acceptance/
+  - path: harness/acceptance-records.schema.json
+  - path: harness/module-checks.yaml
+  module_dependencies:
+  - verification
+  - agents
+  required_environment:
+  - python3
+  input_paths:
+  - scripts/acceptance
+  - tests/acceptance
+  - harness/acceptance-records.schema.json
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.repository.module-tests
+  module: repository
+  command:
+  - python3
+  - -m
+  - scripts.repository.quality
+  - --root
+  - .
+  - --mode
+  - tests
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: repository-baseline
+  triggers:
+  - path: scripts/repository/
+  - path: tests/repository/
+  - path: scripts/architecture-review.md
+  - path: scripts/
+  - path: tests/
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  input_paths:
+  - scripts/repository
+  - tests/repository
+  - scripts/architecture-review.md
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.repository.module-tests-on-change
+  module: repository-change
+  command:
+  - python3
+  - -m
+  - scripts.repository.quality
+  - --root
+  - .
+  - --mode
+  - tests
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: change-targeted
+  triggers:
+  - path: scripts/repository/
+  - path: tests/repository/
+  - path: scripts/architecture-review.md
+  - path: scripts/
+  - path: tests/
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  input_paths:
+  - scripts/repository
+  - tests/repository
+  - scripts/architecture-review.md
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.repository.docs
+  module: repository-docs
+  command:
+  - python3
+  - -m
+  - scripts.repository.quality
+  - --root
+  - .
+  - --mode
+  - docs
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: repository-baseline
+  triggers:
+  - path: docs/
+  - path: openspec/
+  - path: AGENTS.md
+  - path: README.md
+  - path: harness/README.md
+  - path: harness/documentation-policy.yaml
+  - path: harness/module-checks.yaml
+  module_dependencies:
+  - repository
+  required_environment:
+  - python3
+  input_paths:
+  - docs
+  - openspec
+  - AGENTS.md
+  - README.md
+  - harness/README.md
+  - harness/documentation-policy.yaml
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.repository.docs-on-change
+  module: repository-docs-change
+  command:
+  - python3
+  - -m
+  - scripts.repository.quality
+  - --root
+  - .
+  - --mode
+  - docs
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: change-targeted
+  triggers:
+  - path: docs/
+  - path: openspec/
+  - path: AGENTS.md
+  - path: README.md
+  - path: harness/README.md
+  - path: harness/documentation-policy.yaml
+  - path: harness/module-checks.yaml
+  module_dependencies:
+  - repository
+  required_environment:
+  - python3
+  input_paths:
+  - docs
+  - openspec
+  - AGENTS.md
+  - README.md
+  - harness/README.md
+  - harness/documentation-policy.yaml
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.repository.policy
+  module: repository-policy
+  command:
+  - python3
+  - -m
+  - scripts.repository.quality
+  - --root
+  - .
+  - --mode
+  - policy
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: repository-baseline
+  triggers:
+  - path: harness/agent-policy.manifest.yaml
+  - path: harness/agent-runtime.manifest.yaml
+  - path: harness/policy-projections.yaml
+  - path: planning/task-template.yaml
+  - path: planning/workstreams.yaml
+  - path: harness/module-checks.yaml
+  module_dependencies:
+  - repository
+  required_environment:
+  - python3
+  input_paths:
+  - harness/agent-policy.manifest.yaml
+  - harness/agent-runtime.manifest.yaml
+  - harness/policy-projections.yaml
+  - planning/task-template.yaml
+  - planning/workstreams.yaml
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.repository.policy-on-change
+  module: repository-policy-change
+  command:
+  - python3
+  - -m
+  - scripts.repository.quality
+  - --root
+  - .
+  - --mode
+  - policy
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: change-targeted
+  triggers:
+  - path: harness/agent-policy.manifest.yaml
+  - path: harness/agent-runtime.manifest.yaml
+  - path: harness/policy-projections.yaml
+  - path: planning/task-template.yaml
+  - path: planning/workstreams.yaml
+  - path: harness/module-checks.yaml
+  module_dependencies:
+  - repository
+  required_environment:
+  - python3
+  input_paths:
+  - harness/agent-policy.manifest.yaml
+  - harness/agent-runtime.manifest.yaml
+  - harness/policy-projections.yaml
+  - planning/task-template.yaml
+  - planning/workstreams.yaml
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.repository.planning
+  module: repository-planning
+  command:
+  - python3
+  - -m
+  - scripts.repository.quality
+  - --root
+  - .
+  - --mode
+  - planning
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: repository-baseline
+  triggers:
+  - path: planning/
+  - path: harness/
+  - path: scripts/repository/planning_check.py
+  - path: scripts/repository/catalog.py
+  - path: scripts/repository/task_source.py
+  - path: harness/module-checks.yaml
+  module_dependencies:
+  - repository
+  required_environment:
+  - python3
+  input_paths:
+  - planning
+  - harness
+  - scripts/repository/planning_check.py
+  - scripts/repository/catalog.py
+  - scripts/repository/task_source.py
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.repository.planning-on-change
+  module: repository-planning-change
+  command:
+  - python3
+  - -m
+  - scripts.repository.quality
+  - --root
+  - .
+  - --mode
+  - planning
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: change-targeted
+  triggers:
+  - path: planning/
+  - path: harness/
+  - path: scripts/repository/planning_check.py
+  - path: scripts/repository/catalog.py
+  - path: scripts/repository/task_source.py
+  - path: harness/module-checks.yaml
+  module_dependencies:
+  - repository
+  required_environment:
+  - python3
+  input_paths:
+  - planning
+  - harness
+  - scripts/repository/planning_check.py
+  - scripts/repository/catalog.py
+  - scripts/repository/task_source.py
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.repository.hooks
+  module: repository-hooks
+  command:
+  - python3
+  - -m
+  - scripts.repository.quality
+  - --root
+  - .
+  - --mode
+  - hooks
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: repository-baseline
+  triggers:
+  - path: .githooks/
+  - path: scripts/repository/hooks.py
+  - path: harness/module-checks.yaml
+  module_dependencies:
+  - repository
+  required_environment:
+  - python3
+  input_paths:
+  - .githooks
+  - scripts/repository/hooks.py
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.repository.hooks-on-change
+  module: repository-hooks-change
+  command:
+  - python3
+  - -m
+  - scripts.repository.quality
+  - --root
+  - .
+  - --mode
+  - hooks
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: change-targeted
+  triggers:
+  - path: .githooks/
+  - path: scripts/repository/hooks.py
+  - path: harness/module-checks.yaml
+  module_dependencies:
+  - repository
+  required_environment:
+  - python3
+  input_paths:
+  - .githooks
+  - scripts/repository/hooks.py
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.backend.delivery
+  module: backend
+  command:
+  - python3
+  - -m
+  - scripts.environment.java_exec
+  - backend/gradlew
+  - -p
+  - backend
+  - deliveryFull
+  - --console=colored
+  - --rerun-tasks
+  - --no-build-cache
+  executable: python3
+  cwd: .
+  timeout_seconds: 600
+  scope: repository-baseline
+  triggers:
+  - path: backend/
+  - path: infra/postgres/
+  - path: infra/local/
+  module_dependencies: []
+  required_environment:
+  - java-25-temurin
+  - postgres-test-jdbc-url
+  - redis-test-endpoint
+  input_paths:
+  - backend/build.gradle.kts
+  - backend/settings.gradle.kts
+  - backend/gradle.properties
+  - backend/gradle.lockfile
+  - backend/settings-gradle.lockfile
+  - backend/gradle/libs.versions.toml
+  - backend/gradle/build-logic/build.gradle.kts
+  - backend/gradle/build-logic/settings.gradle.kts
+  - backend/gradle/build-logic/src
+  - backend/apps/api/src
+  - backend/apps/api/gradle.lockfile
+  - backend/apps/worker/src
+  - backend/apps/worker/gradle.lockfile
+  - backend/application/lexicon/src
+  - backend/application/lexicon/gradle.lockfile
+  - backend/application/workflow/src
+  - backend/application/workflow/gradle.lockfile
+  - backend/modules/enrichment/src
+  - backend/modules/enrichment/gradle.lockfile
+  - backend/modules/lexicon/src
+  - backend/modules/lexicon/gradle.lockfile
+  - backend/platform/adapters/src
+  - backend/platform/adapters/gradle.lockfile
+  - backend/tests/architecture/src
+  - backend/tests/architecture/gradle.lockfile
+  - backend/tests/quality-gates/src
+  - backend/tests/quality-gates/gradle.lockfile
+  - backend/tests/integration/src
+  - backend/tests/integration/gradle.lockfile
+  - infra/postgres/migrations
+  - scripts/environment
+  result_contract:
+    type: exit-code
+    completeness_guarantee: Backend Gradle deliveryFull enforces non-empty, non-skipped Java tests and runs architecture,
+      source, migration, persistence, runtime-smoke, and boot-jar delivery tasks.
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    pass_exit_code: 0
+- check_id: eng.backend.delivery-on-change
+  module: backend-change
+  command:
+  - python3
+  - -m
+  - scripts.environment.java_exec
+  - backend/gradlew
+  - -p
+  - backend
+  - deliveryFull
+  - --console=colored
+  - --rerun-tasks
+  - --no-build-cache
+  executable: python3
+  cwd: .
+  timeout_seconds: 600
+  scope: change-targeted
+  triggers:
+  - path: backend/
+  - path: infra/postgres/
+  - path: infra/local/
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - java-25-temurin
+  - postgres-test-jdbc-url
+  - redis-test-endpoint
+  input_paths:
+  - backend/build.gradle.kts
+  - backend/settings.gradle.kts
+  - backend/gradle.properties
+  - backend/gradle.lockfile
+  - backend/settings-gradle.lockfile
+  - backend/gradle/libs.versions.toml
+  - backend/gradle/build-logic/build.gradle.kts
+  - backend/gradle/build-logic/settings.gradle.kts
+  - backend/gradle/build-logic/src
+  - backend/apps/api/src
+  - backend/apps/api/gradle.lockfile
+  - backend/apps/worker/src
+  - backend/apps/worker/gradle.lockfile
+  - backend/application/lexicon/src
+  - backend/application/lexicon/gradle.lockfile
+  - backend/application/workflow/src
+  - backend/application/workflow/gradle.lockfile
+  - backend/modules/enrichment/src
+  - backend/modules/enrichment/gradle.lockfile
+  - backend/modules/lexicon/src
+  - backend/modules/lexicon/gradle.lockfile
+  - backend/platform/adapters/src
+  - backend/platform/adapters/gradle.lockfile
+  - backend/tests/architecture/src
+  - backend/tests/architecture/gradle.lockfile
+  - backend/tests/quality-gates/src
+  - backend/tests/quality-gates/gradle.lockfile
+  - backend/tests/integration/src
+  - backend/tests/integration/gradle.lockfile
+  - infra/postgres/migrations
+  - scripts/environment
+  result_contract:
+    type: exit-code
+    completeness_guarantee: Backend Gradle deliveryFull enforces non-empty, non-skipped Java tests and runs architecture,
+      source, migration, persistence, runtime-smoke, and boot-jar delivery tasks.
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    pass_exit_code: 0
+- check_id: eng.extension.quality
+  module: extension
+  command:
+  - node
+  - extension/scripts/quality-check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 600
+  scope: repository-baseline
+  triggers:
+  - path: extension/
+  module_dependencies:
+  - backend
+  required_environment:
+  - node
+  - npm
+  - java-25-temurin
+  input_paths:
+  - extension/src
+  - extension/tests
+  - extension/scripts
+  - extension/tsconfig.json
+  - extension/package.json
+  - extension/package-lock.json
+  - extension/manifest.json
+  - scripts/environment
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - phase
+    - unit_tests
+    - browser_smoke
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum: {}
+    equals: {}
+- check_id: eng.extension.quality-on-change
+  module: extension-change
+  command:
+  - node
+  - extension/scripts/quality-check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 600
+  scope: change-targeted
+  triggers:
+  - path: extension/
+  - path: harness/module-checks.yaml
+  module_dependencies:
+  - backend
+  required_environment:
+  - node
+  - npm
+  - java-25-temurin
+  input_paths:
+  - extension/src
+  - extension/tests
+  - extension/scripts
+  - extension/tsconfig.json
+  - extension/package.json
+  - extension/package-lock.json
+  - extension/manifest.json
+  - scripts/environment
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - phase
+    - unit_tests
+    - browser_smoke
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum: {}
+    equals: {}

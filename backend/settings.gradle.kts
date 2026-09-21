@@ -26,6 +26,7 @@ mapOf(
     ":apps:worker" to "apps/worker",
     ":tests:architecture" to "tests/architecture",
     ":tests:quality-gates" to "tests/quality-gates",
+    ":tests:integration" to "tests/integration",
 ).forEach { (path, directory) ->
     include(path)
     project(path).projectDir = file(directory)

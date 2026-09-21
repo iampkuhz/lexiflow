@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lexiflow.acceptance-records.v3",
+  "title": "LexiFlow formal acceptance records",
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "uuid": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "result": {
+      "enum": [
+        "PASS",
+        "BLOCKED",
+        "FAIL"
+      ]
+    },
+    "descriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "locator",
+        "sha256"
+      ],
+      "properties": {
+        "locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "submission_id",
+        "task_requirements",
+        "submitter_identity",
+        "runtime_proof",
+        "authority",
+        "producer",
+        "change_report",
+        "diff",
+        "verification_freeze",
+        "changed_file_snapshots",
+        "content_hash"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "lexiflow.acceptance-submission.v4"
+        },
+        "submission_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "change_report": {
+          "$ref": "#/$defs/descriptor"
+        },
+        "diff": {
+          "$ref": "#/$defs/descriptor"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "validation_id",
+        "submission_id",
+        "submission_content_hash",
+        "validator_identity",
+        "runtime_proof",
+        "authority",
+        "verification_report",
+        "result",
+        "content_hash"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "lexiflow.acceptance-validation.v3"
+        },
+        "validation_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "submission_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "submission_content_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "verification_report": {
+          "$ref": "#/$defs/descriptor"
+        },
+        "result": {
+          "$ref": "#/$defs/result"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "review_id",
+        "submission_id",
+        "validation_id",
+        "submission_content_hash",
+        "validation_content_hash",
+        "reviewer_identity",
+        "runtime_proof",
+        "authority",
+        "findings",
+        "result",
+        "content_hash"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "lexiflow.acceptance-review.v3"
+        },
+        "review_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "result": {
+          "$ref": "#/$defs/result"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "check_id",
+        "submission_id",
+        "validation_id",
+        "review_id",
+        "submission_content_hash",
+        "validation_content_hash",
+        "review_content_hash",
+        "conditions",
+        "result",
+        "content_hash"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "lexiflow.acceptance-check.v3"
+        },
+        "check_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "result": {
+          "const": "PASS"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "reason": {
+          "const": ""
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "approval_id",
+        "gate_id",
+        "decision",
+        "subject_task_id",
+        "subject_task_version",
+        "subject_change_version",
+        "subject_check_content_hash",
+        "statement",
+        "approved_at",
+        "content_hash"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "lexiflow.user-approval.v1"
+        },
+        "approval_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "gate_id": {
+          "pattern": "^G[1-9][0-9]*$"
+        },
+        "decision": {
+          "const": "APPROVED"
+        },
+        "subject_task_id": {
+          "type": "string"
+        },
+        "subject_task_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "subject_change_version": {
+          "type": "string"
+        },
+        "subject_check_content_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approved_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  ],
+  "$comment": "Canonical duplicate-key-free JSON, SHA256 content binding, safe regular-file reads, immutable atomic publication; semantic/source checks remain in scripts.acceptance."
+}

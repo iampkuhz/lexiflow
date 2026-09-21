@@ -5,7 +5,7 @@
 所有 Java 命令从仓库根通过启动器进入：
 
 ```bash
-python3 -m scripts.toolchain.java_gradle <gradle-task> [gradle-options]
+python3 -m scripts.environment.java_exec backend/gradlew -p backend <gradle-task> [gradle-options]
 ```
 
 启动器选择仓库规定的 Java 与 Wrapper；不要直接以全局 `gradle` 或系统 Java 替代。根聚合、版本与项目依赖见 `backend/build.gradle.kts`、`backend/settings.gradle.kts` 和 `harness/java-product.manifest.yaml`。

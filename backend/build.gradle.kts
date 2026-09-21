@@ -99,7 +99,22 @@ project(":platform:adapters") {
             "lexiflow.postgres.test.jdbcUrl",
             providers.environmentVariable("LEXIFLOW_POSTGRES_TEST_JDBC_URL").getOrElse(""),
         )
+        systemProperty(
+            "lexiflow.postgres.migrations.dir",
+            rootProject.projectDir.parentFile.resolve("infra/postgres/migrations").absolutePath,
+        )
     }
+    tasks.register<JavaExec>("postgresMigrate") {
+        group = "application"
+        description = "Explicitly applies backend-owned PostgreSQL schema migrations."
+        classpath = platformSourceSets["main"].runtimeClasspath
+        mainClass.set("io.lexiflow.lexicon.platform.persistence.PostgresMigrationMain")
+        workingDir(rootProject.projectDir.parentFile)
+        providers.gradleProperty("postgresMigrateArgs").orNull?.let { raw ->
+            args(raw.split("\u001f"))
+        } ?: throw GradleException("postgresMigrate requires -PpostgresMigrateArgs=<jdbc-url>\u001f<migrations-dir>[\u001f<target-version>]")
+    }
+
     tasks.register<JavaExec>("lexiconImport") {
         group = "application"
         description = "Runs the offline LexiFlow lexicon importer."
@@ -137,6 +152,32 @@ project(":tests:architecture") {
 
 project(":tests:quality-gates") {
     dependencies.add("testImplementation", junitJupiter)
+}
+
+project(":tests:integration") {
+    val integrationSourceSets = extensions.getByType<SourceSetContainer>()
+    val runtimeSmoke = integrationSourceSets.create("runtimeSmoke")
+    configurations["runtimeSmokeImplementation"].extendsFrom(configurations["testImplementation"])
+    configurations["runtimeSmokeRuntimeOnly"].extendsFrom(configurations["testRuntimeOnly"])
+    dependencies {
+        add("runtimeSmokeImplementation", junitJupiter)
+        add("runtimeSmokeImplementation", dependencies.project(":platform:adapters"))
+        add("runtimeSmokeRuntimeOnly", "org.postgresql:postgresql")
+        add("runtimeSmokeRuntimeOnly", junitPlatformLauncher)
+    }
+    tasks.register<Test>("runtimeSmokeTest") {
+        group = LifecycleBasePlugin.VERIFICATION_GROUP
+        description = "Runs isolated PostgreSQL/Redis protocol, migration, API health, and worker startup smoke."
+        dependsOn(":apps:api:bootJar", ":apps:worker:bootJar")
+        testClassesDirs = runtimeSmoke.output.classesDirs
+        classpath = runtimeSmoke.runtimeClasspath
+        useJUnitPlatform()
+        systemProperty("lexiflow.postgres.test.jdbcUrl", providers.environmentVariable("LEXIFLOW_POSTGRES_TEST_JDBC_URL").getOrElse(""))
+        systemProperty("lexiflow.redis.test.endpoint", providers.environmentVariable("LEXIFLOW_REDIS_TEST_ENDPOINT").getOrElse(""))
+        systemProperty("lexiflow.migrations.dir", rootProject.projectDir.parentFile.resolve("infra/postgres/migrations").absolutePath)
+        systemProperty("lexiflow.repository.root", rootProject.projectDir.parentFile.absolutePath)
+        testLogging { events("failed") }
+    }
 }
 
 val productSourceFiles = fileTree(rootDir) {
@@ -230,7 +271,7 @@ tasks.register("qualityFull") {
 tasks.register("deliveryFull") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
     description = "Runs the single full Java delivery aggregate: quality checks and both boot jars."
-    dependsOn("qualityFull", "productBootJar")
+    dependsOn("qualityFull", ":platform:adapters:postgresIntegrationTest", ":tests:integration:runtimeSmokeTest", "productBootJar")
 }
 
 tasks.register("spotlessApply") {

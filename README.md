@@ -17,17 +17,18 @@ LexiFlow 在 YouTube 英文字幕上提供少量、结合语境的中文词语�
 后端固定 Java 25；Python 只承载 Harness、Gate 和工程脚本。唯一工程与调度规则在 [AGENTS.md](AGENTS.md) 与 [harness](harness/README.md)。
 
 ```bash
-python3 -m scripts.gates.planning --root .
-python3 -m unittest discover -s tests/harness -p 'test_*.py'
-python3 scripts/toolchain/java_gradle.py --no-daemon clean deliveryFull
+python3 -m scripts.repository.planning_check --root .
+python3 -m scripts.repository.quality --root . --mode tests
+python3 -m scripts.environment.java_exec backend/gradlew -p backend deliveryFull --console=colored --rerun-tasks --no-build-cache
 ```
 
-公开 Gate 的三层验收消费冻结合同和收据；Java 直接工程验证与正式任务收据分别记录，操作见[校验手册](docs/development/validation.md)。
+公开验收消费冻结合同和收据；Java 直接工程验证与正式任务收据分别记录，操作见[校验手册](docs/development/validation.md)。
 
 ```bash
-python3 scripts/gates/cli.py run --mode incremental
+python3 scripts/check_changes.py
+python3 scripts/check_repository.py
 ```
 
-这个入口要求可信证据包与签发者上下文，缺失如实 FAIL；旧收据不能证明修改后的输入。
+正式独立认证使用 `python3 -m scripts.acceptance validate`；它要求冻结输入与独立执行，缺失如实 BLOCKED；旧收据不能证明修改后的输入。
 
 文档维护和本机 skill 接入命令见 [Harness 使用说明](harness/README.md)。

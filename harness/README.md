@@ -5,13 +5,21 @@
 - `manifest.yaml`：项目类型、公开命令与文档入口。
 - `agent-runtime.manifest.yaml`：客户端拥有 Session/checkout 的最小运行契约。
 - `agent-policy.manifest.yaml`：隐私、Git、子任务、Qoder 调度和结果语义。
-- `gate-check-registry.yaml`：按 catalog 顺序冻结的 fixed-command 检查清单。
-- `phase-task-contract-profiles.yaml`：阶段文档型任务的封闭输入与语义断言；不包含自由命令。
+- `module-checks.yaml`：模块级检查声明。
+- `java-product.manifest.yaml`：Java 产品构建与验证规则。
 
-`python3 -m scripts.gates.registry_profiles --root . --check` 验证 profile、catalog 与
-registry 的确定性投影。`python3 -m scripts.gates.task_contracts --task-id <exact-id>`
-只接受 profile 中的稳定 Task；`LF-TSK-ARCH-0008` 在缺少精确用户批准标记时返回
-`BLOCKED`。
+## 脚本归属
+
+`scripts/` 只保存可跨阶段复用且具稳定命令或库消费者、直接测试覆盖的仓库能力。一次性导入、诊断、迁移辅助或仅为当前 OpenSpec 变更服务的脚本必须放在 ignored `tmp/phase-tools/<change-id>/`；它们不得进入公开 manifest、产品运行时或文档的长期命令。只有用户明确批准、补齐稳定合同和测试后，才可提升到 `scripts/`。
+
+`python3 -m scripts.repository.planning_check --root .` 验证 planning catalog
+的静态一致性。
+
+### 目录结构
+
+日常检查的唯一入口是 `scripts/check_changes.py` 与 `scripts/check_repository.py`；正式验收的唯一公开入口是 `python3 -m scripts.acceptance submit|validate|review|check|status`。`scripts/verification/` 只拥有任务中立的声明、冻结输入、固定检查执行与报告；`scripts/acceptance/` 拥有任务来源、身份消费、正式记录、批准和 hash DAG。`scripts/repository/` 拥有计划静态一致性检查、文档治理、策略投影、本机 skill 与 hook 等仓库维护能力。
+
+`scripts/agents/` 独立拥有真实 Codex 身份适配、工作包原始执行记录和 Qoder 生命周期；`codex/` 与 `qoder/` 为其内部实现。Agent 模块不导入 acceptance；acceptance 只消费 agents 的公开 runtime facts 与 verification 的公开 API。
 
 ## Python 运行环境
 
@@ -23,24 +31,40 @@ python3 -m venv .local/lexiflow-python
 ```
 
 之后将上述解释器替换为命令前缀，例如
-`.local/lexiflow-python/bin/python -m scripts.gates.planning --root .`。`.local/` 是忽略的本机运行环境，不是 Gate evidence。
+`.local/lexiflow-python/bin/python -m scripts.repository.planning_check --root .`。`.local/` 是忽略的本机运行环境，不是 Gate evidence。
 
-运行证据写入 ignored 的 `tmp/quality/runs/<run-id>/`；Qoder 任务写入
+验证报告与正式记录分别写入 ignored 的 `tmp/quality/verification-reports/`、`tmp/quality/acceptance/`；Qoder 任务写入
 `tmp/qoder-tasks/<run-id>/`。Harness 不保存产品运行状态，也不把 active change 当成普通写入的权限令牌。
 
 日常 Verify 不是变更锁或 commit 准入。完成时运行：
 
 ```bash
-python3 scripts/gates/change_verify.py
-python3 scripts/gates/repository_verify.py run
+python3 scripts/check_changes.py
+python3 scripts/check_repository.py
 ```
 
-前者按最终 diff 执行 `change-targeted` checks，并输出 advisory `scope_review`；可选 change context 只帮助记录预期目录，范围变化和缺 context 均不阻断。后者不读取 diff/evidence，执行当前 checkout 的所有 `repository-baseline` checks 以及 registry/profile/planning 完整性。它的 `BLOCKED repository-readiness` 带稳定 remediation ID 和 doctor/bootstrap 入口，归属于仓库准备度。两类本地产物都在 ignored `tmp/quality/`，不构成正式 Gate receipt。
+前者按最终 diff 执行 `change-targeted` checks，并输出 advisory `scope_review`；`--expected-path` 只帮助自审，不是编辑或提交权限。后者不读取 Task、身份或验收记录，执行当前 checkout 的所有 `repository-baseline` checks。缺少必需运行环境返回 `BLOCKED` 并指出具体 requirement；验证入口不安装依赖或修改环境。两类本地产物都在 ignored `tmp/quality/`，不构成正式验收记录。
 
-`python3 -m scripts.harness.hooks install` 只安装非阻断提醒；它不自动执行 Verify，也不修改 change context。CI 必须独立调用 `repository_verify.py run`，不能信任 hook 是否运行。
+`python3 -m scripts.repository.hooks install` 只安装非阻断提醒；它不自动执行 Verify，也不修改 change context。CI 必须独立调用 `scripts/check_repository.py`，不能信任 hook 是否运行。
 
 
 ## 执行请求与启动诊断
+
+跨执行器调度由 `agent-policy.manifest.yaml.agent_dispatch` 统一约束：Qoder 路径明确失败或不可用后，父代理必须实际调用原生 Codex Terra 协作工具；只有同轮两条路径均失败才累计连续调度失败。成功接单清连续计数但保留历史。重复回调、自动 Goal 续轮、执行失败与验收失败均不是新的调度失败；到达上限停止该工作包自动派发，不以自动 Goal 的无进展轮次替代此计数。
+
+Qoder 派发前必须检查当前真实父任务的宿主等待兼容性。Goal 活跃或状态无法证明、且没有受支持的外部等待接入时，不启动 Qoder，转入 Terra 路由；不能用调用者自报能力、修改宿主数据库或暂停 Goal 绕过。没有 Goal 的回调模式仍需通过原身份、并发与写域检查。此检查是仓库的兼容性护栏，不声称修改了 Codex 调度器；检查后的宿主模式变化不在该快照的证明范围内。
+
+Terra 使用原生协作事件等待和续办，不要求 Qoder 的外部终态回调。父代理提交的派发结果必须绑定当前 attempt 和真实工具记录；字符串 `PASS`、任意 agent 名称或计划说明不能证明接单成功。启动状态未知或本任务已在途时，不得触发另一执行器重复工作。Qoder 运行/返工预算与跨执行器调度失败上限分别核算。
+
+`start/resume` 返回 Terra 派发动作时，父代理保留原 handoff，按返回的模型和推理参数调用原生 `spawn_agent`，并在子任务说明中绑定返回的工作包与 `attempt_id`。随后只提交当前父会话中该原生调用的 `call_id`：
+
+```bash
+python3 scripts/agents/qoder_task.py record-fallback --task <task.json> --attempt-id <attempt-id> --call-id <native-call-id>
+```
+
+该接口只读取对应的真实工具记录，不接收调用者编写的成功回执。缺失、未知或不匹配的响应不能清计数或再次派发；已消费的同一事件不得重复累计。派发成功只表示接单，不表示子任务实现或验收通过。派发停止只停止该工作包，不取消已运行的其他任务，不自动改变 Goal 状态。
+
+Terra 接单后，该工作包保持在途，不能因启动计数清零就再次派发。收到原生完成事件后，用宿主的单次 `list_agents` 终态快照作为证据，将对应调用的 `call_id` 提交给同一 `record-fallback` 接口；只接受已记录子代理句柄的完成事实。未知或仍在运行的状态不解除占用，也不自动重试。此动作不是定时轮询，更不是交付验收。
 
 执行请求的收尾与接手规则见 `agent-policy.manifest.yaml.execution_progress` 和
 `qoder_delegation.exhausted_budget_recovery`。预计超过 10 分钟且写入范围可隔离的任务，
@@ -54,6 +78,15 @@ python3 scripts/gates/repository_verify.py run
 核心 handoff 已具备身份、受限写入范围、验收、验证命令、agent profile 与规则上下文时，
 无关 Catalog 漂移或非核心范围冲突不得阻断派发。预算耗尽与阶段出口缺收据分别处理，不通过
 改 Task identity 重置预算，也不把 Qoder 无法执行误判为必须停止整个 Task。
+
+占用拒绝统一输出 `lexiflow.qoder-busy-routing.v1` 的 caller/owner repo、session、run、
+归属分类与 `next_action`，不读取或回显其他任务的 prompt、日志或配置。只有 runner 记录同时
+证明当前可信 Codex session、同一父 session、`AWAITING_CALLBACK` 和匹配 session 的 live Qoder
+进程时，`next_action` 才是
+`end-current-turn-await-callback`；同仓其他 session、跨仓/外部 CLI、lease、陈旧记录或未知
+占用均为 `BLOCKED` 且 `fallback-to-codex-subagent`。主 Agent 使用宿主协作工具完成降级，保留
+原工作包、Task/version、验收与已执行记录；runner 不伪造宿主派发，降级也不绕过写域冲突或
+host-wide lease 防护。
 
 Runner 加载 Qoder 的 `user,project,local` 配置源，保留用户已配置的模型/provider；
 仓库 profile、禁止递归委派和显式权限参数仍由 runner 绑定。历史账号失败不是当前
@@ -77,50 +110,23 @@ LLM 回合；结束回合是主 Agent 必须执行的交接动作。
 传递给 worker 和 CLI，直到真实 CLI 退出；不把仓库锁或 ps 快照当作跨 checkout 互斥。
 该机制覆盖本 Harness，外部直接启动的 Qoder 仅能通过进程预检发现。
 
-## 本机 Gate 身份与收据入口
+## 正式验收入口
 
-先在当前仓库的 Codex 任务中运行 `python3 scripts/gates/formal_gate.py doctor`。它只核对本机
-runtime 与 authority 配置，不运行交付检查、不签发验收。默认 adapter 读取 Codex
-session metadata 首行并核对实际 session、用户和 workspace；环境变量仅用于定位。
-这是**信任本机用户的来源校验**，不是平台加密认证，不能抵御同一用户恶意改写记录。
-同一 session 始终是同一 actor；同宿主无独立 session 的子代理不能充当独立签发者。
+正式验收只通过 `python3 -m scripts.acceptance` 的具名场景执行。`submit` 消费已持久化的 PASS 日常变更报告，并自动绑定 catalog Task 要求、冻结输入、快照和 producer 来源；它不接受调用者提供 actor、session、descriptor 或 Task version。委派实现只可提供 `producer-run-id`，由验收从 agents 公开事实解析并摘要绑定。`validate` 必须在不同真实 Codex task/session 中运行，调用 `scripts.verification` 公开 API，并对声明、task source、冻结 artifacts 与快照 fail closed。
 
-1. 产物执行者先完成当前 Task，运行 Change Verify 并阅读 scope review，再运行 Repository Verify。确认 scope review 后，运行 `python3 scripts/gates/certify_submit.py --task-id <exact-id> --run-id <change-verify-run-id> --confirm-scope-review <same-id>` 自动绑定当前 diff、snapshot、测试记录与真实 producer runtime。它只生成 subject evidence，不生成 issuer 或 validation receipt。Main singleton 可用 `python3 -m scripts.harness.local_codex_runtime --task-id <exact-id>` 绑定真实身份和当前合同；该命令只生成 binding/projection，不声称工作完成。
-2. 执行者使用 `scripts/harness/codex_work_package.py` / `scripts/gates/evidence_packet.py`
-   现有 materializer 冻结完整来源，明确交付唯一 evidence packet locator。
-   `LEXIFLOW_GATE_EVIDENCE_PACKET` 只是这个路径的传递方式，不是用户编写的 identity JSON。
-3. 在**不同真实 Codex 任务会话**执行
-   `python3 scripts/gates/formal_gate.py run --mode incremental --evidence-packet <locator>`。
-   未传 issuer 时，由 adapter 自动生成一次新鲜 authority evidence 与 issuer；显式传入的
-   过期 issuer 不会偷偷替换，旧文件也不会更新时间。该命令实际执行 TASK_VALIDATION。
-4. 独立 reviewer 消费 validation receipt、冻结 diff 和只读 review evidence；随后按原有
-   INDEPENDENT_REVIEW、CATALOG_DECISION 合同串行发布收据，后两层不得重跑交付命令。
-   Reviewer 必须同时独立于产物执行者和 validation issuer，不能只换 actor 名称。
-   review/catalog 的 typed evidence 先用
-   `python3 scripts/gates/evidence_packet.py publish-layer-evidence --input <canonical-json> --publication-id <uuid-v4>`
-   发布成不可变 descriptor，再由 `prepare-layer` 绑定到本层 packet；该命令只保存 reviewer
-   已明确给出的 decision/findings/receipt descriptors，绝不默认 PASS 或签发 Gate。
-5. G1 闭包及出口的三层收据全部 current/PASS，且用户批准有效，才可更新阶段状态。
-   `doctor`、绑定成功或静态检查 PASS 均不能替代该条件。
+持久化和读取会验证完整 report schema、当前检查声明摘要、选择/执行覆盖、配置与输入指纹及输出 artifact；Task 缺少显式 `required_check_ids` 时正式提交失败关闭，等待 catalog 集成而不是退化为 baseline-only。`review` 与 `check` 还会只读重算完整冻结闭包，但不会执行检查命令。
 
-需要先审阅纯 plan 时，先显式运行
-`python3 scripts/gates/formal_gate.py prepare-issuer --evidence-packet <locator> --receipt-kind TASK_VALIDATION`，
-再把返回的 issuer locator 传给 `plan --issuer-packet`。`plan` 本身仍然零写入。
-缺 subject evidence、真实来源失效、输入漂移或自审均应停止并报告具体缺项；不再要求
-用户提供本仓库未接入的 Desktop 受保护 attestation 服务，也不扫描旧目录猜测本次 evidence。
+`review` 只消费 submission、validation 和调用者明确给出的真实审查意见；reviewer 必须独立于 producer 与 validator，且不会启动交付命令。`check` 只校验 validation/review/dependency records、显式用户批准与内容 hash DAG，也不会启动交付命令。依赖或 approval 尚未到位时返回 `BLOCKED` 且不发布终态；条件补齐后可重核同一 submission，成功记录幂等返回。每类已发布记录均在 ignored `tmp/quality/acceptance/` 使用 UUID 与原子一次性发布；没有独立生产 session 时，fixture 结果只能证明工程链路，不能声称正式 PASS。
 
-`planning/workstreams.yaml` 是全量 catalog。Task receipt 的 `task_source.sha256` 是目标 Task
-加所属 workstream 的 canonical projection hash，而不是整份 YAML 的 hash；因此其他 Task 的
-新增、版本更新或状态改动不会使该 Task 的 receipt 过期，目标 Task 自身、owner 或依赖改动仍会。
 
 ## 共享策略与文档治理
 
 `agent-policy.manifest.yaml` 是共享调度策略真源；`policy-projections.yaml` 只描述兼容字段的投影位置。runtime、任务模板和 catalog 的字段形状保持兼容，修改共享值后显式执行：
 
 ```bash
-python3 -m scripts.harness.policy_projection --write
-python3 -m scripts.harness.policy_projection --check
-python3 -m scripts.harness.docs_check
+python3 -m scripts.repository.policy_projection --write
+python3 -m scripts.repository.policy_projection --check
+python3 -m scripts.repository.docs_check
 ```
 
 `--write` 只更新声明的投影字段，保留其他手写内容；`--check` 不修改文件。文档检查验证链接、锚点、图源围栏、入口大小和 docs 标题的层级十进制序号；重排标题时保留仍被引用的旧锚点。它要求父页保留核心模型和边界；仅在细节确有必要时放入同名子目录，且不规定子页数量、篇幅或模板。候选方案、方案比较和 A/B/C 选项不能进入 docs，文档只陈述已确定的方案供校验。它不替代中文语义、图文一致性或视觉审查。
@@ -130,8 +136,8 @@ python3 -m scripts.harness.docs_check
 `documentation-policy.yaml` 声明两个按需技能。只从 `CODEX_HOME/skills`（默认用户主目录下的 `.codex/skills`）引用现有安装，不复制实现、不自动下载、不修改用户配置：
 
 ```bash
-python3 -m scripts.harness.local_skills check
-python3 -m scripts.harness.local_skills link
+python3 -m scripts.repository.local_skills check
+python3 -m scripts.repository.local_skills link
 ```
 
 可用 `--source` 显式指定安装根目录；绝对路径只出现在本地检查结果中，不写入共享清单。逐 skill 链接位于忽略的 `.agents/skills/`。同目标重复执行不改变内容，已有不同目标拒绝覆盖，缺源返回 `BLOCKED`。Codex 发现这些链接后按需读取 `SKILL.md`；Qoder 通过项目入口显式读取，不依赖自动发现。

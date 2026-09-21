@@ -7,7 +7,7 @@ protected_roots:
 - openspec/
 - planning/
 - backend/
-- clients/chrome-extension/**
+- extension/**
 - AGENTS.md
 context_hygiene:
   shared_rule_locations:
@@ -239,7 +239,7 @@ subagent_protocol:
   codex_work_package_result:
     schema_version: lexiflow.codex-work-package-result.v1
     schema_locator: harness/codex-work-package-result.schema.json
-    publisher: scripts/harness/codex_work_package.py
+    publisher: scripts/agents/codex_work_package.py
     layout: tmp/quality/codex-work-packages/{run_id}/tasks/{task_id}/{task-projection,outcome,completion,signal}.json
     completion_locator: tmp/quality/codex-work-packages/{run_id}/package-completion.json
     task_keyset: exact-task-ids
@@ -247,7 +247,7 @@ subagent_protocol:
     publication: immutable-completion-before-signal
     legacy_layout_fallback: forbidden
     subprocess_or_log_result_inference: forbidden
-    verify_command: python3 -m scripts.harness.codex_work_package verify --run-id <run_id> --root .
+    verify_command: python3 -m scripts.agents.codex_work_package verify --run-id <run_id> --root .
   codex_work_package_task_projection:
     schema_version: lexiflow.codex-work-package-task-projection.v1
     unit: one-immutable-raw-task-per-target-catalog-task
@@ -362,7 +362,7 @@ subagent_protocol:
     catalog_estimate_rule: caller-10-to-360-or-exact-current-catalog-sum-when-catalog-is-used
     structured_result_required: true
     implementation_status: IMPLEMENTED
-    conformance_test: tests/harness/test_qoder_runner.py
+    conformance_test: tests/agents/test_qoder_runner.py
     owner_task: LF-TSK-QLT-0006
     owner_task_version: 2
     owner_change_version: 2.0.0
@@ -392,9 +392,9 @@ subagent_protocol:
     parent_client: exact-string-codex
   codex_runtime_binding:
     schema_version: lexiflow.codex-runtime-binding.v1
-    implementation: scripts/harness/codex_runtime.py
+    implementation: scripts/agents/codex/runtime_binding.py
     actor_source: owned-local-session-metadata-cross-checked-with-runtime-route
-    local_adapter: scripts/harness/local_codex_runtime.py
+    local_adapter: scripts/agents/local_codex_runtime.py
     local_trust_boundary: trusted-local-user-not-platform-cryptographic-attestation
     local_actor_id: codex-session-<actual-session-uuid>
     actor_stability: same-actual-agent-across-runs-and-attestations
@@ -407,13 +407,14 @@ subagent_protocol:
     fabricated_or_conflicting_runtime: FAIL
     binding_publication: immutable-before-projection-and-completion
     identity_authentication: local-source-provenance-not-JSON-structure-or-self-report
-  canonical_gate_materialization:
-    implementation: scripts/harness/codex_work_package.py
-    source: fixed-current-canonical-run-and-target-task
-    validator_owner: scripts/gates/evidence_packet.py
-    inputs: explicit-Main-attestation-snapshot-diff-test-descriptors
+  acceptance_submission:
+    implementation: scripts/acceptance/submit.py
+    source: fixed-current-verification-report-and-target-task
+    producer_facts_owner: scripts/agents/
+    delegated_producer: explicit-run-id-with-verified-task-completion-and-result
+    inputs: verification-report-id-task-id-explicit-scope-confirmation
     subprocess_log_inference_or_legacy_fallback: forbidden
-    formal_receipt_issuance: public-gate-cli-only
+    formal_receipt_issuance: public-acceptance-scenarios-only
   codex_main_task_projection:
     schema_version: lexiflow.codex-main-task-projection.v1
     executor: runtime-bound-main-task
@@ -424,7 +425,28 @@ subagent_protocol:
     caller_identity_or_executor_kind_authority: forbidden
     identity_source: same-immutable-codex-runtime-binding
     self-validation-or-self-review: forbidden
-    materializer: scripts/harness/codex_work_package.py
+    materializer: scripts/agents/local_codex_runtime.py
+agent_dispatch:
+  primary: qoder
+  fallback_model: gpt-5.6-terra
+  fallback_reasoning_effort: high
+  model_selection_basis: explicit-user-required-terra-fallback
+  max_consecutive_failures: 3
+  failure_unit: qoder-and-terra-both-unavailable-in-one-dispatch-attempt
+  success_effect: reset-consecutive-failures-preserve-history
+  identity: current-parent-repo-work-package-ordered-task-versions
+  replay_effect: no-new-attempt-or-counter-increment
+  unknown_start_effect: preserve-attempt-no-fallback-no-redispatch
+  execution_and_review_failures: separate-from-dispatch-failures
+  stop_effect: stop-package-dispatch-no-fourth-attempt-not-goal-status-change
+  host_wait_policy: reject-active-or-unknown-goal-without-supported-wait-adapter
+  host_wait_evidence: current-runtime-derived-read-only-goal-state
+  host_wait_caller_override: forbidden
+  host_mutations: forbidden
+  fallback_execution_owner: current-parent-native-codex-collaboration-tool
+  fallback_result_evidence: identity-bound-native-tool-result-not-self-reported-pass
+  codex_wait: native-collaboration-events-not-qoder-terminal-callback
+  safety_preconditions: identity-write-scope-no-duplicate-execution
 qoder_delegation:
   default_implementer: qoder
   default_permission_mode: bypass_permissions
@@ -437,8 +459,20 @@ qoder_delegation:
     unknown_status_blocks_dispatch: true
     codex_independent_work_allowed: true
     integration_validation: serial
+  busy_routing:
+    schema: lexiflow.qoder-busy-routing.v1
+    report_fields: [caller.repo, caller.session_id, owner.repo, owner.session_id, owner.run_id, ownership, next_action]
+    trusted_same_session_inflight: end-current-turn-await-callback
+    same_repo_other_session: fallback-to-codex-subagent
+    cross_repo_or_external_or_unknown: fallback-to-codex-subagent
+    stale_owner_record: fallback-to-codex-subagent
+    owner_evidence: current-trusted-codex-runtime-plus-runner-bound-task-plus-awaiting-continuation-plus-live-qoder-session-process
+    forbidden_owner_evidence: [pid-only, stale-lock-file, saved-resume-parent-session, external-cli-arguments]
+    fallback_preserves: [work_package_id, task_ids, task_versions, change_versions, acceptance, executed_records]
+    fallback_cannot_bypass: [compatible-write-scope, duplicate-dispatch-protection, host-wide-max-active-runs]
   max_rework_rounds: 1
   max_total_runs_per_task_before_main_review: 2
+  run_budget_scope: qoder-execution-history-not-combined-dispatch-failure-counter
   exhausted_budget_recovery:
     rule: 预算耗尽先由 Main 只读复核历史完成记录与当前输入；这不是整个 Catalog Task 永久禁止推进，也不是再次 Qoder 派发许可。
     continuation: 复核后保持原稳定 Task identity 与历史数据，按既有规模和身份合同选择 Main 或 Codex 接手；委派遵守当前模型策略，接手者不得自签 validation/review。

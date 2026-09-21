@@ -19,7 +19,8 @@
 出口文档合同的只读诊断命令为：
 
 ```bash
-python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0008
+python3 -m scripts.repository.planning_check --root .
+python3 -m scripts.acceptance status --submission-id <submission-id>
 ```
 
 它不签发收据。缺少精确批准标记时应记为 `BLOCKED`；实际检查失败保留 `FAIL`。只有用户决定与当前出口收据均有效，才具备后续准入。
@@ -30,4 +31,4 @@ python3 -m scripts.gates.task_contracts --task-id LF-TSK-ARCH-0008
 
 ## 1.6. 执行入口
 
-按 [Harness 本机 Gate 流程](../../../harness/README.md) 先运行 `doctor`，由产物执行者冻结当前 evidence，再由独立任务执行公开 Gate。过期收据需要按当前闭包重建三层链，不是重新启动会话即可刷新；新鲜 issuer 由本机 adapter 准备，无需用户编造身份文件或等待额外平台接口。
+按 [Harness 验收流程](../../../harness/README.md) 先持久化 PASS 日常报告并运行 `submit`，再由不同真实任务执行 `validate`、`review` 和 `check`。输入或来源漂移后要针对当前闭包重新送验；runtime authority 由本机 adapter 在签发时验证，无需用户编造身份文件。

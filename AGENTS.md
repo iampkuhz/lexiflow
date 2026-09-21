@@ -26,14 +26,15 @@
 
 - 开始任务先读 `harness/README.md` 与 `harness/manifest.yaml`，按工作类型加载对应合同；长期规范在 `openspec/specs/`，当前变更在 `openspec/changes/`。
 - 子任务前读 `harness/agent-policy.manifest.yaml` 的 `subagent_protocol` 与 `qoder_delegation`；超过 10 分钟且范围可隔离、或需大量新上下文而可简洁验收的任务优先派发。模型显式按 `codex_model_policy` 选择，遵守范围、身份、回调和并发合同。
-- 客户端运行边界见 `harness/agent-runtime.manifest.yaml`。共享字段为 policy 的确定性投影，不手工维护副本；更新后运行 `python3 -m scripts.harness.policy_projection --check`。
+- 客户端运行边界见 `harness/agent-runtime.manifest.yaml`。共享字段为 policy 的确定性投影，不手工维护副本；更新后运行 `python3 -m scripts.repository.policy_projection --check`。
 - 调用者不伪造 runner 身份；实现者不能自行签发 validation/review；完成信号与进程退出零不等于验收通过。集成验证串行，不覆盖其他写入者的修改。
 - 修改文档时读取 `harness/documentation-policy.yaml`；图表生成/校验按其中 skill 声明加载 `feipi-plantuml-generate-diagram`，仅 skill 工程维护加载 `feipi-skill-govern`。缺少工具不得假装已执行；本机接入见 `harness/README.md`。
 
 ## 验证与 Git
 
-- Java 源码格式、静态分析、注释、架构和测试规则由 Gradle 下的 Spotless、Checkstyle、PMD、Java quality gate、ArchUnit、JUnit 与 JaCoCo 唯一执行；Python Gate 只负责规划、编排、证据、收据和跨产物治理，不得重复扫描 Java 源码实现同义规则。
+- Java 质量检查由 Gradle 唯一执行；Python Gate 只编排证据/收据，不重复扫描 Java。
 - 功能交付只在 `TASK_VALIDATION` 执行确定性检查和业务测试；`INDEPENDENT_REVIEW` 只复核冻结 diff 与 validation evidence；`CATALOG_DECISION` 只验证 validation/review/dependency receipt 和 hash DAG。后两层不得重跑交付命令。
 - 结果只使用 `PASS`、`BLOCKED`、`FAIL`；必需检查未运行或跳过不得称 `PASS`。
 - 完成前运行 Change/Repository Verify；不限制编辑或 commit。独立 Formal Gate 须取得同输入 Repository Verify PASS；业务代码还需产品测试。
+- `scripts/` 只放跨阶段、稳定且受测的能力；仅当前阶段使用的脚本放 ignored `tmp/phase-tools/<change-id>/`，不得成为公开入口或 Registry 输入。
 - 禁止自动 stage、commit、merge、rebase、reset、stash、force 或 push。Git 集成与发布只按用户明确指令执行。

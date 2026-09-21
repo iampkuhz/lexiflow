@@ -20,8 +20,8 @@
 ## 1.3. 静态检查
 
 ```bash
-python3 -m scripts.harness.docs_check
-python3 -m scripts.harness.policy_projection --check
+python3 -m scripts.repository.docs_check
+python3 -m scripts.repository.policy_projection --check
 git diff --check
 git diff --cached --check
 ```

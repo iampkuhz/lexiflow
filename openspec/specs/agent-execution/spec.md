@@ -72,7 +72,36 @@ Codex Sub-Agent 同时 MUST 最多一个。一个 Codex 工作包 MUST 聚合至
 
 ### Requirement: 主 Agent 无 busy wait
 
-派发后 SHALL 保存 continuation 并立即交还控制权；主 LLM MUST 结束当前回合，仅由终态 callback 续办。主 LLM MUST NOT sleep、查询时钟、轮询 status/result、进程或日志；不存在 300/600 秒后允许主 LLM 探测的特例。计时探测只属于非 LLM watchdog。新运行未终态的 status/result SHALL 返回交接状态及非零退出码，不提供活跃日志供轮询。Python runner 不能终止宿主 LLM 回合，主 Agent SHALL 遵守返回的 end-current-turn 动作。
+Qoder 派发后 SHALL 保存 continuation 并立即交还控制权；主 LLM MUST 结束当前回合，仅由匹配的终态 callback 续办。主 LLM MUST NOT sleep、查询时钟、轮询 status/result、进程或日志；不存在 300/600 秒后允许主 LLM 探测的特例。计时探测只属于非 LLM watchdog。新运行未终态的 status/result SHALL 返回交接状态及非零退出码，不提供活跃日志供轮询。Python runner 不能终止宿主 LLM 回合，主 Agent SHALL 遵守返回的 end-current-turn 动作。Codex 子代理 SHALL 使用宿主原生协作事件，不得等待不会产生的 Qoder 回调。
+
+### Requirement: 宿主等待兼容性
+
+Qoder preflight、start 与 resume MUST 通过真实当前父会话绑定的只读宿主状态检查。宿主 Goal 活跃或状态未知、且没有受支持的外部等待适配器时，仓库入口 SHALL 在创建 Qoder 进程前拒绝该执行路径并返回 Codex 降级动作。调用者提供的能力布尔值、仓库提示词或 Goal 状态修改 MUST NOT 作为门控证据。该检查只证明派发时兼容性，不证明未来宿主模式不变或宿主调度器已经修复。
+
+#### Scenario: 活跃 Goal 无外部等待支持
+
+- **Given** 当前父任务的真实 Goal 活跃且宿主没有受支持的等待接入
+- **When** 调用任一 Qoder 派发入口
+- **Then** SHALL 不创建 Qoder 运行，并请求原生 Codex 降级
+- **And** SHALL NOT 以暂停目标、改宿主数据库或循环唤醒实现等待
+
+### Requirement: 组合调度失败
+
+跨执行器顺序、失败阈值与模型 SHALL 读取共享 policy 的 agent_dispatch。一次调度 SHALL 绑定同一父任务、仓库、工作包、任务版本与 attempt；Qoder 明确失败或不可用后 MUST 尝试 Codex 降级，只有双方均明确失败才增加连续调度失败。接单成功 SHALL 清连续计数但保留历史。回调重放、同任务在途、未知启动、执行失败与验收失败 MUST NOT 当作新一轮调度失败；身份和写域条件 MUST NOT 被降级绕过。
+
+#### Scenario: 降级接单成功
+
+- **Given** 本轮 Qoder 明确不可用
+- **When** 当前父任务通过原生协作工具成功派发指定模型，并提交绑定 attempt 的真实工具记录
+- **Then** SHALL 记录本轮成功并清连续失败计数
+- **And** SHALL 保留历史；任意自报成功或其他工作包的句柄 MUST NOT 清计数
+
+#### Scenario: 连续组合失败达到上限
+
+- **Given** 同一工作包连续组合调度失败已达到共享 policy 上限
+- **When** 再次请求自动派发
+- **Then** SHALL 停止且不启动任一执行器
+- **And** SHALL NOT 用自动 Goal 续轮数代替组合调度记录
 
 #### Scenario: 任务仍在运行
 

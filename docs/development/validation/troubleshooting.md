@@ -5,7 +5,7 @@
 - 启动器/Java 版本错误：先修 `LEXIFLOW_JAVA_HOME` 或仓库 JDK，不改 Wrapper、锁或任务参数。
 - Gradle/测试失败：保留完整输出，用一个定向任务定位，再回到聚合交付。
 - 文档链接、围栏或策略漂移：运行 `docs_check` 与 `policy_projection --check`，修复真源而不是绕过检查。
-- Gate 缺 evidence/issuer packet：记 `FAIL` 或 `BLOCKED` 的实际原因，不从旧运行取值。
+- 验收缺 submission、runtime source、validation/review 或依赖记录：记 `FAIL` 或 `BLOCKED` 的实际原因，不从旧运行取值。
 
 ## 1.2. Qoder 诊断
 

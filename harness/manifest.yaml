@@ -18,8 +18,6 @@ agent_contract:
   policy_manifest: harness/agent-policy.manifest.yaml
   runtime_manifest: harness/agent-runtime.manifest.yaml
   module_boundaries: harness/module-boundaries.yaml
-  gate_check_registry: harness/gate-check-registry.yaml
-  task_contract_profiles: harness/phase-task-contract-profiles.yaml
   java_product: harness/java-product.manifest.yaml
   documentation_policy: harness/documentation-policy.yaml
   policy_projections: harness/policy-projections.yaml
@@ -30,30 +28,45 @@ agent_contract:
   platform_entries:
     codex_agents: .codex/agents/
     qoder_agents: .qoder/agents/
+  acceptance_records_schema: harness/acceptance-records.schema.json
 public_executables:
-  docs_check: python3 -m scripts.harness.docs_check
-  policy_projection: python3 -m scripts.harness.policy_projection
-  local_skills: python3 -m scripts.harness.local_skills
-  local_codex_runtime: python3 -m scripts.harness.local_codex_runtime
-  quality_gate: python3 scripts/gates/formal_gate.py
-  change_verify: python3 scripts/gates/change_verify.py
-  repository_verify: python3 scripts/gates/repository_verify.py run
-  repository_readiness_doctor: python3 scripts/gates/repository_verify.py doctor
-  certify_submit: python3 scripts/gates/certify_submit.py
-  java_gradle: python3 scripts/toolchain/java_gradle.py
-  postgres_test: python3 scripts/toolchain/postgres_test.py verify --scope all
-  task_contract_check: python3 -m scripts.gates.task_contracts --task-id LF-TSK-...
-  registry_profile_check: python3 -m scripts.gates.registry_profiles --root . --check
-  qoder_task: python3 scripts/harness/qoder_task.py
+  docs_check: python3 -m scripts.repository.docs_check
+  policy_projection: python3 -m scripts.repository.policy_projection
+  local_skills: python3 -m scripts.repository.local_skills
+  hooks: python3 -m scripts.repository.hooks
+  local_codex_runtime: python3 -m scripts.agents.local_codex_runtime
+  change_verify: python3 scripts/check_changes.py
+  repository_verify: python3 scripts/check_repository.py
+  planning_check: python3 -m scripts.repository.planning_check --root .
+  qoder_task: python3 scripts/agents/qoder_task.py
+  acceptance: python3 -m scripts.acceptance submit|validate|review|check|status
+script_governance:
+  durable_script_roots:
+  - scripts/repository/
+  - scripts/agents/
+  - scripts/verification/
+  - scripts/acceptance/
+  - scripts/environment/
+  durable_requires:
+  - reusable-repository-contract
+  - stable-command-or-library-consumer
+  - direct-test-coverage
+  phase_only_root: tmp/phase-tools/
+  phase_only_rules:
+  - ignored
+  - no-registry-entry
+  - no-public-manifest-entry
+  - no-product-runtime-import
+  promotion: explicit-user-approved-contract-and-tests
 quality:
-  delivery_command: python3 scripts/gates/change_verify.py
-  repository_baseline_command: python3 scripts/gates/repository_verify.py run
-  full_command: python3 scripts/gates/formal_gate.py run --mode full
+  delivery_command: python3 scripts/check_changes.py
+  repository_baseline_command: python3 scripts/check_repository.py
+  full_command: python3 -m scripts.acceptance validate --submission-id <submission-id>
   layering:
-    task_validation: executes-frozen-selected-checks
-    independent_review: consumes-task-validation-receipt
-    catalog_decision: consumes-validation-and-review-receipts
-    java_delivery_executor: gradle-java
+    submit: binds-PASS-change-verify-task-requirements-and-producer-runtime
+    validate: independent-verification-public-api-on-frozen-input
+    review: consumes-frozen-validation-and-explicit-review-opinion
+    check: consumes-validation-review-dependency-hash-DAG
   result_values:
   - PASS
   - BLOCKED
@@ -74,7 +87,7 @@ docs:
 - docs/architecture/decisions.md
 - docs/development/validation.md
 - docs/development/gate-control-plane.md
-- docs/development/dispatch-preflight.md
+- docs/development/repository-glossary.md
 - docs/development/toolchain-reproduction.md
 - docs/roadmap/master-plan.md
 - docs/roadmap/phase-1-status.md
