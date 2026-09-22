@@ -71,7 +71,14 @@ public final class LexiconImportMain {
   private static void executeStardict(Arguments command, String digest, StardictCsvReader reader)
       throws IOException {
     if (command.action().equals("validate")) {
-      printStardictScan("PASS", reader.read(command.input(), ignored -> {}), digest);
+      var canonicalSurfaces = LexiconImportPlan.canonicalSurfaceValidator();
+      var scan =
+          reader.read(
+              command.input(),
+              source ->
+                  LexiconImportPlan.prepareNext(
+                      source.row(), 1, digest, command.acquiredAt(), canonicalSurfaces));
+      printStardictScan("PASS", scan, digest);
       return;
     }
     if (command.action().equals("prewarm-report")) {

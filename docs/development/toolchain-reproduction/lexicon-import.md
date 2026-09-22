@@ -92,14 +92,13 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend \
   :platform:adapters:lexiconImport "-PlexiconImportArgs=$LEXICON_ARGS"
 ```
 
-`validate` 流式扫描原始 CSV，输出 `entries`、归并的派生词数和跳过原因；它不连接数据库，也不会将
-3 百万行载入内存。`prewarm-report` 只保持 `--limit` 个候选，用于人工检查频率、复杂词表与 Oxford 排除。
+`validate` 流式扫描原始 CSV，执行与发布一致的领域投影和跨行 canonical 表面校验，输出 `entries`、归并的派生词数和跳过原因；它不连接数据库，不保留原始行或完整领域词条；为检出跨行重复，保留随唯一 lemma/alias 数量增长的 canonical 表面索引。`prewarm-report` 只保持 `--limit` 个候选，用于人工检查频率、复杂词表与 Oxford 排除。
 
 确认上述输出后启动本机 PostgreSQL 并发布：
 
 ```bash
 podman compose -f infra/local/compose.yaml up -d
-JDBC_URL='jdbc:postgresql://127.0.0.1:15432/lexiflow?user=postgres'
+JDBC_URL='jdbc:postgresql://127.0.0.1:15432/lexiflow?user=postgres&reWriteBatchedInserts=true'
 MIGRATION_ARGS=$(printf '%s\037%s' "$JDBC_URL" "$PWD/infra/postgres/migrations")
 python3 -m scripts.environment.java_exec backend/gradlew -p backend \
   :platform:adapters:postgresMigrate "-PpostgresMigrateArgs=$MIGRATION_ARGS"
@@ -108,6 +107,8 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend \
   :platform:adapters:lexiconImport "-PlexiconImportArgs=$LEXICON_ARGS"
 ```
 
-发布以 500 条为一个已提交的 `STAGED` 分块；任意已发布版本在整个扫描期间继续可查询。中断后以相同
-输入摘要、`--batch-source-id` 和 `--batch-license-id` 重跑同一命令，导入从最后已提交的来源行继续；只有
+`reWriteBatchedInserts=true` 让 PostgreSQL JDBC 将批写合并传输，不改变 500 条事务与失败回滚边界。
+
+发布以 500 条为一个已提交的 `STAGED` 分块，词条、义项、词形与来源证据按 JDBC batch 写入；任意已发布版本在整个扫描期间继续可查询。中断后以相同
+输入摘要、`--batch-source-id` 和 `--batch-license-id` 重跑同一命令，导入从最后已提交的来源行继续，新的 canonical 表面会与该批次已提交记录复核。自然屈折形可返回多个 lemma，别名冲突仍拒绝；只有
 完整扫描完成才会切换为 `PUBLISHED`。若来源文件或参数改变，则使用新的发布批次，不复用旧的 `STAGED` 批次。

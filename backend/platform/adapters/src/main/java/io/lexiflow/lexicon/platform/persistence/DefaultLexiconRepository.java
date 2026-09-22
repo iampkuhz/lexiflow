@@ -100,6 +100,11 @@ final class DefaultLexiconRepository implements LexiconRepository {
           var entries =
               LexiconImportPlan.prepare(
                   rows, batch.version(), metadata.sourceDigest(), metadata.acquiredAt());
+          var existingOwners =
+              entryDao.findCanonicalOwners(
+                  batch.version(), LexiconImportPlan.canonicalSurfaces(entries));
+          var canonicalSurfaces = LexiconImportPlan.canonicalSurfaceValidator(existingOwners);
+          entries.forEach(planned -> canonicalSurfaces.register(planned.entry()));
           entryDao.insertEntries(entries, batch.version());
           evidenceDao.insertEvidence(entries, batch.version());
           batchDao.updateProcessed(batch.batchId(), processedThrough);

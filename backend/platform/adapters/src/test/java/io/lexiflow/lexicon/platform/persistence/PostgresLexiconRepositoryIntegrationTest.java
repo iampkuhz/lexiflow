@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.zaxxer.hikari.HikariDataSource;
 import io.lexiflow.lexicon.application.LexiconImportMetadata;
 import io.lexiflow.lexicon.application.LexiconImportRequest;
 import io.lexiflow.lexicon.application.LexiconImportRow;
@@ -39,7 +38,7 @@ class PostgresLexiconRepositoryIntegrationTest {
     schema = createSchema();
     isolatedJdbcUrl = withSchema(adminJdbcUrl, schema);
     assertEquals(
-        List.of(1, 2, 3, 4, 5),
+        List.of(1, 2, 3, 4, 5, 6),
         PostgresSchemaMigrator.apply(
             isolatedJdbcUrl, Path.of(requiredMigrationsDirectory()), null));
   }
@@ -60,7 +59,10 @@ class PostgresLexiconRepositoryIntegrationTest {
     assertEquals(
         "lexicon_entry_lookup_idx",
         scalar(isolatedJdbcUrl, "SELECT to_regclass('lexicon_entry_lookup_idx')"));
-    assertEquals("5", scalar(isolatedJdbcUrl, "SELECT max(version)::text FROM schema_migration"));
+    assertEquals("6", scalar(isolatedJdbcUrl, "SELECT max(version)::text FROM schema_migration"));
+    assertEquals(
+        "lexicon_inflection_lookup_idx",
+        scalar(isolatedJdbcUrl, "SELECT to_regclass('lexicon_inflection_lookup_idx')"));
   }
 
   @Test
@@ -71,15 +73,16 @@ class PostgresLexiconRepositoryIntegrationTest {
     var jdbcUrl = withSchema(adminJdbcUrl, testSchema);
     try {
       assertEquals(
-          List.of(1, 2, 3, 4, 5), PostgresSchemaMigrator.apply(jdbcUrl, migrationDirectory, null));
+          List.of(1, 2, 3, 4, 5, 6),
+          PostgresSchemaMigrator.apply(jdbcUrl, migrationDirectory, null));
       Files.writeString(
-          migrationDirectory.resolve("V006__failing_change.sql"),
+          migrationDirectory.resolve("V007__failing_change.sql"),
           "CREATE TABLE atomic_probe (id INTEGER PRIMARY KEY);\nSELECT 1 / 0;\n");
       assertThrows(
           SQLException.class,
           () -> PostgresSchemaMigrator.apply(jdbcUrl, migrationDirectory, null));
       assertEquals("", scalar(jdbcUrl, "SELECT COALESCE(to_regclass('atomic_probe')::text, '')"));
-      assertEquals("5", scalar(jdbcUrl, "SELECT max(version)::text FROM schema_migration"));
+      assertEquals("6", scalar(jdbcUrl, "SELECT max(version)::text FROM schema_migration"));
     } finally {
       dropSchema(testSchema);
     }
@@ -105,37 +108,103 @@ class PostgresLexiconRepositoryIntegrationTest {
 
   @Test
   void publishesAndReadsACompleteLexiconEntryThroughPostgres() throws Exception {
-    var dataSource = new HikariDataSource();
-    dataSource.setJdbcUrl(isolatedJdbcUrl);
-    try (dataSource;
-        var persistence = PostgresPersistence.open(isolatedJdbcUrl)) {
-      try (var connection = dataSource.getConnection()) {
-        assertTrue(connection.getMetaData().getDatabaseProductName().contains("PostgreSQL"));
-      }
-      var repository = persistence.repository();
-      assertEquals(0, repository.publishedVersion());
-      var published = repository.publish(request());
-      assertEquals(1, published);
-      assertEquals(1, repository.publishedVersion());
-      var entry =
-          repository
-              .findByForms(published, List.of("reliable", "dependable", "reliably"))
-              .getFirst();
-      assertEquals("reliable", entry.lemma());
-      assertEquals(
-          List.of("dependable"),
-          entry.aliases().stream().map(value -> value.normalizedForm()).toList());
-      assertEquals(
-          List.of("reliably"),
-          entry.inflections().stream().map(value -> value.normalizedForm()).toList());
-      assertEquals(
-          List.of("可靠的"), entry.senses().stream().map(value -> value.chineseGloss()).toList());
-      assertEquals(
-          List.of("reliable"),
-          repository.findPrewarmCandidates(published, 1).stream()
-              .map(value -> value.lemma())
-              .toList());
-    }
+    inMigratedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            assertEquals(0, repository.publishedVersion());
+            var published =
+                repository.publish(
+                    request(row("reliable", List.of("dependable"), List.of("reliably"))));
+            assertEquals(published, repository.publishedVersion());
+            var entry =
+                repository
+                    .findByForms(published, List.of("reliable", "dependable", "reliably"))
+                    .getFirst();
+            assertEquals("reliable", entry.lemma());
+            assertEquals(
+                List.of("dependable"),
+                entry.aliases().stream().map(value -> value.normalizedForm()).toList());
+            assertEquals(
+                List.of("reliably"),
+                entry.inflections().stream().map(value -> value.normalizedForm()).toList());
+            assertEquals(
+                List.of("可靠的"),
+                entry.senses().stream().map(value -> value.chineseGloss()).toList());
+            assertEquals(
+                List.of("reliable"),
+                repository.findPrewarmCandidates(published, 1).stream()
+                    .map(value -> value.lemma())
+                    .toList());
+          }
+        });
+  }
+
+  @Test
+  void returnsEveryEntryForAnAmbiguousInflection() throws Exception {
+    inMigratedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            var published =
+                repository.publish(
+                    request(
+                        row("hang", List.of(), List.of("hung")),
+                        row("sling", List.of(), List.of("hung"))));
+
+            assertEquals(
+                List.of("hang", "sling"),
+                repository.findByForms(published, List.of("hung")).stream()
+                    .map(value -> value.lemma())
+                    .sorted()
+                    .toList());
+          }
+        });
+  }
+
+  @Test
+  void keepsThePreviousPublishedVersionVisibleAcrossFailedAndResumedStaging() throws Exception {
+    inMigratedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            var previousPublished =
+                repository.publish(request(row("reliable", List.of(), List.of())));
+            var stagedMetadata = metadata('b');
+            var staged = repository.openOrResume(stagedMetadata);
+            assertEquals(previousPublished + 1, staged.version());
+
+            repository.stage(
+                staged, List.of(row("sling", List.of(), List.of("hung"))), 1, stagedMetadata);
+            var resumed = repository.openOrResume(stagedMetadata);
+            assertEquals(1, resumed.sourceRowsProcessed());
+            assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    repository.stage(
+                        resumed,
+                        List.of(row("rope", List.of("sling"), List.of())),
+                        2,
+                        stagedMetadata));
+
+            assertEquals(previousPublished, repository.publishedVersion());
+            assertEquals(
+                List.of("reliable"),
+                repository.findByForms(previousPublished, List.of("reliable")).stream()
+                    .map(value -> value.lemma())
+                    .toList());
+            var resumedAfterRollback = repository.openOrResume(stagedMetadata);
+            assertEquals(1, resumedAfterRollback.sourceRowsProcessed());
+            repository.stage(
+                resumedAfterRollback,
+                List.of(row("rope", List.of(), List.of())),
+                2,
+                stagedMetadata);
+            repository.publish(resumedAfterRollback, 2);
+
+            assertEquals(resumedAfterRollback.version(), repository.publishedVersion());
+          }
+        });
   }
 
   private static String requiredJdbcUrl() {
@@ -197,21 +266,46 @@ class PostgresLexiconRepositoryIntegrationTest {
     }
   }
 
-  private static LexiconImportRequest request() {
-    var source = new SourceReference("fixture", "MIT", "row-1");
-    var row =
-        new LexiconImportRow(
-            "reliable",
-            "可靠的",
-            "worthy of trust",
-            List.of("dependable"),
-            List.of("reliably"),
-            new LexiconPriority(4.2, 1, 900),
-            source,
-            source,
-            List.of(source),
-            true);
-    return new LexiconImportRequest(
-        List.of(row), new LexiconImportMetadata("a".repeat(64), "fixture", "MIT", Instant.EPOCH));
+  private static void inMigratedSchema(JdbcUrlTest test) throws Exception {
+    var testSchema = createSchema();
+    var jdbcUrl = withSchema(adminJdbcUrl, testSchema);
+    try {
+      assertEquals(
+          List.of(1, 2, 3, 4, 5, 6),
+          PostgresSchemaMigrator.apply(jdbcUrl, Path.of(requiredMigrationsDirectory()), null));
+      test.run(jdbcUrl);
+    } finally {
+      dropSchema(testSchema);
+    }
+  }
+
+  private static LexiconImportRequest request(LexiconImportRow... rows) {
+    return new LexiconImportRequest(List.of(rows), metadata('a'));
+  }
+
+  private static LexiconImportMetadata metadata(char digestCharacter) {
+    return new LexiconImportMetadata(
+        String.valueOf(digestCharacter).repeat(64), "fixture", "MIT", Instant.EPOCH);
+  }
+
+  private static LexiconImportRow row(
+      String lemma, List<String> aliases, List<String> inflections) {
+    var source = new SourceReference("fixture", "MIT", "row-" + lemma);
+    return new LexiconImportRow(
+        lemma,
+        "可靠的",
+        "fixture definition",
+        aliases,
+        inflections,
+        new LexiconPriority(4.2, 1, 900),
+        source,
+        source,
+        List.of(source),
+        true);
+  }
+
+  @FunctionalInterface
+  private interface JdbcUrlTest {
+    void run(String jdbcUrl) throws Exception;
   }
 }

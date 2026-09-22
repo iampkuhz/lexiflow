@@ -38,6 +38,41 @@ class DefaultLexiconRepositoryTest {
   }
 
   @Test
+  void rejectsCanonicalAliasCollisionAgainstPreviouslyStagedChunk() {
+    var events = new ArrayList<String>();
+    var transactionManager = new RecordingTransactionManager();
+    var repository = repository(events, transactionManager, false);
+    var metadata = new LexiconImportMetadata("a".repeat(64), "fixture", "MIT", Instant.EPOCH);
+    var batch = new io.lexiflow.lexicon.application.StagedLexiconImport(UUID.randomUUID(), 7, 0);
+
+    repository.stage(batch, List.of(row("alpha", List.of("beta"), List.of())), 1, metadata);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> repository.stage(batch, List.of(row("beta", List.of(), List.of())), 2, metadata));
+    assertEquals(List.of("entries:1", "evidence:1", "processed:1"), events);
+    assertEquals(1, transactionManager.commits);
+    assertEquals(1, transactionManager.rollbacks);
+  }
+
+  @Test
+  void rollsBackAStagedChunkBeforeItsRecoveryMarkerAdvances() {
+    var events = new ArrayList<String>();
+    var transactionManager = new RecordingTransactionManager();
+    var repository = repository(events, transactionManager, true);
+    var metadata = new LexiconImportMetadata("a".repeat(64), "fixture", "MIT", Instant.EPOCH);
+    var batch = new io.lexiflow.lexicon.application.StagedLexiconImport(UUID.randomUUID(), 7, 0);
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> repository.stage(batch, List.of(request().rows().getFirst()), 1, metadata));
+
+    assertEquals(List.of("entries:1"), events);
+    assertEquals(0, transactionManager.commits);
+    assertEquals(1, transactionManager.rollbacks);
+  }
+
+  @Test
   void rollsBackWhenEntryPersistenceFailsBeforePublication() {
     var events = new ArrayList<String>();
     var transactionManager = new RecordingTransactionManager();
@@ -78,9 +113,26 @@ class DefaultLexiconRepositoryTest {
         List.of(row), new LexiconImportMetadata("a".repeat(64), "fixture", "MIT", Instant.EPOCH));
   }
 
+  private static LexiconImportRow row(
+      String lemma, List<String> aliases, List<String> inflections) {
+    var source = new SourceReference("fixture", "MIT", lemma);
+    return new LexiconImportRow(
+        lemma,
+        "释义",
+        "definition",
+        aliases,
+        inflections,
+        new LexiconPriority(4.2, 1, 900),
+        source,
+        source,
+        List.of(source),
+        true);
+  }
+
   private static final class RecordingEntryDao implements LexiconEntryDao {
     private final List<String> events;
     private final boolean fail;
+    private final java.util.Map<String, String> canonicalOwners = new java.util.HashMap<>();
 
     RecordingEntryDao(List<String> events, boolean fail) {
       this.events = events;
@@ -98,6 +150,16 @@ class DefaultLexiconRepositoryTest {
     }
 
     @Override
+    public java.util.Map<String, String> findCanonicalOwners(
+        long version, Collection<String> surfaces) {
+      return canonicalOwners.entrySet().stream()
+          .filter(entry -> surfaces.contains(entry.getKey()))
+          .collect(
+              java.util.stream.Collectors.toUnmodifiableMap(
+                  java.util.Map.Entry::getKey, java.util.Map.Entry::getValue));
+    }
+
+    @Override
     public void insertEntries(
         List<io.lexiflow.lexicon.application.LexiconImportPlan.PlannedEntry> entries,
         long version) {
@@ -105,6 +167,15 @@ class DefaultLexiconRepositoryTest {
       if (fail) {
         throw new IllegalStateException("entry write failed");
       }
+      entries.forEach(
+          planned -> {
+            canonicalOwners.put(planned.entry().lemma(), planned.entry().lemma());
+            planned
+                .entry()
+                .aliases()
+                .forEach(
+                    alias -> canonicalOwners.put(alias.normalizedForm(), planned.entry().lemma()));
+          });
     }
 
     @Override
@@ -148,7 +219,9 @@ class DefaultLexiconRepositoryTest {
     }
 
     @Override
-    public void updateProcessed(UUID batchId, long processedThrough) {}
+    public void updateProcessed(UUID batchId, long processedThrough) {
+      events.add("processed:" + processedThrough);
+    }
 
     @Override
     public void completeStaged(

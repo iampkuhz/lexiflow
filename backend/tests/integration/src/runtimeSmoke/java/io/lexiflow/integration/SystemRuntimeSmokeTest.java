@@ -61,7 +61,7 @@ class SystemRuntimeSmokeTest {
     }
     var schemaJdbcUrl = jdbcUrl + (jdbcUrl.contains("?") ? "&" : "?") + "currentSchema=" + schema;
     assertEquals(
-        List.of(1, 2, 3, 4, 5),
+        List.of(1, 2, 3, 4, 5, 6),
         PostgresSchemaMigrator.apply(
             schemaJdbcUrl, Path.of(requiredProperty("lexiflow.migrations.dir")), null));
 

@@ -26,11 +26,11 @@ Enrichment 的 Annotation 决策记录。一个 Annotation 必须引用精确的
 `Alias` 表示同一 entry 的可检索拼写或固定别名；`Inflection` 表示可还原到同一 lemma 的
 屈折形。两者都保存原文、`normalized_form`、语言和所属 entry/version。
 
-1. 同一 `normalized_form` 在同一语言、词库版本和匹配类别内只能指向一个 entry。
+1. 同一语言和词库版本的 lemma/alias canonical 表面只能指向一个 entry；自然屈折形允许对应多个 lemma，候选查询保留全部引用，不由导入器猜测义项。
 2. 短语与单词可共享 token，但候选查询按最长匹配排序；重叠候选必须保留到 Enrichment
    决策，Lexicon 不猜测当前字幕义项。
 3. 大小写、Unicode 规范形和连续空白的差异仅在归一化时消除；标点不能静默拼接相邻 token。
-4. 不能归一或存在冲突时，导入批次必须拒绝发布，不得覆盖已发布版本。
+4. 不能归一、重复 lemma 或 canonical 表面冲突时，导入批次必须拒绝发布，不得覆盖已发布版本；自然屈折形歧义不作为冲突。
 
 ## 1.3. 来源、许可与发布
 

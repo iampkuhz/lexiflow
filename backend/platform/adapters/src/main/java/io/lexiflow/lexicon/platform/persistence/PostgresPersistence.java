@@ -3,6 +3,7 @@ package io.lexiflow.lexicon.platform.persistence;
 import com.zaxxer.hikari.HikariDataSource;
 import io.lexiflow.lexicon.application.LexiconRepository;
 import javax.sql.DataSource;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -25,11 +26,12 @@ public final class PostgresPersistence implements AutoCloseable {
    */
   public static LexiconRepository repository(DataSource dataSource) {
     var jdbc = JdbcClient.create(dataSource);
+    var batchJdbc = new JdbcTemplate(dataSource);
     var transaction = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
     return new DefaultLexiconRepository(
-        new PostgresLexiconEntryDao(jdbc),
+        new PostgresLexiconEntryDao(jdbc, batchJdbc),
         new PostgresLexiconImportBatchDao(jdbc),
-        new PostgresLexiconEvidenceDao(jdbc),
+        new PostgresLexiconEvidenceDao(batchJdbc),
         new LexiconEntryMapper(),
         transaction);
   }
