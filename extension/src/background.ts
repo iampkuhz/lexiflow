@@ -12,13 +12,14 @@ type CancelMessage = { type: "cancel-caption-hint"; requestId: string };
 
 const inFlight = new Map<string, AbortController>();
 
-async function requestHints(requestId: string, payload: CaptionHintRequest): Promise<ApiResult> {
-  if (!isCaptionHintRequest(payload) || requestId.length === 0 || requestId.length > 128) {
+async function requestHints(key: string, payload: CaptionHintRequest): Promise<ApiResult> {
+  if (!isCaptionHintRequest(payload)) {
     return { ok: false, reason: "invalid-request" };
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  inFlight.set(requestId, controller);
+  inFlight.get(key)?.abort();
+  inFlight.set(key, controller);
   try {
     const response = await fetch(API_URL, {
       method: "POST",
@@ -33,19 +34,25 @@ async function requestHints(requestId: string, payload: CaptionHintRequest): Pro
     return { ok: false, reason: controller.signal.aborted ? "aborted" : "network" };
   } finally {
     clearTimeout(timeout);
-    if (inFlight.get(requestId) === controller) inFlight.delete(requestId);
+    if (inFlight.get(key) === controller) inFlight.delete(key);
   }
 }
 
 chrome.runtime.onMessage.addListener(
-  (request: HintMessage | CancelMessage, _sender, sendResponse: (response: ApiResult | { ok: true }) => void) => {
+  (request: HintMessage | CancelMessage, sender, sendResponse: (response: ApiResult | { ok: true }) => void) => {
+    if (request?.type !== "caption-hints" && request?.type !== "cancel-caption-hint") return undefined;
+    if (typeof request.requestId !== "string" || request.requestId.length === 0 || request.requestId.length > 128 || sender.tab?.id === undefined) {
+      sendResponse({ ok: false, reason: "invalid-request" });
+      return undefined;
+    }
+    const key = `${sender.tab.id}:${sender.documentId ?? sender.frameId ?? 0}:${request.requestId}`;
     if (request?.type === "cancel-caption-hint") {
-      inFlight.get(request.requestId)?.abort();
+      inFlight.get(key)?.abort();
       sendResponse({ ok: true });
       return undefined;
     }
     if (request?.type !== "caption-hints") return undefined;
-    void requestHints(request.requestId, request.payload).then(sendResponse);
+    void requestHints(key, request.payload).then(sendResponse);
     return true;
   }
 );

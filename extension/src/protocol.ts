@@ -50,10 +50,16 @@ export function parseHintResponse(value: unknown): HintResponse | undefined {
   for (const hint of body.hints) {
     if (hint === null || typeof hint !== "object") return undefined;
     const gloss = (hint as Partial<Hint>).chineseGloss;
-    if (typeof gloss !== "string" || gloss.trim().length === 0 || gloss.length > MAX_CAPTION_LENGTH) {
+    if (typeof gloss !== "string" || gloss.trim().length === 0) {
       return undefined;
     }
-    hints.push({ chineseGloss: gloss });
+    // Present one bounded dictionary clause, not an entire multi-sense article.
+    // This is display compaction, not contextual sense disambiguation.
+    const firstClause = gloss.trim().slice(0, MAX_CAPTION_LENGTH).split(/[；;\n]/, 1)[0].trim();
+    if (firstClause.length === 0) return undefined;
+    const characters = Array.from(firstClause);
+    const compact = characters.slice(0, 60).join("") + (characters.length > 60 ? "…" : "");
+    hints.push({ chineseGloss: compact });
   }
   return { state: body.state, hints };
 }

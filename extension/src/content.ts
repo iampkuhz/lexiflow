@@ -41,13 +41,33 @@ class BilingualOverlay {
   render(view: StreamView): void {
     const host = this.ensure();
     if (host === undefined) return;
-    host.dataset.lexiflowState = view.state;
+    if (host.dataset.lexiflowState !== view.state) host.dataset.lexiflowState = view.state;
     if (this.hint === undefined) return;
-    this.hint.textContent = view.state === "ready" && view.gloss ? `（${view.gloss}）` : "";
+    const text = view.state === "ready" && view.gloss ? `（${view.gloss}）` : "";
+    if (this.hint.textContent !== text) this.hint.textContent = text;
     this.hint.setAttribute(
       "aria-label",
       view.state === "ready" && view.gloss ? `LexiFlow 中文提示：${view.gloss}` : ""
     );
+    this.position();
+  }
+
+  position(): void {
+    if (this.host === undefined || this.hint === undefined || !this.hint.textContent) return;
+    const player = this.host.parentElement;
+    if (player === null) return;
+    const segments = Array.from(player.querySelectorAll<HTMLElement>(captionSelector))
+      .filter((segment) => segment.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
+    if (segments.length === 0) return;
+    const playerBox = player.getBoundingClientRect();
+    const top = Math.min(...segments.map((segment) => segment.getBoundingClientRect().top)) - playerBox.top;
+    const bottom = Math.max(...segments.map((segment) => segment.getBoundingClientRect().bottom)) - playerBox.top;
+    const height = this.hint.getBoundingClientRect().height;
+    // Prefer below English, but move above it when controls leave insufficient space.
+    const y = bottom + 8 + height <= playerBox.height - 52 ? bottom + 8 : Math.max(8, top - height - 8);
+    const nextTop = `${Math.round(y)}px`;
+    if (this.host.style.top !== nextTop) this.host.style.top = nextTop;
+    if (this.host.style.bottom !== "auto") this.host.style.bottom = "auto";
   }
 
   private ensure(): HTMLElement | undefined {
@@ -68,7 +88,7 @@ class BilingualOverlay {
     const root = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
     style.textContent =
-      ":host{font-family:Arial,sans-serif}span{display:inline-block;max-width:100%;padding:0.16em 0.42em;border-radius:0.22em;background:rgba(0,0,0,.72);color:#ffe58f;font-size:clamp(14px,2vw,24px);font-weight:600;line-height:1.35;text-shadow:0 1px 2px #000}";
+      ":host{font-family:Arial,sans-serif}span{display:inline-block;max-width:100%;padding:0.16em 0.42em;border-radius:0.22em;background:rgba(0,0,0,.72);color:#ffe58f;font-size:clamp(14px,2vw,24px);font-weight:600;line-height:1.35;text-shadow:0 1px 2px #000}span:empty{display:none}";
     const hint = document.createElement("span");
     root.append(style, hint);
     player.append(host);
@@ -99,8 +119,9 @@ let scheduledCapture: number | undefined;
 
 function currentCaption(): string | undefined {
   const player = document.querySelector<HTMLElement>(".html5-video-player, #movie_player");
-  if (player === null) return undefined;
+  if (player === null || player.classList.contains("ad-showing")) return undefined;
   const text = Array.from(player.querySelectorAll<HTMLElement>(captionSelector))
+    .filter((segment) => segment.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }))
     .map((segment) => segment.innerText || segment.textContent || "")
     .map(normalizeCaption)
     .filter(Boolean)
@@ -109,7 +130,8 @@ function currentCaption(): string | undefined {
 }
 
 function scheduleCapture(): void {
-  if (scheduledCapture !== undefined) window.clearTimeout(scheduledCapture);
+  // Bound latency even while unrelated page mutations arrive continuously.
+  if (scheduledCapture !== undefined) return;
   scheduledCapture = window.setTimeout(() => {
     scheduledCapture = undefined;
     void captureCurrentCaption();
@@ -117,6 +139,7 @@ function scheduleCapture(): void {
 }
 
 async function captureCurrentCaption(): Promise<void> {
+  overlay.position();
   const video = document.querySelector<HTMLVideoElement>("video");
   const videoId = videoIdFromLocation();
   const caption = currentCaption();
@@ -141,6 +164,7 @@ async function captureCurrentCaption(): Promise<void> {
   }
   const id = await contentId(videoId);
   const segmentId = await sha256(`${id}\u0000${sourceRevision}\u0000${sequence}\u0000${videoTimeMs}\u0000${caption}`);
+  if (sequence !== sourceSequence) return;
   const request: CaptionHintRequest = {
     contentId: id,
     contentRevision: sourceRevision,
@@ -157,7 +181,9 @@ scheduleCapture();
 new MutationObserver(scheduleCapture).observe(document.documentElement, {
   childList: true,
   subtree: true,
-  characterData: true
+  characterData: true,
+  attributes: true,
+  attributeFilter: ["class", "style", "hidden", "aria-hidden"]
 });
 function resetForNavigation(): void {
   activeVideoId = undefined;
@@ -169,4 +195,5 @@ function resetForNavigation(): void {
 document.addEventListener("yt-navigate-start", resetForNavigation);
 document.addEventListener("yt-navigate-finish", scheduleCapture);
 window.addEventListener("popstate", resetForNavigation);
+window.addEventListener("resize", scheduleCapture);
 document.addEventListener("timeupdate", scheduleCapture, true);

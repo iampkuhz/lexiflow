@@ -140,23 +140,59 @@ try {
   );
   await page.goto("https://www.youtube.com/watch?v=lexiflow-e2e", { waitUntil: "domcontentloaded" });
 
-  await setCaption(page, "hello world", 1);
+  await setCaption(page, "zxqv zxqv", 1);
   await waitForState(page, "no-pending");
-  assert.equal(await page.locator(".ytp-caption-segment").textContent(), "hello world");
+  assert.equal(await page.locator(".ytp-caption-segment").textContent(), "zxqv zxqv");
   assert.equal(await overlayText(page), "");
 
   await setCaption(page, "We need reliable captions.", 2);
   await waitForState(page, "ready");
   assert.equal(await page.locator(".ytp-caption-segment").textContent(), "We need reliable captions.");
   assert.match(await overlayText(page), /可靠的/);
+  async function assertNoCaptionOverlap() {
+    const boxes = await page.evaluate(() => {
+      const english = document.querySelector(".ytp-caption-segment").getBoundingClientRect();
+      const chinese = document.querySelector("#lexiflow-caption-overlay").shadowRoot.querySelector("span").getBoundingClientRect();
+      return { englishTop: english.top, englishBottom: english.bottom, chineseTop: chinese.top, chineseBottom: chinese.bottom };
+    });
+    assert.ok(boxes.chineseTop >= boxes.englishBottom || boxes.chineseBottom <= boxes.englishTop, JSON.stringify(boxes));
+  }
+  await assertNoCaptionOverlap();
+  await page.locator("#ytp-caption-window-container").evaluate((element) => { element.style.bottom = "8%"; });
+  await delay(150);
+  await assertNoCaptionOverlap();
+  await page.locator("#ytp-caption-window-container").evaluate((element) => { element.style.bottom = "20%"; });
+
+  // A busy real watch page must not indefinitely postpone caption capture.
+  await page.evaluate(() => {
+    const noise = document.body.appendChild(document.createElement("div"));
+    window.__noiseTimer = setInterval(() => { noise.textContent = String(Date.now()); }, 10);
+  });
+  await setCaption(page, "The context is reliable.", 2.5);
+  await waitForState(page, "ready");
+  await page.locator("#ytp-caption-window-container").evaluate((element) => { element.style.display = "none"; });
+  await waitForState(page, "idle");
+  assert.equal(await overlayText(page), "");
+  const emptyBox = await page.locator("#lexiflow-caption-overlay").evaluate((host) => {
+    const box = host.shadowRoot.querySelector("span").getBoundingClientRect();
+    return { width: box.width, height: box.height };
+  });
+  assert.deepEqual(emptyBox, { width: 0, height: 0 });
+  await page.evaluate(() => clearInterval(window.__noiseTimer));
+  await page.locator("#ytp-caption-window-container").evaluate((element) => { element.style.display = ""; });
+  await waitForState(page, "ready");
+  await page.locator("#player").evaluate((element) => element.classList.add("ad-showing"));
+  await waitForState(page, "idle");
+  await page.locator("#player").evaluate((element) => element.classList.remove("ad-showing"));
+  await waitForState(page, "ready");
 
   await setCaption(page, "We need reliable captions.", 3);
-  await setCaption(page, "hello world", 3.1);
+  await setCaption(page, "zxqv zxqv", 3.1);
   await waitForState(page, "no-pending");
   await delay(2_000);
   assert.equal(await overlayState(page), "no-pending");
   assert.equal(await overlayText(page), "");
-  assert.equal(await page.locator(".ytp-caption-segment").textContent(), "hello world");
+  assert.equal(await page.locator(".ytp-caption-segment").textContent(), "zxqv zxqv");
 
   await setCaption(page, "x".repeat(501), 4);
   await waitForState(page, "idle");

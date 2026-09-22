@@ -3,25 +3,34 @@
 ## 1.1. 可见交互与失败边界
 
 扩展只在 YouTube 播放页同时发现 `video`、`.html5-video-player` 和
-`.ytp-caption-segment` 时工作。原始英文字幕节点从不修改、隐藏或等待网络；Chrome 扩展在独立
+`.ytp-caption-segment` 时工作。原始英文字幕节点从不修改、隐藏或等待网络；隐藏字幕和广告中的字幕不会发请求；Chrome 扩展在独立
 Shadow DOM 覆盖层中仅显示 API 已确认的中文词段释义。因此页面上的英文来自 YouTube，中文提示
-位于其下方；`READY` 以外的状态只保留英文。
+优先位于其下方，空间不足时移到英文上方，并避开底部控件；`READY` 以外的状态只保留英文，空覆盖层不绘制背景。
+
+中文显示首条词典释义的第一分段，最多 60 个 Unicode 字符，超出时标示省略号；不改词库原始释义，也不宣称已经完成语境消歧。
 
 这不是整句翻译功能。`POST /api/v1/caption-hints` 返回的是规则批准的词或短语 `chineseGloss`，
 没有中文整句字段。未命中的字幕、`NO_PENDING`、超长字幕、无法取得所需页面元素、服务端拒绝、
 网络错误和超时都不会展示中文，也不会阻塞英文。
 
-浏览器端把连续 DOM 改动先收敛 50 ms，再将活动字幕请求收敛 150 ms。新字幕会取消旧请求；旧响应
+浏览器端把 DOM 改动按最多 50 ms 的窗口合并（持续更新不会延后既有采样），再将活动字幕请求收敛 150 ms。新字幕会取消同一 tab/document 的旧请求，不影响其他标签页；旧响应
 即使仍然返回，也因观察序号不匹配而被丢弃。service worker 为每个请求设置 1.5 秒时限；失败结果
 不会自动重试、轮询或累积队列。切换字幕、刷新页面或重启 API 后出现新的字幕事件才会触发下一次
 独立请求。
 
 ## 1.2. 本机构建、安装与体验
 
-在一个终端启动 API：
+在一个终端启动演示 API（仅含 5 个内置词条，不代表完整词典覆盖）：
 
 ```bash
-python3 -m scripts.environment.java_exec backend/gradlew -p backend :apps:api:bootRun --args=--server.port=18080
+python3 -m scripts.environment.java_exec backend/gradlew -p backend :apps:api:bootRun '--args=--server.address=127.0.0.1 --server.port=18080'
+```
+
+完整词库体验需先按[离线词库导入](lexicon-import.md)完成本机迁移与发布，再显式连接数据库启动 API；health 正常不等于词库已发布：
+
+```bash
+python3 -m scripts.environment.java_exec backend/gradlew -p backend :apps:api:bootRun \
+  '--args=--server.address=127.0.0.1 --server.port=18080 --spring.datasource.url=jdbc:postgresql://127.0.0.1:15432/lexiflow?user=postgres'
 ```
 
 在另一个终端构建扩展：
@@ -57,7 +66,7 @@ npm run e2e
 
 `npm run e2e` 以 Chromium 加载构建后的 Manifest V3 扩展，并提供一个含 `video`、播放器和 YouTube
 字幕节点的合成页面。它通过真实本机 API 验证词库命中与空结果，再验证快速字幕替换不会留下旧中文、
-501 字符输入不发请求、以及 service worker 请求失败时英文仍保留。端口 `18080` 已有健康 API 时，
+501 字符输入不发请求、以及隐藏字幕、广告、高频无关 DOM 更新、英文/中文不重叠、空覆盖层不可见和 service worker 请求失败时英文仍保留。端口 `18080` 已有健康 API 时，
 测试复用它；否则测试自行启动并在结束时停止该进程。
 
 ## 1.4. 来源合同限制
