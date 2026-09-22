@@ -3,8 +3,8 @@ package io.lexiflow.enrichment.domain;
 import io.lexiflow.lexicon.domain.LexiconEntry;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 /** 根据公开词汇材料生成确定性提示，绝不调用模型或建立伪造的 pending 工作。 */
 public final class DeterministicHintPolicy {
@@ -19,19 +19,11 @@ public final class DeterministicHintPolicy {
   public CaptionHintResult evaluate(CaptionContext context, List<LexiconEntry> candidates) {
     Objects.requireNonNull(context, "context");
     Objects.requireNonNull(candidates, "candidates");
-    var normalized = context.caption().toLowerCase(Locale.ROOT);
     var result = new ArrayList<AnnotationHint>();
     for (var candidate : candidates) {
-      var offset = normalized.indexOf(candidate.term(), context.startOffset());
-      if (withinContext(context, offset, candidate.term().length())
-          && isWordBoundary(normalized, offset, candidate.term().length())) {
-        result.add(
-            new AnnotationHint(
-                offset,
-                offset + candidate.term().length(),
-                candidate.entryId().toString(),
-                candidate.lexiconVersion(),
-                candidate.chineseGloss()));
+      var hint = locate(context, candidate);
+      if (hint != null) {
+        result.add(hint);
       }
     }
     if (result.isEmpty()) {
@@ -40,8 +32,29 @@ public final class DeterministicHintPolicy {
     return new CaptionHintResult(context.caption(), HintState.READY, result);
   }
 
-  private static boolean withinContext(CaptionContext context, int offset, int length) {
-    return offset >= context.startOffset() && offset + length <= context.endOffset();
+  private static AnnotationHint locate(CaptionContext context, LexiconEntry candidate) {
+    var surfaces = new ArrayList<String>();
+    surfaces.add(candidate.term());
+    candidate.aliases().forEach(alias -> surfaces.add(alias.normalizedForm()));
+    candidate.inflections().forEach(inflection -> surfaces.add(inflection.normalizedForm()));
+    surfaces.sort((left, right) -> Integer.compare(right.length(), left.length()));
+    for (var surface : surfaces) {
+      var matches =
+          Pattern.compile(Pattern.quote(surface), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
+              .matcher(context.caption())
+              .region(context.startOffset(), context.endOffset());
+      while (matches.find()) {
+        if (isWordBoundary(context.caption(), matches.start(), matches.end() - matches.start())) {
+          return new AnnotationHint(
+              matches.start(),
+              matches.end(),
+              candidate.entryId().toString(),
+              candidate.lexiconVersion(),
+              candidate.chineseGloss());
+        }
+      }
+    }
+    return null;
   }
 
   private static boolean isWordBoundary(String text, int offset, int length) {
