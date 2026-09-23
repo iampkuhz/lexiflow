@@ -233,7 +233,7 @@ class DocumentationTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         policy = yaml.safe_load((root / 'harness/agent-policy.manifest.yaml').read_text())
         expected = policy['agent_dispatch']
-        self.assertEqual(expected['fallback_model'], 'gpt-5.6-terra')
+        self.assertEqual(expected['fallback_model'], 'gpt-6-sol')
         self.assertEqual(expected['max_consecutive_failures'], 3)
         rules = yaml.safe_load((root / 'harness/policy-projections.yaml').read_text())['projections']
         consumers = {

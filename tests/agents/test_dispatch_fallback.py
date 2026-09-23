@@ -27,7 +27,7 @@ class DispatchFallbackTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / "repo"; self.root.mkdir()
-        policy = {"agent_dispatch": {"primary": "qoder", "fallback_model": "gpt-5.6-terra",
+        policy = {"agent_dispatch": {"primary": "qoder", "fallback_model": "gpt-6-sol",
                   "fallback_reasoning_effort": "high", "max_consecutive_failures": 3,
                   "host_wait_policy": "reject-active-or-unknown-goal-without-supported-wait-adapter"}}
         path = self.root / "harness"; path.mkdir(); (path / "agent-policy.manifest.yaml").write_text(yaml.safe_dump(policy))
@@ -39,7 +39,7 @@ class DispatchFallbackTest(unittest.TestCase):
     def _rollout(self, call_id: str, output: object | None, *, message: str | None = None,
                  tool: str = "spawn_agent", arguments: object | None = None) -> None:
         if arguments is None:
-            arguments = ({} if tool == "list_agents" else {"model": "gpt-5.6-terra", "reasoning_effort": "high",
+            arguments = ({} if tool == "list_agents" else {"model": "gpt-6-sol", "reasoning_effort": "high",
                          "message": message or f"DISPATCH-WP-01 attempt {call_id}"})
         raw_args = arguments if isinstance(arguments, str) else json.dumps(arguments)
         events = [{"type": "response_item", "payload": {"type": "function_call", "name": tool, "call_id": call_id,
@@ -80,8 +80,18 @@ class DispatchFallbackTest(unittest.TestCase):
         subject.begin_qoder_attempt(self.root, task(), "qoder-run")
         route = subject.mark_qoder_unavailable(self.root, task(), "qoder-run", "qoder-cli-not-started")
         self.assertEqual(route["code"], "TERRA_REQUIRED")
+        self.assertEqual(route["fallback"], {"model": "gpt-6-sol", "reasoning_effort": "high"})
         with self.assertRaisesRegex(subject.DispatchFallbackError, "pending"):
             subject.mark_qoder_unavailable(self.root, task(), "qoder-run", "again")
+
+    def test_unsupported_fallback_model_is_rejected(self) -> None:
+        subject.begin_terra_fallback(self.root, task(), "old-model", "external-busy")
+        self._rollout("old-model", {"task_name": "/root/legacy-child"}, arguments={
+            "model": "unsupported-model", "reasoning_effort": "high",
+            "message": "DISPATCH-WP-01 attempt old-model",
+        })
+        with self.assertRaisesRegex(subject.DispatchFallbackError, "configured fallback model"):
+            subject.record_terra_fallback(self.root, task(), "old-model", "old-model")
 
     def test_active_terra_handle_blocks_new_qoder_until_verified_terminal_record(self) -> None:
         subject.begin_terra_fallback(self.root, task(), "terra-active", "external-busy")
@@ -157,7 +167,7 @@ class DispatchFallbackTest(unittest.TestCase):
     def test_wrong_model_and_changed_pending_call_id_are_rejected(self) -> None:
         subject.begin_terra_fallback(self.root, task(), "model", "external-busy")
         self._rollout("model", {"task_name": "/root/terra"}, arguments={
-            "model": "gpt-5.6-luna", "reasoning_effort": "high", "message": "DISPATCH-WP-01 model",
+            "model": "gpt-6-luna", "reasoning_effort": "high", "message": "DISPATCH-WP-01 model",
         })
         with self.assertRaisesRegex(subject.DispatchFallbackError, "explicitly request"):
             subject.record_terra_fallback(self.root, task(), "model", "model")

@@ -56,8 +56,8 @@ architecture:
   - english-caption-waits-for-model
 subagent_protocol:
   codex_model_policy:
-    default_model: gpt-5.6-luna
-    routine_model: gpt-5.6-luna
+    default_model: gpt-6-luna
+    routine_model: gpt-6-luna
     routine_reasoning_effort: low
     applies_to: codex-sub-agent
     explicit_model_argument_required: true
@@ -87,8 +87,7 @@ subagent_protocol:
       category_alone_does_not_escalate: true
       escalation_record: existing-parent-dispatch-note-specific-evidence-and-decision
     allowed_escalation_models:
-    - gpt-5.6-terra
-    - gpt-5.6-sol
+    - gpt-6-sol
     user_only_models:
     - gpt-6-astra
     escalation_requires:
@@ -98,11 +97,9 @@ subagent_protocol:
     escalation_reasons:
     - luna_acceptance_blocked
     - specific_uncovered_risk
-    - terra_insufficient
     - explicit_user_requirement
     qoder_model_policy: separate-runner-controlled
     default_reasoning_effort: medium
-    sol_escalation_requirement: terra_insufficiency_or_predeclared_high_risk_reason
   status_values:
   - PASS
   - FAIL
@@ -428,9 +425,9 @@ subagent_protocol:
     materializer: scripts/agents/local_codex_runtime.py
 agent_dispatch:
   primary: qoder
-  fallback_model: gpt-5.6-terra
+  fallback_model: gpt-6-sol
   fallback_reasoning_effort: high
-  model_selection_basis: explicit-user-required-terra-fallback
+  model_selection_basis: explicit-user-required-sol-fallback
   max_consecutive_failures: 3
   failure_unit: qoder-and-terra-both-unavailable-in-one-dispatch-attempt
   success_effect: reset-consecutive-failures-preserve-history

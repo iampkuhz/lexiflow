@@ -283,13 +283,13 @@ class QoderRunnerContractTest(unittest.TestCase):
             runtime["subagent_protocol"]["caller_required_input"],
         )
         expected_codex_model_policy = {
-            "default_model": "gpt-5.6-luna",
+            "default_model": "gpt-6-luna",
             "default_reasoning_effort": "medium",
-            "routine_model": "gpt-5.6-luna",
+            "routine_model": "gpt-6-luna",
             "routine_reasoning_effort": "low",
             "applies_to": "codex-sub-agent",
             "explicit_model_argument_required": True,
-            "allowed_escalation_models": ["gpt-5.6-terra", "gpt-5.6-sol"],
+            "allowed_escalation_models": ["gpt-6-sol"],
             "user_only_models": ["gpt-6-astra"],
             "escalation_requires": [
                 "stable_task_id",
@@ -299,10 +299,8 @@ class QoderRunnerContractTest(unittest.TestCase):
             "escalation_reasons": [
                 "luna_acceptance_blocked",
                 "specific_uncovered_risk",
-                "terra_insufficient",
                 "explicit_user_requirement",
             ],
-            "sol_escalation_requirement": "terra_insufficiency_or_predeclared_high_risk_reason",
             "qoder_model_policy": "separate-runner-controlled",
         }
         policy_model = dict(policy["subagent_protocol"]["codex_model_policy"])
@@ -331,12 +329,12 @@ class QoderRunnerContractTest(unittest.TestCase):
             policy["subagent_protocol"]["codex_work_package_runner_identity"],
         )
         for contract in codex_contracts:
-            self.assertEqual(contract["model_policy"]["default_model"], "gpt-5.6-luna")
-            self.assertEqual(contract["model_policy"]["routine_model"], "gpt-5.6-luna")
+            self.assertEqual(contract["model_policy"]["default_model"], "gpt-6-luna")
+            self.assertEqual(contract["model_policy"]["routine_model"], "gpt-6-luna")
             self.assertEqual(contract["model_policy"]["routine_reasoning_effort"], "low")
             self.assertEqual(contract["model_policy"]["routing_source"], routing_source)
             self.assertTrue(contract["model_policy"]["explicit_model_argument_required"])
-            self.assertEqual(contract["model_policy"]["allowed_escalation_models"], ["gpt-5.6-terra", "gpt-5.6-sol"])
+            self.assertEqual(contract["model_policy"]["allowed_escalation_models"], ["gpt-6-sol"])
             self.assertEqual(contract["model_policy"]["user_only_models"], ["gpt-6-astra"])
             self.assertEqual(contract["max_active_subagents"], 1)
             self.assertEqual(contract["default_fork_turns"], "none")
@@ -395,13 +393,13 @@ class QoderRunnerContractTest(unittest.TestCase):
         self.assertEqual(routing["deterministic_single_command_or_small_fix"], "main-agent-no-dispatch")
         self.assertEqual(routing["luna_blocker_policy"], "stop-and-compact-callback-parent-checks-failure-layer-before-escalation")
         config = tomllib.loads((root / ".codex/config.toml").read_text())
-        self.assertEqual(config["agents"]["default_subagent_model"], "gpt-5.6-luna")
+        self.assertEqual(config["agents"]["default_subagent_model"], "gpt-6-luna")
         self.assertEqual(config["agents"]["default_subagent_reasoning_effort"], "medium")
         self.assertEqual(config["agents"]["max_concurrent_threads_per_session"], 1)
         self.assertNotIn("model", config)
         entry = root / ".codex" / config["model_instructions_file"]
         self.assertIn("harness/agent-policy.manifest.yaml", entry.read_text())
-        self.assertNotIn("gpt-5.6-", entry.read_text())
+        self.assertNotRegex(entry.read_text(), r"gpt-\d+(?:\.\d+)?-")
         profiles = list((root / ".codex/agents").glob("*.toml"))
         self.assertGreaterEqual(len(profiles), 5)
         for profile in profiles:
@@ -1527,6 +1525,18 @@ print('WORKER_EXIT',flush=True)
         self.assertNotIn("untrusted secret-like payload", message)
         self.assertIn("queued 不算任务通过", message)
 
+    def test_fallback_callback_uses_shared_model_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            message = qoder_task._build_callback_message(
+                "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                {"task_id": "LF-TEST-001", "status": "finished", "exit_code": 0,
+                 "fallback": {"code": "TERRA_REQUIRED", "model": "untrusted-model-value"}},
+                Path(directory),
+            )
+        self.assertIn("fallback_model / fallback_reasoning_effort", message)
+        self.assertNotIn("Terra/high", message)
+        self.assertNotIn("untrusted-model-value", message)
+
     def test_task_and_completion_storage_remain_separate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1620,7 +1630,7 @@ raise SystemExit(1)
             repo_root = Path(directory); (repo_root / ".git").mkdir()
             task_path = repo_root / "task.json"; task_path.write_text(json.dumps(valid_task()))
             route = {"status": "BLOCKED", "code": "TERRA_REQUIRED", "attempt_id": "attempt-1",
-                     "next_action": "spawn-codex-subagent", "fallback": {"model": "gpt-5.6-terra", "reasoning_effort": "high"}}
+                     "next_action": "spawn-codex-subagent", "fallback": {"model": "gpt-6-sol", "reasoning_effort": "high"}}
             with (patch.object(Path, "cwd", return_value=repo_root),
                   patch.object(qoder_task._fallback, "host_wait_decision", return_value={"host_goal": {"state": "active"}}),
                   patch.object(qoder_task._fallback, "begin_terra_fallback", return_value=route) as fallback,
@@ -1782,7 +1792,7 @@ class DispatchEntryTest(unittest.TestCase):
         self.root = Path(self.temp.name) / "repo"; (self.root / ".git").mkdir(parents=True)
         self.home = Path(self.temp.name) / "codex"; self.home.mkdir()
         self.task = valid_task(); self.task["parent_session_id"] = self.session
-        policy = {"agent_dispatch": {"primary": "qoder", "fallback_model": "gpt-5.6-terra",
+        policy = {"agent_dispatch": {"primary": "qoder", "fallback_model": "gpt-6-sol",
                   "fallback_reasoning_effort": "high", "max_consecutive_failures": 3,
                   "host_wait_policy": "reject-active-or-unknown-goal-without-supported-wait-adapter"}}
         policy_path = self.root / "harness/agent-policy.manifest.yaml"; policy_path.parent.mkdir()

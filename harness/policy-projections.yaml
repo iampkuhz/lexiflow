@@ -99,7 +99,6 @@ projections:
     escalation_reasons: subagent_protocol.codex_model_policy.escalation_reasons
     qoder_model_policy: subagent_protocol.codex_model_policy.qoder_model_policy
     default_reasoning_effort: subagent_protocol.codex_model_policy.default_reasoning_effort
-    sol_escalation_requirement: subagent_protocol.codex_model_policy.sol_escalation_requirement
 - file: planning/task-template.yaml
   target: execution.codex_subagent.model_policy
   fields:

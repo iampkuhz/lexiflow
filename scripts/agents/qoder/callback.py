@@ -54,7 +54,7 @@ def _build_callback_message(run_id: str, completion: dict[str, Any], run_dir: Pa
         lines.insert(-1, "账号/访问阻断不得原样补开；先确认外部状态已修复，再显式恢复。无新产物不得计交付通过。")
     fallback = completion.get("fallback")
     if isinstance(fallback, dict) and fallback.get("code") == "TERRA_REQUIRED":
-        lines.insert(-1, "Qoder 未形成可验证启动；按 attempt_id 使用原生 Codex Terra/high 派发，随后用 record-fallback 只提交该原生 call_id。")
+        lines.insert(-1, "Qoder 未形成可验证启动；按 attempt_id 和共享 agent_dispatch 的 fallback_model / fallback_reasoning_effort 使用原生 Codex 协作工具派发，随后用 record-fallback 只提交该原生 call_id。")
     return "\n".join(lines)
 
 

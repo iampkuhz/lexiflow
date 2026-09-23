@@ -50,13 +50,13 @@ python3 scripts/check_repository.py
 
 ## 执行请求与启动诊断
 
-跨执行器调度由 `agent-policy.manifest.yaml.agent_dispatch` 统一约束：Qoder 路径明确失败或不可用后，父代理必须实际调用原生 Codex Terra 协作工具；只有同轮两条路径均失败才累计连续调度失败。成功接单清连续计数但保留历史。重复回调、自动 Goal 续轮、执行失败与验收失败均不是新的调度失败；到达上限停止该工作包自动派发，不以自动 Goal 的无进展轮次替代此计数。
+跨执行器调度由 `agent-policy.manifest.yaml.agent_dispatch` 统一约束：Qoder 路径明确失败或不可用后，父代理必须实际调用原生 Codex 协作工具（模型及推理参数取自该策略）；只有同轮两条路径均失败才累计连续调度失败。成功接单清连续计数但保留历史。重复回调、自动 Goal 续轮、执行失败与验收失败均不是新的调度失败；到达上限停止该工作包自动派发，不以自动 Goal 的无进展轮次替代此计数。
 
-Qoder 派发前必须检查当前真实父任务的宿主等待兼容性。Goal 活跃或状态无法证明、且没有受支持的外部等待接入时，不启动 Qoder，转入 Terra 路由；不能用调用者自报能力、修改宿主数据库或暂停 Goal 绕过。没有 Goal 的回调模式仍需通过原身份、并发与写域检查。此检查是仓库的兼容性护栏，不声称修改了 Codex 调度器；检查后的宿主模式变化不在该快照的证明范围内。
+Qoder 派发前必须检查当前真实父任务的宿主等待兼容性。Goal 活跃或状态无法证明、且没有受支持的外部等待接入时，不启动 Qoder，转入 Codex 回退路由；不能用调用者自报能力、修改宿主数据库或暂停 Goal 绕过。没有 Goal 的回调模式仍需通过原身份、并发与写域检查。此检查是仓库的兼容性护栏，不声称修改了 Codex 调度器；检查后的宿主模式变化不在该快照的证明范围内。
 
-Terra 使用原生协作事件等待和续办，不要求 Qoder 的外部终态回调。父代理提交的派发结果必须绑定当前 attempt 和真实工具记录；字符串 `PASS`、任意 agent 名称或计划说明不能证明接单成功。启动状态未知或本任务已在途时，不得触发另一执行器重复工作。Qoder 运行/返工预算与跨执行器调度失败上限分别核算。
+Codex 回退子代理使用原生协作事件等待和续办，不要求 Qoder 的外部终态回调。父代理提交的派发结果必须绑定当前 attempt 和真实工具记录；字符串 `PASS`、任意 agent 名称或计划说明不能证明接单成功。启动状态未知或本任务已在途时，不得触发另一执行器重复工作。Qoder 运行/返工预算与跨执行器调度失败上限分别核算。
 
-`start/resume` 返回 Terra 派发动作时，父代理保留原 handoff，按返回的模型和推理参数调用原生 `spawn_agent`，并在子任务说明中绑定返回的工作包与 `attempt_id`。随后只提交当前父会话中该原生调用的 `call_id`：
+`start/resume` 返回 Codex 回退派发动作时，父代理保留原 handoff，按返回的模型和推理参数调用原生 `spawn_agent`，并在子任务说明中绑定返回的工作包与 `attempt_id`。随后只提交当前父会话中该原生调用的 `call_id`：
 
 ```bash
 python3 scripts/agents/qoder_task.py record-fallback --task <task.json> --attempt-id <attempt-id> --call-id <native-call-id>
@@ -64,7 +64,7 @@ python3 scripts/agents/qoder_task.py record-fallback --task <task.json> --attemp
 
 该接口只读取对应的真实工具记录，不接收调用者编写的成功回执。缺失、未知或不匹配的响应不能清计数或再次派发；已消费的同一事件不得重复累计。派发成功只表示接单，不表示子任务实现或验收通过。派发停止只停止该工作包，不取消已运行的其他任务，不自动改变 Goal 状态。
 
-Terra 接单后，该工作包保持在途，不能因启动计数清零就再次派发。收到原生完成事件后，用宿主的单次 `list_agents` 终态快照作为证据，将对应调用的 `call_id` 提交给同一 `record-fallback` 接口；只接受已记录子代理句柄的完成事实。未知或仍在运行的状态不解除占用，也不自动重试。此动作不是定时轮询，更不是交付验收。
+Codex 回退子代理接单后，该工作包保持在途，不能因启动计数清零就再次派发。收到原生完成事件后，用宿主的单次 `list_agents` 终态快照作为证据，将对应调用的 `call_id` 提交给同一 `record-fallback` 接口；只接受已记录子代理句柄的完成事实。未知或仍在运行的状态不解除占用，也不自动重试。此动作不是定时轮询，更不是交付验收。
 
 执行请求的收尾与接手规则见 `agent-policy.manifest.yaml.execution_progress` 和
 `qoder_delegation.exhausted_budget_recovery`。预计超过 10 分钟且写入范围可隔离的任务，

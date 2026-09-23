@@ -428,7 +428,7 @@ def record_terra_fallback(root: str | Path, task: Mapping[str, Any], attempt_id:
             return result
     args = _call_args(call)
     if not isinstance(args, dict) or args.get("model") != policy["fallback_model"] or args.get("reasoning_effort") != policy["fallback_reasoning_effort"]:
-        raise DispatchFallbackError("native-tool-call-invalid", "call did not explicitly request Terra/high")
+        raise DispatchFallbackError("native-tool-call-invalid", "call did not explicitly request the configured fallback model and reasoning effort")
     # Bind to the intended package without retaining the complete prompt in state.
     prompt = args.get("message") or args.get("prompt")
     if not isinstance(prompt, str) or task["work_package_id"] not in prompt or attempt_id not in prompt:
