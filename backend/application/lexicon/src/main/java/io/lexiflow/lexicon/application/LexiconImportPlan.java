@@ -126,7 +126,10 @@ public final class LexiconImportPlan {
                 row.dictionary().licenseId(),
                 sourceDigest,
                 acquiredAt),
-            row.priority());
+            row.priority(),
+            row.basicVocabulary()
+                ? io.lexiflow.lexicon.domain.LexiconHintEligibility.BASIC_VOCABULARY
+                : io.lexiflow.lexicon.domain.LexiconHintEligibility.CANDIDATE);
     return new PlannedEntry(entry, row);
   }
 

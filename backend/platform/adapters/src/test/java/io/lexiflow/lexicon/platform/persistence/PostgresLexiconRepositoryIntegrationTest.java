@@ -38,7 +38,7 @@ class PostgresLexiconRepositoryIntegrationTest {
     schema = createSchema();
     isolatedJdbcUrl = withSchema(adminJdbcUrl, schema);
     assertEquals(
-        List.of(1, 2, 3, 4, 5, 6),
+        List.of(1, 2, 3, 4, 5, 6, 7),
         PostgresSchemaMigrator.apply(
             isolatedJdbcUrl, Path.of(requiredMigrationsDirectory()), null));
   }
@@ -59,7 +59,7 @@ class PostgresLexiconRepositoryIntegrationTest {
     assertEquals(
         "lexicon_entry_lookup_idx",
         scalar(isolatedJdbcUrl, "SELECT to_regclass('lexicon_entry_lookup_idx')"));
-    assertEquals("6", scalar(isolatedJdbcUrl, "SELECT max(version)::text FROM schema_migration"));
+    assertEquals("7", scalar(isolatedJdbcUrl, "SELECT max(version)::text FROM schema_migration"));
     assertEquals(
         "lexicon_inflection_lookup_idx",
         scalar(isolatedJdbcUrl, "SELECT to_regclass('lexicon_inflection_lookup_idx')"));
@@ -73,16 +73,16 @@ class PostgresLexiconRepositoryIntegrationTest {
     var jdbcUrl = withSchema(adminJdbcUrl, testSchema);
     try {
       assertEquals(
-          List.of(1, 2, 3, 4, 5, 6),
+          List.of(1, 2, 3, 4, 5, 6, 7),
           PostgresSchemaMigrator.apply(jdbcUrl, migrationDirectory, null));
       Files.writeString(
-          migrationDirectory.resolve("V007__failing_change.sql"),
+          migrationDirectory.resolve("V008__failing_change.sql"),
           "CREATE TABLE atomic_probe (id INTEGER PRIMARY KEY);\nSELECT 1 / 0;\n");
       assertThrows(
           SQLException.class,
           () -> PostgresSchemaMigrator.apply(jdbcUrl, migrationDirectory, null));
       assertEquals("", scalar(jdbcUrl, "SELECT COALESCE(to_regclass('atomic_probe')::text, '')"));
-      assertEquals("6", scalar(jdbcUrl, "SELECT max(version)::text FROM schema_migration"));
+      assertEquals("7", scalar(jdbcUrl, "SELECT max(version)::text FROM schema_migration"));
     } finally {
       dropSchema(testSchema);
     }
@@ -136,6 +136,68 @@ class PostgresLexiconRepositoryIntegrationTest {
                 repository.findPrewarmCandidates(published, 1).stream()
                     .map(value -> value.lemma())
                     .toList());
+          }
+        });
+  }
+
+  @Test
+  void persistsPreparedEligibilityAndDeduplicatedGlossWithoutChangingOldPublishedData()
+      throws Exception {
+    inMigratedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            var reference = new SourceReference("fixture", "MIT", "fixture#prepared");
+            var basic =
+                new LexiconImportRow(
+                    "ability",
+                    "能力",
+                    "",
+                    List.of(),
+                    List.of("abilities"),
+                    LexiconPriority.fromEvidence(4.3, 2),
+                    reference,
+                    reference,
+                    List.of(),
+                    true,
+                    true,
+                    "fixture-top2000-v1");
+            var geometry =
+                new LexiconImportRow(
+                    "parallelogram",
+                    "平行四边形；[机] 平行四边形",
+                    "",
+                    List.of(),
+                    List.of(),
+                    LexiconPriority.unranked(),
+                    reference,
+                    reference,
+                    List.of(),
+                    false,
+                    false,
+                    "fixture-top2000-v1");
+            var version = repository.publish(request(basic, geometry));
+            var loaded = repository.findByForms(version, List.of("abilities")).getFirst();
+            assertEquals(
+                io.lexiflow.lexicon.domain.LexiconHintEligibility.BASIC_VOCABULARY,
+                loaded.hintEligibility());
+            assertTrue(repository.findPrewarmCandidates(version, 2000).isEmpty());
+            var shape = repository.findByForms(version, List.of("parallelogram")).getFirst();
+            assertEquals("平行四边形", shape.senses().getFirst().chineseGloss());
+            assertEquals(
+                io.lexiflow.lexicon.domain.LexiconHintEligibility.CANDIDATE,
+                shape.hintEligibility());
+            assertEquals(
+                "fixture-top2000-v1",
+                scalar(
+                    jdbcUrl,
+                    "SELECT hint_policy_reference FROM lexicon_entry WHERE lemma='ability'"));
+            assertEquals(
+                "UNPROCESSED",
+                scalar(
+                        jdbcUrl,
+                        "SELECT replace(column_default, chr(39), '') FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='lexicon_entry' AND column_name='hint_eligibility'")
+                    .replace("::text", ""));
           }
         });
   }
@@ -271,7 +333,7 @@ class PostgresLexiconRepositoryIntegrationTest {
     var jdbcUrl = withSchema(adminJdbcUrl, testSchema);
     try {
       assertEquals(
-          List.of(1, 2, 3, 4, 5, 6),
+          List.of(1, 2, 3, 4, 5, 6, 7),
           PostgresSchemaMigrator.apply(jdbcUrl, Path.of(requiredMigrationsDirectory()), null));
       test.run(jdbcUrl);
     } finally {

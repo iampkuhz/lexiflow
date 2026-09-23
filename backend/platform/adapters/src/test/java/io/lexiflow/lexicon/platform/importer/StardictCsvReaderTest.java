@@ -68,6 +68,60 @@ class StardictCsvReaderTest {
     assertFalse(rows.get(1).row().prewarmEligible());
   }
 
+  @Test
+  void freezesTop2000FromOxfordRankedWordsIndependentOfSourceOrder() throws Exception {
+    var file = Files.createTempFile("basic-selection", ".csv");
+    var sourceRows = new ArrayList<String>();
+    for (int i = 0; i < 2010; i++) {
+      // 使用纯字母的不同合成词，并列排名验证稳定排序。
+      String word =
+          "word" + (char) ('a' + i / 676) + (char) ('a' + i / 26 % 26) + (char) ('a' + i % 26);
+      sourceRows.add(row(word, "词条", "", "", "100", "200", "", "1"));
+    }
+    sourceRows.add(row("unknown", "未知", "", "", "0", "0", "", "1"));
+    sourceRows.add(row("specialist", "专家", "", "", "1", "1", "", ""));
+    sourceRows.add(row("a phrase", "短语", "", "", "1", "1", "", "1"));
+    Files.writeString(file, header() + "\n" + String.join("\n", sourceRows));
+    var reader = new StardictCsvReader();
+    var first = reader.selectBasicVocabulary(file);
+    assertEquals(2000, first.words().size());
+    assertFalse(first.lemmas().contains("unknown"));
+    assertFalse(first.lemmas().contains("specialist"));
+    assertFalse(first.lemmas().contains("a phrase"));
+    java.util.Collections.reverse(sourceRows);
+    Files.writeString(file, header() + "\n" + String.join("\n", sourceRows));
+    var reversed = reader.selectBasicVocabulary(file);
+    assertEquals(first.words(), reversed.words());
+    assertEquals(first.digest(), reversed.digest());
+    var records = new ArrayList<StardictCsvReader.SourceRecord>();
+    var scan = reader.read(file, records::add, reversed);
+    assertEquals(2000, scan.basicRows());
+    assertEquals(2000, records.stream().filter(r -> r.row().basicVocabulary()).count());
+    assertTrue(
+        records.stream().allMatch(r -> r.row().hintPolicyReference().contains(reversed.digest())));
+  }
+
+  @Test
+  void importsDuplicateGlossAndInheritedBasicInflectionsAsPublishedData() throws Exception {
+    var file = Files.createTempFile("basic-and-gloss", ".csv");
+    Files.writeString(
+        file,
+        header()
+            + "\n"
+            + row("ability", "n. 能力", "", "", "946", "783", "s:abilities", "1")
+            + "\n"
+            + row("parallelogram", "n. 平行四边形\\n[机] 平行四边形", "", "", "0", "0", "", ""));
+    var rows = new ArrayList<StardictCsvReader.SourceRecord>();
+    var scan = new StardictCsvReader().read(file, rows::add);
+    assertEquals(1, scan.selectedBasicLemmas());
+    assertEquals(1, scan.basicRows());
+    assertEquals(1, scan.deduplicatedRows());
+    assertTrue(rows.getFirst().row().basicVocabulary());
+    assertEquals(List.of("abilities"), rows.getFirst().row().inflections());
+    assertFalse(rows.getLast().row().basicVocabulary());
+    assertEquals("平行四边形", rows.getLast().row().chineseGloss());
+  }
+
   private static String header() {
     return String.join(
         ",",

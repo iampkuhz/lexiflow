@@ -25,7 +25,7 @@ public final class LexiconImportMain {
   private LexiconImportMain() {}
 
   /**
-   * 执行 `validate`、`prewarm-report` 或显式 `publish`。
+   * 执行 `validate`、`basic-report`、`prewarm-report` 或显式 `publish`。
    *
    * @param args 含义：受控命令行参数。取值范围：由方法调用前置条件限定。
    */
@@ -46,8 +46,10 @@ public final class LexiconImportMain {
   }
 
   private static void executeCanonical(Arguments command, String digest) throws IOException {
+    if (command.action().equals("basic-report"))
+      throw new IllegalArgumentException("basic-report requires StarDict source evidence");
     var rows = new LexiconCsvReader().read(command.input());
-    var metadata = metadata(command, digest);
+    var metadata = metadata(command, digest, "fixed-function-words-and-identical-gloss-v1");
     var plan = LexiconImportPlan.prepare(rows, 1, digest, command.acquiredAt());
     if (command.action().equals("validate")) {
       System.out.printf(
@@ -70,6 +72,25 @@ public final class LexiconImportMain {
 
   private static void executeStardict(Arguments command, String digest, StardictCsvReader reader)
       throws IOException {
+    var selection = reader.selectBasicVocabulary(command.input());
+    if (command.action().equals("basic-report")) {
+      var scan = reader.read(command.input(), source -> {}, selection);
+      printStardictScan("PASS", scan, digest);
+      System.out.printf(
+          "policy=%s list_sha256=%s selected=%d fixed_forms=%d%n",
+          StardictCsvReader.PREPARATION_POLICY,
+          selection.digest(),
+          selection.words().size(),
+          io.lexiflow.lexicon.application.BasicVocabulary.fixedWords().size());
+      selection
+          .words()
+          .forEach(word -> System.out.printf("BASIC\t%d\t%s%n", word.rank(), word.lemma()));
+      io.lexiflow.lexicon.application.BasicVocabulary.fixedWords().stream()
+          .filter(word -> !selection.lemmas().contains(word))
+          .sorted()
+          .forEach(word -> System.out.printf("FIXED\t%s%n", word));
+      return;
+    }
     if (command.action().equals("validate")) {
       var canonicalSurfaces = LexiconImportPlan.canonicalSurfaceValidator();
       var scan =
@@ -77,12 +98,13 @@ public final class LexiconImportMain {
               command.input(),
               source ->
                   LexiconImportPlan.prepareNext(
-                      source.row(), 1, digest, command.acquiredAt(), canonicalSurfaces));
+                      source.row(), 1, digest, command.acquiredAt(), canonicalSurfaces),
+              selection);
       printStardictScan("PASS", scan, digest);
       return;
     }
     if (command.action().equals("prewarm-report")) {
-      var top = topStardictEntries(reader, command.input(), command.limit());
+      var top = topStardictEntries(reader, command.input(), command.limit(), selection);
       printPrewarm(
           top.stream()
               .map(value -> LexiconImportPlan.fromRow(value.row(), 1, digest, command.acquiredAt()))
@@ -90,7 +112,8 @@ public final class LexiconImportMain {
           command.limit());
       return;
     }
-    var metadata = metadata(command, digest);
+    var metadata =
+        metadata(command, digest, StardictCsvReader.PREPARATION_POLICY + ":" + selection.digest());
     try (var persistence = PostgresPersistence.open(command.databaseUrl())) {
       var service = new LexiconImportService(persistence.repository());
       var batch = service.openOrResume(metadata);
@@ -107,12 +130,17 @@ public final class LexiconImportMain {
                   stage(service, batch, buffer, source.sourceRow(), metadata);
                   buffer.clear();
                 }
-              });
+              },
+              selection);
       if (!buffer.isEmpty()) {
         stage(service, batch, buffer, buffer.getLast().sourceRow(), metadata);
       }
       if (scan.importableRows() == 0) {
         throw new IllegalArgumentException("StarDict source contains no importable entries");
+      }
+      if (!digest.equals(sourceDigest(command.input()))) {
+        throw new IllegalStateException(
+            "source changed during preprocessing; staged batch not published");
       }
       service.publish(batch, scan.sourceRows());
       System.out.printf(
@@ -134,13 +162,18 @@ public final class LexiconImportMain {
         metadata);
   }
 
-  private static LexiconImportMetadata metadata(Arguments command, String digest) {
+  private static LexiconImportMetadata metadata(
+      Arguments command, String digest, String preparation) {
     return new LexiconImportMetadata(
-        digest, command.batchSourceId(), command.batchLicenseId(), command.acquiredAt());
+        digest,
+        command.batchSourceId() + ":" + preparation,
+        command.batchLicenseId(),
+        command.acquiredAt());
   }
 
   private static List<StardictCsvReader.SourceRecord> topStardictEntries(
-      StardictCsvReader reader, Path input, int limit) throws IOException {
+      StardictCsvReader reader, Path input, int limit, StardictCsvReader.BasicSelection selection)
+      throws IOException {
     var lowestFirst =
         Comparator.comparingInt(
                 (StardictCsvReader.SourceRecord value) -> value.row().priority().memoryPriority())
@@ -156,7 +189,8 @@ public final class LexiconImportMain {
             top.remove();
             top.add(value);
           }
-        });
+        },
+        selection);
     return top.stream()
         .sorted(
             Comparator.comparingInt(
@@ -170,13 +204,16 @@ public final class LexiconImportMain {
   private static void printStardictScan(
       String status, StardictCsvReader.ScanResult scan, String digest) {
     System.out.printf(
-        "%s format=ecdict-stardict source_rows=%d entries=%d derived_merged=%d omitted_no_gloss=%d omitted_unsupported_surface=%d source_sha256=%s%n",
+        "%s format=ecdict-stardict source_rows=%d entries=%d derived_merged=%d omitted_no_gloss=%d omitted_unsupported_surface=%d selected_basic=%d basic_rows=%d deduplicated_gloss_rows=%d source_sha256=%s%n",
         status,
         scan.sourceRows(),
         scan.importableRows(),
         scan.derivedRows(),
         scan.noGlossRows(),
         scan.unsupportedSurfaceRows(),
+        scan.selectedBasicLemmas(),
+        scan.basicRows(),
+        scan.deduplicatedRows(),
         digest);
   }
 
@@ -198,6 +235,14 @@ public final class LexiconImportMain {
                     value.entry().priority().frequencyZipf(),
                     value.entry().priority().complexListCount(),
                     value.entry().lemma()));
+  }
+
+  private static String sourceDigest(Path input) throws IOException {
+    try {
+      return sha256(input);
+    } catch (NoSuchAlgorithmException exception) {
+      throw new IllegalStateException(exception);
+    }
   }
 
   private static String sha256(Path input) throws IOException, NoSuchAlgorithmException {
@@ -231,10 +276,11 @@ public final class LexiconImportMain {
     static Arguments parse(String[] args) {
       if (args.length < 2)
         throw new IllegalArgumentException(
-            "usage: <validate|prewarm-report|publish> --input <path> [options]");
+            "usage: <validate|basic-report|prewarm-report|publish> --input <path> [options]");
       var action = args[0];
-      if (!List.of("validate", "prewarm-report", "publish").contains(action))
-        throw new IllegalArgumentException("action must be validate, prewarm-report or publish");
+      if (!List.of("validate", "basic-report", "prewarm-report", "publish").contains(action))
+        throw new IllegalArgumentException(
+            "action must be validate, basic-report, prewarm-report or publish");
       var values = new java.util.HashMap<String, String>();
       for (var index = 1; index < args.length; index += 2) {
         if (!args[index].startsWith("--") || index + 1 >= args.length)

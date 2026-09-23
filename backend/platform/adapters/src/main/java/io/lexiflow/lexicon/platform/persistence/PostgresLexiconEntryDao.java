@@ -17,7 +17,7 @@ final class PostgresLexiconEntryDao implements LexiconEntryDao {
   private static final String ENTRY_COLUMNS =
       "e.lexicon_entry_id, e.lexicon_version, e.language_tag, e.entry_kind, e.lemma, "
           + "e.provenance_source_id, e.provenance_license_id, e.provenance_digest, e.acquired_at, "
-          + "e.frequency_zipf, e.complex_list_count, e.memory_priority, "
+          + "e.frequency_zipf, e.complex_list_count, e.memory_priority, e.hint_eligibility, "
           + "s.sense_id, s.chinese_gloss, s.definition_text, s.provenance_reference ";
   private final JdbcClient jdbc;
   private final JdbcTemplate batchJdbc;
@@ -84,7 +84,7 @@ final class PostgresLexiconEntryDao implements LexiconEntryDao {
                 "SELECT "
                     + ENTRY_COLUMNS
                     + "FROM lexicon_entry e JOIN lexicon_sense s USING (lexicon_entry_id, lexicon_version) "
-                    + "WHERE e.lexicon_version = :version AND e.prewarm_eligible "
+                    + "WHERE e.lexicon_version = :version AND e.prewarm_eligible AND e.hint_eligibility = 'CANDIDATE' "
                     + "ORDER BY e.memory_priority DESC, e.normalized_key LIMIT :limit")
             .param("version", version)
             .param("limit", limit)
@@ -154,7 +154,9 @@ final class PostgresLexiconEntryDao implements LexiconEntryDao {
             entry.priority().frequencyZipf(),
             entry.priority().complexListCount(),
             entry.priority().memoryPriority(),
-            planned.row().prewarmEligible()
+            planned.row().prewarmEligible(),
+            entry.hintEligibility().name(),
+            planned.row().hintPolicyReference()
           });
       for (var sense : entry.senses()) {
         senseArguments.add(
@@ -182,8 +184,8 @@ final class PostgresLexiconEntryDao implements LexiconEntryDao {
     }
     batchJdbc.batchUpdate(
         "INSERT INTO lexicon_entry (lexicon_entry_id, lexicon_version, language_tag, entry_kind, lemma, normalized_key, "
-            + "provenance_source_id, provenance_license_id, provenance_digest, acquired_at, frequency_zipf, complex_list_count, memory_priority, prewarm_eligible) "
-            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            + "provenance_source_id, provenance_license_id, provenance_digest, acquired_at, frequency_zipf, complex_list_count, memory_priority, prewarm_eligible, hint_eligibility, hint_policy_reference) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         entryArguments);
     batchJdbc.batchUpdate(
         "INSERT INTO lexicon_sense (sense_id, lexicon_entry_id, lexicon_version, chinese_gloss, definition_text, provenance_reference) "
@@ -296,7 +298,8 @@ final class PostgresLexiconEntryDao implements LexiconEntryDao {
             row.getObject("sense_id", UUID.class),
             row.getString("chinese_gloss"),
             java.util.Objects.requireNonNullElse(row.getString("definition_text"), ""),
-            row.getString("provenance_reference")));
+            row.getString("provenance_reference")),
+        row.getString("hint_eligibility"));
   }
 
   /**
@@ -315,6 +318,7 @@ final class PostgresLexiconEntryDao implements LexiconEntryDao {
    * @param complex 含义：复杂词表计数。取值范围：由方法调用前置条件限定。
    * @param priority 含义：记忆优先级。取值范围：由方法调用前置条件限定。
    * @param sense 含义：当前联表行的义项。取值范围：由方法调用前置条件限定。
+   * @param hintEligibility 发布资料的提示资格。
    */
   private record RawEntryDO(
       UUID entryId,
@@ -329,7 +333,8 @@ final class PostgresLexiconEntryDao implements LexiconEntryDao {
       double zipf,
       int complex,
       int priority,
-      LexiconSenseDO sense) {}
+      LexiconSenseDO sense,
+      String hintEligibility) {}
 
   /** 在单次联表读取期间聚合一个词条的多个义项。 */
   private static final class MutableEntryDO {
@@ -345,6 +350,7 @@ final class PostgresLexiconEntryDao implements LexiconEntryDao {
     private final double zipf;
     private final int complex;
     private final int priority;
+    private final String hintEligibility;
     private final List<LexiconSenseDO> senses = new ArrayList<>();
 
     MutableEntryDO(RawEntryDO row) {
@@ -360,6 +366,7 @@ final class PostgresLexiconEntryDao implements LexiconEntryDao {
       zipf = row.zipf();
       complex = row.complex();
       priority = row.priority();
+      hintEligibility = row.hintEligibility();
     }
 
     UUID entryId() {
@@ -390,7 +397,8 @@ final class PostgresLexiconEntryDao implements LexiconEntryDao {
           priority,
           List.copyOf(senses),
           List.copyOf(aliases),
-          List.copyOf(inflections));
+          List.copyOf(inflections),
+          hintEligibility);
     }
   }
 }

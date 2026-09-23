@@ -33,6 +33,10 @@ public final class DeterministicHintPolicy {
   }
 
   private static AnnotationHint locate(CaptionContext context, LexiconEntry candidate) {
+    if (candidate.hintEligibility()
+        != io.lexiflow.lexicon.domain.LexiconHintEligibility.CANDIDATE) {
+      return null;
+    }
     var surfaces = new ArrayList<String>();
     surfaces.add(candidate.term());
     candidate.aliases().forEach(alias -> surfaces.add(alias.normalizedForm()));

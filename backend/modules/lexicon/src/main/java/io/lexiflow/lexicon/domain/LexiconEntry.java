@@ -20,6 +20,7 @@ import java.util.UUID;
  * @param inflections 指向同一 lemma 的屈折形集合。
  * @param provenance 发布版本的来源和许可声明。
  * @param priority 非个人化的预热优先级。
+ * @param hintEligibility 随版本发布的预处理资格，不由观看请求推断。
  */
 public record LexiconEntry(
     UUID entryId,
@@ -31,7 +32,8 @@ public record LexiconEntry(
     List<LexiconAlias> aliases,
     List<LexiconInflection> inflections,
     LexiconProvenance provenance,
-    LexiconPriority priority) {
+    LexiconPriority priority,
+    LexiconHintEligibility hintEligibility) {
 
   /** 校验版本化词条、表面唯一性和从属实体的不可变边界。 */
   public LexiconEntry {
@@ -52,6 +54,33 @@ public record LexiconEntry(
     rejectSurfaceReuse(lemma, aliases, inflections);
     Objects.requireNonNull(provenance, "provenance");
     Objects.requireNonNull(priority, "priority");
+    Objects.requireNonNull(hintEligibility, "hintEligibility");
+  }
+
+  /** 构造明确由调用者准备的内置/受控词条；数据库读取须显式传入持久化资格。 */
+  public LexiconEntry(
+      UUID entryId,
+      long lexiconVersion,
+      String languageTag,
+      LexiconEntryKind entryKind,
+      String lemma,
+      List<LexiconSense> senses,
+      List<LexiconAlias> aliases,
+      List<LexiconInflection> inflections,
+      LexiconProvenance provenance,
+      LexiconPriority priority) {
+    this(
+        entryId,
+        lexiconVersion,
+        languageTag,
+        entryKind,
+        lemma,
+        senses,
+        aliases,
+        inflections,
+        provenance,
+        priority,
+        LexiconHintEligibility.CANDIDATE);
   }
 
   /** 兼容没有频率证据的内置词条，导入词条必须显式提供优先级。 */

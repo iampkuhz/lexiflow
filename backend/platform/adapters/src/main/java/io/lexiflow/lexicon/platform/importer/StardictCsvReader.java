@@ -47,8 +47,37 @@ final class StardictCsvReader {
     }
   }
 
-  /** 逐条读取并转换来源记录；消费者只接收可发布的 lemma。 */
+  static final String PREPARATION_POLICY = "oxford-ranked-top2000-fixed-and-identical-gloss-v1";
+
+  /** 预扫描只保留 2000 个有来源排名的基础 lemma，不把全部词库装入内存。 */
+  BasicSelection selectBasicVocabulary(Path input) throws IOException {
+    var order = java.util.Comparator.comparingLong(BasicWord::rank).thenComparing(BasicWord::lemma);
+    var selected = new java.util.TreeSet<BasicWord>(order);
+    scan(
+        input,
+        source -> {
+          if (source.oxfordBasic() && source.rank() > 0 && !source.row().lemma().contains(" ")) {
+            selected.add(new BasicWord(source.row().lemma(), source.rank()));
+            if (selected.size() > 2000) selected.pollLast();
+          }
+        },
+        new BasicSelection(List.of()));
+    return new BasicSelection(List.copyOf(selected));
+  }
+
+  /** 读取前先冻结基础词集合，正式导入只查询该集合并保存资格。 */
   ScanResult read(Path input, Consumer<SourceRecord> consumer) throws IOException {
+    return read(input, consumer, selectBasicVocabulary(input));
+  }
+
+  ScanResult read(Path input, Consumer<SourceRecord> consumer, BasicSelection selection)
+      throws IOException {
+    return scan(input, consumer, selection);
+  }
+
+  /** 逐条读取并转换来源记录；消费者只接收可发布的 lemma。 */
+  private ScanResult scan(Path input, Consumer<SourceRecord> consumer, BasicSelection selection)
+      throws IOException {
     Objects.requireNonNull(input, "input");
     Objects.requireNonNull(consumer, "consumer");
     try (var reader = new CsvRecordReader(Files.newBufferedReader(input, StandardCharsets.UTF_8))) {
@@ -62,6 +91,8 @@ final class StardictCsvReader {
       var derivedRows = 0L;
       var noGlossRows = 0L;
       var unsupportedSurfaceRows = 0L;
+      var basicRows = 0L;
+      var deduplicatedRows = 0L;
       List<String> values;
       while ((values = reader.next()) != null) {
         sourceRows += 1;
@@ -69,7 +100,7 @@ final class StardictCsvReader {
           throw new IllegalArgumentException(
               "source row " + sourceRows + " has an unexpected column count");
         }
-        var converted = convert(values, indexes, sourceRows);
+        var converted = convert(values, indexes, sourceRows, selection);
         if (converted.reason() == OmissionReason.DERIVED) {
           derivedRows += 1;
         } else if (converted.reason() == OmissionReason.NO_GLOSS) {
@@ -78,15 +109,25 @@ final class StardictCsvReader {
           unsupportedSurfaceRows += 1;
         } else {
           importableRows += 1;
+          if (converted.record().row().basicVocabulary()) basicRows++;
+          if (converted.record().glossDeduplicated()) deduplicatedRows++;
           consumer.accept(converted.record());
         }
       }
       return new ScanResult(
-          sourceRows, importableRows, derivedRows, noGlossRows, unsupportedSurfaceRows);
+          sourceRows,
+          importableRows,
+          derivedRows,
+          noGlossRows,
+          unsupportedSurfaceRows,
+          selection.words().size(),
+          basicRows,
+          deduplicatedRows);
     }
   }
 
-  private static Conversion convert(Map<String, String> row, long sourceRow) {
+  private static Conversion convert(
+      Map<String, String> row, long sourceRow, BasicSelection selection) {
     var word = normalize(row.get("word"));
     if (isDerived(row.get("exchange"))) {
       return Conversion.omit(OmissionReason.DERIVED);
@@ -138,7 +179,16 @@ final class StardictCsvReader {
                 dictionary,
                 frequency,
                 complexEvidence,
-                rank != 0 && !"1".equals(normalize(row.get("oxford"))))));
+                rank != 0 && !"1".equals(normalize(row.get("oxford"))),
+                selection.lemmas().contains(word),
+                PREPARATION_POLICY
+                    + ";list_sha256="
+                    + selection.digest()
+                    + ";"
+                    + evidenceReference),
+            "1".equals(normalize(row.get("oxford"))),
+            rank,
+            !gloss.equals(io.lexiflow.lexicon.application.GlossPreparation.normalize(gloss))));
   }
 
   private static Map<String, Integer> indexes(List<String> header) {
@@ -150,10 +200,10 @@ final class StardictCsvReader {
   }
 
   private static Conversion convert(
-      List<String> values, Map<String, Integer> indexes, long sourceRow) {
+      List<String> values, Map<String, Integer> indexes, long sourceRow, BasicSelection selection) {
     var row = new HashMap<String, String>();
     indexes.forEach((name, index) -> row.put(name, values.get(index)));
-    return convert(row, sourceRow);
+    return convert(row, sourceRow, selection);
   }
 
   private static boolean isDerived(String exchange) {
@@ -270,8 +320,16 @@ final class StardictCsvReader {
    *
    * @param sourceRow 一起计入表头之后的物理来源行号
    * @param row 已规范化的导入行
+   * @param oxfordBasic 来源是否标记 oxford=1
+   * @param rank 有效 BNC/FRQ 排名的较小值，缺失为零
+   * @param glossDeduplicated 是否合并了完全相同的重复表达
    */
-  record SourceRecord(long sourceRow, LexiconImportRow row) {}
+  record SourceRecord(
+      long sourceRow,
+      LexiconImportRow row,
+      boolean oxfordBasic,
+      long rank,
+      boolean glossDeduplicated) {}
 
   /**
    * 流式扫描的可审计汇总。
@@ -281,13 +339,69 @@ final class StardictCsvReader {
    * @param derivedRows 被归并到 root lemma 的派生行数
    * @param noGlossRows 缺少中文释义而跳过的行数
    * @param unsupportedSurfaceRows 超出首版匹配表面范围而跳过的行数
+   * @param selectedBasicLemmas 由来源和排名选定的基础 lemma 数
+   * @param basicRows 合并固定功能词后的基础词条数
+   * @param deduplicatedRows 重复表达清洗行数
    */
   record ScanResult(
       long sourceRows,
       long importableRows,
       long derivedRows,
       long noGlossRows,
-      long unsupportedSurfaceRows) {}
+      long unsupportedSurfaceRows,
+      int selectedBasicLemmas,
+      long basicRows,
+      long deduplicatedRows) {}
+
+  /**
+   * 有明确来源排名的基础词。
+   *
+   * @param lemma 已归一 lemma。
+   * @param rank 公开来源中的正排名。
+   */
+  record BasicWord(String lemma, long rank) {}
+
+  /** 冻结的有界基础词清单；摘要不含用户资料。 */
+  static final class BasicSelection {
+    private final List<BasicWord> words;
+    private final Set<String> lemmas;
+    private final String digest;
+
+    BasicSelection(List<BasicWord> words) {
+      this.words = List.copyOf(words);
+      this.lemmas =
+          words.stream()
+              .map(BasicWord::lemma)
+              .collect(java.util.stream.Collectors.toUnmodifiableSet());
+      try {
+        var sha = java.security.MessageDigest.getInstance("SHA-256");
+        sha.update((PREPARATION_POLICY + "\n").getBytes(StandardCharsets.UTF_8));
+        words.forEach(
+            word ->
+                sha.update(
+                    (word.rank() + "\t" + word.lemma() + "\n").getBytes(StandardCharsets.UTF_8)));
+        io.lexiflow.lexicon.application.BasicVocabulary.fixedWords().stream()
+            .sorted()
+            .forEach(
+                word -> sha.update(("fixed\t" + word + "\n").getBytes(StandardCharsets.UTF_8)));
+        digest = java.util.HexFormat.of().formatHex(sha.digest());
+      } catch (java.security.NoSuchAlgorithmException exception) {
+        throw new IllegalStateException(exception);
+      }
+    }
+
+    List<BasicWord> words() {
+      return words;
+    }
+
+    Set<String> lemmas() {
+      return lemmas;
+    }
+
+    String digest() {
+      return digest;
+    }
+  }
 
   /** 不能构成可发布 entry 的来源记录分类。 */
   private enum OmissionReason {

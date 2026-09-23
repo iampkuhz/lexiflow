@@ -15,6 +15,7 @@
 | `entry_kind` | `word` 或 `phrase`；`phrase` 必须由两个或以上 token 组成。 |
 | `lemma` | 词条的规范形，按 `language_tag` 归一。 |
 | `normalized_key` | `language_tag`、`entry_kind` 与规范 lemma 的稳定组合；同一词库版本只能属于一个 entry。 |
+| `hint_eligibility` | 导入期计算并随版本发布：`UNPROCESSED`、`BASIC_VOCABULARY` 或 `CANDIDATE`；只有最后一种进入提示筛选，不代表已消歧。 |
 | `Sense` | 从属的一个或多个义项；每个具有稳定 `sense_id`、简短中文表达、定义、词库版本与来源引用。 |
 
 不同义项可以属于同一个词条，但 alias 或 inflection 不能独立成为义项；语境选择始终由
@@ -53,6 +54,8 @@ API 仅将同一已发布版本中排名靠前的有界集合预热到本机 L1�
 PostgreSQL 查询，再以相同 `lexicon_version` 缓存。缓存和 Redis 都可重建，不能成为词库事实来源。
 导入格式、公式、来源审阅和操作命令见
 [离线词库导入与预热](../development/toolchain-reproduction/lexicon-import.md)。
+
+基础词名单及重复表达去重属于发布前的数据预处理，不在观看请求中计算。排除的基础词及其词形不提示；包含基础词的完整短语独立判定。名单和策略来源可追溯，更新须创建新发布版本。
 
 ## 1.5. 公开查询边界
 

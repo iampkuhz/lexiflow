@@ -36,7 +36,8 @@ final class LexiconEntryMapper {
             source.provenanceDigest(),
             source.acquiredAt()),
         new LexiconPriority(
-            source.frequencyZipf(), source.complexListCount(), source.memoryPriority()));
+            source.frequencyZipf(), source.complexListCount(), source.memoryPriority()),
+        io.lexiflow.lexicon.domain.LexiconHintEligibility.valueOf(source.hintEligibility()));
   }
 
   List<LexiconEntry> toModels(List<LexiconEntryDO> sources) {

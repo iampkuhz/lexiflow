@@ -17,6 +17,8 @@ import java.util.Objects;
  * @param frequency 含义：词频字段来源。取值范围：由方法调用前置条件限定。
  * @param complexLists 含义：复杂词表字段来源。取值范围：由方法调用前置条件限定。
  * @param prewarmEligible 含义：是否可进入预热候选。取值范围：由方法调用前置条件限定。
+ * @param basicVocabulary 导入时已确定的基础词排除标记。
+ * @param hintPolicyReference 基础词选择和清洗规则的来源引用。
  */
 public record LexiconImportRow(
     String lemma,
@@ -28,11 +30,13 @@ public record LexiconImportRow(
     SourceReference dictionary,
     SourceReference frequency,
     List<SourceReference> complexLists,
-    boolean prewarmEligible) {
+    boolean prewarmEligible,
+    boolean basicVocabulary,
+    String hintPolicyReference) {
   /** 构造不可变的导入记录。 */
   public LexiconImportRow {
     lemma = required(lemma, "lemma");
-    chineseGloss = required(chineseGloss, "chineseGloss");
+    chineseGloss = GlossPreparation.normalize(required(chineseGloss, "chineseGloss"));
     definition = Objects.requireNonNullElse(definition, "").trim();
     aliases = List.copyOf(Objects.requireNonNull(aliases, "aliases"));
     inflections = List.copyOf(Objects.requireNonNull(inflections, "inflections"));
@@ -40,6 +44,42 @@ public record LexiconImportRow(
     dictionary = Objects.requireNonNull(dictionary, "dictionary");
     frequency = Objects.requireNonNull(frequency, "frequency");
     complexLists = List.copyOf(Objects.requireNonNull(complexLists, "complexLists"));
+    basicVocabulary =
+        basicVocabulary
+            || BasicVocabulary.contains(lemma)
+            || aliases.stream().anyMatch(BasicVocabulary::contains)
+            || inflections.stream().anyMatch(BasicVocabulary::contains);
+    hintPolicyReference = required(hintPolicyReference, "hintPolicyReference");
+    if (basicVocabulary && lemma.contains(" "))
+      throw new IllegalArgumentException("basic exclusion must name a word, not a phrase");
+    prewarmEligible = prewarmEligible && !basicVocabulary;
+  }
+
+  /** 规范来源使用固定功能词规则；扩展基础词须由上游提供明确标记和依据。 */
+  public LexiconImportRow(
+      String lemma,
+      String chineseGloss,
+      String definition,
+      List<String> aliases,
+      List<String> inflections,
+      LexiconPriority priority,
+      SourceReference dictionary,
+      SourceReference frequency,
+      List<SourceReference> complexLists,
+      boolean prewarmEligible) {
+    this(
+        lemma,
+        chineseGloss,
+        definition,
+        aliases,
+        inflections,
+        priority,
+        dictionary,
+        frequency,
+        complexLists,
+        prewarmEligible,
+        false,
+        "fixed-function-words-and-identical-gloss-v1");
   }
 
   private static String required(String value, String field) {

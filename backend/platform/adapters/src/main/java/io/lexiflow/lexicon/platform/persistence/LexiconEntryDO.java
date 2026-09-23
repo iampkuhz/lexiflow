@@ -22,6 +22,7 @@ import java.util.UUID;
  * @param senses 含义：联表读取的全部义项。取值范围：由方法调用前置条件限定。
  * @param aliases 含义：别名规范表面。取值范围：由方法调用前置条件限定。
  * @param inflections 含义：屈折规范表面。取值范围：由方法调用前置条件限定。
+ * @param hintEligibility 已发布的预处理资格。
  */
 record LexiconEntryDO(
     UUID entryId,
@@ -38,4 +39,5 @@ record LexiconEntryDO(
     int memoryPriority,
     List<LexiconSenseDO> senses,
     List<String> aliases,
-    List<String> inflections) {}
+    List<String> inflections,
+    String hintEligibility) {}
