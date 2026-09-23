@@ -9,7 +9,7 @@ LexiFlow 保留两个业务领域和九个 Gradle 叶项目：共享词汇知识
 | 领域模块 | 只回答的业务问题 | 它拥有的事实和规则 | 不能拥有 |
 |---|---|---|---|
 | `:modules:lexicon` / 共享词汇知识 | **这个词或短语有哪些可复用知识？** | 词项、词形、短语、基础义项、词频/难度、领域元数据及其来源与版本；规范化与查询合同。 | 当前字幕采用哪个义项、是否提示、提示结果、供应商输出。 |
-| `:modules:enrichment` / 通用字幕提示 | **这一段字幕是否需要什么提示？** | `CaptionContext` 输入合同、候选选择、重叠/密度/价值规则、语义证据的任务合同、提示结果与结果版本。 | 词库事实、供应商 SDK、工作租约和队列机制、HTTP 或 DOM。 |
+| `:modules:enrichment` / 通用字幕提示 | **这一段字幕是否需要什么提示？** | `CaptionContext` 输入合同、候选选择、重叠/密度/价值规则、已发布语义资料的适用性判断、提示结果与结果版本。 | 词库事实、供应商 SDK、工作租约和队列机制、HTTP 或 DOM。 |
 
 Lexicon 是**稳定、跨内容复用的知识**；Enrichment 是**针对一段字幕的决策和派生结果**。例如 `settlement` 的基础义项和频率归 Lexicon；在一句字幕中是否提示，以及“结算”是否适用于该词段，归 Enrichment。词库命中不等于展示，单次语义结果也不成为词库义项。
 
@@ -18,7 +18,7 @@ Lexicon 是**稳定、跨内容复用的知识**；Enrichment 是**针对一段�
 | 概念 | 为什么不是独立领域模块 | 所在位置 |
 |---|---|---|
 | 字幕与上下文 | 首版的字幕、位置、修订和有限上下文是提示请求输入，没有内容编辑、内容库或独立后端消费者。 | `CaptionContext`，由 Enrichment 声明为输入值合同；来源适配器产生它，但不把 DOM 或来源私有类型带进领域。 |
-| 语境释义 | 语义能力只服务提示，不拥有独立业务事实。 | Enrichment 声明任务合同和标准结果；最外层的 `:platform:adapters` 调用模型或模拟器。结果绑定本次 `CaptionContext`。 |
+| 语境释义 | 语义能力只服务提示，不拥有独立业务事实。 | Enrichment 对已发布资料进行确定性匹配；模型仅可在第三阶段独立事后分析中由基础设施适配。观看不产生模型任务。 |
 | 共享基础库 | 标识、时间和版本没有脱离业务语义的共享模型。 | 使用 Java 标准 `UUID`、`Instant`、`Duration`；`CaptionRevision`、`LexiconVersion`、`PromptResultVersion` 等值对象由各自 owner 定义。 |
 
 这三类概念目前不拥有独立业务事实，也不建立独立 Gradle 项目；在出现内容库、独立语义产品或稳定的无领域共享合同前，不得向核心领域写入这些规则。
@@ -36,7 +36,7 @@ Lexicon 是**稳定、跨内容复用的知识**；Enrichment 是**针对一段�
 | 验证 | `:tests:architecture`、`:tests:quality-gates` | 2 |
 | **叶项目总数** |  | **9** |
 
-图展示运行链路中的模块级业务调用和最外层基础设施；验证模块与基础设施内部的具体技术实现不在图中展开。基础设施只由组合根装配，不是请求链路的一环，也不发起 Enrichment 决策。
+图展示模块级调用方向，不表示 worker 参与观看请求或授权后台模型补全；验证模块与基础设施内部的具体技术实现不在图中展开。基础设施只由组合根装配，不是请求链路的一环，也不发起 Enrichment 决策。
 
 ```plantuml
 @startuml
@@ -96,10 +96,10 @@ endlegend
 | 模块 | 只做什么 | 产生或拥有的东西 | 绝不做什么 |
 |---|---|---|---|
 | `:modules:lexicon` | 查询和维护共享词汇知识。 | 词项、短语、基础义项及版本。 | 不读来源 DOM，不决定提示，不调用模型。 |
-| `:modules:enrichment` | 将 `CaptionContext` 与词库材料变成提示决策；需要时请求语义证据。 | 候选、规则判断、提示结果、结果版本、语义任务合同。 | 不管理词库事实，不写供应商 SDK，不拥有工作调度机制。 |
+| `:modules:enrichment` | 将 `CaptionContext` 与词库材料变成提示决策；只使用已发布的可靠语义资料。 | 候选、规则判断、提示结果和资料版本关联。 | 不管理词库事实，不写供应商 SDK，不拥有工作调度机制。 |
 | `:application:workflow` | 将一次交互或后台任务按可靠顺序完成。 | 用例协调和提示调用顺序。 | 不判断词义或提示价值，不直接依赖 Postgres、Redis 或模型 SDK。 |
 | `:application:lexicon-application` | 协调离线词库导入和版本感知查询。 | `LexiconRepository` 合同、导入服务与可重建 L1 查询服务。 | 不含 SQL、DAO、DO、Spring 或具体数据库类型。 |
-| `:platform:adapters` | 为上层提供具体技术集成。 | 模型/模拟器调用、Postgres、Redis、观测和安全接入。 | 不调用 Enrichment 决策，不改工作状态机、提示规则或重试预算，不因数据库访问而成为所有表的 owner。 |
+| `:platform:adapters` | 为上层提供具体技术集成。 | 离线模型技术适配、Postgres、Redis、观测和安全接入。 | 不调用 Enrichment 决策，不改工作状态机、提示规则或重试预算，不因数据库访问而成为所有表的 owner。 |
 | `:apps:api` | 启动 HTTP 进程，接收请求并装配依赖。 | HTTP 传输映射和启动配置。 | 不写领域规则，不开后台业务循环，不直接跨表读取。 |
 | `:apps:worker` | 启动无 Web Server 的后台进程，触发 workflow 的后台/恢复用例并装配依赖。 | 进程生命周期与触发配置。 | 不是队列、调度领域或异步代码目录；不拥有提示规则、租约或结果。 |
 | `:tests:architecture` | 验证代码依赖方向和边界访问。 | 架构测试。 | 不参与产品运行或定义业务规则。 |
@@ -112,17 +112,17 @@ Chrome 扩展可拥有本机 `SuppressedTermPreference` 存储与一个固定写
 | 两方 | 一句话分界 | 例子 |
 |---|---|---|
 | `worker` / `workflow` | Worker 决定**进程何时运行**；workflow 决定**工作如何可靠完成**。 | worker 以 `WebApplicationType.NONE` 启动、绑定触发器；workflow 判断取消后能否提交、如何恢复未完成工作。 |
-| `workflow` / `:platform:adapters` | Workflow 定义**需要什么保证**；基础设施用技术实现**怎样做到**。 | workflow 要求“只有持久交接成功才能返回 pending”；基础设施用事务或条件更新实现。 |
+| `workflow` / `:platform:adapters` | Workflow 定义**需要什么保证**；基础设施用技术实现**怎样做到**。 | 词库发布用例要求版本一致；基础设施用事务或条件更新实现。 |
 | `enrichment` / `CaptionContext` | Enrichment 是**对输入作决定**；CaptionContext 是**被决定的原文事实**。 | 字幕修订使旧提示失效；Enrichment 重算提示，不篡改原文。来源私有 DOM 留在来源适配器或扩展。 |
-| `lexicon` / 语义能力 | Lexicon 是**长期复用知识**；语义能力是**本次语境证据**。 | `settlement` 的义项和频率可跨视频复用；当前句选择“结算”只绑定本次 `CaptionContext`。 |
+| `lexicon` / 语义能力 | Lexicon 是**长期复用知识**；语义资料的适用性判断是**本次字幕决策**。 | `settlement` 的义项和频率可跨视频复用；当前句选择“结算”只绑定本次 `CaptionContext`。 |
 
 ### 1.2.3. 一条字幕请求如何经过这些边界
 
 1. 来源适配器/扩展产生不含私有类型的 `CaptionContext`；api 将它交给 workflow。
 2. Workflow 调用 Enrichment；Enrichment 查询 Lexicon，按候选、密度和价值规则决定是否需要提示。
-3. Enrichment 请求语义证据；最外层基础设施访问模型或模拟器。这是 Enrichment 提出需求、基础设施承接技术调用，不是基础设施调用 Enrichment。
-4. Workflow 确认持久交接；成功后才表示 `pending`。
-5. Worker 是调用 workflow 的后台入口；提示结果仍由 Enrichment 决定，工作与投递仍由 workflow 协调，扩展只显示匹配当前修订的结果。
+3. Enrichment 使用适用的已发布资料形成可靠提示；证据不足就不提示，不访问模型。
+4. Workflow 返回确定性结果，不建立当前字幕的后台补全或 pending 承诺。
+5. 扩展仅显示匹配当前字幕的结果。Worker 只可用于独立后台用例，不参与观看等待；第三阶段分析产物经公开发布合同供后续观看使用。
 
 ## 1.3. 静态依赖规则
 

@@ -1,13 +1,13 @@
 # 1. 字幕内容合同
 
 `CaptionContext` 是 Enrichment 的版本化输入值，不形成新的业务领域。来源适配器把来源专有
-字幕转成这个合同；Workflow 保存其必要快照以支持幂等、恢复和失效。来源取得步骤见
+字幕转成这个合同；请求内身份支持关联和失效，不授权持久保存字幕。来源取得步骤见
 [来源适配合同](source-contract.md)，词库查询边界见[共享词库合同](lexicon-contract.md)。
 
 ## 1.1. ContentRevision 与来源引用
 
-一个 `ContentRevision` 以服务端 `content_id` 和正整数 `content_revision` 唯一标识一次
-不可变的规范化字幕输入。它保存受控的 `source_kind`、不可逆 `source_reference_digest`、
+一个 `ContentRevision` 以 `content_id` 和正整数 `content_revision` 唯一标识一次
+不可变的规范化字幕输入。这是输入合同，不是字幕存储要求；它携带受控的 `source_kind`、不可逆 `source_reference_digest`、
 规范化算法版本和有序的 `CaptionSegment`。原始 URL、DOM、播放器状态、cookie 和观看历史
 不得进入该聚合。
 
@@ -26,7 +26,7 @@ segment identity，不同 revision 不共享 segment identity。
 2. 同一轨道不允许重叠；来源明确给出的多轨重叠必须使用不同轨道标识，不得混为一条时间线。
 3. 每个用于提示的范围是该 segment 规范正文内的半开字符区间 `[start_offset, end_offset)`；
    空范围、越界范围或未指明 segment 的范围都被拒绝。
-4. 结果、工作和缓存键必须同时带 content revision、segment identity、范围和各自的合同版本；
+4. 结果和缓存键必须同时带 content revision、segment identity、范围和各自的合同版本；
    新 revision、轨道或算法版本不能复用旧结果。
 
 ## 1.3. 规范化与输入限制
@@ -43,5 +43,5 @@ ASCII 空格，并删除首尾空白。字母、数字、内部撇号和连字�
 
 `source_kind` 只用于选择来源适配器，核心领域不得按来源专有字段分支。`source_reference_digest`
 仅用于诊断同一来源对象，不能反向恢复 URL。来源可撤回、字幕被替换或完整性摘要不匹配时，
-对应 revision 标记为不可投递；已有 Annotation 和 SemanticResult 仍作为版本化历史事实，
-但不再向客户端交付。
+对应 revision 的结果不可展示或复用。不因版本关联持久保存字幕、观看历史或当前字幕的语义工作；
+离线分析的数据边界须在第三阶段另行确认。

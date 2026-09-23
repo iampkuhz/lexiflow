@@ -4,10 +4,10 @@
 
 | 区域 | 责任 | 入口 |
 | --- | --- | --- |
-| 产品 | 目标、范围和第一阶段验收案例 | [产品简介](product/product-brief.md) |
+| 产品 | 用户问题与产品范围 | [产品简介](product/product-brief.md) |
 | 架构 | 边界、流程、合同和决策 | [架构总览](architecture/overview.md) |
 | 开发 | 方针与边界在根页；详细操作在同名子目录 | [开发与校验](development/validation.md) |
-| 路线图 | 长期计划与阶段状态 | [主计划](roadmap/master-plan.md)、[第二阶段状态](roadmap/phase-2-status.md) |
+| 路线图 | 唯一产品方向与三阶段入口 | [产品路线图](roadmap/master-plan.md)、[状态与下一步](roadmap/master-plan/status.md) |
 
 ## 1.1. 架构专题
 

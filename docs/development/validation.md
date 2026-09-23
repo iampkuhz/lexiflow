@@ -29,7 +29,7 @@ Task catalog 必须显式提供 `required_check_ids`；字段缺失表示 catalo
 | Java 工程与定向诊断 | [Java 工程](validation/java-engineering.md) |
 | Harness、目录与派发 | [Harness 与派发](validation/harness-and-dispatch.md) |
 | 正式收据与独立复核 | [收据与验收](validation/receipts-and-acceptance.md) |
-| 第一阶段出口 | [第一阶段决定](validation/phase-1-decision.md) |
+| 产品阶段对齐与状态 | [产品路线图](../roadmap/master-plan.md)、[状态页](../roadmap/master-plan/status.md) |
 | Java/Gradle 精确任务 | [任务参考](validation/java-gradle-task-reference.md) |
 | 故障处理与执行记录 | [故障处理](validation/troubleshooting.md)；[记录模板](validation/record-template.md) |
 
