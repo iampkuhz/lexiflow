@@ -53,4 +53,26 @@ class EnrichCaptionUseCaseTest {
     assertEquals(caption, result.caption());
     assertEquals(0, result.hints().size());
   }
+
+  @Test
+  void measuresQueryAndRulesUsingOneMonotonicClock() {
+    var ticks = new java.util.ArrayDeque<>(java.util.List.of(100L, 160L, 175L));
+    var measuredUseCase =
+        new EnrichCaptionUseCase(
+            new BuiltinLexiconCatalog(), new DeterministicHintPolicy(), ticks::removeFirst);
+    var measured =
+        measuredUseCase.enrichMeasured(
+            new CaptionContext(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                1,
+                "a".repeat(64),
+                "reliable",
+                0,
+                8));
+    assertEquals(60, measured.queryNanos());
+    assertEquals(15, measured.rulesNanos());
+    assertEquals(1, measured.candidateCount());
+    assertEquals(HintState.READY, measured.result().state());
+    assertEquals(0, ticks.size());
+  }
 }

@@ -3,6 +3,7 @@ package io.lexiflow.api.hints;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,18 +19,23 @@ class CaptionHintControllerTest {
     var caption = "We need reliable captions.";
 
     var response =
-        controller.hint(
-            new CaptionHintRequest(
-                UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                1,
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                caption,
-                0,
-                caption.length()));
+        controller
+            .hint(
+                new CaptionHintRequest(
+                    UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                    1,
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    caption,
+                    0,
+                    caption.length()))
+            .getBody();
 
     assertEquals(caption, response.caption());
     assertEquals("READY", response.state());
     assertEquals("可靠的", response.hints().getFirst().chineseGloss());
+    assertEquals(
+        UUID.nameUUIDFromBytes("sense:reliable".getBytes(StandardCharsets.UTF_8)).toString(),
+        response.hints().getFirst().senseId());
   }
 
   @Test

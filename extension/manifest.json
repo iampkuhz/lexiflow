@@ -3,6 +3,8 @@
   "name": "LexiFlow Caption Hints",
   "version": "0.1.0",
   "description": "Keep YouTube English captions visible and add bounded Chinese hints.",
+  "permissions": ["storage"],
+  "action": { "default_popup": "popup.html", "default_title": "LexiFlow 字幕增强" },
   "host_permissions": ["http://127.0.0.1:18080/*"],
   "content_scripts": [
     {

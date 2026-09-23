@@ -19,7 +19,7 @@ class LexiconCsvReaderTest {
     var plan = LexiconImportPlan.prepare(rows, 1, "a".repeat(64), Instant.EPOCH);
 
     assertEquals(1, plan.size());
-    assertEquals("可靠的, 值得信赖", plan.getFirst().entry().chineseGloss());
+    assertEquals("可靠的, 值得信赖", plan.getFirst().entry().senses().getFirst().chineseGloss());
     assertEquals(4.3, plan.getFirst().entry().priority().frequencyZipf());
     assertEquals(1, plan.getFirst().entry().priority().complexListCount());
     assertEquals(834, plan.getFirst().entry().priority().memoryPriority());

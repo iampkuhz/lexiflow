@@ -14,7 +14,7 @@ class LexiconEntryTest {
     var entry = entry(" Figure   Out ", LexiconEntryKind.PHRASE);
 
     assertEquals("figure out", entry.lemma());
-    assertEquals("释义", entry.chineseGloss());
+    assertEquals("释义", entry.senses().getFirst().chineseGloss());
     assertEquals(1, entry.lexiconVersion());
   }
 

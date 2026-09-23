@@ -43,11 +43,13 @@ class CachedLexiconQueryServiceTest {
     var repository = new MutableRepository();
     var service = new CachedLexiconQueryService(repository, 10, 0);
 
-    assertEquals("旧释义", service.candidatesFor("reliable").getFirst().chineseGloss());
+    assertEquals(
+        "旧释义", service.candidatesFor("reliable").getFirst().senses().getFirst().chineseGloss());
     repository.version = 2;
     repository.entry = entry(2, "新释义");
 
-    assertEquals("新释义", service.candidatesFor("reliable").getFirst().chineseGloss());
+    assertEquals(
+        "新释义", service.candidatesFor("reliable").getFirst().senses().getFirst().chineseGloss());
   }
 
   private static LexiconEntry entry(long version, String gloss) {

@@ -2,8 +2,12 @@ package io.lexiflow.api.hints;
 
 import io.lexiflow.enrichment.domain.CaptionContext;
 import io.lexiflow.workflow.application.EnrichCaptionUseCase;
+import java.util.Locale;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,6 +18,7 @@ import org.springframework.web.server.ResponseStatusException;
 @RestController
 @RequestMapping("/api/v1/caption-hints")
 public final class CaptionHintController {
+  private static final Logger LOG = LoggerFactory.getLogger(CaptionHintController.class);
   private final EnrichCaptionUseCase useCase;
 
   /**
@@ -32,11 +37,12 @@ public final class CaptionHintController {
    * @return 保留英文字幕的确定性提示响应。
    */
   @PostMapping
-  public CaptionHintResponse hint(@RequestBody CaptionHintRequest request) {
+  public ResponseEntity<CaptionHintResponse> hint(@RequestBody CaptionHintRequest request) {
+    var started = System.nanoTime();
     try {
       var input = Objects.requireNonNull(request, "request");
-      var result =
-          useCase.enrich(
+      var measured =
+          useCase.enrichMeasured(
               new CaptionContext(
                   input.contentId(),
                   input.contentRevision(),
@@ -44,19 +50,44 @@ public final class CaptionHintController {
                   input.caption(),
                   input.startOffset(),
                   input.endOffset()));
-      return new CaptionHintResponse(
-          result.caption(),
-          result.state().name(),
-          result.hints().stream()
-              .map(
-                  hint ->
-                      new AnnotationHintResponse(
-                          hint.startOffset(),
-                          hint.endOffset(),
-                          hint.lexiconEntryId(),
-                          hint.lexiconVersion(),
-                          hint.chineseGloss()))
-              .toList());
+      var result = measured.result();
+      var body =
+          new CaptionHintResponse(
+              result.caption(),
+              result.state().name(),
+              result.hints().stream()
+                  .map(
+                      hint ->
+                          new AnnotationHintResponse(
+                              hint.startOffset(),
+                              hint.endOffset(),
+                              hint.lexiconEntryId(),
+                              hint.senseId(),
+                              hint.lexiconVersion(),
+                              hint.chineseGloss()))
+                  .toList());
+      var totalMillis = (System.nanoTime() - started) / 1_000_000.0;
+      var queryMillis = measured.queryNanos() / 1_000_000.0;
+      var rulesMillis = measured.rulesNanos() / 1_000_000.0;
+      LOG.info(
+          "hint_request state={} candidates={} hints={} queryMs={} rulesMs={} apiMs={}",
+          result.state(),
+          measured.candidateCount(),
+          result.hints().size(),
+          queryMillis,
+          rulesMillis,
+          totalMillis);
+      return ResponseEntity.ok()
+          .header("Cache-Control", "no-store")
+          .header(
+              "Server-Timing",
+              String.format(
+                  Locale.ROOT,
+                  "query;dur=%.3f, rules;dur=%.3f, api;dur=%.3f",
+                  queryMillis,
+                  rulesMillis,
+                  totalMillis))
+          .body(body);
     } catch (IllegalArgumentException | NullPointerException exception) {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "invalid caption request", exception);

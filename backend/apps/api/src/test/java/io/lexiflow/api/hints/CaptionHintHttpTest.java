@@ -7,6 +7,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -19,9 +21,24 @@ class CaptionHintHttpTest {
   void returnsReadyAndNoPendingAcrossTheRealHttpBoundary() throws Exception {
     var known = post(payload("reliable", 8));
     assertEquals(200, known.statusCode());
+    assertEquals("no-store", known.headers().firstValue("Cache-Control").orElseThrow());
+    assertTrue(
+        known
+            .headers()
+            .firstValue("Server-Timing")
+            .orElseThrow()
+            .matches(
+                "query;dur=[0-9]+[.][0-9]{3}, rules;dur=[0-9]+[.][0-9]{3}, api;dur=[0-9]+[.][0-9]{3}"));
     assertTrue(known.body().contains("\"state\":\"READY\""));
     assertTrue(known.body().contains("可靠的"));
     assertTrue(known.body().contains("\"caption\":\"reliable\""));
+    assertTrue(
+        known
+            .body()
+            .contains(
+                "\"senseId\":\""
+                    + UUID.nameUUIDFromBytes("sense:reliable".getBytes(StandardCharsets.UTF_8))
+                    + "\""));
     var unknown = post(payload("zxqv", 4));
     assertEquals(200, unknown.statusCode());
     assertTrue(unknown.body().contains("\"state\":\"NO_PENDING\""));

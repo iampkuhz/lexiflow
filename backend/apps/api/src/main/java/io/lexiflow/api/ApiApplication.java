@@ -18,6 +18,9 @@ import org.springframework.context.annotation.Import;
 @SpringBootApplication(exclude = DataSourceAutoConfiguration.class)
 @Import(PostgresPersistenceConfiguration.class)
 public class ApiApplication {
+  private static final org.slf4j.Logger LOGGER =
+      org.slf4j.LoggerFactory.getLogger(ApiApplication.class);
+
   /**
    * 启动 API 进程。
    *
@@ -41,8 +44,18 @@ public class ApiApplication {
 
   private static LexiconCatalog lexiconCatalog(LexiconRepository repository) {
     if (repository == null) {
+      LOGGER.warn(
+          "runtime lexicon=builtin-demo; only 5 demo terms, not the imported dictionary;"
+              + " set SPRING_DATASOURCE_URL or start_api --database-url for normal use");
       return new BuiltinLexiconCatalog();
     }
-    return new CachedLexiconQueryService(repository, 4_000, 2_000);
+    var catalog = new CachedLexiconQueryService(repository, 4_000, 2_000);
+    var version = repository.publishedVersion();
+    LOGGER.info("runtime lexicon=postgres publishedVersion={}", version);
+    if (version == 0) {
+      LOGGER.warn(
+          "runtime lexicon=empty reason=no-published-version; publish a lexicon before use");
+    }
+    return catalog;
   }
 }

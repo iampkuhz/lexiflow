@@ -125,15 +125,6 @@ public record LexiconEntry(
     return lemma;
   }
 
-  /**
-   * 返回首版确定性切片唯一义项的简短中文表达。
-   *
-   * @return 首个义项的非空白中文释义。
-   */
-  public String chineseGloss() {
-    return senses.getFirst().chineseGloss();
-  }
-
   /** 将英文表面规范为 NFC、小写和单一 ASCII 空格。 */
   static String normalizeEnglishForm(String value, String field) {
     Objects.requireNonNull(value, field);

@@ -35,6 +35,9 @@ public record CaptionContext(
     if (startOffset < 0 || endOffset <= startOffset || endOffset > caption.length()) {
       throw new IllegalArgumentException("caption range is invalid");
     }
+    if (!isCodePointBoundary(caption, startOffset) || !isCodePointBoundary(caption, endOffset)) {
+      throw new IllegalArgumentException("caption range must not split a surrogate pair");
+    }
   }
 
   /**
@@ -65,5 +68,12 @@ public record CaptionContext(
       throw new IllegalArgumentException(field + " must not be blank");
     }
     return value;
+  }
+
+  private static boolean isCodePointBoundary(String value, int offset) {
+    return offset == 0
+        || offset == value.length()
+        || !(Character.isHighSurrogate(value.charAt(offset - 1))
+            && Character.isLowSurrogate(value.charAt(offset)));
   }
 }
