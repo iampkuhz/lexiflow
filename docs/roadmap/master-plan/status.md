@@ -27,7 +27,7 @@
 | 页面开关 | 工具栏弹窗已有中文开关，仅当前页面内存生效；关闭取消工作、停发请求并恢复原生字幕，开启处理当前句。导航重置，旧弹窗操作拒绝，无新增权限或观看记录。 |
 | 本机偏好 | 显式词条抑制按发布版本隔离，支持刷新保留及恢复，不上传；与当前页面开关分开。 |
 | 分段诊断 | 八段计时及最近 256 样本统计保留；新增摘要阶段/请求前/在途取消、晚到可用结果、最终显示拒绝与服务端计时缺失。主动取消不等于延迟漏译。 |
-| 本机运行 | 主线程 18081 API 与用户 18080 实例仍保留，发布版本为 1。预处理资料尚未部署；最新结构初始化改造正在落实，不能把用户授权或隔离测试视为重建完成。须先核对本项目数据库及运行服务，显式重建、完整导入发布后再切换应用；同时保证资料身份不与缓存或本机偏好混淆。扩展修复仍需用户重新加载。 |
+| 本机运行 | 主线程 18081 API 与用户 18080 实例仍保留，发布版本为 1。预处理资料尚未部署；最新结构初始化改造已落实并通过后端完整验证，未清空运行数据库；不能把用户授权或隔离测试视为重建完成。须先核对本项目数据库及运行服务，显式重建、完整导入发布后再切换应用；同时保证资料身份不与缓存或本机偏好混淆。扩展修复仍需用户重新加载。 |
 | 执行与验收 | foundation 的 7 项任务随实际范围更新版本；popup 子工作包已集成并经父代理复核。直接测试、只读审查与独立正式收据分开，不复用旧 Gate 结果。 |
 
 ## 1.4. 验证证据
@@ -41,12 +41,13 @@
 | 运行实例已发布词库集成 | PASS | 主线程 4 个自造病例贯通扩展、API 与 PostgreSQL；四张截图通过。范围限运行实例，不证明侧线程预处理新规则已发布，也不是整体词库或视频覆盖率。 |
 | 扩展体验冻结源码只读审查 | PASS | 主线程 Qoder 审查 19 个冻结源文件及合同/已有证据；不覆盖侧线程后续预处理改造，未执行交付命令，不替代 Formal Gate。 |
 | 文档与策略投影 | PASS | 最新 Change/Repository 检查中的静态文档与共享投影通过，不证明用户体验。 |
-| 计划一致性 | BLOCKED | 仓库根无关 .DS_Store 没有 owning scope，导致规划检查阻塞及两项仓库自测失败；未删除该文件或放宽护栏。 |
-| Change Verify | FAIL | run `274ec84c-1cb8-4652-bee1-7fd49aa0c069`：计划/仓库自测受 .DS_Store 影响；Java 单测、质量及 PostgreSQL 集成通过，但 Worker 未在 5 秒内启动，runtime smoke 失败。扩展质量/E2E 通过；不能标为全通过。 |
-| Repository Verify | FAIL | run `7eeab7a1-65a5-46da-b0f0-e84b34e2d75b`：Java delivery（含 runtime smoke）、扩展质量/E2E、文档与策略通过；整体因 .DS_Store 引发的计划阻塞与两项仓库自测失败而未通过。 |
+| 计划一致性 | PASS | Finder 元数据已移到 ignored 临时目录保留；未改检查规则。最终完整检查的计划与仓库自测均通过。 |
+| Change Verify | PASS | run `45109c0a-0dc9-48d4-a5eb-2d9d177760c9`：最新结构、Java delivery、扩展质量/E2E、文档、策略及计划检查通过。原格式/元数据失败报告保留，不改写历史证据。 |
+| Repository Verify | PASS | run `1f1ddeb5-a3df-4407-a0aa-d3826448106a`：全部 repository-baseline 检查通过，含 PostgreSQL 集成和 runtime smoke；不等于在线资料已重建或正式独立 Gate 通过。 |
 | Worker 启动单项复测 | PASS | 同一代码和既定 5 秒超时不变，单独重跑 runtimeSmokeTest 通过；runtime-smoke-recheck.log 留证。保留 Change Verify 原失败，不用单项通过替换整轮结果。 |
 | 全量离线预处理扫描 | PASS | 3,402,564 来源行、2,992,863 可导入词条；选中基础 lemma 2000，实际标记基础词条 2009；6563 条释义发生完全重复表达合并。不连接数据库；合并数量不等于新增可展示提示数量。 |
-| 新预处理资料在线验收 | BLOCKED | 未迁移或发布在线词库，未在运行 API/浏览器验证新资格字段；需与主线程协调切换。 |
+| 最新结构初始化 | PASS | 唯一 schema.sql 及 postgresInit 入口；无迁移链或历史台账。14 项适配器单测及 8 项 PostgreSQL 集成回归，包括非空拒绝、失败回滚和修正后重试；后端完整检查通过。未重建在线库。 |
+| 新预处理资料在线验收 | BLOCKED | 未重建或发布在线词库，未在运行 API/浏览器验证新资格字段；需与主线程协调切换。 |
 | 第三阶段词义质量待办 | BLOCKED | 尚未开展；用户截图存在隐喻词字面误提示，保留为第三阶段优化输入，不纳入第一阶段准入，不宣称已修复。 |
 | 本次修复真实页面复验 | BLOCKED | 等待用户重新加载扩展和刷新视频；未自动操作被工具拦截的扩展管理页，也没有通过其他 profile 绕过。 |
 | 独立 Formal Gate | BLOCKED | 尚无满足独立身份要求的正式 validation/review 收据；未自签、伪造或复用旧收据。 |
@@ -72,10 +73,12 @@
 
 本机 ignored 证据：`tmp/quality/experience-live/observed-session.json` 与 `target-word-probe.json`；最新连续/布局证据 `tmp/quality/extended-acceptance/1790170153308/`；多行与 popup 证据 `tmp/quality/experience/1790170529543/`；真实词库病例 `tmp/quality/experience-published/1790170532936/`。只读审查为 `tmp/phase-tools/deliver-foundation-experience/experience-review.md`，对应 Qoder run `ef64b869-8ba8-4844-a31b-6196e2830b41`，身份与冻结哈希已核对并 ack。
 
-当前 OpenSpec 为 ignored 的 `openspec/changes/deliver-foundation-experience/` 与 `openspec/changes/preprocess-hint-eligibility/`；长期功能合同在受跟踪文档和 `openspec/specs/`。没有执行 Git stage、commit 或发布操作。本页更新会改变输入指纹，各验证报告只证明自己的冻结输入。
+当前 OpenSpec 为 ignored 的 `openspec/changes/deliver-foundation-experience/`、`openspec/changes/preprocess-hint-eligibility/` 与 `openspec/changes/latest-only-development/`；长期功能合同在受跟踪文档和 `openspec/specs/`。用户已授权并执行分组 Git 提交；未执行远端推送或在线资料发布。本页更新会改变输入指纹，各验证报告只证明自己的冻结输入。
 
 预处理本机证据在 `tmp/phase-tools/preprocess-hint-eligibility/`：`basic-vocabulary.tsv` 为完整名单与来源/名单摘要，`basic-report.log` 为全量扫描，`direct-final.log` 为直接回归，`change-verify-complete.json` 与 `repository-verify.json` 为整体检查。源码分析与离线扫描不构成线上发布。
 
 ## 1.5. 下一步
 
-交接扩展使用 18081 端口。先完成唯一最新 SQL、初始化器及直接回归，撤除升级链和旧入口；随后协调开发库重建与完整预处理资料导入发布，再切换 API。不要直接用新查询器连接结构不匹配的运行数据库。处理无关计划检查阻塞后，再形成完整 Verify 证据；Worker 启动单项已复测通过，整轮失败仍保留。用户在 default profile 重新加载并刷新测试视频后，复验多行、闪换、页面开关及目标词显示。继续记录语境质量缺口，不以提示数量替代准确度；正式收据另按独立身份合同闭环。
+交接扩展使用 18081 端口。唯一最新 SQL、初始化器及直接回归已完成，升级链和旧入口已移除；下一步协调开发库重建与完整预处理资料导入发布，再切换 API。不要直接用新查询器连接结构不匹配的运行数据库。完整 Verify 已通过，原失败证据保留。用户在 default profile 重新加载并刷新测试视频后，复验多行、闪换、页面开关及目标词显示。继续记录语境质量缺口，不以提示数量替代准确度；正式收据另按独立身份合同闭环。
+
+最新结构原始证据在本机 ignored `tmp/phase-tools/latest-only-development/`：`callback-review.json` 核对 Qoder 身份及父代理补充检查，`change-verify.json`、`repository-verify.json` 保留原完整结果；修正后的通过证据为 `change-verify-final.json`、`repository-verify-final.json`，不覆盖失败记录；本次只追加状态结果，报告各自绑定验证时的输入，不把结果页更新声称为再次全量执行。

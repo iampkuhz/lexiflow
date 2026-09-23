@@ -9,7 +9,6 @@ import io.lexiflow.lexicon.application.LexiconImportRequest;
 import io.lexiflow.lexicon.application.LexiconImportRow;
 import io.lexiflow.lexicon.application.SourceReference;
 import io.lexiflow.lexicon.domain.LexiconPriority;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.DriverManager;
@@ -17,90 +16,136 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** 在显式隔离 schema 上验证迁移、索引、持久化发布和查询路径。 */
+/** 在显式隔离 schema 上验证初始化、索引、持久化发布和查询路径。 */
 @Tag("postgres")
 class PostgresLexiconRepositoryIntegrationTest {
   private static final String JDBC_URL_PROPERTY = "lexiflow.postgres.test.jdbcUrl";
-  private static final String MIGRATIONS_PROPERTY = "lexiflow.postgres.migrations.dir";
+  private static final String SCHEMA_PROPERTY = "lexiflow.postgres.schema.file";
   private static String adminJdbcUrl;
-  private static String isolatedJdbcUrl;
-  private static String schema;
+  private static Path schemaFile;
 
   @BeforeAll
-  static void createIsolatedSchemaAndApplyMigrations() throws Exception {
+  static void captureProperties() {
     adminJdbcUrl = requiredJdbcUrl();
-    schema = createSchema();
-    isolatedJdbcUrl = withSchema(adminJdbcUrl, schema);
-    assertEquals(
-        List.of(1, 2, 3, 4, 5, 6, 7),
-        PostgresSchemaMigrator.apply(
-            isolatedJdbcUrl, Path.of(requiredMigrationsDirectory()), null));
-  }
-
-  @AfterAll
-  static void cleanIsolatedSchema() throws Exception {
-    if (adminJdbcUrl != null && schema != null) {
-      dropSchema(schema);
-    }
+    schemaFile = Path.of(requiredSchemaFile());
   }
 
   @Test
-  void locksMigrationHistoryAndCreatesTheDeclaredQueryIndex() throws Exception {
-    assertEquals(
-        List.of(),
-        PostgresSchemaMigrator.apply(
-            isolatedJdbcUrl, Path.of(requiredMigrationsDirectory()), null));
-    assertEquals(
-        "lexicon_entry_lookup_idx",
-        scalar(isolatedJdbcUrl, "SELECT to_regclass('lexicon_entry_lookup_idx')"));
-    assertEquals("7", scalar(isolatedJdbcUrl, "SELECT max(version)::text FROM schema_migration"));
-    assertEquals(
-        "lexicon_inflection_lookup_idx",
-        scalar(isolatedJdbcUrl, "SELECT to_regclass('lexicon_inflection_lookup_idx')"));
-  }
-
-  @Test
-  void rollsBackAFailingMigrationAndRequiresForwardCompensation(@TempDir Path temporaryDirectory)
-      throws Exception {
-    var migrationDirectory = copyMigrations(temporaryDirectory);
+  void initializesAnEmptySchemaAndCreatesAllDeclaredTablesAndIndexes() throws Exception {
     var testSchema = createSchema();
     var jdbcUrl = withSchema(adminJdbcUrl, testSchema);
     try {
+      PostgresSchemaInitializer.initialize(jdbcUrl, schemaFile);
       assertEquals(
-          List.of(1, 2, 3, 4, 5, 6, 7),
-          PostgresSchemaMigrator.apply(jdbcUrl, migrationDirectory, null));
-      Files.writeString(
-          migrationDirectory.resolve("V008__failing_change.sql"),
-          "CREATE TABLE atomic_probe (id INTEGER PRIMARY KEY);\nSELECT 1 / 0;\n");
-      assertThrows(
-          SQLException.class,
-          () -> PostgresSchemaMigrator.apply(jdbcUrl, migrationDirectory, null));
-      assertEquals("", scalar(jdbcUrl, "SELECT COALESCE(to_regclass('atomic_probe')::text, '')"));
-      assertEquals("7", scalar(jdbcUrl, "SELECT max(version)::text FROM schema_migration"));
+          "6",
+          scalar(
+              jdbcUrl,
+              "SELECT COUNT(*)::text FROM information_schema.tables "
+                  + "WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'"));
+      assertEquals(
+          "lexicon_entry_lookup_idx",
+          scalar(jdbcUrl, "SELECT to_regclass('lexicon_entry_lookup_idx')"));
+      assertEquals(
+          "lexicon_inflection_lookup_idx",
+          scalar(jdbcUrl, "SELECT to_regclass('lexicon_inflection_lookup_idx')"));
+      assertEquals(
+          "lexicon_entry_prewarm_idx",
+          scalar(jdbcUrl, "SELECT to_regclass('lexicon_entry_prewarm_idx')"));
+      assertEquals(
+          "lexicon_import_single_published_idx",
+          scalar(jdbcUrl, "SELECT to_regclass('lexicon_import_single_published_idx')"));
+      assertEquals(
+          "lexicon_source_evidence_entry_idx",
+          scalar(jdbcUrl, "SELECT to_regclass('lexicon_source_evidence_entry_idx')"));
     } finally {
       dropSchema(testSchema);
     }
   }
 
   @Test
-  void rejectsAnAppliedMigrationWhoseChecksumChanges(@TempDir Path temporaryDirectory)
-      throws Exception {
-    var migrationDirectory = copyMigrations(temporaryDirectory);
+  void rejectsNonEmptySchemaWithoutModification() throws Exception {
     var testSchema = createSchema();
     var jdbcUrl = withSchema(adminJdbcUrl, testSchema);
     try {
-      assertEquals(List.of(1), PostgresSchemaMigrator.apply(jdbcUrl, migrationDirectory, 1));
-      var migration = migrationDirectory.resolve("V001__core_data_contract.sql");
-      Files.writeString(migration, Files.readString(migration) + "\n-- changed\n");
+      PostgresSchemaInitializer.initialize(jdbcUrl, schemaFile);
       assertThrows(
           IllegalStateException.class,
-          () -> PostgresSchemaMigrator.apply(jdbcUrl, migrationDirectory, 1));
+          () -> PostgresSchemaInitializer.initialize(jdbcUrl, schemaFile));
+      assertEquals(
+          "6",
+          scalar(
+              jdbcUrl,
+              "SELECT COUNT(*)::text FROM information_schema.tables "
+                  + "WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'"));
+    } finally {
+      dropSchema(testSchema);
+    }
+  }
+
+  @Test
+  void rejectsSchemasContainingOnlyNonTableObjects() throws Exception {
+    for (var ddl :
+        List.of(
+            "CREATE VIEW occupied AS SELECT 42 AS value",
+            "CREATE SEQUENCE occupied",
+            "CREATE TYPE occupied AS ENUM ('value')",
+            "CREATE FUNCTION occupied() RETURNS integer LANGUAGE sql AS 'SELECT 42'")) {
+      var testSchema = createSchema();
+      var jdbcUrl = withSchema(adminJdbcUrl, testSchema);
+      try {
+        try (var connection = DriverManager.getConnection(jdbcUrl);
+            var statement = connection.createStatement()) {
+          statement.execute(ddl);
+        }
+        var countSql =
+            "SELECT COUNT(*)::text FROM pg_catalog.pg_depend "
+                + "WHERE refclassid = 'pg_catalog.pg_namespace'::regclass "
+                + "AND refobjid = current_schema()::regnamespace";
+        var objectsBefore = scalar(jdbcUrl, countSql);
+        assertThrows(
+            IllegalStateException.class,
+            () -> PostgresSchemaInitializer.initialize(jdbcUrl, schemaFile));
+        assertEquals(objectsBefore, scalar(jdbcUrl, countSql));
+        assertEquals(
+            "", scalar(jdbcUrl, "SELECT COALESCE(to_regclass('lexicon_entry')::text, '')"));
+      } finally {
+        dropSchema(testSchema);
+      }
+    }
+  }
+
+  @Test
+  void rollsBackAFailingInitAndRetriesWithCorrectedSql(@TempDir Path temporaryDirectory)
+      throws Exception {
+    var brokenSql = temporaryDirectory.resolve("broken.sql");
+    Files.writeString(
+        brokenSql,
+        Files.readString(schemaFile)
+            + "\nCREATE TABLE atomic_probe (id INTEGER PRIMARY KEY);\nSELECT 1 / 0;\n");
+    var testSchema = createSchema();
+    var jdbcUrl = withSchema(adminJdbcUrl, testSchema);
+    try {
+      assertThrows(
+          SQLException.class, () -> PostgresSchemaInitializer.initialize(jdbcUrl, brokenSql));
+      assertEquals("", scalar(jdbcUrl, "SELECT COALESCE(to_regclass('atomic_probe')::text, '')"));
+      assertEquals(
+          "0",
+          scalar(
+              jdbcUrl,
+              "SELECT COUNT(*)::text FROM information_schema.tables "
+                  + "WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'"));
+      PostgresSchemaInitializer.initialize(jdbcUrl, schemaFile);
+      assertEquals(
+          "6",
+          scalar(
+              jdbcUrl,
+              "SELECT COUNT(*)::text FROM information_schema.tables "
+                  + "WHERE table_schema = current_schema() AND table_type = 'BASE TABLE'"));
     } finally {
       dropSchema(testSchema);
     }
@@ -108,7 +153,7 @@ class PostgresLexiconRepositoryIntegrationTest {
 
   @Test
   void publishesAndReadsACompleteLexiconEntryThroughPostgres() throws Exception {
-    inMigratedSchema(
+    inInitializedSchema(
         jdbcUrl -> {
           try (var persistence = PostgresPersistence.open(jdbcUrl)) {
             var repository = persistence.repository();
@@ -143,7 +188,7 @@ class PostgresLexiconRepositoryIntegrationTest {
   @Test
   void persistsPreparedEligibilityAndDeduplicatedGlossWithoutChangingOldPublishedData()
       throws Exception {
-    inMigratedSchema(
+    inInitializedSchema(
         jdbcUrl -> {
           try (var persistence = PostgresPersistence.open(jdbcUrl)) {
             var repository = persistence.repository();
@@ -204,7 +249,7 @@ class PostgresLexiconRepositoryIntegrationTest {
 
   @Test
   void returnsEveryEntryForAnAmbiguousInflection() throws Exception {
-    inMigratedSchema(
+    inInitializedSchema(
         jdbcUrl -> {
           try (var persistence = PostgresPersistence.open(jdbcUrl)) {
             var repository = persistence.repository();
@@ -226,7 +271,7 @@ class PostgresLexiconRepositoryIntegrationTest {
 
   @Test
   void keepsThePreviousPublishedVersionVisibleAcrossFailedAndResumedStaging() throws Exception {
-    inMigratedSchema(
+    inInitializedSchema(
         jdbcUrl -> {
           try (var persistence = PostgresPersistence.open(jdbcUrl)) {
             var repository = persistence.repository();
@@ -278,11 +323,10 @@ class PostgresLexiconRepositoryIntegrationTest {
     return value;
   }
 
-  private static String requiredMigrationsDirectory() {
-    var value = System.getProperty(MIGRATIONS_PROPERTY, "").trim();
+  private static String requiredSchemaFile() {
+    var value = System.getProperty(SCHEMA_PROPERTY, "").trim();
     if (value.isEmpty()) {
-      throw new IllegalStateException(
-          "PostgreSQL integration runner requires " + MIGRATIONS_PROPERTY);
+      throw new IllegalStateException("PostgreSQL integration runner requires " + SCHEMA_PROPERTY);
     }
     return value;
   }
@@ -307,18 +351,6 @@ class PostgresLexiconRepositoryIntegrationTest {
     }
   }
 
-  private static Path copyMigrations(Path temporaryDirectory) throws IOException {
-    var source = Path.of(requiredMigrationsDirectory());
-    var target = temporaryDirectory.resolve("migrations");
-    Files.createDirectories(target);
-    try (var entries = Files.list(source)) {
-      for (var entry : entries.toList()) {
-        Files.copy(entry, target.resolve(entry.getFileName()));
-      }
-    }
-    return target;
-  }
-
   private static String scalar(String jdbcUrl, String sql) throws SQLException {
     try (var connection = DriverManager.getConnection(jdbcUrl);
         var statement = connection.createStatement();
@@ -328,13 +360,11 @@ class PostgresLexiconRepositoryIntegrationTest {
     }
   }
 
-  private static void inMigratedSchema(JdbcUrlTest test) throws Exception {
+  private static void inInitializedSchema(JdbcUrlTest test) throws Exception {
     var testSchema = createSchema();
     var jdbcUrl = withSchema(adminJdbcUrl, testSchema);
     try {
-      assertEquals(
-          List.of(1, 2, 3, 4, 5, 6, 7),
-          PostgresSchemaMigrator.apply(jdbcUrl, Path.of(requiredMigrationsDirectory()), null));
+      PostgresSchemaInitializer.initialize(jdbcUrl, schemaFile);
       test.run(jdbcUrl);
     } finally {
       dropSchema(testSchema);

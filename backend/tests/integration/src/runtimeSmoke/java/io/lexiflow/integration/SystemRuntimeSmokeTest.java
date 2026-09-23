@@ -2,7 +2,7 @@ package io.lexiflow.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import io.lexiflow.lexicon.platform.persistence.PostgresSchemaMigrator;
+import io.lexiflow.lexicon.platform.persistence.PostgresSchemaInitializer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -17,7 +17,6 @@ import java.nio.file.Path;
 import java.sql.DriverManager;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -60,10 +59,8 @@ class SystemRuntimeSmokeTest {
       statement.execute("CREATE SCHEMA \"" + schema + "\"");
     }
     var schemaJdbcUrl = jdbcUrl + (jdbcUrl.contains("?") ? "&" : "?") + "currentSchema=" + schema;
-    assertEquals(
-        List.of(1, 2, 3, 4, 5, 6, 7),
-        PostgresSchemaMigrator.apply(
-            schemaJdbcUrl, Path.of(requiredProperty("lexiflow.migrations.dir")), null));
+    PostgresSchemaInitializer.initialize(
+        schemaJdbcUrl, Path.of(requiredProperty("lexiflow.postgres.schema.file")));
 
     var repository = Path.of(requiredProperty("lexiflow.repository.root"));
     var java = Path.of(System.getProperty("java.home"), "bin", "java").toString();

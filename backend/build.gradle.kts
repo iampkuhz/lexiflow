@@ -100,19 +100,19 @@ project(":platform:adapters") {
             providers.environmentVariable("LEXIFLOW_POSTGRES_TEST_JDBC_URL").getOrElse(""),
         )
         systemProperty(
-            "lexiflow.postgres.migrations.dir",
-            rootProject.projectDir.parentFile.resolve("infra/postgres/migrations").absolutePath,
+            "lexiflow.postgres.schema.file",
+            rootProject.projectDir.parentFile.resolve("infra/postgres/schema.sql").absolutePath,
         )
     }
-    tasks.register<JavaExec>("postgresMigrate") {
+    tasks.register<JavaExec>("postgresInit") {
         group = "application"
-        description = "Explicitly applies backend-owned PostgreSQL schema migrations."
+        description = "Explicitly initializes the backend-owned PostgreSQL schema."
         classpath = platformSourceSets["main"].runtimeClasspath
-        mainClass.set("io.lexiflow.lexicon.platform.persistence.PostgresMigrationMain")
+        mainClass.set("io.lexiflow.lexicon.platform.persistence.PostgresSchemaMain")
         workingDir(rootProject.projectDir.parentFile)
-        providers.gradleProperty("postgresMigrateArgs").orNull?.let { raw ->
+        providers.gradleProperty("postgresInitArgs").orNull?.let { raw ->
             args(raw.split("\u001f"))
-        } ?: throw GradleException("postgresMigrate requires -PpostgresMigrateArgs=<jdbc-url>\u001f<migrations-dir>[\u001f<target-version>]")
+        } ?: throw GradleException("postgresInit requires -PpostgresInitArgs=<jdbc-url>\u001f<schema-file>")
     }
 
     tasks.register<JavaExec>("lexiconImport") {
@@ -174,7 +174,7 @@ project(":tests:integration") {
         useJUnitPlatform()
         systemProperty("lexiflow.postgres.test.jdbcUrl", providers.environmentVariable("LEXIFLOW_POSTGRES_TEST_JDBC_URL").getOrElse(""))
         systemProperty("lexiflow.redis.test.endpoint", providers.environmentVariable("LEXIFLOW_REDIS_TEST_ENDPOINT").getOrElse(""))
-        systemProperty("lexiflow.migrations.dir", rootProject.projectDir.parentFile.resolve("infra/postgres/migrations").absolutePath)
+        systemProperty("lexiflow.postgres.schema.file", rootProject.projectDir.parentFile.resolve("infra/postgres/schema.sql").absolutePath)
         systemProperty("lexiflow.repository.root", rootProject.projectDir.parentFile.absolutePath)
         testLogging { events("failed") }
     }

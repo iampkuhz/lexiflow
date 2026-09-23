@@ -62,7 +62,7 @@ Agent 只产生可核对的运行事实，不签发 validation、review 或 cata
 | 后端完整交付 | `python3 -m scripts.environment.java_exec backend/gradlew -p backend deliveryFull` | Gradle/Java 25 |
 | 扩展质量 | `node extension/scripts/quality-check.mjs` | Chrome Extension |
 | Java 运行时选择 | `python3 -m scripts.environment.java_exec <command...>` | `scripts.environment` |
-| 数据库迁移 | `:platform:adapters:postgresMigrate` | 后端 platform adapter |
+| 数据库初始化 | `:platform:adapters:postgresInit` | 后端 platform adapter |
 | 离线词库导入 | `:platform:adapters:lexiconImport` | 后端 application/platform |
 
 环境值只通过声明的 `required_environment` 注入子进程。PostgreSQL 与 Redis 测试目标必须显式指向隔离资源；检查不会自动安装、拉取或触碰开发数据库。

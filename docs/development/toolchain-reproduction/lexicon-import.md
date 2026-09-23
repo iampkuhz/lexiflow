@@ -62,7 +62,7 @@ L1 从 `rank` 存在、`oxford != 1` 的词条中按 `memory_priority DESC`、`n
 
 正式导入写入 `hint_eligibility=BASIC_VOCABULARY|CANDIDATE` 与 `hint_policy_reference`（规则标识、名单 SHA-256、来源排名引用）。名单摘要包含选择结果和固定词表；该标记不是语境正确性评分。规范 CSV 没有 Oxford 原始证据，使用明确的固定功能词预处理规则，不伪称已有完整 2000 词选择。观看只读取发布资格，所有词形和别名继承其词条标记。
 
-重复表达清洗在构造导入行时执行；不同表达保留，后续无法消歧则不展示。数据库迁移不改写已发布释义，不推断旧数据资格；旧条目标记为 `UNPROCESSED`，须经完整新版本导入发布后才能供新观看规则提示。批次来源绑定预处理策略标识，不能继续其他策略的 staged 批次。先应用新增迁移，再准备并发布新版本，最后切换应用；不得把列存在当作资料已经处理。
+重复表达清洗在构造导入行时执行；不同表达保留，后续无法消歧则不展示。结构变化直接修改 `infra/postgres/schema.sql`，显式重建本项目开发库后完整重新导入，不维护旧结构升级或旧数据资格回填。`UNPROCESSED` 只用于拒绝未处理资料，不是旧资料兼容入口。批次来源绑定预处理策略标识，不能继续其他策略的 staged 批次；不得把列存在当作资料已经处理。
 
 ## 1.3. 规范输入与数据库
 
@@ -105,12 +105,14 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend \
 
 确认上述输出后启动本机 PostgreSQL 并发布：
 
+以下初始化命令只接受空 schema，重复执行会拒绝，不会自动清库。结构变化时先核对本项目数据库及使用它的 API/worker，协调停用后显式清空并重建；不得操作其他项目库。完整导入发布后再启动应用。重建需同步失效对应缓存，并避免资料身份与本机偏好旧引用混淆；本命令块不自动完成重建或缓存处置。
+
 ```bash
 podman compose -f infra/local/compose.yaml up -d
 JDBC_URL='jdbc:postgresql://127.0.0.1:15432/lexiflow?user=postgres&reWriteBatchedInserts=true'
-MIGRATION_ARGS=$(printf '%s\037%s' "$JDBC_URL" "$PWD/infra/postgres/migrations")
+INIT_ARGS=$(printf '%s\037%s' "$JDBC_URL" "$PWD/infra/postgres/schema.sql")
 python3 -m scripts.environment.java_exec backend/gradlew -p backend \
-  :platform:adapters:postgresMigrate "-PpostgresMigrateArgs=$MIGRATION_ARGS"
+  :platform:adapters:postgresInit "-PpostgresInitArgs=$INIT_ARGS"
 LEXICON_ARGS=$(printf 'publish\037--input\037%s\037--database-url\037%s\037--batch-source-id\037ecdict-stardict\037--batch-license-id\037MIT' "$STARDICT_CSV" "$JDBC_URL")
 python3 -m scripts.environment.java_exec backend/gradlew -p backend \
   :platform:adapters:lexiconImport "-PlexiconImportArgs=$LEXICON_ARGS"

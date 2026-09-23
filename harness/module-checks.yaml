@@ -840,12 +840,12 @@ checks:
   - backend/tests/quality-gates/gradle.lockfile
   - backend/tests/integration/src
   - backend/tests/integration/gradle.lockfile
-  - infra/postgres/migrations
+  - infra/postgres/schema.sql
   - scripts/environment
   result_contract:
     type: exit-code
     completeness_guarantee: Backend Gradle deliveryFull enforces non-empty, non-skipped Java tests and runs architecture,
-      source, migration, persistence, runtime-smoke, and boot-jar delivery tasks.
+      source, schema, persistence, runtime-smoke, and boot-jar delivery tasks.
     allowed_statuses:
     - PASS
     - BLOCKED
@@ -908,7 +908,7 @@ checks:
   - backend/tests/quality-gates/gradle.lockfile
   - backend/tests/integration/src
   - backend/tests/integration/gradle.lockfile
-  - infra/postgres/migrations
+  - infra/postgres/schema.sql
   - scripts/environment
   result_contract:
     type: exit-code
