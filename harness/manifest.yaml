@@ -2,7 +2,7 @@ schemaVersion: 1
 project:
   name: lexiflow
   type: modular-monolith-product
-  description: 面向流媒体内容的个性化英文语境提示。
+  description: 基于已发布词库资料的低打扰英文语境提示。
 architecture:
   deployment_units:
   - api
@@ -30,6 +30,7 @@ agent_contract:
     qoder_agents: .qoder/agents/
   acceptance_records_schema: harness/acceptance-records.schema.json
 public_executables:
+  local_api: python3 -m scripts.environment.start_api
   docs_check: python3 -m scripts.repository.docs_check
   policy_projection: python3 -m scripts.repository.policy_projection
   local_skills: python3 -m scripts.repository.local_skills
@@ -90,8 +91,10 @@ docs:
 - docs/development/repository-glossary.md
 - docs/development/toolchain-reproduction.md
 - docs/roadmap/master-plan.md
-- docs/roadmap/phase-1-status.md
-- docs/roadmap/phase-2-status.md
+- docs/roadmap/master-plan/foundation.md
+- docs/roadmap/master-plan/performance.md
+- docs/roadmap/master-plan/improvement.md
+- docs/roadmap/master-plan/status.md
 - openspec/specs/product-architecture/spec.md
 - openspec/specs/agent-execution/spec.md
 local_only:

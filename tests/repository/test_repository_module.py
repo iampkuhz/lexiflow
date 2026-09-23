@@ -93,7 +93,7 @@ class RepositoryModuleBoundaryTest(unittest.TestCase):
                 shutil.copy2(REPO_ROOT / "harness" / name, root / "harness" / name)
             catalog = root / "planning" / "workstreams.yaml"
             catalog.write_text(catalog.read_text().replace(
-                "id: LF-TSK-ARCH-0008", "id: LF-TSK-BROKEN", 1))
+                "catalog_mode: execution", "catalog_mode: planning-only", 1))
             failed = subprocess.run(
                 [sys.executable, "-m", "scripts.repository.planning_check", "--root", str(root)],
                 cwd=REPO_ROOT, text=True, capture_output=True, check=False,

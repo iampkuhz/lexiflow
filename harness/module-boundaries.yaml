@@ -1,5 +1,4 @@
 schemaVersion: 1
-status: phase-1-proposed
 dependency_rules:
 - composition roots may depend on application use cases and platform infrastructure
 - application use cases may depend on domain contracts
@@ -27,9 +26,9 @@ bounded_contexts:
     - caption-context
     - candidate-pipeline
     - need-hint-policy
-    - semantic-task-contract
+    - published-semantic-material-matching
     - annotation-decision
-    - durable-annotation-result
+    - annotation-result
     may_depend_on:
     - lexicon
 application_modules:
@@ -52,7 +51,7 @@ infrastructure_modules:
     - postgres-integration
     - redis-integration
     - security-integration
-    - model-provider-integration
+    - offline-model-provider-integration
     - job-runtime-integration
     - observability-integration
     may_depend_on:

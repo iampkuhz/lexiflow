@@ -264,6 +264,66 @@ class TestValidCatalog(unittest.TestCase):
         self.assertEqual(result["task_count"], 4)
         self.assertEqual(len(result["checks_run"]), 12)
 
+
+class TestPlanningOnlyCatalog(unittest.TestCase):
+    def empty_catalog(self):
+        data = _base_valid_catalog()
+        data["program"] = {"id": "LF-PRG-001", "catalog_mode": "planning-only"}
+        data.pop("phase_gates")
+        data.pop("phase_entry_validation")
+        for workstream in data["workstreams"]:
+            workstream["epics"] = []
+        return data
+
+    def test_explicit_empty_planning_catalog_runs_all_static_checks(self):
+        result = _validate(self.empty_catalog())
+        self.assertEqual("PASS", result["status"], result["errors"])
+        self.assertEqual(0, result["task_count"])
+        self.assertEqual(12, len(result["checks_run"]))
+
+    def test_empty_catalog_without_explicit_mode_still_fails(self):
+        data = self.empty_catalog()
+        data["program"].pop("catalog_mode")
+        self.assertIn("no-tasks-found-in-catalog", _validate(data)["errors"])
+
+    def test_malformed_program_returns_structured_failure(self):
+        data = self.empty_catalog()
+        data["program"] = "planning-only"
+        self.assertIn("invalid-program-structure", _validate(data)["errors"])
+
+    def test_empty_catalog_cannot_retain_gate_or_entry_task(self):
+        for field in ("phase_gates", "phase_entry_validation"):
+            with self.subTest(field=field):
+                data = self.empty_catalog()
+                data[field] = _base_valid_catalog()[field]
+                self.assertIn("planning-only-catalog-has-execution-state", _validate(data)["errors"])
+
+    def test_planning_mode_cannot_hide_tasks_or_phase_execution(self):
+        for field, value in (
+            ("current_phase", "P2"), ("current_gate", "G2"),
+            ("phase_2_to_6_dispatch_requires_g1_user_approval", True),
+        ):
+            with self.subTest(field=field):
+                data = self.empty_catalog()
+                data["program"][field] = value
+                self.assertIn("planning-only-catalog-has-execution-state", _validate(data)["errors"])
+        data = _base_valid_catalog()
+        data["program"] = {"id": "LF-PRG-001", "catalog_mode": "planning-only"}
+        self.assertIn("planning-only-catalog-has-execution-state", _validate(data)["errors"])
+
+    def test_empty_planning_mode_preserves_ownership_and_policy_checks(self):
+        data = self.empty_catalog()
+        data["path_ownership"]["scopes"][0]["owner"] = "LF-WS-MISSING"
+        result = _validate(data)
+        self.assertNotEqual("PASS", result["status"])
+        self.assertTrue(any("owner-not-found" in error for error in result["errors"]))
+        data = self.empty_catalog()
+        data["orchestration_policy"]["handoff_contract"]["caller_required_input"] = []
+        self.assertNotEqual("PASS", _validate(data)["status"])
+
+
+class TestPopulatedCatalog(unittest.TestCase):
+
     def test_valid_catalog_does_not_hardcode_count(self):
         data = _base_valid_catalog()
         r1 = _validate(data)
@@ -631,8 +691,10 @@ class TestRepoIntegration(unittest.TestCase):
         result = v.run_all()
         self.assertEqual("PASS", result["status"])
         self.assertEqual([], result["errors"])
-        self.assertEqual(86, result["task_count"])
-        self.assertTrue(all(task["required_check_ids"] for task in v.tasks.values()))
+        self.assertEqual("execution", v.ws["program"]["catalog_mode"])
+        self.assertGreater(result["task_count"], 0)
+        self.assertTrue(all(task["phase"] == "P1" for task in v.tasks.values()))
+        self.assertFalse(v.gates, "No historical gates may authorize foundation work")
         self.assertEqual(len(result["checks_run"]), 12)
 
 

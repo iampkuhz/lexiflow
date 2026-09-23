@@ -1328,7 +1328,29 @@ class PlanningValidator:
                 "errors": list(self._structure_errors),
                 "checks_run": [],
             }
-        if not self.tasks:
+        program = self.ws.get("program") or {}
+        if not isinstance(program, dict):
+            return {
+                "status": "FAIL",
+                "task_count": len(self.tasks),
+                "errors": ["invalid-program-structure"],
+                "checks_run": [],
+            }
+        planning_only = program.get("catalog_mode") == "planning-only"
+        if planning_only and (
+            self.tasks or self.gates or self.phase_entry_tasks
+            or any(program.get(key) is not None for key in (
+                "current_phase", "current_gate",
+                "phase_2_to_6_dispatch_requires_g1_user_approval",
+            ))
+        ):
+            return {
+                "status": "FAIL",
+                "task_count": len(self.tasks),
+                "errors": ["planning-only-catalog-has-execution-state"],
+                "checks_run": [],
+            }
+        if not self.tasks and not planning_only:
             return {
                 "status": "FAIL",
                 "task_count": 0,

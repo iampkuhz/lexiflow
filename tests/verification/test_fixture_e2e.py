@@ -148,6 +148,12 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             shutil.copytree(repository / "planning", root / "planning")
+            # Inject a real defect; the repository may legitimately have no
+            # decomposed product tasks in explicit planning-only mode.
+            catalog_path = root / "planning/workstreams.yaml"
+            catalog = yaml.safe_load(catalog_path.read_text())
+            catalog["workstreams"] = "invalid-topology"
+            catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False))
             (root / "harness").mkdir()
             for name in ("agent-policy.manifest.yaml", "agent-runtime.manifest.yaml"):
                 shutil.copy2(repository / "harness" / name, root / "harness" / name)

@@ -6,6 +6,7 @@ import yaml
 from pathlib import Path
 
 from scripts.repository.catalog import catalog_tasks, read_task_dependencies
+from scripts.repository.task_source import task_source_descriptor
 
 
 def _minimal_catalog():
@@ -89,6 +90,14 @@ class ReadTaskDependenciesTest(unittest.TestCase):
         found, deps = read_task_dependencies(self.root, "LF-TSK-TEST-0001")
         self.assertFalse(found)
         self.assertEqual(deps, [])
+
+    def test_planning_only_catalog_has_no_dispatchable_task_or_source(self):
+        catalog = {"program": {"catalog_mode": "planning-only"}, "workstreams": []}
+        (self.root / "planning" / "workstreams.yaml").write_text(yaml.safe_dump(catalog))
+        self.assertEqual({}, catalog_tasks(catalog))
+        self.assertEqual((False, []), read_task_dependencies(self.root, "LF-TSK-ARCH-0008"))
+        with self.assertRaisesRegex(ValueError, "catalog task missing"):
+            task_source_descriptor(self.root, "LF-TSK-ARCH-0008")
 
 
 if __name__ == "__main__":

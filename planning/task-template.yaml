@@ -14,9 +14,9 @@ identity:
   supersedes: null
 
 classification:
-  phase: "P1"
-  gate: "G1"
-  milestone_slices: ["MVP"]
+  phase: "<explicitly approved task phase>"
+  gate: null
+  milestone_slices: []
   priority: "P0"
   requirement_level: "MUST"
   kind: "design"
@@ -81,16 +81,9 @@ produced_contracts:
     version: "1.0.0"
 contract_producer_rule: "Every contract edge must resolve to exactly one producer declaration whose name and version exactly match contract_name and required_contract_version."
 
-phase_entry_prerequisite:
-  applies_to: "P2-P6 entry tasks only"
-  previous_gate_id: "G<N-1>"
-  previous_gate_exit_task_id: "LF-TSK-<DOMAIN>-NNNN"
-  required_exit_task_version: 1
-  required_exit_change_version: "1.0.0"
-  required_gate_result: "PASS"
-  required_user_approval: "APPROVED"
-# approval_evidence_type is intentionally omitted here. Entry tasks inherit it from
-# the matching phase_gates[].entry_requires, and task-level overrides are forbidden.
+# No phase-number or historical Gate approval implicitly activates a task.
+# Define approved prerequisites explicitly when decomposing real work.
+phase_entry_prerequisite: null
 
 decision_record:
   required: false

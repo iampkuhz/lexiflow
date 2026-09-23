@@ -10,6 +10,22 @@ from scripts.repository import docs_check, local_skills, policy_projection
 
 
 class DocumentationTests(unittest.TestCase):
+    def test_product_roadmap_has_one_entry_and_three_stage_entries(self):
+        root = Path(__file__).resolve().parents[2]
+        entry = root / 'docs/roadmap/master-plan.md'
+        content = entry.read_text()
+        manifest = yaml.safe_load((root / 'harness/manifest.yaml').read_text())
+        for name in ('foundation', 'performance', 'improvement', 'status'):
+            relative = f'docs/roadmap/master-plan/{name}.md'
+            self.assertTrue((root / relative).is_file())
+            self.assertIn(relative, manifest['docs'])
+            self.assertIn(f'master-plan/{name}.md', content)
+        for obsolete in ('phase-1-status.md', 'phase-2-status.md'):
+            self.assertFalse((root / 'docs/roadmap' / obsolete).exists())
+        self.assertIn('永不调用大模型', content)
+        self.assertIn('事后分析', content)
+        self.assertIn('方向确认不等于功能验收', content)
+
     def test_diagram_workflow_uses_tmp_drafts_and_markdown_final_source(self):
         root = Path(__file__).resolve().parents[2]
         policy = yaml.safe_load((root / 'harness/documentation-policy.yaml').read_text())
