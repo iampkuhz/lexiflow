@@ -1,5 +1,4 @@
 #!/bin/sh
-# Advisory only: editing and commits are never controlled by Verify.  Run the
-# two explicit end-of-work checks when the change is ready for self-review.
-printf '%s\n' 'LexiFlow reminder: run scripts/gates/change_verify.py and scripts/gates/repository_verify.py before handoff.' >&2
+# 只提醒，不控制编辑或 commit；变更准备好后由调用者显式运行两种 Verify。
+printf '%s\n' 'LexiFlow 提醒：交接前运行 python3 scripts/check_changes.py 和 python3 scripts/check_repository.py。' >&2
 exit 0

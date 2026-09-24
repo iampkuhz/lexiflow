@@ -20,10 +20,10 @@ _MODULES_TO_CHECK = [
     "scripts/verification/__init__.py",
     "scripts/verification/kernel.py",
     "scripts/verification/scope.py",
-    "scripts/verification/environment.py",
     "scripts/verification/declarations.py",
     "scripts/verification/scenarios.py",
     "scripts/environment/__init__.py",
+    "scripts/environment/runtime.py",
     "scripts/check_changes.py",
     "scripts/check_repository.py",
 ]

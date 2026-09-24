@@ -1,24 +1,5 @@
-"""Formal acceptance module.
+"""正式 Acceptance 场景入口：submit 绑定任务与证据，validate 独立运行冻结输入，review 审阅证据，check 核对 receipt；status 只读。各阶段不能互代。"""
 
-Four named scenarios plus read-only status:
-
-- ``submit``: bind actual diff/snapshot/task requirements and real execution
-  identity; return a unique submission reference.
-- ``validate``: in an independent session, call ``scripts.verification``
-  public API on the same frozen input; report coverage gaps, required
-  unexecuted/skipped, input drift and real environment failures.
-- ``review``: consume frozen diff, validation evidence and explicit reviewer
-  findings; never rerun delivery commands.
-- ``check``: verify validation/review/dependency receipts and hash DAG;
-  never rerun delivery commands.
-- ``status``: read-only query for submission state.
-
-Dependency direction: acceptance -> verification (public), acceptance ->
-agents (public facts). The reverse is forbidden.
-
-Identity is discovered from real runtime via ``scripts.agents.local_codex_runtime``,
-not caller-supplied. All records are content-bound with SHA256 hashes.
-"""
 from __future__ import annotations
 
 from scripts.acceptance.submit import submit, SubmissionError
@@ -28,9 +9,13 @@ from scripts.acceptance.check import check_conditions, CheckError
 from scripts.acceptance.status import query_status
 
 __all__ = [
-    "submit", "SubmissionError",
-    "validate", "ValidationError",
-    "review", "ReviewError",
-    "check_conditions", "CheckError",
+    "submit",
+    "SubmissionError",
+    "validate",
+    "ValidationError",
+    "review",
+    "ReviewError",
+    "check_conditions",
+    "CheckError",
     "query_status",
 ]

@@ -1,4 +1,4 @@
-"""Install and diagnose LexiFlow's optional, non-blocking reminder hooks."""
+"""显式安装或诊断可选的非阻断 Hook 提醒；doctor 不修改 Git 配置。"""
 
 from __future__ import annotations
 
@@ -7,14 +7,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 HOOK_PATH = ".githooks"
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", *args], cwd=root, text=True, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, check=False,
+        ["git", *args],
+        cwd=root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
     )
 
 
@@ -36,7 +39,8 @@ def doctor(root: Path) -> dict[str, str]:
     if configured.returncode == 0 and configured.stdout.strip() == HOOK_PATH:
         return {"result": "PASS", "hooks_path": HOOK_PATH}
     return {
-        "result": "BLOCKED", "reason": "advisory-hooks-not-installed",
+        "result": "BLOCKED",
+        "reason": "advisory-hooks-not-installed",
         "next_action": "python3 -m scripts.repository.hooks install",
     }
 
@@ -47,10 +51,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", default=".")
     args = parser.parse_args(argv)
     try:
-        result = install(Path(args.root).resolve()) if args.command == "install" else doctor(Path(args.root).resolve())
+        result = (
+            install(Path(args.root).resolve())
+            if args.command == "install"
+            else doctor(Path(args.root).resolve())
+        )
     except (OSError, ValueError) as exc:
         result = {"result": "FAIL", "reason": "hook-install-failed", "detail": str(exc)}
     import json
+
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return {"PASS": 0, "BLOCKED": 2, "FAIL": 1}[result["result"]]
 

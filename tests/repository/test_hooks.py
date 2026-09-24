@@ -33,6 +33,19 @@ class TestHooks(unittest.TestCase):
         self.assertEqual(result["result"], "BLOCKED")
         self.assertIn("hooks install", result["next_action"])
 
+    def test_repository_reminder_points_to_real_entrypoints_without_running_them(self):
+        root = Path(__file__).resolve().parents[2]
+        result = subprocess.run(
+            ["/bin/sh", str(root / ".githooks/pre-commit")],
+            cwd=self.root, env={"PATH": "/nonexistent"},
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(0, result.returncode)
+        for entry in ("scripts/check_changes.py", "scripts/check_repository.py"):
+            self.assertTrue((root / entry).is_file())
+            self.assertIn(entry, result.stderr)
+        self.assertNotIn("scripts/gates/", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

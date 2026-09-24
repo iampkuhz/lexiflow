@@ -1,8 +1,4 @@
-"""Tests for scripts.verification.environment.
-
-Covers: Python detection, tool detection, missing tools, custom
-environment overrides, Java detection, required-environment check.
-"""
+"""Environment 公共 API 的探测与缺项诊断测试；Verification 直接消费此边界。"""
 from __future__ import annotations
 
 import os
@@ -12,12 +8,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.verification.environment import (
-    check_required_environment,
+from scripts.environment import (
+    check_for as check_required_environment,
     detect_java,
     detect_python,
     detect_tool,
-    diagnose_environment,
+    diagnose as diagnose_environment,
 )
 
 

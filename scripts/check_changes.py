@@ -1,16 +1,5 @@
-"""Change verification CLI entry point.
+"""Change Verify CLI 入口。按 Git 差异选择检查，输出报告；不签发正式 Acceptance receipt。"""
 
-Runs checks selected by git diff and reports results with scope
-review advisory.  This is a thin wrapper over
-``scripts.verification.verify_changes``.
-
-Usage::
-
-    python3 scripts/check_changes.py [--repo-root .] [--base COMMIT]
-        [--expected-path DIR ...]
-
-Does NOT import scripts.gates or scripts.harness.
-"""
 from __future__ import annotations
 
 import argparse
@@ -30,15 +19,19 @@ def main(argv: list[str] | None = None) -> int:
         description="Run checks selected by git diff.",
     )
     parser.add_argument(
-        "--repo-root", default=".",
+        "--repo-root",
+        default=".",
         help="Repository root directory (default: .)",
     )
     parser.add_argument(
-        "--base", default=None,
+        "--base",
+        default=None,
         help="Explicit base commit for diff comparison",
     )
     parser.add_argument(
-        "--expected-path", action="append", default=[],
+        "--expected-path",
+        action="append",
+        default=[],
         dest="expected_paths",
         help="Expected changed directory (repeatable; advisory self-review)",
     )
@@ -52,7 +45,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report["publication"] = persist_report(args.repo_root, report)
     except ValueError as exc:
-        report = {**report, "result": "FAIL", "reason": "report-publication-failed", "detail": str(exc)}
+        report = {
+            **report,
+            "result": "FAIL",
+            "reason": "report-publication-failed",
+            "detail": str(exc),
+        }
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
 
     result = report.get("result", "FAIL")

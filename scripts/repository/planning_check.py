@@ -1,12 +1,7 @@
-"""Planning catalog static validator.
+"""Planning Catalog 的静态一致性检查。
 
-Validates IDs, owners, typed dependencies, contract producers, DAG structure,
-phase-entry prerequisites, and cross-source handoff field consistency.
-
-This module lives in scripts/repository/ as a repository maintenance
-capability.  It checks the static consistency of planning/workstreams.yaml
-and does not gate product check execution.
-"""
+依次核对 ID、owner、dependency 类型与 producer、DAG、阶段前置条件及 handoff 投影。
+这是 Repository 维护能力，不负责启动产品测试，也不授予 Task 执行权限。"""
 
 import json
 import re
@@ -16,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-
 
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 PHASE_RE = re.compile(r"^P\d+$")
@@ -40,16 +34,19 @@ CANONICAL_ID_POLICY = {
 
 ALLOWED_DEP_TYPES = {"hard", "soft", "contract"}
 
-COMMON_REQUIRED_FIELDS = {"task_id", "type", "required_task_version", "required_change_version"}
+COMMON_REQUIRED_FIELDS = {
+    "task_id",
+    "type",
+    "required_task_version",
+    "required_change_version",
+}
 
 
 def _load_canonical_from_policy(policy: dict | None) -> dict[str, Any]:
-    """Extract canonical handoff contract reference from the policy single source of truth.
+    """从 policy 唯一真源提取 handoff contract。
 
-    Returns a dict with keys: caller_fields, result_fields, runner_identity,
-    adapter, adapter_metadata, caller_field_schema.  If the policy is unavailable,
-    returns None so callers can fail closed.
-    """
+    返回 caller/result 字段、runner 身份、adapter 约束及 schema；真源不可用时返回 None，
+    由调用者拒绝继续，不能把缺失 contract 当作空 contract。"""
     if not isinstance(policy, dict):
         return None
     sp = policy.get("subagent_protocol", {})
@@ -65,7 +62,9 @@ def _load_canonical_from_policy(policy: dict | None) -> dict[str, Any]:
     adapter_flags = {
         "target_schema_enforced": adapter.get("target_schema_enforced"),
         "runtime_identity_enforced": adapter.get("runtime_identity_enforced"),
-        "result_fields_required_in_prompt": adapter.get("result_fields_required_in_prompt"),
+        "result_fields_required_in_prompt": adapter.get(
+            "result_fields_required_in_prompt"
+        ),
         "agent_profile_cli_binding": adapter.get("agent_profile_cli_binding"),
         "harness_manifest_preflight": adapter.get("harness_manifest_preflight"),
         "catalog_package_preflight": adapter.get("catalog_package_preflight"),
@@ -91,23 +90,39 @@ def _load_canonical_from_policy(policy: dict | None) -> dict[str, Any]:
 
 
 EXCLUDED_PATH_PATTERNS = [
-    ".git/**", ".git",
-    ".idea/**", ".idea",
-    ".vscode/**", ".vscode",
-    "**/.gradle/**", "**/.gradle",
-    "**/build/**", "**/build",
-    "tmp/**", "tmp",
-    ".local/**", ".local",
-    "data/**", "data",
-    "secrets/**", "secrets",
-    "**/__pycache__/**", "**/__pycache__",
+    ".git/**",
+    ".git",
+    ".idea/**",
+    ".idea",
+    ".vscode/**",
+    ".vscode",
+    "**/.gradle/**",
+    "**/.gradle",
+    "**/build/**",
+    "**/build",
+    "tmp/**",
+    "tmp",
+    ".local/**",
+    ".local",
+    "data/**",
+    "data",
+    "secrets/**",
+    "secrets",
+    "**/__pycache__/**",
+    "**/__pycache__",
     "**/*.pyc",
-    ".pytest_cache/**", ".pytest_cache",
-    ".agents/**", ".agents",
-    ".qoder/**", ".qoder",
-    ".codex/**", ".codex",
-    ".githooks/**", ".githooks",
-    "AGENTS.md", "README.md",
+    ".pytest_cache/**",
+    ".pytest_cache",
+    ".agents/**",
+    ".agents",
+    ".qoder/**",
+    ".qoder",
+    ".codex/**",
+    ".codex",
+    ".githooks/**",
+    ".githooks",
+    "AGENTS.md",
+    "README.md",
     "requirements*.txt",
     "extension/node_modules/**",
     "extension/package-lock.json",
@@ -119,7 +134,9 @@ def _phase_number(task):
 
 
 def _is_semver(value):
-    return isinstance(value, (str, int, float)) and SEMVER_RE.match(str(value)) is not None
+    return (
+        isinstance(value, (str, int, float)) and SEMVER_RE.match(str(value)) is not None
+    )
 
 
 def _path_specificity(pattern):
@@ -161,7 +178,7 @@ def _path_matches(pattern, file_path):
 
 
 def _path_pattern(pattern):
-    """Return path segments for the catalog's whole-segment glob grammar."""
+    """解析 Catalog 的整段 glob；通配符仅允许出现在末段，不沿用任意 shell glob 语义。"""
     if not isinstance(pattern, str) or not pattern:
         return None
     if pattern.startswith("/") or "\\" in pattern:
@@ -188,8 +205,7 @@ def _literal_path(file_path):
         return None
     segments = file_path.split("/")
     if any(
-        not segment or segment in (".", "..") or "*" in segment
-        for segment in segments
+        not segment or segment in (".", "..") or "*" in segment for segment in segments
     ):
         return None
     return tuple(segments)
@@ -200,7 +216,7 @@ def _segments_compatible(left, right):
 
 
 def _path_patterns_overlap(left, right):
-    """Decide whether two whole-segment path globs share at least one path."""
+    """判断两个整段 glob 是否可能覆盖同一路径，用于发现 ownership 冲突。"""
     left_parsed = _path_pattern(left)
     right_parsed = _path_pattern(right)
     if left_parsed is None or right_parsed is None:
@@ -230,7 +246,12 @@ def _path_patterns_overlap(left, right):
 def _is_excluded(file_path):
     path_segments = _literal_path(file_path)
     if path_segments is not None:
-        if any(segment in {"__pycache__", ".gradle", "build"} for segment in path_segments) or file_path.endswith(".pyc"):
+        # Finder 元数据已由 .gitignore 排除；仅匹配文件名，不扩展 Catalog glob 语法。
+        if path_segments[-1] == ".DS_Store":
+            return True
+        if any(
+            segment in {"__pycache__", ".gradle", "build"} for segment in path_segments
+        ) or file_path.endswith(".pyc"):
             return True
     for pat in EXCLUDED_PATH_PATTERNS:
         if _path_matches(pat, file_path):
@@ -239,7 +260,7 @@ def _is_excluded(file_path):
 
 
 class PlanningValidator:
-    """Validates planning/workstreams.yaml against project contracts."""
+    """按共享 contract 核对 planning/workstreams.yaml，累积可定位的错误。"""
 
     def __init__(self, root):
         self.root = Path(root).resolve()
@@ -259,8 +280,14 @@ class PlanningValidator:
         self.errors = []
 
     @classmethod
-    def from_data(cls, ws_data, template_data=None, policy_data=None, runtime_data=None,
-                  module_checks_data=None):
+    def from_data(
+        cls,
+        ws_data,
+        template_data=None,
+        policy_data=None,
+        runtime_data=None,
+        module_checks_data=None,
+    ):
         obj = cls.__new__(cls)
         obj.root = Path(".")
         obj._load_errors = []
@@ -302,6 +329,7 @@ class PlanningValidator:
             self._build_catalog()
 
     def _build_catalog(self):
+        """先校验并展平 WorkStream → Epic → Capability → Task；结构错误不流入后续图检查。"""
         self.tasks = {}
         self.workstreams = {}
         self.gates = []
@@ -311,26 +339,36 @@ class PlanningValidator:
         self._check_failures = []
 
         if not isinstance(self.ws, dict):
-            self._structure_errors.append("invalid-structure: workstreams catalog is not a dict")
+            self._structure_errors.append(
+                "invalid-structure: workstreams catalog is not a dict"
+            )
             return
 
         ws_raw = self.ws.get("workstreams")
         if ws_raw is not None and not isinstance(ws_raw, list):
-            self._structure_errors.append("invalid-structure: workstreams is not a list")
+            self._structure_errors.append(
+                "invalid-structure: workstreams is not a list"
+            )
             return
 
         gates_raw = self.ws.get("phase_gates")
         if gates_raw is not None and not isinstance(gates_raw, list):
-            self._structure_errors.append("invalid-structure: phase_gates is not a list")
+            self._structure_errors.append(
+                "invalid-structure: phase_gates is not a list"
+            )
             return
 
         path_ownership = self.ws.get("path_ownership", {})
         if not isinstance(path_ownership, dict):
-            self._structure_errors.append("invalid-structure: path_ownership is not a map")
+            self._structure_errors.append(
+                "invalid-structure: path_ownership is not a map"
+            )
             path_ownership = {}
         scopes_raw = path_ownership.get("scopes")
         if scopes_raw is not None and not isinstance(scopes_raw, list):
-            self._structure_errors.append("invalid-structure: path_ownership.scopes is not a list")
+            self._structure_errors.append(
+                "invalid-structure: path_ownership.scopes is not a list"
+            )
             scopes_raw = []
 
         phase_entry_validation = self.ws.get("phase_entry_validation", {})
@@ -393,7 +431,9 @@ class PlanningValidator:
                 seen_epic_ids.add(eid)
 
                 capabilities_raw = epic.get("capabilities")
-                if capabilities_raw is not None and not isinstance(capabilities_raw, list):
+                if capabilities_raw is not None and not isinstance(
+                    capabilities_raw, list
+                ):
                     self._structure_errors.append(
                         f"invalid-structure: epic {eid!r} capabilities is not a list"
                     )
@@ -413,10 +453,14 @@ class PlanningValidator:
 
                     cap_phase = cap.get("phase", "P1")
                     if not isinstance(cap_phase, str) or not PHASE_RE.match(cap_phase):
-                        self.errors.append(f"invalid-phase: capability {cid} phase={cap_phase!r}")
+                        self.errors.append(
+                            f"invalid-phase: capability {cid} phase={cap_phase!r}"
+                        )
 
                     seed_tasks_raw = cap.get("seed_tasks")
-                    if seed_tasks_raw is not None and not isinstance(seed_tasks_raw, list):
+                    if seed_tasks_raw is not None and not isinstance(
+                        seed_tasks_raw, list
+                    ):
                         self._structure_errors.append(
                             f"invalid-structure: capability {cid!r} seed_tasks is not a list"
                         )
@@ -448,15 +492,21 @@ class PlanningValidator:
                             )
                             produced_contracts = []
                         elif isinstance(produced_contracts, list):
-                            for contract_index, contract in enumerate(produced_contracts):
+                            for contract_index, contract in enumerate(
+                                produced_contracts
+                            ):
                                 if not isinstance(contract, dict):
                                     self._structure_errors.append(
                                         f"invalid-structure: task {task_id!r} "
                                         f"produced_contracts[{contract_index}] is not a map"
                                     )
                         task_phase = task.get("phase", cap_phase)
-                        if not isinstance(task_phase, str) or not PHASE_RE.match(task_phase):
-                            self.errors.append(f"invalid-phase: task {task_id} phase={task_phase!r}")
+                        if not isinstance(task_phase, str) or not PHASE_RE.match(
+                            task_phase
+                        ):
+                            self.errors.append(
+                                f"invalid-phase: task {task_id} phase={task_phase!r}"
+                            )
                         self.tasks[task_id] = {
                             "id": task_id,
                             "title": task.get("title", ""),
@@ -468,7 +518,9 @@ class PlanningValidator:
                             "workstream_id": ws_id,
                             "epic_id": eid,
                             "capability_id": cid,
-                            "phase_entry_prerequisite": task.get("phase_entry_prerequisite"),
+                            "phase_entry_prerequisite": task.get(
+                                "phase_entry_prerequisite"
+                            ),
                             "produced_contracts": produced_contracts or [],
                             "required_check_ids": task.get("required_check_ids"),
                         }
@@ -520,7 +572,9 @@ class PlanningValidator:
 
         handoff_contracts = []
         orchestration_policy = self.ws.get("orchestration_policy")
-        if orchestration_policy is not None and not isinstance(orchestration_policy, dict):
+        if orchestration_policy is not None and not isinstance(
+            orchestration_policy, dict
+        ):
             self._structure_errors.append(
                 "invalid-structure: orchestration_policy is not a map"
             )
@@ -559,6 +613,7 @@ class PlanningValidator:
                     )
 
     def _check(self, fn):
+        """隔离单项 checker 的异常并记录失败，避免一个异常吞掉完整检查清单。"""
         try:
             fn()
         except Exception as exc:
@@ -567,6 +622,7 @@ class PlanningValidator:
             self._check_failures.append(failure)
 
     def check_all_entity_ids(self):
+        """核对各层 ID 格式及唯一性；名称说明不能代替稳定 ID。"""
         id_policy = self.ws.get("id_policy")
         if not isinstance(id_policy, dict):
             self.errors.append("invalid-id-policy: id_policy must be a map")
@@ -610,9 +666,7 @@ class PlanningValidator:
                 self.errors.append(f"invalid-gate-id: {gid!r}")
             gate_phase = gate.get("phase")
             if not isinstance(gate_phase, str) or not PHASE_RE.match(gate_phase):
-                self.errors.append(
-                    f"invalid-phase: gate {gid} phase={gate_phase!r}"
-                )
+                self.errors.append(f"invalid-phase: gate {gid} phase={gate_phase!r}")
 
         for scope in self.path_scopes:
             sid = scope.get("scope", "")
@@ -622,12 +676,11 @@ class PlanningValidator:
                 self.errors.append(f"invalid-scope-id: {sid!r}")
 
     def check_versions(self):
+        """核对 Task 正整数版本与 change SemVer，供 dependency 精确绑定。"""
         for tid, task in self.tasks.items():
             tv = task["task_version"]
             if not isinstance(tv, int) or tv < 1:
-                self.errors.append(
-                    f"invalid-task-version: {tid} task_version={tv!r}"
-                )
+                self.errors.append(f"invalid-task-version: {tid} task_version={tv!r}")
             cv = task["change_version"]
             if not _is_semver(cv):
                 self.errors.append(
@@ -635,12 +688,20 @@ class PlanningValidator:
                 )
 
     def check_required_check_ids(self):
-        checks = self.module_checks.get("checks") if isinstance(self.module_checks, dict) else None
+        """核对 Task 引用的 Check 确实在 Registry 声明，不执行这些 Check。"""
+        checks = (
+            self.module_checks.get("checks")
+            if isinstance(self.module_checks, dict)
+            else None
+        )
         if not isinstance(checks, list):
-            self.errors.append("required-check-registry: harness/module-checks.yaml checks missing")
+            self.errors.append(
+                "required-check-registry: harness/module-checks.yaml checks missing"
+            )
             return
         declared = {
-            item.get("check_id") for item in checks
+            item.get("check_id")
+            for item in checks
             if isinstance(item, dict) and item.get("scope") == "repository-baseline"
         }
         for tid, task in self.tasks.items():
@@ -648,7 +709,9 @@ class PlanningValidator:
             if not isinstance(required, list) or not required:
                 self.errors.append(f"required-check-ids-missing: {tid}")
                 continue
-            if len(required) != len(set(required)) or not all(isinstance(v, str) and v for v in required):
+            if len(required) != len(set(required)) or not all(
+                isinstance(v, str) and v for v in required
+            ):
                 self.errors.append(f"required-check-ids-invalid: {tid}")
                 continue
             unknown = sorted(set(required) - declared)
@@ -656,10 +719,13 @@ class PlanningValidator:
                 self.errors.append(f"required-check-ids-unknown: {tid} -> {unknown}")
 
     def check_dependency_types(self):
+        """按 hard、soft、contract 分别核对边字段，不把建议顺序提升为强依赖。"""
         for tid, task in self.tasks.items():
             for idx, dep in enumerate(task["depends_on"]):
                 if not isinstance(dep, dict):
-                    self.errors.append(f"invalid-dep-structure: {tid}[{idx}] not a dict")
+                    self.errors.append(
+                        f"invalid-dep-structure: {tid}[{idx}] not a dict"
+                    )
                     continue
 
                 for field in COMMON_REQUIRED_FIELDS:
@@ -713,13 +779,16 @@ class PlanningValidator:
                             )
 
     def check_dependency_existence(self):
+        """核对 dependency 的目标 Task 与指定版本存在，拒绝悬空引用。"""
         for tid, task in self.tasks.items():
             for dep in task["depends_on"]:
                 if not isinstance(dep, dict):
                     continue
                 dep_id = dep.get("task_id")
                 if dep_id is None:
-                    self.errors.append(f"dep-missing-task-id: {tid} has dep without task_id")
+                    self.errors.append(
+                        f"dep-missing-task-id: {tid} has dep without task_id"
+                    )
                     continue
                 if dep_id not in self.tasks:
                     self.errors.append(f"missing-dependency: {tid} -> {dep_id}")
@@ -739,6 +808,7 @@ class PlanningValidator:
                     )
 
     def check_contract_producers(self):
+        """每条 contract 消费边必须精确对应一个 producer 声明及版本。"""
         producers = {}
         for tid, task in self.tasks.items():
             for contract in task["produced_contracts"]:
@@ -786,6 +856,7 @@ class PlanningValidator:
                         )
 
     def check_no_cycles(self):
+        """仅在当前 Task 图中检测环；静态无环不证明运行已完成。"""
         WHITE, GRAY, BLACK = 0, 1, 2
         color = {tid: WHITE for tid in self.tasks}
 
@@ -808,8 +879,11 @@ class PlanningValidator:
                 dfs(tid)
 
     def check_no_later_phase_edges(self):
+        """防止早期阶段反向依赖尚未授权的后期阶段结果。"""
         for tid, task in self.tasks.items():
-            if not isinstance(task.get("phase"), str) or not PHASE_RE.match(task["phase"]):
+            if not isinstance(task.get("phase"), str) or not PHASE_RE.match(
+                task["phase"]
+            ):
                 continue
             task_phase = _phase_number(task)
             for dep in task["depends_on"]:
@@ -819,7 +893,9 @@ class PlanningValidator:
                 if dep_id not in self.tasks:
                     continue
                 dep_task = self.tasks[dep_id]
-                if not isinstance(dep_task.get("phase"), str) or not PHASE_RE.match(dep_task["phase"]):
+                if not isinstance(dep_task.get("phase"), str) or not PHASE_RE.match(
+                    dep_task["phase"]
+                ):
                     continue
                 dep_phase = _phase_number(dep_task)
                 if dep_phase > task_phase:
@@ -829,6 +905,7 @@ class PlanningValidator:
                     )
 
     def check_phase_entry(self):
+        """核对显式阶段前置要求；历史阶段编号或 Gate 名称不自动授权执行。"""
         gate_by_phase = {}
         for gate in self.gates:
             gid = gate.get("id", "")
@@ -855,7 +932,9 @@ class PlanningValidator:
                 continue
             entry_requires = gate.get("entry_requires")
             if not entry_requires or not isinstance(entry_requires, dict):
-                self.errors.append(f"gate-missing-entry-requires: {gate.get('id')} for {phase}")
+                self.errors.append(
+                    f"gate-missing-entry-requires: {gate.get('id')} for {phase}"
+                )
                 continue
 
             for tid in ids:
@@ -892,13 +971,18 @@ class PlanningValidator:
                         f"{pep.get('previous_gate_exit_task_id')!r} expected {prev_exit!r}"
                     )
                 req_tv = pep.get("required_exit_task_version")
-                if prev_exit in self.tasks and req_tv != self.tasks[prev_exit]["task_version"]:
+                if (
+                    prev_exit in self.tasks
+                    and req_tv != self.tasks[prev_exit]["task_version"]
+                ):
                     self.errors.append(
                         f"phase-entry-version-mismatch: {tid} exit_task_version="
                         f"{req_tv} expected {self.tasks[prev_exit]['task_version']}"
                     )
                 req_cv = pep.get("required_exit_change_version")
-                if prev_exit in self.tasks and str(req_cv) != str(self.tasks[prev_exit]["change_version"]):
+                if prev_exit in self.tasks and str(req_cv) != str(
+                    self.tasks[prev_exit]["change_version"]
+                ):
                     self.errors.append(
                         f"phase-entry-change-version-mismatch: {tid} "
                         f"exit_change_version={req_cv} expected {self.tasks[prev_exit]['change_version']}"
@@ -928,7 +1012,9 @@ class PlanningValidator:
                             )
                 if not has_hard_dep_on_exit:
                     if not any(
-                        isinstance(d, dict) and d.get("task_id") == prev_exit and d.get("type") == "hard"
+                        isinstance(d, dict)
+                        and d.get("task_id") == prev_exit
+                        and d.get("type") == "hard"
                         for d in task["depends_on"]
                     ):
                         self.errors.append(
@@ -948,7 +1034,8 @@ class PlanningValidator:
 
         for phase, phase_ids in self.phase_entry_tasks.items():
             phase_task_ids = [
-                tid for tid, t in self.tasks.items()
+                tid
+                for tid, t in self.tasks.items()
                 if isinstance(t.get("phase"), str) and t["phase"] == phase
             ]
             entries = set(phase_ids) & set(phase_task_ids)
@@ -974,7 +1061,8 @@ class PlanningValidator:
             if exit_task not in self.tasks:
                 continue
             p0_entries = [
-                tid for tid in gate.get("entry_tasks", [])
+                tid
+                for tid in gate.get("entry_tasks", [])
                 if tid in self.tasks and self.tasks[tid].get("priority") == "P0"
             ]
             reachable_from_exit = set()
@@ -1001,6 +1089,7 @@ class PlanningValidator:
                     )
 
     def resolve_owner(self, file_path):
+        """按最具体 scope 解析 owner；同等具体度冲突返回 AMBIGUOUS，不任意挑选。"""
         candidates = []
         for scope in self.path_scopes:
             for pattern in scope.get("proposed_paths") or []:
@@ -1016,6 +1105,7 @@ class PlanningValidator:
         return top[0][1]
 
     def check_owners(self):
+        """核对 scope 声明、owner 存在性与重叠关系，不修改路径 claim。"""
         resolution = (self.ws.get("path_ownership") or {}).get("resolution", "")
         if not isinstance(resolution, str) or "most-specific" not in resolution.lower():
             self.errors.append(
@@ -1036,7 +1126,9 @@ class PlanningValidator:
                     f"owner-not-found: scope {sid!r} owner {owner!r} not in workstreams"
                 )
             if not paths:
-                self.errors.append(f"empty-proposed-paths: scope {sid!r} has no proposed_paths")
+                self.errors.append(
+                    f"empty-proposed-paths: scope {sid!r} has no proposed_paths"
+                )
 
         seen_paths = {}
         for scope in self.path_scopes:
@@ -1061,11 +1153,9 @@ class PlanningValidator:
         claims = []
         for scope in self.path_scopes:
             for path in scope.get("proposed_paths") or []:
-                claims.append(
-                    (scope.get("scope", ""), scope.get("owner", ""), path)
-                )
+                claims.append((scope.get("scope", ""), scope.get("owner", ""), path))
         for index, (left_scope, left_owner, left_path) in enumerate(claims):
-            for right_scope, right_owner, right_path in claims[index + 1:]:
+            for right_scope, right_owner, right_path in claims[index + 1 :]:
                 if left_owner == right_owner:
                     continue
                 if _path_specificity(left_path) != _path_specificity(right_path):
@@ -1085,6 +1175,7 @@ class PlanningValidator:
             seen_scopes[sid] = True
 
     def check_cross_source_handoff(self):
+        """从 policy 真源核对模板、Catalog 与 runtime 的共享投影，防止多套 handoff 合同漂移。"""
         sources = {}
         if self.ws:
             ho = self.ws.get("orchestration_policy", {}).get("handoff_contract", {})
@@ -1104,16 +1195,22 @@ class PlanningValidator:
                 sources["runtime"] = r
 
         if len(sources) < 4:
-            missing = [s for s in ("workstreams", "template", "policy", "runtime") if s not in sources]
+            missing = [
+                s
+                for s in ("workstreams", "template", "policy", "runtime")
+                if s not in sources
+            ]
             self.errors.append(
                 f"cross-source-incomplete: missing handoff data from {missing}"
             )
             return
 
-        # Load canonical reference from policy single source of truth
+        # 只从 policy 加载规范真源，逐一核对其他投影。
         canonical = _load_canonical_from_policy(self.policy)
         if canonical is None:
-            self.errors.append("cross-source-handoff: cannot load canonical reference from policy")
+            self.errors.append(
+                "cross-source-handoff: cannot load canonical reference from policy"
+            )
             return
         canonical_caller = canonical["caller_fields"]
         canonical_result = canonical["result_fields"]
@@ -1133,7 +1230,9 @@ class PlanningValidator:
             return []
 
         for n in names:
-            caller_fields = _extract_field_names(sources[n].get("caller_required_input"))
+            caller_fields = _extract_field_names(
+                sources[n].get("caller_required_input")
+            )
             if len(caller_fields) != len(canonical_caller):
                 self.errors.append(
                     f"canonical-caller-count: {n} has {len(caller_fields)} caller fields, "
@@ -1146,7 +1245,9 @@ class PlanningValidator:
                 )
 
         for n in names:
-            result_fields = _extract_field_names(sources[n].get("result_required_output"))
+            result_fields = _extract_field_names(
+                sources[n].get("result_required_output")
+            )
             if len(result_fields) != len(canonical_result):
                 self.errors.append(
                     f"canonical-result-count: {n} has {len(result_fields)} result fields, "
@@ -1182,7 +1283,9 @@ class PlanningValidator:
             flags = {
                 "target_schema_enforced": adapter.get("target_schema_enforced"),
                 "runtime_identity_enforced": adapter.get("runtime_identity_enforced"),
-                "result_fields_required_in_prompt": adapter.get("result_fields_required_in_prompt"),
+                "result_fields_required_in_prompt": adapter.get(
+                    "result_fields_required_in_prompt"
+                ),
                 "agent_profile_cli_binding": adapter.get("agent_profile_cli_binding"),
                 "harness_manifest_preflight": adapter.get("harness_manifest_preflight"),
                 "catalog_package_preflight": adapter.get("catalog_package_preflight"),
@@ -1218,14 +1321,16 @@ class PlanningValidator:
                 )
 
         if not any(
-            isinstance(sources[n].get("caller_field_schema"), dict)
-            for n in names
+            isinstance(sources[n].get("caller_field_schema"), dict) for n in names
         ):
             self.errors.append(
                 "canonical-caller-field-schema: all sources omit caller_field_schema"
             )
 
-        caller_lists = {n: _extract_field_names(sources[n].get("caller_required_input")) for n in names}
+        caller_lists = {
+            n: _extract_field_names(sources[n].get("caller_required_input"))
+            for n in names
+        }
         for i in range(1, len(names)):
             if caller_lists[names[i]] != caller_lists[names[0]]:
                 self.errors.append(
@@ -1234,7 +1339,10 @@ class PlanningValidator:
                 )
                 break
 
-        result_lists = {n: _extract_field_names(sources[n].get("result_required_output")) for n in names}
+        result_lists = {
+            n: _extract_field_names(sources[n].get("result_required_output"))
+            for n in names
+        }
         for i in range(1, len(names)):
             if result_lists[names[i]] != result_lists[names[0]]:
                 self.errors.append(
@@ -1258,13 +1366,25 @@ class PlanningValidator:
             if isinstance(adapter, dict):
                 adapter_maps[n] = {
                     "target_schema_enforced": adapter.get("target_schema_enforced"),
-                    "runtime_identity_enforced": adapter.get("runtime_identity_enforced"),
-                    "result_fields_required_in_prompt": adapter.get("result_fields_required_in_prompt"),
-                    "agent_profile_cli_binding": adapter.get("agent_profile_cli_binding"),
-                    "harness_manifest_preflight": adapter.get("harness_manifest_preflight"),
-                    "catalog_package_preflight": adapter.get("catalog_package_preflight"),
+                    "runtime_identity_enforced": adapter.get(
+                        "runtime_identity_enforced"
+                    ),
+                    "result_fields_required_in_prompt": adapter.get(
+                        "result_fields_required_in_prompt"
+                    ),
+                    "agent_profile_cli_binding": adapter.get(
+                        "agent_profile_cli_binding"
+                    ),
+                    "harness_manifest_preflight": adapter.get(
+                        "harness_manifest_preflight"
+                    ),
+                    "catalog_package_preflight": adapter.get(
+                        "catalog_package_preflight"
+                    ),
                     "catalog_estimate_rule": adapter.get("catalog_estimate_rule"),
-                    "structured_result_required": adapter.get("structured_result_required"),
+                    "structured_result_required": adapter.get(
+                        "structured_result_required"
+                    ),
                     "enforced_caller_fields": adapter.get("enforced_caller_fields", []),
                 }
             else:
@@ -1293,6 +1413,7 @@ class PlanningValidator:
                     break
 
     def check_repo_path_ownership(self):
+        """将非运行产物文件映射到 owner；发现无 owner 或歧义时保留文件路径。"""
         if not self.root.exists():
             return
         governance_files = []
@@ -1314,6 +1435,7 @@ class PlanningValidator:
                 )
 
     def run_all(self):
+        """先处理加载/结构错误，再运行确定性的静态检查；planning-only 也不能跳过基础约束。"""
         if self._load_errors:
             return {
                 "status": "FAIL",
@@ -1338,11 +1460,17 @@ class PlanningValidator:
             }
         planning_only = program.get("catalog_mode") == "planning-only"
         if planning_only and (
-            self.tasks or self.gates or self.phase_entry_tasks
-            or any(program.get(key) is not None for key in (
-                "current_phase", "current_gate",
-                "phase_2_to_6_dispatch_requires_g1_user_approval",
-            ))
+            self.tasks
+            or self.gates
+            or self.phase_entry_tasks
+            or any(
+                program.get(key) is not None
+                for key in (
+                    "current_phase",
+                    "current_gate",
+                    "phase_2_to_6_dispatch_requires_g1_user_approval",
+                )
+            )
         ):
             return {
                 "status": "FAIL",
@@ -1390,8 +1518,9 @@ class PlanningValidator:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry point: python3 -m scripts.repository.planning_check --root <path>"""
+    """CLI 入口：python3 -m scripts.repository.planning_check --root <path>。"""
     import argparse
+
     parser = argparse.ArgumentParser(description="LexiFlow planning catalog validator")
     parser.add_argument("--root", default=".", help="Project root directory")
     parser.add_argument("--verbose", "-v", action="store_true")

@@ -1,4 +1,5 @@
-"""Qoder callback transport, independent of the lifecycle command entry."""
+"""Qoder callback 传输；与生命周期命令入口分离，先发布 completion 再发送通知。"""
+
 from __future__ import annotations
 
 import errno
@@ -10,13 +11,22 @@ from pathlib import Path
 from typing import Any
 
 from scripts.agents.qoder import lifecycle
-from scripts.agents.qoder.failure_diagnostics import access_blocked, compact_failure_signal
+from scripts.agents.qoder.failure_diagnostics import (
+    access_blocked,
+    compact_failure_signal,
+)
 
-_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-_RECEIPT_RE = re.compile(r"^Queued message ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}) for thread ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.$")
+_UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+_RECEIPT_RE = re.compile(
+    r"^Queued message ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}) for thread ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.$"
+)
+
 
 def _is_valid_uuid(value: str) -> bool:
     return isinstance(value, str) and bool(_UUID_RE.fullmatch(value))
+
 
 def _run_codex_queue_cli(
     thread_id: str, message: str, timeout: int = 10, cwd: str = "."
@@ -32,7 +42,9 @@ def _run_codex_queue_cli(
     )
 
 
-def _build_callback_message(run_id: str, completion: dict[str, Any], run_dir: Path) -> str:
+def _build_callback_message(
+    run_id: str, completion: dict[str, Any], run_dir: Path
+) -> str:
     """构建回调消息，仅含受校验字段与固定指令，不含可注入文本或原始日志。"""
     task_id = completion.get("task_id", "")
     work_package_id = completion.get("work_package_id", "")
@@ -51,10 +63,16 @@ def _build_callback_message(run_id: str, completion: dict[str, Any], run_dir: Pa
     if signal:
         lines.insert(4, signal)
     if access_blocked(completion.get("failure")):
-        lines.insert(-1, "账号/访问阻断不得原样补开；先确认外部状态已修复，再显式恢复。无新产物不得计交付通过。")
+        lines.insert(
+            -1,
+            "账号/访问阻断不得原样补开；先确认外部状态已修复，再显式恢复。无新产物不得计交付通过。",
+        )
     fallback = completion.get("fallback")
     if isinstance(fallback, dict) and fallback.get("code") == "TERRA_REQUIRED":
-        lines.insert(-1, "Qoder 未形成可验证启动；按 attempt_id 和共享 agent_dispatch 的 fallback_model / fallback_reasoning_effort 使用原生 Codex 协作工具派发，随后用 record-fallback 只提交该原生 call_id。")
+        lines.insert(
+            -1,
+            "Qoder 未形成可验证启动；按 attempt_id 和共享 agent_dispatch 的 fallback_model / fallback_reasoning_effort 使用原生 Codex 协作工具派发，随后用 record-fallback 只提交该原生 call_id。",
+        )
     return "\n".join(lines)
 
 
@@ -183,9 +201,11 @@ def attempt_codex_callback(
         lifecycle._atomic_write_json(
             callback_path,
             {
-                "status": "failed"
-                if isinstance(exc, FileNotFoundError) and not returned
-                else "unknown",
+                "status": (
+                    "failed"
+                    if isinstance(exc, FileNotFoundError) and not returned
+                    else "unknown"
+                ),
                 "error": type(exc).__name__,
                 "parent_session_id": parent_session_id,
             },

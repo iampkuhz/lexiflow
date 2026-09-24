@@ -1,10 +1,5 @@
-"""Scope selection and git operations for verification scenarios.
+"""Verification 场景的范围选择和 Git 操作。依变更路径选择 Check，明确未覆盖路径并确定依赖闭包。"""
 
-Selects checks based on changed files and module dependencies.
-Provides git diff operations without importing scripts.gates.
-
-Does NOT import scripts.gates or scripts.harness.
-"""
 from __future__ import annotations
 
 import subprocess
@@ -13,7 +8,7 @@ from typing import Any
 
 
 class ScopeError(ValueError):
-    """Error during scope resolution (git unavailable, unsafe paths, etc.)."""
+    """范围解析失败，例如 Git 不可用或路径不安全。"""
 
     def __init__(self, code: str, detail: str) -> None:
         self.code = code
@@ -21,11 +16,12 @@ class ScopeError(ValueError):
 
 
 # ---------------------------------------------------------------------------
-# Git operations
+# Git 操作
 # ---------------------------------------------------------------------------
 
+
 def git_run(root: Path, *args: str) -> str:
-    """Run a git command and return stdout. Raises ScopeError on failure."""
+    """运行 Git 命令并返回 stdout；失败时抛出 ScopeError。"""
     try:
         r = subprocess.run(
             ["git", *args],
@@ -45,11 +41,7 @@ def git_run(root: Path, *args: str) -> str:
 
 
 def resolve_base(root: Path, explicit: str | None = None) -> str:
-    """Resolve the comparison base commit.
-
-    If *explicit* is given, return it directly.  Otherwise try
-    ``@{upstream}`` merge-base, falling back to HEAD.
-    """
+    """解析比较基点 commit；显式指定时直接使用，否则从当前仓库推导。"""
     if explicit:
         return explicit
     try:
@@ -62,13 +54,15 @@ def resolve_base(root: Path, explicit: str | None = None) -> str:
 
 
 def changed_paths(root: Path, base: str) -> list[str]:
-    """Return sorted unique list of changed paths since *base*.
-
-    Includes tracked changes (ACMRD) and untracked non-ignored files.
-    Raises ScopeError on unsafe paths (absolute or path traversal).
-    """
+    """返回相对基点变更路径的排序去重列表，包含 tracked 与未跟踪路径。"""
     diff_out = git_run(
-        root, "diff", "--name-only", "-z", "--diff-filter=ACMRD", base, "--",
+        root,
+        "diff",
+        "--name-only",
+        "-z",
+        "--diff-filter=ACMRD",
+        base,
+        "--",
     )
     untracked = git_run(root, "ls-files", "--others", "--exclude-standard", "-z")
     combined = diff_out + untracked
@@ -80,11 +74,12 @@ def changed_paths(root: Path, base: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Check selection
+# Check 选择
 # ---------------------------------------------------------------------------
 
+
 def _path_matches(trigger_path: str, changed_path: str) -> bool:
-    """Check if *changed_path* falls under *trigger_path* prefix."""
+    """判断变更路径是否落在 trigger 路径前缀下。"""
     return changed_path == trigger_path or changed_path.startswith(
         trigger_path.rstrip("/") + "/"
     )
@@ -94,11 +89,7 @@ def select_checks_for_changes(
     checks: list[dict[str, Any]],
     changed: list[str],
 ) -> list[dict[str, Any]]:
-    """Select checks whose triggers match any changed file.
-
-    Each selected check includes ``selection_reasons`` listing the
-    matched changed files.
-    """
+    """依据变更文件与 trigger 选择 Check，并保留选择原因供报告解释。"""
     selected: list[dict[str, Any]] = []
     for check in checks:
         if check.get("scope") != "change-targeted":
@@ -109,11 +100,13 @@ def select_checks_for_changes(
             trigger_path = trigger.get("path", "")
             for cp in changed:
                 if _path_matches(trigger_path, cp):
-                    reasons.append({
-                        "kind": "changed-file",
-                        "changed_file": cp,
-                        "trigger_path": trigger_path,
-                    })
+                    reasons.append(
+                        {
+                            "kind": "changed-file",
+                            "changed_file": cp,
+                            "trigger_path": trigger_path,
+                        }
+                    )
         if reasons:
             entry = dict(check)
             entry["selection_reasons"] = reasons
@@ -125,11 +118,7 @@ def resolve_module_dependencies(
     selected: list[dict[str, Any]],
     all_checks: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Resolve the complete module dependency closure deterministically.
-
-    Unknown modules and cycles are configuration errors: continuing would make
-    a partial check set look complete.
-    """
+    """确定性求出完整模块依赖闭包；未知模块和环不能静默通过。"""
     by_module: dict[str, list[dict[str, Any]]] = {}
     for check in all_checks:
         by_module.setdefault(check.get("module", ""), []).append(check)
@@ -151,9 +140,15 @@ def resolve_module_dependencies(
         for dependency in check.get("module_dependencies", []):
             candidates = by_module.get(dependency, [])
             if not candidates:
-                raise ScopeError("unknown-module-dependency", f"{check['check_id']} requires {dependency}")
+                raise ScopeError(
+                    "unknown-module-dependency",
+                    f"{check['check_id']} requires {dependency}",
+                )
             for candidate in candidates:
-                add(candidate, {"kind": "module-dependency", "required_by": check["check_id"]})
+                add(
+                    candidate,
+                    {"kind": "module-dependency", "required_by": check["check_id"]},
+                )
         visiting.pop()
         entry = dict(check)
         if reason:
@@ -168,12 +163,15 @@ def resolve_module_dependencies(
     return ordered
 
 
-def uncovered_changed_paths(checks: list[dict[str, Any]], changed: list[str]) -> list[str]:
-    """Return every changed path not directly covered by a targeted trigger."""
+def uncovered_changed_paths(
+    checks: list[dict[str, Any]], changed: list[str]
+) -> list[str]:
+    """返回没有被 targeted trigger 直接覆盖的全部变更路径。"""
     uncovered: list[str] = []
     for changed_path in changed:
         covered = any(
-            check.get("scope") == "change-targeted" and any(
+            check.get("scope") == "change-targeted"
+            and any(
                 _path_matches(trigger.get("path", ""), changed_path)
                 for trigger in check.get("triggers", [])
             )
@@ -190,20 +188,13 @@ def compute_scope_review(
     executed_ids: set[str],
     declared_count: int,
 ) -> dict[str, Any]:
-    """Compute scope_review section of the report.
-
-    Compares changed files against expected paths for self-review
-    advisory.  Reports coverage gaps when changed files are not
-    covered by any executed check.
-    """
+    """对比变更路径与期望范围，生成报告的 scope_review 部分。"""
     expected_list = list(expected_paths)
     if expected_list:
         expected_files = [
-            p for p in changed
-            if any(
-                p == e or p.startswith(e.rstrip("/") + "/")
-                for e in expected_list
-            )
+            p
+            for p in changed
+            if any(p == e or p.startswith(e.rstrip("/") + "/") for e in expected_list)
         ]
         unexpected_files = [p for p in changed if p not in expected_files]
         review_kind = "expected"

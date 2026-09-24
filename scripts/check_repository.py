@@ -1,15 +1,5 @@
-"""Repository verification CLI entry point.
+"""Repository Verify CLI 入口。运行已声明的仓库基线检查，输出报告；不代替正式 validation。"""
 
-Runs all declared repository-baseline checks and aggregates results.
-This is a thin wrapper over ``scripts.verification.verify_repository``.
-
-Usage::
-
-    python3 scripts/check_repository.py [--repo-root .]
-        [--check-id ID ...]
-
-Does NOT import scripts.gates or scripts.harness.
-"""
 from __future__ import annotations
 
 import argparse
@@ -29,11 +19,14 @@ def main(argv: list[str] | None = None) -> int:
         description="Run all declared repository-baseline checks.",
     )
     parser.add_argument(
-        "--repo-root", default=".",
+        "--repo-root",
+        default=".",
         help="Repository root directory (default: .)",
     )
     parser.add_argument(
-        "--check-id", action="append", default=None,
+        "--check-id",
+        action="append",
+        default=None,
         dest="check_ids",
         help="Restrict to specific check IDs (repeatable)",
     )
@@ -46,7 +39,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report["publication"] = persist_report(args.repo_root, report)
     except ValueError as exc:
-        report = {**report, "result": "FAIL", "reason": "report-publication-failed", "detail": str(exc)}
+        report = {
+            **report,
+            "result": "FAIL",
+            "reason": "report-publication-failed",
+            "detail": str(exc),
+        }
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
 
     result = report.get("result", "FAIL")

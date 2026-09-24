@@ -1,3 +1,3 @@
 #!/bin/sh
-# Verify is not a commit gate and commit hooks do not mutate change context.
+# Verify 不控制 commit；Hook 不修改 change context。
 exit 0

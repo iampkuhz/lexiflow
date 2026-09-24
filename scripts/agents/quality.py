@@ -1,4 +1,5 @@
-"""Run the complete agent-module regression suite and emit one JSON result."""
+"""运行 Agent 模块的完整回归测试并输出 JSON 结果。"""
+
 from __future__ import annotations
 
 import argparse
@@ -34,7 +35,9 @@ def run(root: Path) -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[2])
+    parser.add_argument(
+        "--root", type=Path, default=Path(__file__).resolve().parents[2]
+    )
     args = parser.parse_args(argv)
     print(json.dumps(run(args.root.resolve()), ensure_ascii=False, sort_keys=True))
     return 0

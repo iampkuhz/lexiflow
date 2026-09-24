@@ -96,7 +96,9 @@ def _check_no_symlink_ancestors(path: Path) -> None:
     abs_path = path.absolute()
     for component in [abs_path, *abs_path.parents]:
         if component.is_symlink():
-            if component == Path("/var") and component.resolve() == Path("/private/var"):
+            if component == Path("/var") and component.resolve() == Path(
+                "/private/var"
+            ):
                 continue
             raise ValueError(f"symlink in path: {component}")
 
@@ -309,10 +311,12 @@ def watchdog_entry(task_dir_str: str, run_id: str, repo_root_str: str) -> int:
 
         # 记录 watchdog 启动
         write_watchdog_status(
-            run_dir, {"status": "running", "pid": os.getpid(), "started_at": time.time()}
+            run_dir,
+            {"status": "running", "pid": os.getpid(), "started_at": time.time()},
         )
 
         from scripts.agents.qoder.callback import attempt_codex_callback
+
         send_callback = attempt_codex_callback
 
         result = watchdog_loop(run_dir, repo_root, send_callback=send_callback)
@@ -372,6 +376,7 @@ def watchdog_loop(
     """
     if send_callback is None:
         from scripts.agents.qoder.callback import attempt_codex_callback
+
         send_callback = attempt_codex_callback
 
     start_time = clock_fn()
@@ -693,7 +698,9 @@ def ack_run(
     return ack_data
 
 
-def _verified_ack(path: Path, task: dict[str, Any], run_id: str, parent: str) -> dict[str, Any]:
+def _verified_ack(
+    path: Path, task: dict[str, Any], run_id: str, parent: str
+) -> dict[str, Any]:
     """锁内外共用同一完整身份检查，不接受其他 run 的消费记录。"""
     existing = _safe_read_json(path)
     if _uuid_lower(existing.get("parent_session_id", "")) != _uuid_lower(parent):

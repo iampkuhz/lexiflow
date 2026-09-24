@@ -1,4 +1,4 @@
-"""Bounded Qoder failure diagnostics; never export prompts, credentials or logs."""
+"""有界的 Qoder 失败诊断；不得导出 Prompt、凭证或原始日志。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
-
 
 _ACTIONS = {
     "authentication": "refresh-authentication",
@@ -21,7 +20,9 @@ _ACTIONS = {
     "runtime_failure": "inspect-failure-before-recovery",
 }
 _ACCESS_BLOCKERS = frozenset(_ACTIONS) - {
-    "invalid_input", "transient_service", "runtime_failure"
+    "invalid_input",
+    "transient_service",
+    "runtime_failure",
 }
 
 
@@ -69,7 +70,11 @@ def _details(value: Any, depth: int = 0) -> tuple[int | None, int | None, bool]:
     if isinstance(link, str):
         try:
             url = urlparse(link)
-            pricing = url.scheme == "https" and url.netloc == "qoder.com" and url.path == "/pricing"
+            pricing = (
+                url.scheme == "https"
+                and url.netloc == "qoder.com"
+                and url.path == "/pricing"
+            )
         except ValueError:
             pass
     for key in ("message", "body", "error"):
@@ -81,10 +86,13 @@ def _details(value: Any, depth: int = 0) -> tuple[int | None, int | None, bool]:
 
 
 def _matched_transport_details(
-    pid: int, session_id: str, cwd: Path, started_at: float,
+    pid: int,
+    session_id: str,
+    cwd: Path,
+    started_at: float,
     log_root: Path | None = None,
 ) -> tuple[int | None, int | None, bool]:
-    """Only read a matching CLI run's metadata/transport events, not sessions."""
+    """只读取匹配 CLI run 的 metadata 与 transport event，不读取私有 Session。"""
     root = log_root or Path.home() / ".qoder/logs/runs"
     if any(path.is_symlink() for path in (root, *root.parents)):
         return None, None, False
@@ -98,35 +106,49 @@ def _matched_transport_details(
     for directory in candidates:
         if directory.is_symlink():
             continue
-        manifest = _json(_read_tail(directory / "manifest.json", 65536).decode(errors="replace"))
+        manifest = _json(
+            _read_tail(directory / "manifest.json", 65536).decode(errors="replace")
+        )
         if not isinstance(manifest, dict) or manifest.get("pid") != pid:
             continue
         argv = manifest.get("argv")
         if not isinstance(argv, list) or not any(
-            item in ("--session-id", "--resume") and index + 1 < len(argv)
-            and argv[index + 1] == session_id for index, item in enumerate(argv)
+            item in ("--session-id", "--resume")
+            and index + 1 < len(argv)
+            and argv[index + 1] == session_id
+            for index, item in enumerate(argv)
         ):
             continue
         try:
             timestamp = datetime.fromisoformat(manifest["started_at"]).timestamp()
-            if abs(timestamp - started_at) > 30 or Path(manifest["cwd"]).resolve() != cwd.resolve():
+            if (
+                abs(timestamp - started_at) > 30
+                or Path(manifest["cwd"]).resolve() != cwd.resolve()
+            ):
                 continue
         except (KeyError, TypeError, ValueError, OSError):
             continue
         matches.append(directory)
     if len(matches) != 1:
         return None, None, False
-    lines = _read_tail(matches[0] / "qodercli.log", 131072).decode(errors="replace").splitlines()
+    lines = (
+        _read_tail(matches[0] / "qodercli.log", 131072)
+        .decode(errors="replace")
+        .splitlines()
+    )
     for line in reversed(lines):
-        if f"session={session_id} " not in line or "model.request.attempt_failed " not in line:
+        if (
+            f"session={session_id} " not in line
+            or "model.request.attempt_failed " not in line
+        ):
             continue
         status_match = re.search(r"\berror_status=(\d{3})\b", line)
         status = int(status_match[1]) if status_match else None
         marker = "error_message="
         try:
             message, _ = json.JSONDecoder().raw_decode(line.split(marker, 1)[1])
-            # The structured transport message contains a JSON service body.
-            body, _ = json.JSONDecoder().raw_decode(message[message.index("{"):])
+            # 结构化 transport 消息包含 JSON 服务响应体。
+            body, _ = json.JSONDecoder().raw_decode(message[message.index("{") :])
             code, _, pricing = _details(body)
         except (ValueError, IndexError, AttributeError, TypeError, RecursionError):
             code, pricing = None, False
@@ -135,8 +157,13 @@ def _matched_transport_details(
 
 
 def summarize_cli_failure(
-    stdout_path: Path, exit_code: int, *, pid: int | None = None,
-    session_id: str = "", cwd: Path | None = None, started_at: float | None = None,
+    stdout_path: Path,
+    exit_code: int,
+    *,
+    pid: int | None = None,
+    session_id: str = "",
+    cwd: Path | None = None,
+    started_at: float | None = None,
     log_root: Path | None = None,
 ) -> dict[str, Any]:
     content = _read_tail(stdout_path, 1048576).decode(errors="replace")
@@ -144,11 +171,17 @@ def summarize_cli_failure(
     messages = decoded if isinstance(decoded, list) else [decoded]
     if decoded is None:
         messages = [_json(line) for line in content.splitlines()]
-    results = [item for item in messages if isinstance(item, dict) and item.get("type") == "result"]
+    results = [
+        item
+        for item in messages
+        if isinstance(item, dict) and item.get("type") == "result"
+    ]
     result = results[-1] if results else {}
     result_code = _number(result.get("error_code"))
-    # Normalized Result codes and raw transport service codes are not interchangeable.
-    code, status, pricing = _details({key: value for key, value in result.items() if key != "error_code"})
+    # 归一化 Result code 与原始 transport 服务代码不可混用。
+    code, status, pricing = _details(
+        {key: value for key, value in result.items() if key != "error_code"}
+    )
     errors = result.get("errors")
     for error in errors if isinstance(errors, list) else []:
         child_code, child_status, child_pricing = _details(error)
@@ -156,21 +189,36 @@ def summarize_cli_failure(
         status = status if status is not None else child_status
         pricing |= child_pricing
     source = "cli-result"
-    if (code is None or status is None) and pid is not None and cwd is not None and started_at is not None:
+    if (
+        (code is None or status is None)
+        and pid is not None
+        and cwd is not None
+        and started_at is not None
+    ):
         extra_code, extra_status, extra_pricing = _matched_transport_details(
-            pid, session_id, cwd, started_at, log_root,
+            pid,
+            session_id,
+            cwd,
+            started_at,
+            log_root,
         )
         if extra_code is not None or extra_status is not None:
             code = code if code is not None else extra_code
             status = status if status is not None else extra_status
             pricing |= extra_pricing
             source = "cli-result-and-matched-transport-log"
-    if result_code in {105, 100401} or (result_code is None and exit_code == 41) or status == 401:
+    if (
+        result_code in {105, 100401}
+        or (result_code is None and exit_code == 41)
+        or status == 401
+    ):
         category = "authentication"
     elif result_code in {110, 113, 114, 115, 116, 117, 118, 119, 122}:
         category = "quota"
     elif pricing:
-        category = "billing_access_rejected" if status == 403 else "billing_check_required"
+        category = (
+            "billing_access_rejected" if status == 403 else "billing_check_required"
+        )
     elif status == 403 or result_code == 100403:
         category = "access_denied"
     elif result_code in {406, 416, 430, 48716, 80411, 80412} or exit_code in {42, 52}:
@@ -186,22 +234,34 @@ def summarize_cli_failure(
     )
     subtype = result.get("subtype")
     return {
-        "category": category, "result_error_code": result_code, "service_code": code, "http_status": status,
-        "result_subtype": subtype if isinstance(subtype, str) and subtype in {"success", "error_during_execution", "error_max_turns"} else "unknown",
+        "category": category,
+        "result_error_code": result_code,
+        "service_code": code,
+        "http_status": status,
+        "result_subtype": (
+            subtype
+            if isinstance(subtype, str)
+            and subtype in {"success", "error_during_execution", "error_max_turns"}
+            else "unknown"
+        ),
         "retryable": category == "transient_service",
         "requires_external_change": category in _ACCESS_BLOCKERS,
-        "action": _ACTIONS[category], "diagnostic_source": source,
+        "action": _ACTIONS[category],
+        "diagnostic_source": source,
         "zero_token_turn": zero_tokens,
     }
 
 
 def access_blocked(failure: Any) -> bool:
-    return (isinstance(failure, dict) and isinstance(failure.get("category"), str)
-            and failure["category"] in _ACCESS_BLOCKERS)
+    return (
+        isinstance(failure, dict)
+        and isinstance(failure.get("category"), str)
+        and failure["category"] in _ACCESS_BLOCKERS
+    )
 
 
 def compact_failure_signal(failure: Any) -> str:
-    """Rebuild from allowlisted enums/numbers, never interpolate raw error text."""
+    """只用允许的枚举值和数字重建简短信号，不插入原始错误文本。"""
     if not isinstance(failure, dict):
         return ""
     category = failure.get("category")
@@ -210,5 +270,7 @@ def compact_failure_signal(failure: Any) -> str:
     code = _number(failure.get("service_code"))
     result_code = _number(failure.get("result_error_code"))
     status = _number(failure.get("http_status"))
-    return (f"failure: category={category} result_error_code={result_code} service_code={code} http_status={status} "
-            f"retryable={str(category == 'transient_service').lower()} action={_ACTIONS[category]}")
+    return (
+        f"failure: category={category} result_error_code={result_code} service_code={code} http_status={status} "
+        f"retryable={str(category == 'transient_service').lower()} action={_ACTIONS[category]}"
+    )

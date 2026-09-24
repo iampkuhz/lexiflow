@@ -1,4 +1,5 @@
-"""Execute a caller-owned command with the selected Temurin 25 runtime."""
+"""在精确选定的 Temurin 25 下执行调用者指定的命令。"""
+
 from __future__ import annotations
 
 import os
@@ -9,18 +10,22 @@ from typing import Mapping, Sequence
 from scripts.environment.java_runtime import JavaRuntimeError, resolve_java_home
 
 
-def command_environment(root: Path, environ: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Return a child environment that puts the exact JDK first on PATH."""
+def command_environment(
+    root: Path, environ: Mapping[str, str] | None = None
+) -> dict[str, str]:
+    """构建子进程环境，仅把选定 JDK 放在 PATH 前面，不改父进程环境。"""
 
     source = dict(os.environ if environ is None else environ)
     java_home = resolve_java_home(root, source)
     source["JAVA_HOME"] = str(java_home)
-    source["PATH"] = os.pathsep.join([str(java_home / "bin"), source.get("PATH", "")]).rstrip(os.pathsep)
+    source["PATH"] = os.pathsep.join(
+        [str(java_home / "bin"), source.get("PATH", "")]
+    ).rstrip(os.pathsep)
     return source
 
 
 def main(arguments: Sequence[str] | None = None, *, root: Path | None = None) -> int:
-    """Replace this process with the caller-owned command under Temurin 25."""
+    """在完成 Temurin 25 选择后，以调用者命令替换当前进程。"""
 
     argv = list(sys.argv[1:] if arguments is None else arguments)
     if not argv:

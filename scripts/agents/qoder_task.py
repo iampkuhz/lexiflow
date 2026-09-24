@@ -38,10 +38,18 @@ if str(_REPO_ROOT) not in sys.path:
 
 from scripts.agents.qoder import lifecycle as _lifecycle  # noqa: E402
 from scripts.agents.qoder.failure_diagnostics import (  # noqa: E402
-    access_blocked, compact_failure_signal, summarize_cli_failure,
+    access_blocked,
+    compact_failure_signal,
+    summarize_cli_failure,
 )
-from scripts.agents.local_codex_runtime import CodexRuntimeError, discover as discover_codex_runtime  # noqa: E402
-from scripts.agents.contracts import dispatch_path_contains, dispatch_paths_intersect  # noqa: E402
+from scripts.agents.local_codex_runtime import (
+    CodexRuntimeError,
+    discover as discover_codex_runtime,
+)  # noqa: E402
+from scripts.agents.contracts import (
+    dispatch_path_contains,
+    dispatch_paths_intersect,
+)  # noqa: E402
 from scripts.agents import dispatch_fallback as _fallback  # noqa: E402
 
 REQUIRED_HANDOFF: tuple[str, ...] = (
@@ -80,7 +88,9 @@ RUNTIME_IDENTITY_FIELDS: tuple[str, ...] = (
 )
 
 DEFAULT_PERMISSION_MODE = "bypass_permissions"
-VALID_PERMISSION_MODES = frozenset({"default", "accept_edits", "dont_ask", DEFAULT_PERMISSION_MODE})
+VALID_PERMISSION_MODES = frozenset(
+    {"default", "accept_edits", "dont_ask", DEFAULT_PERMISSION_MODE}
+)
 MAX_PROMPT_CHARACTERS = 8000
 MIN_QODER_PACKAGE_MINUTES = 10
 MAX_QODER_PACKAGE_MINUTES = 360
@@ -110,7 +120,7 @@ _TERMINAL_COMPLETION_STATUSES = frozenset({"finished", "failed", "completed"})
 
 
 class FallbackRequired(ValueError):
-    """A native Terra dispatch is required; Python never invokes it."""
+    """需要原生 Codex fallback 派发；Python runner 不自行启动它。"""
 
     def __init__(self, route: dict[str, Any]):
         self.route = route
@@ -118,15 +128,17 @@ class FallbackRequired(ValueError):
 
 
 class BusyRoutingError(ValueError):
-    """A non-starting BUSY rejection with a safe, actionable ownership route."""
+    """未启动任务的 BUSY 拒绝，并携带安全且可执行的 owner 路由。"""
 
     def __init__(self, routing: dict[str, Any], message: str):
         super().__init__(message)
         self.routing = routing
 
 
-def _caller_identity(repo_root: Path | None, task: dict[str, Any] | None) -> dict[str, str | None]:
-    """Return only the caller fields permitted in a BUSY report."""
+def _caller_identity(
+    repo_root: Path | None, task: dict[str, Any] | None
+) -> dict[str, str | None]:
+    """仅返回 BUSY 报告允许的 caller 身份字段。"""
     session_id = task.get("parent_session_id") if isinstance(task, dict) else None
     return {
         "repo": str(repo_root.resolve()) if repo_root is not None else None,
@@ -134,19 +146,25 @@ def _caller_identity(repo_root: Path | None, task: dict[str, Any] | None) -> dic
     }
 
 
-def _current_caller_identity(repo_root: Path, task: dict[str, Any]) -> dict[str, str | None]:
-    """Use current Codex runtime provenance, never a historical run, for caller routing."""
+def _current_caller_identity(
+    repo_root: Path, task: dict[str, Any]
+) -> dict[str, str | None]:
+    """以当前 Codex 运行事实判定 caller 路由，不借用历史 run。"""
     if task.get("parent_client") != "codex":
         return _caller_identity(repo_root, None)
     try:
-        actual_session_id = discover_codex_runtime(repo_root).context["parent_session_id"]
+        actual_session_id = discover_codex_runtime(repo_root).context[
+            "parent_session_id"
+        ]
     except CodexRuntimeError:
-        # A missing trusted runtime can block dispatch later, but must never turn a
-        # caller declaration or saved resume task into a callback-wait authority.
+        # 可信运行时缺失可在后续阻止派发，但调用者声明或保存的 resume Task
+        # 绝不能变成等待 callback 的授权依据。
         return _caller_identity(repo_root, None)
     declared_session_id = task.get("parent_session_id")
     if declared_session_id is not None and declared_session_id != actual_session_id:
-        raise ValueError("caller parent_session_id conflicts with the current trusted Codex runtime")
+        raise ValueError(
+            "caller parent_session_id conflicts with the current trusted Codex runtime"
+        )
     return {"repo": str(repo_root.resolve()), "session_id": actual_session_id}
 
 
@@ -159,7 +177,7 @@ def _busy_routing(
     owner_run_id: str | None = None,
     detail: str,
 ) -> dict[str, Any]:
-    """Create the single safe BUSY shape; never expose another task's handoff."""
+    """构造唯一安全的 BUSY 形状，不暴露其他 Task 的 handoff。"""
     wait_for_callback = ownership == "same-session-trusted-inflight"
     return {
         "schema_version": "lexiflow.qoder-busy-routing.v1",
@@ -168,13 +186,20 @@ def _busy_routing(
         "caller": caller or {"repo": None, "session_id": None},
         "owner": {
             "repo": str(owner_repo.resolve()) if owner_repo is not None else None,
-            "session_id": owner_session_id if _is_valid_uuid(owner_session_id or "") else None,
-            "run_id": owner_run_id if isinstance(owner_run_id, str) and _ID_RE.fullmatch(owner_run_id) else None,
+            "session_id": (
+                owner_session_id if _is_valid_uuid(owner_session_id or "") else None
+            ),
+            "run_id": (
+                owner_run_id
+                if isinstance(owner_run_id, str) and _ID_RE.fullmatch(owner_run_id)
+                else None
+            ),
         },
         "ownership": ownership,
         "next_action": (
             "end-current-turn-await-callback"
-            if wait_for_callback else "fallback-to-codex-subagent"
+            if wait_for_callback
+            else "fallback-to-codex-subagent"
         ),
         "detail": detail,
     }
@@ -250,7 +275,9 @@ def _check_qoder_idle(*, caller: dict[str, str | None] | None = None) -> None:
     pids = []
     for line in processes.splitlines():
         fields = line.strip().split(None, 1)
-        if len(fields) == 2 and re.fullmatch(r"qodercli(?:-\d[\w.-]*)?", Path(fields[1].split(None, 1)[0]).name):
+        if len(fields) == 2 and re.fullmatch(
+            r"qodercli(?:-\d[\w.-]*)?", Path(fields[1].split(None, 1)[0]).name
+        ):
             pids.append(fields[0])
     if pids:
         raise _busy_error(
@@ -261,12 +288,19 @@ def _check_qoder_idle(*, caller: dict[str, str | None] | None = None) -> None:
 
 
 def _matches_live_qoder_session(pid: int, session_id: str) -> bool:
-    """Prove the recorded PID is the expected Qoder CLI/session without exposing argv."""
-    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0 or not _is_valid_uuid(session_id):
+    """核对所记 PID 是预期的 Qoder CLI 与 Session，不泄露 argv。"""
+    if (
+        isinstance(pid, bool)
+        or not isinstance(pid, int)
+        or pid <= 0
+        or not _is_valid_uuid(session_id)
+    ):
         return False
     try:
         output = subprocess.check_output(
-            ["ps", "-p", str(pid), "-o", "pid=,comm=,args="], text=True, timeout=5,
+            ["ps", "-p", str(pid), "-o", "pid=,comm=,args="],
+            text=True,
+            timeout=5,
         )
         fields = output.strip().split(None, 2)
         if len(fields) != 3 or fields[0] != str(pid):
@@ -297,7 +331,9 @@ def _is_non_empty_text_list(value: Any) -> bool:
     )
 
 
-def _validate_task(task: dict[str, Any], *, runtime_bound: bool = False) -> dict[str, Any]:
+def _validate_task(
+    task: dict[str, Any], *, runtime_bound: bool = False
+) -> dict[str, Any]:
     """校验 caller handoff；落盘前再校验 runner 绑定的身份。"""
     if not isinstance(task, dict):
         raise ValueError("task must be a JSON object")
@@ -320,7 +356,11 @@ def _validate_task(task: dict[str, Any], *, runtime_bound: bool = False) -> dict
         if not _is_non_empty_text_list(task[field]):
             raise ValueError(f"handoff field {field!r} must be a non-empty text list")
     task_version = task["task_version"]
-    if isinstance(task_version, bool) or not isinstance(task_version, int) or task_version <= 0:
+    if (
+        isinstance(task_version, bool)
+        or not isinstance(task_version, int)
+        or task_version <= 0
+    ):
         raise ValueError("task_version must be a positive integer")
     change_version = task["change_version"]
     if not isinstance(change_version, str) or not _SEMVER_RE.fullmatch(change_version):
@@ -330,7 +370,9 @@ def _validate_task(task: dict[str, Any], *, runtime_bound: bool = False) -> dict
         not isinstance(task_ids, list)
         or len(task_ids) < MIN_QODER_PACKAGE_TASKS
         or len(task_ids) != len(set(task_ids))
-        or not all(isinstance(item, str) and _ID_RE.fullmatch(item) for item in task_ids)
+        or not all(
+            isinstance(item, str) and _ID_RE.fullmatch(item) for item in task_ids
+        )
     ):
         raise ValueError(
             f"task_ids must contain at least {MIN_QODER_PACKAGE_TASKS} unique stable IDs"
@@ -342,9 +384,13 @@ def _validate_task(task: dict[str, Any], *, runtime_bound: bool = False) -> dict
         if not isinstance(versions, dict) or set(versions) != set(task_ids):
             raise ValueError(f"{field} keys must exactly equal task_ids")
         for value in versions.values():
-            if version_type is int and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
+            if version_type is int and (
+                isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            ):
                 raise ValueError(f"{field} values must be positive integers")
-            if version_type is str and (not isinstance(value, str) or not _SEMVER_RE.fullmatch(value)):
+            if version_type is str and (
+                not isinstance(value, str) or not _SEMVER_RE.fullmatch(value)
+            ):
                 raise ValueError(f"{field} values must be exact SemVer strings")
     if task["task_versions"].get(task["task_id"]) != task_version:
         raise ValueError("anchor task_version must match task_versions")
@@ -363,16 +409,21 @@ def _validate_task(task: dict[str, Any], *, runtime_bound: bool = False) -> dict
         raise ValueError("work_package_id contains invalid characters")
     if not _ID_RE.fullmatch(task["agent_profile"]):
         raise ValueError("agent_profile contains invalid characters")
-    if "title" in task and (not isinstance(task["title"], str) or not task["title"].strip()):
+    if "title" in task and (
+        not isinstance(task["title"], str) or not task["title"].strip()
+    ):
         raise ValueError("title must be a non-empty string")
     if "task_id" in task:
-        if not isinstance(task["task_id"], str) or not _ID_RE.fullmatch(task["task_id"]):
+        if not isinstance(task["task_id"], str) or not _ID_RE.fullmatch(
+            task["task_id"]
+        ):
             raise ValueError("task_id contains invalid characters")
     if not runtime_bound:
         supplied = sorted(field for field in RUNTIME_IDENTITY_FIELDS if field in task)
         if supplied:
             raise ValueError(
-                "start task must omit runner-bound identity fields: " + ", ".join(supplied)
+                "start task must omit runner-bound identity fields: "
+                + ", ".join(supplied)
             )
     else:
         agent_id = task.get("agent_id", "")
@@ -399,7 +450,9 @@ def _validate_task(task: dict[str, Any], *, runtime_bound: bool = False) -> dict
             raise ValueError("parent_session_id must be a string")
     if runtime_bound:
         parent_session_id = task.get("parent_session_id", "")
-        if not isinstance(parent_session_id, str) or not _is_valid_uuid(parent_session_id):
+        if not isinstance(parent_session_id, str) or not _is_valid_uuid(
+            parent_session_id
+        ):
             raise ValueError("codex parent_session_id must be bound to a UUID")
     task.setdefault("permission_mode", DEFAULT_PERMISSION_MODE)
     return task
@@ -429,13 +482,19 @@ def _sha256(path: Path) -> str:
 
 
 def _validate_harness_manifest(
-    task: dict[str, Any], repo_root: Path, *, catalog_package: dict[str, Any] | None = None,
+    task: dict[str, Any],
+    repo_root: Path,
+    *,
+    catalog_package: dict[str, Any] | None = None,
     allow_qodercli_unavailable: bool = False,
 ) -> dict[str, Any]:
     """启动前验证 Qoder 真正可见且可执行的上下文、角色、工具和命令。"""
     path = _repo_regular_file(repo_root, task["harness_manifest"])
     manifest = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(manifest, dict) or manifest.get("schema_version") != "lexiflow.qoder-harness.v1":
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schema_version") != "lexiflow.qoder-harness.v1"
+    ):
         raise ValueError("invalid Qoder harness manifest schema")
     identity = manifest.get("identity")
     expected_identity = {
@@ -457,7 +516,9 @@ def _validate_harness_manifest(
             raise ValueError("invalid Qoder harness context entry")
         context_path = _repo_regular_file(repo_root, entry["path"])
         if entry["path"] in seen or _sha256(context_path) != entry["sha256"]:
-            raise ValueError(f"Qoder harness context missing, duplicate, or stale: {entry['path']}")
+            raise ValueError(
+                f"Qoder harness context missing, duplicate, or stale: {entry['path']}"
+            )
         seen.add(entry["path"])
     mandatory = {
         "AGENTS.md",
@@ -466,32 +527,54 @@ def _validate_harness_manifest(
         "harness/agent-policy.manifest.yaml",
     }
     if not mandatory.issubset(seen):
-        raise ValueError("Qoder harness context is missing mandatory project policy or catalog files")
+        raise ValueError(
+            "Qoder harness context is missing mandatory project policy or catalog files"
+        )
     catalog = catalog_package
     context_hashes = {entry["path"]: entry["sha256"] for entry in required_context}
-    if catalog is not None and catalog["catalog_sha256"] != context_hashes.get("planning/workstreams.yaml"):
+    if catalog is not None and catalog["catalog_sha256"] != context_hashes.get(
+        "planning/workstreams.yaml"
+    ):
         raise ValueError("Qoder catalog changed after package normalization")
     commands = manifest.get("validation_commands")
     if not isinstance(commands, list) or not commands:
         raise ValueError("Qoder harness validation_commands must be non-empty")
     for command in commands:
-        if not isinstance(command, dict) or set(command) != {"argv", "cwd", "timeout_seconds"}:
+        if not isinstance(command, dict) or set(command) != {
+            "argv",
+            "cwd",
+            "timeout_seconds",
+        }:
             raise ValueError("invalid Qoder validation command")
         argv, cwd, timeout = command["argv"], command["cwd"], command["timeout_seconds"]
-        if not isinstance(argv, list) or not argv or not all(isinstance(v, str) and v for v in argv):
+        if (
+            not isinstance(argv, list)
+            or not argv
+            or not all(isinstance(v, str) and v for v in argv)
+        ):
             raise ValueError("Qoder validation argv must be a non-empty string array")
         if cwd != ".":
             raise ValueError("Qoder validation cwd must be the repository root")
-        if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 3600:
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, int)
+            or not 1 <= timeout <= 3600
+        ):
             raise ValueError("Qoder validation timeout_seconds must be 1-3600")
         executable = argv[0]
         if "/" in executable:
             try:
-                candidate = _repo_regular_file(repo_root, (Path(cwd) / executable).as_posix())
+                candidate = _repo_regular_file(
+                    repo_root, (Path(cwd) / executable).as_posix()
+                )
             except ValueError:
-                raise ValueError(f"Qoder validation executable unavailable: {executable}") from None
+                raise ValueError(
+                    f"Qoder validation executable unavailable: {executable}"
+                ) from None
             if not os.access(candidate, os.X_OK):
-                raise ValueError(f"Qoder validation executable unavailable: {executable}")
+                raise ValueError(
+                    f"Qoder validation executable unavailable: {executable}"
+                )
         elif shutil.which(executable) is None:
             raise ValueError(f"Qoder validation executable unavailable: {executable}")
     if catalog is None:
@@ -500,30 +583,50 @@ def _validate_harness_manifest(
         except ValueError as exc:
             raise ValueError("Qoder validation command malformed") from exc
     else:
-        expected = list(dict.fromkeys(tuple(argv) for argv in catalog["validation_argv_by_task"].values()))
+        expected = list(
+            dict.fromkeys(
+                tuple(argv) for argv in catalog["validation_argv_by_task"].values()
+            )
+        )
     observed = [tuple(command["argv"]) for command in commands]
     if observed != expected:
-        raise ValueError("Qoder validation commands must exactly cover unique current Task argv in package order")
+        raise ValueError(
+            "Qoder validation commands must exactly cover unique current Task argv in package order"
+        )
     tools = manifest.get("required_tools")
     if not isinstance(tools, list) or not tools:
         raise ValueError("Qoder harness required_tools must be non-empty")
     for tool in tools:
         if not isinstance(tool, dict) or set(tool) != {
-            "name", "probe_argv", "expected_output_regex", "timeout_seconds"
+            "name",
+            "probe_argv",
+            "expected_output_regex",
+            "timeout_seconds",
         }:
             raise ValueError("invalid required Qoder tool probe")
         argv = tool["probe_argv"]
-        if not isinstance(argv, list) or not argv or not all(isinstance(v, str) and v for v in argv):
+        if (
+            not isinstance(argv, list)
+            or not argv
+            or not all(isinstance(v, str) and v for v in argv)
+        ):
             raise ValueError("Qoder tool probe argv must be a non-empty string array")
         timeout = tool["timeout_seconds"]
         if not isinstance(tool["name"], str) or not tool["name"]:
             raise ValueError("Qoder tool probe name must be non-empty")
-        if not isinstance(tool["expected_output_regex"], str) or not tool["expected_output_regex"]:
+        if (
+            not isinstance(tool["expected_output_regex"], str)
+            or not tool["expected_output_regex"]
+        ):
             raise ValueError("Qoder tool probe expected_output_regex must be non-empty")
-        if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 30:
+        if (
+            isinstance(timeout, bool)
+            or not isinstance(timeout, int)
+            or not 1 <= timeout <= 30
+        ):
             raise ValueError("Qoder tool probe timeout_seconds must be 1-30")
-        # The native fallback is allowed only for the Qoder executable itself.
-        # All other harness capabilities remain mandatory safety contracts.
+        # 原生 fallback 仅适用于 Qoder 可执行文件本身；其他 Harness 能力仍是
+        # 必需的安全合同。
         if allow_qodercli_unavailable and tool["name"] == "qodercli":
             continue
         try:
@@ -536,9 +639,14 @@ def _validate_harness_manifest(
                 check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
-            raise ValueError(f"required Qoder tool unavailable: {tool['name']}") from exc
+            raise ValueError(
+                f"required Qoder tool unavailable: {tool['name']}"
+            ) from exc
         output = probe.stdout + "\n" + probe.stderr
-        if probe.returncode != 0 or re.search(tool["expected_output_regex"], output) is None:
+        if (
+            probe.returncode != 0
+            or re.search(tool["expected_output_regex"], output) is None
+        ):
             raise ValueError(f"required Qoder tool probe failed: {tool['name']}")
     validated = dict(manifest)
     validated["_manifest_sha256"] = _sha256(path)
@@ -553,7 +661,9 @@ def _catalog_scope_items(value: Any, field: str) -> list[str]:
         items = [item.strip() for item in value.split(",")]
     else:
         raise ValueError(f"{field} must be a path list or comma-separated path string")
-    if not items or any(not isinstance(item, str) or not item.strip() for item in items):
+    if not items or any(
+        not isinstance(item, str) or not item.strip() for item in items
+    ):
         raise ValueError(f"{field} must contain non-empty paths")
     normalized = [item.strip() for item in items]
     if len(normalized) != len(set(normalized)):
@@ -568,20 +678,28 @@ def _catalog_scope_items(value: Any, field: str) -> list[str]:
 def _validate_catalog_package(task: dict[str, Any], repo_root: Path) -> dict[str, Any]:
     """用当前 catalog 证明 Qoder 工作包的真实规模、owner、版本与写域。"""
     if task["task_source"] != "planning/workstreams.yaml":
-        raise ValueError("Qoder work package task_source must be planning/workstreams.yaml")
+        raise ValueError(
+            "Qoder work package task_source must be planning/workstreams.yaml"
+        )
     catalog_path = _repo_regular_file(repo_root, task["task_source"])
     catalog = yaml.safe_load(catalog_path.read_text(encoding="utf-8"))
-    if not isinstance(catalog, dict) or not isinstance(catalog.get("workstreams"), list):
+    if not isinstance(catalog, dict) or not isinstance(
+        catalog.get("workstreams"), list
+    ):
         raise ValueError("invalid workstream catalog")
     records: dict[str, tuple[str, dict[str, Any]]] = {}
     for workstream in catalog["workstreams"]:
-        if not isinstance(workstream, dict) or not isinstance(workstream.get("id"), str):
+        if not isinstance(workstream, dict) or not isinstance(
+            workstream.get("id"), str
+        ):
             raise ValueError("invalid workstream catalog owner")
         owner = workstream["id"]
         for epic in workstream.get("epics", []):
             for capability in epic.get("capabilities", []):
                 for record in capability.get("seed_tasks", []):
-                    if not isinstance(record, dict) or not isinstance(record.get("id"), str):
+                    if not isinstance(record, dict) or not isinstance(
+                        record.get("id"), str
+                    ):
                         raise ValueError("invalid workstream catalog task")
                     task_id = record["id"]
                     if task_id in records:
@@ -613,12 +731,16 @@ def _validate_catalog_package(task: dict[str, Any], repo_root: Path) -> dict[str
         total_minutes += minutes
         for field in ("acceptance_criteria", "acceptance_evidence"):
             if not _is_non_empty_text_list(record.get(field)):
-                raise ValueError(f"Qoder catalog {field} must be a non-empty text list: {task_id}")
+                raise ValueError(
+                    f"Qoder catalog {field} must be a non-empty text list: {task_id}"
+                )
         criteria_count += len(record["acceptance_criteria"])
         evidence_count += len(record["acceptance_evidence"])
         command = record.get("validation_command")
         if not isinstance(command, str) or not command.strip():
-            raise ValueError(f"Qoder validation command missing from catalog: {task_id}")
+            raise ValueError(
+                f"Qoder validation command missing from catalog: {task_id}"
+            )
         try:
             argv = shlex.split(command)
         except ValueError as exc:
@@ -626,18 +748,31 @@ def _validate_catalog_package(task: dict[str, Any], repo_root: Path) -> dict[str
         if not argv or any(not argument for argument in argv):
             raise ValueError(f"Qoder validation argv invalid: {task_id}")
         validation_argv_by_task[task_id] = argv
-        allowed = _catalog_scope_items(record.get("allowed_files"), f"catalog[{task_id}].allowed_files")
-        forbidden = _catalog_scope_items(record.get("forbidden_files"), f"catalog[{task_id}].forbidden_files")
+        allowed = _catalog_scope_items(
+            record.get("allowed_files"), f"catalog[{task_id}].allowed_files"
+        )
+        forbidden = _catalog_scope_items(
+            record.get("forbidden_files"), f"catalog[{task_id}].forbidden_files"
+        )
         claims = record.get("file_claims")
         if not isinstance(claims, list) or not claims:
             raise ValueError(f"Qoder catalog file_claims are missing: {task_id}")
         normalized_claims: list[tuple[str, str, str]] = []
         for index, claim in enumerate(claims):
             if not isinstance(claim, dict) or set(claim) != {"path", "mode", "owner"}:
-                raise ValueError(f"Qoder catalog file_claim invalid: {task_id}[{index}]")
-            _catalog_scope_items([claim["path"]], f"catalog[{task_id}].file_claims[{index}].path")
-            if claim["mode"] not in {"read", "write"} or claim["owner"] != task["primary_owner"]:
-                raise ValueError(f"Qoder catalog file_claim invalid: {task_id}[{index}]")
+                raise ValueError(
+                    f"Qoder catalog file_claim invalid: {task_id}[{index}]"
+                )
+            _catalog_scope_items(
+                [claim["path"]], f"catalog[{task_id}].file_claims[{index}].path"
+            )
+            if (
+                claim["mode"] not in {"read", "write"}
+                or claim["owner"] != task["primary_owner"]
+            ):
+                raise ValueError(
+                    f"Qoder catalog file_claim invalid: {task_id}[{index}]"
+                )
             if not any(dispatch_path_contains(path, claim["path"]) for path in allowed):
                 raise ValueError(f"Qoder catalog claim outside Task scope: {task_id}")
             normalized_claims.append((claim["path"], claim["mode"], claim["owner"]))
@@ -652,12 +787,22 @@ def _validate_catalog_package(task: dict[str, Any], repo_root: Path) -> dict[str
             f"Qoder estimated_minutes must equal catalog task sum: {total_minutes}"
         )
     if criteria_count < 4 or evidence_count < 3:
-        raise ValueError("large Qoder package requires at least 4 catalog criteria and 3 catalog evidence items")
-    if any(dispatch_paths_intersect(allow, deny) for allow in package_allowed for deny in package_forbidden):
+        raise ValueError(
+            "large Qoder package requires at least 4 catalog criteria and 3 catalog evidence items"
+        )
+    if any(
+        dispatch_paths_intersect(allow, deny)
+        for allow in package_allowed
+        for deny in package_forbidden
+    ):
         raise ValueError("Qoder package catalog allowed/forbidden scopes intersect")
-    if _catalog_scope_items(task["allowed_files"], "allowed_files") != sorted(package_allowed):
+    if _catalog_scope_items(task["allowed_files"], "allowed_files") != sorted(
+        package_allowed
+    ):
         raise ValueError("Qoder allowed_files must equal the derived catalog scope")
-    if _catalog_scope_items(task["forbidden_files"], "forbidden_files") != sorted(package_forbidden):
+    if _catalog_scope_items(task["forbidden_files"], "forbidden_files") != sorted(
+        package_forbidden
+    ):
         raise ValueError("Qoder forbidden_files must equal the derived catalog scope")
 
     anchor = records[task["task_id"]][1]
@@ -677,12 +822,24 @@ def _validate_catalog_package(task: dict[str, Any], repo_root: Path) -> dict[str
         "criteria_count": criteria_count,
         "evidence_count": evidence_count,
         "validation_argv_by_task": validation_argv_by_task,
-        "package_file_claims": [{"path": path, "mode": mode, "owner": owner} for path, mode, owner in sorted(package_claims)],
-        "task_scopes": {record["id"]: {"allowed_files": record["allowed_files"], "forbidden_files": record["forbidden_files"], "file_claims": record["file_claims"]} for record in package_records},
+        "package_file_claims": [
+            {"path": path, "mode": mode, "owner": owner}
+            for path, mode, owner in sorted(package_claims)
+        ],
+        "task_scopes": {
+            record["id"]: {
+                "allowed_files": record["allowed_files"],
+                "forbidden_files": record["forbidden_files"],
+                "file_claims": record["file_claims"],
+            }
+            for record in package_records
+        },
     }
 
 
-def _resolve_catalog_package(task: dict[str, Any], repo_root: Path) -> dict[str, Any] | None:
+def _resolve_catalog_package(
+    task: dict[str, Any], repo_root: Path
+) -> dict[str, Any] | None:
     """尽力使用 Catalog 增强核对；自包含 handoff 不因其缺失或漂移而失去派发资格。"""
     try:
         return _validate_catalog_package(task, repo_root)
@@ -695,11 +852,11 @@ def _check_no_symlink_ancestors(path: Path) -> None:
     abs_path = path.absolute()
     for component in [abs_path, *abs_path.parents]:
         if component.is_symlink():
-            # macOS exposes the physical temporary hierarchy through the
-            # system-owned `/var` compatibility alias.  It is above every
-            # caller-selected repository root, so reject no repository
-            # descendant less strictly merely because this host alias exists.
-            if component == Path("/var") and component.resolve() == Path("/private/var"):
+            # macOS 通过系统拥有的 `/var` 兼容别名暴露物理临时目录。该别名位于
+            # 所有调用者选择的仓库根之上；不能因此放宽对仓库后代路径的拒绝规则。
+            if component == Path("/var") and component.resolve() == Path(
+                "/private/var"
+            ):
                 continue
             raise ValueError(f"symlink in path: {component}")
 
@@ -715,7 +872,9 @@ def _task_dir(repo_root: Path) -> Path:
         try:
             td.resolve().relative_to(repo_root.resolve())
         except ValueError:
-            raise ValueError(f"QODER_TASK_DIR must be inside repo: {override}") from None
+            raise ValueError(
+                f"QODER_TASK_DIR must be inside repo: {override}"
+            ) from None
         return td
     default = repo_root / "tmp" / "qoder-tasks"
     _check_no_symlink_ancestors(default)
@@ -735,7 +894,9 @@ def _ensure_task_dir(task_dir: Path) -> None:
 
 
 @contextmanager
-def _host_lease(*, create: bool = True, caller: dict[str, str | None] | None = None, busy_probe=None):
+def _host_lease(
+    *, create: bool = True, caller: dict[str, str | None] | None = None, busy_probe=None
+):
     """同一用户所有 checkout 共用；只 close，不 LOCK_UN 解开子进程继承的锁。"""
     path = _host_lock_path()
     _check_no_symlink_ancestors(path)
@@ -744,10 +905,18 @@ def _host_lease(*, create: bool = True, caller: dict[str, str | None] | None = N
         return
     if create:
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK | (os.O_CREAT if create else 0), 0o600)
+    fd = os.open(
+        path,
+        os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK | (os.O_CREAT if create else 0),
+        0o600,
+    )
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o022:
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_mode & 0o022
+        ):
             raise ValueError("unsafe host Qoder lease file")
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -768,7 +937,7 @@ def _host_lease(*, create: bool = True, caller: dict[str, str | None] | None = N
 
 
 def _host_lock_path() -> Path:
-    # Deliberately independent of cwd, CODEX_HOME and task package identity.
+    # 刻意独立于 cwd、CODEX_HOME 和 Task 包身份。
     return Path.home() / ".cache" / "lexiflow" / "qoder-cli.lock"
 
 
@@ -783,9 +952,13 @@ def _verify_inherited_lease(fd: int) -> None:
     actual, expected = os.fstat(fd), path.stat()
     if (actual.st_dev, actual.st_ino) != (expected.st_dev, expected.st_ino):
         raise ValueError("worker did not inherit the host Qoder lease")
-    if not stat.S_ISREG(actual.st_mode) or actual.st_uid != os.getuid() or actual.st_mode & 0o022:
+    if (
+        not stat.S_ISREG(actual.st_mode)
+        or actual.st_uid != os.getuid()
+        or actual.st_mode & 0o022
+    ):
         raise ValueError("unsafe inherited Qoder lease")
-    # An unlocked forged descriptor cannot override an existing holder.
+    # 未持锁的伪造描述符不能覆盖现有持有者。
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
@@ -848,7 +1021,11 @@ def _verify_terminal_completion(run_dir: Path) -> tuple[bool, str]:
         if not isinstance(value, str) or not value or not _ID_RE.fullmatch(value):
             return False, f"completion {field} is invalid"
     task_version = completion.get("task_version")
-    if isinstance(task_version, bool) or not isinstance(task_version, int) or task_version <= 0:
+    if (
+        isinstance(task_version, bool)
+        or not isinstance(task_version, int)
+        or task_version <= 0
+    ):
         return False, "completion task_version is invalid"
     change_version = completion.get("change_version", "")
     if not isinstance(change_version, str) or not _SEMVER_RE.fullmatch(change_version):
@@ -859,14 +1036,17 @@ def _verify_terminal_completion(run_dir: Path) -> tuple[bool, str]:
 
 
 def _trusted_inflight_owner(run_dir: Path) -> tuple[str | None, str | None]:
-    """Read only runner metadata needed to prove a live same-session owner."""
+    """仅读取证明同 Session 活跃 owner 所需的 runner 元数据。"""
     try:
         task = _safe_read_json(run_dir / "task.json")
         _validate_task(task, runtime_bound=True)
         if task.get("run_id") != run_dir.name or task.get("client") != "qoder":
             return None, None
         continuation = _safe_read_json(run_dir / "continuation.json")
-        if continuation.get("run_id") != run_dir.name or continuation.get("state") != "AWAITING_CALLBACK":
+        if (
+            continuation.get("run_id") != run_dir.name
+            or continuation.get("state") != "AWAITING_CALLBACK"
+        ):
             return None, None
         started = _safe_read_json(_lifecycle.started_path(run_dir))
         pid = started.get("pid")
@@ -879,7 +1059,9 @@ def _trusted_inflight_owner(run_dir: Path) -> tuple[str | None, str | None]:
         ):
             return None, None
         parent_session_id = task.get("parent_session_id")
-        if task.get("parent_client") != "codex" or not _is_valid_uuid(parent_session_id):
+        if task.get("parent_client") != "codex" or not _is_valid_uuid(
+            parent_session_id
+        ):
             return None, None
         return parent_session_id, run_dir.name
     except (OSError, ValueError, json.JSONDecodeError, TypeError):
@@ -893,7 +1075,7 @@ def _unfinished_run_error(
     caller: dict[str, str | None] | None,
     repo_root: Path | None,
 ) -> BusyRoutingError:
-    """Classify local metadata without treating a PID or stale file as ownership proof."""
+    """分类本地元数据，不把 PID 或陈旧文件当作 owner 证明。"""
     if reason == "terminal callback not consumed/acknowledged":
         return _busy_error(
             caller,
@@ -936,44 +1118,63 @@ def _assert_no_unfinished_runs(
     caller: dict[str, str | None] | None = None,
     repo_root: Path | None = None,
 ) -> None:
-    """Block every unverified run, waiting only for a proven same-session live owner."""
+    """阻止任何未验证 run；仅对已证明的同 Session 活跃 owner 等待 callback。"""
     for entry in sorted(task_dir.iterdir(), key=lambda item: item.name):
         if entry.name == _DISPATCH_LOCK_FILE:
             continue
         if entry.is_symlink():
             raise _unfinished_run_error(
-                entry, "symlink run directory", caller=caller, repo_root=repo_root,
+                entry,
+                "symlink run directory",
+                caller=caller,
+                repo_root=repo_root,
             )
         if not entry.is_dir():
             continue
         verified, reason = _verify_terminal_completion(entry)
         if not verified:
-            raise _unfinished_run_error(entry, reason, caller=caller, repo_root=repo_root)
+            raise _unfinished_run_error(
+                entry, reason, caller=caller, repo_root=repo_root
+            )
         continuation_path = entry / "continuation.json"
         if continuation_path.exists():
             try:
-                awaiting_callback = _safe_read_json(continuation_path).get("state") == "AWAITING_CALLBACK"
+                awaiting_callback = (
+                    _safe_read_json(continuation_path).get("state")
+                    == "AWAITING_CALLBACK"
+                )
             except (OSError, ValueError, json.JSONDecodeError, TypeError):
                 raise _unfinished_run_error(
-                    entry, "continuation unreadable", caller=caller, repo_root=repo_root,
+                    entry,
+                    "continuation unreadable",
+                    caller=caller,
+                    repo_root=repo_root,
                 ) from None
             if awaiting_callback and not _lifecycle.ack_path(entry).exists():
                 raise _unfinished_run_error(
-                    entry, "terminal callback not consumed/acknowledged", caller=caller, repo_root=repo_root,
+                    entry,
+                    "terminal callback not consumed/acknowledged",
+                    caller=caller,
+                    repo_root=repo_root,
                 )
 
 
 @contextmanager
 def _dispatch_lease(
-    task_dir: Path, *, caller: dict[str, str | None], repo_root: Path,
+    task_dir: Path,
+    *,
+    caller: dict[str, str | None],
+    repo_root: Path,
 ):
-    """Classify local ownership before and during the host-lease critical section."""
+    """在宿主 lease 临界区前后复核本地 owner，避免并发派发。"""
     with _dispatch_lock(task_dir, caller=caller):
         _assert_no_unfinished_runs(task_dir, caller=caller, repo_root=repo_root)
         with _host_lease(
             caller=caller,
             busy_probe=lambda: _assert_no_unfinished_runs(
-                task_dir, caller=caller, repo_root=repo_root,
+                task_dir,
+                caller=caller,
+                repo_root=repo_root,
             ),
         ) as lease_fd:
             _assert_no_unfinished_runs(task_dir, caller=caller, repo_root=repo_root)
@@ -981,7 +1182,7 @@ def _dispatch_lease(
 
 
 def _completed_runs(task_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
-    """Read runner completion metadata, not prompts or private sessions."""
+    """仅读取 runner completion 元数据，不读取 Prompt 或私有 Session。"""
     records = []
     for directory in task_dir.iterdir():
         if directory.is_symlink() or not directory.is_dir():
@@ -992,8 +1193,10 @@ def _completed_runs(task_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
     return records
 
 
-def _assert_dispatch_budget(task_dir: Path, task: dict[str, Any], *, correction: bool) -> None:
-    """An anchor/package/version change cannot reset a stable Task's budget."""
+def _assert_dispatch_budget(
+    task_dir: Path, task: dict[str, Any], *, correction: bool
+) -> None:
+    """稳定 Task 的派发预算不能通过修改 anchor、package 或版本重置。"""
     counts = dict.fromkeys(task["task_ids"], 0)
     for directory, completion in _completed_runs(task_dir):
         if _completion_proves_qoder_no_start(directory, completion):
@@ -1015,37 +1218,44 @@ def _assert_dispatch_budget(task_dir: Path, task: dict[str, Any], *, correction:
                 "不得用新同义 Task 重置 Qoder 尝试次数。"
             )
         else:
-            instruction = "该 Task 已使用首次 Qoder 尝试；若需一次纠正，请使用显式 resume。"
+            instruction = (
+                "该 Task 已使用首次 Qoder 尝试；若需一次纠正，请使用显式 resume。"
+            )
         raise ValueError(f"ATTEMPT_BUDGET: {', '.join(blocked[:3])}。{instruction}")
 
 
-def _completion_proves_qoder_no_start(directory: Path, completion: dict[str, Any]) -> bool:
-    """Exclude only new runner records that prove qodercli never obtained a PID.
-
-    Legacy/malformed records intentionally still count: absence of a started record is
-    not evidence that an earlier runner did not execute.
-    """
+def _completion_proves_qoder_no_start(
+    directory: Path, completion: dict[str, Any]
+) -> bool:
+    """仅排除有 runner 证据表明 qodercli 未取得 PID 的新记录；旧或畸形记录不能推断为未启动。"""
     started = _lifecycle.started_path(directory)
-    return (completion.get("status") == "failed"
-            and completion.get("run_id") == directory.name
-            and completion.get("qoder_dispatch_outcome") == "not-started"
-            and not started.exists() and not started.is_symlink())
+    return (
+        completion.get("status") == "failed"
+        and completion.get("run_id") == directory.name
+        and completion.get("qoder_dispatch_outcome") == "not-started"
+        and not started.exists()
+        and not started.is_symlink()
+    )
 
 
 def _assert_runtime_recovery(task_dir: Path, *, confirmed: bool) -> str | None:
-    """Do not silently allocate another session after an account/access denial."""
+    """账号或访问被拒后，不静默分配新 Session；需要可核验的恢复事实。"""
     records = _completed_runs(task_dir)
     if not records:
         return
-    records.sort(key=lambda item: (item[0] / "completion.json").stat().st_mtime_ns, reverse=True)
+    records.sort(
+        key=lambda item: (item[0] / "completion.json").stat().st_mtime_ns, reverse=True
+    )
     for directory, completion in records:
         if completion.get("status") in {"finished", "completed"}:
             return None
         failure = completion.get("failure")
         if not isinstance(failure, dict):
-            failure = summarize_cli_failure(directory / "stdout.log", completion.get("exit_code", 1))
+            failure = summarize_cli_failure(
+                directory / "stdout.log", completion.get("exit_code", 1)
+            )
         if not access_blocked(failure):
-            # A startup/network/unknown failure is not proof that account access recovered.
+            # 启动、网络或未知失败不能证明账号访问已经恢复。
             continue
         if not confirmed:
             raise ValueError(
@@ -1069,7 +1279,9 @@ def _cleanup_unspawned_run(run_dir: Path) -> None:
     run_dir.rmdir()
 
 
-def _write_worker_spawn_failure(run_dir: Path, task: dict[str, Any], exc: OSError) -> None:
+def _write_worker_spawn_failure(
+    run_dir: Path, task: dict[str, Any], exc: OSError
+) -> None:
     """将 worker spawn 失败持久化为可验证终态。"""
     completion = _build_completion(
         task,
@@ -1080,10 +1292,15 @@ def _write_worker_spawn_failure(run_dir: Path, task: dict[str, Any], exc: OSErro
         qoder_dispatch_outcome="not-started",
     )
     _atomic_write_json(run_dir / "completion.json", completion)
-    _atomic_write_json(run_dir / "continuation.json", {
-        "schema_version": "lexiflow.qoder-continuation.v1", "run_id": run_dir.name,
-        "state": "DISPATCH_FAILED", "next_action": "inspect-dispatch-error",
-    })
+    _atomic_write_json(
+        run_dir / "continuation.json",
+        {
+            "schema_version": "lexiflow.qoder-continuation.v1",
+            "run_id": run_dir.name,
+            "state": "DISPATCH_FAILED",
+            "next_action": "inspect-dispatch-error",
+        },
+    )
 
 
 def _atomic_write_json(path: Path, data: dict[str, Any], mode: int = 0o600) -> None:
@@ -1112,7 +1329,7 @@ def _safe_read_json(path: Path) -> dict[str, Any]:
 
 
 def _result_template(task: dict[str, Any]) -> dict[str, Any]:
-    """Return a run-bound starting shape, never a claimed execution result."""
+    """返回与 run 绑定的初始结构，不冒充执行结果。"""
     return {
         "schema_version": "lexiflow.qoder-work-package-result.v1",
         "status": "BLOCKED",
@@ -1147,7 +1364,8 @@ def _build_prompt(task: dict[str, Any]) -> str:
         f"Agent profile: {task['agent_profile']}",
         f"Harness manifest: {task['harness_manifest']}",
         f"Harness manifest SHA-256: {task.get('harness_manifest_sha256', '<runner-bound>')}",
-        "Frozen harness context: " + json.dumps(task.get("harness_context", []), ensure_ascii=False),
+        "Frozen harness context: "
+        + json.dumps(task.get("harness_context", []), ensure_ascii=False),
         "Read every task record named in task_ids from the hash-bound planning/workstreams.yaml; "
         "apply each deliverable, acceptance contract, validation command, and file claim before implementation.",
         f"Task id: {task['task_id']}",
@@ -1220,7 +1438,7 @@ def _build_qodercli_args(task: dict[str, Any], cwd: Path) -> list[str]:
         str(cwd),
         "--agent",
         task["agent_profile"],
-        # Preserve CLI provider/model settings; project-only silently drops custom models.
+        # 保留 CLI provider/model 配置；仅传 project 会悄然丢失自定义模型。
         "--setting-sources",
         "user,project,local",
     ]
@@ -1229,7 +1447,7 @@ def _build_qodercli_args(task: dict[str, Any], cwd: Path) -> list[str]:
     # 委派入口只执行当前目标，不暴露递归调度工具；Bash 仍不构成目录沙箱。
     args.extend(["--disallowed-tools", "Agent"])
     args.extend(["--output-format", "json"])
-    # No hidden multi-attempt model loop; the parent owns explicit bounded recovery.
+    # 不设置隐式的多次模型尝试循环；父任务负责显式、有界恢复。
     args.extend(["--max-model-request-retries", "0"])
     session_id = task.get("session_id", "")
     if session_id:
@@ -1245,6 +1463,7 @@ from scripts.agents.qoder.callback import (
     _run_codex_queue_cli,
     attempt_codex_callback as _attempt_codex_callback,
 )
+
 
 def _build_completion(
     task: dict[str, Any], status: str, exit_code: int, **extra: Any
@@ -1272,8 +1491,9 @@ def _build_completion(
 
 
 def _validate_structured_result(run_dir: Path, task: dict[str, Any]) -> dict[str, Any]:
-    """Compatibility adapter over the public, single-owner facts validator."""
+    """复用公开且单一 owner 的事实校验器处理结构化结果。"""
     from scripts.agents.qoder.facts import validate_structured_result
+
     result, _descriptor = validate_structured_result(run_dir, task)
     return result
 
@@ -1287,11 +1507,21 @@ def cmd_validate_result(args: argparse.Namespace) -> None:
     if task.get("run_id") != run_id:
         raise ValueError("Qoder task identity does not match the run directory")
     result = _validate_structured_result(run_dir, task)
-    print(json.dumps({"run_id": run_id, "status": "PASS", "result_status": result["status"],
-                      "scope": "result-structure-only-not-task-acceptance"}))
+    print(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "status": "PASS",
+                "result_status": result["status"],
+                "scope": "result-structure-only-not-task-acceptance",
+            }
+        )
+    )
 
 
-def _worker_entry(task_dir: Path, run_id: str, cwd: Path, lease_fd: int | None = None) -> None:
+def _worker_entry(
+    task_dir: Path, run_id: str, cwd: Path, lease_fd: int | None = None
+) -> None:
     if lease_fd is None:
         with _host_lease() as fd:
             return _worker_entry(task_dir, run_id, cwd, fd)
@@ -1299,7 +1529,9 @@ def _worker_entry(task_dir: Path, run_id: str, cwd: Path, lease_fd: int | None =
     _run_worker_with_lease(task_dir, run_id, cwd, lease_fd)
 
 
-def _run_worker_with_lease(task_dir: Path, run_id: str, cwd: Path, lease_fd: int) -> None:
+def _run_worker_with_lease(
+    task_dir: Path, run_id: str, cwd: Path, lease_fd: int
+) -> None:
     """Worker 入口：从 task.json 读取任务，Popen 启动 CLI，记录启动证据后 wait 获取真实退出码。
 
     started.json 在 qodercli 成功 Popen 后写入真实子进程 PID，作为真正启动证据。
@@ -1333,7 +1565,7 @@ def _run_worker_with_lease(task_dir: Path, run_id: str, cwd: Path, lease_fd: int
                 cwd=str(cwd),
             )
         started_at = time.time()
-        # A real Popen clears only the paired dispatch streak; it is not acceptance.
+        # 真实 Popen 只清除配对的派发连续失败计数，不构成验收。
         try:
             _fallback.mark_qoder_started(cwd, task, run_id)
         except _fallback.DispatchFallbackError as exc:
@@ -1372,7 +1604,9 @@ def _run_worker_with_lease(task_dir: Path, run_id: str, cwd: Path, lease_fd: int
     except FileNotFoundError as exc:
         # CLI 缺失 - 不写 started.json
         exit_code = 127
-        completion = _build_completion(task, "failed", exit_code, error=str(exc), run_id=run_id)
+        completion = _build_completion(
+            task, "failed", exit_code, error=str(exc), run_id=run_id
+        )
     except Exception as exc:
         exit_code = proc.wait() if proc is not None else 1
         completion = _build_completion(
@@ -1393,16 +1627,25 @@ def _run_worker_with_lease(task_dir: Path, run_id: str, cwd: Path, lease_fd: int
         completion["lifecycle_errors"] = lifecycle_errors
     if completion.get("status") == "failed":
         completion["failure"] = summarize_cli_failure(
-            stdout_log, completion["exit_code"],
+            stdout_log,
+            completion["exit_code"],
             pid=proc.pid if proc is not None else None,
-            session_id=task.get("session_id", ""), cwd=cwd, started_at=started_at,
+            session_id=task.get("session_id", ""),
+            cwd=cwd,
+            started_at=started_at,
         )
-    # Only no-Popen failures are dispatch failures. A launched CLI failing later is execution evidence.
-    if proc is None and completion.get("status") == "failed" and task.get("run_id") == run_id:
+    # 仅未发生 Popen 的失败属于派发失败；CLI 启动后的失败是执行证据。
+    if (
+        proc is None
+        and completion.get("status") == "failed"
+        and task.get("run_id") == run_id
+    ):
         try:
-            completion["fallback"] = _fallback.mark_qoder_unavailable(cwd, task, run_id, "qoder-cli-not-started")
+            completion["fallback"] = _fallback.mark_qoder_unavailable(
+                cwd, task, run_id, "qoder-cli-not-started"
+            )
         except _fallback.DispatchFallbackError:
-            # Preserve the original terminal fact; a coordinator fault must not invent a fallback.
+            # 保留原始终态事实；协调器故障不能虚构 fallback。
             pass
     # 无持久化完成记录时不发正常完成通知；watchdog 将诊断缺失结果。
     _atomic_write_json(record_path, completion)
@@ -1456,10 +1699,17 @@ def _maybe_start_watchdog(
     except (OSError, ValueError) as exc:
         # 记录错误供 status/result 读取
         try:
-            _lifecycle.write_watchdog_status(run_dir, {"status": "unavailable", "error": str(exc)})
+            _lifecycle.write_watchdog_status(
+                run_dir, {"status": "unavailable", "error": str(exc)}
+            )
         except (OSError, ValueError) as diagnostic_error:
-            print(f"warning: watchdog diagnostic unavailable: {diagnostic_error}", file=sys.stderr)
-        print(f"warning: watchdog unavailable for {run_dir.name}: {exc}", file=sys.stderr)
+            print(
+                f"warning: watchdog diagnostic unavailable: {diagnostic_error}",
+                file=sys.stderr,
+            )
+        print(
+            f"warning: watchdog unavailable for {run_dir.name}: {exc}", file=sys.stderr
+        )
         return {"status": "unavailable", "error": str(exc)}
 
 
@@ -1490,7 +1740,11 @@ def cmd_start(args: argparse.Namespace) -> None:
             task["parent_session_id"] = parent_sid
         else:
             parent_sid = task["parent_session_id"]
-            if not isinstance(parent_sid, str) or not parent_sid or not _is_valid_uuid(parent_sid):
+            if (
+                not isinstance(parent_sid, str)
+                or not parent_sid
+                or not _is_valid_uuid(parent_sid)
+            ):
                 raise ValueError(
                     f"parent_session_id must be a valid UUID for codex parent, got {parent_sid!r}"
                 )
@@ -1504,9 +1758,12 @@ def cmd_start(args: argparse.Namespace) -> None:
     run_dir = task_dir / run_id
     worker_spawned = False
     with _dispatch_lease(task_dir, caller=caller, repo_root=repo_root) as lease_fd:
-        # Validate all caller/harness safety contracts before any host compatibility route.
+        # 进入宿主兼容路由前，先校验全部 caller 与 Harness 安全合同。
         harness = _validate_harness_manifest(
-            task, repo_root, catalog_package=catalog, allow_qodercli_unavailable=True,
+            task,
+            repo_root,
+            catalog_package=catalog,
+            allow_qodercli_unavailable=True,
         )
         task["harness_manifest_sha256"] = harness["_manifest_sha256"]
         task["harness_context"] = harness["required_context"]
@@ -1517,25 +1774,45 @@ def cmd_start(args: argparse.Namespace) -> None:
         try:
             _assert_dispatch_budget(task_dir, task, correction=False)
         except ValueError as exc:
-            if not str(exc).startswith("ATTEMPT_BUDGET:"): raise
-            raise FallbackRequired(_fallback.begin_terra_fallback(repo_root, task, run_id, "qoder-budget-exhausted")) from None
+            if not str(exc).startswith("ATTEMPT_BUDGET:"):
+                raise
+            raise FallbackRequired(
+                _fallback.begin_terra_fallback(
+                    repo_root, task, run_id, "qoder-budget-exhausted"
+                )
+            ) from None
         try:
             recovery_from = _assert_runtime_recovery(
-                task_dir, confirmed=getattr(args, "runtime_recovery_confirmed", False) is True,
+                task_dir,
+                confirmed=getattr(args, "runtime_recovery_confirmed", False) is True,
             )
         except ValueError as exc:
-            if not str(exc).startswith("RUNTIME_BLOCKED:"): raise
-            raise FallbackRequired(_fallback.begin_terra_fallback(repo_root, task, run_id, "qoder-runtime-blocked")) from None
+            if not str(exc).startswith("RUNTIME_BLOCKED:"):
+                raise
+            raise FallbackRequired(
+                _fallback.begin_terra_fallback(
+                    repo_root, task, run_id, "qoder-runtime-blocked"
+                )
+            ) from None
         try:
             _find_qoder_cli()
         except FileNotFoundError:
-            raise FallbackRequired(_fallback.begin_terra_fallback(repo_root, task, run_id, "qoder-cli-unavailable")) from None
+            raise FallbackRequired(
+                _fallback.begin_terra_fallback(
+                    repo_root, task, run_id, "qoder-cli-unavailable"
+                )
+            ) from None
         _check_qoder_idle(caller=caller)
         decision = _fallback.host_wait_decision(repo_root)
         if decision is not None:
-            raise FallbackRequired(_fallback.begin_terra_fallback(
-                repo_root, task, run_id, "host-wait-" + decision["host_goal"]["state"],
-            ))
+            raise FallbackRequired(
+                _fallback.begin_terra_fallback(
+                    repo_root,
+                    task,
+                    run_id,
+                    "host-wait-" + decision["host_goal"]["state"],
+                )
+            )
         _fallback.begin_qoder_attempt(repo_root, task, run_id)
 
         _check_no_symlink_ancestors(run_dir)
@@ -1547,16 +1824,20 @@ def cmd_start(args: argparse.Namespace) -> None:
 
         try:
             _atomic_write_json(run_dir / "task.json", task)
-            # The template proves only shape and identity.  It intentionally has
-            # a different name so an untouched template cannot be mistaken for
-            # the worker's required result.json.
+            # 模板只证明结构和身份；特意使用不同名称，避免未修改的模板被误认成
+            # worker 必需的 result.json。
             _atomic_write_json(run_dir / "result.template.json", _result_template(task))
             _write_continuation(run_id, run_dir)
             if recovery_from:
-                _atomic_write_json(run_dir / "runtime-recovery.json", {
-                    "from_run_id": recovery_from, "operator_asserted": True,
-                    "account_access_verified": False, "recorded_at": time.time(),
-                })
+                _atomic_write_json(
+                    run_dir / "runtime-recovery.json",
+                    {
+                        "from_run_id": recovery_from,
+                        "operator_asserted": True,
+                        "account_access_verified": False,
+                        "recorded_at": time.time(),
+                    },
+                )
 
             worker_cmd = [
                 sys.executable,
@@ -1591,9 +1872,14 @@ def cmd_start(args: argparse.Namespace) -> None:
                 worker_spawned = True
             except OSError as exc:
                 _write_worker_spawn_failure(run_dir, task, exc)
-                raise FallbackRequired(_fallback.mark_qoder_unavailable(
-                    repo_root, task, run_id, "worker-spawn-failed",
-                )) from None
+                raise FallbackRequired(
+                    _fallback.mark_qoder_unavailable(
+                        repo_root,
+                        task,
+                        run_id,
+                        "worker-spawn-failed",
+                    )
+                ) from None
         except BaseException:
             # 未创建 worker 且没有终态时删除本次唯一占位，避免永久 unknown。
             if not worker_spawned and not (run_dir / "completion.json").exists():
@@ -1606,17 +1892,28 @@ def cmd_start(args: argparse.Namespace) -> None:
 
 
 def _write_continuation(run_id: str, run_dir: Path) -> None:
-    _atomic_write_json(run_dir / "continuation.json", {
-        "schema_version": "lexiflow.qoder-continuation.v1", "run_id": run_id,
-        "state": "AWAITING_CALLBACK", "next_action": "end-current-turn-await-callback",
-        "resume_on": "terminal-callback-only", "llm_polling": "forbidden",
-        "callback_actions": ["ignore-if-already-acked-or-superseded", "read-exact-run-result",
-                             "verify-identity-and-artifacts", "ack-once", "continue-or-report-blocker"],
-    })
+    _atomic_write_json(
+        run_dir / "continuation.json",
+        {
+            "schema_version": "lexiflow.qoder-continuation.v1",
+            "run_id": run_id,
+            "state": "AWAITING_CALLBACK",
+            "next_action": "end-current-turn-await-callback",
+            "resume_on": "terminal-callback-only",
+            "llm_polling": "forbidden",
+            "callback_actions": [
+                "ignore-if-already-acked-or-superseded",
+                "read-exact-run-result",
+                "verify-identity-and-artifacts",
+                "ack-once",
+                "continue-or-report-blocker",
+            ],
+        },
+    )
 
 
 def _bound_task_record(run_dir: Path) -> tuple[dict[str, Any] | None, str | None]:
-    """Read only this run's persisted identity; malformed history is never trusted."""
+    """仅读取本 run 持久化的身份；畸形历史不视为可信。"""
     try:
         task = _safe_read_json(run_dir / "task.json")
         _validate_task(task, runtime_bound=True)
@@ -1627,7 +1924,9 @@ def _bound_task_record(run_dir: Path) -> tuple[dict[str, Any] | None, str | None
         return None, f"task-record-invalid:{type(exc).__name__}"
 
 
-def _bound_started_record(run_dir: Path, task: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+def _bound_started_record(
+    run_dir: Path, task: dict[str, Any]
+) -> tuple[dict[str, Any] | None, str | None]:
     path = _lifecycle.started_path(run_dir)
     if not path.exists():
         return None, "started-record-missing"
@@ -1637,18 +1936,28 @@ def _bound_started_record(run_dir: Path, task: dict[str, Any]) -> tuple[dict[str
             raise ValueError("started fields are invalid")
         if started["run_id"] != run_dir.name or started["run_id"] != task["run_id"]:
             raise ValueError("started run_id does not match")
-        if started["session_id"] != task["session_id"] or not _is_valid_uuid(started["session_id"]):
+        if started["session_id"] != task["session_id"] or not _is_valid_uuid(
+            started["session_id"]
+        ):
             raise ValueError("started session_id does not match")
-        if isinstance(started["pid"], bool) or not isinstance(started["pid"], int) or started["pid"] <= 0:
+        if (
+            isinstance(started["pid"], bool)
+            or not isinstance(started["pid"], int)
+            or started["pid"] <= 0
+        ):
             raise ValueError("started pid is invalid")
-        if isinstance(started["started_at"], bool) or not isinstance(started["started_at"], (int, float)):
+        if isinstance(started["started_at"], bool) or not isinstance(
+            started["started_at"], (int, float)
+        ):
             raise ValueError("started timestamp is invalid")
         return started, None
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         return None, f"started-record-invalid:{type(exc).__name__}"
 
 
-def _bound_completion_record(run_dir: Path, task: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+def _bound_completion_record(
+    run_dir: Path, task: dict[str, Any]
+) -> tuple[dict[str, Any] | None, str | None]:
     path = run_dir / "completion.json"
     if not path.exists():
         return None, "completion-record-missing"
@@ -1663,19 +1972,22 @@ def _bound_completion_record(run_dir: Path, task: dict[str, Any]) -> tuple[dict[
 
 
 def _is_bound_dispatch_startup_failure(completion: dict[str, Any]) -> bool:
-    """A dispatch Popen failure is terminal even though no worker wrote started.json."""
-    return (completion.get("status") == "failed" and completion.get("exit_code") == 126
-            and isinstance(completion.get("error"), str)
-            and completion["error"].startswith("worker spawn failed:"))
+    """派发阶段 Popen 失败虽无 worker started.json，仍是终态。"""
+    return (
+        completion.get("status") == "failed"
+        and completion.get("exit_code") == 126
+        and isinstance(completion.get("error"), str)
+        and completion["error"].startswith("worker spawn failed:")
+    )
 
 
 def _start_handshake(run_dir: Path) -> str:
-    """Bounded proof of a run/session-bound start; timeout remains STARTING."""
+    """有界等待与 run、Session 绑定的启动证据；超时仍为 STARTING。"""
     task, task_error = _bound_task_record(run_dir)
     if task is None:
         return "STARTING"
-    # wait_for_started only bounds observation.  Its path-exists result is not
-    # startup proof until the immutable record binds this run and session.
+    # wait_for_started 只限制观察时间；路径存在不等于启动证明，必须由
+    # 不可变记录绑定本 run 与 Session。
     _lifecycle.wait_for_started(run_dir, timeout=START_HANDSHAKE_SECONDS)
     started, _ = _bound_started_record(run_dir, task)
     if started is not None:
@@ -1685,16 +1997,29 @@ def _start_handshake(run_dir: Path) -> str:
         return "FAILED"
     return "STARTING"
 
-def _print_dispatch_handoff(run_id: str, run_dir: Path, handshake: str = "STARTING") -> None:
-    print(json.dumps({"run_id": run_id, "state": "AWAITING_CALLBACK",
-                      "startup_handshake": handshake,
-                      "next_action": "end-current-turn-await-callback",
-                      "continuation": str(run_dir / "continuation.json"),
-                      "started_confirmed": handshake == "STARTED", "llm_polling": "forbidden"}))
+
+def _print_dispatch_handoff(
+    run_id: str, run_dir: Path, handshake: str = "STARTING"
+) -> None:
+    print(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "state": "AWAITING_CALLBACK",
+                "startup_handshake": handshake,
+                "next_action": "end-current-turn-await-callback",
+                "continuation": str(run_dir / "continuation.json"),
+                "started_confirmed": handshake == "STARTED",
+                "llm_polling": "forbidden",
+            }
+        )
+    )
 
 
 def _reject_parent_polling(run_dir: Path) -> None:
-    if (run_dir / "continuation.json").exists() and not (run_dir / "completion.json").exists():
+    if (run_dir / "continuation.json").exists() and not (
+        run_dir / "completion.json"
+    ).exists():
         _print_dispatch_handoff(run_dir.name, run_dir)
         raise SystemExit(3)
 
@@ -1714,18 +2039,28 @@ def cmd_preflight(args: argparse.Namespace) -> None:
         cli_missing = True
     catalog = _resolve_catalog_package(task, repo_root)
     _validate_prompt_budget(task)
-    harness = _validate_harness_manifest(task, repo_root, catalog_package=catalog, allow_qodercli_unavailable=True)
+    harness = _validate_harness_manifest(
+        task, repo_root, catalog_package=catalog, allow_qodercli_unavailable=True
+    )
     frozen = dict(task)
     frozen["harness_manifest_sha256"] = harness["_manifest_sha256"]
     frozen["harness_context"] = harness["required_context"]
     _validate_prompt_budget(frozen)
     recovery_confirmed = getattr(args, "runtime_recovery_confirmed", False) is True
     blockers = _start_readiness_blockers(
-        _task_dir(repo_root), task, repo_root=repo_root, runtime_recovery_confirmed=recovery_confirmed,
+        _task_dir(repo_root),
+        task,
+        repo_root=repo_root,
+        runtime_recovery_confirmed=recovery_confirmed,
     )
     if cli_missing:
-        blockers.append({"code": "QODER_CLI_UNAVAILABLE", "message": "Qoder CLI is unavailable",
-                         "routing": {"next_action": "start-for-terra-fallback"}})
+        blockers.append(
+            {
+                "code": "QODER_CLI_UNAVAILABLE",
+                "message": "Qoder CLI is unavailable",
+                "routing": {"next_action": "start-for-terra-fallback"},
+            }
+        )
     if not blockers:
         try:
             ledger = _fallback.ledger_decision(repo_root, task)
@@ -1733,31 +2068,50 @@ def cmd_preflight(args: argparse.Namespace) -> None:
             blockers.append({"code": exc.code, "message": str(exc)})
         else:
             if ledger is not None:
-                blockers.append({"code": ledger["code"], "message": ledger["next_action"], "routing": ledger})
+                blockers.append(
+                    {
+                        "code": ledger["code"],
+                        "message": ledger["next_action"],
+                        "routing": ledger,
+                    }
+                )
             else:
                 decision = _fallback.host_wait_decision(repo_root)
                 if decision is not None:
-                    blockers.append({"code": decision["code"], "message": decision["host_goal"]["reason"], "routing": decision})
-    print(json.dumps({
-        "schema_version": "lexiflow.qoder-preflight-result.v1",
-        "status": "BLOCKED" if blockers else "PASS",
-        "work_package_id": task["work_package_id"],
-        "task_ids": task["task_ids"],
-        "estimated_minutes": task["estimated_minutes"],
-        "primary_owner": task["primary_owner"],
-        "agent_profile": task["agent_profile"],
-        "catalog_sha256": None if catalog is None else catalog["catalog_sha256"],
-        "harness_manifest_sha256": harness["_manifest_sha256"],
-        "context_count": len(harness["required_context"]),
-        "required_tools": [item["name"] for item in harness["required_tools"]],
-        "validation_command_count": len(harness["validation_commands"]),
-        "model_access_checked": False,
-        "runtime_recovery_asserted": recovery_confirmed,
-        "dispatch_action": "start",
-        "blocking_findings": blockers,
-        "scope": "core-handoff-context-tools-and-start-readiness-snapshot; "
-                 "PASS is not account/model availability, a reservation, or a started run",
-    }, ensure_ascii=False))
+                    blockers.append(
+                        {
+                            "code": decision["code"],
+                            "message": decision["host_goal"]["reason"],
+                            "routing": decision,
+                        }
+                    )
+    print(
+        json.dumps(
+            {
+                "schema_version": "lexiflow.qoder-preflight-result.v1",
+                "status": "BLOCKED" if blockers else "PASS",
+                "work_package_id": task["work_package_id"],
+                "task_ids": task["task_ids"],
+                "estimated_minutes": task["estimated_minutes"],
+                "primary_owner": task["primary_owner"],
+                "agent_profile": task["agent_profile"],
+                "catalog_sha256": (
+                    None if catalog is None else catalog["catalog_sha256"]
+                ),
+                "harness_manifest_sha256": harness["_manifest_sha256"],
+                "context_count": len(harness["required_context"]),
+                "required_tools": [item["name"] for item in harness["required_tools"]],
+                "validation_command_count": len(harness["validation_commands"]),
+                "model_access_checked": False,
+                "runtime_recovery_asserted": recovery_confirmed,
+                "dispatch_action": "start",
+                "blocking_findings": blockers,
+                "scope": "core-handoff-context-tools-and-start-readiness-snapshot; "
+                "PASS is not account/model availability, a reservation, or a started run",
+            },
+            ensure_ascii=False,
+        )
+    )
     if blockers:
         raise SystemExit(1)
 
@@ -1776,7 +2130,9 @@ def _start_readiness_blockers(
         try:
             action()
         except BusyRoutingError as exc:
-            blockers.append({"code": "BUSY", "message": str(exc), "routing": exc.routing})
+            blockers.append(
+                {"code": "BUSY", "message": str(exc), "routing": exc.routing}
+            )
             return False
         except ValueError as exc:
             code = str(exc).partition(":")[0]
@@ -1786,19 +2142,31 @@ def _start_readiness_blockers(
             return False
         return True
 
-    caller = _current_caller_identity(repo_root, task) if repo_root is not None else _caller_identity(None, None)
+    caller = (
+        _current_caller_identity(repo_root, task)
+        if repo_root is not None
+        else _caller_identity(None, None)
+    )
     if task_dir.exists():
-        if not check(lambda: _assert_no_unfinished_runs(task_dir, caller=caller, repo_root=repo_root)):
+        if not check(
+            lambda: _assert_no_unfinished_runs(
+                task_dir, caller=caller, repo_root=repo_root
+            )
+        ):
             return blockers
         check(lambda: _assert_dispatch_budget(task_dir, task, correction=False))
-        check(lambda: _assert_runtime_recovery(task_dir, confirmed=runtime_recovery_confirmed))
+        check(
+            lambda: _assert_runtime_recovery(
+                task_dir, confirmed=runtime_recovery_confirmed
+            )
+        )
     check(lambda: _assert_host_idle(caller=caller))
     check(lambda: _check_qoder_idle(caller=caller))
     return blockers
 
 
 def _status_snapshot(run_dir: Path) -> tuple[str, dict[str, Any]]:
-    """Read one reconciled, identity-bound snapshot; never watch or inspect logs."""
+    """只读一次已协调、身份绑定的快照；不 watch 或扫描日志。"""
     task, task_error = _bound_task_record(run_dir)
     if task is None:
         return "conflict", {"reason": task_error}
@@ -1813,10 +2181,16 @@ def _status_snapshot(run_dir: Path) -> tuple[str, dict[str, Any]]:
     if continuation_path.exists():
         try:
             continuation = _safe_read_json(continuation_path)
-            if continuation.get("run_id") != run_dir.name or not isinstance(continuation.get("state"), str) or not isinstance(continuation.get("next_action"), str):
+            if (
+                continuation.get("run_id") != run_dir.name
+                or not isinstance(continuation.get("state"), str)
+                or not isinstance(continuation.get("next_action"), str)
+            ):
                 raise ValueError("continuation identity is invalid")
         except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-            return "conflict", {"reason": f"continuation-record-invalid:{type(exc).__name__}"}
+            return "conflict", {
+                "reason": f"continuation-record-invalid:{type(exc).__name__}"
+            }
     started, started_error = _bound_started_record(run_dir, task)
     completion, completion_error = _bound_completion_record(run_dir, task)
     completion_path = run_dir / "completion.json"
@@ -1826,39 +2200,73 @@ def _status_snapshot(run_dir: Path) -> tuple[str, dict[str, Any]]:
     if callback_path.exists():
         try:
             callback = _safe_read_json(callback_path)
-            if (callback.get("parent_session_id") != task["parent_session_id"]
-                    or callback.get("status") not in {"queued", "failed", "unknown"}):
+            if callback.get("parent_session_id") != task[
+                "parent_session_id"
+            ] or callback.get("status") not in {"queued", "failed", "unknown"}:
                 raise ValueError("callback identity is invalid")
             if completion is None:
-                return "conflict", {"reason": "callback-without-bound-terminal-completion", "continuation": continuation}
+                return "conflict", {
+                    "reason": "callback-without-bound-terminal-completion",
+                    "continuation": continuation,
+                }
         except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-            return "conflict", {"reason": f"callback-record-invalid:{type(exc).__name__}", "continuation": continuation}
+            return "conflict", {
+                "reason": f"callback-record-invalid:{type(exc).__name__}",
+                "continuation": continuation,
+            }
     ack_path = _lifecycle.ack_path(run_dir)
     if ack_path.exists():
         try:
             ack = _safe_read_json(ack_path)
-            if (ack.get("run_id") != run_dir.name or ack.get("parent_session_id") != task["parent_session_id"]
-                    or ack.get("qoder_session_id") != task["session_id"] or ack.get("task_id") != task["task_id"]):
+            if (
+                ack.get("run_id") != run_dir.name
+                or ack.get("parent_session_id") != task["parent_session_id"]
+                or ack.get("qoder_session_id") != task["session_id"]
+                or ack.get("task_id") != task["task_id"]
+            ):
                 raise ValueError("ack identity is invalid")
             if completion is None:
-                return "conflict", {"reason": "ack-without-bound-terminal-completion", "continuation": continuation}
+                return "conflict", {
+                    "reason": "ack-without-bound-terminal-completion",
+                    "continuation": continuation,
+                }
         except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-            return "conflict", {"reason": f"ack-record-invalid:{type(exc).__name__}", "continuation": continuation}
+            return "conflict", {
+                "reason": f"ack-record-invalid:{type(exc).__name__}",
+                "continuation": continuation,
+            }
     if completion is not None:
-        # Worker-spawn failure is a real, bound terminal failure and correctly
-        # has no started.json.  Any other terminal result needs a valid start.
+        # worker spawn 失败是真实且已绑定的终态失败，可以没有 started.json；
+        # 其他终态结果均需有效的启动证据。
         if started is None and not _is_bound_dispatch_startup_failure(completion):
             return "conflict", {"reason": started_error, "continuation": continuation}
-        return completion["status"], {"completion": completion, "lifecycle": lifecycle, "continuation": continuation,
-                                      "startup": "STARTED" if started is not None else "FAILED"}
+        return completion["status"], {
+            "completion": completion,
+            "lifecycle": lifecycle,
+            "continuation": continuation,
+            "startup": "STARTED" if started is not None else "FAILED",
+        }
     if started is not None:
-        return "running", {"lifecycle": lifecycle, "continuation": continuation, "startup": "STARTED"}
+        return "running", {
+            "lifecycle": lifecycle,
+            "continuation": continuation,
+            "startup": "STARTED",
+        }
     if lifecycle.get("status") in ("acknowledged", "superseded", "exhausted"):
-        return "conflict", {"reason": "lifecycle-terminal-without-bound-completion", "continuation": continuation}
-    return "unknown", {"lifecycle": lifecycle, "continuation": continuation, "startup": "STARTING", "startup_reason": started_error}
+        return "conflict", {
+            "reason": "lifecycle-terminal-without-bound-completion",
+            "continuation": continuation,
+        }
+    return "unknown", {
+        "lifecycle": lifecycle,
+        "continuation": continuation,
+        "startup": "STARTING",
+        "startup_reason": started_error,
+    }
+
 
 def cmd_status(args: argparse.Namespace) -> None:
-    """Read one reconciled record snapshot; this command never becomes a watch."""
+    """只读一次协调后的记录快照；此命令不转为 watch。"""
     repo_root = _find_repo_root(Path.cwd())
     task_dir = _task_dir(repo_root)
     run_id = _validate_run_id(args.run_id)
@@ -1876,8 +2284,15 @@ def cmd_status(args: argparse.Namespace) -> None:
         if _lifecycle.ack_path(run_dir).exists():
             extra["ack"] = _safe_read_json(_lifecycle.ack_path(run_dir))
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-        print(json.dumps({"run_id": run_id, "status": "conflict",
-                          "reason": f"status-side-record-invalid:{type(exc).__name__}"}))
+        print(
+            json.dumps(
+                {
+                    "run_id": run_id,
+                    "status": "conflict",
+                    "reason": f"status-side-record-invalid:{type(exc).__name__}",
+                }
+            )
+        )
         return
     if status == "conflict":
         print(json.dumps({"run_id": run_id, "status": "conflict", **detail, **extra}))
@@ -1889,6 +2304,7 @@ def cmd_status(args: argparse.Namespace) -> None:
     if detail.get("lifecycle"):
         data["lifecycle"] = detail["lifecycle"].get("status", "")
     print(json.dumps(data))
+
 
 def _read_stdout_tail(path: Path, max_bytes: int = 4000) -> str:
     """读取 stdout 日志尾部最多 max_bytes 字节，不读全文件。"""
@@ -2067,7 +2483,10 @@ def cmd_resume(args: argparse.Namespace) -> None:
         catalog = _resolve_catalog_package(new_task, repo_root)
         _validate_prompt_budget(new_task)
         harness = _validate_harness_manifest(
-            new_task, repo_root, catalog_package=catalog, allow_qodercli_unavailable=True,
+            new_task,
+            repo_root,
+            catalog_package=catalog,
+            allow_qodercli_unavailable=True,
         )
         new_task["harness_manifest_sha256"] = harness["_manifest_sha256"]
         new_task["harness_context"] = harness["required_context"]
@@ -2078,24 +2497,44 @@ def cmd_resume(args: argparse.Namespace) -> None:
         try:
             _assert_dispatch_budget(task_dir, new_task, correction=True)
         except ValueError as exc:
-            if not str(exc).startswith("ATTEMPT_BUDGET:"): raise
-            raise FallbackRequired(_fallback.begin_terra_fallback(repo_root, new_task, new_run_id, "qoder-budget-exhausted")) from None
+            if not str(exc).startswith("ATTEMPT_BUDGET:"):
+                raise
+            raise FallbackRequired(
+                _fallback.begin_terra_fallback(
+                    repo_root, new_task, new_run_id, "qoder-budget-exhausted"
+                )
+            ) from None
         decision = _fallback.host_wait_decision(repo_root)
         if decision is not None:
-            raise FallbackRequired(_fallback.begin_terra_fallback(
-                repo_root, new_task, new_run_id, "host-wait-" + decision["host_goal"]["state"],
-            ))
+            raise FallbackRequired(
+                _fallback.begin_terra_fallback(
+                    repo_root,
+                    new_task,
+                    new_run_id,
+                    "host-wait-" + decision["host_goal"]["state"],
+                )
+            )
         try:
             recovery_from = _assert_runtime_recovery(
-                task_dir, confirmed=getattr(args, "runtime_recovery_confirmed", False) is True,
+                task_dir,
+                confirmed=getattr(args, "runtime_recovery_confirmed", False) is True,
             )
         except ValueError as exc:
-            if not str(exc).startswith("RUNTIME_BLOCKED:"): raise
-            raise FallbackRequired(_fallback.begin_terra_fallback(repo_root, new_task, new_run_id, "qoder-runtime-blocked")) from None
+            if not str(exc).startswith("RUNTIME_BLOCKED:"):
+                raise
+            raise FallbackRequired(
+                _fallback.begin_terra_fallback(
+                    repo_root, new_task, new_run_id, "qoder-runtime-blocked"
+                )
+            ) from None
         try:
             _find_qoder_cli()
         except FileNotFoundError:
-            raise FallbackRequired(_fallback.begin_terra_fallback(repo_root, new_task, new_run_id, "qoder-cli-unavailable")) from None
+            raise FallbackRequired(
+                _fallback.begin_terra_fallback(
+                    repo_root, new_task, new_run_id, "qoder-cli-unavailable"
+                )
+            ) from None
         _check_qoder_idle(caller=caller)
         _fallback.begin_qoder_attempt(repo_root, new_task, new_run_id)
 
@@ -2109,12 +2548,19 @@ def cmd_resume(args: argparse.Namespace) -> None:
                 reservation_created = True
                 with os.fdopen(fd, "w", encoding="utf-8") as file_handle:
                     json.dump(
-                        {"new_run_id": new_run_id, "reserved_at": time.time(),
-                         "runtime_recovery_asserted": recovery_from is not None}, file_handle
+                        {
+                            "new_run_id": new_run_id,
+                            "reserved_at": time.time(),
+                            "runtime_recovery_asserted": recovery_from is not None,
+                        },
+                        file_handle,
                     )
             except OSError as exc:
                 if exc.errno == errno.EEXIST:
-                    print("error: resume already in progress for this run", file=sys.stderr)
+                    print(
+                        "error: resume already in progress for this run",
+                        file=sys.stderr,
+                    )
                     sys.exit(1)
                 raise
 
@@ -2127,10 +2573,15 @@ def cmd_resume(args: argparse.Namespace) -> None:
             _atomic_write_json(new_run_dir / "task.json", new_task)
             _write_continuation(new_run_id, new_run_dir)
             if recovery_from:
-                _atomic_write_json(new_run_dir / "runtime-recovery.json", {
-                    "from_run_id": recovery_from, "operator_asserted": True,
-                    "account_access_verified": False, "recorded_at": time.time(),
-                })
+                _atomic_write_json(
+                    new_run_dir / "runtime-recovery.json",
+                    {
+                        "from_run_id": recovery_from,
+                        "operator_asserted": True,
+                        "account_access_verified": False,
+                        "recorded_at": time.time(),
+                    },
+                )
             _lifecycle.record_previous_run(new_run_dir, run_id)
 
             worker_cmd = [
@@ -2166,9 +2617,14 @@ def cmd_resume(args: argparse.Namespace) -> None:
                 worker_spawned = True
             except OSError as exc:
                 _write_worker_spawn_failure(new_run_dir, new_task, exc)
-                raise FallbackRequired(_fallback.mark_qoder_unavailable(
-                    repo_root, new_task, new_run_id, "worker-spawn-failed",
-                )) from None
+                raise FallbackRequired(
+                    _fallback.mark_qoder_unavailable(
+                        repo_root,
+                        new_task,
+                        new_run_id,
+                        "worker-spawn-failed",
+                    )
+                ) from None
         except BaseException as dispatch_error:
             cleanup_errors: list[str] = []
             if reservation_created:
@@ -2194,12 +2650,14 @@ def cmd_resume(args: argparse.Namespace) -> None:
 
 
 def cmd_record_fallback(args: argparse.Namespace) -> None:
-    """Consume one current-parent native Terra spawn result by call id only."""
+    """仅凭 call id 消费当前父任务的原生 Codex fallback spawn 结果。"""
     repo_root = _find_repo_root(Path.cwd())
     task_path = Path(args.task)
     _check_no_symlink_ancestors(task_path)
     task = _validate_task(json.loads(task_path.read_text(encoding="utf-8")))
-    result = _fallback.record_terra_fallback(repo_root, task, args.attempt_id, args.call_id)
+    result = _fallback.record_terra_fallback(
+        repo_root, task, args.attempt_id, args.call_id
+    )
     print(json.dumps(result, ensure_ascii=False))
     if result.get("status") != "PASS":
         raise SystemExit(3)
@@ -2229,7 +2687,9 @@ def cmd_ack(args: argparse.Namespace) -> None:
 def _dispatch_worker(argv: list[str]) -> int:
     """接收任务目录、运行标识、工作目录并执行后台子任务。"""
     if len(argv) != 5:
-        print("usage: _worker <task_dir> <run_id> <cwd> <host-lease-fd>", file=sys.stderr)
+        print(
+            "usage: _worker <task_dir> <run_id> <cwd> <host-lease-fd>", file=sys.stderr
+        )
         return 1
     task_dir = Path(argv[1])
     run_id = argv[2]
@@ -2259,8 +2719,10 @@ def _dispatch_worker(argv: list[str]) -> int:
     return 0
 
 
-def _fallback_for_busy(args: argparse.Namespace, routing: dict[str, Any]) -> dict[str, Any] | None:
-    """Only terminal external/other-owner busy routes can become a Terra request."""
+def _fallback_for_busy(
+    args: argparse.Namespace, routing: dict[str, Any]
+) -> dict[str, Any] | None:
+    """仅外部或其他 owner 的终态 BUSY 路由可转为 Codex fallback 请求。"""
     if routing.get("next_action") != "fallback-to-codex-subagent":
         return None
     if getattr(args, "command", None) not in {"start", "resume"}:
@@ -2268,25 +2730,64 @@ def _fallback_for_busy(args: argparse.Namespace, routing: dict[str, Any]) -> dic
     try:
         repo_root = _find_repo_root(Path.cwd())
         if getattr(args, "task", None):
-            task = _validate_task(json.loads(Path(args.task).read_text(encoding="utf-8")))
+            task = _validate_task(
+                json.loads(Path(args.task).read_text(encoding="utf-8"))
+            )
             catalog = _resolve_catalog_package(task, repo_root)
-            _validate_harness_manifest(task, repo_root, catalog_package=catalog, allow_qodercli_unavailable=True)
+            _validate_harness_manifest(
+                task,
+                repo_root,
+                catalog_package=catalog,
+                allow_qodercli_unavailable=True,
+            )
         elif getattr(args, "run_id", None):
-            task = _safe_read_json(_task_dir(repo_root) / _validate_run_id(args.run_id) / "task.json")
+            task = _safe_read_json(
+                _task_dir(repo_root) / _validate_run_id(args.run_id) / "task.json"
+            )
             _validate_task(task, runtime_bound=True)
             followup = json.loads(Path(args.followup).read_text(encoding="utf-8"))
-            immutable = {"session_id", "client", "_resume_mode", "agent_id", "run_id", "parent_client", "parent_session_id", "harness_manifest_sha256", "harness_context"}
-            if not isinstance(followup, dict) or immutable.intersection(followup): return None
-            task = {**task, **followup}; _validate_task(task, runtime_bound=True)
+            immutable = {
+                "session_id",
+                "client",
+                "_resume_mode",
+                "agent_id",
+                "run_id",
+                "parent_client",
+                "parent_session_id",
+                "harness_manifest_sha256",
+                "harness_context",
+            }
+            if not isinstance(followup, dict) or immutable.intersection(followup):
+                return None
+            task = {**task, **followup}
+            _validate_task(task, runtime_bound=True)
             catalog = _resolve_catalog_package(task, repo_root)
-            _validate_harness_manifest(task, repo_root, catalog_package=catalog, allow_qodercli_unavailable=True)
+            _validate_harness_manifest(
+                task,
+                repo_root,
+                catalog_package=catalog,
+                allow_qodercli_unavailable=True,
+            )
         else:
             return None
-        return _fallback.begin_terra_fallback(repo_root, task, str(uuid.uuid4()), "qoder-busy-" + str(routing.get("ownership", "unknown")))
+        return _fallback.begin_terra_fallback(
+            repo_root,
+            task,
+            str(uuid.uuid4()),
+            "qoder-busy-" + str(routing.get("ownership", "unknown")),
+        )
     except _fallback.DispatchFallbackError as exc:
-        return {"status": "BLOCKED", "code": exc.code, "next_action": "do-not-redispatch"}
+        return {
+            "status": "BLOCKED",
+            "code": exc.code,
+            "next_action": "do-not-redispatch",
+        }
     except (OSError, ValueError, json.JSONDecodeError):
-        return {"status": "BLOCKED", "code": "dispatch-input-invalid", "next_action": "fix-handoff-before-dispatch"}
+        return {
+            "status": "BLOCKED",
+            "code": "dispatch-input-invalid",
+            "next_action": "fix-handoff-before-dispatch",
+        }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -2313,14 +2814,22 @@ def main(argv: list[str] | None = None) -> int:
 
     p_start = sub.add_parser("start", help="Start a Qoder subtask")
     p_start.add_argument("--task", required=True, help="Path to task JSON file")
-    p_start.add_argument("--runtime-recovery-confirmed", action="store_true",
-                         help="Operator asserts account/access repair; not a health check or budget override")
+    p_start.add_argument(
+        "--runtime-recovery-confirmed",
+        action="store_true",
+        help="Operator asserts account/access repair; not a health check or budget override",
+    )
     p_start.set_defaults(func=cmd_start)
 
-    p_preflight = sub.add_parser("preflight", help="Validate a Qoder work package without starting it")
+    p_preflight = sub.add_parser(
+        "preflight", help="Validate a Qoder work package without starting it"
+    )
     p_preflight.add_argument("--task", required=True, help="Path to task JSON file")
-    p_preflight.add_argument("--runtime-recovery-confirmed", action="store_true",
-                            help="Same operator assertion as start; no health check or budget override")
+    p_preflight.add_argument(
+        "--runtime-recovery-confirmed",
+        action="store_true",
+        help="Same operator assertion as start; no health check or budget override",
+    )
     p_preflight.set_defaults(func=cmd_preflight)
 
     p_status = sub.add_parser("status", help="Check task status")
@@ -2331,19 +2840,28 @@ def main(argv: list[str] | None = None) -> int:
     p_result.add_argument("run_id", help="Run ID (UUID) from start")
     p_result.set_defaults(func=cmd_result)
 
-    p_validate = sub.add_parser("validate-result", help="Read-only result structure check, not acceptance")
+    p_validate = sub.add_parser(
+        "validate-result", help="Read-only result structure check, not acceptance"
+    )
     p_validate.add_argument("run_id", help="Run ID (UUID) from start or resume")
     p_validate.set_defaults(func=cmd_validate_result)
 
     p_resume = sub.add_parser("resume", help="Resume with saved session id")
     p_resume.add_argument("run_id", help="Run ID (UUID) from start")
     p_resume.add_argument("--followup", required=True, help="Path to followup JSON")
-    p_resume.add_argument("--runtime-recovery-confirmed", action="store_true",
-                          help="Operator asserts account/access repair; not a health check or budget override")
+    p_resume.add_argument(
+        "--runtime-recovery-confirmed",
+        action="store_true",
+        help="Operator asserts account/access repair; not a health check or budget override",
+    )
     p_resume.set_defaults(func=cmd_resume)
 
-    p_fallback = sub.add_parser("record-fallback", help="Verify one native Terra spawn result")
-    p_fallback.add_argument("--task", required=True, help="Original bounded handoff JSON")
+    p_fallback = sub.add_parser(
+        "record-fallback", help="Verify one native Terra spawn result"
+    )
+    p_fallback.add_argument(
+        "--task", required=True, help="Original bounded handoff JSON"
+    )
     p_fallback.add_argument("--attempt-id", required=True)
     p_fallback.add_argument("--call-id", required=True)
     p_fallback.set_defaults(func=cmd_record_fallback)
@@ -2365,7 +2883,9 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     except BusyRoutingError as exc:
         route = _fallback_for_busy(args, exc.routing)
-        print(json.dumps(route if route is not None else exc.routing, ensure_ascii=False))
+        print(
+            json.dumps(route if route is not None else exc.routing, ensure_ascii=False)
+        )
         return 3 if route is not None else 1
     except (ValueError, FileNotFoundError, json.JSONDecodeError, KeyError) as exc:
         print(f"error: {exc}", file=sys.stderr)

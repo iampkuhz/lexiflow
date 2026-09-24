@@ -1,8 +1,5 @@
-"""CLI entry for ``python3 -m scripts.acceptance``.
+"""`python3 -m scripts.acceptance` 的 CLI 入口。各命名场景保持独立执行和身份边界。"""
 
-Named scenarios: submit, validate, review, check, status.
-Identity is discovered from real runtime, not caller-supplied.
-"""
 from __future__ import annotations
 
 import argparse
@@ -22,6 +19,7 @@ def _output(result: dict) -> int:
 
 def _cmd_submit(args: argparse.Namespace) -> int:
     from scripts.acceptance.submit import submit, SubmissionError
+
     try:
         result = submit(
             args.repo_root,
@@ -37,6 +35,7 @@ def _cmd_submit(args: argparse.Namespace) -> int:
 
 def _cmd_validate(args: argparse.Namespace) -> int:
     from scripts.acceptance.validate import validate, ValidationError
+
     try:
         result = validate(
             args.repo_root,
@@ -49,9 +48,14 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 
 def _cmd_review(args: argparse.Namespace) -> int:
     from scripts.acceptance.review import review, ReviewError
+
     try:
         try:
-            findings = json.loads(Path(args.findings_json).read_text()) if args.findings_json else []
+            findings = (
+                json.loads(Path(args.findings_json).read_text())
+                if args.findings_json
+                else []
+            )
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise ReviewError("findings-invalid", str(exc)) from None
         result = review(
@@ -68,6 +72,7 @@ def _cmd_review(args: argparse.Namespace) -> int:
 
 def _cmd_check(args: argparse.Namespace) -> int:
     from scripts.acceptance.check import check_conditions, CheckError
+
     try:
         result = check_conditions(
             args.repo_root,
@@ -80,6 +85,7 @@ def _cmd_check(args: argparse.Namespace) -> int:
 
 def _cmd_status(args: argparse.Namespace) -> int:
     from scripts.acceptance.status import query_status
+
     result = query_status(args.repo_root, submission_id=args.submission_id)
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0
@@ -94,9 +100,15 @@ def main(argv: list[str] | None = None) -> int:
     submit_parser.add_argument("--task-id", required=True)
     submit_parser.add_argument("--change-report-id", required=True)
     submit_parser.add_argument("--confirm-scope-report-id", required=True)
-    submit_parser.add_argument("--producer-run-id", default=None, help="Optional validated Codex/Qoder run reference")
+    submit_parser.add_argument(
+        "--producer-run-id",
+        default=None,
+        help="Optional validated Codex/Qoder run reference",
+    )
 
-    validate_parser = subparsers.add_parser("validate", help="Run independent validation")
+    validate_parser = subparsers.add_parser(
+        "validate", help="Run independent validation"
+    )
     validate_parser.add_argument("--repo-root", default=".")
     validate_parser.add_argument("--submission-id", required=True)
 
@@ -105,7 +117,9 @@ def main(argv: list[str] | None = None) -> int:
     review_parser.add_argument("--submission-id", required=True)
     review_parser.add_argument("--validation-id", required=True)
     review_parser.add_argument("--findings-json", default=None)
-    review_parser.add_argument("--decision", required=True, choices=("PASS", "BLOCKED", "FAIL"))
+    review_parser.add_argument(
+        "--decision", required=True, choices=("PASS", "BLOCKED", "FAIL")
+    )
 
     check_parser = subparsers.add_parser("check", help="Check acceptance conditions")
     check_parser.add_argument("--repo-root", default=".")
