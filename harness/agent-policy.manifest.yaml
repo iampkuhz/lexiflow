@@ -1,4 +1,8 @@
+# Agent 策略真源：先读边界，再按 subagent_protocol → agent_dispatch → runner 专属规则下钻。
+# 英文短值多为机器协议，不翻译；中文解释与术语表见 docs/development/reference/engineering-glossary.md。
 schemaVersion: 1
+
+# 范围护栏：受保护目录仍可按授权编辑，但不能越权、伪造身份或覆盖他人改动。
 protected_roots:
 - .codex/
 - .qoder/
@@ -9,17 +13,23 @@ protected_roots:
 - backend/
 - extension/**
 - AGENTS.md
+
+# 规则只在共享入口维护；客户端不复制另一套规范。
 context_hygiene:
   shared_rule_locations:
   - AGENTS.md
   - harness/
   platform_configs_are_entry_points: true
   runtime_state_in_harness: false
+
+# 执行与交接：区分计划、已派发、真实启动及正式验收。
 execution_progress:
   rule: 用户明确要求启动或继续时，在授权范围内实际执行到派发、同步交付或可核验阻塞；不得仅阅读配置、描述下一步后结束，也不得暗示回合结束后会自动继续。
   dispatch_evidence: start 返回 run_id 仅表示已派发；只有匹配身份的 started.json 才证明 CLI 已启动。预检 PASS、计划和预计动作均不是启动证据。
   blocked_handoff: 报告实际失败层、阻塞证据与可执行接手路径；可自行完成的准备或合规接手应继续执行，只有缺用户决定、外部恢复或真实执行能力时才交还控制权。
   asynchronous_dispatch_handoff: Qoder start/resume 返回 AWAITING_CALLBACK 后必须立即结束当前主线程回合；这是实际派发后的控制权交接，不属于只承诺不执行。不得 sleep、查时钟、探测进程/日志或以其他工作保持本轮活跃等待完成。只由终态 callback 续办；重复已 ack/superseded 回调直接结束。
+
+# 隐私边界：下列数据不得进入共享产物或委派上下文。
 privacy:
   forbidden_inputs:
   - secrets
@@ -29,6 +39,8 @@ privacy:
   - unredacted-model-payloads
   - runtime-cache
   - personal-config
+
+# Git 集成需用户明示，不把自动提交当作交付步骤。
 git_safety:
   forbidden_actions:
   - stash
@@ -37,6 +49,8 @@ git_safety:
   - rebase
   - unauthorized-push
   integration_requires_explicit_user_choice: true
+
+# 依赖方向是架构 contract；箭头表示允许依赖，不表示 workflow 顺序。
 architecture:
   style: modular-monolith
   dependency_rules:
@@ -54,7 +68,11 @@ architecture:
   - cross-domain-table-access
   - extension-as-service-source-of-truth
   - english-caption-waits-for-model
+
+# 工作包公共 contract：模型选择、身份、caller 输入、runner 输出与结果核对。
 subagent_protocol:
+
+  # 按完整工作包分类；角色名和继承设置不能代替显式模型与 reasoning 参数。
   codex_model_policy:
     default_model: gpt-6-luna
     routine_model: gpt-6-luna
@@ -138,6 +156,8 @@ subagent_protocol:
     applies_to: catalog-task-not-agent-session
     min: 20
     max: 90
+
+  # Work Package 是可独立验收的连贯工作，不按一次模型对话随意切片。
   delegation_work_package:
     unit: coherent-set-of-catalog-tasks
     identity_fields:
@@ -171,13 +191,12 @@ subagent_protocol:
     - isolated_read_only_review
     turn_or_token_count_is_not_acceptance_evidence: true
   identity_rules:
-  - Every Qoder handoff has one stable work_package_id and at least one ordered Task id.
-  - Every Codex work package has one stable work_package_id and an exact ordered task_ids list.
-  - Every run has a unique agent_id and run_id.
-  - Parallel writers have non-overlapping ownership.
-  - Main Agent independently validates delegated output.
-  skipped_semantics: skipped, not-run, unavailable, excluded, queued, acknowledged and exit-zero are not
-    PASS.
+  - "每次 Qoder handoff 必须有稳定的 work_package_id，以及至少一个按顺序声明的 Task ID。"
+  - "每个 Codex Work Package 必须有稳定的 work_package_id，以及精确且有序的 task_ids 列表。"
+  - "每次 run 必须具有唯一的 agent_id 与 run_id。"
+  - "并行写入者的 ownership 不得重叠。"
+  - "Main Agent 独立核验委派产物。"
+  skipped_semantics: "skipped、not-run、unavailable、excluded、queued、acknowledged 与 exit-zero 均不等于 PASS。"
   caller_required_input_applies_to: qoder-task-handoff
   caller_required_input:
   - goal
@@ -423,6 +442,8 @@ subagent_protocol:
     identity_source: same-immutable-codex-runtime-binding
     self-validation-or-self-review: forbidden
     materializer: scripts/agents/local_codex_runtime.py
+
+# 派发路由与失败预算；固定值被 runner 消费，不能把描述性翻译用于替换协议值。
 agent_dispatch:
   primary: qoder
   fallback_model: gpt-6-sol
@@ -444,6 +465,8 @@ agent_dispatch:
   fallback_result_evidence: identity-bound-native-tool-result-not-self-reported-pass
   codex_wait: native-collaboration-events-not-qoder-terminal-callback
   safety_preconditions: identity-write-scope-no-duplicate-execution
+
+# Qoder 专属生命周期：先核对宿主等待资格，再运行；终态 callback 才能续办。
 qoder_delegation:
   default_implementer: qoder
   default_permission_mode: bypass_permissions
@@ -505,7 +528,7 @@ qoder_delegation:
     schema: lexiflow.qoder-work-package-result.v1
     result_json_required_before_completion: true
     exit_zero_without_valid_result: failed
-  prompt_context_policy: Use bounded file locators; do not repeat design documents in the handoff.
+  prompt_context_policy: "使用有界的文件 locator；handoff 不重复粘贴设计文档。"
   recursive_delegation: forbidden
   completion_callback:
     transport: codex-queue
@@ -528,6 +551,8 @@ qoder_delegation:
     result_and_status_read_only: true
 
 # 客户端兼容投影的调度字段，值与既有模板一致。
+
+# Codex 原生协作：沿用工作包合同，通过 native collaboration event 收取结果。
 codex_dispatch:
   max_active_subagents: 1
   default_fork_turns: none

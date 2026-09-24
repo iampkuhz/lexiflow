@@ -1,5 +1,7 @@
 # 1. 字幕内容合同
 
+**位置：** [架构总览](overview.md) → [观看时序](flows/viewing.md) → 字幕内容合同。**上游：** [来源适配](source-contract.md)；**下游：** [Enrichment 提示决策](boundaries.md#11-两个领域回答不同问题)。**失败：** 身份或范围不可靠时不复用旧结果，只保留英文。
+
 `CaptionContext` 是 Enrichment 的版本化输入值，不形成新的业务领域。来源适配器把来源专有
 字幕转成这个合同；请求内身份支持关联和失效，不授权持久保存字幕。来源取得步骤见
 [来源适配合同](source-contract.md)，词库查询边界见[共享词库合同](lexicon-contract.md)。

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lexiflow.acceptance-records.v3",
-  "title": "LexiFlow formal acceptance records",
+  "title": "LexiFlow 正式验收记录",
   "$defs": {
     "sha256": {
       "type": "string",
@@ -229,5 +229,5 @@
       }
     }
   ],
-  "$comment": "Canonical duplicate-key-free JSON, SHA256 content binding, safe regular-file reads, immutable atomic publication; semantic/source checks remain in scripts.acceptance."
+  "$comment": "规范化且无重复 key 的 JSON、SHA256 内容绑定、安全的普通文件读取、不可变原子发布；语义和来源核对仍由 scripts.acceptance 负责。"
 }

@@ -1,4 +1,6 @@
-# 1. 仓库术语表
+# 1. 产品术语表
+
+> 位置：[文档首页](../README.md) → [产品说明](product-brief.md) → 产品术语。工程机制另见[工程术语](../development/reference/engineering-glossary.md)。
 
 本页以 LexiFlow 的产品对象及其关系为主体，供产品讨论、设计和代码命名使用。中文名与英文名表达同一概念；英文名不是现有类名或接口字段的清单。
 

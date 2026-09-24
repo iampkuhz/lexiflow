@@ -1,11 +1,14 @@
+# Domain ownership 与依赖方向；不是部署拓扑，也不按 api/worker 划分业务服务。
 schemaVersion: 1
 dependency_rules:
-- composition roots may depend on application use cases and platform infrastructure
-- application use cases may depend on domain contracts
-- platform infrastructure may depend on the public contracts needed by its technical integrations
-- domain models and policies may depend only on Java standard types and public domain contracts
-- no module may access another domain's persistence implementation or tables
-- no core module may depend on Chrome, YouTube, HTTP, Redis, PostgreSQL or a concrete model provider
+- "Composition Root 可依赖 Application Use Case 与 Platform Infrastructure。"
+- "Application Use Case 可依赖 Domain contract。"
+- "Platform Infrastructure 可依赖技术集成所需的公开 contract。"
+- "Domain 模型与策略仅可依赖 Java 标准类型及公开 Domain contract。"
+- "模块不得访问其他 Domain 的持久化实现或数据表。"
+- "核心模块不得依赖 Chrome、YouTube、HTTP、Redis、PostgreSQL 或具体 Model Provider。"
+
+# Domain 拥有业务概念；其他模块只能消费其公开 contract。
 bounded_contexts:
   lexicon:
     display_name: 共享词汇知识
@@ -31,6 +34,8 @@ bounded_contexts:
     - annotation-result
     may_depend_on:
     - lexicon
+
+# Application 编排用例，不拥有其他 Domain 的存储。
 application_modules:
   workflow-application:
     owns:
@@ -45,6 +50,8 @@ application_modules:
     - lexicon-repository-contract
     may_depend_on:
     - lexicon
+
+# Infrastructure 通过 port 实现技术集成。
 infrastructure_modules:
   platform-adapters:
     owns:
@@ -59,6 +66,8 @@ infrastructure_modules:
     - enrichment
     - workflow-application
     - lexicon-application
+
+# Composition Root 负责组装；api/worker 分进程不改变领域边界。
 composition_roots:
   api:
     includes:
@@ -70,6 +79,8 @@ composition_roots:
     - background-use-cases
     - job-runtime-trigger
     - platform-infrastructure
+
+# 客户端保持薄，只保留显式、本机私有的偏好。
 client_adapters:
   chrome-extension:
     source_of_truth: false

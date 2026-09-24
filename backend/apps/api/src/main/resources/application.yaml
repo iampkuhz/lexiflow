@@ -1,3 +1,5 @@
+# API Composition Root 的运行配置；环境变量覆盖值，默认值不包含真实密钥。
+# 启动与端口选择见 docs/development/operations/local-experience.md。
 spring:
   application:
     name: lexiflow-api

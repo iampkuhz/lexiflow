@@ -33,7 +33,7 @@ async function contentId(videoId: string): Promise<string> {
   return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
 }
 
-// Clipping preserves source geometry and visibility detection without changing subtitle nodes.
+// 裁剪只影响绘制，保留来源几何信息与可见性检测，不修改字幕节点。
 const sourceMask = document.createElement("style");
 sourceMask.textContent = ".lexiflow-inline-active #ytp-caption-window-container{clip-path:inset(50%)!important}";
 document.documentElement.append(sourceMask);
@@ -96,7 +96,7 @@ const coordinator = new CaptionStreamCoordinator(
     }
   }),
   (view) => {
-    // Re-read the live source at delivery, not merely the last debounced snapshot.
+    // 交付结果时重新读取实时来源，不能只相信最后一次 debounce snapshot。
     if (view.state === "ready" && (!view.event || view.event.sequence !== sourceSequence ||
         view.event.request.caption !== currentCaption() || activeVideoId !== videoIdFromLocation())) {
       diagnostics.record({ outcome: "stale-at-render" });
@@ -138,7 +138,7 @@ function currentCaption(): string | undefined {
 }
 
 function scheduleCapture(): void {
-  // MutationObserver runs before paint: invalidate old hints before hashing or request debounce.
+  // MutationObserver 在绘制前执行：先使旧提示失效，再计算哈希或合并请求。
   void captureCurrentCaption();
 }
 
@@ -277,5 +277,5 @@ for (const name of ["emptied", "ended"]) {
   }, true);
 }
 
-// A hidden tab must not keep displaying or requesting an obsolete caption.
+// 隐藏的标签页不得继续显示或请求过期字幕。
 document.addEventListener("visibilitychange", scheduleCapture);

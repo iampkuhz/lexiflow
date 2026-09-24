@@ -1,6 +1,8 @@
 # 1. 架构决策
 
-每项 ADR 固定回答**决定、取舍理由与复审条件**。产品范围见[产品说明](../product/product-brief.md)，阶段计划见[长期计划](../roadmap/master-plan.md)，执行步骤见[校验手册](../development/validation.md)。
+**位置：** [架构总览](overview.md) → 架构决策。先由[产品说明](../product/product-brief.md)和[两条流程](flows.md)理解问题，再按本页查决定、取舍与复审条件。改变决定先进入 OpenSpec 变更；实施进度不在本页维护。
+
+每项 ADR 固定回答**决定、取舍理由与复审条件**。产品范围见[产品说明](../product/product-brief.md)，阶段计划见[长期计划](../roadmap/master-plan.md)，执行步骤见[工程交付](../development/change-delivery.md)。
 
 ## 1.1. ADR-001：以模块化单体交付
 

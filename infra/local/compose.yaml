@@ -1,3 +1,5 @@
+# 本机开发资源：会保留开发数据，不可直接当作破坏性测试数据库。
+# 隔离测试资源的显式准备见 docs/development/operations/verification-environment.md。
 name: lexiflow-local
 services:
   postgres:

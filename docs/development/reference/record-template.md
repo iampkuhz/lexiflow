@@ -1,5 +1,7 @@
 # 1. 校验记录模板
 
+> 位置：[Reference](../reference.md) → 记录模板。用于说明执行事实，不签发正式 receipt；对应流程见[开发交付](../change-delivery.md)。
+
 ```markdown
 # 1. 校验记录
 

@@ -89,7 +89,7 @@ project(":platform:adapters") {
     }
     tasks.register<Test>("postgresIntegrationTest") {
         group = LifecycleBasePlugin.VERIFICATION_GROUP
-        description = "Runs PostgreSQL-backed persistence integration tests."
+        description = "执行基于 PostgreSQL 的持久化集成测试。"
         testClassesDirs = platformSourceSets["test"].output.classesDirs
         classpath = platformSourceSets["test"].runtimeClasspath
         useJUnitPlatform {
@@ -106,7 +106,7 @@ project(":platform:adapters") {
     }
     tasks.register<JavaExec>("postgresInit") {
         group = "application"
-        description = "Explicitly initializes the backend-owned PostgreSQL schema."
+        description = "显式初始化后端拥有的 PostgreSQL schema。"
         classpath = platformSourceSets["main"].runtimeClasspath
         mainClass.set("io.lexiflow.lexicon.platform.persistence.PostgresSchemaMain")
         workingDir(rootProject.projectDir.parentFile)
@@ -117,7 +117,7 @@ project(":platform:adapters") {
 
     tasks.register<JavaExec>("lexiconImport") {
         group = "application"
-        description = "Runs the offline LexiFlow lexicon importer."
+        description = "执行 LexiFlow 离线词库导入。"
         classpath = platformSourceSets["main"].runtimeClasspath
         mainClass.set("io.lexiflow.lexicon.platform.importer.LexiconImportMain")
         workingDir(rootProject.projectDir.parentFile)
@@ -167,7 +167,7 @@ project(":tests:integration") {
     }
     tasks.register<Test>("runtimeSmokeTest") {
         group = LifecycleBasePlugin.VERIFICATION_GROUP
-        description = "Runs isolated PostgreSQL/Redis protocol, migration, API health, and worker startup smoke."
+        description = "执行隔离的 PostgreSQL/Redis 协议、schema 初始化、API 健康与 worker 启动 smoke 测试。"
         dependsOn(":apps:api:bootJar", ":apps:worker:bootJar")
         testClassesDirs = runtimeSmoke.output.classesDirs
         classpath = runtimeSmoke.runtimeClasspath
@@ -191,7 +191,7 @@ val productSourceFiles = fileTree(rootDir) {
 }
 val verifyProductLanguage = tasks.register<VerifyProductLanguageTask>("verifyProductLanguage") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Ensures backend product source remains Java."
+    description = "检查后端产品源码只使用 Java。"
     productSources.from(productSourceFiles)
     resultFile.set(layout.buildDirectory.file("reports/product-language/result.txt"))
 }
@@ -205,20 +205,20 @@ val projectDependencyGraph = leafProjects.associate { source ->
 }
 val verifyProjectDependencies = tasks.register<VerifyProjectDependenciesTask>("verifyProjectDependencies") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Rejects project dependencies that point against modular-monolith layers."
+    description = "拒绝违反 Modular Monolith 层级方向的项目依赖。"
     dependencyGraph.set(projectDependencyGraph.toSortedMap())
     resultFile.set(layout.buildDirectory.file("reports/project-dependencies/result.txt"))
 }
 
 val architectureTest = tasks.register("architectureTest") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Runs the Java architecture boundary suite."
+    description = "执行 Java 架构边界测试。"
     dependsOn(":tests:architecture:test")
 }
 
 val javaSourceGates = tasks.register("javaSourceGates") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Runs deterministic Java source gates."
+    description = "执行确定性的 Java Source Gate。"
     dependsOn(":tests:quality-gates:runJavaSourceGates")
 }
 
@@ -231,7 +231,7 @@ val encodedTestEntries = leafProjects.map { leaf ->
 }
 val verifyNoSkippedJavaTests = tasks.register<VerifyNoSkippedTestsTask>("verifyNoSkippedJavaTests") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Fails when Java test results are absent, skipped, or aborted."
+    description = "Java 测试结果缺失、跳过或中止时失败。"
     dependsOn(leafProjects.map { "${it.path}:test" })
     testEntries.set(encodedTestEntries)
     resultFile.set(layout.buildDirectory.file("reports/verify-no-skipped-tests/result.txt"))
@@ -240,7 +240,7 @@ val verifyNoSkippedJavaTests = tasks.register<VerifyNoSkippedTestsTask>("verifyN
 
 val jacocoRootReport = tasks.register<JacocoReport>("jacocoRootReport") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Aggregates JaCoCo XML and HTML reports across Java leaves."
+    description = "汇总各 Java 子项目的 JaCoCo XML 与 HTML 报告。"
     dependsOn(leafProjects.map { "${it.path}:jacocoTestReport" })
     executionData.from(leafProjects.map { it.layout.buildDirectory.file("jacoco/test.exec") })
     sourceDirectories.from(leafProjects.map { it.layout.projectDirectory.dir("src/main/java") })
@@ -264,19 +264,19 @@ tasks.named("check") {
 
 tasks.register("qualityFull") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Runs the fail-closed Java quality suite and aggregate coverage report."
+    description = "执行 fail-closed 的 Java 质量检查并汇总覆盖率报告。"
     dependsOn("check", jacocoRootReport)
 }
 
 tasks.register("deliveryFull") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "Runs the single full Java delivery aggregate: quality checks and both boot jars."
+    description = "执行唯一完整 Java 交付聚合：质量检查及两个 boot JAR。"
     dependsOn("qualityFull", ":platform:adapters:postgresIntegrationTest", ":tests:integration:runtimeSmokeTest", "productBootJar")
 }
 
 tasks.register("spotlessApply") {
     group = "formatting"
-    description = "Formats every Java leaf through the shared convention."
+    description = "按共享 convention 格式化所有 Java 子项目。"
     dependsOn(leafProjects.map { "${it.path}:spotlessApply" })
 }
 

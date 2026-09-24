@@ -1,3 +1,4 @@
+# Harness 入口索引：公开命令、长期脚本边界和读者导航；不在这里保存运行结果。
 schemaVersion: 1
 project:
   name: lexiflow
@@ -75,21 +76,15 @@ quality:
 docs:
 - docs/README.md
 - docs/product/product-brief.md
+- docs/product/glossary.md
 - docs/architecture/overview.md
-- docs/architecture/boundaries.md
 - docs/architecture/flows.md
-- docs/architecture/semantic-contract.md
-- docs/architecture/data-model.md
-- docs/architecture/lexicon-contract.md
-- docs/architecture/caption-contract.md
-- docs/architecture/data-contracts.md
-- docs/architecture/runtime-safety.md
-- docs/architecture/source-contract.md
-- docs/architecture/decisions.md
-- docs/development/validation.md
-- docs/development/gate-control-plane.md
-- docs/development/repository-glossary.md
-- docs/development/toolchain-reproduction.md
+- docs/development/overview.md
+- docs/development/change-delivery.md
+- docs/development/agent-workflow.md
+- docs/development/operations.md
+- docs/development/reference.md
+- docs/development/troubleshooting.md
 - docs/roadmap/master-plan.md
 - docs/roadmap/master-plan/foundation.md
 - docs/roadmap/master-plan/performance.md

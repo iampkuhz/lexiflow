@@ -1,3 +1,4 @@
+# Java 构建依赖版本的集中声明；由 Gradle 消费，不在 Python Gate 中重复维护。
 [versions]
 archunit = "1.4.2"
 checkstyle = "10.21.4"

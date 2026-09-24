@@ -1,3 +1,5 @@
+# 客户端运行边界；共享字段由 agent-policy 与 policy-projections 派生。
+# 修改共享规则应改 policy，再运行 policy_projection --write；不要手工双写。
 schemaVersion: 1
 agent_dispatch:
   primary: qoder
@@ -30,6 +32,8 @@ protected_roots:
 - backend/
 - extension/**
 - AGENTS.md
+
+# Session 生命周期：运行事实不能通过 caller 自填字段替代。
 lifecycle:
   owner: client
   checkout: client-selected
@@ -43,6 +47,8 @@ lifecycle:
   - force
   - rebase
   - auto-push
+
+# 验证层级与非 PASS 条件；退出码为零不是完整验收。
 validation:
   invocation: explicit
   delivery_command: python3 scripts/check_changes.py
@@ -51,6 +57,8 @@ validation:
   non_passing_results:
   - BLOCKED
   - FAIL
+
+# 共享架构方向的客户端投影。
 architecture_contract:
   source: harness/agent-policy.manifest.yaml
   dependency_rules:
@@ -62,6 +70,8 @@ architecture_contract:
   - application -> domain-and-ports
   forbidden:
   - application-depends-on-concrete-adapter
+
+# 共享工作包协议投影；本文件不是第二真源。
 subagent_protocol:
   source: harness/agent-policy.manifest.yaml
   codex_model_policy:
@@ -263,6 +273,8 @@ subagent_protocol:
     validation_command: non-empty-string
     failure_policy: non-empty-string
     parent_client: exact-string-codex
+
+# 异步交接和恢复边界；未知状态不触发重复执行。
 callback_and_fallback:
   completion_record_first: true
   callback_target: exact-parent-session-uuid
@@ -275,6 +287,8 @@ callback_and_fallback:
     interval_seconds: 600
     max_lifetime_seconds: 86400
     unchanged_state_is_silent: true
+
+# 运行数据只保存在本机 ignored 目录，不混入 Harness 静态规则。
 runtime_data:
   committed: false
   paths:
@@ -282,6 +296,8 @@ runtime_data:
   - .local/
   - data/
   - secrets/
+
+# 各客户端入口定位；入口只加载共享规则。
 platforms:
   codex:
     config_files:

@@ -73,7 +73,7 @@ export function parseHintResponse(value: unknown, expectedCaption?: string): Hin
         startOffset < 0 || endOffset <= startOffset || endOffset > body.caption.length ||
         splitsSurrogate(body.caption, startOffset) || splitsSurrogate(body.caption, endOffset) ||
         typeof chineseGloss !== "string" || chineseGloss.trim().length === 0) return undefined;
-    // Reject doubtful evidence intact. Taking the first clause would invent a sense choice.
+    // 完整拒绝存疑证据；截取第一分句会伪造 sense 选择。
     if (Array.from(chineseGloss).length > 24 || !/\p{Script=Han}/u.test(chineseGloss) ||
         /[\s\p{P}\p{S}\p{C}]/u.test(chineseGloss)) return undefined;
     hints.push({ startOffset, endOffset, chineseGloss, lexiconEntryId, lexiconVersion, senseId });

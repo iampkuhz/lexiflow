@@ -57,3 +57,14 @@ maintenance:
   forbidden_directory_names: [history, archive, archives]
   rule: 每个主题只维护最新版；直接更新或合并删除旧页，不建立历史目录、日期快照或复审副本。
   evidence: 原始运行收据和日志留在忽略目录且不可改写；不把历史通过结果当作最新版文档的验收。
+# 阅读约定用于人工审阅，不新增自动阻断或 Hook。
+reader_navigation:
+  principle: 先回答读者问题，再从总览和 workflow 阶段下钻到子能力、公开入口与文件职责；Reference 是侧链，不是额外必经步骤。
+  overview: 先给目的、边界和主图，再解释阶段与深入入口；不以目录清单代替系统模型。
+  workflow: 明确当前位置、前置输入、输出交接、失败去向和回到上级的路径；调用关系与阶段顺序分别说明。
+  reference: standalone checker 和字段参数按需查阅；有状态的 status/result 仍属于对应 workflow，有副作用的 install/link/start 单列说明。
+  source_comments: 注释解释 contract、不变量、边界和设计原因；先恢复代码结构，不以模板空话、注释数量或中文比例作为质量证据。
+terminology:
+  engineering_glossary: docs/development/reference/engineering-glossary.md
+  product_glossary: docs/product/glossary.md
+  rule: 中文承担叙述与连接，Harness、Quality Gate 等规范术语保持英文；字段、标识符、命令、路径、API、schema 与机器消费的固定值保持原样。

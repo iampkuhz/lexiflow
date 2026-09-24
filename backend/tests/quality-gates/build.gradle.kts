@@ -15,7 +15,7 @@ val javaSources = rootProject.fileTree(backendRoot) {
 
 tasks.register<JavaExec>("runJavaSourceGates") {
     group = "verification"
-    description = "Runs the deterministic LexiFlow Java source gates."
+    description = "执行确定性的 LexiFlow Java Source Gate。"
     dependsOn(tasks.named("classes"))
     mainClass.set("io.lexiflow.quality.QualityGateMain")
     classpath = sourceSets["main"].runtimeClasspath

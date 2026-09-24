@@ -1,3 +1,4 @@
+# Java 产品构建与检查的唯一技术入口；Python 只编排证据，不复刻 Java 扫描。
 schema_version: lexiflow.java-product.v1
 status: active
 backend:
@@ -14,6 +15,8 @@ backend:
     allowed_layers: [composition-root, inbound-adapter, outbound-adapter]
     forbidden_layers: [domain, application]
   runtimes: [api, worker]
+
+# 产品源码只允许 Java；Python 范围另列。
 source_policy:
   product_roots:
   - backend/apps
@@ -25,6 +28,8 @@ source_policy:
 python_scope:
   allowed: [scripts, harness, gates, generators, audit, tests-for-python-tooling]
   forbidden: [product-domain, product-application, product-api, product-worker]
+
+# delivery 命令用于交付，diagnostic_targets 仅用于定位故障，不叠加成为新阶段。
 verification:
   launcher: python3 -m scripts.environment.java_exec
   jdk_resolution: explicit-lexiflow-home-then-repository-local-then-exact-java-home

@@ -1,7 +1,6 @@
-# 1. 离线词库导入
+# 1. 导入记录的处理与字段 Reference
 
-首批完整来源是本机 `stardict.csv`；不叠加 `ecdict.csv`，避免重复 lemma 与词形。词典文件只在
-本机读取，不提交到仓库；频率与缓存优先级不使用用户字幕、观看历史、点击或熟悉度。
+> 位置：[Operations](../../operations.md) → [词库导入](../lexicon-import.md) → 记录处理。这里只解释字段、频率与选择规则，不是每次操作都必须逐项执行的步骤。
 
 ## 1.1. 单条记录提取
 
@@ -80,46 +79,3 @@ lemma,chinese_gloss,definition,aliases,inflections,frequency_zipf,frequency_sour
 | `lexicon_sense` | 中文释义、英文定义、来源记录引用。 |
 | `lexicon_inflection` | 词形到 lemma 的映射。 |
 | `lexicon_source_evidence` | 词典、频率与复杂词表的逐条证据。 |
-
-## 1.4. 操作与验证
-
-准备本机 `stardict.csv`，确认首行和摘要；**直接把该文件传给命令**，不要把 StarDict 文件先转换成
-`lexiflow-lexicon-v1.csv`，也不要叠加 `ecdict.csv`：
-
-```bash
-export STARDICT_CSV=/absolute/path/stardict.csv
-shasum -a 256 "$STARDICT_CSV"
-head -n 1 "$STARDICT_CSV"
-LEXICON_ARGS=$(printf 'validate\037--input\037%s' "$STARDICT_CSV")
-python3 -m scripts.environment.java_exec backend/gradlew -p backend \
-  :platform:adapters:lexiconImport "-PlexiconImportArgs=$LEXICON_ARGS"
-LEXICON_ARGS=$(printf 'basic-report\037--input\037%s' "$STARDICT_CSV")
-python3 -m scripts.environment.java_exec backend/gradlew -p backend \
-  :platform:adapters:lexiconImport "-PlexiconImportArgs=$LEXICON_ARGS"
-LEXICON_ARGS=$(printf 'prewarm-report\037--input\037%s\037--limit\0372000' "$STARDICT_CSV")
-python3 -m scripts.environment.java_exec backend/gradlew -p backend \
-  :platform:adapters:lexiconImport "-PlexiconImportArgs=$LEXICON_ARGS"
-```
-
-`validate` 流式扫描原始 CSV，执行与发布一致的领域投影和跨行 canonical 表面校验，输出 `entries`、归并的派生词数和跳过原因；它不连接数据库，不保留原始行或完整领域词条；为检出跨行重复，保留随唯一 lemma/alias 数量增长的 canonical 表面索引。`basic-report` 输出基础词实际数量、名单及摘要、重复表达清洗数量，不连接数据库。`prewarm-report` 只保持 `--limit` 个候选，用于人工检查频率、复杂词表与 Oxford 排除。
-
-确认上述输出后启动本机 PostgreSQL 并发布：
-
-以下初始化命令只接受空 schema，重复执行会拒绝，不会自动清库。结构变化时先核对本项目数据库及使用它的 API/worker，协调停用后显式清空并重建；不得操作其他项目库。完整导入发布后再启动应用。重建需同步失效对应缓存，并避免资料身份与本机偏好旧引用混淆；本命令块不自动完成重建或缓存处置。
-
-```bash
-podman compose -f infra/local/compose.yaml up -d
-JDBC_URL='jdbc:postgresql://127.0.0.1:15432/lexiflow?user=postgres&reWriteBatchedInserts=true'
-INIT_ARGS=$(printf '%s\037%s' "$JDBC_URL" "$PWD/infra/postgres/schema.sql")
-python3 -m scripts.environment.java_exec backend/gradlew -p backend \
-  :platform:adapters:postgresInit "-PpostgresInitArgs=$INIT_ARGS"
-LEXICON_ARGS=$(printf 'publish\037--input\037%s\037--database-url\037%s\037--batch-source-id\037ecdict-stardict\037--batch-license-id\037MIT' "$STARDICT_CSV" "$JDBC_URL")
-python3 -m scripts.environment.java_exec backend/gradlew -p backend \
-  :platform:adapters:lexiconImport "-PlexiconImportArgs=$LEXICON_ARGS"
-```
-
-`reWriteBatchedInserts=true` 让 PostgreSQL JDBC 将批写合并传输，不改变 500 条事务与失败回滚边界。
-
-发布以 500 条为一个已提交的 `STAGED` 分块，词条、义项、词形与来源证据按 JDBC batch 写入；任意已发布版本在整个扫描期间继续可查询。中断后以相同
-输入摘要、`--batch-source-id` 和 `--batch-license-id` 重跑同一命令，导入从最后已提交的来源行继续，新的 canonical 表面会与该批次已提交记录复核。自然屈折形可返回多个 lemma，别名冲突仍拒绝；只有
-完整扫描完成才会切换为 `PUBLISHED`。若来源文件或参数改变，则使用新的发布批次，不复用旧的 `STAGED` 批次。

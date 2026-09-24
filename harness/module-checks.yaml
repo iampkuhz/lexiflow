@@ -1,7 +1,12 @@
+# Quality Gate 的声明表，不是按文件排列的执行顺序。
+# 先读 docs/development/change-delivery/verification.md 理解选择、冻结与执行。
+# 每项按入口 → scope/触发 → 依赖 → 环境 → 输入 → result contract 阅读。
+# baseline 与 on-change 是两种选择视图；同轮执行去重由 Verification 负责。
 schema_version: lexiflow.module-checks.v1
-description: Closed module-owned checks. Every engineering module exposes a structured completeness result; zero tests, skips,
-  missing results, and unexecuted checks cannot PASS. Product delivery remains native Gradle/npm.
+description: "各工程模块拥有自己的 Check，并返回结构化完整性结果；零测试、跳过、缺失结果或未执行均不能 PASS。产品交付仍由原生 Gradle/npm 执行。"
 checks:
+
+# Verification 自测：选择、冻结、执行和报告的内部合同。
 - check_id: eng.verification.module-tests
   module: verification
   command:
@@ -106,6 +111,8 @@ checks:
       failures: 0
       errors: 0
       skipped: 0
+
+# Agents 自测：runner、身份、callback 与工作包事实。
 - check_id: eng.agents.module-tests
   module: agents
   command:
@@ -208,6 +215,8 @@ checks:
       failures: 0
       errors: 0
       skipped: 0
+
+# Acceptance 自测：submit/validate/review/check 的身份与 receipt 合同。
 - check_id: eng.acceptance.module-tests
   module: acceptance
   command:
@@ -298,6 +307,8 @@ checks:
       failures: 0
       errors: 0
       skipped: 0
+
+# Repository 自测：文档、planning、策略投影与本机接入。
 - check_id: eng.repository.module-tests
   module: repository
   command:
@@ -844,8 +855,7 @@ checks:
   - scripts/environment
   result_contract:
     type: exit-code
-    completeness_guarantee: Backend Gradle deliveryFull enforces non-empty, non-skipped Java tests and runs architecture,
-      source, schema, persistence, runtime-smoke, and boot-jar delivery tasks.
+    completeness_guarantee: "后端 Gradle deliveryFull 要求 Java 测试非空且不跳过，并执行 architecture、source、schema、persistence、runtime-smoke 与 boot-jar 交付任务。"
     allowed_statuses:
     - PASS
     - BLOCKED
@@ -912,8 +922,7 @@ checks:
   - scripts/environment
   result_contract:
     type: exit-code
-    completeness_guarantee: Backend Gradle deliveryFull enforces non-empty, non-skipped Java tests and runs architecture,
-      source, migration, persistence, runtime-smoke, and boot-jar delivery tasks.
+    completeness_guarantee: "后端 Gradle deliveryFull 要求 Java 测试非空且不跳过，并执行 architecture、source、schema、persistence、runtime-smoke 与 boot-jar 交付任务。"
     allowed_statuses:
     - PASS
     - BLOCKED

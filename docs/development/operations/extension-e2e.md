@@ -1,5 +1,7 @@
 # 1. Chrome 扩展双语提示体验与 E2E
 
+> 位置：[工程地图](../overview.md) → [Operations](../operations.md) → Extension E2E。本页验证浏览器交互，不替代真实词库质量验收。
+
 ## 1.1. 可见交互与失败边界
 
 扩展只处理 YouTube 播放页中 `video`、`.html5-video-player`、`#ytp-caption-window-container` 与
@@ -11,7 +13,7 @@ MutationObserver 在绘制前检测新快照，立即取消旧请求并替换为
 
 ## 1.2. 本机构建、安装与体验
 
-完整的依赖、API 启动、词库选择和扩展安装步骤统一在[首页](../../../README.md#本地启动)。
+完整的依赖、API 启动、词库选择和扩展安装步骤统一在[本机体验](local-experience.md)。
 API 默认供扩展访问的地址为 `http://127.0.0.1:18080`；使用完整词库前须[导入并发布](lexicon-import.md)。
 
 若默认端口已被其他实例占用，可用 `python3 -m scripts.environment.start_api --port 18081` 启动独立实例，并以
@@ -64,7 +66,7 @@ YouTube 渲染 DOM 只提供屏幕文本快照与播放器读数，没有可靠�
 播放器的 `#lexiflow-caption-overlay` 元素通过 `data-lexiflow-diagnostics` 提供本机内存聚合：
 采集、合并等待、传输、词库查询、规则、API、渲染和端到端耗时；包含总计数及最近 256 个样本的 p50/p95。
 无样本的百分位为 null，不冒充零耗时。API 用 `Server-Timing` 返回服务端自身计时，客户端不相减跨进程时钟。
-扩展 service worker 的 `[LexiFlow]` 日志仅给出结果和请求耗时。诊断应区分资料缺失、查询耗时与结果格式错误，不把在线模型配置作为观看的前提。配置参数与常用排障入口见[首页](../../../README.md#没有效果时看哪里)。
+扩展 service worker 的 `[LexiFlow]` 日志仅给出结果和请求耗时。诊断应区分资料缺失、查询耗时与结果格式错误，不把在线模型配置作为观看的前提。配置参数与常用排障入口见[排障导航](../troubleshooting.md)。
 
 `cancelled-acquisition`、`cancelled-before-request`、`cancelled-in-flight` 区分失效位置；`late-ready` 表示已返回提示但过期丢弃，`stale-at-render` 表示最终显示校验拒绝。取消可能来自换句、跳转、关闭等，不能全算成延迟漏译。`missing-server-timing` 记录成功响应缺少服务端完整计时；不同阶段样本数可能不同，不能直接相减其均值或百分位。
 

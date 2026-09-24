@@ -1,5 +1,7 @@
 # 1. 来源适配合同
 
+**位置：** [架构总览](overview.md) → [观看时序](flows/viewing.md) → 来源适配。**输入：** YouTube 已渲染英文；**输出：** 有界字幕输入；**下一步：** [字幕身份](caption-contract.md)。**失败：** 没有可靠文本、位置或修订时只保留英文。
+
 本页只定义 `youtube` 视频英文字幕如何成为字幕提示的输入。来源适配器负责取得并规范化字幕；它输出 Enrichment 的 `CaptionContext`，不是独立业务领域，也不参与提示决策。完整提示链路见[字幕提示流程](flows.md)，模块归属见[模块边界](boundaries.md)。
 
 ## 1.1. `youtube` 字幕处理流程
@@ -29,7 +31,7 @@ YouTube 渲染 DOM 不提供稳定字幕轨道标识、字幕修订或每段真�
 身份变更时递增本机观察修订，并把观察序号、播放器读数和文本纳入片段摘要；这些值只能保障一次
 同步请求的关联和迟到拒绝，不能声称是 `CaptionContext` 所需的规范来源修订，也不能进入共享缓存、
 持久工作或异步结果投递。完整限制和体验诊断见
-[Chrome 扩展双语提示体验与 E2E](../development/toolchain-reproduction/chrome-extension-e2e.md)。
+[Chrome 扩展本地体验与 E2E](../development/operations/extension-e2e.md)。
 
 ## 1.4. 注意事项
 

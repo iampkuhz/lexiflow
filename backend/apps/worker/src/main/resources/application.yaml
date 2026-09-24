@@ -1,3 +1,4 @@
+# Worker Composition Root 的运行配置；分进程不意味着拆分业务 Domain。
 spring:
   application:
     name: lexiflow-worker
