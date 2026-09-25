@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import subprocess
-import sys
 from pathlib import Path
 
 HOOK_PATH = ".githooks"
@@ -22,6 +21,7 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def install(root: Path) -> dict[str, str]:
+    """经显式调用安装非阻断 Git Hook 路径，不运行交付检查。"""
     hooks = root / HOOK_PATH
     required = (hooks / "pre-commit", hooks / "post-commit")
     if not hooks.is_dir() or any(not item.is_file() for item in required):
@@ -35,6 +35,7 @@ def install(root: Path) -> dict[str, str]:
 
 
 def doctor(root: Path) -> dict[str, str]:
+    """只读核对 Git Hook 配置是否指向本仓受版本管理的提醒脚本。"""
     configured = _git(root, "config", "--get", "core.hooksPath")
     if configured.returncode == 0 and configured.stdout.strip() == HOOK_PATH:
         return {"result": "PASS", "hooks_path": HOOK_PATH}
@@ -45,16 +46,15 @@ def doctor(root: Path) -> dict[str, str]:
     }
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
+    """选择 Hook 诊断或显式安装动作并输出结果。"""
     parser = argparse.ArgumentParser(description="Manage LexiFlow versioned Git hooks")
     parser.add_argument("command", choices=("install", "doctor"))
-    parser.add_argument("--root", default=".")
     args = parser.parse_args(argv)
     try:
+        repository = (root or Path(__file__).resolve().parents[2]).resolve()
         result = (
-            install(Path(args.root).resolve())
-            if args.command == "install"
-            else doctor(Path(args.root).resolve())
+            install(repository) if args.command == "install" else doctor(repository)
         )
     except (OSError, ValueError) as exc:
         result = {"result": "FAIL", "reason": "hook-install-failed", "detail": str(exc)}

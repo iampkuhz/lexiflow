@@ -118,32 +118,45 @@ def prepare_port(port: int) -> None:
     assert_bindable(port)
 
 
+def local_api_port(value: str | None) -> int:
+    """与扩展构建共用单一的本机端口输入。"""
+    if value is None:
+        return 18080
+    if (
+        not value.isascii()
+        or not value.isdecimal()
+        or value.startswith("0")
+        or len(value) > 5
+    ):
+        raise StartupBlocked("LEXIFLOW_API_PORT 必须为 1 至 65535 的规范整数。")
+    port = int(value)
+    if port > 65535:
+        raise StartupBlocked("LEXIFLOW_API_PORT 必须为 1 至 65535 的规范整数。")
+    return port
+
+
 def main(arguments: Sequence[str] | None = None) -> int:
-    """仅在端口预检成功后启动固定的本地 API 命令。"""
+    """在数据库和端口配置有效、端口预检成功后启动本地 API。"""
     parser = argparse.ArgumentParser(
         description="本机 API 启动；端口冲突时交互确认是否终止旧进程。"
     )
-    parser.add_argument("--port", type=int, default=18080)
-    parser.add_argument(
-        "--database-url",
-        help="可选 JDBC 地址；也可使用 SPRING_DATASOURCE_URL 环境变量。",
-    )
-    args = parser.parse_args(arguments)
-    if not 1 <= args.port <= 65535:
-        parser.error("--port 必须为 1 至 65535")
+    parser.parse_args(arguments)
     root = Path(__file__).resolve().parents[2]
     try:
         environment = command_environment(root)
-        if args.database_url is not None:
-            environment["SPRING_DATASOURCE_URL"] = args.database_url
-        prepare_port(args.port)
-        print(f"启动 LexiFlow API：http://127.0.0.1:{args.port}", flush=True)
+        database_url = environment.get("JDBC_URL", "")
+        if not database_url.strip():
+            raise StartupBlocked("正常启动需要 JDBC_URL；未启动演示词库。")
+        port = local_api_port(environment.get("LEXIFLOW_API_PORT"))
+        environment["SPRING_DATASOURCE_URL"] = database_url
+        prepare_port(port)
+        print(f"启动 LexiFlow API：http://127.0.0.1:{port}", flush=True)
         command = [
             str(root / "backend/gradlew"),
             "-p",
             str(root / "backend"),
             ":apps:api:bootRun",
-            f"--args=--server.address=127.0.0.1 --server.port={args.port}",
+            f"--args=--server.address=127.0.0.1 --server.port={port}",
         ]
         os.execvpe(command[0], command, environment)
     except (

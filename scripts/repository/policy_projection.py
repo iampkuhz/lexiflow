@@ -11,12 +11,14 @@ import yaml
 
 
 def lookup(value, path):
+    """从共享策略按字段路径读取真源值，缺失时明确失败。"""
     for key in path.split("."):
         value = value[key]
     return value
 
 
 def project(policy, rule):
+    """按投影声明计算客户端运行字段，不维护第二份手写策略。"""
     if "source" in rule:
         return copy.deepcopy(lookup(policy, rule["source"]))
     return {
@@ -50,6 +52,7 @@ def replace_block(text, path, value):
 
 
 def run(root: Path, write=False):
+    """检查或显式写入策略投影，返回与真源不一致的文件。"""
     spec = yaml.safe_load((root / "harness/policy-projections.yaml").read_text())
     policy = yaml.safe_load((root / spec["source"]).read_text())
     texts = {}
@@ -74,17 +77,15 @@ def run(root: Path, write=False):
     return drift
 
 
-def main():
+def main(argv=None, *, root: Path | None = None):
+    """强制选择 check 或 write；未显式选择时不修改文件。"""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parents[2]
-    )
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument("--check", action="store_true")
     modes.add_argument("--write", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
-        drift = run(args.root, args.write)
+        drift = run(root or Path(__file__).resolve().parents[2], args.write)
         ok = not drift or args.write
         print(
             json.dumps(

@@ -12,6 +12,7 @@ from scripts.environment.java_runtime import JavaRuntimeError, resolve_java_home
 
 
 def detect_python() -> dict[str, Any]:
+    """探测 Python 运行时是否满足声明的 Check 环境。"""
     return {
         "available": True,
         "executable": sys.executable,
@@ -23,6 +24,7 @@ def detect_python() -> dict[str, Any]:
 
 
 def detect_tool(name: str) -> dict[str, Any]:
+    """只读判断所需本机工具是否可执行，不自动安装。"""
     path = shutil.which(name)
     return {"available": path is not None, "path": path or ""}
 
@@ -68,6 +70,7 @@ def detect_java_25_temurin(
 
 
 def detect_java(root: Path) -> dict[str, Any]:
+    """探测 Java 25 运行环境并报告缺失原因。"""
     java_home = os.environ.get("LEXIFLOW_JAVA_HOME", "")
     if java_home and (Path(java_home) / "bin" / "java").is_file():
         return {"available": True, "source": "LEXIFLOW_JAVA_HOME", "path": java_home}
@@ -86,10 +89,11 @@ def diagnose(
     required: list[str] | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
+    """按环境能力名称汇总可用性与来源供 Gate 使用。"""
     repo, source = Path(root).resolve(), (os.environ if environ is None else environ)
     tools: dict[str, Any] = {}
     missing: list[str] = []
-    for name in (["python3", "git"] if required is None else required):
+    for name in ["python3", "git"] if required is None else required:
         if name == "python3":
             info = detect_python()
         elif name == "java":
@@ -144,6 +148,7 @@ def execution_environment(
 
 
 def check_for(root: str | Path, check_decl: dict[str, Any]) -> dict[str, Any]:
+    """核对单个 Check 的全部必需环境，缺项返回 BLOCKED 而不执行。"""
     diag = diagnose(root, list(check_decl.get("required_environment", [])))
     return {
         "status": diag["status"],

@@ -54,14 +54,17 @@ def _utc_now() -> str:
 
 
 def sha256_bytes(data: bytes) -> str:
+    """计算冻结输入或报告字节的 SHA-256 摘要。"""
     return hashlib.sha256(data).hexdigest()
 
 
 def sha256_text(text: str) -> str:
+    """以固定文本编码计算 SHA-256，避免平台默认编码漂移。"""
     return sha256_bytes(text.encode("utf-8"))
 
 
 def fingerprint_json(value: Any) -> str:
+    """规范化 JSON 后计算输入指纹，绑定本轮检查闭包。"""
     return sha256_bytes(
         json.dumps(
             value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -122,6 +125,7 @@ def verify_input_descriptors(
 
 
 def all_descriptors_verified(results: list[dict[str, str]]) -> bool:
+    """确认全部输入描述符均经当前文件事实核对。"""
     return all(item["status"] == "verified" for item in results)
 
 
@@ -232,6 +236,11 @@ def run_check_process(
             proc.kill()
             stdout, stderr = b"", b""
         timed_out, reason = True, "timeout"
+    except BaseException:
+        # Hook 总超时、SIGTERM 与 Ctrl-C 也必须回收独立的 Check 进程组。
+        _terminate_group(proc.pid)
+        proc.wait(timeout=5)
+        raise
     return {
         "status": "FAIL" if timed_out or proc.returncode != 0 else "PASS",
         "exit_code": proc.returncode,
@@ -461,6 +470,7 @@ def execute_single_check(
 
 
 def aggregate_results(results: list[dict[str, Any]]) -> tuple[str, str]:
+    """按 FAIL、BLOCKED、PASS 优先级聚合已选 Check 的真实结果。"""
     if not results:
         return "FAIL", "no-checks-executed"
     failed = next(
@@ -487,6 +497,7 @@ def aggregate_results(results: list[dict[str, Any]]) -> tuple[str, str]:
 def compute_coverage_gap(
     declared: list[dict[str, Any]], executed_ids: set[str]
 ) -> list[str]:
+    """识别声明范围中未由执行 Check 覆盖的必需能力。"""
     return [
         check["check_id"] for check in declared if check["check_id"] not in executed_ids
     ]

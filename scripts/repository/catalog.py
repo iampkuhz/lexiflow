@@ -9,6 +9,7 @@ import yaml
 
 
 def catalog_tasks(catalog: Any) -> dict[str, dict[str, Any]]:
+    """读取当前 Catalog 的 Task 索引；缺失或重复 ID 不被静默忽略。"""
     if not isinstance(catalog, dict) or not isinstance(
         catalog.get("workstreams"), list
     ):
@@ -38,6 +39,7 @@ def catalog_tasks(catalog: Any) -> dict[str, dict[str, Any]]:
 
 
 def read_task_dependencies(repo_root: Path, task_id: str) -> tuple[bool, list[str]]:
+    """按稳定 Task ID 返回当前依赖声明，供送验与状态核对。"""
     catalog_path = repo_root / "planning/workstreams.yaml"
     try:
         if not catalog_path.is_file():

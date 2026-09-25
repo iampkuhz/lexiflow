@@ -214,7 +214,7 @@ class TestControlledRuntimeInjection(unittest.TestCase):
         self.assertEqual(0, report["checks"][0]["process"]["exit_code"])
         self.assertNotIn(secret_url, json.dumps(report))
 
-class TestAcceptancePublicContract(unittest.TestCase):
+class TestDeliveryGatePublicContract(unittest.TestCase):
     def test_freeze_and_extra_declared_check_are_bound(self):
         from scripts.verification import freeze_inputs, verify_repository
         with tempfile.TemporaryDirectory() as temp:

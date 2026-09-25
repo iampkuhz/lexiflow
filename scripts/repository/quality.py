@@ -10,8 +10,8 @@ import os
 import unittest
 from pathlib import Path
 
-from scripts.repository import docs_check, policy_projection
-from scripts.repository.planning_check import PlanningValidator
+from scripts.repository import docs_check, policy_projection, python_quality
+from scripts.repository.planning_validator import PlanningValidator
 
 
 def _report(
@@ -36,6 +36,7 @@ def _report(
 
 
 def evaluate_suite(suite: unittest.TestSuite) -> dict[str, object]:
+    """将仓库单元测试转成 Gate JSON，零测试或跳过不能 PASS。"""
     stream = io.StringIO()
     result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
     complete = result.testsRun > 0 and not result.skipped
@@ -61,6 +62,27 @@ def evaluate_suite(suite: unittest.TestSuite) -> dict[str, object]:
 
 
 def run(root: Path, mode: str) -> dict[str, object]:
+    """按 Harness 指定模式运行仓库模块检查，并保留各工具诊断。"""
+    if mode == "python":
+        style = python_quality.run(root)
+        docs = python_quality.run_docstrings(root)
+        statuses = {style["status"], docs["status"]}
+        status = (
+            "FAIL"
+            if "FAIL" in statuses
+            else "BLOCKED"
+            if "BLOCKED" in statuses
+            else "PASS"
+        )
+        return _report(
+            status,
+            style["checks_run"] + docs["checks_run"],
+            failures=style["failures"] + docs["failures"],
+            errors=style["errors"] + docs["errors"],
+            skipped=style["skipped"] + docs["skipped"],
+            reason="" if status == "PASS" else "python-quality-incomplete",
+            detail={"ruff": style, "docstrings": docs},
+        )
     if mode == "tests":
         suite = unittest.defaultTestLoader.discover(
             str(root / "tests" / "repository"),
@@ -124,18 +146,16 @@ def run(root: Path, mode: str) -> dict[str, object]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """作为机器适配器输出仓库模块检查结果；不充当人工业务入口。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parents[2]
-    )
-    parser.add_argument(
         "--mode",
-        choices=("tests", "docs", "policy", "planning", "hooks"),
+        choices=("tests", "docs", "policy", "planning", "hooks", "python"),
         required=True,
     )
     args = parser.parse_args(argv)
     try:
-        report = run(args.root.resolve(), args.mode)
+        report = run(Path(__file__).resolve().parents[2], args.mode)
     except Exception as exc:  # CLI 异常也必须返回可解析的结构化结果。
         report = _report(
             "FAIL", 0, errors=1, reason="quality-entry-error", detail=str(exc)

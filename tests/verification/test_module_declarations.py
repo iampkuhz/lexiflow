@@ -68,7 +68,7 @@ class ModuleChecksDeclarationTest(unittest.TestCase):
         expected = {
             "eng.verification.module-tests",
             "eng.agents.module-tests",
-            "eng.acceptance.module-tests",
+            "eng.delivery-gate.module-tests",
             "eng.repository.module-tests",
             "eng.repository.docs",
             "eng.repository.policy",
@@ -94,7 +94,7 @@ class ModuleChecksDeclarationTest(unittest.TestCase):
     def test_structured_python_module_contract_rejects_empty_or_skipped(self) -> None:
         for check in self.document["checks"]:
             if check["check_id"].startswith(("eng.verification.", "eng.agents.",
-                                              "eng.acceptance.", "eng.repository.")):
+                                              "eng.delivery-gate.", "eng.repository.")):
                 with self.subTest(check_id=check["check_id"]):
                     contract = check["result_contract"]
                     self.assertEqual("json-stdout", contract["type"])

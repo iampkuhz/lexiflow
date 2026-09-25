@@ -40,7 +40,7 @@ class TestQualityGateLayering(unittest.TestCase):
 
     def test_control_plane_layering_principle_retired_with_registry(self):
         """gate-check-registry.yaml was retired; layering is now enforced by
-        scripts.acceptance module architecture (submit/validate/review/check)."""
+        scripts.delivery_gate module architecture (submit/validate/review/check)."""
         self.assertFalse(
             (REPO / "harness" / "gate-check-registry.yaml").exists(),
             "gate-check-registry.yaml must remain retired",

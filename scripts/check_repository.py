@@ -13,31 +13,18 @@ if __package__ in (None, ""):
 from scripts.verification import verify_repository, persist_report
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
+    """执行完整 Repository Verify 基线并发布报告；不接受定向检查选择。"""
     parser = argparse.ArgumentParser(
         prog="scripts/check_repository.py",
         description="Run all declared repository-baseline checks.",
     )
-    parser.add_argument(
-        "--repo-root",
-        default=".",
-        help="Repository root directory (default: .)",
-    )
-    parser.add_argument(
-        "--check-id",
-        action="append",
-        default=None,
-        dest="check_ids",
-        help="Restrict to specific check IDs (repeatable)",
-    )
-    args = parser.parse_args(argv)
+    parser.parse_args(argv)
+    repo_root = root or Path(__file__).resolve().parents[1]
 
-    report = verify_repository(
-        args.repo_root,
-        check_ids=args.check_ids,
-    )
+    report = verify_repository(repo_root)
     try:
-        report["publication"] = persist_report(args.repo_root, report)
+        report["publication"] = persist_report(repo_root, report)
     except ValueError as exc:
         report = {
             **report,

@@ -1,0 +1,12 @@
+# Python 质量规则真源；工具只读检查，不自动修复，不按中文比例或注释数量验收。
+required-version = "==0.16.8"
+target-version = "py312"
+line-length = 88
+cache-dir = "../tmp/ruff-cache"
+
+[lint]
+select = ["E4", "E7", "E9", "F", "D100", "D300", "D419"]
+
+[format]
+quote-style = "double"
+indent-style = "space"

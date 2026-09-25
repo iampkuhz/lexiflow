@@ -1,2 +1,7 @@
 # Gate/catalog parsing is a declared runtime dependency, not an implicit local installation.
 PyYAML>=6.0,<7
+# Python 风格、静态错误和文档字符串检查；升级需复核 Harness 规则与测试。
+ruff==0.16.8
+# 中文文档规则使用 Pylint 官方插件协议与 Astroid 文档节点。
+pylint==4.0.9
+astroid==4.0.4

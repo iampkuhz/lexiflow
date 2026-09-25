@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts.repository.planning_check import (
+from scripts.repository.planning_validator import (
     PlanningValidator,
     _load_canonical_from_policy,
 )
@@ -884,6 +884,9 @@ class TestOwnerResolver(unittest.TestCase):
             nested = validator.root / "unowned"
             nested.mkdir()
             (nested / ".DS_Store").write_bytes(b"fixture")
+            cache = validator.root / ".ruff_cache"
+            cache.mkdir()
+            (cache / "CACHEDIR.TAG").write_bytes(b"fixture")
             validator.check_repo_path_ownership()
             self.assertEqual([], validator.errors)
             # 排除操作系统元数据不应放过普通的未声明文件。

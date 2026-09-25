@@ -102,7 +102,7 @@ class PortPreparationTest(unittest.TestCase):
 
 class DiscoveryAndLaunchTest(unittest.TestCase):
     def test_startup_does_not_require_model_configuration(self):
-        with patch.object(api, "command_environment", return_value={}), patch.object(api, "prepare_port"), patch.object(api.os, "execvpe"), contextlib.redirect_stdout(io.StringIO()) as output:
+        with patch.object(api, "command_environment", return_value={"JDBC_URL": "jdbc:test"}), patch.object(api, "prepare_port"), patch.object(api.os, "execvpe"), contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(api.main([]), 0)
         self.assertNotIn("模型", output.getvalue())
 
@@ -132,14 +132,51 @@ class DiscoveryAndLaunchTest(unittest.TestCase):
                 api.assert_bindable(18080)
 
     def test_launcher_uses_checked_port_and_passes_database_via_environment(self):
-        with patch.object(api, "command_environment", return_value={"MODEL_SETTING": "retained"}), patch.object(api, "prepare_port") as prepare, patch.object(api.os, "execvpe") as execute, contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(api.main(["--port", "18081", "--database-url", "jdbc:test"]), 0)
+        with patch.object(api, "command_environment", return_value={"MODEL_SETTING": "retained", "JDBC_URL": "jdbc:test", "LEXIFLOW_API_PORT": "18081"}), patch.object(api, "prepare_port") as prepare, patch.object(api.os, "execvpe") as execute, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(api.main([]), 0)
         prepare.assert_called_once_with(18081)
         _, command, environment = execute.call_args.args
         self.assertIn("--args=--server.address=127.0.0.1 --server.port=18081", command)
         self.assertEqual(environment["SPRING_DATASOURCE_URL"], "jdbc:test")
         self.assertEqual(environment["MODEL_SETTING"], "retained")
         self.assertNotIn("jdbc:test", " ".join(command))
+
+    def test_database_configuration_has_one_manual_source(self):
+        cases = [
+            {"JDBC_URL": "jdbc:shared"},
+            {"JDBC_URL": "jdbc:shared", "SPRING_DATASOURCE_URL": "jdbc:spring"},
+        ]
+        for environment in cases:
+            with self.subTest(environment=environment):
+                with patch.object(api, "command_environment", return_value=dict(environment)), patch.object(api, "prepare_port"), patch.object(api.os, "execvpe") as execute, contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(api.main([]), 0)
+                self.assertEqual(execute.call_args.args[2]["SPRING_DATASOURCE_URL"], "jdbc:shared")
+
+    def test_missing_database_configuration_does_not_silently_start_demo(self):
+        for environment in [{"JDBC_URL": " "}, {"SPRING_DATASOURCE_URL": "jdbc:spring"}, {}]:
+            with self.subTest(environment=environment):
+                with patch.object(api, "command_environment", return_value=environment), patch.object(api, "prepare_port") as prepare, patch.object(api.os, "execvpe") as execute, contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(api.main([]), 2)
+                prepare.assert_not_called()
+                execute.assert_not_called()
+
+    def test_port_environment_rejects_noncanonical_and_remote_values(self):
+        self.assertEqual(api.local_api_port(None), 18080)
+        self.assertEqual(api.local_api_port("18081"), 18081)
+        for value in ("", "0", "01", "65536", "http://remote", "18081/foo", " 18081", "18081.0", "１２３"):
+            with self.subTest(value=value), self.assertRaises(api.StartupBlocked):
+                api.local_api_port(value)
+
+    def test_invalid_port_configuration_does_not_touch_listener(self):
+        with patch.object(api, "command_environment", return_value={"JDBC_URL": "jdbc:test", "LEXIFLOW_API_PORT": "65536"}), patch.object(api, "prepare_port") as prepare, patch.object(api.os, "execvpe") as execute, contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(api.main([]), 2)
+        prepare.assert_not_called()
+        execute.assert_not_called()
+
+    def test_removed_cli_overrides_are_rejected(self):
+        for argument in ("--port", "--database-url"):
+            with self.subTest(argument=argument), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                api.main([argument, "18081"])
 
     def test_invalid_java_does_not_touch_existing_listener(self):
         with patch.object(api, "command_environment", side_effect=api.JavaRuntimeError("missing Java")), patch.object(api, "prepare_port") as prepare, patch.object(api.os, "execvpe") as execute, contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
@@ -150,6 +187,6 @@ class DiscoveryAndLaunchTest(unittest.TestCase):
     def test_port_blocked_or_cancelled_never_launches_gradle(self):
         for error, code in [(api.StartupBlocked("busy"), 2), (KeyboardInterrupt(), 130), (FileNotFoundError("lsof"), 2)]:
             with self.subTest(error=type(error).__name__):
-                with patch.object(api, "command_environment", return_value={}), patch.object(api, "prepare_port", side_effect=error), patch.object(api.os, "execvpe") as execute, contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+                with patch.object(api, "command_environment", return_value={"JDBC_URL": "jdbc:test"}), patch.object(api, "prepare_port", side_effect=error), patch.object(api.os, "execvpe") as execute, contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
                     self.assertEqual(api.main([]), code)
                 execute.assert_not_called()

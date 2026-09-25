@@ -1,18 +1,24 @@
 """以不可变方式发布不含 Task 语义的 Verification 报告。"""
 
 from __future__ import annotations
-import hashlib, json, os, stat, uuid
+import hashlib
+import json
+import os
+import stat
+import uuid
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 
 def canonical_bytes(v: Any) -> bytes:
+    """用确定性 JSON 编码生成可哈希报告字节。"""
     return json.dumps(
         v, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode()
 
 
 def sha256_bytes(v: bytes) -> str:
+    """计算报告或附件原始字节的 SHA-256。"""
     return hashlib.sha256(v).hexdigest()
 
 
@@ -427,6 +433,7 @@ def _validate_pass_report(root: Path, report: dict[str, Any]) -> None:
 
 
 def validate_report(root: Path, report: Any) -> dict[str, Any]:
+    """验证报告结构、输入指纹与检查完整性，拒绝伪造或缺项。"""
     if not isinstance(report, dict):
         raise ValueError("verification report must be an object")
     required = {
@@ -556,6 +563,7 @@ def persist_report(root: str | Path, report: dict[str, Any]) -> dict[str, str]:
 def read_report(
     root: str | Path, report_id: str
 ) -> tuple[dict[str, Any], dict[str, str]]:
+    """按精确报告 ID 安全读取并核对发布记录，不搜索最新报告。"""
     repo = Path(root).resolve()
     run_id = _safe_uuid(report_id)
     relative = f"tmp/quality/verification-reports/{run_id}.json"

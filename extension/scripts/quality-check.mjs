@@ -51,7 +51,10 @@ async function main() {
     return;
   }
 
-  const browser = evaluateBrowserResult(await execute("node", ["tests/translation-e2e.mjs"]));
+  const browserProcess = await execute("node", ["tests/translation-e2e.mjs"]);
+  // Preserve the original assertion and stack in the check log, not just its category.
+  if (browserProcess.stdout || browserProcess.stderr) process.stderr.write(`${browserProcess.stdout}${browserProcess.stderr}`);
+  const browser = evaluateBrowserResult(browserProcess);
   if (browser.status === "BLOCKED") {
     report("BLOCKED", "browser-api-resource", unit.unit_tests, 0, browser.reason);
   } else if (browser.status === "FAIL") {

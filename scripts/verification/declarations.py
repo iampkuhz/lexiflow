@@ -26,6 +26,8 @@ _REQUIRED_CHECK_FIELDS = frozenset(
 
 
 class DeclarationError(ValueError):
+    """Module Check 声明无效时携带可定位的错误原因。"""
+
     def __init__(self, code: str, detail: str) -> None:
         self.code = code
         super().__init__(f"{code}: {detail}")
@@ -213,12 +215,14 @@ def _validate_checks(checks: list[dict[str, Any]]) -> None:
 def filter_checks_by_scope(
     checks: list[dict[str, Any]], scope: str
 ) -> list[dict[str, Any]]:
+    """按完整基线或变更范围筛选已声明 Check。"""
     return [check for check in checks if check["scope"] == scope]
 
 
 def filter_checks_by_ids(
     checks: list[dict[str, Any]], check_ids: list[str] | None
 ) -> list[dict[str, Any]]:
+    """仅供内部定向诊断选择精确 Check ID，不扩大正式证据。"""
     if not check_ids:
         return list(checks)
     wanted = set(check_ids)

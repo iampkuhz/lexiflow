@@ -18,12 +18,14 @@ HTML_LINK = re.compile(r'<(?:a|img)\b[^>]*?\b(?:href|src)=["\']([^"\']+)["\']', 
 
 
 def slug(text):
+    """按文档锚点规则将标题归一化为可链接标识。"""
     text = re.sub(r"<[^>]+>", "", text).replace("`", "").lower()
     text = re.sub(r"[^\w\-\s]", "", text)
     return re.sub(r"\s", "-", text.strip())
 
 
 def parse(text):
+    """解析 Markdown 的标题、链接与围栏信息以供静态检查。"""
     outside, diagrams, errors = [], [], []
     fence = None
     body = []
@@ -54,6 +56,7 @@ def parse(text):
 
 
 def anchors(text):
+    """收集文档内可引用锚点并识别重复或失效定义。"""
     outside, _, _ = parse(text)
     prose = "\n".join(line for _, line in outside)
     found = set(re.findall(r'<a\s+(?:id|name)=["\']([^"\']+)', prose))
@@ -69,6 +72,7 @@ def anchors(text):
 
 
 def check_file(root, file, forbidden_extensions=(".puml", ".svg", ".png")):
+    """检查单个 Markdown 文件的链接、标题与图源围栏。"""
     issues = []
     text = file.read_text()
     outside, diagrams, errors = parse(text)
@@ -238,6 +242,7 @@ def check_version_comparisons(root, policy):
 
 
 def run(root):
+    """遍历受治理文档并汇总可定位的静态问题；不评价语义和布局。"""
     policy = yaml.safe_load((root / "harness/documentation-policy.yaml").read_text())
     issues = check_selected_solution_only(root, policy)
     issues.extend(check_latest_only(root, policy))
@@ -285,14 +290,12 @@ def run(root):
     }
 
 
-def main():
+def main(argv=None, *, root: Path | None = None):
+    """执行零参数文档检查并输出结构化结果。"""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parents[2]
-    )
-    args = parser.parse_args()
+    parser.parse_args(argv)
     try:
-        result = run(args.root)
+        result = run(root or Path(__file__).resolve().parents[2])
     except (OSError, ValueError, subprocess.CalledProcessError, yaml.YAMLError) as exc:
         result = {"status": "FAIL", "issues": [str(exc)]}
     print(json.dumps(result, ensure_ascii=False, indent=2))

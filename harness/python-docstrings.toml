@@ -1,0 +1,18 @@
+# 中文存在性只是一项可自动化约束，不替代说明准确性与价值的语义审阅。
+[tool.pylint.main]
+load-plugins = ["scripts.repository.chinese_docstrings"]
+recursive = true
+persistent = false
+jobs = 1
+
+[tool.pylint.messages_control]
+disable = ["all"]
+enable = ["missing-chinese-docstring", "non-chinese-docstring", "syntax-error", "parse-error", "fatal", "astroid-error", "bad-plugin-value", "unrecognized-option"]
+
+[tool.pylint.reports]
+reports = false
+score = false
+output-format = "json"
+
+[tool.pylint.chinese-docstrings]
+docstring-language-pattern = '[\u3400-\u4dbf\u4e00-\u9fff]'

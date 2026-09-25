@@ -7,6 +7,8 @@ These tests verify that scripts.repository:
 """
 from __future__ import annotations
 import ast
+import contextlib
+import io
 import json
 import shutil
 import subprocess
@@ -22,7 +24,7 @@ REPOSITORY_DIR = REPO_ROOT / "scripts" / "repository"
 FORBIDDEN_IMPORTS = {
     "scripts.gates",
     "scripts.harness",
-    "scripts.acceptance",
+    "scripts.delivery_gate",
     "scripts.agents",
     "scripts.verification",
     "scripts.environment",
@@ -62,7 +64,7 @@ class RepositoryModuleBoundaryTest(unittest.TestCase):
 
     def test_repository_module_files_exist(self):
         expected = {
-            "__init__.py", "__main__.py", "catalog.py", "planning_check.py",
+            "__init__.py", "catalog.py", "planning_check.py", "planning_validator.py",
             "task_source.py", "docs_check.py", "policy_projection.py",
             "local_skills.py", "hooks.py",
             "quality.py",
@@ -70,6 +72,7 @@ class RepositoryModuleBoundaryTest(unittest.TestCase):
         actual = {p.name for p in REPOSITORY_DIR.glob("*.py") if "__pycache__" not in str(p)}
         missing = expected - actual
         self.assertEqual(missing, set(), f"missing repository module files: {missing}")
+        self.assertNotIn("__main__.py", actual, "planning has its own named entry")
 
     def test_planning_check_has_cli_entry(self):
         """planning_check.py must have a CLI entry point."""
@@ -79,8 +82,10 @@ class RepositoryModuleBoundaryTest(unittest.TestCase):
         self.assertIn('if __name__', content, "planning_check.py must have __name__ guard")
 
     def test_planning_cli_real_positive_and_negative_fixtures(self):
+        from scripts.repository.planning_check import main
+
         passed = subprocess.run(
-            [sys.executable, "-m", "scripts.repository.planning_check", "--root", "."],
+            [sys.executable, "-m", "scripts.repository.planning_check"],
             cwd=REPO_ROOT, text=True, capture_output=True, check=False,
         )
         self.assertEqual(0, passed.returncode, passed.stderr)
@@ -94,12 +99,11 @@ class RepositoryModuleBoundaryTest(unittest.TestCase):
             catalog = root / "planning" / "workstreams.yaml"
             catalog.write_text(catalog.read_text().replace(
                 "catalog_mode: execution", "catalog_mode: planning-only", 1))
-            failed = subprocess.run(
-                [sys.executable, "-m", "scripts.repository.planning_check", "--root", str(root)],
-                cwd=REPO_ROOT, text=True, capture_output=True, check=False,
-            )
-        self.assertNotEqual(0, failed.returncode)
-        report = json.loads(failed.stdout)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                failed_code = main([], root=root)
+        self.assertNotEqual(0, failed_code)
+        report = json.loads(output.getvalue())
         self.assertNotEqual("PASS", report["status"])
         self.assertTrue(report["errors"])
 

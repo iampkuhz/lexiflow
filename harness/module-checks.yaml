@@ -12,10 +12,6 @@ checks:
   command:
   - python3
   - tests/verification/module_check_adapter.py
-  - --root
-  - .
-  - --mode
-  - verification-tests
   executable: python3
   cwd: .
   timeout_seconds: 180
@@ -40,6 +36,10 @@ checks:
   - tests/verification
   - tests/__init__.py
   - requirements-dev.txt
+  - harness/delivery-hooks.json
+  - harness/test-services.json
+  - .codex/hooks.json
+  - .qoder/settings.json
   result_contract:
     type: json-stdout
     required_fields:
@@ -64,10 +64,6 @@ checks:
   command:
   - python3
   - tests/verification/module_check_adapter.py
-  - --root
-  - .
-  - --mode
-  - verification-tests
   executable: python3
   cwd: .
   timeout_seconds: 180
@@ -92,6 +88,10 @@ checks:
   - tests/verification
   - tests/__init__.py
   - requirements-dev.txt
+  - harness/delivery-hooks.json
+  - harness/test-services.json
+  - .codex/hooks.json
+  - .qoder/settings.json
   result_contract:
     type: json-stdout
     required_fields:
@@ -118,9 +118,7 @@ checks:
   command:
   - python3
   - -m
-  - scripts.agents.quality
-  - --root
-  - .
+  - scripts.agents.module_tests
   executable: python3
   cwd: .
   timeout_seconds: 180
@@ -169,9 +167,7 @@ checks:
   command:
   - python3
   - -m
-  - scripts.agents.quality
-  - --root
-  - .
+  - scripts.agents.module_tests
   executable: python3
   cwd: .
   timeout_seconds: 180
@@ -216,23 +212,21 @@ checks:
       errors: 0
       skipped: 0
 
-# Acceptance 自测：submit/validate/review/check 的身份与 receipt 合同。
-- check_id: eng.acceptance.module-tests
-  module: acceptance
+# Delivery Gate 自测：submit/validate/review/check 的身份与 receipt 合同。
+- check_id: eng.delivery-gate.module-tests
+  module: delivery-gate
   command:
   - python3
   - -m
-  - scripts.acceptance.quality
-  - --root
-  - .
+  - scripts.delivery_gate.quality
   executable: python3
   cwd: .
   timeout_seconds: 180
   scope: repository-baseline
   triggers:
-  - path: scripts/acceptance/
-  - path: tests/acceptance/
-  - path: harness/acceptance-records.schema.json
+  - path: scripts/delivery_gate/
+  - path: tests/delivery_gate/
+  - path: harness/delivery-gate-records.schema.json
   - path: harness/module-checks.yaml
   module_dependencies:
   - verification
@@ -240,9 +234,9 @@ checks:
   required_environment:
   - python3
   input_paths:
-  - scripts/acceptance
-  - tests/acceptance
-  - harness/acceptance-records.schema.json
+  - scripts/delivery_gate
+  - tests/delivery_gate
+  - harness/delivery-gate-records.schema.json
   result_contract:
     type: json-stdout
     required_fields:
@@ -262,22 +256,20 @@ checks:
       failures: 0
       errors: 0
       skipped: 0
-- check_id: eng.acceptance.module-tests-on-change
-  module: acceptance-change
+- check_id: eng.delivery-gate.module-tests-on-change
+  module: delivery-gate-change
   command:
   - python3
   - -m
-  - scripts.acceptance.quality
-  - --root
-  - .
+  - scripts.delivery_gate.quality
   executable: python3
   cwd: .
   timeout_seconds: 180
   scope: change-targeted
   triggers:
-  - path: scripts/acceptance/
-  - path: tests/acceptance/
-  - path: harness/acceptance-records.schema.json
+  - path: scripts/delivery_gate/
+  - path: tests/delivery_gate/
+  - path: harness/delivery-gate-records.schema.json
   - path: harness/module-checks.yaml
   module_dependencies:
   - verification
@@ -285,9 +277,9 @@ checks:
   required_environment:
   - python3
   input_paths:
-  - scripts/acceptance
-  - tests/acceptance
-  - harness/acceptance-records.schema.json
+  - scripts/delivery_gate
+  - tests/delivery_gate
+  - harness/delivery-gate-records.schema.json
   result_contract:
     type: json-stdout
     required_fields:
@@ -315,8 +307,6 @@ checks:
   - python3
   - -m
   - scripts.repository.quality
-  - --root
-  - .
   - --mode
   - tests
   executable: python3
@@ -362,8 +352,6 @@ checks:
   - python3
   - -m
   - scripts.repository.quality
-  - --root
-  - .
   - --mode
   - tests
   executable: python3
@@ -409,8 +397,6 @@ checks:
   - python3
   - -m
   - scripts.repository.quality
-  - --root
-  - .
   - --mode
   - docs
   executable: python3
@@ -461,8 +447,6 @@ checks:
   - python3
   - -m
   - scripts.repository.quality
-  - --root
-  - .
   - --mode
   - docs
   executable: python3
@@ -513,8 +497,6 @@ checks:
   - python3
   - -m
   - scripts.repository.quality
-  - --root
-  - .
   - --mode
   - policy
   executable: python3
@@ -563,8 +545,6 @@ checks:
   - python3
   - -m
   - scripts.repository.quality
-  - --root
-  - .
   - --mode
   - policy
   executable: python3
@@ -613,8 +593,6 @@ checks:
   - python3
   - -m
   - scripts.repository.quality
-  - --root
-  - .
   - --mode
   - planning
   executable: python3
@@ -625,6 +603,7 @@ checks:
   - path: planning/
   - path: harness/
   - path: scripts/repository/planning_check.py
+  - path: scripts/repository/planning_validator.py
   - path: scripts/repository/catalog.py
   - path: scripts/repository/task_source.py
   - path: harness/module-checks.yaml
@@ -636,6 +615,7 @@ checks:
   - planning
   - harness
   - scripts/repository/planning_check.py
+  - scripts/repository/planning_validator.py
   - scripts/repository/catalog.py
   - scripts/repository/task_source.py
   result_contract:
@@ -663,8 +643,6 @@ checks:
   - python3
   - -m
   - scripts.repository.quality
-  - --root
-  - .
   - --mode
   - planning
   executable: python3
@@ -675,6 +653,7 @@ checks:
   - path: planning/
   - path: harness/
   - path: scripts/repository/planning_check.py
+  - path: scripts/repository/planning_validator.py
   - path: scripts/repository/catalog.py
   - path: scripts/repository/task_source.py
   - path: harness/module-checks.yaml
@@ -686,6 +665,7 @@ checks:
   - planning
   - harness
   - scripts/repository/planning_check.py
+  - scripts/repository/planning_validator.py
   - scripts/repository/catalog.py
   - scripts/repository/task_source.py
   result_contract:
@@ -713,8 +693,6 @@ checks:
   - python3
   - -m
   - scripts.repository.quality
-  - --root
-  - .
   - --mode
   - hooks
   executable: python3
@@ -724,14 +702,25 @@ checks:
   triggers:
   - path: .githooks/
   - path: scripts/repository/hooks.py
+  - path: scripts/verification/delivery_hook.py
+  - path: .codex/hooks.json
+  - path: .qoder/settings.json
+  - path: harness/delivery-hooks.json
+  - path: harness/test-services.json
   - path: harness/module-checks.yaml
   module_dependencies:
   - repository
+  - verification
   required_environment:
   - python3
   input_paths:
   - .githooks
   - scripts/repository/hooks.py
+  - scripts/verification/delivery_hook.py
+  - .codex/hooks.json
+  - .qoder/settings.json
+  - harness/delivery-hooks.json
+  - harness/test-services.json
   result_contract:
     type: json-stdout
     required_fields:
@@ -757,8 +746,6 @@ checks:
   - python3
   - -m
   - scripts.repository.quality
-  - --root
-  - .
   - --mode
   - hooks
   executable: python3
@@ -768,14 +755,25 @@ checks:
   triggers:
   - path: .githooks/
   - path: scripts/repository/hooks.py
+  - path: scripts/verification/delivery_hook.py
+  - path: .codex/hooks.json
+  - path: .qoder/settings.json
+  - path: harness/delivery-hooks.json
+  - path: harness/test-services.json
   - path: harness/module-checks.yaml
   module_dependencies:
   - repository
+  - verification
   required_environment:
   - python3
   input_paths:
   - .githooks
   - scripts/repository/hooks.py
+  - scripts/verification/delivery_hook.py
+  - .codex/hooks.json
+  - .qoder/settings.json
+  - harness/delivery-hooks.json
+  - harness/test-services.json
   result_contract:
     type: json-stdout
     required_fields:
@@ -814,6 +812,7 @@ checks:
   scope: repository-baseline
   triggers:
   - path: backend/
+  - path: harness/test-services.json
   - path: infra/postgres/
   - path: infra/local/
   module_dependencies: []
@@ -823,6 +822,7 @@ checks:
   - redis-test-endpoint
   input_paths:
   - backend/build.gradle.kts
+  - harness/test-services.json
   - backend/settings.gradle.kts
   - backend/gradle.properties
   - backend/gradle.lockfile
@@ -830,15 +830,15 @@ checks:
   - backend/gradle/libs.versions.toml
   - backend/gradle/build-logic/build.gradle.kts
   - backend/gradle/build-logic/settings.gradle.kts
+  - backend/gradle/build-logic/gradle.lockfile
+  - backend/gradle/build-logic/settings-gradle.lockfile
+  - backend/gradle/config
+  - backend/tests/quality-gates/build.gradle.kts
   - backend/gradle/build-logic/src
   - backend/apps/api/src
   - backend/apps/api/gradle.lockfile
   - backend/apps/worker/src
   - backend/apps/worker/gradle.lockfile
-  - backend/application/lexicon/src
-  - backend/application/lexicon/gradle.lockfile
-  - backend/application/workflow/src
-  - backend/application/workflow/gradle.lockfile
   - backend/modules/enrichment/src
   - backend/modules/enrichment/gradle.lockfile
   - backend/modules/lexicon/src
@@ -880,6 +880,7 @@ checks:
   scope: change-targeted
   triggers:
   - path: backend/
+  - path: harness/test-services.json
   - path: infra/postgres/
   - path: infra/local/
   - path: harness/module-checks.yaml
@@ -890,6 +891,7 @@ checks:
   - redis-test-endpoint
   input_paths:
   - backend/build.gradle.kts
+  - harness/test-services.json
   - backend/settings.gradle.kts
   - backend/gradle.properties
   - backend/gradle.lockfile
@@ -897,15 +899,15 @@ checks:
   - backend/gradle/libs.versions.toml
   - backend/gradle/build-logic/build.gradle.kts
   - backend/gradle/build-logic/settings.gradle.kts
+  - backend/gradle/build-logic/gradle.lockfile
+  - backend/gradle/build-logic/settings-gradle.lockfile
+  - backend/gradle/config
+  - backend/tests/quality-gates/build.gradle.kts
   - backend/gradle/build-logic/src
   - backend/apps/api/src
   - backend/apps/api/gradle.lockfile
   - backend/apps/worker/src
   - backend/apps/worker/gradle.lockfile
-  - backend/application/lexicon/src
-  - backend/application/lexicon/gradle.lockfile
-  - backend/application/workflow/src
-  - backend/application/workflow/gradle.lockfile
   - backend/modules/enrichment/src
   - backend/modules/enrichment/gradle.lockfile
   - backend/modules/lexicon/src
@@ -1009,3 +1011,95 @@ checks:
     - FAIL
     minimum: {}
     equals: {}
+
+# Python 的 Ruff 风格/格式与 Pylint 中文 docstring 检查；测试仍由各模块拥有。
+- check_id: eng.repository.python-quality
+  module: repository-python
+  command:
+  - python3
+  - -m
+  - scripts.repository.quality
+  - --mode
+  - python
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: repository-baseline
+  triggers:
+  - path: scripts/
+  - path: harness/python-quality.toml
+  - path: harness/python-docstrings.toml
+  - path: requirements-dev.txt
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  input_paths:
+  - scripts
+  - harness/python-quality.toml
+  - harness/python-docstrings.toml
+  - requirements-dev.txt
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.repository.python-quality-on-change
+  module: repository-python-on-change
+  command:
+  - python3
+  - -m
+  - scripts.repository.quality
+  - --mode
+  - python
+  executable: python3
+  cwd: .
+  timeout_seconds: 180
+  scope: change-targeted
+  triggers:
+  - path: scripts/
+  - path: harness/python-quality.toml
+  - path: harness/python-docstrings.toml
+  - path: requirements-dev.txt
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  input_paths:
+  - scripts
+  - harness/python-quality.toml
+  - harness/python-docstrings.toml
+  - requirements-dev.txt
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0

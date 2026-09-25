@@ -1,0 +1,8 @@
+{
+  "mode": "enforce",
+  "event": "Stop",
+  "disable_environment": "LEXIFLOW_DELIVERY_HOOK_DISABLE",
+  "intermediate_marker": "<!-- lexiflow:intermediate -->",
+  "timeout_seconds": 1800,
+  "heartbeat_seconds": 30
+}

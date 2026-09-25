@@ -12,6 +12,7 @@ import yaml
 
 
 def inspect(root: Path, source: Path):
+    """只读检查本机 skill 源与仓库链接的目标、状态和冲突。"""
     policy = yaml.safe_load((root / "harness/documentation-policy.yaml").read_text())
     if policy["skill_links"] != ".agents/skills":
         raise ValueError("skill 链接只能写入原生仓库目录 .agents/skills")
@@ -58,6 +59,7 @@ def inspect(root: Path, source: Path):
 
 
 def run(root: Path, source: Path, mode: str):
+    """按显式 check 或 link 动作处理本机 skill；不下载或覆盖异目标。"""
     results = inspect(root, source)
     bad = any(x["status"] not in {"ready", "linked"} for x in results)
     if mode == "link" and not bad:
@@ -75,26 +77,26 @@ def run(root: Path, source: Path, mode: str):
         "status": (
             "FAIL"
             if any(x["status"] == "target-conflict" for x in results)
-            else "PASS" if complete else "BLOCKED"
+            else "PASS"
+            if complete
+            else "BLOCKED"
         ),
         "skills": results,
     }
 
 
-def main():
+def main(argv=None, *, root: Path | None = None, source: Path | None = None):
+    """解析本机 skill 维护动作并返回结构化状态。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=["check", "link"])
-    parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parents[2]
-    )
-    parser.add_argument(
-        "--source",
-        type=Path,
-        default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "skills",
-    )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     try:
-        result = run(args.root.resolve(), args.source.expanduser().resolve(), args.mode)
+        repository = root or Path(__file__).resolve().parents[2]
+        skills = (
+            source
+            or Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "skills"
+        )
+        result = run(repository.resolve(), skills.expanduser().resolve(), args.mode)
     except (OSError, ValueError, TypeError, AttributeError, yaml.YAMLError) as exc:
         result = {"status": "FAIL", "reason": str(exc)}
     print(json.dumps(result, ensure_ascii=False, indent=2))

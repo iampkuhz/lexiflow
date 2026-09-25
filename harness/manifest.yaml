@@ -22,6 +22,10 @@ agent_contract:
   java_product: harness/java-product.manifest.yaml
   documentation_policy: harness/documentation-policy.yaml
   policy_projections: harness/policy-projections.yaml
+  delivery_hooks: harness/delivery-hooks.json
+  test_services: harness/test-services.json
+  python_quality: harness/python-quality.toml
+  python_docstrings: harness/python-docstrings.toml
   qoder_harness_schema: harness/qoder-harness.schema.json
   qoder_result_schema: harness/qoder-result.schema.json
   validation_mode: explicit
@@ -29,25 +33,32 @@ agent_contract:
   platform_entries:
     codex_agents: .codex/agents/
     qoder_agents: .qoder/agents/
-  acceptance_records_schema: harness/acceptance-records.schema.json
+    codex_hooks: .codex/hooks.json
+    qoder_hooks: .qoder/settings.json
+  delivery_gate_records_schema: harness/delivery-gate-records.schema.json
 public_executables:
+  java_exec: python3 -m scripts.environment.java_exec <native-command>
   local_api: python3 -m scripts.environment.start_api
   docs_check: python3 -m scripts.repository.docs_check
   policy_projection: python3 -m scripts.repository.policy_projection
   local_skills: python3 -m scripts.repository.local_skills
+  python_quality: python3 -m scripts.repository.python_quality
+  delivery_hook: python3 scripts/verification/delivery_hook.py
   hooks: python3 -m scripts.repository.hooks
   local_codex_runtime: python3 -m scripts.agents.local_codex_runtime
   change_verify: python3 scripts/check_changes.py
   repository_verify: python3 scripts/check_repository.py
-  planning_check: python3 -m scripts.repository.planning_check --root .
-  qoder_task: python3 scripts/agents/qoder_task.py
-  acceptance: python3 -m scripts.acceptance submit|validate|review|check|status
+  verification_diagnose: python3 -m scripts.verification.diagnose change|repository
+  planning_check: python3 -m scripts.repository.planning_check
+  qoder_delegation: python3 -m scripts.agents.delegation.qoder_cli
+  codex_work_package_verify: python3 -m scripts.agents.delegation.codex_cli verify --run-id <run_id>
+  delivery_gate: python3 -m scripts.delivery_gate submit|validate|review|check|status
 script_governance:
   durable_script_roots:
   - scripts/repository/
   - scripts/agents/
   - scripts/verification/
-  - scripts/acceptance/
+  - scripts/delivery_gate/
   - scripts/environment/
   durable_requires:
   - reusable-repository-contract
@@ -63,7 +74,7 @@ script_governance:
 quality:
   delivery_command: python3 scripts/check_changes.py
   repository_baseline_command: python3 scripts/check_repository.py
-  full_command: python3 -m scripts.acceptance validate --submission-id <submission-id>
+  full_command: python3 -m scripts.delivery_gate validate --submission-id <submission-id>
   layering:
     submit: binds-PASS-change-verify-task-requirements-and-producer-runtime
     validate: independent-verification-public-api-on-frozen-input

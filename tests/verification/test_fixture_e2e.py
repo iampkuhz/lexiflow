@@ -162,7 +162,7 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
                 {
                     "check_id": "fixture.planning",
                     "module": "planning",
-                    "command": ["python3", str(repository / "scripts/repository/planning_check.py"), "--root", "."],
+                    "command": ["python3", "-c", "from pathlib import Path; from scripts.repository.planning_check import main; raise SystemExit(main([], root=Path('.')))"],
                     "cwd": ".", "timeout_seconds": 30,
                     "scope": "repository-baseline", "triggers": [{"path": "planning/"}],
                     "required_environment": ["python3"],

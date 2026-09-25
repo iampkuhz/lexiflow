@@ -1,4 +1,4 @@
-"""Change Verify CLI 入口。按 Git 差异选择检查，输出报告；不签发正式 Acceptance receipt。"""
+"""Change Verify CLI 入口。按 Git 差异选择检查，输出报告；不签发正式 Delivery Gate receipt。"""
 
 from __future__ import annotations
 
@@ -13,37 +13,18 @@ if __package__ in (None, ""):
 from scripts.verification import verify_changes, persist_report
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
+    """按当前 Git 差异执行 Change Verify 并发布报告；不签发正式验收收据。"""
     parser = argparse.ArgumentParser(
         prog="scripts/check_changes.py",
         description="Run checks selected by git diff.",
     )
-    parser.add_argument(
-        "--repo-root",
-        default=".",
-        help="Repository root directory (default: .)",
-    )
-    parser.add_argument(
-        "--base",
-        default=None,
-        help="Explicit base commit for diff comparison",
-    )
-    parser.add_argument(
-        "--expected-path",
-        action="append",
-        default=[],
-        dest="expected_paths",
-        help="Expected changed directory (repeatable; advisory self-review)",
-    )
-    args = parser.parse_args(argv)
+    parser.parse_args(argv)
+    repo_root = root or Path(__file__).resolve().parents[1]
 
-    report = verify_changes(
-        args.repo_root,
-        base=args.base,
-        expected_paths=tuple(args.expected_paths),
-    )
+    report = verify_changes(repo_root)
     try:
-        report["publication"] = persist_report(args.repo_root, report)
+        report["publication"] = persist_report(repo_root, report)
     except ValueError as exc:
         report = {
             **report,

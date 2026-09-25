@@ -1,170 +1,99 @@
-"""Tests for CLI entry points: check_changes.py and check_repository.py.
+"""CLI 合同：日常入口零参数，诊断不发布正式报告。"""
 
-Covers: argument parsing, exit codes, JSON output, and public API
-surface.
-"""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
-import os
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 import yaml
 
-_REPO_ROOT = str(Path(__file__).resolve().parents[2])
+from scripts import check_changes, check_repository
+from scripts.verification import diagnose as diagnostic_cli
 
 
-def _repo_env() -> dict[str, str]:
-    """Build env with PYTHONPATH pointing to the repo root."""
-    env = dict(os.environ)
-    existing = env.get("PYTHONPATH", "")
-    env["PYTHONPATH"] = _REPO_ROOT + (":" + existing if existing else "")
-    return env
+def _init_git_repo(root: Path) -> str:
+    subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+    (root / "initial.txt").write_text("initial")
+    (root / ".gitignore").write_text("harness/\n")
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=root, check=True, capture_output=True)
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def _init_git_repo(tmpdir: Path) -> str:
-    subprocess.run(["git", "init"], cwd=str(tmpdir), check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(["git", "config", "user.email", "test@test.com"],
-                   cwd=str(tmpdir), check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(["git", "config", "user.name", "Test"],
-                   cwd=str(tmpdir), check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    (tmpdir / "initial.txt").write_text("initial")
-    (tmpdir / ".gitignore").write_text("harness/\n")
-    subprocess.run(["git", "add", "."], cwd=str(tmpdir), check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(["git", "commit", "-m", "init"], cwd=str(tmpdir), check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(tmpdir),
-                       capture_output=True, text=True, check=True)
-    return r.stdout.strip()
-
-
-def _complete_check(check: dict) -> dict:
-    complete = dict(check)
-    complete.setdefault("module_dependencies", [])
-    complete.setdefault("required_environment", [])
-    complete.setdefault("input_paths", [])
-    complete.setdefault("result_contract", {"type": "exit-code", "completeness_guarantee": "fixture-owned command completion"})
-    return complete
-
-
-def _write_declarations(root: Path, checks: list[dict]) -> None:
-    harness = root / "harness"
-    harness.mkdir(exist_ok=True)
-    data = {
-        "schema_version": "lexiflow.module-checks.v1",
-        "checks": [_complete_check(check) for check in checks],
+def _write_declarations(root: Path, *, scope: str, result: str = "PASS") -> None:
+    (root / "harness").mkdir(exist_ok=True)
+    command = ["python3", "-c", "pass" if result == "PASS" else "raise SystemExit(1)"]
+    declaration = {
+        "check_id": "cli.fixture",
+        "module": "test",
+        "command": command,
+        "executable": "python3",
+        "cwd": ".",
+        "timeout_seconds": 10,
+        "scope": scope,
+        "triggers": [{"path": "test/"}],
+        "module_dependencies": [],
+        "required_environment": ["python3"],
+        "input_paths": ["initial.txt"],
+        "result_contract": {"type": "exit-code", "completeness_guarantee": "fixture-owned command completion"},
     }
-    (harness / "module-checks.yaml").write_text(
-        yaml.dump(data, default_flow_style=False), encoding="utf-8",
-    )
+    (root / "harness/module-checks.yaml").write_text(yaml.safe_dump({"schema_version": "lexiflow.module-checks.v1", "checks": [declaration]}))
 
 
-class TestCheckRepositoryCLI(unittest.TestCase):
-    def test_exit_code_pass(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            _write_declarations(root, [{
-                "check_id": "cli.pass",
-                "module": "test",
-                "command": ["python3", "-c", "pass"],
-                "cwd": ".",
-                "timeout_seconds": 10,
-                "scope": "repository-baseline",
-                "triggers": [{"path": "test/"}],
-                "required_environment": ["python3"],
-                "consumed_inputs": [],
-            }])
-            r = subprocess.run(
-                [sys.executable, os.path.join(_REPO_ROOT, "scripts", "check_repository.py"),
-                 "--repo-root", str(root)],
-                capture_output=True, text=True,
-                cwd=_REPO_ROOT, env=_repo_env(),
-            )
-            report = json.loads(r.stdout)
-        self.assertEqual(report["result"], "PASS")
-        self.assertEqual(r.returncode, 0)
-
-    def test_exit_code_fail(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            r = subprocess.run(
-                [sys.executable, os.path.join(_REPO_ROOT, "scripts", "check_repository.py"),
-                 "--repo-root", str(root)],
-                capture_output=True, text=True,
-                cwd=_REPO_ROOT, env=_repo_env(),
-            )
-            report = json.loads(r.stdout)
-        self.assertEqual(report["result"], "FAIL")
-        self.assertNotEqual(r.returncode, 0)
-
-    def test_json_output(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            r = subprocess.run(
-                [sys.executable, os.path.join(_REPO_ROOT, "scripts", "check_repository.py"),
-                 "--repo-root", str(root)],
-                capture_output=True, text=True,
-                cwd=_REPO_ROOT, env=_repo_env(),
-            )
-            report = json.loads(r.stdout)
-        self.assertIn("schema_version", report)
-        self.assertIn("result", report)
+def _invoke(function, argv: list[str], root: Path) -> tuple[int, dict]:
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        code = function(argv, root=root)
+    return code, json.loads(output.getvalue())
 
 
-class TestCheckChangesCLI(unittest.TestCase):
-    def test_no_changes_exit_zero(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
+class TestDailyAndDiagnosticCLI(unittest.TestCase):
+    def test_repository_daily_pass_and_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "initial.txt").write_text("fixture")
+            _write_declarations(root, scope="repository-baseline")
+            code, report = _invoke(check_repository.main, [], root)
+            self.assertEqual((code, report["result"]), (0, "PASS"))
+            _write_declarations(root, scope="repository-baseline", result="FAIL")
+            code, report = _invoke(check_repository.main, [], root)
+            self.assertEqual((code, report["result"]), (1, "FAIL"))
+
+    def test_change_daily_and_diagnostic_have_distinct_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
             base = _init_git_repo(root)
-            _write_declarations(root, [{
-                "check_id": "cli.change",
-                "module": "test",
-                "command": ["python3", "-c", "pass"],
-                "cwd": ".",
-                "timeout_seconds": 10,
-                "scope": "change-targeted",
-                "triggers": [{"path": "test/"}],
-            }])
-            r = subprocess.run(
-                [sys.executable, os.path.join(_REPO_ROOT, "scripts", "check_changes.py"),
-                 "--repo-root", str(root), "--base", base],
-                capture_output=True, text=True,
-                cwd=_REPO_ROOT, env=_repo_env(),
-            )
-            report = json.loads(r.stdout)
-        self.assertEqual(report["result"], "PASS")
-        self.assertEqual(r.returncode, 0)
+            _write_declarations(root, scope="change-targeted")
+            code, report = _invoke(check_changes.main, [], root)
+            self.assertEqual((code, report["result"]), (0, "PASS"))
+            diagnostic = diagnostic_cli.diagnose(root, "change", base=base, expected_paths=("backend/",))
+            self.assertEqual(diagnostic["kind"], "diagnostic")
+            self.assertIs(diagnostic["full_repository_executed"], False)
+            self.assertIn("scope_review", diagnostic["selected_report"])
 
-    def test_expected_path_argument(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            base = _init_git_repo(root)
-            _write_declarations(root, [{
-                "check_id": "cli.change",
-                "module": "test",
-                "command": ["python3", "-c", "pass"],
-                "cwd": ".",
-                "timeout_seconds": 10,
-                "scope": "change-targeted",
-                "triggers": [{"path": "test/"}],
-            }])
-            r = subprocess.run(
-                [sys.executable, os.path.join(_REPO_ROOT, "scripts", "check_changes.py"),
-                 "--repo-root", str(root), "--base", base,
-                 "--expected-path", "backend/"],
-                capture_output=True, text=True,
-                cwd=_REPO_ROOT, env=_repo_env(),
-            )
-            report = json.loads(r.stdout)
-        self.assertIn("scope_review", report)
+    def test_repository_selection_is_diagnostic_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "initial.txt").write_text("fixture")
+            _write_declarations(root, scope="repository-baseline")
+            result = diagnostic_cli.diagnose(root, "repository", check_ids=("cli.fixture",))
+            self.assertEqual(result["selected_result"], "PASS")
+            self.assertIs(result["full_repository_executed"], False)
+            self.assertNotIn("publication", result["selected_report"])
+            self.assertNotIn("result", result["selected_report"])
+            self.assertNotIn("scope", result["selected_report"])
+
+    def test_daily_overrides_are_rejected(self):
+        for entry, option in ((check_changes.main, "--base"), (check_repository.main, "--check-id")):
+            with self.subTest(option=option), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                entry([option, "fixture"])
 
 
 if __name__ == "__main__":

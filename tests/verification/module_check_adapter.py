@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Module-owned result adapter for the verification test suite.
+"""将 verification 模块测试结果转换为门禁消费的结构化协议。
 
-The kernel only validates this JSON protocol.  It has no knowledge of unittest,
-which keeps tool-specific completeness rules in the owning module.
+测试数量、失败和跳过判定归测试模块；内核只校验 JSON 协议，
+不依赖 unittest 的内部实现，也不把进程退出零当作测试通过。
 """
 from __future__ import annotations
 
 import argparse
 import io
 import json
-import sys
 import unittest
 from pathlib import Path
 
 
 def verification_tests(root: Path) -> dict[str, object]:
+    """发现并执行本模块测试；空集合、失败、异常或跳过均不得返回 PASS。"""
     suite = unittest.defaultTestLoader.discover(str(root / "tests" / "verification"), pattern="test_*.py", top_level_dir=str(root))
     stream = io.StringIO()
     result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
@@ -29,16 +29,10 @@ def verification_tests(root: Path) -> dict[str, object]:
     }
 
 
-def pending_product_coverage() -> dict[str, object]:
-    return {"status": "BLOCKED", "reason": "product-quality-checks-not-migrated"}
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--root", default=".")
-    parser.add_argument("--mode", choices=("verification-tests", "pending-product-coverage"), required=True)
-    args = parser.parse_args(argv)
-    report = verification_tests(Path(args.root).resolve()) if args.mode == "verification-tests" else pending_product_coverage()
+def main() -> int:
+    """以仓库根运行模块检查并输出 JSON，实际通过状态由协议字段表达。"""
+    argparse.ArgumentParser(description=__doc__).parse_args()
+    report = verification_tests(Path(__file__).resolve().parents[2])
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     return 0
 

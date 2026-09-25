@@ -24,6 +24,7 @@ def canonical_bytes(value: Any) -> bytes:
 
 
 def task_source_hash_from_catalog(catalog: Any, task_id: str) -> str:
+    """从当前 Catalog 计算 Task 来源哈希，避免复用漂移的计划事实。"""
     tasks = catalog_tasks(catalog)
     if task_id not in tasks:
         raise ValueError(f"catalog task missing: {task_id}")
@@ -33,6 +34,7 @@ def task_source_hash_from_catalog(catalog: Any, task_id: str) -> str:
 
 
 def task_source_descriptor(repo_root: str | Path, task_id: str) -> dict[str, str]:
+    """构造绑定当前 Task 来源与版本的证据描述符。"""
     root = Path(repo_root)
     content = (root / "planning/workstreams.yaml").read_bytes()
     catalog = yaml.safe_load(content)

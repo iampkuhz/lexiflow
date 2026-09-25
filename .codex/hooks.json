@@ -1,0 +1,17 @@
+{
+  "description": "LexiFlow delivery verification; policy lives in harness/delivery-hooks.json",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "root=$(git rev-parse --show-toplevel) && python3 \"$root/scripts/verification/delivery_hook.py\" || exit 1",
+            "timeout": 1860,
+            "statusMessage": "LexiFlow：执行交付验证（Java / Python / 模块测试）"
+          }
+        ]
+      }
+    ]
+  }
+}
