@@ -1,6 +1,6 @@
 package io.lexiflow.lexicon.platform.persistence;
 
-import io.lexiflow.lexicon.application.LexiconImportMetadata;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import java.util.UUID;
 
 /** 导入发布批次的表级访问合同，仅供 persistence Repository 使用。 */

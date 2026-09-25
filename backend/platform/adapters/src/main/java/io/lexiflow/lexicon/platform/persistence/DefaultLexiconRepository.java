@@ -1,12 +1,12 @@
 package io.lexiflow.lexicon.platform.persistence;
 
-import io.lexiflow.lexicon.application.LexiconImportMetadata;
-import io.lexiflow.lexicon.application.LexiconImportPlan;
-import io.lexiflow.lexicon.application.LexiconImportRequest;
-import io.lexiflow.lexicon.application.LexiconImportRow;
-import io.lexiflow.lexicon.application.LexiconRepository;
-import io.lexiflow.lexicon.application.StagedLexiconImport;
-import io.lexiflow.lexicon.domain.LexiconEntry;
+import io.lexiflow.lexicon.application.importing.LexiconImportPlan;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
+import io.lexiflow.lexicon.application.importing.model.StagedLexiconImport;
+import io.lexiflow.lexicon.application.port.LexiconRepository;
+import io.lexiflow.lexicon.domain.model.LexiconEntry;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;

@@ -55,7 +55,7 @@ endlegend
 
 ## 1.3. 领域与依赖，不等于进程数量
 
-Lexicon 拥有可复用词汇事实和版本；Enrichment 拥有 `CaptionContext` 输入合同、候选与提示决策。`:application:workflow` 协调用例，`:application:lexicon-application` 协调导入和版本查询，`:platform:adapters` 实现技术端口。`api` 与 `worker` 只是可分别部署的组合根；worker 不参加观看等待，也不因为独立进程成为微服务。Domain 不依赖 HTTP、数据库、缓存或供应商 SDK，模块不得直接读写其他 Domain 所有的数据。
+Lexicon 拥有可复用词汇事实和版本；Enrichment 拥有 `CaptionContext` 输入合同、候选与提示决策。两个领域 Gradle 项目内部各自保留 `domain` 与 `application` 包：Enrichment 协调字幕用例，Lexicon 协调导入和版本查询，`:platform:adapters` 实现技术端口。`api` 与 `worker` 只是可分别部署的组合根；worker 不参加观看等待，也不因为独立进程成为微服务。Domain 不依赖 HTTP、数据库、缓存或供应商 SDK，模块不得直接读写其他 Domain 所有的数据。
 
 看[模块边界](boundaries.md)的组件关系、职责和代码位置，再读[持久化模型](data-model.md)区分完整领域聚合与 DAO 行。Python 只负责仓库 Harness、Gate、生成器和审计，不承载产品业务。当前实现和未完成处由[状态页](../roadmap/master-plan/status.md)记录。
 

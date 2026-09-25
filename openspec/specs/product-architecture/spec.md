@@ -26,11 +26,13 @@
 
 ## 3. 模块化单体与所有权
 
-产品后端使用 Java 25。Lexicon 与 Enrichment 为业务领域，workflow 协调用例，platform adapters 隔离技术实现，api / worker 是组合根。Domain 不依赖 HTTP、数据库、缓存或供应商 SDK；跨模块只用公开合同，不跨域读写数据。
+产品后端使用 Java 25。Lexicon 与 Enrichment 分别是业务 Gradle 项目，各自在 `domain` 和 `application` 包内维护领域规则与应用用例。platform adapters 隔离技术实现，api / worker 是组合根，共五个产品项目；测试和构建工具不计入产品项目。Domain 不依赖 HTTP、数据库、缓存或供应商 SDK；跨模块只用公开合同，不跨域读写数据。
+
+业务项目 MUST 按功能及职责组织模型、策略、端口与服务，MUST NOT 按 record 语法统一建目录或机械添加 DTO 后缀。Domain MUST NOT 依赖 Application；model MUST NOT 依赖服务、用例或策略实现。持久化同包私有类型 MUST NOT 为目录拆分扩大可见性。Gradle 只声明实际使用的直接依赖，ArchUnit 验证模块内及跨模块边界。
 
 ### 场景：规则查询资料
 
-Enrichment 从 Lexicon 公开合同读取已发布资料，以确定性规则判断提示价值及适用性，不为决策调用模型。PostgreSQL 为事实存储，缓存与投影可重建。
+Enrichment 只从 Lexicon 的 `domain.port` 及 `domain.model` 公开合同读取已发布资料，不依赖 Lexicon 的应用层或内置词库实现，以确定性规则判断提示价值及适用性，不为决策调用模型。PostgreSQL 为事实存储，缓存与投影可重建。
 
 ## 4. 本机显式偏好
 

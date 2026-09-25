@@ -4,11 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.lexiflow.lexicon.application.LexiconImportMetadata;
-import io.lexiflow.lexicon.application.LexiconImportRequest;
-import io.lexiflow.lexicon.application.LexiconImportRow;
-import io.lexiflow.lexicon.application.SourceReference;
-import io.lexiflow.lexicon.domain.LexiconPriority;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
+import io.lexiflow.lexicon.application.importing.model.SourceReference;
+import io.lexiflow.lexicon.domain.model.LexiconPriority;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.DriverManager;
@@ -224,13 +224,13 @@ class PostgresLexiconRepositoryIntegrationTest {
             var version = repository.publish(request(basic, geometry));
             var loaded = repository.findByForms(version, List.of("abilities")).getFirst();
             assertEquals(
-                io.lexiflow.lexicon.domain.LexiconHintEligibility.BASIC_VOCABULARY,
+                io.lexiflow.lexicon.domain.model.LexiconHintEligibility.BASIC_VOCABULARY,
                 loaded.hintEligibility());
             assertTrue(repository.findPrewarmCandidates(version, 2000).isEmpty());
             var shape = repository.findByForms(version, List.of("parallelogram")).getFirst();
             assertEquals("平行四边形", shape.senses().getFirst().chineseGloss());
             assertEquals(
-                io.lexiflow.lexicon.domain.LexiconHintEligibility.CANDIDATE,
+                io.lexiflow.lexicon.domain.model.LexiconHintEligibility.CANDIDATE,
                 shape.hintEligibility());
             assertEquals(
                 "fixture-top2000-v1",

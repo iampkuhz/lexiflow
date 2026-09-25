@@ -20,7 +20,6 @@ backend:
 source_policy:
   product_roots:
   - backend/apps
-  - backend/application
   - backend/modules
   - backend/platform
   allowed_product_source_extensions: [.java]

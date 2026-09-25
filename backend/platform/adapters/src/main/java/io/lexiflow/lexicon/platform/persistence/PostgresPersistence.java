@@ -1,7 +1,7 @@
 package io.lexiflow.lexicon.platform.persistence;
 
 import com.zaxxer.hikari.HikariDataSource;
-import io.lexiflow.lexicon.application.LexiconRepository;
+import io.lexiflow.lexicon.application.port.LexiconRepository;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;

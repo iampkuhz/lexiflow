@@ -19,8 +19,6 @@ includeBuild("gradle/build-logic")
 mapOf(
     ":modules:lexicon" to "modules/lexicon",
     ":modules:enrichment" to "modules/enrichment",
-    ":application:workflow" to "application/workflow",
-    ":application:lexicon-application" to "application/lexicon",
     ":platform:adapters" to "platform/adapters",
     ":apps:api" to "apps/api",
     ":apps:worker" to "apps/worker",

@@ -17,7 +17,7 @@ LexiFlow 后端是共享两个业务领域的 Modular Monolith，不是因为 `a
 <a id="3-java-module-的完整划分"></a>
 ## 1.2. 依赖从组合根走向公开 contract
 
-下图是**模块级用例／公开 contract 的调用方向**，不画 worker 在观看请求中执行，也不把装配基础设施误作业务调用。具体的客户端、服务端和存储系统关系见[系统边界图](overview.md#11-系统边界英文在本机事实在服务端)。
+下图是**五个产品 Gradle 项目的直接依赖方向**，不是运行时调用顺序。每个业务项目包含领域与应用层；worker 尚无后台业务，不预挂领域或适配器依赖。具体的客户端、服务端和存储系统关系见[系统边界图](overview.md#11-系统边界英文在本机事实在服务端)。
 
 ```plantuml
 @startuml
@@ -27,64 +27,65 @@ skinparam defaultFontName "Noto Sans CJK SC"
 skinparam defaultFontSize 14
 skinparam componentStyle rectangle
 skinparam packageStyle rectangle
-skinparam nodesep 30
-skinparam ranksep 60
+skinparam nodesep 45
+skinparam ranksep 70
 skinparam ArrowColor #475569
-title 核心模块与基础设施
+title 五个产品项目与直接依赖
 top to bottom direction
-package "运行入口" #DBEAFE {
+package "进程入口" #DBEAFE {
   component "api" as api
   component "worker" as worker
 }
-package "应用用例" #DCFCE7 {
-  component "workflow" as workflow
-  component "lexicon application" as lexicon_application
-}
-package "业务领域（2 个模块）" #E0E7FF {
-  component "lexicon" as lexicon
+package "业务模块" #DCFCE7 {
   component "enrichment" as enrichment
+  component "lexicon" as lexicon
 }
-package "最外层基础设施" #FEF3C7 {
-  component ":platform:adapters" as infrastructure
+package "技术适配" #FEF3C7 {
+  component "platform adapters" as adapters
 }
 api -[hidden]right- worker
-workflow -[hidden]down- enrichment
-lexicon_application -[hidden]down- lexicon
-enrichment -[hidden]down- lexicon
-lexicon -[hidden]down- infrastructure
-api --> workflow : S1 调用交互用例
-worker --> workflow : S2 调用后台用例
-api --> lexicon_application : S3 调用词库导入或查询用例
-lexicon_application --> lexicon : S4 使用词库领域模型
-workflow --> enrichment : S3 调用领域用例
-enrichment --> lexicon : S4 读取公开词库合同
+enrichment -[hidden]right- lexicon
+api --> enrichment : S1 字幕用例
+api --> lexicon : S2 查询服务
+api --> adapters : S3 装配实现
+enrichment --> lexicon : S4 公开领域合同
+adapters --> lexicon : S5 实现词库端口
 legend bottom
-  实线：用例或公开合同调用
-  基础设施只由组合根装配，不是业务调用
-  基础设施位于最外层，不发起领域决策
-  CaptionContext 是 enrichment 的输入合同
+  实线表示 Gradle 直接依赖，不表示运行调用顺序
+  domain 与 application 同属业务项目，包边界由 ArchUnit 检查
+  worker 无预挂业务依赖；测试与构建工具不计入产品项目
 endlegend
 @enduml
 ```
 
-`api` / `worker` 是唯一同时装配 application 与 `:platform:adapters` 的组合根，二者不互相依赖。`:application:workflow` 协调交互或后台用例，但不判断词义；`:application:lexicon-application` 负责离线导入与版本查询。Enrichment 只从 Lexicon 的**公开合同**读已发布知识，Lexicon 不反向依赖 Enrichment。`:platform:adapters` 是最外层技术实现，不发起提示决策，也不因实现 DAO 而拥有所有表。
+`api` 装配 Enrichment 字幕用例、Lexicon 查询服务和持久化实现。`worker` 是独立无 Web Server 入口，尚无后台用例，因此不声明产品项目依赖。两者不互相依赖，也不会因分进程而改变业务所有权。Enrichment 只从 Lexicon 的 `domain.port` 与 `domain.model` **公开合同**读取已发布知识；Lexicon 不反向依赖 Enrichment。`:platform:adapters` 仅依赖实际使用的 Lexicon，不发起提示决策。
 
-### 1.2.1. 九个 Gradle 叶项目到哪里找
+### 1.2.1. 五个产品项目与三个测试项目
 
-业务 Domain 在 `:modules:lexicon` 和 `:modules:enrichment`；Application 在 `:application:workflow` 和 `:application:lexicon-application`；技术适配在 `:platform:adapters`；进程入口在 `:apps:api` 与 `:apps:worker`；验证在 `:tests:architecture` 和 `:tests:quality-gates`，合计九个叶项目。验证项目只在检查时依赖受测模块，不参与运行。
+| Gradle 项目 | 职责与内部结构 |
+| --- | --- |
+| `:modules:lexicon` | 词库知识、导入与查询；`domain.model/port/catalog`、`application.importing/query/port` |
+| `:modules:enrichment` | 字幕提示领域规则与用例；`domain.model/policy`、`application.caption` |
+| `:platform:adapters` | 来源文件、持久化等具体技术实现；仅依赖 Lexicon |
+| `:apps:api` | HTTP 映射和装配；请求／响应在 `hints.model` |
+| `:apps:worker` | 无 Web Server 的运行入口，按已实现的后台用例接入依赖 |
+| `:tests:architecture` | 编译类架构边界及隔离反例 |
+| `:tests:quality-gates` | Java 源码工程规则及其直接测试 |
+| `:tests:integration` | PostgreSQL、Redis、API 与 worker 的运行 smoke 测试 |
 
-- [`backend/modules/lexicon`](../../backend/modules/lexicon) 持有词条、义项与版本；[`backend/modules/enrichment`](../../backend/modules/enrichment) 持有 `CaptionContext`、候选和提示规则。Domain 不依赖 HTTP、Chrome、YouTube、Redis、PostgreSQL 或供应商 SDK。
-- [`backend/application/workflow`](../../backend/application/workflow) 协调用例，不能把规则藏在流程里；[`backend/application/lexicon`](../../backend/application/lexicon) 定义 `LexiconRepository`、导入服务和可重建的版本感知 L1 查询，不含 SQL、DAO、DO、Spring 或具体数据库类型。
-- [`backend/platform/adapters`](../../backend/platform/adapters) 提供持久化、缓存、观测、安全和未来离线模型的技术接入，但不改工作状态机、提示规则或重试预算。[`backend/apps/api`](../../backend/apps/api) 是 HTTP 映射和装配入口，不能直接跨表读取；[`backend/apps/worker`](../../backend/apps/worker) 以无 Web Server 进程触发后台／恢复用例，不成为队列或调度领域。
-- [`backend/tests/architecture`](../../backend/tests/architecture) 验证依赖方向；[`backend/tests/quality-gates`](../../backend/tests/quality-gates) 验证 Java 源码工程规则，不替代产品行为测试或 Python Gate 收据。[Gradle 项目护栏](../../backend/gradle/build-logic/src/main/kotlin/io/lexiflow/buildlogic/VerifyProjectDependenciesTask.kt)检查角色方向与环。
+[`backend/gradle/build-logic`](../../backend/gradle/build-logic) 是 Gradle convention 与依赖护栏的独立构建，不是产品模块。测试项目仅在检查时依赖受测模块，不参与运行。扫描覆盖所有业务模块内部的领域与应用源码，不依赖已经不存在的独立 application 项目。
 
-### 1.2.2. 容易混淆的责任
+### 1.2.2. 功能在前，职责在后
 
-Worker 决定**进程何时运行**，workflow 决定**工作如何可靠完成**；例如 worker 以 `WebApplicationType.NONE` 启动，workflow 判断取消后是否可提交和怎样恢复。Workflow 定义**所需保证**，`:platform:adapters` 用事务或条件更新实现保证。`CaptionContext` 是 Enrichment 接收的原文事实，不是新领域；字幕修订使旧提示失效，Enrichment 重算但不篡改原文。Lexicon 的长期义项不等于当前句的语义选择，后者必须带当前 `CaptionContext` 证据。
+以 Lexicon 为例，领域实体和值对象在 `domain.model`，查询合同在 `domain.port`。导入服务与计划在 `application.importing`，请求、来源行和批次值对象在其 `model` 子包；查询服务在 `application.query`，存储端口在 `application.port`。Enrichment 的字幕用例和结果分别在 `application.caption` 与 `application.caption.model`。
+
+类名表达角色：行为使用 `Service`、`UseCase`、`Policy` 等，边界输入输出使用 `Request`、`Result`、`Response`；领域实体与值对象保留业务名词。record 是实现语法，不形成统一的 `record/` 目录，也不机械改名为 DTO。嵌套的辅助结果仍可与所属行为类型就近保存。
+
+`domain` 不依赖 `application`，`model` 不依赖服务、用例或领域策略。导入值对象的构造校验委托 `importing.validation` 纯 Java 辅助函数，该包不得依赖其他应用类型；不把必需校验移到可被绕过的服务调用点。持久化的 DO、DAO、Mapper 在同包协作并保留包私有可见性，不为文件夹对称而公开内部类型。上述边界由 [ArchUnit 测试](../../backend/tests/architecture/src/test/java/io/lexiflow/architecture/LayerArchitectureTest.java)与 [Gradle 项目护栏](../../backend/gradle/build-logic/src/main/kotlin/io/lexiflow/buildlogic/VerifyProjectDependenciesTask.kt)验证。
 
 ## 1.3. 当前字幕怎样经过边界
 
-来源适配器在本机产生不含平台私有类型的有界输入，`api` 交给 workflow；workflow 调用 Enrichment，后者经 Lexicon 公开合同查询候选和发布版本，再按价值、密度和适用性决定返回可靠提示或空结果。没有当前字幕模型调用、后台补全或 `pending` 承诺；扩展只显示匹配当前字幕的结果。Worker 只服务独立后台用例；第三阶段规划的分析产物必须经公开发布合同后，才可供后续观看读取。[观看时序](flows/viewing.md)标出每次调用和迟到丢弃。
+来源适配器在本机产生不含平台私有类型的有界输入，`api` 交给 Enrichment 的字幕应用用例；用例经 Lexicon 公开合同查询候选和发布版本，再调用本领域规则，再按价值、密度和适用性决定返回可靠提示或空结果。没有当前字幕模型调用、后台补全或 `pending` 承诺；扩展只显示匹配当前字幕的结果。Worker 只服务独立后台用例；第三阶段规划的分析产物必须经公开发布合同后，才可供后续观看读取。[观看时序](flows/viewing.md)标出每次调用和迟到丢弃。
 
 Chrome 扩展仅可拥有用户明确触发的本机 `SuppressedTermPreference`：以词段和词库版本写入，不上传、不推断熟悉度、不生成账号身份或跨设备合并。本机偏好不是服务端事实。[产品说明](../product/product-brief.md)解释这种低打扰取舍。
 

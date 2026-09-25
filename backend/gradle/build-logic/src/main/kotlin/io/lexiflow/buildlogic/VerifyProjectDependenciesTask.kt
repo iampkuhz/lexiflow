@@ -25,18 +25,25 @@ abstract class VerifyProjectDependenciesTask : DefaultTask() {
     @TaskAction
     fun verify() {
         val graph = dependencyGraph.get()
+        // Gradle 项目代表领域或运行边界；同模块 domain/application 方向由 ArchUnit 检查。
+        val modules = setOf(":modules:lexicon", ":modules:enrichment")
+        val products = modules + setOf(":platform:adapters", ":apps:api", ":apps:worker")
         val allowed = mapOf(
-            "module" to setOf("module"),
-            "application" to setOf("module"),
-            "platform" to setOf("module", "application"),
-            "app" to setOf("module", "application", "platform"),
-            "test" to setOf("module", "application", "platform", "app"),
+            ":modules:lexicon" to emptySet(),
+            ":modules:enrichment" to setOf(":modules:lexicon"),
+            ":platform:adapters" to setOf(":modules:lexicon"),
+            ":apps:api" to (modules + ":platform:adapters"),
+            ":apps:worker" to emptySet(),
+            ":tests:architecture" to products,
+            ":tests:quality-gates" to emptySet(),
+            ":tests:integration" to setOf(":platform:adapters"),
         )
+        if (graph.keys != allowed.keys) {
+            throw GradleException("Project set differs from architecture: missing=${allowed.keys - graph.keys}, unknown=${graph.keys - allowed.keys}")
+        }
         graph.forEach { (source, targets) ->
-            val sourceRole = role(source)
             targets.forEach { target ->
-                val targetRole = role(target)
-                if (targetRole !in allowed.getValue(sourceRole)) {
+                if (target !in allowed.getValue(source)) {
                     throw GradleException("Forbidden project dependency: $source -> $target")
                 }
             }
@@ -58,12 +65,4 @@ abstract class VerifyProjectDependenciesTask : DefaultTask() {
         output.writeText("PASS\n", Charsets.UTF_8)
     }
 
-    private fun role(path: String): String = when {
-        path.startsWith(":modules:") -> "module"
-        path.startsWith(":application:") -> "application"
-        path.startsWith(":platform:") -> "platform"
-        path.startsWith(":apps:") -> "app"
-        path.startsWith(":tests:") -> "test"
-        else -> throw GradleException("Unknown project role: $path")
-    }
 }

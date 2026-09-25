@@ -1,8 +1,8 @@
 package io.lexiflow.lexicon.platform.importer;
 
-import io.lexiflow.lexicon.application.LexiconImportRow;
-import io.lexiflow.lexicon.application.SourceReference;
-import io.lexiflow.lexicon.domain.LexiconPriority;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
+import io.lexiflow.lexicon.application.importing.model.SourceReference;
+import io.lexiflow.lexicon.domain.model.LexiconPriority;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;

@@ -1,7 +1,10 @@
 package io.lexiflow.api.hints;
 
-import io.lexiflow.enrichment.domain.CaptionContext;
-import io.lexiflow.workflow.application.EnrichCaptionUseCase;
+import io.lexiflow.api.hints.model.AnnotationHintResponse;
+import io.lexiflow.api.hints.model.CaptionHintRequest;
+import io.lexiflow.api.hints.model.CaptionHintResponse;
+import io.lexiflow.enrichment.application.caption.EnrichCaptionUseCase;
+import io.lexiflow.enrichment.domain.model.CaptionContext;
 import java.util.Locale;
 import java.util.Objects;
 import org.slf4j.Logger;

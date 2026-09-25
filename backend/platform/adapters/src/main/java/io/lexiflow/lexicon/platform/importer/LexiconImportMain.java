@@ -1,9 +1,9 @@
 package io.lexiflow.lexicon.platform.importer;
 
-import io.lexiflow.lexicon.application.LexiconImportMetadata;
-import io.lexiflow.lexicon.application.LexiconImportPlan;
-import io.lexiflow.lexicon.application.LexiconImportRequest;
-import io.lexiflow.lexicon.application.LexiconImportService;
+import io.lexiflow.lexicon.application.importing.LexiconImportPlan;
+import io.lexiflow.lexicon.application.importing.LexiconImportService;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
 import io.lexiflow.lexicon.platform.persistence.PostgresPersistence;
 import java.io.IOException;
 import java.io.InputStream;
@@ -81,11 +81,11 @@ public final class LexiconImportMain {
           StardictCsvReader.PREPARATION_POLICY,
           selection.digest(),
           selection.words().size(),
-          io.lexiflow.lexicon.application.BasicVocabulary.fixedWords().size());
+          io.lexiflow.lexicon.application.importing.validation.BasicVocabulary.fixedWords().size());
       selection
           .words()
           .forEach(word -> System.out.printf("BASIC\t%d\t%s%n", word.rank(), word.lemma()));
-      io.lexiflow.lexicon.application.BasicVocabulary.fixedWords().stream()
+      io.lexiflow.lexicon.application.importing.validation.BasicVocabulary.fixedWords().stream()
           .filter(word -> !selection.lemmas().contains(word))
           .sorted()
           .forEach(word -> System.out.printf("FIXED\t%s%n", word));
@@ -151,7 +151,7 @@ public final class LexiconImportMain {
 
   private static void stage(
       LexiconImportService service,
-      io.lexiflow.lexicon.application.StagedLexiconImport batch,
+      io.lexiflow.lexicon.application.importing.model.StagedLexiconImport batch,
       List<StardictCsvReader.SourceRecord> records,
       long processedThrough,
       LexiconImportMetadata metadata) {
@@ -204,7 +204,17 @@ public final class LexiconImportMain {
   private static void printStardictScan(
       String status, StardictCsvReader.ScanResult scan, String digest) {
     System.out.printf(
-        "%s format=ecdict-stardict source_rows=%d entries=%d derived_merged=%d omitted_no_gloss=%d omitted_unsupported_surface=%d selected_basic=%d basic_rows=%d deduplicated_gloss_rows=%d source_sha256=%s%n",
+        "导入校验结果：%s%n"
+            + "文件格式（format）：ecdict-stardict%n"
+            + "来源行数（source_rows）：%d%n"
+            + "可导入词条数（entries）：%d%n"
+            + "归并派生词数（derived_merged）：%d%n"
+            + "缺少释义跳过数（omitted_no_gloss）：%d%n"
+            + "不支持词形跳过数（omitted_unsupported_surface）：%d%n"
+            + "来源基础词命中数（selected_basic）：%d%n"
+            + "合并固定词后的基础词行数（basic_rows）：%d%n"
+            + "去重释义行数（deduplicated_gloss_rows）：%d%n"
+            + "来源文件SHA-256（source_sha256）：%s%n",
         status,
         scan.sourceRows(),
         scan.importableRows(),

@@ -1,8 +1,8 @@
 package io.lexiflow.lexicon.platform.importer;
 
-import io.lexiflow.lexicon.application.LexiconImportRow;
-import io.lexiflow.lexicon.application.SourceReference;
-import io.lexiflow.lexicon.domain.LexiconPriority;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
+import io.lexiflow.lexicon.application.importing.model.SourceReference;
+import io.lexiflow.lexicon.domain.model.LexiconPriority;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -188,7 +188,9 @@ final class StardictCsvReader {
                     + evidenceReference),
             "1".equals(normalize(row.get("oxford"))),
             rank,
-            !gloss.equals(io.lexiflow.lexicon.application.GlossPreparation.normalize(gloss))));
+            !gloss.equals(
+                io.lexiflow.lexicon.application.importing.validation.GlossPreparation.normalize(
+                    gloss))));
   }
 
   private static Map<String, Integer> indexes(List<String> header) {
@@ -380,7 +382,7 @@ final class StardictCsvReader {
             word ->
                 sha.update(
                     (word.rank() + "\t" + word.lemma() + "\n").getBytes(StandardCharsets.UTF_8)));
-        io.lexiflow.lexicon.application.BasicVocabulary.fixedWords().stream()
+        io.lexiflow.lexicon.application.importing.validation.BasicVocabulary.fixedWords().stream()
             .sorted()
             .forEach(
                 word -> sha.update(("fixed\t" + word + "\n").getBytes(StandardCharsets.UTF_8)));

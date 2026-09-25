@@ -47,7 +47,7 @@ class LexiconEntryMapperTest {
         entry.inflections().stream().map(value -> value.normalizedForm()).toList());
     assertEquals(4, entry.lexiconVersion());
     assertEquals(
-        io.lexiflow.lexicon.domain.LexiconHintEligibility.BASIC_VOCABULARY,
+        io.lexiflow.lexicon.domain.model.LexiconHintEligibility.BASIC_VOCABULARY,
         entry.hintEligibility());
   }
 }

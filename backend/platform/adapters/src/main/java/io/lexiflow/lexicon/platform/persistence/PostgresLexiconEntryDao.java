@@ -1,6 +1,6 @@
 package io.lexiflow.lexicon.platform.persistence;
 
-import io.lexiflow.lexicon.application.LexiconImportPlan;
+import io.lexiflow.lexicon.application.importing.LexiconImportPlan;
 import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Collection;

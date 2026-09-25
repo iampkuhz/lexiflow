@@ -1,12 +1,12 @@
 package io.lexiflow.lexicon.platform.persistence;
 
-import io.lexiflow.lexicon.domain.LexiconAlias;
-import io.lexiflow.lexicon.domain.LexiconEntry;
-import io.lexiflow.lexicon.domain.LexiconEntryKind;
-import io.lexiflow.lexicon.domain.LexiconInflection;
-import io.lexiflow.lexicon.domain.LexiconPriority;
-import io.lexiflow.lexicon.domain.LexiconProvenance;
-import io.lexiflow.lexicon.domain.LexiconSense;
+import io.lexiflow.lexicon.domain.model.LexiconAlias;
+import io.lexiflow.lexicon.domain.model.LexiconEntry;
+import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
+import io.lexiflow.lexicon.domain.model.LexiconInflection;
+import io.lexiflow.lexicon.domain.model.LexiconPriority;
+import io.lexiflow.lexicon.domain.model.LexiconProvenance;
+import io.lexiflow.lexicon.domain.model.LexiconSense;
 import java.util.List;
 import java.util.Locale;
 
@@ -37,7 +37,7 @@ final class LexiconEntryMapper {
             source.acquiredAt()),
         new LexiconPriority(
             source.frequencyZipf(), source.complexListCount(), source.memoryPriority()),
-        io.lexiflow.lexicon.domain.LexiconHintEligibility.valueOf(source.hintEligibility()));
+        io.lexiflow.lexicon.domain.model.LexiconHintEligibility.valueOf(source.hintEligibility()));
   }
 
   List<LexiconEntry> toModels(List<LexiconEntryDO> sources) {

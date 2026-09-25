@@ -1,6 +1,6 @@
 package io.lexiflow.lexicon.platform.persistence;
 
-import io.lexiflow.lexicon.application.LexiconImportPlan;
+import io.lexiflow.lexicon.application.importing.LexiconImportPlan;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;

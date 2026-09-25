@@ -3,7 +3,7 @@ package io.lexiflow.lexicon.platform.importer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import io.lexiflow.lexicon.application.LexiconImportPlan;
+import io.lexiflow.lexicon.application.importing.LexiconImportPlan;
 import java.nio.file.Files;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;

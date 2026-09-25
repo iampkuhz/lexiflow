@@ -12,6 +12,7 @@ dependency_rules:
 bounded_contexts:
   lexicon:
     display_name: 共享词汇知识
+    gradle_project: ":modules:lexicon"
     kind: supporting-domain
     owns:
     - terms
@@ -24,6 +25,7 @@ bounded_contexts:
     may_depend_on: []
   enrichment:
     display_name: 通用字幕提示
+    gradle_project: ":modules:enrichment"
     kind: core-domain
     owns:
     - caption-context
@@ -35,21 +37,35 @@ bounded_contexts:
     may_depend_on:
     - lexicon
 
-# Application 编排用例，不拥有其他 Domain 的存储。
-application_modules:
-  workflow-application:
+# Application 是所属领域项目内的逻辑包，不是独立 Gradle 项目。
+application_packages:
+  enrichment-caption:
+    owner: enrichment
+    package: io.lexiflow.enrichment.application.caption
     owns:
     - enrich-caption-use-case
     may_depend_on:
-    - lexicon
-    - enrichment
+    - enrichment-domain
+    - lexicon-public-domain-contract
   lexicon-application:
+    owner: lexicon
+    package: io.lexiflow.lexicon.application
     owns:
     - lexicon-import-service
     - version-aware-lexicon-query-service
     - lexicon-repository-contract
     may_depend_on:
-    - lexicon
+    - lexicon-domain
+
+package_rules:
+- "每个领域项目保留 domain 与 application；domain 不得依赖 application。"
+- "按业务功能再按职责组织 model、policy、port、importing、query；不按 record 语法分组。"
+- "model 不依赖服务、用例、领域策略或端口实现；嵌套辅助类型可留在所属行为类型内。"
+- "Enrichment 仅消费 Lexicon domain.model 与 domain.port；禁止访问 application 或内置 catalog 实现。"
+- "Lexicon 不反向依赖 Enrichment；基础设施仅依赖实际使用的 Lexicon 模块。"
+- "导入 model 可依赖 importing.validation 构造校验；validation 仅依赖 Java 标准库及自身，不依赖其他应用类型。"
+- "持久化 DO/DAO/Mapper 保留同包私有封装，不为目录对称扩大可见性。"
+- "类名用领域名词或 Service、UseCase、Request、Result、Response 等职责后缀，不统一添加 Record/DTO。"
 
 # Infrastructure 通过 port 实现技术集成。
 infrastructure_modules:
@@ -63,9 +79,6 @@ infrastructure_modules:
     - observability-integration
     may_depend_on:
     - lexicon
-    - enrichment
-    - workflow-application
-    - lexicon-application
 
 # Composition Root 负责组装；api/worker 分进程不改变领域边界。
 composition_roots:
@@ -75,6 +88,8 @@ composition_roots:
     - inbound-http
     - platform-infrastructure
   worker:
+    direct_product_dependencies: []
+    note: 尚无后台业务实现，不预先挂载领域或适配器依赖。
     includes:
     - background-use-cases
     - job-runtime-trigger

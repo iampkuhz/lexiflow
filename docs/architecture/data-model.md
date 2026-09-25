@@ -58,7 +58,7 @@ endlegend
 @enduml
 ```
 
-图中展示 Domain 聚合关系，不把每个对象都当作独立服务或 SQL 表。精确字段见 [LexiconEntry](../../backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/domain/LexiconEntry.java)，批次发布边界见下一节。
+图中展示 Domain 聚合关系，不把每个对象都当作独立服务或 SQL 表。精确字段见 [LexiconEntry](../../backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/domain/model/LexiconEntry.java)，批次发布边界见下一节。
 
 ## 1.2. 导入批次与可见性
 
@@ -66,13 +66,13 @@ endlegend
 
 ## 1.3. 持久化边界
 
-`:modules:lexicon` 拥有业务事实；`:application:lexicon-application` 定义 `LexiconRepository` 和导入用例；`:platform:adapters` 的 persistence 包实现 DO、DAO、Mapper、SQL 与 PostgreSQL 事务。技术层不因能访问数据库而取得所有领域表的所有权。未形成闭环的内容、标注、语义结果和异步工作不预留表或持久化接口。存储边界应从[模块边界](boundaries.md)理解，不从项目目录推断业务调用方向。
+`:modules:lexicon` 的 `domain.model` 拥有业务事实，`application.port` 定义 `LexiconRepository`，`application.importing` 协调导入；`:platform:adapters` 的 persistence 包实现 DO、DAO、Mapper、SQL 与 PostgreSQL 事务。技术层不因能访问数据库而取得所有领域表的所有权。未形成闭环的内容、标注、语义结果和异步工作不预留表或持久化接口。存储边界应从[模块边界](boundaries.md)理解，不从项目目录推断业务调用方向。
 
 <a id="1-词库持久化与初始化合同"></a>
 <a id="11-repository-与-dao"></a>
 ## 1.4. Repository 与 DAO
 
-应用服务只依赖 [`LexiconRepository.java`](../../backend/application/lexicon/src/main/java/io/lexiflow/lexicon/application/LexiconRepository.java)。[`DefaultLexiconRepository.java`](../../backend/platform/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DefaultLexiconRepository.java)组合词条、导入批次和来源证据 DAO；DAO 只处理 PostgreSQL 表访问，DO 仅在 persistence 包内出现。[`LexiconEntryMapper.java`](../../backend/platform/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/LexiconEntryMapper.java)把 DO 还原成完整领域 Model；Repository 不向上暴露 `JdbcClient` 或表行。
+应用服务只依赖 [`LexiconRepository.java`](../../backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/application/port/LexiconRepository.java)。[`DefaultLexiconRepository.java`](../../backend/platform/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DefaultLexiconRepository.java)组合词条、导入批次和来源证据 DAO；DAO 只处理 PostgreSQL 表访问，DO 仅在 persistence 包内出现。[`LexiconEntryMapper.java`](../../backend/platform/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/LexiconEntryMapper.java)把 DO 还原成完整领域 Model；Repository 不向上暴露 `JdbcClient` 或表行。
 
 <a id="12-事务与版本"></a>
 ## 1.5. 事务与版本

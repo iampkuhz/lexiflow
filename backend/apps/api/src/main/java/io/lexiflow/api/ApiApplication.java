@@ -1,12 +1,12 @@
 package io.lexiflow.api;
 
-import io.lexiflow.enrichment.domain.DeterministicHintPolicy;
-import io.lexiflow.lexicon.application.CachedLexiconQueryService;
-import io.lexiflow.lexicon.application.LexiconRepository;
-import io.lexiflow.lexicon.domain.BuiltinLexiconCatalog;
-import io.lexiflow.lexicon.domain.LexiconCatalog;
+import io.lexiflow.enrichment.application.caption.EnrichCaptionUseCase;
+import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
+import io.lexiflow.lexicon.application.port.LexiconRepository;
+import io.lexiflow.lexicon.application.query.CachedLexiconQueryService;
+import io.lexiflow.lexicon.domain.catalog.BuiltinLexiconCatalog;
+import io.lexiflow.lexicon.domain.port.LexiconCatalog;
 import io.lexiflow.lexicon.platform.persistence.PostgresPersistenceConfiguration;
-import io.lexiflow.workflow.application.EnrichCaptionUseCase;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -46,7 +46,7 @@ public class ApiApplication {
     if (repository == null) {
       LOGGER.warn(
           "runtime lexicon=builtin-demo; only 5 demo terms, not the imported dictionary;"
-              + " set SPRING_DATASOURCE_URL or start_api --database-url for normal use");
+              + " configure JDBC_URL and use start_api for normal local use");
       return new BuiltinLexiconCatalog();
     }
     var catalog = new CachedLexiconQueryService(repository, 4_000, 2_000);

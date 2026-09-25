@@ -1,6 +1,6 @@
 package io.lexiflow.lexicon.platform.persistence;
 
-import io.lexiflow.lexicon.application.LexiconImportMetadata;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import java.sql.Timestamp;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;

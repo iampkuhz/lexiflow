@@ -3,11 +3,11 @@ package io.lexiflow.lexicon.platform.persistence;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import io.lexiflow.lexicon.application.LexiconImportMetadata;
-import io.lexiflow.lexicon.application.LexiconImportRequest;
-import io.lexiflow.lexicon.application.LexiconImportRow;
-import io.lexiflow.lexicon.application.SourceReference;
-import io.lexiflow.lexicon.domain.LexiconPriority;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
+import io.lexiflow.lexicon.application.importing.model.SourceReference;
+import io.lexiflow.lexicon.domain.model.LexiconPriority;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -43,7 +43,9 @@ class DefaultLexiconRepositoryTest {
     var transactionManager = new RecordingTransactionManager();
     var repository = repository(events, transactionManager, false);
     var metadata = new LexiconImportMetadata("a".repeat(64), "fixture", "MIT", Instant.EPOCH);
-    var batch = new io.lexiflow.lexicon.application.StagedLexiconImport(UUID.randomUUID(), 7, 0);
+    var batch =
+        new io.lexiflow.lexicon.application.importing.model.StagedLexiconImport(
+            UUID.randomUUID(), 7, 0);
 
     repository.stage(batch, List.of(row("alpha", List.of("beta"), List.of())), 1, metadata);
 
@@ -61,7 +63,9 @@ class DefaultLexiconRepositoryTest {
     var transactionManager = new RecordingTransactionManager();
     var repository = repository(events, transactionManager, true);
     var metadata = new LexiconImportMetadata("a".repeat(64), "fixture", "MIT", Instant.EPOCH);
-    var batch = new io.lexiflow.lexicon.application.StagedLexiconImport(UUID.randomUUID(), 7, 0);
+    var batch =
+        new io.lexiflow.lexicon.application.importing.model.StagedLexiconImport(
+            UUID.randomUUID(), 7, 0);
 
     assertThrows(
         IllegalStateException.class,
@@ -161,7 +165,7 @@ class DefaultLexiconRepositoryTest {
 
     @Override
     public void insertEntries(
-        List<io.lexiflow.lexicon.application.LexiconImportPlan.PlannedEntry> entries,
+        List<io.lexiflow.lexicon.application.importing.LexiconImportPlan.PlannedEntry> entries,
         long version) {
       events.add("entries:" + entries.size());
       if (fail) {

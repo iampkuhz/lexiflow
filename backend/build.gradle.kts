@@ -29,10 +29,9 @@ dependencyLocking {
     lockMode.set(LockMode.STRICT)
 }
 
-val domainProjectPaths = listOf(":modules:lexicon", ":modules:enrichment")
-val applicationProjectPaths = listOf(":application:workflow", ":application:lexicon-application")
+val businessProjectPaths = listOf(":modules:lexicon", ":modules:enrichment")
 val platformProjectPaths = listOf(":platform:adapters")
-val productProjectPaths = domainProjectPaths + applicationProjectPaths + platformProjectPaths
+val productProjectPaths = businessProjectPaths + platformProjectPaths
 val appProjectPaths = listOf(":apps:api", ":apps:worker")
 val leafProjects = subprojects.filter { it.childProjects.isEmpty() }
 val junitPlatformLauncher = libs.junit.platform.launcher
@@ -54,17 +53,6 @@ configure(appProjectPaths.map(::project)) {
         add("implementation", platform(springBootBom))
         add("implementation", "org.springframework.boot:spring-boot-starter-actuator")
         add("testImplementation", "org.springframework.boot:spring-boot-starter-test")
-        (domainProjectPaths + applicationProjectPaths + platformProjectPaths).forEach { path ->
-            add("implementation", dependencies.project(path))
-        }
-    }
-}
-
-listOf(":application:workflow", ":application:lexicon-application").forEach { applicationPath ->
-    project(applicationPath) {
-        dependencies {
-            domainProjectPaths.forEach { path -> add("implementation", dependencies.project(path)) }
-        }
     }
 }
 
@@ -77,9 +65,7 @@ project(":platform:adapters") {
         add("implementation", platform(springBootBom))
         add("implementation", "org.springframework.boot:spring-boot-starter-jdbc")
         add("runtimeOnly", "org.postgresql:postgresql")
-        (domainProjectPaths + applicationProjectPaths).forEach { path ->
-            add("implementation", dependencies.project(path))
-        }
+        add("implementation", dependencies.project(":modules:lexicon"))
     }
     val platformSourceSets = extensions.getByType<SourceSetContainer>()
     tasks.named<Test>("test") {
@@ -106,28 +92,54 @@ project(":platform:adapters") {
     }
     tasks.register<JavaExec>("postgresInit") {
         group = "application"
-        description = "显式初始化后端拥有的 PostgreSQL schema。"
+        description = "使用 JDBC_URL 初始化空 schema；不会清空已有数据。"
         classpath = platformSourceSets["main"].runtimeClasspath
         mainClass.set("io.lexiflow.lexicon.platform.persistence.PostgresSchemaMain")
         workingDir(rootProject.projectDir.parentFile)
-        providers.gradleProperty("postgresInitArgs").orNull?.let { raw ->
-            args(raw.split("\u001f"))
-        } ?: throw GradleException("postgresInit requires -PpostgresInitArgs=<jdbc-url>\u001f<schema-file>")
+        if (providers.gradleProperty("postgresInitArgs").isPresent) {
+            throw GradleException("postgresInit 只读取 JDBC_URL；请移除 -PpostgresInitArgs。")
+        }
+        val jdbcUrl = providers.environmentVariable("JDBC_URL").getOrElse("")
+        doFirst {
+            if (jdbcUrl.isBlank()) throw GradleException("请先设置 JDBC_URL，指向本项目开发库。")
+        }
+        args(jdbcUrl, rootProject.projectDir.parentFile.resolve("infra/postgres/schema.sql").absolutePath)
     }
 
-    tasks.register<JavaExec>("lexiconImport") {
-        group = "application"
-        description = "执行 LexiFlow 离线词库导入。"
-        classpath = platformSourceSets["main"].runtimeClasspath
-        mainClass.set("io.lexiflow.lexicon.platform.importer.LexiconImportMain")
-        workingDir(rootProject.projectDir.parentFile)
-        providers.gradleProperty("lexiconImportArgs").orNull?.let { raw ->
-            args(raw.split("\u001f"))
+    // 一个任务只对应一个动作，避免把 validate 误认为已导入；来源路径不经过 shell 拆词。
+    mapOf(
+        "lexiconValidate" to "validate",
+        "lexiconPublish" to "publish",
+        "lexiconBasicReport" to "basic-report",
+        "lexiconPrewarmReport" to "prewarm-report",
+    ).forEach { (taskName, action) ->
+        tasks.register<JavaExec>(taskName) {
+            group = "application"
+            description = if (action == "publish") "导入并发布 ECDICT StarDict 词库。" else "只读执行词库 $action，不写数据库。"
+            classpath = platformSourceSets["main"].runtimeClasspath
+            mainClass.set("io.lexiflow.lexicon.platform.importer.LexiconImportMain")
+            workingDir(rootProject.projectDir.parentFile)
+            val input = providers.environmentVariable("STARDICT_CSV").getOrElse("")
+            doFirst {
+                if (input.isBlank()) throw GradleException("请先设置 STARDICT_CSV，指向本机 stardict.csv。")
+            }
+            args(action, "--input", input)
+            if (action == "publish") {
+                val jdbcUrl = providers.environmentVariable("JDBC_URL").getOrElse("")
+                doFirst {
+                    if (jdbcUrl.isBlank()) throw GradleException("请先设置 JDBC_URL，指向本项目开发库。")
+                }
+                args("--database-url", jdbcUrl, "--batch-source-id", "ecdict-stardict", "--batch-license-id", "MIT")
+            }
         }
     }
+
 }
 
 project(":apps:api") {
+    (businessProjectPaths + platformProjectPaths).forEach { path ->
+        dependencies.add("implementation", dependencies.project(path))
+    }
     dependencies.add("implementation", "org.springframework.boot:spring-boot-starter-webmvc")
     dependencies.add("implementation", "org.springframework.boot:spring-boot-starter-jdbc")
     dependencies.add("runtimeOnly", "org.postgresql:postgresql")
@@ -181,7 +193,7 @@ project(":tests:integration") {
 }
 
 val productSourceFiles = fileTree(rootDir) {
-    include("apps/**", "application/**", "modules/**", "platform/**")
+    include("apps/**", "modules/**", "platform/**")
     exclude {
         val segments = it.relativePath.segments.toList()
         val sourceIndex = segments.indexOf("src")
@@ -252,6 +264,7 @@ val jacocoRootReport = tasks.register<JacocoReport>("jacocoRootReport") {
 }
 
 tasks.named("check") {
+    dependsOn(gradle.includedBuild("build-logic").task(":check"))
     dependsOn(leafProjects.map { "${it.path}:check" })
     dependsOn(
         verifyProductLanguage,

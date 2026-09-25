@@ -1,7 +1,7 @@
 package io.lexiflow.lexicon.platform.persistence;
 
-import io.lexiflow.lexicon.application.LexiconImportPlan;
-import io.lexiflow.lexicon.application.SourceReference;
+import io.lexiflow.lexicon.application.importing.LexiconImportPlan;
+import io.lexiflow.lexicon.application.importing.model.SourceReference;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;

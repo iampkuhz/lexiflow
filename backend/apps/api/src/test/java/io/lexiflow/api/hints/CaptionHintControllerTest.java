@@ -3,6 +3,7 @@ package io.lexiflow.api.hints;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import io.lexiflow.api.hints.model.CaptionHintRequest;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
