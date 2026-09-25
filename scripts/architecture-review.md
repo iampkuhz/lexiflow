@@ -5,7 +5,7 @@ Scripts 的阅读从[工程地图](../docs/development/overview.md)开始，而�
 ## 1.1. 按当前工作定位
 
 - 日常验证：[交付主干](../docs/development/change-delivery.md) → [Verify 子流程](../docs/development/change-delivery/verification.md)。
-- 正式验收：[Acceptance 身份与证据交接](../docs/development/change-delivery/acceptance.md)。
+- 正式验收：[Delivery Gate 身份与证据交接](../docs/development/change-delivery/delivery-gate.md)。
 - 可选委派：[Agent workflow](../docs/development/agent-workflow.md)。
 - 单个工具或文件：[Reference](../docs/development/reference.md) → [Scripts 职责](../docs/development/reference/scripts.md)。
 

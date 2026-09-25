@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.agents.module_tests import evaluate_suite
+from scripts.delivery_gate.quality import evaluate_suite
 
 
-class AgentQualityResultTest(unittest.TestCase):
+class DeliveryGateQualityResultTest(unittest.TestCase):
     def test_empty_suite_cannot_pass(self) -> None:
         self.assertEqual("FAIL", evaluate_suite(unittest.TestSuite())["status"])
 

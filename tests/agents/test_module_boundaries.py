@@ -20,7 +20,7 @@ class AgentModuleBoundaryTest(unittest.TestCase):
                     imported.append(node.module)
             self.assertFalse(any(name.startswith("scripts.gates") for name in imported), source)
             if source.name == "lifecycle.py":
-                self.assertFalse(any(name == "scripts.agents.qoder_task" for name in imported), source)
+                self.assertFalse(any(name == "scripts.agents.qoder.runner" for name in imported), source)
 
     def test_retired_harness_agent_paths_have_no_compatibility_wrappers(self) -> None:
         retired = (
@@ -31,9 +31,11 @@ class AgentModuleBoundaryTest(unittest.TestCase):
             ROOT / "scripts" / "harness" / "codex",
         )
         self.assertTrue(all(not path.exists() for path in retired))
+        self.assertFalse((AGENTS / "qoder_task.py").exists())
+        self.assertFalse((AGENTS / "codex_work_package.py").exists())
 
     def test_start_handshake_has_only_three_runner_states(self) -> None:
-        from scripts.agents import qoder_task
+        from scripts.agents.qoder import runner as qoder_task
         self.assertEqual({"STARTED", "STARTING", "FAILED"}, {
             "STARTED", "STARTING", "FAILED"
         })
@@ -44,7 +46,7 @@ if __name__ == "__main__":
 
 class RunnerRecordStateTest(unittest.TestCase):
     def test_start_handshake_timeout_is_starting_not_failed(self) -> None:
-        from scripts.agents import qoder_task
+        from scripts.agents.qoder import runner as qoder_task
         from unittest.mock import patch
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
@@ -52,7 +54,7 @@ class RunnerRecordStateTest(unittest.TestCase):
                 self.assertEqual(qoder_task._start_handshake(Path(directory)), "STARTING")
 
     def test_status_requires_a_bound_task_record(self) -> None:
-        from scripts.agents import qoder_task
+        from scripts.agents.qoder import runner as qoder_task
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
             run = Path(directory)

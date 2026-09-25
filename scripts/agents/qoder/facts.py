@@ -1,13 +1,19 @@
 """公开、只读的 Qoder 执行事实读取器。核验 runner 拥有的 Task、completion 与身份绑定，不用日志推断结果。"""
 
 from __future__ import annotations
-import hashlib, json, os, stat, uuid
+import hashlib
+import json
+import os
+import stat
+import uuid
 from pathlib import Path
 from typing import Any
 from scripts.agents.qoder.lifecycle import _verify_completion_identity
 
 
 class QoderFactsError(ValueError):
+    """Qoder 原始事实无法证明精确 run 结果时携带拒绝代码。"""
+
     def __init__(self, code: str, detail: str):
         self.code, self.detail = code, detail
         super().__init__(f"{code}: {detail}")
@@ -134,6 +140,7 @@ def _validate_task_identity(task: dict[str, Any], run_id: str) -> None:
 def validate_structured_result(
     run_dir: Path, task: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, str]]:
+    """核对 Qoder 结构化结果的身份与逐 Task 证据，不从退出码推断 PASS。"""
     result, descriptor = _read(run_dir, "result.json")
     if result.get("schema_version") != "lexiflow.qoder-work-package-result.v1":
         raise QoderFactsError("qoder-result-invalid", "schema")
@@ -164,7 +171,9 @@ def validate_structured_result(
     expected_status = (
         "FAIL"
         if any(x["status"] == "FAIL" for x in outcomes)
-        else "BLOCKED" if any(x["status"] == "BLOCKED" for x in outcomes) else "PASS"
+        else "BLOCKED"
+        if any(x["status"] == "BLOCKED" for x in outcomes)
+        else "PASS"
     )
     if result.get("status") != expected_status:
         raise QoderFactsError("qoder-result-invalid", "aggregate status")

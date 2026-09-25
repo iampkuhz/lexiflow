@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts.agents.codex_work_package import (
+from scripts.agents.codex.work_package import (
     CodexWorkPackageError, CodexWorkPackagePublisher, build_codex_main_task_projection,
 )
 
@@ -43,7 +43,7 @@ class CodexWorkPackagePublisherTest(unittest.TestCase):
                 "acceptance_criteria": [f"criterion {index}"],
                 "acceptance_evidence": [f"evidence {index}"],
                 "validation_command": f"python3 -m unittest case{index}",
-                "allowed_files": ["scripts/agents/codex_work_package.py"],
+                "allowed_files": ["scripts/agents/codex/work_package.py"],
                 "forbidden_files": ["secrets/**"],
             })
         path = self.repo / "planning/workstreams.yaml"
@@ -55,7 +55,7 @@ class CodexWorkPackagePublisherTest(unittest.TestCase):
             "goal": "publish fixture", "work_package_id": "LF-WP-QLT-PUBLISHER-TEST-001", "task_ids": self.tasks,
             "task_versions": {task: 2 for task in self.tasks}, "change_versions": {task: "1.0.0" for task in self.tasks},
             "estimated_minutes": 180, "primary_owner": "LF-WS-QLT", "contract_boundary": "fixture",
-            "allowed_files": "scripts/agents/codex_work_package.py", "forbidden_files": "secrets/**",
+            "allowed_files": "scripts/agents/codex/work_package.py", "forbidden_files": "secrets/**",
             "required_context": "AGENTS.md", "expected_outputs_by_task": {task: f"deliverable {i}" for i, task in enumerate(self.tasks, 1)},
             "acceptance_by_task": {task: {"acceptance_criteria": [f"criterion {i}"], "acceptance_evidence": [f"evidence {i}"]} for i, task in enumerate(self.tasks, 1)},
             "validation_commands": {task: f"python3 -m unittest case{i}" for i, task in enumerate(self.tasks, 1)},
@@ -148,7 +148,7 @@ class CodexWorkPackagePublisherTest(unittest.TestCase):
 
     def test_scope_uses_dispatch_coverage_instead_of_substring_matching(self) -> None:
         caller = self._caller()
-        caller["allowed_files"] = "scripts/agents/codex_work_package.py.extra"
+        caller["allowed_files"] = "scripts/agents/codex/work_package.py.extra"
         with self.assertRaisesRegex(CodexWorkPackageError, "catalog-drift"):
             CodexWorkPackagePublisher(self.repo).publish(caller, self._runtime(), self._outcomes())
 

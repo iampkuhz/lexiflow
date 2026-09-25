@@ -24,6 +24,8 @@ _LIST_AGENTS_TOOL = "list_agents"
 
 
 class DispatchFallbackError(ValueError):
+    """表示原生 fallback 调度失败，保留可区分的拒绝代码。"""
+
     def __init__(
         self, code: str, detail: str, *, decision: dict[str, Any] | None = None
     ):
@@ -132,6 +134,7 @@ def host_wait_snapshot(root: str | Path) -> dict[str, str]:
 
 
 def host_wait_decision(root: str | Path) -> dict[str, Any] | None:
+    """根据当前宿主等待能力和 Goal 状态决定是否允许派发。"""
     repo = Path(root).resolve()
     policy = _policy(repo)
     snapshot = host_wait_snapshot(repo)
@@ -597,7 +600,7 @@ def _json_value(value: str, description: str) -> Any:
 
     try:
         return json.loads(value, object_pairs_hook=unique)
-    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (TypeError, ValueError, json.JSONDecodeError):
         raise DispatchFallbackError(
             "native-tool-call-invalid", f"{description} is not strict JSON"
         ) from None

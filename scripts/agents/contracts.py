@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import stat
 import unicodedata
 from pathlib import Path
 from typing import Any, Mapping
@@ -22,18 +21,18 @@ REQUIRED_RESULT_FIELDS = (
 )
 RESULT_STATUSES = frozenset({"PASS", "BLOCKED", "FAIL"})
 _ID = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
-_SEMVER = re.compile(
-    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
-)
 
 
 class AgentContractError(ValueError):
+    """Agent 合同或路径范围无效时携带稳定拒绝代码。"""
+
     def __init__(self, code: str, message: str):
         self.code = code
         super().__init__(f"{code}: {message}")
 
 
 def check_locator_safety_strict(locator: Any) -> None:
+    """拒绝绝对、穿越和表达式路径，确保文件定位符只指向受控相对路径。"""
     if not isinstance(locator, str) or not locator:
         raise AgentContractError("LOCATOR_EMPTY", "locator is empty or not a string")
     if os.path.isabs(locator) or re.match(r"^[A-Za-z]:", locator):
@@ -89,11 +88,13 @@ def _parse_dispatch_path_v1(pattern: Any) -> tuple[str, tuple[str, ...]]:
 
 
 def validate_dispatch_path_v1(pattern: Any) -> bool:
+    """校验派发路径表达式只使用受支持的末尾通配形式。"""
     _parse_dispatch_path_v1(pattern)
     return True
 
 
 def match_dispatch_path_v1(path: Any, pattern: Any) -> bool:
+    """判断一个精确文件路径是否被派发范围允许。"""
     pk, pp = _parse_dispatch_path_v1(path)
     kind, prefix = _parse_dispatch_path_v1(pattern)
     if pk != "exact":
@@ -106,6 +107,7 @@ def match_dispatch_path_v1(path: Any, pattern: Any) -> bool:
 
 
 def dispatch_path_contains(container: Any, member: Any) -> bool:
+    """判断一个派发范围是否完整包含另一个范围。"""
     ck, cp = _parse_dispatch_path_v1(container)
     mk, mp = _parse_dispatch_path_v1(member)
     if ck == "exact":
@@ -120,6 +122,7 @@ def dispatch_path_contains(container: Any, member: Any) -> bool:
 
 
 def dispatch_paths_intersect(left: Any, right: Any) -> bool:
+    """判断两个派发范围是否可能写入同一文件。"""
     lk, lp = _parse_dispatch_path_v1(left)
     rk, rp = _parse_dispatch_path_v1(right)
     if lk == "exact":
@@ -136,6 +139,7 @@ def dispatch_paths_intersect(left: Any, right: Any) -> bool:
 
 
 def normalize_scope_string(raw: Any) -> list[str]:
+    """规范化声明范围，拒绝无法稳定比较的路径表达。"""
     if not isinstance(raw, str) or not raw.strip():
         raise AgentContractError("SCOPE_INVALID", "scope string must be non-empty")
     values = [item.strip() for item in raw.split(",")]
@@ -166,6 +170,7 @@ def _safe_file(root: Path, locator: str) -> Path:
 
 
 def sha256_file_strict(repo_root: str | Path, locator: str) -> str:
+    """仅对受控普通文件计算哈希，拒绝符号链接及越界路径。"""
     return hashlib.sha256(
         _safe_file(Path(repo_root).resolve(), locator).read_bytes()
     ).hexdigest()
@@ -195,6 +200,7 @@ def _identity(raw: Mapping[str, Any], path: str) -> None:
 def validate_codex_work_package_task_projection(
     raw: Any, path: str = "raw task"
 ) -> None:
+    """校验单 Task 投影的身份、范围与精确字段集合。"""
     if not isinstance(raw, Mapping):
         raise AgentContractError("CONTRACT_INVALID", f"{path} must be an object")
     required = {
@@ -257,6 +263,7 @@ def validate_codex_work_package_task_projection(
 
 
 def validate_codex_main_task_projection(raw: Any, path: str = "raw task") -> None:
+    """校验主任务投影只包含可信身份和声明字段。"""
     required = {
         "schema_version",
         "task_id",
@@ -299,6 +306,7 @@ def validate_codex_main_task_projection(raw: Any, path: str = "raw task") -> Non
 def validate_all_result_fields(
     result_fields: Mapping[str, Any], artifact_locators: set[str]
 ) -> None:
+    """要求结果的每个必填字段存在且结构合法，不能凭状态字串通过。"""
     if not isinstance(result_fields, Mapping) or set(result_fields) != set(
         REQUIRED_RESULT_FIELDS
     ):

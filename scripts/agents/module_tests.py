@@ -11,6 +11,7 @@ from pathlib import Path
 
 
 def evaluate_suite(suite: unittest.TestSuite) -> dict[str, object]:
+    """将 Agent 模块测试转成结构化结果；零测试或跳过不能 PASS。"""
     stream = io.StringIO()
     result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
     complete = result.testsRun > 0 and not result.skipped
@@ -27,19 +28,21 @@ def evaluate_suite(suite: unittest.TestSuite) -> dict[str, object]:
 
 
 def run(root: Path) -> dict[str, object]:
+    """执行 Agent 工具自身的回归测试，不判断被委派任务质量。"""
     suite = unittest.defaultTestLoader.discover(
         str(root / "tests" / "agents"), pattern="test_*.py", top_level_dir=str(root)
     )
     return evaluate_suite(suite)
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--root", type=Path, default=Path(__file__).resolve().parents[2]
+def main() -> int:
+    """输出 Agent 模块测试的 Gate JSON；不启动或验收 Agent。"""
+    argparse.ArgumentParser(description=__doc__).parse_args()
+    print(
+        json.dumps(
+            run(Path(__file__).resolve().parents[2]), ensure_ascii=False, sort_keys=True
+        )
     )
-    args = parser.parse_args(argv)
-    print(json.dumps(run(args.root.resolve()), ensure_ascii=False, sort_keys=True))
     return 0
 
 

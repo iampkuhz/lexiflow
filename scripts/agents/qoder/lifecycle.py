@@ -2,7 +2,7 @@
 
 本模块负责每 run 独立 watchdog 调度、显式幂等 ack、resume 替代链及共享 callback claim；
 不负责 LLM 调用、全局 daemon、自动重试或取消 Qoder；
-由 agents/qoder_task.py 调用；不反向导入该入口。
+由 agents/qoder/runner.py 调用；不反向导入该入口。
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ _UUID_RE = re.compile(
 )
 _ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 
-# 回调认领文件名，与 qoder_task._callback_claim_path 共享
+# 回调认领文件名，与 runner._callback_claim_path 共享
 CALLBACK_CLAIM = "callback.claim"
 CALLBACK_FILE = "callback.json"
 LOCK_FILE = "lifecycle.lock"

@@ -2,23 +2,15 @@
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import os
 import re
 import stat
-import sys
 from pathlib import Path
 from typing import Any, Mapping
 
 import yaml
-
-# 同 local_codex_runtime：用户可见的脚本入口须与模块入口使用相同的包导入。
-if __package__ in {None, ""}:
-    repository_root = Path(__file__).resolve().parents[2]
-    if str(repository_root) not in sys.path:
-        sys.path.insert(0, str(repository_root))
 
 from scripts.agents.contracts import (
     CODEX_MAIN_TASK_PROJECTION_SCHEMA_VERSION,
@@ -56,18 +48,22 @@ _IDENTITY_FIELDS = (
 
 
 class CodexWorkPackageError(ValueError):
+    """工作包发布或核对失败；代码用于区分合同与存储边界。"""
+
     def __init__(self, code: str, detail: str) -> None:
         self.code = code
         super().__init__(f"{code}: {detail}")
 
 
 def canonical_json_bytes(value: Any) -> bytes:
+    """以固定 JSON 编码产生可哈希的记录字节。"""
     return json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
 
 
 def sha256_bytes(value: bytes) -> str:
+    """计算原始记录字节的 SHA-256，供不可变证据绑定。"""
     return hashlib.sha256(value).hexdigest()
 
 
@@ -413,19 +409,6 @@ def _read_descriptor(
     return _read_json(path, "completion-invalid")
 
 
-def _descriptor_from_input(value: Any, label: str) -> dict[str, str]:
-    if not isinstance(value, Mapping) or set(value) != {"locator", "sha256"}:
-        raise CodexWorkPackageError(
-            "evidence-input-invalid", f"{label} must be a locator/hash descriptor"
-        )
-    locator, digest = value["locator"], value["sha256"]
-    if not isinstance(locator, str) or not isinstance(digest, str):
-        raise CodexWorkPackageError(
-            "evidence-input-invalid", f"{label} descriptor values are invalid"
-        )
-    return {"locator": locator, "sha256": digest}
-
-
 def _runtime_binding_matches(
     root: Path, run_root_locator: str, identity: Mapping[str, str]
 ) -> None:
@@ -447,6 +430,8 @@ def _runtime_binding_matches(
 
 
 class CodexWorkPackagePublisher:
+    """核对整包合同并一次性发布每 Task 原始执行事实；不签发正式 Delivery Gate。"""
+
     def __init__(self, repo_root: str | Path) -> None:
         self.repo_root = Path(repo_root).resolve()
 
@@ -782,6 +767,7 @@ class CodexWorkPackagePublisher:
 
 
 def projection_identity(projection: Mapping[str, Any]) -> dict[str, Any]:
+    """提取已校验 Task 投影中的运行身份供后续记录绑定。"""
     return {field: projection[field] for field in _IDENTITY_FIELDS}
 
 
@@ -836,32 +822,3 @@ def build_codex_main_task_projection(
     except AgentContractError as exc:
         raise CodexWorkPackageError("projection-invalid", str(exc)) from None
     return projection
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Verify canonical Codex work-package artifacts"
-    )
-    sub = parser.add_subparsers(dest="command", required=True)
-    verify = sub.add_parser("verify")
-    verify.add_argument("--run-id", required=True)
-    verify.add_argument("--root", default=".")
-    args = parser.parse_args(argv)
-    try:
-        result = CodexWorkPackagePublisher(args.root).verify(args.run_id)
-    except (CodexWorkPackageError, AgentContractError, OSError) as exc:
-        result = {
-            "status": "FAIL",
-            "work_package_id": None,
-            "task_ids": [],
-            "run_id": args.run_id,
-            "artifact_locators": {},
-            "validation_commands": [],
-            "blocking_findings": [getattr(exc, "code", "artifact-unavailable")],
-        }
-    print(canonical_json_bytes(result).decode("utf-8"))
-    return 0 if result["status"] == "PASS" else 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

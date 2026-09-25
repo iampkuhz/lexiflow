@@ -19,9 +19,9 @@ from unittest.mock import MagicMock, patch
 
 import yaml
 
-from scripts.agents import qoder_task
+from scripts.agents.qoder import runner as qoder_task
 from scripts.agents import dispatch_fallback
-from scripts.agents.qoder import lifecycle
+from scripts.agents.qoder import handoff, lifecycle
 
 
 def valid_task() -> dict[str, Any]:
@@ -408,8 +408,8 @@ class QoderRunnerContractTest(unittest.TestCase):
                 self.assertNotIn("model", role)
 
     def test_required_handoff_rejects_missing_field(self) -> None:
-        self.assertEqual(tuple(valid_task())[: len(qoder_task.REQUIRED_HANDOFF)], qoder_task.REQUIRED_HANDOFF)
-        for field in qoder_task.REQUIRED_HANDOFF:
+        self.assertEqual(tuple(valid_task())[: len(handoff.REQUIRED_HANDOFF)], handoff.REQUIRED_HANDOFF)
+        for field in handoff.REQUIRED_HANDOFF:
             with self.subTest(field=field):
                 task = valid_task()
                 del task[field]
@@ -417,6 +417,11 @@ class QoderRunnerContractTest(unittest.TestCase):
                     qoder_task._validate_task(task)
 
     def test_versioned_acceptance_fields_and_runner_identity_are_enforced(self) -> None:
+        task = valid_task()
+        task["permission_mode"] = "dont_ask"
+        with self.assertRaisesRegex(ValueError, "permission_mode is runner-owned"):
+            qoder_task._validate_task(task)
+
         task = valid_task()
         task["task_version"] = 0
         with self.assertRaisesRegex(ValueError, "task_version"):
@@ -495,6 +500,13 @@ class QoderRunnerContractTest(unittest.TestCase):
         self.assertEqual(args[args.index("--agent") + 1], "quality-verifier")
         self.assertEqual(args[args.index("--setting-sources") + 1], "user,project,local")
         self.assertNotIn("--model", args)  # Preserve the user's configured provider/model.
+        policy = yaml.safe_load(
+            (Path(__file__).resolve().parents[2] / "harness/agent-policy.manifest.yaml").read_text()
+        )
+        self.assertEqual(
+            args[args.index("--permission-mode") + 1],
+            policy["qoder_delegation"]["default_permission_mode"],
+        )
         self.assertEqual(args[args.index("--disallowed-tools") + 1], "Agent")
 
     def test_harness_preflight_binds_context_tools_commands_and_identity(self) -> None:
@@ -892,7 +904,7 @@ print('WORKER_EXIT',flush=True)
             qoder_task._assert_no_unfinished_runs(root)
 
     def test_shared_policy_requires_end_turn_without_llm_fallback(self) -> None:
-        root = Path(qoder_task.__file__).resolve().parents[2]
+        root = Path(qoder_task.__file__).resolve().parents[3]
         policy = yaml.safe_load((root / 'harness/agent-policy.manifest.yaml').read_text())
         lifecycle_policy = policy['qoder_delegation']['lifecycle']
         self.assertEqual(lifecycle_policy['parent_after_dispatch'], 'end-current-turn-await-callback')
@@ -1605,7 +1617,7 @@ print('WORKER_EXIT',flush=True)
                         """
 import sys
 from pathlib import Path
-from scripts.agents import qoder_task
+from scripts.agents.qoder import runner as qoder_task
 try:
     with qoder_task._dispatch_lock(Path(sys.argv[1])):
         pass
@@ -1619,7 +1631,7 @@ raise SystemExit(1)
                     capture_output=True,
                     text=True,
                     timeout=5,
-                    cwd=str(Path(qoder_task.__file__).resolve().parents[2]),
+                    cwd=str(Path(qoder_task.__file__).resolve().parents[3]),
                     check=False,
                 )
             self.assertEqual(contender.returncode, 0, contender.stderr)

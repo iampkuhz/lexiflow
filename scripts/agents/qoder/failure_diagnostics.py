@@ -166,6 +166,7 @@ def summarize_cli_failure(
     started_at: float | None = None,
     log_root: Path | None = None,
 ) -> dict[str, Any]:
+    """从有界日志提取脱敏失败信号，不把未知错误解释成可重试。"""
     content = _read_tail(stdout_path, 1048576).decode(errors="replace")
     decoded = _json(content)
     messages = decoded if isinstance(decoded, list) else [decoded]
@@ -253,6 +254,7 @@ def summarize_cli_failure(
 
 
 def access_blocked(failure: Any) -> bool:
+    """识别明确的账号或访问阻断证据，供派发预算决策使用。"""
     return (
         isinstance(failure, dict)
         and isinstance(failure.get("category"), str)

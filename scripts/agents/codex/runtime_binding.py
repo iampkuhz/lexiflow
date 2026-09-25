@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import re
-import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -29,6 +28,8 @@ _HOST = ("parent_session_id", "agent_id", "session_id", "client", "parent_client
 
 
 class CodexRuntimeError(ValueError):
+    """可信 Codex 运行身份不可得或与 caller 声明冲突时失败。"""
+
     def __init__(self, code: str, detail: str, *, status: str = "FAIL") -> None:
         self.code = code
         self.status = status
@@ -36,6 +37,7 @@ class CodexRuntimeError(ValueError):
 
 
 def canonical_json_bytes(value: Any) -> bytes:
+    """固定运行身份记录的 JSON 编码以便内容哈希比较。"""
     return json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
@@ -94,6 +96,8 @@ def bind_trusted_host_context(
 
 @dataclass(frozen=True)
 class CodexRuntimeBinding:
+    """保存一个 run 的宿主来源身份与不可变证明。"""
+
     identity: Mapping[str, str]
 
     @classmethod
@@ -103,11 +107,13 @@ class CodexRuntimeBinding:
         trusted_host_context: Mapping[str, Any] | None,
         run_id: str,
     ) -> "CodexRuntimeBinding":
+        """校验 caller 未预填 runner 身份，再与可信宿主上下文绑定。"""
         return cls(
             bind_trusted_host_context(caller_contract, trusted_host_context, run_id)
         )
 
     def persist_immutable(self, repo_root: str | Path) -> dict[str, Any]:
+        """一次性写入身份绑定；已有记录不得覆盖或悄然替换。"""
         root = Path(repo_root).resolve()
         identity = dict(self.identity)
         if set(identity) != set(_IDENTITY):

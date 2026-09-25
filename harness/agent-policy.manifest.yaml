@@ -255,7 +255,7 @@ subagent_protocol:
   codex_work_package_result:
     schema_version: lexiflow.codex-work-package-result.v1
     schema_locator: harness/codex-work-package-result.schema.json
-    publisher: scripts/agents/codex_work_package.py
+    publisher: scripts/agents/codex/work_package.py
     layout: tmp/quality/codex-work-packages/{run_id}/tasks/{task_id}/{task-projection,outcome,completion,signal}.json
     completion_locator: tmp/quality/codex-work-packages/{run_id}/package-completion.json
     task_keyset: exact-task-ids
@@ -263,7 +263,7 @@ subagent_protocol:
     publication: immutable-completion-before-signal
     legacy_layout_fallback: forbidden
     subprocess_or_log_result_inference: forbidden
-    verify_command: python3 -m scripts.agents.codex_work_package verify --run-id <run_id> --root .
+    verify_command: python3 -m scripts.agents.delegation.codex_cli verify --run-id <run_id>
   codex_work_package_task_projection:
     schema_version: lexiflow.codex-work-package-task-projection.v1
     unit: one-immutable-raw-task-per-target-catalog-task
@@ -424,7 +424,7 @@ subagent_protocol:
     binding_publication: immutable-before-projection-and-completion
     identity_authentication: local-source-provenance-not-JSON-structure-or-self-report
   acceptance_submission:
-    implementation: scripts/acceptance/submit.py
+    implementation: scripts/delivery_gate/submit.py
     source: fixed-current-verification-report-and-target-task
     producer_facts_owner: scripts/agents/
     delegated_producer: explicit-run-id-with-verified-task-completion-and-result

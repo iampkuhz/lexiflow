@@ -148,10 +148,13 @@ def _metadata(repo_root: Path, session_id: str) -> tuple[dict[str, Any], str]:
 
 @dataclass(frozen=True)
 class LocalCodexRuntime:
+    """保存从真实本机 Codex Session 推导的身份上下文及来源证明。"""
+
     context: dict[str, str]
     proof: dict[str, str]
 
     def bind(self, caller_contract: dict[str, Any], run_id: str) -> CodexRuntimeBinding:
+        """把 caller 合同与宿主身份绑定到一个精确 run。"""
         host = {
             "agent_id": self.context["actor_id"],
             "parent_client": "codex",
@@ -164,6 +167,7 @@ class LocalCodexRuntime:
 
 
 def discover(repo_root: str | Path) -> LocalCodexRuntime:
+    """从本地 Session 元数据验证当前 Codex 身份，不接受调用者自报 actor。"""
     root = Path(repo_root).resolve()
     thread = os.environ.get("CODEX_THREAD_ID")
     session = os.environ.get("CODEX_SESSION_ID")
@@ -224,7 +228,8 @@ def verify_proof(repo_root: str | Path, proof: Any, context: dict[str, Any]) -> 
 
 
 def bind_main_task(repo_root: str | Path, task_id: str) -> dict[str, Any]:
-    from scripts.agents.codex_work_package import (
+    """为当前主任务发布运行身份与投影，不代表任务已执行或验收通过。"""
+    from scripts.agents.codex.work_package import (
         build_codex_main_task_projection,
         _write_exclusive,
     )
@@ -259,8 +264,9 @@ def bind_main_task(repo_root: str | Path, task_id: str) -> dict[str, Any]:
 
 
 def main() -> int:
+    """读取精确 Task ID 并发布当前主任务的本机身份绑定。"""
     import argparse
-    from scripts.agents.codex_work_package import CodexWorkPackageError
+    from scripts.agents.codex.work_package import CodexWorkPackageError
 
     parser = argparse.ArgumentParser(
         description="Bind one current Main task to actual local session metadata"

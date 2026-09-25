@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.agents import qoder_task
+from scripts.agents.qoder import runner as qoder_task
 from tests.agents.test_qoder_runner import valid_task, terminal_completion
 
 RUN_ID = "00000000-0000-4000-8000-000000000001"
