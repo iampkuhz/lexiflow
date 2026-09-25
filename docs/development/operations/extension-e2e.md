@@ -16,8 +16,7 @@ MutationObserver 在绘制前检测新快照，立即取消旧请求并替换为
 完整的依赖、API 启动、词库选择和扩展安装步骤统一在[本机体验](local-experience.md)。
 API 默认供扩展访问的地址为 `http://127.0.0.1:18080`；使用完整词库前须[导入并发布](lexicon-import.md)。
 
-若默认端口已被其他实例占用，可用 `python3 -m scripts.environment.start_api --port 18081` 启动独立实例，并以
-`LEXIFLOW_API_PORT=18081 npm --prefix extension run build` 构建扩展。构建参数只允许本机端口，不能配置远端主机；
+若默认端口已被其他实例占用，可在同一环境中先执行 `export LEXIFLOW_API_PORT=18081`，再运行零参数的 API 启动与扩展构建命令。构建参数只允许本机端口，不能配置远端主机；
 生成的 API 地址与 host permission 使用同一端口。常规测试会重新构建默认端口，实际安装前须按所选端口再次构建。
 
 源码更新后需要重新构建 `extension/dist`、刷新扩展并刷新播放页；后端改动需重启 API。扩展只请求

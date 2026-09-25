@@ -1,8 +1,8 @@
 # 1. 开发交付：从实现到可信验收
 
-> 位置：[文档首页](../README.md) → [工程地图](overview.md) → 开发交付。先读本页建立阶段关系，再进入 Verify 或 Acceptance；精确参数到 Reference 查阅。
+> 位置：[文档首页](../README.md) → [工程地图](overview.md) → 开发交付。先读本页建立阶段关系，再进入 Verify 或 Delivery Gate；精确参数到 Reference 查阅。
 
-日常 **Verify** 回答“这些输入是否通过检查”；正式 **Acceptance** 回答“同一冻结输入是否经过独立验证、审查及依赖/批准核对”。它们复用检查能力，不共享身份结论。一次 Agent 执行完成不等于验收通过。
+日常 **Verify** 回答“这些输入是否通过检查”；正式 **Delivery Gate** 回答“同一冻结输入是否经过独立验证、审查及依赖/批准核对”。它们复用检查能力，不共享身份结论。一次 Agent 执行完成不等于验收通过。
 
 ## 1.1. 先看交付主干
 
@@ -44,10 +44,10 @@ endlegend
 | --- | --- | --- | --- |
 | S1 实现 | 谁负责本次范围？ | 人工或 Agent 产出代码与真实执行事实 | [可选 Agent workflow](agent-workflow.md) |
 | S2 本地 Verify | 改动与完整基线分别证明什么？ | Change/Repository report | [选择、执行与报告](change-delivery/verification.md) |
-| S3 submit | 哪些输入与哪个 producer 被送验？ | submission | [正式 Acceptance](change-delivery/acceptance.md#12-submit冻结送验输入) |
-| S4 validate | 独立身份是否执行了相同输入的检查？ | validation record | [独立验证](change-delivery/acceptance.md#13-validate执行独立验证) |
-| S5 review | 差异与证据是否支持结论？ | review record | [独立审查](change-delivery/acceptance.md#14-review复核差异与证据) |
-| S6 check | receipt、依赖和用户批准是否满足？ | check record | [条件核对](change-delivery/acceptance.md#15-check核对条件而非重跑) |
+| S3 submit | 哪些输入与哪个 producer 被送验？ | submission | [正式 Delivery Gate](change-delivery/delivery-gate.md#12-submit冻结送验输入) |
+| S4 validate | 独立身份是否执行了相同输入的检查？ | validation record | [独立验证](change-delivery/delivery-gate.md#13-validate执行独立验证) |
+| S5 review | 差异与证据是否支持结论？ | review record | [独立审查](change-delivery/delivery-gate.md#14-review复核差异与证据) |
+| S6 check | receipt、依赖和用户批准是否满足？ | check record | [条件核对](change-delivery/delivery-gate.md#15-check核对条件而非重跑) |
 
 ## 1.2. 哪些不是主干阶段
 

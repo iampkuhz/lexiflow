@@ -4,7 +4,9 @@
 
 ## 1.1. 本地体验没有提示
 
-按浏览器 → 请求 → API → 资料 → 展示定位：
+若 API 在启动时已报 `column e.hint_eligibility does not exist`，先处理[数据库结构与发布资料](operations/lexicon-import.md#15-已有开发库结构不匹配时)，不是 Chrome 或模型配置问题。首次安装按[根 README](../../README.md#本地启动)完成本地编译、配置初始化与词库发布，不能只运行最后的 API 命令。
+
+API 能正常启动后，按浏览器 → 请求 → API → 资料 → 展示定位：
 
 1. 英文是否正常可见？无可靠来源、广告、导航或关闭增强时，扩展应退回英文，不伪造输入。
 2. 构建端口是否匹配 API？查看[本地体验](operations/local-experience.md)，不靠改远端地址解决。
@@ -26,7 +28,7 @@ API、页面聚合诊断与 service worker 的观察方法见[扩展 E2E 与诊�
 
 环境不足是 BLOCKED，不说明业务断言失败。非 PASS 不能被其他成功项冲抵。report 只证明其绑定输入，不证明之后修改的文件。
 
-## 1.3. Acceptance 无法继续
+## 1.3. Delivery Gate 无法继续
 
 | 阶段 | 常见卡点 | 处理边界 |
 | --- | --- | --- |
@@ -35,7 +37,7 @@ API、页面聚合诊断与 service worker 的观察方法见[扩展 E2E 与诊�
 | review | 无真实 findings 或 reviewer 不独立 | 完成实际审查，不默认 PASS、不重跑交付命令 |
 | check | dependency receipt 或用户 approval 缺失 | 条件补齐后重核，不能自动生成批准 |
 
-逐步操作见 [Acceptance](change-delivery/acceptance.md)。已有记录不可覆盖；保留原失败，不用一次定向成功改写历史。
+逐步操作见 [Delivery Gate](change-delivery/delivery-gate.md)。已有记录不可覆盖；保留原失败，不用一次定向成功改写历史。
 
 ## 1.4. Agent 尚未完成或收到重复 callback
 

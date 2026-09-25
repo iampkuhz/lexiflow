@@ -18,7 +18,7 @@ python3 scripts/check_changes.py
 python3 scripts/check_repository.py
 ```
 
-Change 的 base 优先使用显式 `--base`，否则取上游 merge-base，再否则取 HEAD。`--expected-path` 仅用于范围自审，不授予编辑权限。Repository 的 `--check-id` 可定向诊断，但部分选择不构成完整仓库 PASS。
+日常 Change 的 base 取上游 merge-base，无法取得时取 HEAD。需要限定 base、预期路径或 check ID 时，使用 `python3 -m scripts.verification.diagnose change --base <commit> --expected-path <path>` 或 `python3 -m scripts.verification.diagnose repository --check-id <id>`。诊断输出明确标记 `kind=diagnostic` 与 `full_repository_executed=false`，不发布可供正式 Delivery Gate 使用的完整报告；选中检查 PASS 不等于完整仓库 PASS。
 
 ## 1.2. 从阶段到子能力
 
@@ -89,7 +89,7 @@ title 日常 Verify 能力到文件
 +++[#D1FAE5] 模块检查入口\nGradle / npm / Python
 ++[#FEF3C7] 报告与读取
 +++[#FEF3C7] reports.py\n校验与持久化报告
-+++[#FEF3C7] verification 公共 API\n供 CLI 与 Acceptance 使用
++++[#FEF3C7] verification 公共 API\n供 CLI 与 Delivery Gate 使用
 @endmindmap
 ```
 
@@ -111,6 +111,12 @@ title 日常 Verify 能力到文件
 
 报告在 ignored `tmp/quality/verification-reports/`。`PASS` 只证明该报告冻结的输入；必需环境缺失是 `BLOCKED`，检查断言或输入冲突是 `FAIL`。未执行、skip、零测试和缺失结果不能 PASS。具体 code 以结果字段为准，定位步骤见[排障](../troubleshooting.md)。
 
-下一步：需要正式验收时进入 [submit](acceptance.md#12-submit冻结送验输入)，并交出可核验的 Change report；否则回到[交付主干](../change-delivery.md)完成本地自查说明。
+下一步：需要正式验收时进入 [submit](delivery-gate.md#12-submit冻结送验输入)，并交出可核验的 Change report；否则回到[交付主干](../change-delivery.md)完成本地自查说明。
 
 同一能力的 baseline/change 声明应维护相同执行 contract。去重键包含 result_contract，连 completeness_guarantee 说明的漂移也会使同一命令重复执行；只比较命令文本并不充分。
+
+## 1.5. 交付触发与语言检查
+
+完成实现后统一运行上述入口，不在每次工具调用后重复扫描。backend 变更选择 Gradle deliveryFull，保留 Spotless、Checkstyle、PMD、Java source/Javadoc、架构与业务测试；scripts 变更选择 Ruff、Pylint 中文 docstring 检查和模块测试。规则真源分别是 [python-quality.toml](../../../harness/python-quality.toml) 与 [python-docstrings.toml](../../../harness/python-docstrings.toml)，工具与环境固定在 requirements-dev。
+
+交付 Hook 自动执行上述 Verify 并返回真实结果，但不替代检查声明、结果语义约束或独立正式验收；启用、阶段边界与恢复方式见[交付 Hook](hooks.md)。

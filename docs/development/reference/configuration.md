@@ -17,7 +17,7 @@
 | [planning/workstreams.yaml](../../../planning/workstreams.yaml) | Catalog 与阶段分解 | planning-only 不是派发与验收资格 |
 | [planning/task-template.yaml](../../../planning/task-template.yaml) | 工作包/Task 输入形状 | 示例或模板不是运行身份与正式证据 |
 
-Qoder 与 Codex 工作包 schema、Acceptance record schema 定义固定形状；它们不是可手填身份的授权接口。精确 schema 路径见 manifest 的 agent_contract。
+Qoder 与 Codex 工作包 schema、Delivery Gate record schema 定义固定形状；它们不是可手填身份的授权接口。精确 schema 路径见 manifest 的 agent_contract。
 
 ## 1.2. 语言与投影的处理顺序
 

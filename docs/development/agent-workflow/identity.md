@@ -6,7 +6,7 @@
 
 [local_codex_runtime.py](../../../scripts/agents/local_codex_runtime.py) 从可信本机 Session 来源发现身份，[runtime_binding.py](../../../scripts/agents/codex/runtime_binding.py) 绑定来源。actor、Session 和 run 不可由调用者自报。这里是可信本机用户边界，不冒充平台密码学证明。
 
-[codex_work_package.py](../../../scripts/agents/codex_work_package.py) 发布工作包原始记录；Qoder 的 [facts.py](../../../scripts/agents/qoder/facts.py) 核对 task/completion/result。Acceptance 通过 producer 解析这些事实；执行模块不导入 Acceptance，也不签发 validation/review。
+[codex/work_package.py](../../../scripts/agents/codex/work_package.py) 发布工作包原始记录；[delegation/codex_cli.py](../../../scripts/agents/delegation/codex_cli.py) 只接收精确 run ID 并调用核对器。Qoder 的 [facts.py](../../../scripts/agents/qoder/facts.py) 核对 task/completion/result。Delivery Gate 通过 producer 解析这些事实；执行模块不导入 Delivery Gate，也不签发 validation/review。
 
 ## 1.2. Qoder 的生命周期边界
 

@@ -1,9 +1,9 @@
 # 1. 本地体验：API 与 Chrome 扩展
 
-> 位置：[工程地图](../overview.md) → [运行与环境](../operations.md) → 本地体验。先确认词库已发布；输出是本机可使用的浏览器/API，不是正式验收证据。
+> 位置：[工程地图](../overview.md) → [运行与环境](../operations.md) → 本地体验。首次准备从[根 README](../../../README.md#本地启动)开始；输出是本机可使用的浏览器/API，不是正式验收证据。
 
 
-以下命令在仓库根目录执行。需要 **Eclipse Temurin Java 25、Python 3、Node.js/npm 和 Chrome**，以及本机 `lsof`、`ps`；Gradle 使用仓库自带 Wrapper。正常视频体验还需要 Podman、已发布的 PostgreSQL 词库；不连接数据库时只能使用有限的内置演示词库。
+以下命令在仓库根目录执行。需要 **Eclipse Temurin Java 25、Python 3、Node.js/npm 和 Chrome**，以及本机 `lsof`、`ps`；Gradle 使用仓库自带 Wrapper。正常视频体验需要可连接且已发布词库的 PostgreSQL 开发库；有限演示词库仅供隔离自动测试使用。
 
 ## 1.1. 确认 Java
 
@@ -13,16 +13,20 @@ python3 -m scripts.environment.java_exec java -version
 
 如果提示找不到 Java 25，安装 Eclipse Temurin 25 后用 `export LEXIFLOW_JAVA_HOME=/absolute/path/to/jdk-25` 指定；不要使用系统里的其他 Java 版本替代。
 
-## 1.2. 启动确定性 API
+## 1.2. 初始化本地配置，再启动确定性 API
 
-当前 API 不读取、不需要、也不会调用模型服务。完整词库启动方式：
+首次使用先完成[根 README 的本地步骤](../../../README.md#本地启动)：编译 API/扩展 → 配置已有开发库连接与来源路径 → 校验来源 → 初始化空 schema → 发布词库。本页不要求安装容器工具，也不提供数据库服务创建流程；API 不负责建表或升级结构。
+
+已有数据库结构不会随代码更新。遇到 `column e.hint_eligibility does not exist` 时，停止启动重试，进入[开发库检查与重建](lexicon-import.md#15-已有开发库结构不匹配时)；不要只给旧表添加一个字段。日常启动可以复用匹配的已发布数据库，不重复初始化。
+
+
+当前 API 不读取、不需要、也不会调用模型服务。在设置过 `JDBC_URL` 的终端，完整词库启动方式：
 
 ```bash
-python3 -m scripts.environment.start_api \
-  --database-url 'jdbc:postgresql://127.0.0.1:15432/lexiflow?user=postgres'
+python3 -m scripts.environment.start_api
 ```
 
-启动前先确认数据库运行且词库已发布。词库来源由数据库配置决定，不由 profile 名称决定。启动器不会自动读取 `.env`，也不会继承被终止的旧 API 环境变量。
+启动前先确认数据库运行且词库已发布。启动器仅从 `JDBC_URL` 获取本地数据库地址；缺失或空白时返回 `BLOCKED`，不转入演示词库。它不会自动读取 `.env`，也不会继承被终止的旧 API 环境变量。
 
 默认端口为 `18080`。如果已被占用，启动器会列出 PID、进程名称等身份信息，并询问：
 
@@ -32,7 +36,7 @@ python3 -m scripts.environment.start_api \
 
 只有输入 `y` 或 `yes` 才会终止列出的进程；回车、`n`、取消输入或非交互环境均不会杀进程。确认后最多等待 10 秒，端口释放后再启动；不会自动 `kill -9`。
 
-可用 `--port 18081` 指定其他本机端口，并用 `LEXIFLOW_API_PORT=18081 npm --prefix extension run build` 构建匹配的扩展。地址与 host permission 来自同一构建参数，不允许远端主机；质量检查可能重建默认端口，安装前应再次按所选端口构建。
+确需换端口时，在启动 API 与构建扩展的环境中共同设置一次 `LEXIFLOW_API_PORT`，例如 `export LEXIFLOW_API_PORT=18081`，再执行零参数启动与构建命令。地址与 host permission 来自同一端口值，不允许远端主机；质量检查可能重建扩展，实际安装前应在相同环境中再次构建。
 
 保持 API 终端运行，在另一个终端检查：
 
@@ -48,9 +52,7 @@ curl --fail http://127.0.0.1:18080/actuator/health
 runtime lexicon=postgres publishedVersion=<非零版本号>
 ```
 
-`lexicon=builtin-demo` 表示没有接上数据库，只使用 `figure out`、`reliable`、`context`、`caption`、`deliver` 五个演示词条；`publishedVersion=0` 表示数据库没有已发布词库。
-
-仅测试 API 能否启动时，才使用不带数据库参数的 `python3 -m scripts.environment.start_api`；这不是完整词库体验的启动方式。
+若日志出现 `lexicon=builtin-demo`，说明进程没有通过正常本地启动器接上数据库；不要将它当作完整词库体验。`publishedVersion=0` 表示数据库没有已发布词库。
 
 ## 1.3. 构建并加载扩展
 

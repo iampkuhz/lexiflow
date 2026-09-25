@@ -41,7 +41,7 @@ title LexiFlow 阅读地图
 +++[#D1FAE5] 观看主链路
 +++[#D1FAE5] 领域与数据边界
 ++[#FEF3C7] 修改与交付
-+++[#FEF3C7] Verify 与 Acceptance
++++[#FEF3C7] Verify 与 Delivery Gate
 +++[#FEF3C7] 可选 Agent 协作
 ++[#EDE9FE] 运行与排障
 +++[#EDE9FE] 本地体验与资料导入
@@ -60,7 +60,7 @@ title LexiFlow 阅读地图
 | --- | --- | --- |
 | 为什么做、什么不做？ | [产品说明](product/product-brief.md) | [产品术语](product/glossary.md) |
 | 一条字幕怎样得到提示？ | [架构总览](architecture/overview.md) | [产品流程](architecture/flows.md) → 对应领域与数据 contract |
-| 怎样修改并交付？ | [工程地图](development/overview.md) | [交付主干](development/change-delivery.md) → Verify / Acceptance |
+| 怎样修改并交付？ | [工程地图](development/overview.md) | [交付主干](development/change-delivery.md) → Verify / Delivery Gate |
 | 怎样本机使用、导入资料？ | [运行与环境](development/operations.md) | 本地体验 / 词库导入 / 隔离测试 |
 | 某一步失败了怎么办？ | [按阶段排障](development/troubleshooting.md) | 定位运行环境、检查、身份或证据层 |
 | 只查某个工具或英文术语？ | [工程 Reference](development/reference.md) | 工具、配置、Scripts、术语 |
