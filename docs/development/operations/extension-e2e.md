@@ -69,4 +69,4 @@ YouTube 渲染 DOM 只提供屏幕文本快照与播放器读数，没有可靠�
 
 `cancelled-acquisition`、`cancelled-before-request`、`cancelled-in-flight` 区分失效位置；`late-ready` 表示已返回提示但过期丢弃，`stale-at-render` 表示最终显示校验拒绝。取消可能来自换句、跳转、关闭等，不能全算成延迟漏译。`missing-server-timing` 记录成功响应缺少服务端完整计时；不同阶段样本数可能不同，不能直接相减其均值或百分位。
 
-日志不包含字幕原文、视频 URL、模型输入输出或密钥，不开启 HTTP 请求体调试日志。`timeout` 与主动取消的 `aborted` 分开；`NO_PENDING` 是无可靠提示而非成功翻译。
+扩展日志不包含字幕原文、视频 URL、模型输入输出或密钥，不开启 HTTP 请求体调试日志；本机 API 另按用户授权记录英文和最终中英结果，见[本机体验](local-experience.md)。`timeout` 与主动取消的 `aborted` 分开；`NO_PENDING` 是无可靠提示而非成功翻译。

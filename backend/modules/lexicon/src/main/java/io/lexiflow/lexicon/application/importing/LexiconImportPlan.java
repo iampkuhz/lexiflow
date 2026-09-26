@@ -109,7 +109,7 @@ public final class LexiconImportPlan {
       LexiconImportRow row, long lexiconVersion, String sourceDigest, Instant acquiredAt) {
     var entry =
         new LexiconEntry(
-            stableId("entry:" + row.lemma()),
+            stableId("entry:en:" + row.lemma()),
             lexiconVersion,
             "en",
             row.lemma().trim().contains(" ") ? LexiconEntryKind.PHRASE : LexiconEntryKind.WORD,
@@ -127,10 +127,7 @@ public final class LexiconImportPlan {
                 row.dictionary().licenseId(),
                 sourceDigest,
                 acquiredAt),
-            row.priority(),
-            row.basicVocabulary()
-                ? io.lexiflow.lexicon.domain.model.LexiconHintEligibility.BASIC_VOCABULARY
-                : io.lexiflow.lexicon.domain.model.LexiconHintEligibility.CANDIDATE);
+            row.priority());
     return new PlannedEntry(entry, row);
   }
 

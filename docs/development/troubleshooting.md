@@ -4,7 +4,7 @@
 
 ## 1.1. 本地体验没有提示
 
-若 API 在启动时已报 `column e.hint_eligibility does not exist`，先处理[数据库结构与发布资料](operations/lexicon-import.md#15-已有开发库结构不匹配时)，不是 Chrome 或模型配置问题。首次安装按[根 README](../../README.md#本地启动)完成本地编译、配置初始化与词库发布，不能只运行最后的 API 命令。
+若 API 在启动时已报 `relation "lexicon_hint_lookup" does not exist`，先处理[数据库结构与发布资料](operations/lexicon-import.md#15-已有开发库结构不匹配时)，不是 Chrome 或模型配置问题。首次安装按[根 README](../../README.md#本地启动)完成本地编译、配置初始化与词库发布，不能只运行最后的 API 命令。
 
 API 能正常启动后，按浏览器 → 请求 → API → 资料 → 展示定位：
 

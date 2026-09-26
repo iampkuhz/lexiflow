@@ -21,6 +21,11 @@ import java.util.Objects;
  * @param prewarmEligible 含义：是否可进入预热候选。取值范围：由方法调用前置条件限定。
  * @param basicVocabulary 导入时已确定的基础词排除标记。
  * @param hintPolicyReference 基础词选择和清洗规则的来源引用。
+ * @param sourceGloss 被采用来源的原始中文释义；区别于处理后的短释。
+ * @param sourceBncRank 来源的有效 BNC 正排名，缺失时为空。
+ * @param sourceFrqRank 来源的有效 FRQ 正排名，缺失时为空。
+ * @param sourceComplexTags 来源复杂词表的规范标签集合。
+ * @param sourceOxfordBasic 来源 Oxford 基础词原始标记。
  */
 public record LexiconImportRow(
     String lemma,
@@ -34,7 +39,12 @@ public record LexiconImportRow(
     List<SourceReference> complexLists,
     boolean prewarmEligible,
     boolean basicVocabulary,
-    String hintPolicyReference) {
+    String hintPolicyReference,
+    String sourceGloss,
+    Long sourceBncRank,
+    Long sourceFrqRank,
+    List<String> sourceComplexTags,
+    boolean sourceOxfordBasic) {
   /** 构造不可变的导入记录。 */
   public LexiconImportRow {
     lemma = required(lemma, "lemma");
@@ -52,9 +62,49 @@ public record LexiconImportRow(
             || aliases.stream().anyMatch(BasicVocabulary::contains)
             || inflections.stream().anyMatch(BasicVocabulary::contains);
     hintPolicyReference = required(hintPolicyReference, "hintPolicyReference");
+    sourceGloss = Objects.requireNonNullElse(sourceGloss, chineseGloss);
+    sourceComplexTags = List.copyOf(Objects.requireNonNull(sourceComplexTags, "sourceComplexTags"));
+    if (sourceBncRank != null && sourceBncRank < 1)
+      throw new IllegalArgumentException("invalid BNC rank");
+    if (sourceFrqRank != null && sourceFrqRank < 1)
+      throw new IllegalArgumentException("invalid FRQ rank");
     if (basicVocabulary && lemma.contains(" "))
       throw new IllegalArgumentException("basic exclusion must name a word, not a phrase");
     prewarmEligible = prewarmEligible && !basicVocabulary;
+  }
+
+  /** 通用规范输入没有 StarDict 的原始频率及标签证据。 */
+  public LexiconImportRow(
+      String lemma,
+      String chineseGloss,
+      String definition,
+      List<String> aliases,
+      List<String> inflections,
+      LexiconPriority priority,
+      SourceReference dictionary,
+      SourceReference frequency,
+      List<SourceReference> complexLists,
+      boolean prewarmEligible,
+      boolean basicVocabulary,
+      String hintPolicyReference) {
+    this(
+        lemma,
+        chineseGloss,
+        definition,
+        aliases,
+        inflections,
+        priority,
+        dictionary,
+        frequency,
+        complexLists,
+        prewarmEligible,
+        basicVocabulary,
+        hintPolicyReference,
+        chineseGloss,
+        null,
+        null,
+        List.of(),
+        false);
   }
 
   /** 规范来源使用固定功能词规则；扩展基础词须由上游提供明确标记和依据。 */
@@ -81,7 +131,12 @@ public record LexiconImportRow(
         complexLists,
         prewarmEligible,
         false,
-        "fixed-function-words-and-identical-gloss-v1");
+        "fixed-function-words-and-identical-gloss-v1",
+        chineseGloss,
+        null,
+        null,
+        List.of(),
+        false);
   }
 
   private static String required(String value, String field) {

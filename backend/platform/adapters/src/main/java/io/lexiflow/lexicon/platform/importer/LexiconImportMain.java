@@ -12,7 +12,6 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
@@ -20,7 +19,6 @@ import java.util.PriorityQueue;
 
 /** 离线词库导入命令；只解析本机受控输入并调用应用层导入服务。 */
 public final class LexiconImportMain {
-  private static final int CHUNK_SIZE = 500;
 
   private LexiconImportMain() {}
 
@@ -92,14 +90,7 @@ public final class LexiconImportMain {
       return;
     }
     if (command.action().equals("validate")) {
-      var canonicalSurfaces = LexiconImportPlan.canonicalSurfaceValidator();
-      var scan =
-          reader.read(
-              command.input(),
-              source ->
-                  LexiconImportPlan.prepareNext(
-                      source.row(), 1, digest, command.acquiredAt(), canonicalSurfaces),
-              selection);
+      var scan = validateStardict(reader, command, digest, selection);
       printStardictScan("PASS", scan, digest);
       return;
     }
@@ -114,52 +105,49 @@ public final class LexiconImportMain {
     }
     var metadata =
         metadata(command, digest, StardictCsvReader.PREPARATION_POLICY + ":" + selection.digest());
+    var preflight = validateStardict(reader, command, digest, selection);
+    if (preflight.importableRows() == 0) {
+      throw new IllegalArgumentException("StarDict source contains no importable entries");
+    }
+    if (!digest.equals(sourceDigest(command.input()))) {
+      throw new IllegalStateException("source changed during preflight");
+    }
     try (var persistence = PostgresPersistence.open(command.databaseUrl())) {
-      var service = new LexiconImportService(persistence.repository());
-      var batch = service.openOrResume(metadata);
-      var buffer = new ArrayList<StardictCsvReader.SourceRecord>(CHUNK_SIZE);
-      var scan =
-          reader.read(
-              command.input(),
-              source -> {
-                if (source.sourceRow() <= batch.sourceRowsProcessed()) {
-                  return;
-                }
-                buffer.add(source);
-                if (buffer.size() == CHUNK_SIZE) {
-                  stage(service, batch, buffer, source.sourceRow(), metadata);
-                  buffer.clear();
-                }
-              },
-              selection);
-      if (!buffer.isEmpty()) {
-        stage(service, batch, buffer, buffer.getLast().sourceRow(), metadata);
-      }
-      if (scan.importableRows() == 0) {
-        throw new IllegalArgumentException("StarDict source contains no importable entries");
-      }
-      if (!digest.equals(sourceDigest(command.input()))) {
-        throw new IllegalStateException(
-            "source changed during preprocessing; staged batch not published");
-      }
-      service.publish(batch, scan.sourceRows());
+      var version =
+          new LexiconImportService(persistence.repository())
+              .publishStreaming(
+                  metadata,
+                  preflight.sourceRows(),
+                  preflight.importableRows(),
+                  consumer -> {
+                    var second =
+                        reader.read(
+                            command.input(), record -> consumer.accept(record.row()), selection);
+                    if (second.sourceRows() != preflight.sourceRows()
+                        || second.importableRows() != preflight.importableRows()
+                        || !digest.equals(sourceDigest(command.input()))) {
+                      throw new IllegalStateException("source changed during publication");
+                    }
+                  });
       System.out.printf(
           "PASS format=ecdict-stardict published_version=%d source_rows=%d entries=%d source_sha256=%s%n",
-          batch.version(), scan.sourceRows(), scan.importableRows(), digest);
+          version, preflight.sourceRows(), preflight.importableRows(), digest);
     }
   }
 
-  private static void stage(
-      LexiconImportService service,
-      io.lexiflow.lexicon.application.importing.model.StagedLexiconImport batch,
-      List<StardictCsvReader.SourceRecord> records,
-      long processedThrough,
-      LexiconImportMetadata metadata) {
-    service.stage(
-        batch,
-        records.stream().map(StardictCsvReader.SourceRecord::row).toList(),
-        processedThrough,
-        metadata);
+  private static StardictCsvReader.ScanResult validateStardict(
+      StardictCsvReader reader,
+      Arguments command,
+      String digest,
+      StardictCsvReader.BasicSelection selection)
+      throws IOException {
+    var canonicalSurfaces = LexiconImportPlan.canonicalSurfaceValidator();
+    return reader.read(
+        command.input(),
+        source ->
+            LexiconImportPlan.prepareNext(
+                source.row(), 1, digest, command.acquiredAt(), canonicalSurfaces),
+        selection);
   }
 
   private static LexiconImportMetadata metadata(

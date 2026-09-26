@@ -2,84 +2,74 @@
 
 # 1. 词库持久化模型与初始化合同
 
-**位置：** [架构总览](overview.md) → [共享词库合同](lexicon-contract.md) → 持久化模型。**前一步：** 离线词库导入准备规范资料；**下一步：** 发布版本供查询；**失败：** 批次保持不可见或事务回滚，绝不让半成品成为观看事实。操作步骤见[词库导入](../development/operations/lexicon-import.md)。
+**位置：** [架构总览](overview.md) → [共享词库合同](lexicon-contract.md) → 持久化模型。**输入：** 完整扫描并校验的离线来源；**输出：** 一套可供观看直接查询的已发布资料；**失败：** 发布事务回滚，观看继续读取先前完整资料。
 
-LexiFlow 现有持久化闭环是共享词库。PostgreSQL 保存词条版本、导入批次和来源证据；进程内 L1、Redis 与浏览器状态是可重建副本。领域和 application 只使用完整 Model 与 `LexiconRepository`，不能因为底层有表就把 DAO 行当成领域对象。
+PostgreSQL 只保存当前完整词库。来源文件本身按摘要保留在受控本机位置，不把每个来源的每条原始释义分别入库。观看只读 `lexicon_hint_lookup`，不联查准备记录；L1、Redis 与浏览器缓存均可重建。
 
-## 1.1. LexiconEntry 聚合
+## 1.1. 三张表的职责与关系
 
-`LexiconEntry` 用不可猜测的 `lexicon_entry_id` 与不可变 `lexicon_version` 标识可跨内容复用的词汇知识。一个版本包含 lemma、一个或多个 Sense、Alias、Inflection、Provenance 与优先级。Sense 的稳定身份与准确版本会被 Annotation 引用；旧版本不能被新资料原地覆盖。查询时 Repository 还原完整聚合，不能丢失某个 sense、alias 或 inflection。[词库合同](lexicon-contract.md)定义字段、歧义和发布不变量。
-
-<a id="12-导入批次"></a>
 ```plantuml
 @startuml
-title LexiconEntry：版本化聚合与从属对象
+!pragma layout smetana
+title 词库三表：准备资料与准确词形查询
 skinparam backgroundColor white
 skinparam defaultFontName SansSerif
-skinparam defaultFontSize 14
 skinparam shadowing false
-skinparam classAttributeIconSize 0
 skinparam nodesep 35
 skinparam ranksep 50
-hide methods
-class LexiconEntry {
-  entryId : UUID
-  lexiconVersion : long
-  lemma : String
-  hintEligibility : LexiconHintEligibility
+top to bottom direction
+package "数据集元数据" #D6EAF8 {
+  database "lexicon_dataset" as dataset
 }
-class LexiconSense {
-  senseId : UUID
-  chineseGloss : String
+package "离线准备" #D5F5E3 {
+  database "lexicon_prepared_entry" as prepared
 }
-class LexiconAlias {
-  normalizedForm : String
+package "观看查询" #FCF3CF {
+  database "lexicon_hint_lookup" as lookup
 }
-class LexiconInflection {
-  normalizedForm : String
-}
-class LexiconProvenance {
-  sourceId / licenseId
-  contentDigest / acquiredAt
-}
-class LexiconPriority {
-  frequencyZipf / memoryPriority
-}
-LexiconEntry "1" *-- "1..*" LexiconSense : 义项
-LexiconEntry "1" *-- "0..*" LexiconAlias : 别名
-LexiconEntry "1" *-- "0..*" LexiconInflection : 屈折形
-LexiconEntry "1" *-- "1" LexiconProvenance : 来源与许可
-LexiconEntry "1" *-- "1" LexiconPriority : 非个人化优先级
+dataset --> prepared : S1 完整导入生成
+prepared --> lookup : S2 一对多词形投影
+note right of dataset
+  PK dataset_id = 1
+  lexicon_version
+  source_manifest
+end note
+note right of prepared
+  PK lexicon_entry_id
+  UK language_tag + lemma
+  source_* / prepared_*
+end note
+note right of lookup
+  PK language_tag + normalized_form + lexicon_entry_id
+  FK lexicon_entry_id
+  final_action / final_gloss / cache_priority
+end note
 legend bottom
-聚合关系，不是 SQL 表或全部 Java 字段清单
-entryId + lexiconVersion 共同绑定一份发布资料
-Repository 还原完整聚合；不能只返回某一张 DAO 表的行
+  仅 lookup 供观看查询；prepared 保存被采用来源证据。
 endlegend
 @enduml
 ```
 
-图中展示 Domain 聚合关系，不把每个对象都当作独立服务或 SQL 表。精确字段见 [LexiconEntry](../../backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/domain/model/LexiconEntry.java)，批次发布边界见下一节。
+| 表 | 职责 | 关键字段与约束 | 写入与读取 |
+| --- | --- | --- | --- |
+| `lexicon_dataset` | 固定 `dataset_id=1` 的完整来源和发布身份 | PK `dataset_id`；`lexicon_version`、`source_manifest`、行数与准备规则 | 完整发布事务最后写入；API 只取版本 |
+| `lexicon_prepared_entry` | 按语言与主词形归并的离线准备事实 | PK `lexicon_entry_id`；UK `(language_tag, lemma)`；`source_*`、`prepared_gloss`、`exclusion_reason`、`prepared_priority` | 来源扫描后批量写入；观看不查询 |
+| `lexicon_hint_lookup` | 原形、别名和屈折形的准确反查表 | PK `(language_tag, normalized_form, lexicon_entry_id)`；FK 指向准备词条；`final_*`、`cache_priority` | 导入时派生；字幕批量查询唯一读表 |
 
-## 1.2. 导入批次与可见性
+一个准备词条可以产生多条准确词形；一个词形也可以自然地对应多个词条，尤其是屈折形。后者须向 Enrichment 保留全部候选，不选择第一条。逐字段类型、样例、赋值时点及关联见[三表字段 Reference](data-model/fields.md)；数据库约束与中文注释以 [schema.sql](../../infra/postgres/schema.sql) 为准。
 
-`lexicon_import_batch` 记录来源摘要、许可、版本、处理行数与发布状态。规范输入在一个 PostgreSQL 事务内写入并发布；流式输入先写入不可见的 `STAGED` 批次，只在完整扫描、处理行数与来源行数相等后切换到 `PUBLISHED`。同一时刻最多一个版本为 `PUBLISHED`。失败不能把部分批次暴露给观看；更正或撤回通过新版本表达，不改写已发布词条。
+## 1.2. 来源证据与最终决定
 
-## 1.3. 持久化边界
+`source_gloss` 只记录被采用来源的清洗前释义；`source_gloss_ref` 定位来源文件记录。`source_bnc_rank`、`source_frq_rank`、`source_complex_tags`、`source_oxford_basic` 是来源原始证据。导入时计算 `prepared_gloss`、排除原因和优先级，再在查询表冻结 `final_action=HINT|BLOCK`、安全短释、义项身份和独立的缓存优先级。基础词和不能安全形成单一短释的词形保留为 BLOCK，因而可以进入负向缓存，但不显示提示。
 
-`:modules:lexicon` 的 `domain.model` 拥有业务事实，`application.port` 定义 `LexiconRepository`，`application.importing` 协调导入；`:platform:adapters` 的 persistence 包实现 DO、DAO、Mapper、SQL 与 PostgreSQL 事务。技术层不因能访问数据库而取得所有领域表的所有权。未形成闭环的内容、标注、语义结果和异步工作不预留表或持久化接口。存储边界应从[模块边界](boundaries.md)理解，不从项目目录推断业务调用方向。
+词条身份由 `(language_tag, lemma)` 确定，不由来源或数据集 ID 决定。`lexicon_version` 只在单例数据集保存并随完整重导递增；查询结果随已发布资料版本绑定，版本变化时缓存失效。本机显式抑制偏好仍同时核对词条身份和版本。
 
-<a id="1-词库持久化与初始化合同"></a>
-<a id="11-repository-与-dao"></a>
-## 1.4. Repository 与 DAO
+## 1.3. 前置校验与原子发布
 
-应用服务只依赖 [`LexiconRepository.java`](../../backend/modules/lexicon/src/main/java/io/lexiflow/lexicon/application/port/LexiconRepository.java)。[`DefaultLexiconRepository.java`](../../backend/platform/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DefaultLexiconRepository.java)组合词条、导入批次和来源证据 DAO；DAO 只处理 PostgreSQL 表访问，DO 仅在 persistence 包内出现。[`LexiconEntryMapper.java`](../../backend/platform/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/LexiconEntryMapper.java)把 DO 还原成完整领域 Model；Repository 不向上暴露 `JdbcClient` 或表行。
+发布前先完整扫描来源、冻结基础词选择、验证格式和跨行 canonical 词形冲突。通过后重读同一来源，在**单个 PostgreSQL 事务**内以固定分块批写准备表及查询表；来源摘要和计数在提交前再次核对，最后写入数据集元数据。任一步失败均回滚，新数据不部分可见；没有 `STAGED`、`PUBLISHED` 等持久化生命周期状态。更正与撤回通过重新准备完整数据集并原子替换，不在观看时修改资料。
 
-<a id="12-事务与版本"></a>
-## 1.5. 事务与版本
+## 1.4. 边界与初始化
 
-规范导入在同一 PostgreSQL 事务内锁定发布、分配版本、写入批次／词条／证据、替换旧发布版本并发布新版本。流式导入按连续分块更新 `source_rows_processed`；只有处理行数等于完整来源行数，才可以发布。发布身份必须与来源摘要、许可和词条内容绑定，重建后不可让旧缓存或本机偏好错误指向不同资料。
+`LexiconRepository` 是 application 的唯一持久化端口；PostgreSQL 适配器负责事务和 SQL，不向 Enrichment 暴露表行。`LexiconEntry` 仍用于离线准备和领域校验，观看只接收从查询投影生成的 `LexiconHintCandidate`。查询一至三个连续词的准确形式，缺失形式合并为一次批量 SQL，不对长短语做任意 n-gram 枚举。
 
-<a id="13-结构初始化"></a>
-## 1.6. 结构初始化
-
-数据库唯一最新结构在 [`infra/postgres/schema.sql`](../../infra/postgres/schema.sql)。结构变化须显式重建**本项目开发库**并完整重新导入；API 启动不得隐式清库，也不得触及其他项目数据。初始化测试覆盖空库初始化、非空拒绝、失败原子回滚后用修正 SQL 重试。具体隔离环境由[操作入口](../development/operations.md)指引，不用开发数据库充当测试资源。
+数据库唯一最新结构在 [schema.sql](../../infra/postgres/schema.sql)。结构变化须显式重建**本项目开发库**并完整重导；API 启动不隐式清库，也不触及其他项目。隔离集成测试在临时 schema 执行，结束后清理。

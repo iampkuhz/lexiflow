@@ -18,9 +18,9 @@ const longCaption = [
 const mockCaption = "Reliable context needs published captions.";
 
 const mockHints = [
-  ["Reliable", "可靠的"],
-  ["context", "语境"],
-  ["published", "已发布的"]
+  ["Reliable context", "可靠的语境"],
+  ["published", "已发布的"],
+  ["captions", "字幕"]
 ];
 
 function safeCaseId(value) {
@@ -169,6 +169,8 @@ async function runCase({
   assert.equal(evidence.englishText, caption, `${id}: original English must remain complete`);
   assert.equal(evidence.glosses.length, expectedHints, `${id}: hint count`);
   assert.equal(evidence.adjacentGlosses, true, `${id}: Chinese must immediately follow its English segment`);
+  assert.deepEqual(evidence.markedTerms, evidence.glosses.map(gloss => gloss.term), `${id}: each complete hinted span, including phrase spaces, must be underlined`);
+  assert.equal(evidence.allHintsUnderlined, true, `${id}: hinted spans must retain visible underline styling`);
   assert.equal(evidence.withinPlayer, true, `${id}: overlay must stay within the player`);
   assert.equal(evidence.noControlCollision, true, `${id}: overlay must not collide with controls`);
   assert.equal(evidence.noGlossCollision, true, `${id}: glosses must not overlap each other`);
@@ -206,6 +208,9 @@ async function collectGeometry(page, caption, expectedHints, expectedTerms, mini
     if (!(line instanceof HTMLElement) || !(summary instanceof HTMLElement)) throw new Error("visual-shadow-content-missing");
     const children = [...line.children];
     const glosses = children.filter(child => child.classList.contains("gloss"));
+    const markedTerms = children.filter(child => child.classList.contains("hint-term")).map(child => child.textContent ?? "");
+    const allHintsUnderlined = children.filter(child => child.classList.contains("hint-term"))
+      .every(term => getComputedStyle(term).borderBottomStyle === "solid" && parseFloat(getComputedStyle(term).borderBottomWidth) > 0);
     const englishText = children.filter(child => !child.classList.contains("gloss")).map(child => child.textContent ?? "").join("");
     const termsFromTitle = glosses.map(gloss => /^不再提示「(.+?)」/.exec(gloss.getAttribute("title") ?? "")?.[1] ?? "");
     const adjacentGlosses = glosses.every((gloss, index) => {
@@ -230,6 +235,8 @@ async function collectGeometry(page, caption, expectedHints, expectedTerms, mini
       overlayText: line.textContent?.trim() ?? "",
       englishText,
       glosses: glosses.map((gloss, index) => ({ term: terms?.[index] ?? termsFromTitle[index], text: gloss.textContent ?? "", rect: glossRects[index] })),
+      markedTerms,
+      allHintsUnderlined,
       player: playerRect,
       line: lineRect,
       controls: { rect: controlRect, visible: visible(summary), enabled: !buttons.some(button => button.disabled) },

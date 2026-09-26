@@ -5,13 +5,35 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import io.lexiflow.enrichment.domain.model.CaptionContext;
 import io.lexiflow.enrichment.domain.model.HintState;
 import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
-import io.lexiflow.lexicon.domain.catalog.BuiltinLexiconCatalog;
+import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
+import io.lexiflow.lexicon.domain.model.LexiconHintAction;
+import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
+import io.lexiflow.lexicon.domain.port.LexiconCatalog;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class EnrichCaptionUseCaseTest {
   private final EnrichCaptionUseCase useCase =
-      new EnrichCaptionUseCase(new BuiltinLexiconCatalog(), new DeterministicHintPolicy());
+      new EnrichCaptionUseCase(catalog(), new DeterministicHintPolicy());
+
+  private static LexiconCatalog catalog() {
+    var candidate =
+        new LexiconHintCandidate(
+            UUID.fromString("00000000-0000-0000-0000-000000000010"),
+            UUID.fromString("00000000-0000-0000-0000-000000000011"),
+            1,
+            "en",
+            "reliable",
+            "reliable",
+            LexiconEntryKind.WORD,
+            LexiconHintAction.HINT,
+            "可靠的",
+            500,
+            4.2,
+            1);
+    return caption -> caption.contains("reliable") ? List.of(candidate) : List.of();
+  }
 
   @Test
   void returnsChineseGlossForKnownTermInsideTargetRange() {
@@ -58,8 +80,7 @@ class EnrichCaptionUseCaseTest {
   void measuresQueryAndRulesUsingOneMonotonicClock() {
     var ticks = new java.util.ArrayDeque<>(java.util.List.of(100L, 160L, 175L));
     var measuredUseCase =
-        new EnrichCaptionUseCase(
-            new BuiltinLexiconCatalog(), new DeterministicHintPolicy(), ticks::removeFirst);
+        new EnrichCaptionUseCase(catalog(), new DeterministicHintPolicy(), ticks::removeFirst);
     var measured =
         measuredUseCase.enrichMeasured(
             new CaptionContext(

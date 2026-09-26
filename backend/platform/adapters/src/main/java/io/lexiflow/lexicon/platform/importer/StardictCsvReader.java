@@ -38,6 +38,11 @@ final class StardictCsvReader {
   private static final Set<String> INFLECTION_KEYS = Set.of("p", "d", "i", "3", "r", "t", "s");
   private static final Set<String> COMPLEX_TAGS =
       Set.of("cet6", "ky", "toefl", "ielts", "gre", "sat");
+  private static final Map<String, CuratedGloss> CURATED_GLOSSES =
+      Map.of(
+          "sustainability", new CuratedGloss("持续性", "可持续性"),
+          "literally", new CuratedGloss("字面上地", "按字面意思"),
+          "stream of data", new CuratedGloss("数据流", "数据流"));
 
   /** 判断输入首行是否为受支持的 StarDict CSV 合同。 */
   boolean matches(Path input) throws IOException {
@@ -47,7 +52,7 @@ final class StardictCsvReader {
     }
   }
 
-  static final String PREPARATION_POLICY = "oxford-ranked-top2000-fixed-and-identical-gloss-v1";
+  static final String PREPARATION_POLICY = "oxford-ranked-top2000-fixed-and-curated-gloss-v2";
 
   /** 预扫描只保留 2000 个有来源排名的基础 lemma，不把全部词库装入内存。 */
   BasicSelection selectBasicVocabulary(Path input) throws IOException {
@@ -135,7 +140,15 @@ final class StardictCsvReader {
     if (!isSupportedSurface(word)) {
       return Conversion.omit(OmissionReason.UNSUPPORTED_SURFACE);
     }
-    var gloss = cleanTranslation(row.get("translation"));
+    var sourceGloss = cleanTranslation(row.get("translation"));
+    var gloss = sourceGloss;
+    var curated = CURATED_GLOSSES.get(word);
+    if (curated != null) {
+      if (!gloss.contains(curated.sourceExpression())) {
+        throw new IllegalArgumentException("curated gloss source expression changed for " + word);
+      }
+      gloss = curated.displayGloss();
+    }
     if (gloss.isBlank()) {
       return Conversion.omit(OmissionReason.NO_GLOSS);
     }
@@ -181,11 +194,12 @@ final class StardictCsvReader {
                 complexEvidence,
                 rank != 0 && !"1".equals(normalize(row.get("oxford"))),
                 selection.lemmas().contains(word),
-                PREPARATION_POLICY
-                    + ";list_sha256="
-                    + selection.digest()
-                    + ";"
-                    + evidenceReference),
+                PREPARATION_POLICY + ";list_sha256=" + selection.digest() + ";" + evidenceReference,
+                sourceGloss,
+                parseRank(row.get("bnc")) > 0 ? parseRank(row.get("bnc")) : null,
+                parseRank(row.get("frq")) > 0 ? parseRank(row.get("frq")) : null,
+                complexTags.stream().sorted().toList(),
+                "1".equals(normalize(row.get("oxford")))),
             "1".equals(normalize(row.get("oxford"))),
             rank,
             !gloss.equals(
@@ -260,6 +274,14 @@ final class StardictCsvReader {
     var selected = ordinary.isEmpty() ? network : ordinary;
     return String.join("；", selected).replaceAll("\\s+", " ").trim();
   }
+
+  /**
+   * 人工审阅且可从当前来源核对的少量短释，不通用截取多义列表首项。
+   *
+   * @param sourceExpression 来源译文必须包含的表达。
+   * @param displayGloss 经人工审阅后发布的简短中文释义。
+   */
+  private record CuratedGloss(String sourceExpression, String displayGloss) {}
 
   private static String cleanDefinition(String value) {
     return value.replace("\\n", "\n").replaceAll("\\s+", " ").trim();

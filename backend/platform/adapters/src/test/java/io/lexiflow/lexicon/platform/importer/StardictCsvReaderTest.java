@@ -2,6 +2,7 @@ package io.lexiflow.lexicon.platform.importer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -120,6 +121,37 @@ class StardictCsvReaderTest {
     assertEquals(List.of("abilities"), rows.getFirst().row().inflections());
     assertFalse(rows.getLast().row().basicVocabulary());
     assertEquals("平行四边形", rows.getLast().row().chineseGloss());
+  }
+
+  @Test
+  void publishesOnlyReviewedShortGlossesWhenTheExpectedSourceExpressionStillExists()
+      throws Exception {
+    var file = Files.createTempFile("curated-gloss", ".csv");
+    Files.writeString(
+        file,
+        header()
+            + "\n"
+            + row("sustainability", "n. 持续性, 能维持性, 永续性", "", "", "17705", "9092", "", "")
+            + "\n"
+            + row("literally", "adv. 逐字地, 按照字面上地, 不夸张地", "", "", "3512", "2469", "", "")
+            + "\n"
+            + row("stream of data", "un. 数据流\\n[网络] 资料之流", "", "", "0", "0", "", ""));
+    var rows = new ArrayList<StardictCsvReader.SourceRecord>();
+    new StardictCsvReader().read(file, rows::add);
+    assertEquals(
+        List.of("可持续性", "按字面意思", "数据流"),
+        rows.stream().map(value -> value.row().chineseGloss()).toList());
+    assertTrue(rows.getFirst().row().sourceGloss().contains("持续性"));
+    assertEquals(17705L, rows.getFirst().row().sourceBncRank());
+    assertEquals(9092L, rows.getFirst().row().sourceFrqRank());
+    assertTrue(
+        rows.stream()
+            .allMatch(value -> value.row().hintPolicyReference().contains("curated-gloss-v2")));
+
+    Files.writeString(
+        file, header() + "\n" + row("sustainability", "n. 绿色", "", "", "17705", "9092", "", ""));
+    assertThrows(
+        IllegalArgumentException.class, () -> new StardictCsvReader().read(file, ignored -> {}));
   }
 
   private static String header() {

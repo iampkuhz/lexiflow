@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import tools.jackson.core.io.JsonStringEncoder;
 
 /** 为已定位字幕提供不阻塞、词段级中文提示的 HTTP 入口。 */
 @RestController
@@ -73,13 +74,10 @@ public final class CaptionHintController {
       var queryMillis = measured.queryNanos() / 1_000_000.0;
       var rulesMillis = measured.rulesNanos() / 1_000_000.0;
       LOG.info(
-          "hint_request state={} candidates={} hints={} queryMs={} rulesMs={} apiMs={}",
-          result.state(),
-          measured.candidateCount(),
-          result.hints().size(),
-          queryMillis,
-          rulesMillis,
-          totalMillis);
+          "hint_result apiMs={} english={} final={}",
+          String.format(Locale.ROOT, "%.3f", totalMillis),
+          jsonString(body.caption()),
+          jsonString(renderedCaption(body)));
       return ResponseEntity.ok()
           .header("Cache-Control", "no-store")
           .header(
@@ -95,5 +93,22 @@ public final class CaptionHintController {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "invalid caption request", exception);
     }
+  }
+
+  /** 与扩展的词段后插入规则一致；日志只呈现最终文本，不打印内部身份或完整请求。 */
+  static String renderedCaption(CaptionHintResponse body) {
+    var rendered = new StringBuilder();
+    var offset = 0;
+    for (var hint : body.hints()) {
+      rendered.append(body.caption(), offset, hint.endOffset());
+      rendered.append('(').append(hint.chineseGloss()).append(')');
+      offset = hint.endOffset();
+    }
+    return rendered.append(body.caption(), offset, body.caption().length()).toString();
+  }
+
+  /** 将不可信字幕转成单行 JSON 字符串，避免换行、引号或控制字符伪造日志。 */
+  private static String jsonString(String value) {
+    return '"' + new String(JsonStringEncoder.getInstance().quoteAsCharArray(value)) + '"';
   }
 }

@@ -45,8 +45,10 @@ export class BilingualOverlay {
     const caption = source.caption;
     let offset = 0;
     for (const hint of hints) {
-      this.english(caption.slice(offset, hint.endOffset));
-      this.gloss(caption.slice(hint.startOffset, hint.endOffset), hint);
+      this.english(caption.slice(offset, hint.startOffset));
+      const term = caption.slice(hint.startOffset, hint.endOffset);
+      this.hintedTerm(term);
+      this.gloss(term, hint);
       offset = hint.endOffset;
     }
     this.english(caption.slice(offset));
@@ -58,19 +60,31 @@ export class BilingualOverlay {
   private english(text: string): void {
     const start = this.englishOffset;
     const end = start + text.length;
-    let cursor = start;
-    for (const offset of this.source?.lineBreaks ?? []) {
-      if (offset < start || offset >= end) continue;
-      this.englishSpan(text.slice(cursor - start, offset - start));
-      this.line!.append(document.createElement("br"));
-      cursor = offset;
-    }
-    this.englishSpan(text.slice(cursor - start));
+    this.captionSpan(text, start, end);
     this.englishOffset = end;
   }
 
-  private englishSpan(text: string): void {
+  private hintedTerm(text: string): void {
+    const start = this.englishOffset;
+    const end = start + text.length;
+    this.captionSpan(text, start, end, "hint-term");
+    this.englishOffset = end;
+  }
+
+  private captionSpan(text: string, start: number, end: number, className?: string): void {
+    let cursor = start;
+    for (const offset of this.source?.lineBreaks ?? []) {
+      if (offset < start || offset >= end) continue;
+      this.englishSpan(text.slice(cursor - start, offset - start), className);
+      this.line!.append(document.createElement("br"));
+      cursor = offset;
+    }
+    this.englishSpan(text.slice(cursor - start), className);
+  }
+
+  private englishSpan(text: string, className?: string): void {
     const span = document.createElement("span");
+    if (className) span.className = className;
     span.setAttribute("aria-hidden", "true");
     span.textContent = text;
     this.line!.append(span);
@@ -117,7 +131,7 @@ export class BilingualOverlay {
     host.style.cssText = "position:absolute;left:5%;right:5%;bottom:12%;z-index:2147483646;pointer-events:none;text-align:center";
     const root = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
-    style.textContent = ":host{font-family:Arial,sans-serif;white-space:normal}.line{display:inline;white-space:normal;box-decoration-break:clone;-webkit-box-decoration-break:clone;padding:.12em .25em;background:rgba(0,0,0,.8);color:white;font-weight:500;line-height:1.3;text-shadow:0 1px 2px #000;overflow-wrap:anywhere}.line:empty{display:none}.gloss{display:inline;white-space:normal;color:#ffe58f;background:none;border:0;padding:0;font:inherit;text-shadow:inherit;cursor:pointer;pointer-events:auto;max-width:100%;overflow-wrap:anywhere}.gloss:focus-visible{outline:2px solid #ffe58f}";
+    style.textContent = ":host{font-family:Arial,sans-serif;white-space:normal}.line{display:inline;white-space:normal;box-decoration-break:clone;-webkit-box-decoration-break:clone;padding:.12em .25em;background:rgba(0,0,0,.8);color:white;font-weight:500;line-height:1.3;text-shadow:0 1px 2px #000;overflow-wrap:anywhere}.line:empty{display:none}.hint-term{border-bottom:.09em solid #ffe58f;padding-bottom:.12em;box-decoration-break:clone;-webkit-box-decoration-break:clone}.gloss{display:inline;white-space:normal;color:#ffe58f;background:none;border:0;padding:0;font:inherit;text-shadow:inherit;cursor:pointer;pointer-events:auto;max-width:100%;overflow-wrap:anywhere}.gloss:focus-visible{outline:2px solid #ffe58f}";
     this.line = document.createElement("span");
     this.line.className = "line";
     root.append(style, this.line);

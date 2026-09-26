@@ -54,7 +54,8 @@ class LexiconEntryTest {
                 List.of(sense),
                 List.of(new LexiconAlias("reliable")),
                 List.of(new LexiconInflection("reliably")),
-                provenance));
+                provenance,
+                LexiconPriority.unranked()));
   }
 
   private static LexiconEntry entry(String lemma, LexiconEntryKind kind) {
@@ -67,6 +68,7 @@ class LexiconEntryTest {
         List.of(new LexiconSense(UUID.randomUUID(), "释义", "定义", "source")),
         List.of(),
         List.of(),
-        new LexiconProvenance("source", "license", "digest", Instant.EPOCH));
+        new LexiconProvenance("source", "license", "digest", Instant.EPOCH),
+        LexiconPriority.unranked());
   }
 }

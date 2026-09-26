@@ -2,9 +2,9 @@ package io.lexiflow.lexicon.application.port;
 
 import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
-import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
-import io.lexiflow.lexicon.application.importing.model.StagedLexiconImport;
-import io.lexiflow.lexicon.domain.model.LexiconEntry;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
+import io.lexiflow.lexicon.domain.model.LexiconHintAction;
+import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.util.Collection;
 import java.util.List;
 
@@ -18,22 +18,23 @@ public interface LexiconRepository {
   long publishedVersion();
 
   /**
-   * 按指定版本和已规范化表面查询完整词条聚合。
+   * 对一组规范化词形仅从观看查询投影批量读取最终提示或阻断决定。
    *
    * @param version 含义：已发布词库版本。取值范围：由方法调用前置条件限定。
    * @param forms 含义：已规范化、待查的表面集合。取值范围：由方法调用前置条件限定。
-   * @return 匹配表面的完整词条聚合
+   * @return 每个匹配词形的完整候选集合，包括阻断和歧义行。
    */
-  List<LexiconEntry> findByForms(long version, Collection<String> forms);
+  List<LexiconHintCandidate> findByForms(long version, Collection<String> forms);
 
   /**
-   * 返回指定版本内可预热的完整词条聚合。
+   * 返回指定版本内按动作选出的可预热词形及其完整歧义集合。
    *
    * @param version 含义：已发布词库版本。取值范围：由方法调用前置条件限定。
-   * @param limit 含义：返回候选的上限。取值范围：由方法调用前置条件限定。
-   * @return 按预热优先级排序的完整词条聚合
+   * @param action 含义：正向提示或负向阻断。取值范围：非空。
+   * @param limit 含义：预热词形的上限。取值范围：非负整数。
+   * @return 按预热优先级排序且不丢失同形歧义的词形集合。
    */
-  List<LexiconEntry> findPrewarmCandidates(long version, int limit);
+  List<LexiconHintCandidate> findPrewarmForms(long version, LexiconHintAction action, int limit);
 
   /**
    * 原子地持久化并发布一个规范词库版本。
@@ -44,32 +45,17 @@ public interface LexiconRepository {
   long publish(LexiconImportRequest request);
 
   /**
-   * 创建或取得可恢复的 StarDict staged 批次。
+   * 将已预检来源在单个事务中批量写入并完整切换；不保存中间状态。
    *
-   * @param metadata 含义：来源的可审计元数据。取值范围：由方法调用前置条件限定。
-   * @return 当前来源对应的 staged 批次
+   * @param metadata 含义：来源、许可证、摘要和取得时间。取值范围：非 null，摘要与来源已核对。
+   * @param sourceRowsTotal 含义：前置扫描得到的原始来源行数。取值范围：大于等于可导入词条数的正整数。
+   * @param expectedEntries 含义：前置扫描得到的可导入词条数。取值范围：大于零且不超过来源行数。
+   * @param source 含义：在事务内重读来源的有界内存行提供者。取值范围：非 null，不得静默丢弃已解析记录。
+   * @return 完整发布的新版本。
    */
-  StagedLexiconImport openOrResume(LexiconImportMetadata metadata);
-
-  /**
-   * 写入 staged 批次的一个连续、已验证分块。
-   *
-   * @param batch 含义：要续接的 staged 批次。取值范围：由方法调用前置条件限定。
-   * @param rows 含义：本次已验证的来源行。取值范围：由方法调用前置条件限定。
-   * @param processedThrough 含义：本次写入后的来源行边界。取值范围：由方法调用前置条件限定。
-   * @param metadata 含义：来源的可审计元数据。取值范围：由方法调用前置条件限定。
-   */
-  void stage(
-      StagedLexiconImport batch,
-      List<LexiconImportRow> rows,
-      long processedThrough,
-      LexiconImportMetadata metadata);
-
-  /**
-   * 在完整来源已写入后原子切换 staged 批次。
-   *
-   * @param batch 含义：要发布的 staged 批次。取值范围：由方法调用前置条件限定。
-   * @param sourceRowsTotal 含义：已扫描的全部来源行数。取值范围：由方法调用前置条件限定。
-   */
-  void publish(StagedLexiconImport batch, long sourceRowsTotal);
+  long publishStreaming(
+      LexiconImportMetadata metadata,
+      long sourceRowsTotal,
+      long expectedEntries,
+      LexiconImportRowSource source);
 }

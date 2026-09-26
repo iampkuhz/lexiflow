@@ -4,7 +4,6 @@ import com.zaxxer.hikari.HikariDataSource;
 import io.lexiflow.lexicon.application.port.LexiconRepository;
 import javax.sql.DataSource;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -25,15 +24,9 @@ public final class PostgresPersistence implements AutoCloseable {
    * @return 仅暴露应用层合同的词库 Repository
    */
   public static LexiconRepository repository(DataSource dataSource) {
-    var jdbc = JdbcClient.create(dataSource);
     var batchJdbc = new JdbcTemplate(dataSource);
     var transaction = new TransactionTemplate(new DataSourceTransactionManager(dataSource));
-    return new DefaultLexiconRepository(
-        new PostgresLexiconEntryDao(jdbc, batchJdbc),
-        new PostgresLexiconImportBatchDao(jdbc),
-        new PostgresLexiconEvidenceDao(batchJdbc),
-        new LexiconEntryMapper(),
-        transaction);
+    return new DefaultLexiconRepository(batchJdbc, transaction);
   }
 
   /**
@@ -45,6 +38,8 @@ public final class PostgresPersistence implements AutoCloseable {
   public static PostgresPersistence open(String jdbcUrl) {
     var dataSource = new HikariDataSource();
     dataSource.setJdbcUrl(jdbcUrl);
+    // 离线导入按事务成批写入；让 pgJDBC 合并同形 INSERT，避免逐行网络往返。
+    dataSource.addDataSourceProperty("reWriteBatchedInserts", "true");
     return new PostgresPersistence(dataSource, repository(dataSource));
   }
 

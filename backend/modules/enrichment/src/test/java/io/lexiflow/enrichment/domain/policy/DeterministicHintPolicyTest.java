@@ -1,19 +1,13 @@
 package io.lexiflow.enrichment.domain.policy;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.lexiflow.enrichment.domain.model.CaptionContext;
-import io.lexiflow.enrichment.domain.model.CaptionHintResult;
 import io.lexiflow.enrichment.domain.model.HintState;
-import io.lexiflow.lexicon.domain.model.LexiconAlias;
-import io.lexiflow.lexicon.domain.model.LexiconEntry;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
-import io.lexiflow.lexicon.domain.model.LexiconInflection;
-import io.lexiflow.lexicon.domain.model.LexiconProvenance;
-import io.lexiflow.lexicon.domain.model.LexiconSense;
+import io.lexiflow.lexicon.domain.model.LexiconHintAction;
+import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -22,283 +16,142 @@ class DeterministicHintPolicyTest {
   private static final String DIGEST = "a".repeat(64);
   private final DeterministicHintPolicy policy = new DeterministicHintPolicy();
 
-  private static LexiconEntry marked(
-      LexiconEntry entry, io.lexiflow.lexicon.domain.model.LexiconHintEligibility status) {
-    return new LexiconEntry(
-        entry.entryId(),
-        entry.lexiconVersion(),
-        entry.languageTag(),
-        entry.entryKind(),
-        entry.lemma(),
-        entry.senses(),
-        entry.aliases(),
-        entry.inflections(),
-        entry.provenance(),
-        entry.priority(),
-        status);
-  }
-
   @Test
-  void refusesUnprocessedMaterialsAndRetainsAmbiguityFromExcludedCandidates() {
-    assertEquals(
-        HintState.NO_PENDING,
-        evaluate(
-                "hexagon",
-                marked(
-                    entry("hexagon", "六边形"),
-                    io.lexiflow.lexicon.domain.model.LexiconHintEligibility.UNPROCESSED))
-            .state());
-    var basic =
-        marked(
-            entry("ring", "戒指", List.of("circle"), List.of()),
-            io.lexiflow.lexicon.domain.model.LexiconHintEligibility.BASIC_VOCABULARY);
-    assertEquals(
-        HintState.NO_PENDING, evaluate("circle", List.of(basic, entry("circle", "圆圈"))).state());
-  }
-
-  @Test
-  void consumesPreparedGlossWithoutDoingRuntimeDeduplication() {
-    assertEquals(
-        HintState.NO_PENDING, evaluate("hexagon", entry("hexagon", "六边形；[数] 六边形")).state());
-    var material = entry("hexagon", "六边形");
-    var result = evaluate("A hexagon", material);
+  void displaysOnlySafeHintUsingProvidedGlossAndSense() {
+    var good = candidate("reliable", "可靠的");
+    var result = evaluate("A reliable result", List.of(good));
     assertEquals(HintState.READY, result.state());
-    assertEquals(
-        material.senses().getFirst().senseId().toString(), result.hints().getFirst().senseId());
-  }
-
-  @Test
-  void duplicateExpressionNormalizationNeverChoosesFirstMeaningOrDropsInvalidItems() {
-    for (var gloss :
-        List.of("六边形；六角形", "六边形；", ";六边形", "六边形；[数]", "六边形；[数] 六边形,六角形", "六边形；[<b>] 六边形")) {
-      assertEquals(HintState.NO_PENDING, evaluate("hexagon", entry("hexagon", gloss)).state());
-    }
-    assertEquals(
-        HintState.NO_PENDING,
-        evaluate("hexagon", entry("hexagon", List.of("六边形", "六边形；六边形"))).state());
-  }
-
-  @Test
-  void acceptsOnlyOneShortChineseSenseWithoutUnsafeCharacters() {
-    assertEquals(HintState.READY, evaluate("reliable", entry("reliable", "可靠的")).state());
-
-    for (var unsafe :
-        List.of(
-            "可靠的；可信赖", "reliable", "一".repeat(25), "可靠\u0000", "可靠\u200B", "可靠（结果）", "<b>可靠</b>")) {
-      assertEquals(HintState.NO_PENDING, evaluate("reliable", entry("reliable", unsafe)).state());
-    }
-
-    assertEquals(
-        HintState.NO_PENDING,
-        evaluate("reliable", entry("reliable", List.of("可靠的", "可信赖"))).state());
-  }
-
-  @Test
-  void suppressesFunctionWordsEvenWhenDictionaryHasOneShortGloss() {
-    for (var word :
-        List.of(
-            "the", "THE", "a", "an", "she", "is", "could", "of", "and", "that", "very", "also",
-            "beside", "often")) {
+    assertEquals("可靠的", result.hints().getFirst().chineseGloss());
+    assertEquals(good.senseId().toString(), result.hints().getFirst().senseId());
+    for (var unsafe : List.of("reliable", "一".repeat(25), "可靠\u0000", "可靠（结果）", "<b>可靠</b>")) {
       assertEquals(
           HintState.NO_PENDING,
-          evaluate(
-                  word,
-                  marked(
-                      entry(word.toLowerCase(java.util.Locale.ROOT), "那"),
-                      io.lexiflow.lexicon.domain.model.LexiconHintEligibility.BASIC_VOCABULARY))
-              .state());
+          evaluate("reliable", List.of(candidate("reliable", unsafe))).state());
     }
-    var text = "The reliable method";
+  }
+
+  @Test
+  void blockDoesNotDisplayAndStillMakesSameFormAmbiguous() {
+    var hint = candidate("bank", "银行");
+    var block = block("bank");
+    assertEquals(HintState.NO_PENDING, evaluate("bank", List.of(hint, block)).state());
+    assertEquals(HintState.NO_PENDING, evaluate("bank", List.of(block)).state());
+  }
+
+  @Test
+  void refusesMixedVersionsAndPreservesUtf16RangesAndWordBoundaries() {
     assertEquals(
-        List.of("reliable"),
-        surfaces(
-            text,
-            evaluate(
-                text,
+        HintState.NO_PENDING,
+        evaluate(
+                "reliable",
                 List.of(
-                    marked(
-                        entry("the", "那"),
-                        io.lexiflow.lexicon.domain.model.LexiconHintEligibility.BASIC_VOCABULARY),
-                    entry("reliable", "可靠的")))));
-  }
-
-  @Test
-  void functionWordAliasesAndInflectionsCannotBypassHintEligibility() {
-    assertEquals(
-        HintState.NO_PENDING,
-        evaluate(
-                "the",
-                marked(
-                    entry("demonstrative", "那", List.of("the"), List.of()),
-                    io.lexiflow.lexicon.domain.model.LexiconHintEligibility.BASIC_VOCABULARY))
+                    candidate("reliable", "可靠的"),
+                    candidate("context", "语境", 2, LexiconEntryKind.WORD, 0)))
             .state());
+    var text = "🤖 unreliable reliable_test reliable";
+    var result = evaluate(text, List.of(candidate("reliable", "可靠的")));
+    var hint = result.hints().getFirst();
+    assertEquals(28, hint.startOffset());
+    assertEquals(36, hint.endOffset());
+    assertEquals("reliable", text.substring(hint.startOffset(), hint.endOffset()));
+  }
+
+  @Test
+  void choosesLongestAndHigherValueNonoverlappingMatchesAndLimitsThree() {
+    var text = "very reliable context metaphor literally";
+    var candidates =
+        List.of(
+            phrase("very reliable", "非常可靠"),
+            candidate("reliable", "可靠的"),
+            ranked("context", "语境"),
+            ranked("metaphor", "隐喻"),
+            ranked("literally", "按字面"));
+    var result = evaluate(text, candidates);
+    assertEquals(3, result.hints().size());
     assertEquals(
-        HintState.NO_PENDING,
+        List.of("context", "metaphor", "literally"),
+        result.hints().stream().map(h -> text.substring(h.startOffset(), h.endOffset())).toList());
+  }
+
+  @Test
+  void usesFrozenFinalPriorityForEqualTierMatches() {
+    var low = candidate("context", "语境", 1, LexiconEntryKind.WORD, 4.2);
+    var highBase = candidate("literally", "按字面意思", 1, LexiconEntryKind.WORD, 4.2);
+    var high =
+        new LexiconHintCandidate(
+            highBase.entryId(),
+            highBase.senseId(),
+            highBase.lexiconVersion(),
+            highBase.languageTag(),
+            highBase.normalizedForm(),
+            highBase.canonicalLemma(),
+            highBase.entryKind(),
+            highBase.finalAction(),
+            highBase.finalGloss(),
+            900,
+            highBase.frequencyZipf(),
+            highBase.complexListCount());
+    var result =
         evaluate(
-                "was",
-                marked(
-                    entry("exist", "存在", List.of(), List.of("was")),
-                    io.lexiflow.lexicon.domain.model.LexiconHintEligibility.BASIC_VOCABULARY))
-            .state());
-  }
-
-  @Test
-  void functionWordsInsideReliablePhrasesDoNotSuppressWholePhrase() {
-    var text = "on the contrary";
-    var phrase = entry(text, "相反");
-    assertEquals(List.of(text), surfaces(text, evaluate(text, List.of(entry("the", "那"), phrase))));
-    assertEquals(HintState.READY, evaluate("theory", entry("theory", "理论")).state());
-  }
-
-  @Test
-  void returnsTheOnlyEligibleSenseIdentityInsteadOfAClientDerivedValue() {
-    var entry = entry("reliable", "可靠的");
-    var result = evaluate("reliable", entry);
-
-    assertEquals(sense("可靠的").senseId().toString(), result.hints().getFirst().senseId());
-  }
-
-  @Test
-  void rejectsTheEntireCandidateBatchWhenVersionsDiffer() {
-    var versionOne = entry("reliable", "可靠的", 1);
-    var versionTwo = entry("context", "语境", 2);
-
+            "context metaphor algorithm literally",
+            List.of(
+                low,
+                candidate("metaphor", "隐喻", 1, LexiconEntryKind.WORD, 4.2),
+                candidate("algorithm", "算法", 1, LexiconEntryKind.WORD, 4.2),
+                high));
+    assertEquals(3, result.hints().size());
     assertEquals(
-        HintState.NO_PENDING, evaluate("reliable", List.of(versionOne, versionTwo)).state());
+        List.of("隐喻", "算法", "按字面意思"),
+        result.hints().stream().map(hint -> hint.chineseGloss()).toList());
   }
 
   @Test
-  void rejectsAnAmbiguousSurfaceProvidedByAliasAndInflection() {
-    var aliasEntry = entry("dependable", "可靠的", List.of("reliable"), List.of());
-    var inflectionEntry = entry("rely", "依赖", List.of(), List.of("reliable"));
-
-    assertEquals(
-        HintState.NO_PENDING, evaluate("reliable", List.of(aliasEntry, inflectionEntry)).state());
-  }
-
-  @Test
-  void selectsLongestNonOverlappingRangesOncePerEntryAndLimitsResults() {
-    var reliable = entry("reliable", "可靠的");
-    var phrase = entry("very reliable", "非常可靠");
-    var context = entry("context", "语境");
-    var caption = entry("caption", "字幕");
-    var text = "reliable very reliable context caption reliable";
-
-    var result = evaluate(text, List.of(caption, context, reliable, phrase));
-
-    assertEquals(HintState.READY, result.state());
-    assertEquals(List.of("reliable", "very reliable", "context"), surfaces(text, result));
-  }
-
-  @Test
-  void prefersPhraseOverContainedWordAndKeepsCandidateOrderIrrelevant() {
-    var reliable = entry("reliable", "可靠的");
-    var phrase = entry("very reliable", "非常可靠");
-    var context = entry("context", "语境");
-    var text = "very reliable in context";
-
-    var forward = evaluate(text, List.of(reliable, phrase, context));
-    var reversed = evaluate(text, List.of(context, phrase, reliable));
-
-    assertEquals(List.of("very reliable", "context"), surfaces(text, forward));
-    assertEquals(forward.hints(), reversed.hints());
-  }
-
-  @Test
-  void matchesAliasesAndInflectionsAtTheirActualSurfaceOffsets() {
-    var entry = entry("reliable", "可靠的", List.of("dependable"), List.of("reliably"));
-
-    for (var surface : List.of("dependable", "reliably")) {
-      var text = "It works " + surface + ".";
-      var result = evaluate(text, entry);
-
-      assertEquals(HintState.READY, result.state());
-      assertEquals(surface, surfaces(text, result).getFirst());
+  void rejectsLowInformationPhrases() {
+    for (var form : List.of("the first", "not in", "reference to", "on yesterday", "to be")) {
+      assertEquals(HintState.NO_PENDING, evaluate(form, List.of(phrase(form, "错误短释"))).state());
     }
   }
 
-  @Test
-  void doesNotMatchWordsInsideOtherWordsOrAcrossTheTargetRange() {
-    var result = evaluate("unreliable reliable_test reliable", entry("reliable", "可靠的"));
-
-    assertEquals(List.of("reliable"), surfaces("unreliable reliable_test reliable", result));
-    assertEquals(
-        HintState.NO_PENDING,
-        policy.evaluate(context("reliable", 0, 4), List.of(entry("reliable", "可靠的"))).state());
+  private io.lexiflow.enrichment.domain.model.CaptionHintResult evaluate(
+      String text, List<LexiconHintCandidate> candidates) {
+    return policy.evaluate(
+        new CaptionContext(UUID.randomUUID(), 1, DIGEST, text, 0, text.length()), candidates);
   }
 
-  @Test
-  void preservesUtf16OffsetsAndRejectsTargetRangesThatSplitSurrogatePairs() {
-    var text = "🤖 reliable";
-    var result = evaluate(text, entry("reliable", "可靠的"));
-    var hint = result.hints().getFirst();
-
-    assertEquals(3, hint.startOffset());
-    assertEquals(11, hint.endOffset());
-    assertEquals("reliable", text.substring(hint.startOffset(), hint.endOffset()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new CaptionContext(UUID.randomUUID(), 1, DIGEST, text, 1, text.length()));
+  private static LexiconHintCandidate candidate(String form, String gloss) {
+    return candidate(form, gloss, 1, LexiconEntryKind.WORD, 0);
   }
 
-  private CaptionHintResult evaluate(String text, LexiconEntry entry) {
-    return evaluate(text, List.of(entry));
+  private static LexiconHintCandidate ranked(String form, String gloss) {
+    return candidate(form, gloss, 1, LexiconEntryKind.WORD, 3.5);
   }
 
-  private CaptionHintResult evaluate(String text, List<LexiconEntry> entries) {
-    return policy.evaluate(context(text, 0, text.length()), entries);
+  private static LexiconHintCandidate phrase(String form, String gloss) {
+    return candidate(form, gloss, 1, LexiconEntryKind.PHRASE, 0);
   }
 
-  private static CaptionContext context(String text, int startOffset, int endOffset) {
-    return new CaptionContext(UUID.randomUUID(), 1, DIGEST, text, startOffset, endOffset);
+  private static LexiconHintCandidate candidate(
+      String form, String gloss, long version, LexiconEntryKind kind, double zipf) {
+    var id = UUID.nameUUIDFromBytes((form + version).getBytes(StandardCharsets.UTF_8));
+    var senseId = UUID.nameUUIDFromBytes(gloss.getBytes(StandardCharsets.UTF_8));
+    return new LexiconHintCandidate(
+        id, senseId, version, "en", form, form, kind, LexiconHintAction.HINT, gloss, 500, zipf, 1);
   }
 
-  private static List<String> surfaces(String text, CaptionHintResult result) {
-    return result.hints().stream()
-        .map(hint -> text.substring(hint.startOffset(), hint.endOffset()))
-        .toList();
-  }
-
-  private static LexiconEntry entry(String term, String gloss) {
-    return entry(term, gloss, 1);
-  }
-
-  private static LexiconEntry entry(String term, String gloss, long lexiconVersion) {
-    return entry(term, lexiconVersion, List.of(gloss), List.of(), List.of());
-  }
-
-  private static LexiconEntry entry(String term, List<String> glosses) {
-    return entry(term, 1, glosses, List.of(), List.of());
-  }
-
-  private static LexiconEntry entry(
-      String term, String gloss, List<String> aliases, List<String> inflections) {
-    return entry(term, 1, List.of(gloss), aliases, inflections);
-  }
-
-  private static LexiconEntry entry(
-      String term,
-      long lexiconVersion,
-      List<String> glosses,
-      List<String> aliases,
-      List<String> inflections) {
-    return new LexiconEntry(
-        UUID.nameUUIDFromBytes(term.getBytes(StandardCharsets.UTF_8)),
-        lexiconVersion,
+  private static LexiconHintCandidate block(String form) {
+    var id = UUID.nameUUIDFromBytes(form.getBytes(StandardCharsets.UTF_8));
+    return new LexiconHintCandidate(
+        id,
+        null,
+        1,
         "en",
-        term.contains(" ") ? LexiconEntryKind.PHRASE : LexiconEntryKind.WORD,
-        term,
-        glosses.stream().map(DeterministicHintPolicyTest::sense).toList(),
-        aliases.stream().map(LexiconAlias::new).toList(),
-        inflections.stream().map(LexiconInflection::new).toList(),
-        new LexiconProvenance("synthetic", "MIT", DIGEST, Instant.EPOCH));
-  }
-
-  private static LexiconSense sense(String gloss) {
-    return new LexiconSense(
-        UUID.nameUUIDFromBytes(gloss.getBytes(StandardCharsets.UTF_8)),
-        gloss,
-        "synthetic",
-        "synthetic");
+        form,
+        form,
+        LexiconEntryKind.WORD,
+        LexiconHintAction.BLOCK,
+        null,
+        0,
+        0,
+        0);
   }
 }

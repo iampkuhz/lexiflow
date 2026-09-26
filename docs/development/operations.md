@@ -45,4 +45,4 @@ E1 的 API 端口由扩展构建参数与 host permission 共同绑定，默认 
 
 首次 Python 环境使用 requirements-dev.txt 显式创建本机 venv；之后用该解释器执行仓库命令。Java 始终通过 java_exec 和仓库 Gradle Wrapper。依赖安装、容器创建、skill 链接都属于显式准备，不在 Verify 内自动发生。
 
-准备失败时记录 BLOCKED 并指出具体资源；业务断言失败另记 FAIL。运行日志不包含真实字幕、观看历史、密钥或模型输入输出。下一步进入对应操作，或回到[交付主干](change-delivery.md)。
+准备失败时记录 BLOCKED 并指出具体资源；业务断言失败另记 FAIL。验证日志不纳入真实字幕、观看历史、密钥或模型输入输出；本机 API 的逐请求中英结果日志属于受用户授权的敏感运行数据，不提交仓库。下一步进入对应操作，或回到[交付主干](change-delivery.md)。

@@ -42,7 +42,7 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend lexiconPubli
 
 已有匹配结构的已发布词库，直接进入第 3 步；已有匹配结构但尚未发布，只执行 `lexiconPublish`。日常启动不重复初始化或导入。
 
-**`refusing to initialize a non-empty schema` 表示已有数据，初始化没有执行。** 若同时出现 `hint_eligibility` 缺失，先按[结构检查](docs/development/operations/lexicon-import.md#15-已有开发库结构不匹配时)核对连接；确认本项目开发数据可丢弃后人工重建为空 schema，再执行以上两条命令。不会自动清库，也不要只补一个字段。
+**`refusing to initialize a non-empty schema` 表示已有数据，初始化没有执行。** 若同时出现 `lexicon_hint_lookup` 缺失，先按[结构检查](docs/development/operations/lexicon-import.md#15-已有开发库结构不匹配时)核对连接；确认本项目开发数据可丢弃后人工重建为空 schema，再执行以上两条命令。不会自动清库，也不要只补一个字段。
 
 如果只是想先检查 CSV，可单独执行下面的命令；**它不导入数据，也不代替 `lexiconPublish`**，不是日常启动必经步骤：
 

@@ -1,23 +1,18 @@
 package io.lexiflow.lexicon.domain.catalog;
 
-import io.lexiflow.lexicon.domain.model.LexiconEntry;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
-import io.lexiflow.lexicon.domain.model.LexiconProvenance;
-import io.lexiflow.lexicon.domain.model.LexiconSense;
+import io.lexiflow.lexicon.domain.model.LexiconHintAction;
+import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import io.lexiflow.lexicon.domain.port.LexiconCatalog;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 
-/** 首版内置的有限词汇材料，只提供确定性提示而不代表完整词典。 */
+/** 仅用于自动测试的有限内置材料，不替代产品已发布词库。 */
 public final class BuiltinLexiconCatalog implements LexiconCatalog {
-  private static final LexiconProvenance BUILTIN_PROVENANCE =
-      new LexiconProvenance(
-          "lexiflow-builtins", "LicenseRef-LexiFlow-Internal", "builtin-v1", Instant.EPOCH);
-  private static final List<LexiconEntry> ENTRIES =
+  private static final List<LexiconHintCandidate> ENTRIES =
       List.of(
           entry("figure out", "弄明白；理解"),
           entry("reliable", "可靠的"),
@@ -26,33 +21,37 @@ public final class BuiltinLexiconCatalog implements LexiconCatalog {
           entry("deliver", "交付；传达"));
 
   /**
-   * 返回出现在字幕中的内置候选，优先返回更长词段。
+   * 返回字幕中的测试候选，优先更长的词段。
    *
-   * @param caption 含义：待匹配的英文字幕。取值范围：非空，可为空白字符串。
-   * @return 按词段长度降序排列的内置候选。
+   * @param caption 含义：测试提供的字幕文本。取值范围：非 null，可为空字符串。
+   * @return 固定内置材料中的匹配候选。
    */
   @Override
-  public List<LexiconEntry> candidatesFor(String caption) {
+  public List<LexiconHintCandidate> candidatesFor(String caption) {
     Objects.requireNonNull(caption, "caption");
     var normalized = caption.toLowerCase(Locale.ROOT);
     return ENTRIES.stream()
-        .filter(entry -> normalized.contains(entry.term()))
-        .sorted((left, right) -> Integer.compare(right.term().length(), left.term().length()))
+        .filter(entry -> normalized.contains(entry.normalizedForm()))
+        .sorted(
+            (left, right) ->
+                Integer.compare(right.normalizedForm().length(), left.normalizedForm().length()))
         .toList();
   }
 
-  private static LexiconEntry entry(String lemma, String gloss) {
-    var entryId = stableId("entry:" + lemma);
-    return new LexiconEntry(
-        entryId,
+  private static LexiconHintCandidate entry(String lemma, String gloss) {
+    return new LexiconHintCandidate(
+        stableId("entry:en:" + lemma),
+        stableId("sense:" + lemma),
         1,
         "en",
-        lemma.contains(" ") ? LexiconEntryKind.PHRASE : LexiconEntryKind.WORD,
         lemma,
-        List.of(new LexiconSense(stableId("sense:" + lemma), gloss, lemma, "lexiflow-builtins")),
-        List.of(),
-        List.of(),
-        BUILTIN_PROVENANCE);
+        lemma,
+        lemma.contains(" ") ? LexiconEntryKind.PHRASE : LexiconEntryKind.WORD,
+        LexiconHintAction.HINT,
+        gloss,
+        100,
+        0,
+        0);
   }
 
   private static UUID stableId(String value) {

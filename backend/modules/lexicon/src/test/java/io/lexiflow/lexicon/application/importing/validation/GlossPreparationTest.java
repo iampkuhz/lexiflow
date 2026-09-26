@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.lexiflow.lexicon.application.importing.LexiconImportPlan;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
 import io.lexiflow.lexicon.application.importing.model.SourceReference;
-import io.lexiflow.lexicon.domain.model.LexiconHintEligibility;
 import io.lexiflow.lexicon.domain.model.LexiconPriority;
 import java.time.Instant;
 import java.util.List;
@@ -41,9 +40,6 @@ class GlossPreparationTest {
     assertEquals("平行四边形", normalized.chineseGloss());
     var plan =
         LexiconImportPlan.prepare(List.of(basic, normalized), 1, "a".repeat(64), Instant.EPOCH);
-    assertEquals(
-        LexiconHintEligibility.BASIC_VOCABULARY, plan.getFirst().entry().hintEligibility());
-    assertEquals(LexiconHintEligibility.CANDIDATE, plan.getLast().entry().hintEligibility());
     assertEquals("fixture#1", plan.getLast().entry().senses().getFirst().provenanceReference());
   }
 

@@ -1,4 +1,4 @@
-# 1. 离线词库导入：校验、发布与恢复
+# 1. 离线词库导入：校验与原子发布
 
 > 位置：[工程地图](../overview.md) → [Operations](../operations.md) → 离线词库导入。此流程为本机体验准备已发布资料，不是每次代码交付的必经步骤。
 
@@ -10,8 +10,8 @@
 | --- | --- | --- |
 | I1 准备来源 | 核对路径、首行与摘要 | 来源不明确先停，不猜许可证或自动转换大文件 |
 | I2 离线检查 | validate → basic-report / prewarm-report | 不连接数据库；报告帮助人工确认，不代表已发布 |
-| I3 初始化与发布 | 确认开发库归属，初始化空 schema，再 publish | 写入 STAGED，完整扫描后才变为 PUBLISHED |
-| I4 消费与恢复 | API 查询发布版本；中断按相同来源恢复 | 半成品不可见；来源改变则建立新批次 |
+| I3 初始化与发布 | 确认开发库归属，初始化空 schema，再 publish | 前置完整扫描后，单个事务批写并切换完整资料 |
+| I4 消费与重试 | API 查询发布版本；中断后重新执行发布 | 失败事务回滚，旧完整资料仍可见 |
 
 状态和事务关系见[持久化模型](../../architecture/data-model.md)。需要核对单行转换、字段、频率公式或基础词选择时，再读[记录处理 Reference](lexicon-import/record-processing.md)，不用在操作主干展开所有字段。
 
@@ -59,39 +59,31 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend postgresInit
 python3 -m scripts.environment.java_exec backend/gradlew -p backend lexiconPublish
 ```
 
-可在 JDBC URL 中添加 `reWriteBatchedInserts=true` 让 PostgreSQL JDBC 将批写合并传输；它是可选性能参数，不改变 500 条事务与失败回滚边界。
+离线 JDBC 适配器已启用 `reWriteBatchedInserts=true`；每 500 条组成一批网络写入，但整个发布仍只有一个事务。不要另拼接数据库性能参数。
 
-## 1.4. 中断恢复与完成边界
+## 1.4. 中断重试与完成边界
 
-发布以 500 条为一个已提交的 `STAGED` 分块，词条、义项、词形与来源证据按 JDBC batch 写入；任意已发布版本在整个扫描期间继续可查询。中断后以相同
-输入摘要与来源设置重跑 `lexiconPublish`，导入从最后已提交的来源行继续，新的 canonical 表面会与该批次已提交记录复核。自然屈折形可返回多个 lemma，别名冲突仍拒绝；只有
-完整扫描完成才会切换为 `PUBLISHED`。若来源文件或参数改变，则使用新的发布批次，不复用旧的 `STAGED` 批次。
+`lexiconPublish` 先完整扫描来源并检查跨行 canonical 词形，再核对文件摘要；通过后重读来源，以 500 条为一个 JDBC batch 将准备词条和查询词形写入**同一个事务**。批写不是分块提交。提交前再次核对来源摘要与计数。中断或来源变化使事务回滚，原完整数据集继续可查；重新运行命令会从头预检和重导，不需要恢复数据库里的中间状态。自然屈折形可以指向多个 lemma；canonical 别名冲突拒绝发布。
 
 ## 1.5. 已有开发库结构不匹配时
 
-`column e.hint_eligibility does not exist` 表示当前查询所用的 `lexicon_entry` 缺少字段，可能连接错库，也可能数据库结构不匹配。最新 `infra/postgres/schema.sql` 同时声明 `hint_eligibility` 与 `hint_policy_reference`，API 会读取它们。重新编译、重启 API 或重跑 publish 不会补齐结构；postgresInit 只接受空 schema。
+如果查询出现 `relation "lexicon_hint_lookup" does not exist` 或投影字段缺失，先排查是否连接错库；重新编译、重启 API 或重跑 publish 不会补齐结构。`postgresInit` 只接受空 schema。
 
-先核对启动命令的 JDBC URL。在连接到同一数据库的本地 SQL 客户端执行以下只读查询，不另猜端口或库名：
+先核对启动命令的 JDBC URL。在连接到同一数据库的本地 SQL 客户端执行只读查询：
 
 ```sql
 SELECT current_database(), current_user, current_schema();
-SELECT column_name
-FROM information_schema.columns
+SELECT table_name
+FROM information_schema.tables
 WHERE table_schema = current_schema()
-  AND table_name = 'lexicon_entry'
-  AND column_name IN ('hint_eligibility', 'hint_policy_reference')
-ORDER BY column_name;
+  AND table_name IN ('lexicon_dataset', 'lexicon_prepared_entry', 'lexicon_hint_lookup')
+ORDER BY table_name;
+SELECT lexicon_version, entry_count, lookup_count FROM lexicon_dataset;
 ```
 
-字段查询应返回两行；这仅证明两个字段存在，不代表完整 schema 等价。若完整结构已匹配，再确认发布记录：
+应有三张表；数据集行仅在完整发布后出现。表存在不代表字段、约束与索引均匹配。
 
-```sql
-SELECT lexicon_version, state
-FROM lexicon_import_batch
-WHERE state = 'PUBLISHED';
-```
-
-没有发布记录时完成 publish；结构不匹配时按以下边界处理：
+没有完整数据集时完成 publish；结构不匹配时按以下边界处理：
 
 1. 停止使用该库的本项目 API/worker，确认数据库及 schema 属于本项目，不操作共享库或其他项目。
 2. 确认来源可完整重导；需要保留数据时先备份并核验，不能直接丢弃。

@@ -49,7 +49,7 @@ public class ApiApplication {
               + " configure JDBC_URL and use start_api for normal local use");
       return new BuiltinLexiconCatalog();
     }
-    var catalog = new CachedLexiconQueryService(repository, 4_000, 2_000);
+    var catalog = new CachedLexiconQueryService(repository, 4_000, 2_000, 512);
     var version = repository.publishedVersion();
     LOGGER.info("runtime lexicon=postgres publishedVersion={}", version);
     if (version == 0) {

@@ -4,8 +4,9 @@ import io.lexiflow.enrichment.domain.model.AnnotationHint;
 import io.lexiflow.enrichment.domain.model.CaptionContext;
 import io.lexiflow.enrichment.domain.model.CaptionHintResult;
 import io.lexiflow.enrichment.domain.model.HintState;
-import io.lexiflow.lexicon.domain.model.LexiconEntry;
-import io.lexiflow.lexicon.domain.model.LexiconSense;
+import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
+import io.lexiflow.lexicon.domain.model.LexiconHintAction;
+import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -19,9 +20,20 @@ import java.util.regex.Pattern;
 public final class DeterministicHintPolicy {
   private static final int MAX_HINTS_PER_CAPTION = 3;
   private static final int MAX_GLOSS_CODE_POINTS = 24;
+  private static final Set<String> LOW_INFORMATION_STARTS = Set.of("a", "an", "the", "not");
+  private static final Set<String> INCOMPLETE_ENDS =
+      Set.of("to", "of", "for", "by", "with", "in", "on", "at", "from");
+  private static final Set<String> TIME_ADVERBS = Set.of("today", "yesterday", "tomorrow");
+  private static final Set<String> FUNCTION_ONLY_TOKENS =
+      Set.of(
+          "a", "an", "the", "not", "to", "be", "even", "when", "if", "as", "at", "in", "on", "for",
+          "of", "by", "and", "or", "but");
   private static final Comparator<CandidateMatch> MATCH_PRIORITY =
-      Comparator.comparingInt(CandidateMatch::length)
+      Comparator.comparingInt(CandidateMatch::valueTier)
           .reversed()
+          .thenComparing(Comparator.comparingInt(CandidateMatch::finalPriority).reversed())
+          .thenComparing(Comparator.comparingInt(CandidateMatch::complexListCount).reversed())
+          .thenComparing(Comparator.comparingInt(CandidateMatch::length).reversed())
           .thenComparingInt(CandidateMatch::startOffset)
           .thenComparingInt(CandidateMatch::endOffset)
           .thenComparing(CandidateMatch::entryId)
@@ -36,13 +48,14 @@ public final class DeterministicHintPolicy {
    * @param candidates 含义：Lexicon 提供的版本化候选。取值范围：非空，可为空集合。
    * @return 有提示时为 READY，否则为 NO_PENDING。
    */
-  public CaptionHintResult evaluate(CaptionContext context, List<LexiconEntry> candidates) {
+  public CaptionHintResult evaluate(CaptionContext context, List<LexiconHintCandidate> candidates) {
     Objects.requireNonNull(context, "context");
     Objects.requireNonNull(candidates, "candidates");
     if (candidates.stream().anyMatch(Objects::isNull)) {
       return noHints(context);
     }
-    if (candidates.stream().map(LexiconEntry::lexiconVersion).distinct().limit(2).count() > 1) {
+    if (candidates.stream().map(LexiconHintCandidate::lexiconVersion).distinct().limit(2).count()
+        > 1) {
       return noHints(context);
     }
 
@@ -62,22 +75,17 @@ public final class DeterministicHintPolicy {
     return new CaptionHintResult(context.caption(), HintState.NO_PENDING, List.of());
   }
 
-  private static List<CandidateMatch> locate(CaptionContext context, LexiconEntry candidate) {
+  private static List<CandidateMatch> locate(
+      CaptionContext context, LexiconHintCandidate candidate) {
     var matches = new ArrayList<CandidateMatch>();
-    var surfaces = new ArrayList<String>();
-    surfaces.add(candidate.term());
-    candidate.aliases().forEach(alias -> surfaces.add(alias.normalizedForm()));
-    candidate.inflections().forEach(inflection -> surfaces.add(inflection.normalizedForm()));
-    surfaces.sort(
-        Comparator.comparingInt(String::length)
-            .reversed()
-            .thenComparing(Comparator.naturalOrder()));
-    var qualifiedSense =
-        candidate.hintEligibility()
-                == io.lexiflow.lexicon.domain.model.LexiconHintEligibility.CANDIDATE
-            ? reliableChineseSense(candidate.senses())
-            : null;
-    for (var surface : surfaces) {
+    var eligible =
+        candidate.finalAction() == LexiconHintAction.HINT && !lowInformationPhrase(candidate);
+    var qualified =
+        eligible && reliableChineseGloss(candidate.finalGloss()) ? candidate.finalGloss() : null;
+    var valueTier =
+        candidate.entryKind() == LexiconEntryKind.WORD && candidate.frequencyZipf() > 0 ? 1 : 0;
+    var surface = candidate.normalizedForm();
+    {
       var matcher =
           Pattern.compile(Pattern.quote(surface), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
               .matcher(context.caption())
@@ -89,13 +97,28 @@ public final class DeterministicHintPolicy {
                   matcher.start(),
                   matcher.end(),
                   candidate.entryId().toString(),
-                  qualifiedSense == null ? null : qualifiedSense.senseId(),
+                  qualified == null ? null : candidate.senseId().toString(),
                   candidate.lexiconVersion(),
-                  qualifiedSense == null ? null : qualifiedSense.chineseGloss()));
+                  qualified,
+                  valueTier,
+                  candidate.finalPriority(),
+                  candidate.complexListCount()));
         }
       }
     }
     return matches;
+  }
+
+  /** 排除会把冠词、否定或悬空介词误当完整词组的来源短语。 */
+  private static boolean lowInformationPhrase(LexiconHintCandidate candidate) {
+    if (candidate.entryKind() != LexiconEntryKind.PHRASE) return false;
+    var tokens = candidate.normalizedForm().split(" ");
+    var first = tokens[0];
+    var last = tokens[tokens.length - 1];
+    return LOW_INFORMATION_STARTS.contains(first)
+        || INCOMPLETE_ENDS.contains(last)
+        || java.util.Arrays.stream(tokens).allMatch(FUNCTION_ONLY_TOKENS::contains)
+        || (first.equals("on") && TIME_ADVERBS.contains(last));
   }
 
   private static Set<Range> ambiguousRanges(List<CandidateMatch> matches) {
@@ -148,25 +171,21 @@ public final class DeterministicHintPolicy {
     return left.startOffset() < right.endOffset() && right.startOffset() < left.endOffset();
   }
 
-  private static QualifiedSense reliableChineseSense(List<LexiconSense> senses) {
-    if (senses.size() != 1) {
-      return null;
-    }
-    var gloss = senses.getFirst().chineseGloss();
+  private static boolean reliableChineseGloss(String gloss) {
     var codePointCount = gloss.codePointCount(0, gloss.length());
     if (codePointCount < 1 || codePointCount > MAX_GLOSS_CODE_POINTS) {
-      return null;
+      return false;
     }
     var containsHan = false;
     for (var offset = 0; offset < gloss.length(); ) {
       var codePoint = gloss.codePointAt(offset);
       if (!isAllowedGlossCodePoint(codePoint)) {
-        return null;
+        return false;
       }
       containsHan |= Character.UnicodeScript.of(codePoint) == Character.UnicodeScript.HAN;
       offset += Character.charCount(codePoint);
     }
-    return containsHan ? new QualifiedSense(senses.getFirst().senseId().toString(), gloss) : null;
+    return containsHan;
   }
 
   private static boolean isAllowedGlossCodePoint(int codePoint) {
@@ -244,6 +263,9 @@ public final class DeterministicHintPolicy {
    * @param senseId 含义：来源义项身份。取值范围：可空，空值表示未通过单义资格校验。
    * @param lexiconVersion 含义：来源发布版本。取值范围：正整数。
    * @param chineseGloss 含义：通过资格校验的中文表达。取值范围：可空，空值表示不可显示。
+   * @param valueTier 有来源排名的非基础单词优先于未排名短语。
+   * @param finalPriority 导入时冻结的非个人化最终提示优先级。
+   * @param complexListCount 独立复杂词表证据数量。
    */
   private record CandidateMatch(
       int startOffset,
@@ -251,7 +273,10 @@ public final class DeterministicHintPolicy {
       String entryId,
       String senseId,
       long lexiconVersion,
-      String chineseGloss) {
+      String chineseGloss,
+      int valueTier,
+      int finalPriority,
+      int complexListCount) {
 
     private int length() {
       return endOffset - startOffset;
@@ -261,12 +286,4 @@ public final class DeterministicHintPolicy {
       return senseId != null && chineseGloss != null;
     }
   }
-
-  /**
-   * 可安全展示的唯一义项，与词条候选的可靠中文释义一起传递。
-   *
-   * @param senseId 含义：义项稳定身份。取值范围：非空 canonical UUID 字符串。
-   * @param chineseGloss 含义：已通过资格校验的中文表达。取值范围：非空。
-   */
-  private record QualifiedSense(String senseId, String chineseGloss) {}
 }
