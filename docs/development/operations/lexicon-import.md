@@ -43,7 +43,7 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend lexiconPrewa
 
 ## 1.3. 准备数据库并发布
 
-确认来源校验通过，并准备好可连接的本项目 PostgreSQL 开发库。运行前先按[根 README](../../../README.md#本地启动)完成本地编译、连接配置与来源路径设置。本节不创建或启动数据库服务。`JDBC_URL` 与 `STARDICT_CSV` 只配置一次，不再拼接参数。`lexiconPublish` 固定记录已确认来源 `ecdict-stardict` 与许可证 `MIT`，不要把其他来源冒充此来源。
+确认来源校验通过，并准备好可连接的本项目 PostgreSQL 开发库。运行前先按[根 README](../../../README.md#本地启动)完成连接配置与来源路径设置。本节不创建或启动数据库服务。`JDBC_URL` 与 `STARDICT_CSV` 只配置一次，不再拼接参数。`lexiconPublish` 固定记录已确认来源 `ecdict-stardict` 与许可证 `MIT`，不要把其他来源冒充此来源。
 
 已有表时先做[结构检查](#15-已有开发库结构不匹配时)，不要直接重跑初始化。
 
