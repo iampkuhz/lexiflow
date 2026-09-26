@@ -27,13 +27,12 @@ abstract class VerifyProjectDependenciesTask : DefaultTask() {
         val graph = dependencyGraph.get()
         // Gradle 项目代表领域或运行边界；同模块 domain/application 方向由 ArchUnit 检查。
         val modules = setOf(":modules:lexicon", ":modules:enrichment")
-        val products = modules + setOf(":platform:adapters", ":apps:api", ":apps:worker")
+        val products = modules + setOf(":platform:adapters", ":apps:api")
         val allowed = mapOf(
             ":modules:lexicon" to emptySet(),
             ":modules:enrichment" to setOf(":modules:lexicon"),
             ":platform:adapters" to setOf(":modules:lexicon"),
             ":apps:api" to (modules + ":platform:adapters"),
-            ":apps:worker" to emptySet(),
             ":tests:architecture" to products,
             ":tests:quality-gates" to emptySet(),
             ":tests:integration" to setOf(":platform:adapters"),

@@ -27,15 +27,12 @@ import org.junit.jupiter.api.Test;
 class SystemRuntimeSmokeTest {
   private static final Duration START_TIMEOUT = Duration.ofSeconds(45);
   private Process api;
-  private Process worker;
   private Path apiLog;
-  private Path workerLog;
   private String jdbcUrl;
   private String schema;
 
   @AfterEach
   void cleanUp() throws Exception {
-    stop(worker);
     stop(api);
     if (jdbcUrl != null && schema != null) {
       try (var connection = DriverManager.getConnection(jdbcUrl);
@@ -44,11 +41,10 @@ class SystemRuntimeSmokeTest {
       }
     }
     if (apiLog != null) Files.deleteIfExists(apiLog);
-    if (workerLog != null) Files.deleteIfExists(workerLog);
   }
 
   @Test
-  void verifiesDependencyProtocolsMigrationApiHealthAndWorkerStartup() throws Exception {
+  void verifiesDependencyProtocolsSchemaInitializationAndApiHealth() throws Exception {
     jdbcUrl = requiredProperty("lexiflow.postgres.test.jdbcUrl");
     var redis = endpoint(requiredProperty("lexiflow.redis.test.endpoint"));
     assertRedisPong(redis);
@@ -65,7 +61,6 @@ class SystemRuntimeSmokeTest {
     var repository = Path.of(requiredProperty("lexiflow.repository.root"));
     var java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
     var apiJar = bootJar(repository, "api");
-    var workerJar = bootJar(repository, "worker");
     var port = freePort();
     apiLog = Files.createTempFile("lexiflow-api-runtime-smoke-", ".log");
     api =
@@ -80,15 +75,6 @@ class SystemRuntimeSmokeTest {
             .redirectOutput(apiLog.toFile())
             .start();
     awaitApiHealth(port, apiLog);
-
-    workerLog = Files.createTempFile("lexiflow-worker-runtime-smoke-", ".log");
-    worker =
-        new ProcessBuilder(java, "-jar", workerJar.toString())
-            .directory(repository.toFile())
-            .redirectErrorStream(true)
-            .redirectOutput(workerLog.toFile())
-            .start();
-    awaitWorkerStartup(worker, workerLog);
   }
 
   private static String requiredProperty(String name) {
@@ -157,21 +143,6 @@ class SystemRuntimeSmokeTest {
       }
     }
     throw startupFailure("API", log);
-  }
-
-  private void awaitWorkerStartup(Process process, Path log) throws Exception {
-    var deadline = Instant.now().plus(Duration.ofSeconds(5));
-    while (Instant.now().isBefore(deadline)) {
-      if (Files.exists(log) && Files.readString(log).contains("Started WorkerApplication")) return;
-      if (!process.isAlive()) {
-        Thread.sleep(200);
-        if (Files.exists(log) && Files.readString(log).contains("Started WorkerApplication"))
-          return;
-        throw startupFailure("worker", log);
-      }
-      Thread.sleep(200);
-    }
-    throw startupFailure("worker", log);
   }
 
   private static IllegalStateException startupFailure(String name, Path log) throws IOException {

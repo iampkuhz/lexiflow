@@ -1,4 +1,4 @@
-# Domain ownership 与依赖方向；不是部署拓扑，也不按 api/worker 划分业务服务。
+# Domain ownership 与依赖方向；不是部署拓扑，也不按运行方式划分业务服务。
 schemaVersion: 1
 dependency_rules:
 - "Composition Root 可依赖 Application Use Case 与 Platform Infrastructure。"
@@ -80,17 +80,12 @@ infrastructure_modules:
     may_depend_on:
     - lexicon
 
-# Composition Root 负责组装；api/worker 分进程不改变领域边界。
+# 唯一 Composition Root 负责 HTTP 与未来后台任务的装配。
 composition_roots:
   api:
     includes:
     - application-use-cases
     - inbound-http
-    - platform-infrastructure
-  worker:
-    direct_product_dependencies: []
-    note: 尚无后台业务实现，不预先挂载领域或适配器依赖。
-    includes:
     - background-use-cases
     - job-runtime-trigger
     - platform-infrastructure

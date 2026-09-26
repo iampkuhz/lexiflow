@@ -488,10 +488,6 @@ path_ownership:
     proposed_paths:
     - backend/apps/api/**
     - contracts/api/**
-  - scope: backend.worker
-    owner: LF-WS-API
-    proposed_paths:
-    - backend/apps/worker/**
   - scope: backend.build
     owner: LF-WS-OPS
     proposed_paths:

@@ -39,7 +39,7 @@ endlegend
 @enduml
 ```
 
-E1 的 API 端口由扩展构建参数与 host permission 共同绑定，默认 18080；E2 读取 PostgreSQL 已发布资料。Redis/worker 不属于观看最短请求链的必经节点。开发 compose 有持久数据卷，测试不能把它当临时资源使用。
+E1 的 API 端口由扩展构建参数与 host permission 共同绑定，默认 18080；E2 读取 PostgreSQL 已发布资料。Redis 与未来后台任务不属于观看最短请求链的必经节点。开发 compose 有持久数据卷，测试不能把它当临时资源使用。
 
 ## 1.3. 环境准备与验证的边界
 

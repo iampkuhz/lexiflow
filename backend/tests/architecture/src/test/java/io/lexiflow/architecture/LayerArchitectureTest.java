@@ -1,6 +1,7 @@
 package io.lexiflow.architecture;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -27,7 +28,6 @@ import io.lexiflow.architecture.fixtures.enrichment.application.ForbiddenLexicon
 import io.lexiflow.architecture.fixtures.enrichment.application.ForbiddenLexiconImplementation;
 import io.lexiflow.architecture.fixtures.lexicon.domain.ForbiddenEnrichmentDependency;
 import io.lexiflow.architecture.fixtures.platform.PlatformAdapter;
-import io.lexiflow.worker.WorkerApplication;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 /** 验证产品编译类的模块边界，并用隔离 fixture 证明规则确实拒绝反例。 */
 class LayerArchitectureTest {
@@ -44,10 +45,9 @@ class LayerArchitectureTest {
   private static final JavaClasses PRODUCT_CLASSES = importProductionClasses();
 
   @Test
-  void productionImportIsBoundedAndContainsScaffoldMarkers() {
+  void productionImportIsBoundedAndContainsApplicationRoot() {
     assertFalse(PRODUCT_CLASSES.stream().findAny().isEmpty(), "产品 src/main 编译目录不能为空");
     assertTrue(containsClass(ApiApplication.class));
-    assertTrue(containsClass(WorkerApplication.class));
     assertFalse(
         PRODUCT_CLASSES.stream().anyMatch(javaClass -> javaClass.getName().contains(".fixtures.")));
     System.out.println(
@@ -55,6 +55,17 @@ class LayerArchitectureTest {
             + PRODUCT_CLASSES.size()
             + " domainClasses="
             + PRODUCT_CLASSES.stream().filter(DOMAIN_ONLY).count());
+  }
+
+  @Test
+  void hasExactlyOneSpringBootApplication() {
+    assertEquals(
+        List.of(ApiApplication.class.getName()),
+        PRODUCT_CLASSES.stream()
+            .filter(javaClass -> javaClass.isAnnotatedWith(SpringBootApplication.class))
+            .map(JavaClass::getName)
+            .sorted()
+            .toList());
   }
 
   @Test
@@ -119,8 +130,7 @@ class LayerArchitectureTest {
   void modelsAndApplicationDoNotLeakPersistenceDoOrDaoTypes() {
     noClasses()
         .that()
-        .resideInAnyPackage(
-            "..domain..", "..application..", "io.lexiflow.api..", "io.lexiflow.worker..")
+        .resideInAnyPackage("..domain..", "..application..", "io.lexiflow.api..")
         .should()
         .dependOnClassesThat()
         .haveSimpleNameEndingWith("DO")
@@ -318,7 +328,7 @@ class LayerArchitectureTest {
         .should()
         .dependOnClassesThat()
         .resideInAnyPackage(
-            "..platform..", "..adapter..", "..adapters..", "..provider..", "..api..", "..worker..");
+            "..platform..", "..adapter..", "..adapters..", "..provider..", "..api..");
   }
 
   private static ArchRule externalLibraryRule() {
@@ -354,7 +364,7 @@ class LayerArchitectureTest {
   private static ArchRule springBoundaryRule() {
     return noClasses()
         .that()
-        .resideOutsideOfPackages("io.lexiflow.api..", "io.lexiflow.worker..", "..platform..")
+        .resideOutsideOfPackages("io.lexiflow.api..", "..platform..")
         .should()
         .dependOnClassesThat()
         .resideInAPackage("org.springframework..");
@@ -376,8 +386,7 @@ class LayerArchitectureTest {
 
   private static boolean isCompositionRoot(JavaClass javaClass) {
     var packageName = javaClass.getPackageName();
-    return List.of("io.lexiflow.api", "io.lexiflow.worker").stream()
-        .anyMatch(root -> packageName.equals(root) || packageName.startsWith(root + "."));
+    return packageName.equals("io.lexiflow.api") || packageName.startsWith("io.lexiflow.api.");
   }
 
   private static void checkIfSelectorExists(

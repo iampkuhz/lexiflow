@@ -19,8 +19,7 @@ class VerifyProjectDependenciesTaskTest {
         ":modules:enrichment" to listOf(":modules:lexicon"),
         ":platform:adapters" to listOf(":modules:lexicon"),
         ":apps:api" to listOf(":modules:lexicon", ":modules:enrichment", ":platform:adapters"),
-        ":apps:worker" to emptyList(),
-        ":tests:architecture" to listOf(":modules:lexicon", ":modules:enrichment", ":platform:adapters", ":apps:api", ":apps:worker"),
+        ":tests:architecture" to listOf(":modules:lexicon", ":modules:enrichment", ":platform:adapters", ":apps:api"),
         ":tests:quality-gates" to emptyList(),
         ":tests:integration" to listOf(":platform:adapters"),
     )
@@ -55,13 +54,6 @@ class VerifyProjectDependenciesTaskTest {
     }
 
     @Test
-    fun rejectsUnusedWorkerDependency() {
-        val graph = graph()
-        graph[":apps:worker"] = listOf(":modules:lexicon")
-        assertThrows(GradleException::class.java) { verify(graph) }
-    }
-
-    @Test
     fun rejectsMissingAndUnknownProjects() {
         val missing = graph()
         missing.remove(":modules:lexicon")
@@ -69,5 +61,8 @@ class VerifyProjectDependenciesTaskTest {
         val unknown = graph()
         unknown[":application:workflow"] = emptyList()
         assertThrows(GradleException::class.java) { verify(unknown) }
+        val extraRuntime = graph()
+        extraRuntime[":apps:worker"] = emptyList()
+        assertThrows(GradleException::class.java) { verify(extraRuntime) }
     }
 }

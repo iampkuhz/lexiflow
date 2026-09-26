@@ -26,7 +26,7 @@
 
 ## 3. 模块化单体与所有权
 
-产品后端使用 Java 25。Lexicon 与 Enrichment 分别是业务 Gradle 项目，各自在 `domain` 和 `application` 包内维护领域规则与应用用例。platform adapters 隔离技术实现，api / worker 是组合根，共五个产品项目；测试和构建工具不计入产品项目。Domain 不依赖 HTTP、数据库、缓存或供应商 SDK；跨模块只用公开合同，不跨域读写数据。
+产品后端使用 Java 25。Lexicon 与 Enrichment 分别是业务 Gradle 项目，各自在 `domain` 和 `application` 包内维护领域规则与应用用例。platform adapters 隔离技术实现，`:apps:api` 是唯一 Spring Boot 运行项目和唯一 `@SpringBootApplication`；HTTP 与未来后台任务由同一应用装配，共四个产品项目，测试和构建工具不计入产品项目。Domain 不依赖 HTTP、数据库、缓存或供应商 SDK；跨模块只用公开合同，不跨域读写数据。
 
 业务项目 MUST 按功能及职责组织模型、策略、端口与服务，MUST NOT 按 record 语法统一建目录或机械添加 DTO 后缀。Domain MUST NOT 依赖 Application；model MUST NOT 依赖服务、用例或策略实现。持久化同包私有类型 MUST NOT 为目录拆分扩大可见性。Gradle 只声明实际使用的直接依赖，ArchUnit 验证模块内及跨模块边界。
 

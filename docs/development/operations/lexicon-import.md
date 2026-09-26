@@ -47,7 +47,7 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend lexiconPrewa
 
 已有表时先做[结构检查](#15-已有开发库结构不匹配时)，不要直接重跑初始化。
 
-以下初始化命令只接受空 schema，重复执行会拒绝，不会自动清库。结构变化时先核对本项目数据库及使用它的 API/worker，协调停用后显式清空并重建；不得操作其他项目库。完整导入发布后再启动应用。重建需同步失效对应缓存，并避免资料身份与本机偏好旧引用混淆；本命令块不自动完成重建或缓存处置。
+以下初始化命令只接受空 schema，重复执行会拒绝，不会自动清库。结构变化时先核对本项目数据库及使用它的 API，协调停用后显式清空并重建；不得操作其他项目库。完整导入发布后再启动应用。重建需同步失效对应缓存，并避免资料身份与本机偏好旧引用混淆；本命令块不自动完成重建或缓存处置。
 
 ```bash
 python3 -m scripts.environment.java_exec backend/gradlew -p backend postgresInit
@@ -85,9 +85,9 @@ SELECT lexicon_version, entry_count, lookup_count FROM lexicon_dataset;
 
 没有完整数据集时完成 publish；结构不匹配时按以下边界处理：
 
-1. 停止使用该库的本项目 API/worker，确认数据库及 schema 属于本项目，不操作共享库或其他项目。
+1. 停止使用该库的本项目 API，确认数据库及 schema 属于本项目，不操作共享库或其他项目。
 2. 确认来源可完整重导；需要保留数据时先备份并核验，不能直接丢弃。
 3. **只有人工确认开发数据可丢弃后**，才在数据库管理工具中清空并重建目标 schema；这会删除其对象及依赖，本页不提供自动清库命令。
 4. 回到 **1.3 的 postgresInit → lexiconPublish**，完整重导后再启动 API。不要只补单列，也不要把包含不匹配表结构的备份直接恢复到新 schema。
 
-重建会重新产生资料身份。重新启动本项目 API/worker 以清除进程内缓存；若另有缓存或本机词段抑制偏好，需按其 owner 处理旧身份引用，不自动删除用户数据。用不带旧偏好的浏览器测试 profile 验证新词库，完成后回到[本地体验](local-experience.md#12-初始化本地配置再启动确定性-api)。
+重建会重新产生资料身份。重新启动本项目 API 以清除进程内缓存；若另有缓存或本机词段抑制偏好，需按其 owner 处理旧身份引用，不自动删除用户数据。用不带旧偏好的浏览器测试 profile 验证新词库，完成后回到[本地体验](local-experience.md#12-初始化本地配置再启动确定性-api)。

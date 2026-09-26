@@ -21,7 +21,6 @@ mapOf(
     ":modules:enrichment" to "modules/enrichment",
     ":platform:adapters" to "platform/adapters",
     ":apps:api" to "apps/api",
-    ":apps:worker" to "apps/worker",
     ":tests:architecture" to "tests/architecture",
     ":tests:quality-gates" to "tests/quality-gates",
     ":tests:integration" to "tests/integration",

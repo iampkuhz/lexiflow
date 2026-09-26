@@ -56,4 +56,4 @@ export LEXIFLOW_REDIS_TEST_ENDPOINT='127.0.0.1:<test-port>'
 
 这是形状示例，不是可直接粘贴的资源地址。日常交付建议直接使用 Hook 入口统一完成准备、串行 Verify 与清理。
 
-`deliveryFull` 包含静态检查、JUnit、PostgreSQL 集成、runtime smoke 和 boot JAR；普通 `check` 不代替它。runtime smoke 使用合成输入短暂启动 API/worker 后停止，不证明真实页面、生产部署或容量。更多原生任务见 [Java Reference](../reference/java-checks.md)。
+`deliveryFull` 包含静态检查、JUnit、PostgreSQL 集成、runtime smoke 和 API boot JAR；普通 `check` 不代替它。runtime smoke 使用合成输入短暂启动 API 后停止，不证明真实页面、生产部署或容量。更多原生任务见 [Java Reference](../reference/java-checks.md)。

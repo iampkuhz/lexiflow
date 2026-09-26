@@ -32,7 +32,7 @@ dependencyLocking {
 val businessProjectPaths = listOf(":modules:lexicon", ":modules:enrichment")
 val platformProjectPaths = listOf(":platform:adapters")
 val productProjectPaths = businessProjectPaths + platformProjectPaths
-val appProjectPaths = listOf(":apps:api", ":apps:worker")
+val appProjectPaths = listOf(":apps:api")
 val leafProjects = subprojects.filter { it.childProjects.isEmpty() }
 val junitPlatformLauncher = libs.junit.platform.launcher
 val junitJupiter = libs.junit.jupiter
@@ -179,8 +179,8 @@ project(":tests:integration") {
     }
     tasks.register<Test>("runtimeSmokeTest") {
         group = LifecycleBasePlugin.VERIFICATION_GROUP
-        description = "执行隔离的 PostgreSQL/Redis 协议、schema 初始化、API 健康与 worker 启动 smoke 测试。"
-        dependsOn(":apps:api:bootJar", ":apps:worker:bootJar")
+        description = "执行隔离的 PostgreSQL/Redis 协议、schema 初始化与 API 健康 smoke 测试。"
+        dependsOn(":apps:api:bootJar")
         testClassesDirs = runtimeSmoke.output.classesDirs
         classpath = runtimeSmoke.runtimeClasspath
         useJUnitPlatform()
@@ -283,7 +283,7 @@ tasks.register("qualityFull") {
 
 tasks.register("deliveryFull") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "执行唯一完整 Java 交付聚合：质量检查及两个 boot JAR。"
+    description = "执行唯一完整 Java 交付聚合：质量检查及 API boot JAR。"
     dependsOn("qualityFull", ":platform:adapters:postgresIntegrationTest", ":tests:integration:runtimeSmokeTest", "productBootJar")
 }
 
@@ -299,5 +299,5 @@ tasks.named<DependencyReportTask>("dependencies") {
 
 tasks.register("productBootJar") {
     group = LifecycleBasePlugin.BUILD_GROUP
-    dependsOn(":apps:api:bootJar", ":apps:worker:bootJar")
+    dependsOn(":apps:api:bootJar")
 }

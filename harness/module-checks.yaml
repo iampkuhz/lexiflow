@@ -837,8 +837,6 @@ checks:
   - backend/gradle/build-logic/src
   - backend/apps/api/src
   - backend/apps/api/gradle.lockfile
-  - backend/apps/worker/src
-  - backend/apps/worker/gradle.lockfile
   - backend/modules/enrichment/src
   - backend/modules/enrichment/gradle.lockfile
   - backend/modules/lexicon/src
@@ -906,8 +904,6 @@ checks:
   - backend/gradle/build-logic/src
   - backend/apps/api/src
   - backend/apps/api/gradle.lockfile
-  - backend/apps/worker/src
-  - backend/apps/worker/gradle.lockfile
   - backend/modules/enrichment/src
   - backend/modules/enrichment/gradle.lockfile
   - backend/modules/lexicon/src

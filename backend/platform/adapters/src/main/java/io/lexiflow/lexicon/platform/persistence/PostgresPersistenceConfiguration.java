@@ -9,7 +9,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/** API 与 worker 共用的、显式属性驱动的 PostgreSQL 持久化装配。 */
+/** API 应用使用的、显式属性驱动的 PostgreSQL 持久化装配。 */
 @Configuration(proxyBeanMethods = false)
 public class PostgresPersistenceConfiguration {
   /** 仅在配置 JDBC URL 时创建 Hikari 数据源，使演示运行不依赖数据库。 */

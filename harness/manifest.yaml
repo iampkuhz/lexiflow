@@ -7,7 +7,6 @@ project:
 architecture:
   deployment_units:
   - api
-  - worker
   source_of_truth: postgresql
   rebuildable_state:
   - redis

@@ -27,4 +27,4 @@ policy 改动只从真源开始，显式 write 投影后 check。对格式或注
 
 ## 1.3. 产品与运行配置
 
-API/worker 的 application.yaml、扩展 manifest 与构建参数由相应运行模块拥有。开发容器见[运行与环境](../operations.md)；测试地址必须显式隔离，不从个人配置推断。Secrets、真实字幕、观看历史、模型输入输出和本地运行数据不能进入共享配置。
+API 的 application.yaml、扩展 manifest 与构建参数由相应模块拥有。开发容器见[运行与环境](../operations.md)；测试地址必须显式隔离，不从个人配置推断。Secrets、真实字幕、观看历史、模型输入输出和本地运行数据不能进入共享配置。
