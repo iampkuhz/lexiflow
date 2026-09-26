@@ -19,9 +19,7 @@ backend:
 # 产品源码只允许 Java；Python 范围另列。
 source_policy:
   product_roots:
-  - backend/apps
-  - backend/modules
-  - backend/platform
+  - backend/product
   allowed_product_source_extensions: [.java]
   forbidden_product_source_extensions: [.py, .kt, .scala, .groovy]
 python_scope:

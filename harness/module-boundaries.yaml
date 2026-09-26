@@ -12,7 +12,7 @@ dependency_rules:
 bounded_contexts:
   lexicon:
     display_name: 共享词汇知识
-    gradle_project: ":modules:lexicon"
+    gradle_project: ":lexicon"
     kind: supporting-domain
     owns:
     - terms
@@ -25,7 +25,7 @@ bounded_contexts:
     may_depend_on: []
   enrichment:
     display_name: 通用字幕提示
-    gradle_project: ":modules:enrichment"
+    gradle_project: ":enrichment"
     kind: core-domain
     owns:
     - caption-context

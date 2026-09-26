@@ -12,7 +12,7 @@
 
 ```bash
 python3 -m scripts.environment.java_exec java -version
-python3 -m scripts.environment.java_exec backend/gradlew -p backend :apps:api:classes
+python3 -m scripts.environment.java_exec backend/gradlew -p backend :api:classes
 npm --prefix extension ci
 npm --prefix extension run build
 ```

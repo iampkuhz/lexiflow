@@ -21,8 +21,8 @@ class DeliverySelectionTest(unittest.TestCase):
 
     def test_any_backend_path_requires_native_delivery(self):
         for path in (
-            "backend/modules/new/src/Main.java",
-            "backend/tests/new/Test.java",
+            "backend/product/new/src/Main.java",
+            "backend/verification/new/Test.java",
             "backend/build.gradle.kts",
         ):
             with self.subTest(path=path):

@@ -17,13 +17,13 @@ rootProject.name = "lexiflow-backend"
 includeBuild("gradle/build-logic")
 
 mapOf(
-    ":modules:lexicon" to "modules/lexicon",
-    ":modules:enrichment" to "modules/enrichment",
-    ":platform:adapters" to "platform/adapters",
-    ":apps:api" to "apps/api",
-    ":tests:architecture" to "tests/architecture",
-    ":tests:quality-gates" to "tests/quality-gates",
-    ":tests:integration" to "tests/integration",
+    ":lexicon" to "product/lexicon",
+    ":enrichment" to "product/enrichment",
+    ":adapters" to "product/adapters",
+    ":api" to "product/api",
+    ":architecture-tests" to "verification/architecture",
+    ":quality-gates" to "verification/quality-gates",
+    ":integration-tests" to "verification/integration",
 ).forEach { (path, directory) ->
     include(path)
     project(path).projectDir = file(directory)

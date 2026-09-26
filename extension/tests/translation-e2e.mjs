@@ -29,7 +29,7 @@ function assertApiResources() {
 }
 
 function startApi() {
-  const child = spawn("python3", ["-m", "scripts.environment.java_exec", "backend/gradlew", "-p", "backend", "--no-daemon", ":apps:api:bootRun", `--args=--server.address=127.0.0.1 --server.port=${apiPort} --spring.datasource.url=false`], {
+  const child = spawn("python3", ["-m", "scripts.environment.java_exec", "backend/gradlew", "-p", "backend", "--no-daemon", ":api:bootRun", `--args=--server.address=127.0.0.1 --server.port=${apiPort} --spring.datasource.url=false`], {
     cwd: repositoryRoot,
     env: { ...process.env, SPRING_DATASOURCE_URL: "false" },
     detached: true,

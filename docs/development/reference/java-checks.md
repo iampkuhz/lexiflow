@@ -26,7 +26,7 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend <gradle-task
 | 覆盖报告 | `jacocoRootReport` |
 | 产品语言/项目依赖 | `verifyProductLanguage`、`verifyProjectDependencies` |
 
-定向到模块时使用真实 Gradle project path，例如 `:apps:api:test`。除失败定位外，按交付目标选择完整聚合入口；不要再逐个运行已包含的任务。Repository Verify 的 backend Check 使用 deliveryFull，不能用普通 check 替代。
+定向到模块时使用真实 Gradle project path，例如 `:api:test`。除失败定位外，按交付目标选择完整聚合入口；不要再逐个运行已包含的任务。Repository Verify 的 backend Check 使用 deliveryFull，不能用普通 check 替代。
 
 ## 1.3. 报告与边界
 
@@ -34,6 +34,6 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend <gradle-task
 
 ## 1.4. 从失败回到交付
 
-保留完整 Gradle 输出后，可用 `:apps:api:checkstyleMain`、`:apps:api:test`、`architectureTest` 等真实任务定向定位。启动器会强制执行并禁用构建缓存；不得用 `-x`、`--tests` 或 `--dry-run` 跳过交付要求。修复后重新运行对应完整检查；单项成功不能覆盖原失败记录。
+保留完整 Gradle 输出后，可用 `:api:checkstyleMain`、`:api:test`、`architectureTest` 等真实任务定向定位。启动器会强制执行并禁用构建缓存；不得用 `-x`、`--tests` 或 `--dry-run` 跳过交付要求。修复后重新运行对应完整检查；单项成功不能覆盖原失败记录。
 
 `NO-SOURCE`、`UP-TO-DATE`、`FROM-CACHE` 不是本次对全部源码执行检查的证据。缺隔离 PG/Redis 环境时先去[环境准备](../operations/verification-environment.md)，不把开发库地址填作测试地址。

@@ -15,8 +15,8 @@
 
 ## 架构约束
 
-- 产品后端只用 Java 25；Spring Boot 仅限 `backend/apps/`、`backend/platform/`。Python 限 `scripts/`、`harness/`、Gate、生成器、审计，禁承载产品业务。
-- Modular Monolith；唯一 `:apps:api` 与 `@SpringBootApplication`，统一装配 HTTP 和未来后台任务；不建产品 worker 进程，不按运行方式划分业务。
+- 产品后端只用 Java 25；Spring Boot 仅限 `backend/product/api/`、`backend/product/adapters/`。Python 限 `scripts/`、`harness/`、Gate、生成器、审计，禁承载产品业务。
+- Modular Monolith；唯一 `:api` 与 `@SpringBootApplication`，统一装配 HTTP 和未来后台任务；不建产品 worker 进程，不按运行方式划分业务。
 - 依赖由组合根指向 application，再指向 domain/ports；domain 不依赖 HTTP、数据库、缓存或具体模型 Provider。
 - 模块不得直接读写其他 Domain 拥有的数据；跨模块只通过公开 contract。
 - Chrome Extension 保持薄；仅允许用户显式、本机私有的词段抑制偏好，不上传、不推断熟悉度、无账号或同步。

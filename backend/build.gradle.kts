@@ -29,10 +29,10 @@ dependencyLocking {
     lockMode.set(LockMode.STRICT)
 }
 
-val businessProjectPaths = listOf(":modules:lexicon", ":modules:enrichment")
-val platformProjectPaths = listOf(":platform:adapters")
+val businessProjectPaths = listOf(":lexicon", ":enrichment")
+val platformProjectPaths = listOf(":adapters")
 val productProjectPaths = businessProjectPaths + platformProjectPaths
-val appProjectPaths = listOf(":apps:api")
+val appProjectPaths = listOf(":api")
 val leafProjects = subprojects.filter { it.childProjects.isEmpty() }
 val junitPlatformLauncher = libs.junit.platform.launcher
 val junitJupiter = libs.junit.jupiter
@@ -56,16 +56,16 @@ configure(appProjectPaths.map(::project)) {
     }
 }
 
-project(":modules:enrichment") {
-    dependencies.add("implementation", dependencies.project(":modules:lexicon"))
+project(":enrichment") {
+    dependencies.add("implementation", dependencies.project(":lexicon"))
 }
 
-project(":platform:adapters") {
+project(":adapters") {
     dependencies {
         add("implementation", platform(springBootBom))
         add("implementation", "org.springframework.boot:spring-boot-starter-jdbc")
         add("runtimeOnly", "org.postgresql:postgresql")
-        add("implementation", dependencies.project(":modules:lexicon"))
+        add("implementation", dependencies.project(":lexicon"))
     }
     val platformSourceSets = extensions.getByType<SourceSetContainer>()
     tasks.named<Test>("test") {
@@ -136,7 +136,7 @@ project(":platform:adapters") {
 
 }
 
-project(":apps:api") {
+project(":api") {
     (businessProjectPaths + platformProjectPaths).forEach { path ->
         dependencies.add("implementation", dependencies.project(path))
     }
@@ -145,7 +145,7 @@ project(":apps:api") {
     dependencies.add("runtimeOnly", "org.postgresql:postgresql")
 }
 
-project(":tests:architecture") {
+project(":architecture-tests") {
     dependencies {
         add("testImplementation", junitJupiter)
         add("testImplementation", archunitJunit5)
@@ -162,25 +162,25 @@ project(":tests:architecture") {
     }
 }
 
-project(":tests:quality-gates") {
+project(":quality-gates") {
     dependencies.add("testImplementation", junitJupiter)
 }
 
-project(":tests:integration") {
+project(":integration-tests") {
     val integrationSourceSets = extensions.getByType<SourceSetContainer>()
     val runtimeSmoke = integrationSourceSets.create("runtimeSmoke")
     configurations["runtimeSmokeImplementation"].extendsFrom(configurations["testImplementation"])
     configurations["runtimeSmokeRuntimeOnly"].extendsFrom(configurations["testRuntimeOnly"])
     dependencies {
         add("runtimeSmokeImplementation", junitJupiter)
-        add("runtimeSmokeImplementation", dependencies.project(":platform:adapters"))
+        add("runtimeSmokeImplementation", dependencies.project(":adapters"))
         add("runtimeSmokeRuntimeOnly", "org.postgresql:postgresql")
         add("runtimeSmokeRuntimeOnly", junitPlatformLauncher)
     }
     tasks.register<Test>("runtimeSmokeTest") {
         group = LifecycleBasePlugin.VERIFICATION_GROUP
         description = "执行隔离的 PostgreSQL/Redis 协议、schema 初始化与 API 健康 smoke 测试。"
-        dependsOn(":apps:api:bootJar")
+        dependsOn(":api:bootJar")
         testClassesDirs = runtimeSmoke.output.classesDirs
         classpath = runtimeSmoke.runtimeClasspath
         useJUnitPlatform()
@@ -193,7 +193,7 @@ project(":tests:integration") {
 }
 
 val productSourceFiles = fileTree(rootDir) {
-    include("apps/**", "modules/**", "platform/**")
+    include("product/**")
     exclude {
         val segments = it.relativePath.segments.toList()
         val sourceIndex = segments.indexOf("src")
@@ -225,13 +225,13 @@ val verifyProjectDependencies = tasks.register<VerifyProjectDependenciesTask>("v
 val architectureTest = tasks.register("architectureTest") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
     description = "执行 Java 架构边界测试。"
-    dependsOn(":tests:architecture:test")
+    dependsOn(":architecture-tests:test")
 }
 
 val javaSourceGates = tasks.register("javaSourceGates") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
     description = "执行确定性的 Java Source Gate。"
-    dependsOn(":tests:quality-gates:runJavaSourceGates")
+    dependsOn(":quality-gates:runJavaSourceGates")
 }
 
 val encodedTestEntries = leafProjects.map { leaf ->
@@ -284,7 +284,7 @@ tasks.register("qualityFull") {
 tasks.register("deliveryFull") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
     description = "执行唯一完整 Java 交付聚合：质量检查及 API boot JAR。"
-    dependsOn("qualityFull", ":platform:adapters:postgresIntegrationTest", ":tests:integration:runtimeSmokeTest", "productBootJar")
+    dependsOn("qualityFull", ":adapters:postgresIntegrationTest", ":integration-tests:runtimeSmokeTest", "productBootJar")
 }
 
 tasks.register("spotlessApply") {
@@ -299,5 +299,5 @@ tasks.named<DependencyReportTask>("dependencies") {
 
 tasks.register("productBootJar") {
     group = LifecycleBasePlugin.BUILD_GROUP
-    dependsOn(":apps:api:bootJar")
+    dependsOn(":api:bootJar")
 }

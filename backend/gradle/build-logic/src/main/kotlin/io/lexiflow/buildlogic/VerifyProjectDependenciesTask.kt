@@ -26,16 +26,16 @@ abstract class VerifyProjectDependenciesTask : DefaultTask() {
     fun verify() {
         val graph = dependencyGraph.get()
         // Gradle 项目代表领域或运行边界；同模块 domain/application 方向由 ArchUnit 检查。
-        val modules = setOf(":modules:lexicon", ":modules:enrichment")
-        val products = modules + setOf(":platform:adapters", ":apps:api")
+        val modules = setOf(":lexicon", ":enrichment")
+        val products = modules + setOf(":adapters", ":api")
         val allowed = mapOf(
-            ":modules:lexicon" to emptySet(),
-            ":modules:enrichment" to setOf(":modules:lexicon"),
-            ":platform:adapters" to setOf(":modules:lexicon"),
-            ":apps:api" to (modules + ":platform:adapters"),
-            ":tests:architecture" to products,
-            ":tests:quality-gates" to emptySet(),
-            ":tests:integration" to setOf(":platform:adapters"),
+            ":lexicon" to emptySet(),
+            ":enrichment" to setOf(":lexicon"),
+            ":adapters" to setOf(":lexicon"),
+            ":api" to (modules + ":adapters"),
+            ":architecture-tests" to products,
+            ":quality-gates" to emptySet(),
+            ":integration-tests" to setOf(":adapters"),
         )
         if (graph.keys != allowed.keys) {
             throw GradleException("Project set differs from architecture: missing=${allowed.keys - graph.keys}, unknown=${graph.keys - allowed.keys}")

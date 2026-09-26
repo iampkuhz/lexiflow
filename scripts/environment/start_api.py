@@ -155,7 +155,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             str(root / "backend/gradlew"),
             "-p",
             str(root / "backend"),
-            ":apps:api:bootRun",
+            ":api:bootRun",
             f"--args=--server.address=127.0.0.1 --server.port={port}",
         ]
         os.execvpe(command[0], command, environment)
