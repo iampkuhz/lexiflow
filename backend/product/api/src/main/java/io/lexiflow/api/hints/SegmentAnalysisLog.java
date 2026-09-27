@@ -69,7 +69,11 @@ public final class SegmentAnalysisLog {
     initialized = true;
   }
 
-  /** 默认写入仓库 ignored tmp；显式配置仅供本机选择另一私有路径。 */
+  /**
+   * 默认写入仓库 ignored tmp；显式配置仅供本机选择另一私有路径。
+   *
+   * @return 本机私有分析日志的路径
+   */
   public static Path configuredPath() {
     var configured = System.getenv("LEXIFLOW_SEGMENT_LOG_PATH");
     if (configured != null && !configured.isBlank()) return Path.of(configured);
@@ -83,7 +87,13 @@ public final class SegmentAnalysisLog {
     throw new IllegalStateException("LexiFlow repository root is required for analysis log");
   }
 
-  /** 只记录本次处理覆盖；旧上下文与无新增请求均不写入。 */
+  /**
+   * 只记录本次处理覆盖；旧上下文与无新增请求均不写入。
+   *
+   * @param request 含义：本次增量字幕请求。取值范围：已通过领域校验的非空请求。
+   * @param result 含义：本次处理结果及实际覆盖的字幕键。取值范围：非空处理结果。
+   * @throws IOException 日志初始化、读取或写入失败时抛出
+   */
   public synchronized void record(CaptionIncrementalRequest request, IncrementalHintResult result)
       throws IOException {
     if (result.processedKeys().isEmpty()) return;
@@ -242,6 +252,16 @@ public final class SegmentAnalysisLog {
     }
   }
 
+  /**
+   * 单个字幕片段内已翻译区间及其发布资料身份。
+   *
+   * @param start 区间起始偏移，包含该位置
+   * @param end 区间结束偏移，不包含该位置
+   * @param hintId 跨片段共享的提示标识
+   * @param gloss 已发布的中文短释义
+   * @param lexiconVersion 生成提示所用的词库版本
+   * @param anchor 是否为该提示的展示锚点
+   */
   private record TranslatedRange(
       int start, int end, String hintId, String gloss, long lexiconVersion, boolean anchor) {}
 }
