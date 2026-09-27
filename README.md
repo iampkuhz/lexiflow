@@ -15,14 +15,15 @@ export JDBC_URL='jdbc:postgresql://127.0.0.1:15432/lexiflow?user=postgres'
 export STARDICT_CSV='/absolute/path/stardict.csv'
 ```
 
-首次使用空 schema 时，依次建表并导入、发布词库：
+首次使用空 schema，或需要明确重建本项目词库表时，执行：
 
 ```bash
-python3 -m scripts.environment.java_exec backend/gradlew -p backend postgresInit
-python3 -m scripts.environment.java_exec backend/gradlew -p backend lexiconPublish
+python3 -m scripts.environment.java_exec backend/gradlew -p backend lexiconRebuild
 ```
 
-已有匹配结构且已发布词库的数据库无需重复执行。新终端需重新设置 `JDBC_URL`；命令不会自动读取 `.env`。不要将数据库凭据或词库文件提交到仓库。找不到 Java 25 时，设置 `LEXIFLOW_JAVA_HOME` 为其安装目录。
+该命令先完整校验来源；已有本项目词库表时，显示数据库与 schema，并要求输入精确确认文本后才删除三张表、重建结构、完整导入。它不删除来源文件或其他项目数据；运行前须停用 API、核对目标和备份，完成后处理旧缓存及本机偏好引用。已有匹配结构且已发布词库的数据库无需重复执行。新终端需重新设置 `JDBC_URL`；命令不会自动读取 `.env`。不要将数据库凭据或词库文件提交到仓库。找不到 Java 25 时，设置 `LEXIFLOW_JAVA_HOME` 为其安装目录。
+
+`lexiconRebuild` 是单个 Gradle 任务，内部四个阶段会分别打印开始、完成和内部步骤；长时间执行或等待确认时每 3 分钟打印一次状态与耗时。Gradle 的 `EXECUTING` 百分比不是导入进度；详细解释见[词库导入操作](docs/development/operations/lexicon-import.md#13-准备数据库并发布)。
 
 ### 2. 构建扩展并启动 API
 

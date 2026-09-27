@@ -106,6 +106,22 @@ project(":adapters") {
         args(jdbcUrl, rootProject.projectDir.parentFile.resolve("infra/postgres/schema.sql").absolutePath)
     }
 
+    tasks.register<JavaExec>("lexiconRebuild") {
+        group = "application"
+        description = "预检来源，交互确认后仅重建本项目词库表并完整导入。"
+        classpath = platformSourceSets["main"].runtimeClasspath
+        mainClass.set("io.lexiflow.lexicon.platform.importer.LexiconRebuildMain")
+        workingDir(rootProject.projectDir.parentFile)
+        standardInput = System.`in`
+        val jdbcUrl = providers.environmentVariable("JDBC_URL").getOrElse("")
+        val input = providers.environmentVariable("STARDICT_CSV").getOrElse("")
+        doFirst {
+            if (jdbcUrl.isBlank()) throw GradleException("请先设置 JDBC_URL，指向本项目开发库。")
+            if (input.isBlank()) throw GradleException("请先设置 STARDICT_CSV，指向本机 stardict.csv。")
+        }
+        args(jdbcUrl, rootProject.projectDir.parentFile.resolve("infra/postgres/schema.sql").absolutePath, input)
+    }
+
     // 一个任务只对应一个动作，避免把 validate 误认为已导入；来源路径不经过 shell 拆词。
     mapOf(
         "lexiconValidate" to "validate",

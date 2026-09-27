@@ -1,5 +1,5 @@
 -- LexiFlow 最新完整词库：来源资料、准备结果、观看查询投影共三表。
--- 本文件只用于显式初始化空 schema；结构变化须在隔离环境重建并重导。
+-- 本文件用于显式创建最新结构；重建入口仅删除本项目三张表后在同一事务执行。
 
 CREATE TABLE lexicon_dataset (
     dataset_id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (dataset_id = 1),

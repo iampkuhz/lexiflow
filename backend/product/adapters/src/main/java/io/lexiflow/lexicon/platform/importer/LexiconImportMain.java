@@ -16,6 +16,7 @@ import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.PriorityQueue;
+import java.util.function.Consumer;
 
 /** 离线词库导入命令；只解析本机受控输入并调用应用层导入服务。 */
 public final class LexiconImportMain {
@@ -29,17 +30,23 @@ public final class LexiconImportMain {
    */
   public static void main(String[] args) {
     try {
-      var command = Arguments.parse(args);
-      var digest = sha256(command.input());
-      var stardict = new StardictCsvReader();
-      if (stardict.matches(command.input())) {
-        executeStardict(command, digest, stardict);
-      } else {
-        executeCanonical(command, digest);
-      }
+      execute(args, ignored -> {});
     } catch (Exception exception) {
       System.err.println("FAIL " + exception.getMessage());
       System.exit(1);
+    }
+  }
+
+  // 重建入口传入阶段内进度回调；普通导入命令保持原有输出合同。
+  static void execute(String[] args, Consumer<String> progress) throws Exception {
+    var command = Arguments.parse(args);
+    progress.accept("计算来源 SHA-256");
+    var digest = sha256(command.input());
+    var stardict = new StardictCsvReader();
+    if (stardict.matches(command.input())) {
+      executeStardict(command, digest, stardict, progress);
+    } else {
+      executeCanonical(command, digest);
     }
   }
 
@@ -68,8 +75,10 @@ public final class LexiconImportMain {
     }
   }
 
-  private static void executeStardict(Arguments command, String digest, StardictCsvReader reader)
+  private static void executeStardict(
+      Arguments command, String digest, StardictCsvReader reader, Consumer<String> progress)
       throws IOException {
+    progress.accept("选择基础词");
     var selection = reader.selectBasicVocabulary(command.input());
     if (command.action().equals("basic-report")) {
       var scan = reader.read(command.input(), source -> {}, selection);
@@ -90,6 +99,7 @@ public final class LexiconImportMain {
       return;
     }
     if (command.action().equals("validate")) {
+      progress.accept("完整扫描、词形冲突与领域投影校验");
       var scan = validateStardict(reader, command, digest, selection);
       printStardictScan("PASS", scan, digest);
       return;
@@ -105,14 +115,17 @@ public final class LexiconImportMain {
     }
     var metadata =
         metadata(command, digest, StardictCsvReader.PREPARATION_POLICY + ":" + selection.digest());
+    progress.accept("发布前完整扫描与词形冲突校验");
     var preflight = validateStardict(reader, command, digest, selection);
     if (preflight.importableRows() == 0) {
       throw new IllegalArgumentException("StarDict source contains no importable entries");
     }
+    progress.accept("复核来源 SHA-256");
     if (!digest.equals(sourceDigest(command.input()))) {
       throw new IllegalStateException("source changed during preflight");
     }
     try (var persistence = PostgresPersistence.open(command.databaseUrl())) {
+      progress.accept("事务内第二遍读取、批量写入与发布");
       var version =
           new LexiconImportService(persistence.repository())
               .publishStreaming(
@@ -128,6 +141,7 @@ public final class LexiconImportMain {
                         || !digest.equals(sourceDigest(command.input()))) {
                       throw new IllegalStateException("source changed during publication");
                     }
+                    progress.accept("来源复核完成，等待事务提交");
                   });
       System.out.printf(
           "PASS format=ecdict-stardict published_version=%d source_rows=%d entries=%d source_sha256=%s%n",
