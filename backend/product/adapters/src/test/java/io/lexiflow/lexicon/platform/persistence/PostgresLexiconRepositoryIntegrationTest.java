@@ -1,6 +1,7 @@
 package io.lexiflow.lexicon.platform.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -153,7 +154,7 @@ class PostgresLexiconRepositoryIntegrationTest {
                     jdbcUrl,
                     "SELECT source_gloss FROM lexicon_prepared_entry WHERE lemma='sustainability'"));
             assertEquals(
-                "unsafe_or_ambiguous_gloss",
+                "unsafe_default_candidate",
                 scalar(
                     jdbcUrl,
                     "SELECT exclusion_reason FROM lexicon_prepared_entry WHERE lemma='sustainability'"));
@@ -186,6 +187,142 @@ class PostgresLexiconRepositoryIntegrationTest {
             assertEquals(0, repository.findByForms(1, List.of("context")).size());
           }
         });
+  }
+
+  @Test
+  void publishesFirstCandidateAsPreparedGlossAndPreservesFullSourceGloss() throws Exception {
+    inInitializedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            var multiSense =
+                rowWithSource("bank", "银行", "银行；河岸", List.of("banks"), List.of("banked"));
+            var singleSense = rowWithSource("reliable", "可靠的", "可靠的", List.of(), List.of());
+            repository.publish(
+                new LexiconImportRequest(List.of(multiSense, singleSense), metadata('d')));
+            assertEquals(
+                "银行；河岸",
+                scalar(
+                    jdbcUrl, "SELECT source_gloss FROM lexicon_prepared_entry WHERE lemma='bank'"));
+            assertEquals(
+                "银行",
+                scalar(
+                    jdbcUrl,
+                    "SELECT prepared_gloss FROM lexicon_prepared_entry WHERE lemma='bank'"));
+            assertEquals(
+                "HINT",
+                scalar(
+                    jdbcUrl,
+                    "SELECT final_action FROM lexicon_hint_lookup "
+                        + "WHERE normalized_form='bank' AND form_kind='lemma'"));
+            assertEquals(
+                "银行",
+                scalar(
+                    jdbcUrl,
+                    "SELECT final_gloss FROM lexicon_hint_lookup "
+                        + "WHERE normalized_form='bank' AND form_kind='lemma'"));
+            assertEquals(
+                "银行",
+                scalar(
+                    jdbcUrl,
+                    "SELECT final_gloss FROM lexicon_hint_lookup "
+                        + "WHERE normalized_form='banks' AND form_kind='alias'"));
+            assertEquals(
+                "银行",
+                scalar(
+                    jdbcUrl,
+                    "SELECT final_gloss FROM lexicon_hint_lookup "
+                        + "WHERE normalized_form='banked' AND form_kind='inflection'"));
+            var matches = repository.findByForms(1, List.of("bank", "banks", "banked", "reliable"));
+            assertEquals(4, matches.size());
+            assertTrue(matches.stream().allMatch(m -> m.finalAction() == LexiconHintAction.HINT));
+            assertEquals(
+                "可靠的",
+                scalar(
+                    jdbcUrl,
+                    "SELECT final_gloss FROM lexicon_hint_lookup "
+                        + "WHERE normalized_form='reliable' AND form_kind='lemma'"));
+          }
+        });
+  }
+
+  @Test
+  void blocksInvalidFirstCandidateAndPreservesSourceGloss() throws Exception {
+    inInitializedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            var emptyFirst = rowWithSource("emptyfirst", "", "；银行", List.of(), List.of());
+            repository.publish(new LexiconImportRequest(List.of(emptyFirst), metadata('e')));
+            assertEquals(
+                LexiconHintAction.BLOCK,
+                repository.findByForms(1, List.of("emptyfirst")).getFirst().finalAction());
+            assertEquals(
+                "；银行",
+                scalar(
+                    jdbcUrl,
+                    "SELECT source_gloss FROM lexicon_prepared_entry WHERE lemma='emptyfirst'"));
+            assertEquals(
+                "unsafe_default_candidate",
+                scalar(
+                    jdbcUrl,
+                    "SELECT exclusion_reason FROM lexicon_prepared_entry "
+                        + "WHERE lemma='emptyfirst'"));
+          }
+        });
+  }
+
+  @Test
+  void versionSwitchUpdatesSenseIdentityAndInvalidatesOldVersion() throws Exception {
+    inInitializedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            repository.publish(
+                new LexiconImportRequest(
+                    List.of(row("context", "语境", List.of(), List.of())), metadata('f')));
+            assertEquals(1, repository.publishedVersion());
+            var v1 = repository.findByForms(1, List.of("context")).getFirst();
+            assertEquals("语境", v1.finalGloss());
+            assertEquals(1, v1.lexiconVersion());
+            repository.publish(
+                new LexiconImportRequest(
+                    List.of(row("context", "环境", List.of(), List.of())), metadata('g')));
+            assertEquals(2, repository.publishedVersion());
+            assertEquals(0, repository.findByForms(1, List.of("context")).size());
+            var v2 = repository.findByForms(2, List.of("context")).getFirst();
+            assertEquals("环境", v2.finalGloss());
+            assertEquals(2, v2.lexiconVersion());
+            assertFalse(v1.senseId().equals(v2.senseId()));
+          }
+        });
+  }
+
+  private static LexiconImportRow rowWithSource(
+      String lemma,
+      String chineseGloss,
+      String sourceGloss,
+      List<String> aliases,
+      List<String> inflections) {
+    var source = new SourceReference("fixture", "MIT", "row-" + lemma);
+    return new LexiconImportRow(
+        lemma,
+        chineseGloss,
+        "definition",
+        aliases,
+        inflections,
+        new LexiconPriority(4.2, 1, 900),
+        source,
+        source,
+        List.of(source),
+        true,
+        false,
+        "first-candidate-v3",
+        sourceGloss,
+        null,
+        null,
+        List.of(),
+        false);
   }
 
   private static LexiconImportRow row(

@@ -43,6 +43,41 @@ class GlossPreparationTest {
     assertEquals("fixture#1", plan.getLast().entry().senses().getFirst().provenanceReference());
   }
 
+  @Test
+  void selectsFirstCandidateBySemicolonWithoutSemanticReorder() {
+    assertEquals("银行", GlossPreparation.selectFirstCandidate("银行；河岸"));
+    assertEquals("河岸", GlossPreparation.selectFirstCandidate("河岸；银行"));
+    assertEquals("可靠的", GlossPreparation.selectFirstCandidate("可靠的"));
+    assertEquals("", GlossPreparation.selectFirstCandidate("；银行"));
+    assertEquals("bank", GlossPreparation.selectFirstCandidate("bank；银行"));
+    assertEquals("银行", GlossPreparation.selectFirstCandidate("[金融] 银行；河岸"));
+    assertEquals("可靠的", GlossPreparation.selectFirstCandidate("可靠的；可持续的"));
+    assertEquals("可靠的", GlossPreparation.selectFirstCandidate("可靠的;可持续的"));
+  }
+
+  @Test
+  void selectFirstCandidateDoesNotSplitInsideBrackets() {
+    assertEquals("（银行；河岸）", GlossPreparation.selectFirstCandidate("（银行；河岸）；其他"));
+    assertEquals("【金融；投资】银行", GlossPreparation.selectFirstCandidate("【金融；投资】银行；其他"));
+    assertEquals("银行（机构；类型）", GlossPreparation.selectFirstCandidate("银行（机构；类型）；河岸"));
+  }
+
+  @Test
+  void selectFirstCandidateHandlesSupplementaryPlaneCharacters() {
+    var emoji = "𠮷";
+    assertEquals(emoji, GlossPreparation.selectFirstCandidate(emoji + "；银行"));
+    assertEquals(emoji + "银行", GlossPreparation.selectFirstCandidate(emoji + "银行"));
+  }
+
+  @Test
+  void rejectsMismatchedBracketsAndNeverRepairsAnEmptyFirstCandidate() {
+    for (var value : List.of("[金融）银行；河岸", "银行)；河岸", "银行；（河岸")) {
+      assertEquals("", GlossPreparation.selectFirstCandidate(value));
+    }
+    assertEquals("", GlossPreparation.selectFirstCandidate("[金融]；银行"));
+    assertEquals("银行,河岸", GlossPreparation.selectFirstCandidate("银行,河岸；其他"));
+  }
+
   private static LexiconImportRow row(
       String lemma, String gloss, List<String> aliases, List<String> forms) {
     var ref = new SourceReference("fixture", "MIT", "fixture#1");

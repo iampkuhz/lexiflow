@@ -2,6 +2,7 @@ package io.lexiflow.lexicon.platform.importer;
 
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
 import io.lexiflow.lexicon.application.importing.model.SourceReference;
+import io.lexiflow.lexicon.application.importing.validation.GlossPreparation;
 import io.lexiflow.lexicon.domain.model.LexiconPriority;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -15,6 +16,8 @@ import java.util.Objects;
 
 /** 读取受控的 `lexiflow-lexicon-v1.csv`，并在连接数据库前完成全量语法校验。 */
 final class LexiconCsvReader {
+  static final String PREPARATION_POLICY = "fixed-function-words-first-candidate-v2";
+
   static final List<String> REQUIRED_HEADERS =
       List.of(
           "lemma",
@@ -78,9 +81,11 @@ final class LexiconCsvReader {
   private static LexiconImportRow toRow(List<String> values, Map<String, Integer> header) {
     var frequencyZipf = parseZipf(value(values, header, "frequency_zipf"));
     var complexLists = parseComplexEvidence(value(values, header, "complex_evidence"));
+    var fullGloss = value(values, header, "chinese_gloss");
+    var firstCandidate = GlossPreparation.selectFirstCandidate(fullGloss);
     return new LexiconImportRow(
         value(values, header, "lemma"),
-        value(values, header, "chinese_gloss"),
+        firstCandidate,
         value(values, header, "definition"),
         splitForms(value(values, header, "aliases")),
         splitForms(value(values, header, "inflections")),
@@ -94,7 +99,14 @@ final class LexiconCsvReader {
             value(values, header, "frequency_license_id"),
             value(values, header, "frequency_ref")),
         complexLists,
-        true);
+        true,
+        false,
+        PREPARATION_POLICY,
+        fullGloss,
+        null,
+        null,
+        List.of(),
+        false);
   }
 
   private static String value(List<String> values, Map<String, Integer> header, String name) {

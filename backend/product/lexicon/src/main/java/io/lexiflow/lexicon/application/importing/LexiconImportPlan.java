@@ -117,7 +117,8 @@ public final class LexiconImportPlan {
             List.of(
                 new LexiconSense(
                     stableId("sense:" + lexiconVersion + ":" + row.lemma()),
-                    row.chineseGloss(),
+                    // 空首项仍保留有来源的词条，但不能构造虚假的空义项；发布资格由 row 决定。
+                    row.chineseGloss().isBlank() ? row.sourceGloss() : row.chineseGloss(),
                     row.definition(),
                     row.dictionary().recordReference())),
             row.aliases().stream().map(LexiconAlias::new).toList(),

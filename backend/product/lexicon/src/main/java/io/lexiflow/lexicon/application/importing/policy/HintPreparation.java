@@ -19,7 +19,7 @@ public final class HintPreparation {
   private HintPreparation() {}
 
   /**
-   * 返回不可展示的确定原因；空值表示已有安全单一短释。
+   * 返回不可展示的确定原因；空值表示已有安全默认短释。
    *
    * @param row 含义：已完成来源清洗与基础词选择的导入记录。取值范围：非 null，已完成来源格式校验。
    * @return 固定排除原因，或可显示时的 null。
@@ -28,7 +28,7 @@ public final class HintPreparation {
     Objects.requireNonNull(row, "row");
     if (row.basicVocabulary()) return "basic_vocabulary";
     if (lowInformationPhrase(row.lemma())) return "low_information_phrase";
-    if (!safeGloss(row.chineseGloss())) return "unsafe_or_ambiguous_gloss";
+    if (!safeGloss(row.chineseGloss())) return "unsafe_default_candidate";
     return null;
   }
 

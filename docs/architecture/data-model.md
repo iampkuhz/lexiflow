@@ -60,7 +60,7 @@ endlegend
 
 ## 1.2. 来源证据与最终决定
 
-`source_gloss` 只记录被采用来源的清洗前释义；`source_gloss_ref` 定位来源文件记录。`source_bnc_rank`、`source_frq_rank`、`source_complex_tags`、`source_oxford_basic` 是来源原始证据。导入时计算 `prepared_gloss`、排除原因和优先级，再在查询表冻结 `final_action=HINT|BLOCK`、安全短释、义项身份和独立的缓存优先级。基础词和不能安全形成单一短释的词形保留为 BLOCK，因而可以进入负向缓存，但不显示提示。
+`source_gloss` 只记录被采用来源的清洗前释义；`source_gloss_ref` 定位来源文件记录。`source_bnc_rank`、`source_frq_rank`、`source_complex_tags`、`source_oxford_basic` 是来源原始证据。导入时计算 `prepared_gloss`、排除原因和优先级，再在查询表冻结 `final_action=HINT|BLOCK`、安全短释、义项身份和独立的缓存优先级。多义词投影已按候选顺序确定的默认首义，完整义项留在受控资料；基础词和缺少合法已发布默认短释的词形保留为 BLOCK，因而可以进入负向缓存，但不显示提示。
 
 词条身份由 `(language_tag, lemma)` 确定，不由来源或数据集 ID 决定。`lexicon_version` 只在单例数据集保存并随完整重导递增；查询结果随已发布资料版本绑定，版本变化时缓存失效。本机显式抑制偏好仍同时核对词条身份和版本。
 

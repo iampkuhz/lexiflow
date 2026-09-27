@@ -10,7 +10,7 @@ import java.util.Objects;
  * 已解析且受来源合同约束的一条词库导入记录。
  *
  * @param lemma 含义：词条原形。取值范围：由方法调用前置条件限定。
- * @param chineseGloss 含义：中文释义。取值范围：由方法调用前置条件限定。
+ * @param chineseGloss 含义：默认中文候选；可为空表示首项清理后无内容，发布时阻断展示。
  * @param definition 含义：来源定义。取值范围：由方法调用前置条件限定。
  * @param aliases 含义：同义或别名表面。取值范围：由方法调用前置条件限定。
  * @param inflections 含义：屈折表面。取值范围：由方法调用前置条件限定。
@@ -48,7 +48,9 @@ public record LexiconImportRow(
   /** 构造不可变的导入记录。 */
   public LexiconImportRow {
     lemma = required(lemma, "lemma");
-    chineseGloss = GlossPreparation.normalize(required(chineseGloss, "chineseGloss"));
+    Objects.requireNonNull(chineseGloss, "chineseGloss");
+    sourceGloss = required(Objects.requireNonNullElse(sourceGloss, chineseGloss), "sourceGloss");
+    chineseGloss = GlossPreparation.normalize(chineseGloss.trim());
     definition = Objects.requireNonNullElse(definition, "").trim();
     aliases = List.copyOf(Objects.requireNonNull(aliases, "aliases"));
     inflections = List.copyOf(Objects.requireNonNull(inflections, "inflections"));
@@ -62,7 +64,6 @@ public record LexiconImportRow(
             || aliases.stream().anyMatch(BasicVocabulary::contains)
             || inflections.stream().anyMatch(BasicVocabulary::contains);
     hintPolicyReference = required(hintPolicyReference, "hintPolicyReference");
-    sourceGloss = Objects.requireNonNullElse(sourceGloss, chineseGloss);
     sourceComplexTags = List.copyOf(Objects.requireNonNull(sourceComplexTags, "sourceComplexTags"));
     if (sourceBncRank != null && sourceBncRank < 1)
       throw new IllegalArgumentException("invalid BNC rank");

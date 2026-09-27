@@ -106,6 +106,14 @@ class DeterministicHintPolicyTest {
   }
 
   @Test
+  void displaysFirstCandidateFromMultiSenseSourceWithoutSplittingAtViewTime() {
+    var firstSense = candidate("bank", "银行");
+    var result = evaluate("a bank account", List.of(firstSense));
+    assertEquals(HintState.READY, result.state());
+    assertEquals("银行", result.hints().getFirst().chineseGloss());
+  }
+
+  @Test
   void rejectsLowInformationPhrases() {
     for (var form : List.of("the first", "not in", "reference to", "on yesterday", "to be")) {
       assertEquals(HintState.NO_PENDING, evaluate(form, List.of(phrase(form, "错误短释"))).state());

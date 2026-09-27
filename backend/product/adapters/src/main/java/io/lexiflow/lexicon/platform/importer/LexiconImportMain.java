@@ -47,7 +47,7 @@ public final class LexiconImportMain {
     if (command.action().equals("basic-report"))
       throw new IllegalArgumentException("basic-report requires StarDict source evidence");
     var rows = new LexiconCsvReader().read(command.input());
-    var metadata = metadata(command, digest, "fixed-function-words-and-identical-gloss-v1");
+    var metadata = metadata(command, digest, LexiconCsvReader.PREPARATION_POLICY);
     var plan = LexiconImportPlan.prepare(rows, 1, digest, command.acquiredAt());
     if (command.action().equals("validate")) {
       System.out.printf(

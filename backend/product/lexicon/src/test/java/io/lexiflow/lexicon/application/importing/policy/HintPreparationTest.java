@@ -18,7 +18,7 @@ class HintPreparationTest {
       assertEquals("low_information_phrase", HintPreparation.exclusionReason(row(phrase, "错误短释")));
     }
     assertEquals(
-        "unsafe_or_ambiguous_gloss",
+        "unsafe_default_candidate",
         HintPreparation.exclusionReason(row("sustainability", "持续性；可持续性")));
     assertNull(HintPreparation.exclusionReason(row("literally", "按字面意思")));
   }

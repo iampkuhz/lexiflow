@@ -44,6 +44,53 @@ class LexiconCsvReaderTest {
         () -> LexiconImportPlan.prepare(rows, 1, "a".repeat(64), Instant.EPOCH));
   }
 
+  @Test
+  void selectsFirstCandidateFromGenericCsvAndPreservesFullSourceGloss() throws Exception {
+    var file = Files.createTempFile("lexiflow-lexicon-first", ".csv");
+    Files.writeString(
+        file,
+        header()
+            + "\n"
+            + row("bank", "银行；河岸", "4.30", "toefl~CC-BY-4.0~bank")
+            + "\n"
+            + row("reliable", "可靠的", "4.30", "toefl~CC-BY-4.0~reliable"));
+    var rows = new LexiconCsvReader().read(file);
+    assertEquals("银行", rows.get(0).chineseGloss());
+    assertEquals("银行；河岸", rows.get(0).sourceGloss());
+    assertEquals("可靠的", rows.get(1).chineseGloss());
+    assertEquals("可靠的", rows.get(1).sourceGloss());
+  }
+
+  @Test
+  void emptyFirstCandidateStillBuildsABlockedPublicationPlan() throws Exception {
+    var file = Files.createTempFile("lexiflow-empty-first", ".csv");
+    Files.writeString(file, header() + "\n" + row("emptyfirst", "；银行", "4.30", ""));
+    var rows = new LexiconCsvReader().read(file);
+    assertEquals("", rows.getFirst().chineseGloss());
+    assertEquals("；银行", rows.getFirst().sourceGloss());
+    assertEquals(LexiconCsvReader.PREPARATION_POLICY, rows.getFirst().hintPolicyReference());
+    var plan = LexiconImportPlan.prepare(rows, 1, "a".repeat(64), Instant.EPOCH);
+    assertEquals(1, plan.size());
+    assertEquals(
+        "unsafe_default_candidate",
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(
+            rows.getFirst()));
+  }
+
+  @Test
+  void malformedGlossRetainsSourceAndBuildsBlockedPlan() throws Exception {
+    var file = Files.createTempFile("lexiflow-malformed-gloss", ".csv");
+    Files.writeString(file, header() + "\n" + row("malformed", "银行；[残缺", "4.30", ""));
+    var rows = new LexiconCsvReader().read(file);
+    assertEquals("", rows.getFirst().chineseGloss());
+    assertEquals("银行；[残缺", rows.getFirst().sourceGloss());
+    assertEquals(1, LexiconImportPlan.prepare(rows, 1, "a".repeat(64), Instant.EPOCH).size());
+    assertEquals(
+        "unsafe_default_candidate",
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(
+            rows.getFirst()));
+  }
+
   private static String header() {
     return String.join(",", LexiconCsvReader.REQUIRED_HEADERS);
   }

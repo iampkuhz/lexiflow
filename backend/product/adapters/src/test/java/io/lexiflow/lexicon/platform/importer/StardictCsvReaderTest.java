@@ -38,8 +38,10 @@ class StardictCsvReaderTest {
     assertEquals(3, scan.sourceRows());
     assertEquals(2, scan.importableRows());
     assertEquals(1, scan.derivedRows());
+    assertEquals(0, scan.deduplicatedRows());
     var reliable = rows.getFirst().row();
-    assertEquals("可靠的, 可信赖的", reliable.chineseGloss());
+    assertEquals("可靠的", reliable.chineseGloss());
+    assertEquals("可靠的, 可信赖的", reliable.sourceGloss());
     assertEquals("a. worthy of reliance", reliable.definition());
     assertEquals(4.49, reliable.priority().frequencyZipf());
     assertEquals(4, reliable.priority().complexListCount());
@@ -121,6 +123,7 @@ class StardictCsvReaderTest {
     assertEquals(List.of("abilities"), rows.getFirst().row().inflections());
     assertFalse(rows.getLast().row().basicVocabulary());
     assertEquals("平行四边形", rows.getLast().row().chineseGloss());
+    assertTrue(rows.getLast().row().sourceGloss().contains("平行四边形"));
   }
 
   @Test
@@ -146,12 +149,158 @@ class StardictCsvReaderTest {
     assertEquals(9092L, rows.getFirst().row().sourceFrqRank());
     assertTrue(
         rows.stream()
-            .allMatch(value -> value.row().hintPolicyReference().contains("curated-gloss-v2")));
+            .allMatch(value -> value.row().hintPolicyReference().contains("first-candidate-v3")));
 
     Files.writeString(
         file, header() + "\n" + row("sustainability", "n. 绿色", "", "", "17705", "9092", "", ""));
     assertThrows(
         IllegalArgumentException.class, () -> new StardictCsvReader().read(file, ignored -> {}));
+  }
+
+  @Test
+  void selectsFirstCandidateAndPreservesFullSourceGloss() throws Exception {
+    var file = Files.createTempFile("first-candidate", ".csv");
+    Files.writeString(
+        file,
+        header()
+            + "\n"
+            + row("bank", "n. 银行, 河岸", "", "", "100", "200", "", "")
+            + "\n"
+            + row("river", "河岸；银行", "", "", "100", "200", "", "")
+            + "\n"
+            + row("reliable", "可靠的", "", "", "100", "200", "", "")
+            + "\n"
+            + row("noblock", "[金融] 银行；河岸", "", "", "100", "200", "", ""));
+    var rows = new ArrayList<StardictCsvReader.SourceRecord>();
+    new StardictCsvReader().read(file, rows::add);
+    assertEquals("银行", rows.get(0).row().chineseGloss());
+    assertEquals("银行, 河岸", rows.get(0).row().sourceGloss());
+    assertEquals("河岸", rows.get(1).row().chineseGloss());
+    assertEquals("河岸；银行", rows.get(1).row().sourceGloss());
+    assertEquals("可靠的", rows.get(2).row().chineseGloss());
+    assertEquals("银行", rows.get(3).row().chineseGloss());
+    assertEquals("[金融] 银行；河岸", rows.get(3).row().sourceGloss());
+  }
+
+  @Test
+  void doesNotFallbackToSecondCandidateWhenFirstIsInvalid() throws Exception {
+    var file = Files.createTempFile("no-fallback", ".csv");
+    Files.writeString(
+        file,
+        header()
+            + "\n"
+            + row("bank", "bank；银行", "", "", "100", "200", "", "")
+            + "\n"
+            + row("longfirst", "一".repeat(25) + "；短", "", "", "100", "200", "", ""));
+    var rows = new ArrayList<StardictCsvReader.SourceRecord>();
+    new StardictCsvReader().read(file, rows::add);
+    assertEquals("bank", rows.get(0).row().chineseGloss());
+    assertEquals("bank；银行", rows.get(0).row().sourceGloss());
+    var longFirst = rows.get(1).row().chineseGloss();
+    assertTrue(longFirst.length() > 24);
+    assertEquals("一".repeat(25) + "；短", rows.get(1).row().sourceGloss());
+  }
+
+  @Test
+  void preservesEmptyFirstCandidateWithoutFallback() throws Exception {
+    var file = Files.createTempFile("empty-first", ".csv");
+    Files.writeString(
+        file,
+        header()
+            + "\n"
+            + row("emptyfirst", "；银行", "", "", "100", "200", "", "")
+            + "\n"
+            + row("bracketempty", "[金融]；银行", "", "", "100", "200", "", ""));
+    var rows = new ArrayList<StardictCsvReader.SourceRecord>();
+    new StardictCsvReader().read(file, rows::add);
+    assertEquals("", rows.get(0).row().chineseGloss());
+    assertEquals("；银行", rows.get(0).row().sourceGloss());
+    assertEquals("", rows.get(1).row().chineseGloss());
+    assertEquals("[金融]；银行", rows.get(1).row().sourceGloss());
+  }
+
+  @Test
+  void malformedGlossIsBlockedWithoutAbortingTheSource() throws Exception {
+    var file = Files.createTempFile("malformed-gloss", ".csv");
+    var malformed = "[领域]银行；[残缺";
+    Files.writeString(
+        file,
+        header()
+            + "\n"
+            + row("malformed", malformed, "", "", "100", "200", "", "")
+            + "\n"
+            + row("reliable", "可靠的；可信的", "", "", "100", "200", "", ""));
+    var rows = new ArrayList<StardictCsvReader.SourceRecord>();
+    new StardictCsvReader().read(file, rows::add);
+    assertEquals(2, rows.size());
+    assertEquals("", rows.getFirst().row().chineseGloss());
+    assertEquals(malformed, rows.getFirst().row().sourceGloss());
+    assertEquals(
+        "unsafe_default_candidate",
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(
+            rows.getFirst().row()));
+    assertEquals("可靠的", rows.getLast().row().chineseGloss());
+  }
+
+  @Test
+  void parsesStardictCandidatesRespectsBracketsAndDelimiters() {
+    assertEquals(List.of("银行", "河岸"), StardictCsvReader.parseStardictCandidates("银行, 河岸"));
+    assertEquals(List.of("银行", "河岸"), StardictCsvReader.parseStardictCandidates("银行；河岸"));
+    assertEquals(List.of("银行", "河岸"), StardictCsvReader.parseStardictCandidates("[金融] 银行；河岸"));
+    assertEquals(List.of("资料之流"), StardictCsvReader.parseStardictCandidates("[网络] 资料之流"));
+    assertEquals(List.of("银行", "河岸"), StardictCsvReader.parseStardictCandidates("银行；河岸"));
+    assertEquals(List.of("可靠（结果）"), StardictCsvReader.parseStardictCandidates("可靠（结果）"));
+  }
+
+  @Test
+  void preservesEmptyFirstCandidateInParsing() {
+    assertEquals(List.of("", "银行"), StardictCsvReader.parseStardictCandidates("；银行"));
+    assertEquals(List.of("", "银行"), StardictCsvReader.parseStardictCandidates("[金融]；银行"));
+    assertEquals(List.of("", "银行"), StardictCsvReader.parseStardictCandidates("；银行"));
+  }
+
+  @Test
+  void doesNotSplitInsideBrackets() {
+    assertEquals(
+        List.of("银行（机构；类型）", "河岸"), StardictCsvReader.parseStardictCandidates("银行（机构；类型），河岸"));
+    assertEquals(
+        List.of("银行【金融；投资】", "河岸"), StardictCsvReader.parseStardictCandidates("银行【金融；投资】；河岸"));
+  }
+
+  @Test
+  void rejectsMismatchedAndUnclosedBrackets() {
+    assertThrows(
+        IllegalArgumentException.class, () -> StardictCsvReader.parseStardictCandidates("银行（河岸]"));
+    assertThrows(
+        IllegalArgumentException.class, () -> StardictCsvReader.parseStardictCandidates("银行（河岸"));
+    assertThrows(
+        IllegalArgumentException.class, () -> StardictCsvReader.parseStardictCandidates("银行）河岸"));
+    assertThrows(
+        IllegalArgumentException.class, () -> StardictCsvReader.parseStardictCandidates("银行【河岸）"));
+  }
+
+  @Test
+  void handlesSupplementaryPlaneCharactersWithoutCorruption() {
+    var emoji = "𠮷";
+    var result = StardictCsvReader.parseStardictCandidates(emoji + "；银行");
+    assertEquals(List.of(emoji, "银行"), result);
+    assertEquals(emoji, StardictCsvReader.parseFirstStardictCandidate(emoji + "；银行"));
+  }
+
+  @Test
+  void emptyFirstCandidateReachesHintPreparationAsBlocked() throws Exception {
+    var file = Files.createTempFile("empty-to-hint", ".csv");
+    Files.writeString(
+        file, header() + "\n" + row("emptyfirst", "；银行", "", "", "100", "200", "", ""));
+    var rows = new ArrayList<StardictCsvReader.SourceRecord>();
+    new StardictCsvReader().read(file, rows::add);
+    var record = rows.getFirst();
+    assertEquals("", record.row().chineseGloss());
+    assertEquals("；银行", record.row().sourceGloss());
+    var exclusion =
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(
+            record.row());
+    assertEquals("unsafe_default_candidate", exclusion);
   }
 
   private static String header() {

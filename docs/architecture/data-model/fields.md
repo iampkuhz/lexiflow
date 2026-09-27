@@ -31,7 +31,7 @@
 | `source_frq_rank` | `BIGINT` | 有效 FRQ 正排名 | `3504` | 同上 | 不单独建索引 |
 | `source_complex_tags` | `TEXT[]` | 去重的复杂词表标签 | `{cet6,ky,toefl,ielts}` | 来源 tag 过滤并排序 | 不单独建索引 |
 | `source_oxford_basic` | `BOOLEAN` | Oxford 原始标记，不等于最终阻断 | `false` | 来源字段为 `1` 时置真 | 不单独建索引 |
-| `prepared_gloss` | `TEXT` | 经验证可展示的单一中文短释 | `可靠的` | 基础词、短语与释义安全规则完成后写入 | HINT 时非空 |
+| `prepared_gloss` | `TEXT` | 经发布校验可展示的默认中文短释（单义或多义首义） | `可靠的` | 基础词、短语与释义安全规则完成后写入 | HINT 时非空 |
 | `exclusion_reason` | `TEXT` | 无可靠短释时的固定排除原因 | `NULL` | 同一次准备决定；与短释互斥 | BLOCK 时非空 |
 | `prepared_priority` | `INTEGER` | 词频与复杂标签形成的 0～1000 分数 | `930` | 导入时按固定公式计算 | 投影为 `final_priority` |
 | `frequency_zipf` | `NUMERIC(3,2)` | 有效排名换算的 Zipf 值 | `4.49` | 取有效排名较小者再计算 | 投影到查询表 |

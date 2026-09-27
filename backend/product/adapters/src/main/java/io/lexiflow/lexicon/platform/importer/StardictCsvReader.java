@@ -52,7 +52,8 @@ final class StardictCsvReader {
     }
   }
 
-  static final String PREPARATION_POLICY = "oxford-ranked-top2000-fixed-and-curated-gloss-v2";
+  static final String PREPARATION_POLICY =
+      "oxford-ranked-top2000-fixed-and-curated-gloss-first-candidate-v3";
 
   /** 预扫描只保留 2000 个有来源排名的基础 lemma，不把全部词库装入内存。 */
   BasicSelection selectBasicVocabulary(Path input) throws IOException {
@@ -141,16 +142,16 @@ final class StardictCsvReader {
       return Conversion.omit(OmissionReason.UNSUPPORTED_SURFACE);
     }
     var sourceGloss = cleanTranslation(row.get("translation"));
-    var gloss = sourceGloss;
+    if (sourceGloss.isBlank()) {
+      return Conversion.omit(OmissionReason.NO_GLOSS);
+    }
+    var gloss = parseFirstStardictCandidate(sourceGloss);
     var curated = CURATED_GLOSSES.get(word);
     if (curated != null) {
-      if (!gloss.contains(curated.sourceExpression())) {
+      if (!sourceGloss.contains(curated.sourceExpression())) {
         throw new IllegalArgumentException("curated gloss source expression changed for " + word);
       }
       gloss = curated.displayGloss();
-    }
-    if (gloss.isBlank()) {
-      return Conversion.omit(OmissionReason.NO_GLOSS);
     }
     var rank = rank(row.get("bnc"), row.get("frq"));
     var complexTags = complexTags(row.get("tag"));
@@ -179,6 +180,10 @@ final class StardictCsvReader {
                     new SourceReference(
                         "ecdict-tag-" + tag, "MIT", "stardict.csv#" + sourceRow + ":" + word))
             .toList();
+    var deduplicated =
+        !sourceGloss.equals(
+            io.lexiflow.lexicon.application.importing.validation.GlossPreparation.normalize(
+                sourceGloss));
     return Conversion.record(
         new SourceRecord(
             sourceRow,
@@ -202,9 +207,7 @@ final class StardictCsvReader {
                 "1".equals(normalize(row.get("oxford")))),
             "1".equals(normalize(row.get("oxford"))),
             rank,
-            !gloss.equals(
-                io.lexiflow.lexicon.application.importing.validation.GlossPreparation.normalize(
-                    gloss))));
+            deduplicated));
   }
 
   private static Map<String, Integer> indexes(List<String> header) {
@@ -273,6 +276,96 @@ final class StardictCsvReader {
     }
     var selected = ordinary.isEmpty() ? network : ordinary;
     return String.join("；", selected).replaceAll("\\s+", " ").trim();
+  }
+
+  /**
+   * 从已清洗的来源短释中解析首候选；括号外识别 StarDict 列举分隔符。
+   *
+   * <p>分隔符：{@code ； ; ， , 、}；括号 {@code () [] （） 【} 内部不切分。 不按句号、冒号、斜线或任意空白截断。
+   * 括号必须类型配对且平衡；多余闭合、未闭合和错配返回空候选，由准备政策阻断展示。
+   *
+   * <p>首项为空时不补位，保留首项身份。
+   */
+  static String parseFirstStardictCandidate(String cleanedTranslation) {
+    try {
+      return parseStardictCandidates(cleanedTranslation).getFirst();
+    } catch (IllegalArgumentException exception) {
+      // 释义内部结构不可靠只阻断本词条；完整来源仍入库，不猜测或补选。
+      return "";
+    }
+  }
+
+  /**
+   * 将已清洗的来源短释按 StarDict 分隔符切分为有序候选列表。
+   *
+   * <p>使用栈追踪括号配对，支持英文/中文圆括号和方括号。 分隔符仅在括号深度为零时切分。 多余闭合、未闭合和错配抛出异常。 保留首项身份，空首项不丢弃。
+   */
+  static List<String> parseStardictCandidates(String cleanedTranslation) {
+    var points = cleanedTranslation.codePoints().toArray();
+    var splits = splitRespectingBrackets(points);
+    var candidates = new ArrayList<String>();
+    for (var segment : splits) {
+      candidates.add(cleanStarDictCandidate(segment));
+    }
+    return candidates;
+  }
+
+  /**
+   * 在括号深度为零的分隔符处切分，同时校验括号配对。
+   *
+   * @return 切分后的原始片段列表（未清理），至少包含一个元素。
+   */
+  private static List<String> splitRespectingBrackets(int[] points) {
+    var stack = new ArrayList<Integer>();
+    var segments = new ArrayList<String>();
+    var current = new StringBuilder();
+    for (var point : points) {
+      var closer = bracketCloser(point);
+      if (closer != 0) {
+        stack.add(closer);
+        current.appendCodePoint(point);
+      } else if (isBracketCloser(point)) {
+        if (stack.isEmpty() || stack.removeLast() != point) {
+          throw new IllegalArgumentException("mismatched closing bracket in gloss");
+        }
+        current.appendCodePoint(point);
+      } else if (stack.isEmpty() && "；;，,、".indexOf(point) >= 0) {
+        segments.add(current.toString());
+        current.setLength(0);
+      } else {
+        current.appendCodePoint(point);
+      }
+    }
+    if (!stack.isEmpty()) {
+      throw new IllegalArgumentException("unclosed opening bracket in gloss");
+    }
+    segments.add(current.toString());
+    return segments;
+  }
+
+  /** 返回与开括号配对的闭括号 code point；非开括号返回 0。 */
+  private static int bracketCloser(int codePoint) {
+    return switch (codePoint) {
+      case '(' -> ')';
+      case '（' -> '）';
+      case '[' -> ']';
+      case '【' -> '】';
+      default -> 0;
+    };
+  }
+
+  /** 判断是否为闭括号。 */
+  private static boolean isBracketCloser(int codePoint) {
+    return codePoint == ')' || codePoint == '）' || codePoint == ']' || codePoint == '】';
+  }
+
+  /** 去除明确词性前缀与领域括号前缀。 */
+  private static String cleanStarDictCandidate(String raw) {
+    var trimmed =
+        raw.trim()
+            .replaceFirst("^(?:[a-z]{1,6}\\.)\\s*", "")
+            .replaceFirst("^\\[[\\p{IsHan}A-Za-z]{1,12}\\] *", "");
+    return trimmed.trim();
   }
 
   /**
