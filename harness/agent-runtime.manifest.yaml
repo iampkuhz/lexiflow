@@ -1,11 +1,51 @@
 # 客户端运行边界；共享字段由 agent-policy 与 policy-projections 派生。
 # 修改共享规则应改 policy，再运行 policy_projection --write；不要手工双写。
 schemaVersion: 1
+codex_dispatch:
+  max_active_subagents: 1
+  default_fork_turns: none
+  full_history_fork_requires_explicit_exception: true
+  completion_signal_fields:
+  - status
+  - work_package_id
+  - task_ids
+  - run_id
+  - artifact_locators
+  - validation_commands
+  - blocking_findings
+  max_blocking_findings: 3
+  full_context_or_logs_in_callback: false
+  acceptance:
+    default: distinct-native-subagents-in-current-parent
+    independent_host_session_required: false
+    extra_independence_attestation_required: false
+    actor_source: native-thread-and-parent-metadata
+    implementer_must_not_validate_or_review: true
+    reviewer_must_differ_from_validator: true
+  new_session_exception:
+    default: forbidden-for-internal-delegation
+    minimum_passed_subagent_validation_rounds: 2
+    required_evidence:
+    - distinct-validation-rounds-with-current-input-and-PASS-evidence
+    - corresponding-hook-blockers-with-report-locators
+    - targeted-repair-attempts-and-confirmed-current-session-limitation
+    - parent-explanation-and-explicit-user-authorization-to-create-task
+    not_sufficient:
+    - one-identity-or-session-route-error
+    - failed-or-skipped-business-tests
+    - unknown-or-inflight-agent-result
+    - repeated-reading-of-one-PASS-report
+    - unspecified-current-session-limitation
+    cannot_bypass: same-required-tests-hooks-and-frozen-input
+    model_source: subagent_protocol.codex_model_policy
+    explicit_create_thread_model_and_thinking_required: true
+    verify_actual_model_after_start: true
 agent_dispatch:
   primary: qoder
-  fallback_model: gpt-6-sol
-  fallback_reasoning_effort: high
-  model_selection_basis: explicit-user-required-sol-fallback
+  fallback_model: gpt-6-luna
+  fallback_reasoning_effort: medium
+  model_selection_basis: luna-first-unclassified-fallback-escalation-requires-specific-evidence
+  validation_and_review: native-codex-subagents-not-qoder-or-create-thread
   max_consecutive_failures: 3
   failure_unit: qoder-and-terra-both-unavailable-in-one-dispatch-attempt
   success_effect: reset-consecutive-failures-preserve-history
@@ -79,7 +119,7 @@ subagent_protocol:
     routine_model: gpt-6-luna
     routine_reasoning_effort: low
     routing_source: harness/agent-policy.manifest.yaml#subagent_protocol.codex_model_policy
-    applies_to: codex-sub-agent
+    applies_to: codex-delegated-work-including-exception-task
     explicit_model_argument_required: true
     allowed_escalation_models:
     - gpt-6-sol

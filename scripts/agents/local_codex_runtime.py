@@ -1,4 +1,4 @@
-"""本地 session 来源校验；信任本机用户，不冒充平台加密认证。"""
+"""读取原生任务与子代理来源；共享宿主 Session 不妨碍不同子代理分工。"""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ if __package__ in {None, ""}:
 
 from scripts.agents.codex.runtime_binding import CodexRuntimeBinding, CodexRuntimeError
 
-PROOF_SCHEMA = "lexiflow.codex-local-session-proof.v1"
+PROOF_SCHEMA = "lexiflow.codex-local-session-proof.v2"
 ACTOR_PREFIX = "codex-session-"
 MAX_METADATA_BYTES = 1024 * 1024
 
@@ -119,7 +119,7 @@ def _metadata(repo_root: Path, session_id: str) -> tuple[dict[str, Any], str]:
         raise CodexRuntimeError(
             "runtime-source-invalid", "invalid session metadata header"
         ) from None
-    if meta.get("id") != session_id or meta.get("session_id", session_id) != session_id:
+    if meta.get("id") != session_id:
         raise CodexRuntimeError(
             "runtime-identity-drift", "metadata does not match session route"
         )
@@ -128,17 +128,6 @@ def _metadata(repo_root: Path, session_id: str) -> tuple[dict[str, Any], str]:
         raise CodexRuntimeError(
             "runtime-workspace-mismatch", "session belongs to another workspace"
         )
-    # 仅接受 Desktop/CLI 已落盘的独立任务会话。协作子代理仍共享宿主会话，
-    # 不能借此获得 issuer 身份；但由 Codex 创建且拥有不同 session id 的任务
-    # 是可核验的独立会话，和用户直接创建的任务一样可以签发其他 producer 的验收。
-    if meta.get("source") not in ("vscode", "cli", "exec") or meta.get(
-        "thread_source", "user"
-    ) not in ("user", "agent_created_thread"):
-        raise CodexRuntimeError(
-            "runtime-actor-unavailable",
-            "use a distinct user task session; shared/unrecognized actor metadata cannot prove independence",
-            status="BLOCKED",
-        )
     if not isinstance(meta.get("originator"), str) or not meta["originator"]:
         raise CodexRuntimeError(
             "runtime-source-invalid", "session originator is missing"
@@ -146,12 +135,78 @@ def _metadata(repo_root: Path, session_id: str) -> tuple[dict[str, Any], str]:
     return meta, hashlib.sha256(line).hexdigest()
 
 
+def _native_runtime(
+    root: Path, thread_id: str, ancestors: tuple[str, ...] = ()
+) -> tuple[dict[str, str], list[dict[str, str]]]:
+    """按原生父子元数据识别执行者，不把不同 Session 作为验收前置条件。"""
+    thread_id = _session_id(thread_id)
+    if thread_id in ancestors or len(ancestors) >= 8:
+        raise CodexRuntimeError(
+            "runtime-source-invalid", "cyclic or excessive ancestry"
+        )
+    meta, digest = _metadata(root, thread_id)
+    session_id = _session_id(meta.get("session_id", thread_id))
+    source = meta.get("source")
+    kind = meta.get("thread_source", "user")
+    sources = [{"thread_id": thread_id, "metadata_sha256": digest}]
+    if kind == "subagent":
+        spawn = (
+            source.get("subagent", {}).get("thread_spawn")
+            if isinstance(source, dict) and isinstance(source.get("subagent"), dict)
+            else None
+        )
+        if not isinstance(spawn, dict):
+            raise CodexRuntimeError(
+                "runtime-source-invalid", "missing native spawn source"
+            )
+        parent_id = _session_id(meta.get("parent_thread_id"))
+        path = meta.get("agent_path")
+        if (
+            spawn.get("parent_thread_id") != parent_id
+            or not isinstance(path, str)
+            or not path.startswith("/root/")
+            or spawn.get("agent_path") != path
+        ):
+            raise CodexRuntimeError(
+                "runtime-identity-drift", "native parent route differs"
+            )
+        parent, parent_sources = _native_runtime(
+            root, parent_id, (*ancestors, thread_id)
+        )
+        if session_id not in {thread_id, parent["session_id"]}:
+            raise CodexRuntimeError("runtime-route-conflict", "unrelated host session")
+        sources.extend(parent_sources)
+        actor = "codex-thread-" + thread_id
+    elif source in ("vscode", "cli", "exec") and kind in (
+        "user",
+        "agent_created_thread",
+    ):
+        if session_id != thread_id:
+            raise CodexRuntimeError(
+                "runtime-route-conflict", "root session route differs"
+            )
+        parent_id = thread_id
+        actor = ACTOR_PREFIX + thread_id
+    else:
+        raise CodexRuntimeError(
+            "runtime-actor-unavailable",
+            "unsupported native task source",
+            status="BLOCKED",
+        )
+    return {
+        "actor_id": actor,
+        "session_id": session_id,
+        "parent_session_id": parent_id,
+        "client": "codex",
+    }, sources
+
+
 @dataclass(frozen=True)
 class LocalCodexRuntime:
     """保存从真实本机 Codex Session 推导的身份上下文及来源证明。"""
 
     context: dict[str, str]
-    proof: dict[str, str]
+    proof: dict[str, Any]
 
     def bind(self, caller_contract: dict[str, Any], run_id: str) -> CodexRuntimeBinding:
         """把 caller 合同与宿主身份绑定到一个精确 run。"""
@@ -167,7 +222,7 @@ class LocalCodexRuntime:
 
 
 def discover(repo_root: str | Path) -> LocalCodexRuntime:
-    """从本地 Session 元数据验证当前 Codex 身份，不接受调用者自报 actor。"""
+    """从当前原生 thread 推导 actor；环境变量只定位来源，不要求独立 Session。"""
     root = Path(repo_root).resolve()
     thread = os.environ.get("CODEX_THREAD_ID")
     session = os.environ.get("CODEX_SESSION_ID")
@@ -177,31 +232,26 @@ def discover(repo_root: str | Path) -> LocalCodexRuntime:
             "run inside a Codex task in this workspace",
             status="BLOCKED",
         )
-    if thread and session and thread != session:
+    thread_id = _session_id(thread or session)
+    context, sources = _native_runtime(root, thread_id)
+    if session and _session_id(session) != context["session_id"]:
         raise CodexRuntimeError(
             "runtime-route-conflict", "Codex session and thread routes differ"
         )
-    session_id = _session_id(thread or session)
-    _, digest = _metadata(root, session_id)
     return LocalCodexRuntime(
-        context={
-            "actor_id": ACTOR_PREFIX + session_id,
-            "session_id": session_id,
-            "parent_session_id": session_id,
-            "client": "codex",
-        },
+        context=context,
         proof={
             "schema_version": PROOF_SCHEMA,
-            "session_id": session_id,
+            "thread_id": thread_id,
             "workspace": str(root),
-            "metadata_sha256": digest,
+            "sources": sources,
         },
     )
 
 
 def verify_proof(repo_root: str | Path, proof: Any, context: dict[str, Any]) -> None:
     """消费历史证明时重读原 session 来源，不要求它仍是当前 session。"""
-    fields = {"schema_version", "session_id", "workspace", "metadata_sha256"}
+    fields = {"schema_version", "thread_id", "workspace", "sources"}
     if (
         not isinstance(proof, dict)
         or set(proof) != fields
@@ -211,19 +261,12 @@ def verify_proof(repo_root: str | Path, proof: Any, context: dict[str, Any]) -> 
             "runtime-proof-invalid", "local proof fields are invalid"
         )
     root = Path(repo_root).resolve()
-    sid = _session_id(proof["session_id"])
-    _, digest = _metadata(root, sid)
-    if proof["workspace"] != str(root) or proof["metadata_sha256"] != digest:
+    expected, sources = _native_runtime(root, _session_id(proof["thread_id"]))
+    if proof["workspace"] != str(root) or proof["sources"] != sources:
         raise CodexRuntimeError("runtime-proof-drift", "local metadata source changed")
-    expected = {
-        "actor_id": ACTOR_PREFIX + sid,
-        "session_id": sid,
-        "parent_session_id": sid,
-        "client": "codex",
-    }
     if context != expected:
         raise CodexRuntimeError(
-            "runtime-identity-drift", "actor must derive from the recorded session"
+            "runtime-identity-drift", "actor must derive from the native thread"
         )
 
 

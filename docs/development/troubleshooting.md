@@ -33,7 +33,7 @@ API、页面聚合诊断与 service worker 的观察方法见[扩展 E2E 与诊�
 | 阶段 | 常见卡点 | 处理边界 |
 | --- | --- | --- |
 | submit | 报告/Task 要求/producer 不完整 | 补真实输入，不编造 identity/descriptor |
-| validate | 与 producer 身份重合，冻结输入漂移 | 使用真实独立 Session；漂移后重新匹配送验输入 |
+| validate | 与 producer 身份重合，冻结输入漂移 | 使用未参与实现的原生验证子代理，不因共享 Session 拒绝；漂移后重新匹配送验输入 |
 | review | 无真实 findings 或 reviewer 不独立 | 完成实际审查，不默认 PASS、不重跑交付命令 |
 | check | dependency receipt 或用户 approval 缺失 | 条件补齐后重核，不能自动生成批准 |
 

@@ -51,8 +51,10 @@ def _verify_independence(
 ) -> None:
     reviewer = {
         runtime["identity"].get("actor_id"),
-        runtime["identity"].get("session_id"),
-    }
+        runtime["identity"].get("agent_id"),
+    } - {None, ""}
+    if not reviewer:
+        raise ReviewError("reviewer-identity-invalid", "native actor is missing")
     subjects = (
         (
             "submitter",
@@ -74,7 +76,6 @@ def _verify_independence(
         values = {
             identity.get("actor_id"),
             identity.get("agent_id"),
-            identity.get("session_id"),
         } - {None, ""}
         if not values:
             raise ReviewError(f"{label}-identity-invalid", label)

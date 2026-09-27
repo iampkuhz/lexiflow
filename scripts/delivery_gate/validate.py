@@ -36,12 +36,12 @@ def _discover_runtime(repo: Path) -> dict[str, Any]:
 
 
 def _identity_values(identity: dict[str, Any]) -> set[str]:
+    # Session 表示宿主路由；不同原生子代理可以共享它，但不能共享执行者身份。
     return {
         x
         for x in (
             identity.get("actor_id"),
             identity.get("agent_id"),
-            identity.get("session_id"),
         )
         if isinstance(x, str) and x
     }
@@ -49,6 +49,8 @@ def _identity_values(identity: dict[str, Any]) -> set[str]:
 
 def _verify_independence(submission: dict[str, Any], runtime: dict[str, Any]) -> None:
     validator = _identity_values(runtime["identity"])
+    if not validator:
+        raise ValidationError("validator-identity-invalid", "native actor is missing")
     subjects = []
     for label, identity in (
         ("submitter", submission.get("submitter_identity")),
@@ -198,7 +200,7 @@ def _gaps(report: dict[str, Any]) -> list[dict[str, str]]:
 
 
 def validate(root: str | Path, *, submission_id: str) -> dict[str, Any]:
-    """在独立 Session 中校验 submission 的身份与冻结输入，然后经 Verification 公开 API 执行 Check。执行后再次核对冻结资料与 producer；发布的 validation 记录绑定实际报告和 gaps，未执行或缺口不能算 PASS。"""
+    """由不同执行者校验 submission 与冻结输入，不要求独立宿主 Session。经 Verification 公开 API 执行 Check 后再次核对资料与 producer；validation 绑定实际报告和 gaps，未执行或缺口不能算 PASS。"""
     repo = Path(root).resolve()
     try:
         submission = load_submission(repo, submission_id)

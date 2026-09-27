@@ -4,7 +4,7 @@
 
 ## 1.1. 身份从哪里来
 
-[local_codex_runtime.py](../../../scripts/agents/local_codex_runtime.py) 从可信本机 Session 来源发现身份，[runtime_binding.py](../../../scripts/agents/codex/runtime_binding.py) 绑定来源。actor、Session 和 run 不可由调用者自报。这里是可信本机用户边界，不冒充平台密码学证明。
+[local_codex_runtime.py](../../../scripts/agents/local_codex_runtime.py) 从原生 thread 及其父任务元数据识别执行者，[runtime_binding.py](../../../scripts/agents/codex/runtime_binding.py) 绑定来源。actor、Session 和 run 不可由调用者自报。共享宿主 Session 不作为拒绝条件；原生子代理以 thread ID 派生稳定 actor，根任务保持根 actor。环境变量只用于定位元数据，不要求额外独立性认证。这里是可信本机用户边界，不冒充平台密码学证明。
 
 [codex/work_package.py](../../../scripts/agents/codex/work_package.py) 发布工作包原始记录；[delegation/codex_cli.py](../../../scripts/agents/delegation/codex_cli.py) 只接收精确 run ID 并调用核对器。Qoder 的 [facts.py](../../../scripts/agents/qoder/facts.py) 核对 task/completion/result。Delivery Gate 通过 producer 解析这些事实；执行模块不导入 Delivery Gate，也不签发 validation/review。
 

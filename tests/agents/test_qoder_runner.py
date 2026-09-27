@@ -287,7 +287,7 @@ class QoderRunnerContractTest(unittest.TestCase):
             "default_reasoning_effort": "medium",
             "routine_model": "gpt-6-luna",
             "routine_reasoning_effort": "low",
-            "applies_to": "codex-sub-agent",
+            "applies_to": "codex-delegated-work-including-exception-task",
             "explicit_model_argument_required": True,
             "allowed_escalation_models": ["gpt-6-sol"],
             "user_only_models": ["gpt-6-astra"],

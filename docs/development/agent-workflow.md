@@ -63,3 +63,11 @@ Qoder start/resume 返回 run_id、一次有界 startup_handshake 和 continuati
 运行失败和调度失败分开：同轮两条调度路由都不可用才累计 policy 的连续失败；成功接单清连续计数但保留历史，未知启动不重派。预算耗尽时保持 Task identity，核对历史后选择合规接手，不改版本或删运行记录重置预算。
 
 下一步：回到[交付 S2](change-delivery/verification.md)。定位失败见[排障](troubleshooting.md)；只查文件职责见 [Scripts Reference](reference/scripts.md)。
+
+## 1.5. 原生验收与新任务例外
+
+验证与审查默认使用当前父任务下的不同原生子代理，不要求独立 Session；实现者不能自己签发验证或审查。Codex 内部委派不得用 `create_thread` 代替 `spawn_agent`。Qoder 优先负责实现委派，不作为原生验证和审查的前置步骤；原生子代理是 Codex 相对于普通新任务的默认路径，不取消 Qoder-first。
+
+新任务只作为异常兜底：至少两轮不同的子代理验证对当前输入给出 PASS，对应 Hook 仍阻塞，且有针对性修复尝试与当前任务无法解决的具体证据。父任务先说明报告 locator、阻塞层和能力边界，再取得用户明确创建授权；不能把一次身份报错、缺环境、业务测试失败或未知运行当作许可。新 Session 仍执行相同 Hook 与冻结输入规则，不获得跳过检查的权限。
+
+所有 Codex 委派（含例外新任务）默认 Luna：常规工作包 low，其他工作包 medium；只有具体复杂性、失败或未覆盖风险才升级 Sol/high。`spawn_agent` 显式传 `model`/`reasoning_effort`；经批准的 `create_thread` 显式传 `model`/`thinking` 并核对启动后的真实模型，提示词与角色名不能代替参数，也不能继承用户默认 Astra。99.9% 原生子代理是默认路径的设计目标，不是概率路由或已经测得的运行指标。

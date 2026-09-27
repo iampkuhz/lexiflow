@@ -2,8 +2,18 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 from scripts.delivery_gate.review import ReviewError, review
+from scripts.delivery_gate.review import _verify_independence
 from tests.delivery_gate.fixtures import DeliveryGateFixture, PRODUCER_SESSION, VALIDATOR_SESSION, REVIEWER_SESSION, make_mock_runtime
 class TestReview(unittest.TestCase):
+ def test_distinct_siblings_can_review_without_independent_host_session(self):
+  producer={"actor_id":"producer","session_id":"shared"}
+  validator={"actor_id":"validator","session_id":"shared"}
+  submission={"submitter_identity":producer,"producer":{"identity":producer}}
+  validation={"validator_identity":validator}
+  _verify_independence(submission,validation,{"identity":{"actor_id":"reviewer","session_id":"shared"}})
+  for identity in (producer,validator):
+   with self.assertRaises(ReviewError):
+    _verify_independence(submission,validation,{"identity":{**identity,"session_id":"different"}})
  def setUp(self):self.f=DeliveryGateFixture();self.f.create_submission();self.f.create_validation()
  def tearDown(self):self.f.cleanup()
  @patch("scripts.agents.local_codex_runtime.discover")

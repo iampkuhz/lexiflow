@@ -2,7 +2,7 @@
 
 > 位置：[工程地图](../overview.md) → [开发交付 S3–S6](../change-delivery.md) → Delivery Gate。前置是可送验 Task、PASS Change report 和真实 producer；各阶段只发布自己的 record。
 
-这里的 Delivery Gate 指“正式交付证据受理与判定”，不是产品功能的人工验收测试，也不是一键测试脚本。`scripts/delivery_gate/` 把送验、独立验证、独立审查、条件核对分成四个场景；`authority.py` 只是从可信本机 Session 读取并复核证据签发者身份的内部 helper，不管理用户账号、权限或角色库。目录名直接表达独立交付门禁；阅读时应先看四个公开动作，再看身份和记录实现。
+这里的 Delivery Gate 指“正式交付证据受理与判定”，不是产品功能的人工验收测试，也不是一键测试脚本。`scripts/delivery_gate/` 把送验、独立验证、独立审查、条件核对分成四个场景；`authority.py` 只是从原生任务和子代理元数据读取并复核证据签发者身份的内部 helper，不管理用户账号、权限或角色库。目录名直接表达独立交付门禁；阅读时应先看四个公开动作，再看身份和记录实现。
 
 ## 1.1. 先理解谁执行、谁审查
 
@@ -32,7 +32,7 @@ delivery_gate --> reviewer: R3 返回 review record
 @enduml
 ```
 
-图只展开正常的 validate/review 交接。producer 未画入图；validator 须独立于 producer/submitter，reviewer 须独立于 producer/validator。身份由真实 runtime 来源证明，不能填写 actor 字符串代替。
+图只展开正常的 validate/review 交接。producer 未画入图；validator 须独立于 producer/submitter，reviewer 须独立于 producer/validator。原生子代理可共享父 Session，分工由不同 thread/actor 识别，不增加独立 Session 认证。身份直接来自原生元数据，不能填写 actor 字符串代替。
 
 ## 1.2. submit：冻结送验输入
 
@@ -48,13 +48,13 @@ python3 -m scripts.delivery_gate submit --task-id <id> --change-report-id <uuid>
 
 ## 1.3. validate：执行独立验证
 
-在真实独立 Session 中执行以下操作，不与 producer 的命令拼成“一键验收”：
+由当前父任务下未参与实现的原生验证子代理执行以下操作，不要求独立宿主 Session，不与 producer 的命令拼成“一键验收”：
 
 ```bash
 python3 -m scripts.delivery_gate validate --submission-id <uuid>
 ```
 
-[validate.py](../../../scripts/delivery_gate/validate.py) 按顺序读取 submission、核对身份独立性、producer 和 frozen input，再调用 Verification 的公共 API。执行后再次核对输入，发布 validation report/record；缺项与未执行不得 PASS，也不签发 review。
+[validate.py](../../../scripts/delivery_gate/validate.py) 按顺序读取 submission、核对执行者角色分工、producer 和 frozen input，再调用 Verification 的公共 API。执行后再次核对输入，发布 validation report/record；缺项与未执行不得 PASS，也不签发 review。
 
 它使用 [authority.py](../../../scripts/delivery_gate/authority.py) 核对来源、[requirements.py](../../../scripts/delivery_gate/requirements.py) 核对 Task、[records.py](../../../scripts/delivery_gate/records.py) 安全读写记录。私有 helper 的共享现状见 [Scripts Reference](../reference/scripts.md)，不是让调用者绕过公开场景的许可。
 
@@ -82,6 +82,6 @@ python3 -m scripts.delivery_gate check --submission-id <uuid>
 
 每层 record 在 ignored `tmp/quality/delivery-gate/` 原子、一次性发布。重复 JSON key、路径异常、非普通文件、竞争记录、hash 或绑定输入变化均不能当作可信证据。历史 record 不因任意短 TTL 自动失效，但使用时必须重核绑定来源和内容。
 
-`python3 -m scripts.delivery_gate status --submission-id <uuid>` 是只读观察入口，不推动链路。身份冲突、frozen input 漂移、readiness 缺失和 approval 缺失分别按[排障](../troubleshooting.md)处理，不统一归为“再跑一次”。工程 fixture 只能证明实现链路，不代替真实独立 Session。
+`python3 -m scripts.delivery_gate status --submission-id <uuid>` 是只读观察入口，不推动链路。身份冲突、frozen input 漂移、readiness 缺失和 approval 缺失分别按[排障](../troubleshooting.md)处理，不统一归为“再跑一次”。工程 fixture 只能证明实现链路，不代替真实原生子代理的验证和审查。
 
 上一阶段：[Verify](verification.md)。回到[交付主干](../change-delivery.md)，或按需查[记录模板](../reference/record-template.md)。

@@ -249,7 +249,7 @@ class DocumentationTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         policy = yaml.safe_load((root / 'harness/agent-policy.manifest.yaml').read_text())
         expected = policy['agent_dispatch']
-        self.assertEqual(expected['fallback_model'], 'gpt-6-sol')
+        self.assertEqual(expected['fallback_model'], 'gpt-6-luna')
         self.assertEqual(expected['max_consecutive_failures'], 3)
         rules = yaml.safe_load((root / 'harness/policy-projections.yaml').read_text())['projections']
         consumers = {
@@ -262,6 +262,26 @@ class DocumentationTests(unittest.TestCase):
         for name, target in consumers:
             current = yaml.safe_load((root / name).read_text())
             self.assertEqual(policy_projection.lookup(current, target), expected)
+
+    def test_native_acceptance_and_exception_task_have_one_policy_source(self):
+        root = Path(__file__).resolve().parents[2]
+        policy = yaml.safe_load((root / 'harness/agent-policy.manifest.yaml').read_text())
+        runtime = yaml.safe_load((root / 'harness/agent-runtime.manifest.yaml').read_text())
+        dispatch = policy['codex_dispatch']
+        self.assertEqual(runtime['codex_dispatch'], dispatch)
+        self.assertFalse(dispatch['acceptance']['independent_host_session_required'])
+        self.assertFalse(dispatch['acceptance']['extra_independence_attestation_required'])
+        self.assertTrue(dispatch['acceptance']['implementer_must_not_validate_or_review'])
+        exception = dispatch['new_session_exception']
+        self.assertEqual(exception['minimum_passed_subagent_validation_rounds'], 2)
+        self.assertEqual(exception['default'], 'forbidden-for-internal-delegation')
+        self.assertEqual(len(exception['required_evidence']), 4)
+        self.assertTrue(exception['explicit_create_thread_model_and_thinking_required'])
+        self.assertTrue(exception['verify_actual_model_after_start'])
+        model = policy['subagent_protocol']['codex_model_policy']
+        self.assertEqual(model['applies_to'], 'codex-delegated-work-including-exception-task')
+        self.assertEqual(model['default_model'], 'gpt-6-luna')
+        self.assertEqual(policy['agent_dispatch']['fallback_model'], model['default_model'])
 
     def test_projection_preserves_indented_sibling_after_block_mapping(self):
         source = 'execution:\n  model:\n    name: old\n  caller_field_schema:\n    goal: string\n'

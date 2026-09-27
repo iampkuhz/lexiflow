@@ -77,7 +77,7 @@ subagent_protocol:
     default_model: gpt-6-luna
     routine_model: gpt-6-luna
     routine_reasoning_effort: low
-    applies_to: codex-sub-agent
+    applies_to: codex-delegated-work-including-exception-task
     explicit_model_argument_required: true
     routine_routing:
       decision_owner: parent-agent
@@ -412,12 +412,12 @@ subagent_protocol:
     actor_source: owned-local-session-metadata-cross-checked-with-runtime-route
     local_adapter: scripts/agents/local_codex_runtime.py
     local_trust_boundary: trusted-local-user-not-platform-cryptographic-attestation
-    local_actor_id: codex-session-<actual-session-uuid>
+    local_actor_id: root-codex-session-id-or-native-codex-thread-id
     actor_stability: same-actual-agent-across-runs-and-attestations
-    session_source: actual-session-metadata-id-matching-CODEX-SESSION-ID-or-CODEX-THREAD-ID
-    parent_source: local-root-task-session-or-explicit-protected-host-route
-    shared_host_session: forbidden-for-local-issuer-independence
-    protected_host_adapter: explicit-integration-only-not-default-local-CLI
+    session_source: native-metadata-host-session-with-distinct-thread-route
+    parent_source: native-subagent-parent-thread-metadata-or-root-self
+    shared_host_session: allowed-for-distinct-native-subagent-actors
+    protected_host_adapter: native-local-metadata-no-extra-independent-session-attestation
     caller_identity_injection: forbidden
     missing_runtime: BLOCKED
     fabricated_or_conflicting_runtime: FAIL
@@ -446,9 +446,10 @@ subagent_protocol:
 # 派发路由与失败预算；固定值被 runner 消费，不能把描述性翻译用于替换协议值。
 agent_dispatch:
   primary: qoder
-  fallback_model: gpt-6-sol
-  fallback_reasoning_effort: high
-  model_selection_basis: explicit-user-required-sol-fallback
+  fallback_model: gpt-6-luna
+  fallback_reasoning_effort: medium
+  model_selection_basis: luna-first-unclassified-fallback-escalation-requires-specific-evidence
+  validation_and_review: native-codex-subagents-not-qoder-or-create-thread
   max_consecutive_failures: 3
   failure_unit: qoder-and-terra-both-unavailable-in-one-dispatch-attempt
   success_effect: reset-consecutive-failures-preserve-history
@@ -567,3 +568,28 @@ codex_dispatch:
   - blocking_findings
   max_blocking_findings: 3
   full_context_or_logs_in_callback: false
+  acceptance:
+    default: distinct-native-subagents-in-current-parent
+    independent_host_session_required: false
+    extra_independence_attestation_required: false
+    actor_source: native-thread-and-parent-metadata
+    implementer_must_not_validate_or_review: true
+    reviewer_must_differ_from_validator: true
+  new_session_exception:
+    default: forbidden-for-internal-delegation
+    minimum_passed_subagent_validation_rounds: 2
+    required_evidence:
+    - distinct-validation-rounds-with-current-input-and-PASS-evidence
+    - corresponding-hook-blockers-with-report-locators
+    - targeted-repair-attempts-and-confirmed-current-session-limitation
+    - parent-explanation-and-explicit-user-authorization-to-create-task
+    not_sufficient:
+    - one-identity-or-session-route-error
+    - failed-or-skipped-business-tests
+    - unknown-or-inflight-agent-result
+    - repeated-reading-of-one-PASS-report
+    - unspecified-current-session-limitation
+    cannot_bypass: same-required-tests-hooks-and-frozen-input
+    model_source: subagent_protocol.codex_model_policy
+    explicit_create_thread_model_and_thinking_required: true
+    verify_actual_model_after_start: true

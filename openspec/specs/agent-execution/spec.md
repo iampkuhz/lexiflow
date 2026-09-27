@@ -153,11 +153,13 @@ Main-only singleton 来源 MUST 使用显式 `lexiflow.codex-main-task-projectio
 
 Qoder issuer provenance MUST 接受真实 runner 的 pretty/noncanonical JSON whitespace，并按 locator/hash 冻结原始 task/completion bytes；materializer 与 Planner MUST 同时拒绝 duplicate key、非法 JSON number、identity/version drift、非终态 completion 与 stale authority evidence。Issuer packet、非 Qoder attestation 和 receipt 的 canonical JSON 规则不变。
 
-`client` MUST 只表示工具类型，MUST NOT 单独作为 copied-subject identity 的判据。同客户端的不同 verified actor MAY 成为 subject 与 trusted issuer；本地 adapter MUST 以实际 session 为最小独立性单位，同 session 的不同名称 MUST NOT 构成独立 issuer。只有显式受保护 host 集成能够另行证明不同 actor 时，才可共享宿主 session；相同 actor/agent、run、instance 或 replay identity MUST 被拒绝。Actor MUST 在同一真实执行实例的连续 run/attestation 间稳定，MUST NOT 通过更换 nonce/run 伪装独立 reviewer。Session MUST 保留真实会话/路由含义，MUST NOT 随机生成来绕过独立性检查。独立 review MUST 同时排除 subject producer 与 validation issuer，并保持 current input、hash 与零 subject write-set 验证。
+`client` MUST 只表示工具类型。原生子代理 MUST 可以在同一父任务和宿主 Session 下分别实现、验证和审查；本地 adapter MUST NOT 要求独立 Session 或额外独立性认证。实现者与验证者、审查者，以及验证者与审查者 MUST 是不同执行 actor。共享 Session 本身 MUST NOT 构成身份重叠；同一 actor 更换 run、名称或 Session 路由 MUST NOT 获得自验、自审许可。Session MUST 保留真实宿主含义，MUST NOT 伪造；冻结输入、hash 和零 subject write-set 约束保持不变。
 
-本机默认 Codex authority MUST 使用 `codex.local-session.v1`：读取 owned、非共享可写、非 symlink 的当前 session metadata，核对 workspace 与 runtime route，并派生稳定 `codex-session-<session-id>` actor。环境变量只定位来源，MUST NOT 单独证明身份。该模式信任本机用户，MUST NOT 宣称平台加密认证或防御同一用户的恶意改写。共享 session 且无独立来源的子代理 MUST NOT 用于本地独立签发。
+本机默认 Codex authority MUST 直接读取 owned、非共享可写、非 symlink 的原生 metadata，核对 workspace、thread 与父子关系。根任务使用稳定 `codex-session-<thread-id>` actor；原生子代理使用稳定 `codex-thread-<thread-id>` actor。环境变量仅定位来源；子 thread 与宿主 Session 不同属于合法原生路由，不得机械判为冲突。来源缺失 SHALL BLOCKED，来源矛盾 SHALL FAIL。记录绑定 thread 及父元数据 hash，不绑定持续增长的整份日志。信任边界为本机用户，不是平台密码学认证。
 
-公开 `doctor` MUST 只读报告 runtime readiness；`run --evidence-packet` 在没有显式 issuer 时 MUST 从当前独立 session 创建新鲜 authority evidence 与 issuer，再交给原有纯 planner。历史 attestation/receipt MUST NOT 改写、更新时间或自动升级为 current。显式 issuer 仍须严格验证，MUST NOT 隐式替换失效输入；缺少 subject evidence MUST 给出可操作错误而不是要求用户构造 identity JSON。`plan` MUST 保持零写入并要求显式 issuer。
+内部委派 MUST 默认使用原生 subagent，MUST NOT 自动创建普通任务来回避身份或 Hook 问题。只有至少两轮不同的子代理验证均有当前输入 PASS 证据、对应 Hook 仍阻塞、已留下针对性修复尝试和当前任务无法解决的具体原因，并得到用户明确创建授权后，才 MAY 使用新 Session 兜底。重复读取同一 PASS、业务测试失败、单次身份错误或在途未知结果 MUST NOT 满足例外。新任务仍 MUST 执行相同门禁，显式设置模型与推理参数并核对实际运行模型：默认 Luna，只有具体复杂性或失败风险证据才可升级 Sol；不得因 create_thread 继承 Astra。
+
+公开 `doctor` MUST 只读报告 runtime readiness；`run --evidence-packet` 在没有显式 issuer 时 MUST 从当前原生任务或子代理来源创建新鲜 authority evidence 与 issuer，再交给原有纯 planner。历史 attestation/receipt MUST NOT 改写、更新时间或自动升级为 current。显式 issuer 仍须严格验证，MUST NOT 隐式替换失效输入；缺少 subject evidence MUST 给出可操作错误而不是要求用户构造 identity JSON。`plan` MUST 保持零写入并要求显式 issuer。
 
 Gate planner MUST 零写入并只选择 versioned registry 中声明的 fixed argv。Run MUST 在任何 checker 执行前先持久化并 flush `START`，再向调用方 flush 包含唯一 `run_id` 和固定 event locator 的可见 `START`；任一 START 步骤失败时 checker MUST NOT 运行。
 

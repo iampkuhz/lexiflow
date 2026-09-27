@@ -159,9 +159,10 @@ dependency_policy:
 orchestration_policy:
   agent_dispatch:
     primary: qoder
-    fallback_model: gpt-6-sol
-    fallback_reasoning_effort: high
-    model_selection_basis: explicit-user-required-sol-fallback
+    fallback_model: gpt-6-luna
+    fallback_reasoning_effort: medium
+    model_selection_basis: luna-first-unclassified-fallback-escalation-requires-specific-evidence
+    validation_and_review: native-codex-subagents-not-qoder-or-create-thread
     max_consecutive_failures: 3
     failure_unit: qoder-and-terra-both-unavailable-in-one-dispatch-attempt
     success_effect: reset-consecutive-failures-preserve-history

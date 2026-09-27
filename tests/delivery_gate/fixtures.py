@@ -14,8 +14,8 @@ PRODUCER_SESSION="11111111-1111-4111-9111-111111111111";VALIDATOR_SESSION="22222
 PRODUCER_ACTOR=f"codex-session-{PRODUCER_SESSION}";VALIDATOR_ACTOR=f"codex-session-{VALIDATOR_SESSION}";REVIEWER_ACTOR=f"codex-session-{REVIEWER_SESSION}"
 TASK_ID="LF-TSK-TEST-0001"
 @dataclass
-class MockRuntime: context:dict[str,str];proof:dict[str,str]
-def make_mock_runtime(session_id:str)->MockRuntime:return MockRuntime({"actor_id":f"codex-session-{session_id}","session_id":session_id,"parent_session_id":session_id,"client":"codex"},{"schema_version":"lexiflow.codex-local-session-proof.v1","session_id":session_id,"workspace":"/test/workspace","metadata_sha256":"a"*64})
+class MockRuntime: context:dict[str,str];proof:dict[str,Any]
+def make_mock_runtime(session_id:str)->MockRuntime:return MockRuntime({"actor_id":f"codex-session-{session_id}","session_id":session_id,"parent_session_id":session_id,"client":"codex"},{"schema_version":"lexiflow.codex-local-session-proof.v2","thread_id":session_id,"workspace":"/test/workspace","sources":[{"thread_id":session_id,"metadata_sha256":"a"*64}]})
 def mock_authority(session_id:str):
  from scripts.delivery_gate.records import canonical_bytes,sha256_bytes
  runtime=make_mock_runtime(session_id)

@@ -3,7 +3,16 @@ import unittest
 from unittest.mock import patch
 from scripts.delivery_gate.validate import ValidationError,validate
 from tests.delivery_gate.fixtures import DeliveryGateFixture,PRODUCER_SESSION,VALIDATOR_SESSION,make_mock_runtime
+from scripts.delivery_gate.validate import _verify_independence
 class TestValidate(unittest.TestCase):
+ def test_distinct_native_actor_sharing_host_session_can_validate(self):
+  producer={"actor_id":"codex-session-host","session_id":"host"}
+  submission={"submitter_identity":producer,"producer":{"identity":producer}}
+  _verify_independence(submission,{"identity":{"actor_id":"codex-thread-child","session_id":"host"}})
+  with self.assertRaisesRegex(ValidationError,"self-validation-forbidden"):
+   _verify_independence(submission,{"identity":{**producer,"session_id":"other-host"}})
+  with self.assertRaisesRegex(ValidationError,"validator-identity-invalid"):
+   _verify_independence(submission,{"identity":{"session_id":"other-host"}})
  def setUp(self):self.f=DeliveryGateFixture();self.f.create_verification_report();self.f.create_submission()
  def tearDown(self):self.f.cleanup()
  @patch("scripts.agents.local_codex_runtime.discover")
