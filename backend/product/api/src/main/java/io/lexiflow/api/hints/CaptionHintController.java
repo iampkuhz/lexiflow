@@ -3,6 +3,7 @@ package io.lexiflow.api.hints;
 import io.lexiflow.api.hints.model.CaptionHintRequest;
 import io.lexiflow.api.hints.model.CaptionHintResponse;
 import io.lexiflow.enrichment.application.caption.EnrichCaptionUseCase;
+import java.io.IOException;
 import java.util.Locale;
 import java.util.Objects;
 import org.slf4j.Logger;
@@ -14,7 +15,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
-import tools.jackson.core.io.JsonStringEncoder;
 
 /** 为当前可见新增字幕提供不阻塞的词段级中文提示。 */
 @RestController
@@ -22,10 +22,12 @@ import tools.jackson.core.io.JsonStringEncoder;
 public final class CaptionHintController {
   private static final Logger LOG = LoggerFactory.getLogger(CaptionHintController.class);
   private final EnrichCaptionUseCase useCase;
+  private final SegmentAnalysisLog analysisLog;
 
   /** 注入应用用例；控制器不访问词典存储或供应商实现。 */
-  public CaptionHintController(EnrichCaptionUseCase useCase) {
+  public CaptionHintController(EnrichCaptionUseCase useCase, SegmentAnalysisLog analysisLog) {
     this.useCase = Objects.requireNonNull(useCase, "useCase");
+    this.analysisLog = Objects.requireNonNull(analysisLog, "analysisLog");
   }
 
   /**
@@ -38,7 +40,8 @@ public final class CaptionHintController {
   public ResponseEntity<CaptionHintResponse> hint(@RequestBody CaptionHintRequest request) {
     var started = System.nanoTime();
     try {
-      var measured = useCase.enrichIncrementalMeasured(Objects.requireNonNull(request).toDomain());
+      var domainRequest = Objects.requireNonNull(request).toDomain();
+      var measured = useCase.enrichIncrementalMeasured(domainRequest);
       var result = measured.result();
       var body =
           new CaptionHintResponse(
@@ -56,12 +59,12 @@ public final class CaptionHintController {
                               hint.lexiconVersion(),
                               hint.senseId()))
                   .toList());
+      try {
+        analysisLog.record(domainRequest, result);
+      } catch (IOException exception) {
+        LOG.warn("segment analysis log unavailable; processing result was not recorded");
+      }
       var totalMillis = (System.nanoTime() - started) / 1_000_000.0;
-      LOG.info(
-          "hint_result apiMs={} processedEnglish={} processedWithHints={}",
-          String.format(Locale.ROOT, "%.3f", totalMillis),
-          jsonString(measured.processedEnglish()),
-          jsonString(measured.processedWithHints()));
       return ResponseEntity.ok()
           .header("Cache-Control", "no-store")
           .header(
@@ -77,10 +80,5 @@ public final class CaptionHintController {
       throw new ResponseStatusException(
           HttpStatus.BAD_REQUEST, "invalid caption request", exception);
     }
-  }
-
-  /** 将不可信字幕转成单行 JSON 字符串，避免换行、引号或控制字符伪造日志。 */
-  private static String jsonString(String value) {
-    return '"' + new String(JsonStringEncoder.getInstance().quoteAsCharArray(value)) + '"';
   }
 }

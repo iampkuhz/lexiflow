@@ -1,5 +1,6 @@
 package io.lexiflow.api;
 
+import io.lexiflow.api.hints.SegmentAnalysisLog;
 import io.lexiflow.enrichment.application.caption.EnrichCaptionUseCase;
 import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
 import io.lexiflow.lexicon.application.port.LexiconRepository;
@@ -7,7 +8,9 @@ import io.lexiflow.lexicon.application.query.CachedLexiconQueryService;
 import io.lexiflow.lexicon.domain.catalog.BuiltinLexiconCatalog;
 import io.lexiflow.lexicon.domain.port.LexiconCatalog;
 import io.lexiflow.lexicon.platform.persistence.PostgresPersistenceConfiguration;
+import java.nio.file.Path;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration;
@@ -40,6 +43,13 @@ public class ApiApplication {
   EnrichCaptionUseCase enrichCaptionUseCase(ObjectProvider<LexiconRepository> repositories) {
     return new EnrichCaptionUseCase(
         lexiconCatalog(repositories.getIfAvailable()), new DeterministicHintPolicy());
+  }
+
+  /** 为字幕分析单独装配 ignored 本机文件，不通过普通应用日志输出正文。 */
+  @Bean
+  SegmentAnalysisLog segmentAnalysisLog(@Value("${lexiflow.segment-analysis.path:}") String path) {
+    return new SegmentAnalysisLog(
+        path.isBlank() ? SegmentAnalysisLog.configuredPath() : Path.of(path));
   }
 
   private static LexiconCatalog lexiconCatalog(LexiconRepository repository) {

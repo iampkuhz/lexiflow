@@ -71,13 +71,14 @@ npm run build
 
 ## 1.4. 没有效果时看哪里
 
-- **API 终端**：先查看 `runtime lexicon`。每次有效请求打印 `hint_result apiMs=... english="..." final="..."`；`final` 与 `english` 相同时没有可展示提示，不能据此断言完全没有词库候选。此路径不会调用模型。
+- **API 终端**：先查看 `runtime lexicon`；普通日志不输出字幕正文。若出现 `segment analysis log unavailable`，表示本次分析记录写入失败，不影响英文和提示。此路径不会调用模型。
+- **片段分析文件**：默认在 ignored 的 `tmp/analysis/caption-segments.jsonl`，可用本机环境变量 `LEXIFLOW_SEGMENT_LOG_PATH` 指定私有路径。每行是一个成功处理且此前未记录的新增片段，含英文、`translatedRanges`、`untranslatedRanges` 和 `status`。同一 `segmentId` 只统计一次；跨片段提示只统计 `anchor=true` 的一次。`NO_HINT` 表示没有可展示提示，不等于词库没有候选。
 - **YouTube 页面开发者工具 → Console**：筛选 `[LexiFlow]`，查看 `caption` 阶段的 `state`、`sequence`、`elapsedMs`。
 - **扩展管理页 → LexiFlow → Service worker**：查看 `api` 阶段结果和请求耗时。
 
 已发布的近三百万词条不等于每个词都会出现在字幕里：基础词、未处理或多义且缺可信短释的词条、结构不完整的短语、同区间歧义、重叠落选及每段第 4 个及之后的候选都不会展示。有来源排名的非基础单词优先于未排名短语；短释仍不保证特定语境的词义正确，不能把不提示解释成词库没有该词。
 
-API 终端日志会打印英文原文和词段插入后的中英结果，可能包含真实字幕；只在本机查看，不复制到共享日志或提交仓库。它不打印视频地址、内容身份、模型输入输出或密钥；扩展日志仍不含原文。字幕变化、拖动进度、关闭字幕和页面跳转都会清除旧提示；迟到结果直接放弃，英文不会被阻塞。
+片段分析文件可能包含真实字幕，只在本机查看、保留或删除，不复制到共享日志或提交仓库。它不记录视频地址、内容身份、模型输入输出或密钥；记录的是 API 处理结果，不能断言用户最终看到了提示。扩展日志仍不含原文。字幕变化、拖动进度、关闭字幕和页面跳转都会清除旧提示；迟到结果直接放弃，英文不会被阻塞。
 
 
 下一步：[扩展 E2E](extension-e2e.md)验证工程链路；遇到故障先看[按阶段排障](../troubleshooting.md)。需要准备资料时进入[离线词库导入](lexicon-import.md)。

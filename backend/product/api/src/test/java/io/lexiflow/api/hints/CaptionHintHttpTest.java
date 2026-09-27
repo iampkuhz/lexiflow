@@ -12,7 +12,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+    properties =
+        "lexiflow.segment-analysis.path=${java.io.tmpdir}/lexiflow-caption-test-${random.uuid}.jsonl")
 class CaptionHintHttpTest {
   @LocalServerPort private int port;
 
