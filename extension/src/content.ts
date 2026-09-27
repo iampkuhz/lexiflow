@@ -1,5 +1,21 @@
 import { BilingualOverlay, OVERLAY_ID as overlayId, visibleSegments } from "./overlay";
 import { readCaptionSource } from "./caption-source";
+import { CaptionSnapshotTracker } from "./caption-snapshot";
+import { YoutubeSourceMetadata } from "./youtube-source";
+import { snapshotText } from "./protocol";
+const snapshotTracker = new CaptionSnapshotTracker();
+const sourceMetadata = new YoutubeSourceMetadata();
+let trackKey: string | null = null;
+let nativeIdentity = "";
+let topic: string | undefined;
+let topicPromise: Promise<string> | undefined;
+window.addEventListener("message", event => {
+  if (event.source === window && event.origin === location.origin && event.data?.type === "lexiflow-native-captions") {
+    sourceMetadata.accept(event.data.track, videoIdFromLocation());
+    scheduleCapture();
+  }
+});
+window.postMessage({ type: "lexiflow-native-ready" }, location.origin);
 import { PREFERENCE_KEY, type PreferenceAction, type PreferenceResult } from "./preferences";
 import { Diagnostics } from "./diagnostics";
 import {
@@ -26,11 +42,6 @@ function bytesToHex(bytes: ArrayBuffer): string {
 
 async function sha256(value: string): Promise<string> {
   return bytesToHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
-}
-
-async function contentId(videoId: string): Promise<string> {
-  const digest = await sha256(`youtube\u0000${videoId}`);
-  return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
 }
 
 // 裁剪只影响绘制，保留来源几何信息与可见性检测，不修改字幕节点。
@@ -70,7 +81,7 @@ async function updatePreferences(action: PreferenceAction, entryId?: string, lex
 }
 
 function renderCurrentView(): number {
-  const view = latestView.state === "ready" && latestView.event?.request.caption !== currentCaption()
+  const view = latestView.state === "ready" && (latestView.event && snapshotText(latestView.event.request.currentSnapshot)) !== currentCaption()
     ? { state: "idle" as const } : latestView;
   const source = currentSource();
   const shown = overlay.render(view, { ready: preferenceReady, entryKeys: suppressed, message: preferenceMessage },
@@ -98,7 +109,7 @@ const coordinator = new CaptionStreamCoordinator(
   (view) => {
     // 交付结果时重新读取实时来源，不能只相信最后一次 debounce snapshot。
     if (view.state === "ready" && (!view.event || view.event.sequence !== sourceSequence ||
-        view.event.request.caption !== currentCaption() || activeVideoId !== videoIdFromLocation())) {
+        snapshotText(view.event.request.currentSnapshot) !== currentCaption() || activeVideoId !== videoIdFromLocation())) {
       diagnostics.record({ outcome: "stale-at-render" });
       overlay.updateDiagnostics(diagnostics.snapshot());
       return;
@@ -138,8 +149,13 @@ function currentCaption(): string | undefined {
 }
 
 function scheduleCapture(): void {
-  // MutationObserver 在绘制前执行：先使旧提示失效，再计算哈希或合并请求。
+  // 来源文字即时整理，异步响应不得清空仍有效的提示。
   void captureCurrentCaption();
+}
+
+function clearSource(): void {
+  snapshotTracker.reset();
+  coordinator.clear(++sourceSequence);
 }
 
 async function captureCurrentCaption(): Promise<void> {
@@ -149,7 +165,7 @@ async function captureCurrentCaption(): Promise<void> {
     activePlayer = player;
     activeCaptionKey = undefined;
     sourceRevision += 1;
-    coordinator.clear(++sourceSequence);
+    clearSource();
   }
   overlay.position();
   const video = document.querySelector<HTMLVideoElement>("video");
@@ -158,7 +174,7 @@ async function captureCurrentCaption(): Promise<void> {
   if (video === null || videoId === undefined || caption === undefined) {
     if (activeCaptionKey !== undefined) {
       activeCaptionKey = undefined;
-      coordinator.clear(++sourceSequence);
+      clearSource();
     }
     return;
   }
@@ -168,6 +184,20 @@ async function captureCurrentCaption(): Promise<void> {
     activeCaptionKey = undefined;
   }
   const videoTimeMs = Math.max(0, Math.floor((Number.isFinite(video.currentTime) ? video.currentTime : 0) * 1_000));
+  const source = currentSource();
+  if (!source) return;
+  const metadata = sourceMetadata.match(source.caption, videoTimeMs);
+  const firstWord = source.caption.match(/\S+/u)?.[0] ?? source.caption;
+  const firstMetadata = metadata.metadata(firstWord, 0);
+  const nextNativeIdentity = metadata.trackKey && firstMetadata.startMs !== null
+    ? `${metadata.trackKey}:${firstMetadata.windowId}:${firstMetadata.startMs}:${firstMetadata.offsetMs}` : "";
+  const textUnchanged = activeCaptionKey === `${videoId}\u0000${sourceRevision}\u0000${caption}`;
+  if ((metadata.trackKey !== trackKey) ||
+      (textUnchanged && nativeIdentity && nextNativeIdentity && nativeIdentity !== nextNativeIdentity)) {
+    clearSource(); activeCaptionKey = undefined;
+  }
+  nativeIdentity = nextNativeIdentity;
+  trackKey = metadata.trackKey;
   const captionKey = `${videoId}\u0000${sourceRevision}\u0000${caption}`;
   const nextLayoutKey = JSON.stringify(currentSource()?.lineBreaks ?? []);
   if (captionKey === activeCaptionKey) {
@@ -178,37 +208,30 @@ async function captureCurrentCaption(): Promise<void> {
   activeCaptionKey = captionKey;
   observedAt = performance.now();
   diagnostics.record({ outcome: "observed" });
-  coordinator.clear(++sourceSequence);
   const sequence = ++sourceSequence;
   if (caption.length > MAX_CAPTION_LENGTH) {
     diagnostics.record({ outcome: "oversized" });
-    coordinator.clear(sequence);
+    clearSource();
     return;
   }
-  let id: string;
-  let segmentId: string;
-  try {
-    id = await contentId(videoId);
-    segmentId = await sha256(`${id}\u0000${sourceRevision}\u0000${sequence}\u0000${videoTimeMs}\u0000${caption}`);
-  } catch {
-    if (sequence === sourceSequence) coordinator.clear(++sourceSequence);
-    return;
-  }
-  if (sequence !== sourceSequence || currentCaption() !== caption || videoIdFromLocation() !== videoId) {
-    diagnostics.record({ outcome: "cancelled-acquisition" });
-    overlay.updateDiagnostics(diagnostics.snapshot());
-    return;
+  const snapshot = snapshotTracker.capture(source, metadata.metadata);
+  // 主题哈希只在导航时改变。未完成时先显示英文，不阻塞源遮罩和绘制。
+  if (!topic) {
+    latestView = { state: "waiting" };
+    renderCurrentView();
+    const expectedVideo = videoId;
+    try {
+      const resolved = await (topicPromise ??= sha256(`youtube\u0000${videoId}`));
+      if (videoIdFromLocation() !== expectedVideo) return;
+      topic = resolved;
+    } catch { topicPromise = undefined; activeCaptionKey = undefined; return; }
+    if (sequence !== sourceSequence) { activeCaptionKey = undefined; scheduleCapture(); return; }
   }
   const request: CaptionHintRequest = {
-    contentId: id,
-    contentRevision: sourceRevision,
-    segmentId,
-    caption,
-    startOffset: 0,
-    endOffset: caption.length
+    captionTopicKey: topic, trackKey, lastRequestedSnapshot: null, currentSnapshot: snapshot
   };
   diagnostics.record({ stage: "acquisition", elapsedMs: performance.now() - observedAt });
-  const event: CaptionEvent = { key: captionKey, sequence, videoTimeMs, request };
+  const event: CaptionEvent = { key: captionKey, sequence: sourceSequence, videoTimeMs, request };
   coordinator.submit(event);
 }
 
@@ -224,7 +247,7 @@ chrome.runtime.onMessage?.addListener((message, sender, respond) => {
     if (message.pageKey !== pageKey || typeof message.enabled !== "boolean") { respond({ ok: false }); return; }
     enhancementEnabled = message.enabled;
     activeCaptionKey = undefined;
-    coordinator.clear(++sourceSequence);
+    clearSource();
     scheduleCapture();
   } else if (message.action !== "read") { respond({ ok: false }); return; }
   respond({ ok: true, enabled: enhancementEnabled, pageKey });
@@ -244,13 +267,14 @@ function resetForNavigation(): void {
   resetPageSetting();
   activeVideoId = undefined;
   activeCaptionKey = undefined;
-  coordinator.clear(++sourceSequence);
+  clearSource();
 }
 
 function resetPageSetting(): void {
   enhancementEnabled = true;
   pageKey = crypto.randomUUID();
   pageVideoId = videoIdFromLocation();
+  topic = undefined; topicPromise = undefined; trackKey = null; nativeIdentity = ""; sourceMetadata.reset();
   sourceStopped = false;
   activeCaptionKey = undefined;
 }
@@ -261,11 +285,38 @@ window.addEventListener("popstate", () => { resetForNavigation(); scheduleCaptur
 window.addEventListener("resize", scheduleCapture);
 document.addEventListener("timeupdate", scheduleCapture, true);
 
+// YouTube roll-up 通过 CSS transform 移入新行，动画中没有持续 DOM mutation。
+// 仅在原生字幕动画运行时逐帧重读几何；不固定轮询，也不让英文等待 timeupdate。
+let motionFrame: number | undefined;
+let motionDeadline = 0;
+function captureCaptionMotion(): void {
+  motionFrame = undefined;
+  if (document.hidden) return;
+  scheduleCapture();
+  const source = document.querySelector("#ytp-caption-window-container");
+  if (performance.now() < motionDeadline && source?.getAnimations({ subtree: true })
+      .some(animation => animation.playState === "running" || animation.pending)) {
+    motionFrame = requestAnimationFrame(captureCaptionMotion);
+  }
+}
+function isCaptionMotion(event: Event): boolean {
+  return event.target instanceof Element && !!event.target.closest("#ytp-caption-window-container");
+}
+document.addEventListener("transitionrun", event => {
+  if (!isCaptionMotion(event)) return;
+  motionDeadline = performance.now() + 2000;
+  if (motionFrame === undefined) motionFrame = requestAnimationFrame(captureCaptionMotion);
+}, true);
+for (const name of ["transitionend", "transitioncancel"]) {
+  document.addEventListener(name, event => { if (isCaptionMotion(event)) scheduleCapture(); }, true);
+}
+
+
 document.addEventListener("seeking", () => {
   seeking = true;
   sourceRevision += 1;
   activeCaptionKey = undefined;
-  coordinator.clear(++sourceSequence);
+  clearSource();
 }, true);
 document.addEventListener("seeked", () => { seeking = false; sourceStopped = false; scheduleCapture(); }, true);
 document.addEventListener("play", () => { sourceStopped = false; scheduleCapture(); }, true);
@@ -273,7 +324,7 @@ for (const name of ["emptied", "ended"]) {
   document.addEventListener(name, () => {
     sourceStopped = true;
     activeCaptionKey = undefined;
-    coordinator.clear(++sourceSequence);
+    clearSource();
   }, true);
 }
 

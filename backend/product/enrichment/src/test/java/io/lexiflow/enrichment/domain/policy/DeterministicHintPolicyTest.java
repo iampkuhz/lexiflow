@@ -57,7 +57,7 @@ class DeterministicHintPolicyTest {
   }
 
   @Test
-  void choosesLongestAndHigherValueNonoverlappingMatchesAndLimitsThree() {
+  void choosesLongestAndHigherValueNonoverlappingMatchesWithoutCountLimit() {
     var text = "very reliable context metaphor literally";
     var candidates =
         List.of(
@@ -67,9 +67,9 @@ class DeterministicHintPolicyTest {
             ranked("metaphor", "隐喻"),
             ranked("literally", "按字面"));
     var result = evaluate(text, candidates);
-    assertEquals(3, result.hints().size());
+    assertEquals(4, result.hints().size());
     assertEquals(
-        List.of("context", "metaphor", "literally"),
+        List.of("very reliable", "context", "metaphor", "literally"),
         result.hints().stream().map(h -> text.substring(h.startOffset(), h.endOffset())).toList());
   }
 
@@ -99,9 +99,9 @@ class DeterministicHintPolicyTest {
                 candidate("metaphor", "隐喻", 1, LexiconEntryKind.WORD, 4.2),
                 candidate("algorithm", "算法", 1, LexiconEntryKind.WORD, 4.2),
                 high));
-    assertEquals(3, result.hints().size());
+    assertEquals(4, result.hints().size());
     assertEquals(
-        List.of("隐喻", "算法", "按字面意思"),
+        List.of("语境", "隐喻", "算法", "按字面意思"),
         result.hints().stream().map(hint -> hint.chineseGloss()).toList());
   }
 

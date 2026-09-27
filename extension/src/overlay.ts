@@ -1,5 +1,5 @@
 import { suppressionKey } from "./preferences";
-import type { Hint } from "./protocol";
+import { snapshotText, snapshotSegments, type Hint } from "./protocol";
 import type { StreamView } from "./stream";
 import type { Diagnostics } from "./diagnostics";
 import type { CaptionSource } from "./caption-source";
@@ -8,7 +8,16 @@ export const OVERLAY_ID = "lexiflow-caption-overlay";
 export const captionSelector = ".ytp-caption-segment";
 export function visibleSegments(player: HTMLElement): HTMLElement[] {
   return Array.from(player.querySelectorAll<HTMLElement>(captionSelector))
-    .filter(segment => segment.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
+    .filter(segment => {
+      if (!segment.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false;
+      const row = segment.closest<HTMLElement>(".caption-visual-line") ?? segment;
+      const window = segment.closest<HTMLElement>(".caption-window");
+      if (!window) return true;
+      const style = getComputedStyle(window);
+      if (![style.overflow, style.overflowY].some(value => value === "hidden" || value === "clip")) return true;
+      const bounds = window.getBoundingClientRect(), box = row.getBoundingClientRect();
+      return box.bottom > bounds.top + 1 && box.top < bounds.bottom - 1;
+    });
 }
 export type PreferenceView = { ready: boolean; entryKeys: Set<string>; message: string };
 
@@ -22,8 +31,6 @@ export class BilingualOverlay {
   private report?: HTMLPreElement;
   private preferenceMessage?: HTMLElement;
   private latestDiagnostics = "";
-  private source?: CaptionSource;
-  private englishOffset = 0;
 
   constructor(private readonly suppress: (entryId: string, lexiconVersion: number) => void,
     private readonly restore: () => void, private readonly resetDiagnostics: () => void) {}
@@ -31,73 +38,79 @@ export class BilingualOverlay {
   render(view: StreamView, preferences: PreferenceView, source?: CaptionSource): number {
     const host = this.ensure();
     if (!host || !this.line) return 0;
-    const hints = view.state === "ready" && preferences.ready && source?.caption === view.event?.request.caption
+    const hints = preferences.ready && source && view.event && source.caption === snapshotText(view.event.request.currentSnapshot)
       ? view.hints?.filter(hint => !preferences.entryKeys.has(suppressionKey(hint.lexiconEntryId, hint.lexiconVersion))) ?? [] : [];
-    const state = view.state === "ready" && hints.length === 0 ? "no-pending" : view.state;
-    host.dataset.lexiflowState = state;
-    this.line.replaceChildren();
-    this.source = source;
-    this.englishOffset = 0;
-    this.player?.classList.remove("lexiflow-inline-active");
+    host.dataset.lexiflowState = view.state === "ready" && !hints.length ? "no-pending" : view.state;
     if (this.preferenceMessage) this.preferenceMessage.textContent = preferences.message ||
       `仅本机：已抑制 ${preferences.entryKeys.size} 个词条。点击中文即可不再提示。`;
-    if (!source) return 0;
-    const caption = source.caption;
+    if (!source) {
+      if (this.line.childNodes.length) this.line.replaceChildren();
+      this.player?.classList.remove("lexiflow-inline-active");
+      return 0;
+    }
+    const existing = new Map(Array.from(this.line.children).map(node => [(node as HTMLElement).dataset.nodeKey!, node as HTMLElement]));
+    const desired: HTMLElement[] = [];
+    const segments = view.event ? snapshotSegments(view.event.request.currentSnapshot) : [];
+    const anchor = (offset: number): string => {
+      let base = 0;
+      for (const segment of segments) {
+        if (offset < base + segment.text.length) return segment.key;
+        base += segment.text.length;
+      }
+      return `text-${offset}`;
+    };
+    const span = (start: number, end: number, className = ""): void => {
+      if (start === end) return;
+      const text = source.caption.slice(start, end);
+      const key = `${anchor(start)}:${className}:${text}`;
+      const node = existing.get(key) ?? document.createElement("span");
+      node.dataset.nodeKey = key;
+      node.className = className; node.setAttribute("aria-hidden", "true");
+      const breaks = source.lineBreaks.filter(offset => offset >= start && offset < end).map(offset => offset - start);
+      const signature = JSON.stringify([text, breaks]);
+      if (node.dataset.content !== signature) {
+        node.dataset.content = signature;
+        const pieces: Node[] = []; let cursor = 0;
+        for (const offset of breaks) { pieces.push(document.createTextNode(text.slice(cursor, offset)), document.createElement("br")); cursor = offset; }
+        pieces.push(document.createTextNode(text.slice(cursor))); node.replaceChildren(...pieces);
+      }
+      desired.push(node);
+    };
+    const english = (start: number, end: number): void => {
+      // 普通英文也按增量片段切分，新增后缀不会替换旧英文节点。
+      let cursor = start, base = 0;
+      for (const segment of segments) {
+        base += segment.text.length;
+        if (base > cursor && base < end) { span(cursor, base); cursor = base; }
+      }
+      span(cursor, end);
+    };
     let offset = 0;
     for (const hint of hints) {
-      this.english(caption.slice(offset, hint.startOffset));
-      const term = caption.slice(hint.startOffset, hint.endOffset);
-      this.hintedTerm(term);
-      this.gloss(term, hint);
-      offset = hint.endOffset;
+      english(offset, hint.startOffset); span(hint.startOffset, hint.endOffset, "hint-term");
+      const term = source.caption.slice(hint.startOffset, hint.endOffset);
+      const key = `${anchor(hint.startOffset)}:gloss:${hint.lexiconEntryId}:${hint.lexiconVersion}:${hint.senseId}:${term}`;
+      let button = existing.get(key) as HTMLButtonElement | undefined;
+      if (!button) {
+        button = document.createElement("button"); button.dataset.nodeKey = key; button.className = "gloss";
+        button.textContent = `(${hint.chineseGloss})`;
+        button.title = `不再提示「${term}」及该词条词形，仅本机、当前词库版本`;
+        button.setAttribute("aria-label", `${term}：${hint.chineseGloss}。不再提示该词条，仅本机、当前词库版本`);
+        button.addEventListener("click", event => { event.stopPropagation(); this.suppress(hint.lexiconEntryId, hint.lexiconVersion); });
+      }
+      desired.push(button); offset = hint.endOffset;
     }
-    this.english(caption.slice(offset));
+    english(offset, source.caption.length);
+    const retained = new Set(desired);
+    for (const node of Array.from(this.line.children)) if (!retained.has(node as HTMLElement)) node.remove();
+    let cursor: ChildNode | null = this.line.firstChild;
+    for (const node of desired) {
+      if (node === cursor) cursor = cursor.nextSibling;
+      else this.line.insertBefore(node, cursor);
+    }
     this.position();
-    this.player?.classList.add("lexiflow-inline-active");
+    if (!this.player?.classList.contains("lexiflow-inline-active")) this.player?.classList.add("lexiflow-inline-active");
     return hints.length;
-  }
-
-  private english(text: string): void {
-    const start = this.englishOffset;
-    const end = start + text.length;
-    this.captionSpan(text, start, end);
-    this.englishOffset = end;
-  }
-
-  private hintedTerm(text: string): void {
-    const start = this.englishOffset;
-    const end = start + text.length;
-    this.captionSpan(text, start, end, "hint-term");
-    this.englishOffset = end;
-  }
-
-  private captionSpan(text: string, start: number, end: number, className?: string): void {
-    let cursor = start;
-    for (const offset of this.source?.lineBreaks ?? []) {
-      if (offset < start || offset >= end) continue;
-      this.englishSpan(text.slice(cursor - start, offset - start), className);
-      this.line!.append(document.createElement("br"));
-      cursor = offset;
-    }
-    this.englishSpan(text.slice(cursor - start), className);
-  }
-
-  private englishSpan(text: string, className?: string): void {
-    const span = document.createElement("span");
-    if (className) span.className = className;
-    span.setAttribute("aria-hidden", "true");
-    span.textContent = text;
-    this.line!.append(span);
-  }
-
-  private gloss(term: string, hint: Hint): void {
-    const button = document.createElement("button");
-    button.className = "gloss";
-    button.textContent = `(${hint.chineseGloss})`;
-    button.title = `不再提示「${term}」及该词条词形，仅本机、当前词库版本`;
-    button.setAttribute("aria-label", `${term}：${hint.chineseGloss}。不再提示该词条，仅本机、当前词库版本`);
-    button.addEventListener("click", event => { event.stopPropagation(); this.suppress(hint.lexiconEntryId, hint.lexiconVersion); });
-    this.line!.append(button);
   }
 
   updateDiagnostics(value: ReturnType<Diagnostics["snapshot"]>): void {

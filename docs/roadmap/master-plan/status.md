@@ -11,7 +11,9 @@
 
 ## 1.2. 当前交付检查
 
-本轮工作范围是脚本入口、注释门禁、Agent 分层、Delivery Gate 命名、后端边界及其调用点。变更合同在 [`openspec/changes/rename-delivery-gate-and-close-verification/`](../../../openspec/changes/rename-delivery-gate-and-close-verification/)；长期合同在 `openspec/specs/`。本地临时报告按 Harness 写入 ignored `tmp/quality/verification-reports/`，不作为仓库中的固定 PASS 证明。
+本轮工作范围是字幕增量快照、后端新增范围查询和稳定提示渲染。变更合同在 [`openspec/changes/stabilize-incremental-captions/`](../../../openspec/changes/stabilize-incremental-captions/)；长期合同在 `openspec/specs/`。本地临时报告按 Harness 写入 ignored `tmp/quality/verification-reports/`，不作为仓库中的固定 PASS 证明。
+
+合成字幕的单元与浏览器回归已覆盖节点保留、前缀退出、有限重试、来源隐藏及导航失效。真实登录态 Chrome 与本地 PostgreSQL 词库链路已完成自动采样验收，覆盖连续追加、滚动、字幕关闭和跳转后同步；采样发现的 CSS roll-up 可见行滞后已修复，并纳入无 DOM mutation 的动画回归。真实来源字段仅在可靠关联时提供，未知路径保持 null。本地采样证据留在 ignored 目录，不替代最终冻结输入的独立验证与审查。
 
 Change Verify、Repository Verify 与直接测试必须在最终相同输入上分别核验。正式 Delivery Gate 的 submission、validation、review、check 需要各阶段真实独立身份及明确证据，不能由实现者自签或由本地 Verify 自动替代。Qoder 原始运行记录保留在 ignored `tmp/qoder-tasks/`，仅供身份和预算审计，不是本轮的交付签发。
 

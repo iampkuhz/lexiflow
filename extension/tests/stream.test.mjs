@@ -1,203 +1,71 @@
-import assert from "node:assert/strict";
-import test from "node:test";
-import { CaptionStreamCoordinator } from "../dist/stream.js";
-
-function deferred() {
-  let resolve;
-  const promise = new Promise((next) => (resolve = next));
-  return { promise, resolve };
-}
-
-class ManualScheduler {
-  #jobs = new Map();
-  #next = 0;
-
-  setTimeout(callback) {
-    const id = ++this.#next;
-    this.#jobs.set(id, callback);
-    return id;
-  }
-
-  clearTimeout(id) {
-    this.#jobs.delete(id);
-  }
-
-  runAll() {
-    const jobs = [...this.#jobs.values()];
-    this.#jobs.clear();
-    jobs.forEach((job) => job());
-  }
-}
-
-function event(sequence, caption = `caption ${sequence}`) {
-  return {
-    key: `video\u0000revision\u0000${caption}`,
-    sequence,
-    videoTimeMs: sequence * 1000,
-    request: {
-      contentId: "00000000-0000-5000-8000-000000000001",
-      contentRevision: 1,
-      segmentId: "a".repeat(64),
-      caption,
-      startOffset: 0,
-      endOffset: caption.length
-    }
-  };
-}
-
-async function flush() {
-  await Promise.resolve();
-  await Promise.resolve();
-}
-
-test("coalesces DOM churn into one request for the visible caption", async () => {
-  const scheduler = new ManualScheduler();
-  const views = [];
-  const calls = [];
-  const result = deferred();
-  const coordinator = new CaptionStreamCoordinator(
-    (caption, requestId) => {
-      calls.push({ caption, requestId });
-      return { promise: result.promise, cancel: () => assert.fail("must not cancel the active caption") };
-    },
-    (view) => views.push(view),
-    scheduler
-  );
-
-  coordinator.submit(event(1));
-  coordinator.submit(event(1));
-  scheduler.runAll();
-  assert.equal(calls.length, 1);
-  result.resolve({ ok: true, body: { state: "READY", hints: [{ chineseGloss: "提示" }] } });
-  await flush();
-  assert.deepEqual(views.at(-1), { state: "ready", event: event(1), hints: [{ chineseGloss: "提示" }] });
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {CaptionStreamCoordinator,COALESCE_MS} from '../dist/stream.js';
+import {request,snapshot,segment,response,keyedHint} from './caption-fixtures.mjs';
+const flush=async()=>{for(let i=0;i<5;i++)await Promise.resolve();};
+const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve};};
+class Scheduler {jobs=new Map();id=0;setTimeout(fn){this.jobs.set(++this.id,fn);return this.id;}clearTimeout(id){this.jobs.delete(id);}run(){const jobs=[...this.jobs.values()];this.jobs.clear();jobs.forEach(fn=>fn());}}
+const event=(sequence,...segments)=>({sequence,key:`event-${sequence}`,videoTimeMs:sequence*1000,request:request(snapshot(...segments))});
+function setup(){const scheduler=new Scheduler(),views=[],calls=[],observations=[];let cancelled=0;
+ const coordinator=new CaptionStreamCoordinator((e,id)=>{const d=deferred();calls.push({...d,event:e,id});return{promise:d.promise,cancel:()=>cancelled++};},v=>views.push(v),scheduler,o=>observations.push(o));
+ return{scheduler,views,calls,coordinator,observations,get cancelled(){return cancelled;}};}
+const finish=async(call,hints=[])=>{call.resolve({ok:true,body:response(call.event.request,hints)});await flush();};
+test('coalesces observations and freezes last actually dispatched snapshot',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('a','A')));t.coordinator.submit(event(2,segment('a','A'),segment('b',' reliable')));t.scheduler.run();
+ assert.equal(t.calls.length,1);assert.equal(t.calls[0].event.request.lastRequestedSnapshot,null);
+ t.coordinator.submit(event(3,segment('a','A'),segment('b',' reliable'),segment('c',' method')));
+ assert.equal(t.calls.length,1);assert.equal(t.cancelled,0);await finish(t.calls[0]);t.scheduler.run();
+ const req=t.calls[1].event.request;assert.deepEqual(req.lastRequestedSnapshot,t.calls[0].event.request.currentSnapshot);
+ assert.deepEqual(req.currentSnapshot.captions[0].segments.map(s=>s.append),[false,false,true]);
+});
+test('late successful result merges into still visible prefix while suffix waits',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();
+ t.coordinator.submit(event(2,segment('s1','reliable'),segment('s2',' method')));await finish(t.calls[0],[keyedHint()]);
+ assert.equal(t.views.at(-1).state,'waiting');assert.equal(t.views.at(-1).hints[0].chineseGloss,'可靠的');
+ t.scheduler.run();await finish(t.calls[1]);assert.equal(t.views.at(-1).hints.length,1);
+});
+test('retains hints through append and shifts them on prefix removal without a request',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('a','A '),segment('s1','reliable')));t.scheduler.run();await finish(t.calls[0],[keyedHint()]);
+ t.coordinator.submit(event(2,segment('s1','reliable')));t.scheduler.run();assert.equal(t.calls.length,1);
+ assert.equal(t.views.at(-1).hints[0].startOffset,0);
+ t.coordinator.submit(event(3,segment('s1','reliable',false,1)));t.scheduler.run();assert.equal(t.calls.length,1);
+});
+test('unrelated replacement and clear cancel old work, including identical text after seek',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();t.coordinator.clear(2);
+ t.coordinator.submit(event(3,segment('s2','reliable')));t.scheduler.run();await finish(t.calls[0],[keyedHint()]);
+ assert.equal(t.cancelled,1);assert.equal(t.views.at(-1).hints.length,0);await finish(t.calls[1],[keyedHint('s2')]);assert.equal(t.views.at(-1).state,'ready');
+ t.coordinator.submit(event(4,segment('s3','entirely new')));assert.equal(t.views.at(-1).hints.length,0);
+});
+test('retries pending keys without pretending a sent request succeeded and stops at three attempts',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));
+ for(let i=0;i<3;i++){t.scheduler.run();assert.equal(t.calls[i].event.request.currentSnapshot.captions[0].segments[0].append,true);t.calls[i].resolve({ok:false,reason:'network'});await flush();}
+ t.scheduler.run();assert.equal(t.calls.length,3);assert.equal(t.views.at(-1).state,'fallback');
+ t.coordinator.submit(event(2,segment('s1','reliable'),segment('s2',' method')));t.scheduler.run();
+ assert.deepEqual(t.calls[3].event.request.currentSnapshot.captions[0].segments.map(s=>s.append),[true,true]);
+});
+test('no-hint success acknowledges keys and illegal coverage is not accepted',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();await finish(t.calls[0]);assert.equal(t.views.at(-1).state,'no-pending');
+ t.coordinator.submit(event(2,segment('s1','reliable'),segment('s2',' method')));t.scheduler.run();t.calls[1].resolve({ok:true,body:{processedKeys:[],hints:[]}});await flush();
+ assert.equal(t.views.at(-1).state,'fallback');t.scheduler.run();assert.equal(t.calls.length,2);
+});
+test('retains existing hint during failed suffix request and invalidates a changed word boundary',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();await finish(t.calls[0],[keyedHint()]);
+ t.coordinator.submit(event(2,segment('s1','reliable'),segment('s2',' method')));t.scheduler.run();t.calls[1].resolve({ok:false,reason:'rejected'});await flush();assert.equal(t.views.at(-1).hints.length,1);
+ t.coordinator.submit(event(3,segment('s1','reliability')));assert.equal(t.views.at(-1).hints.length,0);
+});
+test('synchronous transport failure uses bounded asynchronous retry and timing has no text',async()=>{
+ const scheduler=new Scheduler(),views=[],observations=[];const c=new CaptionStreamCoordinator(()=>{throw Error('transport');},v=>views.push(v),scheduler,o=>observations.push(o));
+ c.submit(event(1,segment('s1','reliable')));scheduler.run();await flush();assert.equal(views.at(-1).state,'fallback');
+ assert.equal(JSON.stringify(observations).includes('reliable'),false);assert.equal(COALESCE_MS,16);
 });
 
-test("cancels a replaced request and never renders its late result", async () => {
-  const scheduler = new ManualScheduler();
-  const views = [];
-  const first = deferred();
-  const second = deferred();
-  let cancelled = 0;
-  const coordinator = new CaptionStreamCoordinator(
-    (caption) => ({
-      promise: caption.sequence === 1 ? first.promise : second.promise,
-      cancel: () => (cancelled += 1)
-    }),
-    (view) => views.push(view),
-    scheduler
-  );
-
-  coordinator.submit(event(1, "old"));
-  scheduler.runAll();
-  coordinator.submit(event(2, "new"));
-  assert.equal(cancelled, 1);
-  scheduler.runAll();
-  first.resolve({ ok: true, body: { state: "READY", hints: [{ chineseGloss: "旧" }] } });
-  await flush();
-  assert.equal(views.some((view) => view.hints?.[0].chineseGloss === "旧"), false);
-  second.resolve({ ok: true, body: { state: "READY", hints: [{ chineseGloss: "新" }] } });
-  await flush();
-  assert.equal(views.at(-1).state, "ready");
-  assert.equal(views.at(-1).hints[0].chineseGloss, "新");
+test('same entry is shown once across incremental replies while all new keys are acknowledged',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();await finish(t.calls[0],[keyedHint()]);
+ t.coordinator.submit(event(2,segment('s1','reliable'),segment('s2',' reliable')));t.scheduler.run();await finish(t.calls[1],[keyedHint('s2',1,9)]);
+ assert.equal(t.views.at(-1).hints.length,1);assert.equal(t.views.at(-1).hints[0].startOffset,0);
+ t.coordinator.submit(event(3,segment('s1','reliable'),segment('s2',' reliable')));t.scheduler.run();assert.equal(t.calls.length,2);
 });
-
-test("makes NO_PENDING and failures terminal English-only states without retries", async () => {
-  const scheduler = new ManualScheduler();
-  const views = [];
-  let calls = 0;
-  const coordinator = new CaptionStreamCoordinator(
-    (caption) => {
-      calls += 1;
-      return {
-        promise: Promise.resolve(
-          caption.sequence === 1
-            ? { ok: true, body: { state: "NO_PENDING", hints: [] } }
-            : { ok: false, reason: "network" }
-        ),
-        cancel: () => undefined
-      };
-    },
-    (view) => views.push(view),
-    scheduler
-  );
-
-  coordinator.submit(event(1));
-  scheduler.runAll();
-  await flush();
-  assert.equal(views.at(-1).state, "no-pending");
-  coordinator.submit(event(2));
-  scheduler.runAll();
-  await flush();
-  assert.equal(views.at(-1).state, "fallback");
-  assert.equal(calls, 2);
-});
-
-test("clearing the source invalidates in-flight work and removes the overlay state", async () => {
-  const scheduler = new ManualScheduler();
-  const views = [];
-  const delayed = deferred();
-  let cancelled = false;
-  const coordinator = new CaptionStreamCoordinator(
-    () => ({ promise: delayed.promise, cancel: () => (cancelled = true) }),
-    (view) => views.push(view),
-    scheduler
-  );
-
-  coordinator.submit(event(1));
-  scheduler.runAll();
-  coordinator.clear(2);
-  assert.equal(cancelled, true);
-  delayed.resolve({ ok: true, body: { state: "READY", hints: [{ chineseGloss: "不得显示" }] } });
-  await flush();
-  assert.equal(views.at(-1).state, "idle");
-  assert.equal(views.some((view) => view.hints?.[0].chineseGloss === "不得显示"), false);
-});
-
-test("measures coalescing and transport and distinguishes late/cancelled/timeout", async () => {
-  const scheduler = new ManualScheduler();
-  const samples = [];
-  let time = 0;
-  const old = deferred();
-  const coordinator = new CaptionStreamCoordinator(
-    e => ({ promise: e.sequence === 1 ? old.promise : Promise.resolve({ ok: false, reason: "timeout" }), cancel: () => {} }),
-    () => {}, scheduler, value => samples.push(value), () => time
-  );
-  coordinator.submit(event(1)); time = 150; scheduler.runAll();
-  coordinator.submit(event(2)); time = 300; scheduler.runAll();
-  await flush();
-  old.resolve({ ok: false, reason: "aborted" }); await flush();
-  assert.equal(samples.filter(s => s.outcome === "requested").length, 2);
-  assert.equal(samples.filter(s => s.outcome === "cancelled").length, 1);
-  assert.equal(samples.filter(s => s.outcome === "late").length, 1);
-  assert.equal(samples.filter(s => s.outcome === "timeout").length, 1);
-  assert.equal(samples.filter(s => s.stage === "coalesce").every(s => s.elapsedMs === 150), true);
-  assert.equal(samples.filter(s => s.stage === "transport").length, 1);
-  assert.equal(JSON.stringify(samples).includes("caption"), false);
-});
-
-test("synchronous transport failure still falls back without preventing future captions", async () => {
-  const scheduler = new ManualScheduler();
-  const views = [];
-  const coordinator = new CaptionStreamCoordinator(() => { throw new Error("transport"); }, view => views.push(view), scheduler);
-  coordinator.submit(event(1)); scheduler.runAll();
-  assert.equal(views.at(-1).state, "fallback");
-  coordinator.submit(event(2)); scheduler.runAll();
-  assert.equal(views.at(-1).state, "fallback");
-});
-
-test('uses frame-sized coalescing and attributes missed results to specific boundaries', async () => {
-  const {COALESCE_MS}=await import('../dist/stream.js');
-  assert.equal(COALESCE_MS,16);
-  const scheduler=new ManualScheduler(), observations=[];
-  const old=deferred(); let scheduledMs;
-  const original=scheduler.setTimeout.bind(scheduler);
-  scheduler.setTimeout=(fn,ms)=>{scheduledMs=ms;return original(fn);};
-  const c=new CaptionStreamCoordinator(()=>({promise:old.promise,cancel:()=>{}}),()=>{},scheduler,o=>observations.push(o));
-  c.submit(event(1)); c.submit(event(2));
-  assert.equal(scheduledMs,16);
-  scheduler.runAll(); c.clear(3);
-  old.resolve({ok:true,body:{state:'READY',hints:[{chineseGloss:'提示'}]}}); await flush();
-  for(const outcome of ['cancelled-before-request','cancelled-in-flight','late-ready'])
-    assert.equal(observations.filter(o=>o.outcome===outcome).length,1);
+test('same entry duplicated within one reply still yields one display hint',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('s1','reliable'),segment('s2',' reliable')));t.scheduler.run();
+ await finish(t.calls[0],[keyedHint(),keyedHint('s2',1,9)]);assert.equal(t.views.at(-1).hints.length,1);assert.equal(t.views.at(-1).state,'ready');
 });

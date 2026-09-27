@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {readCaptionSource} from '../dist/caption-source.js';
-const segment=(text,row=null,top=0)=>({innerText:text,closest:()=>row,getBoundingClientRect:()=>({top})});
+const segment=(text,row=null,top=0)=>({innerText:text,closest:selector=>selector === ".caption-visual-line" ? row : null,getBoundingClientRect:()=>({top})});
 test('keeps source visual rows without splitting inline segments or changing API offsets',()=>{
  const first={},second={};
  assert.deepEqual(readCaptionSource([segment('A reliable',first),segment('caption',first),segment('on two rows.',second,20)]),{caption:'A reliable caption on two rows.',lineBreaks:[19]});

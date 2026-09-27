@@ -3,6 +3,9 @@
 spring:
   application:
     name: lexiflow-api
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
   threads:
     virtual:
       enabled: true

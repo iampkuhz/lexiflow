@@ -712,18 +712,18 @@ workstreams:
         dependencies: []
         depends_on: []
       - id: LF-TSK-ENR-1002
-        title: 稳定词段匹配与展示上限
+        title: 稳定词段匹配与非重叠展示
         priority: P0
         phase: P1
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: docs/roadmap/master-plan/foundation.md
         estimated_minutes: 40
         allowed_files: backend/product/enrichment/**
         forbidden_files: 除 allowed_files 外的所有文件；尤其 AGENTS.md、harness/**、planning/** 与其他写入者范围
-        expected_output: 词形、别名、Unicode 与标点范围正确；最长优先、去重、非重叠、最多三个且乱序稳定。
+        expected_output: 词形、别名、Unicode 与标点范围正确；价值排序、去重、非重叠、无固定三条上限且乱序稳定。
         acceptance_criteria:
-        - 词形、别名、Unicode 与标点范围正确；最长优先、去重、非重叠、最多三个且乱序稳定。
+        - 词形、别名、Unicode 与标点范围正确；价值排序、去重、非重叠、无固定三条上限且乱序稳定。
         acceptance_evidence:
         - 直接测试结果、冻结 diff 与独立审查；执行状态只见路线图状态页
         validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :enrichment:test
@@ -839,6 +839,44 @@ workstreams:
         - eng.repository.policy
         dependencies: []
         depends_on: []
+      - id: LF-TSK-EXT-1003
+        title: 增量字幕双快照与稳定提示闭环
+        priority: P0
+        phase: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/stabilize-incremental-captions/proposal.md
+        estimated_minutes: 90
+        owner: LF-WS-EXT
+        allowed_files:
+        - backend/product/**
+        - extension/**
+        - docs/product/product-brief.md
+        - docs/architecture/lexicon-contract.md
+        - docs/roadmap/master-plan/foundation/experience.md
+        - docs/roadmap/master-plan/status.md
+        - openspec/specs/product-architecture/spec.md
+        - openspec/changes/stabilize-incremental-captions/**
+        - planning/workstreams.yaml
+        forbidden_files: [AGENTS.md, "harness/**", "scripts/**"]
+        deliverable: 插件统一快照与稳定片段 key；新增范围查询；保留已有提示节点；失败、隐藏、导航与轨道变化安全失效。
+        acceptance_criteria:
+        - 新旧双快照与请求级 append；纯布局不请求；失败片段不误判已处理。
+        - 后端仅处理连续新增范围，保留上下文边界、词库版本与释义护栏，取消固定三条上限。
+        - 合成 DOM 和真实 YouTube 来源验证，独立 Change/Repository Verify 与 review 证据。
+        acceptance_evidence:
+        - extension/tests/incremental-acceptance.mjs
+        - extension/tests/live-youtube-acceptance.mjs
+        - backend/product/enrichment/src/test/java/io/lexiflow/enrichment/application/caption/IncrementalCaptionUseCaseTest.java
+        validation_command: npm --prefix extension run quality:check
+        required_check_ids:
+        - eng.backend.delivery
+        - eng.extension.quality
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies: []
+        depends_on: []
 - id: LF-WS-PRF
   code: PRF
   name: "性能与韧性"
@@ -904,8 +942,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-ENR-1002
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 1.1.0
           required_result: PASS
         - task_id: LF-TSK-API-1001
           type: hard

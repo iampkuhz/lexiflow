@@ -12,6 +12,9 @@ execFileSync("npx", ["tsc", "--noEmit", "-p", "tsconfig.json"], { cwd: root, std
 for (const [entry, format] of [
   ["src/background.ts", "esm"],
   ["src/content.ts", "iife"],
+  ["src/youtube-bridge.ts", "iife"],
+  ["src/youtube-source.ts", "esm"],
+  ["src/caption-snapshot.ts", "esm"],
   ["src/popup.ts", "iife"],
   ["src/caption-source.ts", "esm"],
   ["src/stream.ts", "esm"],

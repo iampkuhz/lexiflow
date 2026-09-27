@@ -197,6 +197,13 @@ try {
     await setCaption(page, "We need reliable captions.", 2);
     await waitForState(page, "ready");
   }
+  const { runIncrementalAcceptance } = await import("./incremental-acceptance.mjs");
+  await runIncrementalAcceptance({page,serviceWorker,setCaption,waitForState,overlayText});
+  if (process.env.LEXIFLOW_LIVE_YOUTUBE_URL) {
+    const { runLiveYoutubeAcceptance } = await import("./live-youtube-acceptance.mjs");
+    await runLiveYoutubeAcceptance({context,serviceWorker,repositoryRoot,url:process.env.LEXIFLOW_LIVE_YOUTUBE_URL});
+    await page.bringToFront();
+  }
   const { runExperienceAcceptance } = await import("./experience-acceptance.mjs");
   await runExperienceAcceptance({ page, context, serviceWorker, apiBase, repositoryRoot, setCaption, waitForState, overlayText });
   await setCaption(page, "We need reliable captions.", 2);
@@ -307,16 +314,23 @@ try {
     (window.chrome ??= {}).runtime = { sendMessage: message => {
       if (message.type === "local-preferences") return Promise.resolve({ok:true,entryKeys:[]});
       if (message.type === "cancel-caption-hint") return Promise.resolve({ ok: true });
-      const caption = message.payload.caption;
-      const startOffset = caption.indexOf("reliable");
-      return Promise.resolve({ ok: true, body: { caption, state: startOffset < 0 ? "NO_PENDING" : "READY",
-        hints: startOffset < 0 ? [] : [{ lexiconEntryId:"00000000-0000-0000-0000-000000000001",lexiconVersion:1,senseId:"00000000-0000-0000-0000-000000000002",startOffset, endOffset: startOffset + 8, chineseGloss: "可靠的" }] } });
+      const segments = message.payload.currentSnapshot.captions.flatMap(group => group.segments);
+      const target = segments.find(segment => segment.append && segment.text.includes("reliable"));
+      const startOffset = target?.text.indexOf("reliable") ?? -1;
+      return Promise.resolve({ ok: true, body: { processedKeys: segments.filter(segment => segment.append).map(segment => segment.key),
+        hints: !target ? [] : [{ startKey:target.key,endKey:target.key,lexiconEntryId:"00000000-0000-0000-0000-000000000001",lexiconVersion:1,senseId:"00000000-0000-0000-0000-000000000002",startOffset, endOffset: startOffset + 8, chineseGloss: "可靠的" }] } });
     } };
   });
   await hashPage.evaluate(await readFile(resolve(extensionPath, "content.js"), "utf8"));
   await setCaption(hashPage, "A reliable result.", 1);
   await waitForState(hashPage, "ready");
-  await hashPage.evaluate(() => { window.__holdDigest = true; window.__setCaption("A reliable method.", 2); });
+  await hashPage.evaluate(() => {
+    window.__holdDigest = true;
+    document.dispatchEvent(new Event("yt-navigate-start"));
+    history.replaceState({}, "", "/watch?v=hash-next");
+    window.__setCaption("A reliable method.", 2);
+    document.dispatchEvent(new Event("yt-navigate-finish"));
+  });
   await hashPage.evaluate(() => new Promise(requestAnimationFrame));
   assert.equal(await overlayText(hashPage), "A reliable method.");
   assert.equal(await hashPage.locator("#player").evaluate(el => el.classList.contains("lexiflow-inline-active")), true);

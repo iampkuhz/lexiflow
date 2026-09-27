@@ -57,8 +57,8 @@ async function requestHints(key: string, payload: CaptionHintRequest): Promise<A
       outcome = "invalid-response";
       return { ok: false, reason: "invalid-response" };
     }
-    const body = parseHintResponse(data, payload.caption);
-    outcome = body?.state ?? "invalid-response";
+    const body = parseHintResponse(data, payload);
+    outcome = body ? (body.hints.length ? "READY" : "NO_PENDING") : "invalid-response";
     const timings = parseServerTiming(response.headers?.get("Server-Timing") ?? null);
     return body === undefined ? { ok: false, reason: "invalid-response" } : { ok: true, body, ...timings };
   } catch {

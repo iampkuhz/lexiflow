@@ -1,57 +1,56 @@
 package io.lexiflow.api.hints;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.lexiflow.api.hints.model.CaptionHintRequest;
-import java.nio.charset.StandardCharsets;
-import java.util.UUID;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.web.server.ResponseStatusException;
 
 @SpringBootTest
 class CaptionHintControllerTest {
   @Autowired private CaptionHintController controller;
 
   @Test
-  void returnsChineseHintWithoutReplacingEnglishCaption() {
-    var caption = "We need reliable captions.";
-
+  void returnsKeyedHintAndProcessesNoHintSegments() {
     var response =
         controller
             .hint(
-                new CaptionHintRequest(
-                    UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                    1,
-                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                    caption,
-                    0,
-                    caption.length()))
+                request(
+                    new CaptionHintRequest.Segment("old", "We need ", null, false, 0L),
+                    new CaptionHintRequest.Segment("a", "reli", null, true, 0L),
+                    new CaptionHintRequest.Segment("b", "able", null, true, 0L),
+                    new CaptionHintRequest.Segment("c", " zxqv", null, true, 0L)))
             .getBody();
-
-    assertEquals(caption, response.caption());
-    assertEquals("READY", response.state());
-    assertEquals("可靠的", response.hints().getFirst().chineseGloss());
-    assertEquals(
-        UUID.nameUUIDFromBytes("sense:reliable".getBytes(StandardCharsets.UTF_8)).toString(),
-        response.hints().getFirst().senseId());
+    assertEquals(List.of("a", "b", "c"), response.processedKeys());
+    assertEquals(1, response.hints().size());
+    var hint = response.hints().getFirst();
+    assertEquals("a", hint.startKey());
+    assertEquals(0, hint.startOffset());
+    assertEquals("b", hint.endKey());
+    assertEquals(4, hint.endOffset());
+    assertEquals("可靠的", hint.chineseGloss());
+    assertTrue(hint.lexiconVersion() > 0);
   }
 
   @Test
-  void rejectsOutOfRangeCaptionRequest() {
-    var request =
-        new CaptionHintRequest(
-            UUID.fromString("00000000-0000-0000-0000-000000000001"),
-            1,
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "caption",
-            0,
-            8);
+  void noAppendMeansNoQueriesAndEmptyResult() {
+    var response =
+        controller
+            .hint(request(new CaptionHintRequest.Segment("old", "reliable", null, false, 0L)))
+            .getBody();
+    assertTrue(response.processedKeys().isEmpty());
+    assertTrue(response.hints().isEmpty());
+  }
 
-    var exception = assertThrows(ResponseStatusException.class, () -> controller.hint(request));
-
-    assertEquals(400, exception.getStatusCode().value());
+  private static CaptionHintRequest request(CaptionHintRequest.Segment... segments) {
+    return new CaptionHintRequest(
+        "topic",
+        null,
+        null,
+        new CaptionHintRequest.Snapshot(
+            List.of(new CaptionHintRequest.CaptionGroup(null, null, List.of(segments)))));
   }
 }

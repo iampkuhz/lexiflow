@@ -280,11 +280,20 @@ async function installThreeHintRendererMock(serviceWorker, apiBase, caption, ter
     globalThis.fetch = async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input?.url;
       if (url === target || String(url ?? "").includes("/api/v1/caption-hints")) {
-        let requestedCaption;
-        try { requestedCaption = JSON.parse(typeof init?.body === "string" ? init.body : "{}").caption; } catch { /* invalid requests retain normal parser behavior */ }
-        const body = requestedCaption === syntheticCaption
-          ? { caption: syntheticCaption, state: "READY", hints: syntheticHints }
-          : { caption: typeof requestedCaption === "string" && requestedCaption ? requestedCaption : syntheticCaption, state: "NO_PENDING", hints: [] };
+        let request;
+        try { request = JSON.parse(typeof init?.body === "string" ? init.body : "{}"); } catch { return originalFetch(input, init); }
+        const segments = request.currentSnapshot.captions.flatMap(group => group.segments);
+        const requestedCaption = segments.map(segment => segment.text).join("");
+        const hints = requestedCaption === syntheticCaption ? syntheticHints.map(hint => {
+          let base = 0, startKey, endKey, startOffset, endOffset;
+          for (const segment of segments) {
+            if (hint.startOffset >= base && hint.startOffset < base + segment.text.length) { startKey=segment.key; startOffset=hint.startOffset-base; }
+            if (hint.endOffset > base && hint.endOffset <= base + segment.text.length) { endKey=segment.key; endOffset=hint.endOffset-base; }
+            base += segment.text.length;
+          }
+          return {...hint,startKey,endKey,startOffset,endOffset};
+        }) : [];
+        const body = { processedKeys: segments.filter(segment => segment.append).map(segment => segment.key), hints };
         return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       return originalFetch(input, init);

@@ -1,14 +1,13 @@
 package io.lexiflow.api.hints;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -18,46 +17,48 @@ class CaptionHintHttpTest {
   @LocalServerPort private int port;
 
   @Test
-  void returnsReadyAndNoPendingAcrossTheRealHttpBoundary() throws Exception {
-    var known = post(payload("reliable", 8));
+  void returnsKeyedHintsAndNoPendingAcrossHttp() throws Exception {
+    var known = post(payload(segment("a", "reliable", true)));
     assertEquals(200, known.statusCode());
     assertEquals("no-store", known.headers().firstValue("Cache-Control").orElseThrow());
-    assertTrue(
-        known
-            .headers()
-            .firstValue("Server-Timing")
-            .orElseThrow()
-            .matches(
-                "query;dur=[0-9]+[.][0-9]{3}, rules;dur=[0-9]+[.][0-9]{3}, api;dur=[0-9]+[.][0-9]{3}"));
-    assertTrue(known.body().contains("\"state\":\"READY\""));
+    assertTrue(known.headers().firstValue("Server-Timing").orElseThrow().contains("query;dur="));
+    assertTrue(known.body().contains("\"processedKeys\":[\"a\"]"));
+    assertTrue(known.body().contains("\"startKey\":\"a\""));
     assertTrue(known.body().contains("可靠的"));
-    assertTrue(known.body().contains("\"caption\":\"reliable\""));
-    assertTrue(
-        known
-            .body()
-            .contains(
-                "\"senseId\":\""
-                    + UUID.nameUUIDFromBytes("sense:reliable".getBytes(StandardCharsets.UTF_8))
-                    + "\""));
-    var unknown = post(payload("zxqv", 4));
+    assertFalse(known.body().contains("\"caption\""));
+    var unknown = post(payload(segment("a", "zxqv", true)));
     assertEquals(200, unknown.statusCode());
-    assertTrue(unknown.body().contains("\"state\":\"NO_PENDING\""));
+    assertTrue(unknown.body().contains("\"processedKeys\":[\"a\"]"));
+    assertTrue(unknown.body().contains("\"hints\":[]"));
   }
 
   @Test
-  void rejectsMalformedJsonAndOutOfContractRequestsWith400() throws Exception {
+  void rejectsMalformedLegacyDuplicateAndExcessiveRequests() throws Exception {
+    var legacy = "{\"contentId\":\"old\",\"caption\":\"reliable\"}";
+    var duplicate = payload(segment("a", "one", true) + "," + segment("a", "two", true));
     for (var body :
         new String[] {
           "{",
           "null",
           "{}",
-          payload("reliable", 9),
-          payload("", 0),
-          payload("x".repeat(501), 501),
-          payload("reliable", 8).replace("\"contentRevision\":1", "\"contentRevision\":0"),
-          payload("reliable", 8).replace("00000000-0000-0000-0000-000000000001", "bad")
+          legacy,
+          duplicate,
+          payload(segment("a", "x".repeat(501), true)),
+          payload(segment("a", "x".repeat(300), true) + "," + segment("b", "y".repeat(201), true)),
+          payload(segment("a", "", true)),
+          payload(segment("a", "valid", true)).replace("\"append\":true,", ""),
+          payload(segment("a", "valid", true)).replace("\"line\":0", "\"line\":-1"),
+          payload(segment("a", "valid", true)).replace("\"line\":0", "\"line\":9007199254740992"),
+          payload(segment("a", "valid", true))
+              .replace("\"captionTopicKey\":\"topic\"", "\"captionTopicKey\":\"\""),
+          payload(segment("a", "valid", true))
+              .replace("\"windowId\":null", "\"windowId\":\"" + "x".repeat(129) + "\""),
+          payload(segment("a", "valid", true))
+              .replace("\"key\":\"a\"", "\"key\":\"" + "x".repeat(129) + "\""),
+          payload(segment("a", "valid", true))
+              .replace("\"append\":true", "\"append\":true,\"contentId\":\"old\"")
         }) {
-      assertEquals(400, post(body).statusCode());
+      assertEquals(400, post(body).statusCode(), body);
     }
   }
 
@@ -72,13 +73,19 @@ class CaptionHintHttpTest {
     }
   }
 
-  private static String payload(String caption, int end) {
-    return "{\"contentId\":\"00000000-0000-0000-0000-000000000001\",\"contentRevision\":1,\"segmentId\":\""
-        + "a".repeat(64)
-        + "\",\"caption\":\""
-        + caption
-        + "\",\"startOffset\":0,\"endOffset\":"
-        + end
-        + "}";
+  private static String payload(String segments) {
+    return "{\"captionTopicKey\":\"topic\",\"trackKey\":null,\"lastRequestedSnapshot\":null,\"currentSnapshot\":{\"captions\":[{\"windowId\":null,\"startMs\":null,\"segments\":["
+        + segments
+        + "]}]}}";
+  }
+
+  private static String segment(String key, String text, boolean append) {
+    return "{\"key\":\""
+        + key
+        + "\",\"text\":\""
+        + text
+        + "\",\"offsetMs\":null,\"append\":"
+        + append
+        + ",\"line\":0}";
   }
 }

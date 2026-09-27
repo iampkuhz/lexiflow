@@ -11,43 +11,28 @@ import io.lexiflow.api.hints.model.CaptionHintRequest;
 import io.lexiflow.enrichment.application.caption.EnrichCaptionUseCase;
 import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
 import io.lexiflow.lexicon.domain.catalog.BuiltinLexiconCatalog;
-import java.util.UUID;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
-/** 本机诊断日志只输出耗时、英文和与扩展一致的最终提示字符串。 */
+/** 本机诊断日志只输出本次处理区间，不声称是客户端整屏合成。 */
 class CaptionHintLogTest {
-  private static final UUID CONTENT_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
-  private static final String SEGMENT_ID = "a".repeat(64);
-
   @Test
-  void logsEnglishAndFinalInlineHintWithoutOtherRequestDetails() {
-    var message = recordedLog("We need reliable captions.");
-
-    assertTrue(
-        message.matches(
-            "hint_result apiMs=[0-9]+[.][0-9]{3} english=\\\"We need reliable captions[.]\\\" final=\\\"We need reliable\\(可靠的\\) captions[.]\\\""));
-    assertFalse(message.contains(CONTENT_ID.toString()));
-    assertFalse(message.contains("state="));
-    assertFalse(message.contains("queryMs="));
-    assertFalse(message.contains("rulesMs="));
+  void logsOnlyCurrentAppendTextAndHintWithoutIdentity() {
+    var message = recordedLog("reliable");
+    assertTrue(message.contains("processedEnglish=\"reliable\""));
+    assertTrue(message.contains("processedWithHints=\"reliable(可靠的)\""));
+    assertFalse(message.contains("old text"));
+    assertFalse(message.contains("secret-topic"));
+    assertFalse(message.contains("new-key"));
+    assertFalse(message.contains("final="));
   }
 
   @Test
-  void logsUnchangedEnglishWhenThereIsNoDisplayableHint() {
-    var message = recordedLog("Nothing familiar here.");
-
-    assertTrue(message.contains("english=\"Nothing familiar here.\""));
-    assertTrue(message.contains("final=\"Nothing familiar here.\""));
-  }
-
-  @Test
-  void escapesUntrustedCaptionAsOneLogLine() {
+  void escapesUntrustedTextAsOneLine() {
     var message = recordedLog("reliable\nfake=\"x\"");
-
     assertFalse(message.contains("\n"));
-    assertTrue(message.contains("english=\"reliable\\nfake=\\\"x\\\"\""));
-    assertTrue(message.contains("final=\"reliable(可靠的)\\nfake=\\\"x\\\"\""));
+    assertTrue(message.contains("processedEnglish=\"reliable\\nfake=\\\"x\\\"\""));
   }
 
   private static String recordedLog(String caption) {
@@ -60,7 +45,20 @@ class CaptionHintLogTest {
           new CaptionHintController(
               new EnrichCaptionUseCase(new BuiltinLexiconCatalog(), new DeterministicHintPolicy()));
       controller.hint(
-          new CaptionHintRequest(CONTENT_ID, 1, SEGMENT_ID, caption, 0, caption.length()));
+          new CaptionHintRequest(
+              "secret-topic",
+              null,
+              null,
+              new CaptionHintRequest.Snapshot(
+                  List.of(
+                      new CaptionHintRequest.CaptionGroup(
+                          null,
+                          null,
+                          List.of(
+                              new CaptionHintRequest.Segment(
+                                  "old-key", "old text ", null, false, 0L),
+                              new CaptionHintRequest.Segment(
+                                  "new-key", caption, null, true, 0L)))))));
       assertEquals(1, appender.list.size());
       return appender.list.getFirst().getFormattedMessage();
     } finally {

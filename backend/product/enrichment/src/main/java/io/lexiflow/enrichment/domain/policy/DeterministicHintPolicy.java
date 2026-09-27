@@ -18,7 +18,6 @@ import java.util.regex.Pattern;
 
 /** 根据公开词汇材料生成确定性提示，绝不调用模型或建立伪造的 pending 工作。 */
 public final class DeterministicHintPolicy {
-  private static final int MAX_HINTS_PER_CAPTION = 3;
   private static final int MAX_GLOSS_CODE_POINTS = 24;
   private static final Set<String> LOW_INFORMATION_STARTS = Set.of("a", "an", "the", "not");
   private static final Set<String> INCOMPLETE_ENDS =
@@ -50,33 +49,46 @@ public final class DeterministicHintPolicy {
    */
   public CaptionHintResult evaluate(CaptionContext context, List<LexiconHintCandidate> candidates) {
     Objects.requireNonNull(context, "context");
+    var selected =
+        evaluate(context.caption(), context.startOffset(), context.endOffset(), candidates);
+    return new CaptionHintResult(
+        context.caption(), selected.isEmpty() ? HintState.NO_PENDING : HintState.READY, selected);
+  }
+
+  /**
+   * 在完整 caption 组的指定新增区间定位，词边界仍取完整组文字。
+   *
+   * @param caption 含义：当前字幕组的完整文字。取值范围：非空对象，可为空字符串。
+   * @param startOffset 含义：新增区间的 UTF-16 起点。取值范围：零至 endOffset，包含该位置。
+   * @param endOffset 含义：新增区间的 UTF-16 终点。取值范围：startOffset 至文字长度，不包含该位置。
+   * @param candidates 含义：新增区间查询到的已发布候选。取值范围：非空列表，可为空集合。
+   * @return 完全位于新增区间内的非重叠提示；歧义或无命中时不补造提示。
+   */
+  public List<AnnotationHint> evaluate(
+      String caption, int startOffset, int endOffset, List<LexiconHintCandidate> candidates) {
+    Objects.requireNonNull(caption, "caption");
     Objects.requireNonNull(candidates, "candidates");
+    if (startOffset < 0 || endOffset < startOffset || endOffset > caption.length()) {
+      throw new IllegalArgumentException("caption range is invalid");
+    }
     if (candidates.stream().anyMatch(Objects::isNull)) {
-      return noHints(context);
+      return List.of();
     }
     if (candidates.stream().map(LexiconHintCandidate::lexiconVersion).distinct().limit(2).count()
         > 1) {
-      return noHints(context);
+      return List.of();
     }
 
     var matches = new ArrayList<CandidateMatch>();
     for (var candidate : candidates) {
-      matches.addAll(locate(context, candidate));
+      matches.addAll(locate(caption, startOffset, endOffset, candidate));
     }
     var ambiguousRanges = ambiguousRanges(matches);
-    var selected = select(matches, ambiguousRanges);
-    if (selected.isEmpty()) {
-      return noHints(context);
-    }
-    return new CaptionHintResult(context.caption(), HintState.READY, selected);
-  }
-
-  private static CaptionHintResult noHints(CaptionContext context) {
-    return new CaptionHintResult(context.caption(), HintState.NO_PENDING, List.of());
+    return select(matches, ambiguousRanges);
   }
 
   private static List<CandidateMatch> locate(
-      CaptionContext context, LexiconHintCandidate candidate) {
+      String caption, int startOffset, int endOffset, LexiconHintCandidate candidate) {
     var matches = new ArrayList<CandidateMatch>();
     var eligible =
         candidate.finalAction() == LexiconHintAction.HINT && !lowInformationPhrase(candidate);
@@ -88,10 +100,10 @@ public final class DeterministicHintPolicy {
     {
       var matcher =
           Pattern.compile(Pattern.quote(surface), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
-              .matcher(context.caption())
-              .region(context.startOffset(), context.endOffset());
+              .matcher(caption)
+              .region(startOffset, endOffset);
       while (matcher.find()) {
-        if (isWordBoundary(context.caption(), matcher.start(), matcher.end())) {
+        if (isWordBoundary(caption, matcher.start(), matcher.end())) {
           matches.add(
               new CandidateMatch(
                   matcher.start(),
@@ -146,8 +158,7 @@ public final class DeterministicHintPolicy {
         .sorted(MATCH_PRIORITY)
         .forEach(
             match -> {
-              if (selected.size() < MAX_HINTS_PER_CAPTION
-                  && !selectedEntryIds.contains(match.entryId())
+              if (!selectedEntryIds.contains(match.entryId())
                   && selected.stream().noneMatch(existing -> overlaps(existing, match))) {
                 selectedEntryIds.add(match.entryId());
                 selected.add(match);

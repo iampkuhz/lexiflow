@@ -2,97 +2,97 @@ declare const __LEXIFLOW_API_PORT__: number;
 export const API_URL = `http://127.0.0.1:${typeof __LEXIFLOW_API_PORT__ === "number" ? __LEXIFLOW_API_PORT__ : 18080}/api/v1/caption-hints`;
 export const MAX_CAPTION_LENGTH = 500;
 export const REQUEST_TIMEOUT_MS = 1_500;
-
-export type CaptionHintRequest = {
-  contentId: string;
-  contentRevision: number;
-  segmentId: string;
-  caption: string;
-  startOffset: number;
-  endOffset: number;
-};
-
+export type CaptionSegment = { key: string; text: string; offsetMs: number | null; append: boolean; line: number };
+export type CaptionGroup = { windowId: string | null; startMs: number | null; segments: CaptionSegment[] };
+export type CaptionSnapshot = { captions: CaptionGroup[] };
+export type CaptionHintRequest = { captionTopicKey: string; trackKey: string | null;
+  lastRequestedSnapshot: CaptionSnapshot | null; currentSnapshot: CaptionSnapshot };
 export type Hint = { startOffset: number; endOffset: number; chineseGloss: string;
   lexiconEntryId: string; lexiconVersion: number; senseId: string };
-/** Published identities are canonical UUIDs, not guessed terms or array indices. */
+export type KeyedHint = Hint & { startKey: string; endKey: string };
+export type HintResponse = { processedKeys: string[]; hints: KeyedHint[] };
+export type ApiTimings = { query?: number; rules?: number; api?: number };
+export type ApiResult = ({ ok: true; body: HintResponse } | { ok: false;
+  reason: "timeout" | "aborted" | "invalid-request" | "network" | "rejected" | "invalid-response" }) & { timings?: ApiTimings };
+export const snapshotSegments = (snapshot: CaptionSnapshot): CaptionSegment[] => snapshot.captions.flatMap(group => group.segments);
+export const snapshotText = (snapshot: CaptionSnapshot): string => snapshotSegments(snapshot).map(segment => segment.text).join("");
+const boundedId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 128;
+const nonnegative = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 export function isStableId(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 }
-export type HintResponse = { caption: string; state: "READY" | "NO_PENDING"; hints: Hint[] };
-export type ApiTimings = { query?: number; rules?: number; api?: number };
-export type ApiResult = (
-  | { ok: true; body: HintResponse }
-  | { ok: false; reason: "timeout" | "aborted" | "invalid-request" | "network" | "rejected" | "invalid-response" }
-) & { timings?: ApiTimings };
-
+export function isCaptionSnapshot(value: unknown): value is CaptionSnapshot {
+  if (!value || typeof value !== "object") return false;
+  const groups = (value as CaptionSnapshot).captions;
+  if (!Array.isArray(groups) || groups.length > 500) return false;
+  let length = 0; const keys = new Set<string>();
+  for (const group of groups) {
+    if (!group || (group.windowId !== null && !boundedId(group.windowId)) ||
+        (group.startMs !== null && !nonnegative(group.startMs)) || !Array.isArray(group.segments) || !group.segments.length) return false;
+    for (const segment of group.segments) {
+      if (!segment || !boundedId(segment.key) || keys.has(segment.key) || typeof segment.text !== "string" || !segment.text.length ||
+          Array.from(segment.text).some(character => character.length === 1 && character.charCodeAt(0) >= 0xd800 && character.charCodeAt(0) <= 0xdfff) ||
+          typeof segment.append !== "boolean" || !nonnegative(segment.line) ||
+          (segment.offsetMs !== null && !nonnegative(segment.offsetMs))) return false;
+      length += segment.text.length; keys.add(segment.key);
+      if (length > MAX_CAPTION_LENGTH || keys.size > 500) return false;
+    }
+  }
+  return true;
+}
 export function isCaptionHintRequest(value: unknown): value is CaptionHintRequest {
-  if (value === null || typeof value !== "object") return false;
-  const request = value as Partial<CaptionHintRequest>;
-  const { contentId, contentRevision, segmentId, caption, startOffset, endOffset } = request;
-  return (
-    typeof contentId === "string" &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(contentId) &&
-    typeof contentRevision === "number" &&
-    Number.isSafeInteger(contentRevision) &&
-    contentRevision > 0 &&
-    typeof segmentId === "string" &&
-    /^[0-9a-f]{64}$/.test(segmentId) &&
-    typeof caption === "string" &&
-    caption.trim().length > 0 &&
-    caption.length <= MAX_CAPTION_LENGTH &&
-    typeof startOffset === "number" &&
-    typeof endOffset === "number" &&
-    Number.isSafeInteger(startOffset) &&
-    Number.isSafeInteger(endOffset) &&
-    startOffset >= 0 &&
-    endOffset > startOffset &&
-    endOffset <= caption.length
-  );
+  if (!value || typeof value !== "object") return false;
+  const request = value as CaptionHintRequest;
+  if (!boundedId(request.captionTopicKey) || (request.trackKey !== null && !boundedId(request.trackKey)) ||
+      !isCaptionSnapshot(request.currentSnapshot) || (request.lastRequestedSnapshot !== null && !isCaptionSnapshot(request.lastRequestedSnapshot))) return false;
+  const previous = new Map(request.lastRequestedSnapshot ? snapshotSegments(request.lastRequestedSnapshot).map(segment => [segment.key, segment.text]) : []);
+  return snapshotSegments(request.currentSnapshot).every(segment => !previous.has(segment.key) || previous.get(segment.key)!.endsWith(segment.text));
 }
-
-function splitsSurrogate(text: string, offset: number): boolean {
-  return offset > 0 && offset < text.length &&
-    /[\uD800-\uDBFF]/.test(text[offset - 1]) && /[\uDC00-\uDFFF]/.test(text[offset]);
+export function splitsSurrogate(text: string, offset: number): boolean {
+  return offset > 0 && offset < text.length && /[\uD800-\uDBFF]/.test(text[offset - 1]) && /[\uDC00-\uDFFF]/.test(text[offset]);
 }
-
-/** 校验 API 的确定性词库提示，不在客户端推断或改写词义。 */
-export function parseHintResponse(value: unknown, expectedCaption?: string): HintResponse | undefined {
-  if (value === null || typeof value !== "object") return undefined;
-  const body = value as Partial<HintResponse>;
-  if (typeof body.caption !== "string" || body.caption.length === 0 || body.caption.length > MAX_CAPTION_LENGTH ||
-      (expectedCaption !== undefined && body.caption !== expectedCaption) ||
-      (body.state !== "READY" && body.state !== "NO_PENDING") || !Array.isArray(body.hints)) return undefined;
-  if ((body.state === "READY" && (body.hints.length === 0 || body.hints.length > 3)) ||
-      (body.state === "NO_PENDING" && body.hints.length !== 0)) return undefined;
-  const hints: Hint[] = [];
+/** 将片段内范围解析成发出快照内的位置，拒绝跨旧片段或字幕组的提示。 */
+export function resolveHint(hint: KeyedHint, snapshot: CaptionSnapshot): Hint | undefined {
+  let position = 0;
+  for (const group of snapshot.captions) {
+    const start = group.segments.findIndex(segment => segment.key === hint.startKey);
+    const end = group.segments.findIndex(segment => segment.key === hint.endKey);
+    if (start >= 0 && end >= start) {
+      const first = group.segments[start], last = group.segments[end];
+      if (!group.segments.slice(start, end + 1).every(segment => segment.append) ||
+          !nonnegative(hint.startOffset) || !nonnegative(hint.endOffset) || hint.startOffset >= first.text.length ||
+          hint.endOffset < 1 || hint.endOffset > last.text.length || splitsSurrogate(first.text, hint.startOffset) || splitsSurrogate(last.text, hint.endOffset)) return;
+      const startOffset = position + group.segments.slice(0, start).reduce((sum, segment) => sum + segment.text.length, 0) + hint.startOffset;
+      const endOffset = position + group.segments.slice(0, end).reduce((sum, segment) => sum + segment.text.length, 0) + hint.endOffset;
+      if (endOffset <= startOffset) return;
+      return { startOffset, endOffset, chineseGloss: hint.chineseGloss, lexiconEntryId: hint.lexiconEntryId,
+        lexiconVersion: hint.lexiconVersion, senseId: hint.senseId };
+    }
+    position += group.segments.reduce((sum, segment) => sum + segment.text.length, 0);
+  }
+}
+/** 严格校验处理覆盖及词库证据；成功且无提示也必须确认所有待处理 key。 */
+export function parseHintResponse(value: unknown, request: CaptionHintRequest): HintResponse | undefined {
+  if (!value || typeof value !== "object" || !isCaptionHintRequest(request)) return;
+  const body = value as HintResponse;
+  const expected = snapshotSegments(request.currentSnapshot).filter(segment => segment.append).map(segment => segment.key);
+  if (!Array.isArray(body.processedKeys) || JSON.stringify(body.processedKeys) !== JSON.stringify(expected) ||
+      !Array.isArray(body.hints) || body.hints.length > MAX_CAPTION_LENGTH) return;
+  let end = 0; let version: number | undefined;
   for (const hint of body.hints) {
-    if (hint === null || typeof hint !== "object") return undefined;
-    const { startOffset, endOffset, chineseGloss, lexiconEntryId, lexiconVersion, senseId } = hint as Hint;
-    if (!isStableId(lexiconEntryId) || !isStableId(senseId) || !Number.isSafeInteger(lexiconVersion) || lexiconVersion < 1) return undefined;
-    if (!Number.isSafeInteger(startOffset) || !Number.isSafeInteger(endOffset) ||
-        startOffset < 0 || endOffset <= startOffset || endOffset > body.caption.length ||
-        splitsSurrogate(body.caption, startOffset) || splitsSurrogate(body.caption, endOffset) ||
-        typeof chineseGloss !== "string" || chineseGloss.trim().length === 0) return undefined;
-    // 完整拒绝存疑证据；截取第一分句会伪造 sense 选择。
-    if (Array.from(chineseGloss).length > 24 || !/\p{Script=Han}/u.test(chineseGloss) ||
-        /[\s\p{P}\p{S}\p{C}]/u.test(chineseGloss)) return undefined;
-    hints.push({ startOffset, endOffset, chineseGloss, lexiconEntryId, lexiconVersion, senseId });
+    if (!hint || !isStableId(hint.lexiconEntryId) || !isStableId(hint.senseId) || !Number.isSafeInteger(hint.lexiconVersion) || hint.lexiconVersion < 1 ||
+        (version !== undefined && version !== hint.lexiconVersion) || typeof hint.chineseGloss !== "string" ||
+        !hint.chineseGloss.length || Array.from(hint.chineseGloss).length > 24 || !/\p{Script=Han}/u.test(hint.chineseGloss) || /[\s\p{P}\p{S}\p{C}]/u.test(hint.chineseGloss)) return;
+    const resolved = resolveHint(hint, request.currentSnapshot);
+    if (!resolved || resolved.startOffset < end) return;
+    end = resolved.endOffset; version = hint.lexiconVersion;
   }
-  if (new Set(hints.map(hint => hint.lexiconVersion)).size > 1) return undefined;
-  hints.sort((left, right) => left.startOffset - right.startOffset);
-  if (hints.some((hint, index) => index > 0 && hint.startOffset < hints[index - 1].endOffset)) return undefined;
-  return { caption: body.caption, state: body.state, hints };
+  return { processedKeys: [...body.processedKeys], hints: body.hints.map(hint => ({ ...hint })) };
 }
-
-/** Preserve the original characters and punctuation, adding glosses after their bound spans. */
 export function inlineParts(caption: string, hints: Hint[]): { text: string; gloss: boolean }[] {
-  const parts: { text: string; gloss: boolean }[] = [];
-  let offset = 0;
+  const parts: { text: string; gloss: boolean }[] = []; let offset = 0;
   for (const hint of hints) {
-    parts.push({ text: caption.slice(offset, hint.endOffset), gloss: false });
-    parts.push({ text: `(${hint.chineseGloss})`, gloss: true });
-    offset = hint.endOffset;
+    parts.push({ text: caption.slice(offset, hint.endOffset), gloss: false }, { text: `(${hint.chineseGloss})`, gloss: true }); offset = hint.endOffset;
   }
-  parts.push({ text: caption.slice(offset), gloss: false });
-  return parts;
+  parts.push({ text: caption.slice(offset), gloss: false }); return parts;
 }
