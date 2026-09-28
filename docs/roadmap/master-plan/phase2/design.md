@@ -111,6 +111,8 @@ Enrichment 是字幕候选键的唯一生成者。对经现有 `LexiconSurfacePo
 
 读写分离分两个可编译动作：先提取 publication role 并让既有 Repository 聚合它，同时将 LexiconImportService 收窄到 publication role；随后提取 read role，查询服务和 API 注入改为 read role。聚合 Repository 只保留给实际需要组合两角色的持久化工厂，不让业务依赖它。这是最终基础设施组合合同，不保留重复方法、旧实现或历史接口适配层。SQL 拆分不是读写分离的必要条件。
 
+`LexiconReadRepository` 是读取合同唯一声明位置；聚合 `LexiconRepository` 不重新声明继承方法。`CachedLexiconQueryService`、包内 `VersionedLexiconCache` 与 API 的 `ObjectProvider` 均只接收 read role，查询测试替身不实现发布方法。`PostgresPersistenceConfiguration` 仍发布唯一聚合 bean，Spring 通过父接口分别提供 read/publication 角色；不创建第二份 Repository、连接池或事务状态。真实隔离数据库测试验证两角色解析到同一实例并完成发布后读取、混合候选返回与失败回滚；API 测试另以只读实现装配真实应用用例，证明不依赖写能力或偷偷回退 demo。服务就绪及 demo 默认策略仍由 API-2001 单独调整。
+
 LexiconImportService 负责 metadata/来源计数校验、预检结果与重读来源的身份一致性和发布调用；来源解析/文件打开、用户重建确认和进度输出留在 CLI/适配器。导入与发布共享已准备结果，不在持久化映射时重复清洗。发布只在一个事务内使新资料可见，源变化或计数不符回滚，API 启动不执行导入。
 
 流式来源 `LexiconImportRowSource.read` 在交付解析行后返回不可变 `ReadReceipt(sourceDigest, sourceRowsTotal)`；摘要由适配器对本次重读的来源生成，应用层不打开文件。导入用例包装该来源，在发布事务结束前核对 receipt 与预检 metadata 摘要、原始行数，并核对实际交付条数；不符立即抛错阻止提交。规范内存输入的 receipt 由已冻结请求生成。该返回值与 CLI、持久化及测试来源同批切换，不保留 void 或默认兼容入口。缓存状态、版本失效、正负预热和动态容量由包内 `VersionedLexiconCache` 管理，查询服务仅校验键、编排精确查询并组装本次结果/计数。

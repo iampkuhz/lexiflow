@@ -2468,35 +2468,41 @@ workstreams:
         title: 适配 PostgreSQL 读写边界与原子发布
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         owner: LF-WS-OPS
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
-        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/**
-        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/**
         - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/LexiconReadRepository.java
         - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/LexiconRepository.java
         - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/query/CachedLexiconQueryService.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/query/VersionedLexiconCache.java
         - backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java
-        - backend/product/lexicon/src/test/**
-        - backend/product/api/src/test/**
+        - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/query/CachedLexiconQueryServiceTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/ApiApplicationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconRepositoryIntegrationTest.java
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/design.md
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
         forbidden_files:
         - secrets/**
         - .local/**
         - data/**
         - .env
-        expected_output: 读写职责隔离的持久化适配器、投影映射及真实隔离库直接测试。
+        expected_output: 读接口与发布接口按调用方隔离，组合持久化保持完整映射和原子事务，包含只读 Spring 装配及真实隔离库回归。
         acceptance_criteria:
         - 查询返回完整候选和统一发布身份；映射不遗漏分类或冲突证据。
         - 原子提交与失败回滚、旧版本可查及开发结构重建边界保持；无跨域表访问。
-        - 提取 read role 后查询服务和 API 仅注入读接口，持久化工厂仍可组合读写角色；消费者和直接测试同一切片适配。
+        - 提取 read role 后查询服务、版本缓存和 API 仅注入读接口，持久化工厂仍可组合读写角色；消费者和直接测试同一切片适配。
+        - Spring 仅提供只读实现时可装配真实 Enrichment 用例并返回该实现候选；真实 PostgreSQL bean 按读和发布角色解析为同一实例。
+        - 聚合接口不重复声明方法，查询测试替身不再实现无用写方法；不改查询排序、事务、demo/readiness 或来源处理。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
-        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :api:test :adapters:postgresIntegrationTest
         required_check_ids:
         - eng.backend.delivery
         - eng.repository.docs
@@ -2516,7 +2522,7 @@ workstreams:
           required_task_version: 2
           required_change_version: 2.0.0
           required_result: PASS
-        deliverable: 读写职责隔离的持久化适配器、投影映射及真实隔离库直接测试。
+        deliverable: 读接口与发布接口按调用方隔离，组合持久化保持完整映射和原子事务，包含只读 Spring 装配及真实隔离库回归。
       - id: LF-TSK-OPS-2002
         title: 将导入 CLI 收敛为入口和来源适配
         priority: P0
@@ -2553,8 +2559,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2001
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         deliverable: StarDict/规范 CSV 来源适配与导入/重建命令接入新用例，保留显式确认和进度。
       - id: LF-TSK-OPS-2003
@@ -2687,8 +2693,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2001
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         - task_id: LF-TSK-OPS-2004
           type: hard

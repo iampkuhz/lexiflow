@@ -1,6 +1,6 @@
 package io.lexiflow.lexicon.application.query;
 
-import io.lexiflow.lexicon.application.port.LexiconRepository;
+import io.lexiflow.lexicon.application.port.LexiconReadRepository;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import io.lexiflow.lexicon.domain.model.LexiconLookupResult;
@@ -15,12 +15,12 @@ import java.util.OptionalLong;
 
 /** 只查已发布的准确词形；固定正负缓存与有界动态缓存都可重建。 */
 public final class CachedLexiconQueryService implements LexiconCatalog {
-  private final LexiconRepository repository;
+  private final LexiconReadRepository repository;
   private final VersionedLexiconCache cache;
 
   /** 分别限定提示和阻断预热词形，避免调用者控制词典筛选策略。 */
   public CachedLexiconQueryService(
-      LexiconRepository repository,
+      LexiconReadRepository repository,
       int cacheCapacity,
       int positivePrewarmLimit,
       int negativePrewarmLimit) {
