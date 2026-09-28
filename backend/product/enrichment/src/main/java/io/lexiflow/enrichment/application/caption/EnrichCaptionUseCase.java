@@ -7,6 +7,7 @@ import io.lexiflow.enrichment.domain.model.CaptionHintResult;
 import io.lexiflow.enrichment.domain.model.CaptionIncrementalRequest;
 import io.lexiflow.enrichment.domain.model.IncrementalHintResult;
 import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
+import io.lexiflow.lexicon.domain.model.LexiconLookupResult;
 import io.lexiflow.lexicon.domain.port.LexiconCatalog;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -63,12 +64,18 @@ public final class EnrichCaptionUseCase {
   public MeasuredCaptionResult enrichMeasured(CaptionContext context) {
     Objects.requireNonNull(context, "context");
     var started = nanoTime.getAsLong();
-    var candidates = lexiconCatalog.candidatesFor(context.caption());
+    var keys = CandidateForms.fromCaption(context.caption());
+    var lookup =
+        keys.isEmpty()
+            ? new LexiconLookupResult(
+                List.of(), java.util.OptionalLong.empty(), LexiconLookupResult.Counts.zero())
+            : lexiconCatalog.lookupForms(keys);
+    var candidates = lookup.candidates();
     var queried = nanoTime.getAsLong();
     var result = hintPolicy.evaluate(context, candidates);
     var finished = nanoTime.getAsLong();
     return new MeasuredCaptionResult(
-        result, queried - started, finished - queried, candidates.size());
+        result, queried - started, finished - queried, candidates.size(), lookup.counts());
   }
 
   /**
@@ -88,6 +95,7 @@ public final class EnrichCaptionUseCase {
     long queryNanos = 0;
     long rulesNanos = 0;
     int candidateCount = 0;
+    var queryCounts = LexiconLookupResult.Counts.zero();
     for (var group : request.current().captions()) {
       var text = new StringBuilder();
       var starts = new ArrayList<Integer>();
@@ -121,7 +129,15 @@ public final class EnrichCaptionUseCase {
         var contextStart = starts.get(contextFirst);
         var groupText = text.toString();
         var started = nanoTime.getAsLong();
-        var candidates = lexiconCatalog.candidatesFor(groupText.substring(contextStart, end));
+        var forms = CandidateForms.fromCaption(groupText.substring(contextStart, end));
+        var lookup =
+            forms.isEmpty()
+                ? new LexiconLookupResult(
+                    List.of(), java.util.OptionalLong.empty(), LexiconLookupResult.Counts.zero())
+                : lexiconCatalog.lookupForms(forms);
+        var candidates = lookup.candidates();
+        queryCounts = queryCounts.plus(lookup.counts());
+        lookup.publishedVersion().ifPresent(publishedVersions::add);
         var queried = nanoTime.getAsLong();
         var selected = hintPolicy.evaluate(groupText, contextStart, end, start, candidates);
         // 先收集版本再去重，不能让同词条的重复命中掩盖跨区间版本冲突。
@@ -180,6 +196,7 @@ public final class EnrichCaptionUseCase {
         queryNanos,
         rulesNanos,
         candidateCount,
+        queryCounts,
         english.toString(),
         finalText.toString());
   }

@@ -1,6 +1,7 @@
 package io.lexiflow.enrichment.application.caption.model;
 
 import io.lexiflow.enrichment.domain.model.CaptionHintResult;
+import io.lexiflow.lexicon.domain.model.LexiconLookupResult;
 import java.util.Objects;
 
 /**
@@ -10,13 +11,19 @@ import java.util.Objects;
  * @param queryNanos 含义：词库候选查询耗时。取值范围：非负纳秒。
  * @param rulesNanos 含义：规则筛选耗时。取值范围：非负纳秒。
  * @param candidateCount 含义：本次公开查询返回的候选数。取值范围：非负整数。
+ * @param queryCounts 含义：本次词库请求的查询计数。取值范围：非空且各字段非负。
  */
 public record MeasuredCaptionResult(
-    CaptionHintResult result, long queryNanos, long rulesNanos, int candidateCount) {
+    CaptionHintResult result,
+    long queryNanos,
+    long rulesNanos,
+    int candidateCount,
+    LexiconLookupResult.Counts queryCounts) {
 
   /** 校验结果与计时，拒绝负数或缺失结果。 */
   public MeasuredCaptionResult {
     Objects.requireNonNull(result, "result");
+    Objects.requireNonNull(queryCounts, "queryCounts");
     if (queryNanos < 0 || rulesNanos < 0 || candidateCount < 0) {
       throw new IllegalArgumentException("measurements must be nonnegative");
     }

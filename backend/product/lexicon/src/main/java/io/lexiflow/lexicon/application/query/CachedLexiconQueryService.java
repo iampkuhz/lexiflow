@@ -3,6 +3,7 @@ package io.lexiflow.lexicon.application.query;
 import io.lexiflow.lexicon.application.port.LexiconRepository;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
+import io.lexiflow.lexicon.domain.model.LexiconLookupResult;
 import io.lexiflow.lexicon.domain.port.LexiconCatalog;
 import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
 import java.util.ArrayList;
@@ -12,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
 
 /** 只查已发布的准确词形；固定正负缓存与有界动态缓存都可重建。 */
 public final class CachedLexiconQueryService implements LexiconCatalog {
@@ -44,62 +46,91 @@ public final class CachedLexiconQueryService implements LexiconCatalog {
   }
 
   /**
-   * 对字幕仅枚举连续的一至三个词形，缺失词形在同一批查询中读取。
+   * 对已规范键精确查询，完整返回本次结果且不受有界缓存淘汰影响。
    *
-   * @param caption 含义：待匹配的原始字幕片段。取值范围：非 null，可为空字符串。
-   * @return 按词形长度排序且保留同形歧义的已发布候选。
+   * @param normalizedForms 含义：Enrichment 生成的规范键。取值范围：非 null；键非空白、已规范且至多三词。
+   * @return 完整候选、当前发布身份和本次请求局部计数。
    */
   @Override
-  public synchronized List<LexiconHintCandidate> candidatesFor(String caption) {
-    Objects.requireNonNull(caption, "caption");
-    var version = refreshVersion();
-    if (version == 0) return List.of();
-    var keys = candidateForms(caption);
+  public synchronized LexiconLookupResult lookupForms(List<String> normalizedForms) {
+    var keys = validate(normalizedForms);
+    if (keys.isEmpty())
+      return new LexiconLookupResult(
+          List.of(), OptionalLong.empty(), LexiconLookupResult.Counts.zero());
+    var metrics = new int[5]; // 依次记录正命中、负命中、缓存未命中、数据库批次和预热读取
+    var version = refreshVersion(metrics);
     var missing = new ArrayList<String>();
+    var requestResults = new LinkedHashMap<String, List<LexiconHintCandidate>>();
     for (var form : keys) {
-      if (!pinned.containsKey(form) && !dynamic.containsKey(form)) missing.add(form);
+      var cached = pinned.get(form);
+      if (cached == null && !pinned.containsKey(form)) cached = dynamic.get(form);
+      if (cached == null && !pinned.containsKey(form) && !dynamic.containsKey(form)) {
+        missing.add(form);
+      } else {
+        requestResults.put(form, cached == null ? List.of() : cached);
+        boolean positive =
+            requestResults.get(form).stream()
+                .anyMatch(candidate -> candidate.finalAction() == LexiconHintAction.HINT);
+        if (positive) metrics[0]++;
+        else metrics[1]++;
+      }
     }
-    if (!missing.isEmpty()) {
+    metrics[2] = missing.size();
+    if (!missing.isEmpty() && version > 0) {
+      metrics[3] = 1;
       var loaded = groupByForm(repository.findByForms(version, missing));
       for (var form : missing) {
-        dynamic.put(form, loaded.getOrDefault(form, List.of()));
+        var found = loaded.getOrDefault(form, List.of());
+        requestResults.put(form, found);
+        dynamic.put(form, found);
         trimDynamic();
       }
+    } else {
+      for (var form : missing) requestResults.put(form, List.of());
     }
     var result = new LinkedHashMap<String, LexiconHintCandidate>();
     for (var form : keys) {
-      var candidates = pinned.get(form);
-      if (candidates == null) candidates = dynamic.getOrDefault(form, List.of());
+      var candidates = requestResults.get(form);
       for (var candidate : candidates) {
         result.put(candidate.entryId() + ":" + candidate.normalizedForm(), candidate);
       }
     }
-    return result.values().stream()
-        .sorted(
-            (left, right) -> {
-              var length =
-                  Integer.compare(right.normalizedForm().length(), left.normalizedForm().length());
-              return length != 0 ? length : left.normalizedForm().compareTo(right.normalizedForm());
-            })
-        .toList();
+    var candidates =
+        result.values().stream()
+            .sorted(
+                (left, right) -> {
+                  var length =
+                      Integer.compare(
+                          right.normalizedForm().length(), left.normalizedForm().length());
+                  return length != 0
+                      ? length
+                      : left.normalizedForm().compareTo(right.normalizedForm());
+                })
+            .toList();
+    return new LexiconLookupResult(
+        candidates,
+        OptionalLong.of(version),
+        new LexiconLookupResult.Counts(
+            keys.size(), metrics[0], metrics[1], metrics[2], metrics[3], 1, metrics[4]));
   }
 
-  private long refreshVersion() {
+  private long refreshVersion(int[] metrics) {
     var version = repository.publishedVersion();
     if (version != cachedVersion) {
       pinned.clear();
       dynamic.clear();
       cachedVersion = version;
       if (version > 0) {
-        prewarm(version, LexiconHintAction.HINT, positivePrewarmLimit);
-        prewarm(version, LexiconHintAction.BLOCK, negativePrewarmLimit);
+        prewarm(version, LexiconHintAction.HINT, positivePrewarmLimit, metrics);
+        prewarm(version, LexiconHintAction.BLOCK, negativePrewarmLimit, metrics);
       }
     }
     return version;
   }
 
-  private void prewarm(long version, LexiconHintAction action, int limit) {
+  private void prewarm(long version, LexiconHintAction action, int limit, int[] metrics) {
     if (limit == 0) return;
+    metrics[4]++;
     var grouped = groupByForm(repository.findPrewarmForms(version, action, limit));
     for (var group : grouped.entrySet()) {
       if (pinned.size() >= positivePrewarmLimit + negativePrewarmLimit
@@ -134,19 +165,25 @@ public final class CachedLexiconQueryService implements LexiconCatalog {
     }
   }
 
-  private static List<String> candidateForms(String caption) {
-    var tokens = LexiconSurfacePolicy.queryTokens(caption).toArray(String[]::new);
-    var forms = new LinkedHashSet<String>();
-    for (var start = 0; start < tokens.length; start++) {
-      var phrase = new StringBuilder();
-      for (var length = 1;
-          length <= LexiconSurfacePolicy.MAX_PHRASE_TOKENS && start + length <= tokens.length;
-          length++) {
-        if (length > 1) phrase.append(' ');
-        phrase.append(tokens[start + length - 1]);
-        forms.add(phrase.toString());
+  private static List<String> validate(List<String> forms) {
+    Objects.requireNonNull(forms, "normalizedForms");
+    var keys = new LinkedHashSet<String>();
+    for (var form : List.copyOf(forms)) {
+      Objects.requireNonNull(form, "normalized form");
+      var tokens = LexiconSurfacePolicy.queryTokens(form);
+      if (form.isBlank()
+          || tokens.isEmpty()
+          || tokens.size() > LexiconSurfacePolicy.MAX_PHRASE_TOKENS
+          || !String.join(" ", tokens).equals(form)) {
+        throw new IllegalArgumentException("normalized form is invalid");
       }
+      keys.add(form);
     }
-    return List.copyOf(forms);
+    return List.copyOf(keys);
+  }
+
+  /** 构造期间启动预热不计入后续请求的局部计数。 */
+  private long refreshVersion() {
+    return refreshVersion(new int[5]);
   }
 }

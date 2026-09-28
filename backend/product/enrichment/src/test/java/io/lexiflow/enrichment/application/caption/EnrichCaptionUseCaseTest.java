@@ -8,8 +8,10 @@ import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
+import io.lexiflow.lexicon.domain.model.LexiconLookupResult;
 import io.lexiflow.lexicon.domain.port.LexiconCatalog;
 import java.util.List;
+import java.util.OptionalLong;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -32,7 +34,11 @@ class EnrichCaptionUseCaseTest {
             500,
             4.2,
             1);
-    return caption -> caption.contains("reliable") ? List.of(candidate) : List.of();
+    return forms ->
+        new LexiconLookupResult(
+            forms.contains("reliable") ? List.of(candidate) : List.of(),
+            OptionalLong.of(1),
+            new LexiconLookupResult.Counts(forms.size(), 0, 0, forms.size(), 0, 1, 0));
   }
 
   @Test

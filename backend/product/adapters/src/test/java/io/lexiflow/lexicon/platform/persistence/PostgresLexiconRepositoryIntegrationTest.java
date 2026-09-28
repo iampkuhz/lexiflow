@@ -384,7 +384,8 @@ class PostgresLexiconRepositoryIntegrationTest {
                     List.of(row("false", "错误的", List.of(), List.of())), metadata('a')));
             var cache = new CachedLexiconQueryService(repository, 20, 1, 1);
             assertEquals(
-                LexiconHintAction.HINT, cache.candidatesFor("false").getFirst().finalAction());
+                LexiconHintAction.HINT,
+                cache.lookupForms(List.of("false")).candidates().getFirst().finalAction());
             var source = new SourceReference("fixture", "MIT", "oxford");
             var words = new java.util.ArrayList<LexiconImportRow>();
             for (var lemma : List.of("false", "ability", "false alarm")) {
@@ -412,14 +413,17 @@ class PostgresLexiconRepositoryIntegrationTest {
             }
             words.add(row("specialist", "专家", List.of(), List.of()));
             repository.publish(new LexiconImportRequest(words, metadata('b')));
-            for (var form : List.of("false", "FALSE", "ability", "abilities", "abilityalias")) {
-              var candidate = cache.candidatesFor(form).getFirst();
+            assertThrows(IllegalArgumentException.class, () -> cache.lookupForms(List.of("FALSE")));
+            for (var form : List.of("false", "ability", "abilities", "abilityalias")) {
+              var candidate = cache.lookupForms(List.of(form)).candidates().getFirst();
               assertEquals(2, candidate.lexiconVersion());
               assertEquals(LexiconHintAction.BLOCK, candidate.finalAction(), form);
             }
             for (var form : List.of("false alarm", "specialist")) {
               assertEquals(
-                  LexiconHintAction.HINT, cache.candidatesFor(form).getFirst().finalAction(), form);
+                  LexiconHintAction.HINT,
+                  cache.lookupForms(List.of(form)).candidates().getFirst().finalAction(),
+                  form);
             }
             assertEquals(
                 "2",

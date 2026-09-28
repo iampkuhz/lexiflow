@@ -21,7 +21,8 @@
 - 启动交接已提交 `6bf12df` 并合入 `phase2`；ARCH-2001 的 check 为 `3d73a8c4-476c-455a-b655-bad962b2631f`（PASS）。
 - 已核对授权、一期缺口、原始主干起点、子任务 ownership 与本地集成事实；启动交接不改变业务规则或真实资料。
 - LEX-2001 已提交 `e1b36db` 并从 `phase2-4-lexicon-classification` 合入 `phase2`；同输入 Change `2df4c253-5d46-418e-b1cf-5226eb02361c`、Repository `5273b27a-dde3-4c77-9453-07e592e6f4ec`、validation `0723fd3b-8dcc-4131-b237-45a5094f165d`、review `8727eb73-6449-4583-b065-c9555be8d15d` 与 check `d8c1a812-3968-4bb0-83ff-a8e8c9446c38` 均 PASS，submission `bda94e95-fdd3-4581-9f2f-5cbb8c8e5a62`。
-- 当前在 `phase2-5-phrase-quality` 开始 LEX-2002 v2：短语质量、默认释义与受信人工映射边界；之后继续查询与应用主线、客户端和发布闭环。
+- LEX-2002 已提交 `fb480fa` 并由 `phase2-5-phrase-quality` 合入 `phase2`；Change `f61bfb13-6edf-458f-b568-5cbaff6fb454`、Repository `f47fca4a-769f-44b3-b608-89f86c9ef04e`、validation `e2308a98-50d0-4da9-b5d9-b5ad4211cdcd`、review `5d0bf80d-50e6-43c3-8129-9255504438bb`、check `793ba163-cd3d-4597-82ad-a0e12bdcaee2` 均 PASS；submission `d1274345-ffef-4051-a3a9-3cdc846a238e`。
+- 当前在 `phase2-6-query-contract` 开始 LEX-2003 v3 的准确词形接口与全消费者原子切换；后续继续应用主线、客户端和发布闭环。
 - OpenSpec 与运行记录保留在 ignored 本机目录；共享交接位于路线图与 Catalog。
 
 ## 1.4. 一期与后续边界
