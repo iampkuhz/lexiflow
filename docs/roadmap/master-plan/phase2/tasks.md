@@ -114,11 +114,13 @@
 - 实现边界：Catalog v2/change 2.0.0；查询服务、版本缓存与 API 一起切换到 read role，聚合接口只保留在基础设施组合；直接测试证明只读替身和真实 PostgreSQL bean 的 Spring 装配。数据库字段已由 DAT-2001 同步交付，不重复改 SQL。
 
 ### 1.3.12. LF-TSK-OPS-2002 · 将导入 CLI 收敛为入口和来源适配
-- 主责：`LF-WS-OPS`；预计 75 分钟；前置：`LF-TSK-OPS-2001`。
-- 产出：StarDict/规范 CSV 来源适配与导入/重建命令接入新用例，保留显式确认和进度。
+- 主责：`LF-WS-OPS`；预计 90 分钟；前置：`LF-TSK-OPS-2001`。
+- 产出：两种来源经统一应用准备与发布用例；持久化消费已准备条目，CLI 保留来源、参数、资源和输出。
 - 验收：不同来源进入统一准备流程且缺失证据不伪造；CLI 仅参数、资源、格式和输出。
 - 验收：普通发布不触发重建；重建仍需精确确认，等待输入不刷进度；不新增后台调度。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test`。
+- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :adapters:test :adapters:postgresIntegrationTest`。
+
+- 实现边界：Catalog v2/change 2.0.0；5 个主要产品文件完成准备用例、发布端口、应用服务、持久化和 CLI 的原子切换，删除 raw-row 发布端口，不以转发包装保留重复业务逻辑。
 
 ### 1.3.13. LF-TSK-ENR-2001 · 分离原文位置匹配与发布候选资格检查
 - 主责：`LF-WS-ENR`；预计 90 分钟；前置：`LF-TSK-LEX-2004`。

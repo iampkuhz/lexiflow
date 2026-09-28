@@ -2,17 +2,14 @@ package io.lexiflow.lexicon.platform.persistence;
 
 import io.lexiflow.lexicon.application.importing.LexiconImportPlan;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
-import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
-import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
-import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
 import io.lexiflow.lexicon.application.importing.policy.ClassificationPolicy;
+import io.lexiflow.lexicon.application.port.LexiconPublicationRepository;
 import io.lexiflow.lexicon.application.port.LexiconRepository;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -108,27 +105,11 @@ final class DefaultLexiconRepository implements LexiconRepository {
   }
 
   @Override
-  public long publish(LexiconImportRequest request) {
-    Objects.requireNonNull(request, "request");
-    LexiconImportPlan.prepare(
-        request.rows(), 1, request.metadata().sourceDigest(), request.metadata().acquiredAt());
-    return publishStreaming(
-        request.metadata(),
-        request.rows().size(),
-        request.rows().size(),
-        consumer -> {
-          request.rows().forEach(consumer);
-          return new LexiconImportRowSource.ReadReceipt(
-              request.metadata().sourceDigest(), request.rows().size());
-        });
-  }
-
-  @Override
-  public long publishStreaming(
+  public long publish(
       LexiconImportMetadata metadata,
       long sourceRowsTotal,
       long expectedEntries,
-      LexiconImportRowSource source) {
+      LexiconPublicationRepository.PreparedEntrySource source) {
     Objects.requireNonNull(metadata, "metadata");
     Objects.requireNonNull(source, "source");
     if (sourceRowsTotal < expectedEntries || expectedEntries < 1) {
@@ -140,11 +121,11 @@ final class DefaultLexiconRepository implements LexiconRepository {
           var version = publishedVersion() + 1;
           jdbc.update("DELETE FROM lexicon_dataset WHERE dataset_id = 1");
           jdbc.update("DELETE FROM lexicon_prepared_entry");
-          var writer = new BatchWriter(version, metadata);
+          var writer = new BatchWriter();
           try {
-            source.read(writer::add);
+            source.read(version, writer::add);
           } catch (IOException exception) {
-            throw new UncheckedIOException("source changed during publication", exception);
+            throw new java.io.UncheckedIOException("source changed during publication", exception);
           }
           writer.flush();
           if (writer.entries != expectedEntries) {
@@ -170,20 +151,12 @@ final class DefaultLexiconRepository implements LexiconRepository {
 
   /** 在一个事务内按固定分块批量写入主词条及其所有准确词形。 */
   private final class BatchWriter {
-    private final long version;
-    private final LexiconImportMetadata metadata;
     private final List<LexiconImportPlan.PlannedEntry> rows = new ArrayList<>(BATCH_SIZE);
     private long entries;
     private long lookups;
 
-    BatchWriter(long version, LexiconImportMetadata metadata) {
-      this.version = version;
-      this.metadata = metadata;
-    }
-
-    void add(LexiconImportRow row) {
-      rows.add(
-          LexiconImportPlan.fromRow(row, version, metadata.sourceDigest(), metadata.acquiredAt()));
+    void add(LexiconImportPlan.PlannedEntry planned) {
+      rows.add(planned);
       if (rows.size() == BATCH_SIZE) flush();
     }
 

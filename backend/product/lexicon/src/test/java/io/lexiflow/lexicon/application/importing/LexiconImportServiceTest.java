@@ -2,6 +2,7 @@ package io.lexiflow.lexicon.application.importing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
@@ -58,6 +59,61 @@ class LexiconImportServiceTest {
             });
     assertEquals(7, actual);
     assertEquals(true, completed.get());
+  }
+
+  @Test
+  void preparesWithActualVersionOnceAndReturnsOnlyPreparedEntries() {
+    var seen =
+        new java.util.ArrayList<
+            io.lexiflow.lexicon.application.importing.LexiconImportPlan.PlannedEntry>();
+    var service =
+        new LexiconImportService(
+            (metadata, raw, entries, source) -> {
+              try {
+                source.read(9, seen::add);
+              } catch (IOException exception) {
+                throw new IllegalStateException(exception);
+              }
+              return 9;
+            });
+    var result =
+        service.publishStreaming(
+            METADATA,
+            1,
+            1,
+            consumer -> {
+              consumer.accept(row());
+              return new LexiconImportRowSource.ReadReceipt(DIGEST, 1);
+            });
+    assertEquals(9, result);
+    assertEquals(1, seen.size());
+    assertEquals(
+        LexiconImportPlan.fromRow(row(), 9, DIGEST, Instant.EPOCH)
+            .entry()
+            .senses()
+            .getFirst()
+            .senseId(),
+        seen.getFirst().entry().senses().getFirst().senseId());
+    assertTrue(seen.getFirst().prepared() != null);
+  }
+
+  @Test
+  void rejectsCanonicalConflictAcrossDeliveredRows() {
+    var service =
+        new LexiconImportService(
+            new FakePublicationRepository(new AtomicBoolean(), new AtomicBoolean()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            service.publishStreaming(
+                METADATA,
+                2,
+                2,
+                consumer -> {
+                  consumer.accept(row());
+                  consumer.accept(row());
+                  return new LexiconImportRowSource.ReadReceipt(DIGEST, 2);
+                }));
   }
 
   @Test
@@ -157,19 +213,13 @@ class LexiconImportServiceTest {
 
     @Override
     public long publish(
-        io.lexiflow.lexicon.application.importing.model.LexiconImportRequest request) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public long publishStreaming(
         LexiconImportMetadata metadata,
         long sourceRowsTotal,
         long expectedEntries,
-        LexiconImportRowSource source) {
+        LexiconPublicationRepository.PreparedEntrySource source) {
       called.set(true);
       try {
-        source.read(ignored -> {});
+        source.read(3, ignored -> {});
       } catch (IOException exception) {
         throw new IllegalStateException("rollback", exception);
       }

@@ -25,7 +25,8 @@
 - LEX-2003 已提交 `c18c34a` 并由 `phase2-6-query-contract` 合入 `phase2`；Change `ac8d3b4a-a01d-49c2-a19f-e00e264e9dce`、Repository `f9b37a37-6072-44b1-9b13-7f6bc0b5d9b4`、validation `11ce59fb-462e-45f6-aba2-980a841a94c7`、review `b35b716a-0802-498c-b307-8179576543ed`、check `c7902434-a633-4b71-a529-7e5f44f5d4ef` 均 PASS；submission `40345063-a948-4dd9-99bd-f803338d6e66`。
 - LEX-2004 v2 已提交 `d1d10fe` 并合入 `phase2`；Change `79c640a0-f686-4dc7-b85a-fef4b6a95975`、Repository `aeba64e3-e23a-45de-9483-f166715de82c`、validation `48738bdd-726c-4abb-b006-a9b1627380c9`、review `4bec142e-0d69-43d9-ae1b-5cf779a35e42`、check `b292a654-51b2-47eb-a0b2-654db66f37a3` 均为 PASS；旧失败送验全部保留。
 - DAT-2001 v2 已提交 `b218fea` 并合入 `phase2`；Change `0d71c290-b826-4d0d-b91f-dc0c9b4a872a`、Repository `98d79e5f-2af8-4f14-9b88-1ac41847630e`、validation `970bcd9c-f6ba-4b83-8dbe-23c3d7f7f2c5`、review `c0e67ad3-113e-4241-8270-fe1e916c73c0`、check `70b3e175-9280-4c7f-b581-8a7af71dcfcf` 均为 PASS；仅隔离库执行 SQL，真实运行资料未改动。
-- 当前在 `phase2-9-read-port` 开始 OPS-2001 v2：读取角色、查询/缓存/API 消费者和 Spring 装配同批切换；后续继续导入入口、应用主线、客户端与发布闭环。
+- OPS-2001 v2 已提交 `9335aa5` 并合入 `phase2`；Change `8e50486d-cf0c-4225-b10d-24022e6872cd`、Repository `b34dc440-e8ac-4d92-a6a4-2d703fb33225`、validation `a22aa425-e62f-4760-89e9-0065b25a0e84`、review `f1922a5c-63d4-4eaa-a4aa-ad2e770743c6`、check `33c4ff85-b8c0-4250-abd8-cab55fd6ae0f` 均为 PASS。
+- 当前在 `phase2-10-import-orchestration` 开始 OPS-2002 v2：统一应用准备、已准备发布端口和来源 CLI，消除实际写入的重复准备；后续继续同步主线、客户端和发布闭环。
 - OpenSpec 与运行记录保留在 ignored 本机目录；共享交接位于路线图与 Catalog。
 
 ## 1.4. 一期与后续边界
