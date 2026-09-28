@@ -25,7 +25,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import tools.jackson.core.io.JsonStringEncoder;
 
-/** 本机敏感 JSONL 台账；每个不可增长的片段 key 只写一行最终处理结果。 */
+/** 本机敏感 JSONL 台账；每个片段 key 只写一行首次处理结果，后续旧尾补全不回写。 */
 public final class SegmentAnalysisLog {
   private static final Pattern ID_LINE =
       Pattern.compile("^\\{\"segmentId\":\"([0-9a-f]{64})\",.*}$");

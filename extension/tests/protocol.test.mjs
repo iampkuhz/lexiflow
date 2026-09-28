@@ -20,14 +20,20 @@ test('retains evidence, exact keyed offsets, Chinese safety and surrogate bounda
  assert.equal(parseHintResponse(response(req,[{...keyedHint(),...fields}]),req),undefined);
  const emoji=request(snapshot(segment('s1','😀a'))); assert.equal(parseHintResponse(response(emoji,[keyedHint('s1',1,2)]),emoji),undefined);
 });
-test('allows phrases across adjacent new segments, not old segments or caption groups',()=>{
+test('allows bounded old-tail phrase completion but not old-only, distant or cross-group hints',()=>{
  const req=request(snapshot(segment('a','reliable'),segment('b',' methods'))),hint=keyedHint('a',0,8,'b');
  assert.ok(parseHintResponse(response(req,[hint]),req));
  assert.equal(resolveHint(hint,req.currentSnapshot).endOffset,16);
+ req.currentSnapshot.captions[0].segments[0].append=false;
+ assert.ok(parseHintResponse(response(req,[hint]),req));
  req.currentSnapshot.captions[0].segments[1].append=false;
  assert.equal(parseHintResponse(response(req,[hint]),req),undefined);
+ const distant=request(snapshot(segment('old','far ',false),segment('gap','middle ',false),segment('more','context ',false),segment('new','word')));
+ assert.equal(parseHintResponse(response(distant,[keyedHint('old',0,4,'new')]),distant),undefined);
  const separate=request({captions:[snapshot(segment('a','reliable')).captions[0],snapshot(segment('b',' methods')).captions[0]]});
  assert.equal(parseHintResponse(response(separate,[hint]),separate),undefined);
+ const separateRows=request(snapshot(segment('a','reliable',false,0),segment('b',' methods',true,1)));
+ assert.equal(parseHintResponse(response(separateRows,[hint]),separateRows),undefined);
 });
 test('rejects overlaps and mixed versions without imposing three-hint limit',()=>{
  const req=request(snapshot(...['a','b','c','d'].map(k=>segment(k,' word'))));

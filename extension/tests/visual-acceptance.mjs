@@ -206,7 +206,7 @@ async function collectGeometry(page, caption, expectedHints, expectedTerms, mini
     const summary = controlRoot?.querySelector("summary");
     const buttons = [...(controlRoot?.querySelectorAll("button") ?? [])];
     if (!(line instanceof HTMLElement) || !(summary instanceof HTMLElement)) throw new Error("visual-shadow-content-missing");
-    const children = [...line.children];
+    const children = [...line.querySelectorAll('[data-node-key]')];
     const glosses = children.filter(child => child.classList.contains("gloss"));
     const markedTerms = children.filter(child => child.classList.contains("hint-phrase")).map(child => child.textContent ?? "");
     const correctUnderlineStyles = children.filter(child => child.classList.contains("hint-term"))
@@ -324,7 +324,6 @@ export async function runUnderlineAcceptance({page,serviceWorker,apiBase,reposit
     {id:'apostrophe-hyphen',text:"We can't use state-of-the-art tools.",terms:[["can't",'不能'],['state-of-the-art','先进的']],marked:[]},
     {id:'phrase-and-word',text:'We take into account reliable evidence.',terms:[['take into account','考虑到'],['reliable','可靠的']],marked:['take into account']},
     {id:'two-source-lines',rows:['We take into account each detail.','Another clear result remains visible.'],terms:[['take into account','考虑到'],['clear result','清晰结果']],marked:['take into account','clear result']},
-    {id:'cross-source-line',rows:['We take into','account each detail.'],terms:[['take into account','考虑到']],marked:['take into account']},
     {id:'narrow-natural-wrap',text:'We take every important detail into account today.',terms:[['take every important detail into account','综合考虑']],marked:['take every important detail into account'],width:440,font:36},
     {id:'large-text-lines',rows:['We take into account each detail.','Another clear result remains visible.'],terms:[['take into account','考虑到'],['clear result','清晰结果']],marked:['take into account','clear result'],font:48}
   ];
@@ -349,14 +348,14 @@ export async function runUnderlineAcceptance({page,serviceWorker,apiBase,reposit
         const actual=await page.evaluate(()=>{
           const line=document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.line');
           const terms=[...line.querySelectorAll('.hint-term')];
-          const rects=[...line.getClientRects()].filter(rect=>rect.width>0).map(rect=>({top:rect.top,bottom:rect.bottom}));
+          const rects=[...line.querySelectorAll('.row-content')].flatMap(content=>[...content.getClientRects()]).filter(rect=>rect.width>0).map(rect=>({top:rect.top,bottom:rect.bottom}));
           const rows=rects.filter((rect,index)=>!rects.slice(0,index).some(old=>Math.abs(old.top-rect.top)<1)).sort((a,b)=>a.top-b.top);
           return {
             marked:terms.filter(term=>getComputedStyle(term).textDecorationLine.includes('underline')).map(term=>term.textContent),
             borderless:terms.every(term=>parseFloat(getComputedStyle(term).borderBottomWidth)===0&&parseFloat(getComputedStyle(term).paddingBottom)===0),
             noBackgroundOverlap:rows.every((row,index)=>index===0||rows[index-1].bottom<=row.top+0.5),
             rowCount:rows.length,rows,
-            english:[...line.children].filter(node=>!node.classList.contains('gloss')).map(node=>node.textContent).join(''),
+            english:[...line.querySelectorAll('[data-node-key]')].filter(node=>!node.classList.contains('gloss')).map(node=>node.textContent).join(''),
             glosses:line.querySelectorAll('.gloss').length,
             phraseRectCount:[...line.querySelectorAll('.hint-phrase')].map(term=>term.getClientRects().length)
           };
@@ -366,7 +365,7 @@ export async function runUnderlineAcceptance({page,serviceWorker,apiBase,reposit
         assert.equal(actual.borderless,true,`${item.id}: no out-of-line border or padding`);
         assert.equal(actual.noBackgroundOverlap,true,`${item.id}: adjacent line backgrounds overlap ${JSON.stringify(actual.rows)}`);
         if(item.rows||item.width)assert.ok(actual.rowCount>=2,`${item.id}: must really render multiple lines`);
-        if(item.id==='cross-source-line'||item.id==='narrow-natural-wrap')assert.ok(actual.phraseRectCount[0]>=2,`${item.id}: phrase must span lines`);
+        if(item.id==='narrow-natural-wrap')assert.ok(actual.phraseRectCount[0]>=2,`${item.id}: phrase must span lines`);
         const screenshot=resolve(artifactRoot,`${item.id}.png`);await page.locator('#player').screenshot({path:screenshot});
         evidence.push({id:item.id,inputMode:'renderer-contract-mock',...actual,screenshot});
       } finally {await restoreHintRendererMock(serviceWorker);}

@@ -34,7 +34,7 @@ class IncrementalCaptionUseCaseTest {
                 segment("gap", " reliable ", false),
                 segment("new", "caption", true)));
     var result = useCase.enrichIncrementalMeasured(request).result();
-    assertEquals(List.of("figure out", "caption"), queries);
+    assertEquals(List.of("context figure out", " reliable caption"), queries);
     assertEquals(List.of("first", "last", "new"), result.processedKeys());
     assertEquals(2, result.hints().size());
     assertEquals("first", result.hints().getFirst().startKey());
@@ -44,7 +44,7 @@ class IncrementalCaptionUseCaseTest {
   }
 
   @Test
-  void oldTextAndOtherGroupsCannotCompletePhraseOrBecomeHint() {
+  void adjacentOldTailCanCompletePhraseButOtherGroupsCannot() {
     var useCase =
         new EnrichCaptionUseCase(
             IncrementalCaptionUseCaseTest::candidates, new DeterministicHintPolicy());
@@ -55,7 +55,22 @@ class IncrementalCaptionUseCaseTest {
             group(segment("last", "out", true)));
     var result = useCase.enrichIncrementalMeasured(request).result();
     assertEquals(List.of("new", "other", "last"), result.processedKeys());
-    assertTrue(result.hints().isEmpty());
+    assertEquals(1, result.hints().size());
+    assertEquals("old", result.hints().getFirst().startKey());
+    assertEquals("new", result.hints().getFirst().endKey());
+  }
+
+  @Test
+  void visualRowBoundaryCannotCreateLatePhraseOnSealedRow() {
+    var queries = new ArrayList<String>();
+    LexiconCatalog catalog = text -> { queries.add(text); return candidates(text); };
+    var measured = new EnrichCaptionUseCase(catalog, new DeterministicHintPolicy())
+        .enrichIncrementalMeasured(request(group(
+            new CaptionIncrementalRequest.Segment("old", "figure ", null, false, 0),
+            new CaptionIncrementalRequest.Segment("new", "out", null, true, 1))));
+    assertEquals(List.of("out"), queries);
+    assertEquals(List.of("new"), measured.result().processedKeys());
+    assertTrue(measured.result().hints().isEmpty());
   }
 
   @Test
@@ -77,7 +92,7 @@ class IncrementalCaptionUseCaseTest {
     LexiconCatalog catalog =
         text -> {
           if (text.equals("figure out")) return List.of(candidate("figure out", "弄明白"));
-          if (text.equals("caption")) {
+          if (text.endsWith("caption")) {
             var original = candidate("caption", "字幕");
             return List.of(
                 new LexiconHintCandidate(

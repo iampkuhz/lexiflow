@@ -24,6 +24,25 @@ test('late successful result merges into still visible prefix while suffix waits
  assert.equal(t.views.at(-1).state,'waiting');assert.equal(t.views.at(-1).hints[0].chineseGloss,'可靠的');
  t.scheduler.run();await finish(t.calls[1]);assert.equal(t.views.at(-1).hints.length,1);
 });
+test('a row is frozen when a newer visual row arrives, so a late reply cannot add Chinese to it',async()=>{
+ const t=setup();
+ t.coordinator.submit(event(1,segment('a','An old ',true,0),segment('b','reliable',true,1)));
+ t.scheduler.run();
+ t.coordinator.submit(event(2,segment('b','reliable',false,0),segment('c',' new words',true,1)));
+ await finish(t.calls[0],[keyedHint('b')]);
+ assert.equal(t.views.at(-1).hints.length,0);
+ t.scheduler.run();await finish(t.calls[1]);
+ assert.equal(t.views.at(-1).hints.length,0);
+});
+test('an already shown hint keeps its identity and gloss when its row becomes old',async()=>{
+ const t=setup();
+ t.coordinator.submit(event(1,segment('a','An old ',true,0),segment('b','reliable',true,1)));
+ t.scheduler.run();await finish(t.calls[0],[keyedHint('b')]);
+ t.coordinator.submit(event(2,segment('b','reliable',false,0),segment('c',' new words',true,1)));
+ assert.deepEqual(t.views.at(-1).hints.map(hint=>hint.chineseGloss),['可靠的']);
+ t.scheduler.run();await finish(t.calls[1]);
+ assert.deepEqual(t.views.at(-1).hints.map(hint=>hint.chineseGloss),['可靠的']);
+});
 test('retains hints through append and shifts them on prefix removal without a request',async()=>{
  const t=setup();t.coordinator.submit(event(1,segment('a','A '),segment('s1','reliable')));t.scheduler.run();await finish(t.calls[0],[keyedHint()]);
  t.coordinator.submit(event(2,segment('s1','reliable')));t.scheduler.run();assert.equal(t.calls.length,1);
@@ -89,6 +108,24 @@ test('source reset discards the baseline and late success cannot restore it',asy
  t.coordinator.clear(3);await finish(t.calls[1]);
  t.coordinator.submit(event(4,segment('s3','reliable')));t.scheduler.run();
  assert.equal(t.calls[2].event.request.lastRequestedSnapshot,null);
+});
+test('temporary unknown JSON3 track keeps segment identity and confirmed coverage',async()=>{
+ const t=setup();
+ const tracked=(sequence,trackKey,segments)=>({...event(sequence,...segments),request:{...request(snapshot(...segments)),trackKey}});
+ t.coordinator.submit(tracked(1,'en:asr',[segment('old','A reliable')]));t.scheduler.run();await finish(t.calls[0],[keyedHint('old',2,10)]);
+ const baseline=t.calls[0].event.request.currentSnapshot;
+ t.coordinator.submit(tracked(2,null,[segment('old','A reliable',false)]));t.scheduler.run();
+ assert.equal(t.calls.length,1);assert.equal(t.views.at(-1).hints.length,1);
+ t.coordinator.submit(tracked(3,null,[segment('old','A reliable',false),segment('new',' method')]));t.scheduler.run();
+ assert.equal(t.calls[1].event.request.trackKey,null);
+ assert.deepEqual(t.calls[1].event.request.lastRequestedSnapshot,baseline);
+ assert.deepEqual(t.calls[1].event.request.currentSnapshot.captions[0].segments.map(s=>[s.key,s.append]),[['old',false],['new',true]]);
+ await finish(t.calls[1]);
+ t.coordinator.submit(tracked(4,'en:asr',[segment('old','A reliable',false),segment('new',' method',false)]));t.scheduler.run();
+ assert.equal(t.calls.length,2);assert.equal(t.views.at(-1).hints.length,1);
+ t.coordinator.submit(tracked(5,'en:other',[segment('old','A reliable',false),segment('new',' method',false),segment('later',' again')]));t.scheduler.run();
+ assert.equal(t.calls[2].event.request.lastRequestedSnapshot,null);
+ assert.deepEqual(t.calls[2].event.request.currentSnapshot.captions[0].segments.map(s=>s.append),[true,true,true]);
 });
 test('no-hint success acknowledges keys and illegal coverage is not accepted',async()=>{
  const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();await finish(t.calls[0]);assert.equal(t.views.at(-1).state,'no-pending');

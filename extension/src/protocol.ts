@@ -51,7 +51,7 @@ export function isCaptionHintRequest(value: unknown): value is CaptionHintReques
 export function splitsSurrogate(text: string, offset: number): boolean {
   return offset > 0 && offset < text.length && /[\uD800-\uDBFF]/.test(text[offset - 1]) && /[\uDC00-\uDFFF]/.test(text[offset]);
 }
-/** 将片段内范围解析成发出快照内的位置，拒绝跨旧片段或字幕组的提示。 */
+/** 只允许同组同视觉行至多两个紧邻旧尾片段补全新提示；提示终点必须属于本次新增范围。 */
 export function resolveHint(hint: KeyedHint, snapshot: CaptionSnapshot): Hint | undefined {
   let position = 0;
   for (const group of snapshot.captions) {
@@ -59,7 +59,12 @@ export function resolveHint(hint: KeyedHint, snapshot: CaptionSnapshot): Hint | 
     const end = group.segments.findIndex(segment => segment.key === hint.endKey);
     if (start >= 0 && end >= start) {
       const first = group.segments[start], last = group.segments[end];
-      if (!group.segments.slice(start, end + 1).every(segment => segment.append) ||
+      const span = group.segments.slice(start, end + 1);
+      const firstNew = span.findIndex(segment => segment.append);
+      const oldPrefix = firstNew < 0 ? span : span.slice(0, firstNew);
+      if (firstNew < 0 || !span.every(segment => segment.line === first.line) ||
+          !span.slice(firstNew).every(segment => segment.append) ||
+          oldPrefix.length > 2 || oldPrefix.reduce((sum, segment) => sum + segment.text.length, 0) > 48 ||
           !nonnegative(hint.startOffset) || !nonnegative(hint.endOffset) || hint.startOffset >= first.text.length ||
           hint.endOffset < 1 || hint.endOffset > last.text.length || splitsSurrogate(first.text, hint.startOffset) || splitsSurrogate(last.text, hint.endOffset)) return;
       const startOffset = position + group.segments.slice(0, start).reduce((sum, segment) => sum + segment.text.length, 0) + hint.startOffset;

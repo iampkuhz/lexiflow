@@ -14,6 +14,17 @@ test('maps only active DOM-matched source metadata and never invents unknown tim
  source.accept({...track,trackKey:'another'},'synthetic');assert.equal(source.match('A reliable',10350).trackKey,null);
  source.reset();assert.equal(source.match('A reliable',10350).trackKey,null);
 });
+test('JSON3 expiry can precede DOM roll-up without any change to the visible old row',()=>{
+ const source=new YoutubeSourceMetadata();
+ source.accept({videoId:'synthetic',trackKey:'en:asr',fragments:[
+  {text:'older row',startMs:123280,endMs:128319,offsetMs:0,windowId:'1',append:false},
+  {text:'new',startMs:125439,endMs:130160,offsetMs:0,windowId:'1',append:false},
+  {text:' row',startMs:125439,endMs:130160,offsetMs:881,windowId:'1',append:true}
+ ]},'synthetic');
+ const visible='older rownew row';
+ assert.equal(source.match(visible,128318).trackKey,'en:asr');
+ assert.equal(source.match(visible,128319).trackKey,null);
+});
 test('rejects spoofed or malformed source evidence at the isolated-world boundary',()=>{
  const source=new YoutubeSourceMetadata();
  for(const value of [{...track,videoId:'other'},{...track,fragments:[{...track.fragments[0],offsetMs:-1}]},{...track,fragments:[{...track.fragments[0],text:42}]}]) source.accept(value,'synthetic');

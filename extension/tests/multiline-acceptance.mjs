@@ -32,7 +32,7 @@ export async function runMultilineAcceptance({page,serviceWorker,repositoryRoot,
   const capture=()=>page.evaluate(()=>{
     const line=document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.line');
     return {
-      english:[...line.children].filter(node=>!node.classList.contains('gloss')).map(node=>node.textContent).join(''),
+      english:[...line.querySelectorAll('[data-node-key]')].filter(node=>!node.classList.contains('gloss')).map(node=>node.textContent).join(''),
       breaks:line.querySelectorAll('br').length,glosses:line.querySelectorAll('.gloss').length,
       masked:document.querySelector('#player').classList.contains('lexiflow-inline-active')
     };
@@ -62,22 +62,21 @@ export async function runMultilineAcceptance({page,serviceWorker,repositoryRoot,
     const second=await sourceRows(rolled);
     assert.deepEqual(second,{english:rolled.join(' '),breaks:2,glosses:0,masked:true});
     assert.equal((await requests()).length,1,'latest observation must wait behind the actual in-flight request');
-    await release();await waitForState(page,'ready');
+    await release();await waitForState(page,'no-pending');
     assert.equal((await capture()).english,rolled.join(' '));
-    assert.equal((await capture()).glosses,1);
+    assert.equal((await capture()).glosses,0,'迟到结果不能补写已滚为旧行的中文');
     const incremental=(await requests()).at(-1).currentSnapshot.captions.flatMap(group=>group.segments);
     assert.equal(incremental.filter(segment=>segment.append).map(segment=>segment.text).join(''),' A newly appended tail');
     assert.equal((await requests()).length,2);
     cases.push({id:'three-line-roll-during-slow-api',sourceLines:3,requests:2,...await capture()});
     await page.locator('#player').screenshot({path:resolve(root,'three-lines-after-api.png')});
 
-    await page.evaluate(()=>{window.__multilineGloss=document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.gloss');});
     await sourceRows(['A reliable method A continuing ending','A newly appended tail']);
     const reflow=await capture();assert.equal(reflow.breaks,1);assert.equal(reflow.english,rolled.join(' '));
     await sourceRows(rolled);await page.waitForTimeout(80);
     assert.equal((await requests()).length,2,'pure line changes must not call API');
-    assert.equal(await page.evaluate(()=>document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.gloss')===window.__multilineGloss),true);
-    cases.push({id:'three-two-three-source-reflow',requests:2,retainedGlossNode:true,...await capture()});
+    assert.equal((await capture()).glosses,0);
+    cases.push({id:'three-two-three-source-reflow',requests:2,...await capture()});
 
     await hold();
     const corrected=['A reliable method','A corrected middle line','A newly appended tail'];

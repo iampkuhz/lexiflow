@@ -7,6 +7,7 @@ const snapshotTracker = new CaptionSnapshotTracker();
 const captionViewport = new CaptionViewport();
 const sourceMetadata = new YoutubeSourceMetadata();
 let trackKey: string | null = null;
+let lastKnownTrackKey: string | null = null;
 let nativeIdentity = "";
 let topic: string | undefined;
 let topicPromise: Promise<string> | undefined;
@@ -60,6 +61,7 @@ let enhancementEnabled = true;
 let pageKey = crypto.randomUUID();
 let pageVideoId = videoIdFromLocation();
 let layoutKey = "";
+let missingCaptionAt: number | undefined;
 const overlay = new BilingualOverlay(
   (entryId, lexiconVersion) => { void updatePreferences("suppress", entryId, lexiconVersion); },
   () => { void updatePreferences("restore-all"); },
@@ -109,8 +111,10 @@ const coordinator = new CaptionStreamCoordinator(
   }),
   (view) => {
     // 交付结果时重新读取实时来源，不能只相信最后一次 debounce snapshot。
+    const liveCaption = currentCaption();
     if (view.state === "ready" && (!view.event || view.event.sequence !== sourceSequence ||
-        snapshotText(view.event.request.currentSnapshot) !== currentCaption() || activeVideoId !== videoIdFromLocation())) {
+        (liveCaption !== undefined && snapshotText(view.event.request.currentSnapshot) !== liveCaption) ||
+        activeVideoId !== videoIdFromLocation())) {
       diagnostics.record({ outcome: "stale-at-render" });
       overlay.updateDiagnostics(diagnostics.snapshot());
       return;
@@ -155,6 +159,7 @@ function scheduleCapture(): void {
 }
 
 function clearSource(): void {
+  missingCaptionAt = undefined;
   captionViewport.reset();
   snapshotTracker.reset();
   coordinator.clear(++sourceSequence);
@@ -174,12 +179,25 @@ async function captureCurrentCaption(): Promise<void> {
   const videoId = videoIdFromLocation();
   const caption = currentCaption();
   if (video === null || videoId === undefined || caption === undefined) {
-    if (activeCaptionKey !== undefined) {
+    const nativeContainer = player?.querySelector<HTMLElement>("#ytp-caption-window-container");
+    const transientGap = caption === undefined && video && !video.ended && videoId && enhancementEnabled &&
+      !document.hidden && !seeking && !navigating && !sourceStopped && !player?.classList.contains("ad-showing") &&
+      nativeContainer?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+    if (transientGap) {
+      missingCaptionAt ??= performance.now();
+      overlay.render({ state: "idle" }, { ready: preferenceReady, entryKeys: suppressed, message: preferenceMessage });
+    } else if (activeCaptionKey !== undefined) {
       activeCaptionKey = undefined;
       clearSource();
     }
     return;
   }
+  const wasMissing = missingCaptionAt !== undefined;
+  if (wasMissing && performance.now() - missingCaptionAt! > 650) {
+    activeCaptionKey = undefined;
+    clearSource();
+  }
+  missingCaptionAt = undefined;
   if (activeVideoId !== videoId) {
     activeVideoId = videoId;
     sourceRevision += 1;
@@ -194,16 +212,18 @@ async function captureCurrentCaption(): Promise<void> {
   const nextNativeIdentity = metadata.trackKey && firstMetadata.startMs !== null
     ? `${metadata.trackKey}:${firstMetadata.windowId}:${firstMetadata.startMs}:${firstMetadata.offsetMs}` : "";
   const textUnchanged = activeCaptionKey === `${videoId}\u0000${sourceRevision}\u0000${caption}`;
-  if ((metadata.trackKey !== trackKey) ||
+  // JSON3 的有效时间窗与 DOM roll-up 并非同步：短暂无法匹配不是换轨证据。
+  if ((metadata.trackKey !== null && lastKnownTrackKey !== null && metadata.trackKey !== lastKnownTrackKey) ||
       (textUnchanged && nativeIdentity && nextNativeIdentity && nativeIdentity !== nextNativeIdentity)) {
     clearSource(); activeCaptionKey = undefined;
   }
-  nativeIdentity = nextNativeIdentity;
+  if (metadata.trackKey !== null) lastKnownTrackKey = metadata.trackKey;
+  if (nextNativeIdentity) nativeIdentity = nextNativeIdentity;
   trackKey = metadata.trackKey;
   const captionKey = `${videoId}\u0000${sourceRevision}\u0000${caption}`;
   const nextLayoutKey = JSON.stringify(currentSource()?.lineBreaks ?? []);
   if (captionKey === activeCaptionKey) {
-    if (nextLayoutKey !== layoutKey) { layoutKey = nextLayoutKey; renderCurrentView(); }
+    if (nextLayoutKey !== layoutKey || wasMissing) { layoutKey = nextLayoutKey; renderCurrentView(); }
     return;
   }
   layoutKey = nextLayoutKey;
@@ -276,7 +296,7 @@ function resetPageSetting(): void {
   enhancementEnabled = true;
   pageKey = crypto.randomUUID();
   pageVideoId = videoIdFromLocation();
-  topic = undefined; topicPromise = undefined; trackKey = null; nativeIdentity = ""; sourceMetadata.reset();
+  topic = undefined; topicPromise = undefined; trackKey = null; lastKnownTrackKey = null; nativeIdentity = ""; sourceMetadata.reset();
   sourceStopped = false;
   activeCaptionKey = undefined;
 }

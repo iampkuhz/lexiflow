@@ -7,7 +7,7 @@ import java.util.Objects;
  * 按当前显示顺序排列、定位到片段 key 的增量提示。
  *
  * @param processedKeys 本次所有 append 片段的 key，按显示顺序排列，包含未命中提示的片段。
- * @param hints 定位到连续新增片段的非重叠提示列表，可为空。
+ * @param hints 定位到新增片段、可跨紧邻旧尾词的非重叠提示列表，可为空。
  */
 public record IncrementalHintResult(List<String> processedKeys, List<Hint> hints) {
   /** 冻结本次处理 key 与提示顺序。 */
@@ -21,7 +21,7 @@ public record IncrementalHintResult(List<String> processedKeys, List<Hint> hints
    *
    * @param startKey 提示起点所在的片段 key。
    * @param startOffset 起点在 startKey 片段内的 UTF-16 偏移，包含该位置。
-   * @param endKey 提示终点所在的片段 key，与起点之间仅允许连续新增片段。
+   * @param endKey 提示终点所在的片段 key，必须落在本次新增片段内。
    * @param endOffset 终点在 endKey 片段内的 UTF-16 偏移，不包含该位置。
    * @param chineseGloss 已发布词义的中文短释义。
    * @param lexiconEntryId 已发布词条的稳定身份。

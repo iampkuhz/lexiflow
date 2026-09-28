@@ -25,12 +25,17 @@ export type PreferenceView = { ready: boolean; entryKeys: Set<string>; message: 
 export class BilingualOverlay {
   private host?: HTMLElement;
   private line?: HTMLSpanElement;
+  private viewport?: HTMLElement;
+  private outgoing?: HTMLElement;
+  private rollFrame?: number;
+  private rollTimer?: ReturnType<typeof setTimeout>;
   private player?: HTMLElement;
   private controls?: HTMLElement;
   private details?: HTMLDetailsElement;
   private report?: HTMLPreElement;
   private preferenceMessage?: HTMLElement;
   private latestDiagnostics = "";
+  private shownHintKeys = new Set<string>();
 
   constructor(private readonly suppress: (entryId: string, lexiconVersion: number) => void,
     private readonly restore: () => void, private readonly resetDiagnostics: () => void) {}
@@ -38,18 +43,19 @@ export class BilingualOverlay {
   render(view: StreamView, preferences: PreferenceView, source?: CaptionSource): number {
     const host = this.ensure();
     if (!host || !this.line) return 0;
-    const hints = preferences.ready && source && view.event && source.caption === snapshotText(view.event.request.currentSnapshot)
-      ? view.hints?.filter(hint => !preferences.entryKeys.has(suppressionKey(hint.lexiconEntryId, hint.lexiconVersion))) ?? [] : [];
-    host.dataset.lexiflowState = view.state === "ready" && !hints.length ? "no-pending" : view.state;
-    if (this.preferenceMessage) this.preferenceMessage.textContent = preferences.message ||
-      `仅本机：已抑制 ${preferences.entryKeys.size} 个词条。点击中文即可不再提示。`;
+    const message = preferences.message || `仅本机：已抑制 ${preferences.entryKeys.size} 个词条。点击中文即可不再提示。`;
+    if (this.preferenceMessage && this.preferenceMessage.textContent !== message) this.preferenceMessage.textContent = message;
     if (!source) {
+      host.dataset.lexiflowState = "idle";
+      this.finishRoll();
       if (this.line.childNodes.length) this.line.replaceChildren();
-      this.player?.classList.remove("lexiflow-inline-active");
+      if (this.player?.classList.contains("lexiflow-inline-active")) this.player.classList.remove("lexiflow-inline-active");
       return 0;
     }
-    const existing = new Map(Array.from(this.line.children).map(node => [(node as HTMLElement).dataset.nodeKey!, node as HTMLElement]));
-    const desired: HTMLElement[] = [];
+    const existing = new Map(Array.from(this.line.querySelectorAll<HTMLElement>("[data-node-key]"))
+      .map(node => [node.dataset.nodeKey!, node]));
+    const boundaries = [0, ...source.lineBreaks.filter(value => value > 0 && value < source.caption.length), source.caption.length];
+    const desired = Array.from({ length: boundaries.length - 1 }, () => [] as HTMLElement[]);
     const segments = view.event ? snapshotSegments(view.event.request.currentSnapshot) : [];
     const anchor = (offset: number): string => {
       let base = 0;
@@ -59,22 +65,34 @@ export class BilingualOverlay {
       }
       return `text-${offset}`;
     };
+    const keys = new Set(segments.map(segment => segment.key));
+    this.shownHintKeys = new Set([...this.shownHintKeys].filter(key => [...keys].some(segmentKey => key.startsWith(`${segmentKey}:`))));
+    const frozen = new Set(view.frozenKeys ?? []);
+    const hintKey = (hint: Hint): string => `${anchor(hint.startOffset)}:${hint.lexiconEntryId}:${hint.lexiconVersion}:${hint.senseId}:${source.caption.slice(hint.startOffset, hint.endOffset)}`;
+    const touchesFrozen = (hint: Hint): boolean => {
+      let offset = 0;
+      for (const segment of segments) {
+        if (offset < hint.endOffset && hint.startOffset < offset + segment.text.length && frozen.has(segment.key)) return true;
+        offset += segment.text.length;
+      }
+      return false;
+    };
+    const hints = preferences.ready && view.event && source.caption === snapshotText(view.event.request.currentSnapshot)
+      ? view.hints?.filter(hint => !preferences.entryKeys.has(suppressionKey(hint.lexiconEntryId, hint.lexiconVersion)) &&
+        (!touchesFrozen(hint) || this.shownHintKeys.has(hintKey(hint)))) ?? [] : [];
+    host.dataset.lexiflowState = view.state === "ready" && !hints.length ? "no-pending" : view.state;
     const span = (start: number, end: number, className = ""): void => {
       if (start === end) return;
+      const breakAt = boundaries.find(value => value > start && value < end);
+      if (breakAt !== undefined) { span(start, breakAt, className); span(breakAt, end, className); return; }
       const text = source.caption.slice(start, end);
       const key = `${anchor(start)}:${className}:${text}`;
       const node = existing.get(key) ?? document.createElement("span");
       node.dataset.nodeKey = key;
       node.className = className; node.setAttribute("aria-hidden", "true");
-      const breaks = source.lineBreaks.filter(offset => offset >= start && offset < end).map(offset => offset - start);
-      const signature = JSON.stringify([text, breaks]);
-      if (node.dataset.content !== signature) {
-        node.dataset.content = signature;
-        const pieces: Node[] = []; let cursor = 0;
-        for (const offset of breaks) { pieces.push(document.createTextNode(text.slice(cursor, offset)), document.createElement("br")); cursor = offset; }
-        pieces.push(document.createTextNode(text.slice(cursor))); node.replaceChildren(...pieces);
-      }
-      desired.push(node);
+      if (node.textContent !== text) node.textContent = text;
+      const row = boundaries.findIndex((value, index) => index < desired.length && start >= value && start < boundaries[index + 1]);
+      desired[Math.max(0, row)].push(node);
     };
     const english = (start: number, end: number): void => {
       // 普通英文也按增量片段切分，新增后缀不会替换旧英文节点。
@@ -100,16 +118,12 @@ export class BilingualOverlay {
         button.setAttribute("aria-label", `${term}：${hint.chineseGloss}。不再提示该词条，仅本机、当前词库版本`);
         button.addEventListener("click", event => { event.stopPropagation(); this.suppress(hint.lexiconEntryId, hint.lexiconVersion); });
       }
-      desired.push(button); offset = hint.endOffset;
+      const row = boundaries.findIndex((value, index) => index < desired.length && hint.startOffset >= value && hint.startOffset < boundaries[index + 1]);
+      desired[Math.max(0, row)].push(button); offset = hint.endOffset;
+      this.shownHintKeys.add(hintKey(hint));
     }
     english(offset, source.caption.length);
-    const retained = new Set(desired);
-    for (const node of Array.from(this.line.children)) if (!retained.has(node as HTMLElement)) node.remove();
-    let cursor: ChildNode | null = this.line.firstChild;
-    for (const node of desired) {
-      if (node === cursor) cursor = cursor.nextSibling;
-      else this.line.insertBefore(node, cursor);
-    }
+    this.renderRows(desired, boundaries, anchor);
     this.position();
     if (!this.player?.classList.contains("lexiflow-inline-active")) this.player?.classList.add("lexiflow-inline-active");
     return hints.length;
@@ -137,11 +151,67 @@ export class BilingualOverlay {
     if (this.line.style.fontSize !== fontSize) this.line.style.fontSize = fontSize;
   }
 
+  private finishRoll(): void {
+    if (this.rollFrame !== undefined) cancelAnimationFrame(this.rollFrame);
+    if (this.rollTimer !== undefined) clearTimeout(this.rollTimer);
+    this.rollFrame = undefined; this.rollTimer = undefined;
+    if (this.line?.classList.contains("rolling")) this.line.classList.remove("rolling");
+    if (this.line?.style.transform) this.line.style.transform = "";
+    this.outgoing?.remove(); this.outgoing = undefined;
+    if (this.viewport?.style.height) this.viewport.style.height = "";
+  }
+
+  private renderRows(desired: HTMLElement[][], boundaries: number[], anchor: (offset: number) => string): void {
+    if (!this.line || !this.viewport) return;
+    const nextKeys = desired.map((_, index) => anchor(boundaries[index]));
+    const currentKeys = Array.from(this.line.querySelectorAll<HTMLElement>(":scope > .caption-row"))
+      .map(row => row.dataset.rowKey);
+    if (this.outgoing && JSON.stringify(currentKeys) !== JSON.stringify(nextKeys)) this.finishRoll();
+    const oldRows = Array.from(this.line.querySelectorAll<HTMLElement>(":scope > .caption-row"));
+    const oldByKey = new Map(oldRows.map(row => [row.dataset.rowKey!, row]));
+    const rows = desired.map((nodes, index) => {
+      const key = anchor(boundaries[index]);
+      const row = oldByKey.get(key) ?? document.createElement("span");
+      row.className = "caption-row"; row.dataset.rowKey = key;
+      let content = row.querySelector<HTMLElement>(":scope > .row-content");
+      if (!content) { content = document.createElement("span"); content.className = "row-content"; row.append(content); }
+      content.replaceChildren(...nodes);
+      return row;
+    });
+    const roll = !this.outgoing && oldRows.length === 2 && rows.length === 2 && oldRows[1] === rows[0] && oldRows[0] !== rows[0];
+    const outgoing = roll ? oldRows[0] : undefined;
+    const outgoingHeight = outgoing?.getBoundingClientRect().height ?? 0;
+    const children: Node[] = [];
+    rows.forEach((row, index) => {
+      if (index) { const br = document.createElement("br"); br.className = "row-break"; children.push(br); }
+      children.push(row);
+    });
+    this.line.replaceChildren(...children);
+    if (outgoing && outgoingHeight > 0) {
+      const ghost = document.createElement("div"); ghost.className = "outgoing"; ghost.append(outgoing);
+      ghost.style.fontSize = this.line.style.fontSize;
+      this.viewport.append(ghost); this.outgoing = ghost;
+      this.viewport.style.height = `${this.line.getBoundingClientRect().height}px`;
+      this.line.style.transform = `translateY(${outgoingHeight}px)`;
+      this.rollFrame = requestAnimationFrame(() => {
+        this.rollFrame = undefined;
+        if (this.outgoing !== ghost || !this.line) return;
+        this.line.classList.add("rolling");
+        ghost.classList.add("rolling");
+        this.line.style.transform = "translateY(0)";
+        ghost.style.transform = `translateY(-${outgoingHeight}px)`;
+        this.rollTimer = setTimeout(() => this.finishRoll(), 450);
+      });
+    }
+  }
+
   private ensure(): HTMLElement | undefined {
     const player = document.querySelector<HTMLElement>(".html5-video-player, #movie_player");
     if (this.host?.isConnected && this.player === player) return this.host;
-    this.player?.classList.remove("lexiflow-inline-active");
+    this.finishRoll(); this.shownHintKeys.clear();
+    if (this.player?.classList.contains("lexiflow-inline-active")) this.player.classList.remove("lexiflow-inline-active");
     this.host?.remove(); this.controls?.remove();
+    this.line = undefined; this.viewport = undefined;
     if (!player?.querySelector("#ytp-caption-window-container")) return undefined;
     this.player = player;
     const host = document.createElement("div");
@@ -150,10 +220,12 @@ export class BilingualOverlay {
     host.style.cssText = "position:absolute;left:5%;right:5%;bottom:12%;z-index:2147483646;pointer-events:none;text-align:center";
     const root = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
-    style.textContent = ":host{font-family:Arial,sans-serif;white-space:normal}.line{display:inline;white-space:normal;box-decoration-break:clone;-webkit-box-decoration-break:clone;padding:.12em .25em;background:rgba(0,0,0,.8);color:white;font-weight:500;line-height:1.55;text-shadow:0 1px 2px #000;overflow-wrap:anywhere}.line:empty{display:none}.hint-phrase{text-decoration-line:underline;text-decoration-color:#ffe58f;text-decoration-thickness:.08em;text-underline-offset:.14em;text-decoration-skip-ink:none}.gloss{display:inline;white-space:normal;color:#ffe58f;background:none;border:0;padding:0;font:inherit;text-shadow:inherit;cursor:pointer;pointer-events:auto;max-width:100%;overflow-wrap:anywhere}.gloss:focus-visible{outline:2px solid #ffe58f}";
+    style.textContent = ":host{font-family:Arial,sans-serif;white-space:normal}.viewport{position:relative;overflow:hidden}.line{display:block;white-space:normal;color:white;font-weight:500;line-height:1.55;text-shadow:0 1px 2px #000;overflow-wrap:anywhere}.line:empty{display:none}.caption-row{display:block;text-align:center}.row-content{padding:.12em .25em;background:rgba(0,0,0,.8);box-decoration-break:clone;-webkit-box-decoration-break:clone}.row-break{display:none}.outgoing{position:absolute;top:0;left:0;right:0;color:white;font:inherit;line-height:1.55;text-shadow:0 1px 2px #000}.rolling{transition:transform .42s ease-out}.hint-phrase{text-decoration-line:underline;text-decoration-color:#ffe58f;text-decoration-thickness:.08em;text-underline-offset:.14em;text-decoration-skip-ink:none}.gloss{display:inline;white-space:normal;color:#ffe58f;background:none;border:0;padding:0;font:inherit;text-shadow:inherit;cursor:pointer;pointer-events:auto;max-width:100%;overflow-wrap:anywhere}.gloss:focus-visible{outline:2px solid #ffe58f}";
     this.line = document.createElement("span");
     this.line.className = "line";
-    root.append(style, this.line);
+    this.viewport = document.createElement("div"); this.viewport.className = "viewport";
+    this.viewport.append(this.line);
+    root.append(style, this.viewport);
     player.append(host);
     this.host = host;
     this.createControls(player);

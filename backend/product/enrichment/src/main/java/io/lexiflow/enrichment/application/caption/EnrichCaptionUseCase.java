@@ -72,7 +72,7 @@ public final class EnrichCaptionUseCase {
   }
 
   /**
-   * 只查询每组连续新增区间，不以旧片段发起候选查询。
+   * 只在新增片段到来时查询，允许同组同视觉行紧邻的有界旧尾词补全词组。
    *
    * @param request 含义：插件已标准化的双快照请求。取值范围：非空且满足领域合同。
    * @return 所有新增片段的处理覆盖、命中提示、累计耗时及仅本次处理区间的诊断文字。
@@ -102,14 +102,28 @@ public final class EnrichCaptionUseCase {
           continue;
         }
         var first = index;
-        while (index < group.segments().size() && group.segments().get(index).append()) index++;
+        var line = group.segments().get(first).line();
+        while (index < group.segments().size()
+            && group.segments().get(index).append()
+            && group.segments().get(index).line() == line) index++;
         var start = starts.get(first);
         var end = starts.get(index - 1) + group.segments().get(index - 1).text().length();
+        var contextFirst = first;
+        var contextLength = 0;
+        while (contextFirst > 0
+            && first - contextFirst < 2
+            && !group.segments().get(contextFirst - 1).append()
+            && group.segments().get(contextFirst - 1).line() == line
+            && contextLength + group.segments().get(contextFirst - 1).text().length() <= 48) {
+          contextFirst--;
+          contextLength += group.segments().get(contextFirst).text().length();
+        }
+        var contextStart = starts.get(contextFirst);
         var groupText = text.toString();
         var started = nanoTime.getAsLong();
-        var candidates = lexiconCatalog.candidatesFor(groupText.substring(start, end));
+        var candidates = lexiconCatalog.candidatesFor(groupText.substring(contextStart, end));
         var queried = nanoTime.getAsLong();
-        var selected = hintPolicy.evaluate(groupText, start, end, candidates);
+        var selected = hintPolicy.evaluate(groupText, contextStart, end, start, candidates);
         // 先收集版本再去重，不能让同词条的重复命中掩盖跨区间版本冲突。
         for (var hint : selected) publishedVersions.add(hint.lexiconVersion());
         selected =
@@ -119,8 +133,8 @@ public final class EnrichCaptionUseCase {
         rulesNanos += finished - queried;
         candidateCount += candidates.size();
         for (var hint : selected) {
-          var startIndex = segmentAtStart(group, starts, first, index, hint.startOffset());
-          var endIndex = segmentAtEnd(group, starts, first, index, hint.endOffset());
+          var startIndex = segmentAtStart(group, starts, contextFirst, index, hint.startOffset());
+          var endIndex = segmentAtEnd(group, starts, contextFirst, index, hint.endOffset());
           hints.add(
               new IncrementalHintResult.Hint(
                   group.segments().get(startIndex).key(),
@@ -132,7 +146,12 @@ public final class EnrichCaptionUseCase {
                   hint.lexiconVersion(),
                   hint.senseId()));
         }
-        intervals.add(new Interval(groupText, start, end, selected));
+        intervals.add(
+            new Interval(
+                groupText,
+                start,
+                end,
+                selected.stream().filter(hint -> hint.startOffset() >= start).toList()));
       }
     }
     if (publishedVersions.size() > 1) {

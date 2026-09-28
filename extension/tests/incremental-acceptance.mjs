@@ -7,6 +7,17 @@ export async function runIncrementalAcceptance({page,serviceWorker,setCaption,wa
  });
  try {
   await setCaption(page,'A reliable',40);await waitForState(page,'ready');
+  const beforeGap=await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length);
+  await setCaption(page,'',40.01);await waitForState(page,'idle');
+  await setCaption(page,'A reliable',40.02);await waitForState(page,'ready');
+  assert.equal(await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length),beforeGap,
+    '短暂原生空帧恢复同一行不能重新分配片段身份或重复请求');
+  await setCaption(page,'A completely reliable',40.03);await page.waitForTimeout(40);
+  await setCaption(page,'',40.04);await waitForState(page,'idle');
+  await page.waitForTimeout(300);
+  await setCaption(page,'A completely reliable',40.05);await waitForState(page,'ready');
+  assert.match(await overlayText(page),/可靠的/,'空帧期间完成的请求可在同一行恢复后显示');
+  await setCaption(page,'A reliable',40.06);await waitForState(page,'ready');
   await page.evaluate(()=>{window.__retainedGloss=document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.gloss');});
   const before=await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length);
   await setCaption(page,'A reliable method',40.2);
@@ -37,6 +48,8 @@ export async function runIncrementalAcceptance({page,serviceWorker,setCaption,wa
   await setCaption(page,'Another reliable',41);await page.waitForTimeout(70);await setCaption(page,'Another reliable result',41.1);
   await waitForState(page,'ready');assert.equal(await overlayText(page),'Another reliable(可靠的) result');
   // 原生 roll-up 仅由 CSS transform 改变可见行：没有 DOM mutation/timeupdate 也要即时采集。
+  // 即使系统报告减少动态效果，增强字幕也始终跟随原生滚动，不切换到跳变模式。
+  await page.emulateMedia({reducedMotion:'reduce'});
   await page.evaluate(()=>{
     const container=document.querySelector('#ytp-caption-window-container');container.replaceChildren();
     const window=document.createElement('div');window.className='caption-window';window.style.cssText='height:48px;overflow:hidden';
@@ -48,8 +61,12 @@ export async function runIncrementalAcceptance({page,serviceWorker,setCaption,wa
   const motionBefore=await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length);
   await page.evaluate(()=>{window.__motionGloss=document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.gloss');document.querySelector('.captions-text').style.transform='translateY(-24px)';});
   await page.waitForFunction(()=>document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.line').textContent.includes('new words'),undefined,{timeout:180});
+  assert.equal(await page.evaluate(()=>!!document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.outgoing')),
+    true,'两行滚动时旧行应暂留为只展示的离场行');
   assert.equal(await page.evaluate(()=>document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.gloss')===window.__motionGloss),true);
   await page.waitForTimeout(500);
+  assert.equal(await page.evaluate(()=>!!document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.outgoing')),
+    false,'滚动结束必须清理离场行');
   assert.equal(await overlayText(page),'A reliable(可靠的) method new words');
   assert.equal(await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length),motionBefore+1);
   // 原生动画复位与前缀节点移除不在同一帧：不得回显旧行或丢掉刚出现的新行。
@@ -74,14 +91,46 @@ export async function runIncrementalAcceptance({page,serviceWorker,setCaption,wa
   await page.waitForFunction(()=>document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.line').textContent.includes('An older line'));
   // 页面桥为不可信输入：已匹配轨道变为歧义时，不能沿用旧轨道标签。
   await setCaption(page,'A reliable native',42);await waitForState(page,'ready');
-  await page.evaluate(()=>window.addEventListener('message',event=>{if(event.data?.type==='lexiflow-native-captions')window.__sourceMessageEvidence={origin:event.origin,sameWindow:event.source===window,videoId:new URL(location.href).searchParams.get('v'),time:document.querySelector('video').currentTime};}));
   const emit=trackKey=>page.evaluate(trackKey=>window.postMessage({type:'lexiflow-native-captions',track:{videoId:'lexiflow-e2e',trackKey,fragments:[
     {text:'A reliable native',startMs:0,endMs:50000,offsetMs:0,windowId:'1',append:false}]}},location.origin),trackKey);
-  await emit('en:source');await page.waitForTimeout(350);await waitForState(page,'ready');
-  const actualTrack=await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.at(-1).trackKey);
-  assert.equal(actualTrack,'en:source',JSON.stringify(await page.evaluate(()=>({event:window.__sourceMessageEvidence,diagnostics:JSON.parse(document.querySelector('#lexiflow-caption-overlay').dataset.lexiflowDiagnostics)}))));
-  assert.equal(await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.at(-1).currentSnapshot.captions[0].startMs),0);
-  await emit('en:ambiguous');await page.waitForTimeout(350);await waitForState(page,'ready');
-  assert.equal(await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.at(-1).trackKey),null);
- } finally { await serviceWorker.evaluate(()=>{globalThis.fetch=globalThis.__incrementalOriginalFetch;delete globalThis.__incrementalOriginalFetch;delete globalThis.__incrementalRequests;}); }
+  const stableBefore=await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length);
+  const stableKeys=await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.at(-1).currentSnapshot.captions.flatMap(g=>g.segments).map(s=>s.key));
+  await emit('en:source');await page.waitForTimeout(350);
+  assert.equal(await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length),stableBefore);
+  // DOM 与原生元信息暂时无法匹配时，未知来源不能重新分配整行 key。
+  await setCaption(page,'A reliable native',50.001);await page.waitForTimeout(100);
+  assert.equal(await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length),stableBefore);
+  await setCaption(page,'A reliable native words',50.1);await waitForState(page,'ready');
+  const expired=await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.at(-1));
+  assert.equal(expired.trackKey,null);
+  assert.deepEqual(expired.currentSnapshot.captions.flatMap(g=>g.segments).slice(0,stableKeys.length).map(s=>s.key),stableKeys);
+  assert.equal(expired.currentSnapshot.captions.flatMap(g=>g.segments).filter(s=>s.append).map(s=>s.text).join(''),' words');
+  assert.deepEqual(expired.lastRequestedSnapshot.captions.flatMap(g=>g.segments).map(s=>s.key),stableKeys);
+  const expiredCount=await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length);
+  await page.evaluate(()=>window.postMessage({type:'lexiflow-native-captions',track:{videoId:'lexiflow-e2e',trackKey:'en:source',fragments:[
+    {text:'A reliable native words',startMs:0,endMs:100000,offsetMs:0,windowId:'1',append:false}]}},location.origin));
+  await page.waitForTimeout(100);
+  assert.equal(await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length),expiredCount);
+  await page.evaluate(()=>window.postMessage({type:'lexiflow-native-captions',track:{videoId:'lexiflow-e2e',trackKey:'en:source',fragments:[
+    {text:'A reliable native words more',startMs:0,endMs:100000,offsetMs:0,windowId:'1',append:false}]}},location.origin));
+  await setCaption(page,'A reliable native words more',50.2);await waitForState(page,'ready');
+  const recovered=await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.at(-1));
+  assert.equal(recovered.trackKey,'en:source');
+  assert.deepEqual(recovered.currentSnapshot.captions.flatMap(g=>g.segments).slice(0,stableKeys.length).map(s=>s.key),stableKeys);
+  assert.equal(recovered.currentSnapshot.captions.flatMap(g=>g.segments).filter(s=>s.append).map(s=>s.text).join(''),' more');
+  // 测试页的 video.currentTime getter 只在 MAIN world 生效；改写 A 的匹配内容使 B 成为唯一确认轨道。
+  await page.evaluate(()=>{
+    for(const [trackKey,text] of [['en:source','other source'],['en:other','A reliable native words more']])
+      window.postMessage({type:'lexiflow-native-captions',track:{videoId:'lexiflow-e2e',trackKey,fragments:[
+        {text,startMs:0,endMs:50000,offsetMs:0,windowId:'2',append:false}]}},location.origin);
+  });
+  await setCaption(page,'A reliable native words more',50.3);await page.waitForTimeout(350);await waitForState(page,'ready');
+  const switched=await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.at(-1));
+  assert.equal(switched.trackKey,'en:other');
+  assert.equal(switched.lastRequestedSnapshot,null);
+  assert.notEqual(switched.currentSnapshot.captions[0].segments[0].key,stableKeys[0]);
+ } finally {
+  await page.emulateMedia({reducedMotion:'no-preference'});
+  await serviceWorker.evaluate(()=>{globalThis.fetch=globalThis.__incrementalOriginalFetch;delete globalThis.__incrementalOriginalFetch;delete globalThis.__incrementalRequests;});
+ }
 }

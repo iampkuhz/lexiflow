@@ -86,6 +86,27 @@ class CaptionHintLogTest {
   }
 
   @Test
+  void lateCompletionKeepsOldSegmentIdAndRecordsOnlyTheNewSuffix() throws IOException {
+    var file = directory.resolve("late-completion.jsonl");
+    var controller = controller(file);
+    controller.hint(request(segment("stable-old", "reli", true)));
+    var firstLine = Files.readAllLines(file).getFirst();
+    var result =
+        controller
+            .hint(request(segment("stable-old", "reli", false), segment("fresh", "able", true)))
+            .getBody();
+    assertEquals(List.of("fresh"), result.processedKeys());
+    assertEquals("stable-old", result.hints().getFirst().startKey());
+    assertEquals("fresh", result.hints().getFirst().endKey());
+    var lines = Files.readAllLines(file);
+    assertEquals(2, lines.size());
+    assertEquals(firstLine, lines.getFirst());
+    assertTrue(lines.getFirst().contains("\"status\":\"NO_HINT\""));
+    assertTrue(lines.get(1).contains("\"status\":\"HINTED\""));
+    assertTrue(lines.get(1).contains("\"anchor\":false"));
+  }
+
+  @Test
   void unavailableFileDoesNotBlockHintsOrLeakCaptionToOrdinaryLog() throws IOException {
     var path = directory.resolve("unavailable.jsonl");
     Files.createDirectory(path);
