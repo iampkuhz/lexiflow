@@ -1417,26 +1417,37 @@ workstreams:
         title: 实现预处理分类与独立提示和缓存资格
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         owner: LF-WS-LEX
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
-        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/**
-        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/domain/model/**
-        - backend/product/lexicon/src/test/**
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/LexiconImportPlan.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/model/LexiconImportRow.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/model/PreparedHint.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/model/ImportClassification.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/policy/HintPreparation.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/policy/ClassificationPolicy.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DefaultLexiconRepository.java
+        - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/importing/**
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/**
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/prepare-phase2-pipeline/**
         forbidden_files:
         - secrets/**
         - .local/**
         - data/**
         - .env
-        expected_output: 分类证据、基础/重点/长尾判定及独立的提示与缓存资格，含直接测试。
+        expected_output: 基础词、频率及复杂词表的正交分类证据与独立提示/缓存资格；重点和长尾沿既有 priority 连续排序，不新增二元阈值，含直接测试。
         acceptance_criteria:
         - 按冻结规则生成分类及原因，低频和缺失排名分别处理；基本词形继承不误伤完整短语。
         - 重点词的默认资料及词形资格可核对；提示资格不由预热资格决定，禁止行为熟练度推断。
+        - 分类和独立资格必须由导入计划及既有发布消费者实际使用；来源排名缺失与规范 CSV 显式频率区分，不改既有 priority 公式或加新阈值。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test
@@ -1453,7 +1464,7 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
-        deliverable: 分类证据、基础/重点/长尾判定及独立的提示与缓存资格，含直接测试。
+        deliverable: 基础词、频率及复杂词表的正交分类证据与独立提示/缓存资格；重点和长尾沿既有 priority 连续排序，不新增二元阈值，含直接测试。
       - id: LF-TSK-LEX-2002
         title: 实现短语质量与默认释义的发布前判定
         priority: P0
@@ -1490,8 +1501,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-LEX-2001
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         deliverable: 有原因的短语/默认释义过滤与边界测试，不再依靠频率掩盖来源质量。
       - id: LF-TSK-LEX-2003

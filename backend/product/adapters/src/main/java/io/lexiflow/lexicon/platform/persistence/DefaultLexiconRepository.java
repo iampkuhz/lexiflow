@@ -5,6 +5,7 @@ import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
+import io.lexiflow.lexicon.application.importing.policy.ClassificationPolicy;
 import io.lexiflow.lexicon.application.port.LexiconRepository;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
@@ -255,9 +256,8 @@ final class DefaultLexiconRepository implements LexiconRepository {
     }
     var priority = entry.priority();
     var cachePriority =
-        action == LexiconHintAction.BLOCK && planned.row().basicVocabulary()
-            ? 1000
-            : planned.row().prewarmEligible() ? priority.memoryPriority() : 0;
+        ClassificationPolicy.cachePriority(
+            planned.row(), planned.prepared().classification(), action);
     lookup.add(
         new Object[] {
           entry.languageTag(),

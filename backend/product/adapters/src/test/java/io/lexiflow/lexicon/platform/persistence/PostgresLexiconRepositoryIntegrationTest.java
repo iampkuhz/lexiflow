@@ -164,6 +164,79 @@ class PostgresLexiconRepositoryIntegrationTest {
   }
 
   @Test
+  void keepsCacheScoreForFinalBlockedFormsAndSeparatesPositiveNegativePrewarm() throws Exception {
+    inInitializedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var source = new SourceReference("fixture", "MIT", "cache-score");
+            var score = new LexiconPriority(4.2, 0, 765);
+            var blocked =
+                new LexiconImportRow(
+                    "opaque", "含混；歧义", "", List.of(), List.of(), score, source, source, List.of(),
+                    true);
+            var longForm =
+                new LexiconImportRow(
+                    "bright distant stellar system",
+                    "明亮的恒星系",
+                    "",
+                    List.of("quasar"),
+                    List.of(),
+                    score,
+                    source,
+                    source,
+                    List.of(),
+                    true);
+            var noPrewarm =
+                new LexiconImportRow(
+                    "nebula", "星云", "", List.of(), List.of(), score, source, source, List.of(),
+                    false);
+            persistence
+                .repository()
+                .publish(
+                    new LexiconImportRequest(
+                        List.of(
+                            row("the", "这个", List.of(), List.of()), blocked, longForm, noPrewarm),
+                        metadata('h')));
+            assertEquals(
+                "BLOCK:1000",
+                scalar(
+                    jdbcUrl,
+                    "SELECT final_action || ':' || cache_priority FROM lexicon_hint_lookup WHERE normalized_form='the'"));
+            assertEquals(
+                "BLOCK:765",
+                scalar(
+                    jdbcUrl,
+                    "SELECT final_action || ':' || cache_priority FROM lexicon_hint_lookup WHERE normalized_form='opaque'"));
+            assertEquals(
+                "BLOCK:765",
+                scalar(
+                    jdbcUrl,
+                    "SELECT final_action || ':' || cache_priority FROM lexicon_hint_lookup WHERE normalized_form='bright distant stellar system'"));
+            assertEquals(
+                "HINT:765",
+                scalar(
+                    jdbcUrl,
+                    "SELECT final_action || ':' || cache_priority FROM lexicon_hint_lookup WHERE normalized_form='quasar'"));
+            assertEquals(
+                "HINT:0",
+                scalar(
+                    jdbcUrl,
+                    "SELECT final_action || ':' || cache_priority FROM lexicon_hint_lookup WHERE normalized_form='nebula'"));
+            assertEquals(
+                java.util.Set.of("the", "opaque", "bright distant stellar system"),
+                persistence.repository().findPrewarmForms(1, LexiconHintAction.BLOCK, 10).stream()
+                    .map(value -> value.normalizedForm())
+                    .collect(java.util.stream.Collectors.toSet()));
+            assertEquals(
+                List.of("quasar"),
+                persistence.repository().findPrewarmForms(1, LexiconHintAction.HINT, 10).stream()
+                    .map(value -> value.normalizedForm())
+                    .toList());
+          }
+        });
+  }
+
+  @Test
   void failedStreamingReplacementRollsBackAllRowsAndVersion() throws Exception {
     inInitializedSchema(
         jdbcUrl -> {

@@ -192,5 +192,12 @@ public final class LexiconImportPlan {
    * @param row 含义：对应的来源行。取值范围：由方法调用前置条件限定。
    * @param prepared 同一来源行的确定性准备结果，供释义与查询投影一致使用。
    */
-  public record PlannedEntry(LexiconEntry entry, LexiconImportRow row, PreparedHint prepared) {}
+  public record PlannedEntry(LexiconEntry entry, LexiconImportRow row, PreparedHint prepared) {
+    /** 校验持久化计划必备值。 */
+    public PlannedEntry {
+      if (entry == null || row == null || prepared == null) {
+        throw new IllegalArgumentException("planned entry values are required");
+      }
+    }
+  }
 }

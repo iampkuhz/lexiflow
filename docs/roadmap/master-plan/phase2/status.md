@@ -18,9 +18,9 @@
 - Gate 最小修复已提交 `6ad4269`，从 `phase2-2-gate-recovery` fast-forward 合回 `phase2`；全部失败记录仍保留，未推送远端。
 - QLT-2005 同输入 Change `d3620a9e-edd4-4c71-a93b-42768a6fb74a`、Repository `d5a60b83-2865-48d9-970e-9c8db0aa15c2`、validation `cb8121b0-1c15-46c7-88ed-7c1b17a767f2`、review `d8e0a07b-0f35-4da0-a4bb-b8a77cacfc7a` 及 check `9a8e7b77-3520-405d-acbf-b648de28ac76` 均为 PASS；submission 为 `63d07782-1303-4bd1-8ad2-4f5f90b01849`。
 - 真实 check 已成功消费 QLT-2003 唯一完整 PASS 链；旧失败记录没有删除或冒充成功，二期共 36 个 Task。
-- 当前 `phase2-3-design-handoff` 从干净的 `phase2` 建立，补齐 ARCH-2001 启动核对及后续设计子任务的独立验收交接。现有功能设计已在设计包中完成，不以重复文档生产代替交接。
-- 已核对授权、一期缺口、原始主干起点、子任务 ownership 与本地集成事实；本次只更新状态记录，不改业务规则、真实资料或产品代码。
-- 产品代码尚未改变。下一步依序执行分类/资格、查询与应用主线、客户端以及发布闭环；设计包或工程修复的 PASS 均不代表这些实现完成。
+- 启动交接已提交 `6bf12df` 并合入 `phase2`；ARCH-2001 的 check 为 `3d73a8c4-476c-455a-b655-bad962b2631f`（PASS）。
+- 已核对授权、一期缺口、原始主干起点、子任务 ownership 与本地集成事实；启动交接不改变业务规则或真实资料。
+- 当前已建立 `phase2-4-lexicon-classification`，收紧 LEX-2001 v2 的七个主要产品文件范围并开始实现；后续仍依序执行查询与应用主线、客户端和发布闭环，不宣称实现完成。
 - OpenSpec 与运行记录保留在 ignored 本机目录；共享交接位于路线图与 Catalog。
 
 ## 1.4. 一期与后续边界
@@ -28,3 +28,15 @@
 - 一期真实 YouTube 最终观看确认、最新交付范围的 Formal Gate 和清洗规则对应的运行资料版本仍待收尾，二期启动不代表一期已 close。
 - 观测随处理节点验收；上下文选义、模型、长短语新算法和性能专项留在后续池。
 - 未连接、重建或修改用户运行数据库；验证只用隔离 PostgreSQL/Redis，已完成批次均有精确清理记录。
+
+## 1.5. 设计子任务验收交接
+
+以下设计已在共享工件中完成，逐项取得独立 validation/review 与公开 check PASS；没有用设计包 receipt 代替子任务，也没有据此宣称产品功能完成。对应送验清单留在 ignored `tmp/quality/phase2-design-handoff/submissions.json`。
+
+| Task | Check ID |
+|---|---|
+| ARCH-2002 | `9eb95548-a469-43c3-98b0-9f149c646276` |
+| ARCH-2003 | `0fa22ffc-d8b0-4e7d-84e2-365127d99a3c` |
+| OBS-2001 | `66cba731-7447-421c-b985-12f69bb45f24` |
+| ARCH-2004 | `0eabd2e9-a1d9-4268-b585-27806f75146d` |
+| ARCH-2006 | `a94da8d3-8a38-4a84-aed9-6699ae877be5` |

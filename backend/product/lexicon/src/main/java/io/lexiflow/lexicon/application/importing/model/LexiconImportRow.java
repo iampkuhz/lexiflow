@@ -64,10 +64,11 @@ public record LexiconImportRow(
     complexLists = List.copyOf(Objects.requireNonNull(complexLists, "complexLists"));
     basicVocabulary =
         basicVocabulary
-            || (sourceOxfordBasic && !lemma.contains(" "))
-            || BasicVocabulary.contains(lemma)
-            || aliases.stream().anyMatch(BasicVocabulary::contains)
-            || inflections.stream().anyMatch(BasicVocabulary::contains);
+            || (!lemma.contains(" ")
+                && (sourceOxfordBasic
+                    || BasicVocabulary.contains(lemma)
+                    || aliases.stream().anyMatch(BasicVocabulary::contains)
+                    || inflections.stream().anyMatch(BasicVocabulary::contains)));
     hintPolicyReference = required(hintPolicyReference, "hintPolicyReference");
     sourceComplexTags = List.copyOf(Objects.requireNonNull(sourceComplexTags, "sourceComplexTags"));
     if (sourceBncRank != null && sourceBncRank < 1)
