@@ -60,6 +60,11 @@ maintenance:
 # 阅读约定用于人工审阅，不新增自动阻断或 Hook。
 reader_navigation:
   principle: 先回答读者问题，再从总览和 workflow 阶段下钻到子能力、公开入口与文件职责；Reference 是侧链，不是额外必经步骤。
+  root_readme:
+    audience: 首次安装和日常使用 LexiFlow 的用户，而非工程实现者。
+    primary_questions: [怎么编译, 怎么初始化配置与资料, 怎么启动使用]
+    rule: 根 README 先选定使用者必须理解的主线，核心操作讲透，非核心特性不逐项罗列；按三个问题给出从仓库根可执行的最短顺序、必要前置条件和成功判据。Harness、Gate、架构原理、诊断参数及详细失败恢复留在对应开发文档，以链接按需进入。
+    media_intro: 效果图或动图前用一句 quote line 说明展示内容；必要的示意性质简短点明，不堆叠按钮、时延等免责解释。
   overview: 先给目的、边界和主图，再解释阶段与深入入口；不以目录清单代替系统模型。
   workflow: 明确当前位置、前置输入、输出交接、失败去向和回到上级的路径；调用关系与阶段顺序分别说明。
   reference: standalone checker 和字段参数按需查阅；有状态的 status/result 仍属于对应 workflow，有副作用的 install/link/start 单列说明。
