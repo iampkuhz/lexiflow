@@ -4,6 +4,7 @@ import io.lexiflow.lexicon.application.importing.LexiconImportPlan;
 import io.lexiflow.lexicon.application.importing.LexiconImportService;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
 import io.lexiflow.lexicon.platform.persistence.PostgresPersistence;
 import java.io.IOException;
 import java.io.InputStream;
@@ -136,12 +137,10 @@ public final class LexiconImportMain {
                     var second =
                         reader.read(
                             command.input(), record -> consumer.accept(record.row()), selection);
-                    if (second.sourceRows() != preflight.sourceRows()
-                        || second.importableRows() != preflight.importableRows()
-                        || !digest.equals(sourceDigest(command.input()))) {
-                      throw new IllegalStateException("source changed during publication");
-                    }
-                    progress.accept("来源复核完成，等待事务提交");
+                    var actualDigest = sourceDigest(command.input());
+                    progress.accept("来源重读完成，等待身份核验与事务提交");
+                    return new LexiconImportRowSource.ReadReceipt(
+                        actualDigest, second.sourceRows());
                   });
       System.out.printf(
           "PASS format=ecdict-stardict published_version=%d source_rows=%d entries=%d source_sha256=%s%n",

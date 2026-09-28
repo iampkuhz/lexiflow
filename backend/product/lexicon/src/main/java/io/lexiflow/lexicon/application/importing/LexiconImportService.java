@@ -3,15 +3,15 @@ package io.lexiflow.lexicon.application.importing;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
-import io.lexiflow.lexicon.application.port.LexiconRepository;
+import io.lexiflow.lexicon.application.port.LexiconPublicationRepository;
 import java.util.Objects;
 
 /** 协调离线词库导入与发布，不包含文件格式、SQL 或连接逻辑。 */
 public final class LexiconImportService {
-  private final LexiconRepository repository;
+  private final LexiconPublicationRepository repository;
 
-  /** 使用唯一词库 Repository 构造导入服务。 */
-  public LexiconImportService(LexiconRepository repository) {
+  /** 使用发布持久化角色构造导入服务。 */
+  public LexiconImportService(LexiconPublicationRepository repository) {
     this.repository = Objects.requireNonNull(repository, "repository");
   }
 
@@ -39,10 +39,31 @@ public final class LexiconImportService {
       long sourceRowsTotal,
       long expectedEntries,
       LexiconImportRowSource source) {
+    Objects.requireNonNull(metadata, "metadata");
+    Objects.requireNonNull(source, "source");
+    if (sourceRowsTotal < 1 || expectedEntries < 1 || expectedEntries > sourceRowsTotal) {
+      throw new IllegalArgumentException("invalid completed source counts");
+    }
     return repository.publishStreaming(
-        Objects.requireNonNull(metadata, "metadata"),
+        metadata,
         sourceRowsTotal,
         expectedEntries,
-        Objects.requireNonNull(source, "source"));
+        consumer -> {
+          var delivered = new long[1];
+          var receipt =
+              source.read(
+                  row -> {
+                    Objects.requireNonNull(row, "source row");
+                    consumer.accept(row);
+                    delivered[0]++;
+                  });
+          Objects.requireNonNull(receipt, "source read receipt");
+          if (!metadata.sourceDigest().equals(receipt.sourceDigest())
+              || receipt.sourceRowsTotal() != sourceRowsTotal
+              || delivered[0] != expectedEntries) {
+            throw new IllegalStateException("source changed during publication");
+          }
+          return receipt;
+        });
   }
 }

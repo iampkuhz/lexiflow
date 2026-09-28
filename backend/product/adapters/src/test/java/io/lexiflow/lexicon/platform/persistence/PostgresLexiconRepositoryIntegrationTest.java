@@ -5,9 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.lexiflow.lexicon.application.importing.LexiconImportService;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
 import io.lexiflow.lexicon.application.importing.model.SourceReference;
 import io.lexiflow.lexicon.application.query.CachedLexiconQueryService;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
@@ -264,6 +266,62 @@ class PostgresLexiconRepositoryIntegrationTest {
   }
 
   @Test
+  void importServiceRejectsChangedStreamAndPostgresKeepsPublishedVersion() throws Exception {
+    inInitializedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            var service = new LexiconImportService(repository);
+            repository.publish(
+                new LexiconImportRequest(
+                    List.of(row("reliable", "可靠的", List.of(), List.of())), metadata('a')));
+            for (var failure :
+                List.of("digest", "raw-count", "fewer-entries", "more-entries", "io")) {
+              assertThrows(
+                  RuntimeException.class,
+                  () ->
+                      service.publishStreaming(
+                          metadata('b'),
+                          2,
+                          1,
+                          consumer -> {
+                            switch (failure) {
+                              case "digest" -> {
+                                consumer.accept(row("context", "语境", List.of(), List.of()));
+                                return new LexiconImportRowSource.ReadReceipt(
+                                    metadata('a').sourceDigest(), 2);
+                              }
+                              case "raw-count" -> {
+                                consumer.accept(row("context", "语境", List.of(), List.of()));
+                                return new LexiconImportRowSource.ReadReceipt(
+                                    metadata('b').sourceDigest(), 3);
+                              }
+                              case "fewer-entries" -> {
+                                return new LexiconImportRowSource.ReadReceipt(
+                                    metadata('b').sourceDigest(), 2);
+                              }
+                              case "more-entries" -> {
+                                consumer.accept(row("context", "语境", List.of(), List.of()));
+                                consumer.accept(row("environment", "环境", List.of(), List.of()));
+                                return new LexiconImportRowSource.ReadReceipt(
+                                    metadata('b').sourceDigest(), 2);
+                              }
+                              case "io" -> {
+                                consumer.accept(row("context", "语境", List.of(), List.of()));
+                                throw new IOException("synthetic stream failure");
+                              }
+                              default -> throw new IllegalStateException("unknown failure case");
+                            }
+                          }));
+              assertEquals(1, repository.publishedVersion(), failure);
+              assertEquals(1, repository.findByForms(1, List.of("reliable")).size(), failure);
+              assertEquals(0, repository.findByForms(1, List.of("context")).size(), failure);
+            }
+          }
+        });
+  }
+
+  @Test
   void publishesFirstCandidateAsPreparedGlossAndPreservesFullSourceGloss() throws Exception {
     inInitializedSchema(
         jdbcUrl -> {
@@ -508,7 +566,11 @@ class PostgresLexiconRepositoryIntegrationTest {
                     metadata,
                     records.size(),
                     records.size(),
-                    consumer -> records.forEach(consumer));
+                    consumer -> {
+                      records.forEach(consumer);
+                      return new LexiconImportRowSource.ReadReceipt(
+                          metadata.sourceDigest(), records.size());
+                    });
               else repository.publish(new LexiconImportRequest(records, metadata));
               assertEquals(
                   "甲床瘤",

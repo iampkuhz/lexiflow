@@ -116,7 +116,11 @@ final class DefaultLexiconRepository implements LexiconRepository {
         request.metadata(),
         request.rows().size(),
         request.rows().size(),
-        consumer -> request.rows().forEach(consumer));
+        consumer -> {
+          request.rows().forEach(consumer);
+          return new LexiconImportRowSource.ReadReceipt(
+              request.metadata().sourceDigest(), request.rows().size());
+        });
   }
 
   @Override

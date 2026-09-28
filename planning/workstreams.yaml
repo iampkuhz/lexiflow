@@ -1574,19 +1574,29 @@ workstreams:
         title: 拆分版本缓存管理与导入应用编排
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         owner: LF-WS-LEX
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
-        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/query/**
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/query/CachedLexiconQueryService.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/query/VersionedLexiconCache.java
         - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/LexiconImportService.java
-        - backend/product/lexicon/src/test/**
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/model/LexiconImportRowSource.java
         - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/LexiconPublicationRepository.java
         - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/LexiconRepository.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/LexiconImportMain.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DefaultLexiconRepository.java
+        - backend/product/lexicon/src/test/**
+        - backend/product/adapters/src/test/**
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
+        - docs/roadmap/master-plan/phase2/design.md
+        - openspec/changes/prepare-phase2-pipeline/**
         forbidden_files:
         - secrets/**
         - .local/**
@@ -1597,6 +1607,7 @@ workstreams:
         - 移除查询服务内字幕候选生成；负缓存、预热与动态缓存保持有界且绑定发布身份。
         - 导入应用编排经端口消费来源，不调用适配器 main；故障不形成部分发布。
         - 提取 publication role 并收窄导入用例依赖；既有 Repository 仅组合角色，不重复方法或保留旧实现；每步完整编译。
+        - 来源端口返回重读摘要与原始行数，应用用例在事务内核对预检身份及实际交付条数；不把内容变化但条数相同当成身份一致。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test
@@ -1724,8 +1735,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-LEX-2004
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         deliverable: 从现有提示策略提取实际被调用的位置匹配和发布候选完整性校验，保留精确范围和冲突证据。
       - id: LF-TSK-ENR-2002
@@ -2494,8 +2505,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-LEX-2004
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         deliverable: 读写职责隔离的持久化适配器、投影映射及真实隔离库直接测试。
       - id: LF-TSK-OPS-2002
