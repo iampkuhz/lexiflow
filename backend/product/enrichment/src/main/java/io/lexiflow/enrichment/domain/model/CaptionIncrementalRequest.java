@@ -10,7 +10,7 @@ import java.util.Objects;
  *
  * @param captionTopicKey 字幕主题的不透明身份，非空且不超过 128 字符。
  * @param trackKey 来源轨道身份；无法可靠识别时为 null。
- * @param previous 上次实际发出请求时冻结的可见快照；首次请求为 null。
+ * @param previous 上次成功确认请求在发送时冻结的可见快照；尚无成功请求时为 null。
  * @param current 本次可见快照，不能为空对象，允许无可见字幕。
  */
 public record CaptionIncrementalRequest(

@@ -10,7 +10,7 @@ function setup(){const scheduler=new Scheduler(),views=[],calls=[],observations=
  const coordinator=new CaptionStreamCoordinator((e,id)=>{const d=deferred();calls.push({...d,event:e,id});return{promise:d.promise,cancel:()=>cancelled++};},v=>views.push(v),scheduler,o=>observations.push(o));
  return{scheduler,views,calls,coordinator,observations,get cancelled(){return cancelled;}};}
 const finish=async(call,hints=[])=>{call.resolve({ok:true,body:response(call.event.request,hints)});await flush();};
-test('coalesces observations and freezes last actually dispatched snapshot',async()=>{
+test('coalesces observations and acknowledges only the successful dispatched snapshot',async()=>{
  const t=setup();t.coordinator.submit(event(1,segment('a','A')));t.coordinator.submit(event(2,segment('a','A'),segment('b',' reliable')));t.scheduler.run();
  assert.equal(t.calls.length,1);assert.equal(t.calls[0].event.request.lastRequestedSnapshot,null);
  t.coordinator.submit(event(3,segment('a','A'),segment('b',' reliable'),segment('c',' method')));
@@ -36,12 +36,59 @@ test('unrelated replacement and clear cancel old work, including identical text 
  assert.equal(t.cancelled,1);assert.equal(t.views.at(-1).hints.length,0);await finish(t.calls[1],[keyedHint('s2')]);assert.equal(t.views.at(-1).state,'ready');
  t.coordinator.submit(event(4,segment('s3','entirely new')));assert.equal(t.views.at(-1).hints.length,0);
 });
-test('retries pending keys without pretending a sent request succeeded and stops at three attempts',async()=>{
- const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));
- for(let i=0;i<3;i++){t.scheduler.run();assert.equal(t.calls[i].event.request.currentSnapshot.captions[0].segments[0].append,true);t.calls[i].resolve({ok:false,reason:'network'});await flush();}
- t.scheduler.run();assert.equal(t.calls.length,3);assert.equal(t.views.at(-1).state,'fallback');
+for (const reason of ['network', 'timeout', 'rejected', 'invalid-request', 'invalid-response', 'aborted']) {
+ test(`first ${reason} failure stays idle until the next caption and preserves null baseline`,async()=>{
+  const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();
+  t.calls[0].resolve({ok:false,reason});await flush();
+  assert.equal(t.scheduler.jobs.size,0);t.scheduler.run();assert.equal(t.calls.length,1);
+  assert.equal(t.views.at(-1).state,'fallback');
+  t.coordinator.submit(event(2,segment('s1','reliable'),segment('s2',' method')));t.scheduler.run();
+  const req=t.calls[1].event.request;
+  assert.equal(req.lastRequestedSnapshot,null);
+  assert.deepEqual(req.currentSnapshot.captions[0].segments.map(s=>s.append),[true,true]);
+  await finish(t.calls[1]);assert.equal(t.views.at(-1).state,'no-pending');
+ });
+}
+test('failed suffix preserves successful baseline and resends only unacknowledged visible keys',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();
+ await finish(t.calls[0],[keyedHint()]);
+ const baseline=structuredClone(t.calls[0].event.request.currentSnapshot);
  t.coordinator.submit(event(2,segment('s1','reliable'),segment('s2',' method')));t.scheduler.run();
- assert.deepEqual(t.calls[3].event.request.currentSnapshot.captions[0].segments.map(s=>s.append),[true,true]);
+ t.calls[1].resolve({ok:false,reason:'network'});await flush();
+ assert.equal(t.views.at(-1).hints.length,1);assert.equal(t.scheduler.jobs.size,0);
+ t.coordinator.submit(event(3,segment('s1','reliable'),segment('s2',' method'),segment('s3',' works')));t.scheduler.run();
+ assert.deepEqual(t.calls[2].event.request.lastRequestedSnapshot,baseline);
+ assert.deepEqual(t.calls[2].event.request.currentSnapshot.captions[0].segments.map(s=>s.append),[false,true,true]);
+ await finish(t.calls[2]);
+ t.coordinator.submit(event(4,segment('s1','reliable'),segment('s2',' method'),segment('s3',' works'),segment('s4',' well')));t.scheduler.run();
+ assert.deepEqual(t.calls[3].event.request.lastRequestedSnapshot,t.calls[2].event.request.currentSnapshot);
+ assert.deepEqual(t.calls[3].event.request.currentSnapshot.captions[0].segments.map(s=>s.append),[false,false,false,true]);
+});
+test('a failed in-flight request does not drain newer observations until a subsequent change',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();
+ t.coordinator.submit(event(2,segment('s1','reliable'),segment('s2',' method')));
+ t.calls[0].resolve({ok:false,reason:'network'});await flush();t.scheduler.run();
+ assert.equal(t.calls.length,1);assert.equal(t.scheduler.jobs.size,0);
+ t.coordinator.submit(event(3,segment('s2',' method'),segment('s3',' works')));t.scheduler.run();
+ assert.equal(t.calls[1].event.request.lastRequestedSnapshot,null);
+ assert.deepEqual(t.calls[1].event.request.currentSnapshot.captions[0].segments.map(s=>s.key),['s2','s3']);
+ assert.deepEqual(t.calls[1].event.request.currentSnapshot.captions[0].segments.map(s=>s.append),[true,true]);
+});
+test('invalid successful response cannot advance the acknowledged snapshot',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();await finish(t.calls[0]);
+ t.coordinator.submit(event(2,segment('s1','reliable'),segment('s2',' method')));t.scheduler.run();
+ t.calls[1].resolve({ok:true,body:{processedKeys:[],hints:[]}});await flush();
+ assert.equal(t.scheduler.jobs.size,0);
+ t.coordinator.submit(event(3,segment('s1','reliable'),segment('s2',' method'),segment('s3',' works')));t.scheduler.run();
+ assert.deepEqual(t.calls[2].event.request.lastRequestedSnapshot,t.calls[0].event.request.currentSnapshot);
+ assert.deepEqual(t.calls[2].event.request.currentSnapshot.captions[0].segments.map(s=>s.append),[false,true,true]);
+});
+test('source reset discards the baseline and late success cannot restore it',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();await finish(t.calls[0]);
+ t.coordinator.submit(event(2,segment('s1','reliable'),segment('s2',' method')));t.scheduler.run();
+ t.coordinator.clear(3);await finish(t.calls[1]);
+ t.coordinator.submit(event(4,segment('s3','reliable')));t.scheduler.run();
+ assert.equal(t.calls[2].event.request.lastRequestedSnapshot,null);
 });
 test('no-hint success acknowledges keys and illegal coverage is not accepted',async()=>{
  const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();await finish(t.calls[0]);assert.equal(t.views.at(-1).state,'no-pending');
@@ -53,10 +100,12 @@ test('retains existing hint during failed suffix request and invalidates a chang
  t.coordinator.submit(event(2,segment('s1','reliable'),segment('s2',' method')));t.scheduler.run();t.calls[1].resolve({ok:false,reason:'rejected'});await flush();assert.equal(t.views.at(-1).hints.length,1);
  t.coordinator.submit(event(3,segment('s1','reliability')));assert.equal(t.views.at(-1).hints.length,0);
 });
-test('synchronous transport failure uses bounded asynchronous retry and timing has no text',async()=>{
- const scheduler=new Scheduler(),views=[],observations=[];const c=new CaptionStreamCoordinator(()=>{throw Error('transport');},v=>views.push(v),scheduler,o=>observations.push(o));
+test('synchronous transport failure waits for a caption change and timing has no text',async()=>{
+ const scheduler=new Scheduler(),views=[],observations=[];let calls=0;const c=new CaptionStreamCoordinator(()=>{calls++;throw Error('transport');},v=>views.push(v),scheduler,o=>observations.push(o));
  c.submit(event(1,segment('s1','reliable')));scheduler.run();await flush();assert.equal(views.at(-1).state,'fallback');
- assert.equal(JSON.stringify(observations).includes('reliable'),false);assert.equal(COALESCE_MS,16);
+ assert.equal(scheduler.jobs.size,0);scheduler.run();assert.equal(calls,1);
+ c.submit(event(2,segment('s1','reliable'),segment('s2',' method')));scheduler.run();await flush();assert.equal(calls,2);
+ assert.equal(scheduler.jobs.size,0);assert.equal(JSON.stringify(observations).includes('reliable'),false);assert.equal(COALESCE_MS,16);
 });
 
 test('same entry is shown once across incremental replies while all new keys are acknowledged',async()=>{

@@ -16,10 +16,9 @@ export class CaptionStreamCoordinator {
   private current?: CaptionEvent;
   private timer?: ReturnType<typeof setTimeout>;
   private active?: { generation: number; event: CaptionEvent; cancel: () => void; started: number };
-  private lastRequested: CaptionSnapshot | null = null;
+  private lastAcknowledged: CaptionSnapshot | null = null;
   private completed = new Set<string>();
   private hints: Hint[] = [];
-  private attempts = 0;
   private submittedAt = 0;
   private requestNumber = 0;
   constructor(private readonly transport: RequestTransport, private readonly render: (view: StreamView) => void,
@@ -36,7 +35,7 @@ export class CaptionStreamCoordinator {
     this.current = structuredClone(event);
     const keys = new Set(snapshotSegments(event.request.currentSnapshot).map(segment => segment.key));
     this.completed = new Set([...this.completed].filter(key => keys.has(key)));
-    this.attempts = 0; this.submittedAt = this.now();
+    this.submittedAt = this.now();
     this.publish(this.pending() ? "waiting" : this.hints.length ? "ready" : "no-pending");
     this.schedule(COALESCE_MS);
   }
@@ -49,7 +48,7 @@ export class CaptionStreamCoordinator {
     this.generation++;
     if (this.timer !== undefined) { this.scheduler.clearTimeout(this.timer); this.timer = undefined; this.observe({ outcome: "cancelled-before-request" }); }
     if (this.active) { this.active.cancel(); this.active = undefined; this.observe({ outcome: "cancelled-in-flight" }); }
-    if (reset) { this.completed.clear(); this.hints = []; this.lastRequested = null; this.attempts = 0; }
+    if (reset) { this.completed.clear(); this.hints = []; this.lastAcknowledged = null; }
   }
   private pending(): boolean {
     return !!this.current && snapshotSegments(this.current.request.currentSnapshot).some(segment => !this.completed.has(segment.key));
@@ -63,12 +62,10 @@ export class CaptionStreamCoordinator {
     if (!this.current || !this.pending()) return;
     const event = structuredClone(this.current);
     for (const segment of snapshotSegments(event.request.currentSnapshot)) segment.append = !this.completed.has(segment.key);
-    event.request.lastRequestedSnapshot = structuredClone(this.lastRequested);
-    this.lastRequested = structuredClone(event.request.currentSnapshot);
+    event.request.lastRequestedSnapshot = structuredClone(this.lastAcknowledged);
     const generation = this.generation, started = this.now();
     this.observe({ stage: "coalesce", elapsedMs: started - this.submittedAt, outcome: "requested" });
-    this.attempts++;
-    // transport 可以同步抛错；也必须计为一次真实尝试，不能递归重试。
+    // 同步抛错与异步通信失败一致：保留确认快照，等待下一次字幕变化。
     let operation: Operation;
     try { operation = this.transport(event, `caption-${++this.requestNumber}`); }
     catch { operation = { promise: Promise.resolve({ ok: false, reason: "network" }), cancel: () => undefined }; }
@@ -85,9 +82,10 @@ export class CaptionStreamCoordinator {
     if (result.ok && !parseHintResponse(result.body, event.request)) result = { ok: false, reason: "invalid-response" };
     if (!result.ok) {
       this.observe({ outcome: result.reason }); this.publish("fallback");
-      if ((result.reason === "network" || result.reason === "timeout") && this.attempts < 3) this.schedule(this.attempts === 1 ? 150 : 450);
       return;
     }
+    // 只确认已校验响应对应的发送快照，不把在途新增内容误标为成功。
+    this.lastAcknowledged = structuredClone(event.request.currentSnapshot);
     const visible = new Set(snapshotSegments(this.current.request.currentSnapshot).map(segment => segment.key));
     for (const key of result.body.processedKeys) if (visible.has(key)) this.completed.add(key);
     const resolved = result.body.hints.map(hint => resolveHint(hint, event.request.currentSnapshot)).filter((hint): hint is Hint => !!hint);
@@ -102,6 +100,6 @@ export class CaptionStreamCoordinator {
     this.hints.sort((left, right) => left.startOffset - right.startOffset);
     this.observe({ outcome: this.hints.length ? "ready" : "no-pending" });
     this.publish(this.pending() ? "waiting" : this.hints.length ? "ready" : "no-pending");
-    this.attempts = 0; this.schedule(COALESCE_MS);
+    this.schedule(COALESCE_MS);
   }
 }

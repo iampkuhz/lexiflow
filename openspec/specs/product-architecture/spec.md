@@ -81,11 +81,11 @@ Chrome / YouTube 为首个客户端和来源；来源私有类型留在适配器
 
 ## 8. 增量字幕快照
 
-观看请求 MUST 携带内容主题与轨道上下文、上次实际请求的冻结快照以及当前快照。每份快照按字幕组携带 windowId/startMs 与有序 segments；片段只携带 key/text/offsetMs/append/line。源窗口和时间未知时 MUST 为 null，MUST NOT 用观察时间伪造。公共合同不包含 mediaTimeMs、endMs、sequence 或 playbackEpoch，也不维护旧请求兼容分支。
+观看请求 MUST 携带内容主题与轨道上下文、上次成功确认请求的冻结快照以及当前快照。每份快照按字幕组携带 windowId/startMs 与有序 segments；片段只携带 key/text/offsetMs/append/line。源窗口和时间未知时 MUST 为 null，MUST NOT 用观察时间伪造。公共合同不包含 mediaTimeMs、endMs、sequence 或 playbackEpoch，也不维护旧请求兼容分支。
 
 插件 MUST 负责源信息关联、稳定 key、增量识别和展示；key 不因 DOM 重建或换行改变，新增文字不得增长进旧 key。append MUST 表示本次待处理内容，不是源 aAppend；成功无提示也必须确认处理覆盖。后端 MUST 只查询同组内连续新增片段，旧内容仅作边界上下文，MUST NOT 跨新旧边界补译。
 
-新增英文 MUST 立即显示，已有提示 MUST 保留节点；纯换行不发新请求，前缀退出仅移除对应内容。单请求在途并合并最新观察，失败不确认处理覆盖且重试有界；来源隐藏或关闭增强后，迟到结果 MUST NOT 复活字幕。来源私有桥消息视为不可信输入；仅可见文字进入本机 API，字幕和观看身份 MUST NOT 写入扩展日志或持久存储。
+新增英文 MUST 立即显示，已有提示 MUST 保留节点；纯换行不发新请求，前缀退出仅移除对应内容。单请求在途并合并最新观察，失败 MUST NOT 自动重试、确认处理覆盖或推进上次成功快照；仅在失败后的下一次有效字幕变化时，将最新快照与上次成功快照一起请求。成功无提示也确认快照；确认 MUST 绑定发送时的冻结快照，而非响应到达时的最新观察；来源隐藏或关闭增强后，迟到结果 MUST NOT 复活字幕。来源私有桥消息视为不可信输入；仅可见文字进入本机 API，字幕和观看身份 MUST NOT 写入扩展日志或持久存储。
 
 CSS roll-up 动画改变可见行但不触发 DOM mutation 时，插件 MUST 在原生字幕动画运行期间逐帧重读可见几何，并在结束或取消时完成末次同步；MUST NOT 使用持续全页轮询或等待网络、timeupdate 才补齐英文。
 
