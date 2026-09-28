@@ -7,7 +7,7 @@ program:
   catalog_mode: execution
   source_brief: docs/product/product-brief.md
   source_roadmap: docs/roadmap/master-plan.md
-  phase_definition: P1 为 foundation 基础体验；P2 为提示处理主线与功能分层。P2 任务草案不授予执行权，启动约束见 docs/roadmap/master-plan/phase2/tasks.md；后续事项不预分期。
+  phase_definition: P1 为 foundation 基础体验；P2 为提示处理主线、功能分层与 macOS 调试/Docker 发布闭环。任务草案不代表验收通过，启动与集成约束见 docs/roadmap/master-plan/phase2/tasks.md；后续事项不预分期。
 
 # ID 表达稳定身份；版本与 lifecycle state 表达变化。
 id_policy:
@@ -632,30 +632,42 @@ workstreams:
         title: 核对用户启动通知、收尾证据与最新主干起点
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 30
         owner: LF-WS-ARCH
         kind: design
         lifecycle_state: DRAFT
-        allowed_files: docs/roadmap/master-plan/phase2/status.md
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - docs/roadmap/master-plan/phase2/status.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 记录用户启动授权、phase1 收尾依据、实际主干名与最新 tip、phase2 起点及干净隔离边界。
         acceptance_criteria:
-        - 没有用户明确通知 phase1 收尾并启动时不执行；不会以自动 Goal 续轮代替授权。
-        - 核对 master/main 命名差异后从届时最新主干创建准确名为 phase2 的分支；不从 phase1 工作分支派生，不静默降级基线。
-        - 检查分支已存在、工作区并发修改、准备文件未集成等情况；保留他人工作并先取得必要 Git 集成选择，不擅自覆盖或提交。
+        - 依据明确的二期启动授权执行；记录一期验收缺口，不把开发授权或自动续轮当作一期 PASS。
+        - 核对远端最新 main 后创建 phase2，子任务使用 phase2-N-主题；不从一期工作分支派生。
+        - 核对分支归属和并发修改；按已授权范围精确提交并及时合回 phase2，不覆盖他人工作、不推送或合回 main。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
-        validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check
-          && python3 -m scripts.repository.policy_projection --check
+        validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
+          python3 -m scripts.repository.policy_projection --check
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies: []
-        depends_on: []
+        dependencies:
+        - LF-TSK-QLT-2003
+        depends_on:
+        - task_id: LF-TSK-QLT-2003
+          type: hard
+          required_task_version: 2
+          required_change_version: 2.0.0
+          required_result: PASS
+        deliverable: 记录用户启动授权、phase1 收尾依据、实际主干名与最新 tip、phase2 起点及干净隔离边界。
       - id: LF-TSK-ARCH-2002
         title: 冻结词段分类、预处理资格及排序规则表
         priority: P0
@@ -667,8 +679,14 @@ workstreams:
         owner: LF-WS-ARCH
         kind: design
         lifecycle_state: DRAFT
-        allowed_files: docs/roadmap/master-plan/phase2/design.md, openspec/changes/prepare-phase2-pipeline/design.md
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - docs/roadmap/master-plan/phase2/design.md
+        - openspec/changes/prepare-phase2-pipeline/design.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 按五个独立维度给出确定规则、来源字段、边界样例和批准的行为变更清单。
         acceptance_criteria:
         - 区分单词/短语、基础/重点/长尾、低频/未知频率、资料质量、提示与缓存；基础不等于用户熟练。
@@ -676,8 +694,8 @@ workstreams:
         - 冻结阈值和优先级的依据及合成验收样例，不凭讨论臆造概率或个人画像；越出已批准范围先提交用户决策。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
-        validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check
-          && python3 -m scripts.repository.policy_projection --check
+        validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
+          python3 -m scripts.repository.policy_projection --check
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
@@ -687,9 +705,10 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-ARCH-2001
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
+        deliverable: 按五个独立维度给出确定规则、来源字段、边界样例和批准的行为变更清单。
       - id: LF-TSK-ARCH-2003
         title: 冻结预处理、启动、同步主线与跨模块接口
         priority: P0
@@ -701,8 +720,14 @@ workstreams:
         owner: LF-WS-ARCH
         kind: design
         lifecycle_state: DRAFT
-        allowed_files: docs/roadmap/master-plan/phase2/design.md, openspec/changes/prepare-phase2-pipeline/design.md
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - docs/roadmap/master-plan/phase2/design.md
+        - openspec/changes/prepare-phase2-pipeline/design.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 每节点的输入输出、owner、调用次序、失败出口和版本合同；列出全部消费者及串行切换顺序。
         acceptance_criteria:
         - 分别明确预处理、启动与请求七步流程；静态质量判断前移，范围、版本及响应安全检查保留在运行期。
@@ -711,8 +736,8 @@ workstreams:
         - 查词默认义仍非上下文消歧；异步 Promise/线程若服务当前提示仍属于关键路径。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
-        validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check
-          && python3 -m scripts.repository.policy_projection --check
+        validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
+          python3 -m scripts.repository.policy_projection --check
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
@@ -725,6 +750,7 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: 每节点的输入输出、owner、调用次序、失败出口和版本合同；列出全部消费者及串行切换顺序。
       - id: LF-TSK-ARCH-2004
         title: 按冻结主线形成架构和执行时序图
         priority: P0
@@ -736,16 +762,21 @@ workstreams:
         owner: LF-WS-ARCH
         kind: design
         lifecycle_state: DRAFT
-        allowed_files: docs/roadmap/master-plan/phase2/architecture.md
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - docs/roadmap/master-plan/phase2/architecture.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 功能分层、观看时序、资料生产与发布时序的内嵌 PlantUML 图及节点到责任映射。
         acceptance_criteria:
         - 图源来自冻结的分类和流程结论；说明当前提示关键路径、独立离线链及发布身份交接，不按线程创建业务服务。
         - 按 documentation-policy 和指定 skill 在 ignored 目录渲染并实际查看后原样入正文；缺工具或预览为 BLOCKED，不以静态围栏检查代替视觉验收。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
-        validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check
-          && python3 -m scripts.repository.policy_projection --check
+        validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
+          python3 -m scripts.repository.policy_projection --check
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
@@ -764,19 +795,28 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: 功能分层、观看时序、资料生产与发布时序的内嵌 PlantUML 图及节点到责任映射。
       - id: LF-TSK-ARCH-2005
         title: 同步最终功能文档并核对阶段交付证据
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
         owner: LF-WS-ARCH
         kind: design
         lifecycle_state: DRAFT
-        allowed_files: docs/architecture/**, docs/roadmap/**, openspec/specs/product-architecture/spec.md, openspec/changes/prepare-phase2-pipeline/**
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - docs/architecture/**
+        - docs/roadmap/**
+        - openspec/specs/product-architecture/spec.md
+        - openspec/changes/prepare-phase2-pipeline/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 最终文档与冻结实现一致，P2 各项证据、限制、用户验收及未来待办归属清楚。
         acceptance_criteria:
         - 清理分散的第二/第三阶段归属陈述；图文只描述已确定主线，模型/隐私护栏不放宽。
@@ -784,16 +824,22 @@ workstreams:
         - 未选入本阶段的性能、多义项、上下文和知识补充事项仍在后续池；不得宣布其已实现。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
-        validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check
-          && python3 -m scripts.repository.policy_projection --check
+        validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
+          python3 -m scripts.repository.policy_projection --check
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
         dependencies:
+        - LF-TSK-QLT-2002
         - LF-TSK-QLT-2001
         - LF-TSK-ARCH-2004
         depends_on:
+        - task_id: LF-TSK-QLT-2002
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
         - task_id: LF-TSK-QLT-2001
           type: hard
           required_task_version: 1
@@ -804,6 +850,94 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: 最终文档与冻结实现一致，P2 各项证据、限制、用户验收及未来待办归属清楚。
+      - id: LF-TSK-ARCH-2006
+        title: 冻结双运行形式、发布身份和使用闭环合同
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/release.md
+        estimated_minutes: 60
+        owner: LF-WS-ARCH
+        kind: design
+        lifecycle_state: DRAFT
+        allowed_files:
+        - docs/roadmap/master-plan/phase2/release.md
+        - docs/roadmap/master-plan/phase2/design.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 冻结双运行形式、发布身份和使用闭环合同及直接验收证据。
+        acceptance_criteria:
+        - 确定 macOS 调试与 Docker 发布共用业务链、容器端口/资料/隐私边界；不制作桌面安装包，不自动开放公网。
+        - 冻结版本真源、镜像/资料/扩展清单、首次初始化、更新恢复及卸载的输入输出和失败动作。
+        - 明确 linux amd64/arm64 验证、资源预算及必需发布凭据；没有实测/外部许可不得标为支持或正式发布。
+        acceptance_evidence:
+        - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
+        validation_command: python3 -m scripts.repository.docs_check
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-ARCH-2003
+        depends_on:
+        - task_id: LF-TSK-ARCH-2003
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 冻结双运行形式、发布身份和使用闭环合同及直接验收证据。
+      - id: LF-TSK-ARCH-2007
+        title: 编写双运行入口和用户安装更新指南
+        priority: P0
+        phase: P2
+        task_version: 2
+        change_version: 2.0.0
+        task_source: docs/roadmap/master-plan/phase2/release.md
+        estimated_minutes: 60
+        owner: LF-WS-ARCH
+        kind: design
+        lifecycle_state: DRAFT
+        allowed_files:
+        - README.md
+        - docs/roadmap/master-plan/phase2/release.md
+        - docs/development/operations/local-experience.md
+        - docs/development/operations/docker-release.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 编写双运行入口和用户安装更新指南及直接验收证据。
+        acceptance_criteria:
+        - 根 README 优先给出 Docker 使用者取得产物、启动和扩展安装的最短流程，macOS 开发调试按需下钻。
+        - 初始化、版本、数据卷、恢复和卸载均有成功判据与失败去向；明确 Docker 环境依赖及扩展实际安装限制。
+        acceptance_evidence:
+        - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
+        validation_command: python3 -m scripts.repository.docs_check
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-QLT-2004
+        - LF-TSK-OPS-2008
+        depends_on:
+        - task_id: LF-TSK-QLT-2004
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2008
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 编写双运行入口和用户安装更新指南及直接验收证据。
 - id: LF-WS-QLT
   code: QLT
   name: "Harness 与 Quality Gate"
@@ -827,8 +961,14 @@ workstreams:
         owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: DRAFT
-        allowed_files: backend/verification/**, extension/tests/**
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - backend/verification/**
+        - extension/tests/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 补齐合成集成场景与规则变化证据，冻结交付输入供独立 TASK_VALIDATION 使用。
         acceptance_criteria:
         - 覆盖基础词/词形、重点/长尾/未知频率、可靠和噪声短语、坏默认义、同形冲突、增量范围及版本切换。
@@ -863,6 +1003,153 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: 补齐合成集成场景与规则变化证据，冻结交付输入供独立 TASK_VALIDATION 使用。
+      - id: LF-TSK-QLT-2002
+        title: 验证干净环境发布闭环和资源门槛
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/release.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: DRAFT
+        allowed_files:
+        - ops/release/verify.mjs
+        - ops/release/tests/verify.test.mjs
+        - docs/roadmap/master-plan/phase2/status.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 验证干净环境发布闭环和资源门槛及直接验收证据。
+        acceptance_criteria:
+        - 执行干净环境安装、初始化、重启、更新失败恢复与卸载；两种运行形式的相同合成输入结果一致。
+        - 报告完整服务体积/冷启动/内存/CPU 与实际测试平台，任一必需架构或预算未验证不能 PASS。
+        - 真实用户视频与合成测试分开；冻结相同输入供独立 validation/review，未完成 Formal Gate 不称正式交付。
+        acceptance_evidence:
+        - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
+        validation_command: node --test ops/release/tests/verify.test.mjs && node ops/release/verify.mjs --isolated &&
+          python3 scripts/check_changes.py && python3 scripts/check_repository.py
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-OPS-2008
+        - LF-TSK-ARCH-2007
+        - LF-TSK-QLT-2001
+        depends_on:
+        - task_id: LF-TSK-OPS-2008
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-ARCH-2007
+          type: hard
+          required_task_version: 2
+          required_change_version: 2.0.0
+          required_result: PASS
+        - task_id: LF-TSK-QLT-2001
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 验证干净环境发布闭环和资源门槛及直接验收证据。
+      - id: LF-TSK-QLT-2003
+        title: 整合二期任务、授权边界与发布交付目标
+        priority: P0
+        phase: P2
+        task_version: 2
+        change_version: 2.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan.md
+        - docs/roadmap/master-plan/phase2.md
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
+        - docs/roadmap/master-plan/phase2/release.md
+        - openspec/changes/prepare-phase2-pipeline/**
+        - docs/roadmap/master-plan/phase2/design.md
+        - docs/roadmap/master-plan/phase2/architecture.md
+        - docs/roadmap/master-plan/phase2/observability.md
+        - tests/repository/test_planning_check.py
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 整合完整二期设计、图源、任务、授权与发布交付目标；本 Task 验收设计包，不代表产品实现或子任务已验收。
+        acceptance_criteria:
+        - 按用户授权确定 macOS 调试与 Docker 发布、phase2 及子任务分支集成，不冒充一期收尾完成或远端发布授权。
+        - 所有二期范围具有稳定任务身份、责任、具体输出、直接检查与精确依赖；最终任务覆盖全部阶段交付，不复用一期 receipt。
+        - 今天已完成的清洗功能不重复排期；公开接口与全部消费者按可构建工作片调整；后续模型/性能专项不混入。
+        - 设计、静态检查、产品实现和正式验收分开记录；OpenSpec ignored 入口不承载唯一共享合同。
+        - 更新只允许全 DRAFT 的准备期断言；回归要求合法生命周期与可执行机器 scope/deliverable，不弱化独立 Gate。
+        acceptance_evidence:
+        - 同输入静态检查及独立验证审查，状态仅在 phase2/status.md；不将任务设计视为产品实现
+        validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
+          python3 -m scripts.repository.policy_projection --check && python3 -m unittest tests.repository.test_planning_check
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        - eng.repository.module-tests
+        dependencies: []
+        depends_on: []
+        deliverable: 整合完整二期设计、图源、任务、授权与发布交付目标；本 Task 验收设计包，不代表产品实现或子任务已验收。
+      - id: LF-TSK-QLT-2004
+        title: 将发布验收与使用入口接入共享工程合同
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 75
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: DRAFT
+        allowed_files:
+        - harness/module-checks.yaml
+        - harness/manifest.yaml
+        - harness/documentation-policy.yaml
+        - tests/verification/test_release_checks.py
+        - docs/development/operations/docker-release.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 将发布验收与使用入口接入共享工程合同及可核对直接证据。
+        acceptance_criteria:
+        - 在 module-checks 注册真实发布检查及其输入/依赖/环境，发布代码变动进入 Change/Repository Verify，不只运行文档检查。
+        - 缺 Docker 或必要资料与目标架构记 BLOCKED，不跳过业务验收；单元测试证明 check 选择和环境传播。
+        - README 阅读合同调整为取得发行产物、初始化与启动使用，macOS 编译调试保留按需入口，不重复维护规则。
+        acceptance_evidence:
+        - 同输入静态检查及独立验证审查，状态仅在 phase2/status.md；不将任务设计视为产品实现
+        validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
+          python3 -m scripts.repository.policy_projection --check && python3 -m unittest discover -s tests/verification
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        - eng.verification.module-tests
+        dependencies:
+        - LF-TSK-OPS-2008
+        depends_on:
+        - task_id: LF-TSK-OPS-2008
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 将发布验收与使用入口接入共享工程合同及可核对直接证据。
 - id: LF-WS-PRD
   code: PRD
   name: "产品体验"
@@ -891,8 +1178,13 @@ workstreams:
         owner: LF-WS-DAT
         kind: implementation
         lifecycle_state: DRAFT
-        allowed_files: infra/postgres/schema.sql
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - infra/postgres/schema.sql
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 仅按冻结合同调整最新 SQL 的分类/质量/资格表示、注释及约束；不另建历史迁移链。
         acceptance_criteria:
         - 每个增加字段都有明确生产者与消费者；能沿来源追溯提示及阻断决定，不存个人状态。
@@ -910,9 +1202,10 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-LEX-2003
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
+        deliverable: 仅按冻结合同调整最新 SQL 的分类/质量/资格表示、注释及约束；不另建历史迁移链。
 - id: LF-WS-LEX
   code: LEX
   name: "共享 Lexicon"
@@ -1078,9 +1371,15 @@ workstreams:
         owner: LF-WS-LEX
         kind: implementation
         lifecycle_state: DRAFT
-        allowed_files: backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/**, backend/product/lexicon/src/main/java/io/lexiflow/lexicon/domain/model/**,
-          backend/product/lexicon/src/test/**
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/**
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/domain/model/**
+        - backend/product/lexicon/src/test/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 分类证据、基础/重点/长尾判定及独立的提示与缓存资格，含直接测试。
         acceptance_criteria:
         - 按冻结规则生成分类及原因，低频和缺失排名分别处理；基本词形继承不误伤完整短语。
@@ -1101,6 +1400,7 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: 分类证据、基础/重点/长尾判定及独立的提示与缓存资格，含直接测试。
       - id: LF-TSK-LEX-2002
         title: 实现短语质量与默认释义的发布前判定
         priority: P0
@@ -1112,8 +1412,14 @@ workstreams:
         owner: LF-WS-LEX
         kind: implementation
         lifecycle_state: DRAFT
-        allowed_files: backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/**, backend/product/lexicon/src/test/**
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/**
+        - backend/product/lexicon/src/test/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 有原因的短语/默认释义过滤与边界测试，不再依靠频率掩盖来源质量。
         acceptance_criteria:
         - 按照冻结规则调整短语粗过滤，覆盖可靠完整短语、残缺词组和高频坏资料。
@@ -1134,28 +1440,46 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: 有原因的短语/默认释义过滤与边界测试，不再依靠频率掩盖来源质量。
       - id: LF-TSK-LEX-2003
-        title: 提供准确词形查询和发布的独立合同
+        title: 原子切换准确词形合同与全部查询消费者
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         owner: LF-WS-LEX
         kind: implementation
         lifecycle_state: DRAFT
-        allowed_files: backend/product/lexicon/src/main/java/io/lexiflow/lexicon/domain/port/**, backend/product/lexicon/src/main/java/io/lexiflow/lexicon/domain/model/**,
-          backend/product/lexicon/src/main/java/io/lexiflow/lexicon/domain/catalog/**, backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/**,
-          backend/product/lexicon/src/test/**
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
-        expected_output: Lexicon 接收词形集合而非字幕；读写合同、发布身份和候选类型与冻结设计一致。
+        allowed_files:
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/domain/port/LexiconCatalog.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/query/CachedLexiconQueryService.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/domain/catalog/BuiltinLexiconCatalog.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/application/caption/CandidateForms.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/application/caption/EnrichCaptionUseCase.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/domain/model/LexiconLookupResult.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/application/caption/model/MeasuredCaptionResult.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/application/caption/model/MeasuredIncrementalCaptionResult.java
+        - backend/product/lexicon/src/test/**
+        - backend/product/enrichment/src/test/**
+        - backend/product/adapters/src/test/**
+        - backend/product/api/src/test/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 候选枚举归 Enrichment，LexiconCatalog 只接受规范词形集合；两实现与全部消费者和测试在同一可编译切片切换。
         acceptance_criteria:
-        - 词形查询完整返回阻断和同形冲突证据，不数据库 first-row 选义；内置测试词库同步适配。
-        - 查询方只依赖只读端口；新接口与消费者在一个串行工作包中切换，不保留旧逻辑兼容链。
+        - 公开 lookupForms(List<String>) 返回不可变 LexiconLookupResult，携带完整候选、可选发布身份和请求局部查询计数；Enrichment 枚举及规范化键，不用全局计数或字幕下标代替原文定位。
+        - 删除旧字幕查询入口，不维护双套兼容；Cached/Builtin、用例、装配与所有测试调用者一起切换并验证全后端编译。
+        - 空输入不读存储；大小写/标点规范化集中且无字符范围漂移；读写 Repository 分离不捆绑此次公开合同。
+        - 同请求版本检查包含空提示查询，不仅检查选中提示；dbBatches/versionReads/prewarmReads 分开计数。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
-        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :enrichment:test
+          :api:test :adapters:test
         required_check_ids:
         - eng.backend.delivery
         - eng.repository.docs
@@ -1169,6 +1493,7 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: 候选枚举归 Enrichment，LexiconCatalog 只接受规范词形集合；两实现与全部消费者和测试在同一可编译切片切换。
       - id: LF-TSK-LEX-2004
         title: 拆分版本缓存管理与导入应用编排
         priority: P0
@@ -1180,13 +1505,22 @@ workstreams:
         owner: LF-WS-LEX
         kind: implementation
         lifecycle_state: DRAFT
-        allowed_files: backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/query/**, backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/LexiconImportService.java,
-          backend/product/lexicon/src/test/**
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/query/**
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/LexiconImportService.java
+        - backend/product/lexicon/src/test/**
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/LexiconPublicationRepository.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/LexiconRepository.java
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 缓存负责版本/预热/容量；导入用例负责预检结果、来源一致性和发布调用，不依赖文件/SQL。
         acceptance_criteria:
         - 移除查询服务内字幕候选生成；负缓存、预热与动态缓存保持有界且绑定发布身份。
         - 导入应用编排经端口消费来源，不调用适配器 main；故障不形成部分发布。
+        - 提取 publication role 并收窄导入用例依赖；既有 Repository 仅组合角色，不重复方法或保留旧实现；每步完整编译。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test
@@ -1200,9 +1534,10 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-LEX-2003
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
+        deliverable: 缓存负责版本/预热/容量；导入用例负责预检结果、来源一致性和发布调用，不依赖文件/SQL。
 - id: LF-WS-CNT
   code: CNT
   name: "内容与字幕"
@@ -1275,22 +1610,31 @@ workstreams:
       phase: P2
       seed_tasks:
       - id: LF-TSK-ENR-2001
-        title: 独立候选生成与位置匹配并适配查询合同
+        title: 分离原文位置匹配与发布候选资格检查
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         owner: LF-WS-ENR
         kind: implementation
         lifecycle_state: DRAFT
-        allowed_files: backend/product/enrichment/src/main/**, backend/product/enrichment/src/test/**
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
-        expected_output: Enrichment 生成准确查询键和原文位置，消费新 Lexicon 合同，包含边界测试。
+        allowed_files:
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/domain/policy/DeterministicHintPolicy.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/domain/policy/CandidateMatcher.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/domain/policy/PublishedCandidateEligibility.java
+        - backend/product/enrichment/src/test/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 从现有提示策略提取实际被调用的位置匹配和发布候选完整性校验，保留精确范围和冲突证据。
         acceptance_criteria:
-        - 保持连续 1～3 词规则，去重查询不丢词段出现位置、同形冲突及标点/Unicode 边界。
-        - 词形查询与原文匹配分离；不增加长短语算法或模型。
+        - 位置匹配独立处理词边界、重复出现、标点和 UTF-16 范围；不重复实现已归 Enrichment 应用层的查询键枚举。
+        - 只消费已发布默认义和动作；资格校验不重做离线清洗，不用预过滤掩盖同形多条目冲突。
+        - 提取组件被现有策略实际消费，不留空框架；未改规则部分用同一合成样例验证行为保持。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :enrichment:test
@@ -1307,6 +1651,7 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: 从现有提示策略提取实际被调用的位置匹配和发布候选完整性校验，保留精确范围和冲突证据。
       - id: LF-TSK-ENR-2002
         title: 实现增量编排、默认义资格与提示选择边界
         priority: P0
@@ -1318,8 +1663,14 @@ workstreams:
         owner: LF-WS-ENR
         kind: implementation
         lifecycle_state: DRAFT
-        allowed_files: backend/product/enrichment/src/main/**, backend/product/enrichment/src/test/**
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - backend/product/enrichment/src/main/**
+        - backend/product/enrichment/src/test/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 新增区间、资格、冲突选择、请求合并、坐标映射独立，移出诊断文本拼接。
         acceptance_criteria:
         - 消费发布时的静态资格，不动态重算基础名单或清洗来源；运行期范围和发布身份校验不移除。
@@ -1338,9 +1689,10 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-ENR-2001
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
+        deliverable: 新增区间、资格、冲突选择、请求合并、坐标映射独立，移出诊断文本拼接。
 - id: LF-WS-SEM
   code: SEM
   name: "Semantic Provider"
@@ -1400,9 +1752,15 @@ workstreams:
         owner: LF-WS-API
         kind: implementation
         lifecycle_state: DRAFT
-        allowed_files: backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java, backend/product/api/src/main/resources/**,
-          backend/product/api/src/test/**
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java
+        - backend/product/api/src/main/resources/**
+        - backend/product/api/src/test/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 正式/演示模式、发布身份、缓存初始化和就绪/降级行为匹配冻结合同。
         acceptance_criteria:
         - 正式配置缺失不静默退回五词演示库；空发布、数据库故障、预热失败均有确定行为。
@@ -1429,6 +1787,7 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: 正式/演示模式、发布身份、缓存初始化和就绪/降级行为匹配冻结合同。
       - id: LF-TSK-API-2002
         title: 连接请求主线、HTTP 映射和终态日志
         priority: P0
@@ -1440,8 +1799,14 @@ workstreams:
         owner: LF-WS-API
         kind: implementation
         lifecycle_state: DRAFT
-        allowed_files: backend/product/api/src/main/java/io/lexiflow/api/**, backend/product/api/src/test/**
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - backend/product/api/src/main/java/io/lexiflow/api/**
+        - backend/product/api/src/test/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 控制器调用应用用例和观测端口，移除直接文件实现，保留外部协议和计时消费合同。
         acceptance_criteria:
         - 正常/空提示/无新增/非法请求/故障均有一致响应与终态汇总，不把敏感台账作为普通日志。
@@ -1469,6 +1834,56 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: 控制器调用应用用例和观测端口，移除直接文件实现，保留外部协议和计时消费合同。
+      - id: LF-TSK-API-2003
+        title: 提供发布就绪合同并隔离发行包敏感记录授权
+        priority: P0
+        phase: P2
+        task_version: 2
+        change_version: 2.0.0
+        task_source: docs/roadmap/master-plan/phase2/release.md
+        estimated_minutes: 75
+        owner: LF-WS-API
+        kind: implementation
+        lifecycle_state: DRAFT
+        allowed_files:
+        - backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/RuntimeStatusController.java
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/RuntimeStatus.java
+        - backend/product/api/src/main/resources/application.properties
+        - backend/product/api/src/test/java/io/lexiflow/api/runtime/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 提供发布就绪合同并隔离发行包敏感记录授权及直接验收证据。
+        acceptance_criteria:
+        - 就绪响应含软件/API/资料身份及固定原因，无发布资料、结构错误或依赖故障不得显示就绪；不泄漏连接凭据。
+        - 发行启动默认不记录敏感字幕；保留用户明确授权的 macOS 调试记录边界，普通日志仍无正文。
+        acceptance_evidence:
+        - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :api:test
+        required_check_ids:
+        - eng.backend.delivery
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-API-2002
+        - LF-TSK-ARCH-2006
+        depends_on:
+        - task_id: LF-TSK-API-2002
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-ARCH-2006
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 提供发布就绪合同并隔离发行包敏感记录授权及直接验收证据。
 - id: LF-WS-EXT
   code: EXT
   name: Chrome Extension
@@ -1589,9 +2004,19 @@ workstreams:
         owner: LF-WS-EXT
         kind: implementation
         lifecycle_state: DRAFT
-        allowed_files: extension/src/content.ts, extension/src/caption-source.ts, extension/src/caption-snapshot.ts,
-          extension/src/stream.ts, extension/src/page-lifecycle.ts, extension/src/caption-capture.ts, extension/tests/**
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - extension/src/content.ts
+        - extension/src/caption-source.ts
+        - extension/src/caption-snapshot.ts
+        - extension/src/stream.ts
+        - extension/src/page-lifecycle.ts
+        - extension/src/caption-capture.ts
+        - extension/tests/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 页面生命周期和采集快照从入口解耦，请求协调器保持唯一请求状态所有者。
         acceptance_criteria:
         - 导航/跳转/字幕关闭/增强开关准确失效；新增字幕不清除仍有效提示，旧响应不跨字幕展示。
@@ -1612,6 +2037,7 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: 页面生命周期和采集快照从入口解耦，请求协调器保持唯一请求状态所有者。
       - id: LF-TSK-EXT-2002
         title: 对齐客户端观测和显示边界
         priority: P0
@@ -1623,9 +2049,17 @@ workstreams:
         owner: LF-WS-EXT
         kind: implementation
         lifecycle_state: DRAFT
-        allowed_files: extension/src/diagnostics.ts, extension/src/background.ts, extension/src/protocol.ts, extension/src/overlay.ts,
-          extension/tests/**
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - extension/src/diagnostics.ts
+        - extension/src/background.ts
+        - extension/src/protocol.ts
+        - extension/src/overlay.ts
+        - extension/tests/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 客户端采集/传输/显示耗时与失败原因匹配新节点，英文优先及本机抑制保持。
         acceptance_criteria:
         - 超时、取消、迟到及无提示分开计数；有界聚合、不输出正文、不上传个人偏好。
@@ -1646,6 +2080,107 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: 客户端采集/传输/显示耗时与失败原因匹配新节点，英文优先及本机抑制保持。
+      - id: LF-TSK-EXT-2003
+        title: 让扩展构建消费统一版本并产出匹配扩展包
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/release.md
+        estimated_minutes: 60
+        owner: LF-WS-EXT
+        kind: implementation
+        lifecycle_state: DRAFT
+        allowed_files:
+        - extension/scripts/build.mjs
+        - extension/scripts/release.mjs
+        - extension/manifest.json
+        - extension/package.json
+        - extension/package-lock.json
+        - extension/tests/release.test.mjs
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 让扩展构建消费统一版本并产出匹配扩展包及直接验收证据。
+        acceptance_criteria:
+        - 移除独立发布版本填写点，生成 manifest 与 ZIP 时从同一软件版本真源读取；保留本机 API 权限。
+        - ZIP 仅含运行所需 dist 文件；排除源码、测试、私有配置，构建格式及清单摘要有直接测试。
+        acceptance_evidence:
+        - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
+        validation_command: npm --prefix extension test && npm --prefix extension run quality:check
+        required_check_ids:
+        - eng.extension.quality
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-OPS-2003
+        depends_on:
+        - task_id: LF-TSK-OPS-2003
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 让扩展构建消费统一版本并产出匹配扩展包及直接验收证据。
+      - id: LF-TSK-EXT-2004
+        title: 展示服务与资料状态并拒绝不匹配协议
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/release.md
+        estimated_minutes: 75
+        owner: LF-WS-EXT
+        kind: implementation
+        lifecycle_state: DRAFT
+        allowed_files:
+        - extension/src/background.ts
+        - extension/src/protocol.ts
+        - extension/src/popup.ts
+        - extension/src/popup.html
+        - extension/src/popup.css
+        - extension/tests/runtime-status.test.mjs
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 展示服务与资料状态并拒绝不匹配协议及直接验收证据。
+        acceptance_criteria:
+        - 弹窗明确区分未启动、初始化中、资料不可用、协议不匹配与就绪，并提供对应操作指引。
+        - 不匹配协议不发送字幕；状态探测不阻塞英文、不扩大主机权限，不读取或上传本机抑制偏好。
+        acceptance_evidence:
+        - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
+        validation_command: npm --prefix extension test && npm --prefix extension run quality:check
+        required_check_ids:
+        - eng.extension.quality
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-API-2003
+        - LF-TSK-EXT-2002
+        - LF-TSK-EXT-2003
+        depends_on:
+        - task_id: LF-TSK-API-2003
+          type: hard
+          required_task_version: 2
+          required_change_version: 2.0.0
+          required_result: PASS
+        - task_id: LF-TSK-EXT-2002
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-EXT-2003
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 展示服务与资料状态并拒绝不匹配协议及直接验收证据。
 - id: LF-WS-PRF
   code: PRF
   name: "性能与韧性"
@@ -1679,8 +2214,13 @@ workstreams:
         owner: LF-WS-OBS
         kind: design
         lifecycle_state: DRAFT
-        allowed_files: docs/roadmap/master-plan/phase2/observability.md
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - docs/roadmap/master-plan/phase2/observability.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 启动、请求、状态变化、导入事件表与成功/空提示/异常样例，区分敏感台账。
         acceptance_criteria:
         - 明确事件名、字段类型单位、原因码、级别、触发次数、开关和保留；result 遵守结果语义，NO_HINT 仅为原因。
@@ -1688,8 +2228,8 @@ workstreams:
         - 保留敏感分析记录的授权、去重和失败语义；不在本阶段引入异步丢失队列或新采集。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
-        validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check
-          && python3 -m scripts.repository.policy_projection --check
+        validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
+          python3 -m scripts.repository.policy_projection --check
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
@@ -1702,6 +2242,7 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: 启动、请求、状态变化、导入事件表与成功/空提示/异常样例，区分敏感台账。
       - id: LF-TSK-OBS-2002
         title: 实现普通结构化观测与敏感记录适配器
         priority: P0
@@ -1713,8 +2254,14 @@ workstreams:
         owner: LF-WS-OBS
         kind: implementation
         lifecycle_state: DRAFT
-        allowed_files: backend/product/adapters/src/main/java/io/lexiflow/observability/**, backend/product/adapters/src/test/java/io/lexiflow/observability/**
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - backend/product/adapters/src/main/java/io/lexiflow/observability/**
+        - backend/product/adapters/src/test/java/io/lexiflow/observability/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 按日志合同实现适配器及脱敏/格式/失败隔离测试，不触发额外资料采集。
         acceptance_criteria:
         - 所有事件字段类型、原因及单位匹配合同；对无提示/失败不混淆，正文与凭据不进入普通日志。
@@ -1741,6 +2288,7 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: 按日志合同实现适配器及脱敏/格式/失败隔离测试，不触发额外资料采集。
 - id: LF-WS-OPS
   code: OPS
   name: "交付与运维"
@@ -1832,12 +2380,25 @@ workstreams:
         owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: DRAFT
-        allowed_files: backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/**, backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/**
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/**
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/**
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/LexiconReadRepository.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/LexiconRepository.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/query/CachedLexiconQueryService.java
+        - backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java
+        - backend/product/lexicon/src/test/**
+        - backend/product/api/src/test/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 读写职责隔离的持久化适配器、投影映射及真实隔离库直接测试。
         acceptance_criteria:
         - 查询返回完整候选和统一发布身份；映射不遗漏分类或冲突证据。
         - 原子提交与失败回滚、旧版本可查及开发结构重建边界保持；无跨域表访问。
+        - 提取 read role 后查询服务和 API 仅注入读接口，持久化工厂仍可组合读写角色；消费者和直接测试同一切片适配。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test
@@ -1860,6 +2421,7 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: 读写职责隔离的持久化适配器、投影映射及真实隔离库直接测试。
       - id: LF-TSK-OPS-2002
         title: 将导入 CLI 收敛为入口和来源适配
         priority: P0
@@ -1871,8 +2433,14 @@ workstreams:
         owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: DRAFT
-        allowed_files: backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/**, backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/importer/**
-        forbidden_files: 除 allowed_files 外的文件；其他写入者范围、真实字幕与运行数据；启动通知前禁止任何产品实现或 Git 切换
+        allowed_files:
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/**
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/importer/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: StarDict/规范 CSV 来源适配与导入/重建命令接入新用例，保留显式确认和进度。
         acceptance_criteria:
         - 不同来源进入统一准备流程且缺失证据不伪造；CLI 仅参数、资源、格式和输出。
@@ -1893,6 +2461,295 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
+        deliverable: StarDict/规范 CSV 来源适配与导入/重建命令接入新用例，保留显式确认和进度。
+      - id: LF-TSK-OPS-2003
+        title: 建立软件版本真源并接入后端构建
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/release.md
+        estimated_minutes: 60
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: DRAFT
+        allowed_files:
+        - ops/release/version.txt
+        - ops/release/version.mjs
+        - ops/release/tests/version.test.mjs
+        - backend/build.gradle.kts
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 建立软件版本真源并接入后端构建及直接验收证据。
+        acceptance_criteria:
+        - 软件版本由 ops/release/version.txt 唯一维护，三段数字格式有界校验；后端构建和清单读取同一来源。
+        - 异常格式、缺失版本、发行构建的脏源码输入必须可检测；不自动修改 Git tag 或推送。
+        acceptance_evidence:
+        - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
+        validation_command: node --test ops/release/tests/version.test.mjs && python3 -m scripts.environment.java_exec
+          backend/gradlew -p backend :api:bootJar
+        required_check_ids:
+        - eng.backend.delivery
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-ARCH-2006
+        depends_on:
+        - task_id: LF-TSK-ARCH-2006
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 建立软件版本真源并接入后端构建及直接验收证据。
+      - id: LF-TSK-OPS-2004
+        title: 实现发布清单、摘要和许可材料打包
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/release.md
+        estimated_minutes: 75
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: DRAFT
+        allowed_files:
+        - ops/release/manifest.mjs
+        - ops/release/package.mjs
+        - ops/release/tests/manifest.test.mjs
+        - ops/release/third-party-notices.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 实现发布清单、摘要和许可材料打包及直接验收证据。
+        acceptance_criteria:
+        - 清单绑定源码、软件/API/SQL/资料/准备策略、架构和全部制品摘要；拒绝缺项、路径逃逸和被篡改内容。
+        - 许可和来源依据随制品交付，缺少必需资料不得发行；构建机私有路径和凭据不进入清单。
+        acceptance_evidence:
+        - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
+        validation_command: node --test ops/release/tests/manifest.test.mjs
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-OPS-2003
+        - LF-TSK-EXT-2003
+        depends_on:
+        - task_id: LF-TSK-OPS-2003
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-EXT-2003
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 实现发布清单、摘要和许可材料打包及直接验收证据。
+      - id: LF-TSK-OPS-2005
+        title: 构建已发布词库资料包与隔离初始化
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/release.md
+        estimated_minutes: 90
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: DRAFT
+        allowed_files:
+        - ops/release/dataset.mjs
+        - ops/release/tests/dataset.test.mjs
+        - ops/docker/init-lexicon.sh
+        - ops/docker/tests/dataset-init.sh
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 构建已发布词库资料包与隔离初始化及直接验收证据。
+        acceptance_criteria:
+        - 仅导出经批准且有来源/许可的已发布资料，不打包开发者日志、观看记录和配置；身份、SQL 摘要与清单一致。
+        - 使用者无需原始 CSV，资料包通过完整性校验后仅初始化明确归属的空数据空间；已有不同资料不覆盖。
+        - 在隔离 PostgreSQL 验证重复启动、损坏包、初始化中断及无资料行为，未发布状态不能就绪。
+        acceptance_evidence:
+        - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
+        validation_command: node --test ops/release/tests/dataset.test.mjs && bash ops/docker/tests/dataset-init.sh
+        required_check_ids:
+        - eng.backend.delivery
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-OPS-2001
+        - LF-TSK-OPS-2004
+        depends_on:
+        - task_id: LF-TSK-OPS-2001
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2004
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 构建已发布词库资料包与隔离初始化及直接验收证据。
+      - id: LF-TSK-OPS-2006
+        title: 封装 API 镜像和私网数据库 Compose
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/release.md
+        estimated_minutes: 90
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: DRAFT
+        allowed_files:
+        - ops/docker/Dockerfile
+        - ops/docker/compose.yaml
+        - ops/docker/.dockerignore
+        - ops/docker/entrypoint.sh
+        - ops/docker/tests/compose-smoke.sh
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 封装 API 镜像和私网数据库 Compose及直接验收证据。
+        acceptance_criteria:
+        - 使用预构建产品与运行时镜像，不在最终镜像包含 Java 编译器、Python/Node 工程环境、源 CSV 或本机配置。
+        - API 宿主默认只绑定 127.0.0.1，PostgreSQL 不发布宿主端口；产品无实际依赖时不启 Redis。
+        - 以非 root API、独立持久卷和明确健康依赖启动；隔离测试覆盖端口冲突、缺资料、重启和停止。
+        acceptance_evidence:
+        - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
+        validation_command: bash ops/docker/tests/compose-smoke.sh
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-OPS-2005
+        - LF-TSK-API-2003
+        depends_on:
+        - task_id: LF-TSK-OPS-2005
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-API-2003
+          type: hard
+          required_task_version: 2
+          required_change_version: 2.0.0
+          required_result: PASS
+        deliverable: 封装 API 镜像和私网数据库 Compose及直接验收证据。
+      - id: LF-TSK-OPS-2007
+        title: 实现匹配制品更新与失败恢复操作
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/release.md
+        estimated_minutes: 90
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: DRAFT
+        allowed_files:
+        - ops/release/lifecycle.mjs
+        - ops/release/tests/lifecycle.test.mjs
+        - ops/docker/tests/update-recovery.sh
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 实现匹配制品更新与失败恢复操作及直接验收证据。
+        acceptance_criteria:
+        - 新制品先校验并准备独立数据空间，准备失败仍能使用原安装；不在原库执行开发重建。
+        - 恢复绑定匹配软件/结构/资料组合，不仅替换可执行文件；停止与删除分开，删除数据须明确确认。
+        - 隔离演练中断、空间不足和错误版本；扩展偏好不因后端生命周期被删除，不操作真实运行卷。
+        acceptance_evidence:
+        - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
+        validation_command: node --test ops/release/tests/lifecycle.test.mjs && bash ops/docker/tests/update-recovery.sh
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-OPS-2006
+        depends_on:
+        - task_id: LF-TSK-OPS-2006
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 实现匹配制品更新与失败恢复操作及直接验收证据。
+      - id: LF-TSK-OPS-2008
+        title: 串联双架构构建与受控发布流水线
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/release.md
+        estimated_minutes: 90
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: DRAFT
+        allowed_files:
+        - ops/release/build.mjs
+        - ops/release/tests/build.test.mjs
+        - .github/workflows/release.yml
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 串联双架构构建与受控发布流水线及直接验收证据。
+        acceptance_criteria:
+        - 固定依赖并生成 linux amd64/arm64 镜像及匹配资料/扩展清单；两个架构分别启动验证，不用仅构建通过代替。
+        - 测试失败、许可缺失、未验证架构均不得进入正式发行清单；本地默认只产物构建，不上传。
+        - 公开上传、商店提交和凭据使用保留人工授权，CI 不自动合并或签发 Formal Gate。
+        acceptance_evidence:
+        - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
+        validation_command: node --test ops/release/tests/build.test.mjs
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-OPS-2004
+        - LF-TSK-OPS-2006
+        - LF-TSK-OPS-2007
+        - LF-TSK-EXT-2004
+        depends_on:
+        - task_id: LF-TSK-OPS-2004
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2006
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2007
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-EXT-2004
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 串联双架构构建与受控发布流水线及直接验收证据。
 - id: LF-WS-ADP
   code: ADP
   name: "后续 Content Adapter"
