@@ -3,7 +3,7 @@ package io.lexiflow.api;
 import io.lexiflow.api.hints.SegmentAnalysisLog;
 import io.lexiflow.enrichment.application.caption.EnrichCaptionUseCase;
 import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
-import io.lexiflow.lexicon.application.port.LexiconRepository;
+import io.lexiflow.lexicon.application.port.LexiconReadRepository;
 import io.lexiflow.lexicon.application.query.CachedLexiconQueryService;
 import io.lexiflow.lexicon.domain.catalog.BuiltinLexiconCatalog;
 import io.lexiflow.lexicon.domain.port.LexiconCatalog;
@@ -40,7 +40,7 @@ public class ApiApplication {
    * @return 可由 HTTP 入口调用的应用用例。
    */
   @Bean
-  EnrichCaptionUseCase enrichCaptionUseCase(ObjectProvider<LexiconRepository> repositories) {
+  EnrichCaptionUseCase enrichCaptionUseCase(ObjectProvider<LexiconReadRepository> repositories) {
     return new EnrichCaptionUseCase(
         lexiconCatalog(repositories.getIfAvailable()), new DeterministicHintPolicy());
   }
@@ -55,7 +55,7 @@ public class ApiApplication {
         console ? System.out : null);
   }
 
-  private static LexiconCatalog lexiconCatalog(LexiconRepository repository) {
+  private static LexiconCatalog lexiconCatalog(LexiconReadRepository repository) {
     if (repository == null) {
       LOGGER.warn(
           "runtime lexicon=builtin-demo; only 5 demo terms, not the imported dictionary;"

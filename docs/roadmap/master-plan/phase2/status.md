@@ -24,7 +24,8 @@
 - LEX-2002 已提交 `fb480fa` 并由 `phase2-5-phrase-quality` 合入 `phase2`；Change `f61bfb13-6edf-458f-b568-5cbaff6fb454`、Repository `f47fca4a-769f-44b3-b608-89f86c9ef04e`、validation `e2308a98-50d0-4da9-b5d9-b5ad4211cdcd`、review `5d0bf80d-50e6-43c3-8129-9255504438bb`、check `793ba163-cd3d-4597-82ad-a0e12bdcaee2` 均 PASS；submission `d1274345-ffef-4051-a3a9-3cdc846a238e`。
 - LEX-2003 已提交 `c18c34a` 并由 `phase2-6-query-contract` 合入 `phase2`；Change `ac8d3b4a-a01d-49c2-a19f-e00e264e9dce`、Repository `f9b37a37-6072-44b1-9b13-7f6bc0b5d9b4`、validation `11ce59fb-462e-45f6-aba2-980a841a94c7`、review `b35b716a-0802-498c-b307-8179576543ed`、check `c7902434-a633-4b71-a529-7e5f44f5d4ef` 均 PASS；submission `40345063-a948-4dd9-99bd-f803338d6e66`。
 - LEX-2004 v2 已提交 `d1d10fe` 并合入 `phase2`；Change `79c640a0-f686-4dc7-b85a-fef4b6a95975`、Repository `aeba64e3-e23a-45de-9483-f166715de82c`、validation `48738bdd-726c-4abb-b006-a9b1627380c9`、review `4bec142e-0d69-43d9-ae1b-5cf779a35e42`、check `b292a654-51b2-47eb-a0b2-654db66f37a3` 均为 PASS；旧失败送验全部保留。
-- 当前在 `phase2-8-publication-schema` 开始 DAT-2001 v2：同步补发布证据字段、写入映射与隔离库约束回归；后续继续读写端口、应用主线、客户端和发布闭环。
+- DAT-2001 v2 已提交 `b218fea` 并合入 `phase2`；Change `0d71c290-b826-4d0d-b91f-dc0c9b4a872a`、Repository `98d79e5f-2af8-4f14-9b88-1ac41847630e`、validation `970bcd9c-f6ba-4b83-8dbe-23c3d7f7f2c5`、review `c0e67ad3-113e-4241-8270-fe1e916c73c0`、check `70b3e175-9280-4c7f-b581-8a7af71dcfcf` 均为 PASS；仅隔离库执行 SQL，真实运行资料未改动。
+- 当前在 `phase2-9-read-port` 开始 OPS-2001 v2：读取角色、查询/缓存/API 消费者和 Spring 装配同批切换；后续继续导入入口、应用主线、客户端与发布闭环。
 - OpenSpec 与运行记录保留在 ignored 本机目录；共享交接位于路线图与 Catalog。
 
 ## 1.4. 一期与后续边界

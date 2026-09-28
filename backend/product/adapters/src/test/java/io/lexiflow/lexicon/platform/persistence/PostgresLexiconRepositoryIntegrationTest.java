@@ -2,6 +2,7 @@ package io.lexiflow.lexicon.platform.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,6 +12,9 @@ import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
 import io.lexiflow.lexicon.application.importing.model.SourceReference;
+import io.lexiflow.lexicon.application.port.LexiconPublicationRepository;
+import io.lexiflow.lexicon.application.port.LexiconReadRepository;
+import io.lexiflow.lexicon.application.port.LexiconRepository;
 import io.lexiflow.lexicon.application.query.CachedLexiconQueryService;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconPriority;
@@ -20,10 +24,13 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.core.env.MapPropertySource;
 
 /** 隔离 PostgreSQL schema 验证三表结构、完整发布、单表查询及回滚。 */
 @Tag("postgres")
@@ -62,7 +69,8 @@ class PostgresLexiconRepositoryIntegrationTest {
           assertTrue(
               scalar(
                       jdbcUrl,
-                      "SELECT pg_get_indexdef('lexicon_prepared_entry_language_lemma_uk'::regclass)")
+                      "SELECT"
+                          + " pg_get_indexdef('lexicon_prepared_entry_language_lemma_uk'::regclass)")
                   .contains("(language_tag, lemma)"));
           assertTrue(
               scalar(jdbcUrl, "SELECT pg_get_indexdef('lexicon_hint_lookup_prewarm_idx'::regclass)")
@@ -102,6 +110,64 @@ class PostgresLexiconRepositoryIntegrationTest {
                     .map(value -> value.normalizedForm())
                     .distinct()
                     .count());
+          }
+        });
+  }
+
+  @Test
+  void springProvidesOneRepositoryForReadAndPublicationRolesAndKeepsAtomicVersions()
+      throws Exception {
+    inInitializedSchema(
+        jdbcUrl -> {
+          try (var context = new AnnotationConfigApplicationContext()) {
+            context
+                .getEnvironment()
+                .getPropertySources()
+                .addFirst(
+                    new MapPropertySource(
+                        "isolated-postgres", Map.of("spring.datasource.url", jdbcUrl)));
+            context.register(PostgresPersistenceConfiguration.class);
+            context.refresh();
+
+            var read = context.getBean(LexiconReadRepository.class);
+            var publication = context.getBean(LexiconPublicationRepository.class);
+            var aggregate = context.getBean(LexiconRepository.class);
+            assertSame(read, publication);
+            assertSame(read, aggregate);
+            assertEquals(0, read.publishedVersion());
+
+            var hint = row("bore", "钻孔", List.of(), List.of());
+            var block = row("bear", "熊；承受", List.of(), List.of("bore"));
+            publication.publish(new LexiconImportRequest(List.of(hint, block), metadata('m')));
+            var mixed = read.findByForms(1, List.of("bore"));
+            assertEquals(2, mixed.size());
+            assertEquals(
+                java.util.Set.of(LexiconHintAction.HINT, LexiconHintAction.BLOCK),
+                mixed.stream()
+                    .map(candidate -> candidate.finalAction())
+                    .collect(java.util.stream.Collectors.toSet()));
+
+            assertThrows(
+                RuntimeException.class,
+                () ->
+                    publication.publishStreaming(
+                        metadata('n'),
+                        2,
+                        1,
+                        consumer -> {
+                          consumer.accept(row("replacement", "替换资料", List.of(), List.of()));
+                          throw new IOException("synthetic publication failure");
+                        }));
+            assertEquals(1, read.publishedVersion());
+            assertEquals(2, read.findByForms(1, List.of("bore")).size());
+            assertEquals(0, read.findByForms(1, List.of("replacement")).size());
+
+            publication.publish(
+                new LexiconImportRequest(
+                    List.of(row("replacement", "替换资料", List.of(), List.of())), metadata('o')));
+            assertEquals(2, read.publishedVersion());
+            assertEquals(0, read.findByForms(1, List.of("replacement")).size());
+            assertEquals(1, read.findByForms(2, List.of("replacement")).size());
           }
         });
   }
@@ -253,7 +319,8 @@ class PostgresLexiconRepositoryIntegrationTest {
                     "UPDATE lexicon_prepared_entry SET exclusion_reason=chr(9)||chr(10) "
                         + "WHERE lemma='ambiguous'",
                     "UPDATE lexicon_prepared_entry SET matched_rules=ARRAY[NULL]::text[]",
-                    "UPDATE lexicon_prepared_entry SET matched_rules=ARRAY['valid', chr(9)]::text[]",
+                    "UPDATE lexicon_prepared_entry SET matched_rules=ARRAY['valid',"
+                        + " chr(9)]::text[]",
                     "UPDATE lexicon_hint_lookup SET normalized_form=chr(9)||chr(10)",
                     "UPDATE lexicon_hint_lookup SET canonical_lemma=chr(9)||chr(10)",
                     "UPDATE lexicon_hint_lookup SET final_decision_reason=chr(9)||chr(10)",
@@ -333,12 +400,14 @@ class PostgresLexiconRepositoryIntegrationTest {
                 "可持续性；持续性",
                 scalar(
                     jdbcUrl,
-                    "SELECT source_gloss FROM lexicon_prepared_entry WHERE lemma='sustainability'"));
+                    "SELECT source_gloss FROM lexicon_prepared_entry WHERE"
+                        + " lemma='sustainability'"));
             assertEquals(
                 "unsafe_default_candidate",
                 scalar(
                     jdbcUrl,
-                    "SELECT exclusion_reason FROM lexicon_prepared_entry WHERE lemma='sustainability'"));
+                    "SELECT exclusion_reason FROM lexicon_prepared_entry WHERE"
+                        + " lemma='sustainability'"));
           }
         });
   }
@@ -381,27 +450,32 @@ class PostgresLexiconRepositoryIntegrationTest {
                 "BLOCK:1000",
                 scalar(
                     jdbcUrl,
-                    "SELECT final_action || ':' || cache_priority FROM lexicon_hint_lookup WHERE normalized_form='the'"));
+                    "SELECT final_action || ':' || cache_priority FROM lexicon_hint_lookup WHERE"
+                        + " normalized_form='the'"));
             assertEquals(
                 "BLOCK:765",
                 scalar(
                     jdbcUrl,
-                    "SELECT final_action || ':' || cache_priority FROM lexicon_hint_lookup WHERE normalized_form='opaque'"));
+                    "SELECT final_action || ':' || cache_priority FROM lexicon_hint_lookup WHERE"
+                        + " normalized_form='opaque'"));
             assertEquals(
                 "BLOCK:765",
                 scalar(
                     jdbcUrl,
-                    "SELECT final_action || ':' || cache_priority FROM lexicon_hint_lookup WHERE normalized_form='bright distant stellar system'"));
+                    "SELECT final_action || ':' || cache_priority FROM lexicon_hint_lookup WHERE"
+                        + " normalized_form='bright distant stellar system'"));
             assertEquals(
                 "HINT:765",
                 scalar(
                     jdbcUrl,
-                    "SELECT final_action || ':' || cache_priority FROM lexicon_hint_lookup WHERE normalized_form='quasar'"));
+                    "SELECT final_action || ':' || cache_priority FROM lexicon_hint_lookup WHERE"
+                        + " normalized_form='quasar'"));
             assertEquals(
                 "HINT:0",
                 scalar(
                     jdbcUrl,
-                    "SELECT final_action || ':' || cache_priority FROM lexicon_hint_lookup WHERE normalized_form='nebula'"));
+                    "SELECT final_action || ':' || cache_priority FROM lexicon_hint_lookup WHERE"
+                        + " normalized_form='nebula'"));
             assertEquals(
                 java.util.Set.of("the", "opaque", "bright distant stellar system"),
                 persistence.repository().findPrewarmForms(1, LexiconHintAction.BLOCK, 10).stream()
@@ -754,12 +828,14 @@ class PostgresLexiconRepositoryIntegrationTest {
                   "甲床瘤",
                   scalar(
                       jdbcUrl,
-                      "SELECT prepared_gloss FROM lexicon_prepared_entry WHERE lemma='synthetic-organ'"));
+                      "SELECT prepared_gloss FROM lexicon_prepared_entry WHERE"
+                          + " lemma='synthetic-organ'"));
               assertEquals(
                   "[医]甲[床]瘤",
                   scalar(
                       jdbcUrl,
-                      "SELECT source_gloss FROM lexicon_prepared_entry WHERE lemma='synthetic-organ'"));
+                      "SELECT source_gloss FROM lexicon_prepared_entry WHERE"
+                          + " lemma='synthetic-organ'"));
               assertEquals(
                   "all_basic_phrase",
                   scalar(
@@ -769,28 +845,33 @@ class PostgresLexiconRepositoryIntegrationTest {
                   "BLOCK",
                   scalar(
                       jdbcUrl,
-                      "SELECT final_action FROM lexicon_hint_lookup WHERE normalized_form='give up'"));
+                      "SELECT final_action FROM lexicon_hint_lookup WHERE normalized_form='give"
+                          + " up'"));
               assertEquals(
                   "星系",
                   scalar(
                       jdbcUrl,
-                      "SELECT final_gloss FROM lexicon_hint_lookup WHERE normalized_form='quasar'"));
+                      "SELECT final_gloss FROM lexicon_hint_lookup WHERE"
+                          + " normalized_form='quasar'"));
               assertEquals(
                   "BLOCK",
                   scalar(
                       jdbcUrl,
-                      "SELECT final_action FROM lexicon_hint_lookup WHERE normalized_form='one distant stellar system'"));
+                      "SELECT final_action FROM lexicon_hint_lookup WHERE normalized_form='one"
+                          + " distant stellar system'"));
               assertEquals(
                   "指定短释",
                   scalar(
                       jdbcUrl,
-                      "SELECT final_gloss FROM lexicon_hint_lookup WHERE normalized_form='curated-term'"));
+                      "SELECT final_gloss FROM lexicon_hint_lookup WHERE"
+                          + " normalized_form='curated-term'"));
               assertEquals(
                   "0",
                   scalar(
                       jdbcUrl,
-                      "SELECT count(*)::text FROM lexicon_hint_lookup h JOIN lexicon_prepared_entry p USING (lexicon_entry_id) "
-                          + "WHERE h.final_action='HINT' AND h.final_gloss IS DISTINCT FROM p.prepared_gloss"));
+                      "SELECT count(*)::text FROM lexicon_hint_lookup h JOIN lexicon_prepared_entry"
+                          + " p USING (lexicon_entry_id) WHERE h.final_action='HINT' AND"
+                          + " h.final_gloss IS DISTINCT FROM p.prepared_gloss"));
             }
           });
     }

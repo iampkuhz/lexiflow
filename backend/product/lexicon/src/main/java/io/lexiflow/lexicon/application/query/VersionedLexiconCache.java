@@ -1,6 +1,6 @@
 package io.lexiflow.lexicon.application.query;
 
-import io.lexiflow.lexicon.application.port.LexiconRepository;
+import io.lexiflow.lexicon.application.port.LexiconReadRepository;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.util.ArrayList;
@@ -32,7 +32,7 @@ final class VersionedLexiconCache {
     this.dynamic = new LinkedHashMap<>(capacity, 0.75F, true);
   }
 
-  Refresh refresh(LexiconRepository repository) {
+  Refresh refresh(LexiconReadRepository repository) {
     var version = repository.publishedVersion();
     if (version == cachedVersion) return new Refresh(version, 0);
     pinned.clear();
@@ -47,7 +47,7 @@ final class VersionedLexiconCache {
   }
 
   private int prewarm(
-      LexiconRepository repository, long version, LexiconHintAction action, int limit) {
+      LexiconReadRepository repository, long version, LexiconHintAction action, int limit) {
     if (limit == 0) return 0;
     var grouped = groupByForm(repository.findPrewarmForms(version, action, limit));
     for (var group : grouped.entrySet()) pin(group.getKey(), group.getValue());

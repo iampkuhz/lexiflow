@@ -106,10 +106,12 @@
 
 ### 1.3.11. LF-TSK-OPS-2001 · 适配 PostgreSQL 读写边界与原子发布
 - 主责：`LF-WS-OPS`；预计 90 分钟；前置：`LF-TSK-DAT-2001`、`LF-TSK-LEX-2004`。
-- 产出：读写职责隔离的持久化适配器、投影映射及真实隔离库直接测试。
+- 产出：只读接口和发布接口按调用方隔离，组合持久化保持完整映射及原子事务。
 - 验收：查询返回完整候选和统一发布身份；映射不遗漏分类或冲突证据。
 - 验收：原子提交与失败回滚、旧版本可查及开发结构重建边界保持；无跨域表访问。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test`。
+- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :api:test :adapters:postgresIntegrationTest`。
+
+- 实现边界：Catalog v2/change 2.0.0；查询服务、版本缓存与 API 一起切换到 read role，聚合接口只保留在基础设施组合；直接测试证明只读替身和真实 PostgreSQL bean 的 Spring 装配。数据库字段已由 DAT-2001 同步交付，不重复改 SQL。
 
 ### 1.3.12. LF-TSK-OPS-2002 · 将导入 CLI 收敛为入口和来源适配
 - 主责：`LF-WS-OPS`；预计 75 分钟；前置：`LF-TSK-OPS-2001`。

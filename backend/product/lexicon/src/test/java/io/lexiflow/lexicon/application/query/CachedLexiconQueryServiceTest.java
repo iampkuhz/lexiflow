@@ -3,10 +3,7 @@ package io.lexiflow.lexicon.application.query;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
-import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
-import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
-import io.lexiflow.lexicon.application.port.LexiconRepository;
+import io.lexiflow.lexicon.application.port.LexiconReadRepository;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
@@ -224,7 +221,7 @@ class CachedLexiconQueryServiceTest {
         1);
   }
 
-  private static final class MutableRepository implements LexiconRepository {
+  private static final class MutableRepository implements LexiconReadRepository {
     private long version = 1;
     private LexiconHintCandidate entry = entry(1, "旧释义");
 
@@ -243,23 +240,9 @@ class CachedLexiconQueryServiceTest {
         long requestedVersion, LexiconHintAction action, int limit) {
       return List.of();
     }
-
-    @Override
-    public long publish(LexiconImportRequest request) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public long publishStreaming(
-        LexiconImportMetadata metadata,
-        long sourceRowsTotal,
-        long expectedEntries,
-        LexiconImportRowSource source) {
-      throw new UnsupportedOperationException();
-    }
   }
 
-  private static final class CountingRepository implements LexiconRepository {
+  private static final class CountingRepository implements LexiconReadRepository {
     private long version = 1;
     private int queryCalls;
     private int versionReads;
@@ -287,20 +270,6 @@ class CachedLexiconQueryServiceTest {
         long requestedVersion, LexiconHintAction action, int limit) {
       prewarmCalls++;
       return prewarm.stream().filter(value -> value.finalAction() == action).toList();
-    }
-
-    @Override
-    public long publish(LexiconImportRequest request) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public long publishStreaming(
-        LexiconImportMetadata metadata,
-        long sourceRowsTotal,
-        long expectedEntries,
-        LexiconImportRowSource source) {
-      throw new UnsupportedOperationException();
     }
   }
 }
