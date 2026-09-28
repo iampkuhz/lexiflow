@@ -19,6 +19,6 @@
 
 ## 1.3. 执行入口
 
-具体工作与依赖见[任务清单](phase2/tasks.md)，细节冻结要求见[设计输入](phase2/design.md)。本机 OpenSpec 草案保存在 `openspec/changes/prepare-phase2-pipeline/`；换 checkout 的稳定交接入口是本页及 Catalog，不依赖忽略目录随 Git 迁移。
+具体工作与依赖见[任务清单](phase2/tasks.md)，细节冻结要求见[设计输入](phase2/design.md)，实际使用中的原始发现见[问题记录](phase2/observations.md)。本机 OpenSpec 草案保存在 `openspec/changes/prepare-phase2-pipeline/`；换 checkout 的稳定交接入口是本页及 Catalog，不依赖忽略目录随 Git 迁移。
 
 必须先由用户确认 phase1 收尾并通知启动，再从核对后的最新主干建立 `phase2`。准备阶段只建立任务，不提前开发。执行状态与本次准备检查只见[第二阶段状态页](phase2/status.md)；第一阶段状态继续由[原状态页](status.md)维护。
