@@ -632,8 +632,8 @@ workstreams:
         title: 核对用户启动通知、收尾证据与最新主干起点
         priority: P0
         phase: P2
-        task_version: 2
-        change_version: 2.0.0
+        task_version: 3
+        change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 30
         owner: LF-WS-ARCH
@@ -661,11 +661,17 @@ workstreams:
         - eng.repository.policy
         dependencies:
         - LF-TSK-QLT-2003
+        - LF-TSK-QLT-2005
         depends_on:
         - task_id: LF-TSK-QLT-2003
           type: hard
           required_task_version: 2
           required_change_version: 2.0.0
+          required_result: PASS
+        - task_id: LF-TSK-QLT-2005
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
           required_result: PASS
         deliverable: 记录用户启动授权、phase1 收尾依据、实际主干名与最新 tip、phase2 起点及干净隔离边界。
       - id: LF-TSK-ARCH-2002
@@ -705,8 +711,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-ARCH-2001
           type: hard
-          required_task_version: 2
-          required_change_version: 2.0.0
+          required_task_version: 3
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: 按五个独立维度给出确定规则、来源字段、边界样例和批准的行为变更清单。
       - id: LF-TSK-ARCH-2003
@@ -1105,6 +1111,53 @@ workstreams:
         dependencies: []
         depends_on: []
         deliverable: 整合完整二期设计、图源、任务、授权与发布交付目标；本 Task 验收设计包，不代表产品实现或子任务已验收。
+      - id: LF-TSK-QLT-2005
+        title: 修复失败送验后成功依赖回执的唯一选择
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 60
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/delivery_gate/check.py
+        - tests/delivery_gate/test_dependencies.py
+        - tests/delivery_gate/test_dependency_recovery.py
+        - planning/workstreams.yaml
+        - docs/development/change-delivery/delivery-gate.md
+        - docs/roadmap/master-plan/phase2/status.md
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - openspec/changes/fix-gate-dependency-recovery/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 保留失败送验历史，只采用唯一完整 PASS 依赖验收链；多个 PASS、损坏证据或不匹配仍失败关闭。
+        acceptance_criteria:
+        - 旧 BLOCKED/FAIL 或未完成送验不遮蔽唯一完整 PASS 链，不按最新时间或任意顺序选取。
+        - 零 PASS、多个 PASS、损坏或重复层记录、身份/hash/任务版本/嵌套依赖漂移仍阻断，不执行交付命令。
+        - 合成回归覆盖失败重送、歧义、篡改、未完成与嵌套依赖；不修改删除真实历史 receipt。
+        acceptance_evidence:
+        - 直接回归、同输入 Change/Repository Verify 与不同原生 validator/reviewer 证据；用户已批准最小修复。
+        validation_command: python3 -m unittest discover -s tests/delivery_gate -p "test_*.py"
+        required_check_ids:
+        - eng.delivery-gate.module-tests
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-QLT-2003
+        depends_on:
+        - task_id: LF-TSK-QLT-2003
+          type: hard
+          required_task_version: 2
+          required_change_version: 2.0.0
+          required_result: PASS
+        deliverable: 保留失败送验历史，只采用唯一完整 PASS 依赖验收链；多个 PASS、损坏证据或不匹配仍失败关闭。
       - id: LF-TSK-QLT-2004
         title: 将发布验收与使用入口接入共享工程合同
         priority: P0

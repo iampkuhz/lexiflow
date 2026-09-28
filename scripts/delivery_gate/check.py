@@ -1,17 +1,19 @@
 """只读评估正式 Delivery Gate 条件；只核对 receipt、依赖和证据，不运行交付命令。"""
 
 from __future__ import annotations
+
 import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
 from scripts.delivery_gate.authority import verify_authority
 from scripts.delivery_gate.records import (
     RecordError,
-    delivery_gate_locator,
     canonical_bytes,
     content_hash,
+    delivery_gate_locator,
     list_layer,
     list_submissions,
     load_submission,
@@ -79,6 +81,77 @@ def _bound_chain(
     return errors
 
 
+def _existing_evidence_errors(
+    repo: Path,
+    submission: dict[str, Any],
+    validation: dict[str, Any] | None,
+    review: dict[str, Any] | None,
+    check: dict[str, Any] | None,
+) -> list[str]:
+    """校验候选已存在 receipt 的身份、绑定和附件，不要求未完成链补齐缺失层。"""
+    errors = []
+    sid = submission.get("submission_id")
+    # 历史失败只能使用协议内的结果；check 只发布成功终态，不能伪装失败来退出选择。
+    for name, record, allowed in (
+        ("validation", validation, {"PASS", "BLOCKED", "FAIL"}),
+        ("review", review, {"PASS", "BLOCKED", "FAIL"}),
+        ("check", check, {"PASS"}),
+    ):
+        if record is not None and record.get("result") not in allowed:
+            errors.append(f"{name}-result-invalid")
+    if validation is not None:
+        if validation.get("submission_id") != sid:
+            errors.append("validation-submission-id")
+        if validation.get("submission_content_hash") != submission.get("content_hash"):
+            errors.append("validation-submission-hash")
+        if validation.get("frozen_input_fingerprint") != submission.get(
+            "verification_freeze", {}
+        ).get("input_fingerprint"):
+            errors.append("validation-input-fingerprint")
+        if verify_authority(repo, validation, "validator_identity"):
+            errors.append("validation-identity")
+        try:
+            descriptor = validation["verification_report"]
+            read_bound_bytes(repo, descriptor["locator"], descriptor["sha256"])
+        except (KeyError, TypeError, RecordError):
+            errors.append("validation-evidence-drift")
+    if review is not None:
+        if (
+            validation is None
+            or review.get("submission_id") != sid
+            or review.get("submission_content_hash") != submission.get("content_hash")
+            or review.get("validation_id") != validation.get("validation_id")
+            or review.get("validation_content_hash") != validation.get("content_hash")
+        ):
+            errors.append("review-binding")
+        if verify_authority(repo, review, "reviewer_identity"):
+            errors.append("review-identity")
+    if check is not None:
+        if (
+            check.get("submission_id") != sid
+            or check.get("submission_content_hash") != submission.get("content_hash")
+            or (validation is None and check.get("result") == "PASS")
+            or (review is None and check.get("result") == "PASS")
+            or (
+                validation is not None
+                and (
+                    check.get("validation_id") != validation.get("validation_id")
+                    or check.get("validation_content_hash")
+                    != validation.get("content_hash")
+                )
+            )
+            or (
+                review is not None
+                and (
+                    check.get("review_id") != review.get("review_id")
+                    or check.get("review_content_hash") != review.get("content_hash")
+                )
+            )
+        ):
+            errors.append("check-binding")
+    return errors
+
+
 def _submissions(
     repo: Path, task_id: str, version: int | None, change: str | None
 ) -> list[dict[str, Any]]:
@@ -131,60 +204,62 @@ def _dependency_status(
         version = edge.get("required_task_version") if isinstance(edge, dict) else None
         change = edge.get("required_change_version") if isinstance(edge, dict) else None
         candidates = _submissions(repo, dep_id, version, change)
-        if len(candidates) != 1:
+        if not candidates:
+            details.append({"task_id": dep_id, "status": "missing"})
+            continue
+        passing = []
+        invalid = False
+        for dep in candidates:
+            try:
+                validation, review, check = _records(repo, dep)
+            except (RecordError, CheckError):
+                invalid = True
+                break
+            if _existing_evidence_errors(repo, dep, validation, review, check):
+                invalid = True
+                break
+            # PASS 是待核验的证据声明；非 PASS 历史保留但不参与成功候选选择。
+            if check and check.get("result") == "PASS":
+                if not validation or not review:
+                    invalid = True
+                    break
+                child_ok, child_details = _dependency_status(
+                    repo, dep, visiting | {task_id}
+                )
+                current_errors = _bound_chain(repo, dep, validation, review)
+                expected_nested = check.get("conditions", {}).get("dependency_receipts")
+                actual_nested = [
+                    {
+                        "task_id": x["task_id"],
+                        "submission_content_hash": x["submission_content_hash"],
+                        "check_content_hash": x["check_content_hash"],
+                    }
+                    for x in child_details
+                    if x.get("status") == "PASS"
+                ]
+                if current_errors or not child_ok or expected_nested != actual_nested:
+                    invalid = True
+                    break
+                passing.append((dep, check, child_details))
+        if invalid:
+            details.append({"task_id": dep_id, "status": "receipt-invalid"})
+        elif len(passing) > 1:
+            details.append({"task_id": dep_id, "status": "ambiguous"})
+        elif not passing:
+            details.append({"task_id": dep_id, "status": "not-pass"})
+        else:
+            dep, check, child_details = passing[0]
             details.append(
                 {
                     "task_id": dep_id,
-                    "status": "missing" if not candidates else "ambiguous",
+                    "status": "PASS",
+                    "task_version": dep["task_requirements"]["task_version"],
+                    "change_version": dep["task_requirements"]["change_version"],
+                    "submission_content_hash": dep["content_hash"],
+                    "check_content_hash": check["content_hash"],
+                    "nested": child_details,
                 }
             )
-            continue
-        dep = candidates[0]
-        try:
-            validation, review, check = _records(repo, dep)
-        except (RecordError, CheckError):
-            details.append({"task_id": dep_id, "status": "receipt-invalid"})
-            continue
-        child_ok, child_details = _dependency_status(repo, dep, visiting | {task_id})
-        current_errors = (
-            _bound_chain(repo, dep, validation, review)
-            if validation and review
-            else ["receipt-missing"]
-        )
-        expected_nested = (check or {}).get("conditions", {}).get("dependency_receipts")
-        actual_nested = [
-            {
-                "task_id": x["task_id"],
-                "submission_content_hash": x["submission_content_hash"],
-                "check_content_hash": x["check_content_hash"],
-            }
-            for x in child_details
-            if x.get("status") == "PASS"
-        ]
-        if (
-            not validation
-            or not review
-            or not check
-            or check.get("result") != "PASS"
-            or current_errors
-            or not child_ok
-            or expected_nested != actual_nested
-        ):
-            details.append(
-                {"task_id": dep_id, "status": "not-pass", "nested": child_details}
-            )
-            continue
-        details.append(
-            {
-                "task_id": dep_id,
-                "status": "PASS",
-                "task_version": dep["task_requirements"]["task_version"],
-                "change_version": dep["task_requirements"]["change_version"],
-                "submission_content_hash": dep["content_hash"],
-                "check_content_hash": check["content_hash"],
-                "nested": child_details,
-            }
-        )
     return all(x["status"] == "PASS" for x in details), details
 
 
