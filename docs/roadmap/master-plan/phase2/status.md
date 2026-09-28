@@ -28,7 +28,9 @@
 - OPS-2001 v2 已提交 `9335aa5` 并合入 `phase2`；Change `8e50486d-cf0c-4225-b10d-24022e6872cd`、Repository `b34dc440-e8ac-4d92-a6a4-2d703fb33225`、validation `a22aa425-e62f-4760-89e9-0065b25a0e84`、review `f1922a5c-63d4-4eaa-a4aa-ad2e770743c6`、check `33c4ff85-b8c0-4250-abd8-cab55fd6ae0f` 均为 PASS。
 - OPS-2002 v2 已提交 `5885803` 并合入 `phase2`；Change `3f95a374-4ba2-43da-b530-af3ea3a0f099`、Repository `039c50d2-12e6-48c3-9249-7049f87e627b`、validation `dc00c8ef-55bd-4852-aab4-279c73e78f62`、review `342ad910-3f4f-4d5c-ac71-e4740121aac5`、check `a204ec1b-f56d-497f-ab67-fb933c1cffb3` 均为 PASS；submission `ec7d868d-c1f1-4152-9807-6a7629399ccf`，旧失败证据保留。
 - ENR-2001 v3 已提交 `4c9042b` 并合入 `phase2`；Change `bf3d1c54-a7eb-4189-a33a-e8aa66f4fd5d`、Repository `52ffa365-5691-4921-b95a-be33952a01bb`、validation `3054ae12-0e68-4ee4-9533-12134ddc46f2`、review `3ebf4815-d9c2-49e6-8c0e-2318694ea39c`、check `5726f525-e062-492b-8b0e-8b2bd4425f6b` 均为 PASS；submission `18f263cd-d5be-4e83-9f0d-91d3311fd722`。
-- 当前在 `phase2-12-incremental-orchestration` 开始 ENR-2002 v2：拆分增量规划、映射、合并和提示选择，并移除普通结果中的诊断正文；后续继续观测、客户端和发布闭环。
+- ENR-2002 v2 已提交 `584701d` 并合入 `phase2`；Change `f159e7ba-c494-472f-a78a-b1925b1d562c`、Repository `a1ff5301-6592-4437-b241-d9bb4d78929c`、validation `6bf40a87-a5b2-4ad2-8672-c68beec3fa16`、review `9bf6880e-b9ba-4502-a863-a3f1e1c4615a`、check `730245df-2789-4928-b80d-70128abba2f9` 均为 PASS；submission `5227ee41-3be1-41cb-bc45-4b829d78b2d0`。验证代理曾提前中断一次，保留该次日志；按既定超时等待后的完整验证通过。
+- 补齐导入/缓存事件的实际接线任务 OBS-2003，并设为主线验收硬依赖；二期现有 37 个 Task，不把仅实现日志适配器当所有节点完成。
+- 当前在 `phase2-13-observability-adapters` 实施 OBS-2002 v2：封闭普通事件、隔离敏感文件 Store 并迁移映射/装配；已补事件矩阵和损坏台账重试回归，正进行完整验收。首轮 Verify 发现 integration runtime 的 Jackson 传递依赖锁缺项，按 Gradle 生成更新并保留失败报告；后续继续调用节点、客户端和发布闭环。
 - OpenSpec 与运行记录保留在 ignored 本机目录；共享交接位于路线图与 Catalog。
 
 ## 1.4. 一期与后续边界

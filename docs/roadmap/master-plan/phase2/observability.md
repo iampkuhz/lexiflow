@@ -60,9 +60,19 @@ db_batches 仅为缺失词形批量读取次数，版本读取与预热分别记
 ## 1.5. 合成事件与直接验收
 
 ```json
-{"schema":"lexiflow.event.v1","event":"caption.request.completed","stage":"request","result":"PASS","reason":"OK","duration_ms":7,"request_id":"synthetic-request-1","lexicon_version":7,"counts":{"new_ranges":1,"query_keys":3,"positive_hits":1,"negative_hits":1,"cache_misses":1,"db_batches":1,"candidates":1,"selected":1},"timings_ms":{"validation":0,"candidates":0,"query":3,"selection":1,"analysis":1,"api":7}}
-{"schema":"lexiflow.event.v1","event":"caption.request.completed","stage":"request","result":"PASS","reason":"NO_HINT","duration_ms":2,"request_id":"synthetic-request-2","lexicon_version":7,"counts":{"new_ranges":1,"selected":0},"timings_ms":{"api":2}}
-{"schema":"lexiflow.event.v1","event":"caption.request.completed","stage":"request","result":"BLOCKED","reason":"DEPENDENCY_UNAVAILABLE","duration_ms":5,"request_id":"synthetic-request-3","counts":{"new_ranges":1},"timings_ms":{"query":4,"api":5}}
+{"schema":"lexiflow.event.v1","event":"caption.request.completed","stage":"request","result":"PASS","reason":"OK","duration_ms":7,"request_id":"00000000-0000-4000-8000-000000000001","lexicon_version":7,"counts":{"new_ranges":1,"query_keys":3,"positive_hits":1,"negative_hits":1,"cache_misses":1,"db_batches":1,"candidates":1,"selected":1},"timings_ms":{"validation":0,"candidates":0,"query":3,"selection":1,"analysis":1,"api":7}}
+{"schema":"lexiflow.event.v1","event":"caption.request.completed","stage":"request","result":"PASS","reason":"NO_HINT","duration_ms":2,"request_id":"00000000-0000-4000-8000-000000000002","lexicon_version":7,"counts":{"new_ranges":1,"selected":0},"timings_ms":{"api":2}}
+{"schema":"lexiflow.event.v1","event":"caption.request.completed","stage":"request","result":"BLOCKED","reason":"DEPENDENCY_UNAVAILABLE","duration_ms":5,"request_id":"00000000-0000-4000-8000-000000000003","counts":{"new_ranges":1},"timings_ms":{"query":4,"api":5}}
 ```
 
 以上数字和身份仅用于合同示例，不是实测结果。直接测试必须证明：成功/空提示/非法请求/依赖故障各一次终态；版本变化一次失效事件；敏感记录故障仍返回既定提示；取消与迟到计数不混淆；未测量字段不伪造；注入换行、凭据样式及合成字幕均不能进入普通事件；日志故障不改变业务响应。
+
+## 1.6. 适配器与集成边界
+
+StructuredEvent 是普通日志的封闭技术值：事件、原因、计数键、耗时键、导入 step/phase 与规则计数键均使用固定枚举；只接受非负整数和后端生成的 UUID 请求关联号，不接收自由文本或异常对象。result、stage 和 level 由事件/原因确定，不允许调用者任意组合。CANCELLED 为 BLOCKED/WARN；启动不可就绪 ERROR、预热降级 WARN；请求 INVALID_REQUEST 为 FAIL/WARN、其他请求 FAIL/BLOCKED 为 ERROR；依赖不可用与敏感写入失败 WARN。schema 错误与版本冲突为 FAIL。请求终态必须有 request_id 与 api 总耗时；analysis.record.failed 关联同一请求 UUID；其他事件不携带 request_id，timings_ms 仅请求终态允许。已知 lexicon_version=0 与未知省略有区别。导入 stage 的 STARTED 对应 started，heartbeat 无最终数量，completed 才可携带最终计数；reason_counts 仅导入终态使用固定准备规则键，不接收词条。未取得的测量用缺项表示。
+
+StructuredEventLogger 负责单行 JSON 编码与按固定级别输出；提供封闭事件 supplier 的失败隔离入口，事件构造、编码或输出失败仅返回未写出，不打印 exception message、路径或正文，不改变调用方业务结果。事件模型与适配器直接验收不代表所有调用位置已接线；请求终态与入口异常在 API-2002，启动/依赖状态在 API-2001，导入/缓存节点由 OBS-2003 逐项取得实际调用与次数证据，并作为 QLT-2001 的硬依赖。
+
+敏感台账通过 adapters 内的 SegmentAnalysisStore 技术接口接收已准备的 SegmentAnalysisRecord（散列 segmentId、英文及分段 translated ranges）。它是本机文件格式合同，不新建业务 Domain 或 Gradle 模块，不让 adapters 依赖 Enrichment/API。API 的 SegmentAnalysisLog 仅将已验证 request/result 映射到该中立记录并调用 Store；文件、锁、去重、权限、JSON 编码和专用 console 全部属于 FileSegmentAnalysisStore，组合根选择路径并装配具体实现。默认路径定位留在组合根，不进入领域或文件 Store；现有开发授权不自动扩展至 Docker，发行模式必须装配 disabled Store，后续显式启用才写入。
+
+Record 及 ranges 防御性复制，范围要求 UTF-16 半开、升序不重叠且在英文内，禁止切开代理对；身份与版本有效。Store 同步写入并 force 成功后才更新去重集合和专用 console；重复 key、重启恢复、旧尾补全不重写、失败不阻断提示保持。空列表和 disabled Store 不初始化文件；损坏 JSON、重复 ID、未完成尾行及符号链接拒绝，不删除、不截断或自动修复。JSON 编码使用现有 BOM 锁定的 Jackson core；不引入平台外发、异步队列或额外资料采集。文件故障测试只用合成临时文件。

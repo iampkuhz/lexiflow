@@ -98,4 +98,6 @@ org.springframework:spring-tx:7.0.9=runtimeSmokePmdAuxClasspath,runtimeSmokeRunt
 org.xmlresolver:xmlresolver:5.2.2=checkstyle
 org.xmlresolver:xmlresolver:5.3.3=pmd
 org.yaml:snakeyaml:2.6=runtimeSmokePmdAuxClasspath,runtimeSmokeRuntimeClasspath
+tools.jackson.core:jackson-core:3.1.5=runtimeSmokePmdAuxClasspath,runtimeSmokeRuntimeClasspath
+tools.jackson:jackson-bom:3.1.5=runtimeSmokePmdAuxClasspath,runtimeSmokeRuntimeClasspath
 empty=annotationProcessor,compileClasspath,mainPmdAuxClasspath,runtimeClasspath,runtimeSmokeAnnotationProcessor,testAnnotationProcessor

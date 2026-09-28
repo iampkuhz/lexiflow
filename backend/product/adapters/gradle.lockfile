@@ -103,4 +103,6 @@ org.springframework:spring-tx:7.0.9=compileClasspath,mainPmdAuxClasspath,runtime
 org.xmlresolver:xmlresolver:5.2.2=checkstyle
 org.xmlresolver:xmlresolver:5.3.3=pmd
 org.yaml:snakeyaml:2.6=compileClasspath,mainPmdAuxClasspath,runtimeClasspath,testCompileClasspath,testPmdAuxClasspath,testRuntimeClasspath
+tools.jackson.core:jackson-core:3.1.5=compileClasspath,mainPmdAuxClasspath,runtimeClasspath,testCompileClasspath,testPmdAuxClasspath,testRuntimeClasspath
+tools.jackson:jackson-bom:3.1.5=compileClasspath,mainPmdAuxClasspath,runtimeClasspath,testCompileClasspath,testPmdAuxClasspath,testRuntimeClasspath
 empty=annotationProcessor,testAnnotationProcessor
