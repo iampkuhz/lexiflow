@@ -7,6 +7,7 @@ import io.lexiflow.enrichment.domain.model.HintState;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
+import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -19,14 +20,6 @@ import java.util.regex.Pattern;
 /** 根据公开词汇材料生成确定性提示，绝不调用模型或建立伪造的 pending 工作。 */
 public final class DeterministicHintPolicy {
   private static final int MAX_GLOSS_CODE_POINTS = 24;
-  private static final Set<String> LOW_INFORMATION_STARTS = Set.of("a", "an", "the", "not");
-  private static final Set<String> INCOMPLETE_ENDS =
-      Set.of("to", "of", "for", "by", "with", "in", "on", "at", "from");
-  private static final Set<String> TIME_ADVERBS = Set.of("today", "yesterday", "tomorrow");
-  private static final Set<String> FUNCTION_ONLY_TOKENS =
-      Set.of(
-          "a", "an", "the", "not", "to", "be", "even", "when", "if", "as", "at", "in", "on", "for",
-          "of", "by", "and", "or", "but");
   private static final Comparator<CandidateMatch> MATCH_PRIORITY =
       Comparator.comparingInt(CandidateMatch::valueTier)
           .reversed()
@@ -148,14 +141,8 @@ public final class DeterministicHintPolicy {
 
   /** 排除会把冠词、否定或悬空介词误当完整词组的来源短语。 */
   private static boolean lowInformationPhrase(LexiconHintCandidate candidate) {
-    if (candidate.entryKind() != LexiconEntryKind.PHRASE) return false;
-    var tokens = candidate.normalizedForm().split(" ");
-    var first = tokens[0];
-    var last = tokens[tokens.length - 1];
-    return LOW_INFORMATION_STARTS.contains(first)
-        || INCOMPLETE_ENDS.contains(last)
-        || java.util.Arrays.stream(tokens).allMatch(FUNCTION_ONLY_TOKENS::contains)
-        || (first.equals("on") && TIME_ADVERBS.contains(last));
+    return candidate.entryKind() == LexiconEntryKind.PHRASE
+        && LexiconSurfacePolicy.lowInformationPhrase(candidate.normalizedForm());
   }
 
   private static Set<Range> ambiguousRanges(List<CandidateMatch> matches) {

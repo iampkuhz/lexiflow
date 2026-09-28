@@ -213,7 +213,7 @@ class StardictCsvReaderTest {
                     value
                         .row()
                         .hintPolicyReference()
-                        .contains("oxford-all-words-fixed-and-curated-gloss-first-candidate-v4")));
+                        .contains("deterministic-preparation-all-basic-and-bounded-cleaning-v5")));
 
     Files.writeString(
         file, header() + "\n" + row("sustainability", "n. 绿色", "", "", "17705", "9092", "", ""));
@@ -300,7 +300,7 @@ class StardictCsvReaderTest {
     assertEquals("", rows.getFirst().row().chineseGloss());
     assertEquals(malformed, rows.getFirst().row().sourceGloss());
     assertEquals(
-        "unsafe_default_candidate",
+        "empty_first_candidate",
         io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(
             rows.getFirst().row()));
     assertEquals("可靠的", rows.getLast().row().chineseGloss());
@@ -364,7 +364,45 @@ class StardictCsvReaderTest {
     var exclusion =
         io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(
             record.row());
-    assertEquals("unsafe_default_candidate", exclusion);
+    assertEquals("empty_first_candidate", exclusion);
+  }
+
+  @Test
+  void marksAllBasicPhrasesUsingCompleteSourceSelectionNotFunctionWordsOnly() throws Exception {
+    var file = Files.createTempFile("all-basic-phrase", ".csv");
+    Files.writeString(
+        file,
+        header()
+            + "\n"
+            + row("give", "给予", "", "", "", "", "", "1")
+            + "\n"
+            + row("up", "向上", "", "", "", "", "", "1")
+            + "\n"
+            + row("give up", "放弃", "", "", "", "", "", "")
+            + "\n"
+            + row("give quasars", "给予类星体", "", "", "", "", "", ""));
+    var rows = new ArrayList<StardictCsvReader.SourceRecord>();
+    new StardictCsvReader().read(file, rows::add);
+    var phrase =
+        rows.stream()
+            .map(StardictCsvReader.SourceRecord::row)
+            .filter(value -> value.lemma().equals("give up"))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(phrase.allBasicPhrase());
+    assertFalse(phrase.basicVocabulary());
+    assertEquals(
+        "all_basic_phrase",
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(phrase));
+    var mixed =
+        rows.stream()
+            .map(StardictCsvReader.SourceRecord::row)
+            .filter(value -> value.lemma().equals("give quasars"))
+            .findFirst()
+            .orElseThrow();
+    assertFalse(mixed.allBasicPhrase());
+    assertFalse(rows.getFirst().row().allBasicPhrase());
+    Files.delete(file);
   }
 
   private static String header() {

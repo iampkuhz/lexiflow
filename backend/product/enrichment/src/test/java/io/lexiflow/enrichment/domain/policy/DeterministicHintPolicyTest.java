@@ -17,6 +17,20 @@ class DeterministicHintPolicyTest {
   private final DeterministicHintPolicy policy = new DeterministicHintPolicy();
 
   @Test
+  void sharedLowInformationPolicyAllowsTwoContentWordsButStillChecksGlossAndPublishedBlock() {
+    assertEquals(
+        HintState.READY,
+        evaluate("the silent majority", List.of(phrase("the silent majority", "沉默的大多数"))).state());
+    assertEquals(
+        HintState.NO_PENDING,
+        evaluate("the majority", List.of(phrase("the majority", "大多数"))).state());
+    assertEquals(
+        HintState.NO_PENDING,
+        evaluate("the silent majority", List.of(phrase("the silent majority", "在…之中"))).state());
+    assertEquals(HintState.NO_PENDING, evaluate("give up", List.of(block("give up"))).state());
+  }
+
+  @Test
   void displaysOnlySafeHintUsingProvidedGlossAndSense() {
     var good = candidate("reliable", "可靠的");
     var result = evaluate("A reliable result", List.of(good));

@@ -333,7 +333,9 @@ class PostgresLexiconRepositoryIntegrationTest {
                       lemma.equals("false") ? 2370L : null,
                       null,
                       List.of(),
-                      true));
+                      true,
+                      false,
+                      false));
             }
             words.add(row("specialist", "专家", List.of(), List.of()));
             repository.publish(new LexiconImportRequest(words, metadata('b')));
@@ -380,6 +382,8 @@ class PostgresLexiconRepositoryIntegrationTest {
         null,
         null,
         List.of(),
+        false,
+        false,
         false);
   }
 
@@ -397,6 +401,112 @@ class PostgresLexiconRepositoryIntegrationTest {
         source,
         List.of(source),
         true);
+  }
+
+  @Test
+  void cleaningDecisionIsIdenticalForListAndStreamingWithSourceAndAliasProtection()
+      throws Exception {
+    for (boolean streaming : List.of(false, true)) {
+      inInitializedSchema(
+          jdbcUrl -> {
+            try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+              var repository = persistence.repository();
+              var records =
+                  List.of(
+                      preparedRow("synthetic-organ", "[医]甲[床]瘤", "甲[床]瘤", false, false, List.of()),
+                      preparedRow("give up", "放弃", "放弃", true, false, List.of()),
+                      preparedRow(
+                          "one distant stellar system",
+                          "星系",
+                          "星系",
+                          false,
+                          false,
+                          List.of("quasar")),
+                      preparedRow("curated-term", "原始释义(说明)", "指定短释", false, true, List.of()));
+              var metadata =
+                  new LexiconImportMetadata(
+                      "d".repeat(64), "ecdict-stardict", "MIT", Instant.EPOCH);
+              if (streaming)
+                repository.publishStreaming(
+                    metadata,
+                    records.size(),
+                    records.size(),
+                    consumer -> records.forEach(consumer));
+              else repository.publish(new LexiconImportRequest(records, metadata));
+              assertEquals(
+                  "甲床瘤",
+                  scalar(
+                      jdbcUrl,
+                      "SELECT prepared_gloss FROM lexicon_prepared_entry WHERE lemma='synthetic-organ'"));
+              assertEquals(
+                  "[医]甲[床]瘤",
+                  scalar(
+                      jdbcUrl,
+                      "SELECT source_gloss FROM lexicon_prepared_entry WHERE lemma='synthetic-organ'"));
+              assertEquals(
+                  "all_basic_phrase",
+                  scalar(
+                      jdbcUrl,
+                      "SELECT exclusion_reason FROM lexicon_prepared_entry WHERE lemma='give up'"));
+              assertEquals(
+                  "BLOCK",
+                  scalar(
+                      jdbcUrl,
+                      "SELECT final_action FROM lexicon_hint_lookup WHERE normalized_form='give up'"));
+              assertEquals(
+                  "星系",
+                  scalar(
+                      jdbcUrl,
+                      "SELECT final_gloss FROM lexicon_hint_lookup WHERE normalized_form='quasar'"));
+              assertEquals(
+                  "BLOCK",
+                  scalar(
+                      jdbcUrl,
+                      "SELECT final_action FROM lexicon_hint_lookup WHERE normalized_form='one distant stellar system'"));
+              assertEquals(
+                  "指定短释",
+                  scalar(
+                      jdbcUrl,
+                      "SELECT final_gloss FROM lexicon_hint_lookup WHERE normalized_form='curated-term'"));
+              assertEquals(
+                  "0",
+                  scalar(
+                      jdbcUrl,
+                      "SELECT count(*)::text FROM lexicon_hint_lookup h JOIN lexicon_prepared_entry p USING (lexicon_entry_id) "
+                          + "WHERE h.final_action='HINT' AND h.final_gloss IS DISTINCT FROM p.prepared_gloss"));
+            }
+          });
+    }
+  }
+
+  private static LexiconImportRow preparedRow(
+      String lemma,
+      String raw,
+      String candidate,
+      boolean allBasic,
+      boolean curated,
+      List<String> aliases) {
+    var source = new SourceReference("ecdict-stardict", "MIT", "fixture-" + lemma);
+    return new LexiconImportRow(
+        lemma,
+        candidate,
+        "",
+        aliases,
+        List.of(),
+        new LexiconPriority(0, 0, 100),
+        source,
+        source,
+        List.of(),
+        false,
+        false,
+        "cleaning-fixture",
+        raw,
+        null,
+        null,
+        List.of(),
+        false,
+        allBasic,
+        curated);
   }
 
   private static LexiconImportMetadata metadata(char digest) {

@@ -106,6 +106,8 @@ final class LexiconCsvReader {
         null,
         null,
         List.of(),
+        false,
+        false,
         false);
   }
 

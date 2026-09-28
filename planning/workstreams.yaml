@@ -948,6 +948,118 @@ workstreams:
         - eng.repository.policy
         dependencies: []
         depends_on: []
+      - id: LF-TSK-LEX-1101
+        title: 共享 StarDict 首义解析与安全校验
+        priority: P0
+        phase: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/analyze-null-gloss-preprocessing/implementation.md
+        estimated_minutes: 30
+        owner: LF-WS-LEX
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/validation/StardictGlossPreparation.java
+        - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/importing/validation/StardictGlossPreparationTest.java
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - README.md
+        - harness/**
+        - docs/roadmap/**
+        expected_output: 首义/多义/字符安全公共纯函数及正反例测试
+        acceptance_criteria:
+        - 现有五分隔符、全段括号配对、空首义不补位完全保持
+        - safeGloss 使用code point上限与Han/letterDigit合同
+        acceptance_evidence:
+        - 合成及来源样本正反例、冻结输入测试结果、互斥计数与独立验收收据；状态只写本机状态页
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test --tests "*StardictGloss*Test"
+        required_check_ids:
+        - eng.backend.delivery
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies: []
+        depends_on: []
+        deliverable: 首义/多义/字符安全公共纯函数及正反例测试
+      - id: LF-TSK-LEX-1102
+        title: 合并确定性来源清洗与正反例
+        priority: P0
+        phase: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/analyze-null-gloss-preprocessing/implementation.md
+        estimated_minutes: 50
+        owner: LF-WS-LEX
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/validation/StardictGlossCleaner.java
+        - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/importing/validation/StardictGlossCleanerTest.java
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - README.md
+        - harness/**
+        - docs/roadmap/**
+        expected_output: 合并清洗Result及入选步骤正反例/组合保护测试
+        acceptance_criteria:
+        - 严格遵守 implementation.md 1.4冻结接口和步骤
+        - 每场景至少一正一反，保留原source，保护罗马数字及短技术符号
+        - 不使用AI、数据库、网络、外部词性库
+        acceptance_evidence:
+        - 合成及来源样本正反例、冻结输入测试结果、互斥计数与独立验收收据；状态只写本机状态页
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test --tests "*StardictGloss*Test"
+        required_check_ids:
+        - eng.backend.delivery
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies: []
+        depends_on: []
+        deliverable: 合并清洗Result及入选步骤正反例/组合保护测试
+      - id: LF-TSK-LEX-1103
+        title: 接入准备结果与基础词组合过滤并回放验收
+        priority: P0
+        phase: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/analyze-null-gloss-preprocessing/implementation.md
+        estimated_minutes: 90
+        owner: LF-WS-LEX
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - backend/product/lexicon/**
+        - backend/product/adapters/**
+        - backend/product/enrichment/**
+        - backend/verification/integration/**
+        - infra/postgres/schema.sql
+        - planning/workstreams.yaml
+        - openspec/changes/analyze-null-gloss-preprocessing/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - README.md
+        - harness/**
+        - docs/roadmap/**
+        expected_output: 准备结果用于 sense/prepared/lookup；共享低信息合同、独立 all_basic_phrase、真实基线净收益和全量回归证据。
+        acceptance_criteria:
+        - 每种资格/过滤场景都有正反例；原始来源、首义、curated 和 alias 身份不被覆盖。
+        - 新合并规则与 all_basic_phrase 逐 ID 只读重放，计数互斥守恒；可选优化不足1000不启用。
+        - 完成产品导入集成测试、同输入全仓验证和独立审查；不修改真实产品数据。
+        acceptance_evidence:
+        - 合成及来源样本正反例、冻结输入测试结果、互斥计数与独立验收收据；状态只写本机状态页
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend check
+        required_check_ids:
+        - eng.backend.delivery
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies: []
+        depends_on: []
+        deliverable: 准备结果用于 sense/prepared/lookup；共享低信息合同、独立 all_basic_phrase、真实基线净收益和全量回归证据。
   - id: LF-EP-LEX-200
     name: 第二阶段提示处理主线
     capabilities:

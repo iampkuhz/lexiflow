@@ -5,11 +5,11 @@ import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
-import io.lexiflow.lexicon.application.importing.policy.HintPreparation;
 import io.lexiflow.lexicon.application.port.LexiconRepository;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
+import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.sql.PreparedStatement;
@@ -189,8 +189,8 @@ final class DefaultLexiconRepository implements LexiconRepository {
       for (var planned : rows) {
         var entry = planned.entry();
         var row = planned.row();
-        var exclusion = HintPreparation.exclusionReason(row);
-        var gloss = exclusion == null ? row.chineseGloss() : null;
+        var exclusion = planned.prepared().exclusionReason();
+        var gloss = planned.prepared().gloss();
         var action = gloss == null ? LexiconHintAction.BLOCK : LexiconHintAction.HINT;
         prepared.add(
             new Object[] {
@@ -249,6 +249,10 @@ final class DefaultLexiconRepository implements LexiconRepository {
       LexiconHintAction action,
       String gloss) {
     var entry = planned.entry();
+    if (!LexiconSurfacePolicy.withinQueryWindow(form)) {
+      action = LexiconHintAction.BLOCK;
+      gloss = null;
+    }
     var priority = entry.priority();
     var cachePriority =
         action == LexiconHintAction.BLOCK && planned.row().basicVocabulary()

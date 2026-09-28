@@ -26,6 +26,8 @@ import java.util.Objects;
  * @param sourceFrqRank 来源的有效 FRQ 正排名，缺失时为空。
  * @param sourceComplexTags 来源复杂词表的规范标签集合。
  * @param sourceOxfordBasic 来源 Oxford 基础词原始标记。
+ * @param allBasicPhrase 短语所有词元均在已冻结基础词集合中的结果，不复用单词标记。
+ * @param curatedGloss 来源适配器已验证的人工指定短释，清洗时不得覆盖。
  */
 public record LexiconImportRow(
     String lemma,
@@ -44,7 +46,9 @@ public record LexiconImportRow(
     Long sourceBncRank,
     Long sourceFrqRank,
     List<String> sourceComplexTags,
-    boolean sourceOxfordBasic) {
+    boolean sourceOxfordBasic,
+    boolean allBasicPhrase,
+    boolean curatedGloss) {
   /** 构造不可变的导入记录。 */
   public LexiconImportRow {
     lemma = required(lemma, "lemma");
@@ -72,7 +76,10 @@ public record LexiconImportRow(
       throw new IllegalArgumentException("invalid FRQ rank");
     if (basicVocabulary && lemma.contains(" "))
       throw new IllegalArgumentException("basic exclusion must name a word, not a phrase");
-    prewarmEligible = prewarmEligible && !basicVocabulary;
+    if (allBasicPhrase && !lemma.contains(" ")) {
+      throw new IllegalArgumentException("all-basic exclusion requires a phrase");
+    }
+    prewarmEligible = prewarmEligible && !basicVocabulary && !allBasicPhrase;
   }
 
   /** 通用规范输入没有 StarDict 的原始频率及标签证据。 */
@@ -106,6 +113,8 @@ public record LexiconImportRow(
         null,
         null,
         List.of(),
+        false,
+        false,
         false);
   }
 
@@ -138,6 +147,8 @@ public record LexiconImportRow(
         null,
         null,
         List.of(),
+        false,
+        false,
         false);
   }
 

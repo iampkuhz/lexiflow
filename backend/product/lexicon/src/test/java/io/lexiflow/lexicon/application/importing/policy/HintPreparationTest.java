@@ -59,7 +59,9 @@ class HintPreparationTest {
         rank,
         null,
         List.of(),
-        true);
+        true,
+        false,
+        false);
   }
 
   private static LexiconImportRow row(String lemma, String gloss) {

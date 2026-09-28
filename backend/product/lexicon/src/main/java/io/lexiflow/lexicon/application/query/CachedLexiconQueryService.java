@@ -4,18 +4,17 @@ import io.lexiflow.lexicon.application.port.LexiconRepository;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import io.lexiflow.lexicon.domain.port.LexiconCatalog;
+import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
 /** 只查已发布的准确词形；固定正负缓存与有界动态缓存都可重建。 */
 public final class CachedLexiconQueryService implements LexiconCatalog {
-  private static final int MAX_PHRASE_TOKENS = 3;
   private final LexiconRepository repository;
   private final int cacheCapacity;
   private final int positivePrewarmLimit;
@@ -136,15 +135,12 @@ public final class CachedLexiconQueryService implements LexiconCatalog {
   }
 
   private static List<String> candidateForms(String caption) {
-    var normalized =
-        caption.toLowerCase(Locale.ROOT).replaceAll("[^\\p{IsAlphabetic}']+", " ").trim();
-    if (normalized.isEmpty()) return List.of();
-    var tokens = normalized.split(" +");
+    var tokens = LexiconSurfacePolicy.queryTokens(caption).toArray(String[]::new);
     var forms = new LinkedHashSet<String>();
     for (var start = 0; start < tokens.length; start++) {
       var phrase = new StringBuilder();
       for (var length = 1;
-          length <= MAX_PHRASE_TOKENS && start + length <= tokens.length;
+          length <= LexiconSurfacePolicy.MAX_PHRASE_TOKENS && start + length <= tokens.length;
           length++) {
         if (length > 1) phrase.append(' ');
         phrase.append(tokens[start + length - 1]);

@@ -1,6 +1,8 @@
 package io.lexiflow.lexicon.application.importing;
 
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
+import io.lexiflow.lexicon.application.importing.model.PreparedHint;
+import io.lexiflow.lexicon.application.importing.policy.HintPreparation;
 import io.lexiflow.lexicon.domain.model.LexiconAlias;
 import io.lexiflow.lexicon.domain.model.LexiconEntry;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
@@ -107,6 +109,7 @@ public final class LexiconImportPlan {
    */
   public static PlannedEntry fromRow(
       LexiconImportRow row, long lexiconVersion, String sourceDigest, Instant acquiredAt) {
+    var prepared = HintPreparation.prepare(row);
     var entry =
         new LexiconEntry(
             stableId("entry:en:" + row.lemma()),
@@ -117,8 +120,10 @@ public final class LexiconImportPlan {
             List.of(
                 new LexiconSense(
                     stableId("sense:" + lexiconVersion + ":" + row.lemma()),
-                    // 空首项仍保留有来源的词条，但不能构造虚假的空义项；发布资格由 row 决定。
-                    row.chineseGloss().isBlank() ? row.sourceGloss() : row.chineseGloss(),
+                    // 空首项仍保留有来源的词条，但不能构造虚假的空义项；发布资格由同一次 prepared 决策确定。
+                    prepared.gloss() != null
+                        ? prepared.gloss()
+                        : row.chineseGloss().isBlank() ? row.sourceGloss() : row.chineseGloss(),
                     row.definition(),
                     row.dictionary().recordReference())),
             row.aliases().stream().map(LexiconAlias::new).toList(),
@@ -129,7 +134,7 @@ public final class LexiconImportPlan {
                 sourceDigest,
                 acquiredAt),
             row.priority());
-    return new PlannedEntry(entry, row);
+    return new PlannedEntry(entry, row, prepared);
   }
 
   private static UUID stableId(String value) {
@@ -185,6 +190,7 @@ public final class LexiconImportPlan {
    *
    * @param entry 含义：完整领域词条。取值范围：由方法调用前置条件限定。
    * @param row 含义：对应的来源行。取值范围：由方法调用前置条件限定。
+   * @param prepared 同一来源行的确定性准备结果，供释义与查询投影一致使用。
    */
-  public record PlannedEntry(LexiconEntry entry, LexiconImportRow row) {}
+  public record PlannedEntry(LexiconEntry entry, LexiconImportRow row, PreparedHint prepared) {}
 }
