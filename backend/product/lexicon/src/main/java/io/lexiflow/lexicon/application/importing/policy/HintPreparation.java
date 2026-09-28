@@ -46,32 +46,39 @@ public final class HintPreparation {
     if (stardict && !hasQueryableSurface(row))
       return excluded(row, "outside_query_window", List.of());
     if (row.basicVocabulary()) return excluded(row, "basic_vocabulary", List.of());
-    if (row.allBasicPhrase()) return excluded(row, "all_basic_phrase", List.of());
-    if (LexiconSurfacePolicy.lowInformationPhrase(row.lemma()))
-      return excluded(row, "low_information_phrase", List.of());
-    if (!stardict || row.curatedGloss()) {
-      return safeGloss(row.chineseGloss())
-          ? ready(
-              row, row.chineseGloss(), row.curatedGloss() ? "curated" : "existing_safe", List.of())
-          : excluded(row, "unsafe_default_candidate", List.of());
+    boolean trustedCurated = stardict && row.curatedGloss();
+    PreparedHint prepared;
+    if (!stardict || trustedCurated) {
+      if (!safeGloss(row.chineseGloss()))
+        return excluded(row, "unsafe_default_candidate", List.of());
+      prepared =
+          ready(row, row.chineseGloss(), trustedCurated ? "curated" : "existing_safe", List.of());
+    } else {
+      if (rareExpansion(row)) return excluded(row, "english_heavy_expansion", List.of());
+      if (!HAN.matcher(row.sourceGloss()).find()) return excluded(row, "no_han_source", List.of());
+      String first = StardictGlossPreparation.firstCandidate(row.sourceGloss());
+      if (withoutFrequencyProtection(row)
+          && CHEMICAL_CHARS.matcher(first).find()
+          && CHEMICAL_NOTATION.matcher(first).find())
+        return excluded(row, "specialist_notation", List.of());
+      var cleaned = StardictGlossCleaner.clean(row.lemma(), row.sourceGloss());
+      if (safeGloss(cleaned.candidate())) {
+        prepared = ready(row, cleaned.candidate(), cleaned.decisiveRule(), cleaned.matchedRules());
+      } else {
+        String reason =
+            cleaned.candidate().isEmpty()
+                ? "empty_first_candidate"
+                : !HAN.matcher(cleaned.candidate()).find()
+                    ? "no_han_first_candidate"
+                    : "unsafe_default_candidate";
+        return excluded(row, reason, cleaned.matchedRules());
+      }
     }
-    if (rareExpansion(row)) return excluded(row, "english_heavy_expansion", List.of());
-    if (!HAN.matcher(row.sourceGloss()).find()) return excluded(row, "no_han_source", List.of());
-    String first = StardictGlossPreparation.firstCandidate(row.sourceGloss());
-    if (withoutFrequencyProtection(row)
-        && CHEMICAL_CHARS.matcher(first).find()
-        && CHEMICAL_NOTATION.matcher(first).find())
-      return excluded(row, "specialist_notation", List.of());
-    var cleaned = StardictGlossCleaner.clean(row.lemma(), row.sourceGloss());
-    if (safeGloss(cleaned.candidate()))
-      return ready(row, cleaned.candidate(), cleaned.decisiveRule(), cleaned.matchedRules());
-    String reason =
-        cleaned.candidate().isEmpty()
-            ? "empty_first_candidate"
-            : !HAN.matcher(cleaned.candidate()).find()
-                ? "no_han_first_candidate"
-                : "unsafe_default_candidate";
-    return excluded(row, reason, cleaned.matchedRules());
+    if (!trustedCurated && row.allBasicPhrase())
+      return excluded(row, "all_basic_phrase", prepared.matchedRules());
+    if (!trustedCurated && LexiconSurfacePolicy.lowInformationPhrase(row.lemma()))
+      return excluded(row, "low_information_phrase", prepared.matchedRules());
+    return prepared;
   }
 
   private static boolean hasQueryableSurface(LexiconImportRow row) {

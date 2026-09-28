@@ -54,7 +54,31 @@ final class StardictCsvReader {
   }
 
   static final String PREPARATION_POLICY =
-      "deterministic-preparation-all-basic-and-bounded-cleaning-v5";
+      "deterministic-preparation-all-basic-and-bounded-cleaning-v6;curated_sha256="
+          + curatedGlossDigest();
+
+  private static String curatedGlossDigest() {
+    try {
+      var sha = java.security.MessageDigest.getInstance("SHA-256");
+      CURATED_GLOSSES.entrySet().stream()
+          .sorted(Map.Entry.comparingByKey())
+          .forEach(
+              entry -> {
+                updateField(sha, entry.getKey());
+                updateField(sha, entry.getValue().sourceExpression());
+                updateField(sha, entry.getValue().displayGloss());
+              });
+      return java.util.HexFormat.of().formatHex(sha.digest());
+    } catch (java.security.NoSuchAlgorithmException exception) {
+      throw new IllegalStateException(exception);
+    }
+  }
+
+  private static void updateField(java.security.MessageDigest digest, String value) {
+    var bytes = value.getBytes(StandardCharsets.UTF_8);
+    digest.update(java.nio.ByteBuffer.allocate(Integer.BYTES).putInt(bytes.length).array());
+    digest.update(bytes);
+  }
 
   /** 预扫描收集来源明确标记的全部 Oxford 单词；缺排名不改变基础资格。 */
   BasicSelection selectBasicVocabulary(Path input) throws IOException {

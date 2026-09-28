@@ -213,10 +213,45 @@ class StardictCsvReaderTest {
                     value
                         .row()
                         .hintPolicyReference()
-                        .contains("deterministic-preparation-all-basic-and-bounded-cleaning-v5")));
+                        .contains(StardictCsvReader.PREPARATION_POLICY)));
 
     Files.writeString(
         file, header() + "\n" + row("sustainability", "n. 绿色", "", "", "17705", "9092", "", ""));
+    assertThrows(
+        IllegalArgumentException.class, () -> new StardictCsvReader().read(file, ignored -> {}));
+  }
+
+  @Test
+  void publishesTrustedAllBasicPhraseFromStreamAndRejectsChangedCuratedSource() throws Exception {
+    var file = Files.createTempFile("curated-all-basic", ".csv");
+    Files.writeString(
+        file,
+        header()
+            + "\n"
+            + row("stream", "流", "", "", "", "", "", "1")
+            + "\n"
+            + row("data", "数据", "", "", "", "", "", "1")
+            + "\n"
+            + row("stream of data", "un. 数据流", "", "", "", "", "", ""));
+    var rows = new ArrayList<StardictCsvReader.SourceRecord>();
+    new StardictCsvReader().read(file, rows::add);
+    var phrase =
+        rows.stream()
+            .map(StardictCsvReader.SourceRecord::row)
+            .filter(value -> value.lemma().equals("stream of data"))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(phrase.allBasicPhrase());
+    assertTrue(phrase.curatedGloss());
+    var prepared = io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(phrase);
+    assertEquals("数据流", prepared.gloss());
+    assertEquals("curated", prepared.decisiveRule());
+    assertEquals(
+        "6b5efcba7b09e2e81366c25812f5a2e05f8b0bc1fad220022183ddb7b8fb8a2d",
+        StardictCsvReader.PREPARATION_POLICY.split("curated_sha256=", 2)[1]);
+
+    Files.writeString(
+        file, header() + "\n" + row("stream of data", "un. 数据之流", "", "", "", "", "", ""));
     assertThrows(
         IllegalArgumentException.class, () -> new StardictCsvReader().read(file, ignored -> {}));
   }
