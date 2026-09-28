@@ -17,6 +17,7 @@ final class VersionedLexiconCache {
   private final Map<String, List<LexiconHintCandidate>> pinned = new LinkedHashMap<>();
   private final Map<String, List<LexiconHintCandidate>> dynamic;
   private long cachedVersion = -1;
+  private WarmupStatus status = new WarmupStatus(-1, 0, 0, 0, false);
 
   VersionedLexiconCache(int capacity, int positivePrewarmLimit, int negativePrewarmLimit) {
     if (capacity < 1
@@ -38,20 +39,56 @@ final class VersionedLexiconCache {
     pinned.clear();
     dynamic.clear();
     cachedVersion = version;
-    var reads = 0;
+    int reads = 0;
+    boolean degraded = false;
     if (version > 0) {
-      reads += prewarm(repository, version, LexiconHintAction.HINT, positivePrewarmLimit);
-      reads += prewarm(repository, version, LexiconHintAction.BLOCK, negativePrewarmLimit);
+      if (positivePrewarmLimit > 0) {
+        reads++;
+        try {
+          prewarm(repository, version, LexiconHintAction.HINT, positivePrewarmLimit);
+        } catch (RuntimeException failure) {
+          degraded = true;
+        }
+      }
+      if (negativePrewarmLimit > 0) {
+        reads++;
+        try {
+          prewarm(repository, version, LexiconHintAction.BLOCK, negativePrewarmLimit);
+        } catch (RuntimeException failure) {
+          degraded = true;
+        }
+      }
     }
+    int positive = 0;
+    int negative = 0;
+    for (var candidates : pinned.values()) {
+      if (candidates.stream().anyMatch(c -> c.finalAction() == LexiconHintAction.HINT)) positive++;
+      else negative++;
+    }
+    status = new WarmupStatus(version, positive, negative, reads, degraded);
     return new Refresh(version, reads);
   }
 
-  private int prewarm(
+  WarmupStatus status() {
+    return status;
+  }
+
+  private void prewarm(
       LexiconReadRepository repository, long version, LexiconHintAction action, int limit) {
-    if (limit == 0) return 0;
-    var grouped = groupByForm(repository.findPrewarmForms(version, action, limit));
+    var rows = List.copyOf(repository.findPrewarmForms(version, action, limit));
+    var grouped = groupByForm(rows);
+    if (grouped.size() > limit) throw new IllegalStateException("prewarm budget exceeded");
+    for (var candidate : rows) {
+      if (candidate.lexiconVersion() != version
+          || candidate.normalizedForm() == null
+          || candidate.normalizedForm().isBlank())
+        throw new IllegalStateException("invalid prewarm candidate");
+    }
+    for (var group : grouped.entrySet()) {
+      boolean selected = group.getValue().stream().anyMatch(c -> c.finalAction() == action);
+      if (!selected) throw new IllegalStateException("invalid prewarm action");
+    }
     for (var group : grouped.entrySet()) pin(group.getKey(), group.getValue());
-    return 1;
   }
 
   static Map<String, List<LexiconHintCandidate>> groupByForm(
@@ -101,4 +138,16 @@ final class VersionedLexiconCache {
    * @param prewarmReads 含义：本次刷新执行的预热读取批次数。取值范围：非负整数。
    */
   record Refresh(long version, int prewarmReads) {}
+
+  /**
+   * 缓存内部的版本预热状态。
+   *
+   * @param version 绑定版本。
+   * @param positiveKeys 实际固定正向键数。
+   * @param negativeKeys 实际固定负向键数。
+   * @param attempts 实际预热读取次数。
+   * @param degraded 是否有失败批次。
+   */
+  record WarmupStatus(
+      long version, int positiveKeys, int negativeKeys, int attempts, boolean degraded) {}
 }

@@ -31,6 +31,43 @@ public final class CachedLexiconQueryService implements LexiconCatalog {
   }
 
   /**
+   * 返回上一次显式或版本切换预热的只读摘要。
+   *
+   * @return 已知版本的实际预热状态。
+   */
+  public synchronized WarmupStatus warmupStatus() {
+    var status = cache.status();
+    return new WarmupStatus(
+        status.version(),
+        status.positiveKeys(),
+        status.negativeKeys(),
+        status.attempts(),
+        status.degraded());
+  }
+
+  /**
+   * 显式读取发布版本并按需刷新，不对相同版本重复预热。
+   *
+   * @return 刷新后的实际预热状态。
+   */
+  public synchronized WarmupStatus refresh() {
+    cache.refresh(repository);
+    return warmupStatus();
+  }
+
+  /**
+   * 单次版本预热的只读状态。
+   *
+   * @param version 绑定的发布版本，未知为 -1。
+   * @param positiveKeys 实际固定正向键数。
+   * @param negativeKeys 实际固定负向键数。
+   * @param attempts 实际发出的预热读取次数。
+   * @param degraded 至少一侧预热失败。
+   */
+  public record WarmupStatus(
+      long version, int positiveKeys, int negativeKeys, int attempts, boolean degraded) {}
+
+  /**
    * 对已规范键精确查询，完整返回本次结果且不受有界缓存淘汰影响。
    *
    * @param normalizedForms 含义：Enrichment 生成的规范键。取值范围：非 null；键非空白、已规范且至多三词。

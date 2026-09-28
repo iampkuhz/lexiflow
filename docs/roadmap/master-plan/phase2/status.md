@@ -30,7 +30,8 @@
 - ENR-2001 v3 已提交 `4c9042b` 并合入 `phase2`；Change `bf3d1c54-a7eb-4189-a33a-e8aa66f4fd5d`、Repository `52ffa365-5691-4921-b95a-be33952a01bb`、validation `3054ae12-0e68-4ee4-9533-12134ddc46f2`、review `3ebf4815-d9c2-49e6-8c0e-2318694ea39c`、check `5726f525-e062-492b-8b0e-8b2bd4425f6b` 均为 PASS；submission `18f263cd-d5be-4e83-9f0d-91d3311fd722`。
 - ENR-2002 v2 已提交 `584701d` 并合入 `phase2`；Change `f159e7ba-c494-472f-a78a-b1925b1d562c`、Repository `a1ff5301-6592-4437-b241-d9bb4d78929c`、validation `6bf40a87-a5b2-4ad2-8672-c68beec3fa16`、review `9bf6880e-b9ba-4502-a863-a3f1e1c4615a`、check `730245df-2789-4928-b80d-70128abba2f9` 均为 PASS；submission `5227ee41-3be1-41cb-bc45-4b829d78b2d0`。验证代理曾提前中断一次，保留该次日志；按既定超时等待后的完整验证通过。
 - 补齐导入/缓存事件的实际接线任务 OBS-2003，并设为主线验收硬依赖；二期现有 37 个 Task，不把仅实现日志适配器当所有节点完成。
-- 当前在 `phase2-13-observability-adapters` 实施 OBS-2002 v2：封闭普通事件、隔离敏感文件 Store 并迁移映射/装配；已补事件矩阵和损坏台账重试回归，正进行完整验收。首轮 Verify 发现 integration runtime 的 Jackson 传递依赖锁缺项，按 Gradle 生成更新并保留失败报告；后续继续调用节点、客户端和发布闭环。
+- OBS-2002 v2 已提交 `3ea85aa` 并合入 `phase2`；Change `72800900-1399-4d33-b325-881bc4641bb5`、Repository `854e5b45-6485-48c1-8b41-0eadbb0bd866`、validation `bccae570-fd57-464e-9982-892e76274552`、review `1659dff2-6566-4b81-84c6-3c6972336d2f`、check `b44ead86-799d-4b39-965d-15360f467581` 均 PASS，submission `1fb7ab07-5819-4aaf-9f3f-cf1c975ec082`；首次依赖锁缺项和后续修复证据均保留。
+- 当前在 `phase2-14-runtime-readiness` 实施 API-2001 v2；发现 preparation_policy 曾写入 sourceId，本批改为真实固定策略标识并拒绝不匹配资料；不修改或重导真实运行库。实现与隔离直接测试已完成，父复核补齐请求触发恢复的实际版本读取/预热计数，正在执行完整交付验证。首轮 Repository Verify 暴露浏览器 smoke 仍依赖隐式 demo；已改显式 demo，并同时断言进程存活及非正式就绪，不降低浏览器提示断言。
 - OpenSpec 与运行记录保留在 ignored 本机目录；共享交接位于路线图与 Catalog。
 
 ## 1.4. 一期与后续边界

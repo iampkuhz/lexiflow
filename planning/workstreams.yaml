@@ -1872,17 +1872,38 @@ workstreams:
         title: 落实启动模式和已发布资料装载
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
-        estimated_minutes: 60
+        estimated_minutes: 90
         owner: LF-WS-API
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
         - backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java
-        - backend/product/api/src/main/resources/**
-        - backend/product/api/src/test/**
+        - backend/product/api/src/main/resources/application.yaml
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/LexiconRuntime.java
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/LexiconNotReadyException.java
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/LexiconHealthIndicator.java
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/RuntimeUnavailableAdvice.java
+        - backend/product/api/src/test/java/io/lexiflow/api/ApiApplicationTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/hints/CaptionHintHttpTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/hints/CaptionHintControllerTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/runtime/LexiconRuntimeTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/runtime/LexiconReadinessHttpTest.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/InvalidPublishedLexiconException.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/query/CachedLexiconQueryService.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/query/VersionedLexiconCache.java
+        - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/query/CachedLexiconQueryServiceTest.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/policy/HintPreparation.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DefaultLexiconRepository.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconRepositoryIntegrationTest.java
+        - backend/verification/integration/src/runtimeSmoke/java/io/lexiflow/integration/SystemRuntimeSmokeTest.java
+        - extension/tests/translation-e2e.mjs
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/design.md
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -1892,17 +1913,26 @@ workstreams:
         acceptance_criteria:
         - 正式配置缺失不静默退回五词演示库；空发布、数据库故障、预热失败均有确定行为。
         - 只装载有界发布资料，不执行导入/重建/模型；英文展示不依赖启动成功。
+        - 默认formal缺Repository/空发布/结构或策略不符时不可就绪，不静默demo；显式demo只允许内置词库并明确非正式就绪。
+        - 启动只做只读发布校验与有界预热；部分预热故障不阻断仍可用查询，版本变更清正负缓存，失败预热不得触发同版本无界重试。
+        - LexiconRuntime唯一持有运行状态；实际只读探测和查询可恢复，启动事件一次，依赖故障/恢复只在状态转换输出固定事件，不输出原异常。
+        - Actuator liveness与词库readiness分离；无发布资料进程仍可活，实际查询失败映射无敏感内容的503；不增加轮询任务或导入/模型调用。
+        - publishedVersion在单次SQL检查观看投影必需列和非空发布元数据/准备策略；发布写入真实固定准备策略而非sourceId，错误策略拒绝观看，显式完整替换不因旧策略卡死。
+        - 合成API状态/HTTP测试、有界预热测试、隔离PostgreSQL缺列/错策略测试以及真实bootJar空库存活但不可就绪证据齐备。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
-        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :api:test
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :api:test
+          :adapters:postgresIntegrationTest :integration-tests:runtimeSmoke
         required_check_ids:
         - eng.backend.delivery
+        - eng.extension.quality
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
         dependencies:
         - LF-TSK-OPS-2002
         - LF-TSK-ENR-2002
+        - LF-TSK-OBS-2002
         depends_on:
         - task_id: LF-TSK-OPS-2002
           type: hard
@@ -1910,6 +1940,11 @@ workstreams:
           required_change_version: 2.0.0
           required_result: PASS
         - task_id: LF-TSK-ENR-2002
+          type: hard
+          required_task_version: 2
+          required_change_version: 2.0.0
+          required_result: PASS
+        - task_id: LF-TSK-OBS-2002
           type: hard
           required_task_version: 2
           required_change_version: 2.0.0
@@ -1953,8 +1988,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-API-2001
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         - task_id: LF-TSK-OBS-2002
           type: hard
@@ -2485,8 +2520,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-API-2001
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         - task_id: LF-TSK-OPS-2002
           type: hard

@@ -9,7 +9,13 @@ spring:
   threads:
     virtual:
       enabled: true
+logging:
+  level:
+    com.zaxxer.hikari: OFF
 management:
+  health:
+    db:
+      enabled: false
   endpoints:
     web:
       exposure:
@@ -18,3 +24,7 @@ management:
     health:
       probes:
         enabled: true
+      group:
+        readiness:
+          include: readinessState,customLexicon
+          show-details: always
