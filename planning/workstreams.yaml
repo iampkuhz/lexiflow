@@ -1708,18 +1708,24 @@ workstreams:
         title: 分离原文位置匹配与发布候选资格检查
         priority: P0
         phase: P2
-        task_version: 2
-        change_version: 2.0.0
+        task_version: 3
+        change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         owner: LF-WS-ENR
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
         - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/domain/policy/DeterministicHintPolicy.java
         - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/domain/policy/CandidateMatcher.java
         - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/domain/policy/PublishedCandidateEligibility.java
-        - backend/product/enrichment/src/test/**
+        - backend/product/enrichment/src/test/java/io/lexiflow/enrichment/domain/policy/DeterministicHintPolicyTest.java
+        - backend/product/enrichment/src/test/java/io/lexiflow/enrichment/domain/policy/CandidateMatcherTest.java
+        - backend/product/enrichment/src/test/java/io/lexiflow/enrichment/domain/policy/PublishedCandidateEligibilityTest.java
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/design.md
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -1730,6 +1736,8 @@ workstreams:
         - 位置匹配独立处理词边界、重复出现、标点和 UTF-16 范围；不重复实现已归 Enrichment 应用层的查询键枚举。
         - 只消费已发布默认义和动作；资格校验不重做离线清洗，不用预过滤掩盖同形多条目冲突。
         - 提取组件被现有策略实际消费，不留空框架；未改规则部分用同一合成样例验证行为保持。
+        - 移除观看时 lowInformationPhrase 重算，已发布安全 HINT 短语直接消费；BLOCK/不安全短释仍保留定位与歧义证据，短释只校验不清洗或改写。
+        - 同形不同条目的 HINT/BLOCK/不安全 HINT 不能在资格过滤后变成唯一可展示项；混合版本、null 候选仍整批拒绝。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :enrichment:test
@@ -1784,8 +1792,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-ENR-2001
           type: hard
-          required_task_version: 2
-          required_change_version: 2.0.0
+          required_task_version: 3
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: 新增区间、资格、冲突选择、请求合并、坐标映射独立，移出诊断文本拼接。
 - id: LF-WS-SEM
