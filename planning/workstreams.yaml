@@ -1224,27 +1224,35 @@ workstreams:
         title: 落实发布投影字段与数据库约束
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
         owner: LF-WS-DAT
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
         - infra/postgres/schema.sql
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DefaultLexiconRepository.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconRepositoryIntegrationTest.java
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/design.md
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
         forbidden_files:
         - secrets/**
         - .local/**
         - data/**
         - .env
-        expected_output: 仅按冻结合同调整最新 SQL 的分类/质量/资格表示、注释及约束；不另建历史迁移链。
+        expected_output: 同步落实最新 SQL、发布写入映射及隔离库回归，保留来源、频率证据、准备规则轨迹和词形最终原因；不另建历史迁移链。
         acceptance_criteria:
         - 每个增加字段都有明确生产者与消费者；能沿来源追溯提示及阻断决定，不存个人状态。
         - 不连接或重建真实运行库；最新 SQL 与适配器集成测试在串行交接中共同核验。
+        - 未排名 StarDict 与规范 CSV 的显式零频率可区分；词形窗口降级不覆盖词条准备轨迹，观看动作和排序不变。
+        - 空白决定、缺失规则、非法频率证据、空来源清单及不一致发布计数由数据库拒绝；失败事务保留旧发布。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
-        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:postgresIntegrationTest
         required_check_ids:
         - eng.backend.delivery
         - eng.repository.docs
@@ -1258,7 +1266,7 @@ workstreams:
           required_task_version: 3
           required_change_version: 3.0.0
           required_result: PASS
-        deliverable: 仅按冻结合同调整最新 SQL 的分类/质量/资格表示、注释及约束；不另建历史迁移链。
+        deliverable: 同步落实最新 SQL、发布写入映射及隔离库回归，保留来源、频率证据、准备规则轨迹和词形最终原因；不另建历史迁移链。
 - id: LF-WS-LEX
   code: LEX
   name: "共享 Lexicon"
@@ -2500,8 +2508,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-DAT-2001
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         - task_id: LF-TSK-LEX-2004
           type: hard

@@ -205,12 +205,18 @@ final class DefaultLexiconRepository implements LexiconRepository {
               entry.entryKind().name().toLowerCase(Locale.ROOT),
               row.sourceGloss(),
               row.dictionary().recordReference(),
+              row.dictionary().sourceId(),
+              row.frequency().sourceId(),
+              row.frequency().recordReference(),
               row.sourceBncRank(),
               row.sourceFrqRank(),
               row.sourceComplexTags().toArray(String[]::new),
               row.sourceOxfordBasic(),
               gloss,
               exclusion,
+              planned.prepared().classification().frequencyEvidence().name(),
+              planned.prepared().decisiveRule(),
+              planned.prepared().matchedRules().toArray(String[]::new),
               row.priority().memoryPriority(),
               row.priority().frequencyZipf(),
               row.priority().complexListCount()
@@ -229,17 +235,18 @@ final class DefaultLexiconRepository implements LexiconRepository {
       }
       jdbc.batchUpdate(
           "INSERT INTO lexicon_prepared_entry (lexicon_entry_id, language_tag, "
-              + "lemma, entry_kind, source_gloss, source_gloss_ref, source_bnc_rank, source_frq_rank, "
+              + "lemma, entry_kind, source_gloss, source_gloss_ref, source_dictionary_id, "
+              + "source_frequency_id, source_frequency_ref, source_bnc_rank, source_frq_rank, "
               + "source_complex_tags, source_oxford_basic, prepared_gloss, exclusion_reason, "
-              + "prepared_priority, frequency_zipf, complex_list_count) "
-              + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          batch(prepared, 8));
+              + "frequency_evidence, decisive_rule, matched_rules, prepared_priority, frequency_zipf, complex_list_count) "
+              + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          batch(prepared));
       jdbc.batchUpdate(
           "INSERT INTO lexicon_hint_lookup (language_tag, normalized_form, "
               + "lexicon_entry_id, form_kind, canonical_lemma, entry_kind, final_action, final_gloss, "
               + "final_priority, final_sense_id, final_frequency_zipf, final_complex_list_count, "
-              + "cache_priority) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          batch(lookup, -1));
+              + "cache_priority, final_decision_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          batch(lookup));
       entries += prepared.size();
       lookups += lookup.size();
       rows.clear();
@@ -254,9 +261,11 @@ final class DefaultLexiconRepository implements LexiconRepository {
       LexiconHintAction action,
       String gloss) {
     var entry = planned.entry();
+    var finalReason = planned.prepared().decisiveRule();
     if (!LexiconSurfacePolicy.withinQueryWindow(form)) {
       action = LexiconHintAction.BLOCK;
       gloss = null;
+      finalReason = "outside_query_window";
     }
     var priority = entry.priority();
     var cachePriority =
@@ -276,11 +285,12 @@ final class DefaultLexiconRepository implements LexiconRepository {
           gloss == null ? null : entry.senses().getFirst().senseId(),
           priority.frequencyZipf(),
           priority.complexListCount(),
-          cachePriority
+          cachePriority,
+          finalReason
         });
   }
 
-  private static BatchPreparedStatementSetter batch(List<Object[]> rows, int arrayIndex) {
+  private static BatchPreparedStatementSetter batch(List<Object[]> rows) {
     return new BatchPreparedStatementSetter() {
       @Override
       public int getBatchSize() {
@@ -291,10 +301,8 @@ final class DefaultLexiconRepository implements LexiconRepository {
       public void setValues(PreparedStatement statement, int index) throws SQLException {
         var values = rows.get(index);
         for (int column = 0; column < values.length; column++) {
-          if (column == arrayIndex) {
-            statement.setArray(
-                column + 1,
-                statement.getConnection().createArrayOf("text", (String[]) values[column]));
+          if (values[column] instanceof String[] array) {
+            statement.setArray(column + 1, statement.getConnection().createArrayOf("text", array));
           } else {
             statement.setObject(column + 1, values[column]);
           }

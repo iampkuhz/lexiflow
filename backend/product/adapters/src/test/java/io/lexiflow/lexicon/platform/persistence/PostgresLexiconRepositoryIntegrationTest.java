@@ -107,6 +107,184 @@ class PostgresLexiconRepositoryIntegrationTest {
   }
 
   @Test
+  void publishesSourceClassificationCleaningAndPerSurfaceDecisionEvidence() throws Exception {
+    inInitializedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            var stardict = preparedRow("medical-term", "[医]甲[床]瘤", "甲床瘤", false, false, List.of());
+            var csvDictionary = new SourceReference("lexicon-csv", "CC0", "csv-dictionary-row");
+            var csvFrequency = new SourceReference("zipf-csv", "CC0", "csv-frequency-row");
+            var zeroFrequency =
+                new LexiconImportRow(
+                    "zero-frequency",
+                    "零频词",
+                    "",
+                    List.of(),
+                    List.of(),
+                    new LexiconPriority(0, 0, 100),
+                    csvDictionary,
+                    csvFrequency,
+                    List.of(),
+                    true);
+            var blocked = row("unsafe-medical", "可持续性；持续性", List.of(), List.of());
+            var longAlias =
+                new LexiconImportRow(
+                    "alias-owner",
+                    "拥有别名",
+                    "",
+                    List.of("one two three four"),
+                    List.of(),
+                    new LexiconPriority(4.2, 1, 100),
+                    csvDictionary,
+                    csvFrequency,
+                    List.of(),
+                    true);
+            repository.publish(
+                new LexiconImportRequest(
+                    List.of(stardict, zeroFrequency, blocked, longAlias), metadata('i')));
+
+            assertEquals(
+                "ecdict-stardict:fixture-medical-term",
+                scalar(
+                    jdbcUrl,
+                    "SELECT source_dictionary_id || ':' || source_gloss_ref "
+                        + "FROM lexicon_prepared_entry WHERE lemma='medical-term'"));
+            assertEquals(
+                "ecdict-stardict:fixture-medical-term:UNKNOWN",
+                scalar(
+                    jdbcUrl,
+                    "SELECT source_frequency_id || ':' || source_frequency_ref || ':' "
+                        + "|| frequency_evidence FROM lexicon_prepared_entry "
+                        + "WHERE lemma='medical-term'"));
+            assertEquals(
+                "source_label,medical_insert",
+                scalar(
+                    jdbcUrl,
+                    "SELECT array_to_string(matched_rules, ',') FROM lexicon_prepared_entry "
+                        + "WHERE lemma='medical-term'"));
+            assertEquals(
+                "medical_insert",
+                scalar(
+                    jdbcUrl,
+                    "SELECT decisive_rule FROM lexicon_prepared_entry "
+                        + "WHERE lemma='medical-term'"));
+            assertEquals(
+                "zipf-csv:csv-frequency-row:KNOWN",
+                scalar(
+                    jdbcUrl,
+                    "SELECT source_frequency_id || ':' || source_frequency_ref || ':' "
+                        + "|| frequency_evidence FROM lexicon_prepared_entry "
+                        + "WHERE lemma='zero-frequency'"));
+            assertEquals(
+                "HINT:existing_safe",
+                scalar(
+                    jdbcUrl,
+                    "SELECT final_action || ':' || final_decision_reason "
+                        + "FROM lexicon_hint_lookup WHERE normalized_form='zero-frequency'"));
+            assertEquals(
+                "unsafe_default_candidate:unsafe_default_candidate",
+                scalar(
+                    jdbcUrl,
+                    "SELECT exclusion_reason || ':' || decisive_rule "
+                        + "FROM lexicon_prepared_entry WHERE lemma='unsafe-medical'"));
+            assertEquals(
+                "unsafe_default_candidate",
+                scalar(
+                    jdbcUrl,
+                    "SELECT final_decision_reason FROM lexicon_hint_lookup "
+                        + "WHERE normalized_form='unsafe-medical'"));
+            assertEquals(
+                "HINT:existing_safe",
+                scalar(
+                    jdbcUrl,
+                    "SELECT final_action || ':' || final_decision_reason "
+                        + "FROM lexicon_hint_lookup WHERE normalized_form='alias-owner'"));
+            assertEquals(
+                "BLOCK:outside_query_window",
+                scalar(
+                    jdbcUrl,
+                    "SELECT final_action || ':' || final_decision_reason "
+                        + "FROM lexicon_hint_lookup WHERE normalized_form='one two three four'"));
+            assertEquals(
+                "existing_safe",
+                scalar(
+                    jdbcUrl,
+                    "SELECT decisive_rule FROM lexicon_prepared_entry WHERE lemma='alias-owner'"));
+            assertEquals(
+                "拥有别名",
+                scalar(
+                    jdbcUrl,
+                    "SELECT prepared_gloss FROM lexicon_prepared_entry WHERE lemma='alias-owner'"));
+          }
+        });
+  }
+
+  @Test
+  void rejectsInvalidPublicationEvidenceAndRollsBackReplacement() throws Exception {
+    inInitializedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            repository.publish(
+                new LexiconImportRequest(
+                    List.of(
+                        row("reliable", "可靠的", List.of(), List.of()),
+                        row("ambiguous", "含混；歧义", List.of(), List.of())),
+                    metadata('j')));
+            for (var invalidSql :
+                List.of(
+                    "UPDATE lexicon_dataset SET source_manifest='[]'::jsonb",
+                    "UPDATE lexicon_dataset SET entry_count=3, lookup_count=3",
+                    "UPDATE lexicon_dataset SET source_row_count=0",
+                    "UPDATE lexicon_dataset SET preparation_policy=chr(9)||chr(10)",
+                    "UPDATE lexicon_prepared_entry SET lemma=chr(9)||chr(10)",
+                    "UPDATE lexicon_prepared_entry SET source_gloss=chr(9)||chr(10)",
+                    "UPDATE lexicon_prepared_entry SET source_gloss_ref=chr(9)||chr(10)",
+                    "UPDATE lexicon_prepared_entry SET source_dictionary_id=chr(9)||chr(10)",
+                    "UPDATE lexicon_prepared_entry SET source_frequency_id=chr(9)||chr(10)",
+                    "UPDATE lexicon_prepared_entry SET source_frequency_ref=chr(9)||chr(10)",
+                    "UPDATE lexicon_prepared_entry SET frequency_evidence='MISSING'",
+                    "UPDATE lexicon_prepared_entry SET decisive_rule=chr(9)||chr(10)",
+                    "UPDATE lexicon_prepared_entry SET prepared_gloss=chr(9)||chr(10) "
+                        + "WHERE prepared_gloss IS NOT NULL",
+                    "UPDATE lexicon_prepared_entry SET exclusion_reason='different' "
+                        + "WHERE lemma='ambiguous'",
+                    "UPDATE lexicon_prepared_entry SET exclusion_reason=chr(9)||chr(10) "
+                        + "WHERE lemma='ambiguous'",
+                    "UPDATE lexicon_prepared_entry SET matched_rules=ARRAY[NULL]::text[]",
+                    "UPDATE lexicon_prepared_entry SET matched_rules=ARRAY['valid', chr(9)]::text[]",
+                    "UPDATE lexicon_hint_lookup SET normalized_form=chr(9)||chr(10)",
+                    "UPDATE lexicon_hint_lookup SET canonical_lemma=chr(9)||chr(10)",
+                    "UPDATE lexicon_hint_lookup SET final_decision_reason=chr(9)||chr(10)",
+                    "UPDATE lexicon_hint_lookup SET final_gloss=chr(9)||chr(10) "
+                        + "WHERE final_action='HINT'",
+                    "UPDATE lexicon_hint_lookup SET final_decision_reason='outside_query_window' "
+                        + "WHERE final_action='HINT'")) {
+              assertThrows(SQLException.class, () -> execute(jdbcUrl, invalidSql), invalidSql);
+            }
+            assertThrows(
+                RuntimeException.class,
+                () ->
+                    repository.publishStreaming(
+                        metadata('k'),
+                        2,
+                        2,
+                        consumer -> {
+                          var duplicate = row("replacement", "替代", List.of(), List.of());
+                          consumer.accept(duplicate);
+                          consumer.accept(duplicate);
+                          return new LexiconImportRowSource.ReadReceipt(
+                              metadata('k').sourceDigest(), 2);
+                        }));
+            assertEquals(1, repository.publishedVersion());
+            assertEquals(1, repository.findByForms(1, List.of("reliable")).size());
+            assertEquals(0, repository.findByForms(1, List.of("replacement")).size());
+          }
+        });
+  }
+
+  @Test
   void prewarmReturnsEveryOwnerOfAnAmbiguousSelectedForm() throws Exception {
     inInitializedSchema(
         jdbcUrl -> {
@@ -688,6 +866,13 @@ class PostgresLexiconRepositoryIntegrationTest {
         var rows = statement.executeQuery(sql)) {
       assertTrue(rows.next());
       return rows.getString(1);
+    }
+  }
+
+  private static void execute(String jdbcUrl, String sql) throws SQLException {
+    try (var connection = DriverManager.getConnection(jdbcUrl);
+        var statement = connection.createStatement()) {
+      statement.executeUpdate(sql);
     }
   }
 
