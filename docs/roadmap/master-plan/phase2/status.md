@@ -26,7 +26,8 @@
 - LEX-2004 v2 已提交 `d1d10fe` 并合入 `phase2`；Change `79c640a0-f686-4dc7-b85a-fef4b6a95975`、Repository `aeba64e3-e23a-45de-9483-f166715de82c`、validation `48738bdd-726c-4abb-b006-a9b1627380c9`、review `4bec142e-0d69-43d9-ae1b-5cf779a35e42`、check `b292a654-51b2-47eb-a0b2-654db66f37a3` 均为 PASS；旧失败送验全部保留。
 - DAT-2001 v2 已提交 `b218fea` 并合入 `phase2`；Change `0d71c290-b826-4d0d-b91f-dc0c9b4a872a`、Repository `98d79e5f-2af8-4f14-9b88-1ac41847630e`、validation `970bcd9c-f6ba-4b83-8dbe-23c3d7f7f2c5`、review `c0e67ad3-113e-4241-8270-fe1e916c73c0`、check `70b3e175-9280-4c7f-b581-8a7af71dcfcf` 均为 PASS；仅隔离库执行 SQL，真实运行资料未改动。
 - OPS-2001 v2 已提交 `9335aa5` 并合入 `phase2`；Change `8e50486d-cf0c-4225-b10d-24022e6872cd`、Repository `b34dc440-e8ac-4d92-a6a4-2d703fb33225`、validation `a22aa425-e62f-4760-89e9-0065b25a0e84`、review `f1922a5c-63d4-4eaa-a4aa-ad2e770743c6`、check `33c4ff85-b8c0-4250-abd8-cab55fd6ae0f` 均为 PASS。
-- 当前在 `phase2-10-import-orchestration` 开始 OPS-2002 v2：统一应用准备、已准备发布端口和来源 CLI，消除实际写入的重复准备；后续继续同步主线、客户端和发布闭环。
+- OPS-2002 v2 已提交 `5885803` 并合入 `phase2`；Change `3f95a374-4ba2-43da-b530-af3ea3a0f099`、Repository `039c50d2-12e6-48c3-9249-7049f87e627b`、validation `dc00c8ef-55bd-4852-aab4-279c73e78f62`、review `342ad910-3f4f-4d5c-ac71-e4740121aac5`、check `a204ec1b-f56d-497f-ab67-fb933c1cffb3` 均为 PASS；submission `ec7d868d-c1f1-4152-9807-6a7629399ccf`，旧失败证据保留。
+- 当前在 `phase2-11-candidate-boundaries` 开始 ENR-2001 v3：拆开原文定位和发布资格，移除观看时重复的短语筛选；后续继续增量编排、观测、客户端和发布闭环。
 - OpenSpec 与运行记录保留在 ignored 本机目录；共享交接位于路线图与 Catalog。
 
 ## 1.4. 一期与后续边界

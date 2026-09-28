@@ -129,6 +129,10 @@ CLI 把 StarDict/规范 CSV 解析包装成同一 row source，每次实际读�
 
 Enrichment 内用实际被调用的组件分离 CandidateForms（查表键）、CandidateMatcher（原文定位）、PublishedCandidateEligibility（发布资料完整性）、冲突/排序/非重叠规则，以及增量区间/坐标映射。来源正文不会进入普通统计对象；原先 Measured result 的诊断文本拼装迁至授权分析适配器，普通结果只含业务结果与聚合计数。API 只负责映射、授权记录调用和终态事件，不重做选词。
 
+CandidateMatcher 是领域内的原文定位组件，仅接收原始 caption、UTF-16 范围和已规范化精确词形；返回该范围内全部位置，不去重、不排序选择、不生成查询键、不判断可展示资格。大小写匹配及词边界沿用现有规则，边界读取完整原文，组合标记/下划线/字母数字不当成分隔，补充平面字符不得切半。重复出现、标点、大小写与区间截断均有直接测试。
+
+PublishedCandidateEligibility 只消费已发布动作及最终短释：HINT 且短释符合现有安全显示合同才允许展示，BLOCK 不展示；24 个 code point 上限、汉字和非法字符防线保留，不裁剪、拆义、清洗或改写。观看不再调用 lowInformationPhrase 或重算基础/词频名单；来源短语资格归离线准备，因此经发布的安全 HINT（包括明确来源特许短语）不被再次筛掉。位置匹配必须保留全部候选，不安全短释与 BLOCK 仍参与同形不同条目的歧义判断。整批 null/混版拒绝、排序、重叠、同词条去重及 requiredEndAfter 规则由 DeterministicHintPolicy 保持；两个组件在该策略内实际调用，包内可见，不扩张跨模块 API。
+
 扩展由 content 组合页面生命周期、采集源、快照协调、stream 请求状态机、overlay 显示和 preferences 本机显式抑制。stream 独占上次成功快照与唯一在途请求；生命周期只发失效信号，不再复制请求状态。失败不自动计时重试，下一次有效字幕变化才重试；旧行中文冻结、导航/关闭后迟到结果不可复活，英文始终不等待后端。
 
 

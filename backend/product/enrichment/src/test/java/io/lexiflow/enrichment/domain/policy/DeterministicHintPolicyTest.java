@@ -17,13 +17,12 @@ class DeterministicHintPolicyTest {
   private final DeterministicHintPolicy policy = new DeterministicHintPolicy();
 
   @Test
-  void sharedLowInformationPolicyAllowsTwoContentWordsButStillChecksGlossAndPublishedBlock() {
+  void publishedShortPhraseDisplaysAndGlossSafetyAndBlockRemainEnforced() {
     assertEquals(
         HintState.READY,
         evaluate("the silent majority", List.of(phrase("the silent majority", "沉默的大多数"))).state());
     assertEquals(
-        HintState.NO_PENDING,
-        evaluate("the majority", List.of(phrase("the majority", "大多数"))).state());
+        HintState.READY, evaluate("the majority", List.of(phrase("the majority", "大多数"))).state());
     assertEquals(
         HintState.NO_PENDING,
         evaluate("the silent majority", List.of(phrase("the silent majority", "在…之中"))).state());
@@ -128,10 +127,55 @@ class DeterministicHintPolicyTest {
   }
 
   @Test
-  void rejectsLowInformationPhrases() {
-    for (var form : List.of("the first", "not in", "reference to", "on yesterday", "to be")) {
-      assertEquals(HintState.NO_PENDING, evaluate(form, List.of(phrase(form, "错误短释"))).state());
-    }
+  void consumesPublishedLowInformationPhraseWithoutRecomputingSourceQualification() {
+    var form = "the first";
+    var result = evaluate(form, List.of(phrase(form, "第一")));
+    assertEquals(HintState.READY, result.state());
+    assertEquals("第一", result.hints().getFirst().chineseGloss());
+  }
+
+  @Test
+  void unsafeHintStillMakesSameFormAmbiguousWithSafeHint() {
+    var safe = candidate("bank", "银行");
+    var unsafeBase = candidate("bank", "银行");
+    var unsafe =
+        new LexiconHintCandidate(
+            UUID.randomUUID(),
+            unsafeBase.senseId(),
+            1,
+            "en",
+            "bank",
+            "bank",
+            LexiconEntryKind.WORD,
+            LexiconHintAction.HINT,
+            "银行（旧）",
+            500,
+            0,
+            1);
+    assertEquals(HintState.NO_PENDING, evaluate("bank", List.of(safe, unsafe)).state());
+  }
+
+  @Test
+  void nullCandidateRefusesWholeBatchAndRepeatedOccurrenceStillSelectsOnce() {
+    var safe = candidate("bank", "银行");
+    assertEquals(
+        HintState.NO_PENDING, evaluate("bank", java.util.Arrays.asList(safe, null)).state());
+    var repeated = evaluate("bank, BANK", List.of(safe));
+    assertEquals(1, repeated.hints().size());
+    assertEquals(0, repeated.hints().getFirst().startOffset());
+    assertEquals(4, repeated.hints().getFirst().endOffset());
+  }
+
+  @Test
+  void oldContextCanCompletePhraseButNeverReemitOldOnlyHint() {
+    var text = "bank give up";
+    var hints =
+        policy.evaluate(
+            text, 0, text.length(), 10, List.of(candidate("bank", "银行"), phrase("give up", "放弃")));
+    assertEquals(1, hints.size());
+    assertEquals(5, hints.getFirst().startOffset());
+    assertEquals(12, hints.getFirst().endOffset());
+    assertEquals("放弃", hints.getFirst().chineseGloss());
   }
 
   private io.lexiflow.enrichment.domain.model.CaptionHintResult evaluate(

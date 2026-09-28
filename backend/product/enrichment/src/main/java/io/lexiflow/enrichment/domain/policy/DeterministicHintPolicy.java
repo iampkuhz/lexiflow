@@ -5,9 +5,7 @@ import io.lexiflow.enrichment.domain.model.CaptionContext;
 import io.lexiflow.enrichment.domain.model.CaptionHintResult;
 import io.lexiflow.enrichment.domain.model.HintState;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
-import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
-import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -15,11 +13,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 /** 根据公开词汇材料生成确定性提示，绝不调用模型或建立伪造的 pending 工作。 */
 public final class DeterministicHintPolicy {
-  private static final int MAX_GLOSS_CODE_POINTS = 24;
   private static final Comparator<CandidateMatch> MATCH_PRIORITY =
       Comparator.comparingInt(CandidateMatch::valueTier)
           .reversed()
@@ -108,41 +104,25 @@ public final class DeterministicHintPolicy {
   private static List<CandidateMatch> locate(
       String caption, int startOffset, int endOffset, LexiconHintCandidate candidate) {
     var matches = new ArrayList<CandidateMatch>();
-    var eligible =
-        candidate.finalAction() == LexiconHintAction.HINT && !lowInformationPhrase(candidate);
-    var qualified =
-        eligible && reliableChineseGloss(candidate.finalGloss()) ? candidate.finalGloss() : null;
+    var displayable = PublishedCandidateEligibility.isDisplayable(candidate);
+    var qualified = displayable ? candidate.finalGloss() : null;
     var valueTier =
         candidate.entryKind() == LexiconEntryKind.WORD && candidate.frequencyZipf() > 0 ? 1 : 0;
-    var surface = candidate.normalizedForm();
-    {
-      var matcher =
-          Pattern.compile(Pattern.quote(surface), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
-              .matcher(caption)
-              .region(startOffset, endOffset);
-      while (matcher.find()) {
-        if (isWordBoundary(caption, matcher.start(), matcher.end())) {
-          matches.add(
-              new CandidateMatch(
-                  matcher.start(),
-                  matcher.end(),
-                  candidate.entryId().toString(),
-                  qualified == null ? null : candidate.senseId().toString(),
-                  candidate.lexiconVersion(),
-                  qualified,
-                  valueTier,
-                  candidate.finalPriority(),
-                  candidate.complexListCount()));
-        }
-      }
+    for (var occurrence :
+        CandidateMatcher.locate(caption, startOffset, endOffset, candidate.normalizedForm())) {
+      matches.add(
+          new CandidateMatch(
+              occurrence.startOffset(),
+              occurrence.endOffset(),
+              candidate.entryId().toString(),
+              qualified == null ? null : candidate.senseId().toString(),
+              candidate.lexiconVersion(),
+              qualified,
+              valueTier,
+              candidate.finalPriority(),
+              candidate.complexListCount()));
     }
     return matches;
-  }
-
-  /** 排除会把冠词、否定或悬空介词误当完整词组的来源短语。 */
-  private static boolean lowInformationPhrase(LexiconHintCandidate candidate) {
-    return candidate.entryKind() == LexiconEntryKind.PHRASE
-        && LexiconSurfacePolicy.lowInformationPhrase(candidate.normalizedForm());
   }
 
   private static Set<Range> ambiguousRanges(List<CandidateMatch> matches) {
@@ -192,81 +172,6 @@ public final class DeterministicHintPolicy {
 
   private static boolean overlaps(CandidateMatch left, CandidateMatch right) {
     return left.startOffset() < right.endOffset() && right.startOffset() < left.endOffset();
-  }
-
-  private static boolean reliableChineseGloss(String gloss) {
-    var codePointCount = gloss.codePointCount(0, gloss.length());
-    if (codePointCount < 1 || codePointCount > MAX_GLOSS_CODE_POINTS) {
-      return false;
-    }
-    var containsHan = false;
-    for (var offset = 0; offset < gloss.length(); ) {
-      var codePoint = gloss.codePointAt(offset);
-      if (!isAllowedGlossCodePoint(codePoint)) {
-        return false;
-      }
-      containsHan |= Character.UnicodeScript.of(codePoint) == Character.UnicodeScript.HAN;
-      offset += Character.charCount(codePoint);
-    }
-    return containsHan;
-  }
-
-  private static boolean isAllowedGlossCodePoint(int codePoint) {
-    if (Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint)) {
-      return false;
-    }
-    return switch (Character.getType(codePoint)) {
-      case Character.CONTROL,
-          Character.FORMAT,
-          Character.SURROGATE,
-          Character.PRIVATE_USE,
-          Character.UNASSIGNED,
-          Character.CONNECTOR_PUNCTUATION,
-          Character.DASH_PUNCTUATION,
-          Character.START_PUNCTUATION,
-          Character.END_PUNCTUATION,
-          Character.INITIAL_QUOTE_PUNCTUATION,
-          Character.FINAL_QUOTE_PUNCTUATION,
-          Character.OTHER_PUNCTUATION,
-          Character.MATH_SYMBOL,
-          Character.CURRENCY_SYMBOL,
-          Character.MODIFIER_SYMBOL,
-          Character.OTHER_SYMBOL ->
-          false;
-      default -> !isMarkupDelimiter(codePoint);
-    };
-  }
-
-  private static boolean isMarkupDelimiter(int codePoint) {
-    return codePoint == '<' || codePoint == '>' || codePoint == '&' || codePoint == '`';
-  }
-
-  private static boolean isWordBoundary(String text, int startOffset, int endOffset) {
-    var before = startOffset == 0 || !isWordCodePoint(text.codePointBefore(startOffset));
-    var after = endOffset == text.length() || !isWordCodePoint(text.codePointAt(endOffset));
-    return before
-        && after
-        && isCodePointBoundary(text, startOffset)
-        && isCodePointBoundary(text, endOffset);
-  }
-
-  private static boolean isCodePointBoundary(String value, int offset) {
-    return offset == 0
-        || offset == value.length()
-        || !(Character.isHighSurrogate(value.charAt(offset - 1))
-            && Character.isLowSurrogate(value.charAt(offset)));
-  }
-
-  private static boolean isWordCodePoint(int codePoint) {
-    return Character.isLetterOrDigit(codePoint)
-        || codePoint == '_'
-        || switch (Character.getType(codePoint)) {
-          case Character.NON_SPACING_MARK,
-              Character.COMBINING_SPACING_MARK,
-              Character.ENCLOSING_MARK ->
-              true;
-          default -> false;
-        };
   }
 
   /**
