@@ -137,7 +137,8 @@
 - 验收：消费发布时的静态资格，不动态重算基础名单或清洗来源；运行期范围和发布身份校验不移除。
 - 验收：跨区间重复、跨片段偏移和混合版本安全处理；同形歧义不能被提前过滤掩盖。
 - 验收：排序/重叠处理符合批准规则；默认义不宣称语境正确。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :enrichment:test`。
+- 实现边界：Catalog v2/change 2.0.0；规划、映射、合并和冲突选择按设计 1.6.3 提取为被实际调用的包内组件；全部版本证据先于去重，诊断字段直接删除，授权日志合同不变。
+- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :enrichment:test :api:test`。
 
 ### 1.3.15. LF-TSK-OBS-2002 · 实现普通结构化观测与敏感记录适配器
 - 主责：`LF-WS-OBS`；预计 90 分钟；前置：`LF-TSK-OBS-2001`、`LF-TSK-ENR-2002`。

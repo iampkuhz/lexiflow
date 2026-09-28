@@ -1759,16 +1759,30 @@ workstreams:
         title: 实现增量编排、默认义资格与提示选择边界
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         owner: LF-WS-ENR
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
-        - backend/product/enrichment/src/main/**
-        - backend/product/enrichment/src/test/**
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/application/caption/EnrichCaptionUseCase.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/application/caption/IncrementalCaptionPlan.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/application/caption/IncrementalHintMapper.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/application/caption/IncrementalResultAssembler.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/application/caption/model/MeasuredIncrementalCaptionResult.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/domain/policy/DeterministicHintPolicy.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/domain/policy/HintSelection.java
+        - backend/product/enrichment/src/test/java/io/lexiflow/enrichment/application/caption/IncrementalCaptionUseCaseTest.java
+        - backend/product/enrichment/src/test/java/io/lexiflow/enrichment/application/caption/IncrementalCaptionPlanTest.java
+        - backend/product/enrichment/src/test/java/io/lexiflow/enrichment/application/caption/IncrementalHintMapperTest.java
+        - backend/product/enrichment/src/test/java/io/lexiflow/enrichment/application/caption/IncrementalResultAssemblerTest.java
+        - backend/product/enrichment/src/test/java/io/lexiflow/enrichment/domain/policy/HintSelectionTest.java
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/design.md
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -1779,9 +1793,13 @@ workstreams:
         - 消费发布时的静态资格，不动态重算基础名单或清洗来源；运行期范围和发布身份校验不移除。
         - 跨区间重复、跨片段偏移和混合版本安全处理；同形歧义不能被提前过滤掩盖。
         - 排序/重叠处理符合批准规则；默认义不宣称语境正确。
+        - 区间规划、坐标映射、请求结果合并和领域冲突选择各由实际调用的包内组件负责；同组同行旧上下文最多两段且不超过48个UTF-16单元。
+        - 合并器在展示与去重前收集全部候选及已知查询版本，包括BLOCK/不安全/未命中位置的候选；任意混版整请求无提示，但保留覆盖和累计计数。
+        - 删除Measured结果的processedEnglish/processedWithHints及构造文本，不增加替代正文统计字段；授权SegmentAnalysisLog继续从request和result记录，不改其逐段日志合同。
+        - 用直接测试与原有用例锁定旧上下文预算、空查询零访问、视觉行/组隔离、UTF-16半开坐标、稳定排序及混版/重复处理。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
-        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :enrichment:test
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :enrichment:test :api:test
         required_check_ids:
         - eng.backend.delivery
         - eng.repository.docs
@@ -1887,8 +1905,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-ENR-2002
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         deliverable: 正式/演示模式、发布身份、缓存初始化和就绪/降级行为匹配冻结合同。
       - id: LF-TSK-API-2002
@@ -2388,8 +2406,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-ENR-2002
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         deliverable: 按日志合同实现适配器及脱敏/格式/失败隔离测试，不触发额外资料采集。
 - id: LF-WS-OPS
