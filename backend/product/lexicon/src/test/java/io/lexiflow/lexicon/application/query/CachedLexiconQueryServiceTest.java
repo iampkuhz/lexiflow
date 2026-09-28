@@ -199,6 +199,58 @@ class CachedLexiconQueryServiceTest {
     assertEquals(2, service.lookupForms(List.of("bank")).candidates().size());
   }
 
+  @Test
+  void failedPositiveBatchKeepsNegativeAndDoesNotRetrySameVersion() {
+    var calls = new int[2];
+    var repo =
+        new LexiconReadRepository() {
+          long version = 1;
+
+          @Override
+          public long publishedVersion() {
+            return version;
+          }
+
+          @Override
+          public List<LexiconHintCandidate> findByForms(long v, Collection<String> forms) {
+            return List.of();
+          }
+
+          @Override
+          public List<LexiconHintCandidate> findPrewarmForms(
+              long v, LexiconHintAction action, int limit) {
+            if (action == LexiconHintAction.HINT) {
+              calls[0]++;
+              throw new IllegalStateException("synthetic failed batch");
+            }
+            calls[1]++;
+            return List.of(
+                new LexiconHintCandidate(
+                    UUID.randomUUID(),
+                    null,
+                    v,
+                    "en",
+                    "blocked",
+                    "blocked",
+                    LexiconEntryKind.WORD,
+                    LexiconHintAction.BLOCK,
+                    null,
+                    0,
+                    0,
+                    0));
+          }
+        };
+    var service = new CachedLexiconQueryService(repo, 4, 1, 1);
+    assertEquals(true, service.warmupStatus().degraded());
+    assertEquals(2, service.warmupStatus().attempts());
+    assertEquals(0, service.warmupStatus().positiveKeys());
+    assertEquals(1, service.warmupStatus().negativeKeys());
+    assertEquals(0, service.lookupForms(List.of("blocked")).counts().cacheMisses());
+    service.refresh();
+    assertEquals(1, calls[0]);
+    assertEquals(1, calls[1]);
+  }
+
   private static LexiconHintCandidate entry(long version, String gloss) {
     return entry(version, "reliable", gloss);
   }

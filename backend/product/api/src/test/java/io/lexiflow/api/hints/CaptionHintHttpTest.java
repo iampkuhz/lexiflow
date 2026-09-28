@@ -14,8 +14,10 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties =
-        "lexiflow.segment-analysis.path=${java.io.tmpdir}/lexiflow-caption-test-${random.uuid}.jsonl")
+    properties = {
+      "lexiflow.runtime.mode=demo",
+      "lexiflow.segment-analysis.path=${java.io.tmpdir}/lexiflow-caption-test-${random.uuid}.jsonl"
+    })
 class CaptionHintHttpTest {
   @LocalServerPort private int port;
 
@@ -62,6 +64,22 @@ class CaptionHintHttpTest {
               .replace("\"append\":true", "\"append\":true,\"contentId\":\"old\"")
         }) {
       assertEquals(400, post(body).statusCode(), body);
+    }
+  }
+
+  @Test
+  void explicitDemoDoesNotAdvertiseFormalReadiness() throws Exception {
+    try (var client = HttpClient.newHttpClient()) {
+      var readiness =
+          client.send(
+              HttpRequest.newBuilder(
+                      URI.create("http://127.0.0.1:" + port + "/actuator/health/readiness"))
+                  .GET()
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
+      assertEquals(503, readiness.statusCode());
+      assertTrue(readiness.body().contains("DEMO_MODE"));
+      assertTrue(readiness.body().contains("demo"));
     }
   }
 

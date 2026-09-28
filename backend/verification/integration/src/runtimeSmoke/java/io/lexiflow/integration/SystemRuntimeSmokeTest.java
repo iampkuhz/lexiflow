@@ -75,6 +75,27 @@ class SystemRuntimeSmokeTest {
             .redirectOutput(apiLog.toFile())
             .start();
     awaitApiHealth(port, apiLog);
+    try (var client = HttpClient.newHttpClient()) {
+      var readiness =
+          client.send(
+              HttpRequest.newBuilder(
+                      URI.create("http://127.0.0.1:" + port + "/actuator/health/readiness"))
+                  .GET()
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
+      assertEquals(503, readiness.statusCode());
+      var hint =
+          client.send(
+              HttpRequest.newBuilder(
+                      URI.create("http://127.0.0.1:" + port + "/api/v1/caption-hints"))
+                  .header("Content-Type", "application/json")
+                  .POST(
+                      HttpRequest.BodyPublishers.ofString(
+                          "{\"captionTopicKey\":\"topic\",\"trackKey\":null,\"lastRequestedSnapshot\":null,\"currentSnapshot\":{\"captions\":[{\"windowId\":null,\"startMs\":null,\"segments\":[{\"key\":\"a\",\"text\":\"reliable\",\"offsetMs\":null,\"append\":true,\"line\":0}]}]}}"))
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
+      assertEquals(503, hint.statusCode());
+    }
   }
 
   private static String requiredProperty(String name) {
@@ -131,7 +152,7 @@ class SystemRuntimeSmokeTest {
           var response =
               client.send(
                   HttpRequest.newBuilder(
-                          URI.create("http://127.0.0.1:" + port + "/actuator/health"))
+                          URI.create("http://127.0.0.1:" + port + "/actuator/health/liveness"))
                       .timeout(Duration.ofSeconds(2))
                       .GET()
                       .build(),

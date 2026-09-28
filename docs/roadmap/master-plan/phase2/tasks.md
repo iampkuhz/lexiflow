@@ -149,11 +149,12 @@
 - 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test :api:test`。
 
 ### 1.3.16. LF-TSK-API-2001 · 落实启动模式和已发布资料装载
-- 主责：`LF-WS-API`；预计 60 分钟；前置：`LF-TSK-OPS-2002`、`LF-TSK-ENR-2002`。
+- 主责：`LF-WS-API`；预计 90 分钟；前置：`LF-TSK-OPS-2002`、`LF-TSK-ENR-2002`、`LF-TSK-OBS-2002`。
 - 产出：正式/演示模式、发布身份、缓存初始化和就绪/降级行为匹配冻结合同。
 - 验收：正式配置缺失不静默退回五词演示库；空发布、数据库故障、预热失败均有确定行为。
 - 验收：只装载有界发布资料，不执行导入/重建/模型；英文展示不依赖启动成功。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :api:test`。
+- 实现边界：Catalog v2/change 2.0.0；运行状态、查询预热降级与只读结构/策略验证同批落地，详见设计 1.2.2.1。
+- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :api:test :adapters:postgresIntegrationTest :integration-tests:runtimeSmoke`。
 
 ### 1.3.17. LF-TSK-API-2002 · 连接请求主线、HTTP 映射和终态日志
 - 主责：`LF-WS-API`；预计 90 分钟；前置：`LF-TSK-API-2001`、`LF-TSK-OBS-2002`。

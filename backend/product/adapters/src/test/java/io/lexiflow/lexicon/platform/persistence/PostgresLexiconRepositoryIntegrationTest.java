@@ -969,6 +969,66 @@ class PostgresLexiconRepositoryIntegrationTest {
         curated);
   }
 
+  @Test
+  void publishedVersionRejectsWrongPolicyAndExplicitRepublishReplacesIt() throws Exception {
+    inInitializedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            assertEquals(0, repository.publishedVersion());
+            var first = row("context", "语境", List.of(), List.of());
+            assertEquals(
+                1,
+                new LexiconImportService(repository)
+                    .publish(new LexiconImportRequest(List.of(first), metadata('a'))));
+            assertEquals(
+                "lexiflow.deterministic-preparation.v1",
+                scalar(jdbcUrl, "SELECT preparation_policy FROM lexicon_dataset"));
+            execute(jdbcUrl, "UPDATE lexicon_dataset SET preparation_policy = 'wrong-policy'");
+            assertThrows(
+                io.lexiflow.lexicon.application.port.InvalidPublishedLexiconException.class,
+                repository::publishedVersion);
+            assertEquals(
+                2,
+                new LexiconImportService(repository)
+                    .publish(new LexiconImportRequest(List.of(first), metadata('b'))));
+            assertEquals(2, repository.publishedVersion());
+          }
+        });
+  }
+
+  @Test
+  void publishedVersionRejectsIncompleteSourceManifest() throws Exception {
+    inInitializedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            var first = row("context", "语境", List.of(), List.of());
+            new LexiconImportService(repository)
+                .publish(new LexiconImportRequest(List.of(first), metadata('a')));
+            execute(
+                jdbcUrl,
+                "UPDATE lexicon_dataset SET source_manifest = '[{\"source_id\":\"fixture\"}]'::jsonb");
+            assertThrows(
+                io.lexiflow.lexicon.application.port.InvalidPublishedLexiconException.class,
+                repository::publishedVersion);
+          }
+        });
+  }
+
+  @Test
+  void publishedVersionRejectsMissingWatchingProjectionColumnEvenWhenEmpty() throws Exception {
+    inInitializedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            execute(jdbcUrl, "ALTER TABLE lexicon_hint_lookup DROP COLUMN final_gloss CASCADE");
+            assertThrows(
+                org.springframework.dao.DataAccessException.class, repository::publishedVersion);
+          }
+        });
+  }
+
   private static LexiconImportMetadata metadata(char digest) {
     return new LexiconImportMetadata(
         String.valueOf(digest).repeat(64), "fixture", "MIT", Instant.EPOCH);

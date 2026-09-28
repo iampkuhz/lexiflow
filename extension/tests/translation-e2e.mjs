@@ -30,7 +30,7 @@ function assertApiResources() {
 }
 
 function startApi() {
-  const child = spawn("python3", ["-m", "scripts.environment.java_exec", "backend/gradlew", "-p", "backend", "--no-daemon", ":api:bootRun", `--args=--server.address=127.0.0.1 --server.port=${apiPort} --spring.datasource.url=false`], {
+  const child = spawn("python3", ["-m", "scripts.environment.java_exec", "backend/gradlew", "-p", "backend", "--no-daemon", ":api:bootRun", `--args=--server.address=127.0.0.1 --server.port=${apiPort} --spring.datasource.url=false --lexiflow.runtime.mode=demo`], {
     cwd: repositoryRoot,
     env: { ...process.env, SPRING_DATASOURCE_URL: "false",
       LEXIFLOW_SEGMENT_LOG_PATH: resolve(repositoryRoot, "tmp/quality/e2e-analysis", `${process.pid}-${apiPort}.jsonl`) },
@@ -57,7 +57,12 @@ async function waitForApi(process) {
     if (process.launchError) throw new ApiResourceUnavailable("api-launcher-resource-unavailable");
     if (process.exitCode !== null) throw new Error(`API stopped before readiness:\n${logs}`);
     try {
-      if ((await fetch(`${apiBase}/actuator/health`)).ok) return;
+      if ((await fetch(`${apiBase}/actuator/health/liveness`)).ok) {
+        const readiness = await fetch(`${apiBase}/actuator/health/readiness`);
+        assert.equal(readiness.status, 503, "demo must not advertise formal readiness");
+        assert.match(await readiness.text(), /DEMO_MODE/u);
+        return;
+      }
     } catch {
       // The process is still starting.
     }

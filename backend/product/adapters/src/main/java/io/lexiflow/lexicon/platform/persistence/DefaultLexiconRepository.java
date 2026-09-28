@@ -3,6 +3,8 @@ package io.lexiflow.lexicon.platform.persistence;
 import io.lexiflow.lexicon.application.importing.LexiconImportPlan;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import io.lexiflow.lexicon.application.importing.policy.ClassificationPolicy;
+import io.lexiflow.lexicon.application.importing.policy.HintPreparation;
+import io.lexiflow.lexicon.application.port.InvalidPublishedLexiconException;
 import io.lexiflow.lexicon.application.port.LexiconPublicationRepository;
 import io.lexiflow.lexicon.application.port.LexiconRepository;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
@@ -40,6 +42,42 @@ final class DefaultLexiconRepository implements LexiconRepository {
 
   @Override
   public long publishedVersion() {
+    return jdbc.query(
+        "WITH required_lookup AS (SELECT h.language_tag, h.normalized_form, "
+            + LOOKUP_COLUMNS
+            + ", h.cache_priority FROM lexicon_hint_lookup h WHERE FALSE) "
+            + "SELECT d.lexicon_version, CASE WHEN jsonb_typeof(d.source_manifest) = 'array' "
+            + "THEN jsonb_array_length(d.source_manifest) > 0 AND NOT EXISTS ("
+            + "SELECT 1 FROM jsonb_array_elements(d.source_manifest) item WHERE "
+            + "coalesce(length(trim(item->>'source_id')), 0) = 0 OR "
+            + "coalesce(length(trim(item->>'license_id')), 0) = 0 OR "
+            + "coalesce(length(trim(item->>'source_digest')), 0) = 0 OR "
+            + "coalesce(length(trim(item->>'acquired_at')), 0) = 0) "
+            + "ELSE FALSE END, d.source_row_count, "
+            + "d.entry_count, d.lookup_count, d.preparation_policy "
+            + "FROM (SELECT 1) anchor LEFT JOIN lexicon_dataset d ON d.dataset_id = 1 "
+            + "WHERE NOT EXISTS (SELECT 1 FROM required_lookup)",
+        result -> {
+          if (!result.next() || result.getObject(1) == null) return 0L;
+          long version = result.getLong(1);
+          boolean manifestValid = result.getBoolean(2);
+          long sourceRows = result.getLong(3);
+          long entries = result.getLong(4);
+          long lookups = result.getLong(5);
+          String policy = result.getString(6);
+          if (version < 1
+              || !manifestValid
+              || sourceRows < entries
+              || entries < 1
+              || lookups < entries
+              || !HintPreparation.POLICY_ID.equals(policy)) {
+            throw new InvalidPublishedLexiconException();
+          }
+          return version;
+        });
+  }
+
+  private long rawPublishedVersion() {
     return jdbc.query(
         "SELECT lexicon_version FROM lexicon_dataset WHERE dataset_id = 1",
         result -> result.next() ? result.getLong(1) : 0L);
@@ -118,7 +156,7 @@ final class DefaultLexiconRepository implements LexiconRepository {
     return transaction.execute(
         status -> {
           jdbc.execute("SELECT pg_advisory_xact_lock(643981781)");
-          var version = publishedVersion() + 1;
+          var version = rawPublishedVersion() + 1;
           jdbc.update("DELETE FROM lexicon_dataset WHERE dataset_id = 1");
           jdbc.update("DELETE FROM lexicon_prepared_entry");
           var writer = new BatchWriter();
@@ -144,7 +182,7 @@ final class DefaultLexiconRepository implements LexiconRepository {
               sourceRowsTotal,
               writer.entries,
               writer.lookups,
-              metadata.sourceId());
+              HintPreparation.POLICY_ID);
           return version;
         });
   }

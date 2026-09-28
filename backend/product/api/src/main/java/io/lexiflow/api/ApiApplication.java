@@ -1,14 +1,14 @@
 package io.lexiflow.api;
 
 import io.lexiflow.api.hints.SegmentAnalysisLog;
+import io.lexiflow.api.runtime.LexiconHealthIndicator;
+import io.lexiflow.api.runtime.LexiconRuntime;
 import io.lexiflow.enrichment.application.caption.EnrichCaptionUseCase;
 import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
 import io.lexiflow.lexicon.application.port.LexiconReadRepository;
-import io.lexiflow.lexicon.application.query.CachedLexiconQueryService;
-import io.lexiflow.lexicon.domain.catalog.BuiltinLexiconCatalog;
-import io.lexiflow.lexicon.domain.port.LexiconCatalog;
 import io.lexiflow.lexicon.platform.persistence.PostgresPersistenceConfiguration;
 import io.lexiflow.observability.platform.FileSegmentAnalysisStore;
+import io.lexiflow.observability.platform.StructuredEventLogger;
 import java.nio.file.Path;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,8 +22,6 @@ import org.springframework.context.annotation.Import;
 @SpringBootApplication(exclude = DataSourceAutoConfiguration.class)
 @Import(PostgresPersistenceConfiguration.class)
 public class ApiApplication {
-  private static final org.slf4j.Logger LOGGER =
-      org.slf4j.LoggerFactory.getLogger(ApiApplication.class);
 
   /**
    * 启动 API 进程。
@@ -34,16 +32,27 @@ public class ApiApplication {
     SpringApplication.run(ApiApplication.class, args);
   }
 
-  /**
-   * 装配确定性字幕提示用例；无显式 PostgreSQL 时保留受限内置演示词库。
-   *
-   * @param repositories 可选的、平台装配的词库 Repository。
-   * @return 可由 HTTP 入口调用的应用用例。
-   */
   @Bean
-  EnrichCaptionUseCase enrichCaptionUseCase(ObjectProvider<LexiconReadRepository> repositories) {
-    return new EnrichCaptionUseCase(
-        lexiconCatalog(repositories.getIfAvailable()), new DeterministicHintPolicy());
+  StructuredEventLogger structuredEventLogger() {
+    return new StructuredEventLogger();
+  }
+
+  @Bean
+  LexiconRuntime lexiconRuntime(
+      ObjectProvider<LexiconReadRepository> repositories,
+      @Value("${lexiflow.runtime.mode:formal}") String mode,
+      StructuredEventLogger events) {
+    return new LexiconRuntime(mode, repositories.getIfAvailable(), events);
+  }
+
+  @Bean("customLexiconHealthIndicator")
+  LexiconHealthIndicator customLexiconHealthIndicator(LexiconRuntime runtime) {
+    return new LexiconHealthIndicator(runtime);
+  }
+
+  @Bean
+  EnrichCaptionUseCase enrichCaptionUseCase(LexiconRuntime runtime) {
+    return new EnrichCaptionUseCase(runtime, new DeterministicHintPolicy());
   }
 
   /** 装配私有片段台账；仅本机启动器显式启用专用控制台流，普通 logger 不含正文。 */
@@ -67,22 +76,5 @@ public class ApiApplication {
         return current.resolve("tmp/analysis/caption-segments.jsonl");
     }
     throw new IllegalStateException("LexiFlow repository root is required for analysis log");
-  }
-
-  private static LexiconCatalog lexiconCatalog(LexiconReadRepository repository) {
-    if (repository == null) {
-      LOGGER.warn(
-          "runtime lexicon=builtin-demo; only 5 demo terms, not the imported dictionary;"
-              + " configure JDBC_URL and use start_api for normal local use");
-      return new BuiltinLexiconCatalog();
-    }
-    var catalog = new CachedLexiconQueryService(repository, 4_000, 2_000, 512);
-    var version = repository.publishedVersion();
-    LOGGER.info("runtime lexicon=postgres publishedVersion={}", version);
-    if (version == 0) {
-      LOGGER.warn(
-          "runtime lexicon=empty reason=no-published-version; publish a lexicon before use");
-    }
-    return catalog;
   }
 }

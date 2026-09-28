@@ -11,6 +11,7 @@ import java.util.regex.Pattern;
 
 /** 离线按固定规则准备候选或分流；不删来源、不调用模型、不在观看时解析释义。 */
 public final class HintPreparation {
+  public static final String POLICY_ID = "lexiflow.deterministic-preparation.v1";
   private static final Pattern SHORT_LEMMA = Pattern.compile("[a-z]{2,8}");
   private static final Pattern EXPANSION = Pattern.compile("^\\[=[A-Za-z][A-Za-z0-9 .,'/-]*\\]");
   private static final Pattern HAN = Pattern.compile("\\p{IsHan}");
