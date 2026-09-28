@@ -145,7 +145,8 @@
 - 产出：按日志合同实现适配器及脱敏/格式/失败隔离测试，不触发额外资料采集。
 - 验收：所有事件字段类型、原因及单位匹配合同；对无提示/失败不混淆，正文与凭据不进入普通日志。
 - 验收：敏感记录文件实现与普通日志分离，沿用同步调用及重试/重启去重/失败语义，不构造假异步成功。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test`。
+- 实现边界：Catalog v2/change 2.0.0；普通封闭事件、敏感文件 Store、API 中立记录映射与装配同步切换，细节见观测合同 1.6，不改变 HTTP 协议。
+- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test :api:test`。
 
 ### 1.3.16. LF-TSK-API-2001 · 落实启动模式和已发布资料装载
 - 主责：`LF-WS-API`；预计 60 分钟；前置：`LF-TSK-OPS-2002`、`LF-TSK-ENR-2002`。
@@ -177,7 +178,7 @@
 - 直接检查：`npm --prefix extension test`。
 
 ### 1.3.20. LF-TSK-QLT-2001 · 串行核验完整主线及跨模块验收矩阵
-- 主责：`LF-WS-QLT`；预计 90 分钟；前置：`LF-TSK-API-2002`、`LF-TSK-EXT-2002`、`LF-TSK-OPS-2002`。
+- 主责：`LF-WS-QLT`；预计 90 分钟；前置：`LF-TSK-API-2002`、`LF-TSK-EXT-2002`、`LF-TSK-OPS-2002`、`LF-TSK-OBS-2003`。
 - 产出：补齐合成集成场景与规则变化证据，冻结交付输入供独立 TASK_VALIDATION 使用。
 - 验收：覆盖基础词/词形、重点/长尾/未知频率、可靠和噪声短语、坏默认义、同形冲突、增量范围及版本切换。
 - 验收：覆盖冷缓存、正式/演示启动、取消迟到、敏感记录故障和发布回滚；使用隔离服务，不连接用户运行库。
@@ -191,6 +192,14 @@
 - 验收：区分静态检查、合成集成、真实页面与正式 receipt；不自签独立 validation/review，不将规划完成当产品完成。
 - 验收：未选入本阶段的性能、多义项、上下文和知识补充事项仍在后续池；不得宣布其已实现。
 - 直接检查：`python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check && python3 -m scripts.repository.policy_projection --check`。
+
+### 1.3.22. LF-TSK-OBS-2003 · 接通导入步骤和缓存版本事件
+- 主责：`LF-WS-OBS`；预计 90 分钟；前置：`LF-TSK-OBS-2002`、`LF-TSK-API-2001`、`LF-TSK-OPS-2002`。
+- 产出：在导入与缓存实际处理节点接通结构化事件，区别适配器可用与节点已经落地。
+- 验收：导入固定步骤开始/完成和一次终态，等待确认不发执行心跳；来源变化与回滚使用固定原因，保留交互输出。
+- 验收：缓存版本清理后恰好一次事件，携带真实正/负失效数量；同版本不重复打印，失败不改变业务结果，不泄漏正文/词形/路径。
+- 验收：核心模块仅交接结构化事实或端口，不依赖logger；实际CLI/查询与隔离发布回归共同证明事件时机和次数。
+- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :adapters:test :adapters:postgresIntegrationTest :api:test`。
 
 ## 1.4. 准备与交付证据的区别
 

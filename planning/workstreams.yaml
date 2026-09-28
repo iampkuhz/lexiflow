@@ -848,8 +848,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-QLT-2001
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         - task_id: LF-TSK-ARCH-2004
           type: hard
@@ -960,8 +960,8 @@ workstreams:
         title: 串行核验完整主线及跨模块验收矩阵
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         owner: LF-WS-QLT
@@ -990,10 +990,16 @@ workstreams:
         - eng.repository.planning
         - eng.repository.policy
         dependencies:
+        - LF-TSK-OBS-2003
         - LF-TSK-API-2002
         - LF-TSK-EXT-2002
         - LF-TSK-OPS-2002
         depends_on:
+        - task_id: LF-TSK-OBS-2003
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
         - task_id: LF-TSK-API-2002
           type: hard
           required_task_version: 1
@@ -1060,8 +1066,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-QLT-2001
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         deliverable: 验证干净环境发布闭环和资源门槛及直接验收证据。
       - id: LF-TSK-QLT-2003
@@ -1952,8 +1958,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-OBS-2002
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         deliverable: 控制器调用应用用例和观测端口，移除直接文件实现，保留外部协议和计时消费合同。
       - id: LF-TSK-API-2003
@@ -2368,16 +2374,32 @@ workstreams:
         title: 实现普通结构化观测与敏感记录适配器
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         owner: LF-WS-OBS
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
-        - backend/product/adapters/src/main/java/io/lexiflow/observability/**
-        - backend/product/adapters/src/test/java/io/lexiflow/observability/**
+        - backend/product/adapters/src/main/java/io/lexiflow/observability/platform/StructuredEvent.java
+        - backend/product/adapters/src/main/java/io/lexiflow/observability/platform/StructuredEventLogger.java
+        - backend/product/adapters/src/main/java/io/lexiflow/observability/platform/SegmentAnalysisStore.java
+        - backend/product/adapters/src/main/java/io/lexiflow/observability/platform/SegmentAnalysisRecord.java
+        - backend/product/adapters/src/main/java/io/lexiflow/observability/platform/FileSegmentAnalysisStore.java
+        - backend/product/adapters/src/test/java/io/lexiflow/observability/platform/StructuredEventTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/observability/platform/StructuredEventLoggerTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/observability/platform/FileSegmentAnalysisStoreTest.java
+        - backend/product/api/src/main/java/io/lexiflow/api/hints/SegmentAnalysisLog.java
+        - backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java
+        - backend/product/api/src/test/java/io/lexiflow/api/hints/CaptionHintLogTest.java
+        - backend/build.gradle.kts
+        - backend/product/adapters/gradle.lockfile
+        - backend/verification/integration/gradle.lockfile
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/observability.md
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -2387,9 +2409,13 @@ workstreams:
         acceptance_criteria:
         - 所有事件字段类型、原因及单位匹配合同；对无提示/失败不混淆，正文与凭据不进入普通日志。
         - 敏感记录文件实现与普通日志分离，沿用同步调用及重试/重启去重/失败语义，不构造假异步成功。
+        - 普通事件仅允许固定枚举、UUID和非负数；事件与原因、计数、step/phase、timings组合严格校验，未知测量省略；logger格式化/输出故障隔离且不输出原异常。
+        - API保留request/result到中立敏感记录映射，组合根装配技术Store；文件writer完整移至adapters，无Enrichment/API反向依赖及兼容文件实现。
+        - 沿用同步force成功后去重、重启恢复和成功后专用console；损坏/重复/未完成尾行及symlink拒绝，空记录与disabled不建文件，不自动修复资料。
+        - API既有跨片段anchor、仅新后缀、重试/重启去重及失败不阻断回归保持；普通事件合成测试不可混入任何敏感正文/路径/异常消息。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
-        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test :api:test
         required_check_ids:
         - eng.backend.delivery
         - eng.repository.docs
@@ -2410,6 +2436,65 @@ workstreams:
           required_change_version: 2.0.0
           required_result: PASS
         deliverable: 按日志合同实现适配器及脱敏/格式/失败隔离测试，不触发额外资料采集。
+      - id: LF-TSK-OBS-2003
+        title: 接通导入步骤和缓存版本事件
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-OBS
+        kind: implementation
+        lifecycle_state: DRAFT
+        allowed_files:
+        - backend/product/lexicon/src/main/**
+        - backend/product/lexicon/src/test/**
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/**
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/importer/**
+        - backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java
+        - backend/product/api/src/test/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 导入步骤/终态和缓存版本清理事件在真实调用路径产生，不以只有formatter的单测代替节点落地。
+        acceptance_criteria:
+        - source_check/prepare/persist/publish 的开始与完成、导入一次终态及固定原因按观测合同输出，等待确认不发执行心跳；交互打印不替代事件。
+        - 缓存观察版本变化并清理后恰好一次事件，正负失效数来自实际本次状态，不伪造；同版本重复请求不重发。
+        - 领域及应用不依赖具体logger，通过结构化结果或明确端口交接；普通事件不包含词形/正文/路径/凭据。
+        - 隔离合成测试覆盖成功发布/来源变化/回滚与缓存版本切换，日志输出故障不改变原业务结果；既有CLI和查询合同保持。
+        acceptance_evidence:
+        - 冻结输入、真实节点调用次数与直接测试、同输入Verify及独立validation/review，执行状态仅记录phase2/status.md。
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :adapters:test :adapters:postgresIntegrationTest :api:test
+        required_check_ids:
+        - eng.backend.delivery
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-OBS-2002
+        - LF-TSK-API-2001
+        - LF-TSK-OPS-2002
+        depends_on:
+        - task_id: LF-TSK-OBS-2002
+          type: hard
+          required_task_version: 2
+          required_change_version: 2.0.0
+          required_result: PASS
+        - task_id: LF-TSK-API-2001
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2002
+          type: hard
+          required_task_version: 2
+          required_change_version: 2.0.0
+          required_result: PASS
+        deliverable: 导入步骤/终态和缓存版本清理事件在真实调用路径产生，不以只有formatter的单测代替节点落地。
+
 - id: LF-WS-OPS
   code: OPS
   name: "交付与运维"

@@ -8,6 +8,7 @@ import io.lexiflow.lexicon.application.query.CachedLexiconQueryService;
 import io.lexiflow.lexicon.domain.catalog.BuiltinLexiconCatalog;
 import io.lexiflow.lexicon.domain.port.LexiconCatalog;
 import io.lexiflow.lexicon.platform.persistence.PostgresPersistenceConfiguration;
+import io.lexiflow.observability.platform.FileSegmentAnalysisStore;
 import java.nio.file.Path;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -50,9 +51,22 @@ public class ApiApplication {
   SegmentAnalysisLog segmentAnalysisLog(
       @Value("${lexiflow.segment-analysis.path:}") String path,
       @Value("${lexiflow.segment-analysis.console:false}") boolean console) {
+    var resolvedPath = path.isBlank() ? configuredAnalysisPath() : Path.of(path);
     return new SegmentAnalysisLog(
-        path.isBlank() ? SegmentAnalysisLog.configuredPath() : Path.of(path),
-        console ? System.out : null);
+        new FileSegmentAnalysisStore(
+            resolvedPath, console ? line -> System.out.print(line) : null));
+  }
+
+  private static Path configuredAnalysisPath() {
+    var configured = System.getenv("LEXIFLOW_SEGMENT_LOG_PATH");
+    if (configured != null && !configured.isBlank()) return Path.of(configured);
+    for (var current = Path.of("").toAbsolutePath().normalize();
+        current != null;
+        current = current.getParent()) {
+      if (java.nio.file.Files.isRegularFile(current.resolve("harness/manifest.yaml")))
+        return current.resolve("tmp/analysis/caption-segments.jsonl");
+    }
+    throw new IllegalStateException("LexiFlow repository root is required for analysis log");
   }
 
   private static LexiconCatalog lexiconCatalog(LexiconReadRepository repository) {

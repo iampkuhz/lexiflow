@@ -11,6 +11,7 @@ import io.lexiflow.api.hints.model.CaptionHintRequest;
 import io.lexiflow.enrichment.application.caption.EnrichCaptionUseCase;
 import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
 import io.lexiflow.lexicon.domain.catalog.BuiltinLexiconCatalog;
+import io.lexiflow.observability.platform.FileSegmentAnalysisStore;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -175,7 +176,9 @@ class CaptionHintLogTest {
       throws IOException {
     return new CaptionHintController(
         new EnrichCaptionUseCase(new BuiltinLexiconCatalog(), new DeterministicHintPolicy()),
-        new SegmentAnalysisLog(path, console));
+        new SegmentAnalysisLog(
+            new FileSegmentAnalysisStore(
+                path, console == null ? null : line -> console.print(line))));
   }
 
   private static CaptionHintRequest request(CaptionHintRequest.Segment... segments) {
