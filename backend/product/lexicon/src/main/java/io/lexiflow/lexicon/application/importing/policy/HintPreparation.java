@@ -41,39 +41,37 @@ public final class HintPreparation {
   public static PreparedHint prepare(LexiconImportRow row) {
     Objects.requireNonNull(row, "row");
     boolean stardict = row.dictionary().sourceId().equals("ecdict-stardict");
-    if (stardict && row.lemma().codePoints().anyMatch(HintPreparation::nonAsciiLetter)) {
-      return excluded("non_ascii_lemma");
-    }
-    if (stardict && !hasQueryableSurface(row)) return excluded("outside_query_window");
-    if (row.basicVocabulary()) return excluded("basic_vocabulary");
-    if (row.allBasicPhrase()) return excluded("all_basic_phrase");
-    if (LexiconSurfacePolicy.lowInformationPhrase(row.lemma())) {
-      return excluded("low_information_phrase");
-    }
+    if (stardict && row.lemma().codePoints().anyMatch(HintPreparation::nonAsciiLetter))
+      return excluded(row, "non_ascii_lemma", List.of());
+    if (stardict && !hasQueryableSurface(row))
+      return excluded(row, "outside_query_window", List.of());
+    if (row.basicVocabulary()) return excluded(row, "basic_vocabulary", List.of());
+    if (row.allBasicPhrase()) return excluded(row, "all_basic_phrase", List.of());
+    if (LexiconSurfacePolicy.lowInformationPhrase(row.lemma()))
+      return excluded(row, "low_information_phrase", List.of());
     if (!stardict || row.curatedGloss()) {
       return safeGloss(row.chineseGloss())
-          ? ready(row.chineseGloss(), row.curatedGloss() ? "curated" : "existing_safe", List.of())
-          : excluded("unsafe_default_candidate");
+          ? ready(
+              row, row.chineseGloss(), row.curatedGloss() ? "curated" : "existing_safe", List.of())
+          : excluded(row, "unsafe_default_candidate", List.of());
     }
-    if (rareExpansion(row)) return excluded("english_heavy_expansion");
-    if (!HAN.matcher(row.sourceGloss()).find()) return excluded("no_han_source");
+    if (rareExpansion(row)) return excluded(row, "english_heavy_expansion", List.of());
+    if (!HAN.matcher(row.sourceGloss()).find()) return excluded(row, "no_han_source", List.of());
     String first = StardictGlossPreparation.firstCandidate(row.sourceGloss());
     if (withoutFrequencyProtection(row)
         && CHEMICAL_CHARS.matcher(first).find()
-        && CHEMICAL_NOTATION.matcher(first).find()) {
-      return excluded("specialist_notation");
-    }
+        && CHEMICAL_NOTATION.matcher(first).find())
+      return excluded(row, "specialist_notation", List.of());
     var cleaned = StardictGlossCleaner.clean(row.lemma(), row.sourceGloss());
-    if (safeGloss(cleaned.candidate())) {
-      return ready(cleaned.candidate(), cleaned.decisiveRule(), cleaned.matchedRules());
-    }
+    if (safeGloss(cleaned.candidate()))
+      return ready(row, cleaned.candidate(), cleaned.decisiveRule(), cleaned.matchedRules());
     String reason =
         cleaned.candidate().isEmpty()
             ? "empty_first_candidate"
             : !HAN.matcher(cleaned.candidate()).find()
                 ? "no_han_first_candidate"
                 : "unsafe_default_candidate";
-    return new PreparedHint(null, reason, reason, cleaned.matchedRules());
+    return excluded(row, reason, cleaned.matchedRules());
   }
 
   private static boolean hasQueryableSurface(LexiconImportRow row) {
@@ -112,12 +110,15 @@ public final class HintPreparation {
     return ascii >= 24 && han > 0 && (double) ascii / (ascii + han) >= 0.7;
   }
 
-  private static PreparedHint ready(String gloss, String rule, List<String> matches) {
-    return new PreparedHint(gloss, null, rule, matches);
+  private static PreparedHint ready(
+      LexiconImportRow row, String gloss, String rule, List<String> matches) {
+    var classification = ClassificationPolicy.classify(row, null);
+    return new PreparedHint(gloss, null, rule, matches, classification);
   }
 
-  private static PreparedHint excluded(String reason) {
-    return new PreparedHint(null, reason, reason, List.of());
+  private static PreparedHint excluded(LexiconImportRow row, String reason, List<String> matches) {
+    var classification = ClassificationPolicy.classify(row, reason);
+    return new PreparedHint(null, reason, reason, matches, classification);
   }
 
   private static boolean safeGloss(String gloss) {
