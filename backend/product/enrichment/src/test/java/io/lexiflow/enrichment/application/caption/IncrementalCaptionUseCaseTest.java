@@ -63,11 +63,18 @@ class IncrementalCaptionUseCaseTest {
   @Test
   void visualRowBoundaryCannotCreateLatePhraseOnSealedRow() {
     var queries = new ArrayList<String>();
-    LexiconCatalog catalog = text -> { queries.add(text); return candidates(text); };
-    var measured = new EnrichCaptionUseCase(catalog, new DeterministicHintPolicy())
-        .enrichIncrementalMeasured(request(group(
-            new CaptionIncrementalRequest.Segment("old", "figure ", null, false, 0),
-            new CaptionIncrementalRequest.Segment("new", "out", null, true, 1))));
+    LexiconCatalog catalog =
+        text -> {
+          queries.add(text);
+          return candidates(text);
+        };
+    var measured =
+        new EnrichCaptionUseCase(catalog, new DeterministicHintPolicy())
+            .enrichIncrementalMeasured(
+                request(
+                    group(
+                        new CaptionIncrementalRequest.Segment("old", "figure ", null, false, 0),
+                        new CaptionIncrementalRequest.Segment("new", "out", null, true, 1))));
     assertEquals(List.of("out"), queries);
     assertEquals(List.of("new"), measured.result().processedKeys());
     assertTrue(measured.result().hints().isEmpty());
