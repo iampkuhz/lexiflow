@@ -91,6 +91,14 @@ class LexiconCsvReaderTest {
             rows.getFirst()));
   }
 
+  @Test
+  void genericCsvDoesNotAcceptCallerSuppliedCuratedFlag() throws Exception {
+    var file = Files.createTempFile("lexiflow-curated-forgery", ".csv");
+    Files.writeString(
+        file, header() + ",curated\n" + row("stream of data", "数据流", "", "") + ",true");
+    assertThrows(IllegalArgumentException.class, () -> new LexiconCsvReader().read(file));
+  }
+
   private static String header() {
     return String.join(",", LexiconCsvReader.REQUIRED_HEADERS);
   }

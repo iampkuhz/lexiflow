@@ -73,6 +73,7 @@
 ### 1.3.7. LF-TSK-LEX-2002 · 实现短语质量与默认释义的发布前判定
 - 主责：`LF-WS-LEX`；预计 75 分钟；前置：`LF-TSK-LEX-2001`。
 - 产出：有原因的短语/默认释义过滤与边界测试，不再依靠频率掩盖来源质量。
+- 实现边界：仅改提示准备策略和 StarDict 人工映射的策略身份；受信完整 lemma 可豁免短语启发式，硬校验不豁免，普通 CSV 无 curated 开关。Catalog 为 v2/change 2.0.0。
 - 验收：按照冻结规则调整短语粗过滤，覆盖可靠完整短语、残缺词组和高频坏资料。
 - 验收：完整原始释义保留；首候选无效不以后项补位，质量判断发布前完成。
 - 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test`。

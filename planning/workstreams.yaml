@@ -1469,16 +1469,23 @@ workstreams:
         title: 实现短语质量与默认释义的发布前判定
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 75
         owner: LF-WS-LEX
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
-        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/**
-        - backend/product/lexicon/src/test/**
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/policy/HintPreparation.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/StardictCsvReader.java
+        - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/importing/**
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/importer/**
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/**
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/prepare-phase2-pipeline/**
         forbidden_files:
         - secrets/**
         - .local/**
@@ -1488,6 +1495,7 @@ workstreams:
         acceptance_criteria:
         - 按照冻结规则调整短语粗过滤，覆盖可靠完整短语、残缺词组和高频坏资料。
         - 完整原始释义保留；首候选无效不以后项补位，质量判断发布前完成。
+        - 只有受信 StarDict 完整 lemma 人工映射可豁免短语启发式；硬校验不豁免，策略身份绑定映射内容，普通 CSV 不接受伪造 curated 资格。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test
@@ -1554,8 +1562,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-LEX-2002
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         deliverable: 候选枚举归 Enrichment，LexiconCatalog 只接受规范词形集合；两实现与全部消费者和测试在同一可编译切片切换。
       - id: LF-TSK-LEX-2004

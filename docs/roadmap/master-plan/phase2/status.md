@@ -20,7 +20,8 @@
 - 真实 check 已成功消费 QLT-2003 唯一完整 PASS 链；旧失败记录没有删除或冒充成功，二期共 36 个 Task。
 - 启动交接已提交 `6bf12df` 并合入 `phase2`；ARCH-2001 的 check 为 `3d73a8c4-476c-455a-b655-bad962b2631f`（PASS）。
 - 已核对授权、一期缺口、原始主干起点、子任务 ownership 与本地集成事实；启动交接不改变业务规则或真实资料。
-- 当前已建立 `phase2-4-lexicon-classification`，收紧 LEX-2001 v2 的七个主要产品文件范围并开始实现；后续仍依序执行查询与应用主线、客户端和发布闭环，不宣称实现完成。
+- LEX-2001 已提交 `e1b36db` 并从 `phase2-4-lexicon-classification` 合入 `phase2`；同输入 Change `2df4c253-5d46-418e-b1cf-5226eb02361c`、Repository `5273b27a-dde3-4c77-9453-07e592e6f4ec`、validation `0723fd3b-8dcc-4131-b237-45a5094f165d`、review `8727eb73-6449-4583-b065-c9555be8d15d` 与 check `d8c1a812-3968-4bb0-83ff-a8e8c9446c38` 均 PASS，submission `bda94e95-fdd3-4581-9f2f-5cbb8c8e5a62`。
+- 当前在 `phase2-5-phrase-quality` 开始 LEX-2002 v2：短语质量、默认释义与受信人工映射边界；之后继续查询与应用主线、客户端和发布闭环。
 - OpenSpec 与运行记录保留在 ignored 本机目录；共享交接位于路线图与 Catalog。
 
 ## 1.4. 一期与后续边界
