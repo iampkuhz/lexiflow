@@ -1,5 +1,6 @@
 """文档治理、本机 skill 与共享策略投影的独立回归。"""
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,21 +11,41 @@ from scripts.repository import docs_check, local_skills, policy_projection
 
 
 class DocumentationTests(unittest.TestCase):
-    def test_product_roadmap_has_one_entry_and_three_stage_entries(self):
+    def test_product_roadmap_has_current_phases_and_future_backlog(self):
         root = Path(__file__).resolve().parents[2]
         entry = root / 'docs/roadmap/master-plan.md'
         content = entry.read_text()
         manifest = yaml.safe_load((root / 'harness/manifest.yaml').read_text())
-        for name in ('foundation', 'performance', 'improvement', 'status'):
+        for name in ('foundation', 'phase2', 'future', 'status'):
             relative = f'docs/roadmap/master-plan/{name}.md'
             self.assertTrue((root / relative).is_file())
             self.assertIn(relative, manifest['docs'])
             self.assertIn(f'master-plan/{name}.md', content)
+        for name in ('design', 'tasks', 'status'):
+            relative = f'docs/roadmap/master-plan/phase2/{name}.md'
+            self.assertTrue((root / relative).is_file())
+            self.assertIn(relative, manifest['docs'])
         for obsolete in ('phase-1-status.md', 'phase-2-status.md'):
             self.assertFalse((root / 'docs/roadmap' / obsolete).exists())
         self.assertIn('永不调用大模型', content)
         self.assertIn('事后分析', content)
         self.assertIn('方向确认不等于功能验收', content)
+
+    def test_build_session_artifacts_are_ignored_but_product_sources_are_not(self):
+        root = Path(__file__).resolve().parents[2]
+        ignored = 'backend/gradle/build-logic/.kotlin/sessions/compiler.salive'
+        source = 'backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/RebuildProgress.java'
+        result = subprocess.run(
+            ['git', 'check-ignore', '--no-index', '--stdin'], cwd=root,
+            input=f'{ignored}\n{source}\n', text=True, capture_output=True, check=False)
+        self.assertEqual(0, result.returncode)
+        self.assertEqual([ignored], result.stdout.splitlines())
+        self.assertEqual('', result.stderr)
+        registry = yaml.safe_load((root / 'harness/module-checks.yaml').read_text())
+        for check_id in ('eng.repository.module-tests', 'eng.repository.module-tests-on-change'):
+            check = next(item for item in registry['checks'] if item['check_id'] == check_id)
+            self.assertIn({'path': '.gitignore'}, check['triggers'])
+            self.assertIn('.gitignore', check['input_paths'])
 
     def test_diagram_workflow_uses_tmp_drafts_and_markdown_final_source(self):
         root = Path(__file__).resolve().parents[2]

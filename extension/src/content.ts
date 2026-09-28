@@ -1,9 +1,10 @@
-import { BilingualOverlay, OVERLAY_ID as overlayId, visibleSegments } from "./overlay";
-import { readCaptionSource } from "./caption-source";
+import { BilingualOverlay, OVERLAY_ID as overlayId } from "./overlay";
+import { CaptionViewport, readCaptionSource } from "./caption-source";
 import { CaptionSnapshotTracker } from "./caption-snapshot";
 import { YoutubeSourceMetadata } from "./youtube-source";
 import { snapshotText } from "./protocol";
 const snapshotTracker = new CaptionSnapshotTracker();
+const captionViewport = new CaptionViewport();
 const sourceMetadata = new YoutubeSourceMetadata();
 let trackKey: string | null = null;
 let nativeIdentity = "";
@@ -141,7 +142,7 @@ function currentSource() {
   const player = document.querySelector<HTMLElement>(".html5-video-player, #movie_player");
   const video = player?.querySelector<HTMLVideoElement>("video");
   if (!enhancementEnabled || player === null || !video || video.ended || sourceStopped || document.hidden || seeking || navigating || player.classList.contains("ad-showing")) return undefined;
-  return readCaptionSource(visibleSegments(player));
+  return readCaptionSource(captionViewport.read(player));
 }
 
 function currentCaption(): string | undefined {
@@ -154,6 +155,7 @@ function scheduleCapture(): void {
 }
 
 function clearSource(): void {
+  captionViewport.reset();
   snapshotTracker.reset();
   coordinator.clear(++sourceSequence);
 }
@@ -302,12 +304,12 @@ function captureCaptionMotion(): void {
 function isCaptionMotion(event: Event): boolean {
   return event.target instanceof Element && !!event.target.closest("#ytp-caption-window-container");
 }
-document.addEventListener("transitionrun", event => {
+for (const name of ["transitionrun", "animationstart"]) document.addEventListener(name, event => {
   if (!isCaptionMotion(event)) return;
   motionDeadline = performance.now() + 2000;
   if (motionFrame === undefined) motionFrame = requestAnimationFrame(captureCaptionMotion);
 }, true);
-for (const name of ["transitionend", "transitioncancel"]) {
+for (const name of ["transitionend", "transitioncancel", "animationend", "animationcancel"]) {
   document.addEventListener(name, event => { if (isCaptionMotion(event)) scheduleCapture(); }, true);
 }
 

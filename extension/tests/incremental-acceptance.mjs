@@ -52,6 +52,26 @@ export async function runIncrementalAcceptance({page,serviceWorker,setCaption,wa
   await page.waitForTimeout(500);
   assert.equal(await overlayText(page),'A reliable(可靠的) method new words');
   assert.equal(await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length),motionBefore+1);
+  // 原生动画复位与前缀节点移除不在同一帧：不得回显旧行或丢掉刚出现的新行。
+  const stableBottom=await page.locator('#lexiflow-caption-overlay').evaluate(host=>host.style.bottom);
+  await page.evaluate(()=>{
+    window.__rollupFrames=[];window.__recordRollup=true;
+    const collect=()=>{if(!window.__recordRollup)return;const host=document.querySelector('#lexiflow-caption-overlay');window.__rollupFrames.push({text:host.shadowRoot.querySelector('.line').textContent,bottom:host.style.bottom});requestAnimationFrame(collect);};requestAnimationFrame(collect);
+    const content=document.querySelector('.captions-text');content.style.transition='none';content.style.transform='translateY(0)';
+  });
+  await page.waitForTimeout(80);
+  assert.equal(await overlayText(page),'A reliable(可靠的) method new words');
+  await page.evaluate(()=>{document.querySelector('.captions-text').firstElementChild.remove();});
+  await page.waitForTimeout(80);
+  const frames=await page.evaluate(()=>{window.__recordRollup=false;return window.__rollupFrames;});
+  assert.ok(frames.length>=2);
+  assert.ok(frames.every(frame=>frame.text==='A reliable(可靠的) method new words'),JSON.stringify(frames));
+  assert.ok(frames.every(frame=>frame.bottom===stableBottom),JSON.stringify(frames));
+  assert.equal(await page.evaluate(()=>document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.gloss')===window.__motionGloss),true);
+  assert.equal(await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length),motionBefore+1);
+  // seek 建立新来源边界，同一节点/相同文字可以合法重新出现。
+  await page.evaluate(()=>{const video=document.querySelector('video');video.dispatchEvent(new Event('seeking',{bubbles:true}));document.querySelector('.captions-text').firstElementChild.querySelector('.ytp-caption-segment').textContent='An older line';video.dispatchEvent(new Event('seeked',{bubbles:true}));});
+  await page.waitForFunction(()=>document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.line').textContent.includes('An older line'));
   // 页面桥为不可信输入：已匹配轨道变为歧义时，不能沿用旧轨道标签。
   await setCaption(page,'A reliable native',42);await waitForState(page,'ready');
   await page.evaluate(()=>window.addEventListener('message',event=>{if(event.data?.type==='lexiflow-native-captions')window.__sourceMessageEvidence={origin:event.origin,sameWindow:event.source===window,videoId:new URL(location.href).searchParams.get('v'),time:document.querySelector('video').currentTime};}));

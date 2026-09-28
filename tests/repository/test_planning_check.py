@@ -12,6 +12,7 @@ from pathlib import Path
 
 import yaml
 
+from scripts.repository.catalog import catalog_tasks
 from scripts.repository.planning_validator import (
     PlanningValidator,
     _load_canonical_from_policy,
@@ -870,7 +871,13 @@ class TestRepoIntegration(unittest.TestCase):
         self.assertEqual([], result["errors"])
         self.assertEqual("execution", v.ws["program"]["catalog_mode"])
         self.assertGreater(result["task_count"], 0)
-        self.assertTrue(all(task["phase"] == "P1" for task in v.tasks.values()))
+        # P2 准备已获授权，但这不允许把草案误当成已启动或已验收任务。
+        self.assertEqual({"P1", "P2"}, {task["phase"] for task in v.tasks.values()})
+        phase2 = [task for task in v.tasks.values() if task["phase"] == "P2"]
+        self.assertTrue(phase2)
+        raw_tasks = catalog_tasks(v.ws)
+        self.assertTrue(all(raw_tasks[task["id"]]["task"]["lifecycle_state"] == "DRAFT"
+                            for task in phase2))
         self.assertFalse(v.gates, "No historical gates may authorize foundation work")
         self.assertEqual(len(result["checks_run"]), 12)
 

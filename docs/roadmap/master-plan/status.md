@@ -11,11 +11,13 @@
 
 ## 1.2. 当前交付检查
 
-本轮工作范围是字幕增量快照、后端新增范围查询和稳定提示渲染。变更合同在 [`openspec/changes/stabilize-incremental-captions/`](../../../openspec/changes/stabilize-incremental-captions/)；长期合同在 `openspec/specs/`。本地临时报告按 Harness 写入 ignored `tmp/quality/verification-reports/`，不作为仓库中的固定 PASS 证明。
+本轮收尾范围为本机持久配置、重建交互提示及第一阶段实际可用链路，合同在 `openspec/changes/finish-foundation-local-delivery/` 与 `openspec/changes/safeguard-lexicon-rebuild/`。本机私有配置已初始化；既有已发布开发词库保留，不为验证而清库。各命令仍独立启动，等待人工输入时停止心跳，执行时才报告耗时。
 
-合成字幕的单元与浏览器回归已覆盖节点保留、前缀退出、有限重试、来源隐藏及导航失效。真实登录态 Chrome 与本地 PostgreSQL 词库链路已完成自动采样验收，覆盖连续追加、滚动、字幕关闭和跳转后同步；采样发现的 CSS roll-up 可见行滞后已修复，并纳入无 DOM mutation 的动画回归。真实来源字段仅在可靠关联时提供，未知路径保持 null。本地采样证据留在 ignored 目录，不替代最终冻结输入的独立验证与审查。
+验证覆盖严格配置读取、确认/取消/EOF、Gradle 配置缓存首跑与复用的 PTY 输入、隔离数据库后端检查、扩展合成连续运行与截图，以及真实已发布词库的只读 HTTP/浏览器近似验证。当前轮原始日志、样本范围、截图检查、冻结指纹和复核结论保存在 ignored `tmp/quality/foundation-local-delivery/`；不能把该目录存在或旧报告视为新输入 PASS。
 
-Change Verify、Repository Verify 与直接测试必须在最终相同输入上分别核验。正式 Delivery Gate 的 submission、validation、review、check 需要各阶段真实独立身份及明确证据，不能由实现者自签或由本地 Verify 自动替代。Qoder 原始运行记录保留在 ignored `tmp/qoder-tasks/`，仅供身份和预算审计，不是本轮的交付签发。
+真实用户 Chrome 的扩展刷新和最终英文视频观看仍需用户确认，隔离合成页面和内置词库检查不能代替它。实际运行库验证必须单独标注资料版本、来源摘要和只读边界。正式一期完成判定继续遵守[独立验收](foundation/acceptance.md)，不把启动成功或近似验证当作完整真实页面验收。
+
+Change Verify、Repository Verify 与直接测试必须绑定相同最终输入。独立审查只消费冻结差异与验证证据；Formal Gate 的独立身份、依赖和最终用户批准不能由实现者自签或由本地 Verify 替代。
 
 ## 1.3. 后续决策
 

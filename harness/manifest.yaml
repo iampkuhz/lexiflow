@@ -97,6 +97,11 @@ docs:
 - docs/development/troubleshooting.md
 - docs/roadmap/master-plan.md
 - docs/roadmap/master-plan/foundation.md
+- docs/roadmap/master-plan/phase2.md
+- docs/roadmap/master-plan/phase2/design.md
+- docs/roadmap/master-plan/phase2/tasks.md
+- docs/roadmap/master-plan/phase2/status.md
+- docs/roadmap/master-plan/future.md
 - docs/roadmap/master-plan/performance.md
 - docs/roadmap/master-plan/improvement.md
 - docs/roadmap/master-plan/status.md

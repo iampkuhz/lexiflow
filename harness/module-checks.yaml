@@ -314,6 +314,7 @@ checks:
   timeout_seconds: 180
   scope: repository-baseline
   triggers:
+  - path: .gitignore
   - path: scripts/repository/
   - path: tests/repository/
   - path: scripts/architecture-review.md
@@ -324,6 +325,7 @@ checks:
   required_environment:
   - python3
   input_paths:
+  - .gitignore
   - scripts/repository
   - tests/repository
   - scripts/architecture-review.md
@@ -359,6 +361,7 @@ checks:
   timeout_seconds: 180
   scope: change-targeted
   triggers:
+  - path: .gitignore
   - path: scripts/repository/
   - path: tests/repository/
   - path: scripts/architecture-review.md
@@ -369,6 +372,7 @@ checks:
   required_environment:
   - python3
   input_paths:
+  - .gitignore
   - scripts/repository
   - tests/repository
   - scripts/architecture-review.md

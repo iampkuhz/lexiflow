@@ -28,7 +28,7 @@ public final class LexiconRebuildMain {
     var schemaFile = Path.of(args[1]);
     var input = args[2];
     System.out.println(
-        "[lexiconRebuild] 这是单个 Gradle 任务；以下 4 个阶段及其内部步骤会分别标记。耗时阶段每 3 分钟报告状态，不代表完成百分比。");
+        "[lexiconRebuild] 这是单个 Gradle 任务；以下 4 个阶段及其内部步骤会分别标记。执行时每 3 分钟报告状态；等待输入时不输出心跳，不代表完成百分比。");
     try (var progress = new RebuildProgress(System.out, TimeUnit.MINUTES.toMillis(3))) {
       progress.start(1, "来源预检", "只读，不连接数据库");
       LexiconImportMain.execute(new String[] {"validate", "--input", input}, progress::detail);
@@ -41,14 +41,19 @@ public final class LexiconRebuildMain {
           target.database(), target.schema(), target.lexiconRelations());
       if (!target.lexiconRelations().isEmpty()) {
         var expected = confirmation(target.database(), target.schema());
-        progress.detail("等待执行人在原终端输入精确确认文本；尚未删除数据");
-        System.out.printf(
-            "将删除并重建本项目三张词库表及其数据。请先停止 API、确认备份和目标。" + " 不会删除 CSV、其他文件或其他表。输入 %s 并按 Enter 继续：%n",
-            expected);
+        progress.awaitInput(
+            "将删除并重建本项目三张词库表及其数据。请先停止 API、确认备份和目标。"
+                + " 不会删除 CSV、其他文件或其他表。\n"
+                + "请在运行此命令的终端输入："
+                + expected
+                + "，然后按 Enter。\n"
+                + "不重建请按 Ctrl+C；输入其他文本或直接按 Enter 也会取消。\n"
+                + "> ");
         requireConfirmation(
             target.database(),
             target.schema(),
             new InputStreamReader(System.in, StandardCharsets.UTF_8));
+        progress.resumeExecution("已收到精确确认；重新核对目标，尚未删除数据");
       }
       if (!target.equals(PostgresSchemaInitializer.inspect(jdbcUrl))) {
         throw new IllegalStateException(
@@ -84,9 +89,11 @@ public final class LexiconRebuildMain {
 
   static void requireConfirmation(String database, String schema, Reader input) throws IOException {
     var answer = new BufferedReader(input).readLine();
+    if (answer == null) {
+      throw new IllegalStateException("未收到确认输入（stdin 已关闭）；未修改数据库。请在可输入的终端重新运行。");
+    }
     if (!confirmation(database, schema).equals(answer)) {
-      throw new IllegalStateException(
-          "rebuild confirmation missing or mismatched; no database changes");
+      throw new IllegalStateException("确认文本不匹配，已取消重建；未修改数据库。");
     }
   }
 }

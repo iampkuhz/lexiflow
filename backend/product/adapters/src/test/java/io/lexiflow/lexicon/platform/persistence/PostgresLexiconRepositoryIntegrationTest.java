@@ -9,6 +9,7 @@ import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
 import io.lexiflow.lexicon.application.importing.model.SourceReference;
+import io.lexiflow.lexicon.application.query.CachedLexiconQueryService;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconPriority;
 import java.io.IOException;
@@ -294,6 +295,63 @@ class PostgresLexiconRepositoryIntegrationTest {
             assertEquals("环境", v2.finalGloss());
             assertEquals(2, v2.lexiconVersion());
             assertFalse(v1.senseId().equals(v2.senseId()));
+          }
+        });
+  }
+
+  @Test
+  void oxfordPublicationBlocksAllFormsAndInvalidatesWarmHintsWithoutBlockingPhrases()
+      throws Exception {
+    inInitializedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            repository.publish(
+                new LexiconImportRequest(
+                    List.of(row("false", "错误的", List.of(), List.of())), metadata('a')));
+            var cache = new CachedLexiconQueryService(repository, 20, 1, 1);
+            assertEquals(
+                LexiconHintAction.HINT, cache.candidatesFor("false").getFirst().finalAction());
+            var source = new SourceReference("fixture", "MIT", "oxford");
+            var words = new java.util.ArrayList<LexiconImportRow>();
+            for (var lemma : List.of("false", "ability", "false alarm")) {
+              words.add(
+                  new LexiconImportRow(
+                      lemma,
+                      "可靠短释",
+                      "",
+                      lemma.equals("ability") ? List.of("abilityalias") : List.of(),
+                      lemma.equals("ability") ? List.of("abilities") : List.of(),
+                      new LexiconPriority(4.2, 1, 900),
+                      source,
+                      source,
+                      List.of(source),
+                      true,
+                      false,
+                      "oxford-all-words-fixture",
+                      "可靠短释",
+                      lemma.equals("false") ? 2370L : null,
+                      null,
+                      List.of(),
+                      true));
+            }
+            words.add(row("specialist", "专家", List.of(), List.of()));
+            repository.publish(new LexiconImportRequest(words, metadata('b')));
+            for (var form : List.of("false", "FALSE", "ability", "abilities", "abilityalias")) {
+              var candidate = cache.candidatesFor(form).getFirst();
+              assertEquals(2, candidate.lexiconVersion());
+              assertEquals(LexiconHintAction.BLOCK, candidate.finalAction(), form);
+            }
+            for (var form : List.of("false alarm", "specialist")) {
+              assertEquals(
+                  LexiconHintAction.HINT, cache.candidatesFor(form).getFirst().finalAction(), form);
+            }
+            assertEquals(
+                "2",
+                scalar(
+                    jdbcUrl,
+                    "SELECT COUNT(*)::text FROM lexicon_prepared_entry "
+                        + "WHERE source_oxford_basic AND exclusion_reason='basic_vocabulary'"));
           }
         });
   }

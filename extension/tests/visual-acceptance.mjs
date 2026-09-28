@@ -86,14 +86,14 @@ export async function runVisualAcceptance({ page, serviceWorker, apiBase, artifa
       viewport: { width: 960, height: 760 }, caption: longCaption, time: 24, expectedHints: 1, inputMode: "actual-local-api"
     });
 
-    await installThreeHintRendererMock(serviceWorker, apiBase, mockCaption, mockHints);
+    await installHintRendererMock(serviceWorker, apiBase, mockCaption, mockHints);
     fetchMockInstalled = true;
     await runCase({
       id: "three-renderer-hints", page, artifactRoot, setCaption, waitForState, overlayText, cases,
       viewport: { width: 960, height: 760 }, caption: mockCaption, time: 25, expectedHints: 3,
       inputMode: "renderer-contract-mock", expectedTerms: mockHints.map(([term]) => term)
     });
-    await restoreThreeHintRendererMock(serviceWorker);
+    await restoreHintRendererMock(serviceWorker);
     fetchMockInstalled = false;
 
     return {
@@ -106,7 +106,7 @@ export async function runVisualAcceptance({ page, serviceWorker, apiBase, artifa
       ]
     };
   } finally {
-    if (fetchMockInstalled) await restoreThreeHintRendererMock(serviceWorker);
+    if (fetchMockInstalled) await restoreHintRendererMock(serviceWorker);
     if (initialFixtureState.caption && (initialFixtureState.overlayState === "ready" || initialFixtureState.overlayState === "no-pending")) {
       await setCaption(page, initialFixtureState.caption, initialFixtureState.time);
       await waitForState(page, initialFixtureState.overlayState);
@@ -169,8 +169,8 @@ async function runCase({
   assert.equal(evidence.englishText, caption, `${id}: original English must remain complete`);
   assert.equal(evidence.glosses.length, expectedHints, `${id}: hint count`);
   assert.equal(evidence.adjacentGlosses, true, `${id}: Chinese must immediately follow its English segment`);
-  assert.deepEqual(evidence.markedTerms, evidence.glosses.map(gloss => gloss.term), `${id}: each complete hinted span, including phrase spaces, must be underlined`);
-  assert.equal(evidence.allHintsUnderlined, true, `${id}: hinted spans must retain visible underline styling`);
+  assert.deepEqual(evidence.markedTerms, evidence.glosses.map(gloss => gloss.term).filter(term => /\S+\s+\S/u.test(term.trim())), `${id}: only one-hint multiword phrases are underlined`);
+  assert.equal(evidence.correctUnderlineStyles, true, `${id}: phrase-only underline styling`);
   assert.equal(evidence.withinPlayer, true, `${id}: overlay must stay within the player`);
   assert.equal(evidence.noControlCollision, true, `${id}: overlay must not collide with controls`);
   assert.equal(evidence.noGlossCollision, true, `${id}: glosses must not overlap each other`);
@@ -208,9 +208,9 @@ async function collectGeometry(page, caption, expectedHints, expectedTerms, mini
     if (!(line instanceof HTMLElement) || !(summary instanceof HTMLElement)) throw new Error("visual-shadow-content-missing");
     const children = [...line.children];
     const glosses = children.filter(child => child.classList.contains("gloss"));
-    const markedTerms = children.filter(child => child.classList.contains("hint-term")).map(child => child.textContent ?? "");
-    const allHintsUnderlined = children.filter(child => child.classList.contains("hint-term"))
-      .every(term => getComputedStyle(term).borderBottomStyle === "solid" && parseFloat(getComputedStyle(term).borderBottomWidth) > 0);
+    const markedTerms = children.filter(child => child.classList.contains("hint-phrase")).map(child => child.textContent ?? "");
+    const correctUnderlineStyles = children.filter(child => child.classList.contains("hint-term"))
+      .every(term => getComputedStyle(term).textDecorationLine.includes("underline") === /\S+\s+\S/u.test(term.textContent.trim()));
     const englishText = children.filter(child => !child.classList.contains("gloss")).map(child => child.textContent ?? "").join("");
     const termsFromTitle = glosses.map(gloss => /^不再提示「(.+?)」/.exec(gloss.getAttribute("title") ?? "")?.[1] ?? "");
     const adjacentGlosses = glosses.every((gloss, index) => {
@@ -236,7 +236,7 @@ async function collectGeometry(page, caption, expectedHints, expectedTerms, mini
       englishText,
       glosses: glosses.map((gloss, index) => ({ term: terms?.[index] ?? termsFromTitle[index], text: gloss.textContent ?? "", rect: glossRects[index] })),
       markedTerms,
-      allHintsUnderlined,
+      correctUnderlineStyles,
       player: playerRect,
       line: lineRect,
       controls: { rect: controlRect, visible: visible(summary), enabled: !buttons.some(button => button.disabled) },
@@ -264,14 +264,14 @@ async function assertControlsUsable(page) {
   await page.getByLabel("LexiFlow 设置与诊断").click();
 }
 
-async function installThreeHintRendererMock(serviceWorker, apiBase, caption, terms) {
+async function installHintRendererMock(serviceWorker, apiBase, caption, terms) {
   const hints = terms.map(([term, chineseGloss], index) => ({
     startOffset: caption.indexOf(term), endOffset: caption.indexOf(term) + term.length, chineseGloss,
     lexiconEntryId: `00000000-0000-0000-0000-00000000000${index + 1}`,
     lexiconVersion: 1,
     senseId: `00000000-0000-0000-0000-00000000001${index + 1}`
   }));
-  assert.equal(hints.length, 3);
+  assert.ok(hints.length > 0);
   assert.ok(hints.every(hint => hint.startOffset >= 0), "mock terms must occur in the synthetic caption");
   await serviceWorker.evaluate(({ base, syntheticCaption, syntheticHints }) => {
     if (globalThis.__lexiflowVisualAcceptanceRestoreFetch) throw new Error("visual-fetch-mock-already-installed");
@@ -305,6 +305,77 @@ async function installThreeHintRendererMock(serviceWorker, apiBase, caption, ter
   }, { base: apiBase, syntheticCaption: caption, syntheticHints: hints });
 }
 
-async function restoreThreeHintRendererMock(serviceWorker) {
+async function restoreHintRendererMock(serviceWorker) {
   await serviceWorker.evaluate(() => globalThis.__lexiflowVisualAcceptanceRestoreFetch?.());
+}
+
+/** 常规 E2E 必跑的词组标记及相邻行背景回归；只 mock 提示合同，不使用真实字幕。 */
+export async function runUnderlineAcceptance({page,serviceWorker,apiBase,repositoryRoot,setCaption,waitForState}) {
+  const artifactRoot=resolve(repositoryRoot,'tmp/quality/underline',String(Date.now()));
+  await mkdir(artifactRoot,{recursive:true});
+  const viewport=page.viewportSize();
+  const previous=await page.evaluate(()=>({
+    width:document.querySelector('#player').style.width,
+    font:document.querySelector('#ytp-caption-window-container').style.fontSize
+  }));
+  const cases=[
+    {id:'single-word',text:'A reliable result.',terms:[['reliable','可靠的']],marked:[]},
+    {id:'adjacent-words',text:'Reliable captions.',terms:[['Reliable','可靠的'],['captions','字幕']],marked:[]},
+    {id:'apostrophe-hyphen',text:"We can't use state-of-the-art tools.",terms:[["can't",'不能'],['state-of-the-art','先进的']],marked:[]},
+    {id:'phrase-and-word',text:'We take into account reliable evidence.',terms:[['take into account','考虑到'],['reliable','可靠的']],marked:['take into account']},
+    {id:'two-source-lines',rows:['We take into account each detail.','Another clear result remains visible.'],terms:[['take into account','考虑到'],['clear result','清晰结果']],marked:['take into account','clear result']},
+    {id:'cross-source-line',rows:['We take into','account each detail.'],terms:[['take into account','考虑到']],marked:['take into account']},
+    {id:'narrow-natural-wrap',text:'We take every important detail into account today.',terms:[['take every important detail into account','综合考虑']],marked:['take every important detail into account'],width:440,font:36},
+    {id:'large-text-lines',rows:['We take into account each detail.','Another clear result remains visible.'],terms:[['take into account','考虑到'],['clear result','清晰结果']],marked:['take into account','clear result'],font:48}
+  ];
+  const evidence=[];
+  try {
+    await page.evaluate(()=>{document.querySelector('#player').style.width='min(960px, calc(100vw - 16px))';});
+    for(const [index,item] of cases.entries()) {
+      await setCaption(page,'',60+index);await waitForState(page,'idle');
+      await page.setViewportSize({width:item.width??1280,height:850});
+      await page.evaluate(font=>{document.querySelector('#ytp-caption-window-container').style.fontSize=`${font}px`;},item.font??24);
+      const caption=item.rows?.join(' ')??item.text;
+      await installHintRendererMock(serviceWorker,apiBase,caption,item.terms);
+      try {
+        await setCaption(page,caption,60+index);await waitForState(page,'ready');
+        if(item.rows) {
+          await page.evaluate(rows=>{
+            const container=document.querySelector('#ytp-caption-window-container');container.replaceChildren();
+            for(const text of rows){const row=document.createElement('span');row.className='caption-visual-line';row.style.display='block';row.append(Object.assign(document.createElement('span'),{className:'ytp-caption-segment',textContent:text}));container.append(row);}
+          },item.rows);
+          await page.waitForFunction(count=>document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelectorAll('br').length===count,item.rows.length-1);
+        }
+        const actual=await page.evaluate(()=>{
+          const line=document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.line');
+          const terms=[...line.querySelectorAll('.hint-term')];
+          const rects=[...line.getClientRects()].filter(rect=>rect.width>0).map(rect=>({top:rect.top,bottom:rect.bottom}));
+          const rows=rects.filter((rect,index)=>!rects.slice(0,index).some(old=>Math.abs(old.top-rect.top)<1)).sort((a,b)=>a.top-b.top);
+          return {
+            marked:terms.filter(term=>getComputedStyle(term).textDecorationLine.includes('underline')).map(term=>term.textContent),
+            borderless:terms.every(term=>parseFloat(getComputedStyle(term).borderBottomWidth)===0&&parseFloat(getComputedStyle(term).paddingBottom)===0),
+            noBackgroundOverlap:rows.every((row,index)=>index===0||rows[index-1].bottom<=row.top+0.5),
+            rowCount:rows.length,rows,
+            english:[...line.children].filter(node=>!node.classList.contains('gloss')).map(node=>node.textContent).join(''),
+            glosses:line.querySelectorAll('.gloss').length,
+            phraseRectCount:[...line.querySelectorAll('.hint-phrase')].map(term=>term.getClientRects().length)
+          };
+        });
+        assert.deepEqual(actual.marked,item.marked,`${item.id}: only whole-phrase hints receive underline`);
+        assert.equal(actual.english,caption);assert.equal(actual.glosses,item.terms.length);
+        assert.equal(actual.borderless,true,`${item.id}: no out-of-line border or padding`);
+        assert.equal(actual.noBackgroundOverlap,true,`${item.id}: adjacent line backgrounds overlap ${JSON.stringify(actual.rows)}`);
+        if(item.rows||item.width)assert.ok(actual.rowCount>=2,`${item.id}: must really render multiple lines`);
+        if(item.id==='cross-source-line'||item.id==='narrow-natural-wrap')assert.ok(actual.phraseRectCount[0]>=2,`${item.id}: phrase must span lines`);
+        const screenshot=resolve(artifactRoot,`${item.id}.png`);await page.locator('#player').screenshot({path:screenshot});
+        evidence.push({id:item.id,inputMode:'renderer-contract-mock',...actual,screenshot});
+      } finally {await restoreHintRendererMock(serviceWorker);}
+    }
+    const {writeFile}=await import('node:fs/promises');
+    await writeFile(resolve(artifactRoot,'report.json'),JSON.stringify({status:'PASS',cases:evidence},null,2));
+  } finally {
+    await page.evaluate(value=>{document.querySelector('#player').style.width=value.width;document.querySelector('#ytp-caption-window-container').style.fontSize=value.font;},previous);
+    if(viewport)await page.setViewportSize(viewport);
+    await setCaption(page,'We need reliable captions.',2);await waitForState(page,'ready');
+  }
 }

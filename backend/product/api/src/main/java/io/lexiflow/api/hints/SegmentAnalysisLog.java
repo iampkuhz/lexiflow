@@ -4,6 +4,7 @@ import io.lexiflow.enrichment.domain.model.CaptionIncrementalRequest;
 import io.lexiflow.enrichment.domain.model.IncrementalHintResult;
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
@@ -29,13 +30,25 @@ public final class SegmentAnalysisLog {
   private static final Pattern ID_LINE =
       Pattern.compile("^\\{\"segmentId\":\"([0-9a-f]{64})\",.*}$");
   private final Path path;
+  private final PrintStream console;
   private final Set<String> recorded = new HashSet<>();
   private long knownSize;
   private boolean initialized;
 
   /** 绑定专用路径；首次记录时初始化，文件故障不能阻止 API 启动。 */
   public SegmentAnalysisLog(Path path) {
+    this(path, null);
+  }
+
+  /**
+   * 将成功新增的片段同时显示在明确启用的本机敏感控制台；不回放历史记录。
+   *
+   * @param path 本机私有 JSONL 路径
+   * @param console 专用本机输出，null 表示不输出正文到控制台
+   */
+  public SegmentAnalysisLog(Path path, PrintStream console) {
     this.path = path.toAbsolutePath().normalize();
+    this.console = console;
   }
 
   private void initialize() throws IOException {
@@ -168,6 +181,11 @@ public final class SegmentAnalysisLog {
       channel.force(true);
       recorded.add(id);
       knownSize = channel.size();
+      // 只镜像已成功持久化的新记录；JSON 转义阻止换行/终端控制符注入。
+      if (console != null) {
+        console.print("[LexiFlow segment] " + line);
+        console.flush();
+      }
     }
   }
 

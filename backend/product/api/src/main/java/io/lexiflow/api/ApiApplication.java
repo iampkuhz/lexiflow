@@ -45,11 +45,14 @@ public class ApiApplication {
         lexiconCatalog(repositories.getIfAvailable()), new DeterministicHintPolicy());
   }
 
-  /** 为字幕分析单独装配 ignored 本机文件，不通过普通应用日志输出正文。 */
+  /** 装配私有片段台账；仅本机启动器显式启用专用控制台流，普通 logger 不含正文。 */
   @Bean
-  SegmentAnalysisLog segmentAnalysisLog(@Value("${lexiflow.segment-analysis.path:}") String path) {
+  SegmentAnalysisLog segmentAnalysisLog(
+      @Value("${lexiflow.segment-analysis.path:}") String path,
+      @Value("${lexiflow.segment-analysis.console:false}") boolean console) {
     return new SegmentAnalysisLog(
-        path.isBlank() ? SegmentAnalysisLog.configuredPath() : Path.of(path));
+        path.isBlank() ? SegmentAnalysisLog.configuredPath() : Path.of(path),
+        console ? System.out : null);
   }
 
   private static LexiconCatalog lexiconCatalog(LexiconRepository repository) {

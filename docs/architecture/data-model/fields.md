@@ -12,7 +12,7 @@
 | `source_row_count` | `BIGINT` | 原始来源行数，含跳过的派生形 | `3402564` | 前置完整扫描计数，重读时复核 | 大于零 |
 | `entry_count` | `BIGINT` | 已准备主词条数 | `2992863` | 批写计数与前置计数一致后写入 | 大于零 |
 | `lookup_count` | `BIGINT` | 原形、别名和屈折形的查询行数 | `3600000` | 批写查询行时累计 | 不小于 `entry_count` |
-| `preparation_policy` | `TEXT` | 本次基础词与释义准备规则标识 | `oxford-ranked-top2000-…` | 离线来源合同冻结后写入 | 非空 |
+| `preparation_policy` | `TEXT` | 本次基础词与释义准备规则标识 | `oxford-all-words-fixed-…` | 离线来源合同冻结后写入 | 非空 |
 | `imported_at` | `TIMESTAMPTZ` | 完整发布记录时间 | `2026-09-26T09:00:00Z` | 数据库在发布事务中赋默认值 | 非空 |
 
 此表不存 `STAGED`、`PUBLISHED` 或其他工作流状态。提交前旧完整资料仍可见，失败时新行与批写一并回滚。

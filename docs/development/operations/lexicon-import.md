@@ -43,7 +43,7 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend lexiconPrewa
 
 ## 1.3. 准备数据库并发布
 
-确认来源校验通过，并准备好可连接的本项目 PostgreSQL 开发库。运行前先按[根 README](../../../README.md#本地启动)完成连接配置与来源路径设置。本节不创建或启动数据库服务。`JDBC_URL` 与 `STARDICT_CSV` 只配置一次，不再拼接参数。`lexiconPublish` 固定记录已确认来源 `ecdict-stardict` 与许可证 `MIT`，不要把其他来源冒充此来源。
+确认来源校验通过，并准备好可连接的本项目 PostgreSQL 开发库。运行前先按[根 README](../../../README.md#本地启动)完成连接配置与来源路径设置。本节不创建或启动数据库服务。`JDBC_URL` 与 `STARDICT_CSV` 在本机 `.local/lexiflow/runtime.json` 保存一次，不再拼接参数或在新终端重复填写。显式环境变量可以覆盖；只读校验、报告、发布及重建各有独立 Gradle 任务，Python 仅选择 JDK 并保留终端输入。`lexiconPublish` 固定记录已确认来源 `ecdict-stardict` 与许可证 `MIT`，不要把其他来源冒充此来源。
 
 已有表时先做[结构检查](#15-已有开发库结构不匹配时)。结构变化或完整重建时先核对本项目数据库及使用它的 API，协调停用并核验备份；不得操作其他项目库。完整导入发布后再启动应用。重建需同步失效对应缓存，并避免资料身份与本机偏好旧引用混淆；命令不会自动清理缓存、偏好或本机文件。
 
@@ -51,9 +51,9 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend lexiconPrewa
 python3 -m scripts.environment.java_exec backend/gradlew -p backend lexiconRebuild
 ```
 
-`lexiconRebuild` 是**一个 Gradle 任务**，内部按“来源预检 → 目标检查与人工确认 → 结构重建 → 全量导入与发布”四个阶段执行。日志以 `[lexiconRebuild 阶段 n/4]` 标出阶段开始、完成与内部步骤；来源统计和发布结果属于相应阶段的内部输出，不是独立 Gradle 任务。任一阶段持续执行或等待输入时，每 3 分钟输出当前内部步骤与该阶段已用时间；这只是存活状态，不是完成百分比或成功保证。若终端停在确认提示，表示仍在等待输入，Gradle 的 `EXECUTING` 百分比不是词库导入进度。正在运行的旧进程不会自动获得新增日志。
+`lexiconRebuild` 是**一个 Gradle 任务**，内部按“来源预检 → 目标检查与人工确认 → 结构重建 → 全量导入与发布”四个阶段执行。日志以 `[lexiconRebuild 阶段 n/4]` 标出阶段开始、完成与内部步骤；来源统计和发布结果属于相应阶段的内部输出，不是独立 Gradle 任务。仅实际执行时，每 3 分钟输出当前内部步骤与该阶段已用时间；这只是存活状态，不是完成百分比或成功保证。等待输入时停止心跳，只显示一次精确文本、Enter 和取消方法；请直接在原终端输入，未输入不是执行进度。默认 plain console 不显示 Gradle 动态百分比。
 
-已有本项目词库表时，命令显示数据库、schema 和已有关系；只有执行人输入 `REBUILD <database>.<schema>` 的精确文本并按 Enter 才会继续。空目标直接创建结构并导入。拒绝或无交互输入不会删除任何表。重建只删除三张本项目词库表，不使用 `CASCADE`；未知 `lexicon_*` 关系或外部依赖会阻断并回滚结构事务。不要把确认文本写入自动化管道。`postgresInit` 仍仅接受空 schema，`lexiconPublish` 仍可单独对已有匹配结构发布，不执行结构重建。
+已有本项目词库表时，命令显示数据库、schema 和已有关系；只有执行人输入 `REBUILD <database>.<schema>` 的精确文本并按 Enter 才会继续。空目标直接创建结构并导入。输入空行或其他文本会取消，stdin 关闭（EOF）会明确报错退出；按 Ctrl+C 可取消。以上情况不会删除任何表。重建只删除三张本项目词库表，不使用 `CASCADE`；未知 `lexicon_*` 关系或外部依赖会阻断并回滚结构事务。不要把确认文本写入自动化管道。`postgresInit` 仍仅接受空 schema，`lexiconPublish` 仍可单独对已有匹配结构发布，不执行结构重建。
 
 离线 JDBC 适配器已启用 `reWriteBatchedInserts=true`；每 500 条组成一批网络写入，但整个发布仍只有一个事务。不要另拼接数据库性能参数。
 

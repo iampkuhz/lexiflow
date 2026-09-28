@@ -8,14 +8,16 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from scripts.environment.java_runtime import JavaRuntimeError, resolve_java_home
+from scripts.environment.local_config import command_local_config
 
 
 def command_environment(
     root: Path, environ: Mapping[str, str] | None = None
 ) -> dict[str, str]:
-    """构建子进程环境，仅把选定 JDK 放在 PATH 前面，不改父进程环境。"""
+    """合并本机私有配置并选择 JDK，仅修改子进程环境，保留原终端输入输出。"""
 
     source = dict(os.environ if environ is None else environ)
+    source.update(command_local_config(root, source))
     java_home = resolve_java_home(root, source)
     source["JAVA_HOME"] = str(java_home)
     source["PATH"] = os.pathsep.join(

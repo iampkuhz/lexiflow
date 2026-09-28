@@ -151,12 +151,17 @@ def main(arguments: Sequence[str] | None = None) -> int:
         environment["SPRING_DATASOURCE_URL"] = database_url
         prepare_port(port)
         print(f"启动 LexiFlow API：http://127.0.0.1:{port}", flush=True)
+        print(
+            "本机片段日志已开启：[LexiFlow segment] 含英文和中文提示，请勿共享终端输出。",
+            flush=True,
+        )
         command = [
             str(root / "backend/gradlew"),
             "-p",
             str(root / "backend"),
             ":api:bootRun",
-            f"--args=--server.address=127.0.0.1 --server.port={port}",
+            f"--args=--server.address=127.0.0.1 --server.port={port}"
+            " --lexiflow.segment-analysis.console=true",
         ]
         os.execvpe(command[0], command, environment)
     except (

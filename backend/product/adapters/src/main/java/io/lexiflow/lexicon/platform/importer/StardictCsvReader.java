@@ -53,21 +53,37 @@ final class StardictCsvReader {
   }
 
   static final String PREPARATION_POLICY =
-      "oxford-ranked-top2000-fixed-and-curated-gloss-first-candidate-v3";
+      "oxford-all-words-fixed-and-curated-gloss-first-candidate-v4";
 
-  /** 预扫描只保留 2000 个有来源排名的基础 lemma，不把全部词库装入内存。 */
+  /** 预扫描收集来源明确标记的全部 Oxford 单词；缺排名不改变基础资格。 */
   BasicSelection selectBasicVocabulary(Path input) throws IOException {
-    var order = java.util.Comparator.comparingLong(BasicWord::rank).thenComparing(BasicWord::lemma);
+    var order =
+        java.util.Comparator.comparingLong(
+                (BasicWord word) -> word.rank() > 0 ? word.rank() : Long.MAX_VALUE)
+            .thenComparing(BasicWord::lemma);
     var selected = new java.util.TreeSet<BasicWord>(order);
-    scan(
-        input,
-        source -> {
-          if (source.oxfordBasic() && source.rank() > 0 && !source.row().lemma().contains(" ")) {
-            selected.add(new BasicWord(source.row().lemma(), source.rank()));
-            if (selected.size() > 2000) selected.pollLast();
-          }
-        },
-        new BasicSelection(List.of()));
+    // 在派生行归并前收集证据，否则 bacteria 等只有词形被标记的基础词会丢失资格。
+    try (var reader = new CsvRecordReader(Files.newBufferedReader(input, StandardCharsets.UTF_8))) {
+      var header = reader.next();
+      if (header == null || !header.equals(REQUIRED_HEADERS)) {
+        throw new IllegalArgumentException("headers must exactly match ECDICT StarDict CSV");
+      }
+      var indexes = indexes(header);
+      List<String> values;
+      while ((values = reader.next()) != null) {
+        if (values.size() != header.size()) {
+          throw new IllegalArgumentException("source row has an unexpected column count");
+        }
+        var word = normalize(values.get(indexes.get("word")));
+        if ("1".equals(normalize(values.get(indexes.get("oxford"))))
+            && !word.contains(" ")
+            && isSupportedSurface(word)) {
+          selected.add(
+              new BasicWord(
+                  word, rank(values.get(indexes.get("bnc")), values.get(indexes.get("frq")))));
+        }
+      }
+    }
     return new BasicSelection(List.copyOf(selected));
   }
 
@@ -198,7 +214,9 @@ final class StardictCsvReader {
                 frequency,
                 complexEvidence,
                 rank != 0 && !"1".equals(normalize(row.get("oxford"))),
-                selection.lemmas().contains(word),
+                !word.contains(" ")
+                    && (selection.lemmas().contains(word)
+                        || inflections.stream().anyMatch(selection.lemmas()::contains)),
                 PREPARATION_POLICY + ";list_sha256=" + selection.digest() + ";" + evidenceReference,
                 sourceGloss,
                 parseRank(row.get("bnc")) > 0 ? parseRank(row.get("bnc")) : null,
@@ -456,7 +474,7 @@ final class StardictCsvReader {
    * @param derivedRows 被归并到 root lemma 的派生行数
    * @param noGlossRows 缺少中文释义而跳过的行数
    * @param unsupportedSurfaceRows 超出首版匹配表面范围而跳过的行数
-   * @param selectedBasicLemmas 由来源和排名选定的基础 lemma 数
+   * @param selectedBasicLemmas 由来源 Oxford 标记选定的基础 lemma 数
    * @param basicRows 合并固定功能词后的基础词条数
    * @param deduplicatedRows 重复表达清洗行数
    */
@@ -471,14 +489,14 @@ final class StardictCsvReader {
       long deduplicatedRows) {}
 
   /**
-   * 有明确来源排名的基础词。
+   * 来源明确标记的基础词；排名只用于报告排序。
    *
    * @param lemma 已归一 lemma。
-   * @param rank 公开来源中的正排名。
+   * @param rank 公开来源中的正排名，缺失时为零。
    */
   record BasicWord(String lemma, long rank) {}
 
-  /** 冻结的有界基础词清单；摘要不含用户资料。 */
+  /** 冻结的来源基础词清单；只收集 Oxford 单词，摘要不含用户资料。 */
   static final class BasicSelection {
     private final List<BasicWord> words;
     private final Set<String> lemmas;

@@ -1,5 +1,6 @@
 package io.lexiflow.lexicon.platform.importer;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,16 +18,53 @@ class RebuildProgressTest {
     try (var output = new PrintStream(bytes, true, StandardCharsets.UTF_8);
         var progress = new RebuildProgress(output, 20)) {
       progress.start(2, "目标检查与确认", "检查目标");
-      progress.detail("等待执行人输入确认文本；尚未删除数据");
+      progress.detail("重新核对目标");
       Thread.sleep(120);
       progress.complete();
     }
     var report = bytes.toString(StandardCharsets.UTF_8);
     assertTrue(report.contains("[lexiconRebuild 阶段 2/4 目标检查与确认] 开始"), report);
-    assertTrue(report.contains("内部步骤：等待执行人输入确认文本；尚未删除数据"), report);
-    assertTrue(report.contains("状态更新：仍在执行或等待"), report);
+    assertTrue(report.contains("内部步骤：重新核对目标"), report);
+    assertTrue(report.contains("状态更新：仍在执行"), report);
     assertTrue(report.contains("完成；本阶段用时"), report);
     assertFalse(report.contains("%"), report);
+  }
+
+  @Test
+  void waitingForInputIsSilentUntilExecutionResumes() throws Exception {
+    var bytes = new ByteArrayOutputStream();
+    try (var output = new PrintStream(bytes, true, StandardCharsets.UTF_8);
+        var progress = new RebuildProgress(output, 20)) {
+      progress.start(2, "目标检查与确认", "检查目标");
+      progress.awaitInput("输入 REBUILD lexiflow.public 后按 Enter；Ctrl+C 取消");
+      var prompt = bytes.toString(StandardCharsets.UTF_8);
+      assertTrue(prompt.contains("等待你的输入；尚未删除数据"), prompt);
+      assertTrue(prompt.contains("Ctrl+C 取消"), prompt);
+      Thread.sleep(120);
+      assertEquals(prompt, bytes.toString(StandardCharsets.UTF_8));
+      progress.resumeExecution("已确认，检查目标");
+      Thread.sleep(120);
+      assertTrue(bytes.toString(StandardCharsets.UTF_8).contains("状态更新：仍在执行"));
+      progress.complete();
+      var completed = bytes.toString(StandardCharsets.UTF_8);
+      Thread.sleep(80);
+      assertEquals(completed, bytes.toString(StandardCharsets.UTF_8));
+    }
+  }
+
+  @Test
+  void cancellationWhileWaitingNeverReportsCompletion() throws Exception {
+    var bytes = new ByteArrayOutputStream();
+    try (var output = new PrintStream(bytes, true, StandardCharsets.UTF_8);
+        var progress = new RebuildProgress(output, 20)) {
+      progress.start(2, "目标检查与确认", "检查目标");
+      progress.awaitInput("请确认");
+    }
+    var report = bytes.toString(StandardCharsets.UTF_8);
+    Thread.sleep(80);
+    assertEquals(report, bytes.toString(StandardCharsets.UTF_8));
+    assertTrue(report.contains("未完成"), report);
+    assertFalse(report.contains("完成；本阶段用时"), report);
   }
 
   @Test

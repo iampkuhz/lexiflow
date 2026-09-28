@@ -60,6 +60,7 @@ public record LexiconImportRow(
     complexLists = List.copyOf(Objects.requireNonNull(complexLists, "complexLists"));
     basicVocabulary =
         basicVocabulary
+            || (sourceOxfordBasic && !lemma.contains(" "))
             || BasicVocabulary.contains(lemma)
             || aliases.stream().anyMatch(BasicVocabulary::contains)
             || inflections.stream().anyMatch(BasicVocabulary::contains);

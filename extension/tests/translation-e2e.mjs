@@ -31,7 +31,8 @@ function assertApiResources() {
 function startApi() {
   const child = spawn("python3", ["-m", "scripts.environment.java_exec", "backend/gradlew", "-p", "backend", "--no-daemon", ":api:bootRun", `--args=--server.address=127.0.0.1 --server.port=${apiPort} --spring.datasource.url=false`], {
     cwd: repositoryRoot,
-    env: { ...process.env, SPRING_DATASOURCE_URL: "false" },
+    env: { ...process.env, SPRING_DATASOURCE_URL: "false",
+      LEXIFLOW_SEGMENT_LOG_PATH: resolve(repositoryRoot, "tmp/quality/e2e-analysis", `${process.pid}-${apiPort}.jsonl`) },
     detached: true,
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -182,6 +183,8 @@ try {
   assert.ok(Math.abs(inlineLayout.lineBottom - inlineLayout.glossBottom) < 15);
   await mkdir(resolve(repositoryRoot, "tmp/quality"), { recursive: true });
   await page.locator("#player").screenshot({ path: resolve(repositoryRoot, "tmp/quality/inline-caption-preview.png") });
+  const { runUnderlineAcceptance } = await import("./visual-acceptance.mjs");
+  await runUnderlineAcceptance({page,serviceWorker,apiBase,repositoryRoot,setCaption,waitForState});
   // Optional extended acceptance remains entirely on the local synthetic fixture.
   // It never visits the real YouTube page or operates a user-owned browser profile.
   if (process.env.LEXIFLOW_EXTENDED_ACCEPTANCE === "1") {
@@ -199,6 +202,8 @@ try {
   }
   const { runIncrementalAcceptance } = await import("./incremental-acceptance.mjs");
   await runIncrementalAcceptance({page,serviceWorker,setCaption,waitForState,overlayText});
+  const { runMultilineAcceptance } = await import("./multiline-acceptance.mjs");
+  await runMultilineAcceptance({page,serviceWorker,repositoryRoot,setCaption,waitForState});
   if (process.env.LEXIFLOW_LIVE_YOUTUBE_URL) {
     const { runLiveYoutubeAcceptance } = await import("./live-youtube-acceptance.mjs");
     await runLiveYoutubeAcceptance({context,serviceWorker,repositoryRoot,url:process.env.LEXIFLOW_LIVE_YOUTUBE_URL});

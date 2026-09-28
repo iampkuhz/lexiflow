@@ -72,7 +72,7 @@ class StardictCsvReaderTest {
   }
 
   @Test
-  void freezesTop2000FromOxfordRankedWordsIndependentOfSourceOrder() throws Exception {
+  void freezesAllOxfordWordsIncludingMissingRankIndependentOfSourceOrder() throws Exception {
     var file = Files.createTempFile("basic-selection", ".csv");
     var sourceRows = new ArrayList<String>();
     for (int i = 0; i < 2010; i++) {
@@ -81,14 +81,18 @@ class StardictCsvReaderTest {
           "word" + (char) ('a' + i / 676) + (char) ('a' + i / 26 % 26) + (char) ('a' + i % 26);
       sourceRows.add(row(word, "词条", "", "", "100", "200", "", "1"));
     }
+    sourceRows.add(row("false", "错误的", "", "", "2370", "2516", "", "1"));
     sourceRows.add(row("unknown", "未知", "", "", "0", "0", "", "1"));
     sourceRows.add(row("specialist", "专家", "", "", "1", "1", "", ""));
     sourceRows.add(row("a phrase", "短语", "", "", "1", "1", "", "1"));
     Files.writeString(file, header() + "\n" + String.join("\n", sourceRows));
     var reader = new StardictCsvReader();
     var first = reader.selectBasicVocabulary(file);
-    assertEquals(2000, first.words().size());
-    assertFalse(first.lemmas().contains("unknown"));
+    assertEquals(2012, first.words().size());
+    assertTrue(first.lemmas().contains("false"));
+    assertEquals("unknown", first.words().getLast().lemma());
+    assertEquals(0, first.words().getLast().rank());
+    assertTrue(first.lemmas().contains("unknown"));
     assertFalse(first.lemmas().contains("specialist"));
     assertFalse(first.lemmas().contains("a phrase"));
     java.util.Collections.reverse(sourceRows);
@@ -98,10 +102,65 @@ class StardictCsvReaderTest {
     assertEquals(first.digest(), reversed.digest());
     var records = new ArrayList<StardictCsvReader.SourceRecord>();
     var scan = reader.read(file, records::add, reversed);
-    assertEquals(2000, scan.basicRows());
-    assertEquals(2000, records.stream().filter(r -> r.row().basicVocabulary()).count());
+    assertEquals(2012, scan.basicRows());
+    assertEquals(2012, records.stream().filter(r -> r.row().basicVocabulary()).count());
+    var falseWord =
+        records.stream()
+            .filter(r -> r.row().lemma().equals("false"))
+            .findFirst()
+            .orElseThrow()
+            .row();
+    assertTrue(falseWord.sourceOxfordBasic());
+    assertEquals(
+        "basic_vocabulary",
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(
+            falseWord));
     assertTrue(
         records.stream().allMatch(r -> r.row().hintPolicyReference().contains(reversed.digest())));
+  }
+
+  @Test
+  void retainsOxfordEvidenceFromMergedDerivedRowsRegardlessOfOrder() throws Exception {
+    var file = Files.createTempFile("derived-oxford", ".csv");
+    var sourceRows =
+        new ArrayList<>(
+            List.of(
+                row("bacterium", "n. 细菌", "", "", "0", "0", "s:bacteria", ""),
+                row("bacteria", "n. 细菌", "", "", "0", "0", "0:bacterium/1:s", "1"),
+                row("false alarm", "误报", "", "", "0", "0", "", "1")));
+    var reader = new StardictCsvReader();
+    String digest = null;
+    for (int order = 0; order < 2; order++) {
+      Files.writeString(file, header() + "\n" + String.join("\n", sourceRows));
+      var selection = reader.selectBasicVocabulary(file);
+      assertEquals(java.util.Set.of("bacteria"), selection.lemmas());
+      if (digest != null) assertEquals(digest, selection.digest());
+      digest = selection.digest();
+      var rows = new ArrayList<StardictCsvReader.SourceRecord>();
+      var scan = reader.read(file, rows::add, selection);
+      assertEquals(1, scan.derivedRows());
+      assertEquals(1, scan.basicRows());
+      var root =
+          rows.stream()
+              .map(StardictCsvReader.SourceRecord::row)
+              .filter(row -> row.lemma().equals("bacterium"))
+              .findFirst()
+              .orElseThrow();
+      assertFalse(root.sourceOxfordBasic());
+      assertTrue(root.basicVocabulary());
+      assertFalse(root.prewarmEligible());
+      assertEquals(
+          "basic_vocabulary",
+          io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(root));
+      assertFalse(
+          rows.stream()
+              .map(StardictCsvReader.SourceRecord::row)
+              .filter(row -> row.lemma().equals("false alarm"))
+              .findFirst()
+              .orElseThrow()
+              .basicVocabulary());
+      java.util.Collections.reverse(sourceRows);
+    }
   }
 
   @Test
@@ -149,7 +208,12 @@ class StardictCsvReaderTest {
     assertEquals(9092L, rows.getFirst().row().sourceFrqRank());
     assertTrue(
         rows.stream()
-            .allMatch(value -> value.row().hintPolicyReference().contains("first-candidate-v3")));
+            .allMatch(
+                value ->
+                    value
+                        .row()
+                        .hintPolicyReference()
+                        .contains("oxford-all-words-fixed-and-curated-gloss-first-candidate-v4")));
 
     Files.writeString(
         file, header() + "\n" + row("sustainability", "n. 绿色", "", "", "17705", "9092", "", ""));

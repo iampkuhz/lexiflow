@@ -2,7 +2,7 @@ import { suppressionKey } from "./preferences";
 import { snapshotText, snapshotSegments, type Hint } from "./protocol";
 import type { StreamView } from "./stream";
 import type { Diagnostics } from "./diagnostics";
-import type { CaptionSource } from "./caption-source";
+import { clipsCaptionRows, type CaptionSource } from "./caption-source";
 
 export const OVERLAY_ID = "lexiflow-caption-overlay";
 export const captionSelector = ".ytp-caption-segment";
@@ -87,8 +87,10 @@ export class BilingualOverlay {
     };
     let offset = 0;
     for (const hint of hints) {
-      english(offset, hint.startOffset); span(hint.startOffset, hint.endOffset, "hint-term");
       const term = source.caption.slice(hint.startOffset, hint.endOffset);
+      // 单个 hint 覆盖多个空格分隔词才标为词组；不合并相邻提示，也不拆撇号/连字符单词。
+      const className = /\S+\s+\S/u.test(term.trim()) ? "hint-term hint-phrase" : "hint-term";
+      english(offset, hint.startOffset); span(hint.startOffset, hint.endOffset, className);
       const key = `${anchor(hint.startOffset)}:gloss:${hint.lexiconEntryId}:${hint.lexiconVersion}:${hint.senseId}:${term}`;
       let button = existing.get(key) as HTMLButtonElement | undefined;
       if (!button) {
@@ -124,7 +126,11 @@ export class BilingualOverlay {
     const segments = visibleSegments(this.player);
     if (!segments.length) return;
     const playerBox = this.player.getBoundingClientRect();
-    const bottom = Math.max(...segments.map(segment => segment.getBoundingClientRect().bottom));
+    // 滚动文字的底部随 transform 每帧变化；裁剪窗口才是稳定的字幕基线。
+    const bottom = Math.max(...segments.map(segment => {
+      const window = segment.closest<HTMLElement>(".caption-window");
+      return window && clipsCaptionRows(window) ? window.getBoundingClientRect().bottom : segment.getBoundingClientRect().bottom;
+    }));
     const nextBottom = `${Math.max(0, Math.round(playerBox.bottom - bottom))}px`;
     const fontSize = getComputedStyle(segments[0]).fontSize;
     if (this.host.style.bottom !== nextBottom) this.host.style.bottom = nextBottom;
@@ -144,7 +150,7 @@ export class BilingualOverlay {
     host.style.cssText = "position:absolute;left:5%;right:5%;bottom:12%;z-index:2147483646;pointer-events:none;text-align:center";
     const root = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
-    style.textContent = ":host{font-family:Arial,sans-serif;white-space:normal}.line{display:inline;white-space:normal;box-decoration-break:clone;-webkit-box-decoration-break:clone;padding:.12em .25em;background:rgba(0,0,0,.8);color:white;font-weight:500;line-height:1.3;text-shadow:0 1px 2px #000;overflow-wrap:anywhere}.line:empty{display:none}.hint-term{border-bottom:.09em solid #ffe58f;padding-bottom:.12em;box-decoration-break:clone;-webkit-box-decoration-break:clone}.gloss{display:inline;white-space:normal;color:#ffe58f;background:none;border:0;padding:0;font:inherit;text-shadow:inherit;cursor:pointer;pointer-events:auto;max-width:100%;overflow-wrap:anywhere}.gloss:focus-visible{outline:2px solid #ffe58f}";
+    style.textContent = ":host{font-family:Arial,sans-serif;white-space:normal}.line{display:inline;white-space:normal;box-decoration-break:clone;-webkit-box-decoration-break:clone;padding:.12em .25em;background:rgba(0,0,0,.8);color:white;font-weight:500;line-height:1.55;text-shadow:0 1px 2px #000;overflow-wrap:anywhere}.line:empty{display:none}.hint-phrase{text-decoration-line:underline;text-decoration-color:#ffe58f;text-decoration-thickness:.08em;text-underline-offset:.14em;text-decoration-skip-ink:none}.gloss{display:inline;white-space:normal;color:#ffe58f;background:none;border:0;padding:0;font:inherit;text-shadow:inherit;cursor:pointer;pointer-events:auto;max-width:100%;overflow-wrap:anywhere}.gloss:focus-visible{outline:2px solid #ffe58f}";
     this.line = document.createElement("span");
     this.line.className = "line";
     root.append(style, this.line);
