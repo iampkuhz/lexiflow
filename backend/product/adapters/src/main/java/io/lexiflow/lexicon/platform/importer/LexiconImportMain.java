@@ -1,9 +1,9 @@
 package io.lexiflow.lexicon.platform.importer;
 
 import io.lexiflow.lexicon.application.importing.LexiconImportPlan;
+import io.lexiflow.lexicon.application.importing.LexiconImportPreparation;
 import io.lexiflow.lexicon.application.importing.LexiconImportService;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
-import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
 import io.lexiflow.lexicon.platform.persistence.PostgresPersistence;
 import java.io.IOException;
@@ -13,10 +13,8 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.PriorityQueue;
 import java.util.function.Consumer;
 
 /** 离线词库导入命令；只解析本机受控输入并调用应用层导入服务。 */
@@ -54,25 +52,33 @@ public final class LexiconImportMain {
   private static void executeCanonical(Arguments command, String digest) throws IOException {
     if (command.action().equals("basic-report"))
       throw new IllegalArgumentException("basic-report requires StarDict source evidence");
-    var rows = new LexiconCsvReader().read(command.input());
     var metadata = metadata(command, digest, LexiconCsvReader.PREPARATION_POLICY);
-    var plan = LexiconImportPlan.prepare(rows, 1, digest, command.acquiredAt());
+    var source = canonicalSource(command.input());
+    var inspection =
+        LexiconImportPreparation.inspect(
+            metadata, source, command.action().equals("prewarm-report") ? command.limit() : 0);
     if (command.action().equals("validate")) {
       System.out.printf(
-          "PASS format=lexiflow-lexicon-v1 entries=%d source_sha256=%s%n", plan.size(), digest);
+          "PASS format=lexiflow-lexicon-v1 entries=%d source_sha256=%s%n",
+          inspection.counts().entries(), digest);
       return;
     }
     if (command.action().equals("prewarm-report")) {
-      printPrewarm(plan, command.limit());
+      printPrewarm(inspection.prewarmEntries());
       return;
     }
+    inspection.requirePublishable();
     try (var persistence = PostgresPersistence.open(command.databaseUrl())) {
       var version =
           new LexiconImportService(persistence.repository())
-              .publish(new LexiconImportRequest(rows, metadata));
+              .publishStreaming(
+                  metadata,
+                  inspection.counts().sourceRowsTotal(),
+                  inspection.counts().entries(),
+                  canonicalSource(command.input()));
       System.out.printf(
           "PASS format=lexiflow-lexicon-v1 published_version=%d entries=%d source_sha256=%s%n",
-          version, plan.size(), digest);
+          version, inspection.counts().entries(), digest);
     }
   }
 
@@ -99,107 +105,95 @@ public final class LexiconImportMain {
           .forEach(word -> System.out.printf("FIXED\t%s%n", word));
       return;
     }
+    var metadata =
+        metadata(command, digest, StardictCsvReader.PREPARATION_POLICY + ":" + selection.digest());
+    var preflight =
+        inspectStardict(
+            reader,
+            command,
+            metadata,
+            selection,
+            command.action().equals("prewarm-report") ? command.limit() : 0);
+    var lastScan = preflight.scan();
     if (command.action().equals("validate")) {
-      progress.accept("完整扫描、词形冲突与领域投影校验");
-      var scan = validateStardict(reader, command, digest, selection);
-      printStardictScan("PASS", scan, digest);
+      printStardictScan("PASS", lastScan, digest);
       return;
     }
     if (command.action().equals("prewarm-report")) {
-      var top = topStardictEntries(reader, command.input(), command.limit(), selection);
-      printPrewarm(
-          top.stream()
-              .map(value -> LexiconImportPlan.fromRow(value.row(), 1, digest, command.acquiredAt()))
-              .toList(),
-          command.limit());
+      printPrewarm(preflight.inspection().prewarmEntries());
       return;
     }
-    var metadata =
-        metadata(command, digest, StardictCsvReader.PREPARATION_POLICY + ":" + selection.digest());
-    progress.accept("发布前完整扫描与词形冲突校验");
-    var preflight = validateStardict(reader, command, digest, selection);
-    if (preflight.importableRows() == 0) {
-      throw new IllegalArgumentException("StarDict source contains no importable entries");
-    }
-    progress.accept("复核来源 SHA-256");
-    if (!digest.equals(sourceDigest(command.input()))) {
-      throw new IllegalStateException("source changed during preflight");
-    }
+    preflight.inspection().requirePublishable();
+    progress.accept("来源预检完成，等待事务重读与发布");
     try (var persistence = PostgresPersistence.open(command.databaseUrl())) {
       progress.accept("事务内第二遍读取、批量写入与发布");
       var version =
           new LexiconImportService(persistence.repository())
               .publishStreaming(
                   metadata,
-                  preflight.sourceRows(),
-                  preflight.importableRows(),
-                  consumer -> {
-                    var second =
-                        reader.read(
-                            command.input(), record -> consumer.accept(record.row()), selection);
-                    var actualDigest = sourceDigest(command.input());
-                    progress.accept("来源重读完成，等待身份核验与事务提交");
-                    return new LexiconImportRowSource.ReadReceipt(
-                        actualDigest, second.sourceRows());
-                  });
+                  preflight.inspection().counts().sourceRowsTotal(),
+                  preflight.inspection().counts().entries(),
+                  stardictSource(reader, command, selection, new StardictCsvReader.ScanResult[1]));
       System.out.printf(
           "PASS format=ecdict-stardict published_version=%d source_rows=%d entries=%d source_sha256=%s%n",
-          version, preflight.sourceRows(), preflight.importableRows(), digest);
+          version,
+          preflight.inspection().counts().sourceRowsTotal(),
+          preflight.inspection().counts().entries(),
+          digest);
     }
   }
 
-  private static StardictCsvReader.ScanResult validateStardict(
+  private static PreparationRun inspectStardict(
       StardictCsvReader reader,
       Arguments command,
-      String digest,
-      StardictCsvReader.BasicSelection selection)
-      throws IOException {
-    var canonicalSurfaces = LexiconImportPlan.canonicalSurfaceValidator();
-    return reader.read(
-        command.input(),
-        source ->
-            LexiconImportPlan.prepareNext(
-                source.row(), 1, digest, command.acquiredAt(), canonicalSurfaces),
-        selection);
+      LexiconImportMetadata metadata,
+      StardictCsvReader.BasicSelection selection,
+      int limit) {
+    var scan = new StardictCsvReader.ScanResult[1];
+    var source = stardictSource(reader, command, selection, scan);
+    var inspection = LexiconImportPreparation.inspect(metadata, source, limit);
+    return new PreparationRun(inspection, scan[0]);
+  }
+
+  private static LexiconImportRowSource stardictSource(
+      StardictCsvReader reader,
+      Arguments command,
+      StardictCsvReader.BasicSelection selection,
+      StardictCsvReader.ScanResult[] scan) {
+    return consumer -> {
+      var actual = reader.read(command.input(), record -> consumer.accept(record.row()), selection);
+      scan[0] = actual;
+      return new LexiconImportRowSource.ReadReceipt(
+          sourceDigest(command.input()), actual.sourceRows());
+    };
+  }
+
+  /**
+   * 关联应用预检结果与本次来源格式统计，仅用于 CLI 输出。
+   *
+   * @param inspection 含义：已完成身份及准备校验的结果。取值范围：非 null。
+   * @param scan 含义：来源适配器实际读取的格式统计。取值范围：非 null。
+   */
+  private record PreparationRun(
+      LexiconImportPreparation.Inspection inspection, StardictCsvReader.ScanResult scan) {}
+
+  private static LexiconImportRowSource canonicalSource(Path input) {
+    return consumer -> {
+      var rows = new LexiconCsvReader().read(input);
+      rows.forEach(consumer);
+      return new LexiconImportRowSource.ReadReceipt(sourceDigest(input), rows.size());
+    };
   }
 
   private static LexiconImportMetadata metadata(
       Arguments command, String digest, String preparation) {
     return new LexiconImportMetadata(
         digest,
-        command.batchSourceId() + ":" + preparation,
-        command.batchLicenseId(),
+        (command.action().equals("publish")
+            ? command.batchSourceId() + ":" + preparation
+            : "preview:" + preparation),
+        (command.action().equals("publish") ? command.batchLicenseId() : "unasserted-preview-only"),
         command.acquiredAt());
-  }
-
-  private static List<StardictCsvReader.SourceRecord> topStardictEntries(
-      StardictCsvReader reader, Path input, int limit, StardictCsvReader.BasicSelection selection)
-      throws IOException {
-    var lowestFirst =
-        Comparator.comparingInt(
-                (StardictCsvReader.SourceRecord value) -> value.row().priority().memoryPriority())
-            .thenComparing(value -> value.row().lemma(), Comparator.reverseOrder());
-    var top = new PriorityQueue<StardictCsvReader.SourceRecord>(limit, lowestFirst);
-    reader.read(
-        input,
-        value -> {
-          if (!value.row().prewarmEligible() || value.row().priority().memoryPriority() == 0)
-            return;
-          if (top.size() < limit) top.add(value);
-          else if (lowestFirst.compare(value, top.peek()) > 0) {
-            top.remove();
-            top.add(value);
-          }
-        },
-        selection);
-    return top.stream()
-        .sorted(
-            Comparator.comparingInt(
-                    (StardictCsvReader.SourceRecord value) ->
-                        value.row().priority().memoryPriority())
-                .reversed()
-                .thenComparing(value -> value.row().lemma()))
-        .toList();
   }
 
   private static void printStardictScan(
@@ -228,24 +222,15 @@ public final class LexiconImportMain {
         digest);
   }
 
-  private static void printPrewarm(List<LexiconImportPlan.PlannedEntry> plan, int limit) {
-    plan.stream()
-        .filter(value -> value.row().prewarmEligible())
-        .sorted(
-            Comparator.comparingInt(
-                    (LexiconImportPlan.PlannedEntry value) ->
-                        value.entry().priority().memoryPriority())
-                .reversed()
-                .thenComparing(value -> value.entry().lemma()))
-        .limit(limit)
-        .forEach(
-            value ->
-                System.out.printf(
-                    "%d\t%.2f\t%d\t%s%n",
-                    value.entry().priority().memoryPriority(),
-                    value.entry().priority().frequencyZipf(),
-                    value.entry().priority().complexListCount(),
-                    value.entry().lemma()));
+  private static void printPrewarm(List<LexiconImportPlan.PlannedEntry> plan) {
+    plan.forEach(
+        value ->
+            System.out.printf(
+                "%d\t%.2f\t%d\t%s%n",
+                value.entry().priority().memoryPriority(),
+                value.entry().priority().frequencyZipf(),
+                value.entry().priority().complexListCount(),
+                value.entry().lemma()));
   }
 
   private static String sourceDigest(Path input) throws IOException {

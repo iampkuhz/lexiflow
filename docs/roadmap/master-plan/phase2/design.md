@@ -107,7 +107,7 @@ Enrichment 是字幕候选键的唯一生成者。对经现有 `LexiconSurfacePo
 
 ### 1.6.2. 持久化角色与导入编排
 
-`LexiconReadRepository` 仅包含 publishedVersion、findByForms、findPrewarmForms；`LexiconPublicationRepository` 仅包含 publish、publishStreaming，参数沿用现有导入 metadata/row source，不对外暴露数据库连接。适配器内的 Repository 实现负责事务、映射和查询，两类业务消费者只依赖对应角色。
+`LexiconReadRepository` 仅包含 publishedVersion、findByForms、findPrewarmForms；`LexiconPublicationRepository` 仅包含 publish(metadata, sourceRowsTotal, expectedEntries, PreparedEntrySource)，消费已准备条目而非原始行，不对外暴露数据库连接。适配器内的 Repository 实现负责事务、映射和查询，两类业务消费者只依赖对应角色。
 
 读写分离分两个可编译动作：先提取 publication role 并让既有 Repository 聚合它，同时将 LexiconImportService 收窄到 publication role；随后提取 read role，查询服务和 API 注入改为 read role。聚合 Repository 只保留给实际需要组合两角色的持久化工厂，不让业务依赖它。这是最终基础设施组合合同，不保留重复方法、旧实现或历史接口适配层。SQL 拆分不是读写分离的必要条件。
 
@@ -116,6 +116,12 @@ Enrichment 是字幕候选键的唯一生成者。对经现有 `LexiconSurfacePo
 LexiconImportService 负责 metadata/来源计数校验、预检结果与重读来源的身份一致性和发布调用；来源解析/文件打开、用户重建确认和进度输出留在 CLI/适配器。导入与发布共享已准备结果，不在持久化映射时重复清洗。发布只在一个事务内使新资料可见，源变化或计数不符回滚，API 启动不执行导入。
 
 流式来源 `LexiconImportRowSource.read` 在交付解析行后返回不可变 `ReadReceipt(sourceDigest, sourceRowsTotal)`；摘要由适配器对本次重读的来源生成，应用层不打开文件。导入用例包装该来源，在发布事务结束前核对 receipt 与预检 metadata 摘要、原始行数，并核对实际交付条数；不符立即抛错阻止提交。规范内存输入的 receipt 由已冻结请求生成。该返回值与 CLI、持久化及测试来源同批切换，不保留 void 或默认兼容入口。缓存状态、版本失效、正负预热和动态容量由包内 `VersionedLexiconCache` 管理，查询服务仅校验键、编排精确查询并组装本次结果/计数。
+
+准备入口 `LexiconImportPreparation.inspect(metadata, rowSource, prewarmLimit)` 不依赖 Repository：按流执行单行准备和跨行 canonical 冲突校验，核对实际读取 receipt 与 metadata 摘要及原始/可导入计数，返回不可变的计数与有界预热报告。预热报告只保留资格为真且 memoryPriority>0 的前 limit 项，分数降序、同分 lemma 升序，不新增评分规则；limit=0 只校验。没有可导入条目可形成校验报告，但发布仍拒绝空资料。CSV 明确频率和 StarDict 缺排名的证据语义不变。
+
+发布端口的嵌套 `PreparedEntrySource` 是 `read(long publishedVersion, Consumer<LexiconImportPlan.PlannedEntry>) throws IOException`：事务取得实际新版本后回调应用生产者。LexiconImportService 对每条原始行调用一次 prepareNext、维护跨分块 canonical 集合、共享该条 PreparedHint 给词义/追溯/查询投影，并在回调返回前校验 receipt 和全部计数。持久化实现仅映射准备结果、批写和事务/版本切换，不执行 prepare/fromRow 或重新清洗。内存输入 publish(request) 由应用服务转成冻结 row source 并走同一链；原始行版本的持久化 publish/publishStreaming 不保留兼容入口。
+
+CLI 把 StarDict/规范 CSV 解析包装成同一 row source，每次实际读取后提供摘要/原始计数；应用预检通过后才打开发布资源，发布重读故障回滚。CLI 不决定 canonical 冲突、清洗、来源一致性或预热排序。两遍分别是预检和事务重读，各扫描只准备一次，不将全量 StarDict 的准备对象保存在内存里。来源的基础名单选择、格式统计、文件读取/摘要计算和打印留在适配器；basic-report 仍是显式来源报告。无库 validate/prewarm 的批次标识仅为 preview、许可为 unasserted-preview-only，不把诊断身份当发布来源。正式发布始终要求用户给出批次来源及许可。重建入口与精确确认保持，不把发布变成隐式重建。
 
 ### 1.6.3. 当前字幕、安全与展示
 

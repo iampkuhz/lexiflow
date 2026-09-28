@@ -89,8 +89,10 @@ class PostgresLexiconRepositoryIntegrationTest {
             var second = row("reliably", "可靠地", List.of(), List.of());
             assertEquals(
                 1,
-                repository.publish(
-                    new LexiconImportRequest(List.of(first, second), metadata('a'))));
+                new LexiconImportService(repository)
+                    .publish(
+                        new io.lexiflow.lexicon.application.importing.model.LexiconImportRequest(
+                            List.of(first, second), metadata('a'))));
             assertEquals(1, repository.publishedVersion());
             var matches = repository.findByForms(1, List.of("reliable", "dependable", "reliably"));
             assertEquals(4, matches.size());
@@ -138,7 +140,10 @@ class PostgresLexiconRepositoryIntegrationTest {
 
             var hint = row("bore", "钻孔", List.of(), List.of());
             var block = row("bear", "熊；承受", List.of(), List.of("bore"));
-            publication.publish(new LexiconImportRequest(List.of(hint, block), metadata('m')));
+            new LexiconImportService(publication)
+                .publish(
+                    new io.lexiflow.lexicon.application.importing.model.LexiconImportRequest(
+                        List.of(hint, block), metadata('m')));
             var mixed = read.findByForms(1, List.of("bore"));
             assertEquals(2, mixed.size());
             assertEquals(
@@ -150,21 +155,23 @@ class PostgresLexiconRepositoryIntegrationTest {
             assertThrows(
                 RuntimeException.class,
                 () ->
-                    publication.publishStreaming(
-                        metadata('n'),
-                        2,
-                        1,
-                        consumer -> {
-                          consumer.accept(row("replacement", "替换资料", List.of(), List.of()));
-                          throw new IOException("synthetic publication failure");
-                        }));
+                    new LexiconImportService(publication)
+                        .publishStreaming(
+                            metadata('n'),
+                            2,
+                            1,
+                            consumer -> {
+                              consumer.accept(row("replacement", "替换资料", List.of(), List.of()));
+                              throw new IOException("synthetic publication failure");
+                            }));
             assertEquals(1, read.publishedVersion());
             assertEquals(2, read.findByForms(1, List.of("bore")).size());
             assertEquals(0, read.findByForms(1, List.of("replacement")).size());
 
-            publication.publish(
-                new LexiconImportRequest(
-                    List.of(row("replacement", "替换资料", List.of(), List.of())), metadata('o')));
+            new LexiconImportService(publication)
+                .publish(
+                    new LexiconImportRequest(
+                        List.of(row("replacement", "替换资料", List.of(), List.of())), metadata('o')));
             assertEquals(2, read.publishedVersion());
             assertEquals(0, read.findByForms(1, List.of("replacement")).size());
             assertEquals(1, read.findByForms(2, List.of("replacement")).size());
@@ -206,9 +213,10 @@ class PostgresLexiconRepositoryIntegrationTest {
                     csvFrequency,
                     List.of(),
                     true);
-            repository.publish(
-                new LexiconImportRequest(
-                    List.of(stardict, zeroFrequency, blocked, longAlias), metadata('i')));
+            new LexiconImportService(repository)
+                .publish(
+                    new LexiconImportRequest(
+                        List.of(stardict, zeroFrequency, blocked, longAlias), metadata('i')));
 
             assertEquals(
                 "ecdict-stardict:fixture-medical-term",
@@ -292,12 +300,13 @@ class PostgresLexiconRepositoryIntegrationTest {
         jdbcUrl -> {
           try (var persistence = PostgresPersistence.open(jdbcUrl)) {
             var repository = persistence.repository();
-            repository.publish(
-                new LexiconImportRequest(
-                    List.of(
-                        row("reliable", "可靠的", List.of(), List.of()),
-                        row("ambiguous", "含混；歧义", List.of(), List.of())),
-                    metadata('j')));
+            new LexiconImportService(repository)
+                .publish(
+                    new LexiconImportRequest(
+                        List.of(
+                            row("reliable", "可靠的", List.of(), List.of()),
+                            row("ambiguous", "含混；歧义", List.of(), List.of())),
+                        metadata('j')));
             for (var invalidSql :
                 List.of(
                     "UPDATE lexicon_dataset SET source_manifest='[]'::jsonb",
@@ -333,17 +342,18 @@ class PostgresLexiconRepositoryIntegrationTest {
             assertThrows(
                 RuntimeException.class,
                 () ->
-                    repository.publishStreaming(
-                        metadata('k'),
-                        2,
-                        2,
-                        consumer -> {
-                          var duplicate = row("replacement", "替代", List.of(), List.of());
-                          consumer.accept(duplicate);
-                          consumer.accept(duplicate);
-                          return new LexiconImportRowSource.ReadReceipt(
-                              metadata('k').sourceDigest(), 2);
-                        }));
+                    new LexiconImportService(repository)
+                        .publishStreaming(
+                            metadata('k'),
+                            2,
+                            2,
+                            consumer -> {
+                              var duplicate = row("replacement", "替代", List.of(), List.of());
+                              consumer.accept(duplicate);
+                              consumer.accept(duplicate);
+                              return new LexiconImportRowSource.ReadReceipt(
+                                  metadata('k').sourceDigest(), 2);
+                            }));
             assertEquals(1, repository.publishedVersion());
             assertEquals(1, repository.findByForms(1, List.of("reliable")).size());
             assertEquals(0, repository.findByForms(1, List.of("replacement")).size());
@@ -357,12 +367,13 @@ class PostgresLexiconRepositoryIntegrationTest {
         jdbcUrl -> {
           try (var persistence = PostgresPersistence.open(jdbcUrl)) {
             var repository = persistence.repository();
-            repository.publish(
-                new LexiconImportRequest(
-                    List.of(
-                        row("zoology", "动物学", List.of(), List.of("able")),
-                        row("zymurgy", "酿造学", List.of(), List.of("able"))),
-                    metadata('c')));
+            new LexiconImportService(repository)
+                .publish(
+                    new LexiconImportRequest(
+                        List.of(
+                            row("zoology", "动物学", List.of(), List.of("able")),
+                            row("zymurgy", "酿造学", List.of(), List.of("able"))),
+                        metadata('c')));
             var candidates = repository.findPrewarmForms(1, LexiconHintAction.HINT, 1);
             assertEquals(2, candidates.size());
             assertEquals(
@@ -378,12 +389,13 @@ class PostgresLexiconRepositoryIntegrationTest {
         jdbcUrl -> {
           try (var persistence = PostgresPersistence.open(jdbcUrl)) {
             var repository = persistence.repository();
-            repository.publish(
-                new LexiconImportRequest(
-                    List.of(
-                        row("the", "这个", List.of(), List.of()),
-                        row("sustainability", "可持续性；持续性", List.of(), List.of())),
-                    metadata('b')));
+            new LexiconImportService(repository)
+                .publish(
+                    new LexiconImportRequest(
+                        List.of(
+                            row("the", "这个", List.of(), List.of()),
+                            row("sustainability", "可持续性；持续性", List.of(), List.of())),
+                        metadata('b')));
             assertEquals(
                 LexiconHintAction.BLOCK,
                 repository.findByForms(1, List.of("the")).getFirst().finalAction());
@@ -439,8 +451,7 @@ class PostgresLexiconRepositoryIntegrationTest {
                 new LexiconImportRow(
                     "nebula", "星云", "", List.of(), List.of(), score, source, source, List.of(),
                     false);
-            persistence
-                .repository()
+            new LexiconImportService(persistence.repository())
                 .publish(
                     new LexiconImportRequest(
                         List.of(
@@ -496,23 +507,65 @@ class PostgresLexiconRepositoryIntegrationTest {
         jdbcUrl -> {
           try (var persistence = PostgresPersistence.open(jdbcUrl)) {
             var repository = persistence.repository();
-            repository.publish(
-                new LexiconImportRequest(
-                    List.of(row("reliable", "可靠的", List.of(), List.of())), metadata('a')));
+            new LexiconImportService(repository)
+                .publish(
+                    new LexiconImportRequest(
+                        List.of(row("reliable", "可靠的", List.of(), List.of())), metadata('a')));
             assertThrows(
                 RuntimeException.class,
                 () ->
-                    repository.publishStreaming(
-                        metadata('b'),
-                        2,
-                        2,
-                        consumer -> {
-                          consumer.accept(row("context", "语境", List.of(), List.of()));
-                          throw new IOException("source disappeared");
-                        }));
+                    new LexiconImportService(repository)
+                        .publishStreaming(
+                            metadata('b'),
+                            2,
+                            2,
+                            consumer -> {
+                              consumer.accept(row("context", "语境", List.of(), List.of()));
+                              throw new IOException("source disappeared");
+                            }));
             assertEquals(1, repository.publishedVersion());
             assertEquals(1, repository.findByForms(1, List.of("reliable")).size());
             assertEquals(0, repository.findByForms(1, List.of("context")).size());
+          }
+        });
+  }
+
+  @Test
+  void canonicalConflictAfterFlushedBatchRollsBackPreparedRowsAndVersion() throws Exception {
+    inInitializedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            var service = new LexiconImportService(repository);
+            service.publish(
+                new LexiconImportRequest(
+                    List.of(row("reliable", "可靠的", List.of(), List.of())), metadata('a')));
+            assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    service.publishStreaming(
+                        metadata('b'),
+                        501,
+                        501,
+                        consumer -> {
+                          for (int index = 0; index < 500; index++) {
+                            var lemma =
+                                "batch" + (char) ('a' + index / 26) + (char) ('a' + index % 26);
+                            consumer.accept(
+                                row(
+                                    lemma,
+                                    "合成词条",
+                                    index == 0 ? List.of("shared") : List.of(),
+                                    List.of()));
+                          }
+                          consumer.accept(row("collision", "冲突词条", List.of("shared"), List.of()));
+                          return new LexiconImportRowSource.ReadReceipt(
+                              metadata('b').sourceDigest(), 501);
+                        }));
+            assertEquals(1, repository.publishedVersion());
+            assertEquals(1, repository.findByForms(1, List.of("reliable")).size());
+            assertEquals(0, repository.findByForms(1, List.of("batchaa")).size());
+            assertEquals("1", scalar(jdbcUrl, "SELECT COUNT(*)::text FROM lexicon_prepared_entry"));
           }
         });
   }
@@ -524,9 +577,10 @@ class PostgresLexiconRepositoryIntegrationTest {
           try (var persistence = PostgresPersistence.open(jdbcUrl)) {
             var repository = persistence.repository();
             var service = new LexiconImportService(repository);
-            repository.publish(
-                new LexiconImportRequest(
-                    List.of(row("reliable", "可靠的", List.of(), List.of())), metadata('a')));
+            new LexiconImportService(repository)
+                .publish(
+                    new LexiconImportRequest(
+                        List.of(row("reliable", "可靠的", List.of(), List.of())), metadata('a')));
             for (var failure :
                 List.of("digest", "raw-count", "fewer-entries", "more-entries", "io")) {
               assertThrows(
@@ -582,8 +636,8 @@ class PostgresLexiconRepositoryIntegrationTest {
             var multiSense =
                 rowWithSource("bank", "银行", "银行；河岸", List.of("banks"), List.of("banked"));
             var singleSense = rowWithSource("reliable", "可靠的", "可靠的", List.of(), List.of());
-            repository.publish(
-                new LexiconImportRequest(List.of(multiSense, singleSense), metadata('d')));
+            new LexiconImportService(repository)
+                .publish(new LexiconImportRequest(List.of(multiSense, singleSense), metadata('d')));
             assertEquals(
                 "银行；河岸",
                 scalar(
@@ -637,7 +691,8 @@ class PostgresLexiconRepositoryIntegrationTest {
           try (var persistence = PostgresPersistence.open(jdbcUrl)) {
             var repository = persistence.repository();
             var emptyFirst = rowWithSource("emptyfirst", "", "；银行", List.of(), List.of());
-            repository.publish(new LexiconImportRequest(List.of(emptyFirst), metadata('e')));
+            new LexiconImportService(repository)
+                .publish(new LexiconImportRequest(List.of(emptyFirst), metadata('e')));
             assertEquals(
                 LexiconHintAction.BLOCK,
                 repository.findByForms(1, List.of("emptyfirst")).getFirst().finalAction());
@@ -662,16 +717,18 @@ class PostgresLexiconRepositoryIntegrationTest {
         jdbcUrl -> {
           try (var persistence = PostgresPersistence.open(jdbcUrl)) {
             var repository = persistence.repository();
-            repository.publish(
-                new LexiconImportRequest(
-                    List.of(row("context", "语境", List.of(), List.of())), metadata('f')));
+            new LexiconImportService(repository)
+                .publish(
+                    new LexiconImportRequest(
+                        List.of(row("context", "语境", List.of(), List.of())), metadata('f')));
             assertEquals(1, repository.publishedVersion());
             var v1 = repository.findByForms(1, List.of("context")).getFirst();
             assertEquals("语境", v1.finalGloss());
             assertEquals(1, v1.lexiconVersion());
-            repository.publish(
-                new LexiconImportRequest(
-                    List.of(row("context", "环境", List.of(), List.of())), metadata('g')));
+            new LexiconImportService(repository)
+                .publish(
+                    new LexiconImportRequest(
+                        List.of(row("context", "环境", List.of(), List.of())), metadata('g')));
             assertEquals(2, repository.publishedVersion());
             assertEquals(0, repository.findByForms(1, List.of("context")).size());
             var v2 = repository.findByForms(2, List.of("context")).getFirst();
@@ -689,9 +746,10 @@ class PostgresLexiconRepositoryIntegrationTest {
         jdbcUrl -> {
           try (var persistence = PostgresPersistence.open(jdbcUrl)) {
             var repository = persistence.repository();
-            repository.publish(
-                new LexiconImportRequest(
-                    List.of(row("false", "错误的", List.of(), List.of())), metadata('a')));
+            new LexiconImportService(repository)
+                .publish(
+                    new LexiconImportRequest(
+                        List.of(row("false", "错误的", List.of(), List.of())), metadata('a')));
             var cache = new CachedLexiconQueryService(repository, 20, 1, 1);
             assertEquals(
                 LexiconHintAction.HINT,
@@ -722,7 +780,8 @@ class PostgresLexiconRepositoryIntegrationTest {
                       false));
             }
             words.add(row("specialist", "专家", List.of(), List.of()));
-            repository.publish(new LexiconImportRequest(words, metadata('b')));
+            new LexiconImportService(repository)
+                .publish(new LexiconImportRequest(words, metadata('b')));
             assertThrows(IllegalArgumentException.class, () -> cache.lookupForms(List.of("FALSE")));
             for (var form : List.of("false", "ability", "abilities", "abilityalias")) {
               var candidate = cache.lookupForms(List.of(form)).candidates().getFirst();
@@ -814,16 +873,19 @@ class PostgresLexiconRepositoryIntegrationTest {
                   new LexiconImportMetadata(
                       "d".repeat(64), "ecdict-stardict", "MIT", Instant.EPOCH);
               if (streaming)
-                repository.publishStreaming(
-                    metadata,
-                    records.size(),
-                    records.size(),
-                    consumer -> {
-                      records.forEach(consumer);
-                      return new LexiconImportRowSource.ReadReceipt(
-                          metadata.sourceDigest(), records.size());
-                    });
-              else repository.publish(new LexiconImportRequest(records, metadata));
+                new LexiconImportService(repository)
+                    .publishStreaming(
+                        metadata,
+                        records.size(),
+                        records.size(),
+                        consumer -> {
+                          records.forEach(consumer);
+                          return new LexiconImportRowSource.ReadReceipt(
+                              metadata.sourceDigest(), records.size());
+                        });
+              else
+                new LexiconImportService(repository)
+                    .publish(new LexiconImportRequest(records, metadata));
               assertEquals(
                   "甲床瘤",
                   scalar(

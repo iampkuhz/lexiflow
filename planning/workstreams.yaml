@@ -1006,8 +1006,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-OPS-2002
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         deliverable: 补齐合成集成场景与规则变化证据，冻结交付输入供独立 TASK_VALIDATION 使用。
       - id: LF-TSK-QLT-2002
@@ -1874,8 +1874,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2002
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         - task_id: LF-TSK-ENR-2002
           type: hard
@@ -2527,28 +2527,42 @@ workstreams:
         title: 将导入 CLI 收敛为入口和来源适配
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
-        estimated_minutes: 75
+        estimated_minutes: 90
         owner: LF-WS-OPS
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
-        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/**
-        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/importer/**
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/LexiconImportPreparation.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/LexiconImportService.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/LexiconPublicationRepository.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DefaultLexiconRepository.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/LexiconImportMain.java
+        - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/importing/LexiconImportPreparationTest.java
+        - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/importing/LexiconImportServiceTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconRepositoryIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/importer/LexiconImportMainOutputTest.java
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/design.md
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
         forbidden_files:
         - secrets/**
         - .local/**
         - data/**
         - .env
-        expected_output: StarDict/规范 CSV 来源适配与导入/重建命令接入新用例，保留显式确认和进度。
+        expected_output: 两种来源统一进入应用准备与发布用例；CLI 仅保留来源、参数、资源和输出，持久化仅消费已准备条目，保留重建确认及原子发布。
         acceptance_criteria:
         - 不同来源进入统一准备流程且缺失证据不伪造；CLI 仅参数、资源、格式和输出。
         - 普通发布不触发重建；重建仍需精确确认，等待输入不刷进度；不新增后台调度。
+        - 准备/跨行冲突/来源凭据/有限预热报告由应用层管理；持久化不调用 prepare/fromRow，实际写入扫描每条准备一次。
+        - 发布端口只接收已准备条目来源并在事务中提供实际新版本；删除旧 raw-row 发布接口，所有生产者/测试同时切换。
+        - 两种来源的 validate/prewarm/publish 主线均有回归，错误摘要/计数/跨分块canonical冲突/读取故障保留旧发布，报告无库运行且不伪造发布成功。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
-        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :adapters:test :adapters:postgresIntegrationTest
         required_check_ids:
         - eng.backend.delivery
         - eng.repository.docs
@@ -2562,7 +2576,7 @@ workstreams:
           required_task_version: 2
           required_change_version: 2.0.0
           required_result: PASS
-        deliverable: StarDict/规范 CSV 来源适配与导入/重建命令接入新用例，保留显式确认和进度。
+        deliverable: 两种来源统一进入应用准备与发布用例；CLI 仅保留来源、参数、资源和输出，持久化仅消费已准备条目，保留重建确认及原子发布。
       - id: LF-TSK-OPS-2003
         title: 建立软件版本真源并接入后端构建
         priority: P0
