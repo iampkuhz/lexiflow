@@ -78,6 +78,8 @@ python3 -m scripts.delivery_gate check --submission-id <uuid>
 
 [check.py](../../../scripts/delivery_gate/check.py) 校验 receipt/hash DAG、当前 Task/dependency 和精确绑定的 approval。缺依赖或批准返回 BLOCKED，不发布永久失败的终态；条件补齐后可重核同一 submission。已有成功记录在当前性重验后幂等返回。系统不自动生成用户批准。
 
+同一依赖 Task/version 的失败或未完成送验会保留；依赖解析只采用唯一完整 PASS 验收链，不按时间选择最新记录。多个 PASS 链、已存在记录损坏或重复、身份与绑定哈希异常仍阻断；被采用的 check 必须绑定实际 validation/review，并递归核对嵌套依赖 receipt。零条完整 PASS 链不构成依赖满足。
+
 ## 1.6. 记录、观察与失败去向
 
 每层 record 在 ignored `tmp/quality/delivery-gate/` 原子、一次性发布。重复 JSON key、路径异常、非普通文件、竞争记录、hash 或绑定输入变化均不能当作可信证据。历史 record 不因任意短 TTL 自动失效，但使用时必须重核绑定来源和内容。
