@@ -1,6 +1,7 @@
 package io.lexiflow.enrichment.application.caption.model;
 
 import io.lexiflow.enrichment.domain.model.IncrementalHintResult;
+import io.lexiflow.lexicon.domain.model.LexiconLookupResult;
 import java.util.Objects;
 
 /**
@@ -10,6 +11,7 @@ import java.util.Objects;
  * @param queryNanos 各新增区间查询已发布词库的累计纳秒耗时，非负。
  * @param rulesNanos 各新增区间执行确定性规则的累计纳秒耗时，非负。
  * @param candidateCount 各新增区间返回的候选总数，非负。
+ * @param queryCounts 各新增区间词库查询计数的累计值，非空且各字段非负。
  * @param processedEnglish 仅本次处理区间的英文，不代表整屏字幕。
  * @param processedWithHints 仅本次处理区间及已命中提示，不代表整屏最终渲染。
  */
@@ -18,11 +20,13 @@ public record MeasuredIncrementalCaptionResult(
     long queryNanos,
     long rulesNanos,
     int candidateCount,
+    LexiconLookupResult.Counts queryCounts,
     String processedEnglish,
     String processedWithHints) {
   /** 校验结果、计时及本次处理文本。 */
   public MeasuredIncrementalCaptionResult {
     Objects.requireNonNull(result, "result");
+    Objects.requireNonNull(queryCounts, "queryCounts");
     Objects.requireNonNull(processedEnglish, "processedEnglish");
     Objects.requireNonNull(processedWithHints, "processedWithHints");
     if (queryNanos < 0 || rulesNanos < 0 || candidateCount < 0) {

@@ -3,11 +3,14 @@ package io.lexiflow.lexicon.domain.catalog;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
+import io.lexiflow.lexicon.domain.model.LexiconLookupResult;
 import io.lexiflow.lexicon.domain.port.LexiconCatalog;
+import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.UUID;
 
 /** 仅用于自动测试的有限内置材料，不替代产品已发布词库。 */
@@ -23,19 +26,43 @@ public final class BuiltinLexiconCatalog implements LexiconCatalog {
   /**
    * 返回字幕中的测试候选，优先更长的词段。
    *
-   * @param caption 含义：测试提供的字幕文本。取值范围：非 null，可为空字符串。
-   * @return 固定内置材料中的匹配候选。
+   * @param normalizedForms 含义：已规范化的精确词形键。取值范围：非 null；每键非空白、规范且至多三个 token。
+   * @return 固定内置材料中的精确匹配候选与本次计数。
    */
   @Override
-  public List<LexiconHintCandidate> candidatesFor(String caption) {
-    Objects.requireNonNull(caption, "caption");
-    var normalized = caption.toLowerCase(Locale.ROOT);
-    return ENTRIES.stream()
-        .filter(entry -> normalized.contains(entry.normalizedForm()))
-        .sorted(
-            (left, right) ->
-                Integer.compare(right.normalizedForm().length(), left.normalizedForm().length()))
-        .toList();
+  public LexiconLookupResult lookupForms(List<String> normalizedForms) {
+    var keys = validate(normalizedForms);
+    if (keys.isEmpty())
+      return new LexiconLookupResult(
+          List.of(), OptionalLong.empty(), LexiconLookupResult.Counts.zero());
+    var found = ENTRIES.stream().filter(entry -> keys.contains(entry.normalizedForm())).toList();
+    int positive =
+        (int)
+            keys.stream()
+                .filter(key -> found.stream().anyMatch(e -> e.normalizedForm().equals(key)))
+                .count();
+    int negative = keys.size() - positive;
+    return new LexiconLookupResult(
+        found,
+        OptionalLong.of(1),
+        new LexiconLookupResult.Counts(keys.size(), positive, negative, 0, 0, 0, 0));
+  }
+
+  private static List<String> validate(List<String> forms) {
+    Objects.requireNonNull(forms, "normalizedForms");
+    var keys = new LinkedHashSet<String>();
+    for (var form : List.copyOf(forms)) {
+      Objects.requireNonNull(form, "normalized form");
+      var tokens = LexiconSurfacePolicy.queryTokens(form);
+      if (form.isBlank()
+          || tokens.isEmpty()
+          || tokens.size() > LexiconSurfacePolicy.MAX_PHRASE_TOKENS
+          || !String.join(" ", tokens).equals(form)) {
+        throw new IllegalArgumentException("normalized form is invalid");
+      }
+      keys.add(form);
+    }
+    return List.copyOf(keys);
   }
 
   private static LexiconHintCandidate entry(String lemma, String gloss) {
