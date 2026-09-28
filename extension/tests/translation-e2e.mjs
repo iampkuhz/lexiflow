@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
+import { openActionPopup } from "./action-popup.mjs";
 
 const extensionRoot = resolve(import.meta.dirname, "..");
 const repositoryRoot = resolve(extensionRoot, "..");
@@ -221,11 +222,18 @@ try {
   await page.reload({waitUntil:"domcontentloaded"});
   await setCaption(page, "We need reliable captions.", 2);
   await waitForState(page, "no-pending");
-  await page.getByLabel("LexiFlow 设置与诊断").click();
-  await page.getByRole("button", {name:"恢复全部提示",exact:true}).click();
+  await page.bringToFront();
+  const popup = await openActionPopup({context,page,serviceWorker});
+  try {
+    await popup.click("#preferences summary");
+    await popup.click("#restore-start");
+    assert.equal(await popup.evaluate(() => !document.getElementById("restore-confirmation").hidden), true);
+    await popup.click("#restore-confirm");
+    await popup.waitFor(() => document.getElementById("restore-status").dataset.kind === "success");
+  } finally { await popup.close(); }
+  await page.bringToFront();
   await waitForState(page, "ready");
   assert.equal(await overlayText(page), "We need reliable(可靠的) captions.");
-  await page.getByLabel("LexiFlow 设置与诊断").click();
   // Clear before the next paint, even though the new request has not started.
   const cleared = await page.evaluate(async () => {
     window.__setCaption("A new unmatched line.", 2.1);

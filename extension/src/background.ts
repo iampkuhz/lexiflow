@@ -76,7 +76,12 @@ chrome.runtime.onMessage.addListener(
   (request: HintMessage | CancelMessage | { type: "local-preferences"; action: PreferenceAction; entryId?: string; lexiconVersion?: number }, sender,
     sendResponse: (response: ApiResult | PreferenceResult | { ok: true }) => void) => {
     if (request?.type === "local-preferences") {
-      if (sender.tab?.id === undefined) { sendResponse({ ok: false, reason: "invalid-request" }); return undefined; }
+      const popupUrl = sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL("popup.html");
+      const popup = popupUrl && sender.tab === undefined;
+      const popupAction = request.action === "read" || request.action === "restore-all";
+      if (sender.id !== chrome.runtime.id || (popupUrl ? !popup || !popupAction : sender.tab?.id === undefined)) {
+        sendResponse({ ok: false, reason: "invalid-request" }); return undefined;
+      }
       void preferences.execute(request.action, request.entryId, request.lexiconVersion).then(sendResponse);
       return true;
     }

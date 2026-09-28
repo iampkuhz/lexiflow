@@ -63,9 +63,7 @@ let pageVideoId = videoIdFromLocation();
 let layoutKey = "";
 let missingCaptionAt: number | undefined;
 const overlay = new BilingualOverlay(
-  (entryId, lexiconVersion) => { void updatePreferences("suppress", entryId, lexiconVersion); },
-  () => { void updatePreferences("restore-all"); },
-  () => { diagnostics.reset(); overlay.updateDiagnostics(diagnostics.snapshot()); }
+  (entryId, lexiconVersion) => { void updatePreferences("suppress", entryId, lexiconVersion); }
 );
 
 async function updatePreferences(action: PreferenceAction, entryId?: string, lexiconVersion?: number): Promise<void> {

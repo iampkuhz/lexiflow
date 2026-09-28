@@ -1,5 +1,5 @@
 import { localApiPort } from "./build-config.mjs";
-import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rm, cp } from "node:fs/promises";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 
@@ -8,6 +8,7 @@ const dist = resolve(root, "dist");
 const apiPort = localApiPort(process.env.LEXIFLOW_API_PORT);
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
+await cp(resolve(root, "assets"), resolve(dist, "assets"), { recursive: true });
 execFileSync("npx", ["tsc", "--noEmit", "-p", "tsconfig.json"], { cwd: root, stdio: "inherit" });
 for (const [entry, format] of [
   ["src/background.ts", "esm"],

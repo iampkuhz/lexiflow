@@ -464,6 +464,7 @@ path_ownership:
     proposed_paths:
     - docs/product/**
     - docs/ux/**
+    - assets/readme/**
   - scope: backend.foundation
     owner: LF-WS-ARCH
     proposed_paths:

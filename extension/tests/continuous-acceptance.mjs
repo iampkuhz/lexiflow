@@ -6,9 +6,9 @@ import { setTimeout as delay } from "node:timers/promises";
 /** Real wall-clock soak of the actual extension + API, using only authored synthetic cues. */
 export async function runContinuousAcceptance({ page, artifactRoot, setCaption, waitForState, overlayText, seconds = 375 }) {
   assert.ok(Number.isInteger(seconds) && seconds >= 10 && seconds <= 900, "bounded explicit soak duration");
-  await page.getByLabel("LexiFlow 设置与诊断").click();
-  await page.getByRole("button", { name: "清空本机统计", exact: true }).click();
-  await page.getByLabel("LexiFlow 设置与诊断").click();
+  // The overlay intentionally has no persistent controls; aggregate diagnostics remain on its host.
+  const initialDiagnostics = await page.locator("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics");
+  const baseline = initialDiagnostics ? JSON.parse(initialDiagnostics).counts : {};
   const start = performance.now();
   const cases = [];
   for (let index = 0; performance.now() - start < seconds * 1000; index++) {
@@ -38,12 +38,13 @@ export async function runContinuousAcceptance({ page, artifactRoot, setCaption, 
   const diagnostics = JSON.parse(await page.locator("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics"));
   assert.ok(elapsedMs >= seconds * 1000);
   assert.ok(cases.length >= Math.floor(seconds / 2), "soak must actually process captions, not merely wait");
-  assert.equal(diagnostics.counts.requested, cases.length);
-  assert.equal(diagnostics.counts.ready, cases.filter(item => item.expected === "ready").length);
-  assert.equal(diagnostics.counts["no-pending"], cases.filter(item => item.expected === "no-pending").length);
-  assert.equal(diagnostics.counts.shown, diagnostics.counts.ready);
+  const delta = key => diagnostics.counts[key] - (baseline[key] ?? 0);
+  assert.equal(delta("requested"), cases.length);
+  assert.equal(delta("ready"), cases.filter(item => item.expected === "ready").length);
+  assert.equal(delta("no-pending"), cases.filter(item => item.expected === "no-pending").length);
+  assert.equal(delta("shown"), delta("ready"));
   for (const outcome of ["network", "timeout", "invalid-response", "rejected", "late"]) {
-    assert.equal(diagnostics.counts[outcome], 0, `unexpected soak outcome: ${outcome}`);
+    assert.equal(delta(outcome), 0, `unexpected soak outcome: ${outcome}`);
   }
   for (const [stage, series] of Object.entries(diagnostics.timings)) {
     assert.ok(series.count > 0 && series.p95Ms >= 0, `missing stage: ${stage}`);

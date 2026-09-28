@@ -409,6 +409,7 @@ checks:
   scope: repository-baseline
   triggers:
   - path: docs/
+  - path: assets/readme/
   - path: openspec/
   - path: AGENTS.md
   - path: README.md
@@ -421,6 +422,7 @@ checks:
   - python3
   input_paths:
   - docs
+  - assets/readme
   - openspec
   - AGENTS.md
   - README.md
@@ -459,6 +461,7 @@ checks:
   scope: change-targeted
   triggers:
   - path: docs/
+  - path: assets/readme/
   - path: openspec/
   - path: AGENTS.md
   - path: README.md
@@ -471,6 +474,7 @@ checks:
   - python3
   input_paths:
   - docs
+  - assets/readme
   - openspec
   - AGENTS.md
   - README.md
@@ -949,6 +953,7 @@ checks:
   - java-25-temurin
   input_paths:
   - extension/src
+  - extension/assets
   - extension/tests
   - extension/scripts
   - extension/tsconfig.json
@@ -990,6 +995,7 @@ checks:
   - java-25-temurin
   input_paths:
   - extension/src
+  - extension/assets
   - extension/tests
   - extension/scripts
   - extension/tsconfig.json

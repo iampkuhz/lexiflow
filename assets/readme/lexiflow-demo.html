@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>LexiFlow README 展示素材</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#213c2d;color:#f4f7f1;font-family:Arial,"PingFang SC",sans-serif}.hero{width:960px;height:360px;padding:27px 34px;background:linear-gradient(120deg,#213c2d,#17281f);position:relative;overflow:hidden}.head{display:flex;align-items:center;gap:12px}.logo{width:40px;height:40px;background:#315c42;border-radius:10px;position:relative}.logo:before{content:"";position:absolute;left:18.75%;top:17.1875%;width:21.875%;height:65.625%;background:#f7faf2;border-radius:1px 1px 0 3px}.logo:after{content:"";position:absolute;left:18.75%;top:60.9375%;width:64.0625%;height:21.875%;background:linear-gradient(to right,#f7faf2 46.875%,#eec96b 46.875%);border-radius:0 3px 3px 3px}.name{font-size:24px;font-weight:700;letter-spacing:-.8px}
+.toggle{margin-left:auto;display:flex;align-items:center;gap:12px;min-width:220px;padding:10px 14px;background:#2c4a36;border:1px solid #64806a;border-radius:10px;color:#eef5ed;font:15px Arial,"PingFang SC",sans-serif;position:relative}.toggle .state{font-size:12px;color:#c7d9c8}.switch{width:38px;height:22px;border-radius:14px;position:relative;background:#94be98;margin-left:2px}.knob{position:absolute;top:3px;left:3px;width:16px;height:16px;background:#f5f8ee;border-radius:50%;transform:translateX(16px)}.english .switch{background:#6c7e71}.english .toggle{background:#293e30;border-color:#617365}.press{position:absolute;inset:-4px;border:2px solid #dbeacb;border-radius:14px;opacity:0;pointer-events:none}
+.viewport{position:absolute;top:120px;left:34px;right:34px;height:120px;overflow:hidden;mask-image:linear-gradient(transparent,#000 7px,#000 113px,transparent)}.captions{text-align:center;font-size:33px;line-height:60px;will-change:transform}.row{height:60px;white-space:nowrap}.row-inner{display:inline-block;background:#111e16;padding:0 12px;line-height:56px}.hint{color:#efd080}.term{text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:7px;text-decoration-color:#efd080;text-decoration-skip-ink:none}.english .hint{display:none}.english .term{text-decoration:none}.foot{position:absolute;bottom:26px;left:34px;right:34px;display:flex;align-items:center;gap:22px;color:#c2d0c4;font-size:13px}.legend{display:flex;gap:22px}.sample{margin-left:auto;color:#9caf9f;font-size:12px}.dot{color:#efd080;padding-right:6px}
+</style>
+<div class="hero">
+ <div class="head"><div class="logo"></div><div class="name">LexiFlow</div><button class="toggle" type="button" aria-pressed="true"><span>字幕增强</span><span class="state">已开启</span><span class="switch" aria-hidden="true"><span class="knob"></span></span><span class="press" aria-hidden="true"></span></button></div>
+ <div class="viewport" aria-label="逐行向上滚动的示例字幕"><div class="captions">
+  <div class="row"><span class="row-inner">A subtle<span class="hint">(微妙的)</span> shift</span></div>
+  <div class="row"><span class="row-inner">can <span class="term">make a difference</span><span class="hint">(起作用)</span>.</span></div>
+  <div class="row"><span class="row-inner">Stay curious<span class="hint">(好奇的)</span>,</span></div>
+  <div class="row"><span class="row-inner">and <span class="term">think outside the box</span><span class="hint">(跳出思维定式)</span>.</span></div>
+  <div class="row"><span class="row-inner">A subtle<span class="hint">(微妙的)</span> shift</span></div>
+  <div class="row"><span class="row-inner">can <span class="term">make a difference</span><span class="hint">(起作用)</span>.</span></div>
+ </div></div>
+ <div class="foot"><div class="legend"><span><span class="dot">•</span>单词：紧随短释</span><span><span class="dot">—</span>词组：连续底线 + 短释</span></div><span class="sample">虚构例句 · 效果示意</span></div>
+</div>
+<script>
+const hero = document.querySelector('.hero');
+const toggle = document.querySelector('.toggle');
+const label = document.querySelector('.state');
+const knob = document.querySelector('.knob');
+const press = document.querySelector('.press');
+const captions = document.querySelector('.captions');
+const smooth = value => { const p = Math.max(0, Math.min(1, value)); return p*p*(3-2*p); };
+function setEnabled(enabled, amount = enabled ? 1 : 0) {
+ hero.classList.toggle('english', !enabled);
+ toggle.setAttribute('aria-pressed', String(enabled));
+ label.textContent = enabled ? '已开启' : '已关闭';
+ knob.style.transform = `translateX(${16 * amount}px)`;
+}
+// 固定时间采样用于导出动画；不依赖墙钟、定时器或网络。
+window.renderAt = milliseconds => {
+ const t = milliseconds % 14400;
+ const off = smooth((t-2100)/300), on = smooth((t-3900)/300);
+ const amount = 1-off+on;
+ setEnabled(amount >= 0.5, amount);
+ let offset = 0;
+ for (const start of [5900,8100,10300,12500]) offset += smooth((t-start)/600);
+ captions.style.transform = `translateY(${-60*offset}px)`;
+ const pulse = [2100,3900].reduce((value,start) => Math.max(value, Math.max(0,1-Math.abs(t-(start+150))/250)),0);
+ press.style.opacity = String(pulse*.8);
+};
+toggle.addEventListener('click', () => setEnabled(toggle.getAttribute('aria-pressed') !== 'true'));
+window.renderAt(0);
+</script>
+</html>

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
+import {openActionPopup} from './action-popup.mjs';
 
 /** Integration with the real extension in the existing routed local fixture, never a user profile. */
 export async function runExperienceAcceptance({page,context,serviceWorker,apiBase,repositoryRoot,setCaption,waitForState,overlayText}) {
@@ -15,6 +16,12 @@ export async function runExperienceAcceptance({page,context,serviceWorker,apiBas
   globalThis.fetch=async(...args)=>{await new Promise(r=>setTimeout(r,220));return previous(...args);};
  },apiBase);
  let popup;
+ const openPopup=async()=>{
+  await popup?.close();
+  popup=await openActionPopup({context,page,serviceWorker});
+  await popup.waitFor(()=>!document.getElementById('enhance-toggle').disabled);
+  return popup;
+ };
  try {
   const immediate=await page.evaluate(async()=>{
    const container=document.querySelector('#ytp-caption-window-container');
@@ -38,28 +45,40 @@ export async function runExperienceAcceptance({page,context,serviceWorker,apiBas
   assert.equal(layout.breaks,1);assert.ok(layout.height>layout.font*1.5);assert.equal(layout.inside,true);
   await page.locator('#player').screenshot({path:resolve(root,'source-multiline.png')});
   const before=await send({type:'page-enhancement',action:'read'});assert.equal(before.ok,true);assert.equal(before.enabled,true);
-  // Popup document is real. Only active-tab selection is bound to the fixture rather than this test tab.
-  popup=await context.newPage();
-  await popup.setViewportSize({width:280,height:110});
-  await popup.addInitScript(id=>{chrome.tabs.query=async()=>[{id}];},targetId);
-  await popup.goto(`chrome-extension://${new URL(serviceWorker.url()).host}/popup.html`);
-  const toggle=popup.getByLabel('当前页面启用字幕增强');await toggle.waitFor();
-  await popup.waitForFunction(()=>!document.getElementById('enhance-toggle').disabled);
-  await toggle.uncheck();await popup.waitForFunction(()=>!document.getElementById('enhance-toggle').disabled);
+  // Open the actual action popup so Chrome supplies its real popup URL and sender identity.
+  await openPopup();
+  const popupFacts=await popup.evaluate(()=>({width:document.documentElement.clientWidth,height:document.body.scrollHeight,
+    logoLoaded:document.querySelector('header img').complete&&document.querySelector('header img').naturalWidth===128,
+    logoWidth:document.querySelector('header img').getBoundingClientRect().width,logoHeight:document.querySelector('header img').getBoundingClientRect().height,
+    switchWidth:Math.round(document.querySelector('#enhance-toggle').getBoundingClientRect().width),
+    status:document.querySelector('#page-status').textContent}));
+  assert.equal(popupFacts.width,280);assert.ok(popupFacts.height>=165);assert.equal(popupFacts.logoLoaded,true);assert.equal(popupFacts.logoWidth,24);assert.equal(popupFacts.logoHeight,24);assert.equal(popupFacts.switchWidth,40);
+  assert.equal(popupFacts.status,'已开启 · 英文优先');
+  await popup.pressSpace('#enhance-toggle');
+  await popup.waitFor(()=>document.getElementById('enhance-toggle').disabled===false&&!document.getElementById('enhance-toggle').checked);
   await waitForState(page,'idle');assert.equal(await overlayText(page),'');
+  await popup.click('#preferences summary');
+  assert.equal(await popup.evaluate(()=>!document.querySelector('#restore-start').hidden),true);
+  await popup.click('#restore-start');
+  assert.equal(await popup.evaluate(()=>!document.querySelector('#restore-confirmation').hidden),true);
+  await popup.click('#restore-cancel');
+  assert.equal(await popup.evaluate(()=>!document.querySelector('#restore-confirmation').hidden),false);
+  assert.equal(await popup.evaluate(()=>!document.querySelector('#restore-status').hidden),false);
+  await page.bringToFront();
   assert.equal(await page.locator('#player').evaluate(e=>e.classList.contains('lexiflow-inline-active')),false);
   const countBefore=JSON.parse(await page.locator('#lexiflow-caption-overlay').getAttribute('data-lexiflow-diagnostics')).counts.requested;
   await setCaption(page,'A reliable disabled caption.',10);
   await page.waitForTimeout(300);
   assert.equal(JSON.parse(await page.locator('#lexiflow-caption-overlay').getAttribute('data-lexiflow-diagnostics')).counts.requested,countBefore);
-  await popup.screenshot({path:resolve(root,'popup-disabled.png')});
-  await toggle.check();await popup.waitForFunction(()=>!document.getElementById('enhance-toggle').disabled);
+  await openPopup();await popup.screenshot({path:resolve(root,'popup-disabled.png')});
+  await popup.pressSpace('#enhance-toggle');await popup.waitFor(()=>!document.getElementById('enhance-toggle').disabled&&document.getElementById('enhance-toggle').checked);
   await waitForState(page,'ready');assert.equal(await overlayText(page),'A reliable(可靠的) disabled caption.');
   await popup.screenshot({path:resolve(root,'popup-enabled.png')});
   // Turning off while a real delayed request is pending must not allow it to resurrect hints.
   await setCaption(page,'Another reliable caption.',11);
   await page.waitForTimeout(60);
-  await toggle.uncheck();await popup.waitForFunction(()=>!document.getElementById('enhance-toggle').disabled);
+  await page.bringToFront();await openPopup();
+  await popup.pressSpace('#enhance-toggle');await popup.waitFor(()=>!document.getElementById('enhance-toggle').disabled&&!document.getElementById('enhance-toggle').checked);
   await page.waitForTimeout(400);assert.equal(await overlayState(),'idle');assert.equal(await overlayText(page),'');
   // Navigation resets only this page's in-memory switch; stale popup cannot target a new page.
   await page.evaluate(()=>{document.dispatchEvent(new Event('yt-navigate-start'));history.pushState({},'', '/watch?v=local-next');document.dispatchEvent(new Event('yt-navigate-finish'));});
@@ -70,10 +89,10 @@ export async function runExperienceAcceptance({page,context,serviceWorker,apiBas
   await waitForState(page,'ready');
   const diagnostics=JSON.parse(await page.locator('#lexiflow-caption-overlay').getAttribute('data-lexiflow-diagnostics'));
   assert.ok(diagnostics.counts['cancelled-in-flight']>=1);
-  await writeFile(resolve(root,'report.json'),JSON.stringify({status:'PASS',scope:'local authored fixture; real extension popup/message/render; active-tab query fixture-bound',immediate,layout,diagnostics,checks:['source-multiline','english-before-paint','popup-toggle','disabled-no-requests','pending-cancellation','navigation-reset','stale-toggle-rejected']},null,2));
+  await writeFile(resolve(root,'report.json'),JSON.stringify({status:'PASS',scope:'local authored fixture; real action popup CDP target, native input and screenshot; active tab is synthetic',immediate,layout,diagnostics,checks:['source-multiline','english-before-paint','popup-toggle','disabled-no-requests','pending-cancellation','navigation-reset','stale-toggle-rejected']},null,2));
   await writeFile(resolve(repositoryRoot,'tmp/quality/experience/latest.json'),JSON.stringify({root,status:'PASS'}));
  } finally {
-  await popup?.close();
+  await popup?.close().catch(()=>undefined);
   await serviceWorker.evaluate(()=>{if(globalThis.__experienceFetch){globalThis.fetch=globalThis.__experienceFetch;delete globalThis.__experienceFetch;}});
  }
  async function overlayState(){return page.locator('#lexiflow-caption-overlay').getAttribute('data-lexiflow-state');}

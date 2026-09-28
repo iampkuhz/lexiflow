@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 let listener;
-globalThis.chrome = { runtime: { onMessage: { addListener(value) { listener = value; } } } };
+globalThis.chrome = { runtime: { id: 'extension-id', getURL: path => `chrome-extension://extension-id/${path}`, onMessage: { addListener(value) { listener = value; } } } };
 await import('../dist/background.js');
 const source = { lexiconEntryId: "00000000-0000-0000-0000-000000000001", lexiconVersion: 1, senseId: "00000000-0000-0000-0000-000000000002" };
 const payload = { captionTopicKey:'topic',trackKey:null,lastRequestedSnapshot:null,currentSnapshot:{captions:[{windowId:null,startMs:null,segments:[{key:'key1',text:'reliable',offsetMs:null,append:true,line:0}]}]}};
-const sender = (id, documentId='doc') => ({tab:{id},documentId});
+const sender = (id, documentId='doc') => ({id:'extension-id',tab:{id},documentId});
 const send = (message, source) => new Promise(resolve => listener(message,source,resolve));
 
 test('isolates cancellation between tabs and documents with identical local sequence IDs', async () => {
@@ -103,4 +103,19 @@ test('preferences only write explicit entry IDs to local storage and never fetch
   assert.deepEqual(await send({type:'local-preferences',action:'read'},sender(2)),{ok:true,entryKeys:[`${entryId}@1`]});
   assert.deepEqual(await send({type:'local-preferences',action:'restore-all'},sender(1)),{ok:true,entryKeys:[]});
   assert.deepEqual(await send({type:'local-preferences',action:'suppress',entryId,lexiconVersion:1},{}),{ok:false,reason:'invalid-request'});
+});
+
+test('popup identity can read and restore all but cannot suppress; sender identity is exact', async () => {
+  let values = { 'lexiflow.suppressed-entries': [`${source.lexiconEntryId}@1`] };
+  chrome.storage={local:{ get:async key => ({[key]:values[key]}),set:async next => {values={...values,...next};} }};
+  const popup = { id:'extension-id', url:'chrome-extension://extension-id/popup.html' };
+  assert.deepEqual(await send({type:'local-preferences',action:'read'},popup),{ok:true,entryKeys:[`${source.lexiconEntryId}@1`]});
+  assert.deepEqual(await send({type:'local-preferences',action:'restore-all'},popup),{ok:true,entryKeys:[]});
+  assert.deepEqual(await send({type:'local-preferences',action:'suppress',entryId:source.lexiconEntryId,lexiconVersion:1},popup),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-preferences',action:'read'}, { ...popup, tab:{id:3} }),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-preferences',action:'read'}, { ...popup, url:'chrome-extension://extension-id/not-popup.html' }),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-preferences',action:'restore-all'}, { ...popup, id:'external-id' }),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-preferences',action:'read'}, { ...popup, tab:{id:3} }),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-preferences',action:'read'}, {}),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-preferences',action:'read'}, {id:'external-id',tab:{id:9}}),{ok:false,reason:'invalid-request'});
 });

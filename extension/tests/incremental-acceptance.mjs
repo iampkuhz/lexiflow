@@ -47,8 +47,28 @@ export async function runIncrementalAcceptance({page,serviceWorker,setCaption,wa
   // 慢请求返回时字幕已追加，仍可见的旧词必须获得提示。
   await setCaption(page,'Another reliable',41);await page.waitForTimeout(70);await setCaption(page,'Another reliable result',41.1);
   await waitForState(page,'ready');assert.equal(await overlayText(page),'Another reliable(可靠的) result');
+  // 在正常动态效果下真实滚动裁剪窗口：共享的第二行节点应成为新首行，离场 ghost 定时清理。
+  await page.emulateMedia({reducedMotion:'no-preference'});
+  await page.evaluate(()=>{
+    const container=document.querySelector('#ytp-caption-window-container');container.replaceChildren();
+    const window=document.createElement('div');window.className='caption-window';window.style.cssText='height:48px;overflow:hidden';
+    const content=document.createElement('span');content.className='captions-text';content.style.cssText='display:block;transition:transform 400ms linear;transform:translateY(0)';
+    for(const text of ['An older line','A reliable method','new words']){const row=document.createElement('span');row.className='caption-visual-line';row.style.cssText='display:block;height:24px;line-height:24px';row.append(Object.assign(document.createElement('span'),{className:'ytp-caption-segment',textContent:text}));content.append(row);}
+    window.append(content);container.append(window);
+  });
+  await waitForState(page,'ready');
+  const normalMotionBefore=await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length);
+  await page.evaluate(()=>{const line=document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.line');window.__sharedRow=line.querySelector(':scope > .caption-row:nth-of-type(2)');document.querySelector('.captions-text').style.transform='translateY(-24px)';});
+  await page.waitForFunction(()=>document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.line').textContent.includes('new words'),undefined,{timeout:180});
+  assert.equal(await page.evaluate(()=>!!document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.outgoing')),true,'正常动态效果的真实两行 roll-up 应有离场裁剪行');
+  assert.equal(await page.evaluate(()=>document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.line').querySelector(':scope > .caption-row')===window.__sharedRow),true,'roll-up 复用原共享行节点');
+  await page.waitForTimeout(500);
+  assert.equal(await page.evaluate(()=>!!document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.outgoing')),false,'正常 roll-up 结束必须移除 ghost');
+  assert.equal(await overlayText(page),'A reliable(可靠的) method new words');
+  assert.equal(await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length),normalMotionBefore+1);
+
   // 原生 roll-up 仅由 CSS transform 改变可见行：没有 DOM mutation/timeupdate 也要即时采集。
-  // 即使系统报告减少动态效果，增强字幕也始终跟随原生滚动，不切换到跳变模式。
+  // 减弱动态效果下即时切换，不启动增强层的平移动画，也不能留下 ghost/旧行。
   await page.emulateMedia({reducedMotion:'reduce'});
   await page.evaluate(()=>{
     const container=document.querySelector('#ytp-caption-window-container');container.replaceChildren();
@@ -62,11 +82,13 @@ export async function runIncrementalAcceptance({page,serviceWorker,setCaption,wa
   await page.evaluate(()=>{window.__motionGloss=document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.gloss');document.querySelector('.captions-text').style.transform='translateY(-24px)';});
   await page.waitForFunction(()=>document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.line').textContent.includes('new words'),undefined,{timeout:180});
   assert.equal(await page.evaluate(()=>!!document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.outgoing')),
-    true,'两行滚动时旧行应暂留为只展示的离场行');
+    false,'减弱动态效果下不能创建离场 ghost');
+  assert.equal(await page.evaluate(()=>document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.line').classList.contains('rolling')),
+    false,'减弱动态效果下不启动增强层平移动画');
   assert.equal(await page.evaluate(()=>document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.gloss')===window.__motionGloss),true);
   await page.waitForTimeout(500);
   assert.equal(await page.evaluate(()=>!!document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.outgoing')),
-    false,'滚动结束必须清理离场行');
+    false,'减弱动态效果下清空和滚动不得留下旧行');
   assert.equal(await overlayText(page),'A reliable(可靠的) method new words');
   assert.equal(await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length),motionBefore+1);
   // 原生动画复位与前缀节点移除不在同一帧：不得回显旧行或丢掉刚出现的新行。

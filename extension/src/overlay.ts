@@ -30,21 +30,13 @@ export class BilingualOverlay {
   private rollFrame?: number;
   private rollTimer?: ReturnType<typeof setTimeout>;
   private player?: HTMLElement;
-  private controls?: HTMLElement;
-  private details?: HTMLDetailsElement;
-  private report?: HTMLPreElement;
-  private preferenceMessage?: HTMLElement;
-  private latestDiagnostics = "";
   private shownHintKeys = new Set<string>();
 
-  constructor(private readonly suppress: (entryId: string, lexiconVersion: number) => void,
-    private readonly restore: () => void, private readonly resetDiagnostics: () => void) {}
+  constructor(private readonly suppress: (entryId: string, lexiconVersion: number) => void) {}
 
   render(view: StreamView, preferences: PreferenceView, source?: CaptionSource): number {
     const host = this.ensure();
     if (!host || !this.line) return 0;
-    const message = preferences.message || `仅本机：已抑制 ${preferences.entryKeys.size} 个词条。点击中文即可不再提示。`;
-    if (this.preferenceMessage && this.preferenceMessage.textContent !== message) this.preferenceMessage.textContent = message;
     if (!source) {
       host.dataset.lexiflowState = "idle";
       this.finishRoll();
@@ -130,9 +122,7 @@ export class BilingualOverlay {
   }
 
   updateDiagnostics(value: ReturnType<Diagnostics["snapshot"]>): void {
-    this.latestDiagnostics = JSON.stringify(value, null, 2);
     if (this.host) this.host.dataset.lexiflowDiagnostics = JSON.stringify(value);
-    if (this.details?.open && this.report) this.report.textContent = this.latestDiagnostics;
   }
 
   position(): void {
@@ -178,7 +168,8 @@ export class BilingualOverlay {
       content.replaceChildren(...nodes);
       return row;
     });
-    const roll = !this.outgoing && oldRows.length === 2 && rows.length === 2 && oldRows[1] === rows[0] && oldRows[0] !== rows[0];
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const roll = !reducedMotion && !this.outgoing && oldRows.length === 2 && rows.length === 2 && oldRows[1] === rows[0] && oldRows[0] !== rows[0];
     const outgoing = roll ? oldRows[0] : undefined;
     const outgoingHeight = outgoing?.getBoundingClientRect().height ?? 0;
     const children: Node[] = [];
@@ -210,7 +201,7 @@ export class BilingualOverlay {
     if (this.host?.isConnected && this.player === player) return this.host;
     this.finishRoll(); this.shownHintKeys.clear();
     if (this.player?.classList.contains("lexiflow-inline-active")) this.player.classList.remove("lexiflow-inline-active");
-    this.host?.remove(); this.controls?.remove();
+    this.host?.remove();
     this.line = undefined; this.viewport = undefined;
     if (!player?.querySelector("#ytp-caption-window-container")) return undefined;
     this.player = player;
@@ -220,7 +211,7 @@ export class BilingualOverlay {
     host.style.cssText = "position:absolute;left:5%;right:5%;bottom:12%;z-index:2147483646;pointer-events:none;text-align:center";
     const root = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
-    style.textContent = ":host{font-family:Arial,sans-serif;white-space:normal}.viewport{position:relative;overflow:hidden}.line{display:block;white-space:normal;color:white;font-weight:500;line-height:1.55;text-shadow:0 1px 2px #000;overflow-wrap:anywhere}.line:empty{display:none}.caption-row{display:block;text-align:center}.row-content{padding:.12em .25em;background:rgba(0,0,0,.8);box-decoration-break:clone;-webkit-box-decoration-break:clone}.row-break{display:none}.outgoing{position:absolute;top:0;left:0;right:0;color:white;font:inherit;line-height:1.55;text-shadow:0 1px 2px #000}.rolling{transition:transform .42s ease-out}.hint-phrase{text-decoration-line:underline;text-decoration-color:#ffe58f;text-decoration-thickness:.08em;text-underline-offset:.14em;text-decoration-skip-ink:none}.gloss{display:inline;white-space:normal;color:#ffe58f;background:none;border:0;padding:0;font:inherit;text-shadow:inherit;cursor:pointer;pointer-events:auto;max-width:100%;overflow-wrap:anywhere}.gloss:focus-visible{outline:2px solid #ffe58f}";
+    style.textContent = ":host{font-family:Arial,sans-serif;white-space:normal}.viewport{position:relative;overflow:hidden}.line{display:block;white-space:normal;color:white;font-weight:500;line-height:1.55;text-shadow:0 1px 2px #000;overflow-wrap:anywhere}.line:empty{display:none}.caption-row{display:block;text-align:center}.row-content{padding:.12em .25em;background:rgba(0,0,0,.8);box-decoration-break:clone;-webkit-box-decoration-break:clone}.row-break{display:none}.outgoing{position:absolute;top:0;left:0;right:0;color:white;font:inherit;line-height:1.55;text-shadow:0 1px 2px #000}.rolling{transition:transform .42s ease-out}.hint-phrase{text-decoration-line:underline;text-decoration-color:#ffe58f;text-decoration-thickness:.08em;text-underline-offset:.14em;text-decoration-skip-ink:none}.gloss{display:inline;white-space:normal;color:#ffe58f;background:none;border:0;padding:0;font:inherit;text-shadow:inherit;cursor:pointer;pointer-events:auto;max-width:100%;overflow-wrap:anywhere}.gloss:focus-visible{outline:2px solid #ffe58f}@media(prefers-reduced-motion:reduce){.rolling{transition:none!important}}";
     this.line = document.createElement("span");
     this.line.className = "line";
     this.viewport = document.createElement("div"); this.viewport.className = "viewport";
@@ -228,31 +219,6 @@ export class BilingualOverlay {
     root.append(style, this.viewport);
     player.append(host);
     this.host = host;
-    this.createControls(player);
     return host;
-  }
-
-  private createControls(player: HTMLElement): void {
-    const controls = document.createElement("div");
-    controls.id = "lexiflow-controls";
-    controls.style.cssText = "position:absolute;top:8px;left:8px;z-index:2147483647;font:12px Arial,sans-serif;color:white";
-    const root = controls.attachShadow({mode:"open"});
-    const style = document.createElement("style");
-    style.textContent = "details{background:rgba(0,0,0,.88);border-radius:5px;padding:5px;max-width:min(420px,75vw)}summary{cursor:pointer;list-style:none;color:#ffe58f}button{margin:4px;padding:5px;color:white;background:#333;border:1px solid #888;border-radius:3px;cursor:pointer}p{line-height:1.5;margin:8px 4px}pre{max-height:200px;overflow:auto;font:11px monospace;white-space:pre-wrap}button:focus-visible,summary:focus-visible{outline:2px solid #ffe58f}";
-    this.details = document.createElement("details");
-    const summary = document.createElement("summary"); summary.textContent = "LF";
-    summary.setAttribute("aria-label", "LexiFlow 设置与诊断");
-    this.preferenceMessage = document.createElement("p");
-    const restore = document.createElement("button"); restore.textContent = "恢复全部提示";
-    restore.addEventListener("click", () => this.restore());
-    const reset = document.createElement("button"); reset.textContent = "清空本机统计";
-    reset.addEventListener("click", () => this.resetDiagnostics());
-    this.report = document.createElement("pre");
-    this.details.addEventListener("toggle", () => { if (this.details?.open && this.report) this.report.textContent = this.latestDiagnostics; });
-    this.details.append(summary, this.preferenceMessage, restore, reset, this.report);
-    root.append(style, this.details);
-    root.addEventListener("click", event => event.stopPropagation());
-    root.addEventListener("keydown", event => event.stopPropagation());
-    player.append(controls); this.controls = controls;
   }
 }

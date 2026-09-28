@@ -172,11 +172,9 @@ async function runCase({
   assert.deepEqual(evidence.markedTerms, evidence.glosses.map(gloss => gloss.term).filter(term => /\S+\s+\S/u.test(term.trim())), `${id}: only one-hint multiword phrases are underlined`);
   assert.equal(evidence.correctUnderlineStyles, true, `${id}: phrase-only underline styling`);
   assert.equal(evidence.withinPlayer, true, `${id}: overlay must stay within the player`);
-  assert.equal(evidence.noControlCollision, true, `${id}: overlay must not collide with controls`);
   assert.equal(evidence.noGlossCollision, true, `${id}: glosses must not overlap each other`);
   assert.equal(evidence.sourceMasked, true, `${id}: original caption must be clipped while inline overlay is active`);
-  assert.equal(evidence.controls.visible, true, `${id}: controls must remain visible`);
-  assert.equal(evidence.controls.enabled, true, `${id}: controls must remain enabled`);
+  assert.equal(evidence.controlsAbsent, true, `${id}: persistent controls stay absent and aggregate diagnostics remain available`);
   assert.ok(evidence.fontSize >= minimumFontSize, `${id}: expected text scale was not applied`);
   if (fullscreen) assert.equal(evidence.fullscreen, true, `${id}: expected fullscreen fixture`);
 
@@ -196,16 +194,12 @@ async function collectGeometry(page, caption, expectedHints, expectedTerms, mini
     const player = document.querySelector("#player");
     const host = document.querySelector("#lexiflow-caption-overlay");
     const source = document.querySelector(".ytp-caption-segment");
-    const controls = document.querySelector("#lexiflow-controls");
-    if (!(player instanceof HTMLElement) || !(host instanceof HTMLElement) || !(source instanceof HTMLElement) || !(controls instanceof HTMLElement)) {
-      throw new Error("visual-fixture-overlay-or-controls-missing");
+    if (!(player instanceof HTMLElement) || !(host instanceof HTMLElement) || !(source instanceof HTMLElement)) {
+      throw new Error("visual-fixture-overlay-missing");
     }
     const root = host.shadowRoot;
-    const controlRoot = controls.shadowRoot;
     const line = root?.querySelector(".line");
-    const summary = controlRoot?.querySelector("summary");
-    const buttons = [...(controlRoot?.querySelectorAll("button") ?? [])];
-    if (!(line instanceof HTMLElement) || !(summary instanceof HTMLElement)) throw new Error("visual-shadow-content-missing");
+    if (!(line instanceof HTMLElement)) throw new Error("visual-shadow-content-missing");
     const children = [...line.querySelectorAll('[data-node-key]')];
     const glosses = children.filter(child => child.classList.contains("gloss"));
     const markedTerms = children.filter(child => child.classList.contains("hint-phrase")).map(child => child.textContent ?? "");
@@ -220,16 +214,11 @@ async function collectGeometry(page, caption, expectedHints, expectedTerms, mini
     });
     const playerRect = asRect(player.getBoundingClientRect());
     const lineRect = asRect(line.getBoundingClientRect());
-    const controlRect = asRect(controls.getBoundingClientRect());
     const glossRects = glosses.map(gloss => asRect(gloss.getBoundingClientRect()));
     const inside = (box) => box.left >= playerRect.left - 1 && box.right <= playerRect.right + 1 &&
       box.top >= playerRect.top - 1 && box.bottom <= playerRect.bottom + 1;
     const disjoint = (left, right) => left.right <= right.left || right.right <= left.left || left.bottom <= right.top || right.bottom <= left.top;
-    const visible = (element) => {
-      const box = element.getBoundingClientRect();
-      const style = getComputedStyle(element);
-      return box.width > 0 && box.height > 0 && style.visibility !== "hidden" && style.display !== "none";
-    };
+    const controlsAbsent = !document.querySelector("#lexiflow-controls") && Boolean(host.dataset.lexiflowDiagnostics);
     return {
       caption: captionValue,
       overlayText: line.textContent?.trim() ?? "",
@@ -239,11 +228,10 @@ async function collectGeometry(page, caption, expectedHints, expectedTerms, mini
       correctUnderlineStyles,
       player: playerRect,
       line: lineRect,
-      controls: { rect: controlRect, visible: visible(summary), enabled: !buttons.some(button => button.disabled) },
+      controlsAbsent,
       sourceMasked: /inset/.test(getComputedStyle(source.parentElement ?? source).clipPath),
       adjacentGlosses,
-      withinPlayer: [lineRect, controlRect, ...glossRects].every(inside),
-      noControlCollision: disjoint(lineRect, controlRect),
+      withinPlayer: [lineRect, ...glossRects].every(inside),
       noGlossCollision: glossRects.every((box, index) => glossRects.slice(index + 1).every(other => disjoint(box, other))),
       expectedHints: expectedHintCount,
       fontSize: Number.parseFloat(getComputedStyle(line).fontSize) || 0,
@@ -254,14 +242,9 @@ async function collectGeometry(page, caption, expectedHints, expectedTerms, mini
 }
 
 async function assertControlsUsable(page) {
-  await page.evaluate(() => {
-    const details = document.querySelector("#lexiflow-controls")?.shadowRoot?.querySelector("details");
-    if (details instanceof HTMLDetailsElement) details.open = false;
-  });
-  await page.getByLabel("LexiFlow 设置与诊断").click();
-  const opened = await page.evaluate(() => document.querySelector("#lexiflow-controls")?.shadowRoot?.querySelector("details")?.open === true);
-  assert.equal(opened, true, "visual controls must respond to a user click");
-  await page.getByLabel("LexiFlow 设置与诊断").click();
+  const controlsAbsent = await page.evaluate(() => !document.querySelector("#lexiflow-controls") &&
+    Boolean(document.querySelector("#lexiflow-caption-overlay")?.getAttribute("data-lexiflow-diagnostics")));
+  assert.equal(controlsAbsent, true, "persistent controls stay absent while aggregate diagnostics remain available");
 }
 
 async function installHintRendererMock(serviceWorker, apiBase, caption, terms) {
