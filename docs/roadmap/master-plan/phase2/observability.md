@@ -39,7 +39,7 @@ db_batches 仅为缺失词形批量读取次数，版本读取与预热分别记
 
 原因与结果关系固定：NO_HINT、NO_NEW_SEGMENTS、DEMO_MODE、PREWARM_DEGRADED 不让业务结果变为 FAIL；NO_PUBLISHED_DATA、DEPENDENCY_UNAVAILABLE 表示 BLOCKED；非法输入及违反版本/结构合同为 FAIL。schema 不合或内部异常不得冒充正常空提示。
 
-请求 terminal 在控制器的统一终态出口输出，包括反序列化/校验失败的入口异常映射。业务组件只返回结构化计数与原因，不直接打印字幕或重复请求终态。导入进度的交互确认文本与结构化事件分开，等待人工输入不发执行心跳。
+请求 terminal 在 HTTP 过滤器的统一终态出口输出，包括反序列化/校验失败的入口异常映射。业务组件只返回结构化计数与原因，不直接打印字幕或重复请求终态。导入进度的交互确认文本与结构化事件分开，等待人工输入不发执行心跳。
 
 ## 1.3. 浏览器观测与展示边界
 
@@ -76,3 +76,17 @@ StructuredEventLogger 负责单行 JSON 编码与按固定级别输出；提供�
 敏感台账通过 adapters 内的 SegmentAnalysisStore 技术接口接收已准备的 SegmentAnalysisRecord（散列 segmentId、英文及分段 translated ranges）。它是本机文件格式合同，不新建业务 Domain 或 Gradle 模块，不让 adapters 依赖 Enrichment/API。API 的 SegmentAnalysisLog 仅将已验证 request/result 映射到该中立记录并调用 Store；文件、锁、去重、权限、JSON 编码和专用 console 全部属于 FileSegmentAnalysisStore，组合根选择路径并装配具体实现。默认路径定位留在组合根，不进入领域或文件 Store；现有开发授权不自动扩展至 Docker，发行模式必须装配 disabled Store，后续显式启用才写入。
 
 Record 及 ranges 防御性复制，范围要求 UTF-16 半开、升序不重叠且在英文内，禁止切开代理对；身份与版本有效。Store 同步写入并 force 成功后才更新去重集合和专用 console；重复 key、重启恢复、旧尾补全不重写、失败不阻断提示保持。空列表和 disabled Store 不初始化文件；损坏 JSON、重复 ID、未完成尾行及符号链接拒绝，不删除、不截断或自动修复。JSON 编码使用现有 BOM 锁定的 Jackson core；不引入平台外发、异步队列或额外资料采集。文件故障测试只用合成临时文件。
+
+## 1.7. 请求观测的具体交接
+
+`HintSelectionResult` 同时返回提示与实际选择计数。ambiguous 统计匹配位置 `(start,end)` 上存在多个 entryId 的位置数，包含禁止提示的歧义证据；overlap_dropped 只统计可显示、非歧义且未因 entryId 重复而排除，最终仅因重叠落选的候选次数。计数不改变既有优先级、去重和区间选择规则。领域只返回值，不依赖 logger。
+
+`MeasuredIncrementalCaptionResult.Diagnostics` 汇总 newRanges、ambiguous、overlapDropped、publishedVersion、versionConflict 与 candidatesNanos。newRanges 是实际处理的连续新增区间数；selected 是跨区间去重后返回的提示数。候选计时包含区间规划及查询词形生成，query 只含实际词库查询，selection 包含策略与坐标映射。所有区间的查询版本、全部候选版本及映射提示版本在过滤与去重前统一检查；混版清空提示并携带明确 conflict，不以空列表反推原因。没有唯一已知版本则省略版本字段；无新增区间不伪造查询/选择计时，无查询 key 不打印 query 节点耗时。
+
+`CaptionRequestObservationFilter` 只负责 `/api/v1/caption-hints` 的请求生命周期：生成不受客户端影响的 UUID，立即写入 `X-Request-ID` 响应头，将独立 observation 放入 request attribute，并在 finally 通过失败隔离的事件 supplier 输出唯一 terminal。observation 只存 ID、固定原因与已测数字，不存字幕、业务结果或异常对象，不使用全局累加器、ThreadLocal 或读取后清零。控制器及异常处理器只补充 observation，不重复打印 terminal。
+
+控制器先独立捕获请求转领域对象的输入错误，再执行用例；用例内部异常不得映射为输入错误。统一异常处理器把 JSON/域输入错误映射为 400 INVALID_REQUEST，依赖或未发布映射为 503，内部异常映射为 500 INTERNAL_ERROR；响应正文与日志均不透传 exception message/cause。LexiconNotReadyException 固定保存抛出时原因，不事后读取可变全局 state。SCHEMA_MISMATCH 在请求事件中归为 INTERNAL_ERROR；混版明确返回 503 VERSION_CONFLICT，不执行敏感记录。
+
+成功覆盖的敏感分析记录仍同步执行并单独计时，无 processed keys 则不调用；文件记录失败只产生最多一次、同 UUID 的 analysis.record.failed，保留已确定的成功响应。其故障捕获仅包围记录调用，不吞掉用例错误。成功响应字段及 Server-Timing 的 query/rules/api 名称保持不变；terminal 的 api 测量覆盖 HTTP 处理出口，不宣称包含网络时延。未执行或未取得的节点测量省略；事件构造、编码及 sink 故障均不改变业务响应。
+
+直接验收使用合成真实 HTTP 请求，覆盖成功、空提示、无新增、非法 JSON、无效领域输入、无发布、依赖故障、混版、内部错误、敏感记录故障及日志 sink 故障；检查每请求恰好一次 terminal、关联头一致、客户端伪造 ID 无效和并发计数隔离。领域测试单独证明歧义/重叠计数及混版原因，普通日志不得包含合成字幕、释义、路径或异常载荷。

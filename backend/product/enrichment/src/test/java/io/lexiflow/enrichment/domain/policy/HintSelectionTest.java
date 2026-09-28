@@ -19,7 +19,7 @@ class HintSelectionTest {
             List.of(lowerPriority, higherPriority, hiddenAmbiguity, visibleAmbiguity));
     assertEquals(
         List.of("00000000-0000-0000-0000-000000000002"),
-        selected.stream().map(hint -> hint.lexiconEntryId()).toList());
+        selected.hints().stream().map(hint -> hint.lexiconEntryId()).toList());
   }
 
   @Test
@@ -49,15 +49,35 @@ class HintSelectionTest {
     var forward = HintSelection.select(List.of(repeated, other, entryFirst));
     var reversed = HintSelection.select(List.of(entryFirst, other, repeated));
     assertEquals(
-        List.of(id(1), id(2)), forward.stream().map(hint -> hint.lexiconEntryId()).toList());
+        List.of(id(1), id(2)),
+        forward.hints().stream().map(hint -> hint.lexiconEntryId()).toList());
     assertEquals(forward, reversed);
+  }
+
+  @Test
+  void countsUniqueAmbiguityIncludingBlockedEvidenceAndOnlyFinalOverlapDrops() {
+    var hiddenAmbiguity = new HintSelection.CandidateMatch(15, 18, id(3), null, 1, null, 1, 10, 0);
+    var visibleAmbiguity = match(15, 18, id(4), "隐藏", 10, 1);
+    var result =
+        HintSelection.select(
+            List.of(
+                match(0, 5, id(1), "保留", 10, 1),
+                match(3, 7, id(2), "重叠淘汰", 9, 1),
+                match(10, 14, id(1), "重复词条不计入重叠", 8, 1),
+                hiddenAmbiguity,
+                visibleAmbiguity));
+    assertEquals(1, result.ambiguous());
+    assertEquals(1, result.overlapDropped());
+    assertEquals(
+        List.of(id(1)), result.hints().stream().map(hint -> hint.lexiconEntryId()).toList());
   }
 
   private static void assertWinner(
       HintSelection.CandidateMatch first, HintSelection.CandidateMatch second, String expected) {
     var one = HintSelection.select(List.of(first, second));
     var two = HintSelection.select(List.of(second, first));
-    assertEquals(List.of(expected), one.stream().map(hint -> hint.lexiconEntryId()).toList());
+    assertEquals(
+        List.of(expected), one.hints().stream().map(hint -> hint.lexiconEntryId()).toList());
     assertEquals(one, two);
   }
 

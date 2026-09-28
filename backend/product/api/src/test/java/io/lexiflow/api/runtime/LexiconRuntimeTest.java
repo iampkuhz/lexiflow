@@ -33,6 +33,20 @@ class LexiconRuntimeTest {
   }
 
   @Test
+  void unavailableExceptionKeepsItsReasonAfterRuntimeRecovery() {
+    var repo = new MutableRepository();
+    repo.version = 0;
+    var runtime =
+        new LexiconRuntime("formal", repo, new StructuredEventLogger((level, json) -> {}));
+    var failure =
+        assertThrows(LexiconNotReadyException.class, () -> runtime.lookupForms(List.of("quasar")));
+    repo.version = 7;
+    assertTrue(runtime.probe().ready());
+    assertEquals(LexiconRuntime.Reason.NO_PUBLISHED_DATA, failure.reason());
+    assertEquals(null, failure.getCause());
+  }
+
+  @Test
   void startupOnceAndDependencyTransitionsOnlyWithRecovery() {
     var events = new ArrayList<String>();
     var repo = new MutableRepository();

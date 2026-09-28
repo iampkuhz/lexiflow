@@ -31,7 +31,9 @@
 - ENR-2002 v2 已提交 `584701d` 并合入 `phase2`；Change `f159e7ba-c494-472f-a78a-b1925b1d562c`、Repository `a1ff5301-6592-4437-b241-d9bb4d78929c`、validation `6bf40a87-a5b2-4ad2-8672-c68beec3fa16`、review `9bf6880e-b9ba-4502-a863-a3f1e1c4615a`、check `730245df-2789-4928-b80d-70128abba2f9` 均为 PASS；submission `5227ee41-3be1-41cb-bc45-4b829d78b2d0`。验证代理曾提前中断一次，保留该次日志；按既定超时等待后的完整验证通过。
 - 补齐导入/缓存事件的实际接线任务 OBS-2003，并设为主线验收硬依赖；二期现有 37 个 Task，不把仅实现日志适配器当所有节点完成。
 - OBS-2002 v2 已提交 `3ea85aa` 并合入 `phase2`；Change `72800900-1399-4d33-b325-881bc4641bb5`、Repository `854e5b45-6485-48c1-8b41-0eadbb0bd866`、validation `bccae570-fd57-464e-9982-892e76274552`、review `1659dff2-6566-4b81-84c6-3c6972336d2f`、check `b44ead86-799d-4b39-965d-15360f467581` 均 PASS，submission `1fb7ab07-5819-4aaf-9f3f-cf1c975ec082`；首次依赖锁缺项和后续修复证据均保留。
-- 当前在 `phase2-14-runtime-readiness` 实施 API-2001 v2；发现 preparation_policy 曾写入 sourceId，本批改为真实固定策略标识并拒绝不匹配资料；不修改或重导真实运行库。实现与隔离直接测试已完成，父复核补齐请求触发恢复的实际版本读取/预热计数，正在执行完整交付验证。首轮 Repository Verify 暴露浏览器 smoke 仍依赖隐式 demo；已改显式 demo，并同时断言进程存活及非正式就绪，不降低浏览器提示断言。
+- API-2001 v2 已提交 `8e3eeb9` 并合入 `phase2`；Change `25a81148-5ed5-4232-9f40-0e92e9a80b27`、Repository `963a1b6f-a8ff-4f4d-af8f-e87585da2b53`、validation `a1f20940-02f3-47b5-9c82-a8a7ca21c2ed`、review `4dc0cd4e-b679-4461-9121-27f9f8a692df`、check `b8decd98-09ed-4eb3-86de-af5c3b76ea4b` 均 PASS，submission `ddacc66f-37b8-4299-b511-984a6edf2431`；首轮浏览器 smoke 隐式 demo 失败及后续显式模式验证证据保留。
+- 当前在 `phase2-15-request-observation` 实施 API-2002 v2，接通请求全终态、固定错误映射和真实选择计数；不触真实运行资料。
+- API-2002 的回归使用独立测试 profile 和临时台账路径，按单文件单顶层类拆成三组 HTTP 测试并显式纳入 Catalog；早期测试曾因遗漏临时路径向默认本机分析台账写入合成样例，已修正测试配置，原台账未读取、删除或清理，失败证据保留。
 - OpenSpec 与运行记录保留在 ignored 本机目录；共享交接位于路线图与 Catalog。
 
 ## 1.4. 一期与后续边界

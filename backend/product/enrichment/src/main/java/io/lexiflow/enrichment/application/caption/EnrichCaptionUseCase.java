@@ -85,6 +85,7 @@ public final class EnrichCaptionUseCase {
   public MeasuredIncrementalCaptionResult enrichIncrementalMeasured(
       CaptionIncrementalRequest request) {
     Objects.requireNonNull(request, "request");
+    var planningStarted = nanoTime.getAsLong();
     var plan = new IncrementalCaptionPlan().plan(request);
     var processedKeys =
         request.current().captions().stream()
@@ -92,32 +93,42 @@ public final class EnrichCaptionUseCase {
             .filter(CaptionIncrementalRequest.Segment::append)
             .map(CaptionIncrementalRequest.Segment::key)
             .toList();
+    var planningFinished = nanoTime.getAsLong();
     var ranges = new ArrayList<IncrementalResultAssembler.RangeResult>();
     var mapper = new IncrementalHintMapper();
     for (var interval : plan) {
-      var started = nanoTime.getAsLong();
+      var candidatesStarted = nanoTime.getAsLong();
       var forms =
           CandidateForms.fromCaption(
               interval.text().substring(interval.contextStart(), interval.appendEndOffset()));
+      var candidatesFinished = nanoTime.getAsLong();
+      var queryStarted = nanoTime.getAsLong();
       var lookup =
           forms.isEmpty()
               ? new LexiconLookupResult(
                   List.of(), java.util.OptionalLong.empty(), LexiconLookupResult.Counts.zero())
               : lexiconCatalog.lookupForms(forms);
       var queried = nanoTime.getAsLong();
-      var selected =
-          hintPolicy.evaluate(
+      var selection =
+          hintPolicy.evaluateSelection(
               interval.text(),
               interval.contextStart(),
               interval.appendEndOffset(),
               interval.appendStart(),
               lookup.candidates());
-      var mapped = mapper.map(request, interval, selected);
+      var mapped = mapper.map(request, interval, selection.hints());
       var finished = nanoTime.getAsLong();
       ranges.add(
           new IncrementalResultAssembler.RangeResult(
-              lookup, mapped, queried - started, finished - queried));
+              lookup,
+              mapped,
+              queried - queryStarted,
+              finished - queried,
+              selection.ambiguous(),
+              selection.overlapDropped(),
+              candidatesFinished - candidatesStarted));
     }
-    return new IncrementalResultAssembler().assemble(processedKeys, ranges);
+    return new IncrementalResultAssembler()
+        .assemble(processedKeys, ranges, planningFinished - planningStarted);
   }
 }

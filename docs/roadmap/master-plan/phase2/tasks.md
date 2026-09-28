@@ -162,7 +162,8 @@
 - 验收：正常/空提示/无新增/非法请求/故障均有一致响应与终态汇总，不把敏感台账作为普通日志。
 - 验收：敏感记录失败不改变提示结果，不隐瞒失败；原 SegmentAnalysisLog 的消费者和测试完成迁移。
 - 验收：不因模块拆分随意修改 HTTP 字段；Server-Timing 如增项必须同步消费者并测试。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :api:test`。
+- 实现边界：Catalog v2/change 2.0.0；请求属性、统一HTTP终态与实测领域选择计数同批落地，详见观测合同 1.7。
+- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :enrichment:test :api:test`。
 
 ### 1.3.18. LF-TSK-EXT-2001 · 收拢页面生命周期与采集快照协调
 - 主责：`LF-WS-EXT`；预计 90 分钟；前置：`LF-TSK-API-2002`。

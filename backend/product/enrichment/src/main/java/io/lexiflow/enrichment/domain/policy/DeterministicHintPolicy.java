@@ -3,6 +3,7 @@ package io.lexiflow.enrichment.domain.policy;
 import io.lexiflow.enrichment.domain.model.AnnotationHint;
 import io.lexiflow.enrichment.domain.model.CaptionContext;
 import io.lexiflow.enrichment.domain.model.CaptionHintResult;
+import io.lexiflow.enrichment.domain.model.HintSelectionResult;
 import io.lexiflow.enrichment.domain.model.HintState;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
@@ -57,6 +58,25 @@ public final class DeterministicHintPolicy {
       int endOffset,
       int requiredEndAfter,
       List<LexiconHintCandidate> candidates) {
+    return evaluateSelection(caption, startOffset, endOffset, requiredEndAfter, candidates).hints();
+  }
+
+  /**
+   * 在新增范围选择提示并返回真实歧义及重叠淘汰计数。
+   *
+   * @param caption 含义：完整字幕文字。取值范围：非空，偏移使用 UTF-16 半开范围。
+   * @param startOffset 含义：查询上下文起点。取值范围：零至 endOffset。
+   * @param endOffset 含义：查询上下文终点。取值范围：不超过文字长度。
+   * @param requiredEndAfter 含义：新增范围起点。取值范围：提示终点必须严格越过此偏移。
+   * @param candidates 含义：已发布词库候选。取值范围：非空列表，可为空集合。
+   * @return 选择结果及基于输入候选计算的计数。
+   */
+  public HintSelectionResult evaluateSelection(
+      String caption,
+      int startOffset,
+      int endOffset,
+      int requiredEndAfter,
+      List<LexiconHintCandidate> candidates) {
     Objects.requireNonNull(caption, "caption");
     Objects.requireNonNull(candidates, "candidates");
     if (startOffset < 0
@@ -67,11 +87,11 @@ public final class DeterministicHintPolicy {
       throw new IllegalArgumentException("caption range is invalid");
     }
     if (candidates.stream().anyMatch(Objects::isNull)) {
-      return List.of();
+      return new HintSelectionResult(List.of(), 0, 0);
     }
     if (candidates.stream().map(LexiconHintCandidate::lexiconVersion).distinct().limit(2).count()
         > 1) {
-      return List.of();
+      return new HintSelectionResult(List.of(), 0, 0);
     }
 
     var matches = new ArrayList<HintSelection.CandidateMatch>();

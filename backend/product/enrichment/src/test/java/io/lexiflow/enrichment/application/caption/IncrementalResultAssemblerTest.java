@@ -19,18 +19,24 @@ class IncrementalResultAssemblerTest {
     var unknown = range(OptionalLong.empty(), List.of(), List.of());
     var knownZero = range(OptionalLong.of(0), List.of(), List.of());
     var neutral =
-        new IncrementalResultAssembler().assemble(List.of("k"), List.of(unknown, knownZero));
+        new IncrementalResultAssembler().assemble(List.of("k"), List.of(unknown, knownZero), 0);
     assertEquals(List.of(), neutral.result().hints());
+    assertEquals(OptionalLong.of(0), neutral.diagnostics().publishedVersion());
+    var unknownOnly = new IncrementalResultAssembler().assemble(List.of("k"), List.of(unknown), 0);
+    assertEquals(OptionalLong.empty(), unknownOnly.diagnostics().publishedVersion());
     var inconsistent = range(OptionalLong.empty(), List.of(safe("entry-one", 1)), List.of(hint));
     assertEquals(
         List.of(hint),
         new IncrementalResultAssembler()
-            .assemble(List.of("k"), List.of(unknown, inconsistent))
+            .assemble(List.of("k"), List.of(unknown, inconsistent), 0)
             .result()
             .hints());
     var conflict =
-        new IncrementalResultAssembler().assemble(List.of("k"), List.of(knownZero, inconsistent));
+        new IncrementalResultAssembler()
+            .assemble(List.of("k"), List.of(knownZero, inconsistent), 0);
     assertEquals(List.of(), conflict.result().hints());
+    assertEquals(true, conflict.diagnostics().versionConflict());
+    assertEquals(OptionalLong.empty(), conflict.diagnostics().publishedVersion());
   }
 
   @Test
@@ -43,13 +49,15 @@ class IncrementalResultAssemblerTest {
     var versionOne = range(OptionalLong.of(1), List.of(safe), List.of(hint("shown-entry", 1)));
     var result =
         new IncrementalResultAssembler()
-            .assemble(List.of("a", "b"), List.of(versionTwo, versionOne));
+            .assemble(List.of("a", "b"), List.of(versionTwo, versionOne), 0);
     assertEquals(List.of(), result.result().hints());
     assertEquals(List.of("a", "b"), result.result().processedKeys());
     assertEquals(3, result.candidateCount());
     assertEquals(4, result.queryNanos());
     assertEquals(6, result.rulesNanos());
     assertEquals(2, result.queryCounts().versionReads());
+    assertEquals(true, result.diagnostics().versionConflict());
+    assertEquals(2, result.diagnostics().newRanges());
   }
 
   @Test
@@ -59,9 +67,10 @@ class IncrementalResultAssemblerTest {
     var second =
         range(OptionalLong.of(2), List.of(safe("same-entry", 2)), List.of(hint("same-entry", 2)));
     var result =
-        new IncrementalResultAssembler().assemble(List.of("a", "b"), List.of(first, second));
+        new IncrementalResultAssembler().assemble(List.of("a", "b"), List.of(first, second), 1);
     assertEquals(List.of(), result.result().hints());
     assertEquals(2, result.candidateCount());
+    assertEquals(9, result.diagnostics().candidatesNanos());
   }
 
   private static IncrementalResultAssembler.RangeResult range(
@@ -71,7 +80,7 @@ class IncrementalResultAssemblerTest {
     var lookup =
         new LexiconLookupResult(
             candidates, published, new LexiconLookupResult.Counts(1, 0, 0, 1, 1, 1, 0));
-    return new IncrementalResultAssembler.RangeResult(lookup, hints, 2, 3);
+    return new IncrementalResultAssembler.RangeResult(lookup, hints, 2, 3, 0, 0, 4);
   }
 
   private static LexiconHintCandidate safe(String entry, long version) {

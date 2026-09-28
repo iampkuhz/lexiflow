@@ -18,17 +18,26 @@ final class IncrementalResultAssembler {
    * @param mapped 映射到片段坐标后的候选提示。
    * @param queryNanos 当前区间查询耗时。
    * @param rulesNanos 当前区间策略与映射耗时。
+   * @param ambiguous 该区间的唯一歧义匹配范围数。
+   * @param overlapDropped 该区间仅因重叠而落选的候选数。
+   * @param candidatesNanos 该区间的候选词形生成耗时。
    */
   record RangeResult(
       LexiconLookupResult lookup,
       List<IncrementalHintResult.Hint> mapped,
       long queryNanos,
-      long rulesNanos) {
+      long rulesNanos,
+      int ambiguous,
+      int overlapDropped,
+      long candidatesNanos) {
     RangeResult {
       Objects.requireNonNull(lookup, "lookup");
       mapped = List.copyOf(Objects.requireNonNull(mapped, "mapped"));
-      if (queryNanos < 0 || rulesNanos < 0)
-        throw new IllegalArgumentException("timings must be nonnegative");
+      if (queryNanos < 0
+          || rulesNanos < 0
+          || ambiguous < 0
+          || overlapDropped < 0
+          || candidatesNanos < 0) throw new IllegalArgumentException("timings must be nonnegative");
     }
   }
 
@@ -37,9 +46,11 @@ final class IncrementalResultAssembler {
    *
    * @param processedKeys 本次请求所有 append 片段 key，按显示顺序排列。
    * @param ranges 本次请求逐个新增区间的查询及处理结果。
+   * @param planningNanos 本次新增区间规划的单调纳秒耗时。
    * @return 合并后的业务结果、耗时和查询计数。
    */
-  MeasuredIncrementalCaptionResult assemble(List<String> processedKeys, List<RangeResult> ranges) {
+  MeasuredIncrementalCaptionResult assemble(
+      List<String> processedKeys, List<RangeResult> ranges, long planningNanos) {
     Objects.requireNonNull(processedKeys, "processedKeys");
     Objects.requireNonNull(ranges, "ranges");
     var hints = new ArrayList<IncrementalHintResult.Hint>();
@@ -47,7 +58,9 @@ final class IncrementalResultAssembler {
     var seenEntries = new HashSet<String>();
     var counts = LexiconLookupResult.Counts.zero();
     int candidates = 0;
-    long query = 0, rules = 0;
+    long query = 0, rules = 0, candidatesNanos = planningNanos;
+    int ambiguous = 0, overlapDropped = 0;
+    if (planningNanos < 0) throw new IllegalArgumentException("planningNanos must be nonnegative");
     for (var range : ranges) {
       var lookup = range.lookup();
       lookup.publishedVersion().ifPresent(versions::add);
@@ -58,10 +71,24 @@ final class IncrementalResultAssembler {
       candidates = Math.addExact(candidates, lookup.candidates().size());
       query = Math.addExact(query, range.queryNanos());
       rules = Math.addExact(rules, range.rulesNanos());
+      candidatesNanos = Math.addExact(candidatesNanos, range.candidatesNanos());
+      ambiguous = Math.addExact(ambiguous, range.ambiguous());
+      overlapDropped = Math.addExact(overlapDropped, range.overlapDropped());
       for (var hint : range.mapped()) if (seenEntries.add(hint.lexiconEntryId())) hints.add(hint);
     }
-    if (versions.size() > 1) hints.clear();
+    boolean conflict = versions.size() > 1;
+    if (conflict) hints.clear();
+    var publishedVersion =
+        conflict || versions.size() != 1
+            ? java.util.OptionalLong.empty()
+            : java.util.OptionalLong.of(versions.iterator().next());
     return new MeasuredIncrementalCaptionResult(
-        new IncrementalHintResult(processedKeys, hints), query, rules, candidates, counts);
+        new IncrementalHintResult(processedKeys, hints),
+        query,
+        rules,
+        candidates,
+        counts,
+        new MeasuredIncrementalCaptionResult.Diagnostics(
+            ranges.size(), ambiguous, overlapDropped, publishedVersion, conflict, candidatesNanos));
   }
 }
