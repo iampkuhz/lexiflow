@@ -97,10 +97,12 @@
 
 ### 1.3.10. LF-TSK-DAT-2001 · 落实发布投影字段与数据库约束
 - 主责：`LF-WS-DAT`；预计 60 分钟；前置：`LF-TSK-LEX-2003`。
-- 产出：仅按冻结合同调整最新 SQL 的分类/质量/资格表示、注释及约束；不另建历史迁移链。
+- 产出：同步调整最新 SQL、发布写入映射及隔离库回归；保存来源、频率证据、准备轨迹和词形最终原因，不另建历史迁移链。
 - 验收：每个增加字段都有明确生产者与消费者；能沿来源追溯提示及阻断决定，不存个人状态。
 - 验收：不连接或重建真实运行库；最新 SQL 与适配器集成测试在串行交接中共同核验。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test`。
+- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:postgresIntegrationTest`。
+
+- 实现边界：Catalog v2/change 2.0.0；数据库字段和写入者同批交付，SQL 追溯消费见设计 1.6.4。读角色拆分仍归 OPS-2001。
 
 ### 1.3.11. LF-TSK-OPS-2001 · 适配 PostgreSQL 读写边界与原子发布
 - 主责：`LF-WS-OPS`；预计 90 分钟；前置：`LF-TSK-DAT-2001`、`LF-TSK-LEX-2004`。
