@@ -7,28 +7,11 @@ import io.lexiflow.enrichment.domain.model.HintState;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 
 /** 根据公开词汇材料生成确定性提示，绝不调用模型或建立伪造的 pending 工作。 */
 public final class DeterministicHintPolicy {
-  private static final Comparator<CandidateMatch> MATCH_PRIORITY =
-      Comparator.comparingInt(CandidateMatch::valueTier)
-          .reversed()
-          .thenComparing(Comparator.comparingInt(CandidateMatch::finalPriority).reversed())
-          .thenComparing(Comparator.comparingInt(CandidateMatch::complexListCount).reversed())
-          .thenComparing(Comparator.comparingInt(CandidateMatch::length).reversed())
-          .thenComparingInt(CandidateMatch::startOffset)
-          .thenComparingInt(CandidateMatch::endOffset)
-          .thenComparing(CandidateMatch::entryId)
-          .thenComparingLong(CandidateMatch::lexiconVersion)
-          .thenComparing(
-              CandidateMatch::chineseGloss, Comparator.nullsFirst(Comparator.naturalOrder()));
-
   /**
    * 在字幕目标范围内定位词汇候选，并返回可直接显示的中文提示。
    *
@@ -91,19 +74,18 @@ public final class DeterministicHintPolicy {
       return List.of();
     }
 
-    var matches = new ArrayList<CandidateMatch>();
+    var matches = new ArrayList<HintSelection.CandidateMatch>();
     for (var candidate : candidates) {
       for (var match : locate(caption, startOffset, endOffset, candidate)) {
         if (match.endOffset() > requiredEndAfter) matches.add(match);
       }
     }
-    var ambiguousRanges = ambiguousRanges(matches);
-    return select(matches, ambiguousRanges);
+    return HintSelection.select(matches);
   }
 
-  private static List<CandidateMatch> locate(
+  private static List<HintSelection.CandidateMatch> locate(
       String caption, int startOffset, int endOffset, LexiconHintCandidate candidate) {
-    var matches = new ArrayList<CandidateMatch>();
+    var matches = new ArrayList<HintSelection.CandidateMatch>();
     var displayable = PublishedCandidateEligibility.isDisplayable(candidate);
     var qualified = displayable ? candidate.finalGloss() : null;
     var valueTier =
@@ -111,7 +93,7 @@ public final class DeterministicHintPolicy {
     for (var occurrence :
         CandidateMatcher.locate(caption, startOffset, endOffset, candidate.normalizedForm())) {
       matches.add(
-          new CandidateMatch(
+          new HintSelection.CandidateMatch(
               occurrence.startOffset(),
               occurrence.endOffset(),
               candidate.entryId().toString(),
@@ -123,95 +105,5 @@ public final class DeterministicHintPolicy {
               candidate.complexListCount()));
     }
     return matches;
-  }
-
-  private static Set<Range> ambiguousRanges(List<CandidateMatch> matches) {
-    var entryIdsByRange = new java.util.HashMap<Range, Set<String>>();
-    for (var match : matches) {
-      entryIdsByRange
-          .computeIfAbsent(
-              new Range(match.startOffset(), match.endOffset()), ignored -> new HashSet<>())
-          .add(match.entryId());
-    }
-    return entryIdsByRange.entrySet().stream()
-        .filter(entry -> entry.getValue().size() > 1)
-        .map(Map.Entry::getKey)
-        .collect(java.util.stream.Collectors.toUnmodifiableSet());
-  }
-
-  private static List<AnnotationHint> select(
-      List<CandidateMatch> matches, Set<Range> ambiguousRanges) {
-    var selected = new ArrayList<CandidateMatch>();
-    var selectedEntryIds = new HashSet<String>();
-    matches.stream()
-        .filter(CandidateMatch::isDisplayable)
-        .filter(
-            match -> !ambiguousRanges.contains(new Range(match.startOffset(), match.endOffset())))
-        .sorted(MATCH_PRIORITY)
-        .forEach(
-            match -> {
-              if (!selectedEntryIds.contains(match.entryId())
-                  && selected.stream().noneMatch(existing -> overlaps(existing, match))) {
-                selectedEntryIds.add(match.entryId());
-                selected.add(match);
-              }
-            });
-    return selected.stream()
-        .sorted(Comparator.comparingInt(CandidateMatch::startOffset))
-        .map(
-            match ->
-                new AnnotationHint(
-                    match.startOffset(),
-                    match.endOffset(),
-                    match.entryId(),
-                    match.senseId(),
-                    match.lexiconVersion(),
-                    match.chineseGloss()))
-        .toList();
-  }
-
-  private static boolean overlaps(CandidateMatch left, CandidateMatch right) {
-    return left.startOffset() < right.endOffset() && right.startOffset() < left.endOffset();
-  }
-
-  /**
-   * 当前原文中的候选区间，用于识别同表面歧义。
-   *
-   * @param startOffset 含义：起始 UTF-16 偏移。取值范围：非负整数。
-   * @param endOffset 含义：终止 UTF-16 偏移。取值范围：大于起始偏移且不超过原文长度。
-   */
-  private record Range(int startOffset, int endOffset) {}
-
-  /**
-   * 已定位的发布资料候选，保留不安全候选以避免用过滤掩盖歧义。
-   *
-   * @param startOffset 含义：起始 UTF-16 偏移。取值范围：非负整数。
-   * @param endOffset 含义：终止 UTF-16 偏移。取值范围：大于起始偏移且不超过原文长度。
-   * @param entryId 含义：来源词条身份。取值范围：非空 UUID 字符串。
-   * @param senseId 含义：来源义项身份。取值范围：可空，空值表示未通过单义资格校验。
-   * @param lexiconVersion 含义：来源发布版本。取值范围：正整数。
-   * @param chineseGloss 含义：通过资格校验的中文表达。取值范围：可空，空值表示不可显示。
-   * @param valueTier 有来源排名的非基础单词优先于未排名短语。
-   * @param finalPriority 导入时冻结的非个人化最终提示优先级。
-   * @param complexListCount 独立复杂词表证据数量。
-   */
-  private record CandidateMatch(
-      int startOffset,
-      int endOffset,
-      String entryId,
-      String senseId,
-      long lexiconVersion,
-      String chineseGloss,
-      int valueTier,
-      int finalPriority,
-      int complexListCount) {
-
-    private int length() {
-      return endOffset - startOffset;
-    }
-
-    private boolean isDisplayable() {
-      return senseId != null && chineseGloss != null;
-    }
   }
 }

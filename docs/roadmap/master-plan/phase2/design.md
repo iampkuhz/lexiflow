@@ -133,6 +133,12 @@ CandidateMatcher 是领域内的原文定位组件，仅接收原始 caption、U
 
 PublishedCandidateEligibility 只消费已发布动作及最终短释：HINT 且短释符合现有安全显示合同才允许展示，BLOCK 不展示；24 个 code point 上限、汉字和非法字符防线保留，不裁剪、拆义、清洗或改写。观看不再调用 lowInformationPhrase 或重算基础/词频名单；来源短语资格归离线准备，因此经发布的安全 HINT（包括明确来源特许短语）不被再次筛掉。位置匹配必须保留全部候选，不安全短释与 BLOCK 仍参与同形不同条目的歧义判断。整批 null/混版拒绝、排序、重叠、同词条去重及 requiredEndAfter 规则由 DeterministicHintPolicy 保持；两个组件在该策略内实际调用，包内可见，不扩张跨模块 API。
 
+增量应用处理由包内 IncrementalCaptionPlan 规划连续 append 区间及紧邻旧上下文，IncrementalHintMapper 将组内 UTF-16 半开范围映回片段 key，IncrementalResultAssembler 合并请求级覆盖、候选计数、查询计数、发布版本和词条去重。EnrichCaptionUseCase 只串联规划、查表、策略、映射合并与单调计时，不持有跨请求状态；空查询键不访问 Catalog。规划保持原有同组同行最多两个旧片段、48 个 UTF-16 单元预算，不截断旧片段，不跨组/视觉行查询或补词。完整组原文仅用于位置边界，不扩大查询范围。
+
+合并器在资格选择/去重结果之外收集每次 lookup 的已知发布版本与全部候选版本；未知发布身份且无候选不引入版本，已知版本 0 与正版本不同。BLOCK、不安全短释、未匹配位置或被去重的候选也不能掩盖混版；多个版本时整请求撤销提示但保留全部处理 key、候选数、查询次数及耗时。同词条跨区间只展示首次选中的一处。HintSelection 拥有领域内的同范围不同词条歧义识别、现有稳定优先级排序、同词条去重和非重叠选择；不新增评分、数量上限或上下文选义。
+
+MeasuredIncrementalCaptionResult 仅保留 result、queryNanos、rulesNanos、candidateCount 和 queryCounts；删除无生产消费者的 processedEnglish/processedWithHints 与诊断拼接，不保留兼容构造器或换名正文副本。现有授权 SegmentAnalysisLog 已直接消费 request/result，继续使用其逐段文本和 translated/untranslated ranges 合同；本切片无需再造整段 finalText 或修改 HTTP/日志输出。原有跨段 anchor、迟到补全仅记新后缀及失败不阻断测试继续运行。
+
 扩展由 content 组合页面生命周期、采集源、快照协调、stream 请求状态机、overlay 显示和 preferences 本机显式抑制。stream 独占上次成功快照与唯一在途请求；生命周期只发失效信号，不再复制请求状态。失败不自动计时重试，下一次有效字幕变化才重试；旧行中文冻结、导航/关闭后迟到结果不可复活，英文始终不等待后端。
 
 

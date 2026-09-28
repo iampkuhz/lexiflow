@@ -138,7 +138,7 @@ class IncrementalCaptionUseCaseTest {
                         segment("b", "caption", true))));
     assertEquals(List.of("a", "b"), result.result().processedKeys());
     assertTrue(result.result().hints().isEmpty());
-    assertEquals(result.processedEnglish(), result.processedWithHints());
+    assertEquals(2, result.queryCounts().versionReads());
   }
 
   @Test
@@ -180,7 +180,7 @@ class IncrementalCaptionUseCaseTest {
     assertEquals(List.of("a", "b", "c"), measured.result().processedKeys());
     assertEquals(1, measured.result().hints().size());
     assertEquals("a", measured.result().hints().getFirst().startKey());
-    assertEquals(1, measured.processedWithHints().chars().filter(c -> c == '(').count());
+    assertEquals("可靠的", measured.result().hints().getFirst().chineseGloss());
   }
 
   @Test
@@ -203,7 +203,71 @@ class IncrementalCaptionUseCaseTest {
                         segment("b", "caption", true))));
     assertEquals(List.of("a", "b"), measured.result().processedKeys());
     assertTrue(measured.result().hints().isEmpty());
-    assertEquals(measured.processedEnglish(), measured.processedWithHints());
+    assertEquals(2, measured.queryCounts().versionReads());
+  }
+
+  @Test
+  void hiddenAndUnmatchedCandidatesFromAnotherVersionSuppressRealHintAcrossIntervals() {
+    LexiconCatalog catalog =
+        forms -> {
+          if (forms.contains("caption"))
+            return lookup(forms, List.of(candidate("caption", "字幕", 1)));
+          var block = blockCandidate("ordinary", 2);
+          var unsafe =
+              new LexiconHintCandidate(
+                  UUID.nameUUIDFromBytes(
+                      "unsafe".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                  UUID.nameUUIDFromBytes(
+                      "unsafe-sense".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                  2,
+                  "en",
+                  "ordinary",
+                  "ordinary",
+                  LexiconEntryKind.WORD,
+                  LexiconHintAction.HINT,
+                  "释".repeat(25),
+                  500,
+                  0,
+                  0);
+          var unmatched = candidate("never-present", "隐藏候选", 2);
+          return new LexiconLookupResult(
+              List.of(block, unsafe, unmatched),
+              OptionalLong.empty(),
+              new LexiconLookupResult.Counts(forms.size(), 1, 0, forms.size() - 1, 1, 1, 0));
+        };
+    var measured =
+        new EnrichCaptionUseCase(catalog, new DeterministicHintPolicy())
+            .enrichIncrementalMeasured(
+                request(
+                    group(
+                        segment("a", "ordinary", true),
+                        segment("gap", " ", false),
+                        segment("b", "caption", true))));
+    assertTrue(measured.result().hints().isEmpty());
+    assertEquals(List.of("a", "b"), measured.result().processedKeys());
+    assertEquals(4, measured.candidateCount());
+    assertEquals(2, measured.queryCounts().versionReads());
+    assertTrue(measured.queryNanos() >= 0);
+    assertTrue(measured.rulesNanos() >= 0);
+  }
+
+  @Test
+  void noAppendAndEmptyFormsPerformNoCatalogAccess() {
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    LexiconCatalog catalog =
+        forms -> {
+          calls.incrementAndGet();
+          return lookup(forms, List.of());
+        };
+    var useCase = new EnrichCaptionUseCase(catalog, new DeterministicHintPolicy());
+    var noAppend =
+        useCase.enrichIncrementalMeasured(request(group(segment("old", "caption", false))));
+    var punctuationOnly =
+        useCase.enrichIncrementalMeasured(request(group(segment("punct", "...", true))));
+    assertEquals(0, calls.get());
+    assertEquals(List.of(), noAppend.result().processedKeys());
+    assertEquals(List.of("punct"), punctuationOnly.result().processedKeys());
+    assertEquals(0, punctuationOnly.queryCounts().queryKeys());
   }
 
   private static CaptionIncrementalRequest request(CaptionIncrementalRequest.Group... groups) {
@@ -261,6 +325,22 @@ class IncrementalCaptionUseCaseTest {
         form.contains(" ") ? LexiconEntryKind.PHRASE : LexiconEntryKind.WORD,
         LexiconHintAction.HINT,
         gloss,
+        500,
+        0,
+        0);
+  }
+
+  private static LexiconHintCandidate blockCandidate(String form, long version) {
+    return new LexiconHintCandidate(
+        UUID.nameUUIDFromBytes(form.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+        null,
+        version,
+        "en",
+        form,
+        form,
+        LexiconEntryKind.WORD,
+        LexiconHintAction.BLOCK,
+        null,
         500,
         0,
         0);
