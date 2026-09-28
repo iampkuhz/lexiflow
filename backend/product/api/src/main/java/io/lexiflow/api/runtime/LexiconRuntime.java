@@ -145,9 +145,10 @@ public final class LexiconRuntime implements LexiconCatalog {
       return new LexiconLookupResult(
           List.of(), java.util.OptionalLong.empty(), LexiconLookupResult.Counts.zero());
     if (demo != null) return demo.lookupForms(normalizedForms);
-    if (repository == null || !"formal".equals(mode)) throw new LexiconNotReadyException();
+    if (repository == null || !"formal".equals(mode))
+      throw new LexiconNotReadyException(state.reason());
     var recovery = state.ready() ? new ProbeResult(state, 0, 0) : probeMeasured();
-    if (!state.ready()) throw new LexiconNotReadyException();
+    if (!state.ready()) throw new LexiconNotReadyException(state.reason());
     long started = System.nanoTime();
     try {
       var result = cached.lookupForms(normalizedForms);
@@ -185,7 +186,7 @@ public final class LexiconRuntime implements LexiconCatalog {
           reason == Reason.SCHEMA_MISMATCH,
           elapsedMs(started));
     }
-    throw new LexiconNotReadyException();
+    throw new LexiconNotReadyException(state.reason());
   }
 
   private static LexiconLookupResult withAdditionalReads(

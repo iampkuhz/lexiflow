@@ -49,6 +49,10 @@ class DeterministicHintPolicyTest {
     var block = block("bank");
     assertEquals(HintState.NO_PENDING, evaluate("bank", List.of(hint, block)).state());
     assertEquals(HintState.NO_PENDING, evaluate("bank", List.of(block)).state());
+    var selection =
+        new DeterministicHintPolicy().evaluateSelection("bank", 0, 4, 0, List.of(hint, block));
+    assertEquals(1, selection.ambiguous());
+    assertEquals(0, selection.overlapDropped());
   }
 
   @Test

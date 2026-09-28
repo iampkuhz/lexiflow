@@ -1002,8 +1002,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-API-2002
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         - task_id: LF-TSK-EXT-2002
           type: hard
@@ -1954,16 +1954,42 @@ workstreams:
         title: 连接请求主线、HTTP 映射和终态日志
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         owner: LF-WS-API
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
-        - backend/product/api/src/main/java/io/lexiflow/api/**
-        - backend/product/api/src/test/**
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/domain/model/HintSelectionResult.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/domain/policy/HintSelection.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/domain/policy/DeterministicHintPolicy.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/application/caption/EnrichCaptionUseCase.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/application/caption/IncrementalResultAssembler.java
+        - backend/product/enrichment/src/main/java/io/lexiflow/enrichment/application/caption/model/MeasuredIncrementalCaptionResult.java
+        - backend/product/enrichment/src/test/java/io/lexiflow/enrichment/domain/policy/HintSelectionTest.java
+        - backend/product/enrichment/src/test/java/io/lexiflow/enrichment/domain/policy/DeterministicHintPolicyTest.java
+        - backend/product/enrichment/src/test/java/io/lexiflow/enrichment/application/caption/IncrementalResultAssemblerTest.java
+        - backend/product/enrichment/src/test/java/io/lexiflow/enrichment/application/caption/IncrementalCaptionUseCaseTest.java
+        - backend/product/api/src/main/java/io/lexiflow/api/hints/CaptionHintController.java
+        - backend/product/api/src/main/java/io/lexiflow/api/hints/CaptionRequestObservation.java
+        - backend/product/api/src/main/java/io/lexiflow/api/hints/CaptionRequestObservationFilter.java
+        - backend/product/api/src/main/java/io/lexiflow/api/hints/CaptionRequestExceptionHandler.java
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/LexiconRuntime.java
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/LexiconNotReadyException.java
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/RuntimeUnavailableAdvice.java
+        - backend/product/api/src/test/java/io/lexiflow/api/hints/CaptionHintControllerTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/hints/CaptionHintLogTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/hints/CaptionHintHttpTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/hints/CaptionRequestObservationHttpTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/hints/CaptionRequestFailureHttpTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/hints/CaptionRequestSinkFailureHttpTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/runtime/LexiconRuntimeTest.java
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/observability.md
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -1974,9 +2000,15 @@ workstreams:
         - 正常/空提示/无新增/非法请求/故障均有一致响应与终态汇总，不把敏感台账作为普通日志。
         - 敏感记录失败不改变提示结果，不隐瞒失败；原 SegmentAnalysisLog 的消费者和测试完成迁移。
         - 不因模块拆分随意修改 HTTP 字段；Server-Timing 如增项必须同步消费者并测试。
+        - 固定请求属性保存每请求独立UUID和已测数字，不保存正文或异常；HTTP出口每次恰好一条terminal，包括JSON反序列化、域校验、依赖故障与内部异常；不信任客户端请求ID。
+        - Enrichment实际返回新增连续区间数、歧义位置数、仅因重叠丢弃数量、候选生成计时、绑定版本与混版标记，不改既有排序/去重/提示规则，不从空提示推断失败原因。
+        - 敏感记录仅同步处理成功覆盖，失败最多一次analysis.record.failed且关联相同UUID，既定HTTP提示仍成功；普通日志不含输入/释义/异常/私有路径。
+        - 保持成功响应字段和query/rules/api Server-Timing名称，新增后端X-Request-ID；未知版本和未执行计时省略，混版明确503 VERSION_CONFLICT，不伪NO_HINT。
+        - HTTP400仅客户端反序列化或域校验，产品异常不得冒充非法请求；LexiconNotReadyException携带不可变固定原因，避免并发读取全局状态导致错报。
+        - 合成真实HTTP覆盖成功/无提示/无新增/非法JSON/无效域输入/无发布/依赖故障/混版/内部错误/敏感写失败/日志sink失败和并发请求隔离，直接策略测试校验实际计数。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
-        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :api:test
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :enrichment:test :api:test
         required_check_ids:
         - eng.backend.delivery
         - eng.repository.docs
@@ -2037,8 +2069,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-API-2002
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         - task_id: LF-TSK-ARCH-2006
           type: hard
@@ -2196,8 +2228,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-API-2002
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         deliverable: 页面生命周期和采集快照从入口解耦，请求协调器保持唯一请求状态所有者。
       - id: LF-TSK-EXT-2002

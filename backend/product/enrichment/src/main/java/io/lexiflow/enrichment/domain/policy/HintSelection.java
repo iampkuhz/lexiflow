@@ -1,6 +1,7 @@
 package io.lexiflow.enrichment.domain.policy;
 
 import io.lexiflow.enrichment.domain.model.AnnotationHint;
+import io.lexiflow.enrichment.domain.model.HintSelectionResult;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -25,7 +26,7 @@ final class HintSelection {
               CandidateMatch::chineseGloss, Comparator.nullsFirst(Comparator.naturalOrder()));
 
   /** 按既有优先顺序选择无歧义且可展示的匹配项。 */
-  static List<AnnotationHint> select(List<CandidateMatch> matches) {
+  static HintSelectionResult select(List<CandidateMatch> matches) {
     var idsByRange = new HashMap<Range, Set<String>>();
     for (var match : matches)
       idsByRange
@@ -39,30 +40,35 @@ final class HintSelection {
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
     var selected = new ArrayList<CandidateMatch>();
     var ids = new HashSet<String>();
-    matches.stream()
-        .filter(CandidateMatch::isDisplayable)
-        .filter(match -> !ambiguous.contains(new Range(match.startOffset(), match.endOffset())))
-        .sorted(PRIORITY)
-        .forEach(
-            match -> {
-              if (!ids.contains(match.entryId())
-                  && selected.stream().noneMatch(existing -> overlaps(existing, match))) {
-                ids.add(match.entryId());
-                selected.add(match);
-              }
-            });
-    return selected.stream()
-        .sorted(Comparator.comparingInt(CandidateMatch::startOffset))
-        .map(
-            match ->
-                new AnnotationHint(
-                    match.startOffset(),
-                    match.endOffset(),
-                    match.entryId(),
-                    match.senseId(),
-                    match.lexiconVersion(),
-                    match.chineseGloss()))
-        .toList();
+    int overlapDropped = 0;
+    var eligible =
+        matches.stream()
+            .filter(CandidateMatch::isDisplayable)
+            .filter(match -> !ambiguous.contains(new Range(match.startOffset(), match.endOffset())))
+            .sorted(PRIORITY)
+            .toList();
+    for (var match : eligible) {
+      if (ids.contains(match.entryId())) continue;
+      if (selected.stream().anyMatch(existing -> overlaps(existing, match))) overlapDropped++;
+      else {
+        ids.add(match.entryId());
+        selected.add(match);
+      }
+    }
+    var hints =
+        selected.stream()
+            .sorted(Comparator.comparingInt(CandidateMatch::startOffset))
+            .map(
+                match ->
+                    new AnnotationHint(
+                        match.startOffset(),
+                        match.endOffset(),
+                        match.entryId(),
+                        match.senseId(),
+                        match.lexiconVersion(),
+                        match.chineseGloss()))
+            .toList();
+    return new HintSelectionResult(hints, ambiguous.size(), overlapDropped);
   }
 
   private static boolean overlaps(CandidateMatch left, CandidateMatch right) {

@@ -35,7 +35,8 @@ class IncrementalCaptionUseCaseTest {
                 segment("last", "out", true),
                 segment("gap", " reliable ", false),
                 segment("new", "caption", true)));
-    var result = useCase.enrichIncrementalMeasured(request).result();
+    var measured = useCase.enrichIncrementalMeasured(request);
+    var result = measured.result();
     assertEquals(
         List.of(
             "context context figure context figure out figure figure out out",
@@ -47,6 +48,11 @@ class IncrementalCaptionUseCaseTest {
     assertEquals(0, result.hints().getFirst().startOffset());
     assertEquals("last", result.hints().getFirst().endKey());
     assertEquals(3, result.hints().getFirst().endOffset());
+    assertEquals(2, measured.diagnostics().newRanges());
+    assertEquals(2, result.hints().size());
+    assertTrue(measured.diagnostics().candidatesNanos() > 0);
+    assertTrue(measured.queryNanos() > 0);
+    assertTrue(measured.rulesNanos() > 0);
   }
 
   @Test
