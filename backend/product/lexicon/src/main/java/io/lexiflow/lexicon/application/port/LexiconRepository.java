@@ -1,15 +1,12 @@
 package io.lexiflow.lexicon.application.port;
 
-import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
-import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
-import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.util.Collection;
 import java.util.List;
 
 /** 词库聚合的唯一持久化合同；调用者不接触表、DAO、DO 或 PostgreSQL 类型。 */
-public interface LexiconRepository {
+public interface LexiconRepository extends LexiconPublicationRepository {
   /**
    * 返回当前已发布词库版本；没有已发布批次时返回 0。
    *
@@ -35,27 +32,4 @@ public interface LexiconRepository {
    * @return 按预热优先级排序且不丢失同形歧义的词形集合。
    */
   List<LexiconHintCandidate> findPrewarmForms(long version, LexiconHintAction action, int limit);
-
-  /**
-   * 原子地持久化并发布一个规范词库版本。
-   *
-   * @param request 含义：完整且已验证的导入输入。取值范围：由方法调用前置条件限定。
-   * @return 新发布的词库版本
-   */
-  long publish(LexiconImportRequest request);
-
-  /**
-   * 将已预检来源在单个事务中批量写入并完整切换；不保存中间状态。
-   *
-   * @param metadata 含义：来源、许可证、摘要和取得时间。取值范围：非 null，摘要与来源已核对。
-   * @param sourceRowsTotal 含义：前置扫描得到的原始来源行数。取值范围：大于等于可导入词条数的正整数。
-   * @param expectedEntries 含义：前置扫描得到的可导入词条数。取值范围：大于零且不超过来源行数。
-   * @param source 含义：在事务内重读来源的有界内存行提供者。取值范围：非 null，不得静默丢弃已解析记录。
-   * @return 完整发布的新版本。
-   */
-  long publishStreaming(
-      LexiconImportMetadata metadata,
-      long sourceRowsTotal,
-      long expectedEntries,
-      LexiconImportRowSource source);
 }

@@ -22,7 +22,8 @@
 - 已核对授权、一期缺口、原始主干起点、子任务 ownership 与本地集成事实；启动交接不改变业务规则或真实资料。
 - LEX-2001 已提交 `e1b36db` 并从 `phase2-4-lexicon-classification` 合入 `phase2`；同输入 Change `2df4c253-5d46-418e-b1cf-5226eb02361c`、Repository `5273b27a-dde3-4c77-9453-07e592e6f4ec`、validation `0723fd3b-8dcc-4131-b237-45a5094f165d`、review `8727eb73-6449-4583-b065-c9555be8d15d` 与 check `d8c1a812-3968-4bb0-83ff-a8e8c9446c38` 均 PASS，submission `bda94e95-fdd3-4581-9f2f-5cbb8c8e5a62`。
 - LEX-2002 已提交 `fb480fa` 并由 `phase2-5-phrase-quality` 合入 `phase2`；Change `f61bfb13-6edf-458f-b568-5cbaff6fb454`、Repository `f47fca4a-769f-44b3-b608-89f86c9ef04e`、validation `e2308a98-50d0-4da9-b5d9-b5ad4211cdcd`、review `5d0bf80d-50e6-43c3-8129-9255504438bb`、check `793ba163-cd3d-4597-82ad-a0e12bdcaee2` 均 PASS；submission `d1274345-ffef-4051-a3a9-3cdc846a238e`。
-- 当前在 `phase2-6-query-contract` 开始 LEX-2003 v3 的准确词形接口与全消费者原子切换；后续继续应用主线、客户端和发布闭环。
+- LEX-2003 已提交 `c18c34a` 并由 `phase2-6-query-contract` 合入 `phase2`；Change `ac8d3b4a-a01d-49c2-a19f-e00e264e9dce`、Repository `f9b37a37-6072-44b1-9b13-7f6bc0b5d9b4`、validation `11ce59fb-462e-45f6-aba2-980a841a94c7`、review `b35b716a-0802-498c-b307-8179576543ed`、check `c7902434-a633-4b71-a529-7e5f44f5d4ef` 均 PASS；submission `40345063-a948-4dd9-99bd-f803338d6e66`。
+- 当前在 `phase2-7-cache-import` 开始 LEX-2004 v2：版本缓存职责拆分及导入来源重读身份核验；后续继续应用主线、客户端和发布闭环。
 - OpenSpec 与运行记录保留在 ignored 本机目录；共享交接位于路线图与 Catalog。
 
 ## 1.4. 一期与后续边界

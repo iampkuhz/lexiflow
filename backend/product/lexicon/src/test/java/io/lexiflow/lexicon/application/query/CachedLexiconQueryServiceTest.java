@@ -18,6 +18,16 @@ import org.junit.jupiter.api.Test;
 /** 验证缓存查询服务只使用 Repository 和领域模型。 */
 class CachedLexiconQueryServiceTest {
   @Test
+  void rejectsPrewarmBudgetOverflowBeforeLoadingSources() {
+    var repository = new CountingRepository();
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CachedLexiconQueryService(repository, 4, Integer.MAX_VALUE, 1));
+    assertEquals(0, repository.versionReads);
+    assertEquals(0, repository.prewarmCalls);
+  }
+
+  @Test
   void emptyLookupIsImmutableZeroAccessAndInvalidKeysAreRejected() {
     var repository = new CountingRepository();
     var service = new CachedLexiconQueryService(repository, 4, 0, 0);
