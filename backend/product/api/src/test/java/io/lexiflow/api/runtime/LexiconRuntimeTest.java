@@ -16,6 +16,24 @@ import org.junit.jupiter.api.Test;
 
 class LexiconRuntimeTest {
   @Test
+  void realRuntimeCacheVersionChangeEmitsOneInvalidationEventAfterFirstBinding() {
+    var events = new ArrayList<String>();
+    var repo = new MutableRepository();
+    var runtime =
+        new LexiconRuntime(
+            "formal", repo, new StructuredEventLogger((level, json) -> events.add(json)));
+    assertEquals(
+        0, events.stream().filter(s -> s.contains("lexicon.cache.version_changed")).count());
+    repo.version = 2;
+    runtime.probe();
+    assertEquals(
+        1, events.stream().filter(s -> s.contains("lexicon.cache.version_changed")).count());
+    runtime.probe();
+    assertEquals(
+        1, events.stream().filter(s -> s.contains("lexicon.cache.version_changed")).count());
+  }
+
+  @Test
   void defaultMissingRepositoryIsNotReadyAndDemoIsExplicit() {
     var runtime =
         new LexiconRuntime("formal", null, new StructuredEventLogger((level, json) -> {}));

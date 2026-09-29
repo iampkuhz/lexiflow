@@ -32,7 +32,8 @@
 - 补齐导入/缓存事件的实际接线任务 OBS-2003，并设为主线验收硬依赖；二期现有 37 个 Task，不把仅实现日志适配器当所有节点完成。
 - OBS-2002 v2 已提交 `3ea85aa` 并合入 `phase2`；Change `72800900-1399-4d33-b325-881bc4641bb5`、Repository `854e5b45-6485-48c1-8b41-0eadbb0bd866`、validation `bccae570-fd57-464e-9982-892e76274552`、review `1659dff2-6566-4b81-84c6-3c6972336d2f`、check `b44ead86-799d-4b39-965d-15360f467581` 均 PASS，submission `1fb7ab07-5819-4aaf-9f3f-cf1c975ec082`；首次依赖锁缺项和后续修复证据均保留。
 - API-2001 v2 已提交 `8e3eeb9` 并合入 `phase2`；Change `25a81148-5ed5-4232-9f40-0e92e9a80b27`、Repository `963a1b6f-a8ff-4f4d-af8f-e87585da2b53`、validation `a1f20940-02f3-47b5-9c82-a8a7ca21c2ed`、review `4dc0cd4e-b679-4461-9121-27f9f8a692df`、check `b8decd98-09ed-4eb3-86de-af5c3b76ea4b` 均 PASS，submission `ddacc66f-37b8-4299-b511-984a6edf2431`；首轮浏览器 smoke 隐式 demo 失败及后续显式模式验证证据保留。
-- 当前在 `phase2-15-request-observation` 实施 API-2002 v2，接通请求全终态、固定错误映射和真实选择计数；不触真实运行资料。
+- API-2002 v2 已提交 `b42892d` 并合入 `phase2`；Change `c95e7ace-fc5e-4ffb-ac1d-63f21d8aae31`、Repository `a5011303-f0ac-4155-8083-01356781abd2`、validation `5372ba59-6318-4e9d-a15d-28cff3d05575`、review `dae3a17e-29a2-481d-85aa-104101eff873`、check `be37d256-789f-4842-b276-2754047ff12d` 均 PASS，submission `20ead54b-e78f-4f46-b79c-71280c711936`。
+- 当前在 `phase2-16-import-cache-observation` 实施 OBS-2003 v2，补齐导入提交/回滚和缓存版本清理事件的真实节点接线；验证只使用合成资料和隔离服务。
 - API-2002 的回归使用独立测试 profile 和临时台账路径，按单文件单顶层类拆成三组 HTTP 测试并显式纳入 Catalog；早期测试曾因遗漏临时路径向默认本机分析台账写入合成样例，已修正测试配置，原台账未读取、删除或清理，失败证据保留。
 - OpenSpec 与运行记录保留在 ignored 本机目录；共享交接位于路线图与 Catalog。
 

@@ -6,12 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.lexiflow.lexicon.application.importing.LexiconImportObservation;
 import io.lexiflow.lexicon.application.importing.LexiconImportService;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
 import io.lexiflow.lexicon.application.importing.model.SourceReference;
+import io.lexiflow.lexicon.application.port.LexiconImportObserver;
 import io.lexiflow.lexicon.application.port.LexiconPublicationRepository;
 import io.lexiflow.lexicon.application.port.LexiconReadRepository;
 import io.lexiflow.lexicon.application.port.LexiconRepository;
@@ -511,6 +513,8 @@ class PostgresLexiconRepositoryIntegrationTest {
                 .publish(
                     new LexiconImportRequest(
                         List.of(row("reliable", "可靠的", List.of(), List.of())), metadata('a')));
+            var events = new java.util.ArrayList<LexiconImportObserver.Event>();
+            var observation = new LexiconImportObservation(events::add);
             assertThrows(
                 RuntimeException.class,
                 () ->
@@ -522,7 +526,55 @@ class PostgresLexiconRepositoryIntegrationTest {
                             consumer -> {
                               consumer.accept(row("context", "语境", List.of(), List.of()));
                               throw new IOException("source disappeared");
-                            }));
+                            },
+                            observation));
+            assertEquals(1, events.stream().filter(LexiconImportObserver.Event::terminal).count());
+            assertEquals(
+                LexiconImportObserver.Reason.SOURCE_INVALID,
+                events.stream()
+                    .filter(LexiconImportObserver.Event::terminal)
+                    .findFirst()
+                    .orElseThrow()
+                    .reason());
+            assertEquals(1, repository.publishedVersion());
+            assertEquals(1, repository.findByForms(1, List.of("reliable")).size());
+            assertEquals(0, repository.findByForms(1, List.of("context")).size());
+          }
+        });
+  }
+
+  @Test
+  void databaseConstraintRollbackHasConfirmedTerminalAndKeepsPublishedData() throws Exception {
+    inInitializedSchema(
+        jdbcUrl -> {
+          try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+            var repository = persistence.repository();
+            var service = new LexiconImportService(repository);
+            service.publish(
+                new LexiconImportRequest(
+                    List.of(row("reliable", "可靠的", List.of(), List.of())), metadata('a')));
+            execute(
+                jdbcUrl,
+                "ALTER TABLE lexicon_prepared_entry ADD CONSTRAINT synthetic_reject_context CHECK (lemma <> 'context')");
+            var events = new java.util.ArrayList<LexiconImportObserver.Event>();
+            assertThrows(
+                org.springframework.dao.DataAccessException.class,
+                () ->
+                    service.publishStreaming(
+                        metadata('b'),
+                        1,
+                        1,
+                        consumer -> {
+                          consumer.accept(row("context", "语境", List.of(), List.of()));
+                          return new LexiconImportRowSource.ReadReceipt(
+                              metadata('b').sourceDigest(), 1);
+                        },
+                        new LexiconImportObservation(events::add)));
+            assertEquals(1, events.stream().filter(LexiconImportObserver.Event::terminal).count());
+            assertEquals(
+                LexiconImportObserver.Reason.PUBLISH_ROLLED_BACK, events.getLast().reason());
+            assertEquals(null, events.getLast().lexiconVersion());
+            assertTrue(events.getLast().counts().isEmpty());
             assertEquals(1, repository.publishedVersion());
             assertEquals(1, repository.findByForms(1, List.of("reliable")).size());
             assertEquals(0, repository.findByForms(1, List.of("context")).size());

@@ -5,8 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.lexiflow.lexicon.application.port.LexiconImportObserver;
 import io.lexiflow.lexicon.platform.persistence.PostgresPersistence;
 import io.lexiflow.lexicon.platform.persistence.PostgresSchemaInitializer;
+import io.lexiflow.observability.platform.LexiconEventObserver;
+import io.lexiflow.observability.platform.StructuredEventLogger;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -106,6 +109,54 @@ class LexiconImportMainOutputTest {
   }
 
   @Test
+  void explicitPublishReportsTypedSourceChangeOnceWhenStardictChangesAfterDigest()
+      throws Exception {
+    var input = Files.createTempFile("lexicon-publish-source-change", ".csv");
+    var original =
+        "word,phonetic,definition,translation,pos,collins,oxford,tag,bnc,frq,exchange,detail,audio\n"
+            + "quasar,,definition,类星体,,,0,cet6,20,20,,,\n";
+    Files.writeString(input, original);
+    var events = new java.util.ArrayList<LexiconImportObserver.Event>();
+    try {
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              LexiconImportMain.execute(
+                  new String[] {
+                    "publish",
+                    "--input",
+                    input.toString(),
+                    "--database-url",
+                    "must-not-open",
+                    "--batch-source-id",
+                    "fixture",
+                    "--batch-license-id",
+                    "MIT"
+                  },
+                  message -> {
+                    if (message.equals("选择基础词")) {
+                      try {
+                        Files.writeString(input, original.replace("类星体", "遥远星体"));
+                      } catch (java.io.IOException exception) {
+                        throw new java.io.UncheckedIOException(exception);
+                      }
+                    }
+                  },
+                  events::add));
+      assertEquals(1, events.stream().filter(LexiconImportObserver.Event::terminal).count());
+      assertEquals(
+          LexiconImportObserver.Reason.SOURCE_CHANGED,
+          events.stream()
+              .filter(LexiconImportObserver.Event::terminal)
+              .findFirst()
+              .orElseThrow()
+              .reason());
+    } finally {
+      Files.deleteIfExists(input);
+    }
+  }
+
+  @Test
   void emptyPublishIsRejectedByApplicationBeforeOpeningDatabase() throws Exception {
     var input = Files.createTempFile("lexicon-empty-publication", ".csv");
     Files.writeString(
@@ -166,7 +217,30 @@ class LexiconImportMainOutputTest {
             "--batch-license-id",
             "MIT"
           };
-      assertTrue(captureArguments(arguments, System.out).contains("published_version=1"));
+      var canonicalEvents = new java.util.ArrayList<LexiconImportObserver.Event>();
+      var canonicalJson = new java.util.ArrayList<String>();
+      var canonicalAdapter =
+          new LexiconEventObserver(
+              new StructuredEventLogger((level, json) -> canonicalJson.add(json)));
+      assertTrue(
+          captureArguments(
+                  arguments,
+                  System.out,
+                  event -> {
+                    canonicalEvents.add(event);
+                    canonicalAdapter.onEvent(event);
+                  })
+              .contains("published_version=1"));
+      assertEquals(8, canonicalEvents.stream().filter(event -> !event.terminal()).count());
+      assertEquals(
+          1, canonicalEvents.stream().filter(LexiconImportObserver.Event::terminal).count());
+      assertEquals(LexiconImportObserver.Reason.OK, canonicalEvents.getLast().reason());
+      assertEquals(
+          8, canonicalJson.stream().filter(line -> line.contains("lexicon.import.stage")).count());
+      assertEquals(
+          1,
+          canonicalJson.stream().filter(line -> line.contains("lexicon.import.completed")).count());
+      assertTrue(canonicalJson.getLast().contains("\"existing_safe\""), canonicalJson.toString());
       try (var persistence = PostgresPersistence.open(jdbcUrl)) {
         assertEquals(1, persistence.repository().publishedVersion());
         assertEquals(1, persistence.repository().findByForms(1, List.of("quasar")).size());
@@ -175,7 +249,30 @@ class LexiconImportMainOutputTest {
           input,
           "word,phonetic,definition,translation,pos,collins,oxford,tag,bnc,frq,exchange,detail,audio\n"
               + "nebula,,cloud,星云,,,0,cet6,90000,90000,,,\n");
-      assertTrue(captureArguments(arguments, System.out).contains("published_version=2"));
+      var stardictEvents = new java.util.ArrayList<LexiconImportObserver.Event>();
+      var stardictJson = new java.util.ArrayList<String>();
+      var stardictAdapter =
+          new LexiconEventObserver(
+              new StructuredEventLogger((level, json) -> stardictJson.add(json)));
+      assertTrue(
+          captureArguments(
+                  arguments,
+                  System.out,
+                  event -> {
+                    stardictEvents.add(event);
+                    stardictAdapter.onEvent(event);
+                  })
+              .contains("published_version=2"));
+      assertEquals(8, stardictEvents.stream().filter(event -> !event.terminal()).count());
+      assertEquals(
+          1, stardictEvents.stream().filter(LexiconImportObserver.Event::terminal).count());
+      assertEquals(LexiconImportObserver.Reason.OK, stardictEvents.getLast().reason());
+      assertEquals(
+          8, stardictJson.stream().filter(line -> line.contains("lexicon.import.stage")).count());
+      assertEquals(
+          1,
+          stardictJson.stream().filter(line -> line.contains("lexicon.import.completed")).count());
+      assertTrue(stardictJson.getLast().contains("\"existing_safe\""), stardictJson.toString());
       try (var persistence = PostgresPersistence.open(jdbcUrl)) {
         assertEquals(2, persistence.repository().publishedVersion());
         assertEquals(1, persistence.repository().findByForms(2, List.of("nebula")).size());
@@ -191,12 +288,13 @@ class LexiconImportMainOutputTest {
     }
   }
 
-  private static String captureArguments(String[] arguments, PrintStream originalOut)
+  private static String captureArguments(
+      String[] arguments, PrintStream originalOut, LexiconImportObserver observer)
       throws Exception {
     var output = new ByteArrayOutputStream();
     try (var capture = new PrintStream(output, true, StandardCharsets.UTF_8)) {
       System.setOut(capture);
-      LexiconImportMain.execute(arguments, ignored -> {});
+      LexiconImportMain.execute(arguments, ignored -> {}, observer);
     } finally {
       System.setOut(originalOut);
     }

@@ -529,7 +529,9 @@ class StructuredEventTest {
                   StructuredEvent.Reason.SOURCE_INVALID,
                   StructuredEvent.Reason.SOURCE_CHANGED,
                   StructuredEvent.Reason.CANCELLED,
-                  StructuredEvent.Reason.DEPENDENCY_UNAVAILABLE)
+                  StructuredEvent.Reason.DEPENDENCY_UNAVAILABLE,
+                  StructuredEvent.Reason.INTERNAL_ERROR,
+                  StructuredEvent.Reason.PUBLISH_ROLLED_BACK)
               .contains(r);
       case LEXICON_IMPORT_COMPLETED ->
           java.util.Set.of(
@@ -537,7 +539,9 @@ class StructuredEventTest {
                   StructuredEvent.Reason.CANCELLED,
                   StructuredEvent.Reason.SOURCE_INVALID,
                   StructuredEvent.Reason.SOURCE_CHANGED,
-                  StructuredEvent.Reason.PUBLISH_ROLLED_BACK)
+                  StructuredEvent.Reason.PUBLISH_ROLLED_BACK,
+                  StructuredEvent.Reason.DEPENDENCY_UNAVAILABLE,
+                  StructuredEvent.Reason.INTERNAL_ERROR)
               .contains(r);
       case LEXICON_CACHE_VERSION_CHANGED -> r == StructuredEvent.Reason.VERSION_CHANGED;
       case CAPTION_REQUEST_COMPLETED ->

@@ -26,8 +26,8 @@
 | event | 打印时机与级别 | 允许计数 | 原因码 |
 | --- | --- | --- | --- |
 | runtime.start.completed | 启动就绪判定结束恰好一次；正常 INFO，不可就绪 ERROR，预热降级 WARN | prewarm_positive、prewarm_negative | OK、DEMO_MODE、NO_PUBLISHED_DATA、DEPENDENCY_UNAVAILABLE、SCHEMA_MISMATCH、PREWARM_DEGRADED |
-| lexicon.import.stage | 每个固定导入步骤开始和结束 INFO；长步骤沿既有有界心跳，不另设逐行日志 | input_rows、prepared_rows、hint_rows、blocked_rows | STARTED、OK、SOURCE_INVALID、SOURCE_CHANGED、CANCELLED、DEPENDENCY_UNAVAILABLE |
-| lexicon.import.completed | 每次导入一次终态；成功 INFO，明确取消 WARN，失败 ERROR | input_rows、prepared_rows、lookup_rows、blocked_rows | OK、CANCELLED、SOURCE_INVALID、SOURCE_CHANGED、PUBLISH_ROLLED_BACK |
+| lexicon.import.stage | 每个固定导入步骤开始和结束 INFO；故障按固定原因分级；长步骤只发有界心跳，不另设逐行日志 | input_rows、prepared_rows、hint_rows、blocked_rows | STARTED、OK、SOURCE_INVALID、SOURCE_CHANGED、CANCELLED、DEPENDENCY_UNAVAILABLE、INTERNAL_ERROR、PUBLISH_ROLLED_BACK |
+| lexicon.import.completed | 每次发布尝试一次终态；成功 INFO，明确取消 WARN，失败 ERROR | input_rows、prepared_rows、lookup_rows、blocked_rows | OK、CANCELLED、SOURCE_INVALID、SOURCE_CHANGED、PUBLISH_ROLLED_BACK、DEPENDENCY_UNAVAILABLE、INTERNAL_ERROR |
 | lexicon.cache.version_changed | 观察到资料身份变化并清理缓存后一次 INFO | invalidated_positive、invalidated_negative | VERSION_CHANGED |
 | caption.request.completed | 每次 HTTP 请求恰好一次终态；正常含空提示 INFO，无效请求 WARN，内部失败 ERROR | new_ranges、query_keys、positive_hits、negative_hits、cache_misses、db_batches、version_reads、prewarm_reads、candidates、selected、ambiguous、overlap_dropped | OK、NO_HINT、NO_NEW_SEGMENTS、INVALID_REQUEST、NO_PUBLISHED_DATA、VERSION_CONFLICT、DEPENDENCY_UNAVAILABLE、INTERNAL_ERROR |
 | runtime.dependency.changed | 依赖从可用转不可用或恢复时打印；故障 WARN，恢复 INFO；同状态不重复 | 无 | DEPENDENCY_UNAVAILABLE、RECOVERED |
@@ -90,3 +90,25 @@ Record 及 ranges 防御性复制，范围要求 UTF-16 半开、升序不重叠
 成功覆盖的敏感分析记录仍同步执行并单独计时，无 processed keys 则不调用；文件记录失败只产生最多一次、同 UUID 的 analysis.record.failed，保留已确定的成功响应。其故障捕获仅包围记录调用，不吞掉用例错误。成功响应字段及 Server-Timing 的 query/rules/api 名称保持不变；terminal 的 api 测量覆盖 HTTP 处理出口，不宣称包含网络时延。未执行或未取得的节点测量省略；事件构造、编码及 sink 故障均不改变业务响应。
 
 直接验收使用合成真实 HTTP 请求，覆盖成功、空提示、无新增、非法 JSON、无效领域输入、无发布、依赖故障、混版、内部错误、敏感记录故障及日志 sink 故障；检查每请求恰好一次 terminal、关联头一致、客户端伪造 ID 无效和并发计数隔离。领域测试单独证明歧义/重叠计数及混版原因，普通日志不得包含合成字幕、释义、路径或异常载荷。
+
+## 1.8. 导入与缓存的实际节点交接
+
+### 1.8.1. 单次导入生命周期
+
+仅显式 publish 建立一次 `LexiconImportObservation`；validate、basic-report、prewarm-report 是只读检查，不伪造发布完成。CLI 在参数解析后、来源摘要计算前开始 source_check；文件识别、摘要及 StarDict 基础词选择完成后结束该步。prepare 包围完整流式预检与 requirePublishable；不从有界预热预览推导全量数量。CLI 将同一 observation 交给应用发布服务，失败出口幂等收口一次，不另造全局状态。
+
+`LexiconImportObserver` 是应用层的封闭观测端口，事件只含固定枚举、数字及有界规则计数。`LexiconEventObserver` 位于 adapters，将其映射到 StructuredEvent；应用与领域不依赖 logger。每次准备统计 input_rows（凭据原始行数）、prepared_rows（准备成功的词条数）、hint_rows/blocked_rows（准备词条的提示/阻断结果），reason_counts 按完整扫描中每词条的 decisiveRule 与 matchedRules 合并去重计数。规则只映射白名单，不携带 lemma、释义或任意键；失败时不把预检数量冒充已提交数量。
+
+persist 从进入发布资源/写入步骤开始；发布端口增加事务进度回调，在批量写入、flush 和条数校验完成后结束 persist 并开始 publish。persist completed 仅表示事务内写入步骤完成，不表示对外可见。lookup_rows 来自持久化实际生成的投影行数；未执行或未取得的计数省略。publish 覆盖资料元数据写入及事务提交，只有发布端口正常返回已提交版本后才输出 publish completed 和唯一 OK 终态。失败和预提交事件不输出未提交版本。
+
+来源凭据/摘要/行数不一致使用 `LexiconSourceChangedException`，不靠异常字符串分类。来源解析/读取失败为 SOURCE_INVALID；现有取消异常为 CANCELLED；资源不可用为 DEPENDENCY_UNAVAILABLE；其他内部异常为 INTERNAL_ERROR。只有事务 afterCompletion 明确通知 ROLLED_BACK 后，普通发布失败才可称 PUBLISH_ROLLED_BACK；来源变化和取消仍优先保留各自原因。未知提交结果不能伪称已回滚。失败关闭尚在运行的步骤并输出一次终态，后续 close/catch 不重复终态，不吞原业务异常。
+
+观察器回调异常、事件构造与 sink 故障均隔离，不改变发布/回滚结果或原始业务异常。心跳使用单调时钟，只有实际执行扫描、批次或既有进度回调时按最多每三分钟一次触发；不另建调度器，不逐行输出，不把等待确认当执行。重建确认之前尚未进入 publish，不制造导入开始/取消事件；实际发布来源抛出取消信号则记录 CANCELLED。所有验证用合成临时文件和隔离 PostgreSQL，禁止访问真实运行台账或资料。
+
+### 1.8.2. 缓存版本清理
+
+`LexiconCacheObserver` 接收本次不可变版本清理结果，由 API 的 LexiconRuntime 注入 `LexiconEventObserver`。首次从未绑定状态装载版本不打印 version_changed；已经绑定的版本发生变化（包括转为 0）时，在 pinned/dynamic 清空并重新绑定之后、预热之前输出恰好一次。版本读取失败或同版本查询不输出，预热降级不重复失效事件。
+
+失效数量在清理前取实际缓存 key：包含 HINT 的候选组为正，空候选或纯 BLOCK 为负，混合 HINT/BLOCK 只计一个正向 key；合并 pinned/dynamic 的实际内容，不用候选行数、容量或命中累计数代替。duration_ms 只计版本切换清理，不含新版本预热；不输出词形或缓存正文。观察器故障不阻止清理、预热或查询；不使用 read-clear、ThreadLocal 或全局累计计数。
+
+直接测试覆盖真实失效数量、同版本不重复、初次装载、零版本、预热失败和 observer 抛错；API 测试检查真实 runtime 接线。隔离 PostgreSQL/CLI 验证两种来源成功发布、来源变化及真实回滚，核对事件顺序、唯一终态、提交前无成功发布事件和失败后旧资料仍在；只有 formatter 测试不构成节点验收。

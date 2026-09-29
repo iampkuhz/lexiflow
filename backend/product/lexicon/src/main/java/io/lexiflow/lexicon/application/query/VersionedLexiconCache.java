@@ -1,5 +1,6 @@
 package io.lexiflow.lexicon.application.query;
 
+import io.lexiflow.lexicon.application.port.LexiconCacheObserver;
 import io.lexiflow.lexicon.application.port.LexiconReadRepository;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
@@ -33,12 +34,28 @@ final class VersionedLexiconCache {
     this.dynamic = new LinkedHashMap<>(capacity, 0.75F, true);
   }
 
-  Refresh refresh(LexiconReadRepository repository) {
+  Refresh refresh(LexiconReadRepository repository, LexiconCacheObserver observer) {
     var version = repository.publishedVersion();
     if (version == cachedVersion) return new Refresh(version, 0);
+    long started = System.nanoTime();
+    long previous = cachedVersion;
+    int oldPositive = 0, oldNegative = 0;
+    var oldKeys = new java.util.LinkedHashMap<String, List<LexiconHintCandidate>>(pinned);
+    dynamic.forEach(oldKeys::putIfAbsent);
+    for (var values : oldKeys.values()) {
+      if (values.stream().anyMatch(c -> c.finalAction() == LexiconHintAction.HINT)) oldPositive++;
+      else oldNegative++;
+    }
     pinned.clear();
     dynamic.clear();
     cachedVersion = version;
+    if (previous >= 0) {
+      try {
+        observer.versionChanged(
+            previous, version, oldPositive, oldNegative, Math.max(0, System.nanoTime() - started));
+      } catch (RuntimeException ignored) {
+      }
+    }
     int reads = 0;
     boolean degraded = false;
     if (version > 0) {

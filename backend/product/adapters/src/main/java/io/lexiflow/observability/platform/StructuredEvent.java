@@ -276,7 +276,9 @@ public record StructuredEvent(
                   Reason.SOURCE_INVALID,
                   Reason.SOURCE_CHANGED,
                   Reason.CANCELLED,
-                  Reason.DEPENDENCY_UNAVAILABLE)
+                  Reason.DEPENDENCY_UNAVAILABLE,
+                  Reason.INTERNAL_ERROR,
+                  Reason.PUBLISH_ROLLED_BACK)
               .contains(reason);
       case LEXICON_IMPORT_COMPLETED ->
           java.util.Set.of(
@@ -284,7 +286,9 @@ public record StructuredEvent(
                   Reason.CANCELLED,
                   Reason.SOURCE_INVALID,
                   Reason.SOURCE_CHANGED,
-                  Reason.PUBLISH_ROLLED_BACK)
+                  Reason.PUBLISH_ROLLED_BACK,
+                  Reason.DEPENDENCY_UNAVAILABLE,
+                  Reason.INTERNAL_ERROR)
               .contains(reason);
       case LEXICON_CACHE_VERSION_CHANGED -> reason == Reason.VERSION_CHANGED;
       case CAPTION_REQUEST_COMPLETED ->

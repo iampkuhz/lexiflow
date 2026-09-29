@@ -1,5 +1,6 @@
 package io.lexiflow.lexicon.application.query;
 
+import io.lexiflow.lexicon.application.port.LexiconCacheObserver;
 import io.lexiflow.lexicon.application.port.LexiconReadRepository;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
@@ -17,6 +18,7 @@ import java.util.OptionalLong;
 public final class CachedLexiconQueryService implements LexiconCatalog {
   private final LexiconReadRepository repository;
   private final VersionedLexiconCache cache;
+  private final LexiconCacheObserver observer;
 
   /** 分别限定提示和阻断预热词形，避免调用者控制词典筛选策略。 */
   public CachedLexiconQueryService(
@@ -24,10 +26,34 @@ public final class CachedLexiconQueryService implements LexiconCatalog {
       int cacheCapacity,
       int positivePrewarmLimit,
       int negativePrewarmLimit) {
+    this(
+        repository,
+        cacheCapacity,
+        positivePrewarmLimit,
+        negativePrewarmLimit,
+        LexiconCacheObserver.NONE);
+  }
+
+  /**
+   * 构造带缓存失效观察器的查询服务。 观察器故障会隔离，不影响缓存和查询。
+   *
+   * @param repository 已发布词库读取端口。
+   * @param cacheCapacity 动态缓存容量。
+   * @param positivePrewarmLimit 正向预热上限。
+   * @param negativePrewarmLimit 负向预热上限。
+   * @param observer 缓存版本失效观察端口。
+   */
+  public CachedLexiconQueryService(
+      LexiconReadRepository repository,
+      int cacheCapacity,
+      int positivePrewarmLimit,
+      int negativePrewarmLimit,
+      LexiconCacheObserver observer) {
     this.repository = Objects.requireNonNull(repository, "repository");
+    this.observer = Objects.requireNonNull(observer, "observer");
     this.cache =
         new VersionedLexiconCache(cacheCapacity, positivePrewarmLimit, negativePrewarmLimit);
-    cache.refresh(repository);
+    cache.refresh(repository, observer);
   }
 
   /**
@@ -51,7 +77,7 @@ public final class CachedLexiconQueryService implements LexiconCatalog {
    * @return 刷新后的实际预热状态。
    */
   public synchronized WarmupStatus refresh() {
-    cache.refresh(repository);
+    cache.refresh(repository, observer);
     return warmupStatus();
   }
 
@@ -80,7 +106,7 @@ public final class CachedLexiconQueryService implements LexiconCatalog {
       return new LexiconLookupResult(
           List.of(), OptionalLong.empty(), LexiconLookupResult.Counts.zero());
     var metrics = new int[5]; // 依次记录正命中、负命中、缓存未命中、数据库批次和预热读取
-    var refresh = cache.refresh(repository);
+    var refresh = cache.refresh(repository, observer);
     var version = refresh.version();
     metrics[4] = refresh.prewarmReads();
     var missing = new ArrayList<String>();

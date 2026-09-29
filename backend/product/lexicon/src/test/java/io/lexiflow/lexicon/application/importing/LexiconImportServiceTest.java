@@ -1,6 +1,7 @@
 package io.lexiflow.lexicon.application.importing;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -8,11 +9,14 @@ import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
 import io.lexiflow.lexicon.application.importing.model.SourceReference;
+import io.lexiflow.lexicon.application.port.LexiconImportObserver;
 import io.lexiflow.lexicon.application.port.LexiconPublicationRepository;
 import io.lexiflow.lexicon.domain.model.LexiconPriority;
 import java.io.IOException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 
@@ -68,12 +72,23 @@ class LexiconImportServiceTest {
             io.lexiflow.lexicon.application.importing.LexiconImportPlan.PlannedEntry>();
     var service =
         new LexiconImportService(
-            (metadata, raw, entries, source) -> {
+            (metadata, raw, entries, source, progress) -> {
+              var lookups = new long[1];
               try {
-                source.read(9, seen::add);
+                source.read(
+                    9,
+                    planned -> {
+                      seen.add(planned);
+                      lookups[0] +=
+                          1L
+                              + planned.entry().aliases().size()
+                              + planned.entry().inflections().size();
+                    });
               } catch (IOException exception) {
+                progress.rolledBack();
                 throw new IllegalStateException(exception);
               }
+              progress.persisted(seen.size(), lookups[0]);
               return 9;
             });
     var result =
@@ -140,7 +155,7 @@ class LexiconImportServiceTest {
     var service =
         new LexiconImportService(new FakePublicationRepository(new AtomicBoolean(), completed));
     assertThrows(
-        IllegalStateException.class,
+        LexiconSourceChangedException.class,
         () ->
             service.publishStreaming(
                 METADATA,
@@ -151,6 +166,139 @@ class LexiconImportServiceTest {
                   return new LexiconImportRowSource.ReadReceipt("b".repeat(64), 2);
                 }));
     assertEquals(false, completed.get());
+  }
+
+  @Test
+  void untypedFailureWithoutRollbackEvidenceIsInternalAndOriginalFailureEscapes() {
+    var failure = new IllegalStateException("synthetic repository failure");
+    var events = runRepositoryFailure(failure, false);
+    assertEquals(LexiconImportObserver.Reason.INTERNAL_ERROR, events.getLast().reason());
+    assertTrue(events.getLast().terminal());
+    assertEquals(1, events.stream().filter(LexiconImportObserver.Event::terminal).count());
+  }
+
+  @Test
+  void repositoryArgumentErrorIsNotMisclassifiedAsSourceValidation() {
+    var failure = new IllegalArgumentException("synthetic persistence programming error");
+    assertEquals(
+        LexiconImportObserver.Reason.INTERNAL_ERROR,
+        runRepositoryFailure(failure, false).getLast().reason());
+    assertEquals(
+        LexiconImportObserver.Reason.PUBLISH_ROLLED_BACK,
+        runRepositoryFailure(failure, true).getLast().reason());
+    var events = new ArrayList<LexiconImportObserver.Event>();
+    var service =
+        new LexiconImportService(new FakePublicationRepository(new AtomicBoolean(), null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            service.publishStreaming(
+                METADATA,
+                1,
+                1,
+                consumer -> {
+                  throw new IllegalArgumentException("synthetic source parse error");
+                },
+                new LexiconImportObservation(events::add)));
+    assertEquals(LexiconImportObserver.Reason.SOURCE_INVALID, events.getLast().reason());
+  }
+
+  @Test
+  void rowConsumerFailuresAreNotSourceFailuresWithOrWithoutConfirmedRollback() {
+    for (boolean rollback : List.of(false, true)) {
+      for (RuntimeException failure :
+          List.of(
+              new IllegalArgumentException("synthetic consumer error"),
+              new java.io.UncheckedIOException(new IOException("synthetic consumer IO")))) {
+        var events = new ArrayList<LexiconImportObserver.Event>();
+        var service =
+            new LexiconImportService(
+                (metadata, raw, entries, source, progress) -> {
+                  try {
+                    source.read(
+                        7,
+                        planned -> {
+                          throw failure;
+                        });
+                  } catch (IOException exception) {
+                    throw new IllegalStateException(exception);
+                  } catch (RuntimeException exception) {
+                    if (rollback) progress.rolledBack();
+                    throw exception;
+                  }
+                  throw new AssertionError("consumer must fail");
+                });
+        assertSame(
+            failure,
+            assertThrows(
+                RuntimeException.class,
+                () ->
+                    service.publishStreaming(
+                        METADATA,
+                        1,
+                        1,
+                        consumer -> {
+                          consumer.accept(row());
+                          return new LexiconImportRowSource.ReadReceipt(DIGEST, 1);
+                        },
+                        new LexiconImportObservation(events::add))));
+        assertEquals(
+            rollback
+                ? LexiconImportObserver.Reason.PUBLISH_ROLLED_BACK
+                : LexiconImportObserver.Reason.INTERNAL_ERROR,
+            events.getLast().reason());
+        assertEquals(1, events.stream().filter(LexiconImportObserver.Event::terminal).count());
+      }
+    }
+  }
+
+  @Test
+  void cancellationTakesPriorityOverRollbackAndSourceReceiptChangeKeepsItsType() {
+    var cancellation = new CancellationException("synthetic cancellation");
+    var cancelled = runRepositoryFailure(cancellation, true);
+    assertEquals(LexiconImportObserver.Reason.CANCELLED, cancelled.getLast().reason());
+
+    var events = new ArrayList<LexiconImportObserver.Event>();
+    var service =
+        new LexiconImportService(new FakePublicationRepository(new AtomicBoolean(), null));
+    var thrown =
+        assertThrows(
+            LexiconSourceChangedException.class,
+            () ->
+                service.publishStreaming(
+                    METADATA,
+                    1,
+                    1,
+                    consumer -> new LexiconImportRowSource.ReadReceipt("b".repeat(64), 1),
+                    new LexiconImportObservation(events::add)));
+    assertEquals(LexiconSourceChangedException.class, thrown.getClass());
+    assertEquals(LexiconImportObserver.Reason.SOURCE_CHANGED, events.getLast().reason());
+  }
+
+  private static List<LexiconImportObserver.Event> runRepositoryFailure(
+      RuntimeException failure, boolean reportRollback) {
+    var events = new ArrayList<LexiconImportObserver.Event>();
+    var service =
+        new LexiconImportService(
+            (metadata, raw, entries, source, progress) -> {
+              if (reportRollback) progress.rolledBack();
+              throw failure;
+            });
+    assertSame(
+        failure,
+        assertThrows(
+            RuntimeException.class,
+            () ->
+                service.publishStreaming(
+                    METADATA,
+                    1,
+                    1,
+                    consumer -> {
+                      consumer.accept(row());
+                      return new LexiconImportRowSource.ReadReceipt(DIGEST, 1);
+                    },
+                    new LexiconImportObservation(events::add))));
+    return events;
   }
 
   @Test
@@ -216,13 +364,24 @@ class LexiconImportServiceTest {
         LexiconImportMetadata metadata,
         long sourceRowsTotal,
         long expectedEntries,
-        LexiconPublicationRepository.PreparedEntrySource source) {
+        LexiconPublicationRepository.PreparedEntrySource source,
+        LexiconPublicationRepository.PublicationProgress progress) {
       called.set(true);
+      progress.persistStarted();
+      var rows = new long[2];
       try {
-        source.read(3, ignored -> {});
+        source.read(
+            3,
+            planned -> {
+              rows[0]++;
+              rows[1] +=
+                  1L + planned.entry().aliases().size() + planned.entry().inflections().size();
+            });
       } catch (IOException exception) {
+        progress.rolledBack();
         throw new IllegalStateException("rollback", exception);
       }
+      progress.persisted(rows[0], rows[1]);
       if (completed != null) completed.set(true);
       return 7;
     }
