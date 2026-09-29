@@ -60,7 +60,7 @@ class SystemRuntimeSmokeTest {
 
     var repository = Path.of(requiredProperty("lexiflow.repository.root"));
     var java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
-    var apiJar = bootJar(repository, "api");
+    var apiJar = Path.of(requiredProperty("lexiflow.runtimeSmoke.bootJar"));
     var port = freePort();
     apiLog = Files.createTempFile("lexiflow-api-runtime-smoke-", ".log");
     api =
@@ -122,18 +122,6 @@ class SystemRuntimeSmokeTest {
       assertEquals(
           "+PONG\r\n",
           new String(socket.getInputStream().readNBytes(7), StandardCharsets.US_ASCII));
-    }
-  }
-
-  private static Path bootJar(Path repository, String application) throws IOException {
-    var directory =
-        repository.resolve("backend/product").resolve(application).resolve("build/libs");
-    try (var files = Files.list(directory)) {
-      return files
-          .filter(path -> path.getFileName().toString().endsWith(".jar"))
-          .filter(path -> !path.getFileName().toString().endsWith("-plain.jar"))
-          .findFirst()
-          .orElseThrow(() -> new IllegalStateException("boot jar is absent for " + application));
     }
   }
 
