@@ -147,7 +147,8 @@ final class DefaultLexiconRepository implements LexiconRepository {
       LexiconImportMetadata metadata,
       long sourceRowsTotal,
       long expectedEntries,
-      LexiconPublicationRepository.PreparedEntrySource source) {
+      LexiconPublicationRepository.PreparedEntrySource source,
+      LexiconPublicationRepository.PublicationProgress progress) {
     Objects.requireNonNull(metadata, "metadata");
     Objects.requireNonNull(source, "source");
     if (sourceRowsTotal < expectedEntries || expectedEntries < 1) {
@@ -155,6 +156,17 @@ final class DefaultLexiconRepository implements LexiconRepository {
     }
     return transaction.execute(
         status -> {
+          safe(progress::persistStarted);
+          if (org.springframework.transaction.support.TransactionSynchronizationManager
+              .isSynchronizationActive())
+            org.springframework.transaction.support.TransactionSynchronizationManager
+                .registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                      @Override
+                      public void afterCompletion(int completionStatus) {
+                        if (completionStatus == STATUS_ROLLED_BACK) safe(progress::rolledBack);
+                      }
+                    });
           jdbc.execute("SELECT pg_advisory_xact_lock(643981781)");
           var version = rawPublishedVersion() + 1;
           jdbc.update("DELETE FROM lexicon_dataset WHERE dataset_id = 1");
@@ -169,6 +181,7 @@ final class DefaultLexiconRepository implements LexiconRepository {
           if (writer.entries != expectedEntries) {
             throw new IllegalStateException("source entry count changed after preflight");
           }
+          safe(() -> progress.persisted(writer.entries, writer.lookups));
           jdbc.update(
               "INSERT INTO lexicon_dataset (dataset_id, lexicon_version, source_manifest, "
                   + "source_row_count, entry_count, lookup_count, preparation_policy) "
@@ -185,6 +198,13 @@ final class DefaultLexiconRepository implements LexiconRepository {
               HintPreparation.POLICY_ID);
           return version;
         });
+  }
+
+  private static void safe(Runnable callback) {
+    try {
+      callback.run();
+    } catch (RuntimeException ignored) {
+    }
   }
 
   /** 在一个事务内按固定分块批量写入主词条及其所有准确词形。 */

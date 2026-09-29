@@ -203,6 +203,8 @@
 - 验收：核心模块仅交接结构化事实或端口，不依赖logger；实际CLI/查询与隔离发布回归共同证明事件时机和次数。
 - 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :adapters:test :adapters:postgresIntegrationTest :api:test`。
 
+- 实现边界：Catalog v2/change 2.0.0；按[观测合同 1.8](observability.md#18-导入与缓存的实际节点交接)接通类型化观察端口、完整准备计数、实际事务边界和缓存失效值；只在事务提交确认后报告发布成功，不把未知故障称为已回滚。
+
 ## 1.4. 准备与交付证据的区别
 
 准备阶段仅运行文档、Catalog 与 policy projection 静态检查，说明任务可读取、依赖无环和共享规则未漂移；不执行产品实现或伪造完整验收。正式交付时，直接测试和同输入 Change/Repository Verify 在 TASK_VALIDATION 边界内核验；INDEPENDENT_REVIEW 只读冻结 diff/evidence，CATALOG_DECISION 只核对 receipt 与依赖 hash DAG。未运行、跳过或缺环境不得称 PASS。

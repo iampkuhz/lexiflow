@@ -3,6 +3,7 @@ package io.lexiflow.lexicon.application.query;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import io.lexiflow.lexicon.application.port.LexiconCacheObserver;
 import io.lexiflow.lexicon.application.port.LexiconReadRepository;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
@@ -14,6 +15,89 @@ import org.junit.jupiter.api.Test;
 
 /** 验证缓存查询服务只使用 Repository 和领域模型。 */
 class CachedLexiconQueryServiceTest {
+  @Test
+  void reportsActualDynamicInvalidationOnlyAfterAnAlreadyBoundVersionChanges() {
+    var repository = new CountingRepository();
+    repository.entries = List.of(entry(1, "reliable", "可靠"));
+    var changes = new java.util.ArrayList<List<Long>>();
+    LexiconCacheObserver observer =
+        (oldVersion, newVersion, positive, negative, nanos) ->
+            changes.add(List.of(oldVersion, newVersion, (long) positive, (long) negative, nanos));
+    var service = new CachedLexiconQueryService(repository, 8, 0, 0, observer);
+    assertEquals(0, changes.size());
+    service.lookupForms(List.of("reliable"));
+    repository.version = 2;
+    service.lookupForms(List.of("reliable"));
+    assertEquals(1, changes.size());
+    assertEquals(List.of(1L, 2L, 1L, 0L), changes.getFirst().subList(0, 4));
+    assertEquals(0, service.refresh().version() == 2 ? changes.size() - 1 : -1);
+  }
+
+  @Test
+  void reportsZeroVersionChangeButNotInitialBindingSameVersionOrVersionReadFailure() {
+    var repository = new CountingRepository();
+    repository.version = 0;
+    var changes = new java.util.ArrayList<List<Long>>();
+    var service =
+        new CachedLexiconQueryService(
+            repository,
+            8,
+            0,
+            0,
+            (oldVersion, newVersion, positive, negative, duration) ->
+                changes.add(List.of(oldVersion, newVersion, (long) positive, (long) negative)));
+    assertEquals(0, changes.size());
+    repository.version = 1;
+    service.lookupForms(List.of("missing"));
+    assertEquals(List.of(List.of(0L, 1L, 0L, 0L)), changes);
+    service.refresh();
+    assertEquals(1, changes.size());
+    repository.failVersionRead = true;
+    assertThrows(IllegalStateException.class, service::refresh);
+    assertEquals(1, changes.size());
+  }
+
+  @Test
+  void countsMixedPinnedAndDynamicKeysBeforeClearAndIsolatesObserverAndPrewarmFailures() {
+    var repository = new CountingRepository();
+    var hint = entry(1, "bank", "银行");
+    var block =
+        new LexiconHintCandidate(
+            UUID.nameUUIDFromBytes(
+                "blocked-bank".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+            null,
+            1,
+            "en",
+            "bank",
+            "bank",
+            LexiconEntryKind.WORD,
+            LexiconHintAction.BLOCK,
+            null,
+            0,
+            0,
+            0);
+    repository.prewarm = List.of(hint, block);
+    var changes = new java.util.ArrayList<List<Long>>();
+    var prewarmCallsAtInvalidation = new int[1];
+    var service =
+        new CachedLexiconQueryService(
+            repository,
+            4,
+            1,
+            1,
+            (oldVersion, newVersion, positive, negative, duration) -> {
+              changes.add(List.of((long) positive, (long) negative));
+              prewarmCallsAtInvalidation[0] = repository.prewarmCalls;
+              throw new IllegalStateException("synthetic observer failure");
+            });
+    service.lookupForms(List.of("unknown"));
+    repository.version = 2;
+    service.lookupForms(List.of("bank"));
+    assertEquals(List.of(List.of(1L, 1L)), changes);
+    assertEquals(2, prewarmCallsAtInvalidation[0]);
+    assertEquals(4, repository.prewarmCalls);
+  }
+
   @Test
   void rejectsPrewarmBudgetOverflowBeforeLoadingSources() {
     var repository = new CountingRepository();
@@ -202,13 +286,13 @@ class CachedLexiconQueryServiceTest {
   @Test
   void failedPositiveBatchKeepsNegativeAndDoesNotRetrySameVersion() {
     var calls = new int[2];
+    var version = new long[] {1};
+    var changes = new java.util.ArrayList<Long>();
     var repo =
         new LexiconReadRepository() {
-          long version = 1;
-
           @Override
           public long publishedVersion() {
-            return version;
+            return version[0];
           }
 
           @Override
@@ -240,7 +324,13 @@ class CachedLexiconQueryServiceTest {
                     0));
           }
         };
-    var service = new CachedLexiconQueryService(repo, 4, 1, 1);
+    var service =
+        new CachedLexiconQueryService(
+            repo,
+            4,
+            1,
+            1,
+            (oldVersion, newVersion, positive, negative, duration) -> changes.add(newVersion));
     assertEquals(true, service.warmupStatus().degraded());
     assertEquals(2, service.warmupStatus().attempts());
     assertEquals(0, service.warmupStatus().positiveKeys());
@@ -249,6 +339,14 @@ class CachedLexiconQueryServiceTest {
     service.refresh();
     assertEquals(1, calls[0]);
     assertEquals(1, calls[1]);
+    assertEquals(0, changes.size());
+    version[0] = 2;
+    service.refresh();
+    assertEquals(List.of(2L), changes);
+    service.refresh();
+    assertEquals(List.of(2L), changes);
+    assertEquals(2, calls[0]);
+    assertEquals(2, calls[1]);
   }
 
   private static LexiconHintCandidate entry(long version, String gloss) {
@@ -299,6 +397,7 @@ class CachedLexiconQueryServiceTest {
     private int queryCalls;
     private int versionReads;
     private int prewarmCalls;
+    private boolean failVersionRead;
     private List<String> lastQueriedForms = List.of();
     private List<LexiconHintCandidate> entries =
         List.of(entry(1, "旧释义"), entry(1, "context", "语境"));
@@ -307,6 +406,7 @@ class CachedLexiconQueryServiceTest {
     @Override
     public long publishedVersion() {
       versionReads++;
+      if (failVersionRead) throw new IllegalStateException("synthetic version read failure");
       return version;
     }
 

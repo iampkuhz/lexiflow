@@ -6,6 +6,7 @@ import io.lexiflow.lexicon.application.query.CachedLexiconQueryService;
 import io.lexiflow.lexicon.domain.catalog.BuiltinLexiconCatalog;
 import io.lexiflow.lexicon.domain.model.LexiconLookupResult;
 import io.lexiflow.lexicon.domain.port.LexiconCatalog;
+import io.lexiflow.observability.platform.LexiconEventObserver;
 import io.lexiflow.observability.platform.StructuredEvent;
 import io.lexiflow.observability.platform.StructuredEventLogger;
 import java.sql.SQLException;
@@ -87,7 +88,9 @@ public final class LexiconRuntime implements LexiconCatalog {
     try {
       CachedLexiconQueryService.WarmupStatus warmup;
       if (cached == null) {
-        cached = new CachedLexiconQueryService(repository, 4_000, 2_000, 512);
+        cached =
+            new CachedLexiconQueryService(
+                repository, 4_000, 2_000, 512, new LexiconEventObserver(events));
         warmup = cached.warmupStatus();
       } else warmup = cached.refresh();
       long version = warmup.version();

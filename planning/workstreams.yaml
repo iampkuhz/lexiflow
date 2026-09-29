@@ -997,8 +997,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OBS-2003
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         - task_id: LF-TSK-API-2002
           type: hard
@@ -2507,20 +2507,42 @@ workstreams:
         title: 接通导入步骤和缓存版本事件
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         owner: LF-WS-OBS
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
-        - backend/product/lexicon/src/main/**
-        - backend/product/lexicon/src/test/**
-        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/**
-        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/importer/**
-        - backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java
-        - backend/product/api/src/test/**
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/LexiconImportObserver.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/LexiconCacheObserver.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/LexiconPublicationRepository.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/LexiconImportObservation.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/LexiconImportStatistics.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/LexiconSourceChangedException.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/LexiconImportPreparation.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/LexiconImportService.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/query/VersionedLexiconCache.java
+        - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/query/CachedLexiconQueryService.java
+        - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/importing/LexiconImportObservationTest.java
+        - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/importing/LexiconImportPreparationTest.java
+        - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/importing/LexiconImportServiceTest.java
+        - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/query/CachedLexiconQueryServiceTest.java
+        - backend/product/adapters/src/main/java/io/lexiflow/observability/platform/LexiconEventObserver.java
+        - backend/product/adapters/src/main/java/io/lexiflow/observability/platform/StructuredEvent.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/LexiconImportMain.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DefaultLexiconRepository.java
+        - backend/product/adapters/src/test/java/io/lexiflow/observability/platform/LexiconEventObserverTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/observability/platform/StructuredEventTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/importer/LexiconImportMainOutputTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconRepositoryIntegrationTest.java
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/LexiconRuntime.java
+        - backend/product/api/src/test/java/io/lexiflow/api/runtime/LexiconRuntimeTest.java
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/observability.md
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -2532,6 +2554,12 @@ workstreams:
         - 缓存观察版本变化并清理后恰好一次事件，正负失效数来自实际本次状态，不伪造；同版本重复请求不重发。
         - 领域及应用不依赖具体logger，通过结构化结果或明确端口交接；普通事件不包含词形/正文/路径/凭据。
         - 隔离合成测试覆盖成功发布/来源变化/回滚与缓存版本切换，日志输出故障不改变原业务结果；既有CLI和查询合同保持。
+        - 导入单次 observation 经 CLI、应用准备及发布回调共享，source_check/prepare/persist/publish 从实际节点计时，提交返回后才允许 publish completed 和唯一成功终态；validate/report 不冒充发布。
+        - 通过事务 afterCompletion 的实际回滚信号区分已确认回滚与未知内部失败；来源身份不符用类型化 SOURCE_CHANGED，取消信号用 CANCELLED，不从异常消息匹配原因，不把全部异常伪报回滚。
+        - 行数区分原始输入、已准备词条、可提示/阻断词条和实际 lookup 行；规则计数来自完整准备而非有界预热样本，失败未取得的计数/版本省略，普通事件只传固定键与数字。
+        - 缓存初次绑定不算版本切换，已绑定版本改变并清空后恰好一次事件；正负数是 pinned/dynamic 中实际键数，空候选和纯 BLOCK 均为负，混合 HINT/BLOCK 为正，同版本及版本读取失败不发事件。
+        - 结构化观察器失败在应用边界隔离，不改变原异常、事务结果、发布版本或查询计数；心跳仅实际执行时按三分钟有界触发，等待确认或完成后不发，不新增后台调度器。
+        - 真实隔离 PostgreSQL 与 CLI 集成证明两种来源成功提交、来源变化和已确认回滚的事件顺序/唯一性及旧资料保留；直接测试证明缓存实际失效数、零版本、预热失败、观察器故障和 API 真实接线。
         acceptance_evidence:
         - 冻结输入、真实节点调用次数与直接测试、同输入Verify及独立validation/review，执行状态仅记录phase2/status.md。
         validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :adapters:test :adapters:postgresIntegrationTest :api:test
@@ -2561,7 +2589,6 @@ workstreams:
           required_change_version: 2.0.0
           required_result: PASS
         deliverable: 导入步骤/终态和缓存版本清理事件在真实调用路径产生，不以只有formatter的单测代替节点落地。
-
 - id: LF-WS-OPS
   code: OPS
   name: "交付与运维"

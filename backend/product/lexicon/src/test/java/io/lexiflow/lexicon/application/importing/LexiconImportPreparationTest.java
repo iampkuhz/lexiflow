@@ -33,10 +33,43 @@ class LexiconImportPreparationTest {
             2);
     assertEquals(5, result.counts().sourceRowsTotal());
     assertEquals(3, result.counts().entries());
+    assertEquals(3, result.statistics().preparedRows());
+    assertEquals(5, result.statistics().inputRows());
+    assertEquals(3, result.statistics().hintRows() + result.statistics().blockedRows());
+    assertTrue(
+        result.statistics().reasonCounts().values().stream().mapToLong(Long::longValue).sum() >= 3);
     assertEquals(
         List.of("gamma", "alpha"),
         result.prewarmEntries().stream().map(v -> v.entry().lemma()).toList());
     assertThrows(UnsupportedOperationException.class, () -> result.prewarmEntries().clear());
+  }
+
+  @Test
+  void decisiveRuleAndMatchedTransformationCountOncePerEntry() {
+    var ref = new SourceReference("ecdict-stardict", "license", "synthetic-row");
+    var row =
+        new LexiconImportRow(
+            "medical-term",
+            "[医]甲[床]瘤",
+            "",
+            List.of(),
+            List.of(),
+            new LexiconPriority(4, 0, 10),
+            ref,
+            ref,
+            List.of(),
+            true);
+    var result =
+        LexiconImportPreparation.inspect(
+            META,
+            consumer -> {
+              consumer.accept(row);
+              return new LexiconImportRowSource.ReadReceipt(DIGEST, 1);
+            },
+            1);
+    var prepared = result.prewarmEntries().getFirst().prepared();
+    assertTrue(prepared.matchedRules().contains(prepared.decisiveRule()));
+    assertEquals(1L, result.statistics().reasonCounts().get(prepared.decisiveRule()));
   }
 
   @Test
@@ -116,6 +149,22 @@ class LexiconImportPreparationTest {
                   return new LexiconImportRowSource.ReadReceipt(DIGEST, 2);
                 },
                 0));
+  }
+
+  @Test
+  void progressObserverFailureDoesNotInterruptPreparation() {
+    var result =
+        LexiconImportPreparation.inspect(
+            META,
+            consumer -> {
+              consumer.accept(row("alpha", 2));
+              return new LexiconImportRowSource.ReadReceipt(DIGEST, 1);
+            },
+            1,
+            () -> {
+              throw new IllegalStateException("synthetic observer failure");
+            });
+    assertEquals(1, result.statistics().preparedRows());
   }
 
   private static LexiconImportRow row(String lemma, int priority) {
