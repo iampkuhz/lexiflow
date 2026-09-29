@@ -189,7 +189,9 @@ project(":integration-tests") {
     configurations["runtimeSmokeImplementation"].extendsFrom(configurations["testImplementation"])
     configurations["runtimeSmokeRuntimeOnly"].extendsFrom(configurations["testRuntimeOnly"])
     dependencies {
+        add("runtimeSmokeImplementation", platform(springBootBom))
         add("runtimeSmokeImplementation", junitJupiter)
+        add("runtimeSmokeImplementation", "tools.jackson.core:jackson-databind")
         add("runtimeSmokeImplementation", dependencies.project(":adapters"))
         add("runtimeSmokeRuntimeOnly", "org.postgresql:postgresql")
         add("runtimeSmokeRuntimeOnly", junitPlatformLauncher)
@@ -205,6 +207,8 @@ project(":integration-tests") {
         systemProperty("lexiflow.redis.test.endpoint", providers.environmentVariable("LEXIFLOW_REDIS_TEST_ENDPOINT").getOrElse(""))
         systemProperty("lexiflow.postgres.schema.file", rootProject.projectDir.parentFile.resolve("infra/postgres/schema.sql").absolutePath)
         systemProperty("lexiflow.repository.root", rootProject.projectDir.parentFile.absolutePath)
+        systemProperty("lexiflow.runtimeSmoke.classpath", runtimeSmoke.runtimeClasspath.asPath)
+        systemProperty("lexiflow.runtimeSmoke.bootJar", project(":api").tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar").flatMap { it.archiveFile }.get().asFile.absolutePath)
         testLogging { events("failed") }
     }
 }
