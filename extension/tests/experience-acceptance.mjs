@@ -88,7 +88,7 @@ export async function runExperienceAcceptance({page,context,serviceWorker,apiBas
   await page.evaluate(()=>{history.replaceState({},'', '/watch?v=lexiflow-e2e');window.dispatchEvent(new PopStateEvent('popstate'));});
   await waitForState(page,'ready');
   const diagnostics=JSON.parse(await page.locator('#lexiflow-caption-overlay').getAttribute('data-lexiflow-diagnostics'));
-  assert.ok(diagnostics.counts['cancelled-in-flight']>=1);
+  assert.ok(diagnostics.counts['cancelled_in_flight']>=1);
   await writeFile(resolve(root,'report.json'),JSON.stringify({status:'PASS',scope:'local authored fixture; real action popup CDP target, native input and screenshot; active tab is synthetic',immediate,layout,diagnostics,checks:['source-multiline','english-before-paint','popup-toggle','disabled-no-requests','pending-cancellation','navigation-reset','stale-toggle-rejected']},null,2));
   await writeFile(resolve(repositoryRoot,'tmp/quality/experience/latest.json'),JSON.stringify({root,status:'PASS'}));
  } finally {

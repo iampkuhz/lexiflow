@@ -70,3 +70,23 @@ test('navigation clears prior media stop and seek flags without waiting for old 
   assert.equal(lifecycle.stopped,false);assert.equal(lifecycle.seeking,false);
   assert.equal(lifecycle.isCurrent(lifecycle.generation,'B'),true);lifecycle.dispose();
 });
+
+test('navigation counts once per new page key, including popstate and refresh, and observation failure cannot break resume',()=>{
+ const {doc,win}=environment();let video='A',key=0,captures=0;const reasons=[];
+ const lifecycle=createPageLifecycle({currentVideoId:()=>video,hasPlayer:()=>true,hasCaptionMotion:()=>false},
+  ()=>{},()=>captures++,reason=>{reasons.push(reason);throw new Error('diagnostic fault');},()=>`page-${++key}`);
+ lifecycle.attach();
+ const first=lifecycle.pageKey;video='B';doc.dispatch('yt-navigate-start');doc.dispatch('yt-navigate-start');
+ assert.notEqual(lifecycle.pageKey,first);assert.equal(reasons.filter(r=>r==='navigation').length,1);
+ doc.dispatch('yt-navigate-finish');assert.equal(lifecycle.isCurrent(lifecycle.generation,'B'),true);
+ const second=lifecycle.pageKey;video='C';win.dispatch('popstate');assert.notEqual(lifecycle.pageKey,second);
+ assert.equal(reasons.filter(r=>r==='navigation').length,2);assert.equal(lifecycle.isCurrent(lifecycle.generation,'C'),true);
+ const third=lifecycle.pageKey;video='D';lifecycle.refreshPage();assert.notEqual(lifecycle.pageKey,third);
+ assert.equal(reasons.filter(r=>r==='navigation').length,3);assert.equal(lifecycle.isCurrent(lifecycle.generation,'D'),true);
+ const captured=captures;doc.dispatch('yt-navigate-finish');assert.ok(captures>=captured);
+ doc.hidden=true;doc.dispatch('visibilitychange');doc.dispatch('visibilitychange');
+ assert.equal(reasons.filter(r=>r==='source_hidden').length,1);
+ doc.hidden=false;doc.dispatch('visibilitychange');const current=lifecycle.pageKey;
+ lifecycle.setEnabled(current,false);lifecycle.setEnabled(current,false);
+ assert.equal(reasons.filter(r=>r==='disabled').length,1);lifecycle.dispose();
+});

@@ -1007,8 +1007,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-EXT-2002
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         - task_id: LF-TSK-OPS-2002
           type: hard
@@ -2242,19 +2242,33 @@ workstreams:
         title: 对齐客户端观测和显示边界
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
-        estimated_minutes: 60
+        estimated_minutes: 90
         owner: LF-WS-EXT
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
         - extension/src/diagnostics.ts
         - extension/src/background.ts
         - extension/src/protocol.ts
-        - extension/src/overlay.ts
-        - extension/tests/**
+        - extension/src/stream.ts
+        - extension/src/content.ts
+        - extension/src/page-lifecycle.ts
+        - extension/src/caption-capture.ts
+        - extension/tests/diagnostics.test.mjs
+        - extension/tests/background.test.mjs
+        - extension/tests/stream.test.mjs
+        - extension/tests/page-lifecycle.test.mjs
+        - extension/tests/caption-capture.test.mjs
+        - extension/tests/translation-e2e.mjs
+        - extension/tests/experience-acceptance.mjs
+        - extension/tests/continuous-acceptance.mjs
+        - docs/roadmap/master-plan/phase2/observability.md
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
+        - planning/workstreams.yaml
         forbidden_files:
         - secrets/**
         - .local/**
@@ -2264,6 +2278,7 @@ workstreams:
         acceptance_criteria:
         - 超时、取消、迟到及无提示分开计数；有界聚合、不输出正文、不上传个人偏好。
         - HUD/Server-Timing 消费者与后端一致；真实页面体验不能仅由夹具测试宣称。
+        - 按观测合同 1.9 定义固定原因生产者与计数时机，缺失耗时不补零；终态耗时不因重复渲染重复计数，普通日志失败不改变响应或资源清理。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: npm --prefix extension test
@@ -2372,8 +2387,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-EXT-2002
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         - task_id: LF-TSK-EXT-2003
           type: hard

@@ -43,7 +43,8 @@ export async function runContinuousAcceptance({ page, artifactRoot, setCaption, 
   assert.equal(delta("ready"), cases.filter(item => item.expected === "ready").length);
   assert.equal(delta("no-pending"), cases.filter(item => item.expected === "no-pending").length);
   assert.equal(delta("shown"), delta("ready"));
-  for (const outcome of ["network", "timeout", "invalid-response", "rejected", "late"]) {
+  assert.equal(delta("no_hint"), delta("no-pending"));
+  for (const outcome of ["network", "timeout", "protocol_mismatch", "backend_unavailable", "rejected", "late_response", "cancelled_before_send", "cancelled_in_flight"]) {
     assert.equal(delta(outcome), 0, `unexpected soak outcome: ${outcome}`);
   }
   for (const [stage, series] of Object.entries(diagnostics.timings)) {

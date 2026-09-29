@@ -1,13 +1,13 @@
 /** Fixed-cardinality, in-memory diagnostics. No captions, IDs, URLs or preference values. */
 export type TimingStage = "acquisition" | "coalesce" | "transport" | "query" | "rules" | "api" | "render" | "endToEnd";
 export type Outcome = "observed" | "requested" | "shown" | "ready" | "no-pending" | "network" | "timeout" |
-  "aborted" | "invalid-request" | "rejected" | "invalid-response" | "cancelled" | "late" | "suppressed" | "oversized" |
-  "cancelled-acquisition" | "cancelled-before-request" | "cancelled-in-flight" | "late-ready" | "stale-at-render" | "missing-server-timing";
+  "aborted" | "invalid-request" | "rejected" | "backend_unavailable" | "protocol_mismatch" | "suppressed" | "oversized" |
+  "cancelled-acquisition" | "cancelled_before_send" | "cancelled_in_flight" | "no_hint" | "late_response" | "disabled" | "source_hidden" | "navigation" | "stale-at-render" | "missing-server-timing";
 export type Observation = { stage?: TimingStage; elapsedMs?: number; outcome?: Outcome };
 const stages: TimingStage[] = ["acquisition", "coalesce", "transport", "query", "rules", "api", "render", "endToEnd"];
 const outcomes: Outcome[] = ["observed", "requested", "shown", "ready", "no-pending", "network", "timeout", "aborted",
-  "invalid-request", "rejected", "invalid-response", "cancelled", "late", "suppressed", "oversized",
-  "cancelled-acquisition", "cancelled-before-request", "cancelled-in-flight", "late-ready", "stale-at-render", "missing-server-timing"];
+  "invalid-request", "rejected", "backend_unavailable", "protocol_mismatch", "suppressed", "oversized",
+  "cancelled-acquisition", "cancelled_before_send", "cancelled_in_flight", "no_hint", "late_response", "disabled", "source_hidden", "navigation", "stale-at-render", "missing-server-timing"];
 const SAMPLE_LIMIT = 256;
 
 type Series = { count: number; totalMs: number; samples: number[] };

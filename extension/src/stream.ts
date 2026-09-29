@@ -27,6 +27,7 @@ export class CaptionStreamCoordinator {
   constructor(private readonly transport: RequestTransport, private readonly render: (view: StreamView) => void,
     private readonly scheduler: Scheduler = globalThis, private readonly observe: (value: Observation) => void = () => undefined,
     private readonly now: () => number = () => performance.now()) {}
+  private record(value: Observation): void { try { this.observe(value); } catch { /* diagnostics cannot change stream state */ } }
   submit(event: CaptionEvent): void {
     if (event.sequence <= this.latestSequence) return;
     this.latestSequence = event.sequence;
@@ -65,8 +66,8 @@ export class CaptionStreamCoordinator {
   }
   private invalidate(reset: boolean): void {
     this.generation++;
-    if (this.timer !== undefined) { this.scheduler.clearTimeout(this.timer); this.timer = undefined; this.observe({ outcome: "cancelled-before-request" }); }
-    if (this.active) { this.active.cancel(); this.active = undefined; this.observe({ outcome: "cancelled-in-flight" }); }
+    if (this.timer !== undefined) { this.scheduler.clearTimeout(this.timer); this.timer = undefined; this.record({ outcome: "cancelled_before_send" }); }
+    if (this.active) { try { this.active.cancel(); } catch { /* cancellation is best effort */ } this.active = undefined; this.record({ outcome: "cancelled_in_flight" }); }
     if (reset) { this.completed.clear(); this.hints = []; this.lastAcknowledged = null;
       this.frozenKeys.clear(); this.activeRowKeys.clear(); }
   }
@@ -85,7 +86,7 @@ export class CaptionStreamCoordinator {
     for (const segment of snapshotSegments(event.request.currentSnapshot)) segment.append = !this.completed.has(segment.key);
     event.request.lastRequestedSnapshot = structuredClone(this.lastAcknowledged);
     const generation = this.generation, started = this.now();
-    this.observe({ stage: "coalesce", elapsedMs: started - this.submittedAt, outcome: "requested" });
+    this.record({ stage: "coalesce", elapsedMs: started - this.submittedAt, outcome: "requested" });
     // 同步抛错与异步通信失败一致：保留确认快照，等待下一次字幕变化。
     let operation: Operation;
     try { operation = this.transport(event, `caption-${++this.requestNumber}`); }
@@ -94,17 +95,19 @@ export class CaptionStreamCoordinator {
     void operation.promise.then(result => this.accept(generation, event, result)).catch(() => this.accept(generation, event, { ok: false, reason: "network" }));
   }
   private accept(generation: number, event: CaptionEvent, result: ApiResult): void {
-    if (generation !== this.generation || !this.current || this.active?.event !== event) { this.observe({ outcome: "late" }); return; }
-    this.observe({ stage: "transport", elapsedMs: this.now() - this.active.started });
+    if (generation !== this.generation || !this.current || this.active?.event !== event) { this.record({ outcome: "late_response" }); return; }
+    this.record({ stage: "transport", elapsedMs: this.now() - this.active.started });
     this.active = undefined;
     for (const stage of ["query", "rules", "api"] as const) {
-      if (result.timings?.[stage] !== undefined) this.observe({ stage, elapsedMs: result.timings[stage] });
+      if (result.timings?.[stage] !== undefined) this.record({ stage, elapsedMs: result.timings[stage] });
     }
     if (result.ok && !parseHintResponse(result.body, event.request)) result = { ok: false, reason: "invalid-response" };
     if (!result.ok) {
-      this.observe({ outcome: result.reason }); this.publish("fallback");
+      this.record({ outcome: result.reason === "invalid-response" ? "protocol_mismatch" : result.reason }); this.publish("fallback");
       return;
     }
+    if (["query", "rules", "api"].some(stage => result.timings?.[stage as keyof typeof result.timings] === undefined))
+      this.record({ outcome: "missing-server-timing" });
     // 只确认已校验响应对应的发送快照，不把在途新增内容误标为成功。
     this.lastAcknowledged = structuredClone(event.request.currentSnapshot);
     const visible = new Set(snapshotSegments(this.current.request.currentSnapshot).map(segment => segment.key));
@@ -133,7 +136,8 @@ export class CaptionStreamCoordinator {
           (old.startOffset < hint.endOffset && hint.startOffset < old.endOffset))) this.hints.push(hint);
     }
     this.hints.sort((left, right) => left.startOffset - right.startOffset);
-    this.observe({ outcome: this.hints.length ? "ready" : "no-pending" });
+    this.record({ outcome: this.hints.length ? "ready" : "no-pending" });
+    if (result.body.hints.length === 0) this.record({ outcome: "no_hint" });
     this.publish(this.pending() ? "waiting" : this.hints.length ? "ready" : "no-pending");
     // 首次完整响应可展示当前旧行一次；之后封版，偏好读取等迟到事件不能再首次补写。
     const groups = this.current.request.currentSnapshot.captions;

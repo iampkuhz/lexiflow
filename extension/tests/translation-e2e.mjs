@@ -164,6 +164,12 @@ try {
 
   await setCaption(page, "zxqv zxqv", 1);
   await waitForState(page, "no-pending");
+  const initialCounts = JSON.parse(await page.locator("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics"));
+  assert.equal(initialCounts.counts.no_hint, 1);
+  assert.equal(initialCounts.timings.endToEnd.count, 1);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  const redrawn = JSON.parse(await page.locator("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics"));
+  assert.equal(redrawn.timings.endToEnd.count, 1, "layout redraw is not another terminal");
   assert.equal(await page.locator(".ytp-caption-segment").textContent(), "zxqv zxqv");
   assert.equal(await overlayText(page), "zxqv zxqv");
 
@@ -231,6 +237,10 @@ try {
   await page.locator("#lexiflow-caption-overlay .gloss").click();
   await waitForState(page, "no-pending");
   assert.equal(await overlayText(page), "We need reliable captions.");
+  const suppressedCounts = JSON.parse(await page.locator("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics")).counts;
+  assert.equal(suppressedCounts.suppressed, 1);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  assert.equal(JSON.parse(await page.locator("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics")).counts.suppressed, 1);
   assert.equal(await page.locator("#player").evaluate(el => el.classList.contains("lexiflow-inline-active")), true);
   await page.reload({waitUntil:"domcontentloaded"});
   await setCaption(page, "We need reliable captions.", 2);

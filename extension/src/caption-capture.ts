@@ -11,9 +11,10 @@ export type CaptureDependencies = {
   now(): number;
   onWaiting(): void;
   onSource(source?: CaptionSource): void;
-  onObserved(): void;
+  onObserved(sequence: number): void;
   onOversized(): void;
   onAcquisition(elapsedMs: number): void;
+  onObservation?(outcome: "cancelled-acquisition"): void;
 };
 /** DOM/viewport/source metadata/snapshot/topic are a single acquisition owner; stream remains request-state owner. */
 export class CaptionCapture {
@@ -25,6 +26,7 @@ export class CaptionCapture {
   private nativeIdentity = "";
   private topic: string | undefined;
   private topicPromise: Promise<string> | undefined;
+  private topicPending = false;
   private layoutKey = "";
   private missingCaptionAt: number | undefined;
   private lastVideoId: string | undefined;
@@ -46,6 +48,7 @@ export class CaptionCapture {
   invalidate(): void { this.generationReset(); }
   dispose(): void { this.generationReset(); this.topicPromise = undefined; }
   private generationReset(): void {
+    if (this.topicPending) { this.topicPending = false; try { this.dependencies.onObservation?.("cancelled-acquisition"); } catch { /* observation is best effort */ } }
     this.missingCaptionAt = undefined; this.layoutKey = ""; this.viewport.reset(); this.snapshots.reset();
     this.topicPromise = undefined;
     this.activeCaptionKey = undefined; this.activePlayer = null; this.sourceRevision++; this.sourceSequence++;
@@ -78,6 +81,7 @@ export class CaptionCapture {
 
   private clearSource(): void {
     this.missingCaptionAt = undefined; this.viewport.reset(); this.snapshots.reset();
+    if (this.topicPending) { this.topicPending = false; try { this.dependencies.onObservation?.("cancelled-acquisition"); } catch { /* observation is best effort */ } }
     this.topicPromise = undefined;
     this.sourceSequence++; this.stream.clear(this.sourceSequence);
   }
@@ -143,8 +147,8 @@ export class CaptionCapture {
       return;
     }
     this.layoutKey = nextLayoutKey; this.activeCaptionKey = key;
-    const observedAt = this.dependencies.now(); this.dependencies.onObserved();
-    const ownSequence = ++this.sourceSequence;
+    const observedAt = this.dependencies.now();
+    const ownSequence = ++this.sourceSequence; this.dependencies.onObserved(ownSequence);
     if (caption.length > MAX_CAPTION_LENGTH) {
       this.dependencies.onOversized(); this.activeCaptionKey = undefined; this.clearSource(); return;
     }
@@ -154,16 +158,18 @@ export class CaptionCapture {
     if (!this.topic) {
       this.dependencies.onWaiting();
       const expectedVideo = videoId;
-      const promise = this.topicPromise ??= this.dependencies.sha256(`youtube\u0000${videoId}`);
+      let promise = this.topicPromise;
+      if (!promise) { promise = this.dependencies.sha256(`youtube\u0000${videoId}`); this.topicPromise = promise; this.topicPending = true; }
       let resolved: string;
       try { resolved = await promise; }
       catch {
+        if (this.topicPromise === promise) { this.topicPromise = undefined; this.topicPending = false; }
         if (this.acceptResult(expectedGeneration, ownSequence, expectedVideo, expectedRevision, caption, nextIdentity, matched.trackKey)) {
-          if (this.topicPromise === promise) this.topicPromise = undefined;
           this.activeCaptionKey = undefined;
         }
         return;
       }
+      if (this.topicPromise === promise) this.topicPending = false;
       if (!this.acceptResult(expectedGeneration, ownSequence, expectedVideo, expectedRevision, caption, nextIdentity, matched.trackKey)) return;
       this.topic = resolved;
     }

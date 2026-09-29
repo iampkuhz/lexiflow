@@ -20,9 +20,10 @@ export type PageLifecycle = {
 };
 
 export function createPageLifecycle(source: LifecycleSource, invalidate: () => void, capture: () => void,
-  onStateChange: () => void, createKey: () => string = () => crypto.randomUUID()): PageLifecycle {
+  onStateChange: (reason?: "disabled" | "source_hidden" | "navigation") => void, createKey: () => string = () => crypto.randomUUID()): PageLifecycle {
   let pageKey = createKey(), videoId = source.currentVideoId(), generation = 0;
   let enabled = true, navigating = false, seeking = false, stopped = false;
+  let lastDocumentHidden = document.hidden;
   let attached = false, disposed = false, motionFrame: number | undefined, motionDeadline = 0;
   let observer: MutationObserver | undefined;
   const listeners: Array<() => void> = [];
@@ -34,13 +35,11 @@ export function createPageLifecycle(source: LifecycleSource, invalidate: () => v
     if (motionFrame !== undefined) cancelAnimationFrame(motionFrame);
     motionFrame = undefined; motionDeadline = 0;
   };
-  const invalidatePage = (resetEnabled: boolean) => {
-    generation++;
-    if (resetEnabled) { enabled = true; seeking = false; stopped = false; cancelMotion(); pageKey = createKey(); }
-    videoId = source.currentVideoId();
-    invalidate(); onStateChange();
+  const notify = (reason?: "disabled" | "source_hidden" | "navigation") => { try { onStateChange(reason); } catch { /* observations cannot alter lifecycle */ } };
+  const resetForLocation = () => {
+    generation++; enabled = true; seeking = false; stopped = false; cancelMotion();
+    pageKey = createKey(); videoId = source.currentVideoId(); invalidate(); notify("navigation");
   };
-  const resetForLocation = () => { invalidatePage(true); };
   const motion = () => {
     motionFrame = undefined;
     if (disposed || document.hidden || !enabled || navigating || seeking || stopped) return;
@@ -58,18 +57,24 @@ export function createPageLifecycle(source: LifecycleSource, invalidate: () => v
     if (target instanceof Element && target.closest("#ytp-caption-window-container")) capture();
   };
   const visibility = () => {
-    if (document.hidden) { cancelMotion(); generation++; invalidate(); onStateChange(); }
+    const changed = lastDocumentHidden !== document.hidden;
+    lastDocumentHidden = document.hidden;
+    if (document.hidden) { cancelMotion(); generation++; invalidate(); notify(changed ? "source_hidden" : undefined); }
     else capture();
   };
-  const pagehide = () => { cancelMotion(); stopped = true; generation++; invalidate(); onStateChange(); };
+  const pagehide = () => { cancelMotion(); stopped = true; generation++; invalidate(); notify(); };
   const pageshow = () => { stopped = false; generation++; invalidate(); capture(); };
-  const seekingStart = () => { cancelMotion(); seeking = true; generation++; invalidate(); onStateChange(); };
+  const seekingStart = () => { cancelMotion(); seeking = true; generation++; invalidate(); notify(); };
   const seekingEnd = () => { seeking = false; stopped = false; capture(); };
-  const stopSource = () => { cancelMotion(); stopped = true; generation++; invalidate(); onStateChange(); };
+  const stopSource = () => { cancelMotion(); stopped = true; generation++; invalidate(); notify(); };
   const resumeSource = () => { stopped = false; capture(); };
-  const navigateStart = () => { navigating = true; resetForLocation(); };
-  const navigateEnd = () => { navigating = false; capture(); };
-  const popstate = () => { resetForLocation(); capture(); };
+  const navigateStart = () => { if (navigating) return; navigating = true; resetForLocation(); };
+  const navigateEnd = () => {
+    const currentVideoId = source.currentVideoId();
+    if (navigating && currentVideoId !== videoId) { videoId = currentVideoId; generation++; invalidate(); }
+    navigating = false; capture();
+  };
+  const popstate = () => { if (navigating) return; resetForLocation(); capture(); };
   const resize = () => capture();
   const timeupdate = () => capture();
   function attach(): void {
@@ -100,7 +105,7 @@ export function createPageLifecycle(source: LifecycleSource, invalidate: () => v
     disposed = true; stopped = true; enabled = false; generation++;
     observer?.disconnect(); observer = undefined;
     for (const remove of listeners.splice(0)) remove();
-    cancelMotion(); attached = false; invalidate(); onStateChange();
+    cancelMotion(); attached = false; invalidate(); notify();
   }
   return {
     get pageKey() { return pageKey; }, get videoId() { return videoId; }, get generation() { return generation; },
@@ -112,7 +117,7 @@ export function createPageLifecycle(source: LifecycleSource, invalidate: () => v
     },
     setEnabled(expectedPageKey, value) {
       if (disposed || expectedPageKey !== pageKey || typeof value !== "boolean") return false;
-      if (enabled !== value) { enabled = value; generation++; invalidate(); onStateChange(); }
+      if (enabled !== value) { enabled = value; generation++; invalidate(); notify(value ? undefined : "disabled"); }
       return true;
     },
     refreshPage() { resetForLocation(); }, attach, dispose

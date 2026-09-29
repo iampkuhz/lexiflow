@@ -19,13 +19,13 @@ function fixture(){
     selector==='.html5-video-player video, #movie_player video'?video:null;
   doc.getElementById=()=>({});
   globalThis.document=doc;globalThis.window=win;globalThis.MutationObserver=Observer;
-  const submissions=[],clears=[];let capture;
+  const submissions=[],clears=[],observations=[];let capture;
   const lifecycle=createPageLifecycle({currentVideoId:()=>videoId,hasPlayer:()=>true,hasCaptionMotion:()=>false},
     ()=>capture?.invalidate(),()=>{void capture?.capture();},()=>{},()=>`page-${++pageKey}`);
   capture=new CaptionCapture(lifecycle,{submit:event=>submissions.push(event),clear:sequence=>clears.push(sequence)},
     {sha256:value=>{hashCalls++;const next=hashes.shift();assert.ok(next,`unexpected topic hash for ${value}`);return next.promise;},
-      now:()=>0,onWaiting:()=>{},onSource:()=>{},onObserved:()=>{},onOversized:()=>{},onAcquisition:()=>{}});
-  return {doc,win,video,player,lifecycle,capture,submissions,clears,hashes,
+      now:()=>0,onWaiting:()=>{},onSource:()=>{},onObserved:()=>{},onOversized:()=>{},onAcquisition:()=>{},onObservation:outcome=>observations.push(outcome)});
+  return {doc,win,video,player,lifecycle,capture,submissions,clears,hashes,observations,
     setGap:value=>{gap=value;},setCaption:value=>{caption=value;},setVideo:value=>{videoId=value;},get hashCalls(){return hashCalls;},
     nextHash(){const value=deferred();hashes.push(value);return value;}};
 }
@@ -87,4 +87,13 @@ test('a short visible empty gap while hashing does not strand the returning iden
   f.setCaption('Returning caption');await f.capture.capture();
   assert.equal(f.hashCalls,1);assert.equal(f.submissions.length,1);
   assert.equal(snapshotText(f.submissions[0]),'Returning caption');
+});
+
+test('pending hash cancellation is counted once on clear; a settled hash is not cancelled',async()=>{
+ const f=fixture(),old=f.nextHash();f.setCaption('Before clear');const pending=f.capture.capture();await flush();
+ f.setCaption('');await f.capture.capture();assert.deepEqual(f.observations,['cancelled-acquisition']);
+ old.resolve('old-topic');await pending;assert.deepEqual(f.observations,['cancelled-acquisition']);
+ const current=f.nextHash();f.setCaption('Current caption');const active=f.capture.capture();await flush();
+ current.resolve('current-topic');await active;assert.equal(f.submissions.length,1);
+ f.capture.invalidate();assert.deepEqual(f.observations,['cancelled-acquisition']);
 });
