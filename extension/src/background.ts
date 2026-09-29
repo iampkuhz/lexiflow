@@ -22,12 +22,17 @@ const inFlight = new Map<string, AbortController>();
 function parseServerTiming(header: string | null): { timings?: ApiTimings } {
   if (!header || header.length > 512) return {};
   const timings: ApiTimings = {};
+  const seen = new Set<string>(), invalid = new Set<string>();
   for (const part of header.split(",")) {
+    const dimension = /^(query|rules|api)(?:\s*;|$)/.exec(part.trim())?.[1];
+    if (dimension && seen.has(dimension)) { invalid.add(dimension); delete timings[dimension as keyof ApiTimings]; continue; }
+    if (dimension) seen.add(dimension);
     const match = /^(query|rules|api);dur=(\d+(?:\.\d+)?)$/.exec(part.trim());
     if (!match) continue;
     const duration = Number(match[2]);
     if (Number.isFinite(duration) && duration <= 60_000) timings[match[1] as keyof ApiTimings] = duration;
   }
+  for (const dimension of invalid) delete timings[dimension as keyof ApiTimings];
   return Object.keys(timings).length ? { timings } : {};
 }
 
@@ -49,7 +54,10 @@ async function requestHints(key: string, payload: CaptionHintRequest): Promise<A
       body: JSON.stringify(payload),
       signal: controller.signal
     });
-    if (!response.ok) { outcome = "rejected"; return { ok: false, reason: "rejected" }; }
+    if (!response.ok) {
+      outcome = response.status === 503 ? "backend_unavailable" : "rejected";
+      return { ok: false, reason: outcome === "backend_unavailable" ? "backend_unavailable" : "rejected" };
+    }
     let data: unknown;
     try { data = await response.json(); }
     catch (error) {
@@ -66,7 +74,7 @@ async function requestHints(key: string, payload: CaptionHintRequest): Promise<A
     outcome = reason;
     return { ok: false, reason };
   } finally {
-    console.info("[LexiFlow]", { stage: "api", outcome, elapsedMs: Math.round(performance.now() - started) });
+    try { console.info("[LexiFlow]", { stage: "api", outcome, elapsedMs: Math.round(performance.now() - started) }); } catch { /* diagnostics cannot affect request cleanup */ }
     clearTimeout(timeout);
     if (inFlight.get(key) === controller) inFlight.delete(key);
   }

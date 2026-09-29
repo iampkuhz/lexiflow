@@ -181,6 +181,8 @@
 - 验收：HUD/Server-Timing 消费者与后端一致；真实页面体验不能仅由夹具测试宣称。
 - 直接检查：`npm --prefix extension test`。
 
+- 实现边界：Catalog v2/change 2.0.0，预计 90 分钟；按观测合同 1.9 接通 7 个客户端实际节点，更新全部计数消费者和精确次数测试，不改变提示协议或本机偏好存储。
+
 ### 1.3.20. LF-TSK-QLT-2001 · 串行核验完整主线及跨模块验收矩阵
 - 主责：`LF-WS-QLT`；预计 90 分钟；前置：`LF-TSK-API-2002`、`LF-TSK-EXT-2002`、`LF-TSK-OPS-2002`、`LF-TSK-OBS-2003`。
 - 产出：补齐合成集成场景与规则变化证据，冻结交付输入供独立 TASK_VALIDATION 使用。

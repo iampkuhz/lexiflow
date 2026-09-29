@@ -20,7 +20,7 @@ test("unknown dimensions and invalid timings cannot introduce raw user data", ()
   assert.equal(stats.snapshot().timings.query.count, 0);
   assert.equal(JSON.stringify(stats.snapshot()).includes("private"), false);
   stats.record({ outcome: "timeout" });
-  stats.record({ outcome: "cancelled" });
   assert.equal(stats.snapshot().counts.timeout, 1);
-  assert.equal(stats.snapshot().counts.cancelled, 1);
+  assert.equal(stats.snapshot().counts["cancelled_before_send"], 0);
+  assert.equal(stats.snapshot().counts.no_hint, 0);
 });

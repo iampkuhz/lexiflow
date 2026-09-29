@@ -34,7 +34,8 @@
 - API-2001 v2 已提交 `8e3eeb9` 并合入 `phase2`；Change `25a81148-5ed5-4232-9f40-0e92e9a80b27`、Repository `963a1b6f-a8ff-4f4d-af8f-e87585da2b53`、validation `a1f20940-02f3-47b5-9c82-a8a7ca21c2ed`、review `4dc0cd4e-b679-4461-9121-27f9f8a692df`、check `b8decd98-09ed-4eb3-86de-af5c3b76ea4b` 均 PASS，submission `ddacc66f-37b8-4299-b511-984a6edf2431`；首轮浏览器 smoke 隐式 demo 失败及后续显式模式验证证据保留。
 - API-2002 v2 已提交 `b42892d` 并合入 `phase2`；Change `c95e7ace-fc5e-4ffb-ac1d-63f21d8aae31`、Repository `a5011303-f0ac-4155-8083-01356781abd2`、validation `5372ba59-6318-4e9d-a15d-28cff3d05575`、review `dae3a17e-29a2-481d-85aa-104101eff873`、check `be37d256-789f-4842-b276-2754047ff12d` 均 PASS，submission `20ead54b-e78f-4f46-b79c-71280c711936`。
 - OBS-2003 已提交 `6a650fe` 并合入 `phase2`；Change `da0da359-067d-4f1a-a658-e3f2c6c121e6`、Repository `41e6dbed-69b3-404b-af1f-5e1db8269525`、validation `59ef0f43-1ed2-4fcb-a81e-21cde82b4f01`、review `aa18ce31-7205-4f97-8292-ffe6f2e45f49`、check `5e807d41-0e4c-4181-8952-563c092f5857` 均 PASS，submission `275eaa64-557b-446e-a90b-80ce30c5c107`；来源异常与 consumer 回调异常的审查失败记录保留，修复后重新送验；未推送。
-- 当前在 `phase2-17-extension-lifecycle` 实施 EXT-2001 v2，收拢页面生命周期与采集快照，补齐异步哈希世代隔离和可见性回归；不访问真实字幕或用户运行资料。
+- EXT-2001 已提交 `1475e07` 并合入 `phase2`；Change `aa6662d5-be06-432b-9fa3-13bb6a82b1ba`、Repository `7dc6cf78-ef7b-4c95-b2aa-a56f2259d3ea`、validation `7d9eab71-7378-49cc-bc78-34f38a0ba687`、review `087299ce-9b0f-4689-8148-9555043cf96a`、check `2ccd4040-0643-4529-b656-a86229b3e3ff` 均 PASS，submission `c583e527-2061-4e9f-8a8d-923f9e1805fb`；93 项单测与合成浏览器接线通过，不等于真实 YouTube 验收，未推送。
+- 当前在 `phase2-18-client-observation` 实施 EXT-2002 v2，落实客户端固定原因、精确次数、服务端计时缺失及诊断失败隔离；仅使用合成资料。
 - API-2002 的回归使用独立测试 profile 和临时台账路径，按单文件单顶层类拆成三组 HTTP 测试并显式纳入 Catalog；早期测试曾因遗漏临时路径向默认本机分析台账写入合成样例，已修正测试配置，原台账未读取、删除或清理，失败证据保留。
 - OpenSpec 与运行记录保留在 ignored 本机目录；共享交接位于路线图与 Catalog。
 

@@ -70,6 +70,25 @@ test('accepts only bounded fixed-cardinality Server-Timing fields', async () => 
   assert.deepEqual(result.timings, {query:12.5,rules:.25,api:13});
   globalThis.fetch = async () => ({ ok:true, json:async () => body, headers:{ get:() => 'query;dur=Infinity, rules;dur=-1, api;dur=60001' } });
   assert.equal((await send({type:'caption-hints',requestId:'metrics',payload},sender(1))).timings, undefined);
+  globalThis.fetch = async () => ({ ok:true, json:async () => body, headers:{ get:() => 'query;dur=1, query;dur=2, rules;dur=3, api;dur=4' } });
+  assert.deepEqual((await send({type:'caption-hints',requestId:'duplicate-metrics',payload},sender(1))).timings,{rules:3,api:4});
+  globalThis.fetch = async () => ({ ok:true, json:async () => body, headers:{ get:() => 'query;dur=1, query;dur=broken, rules;dur=2, api;dur=3' } });
+  assert.deepEqual((await send({type:'caption-hints',requestId:'mixed-duplicate-metrics',payload},sender(1))).timings,{rules:2,api:3});
+});
+
+test('503 is a fixed backend outcome and never includes the response body', async () => {
+  globalThis.fetch = async () => ({ ok:false, status:503, text:async()=>{throw new Error('must not read body');} });
+  assert.deepEqual(await send({type:'caption-hints',requestId:'backend',payload},sender(1)),{ok:false,reason:'backend_unavailable'});
+});
+
+test('diagnostic console failure cannot change response or request cleanup', async () => {
+  const info=console.info;console.info=()=>{throw new Error('diagnostic sink unavailable');};
+  try {
+    const body={processedKeys:['key1'],hints:[]};
+    globalThis.fetch=async()=>({ok:true,json:async()=>body});
+    assert.deepEqual(await send({type:'caption-hints',requestId:'console-fault',payload},sender(1)),{ok:true,body});
+    await send({type:'cancel-caption-hint',requestId:'console-fault'},sender(1));
+  } finally { console.info=info; }
 });
 
 test('timeout is distinct from explicit cancellation', async () => {
@@ -118,4 +137,13 @@ test('popup identity can read and restore all but cannot suppress; sender identi
   assert.deepEqual(await send({type:'local-preferences',action:'read'}, { ...popup, tab:{id:3} }),{ok:false,reason:'invalid-request'});
   assert.deepEqual(await send({type:'local-preferences',action:'read'}, {}),{ok:false,reason:'invalid-request'});
   assert.deepEqual(await send({type:'local-preferences',action:'read'}, {id:'external-id',tab:{id:9}}),{ok:false,reason:'invalid-request'});
+});
+
+
+test('duplicate timing names without a duration invalidate the dimension in either order',async()=>{
+  for (const header of ['query, query;dur=3, api;dur=4', 'query;dur=3, query, api;dur=4',
+      'query ;dur=3, query;dur=4, api;dur=4']) {
+    globalThis.fetch=async()=>({ok:true,json:async()=>({processedKeys:['key1'],hints:[]}),headers:{get:()=>header}});
+    assert.deepEqual((await send({type:'caption-hints',requestId:'duplicates',payload},sender(1))).timings,{api:4});
+  }
 });

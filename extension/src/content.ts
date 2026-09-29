@@ -27,6 +27,12 @@ let latestView: StreamView = { state: "idle" };
 let lastShownSequence = -1;
 let lastSuppressedSequence = -1;
 let observedAt = performance.now();
+let observedSequence = -1;
+let terminalSequence = -1;
+function record(observation: Parameters<Diagnostics["record"]>[0]): void {
+  try { diagnostics.record(observation); } catch { /* diagnostics never changes user-visible behavior */ }
+}
+function updateDiagnostics(): void { try { overlay.updateDiagnostics(diagnostics.snapshot()); } catch { /* diagnostic UI is optional */ } }
 const overlay = new BilingualOverlay((entryId, lexiconVersion) => { void updatePreferences("suppress", entryId, lexiconVersion); });
 let capture: CaptionCapture | undefined;
 let lifecycle: PageLifecycle;
@@ -45,8 +51,8 @@ function renderCurrentView(): number {
   const shown = overlay.render(view, { ready: preferenceReady, entryKeys: suppressed, message: preferenceMessage },
     source && source.caption.length <= MAX_CAPTION_LENGTH ? source : undefined);
   if (view.state === "ready" && view.event && preferenceReady) {
-    if (shown > 0 && lastShownSequence !== view.event.sequence) { lastShownSequence = view.event.sequence; diagnostics.record({ outcome: "shown" }); }
-    else if (shown === 0 && lastSuppressedSequence !== view.event.sequence) { lastSuppressedSequence = view.event.sequence; diagnostics.record({ outcome: "suppressed" }); }
+    if (shown > 0 && lastShownSequence !== view.event.sequence) { lastShownSequence = view.event.sequence; record({ outcome: "shown" }); }
+    else if (shown === 0 && (view.hints?.length ?? 0) > 0 && view.hints!.every(hint => suppressed.has(`${hint.lexiconEntryId}@${hint.lexiconVersion}`)) && lastSuppressedSequence !== view.event.sequence) { lastSuppressedSequence = view.event.sequence; record({ outcome: "suppressed" }); }
   }
   return shown;
 }
@@ -57,7 +63,7 @@ async function updatePreferences(action: PreferenceAction, entryId?: string, lex
   if (result?.ok && Array.isArray(result.entryKeys)) { suppressed = new Set(result.entryKeys); preferenceReady = true; preferenceMessage = ""; }
   else preferenceMessage = result && !result.ok && result.reason === "limit"
     ? "本机抑制已达上限，请先恢复提示。" : "本机偏好读取或保存失败；未宣称已保存。";
-  renderCurrentView(); overlay.updateDiagnostics(diagnostics.snapshot());
+  renderCurrentView(); updateDiagnostics();
 }
 
 const coordinator = new CaptionStreamCoordinator(
@@ -71,13 +77,15 @@ const coordinator = new CaptionStreamCoordinator(
     if (view.state === "ready" && (!view.event || !capture?.isCurrentSequence(view.event.sequence) ||
         (liveCaption !== undefined && snapshotText(view.event.request.currentSnapshot) !== liveCaption) ||
         lifecycle.videoId !== videoIdFromLocation() || !lifecycle.enabled || document.hidden)) {
-      diagnostics.record({ outcome: "stale-at-render" }); overlay.updateDiagnostics(diagnostics.snapshot()); return;
+      record({ outcome: "stale-at-render" }); updateDiagnostics(); return;
     }
     const started = performance.now(); latestView = view; renderCurrentView();
-    diagnostics.record({ stage: "render", elapsedMs: performance.now() - started });
-    if (["ready", "no-pending", "fallback"].includes(view.state)) diagnostics.record({ stage: "endToEnd", elapsedMs: performance.now() - observedAt });
-    overlay.updateDiagnostics(diagnostics.snapshot());
-  }, globalThis, value => { diagnostics.record(value); overlay.updateDiagnostics(diagnostics.snapshot()); });
+    record({ stage: "render", elapsedMs: performance.now() - started });
+    if (["ready", "no-pending", "fallback"].includes(view.state) && view.event && terminalSequence !== view.event.sequence && observedSequence === view.event.sequence) {
+      terminalSequence = view.event.sequence; record({ stage: "endToEnd", elapsedMs: performance.now() - observedAt });
+    }
+    updateDiagnostics();
+  }, globalThis, value => { record(value); updateDiagnostics(); });
 
 lifecycle = createPageLifecycle({
   currentVideoId: videoIdFromLocation,
@@ -86,17 +94,19 @@ lifecycle = createPageLifecycle({
     .some(animation => animation.playState === "running" || animation.pending)
 }, () => {
   capture?.invalidate();
-}, captureLivePage, () => {
-  renderCurrentView(); overlay.updateDiagnostics(diagnostics.snapshot());
+}, captureLivePage, reason => {
+  if (reason) record({ outcome: reason });
+  renderCurrentView(); updateDiagnostics();
 });
 capture = new CaptionCapture(lifecycle, coordinator, {
   sha256, now: () => performance.now(),
   onWaiting: () => { latestView = { state: "waiting" }; renderCurrentView(); },
   onSource: source => { if (source) renderCurrentView(); else overlay.render({ state: "idle" },
     { ready: preferenceReady, entryKeys: suppressed, message: preferenceMessage }); },
-  onObserved: () => { observedAt = performance.now(); diagnostics.record({ outcome: "observed" }); },
-  onOversized: () => diagnostics.record({ outcome: "oversized" }),
-  onAcquisition: elapsedMs => diagnostics.record({ stage: "acquisition", elapsedMs })
+  onObserved: sequence => { observedAt = performance.now(); observedSequence = sequence; record({ outcome: "observed" }); },
+  onOversized: () => record({ outcome: "oversized" }),
+  onAcquisition: elapsedMs => record({ stage: "acquisition", elapsedMs }),
+  onObservation: outcome => record({ outcome })
 });
 
 renderCurrentView();
