@@ -169,9 +169,17 @@ try {
 
   await setCaption(page, "We need reliable captions.", 2);
   await waitForState(page, "ready");
-  assert.equal(await page.locator(".ytp-caption-segment").textContent(), "We need reliable captions.");
+  const observedBeforeVisibility = JSON.parse(await page.locator("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics")).counts.observed;
+  const observedAfterVisibility = await page.evaluate(() => {
+    document.querySelector(".ytp-caption-segment").textContent = "We need reliable captions again.";
+    document.dispatchEvent(new Event("visibilitychange"));
+    return JSON.parse(document.querySelector("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics")).counts.observed;
+  });
+  assert.ok(observedAfterVisibility > observedBeforeVisibility, "content bundle's visibilitychange listener must synchronously recapture the live caption");
+  await waitForState(page, "ready");
+  assert.equal(await page.locator(".ytp-caption-segment").textContent(), "We need reliable captions again.");
   assert.match(await overlayText(page), /可靠的/);
-  assert.equal(await overlayText(page), "We need reliable(可靠的) captions.");
+  assert.equal(await overlayText(page), "We need reliable(可靠的) captions again.");
   const diagnostics = JSON.parse(await page.locator("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics"));
   assert.ok(diagnostics.counts.ready >= 1);
   for (const stage of ["acquisition", "coalesce", "transport", "query", "rules", "api", "render", "endToEnd"]) {
