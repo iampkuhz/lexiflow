@@ -1,10 +1,12 @@
 import io.lexiflow.buildlogic.VerifyNoSkippedTestsTask
 import io.lexiflow.buildlogic.VerifyProductLanguageTask
 import io.lexiflow.buildlogic.VerifyProjectDependenciesTask
+import io.lexiflow.buildlogic.ReleaseVersion
 import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.api.tasks.diagnostics.DependencyReportTask
 import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.SourceSetContainer
+import org.gradle.jvm.tasks.Jar
 import org.gradle.testing.jacoco.tasks.JacocoReport
 
 plugins {
@@ -15,7 +17,28 @@ plugins {
 }
 
 group = "io.lexiflow"
-version = "0.1.0-SNAPSHOT"
+if (providers.gradleProperty("version").isPresent) throw GradleException("软件版本只读取 ops/release/version.txt，不接受 -Pversion 覆盖")
+val softwareVersionContents = providers.fileContents(layout.projectDirectory.file("../ops/release/version.txt")).asText
+version = try {
+    ReleaseVersion.parse(softwareVersionContents.get())
+} catch (_: Exception) {
+    throw GradleException("软件版本文件缺失或格式无效")
+}
+val requestedRelease = providers.gradleProperty("release").orNull
+if (requestedRelease != null && requestedRelease !in setOf("true", "false")) throw GradleException("release 参数必须为 true 或 false")
+if (requestedRelease == "true") {
+    val gitCheck = providers.exec {
+        commandLine("git", "-C", rootDir.parentFile.absolutePath, "rev-parse", "--show-toplevel")
+        isIgnoreExitValue = true
+    }
+    val gitRoot = gitCheck.standardOutput.asText.get().trim()
+    if (gitCheck.result.get().exitValue != 0 || java.io.File(gitRoot).canonicalPath != rootDir.parentFile.canonicalPath) throw GradleException("发行输入必须位于有效 Git 仓库根")
+    val head = providers.exec { commandLine("git", "-C", gitRoot, "rev-parse", "--verify", "HEAD^{commit}"); isIgnoreExitValue = true }
+    if (head.result.get().exitValue != 0 || head.standardOutput.asText.get().isBlank()) throw GradleException("发行输入缺少有效 HEAD")
+    val status = providers.exec { commandLine("git", "-C", gitRoot, "status", "--porcelain=v1", "--untracked-files=all"); isIgnoreExitValue = true }
+    if (status.result.get().exitValue != 0) throw GradleException("无法核对发行输入状态")
+    if (status.standardOutput.asText.get().isNotEmpty()) throw GradleException("发行输入工作区必须清洁")
+}
 
 val deliveryRequested = gradle.startParameter.taskNames.any {
     it.substringAfterLast(':') in setOf("check", "qualityFull", "deliveryFull")
@@ -43,6 +66,9 @@ configure(leafProjects) {
     group = rootProject.group
     version = rootProject.version
     pluginManager.apply("lexiflow.java-library")
+    tasks.withType<Jar>().configureEach {
+        manifest.attributes["Implementation-Version"] = rootProject.version.toString()
+    }
     dependencies.add("testImplementation", junitJupiter)
     dependencies.add("testRuntimeOnly", junitPlatformLauncher)
 }

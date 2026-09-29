@@ -2344,8 +2344,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2003
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         deliverable: 让扩展构建消费统一版本并产出匹配扩展包及直接验收证据。
       - id: LF-TSK-EXT-2004
@@ -2815,18 +2815,27 @@ workstreams:
         title: 建立软件版本真源并接入后端构建
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
-        estimated_minutes: 60
+        estimated_minutes: 90
         owner: LF-WS-OPS
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
         - ops/release/version.txt
         - ops/release/version.mjs
         - ops/release/tests/version.test.mjs
         - backend/build.gradle.kts
+        - backend/gradle/build-logic/src/main/kotlin/io/lexiflow/buildlogic/ReleaseVersion.kt
+        - backend/gradle/build-logic/src/test/kotlin/io/lexiflow/buildlogic/ReleaseVersionTest.kt
+        - backend/verification/integration/src/runtimeSmoke/java/io/lexiflow/integration/SystemRuntimeSmokeTest.java
+        - ops/release/check.mjs
+        - harness/module-checks.yaml
+        - tests/verification/test_release_checks.py
+        - docs/roadmap/master-plan/phase2/release.md
+        - docs/roadmap/master-plan/phase2/status.md
+        - planning/workstreams.yaml
         forbidden_files:
         - secrets/**
         - .local/**
@@ -2836,11 +2845,14 @@ workstreams:
         acceptance_criteria:
         - 软件版本由 ops/release/version.txt 唯一维护，三段数字格式有界校验；后端构建和清单读取同一来源。
         - 异常格式、缺失版本、发行构建的脏源码输入必须可检测；不自动修改 Git tag 或推送。
+        - 版本 parser 的 Node/Kotlin 边界一致，发行构建拒绝脏输入；标准 Verify 执行版本模块真实测试，拒绝零测试或跳过，后端版本文件纳入触发和冻结输入。
         acceptance_evidence:
         - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
         validation_command: node --test ops/release/tests/version.test.mjs && python3 -m scripts.environment.java_exec
           backend/gradlew -p backend :api:bootJar
         required_check_ids:
+        - eng.release.version
+        - eng.verification.module-tests
         - eng.backend.delivery
         - eng.repository.docs
         - eng.repository.planning
@@ -2892,8 +2904,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2003
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         - task_id: LF-TSK-EXT-2003
           type: hard

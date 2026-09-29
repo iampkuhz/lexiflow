@@ -79,6 +79,16 @@ Docker 默认将 API 发布到宿主 127.0.0.1，与扩展现有本机权限一�
 - 软件版本由 ops/release/version.txt 唯一维护，三段数字格式有界校验；后端构建和清单读取同一来源。
 - 异常格式、缺失版本、发行构建的脏源码输入必须可检测；不自动修改 Git tag 或推送。
 
+#### 1.6.2.1. 版本与发行输入合同
+
+`ops/release/version.txt` 是唯一软件版本真源，初始为 `0.1.0`；允许文件末尾一个 LF 或 CRLF，不接受其他空白、BOM、多行、后缀或前导零。格式固定 `major.minor.patch`，各段为 0～65535 且不能全零，遵循 [Chrome 版本字段约束](https://developer.chrome.com/docs/extensions/reference/manifest/version) 的三段子集。软件版本不改变 API/SQL/词库的独立身份。
+
+Node 发布工具通过 `version.mjs` 读取、校验版本；Gradle 通过同合同的 build-logic parser 读取该文件，所有产品子项目及 JAR manifest 消费这个值，不接受第二个版本参数覆盖。两个 parser 都有边界测试；构建消费者按 Gradle 的实际归档输出定位，不扫描目录选中旧版本 JAR。
+
+源码调试允许工作区改动；显式 `-Prelease=true` 的 Gradle 构建和 `node ops/release/version.mjs --release` 必须核对真实 Git 根、有效 HEAD，以及包括未跟踪文件的工作区/暂存区清洁状态。Git 不可用、空仓库或脏输入都拒绝，忽略的本机运行产物不当成发行源码；错误仅给固定原因，不打印私有文件名。检查不创建 tag、不提交、不上传。此处只证明发行输入资格，不代替后续许可、制品清单或 Docker 验收。
+
+版本模块的 `check.mjs` 运行真实 Node 单测，并拒绝零测试、缺失结果、跳过、取消和失败；不以退出零直接判断通过。OPS-2003 的最小接线包括独立 release-version Check 的双 scope 声明、版本文件到后端的触发与冻结输入，以及声明回归测试；父代理集成 Harness 部分，不把 Node 测试塞进产品 Java 模块。QLT-2004 继续负责后续完整 Docker/发布验收入口，不等待它才验证版本基础。
+
 ### 1.6.3. LF-TSK-EXT-2003 · 让扩展构建消费统一版本并产出匹配扩展包
 
 - 主责：`LF-WS-EXT`；预计 60 分钟；前置：`LF-TSK-OPS-2003`。

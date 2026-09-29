@@ -820,6 +820,7 @@ checks:
   scope: repository-baseline
   triggers:
   - path: backend/
+  - path: ops/release/version.txt
   - path: harness/test-services.json
   - path: infra/postgres/
   - path: infra/local/
@@ -830,6 +831,7 @@ checks:
   - redis-test-endpoint
   input_paths:
   - backend/build.gradle.kts
+  - ops/release/version.txt
   - harness/test-services.json
   - backend/settings.gradle.kts
   - backend/gradle.properties
@@ -886,6 +888,7 @@ checks:
   scope: change-targeted
   triggers:
   - path: backend/
+  - path: ops/release/version.txt
   - path: harness/test-services.json
   - path: infra/postgres/
   - path: infra/local/
@@ -897,6 +900,7 @@ checks:
   - redis-test-endpoint
   input_paths:
   - backend/build.gradle.kts
+  - ops/release/version.txt
   - harness/test-services.json
   - backend/settings.gradle.kts
   - backend/gradle.properties
@@ -1090,6 +1094,106 @@ checks:
   - harness/python-quality.toml
   - harness/python-docstrings.toml
   - requirements-dev.txt
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+
+- check_id: eng.release.version
+  module: release-version
+  command:
+  - node
+  - ops/release/check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 180
+  scope: repository-baseline
+  triggers:
+  - path: ops/release/version.txt
+  - path: ops/release/version.mjs
+  - path: ops/release/check.mjs
+  - path: ops/release/tests/version.test.mjs
+  - path: backend/build.gradle.kts
+  - path: backend/gradle/build-logic/src/main/kotlin/io/lexiflow/buildlogic/ReleaseVersion.kt
+  - path: backend/gradle/build-logic/src/test/kotlin/io/lexiflow/buildlogic/ReleaseVersionTest.kt
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - node
+  - git
+  input_paths:
+  - ops/release/version.txt
+  - ops/release/version.mjs
+  - ops/release/check.mjs
+  - ops/release/tests/version.test.mjs
+  - backend/build.gradle.kts
+  - backend/gradle/build-logic/src/main/kotlin/io/lexiflow/buildlogic/ReleaseVersion.kt
+  - backend/gradle/build-logic/src/test/kotlin/io/lexiflow/buildlogic/ReleaseVersionTest.kt
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+
+- check_id: eng.release.version-on-change
+  module: release-version-change
+  command:
+  - node
+  - ops/release/check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 180
+  scope: change-targeted
+  triggers:
+  - path: ops/release/version.txt
+  - path: ops/release/version.mjs
+  - path: ops/release/check.mjs
+  - path: ops/release/tests/version.test.mjs
+  - path: backend/build.gradle.kts
+  - path: backend/gradle/build-logic/src/main/kotlin/io/lexiflow/buildlogic/ReleaseVersion.kt
+  - path: backend/gradle/build-logic/src/test/kotlin/io/lexiflow/buildlogic/ReleaseVersionTest.kt
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - node
+  - git
+  input_paths:
+  - ops/release/version.txt
+  - ops/release/version.mjs
+  - ops/release/check.mjs
+  - ops/release/tests/version.test.mjs
+  - backend/build.gradle.kts
+  - backend/gradle/build-logic/src/main/kotlin/io/lexiflow/buildlogic/ReleaseVersion.kt
+  - backend/gradle/build-logic/src/test/kotlin/io/lexiflow/buildlogic/ReleaseVersionTest.kt
   result_contract:
     type: json-stdout
     required_fields:
