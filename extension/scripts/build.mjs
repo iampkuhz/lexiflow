@@ -19,6 +19,8 @@ for (const [entry, format] of [
   ["src/popup.ts", "iife"],
   ["src/caption-source.ts", "esm"],
   ["src/stream.ts", "esm"],
+  ["src/page-lifecycle.ts", "esm"],
+  ["src/caption-capture.ts", "esm"],
   ["src/protocol.ts", "esm"],
   ["src/diagnostics.ts", "esm"],
   ["src/preferences.ts", "esm"]

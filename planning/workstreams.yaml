@@ -2191,21 +2191,25 @@ workstreams:
         title: 收拢页面生命周期与采集快照协调
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         owner: LF-WS-EXT
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
         - extension/src/content.ts
-        - extension/src/caption-source.ts
-        - extension/src/caption-snapshot.ts
-        - extension/src/stream.ts
         - extension/src/page-lifecycle.ts
         - extension/src/caption-capture.ts
-        - extension/tests/**
+        - extension/scripts/build.mjs
+        - extension/tests/page-lifecycle.test.mjs
+        - extension/tests/caption-capture.test.mjs
+        - extension/tests/translation-e2e.mjs
+        - docs/roadmap/master-plan/phase2/design.md
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
+        - planning/workstreams.yaml
         forbidden_files:
         - secrets/**
         - .local/**
@@ -2215,6 +2219,8 @@ workstreams:
         acceptance_criteria:
         - 导航/跳转/字幕关闭/增强开关准确失效；新增字幕不清除仍有效提示，旧响应不跨字幕展示。
         - 采集、请求、展示不重复维护同一状态；本机偏好不上传、不新增采集。
+        - 按设计 1.6.5 固定生命周期和采集单一状态所有者；异步哈希用世代与来源序号校验，旧成功或失败不得覆盖新页面。
+        - 保留真实 content 浏览器接线回归，新增可控异步哈希乱序、隐藏和恢复测试；不以合成页面宣称真实 YouTube 验收。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: npm --prefix extension test
@@ -2271,8 +2277,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-EXT-2001
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         deliverable: 客户端采集/传输/显示耗时与失败原因匹配新节点，英文优先及本机抑制保持。
       - id: LF-TSK-EXT-2003
