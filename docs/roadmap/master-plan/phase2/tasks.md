@@ -191,6 +191,8 @@
 - 验收：规则改变有批准依据与预期差异；同输入 Change/Repository Verify 未齐备不得 PASS。
 - 直接检查：`python3 scripts/check_changes.py && python3 scripts/check_repository.py`。
 
+- 实现边界：Catalog v3/change 3.0.0；新增既有 runtimeSmoke source set 的真实发布主线测试，范围及复用矩阵见[主线验收](acceptance.md)。不修改产品实现、不新建模块，源码缺陷单独返回 owner。
+
 ### 1.3.21. LF-TSK-ARCH-2005 · 同步最终功能文档并核对阶段交付证据
 - 主责：`LF-WS-ARCH`；预计 60 分钟；前置：`LF-TSK-QLT-2001`、`LF-TSK-ARCH-2004`。
 - 产出：最终文档与冻结实现一致，P2 各项证据、限制、用户验收及未来待办归属清楚；最终收尾同时依赖 QLT-2002 的发布闭环验收。

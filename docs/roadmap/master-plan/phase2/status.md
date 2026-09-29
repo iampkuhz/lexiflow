@@ -35,7 +35,9 @@
 - API-2002 v2 已提交 `b42892d` 并合入 `phase2`；Change `c95e7ace-fc5e-4ffb-ac1d-63f21d8aae31`、Repository `a5011303-f0ac-4155-8083-01356781abd2`、validation `5372ba59-6318-4e9d-a15d-28cff3d05575`、review `dae3a17e-29a2-481d-85aa-104101eff873`、check `be37d256-789f-4842-b276-2754047ff12d` 均 PASS，submission `20ead54b-e78f-4f46-b79c-71280c711936`。
 - OBS-2003 已提交 `6a650fe` 并合入 `phase2`；Change `da0da359-067d-4f1a-a658-e3f2c6c121e6`、Repository `41e6dbed-69b3-404b-af1f-5e1db8269525`、validation `59ef0f43-1ed2-4fcb-a81e-21cde82b4f01`、review `aa18ce31-7205-4f97-8292-ffe6f2e45f49`、check `5e807d41-0e4c-4181-8952-563c092f5857` 均 PASS，submission `275eaa64-557b-446e-a90b-80ce30c5c107`；来源异常与 consumer 回调异常的审查失败记录保留，修复后重新送验；未推送。
 - EXT-2001 已提交 `1475e07` 并合入 `phase2`；Change `aa6662d5-be06-432b-9fa3-13bb6a82b1ba`、Repository `7dc6cf78-ef7b-4c95-b2aa-a56f2259d3ea`、validation `7d9eab71-7378-49cc-bc78-34f38a0ba687`、review `087299ce-9b0f-4689-8148-9555043cf96a`、check `2ccd4040-0643-4529-b656-a86229b3e3ff` 均 PASS，submission `c583e527-2061-4e9f-8a8d-923f9e1805fb`；93 项单测与合成浏览器接线通过，不等于真实 YouTube 验收，未推送。
-- 当前在 `phase2-18-client-observation` 实施 EXT-2002 v2，落实客户端固定原因、精确次数、服务端计时缺失及诊断失败隔离；仅使用合成资料。
+- EXT-2002 已提交 `e04b7aa` 并合入 `phase2`；Change `c5b680be-c844-4a31-b118-ee5d9ee95759`、Repository `b888c7fd-1b95-4734-87f8-d2ff69016125`、validation `a8b6aa2c-f7a5-4804-876b-7497a4fea38c`、review `39cfea34-f0a3-4ea5-a45a-dd10b6426d7d`、check `ae8f2a1c-8435-4038-8d5c-075a289a1cd5` 均 PASS，submission `92515f2e-65b0-44a6-9a84-ade66c24d658`；101 项单测及合成浏览器通过，另执行 10 秒消费者连续检查，不宣称 375 秒性能通过。首次验证因启动器未继承隔离环境 BLOCKED，历史保留，新送验完整通过；未推送。
+- 当前在 `phase2-19-pipeline-acceptance` 实施 QLT-2001 v3，补齐真实合成资料发布到隔离 PostgreSQL、构建 API JAR 和 HTTP 提示之间的集成缺口。Luna low 完成实现后，父代理要求补齐请求级缓存事实、坏首义与换版/回滚断言，再补非预热正缓存及构建产物精确定位；未更改产品规则。
+- QLT-2001 直接 runtimeSmoke 与集成模块 check 已通过，覆盖真实 CLI、两个来源、同进程换版、CHECK 失败后三张表全量不变、正/负缓存与 UTF-16 增量；本次隔离服务清理记录为 `08a2589af7b44a4c9a8d41f90838562e`。同输入 Verify 和独立 Formal Gate 尚待执行，不以直接检查代替验收。
 - API-2002 的回归使用独立测试 profile 和临时台账路径，按单文件单顶层类拆成三组 HTTP 测试并显式纳入 Catalog；早期测试曾因遗漏临时路径向默认本机分析台账写入合成样例，已修正测试配置，原台账未读取、删除或清理，失败证据保留。
 - OpenSpec 与运行记录保留在 ignored 本机目录；共享交接位于路线图与 Catalog。
 

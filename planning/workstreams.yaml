@@ -848,8 +848,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-QLT-2001
           type: hard
-          required_task_version: 2
-          required_change_version: 2.0.0
+          required_task_version: 3
+          required_change_version: 3.0.0
           required_result: PASS
         - task_id: LF-TSK-ARCH-2004
           type: hard
@@ -960,16 +960,23 @@ workstreams:
         title: 串行核验完整主线及跨模块验收矩阵
         priority: P0
         phase: P2
-        task_version: 2
-        change_version: 2.0.0
+        task_version: 3
+        change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         owner: LF-WS-QLT
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
-        - backend/verification/**
-        - extension/tests/**
+        - backend/build.gradle.kts
+        - backend/verification/integration/gradle.lockfile
+        - backend/verification/integration/src/runtimeSmoke/java/io/lexiflow/integration/PublishedPipelineRuntimeTest.java
+        - backend/verification/integration/src/runtimeSmoke/java/io/lexiflow/integration/PipelineRuntimeFixture.java
+        - backend/verification/integration/src/runtimeSmoke/java/io/lexiflow/integration/PipelineSyntheticSources.java
+        - docs/roadmap/master-plan/phase2/acceptance.md
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/roadmap/master-plan/phase2/status.md
+        - planning/workstreams.yaml
         forbidden_files:
         - secrets/**
         - .local/**
@@ -980,6 +987,7 @@ workstreams:
         - 覆盖基础词/词形、重点/长尾/未知频率、可靠和噪声短语、坏默认义、同形冲突、增量范围及版本切换。
         - 覆盖冷缓存、正式/演示启动、取消迟到、敏感记录故障和发布回滚；使用隔离服务，不连接用户运行库。
         - 规则改变有批准依据与预期差异；同输入 Change/Repository Verify 未齐备不得 PASS。
+        - 通过合成 canonical/StarDict 文件和真实导入进程发布到隔离 schema，再调用构建 API JAR 的 HTTP；验证成功就绪、资格/歧义/增量、版本替换与失败回滚，不以 fake Repository 代替完整主线。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 scripts/check_changes.py && python3 scripts/check_repository.py
@@ -1066,8 +1074,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-QLT-2001
           type: hard
-          required_task_version: 2
-          required_change_version: 2.0.0
+          required_task_version: 3
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: 验证干净环境发布闭环和资源门槛及直接验收证据。
       - id: LF-TSK-QLT-2003
