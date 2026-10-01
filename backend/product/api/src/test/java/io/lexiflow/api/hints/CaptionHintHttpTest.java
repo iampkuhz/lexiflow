@@ -8,18 +8,30 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.core.env.Environment;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties = {
-      "lexiflow.runtime.mode=demo",
-      "lexiflow.segment-analysis.path=${java.io.tmpdir}/lexiflow-caption-test-${random.uuid}.jsonl"
-    })
+    properties = {"lexiflow.runtime.mode=demo", "lexiflow.segment-analysis.enabled=true"})
 class CaptionHintHttpTest {
+  @TempDir static Path tempDir;
   @LocalServerPort private int port;
+  @Autowired private Environment environment;
+
+  @DynamicPropertySource
+  static void segmentAnalysisProperties(DynamicPropertyRegistry registry) {
+    registry.add(
+        "lexiflow.segment-analysis.path", () -> tempDir.resolve("segments.jsonl").toString());
+  }
 
   @Test
   void returnsKeyedHintsAndNoPendingAcrossHttp() throws Exception {
@@ -31,10 +43,14 @@ class CaptionHintHttpTest {
     assertTrue(known.body().contains("\"startKey\":\"a\""));
     assertTrue(known.body().contains("可靠的"));
     assertFalse(known.body().contains("\"caption\""));
+    var analysisPath = Path.of(environment.getRequiredProperty("lexiflow.segment-analysis.path"));
+    assertTrue(Files.isRegularFile(analysisPath));
+    assertTrue(Files.size(analysisPath) > 0);
     var unknown = post(payload(segment("a", "zxqv", true)));
     assertEquals(200, unknown.statusCode());
     assertTrue(unknown.body().contains("\"processedKeys\":[\"a\"]"));
     assertTrue(unknown.body().contains("\"hints\":[]"));
+    Files.deleteIfExists(analysisPath);
   }
 
   @Test
@@ -80,6 +96,17 @@ class CaptionHintHttpTest {
       assertEquals(503, readiness.statusCode());
       assertTrue(readiness.body().contains("DEMO_MODE"));
       assertTrue(readiness.body().contains("demo"));
+      var runtimeStatus =
+          client.send(
+              HttpRequest.newBuilder(
+                      URI.create("http://127.0.0.1:" + port + "/api/v1/runtime-status"))
+                  .GET()
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
+      assertEquals(200, runtimeStatus.statusCode());
+      assertTrue(runtimeStatus.body().contains("\"mode\":\"demo\""));
+      assertTrue(runtimeStatus.body().contains("\"reason\":\"DEMO_MODE\""));
+      assertTrue(runtimeStatus.body().contains("\"ready\":false"));
     }
   }
 

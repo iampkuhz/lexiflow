@@ -28,6 +28,37 @@ Thumbs.db
 /harness/reports/
 /.qoder/task-packs/
 
+# ── 词库原始下载与解压中间产物 ────────────────────────────────────
+# 封版确认前词库压缩与展开制品均不跟踪；源码、测试和来源锁不受影响。
+/ecdict-core*.zip
+/ops/dataset/*.zip
+/ops/dataset/*.gz
+/ops/dataset/*.xz
+/ops/dataset/*.7z
+/ops/dataset/*.tgz
+/ops/dataset/*.tar
+/assets/lexicon/*.zip
+/assets/lexicon/*.gz
+/assets/lexicon/*.xz
+/assets/lexicon/*.7z
+/assets/lexicon/*.tgz
+/assets/lexicon/*.tar
+/stardict.csv
+/ecdict.csv
+/stardict.7z
+/ops/dataset/*.csv
+/ops/dataset/*.ndjson
+/ops/dataset/*.jsonl
+/ops/dataset/stardict.7z
+/ops/dataset/downloads/
+/ops/dataset/extracted/
+/assets/lexicon/*.csv
+/assets/lexicon/*.ndjson
+/assets/lexicon/*.jsonl
+/assets/lexicon/stardict.7z
+/assets/lexicon/downloads/
+/assets/lexicon/extracted/
+
 # ── 文档 PlantUML 中间产物：真源在 Markdown 代码块 ────────────────
 # 新图的草稿、渲染和回执只写 /tmp/diagrams/；下列规则只防止旧目录遗留物误提交。
 /docs/**/diagrams/*

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "baseImages": [
+    {
+      "platform": "linux/amd64",
+      "javaRuntime": {
+        "reference": "docker.io/library/eclipse-temurin@sha256:d83c24be1a395b4982f39e9de5712f48a2cc90452d39d2d9cd33663ed54db1b0",
+        "imageId": "sha256:642eb283d527841f7f1a4ccadaa9ca72ef14cddc04cacb6e070e48eb44731a3"
+      },
+      "postgresRuntime": {
+        "reference": "docker.io/library/postgres@sha256:91eb910c44c7ed13f7f1a4ccadaa9ca72ef14cddc04cacb6e070e48eb44731a3",
+        "imageId": "sha256:248efd5e58cd743f2a0e0daec8ea4649e5580145ec2a12e2345bc710d4a77201"
+      }
+    },
+    {
+      "platform": "linux/arm64",
+      "javaRuntime": {
+        "reference": "docker.io/library/eclipse-temurin@sha256:f6548ba38705ddcbf2451909d2d3b221e8ddbb919edca3311f29fc12f182da3a",
+        "imageId": "sha256:d1a2304bc7ef49fde3dc855e2dc55fa7f12fb94c95adbfce2dce63fb92acf687"
+      },
+      "postgresRuntime": {
+        "reference": "docker.io/library/postgres@sha256:75731e2765e7d0c8bb7dea960ef3bdcde68d16314991ab2057a2a74ea0fff257",
+        "imageId": "sha256:3300775c2560bfb0d4176741a76e4a8fc3f42a4a6ce93213ac24e22c13fc6993"
+      }
+    }
+  ]
+}

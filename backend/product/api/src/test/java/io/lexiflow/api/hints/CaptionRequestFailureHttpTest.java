@@ -8,6 +8,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import io.lexiflow.api.runtime.LexiconRuntime;
+import io.lexiflow.lexicon.application.port.InvalidPublishedLexiconException;
 import io.lexiflow.lexicon.application.port.LexiconReadRepository;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
@@ -40,6 +41,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {
       "lexiflow.runtime.mode=formal",
+      "lexiflow.segment-analysis.enabled=true",
       "lexiflow.segment-analysis.path=${java.io.tmpdir}/lexiflow-failure-${random.uuid}.jsonl"
     })
 @Import(CaptionRequestFailureHttpTest.TestBeans.class)
@@ -55,6 +57,59 @@ class CaptionRequestFailureHttpTest {
     SyntheticRepository.mixed = false;
     SyntheticRepository.lookups.set(0);
     runtime.probe();
+  }
+
+  @Test
+  void runtimeStatusUsesCurrentSyntheticPublicationAndFixedFailureReason() throws Exception {
+    try (var client = HttpClient.newHttpClient()) {
+      var first = status(client);
+      var mapper = new tools.jackson.databind.ObjectMapper();
+      var ready = mapper.readTree(first.body());
+      assertEquals(200, first.statusCode());
+      assertEquals(7, ready.get("datasetVersion").asLong());
+      assertTrue(ready.get("ready").asBoolean());
+
+      SyntheticRepository.version = 0;
+      var empty = mapper.readTree(status(client).body());
+      assertFalse(empty.get("ready").asBoolean());
+      assertEquals("NO_PUBLISHED_DATA", empty.get("reason").asString());
+      assertEquals(0, empty.get("datasetVersion").asLong());
+
+      SyntheticRepository.failure = Failure.DEPENDENCY;
+      var unavailable = mapper.readTree(status(client).body());
+      assertFalse(unavailable.get("ready").asBoolean());
+      assertEquals("DEPENDENCY_UNAVAILABLE", unavailable.get("reason").asString());
+      assertEquals("null", unavailable.get("datasetVersion").toString());
+
+      SyntheticRepository.failure = Failure.SCHEMA;
+      var schema = mapper.readTree(status(client).body());
+      assertFalse(schema.get("ready").asBoolean());
+      assertEquals("SCHEMA_MISMATCH", schema.get("reason").asString());
+
+      SyntheticRepository.failure = Failure.PREWARM;
+      SyntheticRepository.version = 8;
+      runtime.probe();
+      var degraded = mapper.readTree(status(client).body());
+      assertTrue(degraded.get("ready").asBoolean());
+      assertEquals("PREWARM_DEGRADED", degraded.get("reason").asString());
+      assertEquals(8, degraded.get("datasetVersion").asLong());
+
+      SyntheticRepository.failure = Failure.NONE;
+      SyntheticRepository.version = 9;
+      runtime.probe();
+      var changed = mapper.readTree(status(client).body());
+      assertTrue(changed.get("ready").asBoolean());
+      assertEquals("OK", changed.get("reason").asString());
+      assertEquals(9, changed.get("datasetVersion").asLong());
+    }
+  }
+
+  private HttpResponse<String> status(HttpClient client) throws Exception {
+    return client.send(
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/v1/runtime-status"))
+            .GET()
+            .build(),
+        HttpResponse.BodyHandlers.ofString());
   }
 
   @Test
@@ -209,7 +264,9 @@ class CaptionRequestFailureHttpTest {
   private enum Failure {
     NONE,
     DEPENDENCY,
-    INTERNAL
+    INTERNAL,
+    SCHEMA,
+    PREWARM
   }
 
   private static final class SyntheticRepository implements LexiconReadRepository {
@@ -220,6 +277,7 @@ class CaptionRequestFailureHttpTest {
 
     @Override
     public long publishedVersion() {
+      if (failure == Failure.SCHEMA) throw new InvalidPublishedLexiconException();
       if (failure == Failure.DEPENDENCY)
         throw new DataAccessResourceFailureException("private-repository-exception");
       return mixed && lookups.get() > 0 ? 8 : version;
@@ -240,6 +298,8 @@ class CaptionRequestFailureHttpTest {
     @Override
     public List<LexiconHintCandidate> findPrewarmForms(
         long requestedVersion, LexiconHintAction action, int limit) {
+      if (failure == Failure.PREWARM && action == LexiconHintAction.HINT)
+        throw new DataAccessResourceFailureException("private-prewarm-exception");
       return List.of();
     }
 

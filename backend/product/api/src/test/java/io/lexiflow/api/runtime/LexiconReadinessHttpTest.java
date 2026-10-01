@@ -2,6 +2,7 @@ package io.lexiflow.api.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.URI;
@@ -14,8 +15,10 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-    properties =
-        "lexiflow.segment-analysis.path=${java.io.tmpdir}/lexiflow-readiness-${random.uuid}.jsonl")
+    properties = {
+      "lexiflow.segment-analysis.enabled=true",
+      "lexiflow.segment-analysis.path=${java.io.tmpdir}/lexiflow-readiness-${random.uuid}.jsonl"
+    })
 class LexiconReadinessHttpTest {
   @LocalServerPort private int port;
 
@@ -23,6 +26,17 @@ class LexiconReadinessHttpTest {
   void emptyFormalProcessIsLiveButNotReadyAndRejectsHintsWithoutLeaks() throws Exception {
     try (var client = HttpClient.newHttpClient()) {
       assertEquals(200, get(client, "/actuator/health/liveness").statusCode());
+      var status = get(client, "/api/v1/runtime-status");
+      assertEquals(200, status.statusCode());
+      assertEquals("no-store", status.headers().firstValue("Cache-Control").orElse(""));
+      var json = new tools.jackson.databind.ObjectMapper().readTree(status.body());
+      assertEquals(6, json.size());
+      assertEquals("caption-hints.v1", json.get("apiContract").asString());
+      assertEquals("formal", json.get("mode").asString());
+      assertFalse(json.get("ready").asBoolean());
+      assertEquals("DEPENDENCY_UNAVAILABLE", json.get("reason").asString());
+      assertNotNull(json.get("softwareVersion"));
+      assertEquals("null", json.get("datasetVersion").toString());
       var readiness = get(client, "/actuator/health/readiness");
       assertEquals(503, readiness.statusCode());
       assertTrue(readiness.body().contains("DEPENDENCY_UNAVAILABLE"));

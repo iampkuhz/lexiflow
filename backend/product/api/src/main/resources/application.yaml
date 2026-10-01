@@ -9,6 +9,9 @@ spring:
   threads:
     virtual:
       enabled: true
+lexiflow:
+  segment-analysis:
+    enabled: false
 logging:
   level:
     com.zaxxer.hikari: OFF

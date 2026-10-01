@@ -336,7 +336,7 @@ class QoderRunnerContractTest(unittest.TestCase):
             self.assertTrue(contract["model_policy"]["explicit_model_argument_required"])
             self.assertEqual(contract["model_policy"]["allowed_escalation_models"], ["gpt-6-sol"])
             self.assertEqual(contract["model_policy"]["user_only_models"], ["gpt-6-astra"])
-            self.assertEqual(contract["max_active_subagents"], 1)
+            self.assertEqual(contract["max_active_subagents"], policy["codex_dispatch"]["max_active_subagents"])
             self.assertEqual(contract["default_fork_turns"], "none")
             self.assertEqual(
                 contract["completion_signal_fields"],
@@ -395,7 +395,12 @@ class QoderRunnerContractTest(unittest.TestCase):
         config = tomllib.loads((root / ".codex/config.toml").read_text())
         self.assertEqual(config["agents"]["default_subagent_model"], "gpt-6-luna")
         self.assertEqual(config["agents"]["default_subagent_reasoning_effort"], "medium")
-        self.assertEqual(config["agents"]["max_concurrent_threads_per_session"], 1)
+        native_limit = policy["codex_dispatch"]["max_active_subagents"]
+        self.assertGreater(native_limit, 1)
+        self.assertEqual(config["agents"]["max_concurrent_threads_per_session"], native_limit)
+        self.assertEqual(policy["qoder_delegation"]["max_active_runs"], 1)
+        self.assertEqual(policy["qoder_delegation"]["concurrency_scope"], "host-os-user-all-checkouts")
+        self.assertEqual(policy["qoder_delegation"]["scheduling"]["integration_validation"], "serial")
         self.assertNotIn("model", config)
         entry = root / ".codex" / config["model_instructions_file"]
         self.assertIn("harness/agent-policy.manifest.yaml", entry.read_text())

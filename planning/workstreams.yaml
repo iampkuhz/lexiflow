@@ -219,7 +219,7 @@ orchestration_policy:
     parallel_writes_require_disjoint_file_claims: true
     contract_changes_are_serialized: true
     child_handoff_preserves_parent_and_task_identity: true
-    max_active_subagents: 1
+    max_active_subagents: 6
     default_fork_turns: none
     full_history_fork_requires_explicit_exception: true
     completion_signal_fields:
@@ -555,6 +555,10 @@ path_ownership:
     owner: LF-WS-QLT
     proposed_paths:
     - docs/development/**
+  - scope: governance.user-docs
+    owner: LF-WS-ARCH
+    proposed_paths:
+    - docs/user/**
   - scope: governance.openspec
     owner: LF-WS-ARCH
     proposed_paths:
@@ -907,9 +911,10 @@ workstreams:
         estimated_minutes: 60
         owner: LF-WS-ARCH
         kind: design
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
         - README.md
+        - docs/user/podman-macos.md
         - docs/roadmap/master-plan/phase2/release.md
         - docs/development/operations/local-experience.md
         - docs/development/operations/docker-release.md
@@ -935,13 +940,13 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-QLT-2004
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 3
+          required_change_version: 3.0.0
           required_result: PASS
         - task_id: LF-TSK-OPS-2008
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 3
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: 编写双运行入口和用户安装更新指南及直接验收证据。
 - id: LF-WS-QLT
@@ -1064,8 +1069,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2008
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 3
+          required_change_version: 3.0.0
           required_result: PASS
         - task_id: LF-TSK-ARCH-2007
           type: hard
@@ -1172,22 +1177,93 @@ workstreams:
           required_change_version: 2.0.0
           required_result: PASS
         deliverable: 保留失败送验历史，只采用唯一完整 PASS 依赖验收链；多个 PASS、损坏证据或不匹配仍失败关闭。
-      - id: LF-TSK-QLT-2004
-        title: 将发布验收与使用入口接入共享工程合同
+      - id: LF-TSK-QLT-2006
+        title: 分离 Codex 原生并发与 Qoder 宿主单并发
         priority: P0
         phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
-        estimated_minutes: 75
+        estimated_minutes: 30
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - .codex/config.toml
+        - harness/agent-policy.manifest.yaml
+        - harness/agent-runtime.manifest.yaml
+        - planning/task-template.yaml
+        - planning/workstreams.yaml
+        - tests/agents/test_qoder_runner.py
+        - docs/roadmap/master-plan/phase2/tasks.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        - extension/**
+        expected_output: 原生上限 6 的唯一策略及一致消费者，保持 Qoder 宿主单并发 1、互斥 ownership 和串行集成验证。
+        acceptance_criteria:
+        - policy、runtime、Catalog、模板及 Codex TOML 的原生上限均为 6，共享投影不手工双写。
+        - Qoder max_active_runs 为 1 且 host-wide 边界不变；并行写入互斥、集成验证串行、独立验收身份约束保持。
+        - 直接 runner 测试和标准 agents Check 实际执行；配置一致不代替原生派发恢复的实际工具证据。
+        acceptance_evidence:
+        - 冻结差异、runner 测试、同输入 Verify 和独立 validation/review/check；实际派发结果留在 ignored 运行证据。
+        validation_command: python3 -m scripts.agents.module_tests && python3 -m scripts.repository.policy_projection --check
+        required_check_ids:
+        - eng.agents.module-tests
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        discovered_from: LF-TSK-QLT-2003
+        dependencies:
+        - LF-TSK-QLT-2003
+        depends_on:
+        - task_id: LF-TSK-QLT-2003
+          type: soft
+          required_task_version: 2
+          required_change_version: 2.0.0
+        deliverable: 原生并发配置和共享投影一致性及不弱化 Qoder/验收边界的直接回归。
+      - id: LF-TSK-QLT-2004
+        title: 将发布验收与使用入口接入共享工程合同
+        priority: P0
+        phase: P2
+        task_version: 3
+        change_version: 3.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
         owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: DRAFT
         allowed_files:
+        - scripts/environment/release_runtime_check.py
+        - scripts/environment/release_runtime_artifacts.py
+        - scripts/environment/release_runtime_lifecycle.py
+        - tests/verification/test_release_runtime_check.py
+        - tests/verification/test_release_runtime_artifacts.py
+        - tests/verification/test_release_runtime_lifecycle.py
+        - scripts/environment/runtime.py
+        - tests/verification/test_environment.py
+        - backend/build.gradle.kts
+        - backend/verification/integration/src/runtimeSmoke/java/io/lexiflow/integration/SyntheticReleaseDatasetProducer.java
+        - backend/verification/integration/src/runtimeSmoke/java/io/lexiflow/integration/SyntheticReleaseDatasetProducerTest.java
+        - scripts/verification/release_source_bridge.py
+        - tests/verification/test_release_source_bridge.py
+        - scripts/environment/release_docker_preflight.py
+        - tests/verification/test_release_docker_preflight.py
+        - tests/verification/test_kernel.py
+        - tests/verification/test_scenarios.py
+        - tests/verification/test_lifecycle_checks.py
         - harness/module-checks.yaml
         - harness/manifest.yaml
         - harness/documentation-policy.yaml
         - tests/verification/test_release_checks.py
+        - scripts/verification/input_snapshot.py
+        - scripts/verification/kernel.py
+        - scripts/verification/scenarios.py
+        - scripts/verification/reports.py
+        - tests/verification/test_input_snapshot.py
+        - docs/development/change-delivery/verification.md
         - docs/development/operations/docker-release.md
         forbidden_files:
         - secrets/**
@@ -1196,8 +1272,9 @@ workstreams:
         - .env
         expected_output: 将发布验收与使用入口接入共享工程合同及可核对直接证据。
         acceptance_criteria:
+        - Verify 文件快照拒绝源码及祖先链接、特殊文件与私有配置读取；执行位进入哈希，缺失输入不得冻结或执行为 PASS，报告严格核对最新描述格式。
         - 在 module-checks 注册真实发布检查及其输入/依赖/环境，发布代码变动进入 Change/Repository Verify，不只运行文档检查。
-        - 缺 Docker 或必要资料与目标架构记 BLOCKED，不跳过业务验收；单元测试证明 check 选择和环境传播。
+        - 当期仅要求 Apple Silicon macOS Docker 的 linux/arm64 端点；缺该环境或必要资料记 BLOCKED，不要求 amd64。单元测试证明宿主/daemon匹配、check选择和环境传播，不跳过业务验收。
         - README 阅读合同调整为取得发行产物、初始化与启动使用，macOS 编译调试保留按需入口，不重复维护规则。
         acceptance_evidence:
         - 同输入静态检查及独立验证审查，状态仅在 phase2/status.md；不将任务设计视为产品实现
@@ -1213,8 +1290,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2008
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 3
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: 将发布验收与使用入口接入共享工程合同及可核对直接证据。
 - id: LF-WS-PRD
@@ -2041,18 +2118,27 @@ workstreams:
         title: 提供发布就绪合同并隔离发行包敏感记录授权
         priority: P0
         phase: P2
-        task_version: 2
-        change_version: 2.0.0
+        task_version: 3
+        change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
-        estimated_minutes: 75
+        estimated_minutes: 90
         owner: LF-WS-API
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
         - backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java
         - backend/product/api/src/main/java/io/lexiflow/api/runtime/RuntimeStatusController.java
         - backend/product/api/src/main/java/io/lexiflow/api/runtime/RuntimeStatus.java
-        - backend/product/api/src/main/resources/application.properties
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/SoftwareIdentity.java
+        - backend/product/api/src/main/resources/application.yaml
+        - backend/build.gradle.kts
+        - scripts/environment/start_api.py
+        - tests/verification/test_start_api.py
+        - backend/product/api/src/test/java/io/lexiflow/api/ApiApplicationTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/hints/**
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/release.md
+        - docs/roadmap/master-plan/phase2/status.md
         - backend/product/api/src/test/java/io/lexiflow/api/runtime/**
         forbidden_files:
         - secrets/**
@@ -2067,6 +2153,7 @@ workstreams:
         - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
         validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :api:test
         required_check_ids:
+        - eng.verification.module-tests
         - eng.backend.delivery
         - eng.repository.docs
         - eng.repository.planning
@@ -2308,13 +2395,13 @@ workstreams:
         title: 让扩展构建消费统一版本并产出匹配扩展包
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
-        estimated_minutes: 60
+        estimated_minutes: 90
         owner: LF-WS-EXT
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
         - extension/scripts/build.mjs
         - extension/scripts/release.mjs
@@ -2322,6 +2409,12 @@ workstreams:
         - extension/package.json
         - extension/package-lock.json
         - extension/tests/release.test.mjs
+        - extension/tests/translation-e2e.mjs
+        - harness/module-checks.yaml
+        - tests/verification/test_release_checks.py
+        - docs/roadmap/master-plan/phase2/release.md
+        - docs/roadmap/master-plan/phase2/status.md
+        - planning/workstreams.yaml
         forbidden_files:
         - secrets/**
         - .local/**
@@ -2331,10 +2424,13 @@ workstreams:
         acceptance_criteria:
         - 移除独立发布版本填写点，生成 manifest 与 ZIP 时从同一软件版本真源读取；保留本机 API 权限。
         - ZIP 仅含运行所需 dist 文件；排除源码、测试、私有配置，构建格式及清单摘要有直接测试。
+        - 包含固定运行允许集的确定性 ZIP 与 SHA-256；拒绝符号链接、版本/权限漂移及脏源码，合成浏览器回归实际加载解包内容。
         acceptance_evidence:
         - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
         validation_command: npm --prefix extension test && npm --prefix extension run quality:check
         required_check_ids:
+        - eng.verification.module-tests
+        - eng.release.version
         - eng.extension.quality
         - eng.repository.docs
         - eng.repository.planning
@@ -2352,20 +2448,34 @@ workstreams:
         title: 展示服务与资料状态并拒绝不匹配协议
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
-        estimated_minutes: 75
+        estimated_minutes: 90
         owner: LF-WS-EXT
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
         - extension/src/background.ts
         - extension/src/protocol.ts
         - extension/src/popup.ts
         - extension/src/popup.html
         - extension/src/popup.css
+        - extension/src/runtime-status.ts
+        - extension/scripts/build.mjs
         - extension/tests/runtime-status.test.mjs
+        - extension/tests/background.test.mjs
+        - extension/tests/popup.test.mjs
+        - extension/tests/translation-e2e.mjs
+        - extension/tests/incremental-acceptance.mjs
+        - extension/tests/multiline-acceptance.mjs
+        - extension/tests/continuous-acceptance.mjs
+        - extension/tests/continuous-acceptance.test.mjs
+        - extension/tests/e2e-runtime.mjs
+        - extension/tests/e2e-runtime.test.mjs
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/release.md
+        - docs/roadmap/master-plan/phase2/status.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -2390,8 +2500,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-API-2003
           type: hard
-          required_task_version: 2
-          required_change_version: 2.0.0
+          required_task_version: 3
+          required_change_version: 3.0.0
           required_result: PASS
         - task_id: LF-TSK-EXT-2002
           type: hard
@@ -2400,8 +2510,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-EXT-2003
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         deliverable: 展示服务与资料状态并拒绝不匹配协议及直接验收证据。
 - id: LF-WS-PRF
@@ -2870,18 +2980,24 @@ workstreams:
         title: 实现发布清单、摘要和许可材料打包
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
-        estimated_minutes: 75
+        estimated_minutes: 90
         owner: LF-WS-OPS
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
         - ops/release/manifest.mjs
         - ops/release/package.mjs
         - ops/release/tests/manifest.test.mjs
         - ops/release/third-party-notices.md
+        - ops/release/manifest-check.mjs
+        - harness/module-checks.yaml
+        - tests/verification/test_release_manifest_checks.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/release.md
+        - docs/roadmap/master-plan/phase2/status.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -2891,10 +3007,13 @@ workstreams:
         acceptance_criteria:
         - 清单绑定源码、软件/API/SQL/资料/准备策略、架构和全部制品摘要；拒绝缺项、路径逃逸和被篡改内容。
         - 许可和来源依据随制品交付，缺少必需资料不得发行；构建机私有路径和凭据不进入清单。
+        - 显式预构建制品先校验 producer身份/摘要和完整许可关联，再原子装配；路径和符号链接逃逸、缺件/篡改、已有不同输出均拒绝，真实临时Git CLI有直接测试。
         acceptance_evidence:
         - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
         validation_command: node --test ops/release/tests/manifest.test.mjs
         required_check_ids:
+        - eng.release.manifest
+        - eng.verification.module-tests
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
@@ -2909,12 +3028,12 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-EXT-2003
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         deliverable: 实现发布清单、摘要和许可材料打包及直接验收证据。
-      - id: LF-TSK-OPS-2005
-        title: 构建已发布词库资料包与隔离初始化
+      - id: LF-TSK-OPS-2009
+        title: 导出并校验已发布资料快照
         priority: P0
         phase: P2
         task_version: 1
@@ -2923,25 +3042,30 @@ workstreams:
         estimated_minutes: 90
         owner: LF-WS-OPS
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
-        - ops/release/dataset.mjs
-        - ops/release/tests/dataset.test.mjs
-        - ops/docker/init-lexicon.sh
-        - ops/docker/tests/dataset-init.sh
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageManifest.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageCodec.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageTables.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetExport.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageCodecTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetExportIntegrationTest.java
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/release.md
+        - docs/roadmap/master-plan/phase2/status.md
         forbidden_files:
         - secrets/**
         - .local/**
         - data/**
         - .env
-        expected_output: 构建已发布词库资料包与隔离初始化及直接验收证据。
+        expected_output: 导出并校验已发布资料快照及直接验收证据。
         acceptance_criteria:
         - 仅导出经批准且有来源/许可的已发布资料，不打包开发者日志、观看记录和配置；身份、SQL 摘要与清单一致。
-        - 使用者无需原始 CSV，资料包通过完整性校验后仅初始化明确归属的空数据空间；已有不同资料不覆盖。
-        - 在隔离 PostgreSQL 验证重复启动、损坏包、初始化中断及无资料行为，未发布状态不能就绪。
+        - 流式规范编码、固定条目和时间戳，不整包缓冲；固定输入生成相同 ZIP，审批与全部数据受摘要绑定。
+        - 隔离 PostgreSQL 验证只读一致快照及并发源更新；离线校验拒绝行结构、许可、计数和摘要错误。
         acceptance_evidence:
         - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
-        validation_command: node --test ops/release/tests/dataset.test.mjs && bash ops/docker/tests/dataset-init.sh
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test :adapters:postgresIntegrationTest
         required_check_ids:
         - eng.backend.delivery
         - eng.repository.docs
@@ -2958,27 +3082,101 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-OPS-2004
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
-        deliverable: 构建已发布词库资料包与隔离初始化及直接验收证据。
-      - id: LF-TSK-OPS-2006
-        title: 封装 API 镜像和私网数据库 Compose
+        deliverable: 导出并校验已发布资料快照及直接验收证据。
+      - id: LF-TSK-OPS-2005
+        title: 实现资料包安全初始化与管理入口
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 5
+        change_version: 5.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
         owner: LF-WS-OPS
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
+        - .gitignore
+        - ops/podman/fetch-ecdict.sh
+        - ops/podman/source-tools.Containerfile
+        - ops/docker/tests/test_ecdict_fetch.py
+        - harness/test-services.json
+        - scripts/environment/test_services.py
+        - tests/verification/test_test_services.py
+        - harness/module-checks.yaml
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/StardictCsvReader.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/importer/StardictCsvReaderTest.java
+        - scripts/environment/ecdict_bundle.py
+        - tests/verification/test_ecdict_bundle.py
+        - ops/dataset/ecdict-source.lock.json
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetPackage.java
+        - backend/product/api/src/main/java/io/lexiflow/api/release/ReleaseDatasetCommand.java
+        - backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java
+        - backend/build.gradle.kts
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetPackageIntegrationTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/release/ReleaseDatasetCommandTest.java
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/release.md
+        - docs/roadmap/master-plan/phase2/status.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 实现资料包安全初始化与管理入口及直接验收证据。
+        acceptance_criteria:
+        - 公开 ECDICT 来源按提交与文件摘要锁定，以基础版候选保守剔除约三分之一为目标、不设数量截断；保护有频率/词典标记的单词，未知保留，并精选少量有依据短语，保留完整Oxford基础集合、词形与来源映射；采用7字段及紧凑可逆来源映射；封版确认前压缩与展开数据均不跟踪，源码与锁文件保持可跟踪。来源包不冒充Java已发布安装包。
+        - 管理入口使用同一 API JAR 与可信 SQL，严格解析参数、核对外层摘要，错误输出不泄漏输入；不启动 HTTP。
+        - 使用者无需原始 CSV，资料包通过完整性校验后仅初始化明确归属的空数据空间；已有不同资料不覆盖。
+        - 在隔离 PostgreSQL 验证重复启动、损坏包、初始化中断及无资料行为，未发布状态不能就绪。
+        acceptance_evidence:
+        - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test :api:test :adapters:postgresIntegrationTest
+        required_check_ids:
+        - eng.backend.delivery
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-OPS-2009
+        depends_on:
+        - task_id: LF-TSK-OPS-2009
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 实现资料包安全初始化与管理入口及直接验收证据。
+      - id: LF-TSK-OPS-2006
+        title: 封装 API 镜像和私网数据库 Compose
+        priority: P0
+        phase: P2
+        task_version: 3
+        change_version: 3.0.0
+        task_source: docs/roadmap/master-plan/phase2/release.md
+        estimated_minutes: 90
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/podman/compose.validation.yaml
+        - ops/docker/tests/test_podman_compose_contract.py
+        - ops/docker/Dockerfile.postgres
         - ops/docker/Dockerfile
         - ops/docker/compose.yaml
         - ops/docker/.dockerignore
         - ops/docker/entrypoint.sh
-        - ops/docker/tests/compose-smoke.sh
+        - ops/docker/bootstrap.sh
+        - ops/docker/tests/test_contract.py
+        - ops/docker/tests/module_check_adapter.py
+        - harness/module-checks.yaml
+        - tests/verification/test_docker_contract_checks.py
+        - backend/product/api/src/main/java/io/lexiflow/api/release/RuntimeHealthCommand.java
+        - backend/product/api/src/test/java/io/lexiflow/api/release/RuntimeHealthCommandTest.java
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/release.md
+        - docs/roadmap/master-plan/phase2/status.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -2991,8 +3189,10 @@ workstreams:
         - 以非 root API、独立持久卷和明确健康依赖启动；隔离测试覆盖端口冲突、缺资料、重启和停止。
         acceptance_evidence:
         - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
-        validation_command: bash ops/docker/tests/compose-smoke.sh
+        validation_command: python3 ops/docker/tests/module_check_adapter.py
         required_check_ids:
+        - eng.release.docker-contract
+        - eng.backend.delivery
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
@@ -3002,17 +3202,17 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2005
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 5
+          required_change_version: 5.0.0
           required_result: PASS
         - task_id: LF-TSK-API-2003
           type: hard
-          required_task_version: 2
-          required_change_version: 2.0.0
+          required_task_version: 3
+          required_change_version: 3.0.0
           required_result: PASS
         deliverable: 封装 API 镜像和私网数据库 Compose及直接验收证据。
-      - id: LF-TSK-OPS-2007
-        title: 实现匹配制品更新与失败恢复操作
+      - id: LF-TSK-OPS-2010
+        title: 生成无宿主语言依赖的发行校验入口
         priority: P0
         phase: P2
         task_version: 1
@@ -3021,11 +3221,138 @@ workstreams:
         estimated_minutes: 90
         owner: LF-WS-OPS
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/manifest.mjs
+        - ops/release/runtime-entry.mjs
+        - ops/release/runtime-verification.sh
+        - ops/release/tests/manifest.test.mjs
+        - ops/release/tests/runtime-entry.test.mjs
+        - ops/release/runtime-entry-check.mjs
+        - harness/module-checks.yaml
+        - tests/verification/test_runtime_entry_checks.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/release.md
+        - docs/roadmap/master-plan/phase2/status.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 受完整清单绑定的 POSIX shell 发行校验入口生成器及真实 shell 直接测试。
+        acceptance_criteria:
+        - 构建端生成入口，用户端不依赖 Node、Python、Java 或源码仓库；入口制品及许可由清单绑定。
+        - 所有固定制品摘要与规范清单字节受入口绑定，同时修改制品及同目录 checksum 仍拒绝；拒绝路径逃逸与符号链接。
+        - 仅在合成 fixture 验证确定性、身份、许可、篡改、幂等和平台选择；无 Docker 调度或真实资料操作，不以自校验宣称发行真实性。
+        acceptance_evidence:
+        - 真实 clean Git fixture 和实际 sh 运行日志、源码摘要；不代替容器生命周期及独立 Formal Gate。
+        validation_command: node --test ops/release/tests/manifest.test.mjs ops/release/tests/runtime-entry.test.mjs
+        required_check_ids:
+        - eng.release.manifest
+        - eng.release.runtime-entry
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-OPS-2004
+        depends_on:
+        - task_id: LF-TSK-OPS-2004
+          type: hard
+          required_task_version: 2
+          required_change_version: 2.0.0
+          required_result: PASS
+        deliverable: 受完整清单绑定的 POSIX shell 发行校验入口生成器及真实 shell 直接测试。
+      - id: LF-TSK-OPS-2011
+        title: 实现私有安装状态与受控 Docker 资源准备
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/release.md
+        estimated_minutes: 90
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/lifecycle-state.sh
+        - ops/release/lifecycle-docker.sh
+        - ops/release/tests/lifecycle-fixture.mjs
+        - ops/release/tests/fake-docker-daemon.mjs
+        - ops/release/tests/lifecycle-install.test.mjs
+        - ops/docker/compose.yaml
+        - ops/docker/tests/test_contract.py
+        - ops/docker/tests/test_docker_bounds.py
+        - ops/docker/tests/test_docker_environment.py
+        - ops/docker/tests/test_operation_ownership.py
+        - ops/docker/tests/test_secret_publication.py
+        - ops/docker/tests/test_state_records.py
+        - ops/docker/tests/test_lifecycle_flow.py
+        - ops/release/lifecycle-install-check.mjs
+        - harness/module-checks.yaml
+        - tests/verification/test_lifecycle_checks.py
+        - tests/verification/test_docker_contract_checks.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/release.md
+        - docs/roadmap/master-plan/phase2/status.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 私有安装状态、锁、精确资源归属与候选安装准备，以及真实 shell 合成验证。
+        acceptance_criteria:
+        - 安装根与 release record 严格归属，锁和 state 原子更新；随机凭据不继承用户配置，不接管未知目录。
+        - 只用本机 Docker、匹配平台和 immutable image ID；Compose project/资源标签固定，拒绝错配和配置污染。
+        - 候选安装准备失败不改变 active；实际 shell 合成测试覆盖故障、健康、超时和安全边界，真实容器结果另行补齐。
+        acceptance_evidence:
+        - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
+        validation_command: node --test ops/release/tests/lifecycle-install.test.mjs
+        required_check_ids:
+        - eng.release.lifecycle-install
+        - eng.release.docker-contract
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies:
+        - LF-TSK-OPS-2010
+        - LF-TSK-OPS-2006
+        depends_on:
+        - task_id: LF-TSK-OPS-2010
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2006
+          type: hard
+          required_task_version: 3
+          required_change_version: 3.0.0
+          required_result: PASS
+        deliverable: 私有安装状态、锁、精确资源归属与候选安装准备，以及真实 shell 合成验证。
+      - id: LF-TSK-OPS-2007
+        title: 实现匹配制品更新与失败恢复操作
+        priority: P0
+        phase: P2
+        task_version: 3
+        change_version: 3.0.0
+        task_source: docs/roadmap/master-plan/phase2/release.md
+        estimated_minutes: 90
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: READY
         allowed_files:
         - ops/release/lifecycle.mjs
+        - ops/release/lifecycle.sh
         - ops/release/tests/lifecycle.test.mjs
+        - ops/docker/tests/test_state_records.py
+        - ops/docker/tests/test_lifecycle_flow.py
+        - ops/release/lifecycle-check.mjs
         - ops/docker/tests/update-recovery.sh
+        - harness/module-checks.yaml
+        - tests/verification/test_lifecycle_checks.py
+        - tests/verification/test_docker_contract_checks.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/release.md
+        - docs/roadmap/master-plan/phase2/status.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -3038,49 +3365,69 @@ workstreams:
         - 隔离演练中断、空间不足和错误版本；扩展偏好不因后端生命周期被删除，不操作真实运行卷。
         acceptance_evidence:
         - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
-        validation_command: node --test ops/release/tests/lifecycle.test.mjs && bash ops/docker/tests/update-recovery.sh
+        validation_command: python3 scripts/check_changes.py
         required_check_ids:
+        - eng.release.lifecycle
+        - eng.release.lifecycle-runtime
+        - eng.release.docker-contract
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
         dependencies:
-        - LF-TSK-OPS-2006
+        - LF-TSK-OPS-2011
         depends_on:
-        - task_id: LF-TSK-OPS-2006
+        - task_id: LF-TSK-OPS-2011
           type: hard
           required_task_version: 1
           required_change_version: 1.0.0
           required_result: PASS
         deliverable: 实现匹配制品更新与失败恢复操作及直接验收证据。
       - id: LF-TSK-OPS-2008
-        title: 串联双架构构建与受控发布流水线
+        title: 串联 Apple Silicon 构建与受控发布流水线
         priority: P0
         phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 3
+        change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
         owner: LF-WS-OPS
         kind: implementation
-        lifecycle_state: DRAFT
+        lifecycle_state: READY
         allowed_files:
+        - ops/docker/base-images.json
         - ops/release/build.mjs
         - ops/release/tests/build.test.mjs
+        - ops/release/build-execution.mjs
+        - ops/release/build-command.mjs
+        - ops/release/tests/build-execution.test.mjs
+        - ops/release/candidate.mjs
+        - ops/release/tests/candidate.test.mjs
+        - ops/release/pipeline.mjs
+        - ops/release/tests/pipeline.test.mjs
+        - harness/manifest.yaml
         - .github/workflows/release.yml
+        - ops/release/build-check.mjs
+        - harness/module-checks.yaml
+        - tests/verification/test_build_checks.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/release.md
+        - docs/roadmap/master-plan/phase2/status.md
         forbidden_files:
         - secrets/**
         - .local/**
         - data/**
         - .env
-        expected_output: 串联双架构构建与受控发布流水线及直接验收证据。
+        expected_output: 串联 Apple Silicon 构建与受控发布流水线及直接验收证据。
         acceptance_criteria:
-        - 固定依赖并生成 linux amd64/arm64 镜像及匹配资料/扩展清单；两个架构分别启动验证，不用仅构建通过代替。
+        - 构建前实际校验clean Git、统一版本、JAR与固定上下文模板摘要；双平台基础镜像以registry digest和image ID分字段绑定，拒绝路径、字段与命令注入。
+        - 固定依赖并生成 Apple Silicon macOS Docker 所需 linux/arm64 镜像及匹配资料/扩展清单；在该宿主原生启动验证，其他宿主与 amd64 留后续，不用仅构建通过代替。
         - 测试失败、许可缺失、未验证架构均不得进入正式发行清单；本地默认只产物构建，不上传。
         - 公开上传、商店提交和凭据使用保留人工授权，CI 不自动合并或签发 Formal Gate。
         acceptance_evidence:
         - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
-        validation_command: node --test ops/release/tests/build.test.mjs
+        validation_command: node --test ops/release/tests/build.test.mjs ops/release/tests/build-execution.test.mjs ops/release/tests/candidate.test.mjs ops/release/tests/pipeline.test.mjs
         required_check_ids:
+        - eng.release.build
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
@@ -3092,25 +3439,26 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2004
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
         - task_id: LF-TSK-OPS-2006
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 3
+          required_change_version: 3.0.0
           required_result: PASS
         - task_id: LF-TSK-OPS-2007
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 3
+          required_change_version: 3.0.0
           required_result: PASS
         - task_id: LF-TSK-EXT-2004
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 2.0.0
           required_result: PASS
-        deliverable: 串联双架构构建与受控发布流水线及直接验收证据。
+        deliverable: 串联 Apple Silicon 构建与受控发布流水线及直接验收证据。
+
 - id: LF-WS-ADP
   code: ADP
   name: "后续 Content Adapter"

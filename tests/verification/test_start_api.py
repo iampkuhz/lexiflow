@@ -136,7 +136,7 @@ class DiscoveryAndLaunchTest(unittest.TestCase):
             self.assertEqual(api.main([]), 0)
         prepare.assert_called_once_with(18081)
         _, command, environment = execute.call_args.args
-        self.assertIn("--args=--server.address=127.0.0.1 --server.port=18081 --lexiflow.segment-analysis.console=true", command)
+        self.assertIn("--args=--server.address=127.0.0.1 --server.port=18081 --lexiflow.segment-analysis.enabled=true --lexiflow.segment-analysis.console=true", command)
         self.assertEqual(environment["SPRING_DATASOURCE_URL"], "jdbc:test")
         self.assertEqual(environment["MODEL_SETTING"], "retained")
         self.assertNotIn("jdbc:test", " ".join(command))

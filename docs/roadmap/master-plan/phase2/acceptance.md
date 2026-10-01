@@ -22,7 +22,7 @@
 
 基础规则细节复用 lexicon 导入准备/资格测试；同形冲突与 UTF-16 映射复用 enrichment 测试；无资料启动、正式/演示与依赖故障复用 API/runtime 测试；敏感记录故障复用 API HTTP sink failure 测试；取消/迟到、英文优先与显示复用 extension 生命周期、stream 及合成 content bundle 检查。复用矩阵见下节，不把局部单测改称完整进程级覆盖。
 
-直接运行通过既有隔离服务上下文执行 `python3 -m scripts.environment.java_exec backend/gradlew -p backend :integration-tests:runtimeSmokeTest`。正式同输入 Change/Repository Verify 与独立 validation/review/check 按 Harness 执行；必需项缺环境为 BLOCKED，不跳过。Docker 干净安装、两种 CPU 架构、375 秒资源预算和真实 YouTube 体验仍由发布闭环验收承担。
+直接运行通过既有隔离服务上下文执行 `python3 -m scripts.environment.java_exec backend/gradlew -p backend :integration-tests:runtimeSmokeTest`。正式同输入 Change/Repository Verify 与独立 validation/review/check 按 Harness 执行；必需项缺环境为 BLOCKED，不跳过。Apple Silicon macOS Docker 干净安装、原生 linux/arm64、375 秒资源预算和真实 YouTube 体验仍由发布闭环验收承担。
 
 ### 1.3.1. 新增主线定位
 

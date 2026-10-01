@@ -1,0 +1,6 @@
+*
+!Dockerfile
+!entrypoint.sh
+!lexiflow-api.jar
+!Dockerfile.postgres
+!bootstrap.sh

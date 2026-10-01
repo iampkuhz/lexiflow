@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { createIncrementalFetch } from './e2e-runtime.mjs';
 /** 使用真实扩展和 API；只延迟网络以确定性暴露刷新与丢片段问题。 */
 export async function runIncrementalAcceptance({page,serviceWorker,setCaption,waitForState,overlayText}) {
- await serviceWorker.evaluate(()=>{
+ await serviceWorker.evaluate((fetchFactorySource)=>{
   globalThis.__incrementalOriginalFetch=globalThis.fetch;globalThis.__incrementalRequests=[];
-  globalThis.fetch=async(...args)=>{const request=JSON.parse(args[1].body);globalThis.__incrementalRequests.push(request);await new Promise(r=>setTimeout(r,250));return globalThis.__incrementalOriginalFetch(...args);};
- });
+  const factory=(0,eval)(`(${fetchFactorySource})`);
+  globalThis.fetch=factory(globalThis.__incrementalOriginalFetch,globalThis.__incrementalRequests,250);
+ }, createIncrementalFetch.toString());
  try {
   await setCaption(page,'A reliable',40);await waitForState(page,'ready');
   const beforeGap=await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length);

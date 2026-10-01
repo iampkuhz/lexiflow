@@ -121,6 +121,44 @@ class TestManagedTestServices(unittest.TestCase):
         self.assertEqual(1, len(paths))
         return json.loads(paths[0].read_text())
 
+    def test_dataset_import_profile_is_explicit_and_bounded(self):
+        with services.isolated_test_services(
+            self.root,
+            {"postgres-test-jdbc-url"},
+            self.messages.append,
+            postgres_profile="dataset-import",
+        ):
+            create = next(args for args, _ in self.fake.calls if args[0] == "create")
+            self.assertEqual("3072m", create[create.index("--memory") + 1])
+            self.assertEqual(
+                "/var/lib/postgresql/data:rw,size=2048m",
+                create[create.index("--tmpfs") + 1],
+            )
+        self.assertTrue(self.receipt()["cleanup_verified"])
+
+    def test_standard_profile_does_not_expand_default_tests(self):
+        with self.context({"postgres-test-jdbc-url"}):
+            create = next(args for args, _ in self.fake.calls if args[0] == "create")
+            self.assertEqual("512m", create[create.index("--memory") + 1])
+            self.assertIn("/var/lib/postgresql/data:rw,size=256m", create)
+
+    def test_unknown_profile_fails_before_podman(self):
+        with self.assertRaises(services.TestServicesError):
+            with services.isolated_test_services(
+                self.root, REQUIRED, self.messages.append, postgres_profile="unbounded"
+            ):
+                self.fail("unknown profile accepted")
+        self.assertFalse(self.fake.calls)
+
+    def test_invalid_profile_capacity_fails_before_podman(self):
+        policy = json.loads((self.root / services.POLICY_PATH).read_text())
+        policy["postgres_profiles"]["dataset-import"]["memory_mib"] = True
+        (self.root / services.POLICY_PATH).write_text(json.dumps(policy))
+        with self.assertRaises(services.TestServicesError):
+            with self.context():
+                self.fail("invalid capacity accepted")
+        self.assertFalse(self.fake.calls)
+
     def test_unneeded_services_never_touch_podman_or_policy(self):
         (self.root / services.POLICY_PATH).unlink()
         with self.context(set()) as env:

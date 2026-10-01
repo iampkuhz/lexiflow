@@ -5,5 +5,15 @@
     "redis": "docker.io/library/redis:7"
   },
   "pull": "never",
-  "readiness_timeout_seconds": 30
+  "readiness_timeout_seconds": 30,
+  "postgres_profiles": {
+    "standard": {
+      "memory_mib": 512,
+      "data_tmpfs_mib": 256
+    },
+    "dataset-import": {
+      "memory_mib": 3072,
+      "data_tmpfs_mib": 2048
+    }
+  }
 }

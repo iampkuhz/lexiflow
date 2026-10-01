@@ -1,7 +1,9 @@
 package io.lexiflow.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import io.lexiflow.api.runtime.SoftwareIdentity;
 import io.lexiflow.enrichment.application.caption.EnrichCaptionUseCase;
 import io.lexiflow.enrichment.domain.model.CaptionContext;
 import io.lexiflow.lexicon.application.port.LexiconPublicationRepository;
@@ -10,6 +12,8 @@ import io.lexiflow.lexicon.application.port.LexiconRepository;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
@@ -26,6 +30,24 @@ class ApiApplicationTest {
 
   @Test
   void contextLoads() {}
+
+  @Test
+  void softwareIdentityComesFromEmbeddedBuildResource() {
+    var identity = new SoftwareIdentity();
+    assertNotNull(identity.version());
+    try {
+      var expected =
+          Files.readString(
+              Path.of(System.getProperty("lexiflow.repository.root"), "ops/release/version.txt"));
+      var normalized =
+          expected.endsWith("\r\n")
+              ? expected.substring(0, expected.length() - 2)
+              : expected.endsWith("\n") ? expected.substring(0, expected.length() - 1) : expected;
+      assertEquals(normalized, identity.version());
+    } catch (java.io.IOException exception) {
+      throw new AssertionError("release version fixture is unavailable", exception);
+    }
+  }
 
   @Test
   void readOnlyRepositoryFeedsRealEnrichmentUseCaseWithoutAggregateOrDemoFallback() {

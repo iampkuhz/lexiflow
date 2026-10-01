@@ -20,6 +20,24 @@ python3 scripts/check_repository.py
 
 日常 Change 的 base 取上游 merge-base，无法取得时取 HEAD。需要限定 base、预期路径或 check ID 时，使用 `python3 -m scripts.verification.diagnose change --base <commit> --expected-path <path>` 或 `python3 -m scripts.verification.diagnose repository --check-id <id>`。诊断输出明确标记 `kind=diagnostic` 与 `full_repository_executed=false`，不发布可供正式 Delivery Gate 使用的完整报告；选中检查 PASS 不等于完整仓库 PASS。
 
+### 1.1.1. 日常功能研发不等待正式发行
+
+执行边界以 [Harness](../../../harness/README.md#执行边界) 为准。功能开发阶段先取得相关模块反馈，不必先完成 ZIP、镜像、双架构发布或真实资料分发验收；源码启动与扩展加载见[本地体验](../operations/local-experience.md)。
+
+在仓库根目录按本次工作选择一个诊断入口：
+
+```bash
+# 后端完整模块检查；仍需要 Java 25 和隔离 PostgreSQL/Redis 测试环境。
+.local/lexiflow-python/bin/python -m scripts.verification.diagnose repository --check-id eng.backend.delivery
+
+# 扩展质量检查；声明依赖会同时纳入后端检查，不是仅做前端单测。
+.local/lexiflow-python/bin/python -m scripts.verification.diagnose repository --check-id eng.extension.quality
+```
+
+测试环境按[验证环境](../operations/verification-environment.md)准备，不能接入真实用户数据库。诊断不会自动安装依赖，也不会因为缺少环境而跳过所选模块的必需检查。
+
+这两个入口不会选中真实发行生命周期检查，但也不证明发布可用。它们仅用于开发反馈；阶段性进展应说明已验证模块和未验证发行项。需要正式交付时仍执行完整 Change/Repository Verify 和独立验收，不能把 diagnostic 结果提交为完整报告。完整工作区包含发布代码时，Change Verify 仍可能选择发布检查，这是覆盖范围而非禁止继续编辑。
+
 ## 1.2. 从阶段到子能力
 
 ```plantuml
@@ -48,6 +66,8 @@ endlegend
 ```
 
 冻结前选定完整检查闭包；执行前后和结束时核对输入。单个检查缺运行环境时不执行其命令，仍汇总 BLOCKED。命令失败、覆盖不足、输入漂移均不能被其他检查的成功抵消。
+
+声明源码通过仓库目录描述符逐层读取，不跟随文件或祖先目录的符号链接；特殊文件、私有配置入口及读取期间的身份变化均拒绝。文件快照绑定相对路径、内容摘要、字节数和执行位，缺失或不安全输入不能冻结为 PASS。报告消费时重新核对完整快照，不能仅保留指纹而改写文件描述。这是声明输入的安全读取合同，不证明构建的实际读取闭包、外部候选或跨主机来源已经完整绑定。
 
 ```plantuml
 @startmindmap
@@ -101,6 +121,7 @@ title 日常 Verify 能力到文件
 - [scenarios.py](../../../scripts/verification/scenarios.py)：组织选择、冻结、执行和最终复核。它负责顺序，不替模块编写检查规则。
 - [Environment API](../../../scripts/environment/__init__.py)：诊断必需运行环境及受控子进程变量，不安装依赖。
 - [kernel.py](../../../scripts/verification/kernel.py)：进程、超时、输出 artifact 与 result contract。Java 内容只由 Gradle 检查。
+- [input_snapshot.py](../../../scripts/verification/input_snapshot.py)：以不跟随链接的目录描述符读取声明源码，绑定字节和执行位并拒绝读取竞态；由既有内核调用，不是独立 Gate 或公开命令。
 - [reports.py](../../../scripts/verification/reports.py)：报告完整性与不可变持久化。外部从 [public API](../../../scripts/verification/__init__.py) 读取，而不是信任手写 PASS JSON。
 
 完整内部职责表见[Scripts Reference](../reference/scripts.md)。模块的直接测试见 `tests/verification/`；它们证明引擎行为，不代表所有产品检查都已运行。

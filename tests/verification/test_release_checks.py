@@ -13,6 +13,7 @@ import yaml
 
 from scripts.verification import freeze_inputs, verify_repository
 from scripts.verification.declarations import load_declarations_snapshot
+from scripts.verification.kernel import snapshot_check_inputs
 from scripts.verification.scope import select_checks_for_changes
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -62,6 +63,17 @@ class ReleaseCheckDeclarationTest(unittest.TestCase):
         self.assertEqual([], base["module_dependencies"])
         self.assertEqual("json-stdout", base["result_contract"]["type"])
 
+    def test_extension_consumers_select_and_freeze_shared_version_sources(self):
+        """统一版本及读取器变动必须触发扩展，并进入两种检查的冻结闭包。"""
+        base = self.by_id["eng.extension.quality"]
+        change = self.by_id["eng.extension.quality-on-change"]
+        self.assertEqual(base["input_paths"], change["input_paths"])
+        for path in ("ops/release/version.txt", "ops/release/version.mjs"):
+            self.assertIn("eng.extension.quality-on-change", self.selected(path))
+            for check in (base, change):
+                self.assertIn(path, check["input_paths"])
+                self.assertIn({"path": path}, check["triggers"])
+
     def fixture(self, root):
         """创建与实际声明路径相同的合成冻结输入。"""
         checks = [copy.deepcopy(self.by_id[key]) for key in (BASE, BASE + "-on-change")]
@@ -75,6 +87,37 @@ class ReleaseCheckDeclarationTest(unittest.TestCase):
             path = root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("synthetic input\n")
+
+    def test_backend_build_launchers_are_frozen(self):
+        """真实构建启动脚本及 Wrapper 字节参与冻结，触发检查不能替代哈希绑定。"""
+        files = (
+            "backend/gradlew",
+            "backend/gradle/wrapper/gradle-wrapper.jar",
+            "backend/gradle/wrapper/gradle-wrapper.properties",
+        )
+        base = self.by_id["eng.backend.delivery"]
+        change = self.by_id["eng.backend.delivery-on-change"]
+        self.assertEqual(base["input_paths"], change["input_paths"])
+        for name in files:
+            self.assertIn(name, base["input_paths"])
+            self.assertIn("eng.backend.delivery-on-change", self.selected(name))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in base["input_paths"]:
+                target = root / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(b"synthetic build input\n")
+            previous = snapshot_check_inputs(root, base)
+            self.assertEqual([], previous["missing"])
+            for name in files:
+                target = root / name
+                target.write_bytes(target.read_bytes() + b"changed\n")
+                current = snapshot_check_inputs(root, base)
+                self.assertNotEqual(
+                    previous["fingerprint"], current["fingerprint"], name
+                )
+                self.assertIn(name, {item["locator"] for item in current["files"]})
+                previous = current
 
     def test_each_declared_input_changes_freeze(self):
         """版本、解析器及测试都参与冻结哈希，不仅影响选择。"""
@@ -92,6 +135,70 @@ class ReleaseCheckDeclarationTest(unittest.TestCase):
                     previous["input_fingerprint"], current["input_fingerprint"], name
                 )
                 previous = current
+
+    def test_runtime_selects_and_freezes_artifact_producer_inputs(self):
+        """JAR 和扩展的生产者输入必须同时触发并绑定发布运行检查。"""
+        runtime = self.by_id["eng.release.lifecycle-runtime"]
+        changed = self.by_id["eng.release.lifecycle-runtime-on-change"]
+        self.assertEqual(runtime["input_paths"], changed["input_paths"])
+        producers = ("eng.backend.delivery", "eng.extension.quality")
+        required = {"tests/verification/test_release_checks.py"}
+        for producer in producers:
+            required.update(self.by_id[producer]["input_paths"])
+        for name in sorted(required):
+            with self.subTest(path=name):
+                self.assertIn(name, runtime["input_paths"])
+                for check in (runtime, changed):
+                    self.assertIn({"path": name}, check["triggers"])
+                self.assertIn(changed["check_id"], self.selected(name))
+
+    def test_runtime_artifact_bytes_and_directory_membership_change_snapshot(self):
+        """合成源文件变化及目录成员增删均改变 runtime 指纹，不执行发行命令。"""
+        check = self.by_id["eng.release.lifecycle-runtime"]
+        producers = ("eng.backend.delivery", "eng.extension.quality")
+        required = sorted(
+            {
+                name
+                for producer in producers
+                for name in self.by_id[producer]["input_paths"]
+            }
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            samples = {}
+            for name in check["input_paths"]:
+                target = root / name
+                if (ROOT / name).is_dir():
+                    target = target / "nested/synthetic-source.txt"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(b"synthetic artifact input\n")
+                samples[name] = target
+            previous = snapshot_check_inputs(root, check)
+            self.assertEqual([], previous["missing"])
+            for name in required:
+                with self.subTest(path=name):
+                    self.assertIn(name, samples)
+                    target = samples[name]
+                    target.write_bytes(target.read_bytes() + b"changed\n")
+                    current = snapshot_check_inputs(root, check)
+                    self.assertNotEqual(previous["fingerprint"], current["fingerprint"])
+                    previous = current
+                    if (ROOT / name).is_dir():
+                        added = root / name / "nested/added-source.txt"
+                        added.write_bytes(b"new synthetic source\n")
+                        expanded = snapshot_check_inputs(root, check)
+                        self.assertNotEqual(
+                            current["fingerprint"], expanded["fingerprint"]
+                        )
+                        self.assertIn(
+                            "eng.release.lifecycle-runtime-on-change",
+                            self.selected(added.relative_to(root).as_posix()),
+                        )
+                        added.unlink()
+                        self.assertEqual(
+                            current["fingerprint"],
+                            snapshot_check_inputs(root, check)["fingerprint"],
+                        )
 
     def test_required_scope_deduplicates_and_incomplete_results_fail(self):
         """执行真实结果合同：零测试、跳过或失败均不能包装成 PASS。"""

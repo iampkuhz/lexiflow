@@ -86,6 +86,27 @@ def _policy(root: Path) -> dict:
     timeout = data.get("readiness_timeout_seconds")
     if type(timeout) is not int or not 1 <= timeout <= 30:
         raise TestServicesError(f"{POLICY_PATH} readiness_timeout_seconds 必须为 1..30")
+    profiles = data.get("postgres_profiles")
+    if not isinstance(profiles, dict) or set(profiles) != {
+        "standard",
+        "dataset-import",
+    }:
+        raise TestServicesError("PostgreSQL 测试容量配置必须包含两个固定 profile")
+    for profile in profiles.values():
+        if not isinstance(profile, dict) or set(profile) != {
+            "memory_mib",
+            "data_tmpfs_mib",
+        }:
+            raise TestServicesError("PostgreSQL 测试容量配置字段无效")
+        memory, storage = profile["memory_mib"], profile["data_tmpfs_mib"]
+        if (
+            type(memory) is not int
+            or type(storage) is not int
+            or not 128 <= memory <= 4096
+            or not 64 <= storage <= 2048
+            or storage >= memory
+        ):
+            raise TestServicesError("PostgreSQL 测试容量超出有界范围")
     return data
 
 
@@ -180,6 +201,7 @@ def _create(
     directory: Path,
     timeout: int,
     progress: Callable[[str], None],
+    postgres_profile: dict,
 ) -> str:
     service = resource["service"]
     port = 5432 if service == "postgres" else 6379
@@ -195,14 +217,14 @@ def _create(
         "--cidfile",
         str(directory / f"{service}.cid"),
         "--memory",
-        "512m" if service == "postgres" else "128m",
+        f"{postgres_profile['memory_mib']}m" if service == "postgres" else "128m",
         "--publish",
         f"127.0.0.1::{port}",
     ]
     if service == "postgres":
         args += [
             "--tmpfs",
-            "/var/lib/postgresql/data:rw,size=256m",
+            f"/var/lib/postgresql/data:rw,size={postgres_profile['data_tmpfs_mib']}m",
             "-e",
             "POSTGRES_HOST_AUTH_METHOD=trust",
             "-e",
@@ -246,7 +268,11 @@ def _create(
 
 @contextlib.contextmanager
 def isolated_test_services(
-    root: Path, required: set[str], progress: Callable[[str], None]
+    root: Path,
+    required: set[str],
+    progress: Callable[[str], None],
+    *,
+    postgres_profile: str = "standard",
 ) -> Iterator[dict[str, str]]:
     """按检查声明准备服务；忽略外部测试地址，临时绑定环境，始终精确清理。"""
     needed = [
@@ -256,6 +282,8 @@ def isolated_test_services(
         yield {}
         return
     policy = _policy(root)
+    if postgres_profile not in policy["postgres_profiles"]:
+        raise TestServicesError("未知 PostgreSQL 测试容量 profile")
     # 所有镜像都先确认；不因缺第二个镜像而先创建一个不必要的容器。
     images = {}
     _local_engine()
@@ -285,6 +313,7 @@ def isolated_test_services(
                 "name": f"lexiflow-check-{service}-{lease}",
                 "image_id": images[service],
                 "ready": False,
+                "postgres_profile": postgres_profile if service == "postgres" else None,
             }
             # 创建前保存归属；即使 CLI 在返回 ID 前中断，也可按名字和 lease 清理。
             resources.append(resource)
@@ -297,6 +326,7 @@ def isolated_test_services(
                 directory,
                 policy["readiness_timeout_seconds"],
                 progress,
+                policy["postgres_profiles"][postgres_profile],
             )
         saved = {key: os.environ.get(key) for key in values}
         os.environ.update(values)

@@ -204,7 +204,7 @@ execution:
       default_reasoning_effort: medium
     requires_non_overlapping_write_scope: true
     may_delegate_only_independent_subtasks: true
-    max_active_subagents: 1
+    max_active_subagents: 6
     default_fork_turns: "none"
     full_history_fork_requires_explicit_exception: true
     completion_signal_fields: [status, work_package_id, task_ids, run_id, artifact_locators, validation_commands,

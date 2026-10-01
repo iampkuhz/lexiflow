@@ -9,8 +9,16 @@
 <body>
   <header><img src="assets/logo.svg" alt=""><strong>LexiFlow</strong></header>
   <main>
+    <section id="service-section" aria-labelledby="service-heading">
+      <strong id="service-heading">服务状态</strong>
+      <div id="service-status" role="status" aria-live="polite">正在查询服务状态…</div>
+      <div id="service-identity" hidden></div>
+    </section>
+    <section id="page-section" aria-labelledby="page-heading">
+    <strong id="page-heading">当前页面增强</strong>
     <label class="toggle-row"><span class="toggle-label">当前页面字幕增强</span><input class="switch" type="checkbox" id="enhance-toggle" role="switch" aria-label="当前页面字幕增强" disabled></label>
     <div id="page-status" role="status" aria-live="polite">正在读取当前页面…</div>
+    </section>
     <details id="preferences"><summary>提示偏好 · 仅本机</summary>
       <p>点击中文可不再提示；仅本机、对应词库版本有效。</p>
       <button id="restore-start" type="button">恢复全部提示</button>
