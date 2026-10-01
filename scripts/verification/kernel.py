@@ -12,10 +12,21 @@ import sys
 import time
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any, Callable
+from scripts.verification.input_snapshot import snapshot_inputs
 
 REPORT_SCHEMA = "lexiflow.verification-report.v1"
+VERIFY_CHILD_INPUT_SCHEMA = "lexiflow.verify-child-input.v1"
+VERIFY_CHILD_INPUT_MAX_BYTES = 1_048_576
+RELEASE_RUNTIME_CHECK_IDS = frozenset(
+    {"eng.release.lifecycle-runtime", "eng.release.lifecycle-runtime-on-change"}
+)
+RELEASE_RUNTIME_CHILD_COMMAND = (
+    "python3",
+    "-m",
+    "scripts.environment.release_runtime_check",
+)
 _ALLOWED_ENV_KEYS = frozenset(
     {
         "USER",
@@ -69,6 +80,18 @@ def fingerprint_json(value: Any) -> str:
         json.dumps(
             value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
+    )
+
+
+def is_release_runtime_child_check(check: dict[str, Any]) -> bool:
+    """只识别两个固定 Check ID 与固定 Python 命令构成的父端 stdin 接线。"""
+    command = check.get("command")
+    return (
+        isinstance(check.get("check_id"), str)
+        and check.get("check_id") in RELEASE_RUNTIME_CHECK_IDS
+        and isinstance(command, list)
+        and tuple(command) == RELEASE_RUNTIME_CHILD_COMMAND
+        and check.get("executable") == "python3"
     )
 
 
@@ -129,43 +152,9 @@ def all_descriptors_verified(results: list[dict[str, str]]) -> bool:
     return all(item["status"] == "verified" for item in results)
 
 
-def _safe_relative(locator: str) -> bool:
-    return (
-        bool(locator)
-        and not locator.startswith("/")
-        and ".." not in PurePosixPath(locator).parts
-    )
-
-
-def _source_input_file(path: Path) -> bool:
-    """从声明的源码目录中排除可重建的本地产物。"""
-    generated_parts = {"__pycache__", ".gradle", "build", "node_modules"}
-    return path.suffix != ".pyc" and not generated_parts.intersection(path.parts)
-
-
 def snapshot_check_inputs(root: Path, check: dict[str, Any]) -> dict[str, Any]:
     """对实际声明的输入文件和完整不可变 Check 配置取哈希。"""
-    files: list[dict[str, str]] = []
-    missing: list[str] = []
-    for locator in sorted(set(check.get("input_paths", []))):
-        if not _safe_relative(locator):
-            missing.append(locator)
-            continue
-        target = root / locator
-        if target.is_file():
-            files.append(
-                {"locator": locator, "sha256": sha256_bytes(target.read_bytes())}
-            )
-        elif target.is_dir():
-            for path in sorted(
-                p for p in target.rglob("*") if p.is_file() and _source_input_file(p)
-            ):
-                rel = path.relative_to(root).as_posix()
-                files.append(
-                    {"locator": rel, "sha256": sha256_bytes(path.read_bytes())}
-                )
-        else:
-            missing.append(locator)
+    files, missing = snapshot_inputs(root, check)
     value = {"check_config": check, "files": files, "missing": missing}
     return {"fingerprint": fingerprint_json(value), "files": files, "missing": missing}
 
@@ -194,18 +183,37 @@ def run_check_process(
     env: dict[str, str],
     timeout_seconds: int,
     executable: str | None = None,
+    *,
+    stdin_payload: bytes | None = None,
 ) -> dict[str, Any]:
-    """只运行声明的 argv；唯有声明为 python3 时可使用当前 venv 解释器。"""
+    """运行声明 argv；唯有固定子进程可选用有界匿名 stdin payload。"""
     executed = list(argv)
     if executable == "python3" and argv[0] == "python3":
         executed[0] = sys.executable
     started_at, started = _utc_now(), time.monotonic()
+    if stdin_payload is not None and (
+        not isinstance(stdin_payload, bytes)
+        or len(stdin_payload) > VERIFY_CHILD_INPUT_MAX_BYTES
+    ):
+        return {
+            "status": "BLOCKED",
+            "exit_code": None,
+            "exit_reason": "verify-context-unavailable",
+            "stdout": "",
+            "stderr": "",
+            "duration_seconds": 0.0,
+            "started_at": started_at,
+            "finished_at": _utc_now(),
+            "timed_out": False,
+            "executable": executed[0],
+            "executed_argv": [],
+        }
     try:
         proc = subprocess.Popen(
             executed,
             cwd=cwd,
             env=env,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE if stdin_payload is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
@@ -226,7 +234,12 @@ def run_check_process(
             "executed_argv": executed,
         }
     try:
-        stdout, stderr = proc.communicate(timeout=timeout_seconds)
+        if stdin_payload is None:
+            stdout, stderr = proc.communicate(timeout=timeout_seconds)
+        else:
+            stdout, stderr = proc.communicate(
+                input=stdin_payload, timeout=timeout_seconds
+            )
         timed_out, reason = False, "exited"
     except subprocess.TimeoutExpired:
         _terminate_group(proc.pid)
@@ -422,13 +435,90 @@ def execute_single_check(
                 }
             },
         )
-    process = runner(
-        list(check["command"]),
-        str(cwd_path),
-        env,
-        check["timeout_seconds"],
-        check.get("executable"),
-    )
+    child_transport = is_release_runtime_child_check(check)
+    stdin_payload: bytes | None = None
+    if child_transport:
+        if not isinstance(run_id, str) or not run_id.strip():
+            blocked = _not_run_result(
+                check,
+                "verify-context-unavailable",
+                {
+                    "input_snapshot": {
+                        "pre": pre,
+                        "before_execution": observed_before_execution,
+                        "post": {},
+                    }
+                },
+            )
+            blocked["status"] = "BLOCKED"
+            return blocked
+        if set(pre) != {"fingerprint", "files", "missing"}:
+            return _not_run_result(
+                check,
+                "verify-context-invalid",
+                {
+                    "input_snapshot": {
+                        "pre": pre,
+                        "before_execution": observed_before_execution,
+                        "post": {},
+                    }
+                },
+            )
+        envelope = {
+            "schema_version": VERIFY_CHILD_INPUT_SCHEMA,
+            "run_id": run_id,
+            "check_id": check["check_id"],
+            "check_config_fingerprint": fingerprint_json(check),
+            "effective_check": check,
+            "snapshot": pre,
+        }
+        try:
+            stdin_payload = json.dumps(
+                envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        except (TypeError, ValueError):
+            return _not_run_result(
+                check,
+                "verify-context-invalid",
+                {
+                    "input_snapshot": {
+                        "pre": pre,
+                        "before_execution": observed_before_execution,
+                        "post": {},
+                    }
+                },
+            )
+        if len(stdin_payload) > VERIFY_CHILD_INPUT_MAX_BYTES:
+            blocked = _not_run_result(
+                check,
+                "verify-context-unavailable",
+                {
+                    "input_snapshot": {
+                        "pre": pre,
+                        "before_execution": observed_before_execution,
+                        "post": {},
+                    }
+                },
+            )
+            blocked["status"] = "BLOCKED"
+            return blocked
+    if child_transport:
+        process = runner(
+            list(check["command"]),
+            str(cwd_path),
+            env,
+            check["timeout_seconds"],
+            check.get("executable"),
+            stdin_payload=stdin_payload,
+        )
+    else:
+        process = runner(
+            list(check["command"]),
+            str(cwd_path),
+            env,
+            check["timeout_seconds"],
+            check.get("executable"),
+        )
     artifacts = _write_output_artifacts(
         repo_root, run_id or str(uuid.uuid4()), check["check_id"], process
     )
@@ -443,6 +533,29 @@ def execute_single_check(
         post_descriptors and not all_descriptors_verified(post_descriptors)
     ):
         status, reason = "FAIL", "input-drift"
+    elif (
+        child_transport
+        and not process.get("timed_out")
+        and process.get("exit_code") == 0
+    ):
+        report = completeness.get("report")
+        contract = check.get("result_contract", {})
+        if contract.get("type") != "json-stdout":
+            status, reason = "FAIL", "verify-context-invalid"
+        elif (
+            status in {"PASS", "BLOCKED"}
+            and (
+                isinstance(report, dict)
+                and report.get("status") in {"PASS", "BLOCKED", "FAIL"}
+                and report.get("status") in contract.get("allowed_statuses", [])
+            )
+            and (
+                report.get("run_id") != run_id
+                or report.get("check_id") != check["check_id"]
+                or report.get("verify_input_fingerprint") != pre["fingerprint"]
+            )
+        ):
+            status, reason = "FAIL", "verify-context-invalid"
     return {
         "check_id": check["check_id"],
         "module": check["module"],

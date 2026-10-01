@@ -36,6 +36,7 @@ agent_contract:
     qoder_hooks: .qoder/settings.json
   delivery_gate_records_schema: harness/delivery-gate-records.schema.json
 public_executables:
+  release_candidate: node ops/release/pipeline.mjs images|assemble /absolute/request.json
   java_exec: python3 -m scripts.environment.java_exec <native-command>
   local_api: python3 -m scripts.environment.start_api
   docs_check: python3 -m scripts.repository.docs_check

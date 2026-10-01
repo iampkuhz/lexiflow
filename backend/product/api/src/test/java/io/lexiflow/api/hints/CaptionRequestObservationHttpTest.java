@@ -27,6 +27,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {
       "lexiflow.runtime.mode=demo",
+      "lexiflow.segment-analysis.enabled=true",
       "lexiflow.segment-analysis.path=${java.io.tmpdir}/lexiflow-observation-${random.uuid}.jsonl"
     })
 class CaptionRequestObservationHttpTest {

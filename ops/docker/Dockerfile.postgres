@@ -1,0 +1,4 @@
+ARG POSTGRES_RUNTIME_IMAGE
+FROM ${POSTGRES_RUNTIME_IMAGE}
+# 只添加固定基础设施 bootstrap；保留 PostgreSQL 官方启动与空卷初始化协议。
+COPY --chmod=0555 bootstrap.sh /docker-entrypoint-initdb.d/10-lexiflow-bootstrap.sh

@@ -15,6 +15,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 @SpringBootTest(
     properties = {
       "lexiflow.runtime.mode=demo",
+      "lexiflow.segment-analysis.enabled=true",
       "lexiflow.segment-analysis.path=${java.io.tmpdir}/lexiflow-caption-test-${random.uuid}.jsonl"
     })
 class CaptionHintControllerTest {

@@ -8,9 +8,11 @@ import {
   type ApiTimings,
   type CaptionHintRequest
 } from "./protocol";
+import { readRuntimeStatus } from "./runtime-status";
 
 type HintMessage = { type: "caption-hints"; requestId: string; payload: CaptionHintRequest };
 type CancelMessage = { type: "cancel-caption-hint"; requestId: string };
+type RuntimeStatusMessage = { type: "runtime-status" };
 
 const preferences = new LocalPreferences({
   read: async () => (await chrome.storage.local.get(PREFERENCE_KEY))[PREFERENCE_KEY],
@@ -48,8 +50,18 @@ async function requestHints(key: string, payload: CaptionHintRequest): Promise<A
   inFlight.get(key)?.abort();
   inFlight.set(key, controller);
   try {
+    const gate = await readRuntimeStatus(controller.signal);
+    if (controller.signal.aborted) throw new Error("aborted");
+    if (!gate.ok || (gate.status.mode !== "demo" && !gate.status.ready)) {
+      outcome = gate.ok ? "backend_unavailable" : gate.reason;
+      return { ok: false, reason: gate.ok ? "backend_unavailable" : gate.reason === "timeout" ? "timeout" : gate.reason === "network" ? "network" : "invalid-response" };
+    }
     const response = await fetch(API_URL, {
       method: "POST",
+      // 本机地址也不能通过重定向转发字幕或继承浏览器凭据。
+      redirect: "error",
+      credentials: "omit",
+      referrerPolicy: "no-referrer",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
       signal: controller.signal
@@ -81,8 +93,14 @@ async function requestHints(key: string, payload: CaptionHintRequest): Promise<A
 }
 
 chrome.runtime.onMessage.addListener(
-  (request: HintMessage | CancelMessage | { type: "local-preferences"; action: PreferenceAction; entryId?: string; lexiconVersion?: number }, sender,
-    sendResponse: (response: ApiResult | PreferenceResult | { ok: true }) => void) => {
+  (request: HintMessage | CancelMessage | RuntimeStatusMessage | { type: "local-preferences"; action: PreferenceAction; entryId?: string; lexiconVersion?: number }, sender,
+    sendResponse: (response: ApiResult | PreferenceResult | { ok: true } | { ok: true; status: unknown } | { ok: false; reason: string }) => void) => {
+    if (request?.type === "runtime-status") {
+      const popup = sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL("popup.html") && sender.tab === undefined;
+      if (!popup) { sendResponse({ ok: false, reason: "invalid-request" }); return undefined; }
+      void readRuntimeStatus().then(sendResponse);
+      return true;
+    }
     if (request?.type === "local-preferences") {
       const popupUrl = sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL("popup.html");
       const popup = popupUrl && sender.tab === undefined;

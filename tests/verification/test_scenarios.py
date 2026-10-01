@@ -6,6 +6,7 @@ resolution, and report schema completeness.
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -15,6 +16,12 @@ from pathlib import Path
 import yaml
 
 from scripts.verification.scenarios import verify_changes, verify_repository
+from scripts.verification.kernel import (
+    RELEASE_RUNTIME_CHILD_COMMAND,
+    fingerprint_json,
+    snapshot_check_inputs,
+)
+from scripts.verification.scenarios import _execute
 
 
 def _complete_check(check: dict) -> dict:
@@ -77,6 +84,99 @@ def _fail_runner(argv, cwd, env, timeout, executable=None):
         "finished_at": "2026-01-01T00:00:00Z",
         "timed_out": False, "executable": sys.executable,
     }
+
+
+class TestReleaseRuntimePipeSelection(unittest.TestCase):
+    """验证父端 IPC 激活条件与目标 Check 的独立执行。"""
+
+    def _check(self, check_id: str, scope: str, *, active: bool = True) -> dict:
+        check = {
+            "check_id": check_id,
+            "module": f"module-{check_id}",
+            "command": list(RELEASE_RUNTIME_CHILD_COMMAND) if active else ["bash", "ops/docker/tests/update-recovery.sh"],
+            "executable": "python3" if active else "bash",
+            "cwd": ".", "timeout_seconds": 10, "scope": scope,
+            "triggers": [{"path": "ops/release/"}],
+            "module_dependencies": [], "required_environment": [], "input_paths": [],
+            "result_contract": {
+                "type": "json-stdout" if active else "exit-code",
+                **({"required_fields": ["status", "reason"], "allowed_statuses": ["PASS", "BLOCKED", "FAIL"]}
+                   if active else {"completeness_guarantee": "synthetic runner owns completion"}),
+            },
+        }
+        if scope == "change-targeted":
+            check["selection_reasons"] = [{
+                "kind": "changed-file", "changed_file": "ops/release/lifecycle.mjs",
+                "trigger_path": "ops/release/",
+            }]
+        return check
+
+    def test_both_active_lifecycle_ids_each_receive_their_exact_context(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            baseline = self._check("eng.release.lifecycle-runtime", "repository-baseline")
+            change = self._check("eng.release.lifecycle-runtime-on-change", "change-targeted")
+            checks = [baseline, change]
+            frozen = {check["check_id"]: snapshot_check_inputs(root, check) for check in checks}
+            received = []
+
+            def runner(argv, cwd, env, timeout, executable=None, *, stdin_payload=None):
+                envelope = json.loads(stdin_payload)
+                received.append(envelope)
+                report = {
+                    "status": "PASS", "reason": "",
+                    "run_id": envelope["run_id"],
+                    "check_id": envelope["check_id"],
+                    "verify_input_fingerprint": envelope["snapshot"]["fingerprint"],
+                }
+                return {
+                    "status": "PASS", "exit_code": 0, "exit_reason": "exited",
+                    "stdout": json.dumps(report, sort_keys=True, separators=(",", ":")),
+                    "stderr": "", "duration_seconds": 0.01,
+                    "started_at": "2026-01-01T00:00:00Z", "finished_at": "2026-01-01T00:00:00Z",
+                    "timed_out": False, "executable": sys.executable,
+                }
+
+            results = _execute(root, checks, frozen, True, "parent-run-123", runner)
+        self.assertEqual([entry["check_id"] for entry in received], [c["check_id"] for c in checks])
+        self.assertEqual([result["status"] for result in results], ["PASS", "PASS"])
+        self.assertEqual(received[0]["effective_check"], baseline)
+        self.assertEqual(received[1]["effective_check"], change)
+        self.assertNotIn("selection_reasons", received[0]["effective_check"])
+        self.assertEqual(received[1]["effective_check"]["selection_reasons"], change["selection_reasons"])
+        for entry, check in zip(received, checks, strict=True):
+            self.assertEqual(entry["run_id"], "parent-run-123")
+            self.assertEqual(entry["check_config_fingerprint"], fingerprint_json(check))
+            self.assertEqual(entry["snapshot"], frozen[check["check_id"]])
+            self.assertEqual(set(entry["snapshot"]), {"fingerprint", "files", "missing"})
+
+    def test_legacy_lifecycle_registration_and_other_check_keep_old_runner_contract(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            checks = [
+                self._check("eng.release.lifecycle-runtime", "repository-baseline", active=False),
+                self._check("eng.release.lifecycle-runtime-on-change", "change-targeted", active=False),
+            ]
+            frozen = {check["check_id"]: snapshot_check_inputs(root, check) for check in checks}
+            calls = []
+            def legacy_runner(argv, cwd, env, timeout, executable=None):
+                calls.append((argv, executable))
+                return _pass_runner(argv, cwd, env, timeout, executable)
+            results = _execute(root, checks, frozen, True, "parent-run-legacy", legacy_runner)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(results[1]["process"]["exit_reason"], "deduplicated")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            other = self._check("other.lifecycle-like-check", "repository-baseline")
+            frozen = {other["check_id"]: snapshot_check_inputs(root, other)}
+            calls = []
+            def ordinary_runner(argv, cwd, env, timeout, executable=None):
+                calls.append((argv, executable))
+                return _pass_runner(argv, cwd, env, timeout, executable)
+            _execute(root, [other], frozen, True, "other-run", ordinary_runner)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], list(RELEASE_RUNTIME_CHILD_COMMAND))
 
 
 class TestVerifyRepository(unittest.TestCase):

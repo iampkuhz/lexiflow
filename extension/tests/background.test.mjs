@@ -1,8 +1,22 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createServer } from 'node:http';
+const nativeFetch = globalThis.fetch;
 let listener;
 globalThis.chrome = { runtime: { id: 'extension-id', getURL: path => `chrome-extension://extension-id/${path}`, onMessage: { addListener(value) { listener = value; } } } };
 await import('../dist/background.js');
+let statusBody = { softwareVersion:'1.2.3',apiContract:'caption-hints.v1',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null };
+let postFetch, holdStatus = false, rejectStatus = false;
+const statusCalls = [];
+Object.defineProperty(globalThis, 'fetch', { configurable:true, get: () => (url, options) => {
+  if (String(url).endsWith('/runtime-status')) {
+    statusCalls.push({url:String(url),options});
+    if (rejectStatus) return Promise.reject(new TypeError('synthetic redirect rejected'));
+    if (holdStatus) return new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('abort','AbortError'))));
+    return Promise.resolve({ok:true,json:async()=>statusBody});
+  }
+  return postFetch(url, options);
+}, set: value => { postFetch = value; } });
 const source = { lexiconEntryId: "00000000-0000-0000-0000-000000000001", lexiconVersion: 1, senseId: "00000000-0000-0000-0000-000000000002" };
 const payload = { captionTopicKey:'topic',trackKey:null,lastRequestedSnapshot:null,currentSnapshot:{captions:[{windowId:null,startMs:null,segments:[{key:'key1',text:'reliable',offsetMs:null,append:true,line:0}]}]}};
 const sender = (id, documentId='doc') => ({id:'extension-id',tab:{id},documentId});
@@ -18,6 +32,7 @@ test('isolates cancellation between tabs and documents with identical local sequ
   const first=send(message,sender(1));
   const second=send(message,sender(2));
   const nextDocument=send(message,sender(1,'next'));
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
   await send({type:'cancel-caption-hint',requestId:message.requestId},sender(1));
   assert.equal(requests[0].aborted,true);
   assert.equal(requests[1].aborted,false);
@@ -33,6 +48,98 @@ test('rejects malformed request IDs and missing tab identity without fetching', 
     assert.deepEqual(await send({type:'caption-hints',requestId,payload},sender(1)),{ok:false,reason:'invalid-request'});
   }
   assert.deepEqual(await send({type:'caption-hints',requestId:'x',payload},{}),{ok:false,reason:'invalid-request'});
+});
+
+test('status gate is bodyless no-store GET; incompatible or invalid status prevents caption POST', async () => {
+  let posts = 0;
+  globalThis.fetch = async () => { posts += 1; return {ok:true,json:async()=>({processedKeys:['key1'],hints:[]})}; };
+  const readCount = statusCalls.length;
+  statusBody = {...statusBody,apiContract:'future-contract'};
+  assert.deepEqual(await send({type:'caption-hints',requestId:'mismatch',payload},sender(8)),{ok:false,reason:'invalid-response'});
+  assert.equal(posts,0);
+  statusBody = {...statusBody,apiContract:'caption-hints.v1',softwareVersion:'01.2.3'};
+  assert.deepEqual(await send({type:'caption-hints',requestId:'invalid-status',payload},sender(8)),{ok:false,reason:'invalid-response'});
+  assert.equal(posts,0);
+  assert.ok(statusCalls.length >= readCount + 2);
+  const call = statusCalls.at(-1);
+  assert.equal(call.options.method,'GET'); assert.equal(call.options.cache,'no-store');
+  assert.equal(call.options.redirect,'error'); assert.equal(call.options.credentials,'omit');
+  assert.equal(call.options.referrerPolicy,'no-referrer');
+  assert.equal(Object.hasOwn(call.options,'body'),false);
+  statusBody = {softwareVersion:'1.2.3',apiContract:'caption-hints.v1',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null};
+});
+
+test('runtime status proxy is restricted to the exact extension popup sender', async () => {
+  globalThis.fetch = () => assert.fail('caption POST must not occur in status-only calls');
+  assert.deepEqual(await send({type:'runtime-status'},{id:'extension-id',url:'chrome-extension://extension-id/popup.html'}),
+    {ok:true,status:statusBody});
+  assert.deepEqual(await send({type:'runtime-status'},sender(9)),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'runtime-status'},{id:'external',url:'chrome-extension://extension-id/popup.html'}),{ok:false,reason:'invalid-request'});
+});
+
+test('cancelling during the status GET prevents the caption POST', async () => {
+  let posts=0; globalThis.fetch=async()=>{posts++;return {ok:true,json:async()=>({processedKeys:['key1'],hints:[]})};};
+  holdStatus=true;
+  const pending=send({type:'caption-hints',requestId:'cancel-during-gate',payload},sender(5));
+  await Promise.resolve(); await Promise.resolve();
+  await send({type:'cancel-caption-hint',requestId:'cancel-during-gate'},sender(5));
+  assert.deepEqual(await pending,{ok:false,reason:'aborted'}); assert.equal(posts,0);
+  holdStatus=false;
+});
+
+test('a rejected status redirect cannot send captions or expose its target', async () => {
+  let posts = 0;
+  const start = statusCalls.length;
+  globalThis.fetch = async () => { posts++; throw new Error('must not post'); };
+  rejectStatus = true;
+  try {
+    assert.deepEqual(await send({type:'caption-hints',requestId:'redirect-gate',payload},sender(12)),
+      {ok:false,reason:'network'});
+    assert.equal(posts,0);
+    assert.equal(statusCalls.length,start + 1);
+    assert.equal(Object.hasOwn(statusCalls.at(-1).options,'body'),false);
+  } finally { rejectStatus = false; }
+});
+
+test('native fetch refuses 307 and 308 caption redirects without reaching their target', {timeout:10000}, async () => {
+  let redirectCode = 307;
+  const received = [];
+  const server = createServer(async (request,response) => {
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    received.push({path:request.url,method:request.method,body});
+    if (request.url === '/source') {
+      response.writeHead(redirectCode,{Location:'/target'}).end();
+    } else {
+      response.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({processedKeys:['key1'],hints:[]}));
+    }
+  });
+  try {
+    await new Promise((resolve,reject) => {
+      server.once('error',reject);
+      server.listen(0,'127.0.0.1',resolve);
+    });
+    const endpoint = `http://127.0.0.1:${server.address().port}/source`;
+    for (const code of [307,308]) {
+      redirectCode = code;
+      const before = received.length;
+      globalThis.fetch = (url,options) => {
+        assert.match(String(url),/^http:\/\/127\.0\.0\.1:\d+\/.*caption-hints$/);
+        assert.equal(options.redirect,'error');
+        assert.equal(options.credentials,'omit');
+        assert.equal(options.referrerPolicy,'no-referrer');
+        // 仅测试传输映射到本轮随机端口，保留产品 fetch 的全部参数。
+        return nativeFetch(endpoint,options);
+      };
+      assert.deepEqual(await send({type:'caption-hints',requestId:`redirect-${code}`,payload},sender(13)),
+        {ok:false,reason:'network'});
+      assert.deepEqual(received.slice(before),[{path:'/source',method:'POST',body:JSON.stringify(payload)}]);
+    }
+    assert.equal(received.some(item => item.path === '/target'),false);
+  } finally {
+    server.closeAllConnections();
+    if (server.listening) await new Promise((resolve,reject) => server.close(error => error ? reject(error) : resolve()));
+  }
 });
 
 test('binds response caption to request and does not accept unbound dictionary text', async () => {

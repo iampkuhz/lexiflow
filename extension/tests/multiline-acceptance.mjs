@@ -12,6 +12,10 @@ export async function runMultilineAcceptance({page,serviceWorker,repositoryRoot,
     globalThis.__multilineOriginalFetch=globalThis.fetch;
     globalThis.__multilineRequests=[];globalThis.__multilineWaiters=[];globalThis.__multilineHold=true;globalThis.__multilineSettled=0;
     globalThis.fetch=async(...args)=>{
+      // 状态预检 GET 不参与字幕请求的暂停与计数。
+      const [input,init]=args;
+      const url=new URL(typeof input==='string'||input instanceof URL?input:input.url);
+      if(String(init?.method??input.method??'GET').toUpperCase()!=='POST'||url.pathname!=='/api/v1/caption-hints')return globalThis.__multilineOriginalFetch(...args);
       globalThis.__multilineRequests.push(JSON.parse(args[1].body));
       try {
         if(globalThis.__multilineHold)await new Promise(resolve=>globalThis.__multilineWaiters.push(resolve));

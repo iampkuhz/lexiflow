@@ -19,6 +19,11 @@ body { width: 280px; min-height: 165px; margin: 0; padding: 0 16px 12px; }
 header { display:flex; align-items:center; gap:9px; height:48px; margin:0 -16px 10px; padding:0 16px; border-bottom:1px solid var(--line); color:var(--fg); font-size:16px; letter-spacing:-.02em; }
 header img { width:24px; height:24px; }
 main { display:grid; gap:9px; }
+section { display:grid; gap:5px; }
+#service-status, #service-identity { border-radius:5px; padding:5px 7px; font-size:12px; color:var(--muted); }
+#service-status[data-kind="error"] { color:var(--error); background:var(--error-bg); }
+#service-status[data-kind="success"] { color:var(--success); background:var(--success-bg); }
+#service-identity[hidden] { display:none; }
 .toggle-row { display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:32px; cursor:pointer; }
 .toggle-label { font-size:14px; font-weight:600; }
 .switch { appearance:none; width:40px; height:24px; margin:0; position:relative; flex:none; border:1px solid var(--line); border-radius:16px; background:var(--muted); cursor:pointer; transition:background-color .15s ease; }

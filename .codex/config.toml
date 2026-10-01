@@ -6,7 +6,7 @@ project_doc_max_bytes = 4000
 multi_agent = true
 
 [agents]
-max_concurrent_threads_per_session = 1
+max_concurrent_threads_per_session = 6
 default_subagent_model = "gpt-6-luna"
 default_subagent_reasoning_effort = "medium"
 max_depth = 2

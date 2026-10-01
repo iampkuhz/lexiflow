@@ -1,4 +1,5 @@
 """Environment 公共 API 的探测与缺项诊断测试；Verification 直接消费此边界。"""
+
 from __future__ import annotations
 
 import os
@@ -91,7 +92,8 @@ class TestDiagnoseEnvironment(unittest.TestCase):
     def test_missing_tool_blocks(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             result = diagnose_environment(
-                Path(tmpdir), ["nonexistent-tool-xyz"],
+                Path(tmpdir),
+                ["nonexistent-tool-xyz"],
             )
             self.assertEqual(result["status"], "BLOCKED")
             self.assertIn("nonexistent-tool-xyz", result["missing"])
@@ -123,3 +125,52 @@ class TestCheckRequiredEnvironment(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReleaseRuntimeEnvironment(unittest.TestCase):
+    def test_release_arm64_docker_host_is_explicit_unix_and_not_disclosed(self):
+        from scripts.environment.runtime import diagnose, execution_environment
+        from unittest.mock import patch
+
+        check = {
+            "required_environment": [
+                "release-arm64-docker-host",
+            ]
+        }
+        env = {
+            "LEXIFLOW_RELEASE_ARM64_DOCKER_HOST": "unix:///private/arm64.sock",
+        }
+        with patch("scripts.environment.runtime.sys.platform", "darwin"), patch(
+            "scripts.environment.runtime.os.uname", return_value=type("Uname", (), {"machine": "arm64"})()
+        ):
+            info = diagnose(".", list(check["required_environment"]), env)
+            self.assertEqual(info["status"], "PASS")
+            self.assertNotIn("/private/arm64.sock", repr(info))
+            self.assertEqual(execution_environment(".", check, env), env)
+
+    def test_release_host_rejects_non_apple_silicon(self):
+        from scripts.environment.release_runtime_check import ConsumerError, _require_supported_host
+        from unittest.mock import patch
+
+        with patch("scripts.environment.runtime.sys.platform", "linux"):
+            with self.assertRaises(ConsumerError) as raised:
+                _require_supported_host()
+            self.assertEqual(raised.exception.status, "BLOCKED")
+
+    def test_release_docker_host_refuses_tcp_and_missing_endpoint(self):
+        from scripts.environment.runtime import diagnose, execution_environment
+        from scripts.environment.java_runtime import JavaRuntimeError
+
+        requirement = "release-arm64-docker-host"
+        self.assertEqual(
+            diagnose(
+                ".", [requirement], {"LEXIFLOW_RELEASE_ARM64_DOCKER_HOST": "tcp://host"}
+            )["status"],
+            "BLOCKED",
+        )
+        with self.assertRaises(JavaRuntimeError):
+            execution_environment(
+                ".",
+                {"required_environment": [requirement]},
+                {"LEXIFLOW_RELEASE_ARM64_DOCKER_HOST": "tcp://host"},
+            )

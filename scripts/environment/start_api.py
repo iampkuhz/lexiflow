@@ -161,6 +161,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             str(root / "backend"),
             ":api:bootRun",
             f"--args=--server.address=127.0.0.1 --server.port={port}"
+            " --lexiflow.segment-analysis.enabled=true"
             " --lexiflow.segment-analysis.console=true",
         ]
         os.execvpe(command[0], command, environment)

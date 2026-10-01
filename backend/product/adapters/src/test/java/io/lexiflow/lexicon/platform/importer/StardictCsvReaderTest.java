@@ -458,6 +458,50 @@ class StardictCsvReaderTest {
         "audio");
   }
 
+  @Test
+  void acceptsCompactSevenColumnRowsWithEquivalentConversionAndRejectsInvalidHeaders()
+      throws Exception {
+    var full = Files.createTempFile("full-format", ".csv");
+    var compact = Files.createTempFile("compact-format", ".csv");
+    var fullHeader = header();
+    var compactHeader = "word,translation,oxford,tag,bnc,frq,exchange";
+    Files.writeString(
+        full,
+        fullHeader + "\n" + row("walk", "行走", "meaning", "cet4", "100", "200", "3:walks", "1"));
+    Files.writeString(compact, compactHeader + "\n" + "walk,行走,1,cet4,100,200,3:walks\n");
+    var fullRows = new ArrayList<StardictCsvReader.SourceRecord>();
+    var compactRows = new ArrayList<StardictCsvReader.SourceRecord>();
+    var reader = new StardictCsvReader();
+    assertTrue(reader.matches(full));
+    assertTrue(reader.matches(compact));
+    reader.read(full, fullRows::add);
+    reader.read(compact, compactRows::add);
+    assertEquals(fullRows.getFirst().row().lemma(), compactRows.getFirst().row().lemma());
+    assertEquals(
+        fullRows.getFirst().row().chineseGloss(), compactRows.getFirst().row().chineseGloss());
+    assertEquals(
+        fullRows.getFirst().row().sourceBncRank(), compactRows.getFirst().row().sourceBncRank());
+    assertEquals(
+        fullRows.getFirst().row().inflections(), compactRows.getFirst().row().inflections());
+    assertEquals(
+        fullRows.getFirst().row().sourceFrqRank(), compactRows.getFirst().row().sourceFrqRank());
+    assertEquals(
+        fullRows.getFirst().row().basicVocabulary(),
+        compactRows.getFirst().row().basicVocabulary());
+    assertEquals(fullRows.getFirst().row().priority(), compactRows.getFirst().row().priority());
+    assertEquals("", compactRows.getFirst().row().definition());
+    for (var invalid :
+        List.of(
+            "word,translation,oxford,tag,bnc,frq",
+            "translation,word,oxford,tag,bnc,frq,exchange",
+            "word,translation,oxford,tag,bnc,frq,exchange,unknown",
+            "word,translation,translation,oxford,tag,bnc,frq,exchange")) {
+      Files.writeString(compact, invalid + "\n");
+      assertFalse(reader.matches(compact));
+      assertThrows(IllegalArgumentException.class, () -> reader.read(compact, ignored -> {}));
+    }
+  }
+
   private static String row(
       String word,
       String translation,

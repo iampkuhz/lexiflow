@@ -1,6 +1,7 @@
 interface PageReply { ok: true; enabled: boolean; pageKey: string }
 type PageResponse = PageReply | { ok: false };
 type PreferenceResponse = { ok: true; entryKeys: string[] } | { ok: false; reason?: string };
+type RuntimeReply = { ok: true; status: { softwareVersion: string; apiContract: string; mode: string; ready: boolean; reason: string; datasetVersion: number | null } } | { ok: false; reason: string };
 
 let pageKey: string | null = null;
 let tabId: number | undefined;
@@ -16,6 +17,32 @@ function renderPageState(enabled: boolean): void {
   const status = el<HTMLDivElement>("page-status");
   status.textContent = enabled ? "已开启 · 英文优先" : "已关闭 · 保留英文";
   status.dataset.kind = "success";
+}
+async function readServiceStatus(): Promise<void> {
+  const status = el<HTMLDivElement>("service-status"), identity = el<HTMLDivElement>("service-identity");
+  status.textContent = "正在查询服务状态…";
+  try {
+    const reply = await chrome.runtime.sendMessage({ type: "runtime-status" }) as RuntimeReply | undefined;
+    if (!reply || reply.ok !== true) {
+      if (reply?.reason === "protocol-mismatch") {
+        status.textContent = "协议不匹配，请使用匹配的扩展与服务版本。"; status.dataset.kind = "error"; identity.hidden = true; return;
+      }
+      throw new Error("status unavailable");
+    }
+    const value = reply.status;
+    identity.textContent = `软件 ${value.softwareVersion} · 协议 ${value.apiContract} · 已发布资料版本 ${value.datasetVersion === null ? "未知" : value.datasetVersion}`;
+    identity.hidden = false;
+    if (value.mode === "demo") { status.textContent = "演示模式 · 非正式就绪"; status.dataset.kind = "error"; }
+    else if (value.mode === "invalid" || value.reason === "SCHEMA_MISMATCH") { status.textContent = "资料结构不匹配，请使用匹配的服务与资料。"; status.dataset.kind = "error"; }
+    else if (value.reason === "NO_PUBLISHED_DATA") { status.textContent = "尚无已发布资料，请检查资料初始化与发布状态。"; status.dataset.kind = "error"; }
+    else if (value.reason === "DEPENDENCY_UNAVAILABLE") { status.textContent = "服务依赖不可用，请检查后端依赖服务。"; status.dataset.kind = "error"; }
+    else if (value.ready) { status.textContent = value.reason === "PREWARM_DEGRADED" ? "正式就绪 · 预热降级，服务可用。" : "正式就绪。"; status.dataset.kind = "success"; }
+    else { status.textContent = "资料初始化未完成。"; status.dataset.kind = "error"; }
+  } catch {
+    identity.hidden = true;
+    status.textContent = "无法连接服务，请检查后端是否启动。";
+    status.dataset.kind = "error";
+  }
 }
 function validPageReply(value: unknown): value is PageReply {
   const result = value as PageReply | undefined;
@@ -59,6 +86,7 @@ async function restoreAll(): Promise<void> {
   finally { restoreBusy = false; start.disabled = false; confirm.disabled = false; cancel.disabled = false; }
 }
 document.addEventListener("DOMContentLoaded", () => {
+  void readServiceStatus();
   el<HTMLInputElement>("enhance-toggle").addEventListener("change", () => { void setPage(); });
   el<HTMLButtonElement>("restore-start").addEventListener("click", () => {
     if (restoreBusy) return;

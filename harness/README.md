@@ -24,6 +24,8 @@ Harness 保存静态、机器可读的工程约束；运行状态、报告与 re
 
 日常命令不接受 root、base 或 check ID 覆盖；定向定位走 `python3 -m scripts.verification.diagnose change|repository`，只返回诊断结果，不发布可供正式 Delivery Gate 使用的完整报告。
 
+日常功能研发不以正式发行包、双架构运行或资料分发许可验收完成为前置。使用上述定向诊断取得所选模块及其依赖的反馈；所选检查仍保留语言、业务测试与环境要求。发布环境受限可继续无依赖的实现，但不得将定向 PASS 当作完整 Verify 或交付 PASS，不删除发布检查或绕过独立 Formal Gate。未知进程和数据归属等执行安全问题仍单独处理。
+
 正式验收只有 `python3 -m scripts.delivery_gate submit|validate|review|check|status`。submit 绑定报告与真实 producer；validate 由当前父任务下的验证子代理执行冻结输入检查，不要求独立 Session；review 只审 frozen diff/evidence；check 只核对 receipt、依赖和批准。review/check 不重跑交付命令，调用者不伪造身份；详细交接见 [Delivery Gate](../docs/development/change-delivery/delivery-gate.md)。
 
 Qoder 与 Codex 调度以 policy 为准。实现委派优先 Qoder；验证与审查直接使用不同原生 Codex 子代理。内部委派不使用 create_thread；只有 policy 的至少两轮验证 PASS、对应 Hook 持续阻塞、针对性修复与当前任务能力边界证据齐备，并经用户明确批准，才允许新任务兜底。例外任务同样显式指定 Luna 模型和推理参数；Sol 升级须具体风险证据，不能继承默认 Astra。先核对真实宿主等待兼容性；Goal 活跃或未知且没有受支持等待适配时，不启动 Qoder。Qoder 交接后父任务结束当前轮，终态 callback 后才核对与 ack；Codex 原生子代理使用原生协作事件。未知运行不重派，不通过修改 Goal、身份或预算绕过。细节和安全恢复见 [Agent workflow](../docs/development/agent-workflow.md)。

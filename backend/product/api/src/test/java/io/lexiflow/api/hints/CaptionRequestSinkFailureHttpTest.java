@@ -21,6 +21,7 @@ import org.springframework.context.annotation.Primary;
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {
       "lexiflow.runtime.mode=demo",
+      "lexiflow.segment-analysis.enabled=true",
       "lexiflow.segment-analysis.path=${java.io.tmpdir}/lexiflow-sink-failure-${random.uuid}.jsonl"
     })
 @org.springframework.test.context.ActiveProfiles("caption-request-sink-failure-test")
