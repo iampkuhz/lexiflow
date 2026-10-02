@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runCommand, HEARTBEAT_MS } from './command.mjs';
 import { doctor, runtime } from './doctor.mjs';
+import { repairNetwork } from './network-repair.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const help = '用法: node ops/podman/local.mjs install|up|status|stop|logs|recover|doctor [--dir 绝对路径] [install: --api-port 18080 --db-port 15432]';
@@ -53,7 +54,7 @@ function run(command, argv, { cwd = dir, timeout = 600000, capture = false, env 
   return runCommand(command, argv, { cwd, timeout, capture, env, logFile, label: label || `执行 ${command} 检查`, announce: Boolean(label), onStart: pid => writeLock(pid), onClose: ({ groupGone }) => { if (groupGone) writeLock(null); } });
 }
 function save() {
-  const next = path.join(dir, 'state.json.next');
+  const next = path.join(dir, `.state-${crypto.randomBytes(16).toString('hex')}.next`);
   fs.writeFileSync(next, JSON.stringify(state, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
   fs.renameSync(next, path.join(dir, 'state.json'));
 }
@@ -92,26 +93,47 @@ async function freePort(port) {
   });
 }
 async function ready() {
-  const started = Date.now();
-  let lastNotice = started;
-  console.log('[LexiFlow]   等待 API 正式就绪…');
-  for (let attempt = 0; attempt < 60; attempt++) {
+  const started = performance.now(), deadline = started + 120000;
+  let lastNotice = started, reason = 'RUNTIME_UNAVAILABLE';
+  console.log('[LexiFlow]   等待 API 正式就绪（最多 120 秒）…');
+  while (performance.now() < deadline) {
     if (interrupted) fail('等待已取消，已初始化的数据保留，可用 up 再次启动');
     try {
-      const [status] = await runtime(state.apiPort, state.version);
-      if (status === 'PASS') {
-        console.log(`[LexiFlow]   API 已正式就绪（${Math.floor((Date.now() - started) / 1000)} 秒）`);
+      const [status, currentReason] = await runtime(state.apiPort, state.version, deadline - performance.now());
+      reason = currentReason;
+      if (status === 'PASS' && performance.now() <= deadline) {
+        console.log(`[LexiFlow]   API 已正式就绪（${Math.floor((performance.now() - started) / 1000)} 秒）`);
         return;
       }
-    } catch { /* 有界等待容器就绪，不输出响应内容。 */ }
-    if (Date.now() - lastNotice >= HEARTBEAT_MS) {
-      console.log(`[LexiFlow]   仍在等待 API 正式就绪（已用 ${Math.floor((Date.now() - started) / 1000)} 秒）`);
-      lastNotice = Date.now();
+      if (status === 'FAIL') fail('API 响应协议或软件版本不匹配，请检查镜像与扩展版本');
+    } catch (error) {
+      if (error.message.startsWith('API 响应')) throw error;
+      reason = error.message === 'HTTP_TIMEOUT' ? 'HTTP_TIMEOUT' : ['ECONNREFUSED', 'ECONNRESET'].includes(error.code) ? error.code : 'RUNTIME_UNAVAILABLE';
     }
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    if (performance.now() - lastNotice >= HEARTBEAT_MS) {
+      console.log(`[LexiFlow]   等待就绪（已用 ${Math.floor((performance.now() - started) / 1000)} 秒；原因 ${reason}）`);
+      lastNotice = performance.now();
+    }
+    const delay = Math.min(2000, deadline - performance.now());
+    if (delay > 0) await new Promise(resolve => setTimeout(resolve, delay));
   }
-  fail('应用未达到 formal/ready/OK；查看 logs，不重复初始化数据库');
+  console.log('[LexiFlow]   就绪等待超时，执行一次容器内部检查（最多 10 秒）…');
+  let internalReady = false;
+  try {
+    const rows = JSON.parse(await run('podman', ['ps', '--format', 'json'], { capture: true, timeout: 5000 }));
+    const owned = rows.filter(row => {
+      const labels = row.Labels || {};
+      return labels['lexiflow.installation'] === state.id && (labels['com.docker.compose.project'] || labels['io.podman.compose.project']) === state.project && (labels['com.docker.compose.service'] || labels['io.podman.compose.service']) === 'api';
+    });
+    const id = owned.length === 1 ? (owned[0].Id || owned[0].ID) : '';
+    if (/^[a-f0-9]{64}$/.test(id)) {
+      const body = JSON.parse(await run('podman', ['exec', id, '/app/entrypoint.sh', 'health'], { capture: true, timeout: 5000 }));
+      internalReady = body.ready === true && body.mode === 'formal' && body.reason === 'OK' && body.softwareVersion === state.version && body.apiContract === 'caption-hints.v1';
+    }
+  } catch { /* 不输出工具原文，无法确认时不声称应用健康。 */ }
+  fail(internalReady ? '容器内部已就绪，但宿主端口不可达（HOST_PORT_UNREACHABLE）；数据已保留。请运行 doctor；不要重新导入词库' : `API 就绪等待超时（${reason}）；内部健康未确认，请查看 logs；不要重新初始化数据库`);
 }
+
 function summary() {
   console.log(`就绪。API: http://127.0.0.1:${state.apiPort}\nChrome 加载目录: ${path.join(dir, 'extension')}\nPostgreSQL: 127.0.0.1:${state.dbPort} / lexiflow / 用户 lexiflow\n密码文件（勿分享）: ${path.join(dir, 'secrets/app-password')}`);
 }
@@ -246,8 +268,12 @@ async function main() {
   fs.writeFileSync(logFile, '', { mode: 0o600, flag: 'wx' });
   console.log(`[LexiFlow] 详细日志（实时写入）: ${logFile}`);
   await run('podman', ['info'], { timeout: 30000 });
-  if (state.digests) verifyConfig();
   await ownedResources();
+  if (state.digests) {
+    const repaired = repairNetwork({ dir, state, template: fs.readFileSync(path.join(repo, 'ops/podman/compose.validation.yaml'), 'utf8'), actualDigests: digestFiles, save, enabled: ['install', 'up'].includes(action) });
+    if (repaired) console.log('[LexiFlow] 已自动修复端口发布网络；保留原数据库、词库和密码，正在重建服务连接。');
+    verifyConfig();
+  }
   if (action === 'install' && !['initialized', 'ready'].includes(state.phase)) {
     if (state.phase === 'initializing') fail('上次数据库初始化未确认完成，已保留现场；禁止自动重导或清库，请查看日志');
     if (state.source !== sourceFingerprint()) fail('未完成安装的源码已变化，请保留现场并使用新的 --dir');

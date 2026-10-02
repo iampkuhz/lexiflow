@@ -1,5 +1,6 @@
 // 可分享的只读诊断：只输出固定原因与受限版本字段，不转发工具/API原文。
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -37,28 +38,40 @@ function live(pid) {
   try { process.kill(pid, 0); return true; }
   catch (error) { return error.code !== 'ESRCH'; }
 }
-async function readStatus(port, endpoint) {
-  const response = await fetch(`http://127.0.0.1:${port}${endpoint}`, { redirect: 'error', signal: AbortSignal.timeout(3000) });
-  if (!response.ok) { await response.body?.cancel(); return { available: false }; }
-  const reader = response.body.getReader();
-  let bytes = 0, parts = [];
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    bytes += value.length;
-    if (bytes > 8192) { await reader.cancel(); return { invalid: true }; }
-    parts.push(Buffer.from(value));
-  }
-  try { return { available: true, body: JSON.parse(Buffer.concat(parts).toString('utf8')) }; }
-  catch { return { invalid: true }; }
+async function readStatus(port, endpoint, timeoutMs) {
+  // 原生 http 固定直连 loopback；不消费环境代理或全局 fetch dispatcher。
+  return new Promise((resolve, reject) => {
+    const request = http.get({ hostname: '127.0.0.1', port, path: endpoint, agent: false }, response => {
+      if (response.statusCode >= 300 && response.statusCode < 400) { reject(new Error('HTTP_REDIRECT')); response.destroy(); return; }
+      if (response.statusCode !== 200) { resolve({ available: false }); response.destroy(); return; }
+      let bytes = 0;
+      const parts = [];
+      response.on('data', part => {
+        bytes += part.length;
+        if (bytes > 8192) { resolve({ invalid: true }); response.destroy(); }
+        else parts.push(part);
+      });
+      response.on('end', () => {
+        try { resolve({ available: true, body: JSON.parse(Buffer.concat(parts).toString('utf8')) }); }
+        catch { resolve({ invalid: true }); }
+      });
+      response.on('error', reject);
+      response.on('aborted', () => reject(new Error('HTTP_RESPONSE_ABORTED')));
+    });
+    const timer = setTimeout(() => request.destroy(new Error('HTTP_TIMEOUT')), Math.max(1, timeoutMs));
+    request.on('error', reject);
+    request.on('close', () => clearTimeout(timer));
+  });
 }
-export async function runtime(port, expectedVersion) {
-  const health = await readStatus(port, '/actuator/health/readiness');
+export async function runtime(port, expectedVersion, timeoutMs = 6000) {
+  const deadline = performance.now() + timeoutMs;
+  const remaining = () => Math.max(1, Math.min(3000, deadline - performance.now()));
+  const health = await readStatus(port, '/actuator/health/readiness', remaining());
   if (health.invalid) return ['FAIL', 'RUNTIME_INVALID'];
   if (!health.available) return ['BLOCKED', 'RUNTIME_NOT_READY'];
   if (!health.body || typeof health.body.status !== 'string') return ['FAIL', 'RUNTIME_INVALID'];
   if (health.body.status !== 'UP') return ['BLOCKED', 'RUNTIME_NOT_READY'];
-  const status = await readStatus(port, '/api/v1/runtime-status');
+  const status = await readStatus(port, '/api/v1/runtime-status', remaining());
   if (status.invalid) return ['FAIL', 'RUNTIME_INVALID'];
   if (!status.available) return ['BLOCKED', 'RUNTIME_UNAVAILABLE'];
   const body = status.body;

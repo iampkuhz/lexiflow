@@ -1,5 +1,6 @@
 """验证本机部署入口的编排和失败边界；替身不能证明真实容器成功。"""
 import contextlib
+import hashlib
 import http.server
 import json
 import os
@@ -27,7 +28,7 @@ class LocalEntryTest(unittest.TestCase):
         self.calls = self.root / "calls"
         self.mode = self.root / "mode"
         self.mode.write_text("")
-        for relative in ["ops/podman/local.mjs", "ops/podman/command.mjs", "ops/podman/doctor.mjs", "ops/podman/compose.validation.yaml",
+        for relative in ["ops/podman/local.mjs", "ops/podman/command.mjs", "ops/podman/doctor.mjs", "ops/podman/network-repair.mjs", "ops/podman/compose.validation.yaml",
                          "ops/podman/fetch-ecdict.sh", "ops/podman/source-tools.Containerfile",
                          "ops/docker/Dockerfile", "ops/docker/Dockerfile.postgres",
                          "ops/docker/entrypoint.sh", "ops/docker/bootstrap.sh",
@@ -151,6 +152,42 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.mode.write_text('')
         result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(secret,(self.kit/'secrets/app-password').read_bytes())
+
+    def test_initialized_install_repairs_network_without_reimport(self):
+        result = self.invoke('install',serve=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        compose = self.kit/'compose.yaml'
+        legacy = compose.read_text().split('  published:\n')[0].replace('networks: [private, published]', 'networks: [private]')
+        compose.write_text(legacy)
+        state_file = self.kit/'state.json'
+        state = json.loads(state_file.read_text())
+        state['digests']['compose.yaml'] = hashlib.sha256(legacy.encode()).hexdigest()
+        state['phase'] = 'initialized'
+        state_file.write_text(json.dumps(state))
+        preserved = {key:value for key,value in state['digests'].items() if key != 'compose.yaml'}
+        (self.kit/'state.json.next').write_text('interrupted-old-save')
+        result = self.invoke('up')
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('已自动修复',result.stdout)
+        self.assertEqual((self.kit/'state.json.next').read_text(),'interrupted-old-save')
+        after = json.loads(state_file.read_text())
+        self.assertEqual(preserved,{key:value for key,value in after['digests'].items() if key != 'compose.yaml'})
+        self.assertIn('networks: [private, published]',compose.read_text())
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertEqual(sum('initialize' in row and 'run' in row for row in calls),1)
+        self.assertFalse(any('down' in row or 'prune' in row for row in calls))
+
+    def test_readiness_deadline_keeps_initialized_data(self):
+        # 只在标准Node preload替换单调时钟，产品没有缩短超时的测试开关。
+        with self.preload.open('a') as output:
+            output.write("Object.defineProperty(globalThis,'performance',{value:{now:(()=>{let n=0;return()=>n+=30000})()}});")
+        result=self.invoke('install')
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('最多 120 秒',result.stdout)
+        self.assertIn('API 就绪等待超时',result.stderr)
+        self.assertEqual(json.loads((self.kit/'state.json').read_text())['phase'],'initialized')
+        self.assertTrue((self.kit/'secrets/app-password').exists())
+        self.assertFalse((self.kit/'.lock').exists())
 
     def test_uncertain_initialization_never_retries(self):
         self.mode.write_text('init-fail')
