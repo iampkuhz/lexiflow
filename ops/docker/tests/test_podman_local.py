@@ -27,7 +27,7 @@ class LocalEntryTest(unittest.TestCase):
         self.calls = self.root / "calls"
         self.mode = self.root / "mode"
         self.mode.write_text("")
-        for relative in ["ops/podman/local.mjs", "ops/podman/command.mjs", "ops/podman/compose.validation.yaml",
+        for relative in ["ops/podman/local.mjs", "ops/podman/command.mjs", "ops/podman/doctor.mjs", "ops/podman/compose.validation.yaml",
                          "ops/podman/fetch-ecdict.sh", "ops/podman/source-tools.Containerfile",
                          "ops/docker/Dockerfile", "ops/docker/Dockerfile.postgres",
                          "ops/docker/entrypoint.sh", "ops/docker/bootstrap.sh",
@@ -75,7 +75,7 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.program(self.bin / "podman", fake)
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
-                payload = {"status": "UP"} if self.path.endswith("readiness") else {"mode": "formal", "ready": True, "reason": "OK", "softwareVersion": version}
+                payload = {"status": "UP"} if self.path.endswith("readiness") else {"mode": "formal", "ready": True, "reason": "OK", "softwareVersion": version, "apiContract": "caption-hints.v1"}
                 self.send_response(200); self.end_headers(); self.wfile.write(json.dumps(payload).encode())
             def log_message(self, *_args):
                 pass

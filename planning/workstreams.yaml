@@ -3163,6 +3163,8 @@ workstreams:
         - ops/podman/compose.validation.yaml
         - ops/podman/local.mjs
         - ops/podman/command.mjs
+        - ops/podman/doctor.mjs
+        - ops/docker/tests/test_podman_doctor.py
         - ops/docker/tests/test_podman_progress.py
         - ops/docker/tests/test_podman_local.py
         - ops/docker/tests/test_podman_compose_contract.py

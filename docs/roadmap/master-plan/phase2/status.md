@@ -15,6 +15,10 @@
 
 ## 1.3. 当前执行
 
+- 本轮补齐安装/up/status 与 doctor 共用有界就绪判定，拒绝重定向、超大响应、HTTP 200/DOWN 和错误协议。定向41项、完整部署Python123项和发布Node79项均通过；独立临时Podman install（约123秒）→doctor→status→stop→up→status通过，API非root/只读文件系统/进程五项capabilities全零、API与PG端口仅loopback均已核验，专属资源精确清理。资源阶段采集器已补实现；真实内核cpu.stat扩展字段带点暴露解析缺陷，修复后10采集+6计算测试及两次真实读取通过，原失败保留。证据`tmp/quality/phase2-readiness-validation/20261002T090603Z-doctor-runtime/`。短采样不证明完整资源预算，阶段工具仍ignored，不成为公开入口。最后补充doctor等价绝对路径规范化，需以其独立后续验证为准，不能沿用此前源码hash声称同输入全链。
+
+- Podman只读诊断已实现：`node ops/podman/local.mjs doctor`提供精简检查，`doctor --json`提供固定字段的可分享报告；覆盖宿主工具、引擎、安装状态、锁、容器归属与readiness/runtime-status双检查。工具与HTTP探测有界，不创建安装目录、不回收锁、不操作容器生命周期或数据库，不输出密码、绝对路径或原始工具日志。独立验证9诊断+14入口+7进度取消+3Compose+5取源共38项及静态检查通过，362项冻结摘要一致；本机对不存在目录实际执行诊断，按预期返回BLOCKED/NOT_INSTALLED且目录未创建。证据`validation-20261002T080000Z-doctor-hardening/continuation-summary/assessment.md`；独立只读复核为该切片PASS。未证明新机器实际安装、真实Chrome/YouTube、完整资源/更新恢复或同输入全仓Verify/Formal；本次改动尚未提交推送。
+
 - Podman部署进度与取消恢复已修复：有意义子步骤起止与耗时、长命令每20秒低噪声心跳、stdout/stderr实时私有日志；不伪报百分比、不将原始输出刷终端。异步子进程取消后确认同PGID后代退出，未退出保留身份与锁；锁记录owner/child PID、短同步claim串行回收，新锁仅确认进程消失后自动回收。旧空锁仅建库前可显式`recover --confirm-stopped`恢复，保留密码/词库/数据并重新准备，初始化中断不自动重导。定向14入口+7进度/后代清理+3Compose+5取源测试及静态检查通过，359输入摘要一致，证据`validation-20261002T061500Z-group-close-proof/continuation-summary/assessment.md`；只读复核进程组与锁释放闭环PASS。早期无group-close证明的review FAIL及旧报告保留；本轮不重跑真实Podman、新机器或Formal。
 
 - Podman部署已简化为`node ops/podman/local.mjs install`，默认ignored `.local/podman`自动组装、构建、真实取源、初始化并检查就绪；up/status/stop/logs复用独立安装，密码不输出、不自动删库、状态不明拒绝重导。本机实跑六步及status/stop/up/status通过，真实ECDICT网络取源已覆盖，独占资源清理完成，证据`validation-20261002T033831Z-simple-entry-retry/continuation-summary/assessment.md`。只读审查随后发现自身PG端口恢复窗口及安装CSV/SQL摘要缺口，已修复；最新9入口+3Compose+5取源测试与静态检查通过，354输入hash一致，证据`validation-20261002T043000Z-recovery-digest-recheck2/continuation-summary/assessment.md`；独立复核两修复PASS。最新两修复未重新完整install，旧真实全链证据不冒充同输入全链；新机器真实Chrome/YouTube与Formal仍未完成。测试fixture曾因未resolve临时目录、teardown等待及DB端口假设失败，修复与旧日志均保留。
@@ -95,14 +99,16 @@
 
 | 事项 | 已闭合实现与机制（非整项正式完成） | 当前待补 |
 | --- | --- | --- |
-| API-2003 就绪接口 | 六字段状态、版本身份、敏感记录默认关闭；API/质量与实际 JAR 验证 | 同输入正式验收、真实容器 readiness 与发行联调 |
-| EXT-2004 扩展状态 | 协议预检与 UI；合成浏览器、实际 JAR/API 切片及独立复审 | 真实 YouTube、Docker 部署联调与完整正式验收 |
-| OPS-2005 资料包与初始化 | Java ZIP导出校验/安全初始化、隔离PG两代合成资料；紧凑ECDICT来源包、7字段读取与真实Java只读准备已验证 | 真实来源导出/安装链、Podman容器初始化与完整生命周期 |
-| OPS-2006 Docker 封装 | 非 root API、私网 PG、Compose/health 合同及合成检查 | 真 Docker 容器权限、端口、重启与资源预算 |
-| OPS-2007 更新恢复 | 状态/锁、更新恢复、环境与引擎身份、精确归属；首次根目录异常安全拒绝与诊断已定向闭合 | 真实daemon取消、跨入口身份与两代故障生命周期 |
-| OPS-2008 当期ARM64构建 | 通用平台子集构建/精确候选装配已独立验证，保留双平台能力 | M芯片macOS原生ARM64实际构建启动、可信交接、受控CI与正式发行 |
-| QLT-2004 发布检查 | 原始快照bridge、两个runtime scope；M宿主/单ARM64端点与两代合成生命周期已定向验证 | 显式ARM64 Docker/Compose端点、完整runtime执行与当前输入Verify/Formal |
-| ARCH-2007 使用指南 | README 安装主线、生命周期指南与 macOS 开发入口 | 真环境全用户旅程、独立验收与前置正式依赖 |
+| API-2003 就绪接口 | 固定协议、版本与敏感记录默认关闭；本机真实 Podman readiness/runtime 联调通过 | 当前输入完整 Verify/Formal |
+| EXT-2004 扩展状态 | 协议预检与 UI；合成浏览器、实际 API 切片已验证 | 新机器真实 Chrome/YouTube 使用及完整正式验收 |
+| OPS-2005 资料包与初始化 | 紧凑 ECDICT 真实取源、Java 导入与隔离 Podman 初始化通过；离线资料包机制已测试 | 正式资料包导出到发行生命周期的完整链 |
+| OPS-2006 Podman Compose 封装 | M 芯片本机 install/doctor/status/stop/up/status 通过；非 root、只读 API、零 capabilities、loopback 端口核验 | 完整资源预算、干净新机器用户验证 |
+| OPS-2007 更新恢复 | 状态/锁、归属、取消恢复及发布生命周期替身回归通过 | Podman 正式两代更新/失败回滚/卸载链；本地入口尚无自动更新回滚 |
+| OPS-2008 当期 ARM64 构建 | M 芯片本机 ARM64 镜像实际构建启动通过；候选装配机制已验证 | 可信制品交接、受控 CI 与正式发行 |
+| QLT-2004 发布检查 | 定向与完整部署替身回归、本机 Podman 安装生命周期均有证据 | 当前输入完整 Verify/Formal 与正式发行消费者的 Podman 接入 |
+| ARCH-2007 使用指南 | 一条命令部署、取源、数据库查看、取消恢复、只读诊断说明已完成 | 新机器真实用户旅程与正式发行依赖 |
+
+QLT-2002 资源工作还需完整空闲/播放窗口、p95、宿主硬件和发行输入绑定及生命周期接线；阶段工具的计算、采集单测和两次真实短采样不代表预算通过。新机器真实体验留给用户，其余工程缺口仍可继续推进，不因 Docker Desktop 缺失暂停 Podman 路线。
 
 当前 session 已启用完全访问并恢复执行模式；父任务重新查询本机进程，未发现匹配旧生命周期、资源归属和构建检查命令的运行，无需杀进程。解除这些读取域的开发隔离，但不补造旧运行终态或将旧结果改成 PASS。OPS-2007 的环境隔离、跨发行委派身份及中断保留锁已完成定向验证和独立技术复核；OPS-2008 候选负例已完成 29 项验证及技术复核。QLT-2004 的原始来源快照消费、动态候选摘要核对和 runtime 接线已实现，本机真实构件链已有独立证据；受控 CI、双原生 Docker 运行、真实 daemon 取消与跨入口身份的实际环境证据仍待补齐。仅在自有临时环境开发和测试，不操作真实安装；环境发布验证暂缓不等于跳过已知实现缺陷。
 
