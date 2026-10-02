@@ -3162,6 +3162,8 @@ workstreams:
         allowed_files:
         - ops/podman/compose.validation.yaml
         - ops/podman/local.mjs
+        - ops/podman/command.mjs
+        - ops/docker/tests/test_podman_progress.py
         - ops/docker/tests/test_podman_local.py
         - ops/docker/tests/test_podman_compose_contract.py
         - ops/docker/Dockerfile.postgres

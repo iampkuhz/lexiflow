@@ -7,12 +7,16 @@ import net from 'node:net';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { runCommand, HEARTBEAT_MS } from './command.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const help = '用法: node ops/podman/local.mjs install|up|status|stop|logs [--dir 绝对路径] [install: --api-port 18080 --db-port 15432]';
+const help = '用法: node ops/podman/local.mjs install|up|status|stop|logs|recover [--dir 绝对路径] [install: --api-port 18080 --db-port 15432]';
 const args = process.argv.slice(2), action = args.shift();
 let dir = path.join(repo, '.local/podman'), apiPort = 18080, dbPort = 15432;
-let lockOwned = false, state, step = '检查参数', logFile;
+let lockOwned = false, state, step = '检查参数', logFile, lockRecord, interrupted = false;
+const markInterrupted = () => { interrupted = true; };
+process.on('SIGINT', markInterrupted);
+process.on('SIGTERM', markInterrupted);
 const sha = (value) => crypto.createHash('sha256').update(value).digest('hex');
 const fail = (message) => { throw new Error(message); };
 const environment = Object.fromEntries(['HOME', 'PATH', 'JAVA_HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'SSH_AUTH_SOCK', 'CONTAINER_HOST', 'CONTAINER_CONNECTION', 'DOCKER_HOST', 'PODMAN_COMPOSE_PROVIDER'].filter(k => process.env[k]).map(k => [k, process.env[k]]));
@@ -28,11 +32,24 @@ function safePath(target) {
     if (fs.existsSync(cursor) && fs.lstatSync(cursor).isSymbolicLink()) fail(`拒绝符号链接路径: ${cursor}`);
   }
 }
+function commandLabel(command, argv) {
+  if (command === './gradlew') return '编译 Java 应用';
+  if (command === 'npm') return argv[0] === 'ci' ? '安装扩展依赖' : '构建 Chrome 扩展';
+  if (command !== 'podman') return undefined;
+  if (argv[0] === 'pull') return argv.at(-1).includes('temurin') ? '拉取 Java 25 基础镜像' : '拉取 PostgreSQL 17 基础镜像';
+  if (argv[0] === 'build') return argv.at(-1) === 'build/api' ? '构建 API 镜像' : argv.at(-1) === 'build/postgres' ? '构建 PostgreSQL 镜像' : '构建词库工具镜像';
+  if (argv[0] === 'run') return '下载、校验并精简 ECDICT';
+  if (argv[0] === 'compose') {
+    if (argv.includes('initialize')) return '导入词库到 PostgreSQL';
+    if (argv.includes('up')) return argv.at(-1) === 'postgres' ? '启动 PostgreSQL' : '启动 API';
+    if (argv.includes('stop')) return '停止服务';
+  }
+  return undefined;
+}
 function run(command, argv, { cwd = dir, timeout = 600000, capture = false, env = environment } = {}) {
-  const result = spawnSync(command, argv, { cwd, env, encoding: 'utf8', timeout, maxBuffer: 24 * 1024 * 1024 });
-  if (logFile) fs.appendFileSync(logFile, `\n[${step}] ${command}\n${result.stdout || ''}${result.stderr || ''}\nexit=${result.status}\n`, { mode: 0o600 });
-  if (result.error || result.status !== 0) fail(`${command} 执行失败或超时${logFile ? `；详情见 ${logFile}` : '；检查工具安装与运行状态'}`);
-  return capture ? (result.stdout || '').trim() : undefined;
+  if (interrupted) fail('安装已取消；已保存当前状态，可重新执行 install（初始化状态不明除外）');
+  const label = commandLabel(command, argv);
+  return runCommand(command, argv, { cwd, timeout, capture, env, logFile, label: label || `执行 ${command} 检查`, announce: Boolean(label), onStart: pid => writeLock(pid), onClose: ({ groupGone }) => { if (groupGone) writeLock(null); } });
 }
 function save() {
   const next = path.join(dir, 'state.json.next');
@@ -52,12 +69,12 @@ function verifyConfig() {
 function compose(...argv) {
   return run('podman', ['compose', '--env-file', 'release.env', '-p', state.project, '-f', 'compose.yaml', ...argv], { capture: true });
 }
-function ownedResources() {
+async function ownedResources() {
   // 扫描 Compose 项目标签，两种 provider 标签均核对；不依赖易漂移的引擎 ID。
   const services = new Set();
   for (const kind of ['container', 'volume', 'network']) {
     const listArgs = kind === 'container' ? ['ps', '-a', '--format', 'json'] : [kind, 'ls', '--format', 'json'];
-    const rows = JSON.parse(run('podman', listArgs, { capture: true, timeout: 30000 }));
+    const rows = JSON.parse(await run('podman', listArgs, { capture: true, timeout: 30000 }));
     for (const row of rows) {
       const labels = row.Labels || row.labels || {};
       if ([labels['com.docker.compose.project'], labels['io.podman.compose.project']].includes(state.project) && labels['lexiflow.installation'] !== state.id) fail(`发现归属不匹配的 ${kind}，拒绝操作`);
@@ -74,13 +91,24 @@ async function freePort(port) {
   });
 }
 async function ready() {
+  const started = Date.now();
+  let lastNotice = started;
+  console.log('[LexiFlow]   等待 API 正式就绪…');
   for (let attempt = 0; attempt < 60; attempt++) {
+    if (interrupted) fail('等待已取消，已初始化的数据保留，可用 up 再次启动');
     try {
       const health = await fetch(`http://127.0.0.1:${state.apiPort}/actuator/health/readiness`, { signal: AbortSignal.timeout(2000) });
       const status = await fetch(`http://127.0.0.1:${state.apiPort}/api/v1/runtime-status`, { signal: AbortSignal.timeout(2000) });
       const body = await status.json();
-      if (health.ok && status.ok && body.mode === 'formal' && body.ready === true && body.reason === 'OK' && body.softwareVersion === state.version) return body;
+      if (health.ok && status.ok && body.mode === 'formal' && body.ready === true && body.reason === 'OK' && body.softwareVersion === state.version) {
+        console.log(`[LexiFlow]   API 已正式就绪（${Math.floor((Date.now() - started) / 1000)} 秒）`);
+        return body;
+      }
     } catch { /* 有界等待容器就绪，不输出响应内容。 */ }
+    if (Date.now() - lastNotice >= HEARTBEAT_MS) {
+      console.log(`[LexiFlow]   仍在等待 API 正式就绪（已用 ${Math.floor((Date.now() - started) / 1000)} 秒）`);
+      lastNotice = Date.now();
+    }
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
   fail('应用未达到 formal/ready/OK；查看 logs，不重复初始化数据库');
@@ -93,7 +121,7 @@ function copy(from, to) {
   fs.mkdirSync(path.dirname(path.join(dir, to)), { recursive: true, mode: 0o700 });
   fs.copyFileSync(path.join(repo, from), path.join(dir, to));
 }
-function checkpoint(phase) { state.phase = phase; save(); }
+function checkpoint(phase) { if (interrupted) fail('安装已取消，保留当前阶段'); state.phase = phase; save(); }
 function progress(text) { step = text; console.log(`[LexiFlow] ${text}`); }
 function sourceFingerprint() {
   // 恢复阶段只允许同一源码输入；不读取 ignored 本机资料。
@@ -111,12 +139,69 @@ function sourceFingerprint() {
   }
   roots.forEach(visit); return sha(JSON.stringify(inputs));
 }
+function writeLock(childPid) {
+  if (!lockOwned) return;
+  lockRecord.childPid = childPid;
+  fs.writeFileSync(path.join(dir, '.lock/owner.json'), JSON.stringify(lockRecord), { mode: 0o600 });
+}
+function alive(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch (error) { if (error.code === 'ESRCH') return false; throw error; }
+}
+function retireLock(confirmLegacy = false) {
+  const root = path.join(dir, '.lock');
+  if (!fs.existsSync(root)) return;
+  safePath(root);
+  const entries = fs.readdirSync(root);
+  if (entries.length === 0) {
+    if (!confirmLegacy) fail('发现旧安装遗留的空锁；确认旧安装已退出后运行 recover --confirm-stopped，再重试 install');
+  } else {
+    if (entries.length !== 1 || entries[0] !== 'owner.json') fail('安装锁内容未知，拒绝删除');
+    regular(path.join(root, 'owner.json'));
+    let owner;
+    try { owner = JSON.parse(fs.readFileSync(path.join(root, 'owner.json'), 'utf8')); }
+    catch { fail('安装锁元数据不完整，拒绝自动删除'); }
+    if (owner.schema !== 1 || owner.root !== dir || owner.installation !== state.id || !Number.isSafeInteger(owner.pid) || owner.pid <= 1 || !/^[a-f0-9]{32}$/.test(owner.token) || (owner.childPid !== null && (!Number.isSafeInteger(owner.childPid) || owner.childPid <= 1))) fail('安装锁归属无效');
+    if (alive(owner.pid) || (owner.childPid && alive(-owner.childPid))) fail('安装或其子进程仍在运行，不能重试或恢复；请先结束原命令');
+    // 删除前再校验原记录，拒绝已发生的身份漂移。
+    if (fs.readFileSync(path.join(root, 'owner.json'), 'utf8') !== JSON.stringify(owner)) fail('安装锁已改变，请稍后重试');
+    fs.unlinkSync(path.join(root, 'owner.json'));
+  }
+  fs.rmdirSync(root);
+}
+function acquireLock(confirmLegacy = false) {
+  // 回收和创建必须属于同一个短同步临界区，防止两个重试删除彼此的新锁。
+  const claim = path.join(dir, '.lock-claim');
+  try { fs.mkdirSync(claim, { mode: 0o700 }); }
+  catch { fail('另一命令正在交接安装锁或上次交接被强制终止；保留现场，不删除未知交接锁'); }
+  try {
+    retireLock(confirmLegacy);
+    fs.mkdirSync(path.join(dir, '.lock'), { mode: 0o700 });
+    lockOwned = true;
+    lockRecord = { schema: 1, root: dir, installation: state.id, pid: process.pid, token: crypto.randomBytes(16).toString('hex'), childPid: null };
+    writeLock(null);
+  } finally { fs.rmdirSync(claim); }
+}
+function releaseLock() {
+  if (!lockOwned) return;
+  if (lockRecord.childPid && alive(-lockRecord.childPid)) {
+    console.error('[LexiFlow] 子进程组仍存在，安装锁已保留；不要同时启动下一次安装');
+    return;
+  }
+  const ownerFile = path.join(dir, '.lock/owner.json');
+  const owner = JSON.parse(fs.readFileSync(ownerFile, 'utf8'));
+  if (owner.token !== lockRecord.token || owner.pid !== process.pid) return;
+  fs.unlinkSync(ownerFile); fs.rmdirSync(path.join(dir, '.lock'));
+}
 async function main() {
   if (action === '--help' || action === 'help') { console.log(help); return; }
-  if (!['install', 'up', 'status', 'stop', 'logs'].includes(action)) fail(help);
+  if (!['install', 'up', 'status', 'stop', 'logs', 'recover'].includes(action)) fail(help);
   const seen = new Set();
+  let confirmStopped = false;
   while (args.length) {
-    const key = args.shift(), value = args.shift();
+    const key = args.shift();
+    if (action === 'recover' && key === '--confirm-stopped' && !confirmStopped) { confirmStopped = true; continue; }
+    const value = args.shift();
     if (!value || seen.has(key)) fail(help); seen.add(key);
     if (key === '--dir') dir = value;
     else if (action === 'install' && ['--api-port', '--db-port'].includes(key) && /^[1-9][0-9]{0,4}$/.test(value) && +value <= 65535) {
@@ -128,6 +213,7 @@ async function main() {
   if (apiPort === dbPort) fail('API 与数据库端口不能相同');
   if (Number(process.versions.node.split('.')[0]) < 22) fail('需要 Node.js 22 或以上');
   if (os.platform() !== 'darwin' || os.arch() !== 'arm64') fail('本入口仅用于 M 芯片 macOS');
+  console.log('[LexiFlow] 检查安装目录与 Podman 环境…');
   const existed = fs.existsSync(dir);
   if (existed) {
     regular(path.join(dir, 'state.json'));
@@ -136,8 +222,8 @@ async function main() {
     if (action === 'install' && ((seen.has('--api-port') && apiPort !== state.apiPort) || (seen.has('--db-port') && dbPort !== state.dbPort))) fail('已有安装不能变更端口，请另选 --dir');
   } else {
     if (action !== 'install') fail('尚未安装，请先运行 install');
-    run('podman', ['info'], { cwd: repo, timeout: 30000 });
-    run('podman', ['compose', 'version'], { cwd: repo, timeout: 30000 });
+    await run('podman', ['info'], { cwd: repo, timeout: 30000 });
+    await run('podman', ['compose', 'version'], { cwd: repo, timeout: 30000 });
     await freePort(apiPort); await freePort(dbPort);
     fs.mkdirSync(path.dirname(dir), { recursive: true, mode: 0o700 });
     fs.mkdirSync(dir, { mode: 0o700 });
@@ -145,13 +231,22 @@ async function main() {
     state = { schema: 1, id, project: `lexiflow-local-${id}`, root: dir, apiPort, dbPort, phase: 'new', version: fs.readFileSync(path.join(repo, 'ops/release/version.txt'), 'utf8').trim(), source: sourceFingerprint() };
     save();
   }
-  try { fs.mkdirSync(path.join(dir, '.lock'), { mode: 0o700 }); lockOwned = true; }
-  catch { fail('安装正在被其他命令操作或上次被强制中断；不要删除未知锁，先核对运行进程'); }
+  if (action === 'recover') {
+    if (!confirmStopped) fail('恢复旧锁需明确确认原安装已经退出：recover --confirm-stopped');
+    if (!['new', 'built'].includes(state.phase)) fail('只允许恢复建库前的安装；已进入数据库阶段时保留现场，不自动清库或重导');
+    acquireLock(true);
+    // 旧脚本升级后的建库前安装完整重建；保留密码、词库和已有镜像，不接管数据库。
+    state.source = sourceFingerprint(); state.phase = 'new'; save();
+    console.log('[LexiFlow] 建库前安装锁已恢复，数据和密码未删除；请重新执行 install');
+    return;
+  }
+  acquireLock();
   logFile = path.join(dir, `operation-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.log`);
   fs.writeFileSync(logFile, '', { mode: 0o600, flag: 'wx' });
-  run('podman', ['info'], { timeout: 30000 });
+  console.log(`[LexiFlow] 详细日志（实时写入）: ${logFile}`);
+  await run('podman', ['info'], { timeout: 30000 });
   if (state.digests) verifyConfig();
-  ownedResources();
+  await ownedResources();
   if (action === 'install' && !['initialized', 'ready'].includes(state.phase)) {
     if (state.phase === 'initializing') fail('上次数据库初始化未确认完成，已保留现场；禁止自动重导或清库，请查看日志');
     if (state.source !== sourceFingerprint()) fail('未完成安装的源码已变化，请保留现场并使用新的 --dir');
@@ -159,9 +254,9 @@ async function main() {
     if (java.status !== 0 || !/version "25[.\"]/.test(java.stderr)) fail('请安装并选择 Java 25 JDK（设置 JAVA_HOME 和 PATH）');
     if (state.phase === 'new') {
       progress('1/6 构建 Java 应用与 Chrome 扩展');
-      run('./gradlew', ['--no-daemon', ':api:bootJar'], { cwd: path.join(repo, 'backend') });
-      run('npm', ['ci'], { cwd: path.join(repo, 'extension') });
-      run('npm', ['run', 'build'], { cwd: path.join(repo, 'extension'), env: { ...environment, LEXIFLOW_API_PORT: String(state.apiPort) } });
+      await run('./gradlew', ['--no-daemon', ':api:bootJar'], { cwd: path.join(repo, 'backend') });
+      await run('npm', ['ci'], { cwd: path.join(repo, 'extension') });
+      await run('npm', ['run', 'build'], { cwd: path.join(repo, 'extension'), env: { ...environment, LEXIFLOW_API_PORT: String(state.apiPort) } });
       for (const [from, to] of [
         [`backend/product/api/build/libs/api-${state.version}.jar`, 'build/api/lexiflow-api.jar'], ['ops/docker/Dockerfile', 'build/api/Dockerfile'], ['ops/docker/entrypoint.sh', 'build/api/entrypoint.sh'], ['ops/docker/Dockerfile.postgres', 'build/postgres/Dockerfile'], ['ops/docker/bootstrap.sh', 'build/postgres/bootstrap.sh'], ['infra/postgres/schema.sql', 'infra/postgres/schema.sql'], ['ops/dataset/ecdict-source.lock.json', 'ops/dataset/ecdict-source.lock.json'], ['scripts/environment/ecdict_bundle.py', 'scripts/environment/ecdict_bundle.py'], ['ops/podman/fetch-ecdict.sh', 'ops/podman/fetch-ecdict.sh'], ['ops/podman/source-tools.Containerfile', 'ops/podman/source-tools.Containerfile'],
       ]) copy(from, to);
@@ -171,11 +266,11 @@ async function main() {
       fs.writeFileSync(path.join(dir, 'compose.yaml'), template);
       progress('2/6 构建 ARM64 容器镜像');
       for (const [name, base, arg] of [['api', 'docker.io/library/eclipse-temurin:25-jre', 'JAVA_RUNTIME_IMAGE'], ['postgres', 'docker.io/library/postgres:17-bookworm', 'POSTGRES_RUNTIME_IMAGE']]) {
-        run('podman', ['pull', '--platform', 'linux/arm64', base]);
-        const baseId = run('podman', ['image', 'inspect', '--format', '{{.Id}}', base], { capture: true });
+        await run('podman', ['pull', '--platform', 'linux/arm64', base]);
+        const baseId = await run('podman', ['image', 'inspect', '--format', '{{.Id}}', base], { capture: true });
         const tag = `localhost/lexiflow-${name}:${state.id}`;
-        run('podman', ['build', '--platform', 'linux/arm64', '--pull=never', '--build-arg', `${arg}=${baseId}`, '-t', tag, `build/${name}`]);
-        state[`${name}Image`] = run('podman', ['image', 'inspect', '--format', '{{.Id}}', tag], { capture: true });
+        await run('podman', ['build', '--platform', 'linux/arm64', '--pull=never', '--build-arg', `${arg}=${baseId}`, '-t', tag, `build/${name}`]);
+        state[`${name}Image`] = await run('podman', ['image', 'inspect', '--format', '{{.Id}}', tag], { capture: true });
         if (!/^(sha256:)?[a-f0-9]{64}$/.test(state[`${name}Image`])) fail('镜像 ID 格式错误');
       }
       fs.mkdirSync(path.join(dir, 'secrets'), { recursive: true, mode: 0o700 });
@@ -190,8 +285,8 @@ async function main() {
       progress('3/6 下载、校验并精简公开 ECDICT 词库');
       fs.mkdirSync(path.join(dir, 'data'), { recursive: true, mode: 0o700 });
       const tag = `localhost/lexiflow-source-tools:${state.id}`;
-      run('podman', ['build', '--platform', 'linux/arm64', '-t', tag, '-f', 'ops/podman/source-tools.Containerfile', 'ops/podman']);
-      const output = run('podman', ['run', '--rm', '--platform', 'linux/arm64', '--memory', '2g', '-v', `${dir}/ops:/kit/ops:ro`, '-v', `${dir}/scripts:/kit/scripts:ro`, '-v', `${dir}/data:/data`, tag, '/kit/ops/podman/fetch-ecdict.sh', '/kit', '/data'], { capture: true, timeout: 1800000 });
+      await run('podman', ['build', '--platform', 'linux/arm64', '-t', tag, '-f', 'ops/podman/source-tools.Containerfile', 'ops/podman']);
+      const output = await run('podman', ['run', '--rm', '--platform', 'linux/arm64', '--memory', '2g', '-v', `${dir}/ops:/kit/ops:ro`, '-v', `${dir}/scripts:/kit/scripts:ro`, '-v', `${dir}/data:/data`, tag, '/kit/ops/podman/fetch-ecdict.sh', '/kit', '/data'], { capture: true, timeout: 1800000 });
       const matches = [...output.matchAll(/^dataset_dir=\/data\/(ecdict-source\.[A-Za-z0-9]+)$/gm)];
       if (matches.length !== 1) fail('未取得唯一且安全的词库目录');
       state.dataset = path.join(dir, 'data', matches[0][1]);
@@ -203,22 +298,25 @@ async function main() {
     if (state.phase === 'source') {
       await freePort(state.apiPort);
       // 已归属 PG 可能在 checkpoint 前启动过；不要把自己的端口当作外部冲突。
-      if (!ownedResources().has('postgres')) await freePort(state.dbPort);
+      if (!(await ownedResources()).has('postgres')) await freePort(state.dbPort);
       verifyConfig();
-      progress('4/6 启动 PostgreSQL'); compose('config'); compose('up', '-d', 'postgres');
+      progress('4/6 启动 PostgreSQL'); await compose('config'); await compose('up', '-d', 'postgres');
       // compose initialize 的 service_healthy 依赖负责等待 PG，而不是错误即重导。
       progress('5/6 首次导入词库（不要中断）'); checkpoint('initializing');
-      compose('run', '--rm', 'initialize'); checkpoint('initialized');
+      await compose('run', '--rm', 'initialize'); checkpoint('initialized');
     }
   }
   if (!state.digests) fail('安装未完成，请运行 install 重试建库前步骤');
-  verifyConfig(); ownedResources();
-  if (action === 'stop') { progress('停止服务，保留数据库'); compose('stop'); return; }
-  if (action === 'logs') { console.log(compose('logs', '--tail=100', 'postgres', 'api')); return; }
-  if (action === 'status') { console.log(compose('ps')); await ready(); summary(); return; }
+  verifyConfig(); await ownedResources();
+  if (action === 'stop') { progress('停止服务，保留数据库'); await compose('stop'); return; }
+  if (action === 'logs') { console.log(await compose('logs', '--tail=100', 'postgres', 'api')); return; }
+  if (action === 'status') { console.log(await compose('ps')); await ready(); summary(); return; }
   if (!['initialized', 'ready'].includes(state.phase)) fail('数据库尚未确认初始化完成；请查看安装日志');
   progress('6/6 启动应用并验证就绪');
-  compose('up', '-d', 'postgres'); compose('up', '-d', '--no-deps', 'api');
+  await compose('up', '-d', 'postgres'); await compose('up', '-d', '--no-deps', 'api');
   await ready(); checkpoint('ready'); summary();
 }
-main().catch(error => { console.error(`[LexiFlow] ${step}失败：${error.message}`); process.exitCode = 1; }).finally(() => { if (lockOwned) fs.rmdirSync(path.join(dir, '.lock')); });
+main().catch(error => { console.error(`[LexiFlow] ${step}失败：${error.message}`); process.exitCode = 1; }).finally(() => {
+  process.removeListener('SIGINT', markInterrupted); process.removeListener('SIGTERM', markInterrupted);
+  releaseLock();
+});

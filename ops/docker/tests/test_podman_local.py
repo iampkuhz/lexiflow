@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import signal
+import time
 import subprocess
 import tempfile
 import threading
@@ -25,7 +27,7 @@ class LocalEntryTest(unittest.TestCase):
         self.calls = self.root / "calls"
         self.mode = self.root / "mode"
         self.mode.write_text("")
-        for relative in ["ops/podman/local.mjs", "ops/podman/compose.validation.yaml",
+        for relative in ["ops/podman/local.mjs", "ops/podman/command.mjs", "ops/podman/compose.validation.yaml",
                          "ops/podman/fetch-ecdict.sh", "ops/podman/source-tools.Containerfile",
                          "ops/docker/Dockerfile", "ops/docker/Dockerfile.postgres",
                          "ops/docker/entrypoint.sh", "ops/docker/bootstrap.sh",
@@ -52,7 +54,10 @@ from pathlib import Path
 args=sys.argv[1:]
 with Path(CALLS).open('a') as f: f.write(json.dumps(args)+'\\n')
 mode=Path(MODE).read_text()
-if args[:1]==['info']: print('{}')
+if args[:1]==['pull'] and mode=='slow-pull':
+    import time
+    print('private-download-output',flush=True);time.sleep(30)
+elif args[:1]==['info']: print('{}')
 elif args[:2]==['image','inspect']: print('sha256:'+'a'*64)
 elif args[:1]==['ps'] or args[:2] in [['volume','ls'],['network','ls']]:
     if mode=='foreign':
@@ -197,6 +202,73 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
             self.assertIn('发生变化',result.stderr)
             self.assertNotIn('"initialize"',self.calls.read_text()[len(calls):])
             file.write_bytes(before)
+
+    def test_cancel_during_image_pull_releases_lock_and_retries(self):
+        self.server.server_close()
+        self.mode.write_text('slow-pull')
+        argv=[shutil.which('node'),'--import',str(self.preload),str(self.repo/'ops/podman/local.mjs'),'install','--dir',str(self.kit),'--api-port',str(self.api_port),'--db-port',str(self.db_port)]
+        proc=subprocess.Popen(argv,env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH']},stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        try:
+            until=time.monotonic()+10
+            while time.monotonic()<until:
+                if self.calls.exists() and any(json.loads(line)[0]=='pull' for line in self.calls.read_text().splitlines()): break
+                time.sleep(.02)
+            self.assertIsNone(proc.poll())
+            self.assertTrue((self.kit/'.lock/owner.json').exists())
+            proc.send_signal(signal.SIGINT)
+            out,err=proc.communicate(timeout=8)
+            self.assertNotEqual(proc.returncode,0)
+            self.assertIn('收到中断请求',err)
+            self.assertFalse((self.kit/'.lock').exists())
+            self.assertNotIn('private-download-output',out+err)
+        finally:
+            if proc.poll() is None: proc.kill();proc.communicate()
+        self.mode.write_text('')
+        result=self.invoke('install',serve=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_legacy_empty_lock_requires_confirmation_and_preserves_data(self):
+        self.mode.write_text('fetch-fail');result=self.invoke('install')
+        self.assertNotEqual(result.returncode,0)
+        secret=(self.kit/'secrets/app-password').read_bytes()
+        (self.kit/'.lock').mkdir()
+        result=self.invoke('install');self.assertNotEqual(result.returncode,0)
+        result=self.invoke('recover');self.assertNotEqual(result.returncode,0)
+        self.assertTrue((self.kit/'.lock').exists())
+        result=self.invoke('recover','--confirm-stopped');self.assertEqual(result.returncode,0,result.stderr)
+        self.assertFalse((self.kit/'.lock').exists())
+        self.assertEqual(secret,(self.kit/'secrets/app-password').read_bytes())
+        self.mode.write_text('');result=self.invoke('install',serve=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_active_lock_cannot_be_recovered_or_removed(self):
+        self.mode.write_text('fetch-fail');self.invoke('install')
+        state=json.loads((self.kit/'state.json').read_text())
+        (self.kit/'.lock').mkdir()
+        owner={'schema':1,'root':str(self.kit),'installation':state['id'],'pid':os.getpid(),'token':'a'*32,'childPid':None}
+        text=json.dumps(owner,separators=(',',':'))
+        (self.kit/'.lock/owner.json').write_text(text)
+        result=self.invoke('recover','--confirm-stopped');self.assertNotEqual(result.returncode,0)
+        self.assertEqual(text,(self.kit/'.lock/owner.json').read_text())
+
+    def test_existing_claim_refuses_recovery_without_touching_locks(self):
+        self.mode.write_text('fetch-fail');self.invoke('install')
+        (self.kit/'.lock').mkdir()
+        (self.kit/'.lock-claim').mkdir()
+        result=self.invoke('recover','--confirm-stopped')
+        self.assertNotEqual(result.returncode,0)
+        self.assertTrue((self.kit/'.lock').is_dir())
+        self.assertTrue((self.kit/'.lock-claim').is_dir())
+
+    def test_dead_owned_lock_is_reclaimed_without_confirmation(self):
+        self.mode.write_text('fetch-fail');self.invoke('install')
+        old=subprocess.Popen([shutil.which('node'),'-e','']);old.wait()
+        state=json.loads((self.kit/'state.json').read_text())
+        (self.kit/'.lock').mkdir()
+        owner={'schema':1,'root':str(self.kit),'installation':state['id'],'pid':old.pid,'token':'b'*32,'childPid':None}
+        (self.kit/'.lock/owner.json').write_text(json.dumps(owner,separators=(',',':')))
+        self.mode.write_text('');result=self.invoke('install',serve=True)
+        self.assertEqual(result.returncode,0,result.stderr)
 
     def test_symlink_directory_is_rejected(self):
         real=self.root/'real';real.mkdir();self.kit.symlink_to(real)
