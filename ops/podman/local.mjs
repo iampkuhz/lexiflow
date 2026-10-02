@@ -12,9 +12,10 @@ import { doctor, runtime } from './doctor.mjs';
 import { repairNetwork } from './network-repair.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const help = '用法: node ops/podman/local.mjs install|up|status|stop|logs|recover|doctor [--dir 绝对路径] [install: --api-port 18080 --db-port 15432]';
+const help = '用法: node ops/podman/local.mjs install|up|status|stop|logs|recover|doctor [--dir 绝对路径] [install: --api-port 18080 --db-port 15432 --caption-debug]';
 const args = process.argv.slice(2), action = args.shift();
 let dir = path.join(repo, '.local/podman'), apiPort = 18080, dbPort = 15432;
+let captionDebug = false;
 let lockOwned = false, state, step = '检查参数', logFile, lockRecord, interrupted = false;
 const markInterrupted = () => { interrupted = true; };
 process.on('SIGINT', markInterrupted);
@@ -60,6 +61,7 @@ function save() {
 }
 function digestFiles() {
   const names = ['compose.yaml', 'release.env', 'secrets/postgres-password', 'secrets/app-password', 'infra/postgres/schema.sql'];
+  if (state.captionDebug) names.push('caption-debug.yaml');
   if (state.dataset) names.push(path.relative(dir, path.join(state.dataset, 'stardict.csv')));
   return Object.fromEntries(names.map(name => {
     const file = path.join(dir, name); safePath(file); regular(file); return [name, sha(fs.readFileSync(file))];
@@ -69,7 +71,7 @@ function verifyConfig() {
   if (JSON.stringify(digestFiles()) !== JSON.stringify(state.digests)) fail('安装配置或密码发生变化，拒绝操作；不要手改受管目录');
 }
 function compose(...argv) {
-  return run('podman', ['compose', '--env-file', 'release.env', '-p', state.project, '-f', 'compose.yaml', ...argv], { capture: true });
+  return run('podman', ['compose', '--env-file', 'release.env', '-p', state.project, '-f', 'compose.yaml', ...(state.captionDebug ? ['-f', 'caption-debug.yaml'] : []), ...argv], { capture: true });
 }
 async function ownedResources() {
   // 扫描 Compose 项目标签，两种 provider 标签均核对；不依赖易漂移的引擎 ID。
@@ -223,6 +225,7 @@ async function main() {
     const key = args.shift();
     if (action === 'doctor' && key === '--json' && !jsonReport) { jsonReport = true; continue; }
     if (action === 'recover' && key === '--confirm-stopped' && !confirmStopped) { confirmStopped = true; continue; }
+    if (action === 'install' && key === '--caption-debug' && !captionDebug) { captionDebug = true; continue; }
     const value = args.shift();
     if (!value || seen.has(key)) fail(help); seen.add(key);
     if (key === '--dir') dir = value;
@@ -242,6 +245,7 @@ async function main() {
     regular(path.join(dir, 'state.json'));
     state = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8'));
     if (state.schema !== 1 || state.root !== dir || !/^[a-f0-9]{32}$/.test(state.id) || state.project !== `lexiflow-local-${state.id}` || !['new', 'built', 'source', 'initializing', 'initialized', 'ready'].includes(state.phase)) fail('安装身份或状态不合法，拒绝接管');
+    if (captionDebug && !state.captionDebug) fail('已有安装未启用字幕调试，请为调试安装另选 --dir');
     if (action === 'install' && ((seen.has('--api-port') && apiPort !== state.apiPort) || (seen.has('--db-port') && dbPort !== state.dbPort))) fail('已有安装不能变更端口，请另选 --dir');
   } else {
     if (action !== 'install') fail('尚未安装，请先运行 install');
@@ -251,7 +255,7 @@ async function main() {
     fs.mkdirSync(path.dirname(dir), { recursive: true, mode: 0o700 });
     fs.mkdirSync(dir, { mode: 0o700 });
     const id = crypto.randomBytes(16).toString('hex');
-    state = { schema: 1, id, project: `lexiflow-local-${id}`, root: dir, apiPort, dbPort, phase: 'new', version: fs.readFileSync(path.join(repo, 'ops/release/version.txt'), 'utf8').trim(), source: sourceFingerprint() };
+    state = { schema: 1, id, project: `lexiflow-local-${id}`, root: dir, apiPort, dbPort, captionDebug, phase: 'new', version: fs.readFileSync(path.join(repo, 'ops/release/version.txt'), 'utf8').trim(), source: sourceFingerprint() };
     save();
   }
   if (action === 'recover') {
@@ -320,6 +324,7 @@ async function main() {
       regular(path.join(state.dataset, 'stardict.csv'));
       const envText = `LEXIFLOW_PLATFORM=linux/arm64\nLEXIFLOW_API_IMAGE=${state.apiImage}\nLEXIFLOW_POSTGRES_IMAGE=${state.postgresImage}\nLEXIFLOW_INSTALLATION_ID=${state.id}\nLEXIFLOW_RELEASE_KEY=local-${state.id}\nLEXIFLOW_SOURCE_DIR="${state.dataset}"\n`;
       fs.writeFileSync(path.join(dir, 'release.env'), envText, { mode: 0o600 });
+      if (state.captionDebug) fs.writeFileSync(path.join(dir, 'caption-debug.yaml'), 'services:\n  api:\n    command: [api-debug]\n', { mode: 0o600 });
       state.digests = digestFiles(); checkpoint('source');
     }
     if (state.phase === 'source') {

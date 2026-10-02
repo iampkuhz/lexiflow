@@ -25,7 +25,7 @@ read_secret() {
 }
 
 case "$mode" in
-  api)
+  api|api-debug)
     [ "$#" -eq 0 ] || fail
     [ -r /run/secrets/app-password ] || fail
     read_secret /run/secrets/app-password || fail
@@ -33,7 +33,9 @@ case "$mode" in
     unset secret
     export SPRING_DATASOURCE_PASSWORD=$password
     unset password
-    exec java -Xms256m -Xmx768m -Dspring.datasource.url=jdbc:postgresql://postgres:5432/lexiflow?currentSchema=lexiflow_release -Dspring.datasource.username=lexiflow -Dlexiflow.runtime.mode=formal -Dlexiflow.segment-analysis.enabled=false -Dlexiflow.segment-analysis.console=false -Dserver.address=0.0.0.0 -Dserver.port=8080 -jar /app/lexiflow-api.jar
+    debug=false
+    [ "$mode" != api-debug ] || debug=true
+    exec java -Xms256m -Xmx768m -Dspring.datasource.url=jdbc:postgresql://postgres:5432/lexiflow?currentSchema=lexiflow_release -Dspring.datasource.username=lexiflow -Dlexiflow.runtime.mode=formal -Dlexiflow.segment-analysis.enabled="$debug" -Dlexiflow.segment-analysis.console="$debug" -Dlexiflow.segment-analysis.path=/tmp/lexiflow-private/caption-segments.jsonl -Dserver.address=0.0.0.0 -Dserver.port=8080 -jar /app/lexiflow-api.jar
     ;;
   initialize)
     [ "$#" -eq 0 ] || fail

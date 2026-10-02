@@ -68,21 +68,27 @@ class CaptionRequestObservationHttpTest {
               .filter(line -> line.contains("caption.request.completed"))
               .toList();
       assertEquals(5, terminals.size());
+      for (var line : terminals) {
+        var columns = line.split("\\|", -1);
+        assertEquals(6, columns.length);
+        assertEquals(columns[2], java.util.UUID.fromString(columns[2]).toString());
+        assertFalse(line.contains("request_id="));
+      }
       assertTrue(terminals.stream().anyMatch(line -> line.contains("NO_HINT")));
       assertTrue(terminals.stream().anyMatch(line -> line.contains("NO_NEW_SEGMENTS")));
       assertTrue(terminals.stream().anyMatch(line -> line.contains("INVALID_REQUEST")));
       var successEvent = eventFor(terminals, ok.headers().firstValue("X-Request-ID").orElseThrow());
-      assertTrue(successEvent.contains("\"new_ranges\":1"));
-      assertTrue(successEvent.contains("\"selected\":1"));
+      assertTrue(successEvent.contains("count_new_ranges=1"));
+      assertTrue(successEvent.contains("count_selected=1"));
       var unchanged = eventFor(terminals, noNew.headers().firstValue("X-Request-ID").orElseThrow());
       assertFalse(unchanged.contains("lexicon_version"));
-      assertFalse(unchanged.contains("\"query\":"));
-      assertFalse(unchanged.contains("\"selection\":"));
-      assertFalse(unchanged.contains("\"analysis\":"));
+      assertFalse(unchanged.contains("timing_query="));
+      assertFalse(unchanged.contains("timing_selection="));
+      assertFalse(unchanged.contains("timing_analysis="));
 
       assertTrue(
           eventFor(terminals, noHint.headers().firstValue("X-Request-ID").orElseThrow())
-              .contains("\"selected\":0"));
+              .contains("count_selected=0"));
       var all = String.join("\n", terminals);
       assertFalse(all.contains("reliable"));
       assertFalse(all.contains("zxqv"));
@@ -128,16 +134,16 @@ class CaptionRequestObservationHttpTest {
       for (int index = 0; index < ids.size(); index++) {
         var line = eventFor(concurrentEvents, ids.get(index));
         if (index % 3 == 0) {
-          assertTrue(line.contains("\"reason\":\"OK\""));
-          assertTrue(line.contains("\"selected\":1"));
-          assertTrue(line.contains("\"new_ranges\":1"));
+          assertFalse(line.contains("reason="));
+          assertTrue(line.contains("count_selected=1"));
+          assertTrue(line.contains("count_new_ranges=1"));
         } else if (index % 3 == 1) {
-          assertTrue(line.contains("\"reason\":\"NO_HINT\""));
-          assertTrue(line.contains("\"selected\":0"));
-          assertTrue(line.contains("\"new_ranges\":1"));
+          assertTrue(line.contains("reason=NO_HINT"));
+          assertTrue(line.contains("count_selected=0"));
+          assertTrue(line.contains("count_new_ranges=1"));
         } else {
-          assertTrue(line.contains("\"reason\":\"NO_NEW_SEGMENTS\""));
-          assertTrue(line.contains("\"new_ranges\":0"));
+          assertTrue(line.contains("reason=NO_NEW_SEGMENTS"));
+          assertTrue(line.contains("count_new_ranges=0"));
         }
       }
     } finally {

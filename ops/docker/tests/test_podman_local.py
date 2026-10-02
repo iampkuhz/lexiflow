@@ -144,6 +144,19 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.assertEqual(sum('initialize' in call for call in calls),1)
         self.assertFalse(any('prune' in call or '-v' in call and 'down' in call for call in calls))
 
+    def test_caption_debug_is_explicit_persisted_and_hash_protected(self):
+        result=self.invoke('install','--caption-debug',serve=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        state=json.loads((self.kit/'state.json').read_text())
+        self.assertTrue(state['captionDebug'])
+        self.assertIn('caption-debug.yaml',state['digests'])
+        result=self.invoke('up')
+        self.assertEqual(result.returncode,0,result.stderr)
+        calls=[json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertTrue(any('caption-debug.yaml' in call for call in calls))
+        (self.kit/'caption-debug.yaml').write_text('tampered')
+        self.assertNotEqual(self.invoke('up').returncode,0)
+
     def test_fetch_failure_can_retry_before_database(self):
         self.mode.write_text('fetch-fail')
         result=self.invoke('install'); self.assertNotEqual(result.returncode,0)

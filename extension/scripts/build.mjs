@@ -24,6 +24,7 @@ for (const [entry, format] of [
   ["src/page-lifecycle.ts", "esm"],
   ["src/caption-capture.ts", "esm"],
   ["src/protocol.ts", "esm"],
+  ["src/caption-debug.ts", "esm"],
   ["src/runtime-status.ts", "esm"],
   ["src/diagnostics.ts", "esm"],
   ["src/preferences.ts", "esm"]

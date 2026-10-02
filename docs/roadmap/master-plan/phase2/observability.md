@@ -4,7 +4,7 @@
 
 ## 1.1. 普通事件结构
 
-后端普通日志使用单行 JSON，以固定字段输出，不以插值拼接原始请求或异常消息。事件 schema 为 `lexiflow.event.v1`。
+后端控制台使用固定六列 `MM-dd HH:mm:ss|LEVEL|关联ID|事件|定位字段|正文`，不添加分隔空格。内部事件模型及测试机器 sink 保留 `lexiflow.event.v1`，不再将该 JSON 默认打印给使用者。下表描述内部模型，不是控制台列清单。
 
 | 字段 | 类型与要求 |
 | --- | --- |
@@ -19,7 +19,7 @@
 | request_id | 后端接受一次请求时生成的随机关联 ID；请求类事件必填，其他事件省略 |
 | timings_ms | 请求终态填写校验、候选、查询、决策、敏感记录和总 API 耗时；未执行节点省略 |
 
-`request_id` 不作为指标标签，也不代表观看身份；不直接信任客户端传来的任意日志字段。logger 自身提供时间和级别。聚合指标只用固定 event/reason/stage 标签，版本与 request_id 留在日志，不进入高基数指标标签。
+`request_id` 不作为指标标签，也不代表观看身份；不直接信任客户端传来的任意日志字段。统一 formatter 提供时间和级别，非请求事件生成真实关联 UUID；普通 logger 不再套重复前缀。聚合指标只用固定 event/reason/stage 标签，版本与 request_id 留在日志，不进入高基数指标标签。
 
 ## 1.2. 事件、级别和打印时机
 
@@ -45,13 +45,13 @@ db_batches 仅为缺失词形批量读取次数，版本读取与预热分别记
 
 浏览器继续保留内存聚合计数和现有分段时延，不逐词输出 INFO，不持久化观看日志。增加或明确固定原因：disabled、source_hidden、navigation、cancelled_before_send、cancelled_in_flight、late_response、protocol_mismatch、backend_unavailable、no_hint。
 
-失败原因仅用于本机诊断；不通过额外网络请求上传。后端 request_id 可随原有响应关联单次诊断，但不保存视频身份。测不到服务端耗时必须标记缺失，不能填 0 或把浏览器往返耗时当数据库耗时。
+失败原因仅用于本机诊断。显式授权字幕调试模式允许扩展向固定本机 API 发送有界增量及收尾事件；后台能力检查关闭或失败时，不发送字幕调试正文，不上传到外部服务。后端 request_id 可随原有响应关联单次诊断，但不保存视频身份。测不到服务端耗时必须标记缺失，不能填 0 或把浏览器往返耗时当数据库耗时。
 
 ## 1.4. 敏感记录与故障隔离
 
 普通事件禁止字幕、中文释义、词段正文、观看 URL、视频/轨道身份、用户偏好、JDBC 字符串、凭据、私有文件路径及模型载荷；异常日志只输出固定错误分类，不透传可能含输入的 exception message。不得通过 DEBUG 绕过此边界。
 
-敏感分析记录继续由用户显式授权的本机独立台账承担，保留 segment.key 去重、重启恢复与成功写入语义。Docker 发行包默认关闭，开发者现有授权不能继承给其他使用者。正文不得进入普通 logger 或诊断包。
+敏感分析记录继续由用户显式授权的本机独立台账承担，保留 segment.key 去重、重启恢复与成功写入语义。Docker 发行包默认关闭，开发者现有授权不能继承给其他使用者。正文不得进入普通 logger 或诊断包。可读专用流使用相同六列，video-start、incremental、final、interrupted 为固定事件白名单；视频定位取可信 YouTube 标签页，未知字段不猜造。正文中的反斜杠、竖杠、换行、回车、制表符与控制字符转义，定位字段的值额外转义分号/等号。解析按六列切分，再切定位键值，最后解码；时间显示不含年份，归档应另保留年份与时区信息。
 
 二期保持当前同步写入语义，将其单独计时，不能称为“异步完成”。记录失败不丢弃已算出的提示，不假装写入成功；以后要异步化时另行设计持久交接、恢复与背压。
 
@@ -59,11 +59,13 @@ db_batches 仅为缺失词形批量读取次数，版本读取与预热分别记
 
 ## 1.5. 合成事件与直接验收
 
-```json
-{"schema":"lexiflow.event.v1","event":"caption.request.completed","stage":"request","result":"PASS","reason":"OK","duration_ms":7,"request_id":"00000000-0000-4000-8000-000000000001","lexicon_version":7,"counts":{"new_ranges":1,"query_keys":3,"positive_hits":1,"negative_hits":1,"cache_misses":1,"db_batches":1,"candidates":1,"selected":1},"timings_ms":{"validation":0,"candidates":0,"query":3,"selection":1,"analysis":1,"api":7}}
-{"schema":"lexiflow.event.v1","event":"caption.request.completed","stage":"request","result":"PASS","reason":"NO_HINT","duration_ms":2,"request_id":"00000000-0000-4000-8000-000000000002","lexicon_version":7,"counts":{"new_ranges":1,"selected":0},"timings_ms":{"api":2}}
-{"schema":"lexiflow.event.v1","event":"caption.request.completed","stage":"request","result":"BLOCKED","reason":"DEPENDENCY_UNAVAILABLE","duration_ms":5,"request_id":"00000000-0000-4000-8000-000000000003","counts":{"new_ranges":1},"timings_ms":{"query":4,"api":5}}
+```text
+10-03 14:25:49|INFO|00000000-0000-4000-8000-000000000001|incremental|position_ms=136300;subtitle=实际片段键;topic=实际主题摘要;video=AbCdEfGhI12|business incentive(动机), maybe it's a
+10-03 14:25:51|INFO|00000000-0000-4000-8000-000000000002|final|position_ms=137100;subtitle=实际片段键;topic=实际主题摘要;video=AbCdEfGhI12|business incentive(动机), maybe it's a political incentive(动机).
+10-03 14:25:55|WARN|00000000-0000-4000-8000-000000000003|caption.request.completed|duration_ms=5;reason=DEPENDENCY_UNAVAILABLE|-
 ```
+
+以上为合成格式示例，真实运行保留实际 UUID、主题摘要与片段键，不伪造短编号。时间按进程时区格式化；容器时区不保证等于宿主时区。增量正文只包含新增范围，必要时补齐跨片段词组。扩展调试队列有界，拥塞/退出时属于尽力发送，不能当作可靠审计台账；中断收尾不冒充完整展示。
 
 以上数字和身份仅用于合同示例，不是实测结果。直接测试必须证明：成功/空提示/非法请求/依赖故障各一次终态；版本变化一次失效事件；敏感记录故障仍返回既定提示；取消与迟到计数不混淆；未测量字段不伪造；注入换行、凭据样式及合成字幕均不能进入普通事件；日志故障不改变业务响应。
 

@@ -1,5 +1,6 @@
-import { BilingualOverlay } from "./overlay";
-import { snapshotText } from "./protocol";
+import { BilingualOverlay, type PresentedLine, type RenderedLine } from "./overlay";
+import { extractIncrementalText, rememberBounded } from "./caption-debug";
+import { snapshotSegments, snapshotText } from "./protocol";
 import { PREFERENCE_KEY, type PreferenceAction, type PreferenceResult } from "./preferences";
 import { Diagnostics } from "./diagnostics";
 import { MAX_CAPTION_LENGTH, type ApiResult } from "./protocol";
@@ -29,13 +30,41 @@ let lastSuppressedSequence = -1;
 let observedAt = performance.now();
 let observedSequence = -1;
 let terminalSequence = -1;
+type TrackedLine = { line: PresentedLine; topicKey: string; videoId: string };
+const debugPresented = new Map<string, TrackedLine>();
+const debugSent = new Set<string>();
+const debugStarted = new Set<string>();
+function sendDebug(event: "video-start" | "incremental" | "final" | "interrupted", topicKey: string,
+  videoId: string, line: PresentedLine, requestId?: string, text = line.text): void {
+  if (!/^[A-Za-z0-9_-]{11}$/.test(videoId) || !topicKey || topicKey.length > 128 || line.subtitleKey.length > 128 || text.length > 16384) return;
+  const eventId = event === "incremental" && requestId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(requestId)
+    ? requestId : crypto.randomUUID();
+  void chrome.runtime.sendMessage({ type: "caption-debug", payload: { eventId, event, topicKey, videoId,
+    subtitleKey: line.subtitleKey, positionMs: line.positionMs, text } }).catch(() => undefined);
+}
 function record(observation: Parameters<Diagnostics["record"]>[0]): void {
   try { diagnostics.record(observation); } catch { /* diagnostics never changes user-visible behavior */ }
 }
 function updateDiagnostics(): void { try { overlay.updateDiagnostics(diagnostics.snapshot()); } catch { /* diagnostic UI is optional */ } }
-const overlay = new BilingualOverlay((entryId, lexiconVersion) => { void updatePreferences("suppress", entryId, lexiconVersion); });
 let capture: CaptionCapture | undefined;
 let lifecycle: PageLifecycle;
+function finalizePresented(line: PresentedLine): void {
+  const tracked = debugPresented.get(line.subtitleKey);
+  if (!tracked) return;
+  const prior = tracked.line;
+  const view = latestView;
+  const keys = new Set(view.event ? snapshotSegments(view.event.request.currentSnapshot).map(segment => segment.key) : []);
+  const frozen = new Set(view.frozenKeys ?? []), finalized = new Set(view.finalizedKeys ?? []);
+  if (view.event && prior.segmentKeys.every(key => frozen.has(key) || finalized.has(key)))
+    sendDebug("final", tracked.topicKey, tracked.videoId, prior, undefined, prior.text);
+  debugPresented.delete(line.subtitleKey);
+}
+function interruptPresented(): void {
+  for (const tracked of debugPresented.values())
+    sendDebug("interrupted", tracked.topicKey, tracked.videoId, tracked.line, undefined, tracked.line.text);
+  debugPresented.clear();
+}
+const overlay = new BilingualOverlay((entryId, lexiconVersion) => { void updatePreferences("suppress", entryId, lexiconVersion); }, finalizePresented);
 function captureLivePage(): void {
   if (lifecycle && lifecycle.videoId !== videoIdFromLocation()) lifecycle.refreshPage();
   overlay.position();
@@ -44,12 +73,59 @@ function captureLivePage(): void {
 
 function renderCurrentView(): number {
   const currentCapture = capture;
-  const view = latestView.state === "ready" && latestView.event &&
+  const view = latestView.event &&
     snapshotText(latestView.event.request.currentSnapshot) !== currentCapture?.currentCaption()
     ? { state: "idle" as const } : latestView;
   const source = currentCapture?.readSource();
   const shown = overlay.render(view, { ready: preferenceReady, entryKeys: suppressed, message: preferenceMessage },
     source && source.caption.length <= MAX_CAPTION_LENGTH ? source : undefined);
+  const rendered = overlay.takePresentation();
+  if (source && view.event && preferenceReady) {
+    const videoId = lifecycle?.videoId;
+    const topic = view.event.request.captionTopicKey;
+    const live = new Set(rendered.lines.map(line => line.subtitleKey));
+    for (const [key, tracked] of debugPresented) {
+      if (live.has(key)) continue;
+      finalizePresented(tracked.line);
+    }
+    for (const line of rendered.lines) if (videoId) debugPresented.set(line.subtitleKey, { line, topicKey: topic, videoId });
+    if (videoId && rendered.lines.length && !debugStarted.has(videoId)) {
+      sendDebug("video-start", topic, videoId, rendered.lines[0], undefined, ""); rememberBounded(debugStarted, videoId, 16);
+    }
+    if (view.debugRequestEvent) {
+      const responseEvent = view.debugRequestEvent;
+      const token = `${responseEvent.sequence}:${view.debugRequestId ?? responseEvent.key}`;
+      if (!debugSent.has(token)) {
+        rememberBounded(debugSent, token, 64);
+        if (videoId) {
+          const requestEvent = view.debugRequestEvent;
+          const appendedRanges: Array<{ start: number; end: number }> = [];
+          let offset = 0;
+          for (const group of requestEvent?.request.currentSnapshot.captions ?? []) for (const segment of group.segments) {
+            if (segment.append) appendedRanges.push({ start: offset, end: offset + segment.text.length });
+            offset += segment.text.length;
+          }
+          appendedRanges.sort((left, right) => left.start - right.start);
+          const mergedRanges: Array<{ start: number; end: number }> = [];
+          for (const range of appendedRanges) {
+            const last = mergedRanges.at(-1);
+            if (last && range.start <= last.end) last.end = Math.max(last.end, range.end);
+            else mergedRanges.push({ ...range });
+          }
+          const actual = rendered.lines.map(line => ({ line, text: extractIncrementalText(line, mergedRanges) }))
+            .filter((entry): entry is { line: RenderedLine; text: string } => !!entry.text);
+          if (actual.length) {
+            const first = actual[0].line;
+            const combinedText = actual.map(entry => entry.text).join("\n");
+            if (combinedText.length <= 16384) {
+              const combined = { ...first, segmentKeys: [...new Set(actual.flatMap(entry => entry.line.segmentKeys))], text: combinedText };
+              sendDebug("incremental", topic, videoId, combined, view.debugRequestId, combined.text);
+            }
+          }
+        }
+      }
+    }
+  }
   if (view.state === "ready" && view.event && preferenceReady) {
     if (shown > 0 && lastShownSequence !== view.event.sequence) { lastShownSequence = view.event.sequence; record({ outcome: "shown" }); }
     else if (shown === 0 && (view.hints?.length ?? 0) > 0 && view.hints!.every(hint => suppressed.has(`${hint.lexiconEntryId}@${hint.lexiconVersion}`)) && lastSuppressedSequence !== view.event.sequence) { lastSuppressedSequence = view.event.sequence; record({ outcome: "suppressed" }); }
@@ -95,7 +171,10 @@ lifecycle = createPageLifecycle({
 }, () => {
   capture?.invalidate();
 }, captureLivePage, reason => {
-  if (reason) record({ outcome: reason });
+  if (reason) {
+    if (reason !== "interrupted") record({ outcome: reason });
+    interruptPresented(); debugSent.clear(); debugStarted.clear();
+  }
   renderCurrentView(); updateDiagnostics();
 });
 capture = new CaptionCapture(lifecycle, coordinator, {
@@ -106,7 +185,8 @@ capture = new CaptionCapture(lifecycle, coordinator, {
   onObserved: sequence => { observedAt = performance.now(); observedSequence = sequence; record({ outcome: "observed" }); },
   onOversized: () => record({ outcome: "oversized" }),
   onAcquisition: elapsedMs => record({ stage: "acquisition", elapsedMs }),
-  onObservation: outcome => record({ outcome })
+  onObservation: outcome => record({ outcome }),
+  onInterrupted: interruptPresented
 });
 
 renderCurrentView();

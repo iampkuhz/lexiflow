@@ -20,6 +20,9 @@ export function visibleSegments(player: HTMLElement): HTMLElement[] {
     });
 }
 export type PreferenceView = { ready: boolean; entryKeys: Set<string>; message: string };
+export type PresentedLine = { subtitleKey: string; segmentKeys: string[]; positionMs: number | null; text: string };
+export type RenderedLine = PresentedLine & { start: number; end: number; caption: string; hints: Array<{ startOffset: number; endOffset: number; chineseGloss: string }> };
+export type OverlayPresentation = { shown: number; lines: RenderedLine[] };
 
 /** Rendering owns no network or storage; only explicit button activation changes preferences. */
 export class BilingualOverlay {
@@ -31,18 +34,21 @@ export class BilingualOverlay {
   private rollTimer?: ReturnType<typeof setTimeout>;
   private player?: HTMLElement;
   private shownHintKeys = new Set<string>();
+  private presented = new Map<string, PresentedLine>();
+  private lastPresentation: OverlayPresentation = { shown: 0, lines: [] };
 
-  constructor(private readonly suppress: (entryId: string, lexiconVersion: number) => void) {}
+  constructor(private readonly suppress: (entryId: string, lexiconVersion: number) => void,
+    private readonly onPresentationExit: (line: PresentedLine) => void = () => undefined) {}
 
   render(view: StreamView, preferences: PreferenceView, source?: CaptionSource): number {
     const host = this.ensure();
-    if (!host || !this.line) return 0;
+    if (!host || !this.line) { this.lastPresentation = { shown: 0, lines: [] }; return 0; }
     if (!source) {
       host.dataset.lexiflowState = "idle";
-      this.finishRoll();
+      this.finishRoll(false);
       if (this.line.childNodes.length) this.line.replaceChildren();
       if (this.player?.classList.contains("lexiflow-inline-active")) this.player.classList.remove("lexiflow-inline-active");
-      return 0;
+      this.lastPresentation = { shown: 0, lines: [] }; return 0;
     }
     const existing = new Map(Array.from(this.line.querySelectorAll<HTMLElement>("[data-node-key]"))
       .map(node => [node.dataset.nodeKey!, node]));
@@ -118,8 +124,42 @@ export class BilingualOverlay {
     this.renderRows(desired, boundaries, anchor);
     this.position();
     if (!this.player?.classList.contains("lexiflow-inline-active")) this.player?.classList.add("lexiflow-inline-active");
+    const lines: RenderedLine[] = [];
+    const addRow = (row: HTMLElement): void => {
+      const rowKey = row.dataset.rowKey;
+      const lineIndex = boundaries.findIndex((value, index) => index < boundaries.length - 1 && anchor(value) === rowKey);
+      if (lineIndex < 0) {
+        const prior = rowKey ? this.presented.get(rowKey) : undefined;
+        if (prior) lines.push(prior as RenderedLine);
+        return;
+      }
+      const start = boundaries[lineIndex], end = boundaries[lineIndex + 1]; let base = 0;
+      const rowSegments: string[] = [];
+      for (const segment of segments) {
+        if (base < end && start < base + segment.text.length) rowSegments.push(segment.key);
+        base += segment.text.length;
+      }
+      if (!rowSegments.length) {
+        const prior = rowKey ? this.presented.get(rowKey) : undefined;
+        if (prior) lines.push(prior as RenderedLine);
+        return;
+      }
+      const first = segments.find(segment => segment.key === rowSegments[0]);
+      const rowHints = hints.filter(hint => hint.startOffset < end && start < hint.endOffset)
+        .map(hint => ({ startOffset: hint.startOffset, endOffset: hint.endOffset, chineseGloss: hint.chineseGloss }));
+      lines.push({ subtitleKey: rowSegments[0], segmentKeys: rowSegments,
+        positionMs: view.event?.videoTimeMs ?? null, text: row.textContent ?? "", start, end,
+        caption: source.caption.slice(start, end), hints: rowHints });
+    };
+    for (const row of Array.from(this.line.querySelectorAll<HTMLElement>(":scope > .caption-row"))) addRow(row);
+    for (const row of Array.from(this.outgoing?.querySelectorAll<HTMLElement>(".caption-row") ?? [])) addRow(row);
+    for (const line of lines) this.presented.set(line.subtitleKey, line);
+    while (this.presented.size > 64) this.presented.delete(this.presented.keys().next().value!);
+    this.lastPresentation = { shown: hints.length, lines };
     return hints.length;
   }
+
+  takePresentation(): OverlayPresentation { const receipt = this.lastPresentation; this.lastPresentation = { shown: 0, lines: [] }; return receipt; }
 
   updateDiagnostics(value: ReturnType<Diagnostics["snapshot"]>): void {
     if (this.host) this.host.dataset.lexiflowDiagnostics = JSON.stringify(value);
@@ -141,12 +181,18 @@ export class BilingualOverlay {
     if (this.line.style.fontSize !== fontSize) this.line.style.fontSize = fontSize;
   }
 
-  private finishRoll(): void {
+  private finishRoll(notifyExit = true): void {
     if (this.rollFrame !== undefined) cancelAnimationFrame(this.rollFrame);
     if (this.rollTimer !== undefined) clearTimeout(this.rollTimer);
     this.rollFrame = undefined; this.rollTimer = undefined;
     if (this.line?.classList.contains("rolling")) this.line.classList.remove("rolling");
     if (this.line?.style.transform) this.line.style.transform = "";
+    if (notifyExit && this.outgoing) {
+      const row = this.outgoing.querySelector<HTMLElement>(".caption-row");
+      const key = row?.dataset.rowKey;
+      const line = key ? this.presented.get(key) : undefined;
+      if (line) { this.presented.delete(line.subtitleKey); try { this.onPresentationExit(line); } catch { /* diagnostics cannot affect rendering */ } }
+    }
     this.outgoing?.remove(); this.outgoing = undefined;
     if (this.viewport?.style.height) this.viewport.style.height = "";
   }
@@ -199,7 +245,7 @@ export class BilingualOverlay {
   private ensure(): HTMLElement | undefined {
     const player = document.querySelector<HTMLElement>(".html5-video-player, #movie_player");
     if (this.host?.isConnected && this.player === player) return this.host;
-    this.finishRoll(); this.shownHintKeys.clear();
+    this.finishRoll(false); this.shownHintKeys.clear(); this.presented.clear();
     if (this.player?.classList.contains("lexiflow-inline-active")) this.player.classList.remove("lexiflow-inline-active");
     this.host?.remove();
     this.line = undefined; this.viewport = undefined;

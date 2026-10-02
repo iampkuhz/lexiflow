@@ -3,6 +3,8 @@
 spring:
   application:
     name: lexiflow-api
+  main:
+    banner-mode: off
   jackson:
     deserialization:
       fail-on-unknown-properties: true
