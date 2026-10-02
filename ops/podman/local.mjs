@@ -8,9 +8,10 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runCommand, HEARTBEAT_MS } from './command.mjs';
+import { doctor, runtime } from './doctor.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const help = '用法: node ops/podman/local.mjs install|up|status|stop|logs|recover [--dir 绝对路径] [install: --api-port 18080 --db-port 15432]';
+const help = '用法: node ops/podman/local.mjs install|up|status|stop|logs|recover|doctor [--dir 绝对路径] [install: --api-port 18080 --db-port 15432]';
 const args = process.argv.slice(2), action = args.shift();
 let dir = path.join(repo, '.local/podman'), apiPort = 18080, dbPort = 15432;
 let lockOwned = false, state, step = '检查参数', logFile, lockRecord, interrupted = false;
@@ -97,12 +98,10 @@ async function ready() {
   for (let attempt = 0; attempt < 60; attempt++) {
     if (interrupted) fail('等待已取消，已初始化的数据保留，可用 up 再次启动');
     try {
-      const health = await fetch(`http://127.0.0.1:${state.apiPort}/actuator/health/readiness`, { signal: AbortSignal.timeout(2000) });
-      const status = await fetch(`http://127.0.0.1:${state.apiPort}/api/v1/runtime-status`, { signal: AbortSignal.timeout(2000) });
-      const body = await status.json();
-      if (health.ok && status.ok && body.mode === 'formal' && body.ready === true && body.reason === 'OK' && body.softwareVersion === state.version) {
+      const [status] = await runtime(state.apiPort, state.version);
+      if (status === 'PASS') {
         console.log(`[LexiFlow]   API 已正式就绪（${Math.floor((Date.now() - started) / 1000)} 秒）`);
-        return body;
+        return;
       }
     } catch { /* 有界等待容器就绪，不输出响应内容。 */ }
     if (Date.now() - lastNotice >= HEARTBEAT_MS) {
@@ -195,11 +194,12 @@ function releaseLock() {
 }
 async function main() {
   if (action === '--help' || action === 'help') { console.log(help); return; }
-  if (!['install', 'up', 'status', 'stop', 'logs', 'recover'].includes(action)) fail(help);
+  if (!['install', 'up', 'status', 'stop', 'logs', 'recover', 'doctor'].includes(action)) fail(help);
   const seen = new Set();
-  let confirmStopped = false;
+  let confirmStopped = false, jsonReport = false;
   while (args.length) {
     const key = args.shift();
+    if (action === 'doctor' && key === '--json' && !jsonReport) { jsonReport = true; continue; }
     if (action === 'recover' && key === '--confirm-stopped' && !confirmStopped) { confirmStopped = true; continue; }
     const value = args.shift();
     if (!value || seen.has(key)) fail(help); seen.add(key);
@@ -208,6 +208,7 @@ async function main() {
       if (key === '--api-port') apiPort = +value; else dbPort = +value;
     } else fail(help);
   }
+  if (action === 'doctor') { await doctor(dir, environment, jsonReport); return; }
   safePath(dir); dir = path.resolve(dir);
   if (dir === repo || dir === os.homedir() || dir === '/') fail('不能使用源码根目录、HOME 或文件系统根作为安装目录');
   if (apiPort === dbPort) fail('API 与数据库端口不能相同');
