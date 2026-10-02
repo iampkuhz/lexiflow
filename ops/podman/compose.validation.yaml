@@ -14,7 +14,7 @@ services:
     ports: ["127.0.0.1:15432:5432"]
     volumes:
       - pgdata:/var/lib/postgresql/data
-    networks: [private]
+    networks: [private, published]
     mem_limit: 768m
     healthcheck:
       test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U lexiflow -d lexiflow"]
@@ -65,7 +65,7 @@ services:
     command: [api]
     ports: ["127.0.0.1:18080:8080"]
     secrets: [app-password]
-    networks: [private]
+    networks: [private, published]
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,6 +101,11 @@ volumes:
 networks:
   private:
     internal: true
+    labels:
+      lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
+      lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}
+  published:
+    driver: bridge
     labels:
       lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
       lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}

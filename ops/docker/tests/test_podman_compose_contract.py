@@ -20,6 +20,13 @@ class PodmanComposeContractTest(unittest.TestCase):
             self.assertEqual(service["pull_policy"], "never")
             self.assertIn("lexiflow.installation", service["labels"])
 
+    def test_published_network_has_route_without_changing_loopback_ports(self):
+        self.assertTrue(self.config['networks']['private']['internal'])
+        self.assertFalse(self.config['networks']['published'].get('internal', False))
+        for service in ['api', 'postgres']:
+            self.assertEqual(self.config['services'][service]['networks'], ['private', 'published'])
+        self.assertEqual(self.config['services']['initialize']['networks'], ['private'])
+
     def test_file_secrets_not_plaintext_or_environment_sources(self):
         self.assertEqual(self.config["secrets"], {
             "postgres-password": {"file": "./secrets/postgres-password"},
