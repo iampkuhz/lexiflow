@@ -1,8 +1,15 @@
 interface PageReply { ok: true; enabled: boolean; pageKey: string }
-type PageResponse = PageReply | { ok: false };
+type PageResponse = PageReply | { ok: false; reason?: string };
 type PreferenceResponse = { ok: true; entryKeys: string[] } | { ok: false; reason?: string };
 type RuntimeReply = { ok: true; status: { softwareVersion: string; apiContract: string; mode: string; ready: boolean; reason: string; datasetVersion: number | null } } | { ok: false; reason: string };
 
+// 消息通道异常时也必须结束等待；迟到结果不再改变弹窗状态。
+function bounded<T>(operation: Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("message timeout")), 5000);
+    operation.then(resolve, reject).finally(() => clearTimeout(timer));
+  });
+}
 let pageKey: string | null = null;
 let tabId: number | undefined;
 let restoreBusy = false;
@@ -22,7 +29,7 @@ async function readServiceStatus(): Promise<void> {
   const status = el<HTMLDivElement>("service-status"), identity = el<HTMLDivElement>("service-identity");
   status.textContent = "正在查询服务状态…";
   try {
-    const reply = await chrome.runtime.sendMessage({ type: "runtime-status" }) as RuntimeReply | undefined;
+    const reply = await bounded(chrome.runtime.sendMessage({ type: "runtime-status" })) as RuntimeReply | undefined;
     if (!reply || reply.ok !== true) {
       if (reply?.reason === "protocol-mismatch") {
         status.textContent = "协议不匹配，请使用匹配的扩展与服务版本。"; status.dataset.kind = "error"; identity.hidden = true; return;
@@ -51,9 +58,10 @@ function validPageReply(value: unknown): value is PageReply {
 async function readPage(): Promise<void> {
   const toggle = el<HTMLInputElement>("enhance-toggle"); toggle.disabled = true;
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const [tab] = await bounded(chrome.tabs.query({ active: true, currentWindow: true }));
     if (typeof tab?.id !== "number") { pageMessage("没有可用标签页，请打开 YouTube 视频页面。"); return; }
-    const response = await chrome.tabs.sendMessage(tab.id, { type: "page-enhancement", action: "read" }) as PageResponse | undefined;
+    const response = await bounded(chrome.tabs.sendMessage(tab.id, { type: "page-enhancement", action: "read" })) as PageResponse | undefined;
+    if (response?.ok === false && response.reason === "not-video-page") { pageMessage("请打开 YouTube 视频播放页后使用字幕增强。"); return; }
     if (!validPageReply(response)) { pageMessage("当前页面不可用，请刷新 YouTube 视频页面后重试。"); return; }
     tabId = tab.id; pageKey = response.pageKey; toggle.checked = response.enabled; toggle.disabled = false;
     renderPageState(response.enabled);
@@ -65,7 +73,7 @@ async function setPage(): Promise<void> {
   toggle.disabled = true;
   pageMessage("正在设置…", "pending");
   try {
-    const response = await chrome.tabs.sendMessage(tabId, { type: "page-enhancement", action: "set", enabled: desired, pageKey }) as PageResponse | undefined;
+    const response = await bounded(chrome.tabs.sendMessage(tabId, { type: "page-enhancement", action: "set", enabled: desired, pageKey })) as PageResponse | undefined;
     if (!validPageReply(response) || response.pageKey !== pageKey) throw new Error("invalid receipt");
     toggle.checked = response.enabled; toggle.disabled = false; renderPageState(response.enabled);
   } catch { toggle.checked = !desired; pageMessage("设置未成功，请重新打开弹窗后重试。"); }
@@ -76,7 +84,7 @@ async function restoreAll(): Promise<void> {
   const start = el<HTMLButtonElement>("restore-start"), confirm = el<HTMLButtonElement>("restore-confirm"), cancel = el<HTMLButtonElement>("restore-cancel");
   start.disabled = true; confirm.disabled = true; cancel.disabled = true;
   try {
-    const response = await chrome.runtime.sendMessage({ type: "local-preferences", action: "restore-all" }) as PreferenceResponse | undefined;
+    const response = await bounded(chrome.runtime.sendMessage({ type: "local-preferences", action: "restore-all" })) as PreferenceResponse | undefined;
     if (!response || response.ok !== true || !Array.isArray(response.entryKeys) || response.entryKeys.length !== 0) throw new Error("invalid receipt");
     restoreMessage("已恢复全部提示偏好。", "success");
     el<HTMLDivElement>("restore-confirmation").hidden = true;

@@ -39,7 +39,6 @@ final class HintSelection {
             .map(Map.Entry::getKey)
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
     var selected = new ArrayList<CandidateMatch>();
-    var ids = new HashSet<String>();
     int overlapDropped = 0;
     var eligible =
         matches.stream()
@@ -48,10 +47,8 @@ final class HintSelection {
             .sorted(PRIORITY)
             .toList();
     for (var match : eligible) {
-      if (ids.contains(match.entryId())) continue;
       if (selected.stream().anyMatch(existing -> overlaps(existing, match))) overlapDropped++;
       else {
-        ids.add(match.entryId());
         selected.add(match);
       }
     }

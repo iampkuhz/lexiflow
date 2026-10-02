@@ -160,12 +160,12 @@ class DeterministicHintPolicyTest {
   }
 
   @Test
-  void nullCandidateRefusesWholeBatchAndRepeatedOccurrenceStillSelectsOnce() {
+  void nullCandidateRefusesWholeBatchAndRepeatedOccurrencesArePreserved() {
     var safe = candidate("bank", "银行");
     assertEquals(
         HintState.NO_PENDING, evaluate("bank", java.util.Arrays.asList(safe, null)).state());
     var repeated = evaluate("bank, BANK", List.of(safe));
-    assertEquals(1, repeated.hints().size());
+    assertEquals(2, repeated.hints().size());
     assertEquals(0, repeated.hints().getFirst().startOffset());
     assertEquals(4, repeated.hints().getFirst().endOffset());
   }
