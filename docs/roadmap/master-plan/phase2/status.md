@@ -15,6 +15,8 @@
 
 ## 1.3. 当前执行
 
+- Podman部署已简化为`node ops/podman/local.mjs install`，默认ignored `.local/podman`自动组装、构建、真实取源、初始化并检查就绪；up/status/stop/logs复用独立安装，密码不输出、不自动删库、状态不明拒绝重导。本机实跑六步及status/stop/up/status通过，真实ECDICT网络取源已覆盖，独占资源清理完成，证据`validation-20261002T033831Z-simple-entry-retry/continuation-summary/assessment.md`。只读审查随后发现自身PG端口恢复窗口及安装CSV/SQL摘要缺口，已修复；最新9入口+3Compose+5取源测试与静态检查通过，354输入hash一致，证据`validation-20261002T043000Z-recovery-digest-recheck2/continuation-summary/assessment.md`；独立复核两修复PASS。最新两修复未重新完整install，旧真实全链证据不冒充同输入全链；新机器真实Chrome/YouTube与Formal仍未完成。测试fixture曾因未resolve临时目录、teardown等待及DB端口假设失败，修复与旧日志均保留。
+
 - M芯片macOS用户指南已按用户授权改为源码自构建，不再等待预制验证包：宿主Java25/Node/npm构建、最小上下文生成ARM64 API/PG镜像、精确image ID绑定、公开ECDICT本机获取、Java导入、Chrome加载和PG loopback15432查看。CSV/ZIP不跟踪。独立本机验证8项测试、静态检查、Java/扩展构建、两镜像构建、隔离PG导入266285源行/265999条目/320100词形及API readiness200/UP、formal ready=true均通过，独占项目资源已清理；实际端口因15432占用改用随机loopback，原模板config仍验证。最新证据`validation-20261001T154908Z-local-build/continuation-idpin/continuation-summary/assessment.md`，350输入摘要一致；最初验证夹具Dockerfile命名错误保留，另用精确ID重跑避免tag证据差异。只读review发现OpenSpec新旧合同矛盾后，已整页统一并复核PASS。未实测首次ECDICT网络下载/工具容器、新机器Chrome/YouTube、完整资源/更新恢复或Formal；用户在新机器执行最终真实体验。
 
 - 用户最新明确批准使用Podman、公开ECDICT导入临时隔离PostgreSQL，并允许清空本项目真实数据库旧表；本轮选择临时空间，未读取或删除真实库。原Docker-only环境前置不再用于阻止本机验证；Podman本机client6.1.1/server5.6.2、linux/arm64、podman-compose1.6.0已核实。正式发行适配仍须保留引擎身份与对象归属：原生info无Docker式ID，兼容API连续/info的ID会变化，不能假装直接兼容或忽略身份漂移。审计podman-runtime-audit-2026-10-01与Podman接入合同已留存。

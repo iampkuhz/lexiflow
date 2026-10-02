@@ -3161,6 +3161,8 @@ workstreams:
         lifecycle_state: READY
         allowed_files:
         - ops/podman/compose.validation.yaml
+        - ops/podman/local.mjs
+        - ops/docker/tests/test_podman_local.py
         - ops/docker/tests/test_podman_compose_contract.py
         - ops/docker/Dockerfile.postgres
         - ops/docker/Dockerfile

@@ -1,0 +1,208 @@
+"""验证本机部署入口的编排和失败边界；替身不能证明真实容器成功。"""
+import contextlib
+import http.server
+import json
+import os
+from pathlib import Path
+import shutil
+import socket
+import subprocess
+import tempfile
+import threading
+import unittest
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+class LocalEntryTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="lexiflow local ")
+        self.root = Path(self.temp.name).resolve()
+        self.repo = self.root / "source"
+        self.kit = self.root / "install"
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        self.calls = self.root / "calls"
+        self.mode = self.root / "mode"
+        self.mode.write_text("")
+        for relative in ["ops/podman/local.mjs", "ops/podman/compose.validation.yaml",
+                         "ops/podman/fetch-ecdict.sh", "ops/podman/source-tools.Containerfile",
+                         "ops/docker/Dockerfile", "ops/docker/Dockerfile.postgres",
+                         "ops/docker/entrypoint.sh", "ops/docker/bootstrap.sh",
+                         "ops/dataset/ecdict-source.lock.json", "scripts/environment/ecdict_bundle.py",
+                         "infra/postgres/schema.sql", "ops/release/version.txt"]:
+            dst = self.repo / relative
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / relative, dst)
+        (self.repo / "backend/product/api/build/libs").mkdir(parents=True)
+        version = (self.repo / "ops/release/version.txt").read_text().strip()
+        (self.repo / f"backend/product/api/build/libs/api-{version}.jar").write_text("synthetic")
+        (self.repo / "extension/dist").mkdir(parents=True)
+        (self.repo / "extension/dist/manifest.json").write_text(json.dumps({"version": version}))
+        self.program(self.repo / "backend/gradlew", "#!/bin/sh\nexit 0\n")
+        self.program(self.bin / "npm", "#!/bin/sh\nexit 0\n")
+        self.program(self.bin / "java", '#!/bin/sh\necho \'openjdk version "25.0.1"\' >&2\n')
+        # 用 Node 标准测试预加载替换平台探测；产品本身无测试开关或平台绕过参数。
+        preload = self.root / "platform.mjs"
+        preload.write_text("import os from 'node:os'; os.platform=()=> 'darwin'; os.arch=()=> 'arm64';")
+        self.preload = preload
+        fake = '''#!PYTHON
+import json, sys
+from pathlib import Path
+args=sys.argv[1:]
+with Path(CALLS).open('a') as f: f.write(json.dumps(args)+'\\n')
+mode=Path(MODE).read_text()
+if args[:1]==['info']: print('{}')
+elif args[:2]==['image','inspect']: print('sha256:'+'a'*64)
+elif args[:1]==['ps'] or args[:2] in [['volume','ls'],['network','ls']]:
+    if mode=='foreign':
+        state=json.loads(Path(KIT,'state.json').read_text()); print(json.dumps([{'Labels':{'com.docker.compose.project':state['project'],'lexiflow.installation':'foreign'}}]))
+    elif mode=='owned-pg':
+        state=json.loads(Path(KIT,'state.json').read_text()); print(json.dumps([{'Labels':{'com.docker.compose.project':state['project'],'com.docker.compose.service':'postgres','lexiflow.installation':state['id']}}]))
+    else: print('[]')
+elif args[:1]==['run']:
+    if mode=='fetch-fail': sys.exit(9)
+    data=Path(KIT,'data/ecdict-source.ABC123');data.mkdir(exist_ok=True)
+    (data/'stardict.csv').write_text('word,translation,oxford,tag,bnc,frq,exchange\\ntest,测试,1,,1,1,\\n')
+    print('dataset_dir=/data/ecdict-source.ABC123')
+elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.exit(8)
+'''.replace("PYTHON", os.sys.executable).replace("CALLS", repr(str(self.calls))).replace("MODE", repr(str(self.mode))).replace("KIT", repr(str(self.kit)))
+        self.program(self.bin / "podman", fake)
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                payload = {"status": "UP"} if self.path.endswith("readiness") else {"mode": "formal", "ready": True, "reason": "OK", "softwareVersion": version}
+                self.send_response(200); self.end_headers(); self.wfile.write(json.dumps(payload).encode())
+            def log_message(self, *_args):
+                pass
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.api_port = self.server.server_port
+        with socket.socket() as reserve:
+            reserve.bind(("127.0.0.1", 0))
+            self.db_port = reserve.getsockname()[1]
+        # install 检查空闲端口后才启动替身HTTP；run()在后台等待写入初始化状态。
+        self.thread = None
+        self.finished = threading.Event()
+
+    @staticmethod
+    def program(file, content):
+        file.write_text(content); file.chmod(0o755)
+
+    def tearDown(self):
+        self.finished.set()
+        if self.thread:
+            self.thread.join(timeout=3)
+        self.server.server_close()
+        self.temp.cleanup()
+
+    def invoke(self, action, *extra, serve=False):
+        if serve and not self.thread:
+            # 释放预留监听，install preflight 后重建；同线程有界观察夹具state。
+            self.server.server_close()
+            def later():
+                import time
+                for _ in range(500):
+                    if self.finished.is_set(): return
+                    try:
+                        state=json.loads((self.kit/'state.json').read_text())
+                        if state['phase'] in ['initializing','initialized','ready']: break
+                    except (FileNotFoundError, json.JSONDecodeError): pass
+                    time.sleep(.02)
+                self.server = http.server.ThreadingHTTPServer(("127.0.0.1", self.api_port), self.server.RequestHandlerClass)
+                self.server.timeout = .1
+                while not self.finished.is_set():
+                    self.server.handle_request()
+            self.thread=threading.Thread(target=later, daemon=True);self.thread.start()
+        elif not self.thread:
+            self.server.server_close()
+        argv = [shutil.which('node'), '--import', str(self.preload), str(self.repo/'ops/podman/local.mjs'), action, '--dir', str(self.kit)]
+        if action == 'install': argv += ['--api-port', str(self.api_port), '--db-port', str(self.db_port)]
+        return subprocess.run(argv+list(extra), env={**os.environ, 'PATH':str(self.bin)+os.pathsep+os.environ['PATH']}, capture_output=True, text=True, timeout=35)
+
+    def test_unknown_directory_is_not_adopted(self):
+        self.kit.mkdir(); (self.kit/'keep').write_text('safe')
+        result=self.invoke('install')
+        self.assertNotEqual(result.returncode,0)
+        self.assertEqual((self.kit/'keep').read_text(),'safe')
+        self.assertFalse(self.calls.exists())
+
+    def test_install_stop_up_does_not_reimport(self):
+        result=self.invoke('install',serve=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        state=json.loads((self.kit/'state.json').read_text())
+        self.assertEqual(state['phase'],'ready')
+        self.assertEqual((self.kit/'secrets/app-password').stat().st_mode & 0o777,0o444)
+        self.assertIn('sha256:'+'a'*64,(self.kit/'release.env').read_text())
+        for action in ['stop','up','install','status']:
+            result=self.invoke(action); self.assertEqual(result.returncode,0,result.stderr)
+        calls=[json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertEqual(sum('initialize' in call for call in calls),1)
+        self.assertFalse(any('prune' in call or '-v' in call and 'down' in call for call in calls))
+
+    def test_fetch_failure_can_retry_before_database(self):
+        self.mode.write_text('fetch-fail')
+        result=self.invoke('install'); self.assertNotEqual(result.returncode,0)
+        self.assertEqual(json.loads((self.kit/'state.json').read_text())['phase'],'built')
+        secret=(self.kit/'secrets/app-password').read_bytes()
+        self.mode.write_text('')
+        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual(secret,(self.kit/'secrets/app-password').read_bytes())
+
+    def test_uncertain_initialization_never_retries(self):
+        self.mode.write_text('init-fail')
+        result=self.invoke('install'); self.assertNotEqual(result.returncode,0)
+        self.assertEqual(json.loads((self.kit/'state.json').read_text())['phase'],'initializing')
+        self.mode.write_text('')
+        result=self.invoke('install');self.assertNotEqual(result.returncode,0)
+        calls=[json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertEqual(sum('initialize' in call for call in calls),1)
+
+    def test_tampered_configuration_refuses_stop(self):
+        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        with (self.kit/'release.env').open('a') as file: file.write('EXTRA=value\n')
+        before=self.calls.read_text()
+        result=self.invoke('stop');self.assertNotEqual(result.returncode,0)
+        self.assertNotIn('"stop"',self.calls.read_text()[len(before):])
+
+    def test_foreign_project_label_refuses_stop(self):
+        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.mode.write_text('foreign')
+        result=self.invoke('stop');self.assertNotEqual(result.returncode,0)
+        self.assertIn('归属不匹配',result.stderr)
+
+    def test_owned_postgres_port_does_not_block_preinit_retry(self):
+        self.mode.write_text('init-fail')
+        result=self.invoke('install'); self.assertNotEqual(result.returncode,0)
+        state=json.loads((self.kit/'state.json').read_text())
+        # 重建“PG启动后、标记initializing前”保存的状态，未修改产品入口。
+        state['phase']='source'
+        (self.kit/'state.json').write_text(json.dumps(state))
+        self.mode.write_text('owned-pg')
+        with socket.socket() as listener:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(('127.0.0.1',state['dbPort']));listener.listen()
+            result=self.invoke('install',serve=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_schema_and_csv_tampering_block_initialization(self):
+        self.mode.write_text('init-fail')
+        result=self.invoke('install');self.assertNotEqual(result.returncode,0)
+        state=json.loads((self.kit/'state.json').read_text())
+        state['phase']='source'
+        (self.kit/'state.json').write_text(json.dumps(state))
+        self.mode.write_text('')
+        for file in [self.kit/'infra/postgres/schema.sql',Path(state['dataset'])/'stardict.csv']:
+            before=file.read_bytes();file.write_bytes(before+b'changed')
+            calls=self.calls.read_text()
+            result=self.invoke('install');self.assertNotEqual(result.returncode,0)
+            self.assertIn('发生变化',result.stderr)
+            self.assertNotIn('"initialize"',self.calls.read_text()[len(calls):])
+            file.write_bytes(before)
+
+    def test_symlink_directory_is_rejected(self):
+        real=self.root/'real';real.mkdir();self.kit.symlink_to(real)
+        result=self.invoke('install');self.assertNotEqual(result.returncode,0)
+        self.assertEqual(list(real.iterdir()),[])
+
+
+if __name__ == '__main__':
+    unittest.main()
