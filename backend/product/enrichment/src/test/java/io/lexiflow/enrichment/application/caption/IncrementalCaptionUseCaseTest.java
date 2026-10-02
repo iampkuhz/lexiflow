@@ -103,7 +103,7 @@ class IncrementalCaptionUseCaseTest {
             group(segment("four", "reliable reliable reliable reliable", true)));
     var result = useCase.enrichIncrementalMeasured(request).result();
     assertEquals(List.of("suffix", "four"), result.processedKeys());
-    assertEquals(1, result.hints().size());
+    assertEquals(4, result.hints().size());
     assertTrue(result.hints().stream().allMatch(hint -> hint.startKey().equals("four")));
   }
 
@@ -173,7 +173,7 @@ class IncrementalCaptionUseCaseTest {
   }
 
   @Test
-  void hintsEachEntryOnceAcrossIntervalsAndGroupsWithoutLosingCoverage() {
+  void hintsEachOccurrenceAcrossIntervalsAndGroupsWithoutLosingCoverage() {
     var measured =
         new EnrichCaptionUseCase(new BuiltinLexiconCatalog(), new DeterministicHintPolicy())
             .enrichIncrementalMeasured(
@@ -184,9 +184,41 @@ class IncrementalCaptionUseCaseTest {
                         segment("b", "reliable", true)),
                     group(segment("c", "reliable", true))));
     assertEquals(List.of("a", "b", "c"), measured.result().processedKeys());
-    assertEquals(1, measured.result().hints().size());
+    assertEquals(3, measured.result().hints().size());
     assertEquals("a", measured.result().hints().getFirst().startKey());
     assertEquals("可靠的", measured.result().hints().getFirst().chineseGloss());
+  }
+
+  @Test
+  void repeatedIncentiveIsStableAcrossBatchedAndIncrementalRequests() {
+    var useCase =
+        new EnrichCaptionUseCase(
+            forms -> lookup(forms, List.of(candidate("incentive", "动机", 1))),
+            new DeterministicHintPolicy());
+    var together =
+        useCase
+            .enrichIncrementalMeasured(
+                request(
+                    group(
+                        segment("a", "business incentive, ", true),
+                        segment("b", "political incentive", true))))
+            .result();
+    var first =
+        useCase
+            .enrichIncrementalMeasured(request(group(segment("a", "business incentive, ", true))))
+            .result();
+    var second =
+        useCase
+            .enrichIncrementalMeasured(
+                request(
+                    group(
+                        segment("a", "business incentive, ", false),
+                        segment("b", "political incentive", true))))
+            .result();
+    var combined = new ArrayList<>(first.hints());
+    combined.addAll(second.hints());
+    assertEquals(2, together.hints().size());
+    assertEquals(together.hints(), combined);
   }
 
   @Test

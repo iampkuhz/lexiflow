@@ -42,14 +42,14 @@ class HintSelectionTest {
   }
 
   @Test
-  void deduplicatesEntryAcrossOccurrencesAndReturnsSpatialOrder() {
+  void preservesDistinctOccurrencesAndReturnsSpatialOrder() {
     var repeated = match(8, 11, id(1), "重复", 8, 1, 1, 1);
     var entryFirst = match(0, 3, id(1), "首次", 8, 1, 1, 1);
     var other = match(4, 7, id(2), "另一词", 8, 1, 1, 1);
     var forward = HintSelection.select(List.of(repeated, other, entryFirst));
     var reversed = HintSelection.select(List.of(entryFirst, other, repeated));
     assertEquals(
-        List.of(id(1), id(2)),
+        List.of(id(1), id(2), id(1)),
         forward.hints().stream().map(hint -> hint.lexiconEntryId()).toList());
     assertEquals(forward, reversed);
   }
@@ -69,7 +69,7 @@ class HintSelectionTest {
     assertEquals(1, result.ambiguous());
     assertEquals(1, result.overlapDropped());
     assertEquals(
-        List.of(id(1)), result.hints().stream().map(hint -> hint.lexiconEntryId()).toList());
+        List.of(id(1), id(1)), result.hints().stream().map(hint -> hint.lexiconEntryId()).toList());
   }
 
   private static void assertWinner(

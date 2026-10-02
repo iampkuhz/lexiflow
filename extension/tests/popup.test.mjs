@@ -437,3 +437,27 @@ test('status lookup failure leaves page enhancement and local preference control
  assert.equal(doc.getElementById('restore-status').dataset.kind,'success');
  assert.equal(chrome._calls.some(call=>call.message?.type==='local-preferences'&&call.message.action==='restore-all'),true);
 });
+
+ test("non-video page explains navigation instead of refresh", async () => {
+  const {doc} = freshSetup({readResponse:{ok:false,reason:"not-video-page"}});
+  await flush();
+  assert.match(doc.getElementById("page-status").textContent, /请打开 YouTube 视频播放页/);
+  assert.equal(doc.getElementById("enhance-toggle").disabled, true);
+ });
+ test("disabled controls never use a perpetual waiting cursor", () => {
+  const css=readFileSync(resolve(import.meta.dirname,"../src/popup.css"),"utf8");
+  assert.doesNotMatch(css, /cursor:\s*wait/);
+ });
+ test("hung page message ends waiting and ignores late reply", async () => {
+  const doc=createDocument(), chrome=createChrome();
+  let late;
+  chrome.tabs.sendMessage=()=>new Promise(resolve=>{late=resolve;});
+  const ctx=makeContext(doc,chrome), timers=[];
+  ctx.setTimeout=(fn)=>{timers.push(fn); return timers.length;};
+  ctx.clearTimeout=()=>{};
+  loadPopup(ctx); fireReady(doc); await flush();
+  timers.forEach(fn=>fn()); await flush();
+  assert.match(doc.getElementById("page-status").textContent,/当前页面不可用/);
+  late({ok:true,enabled:true,pageKey:"late"}); await flush();
+  assert.equal(doc.getElementById("enhance-toggle").disabled,true);
+ });

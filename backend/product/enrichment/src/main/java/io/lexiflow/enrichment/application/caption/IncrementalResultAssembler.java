@@ -55,7 +55,7 @@ final class IncrementalResultAssembler {
     Objects.requireNonNull(ranges, "ranges");
     var hints = new ArrayList<IncrementalHintResult.Hint>();
     var versions = new HashSet<Long>();
-    var seenEntries = new HashSet<String>();
+    var seenOccurrences = new HashSet<IncrementalHintResult.Hint>();
     var counts = LexiconLookupResult.Counts.zero();
     int candidates = 0;
     long query = 0, rules = 0, candidatesNanos = planningNanos;
@@ -74,7 +74,7 @@ final class IncrementalResultAssembler {
       candidatesNanos = Math.addExact(candidatesNanos, range.candidatesNanos());
       ambiguous = Math.addExact(ambiguous, range.ambiguous());
       overlapDropped = Math.addExact(overlapDropped, range.overlapDropped());
-      for (var hint : range.mapped()) if (seenEntries.add(hint.lexiconEntryId())) hints.add(hint);
+      for (var hint : range.mapped()) if (seenOccurrences.add(hint)) hints.add(hint);
     }
     boolean conflict = versions.size() > 1;
     if (conflict) hints.clear();

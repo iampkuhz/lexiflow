@@ -114,7 +114,8 @@ void updatePreferences("read");
 chrome.runtime.onMessage?.addListener((message, sender, respond) => {
   if (sender.id !== chrome.runtime.id || message?.type !== "page-enhancement") return;
   if (lifecycle.videoId !== videoIdFromLocation()) lifecycle.refreshPage();
-  if (!videoIdFromLocation() || lifecycle.navigating || !document.querySelector(".html5-video-player, #movie_player")) {
+  if (!videoIdFromLocation()) { respond({ ok: false, reason: "not-video-page" }); return; }
+  if (lifecycle.navigating || !document.querySelector(".html5-video-player, #movie_player")) {
     respond({ ok: false }); return;
   }
   if (message.action === "set") {
