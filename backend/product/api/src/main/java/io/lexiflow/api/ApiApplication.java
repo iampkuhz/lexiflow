@@ -67,17 +67,14 @@ public class ApiApplication {
     return new EnrichCaptionUseCase(runtime, new DeterministicHintPolicy());
   }
 
-  /** 装配私有片段台账；仅本机启动器显式启用专用控制台流，普通 logger 不含正文。 */
+  /** 装配私有机器台账；可读字幕流由独立调试入口输出，避免重复打印 JSON。 */
   @Bean
   SegmentAnalysisLog segmentAnalysisLog(
       @Value("${lexiflow.segment-analysis.enabled:false}") boolean enabled,
-      @Value("${lexiflow.segment-analysis.path:}") String path,
-      @Value("${lexiflow.segment-analysis.console:false}") boolean console) {
+      @Value("${lexiflow.segment-analysis.path:}") String path) {
     if (!enabled) return new SegmentAnalysisLog(SegmentAnalysisStore.disabled());
     var resolvedPath = path.isBlank() ? configuredAnalysisPath() : Path.of(path);
-    return new SegmentAnalysisLog(
-        new FileSegmentAnalysisStore(
-            resolvedPath, console ? line -> System.out.print(line) : null));
+    return new SegmentAnalysisLog(new FileSegmentAnalysisStore(resolvedPath, null));
   }
 
   private static Path configuredAnalysisPath() {

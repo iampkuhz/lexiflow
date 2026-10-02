@@ -163,7 +163,7 @@ class CaptionRequestFailureHttpTest {
               .filter(line -> line.contains(id))
               .findFirst()
               .orElseThrow();
-      assertTrue(event.contains("\"reason\":\"INVALID_REQUEST\""));
+      assertTrue(event.contains("reason=INVALID_REQUEST"));
     } finally {
       logger.detachAppender(appender);
       appender.stop();
@@ -221,9 +221,13 @@ class CaptionRequestFailureHttpTest {
   }
 
   private static String reason(String event) {
-    var marker = "\"reason\":\"";
-    int start = event.indexOf(marker) + marker.length();
-    return event.substring(start, event.indexOf('"', start));
+    var columns = event.split("\\|", -1);
+    assertEquals(6, columns.length);
+    return java.util.Arrays.stream(columns[4].split(";"))
+        .filter(field -> field.startsWith("reason="))
+        .map(field -> field.substring("reason=".length()))
+        .findFirst()
+        .orElse("OK");
   }
 
   private HttpResponse<String> post(String body) throws Exception {

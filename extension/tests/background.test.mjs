@@ -254,3 +254,62 @@ test('duplicate timing names without a duration invalidate the dimension in eith
     assert.deepEqual((await send({type:'caption-hints',requestId:'duplicates',payload},sender(1))).timings,{api:4});
   }
 });
+
+test('caption debug requires an exact YouTube top-frame sender and fresh enabled no-store capability', async () => {
+  const id='00000000-0000-0000-0000-000000000099'; const videoId='abcdefghijk'; const calls=[];
+  const message={type:'caption-debug',payload:{eventId:id,event:'incremental',topicKey:'topic-key',videoId,
+    subtitleKey:'segment-key',positionMs:1200,text:'new English (新词)'}};
+  globalThis.fetch=async (url,options)=>{
+    calls.push({url:String(url),options});
+    if(String(url).endsWith('/caption-debug')&&options.method==='GET')
+      return {ok:true,headers:{get:name=>name==='Cache-Control'?'no-store':null},text:async()=>'{"enabled":true}'};
+    if(String(url).endsWith('/caption-debug')&&options.method==='POST') return {ok:true};
+    assert.fail('unexpected endpoint');
+  };
+  const invalid={...sender(70),frameId:1,tab:{id:70,url:`https://www.youtube.com/watch?v=${videoId}`}};
+  assert.deepEqual(await send(message,invalid),{ok:false,reason:'invalid-request'});
+  assert.equal(calls.length,0);
+  const valid={...sender(70),frameId:0,tab:{id:70,url:`https://www.youtube.com/watch?v=${videoId}`}};
+  assert.deepEqual(await send(message,valid),{ok:true});
+  for(let index=0;index<30&&!calls.some(call=>call.options.method==='POST');index++) await new Promise(resolve=>setTimeout(resolve,0));
+  assert.deepEqual(calls.map(call=>call.options.method),['GET','POST']);
+  assert.equal(calls[0].url,calls[1].url); assert.equal(calls[0].options.cache,'no-store');
+  assert.equal(Object.hasOwn(calls[0].options,'body'),false);
+  assert.equal(JSON.parse(calls[1].options.body).text,'new English (新词)');
+});
+
+test('disabled or cacheable debug capability never forwards event body', async () => {
+  let posts=0; const videoId='abcdefghijk';
+  const message={type:'caption-debug',payload:{eventId:'00000000-0000-0000-0000-000000000098',event:'video-start',topicKey:'topic-key',videoId,
+    subtitleKey:'segment-key',positionMs:0,text:''}};
+  globalThis.fetch=async (_url,options)=>{if(options.method==='POST'){posts++;return {ok:true};}
+    return {ok:true,headers:{get:name=>name==='Cache-Control'?'no-store':null},text:async()=>'{"enabled":false}'};};
+  assert.deepEqual(await send(message,{...sender(71),frameId:0,tab:{id:71,url:`https://www.youtube.com/watch?v=${videoId}`}}),{ok:true});
+  await new Promise(resolve=>setTimeout(resolve,0)); assert.equal(posts,0);
+  globalThis.fetch=async (_url,options)=>{if(options.method==='POST'){posts++;return {ok:true};}
+    return {ok:true,headers:{get:()=> 'max-age=600'},text:async()=>'{"enabled":true}'};};
+  assert.deepEqual(await send(message,{...sender(71),frameId:0,tab:{id:71,url:`https://www.youtube.com/watch?v=${videoId}`}}),{ok:true});
+  await new Promise(resolve=>setTimeout(resolve,0)); assert.equal(posts,0);
+});
+
+test('capability body is size-bounded and the body read shares the 1.5-second deadline', async () => {
+  const videoId='abcdefghijk'; const message={type:'caption-debug',payload:{eventId:'00000000-0000-0000-0000-000000000097',event:'final',topicKey:'topic-key',videoId,
+    subtitleKey:'segment-key',positionMs:1,text:'known words'}};
+  let posts=0; const validHeaders={get:name=>name==='Cache-Control'?'no-store':null};
+  globalThis.fetch=async (_url,options)=>{if(options.method==='POST'){posts++;return {ok:true};}
+    return {ok:true,headers:validHeaders,text:async()=>'{"enabled":true}'+ ' '.repeat(300)};};
+  await send(message,{...sender(72),frameId:0,tab:{id:72,url:`https://www.youtube.com/watch?v=${videoId}`}});
+  await new Promise(resolve=>setTimeout(resolve,0)); assert.equal(posts,0);
+
+  const nativeSetTimeout=globalThis.setTimeout, nativeClearTimeout=globalThis.clearTimeout;
+  let deadline;
+  globalThis.setTimeout=(callback,ms,...args)=>{if(ms===1500){deadline=callback;return 989;}return nativeSetTimeout(callback,ms,...args);};
+  globalThis.clearTimeout=handle=>{if(handle!==989)nativeClearTimeout(handle);};
+  try {
+    globalThis.fetch=async (_url,options)=>{if(options.method==='POST'){posts++;return {ok:true};}
+      return {ok:true,headers:validHeaders,text:()=>new Promise(()=>{})};};
+    await send(message,{...sender(72),frameId:0,tab:{id:72,url:`https://www.youtube.com/watch?v=${videoId}`}});
+    await Promise.resolve(); await Promise.resolve(); assert.equal(typeof deadline,'function'); deadline();
+    await Promise.resolve(); await Promise.resolve(); assert.equal(posts,0);
+  } finally { globalThis.setTimeout=nativeSetTimeout; globalThis.clearTimeout=nativeClearTimeout; }
+});

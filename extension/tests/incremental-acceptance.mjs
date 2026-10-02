@@ -42,9 +42,9 @@ export async function runIncrementalAcceptance({page,serviceWorker,setCaption,wa
   await page.waitForTimeout(300);assert.equal(await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length),before+1);
   assert.equal(await page.evaluate(()=>document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.gloss')===window.__retainedGloss),true);
   assert.equal(await page.locator('#lexiflow-caption-overlay br').count(),1);
-  // 同一词条在新的增量响应再次命中，也只能保留一处提示且不能替换旧节点。
+  // 同一词条的新出现位置应增加第二处提示，原中文节点身份保持不变。
   await setCaption(page,'reliable method reliable',40.8);await page.waitForTimeout(350);await waitForState(page,'ready');
-  assert.equal(await page.locator('#lexiflow-caption-overlay .gloss').count(),1);
+  assert.equal(await page.locator('#lexiflow-caption-overlay .gloss').count(),2);
   assert.equal(await page.evaluate(()=>document.querySelector('#lexiflow-caption-overlay').shadowRoot.querySelector('.gloss')===window.__retainedGloss),true);
   // 慢请求返回时字幕已追加，仍可见的旧词必须获得提示。
   await setCaption(page,'Another reliable',41);await page.waitForTimeout(70);await setCaption(page,'Another reliable result',41.1);

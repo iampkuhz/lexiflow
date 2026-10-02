@@ -20,7 +20,7 @@ export type PageLifecycle = {
 };
 
 export function createPageLifecycle(source: LifecycleSource, invalidate: () => void, capture: () => void,
-  onStateChange: (reason?: "disabled" | "source_hidden" | "navigation") => void, createKey: () => string = () => crypto.randomUUID()): PageLifecycle {
+  onStateChange: (reason?: "disabled" | "source_hidden" | "navigation" | "interrupted") => void, createKey: () => string = () => crypto.randomUUID()): PageLifecycle {
   let pageKey = createKey(), videoId = source.currentVideoId(), generation = 0;
   let enabled = true, navigating = false, seeking = false, stopped = false;
   let lastDocumentHidden = document.hidden;
@@ -35,7 +35,7 @@ export function createPageLifecycle(source: LifecycleSource, invalidate: () => v
     if (motionFrame !== undefined) cancelAnimationFrame(motionFrame);
     motionFrame = undefined; motionDeadline = 0;
   };
-  const notify = (reason?: "disabled" | "source_hidden" | "navigation") => { try { onStateChange(reason); } catch { /* observations cannot alter lifecycle */ } };
+  const notify = (reason?: "disabled" | "source_hidden" | "navigation" | "interrupted") => { try { onStateChange(reason); } catch { /* observations cannot alter lifecycle */ } };
   const resetForLocation = () => {
     generation++; enabled = true; seeking = false; stopped = false; cancelMotion();
     pageKey = createKey(); videoId = source.currentVideoId(); invalidate(); notify("navigation");
@@ -62,11 +62,11 @@ export function createPageLifecycle(source: LifecycleSource, invalidate: () => v
     if (document.hidden) { cancelMotion(); generation++; invalidate(); notify(changed ? "source_hidden" : undefined); }
     else capture();
   };
-  const pagehide = () => { cancelMotion(); stopped = true; generation++; invalidate(); notify(); };
+  const pagehide = () => { cancelMotion(); stopped = true; generation++; invalidate(); notify("interrupted"); };
   const pageshow = () => { stopped = false; generation++; invalidate(); capture(); };
-  const seekingStart = () => { cancelMotion(); seeking = true; generation++; invalidate(); notify(); };
+  const seekingStart = () => { cancelMotion(); seeking = true; generation++; invalidate(); notify("interrupted"); };
   const seekingEnd = () => { seeking = false; stopped = false; capture(); };
-  const stopSource = () => { cancelMotion(); stopped = true; generation++; invalidate(); notify(); };
+  const stopSource = () => { cancelMotion(); stopped = true; generation++; invalidate(); notify("interrupted"); };
   const resumeSource = () => { stopped = false; capture(); };
   const navigateStart = () => { if (navigating) return; navigating = true; resetForLocation(); };
   const navigateEnd = () => {
@@ -105,7 +105,7 @@ export function createPageLifecycle(source: LifecycleSource, invalidate: () => v
     disposed = true; stopped = true; enabled = false; generation++;
     observer?.disconnect(); observer = undefined;
     for (const remove of listeners.splice(0)) remove();
-    cancelMotion(); attached = false; invalidate(); notify();
+    cancelMotion(); attached = false; invalidate(); notify("interrupted");
   }
   return {
     get pageKey() { return pageKey; }, get videoId() { return videoId; }, get generation() { return generation; },

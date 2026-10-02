@@ -90,6 +90,7 @@ project(":enrichment") {
 project(":adapters") {
     dependencies {
         add("implementation", platform(springBootBom))
+        add("implementation", "ch.qos.logback:logback-classic")
         add("implementation", "tools.jackson.core:jackson-core")
         add("implementation", "org.springframework.boot:spring-boot-starter-jdbc")
         add("runtimeOnly", "org.postgresql:postgresql")

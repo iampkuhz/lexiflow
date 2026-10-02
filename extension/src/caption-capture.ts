@@ -15,6 +15,7 @@ export type CaptureDependencies = {
   onOversized(): void;
   onAcquisition(elapsedMs: number): void;
   onObservation?(outcome: "cancelled-acquisition"): void;
+  onInterrupted?(): void;
 };
 /** DOM/viewport/source metadata/snapshot/topic are a single acquisition owner; stream remains request-state owner. */
 export class CaptionCapture {
@@ -52,6 +53,7 @@ export class CaptionCapture {
     this.missingCaptionAt = undefined; this.layoutKey = ""; this.viewport.reset(); this.snapshots.reset();
     this.topicPromise = undefined;
     this.activeCaptionKey = undefined; this.activePlayer = null; this.sourceRevision++; this.sourceSequence++;
+    try { this.dependencies.onInterrupted?.(); } catch { /* debug reporting cannot affect capture */ }
     this.stream.clear(this.sourceSequence);
   }
   readSource(): CaptionSource | undefined {
@@ -80,7 +82,8 @@ export class CaptionCapture {
   }
 
   private clearSource(): void {
-    this.missingCaptionAt = undefined; this.viewport.reset(); this.snapshots.reset();
+    this.missingCaptionAt = undefined;
+    try { this.dependencies.onInterrupted?.(); } catch { /* debug reporting cannot affect capture */ } this.viewport.reset(); this.snapshots.reset();
     if (this.topicPending) { this.topicPending = false; try { this.dependencies.onObservation?.("cancelled-acquisition"); } catch { /* observation is best effort */ } }
     this.topicPromise = undefined;
     this.sourceSequence++; this.stream.clear(this.sourceSequence);

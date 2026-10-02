@@ -1,18 +1,23 @@
 package io.lexiflow.observability.platform;
 
+import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MarkerFactory;
 import tools.jackson.core.JsonGenerator;
 import tools.jackson.core.json.JsonFactory;
 
-/** 将封闭事件编码为单行 JSON；失败不影响业务路径。 */
+/** 将封闭事件写入机器测试 sink 或固定六列控制台；失败不影响业务路径。 */
 public final class StructuredEventLogger {
   private static final Logger LOG = LoggerFactory.getLogger(StructuredEventLogger.class);
+  private static final String READABLE_MARKER = "LEXIFLOW_READABLE_LINE";
   private final BiConsumer<StructuredEvent.Level, String> sink;
   private final JsonFactory factory = new JsonFactory();
+  private final ReadableLogFormatter formatter = new ReadableLogFormatter();
 
   /** 使用固定 SLF4J sink。 */
   public StructuredEventLogger() {
@@ -37,9 +42,28 @@ public final class StructuredEventLogger {
   public boolean tryEmit(Supplier<StructuredEvent> eventSupplier) {
     try {
       var event = Objects.requireNonNull(eventSupplier).get();
-      var line = encode(event);
-      if (sink != null) sink.accept(event.level(), line);
-      else emitSlf4j(event, line);
+      if (sink != null) sink.accept(event.level(), encode(event));
+      else emitSlf4j(event, readableLine(event));
+      return true;
+    } catch (RuntimeException ignored) {
+      return false;
+    }
+  }
+
+  /**
+   * 安全写入固定 INFO 级别的可读敏感事件。调用者必须仅传入服务端白名单事件名称。
+   *
+   * @param event 固定事件名称。
+   * @param correlationId 真实请求 UUID。
+   * @param fields 已验证且需安全转义的定位字段。
+   * @param body 已确认的显示正文。
+   * @return 写出成功时为 true，否则为 false。
+   */
+  public boolean tryEmitReadableInfo(
+      String event, UUID correlationId, Map<String, String> fields, String body) {
+    try {
+      var line = formatter.format("INFO", correlationId, event, fields, body);
+      emitReadableSlf4j(StructuredEvent.Level.INFO, line);
       return true;
     } catch (RuntimeException ignored) {
       return false;
@@ -47,11 +71,54 @@ public final class StructuredEventLogger {
   }
 
   private static void emitSlf4j(StructuredEvent event, String line) {
-    switch (event.level()) {
-      case INFO -> LOG.info("{}", line);
-      case WARN -> LOG.warn("{}", line);
-      case ERROR -> LOG.error("{}", line);
+    emitReadableSlf4j(event.level(), line);
+  }
+
+  private static void emitReadableSlf4j(StructuredEvent.Level level, String line) {
+    var marker = MarkerFactory.getMarker(READABLE_MARKER);
+    switch (level) {
+      case INFO -> LOG.info(marker, "{}", line);
+      case WARN -> LOG.warn(marker, "{}", line);
+      case ERROR -> LOG.error(marker, "{}", line);
     }
+  }
+
+  private String readableLine(StructuredEvent event) {
+    var fields = new java.util.TreeMap<String, String>();
+    fields.put("duration_ms", Long.toString(event.durationMs()));
+    if (event.reason() != StructuredEvent.Reason.OK) fields.put("reason", event.reason().name());
+    if (event.lexiconVersion() != null
+        && (event.type() == StructuredEvent.EventType.RUNTIME_START_COMPLETED
+            || event.type() == StructuredEvent.EventType.LEXICON_CACHE_VERSION_CHANGED))
+      fields.put("lexicon_version", Long.toString(event.lexiconVersion()));
+    putCount(event, StructuredEvent.Count.SELECTED, fields);
+    putCount(event, StructuredEvent.Count.NEW_RANGES, fields);
+    boolean detailed = LOG.isDebugEnabled();
+    boolean warningOrFailure = event.level() != StructuredEvent.Level.INFO;
+    if (detailed || warningOrFailure)
+      event
+          .counts()
+          .forEach((key, value) -> fields.put("count_" + snake(key.name()), value.toString()));
+    if (detailed)
+      event
+          .timingsMs()
+          .forEach((key, value) -> fields.put("timing_" + snake(key.name()), value.toString()));
+    if (detailed && event.step() != null) {
+      fields.put("step", snake(event.step().name()));
+      fields.put("phase", snake(event.phase().name()));
+    }
+    if (detailed)
+      event
+          .reasonCounts()
+          .forEach((key, value) -> fields.put("reason_" + snake(key.name()), value.toString()));
+    UUID correlationId = event.requestId() == null ? UUID.randomUUID() : event.requestId();
+    return formatter.format(event.level().name(), correlationId, event.eventName(), fields, "-");
+  }
+
+  private static void putCount(
+      StructuredEvent event, StructuredEvent.Count count, java.util.Map<String, String> fields) {
+    Long value = event.counts().get(count);
+    if (value != null) fields.put("count_" + snake(count.name()), value.toString());
   }
 
   private String encode(StructuredEvent e) {

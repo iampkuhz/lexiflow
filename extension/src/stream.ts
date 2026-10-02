@@ -4,7 +4,7 @@ import { remapHints, retainedOverlap } from "./caption-snapshot";
 export const COALESCE_MS = 16;
 export type CaptionEvent = { key: string; sequence: number; videoTimeMs: number; request: CaptionHintRequest };
 export type StreamState = "idle" | "waiting" | "ready" | "no-pending" | "fallback";
-export type StreamView = { state: StreamState; event?: CaptionEvent; hints?: Hint[]; frozenKeys?: string[] };
+export type StreamView = { state: StreamState; event?: CaptionEvent; hints?: Hint[]; frozenKeys?: string[]; finalizedKeys?: string[]; debugRequestId?: string; debugRequestEvent?: CaptionEvent };
 type Operation = { promise: Promise<ApiResult>; cancel: () => void };
 export type RequestTransport = (event: CaptionEvent, requestId: string) => Operation;
 export type Scheduler = { setTimeout: (callback: () => void, timeoutMs: number) => ReturnType<typeof setTimeout>;
@@ -21,6 +21,7 @@ export class CaptionStreamCoordinator {
   private completed = new Set<string>();
   private hints: Hint[] = [];
   private frozenKeys = new Set<string>();
+  private finalizedKeys = new Set<string>();
   private activeRowKeys = new Set<string>();
   private submittedAt = 0;
   private requestNumber = 0;
@@ -33,11 +34,21 @@ export class CaptionStreamCoordinator {
     this.latestSequence = event.sequence;
     const oldText = this.current ? snapshotText(this.current.request.currentSnapshot) : "";
     const nextText = snapshotText(event.request.currentSnapshot);
+    const sameCaptionIdentity = !!this.current && this.current.request.captionTopicKey === event.request.captionTopicKey &&
+      this.current.request.trackKey === event.request.trackKey;
+    const naturalRowExit = !!this.current && sameCaptionIdentity && !retainedOverlap(oldText, nextText);
+    const resetStream = !!this.current && (this.current.request.captionTopicKey !== event.request.captionTopicKey ||
+      (this.lastKnownTrackKey !== null && event.request.trackKey !== null && this.lastKnownTrackKey !== event.request.trackKey) ||
+      !retainedOverlap(oldText, nextText));
     if (this.current && (this.current.request.captionTopicKey !== event.request.captionTopicKey ||
         (this.lastKnownTrackKey !== null && event.request.trackKey !== null &&
-          this.lastKnownTrackKey !== event.request.trackKey) || !retainedOverlap(oldText, nextText))) this.invalidate(true);
+          this.lastKnownTrackKey !== event.request.trackKey) || !retainedOverlap(oldText, nextText))) {
+      const retired = naturalRowExit ? snapshotSegments(this.current.request.currentSnapshot).map(segment => segment.key) : [];
+      this.invalidate(true);
+      for (const key of retired) this.finalizedKeys.add(key);
+    }
     if (event.request.trackKey !== null) this.lastKnownTrackKey = event.request.trackKey;
-    if (this.current) {
+    if (this.current && !resetStream) {
       for (const segment of snapshotSegments(this.current.request.currentSnapshot)) {
         if (!this.activeRowKeys.has(segment.key)) this.frozenKeys.add(segment.key);
       }
@@ -46,15 +57,18 @@ export class CaptionStreamCoordinator {
     this.current = structuredClone(event);
     const keys = new Set(snapshotSegments(event.request.currentSnapshot).map(segment => segment.key));
     this.completed = new Set([...this.completed].filter(key => keys.has(key)));
-    this.frozenKeys = new Set([...this.frozenKeys].filter(key => keys.has(key)));
     const groups = event.request.currentSnapshot.captions;
     const lastGroup = groups.at(-1);
     const lastLine = lastGroup?.segments.at(-1)?.line;
     const nextActive = new Set(lastGroup?.segments.filter(segment => segment.line === lastLine).map(segment => segment.key) ?? []);
     if (this.activeRowKeys.size && ![...this.activeRowKeys].some(key => nextActive.has(key))) {
-      for (const key of this.activeRowKeys) if (keys.has(key)) this.frozenKeys.add(key);
+      for (const key of this.activeRowKeys) this.frozenKeys.add(key);
     }
     this.activeRowKeys = nextActive;
+    for (const key of this.frozenKeys) if (!keys.has(key)) this.finalizedKeys.add(key);
+    this.frozenKeys = new Set([...this.frozenKeys].filter(key => keys.has(key)));
+    for (const key of keys) this.finalizedKeys.delete(key);
+    while (this.finalizedKeys.size > 256) this.finalizedKeys.delete(this.finalizedKeys.values().next().value!);
     this.submittedAt = this.now();
     this.publish(this.pending() ? "waiting" : this.hints.length ? "ready" : "no-pending");
     this.schedule(COALESCE_MS);
@@ -69,13 +83,13 @@ export class CaptionStreamCoordinator {
     if (this.timer !== undefined) { this.scheduler.clearTimeout(this.timer); this.timer = undefined; this.record({ outcome: "cancelled_before_send" }); }
     if (this.active) { try { this.active.cancel(); } catch { /* cancellation is best effort */ } this.active = undefined; this.record({ outcome: "cancelled_in_flight" }); }
     if (reset) { this.completed.clear(); this.hints = []; this.lastAcknowledged = null;
-      this.frozenKeys.clear(); this.activeRowKeys.clear(); }
+      this.frozenKeys.clear(); this.activeRowKeys.clear(); this.finalizedKeys.clear(); }
   }
   private pending(): boolean {
     return !!this.current && snapshotSegments(this.current.request.currentSnapshot).some(segment => !this.completed.has(segment.key));
   }
-  private publish(state: StreamState): void { this.render({ state, event: this.current,
-    hints: this.hints.map(hint => ({ ...hint })), frozenKeys: [...this.frozenKeys] }); }
+  private publish(state: StreamState, debugRequestId?: string, debugRequestEvent?: CaptionEvent): void { this.render({ state, event: this.current,
+    hints: this.hints.map(hint => ({ ...hint })), frozenKeys: [...this.frozenKeys], finalizedKeys: [...this.finalizedKeys], ...(debugRequestId ? { debugRequestId } : {}), ...(debugRequestEvent ? { debugRequestEvent } : {}) }); }
   private schedule(delay: number): void {
     if (this.active || this.timer !== undefined || !this.pending()) return;
     this.timer = this.scheduler.setTimeout(() => { this.timer = undefined; this.dispatch(); }, delay);
@@ -132,13 +146,12 @@ export class CaptionStreamCoordinator {
       });
       if (touchesFrozen || crossesRow) continue;
       if (version !== undefined && hint.lexiconVersion !== version) continue;
-      if (!this.hints.some(old => old.lexiconEntryId === hint.lexiconEntryId ||
-          (old.startOffset < hint.endOffset && hint.startOffset < old.endOffset))) this.hints.push(hint);
+      if (!this.hints.some(old => old.startOffset < hint.endOffset && hint.startOffset < old.endOffset)) this.hints.push(hint);
     }
     this.hints.sort((left, right) => left.startOffset - right.startOffset);
     this.record({ outcome: this.hints.length ? "ready" : "no-pending" });
     if (result.body.hints.length === 0) this.record({ outcome: "no_hint" });
-    this.publish(this.pending() ? "waiting" : this.hints.length ? "ready" : "no-pending");
+    this.publish(this.pending() ? "waiting" : this.hints.length ? "ready" : "no-pending", result.requestId, event);
     // 首次完整响应可展示当前旧行一次；之后封版，偏好读取等迟到事件不能再首次补写。
     const groups = this.current.request.currentSnapshot.captions;
     const newest = groups.at(-1), newestLine = newest?.segments.at(-1)?.line;
