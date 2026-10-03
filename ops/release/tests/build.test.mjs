@@ -7,6 +7,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { prepareImageBuild } from '../build.mjs';
+import { jarBytes, makeZip } from './zip-fixture.mjs';
+import { resolveBuildIdentity } from '../version.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const args = (f, descriptor = f.descriptor) => ({ repoRoot: f.root, artifactRoot: f.artifactRoot, descriptor });
@@ -37,16 +39,23 @@ async function fixture() {
   execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], { timeout: 10_000 });
   const sourceCommit = git(root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const artifactRoot = path.join(root, 'artifact'); await mkdir(artifactRoot);
-  const jarBytes = Buffer.from('synthetic jar bytes'); await writeFile(path.join(artifactRoot, 'app.jar'), jarBytes);
+  const builtJar = jarBytes(resolveBuildIdentity(root)); await writeFile(path.join(artifactRoot, 'app.jar'), builtJar);
   const descriptor = {
     schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit,
-    jar: { path: 'app.jar', bytes: jarBytes.length, sha256: hash(jarBytes) },
+    jar: { path: 'app.jar', bytes: builtJar.length, sha256: hash(builtJar) },
     baseImages: [
       structuredClone(lockImages[0]),
       structuredClone(lockImages[1]),
     ],
   };
-  return { root, artifactRoot, descriptor, cleanup: () => rm(root, { recursive: true, force: true }) };
+  const refreshJar = async () => {
+    const identity = resolveBuildIdentity(root);
+    const bytes = jarBytes(identity);
+    await writeFile(path.join(artifactRoot, 'app.jar'), bytes);
+    descriptor.softwareVersion = identity.softwareVersion; descriptor.sourceCommit = identity.sourceCommit;
+    descriptor.jar.bytes = bytes.length; descriptor.jar.sha256 = hash(bytes);
+  };
+  return { root, artifactRoot, descriptor, refreshJar, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
 
 test('生成固定、双平台且无宿主路径的确定性 argv 计划', async () => {
@@ -57,7 +66,9 @@ test('生成固定、双平台且无宿主路径的确定性 argv 计划', async
     reorderedInput.baseImages.reverse();
     const reordered = await prepareImageBuild(args(f, reorderedInput));
     assert.deepEqual(reordered, result);
-    assert.deepEqual(Object.keys(result), ['schemaVersion', 'softwareVersion', 'sourceCommit', 'jar', 'templates', 'baseImageLock', 'platforms']);
+    assert.deepEqual(Object.keys(result), ['schemaVersion', 'softwareVersion', 'sourceCommit', 'buildIdentity', 'jar', 'templates', 'baseImageLock', 'platforms']);
+    const labels = ['org.opencontainers.image.version=' + result.softwareVersion, 'org.opencontainers.image.revision=' + result.sourceCommit,
+      'io.lexiflow.build-id=' + result.buildIdentity.buildId, 'io.lexiflow.source-sha256=' + result.buildIdentity.sourceSha256].flatMap((label) => ['--label', label]);
     assert.deepEqual(result.baseImageLock, { path: lockPath, bytes: Buffer.byteLength(`${JSON.stringify({ schemaVersion: 1, baseImages: lockImages }, null, 2)}\n`), sha256: hash(`${JSON.stringify({ schemaVersion: 1, baseImages: lockImages }, null, 2)}\n`) });
     assert.deepEqual(result.templates.map((item) => item.path), templates);
     assert.deepEqual(result.platforms.map((item) => item.platform), ['linux/amd64', 'linux/arm64']);
@@ -65,14 +76,14 @@ test('生成固定、双平台且无宿主路径的确定性 argv 计划', async
       [
         ['docker', 'image', 'inspect', 'sha256:' + 'a'.repeat(64)],
         ['docker', 'image', 'inspect', 'sha256:' + 'b'.repeat(64)],
-        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/amd64', '--build-arg', `JAVA_RUNTIME_IMAGE=${runtime('java', 'a').reference}`, '--file', 'Dockerfile', '--iidfile', 'api.iid', '.'],
-        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/amd64', '--build-arg', `POSTGRES_RUNTIME_IMAGE=${runtime('postgres', 'b').reference}`, '--file', 'Dockerfile.postgres', '--iidfile', 'postgres.iid', '.'],
+        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/amd64', ...labels, '--build-arg', `JAVA_RUNTIME_IMAGE=${runtime('java', 'a').reference}`, '--file', 'Dockerfile', '--iidfile', 'api.iid', '.'],
+        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/amd64', ...labels, '--build-arg', `POSTGRES_RUNTIME_IMAGE=${runtime('postgres', 'b').reference}`, '--file', 'Dockerfile.postgres', '--iidfile', 'postgres.iid', '.'],
       ],
       [
         ['docker', 'image', 'inspect', 'sha256:' + 'c'.repeat(64)],
         ['docker', 'image', 'inspect', 'sha256:' + 'd'.repeat(64)],
-        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/arm64', '--build-arg', `JAVA_RUNTIME_IMAGE=${runtime('java', 'c').reference}`, '--file', 'Dockerfile', '--iidfile', 'api.iid', '.'],
-        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/arm64', '--build-arg', `POSTGRES_RUNTIME_IMAGE=${runtime('postgres', 'd').reference}`, '--file', 'Dockerfile.postgres', '--iidfile', 'postgres.iid', '.'],
+        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/arm64', ...labels, '--build-arg', `JAVA_RUNTIME_IMAGE=${runtime('java', 'c').reference}`, '--file', 'Dockerfile', '--iidfile', 'api.iid', '.'],
+        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/arm64', ...labels, '--build-arg', `POSTGRES_RUNTIME_IMAGE=${runtime('postgres', 'd').reference}`, '--file', 'Dockerfile.postgres', '--iidfile', 'postgres.iid', '.'],
       ],
     ]);
     assert.ok(!JSON.stringify(result).includes(f.root));
@@ -98,6 +109,27 @@ test('平台子集只进入计划且仍绑定 lock 中的精确镜像身份', as
   } finally { await f.cleanup(); }
 });
 
+test('完整构建身份接受干净 SNAPSHOT，但拒绝 dirty 源码', async () => {
+  const snapshot = await fixture();
+  try {
+    await writeFile(path.join(snapshot.root, 'ops/release/version.txt'), '2.0.0-SNAPSHOT\n');
+    git(snapshot.root, ['add', 'ops/release/version.txt']);
+    git(snapshot.root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'snapshot fixture']);
+    snapshot.descriptor.sourceCommit = git(snapshot.root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    snapshot.descriptor.softwareVersion = `2.0.0-SNAPSHOT.g${snapshot.descriptor.sourceCommit.slice(0, 7)}`;
+    await snapshot.refreshJar();
+    const result = await prepareImageBuild(args(snapshot));
+    assert.equal(result.buildIdentity.channel, 'snapshot');
+    assert.equal(result.buildIdentity.dirty, false);
+  } finally { await snapshot.cleanup(); }
+
+  const dirty = await fixture();
+  try {
+    await writeFile(path.join(dirty.root, 'uncommitted.txt'), 'dirty');
+    await assert.rejects(prepareImageBuild(args(dirty)), { message: 'RELEASE_SOURCE_REJECTED' });
+  } finally { await dirty.cleanup(); }
+});
+
 test('拒绝 schema、版本/commit、坏 jar、缺平台与注入的 runtime reference', async () => {
   const f = await fixture();
   try {
@@ -115,6 +147,34 @@ test('拒绝 schema、版本/commit、坏 jar、缺平台与注入的 runtime re
     for (const [name, mutate, expected] of cases) {
       const descriptor = structuredClone(f.descriptor); mutate(descriptor);
       await assert.rejects(prepareImageBuild(args(f, descriptor)), { message: expected }, name);
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('JAR 内嵌完整身份及必需资源必须匹配源码身份', async () => {
+  const f = await fixture();
+  try {
+    const identity = resolveBuildIdentity(f.root);
+    const cases = [
+      ['software version', { ...identity, softwareVersion: '9.9.9' }],
+      ['source commit', { ...identity, sourceCommit: '0'.repeat(40) }],
+      ['build id', { ...identity, buildId: '0'.repeat(64) }],
+      ['source hash', { ...identity, sourceSha256: '0'.repeat(64) }],
+    ];
+    for (const [name, altered] of cases) {
+      const bytes = jarBytes(altered);
+      await writeFile(path.join(f.artifactRoot, 'app.jar'), bytes);
+      f.descriptor.jar = { path: 'app.jar', bytes: bytes.length, sha256: hash(bytes) };
+      await assert.rejects(prepareImageBuild(args(f)), { message: 'JAR_IDENTITY_MISMATCH' }, name);
+    }
+    for (const [name, bytes] of [
+      ['missing metadata', makeZip([['META-INF/lexiflow-version.txt', `${identity.softwareVersion}\n`]])],
+      ['malformed archive', Buffer.from('not a zip archive')],
+    ]) {
+      await writeFile(path.join(f.artifactRoot, 'app.jar'), bytes);
+      f.descriptor.jar = { path: 'app.jar', bytes: bytes.length, sha256: hash(bytes) };
+      await assert.rejects(prepareImageBuild(args(f)), name === 'malformed archive'
+        ? { message: 'ARCHIVE_INVALID' } : { message: 'ARCHIVE_ENTRY_MISSING' }, name);
     }
   } finally { await f.cleanup(); }
 });
@@ -140,20 +200,24 @@ test('descriptor 镜像身份由 Git 锁唯一决定且比较不依赖字段顺�
       git(f.root, ['add', lockPath]);
       git(f.root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'mutate lock fixture']);
       f.descriptor.sourceCommit = git(f.root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      await f.refreshJar();
       await assert.rejects(prepareImageBuild(args(f)), { message: 'BASE_IMAGES_INVALID' });
       await writeFile(path.join(f.root, lockPath), `${JSON.stringify({ schemaVersion: 1, baseImages: lockImages }, null, 2)}\n`);
       git(f.root, ['add', lockPath]);
       git(f.root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'restore lock fixture']);
       f.descriptor.sourceCommit = git(f.root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      await f.refreshJar();
     }
     await git(f.root, ['rm', '-q', lockPath]);
     git(f.root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'remove lock fixture']);
     f.descriptor.sourceCommit = git(f.root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    try { await f.refreshJar(); } catch { /* invalid tracked inputs are rejected before artifact identity is consumed */ }
     await assert.rejects(prepareImageBuild(args(f)), { message: 'BASE_IMAGES_INVALID' });
     await writeFile(path.join(f.root, '.gitignore'), '/artifact/\n/ops/docker/base-images.json\n');
     git(f.root, ['add', '.gitignore']);
     git(f.root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'ignore lock fixture']);
     f.descriptor.sourceCommit = git(f.root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    await f.refreshJar();
     await writeFile(path.join(f.root, lockPath), `${JSON.stringify({ schemaVersion: 1, baseImages: lockImages })}\n`);
     await assert.rejects(prepareImageBuild(args(f)), { message: 'BASE_IMAGES_INVALID' });
   } finally { await f.cleanup(); }
@@ -166,12 +230,13 @@ test('锁文件专属路径拒绝 symlink、超限、未知平台与 malformed J
     git(f.root, ['add', '-A', '--', lockPath]);
     git(f.root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'change lock fixture']);
     f.descriptor.sourceCommit = git(f.root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    try { await f.refreshJar(); } catch { /* symlink source is rejected at the source boundary */ }
   };
   try {
     await rm(lockFile);
     await symlink(path.join(f.root, 'ops/release/version.txt'), lockFile);
     await commitCurrentLock();
-    await assert.rejects(prepareImageBuild(args(f)), { message: 'BASE_IMAGES_INVALID' }, 'tracked lock symlink');
+    await assert.rejects(prepareImageBuild(args(f)), { message: 'RELEASE_SOURCE_REJECTED' }, 'tracked lock symlink is rejected by the complete source identity first');
 
     await rm(lockFile);
     await writeFile(lockFile, `${JSON.stringify({ schemaVersion: 1, baseImages: lockImages }, null, 2)}${' '.repeat(16 * 1024)}\n`);
@@ -229,7 +294,8 @@ test('拒绝 artifact 根/父路径 symlink 与 clean 已提交模板 symlink', 
     git(f.root, ['add', '-A']);
     git(f.root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'commit symlink template']);
     f.descriptor.sourceCommit = git(f.root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    await assert.rejects(prepareImageBuild(args(f)), { message: 'TEMPLATE_INVALID' });
+    // 完整源码闭包在模板读取前拒绝所有Git可见symlink。
+    await assert.rejects(prepareImageBuild(args(f)), { message: 'RELEASE_SOURCE_REJECTED' });
   } finally { await rm(alias, { force: true }); await rm(artifactAlias, { force: true }); await f.cleanup(); }
 });
 

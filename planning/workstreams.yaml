@@ -1294,6 +1294,123 @@ workstreams:
           required_change_version: 3.0.0
           required_result: PASS
         deliverable: 将发布验收与使用入口接入共享工程合同及可核对直接证据。
+      - id: LF-TSK-QLT-2007
+        title: 只读消费已有独立 Formal 验收链
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 75
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/delivery_gate/check.py
+        - scripts/delivery_gate/consume.py
+        - scripts/delivery_gate/__init__.py
+        - scripts/delivery_gate/__main__.py
+        - tests/delivery_gate/test_consume.py
+        - planning/workstreams.yaml
+        - harness/manifest.yaml
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/development/change-delivery/delivery-gate.md
+        - docs/development/operations/github-actions.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 不签发 receipt、不运行交付命令的既有完整 PASS 链消费入口与绑定 validation report descriptor。
+        acceptance_criteria:
+        - 缺失 check 时 BLOCKED，不能调用 publish、validate、review 或运行交付检查；对成功和拒绝均证明记录树字节及路径不变。
+        - 重用现有冻结输入、authority、内容哈希 DAG、依赖与批准核验，拒绝缺失、重复、非 PASS、漂移和绑定不匹配。
+        - 返回唯一链中的 submission/validation/review/check 身份、内容哈希与已绑定 verification report descriptor，不能接受调用者自报 actor、candidate 或替代 PASS。
+        - 读取不要求伪造当前 validator/reviewer 身份；跨宿主若原 authority proof 不可验证则 BLOCKED，不复制 UUID 当证明。
+        - 直接 fixture 覆盖正常链、缺层、篡改、重复、源码或要求漂移、依赖/批准缺失，并保留既有 check 发布及幂等行为。
+        acceptance_evidence:
+        - 独立 TASK_VALIDATION 的模块与静态检查结果、冻结差异及另一 actor 的只读审查；不把 fixture receipt 当真实发行许可。
+        validation_command: python3 -m unittest discover -s tests/delivery_gate && python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check && python3 -m scripts.repository.policy_projection --check
+        required_check_ids:
+        - eng.delivery-gate.module-tests
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        discovered_from: LF-TSK-QLT-2004
+        dependencies:
+        - LF-TSK-QLT-2003
+        depends_on:
+        - task_id: LF-TSK-QLT-2003
+          type: soft
+          required_task_version: 2
+          required_change_version: 2.0.0
+        deliverable: 可供发行证据绑定消费者调用的只读既有 Formal PASS 核验接口。
+
+      - id: LF-TSK-QLT-2008
+        title: 联合消费候选运行与已有 Formal 证据
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/delivery_gate/candidate.py
+        - scripts/delivery_gate/__init__.py
+        - scripts/delivery_gate/__main__.py
+        - tests/delivery_gate/test_candidate.py
+        - ops/release/candidate-proof.mjs
+        - ops/release/version.mjs
+        - ops/release/tests/version.test.mjs
+        - ops/release/tests/candidate-proof.test.mjs
+        - ops/release/tests/verified-candidate.test.mjs
+        - ops/release/tests/verified-candidate-fixture.mjs
+        - ops/release/build-check.mjs
+        - harness/module-checks.yaml
+        - harness/manifest.yaml
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/development/change-delivery/delivery-gate.md
+        - docs/development/operations/github-actions.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 只读联合验收消费者，从现有Formal链绑定的实际候选Check输出推导候选身份并核对同字节制品。
+        acceptance_criteria:
+        - 仅接受submission和候选目录，不接收任意PASS文件、摘要、actor或命令；复用consume_existing_pass且不签发或重跑交付命令。
+        - 唯一baseline实际候选Check必须位于该链validation绑定的完整PASS报告，完整核对stdout摘要、字节数、路径、run和冻结输入关联；拒绝合成桥接、缺项、重复或非PASS。
+        - 复用共享候选完整性与构建身份派生，实际候选及当前干净源码的完整身份与受验target相同；候选或证据消费中漂移不能PASS。
+        - 有界安全读取拒绝symlink、路径逃逸、重复JSON键和不完整阶段；成功与拒绝均不写receipt或候选，不执行Podman、构建或发布。
+        - 返回同链report/stdout描述符和候选摘要身份，仅证明联合绑定，SNAPSHOT不因此取得正式发布资格。
+        acceptance_evidence:
+        - 独立TASK_VALIDATION的真实Gate fixture链及真实assemble候选测试，篡改/错配/缺失/漂移拒绝与只读快照证据；独立冻结review。
+        validation_command: python3 -m unittest tests.delivery_gate.test_candidate && node --test ops/release/tests/candidate-proof.test.mjs
+        required_check_ids:
+        - eng.delivery-gate.module-tests
+        - eng.release.build
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        discovered_from: LF-TSK-QLT-2007
+        dependencies:
+        - LF-TSK-QLT-2007
+        - LF-TSK-OPS-2015
+        depends_on:
+        - task_id: LF-TSK-QLT-2007
+          type: soft
+          required_task_version: 1
+          required_change_version: 1.0.0
+        - task_id: LF-TSK-OPS-2015
+          type: soft
+          required_task_version: 1
+          required_change_version: 1.0.0
+        deliverable: 不允许拼接无关PASS的候选与Formal联合绑定接口。
+
 - id: LF-WS-PRD
   code: PRD
   name: "产品体验"
@@ -3466,6 +3583,406 @@ workstreams:
           required_change_version: 2.0.0
           required_result: PASS
         deliverable: 串联 Apple Silicon 构建与受控发布流水线及直接验收证据。
+
+
+      - id: LF-TSK-OPS-2012
+        title: 校验实际候选目录与运行消费身份
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/verified-candidate.mjs
+        - ops/release/tests/verified-candidate.test.mjs
+        - ops/release/pipeline.mjs
+        - ops/release/tests/pipeline.test.mjs
+        - ops/release/build-check.mjs
+        - scripts/verification/release_source_bridge.py
+        - tests/verification/test_release_source_bridge.py
+        - tests/verification/test_module_declarations.py
+        - harness/module-checks.yaml
+        - harness/manifest.yaml
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/development/operations/github-actions.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 只读核验现有 candidate.json、manifest、全部实际制品和内嵌扩展身份，作为运行适配器与晋升共同消费的唯一候选完整性入口。
+        acceptance_criteria:
+        - 复用现有候选和manifest schema及完整buildIdentity，不新建平行候选格式；缺失、重复、额外、路径逃逸、symlink、非普通文件、hash或身份不匹配均拒绝。
+        - 有界流式读取并复核读取前后身份；不解压、不执行候选脚本、不启动容器、不写目录，不把完整性PASS视为运行或Formal许可。
+        - CLI只接受固定候选目录与candidate摘要；proof来自实际marker/manifest及制品字节，不能接受调用者自报PASS或替代manifest。
+        - 直接测试覆盖实际assemble产物、clean SNAPSHOT与release、恶意文件及各层漂移、完整目录不写入，并保持既有images/assemble行为。
+        acceptance_evidence:
+        - 独立TASK_VALIDATION和另一actor冻结审查；无真实候选运行或完整Verify证据不声明发行完成。
+        validation_command: node --test ops/release/tests/verified-candidate.test.mjs ops/release/tests/pipeline.test.mjs
+        required_check_ids:
+        - eng.release.build
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        discovered_from: LF-TSK-OPS-2008
+        dependencies:
+        - LF-TSK-OPS-2008
+        depends_on:
+        - task_id: LF-TSK-OPS-2008
+          type: soft
+          required_task_version: 3
+          required_change_version: 3.0.0
+        deliverable: 运行和晋升可复用的候选实际字节完整性核验及绑定身份。
+
+
+      - id: LF-TSK-OPS-2013
+        title: 共享本机安装执行会话
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 45
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/podman/local.mjs
+        - ops/podman/doctor.mjs
+        - ops/podman/tests/local-session.test.mjs
+        - ops/docker/tests/test_podman_local.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/tasks.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 无导入副作用、按次隔离状态且保留现有 CLI 行为的 runLocal 执行会话，供固定候选适配共享安装和升级事务。
+        acceptance_criteria:
+        - 导入 local.mjs 不执行 CLI、不启动外部命令、不写文件、不注册 signal listener、不改变 process.exitCode。
+        - runLocal(argv) 复制参数并为每次调用隔离 state、目录、日志、取消状态和锁；并发调用在副作用前拒绝，失败后允许新调用。
+        - 错误与 finally 仍记录失败安装并释放本次锁和 listener；库调用返回既有退出码（doctor BLOCKED 为3）、不改进程退出状态；CLI 行为及用户命令不变。
+        - 不增加任意 hook、平台绕过或另一套安装状态机；直接测试覆盖导入、重复调用、失败重试、并发拒绝和 CLI 回归。
+        acceptance_evidence:
+        - 独立 TASK_VALIDATION 执行冻结直接测试及现有本机安装回归，另一 actor 只读审查证据；不将此重构视为候选运行或 Formal 验收。
+        validation_command: node --test ops/podman/tests/*.test.mjs && python3 -m unittest ops.docker.tests.test_podman_local
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        discovered_from: LF-TSK-OPS-2012
+        dependencies:
+        - LF-TSK-OPS-2012
+        depends_on:
+        - task_id: LF-TSK-OPS-2012
+          type: soft
+          required_task_version: 1
+          required_change_version: 1.0.0
+        deliverable: 可复用但不暴露任意注入点的本机执行会话与 CLI 回归证据。
+
+
+      - id: LF-TSK-OPS-2014
+        title: 将实际候选接入本机安装与升级事务
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/podman/local.mjs
+        - ops/podman/candidate.mjs
+        - ops/podman/tests/candidate.test.mjs
+        - ops/podman/tests/candidate-fixture.mjs
+        - ops/podman/tests/local-session.test.mjs
+        - ops/release/archive-identity.mjs
+        - ops/release/tests/archive-identity.test.mjs
+        - ops/docker/tests/test_podman_local.py
+        - harness/module-checks.yaml
+        - tests/verification/test_docker_contract_checks.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/development/operations/github-actions.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 将已核验 candidate 的镜像、扩展 ZIP 和资料包接入共享本机安装阶段及原地 upgrade 事务，不重建第二套生命周期。
+        acceptance_criteria:
+        - runLocal 仅新增精确候选目录与摘要输入，复用 verified-candidate；候选模式不运行源码构建、不执行候选脚本，不接受任意 hook 或调用者身份。
+        - 首装加载真实 ARM64 image archive并核对digest和四项完整identity labels，使用dataset.zip初始化，固定18080扩展权限；模板只做已知受限本机适配。
+        - 升级只准备API和固定扩展，保留PG镜像、卷、资料、密码和端口；仍使用upgradeInstallation的readiness、rollback、retry、no-op和record。
+        - ZIP全内容读取保持元数据路径共享解析器且有entry/total/count上限、hash/CRC/路径/类型保护，不用通用解压命令；候选输入读取前后漂移拒绝。
+        - 直接测试包含真实assemble夹具与受控Podman替身，覆盖首次/重复install、upgrade/no-op、准备或启动失败、取消恢复，以及源模式回归；不把替身测试当实机验收。
+        acceptance_evidence:
+        - 独立TASK_VALIDATION与冻结review；真实M芯片Podman候选运行由后续完整验收链绑定，不以本任务替身PASS冒充。
+        validation_command: node --test ops/podman/tests/*.test.mjs ops/release/tests/archive-identity.test.mjs
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.release.build
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        discovered_from: LF-TSK-OPS-2013
+        dependencies:
+        - LF-TSK-OPS-2013
+        - LF-TSK-OPS-2012
+        depends_on:
+        - task_id: LF-TSK-OPS-2013
+          type: soft
+          required_task_version: 1
+          required_change_version: 1.0.0
+        - task_id: LF-TSK-OPS-2012
+          type: soft
+          required_task_version: 1
+          required_change_version: 1.0.0
+        deliverable: 与现有本机事务一体的实际候选消费路径及直接回归证据。
+
+      - id: LF-TSK-OPS-2015
+        title: 执行同候选 ARM64 原生安装升级验收
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/podman/candidate-runtime.mjs
+        - ops/podman/candidate-session.mjs
+        - ops/podman/tests/candidate-runtime.test.mjs
+        - scripts/environment/candidate_runtime_check.py
+        - scripts/environment/release_runtime_check.py
+        - scripts/environment/runtime.py
+        - scripts/verification/kernel.py
+        - tests/verification/test_kernel.py
+        - tests/verification/test_release_runtime_check.py
+        - tests/verification/test_candidate_runtime_check.py
+        - tests/verification/test_ci.py
+        - tests/verification/test_module_declarations.py
+        - harness/module-checks.yaml
+        - harness/ci-policy.yaml
+        - harness/manifest.yaml
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/development/operations/github-actions.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 复用 runLocal 的实际候选 ARM64 macOS 验收入口与标准 Verify Check，报告绑定候选、完整源码身份及真实运行阶段。
+        acceptance_criteria:
+        - 精确请求仅含 previous 与 target 候选目录及摘要；target 必须匹配当前干净源码完整身份；不接受调用者安装目录、PASS、actor 或命令 hook。
+        - 仅在 Darwin arm64 和固定18080空闲时运行，使用独占 ignored 临时安装；不操作用户实际安装、不改 Podman machine 或候选字节。
+        - 实际候选执行首装、重复安装、no-op、旧候选到新候选同卷升级、真实启动失败自动恢复及重试；验证PG容器和卷、合成标记、资料、密码、端口、扩展及记录身份。
+        - 故障仅停止本次严格归属且镜像匹配的候选API；未观察到故障不能通过；有界子进程终止并等待，无法证明静止时保留现场。
+        - 清理前逐项重新核对本次资源归属与进程静止，仅删除已知资源；不全局prune，报告缺阶段或cleanup失败不得PASS。
+        - 输出绑定candidate与manifest摘要、完整buildIdentity、Verify冻结输入和实际阶段；quick CI显式排除，不替代独立Formal或来源许可审查。
+        acceptance_evidence:
+        - 独立TASK_VALIDATION的替身及拒绝测试、冻结review；真实候选运行单独输出hash-bound stdout，不把替身测试当实机证据。
+        validation_command: node --test ops/podman/tests/candidate-runtime.test.mjs
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.release.docker-contract
+        - eng.release.candidate-runtime
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        discovered_from: LF-TSK-OPS-2014
+        dependencies:
+        - LF-TSK-OPS-2014
+        depends_on:
+        - task_id: LF-TSK-OPS-2014
+          type: soft
+          required_task_version: 1
+          required_change_version: 1.0.0
+        deliverable: 同一实际候选的原生运行验收入口、Verify绑定与受限清理证据。
+
+
+      - id: LF-TSK-OPS-2016
+        title: 有界恢复升级准备失败的私有工作目录
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/podman/upgrade.mjs
+        - ops/podman/prepare-workspace.mjs
+        - ops/podman/local.mjs
+        - ops/podman/candidate.mjs
+        - ops/podman/tests/upgrade.test.mjs
+        - ops/podman/tests/prepare-workspace.test.mjs
+        - ops/podman/tests/candidate.test.mjs
+        - ops/docker/tests/test_podman_local.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/user/podman-macos.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 源码和候选升级共享有界准备写入与恢复，部分复制失败不再遗留无限增长的工作目录。
+        acceptance_criteria:
+        - 写入前持久化归属和预期内容证据，覆盖部分文件、空目录及强杀窗口；不以目录名或文件名代替字节归属。
+        - 已知部分写入在失败或取消后安全清理并允许同目录重试；证据不完整或未知漂移保留单一journal并拒绝新事务。
+        - 未知文件、符号链接、错误内容及归属漂移不得删除；禁止全局目录匹配清理或影响用户数据、PG、密码与已安装扩展。
+        - 源码与候选升级共用恢复能力，首次安装、完整升级、回滚及记录身份保持原合同。
+        acceptance_evidence:
+        - 独立TASK_VALIDATION的重复部分失败、写入中强杀、未知内容拒绝与成功重试证据；不把合成测试当Podman实机。
+        validation_command: node --test ops/podman/tests/upgrade.test.mjs ops/podman/tests/prepare-workspace.test.mjs ops/podman/tests/candidate.test.mjs
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        discovered_from: LF-TSK-OPS-2014
+        dependencies:
+        - LF-TSK-OPS-2014
+        depends_on:
+        - task_id: LF-TSK-OPS-2014
+          type: soft
+          required_task_version: 1
+          required_change_version: 1.0.0
+        deliverable: 有界准备写入、可核验部分清理与恢复重试测试。
+
+
+      - id: LF-TSK-OPS-2017
+        title: 将已验收候选晋升为不可替换的 GitHub 发行
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/environment/release_promotion.py
+        - tests/verification/test_release_promotion.py
+        - ops/release/distribution-licenses.json
+        - ops/release/third-party-notices.md
+        - harness/module-checks.yaml
+        - harness/manifest.yaml
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/development/operations/github-actions.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 复用联合证据的正式候选发布消费者，固定许可核准表、有界资产归档与不可替换GitHub晋升。
+        acceptance_criteria:
+        - 调用者仅指定submission和候选目录，发布另须显式publish；内部复用consume_candidate_pass及正式tag检查，不接受任意PASS或身份覆盖。
+        - 来源许可必须逐项匹配受源码冻结的核准表，默认空表阻断；不得自动确认再分发权，SNAPSHOT或非ARM64候选拒绝。
+        - 仅打包manifest声明的已验收字节，固定规范归档和公开元数据，不收集本机日志、receipt或凭据；流式大小及路径边界受测。
+        - 远端tag必须对应同一commit，immutable配置必须实际开启；拒绝任何已有同名发行，包括draft，不覆盖或删除，不创建移动tag或变更repo设置。
+        - 创建draft后上传固定资产并核对远端digest和完整资产集合，副作用前重核证据、tag及配置；通过才发布并更新latest，失败不假称未发布或自动重试写请求。
+        - 固定GitHub API目的地，无token重定向，响应/时间有界；独立配置只读token与contents写token不传子进程或输出，默认模式无远端写。
+        acceptance_evidence:
+        - 独立TASK_VALIDATION的归档与传输替身全流程、拒绝/失败/未知结果测试及只读冻结review；不实际连接远端写API。
+        validation_command: python3 -m unittest -v tests.verification.test_release_promotion
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        discovered_from: LF-TSK-QLT-2008
+        dependencies:
+        - LF-TSK-QLT-2008
+        - LF-TSK-OPS-2012
+        depends_on:
+        - task_id: LF-TSK-QLT-2008
+          type: soft
+          required_task_version: 1
+          required_change_version: 1.0.0
+        - task_id: LF-TSK-OPS-2012
+          type: soft
+          required_task_version: 1
+          required_change_version: 1.0.0
+        deliverable: 不替换发行的晋升入口与有界公开资产及失败拒绝测试。
+
+
+      - id: LF-TSK-OPS-2018
+        title: 接通实际候选构建与同宿主独立验收发布工作流
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - .github/workflows/release.yml
+        - ops/release/workflow.mjs
+        - ops/release/build-check.mjs
+        - ops/release/tests/workflow.test.mjs
+        - tests/verification/test_ci_workflows.py
+        - harness/manifest.yaml
+        - harness/module-checks.yaml
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/tasks.md
+        - docs/development/operations/github-actions.md
+        - README.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 复用既有构建和候选消费者的发行工作流，保留同宿主输入与原生Formal交接，仅显式批准后晋升。
+        acceptance_criteria:
+        - 正式标签校验后在受控Apple Silicon Podman宿主构建实际JAR、扩展与ARM64镜像，组装候选并向完整Verify提供同一候选及真实previous；不使用机制fixture作为发布输入。
+        - 固定构建命令、输入和许可材料边界，不接受任意shell或调用者PASS；缺少许可、真实previous或必需环境阻断，不自动核准权利。
+        - 保留受验checkout、候选、Verify附件与原生actor证据；普通Actions不签Formal，手动续办不checkout覆盖已有证据，不跨宿主仅复制JSON。
+        - 仅受保护正式标签进入专用runner，PR不可进入；构建验证无发布凭据，晋升另需显式批准并消费既有联合证据，不创建或移动标签。
+        - 失败不清理未知资源、重建用户环境或自动重试远端写；公开输出不包含日志、receipt、字幕或本机私有路径。
+        - 根README面向源码使用者提供install、upgrade、version、logs最短入口，不将尚未验收的发行描述为已可获取。
+        acceptance_evidence:
+        - 独立TASK_VALIDATION的工作流和编排直接测试、冻结输入与只读review；真实候选与GitHub运行单列，不以替身测试授予发布资格。
+        validation_command: node --test ops/release/tests/workflow.test.mjs && python3 -m unittest -v tests.verification.test_ci_workflows
+        required_check_ids:
+        - eng.release.build
+        - eng.verification.module-tests
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        discovered_from: LF-TSK-OPS-2017
+        dependencies:
+        - LF-TSK-OPS-2017
+        - LF-TSK-OPS-2015
+        depends_on:
+        - task_id: LF-TSK-OPS-2017
+          type: soft
+          required_task_version: 1
+          required_change_version: 1.0.0
+        - task_id: LF-TSK-OPS-2015
+          type: soft
+          required_task_version: 1
+          required_change_version: 1.0.0
+        deliverable: 真实候选与原生Formal交接的最小工作流、权限边界及用户命令导航。
 
 - id: LF-WS-ADP
   code: ADP

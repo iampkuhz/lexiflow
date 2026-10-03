@@ -96,6 +96,21 @@ async function inspectJson(args, context, expectedPlatform, expectedId) {
   return image;
 }
 
+function identityLabels(identity) {
+  return {
+    'org.opencontainers.image.version': identity.softwareVersion,
+    'org.opencontainers.image.revision': identity.sourceCommit,
+    'io.lexiflow.build-id': identity.buildId,
+    'io.lexiflow.source-sha256': identity.sourceSha256,
+  };
+}
+
+async function inspectCandidateImage(imageId, context, platform, labels) {
+  const image = await inspectJson(['image', 'inspect', imageId], context, platform, imageId);
+  if (!image.Config?.Labels || typeof image.Config.Labels !== 'object' || Array.isArray(image.Config.Labels)
+    || Object.entries(labels).some(([key, value]) => image.Config.Labels[key] !== value)) reject('IMAGE_LABEL_MISMATCH');
+}
+
 async function prepareContext(plan, repoRoot, artifactRoot, candidateDirectory) {
   const contexts = new Map();
   await mkdir(path.join(candidateDirectory, 'work'), { mode: 0o700 });
@@ -134,7 +149,7 @@ async function buildOnePlatform(planItem, contextRoot, candidateDirectory, docke
     await runDocker(buildArgv.slice(1), { ...dockerContext, cwd: contextRoot, timeoutMs: 900_000 });
     const imageId = await readImageId(iidFile);
     const architecture = planItem.platform;
-    await inspectJson(['image', 'inspect', imageId], dockerContext, architecture, imageId);
+    await inspectCandidateImage(imageId, dockerContext, architecture, identityLabels(planItem.buildIdentity));
     await rm(iidFile, { force: false });
     resultIds.push(imageId);
   }
@@ -203,6 +218,7 @@ export async function buildCandidateImages(input) {
     const candidate = {
       schemaVersion: 1,
       kind: 'lexiflow-image-candidate',
+      buildIdentity: plan.buildIdentity,
       softwareVersion: plan.softwareVersion,
       sourceCommit: plan.sourceCommit,
       platform: selectedPlatform,
@@ -219,7 +235,7 @@ export async function buildCandidateImages(input) {
     return { candidateDirectory, candidate };
   } catch (error) {
     if (knownDockerErrors.has(error.message)) throw error;
-    if (['BUILD_INPUT_INVALID', 'BUILD_INPUT_REJECTED', 'BUILD_INPUT_CHANGED', 'BUILD_CONTEXT_COPY_FAILED', 'BUILD_CONTEXT_INVALID', 'BUILD_PLAN_INVALID', 'DOCKER_METADATA_INVALID', 'DOCKER_PLATFORM_UNSUPPORTED', 'DOCKER_PLATFORM_MISMATCH', 'BASE_IMAGE_MISMATCH', 'IMAGE_ID_INVALID', 'IMAGE_ARCHIVE_INVALID', 'IMAGE_ARCHIVE_CHANGED', 'ENDPOINT_INVALID', 'OUTPUT_PARENT_INVALID', 'BUILD_CANDIDATE_FAILED'].includes(error.message)) throw error;
+    if (['BUILD_INPUT_INVALID', 'BUILD_INPUT_REJECTED', 'BUILD_INPUT_CHANGED', 'BUILD_CONTEXT_COPY_FAILED', 'BUILD_CONTEXT_INVALID', 'BUILD_PLAN_INVALID', 'DOCKER_METADATA_INVALID', 'DOCKER_PLATFORM_UNSUPPORTED', 'DOCKER_PLATFORM_MISMATCH', 'BASE_IMAGE_MISMATCH', 'IMAGE_ID_INVALID', 'IMAGE_LABEL_MISMATCH', 'IMAGE_ARCHIVE_INVALID', 'IMAGE_ARCHIVE_CHANGED', 'ENDPOINT_INVALID', 'OUTPUT_PARENT_INVALID', 'BUILD_CANDIDATE_FAILED'].includes(error.message)) throw error;
     reject('BUILD_CANDIDATE_FAILED');
   } finally {
     if (!retained) await rm(candidateDirectory, { recursive: true, force: true }).catch(() => {});

@@ -6,6 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { resolveBuildIdentity } from '../version.mjs';
+import { jarBytes, extensionBytes } from './zip-fixture.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const cli = path.join(repo, 'ops/release/pipeline.mjs');
 const sha = (b) => createHash('sha256').update(b).digest('hex');
@@ -43,7 +45,7 @@ async function fixture() {
     git(root, ['add', '.']);
     git(root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']);
     const commit = git(root, ['rev-parse', 'HEAD']).toString().trim();
-    const jar = Buffer.from('synthetic jar');
+    const jar = jarBytes(resolveBuildIdentity(root));
     await writeFile(path.join(artifactRoot, 'app.jar'), jar);
     const descriptor = { schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit: commit, jar: { path: 'app.jar', bytes: jar.length, sha256: sha(jar) }, baseImages };
     const out = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-pipeline-out-')));
@@ -57,8 +59,8 @@ async function fixture() {
     await writeFile(driver, `import fs from 'node:fs';import path from 'node:path';const root=path.dirname(new URL(import.meta.url).pathname),s=JSON.parse(fs.readFileSync(path.join(root,'state.json'))),a=process.argv.slice(2).slice(4),op=a[0];fs.appendFileSync(path.join(root,'calls.jsonl'),JSON.stringify({a,op})+'\\n');
 if(s.fail===op){process.stderr.write('SECRET-DO-NOT-LEAK');process.exit(7)}
 if(op==='version')process.stdout.write(JSON.stringify({Server:{Version:'fake'}}));else if(op==='info')process.stdout.write(JSON.stringify({OSType:'linux',Architecture:s.architecture||'amd64'}));
-else if(op==='image'&&a[1]==='inspect'){let x=s.refs[a[2]],id=x?.id,p=x?.platform;for(const [q,ids] of Object.entries(s.finalIds))if(ids.includes(a[2])){id=a[2];p=q}if(!id){process.exit(8)}process.stdout.write(JSON.stringify([{Id:id,Os:'linux',Architecture:p.endsWith('amd64')?'amd64':'arm64'}]))}
-else if(op==='build'){const iid=a[a.indexOf('--iidfile')+1],p=a[a.indexOf('--platform')+1],ix=iid.startsWith('api')?0:1;fs.writeFileSync(path.join(process.cwd(),iid),s.finalIds[p][ix]+'\\n')}
+else if(op==='image'&&a[1]==='inspect'){let x=s.refs[a[2]],id=x?.id,p=x?.platform;for(const [q,ids] of Object.entries(s.finalIds))if(ids.includes(a[2])){id=a[2];p=q}if(!id){process.exit(8)}process.stdout.write(JSON.stringify([{Id:id,Os:'linux',Architecture:p.endsWith('amd64')?'amd64':'arm64',Config:{Labels:s.builtLabels?.[id]}}]))}
+else if(op==='build'){const iid=a[a.indexOf('--iidfile')+1],p=a[a.indexOf('--platform')+1],ix=iid.startsWith('api')?0:1,id=s.finalIds[p][ix],labels={};for(let i=0;i<a.length;i++)if(a[i]==='--label'){const value=a[i+1],eq=value.indexOf('=');labels[value.slice(0,eq)]=value.slice(eq+1)}s.builtLabels??={};s.builtLabels[id]=labels;fs.writeFileSync(path.join(root,'state.json'),JSON.stringify(s));fs.writeFileSync(path.join(process.cwd(),iid),id+'\\n')}
 else if(op==='image'&&a[1]==='save')fs.writeFileSync(a[a.indexOf('--output')+1],'synthetic archive');else process.exit(9);`);
     await writeFile(path.join(bin, 'docker'), `#!/bin/sh\nexec '${process.execPath}' '${driver}' "$@"\n`);
     await chmod(path.join(bin, 'docker'), 0o700);
@@ -115,15 +117,25 @@ test('CLI images 输出实际交接 assemble 并保留匹配候选目录', async
         const extras = [['compose', 'compose.yaml', 'services: {}'], ['sql', 'schema.sql', 'CREATE TABLE t(i int);'], ['dataset', 'dataset.bin', 'data']];
         for (const [role, p, s] of extras)
             await add(role, p, Buffer.from(s), role === 'dataset' ? { metadata: { releaseId: 'rel', preparationId: 'prep', ruleId: 'rule', sqlVersion: 'sql' }, licenseIds: ['data'] } : {});
-        await add('extension', 'extension.zip', Buffer.from('zip'), { metadata: { softwareVersion: '2.0.0', sourceCommit: ic.sourceCommit }, licenseIds: ['lexiflow', 'ext'] });
+        await add('extension', 'extension.zip', extensionBytes(ic.buildIdentity), { metadata: { softwareVersion: '2.0.0', sourceCommit: ic.sourceCommit }, licenseIds: ['lexiflow', 'ext'] });
         for (const [id, component] of [['lexiflow', 'LexiFlow'], ['ext', 'extension-third-party'], ['api', 'API-runtime'], ['pg', 'PostgreSQL'], ['data', 'dataset']])
             licenses.find(x => x.id === id).component = component;
-        const descriptor = { schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit: ic.sourceCommit, apiContract: 'api', sqlVersion: 'sql', dataset: { releaseId: 'rel', preparationId: 'prep', ruleId: 'rule' }, platforms: ['linux/amd64', 'linux/arm64'], artifacts, licenses };
+        const descriptor = { schemaVersion: 1, buildIdentity: ic.buildIdentity, softwareVersion: '2.0.0', sourceCommit: ic.sourceCommit, apiContract: 'api', sqlVersion: 'sql', dataset: { releaseId: 'rel', preparationId: 'prep', ruleId: 'rule' }, platforms: ['linux/amd64', 'linux/arm64'], artifacts, licenses };
         const req = await f.request('assemble-request.json', { repoRoot: f.root, imageCandidates: [{ directory: imageDir, sha256: sha(await readFile(path.join(imageDir, 'candidate.json'))) }, { directory: armDir, sha256: sha(await readFile(path.join(armDir, 'candidate.json'))) }], artifactRoot: f.artifactRoot, descriptor, outputParent: assemblyParent });
         const r = await run(['assemble', req]);
         const v = assertShape(r, 'assemble', 'PASS');
         assert.equal(r.code, 0);
         assert.ok(JSON.parse(await readFile(path.join(v.candidateDirectory, 'candidate.json'), 'utf8')).kind === 'lexiflow-release-candidate');
+        const marker = await readFile(path.join(v.candidateDirectory, 'candidate.json'));
+        const verifyReq = await f.request('verify-request.json', { candidateDirectory: v.candidateDirectory, candidateSha256: sha(marker) });
+        const verified = await run(['verify', verifyReq]);
+        assert.equal(verified.code, 0);
+        const proof = JSON.parse(verified.stdout);
+        assert.equal(proof.status, 'PASS'); assert.equal(proof.scope, 'candidate-integrity-only'); assert.equal(proof.operation, 'verify');
+        assert.equal(proof.candidateSha256, sha(marker)); assert.equal(Object.hasOwn(proof, 'formalEligible'), false);
+        const badReq = await f.request('verify-extra-request.json', { candidateDirectory: v.candidateDirectory, candidateSha256: sha(marker), actor: 'test' });
+        const rejected = await run(['verify', badReq]);
+        assert.equal(rejected.code, 1); assert.deepEqual(JSON.parse(rejected.stdout), { status: 'FAIL', scope: 'candidate-integrity-only', operation: 'verify', reason: 'PIPELINE_OPERATION_FAILED' });
     }
     finally {
         await f.cleanup();
@@ -223,4 +235,22 @@ test('导入不执行，符号链接 CLI 仍实际处理参数而非静默退出
         });
     }
     finally { await rm(temporary, { recursive: true, force: true }); }
+});
+
+test('verify参数、请求读取及自报权限字段始终保持候选完整性scope', async () => {
+    const f = await fixture();
+    try {
+        for (const args of [['verify'], ['verify', 'relative.json'], ['verify', f.imagesReq, 'extra']]) {
+            const r = await run(args);
+            assert.equal(r.code, 1);
+            assert.deepEqual(JSON.parse(r.stdout), { status: 'FAIL', scope: 'candidate-integrity-only', operation: 'verify', reason: 'PIPELINE_ARGUMENTS_INVALID' });
+        }
+        const missing = await run(['verify', path.join(f.fake, 'absent.json')]);
+        assert.equal(missing.code, 1);
+        assert.deepEqual(JSON.parse(missing.stdout), { status: 'FAIL', scope: 'candidate-integrity-only', operation: 'verify', reason: 'PIPELINE_REQUEST_INVALID' });
+        const request = await f.request('verify-actor.json', { candidateDirectory: f.out, candidateSha256: 'a'.repeat(64), actor: 'self', runtime: { formalReleaseEligible: true } });
+        const rejected = await run(['verify', request]);
+        assert.equal(rejected.code, 1);
+        assert.deepEqual(JSON.parse(rejected.stdout), { status: 'FAIL', scope: 'candidate-integrity-only', operation: 'verify', reason: 'PIPELINE_OPERATION_FAILED' });
+    } finally { await f.cleanup(); }
 });

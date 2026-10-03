@@ -9,6 +9,7 @@
 | 在真实浏览器体验提示 | Java/Node/Chrome、已发布开发词库 | [本地体验](operations/local-experience.md) |
 | 准备或重建词库资料 | 明确来源、项目开发库、导入/发布操作授权 | [词库导入](operations/lexicon-import.md) |
 | 执行完整 Java/仓库验证 | 显式隔离 PostgreSQL/Redis 与声明环境 | [隔离验证环境](operations/verification-environment.md) |
+| 检查 GitHub PR 或准备正式标签验证 | 无凭据临时 CI、受保护专用 Mac runner | [GitHub Actions](operations/github-actions.md) |
 | 自动验证扩展工程链路 | 临时 Chromium profile、合成页面、本机夹具 API | [扩展 E2E](operations/extension-e2e.md) |
 
 ## 1.2. 正常本机体验的资源关系

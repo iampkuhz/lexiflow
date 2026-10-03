@@ -3,6 +3,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile, cp, rm, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveBuildIdentity } from '../version.mjs';
+import { extensionBytes } from './zip-fixture.mjs';
 import { packageManifest } from '../package.mjs';
 import { generateRuntimeEntry } from '../runtime-entry.mjs';
 
@@ -13,11 +15,13 @@ export async function lifecycleFixture(t, full = true, variant = '') {
   const repo = path.join(tmp, 'repo'); await mkdir(path.join(repo, 'ops/release'), { recursive: true });
   const local = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
   for (const name of ['version.txt','runtime-entry.mjs','runtime-verification.sh','lifecycle.mjs','lifecycle-state.sh','lifecycle-docker.sh','lifecycle.sh']) await cp(path.join(local,name),path.join(repo,'ops/release',name));
+  await writeFile(path.join(repo, 'ops/release/version.txt'), '0.1.0\n');
   execFileSync('git', ['init', '-q', repo]);
   execFileSync('git', ['-C', repo, 'config', 'user.email', 'fixture@example.invalid']);
   execFileSync('git', ['-C', repo, 'config', 'user.name', 'Fixture']);
   execFileSync('git', ['-C', repo, 'add', '.']); execFileSync('git', ['-C', repo, 'commit', '-qm', '合成输入']);
   const sourceCommit=execFileSync('git',['-C',repo,'rev-parse','HEAD'],{encoding:'utf8'}).trim();
+  const buildIdentity = resolveBuildIdentity(repo);
   const root = path.join(tmp, 'artifacts with spaces'); await mkdir(root);
   const notices = [['api-runtime','API-runtime'],['lexiflow','LexiFlow'],['postgres','PostgreSQL'],['extension-third-party','extension-third-party'],['dataset-license','dataset']];
   const licenses = notices.map(([id, component]) => ({ id, component, licenseId:'MIT', licenseName:'MIT', sourceUrl:'https://example.invalid/license', noticePath:`licenses/${id}.txt`, noticeBytes:1, noticeSha256:sha('L') }));
@@ -29,9 +33,9 @@ export async function lifecycleFixture(t, full = true, variant = '') {
   const compose = await readFile(path.resolve(local,'../docker/compose.yaml'));
   await add('compose','compose.yaml',compose,['lexiflow']);
   await add('dataset','dataset.zip',`synthetic dataset ${variant}`,['dataset-license'],{metadata:{releaseId:'r',preparationId:'p',ruleId:'rule',sqlVersion:'sql1'}});
-  await add('extension','extension.zip','synthetic extension',['lexiflow','extension-third-party'],{metadata:{softwareVersion:'0.1.0',sourceCommit}});
+  await add('extension','extension.zip',extensionBytes(buildIdentity),['lexiflow','extension-third-party'],{metadata:{softwareVersion:'0.1.0',sourceCommit}});
   await add('sql','schema.sql','synthetic schema',['lexiflow']);
-  const descriptor={schemaVersion:1,softwareVersion:'0.1.0',sourceCommit,apiContract:'api1',sqlVersion:'sql1',dataset:{releaseId:'r',preparationId:'p',ruleId:'rule'},platforms:['linux/amd64'],artifacts,licenses};
+  const descriptor={schemaVersion:1,buildIdentity,softwareVersion:'0.1.0',sourceCommit,apiContract:'api1',sqlVersion:'sql1',dataset:{releaseId:'r',preparationId:'p',ruleId:'rule'},platforms:['linux/amd64'],artifacts,licenses};
   let generated;
   if (full === true) {
     const { generateLifecycleEntry } = await import('../lifecycle.mjs');

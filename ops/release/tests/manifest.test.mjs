@@ -10,6 +10,8 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { packageManifest } from '../package.mjs';
 import { buildManifest, createManifest, serializeManifest } from '../manifest.mjs';
+import { resolveBuildIdentity } from '../version.mjs';
+import { extensionBytes } from './zip-fixture.mjs';
 import { generateRuntimeEntry } from '../runtime-entry.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -34,6 +36,7 @@ async function fixture() {
   execFileSync('git', ['-C', root, 'add', '.']);
   execFileSync('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'clean synthetic fixture']);
   const sourceCommit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const buildIdentity = resolveBuildIdentity(root);
   const artifactRoot = path.join(root, 'input'); await mkdir(artifactRoot);
   const licenseComponents = ['LexiFlow', 'extension-third-party', 'API-runtime', 'PostgreSQL', 'dataset'];
   const licenses = [];
@@ -59,8 +62,8 @@ async function fixture() {
   await add('sql', 'database/schema.sql', 'synthetic SQL fixture');
   const dataset = { releaseId: 'release-1', preparationId: 'prep-1', ruleId: 'rules-1' };
   await add('dataset', 'data/dataset.bin', 'synthetic dataset fixture', { metadata: { ...dataset, sqlVersion: 'sql-1' } }, ['dataset-license']);
-  await add('extension', 'extension/lexiflow.zip', 'synthetic extension fixture', { metadata: { softwareVersion: '2.0.0', sourceCommit } }, ['lexiflow', 'ext-third-party']);
-  const descriptor = { schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit, apiContract: 'api-v1', sqlVersion: 'sql-1', dataset, platforms, artifacts, licenses };
+  await add('extension', 'extension/lexiflow.zip', extensionBytes(buildIdentity), { metadata: { softwareVersion: '2.0.0', sourceCommit } }, ['lexiflow', 'ext-third-party']);
+  const descriptor = { schemaVersion: 1, buildIdentity, softwareVersion: '2.0.0', sourceCommit, apiContract: 'api-v1', sqlVersion: 'sql-1', dataset, platforms, artifacts, licenses };
   const entry = await generateRuntimeEntry({ repoRoot: root, descriptor, artifactRoot, lifecycleBody: 'lf_verify_release || exit 1' });
   descriptor.artifacts.push(entry.artifact);
   const descriptorFile = path.join(root, 'descriptor.json'); await writeFile(descriptorFile, JSON.stringify(descriptor));
@@ -182,7 +185,7 @@ test('canonical bytes do not depend on descriptor key or array order', async () 
 test('pure createManifest requires one licensed runtime entry in the canonical structure', async () => {
   const f = await fixture();
   try {
-    const source = { softwareVersion: f.descriptor.softwareVersion, sourceCommit: f.descriptor.sourceCommit };
+    const source = f.descriptor.buildIdentity;
     const manifest = createManifest(f.descriptor, source);
     assert.equal(manifest.artifacts.filter((item) => item.role === 'runtime-entry').length, 1);
     assert.equal(manifest.artifacts.find((item) => item.role === 'runtime-entry').path, 'lexiflow.sh');
@@ -284,4 +287,20 @@ test('source drift during staging rejects publication and removes only its tempo
     assert.equal((await readdir(f.root)).some((name) => name.startsWith('.release.manifest-')), false);
     assert.equal(await readFile(path.join(f.root, 'ops/release/version.txt'), 'utf8'), '2.0.1\n');
   } finally { t.mock.restoreAll(); syncBuiltinESMExports(); await f.cleanup(); }
+});
+
+test('manifest rejects incomplete identity and embedded ZIP drift despite refreshed artifact checksum', async () => {
+  const f = await fixture();
+  try {
+    assert.deepEqual((await buildManifest({ repoRoot: f.root, descriptor: f.descriptor, artifactRoot: f.artifactRoot })).buildIdentity, resolveBuildIdentity(f.root));
+    const absent = structuredClone(f.descriptor); delete absent.buildIdentity;
+    assert.throws(() => createManifest(absent, resolveBuildIdentity(f.root)), /DESCRIPTOR_SCHEMA/);
+    const forged = structuredClone(f.descriptor); forged.buildIdentity.buildId = '0'.repeat(64);
+    assert.throws(() => createManifest(forged, resolveBuildIdentity(f.root)), /SOURCE_IDENTITY_MISMATCH/);
+    const record = f.descriptor.artifacts.find(item => item.role === 'extension');
+    const bytes = extensionBytes({ ...f.descriptor.buildIdentity, sourceSha256: 'f'.repeat(64) });
+    await writeFile(path.join(f.artifactRoot, record.path), bytes);
+    record.bytes = bytes.length; record.sha256 = hash(bytes);
+    await assert.rejects(buildManifest({ repoRoot: f.root, descriptor: f.descriptor, artifactRoot: f.artifactRoot }), /EXTENSION_IDENTITY_MISMATCH/);
+  } finally { await f.cleanup(); }
 });

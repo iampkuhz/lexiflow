@@ -16,7 +16,19 @@
 node ops/podman/local.mjs install
 ```
 
-脚本自动构建镜像、下载精简词库、初始化 PostgreSQL 并启动应用。成功后按输出目录加载 Chrome 扩展。日常使用 `up`、`status`、`stop`、`logs` 子命令，详见[部署与使用指南](docs/user/podman-macos.md)。
+脚本自动构建镜像、下载精简词库、初始化 PostgreSQL 并启动应用。成功后在 `chrome://extensions` 开启开发者模式，按输出的固定目录加载已解压扩展。
+
+已有安装日常使用以下命令；重复 `install` 不会升级，会显示安装与本地源码身份并提示是否需要升级。
+
+```sh
+node ops/podman/local.mjs upgrade  # 原目录升级，保留数据库、密码和端口
+node ops/podman/local.mjs version  # 区分安装、本地源码与可查询的 GitHub 正式版
+node ops/podman/local.mjs logs     # 查看本机日志
+```
+
+升级成功后，在 `chrome://extensions` 重新加载原扩展，再刷新视频页面；无需删除重装或选择新目录。使用过自定义安装目录时，为命令加原来的 `--dir /absolute/install-dir`，不要为普通升级另建环境。
+
+字幕增量与收尾日志默认开启，包含字幕正文和视频定位信息，仅用于本机诊断；不要上传或提交日志。启停、恢复与隐私细节见[部署与使用指南](docs/user/podman-macos.md)。
 
 CSV、词库 ZIP、密码与安装文件只在本机保存，不进入 Git。这是本地验证入口，正式验收与跨机体验进展见[执行状态](docs/roadmap/master-plan/phase2/status.md)。
 

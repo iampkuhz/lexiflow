@@ -91,8 +91,8 @@ npm run build
 
 ## 1.4. 没有效果时看哪里
 
-- **API 终端**：先查看 `runtime lexicon`。零参数 `start_api` 自动开启专用 `[LexiFlow segment]` 结果流，逐行显示新处理片段的英文、中文短释及未提示区间；无提示时为 `NO_HINT`。这是本机敏感输出，请勿共享终端记录。普通 logger 和扩展日志仍不输出正文，其他 API 启动方式默认不开启该流。若出现 `segment analysis log unavailable`，表示本次分析记录写入失败，不影响英文和提示，也不会输出伪成功记录。此路径只查询已发布资料，不会调用模型。
-- **片段分析文件**：默认在 ignored 的 `tmp/analysis/caption-segments.jsonl`，可用本机环境变量 `LEXIFLOW_SEGMENT_LOG_PATH` 指定私有路径。每行是一个成功处理且此前未记录的新增片段，含英文、`translatedRanges`、`untranslatedRanges` 和 `status`。控制台只镜像成功新增记录，不回放旧文件；重复请求和 API 重启不重复输出同一片段。同一 `segmentId` 只统计一次；跨片段提示只统计 `anchor=true` 的一次。`NO_HINT` 表示没有可展示提示，不等于词库没有候选。
+- **API 终端**：先查看 `runtime lexicon`。字幕增量、`final`、`interrupted` 与视频开始事件默认输出为 `MM-dd HH:mm:ss|LEVEL|关联ID|事件|定位字段|正文` 单行日志；增量正文将英文与实际显示的中文提示放在同一行。控制台不依赖分析文件开关，也不会默认创建或写入字幕 JSONL。`start_api` 默认仅绑定 `127.0.0.1`；为兼容旧调用可传 `--caption-debug`，它只提示字幕日志已默认开启，不再转成 API 参数。容器 `api-debug` 保留为与 `api` 相同的启动别名。日志包含字幕正文及视频定位，只可本机查看，不得外发或放入 CI artifact。失败、队列溢出或日志 I/O 均不阻塞英文和提示。此路径只查询已发布资料，不会调用模型。
+- **片段分析 JSONL**：仅在显式启用 `lexiflow.segment-analysis.enabled=true` 时写入，默认路径为 ignored 的 `tmp/analysis/caption-segments.jsonl`，可用 `LEXIFLOW_SEGMENT_LOG_PATH` 指定私有路径。单文件上限为 16 MiB，达到上限后停止追加，不会无界增长；它含英文及提示分析结果，须按敏感本机数据处理，不得外发或进入 CI artifact。`NO_HINT` 表示没有可展示提示，不等于词库没有候选。
 - **YouTube 页面开发者工具 → Console**：筛选 `[LexiFlow]`，查看 `caption` 阶段的 `state`、`sequence`、`elapsedMs`。
 - **扩展管理页 → LexiFlow → Service worker**：查看 `api` 阶段结果和请求耗时。
 

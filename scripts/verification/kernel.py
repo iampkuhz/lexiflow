@@ -27,6 +27,14 @@ RELEASE_RUNTIME_CHILD_COMMAND = (
     "-m",
     "scripts.environment.release_runtime_check",
 )
+CANDIDATE_RUNTIME_CHECK_IDS = frozenset(
+    {"eng.release.candidate-runtime", "eng.release.candidate-runtime-on-change"}
+)
+CANDIDATE_RUNTIME_CHILD_COMMAND = (
+    "python3",
+    "-m",
+    "scripts.environment.candidate_runtime_check",
+)
 _ALLOWED_ENV_KEYS = frozenset(
     {
         "USER",
@@ -84,13 +92,21 @@ def fingerprint_json(value: Any) -> str:
 
 
 def is_release_runtime_child_check(check: dict[str, Any]) -> bool:
-    """只识别两个固定 Check ID 与固定 Python 命令构成的父端 stdin 接线。"""
+    """只识别固定 runtime Check 与对应 Python 命令构成的父端 stdin 接线。"""
     command = check.get("command")
     return (
         isinstance(check.get("check_id"), str)
-        and check.get("check_id") in RELEASE_RUNTIME_CHECK_IDS
         and isinstance(command, list)
-        and tuple(command) == RELEASE_RUNTIME_CHILD_COMMAND
+        and (
+            (
+                check["check_id"] in RELEASE_RUNTIME_CHECK_IDS
+                and tuple(command) == RELEASE_RUNTIME_CHILD_COMMAND
+            )
+            or (
+                check["check_id"] in CANDIDATE_RUNTIME_CHECK_IDS
+                and tuple(command) == CANDIDATE_RUNTIME_CHILD_COMMAND
+            )
+        )
         and check.get("executable") == "python3"
     )
 

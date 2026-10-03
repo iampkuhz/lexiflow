@@ -263,6 +263,15 @@ class TestExecuteSingleCheck(unittest.TestCase):
         self.assertFalse(is_release_runtime_child_check({**baseline, "command": [*baseline["command"], "extra"]}))
         self.assertFalse(is_release_runtime_child_check({**baseline, "check_id": "other.check"}))
 
+    def test_candidate_transport_requires_its_own_exact_command(self):
+        from scripts.verification.kernel import CANDIDATE_RUNTIME_CHILD_COMMAND, CANDIDATE_RUNTIME_CHECK_IDS, RELEASE_RUNTIME_CHILD_COMMAND
+
+        for check_id in CANDIDATE_RUNTIME_CHECK_IDS:
+            check = _release_runtime_check(check_id=check_id, command=list(CANDIDATE_RUNTIME_CHILD_COMMAND))
+            self.assertTrue(is_release_runtime_child_check(check))
+            self.assertFalse(is_release_runtime_child_check({**check, "command": list(RELEASE_RUNTIME_CHILD_COMMAND)}))
+            self.assertFalse(is_release_runtime_child_check({**check, "check_id": "eng.release.lifecycle-runtime"}))
+
     def test_valid_envelope_is_canonical_and_uses_exact_frozen_snapshot(self):
         check = _release_runtime_check(input_paths=[])
         with tempfile.TemporaryDirectory() as tmpdir:

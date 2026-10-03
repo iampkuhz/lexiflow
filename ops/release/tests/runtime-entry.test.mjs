@@ -4,10 +4,11 @@ import { mkdtemp, mkdir, readFile, readdir, realpath, rename, symlink, writeFile
 import os from 'node:os';
 import path from 'node:path';
 import { generateRuntimeEntry } from '../runtime-entry.mjs';
-import { checkReleaseSource } from '../version.mjs';
+import { resolveBuildIdentity } from '../version.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { cp, rm } from 'node:fs/promises';
+import { extensionBytes } from './zip-fixture.mjs';
 import { packageManifest } from '../package.mjs';
 import { manifestSha256, serializeManifest } from '../manifest.mjs';
 import fsPromises from 'node:fs/promises';
@@ -26,7 +27,7 @@ async function cleanFixture(t) {
   execFileSync('git', ['-C', repo, 'config', 'user.name', 'Fixture']);
   execFileSync('git', ['-C', repo, 'add', '.']);
   execFileSync('git', ['-C', repo, 'commit', '-qm', 'fixture']);
-  const source = checkReleaseSource(repo);
+  const source = resolveBuildIdentity(repo);
   const root = path.join(temp, 'artifacts with spaces');
   await mkdir(root);
   const licenses = [
@@ -44,9 +45,9 @@ async function cleanFixture(t) {
   await add('postgres-image', 'images/db.tar', 'db', ['postgres'], { platform: 'linux/amd64', imageDigest: `sha256:${'b'.repeat(64)}` });
   await add('compose', 'compose.yaml', 'compose', ['lexiflow']);
   await add('dataset', 'dataset.zip', 'dataset', ['dataset-license'], { metadata: { releaseId: 'release', preparationId: 'prep', ruleId: 'rule', sqlVersion: 'sql1' } });
-  await add('extension', 'extension.zip', 'extension', ['lexiflow', 'extension-third-party'], { metadata: { softwareVersion: source.softwareVersion, sourceCommit: source.sourceCommit } });
+  await add('extension', 'extension.zip', extensionBytes(source), ['lexiflow', 'extension-third-party'], { metadata: { softwareVersion: source.softwareVersion, sourceCommit: source.sourceCommit } });
   await add('sql', 'schema.sql', 'sql', ['lexiflow']);
-  const descriptor = { schemaVersion: 1, softwareVersion: source.softwareVersion, sourceCommit: source.sourceCommit, apiContract: 'api1', sqlVersion: 'sql1', dataset: { releaseId: 'release', preparationId: 'prep', ruleId: 'rule' }, platforms: ['linux/amd64'], artifacts, licenses };
+  const descriptor = { schemaVersion: 1, buildIdentity: source, softwareVersion: source.softwareVersion, sourceCommit: source.sourceCommit, apiContract: 'api1', sqlVersion: 'sql1', dataset: { releaseId: 'release', preparationId: 'prep', ruleId: 'rule' }, platforms: ['linux/amd64'], artifacts, licenses };
   t.after(() => rm(temp, { recursive: true, force: true }));
   return { repo, root, descriptor, output: path.join(temp, 'package'), descriptorFile: path.join(temp, 'descriptor.json') };
 }

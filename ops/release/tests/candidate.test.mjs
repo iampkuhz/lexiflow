@@ -9,6 +9,8 @@ import fsPromises from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { assembleReleaseCandidate } from '../candidate.mjs';
+import { extensionBytes } from './zip-fixture.mjs';
+import { resolveBuildIdentity } from '../version.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const hash = (value) => createHash('sha256').update(value).digest('hex');
@@ -22,10 +24,10 @@ async function tree(root, relative = '') {
   return result.sort();
 }
 
-async function fixture() {
+async function fixture(baseVersion = '2.0.0') {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'lexiflow-candidate-fixture-')));
   await mkdir(path.join(root, 'ops/release'), { recursive: true });
-  await writeFile(path.join(root, 'ops/release/version.txt'), '2.0.0\n');
+  await writeFile(path.join(root, 'ops/release/version.txt'), `${baseVersion}\n`);
   await writeFile(path.join(root, 'ops/release/version.mjs'), await readFile(path.join(repoRoot, 'ops/release/version.mjs')));
   await writeFile(path.join(root, 'ops/release/runtime-entry.mjs'), await readFile(path.join(repoRoot, 'ops/release/runtime-entry.mjs')));
   await writeFile(path.join(root, 'ops/release/runtime-verification.sh'), await readFile(path.join(repoRoot, 'ops/release/runtime-verification.sh')));
@@ -37,6 +39,8 @@ async function fixture() {
   execFileSync('git', ['-C', root, 'add', '.']);
   execFileSync('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'clean candidate fixture']);
   const sourceCommit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const buildIdentity = resolveBuildIdentity(root);
+  const softwareVersion = buildIdentity.softwareVersion;
   const artifactRoot = path.join(root, 'input');
   const outputParent = await realpath(await mkdtemp(path.join(tmpdir(), 'lexiflow-candidate-output-')));
   await mkdir(artifactRoot);
@@ -73,7 +77,7 @@ async function fixture() {
       records.push({ role, path: relative, bytes: bytes.length, sha256: hash(bytes), licenseIds, platform, imageDigest });
     }
   }
-  const descriptor = { schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit, apiContract: 'api-test', sqlVersion: 'sql-test', dataset,
+  const descriptor = { schemaVersion: 1, buildIdentity, softwareVersion, sourceCommit, apiContract: 'api-test', sqlVersion: 'sql-test', dataset,
     platforms: ['linux/amd64', 'linux/arm64'], artifacts: records, licenses };
   for (const image of records.filter((record) => record.role === 'api-image' || record.role === 'postgres-image')) {
     const bytes = await readFile(path.join(artifactRoot, image.path));
@@ -82,14 +86,14 @@ async function fixture() {
   await add('compose', 'compose.yaml', 'synthetic compose');
   await add('sql', 'database/schema.sql', 'synthetic SQL');
   await add('dataset', 'data/dataset.bin', 'synthetic dataset', { metadata: { ...dataset, sqlVersion: 'sql-test' } }, ['dataset-license']);
-  await add('extension', 'extension/package.zip', 'synthetic extension', { metadata: { softwareVersion: '2.0.0', sourceCommit } }, ['lexiflow', 'ext-third-party']);
+  await add('extension', 'extension/package.zip', extensionBytes(buildIdentity), { metadata: { softwareVersion, sourceCommit } }, ['lexiflow', 'ext-third-party']);
   const imageCandidateDirectories = [];
   const buildInputSha256 = 'e'.repeat(64);
   for (const platform of ['linux/amd64', 'linux/arm64']) {
     const directory = await realpath(await mkdtemp(path.join(tmpdir(), `lexiflow-shard-${platform.split('/')[1]}-`)));
     const candidateRecords = records.filter((record) => record.role === 'api-image' || record.role === 'postgres-image').filter((record) => record.platform === platform)
       .map(({ role, platform: p, path: artifactPath, bytes, sha256, imageDigest }) => ({ role, platform: p, path: artifactPath, bytes, sha256, imageDigest }));
-    const imageCandidate = { schemaVersion: 1, kind: 'lexiflow-image-candidate', softwareVersion: '2.0.0', sourceCommit, platform, buildInputSha256,
+    const imageCandidate = { schemaVersion: 1, kind: 'lexiflow-image-candidate', buildIdentity, softwareVersion, sourceCommit, platform, buildInputSha256,
       baseImages: [candidateBases.find((base) => base.platform === platform)], artifacts: candidateRecords };
     for (const record of candidateRecords) { const target = path.join(directory, record.path); await mkdir(path.dirname(target), { recursive: true }); await writeFile(target, await readFile(path.join(artifactRoot, record.path))); }
     const marker = `${JSON.stringify(imageCandidate, null, 2)}\n`; await writeFile(path.join(directory, 'candidate.json'), marker);
@@ -106,7 +110,7 @@ test('assembles a two-platform private candidate with exact payload and stable m
     const before = await Promise.all(f.imageCandidateDirectories.map(({ directory }) => readFile(path.join(directory, 'candidate.json'))));
     const result = await assembleReleaseCandidate({ repoRoot: f.root, imageCandidates: f.imageCandidateDirectories.map(({ directory, sha256 }) => ({ directory, sha256 })),
       artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent });
-    assert.deepEqual(result.candidate, { schemaVersion: 1, kind: 'lexiflow-release-candidate', softwareVersion: '2.0.0',
+    assert.deepEqual(result.candidate, { schemaVersion: 1, kind: 'lexiflow-release-candidate', buildIdentity: resolveBuildIdentity(f.root), softwareVersion: '2.0.0',
       sourceCommit: f.descriptor.sourceCommit, manifestPath: 'payload/manifest.json',
       manifestSha256: hash(await readFile(path.join(result.candidateDirectory, 'payload/manifest.json'))), buildInputSha256: 'e'.repeat(64), imageCandidates: f.imageCandidateDirectories.map(({ platform, sha256 }) => ({ platform, sha256 })) });
     assert.deepEqual(await tree(result.candidateDirectory), [...result.manifest.artifacts.map((item) => `payload/${item.path}`),
@@ -210,6 +214,40 @@ test('两平台候选 buildInputSha256 不一致在来源一致性层拒绝', as
   } finally { await f.cleanup(); }
 });
 
+test('拒绝缺失或伪造的候选构建身份并拒绝跨平台身份不一致', async () => {
+  for (const mutate of [
+    (value) => { delete value.buildIdentity; },
+    (value) => { value.buildIdentity.buildId = 'f'.repeat(64); },
+    (value) => { value.buildIdentity.sourceSha256 = 'f'.repeat(64); },
+    (value) => { value.buildIdentity.dirty = true; },
+    (value) => { value.buildIdentity.softwareVersion = '9.0.0'; },
+  ]) {
+    const f = await fixture();
+    try {
+      const file = path.join(f.imageCandidateDirectories[0].directory, 'candidate.json');
+      const value = JSON.parse(await readFile(file, 'utf8')); mutate(value);
+      const bytes = Buffer.from(JSON.stringify(value, null, 2) + '\n'); await writeFile(file, bytes);
+      f.imageCandidateDirectories[0].sha256 = hash(bytes);
+      await assert.rejects(assembleReleaseCandidate({ repoRoot: f.root,
+        imageCandidates: f.imageCandidateDirectories.map(({ directory, sha256 }) => ({ directory, sha256 })),
+        artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent }), { message: 'IMAGE_CANDIDATE_INVALID' });
+    } finally { await f.cleanup(); }
+  }
+
+  const f = await fixture();
+  try {
+    const arm = f.imageCandidateDirectories.find(({ platform }) => platform === 'linux/arm64');
+    const file = path.join(arm.directory, 'candidate.json'); const value = JSON.parse(await readFile(file, 'utf8'));
+    value.buildIdentity.sourceSha256 = 'f'.repeat(64);
+    value.buildIdentity.buildId = hash(JSON.stringify({ baseVersion: value.buildIdentity.baseVersion,
+      sourceCommit: value.buildIdentity.sourceCommit, sourceSha256: value.buildIdentity.sourceSha256, dirty: false }));
+    const bytes = Buffer.from(JSON.stringify(value, null, 2) + '\n'); await writeFile(file, bytes); arm.sha256 = hash(bytes);
+    await assert.rejects(assembleReleaseCandidate({ repoRoot: f.root,
+      imageCandidates: f.imageCandidateDirectories.map(({ directory, sha256 }) => ({ directory, sha256 })),
+      artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent }), { message: 'SOURCE_IDENTITY_MISMATCH' });
+  } finally { await f.cleanup(); }
+});
+
 test('rejects artifact and parent symlinks and output containment without touching neighbors', async () => {
   const f = await fixture();
   try {
@@ -289,4 +327,14 @@ test('装配后原始制品或候选记录漂移时撤销整个输出', async ()
       assert.deepEqual(await fsPromises.readdir(f.outputParent), []);
     } finally { fsPromises.readFile = originalRead; syncBuiltinESMExports(); await f.cleanup(); }
   }
+});
+
+test('clean SNAPSHOT assembly preserves the full identity in candidate and manifest', async () => {
+  const f = await fixture('2.0.0-SNAPSHOT');
+  try {
+    const result = await assembleReleaseCandidate({ repoRoot: f.root, imageCandidates: f.imageCandidateDirectories.map(({ directory, sha256 }) => ({ directory, sha256 })), artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent });
+    assert.equal(result.candidate.buildIdentity.channel, 'snapshot');
+    assert.equal(result.candidate.buildIdentity.dirty, false);
+    assert.deepEqual(result.manifest.buildIdentity, result.candidate.buildIdentity);
+  } finally { await f.cleanup(); }
 });

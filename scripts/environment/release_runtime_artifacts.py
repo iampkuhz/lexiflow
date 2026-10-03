@@ -198,6 +198,31 @@ def build_local_inputs(
     }
 
 
+def _source_identity(repo: Path, env: Mapping[str, str]) -> tuple[str, str]:
+    """消费共享 Node 身份入口，不以基础版本文件推断制品路径。"""
+    result = _run(
+        ["node", "ops/release/version.mjs", "--release"],
+        cwd=repo,
+        env=env,
+        timeout=15,
+    )
+    try:
+        identity = json.loads(result.stdout)
+        version = identity["softwareVersion"]
+        commit = identity["sourceCommit"]
+        if (
+            set(identity) != {"softwareVersion", "sourceCommit"}
+            or not isinstance(version, str)
+            or not re.fullmatch(r"[0-9][A-Za-z0-9.-]{0,199}", version)
+            or not isinstance(commit, str)
+            or not re.fullmatch(r"[a-f0-9]{40}|[a-f0-9]{64}", commit)
+        ):
+            raise ValueError
+    except (ValueError, KeyError, TypeError):
+        raise ConsumerError("FAIL", "release-source-identity-invalid") from None
+    return version, commit
+
+
 def produce_candidates(
     repo: Path, scratch: Path, env: Mapping[str, str], bindings: tuple[object, ...]
 ) -> dict[str, object]:
@@ -219,12 +244,7 @@ def produce_candidates(
     artifact_root = Path(inputs["artifact_root"])
     output_parent = scratch / "pipeline-output"
     output_parent.mkdir(mode=0o700)
-    version = (fixture / "ops/release/version.txt").read_text(encoding="ascii").strip()
-    commit = (
-        _run(["git", "rev-parse", "HEAD"], cwd=fixture, env=pipeline_env, timeout=15)
-        .stdout.decode("ascii")
-        .strip()
-    )
+    version, commit = _source_identity(fixture, pipeline_env)
     jar = fixture / "backend/product/api/build/libs" / f"api-{version}.jar"
     if not jar.is_file() or jar.is_symlink():
         raise ConsumerError("FAIL", "api-bootjar-output-missing")
@@ -354,6 +374,7 @@ def produce_candidates(
             record["metadata"] = metadata
         artifact_records.append(record)
 
+    build_identity = None
     for expected_platform, candidate in zip(platforms, candidates, strict=True):
         candidate_dir = Path(candidate["candidateDirectory"])
         marker = _read_regular(candidate_dir / "candidate.json", 2_000_000)
@@ -368,6 +389,17 @@ def produce_candidates(
             or len(record["artifacts"]) != 2
         ):
             raise ConsumerError("FAIL", "image-candidate-invalid")
+        # 完整 schema 与派生一致性仍由 Node assembler 复核，此处只传递已绑定 marker 的身份。
+        identity = record.get("buildIdentity")
+        if (
+            not isinstance(identity, dict)
+            or identity.get("softwareVersion") != version
+            or identity.get("sourceCommit") != commit
+            or identity.get("dirty") is not False
+            or (build_identity is not None and identity != build_identity)
+        ):
+            raise ConsumerError("FAIL", "image-candidate-identity-mismatch")
+        build_identity = identity
         expected_roles = {
             "api-image": f"images/{expected_platform.replace('/', '-')}/api-image.tar",
             "postgres-image": f"images/{expected_platform.replace('/', '-')}/postgres-image.tar",
@@ -444,6 +476,7 @@ def produce_candidates(
         (artifact_root / data_path).write_bytes(data)
         descriptor = {
             "schemaVersion": 1,
+            "buildIdentity": build_identity,
             "softwareVersion": version,
             "sourceCommit": commit,
             "apiContract": "caption-hints.v1",
