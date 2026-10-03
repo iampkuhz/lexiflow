@@ -23,46 +23,48 @@ class StructuredEventLoggerTest {
   void saturatedReadableQueueDropsInsteadOfBlockingCaller() throws Exception {
     var entered = new CountDownLatch(1);
     var release = new CountDownLatch(1);
-    var executor =
+    try (var executor =
         new ThreadPoolExecutor(
             1,
             1,
             0,
             TimeUnit.MILLISECONDS,
             new ArrayBlockingQueue<>(1),
-            new ThreadPoolExecutor.DiscardPolicy());
-    executor.setThreadFactory(
-        runnable -> {
-          var thread = new Thread(runnable, "readable-log-test");
-          thread.setDaemon(true);
-          return thread;
-        });
-    var logger =
-        new StructuredEventLogger(
-            null,
-            executor,
-            line -> {
-              entered.countDown();
-              try {
-                release.await();
-              } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-              }
-            });
-    try {
-      assertTrue(logger.tryEmitReadableInfo("incremental", UUID.randomUUID(), Map.of(), "one"));
-      assertTrue(entered.await(1, TimeUnit.SECONDS));
-      assertTrue(logger.tryEmitReadableInfo("incremental", UUID.randomUUID(), Map.of(), "two"));
-      var caller =
-          new FutureTask<>(
-              () ->
-                  logger.tryEmitReadableInfo("incremental", UUID.randomUUID(), Map.of(), "three"));
-      new Thread(caller, "readable-log-caller-test").start();
-      assertTrue(caller.get(1, TimeUnit.SECONDS));
-      assertEquals(1, executor.getQueue().size());
-    } finally {
-      release.countDown();
-      executor.shutdownNow();
+            new ThreadPoolExecutor.DiscardPolicy())) {
+      executor.setThreadFactory(
+          runnable -> {
+            var thread = new Thread(runnable, "readable-log-test");
+            thread.setDaemon(true);
+            return thread;
+          });
+      var logger =
+          new StructuredEventLogger(
+              null,
+              executor,
+              line -> {
+                entered.countDown();
+                try {
+                  release.await();
+                } catch (InterruptedException interrupted) {
+                  Thread.currentThread().interrupt();
+                }
+              });
+      try {
+        assertTrue(logger.tryEmitReadableInfo("incremental", UUID.randomUUID(), Map.of(), "one"));
+        assertTrue(entered.await(1, TimeUnit.SECONDS));
+        assertTrue(logger.tryEmitReadableInfo("incremental", UUID.randomUUID(), Map.of(), "two"));
+        var caller =
+            new FutureTask<>(
+                () ->
+                    logger.tryEmitReadableInfo(
+                        "incremental", UUID.randomUUID(), Map.of(), "three"));
+        new Thread(caller, "readable-log-caller-test").start();
+        assertTrue(caller.get(1, TimeUnit.SECONDS));
+        assertEquals(1, executor.getQueue().size());
+      } finally {
+        release.countDown();
+        executor.shutdownNow();
+      }
     }
   }
 
