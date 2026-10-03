@@ -479,15 +479,16 @@ else: sys.exit(7)
         proc, _ = self._run("api", ("arbitrary",), files={"app-password": password})
         self.assertNotEqual(proc.returncode, 0)
 
-    def test_caption_debug_requires_explicit_command(self):
+    def test_caption_logs_are_default_without_jsonl_and_legacy_alias_agrees(self):
         password = "a" * 64
         normal, normal_log = self._run("api", files={"app-password": password})
         debug, debug_log = self._run("api-debug", files={"app-password": password})
         self.assertEqual(normal.returncode, 0)
         self.assertEqual(debug.returncode, 0)
-        self.assertIn("-Dlexiflow.segment-analysis.console=false", normal_log)
-        self.assertIn("-Dlexiflow.segment-analysis.console=true", debug_log)
-        self.assertIn("-Dlexiflow.segment-analysis.enabled=true", debug_log)
+        self.assertIn("-Dlexiflow.caption-debug.enabled=true", normal_log)
+        self.assertIn("-Dlexiflow.caption-debug.enabled=true", debug_log)
+        self.assertIn("-Dlexiflow.segment-analysis.enabled=false", debug_log)
+        self.assertIn("-Dlexiflow.segment-analysis.enabled=false", normal_log)
         self.assertNotIn(password, debug_log)
 
     def test_initialize_exact_cli_and_health_no_forwarding(self):

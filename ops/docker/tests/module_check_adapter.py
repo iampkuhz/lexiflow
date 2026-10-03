@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import io
 import json
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -30,14 +31,35 @@ def run_tests() -> dict[str, object]:
     )
     stream = DiagnosticStream()
     result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
-    output = stream.getvalue()
-    passed = result.wasSuccessful() and result.testsRun > 0 and not result.skipped
+    root = Path(__file__).resolve().parents[3]
+    runner = (
+        "import {runTests} from './ops/release/check.mjs';"
+        "const r=await runTests({args:['--test','--test-reporter=tap',...process.argv.slice(1)]});"
+        "console.log(JSON.stringify(r)); if(r.status!=='PASS') process.exitCode=1;"
+    )
+    node_suite = subprocess.run(
+        ["node", "--input-type=module", "-e", runner,
+         *map(str, sorted((root / "ops/podman/tests").glob("*.test.mjs")))],
+        cwd=root, capture_output=True, text=True, check=False, timeout=180,
+    )
+    node_output = node_suite.stdout + node_suite.stderr
+    sys.stderr.write(node_output)
+    sys.stderr.flush()
+    try:
+        node_report = json.loads(node_suite.stdout)
+    except ValueError:
+        node_report = {"status": "FAIL", "checks_run": 0, "errors": 1}
+    node_ok = node_suite.returncode == 0 and node_report.get("status") == "PASS"
+    output = stream.getvalue() + node_output
+    passed = result.wasSuccessful() and result.testsRun > 0 and not result.skipped and node_ok
     return {
         "status": "PASS" if passed else "FAIL",
-        "checks_run": result.testsRun,
-        "failures": len(result.failures),
+        "checks_run": result.testsRun + node_report.get("checks_run", 0),
+        "failures": len(result.failures) + (0 if node_ok else 1),
         "errors": len(result.errors),
         "skipped": len(result.skipped),
+        "node_transaction_exit_code": node_suite.returncode,
+        "node_transaction_no_skips": node_ok,
         "reason": "" if passed else "docker-contract-tests-incomplete",
         "tool_output_sha256": hashlib.sha256(output.encode("utf-8")).hexdigest(),
     }

@@ -28,59 +28,98 @@ class LocalEntryTest(unittest.TestCase):
         self.calls = self.root / "calls"
         self.mode = self.root / "mode"
         self.mode.write_text("")
-        for relative in ["ops/podman/local.mjs", "ops/podman/command.mjs", "ops/podman/doctor.mjs", "ops/podman/network-repair.mjs", "ops/podman/compose.validation.yaml",
+        for relative in ["ops/podman/local.mjs", "ops/podman/process-lock.mjs", "ops/podman/command.mjs", "ops/podman/doctor.mjs", "ops/podman/network-repair.mjs", "ops/podman/upgrade.mjs", "ops/podman/prepare-workspace.mjs", "ops/podman/versions.mjs", "ops/podman/compose.validation.yaml",
                          "ops/podman/fetch-ecdict.sh", "ops/podman/source-tools.Containerfile",
                          "ops/docker/Dockerfile", "ops/docker/Dockerfile.postgres",
                          "ops/docker/entrypoint.sh", "ops/docker/bootstrap.sh",
                          "ops/dataset/ecdict-source.lock.json", "scripts/environment/ecdict_bundle.py",
-                         "infra/postgres/schema.sql", "ops/release/version.txt"]:
+                         "infra/postgres/schema.sql", "ops/release/version.txt", "ops/release/version.mjs"]:
             dst = self.repo / relative
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(ROOT / relative, dst)
+        # Build identity is calculated by the production resolver from Git-visible inputs.
+        (self.repo / ".gitignore").write_text("backend/product/api/build/\nextension/dist/\nextension/node_modules/\n")
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "config", "user.email", "fixture@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "config", "user.name", "Synthetic Fixture"], check=True)
+        # Resolver imports need the release module too; all resolver-visible files are committed as fixture source.
+        subprocess.run(["git", "-C", str(self.repo), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(self.repo), "commit", "-qm", "fixture"], check=True)
         (self.repo / "backend/product/api/build/libs").mkdir(parents=True)
-        version = (self.repo / "ops/release/version.txt").read_text().strip()
-        (self.repo / f"backend/product/api/build/libs/api-{version}.jar").write_text("synthetic")
         (self.repo / "extension/dist").mkdir(parents=True)
-        (self.repo / "extension/dist/manifest.json").write_text(json.dumps({"version": version}))
-        self.program(self.repo / "backend/gradlew", "#!/bin/sh\nexit 0\n")
-        self.program(self.bin / "npm", "#!/bin/sh\nexit 0\n")
+        self.program(self.repo / "backend/gradlew", "#!/bin/sh\nset -eu\nnode -e \"import('../ops/release/version.mjs').then(({resolveBuildIdentity})=>{const id=resolveBuildIdentity('..'); const fs=require('fs'); fs.mkdirSync('product/api/build/libs',{recursive:true}); fs.writeFileSync('product/api/build/libs/api-'+id.softwareVersion+'.jar','synthetic');})\"\n")
+        self.program(self.bin / "npm", "#!/bin/sh\nset -eu\nif [ \"$1\" = run ] && [ \"$2\" = build ]; then node -e \"import('../ops/release/version.mjs').then(({resolveBuildIdentity})=>{const fs=require('fs'); const id=resolveBuildIdentity('..'); const port=process.env.LEXIFLOW_API_PORT; fs.mkdirSync('dist',{recursive:true}); fs.writeFileSync('dist/build-identity.json',JSON.stringify(id)); fs.writeFileSync('dist/manifest.json',JSON.stringify({version:id.chromeVersion,version_name:id.softwareVersion,host_permissions:['http://127.0.0.1:'+port+'/*']}));})\"; fi\n")
         self.program(self.bin / "java", '#!/bin/sh\necho \'openjdk version "25.0.1"\' >&2\n')
+        version = json.loads(subprocess.check_output(["node", "-e", "import('./ops/release/version.mjs').then(({resolveBuildIdentity})=>console.log(JSON.stringify(resolveBuildIdentity('.'))))"], cwd=self.repo, text=True))["softwareVersion"]
         # 用 Node 标准测试预加载替换平台探测；产品本身无测试开关或平台绕过参数。
         preload = self.root / "platform.mjs"
         preload.write_text("import os from 'node:os'; os.platform=()=> 'darwin'; os.arch=()=> 'arm64';")
         self.preload = preload
         fake = '''#!PYTHON
-import json, sys
+import hashlib, json, sys
 from pathlib import Path
 args=sys.argv[1:]
+images_file=Path(CALLS).with_name('images.json')
+runtime_file=Path(CALLS).with_name('runtime.json')
+images=json.loads(images_file.read_text()) if images_file.exists() else {}
 with Path(CALLS).open('a') as f: f.write(json.dumps(args)+'\\n')
 mode=Path(MODE).read_text()
 if args[:1]==['pull'] and mode=='slow-pull':
     import time
     print('private-download-output',flush=True);time.sleep(30)
 elif args[:1]==['info']: print('{}')
-elif args[:2]==['image','inspect']: print('sha256:'+'a'*64)
+elif args[:2]==['image','inspect']:
+    entry=images.get(args[-1])
+    if '--format' in args and args[args.index('--format')+1]=='{{json .Labels}}':
+        print(json.dumps(entry['labels'] if entry else {}))
+    elif '--format' in args and args[args.index('--format')+1]=='{{json .Os}} {{json .Architecture}}':
+        print('\"linux\" \"arm64\"')
+    else: print(entry['id'] if entry else 'sha256:'+hashlib.sha256(args[-1].encode()).hexdigest())
 elif args[:1]==['ps'] or args[:2] in [['volume','ls'],['network','ls']]:
     if mode=='foreign':
         state=json.loads(Path(KIT,'state.json').read_text()); print(json.dumps([{'Labels':{'com.docker.compose.project':state['project'],'lexiflow.installation':'foreign'}}]))
-    elif mode=='owned-pg':
+    elif mode=='owned-pg' and '-a' in args:
         state=json.loads(Path(KIT,'state.json').read_text()); print(json.dumps([{'Labels':{'com.docker.compose.project':state['project'],'com.docker.compose.service':'postgres','lexiflow.installation':state['id']}}]))
+    elif args[:1]==['ps']:
+        state=json.loads(Path(KIT,'state.json').read_text()); print(json.dumps([{'Id':'a'*64,'Labels':{'com.docker.compose.project':state['project'],'com.docker.compose.service':'api','lexiflow.installation':state['id']}}]))
     else: print('[]')
+elif args[:1]==['inspect']:
+    print(json.loads(runtime_file.read_text())['id'])
 elif args[:1]==['run']:
     if mode=='fetch-fail': sys.exit(9)
     data=Path(KIT,'data/ecdict-source.ABC123');data.mkdir(exist_ok=True)
     (data/'stardict.csv').write_text('word,translation,oxford,tag,bnc,frq,exchange\\ntest,测试,1,,1,1,\\n')
     print('dataset_dir=/data/ecdict-source.ABC123')
+elif args[:1]==['build']:
+    labels={args[index+1].split('=',1)[0]:args[index+1].split('=',1)[1] for index,arg in enumerate(args[:-1]) if arg=='--label'}
+    if labels and mode=='api-build-fail': sys.exit(9)
+    tag=args[args.index('-t')+1]
+    image_id='sha256:'+hashlib.sha256((tag+json.dumps(labels,sort_keys=True)).encode()).hexdigest()
+    entry={'id':image_id,'labels':labels}
+    images[tag]=entry; images[image_id]=entry
+    images_file.write_text(json.dumps(images))
+    print('')
+elif args[:1]==['compose'] and 'up' in args and args[-1]=='api':
+    env=Path(KIT,'release.env').read_text()
+    image_id=next(line.split('=',1)[1] for line in env.splitlines() if line.startswith('LEXIFLOW_API_IMAGE='))
+    if mode=='api-start-fail':
+        Path(MODE).write_text(''); sys.exit(8)
+    runtime_file.write_text(json.dumps(images[image_id]))
+elif args[:1]==['compose'] and 'logs' in args: print('synthetic-caption-diagnostic')
 elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.exit(8)
 '''.replace("PYTHON", os.sys.executable).replace("CALLS", repr(str(self.calls))).replace("MODE", repr(str(self.mode))).replace("KIT", repr(str(self.kit)))
         self.program(self.bin / "podman", fake)
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
-                payload = {"status": "UP"} if self.path.endswith("readiness") else {"mode": "formal", "ready": True, "reason": "OK", "softwareVersion": version, "apiContract": "caption-hints.v1"}
+                runtime = json.loads((self.server.kit.parent / 'runtime.json').read_text())
+                current_version = runtime['labels']['org.opencontainers.image.version']
+                payload = {"status": "UP"} if self.path.endswith("readiness") else {"mode": "formal", "ready": True, "reason": "OK", "softwareVersion": current_version, "apiContract": "caption-hints.v1", "datasetVersion": 1}
                 self.send_response(200); self.end_headers(); self.wfile.write(json.dumps(payload).encode())
             def log_message(self, *_args):
                 pass
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server.repo = self.repo
+        self.server.kit = self.kit
         self.api_port = self.server.server_port
         with socket.socket() as reserve:
             reserve.bind(("127.0.0.1", 0))
@@ -114,6 +153,8 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
                     except (FileNotFoundError, json.JSONDecodeError): pass
                     time.sleep(.02)
                 self.server = http.server.ThreadingHTTPServer(("127.0.0.1", self.api_port), self.server.RequestHandlerClass)
+                self.server.repo = self.repo
+                self.server.kit = self.kit
                 self.server.timeout = .1
                 while not self.finished.is_set():
                     self.server.handle_request()
@@ -137,25 +178,89 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         state=json.loads((self.kit/'state.json').read_text())
         self.assertEqual(state['phase'],'ready')
         self.assertEqual((self.kit/'secrets/app-password').stat().st_mode & 0o777,0o444)
-        self.assertIn('sha256:'+'a'*64,(self.kit/'release.env').read_text())
+        self.assertIn(state['apiImage'],(self.kit/'release.env').read_text())
         for action in ['stop','up','install','status']:
             result=self.invoke(action); self.assertEqual(result.returncode,0,result.stderr)
         calls=[json.loads(line) for line in self.calls.read_text().splitlines()]
         self.assertEqual(sum('initialize' in call for call in calls),1)
         self.assertFalse(any('prune' in call or '-v' in call and 'down' in call for call in calls))
 
-    def test_caption_debug_is_explicit_persisted_and_hash_protected(self):
+    def test_caption_debug_is_default_and_legacy_flag_only_warns(self):
         result=self.invoke('install','--caption-debug',serve=True)
         self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('无需指定',result.stdout)
         state=json.loads((self.kit/'state.json').read_text())
-        self.assertTrue(state['captionDebug'])
-        self.assertIn('caption-debug.yaml',state['digests'])
+        self.assertFalse(state.get('captionDebug'))
+        self.assertNotIn('caption-debug.yaml',state['digests'])
         result=self.invoke('up')
         self.assertEqual(result.returncode,0,result.stderr)
         calls=[json.loads(line) for line in self.calls.read_text().splitlines()]
-        self.assertTrue(any('caption-debug.yaml' in call for call in calls))
-        (self.kit/'caption-debug.yaml').write_text('tampered')
-        self.assertNotEqual(self.invoke('up').returncode,0)
+        self.assertFalse(any('caption-debug.yaml' in call for call in calls))
+
+    def test_repeat_install_reports_upgrade_command_without_claiming_upgrade(self):
+        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        old=json.loads((self.kit/'state.json').read_text())
+        # Change a tracked source input to obtain a real resolver-derived target identity.
+        (self.repo/'ops/release/version.txt').write_text('2.0.1-SNAPSHOT\n')
+        result=self.invoke('install');self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('本次未更新应用或插件',result.stdout)
+        self.assertIn('local.mjs upgrade',result.stdout)
+        self.assertEqual(json.loads((self.kit/'state.json').read_text())['buildIdentity'],old['buildIdentity'])
+
+    def test_upgrade_cli_uses_api_only_and_never_initializes_again(self):
+        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        marker=self.kit/'data/synthetic-marker';marker.write_text('preserve')
+        before=json.loads((self.kit/'state.json').read_text())
+        (self.repo/'ops/release/version.txt').write_text('2.0.1-SNAPSHOT\n')
+        first_upgrade_call = len(self.calls.read_text().splitlines())
+        self.mode.write_text('')
+        result=self.invoke('upgrade');self.assertEqual(result.returncode,0,result.stderr)
+        calls=[json.loads(line) for line in self.calls.read_text().splitlines()]
+        calls = calls[first_upgrade_call:]
+        self.assertIn('构建 API 镜像', result.stdout)
+        self.assertNotIn('构建词库工具镜像', result.stdout)
+        compose=[row for row in calls if row[:1]==['compose']]
+        self.assertTrue(any('up' in row and '--no-deps' in row and row[-1]=='api' for row in compose),compose)
+        self.assertFalse(any('initialize' in row for row in calls))
+        self.assertFalse(any('up' in row and row[-1]=='postgres' for row in compose))
+        after=json.loads((self.kit/'state.json').read_text())
+        self.assertEqual((after['id'],after['project'],after['apiPort'],after['dbPort']),(before['id'],before['project'],before['apiPort'],before['dbPort']))
+        self.assertEqual(after['postgresImage'],before['postgresImage']);self.assertEqual(marker.read_text(),'preserve')
+        self.assertNotEqual(after['apiImage'],before['apiImage'])
+        self.assertEqual(json.loads((self.kit/'extension/build-identity.json').read_text()),after['buildIdentity'])
+        self.assertEqual(after['lastOperation']['buildId'],after['buildIdentity']['buildId'])
+        self.assertEqual(after['datasetIdentity'],before['datasetIdentity'])
+        result=self.invoke('upgrade');self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('无需升级',result.stdout)
+
+    def test_upgrade_build_and_start_failures_restore_then_retry(self):
+        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        before=json.loads((self.kit/'state.json').read_text())
+        original_extension=(self.kit/'extension/build-identity.json').read_bytes()
+        (self.repo/'ops/release/version.txt').write_text('2.0.1-SNAPSHOT\n')
+        for failure in ['api-build-fail','api-start-fail']:
+            self.mode.write_text(failure)
+            offset=len(self.calls.read_text().splitlines())
+            result=self.invoke('upgrade');self.assertNotEqual(result.returncode,0)
+            self.assertEqual(json.loads((self.kit/'state.json').read_text()),before)
+            self.assertEqual((self.kit/'extension/build-identity.json').read_bytes(),original_extension)
+            self.assertEqual(json.loads((self.root/'runtime.json').read_text())['id'],before['apiImage'])
+            self.assertFalse((self.kit/'upgrade.json').exists())
+            self.assertFalse((self.kit/'.lock').exists())
+            calls=[json.loads(line) for line in self.calls.read_text().splitlines()[offset:]]
+            self.assertFalse(any('initialize' in row or ('up' in row and row[-1]=='postgres') for row in calls))
+        records=[json.loads(file.read_text()) for file in (self.kit/'installation-records').glob('*.json')]
+        self.assertEqual(sum(record['status']=='FAIL' for record in records),2)
+        self.mode.write_text('')
+        result=self.invoke('upgrade');self.assertEqual(result.returncode,0,result.stderr)
+        self.assertNotEqual(json.loads((self.kit/'state.json').read_text())['apiImage'],before['apiImage'])
+
+    def test_logs_display_does_not_copy_caption_body_to_operation_file(self):
+        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        result=self.invoke('logs');self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('synthetic-caption-diagnostic',result.stdout)
+        for file in self.kit.glob('operation-*.log'):
+            self.assertNotIn('synthetic-caption-diagnostic',file.read_text())
 
     def test_fetch_failure_can_retry_before_database(self):
         self.mode.write_text('fetch-fail')
@@ -165,6 +270,25 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.mode.write_text('')
         result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(secret,(self.kit/'secrets/app-password').read_bytes())
+
+    def test_incomplete_install_rejects_changed_identity_resolver(self):
+        self.mode.write_text('fetch-fail')
+        result = self.invoke('install')
+        self.assertNotEqual(result.returncode, 0)
+        before = json.loads((self.kit/'state.json').read_text())
+        self.assertEqual(before['phase'], 'built')
+        secret = (self.kit/'secrets/app-password').read_bytes()
+        with (self.repo/'ops/release/version.mjs').open('a') as stream:
+            stream.write('\n// synthetic source identity dependency change\n')
+        offset = len(self.calls.read_text().splitlines())
+        self.mode.write_text('')
+        result = self.invoke('install')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('未完成安装的源码已变化', result.stderr)
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()[offset:]]
+        self.assertFalse(any('initialize' in row or 'build' in row for row in calls))
+        self.assertEqual(json.loads((self.kit/'state.json').read_text())['phase'], 'built')
+        self.assertEqual((self.kit/'secrets/app-password').read_bytes(), secret)
 
     def test_initialized_install_repairs_network_without_reimport(self):
         result = self.invoke('install',serve=True)
@@ -319,6 +443,58 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         (self.kit/'.lock/owner.json').write_text(json.dumps(owner,separators=(',',':')))
         self.mode.write_text('');result=self.invoke('install',serve=True)
         self.assertEqual(result.returncode,0,result.stderr)
+
+    def test_sigkill_lock_windows_retry_without_permanent_claim(self):
+        result = self.invoke('install', serve=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        before = (self.kit/'state.json').read_bytes()
+        secret = (self.kit/'secrets/app-password').read_bytes()
+        guard_inode = (self.kit/'.lock-guard').stat().st_ino
+        crash = self.root/'lock-crash.mjs'
+        marker = self.root/'lock-crash.marker'
+        for phase in ['guard', 'prepare-write', 'publish', 'owner-write', 'owner', 'retire']:
+            with self.subTest(phase=phase):
+                marker.unlink(missing_ok=True)
+                crash.write_text("import fs from 'node:fs'; import cp from 'node:child_process'; import {syncBuiltinESMExports} from 'node:module';\n"
+                    + f"const phase={json.dumps(phase)}, marker={json.dumps(str(marker))};\n"
+                    + r"""
+const write=fs.writeFileSync.bind(fs);
+const die=()=>{write(marker,phase);process.kill(process.pid,'SIGKILL');};
+const originalSpawn=cp.spawnSync.bind(cp);
+cp.spawnSync=(command,args,...rest)=>{const result=originalSpawn(command,args,...rest);if(phase==='guard' && ['/usr/bin/lockf','/usr/bin/flock'].includes(command) && result.status===0)die();return result;};
+const opened=new Map(); const originalOpen=fs.openSync.bind(fs);
+fs.openSync=(file,...rest)=>{const fd=originalOpen(file,...rest);opened.set(fd,String(file));return fd;};
+fs.writeFileSync=(file,...rest)=>{const name=opened.get(file)||'';
+if((phase==='prepare-write' && name.includes('/.lock-prepared-')) || (phase==='owner-write' && name.includes('/.lock-owner-'))){write(file,'{partial');die();}
+return write(file,...rest);};
+const rename=fs.renameSync.bind(fs);
+fs.renameSync=(from,to)=>{const result=rename(from,to);from=String(from);to=String(to);
+if(phase==='publish' && from.includes('/.lock-prepared-') && to.endsWith('/.lock'))die();
+if(phase==='owner' && from.includes('/.lock-owner-') && to.endsWith('/.lock/owner.json'))die();
+if(phase==='retire' && from.endsWith('/.lock') && to.includes('/.lock-retired-'))die();
+return result;};
+syncBuiltinESMExports();
+""")
+                argv = [shutil.which('node'), '--import', str(self.preload), '--import', str(crash), str(self.repo/'ops/podman/local.mjs'), 'status', '--dir', str(self.kit)]
+                proc = subprocess.run(argv, env={**os.environ, 'PATH':str(self.bin)+os.pathsep+os.environ['PATH']}, capture_output=True, text=True, timeout=15)
+                self.assertEqual(proc.returncode, -signal.SIGKILL, proc.stderr)
+                self.assertEqual(marker.read_text(), phase)
+                if (self.kit/'.lock/owner.json').exists():
+                    owner = json.loads((self.kit/'.lock/owner.json').read_text())
+                    self.assertEqual(owner['root'], str(self.kit))
+                deadline = time.monotonic() + 10
+                while True:
+                    result = self.invoke('status')
+                    if result.returncode == 0 or time.monotonic() >= deadline:
+                        break
+                    self.assertIn('仍在运行', result.stderr)
+                    time.sleep(.1)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse((self.kit/'.lock').exists())
+                self.assertFalse((self.kit/'.lock-claim').exists())
+                self.assertEqual((self.kit/'.lock-guard').stat().st_ino, guard_inode)
+                self.assertEqual((self.kit/'state.json').read_bytes(), before)
+                self.assertEqual((self.kit/'secrets/app-password').read_bytes(), secret)
 
     def test_symlink_directory_is_rejected(self):
         real=self.root/'real';real.mkdir();self.kit.symlink_to(real)

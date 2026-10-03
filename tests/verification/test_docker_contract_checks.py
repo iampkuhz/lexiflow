@@ -9,6 +9,7 @@ import importlib.util
 import io
 from contextlib import redirect_stderr
 import tempfile
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -52,7 +53,9 @@ class DockerContractCheckTest(unittest.TestCase):
     def test_scopes_and_required_inputs_match(self):
         """两种范围共享命令、输入和结果合同，封装测试不能替代运行验收。"""
         base, change = self.by_id[BASE], self.by_id[BASE + "-on-change"]
-        self.assertEqual((base["timeout_seconds"], change["timeout_seconds"]), (240, 240))
+        self.assertEqual(
+            (base["timeout_seconds"], change["timeout_seconds"]), (600, 600)
+        )
         for key in (
             "command",
             "required_environment",
@@ -60,11 +63,23 @@ class DockerContractCheckTest(unittest.TestCase):
             "result_contract",
         ):
             self.assertEqual(base[key], change[key], key)
-        self.assertEqual(["python3", "ops/docker/tests/module_check_adapter.py"], base["command"])
-        self.assertEqual(["python3"], base["required_environment"])
+        self.assertEqual(
+            ["python3", "ops/docker/tests/module_check_adapter.py"], base["command"]
+        )
+        self.assertEqual(["python3", "node", "git"], base["required_environment"])
         self.assertEqual([], base["module_dependencies"])
         for name in (
             "ops/docker",
+            "ops/release/candidate.mjs",
+            "ops/release/verified-candidate.mjs",
+            "ops/release/manifest.mjs",
+            "ops/release/package.mjs",
+            "ops/release/archive-identity.mjs",
+            "ops/release/embedded-identity.mjs",
+            "ops/release/lifecycle.mjs",
+            "ops/release/runtime-entry.mjs",
+            "ops/release/runtime-verification.sh",
+            "ops/release/tests/zip-fixture.mjs",
             "ops/release/lifecycle-docker.sh",
             "ops/release/lifecycle-state.sh",
             "ops/release/lifecycle.sh",
@@ -74,7 +89,10 @@ class DockerContractCheckTest(unittest.TestCase):
         ):
             self.assertIn(name, base["input_paths"])
         for name in base["input_paths"]:
-            selected = select_checks_for_changes(self.checks, [name + "/entrypoint.sh" if name == "ops/docker" else name])
+            selected = select_checks_for_changes(
+                self.checks,
+                [name + "/entrypoint.sh" if (ROOT / name).is_dir() else name],
+            )
             self.assertIn(BASE + "-on-change", {c["check_id"] for c in selected}, name)
 
     def test_each_input_is_hash_bound(self):
@@ -168,7 +186,8 @@ class DockerAdapterDiagnosticTest(unittest.TestCase):
     def adapter(self):
         """只导入入口定义，发现器由合成套件替代。"""
         spec = importlib.util.spec_from_file_location(
-            "synthetic_docker_adapter", ROOT / "ops/docker/tests/module_check_adapter.py"
+            "synthetic_docker_adapter",
+            ROOT / "ops/docker/tests/module_check_adapter.py",
         )
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -188,25 +207,100 @@ class DockerAdapterDiagnosticTest(unittest.TestCase):
                 parent.assertIn("ok", stream.getvalue())
 
         module = self.adapter()
+        node_output = (
+            json.dumps(
+                {
+                    "status": "PASS",
+                    "checks_run": 1,
+                    "failures": 0,
+                    "errors": 0,
+                    "skipped": 0,
+                }
+            )
+            + "\n"
+        )
         suite = unittest.defaultTestLoader.loadTestsFromTestCase(SyntheticCase)
-        with redirect_stderr(stream), patch.object(unittest.defaultTestLoader, "discover", return_value=suite):
+        with (
+            redirect_stderr(stream),
+            patch.object(unittest.defaultTestLoader, "discover", return_value=suite),
+            patch.object(
+                module.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 0, node_output, ""),
+            ),
+        ):
             report = module.run_tests()
         self.assertEqual(report["status"], "PASS")
-        self.assertEqual(report["checks_run"], 2)
-        self.assertEqual(sum(line.startswith("test_first (") for line in stream.getvalue().splitlines()), 1)
+        self.assertEqual(report["checks_run"], 3)
+        self.assertTrue(report["node_transaction_no_skips"])
+        self.assertTrue(stream.getvalue().endswith(node_output))
+        self.assertEqual(
+            sum(
+                line.startswith("test_first (")
+                for line in stream.getvalue().splitlines()
+            ),
+            1,
+        )
         self.assertEqual(stream.getvalue().count("Ran 2 tests"), 1)
-        self.assertEqual(report["tool_output_sha256"], hashlib.sha256(stream.getvalue().encode()).hexdigest())
+        self.assertEqual(
+            report["tool_output_sha256"],
+            hashlib.sha256(stream.getvalue().encode()).hexdigest(),
+        )
 
     def test_empty_and_skipped_suites_remain_fail_closed(self):
         """空套件与跳过不会因流式日志而被错误标记通过。"""
+
         class SkippedCase(unittest.TestCase):
             @unittest.skip("synthetic skip")
             def test_skipped(self):
                 pass
 
-        for suite in (unittest.TestSuite(), unittest.defaultTestLoader.loadTestsFromTestCase(SkippedCase)):
-            with self.subTest(), redirect_stderr(io.StringIO()), patch.object(
-                unittest.defaultTestLoader, "discover", return_value=suite
+        for suite in (
+            unittest.TestSuite(),
+            unittest.defaultTestLoader.loadTestsFromTestCase(SkippedCase),
+        ):
+            module = self.adapter()
+            node_output = json.dumps({"status": "PASS", "checks_run": 1})
+            with (
+                self.subTest(),
+                redirect_stderr(io.StringIO()),
+                patch.object(
+                    unittest.defaultTestLoader, "discover", return_value=suite
+                ),
+                patch.object(
+                    module.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess([], 0, node_output, ""),
+                ),
             ):
-                report = self.adapter().run_tests()
+                report = module.run_tests()
             self.assertEqual(report["status"], "FAIL")
+
+    def test_node_failure_or_malformed_result_cannot_pass_python_success(self):
+        """Python 通过不能遮盖 Node 事务失败或损坏的结果。"""
+
+        class SyntheticCase(unittest.TestCase):
+            def test_one(self):
+                pass
+
+        for output, code in (
+            (json.dumps({"status": "FAIL", "checks_run": 1}), 1),
+            ("not-json", 0),
+        ):
+            module = self.adapter()
+            suite = unittest.defaultTestLoader.loadTestsFromTestCase(SyntheticCase)
+            with (
+                self.subTest(output=output),
+                redirect_stderr(io.StringIO()),
+                patch.object(
+                    unittest.defaultTestLoader, "discover", return_value=suite
+                ),
+                patch.object(
+                    module.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess([], code, output, ""),
+                ),
+            ):
+                report = module.run_tests()
+            self.assertEqual(report["status"], "FAIL")
+            self.assertFalse(report["node_transaction_no_skips"])

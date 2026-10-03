@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { boundedApiLogging } from './upgrade.mjs';
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 export function networkTemplates(template, apiPort, dbPort) {
   const current = template.replace('127.0.0.1:18080:8080', `127.0.0.1:${apiPort}:8080`).replace('127.0.0.1:15432:5432', `127.0.0.1:${dbPort}:5432`);
@@ -14,11 +15,14 @@ export function repairNetwork({ dir, state, template, actualDigests, save, enabl
   if (!state.digests) return false;
   const same = (a, b) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
   const { current, legacy } = networkTemplates(template, state.apiPort, state.dbPort);
-  const from = hash(legacy), to = hash(current), key = 'compose.yaml';
+  const key = 'compose.yaml';
+  const loggedLegacy = hash(boundedApiLogging(legacy));
+  const logged = state.digests[key] === loggedLegacy;
+  const from = logged ? loggedLegacy : hash(legacy), to = hash(logged ? boundedApiLogging(current) : current);
   const actual = actualDigests();
   if (!same({ ...actual, [key]: '' }, { ...state.digests, [key]: '' })) throw new Error('安装配置或密码发生变化，拒绝网络修复');
   const pending = state.networkRepair;
-  if (!pending && actual[key] === state.digests[key] && actual[key] === to) return false;
+  if (!pending && actual[key] === state.digests[key] && [to, hash(boundedApiLogging(current))].includes(actual[key])) return false;
   if (!enabled) {
     if (pending || !same(actual, state.digests)) throw new Error('网络修复尚未完成，请运行 up 安全续办');
     return false;
@@ -38,7 +42,7 @@ export function repairNetwork({ dir, state, template, actualDigests, save, enabl
   if (actual[key] !== to) {
     // 唯一临时名；崩溃遗留文件不接管、不跟随符号链接。
     const temporary = path.join(dir, `.compose-${crypto.randomBytes(16).toString('hex')}.next`);
-    fs.writeFileSync(temporary, current, { mode: 0o600, flag: 'wx' });
+    fs.writeFileSync(temporary, logged ? boundedApiLogging(current) : current, { mode: 0o600, flag: 'wx' });
     fs.renameSync(temporary, path.join(dir, key));
   }
   state.digests[key] = to;

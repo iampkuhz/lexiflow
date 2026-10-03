@@ -1,5 +1,6 @@
 // 可分享的只读诊断：只输出固定原因与受限版本字段，不转发工具/API原文。
 import fs from 'node:fs';
+import { parseSoftwareVersion } from '../release/version.mjs';
 import http from 'node:http';
 import path from 'node:path';
 import os from 'node:os';
@@ -79,6 +80,13 @@ export async function runtime(port, expectedVersion, timeoutMs = 6000) {
   if (body.mode !== 'formal' || body.ready !== true || body.reason !== 'OK') return ['BLOCKED', 'RUNTIME_NOT_READY'];
   return ['PASS', 'RUNTIME_READY'];
 }
+export async function runtimeDataset(port, expectedVersion) {
+  const response = await readStatus(port, '/api/v1/runtime-status', 3000);
+  const body = response.body;
+  if (!response.available || !body || body.softwareVersion !== expectedVersion || body.ready !== true || body.mode !== 'formal'
+      || !Number.isSafeInteger(body.datasetVersion) || body.datasetVersion < 1) throw new Error('RUNTIME_DATASET_INVALID');
+  return body.datasetVersion;
+}
 export async function diagnose(dir, env) {
   const checks = [];
   const add = (id, status, reason, details = {}) => checks.push({ id, status, reason, next: actions[reason], ...details });
@@ -99,7 +107,7 @@ export async function diagnose(dir, env) {
   if (!fs.existsSync(dir)) { add('installation', 'BLOCKED', 'NOT_INSTALLED'); return report(checks); }
   try {
     state = jsonFile(path.join(dir, 'state.json'));
-    if (state.schema !== 1 || state.root !== dir || !/^[a-f0-9]{32}$/.test(state.id) || state.project !== `lexiflow-local-${state.id}` || !PHASES.has(state.phase) || !Number.isInteger(state.apiPort) || state.apiPort < 1 || state.apiPort > 65535 || !/^[0-9]{1,5}\.[0-9]{1,5}\.[0-9]{1,5}$/.test(state.version)) throw new Error('invalid');
+    if (state.schema !== 1 || state.root !== dir || !/^[a-f0-9]{32}$/.test(state.id) || state.project !== `lexiflow-local-${state.id}` || !PHASES.has(state.phase) || !Number.isInteger(state.apiPort) || state.apiPort < 1 || state.apiPort > 65535 || parseSoftwareVersion(state.version) !== state.version) throw new Error('invalid');
   } catch { add('installation', 'FAIL', 'INVALID_STATE'); return report(checks); }
   const installed = ['initialized', 'ready'].includes(state.phase);
   add('installation', installed ? 'PASS' : 'BLOCKED', installed ? 'SUPPORTED' : state.phase === 'initializing' ? 'INITIALIZATION_UNCERTAIN' : 'INSTALL_INCOMPLETE', { phase: state.phase });
@@ -146,5 +154,5 @@ export async function doctor(dir, env, json) {
     for (const check of result.checks) console.log(`[${check.status}] ${check.id}: ${check.next}`);
     console.log(`自检: ${result.status}；仅诊断，不代表完整验收。可加 --json 生成可分享摘要。`);
   }
-  if (result.status !== 'PASS') process.exitCode = result.status === 'FAIL' ? 1 : 3;
+  return result.status === 'FAIL' ? 1 : result.status === 'BLOCKED' ? 3 : 0;
 }
