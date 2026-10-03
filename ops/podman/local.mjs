@@ -96,8 +96,11 @@ export async function runLocal(argv, candidateRequest) {
   function verifyConfig(installed = state) {
     if (JSON.stringify(digestFiles(installed)) !== JSON.stringify(installed.digests)) fail('安装配置或密码发生变化，拒绝操作；不要手改受管目录');
   }
+  function composeArgs(...argv) {
+    return ['compose', '--env-file', 'release.env', '-p', state.project, '-f', 'compose.yaml', ...(state.captionDebug ? ['-f', 'caption-debug.yaml'] : []), ...argv];
+  }
   function compose(...argv) {
-    return run('podman', ['compose', '--env-file', 'release.env', '-p', state.project, '-f', 'compose.yaml', ...(state.captionDebug ? ['-f', 'caption-debug.yaml'] : []), ...argv], { capture: true, logOutput: argv[0] !== 'logs' });
+    return run('podman', composeArgs(...argv), { capture: true });
   }
   async function ownedResources() {
     // 扫描 Compose 项目标签，两种 provider 标签均核对；不依赖易漂移的引擎 ID。
@@ -434,6 +437,18 @@ export async function runLocal(argv, candidateRequest) {
       state = { schema: 1, id, project: `lexiflow-local-${id}`, root: dir, apiPort, dbPort, captionDebug: false, phase: 'new', version: buildIdentity.softwareVersion, buildIdentity, installationStartedAt: new Date().toISOString(), installationOperation: crypto.randomBytes(16).toString('hex'), source: candidate ? null : sourceFingerprint(), ...(candidate ? { packageType: 'release-package', candidateSha256: candidate.candidateSha256, manifestSha256: candidate.manifestSha256 } : {}) };
       save();
     }
+    if (action === 'logs') {
+      progress('持续查看服务日志（仅显示新日志；Ctrl+C 退出，不停止服务）');
+      // 查看日志不占用安装锁，也不触发升级恢复或创建 operation 日志。
+      if (state.digests) verifyConfig();
+      await run('podman', ['info'], { timeout: 30000 });
+      await ownedResources();
+      if (interrupted) return;
+      await runCommand('podman', composeArgs('logs', '--follow', '--tail=0', 'postgres', 'api'), {
+        cwd: dir, env: environment, follow: true, label: '查看服务日志',
+      });
+      return;
+    }
     if (state.packageType === 'release-package' && !['initialized', 'ready'].includes(state.phase)
       && ['install', 'recover'].includes(action)) {
       if (!candidate || state.candidateSha256 !== candidate.candidateSha256 || state.manifestSha256 !== candidate.manifestSha256) fail('候选安装重试必须提供原候选目录及摘要');
@@ -584,7 +599,6 @@ export async function runLocal(argv, candidateRequest) {
     if (!state.digests) fail('安装未完成，请运行 install 重试建库前步骤');
     verifyConfig(); await ownedResources();
     if (action === 'stop') { progress('停止服务，保留数据库'); await compose('stop'); return; }
-    if (action === 'logs') { console.log(await compose('logs', '--tail=100', 'postgres', 'api')); return; }
     if (action === 'status') { console.log(await compose('ps')); await ready(); summary(); return; }
     if (!['initialized', 'ready'].includes(state.phase)) fail('数据库尚未确认初始化完成；请查看安装日志');
     progress('6/6 启动应用并验证就绪');
