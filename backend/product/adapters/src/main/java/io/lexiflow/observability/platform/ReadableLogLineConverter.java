@@ -7,7 +7,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-/** Logback 转换器：普通记录生成六列，已格式化事件避免重复前缀。 */
+/** Logback 转换器：普通记录使用精简格式，已格式化事件避免重复前缀。 */
 public final class ReadableLogLineConverter extends ClassicConverter {
   private static final String READABLE_MARKER = "LEXIFLOW_READABLE_LINE";
   private final ReadableLogFormatter formatter = new ReadableLogFormatter();
@@ -20,7 +20,6 @@ public final class ReadableLogLineConverter extends ClassicConverter {
     var mdc = event.getMDCPropertyMap();
     var correlationId = uuid(mdc.get("requestId"));
     if (correlationId == null) correlationId = uuid(mdc.get("request_id"));
-    if (correlationId == null) correlationId = UUID.randomUUID();
     Map<String, String> fields = new HashMap<>();
     var keyValuePairs = event.getKeyValuePairs();
     if (keyValuePairs != null)

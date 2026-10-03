@@ -13,6 +13,35 @@ class CaptionDebugControllerTest {
       "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
   @Test
+  void consoleIsCompactWhileOriginalEventIdentityStillDeduplicates() {
+    var lines = new java.util.ArrayList<String>();
+    var controller =
+        new CaptionDebugController(
+            true, new StructuredEventLogger(null, Runnable::run, lines::add));
+    String id = UUID.randomUUID().toString();
+    var request =
+        new CaptionDebugRequest(
+            id,
+            "incremental",
+            "private-topic",
+            "abcdefghijk",
+            "private-subtitle",
+            543129L,
+            "synthetic|caption\n中文");
+    assertEquals(204, controller.append(EXTENSION_ORIGIN, request).getStatusCode().value());
+    assertEquals(204, controller.append(EXTENSION_ORIGIN, request).getStatusCode().value());
+    assertEquals(1, lines.size());
+    var columns = lines.getFirst().split("\\|", -1);
+    assertEquals(6, columns.length);
+    assertEquals("字幕增量", columns[2]);
+    assertEquals("video=abcdefghijk", columns[3]);
+    assertEquals("09:03.129", columns[4]);
+    assertEquals("synthetic\\u007Ccaption\\n中文", columns[5]);
+    assertFalse(lines.getFirst().contains(id));
+    assertFalse(lines.getFirst().contains("private-"));
+  }
+
+  @Test
   void capabilityDefaultsOnAndCanBeDisabledWithoutAnalysisFileSwitch() {
     var enabled = new CaptionDebugController(true, new StructuredEventLogger());
     var allowed = enabled.capability(EXTENSION_ORIGIN);

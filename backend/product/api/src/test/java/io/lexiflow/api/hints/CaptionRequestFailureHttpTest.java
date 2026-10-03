@@ -144,6 +144,8 @@ class CaptionRequestFailureHttpTest {
   @Test
   void getMethodFallbackEmitsInvalidRequestReason() throws Exception {
     var logger = (Logger) LoggerFactory.getLogger(StructuredEventLogger.class);
+    var originalLevel = logger.getLevel();
+    logger.setLevel(ch.qos.logback.classic.Level.DEBUG);
     var appender = new ListAppender<ILoggingEvent>();
     appender.start();
     logger.addAppender(appender);
@@ -165,6 +167,7 @@ class CaptionRequestFailureHttpTest {
               .orElseThrow();
       assertTrue(event.contains("reason=INVALID_REQUEST"));
     } finally {
+      logger.setLevel(originalLevel);
       logger.detachAppender(appender);
       appender.stop();
     }
@@ -200,6 +203,8 @@ class CaptionRequestFailureHttpTest {
 
   private Captured requestWithEvents(String body) throws Exception {
     var logger = (Logger) LoggerFactory.getLogger(StructuredEventLogger.class);
+    var originalLevel = logger.getLevel();
+    logger.setLevel(ch.qos.logback.classic.Level.DEBUG);
     var appender = new ListAppender<ILoggingEvent>();
     appender.start();
     logger.addAppender(appender);
@@ -215,6 +220,7 @@ class CaptionRequestFailureHttpTest {
           1, lines.stream().filter(line -> line.contains("caption.request.completed")).count());
       return new Captured(response, reason(terminal), String.join("\n", lines));
     } finally {
+      logger.setLevel(originalLevel);
       logger.detachAppender(appender);
       appender.stop();
     }

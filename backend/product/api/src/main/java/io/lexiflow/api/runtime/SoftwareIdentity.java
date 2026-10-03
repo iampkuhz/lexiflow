@@ -46,7 +46,7 @@ public final class SoftwareIdentity {
   /**
    * 校验正式或开发软件身份，供运行健康检查共享。
    *
-   * @param raw 构建资源或运行响应中的软件版本。
+   * @param raw 含义：构建资源或运行响应中的软件版本。取值范围：符合统一版本语法的非空字符串。
    * @return 经校验且移除单个结尾换行的版本。
    */
   public static String parseVersion(String raw) {

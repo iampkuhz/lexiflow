@@ -4,7 +4,7 @@
 
 ## 1.1. 普通事件结构
 
-后端控制台使用固定六列 `MM-dd HH:mm:ss|LEVEL|关联ID|事件|定位字段|正文`，不添加分隔空格。内部事件模型及测试机器 sink 保留 `lexiflow.event.v1`，不再将该 JSON 默认打印给使用者。下表描述内部模型，不是控制台列清单。
+字幕控制台使用六列 `MM-dd HH:mm:ss|LEVEL|中文事件|video=真实视频ID|分:秒.毫秒|正文`；普通 INFO 使用 `时间|级别|事件|定位字段|正文`；WARN/ERROR 和 DEBUG 诊断使用 `时间|级别|完整关联ID|事件|定位字段|正文`，无关联 ID 时为 `-`，不伪造 UUID。不添加分隔空格。正常字幕请求终态统计（含 NO_HINT、NO_NEW_SEGMENTS）仅在 DEBUG 输出，异常不降级。内部事件模型及测试机器 sink 保留 `lexiflow.event.v1`，不再将该 JSON 默认打印给使用者。下表描述内部模型，不是控制台列清单。
 
 | 字段 | 类型与要求 |
 | --- | --- |
@@ -51,7 +51,7 @@ db_batches 仅为缺失词形批量读取次数，版本读取与预热分别记
 
 普通事件禁止字幕、中文释义、词段正文、观看 URL、视频/轨道身份、用户偏好、JDBC 字符串、凭据、私有文件路径及模型载荷；异常日志只输出固定错误分类，不透传可能含输入的 exception message。不得通过 DEBUG 绕过此边界。
 
-敏感分析记录继续由用户显式授权的本机独立台账承担，保留 segment.key 去重、重启恢复与成功写入语义。Docker 发行包默认关闭，开发者现有授权不能继承给其他使用者。正文不得进入普通 logger 或诊断包。可读专用流使用相同六列，video-start、incremental、final、interrupted 为固定事件白名单；视频定位取可信 YouTube 标签页，未知字段不猜造。正文中的反斜杠、竖杠、换行、回车、制表符与控制字符转义，定位字段的值额外转义分号/等号。解析按六列切分，再切定位键值，最后解码；时间显示不含年份，归档应另保留年份与时区信息。
+敏感分析记录继续由用户显式授权的本机独立台账承担，保留 segment.key 去重、重启恢复与成功写入语义。Docker 发行包默认关闭，开发者现有授权不能继承给其他使用者。正文不得进入普通 logger 或诊断包。可读专用流使用字幕六列，video-start、incremental、final、interrupted 为固定事件白名单，显示为视频开始、字幕增量、字幕收尾、字幕中断；视频定位取可信 YouTube 标签页，未知字段不猜造。正文中的反斜杠、竖杠、换行、回车、制表符与控制字符转义，定位字段的值额外转义分号/等号。字幕流按六列切分后解码；时间显示不含年份，归档应另保留年份与时区信息。
 
 二期保持当前同步写入语义，将其单独计时，不能称为“异步完成”。记录失败不丢弃已算出的提示，不假装写入成功；以后要异步化时另行设计持久交接、恢复与背压。
 
@@ -60,12 +60,12 @@ db_batches 仅为缺失词形批量读取次数，版本读取与预热分别记
 ## 1.5. 合成事件与直接验收
 
 ```text
-10-03 14:25:49|INFO|00000000-0000-4000-8000-000000000001|incremental|position_ms=136300;subtitle=实际片段键;topic=实际主题摘要;video=AbCdEfGhI12|business incentive(动机), maybe it's a
-10-03 14:25:51|INFO|00000000-0000-4000-8000-000000000002|final|position_ms=137100;subtitle=实际片段键;topic=实际主题摘要;video=AbCdEfGhI12|business incentive(动机), maybe it's a political incentive(动机).
-10-03 14:25:55|WARN|00000000-0000-4000-8000-000000000003|caption.request.completed|duration_ms=5;reason=DEPENDENCY_UNAVAILABLE|-
+10-03 14:25:49|INFO|字幕增量|video=AbCdEfGhI12|02:16.300|business incentive(动机), maybe it's a
+10-03 14:25:51|INFO|字幕收尾|video=AbCdEfGhI12|02:17.100|business incentive(动机), maybe it's a political incentive(动机).
+10-03 14:25:55|ERROR|00000000-0000-4000-8000-000000000003|caption.request.completed|duration_ms=5;reason=DEPENDENCY_UNAVAILABLE|-
 ```
 
-以上为合成格式示例，真实运行保留实际 UUID、主题摘要与片段键，不伪造短编号。时间按进程时区格式化；容器时区不保证等于宿主时区。增量正文只包含新增范围，必要时补齐跨片段词组。扩展调试队列有界，拥塞/退出时属于尽力发送，不能当作可靠审计台账；中断收尾不冒充完整展示。
+以上为合成格式示例，内部协议和去重保留真实完整身份；日常字幕不展示 UUID、主题摘要与片段键，也不伪造短编号。视频 ID 保留，播放时间为累计分钟，超过一小时不回绕。时间按进程时区格式化；容器时区不保证等于宿主时区。增量正文只包含新增范围，必要时补齐跨片段词组。扩展调试队列有界，拥塞/退出时属于尽力发送，不能当作可靠审计台账；中断收尾不冒充完整展示。
 
 以上数字和身份仅用于合同示例，不是实测结果。直接测试必须证明：成功/空提示/非法请求/依赖故障各一次终态；版本变化一次失效事件；敏感记录故障仍返回既定提示；取消与迟到计数不混淆；未测量字段不伪造；注入换行、凭据样式及合成字幕均不能进入普通事件；日志故障不改变业务响应。
 
@@ -73,7 +73,7 @@ db_batches 仅为缺失词形批量读取次数，版本读取与预热分别记
 
 StructuredEvent 是普通日志的封闭技术值：事件、原因、计数键、耗时键、导入 step/phase 与规则计数键均使用固定枚举；只接受非负整数和后端生成的 UUID 请求关联号，不接收自由文本或异常对象。result、stage 和 level 由事件/原因确定，不允许调用者任意组合。CANCELLED 为 BLOCKED/WARN；启动不可就绪 ERROR、预热降级 WARN；请求 INVALID_REQUEST 为 FAIL/WARN、其他请求 FAIL/BLOCKED 为 ERROR；依赖不可用与敏感写入失败 WARN。schema 错误与版本冲突为 FAIL。请求终态必须有 request_id 与 api 总耗时；analysis.record.failed 关联同一请求 UUID；其他事件不携带 request_id，timings_ms 仅请求终态允许。已知 lexicon_version=0 与未知省略有区别。导入 stage 的 STARTED 对应 started，heartbeat 无最终数量，completed 才可携带最终计数；reason_counts 仅导入终态使用固定准备规则键，不接收词条。未取得的测量用缺项表示。
 
-StructuredEventLogger 负责单行 JSON 编码与按固定级别输出；提供封闭事件 supplier 的失败隔离入口，事件构造、编码或输出失败仅返回未写出，不打印 exception message、路径或正文，不改变调用方业务结果。事件模型与适配器直接验收不代表所有调用位置已接线；请求终态与入口异常在 API-2002，启动/依赖状态在 API-2001，导入/缓存节点由 OBS-2003 逐项取得实际调用与次数证据，并作为 QLT-2001 的硬依赖。
+StructuredEventLogger 保留机器测试 sink 的单行 JSON 编码与事件级别；控制台正常字幕请求统计使用 DEBUG，其他事件保持原级别；提供封闭事件 supplier 的失败隔离入口，事件构造、编码或输出失败仅返回未写出，不打印 exception message、路径或正文，不改变调用方业务结果。事件模型与适配器直接验收不代表所有调用位置已接线；请求终态与入口异常在 API-2002，启动/依赖状态在 API-2001，导入/缓存节点由 OBS-2003 逐项取得实际调用与次数证据，并作为 QLT-2001 的硬依赖。
 
 敏感台账通过 adapters 内的 SegmentAnalysisStore 技术接口接收已准备的 SegmentAnalysisRecord（散列 segmentId、英文及分段 translated ranges）。它是本机文件格式合同，不新建业务 Domain 或 Gradle 模块，不让 adapters 依赖 Enrichment/API。API 的 SegmentAnalysisLog 仅将已验证 request/result 映射到该中立记录并调用 Store；文件、锁、去重、权限、JSON 编码和专用 console 全部属于 FileSegmentAnalysisStore，组合根选择路径并装配具体实现。默认路径定位留在组合根，不进入领域或文件 Store；现有开发授权不自动扩展至 Docker，发行模式必须装配 disabled Store，后续显式启用才写入。
 
