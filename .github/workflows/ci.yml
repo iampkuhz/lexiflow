@@ -67,4 +67,23 @@ jobs:
           else
             xvfb-run -a python -m scripts.verification.ci quick --base "$BASE_SHA"
           fi
-      # 不上传运行日志、字幕正文或 tmp/；诊断产物留在本次临时 runner。
+      - name: Build and smoke check extension archive
+        id: package
+        run: |
+          node extension/scripts/release.mjs > "$RUNNER_TEMP/extension-package.json"
+          ZIP=$(node -e 'const d=require(process.argv[1]); console.log(`tmp/releases/${d.softwareVersion}/${d.sourceCommit}/${d.filename}`)' "$RUNNER_TEMP/extension-package.json")
+          node extension/scripts/archive-check.mjs "$ZIP" "$GITHUB_SHA"
+          xvfb-run -a node extension/tests/archive-smoke.mjs "$ZIP" "$GITHUB_SHA"
+          printf 'zip=%s\n' "$ZIP" >> "$GITHUB_OUTPUT"
+      - name: Upload verified extension ZIP and checksum
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lexiflow-chrome-extension-${{ github.sha }}
+          path: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.zip }}.sha256
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          include-hidden-files: false
+      # 仅上传固定 ZIP 和 checksum；不上传整个 tmp/ 或运行日志。

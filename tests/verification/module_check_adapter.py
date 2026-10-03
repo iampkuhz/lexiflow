@@ -25,6 +25,11 @@ def verification_tests(root: Path) -> dict[str, object]:
         "errors": len(result.errors),
         "skipped": len(result.skipped),
         "reason": "" if result.wasSuccessful() and result.testsRun > 0 and not result.skipped else "verification-module-tests-incomplete",
+        "detail": {
+            "failed_tests": [test.id() for test, _ in result.failures],
+            "error_tests": [test.id() for test, _ in result.errors],
+            "skipped_tests": [test.id() for test, _ in result.skipped],
+        },
         "tool_output_sha256": __import__("hashlib").sha256(stream.getvalue().encode("utf-8")).hexdigest(),
     }
 

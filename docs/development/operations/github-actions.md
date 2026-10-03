@@ -16,6 +16,21 @@ python3 -m scripts.verification.ci quick --base <完整commit>
 
 PR 没有发布权限，不使用 `pull_request_target`、self-hosted 或发布 Environment，不上传 `tmp/`、API 原始日志、字幕正文或观看记录。Action 固定完整 commit SHA；源码不能在取得 token 后随意替换。参考 [GitHub 安全使用说明](https://docs.github.com/en/actions/reference/security/secure-use)。
 
+### 1.1.1. 下载与加载扩展
+
+Quick checks 成功后，同一 run 使用现有 `extension/scripts/release.mjs` 构建并校验 ZIP，在隔离 Playwright Chromium profile 加载 service worker 和 popup，再上传 `lexiflow-chrome-extension-<完整commit>` artifact，保留 14 天。此结果是自动化加载 smoke，不是人工 Chrome 安装或正式 Release 验收。run 的 event、分支及完整 commit 必须与目标源码对应；PR run 可能对应 GitHub 合并测试 commit，而非 PR head。
+
+Actions 网页下载的是外层 artifact ZIP；先解开它，得到内层 `lexiflow-extension-<softwareVersion>.zip` 与同名 `.zip.sha256`。可使用 `gh run download <run-id> --name lexiflow-chrome-extension-<完整commit> --dir <目录>` 直接解开外层。下载需要 GitHub 登录及仓库读取权限；过期后不能将旧下载入口承诺为永久发行。校验内层：
+
+```sh
+cd <下载目录>
+shasum -a 256 -c lexiflow-extension-<softwareVersion>.zip.sha256
+```
+
+随后将内层 ZIP 解压到稳定目录；该目录根部必须有 `manifest.json`、`build-identity.json` 与运行资源。打开 `chrome://extensions`，启用开发者模式，点击“加载已解压的扩展程序”，选择这个目录，而不是外层 artifact 目录。API 仍需单独按本机安装说明运行；ZIP 不包含后端或词库。更新后替换该解压目录并在扩展管理页重新加载。
+
+Chrome 官方允许开发者加载可信解压扩展；ZIP 是 Chrome Web Store 上传格式，但不等于已经通过商店审核。普通 Windows/macOS 用户便捷安装应走 Chrome Web Store；GitHub ZIP 或自签名 CRX 不提供通用双击安装。自托管在 Windows/macOS 受企业策略约束，本项目不修改浏览器策略。商店提交不属于 GitHub 分发步骤，也不是此链路的前置。依据：[Chrome 分发规则](https://developer.chrome.com/docs/extensions/how-to/distribute)、[加载解压扩展](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked)、[商店上传](https://developer.chrome.com/docs/webstore/publish)。GitHub 自动生成的 Source code ZIP 不是扩展安装包。
+
 ## 1.2. 正式标签：完整验证与独立验收
 
 `.github/workflows/release.yml` 将 `v*` 标签准备与显式手动晋升分开。标签阶段首先由共享版本入口验证标签指向的 commit、干净源码与三段正式版本完全一致。`2.0.0-SNAPSHOT`、dirty 输入或标签漂移均拒绝；手动续办只能消费原标签、原 checkout 已有的候选和原生验收证据，不能另传源码或候选目录。
@@ -82,7 +97,7 @@ python3 -m scripts.environment.release_promotion --submission-id <uuid> --candid
 
 默认核验并准备公开资产，不写 GitHub。只有用户另行批准后才加 `--publish`；workflow 或 token 的存在不代替该授权。入口复用同宿主的联合证据，只接受干净正式版本和精确 tag、单一 ARM64 候选。`ops/release/distribution-licenses.json` 必须先由负责人依据真实许可核准，并与候选的每个许可条目、来源及 notice 摘要一致；空表或测试占位材料阻断。程序的字段/摘要核对不是法律许可判断。
 
-发行归档只包含已验收 payload；随包保留扩展 ZIP，不把 ZIP 描述为一键安装文件。独立公开资产仅为发行 tar.gz、其摘要、候选 marker、manifest 和 manifest 摘要，不上传 Formal receipt、运行日志、字幕或观看记录。缺件、多余项、路径异常、读取漂移及大小越界均停止。
+发行归档只包含已验收 payload；随包保留扩展 ZIP，不把 ZIP 描述为一键安装文件。独立公开资产仅为发行 tar.gz、其摘要、Chrome 扩展 ZIP、ZIP 摘要、候选 marker、manifest 和 manifest 摘要；独立 ZIP 从已验收候选原样复制，与发行归档内扩展逐字节相同，晋升时不重新构建，不上传 Formal receipt、运行日志、字幕或观看记录。缺件、多余项、路径异常、读取漂移及大小越界均停止。
 
 远端先验证已有 tag 对应同一 commit、不可变发行已启用，任何同 tag 的 draft 或 published release 都拒绝覆盖。创建 draft 后上传固定资产，逐项检查远端名称、字节数与 SHA-256，完整复核后才 publish 并确认 immutable 与 latest。失败不删除草稿或移动 tag；写请求结果未知时保留不确定状态，先由负责人查明，不自动重试。参见 [GitHub 不可变发行](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)及 [Release API](https://docs.github.com/en/rest/releases/releases)。
 

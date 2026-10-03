@@ -37,6 +37,17 @@ class WorkflowContractTest(unittest.TestCase):
             self.assertNotIn(banned, run)
         self.assertNotIn("secrets.", (ROOT / ".github/workflows/ci.yml").read_text())
 
+    def test_archive_is_checked_and_loaded_before_upload(self):
+        steps = workflow("ci.yml")["jobs"]["quick"]["steps"]
+        package = next(step for step in steps if step.get("id") == "package")
+        self.assertIn("node extension/scripts/release.mjs", package["run"])
+        self.assertIn('archive-check.mjs "$ZIP" "$GITHUB_SHA"', package["run"])
+        self.assertIn('archive-smoke.mjs "$ZIP" "$GITHUB_SHA"', package["run"])
+        upload = next(step for step in steps if "upload-artifact@" in step.get("uses", ""))
+        self.assertLess(steps.index(package), steps.index(upload))
+        self.assertNotIn("if", package)
+        self.assertNotIn("if", upload)
+
     def test_release_requires_clean_tag_before_protected_native_runner(self):
         value = workflow("release.yml")
         self.assertEqual(set(value["on"]), {"push", "workflow_dispatch"})
@@ -110,7 +121,15 @@ class WorkflowContractTest(unittest.TestCase):
                         self.assertRegex(
                             step["uses"], r"^actions/[a-z-]+@[a-f0-9]{40}$"
                         )
-                        self.assertNotIn("upload-artifact", step["uses"])
+                        if "upload-artifact" in step["uses"]:
+                            self.assertEqual(name, "ci.yml")
+                            self.assertEqual(step["with"]["retention-days"], "14")
+                            self.assertEqual(step["with"]["if-no-files-found"], "error")
+                            self.assertEqual(step["with"]["include-hidden-files"], "false")
+                            self.assertEqual(step["with"]["path"].splitlines(), [
+                                "${{ steps.package.outputs.zip }}",
+                                "${{ steps.package.outputs.zip }}.sha256",
+                            ])
                     if step.get("uses", "").startswith("actions/checkout@"):
                         self.assertEqual(step["with"]["persist-credentials"], "false")
                         self.assertEqual(step["with"]["fetch-depth"], "0")

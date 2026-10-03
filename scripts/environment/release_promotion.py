@@ -28,6 +28,7 @@ from scripts.environment.release_runtime_check import _run_bounded
 ROOT = Path(__file__).resolve().parents[2]
 LICENSE_TABLE = ROOT / "ops/release/distribution-licenses.json"
 MAX_ASSET = 2 * 1024**3
+MAX_EXTENSION = 256 * 1024**2
 MAX_UNCOMPRESSED = 8 * 1024**3
 MAX_JSON = 4 * 1024**2
 MAX_LICENSE_TABLE = 256 * 1024
@@ -888,15 +889,24 @@ def _bound_candidate(
     if not isinstance(artifacts, list) or not artifacts or len(artifacts) > 128:
         _fail("candidate-manifest-invalid")
     paths = set()
+    extensions = []
     total = len(manifest_bytes) + len(sidecar_bytes)
     for item in artifacts:
         _bounded_item(item)
         if item["path"] in paths:
             _fail("candidate-manifest-invalid")
         paths.add(item["path"])
+        if item["role"] == "extension":
+            extensions.append(item)
         total += item["bytes"]
         if total > MAX_UNCOMPRESSED:
             _fail("asset-size-limit")
+    if (
+        len(extensions) != 1
+        or extensions[0]["path"] != "extension/package.zip"
+        or extensions[0]["bytes"] > MAX_EXTENSION
+    ):
+        _fail("candidate-extension-invalid")
     return proof, identity, manifest_bytes, candidate_bytes, sidecar_bytes
 
 
@@ -954,12 +964,46 @@ def promote(
         archive_sidecar = write(
             archive.name + ".sha256", f"{sha}  {archive.name}\n".encode()
         )
+        extension_item = next(
+            item for item in manifest["artifacts"] if item["role"] == "extension"
+        )
+        extension_name = f"lexiflow-extension-{version}.zip"
+        extension_path = workspace / extension_name
+        extension_fd, extension_info = _stable_fd(
+            candidate, "payload/" + extension_item["path"]
+        )
+        try:
+            if extension_info.st_size != extension_item["bytes"]:
+                _fail("candidate-artifact-hash-mismatch")
+            with extension_path.open("xb") as output:
+                extension_digest = hashlib.sha256()
+                _read_exact(
+                    extension_fd,
+                    extension_item["bytes"],
+                    extension_digest,
+                    output.write,
+                )
+                output.flush()
+                os.fsync(output.fileno())
+            if extension_digest.hexdigest() != extension_item["sha256"] or _stamp(
+                extension_info
+            ) != _stamp(os.fstat(extension_fd)):
+                _fail("candidate-artifact-hash-mismatch")
+        finally:
+            os.close(extension_fd)
+        extension_digest_hex = extension_item["sha256"]
+        extension_sidecar = write(
+            extension_name + ".sha256",
+            f"{extension_digest_hex}  {extension_name}\n".encode(),
+        )
         manifest_path = write("manifest.json", manifest_bytes)
         manifest_sidecar = write("manifest.json.sha256", sidecar_bytes)
         candidate_path = write("candidate.json", candidate_bytes)
         assets = {
             archive.name: archive,
             archive_sidecar.name: archive_sidecar,
+            extension_name: extension_path,
+            extension_sidecar.name: extension_sidecar,
             candidate_path.name: candidate_path,
             manifest_path.name: manifest_path,
             manifest_sidecar.name: manifest_sidecar,
@@ -979,6 +1023,11 @@ def promote(
                 os.close(fd)
         if expected[archive.name] != (size, sha):
             _fail("archive-changed-during-prepare")
+        if expected[extension_name] != (
+            extension_item["bytes"],
+            extension_item["sha256"],
+        ):
+            _fail("extension-changed-during-prepare")
         revalidate()
         if publish:
             owner, repo = _repository(ROOT)
