@@ -20,49 +20,112 @@ import tools.jackson.core.json.JsonFactory;
 
 class StructuredEventLoggerTest {
   @Test
+  void successfulRequestStatisticsAreDebugOnlyButFailuresRetainFullIds() {
+    var slf4j =
+        (ch.qos.logback.classic.Logger)
+            org.slf4j.LoggerFactory.getLogger(StructuredEventLogger.class);
+    var originalLevel = slf4j.getLevel();
+    var appender =
+        new ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent>();
+    appender.start();
+    slf4j.addAppender(appender);
+    var logger = new StructuredEventLogger();
+    var id = UUID.randomUUID();
+    try {
+      slf4j.setLevel(ch.qos.logback.classic.Level.INFO);
+      for (var reason :
+          java.util.List.of(
+              StructuredEvent.Reason.OK,
+              StructuredEvent.Reason.NO_HINT,
+              StructuredEvent.Reason.NO_NEW_SEGMENTS)) {
+        assertTrue(logger.tryEmit(() -> requestEvent(reason, id)));
+      }
+      assertTrue(appender.list.isEmpty());
+      for (var reason :
+          java.util.List.of(
+              StructuredEvent.Reason.INVALID_REQUEST, StructuredEvent.Reason.INTERNAL_ERROR)) {
+        assertTrue(logger.tryEmit(() -> requestEvent(reason, id)));
+      }
+      assertEquals(2, appender.list.size());
+      assertEquals(ch.qos.logback.classic.Level.WARN, appender.list.get(0).getLevel());
+      assertEquals(ch.qos.logback.classic.Level.ERROR, appender.list.get(1).getLevel());
+      assertTrue(
+          appender.list.stream()
+              .allMatch(entry -> entry.getFormattedMessage().contains(id.toString())));
+      appender.list.clear();
+      slf4j.setLevel(ch.qos.logback.classic.Level.DEBUG);
+      assertTrue(logger.tryEmit(() -> requestEvent(StructuredEvent.Reason.NO_HINT, id)));
+      assertEquals(1, appender.list.size());
+      assertEquals(ch.qos.logback.classic.Level.DEBUG, appender.list.getFirst().getLevel());
+      assertTrue(appender.list.getFirst().getFormattedMessage().contains("|DEBUG|" + id + "|"));
+      assertTrue(appender.list.getFirst().getFormattedMessage().contains("reason=NO_HINT"));
+    } finally {
+      slf4j.setLevel(originalLevel);
+      slf4j.detachAppender(appender);
+      appender.stop();
+    }
+  }
+
+  private static StructuredEvent requestEvent(StructuredEvent.Reason reason, UUID id) {
+    return new StructuredEvent(
+        StructuredEvent.EventType.CAPTION_REQUEST_COMPLETED,
+        reason,
+        2,
+        Map.of(),
+        null,
+        id,
+        Map.of(StructuredEvent.Timing.API, 2L),
+        null,
+        null,
+        Map.of());
+  }
+
+  @Test
   void saturatedReadableQueueDropsInsteadOfBlockingCaller() throws Exception {
     var entered = new CountDownLatch(1);
     var release = new CountDownLatch(1);
-    var executor =
+    try (var executor =
         new ThreadPoolExecutor(
             1,
             1,
             0,
             TimeUnit.MILLISECONDS,
             new ArrayBlockingQueue<>(1),
-            new ThreadPoolExecutor.DiscardPolicy());
-    executor.setThreadFactory(
-        runnable -> {
-          var thread = new Thread(runnable, "readable-log-test");
-          thread.setDaemon(true);
-          return thread;
-        });
-    var logger =
-        new StructuredEventLogger(
-            null,
-            executor,
-            line -> {
-              entered.countDown();
-              try {
-                release.await();
-              } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-              }
-            });
-    try {
-      assertTrue(logger.tryEmitReadableInfo("incremental", UUID.randomUUID(), Map.of(), "one"));
-      assertTrue(entered.await(1, TimeUnit.SECONDS));
-      assertTrue(logger.tryEmitReadableInfo("incremental", UUID.randomUUID(), Map.of(), "two"));
-      var caller =
-          new FutureTask<>(
-              () ->
-                  logger.tryEmitReadableInfo("incremental", UUID.randomUUID(), Map.of(), "three"));
-      new Thread(caller, "readable-log-caller-test").start();
-      assertTrue(caller.get(1, TimeUnit.SECONDS));
-      assertEquals(1, executor.getQueue().size());
-    } finally {
-      release.countDown();
-      executor.shutdownNow();
+            new ThreadPoolExecutor.DiscardPolicy())) {
+      executor.setThreadFactory(
+          runnable -> {
+            var thread = new Thread(runnable, "readable-log-test");
+            thread.setDaemon(true);
+            return thread;
+          });
+      var logger =
+          new StructuredEventLogger(
+              null,
+              executor,
+              line -> {
+                entered.countDown();
+                try {
+                  release.await();
+                } catch (InterruptedException interrupted) {
+                  Thread.currentThread().interrupt();
+                }
+              });
+      try {
+        assertTrue(logger.tryEmitReadableInfo("incremental", UUID.randomUUID(), Map.of(), "one"));
+        assertTrue(entered.await(1, TimeUnit.SECONDS));
+        assertTrue(logger.tryEmitReadableInfo("incremental", UUID.randomUUID(), Map.of(), "two"));
+        var caller =
+            new FutureTask<>(
+                () ->
+                    logger.tryEmitReadableInfo(
+                        "incremental", UUID.randomUUID(), Map.of(), "three"));
+        new Thread(caller, "readable-log-caller-test").start();
+        assertTrue(caller.get(1, TimeUnit.SECONDS));
+        assertEquals(1, executor.getQueue().size());
+      } finally {
+        release.countDown();
+        executor.shutdownNow();
+      }
     }
   }
 

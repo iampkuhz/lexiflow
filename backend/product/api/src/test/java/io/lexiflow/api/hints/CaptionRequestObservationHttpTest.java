@@ -36,6 +36,8 @@ class CaptionRequestObservationHttpTest {
   @Test
   void mapsHttpOutcomesAndEmitsOneRedactedTerminalPerRequest() throws Exception {
     var logger = (Logger) LoggerFactory.getLogger(StructuredEventLogger.class);
+    var originalLevel = logger.getLevel();
+    logger.setLevel(ch.qos.logback.classic.Level.DEBUG);
     var appender = new ListAppender<ILoggingEvent>();
     appender.start();
     logger.addAppender(appender);
@@ -147,6 +149,7 @@ class CaptionRequestObservationHttpTest {
         }
       }
     } finally {
+      logger.setLevel(originalLevel);
       logger.detachAppender(appender);
       appender.stop();
     }

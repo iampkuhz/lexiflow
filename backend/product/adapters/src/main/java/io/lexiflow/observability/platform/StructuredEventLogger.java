@@ -13,7 +13,7 @@ import org.slf4j.MarkerFactory;
 import tools.jackson.core.JsonGenerator;
 import tools.jackson.core.json.JsonFactory;
 
-/** 将封闭事件写入机器测试 sink 或固定六列控制台；失败不影响业务路径。 */
+/** 将封闭事件写入机器测试 sink 或精简控制台；失败不影响业务路径。 */
 public final class StructuredEventLogger {
   private static final Logger LOG = LoggerFactory.getLogger(StructuredEventLogger.class);
   private static final String READABLE_MARKER = "LEXIFLOW_READABLE_LINE";
@@ -76,7 +76,12 @@ public final class StructuredEventLogger {
     try {
       var event = Objects.requireNonNull(eventSupplier).get();
       if (sink != null) sink.accept(event.level(), encode(event));
-      else emitSlf4j(event, readableLine(event));
+      else if (event.type() == StructuredEvent.EventType.CAPTION_REQUEST_COMPLETED
+          && event.level() == StructuredEvent.Level.INFO) {
+        // 正常字幕请求已由展示事件反馈，统计仅供显式 DEBUG 排查。
+        if (LOG.isDebugEnabled())
+          LOG.debug(MarkerFactory.getMarker(READABLE_MARKER), "{}", readableLine(event, "DEBUG"));
+      } else emitSlf4j(event, readableLine(event, event.level().name()));
       return true;
     } catch (RuntimeException ignored) {
       return false;
@@ -86,10 +91,10 @@ public final class StructuredEventLogger {
   /**
    * 安全写入固定 INFO 级别的可读敏感事件。调用者必须仅传入服务端白名单事件名称。
    *
-   * @param event 固定事件名称。
-   * @param correlationId 真实请求 UUID。
-   * @param fields 已验证且需安全转义的定位字段。
-   * @param body 已确认的显示正文。
+   * @param event 含义：固定事件名称。取值范围：服务端白名单事件。
+   * @param correlationId 含义：真实事件身份，日常字幕不展示。取值范围：已验证的 UUID。
+   * @param fields 含义：已验证且需安全转义的定位字段。取值范围：非 null 的键值映射。
+   * @param body 含义：已确认的显示正文。取值范围：已校验长度的字幕文本。
    * @return 格式化及提交未抛异常时为 true；队列饱和可丢弃，不表示持久化成功。
    */
   public boolean tryEmitReadableInfo(
@@ -123,7 +128,7 @@ public final class StructuredEventLogger {
     }
   }
 
-  private String readableLine(StructuredEvent event) {
+  private String readableLine(StructuredEvent event, String displayLevel) {
     var fields = new java.util.TreeMap<String, String>();
     fields.put("duration_ms", Long.toString(event.durationMs()));
     if (event.reason() != StructuredEvent.Reason.OK) fields.put("reason", event.reason().name());
@@ -151,8 +156,7 @@ public final class StructuredEventLogger {
       event
           .reasonCounts()
           .forEach((key, value) -> fields.put("reason_" + snake(key.name()), value.toString()));
-    UUID correlationId = event.requestId() == null ? UUID.randomUUID() : event.requestId();
-    return formatter.format(event.level().name(), correlationId, event.eventName(), fields, "-");
+    return formatter.format(displayLevel, event.requestId(), event.eventName(), fields, "-");
   }
 
   private static void putCount(
