@@ -136,7 +136,7 @@ class DiscoveryAndLaunchTest(unittest.TestCase):
             self.assertEqual(api.main([]), 0)
         prepare.assert_called_once_with(18081)
         _, command, environment = execute.call_args.args
-        self.assertIn("--args=--server.address=127.0.0.1 --server.port=18081 --lexiflow.segment-analysis.enabled=true --lexiflow.segment-analysis.console=true", command)
+        self.assertIn("--args=--server.address=127.0.0.1 --server.port=18081", command)
         self.assertEqual(environment["SPRING_DATASOURCE_URL"], "jdbc:test")
         self.assertEqual(environment["MODEL_SETTING"], "retained")
         self.assertNotIn("jdbc:test", " ".join(command))
@@ -177,6 +177,14 @@ class DiscoveryAndLaunchTest(unittest.TestCase):
         for argument in ("--port", "--database-url"):
             with self.subTest(argument=argument), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 api.main([argument, "18081"])
+
+    def test_caption_debug_flag_is_accepted_as_default_behavior(self):
+        with patch.object(api, "command_environment", return_value={"JDBC_URL": "jdbc:test"}), patch.object(api, "prepare_port"), patch.object(api.os, "execvpe") as execute, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(api.main(["--caption-debug"]), 0)
+        command = execute.call_args.args[1]
+        self.assertIn("--server.address=127.0.0.1", command[-1])
+        self.assertNotIn("--caption-debug", command[-1])
+        self.assertNotIn("segment-analysis.enabled=true", command[-1])
 
     def test_invalid_java_does_not_touch_existing_listener(self):
         with patch.object(api, "command_environment", side_effect=api.JavaRuntimeError("missing Java")), patch.object(api, "prepare_port") as prepare, patch.object(api.os, "execvpe") as execute, contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):

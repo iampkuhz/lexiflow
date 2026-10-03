@@ -23,7 +23,7 @@ const preferences = new LocalPreferences({
 const inFlight = new Map<string, AbortController>();
 const DEBUG_URL = API_URL.replace(/caption-hints$/, "caption-debug");
 type DebugEvent = { eventId: string; event: "video-start" | "incremental" | "final" | "interrupted";
-  topicKey: string; videoId: string | null; subtitleKey: string | null; positionMs: number | null; text: string };
+  topicKey: string; videoId: string; subtitleKey: string; positionMs: number; text: string };
 const debugQueue: Array<{ event: DebugEvent; bytes: number }> = [];
 const DEBUG_MAX_EVENTS = 32, DEBUG_MAX_BYTES = 32 * 1024;
 let debugBytes = 0, debugDropped = 0, debugDraining = false;
@@ -42,9 +42,9 @@ function validDebugEvent(value: unknown): value is DebugEvent {
   const item = value as DebugEvent;
   return isStableId(item.eventId) && ["video-start", "incremental", "final", "interrupted"].includes(item.event) &&
     typeof item.topicKey === "string" && item.topicKey.length > 0 && item.topicKey.length <= 128 &&
-    (item.videoId === null || (typeof item.videoId === "string" && /^[A-Za-z0-9_-]{11}$/.test(item.videoId))) &&
-    (item.subtitleKey === null || (typeof item.subtitleKey === "string" && item.subtitleKey.length > 0 && item.subtitleKey.length <= 128)) &&
-    (item.positionMs === null || (Number.isSafeInteger(item.positionMs) && item.positionMs >= 0)) &&
+    typeof item.videoId === "string" && /^[A-Za-z0-9_-]{11}$/.test(item.videoId) &&
+    typeof item.subtitleKey === "string" && item.subtitleKey.length > 0 && item.subtitleKey.length <= 128 &&
+    Number.isSafeInteger(item.positionMs) && item.positionMs >= 0 &&
     typeof item.text === "string" && item.text.length <= 16384;
 }
 async function withDeadline<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {

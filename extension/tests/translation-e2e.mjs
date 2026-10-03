@@ -10,6 +10,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import { openActionPopup } from "./action-popup.mjs";
 import { createApiLaunchSpec } from "./e2e-runtime.mjs";
+import { resolveBuildIdentity } from "../../ops/release/version.mjs";
 import { createExtensionZip } from "../scripts/release.mjs";
 
 const extensionRoot = resolve(import.meta.dirname, "..");
@@ -148,7 +149,7 @@ try {
   await waitForApi(api);
   userDataDir = await mkdtemp(resolve(tmpdir(), "lexiflow-extension-e2e-"));
   const testExtensionPath = resolve(userDataDir, "extension");
-  const packaged = await createExtensionZip({ root: extensionRoot });
+  const packaged = await createExtensionZip({ root: extensionRoot, buildIdentity: resolveBuildIdentity(repositoryRoot) });
   await mkdir(testExtensionPath, { recursive: true });
   for (const [name, bytes] of Object.entries(packaged.unzip())) {
     const target = resolve(testExtensionPath, name);

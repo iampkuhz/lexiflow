@@ -33,9 +33,10 @@ case "$mode" in
     unset secret
     export SPRING_DATASOURCE_PASSWORD=$password
     unset password
-    debug=false
-    [ "$mode" != api-debug ] || debug=true
-    exec java -Xms256m -Xmx768m -Dspring.datasource.url=jdbc:postgresql://postgres:5432/lexiflow?currentSchema=lexiflow_release -Dspring.datasource.username=lexiflow -Dlexiflow.runtime.mode=formal -Dlexiflow.segment-analysis.enabled="$debug" -Dlexiflow.segment-analysis.console="$debug" -Dlexiflow.segment-analysis.path=/tmp/lexiflow-private/caption-segments.jsonl -Dserver.address=0.0.0.0 -Dserver.port=8080 -jar /app/lexiflow-api.jar
+    analysis=${LEXIFLOW_SEGMENT_ANALYSIS_ENABLED:-false}
+    case "$analysis" in true|false) ;; *) fail ;; esac
+    # 两个命令名启用相同的可读日志；该默认行为不会开启 JSONL 分析。
+    exec java -Xms256m -Xmx768m -Dspring.datasource.url=jdbc:postgresql://postgres:5432/lexiflow?currentSchema=lexiflow_release -Dspring.datasource.username=lexiflow -Dlexiflow.runtime.mode=formal -Dlexiflow.caption-debug.enabled=true -Dlexiflow.segment-analysis.enabled="$analysis" -Dlexiflow.segment-analysis.path=/tmp/lexiflow-private/caption-segments.jsonl -Dserver.address=0.0.0.0 -Dserver.port=8080 -jar /app/lexiflow-api.jar
     ;;
   initialize)
     [ "$#" -eq 0 ] || fail

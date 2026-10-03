@@ -3,7 +3,9 @@ package io.lexiflow.observability.platform;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,13 +17,28 @@ import tools.jackson.core.json.JsonFactory;
 public final class StructuredEventLogger {
   private static final Logger LOG = LoggerFactory.getLogger(StructuredEventLogger.class);
   private static final String READABLE_MARKER = "LEXIFLOW_READABLE_LINE";
+  private static final Executor READABLE_OUTPUT =
+      new java.util.concurrent.ThreadPoolExecutor(
+          1,
+          1,
+          0,
+          java.util.concurrent.TimeUnit.MILLISECONDS,
+          new java.util.concurrent.ArrayBlockingQueue<>(256),
+          runnable -> {
+            var thread = new Thread(runnable, "lexiflow-readable-log");
+            thread.setDaemon(true);
+            return thread;
+          },
+          new java.util.concurrent.ThreadPoolExecutor.DiscardPolicy());
   private final BiConsumer<StructuredEvent.Level, String> sink;
+  private final Executor readableExecutor;
+  private final Consumer<String> readableSink;
   private final JsonFactory factory = new JsonFactory();
   private final ReadableLogFormatter formatter = new ReadableLogFormatter();
 
   /** 使用固定 SLF4J sink。 */
   public StructuredEventLogger() {
-    this(null);
+    this(null, READABLE_OUTPUT, line -> emitReadableSlf4j(StructuredEvent.Level.INFO, line));
   }
 
   /**
@@ -30,7 +47,23 @@ public final class StructuredEventLogger {
    * @param sink 含义：接收完整事件 JSON 行的输出函数。取值范围：null 表示固定 SLF4J。
    */
   public StructuredEventLogger(BiConsumer<StructuredEvent.Level, String> sink) {
+    this(sink, READABLE_OUTPUT, line -> emitReadableSlf4j(StructuredEvent.Level.INFO, line));
+  }
+
+  /**
+   * 注入可读日志执行器与 sink，便于验证队列饱和和 sink 故障隔离。
+   *
+   * @param sink 含义：结构化事件测试输出。取值范围：null 表示禁用机器事件 sink。
+   * @param readableExecutor 含义：可读事件执行器。取值范围：非 null。
+   * @param readableSink 含义：消费格式化可读行的函数。取值范围：非 null。
+   */
+  public StructuredEventLogger(
+      BiConsumer<StructuredEvent.Level, String> sink,
+      Executor readableExecutor,
+      Consumer<String> readableSink) {
     this.sink = sink;
+    this.readableExecutor = Objects.requireNonNull(readableExecutor);
+    this.readableSink = Objects.requireNonNull(readableSink);
   }
 
   /**
@@ -57,13 +90,20 @@ public final class StructuredEventLogger {
    * @param correlationId 真实请求 UUID。
    * @param fields 已验证且需安全转义的定位字段。
    * @param body 已确认的显示正文。
-   * @return 写出成功时为 true，否则为 false。
+   * @return 格式化及提交未抛异常时为 true；队列饱和可丢弃，不表示持久化成功。
    */
   public boolean tryEmitReadableInfo(
       String event, UUID correlationId, Map<String, String> fields, String body) {
     try {
       var line = formatter.format("INFO", correlationId, event, fields, body);
-      emitReadableSlf4j(StructuredEvent.Level.INFO, line);
+      readableExecutor.execute(
+          () -> {
+            try {
+              readableSink.accept(line);
+            } catch (RuntimeException ignored) {
+              // 日志后端故障不能回流到字幕请求，也不应打印带正文的异常。
+            }
+          });
       return true;
     } catch (RuntimeException ignored) {
       return false;
