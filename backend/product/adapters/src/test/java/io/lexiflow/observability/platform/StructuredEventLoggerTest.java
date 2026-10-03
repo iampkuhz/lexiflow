@@ -5,6 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -15,6 +19,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import tools.jackson.core.JsonToken;
 import tools.jackson.core.json.JsonFactory;
 
@@ -83,6 +88,44 @@ class StructuredEventLoggerTest {
     assertTrue(logger.tryEmitReadableInfo("incremental", UUID.randomUUID(), Map.of(), "caption"));
     org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> submitted.get().run());
     assertTrue(attempted.get());
+  }
+
+  @Test
+  void readableDebugRetainsVersionAndCountersWithoutExpandingInfoOutput() {
+    var output = (Logger) LoggerFactory.getLogger(StructuredEventLogger.class);
+    var previous = output.getLevel();
+    var appender = new ListAppender<ILoggingEvent>();
+    var event =
+        new StructuredEvent(
+            StructuredEvent.EventType.CAPTION_REQUEST_COMPLETED,
+            StructuredEvent.Reason.OK,
+            1,
+            Map.of(StructuredEvent.Count.CACHE_MISSES, 0L),
+            2L,
+            UUID.randomUUID(),
+            Map.of(StructuredEvent.Timing.API, 0L),
+            null,
+            null,
+            Map.of());
+    appender.start();
+    output.addAppender(appender);
+    try {
+      var logger = new StructuredEventLogger();
+      output.setLevel(Level.INFO);
+      assertTrue(logger.tryEmit(() -> event));
+      var info = appender.list.getLast().getFormattedMessage();
+      assertFalse(info.contains("lexicon_version="));
+      assertFalse(info.contains("count_cache_misses="));
+      output.setLevel(Level.DEBUG);
+      assertTrue(logger.tryEmit(() -> event));
+      var debug = appender.list.getLast().getFormattedMessage();
+      assertTrue(debug.contains("lexicon_version=2"));
+      assertTrue(debug.contains("count_cache_misses=0"));
+    } finally {
+      output.setLevel(previous);
+      output.detachAppender(appender);
+      appender.stop();
+    }
   }
 
   @Test

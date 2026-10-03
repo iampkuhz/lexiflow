@@ -133,6 +133,7 @@ final class PipelineRuntimeFixture implements AutoCloseable {
                 "--lexiflow.runtime.mode=formal",
                 "--lexiflow.segment-analysis.path=" + analysis,
                 "--lexiflow.segment-analysis.console=false",
+                "--logging.level.io.lexiflow.observability.platform.StructuredEventLogger=DEBUG",
                 "--server.address=127.0.0.1",
                 "--server.port=" + port,
                 "--spring.datasource.url=" + jdbcUrl)
@@ -226,7 +227,7 @@ final class PipelineRuntimeFixture implements AutoCloseable {
   JsonNode awaitRequestEvent(String requestId) throws Exception {
     var deadline = Instant.now().plusSeconds(3);
     while (Instant.now().isBefore(deadline)) {
-      for (var event : structuredEvents(Files.exists(apiLog) ? Files.readString(apiLog) : "")) {
+      for (var event : readableEvents(Files.exists(apiLog) ? Files.readString(apiLog) : "")) {
         if (event.path("request_id").isString()
             && requestId.equals(event.path("request_id").stringValue())
             && "caption.request.completed".equals(event.path("event").stringValue())) {
@@ -362,22 +363,39 @@ final class PipelineRuntimeFixture implements AutoCloseable {
   record TrackedResponse(JsonNode body, String requestId) {}
 
   private List<JsonNode> importEvents(String output) throws Exception {
-    return structuredEvents(output).stream()
+    return readableEvents(output).stream()
         .filter(event -> event.path("event").stringValue().startsWith("lexicon.import."))
         .toList();
   }
 
-  private List<JsonNode> structuredEvents(String output) throws Exception {
+  /** 只读取最新六列事件；测试保留原有计数和版本断言，不兼容旧控制台格式。 */
+  static List<JsonNode> readableEvents(String output) {
     var result = new java.util.ArrayList<JsonNode>();
+    var mapper = new ObjectMapper();
     for (var line : output.lines().toList()) {
-      var brace = line.indexOf('{');
-      if (brace < 0) continue;
-      var candidate = line.substring(brace);
-      if (!candidate.contains("\"schema\":\"lexiflow.event.v1\"")) continue;
+      var columns = line.split("\\|", -1);
+      if (columns.length != 6
+          || !(columns[3].equals("caption.request.completed")
+              || columns[3].startsWith("lexicon.import."))) continue;
       try {
-        result.add(json.readTree(candidate));
-      } catch (Exception malformed) {
-        throw new AssertionError("malformed structured event line: " + line, malformed);
+        var event = mapper.createObjectNode();
+        event.put("event", columns[3]);
+        event.put("request_id", UUID.fromString(columns[2]).toString());
+        var counts = event.putObject("counts");
+        if (!columns[4].equals("-")) {
+          for (var field : columns[4].split(";")) {
+            var pair = field.split("=", 2);
+            if (pair.length != 2) throw new IllegalArgumentException("malformed event field");
+            if (pair[0].startsWith("count_"))
+              counts.put(pair[0].substring(6), Long.parseLong(pair[1]));
+            else if (pair[0].equals("lexicon_version"))
+              event.put("lexicon_version", Long.parseLong(pair[1]));
+            else if (pair[0].equals("reason")) event.put("reason", pair[1]);
+          }
+        }
+        result.add(event);
+      } catch (IllegalArgumentException malformed) {
+        throw new AssertionError("malformed readable event", malformed);
       }
     }
     return List.copyOf(result);
