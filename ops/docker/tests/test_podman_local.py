@@ -81,7 +81,9 @@ elif args[:1]==['ps'] or args[:2] in [['volume','ls'],['network','ls']]:
     elif mode=='owned-pg' and '-a' in args:
         state=json.loads(Path(KIT,'state.json').read_text()); print(json.dumps([{'Labels':{'com.docker.compose.project':state['project'],'com.docker.compose.service':'postgres','lexiflow.installation':state['id']}}]))
     elif args[:1]==['ps']:
-        state=json.loads(Path(KIT,'state.json').read_text()); print(json.dumps([{'Id':'a'*64,'Labels':{'com.docker.compose.project':state['project'],'com.docker.compose.service':'api','lexiflow.installation':state['id']}}]))
+        state=json.loads(Path(KIT,'state.json').read_text())
+        runtime=json.loads(runtime_file.read_text()) if runtime_file.exists() else None
+        print(json.dumps([{'Id':runtime['containerId'],'Labels':{'com.docker.compose.project':state['project'],'com.docker.compose.service':'api','lexiflow.installation':state['id']}}] if runtime else []))
     else: print('[]')
 elif args[:1]==['inspect']:
     print(json.loads(runtime_file.read_text())['id'])
@@ -104,7 +106,13 @@ elif args[:1]==['compose'] and 'up' in args and args[-1]=='api':
     image_id=next(line.split('=',1)[1] for line in env.splitlines() if line.startswith('LEXIFLOW_API_IMAGE='))
     if mode=='api-start-fail':
         Path(MODE).write_text(''); sys.exit(8)
-    runtime_file.write_text(json.dumps(images[image_id]))
+    if mode=='reuse-container-once':
+        Path(MODE).write_text(''); sys.exit(0)
+    previous=json.loads(runtime_file.read_text()) if runtime_file.exists() else None
+    if previous and previous['id']==image_id and '--force-recreate' not in args: sys.exit(0)
+    generation=(previous or {}).get('generation',0)+1
+    current={**images[image_id],'generation':generation,'containerId':hashlib.sha256((image_id+str(generation)).encode()).hexdigest()}
+    runtime_file.write_text(json.dumps(current))
 elif args[:1]==['compose'] and 'logs' in args: print('synthetic-caption-diagnostic')
 elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.exit(8)
 '''.replace("PYTHON", os.sys.executable).replace("CALLS", repr(str(self.calls))).replace("MODE", repr(str(self.mode))).replace("KIT", repr(str(self.kit)))
@@ -211,6 +219,7 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
         marker=self.kit/'data/synthetic-marker';marker.write_text('preserve')
         before=json.loads((self.kit/'state.json').read_text())
+        old_container=json.loads((self.root/'runtime.json').read_text())['containerId']
         (self.repo/'ops/release/version.txt').write_text('2.0.1-SNAPSHOT\n')
         first_upgrade_call = len(self.calls.read_text().splitlines())
         self.mode.write_text('')
@@ -220,7 +229,7 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.assertIn('构建 API 镜像', result.stdout)
         self.assertNotIn('构建词库工具镜像', result.stdout)
         compose=[row for row in calls if row[:1]==['compose']]
-        self.assertTrue(any('up' in row and '--no-deps' in row and row[-1]=='api' for row in compose),compose)
+        self.assertTrue(any('up' in row and '--no-deps' in row and '--force-recreate' in row and row[-1]=='api' for row in compose),compose)
         self.assertFalse(any('initialize' in row for row in calls))
         self.assertFalse(any('up' in row and row[-1]=='postgres' for row in compose))
         after=json.loads((self.kit/'state.json').read_text())
@@ -230,8 +239,39 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.assertEqual(json.loads((self.kit/'extension/build-identity.json').read_text()),after['buildIdentity'])
         self.assertEqual(after['lastOperation']['buildId'],after['buildIdentity']['buildId'])
         self.assertEqual(after['datasetIdentity'],before['datasetIdentity'])
+        new_container=json.loads((self.root/'runtime.json').read_text())['containerId']
+        self.assertNotEqual(old_container,new_container)
+        self.assertIn(f'{old_container} -> {new_container}',result.stdout)
+        noop_offset=len(self.calls.read_text().splitlines())
         result=self.invoke('upgrade');self.assertEqual(result.returncode,0,result.stderr)
         self.assertIn('无需升级',result.stdout)
+        self.assertEqual(json.loads((self.root/'runtime.json').read_text())['containerId'],new_container)
+        self.assertFalse(any('--force-recreate' in json.loads(line) for line in self.calls.read_text().splitlines()[noop_offset:]))
+
+    def test_upgrade_rejects_successful_compose_that_reuses_old_api_container(self):
+        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        before=json.loads((self.kit/'state.json').read_text())
+        extension=(self.kit/'extension/build-identity.json').read_bytes()
+        (self.repo/'ops/release/version.txt').write_text('2.0.1-SNAPSHOT\n')
+        self.mode.write_text('reuse-container-once')
+        offset=len(self.calls.read_text().splitlines())
+        result=self.invoke('upgrade')
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('UPGRADE_API_NOT_RECREATED',result.stderr)
+        self.assertNotIn('升级成功',result.stdout)
+        self.assertEqual(json.loads((self.kit/'state.json').read_text()),before)
+        self.assertEqual((self.kit/'extension/build-identity.json').read_bytes(),extension)
+        self.assertEqual(json.loads((self.root/'runtime.json').read_text())['id'],before['apiImage'])
+        records=[json.loads(p.read_text()) for p in (self.kit/'installation-records').glob('*.json')]
+        upgrades=[r for r in records if r['kind']=='upgrade']
+        self.assertEqual([r['status'] for r in upgrades],['FAIL'])
+        calls=[json.loads(line) for line in self.calls.read_text().splitlines()[offset:]]
+        activations=[row for row in calls if row[:1]==['compose'] and 'up' in row]
+        self.assertEqual(len(activations),2)
+        self.assertTrue(all('--force-recreate' in row and '--no-deps' in row and row[-1]=='api' for row in activations))
+        self.assertFalse(any('initialize' in row for row in calls))
+        result=self.invoke('upgrade');self.assertEqual(result.returncode,0,result.stderr)
+        self.assertIn('升级成功',result.stdout)
 
     def test_upgrade_build_and_start_failures_restore_then_retry(self):
         result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
