@@ -1285,7 +1285,7 @@ checks:
   - ops/release/manifest-check.mjs
   executable: node
   cwd: .
-  timeout_seconds: 90
+  timeout_seconds: 150
   scope: repository-baseline
   triggers:
   - path: ops/release/manifest.mjs
@@ -1344,7 +1344,7 @@ checks:
   - ops/release/manifest-check.mjs
   executable: node
   cwd: .
-  timeout_seconds: 90
+  timeout_seconds: 150
   scope: change-targeted
   triggers:
   - path: ops/release/manifest.mjs

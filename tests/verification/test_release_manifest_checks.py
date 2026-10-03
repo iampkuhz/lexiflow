@@ -46,6 +46,7 @@ class ReleaseManifestCheckTest(unittest.TestCase):
         base, change = self.by_id[BASE], self.by_id[BASE + "-on-change"]
         for key in (
             "command",
+            "timeout_seconds",
             "required_environment",
             "input_paths",
             "result_contract",
@@ -68,6 +69,13 @@ class ReleaseManifestCheckTest(unittest.TestCase):
         for name in base["input_paths"]:
             selected = select_checks_for_changes(self.checks, [name])
             self.assertIn(BASE + "-on-change", {c["check_id"] for c in selected}, name)
+
+    def test_manifest_suite_has_bounded_inner_and_outer_budgets(self):
+        """多 fixture 清单测试保留完整执行，外层预算留出进程收尾时间。"""
+        source = (ROOT / "ops/release/manifest-check.mjs").read_text()
+        self.assertIn("timeoutMs: 120_000", source)
+        self.assertEqual(150, self.by_id[BASE]["timeout_seconds"])
+        self.assertEqual(150, self.by_id[BASE + "-on-change"]["timeout_seconds"])
 
     def test_each_input_is_hash_bound(self):
         """每项制品工具输入变更都改变冻结哈希，包括许可说明。"""
