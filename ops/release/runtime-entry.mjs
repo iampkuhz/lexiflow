@@ -3,7 +3,7 @@ import { lstat, link, open, readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createManifest, serializeManifest, verifyContainedFile } from './manifest.mjs';
-import { checkReleaseSource } from './version.mjs';
+import { checkReleaseSource, resolveBuildIdentity, assertBuildIdentityMatches } from './version.mjs';
 
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const fail = (code) => { throw new Error(code); };
@@ -74,7 +74,7 @@ async function makeScript(body, manifest) {
 }
 
 function sourceIdentity(repoRoot) {
-  try { return checkReleaseSource(repoRoot); } catch { fail('RELEASE_SOURCE_REJECTED'); }
+  try { checkReleaseSource(repoRoot); return resolveBuildIdentity(repoRoot); } catch { fail('RELEASE_SOURCE_REJECTED'); }
 }
 async function assertNoSymlinkPath(target) {
   const absolute = path.resolve(target); let cursor = path.parse(absolute).root;
@@ -116,7 +116,7 @@ export async function generateRuntimeEntry({ repoRoot, descriptor, artifactRoot,
   const manifest = createManifest({ ...descriptor, artifacts: [...descriptor.artifacts, artifact] }, first);
   if (await makeScript(lifecycleBody, manifest) !== script) fail('RUNTIME_TEMPLATE_INVALID');
   const second = sourceIdentity(sourceRoot);
-  if (second.sourceCommit !== first.sourceCommit || second.softwareVersion !== first.softwareVersion) fail('RELEASE_SOURCE_CHANGED');
+  try { assertBuildIdentityMatches(second, first); } catch { fail('RELEASE_SOURCE_CHANGED'); }
   const target = path.join(root, 'lexiflow.sh');
   if (await existingSame(target, bytes)) return { artifact, manifest, script };
   const temp = path.join(root, `.lexiflow-${randomUUID()}.tmp`);

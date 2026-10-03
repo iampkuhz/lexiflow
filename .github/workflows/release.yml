@@ -1,0 +1,157 @@
+name: Release validation
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      submission_id:
+        description: Native Formal submission UUID
+        required: true
+        type: string
+      release_tag:
+        description: Prepared release tag
+        required: true
+        type: string
+      publish_confirmation:
+        description: Explicitly enter PUBLISH
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# The dedicated Mac is unique; tag preparation and manually approved promotion
+# must never race, including for different tags.
+concurrency:
+  group: lexiflow-release-host
+  cancel-in-progress: false
+
+jobs:
+  source:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      commit: ${{ steps.identity.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+      - name: Verify exact release tag source
+        id: identity
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node ops/release/version.mjs --tag "$RELEASE_TAG"
+          printf 'commit=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Require dedicated runner readiness
+        env:
+          RUNNER_READY: ${{ vars.LEXIFLOW_RELEASE_RUNNER_READY }}
+        run: |
+          test "$RUNNER_READY" = true
+
+  prepare:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: source
+    runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
+    environment: lexiflow-release-validation
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    env:
+      LEXIFLOW_JAVA_HOME: ${{ vars.LEXIFLOW_RELEASE_JAVA_HOME }}
+      LEXIFLOW_POSTGRES_TEST_JDBC_URL: ${{ secrets.LEXIFLOW_RELEASE_TEST_JDBC_URL }}
+      LEXIFLOW_REDIS_TEST_ENDPOINT: ${{ vars.LEXIFLOW_RELEASE_TEST_REDIS_ENDPOINT }}
+      LEXIFLOW_RELEASE_ARM64_DOCKER_HOST: ${{ vars.LEXIFLOW_RELEASE_ARM64_DOCKER_HOST }}
+      LEXIFLOW_RELEASE_GRADLE_CACHE: ${{ vars.LEXIFLOW_RELEASE_GRADLE_CACHE }}
+      LEXIFLOW_RELEASE_NPM_CACHE: ${{ vars.LEXIFLOW_RELEASE_NPM_CACHE }}
+    steps:
+      # A provisioned pinned checkout is the only source/evidence root. Never
+      # run actions/checkout or clean in a receipt-bearing workspace.
+      - name: Refuse unsafe or changed stable checkout
+        env:
+          WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
+          EXPECTED_COMMIT: ${{ needs.source.outputs.commit }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          test -n "$WORKSPACE"
+          test -d "$WORKSPACE/.git"
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          test "$(git -C "$WORKSPACE" rev-parse --show-toplevel)" = "$WORKSPACE"
+          test "$(git -C "$WORKSPACE" rev-parse HEAD)" = "$EXPECTED_COMMIT"
+          test -z "$(git -C "$WORKSPACE" status --porcelain=v1 --untracked-files=all)"
+          test ! -e "$WORKSPACE/tmp/quality/release-workflow/handoff.json"
+          test ! -d "$WORKSPACE/tmp/quality/release-workflow"
+          cd "$WORKSPACE"
+          node ops/release/version.mjs --tag "$RELEASE_TAG"
+          podman info >/dev/null
+          podman compose version
+      - name: Build and verify one complete ARM64 release candidate
+        env:
+          WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
+          REQUEST_FILE: ${{ vars.LEXIFLOW_RELEASE_REQUEST_FILE }}
+        run: |
+          test -n "$REQUEST_FILE"
+          cd "$WORKSPACE"
+          node ops/release/workflow.mjs prepare "$REQUEST_FILE"
+      - name: Full Change Verify on the same candidate and checkout
+        env:
+          WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
+        run: |
+          cd "$WORKSPACE"
+          python3 scripts/check_changes.py
+      - name: Full Repository Verify on the same candidate and checkout
+        env:
+          WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
+        run: |
+          cd "$WORKSPACE"
+          python3 scripts/check_repository.py
+      # Success here leaves a private native handoff; only distinct local
+      # Codex actors can submit, validate, review and check Formal Gate.
+
+  promotion-dry-check:
+    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && inputs.publish_confirmation == 'PUBLISH' && inputs.release_tag == github.ref_name
+    runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
+    environment: lexiflow-release-validation
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Reconsume immutable native evidence in its original checkout
+        env:
+          WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
+          SUBMISSION_ID: ${{ inputs.submission_id }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          test -n "$WORKSPACE"
+          test -d "$WORKSPACE/.git"
+          cd "$WORKSPACE"
+          node ops/release/workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG"
+
+  promotion:
+    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && inputs.publish_confirmation == 'PUBLISH' && inputs.release_tag == github.ref_name
+    needs: promotion-dry-check
+    runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
+    environment: lexiflow-release-promotion
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - name: Publish only after protected approval and fresh native evidence check
+        env:
+          WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
+          SUBMISSION_ID: ${{ inputs.submission_id }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LEXIFLOW_RELEASE_CONFIG_TOKEN: ${{ secrets.LEXIFLOW_RELEASE_CONFIG_TOKEN }}
+        run: |
+          test -n "$WORKSPACE"
+          test -d "$WORKSPACE/.git"
+          cd "$WORKSPACE"
+          node ops/release/workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish

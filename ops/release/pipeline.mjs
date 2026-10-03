@@ -5,9 +5,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildCandidateImages } from './build-execution.mjs';
 import { assembleReleaseCandidate } from './candidate.mjs';
+import { verifyReleaseCandidate } from './verified-candidate.mjs';
 
 const MAX_REQUEST_BYTES = 2_000_000;
-const OPERATIONS = new Set(['images', 'assemble']);
+const OPERATIONS = new Set(['images', 'assemble', 'verify']);
 
 async function readRequest(requestPath) {
   if (!path.isAbsolute(requestPath) || /[\u0000-\u001f\u007f]/.test(requestPath)) throw new Error('PIPELINE_REQUEST_INVALID');
@@ -48,21 +49,26 @@ function emit(payload) { process.stdout.write(`${JSON.stringify(payload)}\n`); }
 export async function runPipeline(argv) {
   const mode = argv.length >= 1 && OPERATIONS.has(argv[0]) ? argv[0] : null;
   if (argv.length !== 2 || !mode || !path.isAbsolute(argv[1])) {
-    emit({ status: 'FAIL', scope: 'candidate-only', operation: mode, reason: 'PIPELINE_ARGUMENTS_INVALID' });
+    emit({ status: 'FAIL', scope: mode === 'verify' ? 'candidate-integrity-only' : 'candidate-only', operation: mode, reason: 'PIPELINE_ARGUMENTS_INVALID' });
     return 1;
   }
   let request;
   try { request = await readRequest(argv[1]); }
   catch {
-    emit({ status: 'FAIL', scope: 'candidate-only', operation: mode, reason: 'PIPELINE_REQUEST_INVALID' });
+    emit({ status: 'FAIL', scope: mode === 'verify' ? 'candidate-integrity-only' : 'candidate-only', operation: mode, reason: 'PIPELINE_REQUEST_INVALID' });
     return 1;
   }
   try {
-    const result = mode === 'images' ? await buildCandidateImages(request) : await assembleReleaseCandidate(request);
-    emit({ status: 'PASS', scope: 'candidate-only', operation: mode, candidateDirectory: result.candidateDirectory });
+    if (mode === 'verify') {
+      const proof = await verifyReleaseCandidate(request);
+      emit({ status: 'PASS', scope: 'candidate-integrity-only', operation: 'verify', ...proof });
+    } else {
+      const result = mode === 'images' ? await buildCandidateImages(request) : await assembleReleaseCandidate(request);
+      emit({ status: 'PASS', scope: 'candidate-only', operation: mode, candidateDirectory: result.candidateDirectory });
+    }
     return 0;
   } catch {
-    emit({ status: 'FAIL', scope: 'candidate-only', operation: mode, reason: 'PIPELINE_OPERATION_FAILED' });
+    emit({ status: 'FAIL', scope: mode === 'verify' ? 'candidate-integrity-only' : 'candidate-only', operation: mode, reason: 'PIPELINE_OPERATION_FAILED' });
     return 1;
   }
 }

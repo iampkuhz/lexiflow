@@ -3,7 +3,8 @@ import { constants, createReadStream } from 'node:fs';
 import { lstat } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import path from 'node:path';
-import { checkReleaseSource } from './version.mjs';
+import { checkReleaseSource, resolveBuildIdentity, validateBuildIdentity, assertBuildIdentityMatches } from './version.mjs';
+import { verifyExtensionIdentity } from './embedded-identity.mjs';
 
 const roles = new Set(['api-image', 'postgres-image', 'compose', 'dataset', 'extension', 'sql', 'license', 'runtime-entry']);
 const platforms = new Set(['linux/amd64', 'linux/arm64']);
@@ -52,8 +53,9 @@ function validUrl(value) {
 }
 
 function validateDescriptor(descriptor, source) {
-  if (!keys(descriptor, ['schemaVersion', 'softwareVersion', 'sourceCommit', 'apiContract', 'sqlVersion', 'dataset', 'platforms', 'artifacts', 'licenses'])) bad('DESCRIPTOR_SCHEMA');
+  if (!keys(descriptor, ['schemaVersion', 'buildIdentity', 'softwareVersion', 'sourceCommit', 'apiContract', 'sqlVersion', 'dataset', 'platforms', 'artifacts', 'licenses'])) bad('DESCRIPTOR_SCHEMA');
   if (descriptor.schemaVersion !== 1 || descriptor.softwareVersion !== source.softwareVersion || descriptor.sourceCommit !== source.sourceCommit) bad('SOURCE_IDENTITY_MISMATCH');
+  try { validateBuildIdentity(source); assertBuildIdentityMatches(descriptor.buildIdentity, source); if (source.dirty) throw new Error(); } catch { bad('SOURCE_IDENTITY_MISMATCH'); }
   if (typeof descriptor.apiContract !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(descriptor.apiContract) || typeof descriptor.sqlVersion !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(descriptor.sqlVersion)) bad('DESCRIPTOR_SCHEMA');
   const dataset = descriptor.dataset;
   if (!keys(dataset, ['releaseId', 'preparationId', 'ruleId']) || Object.values(dataset).some((v) => typeof v !== 'string' || !ids.test(v))) bad('DESCRIPTOR_SCHEMA');
@@ -119,15 +121,19 @@ export function createManifest(descriptor, source) {
   }).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
   licenses.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   const canonicalLicenses = licenses.map((item) => ({ id: item.id, component: item.component, licenseId: item.licenseId, licenseName: item.licenseName, sourceUrl: item.sourceUrl, noticePath: item.noticePath, noticeBytes: item.noticeBytes, noticeSha256: item.noticeSha256 }));
-  return { schemaVersion: 1, softwareVersion: source.softwareVersion, sourceCommit: source.sourceCommit, apiContract: descriptor.apiContract, sqlVersion: descriptor.sqlVersion, dataset: canonicalDataset, platforms: [...descriptor.platforms].sort(), artifacts, licenses: canonicalLicenses };
+  return { schemaVersion: 1, buildIdentity: { ...source }, softwareVersion: source.softwareVersion, sourceCommit: source.sourceCommit, apiContract: descriptor.apiContract, sqlVersion: descriptor.sqlVersion, dataset: canonicalDataset, platforms: [...descriptor.platforms].sort(), artifacts, licenses: canonicalLicenses };
 }
 
 export async function buildManifest({ repoRoot, descriptor, artifactRoot }) {
   if (typeof artifactRoot !== 'string' || !artifactRoot || /[\u0000\r\n]/.test(artifactRoot)) bad('INVALID_ARTIFACT_ROOT');
   let source;
-  try { source = checkReleaseSource(repoRoot); } catch { bad('RELEASE_SOURCE_REJECTED'); }
+  try { checkReleaseSource(repoRoot); source = resolveBuildIdentity(repoRoot); } catch { bad('RELEASE_SOURCE_REJECTED'); }
   const manifest = createManifest(descriptor, source);
   for (const item of manifest.artifacts) await verifyContainedFile(artifactRoot, item.path, item.bytes, item.sha256);
+  const extension = manifest.artifacts.find(item => item.role === 'extension');
+  await verifyExtensionIdentity(path.join(artifactRoot, extension.path), source);
+  await verifyContainedFile(artifactRoot, extension.path, extension.bytes, extension.sha256);
+  try { checkReleaseSource(repoRoot); assertBuildIdentityMatches(resolveBuildIdentity(repoRoot), source); } catch { bad('RELEASE_SOURCE_CHANGED'); }
   return manifest;
 }
 

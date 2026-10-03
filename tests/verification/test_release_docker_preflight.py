@@ -21,7 +21,7 @@ class ReleaseDockerPreflightTest(unittest.TestCase):
     """验证只读 Docker 预检、固定输出及身份漂移。"""
 
     def setUp(self) -> None:
-        self.root = Path(tempfile.mkdtemp(prefix="lexiflow-preflight-test-")).resolve()
+        self.root = Path(tempfile.mkdtemp(prefix="lfpf-")).resolve()
         self._cleanup_diagnostic: str | None = None
         self.addCleanup(self._cleanup_fixture)
         self.bin = self.root / "bin"
@@ -320,6 +320,7 @@ elif "compose" in args:
         self.assertEqual(str(self.socket_path), result.binding.socket_path)
         second = self.root / "replacement.sock"
         replacement = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.addCleanup(replacement.close)
         second.unlink(missing_ok=True)
         replacement.bind(str(second))
         alias.unlink()

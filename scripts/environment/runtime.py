@@ -104,6 +104,14 @@ def diagnose(
             info = detect_postgres_test_jdbc_url(source)
         elif name == "redis-test-endpoint":
             info = detect_redis_test_endpoint(source)
+        elif name == "candidate-runtime-request":
+            value = source.get("LEXIFLOW_CANDIDATE_RUNTIME_REQUEST", "")
+            valid = bool(value and Path(value).is_absolute())
+            info = {
+                "available": valid,
+                "source": "explicit-candidate-request" if valid else "",
+                "path": "",
+            }
         elif name in {
             "release-amd64-docker-host",
             "release-arm64-docker-host",
@@ -173,6 +181,13 @@ def execution_environment(
                     "explicit PostgreSQL test JDBC URL is unavailable"
                 )
             values["LEXIFLOW_POSTGRES_TEST_JDBC_URL"] = value
+        elif name == "candidate-runtime-request":
+            value = source.get("LEXIFLOW_CANDIDATE_RUNTIME_REQUEST", "")
+            if not value or not Path(value).is_absolute():
+                raise JavaRuntimeError(
+                    "explicit candidate runtime request is unavailable"
+                )
+            values["LEXIFLOW_CANDIDATE_RUNTIME_REQUEST"] = value
         elif name in {
             "release-amd64-docker-host",
             "release-arm64-docker-host",

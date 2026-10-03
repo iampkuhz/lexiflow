@@ -103,3 +103,27 @@ class TestReleaseRuntimeArtifacts(unittest.TestCase):
 
         with self.assertRaisesRegex(ConsumerError, "synthetic-producer-result-invalid"):
             self._build_synthetic_result(formal=True)
+
+
+class TestBuildSourceIdentity(unittest.TestCase):
+    def test_shared_identity_selects_resolved_snapshot_paths(self):
+        import subprocess
+
+        version = "2.0.0-SNAPSHOT.gabc1234"
+        result = subprocess.CompletedProcess(
+            [], 0,
+            json.dumps({"softwareVersion": version, "sourceCommit": "a" * 40}).encode(),
+            b"",
+        )
+        with patch.object(artifacts, "_run", return_value=result) as run:
+            self.assertEqual((version, "a" * 40), artifacts._source_identity(Path("/synthetic"), {}))
+        self.assertEqual(["node", "ops/release/version.mjs", "--release"], run.call_args.args[0])
+
+    def test_source_identity_rejects_unsafe_output_paths(self):
+        import subprocess
+        from scripts.environment.release_runtime_check import ConsumerError
+
+        for payload in [b"null", b"{}", b"not json", json.dumps({"softwareVersion": "../../private", "sourceCommit": "a" * 40}).encode()]:
+            with patch.object(artifacts, "_run", return_value=subprocess.CompletedProcess([], 0, payload, b"")):
+                with self.assertRaises(ConsumerError):
+                    artifacts._source_identity(Path("/synthetic"), {})

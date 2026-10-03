@@ -209,7 +209,9 @@ def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _read_envelope(stream: Any) -> dict[str, Any]:
+def _read_envelope(
+    stream: Any, *, check_ids: frozenset[str] = CHECK_IDS
+) -> dict[str, Any]:
     raw = stream.buffer.read(MAX_ENVELOPE + 1)
     if not raw:
         raise ConsumerError("BLOCKED", "verify-context-unavailable")
@@ -229,7 +231,7 @@ def _read_envelope(stream: Any) -> dict[str, Any]:
         or value.get("schema_version") != "lexiflow.verify-child-input.v1"
         or type(value.get("run_id")) is not str
         or not value["run_id"].strip()
-        or value.get("check_id") not in CHECK_IDS
+        or value.get("check_id") not in check_ids
         or type(value.get("check_config_fingerprint")) is not str
         or not isinstance(value.get("effective_check"), dict)
         or not isinstance(value.get("snapshot"), dict)
@@ -401,6 +403,8 @@ def _run_bounded(
     env: Mapping[str, str],
     timeout: int,
     limit: int = 1_048_576,
+    *,
+    input_stream: Any = None,
 ) -> tuple[bytes, bytes]:
     global _SPAWNING_CHILD, _TERMINATION_REQUESTED
     _install_termination_handler()
@@ -412,7 +416,7 @@ def _run_bounded(
             argv,
             cwd=cwd,
             env=dict(env),
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL if input_stream is None else input_stream,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,

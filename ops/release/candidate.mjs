@@ -8,7 +8,7 @@ import path from 'node:path';
 import { createManifest, verifyContainedFile, validateRelativePath } from './manifest.mjs';
 import { generateLifecycleEntry } from './lifecycle.mjs';
 import { packageManifest } from './package.mjs';
-import { checkReleaseSource } from './version.mjs';
+import { checkReleaseSource, parseSoftwareVersion, resolveBuildIdentity, validateBuildIdentity } from './version.mjs';
 
 const fail = (code) => { throw new Error(code); };
 const hash = () => createHash('sha256');
@@ -65,13 +65,17 @@ async function readImageCandidate(directory) {
   finally { if (handle) await handle.close().catch(() => {}); }
   let candidate;
   try { candidate = JSON.parse(bytes.toString('utf8')); } catch { fail('IMAGE_CANDIDATE_INVALID'); }
-  if (!exactKeys(candidate, ['schemaVersion', 'kind', 'softwareVersion', 'sourceCommit', 'platform', 'buildInputSha256', 'baseImages', 'artifacts'])
+  if (!exactKeys(candidate, ['schemaVersion', 'kind', 'buildIdentity', 'softwareVersion', 'sourceCommit', 'platform', 'buildInputSha256', 'baseImages', 'artifacts'])
     || candidate.schemaVersion !== 1 || candidate.kind !== 'lexiflow-image-candidate'
-    || typeof candidate.softwareVersion !== 'string' || !/^(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})$/.test(candidate.softwareVersion)
+    || typeof candidate.softwareVersion !== 'string'
     || typeof candidate.sourceCommit !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(candidate.sourceCommit)
     || !['linux/amd64', 'linux/arm64'].includes(candidate.platform) || typeof candidate.buildInputSha256 !== 'string' || !hex.test(candidate.buildInputSha256)
     || !Array.isArray(candidate.baseImages) || candidate.baseImages.length !== 1
     || !Array.isArray(candidate.artifacts) || candidate.artifacts.length !== 2) fail('IMAGE_CANDIDATE_INVALID');
+  try { parseSoftwareVersion(candidate.softwareVersion); } catch { fail('IMAGE_CANDIDATE_INVALID'); }
+  const identity = candidate.buildIdentity;
+  try { validateBuildIdentity(identity); } catch { fail('IMAGE_CANDIDATE_INVALID'); }
+  if (identity.dirty || candidate.softwareVersion !== identity.softwareVersion || candidate.sourceCommit !== identity.sourceCommit) fail('IMAGE_CANDIDATE_INVALID');
   const expectedPlatforms = ['linux/amd64', 'linux/arm64'];
   const bases = new Map();
   for (const base of candidate.baseImages) {
@@ -156,6 +160,9 @@ export async function assembleReleaseCandidate(input) {
   for (const root of roots) if (within(root, parent) || within(parent, root)) fail('OUTPUT_PARENT_INVALID');
   let source;
   try { source = checkReleaseSource(repo); } catch { fail('RELEASE_SOURCE_REJECTED'); }
+  let buildIdentity;
+  try { buildIdentity = resolveBuildIdentity(repo); } catch { fail('RELEASE_SOURCE_REJECTED'); }
+  if (buildIdentity.dirty || buildIdentity.sourceCommit !== source.sourceCommit || buildIdentity.softwareVersion !== source.softwareVersion) fail('RELEASE_SOURCE_REJECTED');
   const byPlatform = new Map();
   for (const item of imageCandidates) {
     if (!exactKeys(item, ['directory', 'sha256']) || typeof item.directory !== 'string' || !path.isAbsolute(item.directory)
@@ -181,7 +188,9 @@ export async function assembleReleaseCandidate(input) {
   const sortedCandidates = expectedPlatforms.map((platform) => byPlatform.get(platform));
   const imageCandidatesByPlatform = sortedCandidates.map(({ directory, imageCandidate }) => ({ directory, imageCandidate }));
   const common = sortedCandidates[0].imageCandidate.candidate;
-  if (sortedCandidates.some(({ imageCandidate }) => imageCandidate.candidate.softwareVersion !== source.softwareVersion
+  const sameIdentity = (left, right) => Object.keys(right).every((key) => left[key] === right[key]);
+  if (sortedCandidates.some(({ imageCandidate }) => !sameIdentity(imageCandidate.candidate.buildIdentity, buildIdentity)
+    || imageCandidate.candidate.softwareVersion !== source.softwareVersion
     || imageCandidate.candidate.sourceCommit !== source.sourceCommit || imageCandidate.candidate.buildInputSha256 !== common.buildInputSha256)) fail('SOURCE_IDENTITY_MISMATCH');
   if (!Array.isArray(descriptor.artifacts) || !Array.isArray(descriptor.licenses)
     || descriptor.artifacts.some((item) => !item || item?.role === 'runtime-entry' || item?.path === 'lexiflow.sh')) fail('DESCRIPTOR_INVALID');
@@ -198,7 +207,7 @@ export async function assembleReleaseCandidate(input) {
   if (!licenses) fail('RUNTIME_ENTRY_LICENSE_MISSING');
   const provisional = { role: 'runtime-entry', path: 'lexiflow.sh', bytes: 1, sha256: '0'.repeat(64), licenseIds: [licenses.id] };
   const provisionalDescriptor = { ...descriptor, artifacts: [...descriptor.artifacts, provisional] };
-  try { createManifest(provisionalDescriptor, source); } catch { fail('DESCRIPTOR_INVALID'); }
+  try { createManifest(provisionalDescriptor, buildIdentity); } catch { fail('DESCRIPTOR_INVALID'); }
   for (const { directory, imageCandidate } of imageCandidatesByPlatform) await snapshot(imageCandidate, directory, artifacts, descriptor);
 
   const candidateDirectory = await mkdtemp(path.join(parent, '.lexiflow-release-candidate-')).catch(() => fail('CANDIDATE_CREATE_FAILED'));
@@ -229,9 +238,12 @@ export async function assembleReleaseCandidate(input) {
     for (const { directory, imageCandidate } of imageCandidatesByPlatform) await snapshot(imageCandidate, directory, artifacts, descriptor);
     let currentSource;
     try { currentSource = checkReleaseSource(repo); } catch { fail('RELEASE_SOURCE_CHANGED'); }
-    if (currentSource.sourceCommit !== source.sourceCommit || currentSource.softwareVersion !== source.softwareVersion) fail('RELEASE_SOURCE_CHANGED');
+    let currentBuildIdentity;
+    try { currentBuildIdentity = resolveBuildIdentity(repo); } catch { fail('RELEASE_SOURCE_CHANGED'); }
+    if (currentSource.sourceCommit !== source.sourceCommit || currentSource.softwareVersion !== source.softwareVersion
+      || !sameIdentity(currentBuildIdentity, buildIdentity)) fail('RELEASE_SOURCE_CHANGED');
     await rm(work, { recursive: true, force: false });
-    const candidate = { schemaVersion: 1, kind: 'lexiflow-release-candidate', softwareVersion: source.softwareVersion,
+    const candidate = { schemaVersion: 1, kind: 'lexiflow-release-candidate', buildIdentity, softwareVersion: source.softwareVersion,
       sourceCommit: source.sourceCommit, manifestPath: 'payload/manifest.json', manifestSha256,
       buildInputSha256: common.buildInputSha256,
       imageCandidates: expectedPlatforms.map((platform) => ({ platform, sha256: byPlatform.get(platform).imageCandidate.sha256 })) };

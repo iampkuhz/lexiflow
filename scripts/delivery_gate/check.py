@@ -1,4 +1,4 @@
-"""只读评估正式 Delivery Gate 条件；只核对 receipt、依赖和证据，不运行交付命令。"""
+"""核验正式 Delivery Gate 条件，并在 check 场景中发布完整成功 receipt。"""
 
 from __future__ import annotations
 
@@ -54,6 +54,12 @@ def _bound_chain(
     errors = []
     if validation.get("submission_content_hash") != submission.get("content_hash"):
         errors.append("validation-submission-hash")
+    if validation.get("submission_id") != submission.get("submission_id"):
+        errors.append("validation-submission-id")
+    if review.get("submission_id") != submission.get("submission_id"):
+        errors.append("review-submission-id")
+    if review.get("validation_id") != validation.get("validation_id"):
+        errors.append("review-validation-id")
     if review.get("submission_content_hash") != submission.get("content_hash"):
         errors.append("review-submission-hash")
     if review.get("validation_content_hash") != validation.get("content_hash"):
@@ -69,6 +75,28 @@ def _bound_chain(
         error = verify_authority(repo, record, key)
         if error:
             errors.append(error)
+    # 复用签发阶段同一独立性合同；此处仅消费记录身份，不发现当前调用者身份。
+    from scripts.delivery_gate.review import (
+        ReviewError,
+        _verify_independence as verify_reviewer_independence,
+    )
+    from scripts.delivery_gate.validate import (
+        ValidationError,
+        _verify_independence as verify_validator_independence,
+    )
+
+    try:
+        verify_validator_independence(
+            submission, {"identity": validation.get("validator_identity", {})}
+        )
+    except ValidationError as exc:
+        errors.append(exc.code)
+    try:
+        verify_reviewer_independence(
+            submission, validation, {"identity": review.get("reviewer_identity", {})}
+        )
+    except ReviewError as exc:
+        errors.append(exc.code)
     try:
         descriptor = validation["verification_report"]
         read_bound_bytes(repo, descriptor["locator"], descriptor["sha256"])
@@ -321,8 +349,10 @@ def _approval(
     }
 
 
-def check_conditions(root: str | Path, *, submission_id: str) -> dict[str, Any]:
-    """只读汇总 submission、validation、review、依赖与批准条件，并核验内容哈希 DAG。不运行 Check，不修改已有 receipt；任何必需条件缺失都不能返回 PASS。"""
+def _evaluate_conditions(
+    root: str | Path, *, submission_id: str, publish_missing: bool
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """共享核验；只在显式允许时发布缺失的成功 check。"""
     repo = Path(root).resolve()
     try:
         submission = load_submission(repo, submission_id)
@@ -338,9 +368,9 @@ def check_conditions(root: str | Path, *, submission_id: str) -> dict[str, Any]:
         if validation is None:
             raise CheckError("validation-missing", submission_id)
         review = _one(
-            list_layer(repo, "reviews", "validation_id", validation["validation_id"]),
+            list_layer(repo, "reviews", "submission_id", submission_id),
             "review",
-            validation["validation_id"],
+            submission_id,
         )
         if review is None:
             raise CheckError("review-missing", validation["validation_id"])
@@ -349,6 +379,8 @@ def check_conditions(root: str | Path, *, submission_id: str) -> dict[str, Any]:
             "check",
             submission_id,
         )
+        if existing is None and not publish_missing:
+            raise CheckError("check-missing", submission_id)
         chain_errors = _bound_chain(repo, submission, validation, review)
         dependencies_ok, dependency_details = _dependency_status(repo, submission)
         approval_ok, approval = _approval(repo, submission, dependency_details)
@@ -379,7 +411,7 @@ def check_conditions(root: str | Path, *, submission_id: str) -> dict[str, Any]:
             "reason": exc.code,
             "detail": exc.detail,
             "delivery_rerun": False,
-        }
+        }, None
     except CheckError as exc:
         return {
             "submission_id": submission_id,
@@ -387,7 +419,7 @@ def check_conditions(root: str | Path, *, submission_id: str) -> dict[str, Any]:
             "reason": exc.code,
             "detail": exc.detail,
             "delivery_rerun": False,
-        }
+        }, None
     except Exception as exc:
         return {
             "submission_id": submission_id,
@@ -395,7 +427,7 @@ def check_conditions(root: str | Path, *, submission_id: str) -> dict[str, Any]:
             "reason": getattr(exc, "code", "current-input-invalid"),
             "detail": str(exc),
             "delivery_rerun": False,
-        }
+        }, None
     receipts = [
         {
             "task_id": x["task_id"],
@@ -420,7 +452,7 @@ def check_conditions(root: str | Path, *, submission_id: str) -> dict[str, Any]:
             "conditions": conditions,
             "published": False,
             "delivery_rerun": False,
-        }
+        }, None
     if existing is not None:
         expected = {
             "submission_id": submission_id,
@@ -434,14 +466,20 @@ def check_conditions(root: str | Path, *, submission_id: str) -> dict[str, Any]:
             "conditions": conditions,
             "delivery_rerun": False,
         }
-        if any(existing.get(k) != v for k, v in expected.items()):
+        if (
+            set(existing)
+            != set(expected)
+            | {"schema_version", "check_id", "created_at", "content_hash"}
+            or existing.get("schema_version") != "lexiflow.delivery-gate-check.v3"
+            or any(existing.get(k) != v for k, v in expected.items())
+        ):
             return {
                 "submission_id": submission_id,
                 "result": "BLOCKED",
                 "reason": "existing-check-mismatch",
                 "published": False,
                 "delivery_rerun": False,
-            }
+            }, None
         return {
             "check_id": existing["check_id"],
             "submission_id": submission_id,
@@ -453,7 +491,20 @@ def check_conditions(root: str | Path, *, submission_id: str) -> dict[str, Any]:
             "published": True,
             "idempotent": True,
             "delivery_rerun": False,
+        }, {
+            "submission": submission,
+            "validation": validation,
+            "review": review,
+            "check": existing,
         }
+    if not publish_missing:
+        return {
+            "submission_id": submission_id,
+            "result": "BLOCKED",
+            "reason": "check-missing",
+            "published": False,
+            "delivery_rerun": False,
+        }, None
     check_id = str(uuid.uuid4())
     record = {
         "schema_version": "lexiflow.delivery-gate-check.v3",
@@ -489,4 +540,12 @@ def check_conditions(root: str | Path, *, submission_id: str) -> dict[str, Any]:
         "published": True,
         "idempotent": False,
         "delivery_rerun": False,
-    }
+    }, None
+
+
+def check_conditions(root: str | Path, *, submission_id: str) -> dict[str, Any]:
+    """核验并在完整条件通过时发布 check receipt；不运行交付命令。"""
+    result, _ = _evaluate_conditions(
+        root, submission_id=submission_id, publish_missing=True
+    )
+    return result

@@ -228,6 +228,19 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
             if child_pid.exists():
                 self._assert_process_stops(int(child_pid.read_text(encoding="ascii")))
 
+    def test_bounded_command_consumes_private_input_stream(self):
+        from scripts.environment.release_runtime_check import _run_bounded
+
+        with tempfile.TemporaryFile() as stream:
+            stream.write(b'{"candidate":"fixed"}')
+            stream.seek(0)
+            stdout, stderr = _run_bounded(
+                [sys.executable, "-c", "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"],
+                Path.cwd(), os.environ, 5, input_stream=stream,
+            )
+        self.assertEqual(stdout, b'{"candidate":"fixed"}')
+        self.assertEqual(stderr, b"")
+
     def test_process_group_signals_and_registry_removal_precede_reap(self):
         from scripts.environment import release_runtime_check as runtime
 

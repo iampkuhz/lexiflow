@@ -8,6 +8,8 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runDocker } from '../build-command.mjs';
 import { buildCandidateImages } from '../build-execution.mjs';
+import { resolveBuildIdentity } from '../version.mjs';
+import { jarBytes, makeZip } from './zip-fixture.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const templates = ['ops/docker/.dockerignore', 'ops/docker/Dockerfile', 'ops/docker/Dockerfile.postgres', 'ops/docker/bootstrap.sh', 'ops/docker/entrypoint.sh'];
@@ -32,7 +34,7 @@ async function fixture() {
   git(root, ['add', '.']); git(root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']);
   const sourceCommit = git(root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const artifactRoot = path.join(root, 'artifact'); await mkdir(artifactRoot);
-  const jar = Buffer.from('synthetic application jar'); await writeFile(path.join(artifactRoot, 'app.jar'), jar);
+  const jar = jarBytes(resolveBuildIdentity(root)); await writeFile(path.join(artifactRoot, 'app.jar'), jar);
   const ref = (name, letter) => `registry.example.invalid/library/${name}@sha256:${letter.repeat(64)}`;
   const descriptor = {
     schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit,
@@ -63,6 +65,12 @@ if (op === 'image' && args[1] === 'inspect') {
   if (!platform) { process.stderr.write('unknown synthetic image'); process.exit(30); }
   const architecture = platform.endsWith('amd64') ? 'amd64' : 'arm64';
   const value = { Id: imageId, Os: 'linux', Architecture: state.badArchitecture && state.badArchitecture === target ? 'arm64' : architecture };
+  if (state.builtImages?.[target]) {
+    value.Config = { Labels: { ...state.builtImages[target] } };
+    if (state.labelMode === 'missing') delete value.Config.Labels['io.lexiflow.build-id'];
+    if (state.labelMode === 'bad') value.Config.Labels['io.lexiflow.source-sha256'] = '0'.repeat(64);
+    if (state.labelMode === 'conflict') value.Config.Labels['org.opencontainers.image.version'] = 'conflicting';
+  }
   process.stdout.write(JSON.stringify([value])); process.exit(0);
 }
 if (op === 'build') {
@@ -70,6 +78,12 @@ if (op === 'build') {
   const expected = ['.dockerignore','Dockerfile','Dockerfile.postgres','bootstrap.sh','entrypoint.sh','lexiflow-api.jar'];
   const actual = fs.readdirSync(process.cwd()).sort(); fs.appendFileSync(path.join(root, 'contexts.jsonl'), JSON.stringify({ platform, files: actual }) + '\\n');
   if (JSON.stringify(actual) !== JSON.stringify(expected)) { process.stderr.write('wrong context'); process.exit(31); }
+  const imageIndex = iid.startsWith('api') ? 0 : 1;
+  const labelArgs = [];
+  for (let i = 0; i < args.length; i += 1) if (args[i] === '--label') labelArgs.push(args[i + 1]);
+  state.builtImages ??= {};
+  state.builtImages[state.finalIds[platform][imageIndex]] = Object.fromEntries(labelArgs.map((entry) => { const at = entry.indexOf('='); return [entry.slice(0, at), entry.slice(at + 1)]; }));
+  fs.writeFileSync(path.join(root, 'state.json'), JSON.stringify(state));
   if (state.iidMode === 'symlink') fs.symlinkSync('/etc/hosts', path.join(process.cwd(), iid));
   else if (state.iidMode === 'bad') fs.writeFileSync(path.join(process.cwd(), iid), 'not-an-image-id');
   else if (state.iidMode === 'empty') fs.writeFileSync(path.join(process.cwd(), iid), '');
@@ -120,7 +134,8 @@ test('buildCandidateImages 执行固定预检/构建/导出并留下四镜像候
       const contexts = (await readFile(path.join(f.fakeRoot, 'contexts.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
       assert.equal(contexts.length, 2); assert.ok(contexts.every(({ files }) => files.length === 6));
       const { candidate, candidateDirectory } = result;
-      assert.deepEqual(Object.keys(candidate), ['schemaVersion', 'kind', 'softwareVersion', 'sourceCommit', 'platform', 'buildInputSha256', 'baseImages', 'artifacts']);
+      assert.deepEqual(Object.keys(candidate), ['schemaVersion', 'kind', 'buildIdentity', 'softwareVersion', 'sourceCommit', 'platform', 'buildInputSha256', 'baseImages', 'artifacts']);
+      assert.deepEqual(candidate.buildIdentity, resolveBuildIdentity(f.root));
       assert.equal(candidate.platform, 'linux/amd64');
       assert.equal(candidate.baseImages.length, 1);
       assert.equal(candidate.artifacts.length, 2);
@@ -148,6 +163,16 @@ test('arm64-only descriptor 生成绑定子集摘要的原生候选', async () =
       assert.equal((await calls(f)).filter(({ op }) => op === 'build').length, 2);
     });
   } finally { await f.cleanup(); }
+});
+
+test('inspect 实际镜像标签而非仅信任 build argv', async () => {
+  for (const labelMode of ['missing', 'bad', 'conflict']) {
+    const f = await fixture();
+    try {
+      await setState(f, { labelMode });
+      await withFakePath(f, async () => assert.rejects(buildCandidateImages(buildInput(f)), { message: 'IMAGE_LABEL_MISMATCH' }));
+    } finally { await f.cleanup(); }
+  }
 });
 
 test('拒绝参数、端点、输出目录边界及不支持daemon架构', async () => {
@@ -206,7 +231,12 @@ test('完整计划摘要跨平台稳定且 JAR 字节及 descriptor 同步变化
       const arm64 = await buildCandidateImages(buildInput(f, { platform: 'linux/arm64' }));
       assert.equal(amd64.candidate.buildInputSha256, arm64.candidate.buildInputSha256);
       const jarPath = path.join(f.artifactRoot, f.descriptor.jar.path);
-      const changedJar = Buffer.from('synthetic changed application jar');
+      const identity = resolveBuildIdentity(f.root);
+      const changedJar = makeZip([
+        ['META-INF/lexiflow-build.json', `${JSON.stringify(identity)}\n`],
+        ['META-INF/lexiflow-version.txt', `${identity.softwareVersion}\n`],
+        ['BOOT-INF/classes/synthetic/extra.class', 'synthetic changed application jar'],
+      ]);
       await writeFile(jarPath, changedJar);
       f.descriptor.jar.bytes = changedJar.length;
       f.descriptor.jar.sha256 = hash(changedJar);

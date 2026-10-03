@@ -1,0 +1,8 @@
+schema_version: lexiflow.ci-quick.v1
+always_required_check_ids:
+  - eng.release.version
+  - eng.repository.docs
+  - eng.repository.policy
+formal_only_check_ids:
+  - eng.release.lifecycle-runtime
+  - eng.release.candidate-runtime

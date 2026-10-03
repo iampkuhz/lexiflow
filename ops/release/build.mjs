@@ -4,7 +4,8 @@ import { lstatSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { isIP } from 'node:net';
 import path from 'node:path';
-import { checkReleaseSource } from './version.mjs';
+import { checkReleaseSource, resolveBuildIdentity } from './version.mjs';
+import { verifyJarIdentity } from './embedded-identity.mjs';
 import { validateRelativePath, verifyContainedFile } from './manifest.mjs';
 
 const TEMPLATE_PATHS = [
@@ -95,12 +96,18 @@ export async function loadBaseImageLock(repoRoot) {
   return (await readBaseImageLock(repoRoot)).baseImages;
 }
 
-function buildCommands(platform, javaId, postgresId, javaReference, postgresReference) {
+function buildCommands(platform, javaId, postgresId, javaReference, postgresReference, buildIdentity) {
+  const labels = [
+    `org.opencontainers.image.version=${buildIdentity.softwareVersion}`,
+    `org.opencontainers.image.revision=${buildIdentity.sourceCommit}`,
+    `io.lexiflow.build-id=${buildIdentity.buildId}`,
+    `io.lexiflow.source-sha256=${buildIdentity.sourceSha256}`,
+  ].flatMap((label) => ['--label', label]);
   return [
     ['docker', 'image', 'inspect', javaId],
     ['docker', 'image', 'inspect', postgresId],
-    ['docker', 'build', '--pull=false', '--network=none', '--platform', platform, '--build-arg', `JAVA_RUNTIME_IMAGE=${javaReference}`, '--file', 'Dockerfile', '--iidfile', 'api.iid', '.'],
-    ['docker', 'build', '--pull=false', '--network=none', '--platform', platform, '--build-arg', `POSTGRES_RUNTIME_IMAGE=${postgresReference}`, '--file', 'Dockerfile.postgres', '--iidfile', 'postgres.iid', '.'],
+    ['docker', 'build', '--pull=false', '--network=none', '--platform', platform, ...labels, '--build-arg', `JAVA_RUNTIME_IMAGE=${javaReference}`, '--file', 'Dockerfile', '--iidfile', 'api.iid', '.'],
+    ['docker', 'build', '--pull=false', '--network=none', '--platform', platform, ...labels, '--build-arg', `POSTGRES_RUNTIME_IMAGE=${postgresReference}`, '--file', 'Dockerfile.postgres', '--iidfile', 'postgres.iid', '.'],
   ];
 }
 
@@ -110,6 +117,10 @@ export async function prepareImageBuild(input) {
   try { safeAbsoluteDirectory(repoRoot); safeAbsoluteDirectory(artifactRoot); } catch { reject('INPUT_INVALID'); }
   let source;
   try { source = checkReleaseSource(repoRoot); } catch { reject('RELEASE_SOURCE_REJECTED'); }
+  let buildIdentity;
+  try { buildIdentity = resolveBuildIdentity(repoRoot); } catch { reject('RELEASE_SOURCE_REJECTED'); }
+  if (buildIdentity.dirty || buildIdentity.sourceCommit !== source.sourceCommit
+    || buildIdentity.softwareVersion !== source.softwareVersion) reject('RELEASE_SOURCE_REJECTED');
   try {
     if (!hasKeys(descriptor, ['schemaVersion', 'softwareVersion', 'sourceCommit', 'jar', 'baseImages'])
       || descriptor.schemaVersion !== 1 || descriptor.softwareVersion !== source.softwareVersion
@@ -155,21 +166,32 @@ export async function prepareImageBuild(input) {
     }
     templates.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
     const jar = { path: descriptor.jar.path, bytes: descriptor.jar.bytes, sha256: descriptor.jar.sha256 };
+    // Bind the embedded application identity to the same contained artifact whose
+    // bytes and digest were validated above. Recheck after parsing to close races.
+    try { await verifyContainedFile(artifactRoot, jar.path, jar.bytes, jar.sha256); }
+    catch { reject('BUILD_INPUT_REJECTED'); }
+    const verifiedJarPath = path.join(artifactRoot, ...jar.path.split('/'));
+    await verifyJarIdentity(verifiedJarPath, buildIdentity);
+    try { await verifyContainedFile(artifactRoot, jar.path, jar.bytes, jar.sha256); }
+    catch { reject('BUILD_INPUT_REJECTED'); }
     const platforms = selectedPlatforms.map((platform) => {
       const images = byPlatform.get(platform);
       const contextFiles = [
         ...TEMPLATE_PATHS.map((templatePath, index) => ({ path: templatePath, target: TEMPLATE_NAMES[index] })),
         { path: jar.path, target: 'lexiflow-api.jar' },
       ];
-      return { platform, javaRuntime: { ...images.javaRuntime }, postgresRuntime: { ...images.postgresRuntime }, contextFiles, commands: buildCommands(platform, images.javaRuntime.imageId, images.postgresRuntime.imageId, images.javaRuntime.reference, images.postgresRuntime.reference) };
+      return { platform, buildIdentity, javaRuntime: { ...images.javaRuntime }, postgresRuntime: { ...images.postgresRuntime }, contextFiles, commands: buildCommands(platform, images.javaRuntime.imageId, images.postgresRuntime.imageId, images.javaRuntime.reference, images.postgresRuntime.reference, buildIdentity) };
     });
     let finalSource;
     try { finalSource = checkReleaseSource(repoRoot); } catch { reject('RELEASE_SOURCE_CHANGED'); }
-    if (source.sourceCommit !== finalSource.sourceCommit || source.softwareVersion !== finalSource.softwareVersion) reject('RELEASE_SOURCE_CHANGED');
+    let finalBuildIdentity;
+    try { finalBuildIdentity = resolveBuildIdentity(repoRoot); } catch { reject('RELEASE_SOURCE_CHANGED'); }
+    if (source.sourceCommit !== finalSource.sourceCommit || source.softwareVersion !== finalSource.softwareVersion
+      || JSON.stringify(buildIdentity) !== JSON.stringify(finalBuildIdentity)) reject('RELEASE_SOURCE_CHANGED');
     const baseImageLock = { path: BASE_IMAGE_LOCK_PATH, bytes: lock.bytes, sha256: lock.sha256 };
-    return { schemaVersion: 1, softwareVersion: source.softwareVersion, sourceCommit: source.sourceCommit, jar, templates, baseImageLock, platforms };
+    return { schemaVersion: 1, softwareVersion: source.softwareVersion, sourceCommit: source.sourceCommit, buildIdentity, jar, templates, baseImageLock, platforms };
   } catch (error) {
-    if (['SOURCE_IDENTITY_MISMATCH', 'JAR_INVALID', 'BASE_IMAGES_INVALID', 'TEMPLATE_INVALID', 'RELEASE_SOURCE_CHANGED'].includes(error.message)) throw error;
+    if (['SOURCE_IDENTITY_MISMATCH', 'JAR_INVALID', 'JAR_IDENTITY_MISMATCH', 'ARCHIVE_INVALID', 'ARCHIVE_ENTRY_MISSING', 'ARCHIVE_LIMIT_EXCEEDED', 'BASE_IMAGES_INVALID', 'TEMPLATE_INVALID', 'RELEASE_SOURCE_CHANGED'].includes(error.message)) throw error;
     reject('BUILD_INPUT_REJECTED');
   }
 }
