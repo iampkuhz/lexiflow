@@ -1934,6 +1934,10 @@ checks:
   timeout_seconds: 1200
   scope: repository-baseline
   triggers:
+  - path: ops/release/candidate-proof.mjs
+  - path: ops/release/tests/candidate-proof.test.mjs
+  - path: ops/release/workflow.mjs
+  - path: ops/release/tests/workflow.test.mjs
   - path: .gitignore
   - path: ops/release/third-party-notices.md
   - path: ops/release/lifecycle.mjs
@@ -2044,6 +2048,10 @@ checks:
   - release-gradle-cache
   - release-npm-cache
   input_paths:
+  - ops/release/candidate-proof.mjs
+  - ops/release/tests/candidate-proof.test.mjs
+  - ops/release/workflow.mjs
+  - ops/release/tests/workflow.test.mjs
   - .gitignore
   - ops/release/third-party-notices.md
   - ops/release/lifecycle.mjs
@@ -2151,6 +2159,10 @@ checks:
   timeout_seconds: 1200
   scope: change-targeted
   triggers:
+  - path: ops/release/candidate-proof.mjs
+  - path: ops/release/tests/candidate-proof.test.mjs
+  - path: ops/release/workflow.mjs
+  - path: ops/release/tests/workflow.test.mjs
   - path: .gitignore
   - path: ops/release/third-party-notices.md
   - path: ops/release/lifecycle.mjs
@@ -2261,6 +2273,10 @@ checks:
   - release-gradle-cache
   - release-npm-cache
   input_paths:
+  - ops/release/candidate-proof.mjs
+  - ops/release/tests/candidate-proof.test.mjs
+  - ops/release/workflow.mjs
+  - ops/release/tests/workflow.test.mjs
   - .gitignore
   - ops/release/third-party-notices.md
   - ops/release/lifecycle.mjs
