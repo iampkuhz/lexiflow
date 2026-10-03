@@ -38,7 +38,12 @@ public final class CaptionDebugController {
     this.events = Objects.requireNonNull(events);
   }
 
-  /** 返回无敏感信息且不可缓存的本机调试能力。 */
+  /**
+   * 返回无敏感信息且不可缓存的本机调试能力。
+   *
+   * @param origin 含义：请求来源。取值范围：可为 null，非扩展来源被拒绝。
+   * @return 能力响应或无缓存的拒绝响应。
+   */
   @GetMapping
   public ResponseEntity<Capability> capability(
       @RequestHeader(value = "Origin", required = false) String origin) {
@@ -49,7 +54,13 @@ public final class CaptionDebugController {
     return ResponseEntity.ok().header("Cache-Control", "no-store").body(new Capability(enabled));
   }
 
-  /** 接收扩展确认已显示的事件；禁用或非本机请求均不输出。 */
+  /**
+   * 接收扩展确认已显示的事件；禁用或非本机请求均不输出。
+   *
+   * @param origin 含义：请求来源。取值范围：可为 null，非扩展来源被拒绝。
+   * @param request 含义：待验证的显示事件。取值范围：允许任意输入，无效字段或 null 被拒绝。
+   * @return 无缓存的接收或拒绝响应，不回显正文。
+   */
   @PostMapping
   public ResponseEntity<Void> append(
       @RequestHeader(value = "Origin", required = false) String origin,
@@ -139,6 +150,17 @@ public final class CaptionDebugController {
    */
   public record Capability(boolean enabled) {}
 
+  /**
+   * 完成边界验证的本机显示事件。
+   *
+   * @param eventId 规范 UUID 事件身份。
+   * @param event 白名单中的事件类型。
+   * @param topicKey 已限制长度且不含控制字符的主题键。
+   * @param videoId 已验证的视频标识。
+   * @param subtitleKey 已限制长度且不含控制字符的字幕键。
+   * @param positionMs 非负播放位置，单位毫秒。
+   * @param text 已限制长度的显示正文。
+   */
   private record Validated(
       UUID eventId,
       CaptionDebugEvent event,

@@ -28,11 +28,11 @@ public final class ReadableLogFormatter {
   /**
    * 格式化时间、级别、完整关联 UUID、事件、定位键值和正文。
    *
-   * @param level 固定日志级别名称。
-   * @param correlationId 完整关联 UUID。
-   * @param event 固定事件标识。
-   * @param fields 定位键值；输出顺序按键名排序。
-   * @param body 正文；允许任意文本，但输出严格为单行。
+   * @param level 含义：日志级别名称。取值范围：非空且不含分隔符或控制字符。
+   * @param correlationId 含义：完整关联 UUID。取值范围：非 null。
+   * @param event 含义：固定事件标识。取值范围：非空且不含分隔符或控制字符。
+   * @param fields 含义：按键名排序输出的定位键值。取值范围：非 null，键非 null，值可为 null。
+   * @param body 含义：转义为单行的正文。取值范围：任意文本，null 或空串输出占位符。
    * @return 无填充空格的六列日志行。
    */
   public String format(
@@ -40,7 +40,17 @@ public final class ReadableLogFormatter {
     return format(Instant.now(clock), level, correlationId, event, fields, body);
   }
 
-  /** 使用显式时间格式化，供测试与框架适配器复用。 */
+  /**
+   * 使用显式时间格式化，供测试与框架适配器复用。
+   *
+   * @param instant 含义：事件时间。取值范围：非 null。
+   * @param level 含义：日志级别名称。取值范围：非空且不含分隔符或控制字符。
+   * @param correlationId 含义：完整关联 UUID。取值范围：非 null。
+   * @param event 含义：固定事件标识。取值范围：非空且不含分隔符或控制字符。
+   * @param fields 含义：按键名排序输出的定位键值。取值范围：非 null，键非 null，值可为 null。
+   * @param body 含义：转义为单行的正文。取值范围：任意文本，null 或空串输出占位符。
+   * @return 无填充空格的六列日志行。
+   */
   public String format(
       Instant instant,
       String level,

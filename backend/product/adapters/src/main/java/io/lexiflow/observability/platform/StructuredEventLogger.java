@@ -86,10 +86,10 @@ public final class StructuredEventLogger {
   /**
    * 安全写入固定 INFO 级别的可读敏感事件。调用者必须仅传入服务端白名单事件名称。
    *
-   * @param event 固定事件名称。
-   * @param correlationId 真实请求 UUID。
-   * @param fields 已验证且需安全转义的定位字段。
-   * @param body 已确认的显示正文。
+   * @param event 含义：固定事件名称。取值范围：服务端白名单中的非空标识。
+   * @param correlationId 含义：真实请求 UUID。取值范围：非 null。
+   * @param fields 含义：已验证且需安全转义的定位字段。取值范围：非 null，键非 null。
+   * @param body 含义：已确认的显示正文。取值范围：任意文本，null 或空串输出占位符。
    * @return 格式化及提交未抛异常时为 true；队列饱和可丢弃，不表示持久化成功。
    */
   public boolean tryEmitReadableInfo(
