@@ -113,7 +113,16 @@ elif args[:1]==['compose'] and 'up' in args and args[-1]=='api':
     generation=(previous or {}).get('generation',0)+1
     current={**images[image_id],'generation':generation,'containerId':hashlib.sha256((image_id+str(generation)).encode()).hexdigest()}
     runtime_file.write_text(json.dumps(current))
-elif args[:1]==['compose'] and 'logs' in args: print('synthetic-caption-diagnostic')
+elif args[:1]==['compose'] and 'logs' in args:
+    import os, time
+    assert '--follow' in args and '--tail=0' in args
+    print('synthetic-caption-diagnostic',flush=True)
+    if mode=='logs-fail': sys.exit(9)
+    if mode=='logs-follow':
+        Path(CALLS).with_name('logs-pid').write_text(str(os.getpid()))
+        time.sleep(.3)
+        print('synthetic-follow-stderr',file=sys.stderr,flush=True)
+        while True: time.sleep(1)
 elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.exit(8)
 '''.replace("PYTHON", os.sys.executable).replace("CALLS", repr(str(self.calls))).replace("MODE", repr(str(self.mode))).replace("KIT", repr(str(self.kit)))
         self.program(self.bin / "podman", fake)
@@ -301,6 +310,59 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.assertIn('synthetic-caption-diagnostic',result.stdout)
         for file in self.kit.glob('operation-*.log'):
             self.assertNotIn('synthetic-caption-diagnostic',file.read_text())
+
+    def test_logs_are_read_only_even_with_lock_and_pending_transaction(self):
+        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        before={str(p.relative_to(self.kit)):p.read_bytes() for p in self.kit.rglob('*') if p.is_file()}
+        (self.kit/'.lock').mkdir()
+        (self.kit/'.lock/owner.json').write_text('synthetic-live-owner')
+        (self.kit/'upgrade.json').write_text('synthetic-pending-transaction')
+        offset=len(self.calls.read_text().splitlines())
+        result=self.invoke('logs');self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual((self.kit/'.lock/owner.json').read_text(),'synthetic-live-owner')
+        self.assertEqual((self.kit/'upgrade.json').read_text(),'synthetic-pending-transaction')
+        after={str(p.relative_to(self.kit)):p.read_bytes() for p in self.kit.rglob('*') if p.is_file() and p.name not in ['owner.json','upgrade.json']}
+        self.assertEqual(before,after)
+        calls=[json.loads(line) for line in self.calls.read_text().splitlines()[offset:]]
+        self.assertFalse(any('up' in row or 'stop' in row or 'build' in row for row in calls))
+
+    def test_logs_stream_before_exit_and_cancel_only_the_viewer(self):
+        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.mode.write_text('logs-follow')
+        offset=len(self.calls.read_text().splitlines())
+        operations=set(self.kit.glob('operation-*.log'))
+        state=(self.kit/'state.json').read_bytes()
+        output=self.root/'follow-output'
+        with output.open('w') as out:
+            child=subprocess.Popen([shutil.which('node'),'--import',str(self.preload),str(self.repo/'ops/podman/local.mjs'),'logs','--dir',str(self.kit)],env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH']},stdout=out,stderr=out)
+            try:
+                deadline=time.monotonic()+10
+                while time.monotonic()<deadline and 'synthetic-follow-stderr' not in output.read_text():
+                    if child.poll() is not None: break
+                    time.sleep(.02)
+                self.assertIn('synthetic-caption-diagnostic',output.read_text())
+                self.assertIn('synthetic-follow-stderr',output.read_text())
+                self.assertIsNone(child.poll(),'logs must remain active after delivering output')
+                self.assertFalse((self.kit/'.lock').exists())
+                child.send_signal(signal.SIGINT)
+                self.assertEqual(child.wait(timeout=8),0,output.read_text())
+            finally:
+                if child.poll() is None:
+                    child.send_signal(signal.SIGTERM)
+                    child.wait(timeout=8)
+        self.assertEqual(state,(self.kit/'state.json').read_bytes())
+        self.assertEqual(operations,set(self.kit.glob('operation-*.log')))
+        self.assertNotIn('失败',output.read_text())
+        with self.assertRaises(ProcessLookupError): os.killpg(int((self.root/'logs-pid').read_text()),0)
+        calls=[json.loads(line) for line in self.calls.read_text().splitlines()[offset:]]
+        self.assertFalse(any('stop' in row or 'up' in row for row in calls))
+
+    def test_logs_provider_failure_is_not_success(self):
+        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.mode.write_text('logs-fail')
+        result=self.invoke('logs')
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('退出码 9',result.stderr)
 
     def test_fetch_failure_can_retry_before_database(self):
         self.mode.write_text('fetch-fail')

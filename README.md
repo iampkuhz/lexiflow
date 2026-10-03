@@ -23,7 +23,7 @@ node ops/podman/local.mjs install
 ```sh
 node ops/podman/local.mjs upgrade  # 原目录升级，保留数据库、密码和端口
 node ops/podman/local.mjs version  # 区分安装、本地源码与可查询的 GitHub 正式版
-node ops/podman/local.mjs logs     # 查看本机日志
+node ops/podman/local.mjs logs     # 持续查看本机新日志，Ctrl+C 退出
 ```
 
 升级成功后，在 `chrome://extensions` 重新加载原扩展，再刷新视频页面；无需删除重装或选择新目录。使用过自定义安装目录时，为命令加原来的 `--dir /absolute/install-dir`，不要为普通升级另建环境。
