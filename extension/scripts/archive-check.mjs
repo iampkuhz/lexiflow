@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { lstat, readFile } from 'node:fs/promises';
+import { open } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readExtensionFiles } from '../../ops/release/archive-identity.mjs';
@@ -10,19 +11,27 @@ import { PACKAGE_FILES } from './release.mjs';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 function fail(code) { throw new Error(code); }
 
+async function stableRead(target, limit) {
+  const fd = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const before = await fd.stat();
+    if (!before.isFile() || before.size <= 0 || before.size > limit) fail('ARCHIVE_INVALID');
+    const bytes = await fd.readFile();
+    const after = await fd.stat();
+    if (bytes.length !== before.size || ['dev', 'ino', 'size', 'mtimeMs', 'ctimeMs'].some(key => before[key] !== after[key])) fail('ARCHIVE_CHANGED');
+    return bytes;
+  } finally { await fd.close(); }
+}
+
 /** Verify downloaded ZIP, adjacent checksum and current complete source identity. */
 export async function checkExtensionArchive(zipPath, expectedCommit, repoRoot = ROOT, { verifyCurrentIdentity = true } = {}) {
   if (typeof zipPath !== 'string' || !zipPath || typeof expectedCommit !== 'string' || !/^[a-f0-9]{40,64}$/.test(expectedCommit)) fail('ARCHIVE_ARGUMENTS_INVALID');
   const target = path.resolve(zipPath);
-  const zipStat = await lstat(target).catch(() => null);
-  if (!zipStat?.isFile() || zipStat.isSymbolicLink()) fail('ARCHIVE_INVALID');
-  const bytes = await readFile(target);
+  const bytes = await stableRead(target, 256 * 1024 * 1024);
   const sha256 = createHash('sha256').update(bytes).digest('hex');
   const filename = path.basename(target);
   const checksumPath = `${target}.sha256`;
-  const checksumStat = await lstat(checksumPath).catch(() => null);
-  if (!checksumStat?.isFile() || checksumStat.isSymbolicLink()) fail('ARCHIVE_CHECKSUM_INVALID');
-  const sidecar = await readFile(checksumPath, 'utf8').catch(() => fail('ARCHIVE_CHECKSUM_MISSING'));
+  const sidecar = (await stableRead(checksumPath, 512)).toString('utf8');
   if (sidecar !== `${sha256}  ${filename}\n`) fail('ARCHIVE_CHECKSUM_MISMATCH');
   let expected;
   if (verifyCurrentIdentity) {

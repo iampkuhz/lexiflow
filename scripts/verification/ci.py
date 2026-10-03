@@ -286,7 +286,24 @@ def public_summary(result: dict[str, Any], root: Path) -> dict[str, Any]:
         reason = check.get("reason", "")
         item["reason"] = (
             reason
-            if re.fullmatch(r"[a-z][a-z0-9-]{0,100}", reason)
+            if reason
+            in {
+                "",
+                "non-zero-exit",
+                "input-drift",
+                "result-report-invalid",
+                "result-report-missing-fields",
+                "result-report-invalid-status",
+                "result-status-unexpected",
+                "verification-module-tests-incomplete",
+                "repository-module-tests-incomplete",
+                "documentation-governance-failed",
+                "python-quality-incomplete",
+                "browser-api-smoke-assertion-failed",
+                "docker-contract-tests-incomplete",
+                "timeout",
+                "environment-unavailable",
+            }
             else "see-local-evidence"
         )
         contract = check.get("result_contract", {}).get("report", {})
@@ -309,7 +326,7 @@ def public_summary(result: dict[str, Any], root: Path) -> dict[str, Any]:
                 for key in ("failed_tests", "error_tests", "skipped_tests")
                 for value in (detail.get(key, []) if isinstance(detail, dict) else [])
                 if isinstance(value, str)
-                and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]{0,240}", value)
+                and re.fullmatch(r"tests\.[A-Za-z_][A-Za-z0-9_.]{0,230}", value)
             }
         )
         locations, categories, tasks = set(), set(), set()
@@ -335,7 +352,20 @@ def public_summary(result: dict[str, Any], root: Path) -> dict[str, Any]:
                     )
                 )
                 categories.update(
-                    re.findall(r"\b[A-Za-z][A-Za-z0-9]*(?:Error|Exception)\b", text)
+                    name
+                    for name in (
+                        "AssertionError",
+                        "FileNotFoundError",
+                        "PermissionError",
+                        "TimeoutError",
+                        "TypeError",
+                        "ValueError",
+                        "RuntimeError",
+                        "CalledProcessError",
+                        "SourceBridgeError",
+                        "ModuleNotFoundError",
+                    )
+                    if re.search(r"\b" + name + r"\b", text)
                 )
                 tasks.update(
                     re.findall(
