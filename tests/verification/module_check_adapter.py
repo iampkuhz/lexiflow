@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import sys
 import unittest
 from pathlib import Path
 
@@ -18,6 +19,9 @@ def verification_tests(root: Path) -> dict[str, object]:
     suite = unittest.defaultTestLoader.discover(str(root / "tests" / "verification"), pattern="test_*.py", top_level_dir=str(root))
     stream = io.StringIO()
     result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
+    if not result.wasSuccessful():
+        # Verify 内核保存为私有附件，CI 只投影测试身份/代码位置，不透传 traceback。
+        sys.stderr.write(stream.getvalue())
     return {
         "status": "PASS" if result.wasSuccessful() and result.testsRun > 0 and not result.skipped else "FAIL",
         "checks_run": result.testsRun,

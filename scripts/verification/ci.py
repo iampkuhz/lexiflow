@@ -344,7 +344,31 @@ def public_summary(result: dict[str, Any], root: Path) -> dict[str, Any]:
                     raw
                 ).hexdigest() != descriptor.get("sha256"):
                     continue
-                text = raw.decode("utf-8", errors="replace")
+                text = re.sub(
+                    r"\x1b\[[0-9;]*m", "", raw.decode("utf-8", errors="replace")
+                )
+                item["test_ids"].extend(
+                    f"{owner}.{method}"
+                    for owner, method in re.findall(
+                        r"^\s{0,8}([A-Za-z_][A-Za-z0-9_]{0,100}) > ([A-Za-z_][A-Za-z0-9_]{0,128}(?:\(\))?) FAILED$",
+                        text,
+                        re.MULTILINE,
+                    )
+                )
+                item["test_ids"].extend(
+                    re.findall(
+                        r"^(?:FAIL|ERROR): (test_[A-Za-z0-9_]{1,128})(?=[ (\r\n])",
+                        text,
+                        re.MULTILINE,
+                    )
+                )
+                locations.update(
+                    f"{file}:{line}"
+                    for file, line in re.findall(
+                        r'(?:File ")[^\n"]*?((?:tests|scripts|backend|extension|ops)/[A-Za-z0-9_./-]+\.py)", line ([0-9]+)',
+                        text,
+                    )
+                )
                 locations.update(
                     re.findall(
                         r"(?:tests|scripts|backend|extension|ops)/[A-Za-z0-9_./-]+\.(?:py|mjs|java|kts):[0-9]+",
@@ -363,15 +387,19 @@ def public_summary(result: dict[str, Any], root: Path) -> dict[str, Any]:
                         "RuntimeError",
                         "CalledProcessError",
                         "SourceBridgeError",
+                        "BridgeError",
                         "ModuleNotFoundError",
                     )
                     if re.search(r"\b" + name + r"\b", text)
                 )
                 tasks.update(
-                    re.findall(
-                        r"(?:Execution failed for task '|> Task )(:[A-Za-z0-9:_-]+)",
+                    value
+                    for matches in re.findall(
+                        r"(?:Execution failed for task '(:[A-Za-z0-9:_-]+)'|> Task (:[A-Za-z0-9:_-]+) FAILED)",
                         text,
                     )
+                    for value in matches
+                    if value
                 )
                 for label, pattern in {
                     "missing-display": r"Missing X server|\$DISPLAY|without having a XServer",
@@ -383,6 +411,7 @@ def public_summary(result: dict[str, Any], root: Path) -> dict[str, Any]:
                 }.items():
                     if re.search(pattern, text):
                         categories.add(label)
+        item["test_ids"] = sorted(set(item["test_ids"]))[:80]
         item["source_locations"] = sorted(locations)[:80]
         item["error_categories"] = sorted(categories)[:40]
         item["gradle_tasks"] = sorted(tasks)[:40]

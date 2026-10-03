@@ -43,6 +43,9 @@ _ALLOWED_ENV_KEYS = frozenset(
         "LC_ALL",
         "LANGUAGE",
         "TERM",
+        # Xvfb 的本机显示与授权文件定位；不继承其他浏览器或应用配置。
+        "DISPLAY",
+        "XAUTHORITY",
         "TZ",
         "PYTHONDONTWRITEBYTECODE",
         "PYTHONHASHSEED",

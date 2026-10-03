@@ -612,6 +612,22 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
                     bridge._publish_noreplace(source, destination)
             self.assertEqual((caught.exception.status, caught.exception.code), expected)
 
+    def test_linux_atomic_publish_uses_noreplace_flag_and_propagates_errno(self) -> None:
+        syscall = mock.Mock(return_value=-1)
+        library = mock.Mock(renameat2=syscall)
+        source, destination = self.base / "stage", self.base / "target"
+        with mock.patch.object(bridge.sys, "platform", "linux"), mock.patch.object(
+            bridge.ctypes, "CDLL", return_value=library
+        ), mock.patch.object(bridge.ctypes, "get_errno", return_value=errno.EEXIST):
+            self.assertEqual(bridge._rename_noreplace_syscall(source, destination), (-1, errno.EEXIST))
+        syscall.assert_called_once_with(-100, os.fsencode(source), -100, os.fsencode(destination), 1)
+
+    def test_linux_missing_atomic_primitive_is_blocked_without_fallback(self) -> None:
+        with mock.patch.object(bridge.sys, "platform", "linux"), mock.patch.object(
+            bridge.ctypes, "CDLL", return_value=object()
+        ):
+            self.assertIsNone(bridge._rename_noreplace_syscall(self.base / "a", self.base / "b"))
+
     def test_unsupported_platform_is_blocked_without_rename_fallback(self) -> None:
         stage, destination = self.base / "stage", self.base / "target"
         with mock.patch.object(bridge.sys, "platform", "unsupported-test-platform"):

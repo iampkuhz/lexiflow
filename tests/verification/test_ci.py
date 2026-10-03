@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import hashlib
 import json
 import tempfile
 import unittest
@@ -72,6 +73,23 @@ class CiQuickTests(unittest.TestCase):
         self.assertNotIn(secret, json.dumps(summary))
         self.assertEqual(summary["checks"][0]["test_ids"], ["tests.fixture.Test.test_failure"])
         self.assertFalse(summary["formal_eligible"])
+
+    def test_public_summary_extracts_failure_locations_not_payload(self) -> None:
+        target = self.root / "tmp/quality/check.stderr.log"
+        target.parent.mkdir(parents=True)
+        raw = b'FAIL: test_demo (tests.example.Demo)\n  File "/private/repo/tests/example.py", line 19\nDemoTest > returnsOk() FAILED\n> Task :api:test FAILED\nprivate caption payload\n'
+        raw += b"FAIL: test_" + b"x" * 1000 + b" (tests.example.Demo)\n"
+        raw += b"x" * 1000 + b" > method() FAILED\n"
+        target.write_bytes(raw)
+        result = {"kind": "ci-quick", "status": "FAIL", "selected_diagnostic": {
+            "selected_report": {"checks": [{"check_id": "eng.fixture", "status": "FAIL", "process": {
+                "output_artifacts": {"stderr": {"locator": "tmp/quality/check.stderr.log", "sha256": hashlib.sha256(raw).hexdigest()}}
+            }}]}}}
+        check = ci.public_summary(result, self.root)["checks"][0]
+        self.assertEqual(check["test_ids"], ["DemoTest.returnsOk()", "test_demo"])
+        self.assertEqual(check["source_locations"], ["tests/example.py:19"])
+        self.assertEqual(check["gradle_tasks"], [":api:test"])
+        self.assertNotIn("private", json.dumps(check))
 
     def test_real_backend_extension_docs_and_version_mapping(self) -> None:
         for path, expected in [

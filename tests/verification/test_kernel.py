@@ -124,6 +124,13 @@ class TestBuildChildEnvironment(unittest.TestCase):
             self.assertNotIn("OPENAI_API_KEY", env)
             self.assertIn("USER", env)
 
+    def test_preserves_display_for_headed_browser_without_secrets(self):
+        with patch.dict(os.environ, {"DISPLAY": ":99", "XAUTHORITY": "/tmp/synthetic-xauth", "GITHUB_TOKEN": "synthetic-private"}):
+            env = build_child_environment()
+        self.assertEqual(env["DISPLAY"], ":99")
+        self.assertEqual(env["XAUTHORITY"], "/tmp/synthetic-xauth")
+        self.assertNotIn("GITHUB_TOKEN", env)
+
     def test_override_env(self):
         env = build_child_environment(override={"USER": "override"})
         self.assertEqual(env.get("USER"), "override")
