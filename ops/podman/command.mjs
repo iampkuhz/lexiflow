@@ -15,7 +15,12 @@ export function runCommand(command, argv, { cwd, env, timeout = 600000, capture 
     if (announce) console.log(`[LexiFlow]   ${label}…`);
     try {
       append(`\n[${label}]\n`);
-      child = spawn(command, argv, { cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      // 有归属回调时先启动不执行外部动作的 shell 屏障。父进程须同步持久记录
+      // PGID，再关闭带许可消息的 stdin；父进程强杀/记录失败只有 EOF，不会执行命令。
+      const barrier = 'IFS= read -r permit && [ "$permit" = lexiflow-start ] || exit 125; exec "$@"';
+      child = onStart
+        ? spawn('/bin/sh', ['-c', barrier, 'lexiflow-command', command, ...argv], { cwd, env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] })
+        : spawn(command, argv, { cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     } catch {
       reject(new Error(`${label}无法启动${logFile ? `；详情见 ${logFile}` : ''}`)); return;
     }
@@ -48,8 +53,16 @@ export function runCommand(command, argv, { cwd, env, timeout = 600000, capture 
       catch { stop('无法写入运行日志'); return; }
       if (stdout && capture) output.push(buffer);
     };
-    try { if (child.pid) onStart?.(child.pid); }
-    catch { stop('无法记录子进程归属'); }
+    if (onStart) child.stdin.on('error', () => stop('无法释放子进程启动屏障'));
+    try {
+      if (child.pid) {
+        onStart?.(child.pid);
+        if (onStart) child.stdin.end('lexiflow-start\n');
+      }
+    } catch {
+      if (onStart) child.stdin.destroy();
+      stop('无法记录子进程归属');
+    }
     child.stdout.on('data', buffer => collect(buffer, true));
     child.stderr.on('data', buffer => collect(buffer, false));
     child.on('error', () => { failure ||= '子进程无法启动'; });
