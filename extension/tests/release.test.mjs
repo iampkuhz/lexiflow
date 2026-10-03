@@ -6,6 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import { createHash } from "node:crypto";
 import { PACKAGE_FILES, createExtensionZip, publishExtensionArchive, packageRelease } from "../scripts/release.mjs";
+import { checkExtensionArchive } from "../scripts/archive-check.mjs";
+import { zipSync } from "fflate";
 import { resolveBuildIdentity, chromeVersion } from "../../ops/release/version.mjs";
 
 const buildIdentity = resolveBuildIdentity();
@@ -15,7 +17,7 @@ async function fixture() {
   const dist = path.join(root, "dist");
   await mkdir(path.join(dist, "assets"), { recursive: true });
   for (const file of PACKAGE_FILES) {
-    const data = file === "manifest.json" ? Buffer.from(JSON.stringify({ version: chromeVersion(version), version_name: version, permissions: ["storage"], host_permissions: ["http://127.0.0.1:18080/*"] })) : file === "build-identity.json" ? Buffer.from(JSON.stringify(buildIdentity)) : Buffer.from(`fixture:${file}`);
+    const data = file === "manifest.json" ? Buffer.from(JSON.stringify({ manifest_version: 3, version: chromeVersion(version), version_name: version, permissions: ["storage"], host_permissions: ["http://127.0.0.1:18080/*"], background: { service_worker: "background.js" }, action: { default_popup: "popup.html" } })) : file === "build-identity.json" ? Buffer.from(JSON.stringify(buildIdentity)) : file === "popup.html" ? Buffer.from('<link href="popup.css"><script src="popup.js"></script>') : Buffer.from(`fixture:${file}`);
     await writeFile(path.join(dist, file), data);
   }
   return { root, dist, cleanup: () => rm(root, { recursive: true, force: true }) };
@@ -130,6 +132,45 @@ test("refuses a symlinked release output directory", async () => {
     await symlink(outside, output);
     const artifact = await createExtensionZip({ root, buildIdentity });
     await assert.rejects(publishExtensionArchive(artifact.archive, `${artifact.descriptor.sha256}  ${artifact.descriptor.filename}\n`, output, artifact.descriptor.filename), /symlink/u);
+  } finally { await cleanup(); }
+});
+
+test("archive checker binds sidecar, full current identity, exact entries and local resource references", async () => {
+  const { root, cleanup } = await fixture();
+  const current = resolveBuildIdentity();
+  const output = path.join(root, `lexiflow-extension-${current.softwareVersion}.zip`);
+  try {
+    const built = await createExtensionZip({ root, buildIdentity: current });
+    await writeFile(output, built.archive);
+    await writeFile(`${output}.sha256`, `${built.descriptor.sha256}  ${path.basename(output)}\n`);
+    const accepted = await checkExtensionArchive(output, current.sourceCommit);
+    assert.deepEqual(accepted.buildIdentity, current);
+    assert.equal(accepted.sha256, built.descriptor.sha256);
+    await writeFile(`${output}.sha256`, `${"0".repeat(64)}  ${path.basename(output)}\n`);
+    await assert.rejects(checkExtensionArchive(output, current.sourceCommit), /CHECKSUM_MISMATCH/u);
+    await writeFile(`${output}.sha256`, `${built.descriptor.sha256}  ${path.basename(output)}\n`);
+    await assert.rejects(checkExtensionArchive(output, "0".repeat(40)), /EXPECTED_COMMIT_MISMATCH/u);
+  } finally { await cleanup(); }
+});
+
+test("archive checker rejects extra entries, missing resources and traversal names", async () => {
+  const { root, cleanup } = await fixture();
+  const current = resolveBuildIdentity();
+  const output = path.join(root, `lexiflow-extension-${current.softwareVersion}.zip`);
+  try {
+    const built = await createExtensionZip({ root, buildIdentity: current });
+    const original = built.unzip();
+    for (const entries of [
+      { ...original, "private.env": Buffer.from("synthetic secret") },
+      { ...original, "popup.html": Buffer.from('<script src="missing.js"></script>') },
+      { ...original, "../escape": Buffer.from("x") },
+    ]) {
+      const archive = zipSync(entries);
+      const digest = createHash("sha256").update(archive).digest("hex");
+      await writeFile(output, archive);
+      await writeFile(`${output}.sha256`, `${digest}  ${path.basename(output)}\n`);
+      await assert.rejects(checkExtensionArchive(output, current.sourceCommit));
+    }
   } finally { await cleanup(); }
 });
 

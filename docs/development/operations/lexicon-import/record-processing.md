@@ -22,7 +22,7 @@ stop
 |---|---|---|
 | `word` | NFC、去首尾空白、连续空白折叠、英语小写；单词为 `word`，空格分隔 2–5 词为 `phrase`；观看一期只枚举连续 1–3 词。 | `lemma`、`entry_kind` |
 | `exchange` | 以 `/` 分项、以首个 `:` 分键值。`p/d/i/3/r/t/s` 的值去重为词形；`0:lemma` 归并到 lemma，不另建派生词。 | `lexicon_hint_lookup` 中的屈折形式行 |
-| `translation` | 按行切分，清理空白和词性前缀；有普通释义时移除仅 `[网络]` 行。完整来源表达保留；导入期按来源约定解析有序候选，选第一项并进行短释安全校验后发布，不在观看时临时截取。首项无效不扫描后续项补位；释义括号不平衡只将本词条置为 BLOCK 并保留原文，CSV 列结构损坏仍阻止发布；具体解析边界见[首候选设计](../../../../openspec/changes/support-ranked-default-sense/design.md)。 | `source_gloss`、安全时的 `prepared_gloss` |
+| `translation` | 按行切分，清理空白和词性前缀；有普通释义时移除仅 `[网络]` 行。完整来源表达保留；导入期按来源约定解析有序候选，选第一项并进行短释安全校验后发布，不在观看时临时截取。首项无效不扫描后续项补位；释义括号不平衡只将本词条置为 BLOCK 并保留原文，CSV 列结构损坏仍阻止发布；具体解析边界见[默认首义规范](../../../../openspec/specs/product-architecture/spec.md)。 | `source_gloss`、安全时的 `prepared_gloss` |
 | `definition` | 统一换行和空白；缺失时保留来源未提供状态，不伪造英文定义。 | 离线清洗依据，不进入观看查询表 |
 | `tag` | 小写、去重；仅 `cet6`、`ky`、`toefl`、`ielts`、`gre`、`sat` 计入复杂词表。 | `source_complex_tags`、`complex_list_count` |
 | `bnc`、`frq` | 只接受正十进制排名；`0` 或非数值为缺失。 | `source_bnc_rank`、`source_frq_rank`、`frequency_zipf` |

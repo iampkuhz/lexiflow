@@ -53,6 +53,7 @@ class Fixture:
         for role, name, data in (
             ("runtime-entry", "lexiflow.sh", b"#!/bin/sh\n"),
             ("license", "licenses/MIT.txt", b"MIT\n"),
+            ("extension", "extension/package.zip", b"accepted extension zip bytes"),
             ("api-image", "images/api.tar", b"image bytes"),
         ):
             path = self.payload / name
@@ -110,6 +111,7 @@ class Fixture:
 class FakeGitHub:
     calls = []
     archive = None
+    extension = None
     fail = None
     list_assets = None
     immutable = True
@@ -126,6 +128,7 @@ class FakeGitHub:
     def reset(cls):
         cls.calls = []
         cls.archive = None
+        cls.extension = None
         cls.fail = None
         cls.list_assets = None
         cls.immutable = True
@@ -189,6 +192,8 @@ class FakeGitHub:
         self.assets.append(item)
         if name.endswith(".tar.gz"):
             type(self).archive = payload
+        if name.endswith(".zip"):
+            type(self).extension = payload
         return 201, item
 
 
@@ -231,6 +236,8 @@ class PromotionTests(unittest.TestCase):
             {
                 "lexiflow-1.2.3-macos-arm64.tar.gz",
                 "lexiflow-1.2.3-macos-arm64.tar.gz.sha256",
+                "lexiflow-extension-1.2.3.zip",
+                "lexiflow-extension-1.2.3.zip.sha256",
                 "candidate.json",
                 "manifest.json",
                 "manifest.json.sha256",
@@ -247,6 +254,15 @@ class PromotionTests(unittest.TestCase):
             published = self.promote(publish=True)
         self.assertTrue(published["published"])
         self.assertEqual(published["release_id"], 51)
+        extension_bytes = (self.fixture.payload / "extension/package.zip").read_bytes()
+        self.assertEqual(FakeGitHub.extension, extension_bytes)
+        extension_asset = next(
+            item
+            for item in published["assets"]
+            if item["name"] == "lexiflow-extension-1.2.3.zip"
+        )
+        self.assertEqual(extension_asset["bytes"], len(extension_bytes))
+        self.assertEqual(extension_asset["sha256"], sha(extension_bytes))
         with tarfile.open(fileobj=io.BytesIO(FakeGitHub.archive), mode="r:gz") as tar:
             self.assertEqual(
                 set(tar.getnames()),
@@ -254,6 +270,7 @@ class PromotionTests(unittest.TestCase):
                     "lexiflow.sh",
                     "licenses/MIT.txt",
                     "images/api.tar",
+                    "extension/package.zip",
                     "manifest.json",
                     "manifest.json.sha256",
                 },
@@ -416,7 +433,7 @@ class PromotionTests(unittest.TestCase):
 
                 def request(self, *args, **kwargs):
                     result = old(self, *args, **kwargs)
-                    if len(FakeGitHub.assets) == 5:
+                    if len(FakeGitHub.assets) == 7:
                         FakeGitHub.list_assets = mutate(FakeGitHub.assets)
                     return result
 
@@ -523,7 +540,7 @@ class PromotionTests(unittest.TestCase):
         original = self.fixture.consumer
 
         def drift(*args, **kwargs):
-            if len(FakeGitHub.assets) == 5:
+            if len(FakeGitHub.assets) == 7:
                 return {"result": "BLOCKED"}
             return original(*args, **kwargs)
 
@@ -540,7 +557,7 @@ class PromotionTests(unittest.TestCase):
                 self.promote(publish=True)
         self.assertEqual(caught.exception.release_id, 51)
         self.assertEqual(caught.exception.stage, "draft")
-        self.assertEqual(len(FakeGitHub.assets), 5)
+        self.assertEqual(len(FakeGitHub.assets), 7)
         self.assertFalse(any(call[2] == "PATCH" for call in FakeGitHub.calls))
 
     def test_cli_unknown_output_and_cleanup_preserve_remote_fact(self):

@@ -59,6 +59,20 @@ class CiQuickTests(unittest.TestCase):
         self.addCleanup(self.base_context.stop)
         self.addCleanup(self.changed_context.stop)
 
+    def test_public_summary_excludes_private_payloads(self) -> None:
+        secret = "private-caption-and-token-value"
+        result = {"kind": "ci-quick", "status": "FAIL", "diagnostic": secret,
+                  "selected_diagnostic": {"selected_report": {"checks": [{
+                      "check_id": "eng.fixture", "status": "FAIL", "reason": secret + " /private",
+                      "process": {"exit_code": 1, "stderr": secret},
+                      "result_contract": {"report": {"checks_run": 2, "detail": {
+                          "failed_tests": ["tests.fixture.Test.test_failure", secret + " /private"],
+                          "issues": [secret], "traceback": secret}}}}]}}}
+        summary = ci.public_summary(result, self.root)
+        self.assertNotIn(secret, json.dumps(summary))
+        self.assertEqual(summary["checks"][0]["test_ids"], ["tests.fixture.Test.test_failure"])
+        self.assertFalse(summary["formal_eligible"])
+
     def test_real_backend_extension_docs_and_version_mapping(self) -> None:
         for path, expected in [
             ("backend/product/api/src/X.java", "eng.backend.delivery"),

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -262,6 +263,103 @@ def run(
         }
 
 
+def public_summary(result: dict[str, Any], root: Path) -> dict[str, Any]:
+    """只公开状态、计数与代码位置，禁止透传原始日志和任意报告正文。"""
+    summary = {
+        "kind": result["kind"],
+        "status": result["status"],
+        "formal_eligible": False,
+        "full_repository_executed": False,
+        "checks_executed": result.get("checks_executed", 0),
+        "checks": [],
+    }
+    report = result.get("selected_diagnostic", {}).get("selected_report", {})
+    for check in report.get("checks", []):
+        process = check.get("process", {})
+        item = {
+            "check_id": check["check_id"],
+            "status": check["status"],
+            "exit_code": process.get("exit_code"),
+            "timed_out": process.get("timed_out", False),
+        }
+        # reason 只消费机械类别，不输出动态错误正文。
+        reason = check.get("reason", "")
+        item["reason"] = (
+            reason
+            if re.fullmatch(r"[a-z][a-z0-9-]{0,100}", reason)
+            else "see-local-evidence"
+        )
+        contract = check.get("result_contract", {}).get("report", {})
+        item["counts"] = {
+            key: contract[key]
+            for key in (
+                "checks_run",
+                "failures",
+                "errors",
+                "skipped",
+                "unit_tests",
+                "browser_smoke",
+            )
+            if isinstance(contract.get(key), int)
+        }
+        detail = contract.get("detail", {})
+        item["test_ids"] = sorted(
+            {
+                value
+                for key in ("failed_tests", "error_tests", "skipped_tests")
+                for value in (detail.get(key, []) if isinstance(detail, dict) else [])
+                if isinstance(value, str)
+                and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]{0,240}", value)
+            }
+        )
+        locations, categories, tasks = set(), set(), set()
+        if check["status"] != "PASS":
+            for descriptor in process.get("output_artifacts", {}).values():
+                locator = descriptor.get("locator", "")
+                target = (root / locator).resolve()
+                if not target.is_relative_to((root / "tmp/quality").resolve()):
+                    continue
+                try:
+                    raw = target.read_bytes()
+                except OSError:
+                    continue
+                if len(raw) > 4_000_000 or hashlib.sha256(
+                    raw
+                ).hexdigest() != descriptor.get("sha256"):
+                    continue
+                text = raw.decode("utf-8", errors="replace")
+                locations.update(
+                    re.findall(
+                        r"(?:tests|scripts|backend|extension|ops)/[A-Za-z0-9_./-]+\.(?:py|mjs|java|kts):[0-9]+",
+                        text,
+                    )
+                )
+                categories.update(
+                    re.findall(r"\b[A-Za-z][A-Za-z0-9]*(?:Error|Exception)\b", text)
+                )
+                tasks.update(
+                    re.findall(
+                        r"(?:Execution failed for task '|> Task )(:[A-Za-z0-9:_-]+)",
+                        text,
+                    )
+                )
+                for label, pattern in {
+                    "missing-display": r"Missing X server|\$DISPLAY|without having a XServer",
+                    "dependency-resolution": r"Could not resolve|Could not download",
+                    "tls-failure": r"PKIX|SSLHandshake|certificate verify failed",
+                    "java-compilation": r"Compilation failed|error: cannot find symbol",
+                    "gradle-test-failure": r"There were failing tests",
+                    "process-timeout": r"timed out|TimeoutExpired",
+                }.items():
+                    if re.search(pattern, text):
+                        categories.add(label)
+        item["source_locations"] = sorted(locations)[:80]
+        item["error_categories"] = sorted(categories)[:40]
+        item["gradle_tasks"] = sorted(tasks)[:40]
+        summary["checks"].append(item)
+    return summary
+
+
 def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
     """解析 plan/quick 命令行并输出状态结果。"""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -278,7 +376,13 @@ def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
         execute=args.command == "quick",
         all_paths=args.all,
     )
-    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    # GitHub 日志仅输出白名单摘要；完整私有证据仍留本次 runner。
+    output = (
+        public_summary(result, root or Path(__file__).resolve().parents[2])
+        if os.environ.get("GITHUB_ACTIONS") == "true"
+        else result
+    )
+    print(json.dumps(output, ensure_ascii=False, sort_keys=True))
     return {"PASS": 0, "BLOCKED": 2, "FAIL": 1}.get(result["status"], 1)
 
 
