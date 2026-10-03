@@ -36,11 +36,13 @@ const debugSent = new Set<string>();
 const debugStarted = new Set<string>();
 function sendDebug(event: "video-start" | "incremental" | "final" | "interrupted", topicKey: string,
   videoId: string, line: PresentedLine, requestId?: string, text = line.text): void {
-  if (!/^[A-Za-z0-9_-]{11}$/.test(videoId) || !topicKey || topicKey.length > 128 || line.subtitleKey.length > 128 || text.length > 16384) return;
+  const positionMs = line.positionMs ?? Math.floor(document.querySelector("video")?.currentTime! * 1000);
+  if (!/^[A-Za-z0-9_-]{11}$/.test(videoId) || !topicKey || topicKey.length > 128 || line.subtitleKey.length > 128 ||
+      !Number.isSafeInteger(positionMs) || positionMs < 0 || text.length > 16384) return;
   const eventId = event === "incremental" && requestId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(requestId)
     ? requestId : crypto.randomUUID();
   void chrome.runtime.sendMessage({ type: "caption-debug", payload: { eventId, event, topicKey, videoId,
-    subtitleKey: line.subtitleKey, positionMs: line.positionMs, text } }).catch(() => undefined);
+    subtitleKey: line.subtitleKey, positionMs, text } }).catch(() => undefined);
 }
 function record(observation: Parameters<Diagnostics["record"]>[0]): void {
   try { diagnostics.record(observation); } catch { /* diagnostics never changes user-visible behavior */ }
@@ -88,7 +90,14 @@ function renderCurrentView(): number {
       if (live.has(key)) continue;
       finalizePresented(tracked.line);
     }
-    for (const line of rendered.lines) if (videoId) debugPresented.set(line.subtitleKey, { line, topicKey: topic, videoId });
+    for (const line of rendered.lines) if (videoId) {
+      debugPresented.set(line.subtitleKey, { line, topicKey: topic, videoId });
+      while (debugPresented.size > 64) {
+        const oldest = debugPresented.values().next().value as TrackedLine | undefined;
+        if (!oldest) break;
+        finalizePresented(oldest.line);
+      }
+    }
     if (videoId && rendered.lines.length && !debugStarted.has(videoId)) {
       sendDebug("video-start", topic, videoId, rendered.lines[0], undefined, ""); rememberBounded(debugStarted, videoId, 16);
     }

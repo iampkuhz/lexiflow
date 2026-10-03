@@ -270,6 +270,9 @@ test('caption debug requires an exact YouTube top-frame sender and fresh enabled
   assert.deepEqual(await send(message,invalid),{ok:false,reason:'invalid-request'});
   assert.equal(calls.length,0);
   const valid={...sender(70),frameId:0,tab:{id:70,url:`https://www.youtube.com/watch?v=${videoId}`}};
+  assert.deepEqual(await send({...message,payload:{...message.payload,positionMs:null}},valid),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({...message,payload:{...message.payload,subtitleKey:null}},valid),{ok:false,reason:'invalid-request'});
+  assert.equal(calls.length,0);
   assert.deepEqual(await send(message,valid),{ok:true});
   for(let index=0;index<30&&!calls.some(call=>call.options.method==='POST');index++) await new Promise(resolve=>setTimeout(resolve,0));
   assert.deepEqual(calls.map(call=>call.options.method),['GET','POST']);

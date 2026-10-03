@@ -140,7 +140,14 @@ def main(arguments: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="本机 API 启动；端口冲突时交互确认是否终止旧进程。"
     )
-    parser.parse_args(arguments)
+    parser.add_argument(
+        "--caption-debug",
+        action="store_true",
+        help="保留本机默认字幕日志；不写分析 JSONL",
+    )
+    options = parser.parse_args(arguments)
+    if options.caption_debug:
+        print("字幕可读日志默认已开启；此兼容参数无需启用 JSONL。", flush=True)
     root = Path(__file__).resolve().parents[2]
     try:
         environment = command_environment(root)
@@ -152,7 +159,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         prepare_port(port)
         print(f"启动 LexiFlow API：http://127.0.0.1:{port}", flush=True)
         print(
-            "本机片段日志已开启：[LexiFlow segment] 含英文和中文提示，请勿共享终端输出。",
+            "本机字幕可读日志已开启，包含字幕正文与视频定位；请勿共享终端输出。",
             flush=True,
         )
         command = [
@@ -160,9 +167,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             "-p",
             str(root / "backend"),
             ":api:bootRun",
-            f"--args=--server.address=127.0.0.1 --server.port={port}"
-            " --lexiflow.segment-analysis.enabled=true"
-            " --lexiflow.segment-analysis.console=true",
+            f"--args=--server.address=127.0.0.1 --server.port={port}",
         ]
         os.execvpe(command[0], command, environment)
     except (

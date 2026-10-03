@@ -1,7 +1,9 @@
 package io.lexiflow.observability.platform;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
@@ -23,6 +25,10 @@ import tools.jackson.core.json.JsonFactory;
 /** 同步写入本机敏感 JSONL 台账的技术适配器。 */
 public final class FileSegmentAnalysisStore implements SegmentAnalysisStore {
   private static final Pattern ID = Pattern.compile("[0-9a-f]{64}");
+
+  /** 显式分析台账在重启后仍受单文件大小上限约束。 */
+  private static final long MAX_FILE_BYTES = 16L * 1024 * 1024;
+
   private final Path path;
   private final Consumer<String> console;
   private final Set<String> recorded = new HashSet<>();
@@ -80,7 +86,9 @@ public final class FileSegmentAnalysisStore implements SegmentAnalysisStore {
       if (channel.size() != knownSize) reload();
       if (recorded.contains(record.segmentId())) return;
       var line = jsonLine(record) + "\n";
-      var bytes = ByteBuffer.wrap(line.getBytes(StandardCharsets.UTF_8));
+      var encoded = line.getBytes(StandardCharsets.UTF_8);
+      if (channel.size() + encoded.length > MAX_FILE_BYTES) return;
+      var bytes = ByteBuffer.wrap(encoded);
       channel.position(channel.size());
       while (bytes.hasRemaining()) channel.write(bytes);
       channel.force(true);
@@ -99,15 +107,22 @@ public final class FileSegmentAnalysisStore implements SegmentAnalysisStore {
   private void reload() throws IOException {
     var candidate = new HashSet<String>();
     long candidateSize = Files.size(path);
-    if (candidateSize > 0) {
-      var last = ByteBuffer.allocate(1);
-      try (var channel =
-          FileChannel.open(path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
-        channel.read(last, candidateSize - 1);
-      }
-      if (last.get(0) != '\n') throw new IOException("analysis log has incomplete final line");
+    if (candidateSize > MAX_FILE_BYTES)
+      throw new IOException("analysis log exceeds retention limit");
+    byte[] contents;
+    try (var input =
+        Files.newInputStream(path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
+      contents = input.readNBytes(Math.toIntExact(MAX_FILE_BYTES + 1));
     }
-    try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+    if (contents.length > MAX_FILE_BYTES || contents.length != candidateSize)
+      throw new IOException("analysis log changed or exceeds retention limit");
+    if (candidateSize > 0) {
+      if (contents[contents.length - 1] != '\n')
+        throw new IOException("analysis log has incomplete final line");
+    }
+    var decoder = StandardCharsets.UTF_8.newDecoder();
+    try (BufferedReader reader =
+        new BufferedReader(new InputStreamReader(new ByteArrayInputStream(contents), decoder))) {
       String line;
       while ((line = reader.readLine()) != null) {
         var id = validatedId(line);

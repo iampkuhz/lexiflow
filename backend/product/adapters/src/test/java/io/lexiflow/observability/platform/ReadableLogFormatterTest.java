@@ -1,6 +1,7 @@
 package io.lexiflow.observability.platform;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.time.Clock;
@@ -11,6 +12,24 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class ReadableLogFormatterTest {
+  @Test
+  void formatHasRequiredSixColumnsAndSinglePhysicalLine() {
+    var id = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+    var formatter = new ReadableLogFormatter(Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));
+    var line =
+        formatter.format(
+            "INFO",
+            id,
+            "caption.incremental",
+            Map.of("video", "abcdefghijk", "subtitle", "line-7", "position_ms", "42"),
+            "English(短释)\nnext");
+    assertEquals(
+        "01-01 00:00:00|INFO|123e4567-e89b-12d3-a456-426614174000|caption.incremental|position_ms=42;subtitle=line-7;video=abcdefghijk|English(短释)\\nnext",
+        line);
+    assertEquals(6, line.split("\\|", -1).length);
+    assertFalse(line.contains("\n"));
+  }
+
   @Test
   void emitsSixUnpaddedColumnsWithEscapedBodyAndLocation() {
     var id = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");

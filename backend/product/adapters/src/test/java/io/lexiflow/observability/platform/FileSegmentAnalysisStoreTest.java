@@ -40,6 +40,26 @@ class FileSegmentAnalysisStoreTest {
   }
 
   @Test
+  void rejectsOversizedExistingLedgerBeforeParsingOrAppending() throws Exception {
+    var path = dir.resolve("oversized.jsonl");
+    try (var channel =
+        java.nio.channels.FileChannel.open(
+            path,
+            java.nio.file.StandardOpenOption.CREATE_NEW,
+            java.nio.file.StandardOpenOption.WRITE)) {
+      channel.position(16L * 1024 * 1024);
+      channel.write(java.nio.ByteBuffer.wrap(new byte[] {'\n'}));
+    }
+    long before = Files.size(path);
+    assertThrows(
+        java.io.IOException.class,
+        () ->
+            new FileSegmentAnalysisStore(path, null)
+                .append(List.of(new SegmentAnalysisRecord("a".repeat(64), "x", List.of()))));
+    assertEquals(before, Files.size(path));
+  }
+
+  @Test
   void initializedStoreRepeatedlyRejectsExternalBadTailWithoutAppending() throws Exception {
     var path = dir.resolve("reload.jsonl");
     var store = new FileSegmentAnalysisStore(path, null);

@@ -8,12 +8,81 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import tools.jackson.core.JsonToken;
 import tools.jackson.core.json.JsonFactory;
 
 class StructuredEventLoggerTest {
+  @Test
+  void saturatedReadableQueueDropsInsteadOfBlockingCaller() throws Exception {
+    var entered = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var executor =
+        new ThreadPoolExecutor(
+            1,
+            1,
+            0,
+            TimeUnit.MILLISECONDS,
+            new ArrayBlockingQueue<>(1),
+            new ThreadPoolExecutor.DiscardPolicy());
+    executor.setThreadFactory(
+        runnable -> {
+          var thread = new Thread(runnable, "readable-log-test");
+          thread.setDaemon(true);
+          return thread;
+        });
+    var logger =
+        new StructuredEventLogger(
+            null,
+            executor,
+            line -> {
+              entered.countDown();
+              try {
+                release.await();
+              } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+              }
+            });
+    try {
+      assertTrue(logger.tryEmitReadableInfo("incremental", UUID.randomUUID(), Map.of(), "one"));
+      assertTrue(entered.await(1, TimeUnit.SECONDS));
+      assertTrue(logger.tryEmitReadableInfo("incremental", UUID.randomUUID(), Map.of(), "two"));
+      var caller =
+          new FutureTask<>(
+              () ->
+                  logger.tryEmitReadableInfo("incremental", UUID.randomUUID(), Map.of(), "three"));
+      new Thread(caller, "readable-log-caller-test").start();
+      assertTrue(caller.get(1, TimeUnit.SECONDS));
+      assertEquals(1, executor.getQueue().size());
+    } finally {
+      release.countDown();
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void readableSinkFailureAfterSubmissionDoesNotEscapeIntoRequestOrPrintSensitiveException() {
+    var submitted = new AtomicReference<Runnable>();
+    var attempted = new java.util.concurrent.atomic.AtomicBoolean();
+    var logger =
+        new StructuredEventLogger(
+            null,
+            submitted::set,
+            line -> {
+              attempted.set(true);
+              throw new IllegalStateException("private sink failure");
+            });
+    assertTrue(logger.tryEmitReadableInfo("incremental", UUID.randomUUID(), Map.of(), "caption"));
+    org.junit.jupiter.api.Assertions.assertDoesNotThrow(() -> submitted.get().run());
+    assertTrue(attempted.get());
+  }
+
   @Test
   void parsesSingleLineJsonAndDistinguishesKnownZeroFromUnknown() throws Exception {
     var line = new AtomicReference<String>();
