@@ -257,16 +257,21 @@ export async function runLocal(argv, candidateRequest) {
       unlockProcess?.(); unlockProcess = undefined;
     }
   }
-  async function verifyRunningImage(installed) {
-    const rows = JSON.parse(await run('podman', ['ps', '--format', 'json'], { capture: true, timeout: 10000 }));
+  async function apiContainerId(installed, { all = false, optional = false } = {}) {
+    const rows = JSON.parse(await run('podman', ['ps', ...(all ? ['-a'] : []), '--format', 'json'], { capture: true, timeout: 10000 }));
     const owned = rows.filter(row => {
       const labels = row.Labels || row.labels || {};
       return labels['lexiflow.installation'] === installed.id
         && (labels['com.docker.compose.project'] || labels['io.podman.compose.project']) === installed.project
         && (labels['com.docker.compose.service'] || labels['io.podman.compose.service']) === 'api';
     });
+    if (optional && owned.length === 0) return null;
     const container = owned.length === 1 ? (owned[0].Id || owned[0].ID) : '';
     if (!/^[a-f0-9]{64}$/.test(container)) fail('RUNTIME_CONTAINER_IDENTITY_MISMATCH');
+    return container;
+  }
+  async function verifyRunningImage(installed) {
+    const container = await apiContainerId(installed);
     const image = await run('podman', ['inspect', '--format', '{{.Image}}', container], { capture: true, timeout: 10000 });
     if (image.replace(/^sha256:/, '') !== installed.apiImage.replace(/^sha256:/, '')) fail('RUNTIME_IMAGE_MISMATCH');
     if (installed.buildIdentity) {
@@ -292,7 +297,17 @@ export async function runLocal(argv, candidateRequest) {
       schemaDigest: () => candidate ? candidate.artifacts.sql.sha256 : sha(fs.readFileSync(path.join(repo, 'infra/postgres/schema.sql'))),
       checkCancelled: () => { if (interrupted) fail('升级已取消'); },
       restore: async work => { restoring = true; try { return await work(); } finally { restoring = false; } },
-      activate: async () => { await ownedResources(); await compose('config'); await compose('up', '-d', '--no-deps', 'api'); },
+      activate: async installed => {
+        await ownedResources();
+        const previous = await apiContainerId(installed, { all: true, optional: true });
+        await compose('config');
+        // 升级与恢复明确替换 API，不依赖 provider 对镜像/config-hash 的自动判定。
+        // 不重建依赖服务；相同构建的 no-op 在事务入口已返回，不会来到这里。
+        await compose('up', '-d', '--no-deps', '--force-recreate', 'api');
+        const current = await apiContainerId(installed);
+        if (current === previous) fail('UPGRADE_API_NOT_RECREATED：API 容器未替换，拒绝声明升级成功');
+        console.log(`[LexiFlow] API 容器已替换: ${previous ?? '不存在'} -> ${current}；继续核验镜像与就绪状态`);
+      },
       ready,
       prepare: async (work, identity, installed, persistPlan) => {
         if (candidate) {
