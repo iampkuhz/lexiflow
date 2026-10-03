@@ -9,8 +9,10 @@ export type StatusRead = { ok: true; status: RuntimeStatus } | { ok: false; reas
 const reasons = new Set(["OK", "DEMO_MODE", "NO_PUBLISHED_DATA", "DEPENDENCY_UNAVAILABLE", "SCHEMA_MISMATCH", "PREWARM_DEGRADED"]);
 function validVersion(value: unknown): value is string {
   if (typeof value !== "string") return false;
-  const parts = value.split(".");
-  return parts.length === 3 && parts.every(part => /^(0|[1-9]\d{0,4})$/.test(part) && Number(part) <= 65535) && value !== "0.0.0";
+  if (!/^(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})(?:-SNAPSHOT\.g[a-f0-9]{7,64}(?:\.dirty\.[a-f0-9]{12,64})?)?$/.test(value)) return false;
+  const numeric = value.split("-")[0];
+  const parts = numeric.split(".");
+  return parts.length === 3 && parts.every(part => /^(0|[1-9]\d{0,4})$/.test(part) && Number(part) <= 65535) && numeric !== "0.0.0";
 }
 export function parseRuntimeStatus(value: unknown): RuntimeStatus | undefined {
   if (!value || typeof value !== "object") return;

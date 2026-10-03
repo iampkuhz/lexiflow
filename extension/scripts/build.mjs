@@ -1,5 +1,5 @@
 import { localApiPort } from "./build-config.mjs";
-import { readVersion } from "../../ops/release/version.mjs";
+import { resolveBuildIdentity } from "../../ops/release/version.mjs";
 import { readFile, writeFile, mkdir, rm, cp } from "node:fs/promises";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 const root = resolve(import.meta.dirname, "..");
 const dist = resolve(root, "dist");
 const apiPort = localApiPort(process.env.LEXIFLOW_API_PORT);
-const softwareVersion = await readVersion();
+const identity = resolveBuildIdentity();
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 await cp(resolve(root, "assets"), resolve(dist, "assets"), { recursive: true });
@@ -40,6 +40,8 @@ for (const name of ["popup.html", "popup.css"]) {
   await writeFile(resolve(dist, name), await readFile(resolve(root, "src", name)));
 }
 const manifest = JSON.parse(await readFile(resolve(root, "manifest.json"), "utf8"));
-manifest.version = softwareVersion;
+manifest.version = identity.chromeVersion;
+manifest.version_name = identity.softwareVersion;
+await writeFile(resolve(dist, "build-identity.json"), JSON.stringify(identity, null, 2) + "\n");
 manifest.host_permissions = [`http://127.0.0.1:${apiPort}/*`];
 await writeFile(resolve(dist, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");

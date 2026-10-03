@@ -258,17 +258,7 @@ public final class RuntimeHealthCommand {
 
   private static boolean validSoftwareVersion(String value) {
     try {
-      // 软件身份解析器保持包内可见；此处仅校验相同的三段式响应语法。
-      if (!value.matches("(?:0|[1-9][0-9]{0,4})\\.(?:0|[1-9][0-9]{0,4})\\.(?:0|[1-9][0-9]{0,4})"))
-        return false;
-      String[] parts = value.split("\\.");
-      boolean allZero = true;
-      for (String part : parts) {
-        int number = Integer.parseInt(part);
-        if (number > 65535) return false;
-        allZero &= number == 0;
-      }
-      return !allZero;
+      return value.equals(io.lexiflow.api.runtime.SoftwareIdentity.parseVersion(value));
     } catch (RuntimeException ignored) {
       return false;
     }

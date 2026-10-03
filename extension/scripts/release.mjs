@@ -5,12 +5,12 @@ import { lstat, mkdir, readFile, rm, writeFile, link } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { zipSync, unzipSync } from "fflate";
-import { readVersion, checkReleaseSource } from "../../ops/release/version.mjs";
+import { resolveBuildIdentity, chromeVersion, checkReleaseSource, assertBuildIdentityMatches } from "../../ops/release/version.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const extensionRoot = path.resolve(HERE, "..");
 export const repositoryRoot = path.resolve(extensionRoot, "..");
-export const PACKAGE_FILES = ["manifest.json", "background.js", "content.js", "youtube-bridge.js", "popup.js", "popup.html", "popup.css", "assets/icon-16.png", "assets/icon-32.png", "assets/icon-48.png", "assets/icon-128.png", "assets/logo.svg"];
+export const PACKAGE_FILES = ["manifest.json", "build-identity.json", "background.js", "content.js", "youtube-bridge.js", "popup.js", "popup.html", "popup.css", "assets/icon-16.png", "assets/icon-32.png", "assets/icon-48.png", "assets/icon-128.png", "assets/logo.svg"];
 const ZIP_OPTIONS = { level: 9, mtime: new Date(2020, 0, 1, 0, 0, 0), os: 0 };
 
 function fail(message) { throw new Error(message); }
@@ -28,8 +28,12 @@ async function regularNoSymlink(root, relative) {
 }
 
 export async function createExtensionZip(options = {}) {
-  const { root = extensionRoot, sourceCommit = "test-source" } = options;
-  const softwareVersion = options.softwareVersion ?? await readVersion();
+  const { root = extensionRoot, buildIdentity } = options;
+  if (!buildIdentity) fail("extension build identity required");
+  let expectedIdentity;
+  try { assertBuildIdentityMatches(buildIdentity, buildIdentity); expectedIdentity = { ...buildIdentity }; }
+  catch { fail("BUILD_IDENTITY_MISMATCH"); }
+  const { sourceCommit, softwareVersion } = expectedIdentity;
   const dist = path.join(root, "dist");
   await assertNoSymlinkPath(root);
   await assertNoSymlinkPath(dist);
@@ -43,16 +47,21 @@ export async function createExtensionZip(options = {}) {
     const bytes = await readFile(file);
     if (name === "manifest.json") {
       const manifest = JSON.parse(bytes.toString("utf8"));
-      if (manifest.version !== softwareVersion) fail("manifest software version mismatch");
+      if (manifest.version !== chromeVersion(softwareVersion) || manifest.version_name !== softwareVersion) fail("manifest software version mismatch");
       if (JSON.stringify(manifest.permissions) !== JSON.stringify(["storage"])) fail("manifest permissions mismatch");
       if (JSON.stringify(manifest.host_permissions) !== JSON.stringify(["http://127.0.0.1:18080/*"])) fail("manifest host permissions mismatch");
+    }
+    if (name === "build-identity.json") {
+      const identity = JSON.parse(bytes.toString("utf8"));
+      try { assertBuildIdentityMatches(identity, expectedIdentity); }
+      catch { fail("EXTENSION_IDENTITY_MISMATCH"); }
     }
     entries.push([name, bytes]);
   }
   const binaryArchive = zipSync(Object.fromEntries(entries), ZIP_OPTIONS);
   const digest = createHash("sha256").update(binaryArchive).digest("hex");
   const filename = `lexiflow-extension-${softwareVersion}.zip`;
-  const descriptor = { softwareVersion, sourceCommit, filename, bytes: binaryArchive.byteLength, sha256: digest };
+  const descriptor = { buildIdentity: expectedIdentity, softwareVersion, sourceCommit, filename, bytes: binaryArchive.byteLength, sha256: digest };
   return { archive: binaryArchive, descriptor, files: entries.map(([name]) => name), unzip: () => unzipSync(binaryArchive) };
 }
 
@@ -97,11 +106,22 @@ async function readExistingRegularFile(target) {
 
 export async function packageRelease({ repoRoot = repositoryRoot } = {}) {
   const source = checkReleaseSource(repoRoot);
+  const buildIdentity = resolveBuildIdentity(repoRoot);
   const extension = path.join(repoRoot, "extension");
   execFileSync("npm", ["--prefix", extension, "run", "build"], { cwd: repoRoot, stdio: ["ignore", "ignore", "inherit"], env: { ...process.env, LEXIFLOW_API_PORT: "18080" } });
   const after = checkReleaseSource(repoRoot);
+  const afterIdentity = resolveBuildIdentity(repoRoot);
+  try { assertBuildIdentityMatches(buildIdentity, afterIdentity); }
+  catch { fail("release source changed during build"); }
   if (after.sourceCommit !== source.sourceCommit || after.softwareVersion !== source.softwareVersion) fail("release source changed during build");
-  const result = await createExtensionZip({ root: extension, ...source });
+  const result = await createExtensionZip({ root: extension, buildIdentity });
+  let packagingIdentity;
+  try {
+    checkReleaseSource(repoRoot);
+    packagingIdentity = resolveBuildIdentity(repoRoot);
+    assertBuildIdentityMatches(buildIdentity, packagingIdentity);
+  }
+  catch { fail("release source changed during packaging"); }
   await publishExtensionArchive(result.archive, `${result.descriptor.sha256}  ${result.descriptor.filename}\n`, path.join(repoRoot, "tmp/releases", source.softwareVersion, source.sourceCommit), result.descriptor.filename);
   process.stdout.write(`${JSON.stringify(result.descriptor)}\n`);
   return result.descriptor;

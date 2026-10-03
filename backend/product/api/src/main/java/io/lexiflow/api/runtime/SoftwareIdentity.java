@@ -8,9 +8,10 @@ import java.util.regex.Pattern;
 /** 从构建时嵌入的唯一版本资源读取软件身份。 */
 public final class SoftwareIdentity {
   private static final String RESOURCE = "/META-INF/lexiflow-version.txt";
-  private static final int MAX_RESOURCE_BYTES = 64;
+  private static final int MAX_RESOURCE_BYTES = 256;
   private static final Pattern VERSION =
-      Pattern.compile("(?:0|[1-9][0-9]{0,4})\\.(?:0|[1-9][0-9]{0,4})\\.(?:0|[1-9][0-9]{0,4})");
+      Pattern.compile(
+          "(?:0|[1-9][0-9]{0,4})\\.(?:0|[1-9][0-9]{0,4})\\.(?:0|[1-9][0-9]{0,4})(?:-SNAPSHOT\\.g[a-f0-9]{7,64}(?:\\.dirty\\.[a-f0-9]{12,64})?)?");
   private final String version;
 
   /**
@@ -36,19 +37,25 @@ public final class SoftwareIdentity {
   /**
    * 返回构建时嵌入的规范软件版本。
    *
-   * @return 经校验的三段式软件版本。
+   * @return 经校验的正式或带源码身份的开发软件版本。
    */
   public String version() {
     return version;
   }
 
-  static String parseVersion(String raw) {
+  /**
+   * 校验正式或开发软件身份，供运行健康检查共享。
+   *
+   * @param raw 构建资源或运行响应中的软件版本。
+   * @return 经校验且移除单个结尾换行的版本。
+   */
+  public static String parseVersion(String raw) {
     var value =
         raw.endsWith("\r\n")
             ? raw.substring(0, raw.length() - 2)
             : raw.endsWith("\n") ? raw.substring(0, raw.length() - 1) : raw;
     if (!VERSION.matcher(value).matches()) throw invalidVersion();
-    var parts = value.split("\\.");
+    var parts = value.split("-", 2)[0].split("\\.");
     boolean allZero = true;
     for (var part : parts) {
       // 正则已限制为最多五位数字，不存在解析溢出。

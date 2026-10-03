@@ -10,6 +10,11 @@ class ReleaseVersionTest {
         assertEquals("65535.1.0", ReleaseVersion.parse("65535.1.0\r\n"))
     }
 
+    @Test fun acceptsResolvedSnapshotIdentity() {
+        assertEquals("2.0.0-SNAPSHOT.gabc1234.dirty.0123456789ab", ReleaseVersion.parse("2.0.0-SNAPSHOT.gabc1234.dirty.0123456789ab"))
+        assertThrows(IllegalArgumentException::class.java) { ReleaseVersion.parse("2.0.0-SNAPSHOT") }
+    }
+
     @Test fun rejectsInvalidValues() {
         listOf("0.0.0", "01.2.3", "1.2.65536", "1.2.3\n\n", " 1.2.3", "1.2.3x", "\uFEFF1.2.3").forEach {
             assertThrows(IllegalArgumentException::class.java) { ReleaseVersion.parse(it) }
