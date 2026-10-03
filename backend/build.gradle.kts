@@ -19,15 +19,18 @@ plugins {
 
 group = "io.lexiflow"
 if (providers.gradleProperty("version").isPresent) throw GradleException("软件版本只读取 ops/release/version.txt，不接受 -Pversion 覆盖")
-val softwareVersionContents = providers.fileContents(layout.projectDirectory.file("../ops/release/version.txt")).asText
-version = try {
-    ReleaseVersion.parse(softwareVersionContents.get())
-} catch (_: Exception) {
-    throw GradleException("软件版本文件缺失或格式无效")
+// 与扩展及部署入口消费同一确定性身份，不由 Gradle 另造提交/dirty 规则。
+val identityCommand = providers.exec {
+    commandLine("node", rootDir.parentFile.resolve("ops/release/version.mjs").absolutePath)
 }
+val buildIdentityJson = identityCommand.standardOutput.asText.get().trim()
+val buildIdentity = groovy.json.JsonSlurper().parseText(buildIdentityJson) as Map<*, *>
+version = ReleaseVersion.parse(buildIdentity["softwareVersion"].toString())
+
 val requestedRelease = providers.gradleProperty("release").orNull
 if (requestedRelease != null && requestedRelease !in setOf("true", "false")) throw GradleException("release 参数必须为 true 或 false")
 if (requestedRelease == "true") {
+    if (buildIdentity["dirty"] != false) throw GradleException("发行输入工作区必须清洁")
     val gitCheck = providers.exec {
         commandLine("git", "-C", rootDir.parentFile.absolutePath, "rev-parse", "--show-toplevel")
         isIgnoreExitValue = true
@@ -194,11 +197,21 @@ project(":api") {
     dependencies.add("implementation", "org.springframework.boot:spring-boot-starter-webmvc")
     dependencies.add("implementation", "org.springframework.boot:spring-boot-starter-jdbc")
     dependencies.add("runtimeOnly", "org.postgresql:postgresql")
-    tasks.named<ProcessResources>("processResources") {
-        from(rootProject.projectDir.parentFile.resolve("ops/release/version.txt")) {
-            into("META-INF")
-            rename { "lexiflow-version.txt" }
+    val identityContents = buildIdentityJson
+    val identityVersion = rootProject.version.toString()
+    val generateSoftwareIdentity = tasks.register("generateSoftwareIdentity") {
+        val output = layout.buildDirectory.dir("generated/software-identity")
+        inputs.property("buildIdentity", identityContents)
+        outputs.dir(output)
+        doLast {
+            val directory = output.get().asFile.resolve("META-INF")
+            directory.mkdirs()
+            directory.resolve("lexiflow-version.txt").writeText("$identityVersion\n")
+            directory.resolve("lexiflow-build.json").writeText("$identityContents\n")
         }
+    }
+    tasks.named<ProcessResources>("processResources") {
+        from(generateSoftwareIdentity)
         from(rootProject.projectDir.parentFile.resolve("infra/postgres/schema.sql")) {
             into("META-INF")
             rename { "lexiflow-schema.sql" }
@@ -206,6 +219,7 @@ project(":api") {
     }
     tasks.withType<Test>().configureEach {
         systemProperty("lexiflow.repository.root", rootProject.projectDir.parentFile.absolutePath)
+        systemProperty("lexiflow.build.version", rootProject.version.toString())
     }
 }
 
@@ -254,6 +268,7 @@ project(":integration-tests") {
         systemProperty("lexiflow.redis.test.endpoint", providers.environmentVariable("LEXIFLOW_REDIS_TEST_ENDPOINT").getOrElse(""))
         systemProperty("lexiflow.postgres.schema.file", rootProject.projectDir.parentFile.resolve("infra/postgres/schema.sql").absolutePath)
         systemProperty("lexiflow.repository.root", rootProject.projectDir.parentFile.absolutePath)
+        systemProperty("lexiflow.build.version", rootProject.version.toString())
         systemProperty("lexiflow.runtimeSmoke.classpath", runtimeSmoke.runtimeClasspath.asPath)
         systemProperty("lexiflow.runtimeSmoke.bootJar", project(":api").tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar").flatMap { it.archiveFile }.get().asFile.absolutePath)
         testLogging { events("failed") }
@@ -269,6 +284,7 @@ project(":integration-tests") {
         systemProperty("lexiflow.postgres.test.jdbcUrl", fixtureJdbc)
         systemProperty("lexiflow.postgres.schema.file", rootProject.projectDir.parentFile.resolve("infra/postgres/schema.sql").absolutePath)
         systemProperty("lexiflow.repository.root", rootProject.projectDir.parentFile.absolutePath)
+        systemProperty("lexiflow.build.version", rootProject.version.toString())
         systemProperty("lexiflow.runtimeSmoke.classpath", runtimeSmoke.runtimeClasspath.asPath)
         systemProperty("lexiflow.runtimeSmoke.bootJar", project(":api").tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar").flatMap { it.archiveFile }.get().asFile.absolutePath)
         systemProperty("lexiflow.release.fixture.output", fixtureOutput)

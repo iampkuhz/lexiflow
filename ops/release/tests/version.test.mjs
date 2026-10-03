@@ -4,6 +4,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync, copyFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import fsDefault from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { parseVersion, readVersion, checkReleaseSource } from '../version.mjs';
 import { evaluateTapSummary, runTests } from '../check.mjs';
 
@@ -97,4 +100,139 @@ test('runner handles exit failure, timeout, overflow and spawn error', async () 
     { args: ['-e', 'process.stdout.write("x".repeat(10000))'], maxOutputBytes: 100 },
     { command: '/not/a/real/runner', args: [] },
   ]) assert.equal((await runTests(options)).status, 'FAIL');
+});
+
+test('snapshot input and Chrome channel mapping are deterministic and ordered', async () => {
+  const { chromeVersion } = await import('../version.mjs');
+  assert.equal(parseVersion('2.0.0-SNAPSHOT\n'), '2.0.0-SNAPSHOT');
+  assert.equal(chromeVersion('2.0.0-SNAPSHOT.gabc1234.dirty.123456789abc'), '2.0.0.0');
+  assert.equal(chromeVersion('2.0.0'), '2.0.0.1');
+  assert.equal(chromeVersion('2.0.1-SNAPSHOT.gabc1234'), '2.0.1.0');
+  for (const value of ['0.0.0-SNAPSHOT', '2.0.0-preview', '2.0.0-SNAPSHOT.gABC1234', '2.0.0-SNAPSHOT.gabc1234.dirty.', '2.0.65536-SNAPSHOT', '2.0.0\n']) assert.throws(() => chromeVersion(value));
+  assert.throws(() => parseVersion('2.0.0-SNAPSHOT.gabc1234'));
+});
+test('build identity binds commit and content, not time, staging or ignored local data', async () => {
+  const { resolveBuildIdentity } = await import('../version.mjs');
+  withFixture({ ignore: true }, root => {
+    const clean = resolveBuildIdentity(root);
+    assert.equal(clean.softwareVersion, '1.2.3');
+    assert.equal(clean.chromeVersion, '1.2.3.1');
+    assert.equal(clean.dirty, false);
+    assert.deepEqual(resolveBuildIdentity(root), clean);
+    mkdirSync(path.join(root, 'ignored'));
+    writeFileSync(path.join(root, 'ignored/private'), 'synthetic private input excluded');
+    assert.deepEqual(resolveBuildIdentity(root), clean);
+    writeFileSync(path.join(root, 'source'), 'changed one');
+    const first = resolveBuildIdentity(root);
+    assert.equal(first.channel, 'snapshot');
+    assert.match(first.softwareVersion, /^1\.2\.3-SNAPSHOT\.g[a-f0-9]{7}\.dirty\.[a-f0-9]{12}$/);
+    assert.equal(first.sourceCommit, clean.sourceCommit);
+    git(root, 'add', 'source');
+    assert.deepEqual(resolveBuildIdentity(root), first);
+    writeFileSync(path.join(root, 'source'), 'changed two');
+    const second = resolveBuildIdentity(root);
+    assert.notEqual(second.buildId, first.buildId);
+    assert.notEqual(second.softwareVersion, first.softwareVersion);
+    writeFileSync(path.join(root, 'untracked'), 'new input');
+    assert.notEqual(resolveBuildIdentity(root).buildId, second.buildId);
+    unlinkSync(path.join(root, 'source'));
+    assert.doesNotThrow(() => resolveBuildIdentity(root));
+  });
+});
+test('clean snapshots retain full commit identity and cannot become formal tags', async () => {
+  const { resolveBuildIdentity, checkReleaseTag } = await import('../version.mjs');
+  withFixture({}, root => {
+    writeFileSync(path.join(root, 'ops/release/version.txt'), '2.0.0-SNAPSHOT\n');
+    git(root, 'add', '.'); git(root, 'commit', '-qm', 'snapshot');
+    const identity = resolveBuildIdentity(root);
+    assert.equal(identity.dirty, false);
+    assert.equal(identity.softwareVersion, `2.0.0-SNAPSHOT.g${identity.sourceCommit.slice(0, 7)}`);
+    assert.equal(checkReleaseSource(root).softwareVersion, identity.softwareVersion);
+    git(root, 'tag', 'v2.0.0');
+    assert.throws(() => checkReleaseTag('v2.0.0', root));
+  });
+});
+test('formal tag requires clean numeric version and tag at exact HEAD', async () => {
+  const { checkReleaseTag } = await import('../version.mjs');
+  withFixture({}, root => {
+    assert.throws(() => checkReleaseTag('v1.2.3', root));
+    git(root, 'tag', 'v1.2.3');
+    assert.equal(checkReleaseTag('v1.2.3', root).channel, 'release');
+    assert.throws(() => checkReleaseTag('v1.2.4', root));
+    writeFileSync(path.join(root, 'source'), 'dirty');
+    assert.throws(() => checkReleaseTag('v1.2.3', root));
+    git(root, 'add', '.'); git(root, 'commit', '-qm', 'next commit');
+    assert.throws(() => checkReleaseTag('v1.2.3', root));
+  });
+});
+test('build identity refuses symlinks rather than hashing external private input', async () => {
+  const { resolveBuildIdentity } = await import('../version.mjs');
+  const { symlinkSync } = await import('node:fs');
+  withFixture({}, root => {
+    symlinkSync('/nonexistent-private-source', path.join(root, 'link'));
+    assert.throws(() => resolveBuildIdentity(root), /symlink forbidden/);
+  });
+});
+
+const identityRaces = [
+    ['file edit and restore during read', root => ({ trigger: 'source', change: () => {
+      const file = path.join(root, 'source'); const original = fs.readFileSync(file);
+      fs.writeFileSync(file, 'transient'); fs.writeFileSync(file, original);
+    } })],
+    ['previously read file edit and restore', root => ({ trigger: 'source', change: () => {
+      const file = path.join(root, 'ops/release/version.txt'); const original = fs.readFileSync(file);
+      fs.writeFileSync(file, 'transient'); fs.writeFileSync(file, original);
+    } })],
+    ['previously read file edit', root => ({ trigger: 'source', change: () => { fs.writeFileSync(path.join(root, 'ops/release/version.txt'), '1.2.4\n'); } })],
+    ['tracked member addition', root => ({ trigger: 'source', change: () => { fs.writeFileSync(path.join(root, 'added'), 'x'); git(root, 'add', 'added'); } })],
+    ['tracked member deletion', root => ({ trigger: 'source', change: () => { git(root, 'rm', '-q', 'source'); } })],
+    ['HEAD change', root => ({ trigger: 'source', change: () => { git(root, 'commit', '--allow-empty', '-qm', 'race'); } })],
+    ['version change', root => ({ trigger: 'source', change: () => { fs.writeFileSync(path.join(root, 'ops/release/version.txt'), '1.2.4\n'); } })],
+  ];
+for (const [name, mutate] of identityRaces) test(`identity rejects ${name} observed during bounded snapshots`, async () => {
+  const { resolveBuildIdentity } = await import('../version.mjs');
+  withFixture({}, root => {
+    const originalOpen = fsDefault.openSync;
+    let changed = false;
+    const race = mutate(root);
+    fsDefault.openSync = function patchedOpen(filename, ...args) {
+      const fd = originalOpen.call(this, filename, ...args);
+      if (!changed && String(filename) === path.join(root, race.trigger)) { changed = true; race.change(); }
+      return fd;
+    };
+    syncBuiltinESMExports();
+    try { assert.throws(() => resolveBuildIdentity(root), /build source changed during identity scan/); assert.equal(changed, true); }
+    finally { fsDefault.openSync = originalOpen; syncBuiltinESMExports(); }
+  });
+});
+
+test('identity rejects file bytes changed and restored during an FD read', async () => {
+  const { resolveBuildIdentity } = await import('../version.mjs');
+  withFixture({}, root => {
+    const originalOpen = fsDefault.openSync;
+    const originalRead = fsDefault.readSync;
+    const filename = path.join(root, 'source');
+    const bytes = fs.readFileSync(filename);
+    let targetFd, changed = false;
+    fsDefault.openSync = function (...args) {
+      const fd = originalOpen.apply(this, args);
+      if (String(args[0]) === filename) targetFd = fd;
+      return fd;
+    };
+    fsDefault.readSync = function (...args) {
+      const count = originalRead.apply(this, args);
+      if (!changed && args[0] === targetFd && count > 0) {
+        changed = true;
+        fs.writeFileSync(filename, 'transient'); fs.writeFileSync(filename, bytes);
+      }
+      return count;
+    };
+    syncBuiltinESMExports();
+    try {
+      assert.throws(() => resolveBuildIdentity(root), /build source changed during identity scan/);
+      assert.equal(changed, true);
+    } finally {
+      fsDefault.openSync = originalOpen; fsDefault.readSync = originalRead; syncBuiltinESMExports();
+    }
+  });
 });

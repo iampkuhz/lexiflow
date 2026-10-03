@@ -38,3 +38,12 @@ test("accepts explicit demo and unknown dataset identity without formal readines
   assert.deepEqual(parseRuntimeStatus({...valid,mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null}),
     {...valid,mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null});
 });
+
+test("accepts full snapshot build identities but rejects unresolved or malformed versions", () => {
+  for (const softwareVersion of ["2.0.0-SNAPSHOT.gabc1234", "2.0.0-SNAPSHOT.gabc1234.dirty.0123456789ab"]) {
+    assert.equal(parseRuntimeStatus({ ...valid, softwareVersion }).softwareVersion, softwareVersion);
+  }
+  for (const softwareVersion of ["2.0.0-SNAPSHOT", "0.0.0-SNAPSHOT.gabc1234", "2.0.0-SNAPSHOT.gABC1234", "2.0.0-SNAPSHOT.gabc1234.dirty."]) {
+    assert.equal(parseRuntimeStatus({ ...valid, softwareVersion }), undefined);
+  }
+});
