@@ -27,7 +27,8 @@ class ReadableRuntimeEventTest {
                 + id
                 + "|lexicon.import.completed|reason=PUBLISH_ROLLED_BACK|-");
     assertEquals("PUBLISH_ROLLED_BACK", rollback.getFirst().path("reason").stringValue());
-    assertTrue(PipelineRuntimeFixture.readableEvents("{\"schema\":\"lexiflow.event.v1\"}").isEmpty());
+    assertTrue(
+        PipelineRuntimeFixture.readableEvents("{\"schema\":\"lexiflow.event.v1\"}").isEmpty());
   }
 
   @Test
