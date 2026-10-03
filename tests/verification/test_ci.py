@@ -63,7 +63,7 @@ class CiQuickTests(unittest.TestCase):
         secret = "private-caption-and-token-value"
         result = {"kind": "ci-quick", "status": "FAIL", "diagnostic": secret,
                   "selected_diagnostic": {"selected_report": {"checks": [{
-                      "check_id": "eng.fixture", "status": "FAIL", "reason": secret + " /private",
+                      "check_id": "eng.fixture", "status": "FAIL", "reason": secret,
                       "process": {"exit_code": 1, "stderr": secret},
                       "result_contract": {"report": {"checks_run": 2, "detail": {
                           "failed_tests": ["tests.fixture.Test.test_failure", secret + " /private"],
