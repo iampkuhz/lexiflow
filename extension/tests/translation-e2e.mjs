@@ -261,7 +261,9 @@ try {
   const popup = await openActionPopup({context,page,serviceWorker});
   try {
     await popup.click("#preferences summary");
+    await popup.waitFor(() => document.getElementById("preferences").open);
     await popup.click("#restore-start");
+    await popup.waitFor(() => !document.getElementById("restore-confirmation").hidden);
     assert.equal(await popup.evaluate(() => !document.getElementById("restore-confirmation").hidden), true);
     await popup.click("#restore-confirm");
     await popup.waitFor(() => document.getElementById("restore-status").dataset.kind === "success");
