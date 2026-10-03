@@ -555,7 +555,9 @@ qoder_delegation:
 
 # Codex 原生协作：沿用工作包合同，通过 native collaboration event 收取结果。
 codex_dispatch:
-  max_active_subagents: 1
+  # 原生子代理允许多任务并行；Qoder 的 host-wide 单并发在 qoder_delegation 单独约束。
+  # 同时开放线程的客户端上限消费此值；完成但未关闭的线程可能仍占客户端名额。
+  max_active_subagents: 6
   default_fork_turns: none
   full_history_fork_requires_explicit_exception: true
   completion_signal_fields:

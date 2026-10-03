@@ -871,13 +871,19 @@ class TestRepoIntegration(unittest.TestCase):
         self.assertEqual([], result["errors"])
         self.assertEqual("execution", v.ws["program"]["catalog_mode"])
         self.assertGreater(result["task_count"], 0)
-        # P2 准备已获授权，但这不允许把草案误当成已启动或已验收任务。
+        # 阶段可以按授权推进；计划状态本身不是执行或验收 receipt。
         self.assertEqual({"P1", "P2"}, {task["phase"] for task in v.tasks.values()})
         phase2 = [task for task in v.tasks.values() if task["phase"] == "P2"]
         self.assertTrue(phase2)
         raw_tasks = catalog_tasks(v.ws)
-        self.assertTrue(all(raw_tasks[task["id"]]["task"]["lifecycle_state"] == "DRAFT"
-                            for task in phase2))
+        allowed_states = set(v.ws["lifecycle"]["planning_states"])
+        for task in phase2:
+            contract = raw_tasks[task["id"]]["task"]
+            self.assertIn(contract["lifecycle_state"], allowed_states)
+            self.assertIsInstance(contract["allowed_files"], list)
+            self.assertTrue(contract["allowed_files"])
+            self.assertIsInstance(contract["forbidden_files"], list)
+            self.assertTrue(contract["deliverable"].strip())
         self.assertFalse(v.gates, "No historical gates may authorize foundation work")
         self.assertEqual(len(result["checks_run"]), 12)
 

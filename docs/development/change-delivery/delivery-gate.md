@@ -78,7 +78,25 @@ python3 -m scripts.delivery_gate check --submission-id <uuid>
 
 [check.py](../../../scripts/delivery_gate/check.py) 校验 receipt/hash DAG、当前 Task/dependency 和精确绑定的 approval。缺依赖或批准返回 BLOCKED，不发布永久失败的终态；条件补齐后可重核同一 submission。已有成功记录在当前性重验后幂等返回。系统不自动生成用户批准。
 
-## 1.6. 记录、观察与失败去向
+同一依赖 Task/version 的失败或未完成送验会保留；依赖解析只采用唯一完整 PASS 验收链，不按时间选择最新记录。多个 PASS 链、已存在记录损坏或重复、身份与绑定哈希异常仍阻断；被采用的 check 必须绑定实际 validation/review，并递归核对嵌套依赖 receipt。零条完整 PASS 链不构成依赖满足。
+
+## 1.6. 只读消费既有 PASS
+
+发行证据消费者使用以下只读入口，不调用可能新签发 check 的条件核对动作：
+
+```bash
+python3 -m scripts.delivery_gate consume-existing --submission-id <uuid>
+```
+
+`consume_existing_pass` 必须找到唯一已存在的完整 submission、validation、review、check 链，并重核当前冻结输入、authority、内容哈希、依赖及必要批准。缺 check 返回 BLOCKED，不创建目录、不补签 receipt、不运行交付命令。成功只返回该链的身份、内容哈希及绑定的 validation report descriptor；它本身不是新的验收阶段，也不证明任意候选已运行。
+
+`consume-candidate --submission-id <uuid> --candidate-directory /absolute/candidate` 在同一只读链上继续核对完整 baseline 报告、唯一实际候选 Check 的 stdout 与实际候选目录字节。候选摘要及完整身份来自报告附件，不由调用者指定；当前干净源码也必须一致。它不补签或重跑交付检查，输出不等于公开发布许可。
+
+候选晋升还必须从该报告绑定的检查输出取得同一候选摘要与运行证据，不得另传无关候选拼接 PASS。普通 Actions 不需要伪造当前 validator/reviewer，但必须能验证既有原生来源；跨宿主原 authority proof 不可核验时仍阻断。
+
+<a id="16-记录观察与失败去向"></a>
+
+## 1.7. 记录、观察与失败去向
 
 每层 record 在 ignored `tmp/quality/delivery-gate/` 原子、一次性发布。重复 JSON key、路径异常、非普通文件、竞争记录、hash 或绑定输入变化均不能当作可信证据。历史 record 不因任意短 TTL 自动失效，但使用时必须重核绑定来源和内容。
 

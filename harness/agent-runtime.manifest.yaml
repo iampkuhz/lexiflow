@@ -2,7 +2,7 @@
 # 修改共享规则应改 policy，再运行 policy_projection --write；不要手工双写。
 schemaVersion: 1
 codex_dispatch:
-  max_active_subagents: 1
+  max_active_subagents: 6
   default_fork_turns: none
   full_history_fork_requires_explicit_exception: true
   completion_signal_fields:

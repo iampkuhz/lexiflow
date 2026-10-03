@@ -3,37 +3,41 @@ import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, readFile, mkdir, cp, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import { openActionPopup } from "./action-popup.mjs";
+import { createApiLaunchSpec } from "./e2e-runtime.mjs";
+import { resolveBuildIdentity } from "../../ops/release/version.mjs";
+import { createExtensionZip } from "../scripts/release.mjs";
 
 const extensionRoot = resolve(import.meta.dirname, "..");
 const repositoryRoot = resolve(extensionRoot, "..");
-const extensionPath = resolve(extensionRoot, "dist");
+let extensionPath;
 let apiBase;
 let apiPort;
 
 class ApiResourceUnavailable extends Error {}
 
 function assertApiResources() {
-  if (!existsSync(resolve(repositoryRoot, "backend/gradlew")) || !existsSync(resolve(repositoryRoot, "scripts/environment/java_exec.py"))) {
+  if (!existsSync(resolve(repositoryRoot, "backend/gradlew"))) {
     throw new ApiResourceUnavailable("api-launcher-resource-unavailable");
   }
-  const java = spawnSync("python3", ["-c", "from pathlib import Path; from scripts.environment.java_runtime import resolve_java_home; import os; resolve_java_home(Path('.'), os.environ)"], {
+  const java = spawnSync("python3", ["-c", "from pathlib import Path; from scripts.environment.java_runtime import resolve_java_home; import os; print(resolve_java_home(Path('.'), os.environ))"], {
     cwd: repositoryRoot,
-    stdio: "ignore"
+    encoding: "utf8"
   });
   if (java.error || java.status !== 0) throw new ApiResourceUnavailable("api-java-runtime-unavailable");
+  return java.stdout.trim();
 }
 
-function startApi() {
-  const child = spawn("python3", ["-m", "scripts.environment.java_exec", "backend/gradlew", "-p", "backend", "--no-daemon", ":api:bootRun", `--args=--server.address=127.0.0.1 --server.port=${apiPort} --spring.datasource.url=false`], {
+function startApi(javaHome) {
+  const spec = createApiLaunchSpec({ repositoryRoot, apiPort, javaHome });
+  const child = spawn(spec.command, spec.args, {
     cwd: repositoryRoot,
-    env: { ...process.env, SPRING_DATASOURCE_URL: "false",
-      LEXIFLOW_SEGMENT_LOG_PATH: resolve(repositoryRoot, "tmp/quality/e2e-analysis", `${process.pid}-${apiPort}.jsonl`) },
+    env: spec.env,
     detached: true,
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -57,7 +61,12 @@ async function waitForApi(process) {
     if (process.launchError) throw new ApiResourceUnavailable("api-launcher-resource-unavailable");
     if (process.exitCode !== null) throw new Error(`API stopped before readiness:\n${logs}`);
     try {
-      if ((await fetch(`${apiBase}/actuator/health`)).ok) return;
+      if ((await fetch(`${apiBase}/actuator/health/liveness`)).ok) {
+        const readiness = await fetch(`${apiBase}/actuator/health/readiness`);
+        assert.equal(readiness.status, 503, "demo must not advertise formal readiness");
+        assert.match(await readiness.text(), /DEMO_MODE/u);
+        return;
+      }
     } catch {
       // The process is still starting.
     }
@@ -128,15 +137,26 @@ async function waitForState(page, state) {
 let api;
 let userDataDir;
 let context;
+let evidenceRoot;
 try {
-  assertApiResources();
+  if (process.env.LEXIFLOW_LIVE_YOUTUBE_URL) throw new ApiResourceUnavailable("synthetic-e2e-refuses-live-url");
+  await mkdir(resolve(repositoryRoot, "tmp/quality/e2e-runs"), { recursive: true });
+  evidenceRoot = await mkdtemp(resolve(repositoryRoot, "tmp/quality/e2e-runs/run-"));
+  const javaHome = assertApiResources();
   apiPort = await freePort();
   apiBase = `http://127.0.0.1:${apiPort}`;
-  api = startApi();
+  api = startApi(javaHome);
   await waitForApi(api);
   userDataDir = await mkdtemp(resolve(tmpdir(), "lexiflow-extension-e2e-"));
   const testExtensionPath = resolve(userDataDir, "extension");
-  await cp(extensionPath, testExtensionPath, { recursive: true });
+  const packaged = await createExtensionZip({ root: extensionRoot, buildIdentity: resolveBuildIdentity(repositoryRoot) });
+  await mkdir(testExtensionPath, { recursive: true });
+  for (const [name, bytes] of Object.entries(packaged.unzip())) {
+    const target = resolve(testExtensionPath, name);
+    await mkdir(resolve(target, ".."), { recursive: true });
+    await writeFile(target, bytes);
+  }
+  extensionPath = testExtensionPath;
   const manifest = JSON.parse(await readFile(resolve(testExtensionPath, "manifest.json"), "utf8"));
   manifest.host_permissions = ["http://127.0.0.1/*"];
   await writeFile(resolve(testExtensionPath, "manifest.json"), JSON.stringify(manifest));
@@ -147,7 +167,10 @@ try {
   const serviceWorker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
   await serviceWorker.evaluate((base) => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (_input, options) => originalFetch(`${base}/api/v1/caption-hints`, options);
+    globalThis.fetch = (input, options) => {
+      const pathname = new URL(typeof input === "string" ? input : input.url).pathname;
+      return originalFetch(`${base}${pathname}`, options);
+    };
   }, apiBase);
   const page = await context.newPage();
   const logs = [];
@@ -159,14 +182,28 @@ try {
 
   await setCaption(page, "zxqv zxqv", 1);
   await waitForState(page, "no-pending");
+  const initialCounts = JSON.parse(await page.locator("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics"));
+  assert.equal(initialCounts.counts.no_hint, 1);
+  assert.equal(initialCounts.timings.endToEnd.count, 1);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  const redrawn = JSON.parse(await page.locator("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics"));
+  assert.equal(redrawn.timings.endToEnd.count, 1, "layout redraw is not another terminal");
   assert.equal(await page.locator(".ytp-caption-segment").textContent(), "zxqv zxqv");
   assert.equal(await overlayText(page), "zxqv zxqv");
 
   await setCaption(page, "We need reliable captions.", 2);
   await waitForState(page, "ready");
-  assert.equal(await page.locator(".ytp-caption-segment").textContent(), "We need reliable captions.");
+  const observedBeforeVisibility = JSON.parse(await page.locator("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics")).counts.observed;
+  const observedAfterVisibility = await page.evaluate(() => {
+    document.querySelector(".ytp-caption-segment").textContent = "We need reliable captions again.";
+    document.dispatchEvent(new Event("visibilitychange"));
+    return JSON.parse(document.querySelector("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics")).counts.observed;
+  });
+  assert.ok(observedAfterVisibility > observedBeforeVisibility, "content bundle's visibilitychange listener must synchronously recapture the live caption");
+  await waitForState(page, "ready");
+  assert.equal(await page.locator(".ytp-caption-segment").textContent(), "We need reliable captions again.");
   assert.match(await overlayText(page), /可靠的/);
-  assert.equal(await overlayText(page), "We need reliable(可靠的) captions.");
+  assert.equal(await overlayText(page), "We need reliable(可靠的) captions again.");
   const diagnostics = JSON.parse(await page.locator("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics"));
   assert.ok(diagnostics.counts.ready >= 1);
   for (const stage of ["acquisition", "coalesce", "transport", "query", "rules", "api", "render", "endToEnd"]) {
@@ -182,21 +219,20 @@ try {
     return { lineBottom: line.getBoundingClientRect().bottom, glossBottom: gloss.getBoundingClientRect().bottom };
   });
   assert.ok(Math.abs(inlineLayout.lineBottom - inlineLayout.glossBottom) < 15);
-  await mkdir(resolve(repositoryRoot, "tmp/quality"), { recursive: true });
-  await page.locator("#player").screenshot({ path: resolve(repositoryRoot, "tmp/quality/inline-caption-preview.png") });
+  await page.locator("#player").screenshot({ path: resolve(evidenceRoot, "inline-caption-preview.png") });
   const { runUnderlineAcceptance } = await import("./visual-acceptance.mjs");
-  await runUnderlineAcceptance({page,serviceWorker,apiBase,repositoryRoot,setCaption,waitForState});
+  await runUnderlineAcceptance({page,serviceWorker,apiBase,repositoryRoot: evidenceRoot,setCaption,waitForState});
   // Optional extended acceptance remains entirely on the local synthetic fixture.
   // It never visits the real YouTube page or operates a user-owned browser profile.
   if (process.env.LEXIFLOW_EXTENDED_ACCEPTANCE === "1") {
-    const artifactRoot = resolve(repositoryRoot, "tmp/quality/extended-acceptance", String(Date.now()));
+    const artifactRoot = resolve(evidenceRoot, "tmp/quality/extended-acceptance", String(Date.now()));
     const { runVisualAcceptance } = await import("./visual-acceptance.mjs");
     const { runContinuousAcceptance } = await import("./continuous-acceptance.mjs");
     const visual = await runVisualAcceptance({ page, serviceWorker, apiBase, artifactRoot, setCaption, waitForState, overlayText });
     await writeFile(resolve(artifactRoot, "visual-report.json"), JSON.stringify(visual, null, 2));
     const continuous = await runContinuousAcceptance({ page, artifactRoot, setCaption, waitForState, overlayText,
       seconds: Number(process.env.LEXIFLOW_SOAK_SECONDS ?? "375") });
-    await writeFile(resolve(repositoryRoot, "tmp/quality/extended-acceptance/latest.json"),
+    await writeFile(resolve(evidenceRoot, "tmp/quality/extended-acceptance/latest.json"),
       JSON.stringify({ artifactRoot, status: "PASS", cases: visual.cases.length, processedCues: continuous.processedCues }));
     await setCaption(page, "We need reliable captions.", 2);
     await waitForState(page, "ready");
@@ -204,20 +240,19 @@ try {
   const { runIncrementalAcceptance } = await import("./incremental-acceptance.mjs");
   await runIncrementalAcceptance({page,serviceWorker,setCaption,waitForState,overlayText});
   const { runMultilineAcceptance } = await import("./multiline-acceptance.mjs");
-  await runMultilineAcceptance({page,serviceWorker,repositoryRoot,setCaption,waitForState});
-  if (process.env.LEXIFLOW_LIVE_YOUTUBE_URL) {
-    const { runLiveYoutubeAcceptance } = await import("./live-youtube-acceptance.mjs");
-    await runLiveYoutubeAcceptance({context,serviceWorker,repositoryRoot,url:process.env.LEXIFLOW_LIVE_YOUTUBE_URL});
-    await page.bringToFront();
-  }
+  await runMultilineAcceptance({page,serviceWorker,repositoryRoot: evidenceRoot,setCaption,waitForState});
   const { runExperienceAcceptance } = await import("./experience-acceptance.mjs");
-  await runExperienceAcceptance({ page, context, serviceWorker, apiBase, repositoryRoot, setCaption, waitForState, overlayText });
+  await runExperienceAcceptance({ page, context, serviceWorker, apiBase, repositoryRoot: evidenceRoot, setCaption, waitForState, overlayText });
   await setCaption(page, "We need reliable captions.", 2);
   await waitForState(page, "ready");
   // A user choice is local, persists across reload, and can be explicitly reversed.
   await page.locator("#lexiflow-caption-overlay .gloss").click();
   await waitForState(page, "no-pending");
   assert.equal(await overlayText(page), "We need reliable captions.");
+  const suppressedCounts = JSON.parse(await page.locator("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics")).counts;
+  assert.equal(suppressedCounts.suppressed, 1);
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
+  assert.equal(JSON.parse(await page.locator("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics")).counts.suppressed, 1);
   assert.equal(await page.locator("#player").evaluate(el => el.classList.contains("lexiflow-inline-active")), true);
   await page.reload({waitUntil:"domcontentloaded"});
   await setCaption(page, "We need reliable captions.", 2);
@@ -226,7 +261,9 @@ try {
   const popup = await openActionPopup({context,page,serviceWorker});
   try {
     await popup.click("#preferences summary");
+    await popup.waitFor(() => document.getElementById("preferences").open);
     await popup.click("#restore-start");
+    await popup.waitFor(() => !document.getElementById("restore-confirmation").hidden);
     assert.equal(await popup.evaluate(() => !document.getElementById("restore-confirmation").hidden), true);
     await popup.click("#restore-confirm");
     await popup.waitFor(() => document.getElementById("restore-status").dataset.kind === "success");

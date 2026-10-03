@@ -1,10 +1,13 @@
 import io.lexiflow.buildlogic.VerifyNoSkippedTestsTask
 import io.lexiflow.buildlogic.VerifyProductLanguageTask
 import io.lexiflow.buildlogic.VerifyProjectDependenciesTask
+import io.lexiflow.buildlogic.ReleaseVersion
 import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.api.tasks.diagnostics.DependencyReportTask
 import org.gradle.api.tasks.testing.Test
+import org.gradle.language.jvm.tasks.ProcessResources
 import org.gradle.api.tasks.SourceSetContainer
+import org.gradle.jvm.tasks.Jar
 import org.gradle.testing.jacoco.tasks.JacocoReport
 
 plugins {
@@ -15,7 +18,31 @@ plugins {
 }
 
 group = "io.lexiflow"
-version = "0.1.0-SNAPSHOT"
+if (providers.gradleProperty("version").isPresent) throw GradleException("软件版本只读取 ops/release/version.txt，不接受 -Pversion 覆盖")
+// 与扩展及部署入口消费同一确定性身份，不由 Gradle 另造提交/dirty 规则。
+val identityCommand = providers.exec {
+    commandLine("node", rootDir.parentFile.resolve("ops/release/version.mjs").absolutePath)
+}
+val buildIdentityJson = identityCommand.standardOutput.asText.get().trim()
+val buildIdentity = groovy.json.JsonSlurper().parseText(buildIdentityJson) as Map<*, *>
+version = ReleaseVersion.parse(buildIdentity["softwareVersion"].toString())
+
+val requestedRelease = providers.gradleProperty("release").orNull
+if (requestedRelease != null && requestedRelease !in setOf("true", "false")) throw GradleException("release 参数必须为 true 或 false")
+if (requestedRelease == "true") {
+    if (buildIdentity["dirty"] != false) throw GradleException("发行输入工作区必须清洁")
+    val gitCheck = providers.exec {
+        commandLine("git", "-C", rootDir.parentFile.absolutePath, "rev-parse", "--show-toplevel")
+        isIgnoreExitValue = true
+    }
+    val gitRoot = gitCheck.standardOutput.asText.get().trim()
+    if (gitCheck.result.get().exitValue != 0 || java.io.File(gitRoot).canonicalPath != rootDir.parentFile.canonicalPath) throw GradleException("发行输入必须位于有效 Git 仓库根")
+    val head = providers.exec { commandLine("git", "-C", gitRoot, "rev-parse", "--verify", "HEAD^{commit}"); isIgnoreExitValue = true }
+    if (head.result.get().exitValue != 0 || head.standardOutput.asText.get().isBlank()) throw GradleException("发行输入缺少有效 HEAD")
+    val status = providers.exec { commandLine("git", "-C", gitRoot, "status", "--porcelain=v1", "--untracked-files=all"); isIgnoreExitValue = true }
+    if (status.result.get().exitValue != 0) throw GradleException("无法核对发行输入状态")
+    if (status.standardOutput.asText.get().isNotEmpty()) throw GradleException("发行输入工作区必须清洁")
+}
 
 val deliveryRequested = gradle.startParameter.taskNames.any {
     it.substringAfterLast(':') in setOf("check", "qualityFull", "deliveryFull")
@@ -43,6 +70,9 @@ configure(leafProjects) {
     group = rootProject.group
     version = rootProject.version
     pluginManager.apply("lexiflow.java-library")
+    tasks.withType<Jar>().configureEach {
+        manifest.attributes["Implementation-Version"] = rootProject.version.toString()
+    }
     dependencies.add("testImplementation", junitJupiter)
     dependencies.add("testRuntimeOnly", junitPlatformLauncher)
 }
@@ -63,6 +93,8 @@ project(":enrichment") {
 project(":adapters") {
     dependencies {
         add("implementation", platform(springBootBom))
+        add("implementation", "ch.qos.logback:logback-classic")
+        add("implementation", "tools.jackson.core:jackson-core")
         add("implementation", "org.springframework.boot:spring-boot-starter-jdbc")
         add("runtimeOnly", "org.postgresql:postgresql")
         add("implementation", dependencies.project(":lexicon"))
@@ -76,6 +108,12 @@ project(":adapters") {
     tasks.register<Test>("postgresIntegrationTest") {
         group = LifecycleBasePlugin.VERIFICATION_GROUP
         description = "执行基于 PostgreSQL 的持久化集成测试。"
+        dependsOn(":api:bootJar")
+        systemProperty(
+            "lexiflow.release.test.bootJar",
+            project(":api").tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar")
+                .flatMap { it.archiveFile }.get().asFile.absolutePath,
+        )
         testClassesDirs = platformSourceSets["test"].output.classesDirs
         classpath = platformSourceSets["test"].runtimeClasspath
         useJUnitPlatform {
@@ -159,6 +197,30 @@ project(":api") {
     dependencies.add("implementation", "org.springframework.boot:spring-boot-starter-webmvc")
     dependencies.add("implementation", "org.springframework.boot:spring-boot-starter-jdbc")
     dependencies.add("runtimeOnly", "org.postgresql:postgresql")
+    val identityContents = buildIdentityJson
+    val identityVersion = rootProject.version.toString()
+    val generateSoftwareIdentity = tasks.register("generateSoftwareIdentity") {
+        val output = layout.buildDirectory.dir("generated/software-identity")
+        inputs.property("buildIdentity", identityContents)
+        outputs.dir(output)
+        doLast {
+            val directory = output.get().asFile.resolve("META-INF")
+            directory.mkdirs()
+            directory.resolve("lexiflow-version.txt").writeText("$identityVersion\n")
+            directory.resolve("lexiflow-build.json").writeText("$identityContents\n")
+        }
+    }
+    tasks.named<ProcessResources>("processResources") {
+        from(generateSoftwareIdentity)
+        from(rootProject.projectDir.parentFile.resolve("infra/postgres/schema.sql")) {
+            into("META-INF")
+            rename { "lexiflow-schema.sql" }
+        }
+    }
+    tasks.withType<Test>().configureEach {
+        systemProperty("lexiflow.repository.root", rootProject.projectDir.parentFile.absolutePath)
+        systemProperty("lexiflow.build.version", rootProject.version.toString())
+    }
 }
 
 project(":architecture-tests") {
@@ -188,7 +250,9 @@ project(":integration-tests") {
     configurations["runtimeSmokeImplementation"].extendsFrom(configurations["testImplementation"])
     configurations["runtimeSmokeRuntimeOnly"].extendsFrom(configurations["testRuntimeOnly"])
     dependencies {
+        add("runtimeSmokeImplementation", platform(springBootBom))
         add("runtimeSmokeImplementation", junitJupiter)
+        add("runtimeSmokeImplementation", "tools.jackson.core:jackson-databind")
         add("runtimeSmokeImplementation", dependencies.project(":adapters"))
         add("runtimeSmokeRuntimeOnly", "org.postgresql:postgresql")
         add("runtimeSmokeRuntimeOnly", junitPlatformLauncher)
@@ -204,7 +268,34 @@ project(":integration-tests") {
         systemProperty("lexiflow.redis.test.endpoint", providers.environmentVariable("LEXIFLOW_REDIS_TEST_ENDPOINT").getOrElse(""))
         systemProperty("lexiflow.postgres.schema.file", rootProject.projectDir.parentFile.resolve("infra/postgres/schema.sql").absolutePath)
         systemProperty("lexiflow.repository.root", rootProject.projectDir.parentFile.absolutePath)
+        systemProperty("lexiflow.build.version", rootProject.version.toString())
+        systemProperty("lexiflow.runtimeSmoke.classpath", runtimeSmoke.runtimeClasspath.asPath)
+        systemProperty("lexiflow.runtimeSmoke.bootJar", project(":api").tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar").flatMap { it.archiveFile }.get().asFile.absolutePath)
         testLogging { events("failed") }
+    }
+    tasks.register<JavaExec>("produceSyntheticReleaseDatasets") {
+        val fixtureOutput = providers.systemProperty("lexiflow.release.fixture.output").getOrElse("")
+        val fixtureJdbc = providers.environmentVariable("LEXIFLOW_POSTGRES_TEST_JDBC_URL").getOrElse("")
+        group = "verification"
+        description = "通过真实合成发布链生产 runtime Check 专用资料包。"
+        dependsOn(":api:bootJar")
+        classpath = runtimeSmoke.runtimeClasspath
+        mainClass.set("io.lexiflow.integration.SyntheticReleaseDatasetProducer")
+        systemProperty("lexiflow.postgres.test.jdbcUrl", fixtureJdbc)
+        systemProperty("lexiflow.postgres.schema.file", rootProject.projectDir.parentFile.resolve("infra/postgres/schema.sql").absolutePath)
+        systemProperty("lexiflow.repository.root", rootProject.projectDir.parentFile.absolutePath)
+        systemProperty("lexiflow.build.version", rootProject.version.toString())
+        systemProperty("lexiflow.runtimeSmoke.classpath", runtimeSmoke.runtimeClasspath.asPath)
+        systemProperty("lexiflow.runtimeSmoke.bootJar", project(":api").tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar").flatMap { it.archiveFile }.get().asFile.absolutePath)
+        systemProperty("lexiflow.release.fixture.output", fixtureOutput)
+        doFirst {
+            if (fixtureOutput.isBlank()) {
+                throw GradleException("必须显式指定 -Dlexiflow.release.fixture.output 绝对输出路径。")
+            }
+            if (fixtureJdbc.isBlank()) {
+                throw GradleException("必须提供 Harness 隔离 PostgreSQL 测试服务。")
+            }
+        }
     }
 }
 

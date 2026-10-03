@@ -17,6 +17,7 @@ architecture:
 agent_contract:
   policy_manifest: harness/agent-policy.manifest.yaml
   runtime_manifest: harness/agent-runtime.manifest.yaml
+  ci_policy: harness/ci-policy.yaml
   module_boundaries: harness/module-boundaries.yaml
   java_product: harness/java-product.manifest.yaml
   documentation_policy: harness/documentation-policy.yaml
@@ -36,6 +37,9 @@ agent_contract:
     qoder_hooks: .qoder/settings.json
   delivery_gate_records_schema: harness/delivery-gate-records.schema.json
 public_executables:
+  local_podman: node ops/podman/local.mjs install|upgrade|version|up|status|stop|logs|recover|doctor
+  release_candidate: node ops/release/pipeline.mjs images|assemble|verify /absolute/request.json
+  release_workflow: node ops/release/workflow.mjs prepare /absolute/request.json | resume <submission-uuid> <release-tag> [--publish]
   java_exec: python3 -m scripts.environment.java_exec <native-command>
   local_api: python3 -m scripts.environment.start_api
   docs_check: python3 -m scripts.repository.docs_check
@@ -45,6 +49,7 @@ public_executables:
   delivery_hook: python3 scripts/verification/delivery_hook.py
   hooks: python3 -m scripts.repository.hooks
   local_codex_runtime: python3 -m scripts.agents.local_codex_runtime
+  ci_quick: python3 -m scripts.verification.ci plan|quick
   change_verify: python3 scripts/check_changes.py
   repository_verify: python3 scripts/check_repository.py
   verification_diagnose: python3 -m scripts.verification.diagnose change|repository
@@ -52,6 +57,9 @@ public_executables:
   qoder_delegation: python3 -m scripts.agents.delegation.qoder_cli
   codex_work_package_verify: python3 -m scripts.agents.delegation.codex_cli verify --run-id <run_id>
   delivery_gate: python3 -m scripts.delivery_gate submit|validate|review|check|status
+  delivery_receipt: python3 -m scripts.delivery_gate consume-existing --submission-id <uuid>
+  release_promotion: python3 -m scripts.environment.release_promotion --submission-id <uuid> --candidate-directory /absolute/candidate [--publish]
+  candidate_receipt: python3 -m scripts.delivery_gate consume-candidate --submission-id <uuid> --candidate-directory /absolute/candidate
 script_governance:
   durable_script_roots:
   - scripts/repository/
@@ -93,6 +101,7 @@ docs:
 - docs/development/change-delivery.md
 - docs/development/agent-workflow.md
 - docs/development/operations.md
+- docs/development/operations/github-actions.md
 - docs/development/reference.md
 - docs/development/troubleshooting.md
 - docs/roadmap/master-plan.md

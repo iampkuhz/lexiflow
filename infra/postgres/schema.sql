@@ -4,45 +4,60 @@
 CREATE TABLE lexicon_dataset (
     dataset_id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (dataset_id = 1),
     lexicon_version BIGINT NOT NULL CHECK (lexicon_version > 0),
-    source_manifest JSONB NOT NULL CHECK (jsonb_typeof(source_manifest) = 'array'),
+    source_manifest JSONB NOT NULL CHECK (
+        jsonb_typeof(source_manifest) = 'array' AND jsonb_array_length(source_manifest) > 0),
     source_row_count BIGINT NOT NULL CHECK (source_row_count > 0),
     entry_count BIGINT NOT NULL CHECK (entry_count > 0),
     lookup_count BIGINT NOT NULL CHECK (lookup_count >= entry_count),
-    preparation_policy TEXT NOT NULL CHECK (preparation_policy <> ''),
+    preparation_policy TEXT NOT NULL CHECK (preparation_policy ~ '[^[:space:]]'),
+    CONSTRAINT lexicon_dataset_source_rows_ck CHECK (source_row_count >= entry_count),
     imported_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE lexicon_prepared_entry (
     lexicon_entry_id UUID PRIMARY KEY,
     language_tag TEXT NOT NULL CHECK (language_tag = 'en'),
-    lemma TEXT NOT NULL CHECK (lemma <> ''),
+    lemma TEXT NOT NULL CHECK (lemma ~ '[^[:space:]]'),
     entry_kind TEXT NOT NULL CHECK (entry_kind IN ('word', 'phrase')),
-    source_gloss TEXT NOT NULL CHECK (source_gloss <> ''),
-    source_gloss_ref TEXT NOT NULL CHECK (source_gloss_ref <> ''),
+    source_gloss TEXT NOT NULL CHECK (source_gloss ~ '[^[:space:]]'),
+    source_gloss_ref TEXT NOT NULL CHECK (source_gloss_ref ~ '[^[:space:]]'),
+    source_dictionary_id TEXT NOT NULL CHECK (source_dictionary_id ~ '[^[:space:]]'),
+    source_frequency_id TEXT NOT NULL CHECK (source_frequency_id ~ '[^[:space:]]'),
+    source_frequency_ref TEXT NOT NULL CHECK (source_frequency_ref ~ '[^[:space:]]'),
     source_bnc_rank BIGINT CHECK (source_bnc_rank IS NULL OR source_bnc_rank > 0),
     source_frq_rank BIGINT CHECK (source_frq_rank IS NULL OR source_frq_rank > 0),
     source_complex_tags TEXT[] NOT NULL DEFAULT '{}',
     source_oxford_basic BOOLEAN NOT NULL DEFAULT FALSE,
-    prepared_gloss TEXT,
-    exclusion_reason TEXT,
+    prepared_gloss TEXT CHECK (prepared_gloss IS NULL OR prepared_gloss ~ '[^[:space:]]'),
+    exclusion_reason TEXT CHECK (exclusion_reason IS NULL OR exclusion_reason ~ '[^[:space:]]'),
+    frequency_evidence TEXT NOT NULL CHECK (frequency_evidence IN ('KNOWN', 'UNKNOWN')),
+    decisive_rule TEXT NOT NULL CHECK (decisive_rule ~ '[^[:space:]]'),
+    matched_rules TEXT[] NOT NULL DEFAULT '{}',
     prepared_priority INTEGER NOT NULL CHECK (prepared_priority BETWEEN 0 AND 1000),
     frequency_zipf NUMERIC(3, 2) NOT NULL CHECK (frequency_zipf BETWEEN 0 AND 8),
     complex_list_count SMALLINT NOT NULL CHECK (complex_list_count >= 0),
     CONSTRAINT lexicon_prepared_entry_language_lemma_uk UNIQUE (language_tag, lemma),
     CONSTRAINT lexicon_prepared_entry_decision_ck CHECK (
         (prepared_gloss IS NOT NULL AND exclusion_reason IS NULL)
-        OR (prepared_gloss IS NULL AND exclusion_reason IS NOT NULL))
+        OR (prepared_gloss IS NULL AND exclusion_reason IS NOT NULL)),
+    CONSTRAINT lexicon_prepared_entry_block_rule_ck CHECK (
+        exclusion_reason IS NULL OR exclusion_reason = decisive_rule),
+    CONSTRAINT lexicon_prepared_entry_matched_rules_ck CHECK (
+        array_position(matched_rules, NULL) IS NULL
+        AND (cardinality(matched_rules) = 0 OR array_to_string(matched_rules, chr(31)) !~
+            ('(^|' || chr(31) || ')[[:space:]]*(' || chr(31) || '|$)')))
 );
 
 CREATE TABLE lexicon_hint_lookup (
     language_tag TEXT NOT NULL CHECK (language_tag = 'en'),
-    normalized_form TEXT NOT NULL CHECK (normalized_form <> ''),
+    normalized_form TEXT NOT NULL CHECK (normalized_form ~ '[^[:space:]]'),
     lexicon_entry_id UUID NOT NULL REFERENCES lexicon_prepared_entry (lexicon_entry_id) ON DELETE CASCADE,
     form_kind TEXT NOT NULL CHECK (form_kind IN ('lemma', 'alias', 'inflection')),
-    canonical_lemma TEXT NOT NULL CHECK (canonical_lemma <> ''),
+    canonical_lemma TEXT NOT NULL CHECK (canonical_lemma ~ '[^[:space:]]'),
     entry_kind TEXT NOT NULL CHECK (entry_kind IN ('word', 'phrase')),
     final_action TEXT NOT NULL CHECK (final_action IN ('HINT', 'BLOCK')),
-    final_gloss TEXT,
+    final_decision_reason TEXT NOT NULL CHECK (final_decision_reason ~ '[^[:space:]]'),
+    final_gloss TEXT CHECK (final_gloss IS NULL OR final_gloss ~ '[^[:space:]]'),
     final_priority INTEGER NOT NULL CHECK (final_priority BETWEEN 0 AND 1000),
     final_sense_id UUID,
     final_frequency_zipf NUMERIC(3, 2) NOT NULL CHECK (final_frequency_zipf BETWEEN 0 AND 8),
@@ -51,7 +66,9 @@ CREATE TABLE lexicon_hint_lookup (
     CONSTRAINT lexicon_hint_lookup_pk PRIMARY KEY (language_tag, normalized_form, lexicon_entry_id),
     CONSTRAINT lexicon_hint_lookup_decision_ck CHECK (
         (final_action = 'HINT' AND final_gloss IS NOT NULL AND final_sense_id IS NOT NULL)
-        OR (final_action = 'BLOCK' AND final_gloss IS NULL AND final_sense_id IS NULL))
+        OR (final_action = 'BLOCK' AND final_gloss IS NULL AND final_sense_id IS NULL)),
+    CONSTRAINT lexicon_hint_lookup_window_reason_ck CHECK (
+        final_action <> 'HINT' OR final_decision_reason <> 'outside_query_window')
 );
 
 CREATE INDEX lexicon_hint_lookup_prewarm_idx
@@ -76,12 +93,18 @@ COMMENT ON COLUMN lexicon_prepared_entry.lemma IS '规范化主词形或完整�
 COMMENT ON COLUMN lexicon_prepared_entry.entry_kind IS '单词或短语类型';
 COMMENT ON COLUMN lexicon_prepared_entry.source_gloss IS '被采用来源的原始中文释义，不是所有来源释义集合';
 COMMENT ON COLUMN lexicon_prepared_entry.source_gloss_ref IS '被采用释义在来源文件中的定位';
+COMMENT ON COLUMN lexicon_prepared_entry.source_dictionary_id IS '提供词条及释义的词典来源标识';
+COMMENT ON COLUMN lexicon_prepared_entry.source_frequency_id IS '提供频率证据的来源标识';
+COMMENT ON COLUMN lexicon_prepared_entry.source_frequency_ref IS '频率证据在来源中的记录定位';
 COMMENT ON COLUMN lexicon_prepared_entry.source_bnc_rank IS '来源 BNC 正排名，缺失为空';
 COMMENT ON COLUMN lexicon_prepared_entry.source_frq_rank IS '来源 FRQ 正排名，缺失为空';
 COMMENT ON COLUMN lexicon_prepared_entry.source_complex_tags IS '来源复杂词表标签集合';
 COMMENT ON COLUMN lexicon_prepared_entry.source_oxford_basic IS '来源 Oxford 基础词原始标记，不等于最终阻断';
 COMMENT ON COLUMN lexicon_prepared_entry.prepared_gloss IS '导入时判定安全的单一中文短释；阻断时为空';
 COMMENT ON COLUMN lexicon_prepared_entry.exclusion_reason IS '不能提示时的固定排除原因；可提示时为空';
+COMMENT ON COLUMN lexicon_prepared_entry.frequency_evidence IS '频率来源证据为已知或未知，不将缺失当作零';
+COMMENT ON COLUMN lexicon_prepared_entry.decisive_rule IS '单次准备结果的最终决定规则身份';
+COMMENT ON COLUMN lexicon_prepared_entry.matched_rules IS '单次准备中按执行顺序命中的清洗规则';
 COMMENT ON COLUMN lexicon_prepared_entry.prepared_priority IS '词频及复杂标签计算的最终非个人化排序分数';
 COMMENT ON COLUMN lexicon_prepared_entry.frequency_zipf IS '来源排名换算的 Zipf 值';
 COMMENT ON COLUMN lexicon_prepared_entry.complex_list_count IS '复杂学习词表证据数量';
@@ -92,6 +115,7 @@ COMMENT ON COLUMN lexicon_hint_lookup.form_kind IS '原形、别名或屈折形�
 COMMENT ON COLUMN lexicon_hint_lookup.canonical_lemma IS '展示候选所属的规范主词形';
 COMMENT ON COLUMN lexicon_hint_lookup.entry_kind IS '所属主词条为单词还是短语';
 COMMENT ON COLUMN lexicon_hint_lookup.final_action IS '观看阶段冻结的提示或阻断决定';
+COMMENT ON COLUMN lexicon_hint_lookup.final_decision_reason IS '该词形最终提示或阻断的固定原因';
 COMMENT ON COLUMN lexicon_hint_lookup.final_gloss IS '仅提示行携带的安全中文短释';
 COMMENT ON COLUMN lexicon_hint_lookup.final_priority IS '提示选择时的非个人化优先级';
 COMMENT ON COLUMN lexicon_hint_lookup.final_sense_id IS '仅提示行携带的稳定释义身份';

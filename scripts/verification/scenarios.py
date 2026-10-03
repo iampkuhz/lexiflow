@@ -20,6 +20,7 @@ from scripts.verification.kernel import (
     compute_coverage_gap,
     execute_single_check,
     fingerprint_json,
+    is_release_runtime_child_check,
     sha256_bytes,
     snapshot_check_inputs,
 )
@@ -123,6 +124,7 @@ def _execute(
     # 也不能只凭命令文本去重。
     equivalent: dict[str, dict[str, Any]] = {}
     for check in checks:
+        transport_active = is_release_runtime_child_check(check)
         execution_key = fingerprint_json(
             {
                 key: value
@@ -131,7 +133,7 @@ def _execute(
                 not in {"check_id", "module", "scope", "triggers", "selection_reasons"}
             }
         )
-        if execution_key in equivalent:
+        if execution_key in equivalent and not transport_active:
             original = equivalent[execution_key]
             projected = {
                 **original,
@@ -184,7 +186,8 @@ def _execute(
                     "environment": environment,
                 }
             )
-            equivalent[execution_key] = results[-1]
+            if not transport_active:
+                equivalent[execution_key] = results[-1]
             continue
         child_environment = build_child_environment(
             runtime_environment=execution_environment(repo, check)
@@ -199,7 +202,8 @@ def _execute(
         )
         result["environment"] = environment
         results.append(result)
-        equivalent[execution_key] = result
+        if not transport_active:
+            equivalent[execution_key] = result
     return results
 
 
@@ -334,6 +338,16 @@ def freeze_inputs(
         }
     runtime_checks = _runtime_checks(selected)
     frozen, unchanged = _freeze_selection(repo, runtime_checks, declaration_snapshot)
+    if any(snapshot["missing"] for snapshot in frozen.values()):
+        return {
+            "schema_version": "lexiflow.verification-freeze.v1",
+            "result": "FAIL",
+            "reason": "input-missing",
+            "checks": runtime_checks,
+            "input_snapshots": frozen,
+            "input_fingerprint": "",
+            "declaration_sha256": declaration_snapshot["sha256"],
+        }
     if not unchanged:
         return {
             "schema_version": "lexiflow.verification-freeze.v1",

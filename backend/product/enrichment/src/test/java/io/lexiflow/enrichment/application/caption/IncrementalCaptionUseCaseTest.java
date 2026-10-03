@@ -9,9 +9,11 @@ import io.lexiflow.lexicon.domain.catalog.BuiltinLexiconCatalog;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
+import io.lexiflow.lexicon.domain.model.LexiconLookupResult;
 import io.lexiflow.lexicon.domain.port.LexiconCatalog;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.OptionalLong;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -20,9 +22,9 @@ class IncrementalCaptionUseCaseTest {
   void queriesOnlyContiguousAppendIntervalsAndMapsCrossSegmentPhrase() {
     var queries = new ArrayList<String>();
     LexiconCatalog catalog =
-        text -> {
-          queries.add(text);
-          return candidates(text);
+        forms -> {
+          queries.add(String.join(" ", forms));
+          return lookup(forms, candidates(String.join(" ", forms)));
         };
     var useCase = new EnrichCaptionUseCase(catalog, new DeterministicHintPolicy());
     var request =
@@ -33,21 +35,32 @@ class IncrementalCaptionUseCaseTest {
                 segment("last", "out", true),
                 segment("gap", " reliable ", false),
                 segment("new", "caption", true)));
-    var result = useCase.enrichIncrementalMeasured(request).result();
-    assertEquals(List.of("context figure out", " reliable caption"), queries);
+    var measured = useCase.enrichIncrementalMeasured(request);
+    var result = measured.result();
+    assertEquals(
+        List.of(
+            "context context figure context figure out figure figure out out",
+            "reliable reliable caption caption"),
+        queries);
     assertEquals(List.of("first", "last", "new"), result.processedKeys());
     assertEquals(2, result.hints().size());
     assertEquals("first", result.hints().getFirst().startKey());
     assertEquals(0, result.hints().getFirst().startOffset());
     assertEquals("last", result.hints().getFirst().endKey());
     assertEquals(3, result.hints().getFirst().endOffset());
+    assertEquals(2, measured.diagnostics().newRanges());
+    assertEquals(2, result.hints().size());
+    assertTrue(measured.diagnostics().candidatesNanos() > 0);
+    assertTrue(measured.queryNanos() > 0);
+    assertTrue(measured.rulesNanos() > 0);
   }
 
   @Test
   void adjacentOldTailCanCompletePhraseButOtherGroupsCannot() {
     var useCase =
         new EnrichCaptionUseCase(
-            IncrementalCaptionUseCaseTest::candidates, new DeterministicHintPolicy());
+            forms -> lookup(forms, candidates(String.join(" ", forms))),
+            new DeterministicHintPolicy());
     var request =
         request(
             group(segment("old", "figure ", false), segment("new", "out", true)),
@@ -64,9 +77,9 @@ class IncrementalCaptionUseCaseTest {
   void visualRowBoundaryCannotCreateLatePhraseOnSealedRow() {
     var queries = new ArrayList<String>();
     LexiconCatalog catalog =
-        text -> {
-          queries.add(text);
-          return candidates(text);
+        forms -> {
+          queries.add(String.join(" ", forms));
+          return lookup(forms, candidates(String.join(" ", forms)));
         };
     var measured =
         new EnrichCaptionUseCase(catalog, new DeterministicHintPolicy())
@@ -90,33 +103,36 @@ class IncrementalCaptionUseCaseTest {
             group(segment("four", "reliable reliable reliable reliable", true)));
     var result = useCase.enrichIncrementalMeasured(request).result();
     assertEquals(List.of("suffix", "four"), result.processedKeys());
-    assertEquals(1, result.hints().size());
+    assertEquals(4, result.hints().size());
     assertTrue(result.hints().stream().allMatch(hint -> hint.startKey().equals("four")));
   }
 
   @Test
   void suppressesHintsFromDifferentPublishedVersionsAcrossIntervals() {
     LexiconCatalog catalog =
-        text -> {
-          if (text.equals("figure out")) return List.of(candidate("figure out", "弄明白"));
-          if (text.endsWith("caption")) {
+        forms -> {
+          if (forms.contains("figure out"))
+            return lookup(forms, List.of(candidate("figure out", "弄明白")));
+          if (forms.contains("caption")) {
             var original = candidate("caption", "字幕");
-            return List.of(
-                new LexiconHintCandidate(
-                    original.entryId(),
-                    original.senseId(),
-                    2,
-                    original.languageTag(),
-                    original.normalizedForm(),
-                    original.canonicalLemma(),
-                    original.entryKind(),
-                    original.finalAction(),
-                    original.finalGloss(),
-                    original.finalPriority(),
-                    original.frequencyZipf(),
-                    original.complexListCount()));
+            return lookup(
+                forms,
+                List.of(
+                    new LexiconHintCandidate(
+                        original.entryId(),
+                        original.senseId(),
+                        2,
+                        original.languageTag(),
+                        original.normalizedForm(),
+                        original.canonicalLemma(),
+                        original.entryKind(),
+                        original.finalAction(),
+                        original.finalGloss(),
+                        original.finalPriority(),
+                        original.frequencyZipf(),
+                        original.complexListCount())));
           }
-          return List.of();
+          return lookup(forms, List.of());
         };
     var result =
         new EnrichCaptionUseCase(catalog, new DeterministicHintPolicy())
@@ -128,11 +144,36 @@ class IncrementalCaptionUseCaseTest {
                         segment("b", "caption", true))));
     assertEquals(List.of("a", "b"), result.result().processedKeys());
     assertTrue(result.result().hints().isEmpty());
-    assertEquals(result.processedEnglish(), result.processedWithHints());
+    assertEquals(2, result.queryCounts().versionReads());
   }
 
   @Test
-  void hintsEachEntryOnceAcrossIntervalsAndGroupsWithoutLosingCoverage() {
+  void suppressesHintsWhenDifferentVersionWasSeenOnNoHintLookup() {
+    LexiconCatalog catalog =
+        forms -> {
+          if (forms.contains("caption")) {
+            var candidate = candidate("caption", "字幕", 2);
+            return new LexiconLookupResult(
+                List.of(candidate),
+                OptionalLong.of(2),
+                new LexiconLookupResult.Counts(forms.size(), 1, 0, forms.size() - 1, 1, 1, 0));
+          }
+          return new LexiconLookupResult(
+              List.of(),
+              OptionalLong.of(1),
+              new LexiconLookupResult.Counts(forms.size(), 0, 0, forms.size(), 1, 1, 0));
+        };
+    var measured =
+        new EnrichCaptionUseCase(catalog, new DeterministicHintPolicy())
+            .enrichIncrementalMeasured(
+                request(
+                    group(segment("a", "ordinary", true)), group(segment("b", "caption", true))));
+    assertTrue(measured.result().hints().isEmpty());
+    assertEquals(2, measured.queryCounts().versionReads());
+  }
+
+  @Test
+  void hintsEachOccurrenceAcrossIntervalsAndGroupsWithoutLosingCoverage() {
     var measured =
         new EnrichCaptionUseCase(new BuiltinLexiconCatalog(), new DeterministicHintPolicy())
             .enrichIncrementalMeasured(
@@ -143,15 +184,53 @@ class IncrementalCaptionUseCaseTest {
                         segment("b", "reliable", true)),
                     group(segment("c", "reliable", true))));
     assertEquals(List.of("a", "b", "c"), measured.result().processedKeys());
-    assertEquals(1, measured.result().hints().size());
+    assertEquals(3, measured.result().hints().size());
     assertEquals("a", measured.result().hints().getFirst().startKey());
-    assertEquals(1, measured.processedWithHints().chars().filter(c -> c == '(').count());
+    assertEquals("可靠的", measured.result().hints().getFirst().chineseGloss());
+  }
+
+  @Test
+  void repeatedIncentiveIsStableAcrossBatchedAndIncrementalRequests() {
+    var useCase =
+        new EnrichCaptionUseCase(
+            forms -> lookup(forms, List.of(candidate("incentive", "动机", 1))),
+            new DeterministicHintPolicy());
+    var together =
+        useCase
+            .enrichIncrementalMeasured(
+                request(
+                    group(
+                        segment("a", "business incentive, ", true),
+                        segment("b", "political incentive", true))))
+            .result();
+    var first =
+        useCase
+            .enrichIncrementalMeasured(request(group(segment("a", "business incentive, ", true))))
+            .result();
+    var second =
+        useCase
+            .enrichIncrementalMeasured(
+                request(
+                    group(
+                        segment("a", "business incentive, ", false),
+                        segment("b", "political incentive", true))))
+            .result();
+    var combined = new ArrayList<>(first.hints());
+    combined.addAll(second.hints());
+    assertEquals(2, together.hints().size());
+    assertEquals(together.hints(), combined);
   }
 
   @Test
   void deduplicationCannotHideSameEntryWithDifferentVersions() {
     var calls = new java.util.concurrent.atomic.AtomicInteger();
-    LexiconCatalog catalog = text -> List.of(candidate("caption", "字幕", calls.incrementAndGet()));
+    LexiconCatalog catalog =
+        forms ->
+            lookup(
+                forms,
+                forms.contains("caption")
+                    ? List.of(candidate("caption", "字幕", calls.incrementAndGet()))
+                    : List.of());
     var measured =
         new EnrichCaptionUseCase(catalog, new DeterministicHintPolicy())
             .enrichIncrementalMeasured(
@@ -162,7 +241,71 @@ class IncrementalCaptionUseCaseTest {
                         segment("b", "caption", true))));
     assertEquals(List.of("a", "b"), measured.result().processedKeys());
     assertTrue(measured.result().hints().isEmpty());
-    assertEquals(measured.processedEnglish(), measured.processedWithHints());
+    assertEquals(2, measured.queryCounts().versionReads());
+  }
+
+  @Test
+  void hiddenAndUnmatchedCandidatesFromAnotherVersionSuppressRealHintAcrossIntervals() {
+    LexiconCatalog catalog =
+        forms -> {
+          if (forms.contains("caption"))
+            return lookup(forms, List.of(candidate("caption", "字幕", 1)));
+          var block = blockCandidate("ordinary", 2);
+          var unsafe =
+              new LexiconHintCandidate(
+                  UUID.nameUUIDFromBytes(
+                      "unsafe".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                  UUID.nameUUIDFromBytes(
+                      "unsafe-sense".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                  2,
+                  "en",
+                  "ordinary",
+                  "ordinary",
+                  LexiconEntryKind.WORD,
+                  LexiconHintAction.HINT,
+                  "释".repeat(25),
+                  500,
+                  0,
+                  0);
+          var unmatched = candidate("never-present", "隐藏候选", 2);
+          return new LexiconLookupResult(
+              List.of(block, unsafe, unmatched),
+              OptionalLong.empty(),
+              new LexiconLookupResult.Counts(forms.size(), 1, 0, forms.size() - 1, 1, 1, 0));
+        };
+    var measured =
+        new EnrichCaptionUseCase(catalog, new DeterministicHintPolicy())
+            .enrichIncrementalMeasured(
+                request(
+                    group(
+                        segment("a", "ordinary", true),
+                        segment("gap", " ", false),
+                        segment("b", "caption", true))));
+    assertTrue(measured.result().hints().isEmpty());
+    assertEquals(List.of("a", "b"), measured.result().processedKeys());
+    assertEquals(4, measured.candidateCount());
+    assertEquals(2, measured.queryCounts().versionReads());
+    assertTrue(measured.queryNanos() >= 0);
+    assertTrue(measured.rulesNanos() >= 0);
+  }
+
+  @Test
+  void noAppendAndEmptyFormsPerformNoCatalogAccess() {
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    LexiconCatalog catalog =
+        forms -> {
+          calls.incrementAndGet();
+          return lookup(forms, List.of());
+        };
+    var useCase = new EnrichCaptionUseCase(catalog, new DeterministicHintPolicy());
+    var noAppend =
+        useCase.enrichIncrementalMeasured(request(group(segment("old", "caption", false))));
+    var punctuationOnly =
+        useCase.enrichIncrementalMeasured(request(group(segment("punct", "...", true))));
+    assertEquals(0, calls.get());
+    assertEquals(List.of(), noAppend.result().processedKeys());
+    assertEquals(List.of("punct"), punctuationOnly.result().processedKeys());
+    assertEquals(0, punctuationOnly.queryCounts().queryKeys());
   }
 
   private static CaptionIncrementalRequest request(CaptionIncrementalRequest.Group... groups) {
@@ -180,12 +323,27 @@ class IncrementalCaptionUseCaseTest {
     return new CaptionIncrementalRequest.Segment(key, text, null, append, 0);
   }
 
+  private static LexiconLookupResult lookup(
+      List<String> forms, List<LexiconHintCandidate> candidates) {
+    int positives =
+        (int)
+            forms.stream()
+                .filter(form -> candidates.stream().anyMatch(c -> c.normalizedForm().equals(form)))
+                .count();
+    long version = candidates.isEmpty() ? 1 : candidates.getFirst().lexiconVersion();
+    return new LexiconLookupResult(
+        candidates,
+        OptionalLong.of(version),
+        new LexiconLookupResult.Counts(
+            forms.size(), positives, forms.size() - positives, 0, 0, 1, 0));
+  }
+
   private static List<LexiconHintCandidate> candidates(String text) {
     var result = new ArrayList<LexiconHintCandidate>();
     if (text.contains("figure out")) result.add(candidate("figure out", "弄明白"));
     if (text.contains("caption")) result.add(candidate("caption", "字幕"));
     if (text.contains("reliable")) {
-      result.addAll(new BuiltinLexiconCatalog().candidatesFor("reliable"));
+      result.addAll(new BuiltinLexiconCatalog().lookupForms(List.of("reliable")).candidates());
     }
     return result;
   }
@@ -205,6 +363,22 @@ class IncrementalCaptionUseCaseTest {
         form.contains(" ") ? LexiconEntryKind.PHRASE : LexiconEntryKind.WORD,
         LexiconHintAction.HINT,
         gloss,
+        500,
+        0,
+        0);
+  }
+
+  private static LexiconHintCandidate blockCandidate(String form, long version) {
+    return new LexiconHintCandidate(
+        UUID.nameUUIDFromBytes(form.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+        null,
+        version,
+        "en",
+        form,
+        form,
+        LexiconEntryKind.WORD,
+        LexiconHintAction.BLOCK,
+        null,
         500,
         0,
         0);

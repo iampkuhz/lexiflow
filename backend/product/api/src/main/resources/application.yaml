@@ -3,13 +3,26 @@
 spring:
   application:
     name: lexiflow-api
+  main:
+    banner-mode: off
   jackson:
     deserialization:
       fail-on-unknown-properties: true
   threads:
     virtual:
       enabled: true
+lexiflow:
+  segment-analysis:
+    enabled: false
+  caption-debug:
+    enabled: true
+logging:
+  level:
+    com.zaxxer.hikari: OFF
 management:
+  health:
+    db:
+      enabled: false
   endpoints:
     web:
       exposure:
@@ -18,3 +31,7 @@ management:
     health:
       probes:
         enabled: true
+      group:
+        readiness:
+          include: readinessState,customLexicon
+          show-details: always

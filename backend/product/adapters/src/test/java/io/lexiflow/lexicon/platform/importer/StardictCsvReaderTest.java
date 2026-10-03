@@ -213,10 +213,45 @@ class StardictCsvReaderTest {
                     value
                         .row()
                         .hintPolicyReference()
-                        .contains("deterministic-preparation-all-basic-and-bounded-cleaning-v5")));
+                        .contains(StardictCsvReader.PREPARATION_POLICY)));
 
     Files.writeString(
         file, header() + "\n" + row("sustainability", "n. 绿色", "", "", "17705", "9092", "", ""));
+    assertThrows(
+        IllegalArgumentException.class, () -> new StardictCsvReader().read(file, ignored -> {}));
+  }
+
+  @Test
+  void publishesTrustedAllBasicPhraseFromStreamAndRejectsChangedCuratedSource() throws Exception {
+    var file = Files.createTempFile("curated-all-basic", ".csv");
+    Files.writeString(
+        file,
+        header()
+            + "\n"
+            + row("stream", "流", "", "", "", "", "", "1")
+            + "\n"
+            + row("data", "数据", "", "", "", "", "", "1")
+            + "\n"
+            + row("stream of data", "un. 数据流", "", "", "", "", "", ""));
+    var rows = new ArrayList<StardictCsvReader.SourceRecord>();
+    new StardictCsvReader().read(file, rows::add);
+    var phrase =
+        rows.stream()
+            .map(StardictCsvReader.SourceRecord::row)
+            .filter(value -> value.lemma().equals("stream of data"))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(phrase.allBasicPhrase());
+    assertTrue(phrase.curatedGloss());
+    var prepared = io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(phrase);
+    assertEquals("数据流", prepared.gloss());
+    assertEquals("curated", prepared.decisiveRule());
+    assertEquals(
+        "6b5efcba7b09e2e81366c25812f5a2e05f8b0bc1fad220022183ddb7b8fb8a2d",
+        StardictCsvReader.PREPARATION_POLICY.split("curated_sha256=", 2)[1]);
+
+    Files.writeString(
+        file, header() + "\n" + row("stream of data", "un. 数据之流", "", "", "", "", "", ""));
     assertThrows(
         IllegalArgumentException.class, () -> new StardictCsvReader().read(file, ignored -> {}));
   }
@@ -421,6 +456,50 @@ class StardictCsvReaderTest {
         "exchange",
         "detail",
         "audio");
+  }
+
+  @Test
+  void acceptsCompactSevenColumnRowsWithEquivalentConversionAndRejectsInvalidHeaders()
+      throws Exception {
+    var full = Files.createTempFile("full-format", ".csv");
+    var compact = Files.createTempFile("compact-format", ".csv");
+    var fullHeader = header();
+    var compactHeader = "word,translation,oxford,tag,bnc,frq,exchange";
+    Files.writeString(
+        full,
+        fullHeader + "\n" + row("walk", "行走", "meaning", "cet4", "100", "200", "3:walks", "1"));
+    Files.writeString(compact, compactHeader + "\n" + "walk,行走,1,cet4,100,200,3:walks\n");
+    var fullRows = new ArrayList<StardictCsvReader.SourceRecord>();
+    var compactRows = new ArrayList<StardictCsvReader.SourceRecord>();
+    var reader = new StardictCsvReader();
+    assertTrue(reader.matches(full));
+    assertTrue(reader.matches(compact));
+    reader.read(full, fullRows::add);
+    reader.read(compact, compactRows::add);
+    assertEquals(fullRows.getFirst().row().lemma(), compactRows.getFirst().row().lemma());
+    assertEquals(
+        fullRows.getFirst().row().chineseGloss(), compactRows.getFirst().row().chineseGloss());
+    assertEquals(
+        fullRows.getFirst().row().sourceBncRank(), compactRows.getFirst().row().sourceBncRank());
+    assertEquals(
+        fullRows.getFirst().row().inflections(), compactRows.getFirst().row().inflections());
+    assertEquals(
+        fullRows.getFirst().row().sourceFrqRank(), compactRows.getFirst().row().sourceFrqRank());
+    assertEquals(
+        fullRows.getFirst().row().basicVocabulary(),
+        compactRows.getFirst().row().basicVocabulary());
+    assertEquals(fullRows.getFirst().row().priority(), compactRows.getFirst().row().priority());
+    assertEquals("", compactRows.getFirst().row().definition());
+    for (var invalid :
+        List.of(
+            "word,translation,oxford,tag,bnc,frq",
+            "translation,word,oxford,tag,bnc,frq,exchange",
+            "word,translation,oxford,tag,bnc,frq,exchange,unknown",
+            "word,translation,translation,oxford,tag,bnc,frq,exchange")) {
+      Files.writeString(compact, invalid + "\n");
+      assertFalse(reader.matches(compact));
+      assertThrows(IllegalArgumentException.class, () -> reader.read(compact, ignored -> {}));
+    }
   }
 
   private static String row(

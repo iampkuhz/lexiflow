@@ -1,5 +1,18 @@
 import {writeFile} from 'node:fs/promises';
 
+/** 返回可实际接收鼠标事件的点；弹窗扩容或折叠内容尚未可见时不点击。 */
+export function popupClickPoint(selector) {
+  const element=document.querySelector(selector);
+  if(!element||element.disabled) return null;
+  element.scrollIntoView({block:'center',inline:'nearest'});
+  const rect=element.getBoundingClientRect();
+  if(rect.width<=0||rect.height<=0) return null;
+  const x=rect.left+rect.width/2,y=rect.top+rect.height/2;
+  const target=document.elementFromPoint(x,y);
+  if(!target||(target!==element&&!element.contains(target))) return null;
+  return {x,y};
+}
+
 /** CDP attaches to Chrome's real action popup, which Playwright does not list as a Page. */
 export async function openActionPopup({context,page,serviceWorker}) {
   await page.bringToFront();
@@ -47,13 +60,20 @@ export async function openActionPopup({context,page,serviceWorker}) {
       throw new Error('popup condition timed out');
     };
     const click=async(selector)=>{
-      const point=await evaluate(selector=>{
-        const element=document.querySelector(selector);
-        if(!element) throw new Error(`missing popup element ${selector}`);
-        const rect=element.getBoundingClientRect();return {x:rect.left+rect.width/2,y:rect.top+rect.height/2};
-      },selector);
-      await command('Input.dispatchMouseEvent',{type:'mousePressed',x:point.x,y:point.y,button:'left',clickCount:1});
-      await command('Input.dispatchMouseEvent',{type:'mouseReleased',x:point.x,y:point.y,button:'left',clickCount:1});
+      const end=Date.now()+10000;
+      let previous=null;
+      while(Date.now()<end) {
+        const point=await evaluate(popupClickPoint,selector);
+        // 连续两次可见且位置稳定，防止 details 展开与原生 popup 自动扩容间的竞争。
+        if(point&&previous&&point.x===previous.x&&point.y===previous.y) {
+          await command('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1});
+          await command('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1});
+          return;
+        }
+        previous=point;
+        await new Promise(resolve=>setTimeout(resolve,50));
+      }
+      throw new Error(`popup element not actionable: ${selector}`);
     };
     const pressSpace=async(selector)=>{
       await evaluate(selector=>document.querySelector(selector).focus(),selector);

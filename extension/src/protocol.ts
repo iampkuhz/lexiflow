@@ -13,7 +13,7 @@ export type KeyedHint = Hint & { startKey: string; endKey: string };
 export type HintResponse = { processedKeys: string[]; hints: KeyedHint[] };
 export type ApiTimings = { query?: number; rules?: number; api?: number };
 export type ApiResult = ({ ok: true; body: HintResponse } | { ok: false;
-  reason: "timeout" | "aborted" | "invalid-request" | "network" | "rejected" | "invalid-response" }) & { timings?: ApiTimings };
+  reason: "timeout" | "aborted" | "invalid-request" | "network" | "rejected" | "backend_unavailable" | "invalid-response" }) & { timings?: ApiTimings; requestId?: string };
 export const snapshotSegments = (snapshot: CaptionSnapshot): CaptionSegment[] => snapshot.captions.flatMap(group => group.segments);
 export const snapshotText = (snapshot: CaptionSnapshot): string => snapshotSegments(snapshot).map(segment => segment.text).join("");
 const boundedId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 128;

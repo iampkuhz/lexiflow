@@ -2,16 +2,16 @@ package io.lexiflow.lexicon.platform.persistence;
 
 import io.lexiflow.lexicon.application.importing.LexiconImportPlan;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
-import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
-import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
-import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
+import io.lexiflow.lexicon.application.importing.policy.ClassificationPolicy;
+import io.lexiflow.lexicon.application.importing.policy.HintPreparation;
+import io.lexiflow.lexicon.application.port.InvalidPublishedLexiconException;
+import io.lexiflow.lexicon.application.port.LexiconPublicationRepository;
 import io.lexiflow.lexicon.application.port.LexiconRepository;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -42,6 +42,42 @@ final class DefaultLexiconRepository implements LexiconRepository {
 
   @Override
   public long publishedVersion() {
+    return jdbc.query(
+        "WITH required_lookup AS (SELECT h.language_tag, h.normalized_form, "
+            + LOOKUP_COLUMNS
+            + ", h.cache_priority FROM lexicon_hint_lookup h WHERE FALSE) "
+            + "SELECT d.lexicon_version, CASE WHEN jsonb_typeof(d.source_manifest) = 'array' "
+            + "THEN jsonb_array_length(d.source_manifest) > 0 AND NOT EXISTS ("
+            + "SELECT 1 FROM jsonb_array_elements(d.source_manifest) item WHERE "
+            + "coalesce(length(trim(item->>'source_id')), 0) = 0 OR "
+            + "coalesce(length(trim(item->>'license_id')), 0) = 0 OR "
+            + "coalesce(length(trim(item->>'source_digest')), 0) = 0 OR "
+            + "coalesce(length(trim(item->>'acquired_at')), 0) = 0) "
+            + "ELSE FALSE END, d.source_row_count, "
+            + "d.entry_count, d.lookup_count, d.preparation_policy "
+            + "FROM (SELECT 1) anchor LEFT JOIN lexicon_dataset d ON d.dataset_id = 1 "
+            + "WHERE NOT EXISTS (SELECT 1 FROM required_lookup)",
+        result -> {
+          if (!result.next() || result.getObject(1) == null) return 0L;
+          long version = result.getLong(1);
+          boolean manifestValid = result.getBoolean(2);
+          long sourceRows = result.getLong(3);
+          long entries = result.getLong(4);
+          long lookups = result.getLong(5);
+          String policy = result.getString(6);
+          if (version < 1
+              || !manifestValid
+              || sourceRows < entries
+              || entries < 1
+              || lookups < entries
+              || !HintPreparation.POLICY_ID.equals(policy)) {
+            throw new InvalidPublishedLexiconException();
+          }
+          return version;
+        });
+  }
+
+  private long rawPublishedVersion() {
     return jdbc.query(
         "SELECT lexicon_version FROM lexicon_dataset WHERE dataset_id = 1",
         result -> result.next() ? result.getLong(1) : 0L);
@@ -107,23 +143,12 @@ final class DefaultLexiconRepository implements LexiconRepository {
   }
 
   @Override
-  public long publish(LexiconImportRequest request) {
-    Objects.requireNonNull(request, "request");
-    LexiconImportPlan.prepare(
-        request.rows(), 1, request.metadata().sourceDigest(), request.metadata().acquiredAt());
-    return publishStreaming(
-        request.metadata(),
-        request.rows().size(),
-        request.rows().size(),
-        consumer -> request.rows().forEach(consumer));
-  }
-
-  @Override
-  public long publishStreaming(
+  public long publish(
       LexiconImportMetadata metadata,
       long sourceRowsTotal,
       long expectedEntries,
-      LexiconImportRowSource source) {
+      LexiconPublicationRepository.PreparedEntrySource source,
+      LexiconPublicationRepository.PublicationProgress progress) {
     Objects.requireNonNull(metadata, "metadata");
     Objects.requireNonNull(source, "source");
     if (sourceRowsTotal < expectedEntries || expectedEntries < 1) {
@@ -131,20 +156,32 @@ final class DefaultLexiconRepository implements LexiconRepository {
     }
     return transaction.execute(
         status -> {
+          safe(progress::persistStarted);
+          if (org.springframework.transaction.support.TransactionSynchronizationManager
+              .isSynchronizationActive())
+            org.springframework.transaction.support.TransactionSynchronizationManager
+                .registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                      @Override
+                      public void afterCompletion(int completionStatus) {
+                        if (completionStatus == STATUS_ROLLED_BACK) safe(progress::rolledBack);
+                      }
+                    });
           jdbc.execute("SELECT pg_advisory_xact_lock(643981781)");
-          var version = publishedVersion() + 1;
+          var version = rawPublishedVersion() + 1;
           jdbc.update("DELETE FROM lexicon_dataset WHERE dataset_id = 1");
           jdbc.update("DELETE FROM lexicon_prepared_entry");
-          var writer = new BatchWriter(version, metadata);
+          var writer = new BatchWriter();
           try {
-            source.read(writer::add);
+            source.read(version, writer::add);
           } catch (IOException exception) {
-            throw new UncheckedIOException("source changed during publication", exception);
+            throw new java.io.UncheckedIOException("source changed during publication", exception);
           }
           writer.flush();
           if (writer.entries != expectedEntries) {
             throw new IllegalStateException("source entry count changed after preflight");
           }
+          safe(() -> progress.persisted(writer.entries, writer.lookups));
           jdbc.update(
               "INSERT INTO lexicon_dataset (dataset_id, lexicon_version, source_manifest, "
                   + "source_row_count, entry_count, lookup_count, preparation_policy) "
@@ -158,27 +195,26 @@ final class DefaultLexiconRepository implements LexiconRepository {
               sourceRowsTotal,
               writer.entries,
               writer.lookups,
-              metadata.sourceId());
+              HintPreparation.POLICY_ID);
           return version;
         });
   }
 
+  private static void safe(Runnable callback) {
+    try {
+      callback.run();
+    } catch (RuntimeException ignored) {
+    }
+  }
+
   /** 在一个事务内按固定分块批量写入主词条及其所有准确词形。 */
   private final class BatchWriter {
-    private final long version;
-    private final LexiconImportMetadata metadata;
     private final List<LexiconImportPlan.PlannedEntry> rows = new ArrayList<>(BATCH_SIZE);
     private long entries;
     private long lookups;
 
-    BatchWriter(long version, LexiconImportMetadata metadata) {
-      this.version = version;
-      this.metadata = metadata;
-    }
-
-    void add(LexiconImportRow row) {
-      rows.add(
-          LexiconImportPlan.fromRow(row, version, metadata.sourceDigest(), metadata.acquiredAt()));
+    void add(LexiconImportPlan.PlannedEntry planned) {
+      rows.add(planned);
       if (rows.size() == BATCH_SIZE) flush();
     }
 
@@ -200,12 +236,18 @@ final class DefaultLexiconRepository implements LexiconRepository {
               entry.entryKind().name().toLowerCase(Locale.ROOT),
               row.sourceGloss(),
               row.dictionary().recordReference(),
+              row.dictionary().sourceId(),
+              row.frequency().sourceId(),
+              row.frequency().recordReference(),
               row.sourceBncRank(),
               row.sourceFrqRank(),
               row.sourceComplexTags().toArray(String[]::new),
               row.sourceOxfordBasic(),
               gloss,
               exclusion,
+              planned.prepared().classification().frequencyEvidence().name(),
+              planned.prepared().decisiveRule(),
+              planned.prepared().matchedRules().toArray(String[]::new),
               row.priority().memoryPriority(),
               row.priority().frequencyZipf(),
               row.priority().complexListCount()
@@ -224,17 +266,18 @@ final class DefaultLexiconRepository implements LexiconRepository {
       }
       jdbc.batchUpdate(
           "INSERT INTO lexicon_prepared_entry (lexicon_entry_id, language_tag, "
-              + "lemma, entry_kind, source_gloss, source_gloss_ref, source_bnc_rank, source_frq_rank, "
+              + "lemma, entry_kind, source_gloss, source_gloss_ref, source_dictionary_id, "
+              + "source_frequency_id, source_frequency_ref, source_bnc_rank, source_frq_rank, "
               + "source_complex_tags, source_oxford_basic, prepared_gloss, exclusion_reason, "
-              + "prepared_priority, frequency_zipf, complex_list_count) "
-              + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          batch(prepared, 8));
+              + "frequency_evidence, decisive_rule, matched_rules, prepared_priority, frequency_zipf, complex_list_count) "
+              + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          batch(prepared));
       jdbc.batchUpdate(
           "INSERT INTO lexicon_hint_lookup (language_tag, normalized_form, "
               + "lexicon_entry_id, form_kind, canonical_lemma, entry_kind, final_action, final_gloss, "
               + "final_priority, final_sense_id, final_frequency_zipf, final_complex_list_count, "
-              + "cache_priority) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          batch(lookup, -1));
+              + "cache_priority, final_decision_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          batch(lookup));
       entries += prepared.size();
       lookups += lookup.size();
       rows.clear();
@@ -249,15 +292,16 @@ final class DefaultLexiconRepository implements LexiconRepository {
       LexiconHintAction action,
       String gloss) {
     var entry = planned.entry();
+    var finalReason = planned.prepared().decisiveRule();
     if (!LexiconSurfacePolicy.withinQueryWindow(form)) {
       action = LexiconHintAction.BLOCK;
       gloss = null;
+      finalReason = "outside_query_window";
     }
     var priority = entry.priority();
     var cachePriority =
-        action == LexiconHintAction.BLOCK && planned.row().basicVocabulary()
-            ? 1000
-            : planned.row().prewarmEligible() ? priority.memoryPriority() : 0;
+        ClassificationPolicy.cachePriority(
+            planned.row(), planned.prepared().classification(), action);
     lookup.add(
         new Object[] {
           entry.languageTag(),
@@ -272,11 +316,12 @@ final class DefaultLexiconRepository implements LexiconRepository {
           gloss == null ? null : entry.senses().getFirst().senseId(),
           priority.frequencyZipf(),
           priority.complexListCount(),
-          cachePriority
+          cachePriority,
+          finalReason
         });
   }
 
-  private static BatchPreparedStatementSetter batch(List<Object[]> rows, int arrayIndex) {
+  private static BatchPreparedStatementSetter batch(List<Object[]> rows) {
     return new BatchPreparedStatementSetter() {
       @Override
       public int getBatchSize() {
@@ -287,10 +332,8 @@ final class DefaultLexiconRepository implements LexiconRepository {
       public void setValues(PreparedStatement statement, int index) throws SQLException {
         var values = rows.get(index);
         for (int column = 0; column < values.length; column++) {
-          if (column == arrayIndex) {
-            statement.setArray(
-                column + 1,
-                statement.getConnection().createArrayOf("text", (String[]) values[column]));
+          if (values[column] instanceof String[] array) {
+            statement.setArray(column + 1, statement.getConnection().createArrayOf("text", array));
           } else {
             statement.setObject(column + 1, values[column]);
           }

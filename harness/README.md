@@ -11,6 +11,7 @@ Harness 保存静态、机器可读的工程约束；运行状态、报告与 re
 | [agent-runtime.manifest.yaml](agent-runtime.manifest.yaml) | 客户端 Session/checkout 运行边界，共享字段由 policy 投影 |
 | [policy-projections.yaml](policy-projections.yaml) | 真源到 runtime、模板、Catalog 派生字段的映射 |
 | [delivery-hooks.json](delivery-hooks.json) | 交付 Stop 执行、进度、超时与安全停用；不签发正式验收 |
+| [ci-policy.yaml](ci-policy.yaml) | 快速 CI 的常驻检查与正式发行检查边界，不签发完整 Verify/Formal |
 | [test-services.json](test-services.json) | Hook 临时 PostgreSQL/Redis、本机镜像、就绪与安全资源边界 |
 | [python-quality.toml](python-quality.toml) / [python-docstrings.toml](python-docstrings.toml) | Ruff 风格与格式、Pylint 中文公共接口文档字符串规则；仅 scripts |
 | [module-checks.yaml](module-checks.yaml) | 模块 Check 的入口、触发、依赖、环境、输入与结果 contract |
@@ -24,11 +25,13 @@ Harness 保存静态、机器可读的工程约束；运行状态、报告与 re
 
 日常命令不接受 root、base 或 check ID 覆盖；定向定位走 `python3 -m scripts.verification.diagnose change|repository`，只返回诊断结果，不发布可供正式 Delivery Gate 使用的完整报告。
 
+日常功能研发不以正式发行包、双架构运行或资料分发许可验收完成为前置。使用上述定向诊断取得所选模块及其依赖的反馈；所选检查仍保留语言、业务测试与环境要求。发布环境受限可继续无依赖的实现，但不得将定向 PASS 当作完整 Verify 或交付 PASS，不删除发布检查或绕过独立 Formal Gate。未知进程和数据归属等执行安全问题仍单独处理。
+
 正式验收只有 `python3 -m scripts.delivery_gate submit|validate|review|check|status`。submit 绑定报告与真实 producer；validate 由当前父任务下的验证子代理执行冻结输入检查，不要求独立 Session；review 只审 frozen diff/evidence；check 只核对 receipt、依赖和批准。review/check 不重跑交付命令，调用者不伪造身份；详细交接见 [Delivery Gate](../docs/development/change-delivery/delivery-gate.md)。
 
 Qoder 与 Codex 调度以 policy 为准。实现委派优先 Qoder；验证与审查直接使用不同原生 Codex 子代理。内部委派不使用 create_thread；只有 policy 的至少两轮验证 PASS、对应 Hook 持续阻塞、针对性修复与当前任务能力边界证据齐备，并经用户明确批准，才允许新任务兜底。例外任务同样显式指定 Luna 模型和推理参数；Sol 升级须具体风险证据，不能继承默认 Astra。先核对真实宿主等待兼容性；Goal 活跃或未知且没有受支持等待适配时，不启动 Qoder。Qoder 交接后父任务结束当前轮，终态 callback 后才核对与 ack；Codex 原生子代理使用原生协作事件。未知运行不重派，不通过修改 Goal、身份或预算绕过。细节和安全恢复见 [Agent workflow](../docs/development/agent-workflow.md)。
 
-Git Hook 只提醒；Codex/Qoder 正常 Stop 实际串行执行 Change/Repository Verify。Stop 是回合结束：中间汇报、提问、等待用户、Qoder 交接和只读 review/catalog 回合须以单独一行 `<!-- lexiflow:intermediate -->` 结尾，不执行检查、不声明交付 PASS；普通交付不得加此标记。首次失败 block 请求修复，stop_hook_active 再次失败 continue=false 终止自动重试，保留 FAIL/BLOCKED。不注册工具事件，不跨交付缓存 PASS，不锁编辑或 Git。Java backend 变更选择 Gradle deliveryFull；scripts 选择 Ruff、Pylint 与所属模块测试。检查真源为 module-checks，Stop 策略为 delivery-hooks；CI 仍独立运行 Repository Verify。信任、进度、超时与逃生见[交付 Hook](../docs/development/change-delivery/hooks.md)。
+Git Hook 只提醒；Codex/Qoder 正常 Stop 实际串行执行 Change/Repository Verify。Stop 是回合结束：中间汇报、提问、等待用户、Qoder 交接和只读 review/catalog 回合须以单独一行 `<!-- lexiflow:intermediate -->` 结尾，不执行检查、不声明交付 PASS；普通交付不得加此标记。首次失败 block 请求修复，stop_hook_active 再次失败 continue=false 终止自动重试，保留 FAIL/BLOCKED。不注册工具事件，不跨交付缓存 PASS，不锁编辑或 Git。Java backend 变更选择 Gradle deliveryFull；scripts 选择 Ruff、Pylint 与所属模块测试。检查真源为 module-checks，Stop 策略为 delivery-hooks；分支/PR CI 运行独立 quick 视图；正式标签 CI 仍执行完整 Change/Repository Verify。信任、进度、超时与逃生见[交付 Hook](../docs/development/change-delivery/hooks.md)。
 
 ## 脚本与开发数据边界
 

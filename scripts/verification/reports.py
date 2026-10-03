@@ -156,10 +156,14 @@ def _snapshot_shape(value: Any) -> bool:
         return False
     if any(
         not isinstance(x, dict)
-        or set(x) != {"locator", "sha256"}
+        or set(x) != {"locator", "sha256", "size_bytes", "executable"}
         or not isinstance(x["locator"], str)
         or not isinstance(x["sha256"], str)
         or len(x["sha256"]) != 64
+        or isinstance(x["size_bytes"], bool)
+        or not isinstance(x["size_bytes"], int)
+        or x["size_bytes"] < 0
+        or not isinstance(x["executable"], bool)
         for x in value["files"]
     ):
         return False
@@ -286,24 +290,18 @@ def _pass_check_current(
         )
         if any(not _snapshot_shape(x) for x in (pre, before, post, final)):
             return False
-        if pre["fingerprint"] != final["fingerprint"]:
+        if pre != final or pre["missing"]:
             return False
-        if (
-            reason == "exited"
-            and len(
-                {
-                    pre["fingerprint"],
-                    before["fingerprint"],
-                    post["fingerprint"],
-                    final["fingerprint"],
-                }
-            )
-            != 1
+        if reason == "exited" and (before != pre or post != pre):
+            return False
+        if reason == "deduplicated" and any(
+            item["files"] != pre["files"] or item["missing"] != pre["missing"]
+            for item in (before, post)
         ):
             return False
         from scripts.verification.kernel import snapshot_check_inputs
 
-        if snapshot_check_inputs(root, expected)["fingerprint"] != final["fingerprint"]:
+        if snapshot_check_inputs(root, expected) != final:
             return False
     except (KeyError, TypeError, ValueError, OSError):
         return False

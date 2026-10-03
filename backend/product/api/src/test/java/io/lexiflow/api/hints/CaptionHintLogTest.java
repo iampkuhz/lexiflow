@@ -8,9 +8,12 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import io.lexiflow.api.hints.model.CaptionHintRequest;
+import io.lexiflow.api.hints.model.CaptionHintResponse;
 import io.lexiflow.enrichment.application.caption.EnrichCaptionUseCase;
 import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
 import io.lexiflow.lexicon.domain.catalog.BuiltinLexiconCatalog;
+import io.lexiflow.observability.platform.FileSegmentAnalysisStore;
+import io.lexiflow.observability.platform.StructuredEventLogger;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -18,9 +21,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.LoggerFactory;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 /** 敏感字幕只在专用本机文件按片段记一次，不进入普通 API 日志。 */
 class CaptionHintLogTest {
@@ -39,9 +44,9 @@ class CaptionHintLogTest {
     appender.start();
     logger.addAppender(appender);
     try {
-      controller.hint(request);
-      controller.hint(request);
-      controller(file).hint(request);
+      controller.hint(request, observation());
+      controller.hint(request, observation());
+      controller(file).hint(request, observation());
       assertTrue(
           appender.list.stream()
               .noneMatch(event -> event.getFormattedMessage().contains("reliable")));
@@ -64,7 +69,10 @@ class CaptionHintLogTest {
   @Test
   void recordsNoHintWithCompleteUntranslatedRange() throws IOException {
     var file = directory.resolve("no-hint.jsonl");
-    controller(file).hint(request(segment("old", "reliable", false), segment("new", "zxqv", true)));
+    controller(file)
+        .hint(
+            request(segment("old", "reliable", false), segment("new", "zxqv", true)),
+            observation());
     var lines = Files.readAllLines(file);
     assertEquals(1, lines.size());
     assertTrue(lines.getFirst().contains("\"status\":\"NO_HINT\""));
@@ -75,7 +83,8 @@ class CaptionHintLogTest {
   @Test
   void crossSegmentHintHasOneAnchorButBothSegmentsAreCovered() throws IOException {
     var file = directory.resolve("cross-segment.jsonl");
-    controller(file).hint(request(segment("a", "reli", true), segment("b", "able", true)));
+    controller(file)
+        .hint(request(segment("a", "reli", true), segment("b", "able", true)), observation());
     var lines = Files.readAllLines(file);
     assertEquals(2, lines.size());
     assertTrue(lines.get(0).contains("\"english\":\"reli\""));
@@ -89,12 +98,15 @@ class CaptionHintLogTest {
   void lateCompletionKeepsOldSegmentIdAndRecordsOnlyTheNewSuffix() throws IOException {
     var file = directory.resolve("late-completion.jsonl");
     var controller = controller(file);
-    controller.hint(request(segment("stable-old", "reli", true)));
+    controller.hint(request(segment("stable-old", "reli", true)), observation());
     var firstLine = Files.readAllLines(file).getFirst();
     var result =
-        controller
-            .hint(request(segment("stable-old", "reli", false), segment("fresh", "able", true)))
-            .getBody();
+        (CaptionHintResponse)
+            controller
+                .hint(
+                    request(segment("stable-old", "reli", false), segment("fresh", "able", true)),
+                    observation())
+                .getBody();
     assertEquals(List.of("fresh"), result.processedKeys());
     assertEquals("stable-old", result.hints().getFirst().startKey());
     assertEquals("fresh", result.hints().getFirst().endKey());
@@ -110,20 +122,18 @@ class CaptionHintLogTest {
   void unavailableFileDoesNotBlockHintsOrLeakCaptionToOrdinaryLog() throws IOException {
     var path = directory.resolve("unavailable.jsonl");
     Files.createDirectory(path);
-    var logger = (Logger) LoggerFactory.getLogger(CaptionHintController.class);
-    var appender = new ListAppender<ILoggingEvent>();
-    appender.start();
-    logger.addAppender(appender);
-    try {
-      var response = controller(path).hint(request(segment("new", "reliable", true))).getBody();
-      assertEquals(List.of("new"), response.processedKeys());
-      assertEquals(1, response.hints().size());
-      assertEquals(1, appender.list.size());
-      assertFalse(appender.list.getFirst().getFormattedMessage().contains("reliable"));
-    } finally {
-      logger.detachAppender(appender);
-      appender.stop();
-    }
+    var eventLines = new java.util.ArrayList<String>();
+    var response =
+        (CaptionHintResponse)
+            controller(path, null, new StructuredEventLogger((level, json) -> eventLines.add(json)))
+                .hint(request(segment("new", "reliable", true)), observation())
+                .getBody();
+    assertEquals(List.of("new"), response.processedKeys());
+    assertEquals(1, response.hints().size());
+    assertEquals(1, eventLines.size());
+    assertTrue(eventLines.getFirst().contains("analysis.record.failed"));
+    assertTrue(eventLines.getFirst().contains("attempted_segments"));
+    assertFalse(eventLines.getFirst().contains("reliable"));
   }
 
   @Test
@@ -134,9 +144,9 @@ class CaptionHintLogTest {
     var console = new PrintStream(output, true, StandardCharsets.UTF_8);
     var request = request(segment("console-new", "reliable\n\u001b[31m\rspoof", true));
     var controller = controller(path, console);
-    controller.hint(request);
-    controller.hint(request);
-    controller(path, console).hint(request);
+    controller.hint(request, observation());
+    controller.hint(request, observation());
+    controller(path, console).hint(request, observation());
     var lines = output.toString(StandardCharsets.UTF_8).lines().toList();
     assertEquals(1, lines.size());
     assertEquals("[LexiFlow segment] " + Files.readAllLines(path).getFirst(), lines.getFirst());
@@ -152,16 +162,17 @@ class CaptionHintLogTest {
     var output = new ByteArrayOutputStream();
     var console = new PrintStream(output, true, StandardCharsets.UTF_8);
     controller(directory.resolve("empty.jsonl"), console)
-        .hint(request(segment("empty", "zxqv", true)));
+        .hint(request(segment("empty", "zxqv", true)), observation());
     assertTrue(output.toString(StandardCharsets.UTF_8).contains("NO_HINT"));
     output.reset();
     var blocked = directory.resolve("blocked");
     Files.createDirectory(blocked);
     assertEquals(
         1,
-        controller(blocked, console)
-            .hint(request(segment("bad", "reliable", true)))
-            .getBody()
+        ((CaptionHintResponse)
+                controller(blocked, console)
+                    .hint(request(segment("bad", "reliable", true)), observation())
+                    .getBody())
             .hints()
             .size());
     assertEquals("", output.toString(StandardCharsets.UTF_8));
@@ -173,9 +184,25 @@ class CaptionHintLogTest {
 
   private static CaptionHintController controller(Path path, PrintStream console)
       throws IOException {
+    return controller(path, console, new StructuredEventLogger());
+  }
+
+  private static CaptionHintController controller(
+      Path path, PrintStream console, StructuredEventLogger events) throws IOException {
     return new CaptionHintController(
         new EnrichCaptionUseCase(new BuiltinLexiconCatalog(), new DeterministicHintPolicy()),
-        new SegmentAnalysisLog(path, console));
+        new SegmentAnalysisLog(
+            new FileSegmentAnalysisStore(
+                path, console == null ? null : line -> console.print(line))),
+        events);
+  }
+
+  private static MockHttpServletRequest observation() {
+    var request = new MockHttpServletRequest();
+    request.setAttribute(
+        CaptionRequestObservation.ATTRIBUTE,
+        new CaptionRequestObservation(UUID.randomUUID(), System.nanoTime()));
+    return request;
   }
 
   private static CaptionHintRequest request(CaptionHintRequest.Segment... segments) {
