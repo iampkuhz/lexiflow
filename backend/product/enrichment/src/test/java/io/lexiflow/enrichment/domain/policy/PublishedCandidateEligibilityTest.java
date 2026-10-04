@@ -59,7 +59,7 @@ class PublishedCandidateEligibilityTest {
   private static LexiconHintCandidate candidate(
       String form, LexiconHintAction action, String gloss) {
     return new LexiconHintCandidate(
-        UUID.randomUUID(),
+        1L,
         action == LexiconHintAction.HINT ? UUID.randomUUID() : null,
         1,
         "en",
@@ -69,7 +69,7 @@ class PublishedCandidateEligibilityTest {
         action,
         gloss,
         1,
-        0,
+        false,
         0);
   }
 }

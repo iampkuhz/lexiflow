@@ -9,9 +9,9 @@ public final class DatasetPackageTables {
   /**
    * 固定表名、列、排序及每列的 SQL 类型。
    *
-   * @param name 含义：受控 Lexicon 表名。取值范围：三表之一。
-   * @param columns 含义：最新 SQL 的固定列顺序。取值范围：非空。
-   * @param orderBy 含义：固定导出排序表达式。取值范围：内置常量。
+   * @param name 含义：受控 Lexicon 表名。取值范围：三张最新词库表之一。
+   * @param columns 含义：最新 SQL 的固定列顺序。取值范围：非空且与表结构一致。
+   * @param orderBy 含义：固定导出排序表达式。取值范围：内置列表达式。
    */
   public record Table(String name, List<String> columns, String orderBy) {
     /** 返回本表固定列名集合。 */
@@ -33,75 +33,34 @@ public final class DatasetPackageTables {
               "preparation_policy",
               "imported_at"),
           "dataset_id");
-  public static final Table PREPARED =
+  public static final Table ENTRY =
       new Table(
-          "lexicon_prepared_entry",
+          "lexicon_entry",
           List.of(
-              "lexicon_entry_id",
-              "language_tag",
+              "entry_id",
               "lemma",
-              "entry_kind",
-              "source_gloss",
-              "source_gloss_ref",
-              "source_dictionary_id",
-              "source_frequency_id",
-              "source_frequency_ref",
-              "source_bnc_rank",
-              "source_frq_rank",
-              "source_complex_tags",
-              "source_oxford_basic",
-              "prepared_gloss",
-              "exclusion_reason",
-              "frequency_evidence",
-              "decisive_rule",
-              "matched_rules",
-              "prepared_priority",
-              "frequency_zipf",
-              "complex_list_count"),
-          "lexicon_entry_id");
-  public static final Table LOOKUP =
-      new Table(
-          "lexicon_hint_lookup",
-          List.of(
-              "language_tag",
-              "normalized_form",
-              "lexicon_entry_id",
-              "form_kind",
-              "canonical_lemma",
-              "entry_kind",
-              "final_action",
-              "final_decision_reason",
-              "final_gloss",
-              "final_priority",
-              "final_sense_id",
-              "final_frequency_zipf",
-              "final_complex_list_count",
+              "gloss",
+              "ranked_word",
+              "hint_priority",
+              "complex_list_count",
               "cache_priority"),
-          "language_tag, normalized_form COLLATE \"C\", lexicon_entry_id");
-  public static final List<Table> TABLES = List.of(DATASET, PREPARED, LOOKUP);
+          "entry_id");
+  public static final Table FORM =
+      new Table(
+          "lexicon_form",
+          List.of("normalized_form", "entry_id"),
+          "normalized_form COLLATE \"C\", entry_id");
+  public static final List<Table> TABLES = List.of(DATASET, ENTRY, FORM);
   public static final Map<String, String> TYPES =
       Map.ofEntries(
           Map.entry("dataset_id", "smallint"), Map.entry("lexicon_version", "bigint"),
           Map.entry("source_manifest", "jsonb"), Map.entry("source_row_count", "bigint"),
           Map.entry("entry_count", "bigint"), Map.entry("lookup_count", "bigint"),
           Map.entry("preparation_policy", "text"), Map.entry("imported_at", "timestamptz"),
-          Map.entry("lexicon_entry_id", "uuid"), Map.entry("language_tag", "text"),
-          Map.entry("lemma", "text"), Map.entry("entry_kind", "text"),
-          Map.entry("source_gloss", "text"), Map.entry("source_gloss_ref", "text"),
-          Map.entry("source_dictionary_id", "text"), Map.entry("source_frequency_id", "text"),
-          Map.entry("source_frequency_ref", "text"), Map.entry("source_bnc_rank", "bigint"),
-          Map.entry("source_frq_rank", "bigint"), Map.entry("source_complex_tags", "text[]"),
-          Map.entry("source_oxford_basic", "boolean"), Map.entry("prepared_gloss", "text"),
-          Map.entry("exclusion_reason", "text"), Map.entry("frequency_evidence", "text"),
-          Map.entry("decisive_rule", "text"), Map.entry("matched_rules", "text[]"),
-          Map.entry("prepared_priority", "integer"), Map.entry("frequency_zipf", "numeric"),
-          Map.entry("complex_list_count", "smallint"), Map.entry("normalized_form", "text"),
-          Map.entry("form_kind", "text"), Map.entry("canonical_lemma", "text"),
-          Map.entry("final_action", "text"), Map.entry("final_decision_reason", "text"),
-          Map.entry("final_gloss", "text"), Map.entry("final_priority", "integer"),
-          Map.entry("final_sense_id", "uuid"), Map.entry("final_frequency_zipf", "numeric"),
-          Map.entry("final_complex_list_count", "smallint"),
-              Map.entry("cache_priority", "integer"));
+          Map.entry("entry_id", "bigint"), Map.entry("lemma", "text"),
+          Map.entry("gloss", "text"), Map.entry("ranked_word", "boolean"),
+          Map.entry("hint_priority", "smallint"), Map.entry("complex_list_count", "smallint"),
+          Map.entry("cache_priority", "smallint"), Map.entry("normalized_form", "text"));
 
   private DatasetPackageTables() {}
 }

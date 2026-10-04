@@ -315,7 +315,7 @@ class CaptionRequestFailureHttpTest {
 
     private static LexiconHintCandidate candidate(String entry, String form, long version) {
       return new LexiconHintCandidate(
-          UUID.nameUUIDFromBytes(entry.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+          io.lexiflow.lexicon.domain.port.LexiconIdentity.entryId(entry),
           UUID.nameUUIDFromBytes(
               (entry + "-sense").getBytes(java.nio.charset.StandardCharsets.UTF_8)),
           version,
@@ -326,7 +326,7 @@ class CaptionRequestFailureHttpTest {
           LexiconHintAction.HINT,
           "合成释义",
           500,
-          0,
+          false,
           0);
     }
   }

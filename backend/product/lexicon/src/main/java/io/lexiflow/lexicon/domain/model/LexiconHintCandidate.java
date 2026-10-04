@@ -6,7 +6,7 @@ import java.util.UUID;
 /**
  * 从已准备查询投影取得的一种精确词形；观看不再读取来源准备记录。
  *
- * @param entryId 来源无关的规范词条身份。
+ * @param entryId 来源无关的规范正 long 词条身份。
  * @param senseId 可展示时的精确义项身份；阻断时为空。
  * @param lexiconVersion 完整资料发布版本。
  * @param languageTag 当前仅为英语。
@@ -16,11 +16,11 @@ import java.util.UUID;
  * @param finalAction 冻结的提示或阻断决定。
  * @param finalGloss 可展示时的安全短释；阻断时为空。
  * @param finalPriority 非个人化提示排序分数。
- * @param frequencyZipf 来源排名换算的词频值。
+ * @param rankedWord 是否属于有排名词条；独立于精确 Zipf 数值。
  * @param complexListCount 复杂学习词表证据数量。
  */
 public record LexiconHintCandidate(
-    UUID entryId,
+    long entryId,
     UUID senseId,
     long lexiconVersion,
     String languageTag,
@@ -30,12 +30,12 @@ public record LexiconHintCandidate(
     LexiconHintAction finalAction,
     String finalGloss,
     int finalPriority,
-    double frequencyZipf,
+    boolean rankedWord,
     int complexListCount) {
 
   /** 校验来源无关身份、准确词形和可靠提示与阻断互斥。 */
   public LexiconHintCandidate {
-    Objects.requireNonNull(entryId, "entryId");
+    if (entryId < 1) throw new IllegalArgumentException("entryId must be positive");
     if (lexiconVersion < 1 || !"en".equals(languageTag)) {
       throw new IllegalArgumentException("candidate version or language is invalid");
     }
@@ -43,12 +43,7 @@ public record LexiconHintCandidate(
     canonicalLemma = LexiconEntry.normalizeEnglishForm(canonicalLemma, "canonicalLemma");
     Objects.requireNonNull(entryKind, "entryKind");
     Objects.requireNonNull(finalAction, "finalAction");
-    if (finalPriority < 0
-        || finalPriority > 1000
-        || !Double.isFinite(frequencyZipf)
-        || frequencyZipf < 0
-        || frequencyZipf > 8
-        || complexListCount < 0) {
+    if (finalPriority < 0 || finalPriority > 1000 || complexListCount < 0) {
       throw new IllegalArgumentException("candidate priority evidence is invalid");
     }
     if (finalAction == LexiconHintAction.HINT) {

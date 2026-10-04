@@ -8,7 +8,7 @@ import org.springframework.web.bind.annotation.RestController;
 /** 提供不缓存且不泄漏内部细节的运行状态合同。 */
 @RestController
 public final class RuntimeStatusController {
-  private static final String API_CONTRACT = "caption-hints.v1";
+  private static final String API_CONTRACT = "caption-hints.v2";
   private final LexiconRuntime runtime;
   private final SoftwareIdentity softwareIdentity;
 

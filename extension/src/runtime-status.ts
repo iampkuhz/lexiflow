@@ -1,6 +1,6 @@
 import { API_URL, REQUEST_TIMEOUT_MS } from "./protocol";
 
-export const API_CONTRACT = "caption-hints.v1";
+export const API_CONTRACT = "caption-hints.v2";
 export const RUNTIME_STATUS_URL = API_URL.replace(/\/caption-hints$/, "/runtime-status");
 export type RuntimeStatus = { softwareVersion: string; apiContract: string; mode: "formal" | "demo" | "invalid";
   ready: boolean; reason: "OK" | "DEMO_MODE" | "NO_PUBLISHED_DATA" | "DEPENDENCY_UNAVAILABLE" | "SCHEMA_MISMATCH" | "PREWARM_DEGRADED";

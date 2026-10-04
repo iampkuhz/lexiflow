@@ -250,7 +250,7 @@ async function assertControlsUsable(page) {
 async function installHintRendererMock(serviceWorker, apiBase, caption, terms) {
   const hints = terms.map(([term, chineseGloss], index) => ({
     startOffset: caption.indexOf(term), endOffset: caption.indexOf(term) + term.length, chineseGloss,
-    lexiconEntryId: `00000000-0000-0000-0000-00000000000${index + 1}`,
+    lexiconEntryId: String(index + 1),
     lexiconVersion: 1,
     senseId: `00000000-0000-0000-0000-00000000001${index + 1}`
   }));

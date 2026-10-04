@@ -212,7 +212,7 @@ final class PipelineRuntimeFixture implements AutoCloseable {
 
   List<String> databaseSnapshot() throws Exception {
     var snapshot = new java.util.ArrayList<String>();
-    for (var table : List.of("lexicon_dataset", "lexicon_prepared_entry", "lexicon_hint_lookup")) {
+    for (var table : List.of("lexicon_dataset", "lexicon_entry", "lexicon_form")) {
       try (var connection = DriverManager.getConnection(jdbcUrl);
           var statement = connection.createStatement();
           var rs =
@@ -240,7 +240,7 @@ final class PipelineRuntimeFixture implements AutoCloseable {
     try (var connection = DriverManager.getConnection(jdbcUrl);
         var statement = connection.createStatement()) {
       statement.execute(
-          "ALTER TABLE lexicon_prepared_entry ADD CONSTRAINT synthetic_third_rejected CHECK (lemma <> 'thirdversion')");
+          "ALTER TABLE lexicon_entry ADD CONSTRAINT synthetic_third_rejected CHECK (lemma <> 'thirdversion')");
     }
   }
 

@@ -1,6 +1,6 @@
 # 1. 来源适配合同
 
-[架构总览](overview.md) → [观看时序](flows/viewing.md) → 来源适配。本文定义 YouTube 字幕到 `CaptionContext` 的适配边界。
+[架构总览](overview.md) → [观看时序](flows.md#viewing-request) → 来源适配。本文定义 YouTube 字幕到 `CaptionContext` 的适配边界。
 
 本页只定义 `youtube` 视频英文字幕如何成为字幕提示的输入。来源适配器负责取得并规范化字幕；它输出 Enrichment 的 `CaptionContext`，不是独立业务领域，也不参与提示决策。完整提示链路见[字幕提示流程](flows.md)，模块归属见[模块边界](boundaries.md)。
 

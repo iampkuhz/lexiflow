@@ -59,4 +59,4 @@ Lexicon 拥有可复用词汇事实和版本；Enrichment 拥有 `CaptionContext
 
 ## 1.4. 从流程下钻到 contract 与代码
 
-字幕身份与失效见[观看时序](flows/viewing.md)、[来源适配](source-contract.md)和[字幕身份](caption-contract.md)；提示资格见[共享词库](lexicon-contract.md)与[语义资料](semantic-contract.md)；缓存见[运行安全](runtime-safety.md)。[架构决策](decisions.md)记录取舍，长期约束以[产品架构规范](../../openspec/specs/product-architecture/spec.md)为准。
+字幕身份与失效见[观看时序](flows.md#viewing-request)、[来源适配](source-contract.md)和[字幕身份](caption-contract.md)；提示资格见[共享词库](lexicon-contract.md)与[语义资料](semantic-contract.md)；缓存见[运行安全](runtime-safety.md)。[架构决策](decisions.md)记录取舍，长期约束以[产品架构规范](../../openspec/specs/product-architecture/spec.md)为准。

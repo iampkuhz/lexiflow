@@ -18,8 +18,14 @@ import java.util.Set;
  */
 public final class PostgresSchemaInitializer {
 
+  // 旧两表名仅供操作者明确调用 rebuild 时清除；普通初始化仍拒绝非空 schema。
   private static final Set<String> OWNED_TABLES =
-      Set.of("lexicon_dataset", "lexicon_prepared_entry", "lexicon_hint_lookup");
+      Set.of(
+          "lexicon_dataset",
+          "lexicon_entry",
+          "lexicon_form",
+          "lexicon_prepared_entry",
+          "lexicon_hint_lookup");
 
   private PostgresSchemaInitializer() {}
 
@@ -87,6 +93,10 @@ public final class PostgresSchemaInitializer {
           // 不使用 CASCADE：其他对象依赖本项目表时由 PostgreSQL 拒绝并回滚。
           statement.execute(
               "DROP TABLE IF EXISTS "
+                  + schema
+                  + ".lexicon_form, "
+                  + schema
+                  + ".lexicon_entry, "
                   + schema
                   + ".lexicon_hint_lookup, "
                   + schema

@@ -1,6 +1,7 @@
 package io.lexiflow.lexicon.platform.persistence;
 
 import io.lexiflow.lexicon.application.importing.policy.HintPreparation;
+import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
@@ -48,7 +49,7 @@ public final class DatasetPackageCodec {
   public static final int MAX_METADATA_BYTES = 1024 * 1024;
   public static final List<String> ENTRY_NAMES =
       List.of(
-          "manifest.json", "approvals.json", "dataset.ndjson", "prepared.ndjson", "lookup.ndjson");
+          "manifest.json", "approvals.json", "dataset.ndjson", "entries.ndjson", "forms.ndjson");
   private static final JsonFactory FACTORY =
       JsonFactory.builder().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
   private static final String BAD = "invalid package";
@@ -227,7 +228,7 @@ public final class DatasetPackageCodec {
                 "datasetVersion",
                 "preparationPolicy",
                 "files"));
-    if (integer(node.get("schemaVersion"), 1) != 1) throw new IOException(BAD);
+    if (integer(node.get("schemaVersion"), 2) != 2) throw new IOException(BAD);
     String schema = digestValue(node.get("schemaSha256"));
     String approval = digestValue(node.get("approvalSha256"));
     long version = integer(node.get("datasetVersion"), 1);
@@ -246,7 +247,7 @@ public final class DatasetPackageCodec {
       if (i == 0 && rows != 1) throw new IOException(BAD);
       records.add(new DatasetPackageManifest.FileRecord(name, size, hash, rows));
     }
-    return new DatasetPackageManifest(1, schema, approval, version, policy, List.copyOf(records));
+    return new DatasetPackageManifest(2, schema, approval, version, policy, List.copyOf(records));
   }
 
   /** 审批仅核对显式记录与来源一致，不推断实际法律许可。 */
@@ -376,8 +377,8 @@ public final class DatasetPackageCodec {
                   dir.resolve("manifest.json"),
                   dir.resolve("approvals.json"),
                   dir.resolve("dataset.ndjson"),
-                  dir.resolve("prepared.ndjson"),
-                  dir.resolve("lookup.ndjson"))))) throw new IOException(BAD);
+                  dir.resolve("entries.ndjson"),
+                  dir.resolve("forms.ndjson"))))) throw new IOException(BAD);
       Files.delete(copy);
       var manifest = parseManifest(Files.readAllBytes(dir.resolve("manifest.json")));
       if (!sha256(trustedSchema).equals(manifest.schemaSha256())) throw new IOException(BAD);
@@ -442,14 +443,7 @@ public final class DatasetPackageCodec {
     for (String column : table.columns()) {
       Object value = row.get(column);
       if (value == null) {
-        if (!Set.of(
-                "source_bnc_rank",
-                "source_frq_rank",
-                "prepared_gloss",
-                "exclusion_reason",
-                "final_gloss",
-                "final_sense_id")
-            .contains(column)) throw new IOException(BAD);
+        if (!Set.of("gloss").contains(column)) throw new IOException(BAD);
         continue;
       }
       switch (DatasetPackageTables.TYPES.get(column)) {
@@ -482,6 +476,16 @@ public final class DatasetPackageCodec {
         case "jsonb" -> array(value);
         default -> string(value);
       }
+    }
+    if (table == DatasetPackageTables.ENTRY) {
+      if (integer(row.get("entry_id"), 1) < 1
+          || string(row.get("lemma")).isBlank()
+          || integer(row.get("hint_priority"), 0) > 1000
+          || integer(row.get("complex_list_count"), 0) > Short.MAX_VALUE
+          || integer(row.get("cache_priority"), 0) > 1000) throw new IOException(BAD);
+    } else if (table == DatasetPackageTables.FORM
+        && !LexiconSurfacePolicy.withinQueryWindow(string(row.get("normalized_form")))) {
+      throw new IOException(BAD);
     }
     return row;
   }

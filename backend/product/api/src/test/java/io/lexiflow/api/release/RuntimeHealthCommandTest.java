@@ -16,16 +16,16 @@ import org.junit.jupiter.api.Test;
 class RuntimeHealthCommandTest {
   private static final String READY = "{\"status\":\"UP\"}";
   private static final String RUNTIME =
-      "{\"softwareVersion\":\"1.2.3\",\"apiContract\":\"caption-hints.v1\","
+      "{\"softwareVersion\":\"1.2.3\",\"apiContract\":\"caption-hints.v2\","
           + "\"mode\":\"formal\",\"ready\":true,\"reason\":\"OK\",\"datasetVersion\":42}";
 
   @Test
   void emitsOnlyFixedSafeSummaryForReadyAndPrewarmDegradedStates() throws Exception {
     assertEquals(
-        "{\"softwareVersion\":\"1.2.3\",\"apiContract\":\"caption-hints.v1\",\"mode\":\"formal\",\"ready\":true,\"reason\":\"OK\",\"datasetVersion\":42}",
+        "{\"softwareVersion\":\"1.2.3\",\"apiContract\":\"caption-hints.v2\",\"mode\":\"formal\",\"ready\":true,\"reason\":\"OK\",\"datasetVersion\":42}",
         probe(READY, RUNTIME));
     assertEquals(
-        "{\"softwareVersion\":\"1.2.3\",\"apiContract\":\"caption-hints.v1\",\"mode\":\"formal\",\"ready\":true,\"reason\":\"PREWARM_DEGRADED\",\"datasetVersion\":42}",
+        "{\"softwareVersion\":\"1.2.3\",\"apiContract\":\"caption-hints.v2\",\"mode\":\"formal\",\"ready\":true,\"reason\":\"PREWARM_DEGRADED\",\"datasetVersion\":42}",
         probe(READY, RUNTIME.replace("\"OK\"", "\"PREWARM_DEGRADED\"")));
   }
 
@@ -36,7 +36,7 @@ class RuntimeHealthCommandTest {
     assertNull(probe(READY, RUNTIME.replace("\"mode\":\"formal\"", "\"mode\":\"demo\"")));
     assertNull(
         probe(READY, RUNTIME.replace("\"reason\":\"OK\"", "\"reason\":\"DATASET_MISSING\"")));
-    assertNull(probe(READY, RUNTIME.replace("\"caption-hints.v1\"", "\"other\"")));
+    assertNull(probe(READY, RUNTIME.replace("\"caption-hints.v2\"", "\"other\"")));
   }
 
   @Test
@@ -45,7 +45,7 @@ class RuntimeHealthCommandTest {
       RUNTIME.replace("\"softwareVersion\":\"1.2.3\"", "\"softwareVersion\":1.2"),
       RUNTIME.replace("\"softwareVersion\":\"1.2.3\"", "\"softwareVersion\":\"01.2.3\""),
       RUNTIME.replace("\"softwareVersion\":\"1.2.3\"", "\"softwareVersion\":\"0.0.0\""),
-      RUNTIME.replace("\"apiContract\":\"caption-hints.v1\"", "\"apiContract\":true"),
+      RUNTIME.replace("\"apiContract\":\"caption-hints.v2\"", "\"apiContract\":true"),
       RUNTIME.replace("\"mode\":\"formal\"", "\"mode\":null"),
       RUNTIME.replace("\"ready\":true", "\"ready\":1"),
       RUNTIME.replace("\"reason\":\"OK\"", "\"reason\":false"),

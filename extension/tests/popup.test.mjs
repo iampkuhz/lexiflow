@@ -91,7 +91,7 @@ function createChrome(behaviour = {}) {
       chromeObj._calls.push({ method: "runtime.sendMessage", message: { ...message } });
       if (message.type === "runtime-status") {
         if (behaviour.statusReject) return Promise.reject(new Error("status unavailable"));
-        return Promise.resolve(behaviour.statusResponse ?? {ok:true,status:{softwareVersion:"1.2.3",apiContract:"caption-hints.v1",mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null}});
+        return Promise.resolve(behaviour.statusResponse ?? {ok:true,status:{softwareVersion:"1.2.3",apiContract:"caption-hints.v2",mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null}});
       }
       return behaviour.preferenceResponse !== undefined ? Promise.resolve(behaviour.preferenceResponse) : Promise.resolve({ ok: true, entryKeys: [] });
     } },
@@ -405,11 +405,11 @@ test('service status renders formal readiness, degraded warmup, demo, missing da
   [{mode:'formal',ready:false,reason:'SCHEMA_MISMATCH',datasetVersion:null},'资料结构不匹配，请使用匹配的服务与资料。',false]
  ];
  for(const [state,expected] of cases){
-  const value={softwareVersion:'1.2.3',apiContract:'caption-hints.v1',...state};
+  const value={softwareVersion:'1.2.3',apiContract:'caption-hints.v2',...state};
   const {doc}=freshSetup({statusResponse:{ok:true,status:value}});await flush();
   assert.equal(doc.getElementById('service-status').textContent,expected);
   assert.equal(doc.getElementById('service-identity').hidden,false);
-  assert.match(doc.getElementById('service-identity').textContent,/软件 1\.2\.3 · 协议 caption-hints\.v1/u);
+  assert.match(doc.getElementById('service-identity').textContent,/软件 1\.2\.3 · 协议 caption-hints\.v2/u);
   assert.ok(doc.getElementById('service-identity').textContent.includes(state.datasetVersion===null?'未知':String(state.datasetVersion)));
  }
 });

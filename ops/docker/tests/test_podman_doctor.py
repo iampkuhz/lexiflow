@@ -51,7 +51,7 @@ else: sys.exit(88)
         if self.server: self.server.shutdown();self.server.server_close();self.thread.join()
         self.tmp.cleanup()
 
-    def setup_install(self,api_contract='caption-hints.v1',phase='ready',health_code=200,health_status=None,oversized=False,redirect=False):
+    def setup_install(self,api_contract='caption-hints.v2',phase='ready',health_code=200,health_status=None,oversized=False,redirect=False):
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(inner):
                 body={'mode':'formal','ready':True,'reason':'OK','softwareVersion':'0.1.0','apiContract':api_contract,'datasetVersion':1,'private':'PRIVATE-FIXTURE'}

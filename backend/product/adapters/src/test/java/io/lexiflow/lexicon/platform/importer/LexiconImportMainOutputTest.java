@@ -222,15 +222,16 @@ class LexiconImportMainOutputTest {
       var canonicalAdapter =
           new LexiconEventObserver(
               new StructuredEventLogger((level, json) -> canonicalJson.add(json)));
-      assertTrue(
+      String canonicalOutput =
           captureArguments(
-                  arguments,
-                  System.out,
-                  event -> {
-                    canonicalEvents.add(event);
-                    canonicalAdapter.onEvent(event);
-                  })
-              .contains("published_version=1"));
+              arguments,
+              System.out,
+              event -> {
+                canonicalEvents.add(event);
+                canonicalAdapter.onEvent(event);
+              });
+      long firstVersion = publishedVersion(canonicalOutput);
+      assertTrue(firstVersion > 9_000_000_000L);
       assertEquals(8, canonicalEvents.stream().filter(event -> !event.terminal()).count());
       assertEquals(
           1, canonicalEvents.stream().filter(LexiconImportObserver.Event::terminal).count());
@@ -242,8 +243,9 @@ class LexiconImportMainOutputTest {
           canonicalJson.stream().filter(line -> line.contains("lexicon.import.completed")).count());
       assertTrue(canonicalJson.getLast().contains("\"existing_safe\""), canonicalJson.toString());
       try (var persistence = PostgresPersistence.open(jdbcUrl)) {
-        assertEquals(1, persistence.repository().publishedVersion());
-        assertEquals(1, persistence.repository().findByForms(1, List.of("quasar")).size());
+        assertEquals(firstVersion, persistence.repository().publishedVersion());
+        assertEquals(
+            1, persistence.repository().findByForms(firstVersion, List.of("quasar")).size());
       }
       Files.writeString(
           input,
@@ -254,15 +256,16 @@ class LexiconImportMainOutputTest {
       var stardictAdapter =
           new LexiconEventObserver(
               new StructuredEventLogger((level, json) -> stardictJson.add(json)));
-      assertTrue(
+      String stardictOutput =
           captureArguments(
-                  arguments,
-                  System.out,
-                  event -> {
-                    stardictEvents.add(event);
-                    stardictAdapter.onEvent(event);
-                  })
-              .contains("published_version=2"));
+              arguments,
+              System.out,
+              event -> {
+                stardictEvents.add(event);
+                stardictAdapter.onEvent(event);
+              });
+      long secondVersion = publishedVersion(stardictOutput);
+      assertTrue(secondVersion > firstVersion);
       assertEquals(8, stardictEvents.stream().filter(event -> !event.terminal()).count());
       assertEquals(
           1, stardictEvents.stream().filter(LexiconImportObserver.Event::terminal).count());
@@ -274,10 +277,13 @@ class LexiconImportMainOutputTest {
           stardictJson.stream().filter(line -> line.contains("lexicon.import.completed")).count());
       assertTrue(stardictJson.getLast().contains("\"existing_safe\""), stardictJson.toString());
       try (var persistence = PostgresPersistence.open(jdbcUrl)) {
-        assertEquals(2, persistence.repository().publishedVersion());
-        assertEquals(1, persistence.repository().findByForms(2, List.of("nebula")).size());
-        assertEquals(0, persistence.repository().findByForms(2, List.of("quasar")).size());
-        assertEquals(0, persistence.repository().findByForms(1, List.of("nebula")).size());
+        assertEquals(secondVersion, persistence.repository().publishedVersion());
+        assertEquals(
+            1, persistence.repository().findByForms(secondVersion, List.of("nebula")).size());
+        assertEquals(
+            0, persistence.repository().findByForms(secondVersion, List.of("quasar")).size());
+        assertEquals(
+            0, persistence.repository().findByForms(firstVersion, List.of("nebula")).size());
       }
     } finally {
       Files.deleteIfExists(input);
@@ -286,6 +292,14 @@ class LexiconImportMainOutputTest {
         statement.execute("DROP SCHEMA IF EXISTS \"" + schema + "\" CASCADE");
       }
     }
+  }
+
+  private static long publishedVersion(String output) {
+    var matcher = java.util.regex.Pattern.compile("published_version=(\\d+)").matcher(output);
+    long version = 0;
+    while (matcher.find()) version = Long.parseLong(matcher.group(1));
+    if (version < 1) throw new AssertionError("publish output omitted version: " + output);
+    return version;
   }
 
   private static String captureArguments(

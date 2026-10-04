@@ -5,7 +5,7 @@ const nativeFetch = globalThis.fetch;
 let listener;
 globalThis.chrome = { runtime: { id: 'extension-id', getURL: path => `chrome-extension://extension-id/${path}`, onMessage: { addListener(value) { listener = value; } } } };
 await import('../dist/background.js');
-let statusBody = { softwareVersion:'1.2.3',apiContract:'caption-hints.v1',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null };
+let statusBody = { softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null };
 let postFetch, holdStatus = false, rejectStatus = false;
 const statusCalls = [];
 Object.defineProperty(globalThis, 'fetch', { configurable:true, get: () => (url, options) => {
@@ -17,7 +17,7 @@ Object.defineProperty(globalThis, 'fetch', { configurable:true, get: () => (url,
   }
   return postFetch(url, options);
 }, set: value => { postFetch = value; } });
-const source = { lexiconEntryId: "00000000-0000-0000-0000-000000000001", lexiconVersion: 1, senseId: "00000000-0000-0000-0000-000000000002" };
+const source = { lexiconEntryId: "9007199254740993", lexiconVersion: 1, senseId: "00000000-0000-0000-0000-000000000002" };
 const payload = { captionTopicKey:'topic',trackKey:null,lastRequestedSnapshot:null,currentSnapshot:{captions:[{windowId:null,startMs:null,segments:[{key:'key1',text:'reliable',offsetMs:null,append:true,line:0}]}]}};
 const sender = (id, documentId='doc') => ({id:'extension-id',tab:{id},documentId});
 const send = (message, source) => new Promise(resolve => listener(message,source,resolve));
@@ -57,7 +57,7 @@ test('status gate is bodyless no-store GET; incompatible or invalid status preve
   statusBody = {...statusBody,apiContract:'future-contract'};
   assert.deepEqual(await send({type:'caption-hints',requestId:'mismatch',payload},sender(8)),{ok:false,reason:'invalid-response'});
   assert.equal(posts,0);
-  statusBody = {...statusBody,apiContract:'caption-hints.v1',softwareVersion:'01.2.3'};
+  statusBody = {...statusBody,apiContract:'caption-hints.v2',softwareVersion:'01.2.3'};
   assert.deepEqual(await send({type:'caption-hints',requestId:'invalid-status',payload},sender(8)),{ok:false,reason:'invalid-response'});
   assert.equal(posts,0);
   assert.ok(statusCalls.length >= readCount + 2);
@@ -66,7 +66,7 @@ test('status gate is bodyless no-store GET; incompatible or invalid status preve
   assert.equal(call.options.redirect,'error'); assert.equal(call.options.credentials,'omit');
   assert.equal(call.options.referrerPolicy,'no-referrer');
   assert.equal(Object.hasOwn(call.options,'body'),false);
-  statusBody = {softwareVersion:'1.2.3',apiContract:'caption-hints.v1',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null};
+  statusBody = {softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null};
 });
 
 test('runtime status proxy is restricted to the exact extension popup sender', async () => {
@@ -225,14 +225,14 @@ test('preferences only write explicit entry IDs to local storage and never fetch
   globalThis.fetch=()=>assert.fail('preference action must not reach the server');
   const entryId=source.lexiconEntryId;
   assert.deepEqual(await send({type:'local-preferences',action:'suppress',entryId,lexiconVersion:1},sender(1)),{ok:true,entryKeys:[`${entryId}@1`]});
-  assert.deepEqual(values,{'lexiflow.suppressed-entries':[`${entryId}@1`]});
+  assert.deepEqual(values,{'lexiflow.suppressed-entries-v2':[`${entryId}@1`]});
   assert.deepEqual(await send({type:'local-preferences',action:'read'},sender(2)),{ok:true,entryKeys:[`${entryId}@1`]});
   assert.deepEqual(await send({type:'local-preferences',action:'restore-all'},sender(1)),{ok:true,entryKeys:[]});
   assert.deepEqual(await send({type:'local-preferences',action:'suppress',entryId,lexiconVersion:1},{}),{ok:false,reason:'invalid-request'});
 });
 
 test('popup identity can read and restore all but cannot suppress; sender identity is exact', async () => {
-  let values = { 'lexiflow.suppressed-entries': [`${source.lexiconEntryId}@1`] };
+  let values = { 'lexiflow.suppressed-entries-v2': [`${source.lexiconEntryId}@1`] };
   chrome.storage={local:{ get:async key => ({[key]:values[key]}),set:async next => {values={...values,...next};} }};
   const popup = { id:'extension-id', url:'chrome-extension://extension-id/popup.html' };
   assert.deepEqual(await send({type:'local-preferences',action:'read'},popup),{ok:true,entryKeys:[`${source.lexiconEntryId}@1`]});

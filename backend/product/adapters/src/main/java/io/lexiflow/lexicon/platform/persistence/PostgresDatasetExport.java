@@ -137,7 +137,7 @@ public final class PostgresDatasetExport {
         files.add(file);
       }
       var manifest = new LinkedHashMap<String, Object>();
-      manifest.put("schemaVersion", 1);
+      manifest.put("schemaVersion", 2);
       manifest.put("schemaSha256", DatasetPackageCodec.sha256(schemaSql));
       manifest.put("approvalSha256", DatasetPackageCodec.sha256(approvalBytes));
       manifest.put("datasetVersion", version);
@@ -152,8 +152,8 @@ public final class PostgresDatasetExport {
               dir.resolve("manifest.json"),
               dir.resolve("approvals.json"),
               dir.resolve("dataset.ndjson"),
-              dir.resolve("prepared.ndjson"),
-              dir.resolve("lookup.ndjson")));
+              dir.resolve("entries.ndjson"),
+              dir.resolve("forms.ndjson")));
       String hash = DatasetPackageCodec.sha256(candidate);
       DatasetPackageCodec.verify(candidate, hash, schemaSql);
       DatasetPackageCodec.publishVerified(candidate, output);
@@ -205,11 +205,17 @@ public final class PostgresDatasetExport {
 
   static void validateProjection(Connection connection) throws SQLException, IOException {
     String sql =
-        "SELECT COUNT(*) FROM lexicon_hint_lookup h LEFT JOIN lexicon_prepared_entry p "
-            + "ON p.lexicon_entry_id=h.lexicon_entry_id WHERE p.lexicon_entry_id IS NULL "
-            + "OR h.language_tag<>p.language_tag OR h.canonical_lemma<>p.lemma OR h.entry_kind<>p.entry_kind";
+        "SELECT COUNT(*) FROM lexicon_form f LEFT JOIN lexicon_entry e USING (entry_id) "
+            + "WHERE e.entry_id IS NULL OR f.normalized_form IS NULL";
     try (var statement = connection.createStatement();
         var result = statement.executeQuery(sql)) {
+      if (!result.next() || result.getLong(1) != 0) throw invalid();
+    }
+    try (var statement = connection.createStatement();
+        var result =
+            statement.executeQuery(
+                "SELECT COUNT(*) FROM lexicon_entry e WHERE NOT EXISTS "
+                    + "(SELECT 1 FROM lexicon_form f WHERE f.entry_id=e.entry_id)")) {
       if (!result.next() || result.getLong(1) != 0) throw invalid();
     }
   }

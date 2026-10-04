@@ -5,12 +5,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.UUID;
 
 /**
  * 可复用词汇事实的一个不可变发布版本。
  *
- * @param entryId 词条稳定 UUID。
+ * @param entryId 词条稳定正 long 身份；由语言和规范 lemma 确定。
  * @param lexiconVersion 词条所属的单调词库版本。
  * @param languageTag 词条语言；首版固定为英语。
  * @param entryKind 单词或固定短语。
@@ -22,7 +21,7 @@ import java.util.UUID;
  * @param priority 非个人化的预热优先级。
  */
 public record LexiconEntry(
-    UUID entryId,
+    long entryId,
     long lexiconVersion,
     String languageTag,
     LexiconEntryKind entryKind,
@@ -35,7 +34,7 @@ public record LexiconEntry(
 
   /** 校验版本化词条、表面唯一性和从属实体的不可变边界。 */
   public LexiconEntry {
-    Objects.requireNonNull(entryId, "entryId");
+    if (entryId < 1) throw new IllegalArgumentException("entryId must be positive");
     if (lexiconVersion < 1) {
       throw new IllegalArgumentException("lexiconVersion must be positive");
     }

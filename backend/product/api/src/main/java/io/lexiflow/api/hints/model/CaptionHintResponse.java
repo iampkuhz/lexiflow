@@ -24,7 +24,7 @@ public record CaptionHintResponse(List<String> processedKeys, List<Hint> hints) 
    * @param endKey 提示终点所在的片段 key，与起点之间仅允许连续新增片段。
    * @param endOffset 终点在 endKey 片段内的 UTF-16 偏移，不包含该位置。
    * @param chineseGloss 已发布词义的中文短释义。
-   * @param lexiconEntryId 已发布词条的稳定身份。
+   * @param lexiconEntryId 含义：已发布词条正 BIGINT 的精确十进制字符串。取值范围：1 至 9223372036854775807，不转为 JSON 数字。
    * @param lexiconVersion 本次响应使用的单一词库发布版本。
    * @param senseId 已发布词义的稳定身份。
    */

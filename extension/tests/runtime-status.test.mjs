@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { parseRuntimeStatus, readRuntimeStatus, RUNTIME_STATUS_URL } from "../dist/runtime-status.js";
 
-const valid = { softwareVersion:"1.2.3", apiContract:"caption-hints.v1", mode:"formal", ready:true, reason:"OK", datasetVersion:4 };
+const valid = { softwareVersion:"1.2.3", apiContract:"caption-hints.v2", mode:"formal", ready:true, reason:"OK", datasetVersion:4 };
 test("accepts exact ready and degraded formal runtime shapes", () => {
   assert.deepEqual(parseRuntimeStatus(valid), valid);
   assert.equal(parseRuntimeStatus({...valid, ready:true, reason:"PREWARM_DEGRADED"}).ready, true);
@@ -10,7 +10,7 @@ test("accepts exact ready and degraded formal runtime shapes", () => {
 test("rejects malformed identities, values, and inconsistent readiness", () => {
   for (const patch of [
     {softwareVersion:"01.2.3"}, {softwareVersion:"0.0.0"}, {softwareVersion:"1.65536.3"},
-    {apiContract:"other"}, {mode:"other"}, {reason:"private exception"}, {datasetVersion:-1},
+    {apiContract:"other"}, {apiContract:"caption-hints.v1"}, {mode:"other"}, {reason:"private exception"}, {datasetVersion:-1},
     {reason:"NO_PUBLISHED_DATA",ready:true}, {reason:"DEMO_MODE",mode:"formal",ready:false},
     {mode:"invalid",ready:true}, {extra:true}, {mode:[]}, {ready:true,datasetVersion:0},
     {reason:"NO_PUBLISHED_DATA",datasetVersion:null,ready:false}, {reason:"SCHEMA_MISMATCH",datasetVersion:3,ready:false},

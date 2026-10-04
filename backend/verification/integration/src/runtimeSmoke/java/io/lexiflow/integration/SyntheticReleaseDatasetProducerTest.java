@@ -106,7 +106,7 @@ class SyntheticReleaseDatasetProducerTest {
                   attemptedExport.set(true);
                   try (var connection = java.sql.DriverManager.getConnection(jdbcUrl);
                       var statement = connection.createStatement()) {
-                    statement.execute("DROP TABLE lexicon_hint_lookup CASCADE");
+                    statement.execute("DROP TABLE lexicon_form CASCADE");
                   }
                 }));
     assertTrue(attemptedExport.get());

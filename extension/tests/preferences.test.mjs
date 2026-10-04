@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { LocalPreferences, MAX_SUPPRESSED_ENTRIES, suppressionKey } from "../dist/preferences.js";
-const id = n => `00000000-0000-0000-0000-${String(n).padStart(12,"0")}`;
+const id = n => String(n + 1);
 
 test("explicit local suppression is serialized across tabs and can be fully restored", async () => {
   let stored;
@@ -43,4 +43,17 @@ test("suppression is version-scoped and missing or invalid versions cannot be st
   await prefs.execute("suppress",id(1),1);
   assert.ok(stored.includes(suppressionKey(id(1),1)));
   assert.ok(!stored.includes(suppressionKey(id(1),2)));
+});
+
+test("large entry identities remain exact and distinct in local preferences", async () => {
+  let stored;
+  const prefs=new LocalPreferences({read:async () => stored,write:async keys => {stored=keys;}});
+  for(const entry of ["9007199254740992","9007199254740993","9223372036854775807"]) {
+    assert.equal((await prefs.execute("suppress",entry,1)).ok,true);
+  }
+  assert.equal(stored.length,3);
+  assert.ok(stored.includes("9007199254740993@1"));
+  for(const entry of ["0","01","9223372036854775808",9007199254740993]) {
+    assert.deepEqual(await prefs.execute("suppress",entry,1),{ok:false,reason:"invalid-request"});
+  }
 });

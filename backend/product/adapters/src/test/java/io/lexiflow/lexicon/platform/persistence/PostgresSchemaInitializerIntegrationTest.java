@@ -46,13 +46,44 @@ class PostgresSchemaInitializerIntegrationTest {
                   jdbcUrl,
                   "SELECT COUNT(*)::text FROM information_schema.tables "
                       + "WHERE table_schema=current_schema() AND table_name IN "
-                      + "('lexicon_dataset','lexicon_prepared_entry','lexicon_hint_lookup')"));
+                      + "('lexicon_dataset','lexicon_entry','lexicon_form')"));
           execute(jdbcUrl, "DROP TABLE lexicon_other");
           execute(jdbcUrl, "CREATE VIEW unrelated_view AS SELECT dataset_id FROM lexicon_dataset");
           assertThrows(
               Exception.class, () -> PostgresSchemaInitializer.rebuild(jdbcUrl, schemaFile));
           assertEquals("0", scalar(jdbcUrl, "SELECT COUNT(*)::text FROM lexicon_dataset"));
           assertEquals("0", scalar(jdbcUrl, "SELECT COUNT(*)::text FROM unrelated_view"));
+        });
+  }
+
+  @Test
+  void refusesOrdinaryInitializationOnOldShapeButExplicitRebuildDropsOnlyOwnedTables()
+      throws Exception {
+    withSchema(
+        jdbcUrl -> {
+          execute(jdbcUrl, "CREATE TABLE lexicon_dataset (dataset_id smallint PRIMARY KEY)");
+          execute(
+              jdbcUrl, "CREATE TABLE lexicon_prepared_entry (lexicon_entry_id uuid PRIMARY KEY)");
+          execute(
+              jdbcUrl,
+              "CREATE TABLE lexicon_hint_lookup (lexicon_entry_id uuid REFERENCES lexicon_prepared_entry(lexicon_entry_id))");
+          var schemaFile = schemaFile();
+          assertThrows(
+              IllegalStateException.class,
+              () -> PostgresSchemaInitializer.initialize(jdbcUrl, schemaFile));
+          PostgresSchemaInitializer.rebuild(jdbcUrl, schemaFile);
+          assertEquals(
+              "3",
+              scalar(
+                  jdbcUrl,
+                  "SELECT COUNT(*)::text FROM information_schema.tables "
+                      + "WHERE table_schema=current_schema() AND table_name IN ('lexicon_dataset','lexicon_entry','lexicon_form')"));
+          assertEquals(
+              "0",
+              scalar(
+                  jdbcUrl,
+                  "SELECT COUNT(*)::text FROM information_schema.tables "
+                      + "WHERE table_schema=current_schema() AND table_name IN ('lexicon_prepared_entry','lexicon_hint_lookup')"));
         });
   }
 

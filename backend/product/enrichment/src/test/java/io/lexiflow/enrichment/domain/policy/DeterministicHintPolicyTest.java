@@ -106,7 +106,7 @@ class DeterministicHintPolicyTest {
             highBase.finalAction(),
             highBase.finalGloss(),
             900,
-            highBase.frequencyZipf(),
+            highBase.rankedWord(),
             highBase.complexListCount());
     var result =
         evaluate(
@@ -144,7 +144,7 @@ class DeterministicHintPolicyTest {
     var unsafeBase = candidate("bank", "银行");
     var unsafe =
         new LexiconHintCandidate(
-            UUID.randomUUID(),
+            2L,
             unsafeBase.senseId(),
             1,
             "en",
@@ -154,7 +154,7 @@ class DeterministicHintPolicyTest {
             LexiconHintAction.HINT,
             "银行（旧）",
             500,
-            0,
+            false,
             1);
     assertEquals(HintState.NO_PENDING, evaluate("bank", List.of(safe, unsafe)).state());
   }
@@ -202,14 +202,27 @@ class DeterministicHintPolicyTest {
 
   private static LexiconHintCandidate candidate(
       String form, String gloss, long version, LexiconEntryKind kind, double zipf) {
-    var id = UUID.nameUUIDFromBytes((form + version).getBytes(StandardCharsets.UTF_8));
+    var id = (long) (form + version).hashCode() & Long.MAX_VALUE;
+    if (id == 0) id = 1;
     var senseId = UUID.nameUUIDFromBytes(gloss.getBytes(StandardCharsets.UTF_8));
     return new LexiconHintCandidate(
-        id, senseId, version, "en", form, form, kind, LexiconHintAction.HINT, gloss, 500, zipf, 1);
+        id,
+        senseId,
+        version,
+        "en",
+        form,
+        form,
+        kind,
+        LexiconHintAction.HINT,
+        gloss,
+        500,
+        zipf > 0,
+        1);
   }
 
   private static LexiconHintCandidate block(String form) {
-    var id = UUID.nameUUIDFromBytes(form.getBytes(StandardCharsets.UTF_8));
+    var id = (long) form.hashCode() & Long.MAX_VALUE;
+    if (id == 0) id = 1;
     return new LexiconHintCandidate(
         id,
         null,
@@ -221,7 +234,7 @@ class DeterministicHintPolicyTest {
         LexiconHintAction.BLOCK,
         null,
         0,
-        0,
+        false,
         0);
   }
 }

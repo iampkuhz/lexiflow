@@ -31,7 +31,7 @@ class LexiconReadinessHttpTest {
       assertEquals("no-store", status.headers().firstValue("Cache-Control").orElse(""));
       var json = new tools.jackson.databind.ObjectMapper().readTree(status.body());
       assertEquals(6, json.size());
-      assertEquals("caption-hints.v1", json.get("apiContract").asString());
+      assertEquals("caption-hints.v2", json.get("apiContract").asString());
       assertEquals("formal", json.get("mode").asString());
       assertFalse(json.get("ready").asBoolean());
       assertEquals("DEPENDENCY_UNAVAILABLE", json.get("reason").asString());

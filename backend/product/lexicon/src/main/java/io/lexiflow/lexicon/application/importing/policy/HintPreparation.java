@@ -44,8 +44,7 @@ public final class HintPreparation {
     boolean stardict = row.dictionary().sourceId().equals("ecdict-stardict");
     if (stardict && row.lemma().codePoints().anyMatch(HintPreparation::nonAsciiLetter))
       return excluded(row, "non_ascii_lemma", List.of());
-    if (stardict && !hasQueryableSurface(row))
-      return excluded(row, "outside_query_window", List.of());
+    if (!hasQueryableSurface(row)) return excluded(row, "outside_query_window", List.of());
     if (row.basicVocabulary()) return excluded(row, "basic_vocabulary", List.of());
     boolean trustedCurated = stardict && row.curatedGloss();
     PreparedHint prepared;

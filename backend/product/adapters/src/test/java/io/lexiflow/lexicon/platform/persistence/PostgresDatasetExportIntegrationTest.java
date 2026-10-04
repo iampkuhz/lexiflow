@@ -40,16 +40,16 @@ class PostgresDatasetExportIntegrationTest {
                   try (var update = DriverManager.getConnection(source.jdbcUrl());
                       var statement = update.createStatement()) {
                     statement.executeUpdate(
-                        "UPDATE lexicon_prepared_entry SET source_gloss='newer' WHERE lemma='reliable'");
+                        "UPDATE lexicon_entry SET gloss='newer' WHERE lemma='reliable'");
                   } catch (SQLException exception) {
                     throw new IllegalStateException(exception);
                   }
                 });
-        assertEquals(1, result.datasetVersion());
+        assertEquals(source.version(), result.datasetVersion());
         DatasetPackageCodec.verify(first, result.sha256(), schema);
         try (var checked = DatasetPackageCodec.verifiedPackage(first, result.sha256(), schema)) {
-          assertTrue(Files.readString(checked.file("prepared.ndjson")).contains("old-gloss"));
-          assertTrue(!Files.readString(checked.file("prepared.ndjson")).contains("newer"));
+          assertTrue(Files.readString(checked.file("entries.ndjson")).contains("old-gloss"));
+          assertTrue(!Files.readString(checked.file("entries.ndjson")).contains("newer"));
         }
       }
       Path second = dir.resolve("second.zip");
@@ -88,8 +88,8 @@ class PostgresDatasetExportIntegrationTest {
                 checked.file("manifest.json"),
                 checked.file("approvals.json"),
                 checked.file("dataset.ndjson"),
-                checked.file("prepared.ndjson"),
-                checked.file("lookup.ndjson")));
+                checked.file("entries.ndjson"),
+                checked.file("forms.ndjson")));
         assertThrows(
             IOException.class,
             () -> DatasetPackageCodec.verify(tampered, DatasetPackageCodec.sha256(tampered), sql));
@@ -113,8 +113,7 @@ class PostgresDatasetExportIntegrationTest {
       }
       try (var connection = DriverManager.getConnection(source.jdbcUrl());
           var statement = connection.createStatement()) {
-        statement.executeUpdate(
-            "UPDATE lexicon_hint_lookup SET canonical_lemma='wrong' WHERE normalized_form='reliable'");
+        statement.executeUpdate("DELETE FROM lexicon_form WHERE normalized_form='reliable'");
       }
       try (var connection = DriverManager.getConnection(source.jdbcUrl())) {
         assertThrows(
@@ -162,6 +161,10 @@ class PostgresDatasetExportIntegrationTest {
       return schemaName;
     }
 
+    long version() {
+      return 1_800_000_000_000L;
+    }
+
     String database() throws SQLException {
       try (var connection = DriverManager.getConnection(jdbcUrl);
           var statement = connection.createStatement();
@@ -193,29 +196,23 @@ class PostgresDatasetExportIntegrationTest {
       try (var connection = DriverManager.getConnection(jdbcUrl);
           var statement = connection.createStatement()) {
         statement.executeUpdate(
-            "INSERT INTO lexicon_prepared_entry (lexicon_entry_id,language_tag,lemma,entry_kind,"
-                + "source_gloss,source_gloss_ref,source_dictionary_id,source_frequency_id,source_frequency_ref,"
-                + "source_complex_tags,source_oxford_basic,prepared_gloss,frequency_evidence,decisive_rule,"
-                + "matched_rules,prepared_priority,frequency_zipf,complex_list_count) VALUES ("
-                + "'11111111-1111-1111-1111-111111111111','en','reliable','word','old-gloss','ref','fixture',"
-                + "'fixture','ref',ARRAY['advanced'],false,'safe','KNOWN','fixture',ARRAY['fixture'],100,3.25,1)");
+            "INSERT INTO lexicon_entry (entry_id,lemma,gloss,ranked_word,"
+                + "hint_priority,complex_list_count,cache_priority) "
+                + "VALUES (123,'reliable','old-gloss',true,100,1,100)");
         statement.executeUpdate(
-            "INSERT INTO lexicon_hint_lookup (language_tag,normalized_form,lexicon_entry_id,"
-                + "form_kind,canonical_lemma,entry_kind,final_action,final_decision_reason,final_gloss,"
-                + "final_priority,final_sense_id,final_frequency_zipf,final_complex_list_count,cache_priority) VALUES ("
-                + "'en','reliable','11111111-1111-1111-1111-111111111111','lemma','reliable','word','HINT',"
-                + "'fixture','safe',100,'22222222-2222-2222-2222-222222222222',3.25,1,100)");
+            "INSERT INTO lexicon_form (normalized_form,entry_id) " + "VALUES ('reliable',123)");
         try (var dataset =
             connection.prepareStatement(
                 "INSERT INTO lexicon_dataset (dataset_id,lexicon_version,"
                     + "source_manifest,source_row_count,entry_count,lookup_count,preparation_policy,imported_at) "
-                    + "VALUES (1,1,?::jsonb,1,1,1,?,'1970-01-01T00:00:00Z')")) {
+                    + "VALUES (1,?,?::jsonb,1,1,1,?,'1970-01-01T00:00:00Z')")) {
+          dataset.setLong(1, version());
           dataset.setString(
-              1,
+              2,
               "[{\"source_id\":\"fixture\",\"license_id\":\"MIT\",\"source_digest\":\""
                   + "a".repeat(64)
                   + "\",\"acquired_at\":\"1970-01-01T00:00:00Z\"}]");
-          dataset.setString(2, HintPreparation.POLICY_ID);
+          dataset.setString(3, HintPreparation.POLICY_ID);
           dataset.executeUpdate();
         }
       }

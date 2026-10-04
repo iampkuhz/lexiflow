@@ -19,39 +19,48 @@ class DatasetPackageCodecTest {
   @Test
   void rejectsDuplicateAndCoercedManifestFields() throws Exception {
     String base =
-        "{\"schemaVersion\":1,\"schemaSha256\":\""
+        "{\"schemaVersion\":2,\"schemaSha256\":\""
             + "a".repeat(64)
             + "\",\"approvalSha256\":\""
             + "b".repeat(64)
-            + "\",\"datasetVersion\":1,\"preparationPolicy\":\""
+            + "\",\"datasetVersion\":1800000000000,\"preparationPolicy\":\""
             + HintPreparation.POLICY_ID
             + "\",\"files\":["
             + file("dataset.ndjson", 1)
             + ","
-            + file("prepared.ndjson", 1)
+            + file("entries.ndjson", 1)
             + ","
-            + file("lookup.ndjson", 1)
+            + file("forms.ndjson", 1)
             + "]}";
     assertEquals(
-        1,
+        1_800_000_000_000L,
         DatasetPackageCodec.parseManifest(base.getBytes(StandardCharsets.UTF_8)).datasetVersion());
     assertThrows(
         IOException.class,
         () ->
             DatasetPackageCodec.parseManifest(
-                base.replace("\"datasetVersion\":1", "\"datasetVersion\":\"1\"")
+                base.replace(
+                        "\"datasetVersion\":1800000000000", "\"datasetVersion\":\"1800000000000\"")
                     .getBytes(StandardCharsets.UTF_8)));
     assertThrows(
         IOException.class,
         () ->
             DatasetPackageCodec.parseManifest(
-                base.replace("\"datasetVersion\":1", "\"datasetVersion\":1,\"datasetVersion\":1")
+                base.replace(
+                        "\"datasetVersion\":1800000000000",
+                        "\"datasetVersion\":1800000000000,\"datasetVersion\":1800000000000")
                     .getBytes(StandardCharsets.UTF_8)));
     assertThrows(
         IOException.class,
         () ->
             DatasetPackageCodec.parseManifest(
-                base.replace("\"schemaVersion\":1", "\"schemaVersion\":1,\"extra\":true")
+                base.replace("\"schemaVersion\":2", "\"schemaVersion\":2,\"extra\":true")
+                    .getBytes(StandardCharsets.UTF_8)));
+    assertThrows(
+        IOException.class,
+        () ->
+            DatasetPackageCodec.parseManifest(
+                base.replace("\"schemaVersion\":2", "\"schemaVersion\":1")
                     .getBytes(StandardCharsets.UTF_8)));
   }
 

@@ -76,7 +76,7 @@ export async function runtime(port, expectedVersion, timeoutMs = 6000) {
   if (status.invalid) return ['FAIL', 'RUNTIME_INVALID'];
   if (!status.available) return ['BLOCKED', 'RUNTIME_UNAVAILABLE'];
   const body = status.body;
-  if (typeof body !== 'object' || body === null || body.softwareVersion !== expectedVersion || body.apiContract !== 'caption-hints.v1') return ['FAIL', 'RUNTIME_INVALID'];
+  if (typeof body !== 'object' || body === null || body.softwareVersion !== expectedVersion || body.apiContract !== 'caption-hints.v2') return ['FAIL', 'RUNTIME_INVALID'];
   if (body.mode !== 'formal' || body.ready !== true || body.reason !== 'OK') return ['BLOCKED', 'RUNTIME_NOT_READY'];
   return ['PASS', 'RUNTIME_READY'];
 }

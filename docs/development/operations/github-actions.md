@@ -98,7 +98,7 @@ python3 -m scripts.environment.release_promotion --submission-id <uuid> --candid
 
 ## 1.9. 构建资料与本机交接
 
-构建编排不负责自动批准来源或生产数据库资料。负责人先通过既有 `ReleaseDatasetCommand export` 从已发布资料和真实 `approval-file` 导出发布 ZIP；该包包含 `manifest.json`、`approvals.json`、`dataset.ndjson`、`prepared.ndjson`、`lookup.ndjson`，由实际构建的 JAR 校验。`fetch-ecdict.sh` 生成的是源码词库 ZIP，不是这一发布格式；不能用它、空 ZIP 或合成机制 fixture 替换。
+负责人先通过 `ReleaseDatasetCommand export` 从已发布资料和真实 `approval-file` 导出发布 ZIP（含 `manifest.json`、`approvals.json`、`dataset.ndjson`、`entries.ndjson`、`forms.ndjson`），由实际 JAR 校验。`fetch-ecdict.sh` 生成的是源码词库 ZIP，不是此发布格式。
 
 构建请求提供发布标签、资料包路径与摘要、notice 根、输出父目录、previous 候选及 Podman endpoint。JAR、扩展、SQL、Compose、基础镜像锁和许可关联由固定源码入口派生，不接受任意 shell 或完整 descriptor。首次发布也须准备真实且不同的 previous API 候选。
 

@@ -10,11 +10,34 @@ import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.util.Collection;
 import java.util.List;
-import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 /** 验证缓存查询服务只使用 Repository 和领域模型。 */
 class CachedLexiconQueryServiceTest {
+  @Test
+  void shortWordsCannotLeakFromExistingDatabaseOrPrewarmedCache() {
+    var repository = new CountingRepository();
+    repository.entries =
+        List.of(
+            entry(1, "uh", "语气词"),
+            entry(1, "um", "语气词"),
+            entry(1, "yak", "牦牛"),
+            entry(1, "of course", "当然"));
+    repository.prewarm = repository.entries;
+    var service = new CachedLexiconQueryService(repository, 8, 8, 0);
+    int beforeReads = repository.versionReads;
+    assertEquals(List.of(), service.lookupForms(List.of("uh", "um", "a")).candidates());
+    assertEquals(beforeReads, repository.versionReads);
+    var result = service.lookupForms(List.of("uh", "um", "yak", "of course"));
+    assertEquals(
+        List.of("of course", "yak"),
+        result.candidates().stream().map(LexiconHintCandidate::normalizedForm).toList());
+    assertEquals(0, repository.queryCalls);
+    var cold = new CachedLexiconQueryService(repository, 8, 0, 0);
+    assertEquals(2, cold.lookupForms(List.of("uh", "um", "yak", "of course")).candidates().size());
+    assertEquals(List.of("yak", "of course"), repository.lastQueriedForms);
+  }
+
   @Test
   void reportsActualDynamicInvalidationOnlyAfterAnAlreadyBoundVersionChanges() {
     var repository = new CountingRepository();
@@ -63,8 +86,7 @@ class CachedLexiconQueryServiceTest {
     var hint = entry(1, "bank", "银行");
     var block =
         new LexiconHintCandidate(
-            UUID.nameUUIDFromBytes(
-                "blocked-bank".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+            2L,
             null,
             1,
             "en",
@@ -74,7 +96,7 @@ class CachedLexiconQueryServiceTest {
             LexiconHintAction.BLOCK,
             null,
             0,
-            0,
+            false,
             0);
     repository.prewarm = List.of(hint, block);
     var changes = new java.util.ArrayList<List<Long>>();
@@ -238,7 +260,10 @@ class CachedLexiconQueryServiceTest {
             .stream()
             .map(LexiconHintCandidate::normalizedForm)
             .toList());
-    assertEquals(9, repository.lastQueriedForms.size());
+    assertEquals(
+        List.of(
+            "a stream", "a stream of", "stream", "stream of", "stream of data", "of data", "data"),
+        repository.lastQueriedForms);
     assertEquals(false, repository.lastQueriedForms.contains("a stream of data"));
     assertEquals(true, repository.lastQueriedForms.contains("stream of data"));
   }
@@ -263,7 +288,7 @@ class CachedLexiconQueryServiceTest {
     var hint = entry(1, "bank", "银行");
     var block =
         new LexiconHintCandidate(
-            UUID.randomUUID(),
+            3L,
             null,
             1,
             "en",
@@ -273,7 +298,7 @@ class CachedLexiconQueryServiceTest {
             LexiconHintAction.BLOCK,
             null,
             0,
-            0,
+            false,
             0);
     repository.prewarm = List.of(hint, block);
     var service = new CachedLexiconQueryService(repository, 4, 1, 1);
@@ -310,7 +335,7 @@ class CachedLexiconQueryServiceTest {
             calls[1]++;
             return List.of(
                 new LexiconHintCandidate(
-                    UUID.randomUUID(),
+                    4L,
                     null,
                     v,
                     "en",
@@ -320,7 +345,7 @@ class CachedLexiconQueryServiceTest {
                     LexiconHintAction.BLOCK,
                     null,
                     0,
-                    0,
+                    false,
                     0));
           }
         };
@@ -355,10 +380,8 @@ class CachedLexiconQueryServiceTest {
 
   private static LexiconHintCandidate entry(long version, String lemma, String gloss) {
     return new LexiconHintCandidate(
-        UUID.nameUUIDFromBytes(
-            ("entry:en:" + lemma).getBytes(java.nio.charset.StandardCharsets.UTF_8)),
-        UUID.nameUUIDFromBytes(
-            ("sense" + version + ":" + lemma).getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+        io.lexiflow.lexicon.domain.port.LexiconIdentity.entryId(lemma),
+        io.lexiflow.lexicon.domain.port.LexiconIdentity.senseId(version, lemma),
         version,
         "en",
         lemma,
@@ -367,7 +390,7 @@ class CachedLexiconQueryServiceTest {
         LexiconHintAction.HINT,
         gloss,
         100,
-        5.0,
+        true,
         1);
   }
 

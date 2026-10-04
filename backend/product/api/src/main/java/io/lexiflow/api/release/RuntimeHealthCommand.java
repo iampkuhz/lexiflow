@@ -243,7 +243,7 @@ public final class RuntimeHealthCommand {
         if (!validSoftwareVersion(version)) return null;
         long datasetVersion = datasetNode.longValue();
         String reason = reasonNode.asString();
-        if (!"caption-hints.v1".equals(contractNode.asString())
+        if (!"caption-hints.v2".equals(contractNode.asString())
             || !"formal".equals(modeNode.asString())
             || !readyNode.asBoolean()
             || !("OK".equals(reason) || "PREWARM_DEGRADED".equals(reason))
@@ -272,7 +272,7 @@ public final class RuntimeHealthCommand {
    * 已校验且可安全输出的运行状态摘要。
    *
    * @param softwareVersion 含义：软件版本。取值范围：有效三段式版本。
-   * @param apiContract 含义：接口合同。取值范围：固定 caption-hints.v1。
+   * @param apiContract 含义：接口合同。取值范围：固定 caption-hints.v2。
    * @param mode 含义：运行模式。取值范围：formal。
    * @param reason 含义：就绪原因。取值范围：OK 或 PREWARM_DEGRADED。
    * @param datasetVersion 含义：发布资料版本。取值范围：正整数。

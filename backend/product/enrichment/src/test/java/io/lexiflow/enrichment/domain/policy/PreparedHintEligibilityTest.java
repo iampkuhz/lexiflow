@@ -21,7 +21,7 @@ class PreparedHintEligibilityTest {
         new CaptionContext(UUID.randomUUID(), 1, "a".repeat(64), caption, 0, caption.length());
     var blocked =
         new LexiconHintCandidate(
-            UUID.randomUUID(),
+            1L,
             null,
             1,
             "en",
@@ -31,7 +31,7 @@ class PreparedHintEligibilityTest {
             LexiconHintAction.BLOCK,
             null,
             0,
-            0,
+            false,
             0);
     assertEquals(HintState.NO_PENDING, policy.evaluate(context, List.of(blocked)).state());
   }

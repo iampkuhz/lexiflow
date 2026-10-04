@@ -401,7 +401,7 @@ export async function prepareWorkflow(requestFile, options = {}) {
         licenseIds: licenseIds(licenses, ...(item.role === 'api-image' ? ['LexiFlow', 'API-runtime'] : ['PostgreSQL'])) });
     }
     const descriptor = { schemaVersion: 1, buildIdentity: identity, softwareVersion: identity.softwareVersion,
-      sourceCommit: identity.sourceCommit, apiContract: 'caption-hints.v1', sqlVersion: request.dataset.sqlVersion,
+      sourceCommit: identity.sourceCommit, apiContract: 'caption-hints.v2', sqlVersion: request.dataset.sqlVersion,
       dataset: { releaseId: request.dataset.releaseId, preparationId: request.dataset.preparationId, ruleId: request.dataset.ruleId },
       platforms: ['linux/arm64'], artifacts: records, licenses: manifestLicenses };
     const candidate = await assemble({ repoRoot: root, imageCandidates: [{ directory: imageDirectory, sha256: imageSha256 }],

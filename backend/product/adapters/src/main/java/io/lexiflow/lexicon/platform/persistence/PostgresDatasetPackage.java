@@ -10,6 +10,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.time.OffsetDateTime;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -21,13 +22,14 @@ public final class PostgresDatasetPackage {
       Set.of(
           "lexicon_dataset",
           "lexicon_dataset_pkey",
-          "lexicon_prepared_entry",
-          "lexicon_prepared_entry_pkey",
-          "lexicon_prepared_entry_language_lemma_uk",
-          "lexicon_hint_lookup",
-          "lexicon_hint_lookup_pk",
-          "lexicon_hint_lookup_prewarm_idx",
-          "lexicon_hint_lookup_entry_idx");
+          "lexicon_entry",
+          "lexicon_entry_pkey",
+          "lexicon_entry_lemma_key",
+          "lexicon_form",
+          "lexicon_form_pk",
+          "lexicon_form_entry_idx",
+          "lexicon_entry_prewarm_hint_idx",
+          "lexicon_entry_prewarm_block_idx");
 
   private PostgresDatasetPackage() {}
 
@@ -110,8 +112,8 @@ public final class PostgresDatasetPackage {
         var actual = relations(connection);
         if (actual.isEmpty()) {
           createSchema(connection, trustedSql);
-          load(connection, verified.file("prepared.ndjson"), DatasetPackageTables.PREPARED);
-          load(connection, verified.file("lookup.ndjson"), DatasetPackageTables.LOOKUP);
+          load(connection, verified.file("entries.ndjson"), DatasetPackageTables.ENTRY);
+          load(connection, verified.file("forms.ndjson"), DatasetPackageTables.FORM);
           beforePublish.run();
           load(connection, verified.file("dataset.ndjson"), DatasetPackageTables.DATASET);
           assertCounts(connection, verified.manifest());
@@ -120,8 +122,7 @@ public final class PostgresDatasetPackage {
           if (!actual.equals(RELATIONS)) throw invalid();
           // SHARE 阻断普通 DML 与 DDL，锁等待完成后才重新检查关系和全部内容。
           try (var tables = connection.createStatement()) {
-            tables.execute(
-                "LOCK TABLE lexicon_dataset, lexicon_prepared_entry, lexicon_hint_lookup IN SHARE MODE");
+            tables.execute("LOCK TABLE lexicon_dataset, lexicon_entry, lexicon_form IN SHARE MODE");
           }
           if (!relations(connection).equals(RELATIONS)) throw invalid();
           assertShape(connection);
@@ -152,12 +153,108 @@ public final class PostgresDatasetPackage {
   }
 
   private static void assertShape(Connection connection) throws SQLException, IOException {
-    if (!SHAPE_SHA256.equals(shapeFingerprint(connection))) throw invalid();
+    for (var table : DatasetPackageTables.TABLES) {
+      try (var statement =
+          connection.prepareStatement(
+              "SELECT column_name,data_type,is_nullable FROM information_schema.columns "
+                  + "WHERE table_schema=current_schema() AND table_name=? ORDER BY ordinal_position")) {
+        statement.setString(1, table.name());
+        try (var rows = statement.executeQuery()) {
+          int index = 0;
+          while (rows.next()) {
+            if (index >= table.columns().size()) throw invalid();
+            String column = table.columns().get(index++);
+            String expectedType = DatasetPackageTables.TYPES.get(column);
+            if (!column.equals(rows.getString(1))
+                || !sqlType(expectedType).equals(rows.getString(2))) {
+              throw invalid();
+            }
+            boolean nullable = table == DatasetPackageTables.ENTRY && column.equals("gloss");
+            if (!rows.getString(3).equals(nullable ? "YES" : "NO")) throw invalid();
+          }
+          if (index != table.columns().size()) throw invalid();
+        }
+      }
+    }
+    var requiredConstraints =
+        Set.of(
+            "lexicon_dataset_pkey",
+            "lexicon_dataset_singleton_ck",
+            "lexicon_dataset_version_ck",
+            "lexicon_dataset_manifest_ck",
+            "lexicon_dataset_source_count_ck",
+            "lexicon_dataset_entry_count_ck",
+            "lexicon_dataset_lookup_count_ck",
+            "lexicon_dataset_source_rows_ck",
+            "lexicon_dataset_policy_ck",
+            "lexicon_entry_pkey",
+            "lexicon_entry_positive_id_ck",
+            "lexicon_entry_lemma_key",
+            "lexicon_entry_lemma_ck",
+            "lexicon_entry_gloss_ck",
+            "lexicon_entry_hint_priority_ck",
+            "lexicon_entry_complex_list_count_ck",
+            "lexicon_entry_cache_priority_ck",
+            "lexicon_form_pk",
+            "lexicon_form_window_ck",
+            "lexicon_form_entry_fk");
+    var actualConstraints = new java.util.HashSet<String>();
+    try (var statement = connection.createStatement();
+        var rows =
+            statement.executeQuery(
+                "SELECT conname FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid "
+                    + "JOIN pg_namespace n ON n.oid=t.relnamespace WHERE n.nspname=current_schema()")) {
+      while (rows.next()) actualConstraints.add(rows.getString(1));
+    }
+    if (!actualConstraints.equals(requiredConstraints)) throw invalid();
+    assertIndex(connection, "lexicon_form_pk", "(normalized_form, entry_id)", null);
+    assertIndex(connection, "lexicon_entry_lemma_key", "(lemma)", null);
+    assertIndex(connection, "lexicon_form_entry_idx", "(entry_id)", null);
+    assertIndex(
+        connection,
+        "lexicon_entry_prewarm_hint_idx",
+        "(cache_priority DESC, entry_id)",
+        "gloss IS NOT NULL AND cache_priority > 0");
+    assertIndex(
+        connection,
+        "lexicon_entry_prewarm_block_idx",
+        "(cache_priority DESC, entry_id)",
+        "gloss IS NULL AND cache_priority > 0");
   }
 
-  // 由同一最新 schema.sql 在隔离 PostgreSQL 17 上核对出的 catalog 指纹。
-  private static final String SHAPE_SHA256 =
-      "755f260958f1eb5e805a8faa0d151fa8ea37295eee44afbb93421e2b113a8a57";
+  private static String sqlType(String type) {
+    return switch (type) {
+      case "timestamptz" -> "timestamp with time zone";
+      default -> type;
+    };
+  }
+
+  private static void assertIndex(
+      Connection connection, String name, String columns, String predicate)
+      throws SQLException, IOException {
+    try (var statement =
+        connection.prepareStatement(
+            "SELECT pg_get_indexdef(i.oid),pg_get_expr(x.indpred,x.indrelid) "
+                + "FROM pg_class i JOIN pg_index x ON x.indexrelid=i.oid "
+                + "JOIN pg_namespace n ON n.oid=i.relnamespace "
+                + "WHERE n.nspname=current_schema() AND i.relname=?")) {
+      statement.setString(1, name);
+      try (var rows = statement.executeQuery()) {
+        if (!rows.next() || !rows.getString(1).contains(columns)) throw invalid();
+        String actualPredicate = rows.getString(2);
+        if (predicate == null
+            ? actualPredicate != null
+            : actualPredicate == null
+                || !actualPredicate
+                    .replaceAll("[()\\s]", "")
+                    .toLowerCase(Locale.ROOT)
+                    .contains(predicate.replaceAll("[()\\s]", "").toLowerCase(Locale.ROOT))) {
+          throw invalid();
+        }
+        if (rows.next()) throw invalid();
+      }
+    }
+  }
 
   /** 对列类型/null/default、约束表达式和索引定义求确定性 catalog 摘要。 */
   static String shapeFingerprint(Connection connection) throws SQLException {
