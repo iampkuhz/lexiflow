@@ -873,6 +873,104 @@ checks:
       failures: 0
       errors: 0
       skipped: 0
+
+# Gradle 构建合同实际运行 Java；单列为 backend Check，不进入可复用的 Verification 自测。
+- check_id: eng.backend.build-contract
+  module: backend-build-contract
+  command:
+  - python3
+  - -m
+  - tests.verification.gradle_build_contract
+  executable: python3
+  cwd: .
+  timeout_seconds: 600
+  scope: repository-baseline
+  triggers:
+  - path: backend/
+  - path: ops/release/
+  - path: scripts/environment/
+  - path: tests/verification/gradle_build_contract.py
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  - java-25-temurin
+  - node
+  - git
+  - python-package-yaml
+  input_paths:
+  - backend
+  - ops/release
+  - scripts/environment
+  - tests/verification/gradle_build_contract.py
+  transaction_reuse: false
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.backend.build-contract-on-change
+  module: backend-build-contract-change
+  command:
+  - python3
+  - -m
+  - tests.verification.gradle_build_contract
+  executable: python3
+  cwd: .
+  timeout_seconds: 600
+  scope: change-targeted
+  triggers:
+  - path: backend/
+  - path: ops/release/
+  - path: scripts/environment/
+  - path: tests/verification/gradle_build_contract.py
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  - java-25-temurin
+  - node
+  - git
+  - python-package-yaml
+  input_paths:
+  - backend
+  - ops/release
+  - scripts/environment
+  - tests/verification/gradle_build_contract.py
+  transaction_reuse: false
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
 - check_id: eng.backend.delivery
   module: backend
   command:
@@ -925,18 +1023,23 @@ checks:
   - backend/gradle/config
   - backend/verification/quality-gates/build.gradle.kts
   - backend/gradle/build-logic/src
+  - backend/product/api/build.gradle.kts
   - backend/product/api/src
   - backend/product/api/gradle.lockfile
+  - backend/product/enrichment/build.gradle.kts
   - backend/product/enrichment/src
   - backend/product/enrichment/gradle.lockfile
   - backend/product/lexicon/src
   - backend/product/lexicon/gradle.lockfile
+  - backend/product/adapters/build.gradle.kts
   - backend/product/adapters/src
   - backend/product/adapters/gradle.lockfile
+  - backend/verification/architecture/build.gradle.kts
   - backend/verification/architecture/src
   - backend/verification/architecture/gradle.lockfile
   - backend/verification/quality-gates/src
   - backend/verification/quality-gates/gradle.lockfile
+  - backend/verification/integration/build.gradle.kts
   - backend/verification/integration/src
   - backend/verification/integration/gradle.lockfile
   - infra/postgres/schema.sql
@@ -1002,18 +1105,23 @@ checks:
   - backend/gradle/config
   - backend/verification/quality-gates/build.gradle.kts
   - backend/gradle/build-logic/src
+  - backend/product/api/build.gradle.kts
   - backend/product/api/src
   - backend/product/api/gradle.lockfile
+  - backend/product/enrichment/build.gradle.kts
   - backend/product/enrichment/src
   - backend/product/enrichment/gradle.lockfile
   - backend/product/lexicon/src
   - backend/product/lexicon/gradle.lockfile
+  - backend/product/adapters/build.gradle.kts
   - backend/product/adapters/src
   - backend/product/adapters/gradle.lockfile
+  - backend/verification/architecture/build.gradle.kts
   - backend/verification/architecture/src
   - backend/verification/architecture/gradle.lockfile
   - backend/verification/quality-gates/src
   - backend/verification/quality-gates/gradle.lockfile
+  - backend/verification/integration/build.gradle.kts
   - backend/verification/integration/src
   - backend/verification/integration/gradle.lockfile
   - infra/postgres/schema.sql
@@ -2092,18 +2200,23 @@ checks:
   - path: backend/gradle/wrapper/gradle-wrapper.jar
   - path: backend/gradle/wrapper/gradle-wrapper.properties
   - path: backend/gradlew
+  - path: backend/product/adapters/build.gradle.kts
   - path: backend/product/adapters/gradle.lockfile
   - path: backend/product/adapters/src
+  - path: backend/product/api/build.gradle.kts
   - path: backend/product/api/gradle.lockfile
   - path: backend/product/api/src
+  - path: backend/product/enrichment/build.gradle.kts
   - path: backend/product/enrichment/gradle.lockfile
   - path: backend/product/enrichment/src
   - path: backend/product/lexicon/gradle.lockfile
   - path: backend/product/lexicon/src
   - path: backend/settings-gradle.lockfile
   - path: backend/settings.gradle.kts
+  - path: backend/verification/architecture/build.gradle.kts
   - path: backend/verification/architecture/gradle.lockfile
   - path: backend/verification/architecture/src
+  - path: backend/verification/integration/build.gradle.kts
   - path: backend/verification/integration/gradle.lockfile
   - path: backend/verification/integration/src
   - path: backend/verification/quality-gates/build.gradle.kts
@@ -2206,18 +2319,23 @@ checks:
   - backend/gradle/wrapper/gradle-wrapper.jar
   - backend/gradle/wrapper/gradle-wrapper.properties
   - backend/gradlew
+  - backend/product/adapters/build.gradle.kts
   - backend/product/adapters/gradle.lockfile
   - backend/product/adapters/src
+  - backend/product/api/build.gradle.kts
   - backend/product/api/gradle.lockfile
   - backend/product/api/src
+  - backend/product/enrichment/build.gradle.kts
   - backend/product/enrichment/gradle.lockfile
   - backend/product/enrichment/src
   - backend/product/lexicon/gradle.lockfile
   - backend/product/lexicon/src
   - backend/settings-gradle.lockfile
   - backend/settings.gradle.kts
+  - backend/verification/architecture/build.gradle.kts
   - backend/verification/architecture/gradle.lockfile
   - backend/verification/architecture/src
+  - backend/verification/integration/build.gradle.kts
   - backend/verification/integration/gradle.lockfile
   - backend/verification/integration/src
   - backend/verification/quality-gates/build.gradle.kts
@@ -2317,18 +2435,23 @@ checks:
   - path: backend/gradle/wrapper/gradle-wrapper.jar
   - path: backend/gradle/wrapper/gradle-wrapper.properties
   - path: backend/gradlew
+  - path: backend/product/adapters/build.gradle.kts
   - path: backend/product/adapters/gradle.lockfile
   - path: backend/product/adapters/src
+  - path: backend/product/api/build.gradle.kts
   - path: backend/product/api/gradle.lockfile
   - path: backend/product/api/src
+  - path: backend/product/enrichment/build.gradle.kts
   - path: backend/product/enrichment/gradle.lockfile
   - path: backend/product/enrichment/src
   - path: backend/product/lexicon/gradle.lockfile
   - path: backend/product/lexicon/src
   - path: backend/settings-gradle.lockfile
   - path: backend/settings.gradle.kts
+  - path: backend/verification/architecture/build.gradle.kts
   - path: backend/verification/architecture/gradle.lockfile
   - path: backend/verification/architecture/src
+  - path: backend/verification/integration/build.gradle.kts
   - path: backend/verification/integration/gradle.lockfile
   - path: backend/verification/integration/src
   - path: backend/verification/quality-gates/build.gradle.kts
@@ -2431,18 +2554,23 @@ checks:
   - backend/gradle/wrapper/gradle-wrapper.jar
   - backend/gradle/wrapper/gradle-wrapper.properties
   - backend/gradlew
+  - backend/product/adapters/build.gradle.kts
   - backend/product/adapters/gradle.lockfile
   - backend/product/adapters/src
+  - backend/product/api/build.gradle.kts
   - backend/product/api/gradle.lockfile
   - backend/product/api/src
+  - backend/product/enrichment/build.gradle.kts
   - backend/product/enrichment/gradle.lockfile
   - backend/product/enrichment/src
   - backend/product/lexicon/gradle.lockfile
   - backend/product/lexicon/src
   - backend/settings-gradle.lockfile
   - backend/settings.gradle.kts
+  - backend/verification/architecture/build.gradle.kts
   - backend/verification/architecture/gradle.lockfile
   - backend/verification/architecture/src
+  - backend/verification/integration/build.gradle.kts
   - backend/verification/integration/gradle.lockfile
   - backend/verification/integration/src
   - backend/verification/quality-gates/build.gradle.kts
@@ -2778,18 +2906,23 @@ checks:
   - path: backend/gradle/wrapper/gradle-wrapper.jar
   - path: backend/gradle/wrapper/gradle-wrapper.properties
   - path: backend/gradlew
+  - path: backend/product/adapters/build.gradle.kts
   - path: backend/product/adapters/gradle.lockfile
   - path: backend/product/adapters/src
+  - path: backend/product/api/build.gradle.kts
   - path: backend/product/api/gradle.lockfile
   - path: backend/product/api/src
+  - path: backend/product/enrichment/build.gradle.kts
   - path: backend/product/enrichment/gradle.lockfile
   - path: backend/product/enrichment/src
   - path: backend/product/lexicon/gradle.lockfile
   - path: backend/product/lexicon/src
   - path: backend/settings-gradle.lockfile
   - path: backend/settings.gradle.kts
+  - path: backend/verification/architecture/build.gradle.kts
   - path: backend/verification/architecture/gradle.lockfile
   - path: backend/verification/architecture/src
+  - path: backend/verification/integration/build.gradle.kts
   - path: backend/verification/integration/gradle.lockfile
   - path: backend/verification/integration/src
   - path: backend/verification/quality-gates/build.gradle.kts
@@ -2888,18 +3021,23 @@ checks:
   - backend/gradle/wrapper/gradle-wrapper.jar
   - backend/gradle/wrapper/gradle-wrapper.properties
   - backend/gradlew
+  - backend/product/adapters/build.gradle.kts
   - backend/product/adapters/gradle.lockfile
   - backend/product/adapters/src
+  - backend/product/api/build.gradle.kts
   - backend/product/api/gradle.lockfile
   - backend/product/api/src
+  - backend/product/enrichment/build.gradle.kts
   - backend/product/enrichment/gradle.lockfile
   - backend/product/enrichment/src
   - backend/product/lexicon/gradle.lockfile
   - backend/product/lexicon/src
   - backend/settings-gradle.lockfile
   - backend/settings.gradle.kts
+  - backend/verification/architecture/build.gradle.kts
   - backend/verification/architecture/gradle.lockfile
   - backend/verification/architecture/src
+  - backend/verification/integration/build.gradle.kts
   - backend/verification/integration/gradle.lockfile
   - backend/verification/integration/src
   - backend/verification/quality-gates/build.gradle.kts
@@ -3020,18 +3158,23 @@ checks:
   - path: backend/gradle/wrapper/gradle-wrapper.jar
   - path: backend/gradle/wrapper/gradle-wrapper.properties
   - path: backend/gradlew
+  - path: backend/product/adapters/build.gradle.kts
   - path: backend/product/adapters/gradle.lockfile
   - path: backend/product/adapters/src
+  - path: backend/product/api/build.gradle.kts
   - path: backend/product/api/gradle.lockfile
   - path: backend/product/api/src
+  - path: backend/product/enrichment/build.gradle.kts
   - path: backend/product/enrichment/gradle.lockfile
   - path: backend/product/enrichment/src
   - path: backend/product/lexicon/gradle.lockfile
   - path: backend/product/lexicon/src
   - path: backend/settings-gradle.lockfile
   - path: backend/settings.gradle.kts
+  - path: backend/verification/architecture/build.gradle.kts
   - path: backend/verification/architecture/gradle.lockfile
   - path: backend/verification/architecture/src
+  - path: backend/verification/integration/build.gradle.kts
   - path: backend/verification/integration/gradle.lockfile
   - path: backend/verification/integration/src
   - path: backend/verification/quality-gates/build.gradle.kts

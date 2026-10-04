@@ -10,7 +10,7 @@
 python3 -m scripts.environment.java_exec backend/gradlew -p backend <gradle-task> [gradle-options]
 ```
 
-启动器选择仓库规定的 Java 与 Wrapper；不要直接以全局 `gradle` 或系统 Java 替代。根聚合、版本与项目依赖见 `backend/build.gradle.kts`、`backend/settings.gradle.kts` 和 `harness/java-product.manifest.yaml`。
+启动器选择仓库规定的 Java 与 Wrapper；不要直接以全局 `gradle` 或系统 Java 替代。根聚合、版本与项目依赖见 `backend/build.gradle.kts`、`backend/settings.gradle.kts` 和 `harness/java-product.manifest.yaml`。模块依赖和任务在各自 `build.gradle.kts`，根构建只保留全局配置、共享 convention、跨模块检查和交付聚合。
 
 ## 1.2. 常用任务
 
@@ -28,11 +28,14 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend <gradle-task
 
 定向到模块时使用真实 Gradle project path，例如 `:api:test`。除失败定位外，按交付目标选择完整聚合入口；不要再逐个运行已包含的任务。Repository Verify 的 backend Check 使用 deliveryFull，不能用普通 check 替代。
 
+
+构建接线的真实行为回归由独立 `eng.backend.build-contract` Check 执行（直接诊断：`python3 -m tests.verification.gradle_build_contract`），覆盖实际任务依赖、模块边界拒绝、运行入口参数和配置缓存。它需要 Java/Node，不进入可复用的 Verification 自测；不代替 `check` 或 `deliveryFull`。
+
 ## 1.3. 报告与边界
 
 工具原生报告在相应模块的 `build/reports/`，定制治理结果在 `backend/build/reports/`。目标任务的成功和实际报告内容共同构成该工具的结论；报告不存在、任务跳过或无源码时，不能表述为已验证源码。Java 工具不签发 Gate 收据。
 
-普通 `check` 和 `qualityFull` 执行质量判定，不自动生成 JaCoCo 覆盖率汇总；覆盖率采集和显式报告任务保留。当前没有覆盖率阈值门禁，不能把报告生成成功解释为覆盖率合格。测试完整性仍消费 JUnit XML，静态检查、业务测试和文档完整性要求不变。
+普通 `check` 执行质量判定，不自动生成 JaCoCo 覆盖率汇总；覆盖率采集和显式报告任务保留。当前没有覆盖率阈值门禁，不能把报告生成成功解释为覆盖率合格。测试完整性仍消费 JUnit XML，静态检查、业务测试和文档完整性要求不变。
 
 测试、Checkstyle、PMD 的 HTML 默认关闭，XML 结果保留；JaCoCo 显式任务默认输出 XML。需要人工浏览时使用例如：
 
