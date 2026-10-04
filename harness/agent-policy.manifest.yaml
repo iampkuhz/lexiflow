@@ -28,6 +28,16 @@ execution_progress:
   dispatch_evidence: start 返回 run_id 仅表示已派发；只有匹配身份的 started.json 才证明 CLI 已启动。预检 PASS、计划和预计动作均不是启动证据。
   blocked_handoff: 报告实际失败层、阻塞证据与可执行接手路径；可自行完成的准备或合规接手应继续执行，只有缺用户决定、外部恢复或真实执行能力时才交还控制权。
   asynchronous_dispatch_handoff: Qoder start/resume 返回 AWAITING_CALLBACK 后必须立即结束当前主线程回合；这是实际派发后的控制权交接，不属于只承诺不执行。不得 sleep、查时钟、探测进程/日志或以其他工作保持本轮活跃等待完成。只由终态 callback 续办；重复已 ack/superseded 回调直接结束。
+  user_visible_dispatch:
+    owner: parent-agent
+    surface: current-conversation-assistant-message
+    applies_to: [qoder-start, qoder-resume, codex-spawn, codex-followup, fallback]
+    before_dispatch: 调用前先在当前聊天正文说明执行器、工作包、任务目标和写入范围；明确是准备派发而非已经启动。原生 Codex 同时说明已选择的模型与 reasoning；Qoder 模型由 runner 管理，不猜测。
+    after_dispatch: 工具返回后立即在当前聊天正文报告真实结果、work_package_id 与实际 run_id 或原生 agent 标识；区分已受理但未确认启动、已确认启动、拒绝或失败。只有对应启动证据才说已启动。
+    asynchronous_handoff: AWAITING_CALLBACK 的消息必须说明实施在后台、主线程等待终态通知、尚未验收，并以该条可见消息结束本回合；不为展示进度增加轮询或保持回合活跃。
+    after_completion: 收到终态通知后说明实施结果与主线程下一步；实施完成、独立验证、审查、提交和推送分别按真实证据报告，不把 callback 或 exit-zero 写成验收完成。
+    not_a_substitute: [tool-output-only, terminal-stdout-only, local-log-only, openspec-status-only]
+    privacy: 只展示有界任务摘要、标识和仓库相对产物路径；不粘贴原始日志、凭据、本机私有路径或业务输入。
 
 # 隐私边界：下列数据不得进入共享产物或委派上下文。
 privacy:

@@ -44,6 +44,8 @@ endlegend
 
 ## 1.2. 派发前：先证明允许启动
 
+主线程在当前聊天直接展示交接，不只把状态写在工具输出或本机日志里。提示合同见 [policy 的 execution_progress.user_visible_dispatch](../../harness/agent-policy.manifest.yaml)：调用前说明执行器、工作包、目标和范围；调用后依据返回证据说明是否真正启动以及运行标识。比如“准备派发 Qoder，工作包 `<work_package_id>`，负责 Gradle 配置与直接测试”与“Qoder 已确认启动，run `<run_id>`；后台实施中，主线程等待终态通知，尚未验收”是不同阶段，不能提前宣称成功。启动拒绝或失败同样在聊天说明原因与接手路径；收到完成通知后再分别报告实施、自检、独立验收和 Git 交付。
+
 读取 [policy](../../harness/agent-policy.manifest.yaml) 的 subagent_protocol、模型路由、qoder_delegation 与 agent_dispatch。Task identity、版本、owner、允许/禁止路径、所需上下文、产物、验收和检查命令必须明确。Catalog 存在时核对，不把无关 Catalog 漂移变成通用派发锁；planning-only 也不能冒充已经分解的 Task。
 
 Qoder 使用 [delegation/qoder_cli.py](../../scripts/agents/delegation/qoder_cli.py) 的 preflight 读取资格快照；start/resume 仍在锁内复核。preflight 不分配 run、不证明在线账号健康，也不替代实际启动。Goal 活跃或无法证明宿主能等待外部 callback 时不启动 Qoder，按当前 policy 转入原生 Codex 路由；不改宿主数据库或暂停 Goal 绕过。
