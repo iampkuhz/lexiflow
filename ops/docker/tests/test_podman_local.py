@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -28,7 +29,7 @@ class LocalEntryTest(unittest.TestCase):
         self.calls = self.root / "calls"
         self.mode = self.root / "mode"
         self.mode.write_text("")
-        for relative in ["ops/podman/local.mjs", "ops/podman/process-lock.mjs", "ops/podman/command.mjs", "ops/podman/doctor.mjs", "ops/podman/network-repair.mjs", "ops/podman/upgrade.mjs", "ops/podman/prepare-workspace.mjs", "ops/podman/versions.mjs", "ops/podman/compose.validation.yaml",
+        for relative in ["ops/podman/local.mjs", "ops/podman/java-runtime.mjs", "ops/podman/process-lock.mjs", "ops/podman/command.mjs", "ops/podman/doctor.mjs", "ops/podman/network-repair.mjs", "ops/podman/upgrade.mjs", "ops/podman/prepare-workspace.mjs", "ops/podman/versions.mjs", "ops/podman/compose.validation.yaml",
                          "ops/podman/fetch-ecdict.sh", "ops/podman/source-tools.Containerfile",
                          "ops/docker/Dockerfile", "ops/docker/Dockerfile.postgres",
                          "ops/docker/entrypoint.sh", "ops/docker/bootstrap.sh",
@@ -256,6 +257,26 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.assertIn('无需升级',result.stdout)
         self.assertEqual(json.loads((self.root/'runtime.json').read_text())['containerId'],new_container)
         self.assertFalse(any('--force-recreate' in json.loads(line) for line in self.calls.read_text().splitlines()[noop_offset:]))
+
+    def test_install_and_upgrade_share_explicit_java_home(self):
+        home = self.root / "jdk 25"
+        (home / "bin").mkdir(parents=True)
+        self.program(home / "bin/java", '#!/bin/sh\necho \'openjdk version "25.0.4"\' >&2\n')
+        self.program(self.bin / "java", '#!/bin/sh\necho \'openjdk version "26.0.2"\' >&2\n')
+        gradle = self.repo / "backend/gradlew"
+        gradle.write_text(gradle.read_text().replace("set -eu\n", 'set -eu\n[ "$(command -v java)" = "$JAVA_HOME/bin/java" ]\n'))
+        with patch.dict(os.environ, {"JAVA_HOME": str(home)}):
+            result = self.invoke('install', serve=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            before = json.loads((self.kit / 'state.json').read_text())
+            (self.repo / 'ops/release/version.txt').write_text('2.0.1-SNAPSHOT\n')
+            result = self.invoke('upgrade')
+            self.assertEqual(result.returncode, 0, result.stderr)
+        after = json.loads((self.kit / 'state.json').read_text())
+        self.assertNotEqual(before['apiImage'], after['apiImage'])
+        self.assertEqual(before['postgresImage'], after['postgresImage'])
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertEqual(sum('initialize' in call for call in calls), 1)
 
     def test_upgrade_rejects_successful_compose_that_reuses_old_api_container(self):
         result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)

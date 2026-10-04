@@ -5,7 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
 import crypto from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { javaBuildEnvironment } from './java-runtime.mjs';
 import { fileURLToPath } from 'node:url';
 import { runCommand, HEARTBEAT_MS } from './command.mjs';
 import { acquireProcessLock } from './process-lock.mjs';
@@ -30,7 +30,7 @@ export async function runLocal(argv, candidateRequest) {
   let dir = path.join(repo, '.local/podman'), apiPort = 18080, dbPort = 15432;
   let captionDebug = false, restoring = false;
   let unlockProcess, lockOwned = false, state, step = '检查参数', logFile, lockRecord, interrupted = false;
-  const environment = Object.fromEntries(['HOME', 'PATH', 'JAVA_HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'SSH_AUTH_SOCK', 'CONTAINER_HOST', 'CONTAINER_CONNECTION', 'DOCKER_HOST', 'PODMAN_COMPOSE_PROVIDER'].filter(k => process.env[k]).map(k => [k, process.env[k]]));
+  let environment = Object.fromEntries(['HOME', 'PATH', 'JAVA_HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'SSH_AUTH_SOCK', 'CONTAINER_HOST', 'CONTAINER_CONNECTION', 'DOCKER_HOST', 'PODMAN_COMPOSE_PROVIDER'].filter(k => process.env[k]).map(k => [k, process.env[k]]));
   const markInterrupted = () => { interrupted = true; };
   process.on('SIGINT', markInterrupted);
   process.on('SIGTERM', markInterrupted);
@@ -323,8 +323,7 @@ export async function runLocal(argv, candidateRequest) {
             apiArchiveSha256: frozen.artifacts['api-image:linux/arm64'].sha256, extensionArchiveSha256: frozen.artifacts.extension.sha256 }, datasetIdentity: installed.datasetIdentity };
         }
         if (!candidate) {
-          const java = spawnSync('java', ['-version'], { env: environment, encoding: 'utf8', timeout: 10000 });
-          if (java.status !== 0 || !/version "25[.\"]/.test(java.stderr)) fail('请安装并选择 Java 25 JDK');
+          environment = javaBuildEnvironment(environment);
         }
         const datasetVersion = await ready(installed);
         progress('构建新版应用和插件；原服务继续运行');
@@ -504,8 +503,7 @@ export async function runLocal(argv, candidateRequest) {
       if (candidate && state.packageType !== 'release-package') fail('不能将候选接入源码安装');
       if (candidate && state.packageType === 'release-package' && (candidate.candidateSha256 !== state.candidateSha256 || candidate.manifestSha256 !== state.manifestSha256)) fail('候选身份改变，拒绝接续安装');
       if (!candidate) {
-        const java = spawnSync('java', ['-version'], { env: environment, encoding: 'utf8', timeout: 10000 });
-        if (java.status !== 0 || !/version "25[.\"]/.test(java.stderr)) fail('请安装并选择 Java 25 JDK（设置 JAVA_HOME 和 PATH）');
+        environment = javaBuildEnvironment(environment);
       }
       if (candidate && state.phase === 'new') {
         progress('准备已核验发行候选及固定本机资料');
