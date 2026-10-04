@@ -296,6 +296,12 @@ class TestManagedTestServices(unittest.TestCase):
         (self.root / "harness/delivery-hooks.json").write_bytes(
             (ROOT / "harness/delivery-hooks.json").read_bytes()
         )
+        (self.root / "harness/agent-policy.manifest.yaml").write_bytes(
+            (ROOT / "harness/agent-policy.manifest.yaml").read_bytes()
+        )
+        (self.root / "harness/ci-policy.yaml").write_text(
+            "formal_only_check_ids: [fixture.formal]\n"
+        )
         _write_declarations(
             self.root,
             [
@@ -312,6 +318,22 @@ class TestManagedTestServices(unittest.TestCase):
                     "required_environment": sorted(REQUIRED),
                 }
                 for scope in ("change-targeted", "repository-baseline")
+            ] + [
+                {
+                    "check_id": identifier,
+                    "module": identifier,
+                    "command": ["python3", "-c", "raise SystemExit('formal must not execute')"],
+                    "cwd": ".",
+                    "timeout_seconds": 5,
+                    "scope": scope,
+                    "triggers": [{"path": "formal-input"}],
+                    "input_paths": ["fixture/check.py"],
+                    "required_environment": [],
+                }
+                for identifier, scope in (
+                    ("fixture.formal", "repository-baseline"),
+                    ("fixture.formal-on-change", "change-targeted"),
+                )
             ],
         )
         env = {

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from scripts.environment.java_runtime import JavaRuntimeError, resolve_java_home
 
@@ -104,6 +106,23 @@ def diagnose(
             info = detect_postgres_test_jdbc_url(source)
         elif name == "redis-test-endpoint":
             info = detect_redis_test_endpoint(source)
+        elif name == "python-package-yaml":
+            spec = importlib.util.find_spec("yaml")
+            info = {"available": bool(spec and spec.origin), "path": ""}
+        elif name == "posix-lock-tool":
+            path = (
+                "/usr/bin/lockf"
+                if sys.platform == "darwin"
+                else "/usr/bin/flock"
+                if sys.platform.startswith("linux")
+                else ""
+            )
+            info = {"available": bool(path and os.access(path, os.X_OK)), "path": path}
+        elif name == "sha256-tool":
+            path = shutil.which(
+                "sha256sum", path=source.get("PATH", "")
+            ) or shutil.which("shasum", path=source.get("PATH", ""))
+            info = {"available": bool(path), "path": path or ""}
         elif name == "candidate-runtime-request":
             value = source.get("LEXIFLOW_CANDIDATE_RUNTIME_REQUEST", "")
             valid = bool(value and Path(value).is_absolute())

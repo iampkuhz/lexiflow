@@ -56,7 +56,7 @@ def _init_git_repo(tmpdir: Path) -> str:
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     (tmpdir / "initial.txt").write_text("initial")
     # Ignore harness/ so test declarations don't pollute git diff
-    (tmpdir / ".gitignore").write_text("harness/\n")
+    (tmpdir / ".gitignore").write_text("harness/\ntmp/\n")
     subprocess.run(["git", "add", "."], cwd=str(tmpdir), check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(["git", "commit", "-m", "init"], cwd=str(tmpdir), check=True,
@@ -254,6 +254,26 @@ class TestVerifyRepository(unittest.TestCase):
         self.assertEqual(report["checks"][0]["status"], "BLOCKED")
         self.assertEqual(report["checks"][0]["reason"], "missing-environment")
 
+    def test_delivery_does_not_run_after_missing_environment(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _write_declarations(root, [{
+                "check_id": name, "module": "test",
+                "command": ["python3", "-c", "pass"], "cwd": ".",
+                "timeout_seconds": 10, "scope": "repository-baseline",
+                "triggers": [{"path": "test/"}],
+                "required_environment": ["missing-tool-for-fixture"] if name == "first" else [],
+            } for name in ("first", "second")])
+            report = verify_repository(
+                root,
+                runner=lambda *args, **kwargs: calls.append(args) or _pass_runner(*args[:4]),
+            )
+        self.assertEqual(calls, [])
+        self.assertEqual(report["checks"][0]["reason"], "missing-environment")
+        self.assertEqual(report["checks"][1]["reason"], "prior-check-blocked")
+        self.assertEqual(report["checks"][1]["process"]["exit_reason"], "not-run")
+
     def test_report_schema_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -305,8 +325,7 @@ class TestVerifyRepository(unittest.TestCase):
         self.assertEqual(len(report["checks"]), 1)
         self.assertEqual(report["checks"][0]["check_id"], "a")
 
-    def test_continue_past_failure(self):
-        """Unrelated checks continue even when one fails."""
+    def test_delivery_stops_after_failure_and_marks_remaining_not_run(self):
         call_count = 0
 
         def counting_runner(argv, cwd, env, timeout, executable=None):
@@ -341,10 +360,59 @@ class TestVerifyRepository(unittest.TestCase):
                 },
             ])
             report = verify_repository(tmpdir, runner=counting_runner)
-        self.assertEqual(call_count, 2)
+        self.assertEqual(call_count, 1)
         self.assertEqual(report["result"], "FAIL")
         self.assertEqual(report["checks"][0]["status"], "FAIL")
-        self.assertEqual(report["checks"][1]["status"], "PASS")
+        self.assertEqual(report["checks"][1]["status"], "BLOCKED")
+        self.assertEqual(report["checks"][1]["reason"], "prior-check-failed")
+        self.assertEqual(report["checks"][1]["process"]["exit_reason"], "not-run")
+        self.assertNotIn("second", report["executed_check_ids"])
+
+    def test_diagnostic_continues_past_failure_without_full_pass_identity(self):
+        calls = []
+        def runner(argv, cwd, env, timeout, executable=None):
+            calls.append(argv[-1])
+            return _fail_runner(argv, cwd, env, timeout, executable) if len(calls) == 1 else _pass_runner(argv, cwd, env, timeout, executable)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _write_declarations(root, [{
+                "check_id": name, "module": "test",
+                "command": ["python3", "-c", f"pass # {name}"], "cwd": ".",
+                "timeout_seconds": 10, "scope": "repository-baseline",
+                "triggers": [{"path": "test/"}], "required_environment": [],
+            } for name in ("first", "second")])
+            report = verify_repository(root, runner=runner, execution_mode="diagnostic")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(report["result"], "FAIL")
+        self.assertEqual([item["status"] for item in report["checks"]], ["FAIL", "PASS"])
+
+    def test_delivery_stops_before_runner_when_later_check_input_drifted(self):
+        calls = []
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "future.txt").write_text("before", encoding="utf-8")
+            checks = [{
+                "check_id": name, "module": "test",
+                "command": ["python3", "-c", f"pass # {name}"], "cwd": ".",
+                "timeout_seconds": 10, "scope": "repository-baseline",
+                "triggers": [{"path": "test/"}], "required_environment": [],
+                "input_paths": ["future.txt"] if name == "docker.runner" else [],
+            } for name in ("mutator", "docker.runner", "later")]
+            _write_declarations(root, checks)
+
+            def runner(argv, cwd, env, timeout, executable=None):
+                calls.append(argv[-1])
+                if "mutator" in argv[-1]:
+                    (root / "future.txt").write_text("after", encoding="utf-8")
+                return _pass_runner(argv, cwd, env, timeout, executable)
+
+            report = verify_repository(root, runner=runner)
+        by_id = {item["check_id"]: item for item in report["checks"]}
+        self.assertEqual(calls, ["pass # mutator"])
+        self.assertEqual(by_id["docker.runner"]["reason"], "input-drift")
+        self.assertEqual(by_id["docker.runner"]["process"]["exit_reason"], "not-run")
+        self.assertEqual(by_id["later"]["reason"], "prior-check-failed")
+        self.assertNotIn("docker.runner", report["executed_check_ids"])
 
 
 class TestVerifyChanges(unittest.TestCase):

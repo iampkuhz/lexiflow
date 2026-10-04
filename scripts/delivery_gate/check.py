@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import re
 import uuid
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from scripts.delivery_gate.acceptance import (
+    binding,
+    review_required,
+    verify_validation_evidence,
+)
 from scripts.delivery_gate.authority import verify_authority
 from scripts.delivery_gate.records import (
     RecordError,
@@ -18,7 +24,6 @@ from scripts.delivery_gate.records import (
     list_submissions,
     load_submission,
     publish_json,
-    read_bound_bytes,
     read_json,
     sha256_bytes,
 )
@@ -49,21 +54,29 @@ def _bound_chain(
     repo: Path,
     submission: dict[str, Any],
     validation: dict[str, Any],
-    review: dict[str, Any],
+    review: dict[str, Any] | None,
 ) -> list[str]:
     errors = []
     if validation.get("submission_content_hash") != submission.get("content_hash"):
         errors.append("validation-submission-hash")
     if validation.get("submission_id") != submission.get("submission_id"):
         errors.append("validation-submission-id")
-    if review.get("submission_id") != submission.get("submission_id"):
-        errors.append("review-submission-id")
-    if review.get("validation_id") != validation.get("validation_id"):
-        errors.append("review-validation-id")
-    if review.get("submission_content_hash") != submission.get("content_hash"):
-        errors.append("review-submission-hash")
-    if review.get("validation_content_hash") != validation.get("content_hash"):
-        errors.append("review-validation-hash")
+    if review_required(submission) != (review is not None):
+        errors.append("review-layer-mismatch")
+    if review is not None:
+        if review.get("submission_id") != submission.get("submission_id"):
+            errors.append("review-submission-id")
+        if review.get("validation_id") != validation.get("validation_id"):
+            errors.append("review-validation-id")
+        if review.get("submission_content_hash") != submission.get("content_hash"):
+            errors.append("review-submission-hash")
+        if review.get("validation_content_hash") != validation.get("content_hash"):
+            errors.append("review-validation-hash")
+    for record in (validation, review):
+        if record is not None and any(
+            record.get(k) != v for k, v in binding(submission).items()
+        ):
+            errors.append("acceptance-binding-mismatch")
     if validation.get("frozen_input_fingerprint") != submission.get(
         "verification_freeze", {}
     ).get("input_fingerprint"):
@@ -72,16 +85,22 @@ def _bound_chain(
         (validation, "validator_identity"),
         (review, "reviewer_identity"),
     ):
+        if record is None:
+            continue
         error = verify_authority(repo, record, key)
         if error:
             errors.append(error)
     # 复用签发阶段同一独立性合同；此处仅消费记录身份，不发现当前调用者身份。
     from scripts.delivery_gate.review import (
         ReviewError,
+    )
+    from scripts.delivery_gate.review import (
         _verify_independence as verify_reviewer_independence,
     )
     from scripts.delivery_gate.validate import (
         ValidationError,
+    )
+    from scripts.delivery_gate.validate import (
         _verify_independence as verify_validator_independence,
     )
 
@@ -91,20 +110,22 @@ def _bound_chain(
         )
     except ValidationError as exc:
         errors.append(exc.code)
+    if review is not None:
+        try:
+            verify_reviewer_independence(
+                submission,
+                validation,
+                {"identity": review.get("reviewer_identity", {})},
+            )
+        except ReviewError as exc:
+            errors.append(exc.code)
     try:
-        verify_reviewer_independence(
-            submission, validation, {"identity": review.get("reviewer_identity", {})}
-        )
-    except ReviewError as exc:
-        errors.append(exc.code)
-    try:
-        descriptor = validation["verification_report"]
-        read_bound_bytes(repo, descriptor["locator"], descriptor["sha256"])
+        verify_validation_evidence(repo, submission, validation)
     except (KeyError, TypeError, RecordError):
         errors.append("validation-evidence-drift")
     if validation.get("result") != "PASS":
         errors.append("validation-not-pass")
-    if review.get("result") != "PASS":
+    if review is not None and review.get("result") != "PASS":
         errors.append("review-not-pass")
     return errors
 
@@ -119,6 +140,14 @@ def _existing_evidence_errors(
     """校验候选已存在 receipt 的身份、绑定和附件，不要求未完成链补齐缺失层。"""
     errors = []
     sid = submission.get("submission_id")
+    needs_review = review_required(submission)
+    if review is not None and not needs_review:
+        errors.append("review-not-required")
+    for record in (validation, review, check):
+        if record is not None and any(
+            record.get(k) != v for k, v in binding(submission).items()
+        ):
+            errors.append("acceptance-binding-mismatch")
     # 历史失败只能使用协议内的结果；check 只发布成功终态，不能伪装失败来退出选择。
     for name, record, allowed in (
         ("validation", validation, {"PASS", "BLOCKED", "FAIL"}),
@@ -139,8 +168,7 @@ def _existing_evidence_errors(
         if verify_authority(repo, validation, "validator_identity"):
             errors.append("validation-identity")
         try:
-            descriptor = validation["verification_report"]
-            read_bound_bytes(repo, descriptor["locator"], descriptor["sha256"])
+            verify_validation_evidence(repo, submission, validation)
         except (KeyError, TypeError, RecordError):
             errors.append("validation-evidence-drift")
     if review is not None:
@@ -154,29 +182,35 @@ def _existing_evidence_errors(
             errors.append("review-binding")
         if verify_authority(repo, review, "reviewer_identity"):
             errors.append("review-identity")
-    if check is not None:
-        if (
-            check.get("submission_id") != sid
-            or check.get("submission_content_hash") != submission.get("content_hash")
-            or (validation is None and check.get("result") == "PASS")
-            or (review is None and check.get("result") == "PASS")
-            or (
-                validation is not None
-                and (
-                    check.get("validation_id") != validation.get("validation_id")
-                    or check.get("validation_content_hash")
-                    != validation.get("content_hash")
-                )
+    if check is not None and (
+        check.get("submission_id") != sid
+        or check.get("submission_content_hash") != submission.get("content_hash")
+        or (validation is None and check.get("result") == "PASS")
+        or (needs_review and review is None and check.get("result") == "PASS")
+        or (
+            review is None
+            and (
+                check.get("review_id") is not None
+                or check.get("review_content_hash") is not None
             )
-            or (
-                review is not None
-                and (
-                    check.get("review_id") != review.get("review_id")
-                    or check.get("review_content_hash") != review.get("content_hash")
-                )
+        )
+        or (
+            validation is not None
+            and (
+                check.get("validation_id") != validation.get("validation_id")
+                or check.get("validation_content_hash")
+                != validation.get("content_hash")
             )
-        ):
-            errors.append("check-binding")
+        )
+        or (
+            review is not None
+            and (
+                check.get("review_id") != review.get("review_id")
+                or check.get("review_content_hash") != review.get("content_hash")
+            )
+        )
+    ):
+        errors.append("check-binding")
     return errors
 
 
@@ -199,20 +233,79 @@ def _submissions(
     return result
 
 
+@dataclass
+class _EvaluationContext:
+    """仅供一次求值使用的安全记录索引与已完成依赖节点结果。"""
+
+    submissions: list[dict[str, Any]] | None = None
+    layers: dict[str, dict[str, list[dict[str, Any]]]] = field(default_factory=dict)
+    completed: dict[str, tuple[bool, list[dict[str, Any]]]] = field(
+        default_factory=dict
+    )
+    examined: set[str] = field(default_factory=set)
+    evidence: dict[
+        str,
+        tuple[
+            dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None, bool
+        ],
+    ] = field(default_factory=dict)
+    bound: dict[str, bool] = field(default_factory=dict)
+
+    def submission_records(self, repo: Path) -> list[dict[str, Any]]:
+        if self.submissions is None:
+            self.submissions = list_submissions(repo)
+        return self.submissions
+
+    def layer_records(self, repo: Path, kind: str) -> dict[str, list[dict[str, Any]]]:
+        if kind not in self.layers:
+            from scripts.delivery_gate.records import _list_directory, load_layer
+
+            indexed: dict[str, list[dict[str, Any]]] = {}
+            for name in _list_directory(repo, f"tmp/quality/delivery-gate/{kind}"):
+                rid = name.removesuffix(".json")
+                record = load_layer(repo, kind, rid)
+                sid = record.get("submission_id")
+                if isinstance(sid, str):
+                    indexed.setdefault(sid, []).append(record)
+            self.layers[kind] = indexed
+        return self.layers[kind]
+
+    def fresh_snapshot(self, repo: Path) -> _EvaluationContext:
+        """重新安全读取候选集合和所有 receipt；调用方再重核附件与身份来源。"""
+        fresh = _EvaluationContext(submissions=list_submissions(repo))
+        for kind in ("validations", "reviews", "checks"):
+            fresh.layer_records(repo, kind)
+        return fresh
+
+
 def _records(
-    repo: Path, submission: dict[str, Any]
+    repo: Path, submission: dict[str, Any], context: _EvaluationContext | None = None
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
     sid = submission["submission_id"]
-    validation = _one(
-        list_layer(repo, "validations", "submission_id", sid), "validation", sid
-    )
-    review = _one(list_layer(repo, "reviews", "submission_id", sid), "review", sid)
-    check = _one(list_layer(repo, "checks", "submission_id", sid), "check", sid)
+    if context is None:
+        by_kind = {kind: None for kind in ("validations", "reviews", "checks")}
+    else:
+        by_kind = {
+            kind: context.layer_records(repo, kind)
+            for kind in ("validations", "reviews", "checks")
+        }
+
+    def records(kind):
+        if context is None:
+            return list_layer(repo, kind, "submission_id", sid)
+        return by_kind[kind].get(sid, [])
+
+    validation = _one(records("validations"), "validation", sid)
+    review = _one(records("reviews"), "review", sid)
+    check = _one(records("checks"), "check", sid)
     return validation, review, check
 
 
 def _dependency_status(
-    repo: Path, submission: dict[str, Any], visiting: set[str] | None = None
+    repo: Path,
+    submission: dict[str, Any],
+    visiting: set[str] | None = None,
+    context: _EvaluationContext | None = None,
 ) -> tuple[bool, list[dict[str, Any]]]:
     """只读取当前 Task 的依赖 receipt 并验证哈希链；缺失或不匹配留作条件结果，不执行依赖 Task。"""
     visiting = set() if visiting is None else visiting
@@ -220,6 +313,9 @@ def _dependency_status(
     task_id = requirements.get("task_id", "")
     if task_id in visiting:
         return False, [{"task_id": task_id, "status": "dependency-cycle"}]
+    sid = submission.get("submission_id")
+    if context is not None and sid not in visiting and sid in context.completed:
+        return context.completed[sid]
     try:
         current = load_task_requirements(repo, task_id)
     except RecordError as exc:
@@ -231,30 +327,80 @@ def _dependency_status(
         dep_id = edge["task_id"] if isinstance(edge, dict) else edge
         version = edge.get("required_task_version") if isinstance(edge, dict) else None
         change = edge.get("required_change_version") if isinstance(edge, dict) else None
-        candidates = _submissions(repo, dep_id, version, change)
+        try:
+            source = (
+                context.submission_records(repo) if context else list_submissions(repo)
+            )
+        except RecordError as exc:
+            raise CheckError("dependency-record-invalid", str(exc)) from None
+        candidates = [
+            x
+            for x in source
+            if x.get("task_requirements", {}).get("task_id") == dep_id
+            and (
+                version is None
+                or x.get("task_requirements", {}).get("task_version") == version
+            )
+            and (
+                change is None
+                or x.get("task_requirements", {}).get("change_version") == change
+            )
+        ]
         if not candidates:
             details.append({"task_id": dep_id, "status": "missing"})
             continue
         passing = []
         invalid = False
         for dep in candidates:
-            try:
-                validation, review, check = _records(repo, dep)
-            except (RecordError, CheckError):
-                invalid = True
-                break
-            if _existing_evidence_errors(repo, dep, validation, review, check):
+            dep_sid = dep.get("submission_id")
+            cached = (
+                context.evidence.get(dep_sid)
+                if context is not None and isinstance(dep_sid, str)
+                else None
+            )
+            if cached is None:
+                if context is not None and isinstance(dep_sid, str):
+                    context.examined.add(dep_sid)
+                try:
+                    validation, review, check = _records(repo, dep, context)
+                except (RecordError, CheckError):
+                    invalid = True
+                    break
+                evidence_valid = not _existing_evidence_errors(
+                    repo, dep, validation, review, check
+                )
+                if context is not None and isinstance(dep_sid, str):
+                    context.evidence[dep_sid] = (
+                        validation,
+                        review,
+                        check,
+                        evidence_valid,
+                    )
+            else:
+                validation, review, check, evidence_valid = cached
+            if not evidence_valid:
                 invalid = True
                 break
             # PASS 是待核验的证据声明；非 PASS 历史保留但不参与成功候选选择。
             if check and check.get("result") == "PASS":
-                if not validation or not review:
+                if not validation or (review_required(dep) and not review):
                     invalid = True
                     break
                 child_ok, child_details = _dependency_status(
-                    repo, dep, visiting | {task_id}
+                    repo, dep, visiting | {task_id}, context
                 )
-                current_errors = _bound_chain(repo, dep, validation, review)
+                if (
+                    context is not None
+                    and isinstance(dep_sid, str)
+                    and dep_sid in context.bound
+                ):
+                    current_errors = (
+                        [] if context.bound[dep_sid] else ["bound-chain-invalid"]
+                    )
+                else:
+                    current_errors = _bound_chain(repo, dep, validation, review)
+                    if context is not None and isinstance(dep_sid, str):
+                        context.bound[dep_sid] = not current_errors
                 expected_nested = check.get("conditions", {}).get("dependency_receipts")
                 actual_nested = [
                     {
@@ -288,7 +434,10 @@ def _dependency_status(
                     "nested": child_details,
                 }
             )
-    return all(x["status"] == "PASS" for x in details), details
+    result = (all(x["status"] == "PASS" for x in details), details)
+    if context is not None and isinstance(sid, str):
+        context.completed[sid] = result
+    return result
 
 
 def _approval(
@@ -372,8 +521,10 @@ def _evaluate_conditions(
             "review",
             submission_id,
         )
-        if review is None:
+        if review is None and review_required(submission):
             raise CheckError("review-missing", validation["validation_id"])
+        if review is not None and not review_required(submission):
+            raise CheckError("review-not-required", submission_id)
         existing = _one(
             list_layer(repo, "checks", "submission_id", submission_id),
             "check",
@@ -382,7 +533,17 @@ def _evaluate_conditions(
         if existing is None and not publish_missing:
             raise CheckError("check-missing", submission_id)
         chain_errors = _bound_chain(repo, submission, validation, review)
-        dependencies_ok, dependency_details = _dependency_status(repo, submission)
+        context = _EvaluationContext()
+        # Capture the complete candidate universe before traversing; dependencies may be empty.
+        try:
+            context.submission_records(repo)
+            for kind in ("validations", "reviews", "checks"):
+                context.layer_records(repo, kind)
+        except RecordError as exc:
+            raise CheckError("dependency-record-invalid", str(exc)) from None
+        dependencies_ok, dependency_details = _dependency_status(
+            repo, submission, context=context
+        )
         approval_ok, approval = _approval(repo, submission, dependency_details)
         result = (
             "PASS"
@@ -404,6 +565,75 @@ def _evaluate_conditions(
                 )
             )
         )
+        if result == "PASS":
+            # 结果交付边界重新读取目录、receipt、附件和身份来源；不得将索引视为新鲜度证明。
+            fresh_submission = load_submission(repo, submission_id)
+            if fresh_submission != submission:
+                raise CheckError(
+                    "current-input-invalid", "submission drift during evaluation"
+                )
+            fresh_validation = _one(
+                list_layer(repo, "validations", "submission_id", submission_id),
+                "validation",
+                submission_id,
+            )
+            fresh_review = _one(
+                list_layer(repo, "reviews", "submission_id", submission_id),
+                "review",
+                submission_id,
+            )
+            fresh_context = context.fresh_snapshot(repo)
+            if (
+                fresh_context.submissions != context.submissions
+                or fresh_context.layers != context.layers
+            ):
+                raise CheckError(
+                    "current-input-invalid", "evidence drift during evaluation"
+                )
+            from scripts.delivery_gate.validate import _verify_frozen
+
+            _verify_frozen(repo, fresh_submission)
+            if fresh_validation is None or _bound_chain(
+                repo, fresh_submission, fresh_validation, fresh_review
+            ):
+                raise CheckError("current-input-invalid", "target evidence drift")
+            # 目录快照相同仍需重读依赖链使用的附件及原生 authority 来源；复用新快照索引，
+            # 不再次递归扫描目录或重复遍历共享子图。
+            for candidate in fresh_context.submissions or []:
+                if candidate.get("submission_id") not in context.examined:
+                    continue
+                val, rev, chk = _records(repo, candidate, fresh_context)
+                if _existing_evidence_errors(repo, candidate, val, rev, chk):
+                    raise CheckError("current-input-invalid", "evidence source drift")
+                if (
+                    chk is not None
+                    and chk.get("result") == "PASS"
+                    and (val is None or _bound_chain(repo, candidate, val, rev))
+                ):
+                    raise CheckError(
+                        "current-input-invalid", "PASS evidence source drift"
+                    )
+            fresh_dependencies_ok, fresh_dependency_details = _dependency_status(
+                repo, fresh_submission, context=fresh_context
+            )
+            fresh_approval_ok, _ = _approval(
+                repo, fresh_submission, fresh_dependency_details
+            )
+            if (
+                fresh_validation != validation
+                or fresh_review != review
+                or not fresh_dependencies_ok
+                or not fresh_approval_ok
+                or fresh_dependency_details != dependency_details
+            ):
+                raise CheckError("current-input-invalid", "dependency evidence drift")
+            fresh_check = _one(
+                fresh_context.layer_records(repo, "checks").get(submission_id, []),
+                "check",
+                submission_id,
+            )
+            if fresh_check != existing:
+                raise CheckError("current-input-invalid", "check candidate set drift")
     except RecordError as exc:
         return {
             "submission_id": submission_id,
@@ -438,6 +668,7 @@ def _evaluate_conditions(
         if x["status"] == "PASS"
     ]
     conditions = {
+        "review_required": review_required(submission),
         "hash_dag_errors": chain_errors,
         "dependencies_ok": dependencies_ok,
         "dependency_receipts": receipts,
@@ -455,12 +686,13 @@ def _evaluate_conditions(
         }, None
     if existing is not None:
         expected = {
+            **binding(submission),
             "submission_id": submission_id,
             "validation_id": validation["validation_id"],
-            "review_id": review["review_id"],
+            "review_id": review["review_id"] if review else None,
             "submission_content_hash": submission["content_hash"],
             "validation_content_hash": validation["content_hash"],
-            "review_content_hash": review["content_hash"],
+            "review_content_hash": review["content_hash"] if review else None,
             "result": "PASS",
             "reason": "",
             "conditions": conditions,
@@ -470,7 +702,7 @@ def _evaluate_conditions(
             set(existing)
             != set(expected)
             | {"schema_version", "check_id", "created_at", "content_hash"}
-            or existing.get("schema_version") != "lexiflow.delivery-gate-check.v3"
+            or existing.get("schema_version") != "lexiflow.delivery-gate-check.v4"
             or any(existing.get(k) != v for k, v in expected.items())
         ):
             return {
@@ -507,14 +739,15 @@ def _evaluate_conditions(
         }, None
     check_id = str(uuid.uuid4())
     record = {
-        "schema_version": "lexiflow.delivery-gate-check.v3",
+        "schema_version": "lexiflow.delivery-gate-check.v4",
+        **binding(submission),
         "check_id": check_id,
         "submission_id": submission_id,
         "validation_id": validation["validation_id"],
-        "review_id": review["review_id"],
+        "review_id": review["review_id"] if review else None,
         "submission_content_hash": submission["content_hash"],
         "validation_content_hash": validation["content_hash"],
-        "review_content_hash": review["content_hash"],
+        "review_content_hash": review["content_hash"] if review else None,
         "result": "PASS",
         "reason": "",
         "conditions": conditions,

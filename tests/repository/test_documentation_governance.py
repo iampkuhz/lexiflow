@@ -1,5 +1,4 @@
 """文档治理、本机 skill 与共享策略投影的独立回归。"""
-import json
 import subprocess
 import tempfile
 import unittest
@@ -16,7 +15,7 @@ class DocumentationTests(unittest.TestCase):
         entry = root / 'docs/roadmap/master-plan.md'
         content = entry.read_text()
         manifest = yaml.safe_load((root / 'harness/manifest.yaml').read_text())
-        for name in ('foundation', 'phase2', 'future', 'status'):
+        for name in ('phase2', 'future'):
             relative = f'docs/roadmap/master-plan/{name}.md'
             self.assertTrue((root / relative).is_file())
             self.assertIn(relative, manifest['docs'])
@@ -25,6 +24,9 @@ class DocumentationTests(unittest.TestCase):
             relative = f'docs/roadmap/master-plan/phase2/{name}.md'
             self.assertTrue((root / relative).is_file())
             self.assertIn(relative, manifest['docs'])
+        for obsolete in ('foundation.md', 'foundation/experience.md', 'foundation/acceptance.md', 'status.md'):
+            self.assertFalse((root / 'docs/roadmap/master-plan' / obsolete).exists())
+        self.assertIn('master-plan/phase2/status.md', content)
         for obsolete in ('phase-1-status.md', 'phase-2-status.md'):
             self.assertFalse((root / 'docs/roadmap' / obsolete).exists())
         self.assertIn('永不调用大模型', content)
@@ -115,11 +117,67 @@ class DocumentationTests(unittest.TestCase):
             ordinary = root / 'docs/architecture.md'
             ordinary.write_text('# 1. 架构\n待审核目标\n')
             self.assertEqual(len(docs_check.check_version_comparisons(root, policy)), 1)
-            comparison = root / 'docs/comparison/module-comparison.md'
-            comparison.parent.mkdir()
-            comparison.write_text('# 1. 模块对比\n改前与改后\n')
-            ordinary.write_text('# 1. 架构\n最新版结论\n')
-            self.assertEqual(docs_check.check_version_comparisons(root, policy), [])
+
+    def test_version_comparison_blocks_chinese_context_in_headings_tables_and_prose(self):
+        policy = {'maintenance': {'version_comparison': {
+            'documentation_roots': ['docs'], 'allowed_path_tokens': ['comparison', 'diff'],
+            'allowed_title_tokens': ['对比', '差异', 'comparison', 'diff'],
+            'prohibited_phrases': ['改前', '改后', '当前版本', '目标版本']}}}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / 'docs').mkdir()
+            doc = root / 'docs/status.md'
+            for content in ('# 1. 改后设计\n', '| 阶段 | 当前版本 |\n', '现在采用目标版本配置\n'):
+                doc.write_text(content)
+                self.assertEqual(len(docs_check.check_version_comparisons(root, policy)), 1)
+
+    def test_version_phrase_matching_avoids_embedded_substrings_but_still_blocks_comparisons(self):
+        policy = {'maintenance': {'version_comparison': {
+            'documentation_roots': ['docs'], 'allowed_path_tokens': ['comparison', 'diff'],
+            'allowed_title_tokens': ['对比', '差异', 'comparison', 'diff'],
+            'prohibited_phrases': ['改后', '改前', '当前版本', '目标版本']}}}
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / 'docs').mkdir()
+            status = root / 'docs/status.md'
+            for verb in ('修改', '更改', '整改', '变改', '涂改', '篡改', '批改', '删改'):
+                for when in ('前', '后'):
+                    status.write_text(f'# 1. 状态\n{verb}{when}运行验证\n')
+                    self.assertEqual(docs_check.check_version_comparisons(root, policy), [])
+            status.write_text('# 1. 状态\n改后版本使用新流程\n')
+            self.assertEqual(len(docs_check.check_version_comparisons(root, policy)), 1)
+
+    def test_run_reuses_each_markdown_parse_within_one_invocation(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / 'docs').mkdir()
+            (root / 'harness').mkdir()
+            (root / 'harness/documentation-policy.yaml').write_text(yaml.safe_dump({
+                'forbidden_diagram_link_extensions': ['.puml'],
+                'root_instruction_budget_bytes': 10000,
+                'heading_numbering': {'required': False},
+                'selected_solution_only': {'documentation_roots': []},
+                'maintenance': {'mode': 'latest-only', 'forbidden_directory_names': [],
+                    'version_comparison': {'documentation_roots': ['docs'], 'prohibited_phrases': []}},
+            }))
+            target = root / 'docs/target.md'
+            target.write_text('# target\n')
+            source = root / 'docs/source.md'
+            source.write_text('[a](target.md#target) [b](target.md#target)\n')
+            (root / 'AGENTS.md').write_text('ok')
+            (root / 'README.md').write_text('ok')
+            (root / 'harness/README.md').write_text('ok')
+            original = docs_check.parse
+            calls = []
+            def counted(text):
+                calls.append(text)
+                return original(text)
+            with patch.object(docs_check, 'parse', side_effect=counted):
+                result = docs_check.run(root)
+            self.assertEqual(result['issues'], [])
+            # 两个正文只在 run 开始时解析；重复锚点链接复用 target 索引。
+            self.assertEqual(len(calls), 5)
 
     def test_latest_docs_run_clean(self):
         root = Path(__file__).resolve().parents[2]
@@ -136,7 +194,7 @@ class DocumentationTests(unittest.TestCase):
 
     def test_fences_and_anchors(self):
         text = '# 中文标题\n\n<a id="stable"></a>\n```plantuml\n@startuml\nA -> B\n@enduml\n```\n'
-        outside, diagrams, errors = docs_check.parse(text)
+        _outside, diagrams, errors = docs_check.parse(text)
         self.assertFalse(errors)
         self.assertEqual(len(diagrams), 1)
         self.assertEqual(docs_check.anchors(text), {'中文标题', 'stable'})

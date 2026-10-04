@@ -24,3 +24,10 @@ class TestSubmit(unittest.TestCase):
   forged={"schema_version":"lexiflow.verification-report.v1","run_id":rid,"result":"PASS","reason":"","scope":"change-targeted","checks":[],"input_fingerprint":"","configuration_fingerprint":"","coverage_gaps":[],"scope_review":{"kind":"no-context","changed_files":["src/test.py"]},"base":"HEAD"};path.write_text(json.dumps(forged))
   with self.assertRaises(SubmissionError) as c:submit(self.f.root,task_id="LF-TSK-TEST-0001",change_report_id=rid,confirm_scope_report_id=rid)
   self.assertEqual(c.exception.code,"submission-invalid")
+ @patch("scripts.agents.local_codex_runtime.discover")
+ def test_daily_report_must_cover_entire_real_diff_including_untracked(self,m):
+  m.return_value=make_mock_runtime(PRODUCER_SESSION)
+  self.f.write("other-task/untracked.py","different task")
+  with self.assertRaises(SubmissionError) as c:
+   submit(self.f.root,task_id="LF-TSK-TEST-0001",change_report_id=self.f.report_id,confirm_scope_report_id=self.f.report_id)
+  self.assertEqual(c.exception.code,"scope-input-drift")

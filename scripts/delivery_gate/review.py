@@ -8,6 +8,11 @@ from typing import Any
 import uuid
 
 from scripts.delivery_gate.authority import discover_authority, verify_authority
+from scripts.delivery_gate.acceptance import (
+    binding,
+    review_required,
+    verify_validation_evidence,
+)
 from scripts.delivery_gate.records import (
     RecordError,
     delivery_gate_locator,
@@ -16,7 +21,6 @@ from scripts.delivery_gate.records import (
     load_layer,
     load_submission,
     publish_json,
-    read_bound_bytes,
 )
 
 
@@ -99,6 +103,10 @@ def _verify_validation(
         raise ReviewError(
             "input-drift", "validation frozen input does not match submission"
         )
+    if any(validation.get(k) != v for k, v in binding(submission).items()):
+        raise ReviewError(
+            "acceptance-plan-mismatch", "validation belongs to another risk plan"
+        )
     authority_error = verify_authority(repo, validation, "validator_identity")
     if authority_error:
         raise ReviewError(authority_error, "validator")
@@ -108,7 +116,7 @@ def _verify_validation(
     if not isinstance(descriptor, dict):
         raise ReviewError("validation-evidence-missing", "report descriptor missing")
     try:
-        read_bound_bytes(repo, descriptor["locator"], descriptor["sha256"])
+        verify_validation_evidence(repo, submission, validation)
     except (KeyError, RecordError) as exc:
         raise ReviewError(
             getattr(exc, "code", "validation-evidence-invalid"),
@@ -186,6 +194,10 @@ def review(
         raise ReviewError(
             getattr(exc, "code", "submission-not-current"), str(exc)
         ) from None
+    if not review_required(submission):
+        raise ReviewError(
+            "review-not-required", "risk plan does not authorize a review receipt"
+        )
     runtime = _discover_runtime(repo)
     _verify_independence(submission, validation, runtime)
     _verify_validation(submission, validation, repo)
@@ -197,7 +209,8 @@ def review(
         raise ReviewError(exc.code, exc.detail) from None
     review_id = str(uuid.uuid4())
     record = {
-        "schema_version": "lexiflow.delivery-gate-review.v3",
+        "schema_version": "lexiflow.delivery-gate-review.v4",
+        **binding(submission),
         "review_id": review_id,
         "submission_id": submission_id,
         "validation_id": validation_id,

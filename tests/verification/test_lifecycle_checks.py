@@ -57,7 +57,7 @@ class LifecycleCheckTest(unittest.TestCase):
         ):
             self.assertEqual(base[key], change[key], key)
         self.assertEqual(["node", "ops/release/lifecycle-check.mjs"], base["command"])
-        self.assertEqual(["node", "git", "sh"], base["required_environment"])
+        self.assertEqual(["node", "git", "sh", "mktemp", "sha256-tool"], base["required_environment"])
         self.assertEqual([], base["module_dependencies"])
         for name in (
             "manifest.mjs",
@@ -223,6 +223,7 @@ class LifecycleCheckTest(unittest.TestCase):
                         root,
                         required_check_ids=(self.base + "-on-change",),
                         runner=runner,
+                        execution_mode="diagnostic",
                     )
                 self.assertEqual(expected, result["result"], result)
                 self.assertEqual(
@@ -243,12 +244,15 @@ class LifecycleInstallCheckTest(LifecycleCheckTest):
             first["command"], ["node", "ops/release/lifecycle-install-check.mjs"]
         )
         self.assertEqual(first["input_paths"], second["input_paths"])
-        self.assertNotIn("ops/release/lifecycle.mjs", first["input_paths"])
-        self.assertNotIn("ops/release/lifecycle.sh", first["input_paths"])
+        self.assertEqual(["node", "git", "sh", "bash", "mktemp", "sha256-tool"], first["required_environment"])
+        self.assertEqual(first["required_environment"], second["required_environment"])
+        self.assertIn("ops/release/lifecycle.mjs", first["input_paths"])
+        self.assertIn("ops/release/lifecycle.sh", first["input_paths"])
         for name in (
             "ops/release/lifecycle-state.sh",
             "ops/release/lifecycle-docker.sh",
             "ops/release/tests/lifecycle-install.test.mjs",
+            "ops/docker/tests/update-recovery.sh",
         ):
             self.assertIn(name, first["input_paths"])
             selected = select_checks_for_changes(self.checks, [name])
@@ -259,6 +263,61 @@ class LifecycleInstallCheckTest(LifecycleCheckTest):
 
 class LifecycleRuntimeCheckTest(LifecycleCheckTest):
     """真实容器检查不能替换成 Node stub，也不能把环境缺失视为通过。"""
+
+    def test_build_support_closure_is_selected_and_allowed_by_source_bridge(self):
+        from scripts.verification import release_source_bridge as bridge
+
+        support = (
+            "ops/release/candidate-proof.mjs",
+            "ops/release/tests/candidate-proof.test.mjs",
+            "ops/release/workflow.mjs",
+            "ops/release/tests/workflow.test.mjs",
+            "ops/release/tests/verified-candidate-fixture.mjs",
+        )
+        for path in support:
+            with self.subTest(path=path):
+                self.assertIn(path, bridge._SUPPORT_FILES)
+                for identifier in (bridge.CHECK_ID, bridge.CHANGE_CHECK_ID):
+                    self.assertIn(path, self.by_id[identifier]["input_paths"])
+                    self.assertIn({"path": path}, self.by_id[identifier]["triggers"])
+
+    def test_delivery_stops_before_second_runtime_context_after_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.fixture(root)
+            calls = []
+
+            def runner(argv, *_args, **_kwargs):
+                calls.append(argv)
+                return {
+                    "exit_code": 1,
+                    "exit_reason": "exited",
+                    "timed_out": False,
+                    "stdout": "",
+                    "stderr": "fixture failure",
+                    "executed_argv": argv,
+                }
+
+            with (
+                patch(
+                    "scripts.verification.scenarios.check_for",
+                    return_value={"status": "PASS", "missing": [], "details": {}},
+                ),
+                patch(
+                    "scripts.verification.scenarios.execution_environment",
+                    return_value={},
+                ),
+            ):
+                report = verify_repository(
+                    root,
+                    required_check_ids=(self.base + "-on-change",),
+                    runner=runner,
+                )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(
+            [item["status"] for item in report["checks"]], ["FAIL", "BLOCKED"]
+        )
+        self.assertEqual(report["checks"][1]["process"]["exit_reason"], "not-run")
 
     base = "eng.release.lifecycle-runtime"
 

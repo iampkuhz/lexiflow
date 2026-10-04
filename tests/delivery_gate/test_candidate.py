@@ -56,6 +56,10 @@ class CandidateChainTests(unittest.TestCase):
     def setUp(self):
         self.f = DeliveryGateFixture()
         self.addCleanup(self.f.cleanup)
+        catalog = yaml.safe_load((self.f.root / "planning/workstreams.yaml").read_text())
+        task = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"][0]
+        task["required_check_ids"] = ["eng.release.candidate-runtime"]
+        (self.f.root / "planning/workstreams.yaml").write_text(yaml.safe_dump(catalog, sort_keys=False))
         declared = yaml.safe_load((self.f.root / "harness/module-checks.yaml").read_text())
         candidate = dict(declared["checks"][0])
         candidate.update(check_id="eng.release.candidate-runtime", module="release-candidate-runtime",
@@ -63,9 +67,10 @@ class CandidateChainTests(unittest.TestCase):
                          result_contract={"type": "json-stdout", "required_fields": ["status", "checks_run", "failures", "errors", "skipped", "reason"],
                                           "allowed_statuses": ["PASS"], "minimum": {"checks_run": 1},
                                           "equals": {"failures": 0, "errors": 0, "skipped": 0}})
-        declared["checks"].append(candidate)
+        declared["checks"] = [candidate if item["check_id"] == candidate["check_id"] else item
+                               for item in declared["checks"]]
         (self.f.root / "harness/module-checks.yaml").write_text(yaml.safe_dump(declared, sort_keys=False))
-        self.f._git("add", "harness/module-checks.yaml")
+        self.f._git("add", "harness/module-checks.yaml", "planning/workstreams.yaml")
         self.f._git("commit", "-m", "candidate declaration fixture")
         self.identity = {"schemaVersion": 1, "baseVersion": "2.0.0-SNAPSHOT",
                          "softwareVersion": "2.0.0-SNAPSHOT.gaaaaaaa", "chromeVersion": "2.0.0.0",
@@ -99,7 +104,7 @@ class CandidateChainTests(unittest.TestCase):
                     "duration_seconds": 0.1, "started_at": "2026-09-21T00:00:00Z",
                     "finished_at": "2026-09-21T00:00:01Z"}
 
-        report = verify_repository(self.f.root, required_check_ids=("fixture.change",),
+        report = verify_repository(self.f.root, required_check_ids=tuple(submission["task_requirements"]["required_check_ids"]),
                                    frozen_inputs=submission["verification_freeze"], runner=runner)
         self.assertEqual(report["result"], "PASS", report.get("reason"))
         import uuid
@@ -108,7 +113,9 @@ class CandidateChainTests(unittest.TestCase):
                                    f"tmp/quality/delivery-gate/validations/{validation_id}/report.json",
                                    canonical_bytes(report))
         runtime = make_mock_runtime(VALIDATOR_SESSION)
-        record = {"schema_version": "lexiflow.delivery-gate-validation.v3",
+        record = {"schema_version": "lexiflow.delivery-gate-validation.v4",
+                  "risk_assessment_hash": __import__("scripts.delivery_gate.acceptance", fromlist=["binding"]).binding(submission)["risk_assessment_hash"],
+                  "acceptance_plan_hash": __import__("scripts.delivery_gate.acceptance", fromlist=["binding"]).binding(submission)["acceptance_plan_hash"],
                   "validation_id": validation_id, "submission_id": self.f.submission_id,
                   "submission_content_hash": submission["content_hash"],
                   "validator_identity": runtime.context, "runtime_proof": runtime.proof,
@@ -139,7 +146,8 @@ class CandidateChainTests(unittest.TestCase):
     def test_stdout_tamper_blocks_even_when_chain_remains_intact(self):
         locator = f"tmp/quality/verification/{self.report['run_id']}/eng.release.candidate-runtime.stdout.log"
         (self.f.root / locator).write_text("{}")
-        self.assertEqual(self._consume()["result"], "BLOCKED")
+        result = self._consume()
+        self.assertEqual((result["result"], result["reason"]), ("FAIL", "validation-evidence-drift"))
 
     def test_missing_review_blocks(self):
         import shutil

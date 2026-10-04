@@ -32,9 +32,11 @@ def run_tests() -> dict[str, object]:
     stream = DiagnosticStream()
     result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
     root = Path(__file__).resolve().parents[3]
+    # Node 生命周期回归实测约 45 秒；共享 runner 预算低于本层 180 秒，
+    # 与 Python 阶段共同受 Harness 600 秒总预算约束，不扩大全局默认值。
     runner = (
         "import {runTests} from './ops/release/check.mjs';"
-        "const r=await runTests({args:['--test','--test-reporter=tap',...process.argv.slice(1)]});"
+        "const r=await runTests({timeoutMs:170_000,args:['--test','--test-reporter=tap',...process.argv.slice(1)]});"
         "console.log(JSON.stringify(r)); if(r.status!=='PASS') process.exitCode=1;"
     )
     node_suite = subprocess.run(

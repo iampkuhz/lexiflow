@@ -12,6 +12,12 @@ public final class ReadableLogLineConverter extends ClassicConverter {
   private static final String READABLE_MARKER = "LEXIFLOW_READABLE_LINE";
   private final ReadableLogFormatter formatter = new ReadableLogFormatter();
 
+  /**
+   * 将普通 Logback 事件转换为精简可读行；已格式化的事件保留原消息，避免重复前缀。
+   *
+   * @param event 含义：Logback 提供的待输出事件。取值范围：非 null，遵循 ILoggingEvent 合同。
+   * @return 可读日志文本，异常存在时包含异常详情。
+   */
   @Override
   public String convert(ILoggingEvent event) {
     if (event.getMarkerList() != null

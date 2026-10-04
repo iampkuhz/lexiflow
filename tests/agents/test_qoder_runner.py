@@ -412,6 +412,22 @@ class QoderRunnerContractTest(unittest.TestCase):
                 role = tomllib.loads(profile.read_text())
                 self.assertNotIn("model", role)
 
+    def test_agent_execution_spec_matches_parallelism_and_acceptance_policy(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        policy = yaml.safe_load((root / "harness/agent-policy.manifest.yaml").read_text())
+        spec = (root / "openspec/specs/agent-execution/spec.md").read_text()
+        codex_limit = policy["codex_dispatch"]["max_active_subagents"]
+        qoder_limit = policy["qoder_delegation"]["max_active_runs"]
+        self.assertGreater(codex_limit, 1)
+        self.assertEqual(qoder_limit, 1)
+        self.assertIn(f"Codex 原生子代理同时最多 MUST 遵守 `harness/agent-policy.manifest.yaml` 的并发上限", spec)
+        self.assertIn("Qoder 仍受宿主 OS 用户范围的单运行约束", spec)
+        self.assertIn("集成验证 SHALL 串行", spec)
+        self.assertIn("实现者 MAY 执行静态、编译和直接测试作为自检", spec)
+        self.assertIn("MUST NOT 签发 Formal validation 或 independent review", spec)
+        self.assertNotIn("Codex Sub-Agent 同时 MUST 最多一个", spec)
+        self.assertNotIn("不少于 120 分钟", spec)
+
     def test_required_handoff_rejects_missing_field(self) -> None:
         self.assertEqual(tuple(valid_task())[: len(handoff.REQUIRED_HANDOFF)], handoff.REQUIRED_HANDOFF)
         for field in handoff.REQUIRED_HANDOFF:

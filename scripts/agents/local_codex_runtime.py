@@ -218,7 +218,7 @@ class LocalCodexRuntime:
                 for key in ("session_id", "parent_session_id", "client")
             },
         }
-        return CodexRuntimeBinding.create(caller_contract, host, run_id)
+        return CodexRuntimeBinding.create(caller_contract, host, run_id, self.proof)
 
 
 def discover(repo_root: str | Path) -> LocalCodexRuntime:
@@ -273,8 +273,8 @@ def verify_proof(repo_root: str | Path, proof: Any, context: dict[str, Any]) -> 
 def bind_main_task(repo_root: str | Path, task_id: str) -> dict[str, Any]:
     """为当前主任务发布运行身份与投影，不代表任务已执行或验收通过。"""
     from scripts.agents.codex.work_package import (
-        build_codex_main_task_projection,
         _write_exclusive,
+        build_codex_main_task_projection,
     )
 
     root = Path(repo_root).resolve()
@@ -309,6 +309,7 @@ def bind_main_task(repo_root: str | Path, task_id: str) -> dict[str, Any]:
 def main() -> int:
     """读取精确 Task ID 并发布当前主任务的本机身份绑定。"""
     import argparse
+
     from scripts.agents.codex.work_package import CodexWorkPackageError
 
     parser = argparse.ArgumentParser(

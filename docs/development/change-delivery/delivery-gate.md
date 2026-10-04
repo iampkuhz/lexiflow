@@ -1,34 +1,34 @@
 # 1. Delivery Gate：独立身份与证据交接
 
-> 位置：[工程地图](../overview.md) → [开发交付 S3–S6](../change-delivery.md) → Delivery Gate。前置是可送验 Task、PASS Change report 和真实 producer；各阶段只发布自己的 record。
+> 位置：[工程地图](../overview.md) → [开发交付 S3–S6](../change-delivery.md) → Delivery Gate。前置是可送验 Task、PASS 风险驱动开发报告和真实 producer；各阶段只发布自己的 record。
 
-这里的 Delivery Gate 指“正式交付证据受理与判定”，不是产品功能的人工验收测试，也不是一键测试脚本。`scripts/delivery_gate/` 把送验、独立验证、独立审查、条件核对分成四个场景；`authority.py` 只是从原生任务和子代理元数据读取并复核证据签发者身份的内部 helper，不管理用户账号、权限或角色库。目录名直接表达独立交付门禁；阅读时应先看四个公开动作，再看身份和记录实现。
+这里的 Delivery Gate 指交付证据受理与判定，不是产品功能的人工验收测试，也不是一键测试脚本。submit 绑定风险和计划；独立 validate 始终执行；机械/局部风险不要求 review，高风险工程及正式发行要求独立 review；check 核对相应证据、依赖和批准。`authority.py` 只是从原生任务和子代理元数据读取并复核证据签发者身份的内部 helper，不管理用户账号、权限或角色库。
 
 ## 1.1. 先理解谁执行、谁审查
 
 ```plantuml
 @startuml
 skinparam backgroundColor white
-skinparam defaultFontName SansSerif
+skinparam defaultFontName "PingFang SC"
 skinparam defaultFontSize 14
 skinparam shadowing false
 skinparam nodesep 40
 skinparam ranksep 45
 hide footbox
-title 独立验证与审查：交接的是证据
+title 风险计划决定是否审查
 actor "validator" as validator
-participant "Delivery Gate" as delivery_gate
+participant "Delivery Gate" as gate
 participant "Verification" as verification
 actor "reviewer" as reviewer
-validator -> delivery_gate: M1 validate(submission_id)
-delivery_gate -> delivery_gate: M2 核对身份与 frozen input
-delivery_gate -> verification: M3 verify_repository(frozen_inputs)
-verification --> delivery_gate: R1 返回检查报告与输入指纹
-delivery_gate -> delivery_gate: M4 复核输入并发布 validation record
-delivery_gate --> validator: R2 返回 validation_id 与结果
-reviewer -> delivery_gate: M5 review(validation_id, findings)
-delivery_gate -> delivery_gate: M6 复核证据，不重跑检查
-delivery_gate --> reviewer: R3 返回 review record
+validator -> gate : M1 执行冻结 validation
+gate -> verification : M2 按风险计划执行 verify_profile
+verification --> gate : R1 返回检查结果
+alt 高风险工程或正式发行
+  reviewer -> gate : M3 高风险计划提交 review findings
+  gate -> gate : M4 核对 frozen evidence 不重跑测试
+  gate --> reviewer : R2 返回 review record
+else 机械或局部风险
+end
 @enduml
 ```
 
@@ -44,6 +44,10 @@ python3 -m scripts.delivery_gate submit --task-id <id> --change-report-id <uuid>
 
 [submit.py](../../../scripts/delivery_gate/submit.py) 绑定 Task/version/dependencies、固定检查要求、冻结闭包、diff、文件快照与来源。委派实现可给 `--producer-run-id`，但只用于核对真实原始事实；不能提供自报 actor/session/descriptor。Task 缺 required_check_ids 时失败关闭，不当成空列表。
 
+送验时来源报告的完整 changed-file 集必须与当前真实 diff 一致。Task 主体由当前 Catalog 的 allowed_files、file_claims 和真实 diff 机械求交，必须非空；禁止调用者自选路径或风险。命中 Task allowed 范围但违反 claims/forbidden 的改动仍拒绝。风险和 review patch 还覆盖所选检查输入及模块依赖中的实际变化，不能把闭包内的其他工作隐藏为无关改动。
+
+后续阶段重派生 Task 与变化依赖并核对冻结输入；相关文件、政策或 Task 要求变化使记录失效，闭包外写入不影响局部送验。来源报告虽含提交时完整上下文，不扩大 Task 所有权。高风险仍跑完整 development-baseline，正式发行跑完整 repository-baseline。
+
 输出 submission_id 后交给独立 validator。缺失或漂移的报告不能用历史 PASS 补齐。
 
 ## 1.3. validate：执行独立验证
@@ -56,21 +60,25 @@ python3 -m scripts.delivery_gate validate --submission-id <uuid>
 
 [validate.py](../../../scripts/delivery_gate/validate.py) 按顺序读取 submission、核对执行者角色分工、producer 和 frozen input，再调用 Verification 的公共 API。执行后再次核对输入，发布 validation report/record；缺项与未执行不得 PASS，也不签发 review。
 
-它使用 [authority.py](../../../scripts/delivery_gate/authority.py) 核对来源、[requirements.py](../../../scripts/delivery_gate/requirements.py) 核对 Task、[records.py](../../../scripts/delivery_gate/records.py) 安全读写记录。私有 helper 的共享现状见 [Scripts Reference](../reference/scripts.md)，不是让调用者绕过公开场景的许可。
+同一 validator 可重复传入 `--submission-id`，在一次调用中校验 1 至 16 个不同 submission。先对全部任务执行身份、冻结和已有 receipt 前置检查，再在一个真实窗口按各任务计划执行；任一前置失败不启动检查，执行途中首次 FAIL/BLOCKED 停止后续视图。每个 Task 保持自己的报告、run ID 和 validation record，不把其他 Task 的整份报告直接复用。
+
+复用仅限同次内存 transaction 中显式 `transaction_reuse=true` 且输入、配置、环境、runner、副作用约束等价的 Check。相同 scope 不代表相同输入；每 Task 各有 record 也不表示命令重复执行。validator 须区别于所有 producer/submitter；自检 PASS 不可导入，正式发行 runtime transport 不复用。
+
+内部使用 [authority.py](../../../scripts/delivery_gate/authority.py)、[requirements.py](../../../scripts/delivery_gate/requirements.py) 与 [records.py](../../../scripts/delivery_gate/records.py) 核对身份、Task 和记录。文件职责见 [Scripts Reference](../reference/scripts.md)；调用者仍须走公开场景。
 
 ## 1.4. review：复核差异与证据
 
-独立 reviewer 阅读 frozen diff 和 validation evidence，形成真实 findings 后提交：
+只有高风险工程或正式发行计划要求 review。独立 reviewer 阅读 frozen diff 和 validation evidence，形成真实 findings 后提交：
 
 ```bash
 python3 -m scripts.delivery_gate review --submission-id <uuid> --validation-id <uuid> --findings-json <path> --decision <PASS|BLOCKED|FAIL>
 ```
 
-[review.py](../../../scripts/delivery_gate/review.py) 消费明确审查意见，不替 reviewer 自动生成结论。它会重核冻结输入，但不运行交付命令。没有实际审查不能默认使用 PASS。
+[review.py](../../../scripts/delivery_gate/review.py) 消费明确审查意见，不替 reviewer 自动生成结论。它会重核冻结输入，但不运行交付命令。低风险链的 review_id/content hash 为 null，表示该层不适用，不是假 review 或 PASS；高风险计划缺少实际审查不能通过。
 
 ## 1.5. check：核对条件而非重跑
 
-获得可信 validation/review 后，核对依赖和必要的用户批准：
+获得可信 validation 及风险要求的 review（若适用）后，核对依赖和必要的用户批准：
 
 ```bash
 python3 -m scripts.delivery_gate check --submission-id <uuid>
@@ -88,7 +96,7 @@ python3 -m scripts.delivery_gate check --submission-id <uuid>
 python3 -m scripts.delivery_gate consume-existing --submission-id <uuid>
 ```
 
-`consume_existing_pass` 必须找到唯一已存在的完整 submission、validation、review、check 链，并重核当前冻结输入、authority、内容哈希、依赖及必要批准。缺 check 返回 BLOCKED，不创建目录、不补签 receipt、不运行交付命令。成功只返回该链的身份、内容哈希及绑定的 validation report descriptor；它本身不是新的验收阶段，也不证明任意候选已运行。
+`consume_existing_pass` 必须找到唯一已存在的完整 submission、validation、适用的 review、check 链，并重核当前冻结输入、authority、内容哈希、依赖及必要批准。缺 check 返回 BLOCKED，不创建目录、不补签 receipt、不运行交付命令。成功只返回该链的身份、内容哈希及绑定的 validation report descriptor；它本身不是新的验收阶段，也不证明任意候选已运行。
 
 `consume-candidate --submission-id <uuid> --candidate-directory /absolute/candidate` 在同一只读链上继续核对完整 baseline 报告、唯一实际候选 Check 的 stdout 与实际候选目录字节。候选摘要及完整身份来自报告附件，不由调用者指定；当前干净源码也必须一致。它不补签或重跑交付检查，输出不等于公开发布许可。
 

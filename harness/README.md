@@ -1,6 +1,6 @@
 # LexiFlow Harness
 
-Harness 保存静态、机器可读的工程约束；运行状态、报告与 receipt 留在 ignored 的本机目录。想先理解整体，请从[工程地图](../docs/development/overview.md)进入；想执行一次交付，请读[交付主干](../docs/development/change-delivery.md)。本页是规则真源导航，不是完整操作手册。
+Harness 是机器约束的真源。整体流程见[工程地图](../docs/development/overview.md)，操作步骤见[交付主干](../docs/development/change-delivery.md)。
 
 ## 配置与 owner
 
@@ -21,30 +21,25 @@ Harness 保存静态、机器可读的工程约束；运行状态、报告与 re
 
 ## 执行边界
 
-日常 Verify 不是编辑锁或 commit 准入。实现完成后分别运行 `python3 scripts/check_changes.py` 与 `python3 scripts/check_repository.py`；前者按 diff 自查，后者检查完整 baseline。这些独立 Verify 命令缺必需环境返回 BLOCKED，不自动安装依赖；交付 Hook 则先由环境模块自动准备本次隔离 PostgreSQL/Redis 测试容器，再串行调用同一 Verify API，结束后精确清理。Java 检查只由 Gradle 执行；Python 工程脚本由 Ruff 和 Pylint 检查，Gate 不复刻 Java 扫描。Pylint 只机械检查模块与公共定义是否有中文 docstring，说明是否准确仍需审阅。
-
-日常命令不接受 root、base 或 check ID 覆盖；定向定位走 `python3 -m scripts.verification.diagnose change|repository`，只返回诊断结果，不发布可供正式 Delivery Gate 使用的完整报告。
-
-日常功能研发不以正式发行包、双架构运行或资料分发许可验收完成为前置。使用上述定向诊断取得所选模块及其依赖的反馈；所选检查仍保留语言、业务测试与环境要求。发布环境受限可继续无依赖的实现，但不得将定向 PASS 当作完整 Verify 或交付 PASS，不删除发布检查或绕过独立 Formal Gate。未知进程和数据归属等执行安全问题仍单独处理。
-
-正式验收只有 `python3 -m scripts.delivery_gate submit|validate|review|check|status`。submit 绑定报告与真实 producer；validate 由当前父任务下的验证子代理执行冻结输入检查，不要求独立 Session；review 只审 frozen diff/evidence；check 只核对 receipt、依赖和批准。review/check 不重跑交付命令，调用者不伪造身份；详细交接见 [Delivery Gate](../docs/development/change-delivery/delivery-gate.md)。
-
-Qoder 与 Codex 调度以 policy 为准。实现委派优先 Qoder；验证与审查直接使用不同原生 Codex 子代理。内部委派不使用 create_thread；只有 policy 的至少两轮验证 PASS、对应 Hook 持续阻塞、针对性修复与当前任务能力边界证据齐备，并经用户明确批准，才允许新任务兜底。例外任务同样显式指定 Luna 模型和推理参数；Sol 升级须具体风险证据，不能继承默认 Astra。先核对真实宿主等待兼容性；Goal 活跃或未知且没有受支持等待适配时，不启动 Qoder。Qoder 交接后父任务结束当前轮，终态 callback 后才核对与 ack；Codex 原生子代理使用原生协作事件。未知运行不重派，不通过修改 Goal、身份或预算绕过。细节和安全恢复见 [Agent workflow](../docs/development/agent-workflow.md)。
-
-Git Hook 只提醒；Codex/Qoder 正常 Stop 实际串行执行 Change/Repository Verify。Stop 是回合结束：中间汇报、提问、等待用户、Qoder 交接和只读 review/catalog 回合须以单独一行 `<!-- lexiflow:intermediate -->` 结尾，不执行检查、不声明交付 PASS；普通交付不得加此标记。首次失败 block 请求修复，stop_hook_active 再次失败 continue=false 终止自动重试，保留 FAIL/BLOCKED。不注册工具事件，不跨交付缓存 PASS，不锁编辑或 Git。Java backend 变更选择 Gradle deliveryFull；scripts 选择 Ruff、Pylint 与所属模块测试。检查真源为 module-checks，Stop 策略为 delivery-hooks；分支/PR CI 运行独立 quick 视图；正式标签 CI 仍执行完整 Change/Repository Verify。信任、进度、超时与逃生见[交付 Hook](../docs/development/change-delivery/hooks.md)。
+- **开发自检**：`python3 -m scripts.verification.development` 按真实 diff 和依赖闭包选择 profile：机械/局部运行 `development-change`，高风险另加 `development-baseline`。实现者可做静态、编译与直接测试，但不能自签正式验收。Java 检查由 Gradle 执行；scripts 使用 Ruff/Pylint，中文说明的准确性仍需审阅。
+- **完整验证与诊断**：`python3 scripts/check_changes.py`、`python3 scripts/check_repository.py` 用于明确要求的完整 baseline 和发行 CI；`python3 -m scripts.verification.diagnose change|repository` 只定位问题。日常入口不接受 root/base/check ID 覆盖，缺环境为 BLOCKED，不自动安装依赖。开发 PASS 不等于完整 Verify 或 Formal PASS。详见 [Verify](../docs/development/change-delivery/verification.md)。
+- **验证窗口与复用**：Verify、Hook、工作包和 Formal validation 共用同 checkout 非等待窗口，忙时 BLOCKED，不锁编辑。真实风险闭包漂移使验证失败；不删除未知锁或终止未知进程。仅显式 `transaction_reuse=true` 且完整输入、配置、环境、window、runner、context 相同的成功 Check 可在同次事务复用；未知副作用、runtime transport、失败、自检到 Formal 及跨交付缓存均不复用。
+- **正式验收**：`python3 -m scripts.delivery_gate submit|validate|review|check|status`。submit 从真实完整 diff 与 Catalog 派生 Task 主体和变化依赖，绑定来源报告、风险、计划、未跟踪内容及 producer。`TASK_VALIDATION` 由不同 actor 按冻结计划执行；high-risk/formal 另需 `INDEPENDENT_REVIEW`。review 只读冻结 diff/evidence，`CATALOG_DECISION` 只核对 receipt/hash DAG，均不重跑命令。机械/局部链不伪造 review。每批 validate 最多 16 个不同 submission，各 Task 独立报告，仅同一 validator、同次窗口的等价检查可复用。正式发行风险由 Task 必需检查命中 CI formal 集合触发，仍需完整 Repository baseline。详见 [Delivery Gate](../docs/development/change-delivery/delivery-gate.md)。
+- **Agent 委派**：实现优先 Qoder，验证和审查使用不同原生 Codex 子代理。模型按 policy 显式选择；Sol 升级需具体证据。Goal 活跃/未知且无等待适配时不启动 Qoder；已交接就结束当前轮，终态 callback 后核对并 ack。未知运行不重派，不改 Goal、身份或预算绕过。内部不使用 `create_thread`；新任务例外须满足 policy 的两轮验证、持续 Hook 阻塞、修复及能力边界证据，并获用户明确批准。详见 [Agent workflow](../docs/development/agent-workflow.md)。
+- **Stop 与 CI**：正常 Stop 在一个窗口准备隔离测试服务并运行风险要求的 profiles，最后精确清理；中间汇报、提问、等待、Qoder 交接及只读 review/catalog 回合以单独一行 `<!-- lexiflow:intermediate -->` 结尾，不运行交付检查。普通交付不得使用该标记。首次失败 block；`stop_hook_active` 再失败以 `continue=false` 结束自动重试，不改称 PASS。Git Hook 只提醒，分支/PR CI 用 quick，正式标签 CI 保留完整 Change/Repository Verify。详见 [交付 Hook](../docs/development/change-delivery/hooks.md)。
 
 ## 脚本与开发数据边界
 
-scripts/ 只放跨阶段复用、有稳定消费者和直接测试的能力；阶段工具放 ignored `tmp/phase-tools/<change-id>/`，不成为公开 manifest 或产品运行依赖。提升为长期脚本需用户批准并补齐 contract/测试。职责定位见 [Scripts Reference](../docs/development/reference/scripts.md)。
+`scripts/` 只保存跨阶段复用、有稳定消费者及直接测试的能力；阶段工具放 ignored `tmp/phase-tools/<change-id>/`，不作公开入口或产品依赖。提升为长期脚本须用户批准并补合同和测试，职责见 [Scripts Reference](../docs/development/reference/scripts.md)。
 
-全仓只维护最新逻辑与唯一最新 SQL。结构变化显式重建本项目开发库并完整重导，不保留升级链；API 启动不得隐式清库，不触及其他项目。来源、发布身份、事务、隐私和验证护栏仍保留，重建资料不能与缓存/本机偏好的旧身份混淆。
+只维护最新逻辑和唯一最新 SQL。结构变化须显式重建本项目开发库并完整重导；API 不隐式清库、不触及其他项目，不复用缓存或本机偏好仍引用的身份绑定不同资料。来源、事务、发布与隐私约束不变。
 
-Catalog 的 planning-only 只表示静态计划可合法未分解，不表示可以派发或正式验收。必须依据当前阶段边界分解 Task，旧 Task/receipt 不代表新阶段。共享策略更新先改 policy，再显式 `policy_projection --write` 和 `--check`，不手工双写投影。
+Catalog 的 planning-only 不授予派发或验收资格；须按当前范围分解 Task。共享策略先改 policy，再运行 `policy_projection --write` 和 `--check`，不手工维护投影。
 
 ## 文档与本机接入
 
-图源只在 Markdown 的 plantuml 围栏。按 documentation-policy 先在 ignored tmp/diagrams/ 草稿校验、渲染并实际查看，再原样复制正文；不提交调试产物。完整操作见[图文维护](../docs/development/reference/documentation.md)，不把静态检查当中文语义或视觉验收。
+图源仅为 Markdown 的 fenced `plantuml`；先按 documentation-policy 在 ignored `tmp/diagrams/` 校验、渲染和查看，再原样复制正文。静态检查不代替语义或视觉审阅，操作见[图文维护](../docs/development/reference/documentation.md)。
 
-本机 skill 仅引用 CODEX_HOME/skills（默认 ~/.codex/skills），不自动下载或修改用户配置。`local_skills check` 只检查，`local_skills link` 显式创建 ignored 链接，缺源 BLOCKED、异目标拒绝覆盖；具体见[独立工具](../docs/development/reference/standalone-tools.md)。
+本机 skill 来自 `CODEX_HOME/skills`（默认 `~/.codex/skills`），不自动下载或修改配置。`local_skills check` 只读检查，`link` 显式创建 ignored 链接；缺源 BLOCKED、异目标拒绝覆盖，见[独立工具](../docs/development/reference/standalone-tools.md)。
 
-Python venv、容器引擎/镜像的一次性准备与 Hook 资源生命周期见[验证环境](../docs/development/operations/verification-environment.md)。报告在 tmp/quality/verification-reports/，正式记录在 tmp/quality/delivery-gate/，Qoder 原始运行在 tmp/qoder-tasks/；它们都不进入共享 Harness。
+venv、容器与隔离资源准备见[验证环境](../docs/development/operations/verification-environment.md)。报告、正式记录和 Qoder 运行分别留在 `tmp/quality/verification-reports/`、`tmp/quality/delivery-gate/`、`tmp/qoder-tasks/`，不进入共享 Harness。

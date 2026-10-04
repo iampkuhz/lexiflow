@@ -1,6 +1,6 @@
 # 1. Scripts 工程入口
 
-Scripts 的阅读从[工程地图](../docs/development/overview.md)开始，而不是按文件名推测执行次序。
+整体流程见[工程地图](../docs/development/overview.md)。
 
 ## 1.1. 按当前工作定位
 
@@ -11,4 +11,4 @@ Scripts 的阅读从[工程地图](../docs/development/overview.md)开始，而�
 
 ## 1.2. 真源与边界
 
-规则仅在 [AGENTS.md](../AGENTS.md) 与 [Harness](../harness/README.md)。本页只作源码目录入口，不再维护第二份架构说明、命令表或参数阈值。模块源码和直接测试是实际行为的证据，文档图示不是正式验收结果。
+规则真源为 [AGENTS.md](../AGENTS.md) 与 [Harness](../harness/README.md)；实际行为以源码和测试为据。

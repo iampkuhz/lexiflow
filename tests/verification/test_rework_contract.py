@@ -41,6 +41,7 @@ def _git(root: Path) -> str:
     for args in (("init",), ("config", "user.email", "test@example.invalid"), ("config", "user.name", "Test")):
         subprocess.run(["git", *args], cwd=root, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     (root / "seed").write_text("seed")
+    (root / ".gitignore").write_text("tmp/\n")
     subprocess.run(["git", "add", "."], cwd=root, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(["git", "commit", "-m", "seed"], cwd=root, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()

@@ -46,6 +46,12 @@ public final class FileSegmentAnalysisStore implements SegmentAnalysisStore {
     this.console = console;
   }
 
+  /**
+   * 同步追加用户显式授权的本机分析记录，初始化与持久化失败由调用者处理。
+   *
+   * @param records 含义：本次待写入的片段记录。取值范围：非 null 列表且元素非 null，空列表不执行写入。
+   * @throws IOException 台账初始化、读取或持久化失败时抛出。
+   */
   @Override
   public synchronized void append(List<SegmentAnalysisRecord> records) throws IOException {
     if (records.isEmpty()) return;

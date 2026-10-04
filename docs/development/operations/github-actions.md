@@ -29,7 +29,7 @@ shasum -a 256 -c lexiflow-extension-<softwareVersion>.zip.sha256
 
 随后将内层 ZIP 解压到稳定目录；该目录根部必须有 `manifest.json`、`build-identity.json` 与运行资源。打开 `chrome://extensions`，启用开发者模式，点击“加载已解压的扩展程序”，选择这个目录，而不是外层 artifact 目录。API 仍需单独按本机安装说明运行；ZIP 不包含后端或词库。更新后替换该解压目录并在扩展管理页重新加载。
 
-Chrome 官方允许开发者加载可信解压扩展；ZIP 是 Chrome Web Store 上传格式，但不等于已经通过商店审核。普通 Windows/macOS 用户便捷安装应走 Chrome Web Store；GitHub ZIP 或自签名 CRX 不提供通用双击安装。自托管在 Windows/macOS 受企业策略约束，本项目不修改浏览器策略。商店提交不属于 GitHub 分发步骤，也不是此链路的前置。依据：[Chrome 分发规则](https://developer.chrome.com/docs/extensions/how-to/distribute)、[加载解压扩展](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked)、[商店上传](https://developer.chrome.com/docs/webstore/publish)。GitHub 自动生成的 Source code ZIP 不是扩展安装包。
+开发者可加载可信的解压扩展；ZIP 仅是 Chrome Web Store 上传格式，须经商店审核才可作为普通用户安装方式。GitHub ZIP、自签名 CRX 与自动生成的 Source code ZIP 都不是通用安装包；自托管还受企业策略约束，本项目不修改浏览器策略。参见[Chrome 分发规则](https://developer.chrome.com/docs/extensions/how-to/distribute)、[加载解压扩展](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world#load-unpacked)及[商店上传](https://developer.chrome.com/docs/webstore/publish)。
 
 ## 1.2. 正式标签：完整验证与独立验收
 
@@ -57,25 +57,19 @@ Chrome 官方允许开发者加载可信解压扩展；ZIP 是 Chrome Web Store 
 
 ## 1.4. 候选完整性消费
 
-`node ops/release/pipeline.mjs verify /absolute/request.json` 接收仅含 `candidateDirectory`（绝对路径）与 `candidateSha256` 的请求。入口只读核对现有 marker、规范 manifest、摘要 sidecar、全部制品和许可 notice，以及扩展 ZIP 内嵌身份；目录缺失、额外文件、非普通文件、symlink 或读取中漂移均拒绝。返回 `scope=candidate-integrity-only`，不执行候选脚本或容器，也不表示正式发布许可。
-
-运行适配器和晋升入口应消费同一候选完整性结果，并在实际使用前再次核对，不能把一次核验作为之后可变目录的永久信任。clean SNAPSHOT 可用于候选机制验证；正式发布还必须匹配精确正式标签及独立验收报告中绑定的同一候选摘要。
+`node ops/release/pipeline.mjs verify /absolute/request.json` 接收 `candidateDirectory`（绝对路径）与 `candidateSha256`。入口只读核对 marker、规范 manifest、摘要 sidecar、全部制品和许可 notice，以及扩展 ZIP 内嵌身份；缺失、额外文件、非普通文件、symlink 或漂移均拒绝。返回 `scope=candidate-integrity-only`，不执行候选脚本或容器；结果不永久信任可变目录，消费前须重核实际字节。clean SNAPSHOT 可用于机制验证；正式发布还须匹配精确正式标签及独立验收报告中的同一候选摘要。
 
 
 ## 1.5. 本机候选运行输入
 
-内部库 `runLocal(argv, { candidateDirectory, candidateSha256 })` 将固定候选接入原本机安装与升级事务；不提供任意命令或平台绕过，源码用户的 `install` / `upgrade` 命令保持不变。候选模式首装不编译源码，而是核验并加载 ARM64 镜像、解包固定扩展、用候选词库 ZIP 初始化。API 端口固定为 18080，冲突时停止，不能停止未知服务或重写扩展权限。
-
-升级仅加载候选 API 并准备扩展；PostgreSQL、已有资料、密码及端口保持不变。候选、manifest 与归档摘要写入安装记录，不执行候选中的 shell 入口。候选完整性、替身回归、真实同卷运行和独立 Formal 是不同证据，前两项不能取代后两项。
+内部库 `runLocal(argv, { candidateDirectory, candidateSha256 })` 将固定候选接入原本机安装与升级事务，源码用户的 `install` / `upgrade` 命令不变。候选模式首装核验并加载 ARM64 镜像、解包固定扩展、用候选词库 ZIP 初始化。API 端口固定 18080，冲突时停止，不停止未知服务或改写扩展权限。升级仅加载候选 API 并准备扩展；PostgreSQL、资料、密码及端口不变。候选完整性、替身回归、真实同卷运行和独立 Formal 是不同证据，前两项不取代后两项。
 
 
 ## 1.6. 实际候选原生验收
 
-`eng.release.candidate-runtime` 及其 change 视图消费 `LEXIFLOW_CANDIDATE_RUNTIME_REQUEST` 指定的绝对 JSON 路径。请求只包含 `previous` 和 `target`，每项均为 `candidateDirectory` 与 `candidateSha256`；不接受安装目录、命令或成功声明。target 必须与执行仓库的干净源码完整身份一致。两个候选构建和 API 镜像不同，数据库结构相容；干净 SNAPSHOT 运行不等于正式标签验收。
+`eng.release.candidate-runtime` 消费 `LEXIFLOW_CANDIDATE_RUNTIME_REQUEST` 指定的绝对 JSON 路径。请求只含 `previous` 和 `target`（各为 `candidateDirectory` + `candidateSha256`），target 须与干净源码完整身份一致。
 
-Check 在 Apple Silicon macOS 的既有 Podman 上调用共享安装入口，在自身临时安装中执行首装、重复安装、no-op、同卷升级、真实启动失败自动恢复及重试。固定 18080 被占用则停止，不修改扩展权限、不停止未知服务、不更改 machine。保留断言覆盖 PostgreSQL 容器和卷、合成标记、资料、密码、端口、扩展及记录；资源清理必须重新核验归属与进程静止。
-
-运行结果通过 Verify 的 stdout 附件摘要绑定候选、manifest、完整 build identity 和实际阶段；原始私有运行日志只留 ignored 本机目录，不上传 CI。缺候选、缺宿主、失败恢复未观察到或清理未完成均不得 PASS。quick CI 显式排除此 Check；完整 Verify、候选来源许可与独立 Formal receipt 仍分别必需。
+Check 在 Apple Silicon macOS Podman 上调用共享安装入口，执行首装、重复安装、no-op、同卷升级、真实启动失败自动恢复及重试。18080 被占用则停止。断言覆盖 PostgreSQL 容器和卷、标记、资料、密码、端口、扩展及记录。运行结果通过 Verify stdout 附件绑定候选、manifest、build identity 和阶段。缺候选、缺宿主、恢复未观察到或清理未完成均不得 PASS。故障注入和清理仅限逐项核实归属的本次资源；无法确认进程静止或归属时保留现场。quick CI 排除此 Check。
 
 
 ## 1.7. 联合消费候选与既有验收
@@ -84,9 +78,7 @@ Check 在 Apple Silicon macOS 的既有 Podman 上调用共享安装入口，在
 python3 -m scripts.delivery_gate consume-candidate --submission-id <uuid> --candidate-directory /absolute/candidate
 ```
 
-接口从已有完整 Formal 链绑定的 repository-baseline 报告取得唯一实际候选 Check 的 stdout，核对附件字节、摘要、执行关联和冻结输入，再核对全部运行阶段与清理结果。候选摘要和完整身份由该证据派生，不能由调用者另传；固定只读入口复用候选完整性校验，并要求目录制品与干净源码对应受验身份。
-
-最终候选核验结束后再重核链、报告及 stdout，防止核验耗时期间证据被替换。源码身份采用固定两轮 Git 成员、字节与文件元数据核对，拒绝可观测的读取中漂移；这不是全局文件系统锁，消费者不保证返回后输入仍不变。消费过程不补签 receipt、不运行构建或容器。缺少证据、内容漂移、无关 PASS、合成桥接或快速检查不能通过。输出只证明同一候选与既有验收链的关联；clean SNAPSHOT 不因此取得正式发布资格，公开晋升仍须精确标签、来源许可、远端不可替换配置和发布授权。
+从既有完整 Formal 链的 repository-baseline 报告取得候选 Check stdout，核对附件字节、摘要、冻结输入及运行阶段。候选摘要由证据派生，不由调用者另传。最终核验后重核链与 stdout 防止替换。源码身份采用两轮 Git 成员、字节与元数据核对，但这不是全局文件系统锁，也不保证返回后输入不再变化。消费过程不补签 receipt、不运行构建或容器；clean SNAPSHOT 不因此取得发布资格，公开晋升仍须精确标签、来源许可和发布授权。
 
 
 ## 1.8. 正式候选晋升入口
@@ -95,23 +87,20 @@ python3 -m scripts.delivery_gate consume-candidate --submission-id <uuid> --cand
 python3 -m scripts.environment.release_promotion --submission-id <uuid> --candidate-directory /absolute/candidate
 ```
 
-默认核验并准备公开资产，不写 GitHub。只有用户另行批准后才加 `--publish`；workflow 或 token 的存在不代替该授权。入口复用同宿主的联合证据，只接受干净正式版本和精确 tag、单一 ARM64 候选。`ops/release/distribution-licenses.json` 必须先由负责人依据真实许可核准，并与候选的每个许可条目、来源及 notice 摘要一致；空表或测试占位材料阻断。程序的字段/摘要核对不是法律许可判断。
+默认核验并准备公开资产，不写 GitHub。用户另行批准后才加 `--publish`；workflow 或 token 存在不代替授权。入口复用联合证据，只接受干净正式版本、精确 tag 和单一 ARM64 候选。`ops/release/distribution-licenses.json` 须由负责人依据真实许可核准，与候选许可条目、来源及 notice 摘要一致；空表或测试占位阻断。
 
-发行归档只包含已验收 payload；随包保留扩展 ZIP，不把 ZIP 描述为一键安装文件。独立公开资产仅为发行 tar.gz、其摘要、Chrome 扩展 ZIP、ZIP 摘要、候选 marker、manifest 和 manifest 摘要；独立 ZIP 从已验收候选原样复制，与发行归档内扩展逐字节相同，晋升时不重新构建，不上传 Formal receipt、运行日志、字幕或观看记录。缺件、多余项、路径异常、读取漂移及大小越界均停止。
+发行归档只含已验收 payload，随包保留扩展 ZIP。独立公开资产为发行 tar.gz 及摘要、Chrome 扩展 ZIP 及摘要、候选 marker、manifest 及摘要；独立 ZIP 从候选原样复制，晋升时不重新构建。不上传 Formal receipt、运行日志、字幕或观看记录。
 
-远端先验证已有 tag 对应同一 commit、不可变发行已启用，任何同 tag 的 draft 或 published release 都拒绝覆盖。创建 draft 后上传固定资产，逐项检查远端名称、字节数与 SHA-256，完整复核后才 publish 并确认 immutable 与 latest。失败不删除草稿或移动 tag；写请求结果未知时保留不确定状态，先由负责人查明，不自动重试。参见 [GitHub 不可变发行](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)及 [Release API](https://docs.github.com/en/rest/releases/releases)。
+远端先验证 tag 对应同一 commit 且不可变发行已启用，同 tag 的 draft 或 published release 拒绝覆盖。创建 draft 后上传固定资产，逐项核对名称、字节数与 SHA-256，完整复核后才 publish。失败不删除草稿或移动 tag；写请求未知时保留状态由负责人查明。参见 [GitHub 不可变发行](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)及 [Release API](https://docs.github.com/en/rest/releases/releases)。
 
-发布凭据与配置查询分开：`GITHUB_TOKEN` 仅需目标仓库 Contents write；`LEXIFLOW_RELEASE_CONFIG_TOKEN` 仅作 Administration read 的不可变配置查询，不需要管理写权限。后者不能用普通 Actions 的 `contents:write` 权限冒充；无此查询权限时阻断，不自动启用配置。两者仅供固定 GitHub HTTPS 目的地，不跟随重定向、不传入构建子进程或日志。参见 [不可变配置查询权限](https://docs.github.com/en/rest/repos/repos#check-if-immutable-releases-are-enabled-for-a-repository)。
+发布凭据分离：`GITHUB_TOKEN` 仅需 Contents write；`LEXIFLOW_RELEASE_CONFIG_TOKEN` 仅作 Administration read 的不可变配置查询。两者仅供固定 GitHub HTTPS 目的地，不跟随重定向、不传入构建子进程或日志。参见 [不可变配置查询权限](https://docs.github.com/en/rest/repos/repos#check-if-immutable-releases-are-enabled-for-a-repository)。
 
 
 ## 1.9. 构建资料与本机交接
 
 构建编排不负责自动批准来源或生产数据库资料。负责人先通过既有 `ReleaseDatasetCommand export` 从已发布资料和真实 `approval-file` 导出发布 ZIP；该包包含 `manifest.json`、`approvals.json`、`dataset.ndjson`、`prepared.ndjson`、`lookup.ndjson`，由实际构建的 JAR 校验。`fetch-ecdict.sh` 生成的是源码词库 ZIP，不是这一发布格式；不能用它、空 ZIP 或合成机制 fixture 替换。
 
-构建请求只提供发布标签、资料包绝对路径与摘要及资料身份、已核准 notice 根、独立输出父目录、真实 previous 候选定位与摘要，以及已运行的 Podman Unix endpoint。JAR、扩展、SQL、Compose、基础镜像锁和许可关联由固定源码入口派生，不接受调用者传任意 shell、构建身份、PASS 或完整 descriptor。首次正式发布也必须准备真实且不同的 previous API 候选；若没有，应先完成该输入，不把 target 复制一份冒充升级验收。
-
-候选与原始构建日志保留在该宿主的私有目录。交接文件仅是查找原候选和 runtime request 的定位器，不是验收 receipt。已有交接或不完整准备现场阻断新的准备；不要靠删除现场、另建安装或换端口继续。负责人先核实归属和完成状态，再决定是否开始新的发行。原生验收与手动晋升之间不得修改源码、候选或资料，不能迁移 checkout 或仅拷贝验收记录。
-
+构建请求提供发布标签、资料包路径与摘要、notice 根、输出父目录、previous 候选及 Podman endpoint。JAR、扩展、SQL、Compose、基础镜像锁和许可关联由固定源码入口派生，不接受任意 shell 或完整 descriptor。首次发布也须准备真实且不同的 previous API 候选。
 
 本机编排入口：
 
@@ -119,14 +108,14 @@ python3 -m scripts.environment.release_promotion --submission-id <uuid> --candid
 node ops/release/workflow.mjs prepare /absolute/private-request.json
 ```
 
-请求的固定字段为 `releaseTag`、`dataset`、`noticesRoot`、`outputParent`、`previous`、`endpoint`。其中 `dataset` 仅含 `path`、`sha256`、`releaseId`、`preparationId`、`ruleId`、`sqlVersion`；`previous` 仅含 `candidateDirectory`、`candidateSha256`。`outputParent` 是本次独立、已存在且为空的私有构建输出父目录，不是用户安装目录，也不能在源码目录内。notice 相对路径与摘要来自受跟踪的许可核准表，不另传许可声明；表内条目按 `id` 排序，与规范 manifest 的许可顺序一致。
+请求字段：`releaseTag`、`dataset`（含 `path`/`sha256`/`releaseId`/`preparationId`/`ruleId`/`sqlVersion`）、`noticesRoot`、`outputParent`、`previous`（含 `candidateDirectory`/`candidateSha256`）、`endpoint`。`outputParent` 须已存在且为空，不在源码目录内。notice 路径与摘要来自受跟踪许可核准表，按 `id` 排序。
 
-准备完成后，固定 `tmp/quality/release-workflow/candidate-runtime-request.json` 供完整 Verify 使用；Actions 通过 `GITHUB_ENV` 传入 `LEXIFLOW_CANDIDATE_RUNTIME_REQUEST`，本机原生任务也必须设置该变量指向原文件。`handoff.json` 绑定原 checkout、宿主、源码身份和候选定位；两者均是私有本机文件，不上传。检查成功不代表原生验收已经完成。
+准备完成后固定 `tmp/quality/release-workflow/candidate-runtime-request.json` 供 Verify 使用；`handoff.json` 绑定 checkout、宿主和候选定位，均为私有本机文件不上传。
 
-原生链完成后可在原 checkout 只读核对：
+原生链完成后可只读核对：
 
 ```sh
 node ops/release/workflow.mjs resume <submission-uuid> <release-tag>
 ```
 
-显式批准发布时，从原正式标签手动运行工作流，填写同一标签、submission UUID 和 `PUBLISH`。工作流先执行无发布凭据的 dry-check，再由 `lexiflow-release-promotion` 独立人工审批；只有发布步骤注入 GitHub Contents write 与 `LEXIFLOW_RELEASE_CONFIG_TOKEN` secret（Administration read）。管理员必须先启用仓库 immutable releases；流程不代为修改设置。直接本机调用加 `--publish` 同样须另获发布授权。
+发布时从原正式标签手动运行工作流，填写同一标签、submission UUID 和 `PUBLISH`。先 dry-check 再由 `lexiflow-release-promotion` 人工审批；只有发布步骤注入 Contents write 与 `LEXIFLOW_RELEASE_CONFIG_TOKEN`。管理员须先启用仓库 immutable releases。

@@ -1,14 +1,13 @@
 # 1. 第二阶段任务与启动合同
 
-本页规定二期工作清单；用户授权与执行事实见状态页。任务身份、允许范围、版本和依赖以 [Catalog](../../../../planning/workstreams.yaml) 为准；任务均以 DRAFT 建立，阶段状态只见[状态页](status.md)。目标和边界见[阶段入口](../phase2.md)。
+本页给出执行顺序；Task 身份、owner、范围、版本、依赖、检查命令与验收断言只维护在 [Catalog](../../../../planning/workstreams.yaml)。仅 `READY` Task 可派发；执行事实见[状态页](status.md)，目标见[阶段入口](../phase2.md)。
 
 ## 1.1. 正式启动条件
 
-1. 核对用户启动授权、最新 Harness、实际代码和并发写入者；记录 phase1 缺失验收，不将二期启动标为一期已 close。
-2. 从已获取远端 tip 并核对一致的最新 `main` 建立 `phase2`，不从一期工作分支创建。
-3. 子任务从最新 `phase2` 建立 `phase2-N-主题`。一个可独立编译和验证的工作片完成后，精确提交本任务文件并及时合回 `phase2`；接口生产者和消费者共同切换，不积压到阶段末才集成。
-4. 多 checkout 使用独立子任务分支并核对 ownership；同一 checkout 不在其他执行者运行中切换。集成与验证串行，冲突回到对应 owner 处理，不覆盖他人修改。
-5. 本次授权包含子任务所需本地 stage/commit/merge；不包含 push、合回 `main`、rebase、reset、stash 或 force。构建/发布流程不等于镜像上传、商店提交或公开发布授权。
+1. 读取当前用户授权、Harness、Catalog 与实际代码；未完成验收统一见状态页，不从旧阶段说明推断已通过。
+2. 核对 checkout、分支与并发写入者；不覆盖他人修改，不在其他执行者运行时切换共享 checkout。
+3. 公共接口与消费者按同一合同串行集成，验证串行；冲突回到 owner，不以兼容旧接口绕过切换。
+4. stage、commit、merge、分支切换及公开发布仅依据当前明确授权；任务文档和旧阶段授权均不授予 Git 操作权限。
 
 ## 1.2. 执行波次与边界
 
@@ -20,298 +19,34 @@
 - 观测是每个节点的验收要求，OBS Task 只拥有合同与适配器，不另建“观测业务阶段”。未来性能和模型工作不借机混入。
 - Catalog 的设计 Task 可输出待冻结决定；每项对应实现派发前必须已有唯一合同、具体样例和收紧的 file claim。冻结时如超出 90 分钟或 8 个主要产品文件，按现有分解规则拆分；不得把大 glob 当成无限范围授权。
 
-## 1.3. 逐项工作与验收
+## 1.3. 验收与深入入口
 
-### 1.3.1. LF-TSK-ARCH-2001 · 核对用户启动通知、收尾证据与最新主干起点
-- 主责：`LF-WS-ARCH`；预计 30 分钟；前置：用户启动通知与最新主干核对。
-- 产出：记录用户启动授权、phase1 收尾依据、实际主干名与最新 tip、phase2 起点及干净隔离边界。
-- 验收：依据明确的二期启动授权执行；记录一期验收缺口，不把开发授权或自动续轮当作一期 PASS。
-- 验收：核对远端最新 main 后创建 phase2，子任务使用 phase2-N-主题；不从一期工作分支派生。
-- 验收：核对分支归属和并发修改；按已授权范围精确提交并及时合回 phase2，不覆盖他人工作、不推送或合回 main。
-- 直接检查：`python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check && python3 -m scripts.repository.policy_projection --check`。
-
-### 1.3.2. LF-TSK-ARCH-2002 · 冻结词段分类、预处理资格及排序规则表
-- 主责：`LF-WS-ARCH`；预计 75 分钟；前置：`LF-TSK-ARCH-2001`。
-- 产出：按五个独立维度给出确定规则、来源字段、边界样例和批准的行为变更清单。
-- 验收：区分单词/短语、基础/重点/长尾、低频/未知频率、资料质量、提示与缓存；基础不等于用户熟练。
-- 验收：明确基础名单依据、重点条件与排序、短语质量、默认首义、具体阻断原因及词形继承；低频或缺少排名不单独阻断。
-- 验收：冻结阈值和优先级的依据及合成验收样例，不凭讨论臆造概率或个人画像；越出已批准范围先提交用户决策。
-- 直接检查：`python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check && python3 -m scripts.repository.policy_projection --check`。
-
-### 1.3.3. LF-TSK-ARCH-2003 · 冻结预处理、启动、同步主线与跨模块接口
-- 主责：`LF-WS-ARCH`；预计 90 分钟；前置：`LF-TSK-ARCH-2002`。
-- 产出：每节点的输入输出、owner、调用次序、失败出口和版本合同；列出全部消费者及串行切换顺序。
-- 验收：分别明确预处理、启动与请求七步流程；静态质量判断前移，范围、版本及响应安全检查保留在运行期。
-- 验收：冻结准确词形查询端口、发布投影、诊断和敏感记录接口；现有消费者完整盘点，不造空壳多义项接口。
-- 验收：明确正式/演示模式、无发布版本、依赖故障、预热失败、版本冲突的唯一行为；不隐式导入或重建。
-- 验收：查词默认义仍非上下文消歧；异步 Promise/线程若服务当前提示仍属于关键路径。
-- 直接检查：`python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check && python3 -m scripts.repository.policy_projection --check`。
-
-### 1.3.4. LF-TSK-OBS-2001 · 冻结结构化日志模板、事件和打印时机
-- 主责：`LF-WS-OBS`；预计 60 分钟；前置：`LF-TSK-ARCH-2003`。
-- 产出：启动、请求、状态变化、导入事件表与成功/空提示/异常样例，区分敏感台账。
-- 验收：明确事件名、字段类型单位、原因码、级别、触发次数、开关和保留；result 遵守结果语义，NO_HINT 仅为原因。
-- 验收：普通事件只保留聚合数值、版本和随机关联 ID；不得含字幕、中文提示、观看身份或凭据，ID 不作指标标签。
-- 验收：保留敏感分析记录的授权、去重和失败语义；不在本阶段引入异步丢失队列或新采集。
-- 直接检查：`python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check && python3 -m scripts.repository.policy_projection --check`。
-
-### 1.3.5. LF-TSK-ARCH-2004 · 按冻结主线形成架构和执行时序图
-- 主责：`LF-WS-ARCH`；预计 60 分钟；前置：`LF-TSK-ARCH-2003`、`LF-TSK-OBS-2001`。
-- 产出：功能分层、观看时序、资料生产与发布时序的内嵌 PlantUML 图及节点到责任映射。
-- 验收：图源来自冻结的分类和流程结论；说明当前提示关键路径、独立离线链及发布身份交接，不按线程创建业务服务。
-- 验收：按 documentation-policy 和指定 skill 在 ignored 目录渲染并实际查看后原样入正文；缺工具或预览为 BLOCKED，不以静态围栏检查代替视觉验收。
-- 直接检查：`python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check && python3 -m scripts.repository.policy_projection --check`。
-
-### 1.3.6. LF-TSK-LEX-2001 · 实现预处理分类与独立提示和缓存资格
-- 主责：`LF-WS-LEX`；预计 90 分钟；前置：`LF-TSK-ARCH-2004`。
-- 产出：基础词、频率及复杂词表的正交分类证据与独立提示/缓存资格；重点和长尾沿既有 `priority` 连续排序，不新增二元阈值，含直接测试。
-- 实现边界：分类结果由导入计划与既有发布消费者实际消费；区分 StarDict 缺排名和规范 CSV 明确频率，不新增评分阈值或改写 priority 公式。范围收紧至七个主要产品文件；Catalog 合同为 v2/change 2.0.0。
-- 验收：按冻结规则生成分类及原因，低频和缺失排名分别处理；基本词形继承不误伤完整短语。
-- 验收：重点词的默认资料及词形资格可核对；提示资格不由预热资格决定，禁止行为熟练度推断。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test`。
-
-### 1.3.7. LF-TSK-LEX-2002 · 实现短语质量与默认释义的发布前判定
-- 主责：`LF-WS-LEX`；预计 75 分钟；前置：`LF-TSK-LEX-2001`。
-- 产出：有原因的短语/默认释义过滤与边界测试，不再依靠频率掩盖来源质量。
-- 实现边界：仅改提示准备策略和 StarDict 人工映射的策略身份；受信完整 lemma 可豁免短语启发式，硬校验不豁免，普通 CSV 无 curated 开关。Catalog 为 v2/change 2.0.0。
-- 验收：按照冻结规则调整短语粗过滤，覆盖可靠完整短语、残缺词组和高频坏资料。
-- 验收：完整原始释义保留；首候选无效不以后项补位，质量判断发布前完成。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test`。
-
-### 1.3.8. LF-TSK-LEX-2003 · 原子切换准确词形合同与全部查询消费者
-- 主责：`LF-WS-LEX`；预计 90 分钟；前置：`LF-TSK-LEX-2002`。
-- 产出：候选枚举归 Enrichment，LexiconCatalog 只接受规范词形集合；两实现与全部消费者和测试在同一可编译切片切换。
-- 实现范围：八个主要产品文件及对应消费者测试，Catalog 为 v3/change 3.0.0；不借此拆分读写 Repository。
-- 验收：公开 lookupForms(List<String>) 返回完整候选、可选发布身份与请求局部查询计数；Enrichment 生成规范键，保留同形冲突与 BLOCK 证据，不使用全局计数。
-- 验收：删除旧字幕查询入口，不维护双套兼容；Cached/Builtin、用例、装配与所有测试调用者一起切换并验证全后端编译。
-- 验收：空输入不读存储；大小写/标点规范化集中且无字符范围漂移；读写 Repository 分离不捆绑此次公开合同。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :enrichment:test :api:test :adapters:test`。
-
-### 1.3.9. LF-TSK-LEX-2004 · 拆分版本缓存管理与导入应用编排
-- 主责：`LF-WS-LEX`；预计 90 分钟；前置：`LF-TSK-LEX-2003`。
-- 产出：缓存负责版本/预热/容量；导入用例负责预检结果、来源一致性和发布调用，不依赖文件/SQL。
-- 实现范围：八个主要产品文件及来源消费者测试；来源返回重读摘要/原始行数，由用例在事务内核对身份及实际条数。Catalog 为 v2/change 2.0.0；文件读取与摘要计算留在适配器。
-- 验收：移除查询服务内字幕候选生成；负缓存、预热与动态缓存保持有界且绑定发布身份。
-- 验收：导入应用编排经端口消费来源，不调用适配器 main；故障不形成部分发布。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test`。
-
-### 1.3.10. LF-TSK-DAT-2001 · 落实发布投影字段与数据库约束
-- 主责：`LF-WS-DAT`；预计 60 分钟；前置：`LF-TSK-LEX-2003`。
-- 产出：同步调整最新 SQL、发布写入映射及隔离库回归；保存来源、频率证据、准备轨迹和词形最终原因，不另建历史迁移链。
-- 验收：每个增加字段都有明确生产者与消费者；能沿来源追溯提示及阻断决定，不存个人状态。
-- 验收：不连接或重建真实运行库；最新 SQL 与适配器集成测试在串行交接中共同核验。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:postgresIntegrationTest`。
-
-- 实现边界：Catalog v2/change 2.0.0；数据库字段和写入者同批交付，SQL 追溯消费见设计 1.6.4。读角色拆分仍归 OPS-2001。
-
-### 1.3.11. LF-TSK-OPS-2001 · 适配 PostgreSQL 读写边界与原子发布
-- 主责：`LF-WS-OPS`；预计 90 分钟；前置：`LF-TSK-DAT-2001`、`LF-TSK-LEX-2004`。
-- 产出：只读接口和发布接口按调用方隔离，组合持久化保持完整映射及原子事务。
-- 验收：查询返回完整候选和统一发布身份；映射不遗漏分类或冲突证据。
-- 验收：原子提交与失败回滚、旧版本可查及开发结构重建边界保持；无跨域表访问。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :api:test :adapters:postgresIntegrationTest`。
-
-- 实现边界：Catalog v2/change 2.0.0；查询服务、版本缓存与 API 一起切换到 read role，聚合接口只保留在基础设施组合；直接测试证明只读替身和真实 PostgreSQL bean 的 Spring 装配。数据库字段已由 DAT-2001 同步交付，不重复改 SQL。
-
-### 1.3.12. LF-TSK-OPS-2002 · 将导入 CLI 收敛为入口和来源适配
-- 主责：`LF-WS-OPS`；预计 90 分钟；前置：`LF-TSK-OPS-2001`。
-- 产出：两种来源经统一应用准备与发布用例；持久化消费已准备条目，CLI 保留来源、参数、资源和输出。
-- 验收：不同来源进入统一准备流程且缺失证据不伪造；CLI 仅参数、资源、格式和输出。
-- 验收：普通发布不触发重建；重建仍需精确确认，等待输入不刷进度；不新增后台调度。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :adapters:test :adapters:postgresIntegrationTest`。
-
-- 实现边界：Catalog v2/change 2.0.0；5 个主要产品文件完成准备用例、发布端口、应用服务、持久化和 CLI 的原子切换，删除 raw-row 发布端口，不以转发包装保留重复业务逻辑。
-
-### 1.3.13. LF-TSK-ENR-2001 · 分离原文位置匹配与发布候选资格检查
-- 主责：`LF-WS-ENR`；预计 90 分钟；前置：`LF-TSK-LEX-2004`。
-- 产出：从现有提示策略提取实际被调用的位置匹配和发布候选完整性校验，保留精确范围和冲突证据。
-- 验收：位置匹配独立处理词边界、重复出现、标点和 UTF-16 范围；不重复实现已归 Enrichment 应用层的查询键枚举。
-- 验收：只消费已发布默认义和动作；资格校验不重做离线清洗，不用预过滤掩盖同形多条目冲突。
-- 验收：提取组件被现有策略实际消费，不留空框架；未改规则部分用同一合成样例验证行为保持。
-- 实现边界：Catalog v3/change 3.0.0；领域内包可见组件按设计 1.6.3 拆分，移除观看时静态短语重筛，保留短释安全和全部歧义证据。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :enrichment:test`。
-
-### 1.3.14. LF-TSK-ENR-2002 · 实现增量编排、默认义资格与提示选择边界
-- 主责：`LF-WS-ENR`；预计 90 分钟；前置：`LF-TSK-ENR-2001`。
-- 产出：新增区间、资格、冲突选择、请求合并、坐标映射独立，移出诊断文本拼接。
-- 验收：消费发布时的静态资格，不动态重算基础名单或清洗来源；运行期范围和发布身份校验不移除。
-- 验收：跨区间重复、跨片段偏移和混合版本安全处理；同形歧义不能被提前过滤掩盖。
-- 验收：排序/重叠处理符合批准规则；默认义不宣称语境正确。
-- 实现边界：Catalog v2/change 2.0.0；规划、映射、合并和冲突选择按设计 1.6.3 提取为被实际调用的包内组件；全部版本证据先于去重，诊断字段直接删除，授权日志合同不变。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :enrichment:test :api:test`。
-
-### 1.3.15. LF-TSK-OBS-2002 · 实现普通结构化观测与敏感记录适配器
-- 主责：`LF-WS-OBS`；预计 90 分钟；前置：`LF-TSK-OBS-2001`、`LF-TSK-ENR-2002`。
-- 产出：按日志合同实现适配器及脱敏/格式/失败隔离测试，不触发额外资料采集。
-- 验收：所有事件字段类型、原因及单位匹配合同；对无提示/失败不混淆，正文与凭据不进入普通日志。
-- 验收：敏感记录文件实现与普通日志分离，沿用同步调用及重试/重启去重/失败语义，不构造假异步成功。
-- 实现边界：Catalog v2/change 2.0.0；普通封闭事件、敏感文件 Store、API 中立记录映射与装配同步切换，细节见观测合同 1.6，不改变 HTTP 协议。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test :api:test`。
-
-### 1.3.16. LF-TSK-API-2001 · 落实启动模式和已发布资料装载
-- 主责：`LF-WS-API`；预计 90 分钟；前置：`LF-TSK-OPS-2002`、`LF-TSK-ENR-2002`、`LF-TSK-OBS-2002`。
-- 产出：正式/演示模式、发布身份、缓存初始化和就绪/降级行为匹配冻结合同。
-- 验收：正式配置缺失不静默退回五词演示库；空发布、数据库故障、预热失败均有确定行为。
-- 验收：只装载有界发布资料，不执行导入/重建/模型；英文展示不依赖启动成功。
-- 实现边界：Catalog v2/change 2.0.0；运行状态、查询预热降级与只读结构/策略验证同批落地，详见设计 1.2.2.1。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :api:test :adapters:postgresIntegrationTest :integration-tests:runtimeSmoke`。
-
-### 1.3.17. LF-TSK-API-2002 · 连接请求主线、HTTP 映射和终态日志
-- 主责：`LF-WS-API`；预计 90 分钟；前置：`LF-TSK-API-2001`、`LF-TSK-OBS-2002`。
-- 产出：控制器调用应用用例和观测端口，移除直接文件实现，保留外部协议和计时消费合同。
-- 验收：正常/空提示/无新增/非法请求/故障均有一致响应与终态汇总，不把敏感台账作为普通日志。
-- 验收：敏感记录失败不改变提示结果，不隐瞒失败；原 SegmentAnalysisLog 的消费者和测试完成迁移。
-- 验收：不因模块拆分随意修改 HTTP 字段；Server-Timing 如增项必须同步消费者并测试。
-- 实现边界：Catalog v2/change 2.0.0；请求属性、统一HTTP终态与实测领域选择计数同批落地，详见观测合同 1.7。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :enrichment:test :api:test`。
-
-### 1.3.18. LF-TSK-EXT-2001 · 收拢页面生命周期与采集快照协调
-- 主责：`LF-WS-EXT`；预计 90 分钟；前置：`LF-TSK-API-2002`。
-- 产出：页面生命周期和采集快照从入口解耦，请求协调器保持唯一请求状态所有者。
-- 验收：导航/跳转/字幕关闭/增强开关准确失效；新增字幕不清除仍有效提示，旧响应不跨字幕展示。
-- 验收：采集、请求、展示不重复维护同一状态；本机偏好不上传、不新增采集。
-- 直接检查：`npm --prefix extension test`。
-
-- 实现边界：Catalog v2/change 2.0.0；按设计 1.6.5 提取生命周期与采集的唯一状态所有者，冻结 4 个主要实现/构建文件及 3 个测试文件，不重写 stream 或 overlay。
-
-### 1.3.19. LF-TSK-EXT-2002 · 对齐客户端观测和显示边界
-- 主责：`LF-WS-EXT`；预计 60 分钟；前置：`LF-TSK-EXT-2001`。
-- 产出：客户端采集/传输/显示耗时与失败原因匹配新节点，英文优先及本机抑制保持。
-- 验收：超时、取消、迟到及无提示分开计数；有界聚合、不输出正文、不上传个人偏好。
-- 验收：HUD/Server-Timing 消费者与后端一致；真实页面体验不能仅由夹具测试宣称。
-- 直接检查：`npm --prefix extension test`。
-
-- 实现边界：Catalog v2/change 2.0.0，预计 90 分钟；按观测合同 1.9 接通 7 个客户端实际节点，更新全部计数消费者和精确次数测试，不改变提示协议或本机偏好存储。
-
-### 1.3.20. LF-TSK-QLT-2001 · 串行核验完整主线及跨模块验收矩阵
-- 主责：`LF-WS-QLT`；预计 90 分钟；前置：`LF-TSK-API-2002`、`LF-TSK-EXT-2002`、`LF-TSK-OPS-2002`、`LF-TSK-OBS-2003`。
-- 产出：补齐合成集成场景与规则变化证据，冻结交付输入供独立 TASK_VALIDATION 使用。
-- 验收：覆盖基础词/词形、重点/长尾/未知频率、可靠和噪声短语、坏默认义、同形冲突、增量范围及版本切换。
-- 验收：覆盖冷缓存、正式/演示启动、取消迟到、敏感记录故障和发布回滚；使用隔离服务，不连接用户运行库。
-- 验收：规则改变有批准依据与预期差异；同输入 Change/Repository Verify 未齐备不得 PASS。
-- 直接检查：`python3 scripts/check_changes.py && python3 scripts/check_repository.py`。
-
-- 实现边界：Catalog v3/change 3.0.0；新增既有 runtimeSmoke source set 的真实发布主线测试，范围及复用矩阵见[主线验收](acceptance.md)。不修改产品实现、不新建模块，源码缺陷单独返回 owner。
-
-### 1.3.21. LF-TSK-ARCH-2005 · 同步最终功能文档并核对阶段交付证据
-- 主责：`LF-WS-ARCH`；预计 60 分钟；前置：`LF-TSK-QLT-2001`、`LF-TSK-ARCH-2004`。
-- 产出：最终文档与冻结实现一致，P2 各项证据、限制、用户验收及未来待办归属清楚；最终收尾同时依赖 QLT-2002 的发布闭环验收。
-- 验收：清理分散的第二/第三阶段归属陈述；图文只描述已确定主线，模型/隐私护栏不放宽。
-- 验收：区分静态检查、合成集成、真实页面与正式 receipt；不自签独立 validation/review，不将规划完成当产品完成。
-- 验收：未选入本阶段的性能、多义项、上下文和知识补充事项仍在后续池；不得宣布其已实现。
-- 直接检查：`python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check && python3 -m scripts.repository.policy_projection --check`。
-
-### 1.3.22. LF-TSK-OBS-2003 · 接通导入步骤和缓存版本事件
-- 主责：`LF-WS-OBS`；预计 90 分钟；前置：`LF-TSK-OBS-2002`、`LF-TSK-API-2001`、`LF-TSK-OPS-2002`。
-- 产出：在导入与缓存实际处理节点接通结构化事件，区别适配器可用与节点已经落地。
-- 验收：导入固定步骤开始/完成和一次终态，等待确认不发执行心跳；来源变化与回滚使用固定原因，保留交互输出。
-- 验收：缓存版本清理后恰好一次事件，携带真实正/负失效数量；同版本不重复打印，失败不改变业务结果，不泄漏正文/词形/路径。
-- 验收：核心模块仅交接结构化事实或端口，不依赖logger；实际CLI/查询与隔离发布回归共同证明事件时机和次数。
-- 直接检查：`python3 -m scripts.environment.java_exec backend/gradlew -p backend :lexicon:test :adapters:test :adapters:postgresIntegrationTest :api:test`。
-
-- 实现边界：Catalog v2/change 2.0.0；按[观测合同 1.8](observability.md#18-导入与缓存的实际节点交接)接通类型化观察端口、完整准备计数、实际事务边界和缓存失效值；只在事务提交确认后报告发布成功，不把未知故障称为已回滚。
+- 产品主线和跨模块矩阵：[主线验收合同](acceptance.md)。
+- 制品、安装升级、恢复与发行：[发布与使用闭环](release.md)。
+- Agent 调度与分层检查：[Agent workflow](../../../development/agent-workflow.md) 和 [交付主干](../../../development/change-delivery.md)。
+- 后续模型与性能事项：[后续待办池](../future.md)，不混入本阶段。
 
 ## 1.4. 准备与交付证据的区别
 
-准备阶段仅运行文档、Catalog 与 policy projection 静态检查，说明任务可读取、依赖无环和共享规则未漂移；不执行产品实现或伪造完整验收。正式交付时，直接测试和同输入 Change/Repository Verify 在 TASK_VALIDATION 边界内核验；INDEPENDENT_REVIEW 只读冻结 diff/evidence，CATALOG_DECISION 只核对 receipt 与依赖 hash DAG。未运行、跳过或缺环境不得称 PASS。
-
-后续事项唯一汇总在[后续待办池](../future.md)，每次再由用户选入下一个阶段。
+准备阶段仅运行文档、Catalog 与 policy projection 静态检查，说明任务可读取、依赖无环和共享规则未漂移；不执行产品实现或伪造完整验收。独立验收时，直接测试与风险计划要求的验证在 TASK_VALIDATION 边界内执行；正式发行仍需完整 Repository Verify。INDEPENDENT_REVIEW 只读冻结 diff/evidence，CATALOG_DECISION 只核对 receipt 与依赖 hash DAG。未运行、跳过或缺环境不得称 PASS。
 
 ## 1.5. 计划整合与共享入口
 
-### 1.5.1. LF-TSK-QLT-2003 · 整合二期任务、授权边界与发布交付目标
+以下为 Catalog 定位索引，不另存版本、预算或验收副本。
 
-- 主责：`LF-WS-QLT`；预计 90 分钟。
-- 按用户授权确定 macOS 调试与 Docker 发布、phase2 及子任务分支集成，不冒充一期收尾完成或远端发布授权。
-- 所有二期范围具有稳定任务身份、责任、具体输出、直接检查与精确依赖；最终任务覆盖全部阶段交付，不复用一期 receipt。
-- 今天已完成的清洗功能不重复排期；公开接口与全部消费者按可构建工作片调整；后续模型/性能专项不混入。
-- 设计、静态检查、产品实现和正式验收分开记录；OpenSpec ignored 入口不承载唯一共享合同。
+| Task（省略 `LF-TSK-`） | 职责 |
+| --- | --- |
+| QLT-2003～2004 | 任务整合、发布检查与用户入口 |
+| QLT-2005～2006 | 依赖重送恢复、原生与 Qoder 并发边界 |
+| QLT-2007～2008 | 只读消费 Formal 链及同候选联合证据 |
+| OPS-2012～2014 | 候选完整性、共享执行会话与安装适配 |
+| OPS-2015～2016 | 同候选实机验收与准备失败恢复 |
+| OPS-2017～2018 | 不可替换晋升与同宿主工作流 |
 
-### 1.5.2. LF-TSK-QLT-2004 · 将发布验收与使用入口接入共享工程合同
+## 1.6. Agent 调度与质量门禁优化
 
-- 主责：`LF-WS-QLT`；预计 90 分钟。
-- 在 module-checks 注册真实发布检查及其输入/依赖/环境，发布代码变动进入 Change/Repository Verify，不只运行文档检查。
-- 缺 Docker 或必要资料与目标架构记 BLOCKED，不跳过业务验收；单元测试证明 check 选择和环境传播。
-- README 阅读合同调整为取得发行产物、初始化与启动使用，macOS 编译调试保留按需入口，不重复维护规则。
+QLT-2101～2108 依次负责规则、诊断、执行器、风险与窗口、同事务复用、证据与 DAG、浏览报告、收益核实。机制与约束见 Harness 和[长期执行规范](../../../../openspec/specs/agent-execution/spec.md)；自检、独立验收与正式发行不得互相替代。
 
-- 来源绑定采用 Catalog v3/change 3.0.0：共享 Verify 快照拒绝链接和特殊文件、绑定执行位，缺失输入不得冻结为 PASS；此原语不代替实际候选与 Apple Silicon macOS Docker 验收。
+## 1.7. 当前文档精简
 
-### 1.5.3. LF-TSK-QLT-2005 · 修复依赖送验恢复
-
-- 主责：`LF-WS-QLT`；预计 60 分钟；前置：`LF-TSK-QLT-2003`。
-- 问题：失败送验必须保留，但既有 Gate 在读取验收链前按送验数量判歧义，导致失败重送无法交给下游。
-- 改造：仅采用唯一完整 PASS 链，不按最新时间或任意顺序选择；多个 PASS、损坏/重复记录、身份/hash/嵌套依赖异常仍阻断。
-- 验收：隔离 fixture 覆盖失败后成功、未完成、零/多条 PASS、篡改和嵌套依赖；不删真实历史，不重跑交付命令。
-- 此项是用户批准的工程阻塞修复，列入启动核对前置，不改变二期产品范围。
-
-### 1.5.4. LF-TSK-QLT-2006 · 分离原生并发与 Qoder 单并发
-
-- 主责：`LF-WS-QLT`；预计 30 分钟；来源：用户在 EXT-2003 执行期间追加的并发授权。
-- 原生 Codex 上限为 6，Qoder 仍保持 host-wide 单并发 1；共享 policy 投影到 runtime、Catalog 和模板，客户端 TOML 消费同值。
-- runner 回归核对所有消费者一致、Qoder 边界和串行集成验证；独立验证与审查身份不变。
-- 配置检查不证明宿主派发已恢复，必须另有实际原生子任务结果；不修改产品实现或扩展发行合同。
-
-
-### 1.5.5. LF-TSK-QLT-2007 · 只读消费已有独立 Formal 验收链
-
-- 主责：`LF-WS-QLT`；预计 75 分钟；来源：原地升级与 GitHub 分层发布授权中对独立 Formal 的要求，发现于 `LF-TSK-QLT-2004`。
-- 产出：只读读取唯一既有 submission、validation、review、check 链，核验冻结输入、authority、hash DAG、精确依赖及批准；返回同链绑定的 validation report descriptor。
-- 缺少 check 或其他必需证据必须 BLOCKED，不调用可能签发新 check 的路径，不运行交付检查；不接受自报 actor 或任意候选加无关 PASS。
-- 此入口不是新增验收阶段，不签发 receipt，也不代替候选实际运行绑定；跨宿主无法核验既有原生身份时仍阻断。
-- 直接检查：`python3 -m unittest discover -s tests/delivery_gate`，以及 Catalog、docs、policy 检查。fixture 只证明工具行为，不能作为真实发行授权。
-
-
-### 1.5.6. LF-TSK-OPS-2012 · 校验实际候选目录与运行消费身份
-
-只读消费既有 `candidate.json`、规范 manifest 与实际制品字节，复用完整 build identity、路径和许可关联规则，不建立平行候选格式。`pipeline verify` 只接收候选目录及其预期摘要，拒绝缺失、额外、篡改、非普通文件和身份漂移，输出实际绑定的 candidate/manifest 身份供运行与晋升入口消费。
-
-完整性核验不执行候选脚本、不加载镜像、不写入候选目录，不能替代 Apple Silicon Podman 的同卷升级与失败恢复、许可人工确认或独立 Formal 链。直接测试须覆盖真实 assemble 输出、clean SNAPSHOT/正式身份、失败拒绝和目录不写入；执行状态留在状态页。
-
-
-### 1.5.7. LF-TSK-OPS-2013 · 共享本机安装执行会话
-
-本机入口导出 `runLocal(argv)`：导入无执行副作用，每次调用隔离参数、安装状态、锁、日志和取消状态；返回退出码而不修改宿主进程退出状态。同一模块实例的并发调用在副作用前拒绝，结束或失败后可再次调用。命令行仅作薄转发，继续使用同一安装流程和 `upgradeInstallation` 事务。
-
-该能力是固定候选运行适配的内部基础，不提供任意命令 hook、平台绕过或第二套安装状态机。直接验证包含无副作用导入、连续调用、失败重试、并发拒绝及原 CLI 回归；不代表实际候选已经运行验收。
-
-
-### 1.5.8. LF-TSK-OPS-2014 · 将实际候选接入本机安装与升级事务
-
-固定候选模式只消费既有候选目录及其摘要，不接受任意命令、hook、环境身份或替代 manifest。首装与源码模式共享阶段、锁、记录和就绪条件，制品输入改为已核验的 ARM64 镜像、固定扩展 ZIP 与 dataset.zip；不运行候选中的脚本。安装模板只执行明确的本机端口、网络和密码文件适配。
-
-升级仍由 `upgradeInstallation` 执行，仅替换 API 和扩展，保留 PostgreSQL、资料、密码和端口。运行记录绑定实际候选及 manifest 摘要；固定扩展要求 API 端口 18080，不改写归档权限来使隔离测试通过。全内容 ZIP 读取复用同一受限解析器，按摘要、大小和条目边界拒绝漂移；替身验证不等于真实 Podman 验收。
-
-
-### 1.5.9. LF-TSK-OPS-2015 · 执行同候选 ARM64 原生安装升级验收
-
-验收直接消费 previous 与 target 的候选目录和摘要，target 完整身份必须与冻结干净源码一致。入口复用 `runLocal`，在自身独占临时安装中验证首装、重复安装、同构建 no-op、同卷升级、真实启动失败自动恢复及重试；不接受任意安装位置、命令或调用者成功声明。
-
-固定 18080 被占用即停止。故障注入与最终清理只能操作本次逐项验证归属的容器、网络和卷；进程未静止或归属不明时保留现场。实际阶段、候选/manifest 摘要和完整身份进入 Verify 的 hash-bound stdout，不能用替身测试或来源桥接的合成生命周期代替。
-
-
-### 1.5.10. LF-TSK-OPS-2016 · 有界恢复升级准备失败的私有工作目录
-
-源码和候选升级共用持久写入证据，部分文件或中断后的清理必须核对预期内容与归属。正常失败和可证明的中断恢复后，在原安装目录重试，不改变 PostgreSQL、资料、密码或固定扩展路径。
-
-未知内容、符号链接或证据缺失保留单一待恢复事务并停止；不删除 journal 后反复积累新工作目录，也不按文件名或全局通配删除未知内容。直接测试覆盖重复失败、写入窗口强杀和漂移拒绝，不代替实机验收。
-
-
-### 1.5.11. LF-TSK-QLT-2008 · 联合消费候选运行与已有 Formal 证据
-
-联合消费者只从既有完整 Formal 链绑定的 validation report 取得实际候选 baseline Check 的 stdout，核对运行、冻结输入、完整阶段及清理，再将受验目标与目录制品和干净源码的完整身份核对。调用者只能指定 submission 与候选目录，不能拼接另一份 PASS 或自行提供摘要。
-
-该能力只读且不重跑交付命令，不签发 receipt 或发布许可；正式晋升仍需精确标签、来源许可、不可替换远端配置和明确发布授权。
-
-
-### 1.5.12. LF-TSK-OPS-2017 · 晋升已验收候选为不可替换发行
-
-只读联合证据、干净正式标签和已核准许可表共同约束发布输入；默认仅准备，不授予远端写。发布时先核对实际 immutable 配置及远端 tag，再创建 draft、上传固定公开资产并逐项核对摘要，最终才 publish 并确认 latest。已有发行、缺少许可或凭据、摘要不符和未知响应均停止，不替换、不删除、不自动重试写请求。
-
-直接测试使用合成候选与传输替身，不作为实际公开发布证据；工作流接线和真实 runner/Formal 验收仍须分别满足。用户另行批准实际远端发布后才能执行 `--publish`。
-
-
-### 1.5.13. LF-TSK-OPS-2018 · 接通实际候选与原生验收工作流
-
-正式标签在受控 Apple Silicon Podman 宿主构建实际 JAR、扩展和镜像，复用候选组装与完整 Verify；真实 previous 与 target 必须区别于机制 fixture。许可材料、构建来源及实际候选输入缺失时停止，不自动确认再分发权。
-
-原生独立 validation/review/check 在受验 checkout 与同宿主证据上完成，Actions 不签发或模拟 actor 身份。续办不得覆盖 checkout 或跨机仅复制 JSON；显式批准后才向既有晋升消费者提供发布凭据。工作流替身测试不代表远端已配置或实际发布已执行。README 保留普通用户最短操作入口。
+QLT-2109 删除失效文档与入口，不留备份；逐篇压缩重复背景和赘述，保留必要合同、操作步骤及验收边界，不统一按比例删减。范围与直接检查见 Catalog，执行事实见[状态页](status.md)。

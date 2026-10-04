@@ -1,6 +1,6 @@
 # 1. 观看请求：从字幕到词段提示
 
-**位置：** [架构总览](../overview.md) → [两条流程](../flows.md) → 观看请求。**前置：** 来源提供当前已渲染的英文字幕；**输出：** 当前字幕可用的提示或空结果；**下一步：** 展示后等待下一字幕；**失败：** 保留英文并丢弃不可靠或迟到的提示。
+[架构总览](../overview.md) → [两条流程](../flows.md) → 观看请求。本文展开单次字幕请求的调用顺序与失败降级。
 
 这张时序图只画**一次当前字幕请求**。英文在 M1 后已经可见，M2—R4 都是可降级的附加工作，不构成字幕显示的前置条件。
 
@@ -48,4 +48,4 @@ M1 的来源是 YouTube 已渲染字幕；扩展把当前文本与本机观察�
 
 ## 1.3. 合同与代码位置
 
-源端采集与展示分别在 [`extension/src/caption-source.ts`](../../../extension/src/caption-source.ts)、[`extension/src/overlay.ts`](../../../extension/src/overlay.ts)；HTTP 映射在 [`CaptionHintController.java`](../../../backend/product/api/src/main/java/io/lexiflow/api/hints/CaptionHintController.java)，用例在 [`EnrichCaptionUseCase.java`](../../../backend/product/enrichment/src/main/java/io/lexiflow/enrichment/application/caption/EnrichCaptionUseCase.java)，领域判断在 [`DeterministicHintPolicy.java`](../../../backend/product/enrichment/src/main/java/io/lexiflow/enrichment/domain/policy/DeterministicHintPolicy.java)。这些位置帮助追踪当前实现，不替代[长期产品架构规范](../../../openspec/specs/product-architecture/spec.md)或[状态页](../../roadmap/master-plan/status.md)的交付事实。
+源端采集与展示分别在 [`extension/src/caption-source.ts`](../../../extension/src/caption-source.ts)、[`extension/src/overlay.ts`](../../../extension/src/overlay.ts)；HTTP 映射在 [`CaptionHintController.java`](../../../backend/product/api/src/main/java/io/lexiflow/api/hints/CaptionHintController.java)，用例在 [`EnrichCaptionUseCase.java`](../../../backend/product/enrichment/src/main/java/io/lexiflow/enrichment/application/caption/EnrichCaptionUseCase.java)，领域判断在 [`DeterministicHintPolicy.java`](../../../backend/product/enrichment/src/main/java/io/lexiflow/enrichment/domain/policy/DeterministicHintPolicy.java)。这些位置帮助追踪当前实现，不替代[长期产品架构规范](../../../openspec/specs/product-architecture/spec.md)或[状态页](../../roadmap/master-plan/phase2/status.md)的交付事实。

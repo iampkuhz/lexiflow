@@ -52,7 +52,9 @@ public_executables:
   ci_quick: python3 -m scripts.verification.ci plan|quick
   change_verify: python3 scripts/check_changes.py
   repository_verify: python3 scripts/check_repository.py
+  development_verify: python3 -m scripts.verification.development
   verification_diagnose: python3 -m scripts.verification.diagnose change|repository
+  verification_work_package: python3 -m scripts.verification.work_package <request.json>
   planning_check: python3 -m scripts.repository.planning_check
   qoder_delegation: python3 -m scripts.agents.delegation.qoder_cli
   codex_work_package_verify: python3 -m scripts.agents.delegation.codex_cli verify --run-id <run_id>
@@ -79,7 +81,7 @@ script_governance:
   - no-product-runtime-import
   promotion: explicit-user-approved-contract-and-tests
 quality:
-  delivery_command: python3 scripts/check_changes.py
+  delivery_command: python3 -m scripts.verification.development
   repository_baseline_command: python3 scripts/check_repository.py
   full_command: python3 -m scripts.delivery_gate validate --submission-id <submission-id>
   layering:
@@ -105,7 +107,6 @@ docs:
 - docs/development/reference.md
 - docs/development/troubleshooting.md
 - docs/roadmap/master-plan.md
-- docs/roadmap/master-plan/foundation.md
 - docs/roadmap/master-plan/phase2.md
 - docs/roadmap/master-plan/phase2/design.md
 - docs/roadmap/master-plan/phase2/tasks.md
@@ -113,7 +114,6 @@ docs:
 - docs/roadmap/master-plan/future.md
 - docs/roadmap/master-plan/performance.md
 - docs/roadmap/master-plan/improvement.md
-- docs/roadmap/master-plan/status.md
 - openspec/specs/product-architecture/spec.md
 - openspec/specs/agent-execution/spec.md
 local_only:

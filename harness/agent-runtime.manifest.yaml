@@ -209,18 +209,53 @@ subagent_protocol:
   codex_work_package_task_projection:
     schema_version: lexiflow.codex-work-package-task-projection.v1
     unit: one-immutable-raw-task-per-target-catalog-task
-    exact_top_level_fields: [schema_version, work_package_id, task_ids, target_task_id, task_id, task_source,
-      task_version, change_version, allowed_files, forbidden_files, expected_output, acceptance_criteria,
-      acceptance_evidence, validation_command, caller_contract, parent_session_id, agent_id, run_id, session_id,
-      client, parent_client]
-    caller_contract_exact_fields: [goal, work_package_id, task_ids, task_versions, change_versions,
-      estimated_minutes, primary_owner, contract_boundary, allowed_files, forbidden_files, required_context,
-      expected_outputs_by_task, acceptance_by_task, validation_commands, failure_policy, parent_client]
-    task_ids_rule: exact-ordered-unique-minimum-two
+    exact_top_level_fields:
+    - schema_version
+    - work_package_id
+    - task_ids
+    - target_task_id
+    - task_id
+    - task_source
+    - task_version
+    - change_version
+    - allowed_files
+    - forbidden_files
+    - expected_output
+    - acceptance_criteria
+    - acceptance_evidence
+    - validation_command
+    - caller_contract
+    - parent_session_id
+    - agent_id
+    - run_id
+    - session_id
+    - client
+    - parent_client
+    caller_contract_exact_fields:
+    - goal
+    - work_package_id
+    - task_ids
+    - task_versions
+    - change_versions
+    - estimated_minutes
+    - primary_owner
+    - contract_boundary
+    - allowed_files
+    - forbidden_files
+    - required_context
+    - expected_outputs_by_task
+    - acceptance_by_task
+    - validation_commands
+    - failure_policy
+    - parent_client
+    task_ids_rule: exact-ordered-unique-minimum-one
     target_rule: target_task_id-equals-task_id-and-is-member-of-task_ids
     per_task_maps_rule: exact-keyset-equals-task_ids-and-target-values-match-projection
     current_catalog_rule: all-task-versions-owner-outputs-acceptance-validation-and-package-scope-must-match-current-catalog
-    qoder_only_fields_forbidden: [permission_mode, _resume_mode, title]
+    qoder_only_fields_forbidden:
+    - permission_mode
+    - _resume_mode
+    - title
     raw_json_rule: duplicate-keys-rejected-noncanonical-whitespace-accepted-and-hash-bound
   runner_bound_identity:
     parent_session_id:

@@ -4,24 +4,23 @@
 
 ### Requirement: 子任务身份和文件所有权
 
-Catalog Task MUST 保持单一 owner、单一可验收 outcome 和独立 evidence identity，但 MUST NOT 机械映射为一次 Codex Sub-Agent 会话。每个 Qoder run MUST 有稳定 `task_id`；每个 Codex run MUST 有稳定 `work_package_id`、精确有序的 `task_ids[]`、唯一 agent/run identity、明确读写范围和验证命令。每个被聚合的 Task MUST 分别留下 outcome evidence；并行写范围 MUST NOT 重叠。
+Catalog Task MUST 保持单一 owner、单一可验收 outcome 和独立 evidence identity，但 MUST NOT 机械映射为一次 Codex Sub-Agent 会话。当前 Catalog 是 owner、discovery、file claims、Task/version、acceptance 与 validation contract 的权威来源，不可由 caller 自报覆盖。每个 Qoder run MUST 有稳定 `task_id`；每个 Codex run MUST 有稳定 `work_package_id`、精确有序的 `task_ids[]`、唯一 agent/run identity、明确读写范围和验证命令。每个被聚合的 Task MUST 分别留下 outcome evidence；并行写范围 MUST NOT 重叠。
 
 调用者提供的 handoff、runner 绑定身份和结果字段 MUST 与 `harness/agent-policy.manifest.yaml` 的当前分层 schema 一致。Qoder 的 Task/version/acceptance 输入，以及 Codex 的 package/task/version/owner/contract/acceptance 输入，MUST 在派发前验证。调用者 MUST NOT 提供 `agent_id` 或 `run_id`；Qoder 调用者还 MUST NOT 提供 `session_id` 或 `client`。运行时 MUST 生成或绑定这些 runner identity。
 
-#### Scenario: 多个兼容 Task 组成一个 Codex 工作包
+#### Scenario: 单个有界 Task 组成 Codex 工作包
 
-- **Given** 至少两个连续 Task 具有相同 primary owner、contract boundary 和兼容写范围
-- **And** 总预计时间不少于 120 分钟
+- **Given** 一个 Task 有冻结 contract、明确 owner 和兼容写范围，预计工作量至少 10 分钟
 - **When** 主 Agent派发 Codex 实现
-- **Then** 一个 handoff SHALL 使用稳定 `work_package_id` 和精确有序的 `task_ids[]`
-- **And** 完成产物 SHALL 为每个 Task 分别记录 outcome evidence
+- **Then** 一个 handoff SHALL 使用稳定 `work_package_id` 和恰含该 Task 的有序 `task_ids[]`
+- **And** 完成产物 SHALL 为该 Task 记录 outcome evidence
 
-#### Scenario: 工作量不足两小时
+#### Scenario: 确定性微任务留在主 Agent
 
-- **Given** 候选工作只包含单文件修复、单命令验证、孤立只读审阅或总预计时间不足 120 分钟
+- **Given** 候选工作是确定性单命令任务或预计不超过 10 分钟的小修复
 - **When** 主 Agent 选择执行者
 - **Then** 工作 SHALL 留在主 Agent
-- **And** SHALL NOT 为制造进度启动 Codex Sub-Agent
+- **And** SHALL NOT 为制造进度启动子代理
 
 #### Scenario: 调用者预填 runner identity
 
@@ -30,14 +29,23 @@ Catalog Task MUST 保持单一 owner、单一可验收 outcome 和独立 evidenc
 - **Then** 派发 SHALL 在创建 run 前失败
 - **And** 持久化成功的任务 SHALL 只包含 runner 生成或绑定的 identity
 
-#### Scenario: Codex 工作包投影为独立 Task evidence
+#### Scenario: Codex 工作包发布独立 Task evidence
 
-- **Given** 一个 Codex work package 含至少两个 ordered catalog Task
-- **When** 任一目标 Task 进入 generic evidence materializer
-- **Then** raw task SHALL 使用 `lexiflow.codex-work-package-task-projection.v1`
+- **Given** 一个 Codex work package 含一个或多个 ordered catalog Task
+- **When** runner 为 package 发布 per-Task 投影
+- **Then** 每个 raw task SHALL 使用 `lexiflow.codex-work-package-task-projection.v1`
 - **And** SHALL 精确绑定同一 `work_package_id`、原顺序 `task_ids[]`、目标 Task、完整 caller contract 与 runner identity
 - **And** caller contract SHALL NOT 包含 runner identity，raw task SHALL NOT 包含 Qoder `permission_mode`、`_resume_mode` 或 `title`
 - **And** 每个目标 Task SHALL 保留独立 packet、plan 和 outcome evidence
+
+Qoder/Codex `client` MUST 只标识工具类型并符合当前枚举。Qoder producer fact MUST 从 runner-owned task/completion/result 文件读取并按原始 locator/hash 绑定；接受合法 JSON 空白格式但按原始字节绑定 hash；重复键、Task/run/version 不一致、非终态或不完整结果 MUST 拒绝。Codex 的 caller contract、per-Task projection 与产物 MUST 精确对账当前 Catalog；Main-only 与 delegated 来源不得互相冒充。
+
+#### Scenario: Main-only Codex Task 使用独立投影
+
+- **Given** 当前真实 runtime actor 是 Main Codex Task 且未委派实现
+- **When** runner 为该 Main-only singleton 构造 evidence
+- **Then** SHALL 使用 `lexiflow.codex-main-task-projection.v1` 并绑定唯一 current Task 与同一 snapshot/diff/identity validators
+- **And** MUST 与 delegated package projection 互斥，caller 自报 executor kind、伪装 Qoder 或放宽 delegated package 最小数不得取得 Main-only 权限
 
 #### Scenario: Canonical Codex 完成产物
 
@@ -50,14 +58,14 @@ Catalog Task MUST 保持单一 owner、单一可验收 outcome 和独立 evidenc
 
 ### Requirement: Codex 工作包规模与并发
 
-Codex Sub-Agent 同时 MUST 最多一个。一个 Codex 工作包 MUST 聚合至少两个 compatible catalog Task，总预计时间 MUST 不少于 120 分钟，目标 SHOULD 不超过 360 分钟；完整历史默认 MUST NOT fork。完成回调 MUST 只包含 status、package/task/run identity、artifact locators、validation commands 和最多三条 blocking findings，MUST NOT 返回完整源码、日志或长上下文。
+Codex 原生子代理同时最多 MUST 遵守 `harness/agent-policy.manifest.yaml` 的并发上限；不同子代理仅在写域隔离时可并行，集成验证 MUST 串行。Codex 工作包可包含一个或多个兼容 Task，规模按 policy 的工作包边界确定；确定性单命令或不超过 10 分钟的小修复留在主 Agent。内部委派默认使用原生 subagent，不得以创建普通任务绕过身份或 Hook；仅在 policy 要求的多轮验证、Hook 阻塞、定向修复/能力限制证据与用户明确授权齐备时，才允许开新任务兜底，且必须显式选择并核对实际模型/推理参数。Qoder 仍受宿主 OS 用户范围的单运行约束，不得与 Codex 并发规则混淆。完整历史默认 MUST NOT fork。实现者 MAY 执行静态、编译和直接测试作为自检，但 MUST NOT 签发 Formal validation 或 independent review；验证与审查必须由不同真实 actor 完成。完成回调 MUST 只包含 status、package/task/run identity、artifact locators、validation commands 和最多三条 blocking findings，MUST NOT 返回完整源码、日志或长上下文。
 
-#### Scenario: 已有 Codex 工作包运行
+#### Scenario: 兼容写域可并行，集成验证串行
 
-- **Given** 一个 Codex Sub-Agent 尚未终态
-- **When** 另一个工作包已准备执行
-- **Then** 主 Agent SHALL 保留后者等待
-- **And** SHALL NOT 启动第二个 Codex Sub-Agent 或用 Qoder 绕过写入冲突
+- **Given** 多个 Codex 子代理均处于 policy 并发上限内且写域互不重叠
+- **When** 主 Agent 安排执行与集成验证
+- **Then** 实现工作 MAY 并行
+- **And** 集成验证 SHALL 串行，Qoder 宿主单运行不因此放宽
 
 ### Requirement: Qoder 单运行
 
@@ -131,63 +139,70 @@ Qoder preflight、start 与 resume MUST 通过真实当前父会话绑定的只�
 
 ### Requirement: 真实验收
 
-只有全部 required validation 完成并通过时 MAY 报告 PASS。`queued`、`ack`、退出 0、跳过、未运行和未触发 SHALL NOT 作为 PASS 证据。
+只有当前完整 Delivery Gate 链中 plan 所需 validation、可选 review、dependencies 与 approvals 全部核验为 PASS 时 MAY 报告 Task PASS。`queued`、`ack`、退出 0、跳过、未运行和未触发 SHALL NOT 作为 PASS 证据；实现者自检不是 Formal validation。
 
 #### Scenario: Qoder 退出 0
 
 - **Given** worker 已保存 exit code 0 和 completion
 - **When** 主 Agent 处理回调
 - **Then** run MAY 标记 finished
-- **And** 主 Agent 独立复核运行指定检查后 MAY 接受 implementation evidence
-- **And** catalog Task 只有 current-input `CATALOG_DECISION` receipt 完整验证依赖与证据链后 MAY 标记 PASS
+- **And** completion 与 exit code 只构成 implementation evidence，不得替代独立 `validate`
+- **And** Task 只有 current-input Delivery Gate `check` receipt 验证所需 validation、风险要求的 review、依赖与批准后 MAY 标记 PASS
 
-### Requirement: 可验证的 Gate 控制面
+### Requirement: 风险计划驱动的 Delivery Gate
 
-Gate MUST 从 Main Agent 显式提供的六字段 structured result evidence packet 和固定 authority verifier 证明的 trusted issuer packet 编译纯 plan；MUST NOT 从 stdout、callback、exit code、自然语言 actor/role 或 latest 文件推断结果和权限。
+Delivery Gate 的公开交付入口 MUST 是 `python3 -m scripts.delivery_gate submit|validate|review|check|status`，另提供只读 `consume-existing` 与 `consume-candidate`。调用者 MUST NOT 自报执行者身份或审批权限；MUST NOT 从 stdout、callback、exit code、Task 名称或 latest 文件推断 PASS、授权或真实身份。
 
-Generic evidence packet MUST 能以 hash-bound empty changed-files、empty snapshot 和 empty diff 表达只读 meta-receipt；三者 MUST 精确一致，且 raw identity、tests、scope/claims 与 attestation 仍完整验证。Planner MUST 对 `TASK_VALIDATION` 拒绝空 subject snapshot，但 MAY 为 `INDEPENDENT_REVIEW` 与 `CATALOG_DECISION` 冻结空 reviewer write-set。调用方自报空数组不得替代该 packet 验证。
+`submit` MUST 读取当前 Catalog Task 的 scope、版本、required checks、dependencies 和 approval requirement，接收精确的 PASS `change-targeted` 或 `development-change` 报告及 scope 确认，并核验真实 producer。它 MUST 从真实 diff、changed-file 内容与当前 policy 重算风险及唯一 acceptance plan，并冻结完整检查闭包、输入、风险 assessment 和完整 review patch（包含 untracked bytes）；正式发行仅在 Task `required_check_ids` 命中当前 CI formal-check 集合时成立，且必须使用完整 `repository-baseline`。机械/局部风险使用 `development-change`，高风险工程使用 `development-baseline`；普通开发与高风险工程均不得冒充完整发行验收。任一风险主体、Task 要求、policy、附件或闭包变化都 MUST 使后续阶段拒绝旧结论。
 
-Generic evidence identity MUST 只接受 `client=qoder|codex`。Codex raw task MUST 绑定版本化 per-Task work-package projection，并拒绝 unknown client、duplicate key、字段夹带、少于两个 Task、target 缺失和 runtime identity 漂移。Planner MUST 按 client 使用互斥的 required/optional 字段集合：Qoder initial/resume persisted shape MUST 保持 current strict contract；Codex caller 的 package Task/version/owner/output/acceptance/validation/scope MUST 与 current catalog 对账。Owner、discovery 与 file claims MUST 只由 current catalog 产生。
+`validate` MUST 由不同于 submitter 和真实 producer 的 runtime-bound actor 执行，并通过 Verification 公共 API 对同一冻结计划运行必需 checks；执行前后均 MUST 重核 producer 来源、当前 Task/policy、完整冻结输入及报告。实现者可做静态、编译和直接测试作为自检，但自检 MUST NOT 充当 Formal validation，也不得签发正式 receipt。
 
-Main-only singleton 来源 MUST 使用显式 `lexiflow.codex-main-task-projection.v1`，由受信 runtime 证明真实 Main actor，绑定唯一 current Task 并复用相同 evidence/identity/snapshot/diff validators。该来源 MUST 与 delegated Codex projection 互斥；MUST NOT 通过 caller 自报 executor kind、伪装 Qoder 或降低 delegated package minima 获得权限。独立 issuer 与禁止自审约束不变。
+只有 acceptance plan 要求时，`review` 才 MUST 由同时不同于 submitter、producer 与 validator 的真实 reviewer 消费冻结 diff、附件和 validation evidence，记录明确 findings；它 MUST NOT 运行交付 checks。high-risk-engineering 与 formal-release 要求 review；mechanical 与 local-function 不要求 review，不生成伪 review record，check 链的 `review_id`/hash MUST 为 null。`check` MUST 只核对已发布 validation、计划要求的 review、当前依赖、哈希绑定与 Task 所需的精确用户批准，不重跑测试。`status` 只观察指定 submission。
 
-Qoder issuer provenance MUST 接受真实 runner 的 pretty/noncanonical JSON whitespace，并按 locator/hash 冻结原始 task/completion bytes；materializer 与 Planner MUST 同时拒绝 duplicate key、非法 JSON number、identity/version drift、非终态 completion 与 stale authority evidence。Issuer packet、非 Qoder attestation 和 receipt 的 canonical JSON 规则不变。
+单 Task 主体 MUST 从当前完整真实 diff 与当前 Catalog allowed_files/file_claims 机械派生且非空，MUST 拒绝主体范围内 forbidden/claim 违规；不得由调用者提供过滤路径。风险主体 MUST 包含所选检查声明输入和模块依赖内的实际变化，递归求稳定闭包。提交时来源报告 MUST 匹配完整真实 diff；后续 MUST 重新派生 Task 主体与变化依赖，识别相关新增、删除和字节变化，但闭包外无关写入不单独使局部验证失效。局部 receipt 不代表其他任务或完整工作区验收。
 
-`client` MUST 只表示工具类型。原生子代理 MUST 可以在同一父任务和宿主 Session 下分别实现、验证和审查；本地 adapter MUST NOT 要求独立 Session 或额外独立性认证。实现者与验证者、审查者，以及验证者与审查者 MUST 是不同执行 actor。共享 Session 本身 MUST NOT 构成身份重叠；同一 actor 更换 run、名称或 Session 路由 MUST NOT 获得自验、自审许可。Session MUST 保留真实宿主含义，MUST NOT 伪造；冻结输入、hash 和零 subject write-set 约束保持不变。
+一次 validate 调用 MAY 处理最多 16 个唯一 submission。它 MUST 在任何检查前验证全部身份和冻结，且执行者 MUST 与每一个 producer/submitter 不同；每 Task MUST 保留独立计划、报告和 validation record。等价 Check MAY 复用同次真实窗口与 transaction 的显式允许执行；不得复用历史自检或整份其他 Task 报告。运行中各任务仍须执行前后及发布前新鲜度检查；首次 FAIL/BLOCKED MUST 停止后续昂贵视图，不将未执行项标 PASS。
 
-本机默认 Codex authority MUST 直接读取 owned、非共享可写、非 symlink 的原生 metadata，核对 workspace、thread 与父子关系。根任务使用稳定 `codex-session-<thread-id>` actor；原生子代理使用稳定 `codex-thread-<thread-id>` actor。环境变量仅定位来源；子 thread 与宿主 Session 不同属于合法原生路由，不得机械判为冲突。来源缺失 SHALL BLOCKED，来源矛盾 SHALL FAIL。记录绑定 thread 及父元数据 hash，不绑定持续增长的整份日志。信任边界为本机用户，不是平台密码学认证。
+每份记录和外部附件 MUST 绑定规范 locator、内容 hash 与所需 identity/version/scope；读取 MUST 拒绝重复 JSON key、路径穿越、symlink、非普通文件、重复或损坏 receipt、subject bytes 漂移及不可信 authority 来源。Review patch 和 changed-file snapshot MUST 覆盖冻结主体。Runtime-bound actor MUST 来自实际本机原生 metadata，不得由 caller、actor 字符串或 role 文本伪造。原生子代理可共享父 Session，但身份独立以真实 actor 为准；同 actor 不得通过更换 run、名称或 Session route 获得自验、自审许可。本机默认 Codex authority MUST 核对 owned、非共享可写、非 symlink 的 native metadata 及 workspace/thread/parent 关系；缺失来源 BLOCKED，矛盾来源 FAIL。保持既有本机信任边界：这是本地来源证明而非平台密码学认证，不声称已解决同 OS 恶意冒用。
 
-内部委派 MUST 默认使用原生 subagent，MUST NOT 自动创建普通任务来回避身份或 Hook 问题。只有至少两轮不同的子代理验证均有当前输入 PASS 证据、对应 Hook 仍阻塞、已留下针对性修复尝试和当前任务无法解决的具体原因，并得到用户明确创建授权后，才 MAY 使用新 Session 兜底。重复读取同一 PASS、业务测试失败、单次身份错误或在途未知结果 MUST NOT 满足例外。新任务仍 MUST 执行相同门禁，显式设置模型与推理参数并核对实际运行模型：默认 Luna，只有具体复杂性或失败风险证据才可升级 Sol；不得因 create_thread 继承 Astra。
+依赖闭包 MUST 校验 Task/change 版本、唯一完整 PASS 链、嵌套 receipt hash 与环路；missing、ambiguous、重复、损坏、循环或 stale 链 MUST 阻断。用户批准 MUST 由精确绑定 Gate、Task/version 与对应依赖 check hash 的批准记录证明，系统不得自行生成。`consume-existing` MUST 只读重验唯一完整 PASS 链；`consume-candidate` 还 MUST 要求完整 repository-baseline 报告、真实候选 bytes 与候选运行证据。Review/check/两种 consume MUST NOT 执行交付测试；调用退出 0、ack、跳过或缺失都不是 PASS。
 
-公开 `doctor` MUST 只读报告 runtime readiness；`run --evidence-packet` 在没有显式 issuer 时 MUST 从当前原生任务或子代理来源创建新鲜 authority evidence 与 issuer，再交给原有纯 planner。历史 attestation/receipt MUST NOT 改写、更新时间或自动升级为 current。显式 issuer 仍须严格验证，MUST NOT 隐式替换失效输入；缺少 subject evidence MUST 给出可操作错误而不是要求用户构造 identity JSON。`plan` MUST 保持零写入并要求显式 issuer。
+Receipt 按不可覆盖记录发布；`status` MUST 只依据调用者指定的 submission UUID 返回该链状态，不推断 latest 或发布新结论。Java 产品检查由 Gradle/Java 工具执行：JUnit 执行测试，JaCoCo 产出覆盖率报告；Python Gate MUST NOT 重复扫描 Java 源码实现同义断言。
 
-Gate planner MUST 零写入并只选择 versioned registry 中声明的 fixed argv。Run MUST 在任何 checker 执行前先持久化并 flush `START`，再向调用方 flush 包含唯一 `run_id` 和固定 event locator 的可见 `START`；任一 START 步骤失败时 checker MUST NOT 运行。
+#### Scenario: 单 Task Codex package
 
-`TASK_VALIDATION` MUST 是唯一执行 selected delivery checks 的层。`INDEPENDENT_REVIEW` 与 `CATALOG_DECISION` 的 frozen plan MUST 声明 `checker_execution=forbidden` 且 `checks=[]`，只能消费 hash-bound immutable evidence/receipts；CLI、review handler 和 catalog handler MUST 拒绝 receipt kind、execution layer 与 check set 不一致的 plan。Java 产品源码规则 MUST 由 Gradle/Java 下的 Spotless、Checkstyle、PMD、Java source gate、ArchUnit 与 JUnit/JaCoCo 执行，Python Gate MUST NOT 重复扫描 Java 源码实现同义断言。
+- **Given** 一个有界 Catalog Task 具有冻结 owner、contract、scope 和 acceptance
+- **When** Codex runner 构造 raw task 与完成产物
+- **Then** package MUST 允许一个 Task，并精确绑定有序唯一 `task_ids[]`、Task projection、真实 runtime identity 和各自 outcome evidence
+- **And** 少于当前 policy 最低数量、重复 Task、缺 target 或 identity 漂移 MUST 在派发/发布前失败
 
-TASK_VALIDATION、INDEPENDENT_REVIEW 和 CATALOG_DECISION MUST 通过同一 CLI 的串行 route 写入不可覆盖 receipt。Status MUST 只按调用方提供的 UUID 读取固定 run 路径，MUST NOT 扫描目录或解析 `latest`。Review MUST 验证 reviewer 与 producer 独立，把 reviewer write-set 与 hash-bound current plan 对账，并重新读取 validation packet 绑定的 changed-file snapshot 验证当前 subject bytes/state；调用方自报 changed-files 或 plan 列表 MUST NOT 单独建立 no-write 事实。Catalog closure MUST 再次重验前序链中所有 validation subject snapshots。Hash verifier MUST 只读验证 locator/hash DAG 且拒绝 missing、alias、self-edge、back-edge 和 cycle。Catalog closure MUST 比较 current inputs 的 canonical locator 与 hash，并重新验证每份前序/依赖 receipt issuer packet 的 current authority registry/provenance；同字节 alias 或自造 issuer receipt MUST FAIL。只有 current acceptance registry、task/change/source/policy、validation/review/hash 和 required dependency receipts 全部 current、可信且为 PASS 时，CATALOG_DECISION MAY 将 catalog Task 标记 PASS。
+#### Scenario: 低风险正式链不伪造 review
 
-#### Scenario: 调用方省略可信 evidence context
+- **Given** 机械或局部 Task 的真实主体和当前 policy 形成无需 review 的 acceptance plan
+- **When** 独立 validator 通过冻结计划执行并运行 `check`
+- **Then** validation MUST 独立于 submitter 与 producer，且无需 review record
+- **And** check 中 `review_id` 与 review hash MUST 为 null，review/check MUST 不执行测试
 
-- **Given** 调用方请求编译或运行 Gate，但没有提供 result evidence packet 或 trusted issuer packet 的唯一 locator/hash
-- **When** planner 验证输入
-- **Then** 结果 SHALL 为 FAIL
-- **And** planner SHALL NOT 扫描目录寻找候选 packet
+#### Scenario: 风险升级与正式发行要求
 
-#### Scenario: START 无法对调用方可见
+- **Given** 实际 diff/内容构成高风险工程，或 Task 的 required checks 命中 CI formal-check 集合
+- **When** submit 冻结计划并由 validator 执行
+- **Then** 高风险工程 MUST 使用 `development-baseline` 并要求独立 review；正式发行 MUST 使用完整 `repository-baseline` 并要求独立 review
+- **And** 计划 MUST 来自当前 policy 与真实 Task checks，而非 Task 名称或调用者自报风险
 
-- **Given** run identity 已生成，但磁盘 START 或调用方可见 START 无法完成并 flush
-- **When** Gate 准备调用 checker
-- **Then** checker SHALL NOT 运行
-- **And** 现有事件 SHALL 保留失败事实而不能形成 PASS receipt
+#### Scenario: 哈希或依赖链不完整
 
-#### Scenario: 证据通过但依赖 receipt 过期
+- **Given** submission 附件或任一依赖 receipt 缺失、重复、哈希漂移、版本不匹配、存在循环或有多个完整 PASS 候选
+- **When** Gate 执行 `validate`、`review`、`check` 或只读消费
+- **Then** 该阶段 MUST 返回 BLOCKED/FAIL，且不得从 stdout、exit code 或 latest 记录补造 PASS
+- **And** 缺少 Task 要求的精确用户批准也 MUST 阻止 check PASS
 
-- **Given** task validation、independent review 与 hash DAG 均为 PASS
-- **And** 一个 required dependency receipt 的 task/change version 不是 current catalog pin
-- **When** catalog decision route 聚合证据
-- **Then** catalog Task SHALL NOT 标记 PASS
-- **And** 新 receipt SHALL 保留稳定的 stale-dependency 诊断
+#### Scenario: 检查层不重跑测试
+
+- **Given** 已存在符合计划的 validation evidence，后续需要 review、check 或消费 PASS 链
+- **When** 任一后续阶段执行
+- **Then** 只有 `validate` MAY 运行计划中的 checks
+- **And** review/check/consume MUST 只复核绑定证据与当前条件
 
 ### Requirement: 显式 Git 生命周期
 

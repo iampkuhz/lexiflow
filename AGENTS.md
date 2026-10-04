@@ -34,8 +34,8 @@
 ## 验证与 Git
 
 - 语言检查和 Hook 见 `harness/README.md`；客户端只触发，不复制规则或代替验证。
-- 功能交付只在 `TASK_VALIDATION` 执行确定性检查和业务测试；`INDEPENDENT_REVIEW` 只复核冻结 diff 与 validation evidence；`CATALOG_DECISION` 只验证 validation/review/dependency receipt 和 hash DAG。后两层不得重跑交付命令。
+- 实现者可做静态/编译/测试自检，不得签发正式 validation/review 或代替真实 actor。正式检查只在 `TASK_VALIDATION` 执行；`INDEPENDENT_REVIEW` 只复核冻结 diff/evidence；`CATALOG_DECISION` 只验 receipt/hash DAG。后两层不重跑命令。
 - 结果只用 `PASS`、`BLOCKED`、`FAIL`；必需检查未运行或跳过不得称 `PASS`。
-- 交付须取得同输入 Change/Repository Verify PASS；Stop 执行与中间回合标记见 Harness。Hook 不限制编辑或 commit，不替代独立 Formal Gate。
+- 交付自检按风险选 profile；完整 Change/Repository Verify 按需显式运行，Stop 见 Harness。Hook 不锁编辑或 commit，不替代 Formal Gate。
 - `scripts/` 只放跨阶段、稳定且受测的能力；仅当前阶段使用的脚本放 ignored `tmp/phase-tools/<change-id>/`，不得成为公开入口或 Registry 输入。
 - 禁止自动 stage、commit、merge、rebase、reset、stash、force、push；Git 集成/发布须用户明示。

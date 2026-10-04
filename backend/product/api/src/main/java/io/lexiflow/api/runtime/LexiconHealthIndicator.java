@@ -12,6 +12,11 @@ public final class LexiconHealthIndicator implements HealthIndicator {
     this.runtime = runtime;
   }
 
+  /**
+   * 主动探测词库运行状态，并将 readiness、原因和已知版本映射为健康结果。
+   *
+   * @return 当前探测结果；仅就绪状态返回 UP，其他状态返回 DOWN。
+   */
   @Override
   public Health health() {
     var state = runtime.probe();

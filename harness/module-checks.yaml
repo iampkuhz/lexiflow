@@ -1,7 +1,7 @@
 # Quality Gate 的声明表，不是按文件排列的执行顺序。
 # 先读 docs/development/change-delivery/verification.md 理解选择、冻结与执行。
 # 每项按入口 → scope/触发 → 依赖 → 环境 → 输入 → result contract 阅读。
-# baseline 与 on-change 是两种选择视图；同轮执行去重由 Verification 负责。
+# baseline 与 on-change 是两种选择视图；跨视图事务复用必须由 Check 显式声明 `transaction_reuse: true`。
 schema_version: lexiflow.module-checks.v1
 description: "各工程模块拥有自己的 Check，并返回结构化完整性结果；零测试、跳过、缺失结果或未执行均不能 PASS。产品交付仍由原生 Gradle/npm 执行。"
 checks:
@@ -35,6 +35,7 @@ checks:
   - python3
   - node
   - git
+  - python-package-yaml
   input_paths:
   - ops/release
   - scripts/delivery_gate
@@ -52,6 +53,7 @@ checks:
   - harness/test-services.json
   - .codex/hooks.json
   - .qoder/settings.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -99,6 +101,7 @@ checks:
   - python3
   - node
   - git
+  - python-package-yaml
   input_paths:
   - ops/release
   - scripts/delivery_gate
@@ -116,6 +119,7 @@ checks:
   - harness/test-services.json
   - .codex/hooks.json
   - .qoder/settings.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -160,6 +164,7 @@ checks:
   module_dependencies: []
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - scripts/agents
   - tests/agents
@@ -167,6 +172,7 @@ checks:
   - harness/agent-runtime.manifest.yaml
   - harness/qoder-harness.schema.json
   - harness/qoder-result.schema.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -209,6 +215,7 @@ checks:
   module_dependencies: []
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - scripts/agents
   - tests/agents
@@ -216,6 +223,7 @@ checks:
   - harness/agent-runtime.manifest.yaml
   - harness/qoder-harness.schema.json
   - harness/qoder-result.schema.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -262,6 +270,7 @@ checks:
   - python3
   - node
   - git
+  - python-package-yaml
   input_paths:
   - scripts/delivery_gate
   - ops/release
@@ -269,6 +278,7 @@ checks:
   - scripts/environment/release_runtime_check.py
   - tests/delivery_gate
   - harness/delivery-gate-records.schema.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -313,6 +323,7 @@ checks:
   - python3
   - node
   - git
+  - python-package-yaml
   input_paths:
   - scripts/delivery_gate
   - ops/release
@@ -320,6 +331,7 @@ checks:
   - scripts/environment/release_runtime_check.py
   - tests/delivery_gate
   - harness/delivery-gate-records.schema.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -364,11 +376,13 @@ checks:
   module_dependencies: []
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - .gitignore
   - scripts/repository
   - tests/repository
   - scripts/architecture-review.md
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -411,11 +425,13 @@ checks:
   module_dependencies: []
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - .gitignore
   - scripts/repository
   - tests/repository
   - scripts/architecture-review.md
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -460,6 +476,7 @@ checks:
   - repository
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - docs
   - assets/readme
@@ -468,6 +485,7 @@ checks:
   - README.md
   - harness/README.md
   - harness/documentation-policy.yaml
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -512,6 +530,7 @@ checks:
   - repository
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - docs
   - assets/readme
@@ -520,6 +539,7 @@ checks:
   - README.md
   - harness/README.md
   - harness/documentation-policy.yaml
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -562,12 +582,14 @@ checks:
   - repository
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - harness/agent-policy.manifest.yaml
   - harness/agent-runtime.manifest.yaml
   - harness/policy-projections.yaml
   - planning/task-template.yaml
   - planning/workstreams.yaml
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -610,12 +632,14 @@ checks:
   - repository
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - harness/agent-policy.manifest.yaml
   - harness/agent-runtime.manifest.yaml
   - harness/policy-projections.yaml
   - planning/task-template.yaml
   - planning/workstreams.yaml
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -659,6 +683,7 @@ checks:
   - repository
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - planning
   - harness
@@ -666,6 +691,7 @@ checks:
   - scripts/repository/planning_validator.py
   - scripts/repository/catalog.py
   - scripts/repository/task_source.py
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -709,6 +735,7 @@ checks:
   - repository
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - planning
   - harness
@@ -716,6 +743,7 @@ checks:
   - scripts/repository/planning_validator.py
   - scripts/repository/catalog.py
   - scripts/repository/task_source.py
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -761,6 +789,7 @@ checks:
   - verification
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - .githooks
   - scripts/repository/hooks.py
@@ -769,6 +798,7 @@ checks:
   - .qoder/settings.json
   - harness/delivery-hooks.json
   - harness/test-services.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -814,6 +844,7 @@ checks:
   - verification
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - .githooks
   - scripts/repository/hooks.py
@@ -822,6 +853,7 @@ checks:
   - .qoder/settings.json
   - harness/delivery-hooks.json
   - harness/test-services.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -1113,6 +1145,7 @@ checks:
   - harness/python-quality.toml
   - harness/python-docstrings.toml
   - requirements-dev.txt
+  transaction_reuse: false
   result_contract:
     type: json-stdout
     required_fields:
@@ -1158,6 +1191,7 @@ checks:
   - harness/python-quality.toml
   - harness/python-docstrings.toml
   - requirements-dev.txt
+  transaction_reuse: false
   result_contract:
     type: json-stdout
     required_fields:
@@ -1208,6 +1242,7 @@ checks:
   - backend/build.gradle.kts
   - backend/gradle/build-logic/src/main/kotlin/io/lexiflow/buildlogic/ReleaseVersion.kt
   - backend/gradle/build-logic/src/test/kotlin/io/lexiflow/buildlogic/ReleaseVersionTest.kt
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -1258,6 +1293,7 @@ checks:
   - backend/build.gradle.kts
   - backend/gradle/build-logic/src/main/kotlin/io/lexiflow/buildlogic/ReleaseVersion.kt
   - backend/gradle/build-logic/src/test/kotlin/io/lexiflow/buildlogic/ReleaseVersionTest.kt
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -1288,6 +1324,8 @@ checks:
   timeout_seconds: 90
   scope: repository-baseline
   triggers:
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
   - path: ops/release/manifest.mjs
   - path: ops/release/archive-identity.mjs
   - path: ops/release/embedded-identity.mjs
@@ -1305,6 +1343,8 @@ checks:
   - node
   - git
   input_paths:
+  - ops/release/runtime-entry.mjs
+  - ops/release/runtime-verification.sh
   - ops/release/manifest.mjs
   - ops/release/archive-identity.mjs
   - ops/release/embedded-identity.mjs
@@ -1317,6 +1357,7 @@ checks:
   - ops/release/version.txt
   - ops/release/check.mjs
   - harness/module-checks.yaml
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -1347,6 +1388,8 @@ checks:
   timeout_seconds: 90
   scope: change-targeted
   triggers:
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
   - path: ops/release/manifest.mjs
   - path: ops/release/archive-identity.mjs
   - path: ops/release/embedded-identity.mjs
@@ -1364,6 +1407,8 @@ checks:
   - node
   - git
   input_paths:
+  - ops/release/runtime-entry.mjs
+  - ops/release/runtime-verification.sh
   - ops/release/manifest.mjs
   - ops/release/archive-identity.mjs
   - ops/release/embedded-identity.mjs
@@ -1376,6 +1421,7 @@ checks:
   - ops/release/version.txt
   - ops/release/check.mjs
   - harness/module-checks.yaml
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -1398,6 +1444,7 @@ checks:
 
 # 仅封装合同测试；真实容器、资料与平台验收由独立发布检查承担。
 - check_id: eng.release.docker-contract
+  transaction_reuse: true
   module: docker-contract
   command:
   - python3
@@ -1437,6 +1484,13 @@ checks:
   - python3
   - node
   - git
+  - sh
+  - /bin/sh
+  - python-package-yaml
+  - posix-lock-tool
+  - sha256-tool
+  - mktemp
+  - mkfifo
   input_paths:
   - ops/release/candidate.mjs
   - ops/release/verified-candidate.mjs
@@ -1483,6 +1537,7 @@ checks:
       errors: 0
       skipped: 0
 - check_id: eng.release.docker-contract-on-change
+  transaction_reuse: true
   module: docker-contract-change
   command:
   - python3
@@ -1522,6 +1577,13 @@ checks:
   - python3
   - node
   - git
+  - sh
+  - /bin/sh
+  - python-package-yaml
+  - posix-lock-tool
+  - sha256-tool
+  - mktemp
+  - mkfifo
   input_paths:
   - ops/release/candidate.mjs
   - ops/release/verified-candidate.mjs
@@ -1597,6 +1659,8 @@ checks:
   - node
   - git
   - sh
+  - mktemp
+  - sha256-tool
   input_paths:
   - ops/release/manifest.mjs
   - ops/release/archive-identity.mjs
@@ -1611,6 +1675,7 @@ checks:
   - ops/release/version.txt
   - ops/release/check.mjs
   - harness/module-checks.yaml
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -1659,6 +1724,8 @@ checks:
   - node
   - git
   - sh
+  - mktemp
+  - sha256-tool
   input_paths:
   - ops/release/manifest.mjs
   - ops/release/archive-identity.mjs
@@ -1673,6 +1740,7 @@ checks:
   - ops/release/version.txt
   - ops/release/check.mjs
   - harness/module-checks.yaml
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -1695,6 +1763,7 @@ checks:
 
 # 用户生命周期：确定性 shell 与真实容器验收分开，后者缺环境不能 PASS。
 - check_id: eng.release.lifecycle-install
+  transaction_reuse: true
   module: release-lifecycle-install
   command:
   - node
@@ -1704,6 +1773,9 @@ checks:
   timeout_seconds: 180
   scope: repository-baseline
   triggers:
+  - path: ops/release/lifecycle.mjs
+  - path: ops/release/lifecycle.sh
+  - path: ops/docker/tests/update-recovery.sh
   - path: ops/release/lifecycle-state.sh
   - path: ops/release/lifecycle-docker.sh
   - path: ops/release/runtime-entry.mjs
@@ -1723,11 +1795,17 @@ checks:
   - path: ops/release/lifecycle-install-check.mjs
   - path: ops/release/tests/lifecycle-install.test.mjs
   module_dependencies: &id001 []
-  required_environment: &id002
+  required_environment:
   - node
   - git
   - sh
+  - bash
+  - mktemp
+  - sha256-tool
   input_paths:
+  - ops/release/lifecycle.mjs
+  - ops/release/lifecycle.sh
+  - ops/docker/tests/update-recovery.sh
   - ops/release/lifecycle-state.sh
   - ops/release/lifecycle-docker.sh
   - ops/release/runtime-entry.mjs
@@ -1766,6 +1844,7 @@ checks:
       errors: 0
       skipped: 0
 - check_id: eng.release.lifecycle-install-on-change
+  transaction_reuse: true
   module: release-lifecycle-install-on-change
   command:
   - node
@@ -1775,6 +1854,9 @@ checks:
   timeout_seconds: 180
   scope: change-targeted
   triggers:
+  - path: ops/release/lifecycle.mjs
+  - path: ops/release/lifecycle.sh
+  - path: ops/docker/tests/update-recovery.sh
   - path: ops/release/lifecycle-state.sh
   - path: ops/release/lifecycle-docker.sh
   - path: ops/release/runtime-entry.mjs
@@ -1794,8 +1876,17 @@ checks:
   - path: ops/release/lifecycle-install-check.mjs
   - path: ops/release/tests/lifecycle-install.test.mjs
   module_dependencies: *id001
-  required_environment: *id002
+  required_environment:
+  - node
+  - git
+  - sh
+  - bash
+  - mktemp
+  - sha256-tool
   input_paths:
+  - ops/release/lifecycle.mjs
+  - ops/release/lifecycle.sh
+  - ops/docker/tests/update-recovery.sh
   - ops/release/lifecycle-state.sh
   - ops/release/lifecycle-docker.sh
   - ops/release/runtime-entry.mjs
@@ -1816,6 +1907,7 @@ checks:
   - ops/release/tests/lifecycle-install.test.mjs
   result_contract: *id003
 - check_id: eng.release.lifecycle
+  transaction_reuse: true
   module: release-lifecycle
   command:
   - node
@@ -1846,7 +1938,12 @@ checks:
   - path: ops/release/lifecycle-check.mjs
   - path: ops/release/tests/lifecycle.test.mjs
   module_dependencies: *id001
-  required_environment: *id002
+  required_environment: &id002
+  - node
+  - git
+  - sh
+  - mktemp
+  - sha256-tool
   input_paths:
   - ops/release/lifecycle.mjs
   - ops/release/lifecycle.sh
@@ -1870,6 +1967,7 @@ checks:
   - ops/release/tests/lifecycle.test.mjs
   result_contract: *id003
 - check_id: eng.release.lifecycle-on-change
+  transaction_reuse: true
   module: release-lifecycle-on-change
   command:
   - node
@@ -1977,6 +2075,10 @@ checks:
   - path: ops/release/tests/verified-candidate-fixture.mjs
   - path: ops/release/pipeline.mjs
   - path: ops/release/tests/pipeline.test.mjs
+  - path: ops/release/candidate-proof.mjs
+  - path: ops/release/tests/candidate-proof.test.mjs
+  - path: ops/release/workflow.mjs
+  - path: ops/release/tests/workflow.test.mjs
   - path: backend/build.gradle.kts
   - path: backend/gradle.lockfile
   - path: backend/gradle.properties
@@ -2087,6 +2189,10 @@ checks:
   - ops/release/tests/verified-candidate-fixture.mjs
   - ops/release/pipeline.mjs
   - ops/release/tests/pipeline.test.mjs
+  - ops/release/candidate-proof.mjs
+  - ops/release/tests/candidate-proof.test.mjs
+  - ops/release/workflow.mjs
+  - ops/release/tests/workflow.test.mjs
   - backend/build.gradle.kts
   - backend/gradle.lockfile
   - backend/gradle.properties
@@ -2194,6 +2300,10 @@ checks:
   - path: ops/release/tests/verified-candidate-fixture.mjs
   - path: ops/release/pipeline.mjs
   - path: ops/release/tests/pipeline.test.mjs
+  - path: ops/release/candidate-proof.mjs
+  - path: ops/release/tests/candidate-proof.test.mjs
+  - path: ops/release/workflow.mjs
+  - path: ops/release/tests/workflow.test.mjs
   - path: backend/build.gradle.kts
   - path: backend/gradle.lockfile
   - path: backend/gradle.properties
@@ -2304,6 +2414,10 @@ checks:
   - ops/release/tests/verified-candidate-fixture.mjs
   - ops/release/pipeline.mjs
   - ops/release/tests/pipeline.test.mjs
+  - ops/release/candidate-proof.mjs
+  - ops/release/tests/candidate-proof.test.mjs
+  - ops/release/workflow.mjs
+  - ops/release/tests/workflow.test.mjs
   - backend/build.gradle.kts
   - backend/gradle.lockfile
   - backend/gradle.properties
@@ -2360,6 +2474,7 @@ checks:
 
 # 构建输入的直接测试；不代替实际镜像构建或双架构验收。
 - check_id: eng.release.build
+  transaction_reuse: true
   module: release-build
   command:
   - node
@@ -2413,6 +2528,9 @@ checks:
   required_environment:
   - node
   - git
+  - sh
+  - /bin/sh
+  - mkfifo
   input_paths:
   - ops/release/build.mjs
   - ops/docker/base-images.json
@@ -2474,6 +2592,7 @@ checks:
       errors: 0
       skipped: 0
 - check_id: eng.release.build-on-change
+  transaction_reuse: true
   module: release-build-on-change
   command:
   - node
@@ -2527,6 +2646,9 @@ checks:
   required_environment:
   - node
   - git
+  - sh
+  - /bin/sh
+  - mkfifo
   input_paths:
   - ops/release/build.mjs
   - ops/docker/base-images.json

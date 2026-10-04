@@ -7,8 +7,9 @@ import json
 import os
 import re
 import stat
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import yaml
 
@@ -50,8 +51,9 @@ _IDENTITY_FIELDS = (
 class CodexWorkPackageError(ValueError):
     """工作包发布或核对失败；代码用于区分合同与存储边界。"""
 
-    def __init__(self, code: str, detail: str) -> None:
+    def __init__(self, code: str, detail: str, *, status: str = "FAIL") -> None:
         self.code = code
+        self.status = status
         super().__init__(f"{code}: {detail}")
 
 
@@ -415,17 +417,56 @@ def _runtime_binding_matches(
     """核验可信 runner 预先持久化的宿主绑定；只匹配本 run，不接受调用者重写。"""
     locator = f"{run_root_locator}/runtime-binding.json"
     path = root / locator
-    if not path.exists():
-        return
+    if not path.exists() and not path.is_symlink():
+        raise CodexWorkPackageError(
+            "runtime-metadata-unavailable",
+            "immutable native runtime binding is missing",
+            status="BLOCKED",
+        )
     binding = _read_json(_safe_path(root, locator), "runtime-binding-invalid")
-    expected = {
-        "schema_version": "lexiflow.codex-runtime-binding.v1",
-        "identity": dict(identity),
-    }
-    if binding != expected:
+    if (
+        set(binding) != {"schema_version", "identity", "proof"}
+        or binding["schema_version"] != "lexiflow.codex-runtime-binding.v2"
+        or binding["identity"] != dict(identity)
+    ):
         raise CodexWorkPackageError(
             "runtime-binding-invalid",
             "persisted runtime binding differs from publisher identity",
+        )
+    from scripts.agents.local_codex_runtime import CodexRuntimeError, verify_proof
+
+    try:
+        verify_proof(
+            root,
+            binding["proof"],
+            {
+                "actor_id": identity["agent_id"],
+                "session_id": identity["session_id"],
+                "parent_session_id": identity["parent_session_id"],
+                "client": identity["client"],
+            },
+        )
+    except CodexRuntimeError as exc:
+        raise CodexWorkPackageError(exc.code, str(exc), status=exc.status) from None
+
+
+def _current_delegated_identity(root: Path, identity: Mapping[str, str]) -> None:
+    """发布者必须就是当前原生子代理，而非声称拥有其身份的调用者。"""
+    from scripts.agents.local_codex_runtime import CodexRuntimeError, discover
+
+    try:
+        actual = discover(root).context
+    except CodexRuntimeError as exc:
+        raise CodexWorkPackageError(exc.code, str(exc), status=exc.status) from None
+    expected = {
+        "actor_id": identity["agent_id"],
+        "session_id": identity["session_id"],
+        "parent_session_id": identity["parent_session_id"],
+        "client": identity["client"],
+    }
+    if not actual["actor_id"].startswith("codex-thread-") or actual != expected:
+        raise CodexWorkPackageError(
+            "runtime-identity-drift", "publisher is not the bound native subagent"
         )
 
 
@@ -444,10 +485,13 @@ class CodexWorkPackagePublisher:
         """先核验完整 caller contract、runner 身份、Catalog 与全部 Task outcome，再开始不可变发布。逐 Task 写 projection 和 completion，最后写包 completion 与 signal；部分 run 不复用或覆盖。"""
         caller = _caller(caller_contract)
         identity = _identity(trusted_runtime_context)
+        _current_delegated_identity(self.repo_root, identity)
+        run_root_locator = f"tmp/quality/codex-work-packages/{identity['run_id']}"
+        _runtime_binding_matches(self.repo_root, run_root_locator, identity)
         task_ids = caller.get("task_ids")
         if (
             not isinstance(task_ids, list)
-            or len(task_ids) < 2
+            or not task_ids
             or set(outcomes) != set(task_ids)
         ):
             raise CodexWorkPackageError(
@@ -481,14 +525,17 @@ class CodexWorkPackagePublisher:
             if (
                 run_root.is_symlink()
                 or not run_root.is_dir()
-                or not set(item.name for item in run_root.iterdir()).issubset(
+                or not {item.name for item in run_root.iterdir()}.issubset(
                     permitted_runner_entries
                 )
             ):
                 raise CodexWorkPackageError(
                     "run-collision", "run directory already contains publication state"
                 )
-            _safe_path(self.repo_root, f"{run_root_locator}/validation")
+            if (run_root / "validation").exists() or (
+                run_root / "validation"
+            ).is_symlink():
+                _safe_path(self.repo_root, f"{run_root_locator}/validation")
         else:
             try:
                 run_root.mkdir(mode=0o700)
@@ -496,7 +543,6 @@ class CodexWorkPackagePublisher:
                 raise CodexWorkPackageError(
                     "run-collision", "run directory already exists"
                 ) from None
-        _runtime_binding_matches(self.repo_root, run_root_locator, identity)
         package_tasks: dict[str, Any] = {}
         statuses: list[str] = []
         try:
@@ -576,7 +622,7 @@ class CodexWorkPackagePublisher:
             completion_bytes = canonical_json_bytes(completion)
             _write_exclusive(run_root / "package-completion.json", completion_bytes)
             return completion
-        except Exception:
+        except Exception:  # noqa: TRY203
             # 部分不可变 run 是中断证据，不能复用或覆盖。
             raise
 
@@ -604,6 +650,10 @@ class CodexWorkPackagePublisher:
                 "completion-invalid", "completion fields are not exact"
             )
         identity = _identity(completion["identity"])
+        if not identity["agent_id"].startswith("codex-thread-"):
+            raise CodexWorkPackageError(
+                "completion-invalid", "Main actor cannot claim delegated completion"
+            )
         if (
             completion["schema_version"] != SCHEMA_VERSION
             or identity["run_id"] != run_id
@@ -611,12 +661,15 @@ class CodexWorkPackagePublisher:
             raise CodexWorkPackageError(
                 "completion-invalid", "completion identity is invalid"
             )
+        _runtime_binding_matches(
+            self.repo_root, f"tmp/quality/codex-work-packages/{run_id}", identity
+        )
         tasks = completion.get("tasks")
         task_ids = completion.get("task_ids")
         if (
             not isinstance(tasks, dict)
             or not isinstance(task_ids, list)
-            or len(task_ids) < 2
+            or not task_ids
             or any(
                 not isinstance(task, str) or not _ID.fullmatch(task)
                 for task in task_ids
