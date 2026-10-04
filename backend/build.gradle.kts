@@ -359,14 +359,14 @@ val verifyNoSkippedJavaTests = tasks.register<VerifyNoSkippedTestsTask>("verifyN
 
 val jacocoRootReport = tasks.register<JacocoReport>("jacocoRootReport") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "汇总各 Java 子项目的 JaCoCo XML 与 HTML 报告。"
+    description = "显式汇总各 Java 子项目的覆盖率报告；不参与质量判定。"
     dependsOn(leafProjects.map { "${it.path}:jacocoTestReport" })
     executionData.from(leafProjects.map { it.layout.buildDirectory.file("jacoco/test.exec") })
     sourceDirectories.from(leafProjects.map { it.layout.projectDirectory.dir("src/main/java") })
     classDirectories.from(leafProjects.map { it.layout.buildDirectory.dir("classes/java/main") })
     reports {
         xml.required.set(true)
-        html.required.set(true)
+        html.required.set(providers.gradleProperty("qualityHtmlReports").map { it.toBoolean() }.getOrElse(false))
     }
 }
 
@@ -384,8 +384,8 @@ tasks.named("check") {
 
 tasks.register("qualityFull") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "执行 fail-closed 的 Java 质量检查并汇总覆盖率报告。"
-    dependsOn("check", jacocoRootReport)
+    description = "执行 fail-closed 的 Java 质量检查；覆盖率报告需单独显式请求。"
+    dependsOn("check")
 }
 
 tasks.register("deliveryFull") {

@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,7 +28,7 @@ def _init_git_repo(tmpdir: Path) -> str:
                    cwd=str(tmpdir), check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     (tmpdir / "initial.txt").write_text("initial")
-    (tmpdir / ".gitignore").write_text("harness/\n")
+    (tmpdir / ".gitignore").write_text("harness/\ntmp/\n")
     subprocess.run(["git", "add", "."], cwd=str(tmpdir), check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(["git", "commit", "-m", "init"], cwd=str(tmpdir), check=True,
@@ -176,10 +175,45 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
                     "required_environment": ["python3"], "input_paths": [],
                 },
             ])
-            report = verify_repository(root)
+            report = verify_repository(root, execution_mode="diagnostic")
             self.assertEqual("yes", marker.read_text())
         self.assertEqual("FAIL", report["result"])
         self.assertEqual(["FAIL", "PASS"], [item["status"] for item in report["checks"]])
+
+    def test_delivery_stops_product_after_invalid_planning(self):
+        repository = Path(__file__).resolve().parents[2]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            shutil.copytree(repository / "planning", root / "planning")
+            catalog_path = root / "planning/workstreams.yaml"
+            catalog = yaml.safe_load(catalog_path.read_text())
+            catalog["workstreams"] = "invalid-topology"
+            catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False))
+            (root / "harness").mkdir()
+            for name in ("agent-policy.manifest.yaml", "agent-runtime.manifest.yaml"):
+                shutil.copy2(repository / "harness" / name, root / "harness" / name)
+            _write_declarations(root, [
+                {
+                    "check_id": "fixture.planning", "module": "planning",
+                    "command": ["python3", "-c", "from pathlib import Path; from scripts.repository.planning_check import main; raise SystemExit(main([], root=Path('.')))"],
+                    "cwd": ".", "timeout_seconds": 30,
+                    "scope": "repository-baseline", "triggers": [{"path": "planning/"}],
+                    "required_environment": ["python3"],
+                    "input_paths": ["planning", "harness/agent-policy.manifest.yaml", "harness/agent-runtime.manifest.yaml"],
+                },
+                {
+                    "check_id": "fixture.product", "module": "product",
+                    "command": ["python3", "-c", "from pathlib import Path; Path('product-ran').write_text('yes')"],
+                    "cwd": ".", "timeout_seconds": 30,
+                    "scope": "repository-baseline", "triggers": [{"path": "product/"}],
+                    "required_environment": ["python3"], "input_paths": [],
+                },
+            ])
+            report = verify_repository(root)
+            self.assertFalse((root / "product-ran").exists())
+        self.assertEqual("FAIL", report["result"])
+        self.assertEqual(["FAIL", "BLOCKED"], [item["status"] for item in report["checks"]])
+        self.assertEqual("not-run", report["checks"][1]["process"]["exit_reason"])
 
 
 class TestFixtureChangeVerify(unittest.TestCase):

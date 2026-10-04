@@ -79,6 +79,6 @@ sh "$RELEASE_DIR/lexiflow.sh" delete "$ROOT" "$KEY" --confirm-delete-data
 | `starting` / `stopping` | 使用当前 active 对应入口 `recover "$ROOT"`。恢复为 stopped 后可用 active 入口 `activate` 重启。 |
 | `deleting` | 仅用同一 key 和原发行入口重试确认删除；状态或路径不符时停止并求助。 |
 | `LF_INSTALLATION_UNVERIFIED` | 已存在的安装目录无法通过只读身份与状态核对；保留目录原状。确认当前操作已停止后，选择未占用的新私有路径重新 `prepare`；旧目录由维护者在产品工具之外核对，不自动修复、删除或接管。 |
-| 状态文件无效、锁冲突或其他未知失败 | 保留现场并记录固定错误码与所处阶段；不要手改 state、猜 PID、拆锁或删除 Docker 资源。 |
+| 状态文件无效、锁冲突或其他未知失败 | 保留 journal 和数据，记录固定错误码；不要手改 state、猜 PID 或删除资源。只有确认旧操作全部结束后，才可使用入口的 `unlock` 与精确 token 解除被放弃的锁；不确定时保留现场。 |
 
 生命周期入口不自动清理用户文件。示例命令和状态值是操作说明，不是已执行安装证据。实际平台兼容性、初始化、更新/恢复和独立验收以各自发行记录为准；文档检查通过仅证明链接与格式等静态约束。

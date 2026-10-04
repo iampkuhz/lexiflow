@@ -54,8 +54,12 @@ class ReleaseManifestCheckTest(unittest.TestCase):
         self.assertEqual(["node", "ops/release/manifest-check.mjs"], base["command"])
         self.assertEqual(["node", "git"], base["required_environment"])
         self.assertEqual([], base["module_dependencies"])
+        self.assertIs(base["transaction_reuse"], True)
+        self.assertIs(change["transaction_reuse"], True)
         for name in (
             "manifest.mjs",
+            "runtime-entry.mjs",
+            "runtime-verification.sh",
             "package.mjs",
             "manifest-check.mjs",
             "tests/manifest.test.mjs",

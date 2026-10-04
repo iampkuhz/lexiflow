@@ -267,6 +267,10 @@ class CiQuickTests(unittest.TestCase):
                 diagnostic = result["selected_diagnostic"]
                 self.assertEqual(
                     diagnostic["selected_result"],
+                    status,
+                )
+                self.assertEqual(
+                    diagnostic["qualification_result"],
                     "BLOCKED" if status == "PASS" else "FAIL",
                 )
                 self.assertNotIn("publication", diagnostic["selected_report"])

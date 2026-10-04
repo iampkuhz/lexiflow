@@ -29,6 +29,8 @@ def query_status(root: str | Path, *, submission_id: str) -> dict[str, Any]:
     return {
         "submission_id": submission_id,
         "state": state,
+        "required_layers": submission["acceptance_plan"]["required_layers"],
+        "verification_scope": submission["acceptance_plan"]["verification_scope"],
         "task_id": submission["task_requirements"]["task_id"],
         "validations": [
             {"validation_id": x["validation_id"], "result": x["result"]}

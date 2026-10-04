@@ -20,6 +20,6 @@
 
 ## 1.3. 执行入口
 
-具体工作与依赖见[任务清单](phase2/tasks.md)，细节冻结要求见[设计输入](phase2/design.md)，实际使用中的原始发现见[问题记录](phase2/observations.md)。本机 OpenSpec 草案保存在 `openspec/changes/prepare-phase2-pipeline/`；换 checkout 的稳定交接入口是本页及 Catalog，不依赖忽略目录随 Git 迁移。
+具体工作与依赖见[任务清单](phase2/tasks.md)，细节冻结要求见[设计输入](phase2/design.md)，实际使用中的原始发现见[问题记录](phase2/observations.md)。长期合同由共享 docs/specs 承接，活动变更在 OpenSpec；换 checkout 的交接不依赖已失效的本机阶段草案。
 
-按用户授权从核对后的最新 `main` 建立 `phase2` 集成分支；子任务采用 `phase2-N-主题`，完成验证后及时提交并合回 `phase2`。不推送远端、不合回 `main`，不以二期启动代替一期正式验收。执行状态与本次准备检查只见[第二阶段状态页](phase2/status.md)；第一阶段状态继续由[原状态页](status.md)维护。
+计划和准备不授予执行、Git 集成或发布许可；按当前明确授权与 Harness 边界推进。实际实现与未完成验收统一见[状态页](phase2/status.md)，不以阶段启动替代验收。

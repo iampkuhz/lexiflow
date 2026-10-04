@@ -132,13 +132,14 @@ public final class StructuredEventLogger {
     var fields = new java.util.TreeMap<String, String>();
     fields.put("duration_ms", Long.toString(event.durationMs()));
     if (event.reason() != StructuredEvent.Reason.OK) fields.put("reason", event.reason().name());
+    boolean detailed = LOG.isDebugEnabled();
     if (event.lexiconVersion() != null
-        && (event.type() == StructuredEvent.EventType.RUNTIME_START_COMPLETED
+        && (detailed
+            || event.type() == StructuredEvent.EventType.RUNTIME_START_COMPLETED
             || event.type() == StructuredEvent.EventType.LEXICON_CACHE_VERSION_CHANGED))
       fields.put("lexicon_version", Long.toString(event.lexiconVersion()));
     putCount(event, StructuredEvent.Count.SELECTED, fields);
     putCount(event, StructuredEvent.Count.NEW_RANGES, fields);
-    boolean detailed = LOG.isDebugEnabled();
     boolean warningOrFailure = event.level() != StructuredEvent.Level.INFO;
     if (detailed || warningOrFailure)
       event

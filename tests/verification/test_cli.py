@@ -21,7 +21,7 @@ def _init_git_repo(root: Path) -> str:
     subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=root, check=True)
     subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
     (root / "initial.txt").write_text("initial")
-    (root / ".gitignore").write_text("harness/\n")
+    (root / ".gitignore").write_text("harness/\ntmp/\n")
     subprocess.run(["git", "add", "."], cwd=root, check=True)
     subprocess.run(["git", "commit", "-m", "init"], cwd=root, check=True, capture_output=True)
     return subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()

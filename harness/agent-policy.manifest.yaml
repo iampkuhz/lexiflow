@@ -70,6 +70,88 @@ architecture:
   - english-caption-waits-for-model
 
 # 工作包公共 contract：模型选择、身份、caller 输入、runner 输出与结果核对。
+# 风险等级来自实际差异、内容与依赖闭包；未知不降级，Task要求只能增加检查。
+risk_classification:
+  schema_version: lexiflow.risk-classification.v1
+  levels:
+  - mechanical
+  - local-function
+  - high-risk-engineering
+  - formal-release
+  high_risk_paths:
+  - AGENTS.md
+  - harness/**
+  - .codex/**
+  - .qoder/**
+  - openspec/**
+  - planning/**
+  - scripts/**
+  - tests/**
+  - infra/**
+  - ops/**
+  - .github/**
+  - backend/*.kts
+  - backend/**/*.kts
+  - backend/gradle/**
+  - backend/gradle.properties
+  - backend/buildSrc/**
+  - backend/verification/**
+  - backend/product/api/**
+  - backend/product/adapters/**
+  - '**/port/**'
+  - '**/contract/**'
+  - docs/architecture/**
+  - docs/development/**
+  - docs/roadmap/**
+  local_owner_roots:
+    lexicon: backend/product/lexicon/
+    enrichment: backend/product/enrichment/
+    extension: extension/src/
+    user-documentation: docs/user/
+  mechanical_proof: existing-user-markdown-crlf-only
+  sensitive_content_patterns:
+  - (?i)\b(public|export|fetch|innerHTML|eval|exec|spawn|ProcessBuilder|subprocess|chmod|symlink|jdbc|sql|DataSource|Entity|token|auth\w*|permission\w*|lock\w*|cancel\w*|shutdown|cleanup|delete|remove|redis|postgres\w*|provider|model|inference)\b
+  - (?i)(https?://|localStorage|chrome\.storage|Files\.|fs\.|writeFile|readFile|dataset|schema|password|secret|credential|zipfile|archive|\.execute\(|\.start\()
+  private_paths:
+  - secrets/**
+  - .env
+  - .env.*
+  - data/**
+  - .local/**
+  - tmp/**
+  unknown: high-risk-engineering
+  uncovered: BLOCKED-with-coverage-gap
+  formal_check_source: harness/ci-policy.yaml#formal_only_check_ids
+  validation_actor: different-from-producer-for-all-tiers
+  independent_review_levels:
+  - high-risk-engineering
+  - formal-release
+  repository_pass: only-complete-repository-baseline
+  development_baseline: all-baseline-except-formal-only-and-no-required-id-excluded
+
+verification_window:
+  implementation: scripts/verification/coordination.py
+  scope: same-checkout-verification-execution
+  lock: tmp/quality/verification-window/execution.lock
+  acquisition: exclusive-nonblocking
+  busy: BLOCKED-no-automatic-retry
+  consumers: [change-verify, repository-verify, delivery-hook, work-package, task-validation]
+  sharing: explicit-live-same-thread-holder-within-one-call
+  edit_lock: false
+  freshness: input-closure-before-after-and-publication-remains-required
+  unknown_owner: never-kill-never-unlink-never-infer-from-pid-or-lock-content
+
+execution_failure_handling:
+  diagnostic_summary: scripts/verification/summaries.py
+  known_layers: [static-check, executor, environment, evidence, authorization, prerequisite]
+  assertion_failure: check-needs-triage-until-source-and-log-evidence-distinguish-product-from-test-fixture
+  repair: keep-original-work-package-and-owner-unless-specific-root-cause-requires-change
+  redispatch: no-mechanical-redispatch-or-identity-reset-after-repeated-failure
+  model_change: codex-model-policy-specific-evidence-required
+  budget: one-shared-deadline-including-inner-process-timeout-and-cancellation
+  user_input: only-unavailable-information-real-tradeoff-or-required-authorization
+  summary_limits: structured-test-identities-positions-counts-and-log-locators-not-raw-output
+
 subagent_protocol:
 
   # 按完整工作包分类；角色名和继承设置不能代替显式模型与 reasoning 参数。
@@ -306,7 +388,7 @@ subagent_protocol:
     - validation_commands
     - failure_policy
     - parent_client
-    task_ids_rule: exact-ordered-unique-minimum-two
+    task_ids_rule: exact-ordered-unique-minimum-one
     target_rule: target_task_id-equals-task_id-and-is-member-of-task_ids
     per_task_maps_rule: exact-keyset-equals-task_ids-and-target-values-match-projection
     current_catalog_rule: all-task-versions-owner-outputs-acceptance-validation-and-package-scope-must-match-current-catalog
@@ -407,7 +489,7 @@ subagent_protocol:
     failure_policy: non-empty-string
     parent_client: exact-string-codex
   codex_runtime_binding:
-    schema_version: lexiflow.codex-runtime-binding.v1
+    schema_version: lexiflow.codex-runtime-binding.v2
     implementation: scripts/agents/codex/runtime_binding.py
     actor_source: owned-local-session-metadata-cross-checked-with-runtime-route
     local_adapter: scripts/agents/local_codex_runtime.py
@@ -423,12 +505,24 @@ subagent_protocol:
     fabricated_or_conflicting_runtime: FAIL
     binding_publication: immutable-before-projection-and-completion
     identity_authentication: local-source-provenance-not-JSON-structure-or-self-report
+    historical_verification: persisted-native-proof-rechecked-against-owned-session-metadata
   acceptance_submission:
     implementation: scripts/delivery_gate/submit.py
     source: fixed-current-verification-report-and-target-task
     producer_facts_owner: scripts/agents/
     delegated_producer: explicit-run-id-with-verified-task-completion-and-result
     inputs: verification-report-id-task-id-explicit-scope-confirmation
+    task_subject: current-diff-intersect-current-catalog-scope-and-claims
+    risk_subject: task-subject-plus-changed-input-dependency-fixed-point
+    source_report: complete-current-diff-at-submission
+    subsequent_freshness: rederive-task-and-dependency-subject-not-unrelated-diff
+    formal_batch:
+      maximum_submissions: 16
+      unique_submission_ids: required
+      preflight: all-submissions-before-any-check
+      independence: validator-different-from-every-producer-and-submitter
+      reuse: same-call-explicit-check-equivalence-only
+      evidence: separate-profile-report-and-validation-per-task
     subprocess_log_inference_or_legacy_fallback: forbidden
     formal_receipt_issuance: public-acceptance-scenarios-only
   codex_main_task_projection:
@@ -437,7 +531,7 @@ subagent_protocol:
     canonical_actor_id: codex-session-<actual-session-uuid>
     protected_host_actor_id: /root
     cardinality: one-current-catalog-task
-    delegated_projection: mutually-exclusive-minimum-two-tasks-unchanged
+    delegated_projection: mutually-exclusive-single-or-multiple-task-package
     caller_identity_or_executor_kind_authority: forbidden
     identity_source: same-immutable-codex-runtime-binding
     self-validation-or-self-review: forbidden

@@ -691,7 +691,6 @@ workstreams:
         lifecycle_state: DRAFT
         allowed_files:
         - docs/roadmap/master-plan/phase2/design.md
-        - openspec/changes/prepare-phase2-pipeline/design.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -732,7 +731,6 @@ workstreams:
         lifecycle_state: DRAFT
         allowed_files:
         - docs/roadmap/master-plan/phase2/design.md
-        - openspec/changes/prepare-phase2-pipeline/design.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -821,7 +819,6 @@ workstreams:
         - docs/architecture/**
         - docs/roadmap/**
         - openspec/specs/product-architecture/spec.md
-        - openspec/changes/prepare-phase2-pipeline/**
         forbidden_files:
         - secrets/**
         - .local/**
@@ -961,6 +958,405 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-QLT-2101
+        title: 统一调度、自检与可信身份合同
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 60
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - AGENTS.md
+        - harness/agent-policy.manifest.yaml
+        - harness/agent-runtime.manifest.yaml
+        - harness/README.md
+        - scripts/agents/**
+        - tests/agents/**
+        - scripts/delivery_gate/producer.py
+        - scripts/delivery_gate/submit.py
+        - scripts/delivery_gate/__main__.py
+        - scripts/delivery_gate/authority.py
+        - tests/delivery_gate/test_status_propagation.py
+        - openspec/specs/agent-execution/spec.md
+        - docs/development/agent-workflow.md
+        - openspec/changes/optimize-agent-quality-workflow/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 策略、投影、消费者一致；开发自检不能签发独立验收。；真实来源和三态错误贯通，伪造与缺失证据分别拒绝；不以调用者声明替代运行身份。
+        acceptance_criteria:
+        - 策略、投影、消费者一致；开发自检不能签发独立验收。
+        - 真实来源和三态错误贯通，伪造与缺失证据分别拒绝；不以调用者声明替代运行身份。
+        acceptance_evidence:
+        - 冻结输入、自检与真实不同 actor 的独立验证/审查；收益数据区分实测、估算和未知。
+        validation_command: python3 -m scripts.agents.module_tests && python3 -m scripts.delivery_gate.quality && python3 -m scripts.repository.quality --mode policy && python3 -m scripts.repository.quality --mode planning
+        required_check_ids:
+        - eng.agents.module-tests
+        - eng.delivery-gate.module-tests
+        - eng.repository.policy
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 策略、投影、消费者一致；开发自检不能签发独立验收。；真实来源和三态错误贯通，伪造与缺失证据分别拒绝；不以调用者声明替代运行身份。
+      - id: LF-TSK-QLT-2102
+        title: 聚合文档诊断并复用解析
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 45
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/manifest-check.mjs
+        - ops/docker/tests/module_check_adapter.py
+        - ops/release/tests/manifest.test.mjs
+        - extension/tests/popup.test.mjs
+        - scripts/repository/docs_check.py
+        - tests/repository/test_documentation_governance.py
+        - backend/verification/quality-gates/**
+        - backend/verification/integration/src/runtimeSmoke/java/io/lexiflow/integration/PipelineRuntimeFixture.java
+        - backend/product/adapters/src/main/java/io/lexiflow/observability/platform/StructuredEventLogger.java
+        - backend/product/adapters/src/test/java/io/lexiflow/observability/platform/StructuredEventLoggerTest.java
+        - backend/verification/integration/src/runtimeSmoke/java/io/lexiflow/integration/PublishedPipelineRuntimeTest.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageCodec.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageTables.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DefaultLexiconRepository.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetExport.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetPackage.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/PostgresSchemaInitializer.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/importer/LexiconImportMainOutputTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageCodecTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetExportIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetPackageIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconRepositoryIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresSchemaInitializerIntegrationTest.java
+        - backend/product/adapters/src/main/java/io/lexiflow/observability/platform/FileSegmentAnalysisStore.java
+        - backend/product/adapters/src/main/java/io/lexiflow/observability/platform/LexiconEventObserver.java
+        - backend/product/adapters/src/main/java/io/lexiflow/observability/platform/ReadableLogLineConverter.java
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/LexiconHealthIndicator.java
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/LexiconRuntime.java
+        - openspec/changes/optimize-agent-quality-workflow/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 完整列出职责、参数含义和范围缺项；格式规范不删除。；孤立短语不误报嵌入词语；同次 Markdown 解析计数下降。
+        acceptance_criteria:
+        - 完整列出职责、参数含义和范围缺项；格式规范不删除。
+        - 孤立短语不误报嵌入词语；同次 Markdown 解析计数下降。
+        acceptance_evidence:
+        - 冻结输入、自检与真实不同 actor 的独立验证/审查；收益数据区分实测、估算和未知。
+        validation_command: python3 -m scripts.repository.quality --mode docs && python3 -m scripts.environment.java_exec backend/gradlew -p backend deliveryFull --console=colored --rerun-tasks --no-build-cache && python3 -m scripts.repository.quality --mode policy && python3 -m scripts.repository.quality --mode planning
+        required_check_ids:
+        - eng.repository.docs
+        - eng.backend.delivery
+        - eng.repository.policy
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 完整列出职责、参数含义和范围缺项；格式规范不删除。；孤立短语不误报嵌入词语；同次 Markdown 解析计数下降。
+      - id: LF-TSK-QLT-2103
+        title: 统一有界执行与失效早停
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/verification/execution.py
+        - scripts/verification/work_package.py
+        - scripts/verification/summaries.py
+        - scripts/verification/kernel.py
+        - scripts/verification/scenarios.py
+        - scripts/verification/diagnose.py
+        - scripts/verification/reports.py
+        - scripts/verification/delivery_hook.py
+        - tests/verification/**
+        - harness/manifest.yaml
+        - docs/development/reference/standalone-tools.md
+        - openspec/changes/optimize-agent-quality-workflow/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: delivery 失败早停、diagnostic 收集独立问题且不冒充完整交付。；共用冻结、预算、取消、进程归属和安全报告出版；漂移后昂贵检查不执行。
+        acceptance_criteria:
+        - delivery 失败早停、diagnostic 收集独立问题且不冒充完整交付。
+        - 共用冻结、预算、取消、进程归属和安全报告出版；漂移后昂贵检查不执行。
+        acceptance_evidence:
+        - 冻结输入、自检与真实不同 actor 的独立验证/审查；收益数据区分实测、估算和未知。
+        validation_command: python3 tests/verification/module_check_adapter.py && python3 -m scripts.repository.quality --mode policy && python3 -m scripts.repository.quality --mode planning
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.policy
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: delivery 失败早停、diagnostic 收集独立问题且不冒充完整交付。；共用冻结、预算、取消、进程归属和安全报告出版；漂移后昂贵检查不执行。
+      - id: LF-TSK-QLT-2104
+        title: 按实际风险分层并协调验证窗口
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/verification/**
+        - scripts/delivery_gate/**
+        - tests/verification/**
+        - tests/delivery_gate/**
+        - harness/**
+        - AGENTS.md
+        - docs/development/change-delivery.md
+        - docs/development/change-delivery/**
+        - docs/development/agent-workflow.md
+        - openspec/changes/optimize-agent-quality-workflow/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 按真实 diff 与闭包区分机械、局部、高风险和发行；缺数据不降级。；局部完成不依赖正式发行，高风险独立性保留；共享 checkout 全仓串行窗口仍识别漂移。
+        acceptance_criteria:
+        - 按真实 diff 与闭包区分机械、局部、高风险和发行；缺数据不降级。
+        - 局部完成不依赖正式发行，高风险独立性保留；共享 checkout 全仓串行窗口仍识别漂移。
+        acceptance_evidence:
+        - 冻结输入、自检与真实不同 actor 的独立验证/审查；收益数据区分实测、估算和未知。
+        validation_command: python3 tests/verification/module_check_adapter.py && python3 -m scripts.delivery_gate.quality && python3 -m scripts.repository.quality --mode policy && python3 -m scripts.repository.quality --mode planning
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.delivery-gate.module-tests
+        - eng.repository.policy
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 按真实 diff 与闭包区分机械、局部、高风险和发行；缺数据不降级。；局部完成不依赖正式发行，高风险独立性保留；共享 checkout 全仓串行窗口仍识别漂移。
+      - id: LF-TSK-QLT-2105
+        title: 在同次验收事务内复用等价执行
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - docs/development/reference/scripts.md
+        - scripts/environment/toolchain.py
+        - scripts/environment/runtime.py
+        - scripts/verification/**
+        - scripts/delivery_gate/validate.py
+        - scripts/delivery_gate/__main__.py
+        - scripts/delivery_gate/__init__.py
+        - tests/verification/**
+        - tests/delivery_gate/test_validate.py
+        - tests/delivery_gate/test_validate_batch.py
+        - harness/**
+        - docs/development/change-delivery/**
+        - openspec/changes/optimize-agent-quality-workflow/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 复用现有 alias，绑定完整输入、环境、配置、执行者和副作用；不接受永久缓存。；不同视图保留完整覆盖证明，自检不能替代独立验证，前后新鲜度检查不删除。
+        acceptance_criteria:
+        - 复用现有 alias，绑定完整输入、环境、配置、执行者和副作用；不接受永久缓存。
+        - 不同视图保留完整覆盖证明，自检不能替代独立验证，前后新鲜度检查不删除。
+        acceptance_evidence:
+        - 冻结输入、自检与真实不同 actor 的独立验证/审查；收益数据区分实测、估算和未知。
+        validation_command: python3 tests/verification/module_check_adapter.py && python3 -m scripts.delivery_gate.quality && python3 -m scripts.repository.quality --mode policy && python3 -m scripts.repository.quality --mode planning
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.delivery-gate.module-tests
+        - eng.repository.policy
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 复用现有 alias，绑定完整输入、环境、配置、执行者和副作用；不接受永久缓存。；不同视图保留完整覆盖证明，自检不能替代独立验证，前后新鲜度检查不删除。
+      - id: LF-TSK-QLT-2106
+        title: 合并同次证据核验及依赖访问
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/delivery_gate/**
+        - tests/delivery_gate/**
+        - docs/development/change-delivery/delivery-gate.md
+        - openspec/changes/optimize-agent-quality-workflow/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 索引和节点结果仅同次求值复用，减少重复身份、附件和DAG访问。；保留多候选、hash、版本、循环、漂移和发布前重核；先后计数有可重复证据。
+        acceptance_criteria:
+        - 索引和节点结果仅同次求值复用，减少重复身份、附件和DAG访问。
+        - 保留多候选、hash、版本、循环、漂移和发布前重核；先后计数有可重复证据。
+        acceptance_evidence:
+        - 冻结输入、自检与真实不同 actor 的独立验证/审查；收益数据区分实测、估算和未知。
+        validation_command: python3 -m scripts.delivery_gate.quality && python3 -m scripts.repository.quality --mode policy && python3 -m scripts.repository.quality --mode planning
+        required_check_ids:
+        - eng.delivery-gate.module-tests
+        - eng.repository.policy
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 索引和节点结果仅同次求值复用，减少重复身份、附件和DAG访问。；保留多候选、hash、版本、循环、漂移和发布前重核；先后计数有可重复证据。
+      - id: LF-TSK-QLT-2107
+        title: 分离 Gradle 合格判定与浏览报告
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 60
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - backend/build.gradle.kts
+        - backend/gradle/build-logic/**
+        - backend/verification/quality-gates/build.gradle.kts
+        - tests/verification/test_build_checks.py
+        - tests/verification/test_gradle_report_contract.py
+        - docs/development/reference/java-checks.md
+        - openspec/changes/optimize-agent-quality-workflow/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 逐项核实 Javadoc、JaCoCo、HTML 的实际消费者，无消费者浏览产物按需生成。；DocLint、文档完整性、静态分析和测试覆盖判定保留并直接回归。
+        acceptance_criteria:
+        - 逐项核实 Javadoc、JaCoCo、HTML 的实际消费者，无消费者浏览产物按需生成。
+        - DocLint、文档完整性、静态分析和测试覆盖判定保留并直接回归。
+        acceptance_evidence:
+        - 冻结输入、自检与真实不同 actor 的独立验证/审查；收益数据区分实测、估算和未知。
+        validation_command: python3 -m scripts.environment.java_exec backend/gradlew -p backend deliveryFull --console=colored --rerun-tasks --no-build-cache && python3 -m scripts.repository.quality --mode policy && python3 -m scripts.repository.quality --mode planning
+        required_check_ids:
+        - eng.backend.delivery
+        - eng.repository.policy
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 逐项核实 Javadoc、JaCoCo、HTML 的实际消费者，无消费者浏览产物按需生成。；DocLint、文档完整性、静态分析和测试覆盖判定保留并直接回归。
+      - id: LF-TSK-QLT-2108
+        title: 核实历史基线与组合收益
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 60
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/verification/summaries.py
+        - tests/verification/test_summaries.py
+        - tests/verification/test_work_package.py
+        - docs/development/agent-workflow.md
+        - docs/development/change-delivery.md
+        - openspec/changes/optimize-agent-quality-workflow/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 分别记录派发、验证轮次、命令时间、关键路径墙钟、访问计数和可获得token；未知不猜测。；十四项逐条追溯，组合不累加并行时间或重复收益；独立复核不由放宽后的门禁自证。
+        acceptance_criteria:
+        - 分别记录派发、验证轮次、命令时间、关键路径墙钟、访问计数和可获得token；未知不猜测。
+        - 十四项逐条追溯，组合不累加并行时间或重复收益；独立复核不由放宽后的门禁自证。
+        acceptance_evidence:
+        - 冻结输入、自检与真实不同 actor 的独立验证/审查；收益数据区分实测、估算和未知。
+        validation_command: python3 tests/verification/module_check_adapter.py && python3 -m scripts.repository.quality --mode docs && python3 -m scripts.repository.quality --mode policy && python3 -m scripts.repository.quality --mode planning
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.docs
+        - eng.repository.policy
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 分别记录派发、验证轮次、命令时间、关键路径墙钟、访问计数和可获得token；未知不猜测。；十四项逐条追溯，组合不累加并行时间或重复收益；独立复核不由放宽后的门禁自证。
+      - id: LF-TSK-QLT-2109
+        title: 逐篇精简当前 Markdown 并维护必要合同
+        priority: P0
+        phase: P2
+        task_version: 2
+        change_version: 2.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - AGENTS.md
+        - .qoder/AGENTS.md
+        - .codex/model-instructions.md
+        - README.md
+        - docs/**
+        - openspec/**
+        - harness/README.md
+        - harness/manifest.yaml
+        - harness/documentation-policy.yaml
+        - planning/workstreams.yaml
+        - tests/repository/test_documentation_governance.py
+        - tests/repository/test_planning_check.py
+        - scripts/agents/README.md
+        - scripts/architecture-review.md
+        - ops/release/third-party-notices.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 逐篇判断当前 Markdown 的详略，删赘述与重复而保留必要步骤、字段、阈值、安全和验收边界；不等比例压缩。
+        acceptance_criteria:
+        - 覆盖 inventory-before.json 的全部80份当前Markdown，每篇记录精简或保留的具体理由；已简洁页面不强改。
+        - 总览保留结论和导航，操作页保留顺序与失败处理，合同页保留字段、数值、例外和安全约束；重复内容用唯一真源链接承接。
+        - 不改产品行为、规则、命令与代码围栏，不制造悬空链接；不将未完成验收或未知结果改成通过。
+        - 不统一按比例删减、不简单拼接成长段或滥用缩写；无备份、无Git集成，保留他人工作。
+        acceptance_evidence:
+        - 逐文件编辑理由与保留关键内容清单。
+        - 文件前后摘要及代码围栏一致性、链接检查与定向测试。
+        - 当前冻结差异的独立内容复核；自检不是正式验收。
+        validation_command: python3 -m scripts.repository.docs_check
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        - eng.repository.module-tests
+        dependencies: []
+        depends_on: []
+        deliverable: 逐篇判断当前 Markdown 的详略，删赘述与重复而保留必要步骤、字段、阈值、安全和验收边界；不等比例压缩。
       - id: LF-TSK-QLT-2001
         title: 串行核验完整主线及跨模块验收矩阵
         priority: P0
@@ -1101,7 +1497,6 @@ workstreams:
         - docs/roadmap/master-plan/phase2/tasks.md
         - docs/roadmap/master-plan/phase2/status.md
         - docs/roadmap/master-plan/phase2/release.md
-        - openspec/changes/prepare-phase2-pipeline/**
         - docs/roadmap/master-plan/phase2/design.md
         - docs/roadmap/master-plan/phase2/architecture.md
         - docs/roadmap/master-plan/phase2/observability.md
@@ -1149,7 +1544,6 @@ workstreams:
         - docs/development/change-delivery/delivery-gate.md
         - docs/roadmap/master-plan/phase2/status.md
         - docs/roadmap/master-plan/phase2/tasks.md
-        - openspec/changes/fix-gate-dependency-recovery/**
         forbidden_files:
         - secrets/**
         - .local/**
@@ -1493,7 +1887,7 @@ workstreams:
         phase: P1
         task_version: 2
         change_version: 1.1.0
-        task_source: docs/roadmap/master-plan/foundation.md
+        task_source: docs/roadmap/master-plan/phase2.md
         estimated_minutes: 40
         allowed_files: backend/product/lexicon/**, backend/product/adapters/**
         forbidden_files: 除 allowed_files 外的所有文件；尤其 AGENTS.md、harness/**、planning/** 与其他写入者范围
@@ -1516,7 +1910,7 @@ workstreams:
         phase: P1
         task_version: 1
         change_version: 1.0.0
-        task_source: openspec/changes/analyze-null-gloss-preprocessing/implementation.md
+        task_source: docs/development/operations/lexicon-import/record-processing.md
         estimated_minutes: 30
         owner: LF-WS-LEX
         kind: implementation
@@ -1551,7 +1945,7 @@ workstreams:
         phase: P1
         task_version: 1
         change_version: 1.0.0
-        task_source: openspec/changes/analyze-null-gloss-preprocessing/implementation.md
+        task_source: docs/development/operations/lexicon-import/record-processing.md
         estimated_minutes: 50
         owner: LF-WS-LEX
         kind: implementation
@@ -1567,7 +1961,7 @@ workstreams:
         - docs/roadmap/**
         expected_output: 合并清洗Result及入选步骤正反例/组合保护测试
         acceptance_criteria:
-        - 严格遵守 implementation.md 1.4冻结接口和步骤
+        - 严格遵守 docs/development/operations/lexicon-import/record-processing.md 1.4 的接口和步骤
         - 每场景至少一正一反，保留原source，保护罗马数字及短技术符号
         - 不使用AI、数据库、网络、外部词性库
         acceptance_evidence:
@@ -1587,7 +1981,7 @@ workstreams:
         phase: P1
         task_version: 1
         change_version: 1.0.0
-        task_source: openspec/changes/analyze-null-gloss-preprocessing/implementation.md
+        task_source: docs/development/operations/lexicon-import/record-processing.md
         estimated_minutes: 90
         owner: LF-WS-LEX
         kind: implementation
@@ -1599,14 +1993,13 @@ workstreams:
         - backend/verification/integration/**
         - infra/postgres/schema.sql
         - planning/workstreams.yaml
-        - openspec/changes/analyze-null-gloss-preprocessing/**
         forbidden_files:
         - secrets/**
         - .local/**
         - README.md
         - harness/**
         - docs/roadmap/**
-        expected_output: 准备结果用于 sense/prepared/lookup；共享低信息合同、独立 all_basic_phrase、真实基线净收益和全量回归证据。
+        expected_output: 一次准备结果用于精简词条/词形发布；共享低信息合同、独立 all_basic_phrase、真实基线净收益和全量回归证据。
         acceptance_criteria:
         - 每种资格/过滤场景都有正反例；原始来源、首义、curated 和 alias 身份不被覆盖。
         - 新合并规则与 all_basic_phrase 逐 ID 只读重放，计数互斥守恒；可选优化不足1000不启用。
@@ -1621,7 +2014,7 @@ workstreams:
         - eng.repository.policy
         dependencies: []
         depends_on: []
-        deliverable: 准备结果用于 sense/prepared/lookup；共享低信息合同、独立 all_basic_phrase、真实基线净收益和全量回归证据。
+        deliverable: 一次准备结果用于精简词条/词形发布；共享低信息合同、独立 all_basic_phrase、真实基线净收益和全量回归证据。
   - id: LF-EP-LEX-200
     name: 第二阶段提示处理主线
     capabilities:
@@ -1653,7 +2046,6 @@ workstreams:
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/tasks.md
         - docs/roadmap/master-plan/phase2/status.md
-        - openspec/changes/prepare-phase2-pipeline/**
         forbidden_files:
         - secrets/**
         - .local/**
@@ -1701,7 +2093,6 @@ workstreams:
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/tasks.md
         - docs/roadmap/master-plan/phase2/status.md
-        - openspec/changes/prepare-phase2-pipeline/**
         forbidden_files:
         - secrets/**
         - .local/**
@@ -1756,7 +2147,6 @@ workstreams:
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/tasks.md
         - docs/roadmap/master-plan/phase2/status.md
-        - openspec/changes/prepare-phase2-pipeline/**
         forbidden_files:
         - secrets/**
         - .local/**
@@ -1812,7 +2202,6 @@ workstreams:
         - docs/roadmap/master-plan/phase2/tasks.md
         - docs/roadmap/master-plan/phase2/status.md
         - docs/roadmap/master-plan/phase2/design.md
-        - openspec/changes/prepare-phase2-pipeline/**
         forbidden_files:
         - secrets/**
         - .local/**
@@ -1864,7 +2253,7 @@ workstreams:
         phase: P1
         task_version: 3
         change_version: 1.2.0
-        task_source: docs/roadmap/master-plan/foundation.md
+        task_source: docs/roadmap/master-plan/phase2.md
         estimated_minutes: 40
         allowed_files: backend/product/enrichment/**
         forbidden_files: 除 allowed_files 外的所有文件；尤其 AGENTS.md、harness/**、planning/** 与其他写入者范围
@@ -1888,7 +2277,7 @@ workstreams:
         phase: P1
         task_version: 2
         change_version: 1.1.0
-        task_source: docs/roadmap/master-plan/foundation.md
+        task_source: docs/roadmap/master-plan/phase2.md
         estimated_minutes: 40
         allowed_files: backend/product/enrichment/**
         forbidden_files: 除 allowed_files 外的所有文件；尤其 AGENTS.md、harness/**、planning/** 与其他写入者范围
@@ -2045,7 +2434,7 @@ workstreams:
         phase: P1
         task_version: 3
         change_version: 1.2.0
-        task_source: docs/roadmap/master-plan/foundation.md
+        task_source: docs/roadmap/master-plan/phase2.md
         estimated_minutes: 60
         allowed_files: backend/product/api/src/**, backend/product/enrichment/src/**
         forbidden_files: 除 allowed_files 外的所有文件；尤其 AGENTS.md、harness/**、planning/** 与其他写入者范围
@@ -2308,7 +2697,7 @@ workstreams:
         phase: P1
         task_version: 2
         change_version: 1.1.0
-        task_source: docs/roadmap/master-plan/foundation.md
+        task_source: docs/roadmap/master-plan/phase2.md
         estimated_minutes: 60
         allowed_files: extension/src/protocol.ts, extension/src/stream.ts, extension/src/background.ts,
           extension/tests/protocol.test.mjs, extension/tests/stream.test.mjs, extension/tests/background.test.mjs
@@ -2333,7 +2722,7 @@ workstreams:
         phase: P1
         task_version: 3
         change_version: 1.2.0
-        task_source: docs/roadmap/master-plan/foundation.md
+        task_source: docs/roadmap/master-plan/phase2.md
         estimated_minutes: 80
         allowed_files: extension/src/content.ts, extension/src/overlay.ts, extension/src/preferences.ts,
           extension/src/diagnostics.ts, extension/src/background.ts, extension/manifest.json, extension/scripts/build.mjs,
@@ -2360,7 +2749,7 @@ workstreams:
         phase: P1
         task_version: 1
         change_version: 1.0.0
-        task_source: openspec/changes/stabilize-incremental-captions/proposal.md
+        task_source: openspec/specs/product-architecture/spec.md
         estimated_minutes: 90
         owner: LF-WS-EXT
         allowed_files:
@@ -2368,10 +2757,9 @@ workstreams:
         - extension/**
         - docs/product/product-brief.md
         - docs/architecture/lexicon-contract.md
-        - docs/roadmap/master-plan/foundation/experience.md
-        - docs/roadmap/master-plan/status.md
+        - docs/development/operations/extension-e2e.md
+        - docs/roadmap/master-plan/phase2/status.md
         - openspec/specs/product-architecture/spec.md
-        - openspec/changes/stabilize-incremental-captions/**
         - planning/workstreams.yaml
         forbidden_files: [AGENTS.md, "harness/**", "scripts/**"]
         deliverable: 插件统一快照与稳定片段 key；新增范围查询；保留已有提示节点；失败、隐藏、导航与轨道变化安全失效。
@@ -2863,9 +3251,9 @@ workstreams:
         phase: P1
         task_version: 4
         change_version: 1.3.0
-        task_source: docs/roadmap/master-plan/foundation.md
+        task_source: docs/roadmap/master-plan/phase2.md
         estimated_minutes: 90
-        allowed_files: extension/tests/**, docs/roadmap/master-plan/status.md
+        allowed_files: extension/tests/**, docs/roadmap/master-plan/phase2/status.md
         forbidden_files: 除 allowed_files 外的所有文件；尤其 AGENTS.md、harness/**、planning/** 与其他写入者范围
         expected_output: 逐项证据齐备后运行 E2E、完整真实视频与截图检查；记录覆盖与分段时延。
         acceptance_criteria:

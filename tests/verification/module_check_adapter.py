@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import sys
 import unittest
 from pathlib import Path
 
@@ -18,6 +19,9 @@ def verification_tests(root: Path) -> dict[str, object]:
     suite = unittest.defaultTestLoader.discover(str(root / "tests" / "verification"), pattern="test_*.py", top_level_dir=str(root))
     stream = io.StringIO()
     result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
+    # Kernel 已为 stderr 提供受控日志 locator，失败时无需再跑测试来取得 traceback。
+    for test, trace in [*result.failures, *result.errors]:
+        print(f"FAILED TEST: {test.id()}\n{trace}", file=sys.stderr)
     return {
         "status": "PASS" if result.wasSuccessful() and result.testsRun > 0 and not result.skipped else "FAIL",
         "checks_run": result.testsRun,

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "lexiflow.delivery-gate-records.v3",
+  "$id": "lexiflow.delivery-gate-records.v4",
   "title": "LexiFlow Delivery Gate 记录",
   "$defs": {
     "sha256": {
@@ -34,6 +34,138 @@
           "$ref": "#/$defs/sha256"
         }
       }
+    },
+    "riskAssessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "level",
+        "reason_codes",
+        "base",
+        "head",
+        "changed_files",
+        "file_snapshots",
+        "selected_check_ids",
+        "required_check_ids",
+        "coverage_gaps",
+        "subject_hash"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "lexiflow.risk-assessment.v1"
+        },
+        "level": {
+          "enum": [
+            "mechanical",
+            "local-function",
+            "high-risk-engineering",
+            "formal-release"
+          ]
+        },
+        "reason_codes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "base": {
+          "type": "string",
+          "minLength": 1
+        },
+        "head": {
+          "type": "string",
+          "minLength": 1
+        },
+        "changed_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "file_snapshots": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "selected_check_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "required_check_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "coverage_gaps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "subject_hash": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "acceptancePlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "risk_assessment_hash",
+        "task_requirements_hash",
+        "verification_scope",
+        "required_check_ids",
+        "required_layers",
+        "validator_independent"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "lexiflow.acceptance-plan.v1"
+        },
+        "risk_assessment_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "task_requirements_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "verification_scope": {
+          "enum": [
+            "development-change",
+            "development-baseline",
+            "repository-baseline"
+          ]
+        },
+        "required_check_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "required_layers": {
+          "oneOf": [
+            {
+              "const": [
+                "TASK_VALIDATION"
+              ]
+            },
+            {
+              "const": [
+                "TASK_VALIDATION",
+                "INDEPENDENT_REVIEW"
+              ]
+            }
+          ]
+        },
+        "validator_independent": {
+          "const": true
+        }
+      }
     }
   },
   "oneOf": [
@@ -51,11 +183,14 @@
         "diff",
         "verification_freeze",
         "changed_file_snapshots",
-        "content_hash"
+        "task_subject",
+        "content_hash",
+        "risk_assessment",
+        "acceptance_plan"
       ],
       "properties": {
         "schema_version": {
-          "const": "lexiflow.delivery-gate-submission.v4"
+          "const": "lexiflow.delivery-gate-submission.v5"
         },
         "submission_id": {
           "$ref": "#/$defs/uuid"
@@ -68,6 +203,24 @@
         },
         "content_hash": {
           "$ref": "#/$defs/sha256"
+        },
+        "risk_assessment": {
+          "$ref": "#/$defs/riskAssessment"
+        },
+        "acceptance_plan": {
+          "$ref": "#/$defs/acceptancePlan"
+        },
+        "task_subject": {
+          "type": "object",
+          "required": ["schema_version", "task_paths", "dependency_paths", "changed_files", "selected_check_ids"],
+          "properties": {
+            "schema_version": {"const": "lexiflow.task-subject.v1"},
+            "task_paths": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+            "dependency_paths": {"type": "array", "items": {"type": "string"}},
+            "changed_files": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+            "selected_check_ids": {"type": "array", "items": {"type": "string"}}
+          },
+          "additionalProperties": false
         }
       }
     },
@@ -83,11 +236,13 @@
         "authority",
         "verification_report",
         "result",
-        "content_hash"
+        "content_hash",
+        "risk_assessment_hash",
+        "acceptance_plan_hash"
       ],
       "properties": {
         "schema_version": {
-          "const": "lexiflow.delivery-gate-validation.v3"
+          "const": "lexiflow.delivery-gate-validation.v4"
         },
         "validation_id": {
           "$ref": "#/$defs/uuid"
@@ -106,6 +261,12 @@
         },
         "content_hash": {
           "$ref": "#/$defs/sha256"
+        },
+        "risk_assessment_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "acceptance_plan_hash": {
+          "$ref": "#/$defs/sha256"
         }
       }
     },
@@ -123,11 +284,13 @@
         "authority",
         "findings",
         "result",
-        "content_hash"
+        "content_hash",
+        "risk_assessment_hash",
+        "acceptance_plan_hash"
       ],
       "properties": {
         "schema_version": {
-          "const": "lexiflow.delivery-gate-review.v3"
+          "const": "lexiflow.delivery-gate-review.v4"
         },
         "review_id": {
           "$ref": "#/$defs/uuid"
@@ -136,6 +299,12 @@
           "$ref": "#/$defs/result"
         },
         "content_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "risk_assessment_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "acceptance_plan_hash": {
           "$ref": "#/$defs/sha256"
         }
       }
@@ -147,17 +316,19 @@
         "check_id",
         "submission_id",
         "validation_id",
-        "review_id",
         "submission_content_hash",
         "validation_content_hash",
         "review_content_hash",
         "conditions",
         "result",
-        "content_hash"
+        "content_hash",
+        "risk_assessment_hash",
+        "acceptance_plan_hash",
+        "review_id"
       ],
       "properties": {
         "schema_version": {
-          "const": "lexiflow.delivery-gate-check.v3"
+          "const": "lexiflow.delivery-gate-check.v4"
         },
         "check_id": {
           "$ref": "#/$defs/uuid"
@@ -170,6 +341,32 @@
         },
         "reason": {
           "const": ""
+        },
+        "risk_assessment_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "acceptance_plan_hash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "review_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "review_content_hash": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },

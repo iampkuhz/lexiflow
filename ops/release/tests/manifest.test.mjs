@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, lstat, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import fsPromises from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -115,11 +115,18 @@ test('rejects schema, source, producer, dataset, digest, role, platform and lice
     (d) => { d.licenses[0].sourceUrl = 'https://127.0.0.1/license'; },
     (d) => { d.licenses[0].noticePath = 'licenses/missing.txt'; }
   ];
-  for (const mutate of cases) {
-    const f = await fixture();
-    try { mutate(f.descriptor); await writeFile(f.descriptorFile, JSON.stringify(f.descriptor)); await assert.rejects(packageManifest({ repoRoot: f.root, descriptorFile: f.descriptorFile, artifactRoot: f.artifactRoot, outputDirectory: path.join(f.root, 'release') })); }
-    finally { await f.cleanup(); }
-  }
+  const f = await fixture();
+  try {
+    // 每个变体只改独立 descriptor；共享不变 Git/制品基线，拒绝后必须未发布。
+    for (const mutate of cases) {
+      const descriptor = structuredClone(f.descriptor);
+      mutate(descriptor);
+      await writeFile(f.descriptorFile, JSON.stringify(descriptor));
+      const outputDirectory = path.join(f.root, 'release');
+      await assert.rejects(packageManifest({ repoRoot: f.root, descriptorFile: f.descriptorFile, artifactRoot: f.artifactRoot, outputDirectory }));
+      await assert.rejects(lstat(outputDirectory), { code: 'ENOENT' });
+    }
+  } finally { await f.cleanup(); }
 });
 
 test('rejects dirty source, artifact tampering and symlinked artifact components without publishing', async () => {

@@ -33,6 +33,12 @@ class DeliveryHookTest(unittest.TestCase):
         (self.root / "harness").mkdir()
         self.policy = self.root / hook.POLICY_PATH
         self.policy.write_bytes((ROOT / hook.POLICY_PATH).read_bytes())
+        (self.root / "harness/agent-policy.manifest.yaml").write_bytes(
+            (ROOT / "harness/agent-policy.manifest.yaml").read_bytes()
+        )
+        (self.root / "harness/ci-policy.yaml").write_text(
+            "formal_only_check_ids: [fixture.formal]\n"
+        )
         patch = mock.patch.dict(os.environ, {"LEXIFLOW_DELIVERY_HOOK_DISABLE": "0"})
         patch.start()
         self.addCleanup(patch.stop)
@@ -57,13 +63,36 @@ class DeliveryHookTest(unittest.TestCase):
                     "executable": "python3",
                     "cwd": ".",
                     "timeout_seconds": 10,
+                    "transaction_reuse": True,
                     "scope": scope,
                     "triggers": [{"path": "initial.txt"}, {"path": ".gitignore"}],
                     "input_paths": ["fixture/check.py", "initial.txt"],
                     "required_environment": environment or [],
                 }
             )
-        _write_declarations(self.root, checks)
+        self.write_checks(checks)
+
+    def write_checks(self, checks):
+        formal = [
+            {
+                "check_id": identifier,
+                "module": identifier,
+                "scope": "change-targeted"
+                if identifier.endswith("on-change")
+                else "repository-baseline",
+                "command": [
+                    sys.executable,
+                    "-c",
+                    "raise SystemExit('formal must not execute')",
+                ],
+                "cwd": ".",
+                "timeout_seconds": 10,
+                "triggers": [{"path": "formal-input"}],
+                "input_paths": ["initial.txt"],
+            }
+            for identifier in ("fixture.formal", "fixture.formal-on-change")
+        ]
+        _write_declarations(self.root, [*checks, *formal])
 
     def reports(self):
         return [
@@ -78,7 +107,7 @@ class DeliveryHookTest(unittest.TestCase):
         output = self.evaluate()
         self.assertNotIn("decision", output)
         self.assertIn("交付 PASS", output["systemMessage"])
-        self.assertEqual("xx", (self.root / "tmp/count").read_text())
+        self.assertEqual("x", (self.root / "tmp/count").read_text())
         self.assertEqual(2, len(self.reports()))
         self.assertTrue(all(r["result"] == "PASS" for r in self.reports()))
 
@@ -88,7 +117,7 @@ class DeliveryHookTest(unittest.TestCase):
         )
         self.evaluate()
         self.evaluate()
-        self.assertEqual("xxxx", (self.root / "tmp/count").read_text())
+        self.assertEqual("xx", (self.root / "tmp/count").read_text())
         self.assertEqual(4, len(self.reports()))
 
     def test_failed_check_blocks_and_does_not_execute_repository(self):
@@ -98,6 +127,7 @@ class DeliveryHookTest(unittest.TestCase):
         self.assertIn("fixture.change-targeted FAIL", output["reason"])
         self.assertIn("诊断日志", output["reason"])
         self.assertEqual(1, len(self.reports()))
+        self.assertEqual("development-change", self.reports()[0]["scope"])
 
     def test_reentry_failure_ends_loop_without_granting_pass(self):
         self.fixture("raise SystemExit(1)")
@@ -182,10 +212,10 @@ class DeliveryHookTest(unittest.TestCase):
         self.assertIn("未验证", self.evaluate()["systemMessage"])
         execute.assert_not_called()
 
-    @mock.patch.object(hook, "execute_delivery")
+    @mock.patch.object(hook, "_execute_delivery")
     def test_busy_lock_never_waits_or_runs_twice(self, execute):
         self.fixture()
-        state = self.root / "tmp/quality/delivery-hook"
+        state = self.root / "tmp/quality/verification-window"
         state.mkdir(parents=True)
         with (state / "execution.lock").open("a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -193,7 +223,7 @@ class DeliveryHookTest(unittest.TestCase):
             output = self.evaluate()
         self.assertLess(time.monotonic() - start, 1)
         self.assertFalse(output["continue"])
-        self.assertIn("未重复执行", output["stopReason"])
+        self.assertIn("verification-window-busy", output["stopReason"])
         execute.assert_not_called()
 
     def test_global_timeout_cleans_real_process_and_releases_lock(self):
@@ -208,7 +238,9 @@ class DeliveryHookTest(unittest.TestCase):
         pid = int((self.root / "tmp/child.pid").read_text())
         with self.assertRaises(ProcessLookupError):
             os.kill(pid, 0)
-        with (self.root / "tmp/quality/delivery-hook/execution.lock").open("a") as lock:
+        with (self.root / "tmp/quality/verification-window/execution.lock").open(
+            "a"
+        ) as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
     def test_policy_error_names_file_and_position(self):
@@ -410,8 +442,7 @@ class DeliveryHookTest(unittest.TestCase):
         self.fixture()
         script = self.root / "fixture/check.py"
         script.write_text("import os\n")
-        _write_declarations(
-            self.root,
+        self.write_checks(
             [
                 {
                     "check_id": "fixture.ruff." + scope,

@@ -80,7 +80,7 @@ final class PipelineRuntimeFixture implements AutoCloseable {
                 event ->
                     "lexicon.import.completed".equals(event.path("event").stringValue())
                         && "PUBLISH_ROLLED_BACK".equals(event.path("reason").stringValue())),
-        "failed import lacks structured PUBLISH_ROLLED_BACK terminal: " + result.output());
+        "failed import lacks readable PUBLISH_ROLLED_BACK terminal: " + result.output());
   }
 
   private ProcessResult runCli(Path csv, boolean success) throws Exception {
@@ -133,6 +133,7 @@ final class PipelineRuntimeFixture implements AutoCloseable {
                 "--lexiflow.runtime.mode=formal",
                 "--lexiflow.segment-analysis.path=" + analysis,
                 "--lexiflow.segment-analysis.console=false",
+                "--logging.level.io.lexiflow.observability.platform.StructuredEventLogger=DEBUG",
                 "--server.address=127.0.0.1",
                 "--server.port=" + port,
                 "--spring.datasource.url=" + jdbcUrl)
@@ -226,12 +227,9 @@ final class PipelineRuntimeFixture implements AutoCloseable {
   JsonNode awaitRequestEvent(String requestId) throws Exception {
     var deadline = Instant.now().plusSeconds(3);
     while (Instant.now().isBefore(deadline)) {
-      for (var event : structuredEvents(Files.exists(apiLog) ? Files.readString(apiLog) : "")) {
-        if (event.path("request_id").isString()
-            && requestId.equals(event.path("request_id").stringValue())
-            && "caption.request.completed".equals(event.path("event").stringValue())) {
-          return event;
-        }
+      for (var line : (Files.exists(apiLog) ? Files.readString(apiLog) : "").lines().toList()) {
+        var event = readableRequestEvent(line);
+        if (event != null && requestId.equals(event.path("request_id").stringValue())) return event;
       }
       Thread.sleep(40);
     }
@@ -361,25 +359,48 @@ final class PipelineRuntimeFixture implements AutoCloseable {
 
   record TrackedResponse(JsonNode body, String requestId) {}
 
-  private List<JsonNode> importEvents(String output) throws Exception {
-    return structuredEvents(output).stream()
-        .filter(event -> event.path("event").stringValue().startsWith("lexicon.import."))
-        .toList();
-  }
-
-  private List<JsonNode> structuredEvents(String output) throws Exception {
+  private List<JsonNode> importEvents(String output) {
     var result = new java.util.ArrayList<JsonNode>();
     for (var line : output.lines().toList()) {
-      var brace = line.indexOf('{');
-      if (brace < 0) continue;
-      var candidate = line.substring(brace);
-      if (!candidate.contains("\"schema\":\"lexiflow.event.v1\"")) continue;
-      try {
-        result.add(json.readTree(candidate));
-      } catch (Exception malformed) {
-        throw new AssertionError("malformed structured event line: " + line, malformed);
+      var columns = line.split("\\|", 6);
+      if (columns.length < 5) continue;
+      boolean diagnostic = "ERROR".equals(columns[1]) || "WARN".equals(columns[1]);
+      if (!diagnostic && !"INFO".equals(columns[1])) continue;
+      int eventColumn = diagnostic ? 3 : 2;
+      if (columns.length != (diagnostic ? 6 : 5)
+          || !columns[eventColumn].startsWith("lexicon.import.")) continue;
+      var event = json.createObjectNode();
+      event.put("event", columns[eventColumn]);
+      for (var field : columns[eventColumn + 1].split(";")) {
+        if (field.startsWith("reason=")) event.put("reason", field.substring("reason=".length()));
       }
+      result.add(event);
     }
     return List.copyOf(result);
+  }
+
+  private JsonNode readableRequestEvent(String line) {
+    var columns = line.split("\\|", 6);
+    if (columns.length != 6 || !"DEBUG".equals(columns[1])) return null;
+    try {
+      UUID.fromString(columns[2]);
+    } catch (IllegalArgumentException invalidId) {
+      return null;
+    }
+    if (!"caption.request.completed".equals(columns[3])) return null;
+    var event = json.createObjectNode();
+    event.put("request_id", columns[2]);
+    event.put("event", columns[3]);
+    var counts = event.putObject("counts");
+    for (var field : columns[4].split(";")) {
+      var separator = field.indexOf('=');
+      if (separator < 0) continue;
+      var key = field.substring(0, separator);
+      var value = field.substring(separator + 1);
+      if ("lexicon_version".equals(key)) event.put(key, Long.parseLong(value));
+      else if (key.startsWith("count_"))
+        counts.put(key.substring("count_".length()), Long.parseLong(value));
+    }
+    return event;
   }
 }

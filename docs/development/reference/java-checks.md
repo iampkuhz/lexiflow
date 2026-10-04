@@ -23,7 +23,7 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend <gradle-task
 | 架构 | `architectureTest` |
 | Java 专属规则 | `javaSourceGates` |
 | 测试完整性 | `verifyNoSkippedJavaTests` |
-| 覆盖报告 | `jacocoRootReport` |
+| 按需覆盖报告 | `jacocoRootReport`（XML），加 `-PqualityHtmlReports=true` 生成 HTML |
 | 产品语言/项目依赖 | `verifyProductLanguage`、`verifyProjectDependencies` |
 
 定向到模块时使用真实 Gradle project path，例如 `:api:test`。除失败定位外，按交付目标选择完整聚合入口；不要再逐个运行已包含的任务。Repository Verify 的 backend Check 使用 deliveryFull，不能用普通 check 替代。
@@ -31,6 +31,16 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend <gradle-task
 ## 1.3. 报告与边界
 
 工具原生报告在相应模块的 `build/reports/`，定制治理结果在 `backend/build/reports/`。目标任务的成功和实际报告内容共同构成该工具的结论；报告不存在、任务跳过或无源码时，不能表述为已验证源码。Java 工具不签发 Gate 收据。
+
+普通 `check` 和 `qualityFull` 执行质量判定，不自动生成 JaCoCo 覆盖率汇总；覆盖率采集和显式报告任务保留。当前没有覆盖率阈值门禁，不能把报告生成成功解释为覆盖率合格。测试完整性仍消费 JUnit XML，静态检查、业务测试和文档完整性要求不变。
+
+测试、Checkstyle、PMD 的 HTML 默认关闭，XML 结果保留；JaCoCo 显式任务默认输出 XML。需要人工浏览时使用例如：
+
+```bash
+python3 -m scripts.environment.java_exec backend/gradlew -p backend -PqualityHtmlReports=true jacocoRootReport
+```
+
+该参数只控制浏览产物，不改变 Check 的成功标准。Javadoc 仍由普通 `check` 执行，因为它承载 DocLint/Werror 判定；其网站型输出随工具产生，不将其与无判定消费者的覆盖报告一起删除。旧报告文件可能仍留在 build 目录，必须核对本次命令与产物，不凭文件存在推断本次已经执行。
 
 ## 1.4. 从失败回到交付
 

@@ -142,6 +142,13 @@ public final class LexiconRuntime implements LexiconCatalog {
     return state;
   }
 
+  /**
+   * 根据运行模式查询已发布词形；正式模式在依赖恢复后重新确认就绪状态，不触发模型分析。
+   *
+   * @param normalizedForms 含义：上游已规范化的待查词形。取值范围：非 null 列表且元素为非 null 规范词形，空列表返回空结果。
+   * @return 已发布资料的查询结果和本次实际访问计数。
+   * @throws LexiconNotReadyException 正式词库未就绪或依赖不可用时抛出。
+   */
   @Override
   public synchronized LexiconLookupResult lookupForms(List<String> normalizedForms) {
     if (normalizedForms.isEmpty())

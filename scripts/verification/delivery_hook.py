@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import contextlib
-import fcntl
 import json
 import os
 import select
-import signal
 import sys
 import threading
 import time
@@ -16,10 +13,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 POLICY_PATH = "harness/delivery-hooks.json"
 INPUT_LIMIT = 65536
-
-
-class Interrupted(BaseException):
-    """必须穿过检查器的普通异常处理，确保超时或中断不会变成成功。"""
 
 
 def progress(message: str) -> None:
@@ -69,27 +62,6 @@ def read_policy(root: Path) -> dict:
         if type(value) is not int or not 1 <= value <= maximum:
             raise ValueError(f"{POLICY_PATH} {key} 必须是 1..{maximum} 的整数")
     return policy
-
-
-@contextlib.contextmanager
-def bounded(seconds: int):
-    """POSIX 主线程信号边界；内核负责清理正在运行的独立 Check 进程组。"""
-
-    def interrupt(signum, _frame):
-        reason = (
-            f"总执行超过 {seconds} 秒" if signum == signal.SIGALRM else "执行被中断"
-        )
-        raise Interrupted(reason)
-
-    signals = (signal.SIGALRM, signal.SIGTERM, signal.SIGINT)
-    previous = {sig: signal.signal(sig, interrupt) for sig in signals}
-    signal.alarm(seconds)
-    try:
-        yield
-    finally:
-        signal.alarm(0)
-        for sig, handler in previous.items():
-            signal.signal(sig, handler)
 
 
 def run_with_progress(interval: int):
@@ -222,65 +194,69 @@ def report_progress(report: dict) -> None:
         progress(f"{label} {check['status']}" + (f"：{detail}" if detail else ""))
 
 
-def execute_delivery(root: Path, policy: dict) -> tuple[str, str]:
-    """同一输入上串行执行两种公开 Verify；不使用旧 PASS 或签发正式 receipt。"""
+def _execute_delivery(root: Path, policy: dict, window) -> tuple[str, str]:
+    """按真实风险执行完整开发视图，准备所需隔离服务；不签发 Formal 或发行 PASS。"""
     from scripts.environment.test_services import isolated_test_services
-    from scripts.verification import (
-        freeze_inputs,
-        persist_report,
-        verify_changes,
-        verify_repository,
+    from scripts.verification.development import (
+        prepare_development,
+        execute_development,
     )
-    from scripts.verification.scope import changed_paths, resolve_base
 
-    progress(
-        "开始交付检查：Change Verify → Repository Verify；按需准备隔离测试容器，不安装依赖或启动容器引擎"
-    )
-    before = freeze_inputs(root)
-    if before["result"] != "PASS":
-        return before["result"], report_detail(before)
-    base = resolve_base(root)
-    paths = changed_paths(root, base)
+    prepared = prepare_development(root)
+    scopes = [profile["verification_scope"] for profile in prepared["frozen_profiles"]]
+    progress("开始风险所选开发验证：" + " → ".join(scopes))
     required = {
         name
-        for check in before["checks"]
+        for profile in prepared["frozen_profiles"]
+        for check in profile["checks"]
         for name in check.get("required_environment", [])
     }
     with isolated_test_services(root, required, progress):
-        runner = run_with_progress(policy["heartbeat_seconds"])
-        publications = []
-        for label, verify in (
-            ("Change", verify_changes),
-            ("Repository", verify_repository),
-        ):
-            progress(f"开始 {label} Verify")
-            report = verify(root, runner=runner)
-            report["publication"] = persist_report(root, report)
-            report_progress(report)
-            progress(
-                f"{label} Verify {report['result']}：{report['publication']['locator']}"
-            )
-            if report["result"] != "PASS":
-                return report["result"], report_detail(report, root)
-            publications.append(report["publication"]["locator"])
-        after = freeze_inputs(root)
-        if (
-            after.get("result") != "PASS"
-            or before["input_fingerprint"] != after.get("input_fingerprint")
-            or base != resolve_base(root)
-            or paths != changed_paths(root, base)
-        ):
-            return (
-                "FAIL",
-                "input-drift：两种 Verify 期间源码、配置或 Git 范围变化，请稳定输入后重跑",
-            )
-        return "PASS", "Change/Repository Verify 均通过；报告 " + ", ".join(
-            publications
+        result = execute_development(
+            root,
+            prepared=prepared,
+            runner=run_with_progress(policy["heartbeat_seconds"]),
+            _window=window,
         )
+        publications = []
+        failures = []
+        for report in result["reports"]:
+            report_progress(report)
+            publication = report.get("publication", {}).get("locator")
+            if publication:
+                publications.append(publication)
+            if report.get("result") != "PASS":
+                failures.append(report_detail(report, root))
+        if result["result"] != "PASS":
+            detail = "\n".join(failures) or result.get(
+                "reason", "development-incomplete"
+            )
+            if result.get("detail"):
+                detail += "；" + result["detail"]
+            return result["result"], detail
+        return "PASS", (
+            "风险所选开发验证全部通过（"
+            + ", ".join(scopes)
+            + "）；不是完整发行基线或独立 Formal 验收；报告 "
+            + ", ".join(publications)
+        )
+
+
+def execute_delivery(root: Path, policy: dict) -> tuple[str, str]:
+    """与独立 CLI、工作包和 Formal validation 共用窗口；两种 Verify 期间不交出锁。"""
+    from scripts.verification.coordination import WindowError, verification_window
+
+    try:
+        with verification_window(root) as window:
+            return _execute_delivery(root, policy, window)
+    except WindowError as exc:
+        return exc.status, f"{exc.code}：{exc}；本次不声明交付 PASS"
 
 
 def evaluate(root: Path, event: object) -> dict:
     """对单次 Stop 事件决定是否运行交付检查；中间回合不签 PASS。"""
+    from scripts.verification.execution import Interrupted, bounded
+
     if os.environ.get("LEXIFLOW_DELIVERY_HOOK_DISABLE") == "1":
         return {
             "systemMessage": "LexiFlow 交付 BLOCKED：Hook 已显式停用，未验证，不代表 PASS。"
@@ -315,20 +291,10 @@ def evaluate(root: Path, event: object) -> dict:
                 return {
                     "systemMessage": "LexiFlow：无待检变更，未触发交付检查；未签发 PASS。"
                 }
-            state = root / "tmp/quality/delivery-hook"
-            state.mkdir(parents=True, exist_ok=True)
-            # LOCK_NB 不等待；不能 unlink 锁文件，否则另一个调用可创建第二把锁。
-            with (state / "execution.lock").open("a") as lock:
-                try:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError:
-                    return decision(
-                        "BLOCKED",
-                        "同 checkout 已有交付 Hook 正在检查；本次未重复执行",
-                        True,
-                    )
-                status, detail = execute_delivery(root, policy)
-                return decision(status, detail, active)
+            status, detail = execute_delivery(root, policy)
+            return decision(
+                status, detail, active or detail.startswith("verification-window-")
+            )
 
     except Interrupted as exc:
         return decision("BLOCKED", str(exc) + "；已清理正在执行的检查进程", True)

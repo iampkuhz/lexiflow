@@ -65,4 +65,4 @@ Harness 的机器规则与入口见 [harness/README.md](../../harness/README.md)
 - **维护动作：**install/link/start 会修改本机或启动进程，必须与只读 check 区分。
 - **内部实现：**kernel/records/identity helper 在模块详情展开，不挤进总览。
 
-当前执行状态只在[路线图状态](../roadmap/master-plan/status.md)维护。流程说明不代表相应功能已经正式验收。
+当前执行状态只在[路线图状态](../roadmap/master-plan/phase2/status.md)维护。流程说明不代表相应功能已经正式验收。

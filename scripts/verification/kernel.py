@@ -249,6 +249,8 @@ def run_check_process(
             "executable": executed[0],
             "executed_argv": executed,
         }
+    stdout, stderr = b"", b""
+    timed_out, reason, interrupted = False, "exited", None
     try:
         if stdin_payload is None:
             stdout, stderr = proc.communicate(timeout=timeout_seconds)
@@ -256,21 +258,31 @@ def run_check_process(
             stdout, stderr = proc.communicate(
                 input=stdin_payload, timeout=timeout_seconds
             )
-        timed_out, reason = False, "exited"
     except subprocess.TimeoutExpired:
-        _terminate_group(proc.pid)
-        try:
-            stdout, stderr = proc.communicate(timeout=5)
-        except Exception:
-            proc.kill()
-            stdout, stderr = b"", b""
         timed_out, reason = True, "timeout"
-    except BaseException:
-        # Hook 总超时、SIGTERM 与 Ctrl-C 也必须回收独立的 Check 进程组。
-        _terminate_group(proc.pid)
-        proc.wait(timeout=5)
-        raise
-    return {
+    except BaseException as exc:
+        interrupted = exc
+        reason = "cancelled"
+    finally:
+        # 总预算可能正好在单项 timeout 的回收窗口到期。回收本次进程组期间
+        # 延迟信号，完成 wait/管道关闭后再传播，不能让第二个异常跳过清理。
+        blocked_signals = {signal.SIGALRM, signal.SIGTERM, signal.SIGINT}
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, blocked_signals)
+        try:
+            if timed_out or interrupted is not None:
+                _terminate_group(proc.pid)
+                try:
+                    stdout, stderr = proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    stdout, stderr = proc.communicate(timeout=5)
+        finally:
+            try:
+                signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+            except BaseException as exc:
+                interrupted = exc
+                reason = "cancelled"
+    result = {
         "status": "FAIL" if timed_out or proc.returncode != 0 else "PASS",
         "exit_code": proc.returncode,
         "exit_reason": reason,
@@ -283,6 +295,12 @@ def run_check_process(
         "executable": executed[0],
         "executed_argv": executed,
     }
+
+    if interrupted is not None:
+        # 受控取消仍把原始输出交给调用层保存；不将取消转成退出零。
+        interrupted.process_result = result
+        raise interrupted
+    return result
 
 
 def _write_output_artifacts(
@@ -518,23 +536,32 @@ def execute_single_check(
             )
             blocked["status"] = "BLOCKED"
             return blocked
-    if child_transport:
-        process = runner(
-            list(check["command"]),
-            str(cwd_path),
-            env,
-            check["timeout_seconds"],
-            check.get("executable"),
-            stdin_payload=stdin_payload,
-        )
-    else:
-        process = runner(
-            list(check["command"]),
-            str(cwd_path),
-            env,
-            check["timeout_seconds"],
-            check.get("executable"),
-        )
+    try:
+        if child_transport:
+            process = runner(
+                list(check["command"]),
+                str(cwd_path),
+                env,
+                check["timeout_seconds"],
+                check.get("executable"),
+                stdin_payload=stdin_payload,
+            )
+        else:
+            process = runner(
+                list(check["command"]),
+                str(cwd_path),
+                env,
+                check["timeout_seconds"],
+                check.get("executable"),
+            )
+    except BaseException as exc:
+        process = getattr(exc, "process_result", None)
+        if isinstance(process, dict):
+            exc.output_artifacts = _write_output_artifacts(
+                repo_root, run_id or str(uuid.uuid4()), check["check_id"], process
+            )
+            exc.check_id = check["check_id"]
+        raise
     artifacts = _write_output_artifacts(
         repo_root, run_id or str(uuid.uuid4()), check["check_id"], process
     )

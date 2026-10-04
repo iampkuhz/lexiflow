@@ -29,18 +29,26 @@ def _cmd_submit(args: argparse.Namespace) -> int:
             producer_run_id=args.producer_run_id,
         )
     except SubmissionError as exc:
-        result = {"result": "BLOCKED", "reason": exc.code, "detail": exc.detail}
+        result = {"result": exc.status, "reason": exc.code, "detail": exc.detail}
     return _output(result)
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
-    from scripts.delivery_gate.validate import validate, ValidationError
+    from scripts.delivery_gate.validate import validate, validate_batch, ValidationError
 
     try:
-        result = validate(
-            args.repo_root,
-            submission_id=args.submission_id,
-        )
+        ids = args.submission_id
+        if len(ids) > 1:
+            validations = validate_batch(args.repo_root, submission_ids=ids)
+            statuses = {item["result"] for item in validations}
+            status = (
+                "FAIL"
+                if "FAIL" in statuses
+                else ("BLOCKED" if "BLOCKED" in statuses else "PASS")
+            )
+            result = {"result": status, "validations": validations}
+        else:
+            result = validate(args.repo_root, submission_id=ids[0])
     except ValidationError as exc:
         result = {"result": "BLOCKED", "reason": exc.code, "detail": exc.detail}
     return _output(result)
@@ -128,7 +136,12 @@ def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
     validate_parser = subparsers.add_parser(
         "validate", help="Run independent validation"
     )
-    validate_parser.add_argument("--submission-id", required=True)
+    validate_parser.add_argument(
+        "--submission-id",
+        required=True,
+        action="append",
+        help="Repeat up to 16 times for bounded batch validation",
+    )
 
     review_parser = subparsers.add_parser("review", help="Perform independent review")
     review_parser.add_argument("--submission-id", required=True)

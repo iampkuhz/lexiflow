@@ -26,7 +26,7 @@ def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
         ).verify(args.run_id)
     except (CodexWorkPackageError, AgentContractError, OSError) as exc:
         result = {
-            "status": "FAIL",
+            "status": getattr(exc, "status", "FAIL"),
             "work_package_id": None,
             "task_ids": [],
             "run_id": args.run_id,

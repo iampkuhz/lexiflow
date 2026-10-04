@@ -59,6 +59,9 @@ class StructuredEventLoggerTest {
       assertEquals(ch.qos.logback.classic.Level.DEBUG, appender.list.getFirst().getLevel());
       assertTrue(appender.list.getFirst().getFormattedMessage().contains("|DEBUG|" + id + "|"));
       assertTrue(appender.list.getFirst().getFormattedMessage().contains("reason=NO_HINT"));
+      appender.list.clear();
+      assertTrue(logger.tryEmit(() -> requestEvent(StructuredEvent.Reason.NO_HINT, id, 7L)));
+      assertTrue(appender.list.getFirst().getFormattedMessage().contains("lexicon_version=7"));
     } finally {
       slf4j.setLevel(originalLevel);
       slf4j.detachAppender(appender);
@@ -67,12 +70,17 @@ class StructuredEventLoggerTest {
   }
 
   private static StructuredEvent requestEvent(StructuredEvent.Reason reason, UUID id) {
+    return requestEvent(reason, id, null);
+  }
+
+  private static StructuredEvent requestEvent(
+      StructuredEvent.Reason reason, UUID id, Long lexiconVersion) {
     return new StructuredEvent(
         StructuredEvent.EventType.CAPTION_REQUEST_COMPLETED,
         reason,
         2,
         Map.of(),
-        null,
+        lexiconVersion,
         id,
         Map.of(StructuredEvent.Timing.API, 2L),
         null,

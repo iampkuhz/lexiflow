@@ -1,6 +1,6 @@
 # 1. 模块边界
 
-**位置：** [架构总览](overview.md) → 模块边界。**下一步：** 看[观看时序](flows/viewing.md)追踪运行调用，或按下面的 owner 进入具体 contract。**失败边界：** 不可靠资料由 Enrichment 返回空结果；跨域不能绕过公开 contract 直接读写表。
+[架构总览](overview.md) → 模块边界。本文说明领域 owner、模块依赖和跨域访问边界。
 
 LexiFlow 后端是共享两个业务领域的 Modular Monolith，只有 `:api` 一个 Spring Boot 运行项目。判断模块归属先看**独立事实与规则由谁负责**，再看用例和技术怎样调用它们。仅被多处引用、在后台运行或调用模型，都不是新建领域模块的理由。
 

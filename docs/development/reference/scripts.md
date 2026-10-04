@@ -2,7 +2,7 @@
 
 > 位置：[工程地图](../overview.md) → [Reference](../reference.md) → Scripts。先在 [Verify](../change-delivery/verification.md)、[Delivery Gate](../change-delivery/delivery-gate.md) 或 [Agent workflow](../agent-workflow.md) 确认阶段，再查下面的文件。这里不是执行顺序表。
 
-包导出与 __main__ 是入口设施，没有额外业务阶段。代码位置均相对于仓库根的 scripts/；目录可从[源码入口](../../../scripts/)进入。
+包导出与 `__main__` 是入口设施，不构成业务阶段。下表路径均相对于仓库根的 `scripts/`；见[源码入口](../../../scripts/)。
 
 ## 1.1. 日常 Verify
 
@@ -73,9 +73,10 @@
 | [repository/__init__.py](../../../scripts/repository/__init__.py) | 包设施 | 无独立阅读章节 |
 | [environment/test_services.py](../../../scripts/environment/test_services.py) | 交付临时测试资源 lease | 本机 Podman、随机端口、就绪与归属核验清理；不复用开发库 |
 | [environment/runtime.py](../../../scripts/environment/runtime.py) | 环境能力探测与子进程变量 | Verify 环境子步骤和 Setup 的共用 contract |
+| [environment/toolchain.py](../../../scripts/environment/toolchain.py) | 同事务工具与包内容身份 | 有限声明能力解析、真实执行器与字节指纹；供执行与报告消费共同核对，不承担服务认证 |
 | [environment/java_runtime.py](../../../scripts/environment/java_runtime.py) | Java 25 选择与验证 | 内部能力；避免多个页面重复运行时选择规则 |
 | [environment/java_exec.py](../../../scripts/environment/java_exec.py) | 原生命令环境包装 | 稳定操作入口；不冒充额外 Quality Gate |
 | [environment/start_api.py](../../../scripts/environment/start_api.py) | 端口检查与受控 API 启动 | 本地体验 workflow；有副作用，不作为普通 checker |
 | [environment/__init__.py](../../../scripts/environment/__init__.py) | 环境能力导出 | 模块 contract |
 
-原生产品检查由 Gradle/build-logic、extension/scripts/quality-check.mjs 与 quality-results.mjs 拥有；extension build.mjs/build-config.mjs 负责构建。Java 的交付与诊断入口见 [Java 检查](java-checks.md)，浏览器构建与测试见 [Extension E2E](../operations/extension-e2e.md)。
+原生产品检查由 Gradle/build-logic、extension/scripts/quality-check.mjs 与 quality-results.mjs 拥有；extension build.mjs/build-config.mjs 负责构建。入口见 [Java 检查](java-checks.md)与 [Extension E2E](../operations/extension-e2e.md)。

@@ -58,6 +58,7 @@ def changed_paths(root: Path, base: str) -> list[str]:
     diff_out = git_run(
         root,
         "diff",
+        "--no-renames",
         "--name-only",
         "-z",
         "--diff-filter=ACMRD",

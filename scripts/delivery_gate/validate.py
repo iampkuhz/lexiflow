@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 import uuid
+import yaml
 from scripts.delivery_gate.authority import discover_authority, verify_authority
 from scripts.delivery_gate.records import (
     RecordError,
@@ -17,10 +18,12 @@ from scripts.delivery_gate.records import (
     publish_json,
     read_bound_bytes,
     read_optional_bytes,
+    read_regular_bytes,
     sha256_bytes,
 )
 from scripts.delivery_gate.requirements import requirements_are_current
-from scripts.verification import freeze_inputs, verify_repository
+from scripts.verification import verify_frozen_inputs, verify_profiles
+from scripts.delivery_gate.acceptance import binding, verify_plan
 
 
 class ValidationError(ValueError):
@@ -119,13 +122,11 @@ def _verify_frozen(repo: Path, submission: dict[str, Any]) -> dict[str, Any]:
     required = submission["task_requirements"].get("required_check_ids")
     if not isinstance(required, list):
         raise ValidationError("frozen-inputs-invalid", "task required checks missing")
-    current_freeze = freeze_inputs(repo, required_check_ids=required)
-    if current_freeze.get("result") != "PASS" or current_freeze.get(
-        "input_fingerprint"
-    ) != freeze.get("input_fingerprint"):
+    verify_plan(repo, submission)
+    if not verify_frozen_inputs(repo, freeze):
         raise ValidationError(
             "frozen-input-drift",
-            str(current_freeze.get("reason", "input closure changed")),
+            "input closure changed",
         )
     for label in ("change_report", "diff"):
         desc = submission.get(label)
@@ -199,32 +200,14 @@ def _gaps(report: dict[str, Any]) -> list[dict[str, str]]:
     return values
 
 
-def validate(root: str | Path, *, submission_id: str) -> dict[str, Any]:
-    """由不同执行者校验 submission 与冻结输入，不要求独立宿主 Session。经 Verification 公开 API 执行 Check 后再次核对资料与 producer；validation 绑定实际报告和 gaps，未执行或缺口不能算 PASS。"""
-    repo = Path(root).resolve()
-    try:
-        submission = load_submission(repo, submission_id)
-    except RecordError as exc:
-        raise ValidationError(exc.code, exc.detail) from None
-    runtime = _discover_runtime(repo)
-    _verify_independence(submission, runtime)
-    freeze = _verify_frozen(repo, submission)
-    try:
-        if list_layer(repo, "validations", "submission_id", submission_id):
-            raise ValidationError("validation-already-published", submission_id)
-    except RecordError as exc:
-        raise ValidationError(exc.code, exc.detail) from None
-    report = verify_repository(
-        repo,
-        required_check_ids=submission["task_requirements"]["required_check_ids"],
-        frozen_inputs=freeze,
-    )
-    if report.get("frozen_input_fingerprint") != freeze["input_fingerprint"]:
-        raise ValidationError(
-            "frozen-input-mismatch", "verification did not consume submitted closure"
-        )
-    # 命令执行后重验 submission 产物和 producer 来源，防止运行期间漂移。
-    _verify_frozen(repo, submission)
+def _publish_validation(
+    repo: Path,
+    submission_id: str,
+    submission: dict[str, Any],
+    runtime: dict[str, Any],
+    freeze: dict[str, Any],
+    report: dict[str, Any],
+) -> dict[str, Any]:
     gaps = _gaps(report)
     result = (
         "PASS"
@@ -234,20 +217,21 @@ def validate(root: str | Path, *, submission_id: str) -> dict[str, Any]:
     validation_id = str(uuid.uuid4())
     created = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
     try:
-        report_descriptor = publish_bytes(
+        descriptor = publish_bytes(
             repo,
             f"tmp/quality/delivery-gate/validations/{validation_id}/report.json",
             canonical_bytes(report),
         )
         record = {
-            "schema_version": "lexiflow.delivery-gate-validation.v3",
+            "schema_version": "lexiflow.delivery-gate-validation.v4",
+            **binding(submission),
             "validation_id": validation_id,
             "submission_id": submission_id,
             "submission_content_hash": submission["content_hash"],
             "validator_identity": runtime["identity"],
             "runtime_proof": runtime["proof"],
             "authority": runtime["authority"],
-            "verification_report": report_descriptor,
+            "verification_report": descriptor,
             "frozen_input_fingerprint": freeze["input_fingerprint"],
             "gaps": gaps,
             "result": result,
@@ -266,3 +250,136 @@ def validate(root: str | Path, *, submission_id: str) -> dict[str, Any]:
         "record_sha256": published["sha256"],
         "gaps": gaps,
     }
+
+
+def _bind_terminal_report(
+    report: dict[str, Any], freeze: dict[str, Any]
+) -> dict[str, Any]:
+    """让未启动 profile 的终态报告仍绑定当前 Task 计划，并明确所有 Check 未运行。"""
+    if report.get("frozen_input_fingerprint") == freeze.get("input_fingerprint"):
+        return report
+    if report.get("frozen_input_fingerprint") not in (None, ""):
+        raise ValidationError(
+            "frozen-input-mismatch", "verification did not consume submitted closure"
+        )
+    checks = report.get("checks")
+    if not checks:
+        checks = [
+            {
+                "check_id": check["check_id"],
+                "module": check.get("module", "unknown"),
+                "status": "BLOCKED",
+                "reason": report.get("reason", "profile-not-run"),
+                "process": {"executed_argv": [], "exit_reason": "not-run"},
+            }
+            for check in freeze.get("checks", [])
+        ]
+    return {
+        **report,
+        "scope": freeze["verification_scope"],
+        "checks": checks,
+        "frozen_input_fingerprint": freeze["input_fingerprint"],
+        "required_check_ids": freeze["required_check_ids"],
+        "coverage_gaps": report.get("coverage_gaps")
+        or [check["check_id"] for check in freeze.get("checks", [])],
+    }
+
+
+def validate_batch(
+    root: str | Path, *, submission_ids: list[str]
+) -> list[dict[str, Any]]:
+    """在单一调用中预检并顺序验证 1 至 16 个互异 submission。"""
+    repo = Path(root).resolve()
+    try:
+        policy = yaml.safe_load(
+            read_regular_bytes(repo, "harness/agent-policy.manifest.yaml")
+        )
+        maximum = policy["subagent_protocol"]["acceptance_submission"]["formal_batch"][
+            "maximum_submissions"
+        ]
+        if type(maximum) is not int or maximum != 16:
+            raise ValueError("formal batch maximum must be exactly 16")
+    except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError) as exc:
+        raise ValidationError("formal-batch-policy-invalid", str(exc)) from None
+    if (
+        not isinstance(submission_ids, list)
+        or not 1 <= len(submission_ids) <= maximum
+        or any(not isinstance(value, str) or not value for value in submission_ids)
+        or len(set(submission_ids)) != len(submission_ids)
+    ):
+        raise ValidationError(
+            "submission-batch-invalid",
+            "submission_ids must contain 1..16 unique non-empty IDs",
+        )
+    runtime = _discover_runtime(repo)
+    submissions, freezes = [], []
+    try:
+        for sid in submission_ids:
+            submission = load_submission(repo, sid)
+            _verify_independence(submission, runtime)
+            freeze = _verify_frozen(repo, submission)
+            if list_layer(repo, "validations", "submission_id", sid):
+                raise ValidationError("validation-already-published", sid)
+            submissions.append(submission)
+            freezes.append(freeze)
+    except RecordError as exc:
+        raise ValidationError(exc.code, exc.detail) from None
+
+    freshness_errors: dict[int, tuple[str, str]] = {}
+
+    def freshness(index: int, _profile: dict[str, Any]) -> bool:
+        try:
+            current = _discover_runtime(repo)
+            if current.get("identity") != runtime.get("identity"):
+                freshness_errors[index] = (
+                    "validator-identity-drift",
+                    "the native validator identity changed during this batch",
+                )
+                return False
+            _verify_independence(submissions[index], current)
+            _verify_frozen(repo, submissions[index])
+            if list_layer(repo, "validations", "submission_id", submission_ids[index]):
+                freshness_errors[index] = (
+                    "validation-already-published",
+                    submission_ids[index],
+                )
+                return False
+            freshness_errors.pop(index, None)
+            return True
+        except (ValidationError, RecordError) as exc:
+            freshness_errors[index] = (
+                getattr(exc, "code", "submission-drift"),
+                getattr(exc, "detail", str(exc)),
+            )
+            return False
+
+    reports = verify_profiles(
+        repo,
+        frozen_profiles=freezes,
+        before_profile=freshness,
+        after_profile=lambda i, profile, report: freshness(i, profile),
+    )
+    outputs = []
+    for index, (sid, submission, freeze, report) in enumerate(
+        zip(submission_ids, submissions, freezes, reports, strict=True)
+    ):
+        report = _bind_terminal_report(report, freeze)
+        if not freshness(index, freeze):
+            code, detail = freshness_errors.get(index, ("submission-drift", sid))
+            if code in {"validator-identity-drift", "validation-already-published"}:
+                raise ValidationError(code, detail)
+            report = {
+                **report,
+                "result": "FAIL",
+                "reason": code,
+                "detail": detail,
+            }
+        outputs.append(
+            _publish_validation(repo, sid, submission, runtime, freeze, report)
+        )
+    return outputs
+
+
+def validate(root: str | Path, *, submission_id: str) -> dict[str, Any]:
+    """保持既有单 Task API 和返回结构。"""
+    return validate_batch(root, submission_ids=[submission_id])[0]

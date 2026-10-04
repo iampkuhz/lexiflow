@@ -110,6 +110,20 @@ public final class PublicApiJavadocGate implements JavaSourceGate {
       var declarationLine = line(declarationPosition);
       var doc = sources.docTrees().getDocCommentTree(path);
       if (doc == null) {
+        violations.add(
+            violation(
+                declarationLine,
+                "PUBLIC_API_JAVADOC_MISSING",
+                "公开 API 缺少 Javadoc；必须至少三行，说明整体职责，并为每个参数填写含义和取值范围",
+                Map.of("member", memberName(tree))));
+        for (var parameter : tree.getParameters()) {
+          violations.add(
+              violation(
+                  declarationLine,
+                  "PUBLIC_API_PARAM_MISSING",
+                  "参数缺少 @param 说明；格式：@param 参数名 含义：具体职责。取值范围：允许值及边界。",
+                  Map.of("member", memberName(tree), "parameter", parameter.getName().toString())));
+        }
         return;
       }
       if (javadocLineCount(declarationPosition) < 3) {
@@ -137,22 +151,25 @@ public final class PublicApiJavadocGate implements JavaSourceGate {
               violation(
                   declarationLine,
                   "PUBLIC_API_PARAM_MISSING",
-                  "公开 API 参数缺少 @param 说明",
+                  "公开 API 参数缺少 @param 说明；必须说明含义（“含义：”及其内容）、取值范围（“取值范围：”及其内容），并按规定格式填写",
                   Map.of("member", memberName(tree), "parameter", name)));
-        } else if (!MEANING.matcher(description).find()) {
-          violations.add(
-              violation(
-                  declarationLine,
-                  "PUBLIC_API_PARAM_MEANING_MISSING",
-                  "公开 API 参数说明必须包含“含义：”及其内容",
-                  Map.of("member", memberName(tree), "parameter", name)));
-        } else if (!RANGE.matcher(description).find()) {
-          violations.add(
-              violation(
-                  declarationLine,
-                  "PUBLIC_API_PARAM_RANGE_MISSING",
-                  "公开 API 参数说明必须包含“取值范围：”及其内容",
-                  Map.of("member", memberName(tree), "parameter", name)));
+        } else {
+          if (!MEANING.matcher(description).find()) {
+            violations.add(
+                violation(
+                    declarationLine,
+                    "PUBLIC_API_PARAM_MEANING_MISSING",
+                    "公开 API 参数说明必须包含“含义：”及其内容",
+                    Map.of("member", memberName(tree), "parameter", name)));
+          }
+          if (!RANGE.matcher(description).find()) {
+            violations.add(
+                violation(
+                    declarationLine,
+                    "PUBLIC_API_PARAM_RANGE_MISSING",
+                    "公开 API 参数说明必须包含“取值范围：”及其内容",
+                    Map.of("member", memberName(tree), "parameter", name)));
+          }
         }
       }
     }

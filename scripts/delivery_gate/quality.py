@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import io
 import json
+import sys
 import unittest
 from pathlib import Path
 
@@ -16,6 +17,9 @@ def evaluate_suite(suite: unittest.TestSuite) -> dict[str, object]:
     result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
     complete = result.testsRun > 0 and not result.skipped
     passed = result.wasSuccessful() and complete
+    # 原始失败仅写进程 stderr，由 Verification 保存为本机日志；摘要不复制 traceback。
+    for test, trace in [*result.failures, *result.errors]:
+        print(f"FAILED TEST: {test.id()}\n{trace}", file=sys.stderr)
     return {
         "status": "PASS" if passed else "FAIL",
         "checks_run": result.testsRun,
@@ -23,6 +27,11 @@ def evaluate_suite(suite: unittest.TestSuite) -> dict[str, object]:
         "errors": len(result.errors),
         "skipped": len(result.skipped),
         "reason": "" if passed else "delivery-gate-module-tests-incomplete",
+        "detail": {
+            "failed_tests": [test.id() for test, _ in result.failures],
+            "error_tests": [test.id() for test, _ in result.errors],
+            "skipped_tests": [test.id() for test, _ in result.skipped],
+        },
         "tool_output_sha256": hashlib.sha256(stream.getvalue().encode()).hexdigest(),
     }
 

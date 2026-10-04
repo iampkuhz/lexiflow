@@ -6,9 +6,10 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 _UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -99,6 +100,7 @@ class CodexRuntimeBinding:
     """保存一个 run 的宿主来源身份与不可变证明。"""
 
     identity: Mapping[str, str]
+    proof: Mapping[str, Any] | None = None
 
     @classmethod
     def create(
@@ -106,10 +108,12 @@ class CodexRuntimeBinding:
         caller_contract: Mapping[str, Any],
         trusted_host_context: Mapping[str, Any] | None,
         run_id: str,
-    ) -> "CodexRuntimeBinding":
+        proof: Mapping[str, Any] | None = None,
+    ) -> CodexRuntimeBinding:
         """校验 caller 未预填 runner 身份，再与可信宿主上下文绑定。"""
         return cls(
-            bind_trusted_host_context(caller_contract, trusted_host_context, run_id)
+            bind_trusted_host_context(caller_contract, trusted_host_context, run_id),
+            proof,
         )
 
     def persist_immutable(self, repo_root: str | Path) -> dict[str, Any]:
@@ -121,6 +125,26 @@ class CodexRuntimeBinding:
                 "runtime-context-invalid", "binding identity is incomplete"
             )
         run_id = identity["run_id"]
+        if self.proof is None:
+            raise CodexRuntimeError(
+                "runtime-metadata-unavailable",
+                "native session proof is unavailable",
+                status="BLOCKED",
+            )
+        # A binding is evidence only when the persisted identity follows the
+        # native thread ancestry. A caller-provided host-shaped dict is not proof.
+        from scripts.agents.local_codex_runtime import verify_proof
+
+        verify_proof(
+            root,
+            dict(self.proof),
+            {
+                "actor_id": identity["agent_id"],
+                "session_id": identity["session_id"],
+                "parent_session_id": identity["parent_session_id"],
+                "client": identity["client"],
+            },
+        )
         directory = root / "tmp/quality/codex-work-packages" / run_id
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         if directory.is_symlink() or not directory.is_dir():
@@ -129,8 +153,9 @@ class CodexRuntimeBinding:
             )
         path = directory / "runtime-binding.json"
         payload = {
-            "schema_version": "lexiflow.codex-runtime-binding.v1",
+            "schema_version": "lexiflow.codex-runtime-binding.v2",
             "identity": identity,
+            "proof": dict(self.proof),
         }
         content = canonical_json_bytes(payload)
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)

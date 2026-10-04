@@ -10,6 +10,7 @@ from unittest.mock import patch
 import yaml
 
 from scripts.delivery_gate.check import check_conditions
+from scripts.delivery_gate.source_snapshot import review_patch
 from scripts.delivery_gate.records import (
     RecordError,
     content_hash,
@@ -31,6 +32,8 @@ class TestDependencyRecovery(unittest.TestCase):
         tasks[0]["dependencies"] = []
         tasks.append({**tasks[0], "id": "LF-TSK-TEST-0002", "dependencies": [TASK_ID]})
         path.write_text(yaml.safe_dump(catalog, sort_keys=False))
+        self.f._git("add", "planning/workstreams.yaml")
+        self.f._git("commit", "-m", "dependency recovery fixture catalog")
 
     def tearDown(self) -> None:
         self.f.cleanup()
@@ -55,7 +58,11 @@ class TestDependencyRecovery(unittest.TestCase):
         diff = publish_bytes(
             self.f.root,
             f"tmp/quality/delivery-gate/submissions/{sid}.diff.patch",
-            b"dependent fixture diff",
+            review_patch(
+                self.f.root,
+                base["risk_assessment"]["base"],
+                report["scope_review"]["changed_files"],
+            ),
         )
         snapshots = {
             name: {
@@ -64,13 +71,20 @@ class TestDependencyRecovery(unittest.TestCase):
             }
             for name in report["scope_review"]["changed_files"]
         }
+        from scripts.delivery_gate.acceptance import acceptance_plan
+
+        plan = acceptance_plan(self.f.root, base["risk_assessment"], requirements)
         record = {
             **base,
+            "acceptance_plan": plan,
             "submission_id": sid,
             "task_requirements": requirements,
             "change_report": descriptor,
             "verification_freeze": freeze_inputs(
-                self.f.root, required_check_ids=requirements["required_check_ids"]
+                self.f.root,
+                required_check_ids=requirements["required_check_ids"],
+                verification_scope=plan["verification_scope"],
+                base=base["risk_assessment"]["base"],
             ),
             "changed_file_snapshots": snapshots,
             "diff": diff,
@@ -367,6 +381,8 @@ class TestDependencyRecovery(unittest.TestCase):
         ]
         task2["dependencies"] = [{"task_id": TASK_ID, "required_task_version": 9}]
         catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False))
+        self.f._git("add", "planning/workstreams.yaml")
+        self.f._git("commit", "-m", "version constraint fixture")
         dependent = self._dependent_with_receipts()
         outcome = check_conditions(
             self.f.root, submission_id=dependent["submission_id"]
@@ -379,6 +395,7 @@ class TestDependencyRecovery(unittest.TestCase):
         self.f.cleanup()
         self.setUp()
         self._complete()
+        dependent = self._dependent_with_receipts()
         catalog_path = self.f.root / "planning/workstreams.yaml"
         catalog = yaml.safe_load(catalog_path.read_text())
         task1 = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"][
@@ -386,7 +403,6 @@ class TestDependencyRecovery(unittest.TestCase):
         ]
         task1["dependencies"] = ["LF-TSK-TEST-9999"]
         catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False))
-        dependent = self._dependent_with_receipts()
         outcome = check_conditions(
             self.f.root, submission_id=dependent["submission_id"]
         )

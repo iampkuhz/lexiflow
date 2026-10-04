@@ -66,7 +66,7 @@ class DockerContractCheckTest(unittest.TestCase):
         self.assertEqual(
             ["python3", "ops/docker/tests/module_check_adapter.py"], base["command"]
         )
-        self.assertEqual(["python3", "node", "git"], base["required_environment"])
+        self.assertEqual(["python3", "node", "git", "sh", "/bin/sh", "python-package-yaml", "posix-lock-tool", "sha256-tool", "mktemp", "mkfifo"], base["required_environment"])
         self.assertEqual([], base["module_dependencies"])
         for name in (
             "ops/docker",

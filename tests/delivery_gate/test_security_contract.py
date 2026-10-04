@@ -68,9 +68,10 @@ class TestProducerFacts(unittest.TestCase):
    producer=resolve_producer(root,req,submitter,run_id);self.assertEqual(producer["identity"]["agent_id"],"qoder-worker")
    submission={"producer":producer};(base/"result.json").write_text(json.dumps({**result,"status":"FAIL"}))
    with self.assertRaisesRegex(ValidationError,"producer-source-drift"):_verify_producer(root,submission)
+from scripts.delivery_gate.source_snapshot import review_patch
 class TestDependencyDagAndApproval(unittest.TestCase):
  def setUp(self):
-  self.f=DeliveryGateFixture();self.f.create_verification_report();self._catalog()
+  self.f=DeliveryGateFixture();self._catalog();self.f._git("add","planning/workstreams.yaml");self.f._git("commit","-m","dependency catalog fixture");self.f.create_verification_report()
  def tearDown(self):self.f.cleanup()
  def _catalog(self):
   def task(tid,deps=None,approval=None):
@@ -83,9 +84,15 @@ class TestDependencyDagAndApproval(unittest.TestCase):
   from scripts.delivery_gate.records import publish_bytes,sha256_bytes
   from scripts.delivery_gate.requirements import load_task_requirements
   from scripts.verification import freeze_inputs,read_report
-  req=load_task_requirements(self.f.root,tid);report,desc=read_report(self.f.root,self.f.report_id);freeze=freeze_inputs(self.f.root,required_check_ids=req["required_check_ids"]);sid=str(uuid.uuid4());runtime=make_mock_runtime(PRODUCER_SESSION);auth=mock_authority(PRODUCER_SESSION);patch_desc=publish_bytes(self.f.root,f"tmp/quality/delivery-gate/submissions/{sid}.diff.patch",b"x")
-  snaps={x:{"state":"present","sha256":sha256_bytes((self.f.root/x).read_bytes())} for x in report["scope_review"]["changed_files"]}
-  record={"schema_version":"lexiflow.delivery-gate-submission.v4","submission_id":sid,"task_requirements":req,"change_report":desc,"scope_confirmation":self.f.report_id,"scope_base":"HEAD","diff":patch_desc,"submitter_identity":runtime.context,"runtime_proof":runtime.proof,"authority":auth,"producer":{"kind":"current-codex-task","identity":runtime.context,"runtime_proof":runtime.proof,"authority":auth},"verification_freeze":freeze,"changed_file_snapshots":snaps,"created_at":"2026-09-21T00:00:00Z"}
+  req=load_task_requirements(self.f.root,tid);report,desc=read_report(self.f.root,self.f.report_id);freeze=freeze_inputs(self.f.root,required_check_ids=req["required_check_ids"]);sid=str(uuid.uuid4());runtime=make_mock_runtime(PRODUCER_SESSION);auth=mock_authority(PRODUCER_SESSION);patch_desc=publish_bytes(self.f.root,f"tmp/quality/delivery-gate/submissions/{sid}.diff.patch",review_patch(self.f.root,report["base"],report["scope_review"]["changed_files"]))
+  from scripts.delivery_gate.task_subject import derive_task_subject
+  subject=derive_task_subject(self.f.root,req,report["scope_review"]["changed_files"]);subject_paths=subject["changed_files"]
+  snaps={x:{"state":"present","sha256":sha256_bytes((self.f.root/x).read_bytes())} for x in subject_paths}
+  from scripts.verification.risk import assess
+  from scripts.delivery_gate.acceptance import acceptance_plan
+  risk=assess(self.f.root,base=report["base"],required_check_ids=tuple(req["required_check_ids"]),_subject_paths=tuple(subject_paths));plan=acceptance_plan(self.f.root,risk,req)
+  freeze=freeze_inputs(self.f.root,required_check_ids=req["required_check_ids"],verification_scope=plan["verification_scope"],base=risk["base"])
+  record={"schema_version":"lexiflow.delivery-gate-submission.v5","submission_id":sid,"task_requirements":req,"risk_assessment":risk,"acceptance_plan":plan,"change_report":desc,"scope_confirmation":self.f.report_id,"scope_base":"HEAD","diff":patch_desc,"submitter_identity":runtime.context,"runtime_proof":runtime.proof,"authority":auth,"producer":{"kind":"current-codex-task","identity":runtime.context,"runtime_proof":runtime.proof,"authority":auth},"verification_freeze":freeze,"changed_file_snapshots":snaps,"task_subject":subject,"created_at":"2026-09-21T00:00:00Z"}
   publish_json(self.f.root,delivery_gate_locator("submissions",sid),record);self.f.submission_id=sid;self.f.create_validation();self.f.create_review();return sid
  def test_multilevel_hash_update_and_explicit_approval(self):
   a=self._submission("LF-TSK-TEST-0001");ca=check_conditions(self.f.root,submission_id=a);self.assertEqual(ca["result"],"PASS")

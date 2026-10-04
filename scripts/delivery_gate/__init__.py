@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from scripts.delivery_gate.submit import submit, SubmissionError
-from scripts.delivery_gate.validate import validate, ValidationError
+from scripts.delivery_gate.validate import validate, validate_batch, ValidationError
 from scripts.delivery_gate.review import review, ReviewError
 from scripts.delivery_gate.check import check_conditions, CheckError
 from scripts.delivery_gate.status import query_status
@@ -14,6 +14,7 @@ __all__ = [
     "submit",
     "SubmissionError",
     "validate",
+    "validate_batch",
     "ValidationError",
     "review",
     "ReviewError",
