@@ -15,6 +15,18 @@ import org.junit.jupiter.api.Test;
 /** 覆盖导入时冻结提示或阻断的独立规则。 */
 class HintPreparationTest {
   @Test
+  void excludesShortWordsFromPublishedHintsWithoutDiscardingSourceRows() {
+    for (var word : List.of("a", "uh", "um", "ai", "tv")) {
+      var source = row(word, "合成释义");
+      assertEquals("outside_query_window", HintPreparation.exclusionReason(source));
+      assertFalse(HintPreparation.prepare(source).classification().hintEligible());
+      assertEquals(word, source.lemma());
+    }
+    assertNull(HintPreparation.exclusionReason(row("yak", "牦牛")));
+    assertNull(HintPreparation.exclusionReason(row("of course", "当然")));
+  }
+
+  @Test
   void blocksBasicLowInformationAndAmbiguousGlossButNotRankedWord() {
     assertEquals("basic_vocabulary", HintPreparation.exclusionReason(row("the", "这个")));
     for (var phrase : List.of("the first", "not in", "on yesterday", "to be")) {

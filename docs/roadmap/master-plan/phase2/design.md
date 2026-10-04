@@ -154,37 +154,15 @@ MeasuredIncrementalCaptionResult 仅保留 result、queryNanos、rulesNanos、ca
 扩展由 content 组合页面生命周期、采集源、快照协调、stream 请求状态机、overlay 显示和 preferences 本机显式抑制。stream 独占上次成功快照与唯一在途请求；生命周期只发失效信号，不再复制请求状态。失败不自动计时重试，下一次有效字幕变化才重试；旧行中文冻结、导航/关闭后迟到结果不可复活，英文始终不等待后端。
 
 
-### 1.6.4. 发布证据持久化与数据库不变量
+### 1.6.4. 精简发布结果与数据库不变量
 
-三表保持不变；准备事实与准确词形动作分开。`DefaultLexiconRepository` 从同一个 `PlannedEntry` 写入以下证据，不再次清洗或重算分类。审计通过 `lexicon_entry_id` 联结词形和准备结果，再读取单例 dataset 的批次摘要、许可、准备政策与版本；观看热路径仍只读查询投影，不加载来源正文。
+数据库只保存运行结果：`lexicon_entry` 七列词条、`lexicon_form` 两列准确词形映射以及单例 `lexicon_dataset`。字段、身份算法和索引以[持久化模型](../../../architecture/data-model.md)为准。来源原文和完整候选顺序在按摘要保留的受控文件中，不逐词复制来源 ID、定位、排名、标签、处理原因或命中规则，也不换成逐行 JSON 审计。
 
-| 保存位置 | 生产者 | 消费与目的 |
-|---|---|---|
-| prepared 的 `source_dictionary_id` | row.dictionary.sourceId | 与已有 source_gloss_ref 配对定位被采用释义，不把批次政策标识当词典身份 |
-| prepared 的 `source_frequency_id`、`source_frequency_ref` | row.frequency 的来源与记录引用 | 定位频率证据，既支持 CSV 显式 Zipf，也支持 StarDict 排名来源 |
-| prepared 的 `frequency_evidence` | prepared.classification.frequencyEvidence | SQL 区分 KNOWN/UNKNOWN；数值零不能代替缺失证据 |
-| prepared 的 `decisive_rule`、`matched_rules` | PreparedHint 的决定规则与有序清洗轨迹 | SQL 追溯首项的变换与终态；阻断规则必须与 exclusion_reason 一致 |
-| lookup 的 `final_decision_reason` | 通常继承 decisive_rule；超窗口词形固定 outside_query_window | SQL 解释每个词形的最终动作，不覆盖词条级成功或阻断证据 |
+`entry_id` 用正 BIGINT，接口用精确十进制字符串。提示资格由短释是否为空表达，BLOCK 仍参与同形歧义。查询一次批量关联词形和词条，不选择第一候选、不做 N+1。精确频率仅在准备阶段用于计算，发布保存 `ranked_word`、`hint_priority`、`complex_list_count` 和独立 `cache_priority`。归并、规范冲突与来源完整性检查完成后裁剪短词及窗口外形式；可查询别名不能因 lemma 不可查询被丢弃。
 
-不复制可从现有事实准确得出的资格布尔值：prepared_gloss/exclusion_reason 表示提示资格，cache_priority 表示词形预热结果，来源基础标记与复杂词表证据保留；不能从 cache_priority=0 推断提示被阻断。
+数据库约束拒绝无效身份、空白词形、非法分数和孤儿映射。稳定 ID 碰撞拒绝整批发布，事务失败仍能查询原完整资料。预热选中一个形式后须取齐其所有词条，不能删 BLOCK 消除歧义。来源摘要、发布规则与实际存储计数集中在 dataset，不在观看时重新分类。
 
-数据库拒绝空来源数组、source_row_count 小于 entry_count、空白标识/释义/原因、未知 frequency_evidence 枚举和缺失/空白规则。prepared 的阻断原因须等于决定规则；HINT 的词形原因不得为 outside_query_window。matched_rules 可为空数组但不能含 null 或空白规则；不限制为陈旧的固定规则枚举。SQL 不重新实现清洗算法，不用新增表、触发器或迁移链替代原子发布。
-
-离线只读追溯查询（不由 API 启动执行；正文不进入普通日志）：
-
-```sql
-SELECT d.lexicon_version, d.preparation_policy, d.source_manifest,
-       h.normalized_form, h.final_action, h.final_decision_reason,
-       p.source_dictionary_id, p.source_gloss_ref,
-       p.source_frequency_id, p.source_frequency_ref, p.frequency_evidence,
-       p.decisive_rule, p.matched_rules, p.exclusion_reason, h.cache_priority
-FROM lexicon_hint_lookup h
-JOIN lexicon_prepared_entry p USING (lexicon_entry_id)
-CROSS JOIN lexicon_dataset d
-WHERE d.dataset_id = 1 AND h.language_tag = 'en' AND h.normalized_form = 'reliable';
-```
-
-直接回归使用真实隔离 PostgreSQL：发布合成正常/阻断/缺排名/显式零频率和超窗口别名，核对上述追溯结果；对坏决定和元数据逐条写入验证约束拒绝，事务失败后旧版本及其查询结果保持。源码结构变化需要显式开发库重建，但本任务不授权连接或重建真实运行资料。
+直接回归覆盖真实隔离 PostgreSQL 的发布/回滚、ID 碰撞、短词裁剪、BLOCK 歧义、冷查询与预热、数据包导出恢复。结构变化须显式确认项目数据库后重建，不由 API 启动或普通升级隐式执行。
 
 
 ### 1.6.5. 扩展生命周期与采集的单一状态所有者

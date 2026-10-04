@@ -366,7 +366,7 @@ try {
       const target = segments.find(segment => segment.append && segment.text.includes("reliable"));
       const startOffset = target?.text.indexOf("reliable") ?? -1;
       return Promise.resolve({ ok: true, body: { processedKeys: segments.filter(segment => segment.append).map(segment => segment.key),
-        hints: !target ? [] : [{ startKey:target.key,endKey:target.key,lexiconEntryId:"00000000-0000-0000-0000-000000000001",lexiconVersion:1,senseId:"00000000-0000-0000-0000-000000000002",startOffset, endOffset: startOffset + 8, chineseGloss: "可靠的" }] } });
+        hints: !target ? [] : [{ startKey:target.key,endKey:target.key,lexiconEntryId:"9007199254740993",lexiconVersion:1,senseId:"00000000-0000-0000-0000-000000000002",startOffset, endOffset: startOffset + 8, chineseGloss: "可靠的" }] } });
     } };
   });
   await hashPage.evaluate(await readFile(resolve(extensionPath, "content.js"), "utf8"));

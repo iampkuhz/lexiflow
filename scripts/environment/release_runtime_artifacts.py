@@ -479,7 +479,7 @@ def produce_candidates(
             "buildIdentity": build_identity,
             "softwareVersion": version,
             "sourceCommit": commit,
-            "apiContract": "caption-hints.v1",
+            "apiContract": "caption-hints.v2",
             "sqlVersion": hashlib.sha256(sql_bytes).hexdigest(),
             "dataset": synthetic_dataset,
             "platforms": list(platforms),
@@ -527,7 +527,7 @@ def produce_candidates(
             for row in dataset_records
         ],
         "softwareVersion": version,
-        "apiContract": "caption-hints.v1",
+        "apiContract": "caption-hints.v2",
         "imageCandidates": candidates,
         "artifacts": str(artifact_root),
     }

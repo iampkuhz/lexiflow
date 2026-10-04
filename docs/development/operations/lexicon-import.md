@@ -53,17 +53,17 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend lexiconRebui
 
 `lexiconRebuild` 是**一个 Gradle 任务**，内部按“来源预检 → 目标检查与人工确认 → 结构重建 → 全量导入与发布”四个阶段执行。日志以 `[lexiconRebuild 阶段 n/4]` 标出阶段开始、完成与内部步骤；来源统计和发布结果属于相应阶段的内部输出，不是独立 Gradle 任务。仅实际执行时，每 3 分钟输出当前内部步骤与该阶段已用时间；这只是存活状态，不是完成百分比或成功保证。等待输入时停止心跳，只显示一次精确文本、Enter 和取消方法；请直接在原终端输入，未输入不是执行进度。默认 plain console 不显示 Gradle 动态百分比。
 
-已有本项目词库表时，命令显示数据库、schema 和已有关系；只有执行人输入 `REBUILD <database>.<schema>` 的精确文本并按 Enter 才会继续。空目标直接创建结构并导入。输入空行或其他文本会取消，stdin 关闭（EOF）会明确报错退出；按 Ctrl+C 可取消。以上情况不会删除任何表。重建只删除三张本项目词库表，不使用 `CASCADE`；未知 `lexicon_*` 关系或外部依赖会阻断并回滚结构事务。不要把确认文本写入自动化管道。`postgresInit` 仍仅接受空 schema，`lexiconPublish` 仍可单独对已有匹配结构发布，不执行结构重建。
+已有本项目词库表时，命令显示数据库、schema 和已有关系；只有执行人输入 `REBUILD <database>.<schema>` 的精确文本并按 Enter 才会继续。空目标直接创建结构并导入。输入空行或其他文本会取消，stdin 关闭（EOF）会明确报错退出；按 Ctrl+C 可取消。以上情况不会删除任何表。重建只删除受控名称的本项目词库关系，再创建最新三张表，不使用 `CASCADE`；未知 `lexicon_*` 关系或外部依赖会阻断并回滚结构事务。不要把确认文本写入自动化管道。`postgresInit` 仍仅接受空 schema，`lexiconPublish` 仍可单独对已有匹配结构发布，不执行结构重建。
 
 离线 JDBC 适配器已启用 `reWriteBatchedInserts=true`；每 500 条组成一批网络写入，但整个发布仍只有一个事务。不要另拼接数据库性能参数。
 
 ## 1.4. 中断重试与完成边界
 
-`lexiconPublish` 先完整扫描来源并检查跨行 canonical 词形，再核对文件摘要；通过后重读来源，以 500 条为一个 JDBC batch 将准备词条和查询词形写入**同一个事务**。批写不是分块提交。提交前再次核对来源摘要与计数。中断或来源变化使事务回滚，原完整数据集继续可查；重新运行命令会从头预检和重导，不需要恢复数据库里的中间状态。自然屈折形可以指向多个 lemma；canonical 别名冲突拒绝发布。
+`lexiconPublish` 先完整扫描来源并检查跨行 canonical 词形，再核对文件摘要；通过后重读来源，以 500 条为一个 JDBC batch 将最终词条和可查询词形映射写入**同一个事务**。批写不是分块提交。提交前再次核对来源摘要与计数。中断或来源变化使事务回滚，原完整数据集继续可查；重新运行命令会从头预检和重导，不需要恢复数据库里的中间状态。自然屈折形可以指向多个 lemma；canonical 别名冲突拒绝发布。
 
 ## 1.5. 已有开发库结构不匹配时
 
-如果查询出现 `relation "lexicon_hint_lookup" does not exist` 或投影字段缺失，先排查是否连接错库；重新编译、重启 API 或重跑 publish 不会补齐结构。`postgresInit` 只接受空 schema。
+如果查询出现 `relation "lexicon_form" does not exist` 或投影字段缺失，先排查是否连接错库；重新编译、重启 API 或重跑 publish 不会补齐结构。`postgresInit` 只接受空 schema。
 
 先核对启动命令的 JDBC URL。在连接到同一数据库的本地 SQL 客户端执行只读查询：
 
@@ -72,7 +72,7 @@ SELECT current_database(), current_user, current_schema();
 SELECT table_name
 FROM information_schema.tables
 WHERE table_schema = current_schema()
-  AND table_name IN ('lexicon_dataset', 'lexicon_prepared_entry', 'lexicon_hint_lookup')
+  AND table_name IN ('lexicon_dataset', 'lexicon_entry', 'lexicon_form')
 ORDER BY table_name;
 SELECT lexicon_version, entry_count, lookup_count FROM lexicon_dataset;
 ```
@@ -83,7 +83,7 @@ SELECT lexicon_version, entry_count, lookup_count FROM lexicon_dataset;
 
 1. 停止使用该库的本项目 API，确认数据库及 schema 属于本项目，不操作共享库或其他项目。
 2. 确认来源可完整重导；需要保留数据时先备份并核验，不能直接丢弃。
-3. **只有人工确认开发数据可丢弃后**，才执行 **1.3 的 `lexiconRebuild`**，核对提示中的数据库和 schema，再输入精确确认文本。命令仅重建本项目三张表并完整重导，不删除来源文件、其他项目对象或整个 schema。
+3. **只有人工确认开发数据可丢弃后**，才执行 **1.3 的 `lexiconRebuild`**，核对提示中的数据库和 schema，再输入精确确认文本。命令仅清理本项目受控词库关系并建立最新三张表、完整重导，不删除来源文件、其他项目对象或整个 schema。
 4. 若有未知旧关系、其他对象依赖或数据库权限不足，命令会拒绝并保留原结构；停止并在数据库管理工具中人工核对归属，不使用 `CASCADE` 绕过。成功后再启动 API。不要只补单列，也不要把包含不匹配表结构的备份直接恢复到新 schema。
 
-重建会重新产生资料身份。重新启动本项目 API 以清除进程内缓存；若另有缓存或本机词段抑制偏好，需按其 owner 处理旧身份引用，不自动删除用户数据。用不带旧偏好的浏览器测试 profile 验证新词库，完成后回到[本地体验](local-experience.md#12-初始化本地配置再启动确定性-api)。
+重建会重新产生资料身份。重新启动本项目 API 以清除进程内缓存；若另有缓存或本机词段抑制偏好，需按其 owner 处理旧身份引用，不自动删除用户数据。扩展重新加载后按数字词条偏好命名空间验证新词库，不自动套用不匹配的旧身份，完成后回到[本地体验](local-experience.md#12-初始化本地配置再启动确定性-api)。

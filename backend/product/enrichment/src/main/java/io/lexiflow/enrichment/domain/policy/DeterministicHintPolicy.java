@@ -5,7 +5,6 @@ import io.lexiflow.enrichment.domain.model.CaptionContext;
 import io.lexiflow.enrichment.domain.model.CaptionHintResult;
 import io.lexiflow.enrichment.domain.model.HintSelectionResult;
 import io.lexiflow.enrichment.domain.model.HintState;
-import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.util.ArrayList;
 import java.util.List;
@@ -108,15 +107,14 @@ public final class DeterministicHintPolicy {
     var matches = new ArrayList<HintSelection.CandidateMatch>();
     var displayable = PublishedCandidateEligibility.isDisplayable(candidate);
     var qualified = displayable ? candidate.finalGloss() : null;
-    var valueTier =
-        candidate.entryKind() == LexiconEntryKind.WORD && candidate.frequencyZipf() > 0 ? 1 : 0;
+    var valueTier = candidate.rankedWord() ? 1 : 0;
     for (var occurrence :
         CandidateMatcher.locate(caption, startOffset, endOffset, candidate.normalizedForm())) {
       matches.add(
           new HintSelection.CandidateMatch(
               occurrence.startOffset(),
               occurrence.endOffset(),
-              candidate.entryId().toString(),
+              Long.toString(candidate.entryId()),
               qualified == null ? null : candidate.senseId().toString(),
               candidate.lexiconVersion(),
               qualified,

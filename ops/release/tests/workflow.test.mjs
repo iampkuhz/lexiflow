@@ -124,7 +124,7 @@ test('real staging bytes and exact builder/assembler contracts precede private h
       { role: 'postgres-image', platform: 'linux/arm64', path: 'images/linux-arm64/postgres-image.tar', bytes: 2,
         sha256: sha('pg'), imageDigest: `sha256:${sha('image-pg')}` },
     ] })) }]);
-  assert.equal(assemble.descriptor.apiContract, 'caption-hints.v1');
+  assert.equal(assemble.descriptor.apiContract, 'caption-hints.v2');
   assert.deepEqual(assemble.descriptor.dataset, { releaseId: 'r1', preparationId: 'p1', ruleId: 'rule1' });
   assert.deepEqual(assemble.descriptor.artifacts.filter(a => a.role === 'license').map(a => a.path), ['notice.txt']);
   assert.equal(await readFile(path.join(images.artifactRoot, 'api.jar'), 'utf8'), 'real jar bytes');

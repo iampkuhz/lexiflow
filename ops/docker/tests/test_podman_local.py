@@ -131,7 +131,7 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
             def do_GET(self):
                 runtime = json.loads((self.server.kit.parent / 'runtime.json').read_text())
                 current_version = runtime['labels']['org.opencontainers.image.version']
-                payload = {"status": "UP"} if self.path.endswith("readiness") else {"mode": "formal", "ready": True, "reason": "OK", "softwareVersion": current_version, "apiContract": "caption-hints.v1", "datasetVersion": 1}
+                payload = {"status": "UP"} if self.path.endswith("readiness") else {"mode": "formal", "ready": True, "reason": "OK", "softwareVersion": current_version, "apiContract": "caption-hints.v2", "datasetVersion": 1}
                 self.send_response(200); self.end_headers(); self.wfile.write(json.dumps(payload).encode())
             def log_message(self, *_args):
                 pass

@@ -8,18 +8,15 @@ import org.junit.jupiter.api.Test;
 class HintSelectionTest {
   @Test
   void preservesPriorityAndSuppressesIdenticalRangeAmbiguityIncludingHiddenMatch() {
-    var lowerPriority = match(0, 6, "00000000-0000-0000-0000-000000000001", "低", 1, 1);
-    var higherPriority = match(5, 9, "00000000-0000-0000-0000-000000000002", "高", 9, 1);
-    var hiddenAmbiguity =
-        new HintSelection.CandidateMatch(
-            10, 14, "00000000-0000-0000-0000-000000000003", null, 1, null, 1, 99, 1);
-    var visibleAmbiguity = match(10, 14, "00000000-0000-0000-0000-000000000004", "不应展示", 99, 1);
+    var lowerPriority = match(0, 6, "1", "低", 1, 1);
+    var higherPriority = match(5, 9, "2", "高", 9, 1);
+    var hiddenAmbiguity = new HintSelection.CandidateMatch(10, 14, "3", null, 1, null, 1, 99, 1);
+    var visibleAmbiguity = match(10, 14, "4", "不应展示", 99, 1);
     var selected =
         HintSelection.select(
             List.of(lowerPriority, higherPriority, hiddenAmbiguity, visibleAmbiguity));
     assertEquals(
-        List.of("00000000-0000-0000-0000-000000000002"),
-        selected.hints().stream().map(hint -> hint.lexiconEntryId()).toList());
+        List.of("2"), selected.hints().stream().map(hint -> hint.lexiconEntryId()).toList());
   }
 
   @Test
@@ -109,6 +106,6 @@ class HintSelectionTest {
   }
 
   private static String id(int suffix) {
-    return "00000000-0000-0000-0000-" + String.format("%012d", suffix);
+    return Integer.toString(suffix);
   }
 }

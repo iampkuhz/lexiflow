@@ -22,7 +22,7 @@ class EnrichCaptionUseCaseTest {
   private static LexiconCatalog catalog() {
     var candidate =
         new LexiconHintCandidate(
-            UUID.fromString("00000000-0000-0000-0000-000000000010"),
+            10L,
             UUID.fromString("00000000-0000-0000-0000-000000000011"),
             1,
             "en",
@@ -32,7 +32,7 @@ class EnrichCaptionUseCaseTest {
             LexiconHintAction.HINT,
             "可靠的",
             500,
-            4.2,
+            true,
             1);
     return forms ->
         new LexiconLookupResult(

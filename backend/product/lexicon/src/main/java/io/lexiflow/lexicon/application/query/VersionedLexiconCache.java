@@ -142,9 +142,9 @@ final class VersionedLexiconCache {
 
   private static List<LexiconHintCandidate> merge(
       List<LexiconHintCandidate> left, List<LexiconHintCandidate> right) {
-    var unique = new LinkedHashMap<String, LexiconHintCandidate>();
-    for (var candidate : left) unique.put(candidate.entryId().toString(), candidate);
-    for (var candidate : right) unique.put(candidate.entryId().toString(), candidate);
+    var unique = new LinkedHashMap<Long, LexiconHintCandidate>();
+    for (var candidate : left) unique.put(candidate.entryId(), candidate);
+    for (var candidate : right) unique.put(candidate.entryId(), candidate);
     return List.copyOf(unique.values());
   }
 

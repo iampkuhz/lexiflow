@@ -226,7 +226,7 @@ def _assert_runtime(
                 "datasetVersion",
             }
             or health["softwareVersion"] != software_version
-            or health["apiContract"] != "caption-hints.v1"
+            or health["apiContract"] != "caption-hints.v2"
             or health["mode"] != "formal"
             or health["ready"] is not True
             or health["reason"] not in {"OK", "PREWARM_DEGRADED"}

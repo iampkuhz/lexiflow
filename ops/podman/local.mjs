@@ -162,7 +162,7 @@ export async function runLocal(argv, candidateRequest) {
       const id = owned.length === 1 ? (owned[0].Id || owned[0].ID) : '';
       if (/^[a-f0-9]{64}$/.test(id)) {
         const body = JSON.parse(await run('podman', ['exec', id, '/app/entrypoint.sh', 'health'], { capture: true, timeout: 5000 }));
-        internalReady = body.ready === true && body.mode === 'formal' && body.reason === 'OK' && body.softwareVersion === installed.version && body.apiContract === 'caption-hints.v1';
+        internalReady = body.ready === true && body.mode === 'formal' && body.reason === 'OK' && body.softwareVersion === installed.version && body.apiContract === 'caption-hints.v2';
       }
     } catch { /* 不输出工具原文，无法确认时不声称应用健康。 */ }
     fail(internalReady ? '容器内部已就绪，但宿主端口不可达（HOST_PORT_UNREACHABLE）；数据已保留。请运行 doctor；不要重新导入词库' : `API 就绪等待超时（${reason}）；内部健康未确认，请查看 logs；不要重新初始化数据库`);

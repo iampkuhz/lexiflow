@@ -49,13 +49,14 @@ class ApiApplicationTest {
                       UUID.randomUUID(), 1, "0".repeat(64), "quasar", 0, "quasar".length()));
 
           assertEquals("合成词条", result.hints().getFirst().chineseGloss());
+          assertEquals("9007199254740993", result.hints().getFirst().lexiconEntryId());
         });
   }
 
   private static LexiconReadRepository readOnlyRepository() {
     var candidate =
         new LexiconHintCandidate(
-            UUID.fromString("00000000-0000-0000-0000-000000000001"),
+            9007199254740993L,
             UUID.fromString("00000000-0000-0000-0000-000000000002"),
             7,
             "en",
@@ -65,7 +66,7 @@ class ApiApplicationTest {
             LexiconHintAction.HINT,
             "合成词条",
             100,
-            5.0,
+            true,
             1);
     return new LexiconReadRepository() {
       @Override

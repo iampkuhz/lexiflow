@@ -81,6 +81,8 @@ node ops/podman/local.mjs up
 node ops/podman/local.mjs logs
 ```
 
+单独出现且少于三个字母的词（如 `UH`、`UM`、`AI`、`TV`）不显示提示；三字母词与完整短语按原有规则处理，短语不会因包含短词而被整体过滤。该规则在升级后对已有资料立即生效，无需清库重导；原始来源文件用于离线追溯，数据库不逐词复制来源字段；短词不作为有效提示发布。
+
 字幕增量、收尾与视频开始日志默认开启，无需开关；新安装直接生效，已有安装执行 `upgrade` 后生效。遗留 `--caption-debug` 参数仅提示已默认开启，不再创建另一套调试环境。
 
 日志含字幕正文、中文提示、视频身份和播放位置，仅用于本机诊断；不要上传、放入 Git、CI 制品或未经清理的公开错误报告。默认不额外保存全量字幕 JSONL；`logs` 持续显示新产生的 PostgreSQL/API 日志，不回放历史日志；按 `Ctrl+C` 只退出查看，不停止服务。查看期间不占用安装锁、不触发升级恢复，也不将字幕正文复制到操作日志。API 容器可读日志使用 Podman `k8s-file`，单文件上限 10 MB；达到上限的保留行为由引擎负责，不把日志当作完整观看记录。[Podman 日志选项](https://docs.podman.io/en/latest/markdown/podman-run.1.html#log-opt-name-value)。显式分析 JSONL 与控制台不同，默认关闭；分析文件最多 16 MiB，达到上限停止追加，需用户自行审阅并删除后再采集。
@@ -116,6 +118,8 @@ node ops/podman/local.mjs version
 
 不与 `lexiflow.sh` 或手工 Compose 命令管理同一安装。不要移动受管目录或手改配置、密码、状态及升级事务；脚本会拒绝身份和配置漂移。ZIP 是扩展交付归档，不是通用的一键安装程序。
 
+本仓库使用精简词库结构，词条 ID 为短数字字符串，运行合同标识为 `caption-hints.v2`；API 与扩展须一同更新。已有数据库若结构不匹配，普通 `upgrade` 会停止，不能仅更新 API 后继续使用；需按[显式检查与重建说明](../development/operations/lexicon-import.md#15-已有开发库结构不匹配时)确认项目目标后重建并完整重导，不手工逐列删除。该操作与普通保留数据升级不同。扩展重新加载后使用独立的数字词条偏好命名空间，不将旧身份的抑制偏好误套到新词条。
+
 ## 1.5. 查看 PostgreSQL
 
 数据库客户端使用脚本输出的端口（默认如下）：
@@ -133,8 +137,8 @@ node ops/podman/local.mjs version
 
 ```sql
 BEGIN READ ONLY;
-SELECT count(*) FROM lexiflow_release.lexicon_prepared_entry;
-SELECT count(*) FROM lexiflow_release.lexicon_hint_lookup;
+SELECT count(*) FROM lexiflow_release.lexicon_entry;
+SELECT count(*) FROM lexiflow_release.lexicon_form;
 SELECT * FROM lexiflow_release.lexicon_dataset;
 ROLLBACK;
 ```

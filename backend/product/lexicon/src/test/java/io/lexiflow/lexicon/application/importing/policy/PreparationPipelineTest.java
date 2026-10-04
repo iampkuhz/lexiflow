@@ -18,6 +18,16 @@ import org.junit.jupiter.api.Test;
 /** 每个范围及资格分流都有正反例；格式成功不替代资格和发布合同。 */
 class PreparationPipelineTest {
   @Test
+  void rejectsShortStandaloneWordsButPreservesFullPhrasesAndThreeLetterBoundary() {
+    for (var word : List.of("a", "I", "UH", "um", "AI", "TV", "'uh'", "um!")) {
+      assertFalse(LexiconSurfacePolicy.withinQueryWindow(word), word);
+    }
+    for (var word : List.of("cat", "uhm", "of course", "in front of")) {
+      assertTrue(LexiconSurfacePolicy.withinQueryWindow(word), word);
+    }
+  }
+
+  @Test
   void separatesNonAsciiLettersFromPunctuation() {
     assertEquals("non_ascii_lemma", result("bünde", "城镇").exclusionReason());
     assertNull(result("star-chart", "星图").exclusionReason());

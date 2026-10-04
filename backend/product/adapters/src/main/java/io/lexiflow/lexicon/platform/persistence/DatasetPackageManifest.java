@@ -5,7 +5,7 @@ import java.util.List;
 /**
  * 已发布词库资料包的封闭元数据结构。
  *
- * @param schemaVersion 含义：资料包格式版本。取值范围：当前仅 1。
+ * @param schemaVersion 含义：资料包格式版本。取值范围：当前仅 2。
  * @param schemaSha256 含义：可信 SQL 摘要。取值范围：64 位小写十六进制。
  * @param approvalSha256 含义：审批文件摘要。取值范围：64 位小写十六进制。
  * @param datasetVersion 含义：数据库原发布版本。取值范围：正整数。

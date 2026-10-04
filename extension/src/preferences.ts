@@ -1,6 +1,6 @@
-import { isStableId } from "./protocol";
+import { isEntryId } from "./protocol";
 
-export const PREFERENCE_KEY = "lexiflow.suppressed-entries";
+export const PREFERENCE_KEY = "lexiflow.suppressed-entries-v2";
 export const MAX_SUPPRESSED_ENTRIES = 500;
 /** Publishing a different dictionary version never inherits an old suppression implicitly. */
 export function suppressionKey(entryId: string, lexiconVersion: number): string {
@@ -9,7 +9,7 @@ export function suppressionKey(entryId: string, lexiconVersion: number): string 
 function isSuppressionKey(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const [entryId, version, extra] = value.split("@");
-  return isStableId(entryId) && extra === undefined && /^[1-9][0-9]*$/.test(version ?? "") &&
+  return isEntryId(entryId) && extra === undefined && /^[1-9][0-9]*$/.test(version ?? "") &&
     Number.isSafeInteger(Number(version));
 }
 export type PreferenceAction = "read" | "suppress" | "restore-all";
@@ -30,7 +30,7 @@ export class LocalPreferences {
 
   private async apply(action: PreferenceAction, entryId?: string, lexiconVersion?: number): Promise<PreferenceResult> {
     if (!["read", "suppress", "restore-all"].includes(action) ||
-        (action === "suppress" && (!isStableId(entryId) || !Number.isSafeInteger(lexiconVersion) || lexiconVersion! < 1))) return { ok: false, reason: "invalid-request" };
+        (action === "suppress" && (!isEntryId(entryId) || !Number.isSafeInteger(lexiconVersion) || lexiconVersion! < 1))) return { ok: false, reason: "invalid-request" };
     try {
       if (action === "restore-all") { await this.storage.write([]); return { ok: true, entryKeys: [] }; }
       const value = await this.storage.read();

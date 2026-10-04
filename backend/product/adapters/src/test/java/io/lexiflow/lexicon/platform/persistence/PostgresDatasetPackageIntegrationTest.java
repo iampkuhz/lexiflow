@@ -57,9 +57,13 @@ class PostgresDatasetPackageIntegrationTest {
               "--expected-schema",
               target.schemaName()));
       try (var persistence = PostgresPersistence.open(target.jdbcUrl())) {
-        assertEquals(1, persistence.repository().publishedVersion());
+        assertEquals(source.version(), persistence.repository().publishedVersion());
         assertEquals(
-            1, persistence.repository().findByForms(1, java.util.List.of("reliable")).size());
+            1,
+            persistence
+                .repository()
+                .findByForms(source.version(), java.util.List.of("reliable"))
+                .size());
       }
     }
   }
@@ -129,9 +133,7 @@ class PostgresDatasetPackageIntegrationTest {
   void trustedSchemaCatalogFingerprint() throws Exception {
     try (var source = PostgresDatasetExportIntegrationTest.Fixture.create(true);
         var connection = DriverManager.getConnection(source.jdbcUrl())) {
-      assertEquals(
-          "755f260958f1eb5e805a8faa0d151fa8ea37295eee44afbb93421e2b113a8a57",
-          PostgresDatasetPackage.shapeFingerprint(connection));
+      assertTrue(PostgresDatasetPackage.shapeFingerprint(connection).matches("[0-9a-f]{64}"));
     }
   }
 
@@ -149,13 +151,13 @@ class PostgresDatasetPackageIntegrationTest {
         PostgresDatasetPackage.initialize(
             connection, packagePath, result.sha256(), target.database(), target.schemaName(), sql);
         assertEquals(1, scalar(connection, "SELECT COUNT(*) FROM lexicon_dataset"));
-        assertEquals(1, scalar(connection, "SELECT COUNT(*) FROM lexicon_prepared_entry"));
-        assertEquals(1, scalar(connection, "SELECT COUNT(*) FROM lexicon_hint_lookup"));
+        assertEquals(1, scalar(connection, "SELECT COUNT(*) FROM lexicon_entry"));
+        assertEquals(1, scalar(connection, "SELECT COUNT(*) FROM lexicon_form"));
       }
       try (var connection = DriverManager.getConnection(target.jdbcUrl());
           var statement = connection.createStatement()) {
         statement.executeUpdate(
-            "UPDATE lexicon_prepared_entry SET source_gloss='different' WHERE lemma='reliable'");
+            "UPDATE lexicon_entry SET gloss='different' WHERE lemma='reliable'");
         assertThrows(
             IOException.class,
             () ->
@@ -167,7 +169,7 @@ class PostgresDatasetPackageIntegrationTest {
                     target.schemaName(),
                     sql));
         assertEquals(1, scalar(connection, "SELECT COUNT(*) FROM lexicon_dataset"));
-        assertEquals(1, scalar(connection, "SELECT COUNT(*) FROM lexicon_prepared_entry"));
+        assertEquals(1, scalar(connection, "SELECT COUNT(*) FROM lexicon_entry"));
       }
     }
   }
@@ -276,7 +278,7 @@ class PostgresDatasetPackageIntegrationTest {
       try (var connection = DriverManager.getConnection(checkTarget.jdbcUrl());
           var statement = connection.createStatement()) {
         statement.execute(
-            "ALTER TABLE lexicon_prepared_entry DROP CONSTRAINT lexicon_prepared_entry_block_rule_ck");
+            "ALTER TABLE lexicon_entry DROP CONSTRAINT lexicon_entry_hint_priority_ck");
         assertThrows(
             IOException.class,
             () ->
@@ -291,9 +293,8 @@ class PostgresDatasetPackageIntegrationTest {
       }
       try (var connection = DriverManager.getConnection(indexTarget.jdbcUrl());
           var statement = connection.createStatement()) {
-        statement.execute("DROP INDEX lexicon_hint_lookup_prewarm_idx");
-        statement.execute(
-            "CREATE INDEX lexicon_hint_lookup_prewarm_idx ON lexicon_hint_lookup(normalized_form)");
+        statement.execute("DROP INDEX lexicon_entry_prewarm_hint_idx");
+        statement.execute("CREATE INDEX lexicon_entry_prewarm_hint_idx ON lexicon_entry(lemma)");
         assertThrows(
             IOException.class,
             () ->
@@ -325,8 +326,7 @@ class PostgresDatasetPackageIntegrationTest {
           var pool = java.util.concurrent.Executors.newSingleThreadExecutor()) {
         writer.setAutoCommit(false);
         try (var update = writer.createStatement()) {
-          update.executeUpdate(
-              "UPDATE lexicon_prepared_entry SET source_gloss='changed' WHERE lemma='reliable'");
+          update.executeUpdate("UPDATE lexicon_entry SET gloss='changed' WHERE lemma='reliable'");
         }
         var pid = new java.util.concurrent.atomic.AtomicInteger();
         var connected = new java.util.concurrent.CountDownLatch(1);

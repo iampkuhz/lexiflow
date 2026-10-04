@@ -5,13 +5,12 @@ import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import io.lexiflow.lexicon.domain.model.LexiconLookupResult;
 import io.lexiflow.lexicon.domain.port.LexiconCatalog;
+import io.lexiflow.lexicon.domain.port.LexiconIdentity;
 import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
-import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.OptionalLong;
-import java.util.UUID;
 
 /** 仅用于自动测试的有限内置材料，不替代产品已发布词库。 */
 public final class BuiltinLexiconCatalog implements LexiconCatalog {
@@ -67,8 +66,8 @@ public final class BuiltinLexiconCatalog implements LexiconCatalog {
 
   private static LexiconHintCandidate entry(String lemma, String gloss) {
     return new LexiconHintCandidate(
-        stableId("entry:en:" + lemma),
-        stableId("sense:" + lemma),
+        LexiconIdentity.entryId(lemma),
+        LexiconIdentity.senseId(1, lemma),
         1,
         "en",
         lemma,
@@ -77,11 +76,7 @@ public final class BuiltinLexiconCatalog implements LexiconCatalog {
         LexiconHintAction.HINT,
         gloss,
         100,
-        0,
+        false,
         0);
-  }
-
-  private static UUID stableId(String value) {
-    return UUID.nameUUIDFromBytes(value.getBytes(StandardCharsets.UTF_8));
   }
 }

@@ -26,14 +26,7 @@ class IncrementalHintMapperTest {
                             new CaptionIncrementalRequest.Segment("a", "go", null, true, 0),
                             new CaptionIncrementalRequest.Segment("b", "al", null, true, 0))))));
     var plan = new IncrementalCaptionPlan().plan(request).getFirst();
-    var annotation =
-        new AnnotationHint(
-            3,
-            7,
-            "00000000-0000-0000-0000-000000000001",
-            "00000000-0000-0000-0000-000000000002",
-            1,
-            "出发");
+    var annotation = new AnnotationHint(3, 7, "1", "00000000-0000-0000-0000-000000000002", 1, "出发");
     var hint = new IncrementalHintMapper().map(request, plan, List.of(annotation)).getFirst();
     assertEquals("a", hint.startKey());
     assertEquals(0, hint.startOffset());
@@ -102,12 +95,6 @@ class IncrementalHintMapperTest {
   }
 
   private static AnnotationHint hint(int start, int end) {
-    return new AnnotationHint(
-        start,
-        end,
-        "00000000-0000-0000-0000-000000000001",
-        "00000000-0000-0000-0000-000000000002",
-        1,
-        "释义");
+    return new AnnotationHint(start, end, "1", "00000000-0000-0000-0000-000000000002", 1, "释义");
   }
 }

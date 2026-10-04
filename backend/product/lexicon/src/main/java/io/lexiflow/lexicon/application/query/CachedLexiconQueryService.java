@@ -174,7 +174,8 @@ public final class CachedLexiconQueryService implements LexiconCatalog {
           || !String.join(" ", tokens).equals(form)) {
         throw new IllegalArgumentException("normalized form is invalid");
       }
-      keys.add(form);
+      // 旧资料及已预热缓存也不能绕过最新单词资格；无需清库重导。
+      if (LexiconSurfacePolicy.withinQueryWindow(form)) keys.add(form);
     }
     return List.copyOf(keys);
   }

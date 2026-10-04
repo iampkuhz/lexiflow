@@ -129,7 +129,7 @@ class IncrementalCaptionUseCaseTest {
                         original.finalAction(),
                         original.finalGloss(),
                         original.finalPriority(),
-                        original.frequencyZipf(),
+                        original.rankedWord(),
                         original.complexListCount())));
           }
           return lookup(forms, List.of());
@@ -253,8 +253,7 @@ class IncrementalCaptionUseCaseTest {
           var block = blockCandidate("ordinary", 2);
           var unsafe =
               new LexiconHintCandidate(
-                  UUID.nameUUIDFromBytes(
-                      "unsafe".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                  2L,
                   UUID.nameUUIDFromBytes(
                       "unsafe-sense".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
                   2,
@@ -265,7 +264,7 @@ class IncrementalCaptionUseCaseTest {
                   LexiconHintAction.HINT,
                   "释".repeat(25),
                   500,
-                  0,
+                  false,
                   0);
           var unmatched = candidate("never-present", "隐藏候选", 2);
           return new LexiconLookupResult(
@@ -354,7 +353,7 @@ class IncrementalCaptionUseCaseTest {
 
   private static LexiconHintCandidate candidate(String form, String gloss, long version) {
     return new LexiconHintCandidate(
-        UUID.nameUUIDFromBytes(form.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+        (long) (form.hashCode() & 0x7fffffff) + 1,
         UUID.nameUUIDFromBytes(gloss.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
         version,
         "en",
@@ -364,13 +363,13 @@ class IncrementalCaptionUseCaseTest {
         LexiconHintAction.HINT,
         gloss,
         500,
-        0,
+        false,
         0);
   }
 
   private static LexiconHintCandidate blockCandidate(String form, long version) {
     return new LexiconHintCandidate(
-        UUID.nameUUIDFromBytes(form.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+        (long) (form.hashCode() & 0x7fffffff) + 1,
         null,
         version,
         "en",
@@ -380,7 +379,7 @@ class IncrementalCaptionUseCaseTest {
         LexiconHintAction.BLOCK,
         null,
         500,
-        0,
+        false,
         0);
   }
 }

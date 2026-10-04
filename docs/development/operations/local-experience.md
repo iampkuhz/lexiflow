@@ -37,7 +37,7 @@ chmod 600 .local/lexiflow/runtime.json
 
 已有匹配的已发布词库时直接启动，不重复导入。首次准备开发库可按[数据库准备和发布步骤](lexicon-import.md#13-准备数据库并发布)执行；使用仓库容器配置时需先安装并启动 Podman，再启动 `infra/local/compose.yaml` 的 PostgreSQL。初始化或结构重建须先核对目标和备份，不能用于发行安装资料；API 启动本身不建表、不重建结构。随后按下节构建扩展，不提交本机配置或词库文件。
 
-已有数据库结构不会随代码更新。遇到 `relation "lexicon_hint_lookup" does not exist` 时，停止启动重试，进入[开发库检查与重建](lexicon-import.md#15-已有开发库结构不匹配时)；不要只补一张表或一个字段。日常启动可以复用匹配的已发布数据库，不重复初始化。
+已有数据库结构不会随代码更新。遇到 `relation "lexicon_form" does not exist` 时，停止启动重试，进入[开发库检查与重建](lexicon-import.md#15-已有开发库结构不匹配时)；不要只补一张表或一个字段。日常启动可以复用匹配的已发布数据库，不重复初始化。
 
 
 当前 API 不读取、不需要、也不会调用模型服务。完成本机配置后，在任意新终端，完整词库启动方式：

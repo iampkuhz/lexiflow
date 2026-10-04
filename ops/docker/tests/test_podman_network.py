@@ -40,7 +40,7 @@ import {runtime} from './ops/podman/doctor.mjs';import http from 'node:http';imp
 process.env.HTTP_PROXY='http://127.0.0.1:1';process.env.HTTPS_PROXY=process.env.HTTP_PROXY;process.env.ALL_PROXY=process.env.HTTP_PROXY;process.env.NODE_USE_ENV_PROXY='1';
 let hang=false;const server=http.createServer((req,res)=>{
  if(hang)return;
- res.end(JSON.stringify(req.url.endsWith('readiness')?{status:'UP'}:{softwareVersion:'0.1.0',apiContract:'caption-hints.v1',mode:'formal',ready:true,reason:'OK'}));
+ res.end(JSON.stringify(req.url.endsWith('readiness')?{status:'UP'}:{softwareVersion:'0.1.0',apiContract:'caption-hints.v2',mode:'formal',ready:true,reason:'OK'}));
 });await new Promise(r=>server.listen(0,'127.0.0.1',r));
 try{
  assert.equal((await runtime(server.address().port,'0.1.0',1000))[0],'PASS');hang=true;

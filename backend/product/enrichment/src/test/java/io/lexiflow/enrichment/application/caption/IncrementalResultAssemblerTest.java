@@ -95,7 +95,7 @@ class IncrementalResultAssemblerTest {
       String sense,
       String gloss) {
     return new LexiconHintCandidate(
-        uuid(entry),
+        (long) (entry.hashCode() & 0x7fffffff) + 1,
         sense == null ? null : uuid(sense),
         version,
         "en",
@@ -105,7 +105,7 @@ class IncrementalResultAssemblerTest {
         action,
         gloss,
         500,
-        0,
+        false,
         0);
   }
 
