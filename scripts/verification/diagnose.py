@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from scripts.verification import verify_changes, verify_repository
+from scripts.verification.summaries import selected_result, summarize
 
 
 def diagnose(
@@ -19,11 +20,15 @@ def diagnose(
 ) -> dict[str, object]:
     """执行定向 Verify 诊断并剥离完整报告身份；所选 PASS 不是仓库 PASS。"""
     if mode == "change":
-        report = verify_changes(root, base=base, expected_paths=expected_paths)
+        report = verify_changes(
+            root, base=base, expected_paths=expected_paths, execution_mode="diagnostic"
+        )
     elif mode == "repository":
         if not check_ids:
             raise ValueError("repository diagnosis requires at least one check ID")
-        report = verify_repository(root, check_ids=check_ids)
+        report = verify_repository(
+            root, check_ids=check_ids, execution_mode="diagnostic"
+        )
     else:
         raise ValueError(f"unknown diagnosis mode: {mode}")
     # 内部 Verify API 会返回完整报告的字段形状；诊断输出不得暴露可被误认成
@@ -37,7 +42,10 @@ def diagnose(
         "kind": "diagnostic",
         "full_repository_executed": False,
         "selected_scope": report.get("scope"),
-        "selected_result": report.get("result", "FAIL"),
+        "selected_result": selected_result(report),
+        "qualification_result": report.get("result", "FAIL"),
+        "qualification_reason": report.get("reason", ""),
+        "summary": summarize(report),
         "selected_report": selected_report,
     }
 

@@ -1,52 +1,22 @@
-import { BilingualOverlay, OVERLAY_ID as overlayId } from "./overlay";
-import { CaptionViewport, readCaptionSource } from "./caption-source";
-import { CaptionSnapshotTracker } from "./caption-snapshot";
-import { YoutubeSourceMetadata } from "./youtube-source";
-import { snapshotText } from "./protocol";
-const snapshotTracker = new CaptionSnapshotTracker();
-const captionViewport = new CaptionViewport();
-const sourceMetadata = new YoutubeSourceMetadata();
-let trackKey: string | null = null;
-let lastKnownTrackKey: string | null = null;
-let nativeIdentity = "";
-let topic: string | undefined;
-let topicPromise: Promise<string> | undefined;
-window.addEventListener("message", event => {
-  if (event.source === window && event.origin === location.origin && event.data?.type === "lexiflow-native-captions") {
-    sourceMetadata.accept(event.data.track, videoIdFromLocation());
-    scheduleCapture();
-  }
-});
-window.postMessage({ type: "lexiflow-native-ready" }, location.origin);
+import { BilingualOverlay, type PresentedLine, type RenderedLine } from "./overlay";
+import { extractIncrementalText, rememberBounded } from "./caption-debug";
+import { snapshotSegments, snapshotText } from "./protocol";
 import { PREFERENCE_KEY, type PreferenceAction, type PreferenceResult } from "./preferences";
 import { Diagnostics } from "./diagnostics";
-import {
-  MAX_CAPTION_LENGTH,
-  type ApiResult,
-  type CaptionHintRequest
-} from "./protocol";
-import {
-  CaptionStreamCoordinator,
-  type CaptionEvent,
-  type StreamView
-} from "./stream";
+import { MAX_CAPTION_LENGTH, type ApiResult } from "./protocol";
+import { CaptionStreamCoordinator, type CaptionEvent, type StreamView } from "./stream";
+import { createPageLifecycle, type PageLifecycle } from "./page-lifecycle";
+import { CaptionCapture } from "./caption-capture";
 
 const diagnostics = new Diagnostics();
-
 function videoIdFromLocation(): string | undefined {
   const value = new URL(location.href).searchParams.get("v")?.trim();
   return value && value.length <= 256 ? value : undefined;
 }
-
-function bytesToHex(bytes: ArrayBuffer): string {
-  return [...new Uint8Array(bytes)].map((value) => value.toString(16).padStart(2, "0")).join("");
-}
-
 async function sha256(value: string): Promise<string> {
-  return bytesToHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
 }
-
-// 裁剪只影响绘制，保留来源几何信息与可见性检测，不修改字幕节点。
 const sourceMask = document.createElement("style");
 sourceMask.textContent = ".lexiflow-inline-active #ytp-caption-window-container{clip-path:inset(50%)!important}";
 document.documentElement.append(sourceMask);
@@ -57,296 +27,197 @@ let preferenceMessage = "正在读取本机偏好，英文不受影响。";
 let latestView: StreamView = { state: "idle" };
 let lastShownSequence = -1;
 let lastSuppressedSequence = -1;
-let enhancementEnabled = true;
-let pageKey = crypto.randomUUID();
-let pageVideoId = videoIdFromLocation();
-let layoutKey = "";
-let missingCaptionAt: number | undefined;
-const overlay = new BilingualOverlay(
-  (entryId, lexiconVersion) => { void updatePreferences("suppress", entryId, lexiconVersion); }
-);
+let observedAt = performance.now();
+let observedSequence = -1;
+let terminalSequence = -1;
+type TrackedLine = { line: PresentedLine; topicKey: string; videoId: string };
+const debugPresented = new Map<string, TrackedLine>();
+const debugSent = new Set<string>();
+const debugStarted = new Set<string>();
+function sendDebug(event: "video-start" | "incremental" | "final" | "interrupted", topicKey: string,
+  videoId: string, line: PresentedLine, requestId?: string, text = line.text): void {
+  const positionMs = line.positionMs ?? Math.floor(document.querySelector("video")?.currentTime! * 1000);
+  if (!/^[A-Za-z0-9_-]{11}$/.test(videoId) || !topicKey || topicKey.length > 128 || line.subtitleKey.length > 128 ||
+      !Number.isSafeInteger(positionMs) || positionMs < 0 || text.length > 16384) return;
+  const eventId = event === "incremental" && requestId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(requestId)
+    ? requestId : crypto.randomUUID();
+  void chrome.runtime.sendMessage({ type: "caption-debug", payload: { eventId, event, topicKey, videoId,
+    subtitleKey: line.subtitleKey, positionMs, text } }).catch(() => undefined);
+}
+function record(observation: Parameters<Diagnostics["record"]>[0]): void {
+  try { diagnostics.record(observation); } catch { /* diagnostics never changes user-visible behavior */ }
+}
+function updateDiagnostics(): void { try { overlay.updateDiagnostics(diagnostics.snapshot()); } catch { /* diagnostic UI is optional */ } }
+let capture: CaptionCapture | undefined;
+let lifecycle: PageLifecycle;
+function finalizePresented(line: PresentedLine): void {
+  const tracked = debugPresented.get(line.subtitleKey);
+  if (!tracked) return;
+  const prior = tracked.line;
+  const view = latestView;
+  const keys = new Set(view.event ? snapshotSegments(view.event.request.currentSnapshot).map(segment => segment.key) : []);
+  const frozen = new Set(view.frozenKeys ?? []), finalized = new Set(view.finalizedKeys ?? []);
+  if (view.event && prior.segmentKeys.every(key => frozen.has(key) || finalized.has(key)))
+    sendDebug("final", tracked.topicKey, tracked.videoId, prior, undefined, prior.text);
+  debugPresented.delete(line.subtitleKey);
+}
+function interruptPresented(): void {
+  for (const tracked of debugPresented.values())
+    sendDebug("interrupted", tracked.topicKey, tracked.videoId, tracked.line, undefined, tracked.line.text);
+  debugPresented.clear();
+}
+const overlay = new BilingualOverlay((entryId, lexiconVersion) => { void updatePreferences("suppress", entryId, lexiconVersion); }, finalizePresented);
+function captureLivePage(): void {
+  if (lifecycle && lifecycle.videoId !== videoIdFromLocation()) lifecycle.refreshPage();
+  overlay.position();
+  void capture?.capture();
+}
 
+function renderCurrentView(): number {
+  const currentCapture = capture;
+  const view = latestView.event &&
+    snapshotText(latestView.event.request.currentSnapshot) !== currentCapture?.currentCaption()
+    ? { state: "idle" as const } : latestView;
+  const source = currentCapture?.readSource();
+  const shown = overlay.render(view, { ready: preferenceReady, entryKeys: suppressed, message: preferenceMessage },
+    source && source.caption.length <= MAX_CAPTION_LENGTH ? source : undefined);
+  const rendered = overlay.takePresentation();
+  if (source && view.event && preferenceReady) {
+    const videoId = lifecycle?.videoId;
+    const topic = view.event.request.captionTopicKey;
+    const live = new Set(rendered.lines.map(line => line.subtitleKey));
+    for (const [key, tracked] of debugPresented) {
+      if (live.has(key)) continue;
+      finalizePresented(tracked.line);
+    }
+    for (const line of rendered.lines) if (videoId) {
+      debugPresented.set(line.subtitleKey, { line, topicKey: topic, videoId });
+      while (debugPresented.size > 64) {
+        const oldest = debugPresented.values().next().value as TrackedLine | undefined;
+        if (!oldest) break;
+        finalizePresented(oldest.line);
+      }
+    }
+    if (videoId && rendered.lines.length && !debugStarted.has(videoId)) {
+      sendDebug("video-start", topic, videoId, rendered.lines[0], undefined, ""); rememberBounded(debugStarted, videoId, 16);
+    }
+    if (view.debugRequestEvent) {
+      const responseEvent = view.debugRequestEvent;
+      const token = `${responseEvent.sequence}:${view.debugRequestId ?? responseEvent.key}`;
+      if (!debugSent.has(token)) {
+        rememberBounded(debugSent, token, 64);
+        if (videoId) {
+          const requestEvent = view.debugRequestEvent;
+          const appendedRanges: Array<{ start: number; end: number }> = [];
+          let offset = 0;
+          for (const group of requestEvent?.request.currentSnapshot.captions ?? []) for (const segment of group.segments) {
+            if (segment.append) appendedRanges.push({ start: offset, end: offset + segment.text.length });
+            offset += segment.text.length;
+          }
+          appendedRanges.sort((left, right) => left.start - right.start);
+          const mergedRanges: Array<{ start: number; end: number }> = [];
+          for (const range of appendedRanges) {
+            const last = mergedRanges.at(-1);
+            if (last && range.start <= last.end) last.end = Math.max(last.end, range.end);
+            else mergedRanges.push({ ...range });
+          }
+          const actual = rendered.lines.map(line => ({ line, text: extractIncrementalText(line, mergedRanges) }))
+            .filter((entry): entry is { line: RenderedLine; text: string } => !!entry.text);
+          if (actual.length) {
+            const first = actual[0].line;
+            const combinedText = actual.map(entry => entry.text).join("\n");
+            if (combinedText.length <= 16384) {
+              const combined = { ...first, segmentKeys: [...new Set(actual.flatMap(entry => entry.line.segmentKeys))], text: combinedText };
+              sendDebug("incremental", topic, videoId, combined, view.debugRequestId, combined.text);
+            }
+          }
+        }
+      }
+    }
+  }
+  if (view.state === "ready" && view.event && preferenceReady) {
+    if (shown > 0 && lastShownSequence !== view.event.sequence) { lastShownSequence = view.event.sequence; record({ outcome: "shown" }); }
+    else if (shown === 0 && (view.hints?.length ?? 0) > 0 && view.hints!.every(hint => suppressed.has(`${hint.lexiconEntryId}@${hint.lexiconVersion}`)) && lastSuppressedSequence !== view.event.sequence) { lastSuppressedSequence = view.event.sequence; record({ outcome: "suppressed" }); }
+  }
+  return shown;
+}
 async function updatePreferences(action: PreferenceAction, entryId?: string, lexiconVersion?: number): Promise<void> {
   let result: PreferenceResult;
   try { result = await chrome.runtime.sendMessage({ type: "local-preferences", action, entryId, lexiconVersion }); }
   catch { result = { ok: false, reason: "storage" }; }
-  if (result?.ok && Array.isArray(result.entryKeys)) {
-    suppressed = new Set(result.entryKeys);
-    preferenceReady = true;
-    preferenceMessage = "";
-  } else {
-    preferenceMessage = result && !result.ok && result.reason === "limit" ? "本机抑制已达上限，请先恢复提示。" : "本机偏好读取或保存失败；未宣称已保存。";
-  }
-  renderCurrentView();
-  overlay.updateDiagnostics(diagnostics.snapshot());
+  if (result?.ok && Array.isArray(result.entryKeys)) { suppressed = new Set(result.entryKeys); preferenceReady = true; preferenceMessage = ""; }
+  else preferenceMessage = result && !result.ok && result.reason === "limit"
+    ? "本机抑制已达上限，请先恢复提示。" : "本机偏好读取或保存失败；未宣称已保存。";
+  renderCurrentView(); updateDiagnostics();
 }
 
-function renderCurrentView(): number {
-  const view = latestView.state === "ready" && (latestView.event && snapshotText(latestView.event.request.currentSnapshot)) !== currentCaption()
-    ? { state: "idle" as const } : latestView;
-  const source = currentSource();
-  const shown = overlay.render(view, { ready: preferenceReady, entryKeys: suppressed, message: preferenceMessage },
-    source && source.caption.length <= MAX_CAPTION_LENGTH ? source : undefined);
-  if (view.state === "ready" && view.event && preferenceReady) {
-    if (shown > 0 && lastShownSequence !== view.event.sequence) {
-      lastShownSequence = view.event.sequence;
-      diagnostics.record({ outcome: "shown" });
-    } else if (shown === 0 && lastSuppressedSequence !== view.event.sequence) {
-      lastSuppressedSequence = view.event.sequence;
-      diagnostics.record({ outcome: "suppressed" });
-    }
-  }
-  return shown;
-}
 const coordinator = new CaptionStreamCoordinator(
   (event, requestId) => ({
-    promise: chrome.runtime
-      .sendMessage({ type: "caption-hints", requestId, payload: event.request })
+    promise: chrome.runtime.sendMessage({ type: "caption-hints", requestId, payload: event.request })
       .catch(() => ({ ok: false, reason: "network" } as ApiResult)),
-    cancel: () => {
-      void chrome.runtime.sendMessage({ type: "cancel-caption-hint", requestId }).catch(() => undefined);
-    }
+    cancel: () => { void chrome.runtime.sendMessage({ type: "cancel-caption-hint", requestId }).catch(() => undefined); }
   }),
-  (view) => {
-    // 交付结果时重新读取实时来源，不能只相信最后一次 debounce snapshot。
-    const liveCaption = currentCaption();
-    if (view.state === "ready" && (!view.event || view.event.sequence !== sourceSequence ||
+  view => {
+    const liveCaption = capture?.currentCaption();
+    if (view.state === "ready" && (!view.event || !capture?.isCurrentSequence(view.event.sequence) ||
         (liveCaption !== undefined && snapshotText(view.event.request.currentSnapshot) !== liveCaption) ||
-        activeVideoId !== videoIdFromLocation())) {
-      diagnostics.record({ outcome: "stale-at-render" });
-      overlay.updateDiagnostics(diagnostics.snapshot());
-      return;
+        lifecycle.videoId !== videoIdFromLocation() || !lifecycle.enabled || document.hidden)) {
+      record({ outcome: "stale-at-render" }); updateDiagnostics(); return;
     }
-    const started = performance.now();
-    latestView = view;
-    renderCurrentView();
-    diagnostics.record({ stage: "render", elapsedMs: performance.now() - started });
-    if (view.state === "ready" || view.state === "no-pending" || view.state === "fallback") {
-      diagnostics.record({ stage: "endToEnd", elapsedMs: performance.now() - observedAt });
+    const started = performance.now(); latestView = view; renderCurrentView();
+    record({ stage: "render", elapsedMs: performance.now() - started });
+    if (["ready", "no-pending", "fallback"].includes(view.state) && view.event && terminalSequence !== view.event.sequence && observedSequence === view.event.sequence) {
+      terminalSequence = view.event.sequence; record({ stage: "endToEnd", elapsedMs: performance.now() - observedAt });
     }
-    overlay.updateDiagnostics(diagnostics.snapshot());
-  },
-  globalThis,
-  value => { diagnostics.record(value); overlay.updateDiagnostics(diagnostics.snapshot()); }
-);
+    updateDiagnostics();
+  }, globalThis, value => { record(value); updateDiagnostics(); });
 
-let sourceSequence = 0;
-let sourceRevision = 0;
-let activeVideoId: string | undefined;
-let activePlayer: HTMLElement | null = null;
-let activeCaptionKey: string | undefined;
-let observedAt = performance.now();
-let seeking = false;
-let navigating = false;
-let sourceStopped = false;
-
-function currentSource() {
-  const player = document.querySelector<HTMLElement>(".html5-video-player, #movie_player");
-  const video = player?.querySelector<HTMLVideoElement>("video");
-  if (!enhancementEnabled || player === null || !video || video.ended || sourceStopped || document.hidden || seeking || navigating || player.classList.contains("ad-showing")) return undefined;
-  return readCaptionSource(captionViewport.read(player));
-}
-
-function currentCaption(): string | undefined {
-  return currentSource()?.caption;
-}
-
-function scheduleCapture(): void {
-  // 来源文字即时整理，异步响应不得清空仍有效的提示。
-  void captureCurrentCaption();
-}
-
-function clearSource(): void {
-  missingCaptionAt = undefined;
-  captionViewport.reset();
-  snapshotTracker.reset();
-  coordinator.clear(++sourceSequence);
-}
-
-async function captureCurrentCaption(): Promise<void> {
-  if (pageVideoId !== videoIdFromLocation()) resetPageSetting();
-  const player = document.querySelector<HTMLElement>(".html5-video-player, #movie_player");
-  if (activePlayer !== player || (player !== null && !document.getElementById(overlayId))) {
-    activePlayer = player;
-    activeCaptionKey = undefined;
-    sourceRevision += 1;
-    clearSource();
+lifecycle = createPageLifecycle({
+  currentVideoId: videoIdFromLocation,
+  hasPlayer: () => !!document.querySelector(".html5-video-player, #movie_player"),
+  hasCaptionMotion: () => !!document.querySelector("#ytp-caption-window-container")?.getAnimations({ subtree: true })
+    .some(animation => animation.playState === "running" || animation.pending)
+}, () => {
+  capture?.invalidate();
+}, captureLivePage, reason => {
+  if (reason) {
+    if (reason !== "interrupted") record({ outcome: reason });
+    interruptPresented(); debugSent.clear(); debugStarted.clear();
   }
-  overlay.position();
-  const video = document.querySelector<HTMLVideoElement>("video");
-  const videoId = videoIdFromLocation();
-  const caption = currentCaption();
-  if (video === null || videoId === undefined || caption === undefined) {
-    const nativeContainer = player?.querySelector<HTMLElement>("#ytp-caption-window-container");
-    const transientGap = caption === undefined && video && !video.ended && videoId && enhancementEnabled &&
-      !document.hidden && !seeking && !navigating && !sourceStopped && !player?.classList.contains("ad-showing") &&
-      nativeContainer?.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
-    if (transientGap) {
-      missingCaptionAt ??= performance.now();
-      overlay.render({ state: "idle" }, { ready: preferenceReady, entryKeys: suppressed, message: preferenceMessage });
-    } else if (activeCaptionKey !== undefined) {
-      activeCaptionKey = undefined;
-      clearSource();
-    }
-    return;
-  }
-  const wasMissing = missingCaptionAt !== undefined;
-  if (wasMissing && performance.now() - missingCaptionAt! > 650) {
-    activeCaptionKey = undefined;
-    clearSource();
-  }
-  missingCaptionAt = undefined;
-  if (activeVideoId !== videoId) {
-    activeVideoId = videoId;
-    sourceRevision += 1;
-    activeCaptionKey = undefined;
-  }
-  const videoTimeMs = Math.max(0, Math.floor((Number.isFinite(video.currentTime) ? video.currentTime : 0) * 1_000));
-  const source = currentSource();
-  if (!source) return;
-  const metadata = sourceMetadata.match(source.caption, videoTimeMs);
-  const firstWord = source.caption.match(/\S+/u)?.[0] ?? source.caption;
-  const firstMetadata = metadata.metadata(firstWord, 0);
-  const nextNativeIdentity = metadata.trackKey && firstMetadata.startMs !== null
-    ? `${metadata.trackKey}:${firstMetadata.windowId}:${firstMetadata.startMs}:${firstMetadata.offsetMs}` : "";
-  const textUnchanged = activeCaptionKey === `${videoId}\u0000${sourceRevision}\u0000${caption}`;
-  // JSON3 的有效时间窗与 DOM roll-up 并非同步：短暂无法匹配不是换轨证据。
-  if ((metadata.trackKey !== null && lastKnownTrackKey !== null && metadata.trackKey !== lastKnownTrackKey) ||
-      (textUnchanged && nativeIdentity && nextNativeIdentity && nativeIdentity !== nextNativeIdentity)) {
-    clearSource(); activeCaptionKey = undefined;
-  }
-  if (metadata.trackKey !== null) lastKnownTrackKey = metadata.trackKey;
-  if (nextNativeIdentity) nativeIdentity = nextNativeIdentity;
-  trackKey = metadata.trackKey;
-  const captionKey = `${videoId}\u0000${sourceRevision}\u0000${caption}`;
-  const nextLayoutKey = JSON.stringify(currentSource()?.lineBreaks ?? []);
-  if (captionKey === activeCaptionKey) {
-    if (nextLayoutKey !== layoutKey || wasMissing) { layoutKey = nextLayoutKey; renderCurrentView(); }
-    return;
-  }
-  layoutKey = nextLayoutKey;
-  activeCaptionKey = captionKey;
-  observedAt = performance.now();
-  diagnostics.record({ outcome: "observed" });
-  const sequence = ++sourceSequence;
-  if (caption.length > MAX_CAPTION_LENGTH) {
-    diagnostics.record({ outcome: "oversized" });
-    clearSource();
-    return;
-  }
-  const snapshot = snapshotTracker.capture(source, metadata.metadata);
-  // 主题哈希只在导航时改变。未完成时先显示英文，不阻塞源遮罩和绘制。
-  if (!topic) {
-    latestView = { state: "waiting" };
-    renderCurrentView();
-    const expectedVideo = videoId;
-    try {
-      const resolved = await (topicPromise ??= sha256(`youtube\u0000${videoId}`));
-      if (videoIdFromLocation() !== expectedVideo) return;
-      topic = resolved;
-    } catch { topicPromise = undefined; activeCaptionKey = undefined; return; }
-    if (sequence !== sourceSequence) { activeCaptionKey = undefined; scheduleCapture(); return; }
-  }
-  const request: CaptionHintRequest = {
-    captionTopicKey: topic, trackKey, lastRequestedSnapshot: null, currentSnapshot: snapshot
-  };
-  diagnostics.record({ stage: "acquisition", elapsedMs: performance.now() - observedAt });
-  const event: CaptionEvent = { key: captionKey, sequence: sourceSequence, videoTimeMs, request };
-  coordinator.submit(event);
-}
+  renderCurrentView(); updateDiagnostics();
+});
+capture = new CaptionCapture(lifecycle, coordinator, {
+  sha256, now: () => performance.now(),
+  onWaiting: () => { latestView = { state: "waiting" }; renderCurrentView(); },
+  onSource: source => { if (source) renderCurrentView(); else overlay.render({ state: "idle" },
+    { ready: preferenceReady, entryKeys: suppressed, message: preferenceMessage }); },
+  onObserved: sequence => { observedAt = performance.now(); observedSequence = sequence; record({ outcome: "observed" }); },
+  onOversized: () => record({ outcome: "oversized" }),
+  onAcquisition: elapsedMs => record({ stage: "acquisition", elapsedMs }),
+  onObservation: outcome => record({ outcome }),
+  onInterrupted: interruptPresented
+});
 
 renderCurrentView();
 void updatePreferences("read");
 chrome.runtime.onMessage?.addListener((message, sender, respond) => {
   if (sender.id !== chrome.runtime.id || message?.type !== "page-enhancement") return;
-  if (pageVideoId !== videoIdFromLocation()) resetPageSetting();
-  if (!videoIdFromLocation() || navigating || !document.querySelector(".html5-video-player, #movie_player")) {
+  if (lifecycle.videoId !== videoIdFromLocation()) lifecycle.refreshPage();
+  if (!videoIdFromLocation()) { respond({ ok: false, reason: "not-video-page" }); return; }
+  if (lifecycle.navigating || !document.querySelector(".html5-video-player, #movie_player")) {
     respond({ ok: false }); return;
   }
   if (message.action === "set") {
-    if (message.pageKey !== pageKey || typeof message.enabled !== "boolean") { respond({ ok: false }); return; }
-    enhancementEnabled = message.enabled;
-    activeCaptionKey = undefined;
-    clearSource();
-    scheduleCapture();
+    if (!lifecycle.setEnabled(message.pageKey, message.enabled)) { respond({ ok: false }); return; }
+    captureLivePage();
   } else if (message.action !== "read") { respond({ ok: false }); return; }
-  respond({ ok: true, enabled: enhancementEnabled, pageKey });
+  respond({ ok: true, enabled: lifecycle.enabled, pageKey: lifecycle.pageKey });
 });
-chrome.storage?.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes[PREFERENCE_KEY]) void updatePreferences("read");
-});
-scheduleCapture();
-new MutationObserver(scheduleCapture).observe(document.documentElement, {
-  childList: true,
-  subtree: true,
-  characterData: true,
-  attributes: true,
-  attributeFilter: ["class", "style", "hidden", "aria-hidden"]
-});
-function resetForNavigation(): void {
-  resetPageSetting();
-  activeVideoId = undefined;
-  activeCaptionKey = undefined;
-  clearSource();
-}
-
-function resetPageSetting(): void {
-  enhancementEnabled = true;
-  pageKey = crypto.randomUUID();
-  pageVideoId = videoIdFromLocation();
-  topic = undefined; topicPromise = undefined; trackKey = null; lastKnownTrackKey = null; nativeIdentity = ""; sourceMetadata.reset();
-  sourceStopped = false;
-  activeCaptionKey = undefined;
-}
-
-document.addEventListener("yt-navigate-start", () => { navigating = true; resetForNavigation(); });
-document.addEventListener("yt-navigate-finish", () => { navigating = false; scheduleCapture(); });
-window.addEventListener("popstate", () => { resetForNavigation(); scheduleCapture(); });
-window.addEventListener("resize", scheduleCapture);
-document.addEventListener("timeupdate", scheduleCapture, true);
-
-// YouTube roll-up 通过 CSS transform 移入新行，动画中没有持续 DOM mutation。
-// 仅在原生字幕动画运行时逐帧重读几何；不固定轮询，也不让英文等待 timeupdate。
-let motionFrame: number | undefined;
-let motionDeadline = 0;
-function captureCaptionMotion(): void {
-  motionFrame = undefined;
-  if (document.hidden) return;
-  scheduleCapture();
-  const source = document.querySelector("#ytp-caption-window-container");
-  if (performance.now() < motionDeadline && source?.getAnimations({ subtree: true })
-      .some(animation => animation.playState === "running" || animation.pending)) {
-    motionFrame = requestAnimationFrame(captureCaptionMotion);
+chrome.storage?.onChanged.addListener((changes, area) => { if (area === "local" && changes[PREFERENCE_KEY]) void updatePreferences("read"); });
+window.addEventListener("message", event => {
+  if (event.source === window && event.origin === location.origin && event.data?.type === "lexiflow-native-captions") {
+    capture?.acceptNativeTrack(event.data.track, videoIdFromLocation()); captureLivePage();
   }
-}
-function isCaptionMotion(event: Event): boolean {
-  return event.target instanceof Element && !!event.target.closest("#ytp-caption-window-container");
-}
-for (const name of ["transitionrun", "animationstart"]) document.addEventListener(name, event => {
-  if (!isCaptionMotion(event)) return;
-  motionDeadline = performance.now() + 2000;
-  if (motionFrame === undefined) motionFrame = requestAnimationFrame(captureCaptionMotion);
-}, true);
-for (const name of ["transitionend", "transitioncancel", "animationend", "animationcancel"]) {
-  document.addEventListener(name, event => { if (isCaptionMotion(event)) scheduleCapture(); }, true);
-}
-
-
-document.addEventListener("seeking", () => {
-  seeking = true;
-  sourceRevision += 1;
-  activeCaptionKey = undefined;
-  clearSource();
-}, true);
-document.addEventListener("seeked", () => { seeking = false; sourceStopped = false; scheduleCapture(); }, true);
-document.addEventListener("play", () => { sourceStopped = false; scheduleCapture(); }, true);
-for (const name of ["emptied", "ended"]) {
-  document.addEventListener(name, () => {
-    sourceStopped = true;
-    activeCaptionKey = undefined;
-    clearSource();
-  }, true);
-}
-
-// 隐藏的标签页不得继续显示或请求过期字幕。
-document.addEventListener("visibilitychange", scheduleCapture);
+});
+window.postMessage({ type: "lexiflow-native-ready" }, location.origin);
+lifecycle.attach();

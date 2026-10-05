@@ -17,13 +17,12 @@ class DeterministicHintPolicyTest {
   private final DeterministicHintPolicy policy = new DeterministicHintPolicy();
 
   @Test
-  void sharedLowInformationPolicyAllowsTwoContentWordsButStillChecksGlossAndPublishedBlock() {
+  void publishedShortPhraseDisplaysAndGlossSafetyAndBlockRemainEnforced() {
     assertEquals(
         HintState.READY,
         evaluate("the silent majority", List.of(phrase("the silent majority", "沉默的大多数"))).state());
     assertEquals(
-        HintState.NO_PENDING,
-        evaluate("the majority", List.of(phrase("the majority", "大多数"))).state());
+        HintState.READY, evaluate("the majority", List.of(phrase("the majority", "大多数"))).state());
     assertEquals(
         HintState.NO_PENDING,
         evaluate("the silent majority", List.of(phrase("the silent majority", "在…之中"))).state());
@@ -50,6 +49,10 @@ class DeterministicHintPolicyTest {
     var block = block("bank");
     assertEquals(HintState.NO_PENDING, evaluate("bank", List.of(hint, block)).state());
     assertEquals(HintState.NO_PENDING, evaluate("bank", List.of(block)).state());
+    var selection =
+        new DeterministicHintPolicy().evaluateSelection("bank", 0, 4, 0, List.of(hint, block));
+    assertEquals(1, selection.ambiguous());
+    assertEquals(0, selection.overlapDropped());
   }
 
   @Test
@@ -103,7 +106,7 @@ class DeterministicHintPolicyTest {
             highBase.finalAction(),
             highBase.finalGloss(),
             900,
-            highBase.frequencyZipf(),
+            highBase.rankedWord(),
             highBase.complexListCount());
     var result =
         evaluate(
@@ -128,10 +131,55 @@ class DeterministicHintPolicyTest {
   }
 
   @Test
-  void rejectsLowInformationPhrases() {
-    for (var form : List.of("the first", "not in", "reference to", "on yesterday", "to be")) {
-      assertEquals(HintState.NO_PENDING, evaluate(form, List.of(phrase(form, "错误短释"))).state());
-    }
+  void consumesPublishedLowInformationPhraseWithoutRecomputingSourceQualification() {
+    var form = "the first";
+    var result = evaluate(form, List.of(phrase(form, "第一")));
+    assertEquals(HintState.READY, result.state());
+    assertEquals("第一", result.hints().getFirst().chineseGloss());
+  }
+
+  @Test
+  void unsafeHintStillMakesSameFormAmbiguousWithSafeHint() {
+    var safe = candidate("bank", "银行");
+    var unsafeBase = candidate("bank", "银行");
+    var unsafe =
+        new LexiconHintCandidate(
+            2L,
+            unsafeBase.senseId(),
+            1,
+            "en",
+            "bank",
+            "bank",
+            LexiconEntryKind.WORD,
+            LexiconHintAction.HINT,
+            "银行（旧）",
+            500,
+            false,
+            1);
+    assertEquals(HintState.NO_PENDING, evaluate("bank", List.of(safe, unsafe)).state());
+  }
+
+  @Test
+  void nullCandidateRefusesWholeBatchAndRepeatedOccurrencesArePreserved() {
+    var safe = candidate("bank", "银行");
+    assertEquals(
+        HintState.NO_PENDING, evaluate("bank", java.util.Arrays.asList(safe, null)).state());
+    var repeated = evaluate("bank, BANK", List.of(safe));
+    assertEquals(2, repeated.hints().size());
+    assertEquals(0, repeated.hints().getFirst().startOffset());
+    assertEquals(4, repeated.hints().getFirst().endOffset());
+  }
+
+  @Test
+  void oldContextCanCompletePhraseButNeverReemitOldOnlyHint() {
+    var text = "bank give up";
+    var hints =
+        policy.evaluate(
+            text, 0, text.length(), 10, List.of(candidate("bank", "银行"), phrase("give up", "放弃")));
+    assertEquals(1, hints.size());
+    assertEquals(5, hints.getFirst().startOffset());
+    assertEquals(12, hints.getFirst().endOffset());
+    assertEquals("放弃", hints.getFirst().chineseGloss());
   }
 
   private io.lexiflow.enrichment.domain.model.CaptionHintResult evaluate(
@@ -154,14 +202,27 @@ class DeterministicHintPolicyTest {
 
   private static LexiconHintCandidate candidate(
       String form, String gloss, long version, LexiconEntryKind kind, double zipf) {
-    var id = UUID.nameUUIDFromBytes((form + version).getBytes(StandardCharsets.UTF_8));
+    var id = (long) (form + version).hashCode() & Long.MAX_VALUE;
+    if (id == 0) id = 1;
     var senseId = UUID.nameUUIDFromBytes(gloss.getBytes(StandardCharsets.UTF_8));
     return new LexiconHintCandidate(
-        id, senseId, version, "en", form, form, kind, LexiconHintAction.HINT, gloss, 500, zipf, 1);
+        id,
+        senseId,
+        version,
+        "en",
+        form,
+        form,
+        kind,
+        LexiconHintAction.HINT,
+        gloss,
+        500,
+        zipf > 0,
+        1);
   }
 
   private static LexiconHintCandidate block(String form) {
-    var id = UUID.nameUUIDFromBytes(form.getBytes(StandardCharsets.UTF_8));
+    var id = (long) form.hashCode() & Long.MAX_VALUE;
+    if (id == 0) id = 1;
     return new LexiconHintCandidate(
         id,
         null,
@@ -173,7 +234,7 @@ class DeterministicHintPolicyTest {
         LexiconHintAction.BLOCK,
         null,
         0,
-        0,
+        false,
         0);
   }
 }

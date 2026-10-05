@@ -1,6 +1,6 @@
 # 1. 从问题开始阅读 LexiFlow
 
-LexiFlow 在观看英文内容时提供低打扰词义提示。先建立产品与系统模型，再根据当前任务进入工程流程；只查字段或命令时可以直接进入 Reference。
+按下表选择入口；只查字段或命令可直接进入 Reference。
 
 ## 1.1. 阅读地图
 
@@ -64,10 +64,8 @@ title LexiFlow 阅读地图
 | 怎样本机使用、导入资料？ | [运行与环境](development/operations.md) | 本地体验 / 词库导入 / 隔离测试 |
 | 某一步失败了怎么办？ | [按阶段排障](development/troubleshooting.md) | 定位运行环境、检查、身份或证据层 |
 | 只查某个工具或英文术语？ | [工程 Reference](development/reference.md) | 工具、配置、Scripts、术语 |
-| 已做到哪里、下一阶段做什么？ | [路线图](roadmap/master-plan.md) | [状态与下一步](roadmap/master-plan/status.md) |
+| 已做到哪里、下一阶段做什么？ | [路线图](roadmap/master-plan.md) | [状态与下一步](roadmap/master-plan/phase2/status.md) |
 
 ## 1.3. 如何逐层定位
 
-总览图给出阶段和边界；阶段页说明前置、输出与失败去向；模块页再映射到入口和内部文件。Reference 是侧链，不必顺序读完。每个详情页保留上级和回程，避免为了理解局部而重读全仓规则。
-
-长期能力 contract 见 [OpenSpec](../openspec/project.md)，机器约束真源见 [Harness](../harness/README.md)。图源只在 Markdown 的 PlantUML 围栏；图包和运行证据不成为正文依赖。
+总览 → 阶段流程 → 模块细节，按需下钻。长期合同见 [OpenSpec](../openspec/project.md)，机器约束见 [Harness](../harness/README.md)。

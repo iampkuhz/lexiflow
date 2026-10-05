@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import shutil
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from scripts.environment.java_runtime import JavaRuntimeError, resolve_java_home
 
@@ -104,6 +106,67 @@ def diagnose(
             info = detect_postgres_test_jdbc_url(source)
         elif name == "redis-test-endpoint":
             info = detect_redis_test_endpoint(source)
+        elif name == "python-package-yaml":
+            # 仅 find_spec 预检；实际子进程 import 由 kernel 在 build_child_environment
+            # 构造的安全环境中验证，避免此处继承父 PYTHONPATH 等不安全变量。
+            spec = importlib.util.find_spec("yaml")
+            info = {"available": bool(spec and spec.origin), "path": ""}
+        elif name == "posix-lock-tool":
+            path = (
+                "/usr/bin/lockf"
+                if sys.platform == "darwin"
+                else "/usr/bin/flock"
+                if sys.platform.startswith("linux")
+                else ""
+            )
+            info = {"available": bool(path and os.access(path, os.X_OK)), "path": path}
+        elif name == "sha256-tool":
+            path = shutil.which(
+                "sha256sum", path=source.get("PATH", "")
+            ) or shutil.which("shasum", path=source.get("PATH", ""))
+            info = {"available": bool(path), "path": path or ""}
+        elif name == "candidate-runtime-request":
+            value = source.get("LEXIFLOW_CANDIDATE_RUNTIME_REQUEST", "")
+            valid = bool(value and Path(value).is_absolute())
+            info = {
+                "available": valid,
+                "source": "explicit-candidate-request" if valid else "",
+                "path": "",
+            }
+        elif name in {
+            "release-amd64-docker-host",
+            "release-arm64-docker-host",
+            "release-gradle-cache",
+            "release-npm-cache",
+        }:
+            variable = (
+                "LEXIFLOW_RELEASE_AMD64_DOCKER_HOST"
+                if name == "release-amd64-docker-host"
+                else "LEXIFLOW_RELEASE_ARM64_DOCKER_HOST"
+            )
+            if name in {"release-gradle-cache", "release-npm-cache"}:
+                variable = (
+                    "LEXIFLOW_RELEASE_GRADLE_CACHE"
+                    if name == "release-gradle-cache"
+                    else "LEXIFLOW_RELEASE_NPM_CACHE"
+                )
+                cache = source.get(variable, "").strip()
+                valid = bool(
+                    cache and Path(cache).is_absolute() and Path(cache).is_dir()
+                )
+                info = {
+                    "available": valid,
+                    "source": "explicit-cache-path" if valid else "",
+                    "path": "",
+                }
+            else:
+                endpoint = source.get(variable, "").strip()
+                valid = endpoint.startswith("unix://")
+                info = {
+                    "available": valid,
+                    "source": "explicit-unix-endpoint" if valid else "",
+                    "path": "",
+                }
         else:
             info = detect_tool(name)
         tools[name] = info
@@ -139,6 +202,45 @@ def execution_environment(
                     "explicit PostgreSQL test JDBC URL is unavailable"
                 )
             values["LEXIFLOW_POSTGRES_TEST_JDBC_URL"] = value
+        elif name == "candidate-runtime-request":
+            value = source.get("LEXIFLOW_CANDIDATE_RUNTIME_REQUEST", "")
+            if not value or not Path(value).is_absolute():
+                raise JavaRuntimeError(
+                    "explicit candidate runtime request is unavailable"
+                )
+            values["LEXIFLOW_CANDIDATE_RUNTIME_REQUEST"] = value
+        elif name in {
+            "release-amd64-docker-host",
+            "release-arm64-docker-host",
+            "release-gradle-cache",
+            "release-npm-cache",
+        }:
+            if name in {"release-gradle-cache", "release-npm-cache"}:
+                variable = (
+                    "LEXIFLOW_RELEASE_GRADLE_CACHE"
+                    if name == "release-gradle-cache"
+                    else "LEXIFLOW_RELEASE_NPM_CACHE"
+                )
+                value = source.get(variable, "").strip()
+                if (
+                    not value
+                    or not Path(value).is_absolute()
+                    or not Path(value).is_dir()
+                ):
+                    raise JavaRuntimeError(f"explicit {name} is unavailable")
+                values[variable] = value
+            else:
+                variable = (
+                    "LEXIFLOW_RELEASE_AMD64_DOCKER_HOST"
+                    if name == "release-amd64-docker-host"
+                    else "LEXIFLOW_RELEASE_ARM64_DOCKER_HOST"
+                )
+                value = source.get(variable, "").strip()
+                if not value:
+                    raise JavaRuntimeError(f"explicit {name} is unavailable")
+                if not value.startswith("unix://"):
+                    raise JavaRuntimeError(f"explicit {name} must be a Unix endpoint")
+                values[variable] = value
         elif name == "redis-test-endpoint":
             value = source.get("LEXIFLOW_REDIS_TEST_ENDPOINT", "").strip()
             if not value:

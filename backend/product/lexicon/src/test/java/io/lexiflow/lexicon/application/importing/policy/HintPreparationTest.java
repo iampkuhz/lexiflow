@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.lexiflow.lexicon.application.importing.model.ImportClassification;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
 import io.lexiflow.lexicon.application.importing.model.SourceReference;
 import io.lexiflow.lexicon.domain.model.LexiconPriority;
@@ -13,6 +14,18 @@ import org.junit.jupiter.api.Test;
 
 /** 覆盖导入时冻结提示或阻断的独立规则。 */
 class HintPreparationTest {
+  @Test
+  void excludesShortWordsFromPublishedHintsWithoutDiscardingSourceRows() {
+    for (var word : List.of("a", "uh", "um", "ai", "tv")) {
+      var source = row(word, "合成释义");
+      assertEquals("outside_query_window", HintPreparation.exclusionReason(source));
+      assertFalse(HintPreparation.prepare(source).classification().hintEligible());
+      assertEquals(word, source.lemma());
+    }
+    assertNull(HintPreparation.exclusionReason(row("yak", "牦牛")));
+    assertNull(HintPreparation.exclusionReason(row("of course", "当然")));
+  }
+
   @Test
   void blocksBasicLowInformationAndAmbiguousGlossButNotRankedWord() {
     assertEquals("basic_vocabulary", HintPreparation.exclusionReason(row("the", "这个")));
@@ -38,6 +51,65 @@ class HintPreparationTest {
     assertNull(HintPreparation.exclusionReason(phrase));
     assertFalse(row("specialist", "专家").basicVocabulary());
     assertNull(HintPreparation.exclusionReason(row("specialist", "专家")));
+  }
+
+  @Test
+  void keepsFrequencyEvidenceAndPrewarmSeparateFromHintEligibility() {
+    var unknown =
+        new LexiconImportRow(
+            "obscure",
+            "罕见词",
+            "",
+            List.of(),
+            List.of(),
+            LexiconPriority.fromRankedEvidence(4.2, 1, false),
+            new SourceReference("ecdict-stardict", "fixture", "row-obscure"),
+            new SourceReference("ecdict-stardict", "fixture", "row-obscure"),
+            List.of(),
+            true,
+            false,
+            "fixture",
+            "罕见词",
+            null,
+            null,
+            List.of(),
+            false,
+            false,
+            false);
+    var unknownPrepared = HintPreparation.prepare(unknown);
+    assertEquals(
+        ImportClassification.FrequencyEvidence.UNKNOWN,
+        unknownPrepared.classification().frequencyEvidence());
+    assertTrue(unknownPrepared.classification().hintEligible());
+    assertTrue(unknownPrepared.classification().prewarmEligible());
+
+    var known =
+        new LexiconImportRow(
+            "false alarm",
+            "误报",
+            "",
+            List.of(),
+            List.of(),
+            new LexiconPriority(4.2, 1, 900),
+            new SourceReference("fixture", "MIT", "phrase"),
+            new SourceReference("fixture", "MIT", "phrase"),
+            List.of(),
+            true,
+            false,
+            "fixture",
+            "误报",
+            null,
+            null,
+            List.of(),
+            false,
+            false,
+            false);
+    var knownPrepared = HintPreparation.prepare(known);
+    assertEquals(
+        ImportClassification.FrequencyEvidence.KNOWN,
+        knownPrepared.classification().frequencyEvidence());
+    assertTrue(knownPrepared.classification().hintEligible());
+    assertFalse(knownPrepared.classification().basicWord());
   }
 
   private static LexiconImportRow oxfordRow(String lemma, String gloss, Long rank) {

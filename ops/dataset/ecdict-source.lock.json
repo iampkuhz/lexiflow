@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "repository_url": "https://github.com/skywind3000/ECDICT.git",
+  "commit": "bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b",
+  "files": {
+    "stardict.7z": "f370a0ecb58ada758d9dfe739db1667fd4ed87ed3055a4a7cb6c7054ecdf83d6",
+    "ecdict.csv": "1a6947e04785db63613a92e14903cdae7954f7e84860b10e68e5c7cbb3f9c3cf",
+    "LICENSE": "f8552dd246f61a4e064569eae6194a01c6b3d63b03bf27c6ca863593c549ed0f"
+  },
+  "archive_member": {
+    "archive": "stardict.7z",
+    "member": "stardict.csv",
+    "sha256": "88fce01e0a30524192a62e363d47eeb036fa17820d5826121b3b419fd67a3996",
+    "bytes": 232668349
+  }
+}

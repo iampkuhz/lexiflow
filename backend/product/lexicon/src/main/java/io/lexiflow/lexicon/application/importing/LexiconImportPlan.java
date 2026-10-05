@@ -9,14 +9,13 @@ import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconInflection;
 import io.lexiflow.lexicon.domain.model.LexiconProvenance;
 import io.lexiflow.lexicon.domain.model.LexiconSense;
-import java.nio.charset.StandardCharsets;
+import io.lexiflow.lexicon.domain.port.LexiconIdentity;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /** 将受控导入行转为完整领域词条，并拒绝跨行 canonical 表面冲突。 */
 public final class LexiconImportPlan {
@@ -112,14 +111,14 @@ public final class LexiconImportPlan {
     var prepared = HintPreparation.prepare(row);
     var entry =
         new LexiconEntry(
-            stableId("entry:en:" + row.lemma()),
+            LexiconIdentity.entryId(row.lemma()),
             lexiconVersion,
             "en",
             row.lemma().trim().contains(" ") ? LexiconEntryKind.PHRASE : LexiconEntryKind.WORD,
             row.lemma(),
             List.of(
                 new LexiconSense(
-                    stableId("sense:" + lexiconVersion + ":" + row.lemma()),
+                    LexiconIdentity.senseId(lexiconVersion, row.lemma()),
                     // 空首项仍保留有来源的词条，但不能构造虚假的空义项；发布资格由同一次 prepared 决策确定。
                     prepared.gloss() != null
                         ? prepared.gloss()
@@ -135,10 +134,6 @@ public final class LexiconImportPlan {
                 acquiredAt),
             row.priority());
     return new PlannedEntry(entry, row, prepared);
-  }
-
-  private static UUID stableId(String value) {
-    return UUID.nameUUIDFromBytes(value.getBytes(StandardCharsets.UTF_8));
   }
 
   /** 跨行维护 lemma/alias 唯一性；不登记自然屈折形。 */
@@ -192,5 +187,12 @@ public final class LexiconImportPlan {
    * @param row 含义：对应的来源行。取值范围：由方法调用前置条件限定。
    * @param prepared 同一来源行的确定性准备结果，供释义与查询投影一致使用。
    */
-  public record PlannedEntry(LexiconEntry entry, LexiconImportRow row, PreparedHint prepared) {}
+  public record PlannedEntry(LexiconEntry entry, LexiconImportRow row, PreparedHint prepared) {
+    /** 校验持久化计划必备值。 */
+    public PlannedEntry {
+      if (entry == null || row == null || prepared == null) {
+        throw new IllegalArgumentException("planned entry values are required");
+      }
+    }
+  }
 }

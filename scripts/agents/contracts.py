@@ -234,7 +234,7 @@ def validate_codex_work_package_task_projection(
     ids = raw["task_ids"]
     if (
         not isinstance(ids, list)
-        or len(ids) < 2
+        or not ids
         or len(ids) != len(set(ids))
         or any(not isinstance(x, str) or not _ID.fullmatch(x) for x in ids)
         or raw["target_task_id"] not in ids

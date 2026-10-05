@@ -46,7 +46,7 @@ class LexiconEntryTest {
         IllegalArgumentException.class,
         () ->
             new LexiconEntry(
-                UUID.randomUUID(),
+                1L,
                 1,
                 "en",
                 LexiconEntryKind.WORD,
@@ -60,7 +60,7 @@ class LexiconEntryTest {
 
   private static LexiconEntry entry(String lemma, LexiconEntryKind kind) {
     return new LexiconEntry(
-        UUID.randomUUID(),
+        1L,
         1,
         "en",
         kind,

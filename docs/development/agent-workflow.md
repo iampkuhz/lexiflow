@@ -44,6 +44,8 @@ endlegend
 
 ## 1.2. 派发前：先证明允许启动
 
+主线程在当前聊天直接展示交接，不只把状态写在工具输出或本机日志里。提示合同见 [policy 的 execution_progress.user_visible_dispatch](../../harness/agent-policy.manifest.yaml)：调用前说明执行器、工作包、目标和范围；调用后依据返回证据说明是否真正启动以及运行标识。比如“准备派发 Qoder，工作包 `<work_package_id>`，负责 Gradle 配置与直接测试”与“Qoder 已确认启动，run `<run_id>`；后台实施中，主线程等待终态通知，尚未验收”是不同阶段，不能提前宣称成功。启动拒绝或失败同样在聊天说明原因与接手路径；收到完成通知后再分别报告实施、自检、独立验收和 Git 交付。
+
 读取 [policy](../../harness/agent-policy.manifest.yaml) 的 subagent_protocol、模型路由、qoder_delegation 与 agent_dispatch。Task identity、版本、owner、允许/禁止路径、所需上下文、产物、验收和检查命令必须明确。Catalog 存在时核对，不把无关 Catalog 漂移变成通用派发锁；planning-only 也不能冒充已经分解的 Task。
 
 Qoder 使用 [delegation/qoder_cli.py](../../scripts/agents/delegation/qoder_cli.py) 的 preflight 读取资格快照；start/resume 仍在锁内复核。preflight 不分配 run、不证明在线账号健康，也不替代实际启动。Goal 活跃或无法证明宿主能等待外部 callback 时不启动 Qoder，按当前 policy 转入原生 Codex 路由；不改宿主数据库或暂停 Goal 绕过。
@@ -62,12 +64,14 @@ Qoder start/resume 返回 run_id、一次有界 startup_handshake 和 continuati
 
 运行失败和调度失败分开：同轮两条调度路由都不可用才累计 policy 的连续失败；成功接单清连续计数但保留历史，未知启动不重派。预算耗尽时保持 Task identity，核对历史后选择合规接手，不改版本或删运行记录重置预算。
 
+**工作包执行顺序**：实现者先确定最终 checkout 和输入，仅运行直接小回归（如 `tests.verification.test_development_efficiency`），不运行完整 adapter 全套或 development/Hook。完整 Hook 由独立 validator 在冻结输入后执行一次；若必要检查失败或阻塞，且源代码修复或相关输入/环境发生变化，则按冻结输入规则进行必要重验。只允许现有事务合同证明全部输入、配置、环境、窗口、runner 与 context 相同的事务内成功复用，禁止跨交付复用。实现者可进行直接静态、编译和目标测试自检，不得替代独立完整 Hook。长事件使用原生等待，日志仅在有信息的事件或终态读取。完整验证状态按实际记录报告。共享规则见 [policy validation_efficiency](../../harness/agent-policy.manifest.yaml)。详见[交付 Hook §1.5](change-delivery/hooks.md)。
+
 下一步：回到[交付 S2](change-delivery/verification.md)。定位失败见[排障](troubleshooting.md)；只查文件职责见 [Scripts Reference](reference/scripts.md)。
 
 ## 1.5. 原生验收与新任务例外
 
-验证与审查默认使用当前父任务下的不同原生子代理，不要求独立 Session；实现者不能自己签发验证或审查。Codex 内部委派不得用 `create_thread` 代替 `spawn_agent`。Qoder 优先负责实现委派，不作为原生验证和审查的前置步骤；原生子代理是 Codex 相对于普通新任务的默认路径，不取消 Qoder-first。
+验证与审查由当前父任务下不同的原生子代理承担；共享 Session 可接受，但 actor 必须来自真实原生元数据。实现者可做静态/编译/测试自检，不得自签正式验证或审查。Codex 内部委派用 `spawn_agent`；Qoder 优先用于实现，不是原生验收前置。
 
-新任务只作为异常兜底：至少两轮不同的子代理验证对当前输入给出 PASS，对应 Hook 仍阻塞，且有针对性修复尝试与当前任务无法解决的具体证据。父任务先说明报告 locator、阻塞层和能力边界，再取得用户明确创建授权；不能把一次身份报错、缺环境、业务测试失败或未知运行当作许可。新 Session 仍执行相同 Hook 与冻结输入规则，不获得跳过检查的权限。
+新任务仅作例外兜底：至少两轮不同子代理针对当前输入验证 PASS、对应 Hook 仍阻塞，并有定向修复及当前任务能力边界证据。父任务说明报告 locator、阻塞层和边界后，须获用户明确授权；身份报错、缺环境、业务测试失败或未知运行本身均不构成理由。新任务仍遵守相同 Hook 和冻结输入，不得跳检。
 
-所有 Codex 委派（含例外新任务）默认 Luna：常规工作包 low，其他工作包 medium；只有具体复杂性、失败或未覆盖风险才升级 Sol/high。`spawn_agent` 显式传 `model`/`reasoning_effort`；经批准的 `create_thread` 显式传 `model`/`thinking` 并核对启动后的真实模型，提示词与角色名不能代替参数，也不能继承用户默认 Astra。99.9% 原生子代理是默认路径的设计目标，不是概率路由或已经测得的运行指标。
+Codex 委派默认 Luna：常规工作包 low，其他 medium；只有具体复杂性、失败或未覆盖风险才升级 Sol/high。调用时显式传 `model` 与 `reasoning_effort`；例外 `create_thread` 显式传 `model`/`thinking` 并核对实际模型，不以提示词、角色或默认 Astra 代替。99.9% 是设计目标，不是实测路由指标。

@@ -1,10 +1,108 @@
 # Quality Gate 的声明表，不是按文件排列的执行顺序。
 # 先读 docs/development/change-delivery/verification.md 理解选择、冻结与执行。
 # 每项按入口 → scope/触发 → 依赖 → 环境 → 输入 → result contract 阅读。
-# baseline 与 on-change 是两种选择视图；同轮执行去重由 Verification 负责。
+# baseline 与 on-change 是两种选择视图；跨视图事务复用必须由 Check 显式声明 `transaction_reuse: true`。
 schema_version: lexiflow.module-checks.v1
 description: "各工程模块拥有自己的 Check，并返回结构化完整性结果；零测试、跳过、缺失结果或未执行均不能 PASS。产品交付仍由原生 Gradle/npm 执行。"
 checks:
+
+# Gradle 构建合同实际运行 Java；单列为 backend Check，不进入可复用的 Verification 自测。
+- check_id: eng.backend.build-contract
+  module: backend-build-contract
+  command:
+  - python3
+  - -m
+  - tests.verification.gradle_build_contract
+  executable: python3
+  cwd: .
+  timeout_seconds: 600
+  scope: repository-baseline
+  triggers:
+  - path: backend/
+  - path: ops/release/
+  - path: scripts/environment/
+  - path: tests/verification/gradle_build_contract.py
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  - java-25-temurin
+  - node
+  - git
+  - python-package-yaml
+  input_paths:
+  - backend
+  - ops/release
+  - scripts/environment
+  - tests/verification/gradle_build_contract.py
+  transaction_reuse: false
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.backend.build-contract-on-change
+  module: backend-build-contract-change
+  command:
+  - python3
+  - -m
+  - tests.verification.gradle_build_contract
+  executable: python3
+  cwd: .
+  timeout_seconds: 600
+  scope: change-targeted
+  triggers:
+  - path: backend/
+  - path: ops/release/
+  - path: scripts/environment/
+  - path: tests/verification/gradle_build_contract.py
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  - java-25-temurin
+  - node
+  - git
+  - python-package-yaml
+  input_paths:
+  - backend
+  - ops/release
+  - scripts/environment
+  - tests/verification/gradle_build_contract.py
+  transaction_reuse: false
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
 
 # Verification 自测：选择、冻结、执行和报告的内部合同。
 - check_id: eng.verification.module-tests
@@ -14,11 +112,16 @@ checks:
   - tests/verification/module_check_adapter.py
   executable: python3
   cwd: .
-  timeout_seconds: 180
+  timeout_seconds: 600
   scope: repository-baseline
   triggers:
+  - path: ops/release/
+  - path: scripts/delivery_gate/
   - path: scripts/verification/
+  - path: .github/workflows/
+  - path: harness/ci-policy.yaml
   - path: scripts/environment/
+  - path: ops/dataset/ecdict-source.lock.json
   - path: tests/verification/
   - path: scripts/check_changes.py
   - path: scripts/check_repository.py
@@ -28,9 +131,17 @@ checks:
   module_dependencies: []
   required_environment:
   - python3
+  - node
+  - git
+  - python-package-yaml
   input_paths:
+  - ops/release
+  - scripts/delivery_gate
   - scripts/verification
+  - .github/workflows
+  - harness/ci-policy.yaml
   - scripts/environment
+  - ops/dataset/ecdict-source.lock.json
   - scripts/check_changes.py
   - scripts/check_repository.py
   - tests/verification
@@ -40,6 +151,7 @@ checks:
   - harness/test-services.json
   - .codex/hooks.json
   - .qoder/settings.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -66,11 +178,16 @@ checks:
   - tests/verification/module_check_adapter.py
   executable: python3
   cwd: .
-  timeout_seconds: 180
+  timeout_seconds: 600
   scope: change-targeted
   triggers:
+  - path: ops/release/
+  - path: scripts/delivery_gate/
   - path: scripts/verification/
+  - path: .github/workflows/
+  - path: harness/ci-policy.yaml
   - path: scripts/environment/
+  - path: ops/dataset/ecdict-source.lock.json
   - path: tests/verification/
   - path: scripts/check_changes.py
   - path: scripts/check_repository.py
@@ -80,9 +197,17 @@ checks:
   module_dependencies: []
   required_environment:
   - python3
+  - node
+  - git
+  - python-package-yaml
   input_paths:
+  - ops/release
+  - scripts/delivery_gate
   - scripts/verification
+  - .github/workflows
+  - harness/ci-policy.yaml
   - scripts/environment
+  - ops/dataset/ecdict-source.lock.json
   - scripts/check_changes.py
   - scripts/check_repository.py
   - tests/verification
@@ -92,6 +217,7 @@ checks:
   - harness/test-services.json
   - .codex/hooks.json
   - .qoder/settings.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -136,6 +262,7 @@ checks:
   module_dependencies: []
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - scripts/agents
   - tests/agents
@@ -143,6 +270,7 @@ checks:
   - harness/agent-runtime.manifest.yaml
   - harness/qoder-harness.schema.json
   - harness/qoder-result.schema.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -185,6 +313,7 @@ checks:
   module_dependencies: []
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - scripts/agents
   - tests/agents
@@ -192,6 +321,7 @@ checks:
   - harness/agent-runtime.manifest.yaml
   - harness/qoder-harness.schema.json
   - harness/qoder-result.schema.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -225,6 +355,9 @@ checks:
   scope: repository-baseline
   triggers:
   - path: scripts/delivery_gate/
+  - path: ops/release/
+  - path: scripts/environment/candidate_runtime_check.py
+  - path: scripts/environment/release_runtime_check.py
   - path: tests/delivery_gate/
   - path: harness/delivery-gate-records.schema.json
   - path: harness/module-checks.yaml
@@ -233,10 +366,17 @@ checks:
   - agents
   required_environment:
   - python3
+  - node
+  - git
+  - python-package-yaml
   input_paths:
   - scripts/delivery_gate
+  - ops/release
+  - scripts/environment/candidate_runtime_check.py
+  - scripts/environment/release_runtime_check.py
   - tests/delivery_gate
   - harness/delivery-gate-records.schema.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -268,6 +408,9 @@ checks:
   scope: change-targeted
   triggers:
   - path: scripts/delivery_gate/
+  - path: ops/release/
+  - path: scripts/environment/candidate_runtime_check.py
+  - path: scripts/environment/release_runtime_check.py
   - path: tests/delivery_gate/
   - path: harness/delivery-gate-records.schema.json
   - path: harness/module-checks.yaml
@@ -276,10 +419,17 @@ checks:
   - agents
   required_environment:
   - python3
+  - node
+  - git
+  - python-package-yaml
   input_paths:
   - scripts/delivery_gate
+  - ops/release
+  - scripts/environment/candidate_runtime_check.py
+  - scripts/environment/release_runtime_check.py
   - tests/delivery_gate
   - harness/delivery-gate-records.schema.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -324,11 +474,13 @@ checks:
   module_dependencies: []
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - .gitignore
   - scripts/repository
   - tests/repository
   - scripts/architecture-review.md
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -371,11 +523,13 @@ checks:
   module_dependencies: []
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - .gitignore
   - scripts/repository
   - tests/repository
   - scripts/architecture-review.md
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -420,6 +574,7 @@ checks:
   - repository
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - docs
   - assets/readme
@@ -428,6 +583,7 @@ checks:
   - README.md
   - harness/README.md
   - harness/documentation-policy.yaml
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -472,6 +628,7 @@ checks:
   - repository
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - docs
   - assets/readme
@@ -480,6 +637,7 @@ checks:
   - README.md
   - harness/README.md
   - harness/documentation-policy.yaml
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -522,12 +680,14 @@ checks:
   - repository
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - harness/agent-policy.manifest.yaml
   - harness/agent-runtime.manifest.yaml
   - harness/policy-projections.yaml
   - planning/task-template.yaml
   - planning/workstreams.yaml
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -570,12 +730,14 @@ checks:
   - repository
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - harness/agent-policy.manifest.yaml
   - harness/agent-runtime.manifest.yaml
   - harness/policy-projections.yaml
   - planning/task-template.yaml
   - planning/workstreams.yaml
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -619,6 +781,7 @@ checks:
   - repository
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - planning
   - harness
@@ -626,6 +789,7 @@ checks:
   - scripts/repository/planning_validator.py
   - scripts/repository/catalog.py
   - scripts/repository/task_source.py
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -669,6 +833,7 @@ checks:
   - repository
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - planning
   - harness
@@ -676,6 +841,7 @@ checks:
   - scripts/repository/planning_validator.py
   - scripts/repository/catalog.py
   - scripts/repository/task_source.py
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -721,6 +887,7 @@ checks:
   - verification
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - .githooks
   - scripts/repository/hooks.py
@@ -729,6 +896,7 @@ checks:
   - .qoder/settings.json
   - harness/delivery-hooks.json
   - harness/test-services.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -774,6 +942,7 @@ checks:
   - verification
   required_environment:
   - python3
+  - python-package-yaml
   input_paths:
   - .githooks
   - scripts/repository/hooks.py
@@ -782,6 +951,7 @@ checks:
   - .qoder/settings.json
   - harness/delivery-hooks.json
   - harness/test-services.json
+  transaction_reuse: true
   result_contract:
     type: json-stdout
     required_fields:
@@ -800,6 +970,7 @@ checks:
     equals:
       failures: 0
       errors: 0
+      skipped: 0
       skipped: 0
 - check_id: eng.backend.delivery
   module: backend
@@ -820,16 +991,26 @@ checks:
   scope: repository-baseline
   triggers:
   - path: backend/
+  - path: ops/release/version.txt
+  - path: ops/release/version.mjs
   - path: harness/test-services.json
   - path: infra/postgres/
   - path: infra/local/
   module_dependencies: []
   required_environment:
   - java-25-temurin
+  - node
+  - git
   - postgres-test-jdbc-url
   - redis-test-endpoint
   input_paths:
+  - backend/gradlew
+  - backend/gradle/wrapper/gradle-wrapper.jar
+  - backend/gradle/wrapper/gradle-wrapper.properties
   - backend/build.gradle.kts
+  - ops/release/version.mjs
+  - ops/release/version.txt
+  - ops/release/version.txt
   - harness/test-services.json
   - backend/settings.gradle.kts
   - backend/gradle.properties
@@ -843,18 +1024,23 @@ checks:
   - backend/gradle/config
   - backend/verification/quality-gates/build.gradle.kts
   - backend/gradle/build-logic/src
+  - backend/product/api/build.gradle.kts
   - backend/product/api/src
   - backend/product/api/gradle.lockfile
+  - backend/product/enrichment/build.gradle.kts
   - backend/product/enrichment/src
   - backend/product/enrichment/gradle.lockfile
   - backend/product/lexicon/src
   - backend/product/lexicon/gradle.lockfile
+  - backend/product/adapters/build.gradle.kts
   - backend/product/adapters/src
   - backend/product/adapters/gradle.lockfile
+  - backend/verification/architecture/build.gradle.kts
   - backend/verification/architecture/src
   - backend/verification/architecture/gradle.lockfile
   - backend/verification/quality-gates/src
   - backend/verification/quality-gates/gradle.lockfile
+  - backend/verification/integration/build.gradle.kts
   - backend/verification/integration/src
   - backend/verification/integration/gradle.lockfile
   - infra/postgres/schema.sql
@@ -886,6 +1072,8 @@ checks:
   scope: change-targeted
   triggers:
   - path: backend/
+  - path: ops/release/version.txt
+  - path: ops/release/version.mjs
   - path: harness/test-services.json
   - path: infra/postgres/
   - path: infra/local/
@@ -893,10 +1081,18 @@ checks:
   module_dependencies: []
   required_environment:
   - java-25-temurin
+  - node
+  - git
   - postgres-test-jdbc-url
   - redis-test-endpoint
   input_paths:
+  - backend/gradlew
+  - backend/gradle/wrapper/gradle-wrapper.jar
+  - backend/gradle/wrapper/gradle-wrapper.properties
   - backend/build.gradle.kts
+  - ops/release/version.mjs
+  - ops/release/version.txt
+  - ops/release/version.txt
   - harness/test-services.json
   - backend/settings.gradle.kts
   - backend/gradle.properties
@@ -910,18 +1106,23 @@ checks:
   - backend/gradle/config
   - backend/verification/quality-gates/build.gradle.kts
   - backend/gradle/build-logic/src
+  - backend/product/api/build.gradle.kts
   - backend/product/api/src
   - backend/product/api/gradle.lockfile
+  - backend/product/enrichment/build.gradle.kts
   - backend/product/enrichment/src
   - backend/product/enrichment/gradle.lockfile
   - backend/product/lexicon/src
   - backend/product/lexicon/gradle.lockfile
+  - backend/product/adapters/build.gradle.kts
   - backend/product/adapters/src
   - backend/product/adapters/gradle.lockfile
+  - backend/verification/architecture/build.gradle.kts
   - backend/verification/architecture/src
   - backend/verification/architecture/gradle.lockfile
   - backend/verification/quality-gates/src
   - backend/verification/quality-gates/gradle.lockfile
+  - backend/verification/integration/build.gradle.kts
   - backend/verification/integration/src
   - backend/verification/integration/gradle.lockfile
   - infra/postgres/schema.sql
@@ -945,6 +1146,8 @@ checks:
   scope: repository-baseline
   triggers:
   - path: extension/
+  - path: ops/release/version.txt
+  - path: ops/release/version.mjs
   module_dependencies:
   - backend
   required_environment:
@@ -960,6 +1163,8 @@ checks:
   - extension/package.json
   - extension/package-lock.json
   - extension/manifest.json
+  - ops/release/version.txt
+  - ops/release/version.mjs
   - scripts/environment
   result_contract:
     type: json-stdout
@@ -986,6 +1191,8 @@ checks:
   scope: change-targeted
   triggers:
   - path: extension/
+  - path: ops/release/version.txt
+  - path: ops/release/version.mjs
   - path: harness/module-checks.yaml
   module_dependencies:
   - backend
@@ -1002,6 +1209,8 @@ checks:
   - extension/package.json
   - extension/package-lock.json
   - extension/manifest.json
+  - ops/release/version.txt
+  - ops/release/version.mjs
   - scripts/environment
   result_contract:
     type: json-stdout
@@ -1045,6 +1254,7 @@ checks:
   - harness/python-quality.toml
   - harness/python-docstrings.toml
   - requirements-dev.txt
+  transaction_reuse: false
   result_contract:
     type: json-stdout
     required_fields:
@@ -1090,6 +1300,7 @@ checks:
   - harness/python-quality.toml
   - harness/python-docstrings.toml
   - requirements-dev.txt
+  transaction_reuse: false
   result_contract:
     type: json-stdout
     required_fields:
@@ -1109,3 +1320,1902 @@ checks:
       failures: 0
       errors: 0
       skipped: 0
+
+- check_id: eng.release.version
+  module: release-version
+  command:
+  - node
+  - ops/release/check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 180
+  scope: repository-baseline
+  triggers:
+  - path: ops/release/version.txt
+  - path: ops/release/version.mjs
+  - path: ops/release/check.mjs
+  - path: ops/release/tests/version.test.mjs
+  - path: backend/build.gradle.kts
+  - path: backend/gradle/build-logic/src/main/kotlin/io/lexiflow/buildlogic/ReleaseVersion.kt
+  - path: backend/gradle/build-logic/src/test/kotlin/io/lexiflow/buildlogic/ReleaseVersionTest.kt
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - node
+  - git
+  input_paths:
+  - ops/release/version.txt
+  - ops/release/version.mjs
+  - ops/release/check.mjs
+  - ops/release/tests/version.test.mjs
+  - backend/build.gradle.kts
+  - backend/gradle/build-logic/src/main/kotlin/io/lexiflow/buildlogic/ReleaseVersion.kt
+  - backend/gradle/build-logic/src/test/kotlin/io/lexiflow/buildlogic/ReleaseVersionTest.kt
+  transaction_reuse: true
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+
+- check_id: eng.release.version-on-change
+  module: release-version-change
+  command:
+  - node
+  - ops/release/check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 180
+  scope: change-targeted
+  triggers:
+  - path: ops/release/version.txt
+  - path: ops/release/version.mjs
+  - path: ops/release/check.mjs
+  - path: ops/release/tests/version.test.mjs
+  - path: backend/build.gradle.kts
+  - path: backend/gradle/build-logic/src/main/kotlin/io/lexiflow/buildlogic/ReleaseVersion.kt
+  - path: backend/gradle/build-logic/src/test/kotlin/io/lexiflow/buildlogic/ReleaseVersionTest.kt
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - node
+  - git
+  input_paths:
+  - ops/release/version.txt
+  - ops/release/version.mjs
+  - ops/release/check.mjs
+  - ops/release/tests/version.test.mjs
+  - backend/build.gradle.kts
+  - backend/gradle/build-logic/src/main/kotlin/io/lexiflow/buildlogic/ReleaseVersion.kt
+  - backend/gradle/build-logic/src/test/kotlin/io/lexiflow/buildlogic/ReleaseVersionTest.kt
+  transaction_reuse: true
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+
+- check_id: eng.release.manifest
+  module: release-manifest
+  command:
+  - node
+  - ops/release/manifest-check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 90
+  scope: repository-baseline
+  triggers:
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/manifest.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/manifest-check.mjs
+  - path: ops/release/tests/manifest.test.mjs
+  - path: ops/release/third-party-notices.md
+  - path: ops/release/version.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/check.mjs
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - node
+  - git
+  input_paths:
+  - ops/release/runtime-entry.mjs
+  - ops/release/runtime-verification.sh
+  - ops/release/manifest.mjs
+  - ops/release/archive-identity.mjs
+  - ops/release/embedded-identity.mjs
+  - ops/release/tests/zip-fixture.mjs
+  - ops/release/package.mjs
+  - ops/release/manifest-check.mjs
+  - ops/release/tests/manifest.test.mjs
+  - ops/release/third-party-notices.md
+  - ops/release/version.mjs
+  - ops/release/version.txt
+  - ops/release/check.mjs
+  - harness/module-checks.yaml
+  transaction_reuse: true
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+
+- check_id: eng.release.manifest-on-change
+  module: release-manifest-change
+  command:
+  - node
+  - ops/release/manifest-check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 90
+  scope: change-targeted
+  triggers:
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/manifest.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/manifest-check.mjs
+  - path: ops/release/tests/manifest.test.mjs
+  - path: ops/release/third-party-notices.md
+  - path: ops/release/version.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/check.mjs
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - node
+  - git
+  input_paths:
+  - ops/release/runtime-entry.mjs
+  - ops/release/runtime-verification.sh
+  - ops/release/manifest.mjs
+  - ops/release/archive-identity.mjs
+  - ops/release/embedded-identity.mjs
+  - ops/release/tests/zip-fixture.mjs
+  - ops/release/package.mjs
+  - ops/release/manifest-check.mjs
+  - ops/release/tests/manifest.test.mjs
+  - ops/release/third-party-notices.md
+  - ops/release/version.mjs
+  - ops/release/version.txt
+  - ops/release/check.mjs
+  - harness/module-checks.yaml
+  transaction_reuse: true
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+
+# 仅封装合同测试；真实容器、资料与平台验收由独立发布检查承担。
+- check_id: eng.release.docker-contract
+  transaction_reuse: true
+  module: docker-contract
+  command:
+  - python3
+  - ops/docker/tests/module_check_adapter.py
+  executable: python3
+  cwd: .
+  timeout_seconds: 600
+  scope: repository-baseline
+  triggers:
+  - path: ops/release/candidate.mjs
+  - path: ops/release/verified-candidate.mjs
+  - path: ops/release/manifest.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/lifecycle.mjs
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/docker/
+  - path: ops/podman/
+  - path: scripts/environment/ecdict_bundle.py
+  - path: ops/dataset/ecdict-source.lock.json
+  - path: infra/postgres/schema.sql
+  - path: ops/release/check.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/version.mjs
+  - path: ops/release/lifecycle-docker.sh
+  - path: ops/release/lifecycle-state.sh
+  - path: ops/release/lifecycle.sh
+  - path: backend/product/api/src/main/java/io/lexiflow/api/release/RuntimeHealthCommand.java
+  - path: backend/product/api/src/test/java/io/lexiflow/api/release/RuntimeHealthCommandTest.java
+  - path: requirements-dev.txt
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  - node
+  - git
+  - sh
+  - /bin/sh
+  - python-package-yaml
+  - posix-lock-tool
+  - sha256-tool
+  - mktemp
+  - mkfifo
+  input_paths:
+  - ops/release/candidate.mjs
+  - ops/release/verified-candidate.mjs
+  - ops/release/manifest.mjs
+  - ops/release/package.mjs
+  - ops/release/archive-identity.mjs
+  - ops/release/embedded-identity.mjs
+  - ops/release/lifecycle.mjs
+  - ops/release/runtime-entry.mjs
+  - ops/release/runtime-verification.sh
+  - ops/release/tests/zip-fixture.mjs
+  - ops/docker
+  - ops/podman
+  - ops/release/check.mjs
+  - ops/release/version.txt
+  - ops/release/version.mjs
+  - scripts/environment/ecdict_bundle.py
+  - ops/dataset/ecdict-source.lock.json
+  - infra/postgres/schema.sql
+  - ops/release/lifecycle-docker.sh
+  - ops/release/lifecycle-state.sh
+  - ops/release/lifecycle.sh
+  - backend/product/api/src/main/java/io/lexiflow/api/release/RuntimeHealthCommand.java
+  - backend/product/api/src/test/java/io/lexiflow/api/release/RuntimeHealthCommandTest.java
+  - requirements-dev.txt
+  - harness/module-checks.yaml
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.release.docker-contract-on-change
+  transaction_reuse: true
+  module: docker-contract-change
+  command:
+  - python3
+  - ops/docker/tests/module_check_adapter.py
+  executable: python3
+  cwd: .
+  timeout_seconds: 600
+  scope: change-targeted
+  triggers:
+  - path: ops/release/candidate.mjs
+  - path: ops/release/verified-candidate.mjs
+  - path: ops/release/manifest.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/lifecycle.mjs
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/docker/
+  - path: ops/podman/
+  - path: scripts/environment/ecdict_bundle.py
+  - path: ops/dataset/ecdict-source.lock.json
+  - path: infra/postgres/schema.sql
+  - path: ops/release/check.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/version.mjs
+  - path: ops/release/lifecycle-docker.sh
+  - path: ops/release/lifecycle-state.sh
+  - path: ops/release/lifecycle.sh
+  - path: backend/product/api/src/main/java/io/lexiflow/api/release/RuntimeHealthCommand.java
+  - path: backend/product/api/src/test/java/io/lexiflow/api/release/RuntimeHealthCommandTest.java
+  - path: requirements-dev.txt
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  - node
+  - git
+  - sh
+  - /bin/sh
+  - python-package-yaml
+  - posix-lock-tool
+  - sha256-tool
+  - mktemp
+  - mkfifo
+  input_paths:
+  - ops/release/candidate.mjs
+  - ops/release/verified-candidate.mjs
+  - ops/release/manifest.mjs
+  - ops/release/package.mjs
+  - ops/release/archive-identity.mjs
+  - ops/release/embedded-identity.mjs
+  - ops/release/lifecycle.mjs
+  - ops/release/runtime-entry.mjs
+  - ops/release/runtime-verification.sh
+  - ops/release/tests/zip-fixture.mjs
+  - ops/docker
+  - ops/podman
+  - ops/release/check.mjs
+  - ops/release/version.txt
+  - ops/release/version.mjs
+  - scripts/environment/ecdict_bundle.py
+  - ops/dataset/ecdict-source.lock.json
+  - infra/postgres/schema.sql
+  - ops/release/lifecycle-docker.sh
+  - ops/release/lifecycle-state.sh
+  - ops/release/lifecycle.sh
+  - backend/product/api/src/main/java/io/lexiflow/api/release/RuntimeHealthCommand.java
+  - backend/product/api/src/test/java/io/lexiflow/api/release/RuntimeHealthCommandTest.java
+  - requirements-dev.txt
+  - harness/module-checks.yaml
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+
+# 用户端离线入口直接测试；不代表 Docker 安装或更新验证。
+- check_id: eng.release.runtime-entry
+  module: release-runtime-entry
+  command:
+  - node
+  - ops/release/runtime-entry-check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 90
+  scope: repository-baseline
+  triggers:
+  - path: ops/release/manifest.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/runtime-entry-check.mjs
+  - path: ops/release/tests/runtime-entry.test.mjs
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/version.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/check.mjs
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - node
+  - git
+  - sh
+  - mktemp
+  - sha256-tool
+  input_paths:
+  - ops/release/manifest.mjs
+  - ops/release/archive-identity.mjs
+  - ops/release/embedded-identity.mjs
+  - ops/release/tests/zip-fixture.mjs
+  - ops/release/package.mjs
+  - ops/release/runtime-verification.sh
+  - ops/release/runtime-entry-check.mjs
+  - ops/release/tests/runtime-entry.test.mjs
+  - ops/release/runtime-entry.mjs
+  - ops/release/version.mjs
+  - ops/release/version.txt
+  - ops/release/check.mjs
+  - harness/module-checks.yaml
+  transaction_reuse: true
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+
+- check_id: eng.release.runtime-entry-on-change
+  module: release-runtime-entry-change
+  command:
+  - node
+  - ops/release/runtime-entry-check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 90
+  scope: change-targeted
+  triggers:
+  - path: ops/release/manifest.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/runtime-entry-check.mjs
+  - path: ops/release/tests/runtime-entry.test.mjs
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/version.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/check.mjs
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - node
+  - git
+  - sh
+  - mktemp
+  - sha256-tool
+  input_paths:
+  - ops/release/manifest.mjs
+  - ops/release/archive-identity.mjs
+  - ops/release/embedded-identity.mjs
+  - ops/release/tests/zip-fixture.mjs
+  - ops/release/package.mjs
+  - ops/release/runtime-verification.sh
+  - ops/release/runtime-entry-check.mjs
+  - ops/release/tests/runtime-entry.test.mjs
+  - ops/release/runtime-entry.mjs
+  - ops/release/version.mjs
+  - ops/release/version.txt
+  - ops/release/check.mjs
+  - harness/module-checks.yaml
+  transaction_reuse: true
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+
+# 用户生命周期：确定性 shell 与真实容器验收分开，后者缺环境不能 PASS。
+- check_id: eng.release.lifecycle-install
+  transaction_reuse: true
+  module: release-lifecycle-install
+  command:
+  - node
+  - ops/release/lifecycle-install-check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 180
+  scope: repository-baseline
+  triggers:
+  - path: ops/release/lifecycle.mjs
+  - path: ops/release/lifecycle.sh
+  - path: ops/docker/tests/update-recovery.sh
+  - path: ops/release/lifecycle-state.sh
+  - path: ops/release/lifecycle-docker.sh
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/manifest.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/version.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/check.mjs
+  - path: ops/release/tests/lifecycle-fixture.mjs
+  - path: ops/release/tests/fake-docker-daemon.mjs
+  - path: ops/docker/compose.yaml
+  - path: harness/module-checks.yaml
+  - path: ops/release/lifecycle-install-check.mjs
+  - path: ops/release/tests/lifecycle-install.test.mjs
+  module_dependencies: &id001 []
+  required_environment:
+  - node
+  - git
+  - sh
+  - bash
+  - mktemp
+  - sha256-tool
+  input_paths:
+  - ops/release/lifecycle.mjs
+  - ops/release/lifecycle.sh
+  - ops/docker/tests/update-recovery.sh
+  - ops/release/lifecycle-state.sh
+  - ops/release/lifecycle-docker.sh
+  - ops/release/runtime-entry.mjs
+  - ops/release/runtime-verification.sh
+  - ops/release/manifest.mjs
+  - ops/release/archive-identity.mjs
+  - ops/release/embedded-identity.mjs
+  - ops/release/tests/zip-fixture.mjs
+  - ops/release/package.mjs
+  - ops/release/version.mjs
+  - ops/release/version.txt
+  - ops/release/check.mjs
+  - ops/release/tests/lifecycle-fixture.mjs
+  - ops/release/tests/fake-docker-daemon.mjs
+  - ops/docker/compose.yaml
+  - harness/module-checks.yaml
+  - ops/release/lifecycle-install-check.mjs
+  - ops/release/tests/lifecycle-install.test.mjs
+  result_contract: &id003
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.release.lifecycle-install-on-change
+  transaction_reuse: true
+  module: release-lifecycle-install-on-change
+  command:
+  - node
+  - ops/release/lifecycle-install-check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 180
+  scope: change-targeted
+  triggers:
+  - path: ops/release/lifecycle.mjs
+  - path: ops/release/lifecycle.sh
+  - path: ops/docker/tests/update-recovery.sh
+  - path: ops/release/lifecycle-state.sh
+  - path: ops/release/lifecycle-docker.sh
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/manifest.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/version.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/check.mjs
+  - path: ops/release/tests/lifecycle-fixture.mjs
+  - path: ops/release/tests/fake-docker-daemon.mjs
+  - path: ops/docker/compose.yaml
+  - path: harness/module-checks.yaml
+  - path: ops/release/lifecycle-install-check.mjs
+  - path: ops/release/tests/lifecycle-install.test.mjs
+  module_dependencies: *id001
+  required_environment:
+  - node
+  - git
+  - sh
+  - bash
+  - mktemp
+  - sha256-tool
+  input_paths:
+  - ops/release/lifecycle.mjs
+  - ops/release/lifecycle.sh
+  - ops/docker/tests/update-recovery.sh
+  - ops/release/lifecycle-state.sh
+  - ops/release/lifecycle-docker.sh
+  - ops/release/runtime-entry.mjs
+  - ops/release/runtime-verification.sh
+  - ops/release/manifest.mjs
+  - ops/release/archive-identity.mjs
+  - ops/release/embedded-identity.mjs
+  - ops/release/tests/zip-fixture.mjs
+  - ops/release/package.mjs
+  - ops/release/version.mjs
+  - ops/release/version.txt
+  - ops/release/check.mjs
+  - ops/release/tests/lifecycle-fixture.mjs
+  - ops/release/tests/fake-docker-daemon.mjs
+  - ops/docker/compose.yaml
+  - harness/module-checks.yaml
+  - ops/release/lifecycle-install-check.mjs
+  - ops/release/tests/lifecycle-install.test.mjs
+  result_contract: *id003
+- check_id: eng.release.lifecycle
+  transaction_reuse: true
+  module: release-lifecycle
+  command:
+  - node
+  - ops/release/lifecycle-check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 180
+  scope: repository-baseline
+  triggers:
+  - path: ops/release/lifecycle.mjs
+  - path: ops/release/lifecycle.sh
+  - path: ops/release/lifecycle-state.sh
+  - path: ops/release/lifecycle-docker.sh
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/manifest.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/version.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/check.mjs
+  - path: ops/release/tests/lifecycle-fixture.mjs
+  - path: ops/release/tests/fake-docker-daemon.mjs
+  - path: ops/docker/compose.yaml
+  - path: harness/module-checks.yaml
+  - path: ops/release/lifecycle-check.mjs
+  - path: ops/release/tests/lifecycle.test.mjs
+  module_dependencies: *id001
+  required_environment: &id002
+  - node
+  - git
+  - sh
+  - mktemp
+  - sha256-tool
+  input_paths:
+  - ops/release/lifecycle.mjs
+  - ops/release/lifecycle.sh
+  - ops/release/lifecycle-state.sh
+  - ops/release/lifecycle-docker.sh
+  - ops/release/runtime-entry.mjs
+  - ops/release/runtime-verification.sh
+  - ops/release/manifest.mjs
+  - ops/release/archive-identity.mjs
+  - ops/release/embedded-identity.mjs
+  - ops/release/tests/zip-fixture.mjs
+  - ops/release/package.mjs
+  - ops/release/version.mjs
+  - ops/release/version.txt
+  - ops/release/check.mjs
+  - ops/release/tests/lifecycle-fixture.mjs
+  - ops/release/tests/fake-docker-daemon.mjs
+  - ops/docker/compose.yaml
+  - harness/module-checks.yaml
+  - ops/release/lifecycle-check.mjs
+  - ops/release/tests/lifecycle.test.mjs
+  result_contract: *id003
+- check_id: eng.release.lifecycle-on-change
+  transaction_reuse: true
+  module: release-lifecycle-on-change
+  command:
+  - node
+  - ops/release/lifecycle-check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 180
+  scope: change-targeted
+  triggers:
+  - path: ops/release/lifecycle.mjs
+  - path: ops/release/lifecycle.sh
+  - path: ops/release/lifecycle-state.sh
+  - path: ops/release/lifecycle-docker.sh
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/manifest.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/version.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/check.mjs
+  - path: ops/release/tests/lifecycle-fixture.mjs
+  - path: ops/release/tests/fake-docker-daemon.mjs
+  - path: ops/docker/compose.yaml
+  - path: harness/module-checks.yaml
+  - path: ops/release/lifecycle-check.mjs
+  - path: ops/release/tests/lifecycle.test.mjs
+  module_dependencies: *id001
+  required_environment: *id002
+  input_paths:
+  - ops/release/lifecycle.mjs
+  - ops/release/lifecycle.sh
+  - ops/release/lifecycle-state.sh
+  - ops/release/lifecycle-docker.sh
+  - ops/release/runtime-entry.mjs
+  - ops/release/runtime-verification.sh
+  - ops/release/manifest.mjs
+  - ops/release/archive-identity.mjs
+  - ops/release/embedded-identity.mjs
+  - ops/release/tests/zip-fixture.mjs
+  - ops/release/package.mjs
+  - ops/release/version.mjs
+  - ops/release/version.txt
+  - ops/release/check.mjs
+  - ops/release/tests/lifecycle-fixture.mjs
+  - ops/release/tests/fake-docker-daemon.mjs
+  - ops/docker/compose.yaml
+  - harness/module-checks.yaml
+  - ops/release/lifecycle-check.mjs
+  - ops/release/tests/lifecycle.test.mjs
+  result_contract: *id003
+- check_id: eng.release.lifecycle-runtime
+  module: release-lifecycle-runtime
+  command:
+  - python3
+  - -m
+  - scripts.environment.release_runtime_check
+  executable: python3
+  cwd: .
+  timeout_seconds: 1200
+  scope: repository-baseline
+  triggers:
+  - path: .gitignore
+  - path: ops/release/third-party-notices.md
+  - path: ops/release/lifecycle.mjs
+  - path: ops/release/lifecycle.sh
+  - path: ops/release/lifecycle-state.sh
+  - path: ops/release/lifecycle-docker.sh
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/manifest.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/version.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/check.mjs
+  - path: ops/release/tests/lifecycle-fixture.mjs
+  - path: ops/release/tests/fake-docker-daemon.mjs
+  - path: ops/docker/compose.yaml
+  - path: harness/module-checks.yaml
+  - path: ops/docker/tests/update-recovery.sh
+  - path: harness/test-services.json
+  - path: ops/release/build.mjs
+  - path: ops/docker/base-images.json
+  - path: ops/release/tests/build.test.mjs
+  - path: ops/release/build-check.mjs
+  - path: ops/release/tests/archive-identity.test.mjs
+  - path: ops/release/tests/embedded-identity.test.mjs
+  - path: ops/docker/Dockerfile
+  - path: ops/docker/Dockerfile.postgres
+  - path: ops/docker/.dockerignore
+  - path: ops/docker/entrypoint.sh
+  - path: ops/docker/bootstrap.sh
+  - path: ops/release/build-execution.mjs
+  - path: ops/release/build-command.mjs
+  - path: ops/release/tests/build-execution.test.mjs
+  - path: ops/release/candidate.mjs
+  - path: ops/release/verified-candidate.mjs
+  - path: ops/release/tests/candidate.test.mjs
+  - path: ops/release/tests/verified-candidate.test.mjs
+  - path: ops/release/tests/verified-candidate-fixture.mjs
+  - path: ops/release/pipeline.mjs
+  - path: ops/release/tests/pipeline.test.mjs
+  - path: ops/release/candidate-proof.mjs
+  - path: ops/release/tests/candidate-proof.test.mjs
+  - path: ops/release/workflow.mjs
+  - path: ops/release/tests/workflow.test.mjs
+  - path: backend/build.gradle.kts
+  - path: backend/gradle.lockfile
+  - path: backend/gradle.properties
+  - path: backend/gradle/build-logic/build.gradle.kts
+  - path: backend/gradle/build-logic/gradle.lockfile
+  - path: backend/gradle/build-logic/settings-gradle.lockfile
+  - path: backend/gradle/build-logic/settings.gradle.kts
+  - path: backend/gradle/build-logic/src
+  - path: backend/gradle/config
+  - path: backend/gradle/libs.versions.toml
+  - path: backend/gradle/wrapper/gradle-wrapper.jar
+  - path: backend/gradle/wrapper/gradle-wrapper.properties
+  - path: backend/gradlew
+  - path: backend/product/adapters/build.gradle.kts
+  - path: backend/product/adapters/gradle.lockfile
+  - path: backend/product/adapters/src
+  - path: backend/product/api/build.gradle.kts
+  - path: backend/product/api/gradle.lockfile
+  - path: backend/product/api/src
+  - path: backend/product/enrichment/build.gradle.kts
+  - path: backend/product/enrichment/gradle.lockfile
+  - path: backend/product/enrichment/src
+  - path: backend/product/lexicon/gradle.lockfile
+  - path: backend/product/lexicon/src
+  - path: backend/settings-gradle.lockfile
+  - path: backend/settings.gradle.kts
+  - path: backend/verification/architecture/build.gradle.kts
+  - path: backend/verification/architecture/gradle.lockfile
+  - path: backend/verification/architecture/src
+  - path: backend/verification/integration/build.gradle.kts
+  - path: backend/verification/integration/gradle.lockfile
+  - path: backend/verification/integration/src
+  - path: backend/verification/quality-gates/build.gradle.kts
+  - path: backend/verification/quality-gates/gradle.lockfile
+  - path: backend/verification/quality-gates/src
+  - path: extension/assets
+  - path: extension/manifest.json
+  - path: extension/package-lock.json
+  - path: extension/package.json
+  - path: extension/scripts
+  - path: extension/src
+  - path: extension/tests
+  - path: extension/tsconfig.json
+  - path: infra/postgres/schema.sql
+  - path: scripts/environment
+  - path: tests/verification/test_release_checks.py
+  - path: scripts/verification/input_snapshot.py
+  - path: scripts/verification/kernel.py
+  - path: scripts/verification/scenarios.py
+  - path: scripts/verification/reports.py
+  - path: tests/verification/test_input_snapshot.py
+  - path: scripts/verification/release_source_bridge.py
+  - path: tests/verification/test_release_source_bridge.py
+  - path: tests/verification/test_release_runtime_check.py
+  - path: tests/verification/test_release_runtime_artifacts.py
+  - path: tests/verification/test_release_runtime_lifecycle.py
+  - path: tests/verification/test_environment.py
+  module_dependencies: *id001
+  required_environment:
+  - python3
+  - bash
+  - sh
+  - git
+  - node
+  - npm
+  - docker
+  - java-25-temurin
+  - postgres-test-jdbc-url
+  - release-arm64-docker-host
+  - release-gradle-cache
+  - release-npm-cache
+  input_paths:
+  - .gitignore
+  - ops/release/third-party-notices.md
+  - ops/release/lifecycle.mjs
+  - ops/release/lifecycle.sh
+  - ops/release/lifecycle-state.sh
+  - ops/release/lifecycle-docker.sh
+  - ops/release/runtime-entry.mjs
+  - ops/release/runtime-verification.sh
+  - ops/release/manifest.mjs
+  - ops/release/archive-identity.mjs
+  - ops/release/embedded-identity.mjs
+  - ops/release/tests/zip-fixture.mjs
+  - ops/release/package.mjs
+  - ops/release/version.mjs
+  - ops/release/version.txt
+  - ops/release/check.mjs
+  - ops/release/tests/lifecycle-fixture.mjs
+  - ops/release/tests/fake-docker-daemon.mjs
+  - ops/docker/compose.yaml
+  - harness/module-checks.yaml
+  - ops/docker/tests/update-recovery.sh
+  - harness/test-services.json
+  - ops/release/build.mjs
+  - ops/docker/base-images.json
+  - ops/release/tests/build.test.mjs
+  - ops/release/build-check.mjs
+  - ops/release/tests/archive-identity.test.mjs
+  - ops/release/tests/embedded-identity.test.mjs
+  - ops/docker/Dockerfile
+  - ops/docker/Dockerfile.postgres
+  - ops/docker/.dockerignore
+  - ops/docker/entrypoint.sh
+  - ops/docker/bootstrap.sh
+  - ops/release/build-execution.mjs
+  - ops/release/build-command.mjs
+  - ops/release/tests/build-execution.test.mjs
+  - ops/release/candidate.mjs
+  - ops/release/verified-candidate.mjs
+  - ops/release/tests/candidate.test.mjs
+  - ops/release/tests/verified-candidate.test.mjs
+  - ops/release/tests/verified-candidate-fixture.mjs
+  - ops/release/pipeline.mjs
+  - ops/release/tests/pipeline.test.mjs
+  - ops/release/candidate-proof.mjs
+  - ops/release/tests/candidate-proof.test.mjs
+  - ops/release/workflow.mjs
+  - ops/release/tests/workflow.test.mjs
+  - backend/build.gradle.kts
+  - backend/gradle.lockfile
+  - backend/gradle.properties
+  - backend/gradle/build-logic/build.gradle.kts
+  - backend/gradle/build-logic/gradle.lockfile
+  - backend/gradle/build-logic/settings-gradle.lockfile
+  - backend/gradle/build-logic/settings.gradle.kts
+  - backend/gradle/build-logic/src
+  - backend/gradle/config
+  - backend/gradle/libs.versions.toml
+  - backend/gradle/wrapper/gradle-wrapper.jar
+  - backend/gradle/wrapper/gradle-wrapper.properties
+  - backend/gradlew
+  - backend/product/adapters/build.gradle.kts
+  - backend/product/adapters/gradle.lockfile
+  - backend/product/adapters/src
+  - backend/product/api/build.gradle.kts
+  - backend/product/api/gradle.lockfile
+  - backend/product/api/src
+  - backend/product/enrichment/build.gradle.kts
+  - backend/product/enrichment/gradle.lockfile
+  - backend/product/enrichment/src
+  - backend/product/lexicon/gradle.lockfile
+  - backend/product/lexicon/src
+  - backend/settings-gradle.lockfile
+  - backend/settings.gradle.kts
+  - backend/verification/architecture/build.gradle.kts
+  - backend/verification/architecture/gradle.lockfile
+  - backend/verification/architecture/src
+  - backend/verification/integration/build.gradle.kts
+  - backend/verification/integration/gradle.lockfile
+  - backend/verification/integration/src
+  - backend/verification/quality-gates/build.gradle.kts
+  - backend/verification/quality-gates/gradle.lockfile
+  - backend/verification/quality-gates/src
+  - extension/assets
+  - extension/manifest.json
+  - extension/package-lock.json
+  - extension/package.json
+  - extension/scripts
+  - extension/src
+  - extension/tests
+  - extension/tsconfig.json
+  - infra/postgres/schema.sql
+  - scripts/environment
+  - tests/verification/test_release_checks.py
+  - scripts/verification/input_snapshot.py
+  - scripts/verification/kernel.py
+  - scripts/verification/scenarios.py
+  - scripts/verification/reports.py
+  - tests/verification/test_input_snapshot.py
+  - scripts/verification/release_source_bridge.py
+  - tests/verification/test_release_source_bridge.py
+  - tests/verification/test_release_runtime_check.py
+  - tests/verification/test_release_runtime_artifacts.py
+  - tests/verification/test_release_runtime_lifecycle.py
+  - tests/verification/test_environment.py
+  result_contract: *id003
+- check_id: eng.release.lifecycle-runtime-on-change
+  module: release-lifecycle-runtime-on-change
+  command:
+  - python3
+  - -m
+  - scripts.environment.release_runtime_check
+  executable: python3
+  cwd: .
+  timeout_seconds: 1200
+  scope: change-targeted
+  triggers:
+  - path: .gitignore
+  - path: ops/release/third-party-notices.md
+  - path: ops/release/lifecycle.mjs
+  - path: ops/release/lifecycle.sh
+  - path: ops/release/lifecycle-state.sh
+  - path: ops/release/lifecycle-docker.sh
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/manifest.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/version.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/check.mjs
+  - path: ops/release/tests/lifecycle-fixture.mjs
+  - path: ops/release/tests/fake-docker-daemon.mjs
+  - path: ops/docker/compose.yaml
+  - path: harness/module-checks.yaml
+  - path: ops/docker/tests/update-recovery.sh
+  - path: harness/test-services.json
+  - path: ops/release/build.mjs
+  - path: ops/docker/base-images.json
+  - path: ops/release/tests/build.test.mjs
+  - path: ops/release/build-check.mjs
+  - path: ops/release/tests/archive-identity.test.mjs
+  - path: ops/release/tests/embedded-identity.test.mjs
+  - path: ops/docker/Dockerfile
+  - path: ops/docker/Dockerfile.postgres
+  - path: ops/docker/.dockerignore
+  - path: ops/docker/entrypoint.sh
+  - path: ops/docker/bootstrap.sh
+  - path: ops/release/build-execution.mjs
+  - path: ops/release/build-command.mjs
+  - path: ops/release/tests/build-execution.test.mjs
+  - path: ops/release/candidate.mjs
+  - path: ops/release/verified-candidate.mjs
+  - path: ops/release/tests/candidate.test.mjs
+  - path: ops/release/tests/verified-candidate.test.mjs
+  - path: ops/release/tests/verified-candidate-fixture.mjs
+  - path: ops/release/pipeline.mjs
+  - path: ops/release/tests/pipeline.test.mjs
+  - path: ops/release/candidate-proof.mjs
+  - path: ops/release/tests/candidate-proof.test.mjs
+  - path: ops/release/workflow.mjs
+  - path: ops/release/tests/workflow.test.mjs
+  - path: backend/build.gradle.kts
+  - path: backend/gradle.lockfile
+  - path: backend/gradle.properties
+  - path: backend/gradle/build-logic/build.gradle.kts
+  - path: backend/gradle/build-logic/gradle.lockfile
+  - path: backend/gradle/build-logic/settings-gradle.lockfile
+  - path: backend/gradle/build-logic/settings.gradle.kts
+  - path: backend/gradle/build-logic/src
+  - path: backend/gradle/config
+  - path: backend/gradle/libs.versions.toml
+  - path: backend/gradle/wrapper/gradle-wrapper.jar
+  - path: backend/gradle/wrapper/gradle-wrapper.properties
+  - path: backend/gradlew
+  - path: backend/product/adapters/build.gradle.kts
+  - path: backend/product/adapters/gradle.lockfile
+  - path: backend/product/adapters/src
+  - path: backend/product/api/build.gradle.kts
+  - path: backend/product/api/gradle.lockfile
+  - path: backend/product/api/src
+  - path: backend/product/enrichment/build.gradle.kts
+  - path: backend/product/enrichment/gradle.lockfile
+  - path: backend/product/enrichment/src
+  - path: backend/product/lexicon/gradle.lockfile
+  - path: backend/product/lexicon/src
+  - path: backend/settings-gradle.lockfile
+  - path: backend/settings.gradle.kts
+  - path: backend/verification/architecture/build.gradle.kts
+  - path: backend/verification/architecture/gradle.lockfile
+  - path: backend/verification/architecture/src
+  - path: backend/verification/integration/build.gradle.kts
+  - path: backend/verification/integration/gradle.lockfile
+  - path: backend/verification/integration/src
+  - path: backend/verification/quality-gates/build.gradle.kts
+  - path: backend/verification/quality-gates/gradle.lockfile
+  - path: backend/verification/quality-gates/src
+  - path: extension/assets
+  - path: extension/manifest.json
+  - path: extension/package-lock.json
+  - path: extension/package.json
+  - path: extension/scripts
+  - path: extension/src
+  - path: extension/tests
+  - path: extension/tsconfig.json
+  - path: infra/postgres/schema.sql
+  - path: scripts/environment
+  - path: tests/verification/test_release_checks.py
+  - path: scripts/verification/input_snapshot.py
+  - path: scripts/verification/kernel.py
+  - path: scripts/verification/scenarios.py
+  - path: scripts/verification/reports.py
+  - path: tests/verification/test_input_snapshot.py
+  - path: scripts/verification/release_source_bridge.py
+  - path: tests/verification/test_release_source_bridge.py
+  - path: tests/verification/test_release_runtime_check.py
+  - path: tests/verification/test_release_runtime_artifacts.py
+  - path: tests/verification/test_release_runtime_lifecycle.py
+  - path: tests/verification/test_environment.py
+  module_dependencies: *id001
+  required_environment:
+  - python3
+  - bash
+  - sh
+  - git
+  - node
+  - npm
+  - docker
+  - java-25-temurin
+  - postgres-test-jdbc-url
+  - release-arm64-docker-host
+  - release-gradle-cache
+  - release-npm-cache
+  input_paths:
+  - .gitignore
+  - ops/release/third-party-notices.md
+  - ops/release/lifecycle.mjs
+  - ops/release/lifecycle.sh
+  - ops/release/lifecycle-state.sh
+  - ops/release/lifecycle-docker.sh
+  - ops/release/runtime-entry.mjs
+  - ops/release/runtime-verification.sh
+  - ops/release/manifest.mjs
+  - ops/release/archive-identity.mjs
+  - ops/release/embedded-identity.mjs
+  - ops/release/tests/zip-fixture.mjs
+  - ops/release/package.mjs
+  - ops/release/version.mjs
+  - ops/release/version.txt
+  - ops/release/check.mjs
+  - ops/release/tests/lifecycle-fixture.mjs
+  - ops/release/tests/fake-docker-daemon.mjs
+  - ops/docker/compose.yaml
+  - harness/module-checks.yaml
+  - ops/docker/tests/update-recovery.sh
+  - harness/test-services.json
+  - ops/release/build.mjs
+  - ops/docker/base-images.json
+  - ops/release/tests/build.test.mjs
+  - ops/release/build-check.mjs
+  - ops/release/tests/archive-identity.test.mjs
+  - ops/release/tests/embedded-identity.test.mjs
+  - ops/docker/Dockerfile
+  - ops/docker/Dockerfile.postgres
+  - ops/docker/.dockerignore
+  - ops/docker/entrypoint.sh
+  - ops/docker/bootstrap.sh
+  - ops/release/build-execution.mjs
+  - ops/release/build-command.mjs
+  - ops/release/tests/build-execution.test.mjs
+  - ops/release/candidate.mjs
+  - ops/release/verified-candidate.mjs
+  - ops/release/tests/candidate.test.mjs
+  - ops/release/tests/verified-candidate.test.mjs
+  - ops/release/tests/verified-candidate-fixture.mjs
+  - ops/release/pipeline.mjs
+  - ops/release/tests/pipeline.test.mjs
+  - ops/release/candidate-proof.mjs
+  - ops/release/tests/candidate-proof.test.mjs
+  - ops/release/workflow.mjs
+  - ops/release/tests/workflow.test.mjs
+  - backend/build.gradle.kts
+  - backend/gradle.lockfile
+  - backend/gradle.properties
+  - backend/gradle/build-logic/build.gradle.kts
+  - backend/gradle/build-logic/gradle.lockfile
+  - backend/gradle/build-logic/settings-gradle.lockfile
+  - backend/gradle/build-logic/settings.gradle.kts
+  - backend/gradle/build-logic/src
+  - backend/gradle/config
+  - backend/gradle/libs.versions.toml
+  - backend/gradle/wrapper/gradle-wrapper.jar
+  - backend/gradle/wrapper/gradle-wrapper.properties
+  - backend/gradlew
+  - backend/product/adapters/build.gradle.kts
+  - backend/product/adapters/gradle.lockfile
+  - backend/product/adapters/src
+  - backend/product/api/build.gradle.kts
+  - backend/product/api/gradle.lockfile
+  - backend/product/api/src
+  - backend/product/enrichment/build.gradle.kts
+  - backend/product/enrichment/gradle.lockfile
+  - backend/product/enrichment/src
+  - backend/product/lexicon/gradle.lockfile
+  - backend/product/lexicon/src
+  - backend/settings-gradle.lockfile
+  - backend/settings.gradle.kts
+  - backend/verification/architecture/build.gradle.kts
+  - backend/verification/architecture/gradle.lockfile
+  - backend/verification/architecture/src
+  - backend/verification/integration/build.gradle.kts
+  - backend/verification/integration/gradle.lockfile
+  - backend/verification/integration/src
+  - backend/verification/quality-gates/build.gradle.kts
+  - backend/verification/quality-gates/gradle.lockfile
+  - backend/verification/quality-gates/src
+  - extension/assets
+  - extension/manifest.json
+  - extension/package-lock.json
+  - extension/package.json
+  - extension/scripts
+  - extension/src
+  - extension/tests
+  - extension/tsconfig.json
+  - infra/postgres/schema.sql
+  - scripts/environment
+  - tests/verification/test_release_checks.py
+  - scripts/verification/input_snapshot.py
+  - scripts/verification/kernel.py
+  - scripts/verification/scenarios.py
+  - scripts/verification/reports.py
+  - tests/verification/test_input_snapshot.py
+  - scripts/verification/release_source_bridge.py
+  - tests/verification/test_release_source_bridge.py
+  - tests/verification/test_release_runtime_check.py
+  - tests/verification/test_release_runtime_artifacts.py
+  - tests/verification/test_release_runtime_lifecycle.py
+  - tests/verification/test_environment.py
+  result_contract: *id003
+
+# 构建输入的直接测试；不代替实际镜像构建或双架构验收。
+- check_id: eng.release.build
+  transaction_reuse: true
+  module: release-build
+  command:
+  - node
+  - ops/release/build-check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 180
+  scope: repository-baseline
+  triggers:
+  - path: ops/release/build.mjs
+  - path: ops/docker/base-images.json
+  - path: ops/release/tests/build.test.mjs
+  - path: ops/release/build-check.mjs
+  - path: ops/release/tests/archive-identity.test.mjs
+  - path: ops/release/tests/embedded-identity.test.mjs
+  - path: ops/release/manifest.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/release/version.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/check.mjs
+  - path: ops/docker/Dockerfile
+  - path: ops/docker/Dockerfile.postgres
+  - path: ops/docker/.dockerignore
+  - path: ops/docker/entrypoint.sh
+  - path: ops/docker/bootstrap.sh
+  - path: harness/module-checks.yaml
+  - path: ops/release/build-execution.mjs
+  - path: ops/release/build-command.mjs
+  - path: ops/release/tests/build-execution.test.mjs
+  - path: ops/release/candidate.mjs
+  - path: ops/release/verified-candidate.mjs
+  - path: ops/release/candidate-proof.mjs
+  - path: ops/release/tests/candidate-proof.test.mjs
+  - path: ops/release/tests/candidate.test.mjs
+  - path: ops/release/tests/verified-candidate.test.mjs
+  - path: ops/release/tests/verified-candidate-fixture.mjs
+  - path: ops/release/pipeline.mjs
+  - path: ops/release/workflow.mjs
+  - path: ops/release/tests/workflow.test.mjs
+  - path: ops/release/tests/pipeline.test.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/lifecycle.mjs
+  - path: ops/release/lifecycle-state.sh
+  - path: ops/release/lifecycle-docker.sh
+  - path: ops/release/lifecycle.sh
+  module_dependencies: []
+  required_environment:
+  - node
+  - git
+  - sh
+  - /bin/sh
+  - mkfifo
+  input_paths:
+  - ops/release/build.mjs
+  - ops/docker/base-images.json
+  - ops/release/tests/build.test.mjs
+  - ops/release/build-check.mjs
+  - ops/release/tests/archive-identity.test.mjs
+  - ops/release/tests/embedded-identity.test.mjs
+  - ops/release/manifest.mjs
+  - ops/release/archive-identity.mjs
+  - ops/release/embedded-identity.mjs
+  - ops/release/tests/zip-fixture.mjs
+  - ops/release/version.mjs
+  - ops/release/version.txt
+  - ops/release/check.mjs
+  - ops/docker/Dockerfile
+  - ops/docker/Dockerfile.postgres
+  - ops/docker/.dockerignore
+  - ops/docker/entrypoint.sh
+  - ops/docker/bootstrap.sh
+  - harness/module-checks.yaml
+  - ops/release/build-execution.mjs
+  - ops/release/build-command.mjs
+  - ops/release/tests/build-execution.test.mjs
+  - ops/release/candidate.mjs
+  - ops/release/verified-candidate.mjs
+  - ops/release/candidate-proof.mjs
+  - ops/release/tests/candidate-proof.test.mjs
+  - ops/release/tests/candidate.test.mjs
+  - ops/release/tests/verified-candidate.test.mjs
+  - ops/release/tests/verified-candidate-fixture.mjs
+  - ops/release/pipeline.mjs
+  - ops/release/workflow.mjs
+  - ops/release/tests/workflow.test.mjs
+  - ops/release/tests/pipeline.test.mjs
+  - ops/release/package.mjs
+  - ops/release/runtime-entry.mjs
+  - ops/release/runtime-verification.sh
+  - ops/release/lifecycle.mjs
+  - ops/release/lifecycle-state.sh
+  - ops/release/lifecycle-docker.sh
+  - ops/release/lifecycle.sh
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.release.build-on-change
+  transaction_reuse: true
+  module: release-build-on-change
+  command:
+  - node
+  - ops/release/build-check.mjs
+  executable: node
+  cwd: .
+  timeout_seconds: 180
+  scope: change-targeted
+  triggers:
+  - path: ops/release/build.mjs
+  - path: ops/docker/base-images.json
+  - path: ops/release/tests/build.test.mjs
+  - path: ops/release/build-check.mjs
+  - path: ops/release/tests/archive-identity.test.mjs
+  - path: ops/release/tests/embedded-identity.test.mjs
+  - path: ops/release/manifest.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/release/version.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/check.mjs
+  - path: ops/docker/Dockerfile
+  - path: ops/docker/Dockerfile.postgres
+  - path: ops/docker/.dockerignore
+  - path: ops/docker/entrypoint.sh
+  - path: ops/docker/bootstrap.sh
+  - path: harness/module-checks.yaml
+  - path: ops/release/build-execution.mjs
+  - path: ops/release/build-command.mjs
+  - path: ops/release/tests/build-execution.test.mjs
+  - path: ops/release/candidate.mjs
+  - path: ops/release/verified-candidate.mjs
+  - path: ops/release/candidate-proof.mjs
+  - path: ops/release/tests/candidate-proof.test.mjs
+  - path: ops/release/tests/candidate.test.mjs
+  - path: ops/release/tests/verified-candidate.test.mjs
+  - path: ops/release/tests/verified-candidate-fixture.mjs
+  - path: ops/release/pipeline.mjs
+  - path: ops/release/workflow.mjs
+  - path: ops/release/tests/workflow.test.mjs
+  - path: ops/release/tests/pipeline.test.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/lifecycle.mjs
+  - path: ops/release/lifecycle-state.sh
+  - path: ops/release/lifecycle-docker.sh
+  - path: ops/release/lifecycle.sh
+  module_dependencies: []
+  required_environment:
+  - node
+  - git
+  - sh
+  - /bin/sh
+  - mkfifo
+  input_paths:
+  - ops/release/build.mjs
+  - ops/docker/base-images.json
+  - ops/release/tests/build.test.mjs
+  - ops/release/build-check.mjs
+  - ops/release/tests/archive-identity.test.mjs
+  - ops/release/tests/embedded-identity.test.mjs
+  - ops/release/manifest.mjs
+  - ops/release/archive-identity.mjs
+  - ops/release/embedded-identity.mjs
+  - ops/release/tests/zip-fixture.mjs
+  - ops/release/version.mjs
+  - ops/release/version.txt
+  - ops/release/check.mjs
+  - ops/docker/Dockerfile
+  - ops/docker/Dockerfile.postgres
+  - ops/docker/.dockerignore
+  - ops/docker/entrypoint.sh
+  - ops/docker/bootstrap.sh
+  - harness/module-checks.yaml
+  - ops/release/build-execution.mjs
+  - ops/release/build-command.mjs
+  - ops/release/tests/build-execution.test.mjs
+  - ops/release/candidate.mjs
+  - ops/release/verified-candidate.mjs
+  - ops/release/candidate-proof.mjs
+  - ops/release/tests/candidate-proof.test.mjs
+  - ops/release/tests/candidate.test.mjs
+  - ops/release/tests/verified-candidate.test.mjs
+  - ops/release/tests/verified-candidate-fixture.mjs
+  - ops/release/pipeline.mjs
+  - ops/release/workflow.mjs
+  - ops/release/tests/workflow.test.mjs
+  - ops/release/tests/pipeline.test.mjs
+  - ops/release/package.mjs
+  - ops/release/runtime-entry.mjs
+  - ops/release/runtime-verification.sh
+  - ops/release/lifecycle.mjs
+  - ops/release/lifecycle-state.sh
+  - ops/release/lifecycle-docker.sh
+  - ops/release/lifecycle.sh
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+
+# 实际候选原生安装与同卷升级验收，输出绑定候选摘要；不复用合成source bridge结果。
+- check_id: eng.release.candidate-runtime
+  module: release-candidate-runtime
+  command:
+  - python3
+  - -m
+  - scripts.environment.candidate_runtime_check
+  executable: python3
+  cwd: .
+  timeout_seconds: 2400
+  scope: repository-baseline
+  triggers:
+  - path: .gitignore
+  - path: ops/release/third-party-notices.md
+  - path: ops/release/lifecycle.mjs
+  - path: ops/release/lifecycle.sh
+  - path: ops/release/lifecycle-state.sh
+  - path: ops/release/lifecycle-docker.sh
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/manifest.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/version.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/check.mjs
+  - path: ops/release/tests/lifecycle-fixture.mjs
+  - path: ops/release/tests/fake-docker-daemon.mjs
+  - path: ops/docker/compose.yaml
+  - path: harness/module-checks.yaml
+  - path: ops/docker/tests/update-recovery.sh
+  - path: harness/test-services.json
+  - path: ops/release/build.mjs
+  - path: ops/docker/base-images.json
+  - path: ops/release/tests/build.test.mjs
+  - path: ops/release/build-check.mjs
+  - path: ops/release/tests/archive-identity.test.mjs
+  - path: ops/release/tests/embedded-identity.test.mjs
+  - path: ops/docker/Dockerfile
+  - path: ops/docker/Dockerfile.postgres
+  - path: ops/docker/.dockerignore
+  - path: ops/docker/entrypoint.sh
+  - path: ops/docker/bootstrap.sh
+  - path: ops/release/build-execution.mjs
+  - path: ops/release/build-command.mjs
+  - path: ops/release/tests/build-execution.test.mjs
+  - path: ops/release/candidate.mjs
+  - path: ops/release/verified-candidate.mjs
+  - path: ops/release/tests/candidate.test.mjs
+  - path: ops/release/tests/verified-candidate.test.mjs
+  - path: ops/release/tests/verified-candidate-fixture.mjs
+  - path: ops/release/pipeline.mjs
+  - path: ops/release/tests/pipeline.test.mjs
+  - path: backend/build.gradle.kts
+  - path: backend/gradle.lockfile
+  - path: backend/gradle.properties
+  - path: backend/gradle/build-logic/build.gradle.kts
+  - path: backend/gradle/build-logic/gradle.lockfile
+  - path: backend/gradle/build-logic/settings-gradle.lockfile
+  - path: backend/gradle/build-logic/settings.gradle.kts
+  - path: backend/gradle/build-logic/src
+  - path: backend/gradle/config
+  - path: backend/gradle/libs.versions.toml
+  - path: backend/gradle/wrapper/gradle-wrapper.jar
+  - path: backend/gradle/wrapper/gradle-wrapper.properties
+  - path: backend/gradlew
+  - path: backend/product/adapters/build.gradle.kts
+  - path: backend/product/adapters/gradle.lockfile
+  - path: backend/product/adapters/src
+  - path: backend/product/api/build.gradle.kts
+  - path: backend/product/api/gradle.lockfile
+  - path: backend/product/api/src
+  - path: backend/product/enrichment/build.gradle.kts
+  - path: backend/product/enrichment/gradle.lockfile
+  - path: backend/product/enrichment/src
+  - path: backend/product/lexicon/gradle.lockfile
+  - path: backend/product/lexicon/src
+  - path: backend/settings-gradle.lockfile
+  - path: backend/settings.gradle.kts
+  - path: backend/verification/architecture/build.gradle.kts
+  - path: backend/verification/architecture/gradle.lockfile
+  - path: backend/verification/architecture/src
+  - path: backend/verification/integration/build.gradle.kts
+  - path: backend/verification/integration/gradle.lockfile
+  - path: backend/verification/integration/src
+  - path: backend/verification/quality-gates/build.gradle.kts
+  - path: backend/verification/quality-gates/gradle.lockfile
+  - path: backend/verification/quality-gates/src
+  - path: extension/assets
+  - path: extension/manifest.json
+  - path: extension/package-lock.json
+  - path: extension/package.json
+  - path: extension/scripts
+  - path: extension/src
+  - path: extension/tests
+  - path: extension/tsconfig.json
+  - path: infra/postgres/schema.sql
+  - path: scripts/environment
+  - path: tests/verification/test_release_checks.py
+  - path: scripts/verification/input_snapshot.py
+  - path: scripts/verification/kernel.py
+  - path: scripts/verification/scenarios.py
+  - path: scripts/verification/reports.py
+  - path: tests/verification/test_input_snapshot.py
+  - path: scripts/verification/release_source_bridge.py
+  - path: tests/verification/test_release_source_bridge.py
+  - path: tests/verification/test_release_runtime_check.py
+  - path: tests/verification/test_release_runtime_artifacts.py
+  - path: tests/verification/test_release_runtime_lifecycle.py
+  - path: tests/verification/test_environment.py
+  - path: ops/podman
+  - path: scripts/environment/candidate_runtime_check.py
+  - path: scripts/environment/runtime.py
+  - path: scripts/verification/declarations.py
+  - path: tests/verification/test_candidate_runtime_check.py
+  - path: harness/ci-policy.yaml
+  - path: tests/verification/test_ci.py
+  module_dependencies: []
+  required_environment:
+  - python3
+  - node
+  - git
+  - podman
+  - candidate-runtime-request
+  input_paths: &candidate_runtime_inputs
+  - .gitignore
+  - ops/release/third-party-notices.md
+  - ops/release/lifecycle.mjs
+  - ops/release/lifecycle.sh
+  - ops/release/lifecycle-state.sh
+  - ops/release/lifecycle-docker.sh
+  - ops/release/runtime-entry.mjs
+  - ops/release/runtime-verification.sh
+  - ops/release/manifest.mjs
+  - ops/release/archive-identity.mjs
+  - ops/release/embedded-identity.mjs
+  - ops/release/tests/zip-fixture.mjs
+  - ops/release/package.mjs
+  - ops/release/version.mjs
+  - ops/release/version.txt
+  - ops/release/check.mjs
+  - ops/release/tests/lifecycle-fixture.mjs
+  - ops/release/tests/fake-docker-daemon.mjs
+  - ops/docker/compose.yaml
+  - harness/module-checks.yaml
+  - ops/docker/tests/update-recovery.sh
+  - harness/test-services.json
+  - ops/release/build.mjs
+  - ops/docker/base-images.json
+  - ops/release/tests/build.test.mjs
+  - ops/release/build-check.mjs
+  - ops/release/tests/archive-identity.test.mjs
+  - ops/release/tests/embedded-identity.test.mjs
+  - ops/docker/Dockerfile
+  - ops/docker/Dockerfile.postgres
+  - ops/docker/.dockerignore
+  - ops/docker/entrypoint.sh
+  - ops/docker/bootstrap.sh
+  - ops/release/build-execution.mjs
+  - ops/release/build-command.mjs
+  - ops/release/tests/build-execution.test.mjs
+  - ops/release/candidate.mjs
+  - ops/release/verified-candidate.mjs
+  - ops/release/tests/candidate.test.mjs
+  - ops/release/tests/verified-candidate.test.mjs
+  - ops/release/tests/verified-candidate-fixture.mjs
+  - ops/release/pipeline.mjs
+  - ops/release/tests/pipeline.test.mjs
+  - backend/build.gradle.kts
+  - backend/gradle.lockfile
+  - backend/gradle.properties
+  - backend/gradle/build-logic/build.gradle.kts
+  - backend/gradle/build-logic/gradle.lockfile
+  - backend/gradle/build-logic/settings-gradle.lockfile
+  - backend/gradle/build-logic/settings.gradle.kts
+  - backend/gradle/build-logic/src
+  - backend/gradle/config
+  - backend/gradle/libs.versions.toml
+  - backend/gradle/wrapper/gradle-wrapper.jar
+  - backend/gradle/wrapper/gradle-wrapper.properties
+  - backend/gradlew
+  - backend/product/adapters/build.gradle.kts
+  - backend/product/adapters/gradle.lockfile
+  - backend/product/adapters/src
+  - backend/product/api/build.gradle.kts
+  - backend/product/api/gradle.lockfile
+  - backend/product/api/src
+  - backend/product/enrichment/build.gradle.kts
+  - backend/product/enrichment/gradle.lockfile
+  - backend/product/enrichment/src
+  - backend/product/lexicon/gradle.lockfile
+  - backend/product/lexicon/src
+  - backend/settings-gradle.lockfile
+  - backend/settings.gradle.kts
+  - backend/verification/architecture/build.gradle.kts
+  - backend/verification/architecture/gradle.lockfile
+  - backend/verification/architecture/src
+  - backend/verification/integration/build.gradle.kts
+  - backend/verification/integration/gradle.lockfile
+  - backend/verification/integration/src
+  - backend/verification/quality-gates/build.gradle.kts
+  - backend/verification/quality-gates/gradle.lockfile
+  - backend/verification/quality-gates/src
+  - extension/assets
+  - extension/manifest.json
+  - extension/package-lock.json
+  - extension/package.json
+  - extension/scripts
+  - extension/src
+  - extension/tests
+  - extension/tsconfig.json
+  - infra/postgres/schema.sql
+  - scripts/environment
+  - tests/verification/test_release_checks.py
+  - scripts/verification/input_snapshot.py
+  - scripts/verification/kernel.py
+  - scripts/verification/scenarios.py
+  - scripts/verification/reports.py
+  - tests/verification/test_input_snapshot.py
+  - scripts/verification/release_source_bridge.py
+  - tests/verification/test_release_source_bridge.py
+  - tests/verification/test_release_runtime_check.py
+  - tests/verification/test_release_runtime_artifacts.py
+  - tests/verification/test_release_runtime_lifecycle.py
+  - tests/verification/test_environment.py
+  - ops/podman
+  - scripts/environment/candidate_runtime_check.py
+  - scripts/environment/runtime.py
+  - scripts/verification/declarations.py
+  - tests/verification/test_candidate_runtime_check.py
+  - harness/ci-policy.yaml
+  - tests/verification/test_ci.py
+  result_contract: &candidate_runtime_result
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.release.candidate-runtime-on-change
+  module: release-candidate-runtime-on-change
+  command:
+  - python3
+  - -m
+  - scripts.environment.candidate_runtime_check
+  executable: python3
+  cwd: .
+  timeout_seconds: 2400
+  scope: change-targeted
+  triggers:
+  - path: .gitignore
+  - path: ops/release/third-party-notices.md
+  - path: ops/release/lifecycle.mjs
+  - path: ops/release/lifecycle.sh
+  - path: ops/release/lifecycle-state.sh
+  - path: ops/release/lifecycle-docker.sh
+  - path: ops/release/runtime-entry.mjs
+  - path: ops/release/runtime-verification.sh
+  - path: ops/release/manifest.mjs
+  - path: ops/release/archive-identity.mjs
+  - path: ops/release/embedded-identity.mjs
+  - path: ops/release/tests/zip-fixture.mjs
+  - path: ops/release/package.mjs
+  - path: ops/release/version.mjs
+  - path: ops/release/version.txt
+  - path: ops/release/check.mjs
+  - path: ops/release/tests/lifecycle-fixture.mjs
+  - path: ops/release/tests/fake-docker-daemon.mjs
+  - path: ops/docker/compose.yaml
+  - path: harness/module-checks.yaml
+  - path: ops/docker/tests/update-recovery.sh
+  - path: harness/test-services.json
+  - path: ops/release/build.mjs
+  - path: ops/docker/base-images.json
+  - path: ops/release/tests/build.test.mjs
+  - path: ops/release/build-check.mjs
+  - path: ops/release/tests/archive-identity.test.mjs
+  - path: ops/release/tests/embedded-identity.test.mjs
+  - path: ops/docker/Dockerfile
+  - path: ops/docker/Dockerfile.postgres
+  - path: ops/docker/.dockerignore
+  - path: ops/docker/entrypoint.sh
+  - path: ops/docker/bootstrap.sh
+  - path: ops/release/build-execution.mjs
+  - path: ops/release/build-command.mjs
+  - path: ops/release/tests/build-execution.test.mjs
+  - path: ops/release/candidate.mjs
+  - path: ops/release/verified-candidate.mjs
+  - path: ops/release/tests/candidate.test.mjs
+  - path: ops/release/tests/verified-candidate.test.mjs
+  - path: ops/release/tests/verified-candidate-fixture.mjs
+  - path: ops/release/pipeline.mjs
+  - path: ops/release/tests/pipeline.test.mjs
+  - path: backend/build.gradle.kts
+  - path: backend/gradle.lockfile
+  - path: backend/gradle.properties
+  - path: backend/gradle/build-logic/build.gradle.kts
+  - path: backend/gradle/build-logic/gradle.lockfile
+  - path: backend/gradle/build-logic/settings-gradle.lockfile
+  - path: backend/gradle/build-logic/settings.gradle.kts
+  - path: backend/gradle/build-logic/src
+  - path: backend/gradle/config
+  - path: backend/gradle/libs.versions.toml
+  - path: backend/gradle/wrapper/gradle-wrapper.jar
+  - path: backend/gradle/wrapper/gradle-wrapper.properties
+  - path: backend/gradlew
+  - path: backend/product/adapters/build.gradle.kts
+  - path: backend/product/adapters/gradle.lockfile
+  - path: backend/product/adapters/src
+  - path: backend/product/api/build.gradle.kts
+  - path: backend/product/api/gradle.lockfile
+  - path: backend/product/api/src
+  - path: backend/product/enrichment/build.gradle.kts
+  - path: backend/product/enrichment/gradle.lockfile
+  - path: backend/product/enrichment/src
+  - path: backend/product/lexicon/gradle.lockfile
+  - path: backend/product/lexicon/src
+  - path: backend/settings-gradle.lockfile
+  - path: backend/settings.gradle.kts
+  - path: backend/verification/architecture/build.gradle.kts
+  - path: backend/verification/architecture/gradle.lockfile
+  - path: backend/verification/architecture/src
+  - path: backend/verification/integration/build.gradle.kts
+  - path: backend/verification/integration/gradle.lockfile
+  - path: backend/verification/integration/src
+  - path: backend/verification/quality-gates/build.gradle.kts
+  - path: backend/verification/quality-gates/gradle.lockfile
+  - path: backend/verification/quality-gates/src
+  - path: extension/assets
+  - path: extension/manifest.json
+  - path: extension/package-lock.json
+  - path: extension/package.json
+  - path: extension/scripts
+  - path: extension/src
+  - path: extension/tests
+  - path: extension/tsconfig.json
+  - path: infra/postgres/schema.sql
+  - path: scripts/environment
+  - path: tests/verification/test_release_checks.py
+  - path: scripts/verification/input_snapshot.py
+  - path: scripts/verification/kernel.py
+  - path: scripts/verification/scenarios.py
+  - path: scripts/verification/reports.py
+  - path: tests/verification/test_input_snapshot.py
+  - path: scripts/verification/release_source_bridge.py
+  - path: tests/verification/test_release_source_bridge.py
+  - path: tests/verification/test_release_runtime_check.py
+  - path: tests/verification/test_release_runtime_artifacts.py
+  - path: tests/verification/test_release_runtime_lifecycle.py
+  - path: tests/verification/test_environment.py
+  - path: ops/podman
+  - path: scripts/environment/candidate_runtime_check.py
+  - path: scripts/environment/runtime.py
+  - path: scripts/verification/declarations.py
+  - path: tests/verification/test_candidate_runtime_check.py
+  - path: harness/ci-policy.yaml
+  - path: tests/verification/test_ci.py
+  module_dependencies: []
+  required_environment:
+  - python3
+  - node
+  - git
+  - podman
+  - candidate-runtime-request
+  input_paths: *candidate_runtime_inputs
+  result_contract: *candidate_runtime_result

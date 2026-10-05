@@ -1,12 +1,14 @@
 """将一个 Catalog Task 与一份已持久化的日常 Verify 报告绑定为 submission。"""
 
 from __future__ import annotations
-import subprocess
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from scripts.delivery_gate.authority import discover_authority
+from scripts.delivery_gate.acceptance import acceptance_plan
+from scripts.delivery_gate.source_snapshot import review_patch
+from scripts.verification.risk import assess
 from scripts.delivery_gate.producer import ProducerError, resolve_producer
 from scripts.delivery_gate.records import (
     RecordError,
@@ -20,61 +22,28 @@ from scripts.delivery_gate.records import (
 from scripts.delivery_gate.requirements import load_task_requirements
 from scripts.verification import freeze_inputs, read_report
 from scripts.verification.scope import changed_paths
+from scripts.delivery_gate.task_subject import derive_task_subject
 
 
 class SubmissionError(ValueError):
     """送验输入、身份或冻结范围无效时返回稳定错误代码。"""
 
-    def __init__(self, code: str, detail: str) -> None:
+    def __init__(self, code: str, detail: str, *, status: str = "BLOCKED") -> None:
         self.code, self.detail = code, detail
+        self.status = status
         super().__init__(f"{code}: {detail}")
 
 
 def _err(e: Exception) -> SubmissionError:
     return SubmissionError(
-        getattr(e, "code", "submission-invalid"), getattr(e, "detail", str(e))
+        getattr(e, "code", "submission-invalid"),
+        getattr(e, "detail", str(e)),
+        status=getattr(e, "status", "BLOCKED"),
     )
 
 
 def _discover_runtime(repo: Path) -> dict[str, Any]:
     return discover_authority(repo, SubmissionError)
-
-
-def _git_diff(repo: Path, base: str) -> bytes:
-    r = subprocess.run(
-        ["git", "diff", "--binary", base, "--"],
-        cwd=repo,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if r.returncode:
-        raise SubmissionError("git-diff-failed", r.stderr.decode(errors="replace"))
-    return r.stdout
-
-
-def _matches(path: str, pattern: str) -> bool:
-    from scripts.agents.contracts import AgentContractError, match_dispatch_path_v1
-
-    try:
-        return match_dispatch_path_v1(path, pattern)
-    except AgentContractError as exc:
-        raise SubmissionError("task-scope-invalid", str(exc)) from None
-
-
-def _verify_task_scope(requirements: dict[str, Any], changed: list[str]) -> None:
-    allowed, forbidden, claims = (
-        requirements["allowed_files"],
-        requirements["forbidden_files"],
-        requirements["file_claims"],
-    )
-    for path in changed:
-        if any(_matches(path, x) for x in forbidden):
-            raise SubmissionError("forbidden-scope", path)
-        if allowed and not any(_matches(path, x) for x in allowed):
-            raise SubmissionError("outside-allowed-scope", path)
-        if claims and not any(_matches(path, x) for x in claims):
-            raise SubmissionError("outside-file-claim", path)
 
 
 def _snapshots(repo: Path, changed: list[str]) -> dict[str, dict[str, str]]:
@@ -114,7 +83,10 @@ def submit(
         producer = resolve_producer(repo, requirements, submitter, producer_run_id)
     except (RecordError, ValueError, ProducerError) as exc:
         raise _err(exc) from None
-    if report.get("scope") != "change-targeted" or report.get("result") != "PASS":
+    if (
+        report.get("scope") not in {"change-targeted", "development-change"}
+        or report.get("result") != "PASS"
+    ):
         raise SubmissionError(
             "change-report-not-pass",
             "submit requires persisted PASS change-targeted report",
@@ -139,14 +111,42 @@ def submit(
         raise SubmissionError(
             "scope-input-drift", "daily report changed-file set is no longer current"
         )
-    _verify_task_scope(requirements, changed)
-    frozen = freeze_inputs(repo, required_check_ids=requirements["required_check_ids"])
+    try:
+        subject = derive_task_subject(repo, requirements, current_changed)
+    except ValueError as exc:
+        code, _, detail = str(exc).partition(": ")
+        raise SubmissionError(code, detail or code) from None
+    try:
+        assessment = assess(
+            repo,
+            base=base,
+            required_check_ids=tuple(requirements["required_check_ids"]),
+            _subject_paths=tuple(subject["changed_files"]),
+        )
+        plan = acceptance_plan(repo, assessment, requirements)
+    except (RecordError, ValueError) as exc:
+        raise _err(exc) from None
+    if assessment["changed_files"] != subject["changed_files"]:
+        raise SubmissionError(
+            "scope-input-drift", "task subject changed during submission"
+        )
+    frozen = freeze_inputs(
+        repo,
+        required_check_ids=requirements["required_check_ids"],
+        verification_scope=plan["verification_scope"],
+        base=assessment["base"],
+        _subject_changed_files=(
+            subject["changed_files"]
+            if plan["verification_scope"] == "development-change"
+            else None
+        ),
+    )
     if frozen.get("result") != "PASS":
         raise SubmissionError(
             "freeze-inputs-failed", str(frozen.get("reason", "unknown"))
         )
     submission_id = str(uuid.uuid4())
-    patch = _git_diff(repo, base)
+    patch = review_patch(repo, assessment["base"], subject["changed_files"])
     try:
         patch_descriptor = publish_bytes(
             repo,
@@ -155,7 +155,9 @@ def submit(
         )
         created = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
         record = {
-            "schema_version": "lexiflow.delivery-gate-submission.v4",
+            "schema_version": "lexiflow.delivery-gate-submission.v5",
+            "risk_assessment": assessment,
+            "acceptance_plan": plan,
             "submission_id": submission_id,
             "task_requirements": requirements,
             "change_report": report_descriptor,
@@ -167,9 +169,18 @@ def submit(
             "authority": submitter["authority"],
             "producer": producer,
             "verification_freeze": frozen,
-            "changed_file_snapshots": _snapshots(repo, changed),
+            "changed_file_snapshots": _snapshots(repo, subject["changed_files"]),
+            "task_subject": subject,
             "created_at": created,
         }
+        from scripts.delivery_gate.acceptance import verify_plan
+        from scripts.verification import verify_frozen_inputs
+
+        verify_plan(repo, record)
+        if not verify_frozen_inputs(repo, frozen):
+            raise SubmissionError(
+                "frozen-input-drift", "input changed before publication"
+            )
         published = publish_json(
             repo, delivery_gate_locator("submissions", submission_id), record
         )

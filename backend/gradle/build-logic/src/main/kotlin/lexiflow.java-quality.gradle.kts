@@ -15,6 +15,10 @@ plugins {
 }
 
 val qualityConfig = rootProject.layout.projectDirectory.dir("gradle/config")
+// HTML 仅供人工浏览，不参与合格判定；检查结果 XML 保留，浏览产物显式开启。
+val htmlQualityReports = providers.gradleProperty("qualityHtmlReports")
+    .map { it.toBoolean() }
+    .getOrElse(false)
 val generateJavadocAnchor = tasks.register<GenerateJavadocAnchorTask>("generateJavadocAnchor") {
     outputFile.set(layout.buildDirectory.file("generated/sources/javadoc/JavadocAnchor.java"))
 }
@@ -41,7 +45,7 @@ checkstyle {
 tasks.withType<Checkstyle>().configureEach {
     reports {
         xml.required.set(true)
-        html.required.set(true)
+        html.required.set(htmlQualityReports)
     }
 }
 
@@ -56,7 +60,7 @@ pmd {
 tasks.withType<Pmd>().configureEach {
     reports {
         xml.required.set(true)
-        html.required.set(true)
+        html.required.set(htmlQualityReports)
     }
 }
 
@@ -81,7 +85,7 @@ tasks.withType<Test>().configureEach {
     jvmArgs("--add-modules", "jdk.compiler")
     reports {
         junitXml.required.set(true)
-        html.required.set(true)
+        html.required.set(htmlQualityReports)
     }
     testLogging {
         events("passed", "skipped", "failed")
@@ -92,7 +96,7 @@ tasks.withType<Test>().configureEach {
 tasks.withType<JacocoReport>().configureEach {
     reports {
         xml.required.set(true)
-        html.required.set(true)
+        html.required.set(htmlQualityReports)
     }
 }
 
@@ -101,5 +105,6 @@ tasks.named<JacocoReport>("jacocoTestReport") {
 }
 
 tasks.named("check") {
-    dependsOn("javadoc", "jacocoTestReport", "spotlessCheck")
+    // DocLint 是质量判定；coverage report 仅供显式浏览，不参与 check 判定。
+    dependsOn("javadoc", "spotlessCheck")
 }

@@ -36,6 +36,8 @@ final class StardictCsvReader {
           "exchange",
           "detail",
           "audio");
+  private static final List<String> COMPACT_HEADERS =
+      List.of("word", "translation", "oxford", "tag", "bnc", "frq", "exchange");
   private static final Set<String> INFLECTION_KEYS = Set.of("p", "d", "i", "3", "r", "t", "s");
   private static final Set<String> COMPLEX_TAGS =
       Set.of("cet6", "ky", "toefl", "ielts", "gre", "sat");
@@ -49,12 +51,36 @@ final class StardictCsvReader {
   boolean matches(Path input) throws IOException {
     try (var reader = new CsvRecordReader(Files.newBufferedReader(input, StandardCharsets.UTF_8))) {
       var header = reader.next();
-      return header != null && header.equals(REQUIRED_HEADERS);
+      return header != null && (header.equals(REQUIRED_HEADERS) || header.equals(COMPACT_HEADERS));
     }
   }
 
   static final String PREPARATION_POLICY =
-      "deterministic-preparation-all-basic-and-bounded-cleaning-v5";
+      "deterministic-preparation-all-basic-and-bounded-cleaning-v6;curated_sha256="
+          + curatedGlossDigest();
+
+  private static String curatedGlossDigest() {
+    try {
+      var sha = java.security.MessageDigest.getInstance("SHA-256");
+      CURATED_GLOSSES.entrySet().stream()
+          .sorted(Map.Entry.comparingByKey())
+          .forEach(
+              entry -> {
+                updateField(sha, entry.getKey());
+                updateField(sha, entry.getValue().sourceExpression());
+                updateField(sha, entry.getValue().displayGloss());
+              });
+      return java.util.HexFormat.of().formatHex(sha.digest());
+    } catch (java.security.NoSuchAlgorithmException exception) {
+      throw new IllegalStateException(exception);
+    }
+  }
+
+  private static void updateField(java.security.MessageDigest digest, String value) {
+    var bytes = value.getBytes(StandardCharsets.UTF_8);
+    digest.update(java.nio.ByteBuffer.allocate(Integer.BYTES).putInt(bytes.length).array());
+    digest.update(bytes);
+  }
 
   /** 预扫描收集来源明确标记的全部 Oxford 单词；缺排名不改变基础资格。 */
   BasicSelection selectBasicVocabulary(Path input) throws IOException {
@@ -66,7 +92,7 @@ final class StardictCsvReader {
     // 在派生行归并前收集证据，否则 bacteria 等只有词形被标记的基础词会丢失资格。
     try (var reader = new CsvRecordReader(Files.newBufferedReader(input, StandardCharsets.UTF_8))) {
       var header = reader.next();
-      if (header == null || !header.equals(REQUIRED_HEADERS)) {
+      if (header == null || !supportedHeader(header)) {
         throw new IllegalArgumentException("headers must exactly match ECDICT StarDict CSV");
       }
       var indexes = indexes(header);
@@ -105,7 +131,7 @@ final class StardictCsvReader {
     Objects.requireNonNull(consumer, "consumer");
     try (var reader = new CsvRecordReader(Files.newBufferedReader(input, StandardCharsets.UTF_8))) {
       var header = reader.next();
-      if (header == null || !header.equals(REQUIRED_HEADERS)) {
+      if (header == null || !supportedHeader(header)) {
         throw new IllegalArgumentException("headers must exactly match ECDICT StarDict CSV");
       }
       var indexes = indexes(header);
@@ -207,7 +233,7 @@ final class StardictCsvReader {
             new LexiconImportRow(
                 word,
                 gloss,
-                cleanDefinition(row.get("definition")),
+                cleanDefinition(row.getOrDefault("definition", "")),
                 List.of(),
                 inflections,
                 priority,
@@ -237,6 +263,10 @@ final class StardictCsvReader {
       result.put(header.get(index), index);
     }
     return result;
+  }
+
+  private static boolean supportedHeader(List<String> header) {
+    return header.equals(REQUIRED_HEADERS) || header.equals(COMPACT_HEADERS);
   }
 
   private static Conversion convert(

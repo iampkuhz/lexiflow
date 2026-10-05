@@ -18,6 +18,16 @@ import org.junit.jupiter.api.Test;
 /** 每个范围及资格分流都有正反例；格式成功不替代资格和发布合同。 */
 class PreparationPipelineTest {
   @Test
+  void rejectsShortStandaloneWordsButPreservesFullPhrasesAndThreeLetterBoundary() {
+    for (var word : List.of("a", "I", "UH", "um", "AI", "TV", "'uh'", "um!")) {
+      assertFalse(LexiconSurfacePolicy.withinQueryWindow(word), word);
+    }
+    for (var word : List.of("cat", "uhm", "of course", "in front of")) {
+      assertTrue(LexiconSurfacePolicy.withinQueryWindow(word), word);
+    }
+  }
+
+  @Test
   void separatesNonAsciiLettersFromPunctuation() {
     assertEquals("non_ascii_lemma", result("bünde", "城镇").exclusionReason());
     assertNull(result("star-chart", "星图").exclusionReason());
@@ -115,6 +125,28 @@ class PreparationPipelineTest {
     assertEquals("unsafe_default_candidate", HintPreparation.exclusionReason(unsafe));
   }
 
+  @Test
+  void validatesDefaultMeaningBeforeApplyingPhraseHeuristicsAndRestrictsCuratedTrust() {
+    var ordinaryAllBasic =
+        row("stream of data", "数据流", "数据流", false, true, false, null, 0, List.of());
+    assertEquals("all_basic_phrase", HintPreparation.exclusionReason(ordinaryAllBasic));
+    var cleanedAllBasic =
+        row("stream of data", "【医】数据流", "数据流", false, true, false, null, 0, List.of());
+    var rejectedAfterCleaning = HintPreparation.prepare(cleanedAllBasic);
+    assertEquals("all_basic_phrase", rejectedAfterCleaning.exclusionReason());
+    assertEquals(List.of("source_label"), rejectedAfterCleaning.matchedRules());
+    var invalidFirst =
+        row("stream of data", ";数据流", ";数据流", false, true, false, null, 0, List.of());
+    assertEquals("empty_first_candidate", HintPreparation.exclusionReason(invalidFirst));
+    var falselyCurated =
+        rowWithSource(
+            "the majority", "错误释义", "错误释义", false, false, true, null, 0, List.of(), "fixture");
+    assertEquals("low_information_phrase", HintPreparation.exclusionReason(falselyCurated));
+    var unsafeCurated =
+        row("stream of data", "不…安全", "不…安全", false, true, true, null, 0, List.of());
+    assertEquals("unsafe_default_candidate", HintPreparation.exclusionReason(unsafeCurated));
+  }
+
   private static io.lexiflow.lexicon.application.importing.model.PreparedHint result(
       String lemma, String raw) {
     return HintPreparation.prepare(row(lemma, raw, raw, false, false, false, null, 0, List.of()));
@@ -130,7 +162,22 @@ class PreparationPipelineTest {
       Long rank,
       double zipf,
       List<String> aliases) {
-    var source = new SourceReference("ecdict-stardict", "MIT", "fixture");
+    return rowWithSource(
+        lemma, raw, candidate, basic, allBasic, curated, rank, zipf, aliases, "ecdict-stardict");
+  }
+
+  private static LexiconImportRow rowWithSource(
+      String lemma,
+      String raw,
+      String candidate,
+      boolean basic,
+      boolean allBasic,
+      boolean curated,
+      Long rank,
+      double zipf,
+      List<String> aliases,
+      String sourceId) {
+    var source = new SourceReference(sourceId, "MIT", "fixture");
     return new LexiconImportRow(
         lemma,
         candidate,

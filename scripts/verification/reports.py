@@ -1,6 +1,7 @@
 """以不可变方式发布不含 Task 语义的 Verification 报告。"""
 
 from __future__ import annotations
+
 import hashlib
 import json
 import os
@@ -156,10 +157,14 @@ def _snapshot_shape(value: Any) -> bool:
         return False
     if any(
         not isinstance(x, dict)
-        or set(x) != {"locator", "sha256"}
+        or set(x) != {"locator", "sha256", "size_bytes", "executable"}
         or not isinstance(x["locator"], str)
         or not isinstance(x["sha256"], str)
         or len(x["sha256"]) != 64
+        or isinstance(x["size_bytes"], bool)
+        or not isinstance(x["size_bytes"], int)
+        or x["size_bytes"] < 0
+        or not isinstance(x["executable"], bool)
         for x in value["files"]
     ):
         return False
@@ -167,28 +172,73 @@ def _snapshot_shape(value: Any) -> bool:
 
 
 def _pass_check_current(
-    root: Path, result: Any, expected: dict[str, Any], prior_ids: set[str], run_id: str
+    root: Path,
+    result: Any,
+    expected: dict[str, Any],
+    prior_ids: set[str],
+    run_id: str,
+    *,
+    cross_source_valid: bool = False,
+    artifact_run_id: str | None = None,
 ) -> bool:
     """复核已报告 PASS 的 Check 所绑定的声明和输入是否仍与当前快照一致；漂移不能沿用旧 PASS。"""
+    cross_view = isinstance(result, dict) and "cross_view_source" in result
     if (
         not isinstance(result, dict)
-        or set(result)
-        != {
-            "check_id",
-            "module",
-            "status",
-            "reason",
-            "process",
-            "input_snapshot",
-            "consumed_inputs",
-            "result_contract",
-            "environment",
-        }
+        or (
+            set(result)
+            - ({"toolchain"} if expected.get("transaction_reuse") is True else set())
+        )
+        not in (
+            {
+                "check_id",
+                "module",
+                "status",
+                "reason",
+                "process",
+                "input_snapshot",
+                "consumed_inputs",
+                "result_contract",
+                "environment",
+            },
+            {
+                "check_id",
+                "module",
+                "status",
+                "reason",
+                "process",
+                "input_snapshot",
+                "consumed_inputs",
+                "result_contract",
+                "environment",
+                "cross_view_source",
+            },
+        )
         or result.get("check_id") != expected["check_id"]
         or result.get("module") != expected["module"]
         or result.get("status") != "PASS"
         or result.get("reason") not in ("", "equivalent-check-deduplicated")
     ):
+        return False
+    if expected.get("transaction_reuse") is True:
+        if "toolchain" not in result:
+            return False
+        try:
+            from scripts.environment import execution_environment
+            from scripts.environment.toolchain import resolve_toolchain
+            from scripts.verification.kernel import build_child_environment
+
+            current_toolchain = resolve_toolchain(
+                expected,
+                build_child_environment(
+                    runtime_environment=execution_environment(root, expected)
+                ),
+            )
+        except (OSError, ValueError):
+            return False
+        if result["toolchain"] != current_toolchain:
+            return False
+    elif "toolchain" in result:
         return False
     process = result.get("process")
     snapshots = result.get("input_snapshot")
@@ -214,6 +264,18 @@ def _pass_check_current(
             "finished_at",
             "output_artifacts",
             "deduplicated_from",
+        },
+        {
+            "executed_argv",
+            "exit_code",
+            "exit_reason",
+            "duration_seconds",
+            "timed_out",
+            "started_at",
+            "finished_at",
+            "output_artifacts",
+            "deduplicated_from",
+            "source_run_id",
         },
     ):
         return False
@@ -268,16 +330,25 @@ def _pass_check_current(
             process.get("exit_code") != 0
             or process.get("timed_out") is not False
             or process.get("executed_argv") != []
-            or process.get("deduplicated_from") not in prior_ids
+            or (
+                process.get("deduplicated_from") not in prior_ids
+                and not cross_source_valid
+            )
+            or (cross_view and not cross_source_valid)
+            or (not cross_view and "source_run_id" in process)
         ):
             return False
     else:
         return False
     artifacts = process.get("output_artifacts")
+    evidence_run_id = artifact_run_id or run_id
     if (
         not isinstance(artifacts, dict)
         or set(artifacts) != {"stdout", "stderr"}
-        or any(not _descriptor_current(root, x, run_id) for x in artifacts.values())
+        or any(
+            not _descriptor_current(root, x, evidence_run_id)
+            for x in artifacts.values()
+        )
     ):
         return False
     try:
@@ -286,24 +357,18 @@ def _pass_check_current(
         )
         if any(not _snapshot_shape(x) for x in (pre, before, post, final)):
             return False
-        if pre["fingerprint"] != final["fingerprint"]:
+        if pre != final or pre["missing"]:
             return False
-        if (
-            reason == "exited"
-            and len(
-                {
-                    pre["fingerprint"],
-                    before["fingerprint"],
-                    post["fingerprint"],
-                    final["fingerprint"],
-                }
-            )
-            != 1
+        if reason == "exited" and (before != pre or post != pre):
+            return False
+        if reason == "deduplicated" and any(
+            item["files"] != pre["files"] or item["missing"] != pre["missing"]
+            for item in (before, post)
         ):
             return False
         from scripts.verification.kernel import snapshot_check_inputs
 
-        if snapshot_check_inputs(root, expected)["fingerprint"] != final["fingerprint"]:
+        if snapshot_check_inputs(root, expected) != final:
             return False
     except (KeyError, TypeError, ValueError, OSError):
         return False
@@ -312,22 +377,203 @@ def _pass_check_current(
     )
 
 
+def _operation_fingerprint(check: dict[str, Any]) -> str:
+    """计算跨视图允许共享的完整操作配置，不抹除命令或输入声明。"""
+    from scripts.verification.kernel import fingerprint_json
+
+    return fingerprint_json(
+        {
+            key: value
+            for key, value in check.items()
+            if key
+            not in {"check_id", "module", "scope", "triggers", "selection_reasons"}
+        }
+    )
+
+
+def _environment_fingerprint(root: Path, check: dict[str, Any]) -> str:
+    """对本次可执行的精确子进程环境求指纹，不将环境值写入报告。"""
+    from scripts.environment import execution_environment
+    from scripts.verification.kernel import build_child_environment, fingerprint_json
+
+    environment = build_child_environment(
+        runtime_environment=execution_environment(root, check)
+    )
+    return fingerprint_json({key: environment[key] for key in sorted(environment)})
+
+
+def _cross_view_source_current(
+    root: Path,
+    result: dict[str, Any],
+    expected: dict[str, Any],
+    report_scope: str,
+    declarations: dict[str, Any],
+) -> tuple[bool, str | None]:
+    """从当前声明重推外视图的选择、操作、环境和真实原始 PASS 证据。"""
+    from scripts.verification.kernel import is_release_runtime_child_check
+    from scripts.verification.scenarios import _runtime_checks, freeze_inputs
+
+    witness = result.get("cross_view_source")
+    process = result.get("process")
+    if not isinstance(witness, dict) or set(witness) != {
+        "scope",
+        "run_id",
+        "check",
+        "result",
+        "operation_fingerprint",
+        "environment_fingerprint",
+        "toolchain",
+        "profile",
+        "transaction_nonce",
+    }:
+        return False, None
+    if not isinstance(process, dict):
+        return False, None
+    source_scope = witness.get("scope")
+    if source_scope not in {
+        "development-baseline",
+        "development-change",
+        "repository-baseline",
+    }:
+        return False, None
+    try:
+        source_run_id = _safe_uuid(witness.get("run_id"))
+        _safe_uuid(witness.get("transaction_nonce"))
+    except ValueError:
+        return False, None
+    profile = witness.get("profile")
+    if (
+        not isinstance(profile, dict)
+        or set(profile)
+        != {
+            "verification_scope",
+            "base",
+            "changed_files",
+            "required_check_ids",
+            "input_fingerprint",
+        }
+        or profile.get("verification_scope") != source_scope
+    ):
+        return False, None
+    required_ids = profile.get("required_check_ids")
+    changed_files = profile.get("changed_files")
+    fingerprint = profile.get("input_fingerprint")
+    if (
+        not isinstance(required_ids, list)
+        or any(not isinstance(value, str) or not value for value in required_ids)
+        or required_ids != sorted(set(required_ids))
+        or not isinstance(changed_files, list)
+        or any(not isinstance(value, str) or not value for value in changed_files)
+        or changed_files != sorted(set(changed_files))
+        or not isinstance(fingerprint, str)
+        or len(fingerprint) != 64
+        or any(character not in "0123456789abcdef" for character in fingerprint)
+        or (source_scope == "development-baseline" and profile.get("base") is not None)
+    ):
+        return False, None
+    try:
+        source_freeze = freeze_inputs(
+            root,
+            verification_scope=source_scope,
+            base=profile.get("base"),
+            required_check_ids=profile.get("required_check_ids"),
+            _subject_changed_files=(
+                profile.get("changed_files")
+                if source_scope == "development-change"
+                else None
+            ),
+        )
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+        return False, None
+    if source_freeze.get("result") != "PASS" or source_freeze.get(
+        "input_fingerprint"
+    ) != profile.get("input_fingerprint"):
+        return False, None
+    check_id = process.get("deduplicated_from")
+    declared_checks = declarations.get("checks")
+    if not isinstance(declared_checks, list) or not any(
+        isinstance(check, dict) and check.get("check_id") == check_id
+        for check in declared_checks
+    ):
+        return False, None
+    source_selected = {
+        check["check_id"]: check
+        for check in source_freeze.get("checks", [])
+        if isinstance(check, dict) and isinstance(check.get("check_id"), str)
+    }
+    source_check = source_selected.get(check_id)
+    if (
+        source_check is None
+        or source_check.get("transaction_reuse") is not True
+        or expected.get("transaction_reuse") is not True
+        or is_release_runtime_child_check(source_check)
+        or is_release_runtime_child_check(expected)
+        or witness.get("check") != source_check
+    ):
+        return False, None
+    source_runtime = _runtime_checks([source_check])[0]
+    target_runtime = expected
+    operation = _operation_fingerprint(target_runtime)
+    if (
+        operation != _operation_fingerprint(source_runtime)
+        or witness.get("operation_fingerprint") != operation
+        or process.get("source_run_id") != source_run_id
+    ):
+        return False, None
+    source_result = witness.get("result")
+    if not _pass_check_current(
+        root, source_result, source_runtime, set(), source_run_id
+    ):
+        return False, None
+    if (
+        source_result.get("check_id") != check_id
+        or source_result.get("process", {}).get("exit_reason") != "exited"
+        or source_result.get("environment", {}).get("status") != "PASS"
+    ):
+        return False, None
+    try:
+        source_environment = _environment_fingerprint(root, source_runtime)
+        target_environment = _environment_fingerprint(root, target_runtime)
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+        return False, None
+    if (
+        source_environment != target_environment
+        or witness.get("environment_fingerprint") != source_environment
+        or witness.get("toolchain") != source_result.get("toolchain")
+        or witness.get("toolchain") != result.get("toolchain")
+    ):
+        return False, None
+    target_snapshots = result.get("input_snapshot")
+    if not isinstance(target_snapshots, dict) or not _snapshot_shape(
+        target_snapshots.get("pre")
+    ):
+        return False, None
+    source_files = source_result["input_snapshot"]["pre"]["files"]
+    target_files = target_snapshots["pre"]["files"]
+    if source_files != target_files:
+        return False, None
+    return True, source_run_id
+
+
 def _validate_pass_report(root: Path, report: dict[str, Any]) -> None:
     """发布前核对 PASS 报告的范围、Check 完整性、输入指纹与证据；不为缺失检查补造成功结果。"""
-    from scripts.verification.declarations import load_declarations_snapshot
-    from scripts.verification.kernel import fingerprint_json
-    from scripts.verification.scope import (
-        resolve_module_dependencies,
-        select_checks_for_changes,
+    from scripts.verification.declarations import (
+        DeclarationError,
+        load_declarations_snapshot,
     )
+    from scripts.verification.kernel import fingerprint_json
     from scripts.verification.scenarios import (
         _runtime_checks,
         _select_repository_checks,
     )
+    from scripts.verification.scope import (
+        resolve_module_dependencies,
+        select_checks_for_changes,
+    )
 
     try:
         declarations, declaration = load_declarations_snapshot(root)
-    except Exception as exc:
+    except (DeclarationError, OSError) as exc:
         raise ValueError(
             f"verification report declaration unavailable: {exc}"
         ) from None
@@ -351,6 +597,41 @@ def _validate_pass_report(root: Path, report: dict[str, Any]) -> None:
                 else list(declarations["checks"])
             )
             selected = resolve_module_dependencies(selected, declarations["checks"])
+        elif scope in {"development-baseline", "development-change"}:
+            from scripts.verification.scenarios import freeze_inputs
+
+            required_ids = report.get("required_check_ids")
+            if not isinstance(required_ids, list) or any(
+                not isinstance(x, str) or not x for x in required_ids
+            ):
+                raise ValueError("verification profile required checks invalid")
+            if scope == "development-baseline" and report.get("base") is not None:
+                raise ValueError("verification profile baseline base invalid")
+            changed_subject = report.get("scope_review", {}).get("changed_files")
+            frozen = freeze_inputs(
+                root,
+                required_check_ids=required_ids,
+                verification_scope=scope,
+                base=report.get("base"),
+                _subject_changed_files=changed_subject
+                if scope == "development-change"
+                else None,
+            )
+            if frozen.get("result") != "PASS":
+                raise ValueError("verification profile selection unavailable")
+            if scope == "development-change" and report.get("base") != frozen.get(
+                "base"
+            ):
+                raise ValueError("verification profile base invalid")
+            selected = frozen["checks"]
+            if report.get("frozen_input_fingerprint") != frozen.get(
+                "input_fingerprint"
+            ) or not isinstance(report.get("frozen_input_fingerprint"), str):
+                raise ValueError("verification profile freeze fingerprint invalid")
+            if report.get("scope_review", {}).get("changed_files", []) != frozen.get(
+                "changed_files", []
+            ):
+                raise ValueError("verification profile changed files invalid")
         elif scope == "repository-baseline":
             required = report.get("required_check_ids")
             if not isinstance(required, list) or any(
@@ -369,7 +650,7 @@ def _validate_pass_report(root: Path, report: dict[str, Any]) -> None:
             raise ValueError("verification report scope invalid")
     except ValueError:
         raise
-    except Exception as exc:
+    except (KeyError, TypeError) as exc:
         raise ValueError(f"verification report selection invalid: {exc}") from None
     runtime_checks = _runtime_checks(selected)
     checks = report.get("checks")
@@ -387,7 +668,20 @@ def _validate_pass_report(root: Path, report: dict[str, Any]) -> None:
         raise ValueError("verification report configuration fingerprint invalid")
     prior = set()
     for result, expected in zip(checks, runtime_checks, strict=True):
-        if not _pass_check_current(root, result, expected, prior, report["run_id"]):
+        cross_source_valid, source_run_id = False, None
+        if isinstance(result, dict) and "cross_view_source" in result:
+            cross_source_valid, source_run_id = _cross_view_source_current(
+                root, result, expected, scope, declarations
+            )
+        if not _pass_check_current(
+            root,
+            result,
+            expected,
+            prior,
+            report["run_id"],
+            cross_source_valid=cross_source_valid,
+            artifact_run_id=source_run_id,
+        ):
             raise ValueError(
                 f"verification report check invalid: {expected['check_id']}"
             )
@@ -420,6 +714,9 @@ def _validate_pass_report(root: Path, report: dict[str, Any]) -> None:
     if scope == "repository-baseline":
         frozen = fingerprint_json(
             {
+                "verification_scope": "repository-baseline",
+                "base": None,
+                "changed_files": [],
                 "declaration_sha256": declaration["sha256"],
                 "checks": runtime_checks,
                 "input_snapshots": {
@@ -435,7 +732,7 @@ def _validate_pass_report(root: Path, report: dict[str, Any]) -> None:
 def validate_report(root: Path, report: Any) -> dict[str, Any]:
     """验证报告结构、输入指纹与检查完整性，拒绝伪造或缺项。"""
     if not isinstance(report, dict):
-        raise ValueError("verification report must be an object")
+        raise TypeError("verification report must be an object")
     required = {
         "schema_version",
         "run_id",
@@ -456,7 +753,13 @@ def validate_report(root: Path, report: Any) -> dict[str, Any]:
     _safe_uuid(report.get("run_id"))
     if (
         report.get("result") not in {"PASS", "BLOCKED", "FAIL"}
-        or report.get("scope") not in {"change-targeted", "repository-baseline"}
+        or report.get("scope")
+        not in {
+            "change-targeted",
+            "repository-baseline",
+            "development-baseline",
+            "development-change",
+        }
         or not isinstance(report.get("checks"), list)
         or not isinstance(report.get("coverage_gaps"), list)
         or not isinstance(report.get("scope_review"), dict)
@@ -497,12 +800,27 @@ def persist_report(root: str | Path, report: dict[str, Any]) -> dict[str, str]:
     repo = Path(root).resolve()
     validate_report(repo, report)
     run_id = _safe_uuid(report.get("run_id"))
-    relative = f"tmp/quality/verification-reports/{run_id}.json"
+    return _publish_document(repo, report, run_id, "verification-reports")
+
+
+def persist_diagnostic(root: Path, diagnostic: dict[str, Any]) -> dict[str, str]:
+    """将工作包诊断发布到非验收目录；禁止携带完整 Verify 的报告身份。"""
+    if (
+        diagnostic.get("kind") != "work-package-diagnostic"
+        or diagnostic.get("formal_acceptance") is not False
+        or {"result", "scope", "schema_version", "publication"} & diagnostic.keys()
+    ):
+        raise ValueError("invalid diagnostic identity")
+    run_id = _safe_uuid(diagnostic.get("diagnostic_id"))
+    return _publish_document(Path(root).resolve(), diagnostic, run_id, "diagnostics")
+
+
+def _publish_document(repo, report, run_id, namespace):
+    """复用 descriptor-relative 不可变写入，不把诊断目录当正式报告来源。"""
+    relative = f"tmp/quality/{namespace}/{run_id}.json"
     leaf = f"{run_id}.json"
     data = canonical_bytes(report)
-    dir_fd = _open_directory(
-        repo, ("tmp", "quality", "verification-reports"), create=True
-    )
+    dir_fd = _open_directory(repo, ("tmp", "quality", namespace), create=True)
     temp = f".{run_id}.{uuid.uuid4()}.tmp"
     fd = None
     identity = None

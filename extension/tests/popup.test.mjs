@@ -89,6 +89,10 @@ function createChrome(behaviour = {}) {
     },
     runtime: { lastError: null, sendMessage(message) {
       chromeObj._calls.push({ method: "runtime.sendMessage", message: { ...message } });
+      if (message.type === "runtime-status") {
+        if (behaviour.statusReject) return Promise.reject(new Error("status unavailable"));
+        return Promise.resolve(behaviour.statusResponse ?? {ok:true,status:{softwareVersion:"1.2.3",apiContract:"caption-hints.v2",mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null}});
+      }
       return behaviour.preferenceResponse !== undefined ? Promise.resolve(behaviour.preferenceResponse) : Promise.resolve({ ok: true, entryKeys: [] });
     } },
   };
@@ -356,7 +360,7 @@ test('restore requires explicit confirmation and reports only empty success rece
  doc.getElementById('restore-start').dispatchEvent(new Event('click'));
  assert.equal(doc.getElementById('restore-confirmation').hidden,false);
  doc.getElementById('restore-cancel').dispatchEvent(new Event('click'));await flush();
- assert.equal(doc.getElementById('restore-confirmation').hidden,true);assert.equal(chrome._calls.some(call=>call.method==='runtime.sendMessage'),false);
+ assert.equal(doc.getElementById('restore-confirmation').hidden,true);assert.equal(chrome._calls.some(call=>call.method==='runtime.sendMessage'&&call.message.type==='local-preferences'),false);
  doc.getElementById('restore-start').dispatchEvent(new Event('click'));
  doc.getElementById('restore-confirm').dispatchEvent(new Event('click'));
  assert.equal(doc.getElementById('restore-confirm').disabled,true);
@@ -366,8 +370,8 @@ test('restore requires explicit confirmation and reports only empty success rece
  await flush();assert.equal(doc.getElementById('restore-status').dataset.kind,'success');
  assert.equal(doc.getElementById('restore-status').textContent,'已恢复全部提示偏好。');
  assert.equal(details.open,true,'success feedback remains visible inside the expanded details');
- assert.deepEqual(chrome._calls.find(call=>call.method==='runtime.sendMessage').message,{type:'local-preferences',action:'restore-all'});
- assert.equal(chrome._calls.filter(call=>call.method==='runtime.sendMessage').length,1,'duplicate confirm cannot dispatch twice');
+ assert.deepEqual(chrome._calls.find(call=>call.method==='runtime.sendMessage'&&call.message.type==='local-preferences').message,{type:'local-preferences',action:'restore-all'});
+ assert.equal(chrome._calls.filter(call=>call.method==='runtime.sendMessage'&&call.message.type==='local-preferences').length,1,'duplicate confirm cannot dispatch twice');
 });
 
 test('restore malformed, non-empty, or failed receipt never claims success',async()=>{
@@ -390,3 +394,70 @@ test('restore failure is independent from later successful page toggle',async()=
  assert.equal(doc.getElementById('restore-status').dataset.kind,'error');
  assert.equal(doc.getElementById('page-status').textContent,'已开启 · 英文优先');
 });
+
+test('service status renders formal readiness, degraded warmup, demo, missing data, dependency and schema states',async()=>{
+ const cases=[
+  [{mode:'formal',ready:true,reason:'OK',datasetVersion:7},'正式就绪。',false],
+  [{mode:'formal',ready:true,reason:'PREWARM_DEGRADED',datasetVersion:7},'正式就绪 · 预热降级，服务可用。',false],
+  [{mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null},'演示模式 · 非正式就绪',false],
+  [{mode:'formal',ready:false,reason:'NO_PUBLISHED_DATA',datasetVersion:0},'尚无已发布资料，请检查资料初始化与发布状态。',false],
+  [{mode:'formal',ready:false,reason:'DEPENDENCY_UNAVAILABLE',datasetVersion:null},'服务依赖不可用，请检查后端依赖服务。',false],
+  [{mode:'formal',ready:false,reason:'SCHEMA_MISMATCH',datasetVersion:null},'资料结构不匹配，请使用匹配的服务与资料。',false]
+ ];
+ for(const [state,expected] of cases){
+  const value={softwareVersion:'1.2.3',apiContract:'caption-hints.v2',...state};
+  const {doc}=freshSetup({statusResponse:{ok:true,status:value}});await flush();
+  assert.equal(doc.getElementById('service-status').textContent,expected);
+  assert.equal(doc.getElementById('service-identity').hidden,false);
+  assert.match(doc.getElementById('service-identity').textContent,/软件 1\.2\.3 · 协议 caption-hints\.v2/u);
+  assert.ok(doc.getElementById('service-identity').textContent.includes(state.datasetVersion===null?'未知':String(state.datasetVersion)));
+ }
+});
+
+test('protocol mismatch and unreachable states are fixed safe messages and hide untrusted identity',async()=>{
+ const mismatch=freshSetup({statusResponse:{ok:false,reason:'protocol-mismatch'}});await flush();
+ assert.equal(mismatch.doc.getElementById('service-status').textContent,'协议不匹配，请使用匹配的扩展与服务版本。');
+ assert.equal(mismatch.doc.getElementById('service-identity').hidden,true);
+ const unreachable=freshSetup({statusReject:true,readResponse:{ok:true,enabled:false,pageKey:'page'}});await flush();
+ assert.equal(unreachable.doc.getElementById('service-status').textContent,'无法连接服务，请检查后端是否启动。');
+ assert.equal(unreachable.doc.getElementById('service-identity').hidden,true);
+ assert.equal(unreachable.doc.getElementById('enhance-toggle').disabled,false,'status failure does not disable page controls');
+ assert.equal(unreachable.doc.getElementById('enhance-toggle').checked,false);
+});
+
+test('status lookup failure leaves page enhancement and local preference controls usable',async()=>{
+ const {doc,chrome}=freshSetup({statusReject:true,readResponse:{ok:true,enabled:false,pageKey:'independent-page'}});await flush();
+ const toggle=doc.getElementById('enhance-toggle');assert.equal(toggle.disabled,false);
+ chrome._nextResponse={ok:true,enabled:true,pageKey:'independent-page'};
+ toggle.checked=true;toggle.dispatchEvent(new Event('change'));await flush();
+ assert.equal(toggle.checked,true);
+ const details=doc.getElementById('preferences');details.open=true;
+ doc.getElementById('restore-start').dispatchEvent(new Event('click'));
+ doc.getElementById('restore-confirm').dispatchEvent(new Event('click'));await flush();
+ assert.equal(doc.getElementById('restore-status').dataset.kind,'success');
+ assert.equal(chrome._calls.some(call=>call.message?.type==='local-preferences'&&call.message.action==='restore-all'),true);
+});
+
+ test("non-video page explains navigation instead of refresh", async () => {
+  const {doc} = freshSetup({readResponse:{ok:false,reason:"not-video-page"}});
+  await flush();
+  assert.match(doc.getElementById("page-status").textContent, /请打开 YouTube 视频播放页/);
+  assert.equal(doc.getElementById("enhance-toggle").disabled, true);
+ });
+ test("disabled controls never use a perpetual waiting cursor", () => {
+  const css=readFileSync(resolve(import.meta.dirname,"../src/popup.css"),"utf8");
+  assert.doesNotMatch(css, /cursor:\s*wait/);
+ });
+ test("hung page message ends waiting and ignores late reply", async () => {
+  const doc=createDocument(), chrome=createChrome();
+  let late;
+  chrome.tabs.sendMessage=()=>new Promise(resolve=>{late=resolve;});
+  const ctx=makeContext(doc,chrome), timers=[];
+  ctx.setTimeout=(fn)=>{timers.push(fn); return timers.length;};
+  ctx.clearTimeout=()=>{};
+  loadPopup(ctx); fireReady(doc); await flush();
+  timers.forEach(fn=>fn()); await flush();
+  assert.match(doc.getElementById("page-status").textContent,/当前页面不可用/);
+  late({ok:true,enabled:true,pageKey:"late"}); await flush();
+  assert.equal(doc.getElementById("enhance-toggle").disabled,true);
+ });

@@ -3,6 +3,7 @@
 Covers: YAML loading, schema validation, required fields, duplicate
 check IDs, invalid commands, scope filtering, check ID filtering.
 """
+
 from __future__ import annotations
 
 import tempfile
@@ -26,9 +27,16 @@ def _write_declarations(root: Path, data: dict) -> None:
         check.setdefault("module_dependencies", [])
         check.setdefault("required_environment", [])
         check.setdefault("input_paths", [])
-        check.setdefault("result_contract", {"type": "exit-code", "completeness_guarantee": "fixture-owned command completion"})
+        check.setdefault(
+            "result_contract",
+            {
+                "type": "exit-code",
+                "completeness_guarantee": "fixture-owned command completion",
+            },
+        )
     (harness / "module-checks.yaml").write_text(
-        yaml.dump(data, default_flow_style=False), encoding="utf-8",
+        yaml.dump(data, default_flow_style=False),
+        encoding="utf-8",
     )
 
 
@@ -44,16 +52,87 @@ _VALID_CHECK = {
 
 
 class TestLoadDeclarations(unittest.TestCase):
+    def test_offline_reuse_is_explicit_and_runtime_remains_conservative(self):
+        checks = {check["check_id"]: check for check in load_declarations(Path(__file__).resolve().parents[2])["checks"]}
+        for name in ("docker-contract", "lifecycle-install", "lifecycle", "build"):
+            for suffix in ("", "-on-change"):
+                self.assertIs(checks["eng.release." + name + suffix]["transaction_reuse"], True)
+        for check_id, check in checks.items():
+            if any(token in check_id for token in ("lifecycle-runtime", "candidate-runtime", "python-quality", "eng.backend", "eng.extension")):
+                self.assertIs(check["transaction_reuse"], False, check_id)
+
     def test_valid_declarations(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _write_declarations(root, {
-                "schema_version": "lexiflow.module-checks.v1",
-                "checks": [_VALID_CHECK],
-            })
+            _write_declarations(
+                root,
+                {
+                    "schema_version": "lexiflow.module-checks.v1",
+                    "checks": [_VALID_CHECK],
+                },
+            )
             data = load_declarations(root)
             self.assertEqual(data["schema_version"], "lexiflow.module-checks.v1")
             self.assertEqual(len(data["checks"]), 1)
+            self.assertIs(data["checks"][0]["transaction_reuse"], False)
+
+    def test_transaction_reuse_requires_boolean_and_defaults_to_false(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            check = {**_VALID_CHECK, "transaction_reuse": "true"}
+            _write_declarations(
+                root,
+                {
+                    "schema_version": "lexiflow.module-checks.v1",
+                    "checks": [check],
+                },
+            )
+            with self.assertRaises(DeclarationError) as ctx:
+                load_declarations(root)
+            self.assertEqual(ctx.exception.code, "declarations-shape")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            check = {**_VALID_CHECK, "transaction_reuse": True}
+            _write_declarations(
+                root,
+                {
+                    "schema_version": "lexiflow.module-checks.v1",
+                    "checks": [check],
+                },
+            )
+            data = load_declarations(root)
+            self.assertIs(data["checks"][0]["transaction_reuse"], True)
+
+    def test_runtime_transport_cannot_enable_transaction_reuse(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            check = {
+                **_VALID_CHECK,
+                "check_id": "eng.release.lifecycle-runtime",
+                "command": [
+                    "python3",
+                    "-m",
+                    "scripts.environment.release_runtime_check",
+                ],
+                "executable": "python3",
+                "transaction_reuse": True,
+                "result_contract": {
+                    "type": "json-stdout",
+                    "required_fields": ["status", "reason"],
+                    "allowed_statuses": ["PASS", "BLOCKED", "FAIL"],
+                },
+            }
+            _write_declarations(
+                root,
+                {
+                    "schema_version": "lexiflow.module-checks.v1",
+                    "checks": [check],
+                },
+            )
+            with self.assertRaises(DeclarationError) as ctx:
+                load_declarations(root)
+            self.assertEqual(ctx.exception.code, "declarations-shape")
 
     def test_missing_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -64,10 +143,13 @@ class TestLoadDeclarations(unittest.TestCase):
     def test_wrong_schema(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _write_declarations(root, {
-                "schema_version": "wrong",
-                "checks": [],
-            })
+            _write_declarations(
+                root,
+                {
+                    "schema_version": "wrong",
+                    "checks": [],
+                },
+            )
             with self.assertRaises(DeclarationError) as ctx:
                 load_declarations(root)
             self.assertEqual(ctx.exception.code, "declarations-schema")
@@ -77,10 +159,13 @@ class TestLoadDeclarations(unittest.TestCase):
             root = Path(tmpdir)
             check = dict(_VALID_CHECK)
             del check["command"]
-            _write_declarations(root, {
-                "schema_version": "lexiflow.module-checks.v1",
-                "checks": [check],
-            })
+            _write_declarations(
+                root,
+                {
+                    "schema_version": "lexiflow.module-checks.v1",
+                    "checks": [check],
+                },
+            )
             with self.assertRaises(DeclarationError) as ctx:
                 load_declarations(root)
             self.assertEqual(ctx.exception.code, "declarations-shape")
@@ -88,10 +173,13 @@ class TestLoadDeclarations(unittest.TestCase):
     def test_duplicate_check_id(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _write_declarations(root, {
-                "schema_version": "lexiflow.module-checks.v1",
-                "checks": [_VALID_CHECK, _VALID_CHECK],
-            })
+            _write_declarations(
+                root,
+                {
+                    "schema_version": "lexiflow.module-checks.v1",
+                    "checks": [_VALID_CHECK, _VALID_CHECK],
+                },
+            )
             with self.assertRaises(DeclarationError) as ctx:
                 load_declarations(root)
             self.assertEqual(ctx.exception.code, "duplicate-check-id")
@@ -101,10 +189,13 @@ class TestLoadDeclarations(unittest.TestCase):
             root = Path(tmpdir)
             check = dict(_VALID_CHECK)
             check["command"] = []
-            _write_declarations(root, {
-                "schema_version": "lexiflow.module-checks.v1",
-                "checks": [check],
-            })
+            _write_declarations(
+                root,
+                {
+                    "schema_version": "lexiflow.module-checks.v1",
+                    "checks": [check],
+                },
+            )
             with self.assertRaises(DeclarationError):
                 load_declarations(root)
 
@@ -113,10 +204,13 @@ class TestLoadDeclarations(unittest.TestCase):
             root = Path(tmpdir)
             check = dict(_VALID_CHECK)
             check["timeout_seconds"] = -1
-            _write_declarations(root, {
-                "schema_version": "lexiflow.module-checks.v1",
-                "checks": [check],
-            })
+            _write_declarations(
+                root,
+                {
+                    "schema_version": "lexiflow.module-checks.v1",
+                    "checks": [check],
+                },
+            )
             with self.assertRaises(DeclarationError):
                 load_declarations(root)
 
@@ -125,10 +219,13 @@ class TestLoadDeclarations(unittest.TestCase):
             root = Path(tmpdir)
             check = dict(_VALID_CHECK)
             check["scope"] = "invalid-scope"
-            _write_declarations(root, {
-                "schema_version": "lexiflow.module-checks.v1",
-                "checks": [check],
-            })
+            _write_declarations(
+                root,
+                {
+                    "schema_version": "lexiflow.module-checks.v1",
+                    "checks": [check],
+                },
+            )
             with self.assertRaises(DeclarationError):
                 load_declarations(root)
 

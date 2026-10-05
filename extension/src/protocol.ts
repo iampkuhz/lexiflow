@@ -13,11 +13,16 @@ export type KeyedHint = Hint & { startKey: string; endKey: string };
 export type HintResponse = { processedKeys: string[]; hints: KeyedHint[] };
 export type ApiTimings = { query?: number; rules?: number; api?: number };
 export type ApiResult = ({ ok: true; body: HintResponse } | { ok: false;
-  reason: "timeout" | "aborted" | "invalid-request" | "network" | "rejected" | "invalid-response" }) & { timings?: ApiTimings };
+  reason: "timeout" | "aborted" | "invalid-request" | "network" | "rejected" | "backend_unavailable" | "invalid-response" }) & { timings?: ApiTimings; requestId?: string };
 export const snapshotSegments = (snapshot: CaptionSnapshot): CaptionSegment[] => snapshot.captions.flatMap(group => group.segments);
 export const snapshotText = (snapshot: CaptionSnapshot): string => snapshotSegments(snapshot).map(segment => segment.text).join("");
 const boundedId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 128;
 const nonnegative = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+/** 正 BIGINT 以十进制字符串传输；不转换为丢失精度的 Number。 */
+export function isEntryId(value: unknown): value is string {
+  return typeof value === "string" && /^[1-9][0-9]{0,18}$/.test(value) &&
+    (value.length < 19 || value <= "9223372036854775807");
+}
 export function isStableId(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 }
@@ -85,7 +90,7 @@ export function parseHintResponse(value: unknown, request: CaptionHintRequest): 
       !Array.isArray(body.hints) || body.hints.length > MAX_CAPTION_LENGTH) return;
   let end = 0; let version: number | undefined;
   for (const hint of body.hints) {
-    if (!hint || !isStableId(hint.lexiconEntryId) || !isStableId(hint.senseId) || !Number.isSafeInteger(hint.lexiconVersion) || hint.lexiconVersion < 1 ||
+    if (!hint || !isEntryId(hint.lexiconEntryId) || !isStableId(hint.senseId) || !Number.isSafeInteger(hint.lexiconVersion) || hint.lexiconVersion < 1 ||
         (version !== undefined && version !== hint.lexiconVersion) || typeof hint.chineseGloss !== "string" ||
         !hint.chineseGloss.length || Array.from(hint.chineseGloss).length > 24 || !/\p{Script=Han}/u.test(hint.chineseGloss) || /[\s\p{P}\p{S}\p{C}]/u.test(hint.chineseGloss)) return;
     const resolved = resolveHint(hint, request.currentSnapshot);

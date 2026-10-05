@@ -336,7 +336,7 @@ class QoderRunnerContractTest(unittest.TestCase):
             self.assertTrue(contract["model_policy"]["explicit_model_argument_required"])
             self.assertEqual(contract["model_policy"]["allowed_escalation_models"], ["gpt-6-sol"])
             self.assertEqual(contract["model_policy"]["user_only_models"], ["gpt-6-astra"])
-            self.assertEqual(contract["max_active_subagents"], 1)
+            self.assertEqual(contract["max_active_subagents"], policy["codex_dispatch"]["max_active_subagents"])
             self.assertEqual(contract["default_fork_turns"], "none")
             self.assertEqual(
                 contract["completion_signal_fields"],
@@ -395,7 +395,12 @@ class QoderRunnerContractTest(unittest.TestCase):
         config = tomllib.loads((root / ".codex/config.toml").read_text())
         self.assertEqual(config["agents"]["default_subagent_model"], "gpt-6-luna")
         self.assertEqual(config["agents"]["default_subagent_reasoning_effort"], "medium")
-        self.assertEqual(config["agents"]["max_concurrent_threads_per_session"], 1)
+        native_limit = policy["codex_dispatch"]["max_active_subagents"]
+        self.assertGreater(native_limit, 1)
+        self.assertEqual(config["agents"]["max_concurrent_threads_per_session"], native_limit)
+        self.assertEqual(policy["qoder_delegation"]["max_active_runs"], 1)
+        self.assertEqual(policy["qoder_delegation"]["concurrency_scope"], "host-os-user-all-checkouts")
+        self.assertEqual(policy["qoder_delegation"]["scheduling"]["integration_validation"], "serial")
         self.assertNotIn("model", config)
         entry = root / ".codex" / config["model_instructions_file"]
         self.assertIn("harness/agent-policy.manifest.yaml", entry.read_text())
@@ -406,6 +411,22 @@ class QoderRunnerContractTest(unittest.TestCase):
             with self.subTest(profile=profile.name):
                 role = tomllib.loads(profile.read_text())
                 self.assertNotIn("model", role)
+
+    def test_agent_execution_spec_matches_parallelism_and_acceptance_policy(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        policy = yaml.safe_load((root / "harness/agent-policy.manifest.yaml").read_text())
+        spec = (root / "openspec/specs/agent-execution/spec.md").read_text()
+        codex_limit = policy["codex_dispatch"]["max_active_subagents"]
+        qoder_limit = policy["qoder_delegation"]["max_active_runs"]
+        self.assertGreater(codex_limit, 1)
+        self.assertEqual(qoder_limit, 1)
+        self.assertIn(f"Codex 原生子代理同时最多 MUST 遵守 `harness/agent-policy.manifest.yaml` 的并发上限", spec)
+        self.assertIn("Qoder 仍受宿主 OS 用户范围的单运行约束", spec)
+        self.assertIn("集成验证 SHALL 串行", spec)
+        self.assertIn("实现者 MAY 执行静态、编译和直接测试作为自检", spec)
+        self.assertIn("MUST NOT 签发 Formal validation 或 independent review", spec)
+        self.assertNotIn("Codex Sub-Agent 同时 MUST 最多一个", spec)
+        self.assertNotIn("不少于 120 分钟", spec)
 
     def test_required_handoff_rejects_missing_field(self) -> None:
         self.assertEqual(tuple(valid_task())[: len(handoff.REQUIRED_HANDOFF)], handoff.REQUIRED_HANDOFF)

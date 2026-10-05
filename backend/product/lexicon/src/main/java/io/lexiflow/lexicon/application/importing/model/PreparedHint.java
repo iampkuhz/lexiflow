@@ -10,9 +10,14 @@ import java.util.Objects;
  * @param exclusionReason 含义：稳定阻断原因。取值范围：通过时为 null，阻断时非空。
  * @param decisiveRule 含义：决定终态的规则身份。取值范围：非空。
  * @param matchedRules 含义：执行过的清洗变换。取值范围：非 null，不可变。
+ * @param classification 含义：与本结果一致的导入分类与缓存资格；非 null。
  */
 public record PreparedHint(
-    String gloss, String exclusionReason, String decisiveRule, List<String> matchedRules) {
+    String gloss,
+    String exclusionReason,
+    String decisiveRule,
+    List<String> matchedRules,
+    ImportClassification classification) {
   /** 检查互斥终态并冻结轨迹，不在结果模型中执行业务策略。 */
   public PreparedHint {
     if ((gloss == null) == (exclusionReason == null)) {
@@ -20,5 +25,9 @@ public record PreparedHint(
     }
     Objects.requireNonNull(decisiveRule, "decisiveRule");
     matchedRules = List.copyOf(matchedRules);
+    Objects.requireNonNull(classification, "classification");
+    if (classification.hintEligible() != (gloss != null)) {
+      throw new IllegalArgumentException("classification hint eligibility must match gloss");
+    }
   }
 }

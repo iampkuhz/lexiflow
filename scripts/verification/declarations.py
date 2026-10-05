@@ -197,6 +197,23 @@ def _validate_checks(checks: list[dict[str, Any]]) -> None:
                 )
         for path in check["input_paths"]:
             _safe_relative(path, f"checks[{i}].input_paths")
+        if "transaction_reuse" in check and not isinstance(
+            check["transaction_reuse"], bool
+        ):
+            raise DeclarationError(
+                "declarations-shape",
+                f"checks[{i}].transaction_reuse must be a boolean",
+            )
+        if check.get("transaction_reuse") is True:
+            from scripts.verification.kernel import is_release_runtime_child_check
+
+            if is_release_runtime_child_check(check):
+                raise DeclarationError(
+                    "declarations-shape",
+                    f"checks[{i}] runtime transport cannot enable transaction reuse",
+                )
+        # 缺省明确表示不允许跨 profile 事务共享执行。
+        check.setdefault("transaction_reuse", False)
         executable = check.get("executable")
         if executable is not None and (
             not isinstance(executable, str) or not executable

@@ -12,9 +12,11 @@ from urllib.parse import unquote, urlsplit
 import yaml
 
 LINK = re.compile(r'!?\[[^\]\n]*\]\(([^\s]+?)(?:\s+"[^"]*")?\)')
-REF_DEF = re.compile(r"^\s*\[[^\]]+\]:\s*<?([^\s>]+)>?", re.M)
+REF_DEF = re.compile(r"^\s*\[[^\]]+\]:\s*<?([^\s>]+)>?", re.MULTILINE)
 REFERENCE = re.compile(r"!?\[([^\]\n]+)\]\[([^\]\n]*)\]")
-HTML_LINK = re.compile(r'<(?:a|img)\b[^>]*?\b(?:href|src)=["\']([^"\']+)["\']', re.I)
+HTML_LINK = re.compile(
+    r'<(?:a|img)\b[^>]*?\b(?:href|src)=["\']([^"\']+)["\']', re.IGNORECASE
+)
 
 
 def slug(text):
@@ -57,32 +59,32 @@ def parse(text):
 
 def anchors(text):
     """收集文档内可引用锚点并识别重复或失效定义。"""
-    outside, _, _ = parse(text)
-    prose = "\n".join(line for _, line in outside)
-    found = set(re.findall(r'<a\s+(?:id|name)=["\']([^"\']+)', prose))
-    counts = {}
-    for _, line in outside:
-        match = re.match(r"^#{1,6}\s+(.+?)(?:\s+#+)?$", line)
-        if match:
-            base = slug(match[1])
-            n = counts.get(base, 0)
-            found.add(base if not n else f"{base}-{n}")
-            counts[base] = n + 1
-    return found
+    return anchors_from_parsed(parse(text))
 
 
-def check_file(root, file, forbidden_extensions=(".puml", ".svg", ".png")):
+def check_file(
+    root,
+    file,
+    forbidden_extensions=(".puml", ".svg", ".png"),
+    *,
+    text=None,
+    parsed=None,
+    anchor_index=None,
+    documents=None,
+):
     """检查单个 Markdown 文件的链接、标题与图源围栏。"""
     issues = []
-    text = file.read_text()
-    outside, diagrams, errors = parse(text)
+    text = file.read_text() if text is None else text
+    outside, diagrams, errors = parse(text) if parsed is None else parsed
     issues.extend(errors)
     prose = "\n".join(line for _, line in outside)
     prose = re.sub(r"(`+).*?\1", "", prose)
     explicit = re.findall(r'<a\s+(?:id|name)=["\']([^"\']+)', prose)
     if len(explicit) != len(set(explicit)):
         issues.append("显式锚点重复")
-    definitions = {x.casefold() for x in re.findall(r"^\s*\[([^\]]+)\]:", prose, re.M)}
+    definitions = {
+        x.casefold() for x in re.findall(r"^\s*\[([^\]]+)\]:", prose, re.MULTILINE)
+    }
     for label, reference in REFERENCE.findall(prose):
         if (reference or label).casefold() not in definitions:
             issues.append(f"未定义的引用链接：{reference or label}")
@@ -115,27 +117,63 @@ def check_file(root, file, forbidden_extensions=(".puml", ".svg", ".png")):
         if (
             parsed.fragment
             and dest.suffix == ".md"
-            and unquote(parsed.fragment) not in anchors(dest.read_text())
+            and unquote(parsed.fragment)
+            not in _anchors_for(dest, anchor_index, documents)
         ):
             issues.append(f"失效锚点：{target}")
     for line, code in diagrams:
-        starts = re.findall(r"^\s*@start(uml|mindmap)\b", code, re.M)
-        ends = re.findall(r"^\s*@end(uml|mindmap)\b", code, re.M)
+        starts = re.findall(r"^\s*@start(uml|mindmap)\b", code, re.MULTILINE)
+        ends = re.findall(r"^\s*@end(uml|mindmap)\b", code, re.MULTILINE)
         if len(starts) != 1 or starts != ends:
             issues.append(f"第 {line} 行图源定界符不配对")
-        if re.search(r"^\s*!include", code, re.M):
+        if re.search(r"^\s*!include", code, re.MULTILINE):
             issues.append(f"第 {line} 行图源依赖外部 include，不是自包含图源")
     return issues, len(diagrams)
 
 
-def check_heading_numbering(file, policy):
+def _anchors_for(file, anchor_index, documents=None):
+    """在单次 run 的 Markdown 索引中复用目标锚点，不跨调用持久化。"""
+    resolved = file.resolve()
+    if anchor_index is None:
+        return anchors(file.read_text())
+    if resolved not in anchor_index:
+        # 复用显式传入的当前 run 文档缓存；不使用跨调用模块状态。
+        text, parsed = (
+            documents.get(resolved, (None, None))
+            if documents is not None
+            else (None, None)
+        )
+        if parsed is None:
+            text = file.read_text()
+            parsed = parse(text)
+        anchor_index[resolved] = anchors_from_parsed(parsed)
+    return anchor_index[resolved]
+
+
+def anchors_from_parsed(parsed):
+    """从已解析的 Markdown 计算锚点集合，复用重复标题编号规则。"""
+    outside, _, _ = parsed
+    prose = "\n".join(line for _, line in outside)
+    found = set(re.findall(r'<a\s+(?:id|name)=["\']([^"\']+)', prose))
+    counts = {}
+    for _, line in outside:
+        match = re.match(r"^#{1,6}\s+(.+?)(?:\s+#+)?$", line)
+        if match:
+            base = slug(match[1])
+            n = counts.get(base, 0)
+            found.add(base if not n else f"{base}-{n}")
+            counts[base] = n + 1
+    return found
+
+
+def check_heading_numbering(file, policy, *, parsed=None):
     """检查 docs/ 渲染标题的层级十进制序号；代码围栏中的示例不算标题。"""
     numbering = policy.get("heading_numbering", {})
     if not numbering.get("required"):
         return []
     issues = []
     counters = [0] * 7
-    for line_number, line in parse(file.read_text())[0]:
+    for line_number, line in (parse(file.read_text()) if parsed is None else parsed)[0]:
         match = re.match(r"^(#{1,6})\s+(.+?)(?:\s+#+)?$", line)
         if not match:
             continue
@@ -149,15 +187,15 @@ def check_heading_numbering(file, policy):
     return issues
 
 
-def check_selected_solution_only(root, policy):
+def check_selected_solution_only(root, policy, *, documents=None):
     """检查文档是否只陈述已确定的方案，不把未决选项交给读者。"""
     config = policy.get("selected_solution_only", {})
     heading_patterns = [
-        re.compile(pattern, re.I)
+        re.compile(pattern, re.IGNORECASE)
         for pattern in config.get("prohibited_heading_patterns", [])
     ]
     prose_patterns = [
-        re.compile(pattern, re.I)
+        re.compile(pattern, re.IGNORECASE)
         for pattern in config.get("prohibited_prose_patterns", [])
     ]
     issues = []
@@ -166,7 +204,17 @@ def check_selected_solution_only(root, policy):
         if not directory.is_dir():
             continue
         for file in sorted(directory.rglob("*.md")):
-            for line_number, line in parse(file.read_text())[0]:
+            text, parsed = (
+                documents.get(file.resolve(), (None, None))
+                if documents is not None
+                else (None, None)
+            )
+            if parsed is None:
+                text = file.read_text()
+                parsed = parse(text)
+                if documents is not None:
+                    documents[file.resolve()] = (text, parsed)
+            for line_number, line in parsed[0]:
                 match = re.match(r"^#{1,6}\s+(.+?)(?:\s+#+)?$", line)
                 if match and any(
                     pattern.search(match.group(1)) for pattern in heading_patterns
@@ -200,7 +248,7 @@ def check_latest_only(root, policy):
     return issues
 
 
-def check_version_comparisons(root, policy):
+def check_version_comparisons(root, policy, *, documents=None):
     """拒绝普通文档中的版本对照；只有路径和标题均明确的对比页可例外。"""
     config = policy.get("maintenance", {}).get("version_comparison", {})
     roots = config.get("documentation_roots", [])
@@ -217,7 +265,17 @@ def check_version_comparisons(root, policy):
         if not directory.is_dir():
             continue
         for file in sorted(directory.rglob("*.md")):
-            outside, _, _ = parse(file.read_text())
+            text, parsed = (
+                documents.get(file.resolve(), (None, None))
+                if documents is not None
+                else (None, None)
+            )
+            if parsed is None:
+                text = file.read_text()
+                parsed = parse(text)
+                if documents is not None:
+                    documents[file.resolve()] = (text, parsed)
+            outside, _, _ = parsed
             prose = "\n".join(line for _, line in outside)
             title = next(
                 (
@@ -234,7 +292,14 @@ def check_version_comparisons(root, policy):
             if path_allowed and title_allowed:
                 continue
             for phrase in phrases:
-                if phrase in prose:
+                # 双字阶段简称不能命中“修改/更改/整改”等动词的尾部；
+                # 较长的禁止短语仍逐字检查，不用宽泛中文边界掩盖真实对照。
+                pattern = (
+                    re.compile(rf"(?<![修更整变悔涂篡批删]){re.escape(phrase)}")
+                    if phrase in {"改前", "改后"}
+                    else re.compile(re.escape(phrase))
+                )
+                if pattern.search(prose):
                     issues.append(
                         f"{file.relative_to(root)}: 普通文档禁止版本对照用语：{phrase}"
                     )
@@ -244,22 +309,41 @@ def check_version_comparisons(root, policy):
 def run(root):
     """遍历受治理文档并汇总可定位的静态问题；不评价语义和布局。"""
     policy = yaml.safe_load((root / "harness/documentation-policy.yaml").read_text())
-    issues = check_selected_solution_only(root, policy)
-    issues.extend(check_latest_only(root, policy))
-    issues.extend(check_version_comparisons(root, policy))
-    count = 0
+    documents = {}
+
+    def document(file):
+        key = file.resolve()
+        if key not in documents:
+            text = file.read_text()
+            documents[key] = (text, parse(text))
+        return documents[key]
+
+    anchor_index = {}
     files = sorted((root / "docs").rglob("*.md"))
     files += [root / "AGENTS.md", root / "README.md", root / "harness/README.md"]
     for file in files:
+        document(file)
+    issues = check_selected_solution_only(root, policy, documents=documents)
+    issues.extend(check_latest_only(root, policy))
+    issues.extend(check_version_comparisons(root, policy, documents=documents))
+    count = 0
+    for file in files:
+        text, parsed = document(file)
         errors, diagrams = check_file(
-            root, file, policy["forbidden_diagram_link_extensions"]
+            root,
+            file,
+            policy["forbidden_diagram_link_extensions"],
+            text=text,
+            parsed=parsed,
+            anchor_index=anchor_index,
+            documents=documents,
         )
         count += diagrams
         issues.extend(f"{file.relative_to(root)}: {x}" for x in errors)
         if file.is_relative_to(root / "docs"):
             issues.extend(
                 f"{file.relative_to(root)}: {x}"
-                for x in check_heading_numbering(file, policy)
+                for x in check_heading_numbering(file, policy, parsed=parsed)
             )
     if (root / "AGENTS.md").stat().st_size > policy["root_instruction_budget_bytes"]:
         issues.append("AGENTS.md 超出读取预算")

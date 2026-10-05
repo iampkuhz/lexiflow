@@ -62,13 +62,16 @@ public final class LexiconSurfacePolicy {
   }
 
   /**
-   * 检查表面形式是否位于当前查询窗口内。
+   * 检查查询资格：单词至少三个字母，完整短语仍按查询窗口独立判断。
    *
    * @param value 含义：词形表面。取值范围：非 null。
-   * @return 是否包含一至三个查询词元。
+   * @return 是否包含一至三个查询词元且单词达到最小字母数。
    */
   public static boolean withinQueryWindow(String value) {
-    int count = queryTokens(value).size();
+    var tokens = queryTokens(value);
+    int count = tokens.size();
+    if (count == 1 && tokens.getFirst().codePoints().filter(Character::isAlphabetic).count() < 3)
+      return false;
     return count > 0 && count <= MAX_PHRASE_TOKENS;
   }
 }

@@ -11,11 +11,32 @@ import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path, PurePosixPath
-from typing import Any, Callable
+from pathlib import Path
+from typing import Any
+
+from scripts.verification.input_snapshot import snapshot_inputs
 
 REPORT_SCHEMA = "lexiflow.verification-report.v1"
+VERIFY_CHILD_INPUT_SCHEMA = "lexiflow.verify-child-input.v1"
+VERIFY_CHILD_INPUT_MAX_BYTES = 1_048_576
+RELEASE_RUNTIME_CHECK_IDS = frozenset(
+    {"eng.release.lifecycle-runtime", "eng.release.lifecycle-runtime-on-change"}
+)
+RELEASE_RUNTIME_CHILD_COMMAND = (
+    "python3",
+    "-m",
+    "scripts.environment.release_runtime_check",
+)
+CANDIDATE_RUNTIME_CHECK_IDS = frozenset(
+    {"eng.release.candidate-runtime", "eng.release.candidate-runtime-on-change"}
+)
+CANDIDATE_RUNTIME_CHILD_COMMAND = (
+    "python3",
+    "-m",
+    "scripts.environment.candidate_runtime_check",
+)
 _ALLOWED_ENV_KEYS = frozenset(
     {
         "USER",
@@ -72,6 +93,26 @@ def fingerprint_json(value: Any) -> str:
     )
 
 
+def is_release_runtime_child_check(check: dict[str, Any]) -> bool:
+    """只识别固定 runtime Check 与对应 Python 命令构成的父端 stdin 接线。"""
+    command = check.get("command")
+    return (
+        isinstance(check.get("check_id"), str)
+        and isinstance(command, list)
+        and (
+            (
+                check["check_id"] in RELEASE_RUNTIME_CHECK_IDS
+                and tuple(command) == RELEASE_RUNTIME_CHILD_COMMAND
+            )
+            or (
+                check["check_id"] in CANDIDATE_RUNTIME_CHECK_IDS
+                and tuple(command) == CANDIDATE_RUNTIME_CHILD_COMMAND
+            )
+        )
+        and check.get("executable") == "python3"
+    )
+
+
 def build_child_environment(
     override: dict[str, str] | None = None,
     runtime_environment: dict[str, str] | None = None,
@@ -97,6 +138,26 @@ def build_child_environment(
     if runtime_environment:
         env.update(runtime_environment)
     return env
+
+
+def probe_python_package_yaml(
+    child_env: dict[str, str], cwd: str | Path, timeout_seconds: int = 5
+) -> dict[str, Any]:
+    """通过受控进程组验证 Check 同解释器能导入 yaml。"""
+    result = run_check_process(
+        [sys.executable, "-c", "import yaml; print(yaml.__file__)"],
+        str(cwd),
+        child_env,
+        timeout_seconds,
+        sys.executable,
+    )
+    available = result.get("status") == "PASS" and result.get("exit_code") == 0
+    return {
+        "available": available,
+        "subprocess_verified": available,
+        "origin": result.get("stdout", "").strip() if available else "",
+        "error": result.get("exit_reason", "") if not available else "",
+    }
 
 
 def verify_input_descriptors(
@@ -129,43 +190,9 @@ def all_descriptors_verified(results: list[dict[str, str]]) -> bool:
     return all(item["status"] == "verified" for item in results)
 
 
-def _safe_relative(locator: str) -> bool:
-    return (
-        bool(locator)
-        and not locator.startswith("/")
-        and ".." not in PurePosixPath(locator).parts
-    )
-
-
-def _source_input_file(path: Path) -> bool:
-    """从声明的源码目录中排除可重建的本地产物。"""
-    generated_parts = {"__pycache__", ".gradle", "build", "node_modules"}
-    return path.suffix != ".pyc" and not generated_parts.intersection(path.parts)
-
-
 def snapshot_check_inputs(root: Path, check: dict[str, Any]) -> dict[str, Any]:
     """对实际声明的输入文件和完整不可变 Check 配置取哈希。"""
-    files: list[dict[str, str]] = []
-    missing: list[str] = []
-    for locator in sorted(set(check.get("input_paths", []))):
-        if not _safe_relative(locator):
-            missing.append(locator)
-            continue
-        target = root / locator
-        if target.is_file():
-            files.append(
-                {"locator": locator, "sha256": sha256_bytes(target.read_bytes())}
-            )
-        elif target.is_dir():
-            for path in sorted(
-                p for p in target.rglob("*") if p.is_file() and _source_input_file(p)
-            ):
-                rel = path.relative_to(root).as_posix()
-                files.append(
-                    {"locator": rel, "sha256": sha256_bytes(path.read_bytes())}
-                )
-        else:
-            missing.append(locator)
+    files, missing = snapshot_inputs(root, check)
     value = {"check_config": check, "files": files, "missing": missing}
     return {"fingerprint": fingerprint_json(value), "files": files, "missing": missing}
 
@@ -194,18 +221,37 @@ def run_check_process(
     env: dict[str, str],
     timeout_seconds: int,
     executable: str | None = None,
+    *,
+    stdin_payload: bytes | None = None,
 ) -> dict[str, Any]:
-    """只运行声明的 argv；唯有声明为 python3 时可使用当前 venv 解释器。"""
+    """运行声明 argv；唯有固定子进程可选用有界匿名 stdin payload。"""
     executed = list(argv)
     if executable == "python3" and argv[0] == "python3":
         executed[0] = sys.executable
     started_at, started = _utc_now(), time.monotonic()
+    if stdin_payload is not None and (
+        not isinstance(stdin_payload, bytes)
+        or len(stdin_payload) > VERIFY_CHILD_INPUT_MAX_BYTES
+    ):
+        return {
+            "status": "BLOCKED",
+            "exit_code": None,
+            "exit_reason": "verify-context-unavailable",
+            "stdout": "",
+            "stderr": "",
+            "duration_seconds": 0.0,
+            "started_at": started_at,
+            "finished_at": _utc_now(),
+            "timed_out": False,
+            "executable": executed[0],
+            "executed_argv": [],
+        }
     try:
         proc = subprocess.Popen(
             executed,
             cwd=cwd,
             env=env,
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE if stdin_payload is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,
@@ -225,23 +271,40 @@ def run_check_process(
             "executable": executed[0],
             "executed_argv": executed,
         }
+    stdout, stderr = b"", b""
+    timed_out, reason, interrupted = False, "exited", None
     try:
-        stdout, stderr = proc.communicate(timeout=timeout_seconds)
-        timed_out, reason = False, "exited"
+        if stdin_payload is None:
+            stdout, stderr = proc.communicate(timeout=timeout_seconds)
+        else:
+            stdout, stderr = proc.communicate(
+                input=stdin_payload, timeout=timeout_seconds
+            )
     except subprocess.TimeoutExpired:
-        _terminate_group(proc.pid)
-        try:
-            stdout, stderr = proc.communicate(timeout=5)
-        except Exception:
-            proc.kill()
-            stdout, stderr = b"", b""
         timed_out, reason = True, "timeout"
-    except BaseException:
-        # Hook 总超时、SIGTERM 与 Ctrl-C 也必须回收独立的 Check 进程组。
-        _terminate_group(proc.pid)
-        proc.wait(timeout=5)
-        raise
-    return {
+    except BaseException as exc:
+        interrupted = exc
+        reason = "cancelled"
+    finally:
+        # 总预算可能正好在单项 timeout 的回收窗口到期。回收本次进程组期间
+        # 延迟信号，完成 wait/管道关闭后再传播，不能让第二个异常跳过清理。
+        blocked_signals = {signal.SIGALRM, signal.SIGTERM, signal.SIGINT}
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, blocked_signals)
+        try:
+            if timed_out or interrupted is not None:
+                _terminate_group(proc.pid)
+                try:
+                    stdout, stderr = proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    stdout, stderr = proc.communicate(timeout=5)
+        finally:
+            try:
+                signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+            except BaseException as exc:
+                interrupted = exc
+                reason = "cancelled"
+    result = {
         "status": "FAIL" if timed_out or proc.returncode != 0 else "PASS",
         "exit_code": proc.returncode,
         "exit_reason": reason,
@@ -254,6 +317,12 @@ def run_check_process(
         "executable": executed[0],
         "executed_argv": executed,
     }
+
+    if interrupted is not None:
+        # 受控取消仍把原始输出交给调用层保存；不将取消转成退出零。
+        interrupted.process_result = result
+        raise interrupted
+    return result
 
 
 def _write_output_artifacts(
@@ -422,13 +491,118 @@ def execute_single_check(
                 }
             },
         )
-    process = runner(
-        list(check["command"]),
-        str(cwd_path),
-        env,
-        check["timeout_seconds"],
-        check.get("executable"),
-    )
+    child_transport = is_release_runtime_child_check(check)
+    stdin_payload: bytes | None = None
+    if child_transport:
+        if not isinstance(run_id, str) or not run_id.strip():
+            blocked = _not_run_result(
+                check,
+                "verify-context-unavailable",
+                {
+                    "input_snapshot": {
+                        "pre": pre,
+                        "before_execution": observed_before_execution,
+                        "post": {},
+                    }
+                },
+            )
+            blocked["status"] = "BLOCKED"
+            return blocked
+        if set(pre) != {"fingerprint", "files", "missing"}:
+            return _not_run_result(
+                check,
+                "verify-context-invalid",
+                {
+                    "input_snapshot": {
+                        "pre": pre,
+                        "before_execution": observed_before_execution,
+                        "post": {},
+                    }
+                },
+            )
+        envelope = {
+            "schema_version": VERIFY_CHILD_INPUT_SCHEMA,
+            "run_id": run_id,
+            "check_id": check["check_id"],
+            "check_config_fingerprint": fingerprint_json(check),
+            "effective_check": check,
+            "snapshot": pre,
+        }
+        try:
+            stdin_payload = json.dumps(
+                envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        except (TypeError, ValueError):
+            return _not_run_result(
+                check,
+                "verify-context-invalid",
+                {
+                    "input_snapshot": {
+                        "pre": pre,
+                        "before_execution": observed_before_execution,
+                        "post": {},
+                    }
+                },
+            )
+        if len(stdin_payload) > VERIFY_CHILD_INPUT_MAX_BYTES:
+            blocked = _not_run_result(
+                check,
+                "verify-context-unavailable",
+                {
+                    "input_snapshot": {
+                        "pre": pre,
+                        "before_execution": observed_before_execution,
+                        "post": {},
+                    }
+                },
+            )
+            blocked["status"] = "BLOCKED"
+            return blocked
+    # 在重命令前验证 python-package-yaml 实际可导入（使用安全子环境）。
+    # 这比 runtime.diagnose 的 find_spec 更可靠，因为使用与 Check 相同的环境。
+    if "python-package-yaml" in check.get("required_environment", []):
+        yaml_probe = probe_python_package_yaml(env, cwd_path)
+        if not yaml_probe["available"]:
+            blocked = _not_run_result(
+                check,
+                "python-package-yaml-unavailable-in-child-env",
+                {
+                    "input_snapshot": {
+                        "pre": pre,
+                        "before_execution": observed_before_execution,
+                        "post": {},
+                    },
+                    "yaml_probe": yaml_probe,
+                },
+            )
+            blocked["status"] = "BLOCKED"
+            return blocked
+    try:
+        if child_transport:
+            process = runner(
+                list(check["command"]),
+                str(cwd_path),
+                env,
+                check["timeout_seconds"],
+                check.get("executable"),
+                stdin_payload=stdin_payload,
+            )
+        else:
+            process = runner(
+                list(check["command"]),
+                str(cwd_path),
+                env,
+                check["timeout_seconds"],
+                check.get("executable"),
+            )
+    except BaseException as exc:
+        process = getattr(exc, "process_result", None)
+        if isinstance(process, dict):
+            exc.output_artifacts = _write_output_artifacts(
+                repo_root, run_id or str(uuid.uuid4()), check["check_id"], process
+            )
+            exc.check_id = check["check_id"]
+        raise
     artifacts = _write_output_artifacts(
         repo_root, run_id or str(uuid.uuid4()), check["check_id"], process
     )
@@ -443,6 +617,27 @@ def execute_single_check(
         post_descriptors and not all_descriptors_verified(post_descriptors)
     ):
         status, reason = "FAIL", "input-drift"
+    elif (
+        child_transport
+        and not process.get("timed_out")
+        and process.get("exit_code") == 0
+    ):
+        report = completeness.get("report")
+        contract = check.get("result_contract", {})
+        if contract.get("type") != "json-stdout" or (
+            status in {"PASS", "BLOCKED"}
+            and (
+                isinstance(report, dict)
+                and report.get("status") in {"PASS", "BLOCKED", "FAIL"}
+                and report.get("status") in contract.get("allowed_statuses", [])
+            )
+            and (
+                report.get("run_id") != run_id
+                or report.get("check_id") != check["check_id"]
+                or report.get("verify_input_fingerprint") != pre["fingerprint"]
+            )
+        ):
+            status, reason = "FAIL", "verify-context-invalid"
     return {
         "check_id": check["check_id"],
         "module": check["module"],

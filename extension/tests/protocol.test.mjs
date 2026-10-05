@@ -43,3 +43,15 @@ test('rejects overlaps and mixed versions without imposing three-hint limit',()=
  assert.equal(parseHintResponse(response(req,[hints[0],{...hints[1],lexiconVersion:2}]),req),undefined);
  assert.equal(inlineParts('reliable',[resolveHint(keyedHint(),request().currentSnapshot)]).map(p=>p.text).join(''),'reliable(可靠的)');
 });
+
+test('preserves positive BIGINT entry identities as exact decimal strings',()=>{
+ const req=request();
+ for(const id of ['1','9007199254740993','9223372036854775807']) {
+  const parsed=parseHintResponse(response(req,[{...keyedHint(),lexiconEntryId:id}]),req);
+  assert.equal(parsed.hints[0].lexiconEntryId,id);
+ }
+ for(const id of ['0','01','-1','1.0','1e3','9223372036854775808','10000000000000000000',
+  '00000000-0000-0000-0000-000000000001',9007199254740992,null]) {
+  assert.equal(parseHintResponse(response(req,[{...keyedHint(),lexiconEntryId:id}]),req),undefined);
+ }
+});

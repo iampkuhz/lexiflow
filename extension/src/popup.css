@@ -19,13 +19,18 @@ body { width: 280px; min-height: 165px; margin: 0; padding: 0 16px 12px; }
 header { display:flex; align-items:center; gap:9px; height:48px; margin:0 -16px 10px; padding:0 16px; border-bottom:1px solid var(--line); color:var(--fg); font-size:16px; letter-spacing:-.02em; }
 header img { width:24px; height:24px; }
 main { display:grid; gap:9px; }
+section { display:grid; gap:5px; }
+#service-status, #service-identity { border-radius:5px; padding:5px 7px; font-size:12px; color:var(--muted); }
+#service-status[data-kind="error"] { color:var(--error); background:var(--error-bg); }
+#service-status[data-kind="success"] { color:var(--success); background:var(--success-bg); }
+#service-identity[hidden] { display:none; }
 .toggle-row { display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:32px; cursor:pointer; }
 .toggle-label { font-size:14px; font-weight:600; }
 .switch { appearance:none; width:40px; height:24px; margin:0; position:relative; flex:none; border:1px solid var(--line); border-radius:16px; background:var(--muted); cursor:pointer; transition:background-color .15s ease; }
 .switch::after { content:""; position:absolute; width:18px; height:18px; top:2px; left:2px; border-radius:50%; background:var(--bg); transition:left .15s ease; }
 .switch:checked { background:var(--accent); }
 .switch:checked::after { left:18px; background:var(--on); }
-.switch:disabled { opacity:.45; cursor:wait; }
+.switch:disabled { opacity:.45; cursor:not-allowed; }
 #page-status, #restore-status { border-radius:5px; padding:5px 7px; font-size:12px; color:var(--muted); }
 #page-status[data-kind="error"], #restore-status[data-kind="error"] { color:var(--error); background:var(--error-bg); }
 #page-status[data-kind="success"], #restore-status[data-kind="success"] { color:var(--success); background:var(--success-bg); }
@@ -37,5 +42,5 @@ details p { margin:8px 0; color:var(--muted); }
 .actions { display:flex; gap:7px; }
 button { min-height:28px; border:1px solid var(--line); border-radius:5px; padding:4px 9px; color:var(--fg); background:var(--bg); cursor:pointer; font:inherit; }
 button:hover { background:light-dark(#f3f7f4, #26362e); }
-button:disabled { opacity:.55; cursor:wait; }
+button:disabled { opacity:.55; cursor:not-allowed; }
 @media(prefers-reduced-motion:reduce) { .switch, .switch::after { transition:none; } }

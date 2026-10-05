@@ -28,6 +28,16 @@ execution_progress:
   dispatch_evidence: start 返回 run_id 仅表示已派发；只有匹配身份的 started.json 才证明 CLI 已启动。预检 PASS、计划和预计动作均不是启动证据。
   blocked_handoff: 报告实际失败层、阻塞证据与可执行接手路径；可自行完成的准备或合规接手应继续执行，只有缺用户决定、外部恢复或真实执行能力时才交还控制权。
   asynchronous_dispatch_handoff: Qoder start/resume 返回 AWAITING_CALLBACK 后必须立即结束当前主线程回合；这是实际派发后的控制权交接，不属于只承诺不执行。不得 sleep、查时钟、探测进程/日志或以其他工作保持本轮活跃等待完成。只由终态 callback 续办；重复已 ack/superseded 回调直接结束。
+  user_visible_dispatch:
+    owner: parent-agent
+    surface: current-conversation-assistant-message
+    applies_to: [qoder-start, qoder-resume, codex-spawn, codex-followup, fallback]
+    before_dispatch: 调用前先在当前聊天正文说明执行器、工作包、任务目标和写入范围；明确是准备派发而非已经启动。原生 Codex 同时说明已选择的模型与 reasoning；Qoder 模型由 runner 管理，不猜测。
+    after_dispatch: 工具返回后立即在当前聊天正文报告真实结果、work_package_id 与实际 run_id 或原生 agent 标识；区分已受理但未确认启动、已确认启动、拒绝或失败。只有对应启动证据才说已启动。
+    asynchronous_handoff: AWAITING_CALLBACK 的消息必须说明实施在后台、主线程等待终态通知、尚未验收，并以该条可见消息结束本回合；不为展示进度增加轮询或保持回合活跃。
+    after_completion: 收到终态通知后说明实施结果与主线程下一步；实施完成、独立验证、审查、提交和推送分别按真实证据报告，不把 callback 或 exit-zero 写成验收完成。
+    not_a_substitute: [tool-output-only, terminal-stdout-only, local-log-only, openspec-status-only]
+    privacy: 只展示有界任务摘要、标识和仓库相对产物路径；不粘贴原始日志、凭据、本机私有路径或业务输入。
 
 # 隐私边界：下列数据不得进入共享产物或委派上下文。
 privacy:
@@ -70,6 +80,88 @@ architecture:
   - english-caption-waits-for-model
 
 # 工作包公共 contract：模型选择、身份、caller 输入、runner 输出与结果核对。
+# 风险等级来自实际差异、内容与依赖闭包；未知不降级，Task要求只能增加检查。
+risk_classification:
+  schema_version: lexiflow.risk-classification.v1
+  levels:
+  - mechanical
+  - local-function
+  - high-risk-engineering
+  - formal-release
+  high_risk_paths:
+  - AGENTS.md
+  - harness/**
+  - .codex/**
+  - .qoder/**
+  - openspec/**
+  - planning/**
+  - scripts/**
+  - tests/**
+  - infra/**
+  - ops/**
+  - .github/**
+  - backend/*.kts
+  - backend/**/*.kts
+  - backend/gradle/**
+  - backend/gradle.properties
+  - backend/buildSrc/**
+  - backend/verification/**
+  - backend/product/api/**
+  - backend/product/adapters/**
+  - '**/port/**'
+  - '**/contract/**'
+  - docs/architecture/**
+  - docs/development/**
+  - docs/roadmap/**
+  local_owner_roots:
+    lexicon: backend/product/lexicon/
+    enrichment: backend/product/enrichment/
+    extension: extension/src/
+    user-documentation: docs/user/
+  mechanical_proof: existing-user-markdown-crlf-only
+  sensitive_content_patterns:
+  - (?i)\b(public|export|fetch|innerHTML|eval|exec|spawn|ProcessBuilder|subprocess|chmod|symlink|jdbc|sql|DataSource|Entity|token|auth\w*|permission\w*|lock\w*|cancel\w*|shutdown|cleanup|delete|remove|redis|postgres\w*|provider|model|inference)\b
+  - (?i)(https?://|localStorage|chrome\.storage|Files\.|fs\.|writeFile|readFile|dataset|schema|password|secret|credential|zipfile|archive|\.execute\(|\.start\()
+  private_paths:
+  - secrets/**
+  - .env
+  - .env.*
+  - data/**
+  - .local/**
+  - tmp/**
+  unknown: high-risk-engineering
+  uncovered: BLOCKED-with-coverage-gap
+  formal_check_source: harness/ci-policy.yaml#formal_only_check_ids
+  validation_actor: different-from-producer-for-all-tiers
+  independent_review_levels:
+  - high-risk-engineering
+  - formal-release
+  repository_pass: only-complete-repository-baseline
+  development_baseline: all-baseline-except-formal-only-and-no-required-id-excluded
+
+verification_window:
+  implementation: scripts/verification/coordination.py
+  scope: same-checkout-verification-execution
+  lock: tmp/quality/verification-window/execution.lock
+  acquisition: exclusive-nonblocking
+  busy: BLOCKED-no-automatic-retry
+  consumers: [change-verify, repository-verify, delivery-hook, work-package, task-validation]
+  sharing: explicit-live-same-thread-holder-within-one-call
+  edit_lock: false
+  freshness: input-closure-before-after-and-publication-remains-required
+  unknown_owner: never-kill-never-unlink-never-infer-from-pid-or-lock-content
+
+execution_failure_handling:
+  diagnostic_summary: scripts/verification/summaries.py
+  known_layers: [static-check, executor, environment, evidence, authorization, prerequisite]
+  assertion_failure: check-needs-triage-until-source-and-log-evidence-distinguish-product-from-test-fixture
+  repair: keep-original-work-package-and-owner-unless-specific-root-cause-requires-change
+  redispatch: no-mechanical-redispatch-or-identity-reset-after-repeated-failure
+  model_change: codex-model-policy-specific-evidence-required
+  budget: one-shared-deadline-including-inner-process-timeout-and-cancellation
+  user_input: only-unavailable-information-real-tradeoff-or-required-authorization
+  summary_limits: structured-test-identities-positions-counts-and-log-locators-not-raw-output
+
 subagent_protocol:
 
   # 按完整工作包分类；角色名和继承设置不能代替显式模型与 reasoning 参数。
@@ -118,6 +210,17 @@ subagent_protocol:
     - explicit_user_requirement
     qoder_model_policy: separate-runner-controlled
     default_reasoning_effort: medium
+  validation_efficiency:
+    sequencing: [freeze-final-checkout-and-inputs, direct-small-regression, one-independent-complete-hook]
+    full_hook_owner: independent-validator
+    reviewer_consumes: frozen-evidence-read-only
+    event_wait: native-long-event-wait
+    log_reading: only-on-informative-event-or-terminal-state
+    rerun_when: required-check-failure-or-relevant-input-or-environment-change
+    reuse_boundary: same-transaction-only-when-existing-reuse-contract-proves-complete-input-config-environment-window-runner-context-equality
+    cross-delivery-reuse: forbidden
+    implementation_self_check: direct-static-compile-and-targeted-tests-allowed
+    no-routine-full-suite-before-hook: true
   status_values:
   - PASS
   - FAIL
@@ -306,7 +409,7 @@ subagent_protocol:
     - validation_commands
     - failure_policy
     - parent_client
-    task_ids_rule: exact-ordered-unique-minimum-two
+    task_ids_rule: exact-ordered-unique-minimum-one
     target_rule: target_task_id-equals-task_id-and-is-member-of-task_ids
     per_task_maps_rule: exact-keyset-equals-task_ids-and-target-values-match-projection
     current_catalog_rule: all-task-versions-owner-outputs-acceptance-validation-and-package-scope-must-match-current-catalog
@@ -407,7 +510,7 @@ subagent_protocol:
     failure_policy: non-empty-string
     parent_client: exact-string-codex
   codex_runtime_binding:
-    schema_version: lexiflow.codex-runtime-binding.v1
+    schema_version: lexiflow.codex-runtime-binding.v2
     implementation: scripts/agents/codex/runtime_binding.py
     actor_source: owned-local-session-metadata-cross-checked-with-runtime-route
     local_adapter: scripts/agents/local_codex_runtime.py
@@ -423,12 +526,24 @@ subagent_protocol:
     fabricated_or_conflicting_runtime: FAIL
     binding_publication: immutable-before-projection-and-completion
     identity_authentication: local-source-provenance-not-JSON-structure-or-self-report
+    historical_verification: persisted-native-proof-rechecked-against-owned-session-metadata
   acceptance_submission:
     implementation: scripts/delivery_gate/submit.py
     source: fixed-current-verification-report-and-target-task
     producer_facts_owner: scripts/agents/
     delegated_producer: explicit-run-id-with-verified-task-completion-and-result
     inputs: verification-report-id-task-id-explicit-scope-confirmation
+    task_subject: current-diff-intersect-current-catalog-scope-and-claims
+    risk_subject: task-subject-plus-changed-input-dependency-fixed-point
+    source_report: complete-current-diff-at-submission
+    subsequent_freshness: rederive-task-and-dependency-subject-not-unrelated-diff
+    formal_batch:
+      maximum_submissions: 16
+      unique_submission_ids: required
+      preflight: all-submissions-before-any-check
+      independence: validator-different-from-every-producer-and-submitter
+      reuse: same-call-explicit-check-equivalence-only
+      evidence: separate-profile-report-and-validation-per-task
     subprocess_log_inference_or_legacy_fallback: forbidden
     formal_receipt_issuance: public-acceptance-scenarios-only
   codex_main_task_projection:
@@ -437,7 +552,7 @@ subagent_protocol:
     canonical_actor_id: codex-session-<actual-session-uuid>
     protected_host_actor_id: /root
     cardinality: one-current-catalog-task
-    delegated_projection: mutually-exclusive-minimum-two-tasks-unchanged
+    delegated_projection: mutually-exclusive-single-or-multiple-task-package
     caller_identity_or_executor_kind_authority: forbidden
     identity_source: same-immutable-codex-runtime-binding
     self-validation-or-self-review: forbidden
@@ -555,7 +670,9 @@ qoder_delegation:
 
 # Codex 原生协作：沿用工作包合同，通过 native collaboration event 收取结果。
 codex_dispatch:
-  max_active_subagents: 1
+  # 原生子代理允许多任务并行；Qoder 的 host-wide 单并发在 qoder_delegation 单独约束。
+  # 同时开放线程的客户端上限消费此值；完成但未关闭的线程可能仍占客户端名额。
+  max_active_subagents: 6
   default_fork_turns: none
   full_history_fork_requires_explicit_exception: true
   completion_signal_fields:

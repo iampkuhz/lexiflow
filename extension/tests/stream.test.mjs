@@ -18,6 +18,20 @@ test('coalesces observations and acknowledges only the successful dispatched sna
  const req=t.calls[1].event.request;assert.deepEqual(req.lastRequestedSnapshot,t.calls[0].event.request.currentSnapshot);
  assert.deepEqual(req.currentSnapshot.captions[0].segments.map(s=>s.append),[false,false,true]);
 });
+test('separates cancelled scheduled sends, in-flight cancellation, and late completion',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('a','A')));t.coordinator.submit(event(2,segment('b','B')));
+ assert.equal(t.observations.filter(o=>o.outcome==='cancelled_before_send').length,1);
+ t.scheduler.run();t.coordinator.clear(3);assert.equal(t.observations.filter(o=>o.outcome==='cancelled_in_flight').length,1);
+ await finish(t.calls[0]);assert.equal(t.observations.filter(o=>o.outcome==='late_response').length,1);
+});
+test('no-hint is based on current response rather than retained hints and observation faults are isolated',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('a','reliable')));t.scheduler.run();await finish(t.calls[0],[keyedHint('a')]);
+ const second=event(2,segment('a','reliable'),segment('b',' method'));
+ t.coordinator.submit(second);t.scheduler.run();await finish(t.calls[1]);
+ assert.equal(t.views.at(-1).hints.length,1);assert.equal(t.observations.filter(o=>o.outcome==='no-pending').length,0);
+ assert.equal(t.observations.filter(o=>o.outcome==='ready').length,2);
+ assert.equal(t.observations.filter(o=>o.outcome==='no_hint').length,1);
+});
 test('late successful result merges into still visible prefix while suffix waits',async()=>{
  const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();
  t.coordinator.submit(event(2,segment('s1','reliable'),segment('s2',' method')));await finish(t.calls[0],[keyedHint()]);
@@ -61,6 +75,7 @@ for (const reason of ['network', 'timeout', 'rejected', 'invalid-request', 'inva
   t.calls[0].resolve({ok:false,reason});await flush();
   assert.equal(t.scheduler.jobs.size,0);t.scheduler.run();assert.equal(t.calls.length,1);
   assert.equal(t.views.at(-1).state,'fallback');
+  if(reason==='invalid-response') assert.equal(t.observations.filter(o=>o.outcome==='protocol_mismatch').length,1);
   t.coordinator.submit(event(2,segment('s1','reliable'),segment('s2',' method')));t.scheduler.run();
   const req=t.calls[1].event.request;
   assert.equal(req.lastRequestedSnapshot,null);
@@ -145,13 +160,49 @@ test('synchronous transport failure waits for a caption change and timing has no
  assert.equal(scheduler.jobs.size,0);assert.equal(JSON.stringify(observations).includes('reliable'),false);assert.equal(COALESCE_MS,16);
 });
 
-test('same entry is shown once across incremental replies while all new keys are acknowledged',async()=>{
+test('same entry at a new non-overlapping range is preserved across incremental replies',async()=>{
  const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();await finish(t.calls[0],[keyedHint()]);
  t.coordinator.submit(event(2,segment('s1','reliable'),segment('s2',' reliable')));t.scheduler.run();await finish(t.calls[1],[keyedHint('s2',1,9)]);
- assert.equal(t.views.at(-1).hints.length,1);assert.equal(t.views.at(-1).hints[0].startOffset,0);
+ assert.equal(t.views.at(-1).hints.length,2);assert.deepEqual(t.views.at(-1).hints.map(hint=>hint.startOffset),[0,9]);
  t.coordinator.submit(event(3,segment('s1','reliable'),segment('s2',' reliable')));t.scheduler.run();assert.equal(t.calls.length,2);
 });
-test('same entry duplicated within one reply still yields one display hint',async()=>{
+test('same entry at distinct non-overlapping ranges is preserved within one reply',async()=>{
  const t=setup();t.coordinator.submit(event(1,segment('s1','reliable'),segment('s2',' reliable')));t.scheduler.run();
- await finish(t.calls[0],[keyedHint(),keyedHint('s2',1,9)]);assert.equal(t.views.at(-1).hints.length,1);assert.equal(t.views.at(-1).state,'ready');
+ await finish(t.calls[0],[keyedHint(),keyedHint('s2',1,9)]);assert.equal(t.views.at(-1).hints.length,2);assert.equal(t.views.at(-1).state,'ready');
+});
+test('partial Server-Timing records measured dimensions and one missing event per accepted response',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();
+ t.calls[0].resolve({ok:true,body:response(t.calls[0].event.request,[]),timings:{query:2,api:5}});await flush();
+ assert.deepEqual(t.observations.filter(o=>o.stage==='query').map(o=>o.elapsedMs),[2]);
+ assert.equal(t.observations.filter(o=>o.stage==='rules').length,0);
+ assert.equal(t.observations.filter(o=>o.outcome==='missing-server-timing').length,1);
+ assert.equal(t.observations.filter(o=>o.outcome==='no_hint').length,1);
+});
+test('same lexicon entry may occur again in a non-overlapping caption interval', async () => {
+ const t=setup();t.coordinator.submit(event(1,segment('s1','reliable and reliable')));t.scheduler.run();
+ const first=keyedHint('s1',0,8), second=keyedHint('s1',13,21);
+ await finish(t.calls[0],[first,second]);
+ assert.equal(t.views.at(-1).hints.length,2);
+ assert.deepEqual(t.views.at(-1).hints.map(h=>[h.startOffset,h.endOffset]),[[0,8],[13,21]]);
+});
+
+test('accepted no-hint response retains a bounded event receipt for visible English logging',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('s1','ordinary English')));t.scheduler.run();
+ const requestId='00000000-0000-0000-0000-000000000123';
+ t.calls[0].resolve({ok:true,requestId,body:response(t.calls[0].event.request,[])});await flush();
+ assert.equal(t.views.at(-1).state,'no-pending');
+ assert.equal(t.views.at(-1).debugRequestId,requestId);
+ assert.equal(t.views.at(-1).debugRequestEvent.sequence,1);
+});
+test('invalid or absent request ID never becomes a fabricated request correlation ID',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('s1','untranslated')));t.scheduler.run();
+ t.calls[0].resolve({ok:true,body:response(t.calls[0].event.request,[])});await flush();
+ assert.equal(t.views.at(-1).debugRequestId,undefined);
+ assert.equal(t.views.at(-1).debugRequestEvent.sequence,1);
+});
+test('natural same-track line replacement exposes finalized keys but clear/reset never does',async()=>{
+ const t=setup();t.coordinator.submit(event(1,segment('old-line','first sentence')));t.scheduler.run();await finish(t.calls[0]);
+ t.coordinator.submit(event(2,segment('new-line','completely different')));
+ assert.ok(t.views.at(-1).finalizedKeys.includes('old-line'));
+ t.coordinator.clear(3);assert.deepEqual(t.views.at(-1).finalizedKeys ?? [],[]);
 });

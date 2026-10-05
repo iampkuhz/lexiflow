@@ -1,9 +1,9 @@
 # 1. 本地体验：API 与 Chrome 扩展
 
-> 位置：[工程地图](../overview.md) → [运行与环境](../operations.md) → 本地体验。首次准备从[根 README](../../../README.md#本地启动)开始；输出是本机可使用的浏览器/API，不是正式验收证据。
+> 位置：[工程地图](../overview.md) → [运行与环境](../operations.md) → 本地体验。Docker 用户先看[根 README 的安装主线](../../../README.md#docker-安装与使用)；源码开发从下方本地步骤开始，输出是本机可使用的浏览器/API，不是正式验收证据。
 
 
-以下命令在仓库根目录执行。需要 **Eclipse Temurin Java 25、Python 3、Node.js/npm 和 Chrome**，以及本机 `lsof`、`ps`；Gradle 使用仓库自带 Wrapper。正常视频体验需要可连接且已发布词库的 PostgreSQL 开发库；有限演示词库仅供隔离自动测试使用。
+以下 macOS 源码开发命令在仓库根目录执行。需要 **Eclipse Temurin Java 25、Python 3、Node.js/npm 和 Chrome**，以及本机 `lsof`、`ps`；Gradle 使用仓库自带 Wrapper。正常视频体验需要可连接且已发布词库的 PostgreSQL 开发库；有限演示词库仅供隔离自动测试使用。这里的开发数据库初始化与重建不适用于 Docker 发行安装数据。
 
 ## 1.1. 确认 Java
 
@@ -15,9 +15,29 @@ python3 -m scripts.environment.java_exec java -version
 
 ## 1.2. 初始化本地配置，再启动确定性 API
 
-首次使用先完成[根 README 的本地步骤](../../../README.md#本地启动)：配置已有开发库连接与来源路径 → 初始化空 schema → 发布词库 → 构建扩展并启动 API。本页不要求安装容器工具，也不提供数据库服务创建流程；API 不负责建表或升级结构。
+先在仓库根编译 API，并创建本机配置目录：
 
-已有数据库结构不会随代码更新。遇到 `relation "lexicon_hint_lookup" does not exist` 时，停止启动重试，进入[开发库检查与重建](lexicon-import.md#15-已有开发库结构不匹配时)；不要只补一张表或一个字段。日常启动可以复用匹配的已发布数据库，不重复初始化。
+```bash
+python3 -m scripts.environment.java_exec backend/gradlew -p backend :api:bootJar
+mkdir -p .local/lexiflow
+```
+
+将以下配置写入 `.local/lexiflow/runtime.json`，把来源文件路径改为已合法取得的 ECDICT StarDict CSV 绝对路径，并按实际开发数据库填写连接：
+
+```json
+{
+  "JDBC_URL": "jdbc:postgresql://127.0.0.1:15432/lexiflow?user=postgres",
+  "STARDICT_CSV": "/absolute/path/stardict.csv"
+}
+```
+
+```bash
+chmod 600 .local/lexiflow/runtime.json
+```
+
+已有匹配的已发布词库时直接启动，不重复导入。首次准备开发库可按[数据库准备和发布步骤](lexicon-import.md#13-准备数据库并发布)执行；使用仓库容器配置时需先安装并启动 Podman，再启动 `infra/local/compose.yaml` 的 PostgreSQL。初始化或结构重建须先核对目标和备份，不能用于发行安装资料；API 启动本身不建表、不重建结构。随后按下节构建扩展，不提交本机配置或词库文件。
+
+已有数据库结构不会随代码更新。遇到 `relation "lexicon_form" does not exist` 时，停止启动重试，进入[开发库检查与重建](lexicon-import.md#15-已有开发库结构不匹配时)；不要只补一张表或一个字段。日常启动可以复用匹配的已发布数据库，不重复初始化。
 
 
 当前 API 不读取、不需要、也不会调用模型服务。完成本机配置后，在任意新终端，完整词库启动方式：
@@ -71,8 +91,8 @@ npm run build
 
 ## 1.4. 没有效果时看哪里
 
-- **API 终端**：先查看 `runtime lexicon`。零参数 `start_api` 自动开启专用 `[LexiFlow segment]` 结果流，逐行显示新处理片段的英文、中文短释及未提示区间；无提示时为 `NO_HINT`。这是本机敏感输出，请勿共享终端记录。普通 logger 和扩展日志仍不输出正文，其他 API 启动方式默认不开启该流。若出现 `segment analysis log unavailable`，表示本次分析记录写入失败，不影响英文和提示，也不会输出伪成功记录。此路径只查询已发布资料，不会调用模型。
-- **片段分析文件**：默认在 ignored 的 `tmp/analysis/caption-segments.jsonl`，可用本机环境变量 `LEXIFLOW_SEGMENT_LOG_PATH` 指定私有路径。每行是一个成功处理且此前未记录的新增片段，含英文、`translatedRanges`、`untranslatedRanges` 和 `status`。控制台只镜像成功新增记录，不回放旧文件；重复请求和 API 重启不重复输出同一片段。同一 `segmentId` 只统计一次；跨片段提示只统计 `anchor=true` 的一次。`NO_HINT` 表示没有可展示提示，不等于词库没有候选。
+- **API 终端**：先查看 `runtime lexicon`。字幕增量、`final`、`interrupted` 与视频开始事件默认输出为 `MM-dd HH:mm:ss|LEVEL|中文事件|video=真实视频ID|分:秒.毫秒|正文` 单行日志，日常不展示内部长 ID，正常请求统计仅输出 DEBUG；WARN/ERROR 保留完整关联 ID。增量正文将英文与实际显示的中文提示放在同一行。控制台不依赖分析文件开关，也不会默认创建或写入字幕 JSONL。`start_api` 默认仅绑定 `127.0.0.1`；为兼容旧调用可传 `--caption-debug`，它只提示字幕日志已默认开启，不再转成 API 参数。容器 `api-debug` 保留为与 `api` 相同的启动别名。日志包含字幕正文及视频定位，只可本机查看，不得外发或放入 CI artifact。失败、队列溢出或日志 I/O 均不阻塞英文和提示。此路径只查询已发布资料，不会调用模型。
+- **片段分析 JSONL**：仅在显式启用 `lexiflow.segment-analysis.enabled=true` 时写入，默认路径为 ignored 的 `tmp/analysis/caption-segments.jsonl`，可用 `LEXIFLOW_SEGMENT_LOG_PATH` 指定私有路径。单文件上限为 16 MiB，达到上限后停止追加，不会无界增长；它含英文及提示分析结果，须按敏感本机数据处理，不得外发或进入 CI artifact。`NO_HINT` 表示没有可展示提示，不等于词库没有候选。
 - **YouTube 页面开发者工具 → Console**：筛选 `[LexiFlow]`，查看 `caption` 阶段的 `state`、`sequence`、`elapsedMs`。
 - **扩展管理页 → LexiFlow → Service worker**：查看 `api` 阶段结果和请求耗时。
 

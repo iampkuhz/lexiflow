@@ -17,4 +17,4 @@ class TestCheck(unittest.TestCase):
   r=check_conditions(self.f.root,submission_id=self.f.submission_id);self.assertFalse(r["delivery_rerun"])
  def test_unmodified_baseline_input_drift_after_review_blocks_check(self):
   self.f.write("protected.py","after review\n");r=check_conditions(self.f.root,submission_id=self.f.submission_id)
-  self.assertEqual((r["result"],r["reason"]),("BLOCKED","frozen-input-drift"));self.assertFalse(r["delivery_rerun"])
+  self.assertEqual((r["result"],r["reason"]),("BLOCKED","risk-assessment-drift"));self.assertFalse(r["delivery_rerun"])

@@ -32,7 +32,7 @@ class TestReview(unittest.TestCase):
  def test_unmodified_baseline_input_drift_after_validation_blocks_review_without_rerun(self,m):
   m.return_value=make_mock_runtime(REVIEWER_SESSION);self.f.write("protected.py","after validation\n")
   with self.assertRaises(ReviewError) as c:review(self.f.root,submission_id=self.f.submission_id,validation_id=self.f.validation_id,decision="PASS",findings=[{"finding_id":"a","severity":"PASS","code":"ok","evidence":[{"detail":"review"}]}])
-  self.assertEqual(c.exception.code,"frozen-input-drift")
+  self.assertEqual(c.exception.code,"risk-assessment-drift")
 
 class TestAuthorityFreshness(unittest.TestCase):
  def setUp(self):self.f=DeliveryGateFixture();self.f.create_verification_report();self.f.create_submission();self.f.create_validation()

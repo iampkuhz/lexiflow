@@ -14,8 +14,9 @@ from scripts.delivery_gate.records import (
 class ProducerError(ValueError):
     """实现来源 run 与送验 Task 不匹配时携带错误代码。"""
 
-    def __init__(self, code: str, detail: str):
+    def __init__(self, code: str, detail: str, *, status: str = "FAIL"):
         self.code, self.detail = code, detail
+        self.status = status
         super().__init__(f"{code}: {detail}")
 
 
@@ -36,7 +37,9 @@ def _codex(repo: Path, run_id: str, task: dict[str, Any]) -> dict[str, Any] | No
             "codex package completion",
         )
     except (CodexWorkPackageError, RecordError, KeyError) as exc:
-        raise ProducerError("producer-run-invalid", str(exc)) from None
+        raise ProducerError(
+            "producer-run-invalid", str(exc), status=getattr(exc, "status", "FAIL")
+        ) from None
     tid = task["task_id"]
     if (
         tid not in value.get("task_ids", [])

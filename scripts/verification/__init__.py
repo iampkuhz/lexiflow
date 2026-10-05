@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
+from scripts.verification.reports import persist_report, read_report
 from scripts.verification.scenarios import (
     freeze_inputs,
     verify_changes,
+    verify_frozen_inputs,
+    verify_profile,
+    verify_profiles,
     verify_repository,
 )
-from scripts.verification.reports import persist_report, read_report
 
 __all__ = [
     "freeze_inputs",
     "persist_report",
     "read_report",
     "verify_changes",
+    "verify_frozen_inputs",
+    "verify_profile",
+    "verify_profiles",
     "verify_repository",
 ]

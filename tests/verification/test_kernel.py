@@ -12,7 +12,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from scripts.verification.kernel import (
     aggregate_results,
@@ -23,6 +23,13 @@ from scripts.verification.kernel import (
     sha256_bytes,
     snapshot_check_inputs,
     verify_input_descriptors,
+)
+from scripts.verification.kernel import (
+    RELEASE_RUNTIME_CHILD_COMMAND,
+    RELEASE_RUNTIME_CHECK_IDS,
+    VERIFY_CHILD_INPUT_MAX_BYTES,
+    fingerprint_json,
+    is_release_runtime_child_check,
 )
 
 
@@ -68,6 +75,40 @@ def _timeout_runner(argv, cwd, env, timeout, executable=None):
         "stdout": "", "stderr": "", "duration_seconds": timeout,
         "started_at": "2026-01-01T00:00:00Z", "finished_at": "2026-01-01T00:00:00Z",
         "timed_out": True, "executable": sys.executable,
+    }
+
+
+def _release_runtime_check(**overrides):
+    check = _make_check(
+        check_id="eng.release.lifecycle-runtime",
+        module="release-lifecycle-runtime",
+        command=list(RELEASE_RUNTIME_CHILD_COMMAND),
+        executable="python3",
+        result_contract={
+            "type": "json-stdout",
+            "required_fields": ["status", "reason"],
+            "allowed_statuses": ["PASS", "BLOCKED", "FAIL"],
+        },
+    )
+    check.update(overrides)
+    return check
+
+
+def _process_result(stdout="", *, exit_code=0, timed_out=False):
+    return {
+        "status": "FAIL" if exit_code else "PASS", "exit_code": exit_code,
+        "exit_reason": "timeout" if timed_out else "exited",
+        "stdout": stdout, "stderr": "", "duration_seconds": 0.01,
+        "started_at": "2026-01-01T00:00:00Z", "finished_at": "2026-01-01T00:00:00Z",
+        "timed_out": timed_out, "executable": sys.executable,
+    }
+
+
+def _correlated_report(envelope, *, status="PASS", reason=""):
+    return {
+        "status": status, "reason": reason,
+        "run_id": envelope["run_id"], "check_id": envelope["check_id"],
+        "verify_input_fingerprint": envelope["snapshot"]["fingerprint"],
     }
 
 
@@ -142,6 +183,45 @@ class TestRunCheckProcess(unittest.TestCase):
         output = result["stdout"].strip()
         self.assertIn(sys.prefix, output)
 
+    def test_large_stdin_and_simultaneous_stdout_stderr_are_drained(self):
+        payload = b"p" * 1_000_000
+        command = [
+            sys.executable,
+            "-c",
+            "import sys,time; time.sleep(.15); "
+            "sys.stdout.buffer.write(b'o'*262144); sys.stdout.flush(); "
+            "sys.stderr.buffer.write(b'e'*262144); sys.stderr.flush(); "
+            "data=sys.stdin.buffer.read(); sys.exit(0 if len(data)==1000000 else 9)",
+        ]
+        result = run_check_process(
+            command, cwd=".", env={"PATH": os.environ.get("PATH", "")},
+            timeout_seconds=10, stdin_payload=payload,
+        )
+        self.assertEqual(result["status"], "PASS")
+        self.assertEqual(result["exit_code"], 0)
+        self.assertEqual(len(result["stdout"]), 262144)
+        self.assertEqual(len(result["stderr"]), 262144)
+
+    def test_timeout_while_pipe_writer_is_blocked_reaps_child(self):
+        payload = b"p" * 1_000_000
+        result = run_check_process(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=".", env={"PATH": os.environ.get("PATH", "")},
+            timeout_seconds=0.2, stdin_payload=payload,
+        )
+        self.assertTrue(result["timed_out"])
+        self.assertEqual((result["status"], result["exit_reason"]), ("FAIL", "timeout"))
+
+    def test_oversized_direct_stdin_is_blocked_without_spawn(self):
+        with patch("scripts.verification.kernel.subprocess.Popen") as popen:
+            result = run_check_process(
+                [sys.executable, "-c", "pass"], cwd=".", env={}, timeout_seconds=1,
+                stdin_payload=b"x" * (VERIFY_CHILD_INPUT_MAX_BYTES + 1),
+            )
+        self.assertEqual((result["status"], result["exit_reason"]), ("BLOCKED", "verify-context-unavailable"))
+        self.assertEqual(result["executed_argv"], [])
+        popen.assert_not_called()
+
 
 class TestExecuteSingleCheck(unittest.TestCase):
     def test_passing_check_with_runner(self):
@@ -172,6 +252,133 @@ class TestExecuteSingleCheck(unittest.TestCase):
             result = execute_single_check(check, root, {}, runner=_pass_runner)
         self.assertEqual(result["status"], "FAIL")
         self.assertEqual(result["reason"], "input-drift")
+
+    def test_only_fixed_id_command_and_python_executable_activate_transport(self):
+        baseline = _release_runtime_check(check_id="eng.release.lifecycle-runtime")
+        change = _release_runtime_check(check_id="eng.release.lifecycle-runtime-on-change")
+        self.assertTrue(is_release_runtime_child_check(baseline))
+        self.assertTrue(is_release_runtime_child_check(change))
+        self.assertEqual(RELEASE_RUNTIME_CHECK_IDS, {baseline["check_id"], change["check_id"]})
+        self.assertFalse(is_release_runtime_child_check({**baseline, "executable": "bash"}))
+        self.assertFalse(is_release_runtime_child_check({**baseline, "command": [*baseline["command"], "extra"]}))
+        self.assertFalse(is_release_runtime_child_check({**baseline, "check_id": "other.check"}))
+
+    def test_candidate_transport_requires_its_own_exact_command(self):
+        from scripts.verification.kernel import CANDIDATE_RUNTIME_CHILD_COMMAND, CANDIDATE_RUNTIME_CHECK_IDS, RELEASE_RUNTIME_CHILD_COMMAND
+
+        for check_id in CANDIDATE_RUNTIME_CHECK_IDS:
+            check = _release_runtime_check(check_id=check_id, command=list(CANDIDATE_RUNTIME_CHILD_COMMAND))
+            self.assertTrue(is_release_runtime_child_check(check))
+            self.assertFalse(is_release_runtime_child_check({**check, "command": list(RELEASE_RUNTIME_CHILD_COMMAND)}))
+            self.assertFalse(is_release_runtime_child_check({**check, "check_id": "eng.release.lifecycle-runtime"}))
+
+    def test_valid_envelope_is_canonical_and_uses_exact_frozen_snapshot(self):
+        check = _release_runtime_check(input_paths=[])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            captured = {}
+            def runner(argv, cwd, env, timeout, executable=None, *, stdin_payload=None):
+                captured["payload"] = stdin_payload
+                envelope = json.loads(stdin_payload)
+                return _process_result(json.dumps(_correlated_report(envelope)))
+            result = execute_single_check(check, root, {}, runner=runner, run_id="verify-run-1")
+        envelope = json.loads(captured["payload"])
+        self.assertEqual(captured["payload"], json.dumps(envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode())
+        self.assertEqual(set(envelope), {"schema_version", "run_id", "check_id", "check_config_fingerprint", "effective_check", "snapshot"})
+        self.assertEqual(envelope["schema_version"], "lexiflow.verify-child-input.v1")
+        self.assertEqual(envelope["run_id"], "verify-run-1")
+        self.assertEqual(envelope["check_id"], check["check_id"])
+        self.assertEqual(envelope["effective_check"], check)
+        self.assertEqual(envelope["check_config_fingerprint"], fingerprint_json(check))
+        self.assertEqual(set(envelope["snapshot"]), {"fingerprint", "files", "missing"})
+        self.assertEqual(result["status"], "PASS")
+
+    def test_missing_run_id_and_oversized_envelope_do_not_spawn(self):
+        check = _release_runtime_check(input_paths=[])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            runner = Mock()
+            missing = execute_single_check(check, root, {}, runner=runner, run_id=None)
+            self.assertEqual((missing["status"], missing["reason"]), ("BLOCKED", "verify-context-unavailable"))
+            self.assertEqual(missing["process"]["executed_argv"], [])
+            runner.assert_not_called()
+            huge = {**check, "synthetic_context_padding": "x" * VERIFY_CHILD_INPUT_MAX_BYTES}
+            oversized = execute_single_check(huge, root, {}, runner=runner, run_id="verify-run-2")
+        self.assertEqual((oversized["status"], oversized["reason"]), ("BLOCKED", "verify-context-unavailable"))
+        self.assertEqual(oversized["process"]["executed_argv"], [])
+        runner.assert_not_called()
+
+    def test_correlation_is_fail_closed_but_does_not_override_nonzero_or_drift(self):
+        check = _release_runtime_check(input_paths=["input.txt"])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            path = root / "input.txt"
+            path.write_text("before")
+            def bad_correlation(argv, cwd, env, timeout, executable=None, *, stdin_payload=None):
+                envelope = json.loads(stdin_payload)
+                report = _correlated_report(envelope)
+                report["run_id"] = "wrong-run"
+                return _process_result(json.dumps(report))
+            mismatch = execute_single_check(check, root, {}, runner=bad_correlation, run_id="right-run")
+            self.assertEqual((mismatch["status"], mismatch["reason"]), ("FAIL", "verify-context-invalid"))
+
+            def nonzero_bad_correlation(argv, cwd, env, timeout, executable=None, *, stdin_payload=None):
+                return _process_result("", exit_code=7)
+            nonzero = execute_single_check(check, root, {}, runner=nonzero_bad_correlation, run_id="right-run")
+            self.assertEqual((nonzero["status"], nonzero["reason"]), ("FAIL", "non-zero-exit"))
+
+            def timeout_bad_correlation(argv, cwd, env, timeout, executable=None, *, stdin_payload=None):
+                return _process_result("", exit_code=None, timed_out=True)
+            timeout = execute_single_check(check, root, {}, runner=timeout_bad_correlation, run_id="right-run")
+            self.assertEqual((timeout["status"], timeout["reason"]), ("FAIL", "timeout"))
+
+            def drift_bad_correlation(argv, cwd, env, timeout, executable=None, *, stdin_payload=None):
+                envelope = json.loads(stdin_payload)
+                path.write_text("after")
+                report = _correlated_report(envelope)
+                report["check_id"] = "wrong-check"
+                return _process_result(json.dumps(report))
+            drift = execute_single_check(check, root, {}, runner=drift_bad_correlation, run_id="right-run")
+            self.assertEqual((drift["status"], drift["reason"]), ("FAIL", "input-drift"))
+
+    def test_active_target_exit_code_contract_cannot_pass_without_correlation(self):
+        check = _release_runtime_check(
+            input_paths=[],
+            result_contract={"type": "exit-code", "completeness_guarantee": "not sufficient for lifecycle child"},
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = execute_single_check(check, Path(tmpdir), {}, runner=lambda *args, **kwargs: _process_result(), run_id="verify-run")
+        self.assertEqual((result["status"], result["reason"]), ("FAIL", "verify-context-invalid"))
+
+    def test_correlation_cannot_upgrade_missing_result_evidence(self):
+        check = _release_runtime_check(
+            input_paths=[],
+            result_contract={
+                "type": "json-stdout", "required_fields": ["status", "reason"],
+                "allowed_statuses": ["PASS", "BLOCKED", "FAIL"], "minimum": {"checks_run": 1},
+            },
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            def incomplete_but_correlated(argv, cwd, env, timeout, executable=None, *, stdin_payload=None):
+                envelope = json.loads(stdin_payload)
+                return _process_result(json.dumps(_correlated_report(envelope)))
+            result = execute_single_check(check, Path(tmpdir), {}, runner=incomplete_but_correlated, run_id="verify-run")
+        self.assertEqual((result["status"], result["reason"]), ("FAIL", "result-report-incomplete"))
+
+    def test_missing_correlation_fails_and_valid_blocked_correlation_stays_blocked(self):
+        check = _release_runtime_check(input_paths=[])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            def missing(argv, cwd, env, timeout, executable=None, *, stdin_payload=None):
+                return _process_result(json.dumps({"status": "PASS", "reason": ""}))
+            result = execute_single_check(check, root, {}, runner=missing, run_id="verify-run")
+            self.assertEqual((result["status"], result["reason"]), ("FAIL", "verify-context-invalid"))
+
+            def blocked(argv, cwd, env, timeout, executable=None, *, stdin_payload=None):
+                envelope = json.loads(stdin_payload)
+                return _process_result(json.dumps(_correlated_report(envelope, status="BLOCKED", reason="missing-environment")))
+            result = execute_single_check(check, root, {}, runner=blocked, run_id="verify-run")
+        self.assertEqual((result["status"], result["reason"]), ("BLOCKED", "missing-environment"))
 
     def test_timeout_recorded(self):
         check = _make_check()

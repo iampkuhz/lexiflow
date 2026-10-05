@@ -60,7 +60,7 @@ class SystemRuntimeSmokeTest {
 
     var repository = Path.of(requiredProperty("lexiflow.repository.root"));
     var java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
-    var apiJar = bootJar(repository, "api");
+    var apiJar = Path.of(requiredProperty("lexiflow.runtimeSmoke.bootJar"));
     var port = freePort();
     apiLog = Files.createTempFile("lexiflow-api-runtime-smoke-", ".log");
     api =
@@ -75,6 +75,27 @@ class SystemRuntimeSmokeTest {
             .redirectOutput(apiLog.toFile())
             .start();
     awaitApiHealth(port, apiLog);
+    try (var client = HttpClient.newHttpClient()) {
+      var readiness =
+          client.send(
+              HttpRequest.newBuilder(
+                      URI.create("http://127.0.0.1:" + port + "/actuator/health/readiness"))
+                  .GET()
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
+      assertEquals(503, readiness.statusCode());
+      var hint =
+          client.send(
+              HttpRequest.newBuilder(
+                      URI.create("http://127.0.0.1:" + port + "/api/v1/caption-hints"))
+                  .header("Content-Type", "application/json")
+                  .POST(
+                      HttpRequest.BodyPublishers.ofString(
+                          "{\"captionTopicKey\":\"topic\",\"trackKey\":null,\"lastRequestedSnapshot\":null,\"currentSnapshot\":{\"captions\":[{\"windowId\":null,\"startMs\":null,\"segments\":[{\"key\":\"a\",\"text\":\"reliable\",\"offsetMs\":null,\"append\":true,\"line\":0}]}]}}"))
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
+      assertEquals(503, hint.statusCode());
+    }
   }
 
   private static String requiredProperty(String name) {
@@ -104,18 +125,6 @@ class SystemRuntimeSmokeTest {
     }
   }
 
-  private static Path bootJar(Path repository, String application) throws IOException {
-    var directory =
-        repository.resolve("backend/product").resolve(application).resolve("build/libs");
-    try (var files = Files.list(directory)) {
-      return files
-          .filter(path -> path.getFileName().toString().endsWith(".jar"))
-          .filter(path -> !path.getFileName().toString().endsWith("-plain.jar"))
-          .findFirst()
-          .orElseThrow(() -> new IllegalStateException("boot jar is absent for " + application));
-    }
-  }
-
   private static int freePort() throws IOException {
     try (var socket = new ServerSocket(0)) {
       return socket.getLocalPort();
@@ -131,7 +140,7 @@ class SystemRuntimeSmokeTest {
           var response =
               client.send(
                   HttpRequest.newBuilder(
-                          URI.create("http://127.0.0.1:" + port + "/actuator/health"))
+                          URI.create("http://127.0.0.1:" + port + "/actuator/health/liveness"))
                       .timeout(Duration.ofSeconds(2))
                       .GET()
                       .build(),
