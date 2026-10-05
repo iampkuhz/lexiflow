@@ -6,6 +6,104 @@ schema_version: lexiflow.module-checks.v1
 description: "各工程模块拥有自己的 Check，并返回结构化完整性结果；零测试、跳过、缺失结果或未执行均不能 PASS。产品交付仍由原生 Gradle/npm 执行。"
 checks:
 
+# Gradle 构建合同实际运行 Java；单列为 backend Check，不进入可复用的 Verification 自测。
+- check_id: eng.backend.build-contract
+  module: backend-build-contract
+  command:
+  - python3
+  - -m
+  - tests.verification.gradle_build_contract
+  executable: python3
+  cwd: .
+  timeout_seconds: 600
+  scope: repository-baseline
+  triggers:
+  - path: backend/
+  - path: ops/release/
+  - path: scripts/environment/
+  - path: tests/verification/gradle_build_contract.py
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  - java-25-temurin
+  - node
+  - git
+  - python-package-yaml
+  input_paths:
+  - backend
+  - ops/release
+  - scripts/environment
+  - tests/verification/gradle_build_contract.py
+  transaction_reuse: false
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+- check_id: eng.backend.build-contract-on-change
+  module: backend-build-contract-change
+  command:
+  - python3
+  - -m
+  - tests.verification.gradle_build_contract
+  executable: python3
+  cwd: .
+  timeout_seconds: 600
+  scope: change-targeted
+  triggers:
+  - path: backend/
+  - path: ops/release/
+  - path: scripts/environment/
+  - path: tests/verification/gradle_build_contract.py
+  - path: harness/module-checks.yaml
+  module_dependencies: []
+  required_environment:
+  - python3
+  - java-25-temurin
+  - node
+  - git
+  - python-package-yaml
+  input_paths:
+  - backend
+  - ops/release
+  - scripts/environment
+  - tests/verification/gradle_build_contract.py
+  transaction_reuse: false
+  result_contract:
+    type: json-stdout
+    required_fields:
+    - status
+    - checks_run
+    - failures
+    - errors
+    - skipped
+    - reason
+    allowed_statuses:
+    - PASS
+    - BLOCKED
+    - FAIL
+    minimum:
+      checks_run: 1
+    equals:
+      failures: 0
+      errors: 0
+      skipped: 0
+
 # Verification 自测：选择、冻结、执行和报告的内部合同。
 - check_id: eng.verification.module-tests
   module: verification
@@ -873,103 +971,6 @@ checks:
       failures: 0
       errors: 0
       skipped: 0
-
-# Gradle 构建合同实际运行 Java；单列为 backend Check，不进入可复用的 Verification 自测。
-- check_id: eng.backend.build-contract
-  module: backend-build-contract
-  command:
-  - python3
-  - -m
-  - tests.verification.gradle_build_contract
-  executable: python3
-  cwd: .
-  timeout_seconds: 600
-  scope: repository-baseline
-  triggers:
-  - path: backend/
-  - path: ops/release/
-  - path: scripts/environment/
-  - path: tests/verification/gradle_build_contract.py
-  - path: harness/module-checks.yaml
-  module_dependencies: []
-  required_environment:
-  - python3
-  - java-25-temurin
-  - node
-  - git
-  - python-package-yaml
-  input_paths:
-  - backend
-  - ops/release
-  - scripts/environment
-  - tests/verification/gradle_build_contract.py
-  transaction_reuse: false
-  result_contract:
-    type: json-stdout
-    required_fields:
-    - status
-    - checks_run
-    - failures
-    - errors
-    - skipped
-    - reason
-    allowed_statuses:
-    - PASS
-    - BLOCKED
-    - FAIL
-    minimum:
-      checks_run: 1
-    equals:
-      failures: 0
-      errors: 0
-      skipped: 0
-- check_id: eng.backend.build-contract-on-change
-  module: backend-build-contract-change
-  command:
-  - python3
-  - -m
-  - tests.verification.gradle_build_contract
-  executable: python3
-  cwd: .
-  timeout_seconds: 600
-  scope: change-targeted
-  triggers:
-  - path: backend/
-  - path: ops/release/
-  - path: scripts/environment/
-  - path: tests/verification/gradle_build_contract.py
-  - path: harness/module-checks.yaml
-  module_dependencies: []
-  required_environment:
-  - python3
-  - java-25-temurin
-  - node
-  - git
-  - python-package-yaml
-  input_paths:
-  - backend
-  - ops/release
-  - scripts/environment
-  - tests/verification/gradle_build_contract.py
-  transaction_reuse: false
-  result_contract:
-    type: json-stdout
-    required_fields:
-    - status
-    - checks_run
-    - failures
-    - errors
-    - skipped
-    - reason
-    allowed_statuses:
-    - PASS
-    - BLOCKED
-    - FAIL
-    minimum:
-      checks_run: 1
-    equals:
-      failures: 0
-      errors: 0
       skipped: 0
 - check_id: eng.backend.delivery
   module: backend

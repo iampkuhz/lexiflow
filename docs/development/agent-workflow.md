@@ -64,6 +64,8 @@ Qoder start/resume 返回 run_id、一次有界 startup_handshake 和 continuati
 
 运行失败和调度失败分开：同轮两条调度路由都不可用才累计 policy 的连续失败；成功接单清连续计数但保留历史，未知启动不重派。预算耗尽时保持 Task identity，核对历史后选择合规接手，不改版本或删运行记录重置预算。
 
+**工作包执行顺序**：实现者先确定最终 checkout 和输入，仅运行直接小回归（如 `tests.verification.test_development_efficiency`），不运行完整 adapter 全套或 development/Hook。完整 Hook 由独立 validator 在冻结输入后执行一次；若必要检查失败或阻塞，且源代码修复或相关输入/环境发生变化，则按冻结输入规则进行必要重验。只允许现有事务合同证明全部输入、配置、环境、窗口、runner 与 context 相同的事务内成功复用，禁止跨交付复用。实现者可进行直接静态、编译和目标测试自检，不得替代独立完整 Hook。长事件使用原生等待，日志仅在有信息的事件或终态读取。完整验证状态按实际记录报告。共享规则见 [policy validation_efficiency](../../harness/agent-policy.manifest.yaml)。详见[交付 Hook §1.5](change-delivery/hooks.md)。
+
 下一步：回到[交付 S2](change-delivery/verification.md)。定位失败见[排障](troubleshooting.md)；只查文件职责见 [Scripts Reference](reference/scripts.md)。
 
 ## 1.5. 原生验收与新任务例外
