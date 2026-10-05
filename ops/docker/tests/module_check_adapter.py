@@ -9,6 +9,7 @@ import io
 import json
 import subprocess
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -24,13 +25,52 @@ class DiagnosticStream(io.StringIO):
         return written
 
 
+class _TimedResult(unittest.TextTestResult):
+    """记录每用例的单调计时；保持 TextTestResult 的 verbosity 和诊断输出。"""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.per_test: dict[str, float] = {}
+        self._start: float | None = None
+        self._current_id: str | None = None
+
+    def startTest(self, test):
+        super().startTest(test)
+        self._current_id = test.id()
+        self._start = time.monotonic()
+
+    def stopTest(self, test):
+        if self._start is not None and self._current_id is not None:
+            self.per_test[self._current_id] = round(
+                time.monotonic() - self._start, 6
+            )
+        self._start = None
+        self._current_id = None
+        super().stopTest(test)
+
+
+def _top_slow(per_test: dict[str, float], limit: int = 10) -> list[dict[str, float]]:
+    """成功时只输出前 N 慢用例摘要，避免长期噪声。"""
+    return [
+        {"test": name, "seconds": seconds}
+        for name, seconds in sorted(
+            per_test.items(), key=lambda item: item[1], reverse=True
+        )[:limit]
+    ]
+
+
 def run_tests() -> dict[str, object]:
     """真实发现并执行本目录测试，零测试和任何跳过均失败关闭。"""
+    total_started = time.monotonic()
     suite = unittest.defaultTestLoader.discover(
         str(Path(__file__).resolve().parent), pattern="test_*.py"
     )
     stream = DiagnosticStream()
-    result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
+    python_started = time.monotonic()
+    result = unittest.TextTestRunner(
+        stream=stream, verbosity=2, resultclass=_TimedResult
+    ).run(suite)
+    python_duration = round(time.monotonic() - python_started, 6)
     root = Path(__file__).resolve().parents[3]
     # Node 生命周期回归实测约 45 秒；共享 runner 预算低于本层 180 秒，
     # 与 Python 阶段共同受 Harness 600 秒总预算约束，不扩大全局默认值。
@@ -39,11 +79,13 @@ def run_tests() -> dict[str, object]:
         "const r=await runTests({timeoutMs:170_000,args:['--test','--test-reporter=tap',...process.argv.slice(1)]});"
         "console.log(JSON.stringify(r)); if(r.status!=='PASS') process.exitCode=1;"
     )
+    node_started = time.monotonic()
     node_suite = subprocess.run(
         ["node", "--input-type=module", "-e", runner,
          *map(str, sorted((root / "ops/podman/tests").glob("*.test.mjs")))],
         cwd=root, capture_output=True, text=True, check=False, timeout=180,
     )
+    node_duration = round(time.monotonic() - node_started, 6)
     node_output = node_suite.stdout + node_suite.stderr
     sys.stderr.write(node_output)
     sys.stderr.flush()
@@ -54,7 +96,9 @@ def run_tests() -> dict[str, object]:
     node_ok = node_suite.returncode == 0 and node_report.get("status") == "PASS"
     output = stream.getvalue() + node_output
     passed = result.wasSuccessful() and result.testsRun > 0 and not result.skipped and node_ok
-    return {
+    total_duration = round(time.monotonic() - total_started, 6)
+    per_test = getattr(result, "per_test", {})
+    report: dict[str, object] = {
         "status": "PASS" if passed else "FAIL",
         "checks_run": result.testsRun + node_report.get("checks_run", 0),
         "failures": len(result.failures) + (0 if node_ok else 1),
@@ -62,9 +106,17 @@ def run_tests() -> dict[str, object]:
         "skipped": len(result.skipped),
         "node_transaction_exit_code": node_suite.returncode,
         "node_transaction_no_skips": node_ok,
+        "python_unittest_duration_seconds": python_duration,
+        "node_suite_duration_seconds": node_duration,
+        "total_duration_seconds": total_duration,
         "reason": "" if passed else "docker-contract-tests-incomplete",
         "tool_output_sha256": hashlib.sha256(output.encode("utf-8")).hexdigest(),
     }
+    if per_test:
+        report["per_test_timing"] = per_test
+        if passed:
+            report["top_slow_tests"] = _top_slow(per_test)
+    return report
 
 
 def main() -> int:

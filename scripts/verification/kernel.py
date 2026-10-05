@@ -11,9 +11,11 @@ import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+
 from scripts.verification.input_snapshot import snapshot_inputs
 
 REPORT_SCHEMA = "lexiflow.verification-report.v1"
@@ -136,6 +138,26 @@ def build_child_environment(
     if runtime_environment:
         env.update(runtime_environment)
     return env
+
+
+def probe_python_package_yaml(
+    child_env: dict[str, str], cwd: str | Path, timeout_seconds: int = 5
+) -> dict[str, Any]:
+    """通过受控进程组验证 Check 同解释器能导入 yaml。"""
+    result = run_check_process(
+        [sys.executable, "-c", "import yaml; print(yaml.__file__)"],
+        str(cwd),
+        child_env,
+        timeout_seconds,
+        sys.executable,
+    )
+    available = result.get("status") == "PASS" and result.get("exit_code") == 0
+    return {
+        "available": available,
+        "subprocess_verified": available,
+        "origin": result.get("stdout", "").strip() if available else "",
+        "error": result.get("exit_reason", "") if not available else "",
+    }
 
 
 def verify_input_descriptors(
@@ -536,6 +558,25 @@ def execute_single_check(
             )
             blocked["status"] = "BLOCKED"
             return blocked
+    # 在重命令前验证 python-package-yaml 实际可导入（使用安全子环境）。
+    # 这比 runtime.diagnose 的 find_spec 更可靠，因为使用与 Check 相同的环境。
+    if "python-package-yaml" in check.get("required_environment", []):
+        yaml_probe = probe_python_package_yaml(env, cwd_path)
+        if not yaml_probe["available"]:
+            blocked = _not_run_result(
+                check,
+                "python-package-yaml-unavailable-in-child-env",
+                {
+                    "input_snapshot": {
+                        "pre": pre,
+                        "before_execution": observed_before_execution,
+                        "post": {},
+                    },
+                    "yaml_probe": yaml_probe,
+                },
+            )
+            blocked["status"] = "BLOCKED"
+            return blocked
     try:
         if child_transport:
             process = runner(
@@ -583,9 +624,7 @@ def execute_single_check(
     ):
         report = completeness.get("report")
         contract = check.get("result_contract", {})
-        if contract.get("type") != "json-stdout":
-            status, reason = "FAIL", "verify-context-invalid"
-        elif (
+        if contract.get("type") != "json-stdout" or (
             status in {"PASS", "BLOCKED"}
             and (
                 isinstance(report, dict)

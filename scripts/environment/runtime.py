@@ -107,6 +107,8 @@ def diagnose(
         elif name == "redis-test-endpoint":
             info = detect_redis_test_endpoint(source)
         elif name == "python-package-yaml":
+            # 仅 find_spec 预检；实际子进程 import 由 kernel 在 build_child_environment
+            # 构造的安全环境中验证，避免此处继承父 PYTHONPATH 等不安全变量。
             spec = importlib.util.find_spec("yaml")
             info = {"available": bool(spec and spec.origin), "path": ""}
         elif name == "posix-lock-tool":
