@@ -17,12 +17,13 @@ plugins {
 
 group = "io.lexiflow"
 if (providers.gradleProperty("version").isPresent) throw GradleException("软件版本只读取 ops/release/version.txt，不接受 -Pversion 覆盖")
-// 与扩展及部署入口消费同一确定性身份，由 Node 单一发行资格入口解析；Gradle 不执行 Git 检查。
+// 配置阶段仅读取基础版本，不启动 Node/Git；完整身份由类型化任务在执行阶段生成。
 val requestedRelease = providers.gradleProperty("release").orNull
 if (requestedRelease != null && requestedRelease !in setOf("true", "false")) throw GradleException("release 参数必须为 true 或 false")
-val identity = BuildIdentity.resolve(providers, rootDir.parentFile, requestedRelease == "true")
-version = identity.softwareVersion
-extensions.add(BuildIdentityExtension::class.java, "buildIdentity", identity)
+val repoRoot = rootDir.parentFile
+val baseVersion = BuildIdentity.readBaseVersion(repoRoot)
+version = baseVersion
+extensions.add(BuildIdentityExtension::class.java, "buildIdentity", BuildIdentityExtension(baseVersion))
 
 val deliveryRequested = gradle.startParameter.taskNames.any {
     it.substringAfterLast(':') in setOf("check", "deliveryFull")
@@ -44,8 +45,11 @@ configure(leafProjects) {
     group = rootProject.group
     version = rootProject.version
     pluginManager.apply("lexiflow.java-library")
-    tasks.withType<Jar>().configureEach {
-        manifest.attributes["Implementation-Version"] = rootProject.version.toString()
+    // 非 API 模块使用基础版本；API 模块在 api/build.gradle.kts 中绑定生成任务输出。
+    if (project.path != ":api") {
+        tasks.withType<Jar>().configureEach {
+            manifest.attributes["Implementation-Version"] = rootProject.version.toString()
+        }
     }
     dependencies.add("testImplementation", junitJupiter)
     dependencies.add("testRuntimeOnly", junitPlatformLauncher)
