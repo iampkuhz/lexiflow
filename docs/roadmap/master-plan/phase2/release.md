@@ -85,9 +85,9 @@ Docker 默认将 API 发布到宿主 127.0.0.1，与扩展现有本机权限一�
 
 `ops/release/version.txt` 是唯一软件版本真源，初始为 `0.1.0`；允许文件末尾一个 LF 或 CRLF，不接受其他空白、BOM、多行、后缀或前导零。格式固定 `major.minor.patch`，各段为 0～65535 且不能全零，遵循 [Chrome 版本字段约束](https://developer.chrome.com/docs/extensions/reference/manifest/version) 的三段子集。软件版本不改变 API/SQL/词库的独立身份。
 
-Node 发布工具通过 `version.mjs` 读取、校验版本；Gradle 通过同合同的 build-logic parser 读取该文件，所有产品子项目及 JAR manifest 消费这个值，不接受第二个版本参数覆盖。两个 parser 都有边界测试；构建消费者按 Gradle 的实际归档输出定位，不扫描目录选中旧版本 JAR。
+Node 发布工具通过 `version.mjs` 读取、校验版本；Gradle 配置阶段通过 build-logic parser 只读取 `ops/release/version.txt` 的基础版本，不启动 Node 或 Git，完整身份由 `generateSoftwareIdentity` 任务在执行阶段调用 Node 惰性生成，产品子项目配置版本及非 API JAR manifest 使用基础版本，API JAR manifest 与内嵌资源使用完整身份，不接受第二个版本参数覆盖。两个 parser 都有边界测试；API 归档的内部路径固定以支持 IDE 模型查询，`bootJar` 完成时校验并复制为公开的 `build/libs/api-<softwareVersion>.jar`，发行消费者按完整身份定位该文件，不扫描目录选中旧版本 JAR。
 
-源码调试允许工作区改动；显式 `-Prelease=true` 的 Gradle 构建调用 `node ops/release/version.mjs --release` 核对真实 Git 根、有效 HEAD，以及包括未跟踪文件的工作区/暂存区清洁状态。Git 不可用、空仓库或脏输入都拒绝，忽略的本机运行产物不当成发行源码；错误仅给固定原因，不打印私有文件名。Gradle 随后消费默认 Node 接口的完整身份 JSON，并核对资格摘要与完整身份的版本、commit 一致且输入清洁；资格摘要不能替代 JAR 内的完整身份。检查不创建 tag、不提交、不上传。此处只证明发行输入资格，不代替后续许可、制品清单或 Docker 验收。
+源码调试允许工作区改动；显式 `-Prelease=true` 的 Gradle 构建在执行阶段调用 `node ops/release/version.mjs --release` 核对真实 Git 根、有效 HEAD，以及包括未跟踪文件的工作区/暂存区清洁状态。Git 不可用、空仓库或脏输入都拒绝，忽略的本机运行产物不当成发行源码；错误仅给固定原因，不打印私有文件名。Gradle 随后消费默认 Node 接口的完整身份 JSON，并核对资格摘要与完整身份的版本、commit 一致且输入清洁；资格摘要不能替代 JAR 内的完整身份。检查不创建 tag、不提交、不上传。此处只证明发行输入资格，不代替后续许可、制品清单或 Docker 验收。
 
 版本模块的 `check.mjs` 运行真实 Node 单测，并拒绝零测试、缺失结果、跳过、取消和失败；不以退出零直接判断通过。OPS-2003 的最小接线包括独立 release-version Check 的双 scope 声明、版本文件到后端的触发与冻结输入，以及声明回归测试；父代理集成 Harness 部分，不把 Node 测试塞进产品 Java 模块。QLT-2004 继续负责后续完整 Docker/发布验收入口，不等待它才验证版本基础。
 

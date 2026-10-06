@@ -61,8 +61,18 @@ class GradleReportContractTest(unittest.TestCase):
 
     def test_identity_resolved_via_build_logic(self):
         source = ROOT_BUILD.read_text(encoding="utf-8")
-        self.assertIn("BuildIdentity.resolve", source)
+        self.assertIn("BuildIdentity.readBaseVersion", source)
         self.assertIn("BuildIdentityExtension", source)
+        self.assertNotIn("BuildIdentity.resolve", source)
+
+    def test_configuration_phase_does_not_call_node(self):
+        source = ROOT_BUILD.read_text(encoding="utf-8")
+        self.assertNotIn('"node"', source)
+        self.assertNotIn("providers.exec", source)
+        api_source = (ROOT / "backend/product/api/build.gradle.kts").read_text(encoding="utf-8")
+        self.assertNotIn('"node"', api_source)
+        self.assertNotIn("providers.exec", api_source)
+        self.assertNotIn("doFirst", api_source)
 
     def test_dependency_graph_collected_after_projects_evaluated(self):
         source = ROOT_BUILD.read_text(encoding="utf-8")

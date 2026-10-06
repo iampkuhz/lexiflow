@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -19,6 +22,60 @@ EXPECTED_GRAPH = {
     ":lexicon": [],
     ":quality-gates": [],
 }
+
+
+def _copy_backend_fixture(source: Path, target: Path) -> None:
+    """Copy the complete build inputs without generated state or Git metadata."""
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        del directory
+        return {name for name in names if name in {"build", ".gradle", ".git"}}
+    shutil.copytree(source, target, ignore=ignore)
+
+
+def _fixture_gradle(backend: Path, *args: str, env: dict[str, str] | None = None,
+                    timeout: int = 600, label: str = "fixture-gradle") -> subprocess.CompletedProcess[str]:
+    """Run fixture Gradle directly so no caller checkout or Java selector is involved."""
+    environment = os.environ.copy()
+    environment.update(env or {})
+    from scripts.environment.java_runtime import resolve_java_home
+    jdk = resolve_java_home(ROOT, environment)
+    environment["JAVA_HOME"] = str(jdk)
+    environment["PATH"] = os.pathsep.join([str(jdk / "bin"), environment.get("PATH", "")])
+    environment["JDBC_URL"] = "jdbc:postgresql://127.0.0.1:1/lexiflow_fixture"
+    environment["STARDICT_CSV"] = str(ROOT / "tmp/synthetic-stardict.csv")
+    try:
+        return subprocess.run([str(backend / "gradlew"), "-p", str(backend), *args],
+                              cwd=backend, env=environment, text=True, capture_output=True,
+                              timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        _record_timeout(label, error, timeout)
+        raise
+
+
+def _record_fixture_result(name: str, result: subprocess.CompletedProcess[str], elapsed_seconds: float) -> None:
+    """Persist test command evidence outside the repository's tracked files."""
+    log_dir = ROOT / "tmp/quality/gradle-node-free-configuration/fixture-tests"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    (log_dir / f"{name}.log").write_text(
+        f"ELAPSED_SECONDS={elapsed_seconds:.3f}\n\n" + result.stdout + "\n--- STDERR ---\n" + result.stderr,
+                                         encoding="utf-8")
+
+
+def _record_timeout(name: str, error: subprocess.TimeoutExpired, timeout: int) -> None:
+    """Persist partial subprocess output when a bounded command times out."""
+    log_dir = ROOT / "tmp/quality/gradle-node-free-configuration/fixture-tests"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stdout = error.stdout.decode(errors="replace") if isinstance(error.stdout, bytes) else (error.stdout or "")
+    stderr = error.stderr.decode(errors="replace") if isinstance(error.stderr, bytes) else (error.stderr or "")
+    (log_dir / f"{name}.log").write_text(stdout + "\n--- STDERR ---\n" + stderr +
+                                         f"\nTIMEOUT after {timeout}s: {error.cmd!r}\n", encoding="utf-8")
+
+
+def _manifest_main_attribute(manifest_text: str, name: str) -> str | None:
+    """Read a main Manifest attribute after unfolding RFC-style continuation lines."""
+    unfolded = re.sub(r"\r?\n[ \t]", "", manifest_text)
+    prefix = name + ": "
+    return next((line[len(prefix):] for line in unfolded.splitlines() if line.startswith(prefix)), None)
 
 
 def _gradle(init_script: str, *tasks: str) -> subprocess.CompletedProcess[str]:
@@ -53,7 +110,7 @@ gradle.projectsEvaluated {
       def graph = task(":verifyProjectDependencies").dependencyGraph.get()
       def payload = [
         deliveryFull: direct(task(":deliveryFull")), check: direct(task(":check")),
-        graph: graph, identity: [json:identity.json, softwareVersion:rootProject.version.toString()],
+        graph: graph, identity: [baseVersion:identity.baseVersion],
         javaExec: [":adapters:lexiconValidate":exec(":adapters:lexiconValidate"),
           ":adapters:lexiconPublish":exec(":adapters:lexiconPublish"),
           ":adapters:lexiconBasicReport":exec(":adapters:lexiconBasicReport"),
@@ -108,13 +165,10 @@ class GradleTaskGraphTest(unittest.TestCase):
         self.assertFalse(any("jacoco" in dep.lower() or "report" in dep.lower() for dep in check))
         self.assertEqual(self.model["aliases"], {"qualityFull": False, "productBootJar": False})
 
-    def test_consumer_receives_complete_identity(self):
+    def test_configuration_phase_exposes_base_version_without_node(self):
         identity = self.model["identity"]
-        value = json.loads(identity["json"])
-        self.assertEqual(set(value), {"schemaVersion", "baseVersion", "softwareVersion",
-                                     "chromeVersion", "sourceCommit", "sourceSha256",
-                                     "buildId", "dirty", "channel"})
-        self.assertEqual(value["softwareVersion"], identity["softwareVersion"])
+        self.assertIn("baseVersion", identity)
+        self.assertRegex(identity["baseVersion"], r"^\d+\.\d+\.\d+(-SNAPSHOT)?$")
 
     def test_javaexec_entrypoints_preserve_names_arguments_and_launch_contract(self):
         tasks = self.model["javaExec"]
@@ -143,20 +197,194 @@ class GradleTaskGraphTest(unittest.TestCase):
 
 
 class GradleIdentityResourceTest(unittest.TestCase):
-    def test_identity_generation_supports_configuration_cache_reuse(self):
-        command = [sys.executable, "-m", "scripts.environment.java_exec", "backend/gradlew",
-                   "-p", "backend", ":api:generateSoftwareIdentity", "--configuration-cache",
-                   "--rerun-tasks", "--no-build-cache"]
-        for attempt in range(2):
-            result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, timeout=600)
-            self.assertEqual(result.returncode, 0, (result.stdout + result.stderr)[-5000:])
-            if attempt == 1:
-                self.assertIn("Configuration cache entry reused", result.stdout)
-        output = ROOT / "backend/product/api/build/generated/software-identity/META-INF"
-        identity = json.loads((output / "lexiflow-build.json").read_text())
-        self.assertEqual(identity["softwareVersion"] + "\n",
-                         (output / "lexiflow-version.txt").read_text())
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.temp = tempfile.TemporaryDirectory(prefix="fixture-", dir=ROOT / "tmp")
+        cls.root = Path(cls.temp.name)
+        cls.backend = cls.root / "backend"
+        _copy_backend_fixture(ROOT / "backend", cls.backend)
+        if (ROOT / ".gitignore").exists():
+            shutil.copy2(ROOT / ".gitignore", cls.root / ".gitignore")
+        for relative in ("ops/release", "infra/postgres/schema.sql"):
+            source, target = ROOT / relative, cls.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if source.is_dir():
+                shutil.copytree(source, target, ignore=shutil.ignore_patterns("build", ".gradle", ".git"))
+            else:
+                shutil.copy2(source, target)
+        cls.git = shutil.which("git")
+        if not cls.git:
+            raise RuntimeError("git executable is required for fixture identity tests")
+        subprocess.run([cls.git, "init", "-q"], cwd=cls.root, check=True)
+        subprocess.run([cls.git, "add", "backend", "ops/release", "infra/postgres/schema.sql", ".gitignore"],
+                       cwd=cls.root, check=True)
+        subprocess.run([cls.git, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                        "commit", "-qm", "fixture"], cwd=cls.root, check=True)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temp.cleanup()
+
+    def _run(self, label: str, *args: str, env: dict[str, str] | None = None,
+             timeout: int = 600) -> subprocess.CompletedProcess[str]:
+        started = time.perf_counter()
+        result = _fixture_gradle(self.backend, *args, env=env, timeout=timeout, label=label)
+        _record_fixture_result(label, result, time.perf_counter() - started)
+        return result
+
+    def test_cold_help_and_tasks_do_not_call_node_or_git(self):
+        sentinels_temp = tempfile.TemporaryDirectory(prefix="sentinels-", dir=ROOT / "tmp")
+        self.addCleanup(sentinels_temp.cleanup)
+        sentinels = Path(sentinels_temp.name)
+        calls = sentinels / "calls"
+        for executable in ("node", "git"):
+            path = sentinels / executable
+            path.write_text(f"#!/bin/sh\necho {executable} >> '{calls}'\nexit 97\n", encoding="utf-8")
+            path.chmod(0o755)
+        # Keep shell utilities and the explicitly selected JDK, but expose no real Node/Git.
+        from scripts.environment.java_runtime import resolve_java_home
+        java_home = str(resolve_java_home(ROOT, os.environ))
+        environment = {"PATH": os.pathsep.join([str(sentinels), "/bin", "/usr/bin", f"{java_home}/bin"]),
+                       "JAVA_HOME": java_home}
+        result = self._run("cold-help-tasks", "help", "tasks", "--no-configuration-cache",
+                           "--no-daemon", env=environment)
+        self.assertEqual(result.returncode, 0, (result.stdout + result.stderr)[-5000:])
+        self.assertFalse(calls.exists(), calls.read_text() if calls.exists() else "")
+
+    def test_idea_project_model_loads_without_node_or_generated_identity(self):
+        probe = self.root / "IdeaModelProbe.java"
+        probe.write_text('''import java.io.File;
+import org.gradle.tooling.GradleConnector;
+import org.gradle.tooling.ProjectConnection;
+import org.gradle.tooling.model.idea.IdeaProject;
+public class IdeaModelProbe {
+  public static void main(String[] args) {
+    try (ProjectConnection c = GradleConnector.newConnector().forProjectDirectory(new File(args[0])).connect()) {
+      IdeaProject p = c.getModel(IdeaProject.class);
+      System.out.println("IDEA_MODEL=" + p.getName() + ", modules=" + p.getChildren().size());
+    }
+  }
+}''', encoding="utf-8")
+        gradle_home = Path.home() / ".gradle/wrapper/dists"
+        distributions = list(gradle_home.glob("gradle-*-bin/*/gradle-*/lib/gradle-tooling-api-*.jar"))
+        wrapper = (self.backend / "gradle/wrapper/gradle-wrapper.properties").read_text(encoding="utf-8")
+        match = re.search(r"distributionUrl=.*?/gradle-([0-9][^/]*?)-bin\.zip", wrapper)
+        expected_version = match.group(1) if match else None
+        tooling = [path for path in distributions if path.name == f"gradle-tooling-api-{expected_version}.jar"]
+        self.assertTrue(tooling, "Gradle wrapper distribution tooling API jar is not cached")
+        gradle_lib = tooling[0].parent
+        from scripts.environment.java_runtime import resolve_java_home
+        compiler = resolve_java_home(ROOT, os.environ) / "bin/javac"
+        self.assertTrue(compiler.is_file(), "javac from the configured JDK is required")
+        classpath = os.pathsep.join([str(gradle_lib / "*"), str(gradle_lib / "plugins/*")])
+        compiled = subprocess.run([str(compiler), "-cp", classpath, str(probe)], text=True,
+                                  capture_output=True, timeout=60)
+        self.assertEqual(compiled.returncode, 0, compiled.stderr[-3000:])
+        sentinels_temp = tempfile.TemporaryDirectory(prefix="idea-sentinels-", dir=ROOT / "tmp")
+        self.addCleanup(sentinels_temp.cleanup)
+        sentinels = Path(sentinels_temp.name)
+        calls = sentinels / "calls"
+        for executable in ("node", "git"):
+            path = sentinels / executable
+            path.write_text(f"#!/bin/sh\necho {executable} >> '{calls}'\nexit 97\n", encoding="utf-8")
+            path.chmod(0o755)
+        from scripts.environment.java_runtime import resolve_java_home
+        java_home = str(resolve_java_home(ROOT, os.environ))
+        env = {"PATH": os.pathsep.join([str(sentinels), "/bin", "/usr/bin", f"{java_home}/bin"]),
+               "JAVA_HOME": java_home}
+        generated = self.backend / "product/api/build/generated/software-identity"
+        self.assertFalse(generated.exists(), "model test must start without generated identity")
+        started = time.perf_counter()
+        try:
+            result = subprocess.run([str(Path(java_home) / "bin/java"), "-cp",
+                                     os.pathsep.join([str(self.root), classpath]), "IdeaModelProbe", str(self.backend)],
+                                    cwd=self.root, env={**os.environ, **env}, text=True,
+                                    capture_output=True, timeout=600)
+        except subprocess.TimeoutExpired as error:
+            _record_timeout("idea-project-model", error, 600)
+            raise
+        _record_fixture_result("idea-project-model", result, time.perf_counter() - started)
+        self.assertEqual(result.returncode, 0, (result.stdout + result.stderr)[-5000:])
+        root_name = re.search(r'rootProject\.name\s*=\s*"([^"]+)"',
+                              (self.backend / "settings.gradle.kts").read_text(encoding="utf-8"))
+        model = re.fullmatch(r"IDEA_MODEL=(.+), modules=(\d+)\n?", result.stdout.strip())
+        self.assertIsNotNone(root_name, "fixture settings must declare the root project name")
+        self.assertIsNotNone(model, result.stdout)
+        self.assertEqual(model.group(1), root_name.group(1))
+        self.assertGreater(int(model.group(2)), 1, "IDE model must include the backend subprojects")
+        self.assertFalse(calls.exists(), calls.read_text() if calls.exists() else "")
+        self.assertFalse(generated.exists(), "IDE model must not create identity task outputs")
+
+    def test_identity_task_fails_without_node(self):
+        no_node_temp = tempfile.TemporaryDirectory(prefix="no-node-", dir=ROOT / "tmp")
+        self.addCleanup(no_node_temp.cleanup)
+        no_node = Path(no_node_temp.name)
+        from scripts.environment.java_runtime import resolve_java_home
+        java_home = str(resolve_java_home(ROOT, os.environ))
+        env = {"PATH": os.pathsep.join([str(no_node), "/bin", "/usr/bin", f"{java_home}/bin"]),
+               "JAVA_HOME": java_home}
+        result = self._run("identity-no-node", ":api:generateSoftwareIdentity", "--no-configuration-cache",
+                           "--no-daemon", "--rerun-tasks", env=env)
+        self.assertNotEqual(result.returncode, 0, "identity generation must fail without Node")
+        self.assertRegex(result.stdout + result.stderr, r"(?i)(node|not found|executable)")
+
+    def test_identity_and_bootjar_are_coherent_and_cache_is_reused(self):
+        marker = self.backend / "product/api/src/main/java/io/lexiflow/api/IdentityFixtureMarker.java"
+        marker.write_text("package io.lexiflow.api; final class IdentityFixtureMarker {}\n", encoding="utf-8")
+        subprocess.run([self.git, "add", "backend"], cwd=self.root, check=True)
+        subprocess.run([self.git, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                        "commit", "-qm", "source marker"], cwd=self.root, check=True)
+
+        # Prime output directories before the cache pair so only intended task inputs vary.
+        warmup = self._run("identity-bootjar-warmup", ":api:bootJar", "--no-configuration-cache",
+                           "--no-build-cache")
+        self.assertEqual(warmup.returncode, 0, (warmup.stdout + warmup.stderr)[-5000:])
+        command = (":api:generateSoftwareIdentity", ":api:bootJar", "--configuration-cache", "--no-build-cache")
+        first = self._run("identity-bootjar-first", *command)
+        self.assertEqual(first.returncode, 0, (first.stdout + first.stderr)[-5000:])
+        second = self._run("identity-bootjar-second", *command)
+        self.assertEqual(second.returncode, 0, (second.stdout + second.stderr)[-5000:])
+        self.assertIn("Configuration cache entry reused", second.stdout)
+        self._assert_identity_in_artifact("base-identity-artifact")
+
+        output = self.backend / "product/api/build/generated/software-identity/META-INF/lexiflow-build.json"
+        original = json.loads(output.read_text(encoding="utf-8"))
+        marker.write_text("package io.lexiflow.api; final class IdentityFixtureMarker { int changed() { return 1; } }\n",
+                          encoding="utf-8")
+        changed = self._run("source-change-bootjar", *command)
+        self.assertEqual(changed.returncode, 0, (changed.stdout + changed.stderr)[-5000:])
+        self.assertIn("Configuration cache entry reused", changed.stdout)
+        refreshed = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(original["baseVersion"], refreshed["baseVersion"])
+        self.assertNotEqual(original["sourceSha256"], refreshed["sourceSha256"])
+        self.assertNotEqual(original["softwareVersion"], refreshed["softwareVersion"])
+        self._assert_identity_in_artifact("changed-identity-artifact")
+
+    def _assert_identity_in_artifact(self, label: str) -> None:
+        import zipfile
+
+        output = self.backend / "product/api/build/generated/software-identity/META-INF"
+        identity = json.loads((output / "lexiflow-build.json").read_text(encoding="utf-8"))
+        version_text = (output / "lexiflow-version.txt").read_text(encoding="utf-8")
         self.assertEqual(len(identity), 9)
+        self.assertEqual(identity["softwareVersion"] + "\n", version_text)
+        jar_path = self.backend / "product/api/build/libs" / f"api-{identity['softwareVersion']}.jar"
+        self.assertTrue(jar_path.is_file(), f"missing versioned JAR {jar_path.name}")
+        with zipfile.ZipFile(jar_path) as jar:
+            manifest = jar.read("META-INF/MANIFEST.MF").decode("utf-8")
+            embedded_json = json.loads(jar.read("META-INF/lexiflow-build.json"))
+            embedded_version = jar.read("META-INF/lexiflow-version.txt").decode("utf-8")
+        self.assertEqual(_manifest_main_attribute(manifest, "Implementation-Version"), identity["softwareVersion"])
+        self.assertEqual(embedded_json, identity)
+        self.assertEqual(embedded_version, version_text)
+        node = shutil.which("node")
+        self.assertIsNotNone(node, "real Node is required for source-of-truth comparison")
+        started = time.perf_counter()
+        canonical = subprocess.run([node, "ops/release/version.mjs"], cwd=self.root, text=True,
+                                   capture_output=True, timeout=30)
+        _record_fixture_result(label + "-node-source", canonical, time.perf_counter() - started)
+        self.assertEqual(canonical.returncode, 0, canonical.stderr)
+        self.assertEqual(identity, json.loads(canonical.stdout))
 
 
 class GradleDependencyViolationTest(unittest.TestCase):

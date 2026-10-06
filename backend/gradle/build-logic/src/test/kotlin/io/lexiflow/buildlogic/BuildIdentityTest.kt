@@ -2,12 +2,12 @@ package io.lexiflow.buildlogic
 
 import java.nio.file.Files
 import java.nio.file.Path
-import org.gradle.testfixtures.ProjectBuilder
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 
+/** BuildIdentity 配置阶段纯读取与纯消费校验；Node 执行由 GenerateSoftwareIdentityTask 覆盖。 */
 class BuildIdentityTest {
     @TempDir lateinit var repoRoot: Path
 
@@ -15,119 +15,104 @@ class BuildIdentityTest {
     private val sourceSha = "1".repeat(64)
     private val buildId = "2".repeat(64)
 
-    private fun invoke(script: String) {
-        val nodeScript = repoRoot.resolve("ops/release/version.mjs")
-        Files.createDirectories(nodeScript.parent)
-        Files.writeString(nodeScript, script)
-    }
-
     private fun validIdentity(
         version: String = "1.2.3-SNAPSHOT.gabcdef0",
         sourceCommit: String = commit,
         dirty: Boolean = false,
     ) = """{"schemaVersion":1,"baseVersion":"1.2.3-SNAPSHOT","softwareVersion":"$version","chromeVersion":"1.2.3.0","sourceCommit":"$sourceCommit","sourceSha256":"$sourceSha","buildId":"$buildId","dirty":$dirty,"channel":"snapshot"}"""
 
-    private fun resolve(release: Boolean = false): BuildIdentityExtension =
-        BuildIdentity.resolve(ProjectBuilder.builder().build().providers, repoRoot.toFile(), release)
-
-    private fun nodeFixture(
-        releaseOutput: String,
-        fullOutput: String,
-        releaseExit: Int = 0,
-        fullExit: Int = 0,
-        requireReleaseFirst: Boolean = false,
-    ) =
-        """
-        import { existsSync, writeFileSync } from 'node:fs';
-        const isRelease = process.argv.includes('--release');
-        const marker = ${js(repoRoot.resolve("release-called").toString())};
-        if ($requireReleaseFirst) {
-          if (isRelease) writeFileSync(marker, 'called');
-          else if (!existsSync(marker)) { process.stderr.write('full identity called before release qualification'); process.exit(9); }
-        }
-        const output = isRelease ? ${js(releaseOutput)} : ${js(fullOutput)};
-        const exit = isRelease ? $releaseExit : $fullExit;
-        process.stdout.write(output);
-        process.exitCode = exit;
-        """.trimIndent()
-
-    private fun js(value: String): String =
-        "'" + value.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n") + "'"
+    @Test
+    fun `readBaseVersion returns version from file without Node`() {
+        val versionFile = repoRoot.resolve("ops/release/version.txt")
+        Files.createDirectories(versionFile.parent)
+        Files.writeString(versionFile, "3.4.5\n")
+        assertEquals("3.4.5", BuildIdentity.readBaseVersion(repoRoot.toFile()))
+    }
 
     @Test
-    fun `resolves full identity in development mode`() {
+    fun `readBaseVersion accepts SNAPSHOT suffix`() {
+        val versionFile = repoRoot.resolve("ops/release/version.txt")
+        Files.createDirectories(versionFile.parent)
+        Files.writeString(versionFile, "1.0.0-SNAPSHOT\n")
+        assertEquals("1.0.0-SNAPSHOT", BuildIdentity.readBaseVersion(repoRoot.toFile()))
+    }
+
+    @Test
+    fun `readBaseVersion rejects invalid format`() {
+        val versionFile = repoRoot.resolve("ops/release/version.txt")
+        Files.createDirectories(versionFile.parent)
+        Files.writeString(versionFile, "not-a-version\n")
+        assertThrows(Exception::class.java) { BuildIdentity.readBaseVersion(repoRoot.toFile()) }
+    }
+
+    @Test
+    fun `readBaseVersion rejects missing file`() {
+        assertThrows(Exception::class.java) { BuildIdentity.readBaseVersion(repoRoot.toFile()) }
+    }
+
+    @Test
+    fun `validateFullIdentity accepts complete payload`() {
         val json = validIdentity()
-        invoke(nodeFixture("", json))
-        val result = resolve()
-        assertEquals(json, result.json)
-        assertEquals("1.2.3-SNAPSHOT.gabcdef0", result.softwareVersion)
+        val result = BuildIdentity.validateFullIdentity(json)
+        assertEquals(1, result["schemaVersion"])
+        assertEquals("1.2.3-SNAPSHOT.gabcdef0", result["softwareVersion"])
+        assertEquals("1.2.3-SNAPSHOT", result["baseVersion"])
+        assertEquals(false, result["dirty"])
+        assertEquals("snapshot", result["channel"])
     }
 
     @Test
-    fun `release qualification precedes and agrees with full identity`() {
-        val json = validIdentity(version = "1.2.3", sourceCommit = commit)
-        invoke(nodeFixture("{\"softwareVersion\":\"1.2.3\",\"sourceCommit\":\"$commit\"}", json,
-            requireReleaseFirst = true))
-        val result = resolve(release = true)
-        assertEquals(json, result.json)
-        assertEquals("1.2.3", result.softwareVersion)
-    }
-
-    @Test
-    fun `rejects dirty release full identity`() {
-        val json = validIdentity(version = "1.2.3-SNAPSHOT.gabcdef0.dirty.111111111111", dirty = true)
-        invoke(nodeFixture("{\"softwareVersion\":\"1.2.3\",\"sourceCommit\":\"$commit\"}", json,
-            requireReleaseFirst = true))
-        assertThrows(Exception::class.java) { resolve(release = true) }
-    }
-
-    @Test
-    fun `rejects release qualification commit or version mismatch`() {
-        val json = validIdentity(version = "1.2.3", sourceCommit = commit)
-        invoke(nodeFixture("{\"softwareVersion\":\"1.2.3\",\"sourceCommit\":\"${"0".repeat(40)}\"}", json,
-            requireReleaseFirst = true))
-        assertThrows(Exception::class.java) { resolve(release = true) }
-        invoke(nodeFixture("{\"softwareVersion\":\"1.2.4\",\"sourceCommit\":\"$commit\"}", json,
-            requireReleaseFirst = true))
-        assertThrows(Exception::class.java) { resolve(release = true) }
-    }
-
-    @Test
-    fun `rejects invalid complete identity payloads`() {
+    fun `validateFullIdentity rejects malformed payloads`() {
         val good = validIdentity()
         val malformed = listOf(
-            "not-json", "", "{}", good.replace("\"schemaVersion\":1", "\"schemaVersion\":2"),
+            "not-json", "", "{}",
+            good.replace("\"schemaVersion\":1", "\"schemaVersion\":2"),
             good.replace("\"dirty\":false", "\"dirty\":\"false\""),
             good.replace(",\"buildId\":\"$buildId\"", ""),
             good.replace("\"softwareVersion\":\"1.2.3-SNAPSHOT.gabcdef0\"", "\"softwareVersion\":7"),
             good.replace("1.2.3-SNAPSHOT.gabcdef0", "1.2.3-SNAPSHOT.gINVALID"),
         )
         malformed.forEach { payload ->
-            invoke(nodeFixture("", payload))
-            assertThrows(Exception::class.java, { resolve() }, "Expected rejection for: $payload")
+            assertThrows(Exception::class.java, { BuildIdentity.validateFullIdentity(payload) },
+                "Expected rejection for: $payload")
         }
     }
 
     @Test
-    fun `accepts dirty development and clean snapshot release`() {
-        val dirty = validIdentity(version = "1.2.3-SNAPSHOT.gabcdef0.dirty.111111111111", dirty = true)
-        invoke(nodeFixture("", dirty))
-        assertEquals(dirty, resolve().json)
-        val clean = validIdentity()
-        invoke(nodeFixture("{\"softwareVersion\":\"1.2.3-SNAPSHOT.gabcdef0\",\"sourceCommit\":\"$commit\"}", clean,
-            requireReleaseFirst = true))
-        assertEquals(clean, resolve(release = true).json)
+    fun `validateReleaseQualification accepts matching qualification`() {
+        val identity = BuildIdentity.validateFullIdentity(
+            validIdentity(version = "1.2.3", sourceCommit = commit))
+        val qualification = """{"softwareVersion":"1.2.3","sourceCommit":"$commit"}"""
+        BuildIdentity.validateReleaseQualification(identity, qualification)
     }
 
     @Test
-    fun `rejected release qualification prevents full identity call`() {
-        invoke(nodeFixture("", validIdentity(), releaseExit = 3, requireReleaseFirst = true))
-        assertThrows(Exception::class.java) { resolve(release = true) }
+    fun `validateReleaseQualification rejects dirty identity`() {
+        val identity = BuildIdentity.validateFullIdentity(
+            validIdentity(version = "1.2.3-SNAPSHOT.gabcdef0.dirty.111111111111", dirty = true))
+        val qualification = """{"softwareVersion":"1.2.3","sourceCommit":"$commit"}"""
+        assertThrows(Exception::class.java) {
+            BuildIdentity.validateReleaseQualification(identity, qualification)
+        }
     }
 
     @Test
-    fun `rejects unsuccessful Node execution`() {
-        invoke(nodeFixture("", validIdentity(), fullExit = 7))
-        assertThrows(Exception::class.java) { resolve() }
+    fun `validateReleaseQualification rejects commit mismatch`() {
+        val identity = BuildIdentity.validateFullIdentity(
+            validIdentity(version = "1.2.3", sourceCommit = commit))
+        val qualification = """{"softwareVersion":"1.2.3","sourceCommit":"${"0".repeat(40)}"}"""
+        assertThrows(Exception::class.java) {
+            BuildIdentity.validateReleaseQualification(identity, qualification)
+        }
+    }
+
+    @Test
+    fun `validateReleaseQualification rejects version mismatch`() {
+        val identity = BuildIdentity.validateFullIdentity(
+            validIdentity(version = "1.2.3", sourceCommit = commit))
+        val qualification = """{"softwareVersion":"1.2.4","sourceCommit":"$commit"}"""
+        assertThrows(Exception::class.java) {
+            BuildIdentity.validateReleaseQualification(identity, qualification)
+        }
     }
 }

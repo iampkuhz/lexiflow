@@ -30,10 +30,21 @@ class ApiApplicationTest {
   void contextLoads() {}
 
   @Test
-  void softwareIdentityComesFromEmbeddedBuildResource() {
+  void softwareIdentityComesFromEmbeddedBuildResource() throws Exception {
     var identity = new SoftwareIdentity();
     assertNotNull(identity.version());
-    assertEquals(System.getProperty("lexiflow.build.version"), identity.version());
+    // 独立消费任务提供的版本和内嵌 JSON，避免重复读取同一 txt 形成循环断言。
+    String expectedVersion = System.getProperty("lexiflow.build.version");
+    assertNotNull(expectedVersion, "build task must provide software identity");
+    assertEquals(expectedVersion, identity.version());
+    try (var resource =
+        getClass().getClassLoader().getResourceAsStream("META-INF/lexiflow-build.json")) {
+      assertNotNull(resource, "META-INF/lexiflow-build.json must be on test classpath");
+      var embedded = new tools.jackson.databind.ObjectMapper().readTree(resource);
+      assertEquals(9, embedded.size());
+      assertEquals(1, embedded.get("schemaVersion").asInt());
+      assertEquals(expectedVersion, embedded.get("softwareVersion").asString());
+    }
   }
 
   @Test

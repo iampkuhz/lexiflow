@@ -29,7 +29,7 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend <gradle-task
 定向到模块时使用真实 Gradle project path，例如 `:api:test`。除失败定位外，按交付目标选择完整聚合入口；不要再逐个运行已包含的任务。Repository Verify 的 backend Check 使用 deliveryFull，不能用普通 check 替代。
 
 
-构建接线的真实行为回归由独立 `eng.backend.build-contract` Check 执行（直接诊断：`python3 -m tests.verification.gradle_build_contract`），覆盖实际任务依赖、模块边界拒绝、运行入口参数和配置缓存。它需要 Java/Node，不进入可复用的 Verification 自测；不代替 `check` 或 `deliveryFull`。
+构建接线的真实行为回归由独立 `eng.backend.build-contract` Check 执行（直接诊断：`python3 -m tests.verification.gradle_build_contract`），覆盖实际任务依赖、模块边界拒绝、运行入口参数和配置缓存。Gradle 配置阶段只读取 `ops/release/version.txt` 的基础版本，不启动 Node 或 Git；完整身份由 `GenerateSoftwareIdentityTask` 类型化任务在执行阶段通过 `ExecOperations` 调用 Node 生成，身份生成禁用 up-to-date 与构建缓存复用，以保证每次执行都产生新鲜身份。API 归档使用稳定的内部路径供 Gradle/IDE 查询；原生 Manifest 合并消费任务生成的完整身份，`bootJar` 在同一任务内校验并复制为公开的 `build/libs/api-<softwareVersion>.jar`。内部归档不是发行入口，公开文件名、Manifest 和内嵌 JSON/txt 必须一致。该检查需要 Java/Node，不进入可复用的 Verification 自测；不代替 `check` 或 `deliveryFull`。
 
 ## 1.3. 报告与边界
 
