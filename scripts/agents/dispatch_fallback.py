@@ -42,7 +42,7 @@ def _policy(root: Path) -> dict[str, Any]:
         raise DispatchFallbackError("dispatch-policy-unavailable", str(exc)) from None
     if (
         not isinstance(value, dict)
-        or value.get("primary") != "qoder"
+        or value.get("primary") not in {"qoder", "native-codex"}
         or not isinstance(value.get("fallback_model"), str)
         or not value["fallback_model"]
         or not isinstance(value.get("fallback_reasoning_effort"), str)
