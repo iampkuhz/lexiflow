@@ -17,10 +17,26 @@ class SoftwareIdentityTest {
 
   @Test
   void acceptsResolvedSnapshotAndDirtyIdentity() {
-    var value = "2.0.0-SNAPSHOT.gabc1234.dirty.0123456789ab";
+    var value = "2.0.0-SNAPSHOT.20261006.gabc1234.dirty.0123456789ab";
     assertEquals(value, SoftwareIdentity.parseVersion(value));
     assertThrows(
         IllegalStateException.class, () -> SoftwareIdentity.parseVersion("2.0.0-SNAPSHOT"));
+  }
+
+  @Test
+  void rejectsInvalidOrMissingSourceDates() {
+    assertEquals(
+        "2.0.0-SNAPSHOT.20240229.gabc1234",
+        SoftwareIdentity.parseVersion("2.0.0-SNAPSHOT.20240229.gabc1234"));
+    for (var date :
+        List.of("20260229", "20260431", "20261301", "20260001", "00000101", "2026106")) {
+      assertThrows(
+          IllegalStateException.class,
+          () -> SoftwareIdentity.parseVersion("2.0.0-SNAPSHOT." + date + ".gabc1234"));
+    }
+    assertThrows(
+        IllegalStateException.class,
+        () -> SoftwareIdentity.parseVersion("2.0.0-SNAPSHOT.gabc1234"));
   }
 
   @Test

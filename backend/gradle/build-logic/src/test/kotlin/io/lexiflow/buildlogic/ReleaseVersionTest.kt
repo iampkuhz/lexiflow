@@ -11,8 +11,16 @@ class ReleaseVersionTest {
     }
 
     @Test fun acceptsResolvedSnapshotIdentity() {
-        assertEquals("2.0.0-SNAPSHOT.gabc1234.dirty.0123456789ab", ReleaseVersion.parse("2.0.0-SNAPSHOT.gabc1234.dirty.0123456789ab"))
+        assertEquals("2.0.0-SNAPSHOT.20261006.gabc1234.dirty.0123456789ab", ReleaseVersion.parse("2.0.0-SNAPSHOT.20261006.gabc1234.dirty.0123456789ab"))
         assertThrows(IllegalArgumentException::class.java) { ReleaseVersion.parse("2.0.0-SNAPSHOT") }
+    }
+
+    @Test fun rejectsInvalidOrMissingSourceDates() {
+        assertEquals("2.0.0-SNAPSHOT.20240229.gabc1234", ReleaseVersion.parse("2.0.0-SNAPSHOT.20240229.gabc1234"))
+        listOf("20260229", "20260431", "20261301", "20260001", "00000101", "2026106").forEach {
+            assertThrows(IllegalArgumentException::class.java) { ReleaseVersion.parse("2.0.0-SNAPSHOT.$it.gabc1234") }
+        }
+        assertThrows(IllegalArgumentException::class.java) { ReleaseVersion.parse("2.0.0-SNAPSHOT.gabc1234") }
     }
 
     @Test fun rejectsInvalidValues() {

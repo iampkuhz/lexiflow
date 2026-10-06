@@ -114,7 +114,7 @@ node ops/podman/local.mjs upgrade
 node ops/podman/local.mjs version
 ```
 
-网络失败或还没有正式发行时显示“未知”，不影响本机使用。开发版本如 `2.0.0-SNAPSHOT.gabc1234`，未提交改动附加 `dirty` 和输入摘要；同一输入不会反复增长版本号。Chrome 展示完整 `version_name`，数字 `version` 单独映射。安装记录在受管目录 `installation-records/`，包含时间、原版本、结果、完整 commit、构建/制品摘要与独立的词库资料身份；该目录属于本机私有运行数据，不上传。
+网络失败或还没有正式发行时显示“未知”，不影响本机使用。开发版本如 `2.0.0-SNAPSHOT.20261006.gabc1234`，日期取 Git 提交者时间并固定为 Asia/Shanghai（UTC+08:00），不是本次构建日期；未提交改动附加 `dirty` 和输入摘要，同一输入不会因隔天构建而改变版本号。正式版仍使用纯数字版本。Chrome 展示完整 `version_name`，数字 `version` 单独映射。安装记录在受管目录 `installation-records/`，包含时间、原版本、结果、完整 commit、构建/制品摘要与独立的词库资料身份；该目录属于本机私有运行数据，不上传。
 
 不与 `lexiflow.sh` 或手工 Compose 命令管理同一安装。不要移动受管目录或手改配置、密码、状态及升级事务；脚本会拒绝身份和配置漂移。ZIP 是扩展交付归档，不是通用的一键安装程序。
 

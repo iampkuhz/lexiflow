@@ -109,7 +109,7 @@ class TestBuildSourceIdentity(unittest.TestCase):
     def test_shared_identity_selects_resolved_snapshot_paths(self):
         import subprocess
 
-        version = "2.0.0-SNAPSHOT.gabc1234"
+        version = "2.0.0-SNAPSHOT.20261006.gabc1234"
         result = subprocess.CompletedProcess(
             [], 0,
             json.dumps({"softwareVersion": version, "sourceCommit": "a" * 40}).encode(),

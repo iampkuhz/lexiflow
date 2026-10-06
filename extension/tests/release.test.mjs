@@ -80,7 +80,7 @@ test("requires and verifies the complete embedded extension identity", async () 
     await assert.rejects(createExtensionZip({ root }), /identity required/u);
     const sourceSha256 = `${buildIdentity.sourceSha256.slice(0, 12)}${buildIdentity.sourceSha256.slice(12) === "0".repeat(52) ? "1".repeat(52) : "0".repeat(52)}`;
     const altered = { ...buildIdentity, sourceSha256 };
-    altered.buildId = createHash("sha256").update(JSON.stringify({ baseVersion: altered.baseVersion, sourceCommit: altered.sourceCommit, sourceSha256, dirty: altered.dirty })).digest("hex");
+    altered.buildId = createHash("sha256").update(JSON.stringify({ baseVersion: altered.baseVersion, sourceCommit: altered.sourceCommit, sourceSha256, dirty: altered.dirty, ...(altered.channel === "snapshot" ? { sourceDate: altered.softwareVersion.split("-SNAPSHOT.")[1].split(".")[0] } : {}) })).digest("hex");
     assert.equal(altered.softwareVersion, buildIdentity.softwareVersion);
     assert.equal(altered.sourceCommit, buildIdentity.sourceCommit);
     await writeFile(path.join(dist, "build-identity.json"), JSON.stringify(altered));

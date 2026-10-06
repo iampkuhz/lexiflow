@@ -10,9 +10,9 @@ import { makeZip, jarBytes, extensionBytes } from './zip-fixture.mjs';
 
 function identity({ dirty = false, snapshot = false, sourceSha256 = 'b'.repeat(64) } = {}) {
   const baseVersion = `2.0.0${snapshot ? '-SNAPSHOT' : ''}`, sourceCommit = 'a'.repeat(40);
-  const softwareVersion = dirty || snapshot ? `2.0.0-SNAPSHOT.gaaaaaaa${dirty ? `.dirty.${sourceSha256.slice(0, 12)}` : ''}` : '2.0.0';
+  const softwareVersion = dirty || snapshot ? `2.0.0-SNAPSHOT.20261006.gaaaaaaa${dirty ? `.dirty.${sourceSha256.slice(0, 12)}` : ''}` : '2.0.0';
   return { schemaVersion: 1, baseVersion, softwareVersion, chromeVersion: `2.0.0.${dirty || snapshot ? 0 : 1}`,
-    sourceCommit, sourceSha256, buildId: createHash('sha256').update(JSON.stringify({ baseVersion, sourceCommit, sourceSha256, dirty })).digest('hex'), dirty, channel: dirty || snapshot ? 'snapshot' : 'release' };
+    sourceCommit, sourceSha256, buildId: createHash('sha256').update(JSON.stringify({ baseVersion, sourceCommit, sourceSha256, dirty, ...(dirty || snapshot ? { sourceDate: '20261006' } : {}) })).digest('hex'), dirty, channel: dirty || snapshot ? 'snapshot' : 'release' };
 }
 async function archive(bytes, fn) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lf-embedded-')));

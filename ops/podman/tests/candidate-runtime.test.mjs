@@ -155,8 +155,8 @@ const flowPrevious = flowCandidate('previous', 'a');
 const flowTarget = flowCandidate('target', 'b');
 const flowIdentity = (_name, letter) => {
   const source = { baseVersion: '2.0.0-SNAPSHOT', sourceCommit: letter.repeat(40), sourceSha256: flowHex(letter), dirty: false };
-  return { schemaVersion: 1, ...source, softwareVersion: `2.0.0-SNAPSHOT.g${letter.repeat(7)}`,
-    chromeVersion: '2.0.0.0', buildId: flowSha(JSON.stringify(source)), channel: 'snapshot' };
+  return { schemaVersion: 1, ...source, softwareVersion: `2.0.0-SNAPSHOT.20261006.g${letter.repeat(7)}`,
+    chromeVersion: '2.0.0.0', buildId: flowSha(JSON.stringify({ ...source, sourceDate: '20261006' })), channel: 'snapshot' };
 };
 const flowVerified = (name, letter) => ({ candidateSha256: flowHex(letter), manifestSha256: flowHex(letter === 'a' ? 'c' : 'd'), buildIdentity: flowIdentity(name, letter), manifest: { artifacts: [
   { role: 'api-image', platform: 'linux/arm64', imageDigest: `sha256:${flowHex(letter)}` },

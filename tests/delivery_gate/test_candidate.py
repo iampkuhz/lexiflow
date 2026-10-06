@@ -73,7 +73,7 @@ class CandidateChainTests(unittest.TestCase):
         self.f._git("add", "harness/module-checks.yaml", "planning/workstreams.yaml")
         self.f._git("commit", "-m", "candidate declaration fixture")
         self.identity = {"schemaVersion": 1, "baseVersion": "2.0.0-SNAPSHOT",
-                         "softwareVersion": "2.0.0-SNAPSHOT.gaaaaaaa", "chromeVersion": "2.0.0.0",
+                         "softwareVersion": "2.0.0-SNAPSHOT.20261006.gaaaaaaa", "chromeVersion": "2.0.0.0",
                          "sourceCommit": "a" * 40, "sourceSha256": "b" * 64, "buildId": "c" * 64,
                          "dirty": False, "channel": "snapshot"}
         self.candidate = {"candidateSha256": "d" * 64, "manifestSha256": "e" * 64,

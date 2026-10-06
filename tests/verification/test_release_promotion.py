@@ -308,7 +308,7 @@ class PromotionTests(unittest.TestCase):
                 p.PromotionError, "formal-candidate-proof-required"
             ):
                 self.promote()
-        for value in ("1.2.3-SNAPSHOT.gabc", "1.2.3"):
+        for value in ("1.2.3-SNAPSHOT.20261006.gabc", "1.2.3"):
             self.fixture.identity["softwareVersion"] = value
             self.fixture.refresh()
             if value.endswith("gabc"):

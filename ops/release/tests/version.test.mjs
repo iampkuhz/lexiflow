@@ -10,7 +10,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { parseVersion, readVersion, checkReleaseSource } from '../version.mjs';
 import { evaluateTapSummary, runTests } from '../check.mjs';
 
-const git = (cwd, ...args) => execFileSync('git', args, { cwd, stdio: 'ignore', timeout: 10_000 });
+const git = (cwd, ...args) => execFileSync('git', args, { cwd, stdio: 'ignore', timeout: 10_000, env: { ...process.env, GIT_AUTHOR_DATE: '2026-10-05T00:00:00Z', GIT_COMMITTER_DATE: '2026-10-05T18:00:00Z' } });
 function fixture({ head = true, ignore = false } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-release-'));
   git(root, 'init', '-q'); git(root, 'config', 'user.email', 'fixture@example.invalid'); git(root, 'config', 'user.name', 'Fixture');
@@ -105,11 +105,11 @@ test('runner handles exit failure, timeout, overflow and spawn error', async () 
 test('snapshot input and Chrome channel mapping are deterministic and ordered', async () => {
   const { chromeVersion } = await import('../version.mjs');
   assert.equal(parseVersion('2.0.0-SNAPSHOT\n'), '2.0.0-SNAPSHOT');
-  assert.equal(chromeVersion('2.0.0-SNAPSHOT.gabc1234.dirty.123456789abc'), '2.0.0.0');
+  assert.equal(chromeVersion('2.0.0-SNAPSHOT.20261006.gabc1234.dirty.123456789abc'), '2.0.0.0');
   assert.equal(chromeVersion('2.0.0'), '2.0.0.1');
-  assert.equal(chromeVersion('2.0.1-SNAPSHOT.gabc1234'), '2.0.1.0');
-  for (const value of ['0.0.0-SNAPSHOT', '2.0.0-preview', '2.0.0-SNAPSHOT.gABC1234', '2.0.0-SNAPSHOT.gabc1234.dirty.', '2.0.65536-SNAPSHOT', '2.0.0\n']) assert.throws(() => chromeVersion(value));
-  assert.throws(() => parseVersion('2.0.0-SNAPSHOT.gabc1234'));
+  assert.equal(chromeVersion('2.0.1-SNAPSHOT.20261006.gabc1234'), '2.0.1.0');
+  for (const value of ['0.0.0-SNAPSHOT', '2.0.0-preview', '2.0.0-SNAPSHOT.20261006.gABC1234', '2.0.0-SNAPSHOT.20261006.gabc1234.dirty.', '2.0.65536-SNAPSHOT', '2.0.0\n']) assert.throws(() => chromeVersion(value));
+  assert.throws(() => parseVersion('2.0.0-SNAPSHOT.20261006.gabc1234'));
 });
 test('build identity binds commit and content, not time, staging or ignored local data', async () => {
   const { resolveBuildIdentity } = await import('../version.mjs');
@@ -125,7 +125,7 @@ test('build identity binds commit and content, not time, staging or ignored loca
     writeFileSync(path.join(root, 'source'), 'changed one');
     const first = resolveBuildIdentity(root);
     assert.equal(first.channel, 'snapshot');
-    assert.match(first.softwareVersion, /^1\.2\.3-SNAPSHOT\.g[a-f0-9]{7}\.dirty\.[a-f0-9]{12}$/);
+    assert.match(first.softwareVersion, /^1\.2\.3-SNAPSHOT\.[1-9][0-9]{7}\.g[a-f0-9]{7}\.dirty\.[a-f0-9]{12}$/);
     assert.equal(first.sourceCommit, clean.sourceCommit);
     git(root, 'add', 'source');
     assert.deepEqual(resolveBuildIdentity(root), first);
@@ -146,7 +146,7 @@ test('clean snapshots retain full commit identity and cannot become formal tags'
     git(root, 'add', '.'); git(root, 'commit', '-qm', 'snapshot');
     const identity = resolveBuildIdentity(root);
     assert.equal(identity.dirty, false);
-    assert.equal(identity.softwareVersion, `2.0.0-SNAPSHOT.g${identity.sourceCommit.slice(0, 7)}`);
+    assert.equal(identity.softwareVersion, `2.0.0-SNAPSHOT.20261006.g${identity.sourceCommit.slice(0, 7)}`);
     assert.equal(checkReleaseSource(root).softwareVersion, identity.softwareVersion);
     git(root, 'tag', 'v2.0.0');
     assert.throws(() => checkReleaseTag('v2.0.0', root));
@@ -234,5 +234,41 @@ test('identity rejects file bytes changed and restored during an FD read', async
     } finally {
       fsDefault.openSync = originalOpen; fsDefault.readSync = originalRead; syncBuiltinESMExports();
     }
+  });
+});
+
+
+test('snapshot date uses committer date in UTC+08 and ignores build clock and host timezone', async () => {
+  const { resolveBuildIdentity } = await import('../version.mjs');
+  withFixture({}, root => {
+    writeFileSync(path.join(root, 'ops/release/version.txt'), '2.0.0-SNAPSHOT\n');
+    git(root, 'add', '.'); git(root, 'commit', '-qm', 'dated snapshot');
+    const expected = resolveBuildIdentity(root);
+    assert.match(expected.softwareVersion, /^2\.0\.0-SNAPSHOT\.20261006\.g[a-f0-9]{7}$/);
+    assert.equal(checkReleaseSource(root).softwareVersion, expected.softwareVersion);
+    const script = `import {resolveBuildIdentity} from ${JSON.stringify(new URL('../version.mjs', import.meta.url).href)}; Date.now = () => 1; console.log(JSON.stringify(resolveBuildIdentity(process.argv[1])));`;
+    for (const TZ of ['UTC', 'Pacific/Honolulu', 'Pacific/Auckland']) {
+      const result = spawnSync(process.execPath, ['--input-type=module', '-e', script, root], {
+        encoding: 'utf8', timeout: 10000, env: { ...process.env, TZ },
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(JSON.parse(result.stdout), expected);
+    }
+  });
+});
+
+test('snapshot date must be a real calendar date and is bound into the development build ID', async () => {
+  const { parseSoftwareVersion, resolveBuildIdentity, validateBuildIdentity } = await import('../version.mjs');
+  assert.equal(parseSoftwareVersion('2.0.0-SNAPSHOT.20240229.gabc1234'), '2.0.0-SNAPSHOT.20240229.gabc1234');
+  for (const date of ['20260229', '20260431', '20261301', '20260001', '00000101', '2026106']) {
+    assert.throws(() => parseSoftwareVersion(`2.0.0-SNAPSHOT.${date}.gabc1234`));
+  }
+  assert.throws(() => parseSoftwareVersion('2.0.0-SNAPSHOT.gabc1234'));
+  withFixture({}, root => {
+    writeFileSync(path.join(root, 'source'), 'dirty fixture');
+    const expected = resolveBuildIdentity(root);
+    assert.equal(validateBuildIdentity(expected), expected);
+    assert.throws(() => validateBuildIdentity({ ...expected,
+      softwareVersion: expected.softwareVersion.replace('.20261006.', '.20261007.') }), /INVALID_BUILD_IDENTITY/);
   });
 });
