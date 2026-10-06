@@ -1,10 +1,10 @@
-# 1. Agent workflow：可选委派与真实交接
+# 1. Agent workflow：有界派发与真实交接
 
-> 位置：[工程地图](overview.md) → [开发交付 S1](change-delivery.md) → Agent 协作。前置是有界工作包和真实宿主身份，输出是可核对的执行事实；它不是独立验收的替代品。
+> 上级：[仓库生命周期](overview.md)。Agent 协作是实现或独立验证的组织方式，不是额外交付阶段；先明确工作包，再决定是否需要委派。
 
-## 1.1. 先分清执行与验收
+**新派发使用原生 Codex 协作。** 策略真源为 [agent-policy](../../harness/agent-policy.manifest.yaml) 的 `subagent_protocol`、`codex_model_policy`、`agent_dispatch` 与 `qoder_delegation`；本页只解释实际交接。
 
-Main 决定范围、owner 和验收方式；Agent 执行工作包；完成信号只通知 Main 去核对事实。核对后需要正式验收时，再进入独立 submit/validate/review/check，不让实现者自签。
+## 1.1. 先看派发到集成
 
 ```plantuml
 @startuml
@@ -13,63 +13,93 @@ skinparam defaultFontName SansSerif
 skinparam defaultFontSize 14
 skinparam shadowing false
 skinparam nodesep 40
-skinparam ranksep 45
-top to bottom direction
-title Agent 交接：等待不是重试许可
-state "可派发\n已核对工作包" as Ready
-state "既有 Qoder 运行\n只读核对 / ack" as Handoff
-state "等待既有终态 callback\n主任务结束当前回合" as Waiting
-state "核对原始事实\n身份、范围、结果" as Checking
-state "已消费\nack 不是验收" as Acked
-state "Codex 原生协作\n保留工作包与范围" as Codex
-state "核对原生完成事实" as Done
-[*] --> Ready
-Ready --> Codex : 默认使用原生 Codex
-Ready --> Handoff : 仅续办既有 Qoder callback
-Handoff --> Waiting : 返回 continuation
-Waiting --> Checking : 匹配终态 callback
-Checking --> Acked : 核对后显式 ack
-Codex --> Done : 原生终态事件
-Done --> [*]
-Acked --> [*]
+skinparam ranksep 35
+skinparam activityBackgroundColor #EAF2FF
+skinparam activityBorderColor #46699A
+skinparam noteBackgroundColor #F5F6F8
+skinparam noteBorderColor #A0AAB8
+title 原生 Agent 工作包：派发、等待、核对与集成
+start
+:S1 定义有界工作包;
+note right
+入口：无脚本（父任务定界）
+作用：明确文件范围、产物、验收与禁止修改范围
+<color:#995A00><b>预期：5–10 分钟（Agent 规划）</b></color>
+end note
+:S2 读取策略并选择模型;
+note right
+入口：无脚本（读取 agent-policy）
+作用：按完整工作包分类，显式决定模型和推理参数
+<color:#995A00><b>预期：1–3 分钟（Agent 规划）</b></color>
+end note
+:S3 调用原生派发工具;
+note right
+入口：无仓库脚本（spawn_agent / followup_task）
+作用：把范围和验收交给实际子代理，保留返回标识
+<color:#995A00><b>预期：5–30 秒（工具调用规划）</b></color>
+end note
+:S4 等待真实终态;
+note right
+入口：无仓库脚本（原生等待工具）
+作用：父任务做无冲突工作；未知或超时不重派
+<color:#995A00><b>预期：10–60 分钟（常规工作包示例预算）</b></color>
+end note
+:S5 核对完成事实与产物;
+note right
+入口：无脚本（核对工具终态与 diff）
+作用：检查真实来源、范围、报告和未完成项
+<color:#995A00><b>预期：2–5 分钟（Agent 规划）</b></color>
+end note
+:S6 串行集成并交接验证;
+note right
+入口：无脚本（父任务集成）
+作用：保留其他写入者改动，进入所需交付检查
+<color:#995A00><b>预期：2–5 分钟（Agent 规划，验证另计）</b></color>
+end note
+stop
 legend bottom
-这是阅读状态模型，不是新增运行时 enum
-未知运行不重派；终态失败按原 Task 接手，不重置预算
-后续是否正式验收，回到交付主流程另行判断
+只展示当前原生协作主路径；实现、验证、审查不是同一身份。
+完成事件不是 Formal PASS；失败先按原工作包核对并接手。
+等待时间由本包预算决定，不以示例区间作为超时或重派规则。
 endlegend
 @enduml
 ```
 
-图为阅读状态模型，不是新增 enum。新实现派发默认且仅允许使用原生 Codex 子代理；Qoder 的既有状态、结果、验证和 ack 入口仅供读取/消费历史运行，不再自动 start/resume 或 fallback 到 Qoder。原生子代理使用协作事件，不要求 Qoder ack；两种历史记录不共享未经证明的完成结论。
+| 节点 | 核心作用 | 入口／交接产物 |
+| --- | --- | --- |
+| S1 | 明确可独立验收的职责、文件范围与禁止范围 | [Task / Catalog](../../planning/workstreams.yaml)；无关计划漂移不冒充通用派发锁 |
+| S2 | 每次调用前读取完整工作包的模型策略 | [agent-policy](../../harness/agent-policy.manifest.yaml)；显式模型与 reasoning 参数 |
+| S3 | 调用 `spawn_agent`／`followup_task`，展示真实交接 | 原生协作工具；返回的真实 agent 标识 |
+| S4 | 等待终态，做无写域冲突的其他工作 | 原生事件／等待工具；未知状态不当成失败重派 |
+| S5 | 核对来源、范围、产物和阻塞项 | 真实工具终态、diff、报告；规范记录另用[Codex 核对入口](../../scripts/agents/delegation/codex_cli.py) |
+| S6 | 串行集成，交给所需验证／审查 | [执行门禁场景](scenarios/run-repository-gates.md)；完成信号不是验收 receipt |
 
-## 1.2. 派发前：先证明允许启动
+本图的等待预算仅示例，不替代策略或具体工作包预算。图中协作工具不由仓库脚本实现，不能虚构一个脚本路径。
 
-主线程在当前聊天直接展示交接，不只把状态写在工具输出或本机日志里。新实现工作调用原生 `spawn_agent` / `followup_task`，按完整工作包在派发说明中显式选择模型与 reasoning；调用前说明工作包、目标和范围，调用后报告真实原生 agent 标识。Qoder 仅供已有运行的只读核对和 ack，不再作为实现执行器或失败 fallback。Harness 中 `qoder_delegation.default_implementer` 标为 `legacy-records-only`，不构成当前路由。
+## 1.2. 派发前后交接什么
 
-读取 [policy](../../harness/agent-policy.manifest.yaml) 的 subagent_protocol、模型路由、qoder_delegation 与 agent_dispatch。Task identity、版本、owner、允许/禁止路径、所需上下文、产物、验收和检查命令必须明确。Catalog 存在时核对，不把无关 Catalog 漂移变成通用派发锁；planning-only 也不能冒充已经分解的 Task。
+工作包给出 Task/version（若适用）、目标、允许／禁止路径、必要上下文、产物、验收和直接检查。派发前在当前聊天说明范围与模型选择依据；派发后保留真实 agent 标识。并行写入范围不得重合，不覆盖其他线程修改；真实身份与并发合同见 [Harness](../../harness/README.md)。
 
-原生 Codex 派发遵循同一工作包身份、范围、模型和并发合同；不伪造 runner 身份，不允许实现者自签验证或审查。既有 Qoder preflight/status/result/validate-result/ack 仍可核查旧记录，但 start/resume 会被当前 policy 明确拒绝。
+模型按工作包选择，角色名或提示词不能代替工具参数。升级条件、等待与接手预算只在 policy 维护，不在文档缓存一份阈值。planning-only 计划不是已具备派发资格的 Task。
 
-## 1.3. 启动与等待：未知不是失败
+## 1.3. 完成后怎样交给验证
 
-既有 Qoder callback 到达后仍只按原父 Session 核对；不得因状态未知而再次派发或改走其他执行器。
+核对终态不只看 exit-zero：确认当前输入、实际 diff、产物 locator、真实身份与未完成项。实现者可做静态、编译和直接回归；完整交付检查与正式 validation 按[执行场景](scenarios/run-repository-gates.md)进行。`INDEPENDENT_REVIEW` 只读冻结证据，`CATALOG_DECISION` 只核对证据链，两层不重跑命令。
 
-占用拒绝区分当前可信 Session、同仓其他 Session、跨仓或未知占用。只有充分证据证明本 Session 已在途，才能等待该 callback；其他情况按结构化 next_action 处理，不能绕过写域冲突或 host-wide lease。精确锁与预算见[身份和运行事实](agent-workflow/identity.md)。
+直接检查、开发 Hook、正式验收的复用边界见 [policy validation_efficiency](../../harness/agent-policy.manifest.yaml)。不要惯例叠跑完整 adapter、development 和 Hook；更不能把实现者报告导入为正式独立验证。
 
-## 1.4. 完成与接手：先核对再消费
+原始记录及身份来源见[身份与运行事实](agent-workflow/identity.md)。核对结果与正式验收分开，失败按原工作包接手，不改 Task 身份重置预算。
 
-匹配终态 callback 到达后核对 Task/version、允许范围、身份、规范产物及执行证据。Qoder 的 `validate-result` 只核对结构，不能签发 Gate；核对后才显式 ack。重复已 ack/superseded 的 callback 不再派发或重验。
+## 1.4. 既有 Qoder 记录怎样处理
 
-运行证据与派发状态分开；完成信号不是验收。保留历史运行证据，不为切换执行器而清理、改写或重置记录。
+Qoder 新 `start`／`resume` 已禁用；其 `status`、`result`、`validate-result` 和 `ack` 仅供既有运行核对。匹配原父 Session 与真实 run 的终态 callback 后，核对原始事实再 ack；重复已消费信号不再派发。未知占用、观察超时不授权重派，也不改写旧记录。
 
-**工作包执行顺序**：实现者先确定最终 checkout 和输入，仅运行直接小回归（如 `tests.verification.test_development_efficiency`），不运行完整 adapter 全套或 development/Hook。完整 Hook 由独立 validator 在冻结输入后执行一次；若必要检查失败或阻塞，且源代码修复或相关输入/环境发生变化，则按冻结输入规则进行必要重验。只允许现有事务合同证明全部输入、配置、环境、窗口、runner 与 context 相同的事务内成功复用，禁止跨交付复用。实现者可进行直接静态、编译和目标测试自检，不得替代独立完整 Hook。长事件使用原生等待，日志仅在有信息的事件或终态读取。完整验证状态按实际记录报告。共享规则见 [policy validation_efficiency](../../harness/agent-policy.manifest.yaml)。详见[交付 Hook §1.5](change-delivery/hooks.md)。
-
-下一步：回到[交付 S2](change-delivery/verification.md)。定位失败见[排障](troubleshooting.md)；只查文件职责见 [Scripts Reference](reference/scripts.md)。
+Qoder 客户端 Stop 配置仍存在，见 [Hook](change-delivery/hooks.md)。这是客户端触发器，不表示 Qoder agent 可重新启动。
 
 ## 1.5. 原生验收与新任务例外
 
-验证与审查由当前父任务下不同的原生子代理承担；共享 Session 可接受，但 actor 必须来自真实原生元数据。实现者可做静态/编译/测试自检，不得自签正式验证或审查。Codex 内部委派用 `spawn_agent`；实现、验证和审查均不调用 Qoder。
+验证／审查使用当前父任务下不同的真实原生子代理，不伪造 actor；共享宿主 Session 不等于同一执行者。内部协作不使用 `create_thread`。
 
-新任务仅作例外兜底：至少两轮不同子代理针对当前输入验证 PASS、对应 Hook 仍阻塞，并有定向修复及当前任务能力边界证据。父任务说明报告 locator、阻塞层和边界后，须获用户明确授权；身份报错、缺环境、业务测试失败或未知运行本身均不构成理由。新任务仍遵守相同 Hook 和冻结输入，不得跳检。
+确需新任务例外时，先按 policy 收集当前输入的多轮独立验证、Hook 阻塞与定向修复证据，说明能力边界并取得用户明确授权；缺环境、身份报错、业务失败或未知运行不能单独构成理由。例外仍遵守原检查要求，不能绕过 Hook。
 
-Codex 委派默认 Luna：常规工作包 low，其他 medium；只有具体复杂性、失败或未覆盖风险才升级 Sol/high。调用时显式传 `model` 与 `reasoning_effort`；例外 `create_thread` 显式传 `model`/`thinking` 并核对实际模型，不以提示词、角色或默认 Astra 代替。99.9% 是设计目标，不是实测路由指标。
+失败定位回到[排障](troubleshooting.md)；文件维护查 [Scripts](reference/scripts.md)。

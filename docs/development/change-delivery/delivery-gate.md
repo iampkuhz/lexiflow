@@ -4,35 +4,19 @@
 
 这里的 Delivery Gate 指交付证据受理与判定，不是产品功能的人工验收测试，也不是一键测试脚本。submit 绑定风险和计划；独立 validate 始终执行；机械/局部风险不要求 review，高风险工程及正式发行要求独立 review；check 核对相应证据、依赖和批准。`authority.py` 只是从原生任务和子代理元数据读取并复核证据签发者身份的内部 helper，不管理用户账号、权限或角色库。
 
-## 1.1. 先理解谁执行、谁审查
+## 1.1. 阶段职责与唯一 CLI
 
-```plantuml
-@startuml
-skinparam backgroundColor white
-skinparam defaultFontName "PingFang SC"
-skinparam defaultFontSize 14
-skinparam shadowing false
-skinparam nodesep 40
-skinparam ranksep 45
-hide footbox
-title 风险计划决定是否审查
-actor "validator" as validator
-participant "Delivery Gate" as gate
-participant "Verification" as verification
-actor "reviewer" as reviewer
-validator -> gate : M1 执行冻结 validation
-gate -> verification : M2 按风险计划执行 verify_profile
-verification --> gate : R1 返回检查结果
-alt 高风险工程或正式发行
-  reviewer -> gate : M3 高风险计划提交 review findings
-  gate -> gate : M4 核对 frozen evidence 不重跑测试
-  gate --> reviewer : R2 返回 review record
-else 机械或局部风险
-end
-@enduml
-```
+正式 Gate 由 `python3 -m scripts.delivery_gate <子命令>` 统一分派。`submit.py`、`validate.py`、`review.py`、`check.py` 是场景实现文件，不是独立 CLI。完整执行顺序与分支见[门禁场景 C](../scenarios/run-repository-gates.md)。
 
-图只展开正常的 validate/review 交接。producer 未画入图；validator 须独立于 producer/submitter，reviewer 须独立于 producer/validator。原生子代理可共享父 Session，分工由不同 thread/actor 识别，不增加独立 Session 认证。身份直接来自原生元数据，不能填写 actor 字符串代替。
+| 阶段 | 核心作用 | 入口链接 |
+| --- | --- | --- |
+| `submit` | 绑定 Task、风险计划、来源报告、完整 diff 与 producer | [submit 实现](../../../scripts/delivery_gate/submit.py) |
+| `validate` | 独立身份执行冻结计划并发布 validation record | [validate 实现](../../../scripts/delivery_gate/validate.py) |
+| `review` | 发布独立 reviewer 的真实意见；不重跑测试 | [review 实现](../../../scripts/delivery_gate/review.py) |
+| `check` | 核对 receipt/hash DAG、依赖与必要批准 | [check 实现](../../../scripts/delivery_gate/check.py) |
+| 观察／消费 | 只读查询状态或消费既有完整 PASS | [status 实现](../../../scripts/delivery_gate/status.py)、[consume 实现](../../../scripts/delivery_gate/consume.py) |
+
+validator 与 producer/submitter 分离；reviewer 与 producer/validator 分离。机械/局部计划不伪造 review；review/check 不重跑测试。身份与分工依赖原生元数据，调用者不得传入身份字符串。以下各节只保留命令、参数和阶段特有不变量。
 
 ## 1.2. submit：冻结送验输入
 
@@ -110,4 +94,4 @@ python3 -m scripts.delivery_gate consume-existing --submission-id <uuid>
 
 `python3 -m scripts.delivery_gate status --submission-id <uuid>` 是只读观察入口，不推动链路。身份冲突、frozen input 漂移、readiness 缺失和 approval 缺失分别按[排障](../troubleshooting.md)处理，不统一归为“再跑一次”。工程 fixture 只能证明实现链路，不代替真实原生子代理的验证和审查。
 
-上一阶段：[Verify](verification.md)。回到[交付主干](../change-delivery.md)，或按需查[记录模板](../reference/record-template.md)。
+上一层：[开发交付能力总览](../change-delivery.md)；执行顺序见[门禁场景 C](../scenarios/run-repository-gates.md)。

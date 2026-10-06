@@ -2,7 +2,15 @@
 
 > 位置：[运行与环境](../operations.md) → Docker 发行安装。取得渠道、版本、许可证、平台和配套扩展以对应的已验收发行材料为准；实施与验收进度仅见[执行状态](../../roadmap/master-plan/phase2/status.md)。
 
+
 ## 1.1. 准备发行目录与主机
+
+| 任务 | 命令 | 成功判据 |
+| --- | --- | --- |
+| 验证取得的发行包 | `sh "$RELEASE_DIR/lexiflow.sh" verify` | 退出码成功，清单和制品完整匹配 |
+| 首次部署 | `prepare` → `activate` → `status` | 扩展显示正式就绪，并核对软件、协议和资料版本 |
+| 更新与恢复 | 新包 `prepare` → `activate`；需要时旧包 `recover` | 状态槽与目标发行一致，扩展连接就绪 |
+| 停止或卸载 | `stop`；逐槽 `delete` 需 `--confirm-delete-data` | 停止后数据保留；删除仅在目标 key 和槽位核实后执行 |
 
 从可信发行渠道取得完整发行包，先用该渠道的可信摘要验证整包或入口，再解包。同目录的 checksum 不能独立证明来源真实性；不要在核实来源前执行其中的脚本。不要重命名或移动它：私有安装记录会绑定 `lexiflow.sh` 的入口绝对路径和发行包身份。目录应包含 `lexiflow.sh`、`manifest.json`、`manifest.json.sha256` 及清单列出的制品；实际文件名和摘要以清单为准。不要自行补文件或修改摘要。
 

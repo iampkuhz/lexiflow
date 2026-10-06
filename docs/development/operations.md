@@ -2,15 +2,17 @@
 
 > 位置：[文档首页](../README.md) → [工程地图](overview.md) → 运行与环境。启动 API、导入词库和准备隔离测试是不同操作；有副作用的动作不能隐藏在只读 Verify 内。
 
+
 ## 1.1. 先选择运行目的
 
-| 目的 | 输入和前置 | 进入哪里 |
+| 任务 | 入口命令或操作 | 成功判据 |
 | --- | --- | --- |
-| 在真实浏览器体验提示 | Java/Node/Chrome、已发布开发词库 | [本地体验](operations/local-experience.md) |
-| 准备或重建词库资料 | 明确来源、项目开发库、导入/发布操作授权 | [词库导入](operations/lexicon-import.md) |
-| 执行完整 Java/仓库验证 | 显式隔离 PostgreSQL/Redis 与声明环境 | [隔离验证环境](operations/verification-environment.md) |
-| 检查 GitHub PR 或准备正式标签验证 | 无凭据临时 CI、受保护专用 Mac runner | [GitHub Actions](operations/github-actions.md) |
-| 自动验证扩展工程链路 | 临时 Chromium profile、合成页面、本机夹具 API | [扩展 E2E](operations/extension-e2e.md) |
+| 启动源码体验 | [本机体验](operations/local-experience.md)；`python3 -m scripts.environment.start_api` | API 健康且日志显示已发布词库；浏览器扩展报告就绪 |
+| 准备或重建词库 | [词库导入](operations/lexicon-import.md)；`lexiconValidate` 后按需 `lexiconRebuild` | 来源校验通过；发布事务提交且资料版本可查询 |
+| 执行扩展工程测试 | [扩展 E2E](operations/extension-e2e.md)；在 `extension/` 下运行 `npm test`、`npm run e2e` | 合成页面与本机夹具测试完成；不代表真实观看验收 |
+| 检查 PR | [GitHub Actions](operations/github-actions.md)；`python3 -m scripts.verification.ci quick --base <完整commit>` | quick 全部必需检查 PASS；不代表完整 Verify 或 Formal |
+| 准备正式候选 | [GitHub Actions](operations/github-actions.md)；发行标签 workflow | 候选和完整 Verify 完成后仍需独立 Gate 与人工批准 |
+| 准备隔离验证资源 | [验证环境](operations/verification-environment.md)；按需准备本机镜像与运行时 | 隔离资源就绪；资源就绪本身不是验证 PASS |
 
 ## 1.2. 正常本机体验的资源关系
 
