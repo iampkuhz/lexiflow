@@ -1485,6 +1485,10 @@ def _maybe_start_watchdog(
 def cmd_start(args: argparse.Namespace) -> None:
     """派发后立即交还控制权，由完成回调续办，不维持主线程等待。"""
     repo_root = _find_repo_root(Path.cwd())
+    if _fallback._policy(repo_root).get("primary") != "qoder":
+        raise ValueError(
+            "Qoder start is disabled by the current agent_dispatch policy; use native Codex collaboration"
+        )
     task_dir = _task_dir(repo_root)
     task_path = Path(args.task)
     _check_no_symlink_ancestors(task_path)
@@ -1978,6 +1982,10 @@ def cmd_resume(args: argparse.Namespace) -> None:
     与 start 共用 task_dir 派发锁；先占位再启动 worker，成功后记录 supersession。
     """
     repo_root = _find_repo_root(Path.cwd())
+    if _fallback._policy(repo_root).get("primary") != "qoder":
+        raise ValueError(
+            "Qoder resume is disabled by the current agent_dispatch policy; use native Codex collaboration"
+        )
     task_dir = _task_dir(repo_root)
     run_id = _validate_run_id(args.run_id)
     run_dir = task_dir / run_id

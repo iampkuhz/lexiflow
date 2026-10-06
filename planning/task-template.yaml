@@ -144,13 +144,16 @@ acceptance:
 # 执行配置；共享 agent_dispatch 和 model_policy 值由 policy 投影。
 execution:
   agent_dispatch:
-    primary: qoder
+    primary: native-codex
+    default_implementer: native-codex
     fallback_model: gpt-6-luna
     fallback_reasoning_effort: medium
-    model_selection_basis: luna-first-unclassified-fallback-escalation-requires-specific-evidence
+    model_selection_basis: subagent_protocol.codex_model_policy
+    qoder_automatic_dispatch: forbidden
+    legacy_qoder_actions: read-only-status-result-validation-and-ack-only
     validation_and_review: native-codex-subagents-not-qoder-or-create-thread
     max_consecutive_failures: 3
-    failure_unit: qoder-and-terra-both-unavailable-in-one-dispatch-attempt
+    failure_unit: legacy-qoder-attempt-and-native-fallback-both-unavailable-in-one-dispatch-attempt
     success_effect: reset-consecutive-failures-preserve-history
     identity: current-parent-repo-work-package-ordered-task-versions
     replay_effect: no-new-attempt-or-counter-increment

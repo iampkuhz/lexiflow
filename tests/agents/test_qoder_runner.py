@@ -163,6 +163,13 @@ class QoderRunnerContractTest(unittest.TestCase):
         patcher = patch.object(qoder_task, "_host_lock_path", return_value=self.host_lock)
         patcher.start()
         self.addCleanup(patcher.stop)
+        policy = patch.object(
+            qoder_task._fallback,
+            "_policy",
+            return_value={"primary": "qoder"},
+        )
+        policy.start()
+        self.addCleanup(policy.stop)
         host_wait = patch.object(qoder_task._fallback, "host_wait_decision", return_value=None)
         host_wait.start()
         self.addCleanup(host_wait.stop)
@@ -1843,6 +1850,36 @@ class DispatchEntryTest(unittest.TestCase):
 
     def _start(self) -> argparse.Namespace:
         return argparse.Namespace(task=str(self.task_path), runtime_recovery_confirmed=False)
+
+    def test_current_policy_blocks_qoder_start_and_preserves_read_ack_routes(self) -> None:
+        path = self.root / "harness/agent-policy.manifest.yaml"
+        policy = yaml.safe_load(path.read_text())
+        policy["agent_dispatch"].update(
+            primary="native-codex", default_implementer="native-codex"
+        )
+        path.write_text(yaml.safe_dump(policy), encoding="utf-8")
+        with patch.object(qoder_task, "_find_repo_root", return_value=self.root):
+            with self.assertRaisesRegex(ValueError, "Qoder start is disabled"):
+                qoder_task.cmd_start(argparse.Namespace())
+            with self.assertRaisesRegex(ValueError, "Qoder resume is disabled"):
+                qoder_task.cmd_resume(argparse.Namespace())
+        # Exercise the real CLI parser and handler registration without loading an
+        # old run or invoking any lifecycle operation.
+        for command, handler_name in (
+            ("status", "cmd_status"),
+            ("result", "cmd_result"),
+            ("validate-result", "cmd_validate_result"),
+            ("ack", "cmd_ack"),
+        ):
+            with self.subTest(command=command):
+                called = []
+                with patch.object(
+                    qoder_task,
+                    handler_name,
+                    side_effect=lambda args, name=handler_name: called.append(name),
+                ):
+                    self.assertEqual(qoder_task.main([command, "11111111-2222-4333-8444-555555555555"]), 0)
+                self.assertEqual(called, [handler_name])
 
     def test_invalid_busy_handoff_does_not_return_dispatch_permission(self) -> None:
         (self.root / self.task["harness_manifest"]).write_text('{}')

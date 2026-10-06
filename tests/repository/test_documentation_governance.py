@@ -328,6 +328,13 @@ class DocumentationTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         policy = yaml.safe_load((root / 'harness/agent-policy.manifest.yaml').read_text())
         expected = policy['agent_dispatch']
+        self.assertEqual(expected['primary'], 'native-codex')
+        self.assertEqual(expected['default_implementer'], 'native-codex')
+        self.assertTrue(expected['qoder_automatic_dispatch'] == 'forbidden')
+        self.assertEqual(policy['qoder_delegation']['default_implementer'], 'legacy-records-only')
+        self.assertTrue(expected['failure_unit'].startswith('legacy-'))
+        self.assertIn('原生 Codex 子代理', (root / 'harness/README.md').read_text())
+        self.assertNotIn('实现优先 Qoder', (root / 'harness/README.md').read_text())
         self.assertEqual(expected['fallback_model'], 'gpt-6-luna')
         self.assertEqual(expected['max_consecutive_failures'], 3)
         rules = yaml.safe_load((root / 'harness/policy-projections.yaml').read_text())['projections']
