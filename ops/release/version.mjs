@@ -21,6 +21,23 @@ export async function readVersion(source = path.resolve(path.dirname(fileURLToPa
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const digest = value => createHash('sha256').update(value).digest('hex');
 
+function validateSourceDate(value) {
+  if (typeof value !== 'string' || !/^[1-9][0-9]{7}$/.test(value)) throw new Error('invalid source date');
+  const iso = `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
+  const date = new Date(`${iso}T00:00:00Z`);
+  if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== iso) throw new Error('invalid source date');
+  return value;
+}
+
+// Git committer timestamp + 固定 UTC+08:00；与构建时钟、本机 TZ 和作者日期无关。
+function sourceDateForCommit(root, commit) {
+  const seconds = gitOutput(root, 'show', '-s', '--format=%ct', commit).trim();
+  if (!/^[0-9]+$/.test(seconds) || !Number.isSafeInteger(Number(seconds))) throw new Error('invalid commit timestamp');
+  const date = new Date((Number(seconds) + 8 * 60 * 60) * 1000);
+  if (!Number.isFinite(date.getTime())) throw new Error('invalid commit timestamp');
+  return validateSourceDate(date.toISOString().slice(0, 10).replaceAll('-', ''));
+}
+
 function gitOutput(root, ...args) {
   return execFileSync('git', ['-C', root, ...args], {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000, maxBuffer: 8 * 1024 * 1024,
@@ -32,9 +49,10 @@ function gitSnapshot(root) {
   if (repository !== realpathSync(root)) throw new Error();
   const sourceCommit = gitOutput(root, 'rev-parse', '--verify', 'HEAD^{commit}').trim();
   if (!/^[a-f0-9]{40,64}$/.test(sourceCommit)) throw new Error();
+  const sourceDate = sourceDateForCommit(root, sourceCommit);
   const dirty = gitOutput(root, 'status', '--porcelain=v1', '--untracked-files=all').length > 0;
   const files = [...new Set(gitOutput(root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard').split('\0').filter(Boolean))].sort();
-  return { repository, sourceCommit, dirty, files };
+  return { repository, sourceCommit, sourceDate, dirty, files };
 }
 
 function statIdentity(stat) {
@@ -135,17 +153,18 @@ export function resolveBuildIdentity(root = repositoryRoot) {
     || JSON.stringify(first.files) !== JSON.stringify(second.files)
     || first.baseVersion !== second.baseVersion) throw new Error('build source changed during identity scan');
   return derivedIdentity({ baseVersion: first.baseVersion, sourceCommit: first.git.sourceCommit,
-    sourceSha256: first.sourceSha256, dirty: first.git.dirty });
+    sourceDate: first.git.sourceDate, sourceSha256: first.sourceSha256, dirty: first.git.dirty });
 }
 
 // 所有制品消费者共享此派生规则，不能只比对可伪造的版本与 commit。
-function derivedIdentity({ baseVersion, sourceCommit, sourceSha256, dirty }) {
+function derivedIdentity({ baseVersion, sourceCommit, sourceDate, sourceSha256, dirty }) {
   const development = baseVersion.endsWith('-SNAPSHOT') || dirty;
   const numericVersion = baseVersion.replace(/-SNAPSHOT$/, '');
   const softwareVersion = development
-    ? `${numericVersion}-SNAPSHOT.g${sourceCommit.slice(0, 7)}${dirty ? `.dirty.${sourceSha256.slice(0, 12)}` : ''}`
+    ? `${numericVersion}-SNAPSHOT.${validateSourceDate(sourceDate)}.g${sourceCommit.slice(0, 7)}${dirty ? `.dirty.${sourceSha256.slice(0, 12)}` : ''}`
     : numericVersion;
-  const buildId = digest(JSON.stringify({ baseVersion, sourceCommit, sourceSha256, dirty }));
+  const buildId = digest(JSON.stringify({ baseVersion, sourceCommit, sourceSha256, dirty,
+    ...(development ? { sourceDate } : {}) }));
   return { schemaVersion: 1, baseVersion, softwareVersion, chromeVersion: chromeVersion(softwareVersion),
     sourceCommit, sourceSha256, buildId, dirty, channel: development ? 'snapshot' : 'release' };
 }
@@ -159,7 +178,8 @@ export function validateBuildIdentity(identity) {
     || typeof identity.sourceSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(identity.sourceSha256)) throw new Error('INVALID_BUILD_IDENTITY');
   try {
     if (parseVersion(identity.baseVersion) !== identity.baseVersion) throw new Error();
-    const derived = derivedIdentity(identity);
+    parseSoftwareVersion(identity.softwareVersion);
+    const derived = derivedIdentity({ ...identity, sourceDate: identity.softwareVersion.split('-SNAPSHOT.')[1]?.split('.')[0] });
     if (fields.some(field => identity[field] !== derived[field])) throw new Error();
   } catch { throw new Error('INVALID_BUILD_IDENTITY'); }
   return identity;
@@ -175,7 +195,11 @@ export function parseSoftwareVersion(value) {
   if (typeof value !== 'string') throw new Error('invalid software version');
   const numeric = value.split('-')[0];
   if (parseVersion(numeric) !== numeric) throw new Error('invalid software version');
-  if (value !== numeric && !/^[0-9.]+-SNAPSHOT\.g[a-f0-9]{7,64}(?:\.dirty\.[a-f0-9]{12,64})?$/.test(value)) throw new Error('invalid software version');
+  if (value !== numeric) {
+    const match = /^[0-9.]+-SNAPSHOT\.([1-9][0-9]{7})\.g[a-f0-9]{7,64}(?:\.dirty\.[a-f0-9]{12,64})?$/.exec(value);
+    if (!match) throw new Error('invalid software version');
+    validateSourceDate(match[1]);
+  }
   return value;
 }
 
@@ -214,7 +238,7 @@ export function checkReleaseSource(repoRoot = path.resolve(path.dirname(fileURLT
   try { status = git('status', '--porcelain=v1', '--untracked-files=all'); }
   catch { throw new Error('release input status unavailable'); }
   if (status) throw new Error('release input must be clean');
-  if (softwareVersion.endsWith('-SNAPSHOT')) softwareVersion = `${softwareVersion}.g${sourceCommit.slice(0, 7)}`;
+  if (softwareVersion.endsWith('-SNAPSHOT')) softwareVersion = `${softwareVersion}.${sourceDateForCommit(repoRoot, sourceCommit)}.g${sourceCommit.slice(0, 7)}`;
   return { softwareVersion, sourceCommit };
 }
 

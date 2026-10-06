@@ -3,6 +3,9 @@ package io.lexiflow.api.runtime;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.regex.Pattern;
 
 /** 从构建时嵌入的唯一版本资源读取软件身份。 */
@@ -11,7 +14,7 @@ public final class SoftwareIdentity {
   private static final int MAX_RESOURCE_BYTES = 256;
   private static final Pattern VERSION =
       Pattern.compile(
-          "(?:0|[1-9][0-9]{0,4})\\.(?:0|[1-9][0-9]{0,4})\\.(?:0|[1-9][0-9]{0,4})(?:-SNAPSHOT\\.g[a-f0-9]{7,64}(?:\\.dirty\\.[a-f0-9]{12,64})?)?");
+          "(?:0|[1-9][0-9]{0,4})\\.(?:0|[1-9][0-9]{0,4})\\.(?:0|[1-9][0-9]{0,4})(?:-SNAPSHOT\\.[1-9][0-9]{7}\\.g[a-f0-9]{7,64}(?:\\.dirty\\.[a-f0-9]{12,64})?)?");
   private final String version;
 
   /**
@@ -55,6 +58,14 @@ public final class SoftwareIdentity {
             ? raw.substring(0, raw.length() - 2)
             : raw.endsWith("\n") ? raw.substring(0, raw.length() - 1) : raw;
     if (!VERSION.matcher(value).matches()) throw invalidVersion();
+    if (value.contains("-SNAPSHOT.")) {
+      var date = value.split("-SNAPSHOT\\.", 2)[1].split("\\.", 2)[0];
+      try {
+        LocalDate.parse(date, DateTimeFormatter.BASIC_ISO_DATE);
+      } catch (DateTimeParseException exception) {
+        throw invalidVersion();
+      }
+    }
     var parts = value.split("-", 2)[0].split("\\.");
     boolean allZero = true;
     for (var part : parts) {

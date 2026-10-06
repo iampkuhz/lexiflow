@@ -9,7 +9,7 @@ import { spawn } from 'node:child_process';
 import { versionSummary } from '../versions.mjs';
 import { writePreparedTree } from '../prepare-workspace.mjs';
 
-const identity = tag => ({ schemaVersion: 1, baseVersion: '2.0.0-SNAPSHOT', softwareVersion: `2.0.0-SNAPSHOT.g${tag.repeat(7)}`, chromeVersion: '2.0.0.0', sourceCommit: tag.repeat(40).slice(0, 40), sourceSha256: 'a'.repeat(64), buildId: tag.repeat(64).slice(0, 64), dirty: false, channel: 'snapshot' });
+const identity = tag => ({ schemaVersion: 1, baseVersion: '2.0.0-SNAPSHOT', softwareVersion: `2.0.0-SNAPSHOT.20261006.g${tag.repeat(7)}`, chromeVersion: '2.0.0.0', sourceCommit: tag.repeat(40).slice(0, 40), sourceSha256: 'a'.repeat(64), buildId: tag.repeat(64).slice(0, 64), dirty: false, channel: 'snapshot' });
 function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiflow-upgrade-'));
   const old = identity('1'), target = identity('2');

@@ -40,10 +40,20 @@ test("accepts explicit demo and unknown dataset identity without formal readines
 });
 
 test("accepts full snapshot build identities but rejects unresolved or malformed versions", () => {
-  for (const softwareVersion of ["2.0.0-SNAPSHOT.gabc1234", "2.0.0-SNAPSHOT.gabc1234.dirty.0123456789ab"]) {
+  for (const softwareVersion of ["2.0.0-SNAPSHOT.20261006.gabc1234", "2.0.0-SNAPSHOT.20261006.gabc1234.dirty.0123456789ab"]) {
     assert.equal(parseRuntimeStatus({ ...valid, softwareVersion }).softwareVersion, softwareVersion);
   }
-  for (const softwareVersion of ["2.0.0-SNAPSHOT", "0.0.0-SNAPSHOT.gabc1234", "2.0.0-SNAPSHOT.gABC1234", "2.0.0-SNAPSHOT.gabc1234.dirty."]) {
+  for (const softwareVersion of ["2.0.0-SNAPSHOT", "0.0.0-SNAPSHOT.20261006.gabc1234", "2.0.0-SNAPSHOT.20261006.gABC1234", "2.0.0-SNAPSHOT.20261006.gabc1234.dirty."]) {
     assert.equal(parseRuntimeStatus({ ...valid, softwareVersion }), undefined);
   }
+});
+
+
+test("snapshot source dates are calendar-valid and mandatory", () => {
+  assert.equal(parseRuntimeStatus({ ...valid, softwareVersion: "2.0.0-SNAPSHOT.20240229.gabc1234" }).softwareVersion,
+    "2.0.0-SNAPSHOT.20240229.gabc1234");
+  for (const date of ["20260229", "20260431", "20261301", "20260001", "00000101", "2026106"]) {
+    assert.equal(parseRuntimeStatus({ ...valid, softwareVersion: `2.0.0-SNAPSHOT.${date}.gabc1234` }), undefined);
+  }
+  assert.equal(parseRuntimeStatus({ ...valid, softwareVersion: "2.0.0-SNAPSHOT.gabc1234" }), undefined);
 });

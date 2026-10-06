@@ -16,7 +16,7 @@ class BuildIdentityTest {
     private val buildId = "2".repeat(64)
 
     private fun validIdentity(
-        version: String = "1.2.3-SNAPSHOT.gabcdef0",
+        version: String = "1.2.3-SNAPSHOT.20261006.gabcdef0",
         sourceCommit: String = commit,
         dirty: Boolean = false,
     ) = """{"schemaVersion":1,"baseVersion":"1.2.3-SNAPSHOT","softwareVersion":"$version","chromeVersion":"1.2.3.0","sourceCommit":"$sourceCommit","sourceSha256":"$sourceSha","buildId":"$buildId","dirty":$dirty,"channel":"snapshot"}"""
@@ -55,7 +55,7 @@ class BuildIdentityTest {
         val json = validIdentity()
         val result = BuildIdentity.validateFullIdentity(json)
         assertEquals(1, result["schemaVersion"])
-        assertEquals("1.2.3-SNAPSHOT.gabcdef0", result["softwareVersion"])
+        assertEquals("1.2.3-SNAPSHOT.20261006.gabcdef0", result["softwareVersion"])
         assertEquals("1.2.3-SNAPSHOT", result["baseVersion"])
         assertEquals(false, result["dirty"])
         assertEquals("snapshot", result["channel"])
@@ -69,8 +69,8 @@ class BuildIdentityTest {
             good.replace("\"schemaVersion\":1", "\"schemaVersion\":2"),
             good.replace("\"dirty\":false", "\"dirty\":\"false\""),
             good.replace(",\"buildId\":\"$buildId\"", ""),
-            good.replace("\"softwareVersion\":\"1.2.3-SNAPSHOT.gabcdef0\"", "\"softwareVersion\":7"),
-            good.replace("1.2.3-SNAPSHOT.gabcdef0", "1.2.3-SNAPSHOT.gINVALID"),
+            good.replace("\"softwareVersion\":\"1.2.3-SNAPSHOT.20261006.gabcdef0\"", "\"softwareVersion\":7"),
+            good.replace("1.2.3-SNAPSHOT.20261006.gabcdef0", "1.2.3-SNAPSHOT.20261006.gINVALID"),
         )
         malformed.forEach { payload ->
             assertThrows(Exception::class.java, { BuildIdentity.validateFullIdentity(payload) },
@@ -89,7 +89,7 @@ class BuildIdentityTest {
     @Test
     fun `validateReleaseQualification rejects dirty identity`() {
         val identity = BuildIdentity.validateFullIdentity(
-            validIdentity(version = "1.2.3-SNAPSHOT.gabcdef0.dirty.111111111111", dirty = true))
+            validIdentity(version = "1.2.3-SNAPSHOT.20261006.gabcdef0.dirty.111111111111", dirty = true))
         val qualification = """{"softwareVersion":"1.2.3","sourceCommit":"$commit"}"""
         assertThrows(Exception::class.java) {
             BuildIdentity.validateReleaseQualification(identity, qualification)

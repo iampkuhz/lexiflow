@@ -116,7 +116,7 @@ test('完整构建身份接受干净 SNAPSHOT，但拒绝 dirty 源码', async (
     git(snapshot.root, ['add', 'ops/release/version.txt']);
     git(snapshot.root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'snapshot fixture']);
     snapshot.descriptor.sourceCommit = git(snapshot.root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    snapshot.descriptor.softwareVersion = `2.0.0-SNAPSHOT.g${snapshot.descriptor.sourceCommit.slice(0, 7)}`;
+    snapshot.descriptor.softwareVersion = resolveBuildIdentity(snapshot.root).softwareVersion;
     await snapshot.refreshJar();
     const result = await prepareImageBuild(args(snapshot));
     assert.equal(result.buildIdentity.channel, 'snapshot');
