@@ -4,7 +4,7 @@
 
 ## 1.1. 本地体验没有提示
 
-若 API 在启动时已报 `relation "lexicon_form" does not exist`，先处理[数据库结构与发布资料](operations/lexicon-import.md#15-已有开发库结构不匹配时)，不是 Chrome 或模型配置问题。首次安装按[根 README](../../README.md#本地启动)完成数据库配置、初始化与词库发布，不能只运行最后的 API 命令。
+若 API 在启动时已报 `relation "lexicon_form" does not exist`，先处理[数据库结构与发布资料](operations/lexicon-import.md)，不是 Chrome 或模型配置问题。首次安装按[根 README](../../README.md)完成数据库配置、初始化与词库发布，不能只运行最后的 API 命令。
 
 API 能正常启动后，按浏览器 → 请求 → API → 资料 → 展示定位：
 
@@ -14,12 +14,14 @@ API 能正常启动后，按浏览器 → 请求 → API → 资料 → 展示�
 4. `NO_PENDING` 表示没有可靠提示，不是模型没配置；观看链路不调用模型。
 5. 是否在返回前已经换句、seek 或关闭？过期结果必须被放弃，不能延续到下一句。
 
-API、页面聚合诊断与 service worker 的观察方法见[扩展 E2E 与诊断](operations/extension-e2e.md#15-日志与排障)。不同阶段样本数不同，不能直接相减均值或跨进程时钟。
+API、页面聚合诊断与 service worker 的观察方法见[扩展 E2E 与诊断](operations/extension-e2e.md)。不同阶段样本数不同，不能直接相减均值或跨进程时钟。
 
 ## 1.2. Verify 卡住或失败
 
 | 现象 | 先确认 | 安全下一步 |
 | --- | --- | --- |
+| window-busy | 同 checkout 的真实验证运行 | 等待已知运行终态，不删除未知锁或杀进程 |
+| Stop 重入失败 | 已有 `stop_hook_active` 与原始 reason | 终止自动重试；回到原失败节点修复，不报告 PASS |
 | missing-environment | 缺哪项 required_environment | 去[隔离环境准备](operations/verification-environment.md)，不连接开发库 |
 | Java 版本或启动器错误 | LEXIFLOW_JAVA_HOME 与 Temurin 25 | 修复运行时，不修改 Wrapper/锁或跳过检查 |
 | 模块断言失败 | 哪个 check、原生报告和输出 | 用[精确任务](reference/java-checks.md)定位，再回完整检查 |
@@ -41,7 +43,7 @@ API、页面聚合诊断与 service worker 的观察方法见[扩展 E2E 与诊�
 
 ## 1.4. Agent 尚未完成或收到重复 callback
 
-先绑定明确 run/Task/Session，不扫描“最新”日志猜归属。STARTING、未知占用和 observation timeout 不构成重派许可。Qoder 父任务在 AWAITING_CALLBACK 时结束当前轮；Codex 原生子代理使用原生事件等待。
+先绑定明确 run/Task/Session，不扫描“最新”日志猜归属。STARTING、未知占用和 observation timeout 不构成重派许可。新派发只用 Codex 原生协作事件。Qoder 仅核对既有运行，在 AWAITING_CALLBACK 时结束当前轮，不 start/resume 或重派。
 
 匹配终态 callback 后核对事实，再显式 ack；已 ack/superseded 的重复事件直接结束。调度失败、执行失败、验收失败分别计数和处理，不改 Task identity 重置预算。详见 [Agent workflow](agent-workflow.md)与[身份/事实](agent-workflow/identity.md)。
 

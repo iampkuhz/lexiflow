@@ -4,6 +4,13 @@
 
 ## 1.1. 准备一次
 
+| 任务 | 命令 | 成功判据 |
+| --- | --- | --- |
+| 首次源码部署 | `node ops/podman/local.mjs install` | 输出就绪，列出 API、扩展目录与数据库连接信息 |
+| 日常启动/停止 | `node ops/podman/local.mjs up` / `stop` | `up` 输出本机就绪（不代表正式发行验收）；`stop` 保留资料 |
+| 源码升级 | 拉取所需源码后运行 `node ops/podman/local.mjs upgrade` | 升级完成并就绪，Chrome 刷新原扩展 |
+| 故障自检 | `node ops/podman/local.mjs doctor` | 获得 `PASS` / `BLOCKED` / `FAIL` 固定检查摘要；不执行修复 |
+
 需要 M 芯片 Mac、Java 25 JDK、Node.js 22 或以上（含 npm）、Podman 和可用的 Compose provider，以及 Chrome。首次安装需要访问 Maven、npm、GitHub 和容器镜像源；无需安装本机 PostgreSQL、Python 或 Docker Desktop。
 
 在包含本指南和 `ops/podman/local.mjs` 的源码仓库根目录打开终端：

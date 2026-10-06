@@ -1,11 +1,18 @@
 # 1. 本地体验：API 与 Chrome 扩展
 
-> 位置：[工程地图](../overview.md) → [运行与环境](../operations.md) → 本地体验。Docker 用户先看[根 README 的安装主线](../../../README.md#docker-安装与使用)；源码开发从下方本地步骤开始，输出是本机可使用的浏览器/API，不是正式验收证据。
+> 位置：[工程地图](../overview.md) → [运行与环境](../operations.md) → 本地体验。Docker 用户先看[根 README 的发行安装主线](../../../README.md)；源码开发从下方本地步骤开始，输出是本机可使用的浏览器/API，不是正式验收证据。
 
 
 以下 macOS 源码开发命令在仓库根目录执行。需要 **Eclipse Temurin Java 25、Python 3、Node.js/npm 和 Chrome**，以及本机 `lsof`、`ps`；Gradle 使用仓库自带 Wrapper。正常视频体验需要可连接且已发布词库的 PostgreSQL 开发库；有限演示词库仅供隔离自动测试使用。这里的开发数据库初始化与重建不适用于 Docker 发行安装数据。
 
+
 ## 1.1. 确认 Java
+
+| 任务 | 命令或操作 | 成功判据 |
+| --- | --- | --- |
+| 确认 Java | `python3 -m scripts.environment.java_exec java -version` | 选择到 Temurin Java 25 |
+| 准备 API | 本机 runtime 配置后运行 `python3 -m scripts.environment.start_api` | 健康检查成功且日志显示非零已发布资料版本 |
+| 加载扩展 | `npm ci`、`npm run build`，Chrome 加载 `extension/dist` | 扩展弹窗显示就绪，观看保持英文且仅对合格词段提示 |
 
 ```bash
 python3 -m scripts.environment.java_exec java -version
@@ -35,9 +42,9 @@ mkdir -p .local/lexiflow
 chmod 600 .local/lexiflow/runtime.json
 ```
 
-已有匹配的已发布词库时直接启动，不重复导入。首次准备开发库可按[数据库准备和发布步骤](lexicon-import.md#13-准备数据库并发布)执行；使用仓库容器配置时需先安装并启动 Podman，再启动 `infra/local/compose.yaml` 的 PostgreSQL。初始化或结构重建须先核对目标和备份，不能用于发行安装资料；API 启动本身不建表、不重建结构。随后按下节构建扩展，不提交本机配置或词库文件。
+已有匹配的已发布词库时直接启动，不重复导入。首次准备开发库可按[数据库准备和发布步骤](lexicon-import.md)执行；使用仓库容器配置时需先安装并启动 Podman，再启动 `infra/local/compose.yaml` 的 PostgreSQL。初始化或结构重建须先核对目标和备份，不能用于发行安装资料；API 启动本身不建表、不重建结构。随后按下节构建扩展，不提交本机配置或词库文件。
 
-已有数据库结构不会随代码更新。遇到 `relation "lexicon_form" does not exist` 时，停止启动重试，进入[开发库检查与重建](lexicon-import.md#15-已有开发库结构不匹配时)；不要只补一张表或一个字段。日常启动可以复用匹配的已发布数据库，不重复初始化。
+已有数据库结构不会随代码更新。遇到 `relation "lexicon_form" does not exist` 时，停止启动重试，进入[开发库检查与重建](lexicon-import.md)；不要只补一张表或一个字段。日常启动可以复用匹配的已发布数据库，不重复初始化。
 
 
 当前 API 不读取、不需要、也不会调用模型服务。完成本机配置后，在任意新终端，完整词库启动方式：

@@ -1,71 +1,31 @@
-# 1. 从问题开始阅读 LexiFlow
+# 1. LexiFlow 文档入口
 
-按下表选择入口；只查字段或命令可直接进入 Reference。
+**先按任务进入生命周期。** 不必按 `product/`、`architecture/`、`development/` 的目录顺序阅读；它们是现有存放位置，不是三套执行流程。
 
-## 1.1. 阅读地图
+## 1.1. 从目标进入
 
-```plantuml
-@startmindmap
-skinparam backgroundColor #FFFFFF
-skinparam shadowing false
-<style>
-mindmapDiagram {
-  node {
-    FontColor #1E293B
-    FontSize 14
-    LineColor #94A3B8
-    LineThickness 1
-    RoundCorner 12
-    Padding 10
-    Margin 8
-    MaximumWidth 180
-  }
-  rootNode {
-    FontSize 18
-    FontStyle bold
-    LineColor #475569
-  }
-  arrow {
-    LineColor #94A3B8
-    LineThickness 1.2
-  }
-}
-</style>
-title LexiFlow 阅读地图
-
-+[#E2E8F0] 从问题开始阅读
-++[#DBEAFE] 理解产品
-+++[#DBEAFE] 价值与范围
-+++[#DBEAFE] 产品概念
-++[#D1FAE5] 理解系统
-+++[#D1FAE5] 观看主链路
-+++[#D1FAE5] 领域与数据边界
-++[#FEF3C7] 修改与交付
-+++[#FEF3C7] Verify 与 Delivery Gate
-+++[#FEF3C7] 可选 Agent 协作
-++[#EDE9FE] 运行与排障
-+++[#EDE9FE] 本地体验与资料导入
-+++[#EDE9FE] 按阶段定位卡点
-++[#FFE4E6] 按需查阅
-+++[#FFE4E6] 独立工具与配置
-+++[#FFE4E6] 工程术语
-++[#CFFAFE] 方向与状态
-+++[#CFFAFE] 阶段目标与当前证据
-@endmindmap
-```
-
-## 1.2. 选择你的入口
-
-| 你要理解或完成什么 | 从这里开始 | 接下来 |
+| 你要完成什么 | 从哪里开始 | 下一步 |
 | --- | --- | --- |
-| 为什么做、什么不做？ | [产品说明](product/product-brief.md) | [产品术语](product/glossary.md) |
-| 一条字幕怎样得到提示？ | [架构总览](architecture/overview.md) | [产品流程](architecture/flows.md) → 对应领域与数据 contract |
-| 怎样修改并交付？ | [工程地图](development/overview.md) | [交付主干](development/change-delivery.md) → Verify / Delivery Gate |
-| 怎样本机使用、导入资料？ | [运行与环境](development/operations.md) | 本地体验 / 词库导入 / 隔离测试 |
-| 某一步失败了怎么办？ | [按阶段排障](development/troubleshooting.md) | 定位运行环境、检查、身份或证据层 |
-| 只查某个工具或英文术语？ | [工程 Reference](development/reference.md) | 工具、配置、Scripts、术语 |
-| 已做到哪里、下一阶段做什么？ | [路线图](roadmap/master-plan.md) | [状态与下一步](roadmap/master-plan/phase2/status.md) |
+| 修改功能、文档或工程工具 | [仓库生命周期](development/overview.md) | 明确范围 → 实现自检 → 交付验收 → 授权集成 |
+| 修改词库导入逻辑 | [功能变更场景](development/scenarios/change-lexicon-import.md) | 领域／适配器／持久化定位与直接测试 |
+| 编码后执行现有门禁 | [执行门禁场景](development/scenarios/run-repository-gates.md) | 开发 Stop；需要时正式独立验收 |
+| 优化门禁脚本 | [优化门禁场景](development/scenarios/optimize-repository-gates.md) | 先定位成本，再改实现；共用执行页交付 |
+| 安装使用或排障 | [用户指南](user/podman-macos.md)／[排障](development/troubleshooting.md) | 使用者不需要先读工程规则 |
+| 导入资料、调试或发行 | [运行任务](development/operations.md) | 选择对应操作，不把发行当日常开发前置 |
 
-## 1.3. 如何逐层定位
+<a id="12-选择你的入口"></a>
 
-总览 → 阶段流程 → 模块细节，按需下钻。长期合同见 [OpenSpec](../openspec/project.md)，机器约束见 [Harness](../harness/README.md)。
+## 1.2. 按需理解或查阅
+
+| 要查什么 | 唯一正文入口 |
+| --- | --- |
+| 产品价值与范围 | [产品说明](product/product-brief.md)、[产品术语](product/glossary.md) |
+| 系统模型、领域合同与数据 | [系统总览](architecture/overview.md) → [调用流程](architecture/flows.md) → 对应合同 |
+| 命令、脚本文件与配置 | [Reference](development/reference.md) |
+| 计划、验收要求与未决问题 | [路线图](roadmap/master-plan.md)、[状态与问题台账](roadmap/master-plan/phase2/status.md) |
+| Agent 约束与长期规范 | [Harness](../harness/README.md)、[OpenSpec](../openspec/project.md) |
+
+<a id="11-阅读地图"></a>
+<a id="13-如何逐层定位"></a>
+
+总流程只在[仓库生命周期](development/overview.md)维护；详情页回链到自己的上级。规则、操作、计划和运行证据各有维护位置，不再按目录复制相同事实。

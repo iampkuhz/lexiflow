@@ -2,7 +2,15 @@
 
 > 位置：[运行与环境](../operations.md) → GitHub Actions。普通工程反馈与正式发行是两层；任何快速检查都不是 Formal receipt。
 
+
 ## 1.1. 分支与 PR：共享快速入口
+
+| 任务 | 命令或操作 | 成功判据 |
+| --- | --- | --- |
+| 检查 PR | `python3 -m scripts.verification.ci quick --base <完整commit>`；新分支用 `--all` | 必需与受影响 Check 完成；不等于 full Verify/Formal |
+| 下载并测试扩展包 | 从同次 quick run 下载 ZIP，校验 `.zip.sha256` 后加载解压目录 | artifact 对应目标 commit；Smoke 不替代真实观看或发行验收 |
+| 准备正式候选 | 从受保护的 `v*` tag 触发 release workflow | 单一 Mac/Podman 候选与完整 Change/Repository Verify 完成 |
+| 晋升公开发行 | 原标签手动续办，已有独立 Formal 链、两道人审授权与 `PUBLISH` | release资产摘要复核并发布；缺证/漂移立即停止 |
 
 `.github/workflows/ci.yml` 在分支 push、`pull_request` 和手动运行时调用：
 
@@ -10,7 +18,90 @@
 python3 -m scripts.verification.ci quick --base <完整commit>
 ```
 
-新分支没有可比较的前序 commit 时使用 `--all`；本机可用 `plan` 只查看选择，不执行检查。检查仍由 `harness/module-checks.yaml` 的模块命令负责，`harness/ci-policy.yaml` 仅决定 CI 范围：版本、文档与 policy 始终核对；受影响模块连同必要依赖执行编译、静态检查、业务测试及扩展构建/浏览器测试。真实发行生命周期留到标签流程，不默认导入真实词库。
+新分支没有可比较的前序 commit 时使用 `--all`；本机可用 `plan` 只查看选择，不执行检查。
+
+```plantuml
+@startuml
+skinparam backgroundColor white
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam shadowing false
+skinparam nodesep 40
+skinparam ranksep 45
+skinparam activityBackgroundColor #EAF2FF
+skinparam activityBorderColor #46699A
+skinparam noteBackgroundColor #F3F4F6
+skinparam noteBorderColor #94A3B8
+title quick CI：工程反馈，不签发 Formal
+start
+:S1 准备隔离环境;
+note right
+入口：.github/workflows/ci.yml 的隔离服务与工具准备
+作用：准备临时 PostgreSQL/Redis、运行时和 Chromium
+<color:#995A00><b>预期：10 分钟规划预算（按 45 分钟 workflow 上限分配；非实测/SLA）</b></color>
+end note
+if (环境准备成功？) then (是)
+else (否：停止 workflow)
+stop
+endif
+:S2 选闭包并冻结;
+note right
+入口：scripts/verification/ci.py::main()（quick）
+作用：选择常驻与受影响 Check 并冻结输入
+<color:#995A00><b>预期：3 分钟规划预算（按 45 分钟 workflow 上限分配；非实测/SLA）</b></color>
+end note
+if (计划与输入有效？) then (是)
+else (否：FAIL)
+stop
+endif
+:S3 跑受选检查;
+note right
+入口：scripts/verification/ci.py + harness/module-checks.yaml
+作用：执行所选命令并核对无遗漏、跳过或缺结果
+<color:#995A00><b>预期：25 分钟规划预算（按 45 分钟 workflow 上限分配；非实测/SLA）</b></color>
+end note
+if (quick 最终 PASS？) then (是)
+else (否：FAIL / BLOCKED)
+stop
+endif
+:S4 打包扩展;
+note right
+入口：extension/scripts/release.mjs、archive-check.mjs、tests/archive-smoke.mjs
+作用：构建扩展 ZIP、核对归档并运行 Chromium smoke
+<color:#995A00><b>预期：5 分钟规划预算（按 45 分钟 workflow 上限分配；非实测/SLA）</b></color>
+end note
+if (归档与 smoke 成功？) then (是)
+else (否：停止 workflow)
+stop
+endif
+:S5 上传产物;
+note right
+入口：.github/workflows/ci.yml 的 actions/upload-artifact
+作用：仅上传校验过的 ZIP 和 checksum，保留 14 天
+<color:#995A00><b>预期：2 分钟规划预算（按 45 分钟 workflow 上限分配；非实测/SLA）</b></color>
+end note
+stop
+legend bottom
+S1–S5 是 workflow 的顺序；S2–S3 是 quick 命令内部阶段。
+quick 使用诊断内核收集独立问题，不等于完整 Repository Verify。
+任何前置或最终结果失败均停止后续 workflow；缺必需项不称 PASS。
+endlegend
+@enduml
+```
+
+图中主干箭头表示同一 workflow run 的顺序调用；quick 内部使用诊断内核收集独立问题，最终结果非 PASS 时停止后续 workflow，不把它描述为逐 Check 早停。`S4` 与 `S5` 是 Quick 成功后的同 run 扩展打包/上传步骤，不是 Quick 的独立验收。实际耗时随闭包、缓存及 CI 冷启动变化；图注提供 workflow 总预算分配，不是实测样本。
+
+| 节点 | 命令 | 成功判据 |
+| --- | --- | --- |
+| S1 准备隔离环境 | `.github/workflows/ci.yml` 的 setup、`pip install`、`npm ci`、Playwright 安装 | Python/Java/Node 与合成 PostgreSQL/Redis/Chromium 就绪；缺项则 workflow 停止 |
+| S2 选闭包并冻结 | `python3 -m scripts.verification.ci quick --base <完整commit>` 或 `--all` | 常驻版本/docs/policy 加受影响依赖闭包被选中；正式专属检查排除在 quick 外 |
+| S3 执行受选检查 | `scripts/verification/ci.py` 按 `harness/module-checks.yaml` 执行声明命令 | 无必需 Check 被跳过或缺失；失败/缺环境时不得称 PASS |
+| S4 打包扩展 | `node extension/scripts/release.mjs`、`archive-check.mjs`、`archive-smoke.mjs` | 同次 run 的 ZIP 身份、checksum 与 Chromium smoke 匹配 |
+| S5 上传产物 | GitHub `actions/upload-artifact` | 只上传 ZIP 和 checksum，14 天保留；非永久发行渠道 |
+
+每节点时间只可作计划预算：S1 10 分钟、S2 3 分钟、S3 25 分钟、S4 5 分钟、S5 2 分钟；这是按 [`ci.yml`](../../../.github/workflows/ci.yml) 的 45 分钟 workflow timeout 分配的规划预算，不是实测或 SLA。依赖冷启动、受影响检查、网络及人工下载另计；workflow 超时不能证明该预算充足。入口与边界分别见 [`ci.yml`](../../../.github/workflows/ci.yml)、[`ci-policy.yaml`](../../../harness/ci-policy.yaml)、[`module-checks.yaml`](../../../harness/module-checks.yaml)、[`ci.py`](../../../scripts/verification/ci.py)。
+
+检查仍由 `harness/module-checks.yaml` 的模块命令负责，`harness/ci-policy.yaml` 仅决定 CI 范围：版本、文档与 policy 始终核对；受影响模块连同必要依赖执行编译、静态检查、业务测试及扩展构建/浏览器测试。真实发行生命周期留到标签流程，不默认导入真实词库。
 
 快速入口保留输入冻结、缺环境 BLOCKED、测试跳过拒绝和覆盖缺口；输出固定说明 `formal_eligible=false`。托管 Linux runner 只是隔离的工程检查环境，不新增产品交付平台，也不代替 M 芯片 Mac/Podman 验收。临时 PostgreSQL/Redis 仅服务本次合成测试，不能接到用户安装。
 
@@ -38,6 +129,123 @@ shasum -a 256 -c lexiflow-extension-<softwareVersion>.zip.sha256
 标签来源检查之后进入唯一专用 Apple Silicon macOS/Podman runner，在同一稳定 checkout 构建 JAR、扩展和单 ARM64 镜像，组装真实候选，随后串行执行 Change Verify 和 Repository Verify。构建与验证不启用发布权限，不自动签发 validation/review/check，也不将 Actions 绿灯等同于正式发行。
 
 候选准备、完整 Verify 与原生验收之间保留原路径和字节。负责人在该 checkout 的真实 Codex 任务中按 [Delivery Gate](../change-delivery/delivery-gate.md) 送验，交给不同原生 actor 验证和审查，最后核对 receipt/hash DAG。原生验证执行自身冻结检查，审查与条件核对不重跑；不要为节省时间复用普通 Actions 的退出码作为原生 receipt。手动晋升不再 checkout 或清理工作树，缺链、输入漂移或原生来源不可读时阻断。
+
+```plantuml
+@startuml
+skinparam BackgroundColor #FFFFFF
+skinparam DefaultFontName SansSerif
+skinparam DefaultFontSize 14
+skinparam ActivityFontName SansSerif
+skinparam ActivityFontSize 14
+skinparam ActivityBackgroundColor #EAF2F8
+skinparam ActivityBorderColor #4F78A5
+skinparam ActivityFontColor #17324D
+skinparam ArrowColor #4F78A5
+skinparam NoteBackgroundColor #F4F7FA
+skinparam NoteBorderColor #9AAFC3
+skinparam Shadowing false
+skinparam nodesep 30
+skinparam ranksep 40
+start
+:S1 核对标签源;
+note right
+入口：release.yml source job → ops/release/version.mjs
+作用：核对标签到 commit、干净输入、正式版本与 runner readiness
+<color:#995A00><b>预期：5 分钟 job timeout 上限；非实测/SLA</b></color>
+end note
+if (source 成功且 validation Environment 已批准？) then (是)
+else (否：停止)
+stop
+endif
+:S2 准备候选;
+note right
+入口：release.yml prepare job → workflow.mjs prepare
+作用：专用 Apple Silicon Mac/Podman 构建并验证候选
+<color:#995A00><b>预期：60 分钟规划预算（与 S3/S4 共用 180 分钟 job 上限；非实测/SLA）</b></color>
+end note
+if (候选准备成功？) then (是)
+else (否：FAIL / BLOCKED)
+stop
+endif
+:S3 Change Verify;
+note right
+入口：python3 scripts/check_changes.py
+作用：对同 checkout 与候选执行完整 Change Verify
+<color:#995A00><b>预期：60 分钟规划预算（与 S2/S4 共用 180 分钟 job 上限；非实测/SLA）</b></color>
+end note
+if (Change Verify PASS？) then (是)
+else (否：FAIL / BLOCKED)
+stop
+endif
+:S4 仓库Verify;
+note right
+入口：python3 scripts/check_repository.py
+作用：对同 checkout 执行完整 Repository Verify 并保留交接
+<color:#995A00><b>预期：60 分钟规划预算（与 S2/S3 共用 180 分钟 job 上限；非实测/SLA）</b></color>
+end note
+if (Repository Verify PASS？) then (是)
+else (否：FAIL / BLOCKED)
+stop
+endif
+:S5 原生验收;
+note right
+入口：scripts/delivery_gate/~_~_main~_~_.py（四项子命令）
+作用：不同原生 actor 完成冻结输入验证、独立只读审查和 DAG 核对
+<color:#995A00><b>预期：60 分钟规划预算；无单次样本，人工排期另计，非 SLA</b></color>
+end note
+if (完整原生链 PASS 且手动 dispatch 前置满足？) then (是)
+else (否：停止)
+stop
+endif
+:S6 dry-check;
+note right
+入口：release.yml dry-check job → workflow.mjs resume
+作用：原标签重核既有候选和 Formal 证据，不发布
+<color:#995A00><b>预期：30 分钟 job timeout 上限；非实测/SLA</b></color>
+end note
+if (dry-check 成功？) then (是)
+else (否：FAIL / BLOCKED)
+stop
+endif
+:S7 人工批准;
+note right
+入口：无脚本（lexiflow-release-promotion 人工批准）
+作用：按保护规则独立人工批准发布
+<color:#995A00><b>预期：30 分钟人工计划预算；实际等待另计，非 SLA</b></color>
+end note
+if (promotion Environment 已批准？) then (是)
+else (否：不发布)
+stop
+endif
+:S8 publish;
+note right
+入口：release.yml promotion job → workflow.mjs resume --publish
+作用：fresh evidence check 后发布固定资产，只有此步注入发布凭据
+<color:#995A00><b>预期：45 分钟 job timeout 上限；非实测/SLA</b></color>
+end note
+stop
+note left
+FAIL / BLOCKED：任何准备、Verify、原生证据、标签/候选一致性检查失败即停止；缺证据不发布。
+S1→S4 为 workflow job/runner 流转；S4→S5 是本机原生人工交接；S5→S6 是负责人手动 dispatch；S6→S7→S8 含人工环境批准与 workflow job 交接。
+手动 dispatch 还须 validation Environment 批准；PUBLISH 不是测试或验收结果。
+end note
+@enduml
+```
+
+S1→S4 表示 release workflow 的 source job、专用 runner prepare job 及同 checkout 的两个 Verify 命令依次交接；S4→S5 是负责人在原 checkout 发起的本机原生验收，不是 Actions 自动签证。S5→S6 由负责人从原正式标签手动 dispatch，并通过 `lexiflow-release-validation` 批准；S6→S7→S8 含 workflow job 转移和受保护 Environment 人工批准。手动填写 `PUBLISH` 只满足输入门槛；无论 workflow 绿灯或人工验签，都不能代替相应自动检查/独立 Gate receipt。失败或证据缺失以 `FAIL` / `BLOCKED` 终止，不进入发布。
+
+| 节点 | 命令或操作 | 成功判据 |
+| --- | --- | --- |
+| S1 核对标签源 | `node ops/release/version.mjs --tag <tag>` | 精确 tag、commit、干净输入与正式版本匹配；runner readiness 已配置 |
+| S2 准备候选 | `node ops/release/workflow.mjs prepare <request>` | 专用 Apple Silicon Mac/Podman 上的候选身份和制品完整；validation Environment 已批准 |
+| S3 Change Verify | `python3 scripts/check_changes.py` | 同候选 checkout 的完整 Change Verify PASS |
+| S4 Repository Verify | `python3 scripts/check_repository.py` | 同 checkout 的完整 Repository Verify PASS 并保留本机交接 |
+| S5 原生 Formal | `python3 -m scripts.delivery_gate <subcommand>`（`submit`、`validate`、`review` 或 `check`） | 真实独立 actor 与冻结输入形成完整 Gate receipt/hash DAG |
+| S6 dry-check | `node ops/release/workflow.mjs resume <submission> <tag>` | 从原标签复核既有候选和 Formal 证据，不发布 |
+| S7 晋升批准 | GitHub Environment `lexiflow-release-promotion` | 符合保护规则的独立人工批准；不是测试结果 |
+| S8 发布 | `node ops/release/workflow.mjs resume <submission> <tag> --publish` | 新鲜证据复核成功，固定资产摘要核对通过，远端状态确认 |
+
+S1 规划预算 5 分钟（见 [`release.yml`](../../../.github/workflows/release.yml) source job timeout）；S2–S4 共用一个 180 分钟 prepare job 上限；图中各 60 分钟仅是人工规划分配，不是三个独立 timeout；S5 取决于独立验证与审查排期；S6 dry-check 有 30 分钟 workflow 上限；S7 人工等待不计机器时间；S8 publish 有 45 分钟 workflow 上限。以上是工作流 timeout 上限/规划预算而非实测时长或 SLA，依赖拉取、人工等待和远端服务另计。步骤入口与源码位置见 [`release.yml`](../../../.github/workflows/release.yml)、[`workflow.mjs`](../../../ops/release/workflow.mjs)、[`pipeline.mjs`](../../../ops/release/pipeline.mjs)、[Delivery Gate](../change-delivery/delivery-gate.md)。
 
 正式晋升还必须核对同候选制品摘要、来源与许可、干净安装、同卷保留资料升级/失败恢复，以及真实独立 Formal 链。缺少任一项不得创建公开 Release 或更新正式版指针。已有发行生命周期的合成两代资料测试不能替代 local `upgrade` 的同卷验收。
 

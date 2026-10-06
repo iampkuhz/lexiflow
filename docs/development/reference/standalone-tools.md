@@ -4,14 +4,14 @@
 
 ## 1.1. 只读检查器
 
-| 要确认的事实 | 命令 | owner 与证明边界 |
+| 要确认的事实 | 命令 | 源码与证明边界 |
 | --- | --- | --- |
-| 链接、标题、图源围栏等静态结构 | `python3 -m scripts.repository.docs_check` | repository；不证明中文语义、图像布局或正式验收 |
-| policy 的确定性投影未漂移 | `python3 -m scripts.repository.policy_projection --check` | repository；不证明真实派发成功 |
-| Catalog 的静态一致性 | `python3 -m scripts.repository.planning_check` | repository；planning-only 合法不表示可派发或已验收 |
-| 本机 skill 安装来源可用 | `python3 -m scripts.repository.local_skills check` | repository；不安装或自动下载 |
-| scripts 风格、格式、模块文档字符串 | `python3 -m scripts.repository.python_quality` | repository；规则在 Harness，不自动 fix 或安装 |
-| 本仓 Git Hook 接入状态 | `python3 -m scripts.repository.hooks doctor` | repository；不执行完整 Verify |
+| 链接、标题、图源围栏等静态结构 | `python3 -m scripts.repository.docs_check` | [docs_check.py](../../../scripts/repository/docs_check.py)；不证明中文语义、图像布局或正式验收 |
+| policy 的确定性投影未漂移 | `python3 -m scripts.repository.policy_projection --check` | [policy_projection.py](../../../scripts/repository/policy_projection.py)；不证明真实派发成功 |
+| Catalog 的静态一致性 | `python3 -m scripts.repository.planning_check` | [planning_check.py](../../../scripts/repository/planning_check.py)；planning-only 合法不表示可派发或已验收 |
+| 本机 skill 安装来源可用 | `python3 -m scripts.repository.local_skills check` | [local_skills.py](../../../scripts/repository/local_skills.py)；不安装或自动下载 |
+| scripts 风格、格式、模块文档字符串 | `python3 -m scripts.repository.python_quality` | [python_quality.py](../../../scripts/repository/python_quality.py)；规则在 Harness，不自动 fix 或安装 |
+| 本仓 Git Hook 接入状态 | `python3 -m scripts.repository.hooks doctor` | [hooks.py](../../../scripts/repository/hooks.py)；不执行完整 Verify |
 
 日常检查器从仓库入口定位规则与文件，不接受 root 覆盖；隔离测试在函数层注入 root。它们可以被全局 Verify 编排；从总览下沉到此处不表示取消检查。
 

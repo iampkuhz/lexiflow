@@ -83,7 +83,7 @@ Docker 默认将 API 发布到宿主 127.0.0.1，与扩展现有本机权限一�
 
 #### 1.6.2.1. 版本与发行输入合同
 
-`ops/release/version.txt` 是唯一软件版本真源，初始为 `0.1.0`；允许文件末尾一个 LF 或 CRLF，不接受其他空白、BOM、多行、后缀或前导零。格式固定 `major.minor.patch`，各段为 0～65535 且不能全零，遵循 [Chrome 版本字段约束](https://developer.chrome.com/docs/extensions/reference/manifest/version) 的三段子集。软件版本不改变 API/SQL/词库的独立身份。
+[ops/release/version.txt](../../../../ops/release/version.txt) 是唯一软件版本真源，文档不缓存其数值；允许文件末尾一个 LF 或 CRLF，不接受其他空白、BOM、多行、任意后缀或前导零。基础格式为 `major.minor.patch`，仅允许可选的 `-SNAPSHOT` 后缀，各段为 0～65535 且不能全零，数字版本采用 [Chrome 版本字段约束](https://developer.chrome.com/docs/extensions/reference/manifest/version) 的三段子集。软件版本不改变 API/SQL/词库的独立身份。
 
 Node 发布工具通过 `version.mjs` 读取、校验版本；Gradle 配置阶段通过 build-logic parser 只读取 `ops/release/version.txt` 的基础版本，不启动 Node 或 Git，完整身份由 `generateSoftwareIdentity` 任务在执行阶段调用 Node 惰性生成，产品子项目配置版本及非 API JAR manifest 使用基础版本，API JAR manifest 与内嵌资源使用完整身份，不接受第二个版本参数覆盖。两个 parser 都有边界测试；API 归档的内部路径固定以支持 IDE 模型查询，`bootJar` 完成时校验并复制为公开的 `build/libs/api-<softwareVersion>.jar`，发行消费者按完整身份定位该文件，不扫描目录选中旧版本 JAR。
 
@@ -160,7 +160,7 @@ node ops/release/package.mjs \
 
 资料 ZIP 限于 manifest、来源审批记录及 `dataset.ndjson`、`entries.ndjson`、`forms.ndjson` 三份 NDJSON；目录、未知条目、重复字段、摘要或条数不符均拒绝。导出在只读一致性快照中完成，保留发布版本、来源许可身份、准备策略及全量三表字段。
 
-初始化只使用软件内嵌且摘要匹配的最新 SQL，不执行包内 SQL。目标数据库、schema 和 owner 须与显式输入一致，拒绝默认 public 或已有不同内容；受控初始化锁内一次事务完成结构、条目、投影和发布单行，失败回滚。只有内容摘要、版本、策略与条数完全相同才可复用。禁止调用开发重建工具。
+初始化只使用软件内嵌且摘要匹配的最新 SQL，不执行包内 SQL。目标数据库、schema 和数据库对象所属角色须与显式输入一致，拒绝默认 public 或已有不同内容；受控初始化锁内一次事务完成结构、条目、投影和发布单行，失败回滚。只有内容摘要、版本、策略与条数完全相同才可复用。禁止调用开发重建工具。
 
 导出与解压使用本次独占目录，拒绝符号链接和未知条目。处理流式且限制文件、单行与解压总量，格式上限不代替资源实测。最终 ZIP 摘要与准备策略交给发布清单，完整 PG 事务和故障行为由 Harness 隔离数据库的真实合成往返证明。
 
@@ -182,7 +182,7 @@ node ops/release/package.mjs \
 
 扩展通过 `GET /api/v1/runtime-status` 读取封闭字段：`softwareVersion`、`apiContract`、`mode`、`ready`、`reason`、`datasetVersion`。状态查询本身正常时返回 HTTP 200，是否可用只看 `ready`；响应使用 `Cache-Control: no-store`。`apiContract` 为 `caption-hints.v2`，不与软件版本混用。软件版本来自统一版本文件经 Gradle 放入 API 类路径的资源，运行时不读取仓库或接受第二份配置覆盖。
 
-运行模式、就绪布尔值、原因和资料版本由同一次 `LexiconRuntime.probe()` 取得，不增加第二套状态 owner。`datasetVersion` 表示运行库实际已发布版本，未知为 null、无发布为 0；它不是清单制品的字符串 releaseId，也不包含完整来源或预处理元数据。正式数据可查但预热降级仍可就绪；演示模式、空发布、结构错误与依赖故障不得冒充正式就绪。状态响应不含字幕、来源正文、私有路径、凭据或异常详情。
+运行模式、就绪布尔值、原因和资料版本由同一次 `LexiconRuntime.probe()` 取得，不增加第二个状态维护点。`datasetVersion` 表示运行库实际已发布版本，未知为 null、无发布为 0；它不是清单制品的字符串 releaseId，也不包含完整来源或预处理元数据。正式数据可查但预热降级仍可就绪；演示模式、空发布、结构错误与依赖故障不得冒充正式就绪。状态响应不含字幕、来源正文、私有路径、凭据或异常详情。
 
 `lexiflow.segment-analysis.enabled` 默认 false，禁用时不解析或访问敏感台账文件，设置路径或控制台开关本身不会启用记录。已授权的 macOS 本机启动入口显式传入 enabled=true 并显示敏感内容警告；发行入口默认关闭。日志相关回归只使用合成内容与隔离临时目录。
 
@@ -238,7 +238,7 @@ Compose 只装配 PostgreSQL、一次性资料初始化和 API，所有镜像均
 
 `LF-TSK-OPS-2011`（前置 OPS-2010 与 OPS-2006）与 OPS-2007 顺序交付同一生成入口；状态/锁及资源归属与指针切换分别验收。
 
-**安装目录与 Docker 端点**：用户显式指定私有 installation root，入口记录安装身份、完整发行组合及 active/previous/candidate，不接管未知目录。`prepare` 对已存在目录先只读核对 owner/state 与 engine 记录，失败返回固定 `LF_INSTALLATION_UNVERIFIED`，不查询 Docker、不写入或删除安装目录；用户确认停止后选新路径重试，不承诺同路径自动恢复。凭据由系统随机源生成，仅写入本安装私有文件。每个组合拥有独立 Compose project、资料卷与标签，启动前校验本机引擎、镜像平台及不可变 image ID。Docker 端点按 `DOCKER_CONTEXT` → `DOCKER_HOST` → 当前 context 顺序选取，只接受绝对 Unix socket，拒绝 TCP/SSH、相对路径与控制字符。Docker 子进程以最小白名单环境执行，不继承代理、远端 context、TLS 或 Compose 覆盖；只有固定 Compose 动作在子 shell 通过专用文件描述符交接秘密，密码不进入 argv 或日志。自定义归属标签仅 `lexiflow.installation` 和 `lexiflow.release`；`com.docker.compose.*` 由 Compose 生成，不手工声明。
+**安装目录与 Docker 端点**：用户显式指定私有 installation root，入口记录安装身份、完整发行组合及 active/previous/candidate，不接管未知目录。`prepare` 对已存在目录先只读核对 `owner/state`（资源归属与状态）及 engine 记录，失败返回固定 `LF_INSTALLATION_UNVERIFIED`，不查询 Docker、不写入或删除安装目录；用户确认停止后选新路径重试，不承诺同路径自动恢复。凭据由系统随机源生成，仅写入本安装私有文件。每个组合拥有独立 Compose project、资料卷与标签，启动前校验本机引擎、镜像平台及不可变 image ID。Docker 端点按 `DOCKER_CONTEXT` → `DOCKER_HOST` → 当前 context 顺序选取，只接受绝对 Unix socket，拒绝 TCP/SSH、相对路径与控制字符。Docker 子进程以最小白名单环境执行，不继承代理、远端 context、TLS 或 Compose 覆盖；只有固定 Compose 动作在子 shell 通过专用文件描述符交接秘密，密码不进入 argv 或日志。自定义归属标签仅 `lexiflow.installation` 和 `lexiflow.release`；`com.docker.compose.*` 由 Compose 生成，不手工声明。
 
 **命令执行预算**：Docker CLI 含 context 探测经固定预算执行器——普通 30 秒、资料初始化 600 秒。输出在独占私有目录捕获，每流 < 256 KiB，失败不回显原始输出。超时终止本次 CLI 并回收 timer，不接受环境预算或 PID 覆盖；结果不确定时保留 journal 走恢复流程。
 

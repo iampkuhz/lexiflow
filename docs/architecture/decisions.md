@@ -42,7 +42,7 @@
 
 ## 1.7. ADR-007：Markdown 内嵌 PlantUML 是唯一图源
 
-- **决定：** 正文 `plantuml` 围栏是唯一图源；调试和渲染产物只存在于 `tmp/diagrams/`。
+- **决定：** 文档与图源合同统一由 [documentation-policy](../../harness/documentation-policy.yaml)维护，操作见[图文维护](../development/reference/documentation.md)，本决策不维护第二份 Agent 规则。
 - **取舍理由：** 独立图片或 `.puml` 链接会漂移和失效；内嵌源码可随文档审阅。
 - **复审条件：** IDE 正文预览或渲染合同产生可复现缺陷。
 

@@ -1,21 +1,11 @@
-# 1. 工程地图：从工作目标找到流程与文件
+# 1. 仓库生命周期：从问题到交付与维护
 
-> 位置：[文档首页](../README.md) → 工程地图。本页先解释工程能力的关系，不要求先读脚本清单或配置字段。
+**先明确任务，再按阶段推进。** 功能变更、文档维护和工程改进都适用；优化门禁只是其中一种任务，不是必经步骤。
 
-开发工作的主干是“实现 → Verify → 必要时正式 Delivery Gate”。环境准备是前置能力，Agent 协作是可选实现方式，格式与配置检查是可独立调用的叶子能力；它们不应被串成每次都必须走完的长链。
+<a id="11-先选择要完成的事情"></a>
+<a id="111-按场景看脚本与门禁"></a>
 
-## 1.1. 先选择要完成的事情
-
-| 你的问题 | 阅读入口 | 能得到什么 |
-| --- | --- | --- |
-| 改动完成后如何可信交付？ | [开发交付](change-delivery.md) | 大阶段、角色交接、失败卡点 |
-| 为什么触发这些检查？ | [Verify](change-delivery/verification.md) | 选择规则、依赖闭包与执行文件 |
-| 如何安排 Agent 工作？ | [Agent workflow](agent-workflow.md) | 可选委派、终态事件与事实核对 |
-| 如何运行产品或准备测试？ | [运行与环境](operations.md) | 本地体验、资料导入、隔离资源 |
-| 已经卡住，下一步做什么？ | [按阶段排障](troubleshooting.md) | 失败层与安全恢复路径 |
-| 只想查一个字段或命令？ | [Reference](reference.md) | 工程术语、独立工具、配置与脚本职责 |
-
-## 1.2. 再理解能力的归属
+## 1.1. 一条生命周期，按交接产物下钻
 
 ```plantuml
 @startuml
@@ -24,45 +14,92 @@ skinparam defaultFontName SansSerif
 skinparam defaultFontSize 14
 skinparam shadowing false
 skinparam nodesep 40
-skinparam ranksep 45
-top to bottom direction
-title 工程模块：公开入口与职责边界
-package "公开入口" as entry {
-component "日常 Verify CLI" as daily
-component "Delivery Gate CLI" as formal
-}
-package "场景与事实" as scene {
-component "Verification" as verification
-component "Delivery Gate" as delivery_gate
-component "Agents 运行事实" as agents
-}
-package "原子执行能力" as atomic {
-component "模块自有检查" as modules
-component "Environment" as environment
-}
-daily --> verification: E1
-formal --> delivery_gate: E2
-delivery_gate --> verification: E3
-delivery_gate --> agents: E4
-verification --> modules: E5
-verification --> environment: E6
+skinparam ranksep 35
+skinparam activityBackgroundColor #EAF2FF
+skinparam activityBorderColor #46699A
+skinparam noteBackgroundColor #F5F6F8
+skinparam noteBorderColor #A0AAB8
+title 生命周期：每个阶段交出不同的东西
+start
+:S1 明确要解决的问题;
+note right
+输入：用户提出的问题或目标
+动作：区分只读答疑与需要修改的任务
+输出：明确的问题与完成目标
+end note
+:S2 明确范围与验收;
+note right
+输入：本次目标与当前规范
+动作：确定改哪些模块／文件、怎样验收
+输出：修改范围、非目标与验收标准
+end note
+:S3 实现并直接自检;
+note right
+输入：修改范围与验收标准
+动作：实现、更新说明并做直接检查
+输出：代码／文档 diff 与直接检查结果
+end note
+:S4 取得交付与验收证据;
+note right
+输入：可交付修改与直接检查结果
+动作：执行开发检查；需要时独立正式验收
+输出：开发报告及本次要求的验收链
+end note
+:S5 授权集成与发行;
+note right
+输入：有效证据与用户授权
+动作：按授权集成；需要时验证发行候选
+输出：集成成果或通过验证的发行产物
+end note
+:S6 使用与文档维护;
+note right
+输入：实际使用的成果
+动作：安装、排障并持续更新说明
+输出：可用环境与准确的操作文档
+end note
+stop
 legend bottom
-蓝：公开入口；绿：场景与事实；黄：原子执行能力
-箭头表示调用或读取方向，E 编号是关系索引，不是阶段
+箭头是阶段交接，不是自动执行器，也不要求每个任务经过全部阶段。
+只读分析完成问题回答即可；文档更新同时属于实现与审查，不等到使用后补写。
+本图注释是输入 / 动作 / 输出；执行场景再给入口 / 作用 / 预期。
 endlegend
 @enduml
 ```
 
-上图是能力依赖，不是执行时序。Delivery Gate 消费 Verification 与 Agents 的公开能力；Verification 不读取 Task identity。Agents 产生真实执行事实，不签发正式验收。模块拥有自己的检查内容，全局执行器不应了解模块内部测试类。
+总图的三行注释是“输入、动作、输出”；执行场景的三行注释是“入口、作用、预期”。抽象阶段不设置脱离任务范围的统一耗时。
 
-Harness 的机器规则与入口见 [harness/README.md](../../harness/README.md)，原生 Java 规则由 Gradle 拥有。阶段展开后再读文件职责；完整对照放在 [Scripts Reference](reference/scripts.md)，不要求首次阅读时逐个浏览。
+| 阶段 | 做什么／交出什么 | 按需入口 |
+| --- | --- | --- |
+| S1 明确问题 | 明确本次目标，分清答疑还是需要修改 | [产品说明](../product/product-brief.md)、[系统说明](../architecture/overview.md) |
+| S2 明确范围与验收 | 确定涉及的模块、文件、非目标与验收标准；适用于所有变更 | [任务与工作包](agent-workflow.md)、[现行约束](../../harness/README.md) |
+| S3 实现并直接自检 | 修改功能、文档或工程工具，交出 diff 与直接检查结果 | 修改导入：[功能变更场景](scenarios/change-lexicon-import.md)；优化门禁：[优化场景](scenarios/optimize-repository-gates.md) |
+| S4 取得交付与验收证据 | 执行现有门禁，取得开发报告；需要时取得正式验收链 | [编码后执行门禁](scenarios/run-repository-gates.md) |
+| S5 授权集成与发行 | 按用户授权集成；需要发行时另验真实候选 | [交付](change-delivery.md)、[发行](operations/github-actions.md) |
+| S6 使用与文档维护 | 安装、排障，持续维护与行为一致的说明 | [用户操作](../user/podman-macos.md)、[排障](troubleshooting.md)、[图文维护](reference/documentation.md) |
 
-## 1.3. 主干与侧链的区别
+一个任务可以跨多个阶段；只读答疑完成回答即可。计划和状态见 [roadmap](../roadmap/master-plan.md)，日常使用见 [user](../user/podman-macos.md)。
 
-- **workflow：**需要前后证据和上下文，按阶段讲，例如 submit/validate/review/check。
-- **standalone checker：**给定输入即可局部判断，例如 docs_check；可被 workflow 调用，但不是新阶段。
-- **上下文观察：**status/result 依赖具体 submission/run，不因有 CLI 就变成无上下文工具。
-- **维护动作：**install/link/start 会修改本机或启动进程，必须与只读 check 区分。
-- **内部实现：**kernel/records/identity helper 在模块详情展开，不挤进总览。
+<a id="12-再理解能力的归属"></a>
 
-当前执行状态只在[路线图状态](../roadmap/master-plan/phase2/status.md)维护。流程说明不代表相应功能已经正式验收。
+## 1.2. 为什么这样分阶段
+
+- **S2：明确范围与验收。** 事实、修改范围和成功标准一起确认，不拆成两次“冻结”。
+- **S3／S4：实现反馈与交付证明。** 直接检查先修错；开发检查补齐风险覆盖；Formal 另做独立验收。详见[执行场景](scenarios/run-repository-gates.md)。
+- **S6：持续维护。** 文档随实现更新、随交付复核，使用期间继续维护。
+
+<a id="13-主干与侧链的区别"></a>
+
+## 1.3. 知识放在哪里
+
+约束 Agent 行为的规则放 Harness；面向读者的解释与操作放 docs；未决设计放状态页。
+
+| 内容 | 唯一真源／维护入口 |
+| --- | --- |
+| 工作范围、身份、风险、Git 与结果规则 | [AGENTS.md](../../AGENTS.md)、[Harness](../../harness/README.md) |
+| 文档原则与图源制作合同 | [documentation-policy](../../harness/documentation-policy.yaml) |
+| 产品与领域长期不变量 | [OpenSpec 产品架构规范](../../openspec/specs/product-architecture/spec.md) |
+| 执行流程／优化任务 | [执行场景](scenarios/run-repository-gates.md)／[优化场景](scenarios/optimize-repository-gates.md)；优化页引用执行页，不复制子流程 |
+| 脚本实际行为与文件职责 | 源码与直接测试；[Scripts 索引](reference/scripts.md) |
+| 未决设计与当前状态 | [问题台账](../roadmap/master-plan/phase2/status.md) |
+
+现有目录划分仍在问题台账中评估；本入口不要求读者按 `product/`、`architecture/`、`development/` 顺序阅读。规范补足事项也记录在台账，本次不修改 Harness。

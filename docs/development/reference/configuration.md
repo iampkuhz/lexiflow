@@ -1,30 +1,29 @@
-# 1. 配置地图：先找 owner，再改说明或机器值
+# 1. 配置地图：先找真源与消费者
 
-> 位置：[工程地图](../overview.md) → [Reference](../reference.md) → 配置。字段和固定值由消费者解释；不是 YAML 中所有字符串都可以翻译。
+> 上级：[Reference](../reference.md)。修改前先确定是说明文字、机器值还是派生字段；不能把所有英文字符串都当成可翻译说明。
 
-## 1.1. Harness 与计划
+## 1.1. 工程配置
 
-| 真源 | 拥有的内容 | 读者应注意 |
+| 真源 | 控制什么 | 维护入口／注意点 |
 | --- | --- | --- |
-| [manifest.yaml](../../../harness/manifest.yaml) | 工程入口、公开命令与文档导航 | 不保存运行状态 |
-| [agent-policy.manifest.yaml](../../../harness/agent-policy.manifest.yaml) | 共享身份、调度、规模与安全策略 | 是派发策略真源，不在客户端复制规则 |
-| [agent-runtime.manifest.yaml](../../../harness/agent-runtime.manifest.yaml) | 客户端 Session/checkout 能力 | 共享字段由 policy 投影，非独立修改入口 |
-| [policy-projections.yaml](../../../harness/policy-projections.yaml) | 真源到派生字段的映射 | 先改真源，再显式生成、核对 |
-| [module-checks.yaml](../../../harness/module-checks.yaml) | Check 的命令、scope、triggers、环境、输入与结果 contract | 当前 baseline/change 声明是不同场景，不等于每次重复执行 |
-| [module-boundaries.yaml](../../../harness/module-boundaries.yaml) | 模块 owner 与依赖边界 | 与流程次序区别 |
-| [java-product.manifest.yaml](../../../harness/java-product.manifest.yaml) | Java 构建与质量入口 | Java 检查仍由 Gradle 执行 |
-| [documentation-policy.yaml](../../../harness/documentation-policy.yaml) | 文档语言、图源与信息组织 | 机器静态检查不代替人工理解 |
-| [planning/workstreams.yaml](../../../planning/workstreams.yaml) | Catalog 与阶段分解 | planning-only 不是派发与验收资格 |
-| [planning/task-template.yaml](../../../planning/task-template.yaml) | 工作包/Task 输入形状 | 示例或模板不是运行身份与正式证据 |
+| [manifest.yaml](../../../harness/manifest.yaml) | 公开命令与入口索引 | 不保存运行状态 |
+| [agent-policy](../../../harness/agent-policy.manifest.yaml) | 范围、模型、身份、风险与调度 | 共享策略的修改真源 |
+| [agent-runtime](../../../harness/agent-runtime.manifest.yaml)／[policy-projections](../../../harness/policy-projections.yaml) | 客户端边界与派生映射 | 先改 policy，再生成、核对投影 |
+| [module-checks](../../../harness/module-checks.yaml) | Check 命令、触发、依赖、输入与环境 | [声明加载](../../../scripts/verification/declarations.py)、[选择闭包](../../../scripts/verification/scope.py) |
+| [delivery-hooks](../../../harness/delivery-hooks.json)／[test-services](../../../harness/test-services.json) | Stop 预算与隔离服务 | [Hook](../change-delivery/hooks.md)、[环境](../operations/verification-environment.md) |
+| [ci-policy](../../../harness/ci-policy.yaml) | quick 与正式发行检查集合 | [CI 运行](../operations/github-actions.md) |
+| [module-boundaries](../../../harness/module-boundaries.yaml)／[java-product](../../../harness/java-product.manifest.yaml) | 模块归属、依赖与 Java 入口 | [系统边界](../../architecture/boundaries.md)、[Java 检查](java-checks.md) |
+| [documentation-policy](../../../harness/documentation-policy.yaml) | 文档与图源合同 | [维护操作](documentation.md)，不在 docs 再造规则 |
+| [Catalog](../../../planning/workstreams.yaml)／[Task 模板](../../../planning/task-template.yaml) | Task 范围、依赖和输入形状 | planning-only 不授予派发或验收资格 |
 
-Qoder 与 Codex 工作包 schema、Delivery Gate record schema 定义固定形状；它们不是可手填身份的授权接口。精确 schema 路径见 manifest 的 agent_contract。
+schema 路径由 manifest 索引；schema 合法只证明形状，不授权调用者手填身份或正式结果。
 
-## 1.2. 语言与投影的处理顺序
+## 1.2. 修改与投影
 
-先确认某字段是人类说明、机器枚举还是参与匹配/指纹的值。注释与说明用中文，并保留[工程术语](engineering-glossary.md)；字段、ID、command、path、schema 与状态固定值保持原样。即使名为 description/reason，也先检查消费者。例如 path_ownership.resolution 看似英文句子，但 planning_check 会匹配 most-specific，因此保留原值并用中文注释解释。文件注释变化也会改变 byte hash，不能据此复用旧的 Verify 或 receipt。
+`path_ownership.resolution` 是机器字段，`most-specific` 是消费者匹配的固定值；中文解释为“按最具体路径确定模块归属”，不要翻译字段值。其他参与 enum、匹配或指纹的值同样先查消费者。
 
-policy 改动只从真源开始，显式 write 投影后 check。对格式或注释的调整不等于获得修改模型、预算、权限、触发或 receipt contract 的授权。
+policy 修改后，显式执行 `python3 -m scripts.repository.policy_projection --write`，再 `--check`；这些是有副作用的维护操作，不因阅读文档自动执行。注释或格式变化也改变字节摘要，不据此复用旧报告。具体授权见 [AGENTS.md](../../../AGENTS.md)。
 
-## 1.3. 产品与运行配置
+## 1.3. 产品与本机配置
 
-API 的 application.yaml、扩展 manifest 与构建参数由相应模块拥有。开发容器见[运行与环境](../operations.md)；测试地址必须显式隔离，不从个人配置推断。Secrets、真实字幕、观看历史、模型输入输出和本地运行数据不能进入共享配置。
+产品配置由对应模块维护：API 的 `application.yaml`、扩展 manifest 和构建参数回到[系统边界](../../architecture/boundaries.md)。本机路径、凭据与运行配置见[本地体验](../operations/local-experience.md)；测试环境见[隔离验证环境](../operations/verification-environment.md)。隐私和提交边界只在 [Harness](../../../harness/agent-policy.manifest.yaml)维护。

@@ -22,3 +22,49 @@
 - 工程验证与身份交接：[交付主干](../../../development/change-delivery.md)。
 - 当前运行边界：[发布与使用](release.md)、[架构与数据](../../../architecture/overview.md)。
 - 后续能力不阻断基础观看，见[待办池](../future.md)。
+
+## 1.4. 工程架构与治理问题
+
+本节是未决问题的唯一记录，操作页只解释现行逻辑并回链。**文档表达不满足阅读要求，与实际架构／流程设计未获认可，是两类问题。** 只有修改图文可解决的，不据此宣称架构有缺陷；需要改变合同或执行行为的，先决策并形成 OpenSpec 工作项，不以文档改写代替批准。
+
+| 标识／类别 | 当前问题与证据 | 需要确认的设计及验收边界 |
+| --- | --- | --- |
+| ARCH-GATE-01：执行层次设计 | [submit](../../../../scripts/delivery_gate/submit.py) 要求开发来源报告；[validate](../../../../scripts/delivery_gate/validate.py) 仍独立执行计划。高风险开发与正式验证可能覆盖相近昂贵 Check；[复用合同](../../../../harness/agent-policy.manifest.yaml) 禁止自检到 Formal 及跨交付复用 | 评估两次完整覆盖是否都必要、各自提供何种不可替代证明，以及能否在独立身份／输入冻结／必需覆盖均保留的前提下缩短关键路径。现有证据支持设计评估，不证明重复本身是 bug，不授权省略任一层 |
+| ARCH-GATE-02：环境责任设计 | [Hook](../../../../scripts/verification/delivery_hook.py) 自动拥有隔离服务 lease；[development CLI](../../../../scripts/verification/development.py) 与 [Formal validate](../../../../scripts/delivery_gate/validate.py) 依赖调用者确认环境，详见[环境说明](../../../development/operations/verification-environment.md) | 评估“执行同一检查能力”是否需要统一受控环境准备与清理的接口，或维持不同职责但建立一致用户入口。不得复用已清理 lease、开发库／未知资源，也不默认安装或下载；需用失败／取消／归属回归证明 |
+| ARCH-DOC-01：事实归属设计 | `product/`、`architecture/`、`development/` 使用不同视角，场景与能力页也可能重复流程解释；目录不同本身不证明事实重复 | 先按事实的唯一维护位置核对重复正文、规则副本与跨页同步成本，再确定合并或唯一正文位置。roadmap 状态与 user 操作仍独立；“执行流程”维护完整运行路径，“优化流程”只维护改进任务并回链。已按主题逐页整理唯一正文与回链；因仓库外部引用和授权边界，本次保持路径，目录合并仍未决 |
+| ARCH-SCRIPT-01：脚本入口设计 | [delivery_gate/__main__.py](../../../../scripts/delivery_gate/__main__.py) 统一分派子命令；`submit.py`、`validate.py`、`review.py`、`check.py` 分别提供场景 API，不是独立 CLI | 按文件优先说明职责，区分公开 CLI、内部函数与人工步骤。是否进一步要求每种流程独立可执行文件、一个公开入口，需单独评估；本次只如实标注入口，不改文件结构或接口 |
+| GOV-DOC-01：文档合同归属 | 读者提出的维护要求曾保存在总入口；[documentation-policy](../../../../harness/documentation-policy.yaml) 已有层级、导航、图源等合同，但未完整表达场景命名、执行／优化分离、耗时和 IDE 复核要求 | 原则性 Agent 要求归 Harness，操作与解释归 docs，未决问题归本页。需将缺口补入现有 policy 后检查消费者与必要回归；不能把这里的待办当成已生效规范。本次仅可写 docs，Harness 未修改 |
+
+## 1.5. 文档合同补足与表达复核
+
+以下是 `GOV-DOC-01` 的合同补足待办，不是新增自动门禁；归属以 [AGENTS.md](../../../../AGENTS.md)、[Harness](../../../../harness/README.md) 为准。
+
+| 原则性内容 | Harness 归属 | docs 中的表达／维护位置 |
+| --- | --- | --- |
+| 同一事实明确唯一维护位置；场景引用合同，不创建规则副本 | `documentation-policy.information_architecture` 与导航合同 | 总入口只给归属和真源链接；目录整理以前置重复审计为依据 |
+| 通用生命周期不绑定某个特定任务；场景按工作目标命名；运行与优化分开 | `documentation-policy.reader_navigation.overview / workflow` | 运行步骤只在执行页完整维护，优化页引用；能力页解释内部调用与参数 |
+| 总—分叙述；节点的输入／输出／职责可区分；主干纵向，真实结果左右分支且失败提前结束 | `documentation-policy.reader_navigation.workflow` 与图文审阅合同 | 图先展示整件事，再展开复杂层次；不把空的 helper 是否执行画成流程分支 |
+| 术语明确指向模块／文件或执行者；执行图注释固定入口／作用／预期；节点表只留核心作用和链接；展开图标出父节点与公开入口 | `reader_navigation.workflow` 与图文审阅合同 | 不把人员职责冒充脚本入口；真实人工步骤注明无脚本，说明只在必要处展开 |
+| 执行节点有预期秒／分钟；估算与实测明确区分；机器、Agent、准备与等待分开；父子不重复计时 | 图文审阅合同的预算说明 | 场景保存有前提的规划预算和来源，不当性能保证，不为补数字重跑重套件 |
+| IDE 内链实际可用；静态 slug 通过不证明标题定位成功 | 导航复核合同 | 主导航使用相对文件链接；需要片段定位时实际点击复核，并保留被引用旧锚点 |
+| 中文加粗结束标记后与后文分隔，避免标点与汉字紧贴造成失效；复核 IDE 实际渲染 | 导航／图文复核合同 | 使用 `**短句。** 后文`；不写 `** 文本**`，开始标记内侧不加空格 |
+| 文档表达问题与实际设计问题分开；未决设计不能写成已确定规则 | 既有 `selected_solution_only`、`maintenance` 与问题记录边界 | 已确定操作写 docs；问题与决策条件只在本状态页，决策后按真实范围进入 OpenSpec |
+
+当前阅读入口位于[总入口](../../../development/overview.md)、[优化场景](../../../development/scenarios/optimize-repository-gates.md)、[执行场景](../../../development/scenarios/run-repository-gates.md)。合并事实／合同定界阶段、解释三层检查、补上文档维护、删除末尾反馈节点属于表达调整，不等于改变门禁实现；具体阅读效果仍需用户确认。架构问题是否解决只看上述具体决策与对应当前输入证据，不以样板写完或静态检查通过代替。
+
+## 1.6. 待优化清单与已实现机制的验收缺口
+
+本清单针对现行处理逻辑，不是文档排版待办。设计待确认、执行待优化、源码已有改进但未完成性能验收分别记录；只读核对不签发正式验证。详细约束继续由 Harness 维护。
+
+| 优先级／状态 | 事实与维护真源 | 优化方向与验收边界 |
+| --- | --- | --- |
+| P1 · 设计待确认：风险与基线成本耦合 | [risk_classification](../../../../harness/agent-policy.manifest.yaml) 将大量 docs、OpenSpec、ops、scripts 等变化列为高风险；[development.py](../../../../scripts/verification/development.py) 选择开发变化检查加非发行完整基线 | 分离“审查风险”与“必需检查集合”的设计评估，先建立覆盖完整的 docs-only／局部工程合同，不为降耗直接降风险。用路径／内容／依赖矩阵及相同冻结输入对照证明无覆盖缺口 |
+| P1 · 待优化：Git 提醒仍指向两种完整 Verify | [.githooks/pre-commit](../../../../.githooks/pre-commit) 每次 commit 提醒同时运行完整 Change／Repository，与 [Harness](../../../../harness/README.md) 的日常风险驱动开发入口不一致；提醒本身不执行检查 | 更新受管 Hook 提示及安装／资产校验回归，默认引导开发入口，完整基线只在显式要求或发行时运行；保留不锁编辑／commit 的边界，不能用提醒代替检查 |
+| P1 · 待优化：非交付 Stop 依赖人工标记 | [delivery_hook.py](../../../../scripts/verification/delivery_hook.py) 只识别精确末尾中间标记；只读或等待回合漏标且有 diff 时仍执行检查 | 优先让调用方明确回合意图；若增加集成信号，只接受窄而显式的非交付类型，不推断聊天语义。补标记位置与各中间回合测试，正常交付仍必须执行，跳过不叫 PASS |
+| P2 · 设计待确认：开发到 Formal 的重复执行 | `ARCH-GATE-01`：来源报告与独立 validate 提供不同证明，跨交付／自检到 Formal 复用被禁止 | 先统计真实重复进程，而非把 review／check 算成测试。需要证据交接优化时先设计独立身份、输入当前性与完整覆盖合同；本次不授权省略任何层 |
+| P2 · 设计待确认：环境入口不统一 | `ARCH-GATE-02`：Hook 自动 lease，显式开发／Formal 由调用者确认隔离环境 | 确定统一受控准备接口或一致操作入口；验收准备失败、取消、清理与资源归属，不复用已清理 lease 或开发库 |
+| P2 · 已有源码改进，验收待补：去重、早停与一次服务准备 | [scenarios.py](../../../../scripts/verification/scenarios.py)、[test_services.py](../../../../scripts/environment/test_services.py) 已实现同事务精确等价成功 Check 复用、交付失败早停、多 profile 一次 lease；Hook 有单项超时、总预算与有限失败重入 | 核对实际调用次数、未运行项状态、不同工具／环境不复用和清理证明；修复重入仍重新检查。机制存在不等于整项优化通过，也不证明所有套件／跨调用重复已消除 |
+| P2 · 已有源码改进，性能待补证：套件内部计时 | [Verification adapter](../../../../tests/verification/module_check_adapter.py)、[Docker adapter](../../../../ops/docker/tests/module_check_adapter.py) 记录测试／阶段计时；[效率直接测试](../../../../tests/verification/test_development_efficiency.py)主要证明合成字段机制 | 在相同环境与相同 profile 下收集可比摘要，检查测试数、skip 与覆盖一致，区分耗时方差和因果；没有可比端到端样本，不宣称提速 |
+| P3 · 治理待补：文档原则进入机器真源 | `GOV-DOC-01`：要求已记录在本页，但本次只写 docs，未修改 Harness | 在另行授权后补现有 documentation-policy 的场景、节点预算、IDE 与执行／优化约定，并核对消费者；不把 docs 待办当成已生效 Agent 规则 |
+
+submit／冻结只绑定输入，不运行 Java 扫描；正式 validate 执行检查；review 和 check 只核对证据。这些职责分离本身未被证明有缺陷。quick CI、开发检查、完整 Repository 与 Formal 的集合不同，不能把它们都称为“全套检查”或互相替代。

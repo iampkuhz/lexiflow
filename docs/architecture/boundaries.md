@@ -1,6 +1,6 @@
 # 1. 模块边界
 
-[架构总览](overview.md) → 模块边界。本文说明领域 owner、模块依赖和跨域访问边界。
+[架构总览](overview.md) → 模块边界。本文说明各领域由哪个模块维护、模块依赖和跨域访问边界。
 
 LexiFlow 后端是共享两个业务领域的 Modular Monolith，只有 `:api` 一个 Spring Boot 运行项目。判断模块归属先看**独立事实与规则由谁负责**，再看用例和技术怎样调用它们。仅被多处引用、在后台运行或调用模型，都不是新建领域模块的理由。
 
@@ -12,12 +12,12 @@ LexiFlow 后端是共享两个业务领域的 Modular Monolith，只有 `:api` �
 
 ### 1.1.1. 看似领域、实际上不是模块的概念
 
-字幕、位置、修订和有限上下文只是 Enrichment 的 `CaptionContext` 输入值，首版没有内容编辑或内容库。来源适配器生成该输入，但 YouTube DOM 和来源私有类型不能进入领域。语义能力只服务提示：观看仅做确定性匹配，第三阶段的独立事后分析才可由基础设施适配模型；它不拥有独立业务事实，也不预建语义服务。通用标识、时间和版本用 Java 标准 `UUID`、`Instant`、`Duration`；`CaptionRevision`、`LexiconVersion`、`PromptResultVersion` 等由各自 owner 定义，不建空壳 shared kernel。出现独立内容库、语义产品或稳定跨领域共享合同的证据前，不向核心领域写入这些新规则。
+字幕、位置、修订和有限上下文只是 Enrichment 的 `CaptionContext` 输入值，首版没有内容编辑或内容库。来源适配器生成该输入，但 YouTube DOM 和来源私有类型不能进入领域。语义能力只服务提示：观看仅做确定性匹配，第三阶段的独立事后分析才可由基础设施适配模型；它没有独立业务事实，也不预建语义服务。通用标识、时间和版本用 Java 标准 `UUID`、`Instant`、`Duration`；`CaptionRevision`、`LexiconVersion`、`PromptResultVersion` 等由其所属模块维护，不建空壳 shared kernel。出现独立内容库、语义产品或稳定跨领域共享合同的证据前，不向核心领域写入这些新规则。
 
 <a id="3-java-module-的完整划分"></a>
 ## 1.2. 依赖从组合根走向公开 contract
 
-下图是**四个产品 Gradle 项目的直接依赖方向**，不是运行时调用顺序。每个业务项目包含领域与应用层；未来后台用例仍由所属业务模块实现，经唯一应用组合根装配。具体的客户端、服务端和存储系统关系见[系统边界图](overview.md#11-系统边界英文在本机事实在服务端)。
+下图是**四个产品 Gradle 项目的直接依赖方向**，不是运行时调用顺序。每个业务项目包含领域与应用层；未来后台用例仍由所属业务模块实现，经唯一应用组合根装配。具体的客户端、服务端和存储系统关系见[系统边界图](overview.md)。
 
 ```plantuml
 @startuml
@@ -84,10 +84,10 @@ endlegend
 
 ## 1.3. 当前字幕怎样经过边界
 
-来源适配器在本机产生不含平台私有类型的有界输入，`api` 交给 Enrichment 的字幕应用用例；用例经 Lexicon 公开合同查询候选和发布版本，再调用本领域规则，再按价值、密度和适用性决定返回可靠提示或空结果。没有当前字幕模型调用、后台补全或 `pending` 承诺；扩展只显示匹配当前字幕的结果。第三阶段规划的事后分析即使由同一应用调度，产物仍须经公开发布合同后才可供后续观看读取。[观看时序](flows.md#viewing-request)标出每次调用和迟到丢弃。
+来源适配器在本机产生不含平台私有类型的有界输入，`api` 交给 Enrichment 的字幕应用用例；用例经 Lexicon 公开合同查询候选和发布版本，再调用本领域规则，再按价值、密度和适用性决定返回可靠提示或空结果。没有当前字幕模型调用、后台补全或 `pending` 承诺；扩展只显示匹配当前字幕的结果。第三阶段规划的事后分析即使由同一应用调度，产物仍须经公开发布合同后才可供后续观看读取。[观看时序](flows.md)标出每次调用和迟到丢弃。
 
 Chrome 扩展仅可拥有用户明确触发的本机 `SuppressedTermPreference`：以词段和词库版本写入，不上传、不推断熟悉度、不生成账号身份或跨设备合并。本机偏好不是服务端事实。[产品说明](../product/product-brief.md)解释这种低打扰取舍。
 
 ## 1.4. 静态边界与变更入口
 
-模块不得直接读写其他 Domain 拥有的数据；来源专有类型不得进入 `CaptionContext`；infra 不得向领域发起决策；组合根之外不得直接依赖具体技术适配。准备修改时先确定 owner 和公开 contract，再看[持久化边界](data-model.md)或[来源适配](source-contract.md)；需要改变长期约束时从[产品架构规范](../../openspec/specs/product-architecture/spec.md)与 OpenSpec 变更进入，不以文档叙述代替验证。
+模块不得直接读写其他 Domain 拥有的数据；来源专有类型不得进入 `CaptionContext`；infra 不得向领域发起决策；组合根之外不得直接依赖具体技术适配。准备修改时先确定所属模块与公开 contract，再看[持久化边界](data-model.md)或[来源适配](source-contract.md)；需要改变长期约束时从[产品架构规范](../../openspec/specs/product-architecture/spec.md)与 OpenSpec 变更进入，不以文档叙述代替验证。

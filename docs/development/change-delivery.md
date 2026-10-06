@@ -2,60 +2,25 @@
 
 > 位置：[文档首页](../README.md) → [工程地图](overview.md) → 开发交付。先读本页建立阶段关系，再进入 Verify 或 Delivery Gate；精确参数到 Reference 查阅。
 
-日常开发自检按真实改动风险选择检查；完整 Change/Repository Verify 是显式完整基线原语，正式 **Delivery Gate** 回答“同一冻结输入是否经过独立验证、必要审查及依赖/批准核对”。它们复用检查能力，不共享身份结论。一次 Agent 执行完成不等于验收通过。
+日常开发自检按真实改动风险选择检查；完整 Change/Repository Verify 是显式完整基线原语，正式 Delivery Gate 回答“同一冻结输入是否经过独立验证、必要审查及依赖/批准核对”。它们复用检查能力，不共享身份结论。一次 Agent 执行完成不等于验收通过。
 
-## 1.1. 先看交付主干
+## 1.1. 能力边界与入口
 
-```plantuml
-@startuml
-skinparam backgroundColor white
-skinparam defaultFontName SansSerif
-skinparam shadowing false
-skinparam nodesep 40
-skinparam ranksep 45
-skinparam activityBackgroundColor #EAF2FF
-skinparam activityBorderColor #46699A
-skinparam defaultFontSize 15
-title 风险驱动开发与独立验收
-start
-:S1 完成实现;
-:S2 风险评估与开发自检;
-if (需要正式验收？) then (是)
-  :S3 submit 并冻结输入;
-  :S4 独立 validate;
-  if (计划要求独立 review？) then (是)
-    :S5 按计划独立 review;
-  else (否)
-  endif
-  :S6 check 依赖与批准;
-else (否)
-  stop
-endif
-stop
-legend bottom
-S2 日常自检：机械/局部为 development-change；高风险另加 development-baseline
-正式路径都必须独立 validate；仅 high-risk-engineering/formal-release 要求 review
-Formal release 由 Task required_check_ids 命中 CI formal-check 集合触发完整 repository-baseline
-自检 PASS 不是 Formal PASS；完整 Change/Repository Verify 仍可显式运行
-箭头表示人工交接；不需要 Formal 时止于 S2；无 review 时 S4 直接到 S6
-endlegend
-@enduml
-```
+本页只说明证明层次，不重复执行活动流程。直接自检是实现者针对局部改动的静态、编译或定点回归；开发 Stop 按真实 diff 风险生成开发报告；完整 Change/Repository Verify 是显式完整基线；Formal Gate 冻结 Task 与输入，由独立身份验证，并按计划审查、核对证据。普通 CI quick 与正式发行 CI 的边界见[CI 说明](operations/github-actions.md)。这些证明不可互相替代。
 
-图中的箭头是交接顺序，不表示前一个 CLI 自动调用下一个。日常工作不需要正式验收时，止于本地自查；本地检查失败则停在对应问题，不能把“结束”理解成 PASS。正式链的后续操作以当前步骤满足要求为前提。
+| 能力 | 核心作用 | 入口链接 |
+| --- | --- | --- |
+| 直接自检 | 实现者先发现并修复局部问题 | [自检选择](change-delivery/verification.md) |
+| 开发 Stop | 以真实风险闭包产出开发报告；不签 Formal receipt | [Hook 机制](change-delivery/hooks.md) |
+| 完整 Verify | 显式运行完整变化或仓库基线 | [Verify 入口](change-delivery/verification.md) |
+| Formal Gate | 冻结送验输入、独立执行、按需审查并核对 receipt/DAG | [Delivery Gate](change-delivery/delivery-gate.md) |
+| CI | 普通分支/PR 使用 quick；发行标签执行完整基线 | [GitHub Actions](operations/github-actions.md) |
 
-| 阶段 | 要解决的问题 | 入口与交接 | 深入阅读 |
-| --- | --- | --- | --- |
-| S1 实现 | 谁负责本次范围？ | 人工或 Agent 产出代码与真实执行事实 | [可选 Agent workflow](agent-workflow.md) |
-| S2 本地 Verify | 真实改动风险要求哪些检查？ | development report；完整基线原语按需显式运行 | [选择、执行与报告](change-delivery/verification.md) |
-| S3 submit | 哪些输入与哪个 producer 被送验？ | submission | [正式 Delivery Gate](change-delivery/delivery-gate.md#12-submit冻结送验输入) |
-| S4 validate | 独立身份是否执行了相同输入的检查？ | validation record | [独立验证](change-delivery/delivery-gate.md#13-validate执行独立验证) |
-| S5 review | 风险计划是否要求独立审查？ | 高风险/发行发布 review record；低风险不适用 | [独立审查](change-delivery/delivery-gate.md#14-review复核差异与证据) |
-| S6 check | receipt、依赖和用户批准是否满足？ | check record | [条件核对](change-delivery/delivery-gate.md#15-check核对条件而非重跑) |
+各层详细执行活动统一见[编码后执行仓库门禁场景](scenarios/run-repository-gates.md)。本页只提供导航，不把人工交接画成自动串联。
 
 ## 1.2. 哪些不是主干阶段
 
-文档链接、格式和 policy projection 是模块检查里的 **standalone checker**，无需把每项都画成新的阶段。缺环境、身份冲突、输入漂移和缺批准会阻止交接，因此必须从主干进入[排障页](troubleshooting.md)。
+文档链接、格式和 policy projection 是模块检查里的 standalone checker，无需把每项都画成新的阶段。缺环境、身份冲突、输入漂移和缺批准会阻止交接，因此必须从主干进入[排障页](troubleshooting.md)。
 
 `status` 是已有 submission 的观察入口，不是 S7。Hook 安装和 skill 链接是有副作用的本机维护，不是编辑或提交的许可步骤。日常 Verify 不读取 Task identity，不签发正式 receipt，也不阻断 commit。
 

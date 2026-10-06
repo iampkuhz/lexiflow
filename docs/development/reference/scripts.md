@@ -1,82 +1,84 @@
-# 1. Scripts 职责：从阶段回到文件
+# 1. Scripts 职责：从流程节点回到文件
 
-> 位置：[工程地图](../overview.md) → [Reference](../reference.md) → Scripts。先在 [Verify](../change-delivery/verification.md)、[Delivery Gate](../change-delivery/delivery-gate.md) 或 [Agent workflow](../agent-workflow.md) 确认阶段，再查下面的文件。这里不是执行顺序表。
+> 上级：[Reference](../reference.md)。执行顺序看[编码后执行门禁](../scenarios/run-repository-gates.md)，改进任务看[优化门禁](../scenarios/optimize-repository-gates.md)。这里只回答“从哪个文件进入、在哪里维护”。
 
-包导出与 `__main__` 是入口设施，不构成业务阶段。下表路径均相对于仓库根的 `scripts/`；见[源码入口](../../../scripts/)。
+**先看公开入口，再查内部实现。** 包导出不是流程阶段；一个文件有内部函数不意味着每个函数都是公开命令。下表均链接实际源码，不用角色名称替代文件入口。
 
-## 1.1. 日常 Verify
+## 1.1. 开发与完整 Verify
 
-| 文件（scripts/ 下） | 当前职责 | 阅读位置与边界 |
+| 入口文件／命令 | 核心职责 | 深入位置 |
 | --- | --- | --- |
-| [check_changes.py](../../../scripts/check_changes.py) | diff 入口、参数、报告持久化 | 交付 S2 入口；保留薄 CLI |
-| [check_repository.py](../../../scripts/check_repository.py) | baseline 入口、报告持久化 | 交付 S2 与 CI 调用入口；CI 外部配置另核实 |
-| [verification/diagnose.py](../../../scripts/verification/diagnose.py) | 定向诊断，不发布正式报告 | 只用于定位；选中检查 PASS 不代表完整仓库 PASS |
-| [verification/__init__.py](../../../scripts/verification/__init__.py) | 导出公共能力 | 模块 contract；明确允许外部调用的表面 |
-| [verification/scenarios.py](../../../scripts/verification/scenarios.py) | 选择、冻结、执行、聚合 | Verify 子流程主干，分段解释顺序不变量 |
-| [verification/declarations.py](../../../scripts/verification/declarations.py) | 加载与验证 module-checks | 选择阶段的内部能力，不独立当作交付步骤 |
-| [verification/scope.py](../../../scripts/verification/scope.py) | Git diff、触发、依赖闭包 | 选择阶段；同时被 Delivery Gate 的 submit 消费 changed_paths |
-| [verification/kernel.py](../../../scripts/verification/kernel.py) | 输入摘要、子进程、超时、结果判定 | 执行阶段；按能力解释，不逐 helper 列独立页面 |
-| [verification/reports.py](../../../scripts/verification/reports.py) | 报告完整性和读写 | 证据输出阶段；不可与正式 receipt 混淆 |
+| [development.py](../../../scripts/verification/development.py) · `python3 -m scripts.verification.development` | 风险驱动开发 profiles；调用者准备隔离环境 | [执行场景 B](../scenarios/run-repository-gates.md) |
+| [delivery_hook.py](../../../scripts/verification/delivery_hook.py) · `main()` | Stop 输入判断、隔离服务、开发检查与清理 | [Hook](../change-delivery/hooks.md) |
+| [check_changes.py](../../../scripts/check_changes.py) · `python3 scripts/check_changes.py` | 显式完整 Change Verify | [Verify](../change-delivery/verification.md) |
+| [check_repository.py](../../../scripts/check_repository.py) · `python3 scripts/check_repository.py` | 显式完整 Repository baseline | [Verify](../change-delivery/verification.md) |
+| [diagnose.py](../../../scripts/verification/diagnose.py) · `python3 -m scripts.verification.diagnose change\|repository` | 定向问题定位，不发布完整交付报告 | [诊断](standalone-tools.md) |
+| [work_package.py](../../../scripts/verification/work_package.py) · `python3 -m scripts.verification.work_package <request.json>` | 显式所选 Check 的非正式诊断 | [请求与资格](standalone-tools.md) |
+| [ci.py](../../../scripts/verification/ci.py) · `python3 -m scripts.verification.ci plan\|quick` | quick 计划与执行；不是完整或 Formal | [CI](../operations/github-actions.md) |
+
+| 内部文件 | 核心职责 | 维护真源／直接测试 |
+| --- | --- | --- |
+| [scenarios.py](../../../scripts/verification/scenarios.py) | profiles 选择、冻结、执行与聚合 | [module-checks](../../../harness/module-checks.yaml)、[编排测试](../../../tests/verification/test_lightweight_orchestration.py) |
+| [declarations.py](../../../scripts/verification/declarations.py)／[scope.py](../../../scripts/verification/scope.py) | 声明加载、真实 diff 与依赖闭包 | [Verification 测试](../../../tests/verification/) |
+| [risk.py](../../../scripts/verification/risk.py)／[transaction.py](../../../scripts/verification/transaction.py) | 风险计算、验证窗口和事务边界 | [agent-policy](../../../harness/agent-policy.manifest.yaml) |
+| [kernel.py](../../../scripts/verification/kernel.py)／[execution.py](../../../scripts/verification/execution.py) | 冻结输入、子进程、预算与结果判定 | [Verification 测试](../../../tests/verification/) |
+| [reports.py](../../../scripts/verification/reports.py)／[summaries.py](../../../scripts/verification/summaries.py) | 报告持久化、完整性与脱敏摘要 | 正式报告与诊断命名空间分开 |
 
 ## 1.2. 正式 Delivery Gate
 
-| 文件（scripts/delivery_gate/ 下） | 当前职责 | 阅读位置与边界 |
+公开 CLI 是 [delivery_gate/__main__.py](../../../scripts/delivery_gate/__main__.py)::`main()`：`python3 -m scripts.delivery_gate <子命令> ...`。下列场景文件提供内部 API，不能误写为各自独立的 `python file.py` 入口。参数在 [Delivery Gate](../change-delivery/delivery-gate.md)，流程在[执行场景 C](../scenarios/run-repository-gates.md)。
+
+| 场景文件 | 核心职责 | 执行边界 |
 | --- | --- | --- |
-| [__main__.py](../../../scripts/delivery_gate/__main__.py) / [__init__.py](../../../scripts/delivery_gate/__init__.py) | 具名 CLI 与公共导出 | 正式验收入口；不得描述成自动连跑所有阶段 |
-| [submit.py](../../../scripts/delivery_gate/submit.py) | 任务、diff、producer 与冻结输入绑定 | S3；明确需要哪些已存在的证据 |
-| [validate.py](../../../scripts/delivery_gate/validate.py) | 独立身份、执行冻结检查、签发 validation | S4；身份、冻结输入与签发；共享校验 helper 由当前场景提供 |
-| [review.py](../../../scripts/delivery_gate/review.py) | 独立 reviewer 与真实 findings、证据复核 | S5；明确不执行交付命令 |
-| [check.py](../../../scripts/delivery_gate/check.py) | receipt、依赖、approval、hash DAG | S6；区别可补条件和输入失效；不重跑交付检查 |
-| [status.py](../../../scripts/delivery_gate/status.py) | 查询已发布记录 | 上述 workflow 的只读观察侧链，不是无上下文工具 |
-| [authority.py](../../../scripts/delivery_gate/authority.py) | 身份发现与证明核对 | 跨阶段内部能力，图中表现为身份边界 |
-| [producer.py](../../../scripts/delivery_gate/producer.py) | 解析实现来源事实 | S3 内部；只消费 agents 的事实 |
-| [requirements.py](../../../scripts/delivery_gate/requirements.py) | 读取正式 Task 的要求 | S3/S6 内部；与 planning 静态检查区别 |
-| [records.py](../../../scripts/delivery_gate/records.py) | 安全路径、不可变发布、记录读取 | 跨阶段内部存储 contract，不是新的验收阶段 |
-| [quality.py](../../../scripts/delivery_gate/quality.py) | Delivery Gate 自身直接测试入口 | 模块 checker Reference，不与产品送验步骤混淆 |
+| [submit.py](../../../scripts/delivery_gate/submit.py) | 绑定 Task、producer、开发报告并冻结送验输入 | 不运行测试命令 |
+| [validate.py](../../../scripts/delivery_gate/validate.py) | 独立 actor 执行冻结必需计划 | 唯一正式执行检查层 |
+| [review.py](../../../scripts/delivery_gate/review.py) | 独立复核冻结 diff/evidence | 不重跑检查 |
+| [check.py](../../../scripts/delivery_gate/check.py) | 核对 receipt、依赖、approval 和 hash DAG | 不重跑检查、不生成用户批准 |
+| [status.py](../../../scripts/delivery_gate/status.py) | 查询具体 submission 的已有记录 | 只读观察，不自动推进流程 |
 
-## 1.3. 可选 Agent workflow
+身份与存储分别由 [authority.py](../../../scripts/delivery_gate/authority.py)、[producer.py](../../../scripts/delivery_gate/producer.py)、[requirements.py](../../../scripts/delivery_gate/requirements.py)、[records.py](../../../scripts/delivery_gate/records.py)支撑；直接回归见 [tests/delivery_gate](../../../tests/delivery_gate/)。[quality.py](../../../scripts/delivery_gate/quality.py)检查 Gate 实现本身，不是产品送验入口。
 
-| 文件（scripts/agents/ 下） | 当前职责 | 阅读位置与边界 |
+## 1.3. Agent 运行与历史记录
+
+新实现与独立验收使用原生 Codex 协作工具；Qoder 新 `start`／`resume` 被策略拒绝。**Qoder 客户端 Stop 配置仍存在。** 客户端 Hook 与执行器派发不是同一开关，见 [Hook](../change-delivery/hooks.md)。
+
+| 文件／入口 | 核心职责 | 深入位置 |
 | --- | --- | --- |
-| [delegation/qoder_cli.py](../../../scripts/agents/delegation/qoder_cli.py) | preflight/start/resume/result/ack 等公开入口 | 只转交显式命令，不推断 latest |
-| [qoder/runner.py](../../../scripts/agents/qoder/runner.py) | Qoder 派发与生命周期实现 | 只供委派入口和内部 worker/watchdog 使用；仍需按职责继续拆分 |
-| [qoder/cli.py](../../../scripts/agents/qoder/cli.py) | Qoder 参数解析与动作分派 | 不读取运行记录或启动执行器 |
-| [qoder/handoff.py](../../../scripts/agents/qoder/handoff.py) | caller handoff 与 runner 身份字段校验 | 独立于派发和生命周期，不接受调用者预填 runner identity |
-| [qoder/read_model.py](../../../scripts/agents/qoder/read_model.py) | 身份绑定的单次运行快照 | 只读 task、started、completion 与回调状态；不派发或推进生命周期 |
-| [qoder/lifecycle.py](../../../scripts/agents/qoder/lifecycle.py) | 运行状态、started、watchdog、ack | 状态详情；有状态内部协议，不是 standalone checker |
-| [qoder/callback.py](../../../scripts/agents/qoder/callback.py) | 终态回调投递及重复消费边界 | 完成与交接阶段；queued 不冒充验收 |
-| [qoder/facts.py](../../../scripts/agents/qoder/facts.py) | 核对原始结果与运行事实 | 完成核对与 producer 消费边界 |
-| [qoder/failure_diagnostics.py](../../../scripts/agents/qoder/failure_diagnostics.py) | CLI 失败脱敏诊断 | 失败节点侧链；不是自动重试入口 |
-| [dispatch_fallback.py](../../../scripts/agents/dispatch_fallback.py) | 宿主等待资格、attempt 与 fallback 记录 | 调度失败分支；属于状态相关机制，非纯格式检查 |
-| [local_codex_runtime.py](../../../scripts/agents/local_codex_runtime.py) | 真实本地 Session 来源 | 身份详情；只读证明与记录写入能力分别说明 |
-| [codex/runtime_binding.py](../../../scripts/agents/codex/runtime_binding.py) | 身份绑定 contract | 内部 Reference，不让调用者手写身份 |
-| [codex/work_package.py](../../../scripts/agents/codex/work_package.py) | Codex 工作包记录与结果投影 | 原始执行事实；与正式 receipt 分开 |
-| [delegation/codex_cli.py](../../../scripts/agents/delegation/codex_cli.py) | 跨 Agent 委派流程中的 Codex 工作包核对入口 | 只解析精确 run ID 并调用 Codex 核对器 |
-| [contracts.py](../../../scripts/agents/contracts.py) | path/scope/结果结构合同 | 内部共享能力；不在主图逐字段展开 |
-| [module_tests.py](../../../scripts/agents/module_tests.py) | agents 工具模块自身的测试适配器 | 只验证工具实现；不判断被委派任务的交付质量，也不表示派发已发生 |
-| [__init__.py](../../../scripts/agents/__init__.py) / [codex/__init__.py](../../../scripts/agents/codex/__init__.py) / [qoder/__init__.py](../../../scripts/agents/qoder/__init__.py) | 包与事实导出 | 无独立 workflow 阶段 |
+| [local_codex_runtime.py](../../../scripts/agents/local_codex_runtime.py)／[runtime_binding.py](../../../scripts/agents/codex/runtime_binding.py) | 从真实宿主元数据识别并绑定执行者 | [身份事实](../agent-workflow/identity.md) |
+| [codex/work_package.py](../../../scripts/agents/codex/work_package.py) | 不可变工作包记录与结果投影 | 库 API，不是原生派发命令 |
+| [delegation/codex_cli.py](../../../scripts/agents/delegation/codex_cli.py) · `verify --run-id <run_id>` | 核对精确 Codex 工作包 run | [Agent workflow](../agent-workflow.md) |
+| [delegation/qoder_cli.py](../../../scripts/agents/delegation/qoder_cli.py) | 读取／核对／ack 既有 Qoder 运行 | 不猜 latest，不允许新 start/resume |
+| [qoder/read_model.py](../../../scripts/agents/qoder/read_model.py)／[facts.py](../../../scripts/agents/qoder/facts.py) | 历史运行快照与完成事实 | 不签发 validation/review |
+| [qoder/lifecycle.py](../../../scripts/agents/qoder/lifecycle.py)／[callback.py](../../../scripts/agents/qoder/callback.py) | 历史生命周期、终态通知与消费 | [身份事实](../agent-workflow/identity.md) |
+| [dispatch_fallback.py](../../../scripts/agents/dispatch_fallback.py) | attempt 与实际宿主工具调用绑定 | 未知运行不授权重派 |
+| [contracts.py](../../../scripts/agents/contracts.py)／[module_tests.py](../../../scripts/agents/module_tests.py) | 工作包合同与工具直接测试 | [tests/agents](../../../tests/agents/) |
 
-## 1.4. 独立维护与环境能力
+## 1.4. 仓库维护与环境
 
-| 文件（scripts/ 下） | 角色 | 阅读边界 |
+| 入口文件 | 核心职责 | 操作位置 |
 | --- | --- | --- |
-| [repository/docs_check.py](../../../scripts/repository/docs_check.py) | standalone checker | Reference 简明说明；保留被 Verify 调用的关系 |
-| [repository/policy_projection.py](../../../scripts/repository/policy_projection.py) | check + 显式 write | 分开描述校验与修改副作用，规则只从 policy 派生 |
-| [repository/planning_check.py](../../../scripts/repository/planning_check.py) | 零参数静态检查 CLI | 不描述为所有工作包派发的必经前置阶段 |
-| [repository/planning_validator.py](../../../scripts/repository/planning_validator.py) | Catalog 加载、结构与合同校验 | 内部能力，供 CLI 和模块 checker 调用 |
-| [repository/python_quality.py](../../../scripts/repository/python_quality.py) | Ruff 与 Pylint 中文 docstring 只读检查 | Verify 调用，缺工具 BLOCKED；规则在 Harness；不判断说明的语义质量 |
-| [verification/delivery_hook.py](../../../scripts/verification/delivery_hook.py) | 交付 Stop 入口 | 串行 Verify、真实报告、进度、超时与有界失败决策 |
-| [repository/hooks.py](../../../scripts/repository/hooks.py) | doctor + install | 维护 Reference；安装和强制激活需明确授权 |
-| [repository/local_skills.py](../../../scripts/repository/local_skills.py) | check + link | 本机接入 Reference；无关产品 workflow 不必经过 |
-| [repository/quality.py](../../../scripts/repository/quality.py) | 模块 checker adapter | 汇总直接能力；输出模块检查结果，不负责正式验收 |
-| repository/catalog.py / task_source.py | 内部 catalog 查询与指纹 | Catalog 解析只在 catalog.py；task_source.py 复用它绑定任务指纹，不另建解析器 |
-| [repository/__init__.py](../../../scripts/repository/__init__.py) | 包设施 | 无独立阅读章节 |
-| [environment/test_services.py](../../../scripts/environment/test_services.py) | 交付临时测试资源 lease | 本机 Podman、随机端口、就绪与归属核验清理；不复用开发库 |
-| [environment/runtime.py](../../../scripts/environment/runtime.py) | 环境能力探测与子进程变量 | Verify 环境子步骤和 Setup 的共用 contract |
-| [environment/toolchain.py](../../../scripts/environment/toolchain.py) | 同事务工具与包内容身份 | 有限声明能力解析、真实执行器与字节指纹；供执行与报告消费共同核对，不承担服务认证 |
-| [environment/java_runtime.py](../../../scripts/environment/java_runtime.py) | Java 25 选择与验证 | 内部能力；避免多个页面重复运行时选择规则 |
-| [environment/java_exec.py](../../../scripts/environment/java_exec.py) | 原生命令环境包装 | 稳定操作入口；不冒充额外 Quality Gate |
-| [environment/start_api.py](../../../scripts/environment/start_api.py) | 端口检查与受控 API 启动 | 本地体验 workflow；有副作用，不作为普通 checker |
-| [environment/__init__.py](../../../scripts/environment/__init__.py) | 环境能力导出 | 模块 contract |
+| [docs_check.py](../../../scripts/repository/docs_check.py) | 文档静态检查 | [图文维护](documentation.md) |
+| [policy_projection.py](../../../scripts/repository/policy_projection.py) | `--check` 核对；`--write` 显式修改投影 | [配置地图](configuration.md) |
+| [planning_check.py](../../../scripts/repository/planning_check.py)／[planning_validator.py](../../../scripts/repository/planning_validator.py) | CLI 与共用 Catalog 校验实现 | 不是两套门禁 |
+| [python_quality.py](../../../scripts/repository/python_quality.py) | Ruff/Pylint，只读质量判断 | [独立工具](standalone-tools.md) |
+| [hooks.py](../../../scripts/repository/hooks.py)／[local_skills.py](../../../scripts/repository/local_skills.py) | `doctor/check` 查询；`install/link` 有副作用 | [独立工具](standalone-tools.md) |
+| [quality.py](../../../scripts/repository/quality.py) | 仓库 Check adapter | 复用各检查器，不签发 Formal |
+| [catalog.py](../../../scripts/repository/catalog.py)／[task_source.py](../../../scripts/repository/task_source.py) | Catalog 查询与任务指纹 | 单一解析实现 |
+| [test_services.py](../../../scripts/environment/test_services.py) | Hook 隔离服务 lease、就绪与精确清理 | [验证环境](../operations/verification-environment.md) |
+| [runtime.py](../../../scripts/environment/runtime.py)／[toolchain.py](../../../scripts/environment/toolchain.py) | 环境能力与真实工具身份 | [Verify](../change-delivery/verification.md) |
+| [java_runtime.py](../../../scripts/environment/java_runtime.py)／[java_exec.py](../../../scripts/environment/java_exec.py) | Java 选择与原生命令包装 | [Java 检查](java-checks.md) |
+| [start_api.py](../../../scripts/environment/start_api.py) | 端口检查与受控 API 启动 | [本地体验](../operations/local-experience.md) |
 
-原生产品检查由 Gradle/build-logic、extension/scripts/quality-check.mjs 与 quality-results.mjs 拥有；extension build.mjs/build-config.mjs 负责构建。入口见 [Java 检查](java-checks.md)与 [Extension E2E](../operations/extension-e2e.md)。
+产品检查回到原生模块：后端 [Gradle](../../../backend/build.gradle.kts)，扩展 [quality-check.mjs](../../../extension/scripts/quality-check.mjs)／[quality-results.mjs](../../../extension/scripts/quality-results.mjs)。不为“每文件一个入口”的阅读愿望增加无职责 wrapper。
+
+## 1.5. 按修改目标找维护真源
+
+| 要改什么 | 真源 | 实现／回归 |
+| --- | --- | --- |
+| Check 触发、依赖与冻结输入 | [module-checks](../../../harness/module-checks.yaml) | declarations／scope／[Verification 测试](../../../tests/verification/) |
+| 风险、身份与复用 | [agent-policy](../../../harness/agent-policy.manifest.yaml) | risk／transaction／[Gate 测试](../../../tests/delivery_gate/) |
+| Stop 触发、预算与清理 | [delivery-hooks](../../../harness/delivery-hooks.json)、[test-services](../../../harness/test-services.json) | [Hook 回归](../../../tests/verification/test_delivery_hook.py) |
+| quick 与正式发行集合 | [ci-policy](../../../harness/ci-policy.yaml)、[workflows](../../../.github/workflows/) | [CI 回归](../../../tests/verification/test_ci.py) |
+| 图中时间预算 | [执行场景的预算口径](../scenarios/run-repository-gates.md) | 既有成功物理执行样本；估算和实测分开，不靠重跑补数字 |
+
+改变规则或实现前走[优化任务](../scenarios/optimize-repository-gates.md)；仅运行既有流程走[执行任务](../scenarios/run-repository-gates.md)。

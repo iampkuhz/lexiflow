@@ -10,7 +10,7 @@
 python3 -m scripts.environment.java_exec backend/gradlew -p backend <gradle-task> [gradle-options]
 ```
 
-启动器选择仓库规定的 Java 与 Wrapper；不要直接以全局 `gradle` 或系统 Java 替代。根聚合、版本与项目依赖见 `backend/build.gradle.kts`、`backend/settings.gradle.kts` 和 `harness/java-product.manifest.yaml`。模块依赖和任务在各自 `build.gradle.kts`，根构建只保留全局配置、共享 convention、跨模块检查和交付聚合。
+启动器选择仓库规定的 Java 与 Wrapper；不要直接以全局 `gradle` 或系统 Java 替代。根聚合、版本与项目依赖见 [build.gradle.kts](../../../backend/build.gradle.kts)、[settings.gradle.kts](../../../backend/settings.gradle.kts) 和 [java-product](../../../harness/java-product.manifest.yaml)。模块依赖和任务在各自 `build.gradle.kts`，根构建只保留全局配置、共享 convention、跨模块检查和交付聚合。
 
 ## 1.2. 常用任务
 
@@ -47,6 +47,6 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend -PqualityHtm
 
 ## 1.4. 从失败回到交付
 
-保留完整 Gradle 输出后，可用 `:api:checkstyleMain`、`:api:test`、`architectureTest` 等真实任务定向定位。启动器会强制执行并禁用构建缓存；不得用 `-x`、`--tests` 或 `--dry-run` 跳过交付要求。修复后重新运行对应完整检查；单项成功不能覆盖原失败记录。
+保留完整 Gradle 输出后，可用 `:api:checkstyleMain`、`:api:test`、`architectureTest` 等真实任务定向定位。启动器会强制执行并禁用构建缓存。直接定位可以对真实 Test 任务使用 `--tests <测试类>`；但不能拿定向结果替代完整交付，也不得用 `-x`、`--tests` 或 `--dry-run` 裁剪交付命令。修复后重新运行对应完整检查；单项成功不能覆盖原失败记录。
 
 `NO-SOURCE`、`UP-TO-DATE`、`FROM-CACHE` 不是本次对全部源码执行检查的证据。缺隔离 PG/Redis 环境时先去[环境准备](../operations/verification-environment.md)，不把开发库地址填作测试地址。

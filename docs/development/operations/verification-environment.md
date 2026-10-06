@@ -2,7 +2,14 @@
 
 > 位置：[工程地图](../overview.md) → [运行与环境](../operations.md) → 隔离验证环境。环境就绪与验证 PASS 是两个独立结果。
 
+
 ## 1.1. 一次性准备运行时与镜像
+
+| 任务 | 入口 | 成功判据 |
+| --- | --- | --- |
+| 准备 Hook 环境 | 本页一次性准备 Python、Java 25 与本机 Podman 镜像 | 所需工具和镜像在本机可用；尚未代表测试通过 |
+| 正常交付 | [交付 Hook](../change-delivery/hooks.md) | Hook 在同一隔离资源 lease 内执行要求的检查并完成精确清理 |
+| 单独运行完整 Verify | `python3 scripts/check_changes.py` 或 `python3 scripts/check_repository.py` | 使用调用者确认的隔离 PostgreSQL/Redis；结果不是自动准备动作 |
 
 首次显式创建 ignored Python 环境并安装声明依赖：
 
@@ -29,7 +36,7 @@ macOS 上如果本机 Podman machine 已存在但没有运行，先显式执行 
 
 ## 1.2. Hook 自动拥有测试资源生命周期
 
-正常交付只需执行 [Hook 入口](../change-delivery/hooks.md#14-双客户端配置与手工执行)，无需 export PostgreSQL/Redis 地址，也不需要运行阶段 helper。
+正常交付只需执行 [Hook 入口](../change-delivery/hooks.md)，无需 export PostgreSQL/Redis 地址，也不需要运行阶段 helper。
 
 策略在 `harness/test-services.json`，执行能力为 `scripts/environment/test_services.py`。Hook 从冻结的 baseline 检查声明判断所需服务，在一个 lease 内准备 PostgreSQL 17 / Redis 7，两个 Verify 共用；检查结束或中断后清理。
 
