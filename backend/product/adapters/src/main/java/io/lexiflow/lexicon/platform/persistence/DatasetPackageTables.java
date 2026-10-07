@@ -31,6 +31,12 @@ public final class DatasetPackageTables {
               "entry_count",
               "lookup_count",
               "preparation_policy",
+              "generation_version",
+              "generation_code_version",
+              "generation_source_digest",
+              "generation_config",
+              "generation_inputs",
+              "content_sha256",
               "imported_at"),
           "dataset_id");
   public static final Table ENTRY =
@@ -53,14 +59,28 @@ public final class DatasetPackageTables {
   public static final List<Table> TABLES = List.of(DATASET, ENTRY, FORM);
   public static final Map<String, String> TYPES =
       Map.ofEntries(
-          Map.entry("dataset_id", "smallint"), Map.entry("lexicon_version", "bigint"),
-          Map.entry("source_manifest", "jsonb"), Map.entry("source_row_count", "bigint"),
-          Map.entry("entry_count", "bigint"), Map.entry("lookup_count", "bigint"),
-          Map.entry("preparation_policy", "text"), Map.entry("imported_at", "timestamptz"),
-          Map.entry("entry_id", "bigint"), Map.entry("lemma", "text"),
-          Map.entry("gloss", "text"), Map.entry("ranked_word", "boolean"),
-          Map.entry("hint_priority", "smallint"), Map.entry("complex_list_count", "smallint"),
-          Map.entry("cache_priority", "smallint"), Map.entry("normalized_form", "text"));
+          Map.entry("dataset_id", "smallint"),
+          Map.entry("lexicon_version", "bigint"),
+          Map.entry("source_manifest", "jsonb"),
+          Map.entry("source_row_count", "bigint"),
+          Map.entry("entry_count", "bigint"),
+          Map.entry("lookup_count", "bigint"),
+          Map.entry("preparation_policy", "text"),
+          Map.entry("imported_at", "timestamptz"),
+          Map.entry("generation_version", "character"),
+          Map.entry("generation_code_version", "character"),
+          Map.entry("generation_source_digest", "character"),
+          Map.entry("generation_config", "jsonb"),
+          Map.entry("generation_inputs", "jsonb"),
+          Map.entry("content_sha256", "character"),
+          Map.entry("entry_id", "bigint"),
+          Map.entry("lemma", "text"),
+          Map.entry("gloss", "text"),
+          Map.entry("ranked_word", "boolean"),
+          Map.entry("hint_priority", "smallint"),
+          Map.entry("complex_list_count", "smallint"),
+          Map.entry("cache_priority", "smallint"),
+          Map.entry("normalized_form", "text"));
 
   private DatasetPackageTables() {}
 }

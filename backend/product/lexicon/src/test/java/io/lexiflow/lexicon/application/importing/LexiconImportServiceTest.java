@@ -24,7 +24,8 @@ import org.junit.jupiter.api.Test;
 class LexiconImportServiceTest {
   private static final String DIGEST = "a".repeat(64);
   private static final LexiconImportMetadata METADATA =
-      new LexiconImportMetadata(DIGEST, "source", "license", Instant.EPOCH);
+      new LexiconImportMetadata(
+          DIGEST, "source", "license", Instant.EPOCH, TestGenerationFixture.identity());
 
   @Test
   void rejectsInvalidCountsBeforeCallingPublicationPort() {

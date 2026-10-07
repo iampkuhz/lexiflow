@@ -67,7 +67,7 @@ else: sys.exit(88)
         self.server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
         self.install.mkdir()
-        self.state={'schema':1,'root':str(self.install),'id':'a'*32,'project':'lexiflow-local-'+'a'*32,'phase':phase,'apiPort':self.server.server_port,'version':'0.1.0','private':'PRIVATE-FIXTURE'}
+        self.state={'schema':1,'root':str(self.install),'id':'a'*32,'project':'lexiflow-local-'+'a'*32,'phase':phase,'apiPort':self.server.server_port,'version':'0.1.0','generationVersion':'b'*64,'datasetIdentity':{'version':1,'generationVersion':'b'*64},'private':'PRIVATE-FIXTURE'}
         (self.install/'state.json').write_text(json.dumps(self.state))
         (self.install/'secret-marker').write_text('PRIVATE-FIXTURE')
 
@@ -96,6 +96,15 @@ else: sys.exit(88)
         self.setup_install();result,report=self.invoke()
         self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(report['status'],'PASS')
         self.assertEqual(report['checks'][-1]['reason'],'RUNTIME_READY')
+
+    def test_missing_data_success_identity_is_not_ready(self):
+        self.setup_install()
+        del self.state['generationVersion']
+        del self.state['datasetIdentity']
+        (self.install/'state.json').write_text(json.dumps(self.state))
+        result,report=self.invoke()
+        self.assertEqual(result.returncode,3)
+        self.assertIn('INSTALL_INCOMPLETE',[check['reason'] for check in report['checks']])
 
     def test_equivalent_absolute_directory_is_accepted(self):
         self.setup_install()

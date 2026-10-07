@@ -81,7 +81,8 @@ final class DefaultLexiconRepository implements LexiconRepository {
 
   private long rawPublishedVersion() {
     return jdbc.query(
-        "SELECT lexicon_version FROM lexicon_dataset WHERE dataset_id = 1",
+        "SELECT GREATEST(COALESCE((SELECT lexicon_version FROM lexicon_dataset WHERE dataset_id = 1),0),"
+            + "COALESCE(NULLIF(current_setting('lexiflow.previous_version',true),'')::bigint,0))",
         result -> result.next() ? result.getLong(1) : 0L);
   }
 
@@ -209,11 +210,14 @@ final class DefaultLexiconRepository implements LexiconRepository {
             throw new IllegalStateException("persisted lexicon row counts are inconsistent");
           }
           safe(() -> progress.persisted(writer.entries, writer.lookups));
+          String contentSha256 = jdbc.execute(DatasetContentChecksum::calculate);
+          var generation = metadata.generation();
           jdbc.update(
               "INSERT INTO lexicon_dataset (dataset_id, lexicon_version, source_manifest, "
-                  + "source_row_count, entry_count, lookup_count, preparation_policy) "
+                  + "source_row_count, entry_count, lookup_count, preparation_policy, "
+                  + "generation_version,generation_code_version,generation_source_digest,generation_config,generation_inputs,content_sha256) "
                   + "VALUES (1, ?, jsonb_build_array(jsonb_build_object('source_id', ?, "
-                  + "'license_id', ?, 'source_digest', ?, 'acquired_at', ?::timestamptz)), ?, ?, ?, ?)",
+                  + "'license_id', ?, 'source_digest', ?, 'acquired_at', ?::timestamptz)), ?, ?, ?, ?,?,?,?,?::jsonb,?::jsonb,?)",
               version,
               metadata.sourceId(),
               metadata.licenseId(),
@@ -222,7 +226,13 @@ final class DefaultLexiconRepository implements LexiconRepository {
               sourceRowsTotal,
               writer.entries,
               writer.lookups,
-              HintPreparation.POLICY_ID);
+              HintPreparation.POLICY_ID,
+              generation.generationVersion(),
+              generation.codeVersion(),
+              generation.sourceDigest(),
+              generation.configJson(),
+              generation.inputsJson(),
+              contentSha256);
           return version;
         });
   }

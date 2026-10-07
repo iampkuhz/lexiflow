@@ -18,7 +18,7 @@ import java.util.UUID;
 /** 在明确拥有的空 PostgreSQL schema 上初始化，或精确核对幂等快照。 */
 public final class PostgresDatasetPackage {
   private static final String BAD = "invalid package";
-  private static final Set<String> RELATIONS =
+  static final Set<String> RELATIONS =
       Set.of(
           "lexicon_dataset",
           "lexicon_dataset_pkey",
@@ -83,10 +83,61 @@ public final class PostgresDatasetPackage {
         expectedDatabase,
         expectedSchema,
         trustedSql,
+        true,
         () -> {});
   }
 
-  /** 测试 callback 仅允许在资料写完而 dataset 尚未发布时注入故障。 */
+  /**
+   * 在由部署执行器拥有的事务中恢复，不提交或回滚调用者事务。
+   *
+   * @param connection 含义：调用者管理的连接。取值范围：目标库与 schema 已核对。
+   * @param packagePath 含义：资料包路径。取值范围：无符号链接的普通文件。
+   * @param expectedSha256 含义：资料包字节摘要。取值范围：64 位小写十六进制。
+   * @param expectedDatabase 含义：目标数据库。取值范围：当前连接数据库。
+   * @param expectedSchema 含义：目标 schema。取值范围：当前连接 schema。
+   * @param trustedSql 含义：可信最新结构 SQL。取值范围：非空内嵌字节。
+   */
+  public static void initializeWithinTransaction(
+      Connection connection,
+      Path packagePath,
+      String expectedSha256,
+      String expectedDatabase,
+      String expectedSchema,
+      byte[] trustedSql)
+      throws SQLException, IOException {
+    initialize(
+        connection,
+        packagePath,
+        expectedSha256,
+        expectedDatabase,
+        expectedSchema,
+        trustedSql,
+        false,
+        () -> {});
+  }
+
+  private static void initialize(
+      Connection connection,
+      Path packagePath,
+      String expectedSha256,
+      String expectedDatabase,
+      String expectedSchema,
+      byte[] trustedSql,
+      boolean manageTransaction,
+      Runnable beforePublish)
+      throws SQLException, IOException {
+    initializeInternal(
+        connection,
+        packagePath,
+        expectedSha256,
+        expectedDatabase,
+        expectedSchema,
+        trustedSql,
+        manageTransaction,
+        beforePublish);
+  }
+
+  /** 测试故障注入仅运行于资料写完而发布记录插入前。 */
   static void initialize(
       Connection connection,
       Path packagePath,
@@ -96,14 +147,37 @@ public final class PostgresDatasetPackage {
       byte[] trustedSql,
       Runnable beforePublish)
       throws SQLException, IOException {
+    initialize(
+        connection,
+        packagePath,
+        expectedSha256,
+        expectedDatabase,
+        expectedSchema,
+        trustedSql,
+        true,
+        beforePublish);
+  }
+
+  private static void initializeInternal(
+      Connection connection,
+      Path packagePath,
+      String expectedSha256,
+      String expectedDatabase,
+      String expectedSchema,
+      byte[] trustedSql,
+      boolean manageTransaction,
+      Runnable beforePublish)
+      throws SQLException, IOException {
     try (var verified =
         DatasetPackageCodec.verifiedPackage(packagePath, expectedSha256, trustedSql)) {
       validateTarget(connection, expectedDatabase, expectedSchema);
       boolean auto = connection.getAutoCommit();
       int isolation = connection.getTransactionIsolation();
       try {
-        connection.setAutoCommit(false);
-        connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+        if (manageTransaction) {
+          connection.setAutoCommit(false);
+          connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+        }
         try (var lock =
             connection.prepareStatement(
                 "SELECT pg_advisory_xact_lock(hashtext(current_database()), hashtext(current_schema()))")) {
@@ -129,18 +203,20 @@ public final class PostgresDatasetPackage {
           assertCounts(connection, verified.manifest());
           compareExisting(connection, verified, trustedSql);
         }
-        connection.commit();
+        if (manageTransaction) connection.commit();
       } catch (SQLException | IOException | RuntimeException exception) {
-        connection.rollback();
+        if (manageTransaction) connection.rollback();
         throw exception;
       } finally {
-        connection.setTransactionIsolation(isolation);
-        connection.setAutoCommit(auto);
+        if (manageTransaction) {
+          connection.setTransactionIsolation(isolation);
+          connection.setAutoCommit(auto);
+        }
       }
     }
   }
 
-  private static Set<String> relations(Connection connection) throws SQLException {
+  static Set<String> relations(Connection connection) throws SQLException {
     var found = new java.util.HashSet<String>();
     try (var statement = connection.createStatement();
         var result =
@@ -152,11 +228,11 @@ public final class PostgresDatasetPackage {
     return found;
   }
 
-  private static void assertShape(Connection connection) throws SQLException, IOException {
+  static void assertShape(Connection connection) throws SQLException, IOException {
     for (var table : DatasetPackageTables.TABLES) {
       try (var statement =
           connection.prepareStatement(
-              "SELECT column_name,data_type,is_nullable FROM information_schema.columns "
+              "SELECT column_name,data_type,is_nullable,character_maximum_length FROM information_schema.columns "
                   + "WHERE table_schema=current_schema() AND table_name=? ORDER BY ordinal_position")) {
         statement.setString(1, table.name());
         try (var rows = statement.executeQuery()) {
@@ -169,6 +245,7 @@ public final class PostgresDatasetPackage {
                 || !sqlType(expectedType).equals(rows.getString(2))) {
               throw invalid();
             }
+            if ("character".equals(expectedType) && rows.getInt(4) != 64) throw invalid();
             boolean nullable = table == DatasetPackageTables.ENTRY && column.equals("gloss");
             if (!rows.getString(3).equals(nullable ? "YES" : "NO")) throw invalid();
           }
@@ -187,6 +264,12 @@ public final class PostgresDatasetPackage {
             "lexicon_dataset_lookup_count_ck",
             "lexicon_dataset_source_rows_ck",
             "lexicon_dataset_policy_ck",
+            "lexicon_dataset_generation_version_ck",
+            "lexicon_dataset_generation_code_ck",
+            "lexicon_dataset_generation_source_ck",
+            "lexicon_dataset_generation_config_ck",
+            "lexicon_dataset_generation_inputs_ck",
+            "lexicon_dataset_content_sha_ck",
             "lexicon_entry_pkey",
             "lexicon_entry_positive_id_ck",
             "lexicon_entry_lemma_key",
@@ -382,14 +465,32 @@ public final class PostgresDatasetPackage {
     try (var statement = connection.createStatement();
         var result =
             statement.executeQuery(
-                "SELECT lexicon_version, preparation_policy, entry_count, lookup_count "
+                "SELECT lexicon_version, preparation_policy, entry_count, lookup_count, generation_version, generation_code_version, generation_source_digest, content_sha256, generation_inputs::text, generation_config::text "
                     + "FROM lexicon_dataset WHERE dataset_id=1")) {
       if (!result.next()
           || result.getLong(1) != manifest.datasetVersion()
           || !result.getString(2).equals(manifest.preparationPolicy())
           || result.getLong(3) != manifest.files().get(1).rows()
           || result.getLong(4) != manifest.files().get(2).rows()
+          || !result.getString(5).trim().equals(manifest.generationVersion())
+          || !result.getString(6).trim().equals(manifest.generationCodeVersion())
+          || !result.getString(7).trim().equals(manifest.generationSourceDigest())
+          || !result.getString(8).trim().equals(manifest.contentSha256())
+          || !jsonEquals(result.getString(9), manifest.generationInputsJson())
+          || !jsonEquals(result.getString(10), manifest.generationConfigJson())
           || result.next()) throw invalid();
+    }
+    if (!DatasetContentChecksum.calculate(connection).equals(manifest.contentSha256()))
+      throw invalid();
+  }
+
+  private static boolean jsonEquals(String left, String right) {
+    try {
+      return java.util.Arrays.equals(
+          DatasetPackageCodec.jsonBytes(DatasetPackageCodec.parseJson(left)),
+          DatasetPackageCodec.jsonBytes(DatasetPackageCodec.parseJson(right)));
+    } catch (IOException failure) {
+      return false;
     }
   }
 

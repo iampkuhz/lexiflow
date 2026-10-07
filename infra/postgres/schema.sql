@@ -9,6 +9,12 @@ CREATE TABLE lexicon_dataset (
     entry_count BIGINT NOT NULL CONSTRAINT lexicon_dataset_entry_count_ck CHECK (entry_count > 0),
     lookup_count BIGINT NOT NULL CONSTRAINT lexicon_dataset_lookup_count_ck CHECK (lookup_count >= entry_count),
     preparation_policy TEXT NOT NULL CONSTRAINT lexicon_dataset_policy_ck CHECK (preparation_policy ~ '[^[:space:]]'),
+    generation_version CHAR(64) NOT NULL CONSTRAINT lexicon_dataset_generation_version_ck CHECK (generation_version ~ '^[0-9a-f]{64}$'),
+    generation_code_version CHAR(64) NOT NULL CONSTRAINT lexicon_dataset_generation_code_ck CHECK (generation_code_version ~ '^[0-9a-f]{64}$'),
+    generation_source_digest CHAR(64) NOT NULL CONSTRAINT lexicon_dataset_generation_source_ck CHECK (generation_source_digest ~ '^[0-9a-f]{64}$'),
+    generation_config JSONB NOT NULL CONSTRAINT lexicon_dataset_generation_config_ck CHECK (jsonb_typeof(generation_config) = 'object'),
+    generation_inputs JSONB NOT NULL CONSTRAINT lexicon_dataset_generation_inputs_ck CHECK (jsonb_typeof(generation_inputs) = 'object'),
+    content_sha256 CHAR(64) NOT NULL CONSTRAINT lexicon_dataset_content_sha_ck CHECK (content_sha256 ~ '^[0-9a-f]{64}$'),
     CONSTRAINT lexicon_dataset_source_rows_ck CHECK (source_row_count >= entry_count),
     imported_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -25,9 +31,9 @@ CREATE TABLE lexicon_entry (
 
 CREATE TABLE lexicon_form (
     normalized_form TEXT NOT NULL CONSTRAINT lexicon_form_window_ck CHECK (
-        normalized_form ~ '[^[:space:]]'
-        AND array_length(regexp_split_to_array(btrim(normalized_form), '[[:space:]]+'), 1) BETWEEN 1 AND 3
-        AND (array_length(regexp_split_to_array(btrim(normalized_form), '[[:space:]]+'), 1) > 1
+        btrim(regexp_replace(normalized_form, '[^[:alpha:]'']+', ' ', 'g')) ~ '[^[:space:]]'
+        AND array_length(regexp_split_to_array(btrim(regexp_replace(normalized_form, '[^[:alpha:]'']+', ' ', 'g')), ' +'), 1) BETWEEN 1 AND 3
+        AND (array_length(regexp_split_to_array(btrim(regexp_replace(normalized_form, '[^[:alpha:]'']+', ' ', 'g')), ' +'), 1) > 1
              OR length(regexp_replace(normalized_form, '[^[:alpha:]]', '', 'g')) >= 3)),
     entry_id BIGINT NOT NULL CONSTRAINT lexicon_form_entry_fk REFERENCES lexicon_entry(entry_id) ON DELETE CASCADE,
     CONSTRAINT lexicon_form_pk PRIMARY KEY (normalized_form, entry_id)
@@ -49,6 +55,12 @@ COMMENT ON COLUMN lexicon_dataset.source_row_count IS '完整来源预扫描的�
 COMMENT ON COLUMN lexicon_dataset.entry_count IS '窗口裁剪后最终持久化词条行数';
 COMMENT ON COLUMN lexicon_dataset.lookup_count IS '窗口裁剪后最终持久化词形映射行数';
 COMMENT ON COLUMN lexicon_dataset.preparation_policy IS '本次数据准备采用的冻结规则标识';
+COMMENT ON COLUMN lexicon_dataset.generation_version IS '由生成代码、实际来源摘要与有效配置共同派生的数据生成版本';
+COMMENT ON COLUMN lexicon_dataset.generation_code_version IS '按唯一输入清单的相对路径与内容计算的生成代码 SHA-256';
+COMMENT ON COLUMN lexicon_dataset.generation_source_digest IS '已校验上游来源身份与实际导入输入摘要的规范化 SHA-256';
+COMMENT ON COLUMN lexicon_dataset.generation_config IS '本次数据生成采用的有效配置，不含凭据或取得时间';
+COMMENT ON COLUMN lexicon_dataset.generation_inputs IS '实际校验的上游来源身份及内容摘要与导入输入摘要';
+COMMENT ON COLUMN lexicon_dataset.content_sha256 IS '按确定顺序计算的已发布词条与词形内容 SHA-256';
 COMMENT ON COLUMN lexicon_dataset.imported_at IS '完整写入事务提交前记录的导入时间';
 COMMENT ON COLUMN lexicon_entry.entry_id IS '由英文规范 lemma 派生的正 63 位稳定身份；碰撞拒绝发布';
 COMMENT ON COLUMN lexicon_entry.lemma IS '规范化主词形或完整短语';

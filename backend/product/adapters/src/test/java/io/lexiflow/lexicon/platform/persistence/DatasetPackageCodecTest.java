@@ -25,6 +25,18 @@ class DatasetPackageCodecTest {
             + "b".repeat(64)
             + "\",\"datasetVersion\":1800000000000,\"preparationPolicy\":\""
             + HintPreparation.POLICY_ID
+            + "\",\"generationVersion\":\""
+            + fixtureHash("generation")
+            + "\",\"generationCodeVersion\":\""
+            + fixtureHash("code")
+            + "\",\"generationSourceDigest\":\""
+            + fixtureHash("source")
+            + "\",\"generationInputs\":{\"inputSha256\":\""
+            + fixtureHash("input")
+            + "\",\"upstream\":{}}"
+            + ",\"generationConfig\":{\"sourceId\":\"ecdict-stardict\",\"licenseId\":\"MIT\"}"
+            + ",\"contentSha256\":\""
+            + fixtureHash("content")
             + "\",\"files\":["
             + file("dataset.ndjson", 1)
             + ","
@@ -62,6 +74,14 @@ class DatasetPackageCodecTest {
             DatasetPackageCodec.parseManifest(
                 base.replace("\"schemaVersion\":2", "\"schemaVersion\":1")
                     .getBytes(StandardCharsets.UTF_8)));
+  }
+
+  private static String fixtureHash(String content) throws Exception {
+    return java.util.HexFormat.of()
+        .formatHex(
+            java.security.MessageDigest.getInstance("SHA-256")
+                .digest(
+                    ("dataset-package-codec-fixture:" + content).getBytes(StandardCharsets.UTF_8)));
   }
 
   @Test

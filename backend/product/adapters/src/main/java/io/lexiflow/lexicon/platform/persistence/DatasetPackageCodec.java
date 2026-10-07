@@ -227,12 +227,42 @@ public final class DatasetPackageCodec {
                 "approvalSha256",
                 "datasetVersion",
                 "preparationPolicy",
+                "generationVersion",
+                "generationCodeVersion",
+                "generationSourceDigest",
+                "generationInputs",
+                "generationConfig",
+                "contentSha256",
                 "files"));
     if (integer(node.get("schemaVersion"), 2) != 2) throw new IOException(BAD);
     String schema = digestValue(node.get("schemaSha256"));
     String approval = digestValue(node.get("approvalSha256"));
     long version = integer(node.get("datasetVersion"), 1);
     String policy = string(node.get("preparationPolicy"));
+    String generationVersion = digestValue(node.get("generationVersion"));
+    String generationCodeVersion = digestValue(node.get("generationCodeVersion"));
+    String generationSourceDigest = digestValue(node.get("generationSourceDigest"));
+    String generationInputs =
+        new String(
+            jsonBytes(object(node.get("generationInputs"), Set.of("inputSha256", "upstream"))),
+            StandardCharsets.UTF_8);
+    String generationConfig =
+        new String(
+            jsonBytes(object(node.get("generationConfig"), Set.of("sourceId", "licenseId"))),
+            StandardCharsets.UTF_8);
+    var inputs =
+        object(
+            parseJson(generationInputs.getBytes(StandardCharsets.UTF_8)),
+            Set.of("inputSha256", "upstream"));
+    digestValue(inputs.get("inputSha256"));
+    if (!(inputs.get("upstream") instanceof Map<?, ?>)) throw new IOException(BAD);
+    var config =
+        object(
+            parseJson(generationConfig.getBytes(StandardCharsets.UTF_8)),
+            Set.of("sourceId", "licenseId"));
+    string(config.get("sourceId"));
+    string(config.get("licenseId"));
+    String contentSha256 = digestValue(node.get("contentSha256"));
     if (!HintPreparation.POLICY_ID.equals(policy)) throw new IOException(BAD);
     List<Object> files = array(node.get("files"));
     if (files.size() != 3) throw new IOException(BAD);
@@ -247,7 +277,19 @@ public final class DatasetPackageCodec {
       if (i == 0 && rows != 1) throw new IOException(BAD);
       records.add(new DatasetPackageManifest.FileRecord(name, size, hash, rows));
     }
-    return new DatasetPackageManifest(2, schema, approval, version, policy, List.copyOf(records));
+    return new DatasetPackageManifest(
+        2,
+        schema,
+        approval,
+        version,
+        policy,
+        generationVersion,
+        generationCodeVersion,
+        generationSourceDigest,
+        generationInputs,
+        generationConfig,
+        contentSha256,
+        List.copyOf(records));
   }
 
   /** 审批仅核对显式记录与来源一致，不推断实际法律许可。 */
@@ -381,6 +423,7 @@ public final class DatasetPackageCodec {
                   dir.resolve("forms.ndjson"))))) throw new IOException(BAD);
       Files.delete(copy);
       var manifest = parseManifest(Files.readAllBytes(dir.resolve("manifest.json")));
+      verifyGeneration(manifest);
       if (!sha256(trustedSchema).equals(manifest.schemaSha256())) throw new IOException(BAD);
       byte[] approvalBytes = Files.readAllBytes(dir.resolve("approvals.json"));
       if (!sha256(approvalBytes).equals(manifest.approvalSha256())) throw new IOException(BAD);
@@ -407,6 +450,16 @@ public final class DatasetPackageCodec {
           || integer(dataset.get("dataset_id"), 1) != 1
           || integer(dataset.get("lexicon_version"), 1) != manifest.datasetVersion()
           || !string(dataset.get("preparation_policy")).equals(manifest.preparationPolicy())
+          || !string(dataset.get("generation_version")).equals(manifest.generationVersion())
+          || !string(dataset.get("generation_code_version"))
+              .equals(manifest.generationCodeVersion())
+          || !string(dataset.get("generation_source_digest"))
+              .equals(manifest.generationSourceDigest())
+          || !new String(jsonBytes(dataset.get("generation_inputs")), StandardCharsets.UTF_8)
+              .equals(manifest.generationInputsJson())
+          || !new String(jsonBytes(dataset.get("generation_config")), StandardCharsets.UTF_8)
+              .equals(manifest.generationConfigJson())
+          || !string(dataset.get("content_sha256")).equals(manifest.contentSha256())
           || integer(dataset.get("entry_count"), 1) != manifest.files().get(1).rows()
           || integer(dataset.get("lookup_count"), 1) != manifest.files().get(2).rows()
           || integer(dataset.get("source_row_count"), 1) < manifest.files().get(1).rows())
@@ -421,6 +474,75 @@ public final class DatasetPackageCodec {
     }
   }
 
+  private static void verifyGeneration(DatasetPackageManifest manifest) throws IOException {
+    verifyGeneration(
+        manifest.generationCodeVersion(),
+        manifest.generationSourceDigest(),
+        manifest.generationVersion(),
+        manifest.generationConfigJson(),
+        manifest.generationInputsJson());
+  }
+
+  /**
+   * 验证 generation 元数据与当前 JAR 内嵌代码身份完全匹配。
+   *
+   * @param codeVersion 含义：包内代码摘要。取值范围：64 位小写十六进制。
+   * @param sourceDigest 含义：包内来源摘要。取值范围：64 位小写十六进制。
+   * @param generationVersion 含义：包内生成摘要。取值范围：64 位小写十六进制。
+   * @param configJson 含义：来源配置。取值范围：规范 JSON 对象。
+   * @param inputsJson 含义：原始输入及上游。取值范围：规范 JSON 对象。
+   */
+  public static void verifyGeneration(
+      String codeVersion,
+      String sourceDigest,
+      String generationVersion,
+      String configJson,
+      String inputsJson)
+      throws IOException {
+    try {
+      if (!GenerationIdentityReader.embeddedCodeVersion().equals(codeVersion))
+        throw new IOException(BAD);
+      var inputs = object(parseJson(inputsJson), Set.of("inputSha256", "upstream"));
+      digestValue(inputs.get("inputSha256"));
+      if (!(inputs.get("upstream") instanceof Map<?, ?>)) throw new IOException(BAD);
+      var config = object(parseJson(configJson), Set.of("sourceId", "licenseId"));
+      if (!"ecdict-stardict".equals(config.get("sourceId"))
+          || !"MIT".equals(config.get("licenseId"))) throw new IOException(BAD);
+      String source =
+          sha256(
+              jsonBytes(
+                  canonical(
+                      Map.of(
+                          "inputSha256",
+                          inputs.get("inputSha256"),
+                          "upstream",
+                          inputs.get("upstream")))));
+      String version =
+          sha256(
+              jsonBytes(
+                  canonical(
+                      Map.of(
+                          "codeVersion", codeVersion, "sourceDigest", source, "config", config))));
+      if (!source.equals(sourceDigest) || !version.equals(generationVersion))
+        throw new IOException(BAD);
+    } catch (IOException failure) {
+      throw failure;
+    } catch (Exception failure) {
+      throw new IOException(BAD, failure);
+    }
+  }
+
+  private static Object canonical(Object value) {
+    if (value instanceof Map<?, ?> map) {
+      var sorted = new java.util.TreeMap<String, Object>();
+      map.forEach((key, item) -> sorted.put((String) key, canonical(item)));
+      return sorted;
+    }
+    if (value instanceof List<?> list)
+      return list.stream().map(DatasetPackageCodec::canonical).toList();
+    return value;
+  }
+
   /**
    * 离线核对完整包及可信外部摘要；不连接数据库。
    *
@@ -432,6 +554,20 @@ public final class DatasetPackageCodec {
       throws IOException {
     try (var verified = verifiedPackage(path, expectedSha256, trustedSchema)) {
       verified.manifest();
+    }
+  }
+
+  /**
+   * 校验整个包后返回用于部署身份比较的内嵌生成元数据。
+   *
+   * @param path 含义：资料包路径。取值范围：无符号链接的普通 ZIP 文件。
+   * @param expectedSha256 含义：资料包字节摘要。取值范围：64 位小写十六进制。
+   * @param trustedSchema 含义：可信最新结构 SQL。取值范围：非空内嵌字节。
+   */
+  public static DatasetPackageManifest verifiedManifest(
+      Path path, String expectedSha256, byte[] trustedSchema) throws IOException {
+    try (var verified = verifiedPackage(path, expectedSha256, trustedSchema)) {
+      return verified.manifest();
     }
   }
 
@@ -473,7 +609,10 @@ public final class DatasetPackageCodec {
         case "text[]" -> {
           for (Object element : array(value)) string(element);
         }
-        case "jsonb" -> array(value);
+        case "jsonb" -> {
+          if (column.equals("source_manifest")) array(value);
+          else if (!(value instanceof Map<?, ?>)) throw new IOException(BAD);
+        }
         default -> string(value);
       }
     }

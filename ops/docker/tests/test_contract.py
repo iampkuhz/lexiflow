@@ -441,7 +441,7 @@ else: sys.exit(7)
             bindir.mkdir()
             log = pathlib.Path(td) / "log"
             stub = bindir / "java"
-            stub.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$LOG\"\nprintf 'JVM_ENV=%s|%s|%s\\n' \"${JAVA_TOOL_OPTIONS:-}\" \"${JDK_JAVA_OPTIONS:-}\" \"${_JAVA_OPTIONS:-}\" >> \"$LOG\"\nexit \"${JAVA_EXIT:-0}\"\n")
+            stub.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$LOG\"\nprintf 'JVM_ENV=%s|%s|%s\\n' \"${JAVA_TOOL_OPTIONS:-}\" \"${JDK_JAVA_OPTIONS:-}\" \"${_JAVA_OPTIONS:-}\" >> \"$LOG\"\nprintf 'DB_ENV=%s|%s\\n' \"${SPRING_DATASOURCE_URL:-}\" \"${SPRING_DATASOURCE_USERNAME:-}\" >> \"$LOG\"\nif [ -z \"${SPRING_DATASOURCE_PASSWORD:-}\" ]; then printf 'DB_PASSWORD_EMPTY=true\\n' >> \"$LOG\"; else printf 'DB_PASSWORD_EMPTY=false\\n' >> \"$LOG\"; fi\nexit \"${JAVA_EXIT:-0}\"\n")
             stub.chmod(0o755)
             secrets = pathlib.Path(td) / "secrets"
             secrets.mkdir()
@@ -490,6 +490,22 @@ else: sys.exit(7)
         self.assertIn("-Dlexiflow.segment-analysis.enabled=false", debug_log)
         self.assertIn("-Dlexiflow.segment-analysis.enabled=false", normal_log)
         self.assertNotIn(password, debug_log)
+
+    def test_api_development_trust_requires_explicit_external_postgres_without_secret(self):
+        target = {"LEXIFLOW_DATABASE_HOST": "host.containers.internal", "LEXIFLOW_DATABASE_PORT": "15432",
+                  "LEXIFLOW_DATABASE_USER": "postgres", "LEXIFLOW_DATABASE_AUTH_MODE": "development-trust"}
+        proc, logged = self._run("api", env=target)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("DB_ENV=jdbc:postgresql://host.containers.internal:15432/lexiflow?currentSchema=lexiflow_release|postgres", logged)
+        self.assertIn("DB_PASSWORD_EMPTY=true", logged)
+        for broken_env, files in [({**target, "LEXIFLOW_DATABASE_USER": "lexiflow"}, None),
+                                   ({**target, "LEXIFLOW_DATABASE_HOST": "postgres"}, None),
+                                   ({**target, "LEXIFLOW_DATABASE_AUTH_MODE": "unknown"}, None),
+                                   ({**target, "SPRING_DATASOURCE_PASSWORD": "synthetic-secret"}, None),
+                                   (target, {"app-password": "a" * 64})]:
+            rejected, leaked = self._run("api", env=broken_env, files=files)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertNotIn("synthetic-secret", rejected.stderr + leaked)
 
     def test_initialize_exact_cli_and_health_no_forwarding(self):
         password = "b" * 64

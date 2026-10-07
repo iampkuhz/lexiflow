@@ -21,10 +21,13 @@ import io.lexiflow.lexicon.application.query.CachedLexiconQueryService;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconPriority;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -890,7 +893,11 @@ class PostgresLexiconRepositoryIntegrationTest {
                       preparedRow("curated-term", "原始释义(说明)", "指定短释", false, true, List.of()));
               var metadata =
                   new LexiconImportMetadata(
-                      "d".repeat(64), "ecdict-stardict", "MIT", Instant.EPOCH);
+                      "d".repeat(64),
+                      "ecdict-stardict",
+                      "MIT",
+                      Instant.EPOCH,
+                      GenerationIdentityReader.forInput("d".repeat(64)));
               if (streaming)
                 new LexiconImportService(repository)
                     .publishStreaming(
@@ -1022,9 +1029,19 @@ class PostgresLexiconRepositoryIntegrationTest {
         });
   }
 
-  private static LexiconImportMetadata metadata(char digest) {
-    return new LexiconImportMetadata(
-        String.valueOf(digest).repeat(64), "fixture", "MIT", Instant.EPOCH);
+  private static LexiconImportMetadata metadata(char seed) {
+    // 字符只区分合成来源；摘要必须来自明确的 fixture bytes，不能把非十六进制字符当摘要。
+    try {
+      var digest =
+          HexFormat.of()
+              .formatHex(
+                  MessageDigest.getInstance("SHA-256")
+                      .digest(String.valueOf(seed).getBytes(StandardCharsets.UTF_8)));
+      return new LexiconImportMetadata(
+          digest, "fixture", "MIT", Instant.EPOCH, GenerationIdentityReader.forInput(digest));
+    } catch (java.security.NoSuchAlgorithmException impossible) {
+      throw new IllegalStateException(impossible);
+    }
   }
 
   private static String required(String property) {

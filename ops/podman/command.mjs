@@ -88,7 +88,14 @@ export function runCommand(command, argv, { cwd, env, timeout = 600000, capture 
       if (!groupGone) failure = '子进程组尚未完全退出，保留安装锁与子进程身份';
       try { onClose?.({ groupGone }); } catch { failure ||= '无法更新子进程归属'; }
       if (failure || (code !== 0 && !cancelled)) {
-        reject(new Error(`${label}失败（${failure || `退出码 ${code}${signal ? `，信号 ${signal}` : ''}`}，已用 ${elapsed()} 秒）${logFile ? `；详情见 ${logFile}` : '；检查工具安装与运行状态'}`));
+        const error = new Error(`${label}失败（${failure || `退出码 ${code}${signal ? `，信号 ${signal}` : ''}`}，已用 ${elapsed()} 秒）${logFile ? `；详情见 ${logFile}` : '；检查工具安装与运行状态'}`);
+        // 捕获模式的正常非零退出可携带机器响应；message 不含 stdout 或 stderr。
+        // 调用者必须核对退出码和白名单协议，不能把非零当成功。
+        if (capture && !failure && !cancelled && !signal) {
+          error.commandExitCode = code;
+          error.stdout = Buffer.concat(output).toString('utf8').trim();
+        }
+        reject(error);
         return;
       }
       if (announce) console.log(`[LexiFlow]   ${label}完成（${elapsed()} 秒）`);

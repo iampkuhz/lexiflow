@@ -41,9 +41,7 @@ class _TimedResult(unittest.TextTestResult):
 
     def stopTest(self, test):
         if self._start is not None and self._current_id is not None:
-            self.per_test[self._current_id] = round(
-                time.monotonic() - self._start, 6
-            )
+            self.per_test[self._current_id] = round(time.monotonic() - self._start, 6)
         self._start = None
         self._current_id = None
         super().stopTest(test)
@@ -81,9 +79,19 @@ def run_tests() -> dict[str, object]:
     )
     node_started = time.monotonic()
     node_suite = subprocess.run(
-        ["node", "--input-type=module", "-e", runner,
-         *map(str, sorted((root / "ops/podman/tests").glob("*.test.mjs")))],
-        cwd=root, capture_output=True, text=True, check=False, timeout=180,
+        [
+            "node",
+            "--input-type=module",
+            "-e",
+            runner,
+            *map(str, sorted((root / "ops/podman/tests").glob("*.test.mjs"))),
+            *map(str, sorted((root / "ops/dataset/tests").glob("*.test.mjs"))),
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=180,
     )
     node_duration = round(time.monotonic() - node_started, 6)
     node_output = node_suite.stdout + node_suite.stderr
@@ -95,7 +103,12 @@ def run_tests() -> dict[str, object]:
         node_report = {"status": "FAIL", "checks_run": 0, "errors": 1}
     node_ok = node_suite.returncode == 0 and node_report.get("status") == "PASS"
     output = stream.getvalue() + node_output
-    passed = result.wasSuccessful() and result.testsRun > 0 and not result.skipped and node_ok
+    passed = (
+        result.wasSuccessful()
+        and result.testsRun > 0
+        and not result.skipped
+        and node_ok
+    )
     total_duration = round(time.monotonic() - total_started, 6)
     per_test = getattr(result, "per_test", {})
     report: dict[str, object] = {

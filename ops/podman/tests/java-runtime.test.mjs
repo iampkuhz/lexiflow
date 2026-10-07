@@ -98,3 +98,27 @@ test('real subprocess handles SDKMAN-style current symlink and spaces ahead of a
   assert.equal(build.status, 0);
   assert.equal([...build.stderr.matchAll(/25\.0\.4/g)].length, 2);
 });
+
+test('production selection prefers explicit then repository-local then inherited Temurin 25', t => {
+  const stub = probe(t);
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiflow java repo '));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const fixture = (home, version = '25.0.4') => {
+    fs.mkdirSync(path.join(home, 'bin'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'release'), `JAVA_VERSION="${version}"\nIMPLEMENTOR="Eclipse Adoptium"\nIMPLEMENTOR_VERSION="Temurin-25.0.4+7"\n`);
+    fs.writeFileSync(path.join(home, 'bin/java'), '#!/bin/sh\n', { mode: 0o755 });
+  };
+  const local = path.join(repo, '.local/toolchains/jdk-25/Contents/Home');
+  const inherited = path.join(repo, 'inherited');
+  const explicit = path.join(repo, 'explicit');
+  fixture(local); fixture(inherited); fixture(explicit);
+  const base = { PATH: '/java26/bin', JAVA_HOME: inherited };
+  assert.equal(javaBuildEnvironment(base, { repo }).JAVA_HOME, local);
+  assert.equal(javaBuildEnvironment({ ...base, LEXIFLOW_JAVA_HOME: explicit }, { repo }).JAVA_HOME, explicit);
+  assert.equal(stub.mock.calls.at(-1).arguments[0], path.join(explicit, 'bin/java'));
+  assert.throws(() => javaBuildEnvironment({ ...base, LEXIFLOW_JAVA_HOME: path.join(repo, 'missing') }, { repo }), /JAVA_RELEASE_INVALID/);
+  assert.equal(stub.mock.callCount(), 2, 'invalid explicit home must not fall back');
+  fs.rmSync(path.join(repo, '.local'), { recursive: true, force: true });
+  assert.equal(javaBuildEnvironment(base, { repo }).JAVA_HOME, inherited);
+  assert.throws(() => javaBuildEnvironment({ PATH: '/java26/bin' }, { repo }), /JAVA_25_UNAVAILABLE/);
+});

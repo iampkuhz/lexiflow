@@ -1,5 +1,7 @@
 """Podman 使用者验证模板的静态安全合同。"""
+import json
 import pathlib
+import subprocess
 import unittest
 import yaml
 
@@ -11,7 +13,7 @@ class PodmanComposeContractTest(unittest.TestCase):
 
     def test_local_only_ports_and_separate_database(self):
         services = self.config["services"]
-        self.assertEqual(set(services), {"postgres", "initialize", "api"})
+        self.assertEqual(set(services), {"postgres", "api"})
         self.assertEqual(services["postgres"]["ports"], ["127.0.0.1:15432:5432"])
         self.assertEqual(services["api"]["ports"], ["127.0.0.1:18080:8080"])
         self.assertIn("pgdata:/var/lib/postgresql/data", services["postgres"]["volumes"])
@@ -25,7 +27,6 @@ class PodmanComposeContractTest(unittest.TestCase):
         self.assertFalse(self.config['networks']['published'].get('internal', False))
         for service in ['api', 'postgres']:
             self.assertEqual(self.config['services'][service]['networks'], ['private', 'published'])
-        self.assertEqual(self.config['services']['initialize']['networks'], ['private'])
 
     def test_file_secrets_not_plaintext_or_environment_sources(self):
         self.assertEqual(self.config["secrets"], {
@@ -34,17 +35,22 @@ class PodmanComposeContractTest(unittest.TestCase):
         })
         self.assertNotIn("POSTGRES_PASSWORD", self.config["services"]["postgres"]["environment"])
 
-    def test_manual_initialization_uses_real_java_source_importer(self):
-        initializer = self.config["services"]["initialize"]
-        command = initializer["command"][0]
-        self.assertIn("PostgresSchemaMain", command)
-        self.assertIn("LexiconImportMain", command)
-        self.assertIn("publish --input /input/stardict.csv", command)
-        self.assertNotIn("redistributionApproved", command)
-        self.assertEqual(initializer["entrypoint"], ["/bin/sh", "-ec"])
-        self.assertTrue(initializer["read_only"])
-        self.assertNotIn("initialize", self.config["services"]["api"]["depends_on"])
-        self.assertIn("./infra/postgres/schema.sql:/input/schema.sql:ro", initializer["volumes"])
+    def test_template_matches_shared_managed_deployment_compose(self):
+        command = (
+            "import {renderCompose} from './ops/podman/unified-local.mjs';"
+            "console.log(renderCompose(process.cwd(),"
+            "{apiPort:18080,dbPort:15432,external:false,dbUser:'lexiflow'}));"
+        )
+        output = subprocess.run(
+            ["node", "--input-type=module", "-e", command], cwd=ROOT,
+            capture_output=True, text=True, check=True, timeout=10,
+        )
+        self.assertEqual(self.config, json.loads(output.stdout))
+        self.assertNotIn("initialize", self.config["services"])
+        self.assertEqual(self.config["services"]["api"]["command"], ["api"])
+        self.assertEqual(self.config["services"]["api"]["depends_on"], {
+            "postgres": {"condition": "service_healthy"},
+        })
 
 if __name__ == "__main__":
     unittest.main()

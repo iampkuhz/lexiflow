@@ -1,4 +1,5 @@
 import io.lexiflow.buildlogic.GenerateSoftwareIdentityTask
+import io.lexiflow.buildlogic.GenerateDataGenerationTask
 import io.lexiflow.buildlogic.IdentityVersionArgumentProvider
 import io.lexiflow.buildlogic.PublishVersionedBootJarAction
 import org.gradle.jvm.tasks.Jar
@@ -32,8 +33,15 @@ val generateSoftwareIdentity = tasks.register<GenerateSoftwareIdentityTask>("gen
     manifestFile.set(layout.buildDirectory.file("generated/software-identity-manifest/MANIFEST.MF"))
 }
 
+val generateDataGeneration = tasks.register<GenerateDataGenerationTask>("generateDataGeneration") {
+    repoRoot.set(repositoryRoot)
+    script.set(File(repositoryRoot, "ops/dataset/generation-version.mjs"))
+    outputDirectory.set(layout.buildDirectory.dir("generated/data-generation"))
+}
+
 tasks.named<ProcessResources>("processResources") {
     from(generateSoftwareIdentity.flatMap { it.outputDirectory })
+    from(generateDataGeneration.flatMap { it.outputDirectory })
     from(repositoryRoot.resolve("infra/postgres/schema.sql")) {
         into("META-INF")
         rename { "lexiflow-schema.sql" }
@@ -45,12 +53,14 @@ val generatedVersionFile = generateSoftwareIdentity.flatMap { it.outputDirectory
 val identityJsonFile = generateSoftwareIdentity.flatMap { it.outputDirectory.file("META-INF/lexiflow-build.json") }
 tasks.named<Jar>("jar") {
     dependsOn(generateSoftwareIdentity)
+    dependsOn(generateDataGeneration)
     archiveFileName.set("api-plain.jar")
     destinationDirectory.set(layout.buildDirectory.dir("internal/plain"))
     manifest.from(generateSoftwareIdentity.flatMap { it.manifestFile })
 }
 tasks.named<BootJar>("bootJar") {
     dependsOn(generateSoftwareIdentity)
+    dependsOn(generateDataGeneration)
     archiveFileName.set("api-internal.jar")
     destinationDirectory.set(layout.buildDirectory.dir("internal/boot"))
     manifest.from(generateSoftwareIdentity.flatMap { it.manifestFile })

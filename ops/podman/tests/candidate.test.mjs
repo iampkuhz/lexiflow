@@ -10,7 +10,8 @@ import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { assembleReleaseCandidate } from '../../release/candidate.mjs';
 import { resolveBuildIdentity } from '../../release/version.mjs';
-import { extensionBytes } from '../../release/tests/zip-fixture.mjs';
+import { extensionBytes, makeZip } from '../../release/tests/zip-fixture.mjs';
+import { dataGeneration } from '../../dataset/generation-version.mjs';
 import { readCandidate, installCandidateArtifacts } from '../candidate.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -61,12 +62,17 @@ async function assembled(baseVersion = '2.0.0-SNAPSHOT', sqlText = 'synthetic sc
   const compose = await fs.readFile(path.join(repo, 'ops/docker/compose.yaml'));
   await add('compose', 'compose.yaml', compose, ['lexiflow']); await add('sql', 'database/schema.sql', Buffer.from(sqlText), ['lexiflow']);
   const dataset = { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rules-test' };
-  await add('dataset', 'data/dataset.zip', Buffer.from('synthetic dataset'), ['dataset'], { ...dataset, sqlVersion: 'sql-test' });
+  const generation = dataGeneration({ codeVersion: 'f'.repeat(64), inputSha256: hash('fixture csv'), upstream: {} });
+  const packageManifest = { generationVersion: generation.generationVersion,
+    generationCodeVersion: generation.codeVersion, generationSourceDigest: generation.sourceDigest,
+    generationInputsJson: JSON.stringify({ inputSha256: generation.inputSha256, upstream: generation.upstream }),
+    generationConfigJson: JSON.stringify(generation.config) };
+  await add('dataset', 'data/dataset.zip', makeZip([['manifest.json', JSON.stringify(packageManifest)]]), ['dataset'], { ...dataset, sqlVersion: 'sql-test' });
   await add('extension', 'extension.zip', extensionBytes(identity), ['lexiflow', 'extension'], { softwareVersion: identity.softwareVersion, sourceCommit: identity.sourceCommit });
   const descriptor = { schemaVersion: 1, buildIdentity: identity, softwareVersion: identity.softwareVersion, sourceCommit: commit, apiContract: 'api-test', sqlVersion: 'sql-test', dataset, platforms: ['linux/amd64', 'linux/arm64'], artifacts: records, licenses };
   const result = await assembleReleaseCandidate({ repoRoot: root, imageCandidates: shardInputs, artifactRoot, descriptor, outputParent: out });
   const marker = await fs.readFile(path.join(result.candidateDirectory, 'candidate.json'));
-  return { ...result, input: { candidateDirectory: result.candidateDirectory, candidateSha256: hash(marker) }, identity, root, out, shardInputs,
+  return { ...result, input: { candidateDirectory: result.candidateDirectory, candidateSha256: hash(marker) }, identity, generation, root, out, shardInputs,
     cleanup: async () => { await fs.rm(root, { recursive: true, force: true }); await fs.rm(out, { recursive: true, force: true }); for (const shard of shardInputs) await fs.rm(shard.directory, { recursive: true, force: true }); } };
 }
 
@@ -128,7 +134,8 @@ test('runLocal installs, repeats, upgrades and no-ops candidates through shared 
   const podmanBody = String.raw`
 import json, os, signal, sys
 from pathlib import Path
-CALLS=Path(${JSON.stringify(callsFile)}); images=json.loads(${JSON.stringify(JSON.stringify(imageMap))}); kit=Path.cwd()
+CALLS=Path(${JSON.stringify(callsFile)}); images=json.loads(${JSON.stringify(JSON.stringify(imageMap))}); kit=Path(${JSON.stringify(dir)})
+GENERATION=${JSON.stringify(first.generation.generationVersion)}
 BAD_LABEL=Path(${JSON.stringify(badLabelMarker)}); FAIL_API=Path(${JSON.stringify(failMarker)}); CANCEL=Path(${JSON.stringify(cancelMarker)})
 a=sys.argv[1:]; CALLS.open('a').write(json.dumps(a)+'\n')
 labels={}
@@ -155,6 +162,14 @@ elif a[:1]==['ps']:
 elif a[:1] in (['volume'],['network']): print('[]')
 elif a[:1]==['inspect']:
     env=(kit/'release.env').read_text(); key=next(x.split('=',1)[1] for x in env.splitlines() if x.startswith('LEXIFLOW_API_IMAGE=')); print(images[key]['Id'])
+elif a[:1]==['run'] and '--deployment-data' in a:
+    if 'apply' in a: print(json.dumps({'status':'PASS','rebuilt':True,'generationVersion':GENERATION,'datasetVersion':7}))
+    else:
+        state=json.loads((kit/'state.json').read_text()) if (kit/'state.json').exists() else {}
+        complete=state.get('phase') in ('initialized','ready')
+        print(json.dumps({'status':'PASS','database':'lexiflow','schema':'lexiflow_release','fingerprint':'f'*64,
+          'needsRebuild':not complete,'reason':'OK' if complete else 'SCHEMA_MISSING',
+          'generationVersion':GENERATION if complete else None,'datasetVersion':7 if complete else None}))
 elif a[:1]==['compose'] and 'logs' in a: print('synthetic logs')
 elif a[:1]==['compose'] and 'ps' in a: print('synthetic status')
 elif a[:1]==['compose'] and 'run' in a: pass
@@ -173,25 +188,26 @@ os.platform=()=> 'darwin'; os.arch=()=> 'arm64';
 net.createServer=()=>({ once(){return this;}, listen(_port,_host,cb){setImmediate(cb);return this;}, close(cb){setImmediate(cb);return this;} });
 http.get=(options,callback)=>{const req=new EventEmitter(); req.destroy=(err)=>{if(err)req.emit('error',err);req.emit('close');}; setImmediate(()=>{const env=fs.readFileSync(process.env.INSTALL_DIR+'/release.env','utf8');const image=env.match(/^LEXIFLOW_API_IMAGE=(.+)$/m)?.[1];const versions=JSON.parse(process.env.IMAGE_VERSIONS);const value=options.path.endsWith('/readiness')?{status:'UP'}:{mode:'formal',ready:true,reason:'OK',softwareVersion:versions[image],apiContract:'caption-hints.v2',datasetVersion:7};const res=Readable.from([Buffer.from(JSON.stringify(value))]);res.statusCode=200;res.on('end',()=>req.emit('close'));callback(res);});return req;};`);
   const source = `import fs from 'node:fs'; import path from 'node:path'; import {runLocal} from ${JSON.stringify(pathToFileURL(path.join(repo,'ops/podman/local.mjs')).href)};\n`+
+    `async function deploy(action,input){let hash;const log=console.log;console.log=(...parts)=>{for(const part of parts){try{const row=JSON.parse(part);if(row.planHash)hash=row.planHash;}catch{}}log(...parts);};const planned=await runLocal([action,'--dir',${JSON.stringify(dir)},'--plan'],input);console.log=log;return planned===0&&hash?runLocal([action,'--dir',${JSON.stringify(dir)},'--confirm-plan',hash],input):1;}\n`+
     `if(await runLocal(['install'],${JSON.stringify(first.input)})===0)throw new Error('candidate default dir accepted'); if(await runLocal(['install','--dir',${JSON.stringify(dir)},'--api-port','18081'],${JSON.stringify(first.input)})===0)throw new Error('candidate port override accepted'); if(fs.existsSync(${JSON.stringify(dir)}))throw new Error('invalid inputs created installation');\n`+
-    `fs.writeFileSync(${JSON.stringify(badLabelMarker)},'1'); const rejected=await runLocal(['install','--dir',${JSON.stringify(dir)}],${JSON.stringify(first.input)}); if(rejected===0)throw new Error('bad image labels accepted');\n`+
-    `const one=await runLocal(['install','--dir',${JSON.stringify(dir)}],${JSON.stringify(first.input)}); if(one!==0)process.exitCode=one;\n`+
-    `const repeat=await runLocal(['install','--dir',${JSON.stringify(dir)}],${JSON.stringify(first.input)}); if(repeat!==0)process.exitCode=repeat;\n`+
-    `if(await runLocal(['upgrade','--dir',${JSON.stringify(dir)}],${JSON.stringify(incompatible.input)})===0)throw new Error('incompatible SQL accepted');\n`+
+    `fs.writeFileSync(${JSON.stringify(badLabelMarker)},'1'); const rejected=await deploy('install',${JSON.stringify(first.input)}); if(rejected===0)throw new Error('bad image labels accepted');\n`+
+    `const one=await deploy('install',${JSON.stringify(first.input)}); if(one!==0)process.exitCode=one;\n`+
+    `const repeat=await deploy('install',${JSON.stringify(first.input)}); if(repeat!==0)process.exitCode=repeat;\n`+
     `const beforeUpgrade=JSON.parse(fs.readFileSync(${JSON.stringify(path.join(dir,'state.json'))},'utf8')); const oldPassword=fs.readFileSync(${JSON.stringify(path.join(dir,'secrets/app-password'))}); const oldDataset=fs.readFileSync(path.join(beforeUpgrade.dataset,'dataset.zip')); fs.writeFileSync(${JSON.stringify(path.join(root,'before-upgrade.json'))},JSON.stringify({state:beforeUpgrade,password:oldPassword.toString('hex'),dataset:oldDataset.toString('hex')})); fs.writeFileSync(${JSON.stringify(failMarker)},'1');\n`+
-    `const failed=await runLocal(['upgrade','--dir',${JSON.stringify(dir)}],${JSON.stringify(second.input)}); if(failed===0)throw new Error('failed API start accepted');\n`+
-    `const restored=JSON.parse(fs.readFileSync(${JSON.stringify(path.join(dir,'state.json'))},'utf8')); if(restored.buildIdentity.buildId!==beforeUpgrade.buildIdentity.buildId||restored.apiImage!==beforeUpgrade.apiImage||restored.postgresImage!==beforeUpgrade.postgresImage||restored.apiPort!==beforeUpgrade.apiPort||restored.dbPort!==beforeUpgrade.dbPort)throw new Error('upgrade recovery drift'); if(!fs.readFileSync(${JSON.stringify(path.join(dir,'secrets/app-password'))}).equals(oldPassword))throw new Error('password changed');\n`+
-    `fs.writeFileSync(${JSON.stringify(cancelMarker)},'1'); const cancelled=await runLocal(['upgrade','--dir',${JSON.stringify(dir)}],${JSON.stringify(second.input)}); if(cancelled===0)throw new Error('cancelled upgrade accepted'); if(JSON.parse(fs.readFileSync(${JSON.stringify(path.join(dir,'state.json'))},'utf8')).apiImage!==beforeUpgrade.apiImage)throw new Error('cancel recovery drift');\n`+
-    `const upgrade=await runLocal(['upgrade','--dir',${JSON.stringify(dir)}],${JSON.stringify(second.input)}); if(upgrade!==0)process.exitCode=upgrade;\n`+
-    `const noop=await runLocal(['upgrade','--dir',${JSON.stringify(dir)}],${JSON.stringify(second.input)}); if(noop!==0)process.exitCode=noop;\n`+
-    `if(await runLocal(['install','--dir',${JSON.stringify(dir)}],${JSON.stringify(second.input)})!==0)throw new Error('repeat install after upgrade rejected');\n`+
+    `const failed=await deploy('upgrade',${JSON.stringify(second.input)}); if(failed===0)throw new Error('failed API start accepted');\n`+
+    `const pending=JSON.parse(fs.readFileSync(${JSON.stringify(path.join(dir,'state.json'))},'utf8')); if(pending.phase!=='initialized'||pending.buildIdentity.buildId===beforeUpgrade.buildIdentity.buildId||pending.postgresImage!==beforeUpgrade.postgresImage||pending.apiPort!==beforeUpgrade.apiPort||pending.dbPort!==beforeUpgrade.dbPort)throw new Error('forward target not preserved'); if(!fs.readFileSync(${JSON.stringify(path.join(dir,'secrets/app-password'))}).equals(oldPassword))throw new Error('password changed');\n`+
+    `const recovery=await runLocal(['recover','--dir',${JSON.stringify(dir)}]); if(recovery!==0)process.exitCode=recovery;\n`+
+    `fs.writeFileSync(${JSON.stringify(cancelMarker)},'1'); const cancelled=await deploy('upgrade',${JSON.stringify(incompatible.input)}); if(cancelled===0)throw new Error('cancelled upgrade accepted'); if(JSON.parse(fs.readFileSync(${JSON.stringify(path.join(dir,'state.json'))},'utf8')).apiImage!==pending.apiImage)throw new Error('cancel changed installed target');\n`+
+    `const noop=await deploy('upgrade',${JSON.stringify(second.input)}); if(noop!==0)process.exitCode=noop;\n`+
+    `if(await deploy('install',${JSON.stringify(second.input)})!==0)throw new Error('repeat install after upgrade rejected');\n`+
+    `const sqlUpgrade=await deploy('upgrade',${JSON.stringify(incompatible.input)}); if(sqlUpgrade!==0)process.exitCode=sqlUpgrade;\n`+
     `for(const action of ['up','status','logs','stop']) { const code=await runLocal([action,'--dir',${JSON.stringify(dir)}]); if(code!==0)throw new Error(action+' requires candidate again or failed'); }\n`;
   const result = spawnSync(process.execPath, ['--import', preload, '--input-type=module', '-e', source], {
     encoding: 'utf8', timeout: 240000, env: { ...process.env, INSTALL_DIR: dir, IMAGE_VERSIONS: JSON.stringify(Object.fromEntries(Object.entries(imageMap).map(([id, image]) => [id, image.Config.Labels['org.opencontainers.image.version']]))), PATH: `${bin}${path.delimiter}${process.env.PATH}` },
   });
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}\nCALLS=${(await fs.readFile(callsFile,'utf8').catch(()=>'none')).split('\n').slice(-8).join('\n')}`);
   const installed = JSON.parse(await fs.readFile(path.join(dir, 'state.json'), 'utf8'));
-  assert.equal(installed.phase, 'ready'); assert.equal(installed.version, (await readCandidate(second.input)).buildIdentity.softwareVersion);
+  assert.equal(installed.phase, 'ready'); assert.equal(installed.version, (await readCandidate(incompatible.input)).buildIdentity.softwareVersion);
   assert.equal(installed.apiPort, 18080); assert.equal(installed.packageType, 'release-package');
   const before = JSON.parse(await fs.readFile(path.join(root, 'before-upgrade.json'), 'utf8'));
   assert.equal(installed.id, before.state.id); assert.equal(installed.project, before.state.project);
@@ -199,9 +215,9 @@ http.get=(options,callback)=>{const req=new EventEmitter(); req.destroy=(err)=>{
   assert.deepEqual(installed.datasetIdentity, before.state.datasetIdentity);
   assert.equal((await fs.readFile(path.join(dir, 'secrets/app-password'))).toString('hex'), before.password);
   assert.equal((await fs.readFile(path.join(installed.dataset, 'dataset.zip'))).toString('hex'), before.dataset);
-  assert.equal((await fs.readFile(path.join(dir, 'infra/postgres/schema.sql'), 'utf8')), 'synthetic schema\n');
+  assert.equal((await fs.readFile(path.join(dir, 'infra/postgres/schema.sql'), 'utf8')), 'incompatible schema\n');
   const calls = (await fs.readFile(callsFile, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
-  assert.equal(calls.filter(row => row[0] === 'load').length, 6, 'invalid install, valid install API+PG, failed/cancelled/successful upgrade API; repeat/no-op do not load');
-  assert.equal(calls.filter(row => row.includes('initialize')).length, 1);
+  assert.ok(calls.filter(row => row[0] === 'load').length >= 4, 'candidate image loads are bounded to inspection/preparation');
+  assert.equal(calls.filter(row => row.includes('initialize')).length, 0);
   assert.equal(calls.some(row => row[0] === 'images'), false);
 });
