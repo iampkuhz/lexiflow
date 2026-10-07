@@ -86,6 +86,8 @@ endlegend
 
 图型按需要选择：阶段分支用 activity，调用交接用 sequence，依赖用 component／architecture，资源用 deployment。state／class 使用 skill 的 fallback 合同，不能冒充 typed 覆盖验证。
 
+图源与正文同处，便于一次审阅，避免独立图片或 `.puml` 链接漂移；IDE 预览或渲染合同出现可复现缺陷时再评估工具方案，规则仍以 Harness 为准。
+
 ## 1.3. 在 IntelliJ 里复核
 
 主导航使用相对**文件链接**，例如从 `overview.md` 到 `change-delivery/hooks.md`；带 `#标题片段` 的链接还依赖 IDE 的标题解析。截图中的 “Cannot find header to navigate to” 属于标题定位层，不能直接推断文件不存在。本次样板改用文件链接；保留被外部引用的旧锚点不代表所有 IDE 都识别 HTML alias。

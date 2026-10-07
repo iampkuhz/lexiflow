@@ -56,8 +56,8 @@ Lexicon 保存跨内容复用的词汇知识及发布版本；Enrichment 接收 
 
 ## 1.3. 两条流程与唯一合同
 
-观看流程见[字幕提示与事后改进流程](flows.md)。各项精确事实仅在合同正文维护：来源适配与能力边界见[source contract](source-contract.md)；规范输入字段和限值见[caption contract](caption-contract.md)；词条、查询与发布见[lexicon contract](lexicon-contract.md)；语义资料资格见[semantic contract](semantic-contract.md)；缓存、安全与观测见[runtime safety](runtime-safety.md)。本页不复制这些合同字段或算法。
+观看流程见[字幕提示与事后改进流程](flows.md)。各项精确事实仅在合同正文维护：来源取得、输入字段与限制见[字幕输入合同](caption-contract.md)；词条、查询与发布见[lexicon contract](lexicon-contract.md)；语义资料资格见[semantic contract](semantic-contract.md)；缓存、安全与观测见[runtime safety](runtime-safety.md)。本页不复制这些合同字段或算法。
 
-长期架构约束以[产品架构规范](../../openspec/specs/product-architecture/spec.md)为准；架构取舍见[决策记录](decisions.md)，当前实现状态只见[状态页](../roadmap/master-plan/phase2/status.md)。
+长期架构约束以[产品架构规范](../../openspec/specs/product-architecture/spec.md)为准；划分原因与复审条件随[模块边界](boundaries.md)、[产品取舍](../product/product-brief.md)及[语义发布](semantic-contract.md)就近维护，不再另建重复决定的汇总页。当前实现状态只见[状态页](../roadmap/master-plan/phase2/status.md)。
 
 <a id="14-从流程下钻到-contract-与代码"></a>

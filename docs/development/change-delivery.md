@@ -6,7 +6,7 @@
 
 ## 1.1. 能力边界与入口
 
-本页只说明证明层次，不重复执行活动流程。直接自检是实现者针对局部改动的静态、编译或定点回归；开发 Stop 按真实 diff 风险生成开发报告；完整 Change/Repository Verify 是显式完整基线；Formal Gate 冻结 Task 与输入，由独立身份验证，并按计划审查、核对证据。普通 CI quick 与正式发行 CI 的边界见[CI 说明](operations/github-actions.md)。这些证明不可互相替代。
+本页只说明各能力提供哪种证明；先后与失败交接见[执行门禁场景](scenarios/run-repository-gates.md)。
 
 | 能力 | 核心作用 | 入口链接 |
 | --- | --- | --- |
@@ -26,8 +26,4 @@
 
 ## 1.3. 从本次工作开始
 
-先确认最终 diff、他人修改与本次负责范围，不在编辑前预锁文件。日常完成时运行风险驱动开发入口并阅读风险/范围结论；只有需要完整 Change/Repository 基线或正式发行时才运行对应完整入口。自检不能代替正式独立验证。
-
-完整原生检查被聚合入口包含时，不再机械补跑每个子任务。正式 validate 由独立身份执行；机械/局部风险无需 review，高风险工程与正式发行要求独立 review。review/check 不运行交付命令。
-
-下一步：进入 [Verify](change-delivery/verification.md)。需要准备环境时进入[隔离验证环境](operations/verification-environment.md)；只查某个工具时进入 [Reference](reference.md)。
+先确认本次 diff 与他人修改，再进入[执行场景](scenarios/run-repository-gates.md)，不要把表中所有能力顺序运行一遍。需要准备环境时进入[隔离验证环境](operations/verification-environment.md)；只查某个工具时进入 [Reference](reference.md)。

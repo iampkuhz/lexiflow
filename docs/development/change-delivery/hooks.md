@@ -17,9 +17,17 @@
 
 ## 1.2. 交付时实际做什么
 
-正常 Stop 调用开发验证 API，与 `python3 -m scripts.verification.development` 共用风险准备和执行逻辑，在同一个验证窗口内隔离环境后串行执行所需 profiles。机械/局部风险执行 `development-change`；高风险工程另执行 `development-baseline`。正式发行的完整 Repository baseline 仍由 required formal check 路径执行，不由开发 PASS 代替。Java 检查通过 Gradle 执行；scripts 按所属 profile 执行质量与测试检查。任何必需检查未运行、环境缺失、输入漂移或测试失败都不能产生开发 PASS。现有开发 Hook 测量样本约 25 分 10 秒，包含所选 profiles 与子检查；这是一次样本总窗口，不可拆成单项耗时或保证当前输入耗时。执行图给出预期预算，未测项明确标规划估算；人工等待不计脚本时长，预算前提只在[执行场景](../scenarios/run-repository-gates.md)维护。
+正常 Stop 在一个验证窗口内准备隔离环境，经开发验证 API 串行执行风险所需 profiles，再清理本次资源；不经 shell 另起一次开发 CLI。活动顺序、每步预期及样本依据只在[执行场景 B](../scenarios/run-repository-gates.md)维护；检查选择和语言工具见[Verify](verification.md)。
 
-Ruff 风格与格式规则在 `harness/python-quality.toml`；Pylint 中文 docstring 规则在 `harness/python-docstrings.toml`，只约束 `scripts/` 模块与公共定义。工具固定版本在 `requirements-dev.txt`。不以注释数量、模板注释或 lint 通过代替语义审阅。
+| 入口条件 | 实际处理 | 输出含义 |
+| --- | --- | --- |
+| 非 Stop 事件 | 不调用开发检查 | 空响应，不签 PASS |
+| 显式停用 | 不调用开发检查 | BLOCKED／未验证，不豁免交付要求 |
+| 精确的末行中间标记 | 不调用开发检查 | 中间回合，不签 PASS |
+| 无待检 diff | 不调用开发检查 | 无待检变更，不签 PASS |
+| 正常 Stop 且存在 diff | 取得非等待窗口，再执行 B | 开发报告，不是正式验收 |
+
+不合法的 JSON、策略或读取失败属于 BLOCKED，不能归入“无需检查”。条件判断次序以 [evaluate()](../../../scripts/verification/delivery_hook.py) 为准。
 
 [Codex Stop 协议](https://learn.chatgpt.com/docs/hooks) 的含义是“本轮结束”，不是“整个任务完成”。因此，中间汇报、提问、等待用户、Qoder callback 交接以及只读 review/catalog 回合，必须在最后单独加一行：
 
@@ -60,15 +68,11 @@ printf '%s\n' '{"hook_event_name":"Stop","stop_hook_active":false}' | python3 sc
 
 ## 1.5. 能力边界与源码入口
 
-Stop Hook 是客户端触发器：`delivery_hook.py` 解析请求与中间回合标记，调用开发验证、管理隔离测试服务并映射客户端响应；它不锁定编辑或 Git，不签发正式验收。Qoder agent 新派发被禁用，不等于 Qoder 客户端 Stop Hook 已停用。完整执行顺序和人工交接见[门禁场景](../scenarios/run-repository-gates.md)。
-
 | 能力 | 核心作用 | 入口链接 |
 | --- | --- | --- |
 | Hook 协议 | 解析 Stop、中间回合与停用开关 | [delivery_hook.py](../../../scripts/verification/delivery_hook.py) |
 | 风险准备／执行 | 冻结真实风险及 profile，调用公共 Verify API | [development.py](../../../scripts/verification/development.py) |
 | 环境生命周期 | 使用并清理本次隔离服务 lease | [test_services.py](../../../scripts/environment/test_services.py) |
 | CI 边界 | quick 不等于发行完整 baseline | [CI policy](../../../harness/ci-policy.yaml) |
-
-手工执行命令见上文。紧急停用通过 `harness/delivery-hooks.json` 的 `mode=off` 或 `LEXIFLOW_DELIVERY_HOOK_DISABLE=1`；停用只表示未验证。进度、失败续轮、窗口冲突、环境 BLOCKED 与恢复约束由前文和共享 Harness 定义，操作总流程不在此重复。
 
 上一层：[开发交付能力总览](../change-delivery.md)。

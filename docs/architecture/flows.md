@@ -49,7 +49,7 @@ M1—R4 描述一次观看请求：来源适配形成输入，唯一 API 装配�
 
 ### 1.1.2. 失败与降级
 
-不能可靠取得字幕或身份、输入不合格、资料不适用、服务失败，或响应已不对应当前字幕时，系统不伪造来源、不提示或丢弃旧响应，英文继续显示。输入细节见[来源适配合同](source-contract.md)与[字幕内容合同](caption-contract.md)；提示资格和失效边界分别见[共享词库合同](lexicon-contract.md)、[语义资料合同](semantic-contract.md)和[运行安全](runtime-safety.md)。
+不能可靠取得字幕或身份、输入不合格、资料不适用、服务失败，或响应已不对应当前字幕时，系统不伪造来源、不提示或丢弃旧响应，英文继续显示。输入细节见[字幕来源与输入合同](caption-contract.md)；提示资格和失效边界分别见[共享词库合同](lexicon-contract.md)、[语义资料合同](semantic-contract.md)和[运行安全](runtime-safety.md)。
 
 ### 1.1.3. 合同与代码位置
 
@@ -87,4 +87,4 @@ endif
 
 ## 1.4. 按问题进入准确合同
 
-输入来源或身份不可靠，查[来源适配](source-contract.md)和[字幕内容](caption-contract.md)；不知道候选何时可提示，查[共享词库](lexicon-contract.md)和[语义资料](semantic-contract.md)；怀疑旧结果或缓存，查[运行安全](runtime-safety.md)。这些是本流程节点的 Reference，不是需要顺序执行的附加步骤。进度与证据只见[状态页](../roadmap/master-plan/phase2/status.md)。
+输入来源或身份不可靠，查[字幕来源与输入合同](caption-contract.md)；不知道候选何时可提示，查[共享词库](lexicon-contract.md)和[语义资料](semantic-contract.md)；怀疑旧结果或缓存，查[运行安全](runtime-safety.md)。这些是本流程节点的 Reference，不是需要顺序执行的附加步骤。进度与证据只见[状态页](../roadmap/master-plan/phase2/status.md)。
