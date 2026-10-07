@@ -23,38 +23,6 @@ services:
       retries: 5
       start_period: 20s
 
-  initialize:
-    labels:
-      lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
-      lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}
-    image: ${LEXIFLOW_API_IMAGE:?LEXIFLOW_API_IMAGE is required}
-    pull_policy: never
-    platform: ${LEXIFLOW_PLATFORM:?LEXIFLOW_PLATFORM is required}
-    entrypoint: [/bin/sh, -ec]
-    command:
-      - |
-        unset JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS
-        password=$$(cat /run/secrets/app-password)
-        case "$$password" in *[!0-9a-f]*|'') exit 64;; esac
-        [ "$${#password}" -eq 64 ] || exit 64
-        jdbc="jdbc:postgresql://postgres:5432/lexiflow?currentSchema=lexiflow_release&user=lexiflow&password=$$password"
-        java -Xmx768m -Dloader.main=io.lexiflow.lexicon.platform.persistence.PostgresSchemaMain -cp /app/lexiflow-api.jar org.springframework.boot.loader.launch.PropertiesLauncher "$$jdbc" /input/schema.sql
-        exec java -Xmx768m -Dloader.main=io.lexiflow.lexicon.platform.importer.LexiconImportMain -cp /app/lexiflow-api.jar org.springframework.boot.loader.launch.PropertiesLauncher publish --input /input/stardict.csv --database-url "$$jdbc" --batch-source-id ecdict-stardict --batch-license-id MIT
-    secrets: [app-password]
-    volumes:
-      - ${LEXIFLOW_SOURCE_DIR:?LEXIFLOW_SOURCE_DIR is required}:/input:ro
-      - ./infra/postgres/schema.sql:/input/schema.sql:ro
-      - initialization-work:/work
-    networks: [private]
-    depends_on:
-      postgres:
-        condition: service_healthy
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    tmpfs: [/tmp:size=128m]
-    mem_limit: 1280m
-
   api:
     labels:
       lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
@@ -63,6 +31,10 @@ services:
     pull_policy: never
     platform: ${LEXIFLOW_PLATFORM:?LEXIFLOW_PLATFORM is required}
     command: [api]
+    logging:
+      driver: k8s-file
+      options:
+        max-size: 10mb
     ports: ["127.0.0.1:18080:8080"]
     secrets: [app-password]
     networks: [private, published]
@@ -93,11 +65,6 @@ volumes:
     labels:
       lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
       lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}
-  initialization-work:
-    labels:
-      lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
-      lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}
-
 networks:
   private:
     internal: true

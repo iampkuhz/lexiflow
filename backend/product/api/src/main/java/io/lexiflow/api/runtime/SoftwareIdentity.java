@@ -63,7 +63,7 @@ public final class SoftwareIdentity {
       try {
         LocalDate.parse(date, DateTimeFormatter.BASIC_ISO_DATE);
       } catch (DateTimeParseException exception) {
-        throw invalidVersion();
+        throw invalidVersion(exception);
       }
     }
     var parts = value.split("-", 2)[0].split("\\.");
@@ -79,6 +79,10 @@ public final class SoftwareIdentity {
   }
 
   private static IllegalStateException invalidVersion() {
-    return new IllegalStateException("LexiFlow software version resource is invalid");
+    return invalidVersion(null);
+  }
+
+  private static IllegalStateException invalidVersion(Throwable cause) {
+    return new IllegalStateException("LexiFlow software version resource is invalid", cause);
   }
 }

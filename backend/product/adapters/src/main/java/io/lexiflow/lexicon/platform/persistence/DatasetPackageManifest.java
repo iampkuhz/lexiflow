@@ -10,6 +10,12 @@ import java.util.List;
  * @param approvalSha256 含义：审批文件摘要。取值范围：64 位小写十六进制。
  * @param datasetVersion 含义：数据库原发布版本。取值范围：正整数。
  * @param preparationPolicy 含义：既有准备策略身份。取值范围：当前固定策略 ID。
+ * @param generationVersion 含义：资料生成身份。取值范围：64 位小写十六进制。
+ * @param generationCodeVersion 含义：生成代码身份。取值范围：64 位小写十六进制。
+ * @param generationSourceDigest 含义：原始来源身份。取值范围：64 位小写十六进制。
+ * @param generationInputsJson 含义：原始输入及上游身份。取值范围：规范 JSON。
+ * @param generationConfigJson 含义：固定来源配置。取值范围：规范 JSON。
+ * @param contentSha256 含义：词条与词形内容摘要。取值范围：64 位小写十六进制。
  * @param files 含义：按固定顺序排列的三份 NDJSON 记录。取值范围：恰好三项。
  */
 public record DatasetPackageManifest(
@@ -18,6 +24,12 @@ public record DatasetPackageManifest(
     String approvalSha256,
     long datasetVersion,
     String preparationPolicy,
+    String generationVersion,
+    String generationCodeVersion,
+    String generationSourceDigest,
+    String generationInputsJson,
+    String generationConfigJson,
+    String contentSha256,
     List<FileRecord> files) {
 
   /**

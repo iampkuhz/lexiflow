@@ -17,7 +17,8 @@ import org.junit.jupiter.api.Test;
 class LexiconImportPreparationTest {
   private static final String DIGEST = "a".repeat(64);
   private static final LexiconImportMetadata META =
-      new LexiconImportMetadata(DIGEST, "source", "license", Instant.EPOCH);
+      new LexiconImportMetadata(
+          DIGEST, "source", "license", Instant.EPOCH, TestGenerationFixture.identity());
 
   @Test
   void countsRawRowsSeparatelyFromDeliveredRowsAndBoundsSortedPreview() {

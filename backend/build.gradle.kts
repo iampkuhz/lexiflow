@@ -55,6 +55,21 @@ configure(leafProjects) {
     dependencies.add("testRuntimeOnly", junitPlatformLauncher)
 }
 
+// 只调整已选任务顺序：单个 Test 诊断不额外选择质量任务，完整交付由 check 纳入全部质量检查。
+// 不约束编译与资源生成，让静态检查继续共享测试、归档的正常前置任务。
+val staticQualityTasks = leafProjects.flatMap { leaf ->
+    listOf("spotlessCheck", "checkstyleMain", "checkstyleTest", "pmdMain", "pmdTest", "javadoc")
+        .map { taskName -> leaf.tasks.named(taskName) }
+}
+leafProjects.forEach { leaf ->
+    leaf.tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+        mustRunAfter(staticQualityTasks)
+    }
+}
+project(":api").tasks.withType<org.springframework.boot.gradle.tasks.bundling.BootJar>().configureEach {
+    mustRunAfter(staticQualityTasks)
+}
+
 // API 插件在模块求值前装配，供 adapters 的集成测试引用 bootJar provider。
 project(":api").pluginManager.apply("org.springframework.boot")
 

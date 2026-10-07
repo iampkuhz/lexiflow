@@ -5,6 +5,7 @@ import org.gradle.api.DefaultTask
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.Property
+import org.gradle.api.provider.ProviderFactory
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.Internal
@@ -44,6 +45,9 @@ abstract class GenerateSoftwareIdentityTask : DefaultTask() {
     @Inject
     protected abstract fun getExecOperations(): ExecOperations
 
+    @Inject
+    protected abstract fun getProviders(): ProviderFactory
+
     init {
         outputs.upToDateWhen { false }
         outputs.doNotCacheIf("身份绑定当前 Git 和源码状态") { true }
@@ -53,11 +57,12 @@ abstract class GenerateSoftwareIdentityTask : DefaultTask() {
     fun generate() {
         val root = repoRoot.get()
         val script = versionScript.get().asFile.absolutePath
+        val node = nodeExecutable(getProviders().environmentVariable("PATH").getOrElse(""))
 
         fun runNode(vararg arguments: String): String {
             val output = java.io.ByteArrayOutputStream()
             getExecOperations().exec {
-                commandLine(listOf("node", script) + arguments)
+                commandLine(listOf(node, script) + arguments)
                 workingDir(root)
                 standardOutput = output
             }

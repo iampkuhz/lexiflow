@@ -27,16 +27,46 @@ read_secret() {
 case "$mode" in
   api|api-debug)
     [ "$#" -eq 0 ] || fail
-    [ -r /run/secrets/app-password ] || fail
-    read_secret /run/secrets/app-password || fail
-    password=$secret
-    unset secret
+    if [ -n "${LEXIFLOW_DATABASE_HOST:-}" ]; then
+      [ "$LEXIFLOW_DATABASE_HOST" = host.containers.internal ] || fail
+      case "${LEXIFLOW_DATABASE_PORT:-}" in *[!0-9]*|'') fail;; esac
+      [ "${LEXIFLOW_DATABASE_PORT}" -ge 1 ] && [ "${LEXIFLOW_DATABASE_PORT}" -le 65535 ] || fail
+      case "${LEXIFLOW_DATABASE_USER:-}" in ''|*'
+'*) fail;; esac
+      [ "$(printf '%s' "$LEXIFLOW_DATABASE_USER" | wc -c | tr -d ' ')" -le 63 ] || fail
+      case "${LEXIFLOW_DATABASE_AUTH_MODE:-}" in
+        development-trust)
+          [ "$LEXIFLOW_DATABASE_USER" = postgres ] || fail
+          [ ! -e /run/secrets/app-password ] || fail
+          [ -z "${SPRING_DATASOURCE_PASSWORD:-}" ] || fail
+          password=''
+          ;;
+        password)
+          [ -r /run/secrets/app-password ] || fail
+          password=$(cat /run/secrets/app-password)
+          [ -n "$password" ] || fail
+          ;;
+        *) fail ;;
+      esac
+      jdbc="jdbc:postgresql://host.containers.internal:${LEXIFLOW_DATABASE_PORT}/lexiflow?currentSchema=lexiflow_release"
+      db_user=$LEXIFLOW_DATABASE_USER
+    else
+      [ "${LEXIFLOW_DATABASE_AUTH_MODE:-managed}" = managed ] || fail
+      [ -r /run/secrets/app-password ] || fail
+      read_secret /run/secrets/app-password || fail
+      password=$secret
+      unset secret
+      jdbc='jdbc:postgresql://postgres:5432/lexiflow?currentSchema=lexiflow_release'
+      db_user=lexiflow
+    fi
     export SPRING_DATASOURCE_PASSWORD=$password
     unset password
     analysis=${LEXIFLOW_SEGMENT_ANALYSIS_ENABLED:-false}
     case "$analysis" in true|false) ;; *) fail ;; esac
     # 两个命令名启用相同的可读日志；该默认行为不会开启 JSONL 分析。
-    exec java -Xms256m -Xmx768m -Dspring.datasource.url=jdbc:postgresql://postgres:5432/lexiflow?currentSchema=lexiflow_release -Dspring.datasource.username=lexiflow -Dlexiflow.runtime.mode=formal -Dlexiflow.caption-debug.enabled=true -Dlexiflow.segment-analysis.enabled="$analysis" -Dlexiflow.segment-analysis.path=/tmp/lexiflow-private/caption-segments.jsonl -Dserver.address=0.0.0.0 -Dserver.port=8080 -jar /app/lexiflow-api.jar
+    export SPRING_DATASOURCE_URL=$jdbc SPRING_DATASOURCE_USERNAME=$db_user
+    unset jdbc db_user
+    exec java -Xms256m -Xmx768m -Dlexiflow.runtime.mode=formal -Dlexiflow.caption-debug.enabled=true -Dlexiflow.segment-analysis.enabled="$analysis" -Dlexiflow.segment-analysis.path=/tmp/lexiflow-private/caption-segments.jsonl -Dserver.address=0.0.0.0 -Dserver.port=8080 -jar /app/lexiflow-api.jar
     ;;
   initialize)
     [ "$#" -eq 0 ] || fail

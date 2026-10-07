@@ -1,5 +1,6 @@
 package io.lexiflow.api;
 
+import io.lexiflow.api.deployment.DeploymentDataCommand;
 import io.lexiflow.api.hints.SegmentAnalysisLog;
 import io.lexiflow.api.release.ReleaseDatasetCommand;
 import io.lexiflow.api.runtime.LexiconHealthIndicator;
@@ -34,6 +35,10 @@ public class ApiApplication {
   public static void main(String[] args) {
     if (args.length > 0 && "--release-dataset".equals(args[0])) {
       System.exit(ReleaseDatasetCommand.run(args));
+      return;
+    }
+    if (args.length > 0 && "--deployment-data".equals(args[0])) {
+      System.exit(DeploymentDataCommand.run(args));
       return;
     }
     SpringApplication.run(ApiApplication.class, args);

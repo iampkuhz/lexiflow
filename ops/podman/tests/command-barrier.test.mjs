@@ -55,3 +55,14 @@ await runCommand(process.execPath,['-e',${JSON.stringify(`require('fs').writeFil
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('nonzero captured machine output stays separate from the safe error message', async () => {
+  await assert.rejects(runCommand(process.execPath, ['-e',
+    'process.stdout.write(JSON.stringify({status:"BLOCKED",reason:"AUTHORIZATION_FAILED"})); process.stderr.write("private-error"); process.exitCode=3;'],
+  { capture: true, timeout: 5000 }), error => {
+    assert.equal(error.commandExitCode, 3);
+    assert.deepEqual(JSON.parse(error.stdout), { status: 'BLOCKED', reason: 'AUTHORIZATION_FAILED' });
+    assert.doesNotMatch(error.message, /private-error|AUTHORIZATION_FAILED/);
+    return true;
+  });
+});

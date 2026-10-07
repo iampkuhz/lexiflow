@@ -10,7 +10,11 @@ const localUrl = pathToFileURL(path.join(repo, 'ops/podman/local.mjs')).href;
 const sessionUrl = pathToFileURL(fileURLToPath(import.meta.url)).href;
 const source = `import {runLocal} from ${JSON.stringify(localUrl)}; import {watchCancel} from ${JSON.stringify(sessionUrl)};\n` +
   `let raw=''; for await (const chunk of process.stdin) { raw += chunk; if (raw.length > 4096) throw Error('SESSION_INPUT_TOO_LARGE'); }\n` +
-  `const input=JSON.parse(raw); const cancel=watchCancel(()=>process.emit('SIGTERM')); const code=await runLocal(input.argv,input.candidate); process.exitCode=Number.isInteger(code)?code:1; cancel.destroy();\n`;
+  `const input=JSON.parse(raw); const cancel=watchCancel(()=>process.emit('SIGTERM')); let planHash; const log=console.log;\n` +
+  `console.log=(...parts)=>{ for(const part of parts) { try { const row=JSON.parse(part); if(row.planHash && /^[a-f0-9]{64}$/.test(row.planHash)) planHash=row.planHash; } catch {} } log(...parts); };\n` +
+  `const planned=await runLocal([...input.argv,'--plan'],input.candidate); console.log=log;\n` +
+  `const code=planned===0 && planHash ? await runLocal([...input.argv,'--confirm-plan',planHash],input.candidate) : 1;\n` +
+  `process.exitCode=Number.isInteger(code)?code:1; cancel.destroy();\n`;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 /** fd3 is a fixed inherited pipe, not caller input. EOF also cancels orphaned sessions. */
 export function watchCancel(onCancel, fd = 3) {

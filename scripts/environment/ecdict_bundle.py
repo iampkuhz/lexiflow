@@ -69,6 +69,12 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _canonical(value: Any) -> bytes:
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode()
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -510,7 +516,9 @@ def _verify_sources(
         raise BundleError("source inputs changed during build")
 
 
-def build(source_repo: Path, output: Path) -> dict[str, Any]:
+def build(
+    source_repo: Path, output: Path, *, generation_code_version: str | None = None
+) -> dict[str, Any]:
     """校验公开来源并生成不可覆盖、可复现的词库构建输入包。"""
     repo = source_repo.expanduser().absolute()
     target = output.expanduser().absolute()
@@ -526,6 +534,23 @@ def build(source_repo: Path, output: Path) -> dict[str, Any]:
     full_bytes, full_hash = _read_full_csv(repo)
     rows, counts, audit = _build_rows(base_bytes, full_bytes)
     data, row_map = _serialize(rows)
+    generation_script = (
+        Path(__file__).resolve().parents[2] / "ops/dataset/generation-version.mjs"
+    )
+    code_version = generation_code_version
+    if code_version is None:
+        try:
+            code_version = subprocess.run(
+                ["node", str(generation_script), "--print-code-version"],
+                cwd=generation_script.parents[2],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise BundleError("generation code identity unavailable") from exc
+    if not re.fullmatch(r"[0-9a-f]{64}", code_version):
+        raise BundleError("generation code identity invalid")
     license_bytes = (repo / "LICENSE").read_bytes()
     members = {
         "stardict.csv": data,
@@ -535,6 +560,32 @@ def build(source_repo: Path, output: Path) -> dict[str, Any]:
     member_facts = {
         name: {"bytes": len(value), "sha256": _sha256(value)}
         for name, value in members.items()
+    }
+    generation_upstream = {
+        "repository_url": REPOSITORY_URL,
+        "commit": COMMIT,
+        "files": lock["files"],
+        "archive_member": {"sha256": full_hash, "bytes": len(full_bytes)},
+    }
+    generation_config = {"sourceId": "ecdict-stardict", "licenseId": "MIT"}
+    generation_source_digest = _sha256(
+        _canonical({"inputSha256": _sha256(data), "upstream": generation_upstream})
+    )
+    generation = {
+        "codeVersion": code_version,
+        "inputSha256": _sha256(data),
+        "sourceDigest": generation_source_digest,
+        "generationVersion": _sha256(
+            _canonical(
+                {
+                    "codeVersion": code_version,
+                    "sourceDigest": generation_source_digest,
+                    "config": generation_config,
+                }
+            )
+        ),
+        "upstream": generation_upstream,
+        "config": generation_config,
     }
     manifest = {
         "schema_version": 2,
@@ -561,6 +612,7 @@ def build(source_repo: Path, output: Path) -> dict[str, Any]:
         },
         "source_files": ["ecdict.csv", "stardict.csv"],
         "generator_sha256": _sha256_file(Path(__file__)),
+        "generation": generation,
     }
     members["manifest.json"] = (
         json.dumps(manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -635,9 +687,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--source-repo", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--generation-code-version")
     args = parser.parse_args(argv)
     try:
-        print(json.dumps(build(args.source_repo, args.output), sort_keys=True))
+        print(
+            json.dumps(
+                build(
+                    args.source_repo,
+                    args.output,
+                    generation_code_version=args.generation_code_version,
+                ),
+                sort_keys=True,
+            )
+        )
     except BundleError as exc:
         print(str(exc), file=sys.stderr)
         return 2

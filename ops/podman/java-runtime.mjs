@@ -1,16 +1,51 @@
 // 源码预检与 Gradle 使用同一 Java；不安装工具，不修改调用方或继承环境白名单。
 import path from 'node:path';
+import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
-export function javaBuildEnvironment(environment) {
+function exactTemurinHome(home, source) {
+  if (!path.isAbsolute(home)) throw new Error(`JAVA_HOME_INVALID：${source} 必须是 JDK 25 的绝对路径`);
+  let release;
+  try {
+    const lines = fs.readFileSync(path.join(home, 'release'), 'utf8').split(/\r?\n/);
+    release = Object.create(null);
+    for (const line of lines) {
+      if (!line || line.startsWith('#')) continue;
+      const match = /^([A-Z_]+)="([^"]*)"$/.exec(line);
+      if (!match || Object.hasOwn(release, match[1])) throw new Error('invalid release');
+      release[match[1]] = match[2];
+    }
+    if (!/^25(?:\.|$)/.test(release.JAVA_VERSION ?? '') || release.IMPLEMENTOR !== 'Eclipse Adoptium'
+        || !/^Temurin-25\./.test(release.IMPLEMENTOR_VERSION ?? '')) throw new Error('wrong release');
+    const java = path.join(home, 'bin', 'java');
+    if (!fs.statSync(java).isFile()) throw new Error('missing executable');
+    fs.accessSync(java, fs.constants.X_OK);
+  } catch {
+    throw new Error(`JAVA_RELEASE_INVALID：${source} 不是可执行的 Eclipse Temurin 25 JDK`);
+  }
+}
+
+export function javaBuildEnvironment(environment, { repo } = {}) {
   const env = { ...environment };
-  const home = env.JAVA_HOME;
+  let home = env.JAVA_HOME;
+  let source = home ? 'JAVA_HOME' : 'PATH';
+  if (repo) {
+    const explicit = env.LEXIFLOW_JAVA_HOME?.trim();
+    const candidates = [path.join(repo, '.local/toolchains/jdk-25/Contents/Home'), path.join(repo, '.local/toolchains/jdk-25')];
+    if (explicit) { home = explicit; source = 'LEXIFLOW_JAVA_HOME'; }
+    else {
+      const local = candidates.find(candidate => fs.existsSync(candidate));
+      if (local) { home = local; source = 'repository-local'; }
+      else if (!home) throw new Error('JAVA_25_UNAVAILABLE：未找到仓库本地或继承的 Eclipse Temurin 25 JDK');
+    }
+    exactTemurinHome(home, source);
+    env.JAVA_HOME = home;
+  }
   if (home) {
     if (!path.isAbsolute(home)) throw new Error('JAVA_HOME_INVALID：JAVA_HOME 必须是 JDK 25 的绝对路径');
     env.PATH = [path.join(home, 'bin'), env.PATH].filter(Boolean).join(path.delimiter);
   }
   const command = home ? path.join(home, 'bin', 'java') : 'java';
-  const source = home ? 'JAVA_HOME' : 'PATH';
   const result = spawnSync(command, ['-version'], {
     env, encoding: 'utf8', timeout: 10000, maxBuffer: 64 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],

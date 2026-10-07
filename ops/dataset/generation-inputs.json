@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "include": [
+    "backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/**",
+    "backend/product/lexicon/src/main/java/io/lexiflow/lexicon/domain/**",
+    "backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/**",
+    "backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/**",
+    "backend/product/adapters/src/main/java/io/lexiflow/observability/platform/LexiconEventObserver.java",
+    "backend/product/adapters/src/main/java/io/lexiflow/observability/platform/StructuredEventLogger.java",
+    "backend/product/adapters/src/main/java/io/lexiflow/observability/platform/StructuredEvent.java",
+    "backend/product/api/src/main/java/io/lexiflow/api/deployment/**",
+    "backend/product/api/src/main/java/io/lexiflow/api/release/ReleaseDatasetCommand.java",
+    "backend/product/api/build.gradle.kts",
+    "backend/product/adapters/build.gradle.kts",
+    "backend/gradle/libs.versions.toml",
+    "backend/gradle.lockfile",
+    "backend/product/lexicon/gradle.lockfile",
+    "backend/product/adapters/gradle.lockfile",
+    "backend/product/api/gradle.lockfile",
+    "infra/postgres/schema.sql",
+    "ops/dataset/ecdict-source.lock.json",
+    "scripts/environment/ecdict_bundle.py",
+    "ops/podman/fetch-ecdict.sh",
+    "ops/podman/source-tools.Containerfile"
+  ]
+}

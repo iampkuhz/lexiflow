@@ -5,8 +5,12 @@ import http from 'node:http';
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { javaBuildEnvironment } from './java-runtime.mjs';
 
-const PHASES = new Set(['new', 'built', 'source', 'initializing', 'initialized', 'ready']);
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+const PHASES = new Set(['new', 'initialized', 'ready']);
 const actions = {
   SUPPORTED: '环境满足此项要求', MISSING_TOOL: '安装所需工具后重试', UNSUPPORTED_VERSION: '选择 Java 25 和 Node.js 22 或以上',
   UNSUPPORTED_HOST: '在 M 芯片 macOS 上运行', ENGINE_UNAVAILABLE: '检查 Podman machine 是否已启动', COMPOSE_UNAVAILABLE: '安装或检查 Podman Compose provider',
@@ -14,7 +18,7 @@ const actions = {
   INITIALIZATION_UNCERTAIN: '保留数据库与日志，不自动重导', NO_LOCK: '没有安装锁', ACTIVE_LOCK: '等待原安装结束，不同时重试',
   STALE_LOCK: '原进程已消失，可重试 install', LEGACY_LOCK: '确认原安装退出后 recover --confirm-stopped', INVALID_LOCK: '保留未知锁，勿手工删除',
   NO_CONTAINERS: '安装完成后可运行 up；首次安装运行 install', CONTAINERS_STOPPED: '运行 up 启动已有安装', CONTAINER_OWNERSHIP: '容器归属异常，保留现场',
-  CONTAINERS_RUNNING: '应用与数据库容器均在运行', RUNTIME_UNAVAILABLE: '检查服务日志和安装阶段', RUNTIME_NOT_READY: '查看安装阶段及服务日志',
+  CONTAINERS_RUNNING: '本安装所需容器均在运行', RUNTIME_UNAVAILABLE: '检查服务日志和安装阶段', RUNTIME_NOT_READY: '查看安装阶段及服务日志',
   RUNTIME_INVALID: '运行状态不符合协议，检查镜像与扩展版本', RUNTIME_READY: '服务正式就绪；仍需人工验证 Chrome 和视频体验',
 };
 function probe(command, argv, env, includeStderr = false) {
@@ -93,8 +97,10 @@ export async function diagnose(dir, env) {
   add('host', os.platform() === 'darwin' && os.arch() === 'arm64' ? 'PASS' : 'BLOCKED', os.platform() === 'darwin' && os.arch() === 'arm64' ? 'SUPPORTED' : 'UNSUPPORTED_HOST');
   const node = process.versions.node;
   add('node', +node.split('.')[0] >= 22 ? 'PASS' : 'BLOCKED', +node.split('.')[0] >= 22 ? 'SUPPORTED' : 'UNSUPPORTED_VERSION', { version: node });
-  const java = probe('java', ['-version'], env, true), version = java?.match(/version "([0-9]+(?:\.[0-9]+){0,3})[^"\r\n]*"/)?.[1];
-  add('java', version?.split('.')[0] === '25' ? 'PASS' : 'BLOCKED', java === null ? 'MISSING_TOOL' : version?.split('.')[0] === '25' ? 'SUPPORTED' : 'UNSUPPORTED_VERSION', version ? { version } : {});
+  let javaReady = false;
+  try { javaBuildEnvironment(env, { repo }); javaReady = true; }
+  catch { /* 只报告固定原因，不泄露 Java 路径或原始探测输出。 */ }
+  add('java', javaReady ? 'PASS' : 'BLOCKED', javaReady ? 'SUPPORTED' : 'UNSUPPORTED_VERSION');
   const engine = probe('podman', ['info', '--format', 'json'], env);
   let engineOK = false;
   try { const info = JSON.parse(engine); engineOK = ['arm64', 'aarch64'].includes(info.host?.arch) && info.host?.os === 'linux'; } catch { /* 仅固定枚举，不输出工具原文。 */ }
@@ -110,7 +116,7 @@ export async function diagnose(dir, env) {
     if (state.schema !== 1 || state.root !== dir || !/^[a-f0-9]{32}$/.test(state.id) || state.project !== `lexiflow-local-${state.id}` || !PHASES.has(state.phase) || !Number.isInteger(state.apiPort) || state.apiPort < 1 || state.apiPort > 65535 || parseSoftwareVersion(state.version) !== state.version) throw new Error('invalid');
   } catch { add('installation', 'FAIL', 'INVALID_STATE'); return report(checks); }
   const installed = ['initialized', 'ready'].includes(state.phase);
-  add('installation', installed ? 'PASS' : 'BLOCKED', installed ? 'SUPPORTED' : state.phase === 'initializing' ? 'INITIALIZATION_UNCERTAIN' : 'INSTALL_INCOMPLETE', { phase: state.phase });
+  add('installation', installed && state.generationVersion && state.datasetIdentity ? 'PASS' : 'BLOCKED', installed && state.generationVersion && state.datasetIdentity ? 'SUPPORTED' : 'INSTALL_INCOMPLETE', { phase: state.phase });
   const lock = path.join(dir, '.lock');
   try {
     if (fs.existsSync(path.join(dir, '.lock-claim'))) add('lock', 'BLOCKED', 'ACTIVE_LOCK');
@@ -133,8 +139,13 @@ export async function diagnose(dir, env) {
       if (!Array.isArray(rows)) throw new Error('invalid');
       if (rows.some(row => row.Labels?.['lexiflow.installation'] !== state.id || row.Labels?.['com.docker.compose.project'] !== state.project)) add('containers', 'FAIL', 'CONTAINER_OWNERSHIP');
       else {
-        containersOK = ['postgres', 'api'].every(service => rows.some(row => row.Labels?.['com.docker.compose.service'] === service && row.State === 'running'));
-        add('containers', containersOK ? 'PASS' : 'BLOCKED', containersOK ? 'CONTAINERS_RUNNING' : rows.length ? 'CONTAINERS_STOPPED' : 'NO_CONTAINERS');
+        const external = state.databaseTarget?.kind === 'external';
+        const services = rows.map(row => row.Labels?.['com.docker.compose.service']);
+        if (external && services.some(service => service !== 'api')) add('containers', 'FAIL', 'CONTAINER_OWNERSHIP');
+        else {
+          containersOK = (external ? ['api'] : ['postgres', 'api']).every(service => rows.some(row => row.Labels?.['com.docker.compose.service'] === service && row.State === 'running'));
+          add('containers', containersOK ? 'PASS' : 'BLOCKED', containersOK ? 'CONTAINERS_RUNNING' : rows.length ? 'CONTAINERS_STOPPED' : 'NO_CONTAINERS');
+        }
       }
     } catch { add('containers', 'BLOCKED', 'ENGINE_UNAVAILABLE'); }
   }

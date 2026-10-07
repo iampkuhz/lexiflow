@@ -4,8 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
 import java.nio.file.Path;
 import java.sql.DriverManager;
+import java.sql.SQLException;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -13,6 +16,31 @@ import org.junit.jupiter.api.Test;
 /** 隔离 PostgreSQL schema 验证重建只处理本项目对象且失败回滚。 */
 @Tag("postgres")
 class PostgresSchemaInitializerIntegrationTest {
+
+  @Test
+  void formWindowUsesQueryTokenBoundariesIncludingPunctuation() throws Exception {
+    withSchema(
+        jdbcUrl -> {
+          PostgresSchemaInitializer.initialize(jdbcUrl, schemaFile());
+          execute(jdbcUrl, "INSERT INTO lexicon_entry VALUES (1,'synthetic','合成',false,0,0,0)");
+          for (String form :
+              List.of("a-c", "a.c", "a/c", "x-y-z", "cat", "can't", "of course", "in front of")) {
+            assertTrue(LexiconSurfacePolicy.withinQueryWindow(form), form);
+            execute(
+                jdbcUrl, "INSERT INTO lexicon_form VALUES ('" + form.replace("'", "''") + "',1)");
+          }
+          for (String form : List.of("uh", "um!", "'uh'", "a-b-c-d", "one two three four", "123")) {
+            org.junit.jupiter.api.Assertions.assertFalse(
+                LexiconSurfacePolicy.withinQueryWindow(form), form);
+            assertThrows(
+                SQLException.class,
+                () ->
+                    execute(
+                        jdbcUrl,
+                        "INSERT INTO lexicon_form VALUES ('" + form.replace("'", "''") + "',1)"));
+          }
+        });
+  }
 
   @Test
   void rebuildsOwnedTablesAndPreservesUnrelatedTable() throws Exception {

@@ -125,6 +125,8 @@ public final class PostgresDatasetExport {
           || DatasetPackageCodec.integer(dataset.get("source_row_count"), 1)
               < records.get(1).rows()) throw invalid();
       DatasetPackageCodec.validateSources(dataset.get("source_manifest"), approvals);
+      if (!DatasetContentChecksum.calculate(connection).equals(dataset.get("content_sha256")))
+        throw invalid();
       validateProjection(connection);
       long version = DatasetPackageCodec.integer(dataset.get("lexicon_version"), 1);
       var files = new ArrayList<Map<String, Object>>();
@@ -142,6 +144,12 @@ public final class PostgresDatasetExport {
       manifest.put("approvalSha256", DatasetPackageCodec.sha256(approvalBytes));
       manifest.put("datasetVersion", version);
       manifest.put("preparationPolicy", dataset.get("preparation_policy"));
+      manifest.put("generationVersion", dataset.get("generation_version"));
+      manifest.put("generationCodeVersion", dataset.get("generation_code_version"));
+      manifest.put("generationSourceDigest", dataset.get("generation_source_digest"));
+      manifest.put("generationInputs", dataset.get("generation_inputs"));
+      manifest.put("generationConfig", dataset.get("generation_config"));
+      manifest.put("contentSha256", dataset.get("content_sha256"));
       manifest.put("files", files);
       Files.write(dir.resolve("manifest.json"), DatasetPackageCodec.jsonBytes(manifest));
       Files.write(dir.resolve("approvals.json"), approvalBytes);

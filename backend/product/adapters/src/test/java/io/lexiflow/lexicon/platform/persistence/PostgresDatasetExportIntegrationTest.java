@@ -54,8 +54,9 @@ class PostgresDatasetExportIntegrationTest {
       }
       Path second = dir.resolve("second.zip");
       try (var connection = DriverManager.getConnection(source.jdbcUrl())) {
-        var result = PostgresDatasetExport.export(connection, second, approval, schema);
-        assertTrue(!result.sha256().equals(DatasetPackageCodec.sha256(first)));
+        assertThrows(
+            IOException.class,
+            () -> PostgresDatasetExport.export(connection, second, approval, schema));
       }
     }
   }
@@ -135,7 +136,7 @@ class PostgresDatasetExportIntegrationTest {
         path,
         "{\"schemaVersion\":1,\"sources\":[{\"sourceId\":\"fixture\","
             + "\"sourceDigest\":\""
-            + "a".repeat(64)
+            + DatasetPackageCodec.sha256("fixture".getBytes(StandardCharsets.UTF_8))
             + "\",\"licenseId\":\"MIT\","
             + "\"redistributionApproved\":true,\"evidenceUrl\":\"https://example.invalid/license\"}]}",
         StandardCharsets.UTF_8);
@@ -201,18 +202,28 @@ class PostgresDatasetExportIntegrationTest {
                 + "VALUES (123,'reliable','old-gloss',true,100,1,100)");
         statement.executeUpdate(
             "INSERT INTO lexicon_form (normalized_form,entry_id) " + "VALUES ('reliable',123)");
+        String inputSha = DatasetPackageCodec.sha256("fixture".getBytes(StandardCharsets.UTF_8));
+        var generation = GenerationIdentityReader.forInput(inputSha);
+        String content = DatasetContentChecksum.calculate(connection);
         try (var dataset =
             connection.prepareStatement(
                 "INSERT INTO lexicon_dataset (dataset_id,lexicon_version,"
-                    + "source_manifest,source_row_count,entry_count,lookup_count,preparation_policy,imported_at) "
-                    + "VALUES (1,?,?::jsonb,1,1,1,?,'1970-01-01T00:00:00Z')")) {
+                    + "source_manifest,source_row_count,entry_count,lookup_count,preparation_policy,imported_at,"
+                    + "generation_version,generation_code_version,generation_source_digest,generation_config,generation_inputs,content_sha256) "
+                    + "VALUES (1,?,?::jsonb,1,1,1,?,'1970-01-01T00:00:00Z',?,?,?,?::jsonb,?::jsonb,?)")) {
           dataset.setLong(1, version());
           dataset.setString(
               2,
               "[{\"source_id\":\"fixture\",\"license_id\":\"MIT\",\"source_digest\":\""
-                  + "a".repeat(64)
+                  + inputSha
                   + "\",\"acquired_at\":\"1970-01-01T00:00:00Z\"}]");
           dataset.setString(3, HintPreparation.POLICY_ID);
+          dataset.setString(4, generation.generationVersion());
+          dataset.setString(5, generation.codeVersion());
+          dataset.setString(6, generation.sourceDigest());
+          dataset.setString(7, generation.configJson());
+          dataset.setString(8, generation.inputsJson());
+          dataset.setString(9, content);
           dataset.executeUpdate();
         }
       }

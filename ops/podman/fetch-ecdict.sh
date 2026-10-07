@@ -71,7 +71,10 @@ with target.open("xb") as f: f.write(data)
 target.chmod(0o644)
 PY
 
-python3 -I "$GENERATOR" --source-repo "$REPO" --output "$OUT/ecdict-core-source.zip"
+# Code identity is computed once by the host's canonical generator. The tool
+# image deliberately has no Node or product source checkout.
+[ -n "${LEXIFLOW_GENERATION_CODE_VERSION:-}" ] || { printf '%s\n' 'generation code identity required' >&2; exit 1; }
+python3 -I "$GENERATOR" --source-repo "$REPO" --output "$OUT/ecdict-core-source.zip" --generation-code-version "$LEXIFLOW_GENERATION_CODE_VERSION"
 
 # Verify every archive member and manifest digest before publishing the CSV.
 python3 -I - "$OUT" <<'PY'
@@ -88,13 +91,22 @@ assert manifest.get("schema_version")==2
 assert manifest.get("upstream",{}).get("repository_url")=="https://github.com/skywind3000/ECDICT.git"
 assert manifest.get("upstream",{}).get("commit")=="bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b"
 assert manifest.get("members")=={n:{"bytes":len(raw[n]),"sha256":hashlib.sha256(raw[n]).hexdigest()} for n in expected-{"manifest.json"}}
+generation=manifest.get("generation")
+assert isinstance(generation,dict) and set(generation)=={"codeVersion","inputSha256","sourceDigest","generationVersion","upstream","config"}
+assert generation["inputSha256"]==hashlib.sha256(raw["stardict.csv"]).hexdigest()
+assert all(isinstance(generation[k],str) and len(generation[k])==64 for k in ("codeVersion","sourceDigest","generationVersion"))
+canonical=lambda value: json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode()
+digest=lambda value: hashlib.sha256(value).hexdigest()
+assert generation["sourceDigest"]==digest(canonical({"inputSha256":generation["inputSha256"],"upstream":generation["upstream"]}))
+assert generation["generationVersion"]==digest(canonical({"codeVersion":generation["codeVersion"],"sourceDigest":generation["sourceDigest"],"config":generation["config"]}))
+assert generation["config"]=={"sourceId":"ecdict-stardict","licenseId":"MIT"}
 assert manifest.get("csv_columns")==["word","translation","oxford","tag","bnc","frq","exchange"]
 rows=csv.reader(io.TextIOWrapper(io.BytesIO(raw["stardict.csv"]),encoding="utf-8-sig",newline=""))
 assert tuple(next(rows))==tuple(manifest["csv_columns"])
 assert next(rows, None) is not None
 # Publish through private staging; rename the CSV only after all checks pass.
 (root/".stardict.csv.tmp").write_bytes(raw["stardict.csv"])
-(root/"source-summary.json").write_text(json.dumps({"source":"public","upstream":manifest["upstream"],"selection":manifest["selection"],"csv_sha256":hashlib.sha256(raw["stardict.csv"]).hexdigest()},sort_keys=True,indent=2)+"\n",encoding="utf-8")
+(root/"source-summary.json").write_text(json.dumps({"source":"public","upstream":manifest["upstream"],"selection":manifest["selection"],"csv_sha256":hashlib.sha256(raw["stardict.csv"]).hexdigest(),"generation":generation},sort_keys=True,indent=2)+"\n",encoding="utf-8")
 (root/".stardict.csv.tmp").replace(root/"stardict.csv")
 for name in ("ecdict-core-source.zip", "source-summary.json", "stardict.csv"):
     (root/name).chmod(0o644)
