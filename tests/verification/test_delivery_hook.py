@@ -231,10 +231,11 @@ class DeliveryHookTest(unittest.TestCase):
             "import os,time\nfrom pathlib import Path\nPath('tmp/child.pid').write_text(str(os.getpid()))\ntime.sleep(60)"
         )
         policy = json.loads(self.policy.read_text())
-        policy["timeout_seconds"] = 1
+        # 给真实预检与进程启动留出余量；总预算仍短于单项 10 秒及子进程 60 秒。
+        policy["timeout_seconds"] = 5
         self.policy.write_text(json.dumps(policy))
         output = self.evaluate()
-        self.assertIn("总执行超过 1 秒", output["stopReason"])
+        self.assertIn("总执行超过 5 秒", output["stopReason"])
         pid = int((self.root / "tmp/child.pid").read_text())
         with self.assertRaises(ProcessLookupError):
             os.kill(pid, 0)

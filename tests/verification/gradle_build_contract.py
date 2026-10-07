@@ -1,6 +1,7 @@
 """Behavior tests for the actual Gradle model and its project-boundary gate."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -106,10 +107,17 @@ gradle.projectsEvaluated {
         [name:t.name, args:t.args ?: [], mainClass:t.mainClass.orNull,
          classpath:t.classpath.files.collect { it.absolutePath }.sort(), usesTerminalStdin:(t.standardInput.is(System.in))]
       }
+      def orderAfter = { String path -> task(path).mustRunAfter.getDependencies(task(path)).collect { it.path }.sort() }
+      def dependencyNames = { String path -> task(path).taskDependencies.getDependencies(task(path)).collect { it.path }.sort() }
       def identity = rootProject.extensions.getByName("buildIdentity")
       def graph = task(":verifyProjectDependencies").dependencyGraph.get()
       def payload = [
         deliveryFull: direct(task(":deliveryFull")), check: direct(task(":check")),
+        orderAfter: [":api:test":orderAfter(":api:test"),
+          ":adapters:postgresIntegrationTest":orderAfter(":adapters:postgresIntegrationTest"),
+          ":integration-tests:runtimeSmokeTest":orderAfter(":integration-tests:runtimeSmokeTest"),
+          ":api:bootJar":orderAfter(":api:bootJar")],
+        apiTestDependencies: dependencyNames(":api:test"),
         graph: graph, identity: [baseVersion:identity.baseVersion],
         javaExec: [":adapters:lexiconValidate":exec(":adapters:lexiconValidate"),
           ":adapters:lexiconPublish":exec(":adapters:lexiconPublish"),
@@ -152,6 +160,30 @@ class GradleTaskGraphTest(unittest.TestCase):
     def test_delivery_aggregator_has_exact_direct_dependencies(self):
         self.assertEqual(self.model["deliveryFull"], [":adapters:postgresIntegrationTest",
                          ":api:bootJar", ":integration-tests:runtimeSmokeTest", "check"])
+        check = self.model["check"]
+        self.assertEqual(len(check), 7)
+        self.assertEqual(check[0], "[:adapters:check, :api:check, :architecture-tests:check, "
+                                  ":enrichment:check, :integration-tests:check, :lexicon:check, "
+                                  ":quality-gates:check]")
+        self.assertTrue(check[1].startswith("org.gradle.api.internal.tasks.DefaultTaskReference@"))
+        self.assertEqual(set(check[2:]), {
+            "provider(task 'architectureTest', class org.gradle.api.DefaultTask)",
+            "provider(task 'javaSourceGates', class org.gradle.api.DefaultTask)",
+            "provider(task 'verifyNoSkippedJavaTests', class io.lexiflow.buildlogic.VerifyNoSkippedTestsTask)",
+            "provider(task 'verifyProductLanguage', class io.lexiflow.buildlogic.VerifyProductLanguageTask)",
+            "provider(task 'verifyProjectDependencies', class io.lexiflow.buildlogic.VerifyProjectDependenciesTask)",
+        })
+
+    def test_existing_static_checks_order_before_selected_delivery_work(self):
+        expected = {f":{project}:{task}" for project in
+                    ("adapters", "api", "enrichment", "lexicon", "architecture-tests",
+                     "quality-gates", "integration-tests") for task in
+                    ("spotlessCheck", "checkstyleMain", "checkstyleTest", "pmdMain", "pmdTest", "javadoc")}
+        for path in (":api:test", ":adapters:postgresIntegrationTest",
+                     ":integration-tests:runtimeSmokeTest", ":api:bootJar"):
+            self.assertTrue(expected.issubset(set(self.model["orderAfter"][path])), path)
+        # mustRunAfter is not a dependency edge: a targeted diagnostic stays targeted.
+        self.assertFalse(any(name in expected for name in self.model["apiTestDependencies"]))
 
     def test_complete_nonempty_dependency_graph_matches_contract(self):
         graph = self.model["graph"]
@@ -205,7 +237,11 @@ class GradleIdentityResourceTest(unittest.TestCase):
         _copy_backend_fixture(ROOT / "backend", cls.backend)
         if (ROOT / ".gitignore").exists():
             shutil.copy2(ROOT / ".gitignore", cls.root / ".gitignore")
-        for relative in ("ops/release", "infra/postgres/schema.sql"):
+        for relative in (
+            "ops/release", "ops/dataset", "infra/postgres/schema.sql",
+            "scripts/environment/ecdict_bundle.py", "ops/podman/fetch-ecdict.sh",
+            "ops/podman/source-tools.Containerfile",
+        ):
             source, target = ROOT / relative, cls.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             if source.is_dir():
@@ -216,7 +252,7 @@ class GradleIdentityResourceTest(unittest.TestCase):
         if not cls.git:
             raise RuntimeError("git executable is required for fixture identity tests")
         subprocess.run([cls.git, "init", "-q"], cwd=cls.root, check=True)
-        subprocess.run([cls.git, "add", "backend", "ops/release", "infra/postgres/schema.sql", ".gitignore"],
+        subprocess.run([cls.git, "add", "backend", "ops", "scripts", "infra", ".gitignore"],
                        cwd=cls.root, check=True)
         subprocess.run([cls.git, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                         "commit", "-qm", "fixture"], cwd=cls.root, check=True)
@@ -349,6 +385,8 @@ public class IdeaModelProbe {
 
         output = self.backend / "product/api/build/generated/software-identity/META-INF/lexiflow-build.json"
         original = json.loads(output.read_text(encoding="utf-8"))
+        generation_file = self.backend / "product/api/build/generated/data-generation/META-INF/lexiflow-generation.json"
+        original_generation = json.loads(generation_file.read_text(encoding="utf-8"))
         marker.write_text("package io.lexiflow.api; final class IdentityFixtureMarker { int changed() { return 1; } }\n",
                           encoding="utf-8")
         changed = self._run("source-change-bootjar", *command)
@@ -358,7 +396,17 @@ public class IdeaModelProbe {
         self.assertEqual(original["baseVersion"], refreshed["baseVersion"])
         self.assertNotEqual(original["sourceSha256"], refreshed["sourceSha256"])
         self.assertNotEqual(original["softwareVersion"], refreshed["softwareVersion"])
+        self.assertEqual(original_generation, json.loads(generation_file.read_text(encoding="utf-8")),
+                         "unrelated application code must not change data generation identity")
         self._assert_identity_in_artifact("changed-identity-artifact")
+
+        schema = self.root / "infra/postgres/schema.sql"
+        schema.write_text(schema.read_text(encoding="utf-8") + "\n-- generation fixture comment\n", encoding="utf-8")
+        sql_changed = self._run("sql-change-bootjar", *command)
+        self.assertEqual(sql_changed.returncode, 0, (sql_changed.stdout + sql_changed.stderr)[-5000:])
+        self.assertNotEqual(original_generation, json.loads(generation_file.read_text(encoding="utf-8")),
+                            "SQL bytes must refresh generation identity even with configuration cache")
+        self._assert_identity_in_artifact("sql-identity-artifact")
 
     def _assert_identity_in_artifact(self, label: str) -> None:
         import zipfile
@@ -374,9 +422,16 @@ public class IdeaModelProbe {
             manifest = jar.read("META-INF/MANIFEST.MF").decode("utf-8")
             embedded_json = json.loads(jar.read("META-INF/lexiflow-build.json"))
             embedded_version = jar.read("META-INF/lexiflow-version.txt").decode("utf-8")
+            embedded_generation = json.loads(jar.read("META-INF/lexiflow-generation.json"))
         self.assertEqual(_manifest_main_attribute(manifest, "Implementation-Version"), identity["softwareVersion"])
         self.assertEqual(embedded_json, identity)
         self.assertEqual(embedded_version, version_text)
+        api_generation = json.loads((self.backend / "product/api/build/generated/data-generation/META-INF/lexiflow-generation.json").read_text(encoding="utf-8"))
+        adapter_generation = json.loads((self.backend / "product/adapters/build/generated/data-generation/META-INF/lexiflow-generation.json").read_text(encoding="utf-8"))
+        self.assertEqual(embedded_generation, api_generation)
+        self.assertEqual(embedded_generation, adapter_generation)
+        self.assertEqual(set(embedded_generation), {"codeVersion"})
+        self.assertRegex(embedded_generation["codeVersion"], r"^[0-9a-f]{64}$")
         node = shutil.which("node")
         self.assertIsNotNone(node, "real Node is required for source-of-truth comparison")
         started = time.perf_counter()
@@ -405,6 +460,83 @@ class GradleDependencyViolationTest(unittest.TestCase):
                 result = _gradle("", *arguments)
                 self.assertNotEqual(result.returncode, 0, result.stdout[-2000:])
                 self.assertIn(reason, result.stdout + result.stderr)
+
+
+class GradleStaticBeforeDeliveryFailureTest(unittest.TestCase):
+    """Exercise the frozen quality contract in an isolated, intentionally-invalid fixture."""
+
+    def test_missing_javadoc_stops_delivery_before_behavior_tasks_and_rules_are_unchanged(self):
+        quality_files = [path for path in (ROOT / "backend/gradle/config").rglob("*") if path.is_file()]
+        quality_files.append(ROOT / "backend/gradle/build-logic/src/main/kotlin/lexiflow.java-quality.gradle.kts")
+        quality_hashes = {path.relative_to(ROOT): hashlib.sha256(path.read_bytes()).hexdigest()
+                          for path in quality_files}
+        temporary = tempfile.TemporaryDirectory(prefix="lvo-gradle-failure-", dir=ROOT / "tmp")
+        self.addCleanup(temporary.cleanup)
+        fixture_root = Path(temporary.name)
+        backend = fixture_root / "backend"
+        _copy_backend_fixture(ROOT / "backend", backend)
+        # Build scripts resolve repository inputs relative to backend's parent directory.
+        for relative in ("ops/release", "ops/dataset", "infra/postgres/schema.sql",
+                         "scripts/environment/ecdict_bundle.py", "ops/podman/fetch-ecdict.sh",
+                         "ops/podman/source-tools.Containerfile"):
+            source, target = ROOT / relative, fixture_root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if source.is_dir():
+                shutil.copytree(source, target, ignore=shutil.ignore_patterns("build", ".gradle", ".git"))
+            else:
+                shutil.copy2(source, target)
+        if (ROOT / ".gitignore").exists():
+            shutil.copy2(ROOT / ".gitignore", fixture_root / ".gitignore")
+        git = shutil.which("git")
+        self.assertIsNotNone(git, "git executable is required for identity fixture")
+        subprocess.run([git, "init", "-q"], cwd=fixture_root, check=True)
+        subprocess.run([git, "add", "backend", "ops", "scripts", "infra", ".gitignore"],
+                       cwd=fixture_root, check=True)
+        subprocess.run([git, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                        "commit", "-qm", "fixture"], cwd=fixture_root, check=True)
+
+        bad_source = backend / "product/api/src/main/java/io/lexiflow/api/MissingDocumentationFixture.java"
+        bad_source.write_text("package io.lexiflow.api;\n\nfinal class MissingDocumentationFixture {}\n",
+                              encoding="utf-8")
+        subprocess.run([git, "add", str(bad_source.relative_to(fixture_root))], cwd=fixture_root, check=True)
+        subprocess.run([git, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                        "commit", "-qm", "synthetic javadoc failure"], cwd=fixture_root, check=True)
+        marker = fixture_root / "executed-delivery-task.txt"
+        init = fixture_root / "mark-delivery.init.gradle"
+        init.write_text(r'''
+gradle.projectsEvaluated {
+  if (rootProject.name == "lexiflow-backend") {
+    println("LVO_MONITOR_READY")
+    allprojects { project ->
+      project.tasks.configureEach { task ->
+        if (task instanceof org.gradle.api.tasks.testing.Test || task.name == "bootJar") task.doFirst {
+          new File(System.getProperty("lexiflow.marker")).append(task.path + "\\n")
+          throw new GradleException("unexpected delivery work before static failure")
+        }
+      }
+    }
+  }
+}
+''', encoding="utf-8")
+        environment = {"JDBC_URL": "jdbc:postgresql://127.0.0.1:1/lexiflow_fixture",
+                      "STARDICT_CSV": str(ROOT / "tmp/synthetic-stardict.csv"),
+                      "JAVA_TOOL_OPTIONS": f"-Dlexiflow.marker={marker}"}
+        started = time.perf_counter()
+        result = _fixture_gradle(backend, "--no-configuration-cache", "--init-script", str(init),
+                                 "deliveryFull", "--rerun-tasks", "--no-build-cache",
+                                 env=environment, timeout=900)
+        _record_fixture_result("lvo-javadoc-failure-before-delivery", result,
+                               time.perf_counter() - started)
+        self.assertNotEqual(result.returncode, 0, (result.stdout + result.stderr)[-5000:])
+        self.assertIn("LVO_MONITOR_READY", result.stdout)
+        self.assertIn("MissingDocumentationFixture", result.stdout + result.stderr)
+        self.assertIn("MissingJavadocType", result.stdout + result.stderr)
+        self.assertFalse(marker.exists(), marker.read_text(encoding="utf-8") if marker.exists() else "")
+
+        # 测试自包含，不以 ignored 的阶段证据为测试输入；检查源码与 fixture 均未修改质量规则。
+        for relative, digest in quality_hashes.items():
+            self.assertEqual(hashlib.sha256((ROOT / relative).read_bytes()).hexdigest(), digest, str(relative))
+            self.assertEqual(hashlib.sha256((fixture_root / relative).read_bytes()).hexdigest(), digest, str(relative))
 
 
 if __name__ == "__main__":
