@@ -107,6 +107,70 @@ endlegend
 
 身份与分工以 [agent-policy](../../../harness/agent-policy.manifest.yaml) 为准；开发报告不能直接升级为 Formal validation。
 
+**对应总图 S2 [A]。** 以下是实现者选择和交接过程，不是新增自动脚本；S2 的实际命令按图下语言表选择。
+
+```plantuml
+@startuml
+skinparam backgroundColor white
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam shadowing false
+skinparam nodesep 40
+skinparam ranksep 35
+skinparam activityBackgroundColor #EAF2FF
+skinparam activityBorderColor #46699A
+skinparam noteBackgroundColor #F5F6F8
+skinparam noteBorderColor #A0AAB8
+title A｜实现者直接自检：选择、执行、交接
+start
+:S1 选择相关检查;
+note right
+入口：无脚本（核对实际改动）
+作用：按所改语言／模块选择静态、编译和直接回归
+<color:#995A00><b>预期：1–3 分钟（Agent 规划）</b></color>
+end note
+:S2 执行选定命令;
+note right
+入口：python_quality.py／docs_check.py／java_exec.py／npm 等（下表）
+作用：只执行所选命令；不叠跑全仓聚合入口
+<color:#995A00><b>预期：1–5 分钟（轻量机器规划）</b></color>
+end note
+if (所选检查真实通过？) then (PASS)
+:S3 核对自检范围;
+note right
+入口：无脚本（读取实际输出）
+作用：区分通过、未运行和不适用，不推断完整覆盖
+<color:#995A00><b>预期：30–60 秒（Agent 规划）</b></color>
+end note
+:S4 交出直接反馈;
+note right
+入口：无脚本（整理检查证据）
+作用：交出命令和结果，再进入 B 风险检查
+<color:#995A00><b>预期：30–60 秒（Agent 规划）</b></color>
+end note
+stop
+else (FAIL / BLOCKED)
+:S5 定位修复入口;
+note right
+入口：无脚本（分析失败日志）
+作用：交回对应实现或环境；修复后从相关检查重入
+<color:#995A00><b>预期：2–5 分钟（分析规划，不含修复）</b></color>
+end note
+stop
+endif
+legend bottom
+下表按语言列实际命令；不是所有命令都运行。
+预算不含下载、环境安装和修复；直接结果不代替 B 或 Formal。
+endlegend
+@enduml
+```
+
+| 节点 | 核心作用 | 入口／交接 |
+| --- | --- | --- |
+| S1–S2 选择并执行 | 按实际改动运行相关检查 | 下方语言入口表，不要求全跑 |
+| S3–S4 核对并交接 | 明确真实结果与未覆盖范围 | 人工／Agent 核对输出，再进入本页 B |
+| S5 定位失败 | 先修实现或环境，之后重入相关检查 | 对应源码、直接测试或[环境准备](../operations/verification-environment.md) |
+
 | A：改动类型 | 直接检查 | 入口文件／说明 |
 | --- | --- | --- |
 | Python 工具 | `python3 -m scripts.repository.python_quality`；相关 `python3 -m unittest <测试模块>` | [python_quality.py](../../../scripts/repository/python_quality.py)、对应[直接测试](../../../tests/) |
@@ -134,70 +198,86 @@ skinparam activityBackgroundColor #EAF2FF
 skinparam activityBorderColor #46699A
 skinparam noteBackgroundColor #F5F6F8
 skinparam noteBorderColor #A0AAB8
-title B｜delivery_hook.py：一次 Stop 交付检查
+title B｜Stop：先判断是否交付，再检查与收尾
 start
-:S1 冻结风险与窗口;
+:S1 分类入口与回合;
 note right
-入口：delivery_hook.py（内部：coordination / development）
-作用：取得非等待窗口，冻结真实风险和检查范围
-<color:#995A00><b>预期：1–10 秒（规划估算）</b></color>
+入口：scripts/verification/delivery_hook.py::main / evaluate
+作用：校验输入、事件、启用状态、末行标记与真实 diff
+<color:#995A00><b>预期：1–5 秒（规划；输入等待上限 3 秒）</b></color>
 end note
-:S2 准备隔离服务;
+if (有效 Stop、启用、交付且有 diff？) then (需要检查)
+:S2 取得窗口并冻结风险;
 note right
-入口：test_services.py（内部准备）
-作用：准备本次隔离 PG／Redis，不下载依赖
-<color:#995A00><b>预期：10–30 秒（就绪引擎／镜像的规划）</b></color>
+入口：delivery_hook.py → coordination.py / development.py
+作用：取得非等待窗口，再冻结真实范围与 profiles
+<color:#995A00><b>预期：1–10 秒（机器规划）</b></color>
 end note
-:S3 调度风险检查;
+:S3 准备隔离服务;
 note right
-入口：development.py（内部执行）
-作用：执行风险所需 Check，首个失败早停
+入口：test_services.py::isolated_test_services
+作用：按风险闭包一次准备本次 PostgreSQL／Redis
+<color:#995A00><b>预期：10–30 秒（引擎／镜像就绪规划）</b></color>
+end note
+:S4 执行风险检查;
+note right
+入口：development.py::execute_development
+作用：首个失败早停，未执行项不当作通过
 <color:#995A00><b>预期：高风险 25–28 分钟（单次样本推估）</b></color>
 end note
-:S4 清理自有资源;
+:S5 清理自有资源;
 note right
-入口：test_services.py（内部收尾）
-作用：只清理本次自有 lease，清理不确定不通过
-<color:#995A00><b>预期：10–30 秒（规划估算）</b></color>
+入口：test_services.py::isolated_test_services
+作用：finally 清理本次 lease，不清理未知资源
+<color:#995A00><b>预期：10–30 秒（机器规划）</b></color>
 end note
-:S5 分析执行结果;
+:S6 分析执行结果;
 note right
-入口：delivery_hook.py（内部结果处理）
+入口：delivery_hook.py::execute_delivery / evaluate
 作用：合并准备、检查、漂移与清理结果
-<color:#995A00><b>预期：1–5 秒（规划估算）</b></color>
+<color:#995A00><b>预期：1–5 秒（机器规划）</b></color>
 end note
 if (必需检查与清理全部通过？) then (PASS)
-:S6 交出开发报告;
+:S7 交出开发报告;
 note right
-入口：delivery_hook.py（内部协议输出）
-作用：交出开发报告，不签正式 validation
-<color:#995A00><b>预期：不超过 1 秒（规划估算）</b></color>
+入口：delivery_hook.py::decision
+作用：输出开发 PASS 及报告，不签正式 validation
+<color:#995A00><b>预期：不超过 1 秒（机器规划）</b></color>
 end note
 stop
 else (FAIL / BLOCKED)
-:S7 交还阻断原因;
+:S8 交还阻断原因;
 note right
-入口：delivery_hook.py（内部协议输出）
-作用：首次阻断；续轮失败停止自动重试
-<color:#995A00><b>预期：不超过 1 秒（规划估算）</b></color>
+入口：delivery_hook.py::decision
+作用：普通首次阻断；续轮或窗口冲突停止自动重试
+<color:#995A00><b>预期：不超过 1 秒（机器规划）</b></color>
+end note
+stop
+endif
+else (不运行)
+:S9 输出未检查原因;
+note right
+入口：delivery_hook.py::evaluate
+作用：中间／无 diff 不签 PASS；停用或异常为 BLOCKED
+<color:#995A00><b>预期：不超过 1 秒（机器规划）</b></color>
 end note
 stop
 endif
 legend bottom
-S1–S5 是结果处理主干，不保证所有子命令都已执行。
-前置失败短路检查；已获得资源才有相应清理；均进入结果分析。
-仅在分析结果后分左右去向，不画空的“是 / 否”分支。
+非 Stop 返回空响应；精确末行标记表示中间回合，不能用于普通交付。
+S2–S6 表示结果处理主干，不保证每项执行：前置失败短路检查，只清理已获资源。
+窗口冲突／取消等直接停止续轮；普通首次失败请求修复，续轮失败 continue=false。
 endlegend
 @enduml
 ```
 
 | 节点 | 核心作用 | 实现文件 |
 | --- | --- | --- |
-| S1 窗口与冻结 | 固定当前风险和检查范围；忙时 BLOCKED | [coordination.py](../../../scripts/verification/coordination.py)、[development.py](../../../scripts/verification/development.py) |
-| S2／S4 准备与清理 | 只使用、清理本次隔离资源 | [test_services.py](../../../scripts/environment/test_services.py) |
-| S3 检查执行 | 执行所需 Check；首个失败早停 | [development.py](../../../scripts/verification/development.py)、[检查声明](../../../harness/module-checks.yaml) |
-| S5 结果分析 | 合并检查、漂移与清理结果 | [delivery_hook.py](../../../scripts/verification/delivery_hook.py) |
-| S6／S7 协议输出 | 交报告或阻断；续轮失败 `continue=false` | [delivery_hook.py](../../../scripts/verification/delivery_hook.py)、[Stop 策略](../../../harness/delivery-hooks.json) |
+| S1／S9 入口与未执行 | 区分真实交付、中间回合、无 diff、停用和异常输入；不签虚假 PASS | [delivery_hook.py](../../../scripts/verification/delivery_hook.py) |
+| S2 窗口与冻结 | 非等待窗口内固定真实风险及检查范围 | [coordination.py](../../../scripts/verification/coordination.py)、[development.py](../../../scripts/verification/development.py) |
+| S3／S5 准备与清理 | 一次准备并清理本次隔离资源 | [test_services.py](../../../scripts/environment/test_services.py) |
+| S4 检查执行 | 执行所需 Check；首个失败早停 | [development.py](../../../scripts/verification/development.py)、[检查声明](../../../harness/module-checks.yaml) |
+| S6–S8 结果与协议 | 分析真实结果；输出开发报告或阻断，续轮失败终止重试 | [delivery_hook.py](../../../scripts/verification/delivery_hook.py)、[Stop 策略](../../../harness/delivery-hooks.json) |
 
 准备失败不执行检查；清理不确定不能 PASS。无 diff 或中间回合也不签 PASS。每个 Check 的内部命令与耗时见[共用检查链](../change-delivery/verification.md)。
 

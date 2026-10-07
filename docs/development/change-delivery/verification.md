@@ -4,6 +4,104 @@
 
 ## 1.1. 风险驱动的开发入口与完整基线
 
+日常编码的先后顺序看[执行门禁场景](../scenarios/run-repository-gates.md)。下图只展开显式完整 Verify 与问题诊断，二者不是日常必须叠跑的步骤。
+
+```plantuml
+@startuml
+skinparam backgroundColor white
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam shadowing false
+skinparam nodesep 40
+skinparam ranksep 35
+skinparam activityBackgroundColor #EAF2FF
+skinparam activityBorderColor #46699A
+skinparam noteBackgroundColor #F5F6F8
+skinparam noteBorderColor #A0AAB8
+title 完整 Verify／诊断：范围、执行策略与输出
+start
+:S1 选择目的与范围;
+note right
+入口：无脚本（选择下表公开命令）
+作用：区分完整 Verify 与诊断，确定 Change 或 Repository
+<color:#995A00><b>预期：30–60 秒（Agent 规划）</b></color>
+end note
+:S2 取得验证窗口;
+note right
+入口：scenarios.py::_within_window → coordination.py
+作用：先取得非等待窗口；忙时直接返回 BLOCKED
+<color:#995A00><b>预期：1–5 秒（机器规划）</b></color>
+end note
+if (按变化还是仓库选择？) then (Change)
+:S3 选择变化闭包;
+note right
+入口：check_changes.py 或 diagnose.py change → scenarios.py
+作用：按 diff 选择；无 diff 选全部声明，然后冻结输入
+<color:#995A00><b>预期：1–10 秒（机器规划）</b></color>
+end note
+else (Repository)
+:S4 选择仓库范围;
+note right
+入口：check_repository.py 或 diagnose.py repository → scenarios.py
+作用：完整入口选全部基线；诊断选 Check ID 及依赖后冻结
+<color:#995A00><b>预期：1–10 秒（机器规划）</b></color>
+end note
+endif
+if (完整交付还是问题诊断？) then (delivery)
+:S5 执行并首错早停;
+note right
+入口：scenarios.py → kernel.py
+作用：逐项预检并执行，FAIL／BLOCKED 后余项不再运行
+<color:#995A00><b>预期：局部 1–5 分钟；全量 90–120 分钟（规划）</b></color>
+end note
+else (diagnostic)
+:S6 执行并收集独立错误;
+note right
+入口：diagnose.py → scenarios.py → kernel.py
+作用：继续独立检查；缺前置仍不运行，不伪造通过
+<color:#995A00><b>预期：局部 1–5 分钟；昂贵闭包 90–120 分钟（规划）</b></color>
+end note
+endif
+:S7 复核冻结输入;
+note right
+入口：scenarios.py / scope.py
+作用：检查执行期间和结束时的漂移，冲突不能通过
+<color:#995A00><b>预期：1–5 秒（机器规划）</b></color>
+end note
+if (是否完整 Verify 入口？) then (完整 Verify)
+:S8 持久化完整报告;
+note right
+入口：check_changes.py / check_repository.py → reports.py
+作用：保存真实结果；报告发布失败改为 FAIL
+<color:#995A00><b>预期：1–5 秒（机器规划）</b></color>
+end note
+stop
+else (诊断)
+:S9 输出诊断摘要;
+note right
+入口：diagnose.py → summaries.py
+作用：只输出所选范围摘要，不发布完整报告身份
+<color:#995A00><b>预期：1–3 秒（机器规划）</b></color>
+end note
+stop
+endif
+legend bottom
+入口一选一，不是依次运行所有命令；环境须事先准备，失败不自动安装。
+窗口／选择／预检失败短路相应步骤，仍输出真实阻断；诊断也不绕过依赖失败。
+全量预算含昂贵发行检查，是未测规划，不套用 25 分钟开发样本；两分支不相加。
+endlegend
+@enduml
+```
+
+| 节点 | 核心作用 | 入口／源码 |
+| --- | --- | --- |
+| S1 选择目的 | 选完整 Verify 或问题诊断，以及 Change／Repository 范围 | `python3 scripts/check_changes.py`、`python3 scripts/check_repository.py`、`python3 -m scripts.verification.diagnose change\|repository` |
+| S2–S4 窗口与范围 | 取得窗口后选择检查闭包并冻结输入 | [scenarios.py](../../../scripts/verification/scenarios.py)、[scope.py](../../../scripts/verification/scope.py) |
+| S5／S6 执行策略 | 交付首错早停；诊断继续独立检查，均不绕过前置要求 | [scenarios.py](../../../scripts/verification/scenarios.py)、[kernel.py](../../../scripts/verification/kernel.py) |
+| S7–S9 复核与输出 | 复核漂移；完整入口持久化报告，诊断只输出范围摘要 | [reports.py](../../../scripts/verification/reports.py)、[diagnose.py](../../../scripts/verification/diagnose.py) |
+
+预算按所选闭包判断，局部与全量不是稳定性能区间；全量 90–120 分钟是包含昂贵发行检查的未测规划，不是开发 Stop 的预期。环境安装、下载和人工等待另计。
+
 公开日常开发入口按真实 diff、文件内容和闭包自动评估风险，不接受 root、base、check ID 或风险覆盖参数：
 
 ```bash
@@ -48,31 +146,13 @@ python3 scripts/check_repository.py
 
 ### 1.1.2. 实现者直接自检
 
-只先运行与本次修改相关的静态检查和直接回归，不把完整 adapter、development 和 Stop Hook 惯例性地叠加。检查按实际改动选择；跨模块可运行多类检查，任何失败先修复，不交出虚假的通过结论。
-
-| 检查 | 核心作用 | 入口链接 |
-| --- | --- | --- |
-| 文档 | 文档规则与引用静态检查 | `python3 -m scripts.repository.docs_check`；[docs_check.py](../../../scripts/repository/docs_check.py) |
-| Python | Ruff／Pylint 与所改模块直接回归 | `python3 -m scripts.repository.python_quality`、`python3 -m unittest <测试模块>`；[python_quality.py](../../../scripts/repository/python_quality.py) |
-| Java | Java 25 下相关 Gradle 定点测试 | `python3 -m scripts.environment.java_exec backend/gradlew -p backend <Test> --tests <测试类>`；[Java 检查](../reference/java-checks.md) |
-| 扩展 | 先构建，再跑相关 Node 直接回归 | `npm --prefix extension run build`、`node --test extension/tests/<测试>.mjs`；[package.json](../../../extension/package.json) |
-| 差异 | 检查本次差异空白，不 stage／commit | `git diff --check` |
-
-这不是新的自动执行器；Java Test 路径和测试类由实际修改决定。自检不签发 receipt。需要交付时再进入[Stop 交付能力](hooks.md)，不要拿直接测试替代风险要求的完整检查。
+按实际改动选择相关静态、编译和直接回归；选择步骤与各语言入口统一见[执行门禁场景 A](../scenarios/run-repository-gates.md)。跨模块可以选择多类检查，失败先修实现；不要惯例性地叠跑完整 adapter、development 和 Stop。直接自检不签发 receipt，也不替代开发风险检查。
 
 ## 1.2. 从阶段到子能力
 
-| Verify 能力 | 核心作用 | 入口链接 |
-| --- | --- | --- |
-| Change Verify | 按 diff 选择 `change-targeted` 完整变化闭包；无 diff 时选择全部声明 | `python3 scripts/check_changes.py`；[check_changes.py](../../../scripts/check_changes.py) |
-| Repository Verify | 执行全部 `repository-baseline`，不读取 Task、身份或批准 | `python3 scripts/check_repository.py`；[check_repository.py](../../../scripts/check_repository.py) |
-| 定向诊断 | 按模式或 Check ID 定位问题；输出不作完整 Verify 报告 | `python3 -m scripts.verification.diagnose change\|repository`；[diagnose.py](../../../scripts/verification/diagnose.py) |
-| 冻结与执行 | 取得非等待窗口，冻结选中声明和真实输入，再逐项预检／执行 | [scenarios.py](../../../scripts/verification/scenarios.py)、[scope.py](../../../scripts/verification/scope.py)、[kernel.py](../../../scripts/verification/kernel.py) |
-| 报告与摘要 | 完整入口保存报告；诊断只输出范围摘要 | [reports.py](../../../scripts/verification/reports.py)、[summaries.py](../../../scripts/verification/summaries.py) |
-
-
-
 冻结前选定完整检查闭包；执行前后和结束时核对输入。单个检查缺运行环境时不执行其命令，仍汇总 BLOCKED。命令失败、覆盖不足、输入漂移均不能被其他检查的成功抵消。
+
+声明以轻量反馈优先的稳定顺序组织，依赖闭包仍优先：版本、文档、policy、planning、Hook 资产与 Python 静态检查先运行，随后是后端交付，再执行构建合同、工具框架自检与其他产品/发行检查。独立规则检查不以整个工具测试套件为前置，但显式冻结检查器源码；工具源码变更仍选择其模块测试，完整 repository baseline 保留所有检查。正常交付仍 fail-fast，后续未执行项记为 BLOCKED；定向诊断可汇总独立问题，不能据此签发完整交付结论。
 
 声明源码通过仓库目录描述符逐层读取，不跟随文件或祖先目录的符号链接；特殊文件、私有配置入口及读取期间的身份变化均拒绝。文件快照绑定相对路径、内容摘要、字节数和执行位，缺失或不安全输入不能冻结为 PASS。报告消费时重新核对完整快照，不能仅保留指纹而改写文件描述。这是声明输入的安全读取合同，不证明构建的实际读取闭包、外部候选或跨主机来源已经完整绑定。
 
