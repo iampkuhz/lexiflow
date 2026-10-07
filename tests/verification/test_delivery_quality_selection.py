@@ -6,7 +6,10 @@ import unittest
 from pathlib import Path
 
 from scripts.verification.declarations import load_declarations_snapshot
-from scripts.verification.scope import select_checks_for_changes
+from scripts.verification.scope import (
+    resolve_module_dependencies,
+    select_checks_for_changes,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -60,7 +63,15 @@ class DeliverySelectionTest(unittest.TestCase):
                         "eng.repository.hooks-on-change",
                     ):
                         self.assertIn(path, check["input_paths"])
-                        self.assertIn("verification", check["module_dependencies"])
+                        self.assertIn("scripts/repository", check["input_paths"])
+                        self.assertIn(
+                            "scripts/verification/delivery_hook.py", check["input_paths"]
+                        )
+                        self.assertEqual([], check["module_dependencies"])
+                        closed = resolve_module_dependencies([check], self.checks)
+                        self.assertEqual(
+                            [check["check_id"]], [c["check_id"] for c in closed]
+                        )
 
     def test_baseline_and_change_share_frozen_contract(self):
         by_id = {c["check_id"]: c for c in self.checks}
