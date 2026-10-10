@@ -178,13 +178,13 @@ class DiscoveryAndLaunchTest(unittest.TestCase):
             with self.subTest(argument=argument), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 api.main([argument, "18081"])
 
-    def test_caption_debug_flag_is_accepted_as_default_behavior(self):
-        with patch.object(api, "command_environment", return_value={"JDBC_URL": "jdbc:test"}), patch.object(api, "prepare_port"), patch.object(api.os, "execvpe") as execute, contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(api.main(["--caption-debug"]), 0)
-        command = execute.call_args.args[1]
-        self.assertIn("--server.address=127.0.0.1", command[-1])
-        self.assertNotIn("--caption-debug", command[-1])
-        self.assertNotIn("segment-analysis.enabled=true", command[-1])
+    def test_caption_debug_flag_is_rejected_before_environment_or_port_access(self):
+        with patch.object(api, "command_environment") as environment, patch.object(api, "prepare_port") as prepare, patch.object(api.os, "execvpe") as execute, contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            api.main(["--caption-debug"])
+        self.assertEqual(raised.exception.code, 2)
+        environment.assert_not_called()
+        prepare.assert_not_called()
+        execute.assert_not_called()
 
     def test_invalid_java_does_not_touch_existing_listener(self):
         with patch.object(api, "command_environment", side_effect=api.JavaRuntimeError("missing Java")), patch.object(api, "prepare_port") as prepare, patch.object(api.os, "execvpe") as execute, contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):

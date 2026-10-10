@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 import tempfile
 import unittest
@@ -11,7 +10,7 @@ from unittest.mock import patch
 
 from scripts.environment import (
     check_for as check_required_environment,
-    detect_java,
+    detect_java_25_temurin,
     detect_python,
     detect_tool,
     diagnose as diagnose_environment,
@@ -44,42 +43,31 @@ class TestDetectTool(unittest.TestCase):
 
 
 class TestDetectJava(unittest.TestCase):
-    def test_missing_java(self):
+    def test_missing_java_is_blocked_even_if_path_java_exists(self):
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch.dict(os.environ, {}, clear=False):
-                env = dict(os.environ)
-                env.pop("LEXIFLOW_JAVA_HOME", None)
-                with patch.dict(os.environ, env, clear=True):
-                    info = detect_java(Path(tmpdir))
-                    # May or may not find java on PATH
-                    self.assertIsInstance(info["available"], bool)
+            with patch("scripts.environment.runtime.shutil.which", return_value="/usr/bin/java"):
+                info = detect_java_25_temurin(Path(tmpdir), {"PATH": "/usr/bin"})
+            self.assertFalse(info["available"])
 
-    def test_java_home_env(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            jdk = Path(tmpdir) / "jdk"
-            jdk_bin = jdk / "bin"
-            jdk_bin.mkdir(parents=True)
-            (jdk_bin / "java").write_text("#!/bin/sh\necho java")
-            os.chmod(str(jdk_bin / "java"), 0o755)
-            with patch.dict(os.environ, {"LEXIFLOW_JAVA_HOME": str(jdk)}):
-                info = detect_java(Path(tmpdir))
-                self.assertTrue(info["available"])
-                self.assertEqual(info["source"], "LEXIFLOW_JAVA_HOME")
-
-    def test_local_toolchain(self):
+    def test_java_home_and_local_toolchain_require_temurin_25_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            jdk = root / ".local" / "toolchains" / "jdk-25" / "bin"
-            jdk.mkdir(parents=True)
-            (jdk / "java").write_text("#!/bin/sh\necho java")
-            os.chmod(str(jdk / "java"), 0o755)
-            with patch.dict(os.environ, {}, clear=False):
-                env = dict(os.environ)
-                env.pop("LEXIFLOW_JAVA_HOME", None)
-                with patch.dict(os.environ, env, clear=True):
-                    info = detect_java(root)
-                    self.assertTrue(info["available"])
-                    self.assertEqual(info["source"], "local-toolchain")
+            jdk = root / ".local/toolchains/jdk-25"
+            (jdk / "bin").mkdir(parents=True)
+            java = jdk / "bin/java"
+            java.write_text("#!/bin/sh\necho java")
+            java.chmod(0o755)
+            self.assertFalse(detect_java_25_temurin(root, {})["available"])
+            (jdk / "release").write_text(
+                'JAVA_VERSION="25.0.1"\nIMPLEMENTOR="Eclipse Adoptium"\n'
+                'IMPLEMENTOR_VERSION="Temurin-25.0.1+8"\n'
+            )
+            for env in ({}, {"LEXIFLOW_JAVA_HOME": str(jdk)}):
+                with self.subTest(env=env):
+                    info = diagnose_environment(root, ["java-25-temurin"], env)
+                    self.assertEqual(info["status"], "PASS")
+                    self.assertEqual(info["tools"]["java-25-temurin"]["source"], "temurin-25")
+                    self.assertEqual(info["tools"]["java-25-temurin"]["path"], str(jdk.resolve()))
 
 
 class TestDiagnoseEnvironment(unittest.TestCase):

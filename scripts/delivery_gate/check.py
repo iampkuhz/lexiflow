@@ -214,25 +214,6 @@ def _existing_evidence_errors(
     return errors
 
 
-def _submissions(
-    repo: Path, task_id: str, version: int | None, change: str | None
-) -> list[dict[str, Any]]:
-    result = []
-    try:
-        submissions = list_submissions(repo)
-    except RecordError as exc:
-        raise CheckError("dependency-record-invalid", str(exc)) from None
-    for submission in submissions:
-        req = submission.get("task_requirements", {})
-        if (
-            req.get("task_id") == task_id
-            and (version is None or req.get("task_version") == version)
-            and (change is None or req.get("change_version") == change)
-        ):
-            result.append(submission)
-    return result
-
-
 @dataclass
 class _EvaluationContext:
     """仅供一次求值使用的安全记录索引与已完成依赖节点结果。"""

@@ -12,7 +12,7 @@
 | 判断回合与输出协议 | [delivery_hook.py](../../scripts/verification/delivery_hook.py) 判断中间标记／diff／停用／重入状态 | 1.2 与 1.3；中间回合不代表 PASS |
 | 风险检查与服务 | 开发 Verify API 串行执行 profiles，环境模块一次准备并清理 lease | [执行场景 B](../scenarios/run-repository-gates.md)、[隔离环境](../scenarios/verification-environment.md) |
 | 正式验收／CI | 不由 Hook 代签；Git Hook 只提醒 | [Delivery Gate](delivery-gate.md)、[CI](../scenarios/github-actions.md) |
-| Git Hook 资产 Check | `python3 -m scripts.repository.quality --mode hooks` 只核对 `.githooks/pre-commit` 与 `.githooks/post-commit` 文件存在且可执行，不检查宿主是否加载／信任 Stop Hook | [共用 Check 清单](verification/check-catalog.md)、[quality.py](../../scripts/repository/quality.py) |
+| Git Hook 资产 Check | `python3 -m scripts.repository.quality --mode hooks` 只核对 `.githooks/pre-commit` 文件存在且可执行，不检查宿主是否加载／信任 Stop Hook | [共用 Check 清单](verification/check-catalog.md)、[quality.py](../../scripts/repository/quality.py) |
 
 规则只在 [AGENTS.md](../../AGENTS.md)／[Harness](../../harness/README.md)，客户端不复制检查实现。Stop Hook 是交付检查的触发适配器；它不是 Git Hook 资产检查，也不签发 Formal 验收。
 

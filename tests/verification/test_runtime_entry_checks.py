@@ -48,14 +48,13 @@ class RuntimeEntryCheckTest(unittest.TestCase):
             "result_contract",
         ):
             self.assertEqual(base[key], change[key], key)
-        self.assertEqual(["node", "ops/release/runtime-entry-check.mjs"], base["command"])
+        self.assertEqual(["node", "ops/release/check.mjs", "--suite", "runtime-entry"], base["command"])
         self.assertEqual(["node", "git", "sh", "mktemp", "sha256-tool"], base["required_environment"])
         self.assertEqual([], base["module_dependencies"])
         for name in (
             "manifest.mjs",
             "package.mjs",
             "runtime-verification.sh",
-            "runtime-entry-check.mjs",
             "tests/runtime-entry.test.mjs",
             "runtime-entry.mjs",
             "version.mjs",

@@ -140,14 +140,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="本机 API 启动；端口冲突时交互确认是否终止旧进程。"
     )
-    parser.add_argument(
-        "--caption-debug",
-        action="store_true",
-        help="保留本机默认字幕日志；不写分析 JSONL",
-    )
-    options = parser.parse_args(arguments)
-    if options.caption_debug:
-        print("字幕可读日志默认已开启；此兼容参数无需启用 JSONL。", flush=True)
+    parser.parse_args(arguments)
     root = Path(__file__).resolve().parents[2]
     try:
         environment = command_environment(root)

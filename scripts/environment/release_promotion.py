@@ -35,13 +35,6 @@ MAX_LICENSE_TABLE = 256 * 1024
 MAX_LICENSES = 64
 API_VERSION = "2026-03-10"
 SHA = re.compile(r"[0-9a-f]{64}\Z")
-ASSET_NAMES = (
-    "archive",
-    "archive_checksum",
-    "candidate",
-    "manifest",
-    "manifest_checksum",
-)
 
 
 class PromotionError(ValueError):
@@ -57,15 +50,6 @@ class PromotionError(ValueError):
 
 def _fail(reason: str) -> None:
     raise PromotionError(reason)
-
-
-def _unique(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate key")
-        result[key] = value
-    return result
 
 
 def _read(root: Path, relative: str, limit: int) -> bytes:

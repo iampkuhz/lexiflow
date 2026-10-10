@@ -406,7 +406,6 @@ def _cross_view_source_current(
     root: Path,
     result: dict[str, Any],
     expected: dict[str, Any],
-    report_scope: str,
     declarations: dict[str, Any],
 ) -> tuple[bool, str | None]:
     """从当前声明重推外视图的选择、操作、环境和真实原始 PASS 证据。"""
@@ -671,7 +670,7 @@ def _validate_pass_report(root: Path, report: dict[str, Any]) -> None:
         cross_source_valid, source_run_id = False, None
         if isinstance(result, dict) and "cross_view_source" in result:
             cross_source_valid, source_run_id = _cross_view_source_current(
-                root, result, expected, scope, declarations
+                root, result, expected, declarations
             )
         if not _pass_check_current(
             root,

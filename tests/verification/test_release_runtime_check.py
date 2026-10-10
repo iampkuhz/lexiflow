@@ -91,17 +91,16 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
             ) as preflight,
         ):
             result = runtime._bindings(
-                Path("."),
                 {"LEXIFLOW_RELEASE_ARM64_DOCKER_HOST": "unix:///private/docker.sock"},
             )
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].target_platform, "linux/arm64")
-        self.assertEqual(preflight.call_count, 1)
+        preflight.assert_called_once_with("linux/arm64", {"DOCKER_HOST": "unix:///private/docker.sock", "PATH": ""})
         with patch.object(runtime, "_require_supported_host"):
             with self.assertRaisesRegex(
                 ConsumerError, "BLOCKED/missing-lexiflow-release-arm64-docker-host"
             ):
-                runtime._bindings(Path("."), {})
+                runtime._bindings({})
 
     def test_accepts_exact_schema_and_snapshot_without_check_id(self):
         value = _read_envelope(BufferedInput(json.dumps(envelope()).encode()))
@@ -162,6 +161,10 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
                     "scripts.environment.release_runtime_check.shutil.rmtree",
                     side_effect=OSError("cleanup denied"),
                 ),
+                patch(
+                    "scripts.environment.release_runtime_check.consume_verify_snapshot",
+                    side_effect=BridgeError("BLOCKED", "source-unavailable"),
+                ),
             ):
                 with self.assertRaisesRegex(
                     ConsumerError, "FAIL/release-scratch-cleanup-failed"
@@ -169,12 +172,27 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
                     run_consumer(
                         parent,
                         value,
-                        bridge=lambda *args: (_ for _ in ()).throw(
-                            BridgeError("BLOCKED", "source-unavailable")
-                        ),
                     )
             self.assertTrue(scratch.is_dir())
             self.assertTrue((scratch / "source-parent").is_dir())
+
+    def test_fixed_bridge_consumes_complete_verify_context_and_cleans_failure(self):
+        from scripts.verification.release_source_bridge import BridgeError
+        from scripts.environment import release_runtime_check as runtime
+
+        with tempfile.TemporaryDirectory() as directory:
+            scratch = Path(directory).resolve() / "scratch"
+            scratch.mkdir()
+            value = envelope()
+            with patch.object(runtime.tempfile, "mkdtemp", return_value=str(scratch)), patch.object(runtime, "consume_verify_snapshot", side_effect=BridgeError("BLOCKED", "source-unavailable")) as bridge:
+                with self.assertRaisesRegex(ConsumerError, "BLOCKED/source-unavailable"):
+                    runtime.run_consumer(directory, value, environ={})
+            bridge.assert_called_once_with(
+                Path(directory).resolve(), value["effective_check"],
+                {key: value[key] for key in ("run_id", "check_id", "check_config_fingerprint")},
+                value["snapshot"], scratch / "source-parent",
+            )
+            self.assertFalse(scratch.exists())
 
     def test_bounded_runner_collects_and_reaps_each_process_path(self):
         from scripts.environment.release_runtime_check import _run_bounded

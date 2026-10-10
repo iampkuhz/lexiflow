@@ -1,6 +1,5 @@
 package io.lexiflow.buildlogic
 
-import java.io.ByteArrayOutputStream
 import java.io.File
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.DirectoryProperty
@@ -16,19 +15,16 @@ import javax.inject.Inject
 abstract class GenerateDataGenerationTask : DefaultTask() {
     @get:Internal abstract val repoRoot: Property<File>
     @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
-    @get:Internal abstract val script: Property<File>
     @Inject protected abstract fun getExecOperations(): ExecOperations
     @Inject protected abstract fun getProviders(): ProviderFactory
 
     init { outputs.upToDateWhen { false }; outputs.doNotCacheIf("身份绑定当前生成输入") { true } }
 
     @TaskAction fun generate() {
-        val output = ByteArrayOutputStream()
         val node = nodeExecutable(getProviders().environmentVariable("PATH").getOrElse(""))
         getExecOperations().exec {
-            commandLine(node, script.get().absolutePath, "--output-dir", outputDirectory.get().asFile.absolutePath)
+            commandLine(node, File(repoRoot.get(), "ops/dataset/generation-version.mjs").absolutePath, "--output-dir", outputDirectory.get().asFile.absolutePath)
             workingDir(repoRoot.get())
-            standardOutput = output
         }
     }
 }

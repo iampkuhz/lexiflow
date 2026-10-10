@@ -73,7 +73,7 @@ def _descriptor(locator: str, content: bytes) -> dict[str, Any]:
     return {"locator": locator, "sha256": sha256_bytes(content), "bytes": len(content)}
 
 
-def _safe_path(root: Path, locator: str, *, leaf_missing: bool = False) -> Path:
+def _safe_path(root: Path, locator: str) -> Path:
     try:
         check_locator_safety_strict(locator)
     except AgentContractError as exc:
@@ -85,8 +85,6 @@ def _safe_path(root: Path, locator: str, *, leaf_missing: bool = False) -> Path:
         try:
             mode = current.lstat().st_mode
         except FileNotFoundError:
-            if leaf_missing and index == len(parts) - 1:
-                return current
             raise CodexWorkPackageError(
                 "artifact-missing", f"missing path: {locator}"
             ) from None
@@ -161,9 +159,11 @@ def _catalog_tasks(repo_root: Path) -> dict[str, dict[str, Any]]:
         raise CodexWorkPackageError("catalog-unavailable", str(exc)) from None
     result: dict[str, dict[str, Any]] = {}
 
-    def visit(value: Any) -> None:
+    def visit(value: Any, owner: str | None = None) -> None:
         if isinstance(value, dict):
             task_id = value.get("id")
+            if isinstance(task_id, str) and task_id.startswith("LF-WS-"):
+                owner = task_id
             if (
                 isinstance(task_id, str)
                 and task_id.startswith("LF-TSK-")
@@ -173,12 +173,12 @@ def _catalog_tasks(repo_root: Path) -> dict[str, dict[str, Any]]:
                     raise CodexWorkPackageError(
                         "catalog-invalid", f"duplicate task: {task_id}"
                     )
-                result[task_id] = value
+                result[task_id] = {"owner": owner, **value}
             for child in value.values():
-                visit(child)
+                visit(child, owner)
         elif isinstance(value, list):
             for child in value:
-                visit(child)
+                visit(child, owner)
 
     visit(root)
     return result
@@ -217,19 +217,128 @@ def _identity(runtime: Mapping[str, Any]) -> dict[str, str]:
     return result
 
 
-def _caller(caller: Mapping[str, Any]) -> dict[str, Any]:
+def _caller(caller: Any, *, frozen: bool = False) -> dict[str, Any]:
+    """区分精简调用输入与完整冻结证据；冻结字段不从当前 Catalog 补缺。"""
     if not isinstance(caller, Mapping):
         raise CodexWorkPackageError(
             "caller-contract-invalid", "caller contract must be an object"
         )
-    # parent_client 是稳定的 caller 路由约束；其余字段均是 runner 拥有的执行身份。
-    forbidden = (set(_IDENTITY_FIELDS) - {"parent_client"}) & set(caller)
-    if forbidden:
+    forbidden = set(_IDENTITY_FIELDS) - ({"parent_client"} if frozen else set())
+    if forbidden & set(caller):
         raise CodexWorkPackageError(
             "caller-contract-invalid", "caller owns no runner identity"
         )
-    # 现有 projection 校验器负责完整的 caller 结构检查。
+    required = {
+        "goal",
+        "work_package_id",
+        "task_ids",
+        "task_versions",
+        "change_versions",
+        "estimated_minutes",
+        "contract_boundary",
+        "allowed_files",
+        "forbidden_files",
+        "required_context",
+        "failure_policy",
+    }
+    if frozen:
+        required.update(
+            {
+                "primary_owner",
+                "expected_outputs_by_task",
+                "acceptance_by_task",
+                "validation_commands",
+                "parent_client",
+            }
+        )
+    if set(caller) != required:
+        raise CodexWorkPackageError(
+            "caller-contract-invalid", "caller contract fields are not exact"
+        )
+    ids = caller["task_ids"]
+    if (
+        not isinstance(ids, list)
+        or not ids
+        or any(not isinstance(task, str) or not _ID.fullmatch(task) for task in ids)
+        or len(ids) != len(set(ids))
+    ):
+        raise CodexWorkPackageError("caller-contract-invalid", "task_ids are invalid")
+    maps = ["task_versions", "change_versions"]
+    if frozen:
+        maps.extend(
+            ["expected_outputs_by_task", "acceptance_by_task", "validation_commands"]
+        )
+    if any(
+        not isinstance(caller[field], Mapping) or set(caller[field]) != set(ids)
+        for field in maps
+    ):
+        raise CodexWorkPackageError(
+            "caller-contract-invalid", "Task maps are not exact"
+        )
+    if frozen and any(
+        not isinstance(caller["acceptance_by_task"][task], Mapping)
+        or set(caller["acceptance_by_task"][task])
+        != {"acceptance_criteria", "acceptance_evidence"}
+        for task in ids
+    ):
+        raise CodexWorkPackageError(
+            "caller-contract-invalid", "frozen acceptance is incomplete"
+        )
     return dict(caller)
+
+
+def _freeze_caller(
+    caller: dict[str, Any], tasks: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """把锁定版本的当前 Task 合同派生进原有冻结布局，不开放重复外参。"""
+    records = {}
+    for task_id in caller["task_ids"]:
+        record = tasks.get(task_id)
+        if record is None:
+            raise CodexWorkPackageError("catalog-drift", f"task missing: {task_id}")
+        required = (
+            "owner",
+            "deliverable",
+            "acceptance_criteria",
+            "acceptance_evidence",
+            "validation_command",
+            "task_version",
+            "change_version",
+        )
+        if (
+            any(field not in record for field in required)
+            or not isinstance(record["owner"], str)
+            or not record["owner"]
+        ):
+            raise CodexWorkPackageError(
+                "catalog-invalid", f"task incomplete: {task_id}"
+            )
+        records[task_id] = record
+    owners = {record["owner"] for record in records.values()}
+    if len(owners) != 1:
+        raise CodexWorkPackageError(
+            "catalog-drift", "work package must share primary_owner"
+        )
+    frozen = {
+        **caller,
+        "primary_owner": next(iter(owners)),
+        "expected_outputs_by_task": {
+            key: item["deliverable"] for key, item in records.items()
+        },
+        "acceptance_by_task": {
+            key: {
+                field: item[field]
+                for field in ("acceptance_criteria", "acceptance_evidence")
+            }
+            for key, item in records.items()
+        },
+        "validation_commands": {
+            key: item["validation_command"] for key, item in records.items()
+        },
+        "parent_client": "codex",
+    }
+    _validate_current(frozen, tasks)
+    return frozen
 
 
 def _validate_current(caller: dict[str, Any], tasks: dict[str, dict[str, Any]]) -> None:
@@ -497,11 +606,12 @@ class CodexWorkPackagePublisher:
             raise CodexWorkPackageError(
                 "outcome-invalid", "outcomes must exactly cover caller task_ids"
             )
+        # 当前 Catalog 只用于发布前派生；核验历史发布物绝不补齐冻结字段。
+        caller = _freeze_caller(caller, _catalog_tasks(self.repo_root))
         # 写入前一次性构建全部 projection，复用现有校验器核对完整合同。
         projections = {
             task_id: _projection(caller, identity, task_id) for task_id in task_ids
         }
-        _validate_current(caller, _catalog_tasks(self.repo_root))
         prepared_outcomes = {
             task_id: _outcome(
                 task_id,
@@ -711,7 +821,7 @@ class CodexWorkPackagePublisher:
                 artifacts["task_projection"],
                 f"{task_locator}/task-projection.json",
             )
-            projected_caller = _caller(projection.get("caller_contract"))
+            projected_caller = _caller(projection.get("caller_contract"), frozen=True)
             expected_projection = _projection(projected_caller, identity, task_id)
             if projection != expected_projection or (
                 caller is not None and caller != projected_caller
@@ -819,19 +929,10 @@ class CodexWorkPackagePublisher:
         }
 
 
-def projection_identity(projection: Mapping[str, Any]) -> dict[str, Any]:
-    """提取已校验 Task 投影中的运行身份供后续记录绑定。"""
-    return {field: projection[field] for field in _IDENTITY_FIELDS}
-
-
 def build_codex_main_task_projection(
     repo_root: str | Path,
     task_id: str,
     trusted_runtime_context: Mapping[str, Any],
-    *,
-    goal: str,
-    required_context: str,
-    failure_policy: str,
 ) -> dict[str, Any]:
     """从当前 Catalog 和宿主绑定构造单 Task Main projection。只使用 runner 身份与当前任务合同，调用者声明不能取得执行权。"""
     root = Path(repo_root).resolve()
@@ -865,9 +966,9 @@ def build_codex_main_task_projection(
         "acceptance_criteria": record["acceptance_criteria"],
         "acceptance_evidence": record["acceptance_evidence"],
         "validation_command": record["validation_command"],
-        "goal": goal,
-        "required_context": required_context,
-        "failure_policy": failure_policy,
+        "goal": "Record current source for explicit independent Gate validation",
+        "required_context": "AGENTS.md; harness/README.md; current catalog task",
+        "failure_policy": "BLOCKED on missing current evidence; never infer acceptance",
         **identity,
     }
     try:

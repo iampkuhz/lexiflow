@@ -23,7 +23,7 @@ def _git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
 def install(root: Path) -> dict[str, str]:
     """经显式调用安装非阻断 Git Hook 路径，不运行交付检查。"""
     hooks = root / HOOK_PATH
-    required = (hooks / "pre-commit", hooks / "post-commit")
+    required = (hooks / "pre-commit",)
     if not hooks.is_dir() or any(not item.is_file() for item in required):
         raise ValueError("versioned hooks are unavailable")
     for item in required:

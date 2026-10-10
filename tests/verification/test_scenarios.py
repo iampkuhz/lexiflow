@@ -161,7 +161,7 @@ class TestReleaseRuntimePipeSelection(unittest.TestCase):
             check["selection_reasons"] = [
                 {
                     "kind": "changed-file",
-                    "changed_file": "ops/release/lifecycle.mjs",
+                    "changed_file": "ops/release/runtime-entry.mjs",
                     "trigger_path": "ops/release/",
                 }
             ]

@@ -28,8 +28,6 @@ class TestQualityGateLayering(unittest.TestCase):
         self.assertEqual(
             verification["gate_selection"],
             {
-                "incremental": ["check"],
-                "full": ["deliveryFull"],
                 "excluded_diagnostics": ["architectureTest", "verifyProductLanguage"],
             },
         )

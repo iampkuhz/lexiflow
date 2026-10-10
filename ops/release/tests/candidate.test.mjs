@@ -31,7 +31,7 @@ async function fixture(baseVersion = '2.0.0') {
   await writeFile(path.join(root, 'ops/release/version.mjs'), await readFile(path.join(repoRoot, 'ops/release/version.mjs')));
   await writeFile(path.join(root, 'ops/release/runtime-entry.mjs'), await readFile(path.join(repoRoot, 'ops/release/runtime-entry.mjs')));
   await writeFile(path.join(root, 'ops/release/runtime-verification.sh'), await readFile(path.join(repoRoot, 'ops/release/runtime-verification.sh')));
-  for (const name of ['lifecycle.mjs', 'lifecycle-state.sh', 'lifecycle-docker.sh', 'lifecycle.sh']) {
+  for (const name of ['lifecycle-state.sh', 'lifecycle-docker.sh', 'lifecycle.sh']) {
     await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repoRoot, 'ops/release', name)));
   }
   await writeFile(path.join(root, '.gitignore'), '/input/\n/images/\n/output/\n/descriptor.json\n');
@@ -99,6 +99,8 @@ async function fixture(baseVersion = '2.0.0') {
     const marker = `${JSON.stringify(imageCandidate, null, 2)}\n`; await writeFile(path.join(directory, 'candidate.json'), marker);
     imageCandidateDirectories.push({ directory, sha256: hash(Buffer.from(marker)) });
   }
+  descriptor.artifacts = records.map(record => ['api-image', 'postgres-image'].includes(record.role)
+    ? { role: record.role, platform: record.platform, licenseIds: record.licenseIds } : record);
   const descriptorFile = path.join(root, 'descriptor.json'); await writeFile(descriptorFile, JSON.stringify(descriptor));
   return { root, artifactRoot, imageCandidateDirectories: imageCandidateDirectories.map(({ directory, sha256 }, index) => ({ directory, sha256, platform: index === 0 ? 'linux/amd64' : 'linux/arm64' })), outputParent, descriptor, descriptorFile,
     cleanup: async () => { await rm(root, { recursive: true, force: true }); await rm(outputParent, { recursive: true, force: true }); for (const { directory } of imageCandidateDirectories) await rm(directory, { recursive: true, force: true }); } };
@@ -107,6 +109,8 @@ async function fixture(baseVersion = '2.0.0') {
 test('assembles a two-platform private candidate with exact payload and stable marker', async () => {
   const f = await fixture();
   try {
+    const requestsBefore = structuredClone(f.descriptor.artifacts);
+    await rm(path.join(f.artifactRoot, 'images'), { recursive: true });
     const before = await Promise.all(f.imageCandidateDirectories.map(({ directory }) => readFile(path.join(directory, 'candidate.json'))));
     const result = await assembleReleaseCandidate({ repoRoot: f.root, imageCandidates: f.imageCandidateDirectories.map(({ directory, sha256 }) => ({ directory, sha256 })),
       artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent });
@@ -116,6 +120,14 @@ test('assembles a two-platform private candidate with exact payload and stable m
     assert.deepEqual(await tree(result.candidateDirectory), [...result.manifest.artifacts.map((item) => `payload/${item.path}`),
       'candidate.json', 'payload/manifest.json', 'payload/manifest.json.sha256'].sort());
     assert.deepEqual(await Promise.all(f.imageCandidateDirectories.map(({ directory }) => readFile(path.join(directory, 'candidate.json')))), before);
+    assert.deepEqual(f.descriptor.artifacts, requestsBefore, 'caller remains a narrow immutable request');
+    for (const marker of before) {
+      for (const record of JSON.parse(marker).artifacts) {
+        const published = result.manifest.artifacts.find(a => a.role === record.role && a.platform === record.platform);
+        for (const key of ['path', 'bytes', 'sha256', 'imageDigest']) assert.equal(published[key], record[key]);
+        assert.equal(hash(await readFile(path.join(result.candidateDirectory, 'payload', record.path))), record.sha256);
+      }
+    }
     assert.equal(result.candidate.supported, undefined); assert.equal(result.candidate.verified, undefined);
     assert.equal(result.manifest.artifacts.find((item) => item.role === 'runtime-entry').path, 'lexiflow.sh');
   } finally { await f.cleanup(); }
@@ -143,7 +155,8 @@ test('assembles exactly the descriptor platform subset and rejects omitted selec
 test('rejects identity, image binding, descriptor schema and runtime entry injection', async () => {
   for (const mutate of [
     (f) => { f.descriptor.sourceCommit = 'f'.repeat(40); },
-    (f) => { f.descriptor.artifacts.find((item) => item.role === 'api-image').sha256 = 'f'.repeat(64); },
+    ...['path', 'bytes', 'sha256', 'imageDigest'].map(key => f => { f.descriptor.artifacts.find(item => item.role === 'api-image')[key] = 'forged'; }),
+    (f) => { f.descriptor.artifacts.find(item => item.role === 'api-image').licenseIds = []; },
     (f) => { f.descriptor.artifacts.find((item) => item.role === 'api-image').platform = 'linux/ppc64'; },
     (f) => { f.descriptor.extra = true; },
     (f) => { f.descriptor.artifacts.push({ role: 'runtime-entry', path: 'lexiflow.sh' }); }

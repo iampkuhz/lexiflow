@@ -171,16 +171,14 @@ def _read_regular(root: Path, locator: str, *, missing_code: str) -> bytes:
         os.close(fd)
 
 
-def read_json(
-    root: Path, locator: str, kind: str, *, require_hash: bool = True
-) -> dict[str, Any]:
+def read_json(root: Path, locator: str, kind: str) -> dict[str, Any]:
     """安全读取精确 locator 的 JSON 正式记录。"""
     value = parse_json(
         _read_regular(root, locator, missing_code="record-not-found"), kind
     )
     if not isinstance(value, dict):
         raise RecordError("record-invalid", f"{kind} must be an object")
-    return verify_record(value, kind) if require_hash else value
+    return verify_record(value, kind)
 
 
 def read_bound_bytes(root: Path, locator: str, expected_sha256: str) -> bytes:

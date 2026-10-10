@@ -24,7 +24,6 @@ class VerificationTransaction:
         self.owner = (os.getpid(), threading.get_ident())
         self.nonce = str(uuid.uuid4())
         self.executions: dict[str, dict[str, Any]] = {}
-        self.operations: dict[str, dict[str, Any]] = {}
         self.active = True
 
     def check(self, root: Path, window: VerificationWindow) -> None:
@@ -43,7 +42,6 @@ class VerificationTransaction:
         """销毁本轮可复用结果，禁止跨调用持久化。"""
         self.active = False
         self.executions.clear()
-        self.operations.clear()
         _ACTIVE.discard(self)
 
 

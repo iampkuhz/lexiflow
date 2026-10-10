@@ -1,10 +1,8 @@
 {
-  "provider": "podman-ephemeral",
   "images": {
     "postgres": "docker.io/library/postgres:17",
     "redis": "docker.io/library/redis:7"
   },
-  "pull": "never",
   "readiness_timeout_seconds": 30,
   "postgres_profiles": {
     "standard": {

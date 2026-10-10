@@ -150,9 +150,9 @@ class DeliveryGateFixture:
     def _write_catalog(self):
         task = {
             "id": TASK_ID,
-            "version": 1,
+            "task_version": 1,
             "change_version": "1.0.0",
-            "dependencies": [],
+            "depends_on": [],
             "required_check_ids": ["fixture.change"],
             "allowed_files": ["src/test.py"],
             "forbidden_files": ["secrets/**"],

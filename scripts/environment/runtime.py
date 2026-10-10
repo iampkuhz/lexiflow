@@ -72,21 +72,6 @@ def detect_java_25_temurin(
     return {"available": True, "source": "temurin-25", "path": str(home)}
 
 
-def detect_java(root: Path) -> dict[str, Any]:
-    """探测 Java 25 运行环境并报告缺失原因。"""
-    java_home = os.environ.get("LEXIFLOW_JAVA_HOME", "")
-    if java_home and (Path(java_home) / "bin" / "java").is_file():
-        return {"available": True, "source": "LEXIFLOW_JAVA_HOME", "path": java_home}
-    local_jdk = root / ".local" / "toolchains" / "jdk-25"
-    if (local_jdk / "bin" / "java").is_file():
-        return {"available": True, "source": "local-toolchain", "path": str(local_jdk)}
-    return {
-        "available": bool(shutil.which("java")),
-        "source": "PATH",
-        "path": shutil.which("java") or "",
-    }
-
-
 def diagnose(
     root: str | Path = ".",
     required: list[str] | None = None,
@@ -99,8 +84,6 @@ def diagnose(
     for name in ["python3", "git"] if required is None else required:
         if name == "python3":
             info = detect_python()
-        elif name == "java":
-            info = detect_java(repo)
         elif name == "java-25-temurin":
             info = detect_java_25_temurin(repo, source)
         elif name == "postgres-test-jdbc-url":
@@ -135,16 +118,11 @@ def diagnose(
                 "path": "",
             }
         elif name in {
-            "release-amd64-docker-host",
             "release-arm64-docker-host",
             "release-gradle-cache",
             "release-npm-cache",
         }:
-            variable = (
-                "LEXIFLOW_RELEASE_AMD64_DOCKER_HOST"
-                if name == "release-amd64-docker-host"
-                else "LEXIFLOW_RELEASE_ARM64_DOCKER_HOST"
-            )
+            variable = "LEXIFLOW_RELEASE_ARM64_DOCKER_HOST"
             if name in {"release-gradle-cache", "release-npm-cache"}:
                 variable = (
                     "LEXIFLOW_RELEASE_GRADLE_CACHE"
@@ -211,7 +189,6 @@ def execution_environment(
                 )
             values["LEXIFLOW_CANDIDATE_RUNTIME_REQUEST"] = value
         elif name in {
-            "release-amd64-docker-host",
             "release-arm64-docker-host",
             "release-gradle-cache",
             "release-npm-cache",
@@ -231,11 +208,7 @@ def execution_environment(
                     raise JavaRuntimeError(f"explicit {name} is unavailable")
                 values[variable] = value
             else:
-                variable = (
-                    "LEXIFLOW_RELEASE_AMD64_DOCKER_HOST"
-                    if name == "release-amd64-docker-host"
-                    else "LEXIFLOW_RELEASE_ARM64_DOCKER_HOST"
-                )
+                variable = "LEXIFLOW_RELEASE_ARM64_DOCKER_HOST"
                 value = source.get(variable, "").strip()
                 if not value:
                     raise JavaRuntimeError(f"explicit {name} is unavailable")

@@ -3,8 +3,6 @@ description = "只读审查领域归属、依赖方向、运行流程与 ADR 一
 sandbox_mode = "read-only"
 
 developer_instructions = """
-先读 AGENTS.md；共享调度、交接、模型选择与结果字段以 harness/agent-policy.manifest.yaml 为准，角色不固定模型、不自行升级。
-只读取相关设计和模块边界；检查循环依赖、基础设施泄漏、跨领域持久化访问、英文字幕路径上的模型阻塞，以及文档与机器合同冲突。不编辑文件。
-按共享结果合同逐任务报告验证、效果检查与风险；只回调紧凑信号。遵守 Git 护栏，不自动提交。
+先读 AGENTS.md 与 harness/agent-policy.manifest.yaml 的 subagent_protocol、codex_dispatch；共享规则仅由这些入口维护。
+只读审查相关设计与模块边界：领域归属、循环依赖、基础设施泄漏、跨领域持久化访问、英文字幕路径上的模型阻塞，以及文档与机器合同一致性。
 """
-

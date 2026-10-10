@@ -40,7 +40,7 @@ lf_set_release() {
   LF_RELEASE_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd -P) || return 1
   LF_CURRENT_KEY=$LF_RELEASE_KEY
   [ -z "${LF_INSTALL_ID:-}" ] || LF_PROJECT="lf_${LF_INSTALL_ID}_$(printf '%s' "$LF_CURRENT_KEY" | cut -c1-16)"
-  LF_COMPOSE_PATH=${LF_COMPOSE_PATH:-compose.yaml}
+  [ -n "${LF_COMPOSE_PATH:-}" ] || return 1
 }
 lf_make_record() {
   local dir="$LF_ROOT/releases/$LF_RELEASE_KEY" entry hash tmp value secret result
@@ -51,7 +51,7 @@ lf_make_record() {
   lf_safe_absolute_file "$0" || return 1
   entry=$0
   lf_safe_absolute_file "$entry" || return 1
-  hash=$(lf_sha "$entry") || return 1
+  hash=$(lf_sha256 "$entry") || return 1
   case "$LF_PLATFORM" in linux/amd64|linux/arm64) ;; *) return 1;; esac
   [ "$LF_PROJECT" = "lf_${LF_INSTALL_ID}_$(printf '%s' "$LF_RELEASE_KEY" | cut -c1-16)" ] || return 1
   [ ! -L "$dir" ] || return 1
@@ -63,7 +63,7 @@ lf_make_record() {
   fi
   tmp="$dir/.record-$LF_LOCK_TOKEN"
   [ ! -e "$tmp" ] && [ ! -L "$tmp" ] || return 1
-  (umask 077; set -C; printf 'key=%s\nentry=%s\nsha256=%s\nplatform=%s\nproject=%s\n' "$LF_RELEASE_KEY" "$entry" "$hash" "$LF_PLATFORM" "$LF_PROJECT" > "$tmp") 2>/dev/null || return 1
+  (umask 077; set -C; printf 'key=%s\nentry=%s\nsha256=%s\nplatform=%s\n' "$LF_RELEASE_KEY" "$entry" "$hash" "$LF_PLATFORM" > "$tmp") 2>/dev/null || return 1
   if [ -e "$dir/record" ] || [ -L "$dir/record" ]; then
     result=0; cmp -s "$dir/record" "$tmp" || result=$?
     rm -f "$tmp" || return 1
@@ -139,14 +139,6 @@ lf_secret_publish() {
   lf_secret_context_check "$key" "$dir" || return 1
   lf_secret_file_verify "$dir/postgres-password" && lf_secret_file_verify "$dir/app-password" || return 1
   lf_secret_pending_clean "$key" "$dir"
-}
-lf_load_release() {
-  lf_record_verify "$1" || return 1
-  LF_CURRENT_KEY=$1
-  LF_RELEASE_ROOT=$(CDPATH= cd -- "$(dirname -- "$LF_DELEGATE_ENTRY")" 2>/dev/null && pwd -P) || return 1
-  lf_verify_release || return 1
-  LF_PROJECT="lf_${LF_INSTALL_ID}_$(printf '%s' "$1" | cut -c1-16)"
-  lf_select_platform "$LF_PLATFORM" || return 1
 }
 lf_run_prepare() {
   local parent next_active item name daemon_id
@@ -224,7 +216,6 @@ lf_delegate() {
   lf_select_platform "$LF_PLATFORM" || return 1
   case "$action" in verify-record) lf_docker_identity_check;; prepare) lf_docker_prepare;; start) lf_docker_start;; stop) lf_docker_stop;; remove) lf_docker_remove;; *) return 1;; esac
 }
-lf_call() { "$LF_DELEGATE_ENTRY" _project "$LF_ROOT" "$LF_RELEASE_KEY" "$LF_LOCK_TOKEN" "$1"; }
 lf_recovery_required() { printf '%s\n' LF_RECOVERY_REQUIRED >&2; return 1; }
 lf_verify_pair() {
   lf_delegate "$1" verify-record || return 1

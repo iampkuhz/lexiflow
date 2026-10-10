@@ -1,17 +1,14 @@
 # Java 产品构建与检查的唯一技术入口；Python 只编排证据，不复刻 Java 扫描。
 schema_version: lexiflow.java-product.v1
-status: active
 backend:
   language: java
   java_release: 25
   distribution: Eclipse Temurin
   build:
     tool: gradle-wrapper
-    version: 9.7.1
     dsl: kotlin
   framework:
     name: spring-boot
-    version: 4.1.1
     allowed_layers: [composition-root, inbound-adapter, outbound-adapter]
     forbidden_layers: [domain, application]
   runtimes: [api]
@@ -35,8 +32,6 @@ verification:
   incremental_delivery: python3 -m scripts.environment.java_exec backend/gradlew -p backend check
   full_delivery: python3 -m scripts.environment.java_exec backend/gradlew -p backend deliveryFull
   gate_selection:
-    incremental: [check]
-    full: [deliveryFull]
     excluded_diagnostics: [architectureTest, verifyProductLanguage]
   diagnostic_targets:
     architecture: python3 -m scripts.environment.java_exec backend/gradlew -p backend architectureTest

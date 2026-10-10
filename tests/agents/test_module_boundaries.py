@@ -34,25 +34,15 @@ class AgentModuleBoundaryTest(unittest.TestCase):
         self.assertFalse((AGENTS / "qoder_task.py").exists())
         self.assertFalse((AGENTS / "codex_work_package.py").exists())
 
-    def test_start_handshake_has_only_three_runner_states(self) -> None:
+    def test_disabled_dispatch_has_no_start_handshake(self) -> None:
         from scripts.agents.qoder import runner as qoder_task
-        self.assertEqual({"STARTED", "STARTING", "FAILED"}, {
-            "STARTED", "STARTING", "FAILED"
-        })
-        self.assertGreater(qoder_task.START_HANDSHAKE_SECONDS, 0)
+        self.assertFalse(hasattr(qoder_task, "_start_handshake"))
+        self.assertFalse(hasattr(qoder_task, "START_HANDSHAKE_SECONDS"))
 
 if __name__ == "__main__":
     unittest.main()
 
 class RunnerRecordStateTest(unittest.TestCase):
-    def test_start_handshake_timeout_is_starting_not_failed(self) -> None:
-        from scripts.agents.qoder import runner as qoder_task
-        from unittest.mock import patch
-        import tempfile
-        with tempfile.TemporaryDirectory() as directory:
-            with patch.object(qoder_task._lifecycle, "wait_for_started", return_value=False):
-                self.assertEqual(qoder_task._start_handshake(Path(directory)), "STARTING")
-
     def test_status_requires_a_bound_task_record(self) -> None:
         from scripts.agents.qoder import runner as qoder_task
         import tempfile

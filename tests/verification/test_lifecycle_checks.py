@@ -53,17 +53,15 @@ class LifecycleCheckTest(unittest.TestCase):
             "result_contract",
         ):
             self.assertEqual(base[key], change[key], key)
-        self.assertEqual(["node", "ops/release/lifecycle-check.mjs"], base["command"])
+        self.assertEqual(["node", "ops/release/check.mjs", "--suite", "lifecycle"], base["command"])
         self.assertEqual(["node", "git", "sh", "mktemp", "sha256-tool"], base["required_environment"])
         self.assertEqual([], base["module_dependencies"])
         for name in (
             "manifest.mjs",
             "package.mjs",
             "runtime-verification.sh",
-            "lifecycle-check.mjs",
             "tests/lifecycle.test.mjs",
             "runtime-entry.mjs",
-            "lifecycle.mjs",
             "lifecycle.sh",
             "lifecycle-state.sh",
             "lifecycle-docker.sh",
@@ -238,12 +236,12 @@ class LifecycleInstallCheckTest(LifecycleCheckTest):
         first = self.by_id[self.base]
         second = self.by_id[self.base + "-on-change"]
         self.assertEqual(
-            first["command"], ["node", "ops/release/lifecycle-install-check.mjs"]
+            first["command"], ["node", "ops/release/check.mjs", "--suite", "lifecycle-install"]
         )
         self.assertEqual(first["input_paths"], second["input_paths"])
         self.assertEqual(["node", "git", "sh", "bash", "mktemp", "sha256-tool"], first["required_environment"])
         self.assertEqual(first["required_environment"], second["required_environment"])
-        self.assertIn("ops/release/lifecycle.mjs", first["input_paths"])
+        self.assertIn("ops/release/runtime-entry.mjs", first["input_paths"])
         self.assertIn("ops/release/lifecycle.sh", first["input_paths"])
         for name in (
             "ops/release/lifecycle-state.sh",

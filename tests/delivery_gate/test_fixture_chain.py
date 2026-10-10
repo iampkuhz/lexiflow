@@ -1,7 +1,7 @@
 from __future__ import annotations
 import contextlib,io,json,os,unittest
 from unittest.mock import patch
-from scripts.delivery_gate import submit,validate,review,check_conditions
+from scripts.delivery_gate import submit,validate_batch,review,check_conditions
 from scripts.delivery_gate.status import query_status
 from tests.delivery_gate.fixtures import DeliveryGateFixture,PRODUCER_SESSION,VALIDATOR_SESSION,REVIEWER_SESSION,make_mock_runtime
 class TestActualFourScenarioChain(unittest.TestCase):
@@ -20,18 +20,18 @@ class TestActualFourScenarioChain(unittest.TestCase):
   with patch.dict(os.environ,{**env,'CODEX_THREAD_ID':PRODUCER_SESSION}):
    sub=submit(root,task_id='LF-TSK-TEST-0001',change_report_id=self.f.report_id,confirm_scope_report_id=self.f.report_id)
   with patch.dict(os.environ,{**env,'CODEX_THREAD_ID':VALIDATOR_SESSION}):
-   val=validate(root,submission_id=sub['submission_id'])
+   val=validate_batch(root,submission_ids=[sub['submission_id']])[0]
   with patch.dict(os.environ,{**env,'CODEX_THREAD_ID':REVIEWER_SESSION}):
-   review(root,submission_id=sub['submission_id'],validation_id=val['validation_id'],decision='PASS',findings=[{'finding_id':'f','severity':'PASS','code':'reviewed','evidence':[{'detail':'synthetic frozen diff'}]}])
+   review(root,validation_id=val['validation_id'],decision='PASS',findings=[{'finding_id':'f','severity':'PASS','code':'reviewed','evidence':[{'detail':'synthetic frozen diff'}]}])
    self.assertEqual(check_conditions(root,submission_id=sub['submission_id'])['result'],'PASS')
  @patch("scripts.agents.local_codex_runtime.discover")
  def test_daily_report_submit_validate_review_check(self,m):
   m.return_value=make_mock_runtime(PRODUCER_SESSION)
   sub=submit(self.f.root,task_id="LF-TSK-TEST-0001",change_report_id=self.f.report_id,confirm_scope_report_id=self.f.report_id)
   m.return_value=make_mock_runtime(VALIDATOR_SESSION)
-  val=validate(self.f.root,submission_id=sub["submission_id"])
+  val=validate_batch(self.f.root,submission_ids=[sub["submission_id"]])[0]
   m.return_value=make_mock_runtime(REVIEWER_SESSION)
-  review(self.f.root,submission_id=sub["submission_id"],validation_id=val["validation_id"],decision="PASS",findings=[{"finding_id":"f","severity":"PASS","code":"reviewed","evidence":[{"detail":"frozen diff"}]}])
+  review(self.f.root,validation_id=val["validation_id"],decision="PASS",findings=[{"finding_id":"f","severity":"PASS","code":"reviewed","evidence":[{"detail":"frozen diff"}]}])
   self.assertEqual(check_conditions(self.f.root,submission_id=sub["submission_id"])["result"],"PASS")
  @patch("scripts.agents.local_codex_runtime.discover")
  def test_public_cli(self,m):
@@ -41,7 +41,7 @@ class TestActualFourScenarioChain(unittest.TestCase):
    out=io.StringIO()
    with contextlib.redirect_stdout(out):self.assertEqual(main(args,root=self.f.root),0)
    return json.loads(out.getvalue())
-  sub=run(["submit","--task-id","LF-TSK-TEST-0001","--change-report-id",self.f.report_id,"--confirm-scope-report-id",self.f.report_id]);m.return_value=make_mock_runtime(VALIDATOR_SESSION);val=run(["validate","--submission-id",sub["submission_id"]]);m.return_value=make_mock_runtime(REVIEWER_SESSION);run(["review","--submission-id",sub["submission_id"],"--validation-id",val["validation_id"],"--findings-json",str(findings),"--decision","PASS"]);self.assertEqual(run(["check","--submission-id",sub["submission_id"]])["result"],"PASS")
+  sub=run(["submit","--task-id","LF-TSK-TEST-0001","--change-report-id",self.f.report_id,"--confirm-scope-report-id",self.f.report_id]);m.return_value=make_mock_runtime(VALIDATOR_SESSION);val=run(["validate","--submission-id",sub["submission_id"]]);m.return_value=make_mock_runtime(REVIEWER_SESSION);run(["review","--validation-id",val["validation_id"],"--findings-json",str(findings),"--decision","PASS"]);self.assertEqual(run(["check","--submission-id",sub["submission_id"]])["result"],"PASS")
  def test_public_cli_rejects_repo_root_override(self):
   from scripts.delivery_gate.__main__ import main
   with contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):

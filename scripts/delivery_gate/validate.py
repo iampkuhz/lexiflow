@@ -21,7 +21,6 @@ from scripts.delivery_gate.records import (
     read_regular_bytes,
     sha256_bytes,
 )
-from scripts.delivery_gate.requirements import requirements_are_current
 from scripts.verification import verify_frozen_inputs, verify_profiles
 from scripts.delivery_gate.acceptance import binding, verify_plan
 
@@ -115,13 +114,6 @@ def _verify_frozen(repo: Path, submission: dict[str, Any]) -> dict[str, Any]:
         raise ValidationError(
             "frozen-inputs-invalid", "submission has no complete verification freeze"
         )
-    if not requirements_are_current(repo, submission.get("task_requirements")):
-        raise ValidationError(
-            "task-requirements-drift", "task source/version/dependencies changed"
-        )
-    required = submission["task_requirements"].get("required_check_ids")
-    if not isinstance(required, list):
-        raise ValidationError("frozen-inputs-invalid", "task required checks missing")
     verify_plan(repo, submission)
     if not verify_frozen_inputs(repo, freeze):
         raise ValidationError(
@@ -378,8 +370,3 @@ def validate_batch(
             _publish_validation(repo, sid, submission, runtime, freeze, report)
         )
     return outputs
-
-
-def validate(root: str | Path, *, submission_id: str) -> dict[str, Any]:
-    """保持既有单 Task API 和返回结构。"""
-    return validate_batch(root, submission_ids=[submission_id])[0]

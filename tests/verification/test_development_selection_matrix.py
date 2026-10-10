@@ -181,6 +181,7 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
                 "eng.release.docker-node-on-change", "eng.backend.build-contract-on-change",
                 "eng.release.lifecycle-install-on-change", "eng.release.lifecycle-on-change",
                 "eng.release.build-on-change", "eng.agents.module-tests",
+                "eng.release.runtime-entry-on-change",
                 "eng.delivery-gate.module-tests-on-change", "eng.verification.module-tests-on-change",
                 "eng.verification.module-tests",
             },
@@ -260,7 +261,7 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
         consumer_sources = {
             "eng.delivery-gate.module-tests-on-change": (
                 "scripts/verification/", "scripts/agents/",
-                "harness/agent-policy.manifest.yaml", "harness/agent-runtime.manifest.yaml",
+                "harness/agent-policy.manifest.yaml",
             ),
             "eng.extension.quality-on-change": ("backend/", "infra/postgres/"),
         }

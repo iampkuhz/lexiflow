@@ -13,7 +13,6 @@ import json
 import os
 import re
 import stat
-import subprocess
 import sys
 import tempfile
 import time
@@ -45,7 +44,7 @@ _UUID_RE = re.compile(
 )
 _ID_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 
-# 回调认领文件名，与 runner._callback_claim_path 共享
+# 回调认领文件名，由 worker 与 watchdog 共享
 CALLBACK_CLAIM = "callback.claim"
 CALLBACK_FILE = "callback.json"
 LOCK_FILE = "lifecycle.lock"
@@ -251,32 +250,6 @@ def record_started(run_dir: Path, pid: int, session_id: str = "") -> None:
 # --- 看门狗 ---
 
 
-def start_watchdog(run_dir: Path, repo_root: Path) -> subprocess.Popen:
-    """启动 watchdog 后台进程。stderr 写入 watchdog.log 供诊断。"""
-    watchdog_cmd = [
-        sys.executable,
-        str(Path(__file__).resolve()),
-        "_watchdog",
-        str(run_dir.parent),  # 任务目录
-        run_dir.name,  # 运行标识
-        str(repo_root),
-    ]
-    # stderr 写入日志文件供诊断，stdout 仍丢弃
-    log_path = run_dir / "watchdog.log"
-    log_fd = _open_private_file(log_path, os.O_CREAT | os.O_APPEND | os.O_WRONLY)
-    try:
-        return subprocess.Popen(
-            watchdog_cmd,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=log_fd,
-            start_new_session=True,
-            cwd=str(repo_root),
-        )
-    finally:
-        os.close(log_fd)
-
-
 def watchdog_entry(task_dir_str: str, run_id: str, repo_root_str: str) -> int:
     """Watchdog 入口，由 _watchdog 子命令调用。初始化在顶层异常保护内。"""
     task_dir = Path(task_dir_str)
@@ -463,7 +436,7 @@ def watchdog_check(
 
         if not cb_exists and not claim_exists:
             # 从未尝试发送 - 补发首次通知
-            send_callback(run_dir, run_id, completion, task, repo_root)
+            send_callback(run_dir, completion, task, repo_root)
             return "sent_first"
 
         return "continue"
@@ -479,6 +452,13 @@ def watchdog_check(
             # 尝试一次异常通知（使用相同 claim 闸门）
             if not claim_path.exists() and not cb_path.exists():
                 anomaly_completion = {
+                    "run_id": run_id,
+                    "task_version": task.get("task_version"),
+                    "change_version": task.get("change_version"),
+                    "work_package_id": task.get("work_package_id"),
+                    "task_ids": task.get("task_ids"),
+                    "task_versions": task.get("task_versions"),
+                    "change_versions": task.get("change_versions"),
                     "status": "unknown",
                     "exit_code": "",
                     "task_id": task.get("task_id", ""),
@@ -490,7 +470,7 @@ def watchdog_check(
                     "parent_session_id": parent_sid,
                     "error": "worker died without completion",
                 }
-                send_callback(run_dir, run_id, anomaly_completion, task, repo_root)
+                send_callback(run_dir, anomaly_completion, task, repo_root)
 
             return "recorded_unknown"
         # pid 无效（符号链接或非法值）或权限不足（进程存活）
@@ -833,49 +813,6 @@ def record_supersession(old_run_dir: Path, new_run_id: str) -> None:
             lifecycle["status"] = "superseded"
 
         write_lifecycle(old_run_dir, lifecycle)
-
-
-def record_previous_run(new_run_dir: Path, previous_run_id: str) -> None:
-    """在新 run 的生命周期中记录前一个 run。使用 per-run 锁。"""
-    _validate_run_id(previous_run_id)
-    with _run_lock(new_run_dir):
-        lifecycle = read_lifecycle(new_run_dir)
-        previous = lifecycle.get("previous_run_id")
-        if previous and previous != previous_run_id:
-            raise ValueError("previous run already recorded")
-        lifecycle["previous_run_id"] = previous_run_id
-        write_lifecycle(new_run_dir, lifecycle)
-
-
-def has_next_run(old_run_dir: Path) -> bool:
-    """检查旧 run 是否已有后续 run。"""
-    lifecycle = read_lifecycle(old_run_dir)
-    return bool(lifecycle.get("next_run_id"))
-
-
-# --- 等待启动标记 ---
-
-
-def wait_for_started(
-    run_dir: Path,
-    timeout: float = 2.0,
-    poll_interval: float = 0.1,
-    sleep_fn: Callable = time.sleep,
-    clock_fn: Callable = time.monotonic,
-) -> bool:
-    """等待 worker 写入 started.json。
-
-    返回是否在超时前检测到启动确认。
-    """
-    start = clock_fn()
-    path = started_path(run_dir)
-    while True:
-        if path.exists():
-            return True
-        elapsed = clock_fn() - start
-        if elapsed >= timeout:
-            return False
-        sleep_fn(poll_interval)
 
 
 # --- _watchdog 子命令入口 ---

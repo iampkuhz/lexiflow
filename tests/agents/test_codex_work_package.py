@@ -1,3 +1,5 @@
+"""校验精简调用输入、完整冻结工作包及不可变来源链。"""
+
 from __future__ import annotations
 
 import hashlib
@@ -16,7 +18,7 @@ from scripts.agents.codex.work_package import (
     CodexWorkPackagePublisher,
     build_codex_main_task_projection,
 )
-from scripts.agents.local_codex_runtime import discover
+from scripts.agents.local_codex_runtime import bind_main_task, discover
 
 
 class CodexWorkPackagePublisherTest(unittest.TestCase):
@@ -125,33 +127,17 @@ class CodexWorkPackagePublisherTest(unittest.TestCase):
             "task_versions": {task: 2 for task in self.tasks},
             "change_versions": {task: "1.0.0" for task in self.tasks},
             "estimated_minutes": 180,
-            "primary_owner": "LF-WS-QLT",
             "contract_boundary": "fixture",
             "allowed_files": "scripts/agents/codex/work_package.py",
             "forbidden_files": "secrets/**",
             "required_context": "AGENTS.md",
-            "expected_outputs_by_task": {
-                task: f"deliverable {i}" for i, task in enumerate(self.tasks, 1)
-            },
-            "acceptance_by_task": {
-                task: {
-                    "acceptance_criteria": [f"criterion {i}"],
-                    "acceptance_evidence": [f"evidence {i}"],
-                }
-                for i, task in enumerate(self.tasks, 1)
-            },
-            "validation_commands": {
-                task: f"python3 -m unittest case{i}"
-                for i, task in enumerate(self.tasks, 1)
-            },
             "failure_policy": "record results",
-            "parent_client": "codex",
         }
 
     def _runtime(self) -> dict:
         if self.runtime_identity is None:
             runtime = discover(self.repo)
-            binding = runtime.bind({"parent_client": "codex"}, self.run_id)
+            binding = runtime.bind({}, self.run_id)
             binding.persist_immutable(self.repo)
             self.runtime_identity = dict(binding.identity)
         return dict(self.runtime_identity)
@@ -183,6 +169,220 @@ class CodexWorkPackagePublisherTest(unittest.TestCase):
                 },
             }
         return values
+
+    def _replace_projection(self, mutate) -> None:
+        base = self.repo / "tmp/quality/codex-work-packages" / self.run_id
+        task = self.tasks[0]
+        task_dir = base / "tasks" / task
+
+        def rewrite(path, value):
+            content = json.dumps(value).encode()
+            path.write_bytes(content)
+            return {
+                "locator": path.relative_to(self.repo).as_posix(),
+                "sha256": hashlib.sha256(content).hexdigest(),
+                "bytes": len(content),
+            }
+
+        projection = json.loads((task_dir / "task-projection.json").read_text())
+        mutate(projection)
+        descriptor = rewrite(task_dir / "task-projection.json", projection)
+        completion = json.loads((task_dir / "completion.json").read_text())
+        completion["artifacts"]["task_projection"] = descriptor
+        completion_descriptor = rewrite(task_dir / "completion.json", completion)
+        signal = json.loads((task_dir / "signal.json").read_text())
+        signal["artifact_locators"]["completion"] = completion_descriptor
+        signal_descriptor = rewrite(task_dir / "signal.json", signal)
+        package = json.loads((base / "package-completion.json").read_text())
+        package["tasks"][task]["artifacts"].update(
+            {
+                "task_projection": descriptor,
+                "completion": completion_descriptor,
+                "signal": signal_descriptor,
+            }
+        )
+        rewrite(base / "package-completion.json", package)
+
+    def test_public_caller_rejects_removed_inputs_and_identity(self) -> None:
+        for field in (
+            "primary_owner",
+            "expected_outputs_by_task",
+            "acceptance_by_task",
+            "validation_commands",
+            "parent_client",
+        ):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(
+                    CodexWorkPackageError, "caller-contract-invalid"
+                ):
+                    CodexWorkPackagePublisher(self.repo).publish(
+                        {**self._caller(), field: "forged"},
+                        self._runtime(),
+                        self._outcomes(),
+                    )
+
+    def test_frozen_contract_derives_catalog_and_preserves_original_layout(self):
+        caller = self._caller()
+        publisher = CodexWorkPackagePublisher(self.repo)
+        publisher.publish(caller, self._runtime(), self._outcomes())
+        task = self.tasks[0]
+        path = (
+            self.repo
+            / "tmp/quality/codex-work-packages"
+            / self.run_id
+            / "tasks"
+            / task
+            / "task-projection.json"
+        )
+        projection = json.loads(path.read_text())
+        frozen = projection["caller_contract"]
+        self.assertEqual(len(caller), 11)
+        self.assertEqual(len(frozen), 16)
+        self.assertEqual(len(projection), 21)
+        self.assertEqual(frozen["primary_owner"], "LF-WS-QLT")
+        self.assertEqual(frozen["parent_client"], projection["parent_client"])
+        self.assertEqual(frozen["expected_outputs_by_task"][task], "deliverable 1")
+        self.assertEqual(
+            frozen["acceptance_by_task"][task]["acceptance_criteria"], ["criterion 1"]
+        )
+        self.assertEqual(
+            frozen["acceptance_by_task"][task]["acceptance_evidence"], ["evidence 1"]
+        )
+        self.assertEqual(
+            frozen["validation_commands"][task], projection["validation_command"]
+        )
+        self.assertEqual(publisher.verify(self.run_id)["status"], "PASS")
+
+    def test_current_catalog_cannot_fill_missing_frozen_field(self):
+        publisher = CodexWorkPackagePublisher(self.repo)
+        publisher.publish(self._caller(), self._runtime(), self._outcomes())
+        for field in (
+            "primary_owner",
+            "expected_outputs_by_task",
+            "acceptance_by_task",
+            "validation_commands",
+            "parent_client",
+        ):
+            with self.subTest(field=field):
+                # Each mutation begins with the original fixture; failure is not a hash mismatch.
+                path = (
+                    self.repo
+                    / "tmp/quality/codex-work-packages"
+                    / self.run_id
+                    / "tasks"
+                    / self.tasks[0]
+                    / "task-projection.json"
+                )
+                original = json.loads(path.read_text())["caller_contract"]
+                self._replace_projection(
+                    lambda value: value["caller_contract"].pop(field)
+                )
+                with self.assertRaisesRegex(
+                    CodexWorkPackageError, "caller-contract-invalid"
+                ):
+                    publisher.verify(self.run_id)
+                self._replace_projection(
+                    lambda value: value.update(caller_contract=original)
+                )
+
+    def test_frozen_acceptance_cannot_be_completed_from_current_catalog(self):
+        publisher = CodexWorkPackagePublisher(self.repo)
+        publisher.publish(self._caller(), self._runtime(), self._outcomes())
+        self._replace_projection(
+            lambda value: value["caller_contract"]["acceptance_by_task"][
+                self.tasks[0]
+            ].pop("acceptance_evidence")
+        )
+        with self.assertRaisesRegex(
+            CodexWorkPackageError, "frozen acceptance is incomplete"
+        ):
+            publisher.verify(self.run_id)
+
+    def test_native_main_binding_uses_fixed_projection_builder_without_caller_identity(
+        self,
+    ):
+        with patch.dict(os.environ, {"CODEX_THREAD_ID": self.parent_id}):
+            result = bind_main_task(self.repo, self.tasks[0])
+        self.assertEqual(result["result"], "PASS")
+        projection = json.loads((self.repo / result["projection"]).read_text())
+        self.assertEqual(projection["agent_id"], "codex-session-" + self.parent_id)
+        self.assertEqual(
+            projection["goal"],
+            "Record current source for explicit independent Gate validation",
+        )
+        self.assertEqual(
+            projection["required_context"],
+            "AGENTS.md; harness/README.md; current catalog task",
+        )
+        self.assertEqual(
+            projection["failure_policy"],
+            "BLOCKED on missing current evidence; never infer acceptance",
+        )
+
+    def test_frozen_source_and_acceptance_tampering_fail_without_hash_error(self):
+        publisher = CodexWorkPackagePublisher(self.repo)
+        publisher.publish(self._caller(), self._runtime(), self._outcomes())
+        self._replace_projection(
+            lambda value: value.update(task_source="planning/forged.yaml")
+        )
+        with self.assertRaisesRegex(CodexWorkPackageError, "completion-invalid"):
+            publisher.verify(self.run_id)
+        self._replace_projection(
+            lambda value: value.update(
+                task_source="planning/workstreams.yaml", acceptance_criteria=["forged"]
+            )
+        )
+        with self.assertRaisesRegex(CodexWorkPackageError, "completion-invalid"):
+            publisher.verify(self.run_id)
+
+    def test_same_version_catalog_contract_drift_cannot_rewrite_frozen_evidence(self):
+        publisher = CodexWorkPackagePublisher(self.repo)
+        publisher.publish(self._caller(), self._runtime(), self._outcomes())
+        path = self.repo / "planning/workstreams.yaml"
+        original = path.read_text()
+        for old, new in (
+            ("deliverable 1", "new output"),
+            ("criterion 1", "new criterion"),
+            ("evidence 1", "new evidence"),
+            ("LF-WS-QLT", "LF-WS-OTHER"),
+            ("python3 -m unittest case1", "python3 -m unittest other"),
+        ):
+            with self.subTest(field=old):
+                path.write_text(original.replace(old, new))
+                with self.assertRaisesRegex(CodexWorkPackageError, "catalog-drift"):
+                    publisher.verify(self.run_id)
+        path.write_text(original)
+
+    def test_publish_checks_locked_versions_before_freezing(self):
+        for field, version in (("task_versions", 1), ("change_versions", "0.0.0")):
+            with self.subTest(field=field):
+                caller = self._caller()
+                caller[field][self.tasks[0]] = version
+                with self.assertRaisesRegex(CodexWorkPackageError, "catalog-drift"):
+                    CodexWorkPackagePublisher(self.repo).publish(
+                        caller, self._runtime(), self._outcomes()
+                    )
+
+    def test_catalog_owner_is_inherited_and_mixed_owners_are_rejected(self):
+        path = self.repo / "planning/workstreams.yaml"
+        catalog = yaml.safe_load(path.read_text())
+        ws = catalog["workstreams"][0]
+        ws["id"] = "LF-WS-QLT"
+        records = ws["epics"][0]["capabilities"][0]["seed_tasks"]
+        for record in records:
+            record.pop("owner")
+        path.write_text(yaml.safe_dump(catalog))
+        records[0]["owner"] = "LF-WS-OTHER"
+        path.write_text(yaml.safe_dump(catalog))
+        with self.assertRaisesRegex(CodexWorkPackageError, "share primary_owner"):
+            CodexWorkPackagePublisher(self.repo).publish(
+                self._caller(), self._runtime(), self._outcomes()
+            )
+        records[0].pop("owner")
+        path.write_text(yaml.safe_dump(catalog))
+        publisher = CodexWorkPackagePublisher(self.repo)
+        publisher.publish(self._caller(), self._runtime(), self._outcomes())
+        self.assertEqual(publisher.verify(self.run_id)["status"], "PASS")
 
     def test_publishes_exact_layout_and_verifies_hashes(self) -> None:
         completion = CodexWorkPackagePublisher(self.repo).publish(
@@ -300,9 +500,6 @@ class CodexWorkPackagePublisherTest(unittest.TestCase):
             self.repo,
             self.tasks[0],
             runtime,
-            goal="Main fixture",
-            required_context="current catalog",
-            failure_policy="fail closed",
         )
         self.assertEqual(projection["task_id"], self.tasks[0])
         self.assertNotIn("task_ids", projection)
@@ -315,9 +512,6 @@ class CodexWorkPackagePublisherTest(unittest.TestCase):
             self.repo,
             self.tasks[0],
             runtime,
-            goal="Main fixture",
-            required_context="current catalog",
-            failure_policy="fail closed",
         )
         self.assertEqual(changed["task_version"], 3)
 
@@ -327,9 +521,6 @@ class CodexWorkPackagePublisherTest(unittest.TestCase):
                 self.repo,
                 self.tasks[0],
                 {**self._runtime(), "agent_id": "/root/child"},
-                goal="child cannot claim Main route",
-                required_context="current catalog",
-                failure_policy="fail closed",
             )
 
     def test_single_task_package_dispatches_and_publishes_projection(self) -> None:
@@ -339,9 +530,6 @@ class CodexWorkPackagePublisherTest(unittest.TestCase):
         for field in (
             "task_versions",
             "change_versions",
-            "expected_outputs_by_task",
-            "acceptance_by_task",
-            "validation_commands",
         ):
             caller[field] = {task: caller[field][task]}
         caller["estimated_minutes"] = 30
@@ -375,9 +563,6 @@ class CodexWorkPackagePublisherTest(unittest.TestCase):
         for field in (
             "task_versions",
             "change_versions",
-            "expected_outputs_by_task",
-            "acceptance_by_task",
-            "validation_commands",
         ):
             caller[field] = {task: caller[field][task]}
         caller["estimated_minutes"] = 30
@@ -420,9 +605,7 @@ class CodexWorkPackagePublisherTest(unittest.TestCase):
 
         # A publication made while the source existed must not remain valid
         # after its native provenance is removed.
-        discover(self.repo).bind(
-            {"parent_client": "codex"}, self.run_id
-        ).persist_immutable(self.repo)
+        discover(self.repo).bind({}, self.run_id).persist_immutable(self.repo)
         publisher.publish(self._caller(), runtime, self._outcomes())
         binding.unlink()
         with self.assertRaises(CodexWorkPackageError) as caught:

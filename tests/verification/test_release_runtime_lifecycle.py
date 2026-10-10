@@ -166,7 +166,7 @@ class TestReleaseRuntimeLifecycle(unittest.TestCase):
                 ),
             ):
                 result = lifecycle.execute_lifecycle(
-                    root, root, evidence, tuple(bindings), {"PATH": "/usr/bin:/bin"}
+                    root, evidence, tuple(bindings), {"PATH": "/usr/bin:/bin"}
                 )
             self.assertEqual(len(result["platforms"]), 1)
             self.assertEqual(result["platforms"][0]["platform"], "linux/arm64")
@@ -296,7 +296,7 @@ class TestReleaseRuntimeLifecycle(unittest.TestCase):
 
     def test_missing_candidates_rejected(self):
         with self.assertRaisesRegex(ConsumerError, "release-candidate-not-assembled"):
-            lifecycle.execute_lifecycle(None, None, {}, (), {})
+            lifecycle.execute_lifecycle(None, {}, (), {})
 
     def test_postgres_unhealthy_is_not_accepted_when_api_is_healthy(self):
         binding = SimpleNamespace(

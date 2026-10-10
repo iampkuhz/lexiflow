@@ -243,15 +243,6 @@ def _execute(
             not in {"check_id", "module", "scope", "triggers", "selection_reasons"}
         }
         operation_fingerprint = fingerprint_json(operation)
-        operation_key = fingerprint_json(
-            {
-                "operation_fingerprint": operation_fingerprint,
-                "input_files": frozen[check["check_id"]]["files"],
-                "input_missing": frozen[check["check_id"]]["missing"],
-                "runner_identity": id(runner) if runner is not None else "native",
-                "transaction": transaction.nonce if transaction is not None else run_id,
-            }
-        )
         execution_key = fingerprint_json(
             {
                 "operation_fingerprint": operation_fingerprint,
@@ -271,8 +262,7 @@ def _execute(
             and transaction_reuse
             and not transport_active
         ):
-            # Operation 候选只是索引；只有包含环境指纹的 execution_key 命中
-            # 才能复用，环境不同就正常执行当前视图。
+            # 只有包含环境指纹的 execution_key 命中才能复用；环境不同则执行当前视图。
             source = transaction.executions.get(execution_key)
             # 每份 profile 有自己的 run_id；同 scope 也必须留下可追溯来源 witness。
             cross_view_source = source is not None and source["run_id"] != run_id
@@ -357,9 +347,6 @@ def _execute(
                     "toolchain": toolchain,
                     "profile": view_context,
                 }
-                transaction.operations[operation_key] = transaction.executions[
-                    execution_key
-                ]
         if stop_on_blocked and result.get("status") in {"FAIL", "BLOCKED"}:
             stopped_reason = (
                 "prior-check-failed"
@@ -1244,20 +1231,7 @@ def verify_profiles(
                 for profile, is_stale in zip(frozen_profiles, stale, strict=True)
             ]
         reports = []
-        for index, (profile, is_stale) in enumerate(
-            zip(frozen_profiles, stale, strict=True)
-        ):
-            if is_stale:
-                reports.append(
-                    _error_report(
-                        "FAIL",
-                        "frozen-input-mismatch",
-                        "profile freeze is missing or stale",
-                        str(uuid.uuid4()),
-                        scope=_profile_scope(profile),
-                    )
-                )
-                continue
+        for index, profile in enumerate(frozen_profiles):
             if before_profile is not None and not before_profile(index, profile):
                 reports.append(
                     _error_report(

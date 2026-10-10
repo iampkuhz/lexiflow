@@ -1,26 +1,13 @@
 // 固定发行候选到本机 Podman 安装目录的受限适配；不执行候选内脚本。
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { verifyReleaseCandidate } from '../release/verified-candidate.mjs';
 import { readExtensionFiles } from '../release/archive-identity.mjs';
-import { writePreparedTree } from './prepare-workspace.mjs';
 import { versionedImageReference, deploymentImageTag } from './versioned-images.mjs';
 import { removeVersionedImage } from './versioned-images.mjs';
 
-const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const fail = code => { throw new Error(code); };
-function rejectSymlinkParents(target) {
-  let cursor = path.parse(target).root;
-  for (const part of target.slice(cursor.length).split(path.sep).filter(Boolean).slice(0, -1)) {
-    cursor = path.join(cursor, part);
-    try {
-      const info = fs.lstatSync(cursor);
-      if (!info.isDirectory() || info.isSymbolicLink()) fail('CANDIDATE_TARGET_DRIFT');
-    } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  }
-}
 export function validateCandidateRequest(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).sort().join(',') !== 'candidateDirectory,candidateSha256'
@@ -38,7 +25,7 @@ export async function readCandidate(request) {
   return { ...verified, artifacts, root: path.resolve(request.candidateDirectory) };
 }
 
-export async function installCandidateArtifacts(candidate, { run, installDir, apiPort, includeApi = true, includePostgres = true, persistPlan = null, baseVersion, installationId }) {
+export async function installCandidateArtifacts(candidate, { run, installDir, apiPort, includeApi = true, includePostgres = true, baseVersion, installationId }) {
   if (apiPort !== 18080) fail('CANDIDATE_API_PORT_FIXED');
   const deploymentVersion = deploymentImageTag(baseVersion);
   if (typeof installationId !== 'string' || !/^[a-f0-9]{32}$/.test(installationId)) fail('CANDIDATE_INSTALLATION_REQUIRED');
@@ -85,9 +72,6 @@ export async function installCandidateArtifacts(candidate, { run, installDir, ap
   }
   const stage = path.join(installDir, 'extension');
   try {
-    if (persistPlan) {
-      await writePreparedTree(installDir, [...files].map(([name, bytes]) => ({ path: `extension/${name}`, bytes })), persistPlan);
-    } else {
     if (fs.existsSync(stage)) {
       const observed = new Map(), observedDirs = new Set();
       const expectedDirs = new Set();
@@ -140,60 +124,8 @@ export async function installCandidateArtifacts(candidate, { run, installDir, ap
         try { fs.writeFileSync(fd, content); } finally { fs.closeSync(fd); }
       }
     }
-    }
   } catch (error) { throw error; }
   const end = await verifyReleaseCandidate({ candidateDirectory: candidate.root, candidateSha256: candidate.candidateSha256 });
   if (end.manifestSha256 !== candidate.manifestSha256) fail('CANDIDATE_CHANGED');
   return { apiImage: loadedImages.get('api-image'), postgresImage: loadedImages.get('postgres-image'), datasetPath: bytesPath(candidate.artifacts.dataset), sqlPath: bytesPath(candidate.artifacts.sql) };
 }
-
-export async function copyCandidateArtifact(candidate, role, target) {
-  const item = candidate.artifacts[role];
-  if (!item) fail('CANDIDATE_ARTIFACT_MISSING');
-  const before = await verifyReleaseCandidate({ candidateDirectory: candidate.root, candidateSha256: candidate.candidateSha256 });
-  if (before.manifestSha256 !== candidate.manifestSha256) fail('CANDIDATE_CHANGED');
-  const source = path.join(candidate.root, 'payload', ...item.path.split('/'));
-  const srcFd = fs.openSync(source, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0));
-  let targetFd;
-  try {
-    const inputStat = fs.fstatSync(srcFd);
-    if (!inputStat.isFile() || inputStat.size !== item.bytes) fail('CANDIDATE_CHANGED');
-    rejectSymlinkParents(target);
-    fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-    let existingSize = 0;
-    if (fs.existsSync(target)) {
-      const existing = fs.lstatSync(target);
-      if (!existing.isFile() || existing.isSymbolicLink() || existing.size > item.bytes) fail('CANDIDATE_TARGET_DRIFT');
-      existingSize = existing.size;
-      targetFd = fs.openSync(target, fs.constants.O_RDWR | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0));
-      const opened = fs.fstatSync(targetFd);
-      if (!opened.isFile() || opened.dev !== existing.dev || opened.ino !== existing.ino || opened.size !== existing.size) fail('CANDIDATE_TARGET_DRIFT');
-      const expected = Buffer.alloc(64 * 1024), observed = Buffer.alloc(64 * 1024);
-      for (let offset = 0; offset < existingSize;) {
-        const count = Math.min(expected.length, existingSize - offset);
-        const a = fs.readSync(srcFd, expected, 0, count, offset), b = fs.readSync(targetFd, observed, 0, count, offset);
-        if (a !== count || b !== count || !expected.subarray(0, count).equals(observed.subarray(0, count))) fail('CANDIDATE_TARGET_DRIFT');
-        offset += count;
-      }
-      fs.ftruncateSync(targetFd, 0);
-    } else targetFd = fs.openSync(target, 'wx', 0o600);
-    const digest = crypto.createHash('sha256'), buffer = Buffer.alloc(1024 * 1024);
-    let count = 0;
-    while (true) {
-      const size = fs.readSync(srcFd, buffer, 0, buffer.length, null); if (!size) break;
-      count += size; if (count > item.bytes) fail('CANDIDATE_CHANGED');
-      digest.update(buffer.subarray(0, size));
-      let written = 0; while (written < size) { const amount = fs.writeSync(targetFd, buffer, written, size - written); if (amount <= 0) fail('CANDIDATE_COPY_FAILED'); written += amount; }
-    }
-    fs.fsyncSync(targetFd);
-    const afterStat = fs.fstatSync(srcFd);
-    if (count !== item.bytes || digest.digest('hex') !== item.sha256 || inputStat.dev !== afterStat.dev || inputStat.ino !== afterStat.ino || inputStat.size !== afterStat.size || inputStat.mtimeMs !== afterStat.mtimeMs || inputStat.ctimeMs !== afterStat.ctimeMs) fail('CANDIDATE_CHANGED');
-  } finally { try { if (targetFd !== undefined) fs.closeSync(targetFd); } finally { fs.closeSync(srcFd); } }
-  const after = await verifyReleaseCandidate({ candidateDirectory: candidate.root, candidateSha256: candidate.candidateSha256 });
-  if (after.manifestSha256 !== candidate.manifestSha256) {
-    fs.unlinkSync(target); fail('CANDIDATE_CHANGED');
-  }
-  return item.sha256;
-}
-
-export function sha256(value) { return hash(value); }

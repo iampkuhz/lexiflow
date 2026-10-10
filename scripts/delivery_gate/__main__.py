@@ -34,12 +34,12 @@ def _cmd_submit(args: argparse.Namespace) -> int:
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
-    from scripts.delivery_gate.validate import validate, validate_batch, ValidationError
+    from scripts.delivery_gate.validate import validate_batch, ValidationError
 
     try:
         ids = args.submission_id
+        validations = validate_batch(args.repo_root, submission_ids=ids)
         if len(ids) > 1:
-            validations = validate_batch(args.repo_root, submission_ids=ids)
             statuses = {item["result"] for item in validations}
             status = (
                 "FAIL"
@@ -48,7 +48,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
             )
             result = {"result": status, "validations": validations}
         else:
-            result = validate(args.repo_root, submission_id=ids[0])
+            result = validations[0]
     except ValidationError as exc:
         result = {"result": "BLOCKED", "reason": exc.code, "detail": exc.detail}
     return _output(result)
@@ -68,7 +68,6 @@ def _cmd_review(args: argparse.Namespace) -> int:
             raise ReviewError("findings-invalid", str(exc)) from None
         result = review(
             args.repo_root,
-            submission_id=args.submission_id,
             validation_id=args.validation_id,
             findings=findings,
             decision=args.decision,
@@ -144,7 +143,6 @@ def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
     )
 
     review_parser = subparsers.add_parser("review", help="Perform independent review")
-    review_parser.add_argument("--submission-id", required=True)
     review_parser.add_argument("--validation-id", required=True)
     review_parser.add_argument("--findings-json", default=None)
     review_parser.add_argument(

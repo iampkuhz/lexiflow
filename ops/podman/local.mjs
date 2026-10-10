@@ -25,7 +25,6 @@ export async function runLocal(argv, candidateRequest) {
   let dir = path.join(repo, '.local/podman'), apiPort = 18080, dbPort = 15432;
   let state, logFile, lockRecord, lockOwned = false, unlockProcess, interrupted = false, step = '检查参数';
   const abort = new AbortController();
-  const restoring = false;
   let environment = Object.fromEntries(['HOME', 'PATH', 'JAVA_HOME', 'LEXIFLOW_JAVA_HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'SSH_AUTH_SOCK', 'CONTAINER_HOST', 'CONTAINER_CONNECTION', 'DOCKER_HOST', 'PODMAN_COMPOSE_PROVIDER'].filter(k => process.env[k]).map(k => [k, process.env[k]]));
   const markInterrupted = () => { interrupted = true; abort.abort(); };
   process.on('SIGINT', markInterrupted); process.on('SIGTERM', markInterrupted);
@@ -60,7 +59,7 @@ export async function runLocal(argv, candidateRequest) {
     return undefined;
   }
   function run(command, argv, { cwd = fs.existsSync(dir) ? dir : repo, timeout = 600000, capture = false, env = environment, logOutput = true } = {}) {
-    if (interrupted && !restoring) fail('安装已取消；已保存当前状态，可重新执行 install（初始化状态不明除外）');
+    if (interrupted) fail('安装已取消；已保存当前状态，可重新执行 install（初始化状态不明除外）');
     const label = commandLabel(command, argv);
     return runCommand(command, argv, { cwd, timeout, capture, env, logFile: logOutput ? logFile : undefined, label: label || `执行 ${command} 检查`, announce: Boolean(label), onStart: pid => writeLock(pid), onClose: ({ groupGone }) => { if (groupGone) writeLock(null); } });
   }
@@ -134,7 +133,7 @@ export async function runLocal(argv, candidateRequest) {
     let lastNotice = started, reason = 'RUNTIME_UNAVAILABLE';
     console.log('[LexiFlow]   等待 API 正式就绪（最多 120 秒）…');
     while (performance.now() < deadline) {
-      if (interrupted && !restoring) fail('等待已取消，已初始化的数据保留，可用 up 再次启动');
+      if (interrupted) fail('等待已取消，已初始化的数据保留，可用 up 再次启动');
       try {
         const [status, currentReason] = await runtime(installed.apiPort, installed.version, deadline - performance.now());
         reason = currentReason;

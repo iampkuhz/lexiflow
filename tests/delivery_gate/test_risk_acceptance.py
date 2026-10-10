@@ -15,7 +15,7 @@ from scripts.delivery_gate.consume import consume_existing_pass
 from scripts.delivery_gate.records import RecordError, load_submission
 from scripts.delivery_gate.review import ReviewError, review
 from scripts.delivery_gate.submit import submit
-from scripts.delivery_gate.validate import ValidationError, validate
+from scripts.delivery_gate.validate import ValidationError, validate_batch
 from scripts.verification import freeze_inputs, persist_report, verify_profile
 from tests.delivery_gate.fixtures import (
     DeliveryGateFixture,
@@ -87,17 +87,16 @@ class RiskAcceptanceTest(unittest.TestCase):
             return_value=make_mock_runtime(PRODUCER_SESSION),
         ):
             with self.assertRaisesRegex(ValidationError, "self-validation-forbidden"):
-                validate(self.f.root, submission_id=sid)
+                validate_batch(self.f.root, submission_ids=[sid])[0]
         with patch(
             "scripts.agents.local_codex_runtime.discover",
             return_value=make_mock_runtime(VALIDATOR_SESSION),
         ):
-            validation = validate(self.f.root, submission_id=sid)
+            validation = validate_batch(self.f.root, submission_ids=[sid])[0]
         self.assertEqual("PASS", validation["result"], validation)
         with self.assertRaisesRegex(ReviewError, "review-not-required"):
             review(
                 self.f.root,
-                submission_id=sid,
                 validation_id=validation["validation_id"],
                 findings=[],
                 decision="PASS",
@@ -121,7 +120,7 @@ class RiskAcceptanceTest(unittest.TestCase):
             "scripts.agents.local_codex_runtime.discover",
             return_value=make_mock_runtime(VALIDATOR_SESSION),
         ):
-            validation = validate(self.f.root, submission_id=sid)
+            validation = validate_batch(self.f.root, submission_ids=[sid])[0]
         self.assertEqual("PASS", validation["result"], validation)
         self.f.write("docs/user/related.md", "新增依赖输入。\n")
         checked = check_conditions(self.f.root, submission_id=sid)
@@ -151,7 +150,7 @@ class RiskAcceptanceTest(unittest.TestCase):
             "scripts.agents.local_codex_runtime.discover",
             return_value=make_mock_runtime(VALIDATOR_SESSION),
         ):
-            validation = validate(self.f.root, submission_id=sid)
+            validation = validate_batch(self.f.root, submission_ids=[sid])[0]
         self.assertEqual("PASS", validation["result"], validation)
         result = check_conditions(self.f.root, submission_id=sid)
         self.assertEqual(

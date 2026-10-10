@@ -208,7 +208,7 @@ lf_owner_init() {
 }
 lf_record_path() { printf '%s/releases/%s/record' "$LF_ROOT" "$1"; }
 lf_record_verify() {
-  local key="$1" dir rec entrance hash platform project r1 r2 r3 r4 r5
+  local key="$1" dir rec entrance hash platform r1 r2 r3 r4
   lf_safe_private_tree && lf_valid_token "$LF_INSTALL_ID" && lf_valid_key "$key" || return 1
   [ -d "$LF_ROOT/releases" ] && [ ! -L "$LF_ROOT/releases" ] || return 1
   case "${2:-ordinary}" in
@@ -219,27 +219,13 @@ lf_record_verify() {
   rec="$dir/record"
   [ -d "$dir" ] && [ ! -L "$dir" ] && [ -f "$rec" ] && [ ! -L "$rec" ] || return 1
   [ "$(wc -c < "$rec" | tr -d ' ')" -le 8192 ] || return 1
-  { IFS= read -r r1 && IFS= read -r r2 && IFS= read -r r3 && IFS= read -r r4 && IFS= read -r r5; } < "$rec" || return 1
+  { IFS= read -r r1 && IFS= read -r r2 && IFS= read -r r3 && IFS= read -r r4; } < "$rec" || return 1
   [ "$r1" = "key=$key" ] || return 1
   case "$r2" in entry=/*) entrance=${r2#entry=};; *) return 1;; esac
   case "$r3" in sha256=*) hash=${r3#sha256=};; *) return 1;; esac
   lf_valid_key "$hash" || return 1
   case "$r4" in platform=linux/amd64|platform=linux/arm64) platform=${r4#platform=};; *) return 1;; esac
-  project="lf_${LF_INSTALL_ID}_$(printf '%s' "$key" | cut -c1-16)"
-  [ "$r5" = "project=$project" ] || return 1
-  printf 'key=%s\nentry=%s\nsha256=%s\nplatform=%s\nproject=%s\n' "$key" "$entrance" "$hash" "$platform" "$project" | cmp -s - "$rec" || return 1
-  lf_safe_absolute_file "$entrance" && [ "$(lf_sha "$entrance")" = "$hash" ] || return 1
+  printf 'key=%s\nentry=%s\nsha256=%s\nplatform=%s\n' "$key" "$entrance" "$hash" "$platform" | cmp -s - "$rec" || return 1
+  lf_safe_absolute_file "$entrance" && [ "$(lf_sha256 "$entrance")" = "$hash" ] || return 1
   LF_RECORD_PLATFORM=$platform LF_DELEGATE_ENTRY=$entrance
-}
-lf_sha() {
-  local output digest
-  # 先检查摘要工具本身的退出码，不能让管道末端覆盖读取失败。
-  if command -v sha256sum >/dev/null 2>&1; then
-    output=$(sha256sum "$1" 2>/dev/null) || return 1
-  else
-    output=$(shasum -a 256 "$1" 2>/dev/null) || return 1
-  fi
-  digest=${output%% *}
-  lf_valid_key "$digest" || return 1
-  printf '%s\n' "$digest"
 }

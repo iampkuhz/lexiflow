@@ -20,7 +20,7 @@ _UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
 _RECEIPT_RE = re.compile(
-    r"^Queued message ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}) for thread ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.$"
+    r"^Queued message ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}) for thread ([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.$"
 )
 
 
@@ -76,11 +76,6 @@ def _build_callback_message(
     return "\n".join(lines)
 
 
-def _callback_claim_path(run_dir: Path) -> Path:
-    """返回回调认领文件路径。"""
-    return run_dir / "callback.claim"
-
-
 def is_run_consumed_or_superseded(run_dir: Path) -> bool:
     """检查 run 是否已被消费或替代。"""
     # 检查 ack.json（权威 marker）
@@ -95,7 +90,6 @@ def is_run_consumed_or_superseded(run_dir: Path) -> bool:
 
 def attempt_codex_callback(
     run_dir: Path,
-    run_id: str,
     completion: dict[str, Any],
     task: dict[str, Any],
     cwd: Path,
@@ -107,6 +101,12 @@ def attempt_codex_callback(
     超时或回执不可验证时状态为 unknown，不伪造 queued。
     已 ack 或 superseded 的 run 不发送。
     """
+    run_id = lifecycle._validate_run_id(run_dir.name)
+    lifecycle._verify_completion_identity(completion, task, run_id)
+    for field in ("work_package_id", "task_ids", "task_versions", "change_versions"):
+        if completion.get(field) != task.get(field):
+            raise ValueError(f"callback {field} does not match task")
+
     if task.get("parent_client") != "codex":
         return
     parent_session_id = task.get("parent_session_id", "")

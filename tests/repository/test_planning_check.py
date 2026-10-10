@@ -12,11 +12,12 @@ from pathlib import Path
 
 import yaml
 
-from scripts.repository.catalog import catalog_tasks
 from scripts.repository.planning_validator import PlanningValidator
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = yaml.safe_load((ROOT / "harness" / "agent-policy.manifest.yaml").read_text())
+
+
 def _base_valid_catalog():
     return {
         "schema_version": "lexiflow.workstreams.v1",
@@ -27,16 +28,8 @@ def _base_valid_catalog():
             "current_phase": "P1",
             "current_gate": "G1",
         },
-        "id_policy": {
-            "program": "LF-PRG-NNN",
-            "workstream": "LF-WS-{DOMAIN}",
-            "epic": "LF-EP-{DOMAIN}-NNN",
-            "capability": "LF-CP-{DOMAIN}-NNN",
-            "task": "LF-TSK-{DOMAIN}-NNNN",
-        },
         "domain_codes": {"ARCH": "arch", "QLT": "quality", "PRD": "product"},
         "path_ownership": {
-            "resolution": "Most-specific wins",
             "scopes": [
                 {
                     "scope": "governance.catalog",
@@ -63,12 +56,20 @@ def _base_valid_catalog():
                 {
                     "scope": "governance.architecture",
                     "owner": "LF-WS-ARCH",
-                    "proposed_paths": ["docs/system.md", "docs/system/**", "docs/adr/**"],
+                    "proposed_paths": [
+                        "docs/system.md",
+                        "docs/system/**",
+                        "docs/adr/**",
+                    ],
                 },
                 {
                     "scope": "governance.development",
                     "owner": "LF-WS-QLT",
-                    "proposed_paths": ["docs/scenarios/**", "docs/reference/**", "docs/reference.md"],
+                    "proposed_paths": [
+                        "docs/scenarios/**",
+                        "docs/reference/**",
+                        "docs/reference.md",
+                    ],
                 },
                 {
                     "scope": "governance.product",
@@ -92,7 +93,6 @@ def _base_valid_catalog():
                         "harness/manifest.yaml",
                         "harness/module-boundaries.yaml",
                         "harness/agent-policy.manifest.yaml",
-                        "harness/agent-runtime.manifest.yaml",
                         "scripts/README.md",
                     ],
                 },
@@ -368,7 +368,6 @@ class TestPlanningOnlyCatalog(unittest.TestCase):
 
 
 class TestPopulatedCatalog(unittest.TestCase):
-
     def test_valid_catalog_does_not_hardcode_count(self):
         data = _base_valid_catalog()
         r1 = _validate(data)
@@ -660,7 +659,9 @@ class TestPolicyContract(unittest.TestCase):
 
     def test_missing_policy_identity_boundary_fails_closed(self):
         policy = _base_policy()
-        del policy["codex_dispatch"]["acceptance"]["implementer_must_not_validate_or_review"]
+        del policy["codex_dispatch"]["acceptance"][
+            "implementer_must_not_validate_or_review"
+        ]
         result = _validate(_base_valid_catalog(), policy=policy)
         self.assertEqual(result["status"], "BLOCKED")
         self.assertTrue(any("policy-contract" in error for error in result["errors"]))
@@ -670,7 +671,9 @@ class TestPolicyContract(unittest.TestCase):
         policy["subagent_protocol"]["caller_field_schema"] = []
         result = _validate(_base_valid_catalog(), policy=policy)
         self.assertEqual(result["status"], "BLOCKED")
-        self.assertTrue(any("caller_field_schema" in error for error in result["errors"]))
+        self.assertTrue(
+            any("caller_field_schema" in error for error in result["errors"])
+        )
 
 
 class TestInvalidDepType(unittest.TestCase):
@@ -750,6 +753,45 @@ class TestLoadErrors(unittest.TestCase):
         self.assertTrue(any("Required file not found" in e for e in result["errors"]))
 
 
+class TestCatalogInheritance(unittest.TestCase):
+    """祖先继承只省重复声明；明确 Task phase 覆盖仍是事实。"""
+
+    def test_constructor_is_reused_without_loading_files(self):
+        """from_data 复用内存构造器，不读取或执行真实仓库。"""
+        data = _base_valid_catalog()
+        validator = PlanningValidator.from_data(data)
+        self.assertEqual(Path(".").resolve(), validator.root)
+        self.assertIs(validator.ws, data)
+        self.assertEqual([], validator._load_errors)
+        self.assertEqual([], validator._check_failures)
+
+    def test_phase_inherits_nearest_declared_ancestor_and_preserves_override(self):
+        """按 WorkStream/Epic/Capability 继承，真实 Task 覆盖不被抹去。"""
+        data = _base_valid_catalog()
+        workstream = next(ws for ws in data["workstreams"] if ws["epics"])
+        epic = workstream["epics"][0]
+        capability = epic["capabilities"][0]
+        task = capability["seed_tasks"][0]
+        workstream["phase"] = "P2"
+        capability.pop("phase", None)
+        task.pop("phase", None)
+        self.assertEqual(
+            "P2", PlanningValidator.from_data(data).tasks[task["id"]]["phase"]
+        )
+        epic["phase"] = "P3"
+        self.assertEqual(
+            "P3", PlanningValidator.from_data(data).tasks[task["id"]]["phase"]
+        )
+        capability["phase"] = "P4"
+        self.assertEqual(
+            "P4", PlanningValidator.from_data(data).tasks[task["id"]]["phase"]
+        )
+        task["phase"] = "P5"
+        self.assertEqual(
+            "P5", PlanningValidator.from_data(data).tasks[task["id"]]["phase"]
+        )
+
+
 class TestRepoIntegration(unittest.TestCase):
     def test_real_repo_passes_structural_checks(self):
         """The real catalog has complete ownership and fixed-check mappings."""
@@ -765,10 +807,16 @@ class TestRepoIntegration(unittest.TestCase):
         self.assertEqual({"P1", "P2"}, {task["phase"] for task in v.tasks.values()})
         phase2 = [task for task in v.tasks.values() if task["phase"] == "P2"]
         self.assertTrue(phase2)
-        raw_tasks = catalog_tasks(v.ws)
-        allowed_states = set(v.ws["lifecycle"]["planning_states"])
+        raw_tasks = {
+            task["id"]: task
+            for workstream in v.ws["workstreams"]
+            for epic in workstream.get("epics", [])
+            for capability in epic.get("capabilities", [])
+            for task in capability.get("seed_tasks", [])
+        }
+        allowed_states = set(v.policy["planning_contract"]["planning_states"])
         for task in phase2:
-            contract = raw_tasks[task["id"]]["task"]
+            contract = raw_tasks[task["id"]]
             self.assertIn(contract["lifecycle_state"], allowed_states)
             self.assertIsInstance(contract["allowed_files"], list)
             self.assertTrue(contract["allowed_files"])
@@ -817,6 +865,8 @@ class TestOwnerResolver(unittest.TestCase):
             },
         ]
         v = PlanningValidator.from_data(data)
+        v.check_owners()
+        self.assertEqual([], v.errors)
         owner = v.resolve_owner("docs/catalog/file.yaml")
         self.assertEqual(owner, "LF-WS-QLT")
 
@@ -829,6 +879,23 @@ class TestOwnerResolver(unittest.TestCase):
         v = PlanningValidator.from_data(data)
         owner = v.resolve_owner("docs/file.yaml")
         self.assertEqual(owner, "AMBIGUOUS")
+
+    def test_exact_path_wins_over_terminal_segment_wildcard(self):
+        """固定有限 glob 语法中，同目录精确文件比末段通配声明更具体。"""
+        data = _base_valid_catalog()
+        data["path_ownership"]["scopes"] = [
+            {"scope": "scope.a", "owner": "LF-WS-ARCH", "proposed_paths": ["docs/*"]},
+            {
+                "scope": "scope.b",
+                "owner": "LF-WS-QLT",
+                "proposed_paths": ["docs/one.md"],
+            },
+        ]
+        validator = PlanningValidator.from_data(data)
+        self.assertEqual("LF-WS-QLT", validator.resolve_owner("docs/one.md"))
+        self.assertEqual("LF-WS-ARCH", validator.resolve_owner("docs/other.md"))
+        validator.check_owners()
+        self.assertEqual([], validator.errors)
 
 
 if __name__ == "__main__":

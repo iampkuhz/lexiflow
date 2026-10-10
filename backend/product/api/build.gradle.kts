@@ -35,7 +35,6 @@ val generateSoftwareIdentity = tasks.register<GenerateSoftwareIdentityTask>("gen
 
 val generateDataGeneration = tasks.register<GenerateDataGenerationTask>("generateDataGeneration") {
     repoRoot.set(repositoryRoot)
-    script.set(File(repositoryRoot, "ops/dataset/generation-version.mjs"))
     outputDirectory.set(layout.buildDirectory.dir("generated/data-generation"))
 }
 

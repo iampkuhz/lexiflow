@@ -177,15 +177,15 @@ def _findings(findings: Any, decision: str) -> list[dict[str, Any]]:
 def review(
     root: str | Path,
     *,
-    submission_id: str,
     validation_id: str,
     findings: list[dict[str, Any]],
     decision: str,
 ) -> dict[str, Any]:
-    """记录明确的独立审阅意见。输入为冻结的 submission、validation 与审阅者身份；只发布 review 记录，不运行检查命令。"""
+    """记录明确的独立审阅意见。从精确 validation 派生冻结 submission，身份由本机 runtime 发现；只发布 review 记录，不运行检查命令。"""
     repo = Path(root).resolve()
-    submission = _load_submission(repo, submission_id)
     validation = _load_validation(repo, validation_id)
+    submission_id = validation["submission_id"]
+    submission = _load_submission(repo, submission_id)
     from scripts.delivery_gate.validate import _verify_frozen
 
     try:

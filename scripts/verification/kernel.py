@@ -79,11 +79,6 @@ def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def sha256_text(text: str) -> str:
-    """以固定文本编码计算 SHA-256，避免平台默认编码漂移。"""
-    return sha256_bytes(text.encode("utf-8"))
-
-
 def fingerprint_json(value: Any) -> str:
     """规范化 JSON 后计算输入指纹，绑定本轮检查闭包。"""
     return sha256_bytes(

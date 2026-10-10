@@ -87,7 +87,7 @@ class CiQuickTests(unittest.TestCase):
         plan = ci.make_plan(self.root)
         self.assertEqual(plan["checks_executed"], 0)
         with patch.object(
-            ci, "changed_paths", return_value=["ops/release/lifecycle.mjs"]
+            ci, "changed_paths", return_value=["ops/release/runtime-entry.mjs"]
         ):
             plan = ci.make_plan(self.root)
         self.assertNotIn("eng.release.lifecycle-runtime", plan["selected_check_ids"])

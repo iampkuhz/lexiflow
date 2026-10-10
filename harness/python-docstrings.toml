@@ -13,6 +13,3 @@ enable = ["missing-chinese-docstring", "non-chinese-docstring", "syntax-error", 
 reports = false
 score = false
 output-format = "json"
-
-[tool.pylint.chinese-docstrings]
-docstring-language-pattern = '[\u3400-\u4dbf\u4e00-\u9fff]'

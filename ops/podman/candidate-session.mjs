@@ -17,8 +17,8 @@ const source = `import {runLocal} from ${JSON.stringify(localUrl)}; import {watc
   `process.exitCode=Number.isInteger(code)?code:1; cancel.destroy();\n`;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 /** fd3 is a fixed inherited pipe, not caller input. EOF also cancels orphaned sessions. */
-export function watchCancel(onCancel, fd = 3) {
-  const socket = new net.Socket({ fd, readable: true, writable: false });
+export function watchCancel(onCancel) {
+  const socket = new net.Socket({ fd: 3, readable: true, writable: false });
   let fired = false;
   const cancel = () => { if (!fired) { fired = true; onCancel(); } };
   socket.on('data', cancel); socket.on('end', cancel); socket.on('error', cancel);

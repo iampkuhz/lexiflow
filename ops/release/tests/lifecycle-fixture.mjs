@@ -17,7 +17,7 @@ export async function lifecycleFixture(t, full = true, variant = '') {
   t.after(async()=>{if(!daemonOwnsTmp) await rm(tmp,{recursive:true,force:true});});
   const repo = path.join(tmp, 'repo'); await mkdir(path.join(repo, 'ops/release'), { recursive: true });
   const local = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-  for (const name of ['version.txt','runtime-entry.mjs','runtime-verification.sh','lifecycle.mjs','lifecycle-state.sh','lifecycle-docker.sh','lifecycle.sh']) await cp(path.join(local,name),path.join(repo,'ops/release',name));
+  for (const name of ['version.txt','runtime-entry.mjs','runtime-verification.sh','lifecycle-state.sh','lifecycle-docker.sh','lifecycle.sh']) await cp(path.join(local,name),path.join(repo,'ops/release',name));
   await writeFile(path.join(repo, 'ops/release/version.txt'), '0.1.0\n');
   execFileSync('git', ['init', '-q', repo]);
   execFileSync('git', ['-C', repo, 'config', 'user.email', 'fixture@example.invalid']);
@@ -41,8 +41,7 @@ export async function lifecycleFixture(t, full = true, variant = '') {
   const descriptor={schemaVersion:1,buildIdentity,softwareVersion:'0.1.0',sourceCommit,apiContract:'api1',sqlVersion:'sql1',dataset:{releaseId:'r',preparationId:'p',ruleId:'rule'},platforms:['linux/amd64'],artifacts,licenses};
   let generated;
   if (full === true) {
-    const { generateLifecycleEntry } = await import('../lifecycle.mjs');
-    generated=await generateLifecycleEntry({repoRoot:repo,descriptor,artifactRoot:root});
+    generated=await generateRuntimeEntry({repoRoot:repo,descriptor,artifactRoot:root});
   } else if (full === 'owner-init-fault') {
     // Test-only synthetic fault: exercise the real generated prepare path while
     // making the real lf_owner_init stop after mkdir and before owner publish.

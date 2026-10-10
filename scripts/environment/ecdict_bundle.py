@@ -42,9 +42,6 @@ HEADER = (
     "audio",
 )
 COMPACT_HEADER = ("word", "translation", "oxford", "tag", "bnc", "frq", "exchange")
-KEPT_FIELDS = frozenset(
-    ("word", "translation", "oxford", "tag", "bnc", "frq", "exchange")
-)
 REMOVED_FIELDS = ("phonetic", "definition", "pos", "collins", "detail", "audio")
 FILTER_VERSION = "ecdict-conservative-2"
 MAX_CSV_BYTES = 32 * 1024 * 1024
@@ -176,25 +173,6 @@ def _read_full_csv(repo: Path) -> tuple[bytes, str]:
     return data, digest
 
 
-def _parse_rows(
-    data: bytes, expected_header: tuple[str, ...] | None = None
-) -> list[dict[str, str]]:
-    try:
-        reader = csv.DictReader(
-            io.TextIOWrapper(io.BytesIO(data), encoding="utf-8-sig", newline="")
-        )
-        if expected_header and tuple(reader.fieldnames or ()) != expected_header:
-            raise BundleError("source CSV header mismatch")
-        rows = []
-        for row in reader:
-            if None in row or any(value is None for value in row.values()):
-                raise BundleError("source CSV row shape invalid")
-            rows.append(dict(row))
-        return rows
-    except (UnicodeDecodeError, csv.Error) as exc:
-        raise BundleError("source CSV parsing failed") from exc
-
-
 def _iter_rows(data: bytes, expected_header: tuple[str, ...]):
     try:
         reader = csv.DictReader(
@@ -304,7 +282,7 @@ def _reason_candidates(
 def _build_rows(
     base_data: bytes, full_data: bytes
 ) -> tuple[list[tuple[str, int, dict[str, str]]], dict[str, Any], list[dict[str, Any]]]:
-    base = _parse_rows(base_data, HEADER)
+    base = list(_iter_rows(base_data, HEADER))
     full_index: dict[str, tuple[int, dict[str, str]]] = {}
     coverage: dict[str, set[str]] = defaultdict(set)
     for line_no, row in _iter_rows(full_data, HEADER):
@@ -314,7 +292,7 @@ def _build_rows(
     # Baseline is single-word, source-order deduplicated; evidence is never quality-filtered.
     baseline: dict[str, tuple[int, dict[str, str]]] = {}
     prefilter = Counter()
-    for line_no, row in enumerate(base, 2):
+    for line_no, row in base:
         key = row["word"].strip().lower()
         prefilter["base_physical_rows"] += 1
         if not _valid_word(row["word"]):
@@ -387,7 +365,7 @@ def _build_rows(
             selected_by_word[word] = ("ecdict.csv", line_no, row)
     # Keep every Oxford physical row, even if another physical row has the same lemma.
     oxford_rows = []
-    for line_no, row in enumerate(base, 2):
+    for line_no, row in base:
         if row["oxford"].strip() == "1":
             counts["oxford_support_rows_seen"] += 1
             oxford_rows.append(("ecdict.csv", line_no, row))
@@ -411,7 +389,7 @@ def _build_rows(
     for _, _, row in selected:
         _add_prototype_coverage(row, final_coverage)
     # 预筛中的 0: 不等于已证明无损：逐条报告其实际保留原型覆盖情况。
-    for line_no, row in enumerate(base, 2):
+    for line_no, row in base:
         prototypes = {
             token[2:].strip().lower()
             for token in row["exchange"].split("/")
@@ -467,32 +445,6 @@ def _serialize(rows: list[tuple[str, int, dict[str, str]]]) -> tuple[bytes, byte
     if len(data_bytes) > MAX_CSV_BYTES:
         raise BundleError("expanded CSV exceeds 32 MiB limit")
     return data_bytes, map_bytes
-
-
-def decode_source_row(marker: str, subset_row: int) -> tuple[str, int, int]:
-    """严格解码来源行标记并还原来源文件、来源行与子集行。"""
-    if (
-        not isinstance(marker, str)
-        or not isinstance(subset_row, int)
-        or isinstance(subset_row, bool)
-        or subset_row < 2
-    ):
-        raise BundleError("source row mapping invalid")
-    match = re.fullmatch(r"(s:)?([1-9][0-9]*)", marker)
-    if not match:
-        raise BundleError("source row marker invalid")
-    source_row = int(match.group(2))
-    if source_row < 2:
-        raise BundleError("source row must be at least 2")
-    return ("stardict.csv" if match.group(1) else "ecdict.csv", source_row, subset_row)
-
-
-def decode_source_rows(data: bytes) -> list[tuple[str, int, int]]:
-    """校验紧凑映射的单列表头和行结构，并按记录顺序还原来源。"""
-    rows = _parse_rows(data, ("source_row",))
-    return [
-        decode_source_row(row["source_row"], index) for index, row in enumerate(rows, 2)
-    ]
 
 
 def _zip_info(name: str) -> zipfile.ZipInfo:

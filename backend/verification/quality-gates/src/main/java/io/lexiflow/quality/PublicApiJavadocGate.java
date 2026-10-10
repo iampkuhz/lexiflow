@@ -198,9 +198,7 @@ public final class PublicApiJavadocGate implements JavaSourceGate {
     }
 
     private String memberName(MethodTree tree) {
-      return tree.getName().contentEquals("<init>")
-          ? enclosingClass(getCurrentPath()).getSimpleName().toString()
-          : tree.getName().toString();
+      return tree.getName().toString();
     }
 
     private int javadocLineCount(long declarationPosition) {

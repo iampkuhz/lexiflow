@@ -108,11 +108,11 @@ class DockerContractTest(unittest.TestCase):
                             self.assertEqual((installation / ".lock/token").read_text(), "replacement\n")
 
     def test_installation_hash_rejects_tool_failure_and_invalid_digest(self):
-        source = ROOT / "ops/release/lifecycle-state.sh"
+        source = ROOT / "ops/release/runtime-verification.sh"
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td).resolve()
             script = root / "digest.sh"
-            script.write_text('. "$1"\nlf_sha "$2"\n')
+            script.write_text(source.read_text().split("# 在 cd -P", 1)[0] + '\nlf_sha256 "$2"\n')
             actual = root / "file with spaces"
             actual.write_bytes(b"abc")
             result = subprocess.run(["/bin/sh", str(script), str(source), str(actual)],
@@ -124,22 +124,28 @@ class DockerContractTest(unittest.TestCase):
                                     capture_output=True, text=True, timeout=3)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(result.stdout + result.stderr, "")
+            (root / "synthetic").write_bytes(b"abc")
             for tool in ("sha256sum", "shasum"):
                 bindir = root / tool
                 bindir.mkdir()
                 stub = bindir / tool
-                stub.write_text('#!/bin/sh\nprintf "%s  synthetic\\n" "$TEST_DIGEST"\n'
+                stub.write_text('#!/bin/sh\nprintf "%s  %s\\n" "$TEST_DIGEST" "$TEST_NAME"\n'
                                 'printf "%s\\n" private-error >&2\nexit "$TEST_EXIT"\n')
                 stub.chmod(0o755)
                 for digest, status, passed in (("a" * 64, "0", True), ("a" * 64, "7", False),
                                                ("a" * 63, "0", False), ("g" * 64, "0", False),
                                                ("", "0", False)):
-                    env = {"PATH": str(bindir), "TEST_DIGEST": digest, "TEST_EXIT": status}
+                    env = {"PATH": str(bindir), "TEST_DIGEST": digest, "TEST_EXIT": status, "TEST_NAME": "-"}
                     result = subprocess.run(["/bin/sh", str(script), str(source), str(root / "synthetic")],
                                             env=env, capture_output=True, text=True, timeout=3)
                     self.assertEqual(result.returncode == 0, passed)
                     self.assertEqual(result.stdout, digest + "\n" if passed else "")
                     self.assertEqual(result.stderr, "")
+                env = {"PATH": str(bindir), "TEST_DIGEST": "a" * 64, "TEST_EXIT": "0", "TEST_NAME": "synthetic"}
+                result = subprocess.run(["/bin/sh", str(script), str(source), str(root / "synthetic")],
+                                        env=env, capture_output=True, text=True, timeout=3)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout + result.stderr, "")
 
     def test_context_and_image_are_minimal_nonroot(self):
         ignore = (DOCKER / ".dockerignore").read_text()
@@ -479,17 +485,24 @@ else: sys.exit(7)
         proc, _ = self._run("api", ("arbitrary",), files={"app-password": password})
         self.assertNotEqual(proc.returncode, 0)
 
-    def test_caption_logs_are_default_without_jsonl_and_legacy_alias_agrees(self):
+    def test_caption_logs_are_default_without_jsonl_and_removed_alias_is_rejected(self):
         password = "a" * 64
         normal, normal_log = self._run("api", files={"app-password": password})
-        debug, debug_log = self._run("api-debug", files={"app-password": password})
+        rejected, rejected_log = self._run("api-debug", files={"app-password": password})
         self.assertEqual(normal.returncode, 0)
-        self.assertEqual(debug.returncode, 0)
+        self.assertEqual(rejected.returncode, 64)
+        self.assertEqual(rejected_log, "")
         self.assertIn("-Dlexiflow.caption-debug.enabled=true", normal_log)
-        self.assertIn("-Dlexiflow.caption-debug.enabled=true", debug_log)
-        self.assertIn("-Dlexiflow.segment-analysis.enabled=false", debug_log)
         self.assertIn("-Dlexiflow.segment-analysis.enabled=false", normal_log)
-        self.assertNotIn(password, debug_log)
+        self.assertNotIn(password, normal_log + rejected.stderr)
+        enabled, enabled_log = self._run("api", files={"app-password": password},
+                                         env={"LEXIFLOW_SEGMENT_ANALYSIS_ENABLED": "true"})
+        self.assertEqual(enabled.returncode, 0)
+        self.assertIn("-Dlexiflow.segment-analysis.enabled=true", enabled_log)
+        invalid, invalid_log = self._run("api", files={"app-password": password},
+                                         env={"LEXIFLOW_SEGMENT_ANALYSIS_ENABLED": "unknown"})
+        self.assertNotEqual(invalid.returncode, 0)
+        self.assertEqual(invalid_log, "")
 
     def test_api_development_trust_requires_explicit_external_postgres_without_secret(self):
         target = {"LEXIFLOW_DATABASE_HOST": "host.containers.internal", "LEXIFLOW_DATABASE_PORT": "15432",

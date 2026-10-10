@@ -11,7 +11,7 @@
 | 送验并冻结范围 | `python3 -m scripts.delivery_gate submit --task-id <id> --change-report-id <uuid> --confirm-scope-report-id <uuid> [--producer-run-id <id>]` | 当前 Task、PASS 开发报告、范围确认报告；producer run 仅用于核对真实来源 |
 | 独立验证 | `python3 -m scripts.delivery_gate validate --submission-id <uuid>` | 冻结 submission；需验证的 actor 与 producer/submitter 不同 |
 | 有界批量验证 | 重复 `--submission-id <uuid>` 参数，最多 16 个唯一 submission | 各 Task 分别保留计划、报告和 validation record |
-| 独立审查 | `python3 -m scripts.delivery_gate review --submission-id <uuid> --validation-id <uuid> [--findings-json <path>] --decision <PASS|BLOCKED|FAIL>` | 仅验收计划要求时使用；审查者与实现者及 validator 不同 |
+| 独立审查 | `python3 -m scripts.delivery_gate review --validation-id <uuid> [--findings-json <path>] --decision <PASS|BLOCKED|FAIL>` | 仅验收计划要求时使用；审查者与实现者及 validator 不同 |
 | 核对验收条件 | `python3 -m scripts.delivery_gate check --submission-id <uuid>` | 已发布证据、当前依赖与精确绑定的批准（若要求） |
 | 只读观察 | `python3 -m scripts.delivery_gate status --submission-id <uuid>` | 指定 submission；不推断 latest，也不推进链路 |
 | 消费既有 PASS | `python3 -m scripts.delivery_gate consume-existing --submission-id <uuid>` | 只读重核唯一、完整且当前的 Gate 链 |

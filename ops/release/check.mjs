@@ -3,6 +3,16 @@ import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
+// 仅选择固定检查范围与原有子进程预算；CLI 不接收命令或预算覆盖。
+const suites = {
+  version: { timeoutMs: 30_000, files: ['version'] },
+  build: { timeoutMs: 170_000, files: ['archive-identity', 'embedded-identity', 'build', 'build-execution', 'candidate', 'verified-candidate', 'candidate-proof', 'pipeline', 'workflow'] },
+  manifest: { timeoutMs: 80_000, files: ['manifest'] },
+  'runtime-entry': { timeoutMs: 80_000, files: ['runtime-entry'] },
+  lifecycle: { timeoutMs: 120_000, files: ['lifecycle'] },
+  'lifecycle-install': { timeoutMs: 120_000, files: ['lifecycle-install'] },
+};
+
 const fields = ['tests', 'pass', 'fail', 'cancelled', 'skipped', 'todo'];
 const failed = (reason, errors = 0) => ({ status: 'FAIL', checks_run: 0, failures: errors ? 0 : 1, errors, skipped: 0, reason });
 
@@ -82,4 +92,12 @@ function invokedDirectly() {
   catch { return false; }
 }
 
-if (invokedDirectly()) runTests().then((result) => { console.log(JSON.stringify(result)); if (result.status !== 'PASS') process.exitCode = 1; });
+if (invokedDirectly()) {
+  const argv = process.argv.slice(2);
+  const suite = argv.length === 0 ? suites.version
+    : argv.length === 2 && argv[0] === '--suite' && argv[1] !== 'version' && Object.hasOwn(suites, argv[1]) ? suites[argv[1]] : null;
+  const pending = suite ? runTests({ timeoutMs: suite.timeoutMs,
+    args: ['--test', '--test-reporter=tap', ...suite.files.map(name => path.join(path.dirname(fileURLToPath(import.meta.url)), `tests/${name}.test.mjs`))] })
+    : Promise.resolve(failed('invalid arguments'));
+  pending.then(result => { console.log(JSON.stringify(result)); if (result.status !== 'PASS') process.exitCode = 1; });
+}

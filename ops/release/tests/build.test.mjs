@@ -43,10 +43,6 @@ async function fixture() {
   const descriptor = {
     schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit,
     jar: { path: 'app.jar', bytes: builtJar.length, sha256: hash(builtJar) },
-    baseImages: [
-      structuredClone(lockImages[0]),
-      structuredClone(lockImages[1]),
-    ],
   };
   const refreshJar = async () => {
     const identity = resolveBuildIdentity(root);
@@ -63,7 +59,8 @@ test('生成固定、双平台且无宿主路径的确定性 argv 计划', async
   try {
     const result = await prepareImageBuild(args(f));
     const reorderedInput = structuredClone(f.descriptor);
-    reorderedInput.baseImages.reverse();
+    const reorderedJar = reorderedInput.jar;
+    reorderedInput.jar = { sha256: reorderedJar.sha256, bytes: reorderedJar.bytes, path: reorderedJar.path };
     const reordered = await prepareImageBuild(args(f, reorderedInput));
     assert.deepEqual(reordered, result);
     assert.deepEqual(Object.keys(result), ['schemaVersion', 'softwareVersion', 'sourceCommit', 'buildIdentity', 'jar', 'templates', 'baseImageLock', 'platforms']);
@@ -93,21 +90,25 @@ test('生成固定、双平台且无宿主路径的确定性 argv 计划', async
     const mutableInput = structuredClone(f.descriptor);
     const independent = await prepareImageBuild(args(f, mutableInput));
     mutableInput.jar.path = 'mutated.jar';
-    mutableInput.baseImages[0].javaRuntime.reference = 'mutated';
     assert.deepEqual(independent, before);
     result.platforms[0].commands[0][0] = 'corrupted';
     assert.equal((await prepareImageBuild(args(f))).platforms[0].commands[0][0], 'docker');
   } finally { await f.cleanup(); }
 });
 
-test('平台子集只进入计划且仍绑定 lock 中的精确镜像身份', async () => {
+test('计划平台唯一取自 canonical lock，不接受 descriptor 锁副本', async () => {
   const f = await fixture();
   try {
-    const descriptor = structuredClone(f.descriptor);
-    descriptor.baseImages = descriptor.baseImages.filter((item) => item.platform === 'linux/arm64');
-    const plan = await prepareImageBuild(args(f, descriptor));
-    assert.deepEqual(plan.platforms.map((item) => item.platform), ['linux/arm64']);
-    assert.ok(!JSON.stringify(plan).includes('linux/amd64'));
+    const plan = await prepareImageBuild(args(f));
+    assert.deepEqual(plan.platforms.map(item => item.platform), ['linux/amd64', 'linux/arm64']);
+    await assert.rejects(prepareImageBuild(args(f, { ...f.descriptor, baseImages: lockImages })), { message: 'SOURCE_IDENTITY_MISMATCH' });
+    await writeFile(path.join(f.root, lockPath), JSON.stringify({ schemaVersion: 1, baseImages: [lockImages[1]] }));
+    git(f.root, ['add', lockPath]);
+    git(f.root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'single-platform lock']);
+    await f.refreshJar();
+    const subset = await prepareImageBuild(args(f));
+    assert.deepEqual(subset.platforms.map(item => item.platform), ['linux/arm64']);
+    assert.deepEqual(subset.platforms[0].javaRuntime, lockImages[1].javaRuntime);
   } finally { await f.cleanup(); }
 });
 
@@ -132,7 +133,7 @@ test('完整构建身份接受干净 SNAPSHOT，但拒绝 dirty 源码', async (
   } finally { await dirty.cleanup(); }
 });
 
-test('拒绝 schema、版本/commit、坏 jar、缺平台与注入的 runtime reference', async () => {
+test('拒绝 schema、版本/commit 与坏 JAR', async () => {
   const f = await fixture();
   try {
     const cases = [
@@ -140,11 +141,6 @@ test('拒绝 schema、版本/commit、坏 jar、缺平台与注入的 runtime re
       ['wrong version', (d) => { d.softwareVersion = '1.0.0'; }, 'SOURCE_IDENTITY_MISMATCH'],
       ['wrong source commit', (d) => { d.sourceCommit = '0'.repeat(40); }, 'SOURCE_IDENTITY_MISMATCH'],
       ['bad digest', (d) => { d.jar.sha256 = 'A'.repeat(64); }, 'JAR_INVALID'],
-      ['duplicate platform', (d) => { d.baseImages[1].platform = 'linux/amd64'; }, 'BASE_IMAGES_INVALID'],
-      ['tag reference', (d) => { d.baseImages[0].javaRuntime.reference = 'registry.example.invalid/java:latest'; }, 'BASE_IMAGES_INVALID'],
-      ['argument injection', (d) => { d.baseImages[0].javaRuntime.reference = 'registry.example.invalid/java@sha256:' + 'a'.repeat(64) + ';echo'; }, 'BASE_IMAGES_INVALID'],
-      ['private registry host', (d) => { d.baseImages[0].javaRuntime.reference = 'localhost/java@sha256:' + 'a'.repeat(64); }, 'BASE_IMAGES_INVALID'],
-      ['unknown runtime field', (d) => { d.baseImages[0].javaRuntime.tag = 'latest'; }, 'BASE_IMAGES_INVALID'],
     ];
     for (const [name, mutate, expected] of cases) {
       const descriptor = structuredClone(f.descriptor); mutate(descriptor);
@@ -181,21 +177,20 @@ test('JAR 内嵌完整身份及必需资源必须匹配源码身份', async () =
   } finally { await f.cleanup(); }
 });
 
-test('descriptor 镜像身份由 Git 锁唯一决定且比较不依赖字段顺序', async () => {
+test('canonical lock 唯一决定镜像身份，并拒绝未知字段、注入与缺失锁', async () => {
   const f = await fixture();
   try {
-    const reordered = structuredClone(f.descriptor);
-    reordered.baseImages[0].javaRuntime = { imageId: reordered.baseImages[0].javaRuntime.imageId, reference: reordered.baseImages[0].javaRuntime.reference };
-    assert.equal((await prepareImageBuild(args(f, reordered))).baseImageLock.path, lockPath);
-    const mismatch = structuredClone(f.descriptor);
-    mismatch.baseImages[0].javaRuntime.imageId = `sha256:${'f'.repeat(64)}`;
-    await assert.rejects(prepareImageBuild(args(f, mismatch)), { message: 'BASE_IMAGES_INVALID' });
+    assert.equal((await prepareImageBuild(args(f))).baseImageLock.path, lockPath);
     for (const mutate of [
       (lock) => { lock.extra = true; },
       (lock) => { lock.schemaVersion = 2; },
+      (lock) => { lock.baseImages = []; },
       (lock) => { lock.baseImages[0].javaRuntime.reference = 'registry.example.invalid/java:latest'; },
       (lock) => { lock.baseImages[1].platform = 'linux/amd64'; },
       (lock) => { lock.baseImages[0].javaRuntime.imageId = 42; },
+      (lock) => { lock.baseImages[0].javaRuntime.reference = 'registry.example.invalid/java@sha256:' + 'a'.repeat(64) + ';echo'; },
+      (lock) => { lock.baseImages[0].javaRuntime.reference = 'localhost/java@sha256:' + 'a'.repeat(64); },
+      (lock) => { lock.baseImages[0].javaRuntime.tag = 'latest'; },
     ]) {
       const lock = { schemaVersion: 1, baseImages: structuredClone(lockImages) }; mutate(lock);
       await writeFile(path.join(f.root, lockPath), `${JSON.stringify(lock)}\n`);

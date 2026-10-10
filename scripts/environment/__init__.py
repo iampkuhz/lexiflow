@@ -2,7 +2,6 @@
 
 from scripts.environment.runtime import (
     check_for,
-    detect_java,
     detect_java_25_temurin,
     detect_postgres_test_jdbc_url,
     detect_redis_test_endpoint,
@@ -14,7 +13,6 @@ from scripts.environment.runtime import (
 
 __all__ = [
     "check_for",
-    "detect_java",
     "detect_java_25_temurin",
     "detect_postgres_test_jdbc_url",
     "detect_redis_test_endpoint",

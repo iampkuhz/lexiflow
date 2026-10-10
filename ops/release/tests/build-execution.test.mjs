@@ -39,9 +39,8 @@ async function fixture() {
   const descriptor = {
     schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit,
     jar: { path: 'app.jar', bytes: jar.length, sha256: hash(jar) },
-    baseImages: structuredClone(syntheticLock),
   };
-  const refs = Object.fromEntries(descriptor.baseImages.flatMap(({ platform, javaRuntime, postgresRuntime }) => [[javaRuntime.reference, { platform, imageId: javaRuntime.imageId }], [postgresRuntime.reference, { platform, imageId: postgresRuntime.imageId }]]));
+  const refs = Object.fromEntries(syntheticLock.flatMap(({ platform, javaRuntime, postgresRuntime }) => [[javaRuntime.reference, { platform, imageId: javaRuntime.imageId }], [postgresRuntime.reference, { platform, imageId: postgresRuntime.imageId }]]));
   const outputParent = await realpath(await import('node:fs/promises').then(({ mkdtemp }) => mkdtemp(path.join(os.tmpdir(), 'lexiflow-output-'))));
   const fakeRoot = await import('node:fs/promises').then(({ mkdtemp }) => mkdtemp(path.join(os.tmpdir(), 'lexiflow-fake-docker-')));
   const bin = path.join(fakeRoot, 'bin'); await mkdir(bin);
@@ -151,10 +150,9 @@ test('buildCandidateImages 执行固定预检/构建/导出并留下四镜像候
   } finally { delete process.env.DOCKER_HOST; delete process.env.DOCKER_CONFIG; delete process.env.COMPOSE_FILE; delete process.env.BUILDX_CONFIG; delete process.env.SSH_AUTH_SOCK; delete process.env.BUILD_SECRET; await f.cleanup(); }
 });
 
-test('arm64-only descriptor 生成绑定子集摘要的原生候选', async () => {
+test('固定全锁计划按执行平台生成原生 arm64 候选', async () => {
   const f = await fixture();
   try {
-    f.descriptor.baseImages = f.descriptor.baseImages.filter((item) => item.platform === 'linux/arm64');
     await setState(f, { daemonArchitecture: 'arm64' });
     await withFakePath(f, async () => {
       const result = await buildCandidateImages(buildInput(f, { platform: 'linux/arm64' }));
@@ -252,7 +250,7 @@ test('拒绝基础镜像错配、构建失败及坏/符号链接 IID', async () 
   const neighbor = path.join(f.outputParent, 'neighbor'); await mkdir(neighbor); await writeFile(path.join(neighbor, 'keep.txt'), 'keep');
   try {
     await withFakePath(f, async () => {
-      await setState(f, { badArchitecture: f.descriptor.baseImages[0].javaRuntime.reference });
+      await setState(f, { badArchitecture: `registry.example.invalid/library/java@${ids['linux/amd64'][0]}` });
       await assert.rejects(buildCandidateImages(buildInput(f)), { message: 'BASE_IMAGE_MISMATCH' });
       assert.deepEqual(await import('node:fs/promises').then(({ readdir }) => readdir(neighbor)), ['keep.txt']);
       await setState(f, { badArchitecture: null, failOp: 'build', failSub: null });

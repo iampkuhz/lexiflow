@@ -32,7 +32,7 @@ class LocalEntryTest(unittest.TestCase):
         self.calls = self.root / "calls"
         self.mode = self.root / "mode"
         self.mode.write_text("")
-        for relative in ["ops/podman/local.mjs", "ops/podman/unified-local.mjs", "ops/podman/deployment.mjs", "ops/podman/database-target.mjs", "ops/podman/candidate.mjs", "ops/podman/versioned-images.mjs", "ops/podman/image-slot-lock.mjs", "ops/podman/java-runtime.mjs", "ops/podman/process-lock.mjs", "ops/podman/command.mjs", "ops/podman/doctor.mjs", "ops/podman/network-repair.mjs", "ops/podman/upgrade.mjs", "ops/podman/prepare-workspace.mjs", "ops/podman/versions.mjs", "ops/podman/compose.validation.yaml",
+        for relative in ["ops/podman/local.mjs", "ops/podman/unified-local.mjs", "ops/podman/deployment.mjs", "ops/podman/database-target.mjs", "ops/podman/candidate.mjs", "ops/podman/versioned-images.mjs", "ops/podman/image-slot-lock.mjs", "ops/podman/java-runtime.mjs", "ops/podman/process-lock.mjs", "ops/podman/command.mjs", "ops/podman/doctor.mjs", "ops/podman/upgrade.mjs", "ops/podman/prepare-workspace.mjs", "ops/podman/versions.mjs", "ops/podman/compose.validation.yaml",
                          "ops/podman/fetch-ecdict.sh", "ops/podman/source-tools.Containerfile",
                          "ops/docker/Dockerfile", "ops/docker/Dockerfile.postgres",
                          "ops/docker/entrypoint.sh", "ops/docker/bootstrap.sh",
@@ -1356,18 +1356,37 @@ const [api,db]=process.argv.slice(1); console.log(renderCompose(process.cwd(),
         compose = self.kit/'compose.yaml'
         before=compose.read_bytes(); state=(self.kit/'state.json').read_bytes()
         compose.write_bytes(before+b'\nunknown-network: true\n')
-        offset=len(self.calls.read_text().splitlines())
-        result = self.invoke('up')
-        self.assertNotEqual(result.returncode,0)
-        self.assertEqual(compose.read_bytes(),before+b'\nunknown-network: true\n')
-        self.assertEqual((self.kit/'state.json').read_bytes(),state)
-        calls=[json.loads(line) for line in self.calls.read_text().splitlines()[offset:]]
-        self.assertFalse(any('apply' in row or 'down' in row or 'prune' in row for row in calls))
+        for action in ['up', 'recover']:
+            with self.subTest(action=action):
+                offset=len(self.calls.read_text().splitlines())
+                result = self.invoke(action)
+                self.assertNotEqual(result.returncode,0)
+                self.assertEqual(compose.read_bytes(),before+b'\nunknown-network: true\n')
+                self.assertEqual((self.kit/'state.json').read_bytes(),state)
+                calls=[json.loads(line) for line in self.calls.read_text().splitlines()[offset:]]
+                self.assertFalse(any('apply' in row or 'down' in row or 'prune' in row for row in calls))
+                self.assertFalse(any(row[:1] == ['compose'] and any(cmd in row for cmd in ['up', 'stop']) for row in calls))
 
     def test_readiness_deadline_keeps_initialized_data(self):
-        # 只在标准Node preload替换单调时钟，产品没有缩短超时的测试开关。
+        # 只在 API 就绪阶段推进 preload 时钟，避免准备阶段先消耗超时预算。
+        # 产品没有缩短超时的测试开关；保留实际 120 秒边界及数据保留断言。
         with self.preload.open('a') as output:
-            output.write("Object.defineProperty(globalThis,'performance',{value:{now:(()=>{let n=0;return()=>n+=30000})()}});")
+            output.write("""
+const realNow = performance.now.bind(performance);
+const originalLog = console.log.bind(console);
+let readinessClock = false;
+let tick = 0;
+console.log = (...args) => {
+  if (args.some(value => typeof value === 'string' && value.includes('等待 API 正式就绪'))) {
+    readinessClock = true;
+    tick = realNow();
+  }
+  originalLog(...args);
+};
+Object.defineProperty(globalThis, 'performance', {
+  value: {now: () => readinessClock ? (tick += 30000) : realNow()}
+});
+""")
         result=self.invoke('install')
         self.assertNotEqual(result.returncode,0)
         self.assertIn('最多 120 秒',result.stdout)

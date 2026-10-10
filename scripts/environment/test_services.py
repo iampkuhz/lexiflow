@@ -70,12 +70,12 @@ def _policy(root: Path) -> dict:
         data = json.loads((root / POLICY_PATH).read_text())
     except (OSError, ValueError) as exc:
         raise TestServicesError(f"无法读取 {POLICY_PATH}：{exc}") from exc
-    if (
-        not isinstance(data, dict)
-        or data.get("provider") != "podman-ephemeral"
-        or data.get("pull") != "never"
-    ):
-        raise TestServicesError(f"{POLICY_PATH} 只允许 podman-ephemeral / pull=never")
+    if not isinstance(data, dict) or set(data) != {
+        "images",
+        "readiness_timeout_seconds",
+        "postgres_profiles",
+    }:
+        raise TestServicesError(f"{POLICY_PATH} 配置字段无效")
     if data.get("images") != {
         "postgres": "docker.io/library/postgres:17",
         "redis": "docker.io/library/redis:7",

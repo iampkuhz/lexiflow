@@ -257,3 +257,33 @@ class ReleaseCheckDeclarationTest(unittest.TestCase):
                     )
                 self.assertEqual("BLOCKED", report["result"], report)
                 self.assertEqual("missing-environment", report["checks"][0]["reason"])
+
+    def test_fixed_release_suites_have_one_entrypoint_and_original_budgets(self):
+        """真实声明保留独立范围及外层预算，统一入口仍进入冻结闭包。"""
+        for suffix, suite, budget in (
+            ("build", "build", 180),
+            ("manifest", "manifest", 90),
+            ("runtime-entry", "runtime-entry", 90),
+            ("lifecycle", "lifecycle", 180),
+            ("lifecycle-install", "lifecycle-install", 180),
+        ):
+            with self.subTest(suite=suite):
+                base = self.by_id[f"eng.release.{suffix}"]
+                changed = self.by_id[f"eng.release.{suffix}-on-change"]
+                self.assertEqual(
+                    ["node", "ops/release/check.mjs", "--suite", suite],
+                    base["command"],
+                )
+                self.assertEqual(base["command"], changed["command"])
+                self.assertEqual(budget, base["timeout_seconds"])
+                self.assertIn("ops/release/check.mjs", base["input_paths"])
+                if suite == "runtime-entry":
+                    for name in ("lifecycle-state.sh", "lifecycle-docker.sh", "lifecycle.sh"):
+                        source = f"ops/release/{name}"
+                        self.assertIn(source, base["input_paths"])
+                        self.assertIn(changed["check_id"], self.selected(source))
+                for check in (base, changed):
+                    self.assertNotIn(
+                        f"ops/release/{suite}-check.mjs", check["input_paths"]
+                    )
+                    self.assertNotIn("ops/release/lifecycle.mjs", check["input_paths"])

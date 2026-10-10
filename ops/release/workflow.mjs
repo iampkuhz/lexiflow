@@ -23,8 +23,7 @@ const MAX_JSON = 2_000_000;
 const MAX_ARTIFACT = 2 ** 40;
 const MAX_LICENSE_TABLE = 256 * 1024;
 const MAX_LICENSES = 64;
-const SAFE_ENV = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'LEXIFLOW_JAVA_HOME', 'JAVA_HOME',
-  'LEXIFLOW_RELEASE_GRADLE_CACHE', 'LEXIFLOW_RELEASE_NPM_CACHE'];
+const SAFE_ENV = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'LEXIFLOW_JAVA_HOME', 'JAVA_HOME'];
 const fail = code => { throw new Error(code); };
 const exact = (v, keys) => v !== null && typeof v === 'object' && !Array.isArray(v)
   && Object.keys(v).sort().join('\0') === [...keys].sort().join('\0');
@@ -100,7 +99,7 @@ function parseStrictJson(bytes) {
   return parsed;
 }
 
-export async function readBoundedJson(file, maximum = MAX_JSON) {
+async function readBoundedJson(file, maximum = MAX_JSON) {
   await safePath(file);
   const fd = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
@@ -362,7 +361,7 @@ export async function prepareWorkflow(requestFile, options = {}) {
     const stagedJar = path.join(artifactRoot, 'api.jar');
     await copyArtifact(jarSource, stagedJar, jar);
     const imageDescriptor = { schemaVersion: 1, softwareVersion: identity.softwareVersion,
-      sourceCommit: identity.sourceCommit, jar: { path: 'api.jar', ...jar }, baseImages };
+      sourceCommit: identity.sourceCommit, jar: { path: 'api.jar', ...jar } };
     const imageResult = await buildImages({ repoRoot: root, artifactRoot, descriptor: imageDescriptor,
       outputParent: imageParent, endpoint: request.endpoint, platform: 'linux/arm64' });
     const imageDirectory = imageResult.candidateDirectory;
@@ -396,8 +395,7 @@ export async function prepareWorkflow(requestFile, options = {}) {
     const manifestLicenses = licenses.map(item => ({ ...item }));
     for (const item of imageMarker.artifacts) {
       if (!['api-image', 'postgres-image'].includes(item.role) || item.platform !== 'linux/arm64') fail('IMAGE_RESULT_INVALID');
-      records.push({ role: item.role, path: item.path, bytes: item.bytes, sha256: item.sha256,
-        platform: item.platform, imageDigest: item.imageDigest,
+      records.push({ role: item.role, platform: item.platform,
         licenseIds: licenseIds(licenses, ...(item.role === 'api-image' ? ['LexiFlow', 'API-runtime'] : ['PostgreSQL'])) });
     }
     const descriptor = { schemaVersion: 1, buildIdentity: identity, softwareVersion: identity.softwareVersion,

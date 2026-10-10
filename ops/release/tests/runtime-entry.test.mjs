@@ -52,7 +52,7 @@ async function cleanFixture(t) {
   return { repo, root, descriptor, output: path.join(temp, 'package'), descriptorFile: path.join(temp, 'descriptor.json') };
 }
 
-const body = `lf_verify_release || exit 1\nif [ "${'${1:-}'}" = verify ]; then exit 0; fi\nif [ "${'${1:-}'}" = platform ]; then lf_select_platform "${'${2:-}'}" || exit 1; printf '%s\\n' "$LF_API_IMAGE"; exit 0; fi\nif [ "${'${1:-}'}" = identity ]; then printf '%s\\n' "$LF_RELEASE_KEY|$LF_SOFTWARE_VERSION|$LF_API_CONTRACT|$LF_SQL_VERSION|$LF_DATASET_SHA256|$LF_DATASET_PATH|$LF_COMPOSE_PATH"; exit 0; fi\nexit 64`;
+const body = `lf_verify_release || exit 1\nif [ "${'${1:-}'}" = environment ]; then lf_select_platform linux/amd64 || exit 1; env | LC_ALL=C sort; exit 0; fi\nif [ "${'${1:-}'}" = verify ]; then exit 0; fi\nif [ "${'${1:-}'}" = platform ]; then lf_select_platform "${'${2:-}'}" || exit 1; printf '%s\\n' "$LF_API_IMAGE"; exit 0; fi\nif [ "${'${1:-}'}" = identity ]; then printf '%s\\n' "$LF_RELEASE_KEY|$LF_SOFTWARE_VERSION|$LF_API_CONTRACT|$LF_SQL_VERSION|$LF_DATASET_SHA256|$LF_DATASET_PATH|$LF_COMPOSE_PATH"; exit 0; fi\nexit 64`;
 
 async function assembledFixture(t) {
   const f = await cleanFixture(t);
@@ -306,4 +306,25 @@ test('real sh rejects non-ASCII or uppercase digest syntax before comparing iden
     assert.equal(error?.stdout, '');
     assert.equal(error?.signal, null);
   }
+});
+
+
+test('verified runtime facts stay in the shell and are not exported to child environment', async t => {
+  const f = await assembledFixture(t);
+  const environment = f.run('environment');
+  for (const name of ['LF_RELEASE_ROOT', 'LF_RELEASE_KEY', 'LF_SOFTWARE_VERSION', 'LF_API_CONTRACT', 'LF_SQL_VERSION', 'LF_DATASET_SHA256', 'LF_DATASET_PATH', 'LF_COMPOSE_PATH', 'LF_PLATFORM', 'LF_API_IMAGE', 'LF_POSTGRES_IMAGE', 'LF_API_ARCHIVE', 'LF_POSTGRES_ARCHIVE']) {
+    assert.ok(!environment.split('\n').some(line => line.startsWith(`${name}=`)), name);
+  }
+  assert.match(f.run('identity'), /\|api1\|sql1\|/);
+});
+
+
+test('default lifecycle body retains NUL rejection after reading source-root templates', async t => {
+  const f = await cleanFixture(t);
+  for (const [name, content] of [['lifecycle-state.sh', '# state\n'], ['lifecycle-docker.sh', '# docker\n'], ['lifecycle.sh', 'invalid\u0000body']]) {
+    await writeFile(path.join(f.repo, 'ops/release', name), content);
+  }
+  execFileSync('git', ['-C', f.repo, 'add', '.']);
+  execFileSync('git', ['-C', f.repo, 'commit', '-qm', 'invalid default body']);
+  await assert.rejects(generateRuntimeEntry({ repoRoot: f.repo, descriptor: {}, artifactRoot: f.root }), /ARGUMENTS_INVALID/);
 });

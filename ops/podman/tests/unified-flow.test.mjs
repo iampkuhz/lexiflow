@@ -147,6 +147,7 @@ function fixture({ candidateMode = false, failReady = false, failApply = false, 
     return { repo, dir, action: 'install', apiPort: 18080, dbPort, seen: new Set(),
       candidate, candidateRequest: request, candidateAdapter: { readCandidate: async () => candidate,
         installCandidateArtifacts: async (_candidate, { installDir }) => {
+          calls.push('candidate-install');
           write(path.join(installDir, 'extension/build-identity.json'), JSON.stringify(identity));
           write(path.join(installDir, 'extension/manifest.json'), JSON.stringify({ version: identity.chromeVersion,
             version_name: identity.softwareVersion, host_permissions: ['http://127.0.0.1:18080/*'] }));
@@ -168,10 +169,10 @@ function fixture({ candidateMode = false, failReady = false, failApply = false, 
       planOnly, confirmPlan, confirmInput, confirmOutput,
       interrupted: () => false, setLogFile: () => {} };
   }
-  async function plan() {
+  async function plan(action = 'install') {
     const original = console.log; let planned; const existed = fs.existsSync(dir);
     console.log = value => { try { const parsed = JSON.parse(value); if (parsed.planHash) planned = parsed; } catch {} };
-    try { assert.equal(await runUnifiedDeployment(ctx({ planOnly: true })), 0); }
+    try { assert.equal(await runUnifiedDeployment({ ...ctx({ planOnly: true }), action }), 0); }
     finally { console.log = original; }
     assert.ok(planned?.planHash); if (!existed) assert.equal(fs.existsSync(dir), false);
     return planned;
@@ -455,5 +456,42 @@ test('ordinary consent blocks recorded credential changes before its first conne
     };
     await assert.rejects(runUnifiedDeployment(ctx), /DEPLOYMENT_SECRET_DRIFT/);
     assert.equal(f.calls.slice(before).some(call => call.startsWith('./gradlew:') || call.startsWith('podman:run')), false);
+  } finally { f.cleanup(); }
+});
+
+for (const candidateMode of [false, true]) test(`unchanged ${candidateMode ? 'candidate' : 'source'} refresh always prepares and restarts application without reimporting data`, async () => {
+  const f = fixture({ candidateMode });
+  try {
+    await f.setup(); const initial = await f.plan();
+    await runUnifiedDeployment(f.ctx({ confirmPlan: initial.planHash }));
+    const initialState = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json')));
+    let operation = initialState.lastOperation.operation;
+    for (const action of ['install', 'upgrade']) {
+      const planned = await f.plan(action);
+      assert.equal(planned.plan.actions.applicationReason, 'INSTALL_REFRESH');
+      assert.equal(planned.plan.actions.applicationUpdate, true);
+      assert.equal(planned.plan.actions.applicationStart, true);
+      assert.equal(planned.plan.actions.dataRebuild, false);
+      const offset = f.calls.length;
+      assert.equal(await runUnifiedDeployment({ ...f.ctx({ confirmPlan: planned.planHash }), action }), 0);
+      const execution = f.calls.slice(offset);
+      assert.equal(execution.filter(call => call.includes('--deployment-data apply')).length, 0);
+      assert.equal(execution.filter(call => call === 'compose:stop api').length, 1);
+      assert.equal(execution.filter(call => call === 'compose:up -d --no-deps --force-recreate api').length, 1);
+      assert.equal(execution.filter(call => call === 'ready').length, 1);
+      if (candidateMode) assert.equal(execution.filter(call => call === 'candidate-install').length, 1);
+      else {
+        assert.equal(execution.filter(call => call.startsWith('npm:run build')).length, 1);
+        assert.equal(execution.filter(call => call.startsWith('podman:build') && call.includes('-t localhost/lexiflow-api:')).length, 1);
+      }
+      const state = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json')));
+      assert.equal(state.phase, 'ready');
+      assert.equal(state.id, initialState.id);
+      assert.equal(state.generationVersion, initialState.generationVersion);
+      assert.notEqual(state.lastOperation.operation, operation);
+      assert.equal(state.lastOperation.kind, action);
+      assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'deployment.json'))).stage, 'complete');
+      operation = state.lastOperation.operation;
+    }
   } finally { f.cleanup(); }
 });

@@ -49,13 +49,11 @@ Thumbs.db
 /ops/dataset/*.csv
 /ops/dataset/*.ndjson
 /ops/dataset/*.jsonl
-/ops/dataset/stardict.7z
 /ops/dataset/downloads/
 /ops/dataset/extracted/
 /assets/lexicon/*.csv
 /assets/lexicon/*.ndjson
 /assets/lexicon/*.jsonl
-/assets/lexicon/stardict.7z
 /assets/lexicon/downloads/
 /assets/lexicon/extracted/
 

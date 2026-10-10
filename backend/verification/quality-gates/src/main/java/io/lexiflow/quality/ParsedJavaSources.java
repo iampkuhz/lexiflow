@@ -30,13 +30,11 @@ public record ParsedJavaSources(List<ParsedSource> sources, DocTrees docTrees) {
   /**
    * 解析调用者明确提供的源码，不解析类型也不访问工作树状态。
    *
-   * @param root 后端构建根目录。
    * @param candidates 候选源码。
    * @return 共享解析结果。
    * @throws IOException 源码读取失败或存在语法错误。
    */
-  public static ParsedJavaSources parse(Path root, List<JavaSourceFile> candidates)
-      throws IOException {
+  public static ParsedJavaSources parse(List<JavaSourceFile> candidates) throws IOException {
     var compiler = ToolProvider.getSystemJavaCompiler();
     if (compiler == null) {
       throw new IOException("JDK compiler is unavailable");

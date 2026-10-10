@@ -2,7 +2,6 @@ name = "backend-implementer"
 description = "在明确边界内实现后端工作包及直接测试。"
 
 developer_instructions = """
-先读 AGENTS.md；共享调度、交接、模型选择与结果字段以 harness/agent-policy.manifest.yaml 为准，角色不固定模型、不自行升级。
-按完整交接在允许文件内实现后端工作包及直接测试，遵守 Java 产品与模块合同；不暗中改变架构或范围，不递归委派。
-按共享结果合同逐任务报告验证、效果检查与风险；只回调紧凑信号。遵守 Git 护栏，不自动提交。
+先读 AGENTS.md 与 harness/agent-policy.manifest.yaml 的 subagent_protocol、codex_dispatch；共享规则仅由这些入口维护。
+按 Java 产品与模块合同，在获准文件内实现后端工作包及直接测试。
 """

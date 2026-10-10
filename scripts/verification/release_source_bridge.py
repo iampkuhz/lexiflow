@@ -45,7 +45,6 @@ FIXED_FILES = frozenset(
         "ops/release/build-execution.mjs",
         "ops/release/candidate.mjs",
         "ops/release/verified-candidate.mjs",
-        "ops/release/lifecycle.mjs",
         "ops/release/lifecycle-docker.sh",
         "ops/release/lifecycle-state.sh",
         "ops/release/lifecycle.sh",
@@ -121,7 +120,6 @@ _SUPPORT_FILES = frozenset(
         "tests/verification/test_release_runtime_lifecycle.py",
         "tests/verification/test_environment.py",
         "ops/release/check.mjs",
-        "ops/release/build-check.mjs",
         "ops/release/tests/lifecycle-fixture.mjs",
         "ops/release/tests/fake-docker-daemon.mjs",
         "ops/release/tests/build.test.mjs",
@@ -157,34 +155,6 @@ class BridgeError(RuntimeError):
     def __init__(self, status: str, code: str) -> None:
         self.status, self.code = status, code
         super().__init__(f"{status}/{code}")
-
-
-class FrozenSource:
-    """仅作为本进程 API 交接载体；对象类型不构成安全认证。"""
-
-    __slots__ = (
-        "_seal",
-        "check",
-        "check_config_fingerprint",
-        "identity",
-        "root",
-        "snapshot",
-    )
-
-    def __init__(
-        self,
-        root: Path,
-        check: dict[str, Any],
-        snapshot: dict[str, Any],
-        identity: dict[str, Any],
-        seal: object,
-    ) -> None:
-        self.root, self.check, self.snapshot = root, check, snapshot
-        self.check_config_fingerprint = fingerprint_json(check)
-        self.identity, self._seal = identity, seal
-
-
-_SEAL = object()
 
 
 def _fail(code: str) -> None:
@@ -334,29 +304,6 @@ def _private(path: str) -> bool:
         part in _PRIVATE or part == ".env" or part.startswith(".env.")
         for part in path.split("/")
     )
-
-
-def _load_check(root: Path, check_id: str) -> dict[str, Any]:
-    if check_id not in {CHECK_ID, CHANGE_CHECK_ID}:
-        _fail("check-identity-mismatch")
-    try:
-        document = load_declarations(root)
-    except DeclarationError:
-        _fail("check-configuration-invalid")
-    checks = document.get("checks") if isinstance(document, dict) else None
-    if not isinstance(checks, list):
-        _fail("check-configuration-invalid")
-    matches = [
-        item
-        for item in checks
-        if isinstance(item, dict) and item.get("check_id") == check_id
-    ]
-    if len(matches) != 1:
-        _fail("check-identity-mismatch")
-    check = matches[0]
-    if not isinstance(check.get("input_paths"), list):
-        _fail("check-configuration-invalid")
-    return check
 
 
 def _exact_json_equal(left: Any, right: Any) -> bool:
@@ -616,33 +563,6 @@ def _git_identity(root: Path) -> dict[str, Any]:
     }
 
 
-def freeze_release_source(repo_root: str | Path, check_id: str) -> FrozenSource:
-    """冻结精确 Check 声明输入，并立即以真实 kernel 复算。"""
-    supplied_root = Path(repo_root)
-    if supplied_root.is_symlink():
-        _fail("repository-root-invalid")
-    root = supplied_root.resolve(strict=True)
-    if not root.is_dir():
-        _fail("repository-root-invalid")
-    check = _load_check(root, check_id)
-    before = _git_identity(root)
-    snapshot = snapshot_check_inputs(root, check)
-    if snapshot["missing"]:
-        if (
-            ".gitignore" in snapshot["missing"]
-            or "ops/release/third-party-notices.md" in snapshot["missing"]
-        ):
-            _blocked("missing-frozen-input")
-        _fail("missing-frozen-input")
-    if not isinstance(snapshot.get("files"), list) or not snapshot.get("fingerprint"):
-        _fail("snapshot-shape-invalid")
-    after_snapshot = snapshot_check_inputs(root, check)
-    after = _git_identity(root)
-    if snapshot != after_snapshot or before != after:
-        _fail("repository-identity-drift")
-    return FrozenSource(root, check, snapshot, before, _SEAL)
-
-
 def _closure(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     files = snapshot["files"]
     by_path: dict[str, dict[str, Any]] = {}
@@ -828,35 +748,6 @@ def _closure_description() -> dict[str, Any]:
     }
 
 
-def create_release_source_fixture(
-    repo_root: str | Path, frozen_source: FrozenSource, output_parent: str | Path
-) -> dict[str, Any]:
-    """把冻结闭包复制到隔离 Git fixture，并写出不可用于正式发行的映射 receipt。"""
-    supplied_root = Path(repo_root)
-    if supplied_root.is_symlink():
-        _fail("repository-root-invalid")
-    root = supplied_root.resolve(strict=True)
-    if not isinstance(frozen_source, FrozenSource) or frozen_source._seal is not _SEAL:
-        _fail("frozen-object-not-issued-here")
-    if frozen_source.root != root or frozen_source.check.get("check_id") != CHECK_ID:
-        _fail("frozen-object-context-mismatch")
-    check = _load_check(root, CHECK_ID)
-    if fingerprint_json(check) != frozen_source.check_config_fingerprint:
-        _fail("check-configuration-drift")
-    current = snapshot_check_inputs(root, check)
-    identity = _git_identity(root)
-    if current != frozen_source.snapshot or identity != frozen_source.identity:
-        _fail("frozen-source-drift")
-    return _create_fixture_from_snapshot(
-        root,
-        check,
-        current,
-        identity,
-        frozen_source.check_config_fingerprint,
-        output_parent,
-    )
-
-
 def consume_verify_snapshot(
     repo_root: str | Path,
     effective_check: dict[str, Any],
@@ -913,7 +804,7 @@ def _create_fixture_from_snapshot(
     identity: dict[str, Any],
     check_config_fingerprint: str,
     output_parent: str | Path,
-    verify_context: dict[str, Any] | None = None,
+    verify_context: dict[str, Any],
 ) -> dict[str, Any]:
     """用既有字节安全 copier 消费已核对快照。"""
     if fingerprint_json(check) != check_config_fingerprint:
@@ -1039,12 +930,11 @@ def _create_fixture_from_snapshot(
             "purpose": PURPOSE,
             "formalReleaseEligible": False,
         }
-        if verify_context is not None:
-            provenance["verifyContext"] = {
-                "run_id": verify_context["run_id"],
-                "check_id": verify_context["check_id"],
-                "check_config_fingerprint": verify_context["check_config_fingerprint"],
-            }
+        provenance["verifyContext"] = {
+            "run_id": verify_context["run_id"],
+            "check_id": verify_context["check_id"],
+            "check_config_fingerprint": verify_context["check_config_fingerprint"],
+        }
         receipt = json.dumps(
             provenance, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
@@ -1088,10 +978,3 @@ def _create_fixture_from_snapshot(
                     _blocked("staging-cleanup-ownership-unknown")
             except FileNotFoundError:
                 pass
-
-
-def create_release_source_fixture_from_current_check(
-    *args: Any, **kwargs: Any
-) -> dict[str, Any]:
-    """禁止调用者以通用参数包装绕过 frozen object API。"""
-    _fail("unsupported-api")

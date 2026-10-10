@@ -67,6 +67,23 @@ test('database-fact recovery activates target only, retaining marker, installati
   } finally { f.cleanup(); }
 });
 
+test('uncommitted or unknown database fact never activates prepared target or alters files', async () => {
+  for (const fact of [
+    { needsRebuild: true, generationVersion: 'c'.repeat(64), datasetVersion: 73 },
+    { needsRebuild: false, generationVersion: 'e'.repeat(64), datasetVersion: 73 },
+    { needsRebuild: false, generationVersion: 'c'.repeat(64), datasetVersion: null },
+  ]) {
+    const f = fixture();
+    try {
+      await assert.rejects(activatePreparedTarget({ ...f.callbacks, fact }), /DEPLOYMENT_RECOVERY_FACT_DRIFT/);
+      assert.deepEqual(f.calls, []);
+      assert.equal(fs.readFileSync(path.join(f.dir, 'compose.yaml'), 'utf8'), 'old compose');
+      assert.equal(fs.readFileSync(path.join(f.dir, 'infra/postgres/schema.sql'), 'utf8'), 'old sql');
+      assert.equal(fs.existsSync(f.prepared.extensionStage), true);
+    } finally { f.cleanup(); }
+  }
+});
+
 test('unknown config/secret/extension drift blocks before switching application', async () => {
   for (const mutate of [
     f => fs.writeFileSync(path.join(f.dir, 'compose.yaml'), 'unknown compose'),
@@ -109,6 +126,7 @@ test('extension mismatch and immutable installation record publication remain gu
     publishRecord(f.dir, record); publishRecord(f.dir, record);
     assert.equal(fs.readdirSync(path.join(f.dir, 'installation-records')).length, 1);
     assert.throws(() => publishRecord(f.dir, { ...record, status: 'FAIL' }), /INSTALL_RECORD_CONFLICT/);
-    assert.equal(versionSummary({ version: f.old.softwareVersion }, f.next, null).latestRelease, null);
+    assert.deepEqual(versionSummary({ version: f.old.softwareVersion }, f.next, null), {
+      installed: f.old.softwareVersion, local: f.next.softwareVersion, latestRelease: null });
   } finally { f.cleanup(); }
 });

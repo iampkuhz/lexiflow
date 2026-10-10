@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 
-/** 以固定顺序共享输入并执行三条 LexiFlow Java source gate。 */
+/** 以固定顺序共享输入并执行全部 LexiFlow Java source gate。 */
 public final class JavaSourceGateRunner {
 
   private static final List<JavaSourceGate> RULES =
@@ -25,15 +25,9 @@ public final class JavaSourceGateRunner {
    */
   public static GateReport run(Path root) throws IOException {
     var allSources = JavaSourceDiscovery.discover(root);
-    var parsed = ParsedJavaSources.parse(root, allSources);
+    var parsed = ParsedJavaSources.parse(allSources);
     var context = new JavaSourceContext(allSources, parsed);
-    var evaluations =
-        RULES.stream().map(rule -> GateEvaluation.from(rule.id(), rule.evaluate(context))).toList();
-    var status =
-        evaluations.stream().allMatch(item -> item.status() == GateStatus.PASS)
-            ? GateStatus.PASS
-            : GateStatus.FAIL;
-    return new GateReport(status, allSources.size(), evaluations);
+    return evaluate(context);
   }
 
   /**
@@ -44,11 +38,7 @@ public final class JavaSourceGateRunner {
    */
   public static GateReport evaluate(JavaSourceContext context) {
     var evaluations =
-        RULES.stream().map(rule -> GateEvaluation.from(rule.id(), rule.evaluate(context))).toList();
-    var status =
-        evaluations.stream().allMatch(item -> item.status() == GateStatus.PASS)
-            ? GateStatus.PASS
-            : GateStatus.FAIL;
-    return new GateReport(status, context.allSources().size(), evaluations);
+        RULES.stream().map(rule -> new GateEvaluation(rule.id(), rule.evaluate(context))).toList();
+    return new GateReport(context.allSources().size(), evaluations);
   }
 }

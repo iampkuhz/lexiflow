@@ -48,7 +48,7 @@ class ReleaseManifestCheckTest(unittest.TestCase):
             "result_contract",
         ):
             self.assertEqual(base[key], change[key], key)
-        self.assertEqual(["node", "ops/release/manifest-check.mjs"], base["command"])
+        self.assertEqual(["node", "ops/release/check.mjs", "--suite", "manifest"], base["command"])
         self.assertEqual(["node", "git"], base["required_environment"])
         self.assertEqual([], base["module_dependencies"])
         self.assertIs(base["transaction_reuse"], True)
@@ -58,7 +58,6 @@ class ReleaseManifestCheckTest(unittest.TestCase):
             "runtime-entry.mjs",
             "runtime-verification.sh",
             "package.mjs",
-            "manifest-check.mjs",
             "tests/manifest.test.mjs",
             "third-party-notices.md",
             "version.mjs",

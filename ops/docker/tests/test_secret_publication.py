@@ -13,6 +13,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[3]
 STATE = ROOT / "ops/release/lifecycle-state.sh"
 LIFECYCLE = ROOT / "ops/release/lifecycle.sh"
+VERIFIER_HASH = (ROOT / "ops/release/runtime-verification.sh").read_text().split("# 在 cd -P", 1)[0]
 KEY = "a" * 64
 INSTALL = "b" * 32
 TOKEN = "c" * 32
@@ -39,7 +40,7 @@ class SecretPublicationTest(unittest.TestCase):
         self.entry = self.base / "entry.sh"
         library = LIFECYCLE.read_text().split('lf_user_main "$@" ||', 1)[0]
         self.entry.write_text(
-            "#!/bin/sh\n" + STATE.read_text() + "\n" + library + "\n"
+            "#!/bin/sh\n" + VERIFIER_HASH + "\n" + STATE.read_text() + "\n" + library + "\n"
             f"LF_ROOT='{self.root}'\nLF_INSTALL_ID={INSTALL}\nLF_LOCK_TOKEN={TOKEN}\n"
             f"LF_RELEASE_KEY={KEY}\nLF_PLATFORM=linux/amd64\n"
             f"LF_PROJECT=lf_{INSTALL}_{KEY[:16]}\n"
@@ -69,7 +70,7 @@ class SecretPublicationTest(unittest.TestCase):
         self.record = self.release / "record"
         self.record.write_text(
             f"key={KEY}\nentry={self.entry}\nsha256={hashlib.sha256(self.entry.read_bytes()).hexdigest()}\n"
-            f"platform=linux/amd64\nproject=lf_{INSTALL}_{KEY[:16]}\n"
+            "platform=linux/amd64\n"
         )
 
     def run_shell(self, action: str = "make", **flags: str) -> subprocess.CompletedProcess[bytes]:

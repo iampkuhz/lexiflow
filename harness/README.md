@@ -8,7 +8,6 @@ Harness 是机器约束的真源。理解职责先读[工程三体系总览](../
 | --- | --- |
 | [manifest.yaml](manifest.yaml) | 项目类型、公开命令、模块与文档入口 |
 | [agent-policy.manifest.yaml](agent-policy.manifest.yaml) | 隐私、Git、工作包、模型路由、身份、调度与结果语义 |
-| [agent-runtime.manifest.yaml](agent-runtime.manifest.yaml) | 客户端 Session/checkout 运行边界；共享规则直接读 policy |
 | [delivery-hooks.json](delivery-hooks.json) | 交付 Stop 的模式、超时与进度间隔；固定协议由入口实现，不签发正式验收 |
 | [ci-policy.yaml](ci-policy.yaml) | 快速 CI 的常驻检查与正式发行检查边界，不签发完整 Verify/Formal |
 | [test-services.json](test-services.json) | Hook 临时 PostgreSQL/Redis、本机镜像、就绪与安全资源边界 |
@@ -20,12 +19,12 @@ Harness 是机器约束的真源。理解职责先读[工程三体系总览](../
 
 ## 执行边界
 
-- **开发自检**：`python3 -m scripts.verification.development` 按完整真实 diff 的显式 `triggers` 及模块消费依赖闭包选择日常 `development-change` checks；高风险等级保留，不因风险等级单独追加全仓 `development-baseline`。未知覆盖、依赖或相关漂移仍失败关闭；同工作区未提交变化累计纳入。实现者可做静态、编译与直接测试，但不能自签正式验收。Java 检查由 Gradle 执行；scripts 使用 Ruff/Pylint，中文说明的准确性仍需审阅。
-- **完整验证与诊断**：`python3 scripts/check_changes.py`、`python3 scripts/check_repository.py` 用于明确要求的完整 baseline 和发行 CI；`python3 -m scripts.verification.diagnose change|repository` 只定位问题。日常入口不接受 root/base/check ID 覆盖，缺环境为 BLOCKED，不自动安装依赖。开发 PASS 不等于完整 Verify 或 Formal PASS。详见 [Verify](../docs/reference/verification.md)。
-- **验证窗口与复用**：Verify、Hook、工作包和 Formal validation 共用同 checkout 非等待窗口，忙时 BLOCKED，不锁编辑。真实风险闭包漂移使验证失败；不删除未知锁或终止未知进程。仅显式 `transaction_reuse=true` 且完整输入、配置、环境、window、runner、context 相同的成功 Check 可在同次事务复用；未知副作用、runtime transport、失败、自检到 Formal 及跨交付缓存均不复用。
-- **正式验收**：`python3 -m scripts.delivery_gate submit|validate|review|check|status`。submit 从真实完整 diff 与 Catalog 派生 Task 主体和变化依赖，绑定来源报告、风险、计划、未跟踪内容及 producer。`TASK_VALIDATION` 由不同 actor 按冻结计划执行；high-risk/formal 另需 `INDEPENDENT_REVIEW`。review 只读冻结 diff/evidence，`CATALOG_DECISION` 只核对 receipt/hash DAG，均不重跑命令。机械/局部链不伪造 review。每批 validate 最多 16 个不同 submission，各 Task 独立报告，仅同一 validator、同次窗口的等价检查可复用。正式独立高风险验收仍执行 `development-baseline` 并要求独立 review；正式发行风险由 Task 必需检查命中 CI formal 集合触发，仍需完整 Repository baseline。详见 [Delivery Gate](../docs/reference/delivery-gate.md)。
-- **Agent 委派**：实现默认使用当前父任务下的原生 Codex 子代理；Qoder 生命周期只供核对、读取和 ack 历史运行，当前策略拒绝 Qoder start/resume。模型按完整工作包由 policy 显式选择；Sol 升级需具体证据。保留旧运行的身份、回调与证据，不因切换路由改写或删除。验证和审查仍由不同原生 Codex 子代理承担；内部不使用 `create_thread`，集成验证串行。详见 [Agent workflow](../docs/scenarios/delegate-work.md)。
-- **Stop 与 CI**：正常 Stop 在一个窗口准备隔离测试服务，按完整 diff 的显式 `triggers` 与模块消费依赖闭包运行日常 checks，最后精确清理；中间汇报、提问、等待、Qoder 交接及只读 review/catalog 回合以单独一行 `<!-- lexiflow:intermediate -->` 结尾，不运行交付检查。普通交付不得使用该标记。首次失败 block；`stop_hook_active` 再失败以 `continue=false` 结束自动重试，不改称 PASS。Git Hook 只提醒，分支/PR CI 用 quick，正式标签 CI 保留完整 Change/Repository Verify。详见 [交付 Hook](../docs/reference/hooks.md)。
+- **开发自检**：`python3 -m scripts.verification.development` 按完整真实 diff 的 triggers 与模块消费依赖闭包选择检查；未知覆盖失败关闭，开发 PASS 不是完整 Verify 或 Formal PASS。实现者可做静态、编译与精准测试，不能自签验收。见[执行场景](../docs/scenarios/run-repository-gates.md)。
+- **完整 Verify**：`public_executables` 定义公开命令；完整基线按需显式运行，诊断不签发验收。见[Verify](../docs/reference/verification.md)。
+- **窗口与复用**：同 checkout 的执行窗口非等待，不锁编辑；输入漂移失败，不终止未知进程或删锁。复用只在同次事务的完整等价合同内，自检不得复用为 Formal。见[协调合同](agent-policy.manifest.yaml)。
+- **正式验收**：`TASK_VALIDATION` 由不同 actor 执行冻结计划；高风险另需 `INDEPENDENT_REVIEW`。review 只读冻结 diff/evidence，`CATALOG_DECISION` 只核对 receipt/hash DAG，两层不重跑命令。见[Delivery Gate](../docs/reference/delivery-gate.md)。
+- **Agent 委派**：默认当前父任务下原生子代理，模型显式按 policy 选择；Qoder 只消费历史运行，新 start/resume 拒绝。不同 actor 分担验证／审查，集成验证串行，内部不用 `create_thread`。见[Agent workflow](../docs/scenarios/delegate-work.md)。
+- **Stop 与 CI**：正常 Stop 运行开发检查；中间汇报、提问、等待及只读 review/catalog 以独立行 `<!-- lexiflow:intermediate -->` 结尾。普通交付不使用该标记；跳过、callback、零退出和失败重试均不是 PASS。Git Hook 仅提醒；CI quick 与正式发行基线见[Hook](../docs/reference/hooks.md)及[CI](../docs/scenarios/github-actions.md)。
 
 ## 脚本与开发数据边界
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 import unittest
 from unittest.mock import patch
-from scripts.delivery_gate.validate import ValidationError, validate
+from scripts.delivery_gate.validate import ValidationError, validate_batch
 from tests.delivery_gate.fixtures import (
     DeliveryGateFixture,
     PRODUCER_SESSION,
@@ -43,7 +43,7 @@ class TestValidate(unittest.TestCase):
     def test_self_validation_rejected(self, m):
         m.return_value = make_mock_runtime(PRODUCER_SESSION)
         with self.assertRaises(ValidationError) as c:
-            validate(self.f.root, submission_id=self.f.submission_id)
+            validate_batch(self.f.root, submission_ids=[self.f.submission_id])[0]
         self.assertEqual(c.exception.code, "self-validation-forbidden")
 
     @patch("scripts.agents.local_codex_runtime.discover")
@@ -51,7 +51,7 @@ class TestValidate(unittest.TestCase):
         self.f.write("protected.py", "after\n")
         m.return_value = make_mock_runtime(VALIDATOR_SESSION)
         with self.assertRaises(ValidationError) as c:
-            validate(self.f.root, submission_id=self.f.submission_id)
+            validate_batch(self.f.root, submission_ids=[self.f.submission_id])[0]
         self.assertIn(
             c.exception.code,
             {

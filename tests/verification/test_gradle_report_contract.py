@@ -1,6 +1,7 @@
 """Direct contract checks for Gradle quality determination versus browse-only reports."""
 from pathlib import Path
 import unittest
+import tomllib
 
 import yaml
 from scripts.verification.declarations import load_declarations
@@ -63,8 +64,27 @@ class GradleReportContractTest(unittest.TestCase):
     def test_identity_resolved_via_build_logic(self):
         source = ROOT_BUILD.read_text(encoding="utf-8")
         self.assertIn("BuildIdentity.readBaseVersion", source)
-        self.assertIn("BuildIdentityExtension", source)
+        self.assertIn("version = baseVersion", source)
+        self.assertNotIn("BuildIdentityExtension", source)
+        self.assertNotIn('"buildIdentity"', source)
         self.assertNotIn("BuildIdentity.resolve", source)
+
+    def test_version_catalog_contains_only_consumed_tool_versions(self):
+        catalog = tomllib.loads((ROOT / "backend/gradle/libs.versions.toml").read_text(encoding="utf-8"))
+        for key in ("checkstyle", "google-java-format", "jacoco", "pmd"):
+            self.assertNotIn(key, catalog["versions"])
+        self.assertNotIn("spotless", catalog["plugins"])
+        self.assertEqual(catalog["libraries"]["junit-platform-launcher"]["version"], {"ref": "junit"})
+        self.assertIn("spotless", catalog["versions"])
+
+    def test_runtime_switch_defaults_remain_at_injection_points(self):
+        config = yaml.safe_load((ROOT / "backend/product/api/src/main/resources/application.yaml").read_text(encoding="utf-8"))
+        for section in ("segment-analysis", "caption-debug"):
+            self.assertNotIn("enabled", config.get("lexiflow", {}).get(section, {}))
+        api = (ROOT / "backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java").read_text(encoding="utf-8")
+        debug = (ROOT / "backend/product/api/src/main/java/io/lexiflow/api/captiondebug/CaptionDebugController.java").read_text(encoding="utf-8")
+        self.assertIn('${lexiflow.segment-analysis.enabled:false}', api)
+        self.assertIn('${lexiflow.caption-debug.enabled:true}', debug)
 
     def test_configuration_phase_does_not_call_node(self):
         source = ROOT_BUILD.read_text(encoding="utf-8")

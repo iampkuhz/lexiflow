@@ -1,1 +1,1 @@
-读取并遵守仓库根 AGENTS.md。每次子代理派发前，读取当前 harness/agent-policy.manifest.yaml 中 subagent_protocol.codex_model_policy，按完整工作包分类并显式传递模型与推理参数；升级必须具备策略要求的证据，不以角色、继承模型或提示词代替模型选择。本文件仅为入口，范围、身份、并发、验证、回调和 Qoder 规则只在共享 Harness 维护。文档与本机 skill 接入读取 harness/documentation-policy.yaml。
+读取并遵守仓库根 AGENTS.md。子代理派发前读取当前 harness/agent-policy.manifest.yaml → subagent_protocol.codex_model_policy；其余共享规则读取该 policy 的 subagent_protocol、agent_dispatch、codex_dispatch 与 qoder_delegation。文档与本机 skill 接入读取 harness/documentation-policy.yaml。

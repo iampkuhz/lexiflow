@@ -27,15 +27,15 @@
 
 - 开始任务先读 `harness/README.md` 与 `harness/manifest.yaml`，按工作类型加载对应合同；长期规范在 `openspec/specs/`，当前变更在 `openspec/changes/`。
 - 子任务前读 `harness/agent-policy.manifest.yaml` 的 `subagent_protocol` 与 `qoder_delegation`；超过 10 分钟且范围可隔离、或需大量新上下文而可简洁验收的任务优先派发。模型显式按 `codex_model_policy` 选择，遵守范围、身份、回调和并发合同。
-- 客户端运行边界见 `harness/agent-runtime.manifest.yaml`；共享规则只维护在 policy，runtime、任务模板与 Catalog 不保存副本。
+- 客户端 Session/checkout 边界与共享规则见 `harness/agent-policy.manifest.yaml`；客户端、任务模板与 Catalog 不保存副本。
 - 调用者不伪造 runner 身份；实现者不能自行签发 validation/review；完成或退出零不等于验收。集成验证串行，不覆盖其他写入者的修改。
-- 修改文档时读取 `harness/documentation-policy.yaml`；图表生成/校验按其中 skill 声明加载 `feipi-plantuml-generate-diagram`，仅 skill 工程维护加载 `feipi-skill-govern`。缺少工具不得假装已执行；本机接入见 `harness/README.md`。
+- 修改文档先读 `harness/documentation-policy.yaml`，按其 skill 声明及图源流程执行；本机接入见 `harness/README.md`，缺工具不得假装完成。
 
 ## 验证与 Git
 
 - 语言检查和 Hook 见 `harness/README.md`；客户端只触发，不复制规则或代替验证。
-- 实现者可做静态/编译/测试自检，不得签发正式 validation/review 或代替真实 actor。正式检查只在 `TASK_VALIDATION` 执行；`INDEPENDENT_REVIEW` 只复核冻结 diff/evidence；`CATALOG_DECISION` 只验 receipt/hash DAG。后两层不重跑命令。
+- 自检、`TASK_VALIDATION`、`INDEPENDENT_REVIEW` 与 `CATALOG_DECISION` 的执行／证据边界见 `harness/README.md`；实现者不得自签验收或代替真实 actor。
 - 结果只用 `PASS`、`BLOCKED`、`FAIL`；必需检查未运行或跳过不得称 `PASS`。
-- 交付自检按风险选 profile；完整 Change/Repository Verify 按需显式运行，Stop 见 Harness。Hook 不锁编辑或 commit，不替代 Formal Gate。
+- 开发自检、完整 Verify、Stop 与 Hook 按 `harness/README.md` 执行；Hook 不锁编辑或 commit，不替代 Formal Gate。
 - `scripts/` 只放跨阶段、稳定且受测的能力；仅当前阶段使用的脚本放 ignored `tmp/phase-tools/<change-id>/`，不得成为公开入口或 Registry 输入。
 - 禁止自动 stage、commit、merge、rebase、reset、stash、force、push；Git 集成/发布须用户明示。
