@@ -15,6 +15,7 @@ from scripts.verification import freeze_inputs, verify_repository
 from scripts.verification.declarations import load_declarations_snapshot
 from scripts.verification.kernel import snapshot_check_inputs
 from scripts.verification.scope import select_checks_for_changes
+from tests.verification.declaration_fixtures import write_declarations
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = "eng.release.build"
@@ -37,11 +38,7 @@ class BuildCheckTest(unittest.TestCase):
             path = root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("synthetic input\n")
-        (root / "harness/module-checks.yaml").write_text(
-            yaml.safe_dump(
-                {"schema_version": "lexiflow.module-checks.v1", "checks": checks}
-            )
-        )
+        write_declarations(root / "harness/module-checks.yaml", checks)
 
     def test_scopes_and_required_inputs_match(self):
         """两种范围共享命令、输入和结果合同，清单测试不能被版本测试替代。"""
@@ -185,14 +182,7 @@ class BuildCheckTest(unittest.TestCase):
                     target = root / name
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text("synthetic input\n")
-                (root / "harness/module-checks.yaml").write_text(
-                    yaml.safe_dump(
-                        {
-                            "schema_version": "lexiflow.module-checks.v1",
-                            "checks": checks,
-                        }
-                    )
-                )
+                write_declarations(root / "harness/module-checks.yaml", checks)
                 executed = []
 
                 def runner(argv, *_, stdin_payload=None):

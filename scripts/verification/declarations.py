@@ -2,27 +2,29 @@
 
 from __future__ import annotations
 
+import copy
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
 
-_DECLARATION_SCHEMA = "lexiflow.module-checks.v1"
-_REQUIRED_CHECK_FIELDS = frozenset(
-    {
-        "check_id",
-        "module",
-        "command",
-        "cwd",
-        "timeout_seconds",
-        "scope",
-        "triggers",
-        "module_dependencies",
-        "required_environment",
-        "result_contract",
-        "input_paths",
-    }
-)
+from scripts.verification.yaml_input import parse_yaml_input
+
+_DECLARATION_SCHEMA = "lexiflow.module-checks.v2"
+_DEFAULT_RESULT_CONTRACT = {
+    "type": "json-stdout",
+    "required_fields": [
+        "status",
+        "checks_run",
+        "failures",
+        "errors",
+        "skipped",
+        "reason",
+    ],
+    "allowed_statuses": ["PASS", "BLOCKED", "FAIL"],
+    "minimum": {"checks_run": 1},
+    "equals": {"failures": 0, "errors": 0, "skipped": 0},
+}
 
 
 class DeclarationError(ValueError):
@@ -35,7 +37,7 @@ class DeclarationError(ValueError):
 
 def _parse_declarations(raw: bytes) -> dict[str, Any]:
     try:
-        data = yaml.safe_load(raw.decode("utf-8"))
+        data = parse_yaml_input(raw.decode("utf-8"))
     except UnicodeDecodeError as exc:
         raise DeclarationError("declarations-read-error", str(exc)) from None
     except yaml.YAMLError as exc:
@@ -44,11 +46,198 @@ def _parse_declarations(raw: bytes) -> dict[str, Any]:
         raise DeclarationError("declarations-shape", "root must be a mapping")
     if data.get("schema_version") != _DECLARATION_SCHEMA:
         raise DeclarationError("declarations-schema", f"expected {_DECLARATION_SCHEMA}")
-    checks = data.get("checks")
-    if not isinstance(checks, list):
-        raise DeclarationError("declarations-shape", "checks must be a list")
-    _validate_checks(checks)
-    return data
+    if set(data) != {"schema_version", "description", "executions", "checks"}:
+        raise DeclarationError("declarations-shape", "unknown or missing root fields")
+    executions, checks = data["executions"], data["checks"]
+    if not isinstance(executions, dict) or not isinstance(checks, list):
+        raise DeclarationError(
+            "declarations-shape", "executions must be a mapping and checks a list"
+        )
+    allowed_execution = {
+        "command",
+        "timeout_seconds",
+        "required_environment",
+        "input_paths",
+        "transaction_reuse",
+        "result_contract",
+    }
+    normalized_executions: dict[str, dict[str, Any]] = {}
+    for name, execution in executions.items():
+        if (
+            not isinstance(name, str)
+            or not name
+            or not isinstance(execution, dict)
+            or set(execution) - allowed_execution
+        ):
+            raise DeclarationError("declarations-shape", f"invalid execution {name!r}")
+        if not {
+            "command",
+            "timeout_seconds",
+            "required_environment",
+            "input_paths",
+        }.issubset(execution):
+            raise DeclarationError(
+                "declarations-shape", f"execution {name} missing required fields"
+            )
+        command = execution["command"]
+        if (
+            not isinstance(command, list)
+            or not command
+            or any(not isinstance(x, str) or not x for x in command)
+        ):
+            raise DeclarationError(
+                "declarations-shape", f"execution {name} command invalid"
+            )
+        timeout = execution["timeout_seconds"]
+        if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
+            raise DeclarationError(
+                "declarations-shape", f"execution {name} timeout invalid"
+            )
+        for field in ("required_environment", "input_paths"):
+            value = execution[field]
+            if not isinstance(value, list) or any(
+                not isinstance(x, str) or not x for x in value
+            ):
+                raise DeclarationError(
+                    "declarations-shape", f"execution {name} {field} invalid"
+                )
+        for path in execution["input_paths"]:
+            _safe_relative(path, f"executions.{name}.input_paths")
+        reuse = execution.get("transaction_reuse", False)
+        if not isinstance(reuse, bool):
+            raise DeclarationError(
+                "declarations-shape", f"execution {name} transaction_reuse invalid"
+            )
+        kind = execution.get("result_contract", "json")
+        if kind == "json":
+            contract = _DEFAULT_RESULT_CONTRACT
+        elif kind == "gradle-exit-code":
+            contract = {
+                "type": "exit-code",
+                "completeness_guarantee": "后端 Gradle deliveryFull 要求 Java 测试非空且不跳过，并执行 architecture、source、schema、persistence、runtime-smoke 与 boot-jar 交付任务。",
+                "allowed_statuses": ["PASS", "BLOCKED", "FAIL"],
+                "pass_exit_code": 0,
+            }
+        elif kind == "runtime-phase-json":
+            contract = {
+                "type": "json-stdout",
+                "required_fields": [
+                    "status",
+                    "phase",
+                    "unit_tests",
+                    "browser_smoke",
+                    "reason",
+                ],
+                "allowed_statuses": ["PASS", "BLOCKED", "FAIL"],
+                "minimum": {},
+                "equals": {},
+            }
+        else:
+            raise DeclarationError(
+                "declarations-shape", f"execution {name} result contract unsupported"
+            )
+        normalized_executions[name] = {
+            **execution,
+            "transaction_reuse": reuse,
+            "result_contract": contract,
+        }
+    seen: set[str] = set()
+    referenced: set[str] = set()
+    normalized_checks = []
+    for i, check in enumerate(checks):
+        if not isinstance(check, dict) or set(check) != {
+            "check_id",
+            "module",
+            "scope",
+            "execution",
+            "triggers",
+            "module_dependencies",
+        }:
+            raise DeclarationError(
+                "declarations-shape", f"checks[{i}] has unknown or missing fields"
+            )
+        check_id, execution_id = check["check_id"], check["execution"]
+        if not isinstance(check_id, str) or not check_id:
+            raise DeclarationError("declarations-shape", f"invalid check_id at {i}")
+        if check_id in seen:
+            raise DeclarationError("duplicate-check-id", f"invalid check_id at {i}")
+        if (
+            not isinstance(execution_id, str)
+            or execution_id not in normalized_executions
+        ):
+            raise DeclarationError(
+                "declarations-shape", f"checks[{i}] unknown execution"
+            )
+        seen.add(check_id)
+        referenced.add(execution_id)
+        if (
+            not isinstance(check["module"], str)
+            or not check["module"]
+            or not isinstance(check["scope"], str)
+            or check["scope"] not in {"change-targeted", "repository-baseline"}
+        ):
+            raise DeclarationError(
+                "declarations-shape", f"checks[{i}] module or scope invalid"
+            )
+        if not isinstance(check["triggers"], list) or any(
+            not isinstance(t, dict)
+            or set(t) != {"path"}
+            or not isinstance(t["path"], str)
+            or not t["path"]
+            for t in check["triggers"]
+        ):
+            raise DeclarationError(
+                "declarations-shape", f"checks[{i}] triggers invalid"
+            )
+        if not isinstance(check["module_dependencies"], list) or any(
+            not isinstance(x, str) or not x for x in check["module_dependencies"]
+        ):
+            raise DeclarationError(
+                "declarations-shape", f"checks[{i}] dependencies invalid"
+            )
+        definition = normalized_executions[execution_id]
+        if definition["transaction_reuse"]:
+            from scripts.verification.kernel import is_release_runtime_child_check
+
+            if is_release_runtime_child_check(
+                {
+                    "check_id": check_id,
+                    "command": definition["command"],
+                    "executable": definition["command"][0],
+                }
+            ):
+                raise DeclarationError(
+                    "declarations-shape",
+                    f"checks[{i}] runtime transport cannot enable transaction reuse",
+                )
+        normalized_checks.append(
+            {
+                "check_id": check_id,
+                "module": check["module"],
+                "scope": check["scope"],
+                "command": copy.deepcopy(definition["command"]),
+                "executable": definition["command"][0],
+                "cwd": ".",
+                "timeout_seconds": definition["timeout_seconds"],
+                "required_environment": copy.deepcopy(
+                    definition["required_environment"]
+                ),
+                "input_paths": copy.deepcopy(definition["input_paths"]),
+                "transaction_reuse": definition["transaction_reuse"],
+                "result_contract": copy.deepcopy(definition["result_contract"]),
+                "triggers": copy.deepcopy(check["triggers"]),
+                "module_dependencies": copy.deepcopy(check["module_dependencies"]),
+            }
+        )
+    if referenced != set(normalized_executions):
+        raise DeclarationError(
+            "declarations-shape", "unreferenced execution definitions"
+        )
+    return {
+        "schema_version": _DECLARATION_SCHEMA,
+        "description": data["description"],
+        "checks": normalized_checks,
+    }
 
 
 def load_declarations_snapshot(root: Path) -> tuple[dict[str, Any], dict[str, str]]:
@@ -86,147 +275,6 @@ def _safe_relative(value: Any, field: str) -> None:
         raise DeclarationError(
             "declarations-shape", f"{field} must be a safe non-empty relative path"
         )
-
-
-def _validate_contract(contract: Any, index: int) -> None:
-    if not isinstance(contract, dict):
-        raise DeclarationError(
-            "declarations-shape", f"checks[{index}].result_contract must be a mapping"
-        )
-    kind = contract.get("type")
-    if kind == "json-stdout":
-        fields = contract.get("required_fields")
-        statuses = contract.get("allowed_statuses")
-        if (
-            not isinstance(fields, list)
-            or not fields
-            or not all(isinstance(x, str) and x for x in fields)
-        ):
-            raise DeclarationError(
-                "declarations-shape",
-                f"checks[{index}].result_contract.required_fields required",
-            )
-        if (
-            not isinstance(statuses, list)
-            or not statuses
-            or any(s not in {"PASS", "BLOCKED", "FAIL"} for s in statuses)
-        ):
-            raise DeclarationError(
-                "declarations-shape",
-                f"checks[{index}].result_contract.allowed_statuses invalid",
-            )
-        for key in ("minimum", "equals"):
-            value = contract.get(key, {})
-            if not isinstance(value, dict) or any(
-                not isinstance(k, str) or not isinstance(v, int)
-                for k, v in value.items()
-            ):
-                raise DeclarationError(
-                    "declarations-shape",
-                    f"checks[{index}].result_contract.{key} invalid",
-                )
-    elif kind == "exit-code":
-        guarantee = contract.get("completeness_guarantee")
-        if not isinstance(guarantee, str) or not guarantee.strip():
-            raise DeclarationError(
-                "declarations-shape",
-                f"checks[{index}] exit-code contract needs completeness_guarantee",
-            )
-    else:
-        raise DeclarationError(
-            "declarations-shape", f"checks[{index}].result_contract.type is unsupported"
-        )
-
-
-def _validate_checks(checks: list[dict[str, Any]]) -> None:
-    seen: set[str] = set()
-    for i, check in enumerate(checks):
-        if not isinstance(check, dict):
-            raise DeclarationError(
-                "declarations-shape", f"checks[{i}] must be a mapping"
-            )
-        missing = _REQUIRED_CHECK_FIELDS - check.keys()
-        if missing:
-            raise DeclarationError(
-                "declarations-shape", f"checks[{i}] missing {sorted(missing)}"
-            )
-        check_id = check["check_id"]
-        if not isinstance(check_id, str) or not check_id or check_id in seen:
-            raise DeclarationError(
-                "duplicate-check-id" if check_id in seen else "declarations-shape",
-                f"invalid check_id at {i}",
-            )
-        seen.add(check_id)
-        if not isinstance(check["module"], str) or not check["module"]:
-            raise DeclarationError("declarations-shape", f"checks[{i}].module invalid")
-        command = check["command"]
-        if (
-            not isinstance(command, list)
-            or not command
-            or any(not isinstance(x, str) or not x for x in command)
-        ):
-            raise DeclarationError("declarations-shape", f"checks[{i}].command invalid")
-        _safe_relative(check["cwd"], f"checks[{i}].cwd")
-        if (
-            not isinstance(check["timeout_seconds"], int)
-            or isinstance(check["timeout_seconds"], bool)
-            or check["timeout_seconds"] <= 0
-        ):
-            raise DeclarationError(
-                "declarations-shape", f"checks[{i}].timeout_seconds invalid"
-            )
-        if check["scope"] not in {"change-targeted", "repository-baseline"}:
-            raise DeclarationError("declarations-shape", f"checks[{i}].scope invalid")
-        triggers = check["triggers"]
-        if not isinstance(triggers, list) or any(
-            not isinstance(t, dict)
-            or not isinstance(t.get("path"), str)
-            or not t["path"]
-            for t in triggers
-        ):
-            raise DeclarationError(
-                "declarations-shape", f"checks[{i}].triggers invalid"
-            )
-        for field in ("module_dependencies", "required_environment", "input_paths"):
-            value = check[field]
-            if not isinstance(value, list) or any(
-                not isinstance(x, str) or not x for x in value
-            ):
-                raise DeclarationError(
-                    "declarations-shape", f"checks[{i}].{field} invalid"
-                )
-        for path in check["input_paths"]:
-            _safe_relative(path, f"checks[{i}].input_paths")
-        if "transaction_reuse" in check and not isinstance(
-            check["transaction_reuse"], bool
-        ):
-            raise DeclarationError(
-                "declarations-shape",
-                f"checks[{i}].transaction_reuse must be a boolean",
-            )
-        if check.get("transaction_reuse") is True:
-            from scripts.verification.kernel import is_release_runtime_child_check
-
-            if is_release_runtime_child_check(check):
-                raise DeclarationError(
-                    "declarations-shape",
-                    f"checks[{i}] runtime transport cannot enable transaction reuse",
-                )
-        # 缺省明确表示不允许跨 profile 事务共享执行。
-        check.setdefault("transaction_reuse", False)
-        executable = check.get("executable")
-        if executable is not None and (
-            not isinstance(executable, str) or not executable
-        ):
-            raise DeclarationError(
-                "declarations-shape", f"checks[{i}].executable invalid"
-            )
-        if executable == "python3" and command[0] != "python3":
-            raise DeclarationError(
-                "declarations-shape",
-                f"checks[{i}] python executable requires python3 argv",
-            )
-        _validate_contract(check["result_contract"], i)
 
 
 def filter_checks_by_scope(

@@ -5,7 +5,7 @@ program:
   id: LF-PRG-001
   name: "LexiFlow 英文语境提示"
   catalog_mode: execution
-  source_brief: docs/product/product-brief.md
+  source_brief: docs/system/experience.md
   source_roadmap: docs/roadmap/master-plan.md
   phase_definition: P1 为 foundation 基础体验；P2 为提示处理主线、功能分层与 macOS 调试/Docker 发布闭环。任务草案不代表验收通过，启动与集成约束见 docs/roadmap/master-plan/phase2/tasks.md；后续事项不预分期。
 
@@ -155,249 +155,7 @@ dependency_policy:
   public_contract_changes_are_serialized: true
   integration_depends_on_all_contributors: true
 
-# 调度与 handoff 投影；修改共享字段从 agent-policy 发起。
-orchestration_policy:
-  agent_dispatch:
-    primary: native-codex
-    default_implementer: native-codex
-    fallback_model: gpt-6-luna
-    fallback_reasoning_effort: medium
-    model_selection_basis: subagent_protocol.codex_model_policy
-    qoder_automatic_dispatch: forbidden
-    legacy_qoder_actions: read-only-status-result-validation-and-ack-only
-    validation_and_review: native-codex-subagents-not-qoder-or-create-thread
-    max_consecutive_failures: 3
-    failure_unit: legacy-qoder-attempt-and-native-fallback-both-unavailable-in-one-dispatch-attempt
-    success_effect: reset-consecutive-failures-preserve-history
-    identity: current-parent-repo-work-package-ordered-task-versions
-    replay_effect: no-new-attempt-or-counter-increment
-    unknown_start_effect: preserve-attempt-no-fallback-no-redispatch
-    execution_and_review_failures: separate-from-dispatch-failures
-    stop_effect: stop-package-dispatch-no-fourth-attempt-not-goal-status-change
-    host_wait_policy: reject-active-or-unknown-goal-without-supported-wait-adapter
-    host_wait_evidence: current-runtime-derived-read-only-goal-state
-    host_wait_caller_override: forbidden
-    host_mutations: forbidden
-    fallback_execution_owner: current-parent-native-codex-collaboration-tool
-    fallback_result_evidence: identity-bound-native-tool-result-not-self-reported-pass
-    codex_wait: native-collaboration-events-not-qoder-terminal-callback
-    safety_preconditions: identity-write-scope-no-duplicate-execution
-  qoder:
-    description: "Qoder 承担 Coder Sub-Agent 的实现工作。"
-    max_active_runs: 1
-    overflow: queue
-    unknown_status_blocks_new_dispatch: true
-    recursive_qoder_delegation: false
-    max_rework_rounds: 1
-    max_total_runs_per_task_before_main_review: 2
-    max_prompt_characters: 8000
-    work_package_estimated_minutes:
-      min: 10
-      max: 360
-    work_package_estimate_source: caller-declared-estimate-or-exact-current-catalog-sum-when-catalog-is-used
-    minimum_catalog_tasks_per_work_package: 1
-    required_agent_profile: true
-    required_harness_manifest: lexiflow.qoder-harness.v1
-    required_result_schema: lexiflow.qoder-work-package-result.v1
-    prompt_context_policy: 使用有界的文件 locator；handoff 不重复粘贴设计文档。
-    rework_reuses_session_and_creates_new_run: true
-  codex_subagents:
-    model_policy:
-      default_model: gpt-6-luna
-      routine_model: gpt-6-luna
-      routine_reasoning_effort: low
-      routing_source: harness/agent-policy.manifest.yaml#subagent_protocol.codex_model_policy
-      explicit_model_argument_required: true
-      allowed_escalation_models:
-      - gpt-6-sol
-      user_only_models:
-      - gpt-6-astra
-      qoder_model_policy: separate-runner-controlled
-      default_reasoning_effort: medium
-    use_for:
-    - bounded research
-    - non-overlapping implementation
-    - independent review
-    - targeted validation
-    parallel_writes_require_disjoint_file_claims: true
-    contract_changes_are_serialized: true
-    child_handoff_preserves_parent_and_task_identity: true
-    max_active_subagents: 6
-    default_fork_turns: none
-    full_history_fork_requires_explicit_exception: true
-    completion_signal_fields:
-    - status
-    - work_package_id
-    - task_ids
-    - run_id
-    - artifact_locators
-    - validation_commands
-    - blocking_findings
-    max_blocking_findings: 3
-    full_context_or_logs_in_callback: false
-    delegation_work_package:
-      unit: coherent-set-of-catalog-tasks
-      identity_fields:
-      - work_package_id
-      - task_ids
-      work_package_id_rule: caller-stable-non-run-identity
-      task_ids_rule: exact-ordered-catalog-task-identities
-      per_task_outcome_evidence_required: true
-      preferred_minutes:
-        min: 10
-        max: 360
-      minimum_total_estimated_minutes: 10
-      target_maximum_total_estimated_minutes: 360
-      minimum_catalog_tasks: 1
-      must_share:
-      - primary_owner
-      - contract_boundary
-      - compatible_write_scope
-      required_outcomes:
-      - implementation_or_design
-      - direct_validation
-      - acceptance_evidence
-      proactive_dispatch:
-        threshold_minutes: 10
-        prefer_when:
-        - isolated-subtask-requires-large-new-context
-        - acceptance-is-confirmable-by-compact-result-or-deterministic-command
-        - non-overlapping-write-scope
-      main_agent_only_when:
-      - deterministic-task-at-or-under-10-minutes
-      - isolated_read_only_review
-      turn_or_token_count_is_not_acceptance_evidence: true
-  main_agent:
-    callback_first: true
-    busy_wait_forbidden: true
-    status_poll_loop_forbidden: true
-    sleep_to_keep_session_open_forbidden: true
-    continue_independent_work_or_end_turn_after_dispatch: true
-    llm_fallback_first_probe_after_seconds: 300
-    llm_fallback_min_subsequent_probe_interval_seconds: 600
-    callback_may_be_processed_immediately: true
-    no_llm_watchdog:
-      allowed: true
-      initial_delay_seconds: 300
-      interval_seconds: 600
-      unchanged_state_is_silent: true
-    independent_review_required_for_pass: true
-  handoff_contract:
-    caller_required_input:
-    - goal
-    - task_id
-    - task_source
-    - task_version
-    - change_version
-    - work_package_id
-    - task_ids
-    - task_versions
-    - change_versions
-    - estimated_minutes
-    - primary_owner
-    - contract_boundary
-    - agent_profile
-    - harness_manifest
-    - allowed_files
-    - forbidden_files
-    - required_context
-    - expected_output
-    - acceptance_criteria
-    - acceptance_evidence
-    - validation_command
-    - failure_policy
-    - parent_client
-    runner_bound_identity:
-      parent_session_id:
-        source: caller-or-CODEX_THREAD_ID
-        required_in_persisted_task: true
-      agent_id:
-        source: runner-generated-at-dispatch
-        caller_must_omit: true
-      run_id:
-        source: runner-generated-at-dispatch
-        caller_must_omit: true
-      session_id:
-        source: runner-generated-or-resume-record
-        caller_must_omit_on_start: true
-      client:
-        source: runner-forced
-        value: qoder
-    result_required_output:
-    - status
-    - work_package_id
-    - task_ids
-    - task_versions
-    - change_versions
-    - run_id
-    - outcomes
-    - changed_files
-    - validation
-    - acceptance_evidence
-    - effect_checks
-    - risks
-    current_runner_adapter:
-      enforced_caller_fields:
-      - goal
-      - task_id
-      - task_source
-      - task_version
-      - change_version
-      - work_package_id
-      - task_ids
-      - task_versions
-      - change_versions
-      - estimated_minutes
-      - primary_owner
-      - contract_boundary
-      - agent_profile
-      - harness_manifest
-      - allowed_files
-      - forbidden_files
-      - required_context
-      - expected_output
-      - acceptance_criteria
-      - acceptance_evidence
-      - validation_command
-      - failure_policy
-      - parent_client
-      target_schema_enforced: true
-      runtime_identity_enforced: true
-      result_fields_required_in_prompt: true
-      agent_profile_cli_binding: true
-      harness_manifest_preflight: true
-      catalog_package_preflight: advisory-when-present
-      catalog_estimate_rule: caller-10-to-360-or-exact-current-catalog-sum-when-catalog-is-used
-      structured_result_required: true
-      implementation_status: IMPLEMENTED
-      conformance_test: tests/agents/test_qoder_runner.py
-      owner_task: LF-TSK-QLT-0006
-      owner_task_version: 2
-      owner_change_version: 2.0.0
-    caller_field_schema:
-      goal: non-empty-string
-      task_id: stable-task-id-string
-      task_source: non-empty-string
-      task_version: positive-integer
-      change_version: semver-string
-      work_package_id: stable-work-package-id-string
-      task_ids: ordered-unique-list-minimum-one
-      task_versions: exact-task-id-to-positive-integer-map
-      change_versions: exact-task-id-to-semver-map
-      estimated_minutes: integer-10-to-360
-      primary_owner: non-empty-string
-      contract_boundary: non-empty-string
-      agent_profile: project-qoder-agent-name
-      harness_manifest: repository-relative-hash-bound-json
-      allowed_files: non-empty-string
-      forbidden_files: non-empty-string
-      required_context: non-empty-string
-      expected_output: non-empty-string
-      acceptance_criteria: non-empty-list-of-strings
-      acceptance_evidence: non-empty-list-of-strings
-      validation_command: non-empty-string
-      failure_policy: non-empty-string
-      parent_client: exact-string-codex
+# Agent 调度、身份与交接规则直接读取 harness/agent-policy.manifest.yaml。
 
 # 范围变化需更新版本，不静默扩大已派发任务。
 change_control:
@@ -442,7 +200,8 @@ path_ownership:
     owner: LF-WS-ARCH
     proposed_paths:
     - docs/roadmap/**
-    - docs/architecture/**
+    - docs/system.md
+    - docs/system/**
     - docs/adr/**
   - scope: governance.catalog
     owner: LF-WS-QLT
@@ -461,11 +220,11 @@ path_ownership:
     - scripts/check_changes.py
     - scripts/check_repository.py
     - scripts/architecture-review.md
-    - docs/product/product-brief.md
+    - docs/system/experience.md
   - scope: product.experience
     owner: LF-WS-PRD
     proposed_paths:
-    - docs/product/**
+    - docs/reference/product-glossary.md
     - docs/ux/**
     - assets/readme/**
   - scope: backend.foundation
@@ -557,7 +316,9 @@ path_ownership:
   - scope: governance.development-docs
     owner: LF-WS-QLT
     proposed_paths:
-    - docs/development/**
+    - docs/scenarios/**
+    - docs/reference/**
+    - docs/reference.md
   - scope: governance.user-docs
     owner: LF-WS-ARCH
     proposed_paths:
@@ -661,7 +422,7 @@ workstreams:
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
-          python3 -m scripts.repository.policy_projection --check
+          python3 -m scripts.repository.quality --mode policy
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
@@ -707,7 +468,7 @@ workstreams:
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
-          python3 -m scripts.repository.policy_projection --check
+          python3 -m scripts.repository.quality --mode policy
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
@@ -748,7 +509,7 @@ workstreams:
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
-          python3 -m scripts.repository.policy_projection --check
+          python3 -m scripts.repository.quality --mode policy
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
@@ -787,7 +548,7 @@ workstreams:
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
-          python3 -m scripts.repository.policy_projection --check
+          python3 -m scripts.repository.quality --mode policy
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
@@ -819,7 +580,8 @@ workstreams:
         kind: design
         lifecycle_state: DRAFT
         allowed_files:
-        - docs/architecture/**
+        - docs/system.md
+        - docs/system/**
         - docs/roadmap/**
         - openspec/specs/product-architecture/spec.md
         forbidden_files:
@@ -835,7 +597,7 @@ workstreams:
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
-          python3 -m scripts.repository.policy_projection --check
+          python3 -m scripts.repository.quality --mode policy
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
@@ -916,8 +678,8 @@ workstreams:
         - README.md
         - docs/user/podman-macos.md
         - docs/roadmap/master-plan/phase2/release.md
-        - docs/development/operations/local-experience.md
-        - docs/development/operations/docker-release.md
+        - docs/scenarios/local-development.md
+        - docs/scenarios/docker-release.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -985,7 +747,7 @@ workstreams:
         - scripts/delivery_gate/authority.py
         - tests/delivery_gate/test_status_propagation.py
         - openspec/specs/agent-execution/spec.md
-        - docs/development/agent-workflow.md
+        - docs/scenarios/delegate-work.md
         - openspec/changes/optimize-agent-quality-workflow/**
         forbidden_files:
         - secrets/**
@@ -1090,7 +852,7 @@ workstreams:
         - scripts/verification/delivery_hook.py
         - tests/verification/**
         - harness/manifest.yaml
-        - docs/development/reference/standalone-tools.md
+        - docs/reference/standalone-tools.md
         - openspec/changes/optimize-agent-quality-workflow/**
         forbidden_files:
         - secrets/**
@@ -1129,9 +891,11 @@ workstreams:
         - tests/delivery_gate/**
         - harness/**
         - AGENTS.md
-        - docs/development/change-delivery.md
-        - docs/development/change-delivery/**
-        - docs/development/agent-workflow.md
+        - docs/reference/checks.md
+        - docs/reference/verification.md
+        - docs/reference/hooks.md
+        - docs/reference/delivery-gate.md
+        - docs/scenarios/delegate-work.md
         - openspec/changes/optimize-agent-quality-workflow/**
         forbidden_files:
         - secrets/**
@@ -1165,7 +929,7 @@ workstreams:
         kind: implementation
         lifecycle_state: READY
         allowed_files:
-        - docs/development/reference/scripts.md
+        - docs/reference/scripts.md
         - scripts/environment/toolchain.py
         - scripts/environment/runtime.py
         - scripts/verification/**
@@ -1176,7 +940,9 @@ workstreams:
         - tests/delivery_gate/test_validate.py
         - tests/delivery_gate/test_validate_batch.py
         - harness/**
-        - docs/development/change-delivery/**
+        - docs/reference/verification.md
+        - docs/reference/hooks.md
+        - docs/reference/delivery-gate.md
         - openspec/changes/optimize-agent-quality-workflow/**
         forbidden_files:
         - secrets/**
@@ -1212,7 +978,7 @@ workstreams:
         allowed_files:
         - scripts/delivery_gate/**
         - tests/delivery_gate/**
-        - docs/development/change-delivery/delivery-gate.md
+        - docs/reference/delivery-gate.md
         - openspec/changes/optimize-agent-quality-workflow/**
         forbidden_files:
         - secrets/**
@@ -1250,7 +1016,7 @@ workstreams:
         - backend/verification/quality-gates/build.gradle.kts
         - tests/verification/test_build_checks.py
         - tests/verification/test_gradle_report_contract.py
-        - docs/development/reference/java-checks.md
+        - docs/reference/java-checks.md
         - openspec/changes/optimize-agent-quality-workflow/**
         forbidden_files:
         - secrets/**
@@ -1286,8 +1052,8 @@ workstreams:
         - scripts/verification/summaries.py
         - tests/verification/test_summaries.py
         - tests/verification/test_work_package.py
-        - docs/development/agent-workflow.md
-        - docs/development/change-delivery.md
+        - docs/scenarios/delegate-work.md
+        - docs/reference/checks.md
         - openspec/changes/optimize-agent-quality-workflow/**
         forbidden_files:
         - secrets/**
@@ -1310,11 +1076,11 @@ workstreams:
         depends_on: []
         deliverable: 分别记录派发、验证轮次、命令时间、关键路径墙钟、访问计数和可获得token；未知不猜测。；十四项逐条追溯，组合不累加并行时间或重复收益；独立复核不由放宽后的门禁自证。
       - id: LF-TSK-QLT-2109
-        title: 逐篇精简当前 Markdown 并维护必要合同
+        title: 合并文档真源与生命周期入口并同步引用
         priority: P0
         phase: P2
-        task_version: 2
-        change_version: 2.0.0
+        task_version: 3
+        change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         owner: LF-WS-QLT
@@ -1336,21 +1102,28 @@ workstreams:
         - scripts/agents/README.md
         - scripts/architecture-review.md
         - ops/release/third-party-notices.md
+        - harness/agent-policy.manifest.yaml
+        - harness/module-checks.yaml
+        - backend/product/api/src/main/resources/application.yaml
+        - infra/local/compose.yaml
+        - tests/verification/test_ci.py
+        - tests/verification/test_delivery_quality_selection.py
         forbidden_files:
         - secrets/**
         - .local/**
         - data/**
         - .env
-        expected_output: 逐篇判断当前 Markdown 的详略，删赘述与重复而保留必要步骤、字段、阈值、安全和验收边界；不等比例压缩。
+        expected_output: 合并重复文档入口，以生命周期连接系统主题、任务场景和查阅索引；同步 Harness 原则、Catalog、路径引用及直接测试，保留必要合同与行为边界。
         acceptance_criteria:
-        - 覆盖 inventory-before.json 的全部80份当前Markdown，每篇记录精简或保留的具体理由；已简洁页面不强改。
-        - 总览保留结论和导航，操作页保留顺序与失败处理，合同页保留字段、数值、例外和安全约束；重复内容用唯一真源链接承接。
-        - 不改产品行为、规则、命令与代码围栏，不制造悬空链接；不将未完成验收或未知结果改成通过。
-        - 不统一按比例删减、不简单拼接成长段或滥用缩写；无备份、无Git集成，保留他人工作。
+        - 消除 docs/product、docs/architecture、docs/development 目录和活动引用；各主题只保留唯一正文，roadmap 与 user 独立。
+        - 生命周期适用于功能、文档和工程变更；运行流程与优化流程分别可达，优化页不复制执行子流程。
+        - 同步相关索引、Catalog 归属和风险路径，不缩减风险覆盖，不改业务行为或门禁算法；既有图源原样保留，改图遵循 skill。
+        - 文档原则只在 Harness，docs 保留操作和内链；相对链接、标题、围栏与直接测试通过，未验证项不称 PASS。
+        - 保留他人工作与必要字段、数值、例外和安全约束；无备份、无兼容副本，Git 仅按用户明示执行。
         acceptance_evidence:
-        - 逐文件编辑理由与保留关键内容清单。
-        - 文件前后摘要及代码围栏一致性、链接检查与定向测试。
-        - 当前冻结差异的独立内容复核；自检不是正式验收。
+        - 路径映射、合并理由与全部会话要求的完成清单。
+        - 图源哈希、链接与标题检查、Catalog 和投影检查以及相关定向测试。
+        - 当前冻结差异的独立只读内容复核；自检不是正式验收。
         validation_command: python3 -m scripts.repository.docs_check
         required_check_ids:
         - eng.repository.docs
@@ -1359,7 +1132,1167 @@ workstreams:
         - eng.repository.module-tests
         dependencies: []
         depends_on: []
-        deliverable: 逐篇判断当前 Markdown 的详略，删赘述与重复而保留必要步骤、字段、阈值、安全和验收边界；不等比例压缩。
+        deliverable: 合并重复文档入口，以生命周期连接系统主题、任务场景和查阅索引；同步 Harness 原则、Catalog、路径引用及直接测试，保留必要合同与行为边界。
+      - id: LF-TSK-QLT-2110
+        title: 批量构造来源身份临时索引以降低门禁测试开销
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 60
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/verification/release_source_bridge.py
+        - tests/verification/test_release_source_bridge.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 以一次批量 Git 输入构造私有临时索引，保留来源身份、输入新鲜度和全部门禁覆盖；交付等价性、调用次数与实际验证证据。
+        acceptance_criteria:
+        - 原逐项路径、stage、gitlink 和零对象校验保留，临时索引/对象库仍隔离，不写来源索引或对象。
+        - 同一输入的完整身份与逐条写入算法一致；多文件只启动一次 update-index，空索引仍合法，失败不产生成功身份。
+        - 不删除既有测试和断言，不改变风险、检查集合、超时、skip、环境、复用或独立 actor 合同。
+        - 定点回归通过后冻结输入，由未参与实现的执行者运行完整风险 Hook，收益仅以真实运行范围和计时声明。
+        acceptance_evidence:
+        - 实际 Git 子进程计数、同输入等价回归及源索引/对象字节不变证明。
+        - 原用例保留清单、定点回归和当前冻结输入的独立开发检查报告及只读复核。
+        validation_command: python3 -m unittest tests.verification.test_release_source_bridge
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 来源身份计算的常数次 Git 调用、等价与隔离回归，以及保持覆盖的开发检查性能证据。
+      - id: LF-TSK-QLT-2111
+        title: 复用相同 YAML 字节的纯解析以降低门禁开销
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 45
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/verification/yaml_input.py
+        - scripts/verification/risk.py
+        - scripts/verification/declarations.py
+        - scripts/delivery_gate/acceptance.py
+        - scripts/delivery_gate/requirements.py
+        - tests/verification/test_yaml_input.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 对精确相同 YAML 输入复用纯解析，逐次返回独立副本，保留实时读取、语义校验和全部门禁证明。
+        acceptance_criteria:
+        - 使用原 SafeLoader 语义，仅有限条目和有限大小的 bytes 或 str 内容可进入进程内缓存；不同内容不得误复用。
+        - 每次返回独立深副本，别名和循环引用语义保留；超大输入不缓存，异常不缓存，非法 tag 仍拒绝。
+        - 不缓存文件状态、风险、计划、Task 要求或检查结果；所有调用方仍读取真实字节并执行原有完整校验和漂移检查。
+        - 不删除测试或断言，不调整风险、Check、超时或独立 actor；定点回归后冻结并独立运行完整风险 Hook。
+        acceptance_evidence:
+        - 内容键、调用次数、返回隔离、容量、错误和安全回归。
+        - 原测试保留清单、当前冻结输入的独立检查与只读复核。
+        validation_command: python3 -m unittest tests.verification.test_yaml_input
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.delivery-gate.module-tests
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 有界纯解析复用及隔离回归，保留新鲜输入和独立验收的实际性能证据。
+      - id: LF-TSK-QLT-2112
+        title: 合并同一快照的 Git 元数据读取以降低发行检查开销
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 45
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/version.mjs
+        - ops/release/tests/version.test.mjs
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 同一 Git 快照的一次 rev-parse 返回根路径和 HEAD，减少进程启动；保留每轮真实读取与完整漂移拒绝。
+        acceptance_criteria:
+        - 仅合并 gitSnapshot 中相邻的两次 rev-parse，不减少四次 Git 快照、两轮文件扫描、时间戳或状态读取。
+        - 完整构建身份与逐条读取的测试 oracle 一致，普通路径及包含空格、Unicode、换行的根路径可解析；无效或失败输出关闭成功路径。
+        - 原测试与断言全部保留，真实 Git、ZIP、CLI 和隔离 fixture 继续执行；不更改超时、复用或独立验收边界。
+        - 定点回归后冻结全部输入，由独立执行者运行一次完整风险 Hook；命令计数与单样本耗时不冒充稳定预算保证。
+        acceptance_evidence:
+        - 原断言保留清单、等价性、命令计数和异常回归。
+        - 真实定点测试及新冻结输入的独立完整检查与只读审查。
+        validation_command: node --test ops/release/tests/version.test.mjs
+        required_check_ids:
+        - eng.release.version
+        - eng.release.manifest
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: Git 元数据批量读取的最小实现、真实等价与漂移回归，以及不减覆盖的执行证据。
+      - id: LF-TSK-QLT-2113
+        title: 消除生命周期测试重复启动合成 Docker 模型的开销
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 60
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/tests/fake-docker-daemon.mjs
+        - ops/release/tests/lifecycle-fixture.mjs
+        - ops/release/tests/lifecycle.test.mjs
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 真实逐条 Docker CLI 请求通过私有传输进入测试专属常驻模型，保留状态新鲜性、身份检查、错误和完整断言。
+        acceptance_criteria:
+        - 每请求完整 argv 与原身份环境进入唯一模型，重新读取 control/state 并产生原输出、退出码及动作；不缓存结果或旁路身份查询。
+        - Worker 和请求属于当前测试，两代共享原 daemon 而不同测试隔离；启动、传输或退出故障不能被预期失败断言掩盖，清理不触碰其他资源。
+        - 原聚合测试及全部断言保留，追加动态身份、参数、结果等价、隔离及传输故障回归；不调整产品、Check、超时或验收独立性。
+        - 小型直接回归后冻结输入，由独立执行者仅运行一次完整正常风险 Hook；报告实际样本，不承诺稳定性能。
+        acceptance_evidence:
+        - 原模型与聚合用例保留证明、传输直接回归及资源清理证据。
+        - 冻结输入的独立完整风险检查和只读差异审查。
+        validation_command: node --test --test-name-pattern=transport ops/release/tests/lifecycle.test.mjs
+        required_check_ids:
+        - eng.release.lifecycle
+        - eng.release.lifecycle-install
+        - eng.verification.module-tests
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 常驻合成模型的测试内部优化、无缓存与失败关闭回归、当前冻结输入的独立性能证据。
+      - id: LF-TSK-QLT-2114
+        title: 消除门禁测试的空等计时器并验证整轮收益
+        priority: P0
+        phase: P2
+        task_version: 3
+        change_version: 3.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - extension/tests/translation-e2e.mjs
+        - extension/tests/e2e-runtime.mjs
+        - extension/tests/e2e-runtime.test.mjs
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 移除 API 子进程已结束后仍保持 Node 存活的等待计时器，保留原终止顺序、十秒宽限及所有浏览器断言。
+        acceptance_criteria:
+        - 不更改产品行为、必需检查、超时、风险或独立验收；所有原测试与断言保留，无新增跳过。
+        - 保持 API 进程组 TERM、十秒宽限、必要时 KILL 及 close 等待；仅在竞速结束或异常时取消已无用途的计时器。
+        - 直接回归覆盖正常关闭、十秒上限及强杀、异常和已结束进程；真实 Node 子进程完成后不因遗留计时器空等。
+        - 保持串行 Check 和现有清理边界；不采用无法证明取消回收的 Docker 并行原型。
+        - 最终冻结后独立运行一次完整正常风险 Hook，只读复核全部检查及实际整轮耗时；不得由局部收益声称整轮问题已解决。
+        acceptance_evidence:
+        - 已有成功基线、源码诊断、原断言保留及有界直接回归。
+        - 最终冻结输入的独立完整 Hook、耗时比较与资源清理证据。
+        validation_command: node --test extension/tests/e2e-runtime.test.mjs
+        required_check_ids:
+        - eng.extension.quality
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 不减覆盖的等待清理优化及完整开发检查耗时证据。
+      - id: LF-TSK-QLT-2115
+        title: 修复 Docker deadline helper 回收竞态以避免整轮失败重跑
+        priority: P0
+        phase: P2
+        task_version: 2
+        change_version: 1.1.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/lifecycle-docker.sh
+        - ops/docker/tests/test_docker_bounds.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 定点证明并修复 deadline helper 的信号与 PID 登记回收竞态，消除导致整轮重跑的不可靠路径。
+        acceptance_criteria:
+        - 先区分真实 helper 存活、未回收与 PID 复用；定点证据支持根因，不盲重跑完整套件。
+        - 保留全部原断言、预算、TERM/KILL/等待回收、输出隐私和归属保护；不减少覆盖、不新增跳过、不扩大宽限。
+        - 用确定性竞态回归证明旧路径失败且修复后通过，覆盖快退出、超时、工具失败及取消；不引入通用 supervisor 或并行 Check。
+        - timer 工具失败用例必须先握手确认 CLI 真实启动，再注入非零退出；保留 PID 不存在、输出隐私、helper 和私有目录清理断言，禁止固定 sleep 猜测启动。
+        - 实现后只做有界直接回归，最终冻结后独立完整 Stop；完整覆盖前不得称交付 PASS 或整轮加速。
+        acceptance_evidence:
+        - 原始失败报告、确定性定点复现及原断言保留证明。
+        - 直接回归、冻结源码只读审查及完整独立 Stop 报告。
+        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_docker_bounds.py -v
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: Docker deadline helper 的可靠终止回收及不牺牲覆盖的交付证据。
+      - id: LF-TSK-QLT-2116
+        title: 消除重复 Git 工具启动成本并保持工具链证据一致
+        priority: P0
+        phase: P2
+        task_version: 3
+        change_version: 1.2.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/environment/git_runtime.py
+        - scripts/environment/toolchain.py
+        - scripts/environment/runtime.py
+        - tests/verification/test_toolchain.py
+        - tests/verification/test_git_runtime.py
+        - docs/scenarios/verification-environment.md
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 显式准备 checkout 私有 Git-only 入口，由现有子环境只读选择同一 Apple Git；正常 Check 与工具链证据共用 PATH，不缓存仓库身份或结果。
+        acceptance_criteria:
+        - 保留全部 Git 命令、四次快照、两轮文件扫描、超时、风险及独立验收，不能用结果缓存代替真实读取。
+        - 尊重 PATH 自定义包装器和非 macOS 工具；本机工具选择或环境变动必须重新核对，不隐式安装或修改全局配置。
+        - 实际调用的可执行文件、工具链记录和同事务复用键一致；无法证明时保持原路线，不静默改变工具。
+        - 先用定点证据证明收益和接口边界，再实现直接回归；最终冻结后独立完整 Stop，微基准不当作整轮加速证明。
+        - 仅对 transaction_reuse=true 且声明 git 的 Check，在 macOS、原最终 PATH 精确选中系统 launcher、私有 git-only 目录安全且其目标等于有效子环境下 xcrun 解析结果时启用；其他情况保持原 PATH。
+        - 环境消费不创建、覆盖或清理工具目录；不改全局配置、不自动安装工具，父层 Git 不声称已优化。
+        - 真实执行、工具链路径与字节、环境指纹、final 及报告读回保持一致；覆盖 wrapper 优先、目录污染、目标与环境漂移及回退。
+        - Git-only 入口通过固定格式 shell exec 真实绝对路径，不能用改变 Git 安装前缀语义的 symlink；绑定入口、shell解释器和目标Git字节。
+        - 真实 Git 的 exec-path、html-path、临时仓库 init 模板结果必须与直接调用一致；保留既有回退和报告失效覆盖。
+        acceptance_evidence:
+        - 单用例命令家族剖析和真实 Git 启动器对照样本。
+        - 工具选择与身份记录审查、直接回归及完整独立 Stop。
+        validation_command: python3 -m unittest tests.verification.test_git_runtime tests.verification.test_toolchain -v
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.release.version
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 不削弱来源检查或工具链身份的固定启动成本优化。
+      - id: LF-TSK-QLT-2117
+        title: 使用 Gradle 原生有界调度降低静态质量检查串行成本
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - backend/gradle.properties
+        - backend/build.gradle.kts
+        - backend/gradle/build-logic/src/**
+        - tests/verification/gradle_build_contract.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 审计任务读写与依赖后，用 Gradle 原生有界调度重叠独立静态任务；测试与外部状态操作仍隔离串行。
+        acceptance_criteria:
+        - 保留所有任务、测试、断言、源扫描、无跳过判定、重新执行及禁用构建缓存语义；不改检查集合、风险、总预算或独立验收。
+        - 有明确项目输出隔离与任务依赖证据才启用原生并行；固定最多两个 Gradle worker，不并行 Check、窗口或 Formal actor。
+        - 真实 Test 任务继续串行，静态任务完成后才进入测试和交付归档；任务失败仍使聚合失败，取消交给现有 Gradle 执行器。
+        - 用有界直接回归证明任务集合、顺序约束、最大并发及失败关闭；最终冻结后独立完整 Stop，并比较实际成功耗时。
+        acceptance_evidence:
+        - 当前任务图、输出隔离审计和原成功耗时证据。
+        - 定点调度回归、源码独立复核及完整独立 Stop。
+        validation_command: python3 -m unittest tests.verification.gradle_build_contract.GradleTaskGraphTest -v
+        required_check_ids:
+        - eng.backend.delivery
+        - eng.backend.build-contract
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 不减覆盖的原生有界 Gradle 调度及整轮耗时证据。
+      - id: LF-TSK-QLT-2118
+        title: 按变更影响选择日常门禁并证明覆盖与独立验收边界
+        priority: P0
+        phase: P2
+        task_version: 2
+        change_version: 1.1.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/verification/development.py
+        - scripts/verification/scope.py
+        - scripts/verification/declarations.py
+        - scripts/verification/scenarios.py
+        - harness/agent-policy.manifest.yaml
+        - harness/module-checks.yaml
+        - harness/README.md
+        - tests/verification/test_development.py
+        - tests/verification/test_development_efficiency.py
+        - tests/verification/test_delivery_quality_selection.py
+        - tests/verification/test_development_selection_matrix.py
+        - tests/verification/test_delivery_hook.py
+        - tests/verification/test_test_services.py
+        - tests/verification/test_profiles.py
+        - tests/verification/test_scope.py
+        - docs/reference/verification.md
+        - docs/reference/hooks.md
+        - docs/reference/checks.md
+        - docs/scenarios/run-repository-gates.md
+        - docs/scenarios/optimize-repository-gates.md
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/specs/agent-execution/spec.md
+        - openspec/changes/gate-test-performance/**
+        - planning/workstreams.yaml
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 日常开发只运行真实变更及消费依赖所需检查；风险分级、独立验收与显式完整基线保留。
+        acceptance_criteria:
+        - 不删除测试、断言或必需依赖，不新增跳过，不改变超时、验证窗口、身份或跨交付复用边界。
+        - 用实际声明和有界合成变更矩阵证明 Java、SQL、脚本、共享配置、文档、删除与未跟踪文件的选择完整；未知路径或依赖缺口失败关闭。
+        - 高风险不再单独导致日常交付追加全仓基线；所有选择均有变更或依赖理由，不能通过调用者指定风险、检查编号或范围绕过。
+        - 独立 Formal 的高风险基线和审查、正式发行完整 Repository baseline、显式完整验证均保持原合同。
+        - 冻结后独立执行一次完整当前变更的 Stop，核对实际覆盖、无漂移及资源清理，并记录代表性场景和整轮耗时。
+        acceptance_evidence:
+        - 用户授权、影响与消费链审计及真实声明选择矩阵。
+        - 有界直接回归、冻结输入独立 Stop 与只读证据复核。
+        validation_command: python3 -m unittest tests.verification.test_development tests.verification.test_delivery_quality_selection tests.verification.test_development_selection_matrix tests.verification.test_delivery_hook tests.verification.test_test_services -v
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.policy
+        - eng.repository.planning
+        - eng.repository.docs
+        dependencies: []
+        depends_on: []
+        deliverable: 依赖覆盖完整的日常门禁选择及可核验耗时证据。
+      - id: LF-TSK-QLT-2119
+        title: 移除本机部署测试夹具未消费的身份预计算
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 20
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/tests/test_podman_local.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 只删除 setUp 中结果从未被读取的身份预计算；受测 CLI 的真实身份解析、每例 Git 与私有状态保留。
+        acceptance_criteria:
+        - AST 证明移除赋值无消费者；不修改测试体、断言、超时或运行选择。
+        - 对照夹具文件清单及实际预计算次数，保留独立临时目录、Git 源码和正常清理。
+        - 运行身份漂移与拒绝边界等定点回归；与批次一起冻结做一次独立完整 Stop，不另跑完整套件。
+        acceptance_evidence:
+        - 隔离 setup 对照、精确差异与定点回归。
+        - 冻结批次的独立完整检查及只读复核。
+        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_podman_local.py -v
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 无消费者的重复准备移除及保留身份检查的证据。
+      - id: LF-TSK-QLT-2120
+        title: 回收发行测试入口超时后的受控子进程
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 60
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/check.mjs
+        - ops/release/tests/version.test.mjs
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 内部超时与输出超限精确回收自身测试进程组，上级取消仍有效；不遗留 worker 影响后续运行。
+        acceptance_criteria:
+        - 保持所有消费者、TAP 语义、超时和输出上限，不减少测试或断言，不签发正式验收。
+        - 只处理本次 spawn 创建的子进程及其组；不得扫描或杀死未知进程，正常输出和失败分类保留。
+        - 上级 Verify 的 TERM 后 0.5 秒 KILL 合同不变；内部取消立即强制回收，不能加入更长宽限或只创建脱离上级的进程组。
+        - 真实握手回归覆盖后代与独立哨兵、timeout、overflow、上级 TERM/INT、spawn error 和正常结束；所有自身测试进程清理。
+        acceptance_evidence:
+        - 已观测遗留 worker 的探针和只读取消链审查。
+        - 定点真实进程回归、独立只读复核和最终冻结批次检查。
+        validation_command: node --test --test-name-pattern=runner ops/release/tests/version.test.mjs
+        required_check_ids:
+        - eng.release.version
+        - eng.release.lifecycle
+        - eng.verification.module-tests
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 不增加预算的测试进程回收与不误杀、不漏取消的证据。
+      - id: LF-TSK-QLT-2121
+        title: 保留 Docker 合同超时前的逐例和分阶段耗时证据
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 30
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/tests/module_check_adapter.py
+        - ops/docker/tests/test_module_check_adapter.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 逐例单调耗时与 Python、Node 阶段边界即时写入 stderr，超时保留已完成工作证据，最终结果合同不变。
+        acceptance_criteria:
+        - 保留全部发现规则、执行顺序、断言、结果字段、失败和跳过语义、600 秒总预算及 Node 内部预算。
+        - stdout 仍只有完整最终 JSON；stderr 计时行有固定标识，使用测试 ID 和合成数字，不输出环境、参数或敏感数据。
+        - 每例结束后刷新计时，阶段开始和完成可辨认；未完成的阶段不得输出完成或 PASS，计时不得重复累加。
+        - 用小型合成 suite 和 subprocess stub 验证成功、失败、跳过、Node 中断和摘要一致；不为验证日志重跑重套件。
+        acceptance_evidence:
+        - 600 秒失败原始日志与缺失逐例计时的源码证据。
+        - 小型直接回归、源码只读复核和后续冻结批次检查。
+        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_module_check_adapter.py -v
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 超时可用的耗时证据，不改变检查结论或预算。
+      - id: LF-TSK-QLT-2122
+        title: 延后加载本机部署测试客户端的非通用依赖
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 20
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/tests/test_podman_local.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 假 Podman 客户端仅在实际生成资料时导入 subprocess，普通状态查询不再承担该依赖启动成本。
+        acceptance_criteria:
+        - 仅移动假客户端的 subprocess 导入到唯一消费位置，不修改状态模型、真实 CLI、身份解析、断言或超时。
+        - 同一现有部署用例的独立夹具对照均通过，实际调用次数一致；不将单例收益外推整轮。
+        - 保留资料生成的真实 Node 调用、最新文件读取与取消语义；运行安装及资料生成取消的原有定向回归。
+        - 独立只读复核后复测已失败的 Docker 检查；通过再冻结整轮，不提高预算或删减检查。
+        acceptance_evidence:
+        - 启动微基准和原有完整单例的 source-bound 对照。
+        - 精确两行差异、定向回归和独立源码复核。
+        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_podman_local.py -v
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 不改变覆盖的客户端加载成本降低及有边界的测量证据。
+      - id: LF-TSK-QLT-2123
+        title: 划清本机部署测试的场景验证与重复前置成本
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 30
+        owner: LF-WS-QLT
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - openspec/changes/gate-test-performance/**
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 基于最新 38 个本机部署用例的覆盖映射，区分正在验证的 CLI 场景和重复安装前置；确定是否存在不减覆盖的结构性降耗方案。
+        acceptance_criteria:
+        - 逐例绑定真实源码断言与最新计时，不把名称或旧样本当作覆盖证明。
+        - 保留真实 CLI、信号、锁、身份和权限场景；若提出替换重复前置，必须列出仍覆盖完整安装的用例及隔离、路径和身份不变量。
+        - 不缓存 PASS、不共用可变安装状态、不直接跳过断言或删测试；设计审查未完成前不修改实现。
+        - 形成明确可实施或不采用的结论，给出有界验证与性能对照方法，不运行完整重套件。
+        acceptance_evidence:
+        - 当前源码哈希、逐例覆盖映射和依赖分析。
+        - Main 对设计风险和最小实施范围的判断。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 可核验的场景分层设计及覆盖边界，不冒充性能实现或正式验收。
+      - id: LF-TSK-QLT-2124
+        title: 将纯日志场景的安装前置改为独立已安装夹具
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 60
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/tests/test_podman_local.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 四个纯日志用例使用每例独立已安装夹具，真实日志 CLI、流式取消和只读断言不变；专用完整安装覆盖保留。
+        acceptance_criteria:
+        - 仅替换四个 logs 用例的成功安装前置，其他34例主体和原断言保留；不运行改变过的产品源码。
+        - 保留每例私有 Git、目录、端口、资源与文件；真实解析 build identity、generation、Compose 和摘要，不共享可变状态、不缓存检查结论。
+        - 真实只读 status 验证夹具，并复用已有真实安装例核对结构/字段/文件 contract；日志断言有非空操作日志，不允许空循环假通过。
+        - 保留日志真实进程、HTTP、SIGINT、stdout/stderr、退出码与进程组回收；增加夹具隔离及异常回归，不缩短超时。
+        - 有界直接回归和代表例对照证明收益；随后独立冻结检查，禁止五组完整套件式测量或重复求绿。
+        acceptance_evidence:
+        - 38例场景映射与原 logs_readonly 的安装前置耗时探针。
+        - 夹具一致性/隔离回归、精确差异和原日志场景测试证据。
+        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_podman_local.py -k logs -v
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 测试前置成本降低，不降低产品场景覆盖或独立验收。
+      - id: LF-TSK-QLT-2125
+        title: 在既有回收期限内确认短暂未知的进程组状态
+        priority: P0
+        phase: P2
+        task_version: 2
+        change_version: 1.1.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 30
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/environment/release_docker_preflight.py
+        - tests/verification/test_release_docker_preflight.py
+        - openspec/changes/gate-test-performance/**
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 在原有一秒观察窗口内重查短暂未知状态，只有最终明确组不存在才成功；持续未知和存活仍失败，不提高预算。
+        acceptance_criteria:
+        - 绑定最新失败日志和原始源码，区别真实遗留进程、权限不确定与系统回收时序，不把偶发通过当作根因消失。
+        - 只运行有界单例诊断，不重跑全套；不得提高预算、删除断言、修改系统或终止未知进程。
+        - 保留先对已拥有进程组发信号再 reap、reap 后不再向数字 PGID 发非零信号及未知状态失败关闭；不改 group_state 的三态语义。
+        - 固定时钟回归覆盖 None 转 False 成功、持续 None 失败、持续 True 失败与 direct-child reap 失败；保留已有真实 orphan 与 timeout 用例。
+        acceptance_evidence:
+        - 当前源码哈希、失败日志、单例观察和修复边界。
+        validation_command: python3 -m unittest tests.verification.test_release_docker_preflight -v
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 消除短暂未知状态的过早失败，保持清理判据和时限，不冒充整轮性能通过。
+      - id: LF-TSK-QLT-2126
+        title: 设计 Docker 场景层的分钟级降耗
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 60
+        owner: LF-WS-QLT
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - openspec/changes/gate-test-performance/**
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 基于最新成功样本与真实调用链，识别 Docker 场景重复前置或重复计算，给出保留覆盖和隔离的单一优先方案。
+        acceptance_criteria:
+        - 绑定当前源码及最近成功完整样本，区分测量、推导上界与待测假设；不额外重跑全套获取基线。
+        - 保留现有场景、断言、真实受测入口、每例可变状态隔离、取消回收及预算；不缓存 PASS 或改变验收独立性。
+        - 不重新采用已否决的并行 Check、通用 worker 监督器、全局 Git 启动器替换或未经证明的共享状态；新方案须指出不同证据。
+        - 给出明确优先方案与最小源码范围、直接验证方法和覆盖映射；没有足够证据则只声明缺失的有界测量，不编造性能承诺。
+        acceptance_evidence:
+        - 成功样本哈希、源码定位、重复次数及合同保持分析。
+        - Main 对实际收益潜力和实现范围的决策。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 针对主要耗时节点的可实施设计，不以局部微优化代替整轮目标。
+      - id: LF-TSK-QLT-2127
+        title: 设计 Verify 与 Gate 夹具的分钟级降耗
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 45
+        owner: LF-WS-QLT
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - openspec/changes/gate-test-performance/**
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 基于最新成功样本与 fixture 消费关系，区分真实安全校验与重复测试准备，给出可量化的优先方案。
+        acceptance_criteria:
+        - 绑定当前源码及最近成功完整样本，区分测量、推导上界与待测假设；不额外重跑全套获取基线。
+        - 保留现有场景、断言、真实受测入口、每例可变状态隔离、取消回收及预算；不缓存 PASS 或改变验收独立性。
+        - 不重新采用已否决的并行 Check、通用 worker 监督器、全局 Git 启动器替换或未经证明的共享状态；新方案须指出不同证据。
+        - 给出明确优先方案与最小源码范围、直接验证方法和覆盖映射；没有足够证据则只声明缺失的有界测量，不编造性能承诺。
+        acceptance_evidence:
+        - 成功样本哈希、源码定位、重复次数及合同保持分析。
+        - Main 对实际收益潜力和实现范围的决策。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 针对主要耗时节点的可实施设计，不以局部微优化代替整轮目标。
+      - id: LF-TSK-QLT-2128
+        title: 设计发行构建回归的重复成本消除
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 45
+        owner: LF-WS-QLT
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - openspec/changes/gate-test-performance/**
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 基于当前发行构建测试与已有日志，定位 fixture 生成、身份计算和命令重复，给出不删除场景断言的优先方案。
+        acceptance_criteria:
+        - 绑定当前源码及最近成功完整样本，区分测量、推导上界与待测假设；不额外重跑全套获取基线。
+        - 保留现有场景、断言、真实受测入口、每例可变状态隔离、取消回收及预算；不缓存 PASS 或改变验收独立性。
+        - 不重新采用已否决的并行 Check、通用 worker 监督器、全局 Git 启动器替换或未经证明的共享状态；新方案须指出不同证据。
+        - 给出明确优先方案与最小源码范围、直接验证方法和覆盖映射；没有足够证据则只声明缺失的有界测量，不编造性能承诺。
+        acceptance_evidence:
+        - 成功样本哈希、源码定位、重复次数及合同保持分析。
+        - Main 对实际收益潜力和实现范围的决策。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.release.build
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 针对主要耗时节点的可实施设计，不以局部微优化代替整轮目标。
+      - id: LF-TSK-QLT-2129
+        title: 合并发行链同阶段的重复源码资格检查
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/version.mjs
+        - ops/release/build.mjs
+        - ops/release/candidate.mjs
+        - ops/release/manifest.mjs
+        - ops/release/runtime-entry.mjs
+        - ops/release/package.mjs
+        - ops/release/tests/version.test.mjs
+        - ops/release/tests/build.test.mjs
+        - ops/release/tests/candidate.test.mjs
+        - ops/release/tests/manifest.test.mjs
+        - ops/release/tests/runtime-entry.test.mjs
+        - ops/release/tests/package.test.mjs
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 用窄的干净完整身份入口替代同阶段 checkReleaseSource 与 resolveBuildIdentity 成对调用，保留独立边界复查，减少重复 Git 启动。
+        acceptance_criteria:
+        - 新入口复用完整身份扫描实现，仍有四次 Git 快照、两轮稳定文件读取；不缓存身份、文件或 PASS，不减少前后独立边界。
+        - 干净入口在现有 Git 快照内使用 100000 字节 porcelain 上限并拒绝 dirty；普通身份入口仍支持 dirty，checkReleaseSource 独立 API/CLI 不变，不增加公开选项矩阵。
+        - 仅合并相邻同阶段源码资格与完整身份检查；保留返回形状、公开错误映射、源和制品漂移、独立验收及所有已有断言。
+        - 新增真实 Git 回归覆盖 clean release/SNAPSHOT、四种 dirty、缺失与非法版本、错误根和无 HEAD、symlink、扫描漂移、ignored 文件；有界故障注入覆盖 status 上限。
+        - 直接回归与冻结源码审查后由独立 actor 执行一次完整 Stop；单例少24次Git启动和耗时样本不外推为整轮保证。
+        acceptance_evidence:
+        - ignored release-identity-design 与 release-identity-probe 中绑定源码的设计、原型、相同断言和命令计数对照。
+        - 新旧 API 合同回归、冻结差异与独立完整开发交付报告。
+        validation_command: node --test --test-reporter=tap ops/release/tests/version.test.mjs
+        required_check_ids:
+        - eng.release.version
+        - eng.release.build
+        - eng.release.manifest
+        - eng.release.runtime-entry
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 不削弱源码完整性和独立验收的发行资格检查去重。
+      - id: LF-TSK-QLT-2130
+        title: 减少本机部署测试有限替身请求的进程启动成本
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/tests/test_podman_local.py
+        - ops/docker/tests/podman_fake_transport.py
+        - ops/docker/tests/test_podman_fake_transport.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 测试专属、每例独立的有限请求传输；保持真实外部 CLI 调用与唯一模型，消除多余解释器及辅助工具启动。
+        acceptance_criteria:
+        - 所有原测试方法及断言保留；只修改模型承载与夹具准备，不改产品、门禁集合、超时或独立验收。
+        - 有限请求声明只有一个真源；长流、pull/run/logs 与取消/PID/TTY/进程锁用例仍以原 Python 独立进程执行，未知调用回到原路径。
+        - 每例独立 server 与可变文件；每请求 fresh globals 和实时状态，无响应、身份或 PASS 缓存；完整 argv、cwd、环境、stdout/stderr 与退出语义保持。
+        - 私有请求原子发布、有界大小与等待、响应长度/状态核对、错误粘滞失败和精确清理；server 不脱离调用进程组，所有退出路径回收。
+        - 直接回归覆盖真实单进程与传输的状态/输出/动作等价、动态输入、字节参数、两例隔离、损坏/超限/crash、原取消路径；不以原型单样本冒充整轮收益。
+        - 定向验证与独立只读审查后统一冻结，独立 actor 仅执行一次完整 Stop，核对覆盖数量、无跳过、无漂移和资源清理。
+        acceptance_evidence:
+        - ignored local-fake-transport-design 与 local-transport-probe 的源码绑定、原测试断言、140 次调用与单次测量。
+        - 测试传输回归、独立源码审查和冻结完整开发交付报告。
+        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_podman_fake_transport.py -v
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 降低本机部署测试启动开销，保持进程可观察性、覆盖和独立验证。
+      - id: LF-TSK-QLT-2131
+        title: 按依赖拆分日常 Docker 合同检查
+        priority: P0
+        phase: P2
+        task_version: 2
+        change_version: 1.1.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - harness/module-checks.yaml
+        - ops/docker/tests/module_check_adapter.py
+        - ops/docker/tests/test_module_check_adapter.py
+        - tests/verification/test_docker_contract_checks.py
+        - tests/verification/test_development_selection_matrix.py
+        - tests/verification/test_lightweight_orchestration.py
+        - tests/verification/test_declarations.py
+        - tests/verification/test_development_efficiency.py
+        - planning/workstreams.yaml
+        - docs/roadmap/master-plan/phase2/status.md
+        - docs/reference/verification.md
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 固定 surface、shell、local、node 日常检查及唯一成员清单，按消费依赖触发；保留无参完整基线、CI quick 和正式验收。
+        acceptance_criteria:
+        - 四组逐字测试输入是唯一成员清单，发现全集与并集全等且不重叠；未知、删除、重复、空组与未分类源码失败关闭，不能默默漏测。
+        - 按实际复制、读文件、导入和递归依赖维护触发与冻结，消费边缺口拒绝通过；仅装载选中 Python 组，Node 保持一个完整 TAP 事务。
+        - 保留全部原有测试和断言、失败与跳过拒绝、计时和日志哈希；不新增并行、跨交付复用、通用 schema 或任意测试筛选入口。
+        - 完整基线 ID 和命令不变，其输入覆盖全部分组消费；日常只选分组，正常完整基线及 Formal 计划只选 aggregate，不重复执行两者。
+        - 真实 freeze_inputs 矩阵覆盖单测试、共享源、普通 Java、SQL、未知新增与删除；CI quick 仍使用完整 baseline，独立验收身份不变。
+        - 定点直接回归与独立只读审查后冻结，由独立执行者运行一次完整 Stop，核对执行集合、无跳过、输入漂移和清理；不以旧样本组内求和冒充实测收益。
+        acceptance_evidence:
+        - 31 个测试文件消费闭包、声明单一成员真源、选择矩阵与失败关闭回归。
+        - 独立审查、冻结完整开发交付日志及分组实际耗时；正式验收另列状态。
+        validation_command: python3 -m unittest tests.verification.test_docker_contract_checks tests.verification.test_development_selection_matrix tests.verification.test_lightweight_orchestration tests.verification.test_declarations -v
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.verification.module-tests
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 局部变化不再运行无关 Docker 测试，覆盖与完整验收不缩水。
+      - id: LF-TSK-QLT-2132
+        title: 消除心跳测试的真实空等
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 30
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/tests/test_podman_progress.py
+        - planning/workstreams.yaml
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 只在单例私有 Node 进程推进心跳时钟，保留真实子进程、实时日志和全部原断言。
+        acceptance_criteria:
+        - 生产脚本、20 秒常量和原取消/超时测试不变，不缩短生产周期、不模拟输出、不新增 skip。
+        - 只 mock setInterval，setTimeout、performance 和子进程仍真实；Python 先核对运行中日志、权限再触发推进。
+        - 19999ms 无心跳、再 1ms 恰好一次、再 19999ms 仍一次；真实完成后再推进证明定时器已清理。
+        - 保留每例私有资源和异常退出清理；定向回归、只读独立审查和最终一次冻结 Stop 分层报告。
+        acceptance_evidence:
+        - 原 21.143028 秒成功单样本、全部原断言保留检查与定向实测；不直接推断整轮收益。
+        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_podman_progress.py -v
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 消除一个确定的测试空等，不改变真实心跳合同或验收独立性。
+      - id: LF-TSK-QLT-2133
+        title: 消除非安装场景的重复成功安装前置
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/tests/test_podman_local.py
+        - planning/workstreams.yaml
+        - openspec/changes/gate-test-performance/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 每例私有的已安装状态准备、真实安装对照及覆盖映射，减少非安装场景的重复准备。
+        acceptance_criteria:
+        - 用户批准转移重复首次安装成功断言；保留全部原测试身份及受测动作、断言，明确将前置安装覆盖保留在安装与完整安装升级测试中，不冒称所有原断言逐字未改。
+        - 只迁移经证明不依赖首次安装历史的候选；每例独立源码、目录、端口、状态和清理，不复制其他测试可变状态，不缓存 PASS。
+        - 版本、资料代际和配置来自当前生产解析函数；镜像与运行状态使用既有模拟模型，不新增第二套镜像身份算法，不制造成功安装记录或虚假调用日志。
+        - 真实安装与准备状态的对照检查字段关系、内容、权限、身份、配置、镜像及状态和计划；归一化不得掩盖跨字段不变量，负例证明拒绝损坏，双实例证明隔离。
+        - 保留首次安装、失败初始化、取消、显式 Java 继承及完整安装升级链路；后续升级失败产生的 journal 和恢复动作仍真实执行，同版本重试的 apply 断言改为受测边界内零次。
+        - 准备成本与新对照测试成本一并计入，不把单例收益外推为整套；直接回归后冻结，由独立执行者完成正常 Stop，审查只读差异与证据。
+        acceptance_evidence:
+        - 本次批准、17 个候选的覆盖映射、源码与原始断言绑定及准备对照回归。
+        - 定向测试与独立冻结验证的执行数量、无跳过、输入漂移和资源清理记录。
+        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_podman_local.py -v
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 减少重复安装准备而不削减安装及后续行为覆盖，保持独立验收。
+      - id: LF-TSK-QLT-2134
+        title: 合并测试客户端的显式清理进程
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 45
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/tests/test_operation_ownership.py
+        - planning/workstreams.yaml
+        - openspec/changes/gate-test-performance/**
+        - docs/roadmap/master-plan/phase2/status.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 合并 fake Docker 客户端的显式响应清理与活动标记清理，保留失败关闭及私有资源回收。
+        acceptance_criteria:
+        - 只将活动标记并入正常响应的显式 rm，保留 rmdir、错误和信号处理及父进程残留核对；产品脚本、业务模型、超时和全部原测试方法不变。
+        - 新增直接回归证明成功及非零业务退出的输出和清理、真实部分删除失败、未知文件保留、清理间隙 TERM 的失败标记；正常请求少一次 rm。
+        - 每例独立资源，不递归删除请求、不共享状态、不缓存响应、不创建通用传输框架；异常和完成后只回收本例进程组。
+        - 定点检查后独立只读复核，冻结最终输入运行一次正常 Stop；单例样本不外推整轮收益，不自签正式验收。
+        acceptance_evidence:
+        - 88 个原业务命令的单次对照、源码哈希及全部原测试方法 AST 对照。
+        - 清理负例与定向回归、独立冻结检查及资源回收证据。
+        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_operation_ownership.py -v
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 减少重复清理进程而不削减行为、安全覆盖或验收独立性。
+      - id: LF-TSK-QLT-2135
+        title: 去重检查执行定义与固定结果合同
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - harness/module-checks.yaml
+        - scripts/verification/**
+        - scripts/environment/candidate_runtime_check.py
+        - scripts/repository/planning_validator.py
+        - scripts/delivery_gate/task_subject.py
+        - tests/verification/**
+        - tests/delivery_gate/**
+        - ops/docker/tests/module_check_adapter.py
+        - ops/docker/tests/test_module_check_adapter.py
+        - planning/workstreams.yaml
+        - openspec/changes/simplify-engineering-configuration/**
+        - harness/README.md
+        - harness/manifest.yaml
+        - harness/agent-policy.manifest.yaml
+        - docs/reference/configuration.md
+        - docs/reference/verification.md
+        - docs/reference/scripts.md
+        - docs/roadmap/master-plan/phase2/status.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 唯一执行定义、固定成功合同、原检查身份及场景选择保持；加载器和直接消费者闭环更新。
+        acceptance_criteria:
+        - 只修改本次工作包的增量，保留已有改动；以实际消费者证据删除副本和无效配置，不以搬迁或格式压缩充数。
+        - 第一轮保持检查身份、命令、选择、顺序和安全语义；未知输入失败关闭，漂移保护、资源清理及独立执行不变。
+        - 子任务仅精准轻量检查，不运行完整门禁；主线程集中整合冻结后由独立执行者一次整轮验证，审查不重跑。
+        - 记录文件及有效代码和配置净变化、维护路径减少及必要复杂度；独立测试不与实现共享答案。
+        acceptance_evidence:
+        - 本次基线、实际消费关系、精简合同及语义等价或负例证据。
+        - 精准检查、独立整轮回归和冻结证据复核。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.release.docker-contract
+        - eng.repository.planning
+        dependencies: []
+        depends_on: []
+        deliverable: 唯一执行定义、固定成功合同、原检查身份及场景选择保持；加载器和直接消费者闭环更新。
+      - id: LF-TSK-QLT-2136
+        title: 删除 Stop 配置中的固定协议副本
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 30
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - harness/delivery-hooks.json
+        - scripts/verification/delivery_hook.py
+        - tests/verification/test_delivery_hook.py
+        - tests/verification/test_delivery_quality_selection.py
+        - tests/verification/test_test_services.py
+        - .codex/hooks.json
+        - .qoder/settings.json
+        - planning/workstreams.yaml
+        - openspec/changes/simplify-engineering-configuration/**
+        - harness/README.md
+        - harness/manifest.yaml
+        - harness/agent-policy.manifest.yaml
+        - docs/reference/configuration.md
+        - docs/reference/verification.md
+        - docs/reference/scripts.md
+        - docs/roadmap/master-plan/phase2/status.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 固定协议只在实现定义，模式与时间配置保留原行为；正常交付仍执行，中间回合不伪造 PASS。
+        acceptance_criteria:
+        - 只修改本次工作包的增量，保留已有改动；以实际消费者证据删除副本和无效配置，不以搬迁或格式压缩充数。
+        - 第一轮保持检查身份、命令、选择、顺序和安全语义；未知输入失败关闭，漂移保护、资源清理及独立执行不变。
+        - 子任务仅精准轻量检查，不运行完整门禁；主线程集中整合冻结后由独立执行者一次整轮验证，审查不重跑。
+        - 记录文件及有效代码和配置净变化、维护路径减少及必要复杂度；独立测试不与实现共享答案。
+        acceptance_evidence:
+        - 本次基线、实际消费关系、精简合同及语义等价或负例证据。
+        - 精准检查、独立整轮回归和冻结证据复核。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.hooks
+        dependencies: []
+        depends_on: []
+        deliverable: 固定协议只在实现定义，模式与时间配置保留原行为；正常交付仍执行，中间回合不伪造 PASS。
+      - id: LF-TSK-QLT-2137
+        title: 收敛 Agent 规则副本与同步维护
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: docs/roadmap/master-plan/phase2/tasks.md
+        estimated_minutes: 90
+        owner: LF-WS-QLT
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - harness/agent-runtime.manifest.yaml
+        - harness/policy-projections.yaml
+        - planning/task-template.yaml
+        - scripts/repository/policy_projection.py
+        - scripts/repository/planning_validator.py
+        - scripts/repository/quality.py
+        - tests/repository/**
+        - planning/workstreams.yaml
+        - openspec/changes/simplify-engineering-configuration/**
+        - harness/README.md
+        - harness/manifest.yaml
+        - harness/agent-policy.manifest.yaml
+        - docs/reference/configuration.md
+        - docs/reference/verification.md
+        - docs/reference/scripts.md
+        - docs/roadmap/master-plan/phase2/status.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 删除可证明重复的规则投影和同步步骤；保留唯一策略、真实消费者检查与身份安全合同。
+        acceptance_criteria:
+        - 只修改本次工作包的增量，保留已有改动；以实际消费者证据删除副本和无效配置，不以搬迁或格式压缩充数。
+        - 第一轮保持检查身份、命令、选择、顺序和安全语义；未知输入失败关闭，漂移保护、资源清理及独立执行不变。
+        - 子任务仅精准轻量检查，不运行完整门禁；主线程集中整合冻结后由独立执行者一次整轮验证，审查不重跑。
+        - 记录文件及有效代码和配置净变化、维护路径减少及必要复杂度；独立测试不与实现共享答案。
+        acceptance_evidence:
+        - 本次基线、实际消费关系、精简合同及语义等价或负例证据。
+        - 精准检查、独立整轮回归和冻结证据复核。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.repository.policy
+        - eng.repository.planning
+        - eng.repository.module-tests
+        dependencies: []
+        depends_on: []
+        deliverable: 删除可证明重复的规则投影和同步步骤；保留唯一策略、真实消费者检查与身份安全合同。
       - id: LF-TSK-QLT-2001
         title: 串行核验完整主线及跨模块验收矩阵
         priority: P0
@@ -1519,7 +2452,7 @@ workstreams:
         acceptance_evidence:
         - 同输入静态检查及独立验证审查，状态仅在 phase2/status.md；不将任务设计视为产品实现
         validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
-          python3 -m scripts.repository.policy_projection --check && python3 -m unittest tests.repository.test_planning_check
+          python3 -m scripts.repository.quality --mode policy && python3 -m unittest tests.repository.test_planning_check
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
@@ -1544,7 +2477,7 @@ workstreams:
         - tests/delivery_gate/test_dependencies.py
         - tests/delivery_gate/test_dependency_recovery.py
         - planning/workstreams.yaml
-        - docs/development/change-delivery/delivery-gate.md
+        - docs/reference/delivery-gate.md
         - docs/roadmap/master-plan/phase2/status.md
         - docs/roadmap/master-plan/phase2/tasks.md
         forbidden_files:
@@ -1606,7 +2539,7 @@ workstreams:
         - 直接 runner 测试和标准 agents Check 实际执行；配置一致不代替原生派发恢复的实际工具证据。
         acceptance_evidence:
         - 冻结差异、runner 测试、同输入 Verify 和独立 validation/review/check；实际派发结果留在 ignored 运行证据。
-        validation_command: python3 -m scripts.agents.module_tests && python3 -m scripts.repository.policy_projection --check
+        validation_command: python3 -m scripts.agents.module_tests && python3 -m scripts.repository.quality --mode policy
         required_check_ids:
         - eng.agents.module-tests
         - eng.repository.docs
@@ -1660,8 +2593,8 @@ workstreams:
         - scripts/verification/scenarios.py
         - scripts/verification/reports.py
         - tests/verification/test_input_snapshot.py
-        - docs/development/change-delivery/verification.md
-        - docs/development/operations/docker-release.md
+        - docs/reference/verification.md
+        - docs/scenarios/docker-release.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -1676,7 +2609,7 @@ workstreams:
         acceptance_evidence:
         - 同输入静态检查及独立验证审查，状态仅在 phase2/status.md；不将任务设计视为产品实现
         validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
-          python3 -m scripts.repository.policy_projection --check && python3 -m unittest discover -s tests/verification
+          python3 -m scripts.repository.quality --mode policy && python3 -m unittest discover -s tests/verification
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
@@ -1711,8 +2644,8 @@ workstreams:
         - planning/workstreams.yaml
         - harness/manifest.yaml
         - docs/roadmap/master-plan/phase2/tasks.md
-        - docs/development/change-delivery/delivery-gate.md
-        - docs/development/operations/github-actions.md
+        - docs/reference/delivery-gate.md
+        - docs/scenarios/github-actions.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -1727,7 +2660,7 @@ workstreams:
         - 直接 fixture 覆盖正常链、缺层、篡改、重复、源码或要求漂移、依赖/批准缺失，并保留既有 check 发布及幂等行为。
         acceptance_evidence:
         - 独立 TASK_VALIDATION 的模块与静态检查结果、冻结差异及另一 actor 的只读审查；不把 fixture receipt 当真实发行许可。
-        validation_command: python3 -m unittest discover -s tests/delivery_gate && python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check && python3 -m scripts.repository.policy_projection --check
+        validation_command: python3 -m unittest discover -s tests/delivery_gate && python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check && python3 -m scripts.repository.quality --mode policy
         required_check_ids:
         - eng.delivery-gate.module-tests
         - eng.repository.docs
@@ -1770,8 +2703,8 @@ workstreams:
         - harness/manifest.yaml
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/tasks.md
-        - docs/development/change-delivery/delivery-gate.md
-        - docs/development/operations/github-actions.md
+        - docs/reference/delivery-gate.md
+        - docs/scenarios/github-actions.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -1913,7 +2846,7 @@ workstreams:
         phase: P1
         task_version: 1
         change_version: 1.0.0
-        task_source: docs/development/operations/lexicon-import/record-processing.md
+        task_source: docs/scenarios/lexicon-import/record-processing.md
         estimated_minutes: 30
         owner: LF-WS-LEX
         kind: implementation
@@ -1948,7 +2881,7 @@ workstreams:
         phase: P1
         task_version: 1
         change_version: 1.0.0
-        task_source: docs/development/operations/lexicon-import/record-processing.md
+        task_source: docs/scenarios/lexicon-import/record-processing.md
         estimated_minutes: 50
         owner: LF-WS-LEX
         kind: implementation
@@ -1964,7 +2897,7 @@ workstreams:
         - docs/roadmap/**
         expected_output: 合并清洗Result及入选步骤正反例/组合保护测试
         acceptance_criteria:
-        - 严格遵守 docs/development/operations/lexicon-import/record-processing.md 1.4 的接口和步骤
+        - 严格遵守 docs/scenarios/lexicon-import/record-processing.md 1.4 的接口和步骤
         - 每场景至少一正一反，保留原source，保护罗马数字及短技术符号
         - 不使用AI、数据库、网络、外部词性库
         acceptance_evidence:
@@ -1984,7 +2917,7 @@ workstreams:
         phase: P1
         task_version: 1
         change_version: 1.0.0
-        task_source: docs/development/operations/lexicon-import/record-processing.md
+        task_source: docs/scenarios/lexicon-import/record-processing.md
         estimated_minutes: 90
         owner: LF-WS-LEX
         kind: implementation
@@ -2758,9 +3691,9 @@ workstreams:
         allowed_files:
         - backend/product/**
         - extension/**
-        - docs/product/product-brief.md
-        - docs/architecture/lexicon-contract.md
-        - docs/development/operations/extension-e2e.md
+        - docs/system/experience.md
+        - docs/system/lexicon.md
+        - docs/scenarios/extension-e2e.md
         - docs/roadmap/master-plan/phase2/status.md
         - openspec/specs/product-architecture/spec.md
         - planning/workstreams.yaml
@@ -3070,7 +4003,7 @@ workstreams:
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.repository.planning_check && python3 -m scripts.repository.docs_check &&
-          python3 -m scripts.repository.policy_projection --check
+          python3 -m scripts.repository.quality --mode policy
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
@@ -4000,7 +4933,7 @@ workstreams:
         - harness/manifest.yaml
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/tasks.md
-        - docs/development/operations/github-actions.md
+        - docs/scenarios/github-actions.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -4103,7 +5036,7 @@ workstreams:
         - tests/verification/test_docker_contract_checks.py
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/tasks.md
-        - docs/development/operations/github-actions.md
+        - docs/scenarios/github-actions.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -4169,7 +5102,7 @@ workstreams:
         - harness/manifest.yaml
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/tasks.md
-        - docs/development/operations/github-actions.md
+        - docs/scenarios/github-actions.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -4277,7 +5210,7 @@ workstreams:
         - harness/manifest.yaml
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/tasks.md
-        - docs/development/operations/github-actions.md
+        - docs/scenarios/github-actions.md
         forbidden_files:
         - secrets/**
         - .local/**
@@ -4336,7 +5269,7 @@ workstreams:
         - harness/module-checks.yaml
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/tasks.md
-        - docs/development/operations/github-actions.md
+        - docs/scenarios/github-actions.md
         - README.md
         forbidden_files:
         - secrets/**
@@ -4374,6 +5307,95 @@ workstreams:
           required_task_version: 1
           required_change_version: 1.0.0
         deliverable: 真实候选与原生Formal交接的最小工作流、权限边界及用户命令导航。
+
+      - id: LF-TSK-OPS-2019
+        title: 实现软件版本镜像槽位与归属保护
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/versioned-podman-images/tasks.md
+        estimated_minutes: 60
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/podman/versioned-images.mjs
+        - ops/podman/tests/versioned-images.test.mjs
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 实现软件版本镜像槽位与归属保护及直接测试证据。
+        acceptance_criteria:
+        - 部署 tag 仅由合法软件基础版本派生，小写 snapshot 与完整构建身份分离。
+        - 仅删除精确 tag 的经安装/project/service/image ID 证明的本安装容器；未知、共享、漂移或异常均拒绝，不清理卷和其他 tag。
+        - 替身回归覆盖无镜像、正常替换、失败层、跨安装、重复标签、检查漂移与删除顺序。
+        acceptance_evidence:
+        - 冻结差异、直接回归与独立复核；未运行的真实部署不宣称通过。
+        validation_command: node --test ops/podman/tests/versioned-images.test.mjs
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies: []
+        depends_on: []
+        deliverable: 实现软件版本镜像槽位与归属保护及直接测试。
+
+      - id: LF-TSK-OPS-2020
+        title: 接通稳定版本 Podman 镜像安装流程
+        priority: P0
+        phase: P2
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/versioned-podman-images/tasks.md
+        estimated_minutes: 60
+        owner: LF-WS-OPS
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/podman/unified-local.mjs
+        - ops/podman/local.mjs
+        - ops/podman/candidate.mjs
+        - ops/podman/deployment.mjs
+        - ops/podman/image-slot-lock.mjs
+        - ops/podman/tests/image-slot-lock.test.mjs
+        - ops/release/build.mjs
+        - ops/release/tests/build.test.mjs
+        - ops/release/tests/build-execution.test.mjs
+        - ops/podman/tests/unified-flow.test.mjs
+        - ops/podman/tests/unified-local.test.mjs
+        - ops/podman/tests/candidate.test.mjs
+        - ops/podman/tests/candidate-fixture.mjs
+        - ops/podman/tests/deployment.test.mjs
+        - ops/docker/tests/test_podman_local.py
+        - docs/user/podman-macos.md
+        - docs/roadmap/master-plan/phase2/release.md
+        - openspec/changes/versioned-podman-images/**
+        - openspec/specs/deployment-images/spec.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 接通稳定版本 Podman 镜像安装流程及直接测试证据。
+        acceptance_criteria:
+        - API与受管PG采用软件版本tag，来源工具采用精确清理的一次性无tag镜像，构建label/digest及漂移核验保留。
+        - 同版本安装先删除经证明的旧容器和镜像后重建；重复安装不走应用no-op，资料和外部数据库保护不变。
+        - 失败不伪装同版本旧镜像可回退；未知资源和并发碰撞失败关闭，公开文档说明中断与数据保留。
+        acceptance_evidence:
+        - 冻结差异、直接回归与独立复核；未运行的真实部署不宣称通过。
+        validation_command: node --test ops/podman/tests/*.test.mjs && python3 -m unittest ops.docker.tests.test_podman_local
+        required_check_ids:
+        - eng.release.docker-contract
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        dependencies: []
+        depends_on: []
+        deliverable: 接通稳定版本 Podman 镜像安装流程及直接测试。
 
 - id: LF-WS-ADP
   code: ADP

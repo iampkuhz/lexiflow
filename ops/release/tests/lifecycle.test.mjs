@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdir, writeFile, unlink, rmdir, readFile, chmod, symlink, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { lifecycleFixture } from './lifecycle-fixture.mjs';
+import { execute as executeDockerModel, createTransport } from './fake-docker-daemon.mjs';
+import { mkdtemp as mkdtempTransport, mkdir as mkdirTransport, readFile as readTransport, writeFile as writeTransport, rm as rmTransport } from 'node:fs/promises';
+import os from 'node:os';
 
 // 原六个 case 分别由下列五个具名断言阶段及主 test 的两代闭环承载；
 // 不使用 nested test，TAP 仅有一个顶层 case。
@@ -251,4 +254,126 @@ test('真实两代入口复用准备状态覆盖身份负例与完整生命周�
   const installation=firstResourcesBefore[0].installation;
   assert.ok(removed.some((item)=>item.action==='remove'&&item.resource?.project===`lf_${installation}_${firstKey.slice(0,16)}`),
     '动作台账应记录目标发行的资源移除');
+});
+
+
+const transportArgs=['--host','unix:///synthetic.sock','info','--format','{{.ID}}'];
+const transportEnv={LEXIFLOW_INSTALLATION_ID:'a'.repeat(32),LEXIFLOW_RELEASE_KEY:'b'.repeat(64)};
+async function transportFixture(t,{id='id-one',composeFail=false,clientTransform=source=>source}={}) {
+  const dir=await mkdtempTransport(path.join(os.tmpdir(),'lf-transport-'));
+  const state=path.join(dir,'state'),control=path.join(dir,'control'),ledger=path.join(dir,'ledger'),box=path.join(dir,'box'),client=path.join(dir,'docker');
+  await writeTransport(state,JSON.stringify({daemons:{primary:{id,resources:[]},clone:{id:'id-clone',resources:[]}}}));
+  await writeTransport(control,JSON.stringify({contextEndpoint:'unix:///synthetic.sock',endpoints:{'unix:///synthetic.sock':'primary'},composeFail}));
+  const transport=await createTransport({state,control,ledger,directory:box});
+  await writeTransport(client,clientTransform(transport.clientSource()),{mode:0o700});
+  let closed=false;t.after(async()=>{if(closed)return;let failure;try{await transport.close();}catch(error){failure=error;}finally{await rmTransport(dir,{recursive:true,force:true});}if(failure)throw failure;});
+  const cli=(argv,env={})=>{const result=spawnSync(client,argv,{encoding:'utf8',timeout:12000,env:{...process.env,...env}});assert.equal(result.error,undefined);return {status:result.status,stdout:result.stdout,stderr:result.stderr};};
+  return {dir,state,control,ledger,box,client,transport,cli,markClosed:()=>{closed=true;}};
+}
+
+test('transport 真实 shell CLI 与 direct 模型逐请求结果和 ledger 一致',async(t)=>{
+  const f=await transportFixture(t);
+  const cases=[transportArgs,['--host','unix:///synthetic.sock','container','ls','--filter','name=x','--format','{{.ID}}'],['--host','unix:///synthetic.sock','inspect','--format','x','missing'],['bad']];
+  for(const argv of cases){
+    const expected=await executeDockerModel(f.state,f.ledger,f.control,argv,{});
+    const actual=f.cli(argv);
+    assert.deepEqual(actual,expected);
+    const node=spawnSync(process.execPath,[new URL('./fake-docker-daemon.mjs',import.meta.url).pathname,f.state,f.ledger,f.control,...argv],{encoding:'utf8'});
+    assert.deepEqual({status:node.status,stdout:node.stdout,stderr:node.stderr},expected);
+  }
+  const actions=(await readTransport(f.ledger,'utf8')).trim().split('\n').map(JSON.parse);
+  assert.deepEqual(actions.map(x=>x.action),['info','info','info','list','list','list']);
+});
+
+test('transport 动态 control、真实 ID 切换与重复请求不缓存',async(t)=>{
+  const f=await transportFixture(t);
+  assert.equal(f.cli(transportArgs).stdout,'id-one\n');
+  const base=JSON.parse(await readTransport(f.control));
+  await writeTransport(f.control,JSON.stringify({...base,idOverride:'雪 with space\nnext'}));
+  assert.equal(f.cli(transportArgs).stdout,'雪 with space\nnext\n');
+  await writeTransport(f.control,JSON.stringify({...base,switchAfterIdQueries:{remaining:1,endpoint:'unix:///synthetic.sock',target:'clone'}}));
+  assert.equal(f.cli(transportArgs).stdout,'id-one\n');
+  assert.equal(f.cli(transportArgs).stdout,'id-clone\n');
+  assert.equal(JSON.parse(await readTransport(f.control)).endpoints['unix:///synthetic.sock'],'clone');
+  await writeTransport(f.control,JSON.stringify({endpoints:{'unix:///synthetic.sock':'clone'},idOverride:{value:'雪'}}));
+  assert.equal(f.cli(['context','inspect','--format','x']).stdout,'undefined\n');
+  assert.equal(f.cli(transportArgs).stdout,"{ value: '雪' }\n");
+  assert.equal((await readTransport(f.ledger,'utf8')).trim().split('\n').length,6);
+});
+
+test('transport compose 实际身份环境、Unicode 空值与非零 2 64 70 71',async(t)=>{
+  const f=await transportFixture(t);
+  const compose=['--host','unix:///synthetic.sock','compose','--project-name','项目 with space','-f','file name.yaml','up','-d','--no-deps','postgres'];
+  const ok=f.cli(compose,transportEnv);
+  assert.equal(ok.status,0);
+  const resources=JSON.parse(await readTransport(f.state)).daemons.primary.resources;
+  assert.equal(resources[0].labels.installation,transportEnv.LEXIFLOW_INSTALLATION_ID);
+  assert.equal(resources[0].labels.release,transportEnv.LEXIFLOW_RELEASE_KEY);
+  assert.equal(resources[0].labels.project,'项目 with space');
+  assert.equal(f.cli(compose,{...transportEnv,LEXIFLOW_RELEASE_KEY:''}).status,64);
+  assert.equal(f.cli(['--host','unix:///synthetic.sock','inspect','--format','x','missing']).status,2);
+  assert.equal(f.cli(['bad','', '雪 with space\nnext']).status,64);
+  const base=JSON.parse(await readTransport(f.control));
+  await writeTransport(f.control,JSON.stringify({...base,composeFail:true}));
+  assert.equal(f.cli(compose,transportEnv).status,71);
+  await writeTransport(f.state,'not json');
+  assert.equal(f.cli(transportArgs).status,70);
+  const actions=(await readTransport(f.ledger,'utf8')).trim().split('\n').map(JSON.parse);
+  assert.ok(actions.some(x=>x.action==='compose-up'&&x.resource.project==='项目 with space'));
+  assert.ok(actions.some(x=>x.action==='compose-failed'));
+});
+
+test('transport 两实例状态隔离、同一模型每次读取 state',async(t)=>{
+  const a=await transportFixture(t,{id:'A'}),b=await transportFixture(t,{id:'B'});
+  assert.equal(a.cli(transportArgs).stdout,'A\n');
+  assert.equal(b.cli(transportArgs).stdout,'B\n');
+  await writeTransport(a.state,JSON.stringify({daemons:{primary:{id:'A2',resources:[]},clone:{id:'C',resources:[]}}}));
+  assert.equal(a.cli(transportArgs).stdout,'A2\n');
+  assert.equal(b.cli(transportArgs).stdout,'B\n');
+});
+
+test('transport batching 对损坏长度、缺失响应和未知残留失败关闭',async(t)=>{
+  const faults=[
+    ['bad-length',`printf '999 0\\n' > "$req/lengths"`],
+    ['missing-response',`rm "$req/out"`],
+    ['unknown-entry',`: > "$req/unexpected"`],
+  ];
+  for(const [name,injection] of faults){
+    const marker='done\n[ -f "$req/out" ]';
+    const f=await transportFixture(t,{clientTransform:source=>{
+      assert.ok(source.includes(marker),'fault injection point must remain after done and before response validation');
+      return source.replace(marker,`done\n${injection}\n[ -f "$req/out" ]`);
+    }});
+    const result=f.cli(transportArgs);
+    assert.equal(result.status,97,`${name} client must report the transport failure status`);
+    const expectedFailure=name==='bad-length'?'response length mismatch':name==='missing-response'?'incomplete response':'response cleanup';
+    assert.match(await readTransport(path.join(f.box,'failed'),'utf8'),new RegExp(`transport failure: ${expectedFailure}`));
+    assert.ok(f.transport.fatal,`${name} failure marker must remain sticky`);
+    assert.throws(()=>f.transport.assertHealthy(),/transport failure:/);
+    // close is expected to reject due to sticky fatal, but must still terminate
+    // the worker and remove its private directory before the fixture is marked closed.
+    await assert.rejects(()=>f.transport.close(),/transport failure:/);
+    f.markClosed();
+    assert.equal(await stat(f.box).then(()=>true,error=>{assert.equal(error.code,'ENOENT');return false;}),false);
+    assert.equal(f.transport.worker.threadId,-1);
+    await rmTransport(f.dir,{recursive:true});
+  }
+});
+
+test('transport 协议损坏和 worker 停机留下 sticky fatal，close 清理且失败',async(t)=>{
+  for(const fault of ['protocol','stop']){
+    const f=await transportFixture(t);
+    if(fault==='protocol'){
+      const bad=path.join(f.box,'q.corrupt');await mkdirTransport(bad);await writeTransport(path.join(bad,'ready'),'');
+    }else await f.transport.worker.terminate();
+    const end=Date.now()+1000;
+    while(!f.transport.fatal&&Date.now()<end)await new Promise(resolve=>setTimeout(resolve,5));
+    assert.ok(f.transport.fatal,`${fault} must persist fatal`);
+    assert.equal(f.cli(transportArgs).status,97);
+    assert.throws(()=>f.transport.assertHealthy());
+    await assert.rejects(()=>f.transport.close());f.markClosed();
+    assert.equal(await stat(f.box).then(()=>true,error=>{assert.equal(error.code,'ENOENT');return false;}),false);
+    assert.equal(f.transport.worker.threadId,-1,'worker must be terminated');
+    await rmTransport(f.dir,{recursive:true});
+  }
 });

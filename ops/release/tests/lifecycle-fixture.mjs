@@ -7,11 +7,14 @@ import { resolveBuildIdentity } from '../version.mjs';
 import { extensionBytes } from './zip-fixture.mjs';
 import { packageManifest } from '../package.mjs';
 import { generateRuntimeEntry } from '../runtime-entry.mjs';
+import { createTransport } from './fake-docker-daemon.mjs';
 
 const sha = (value) => createHash('sha256').update(value).digest('hex');
 const daemonByTest = new WeakMap();
 export async function lifecycleFixture(t, full = true, variant = '') {
   const tmp = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lf-lifecycle-fixture-')));
+  let daemonOwnsTmp=false;
+  t.after(async()=>{if(!daemonOwnsTmp) await rm(tmp,{recursive:true,force:true});});
   const repo = path.join(tmp, 'repo'); await mkdir(path.join(repo, 'ops/release'), { recursive: true });
   const local = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
   for (const name of ['version.txt','runtime-entry.mjs','runtime-verification.sh','lifecycle.mjs','lifecycle-state.sh','lifecycle-docker.sh','lifecycle.sh']) await cp(path.join(local,name),path.join(repo,'ops/release',name));
@@ -62,17 +65,28 @@ export async function lifecycleFixture(t, full = true, variant = '') {
   const bin=path.join(tmp,'bin'); await mkdir(bin);
   let daemon=daemonByTest.get(t);
   if (!daemon) {
-    daemon={state:path.join(tmp,'docker-daemon.json'),ledger:path.join(tmp,'docker-actions.jsonl'),control:path.join(tmp,'docker-control.json')};
+    daemon={state:path.join(tmp,'docker-daemon.json'),ledger:path.join(tmp,'docker-actions.jsonl'),control:path.join(tmp,'docker-control.json'),tmp,fixtures:[],fatal:null};
     await writeFile(daemon.state,JSON.stringify({daemons:{primary:{id:'synthetic-daemon-id',resources:[]},empty:{id:'empty-daemon-id',resources:[]},clone:{id:'clone-daemon-id',resources:[]}}}));
     await writeFile(daemon.control,JSON.stringify({contextEndpoint:'unix:///lexiflow-synthetic-docker.sock',endpoints:{'unix:///lexiflow-synthetic-docker.sock':'primary','unix:///other-empty.sock':'empty','unix:///other-clone.sock':'clone'}}));
     daemonByTest.set(t,daemon);
+    daemon.mailbox=path.join(tmp,'mailbox');
+    daemon.transport=await createTransport({...daemon,directory:daemon.mailbox});
+    daemon.closed=false;
+    t.after(async()=>{
+      let failure=daemon.transport.fatal;
+      try { await daemon.transport.close(); daemon.closed=true; } catch(error) { failure ||= error; }
+      for(const dir of daemon.fixtures) { try { await rm(dir,{recursive:true}); } catch(error) { failure ||= error; } }
+      if(failure) throw failure;
+    });
   }
-  await cp(path.join(path.dirname(new URL(import.meta.url).pathname),'fake-docker-daemon.mjs'),path.join(bin,'fake-docker-daemon.mjs'));
-  const fake=`#!/bin/sh\nexec node "${path.join(bin,'fake-docker-daemon.mjs')}" "${daemon.state}" "${daemon.ledger}" "${daemon.control}" "$@"\n`;
+  daemon.fixtures.push(tmp);
+  daemonOwnsTmp=true;
+  const fake=daemon.transport.clientSource();
   await writeFile(path.join(bin,'docker'),fake,{mode:0o755});
-  const runWith=(environment,...args)=>execFileSync('sh',[path.join(pkg,'lexiflow.sh'),...args],{encoding:'utf8',timeout:60000,env:{...process.env,PATH:`${bin}:${process.env.PATH}`,DOCKER_HOST:'',DOCKER_CONTEXT:'',DOCKER_CONFIG:'',...environment},stdio:['ignore','pipe','pipe']});
+  const healthy=()=>daemon.transport.assertHealthy();
+  const runWith=(environment,...args)=>{try{return execFileSync('sh',[path.join(pkg,'lexiflow.sh'),...args],{encoding:'utf8',timeout:60000,env:{...process.env,PATH:`${bin}:${process.env.PATH}`,DOCKER_HOST:'',DOCKER_CONTEXT:'',DOCKER_CONFIG:'',...environment},stdio:['ignore','pipe','pipe']});}finally{healthy();}};
   const run=(...args)=>runWith({},...args);
-  t.after(()=>rm(tmp,{recursive:true,force:true}));
+  t.after(()=>healthy());
   const daemonState=async(name='primary')=>JSON.parse(await readFile(daemon.state,'utf8')).daemons[name];
   const daemonControl=async()=>JSON.parse(await readFile(daemon.control,'utf8'));
   const setDaemonControl=async(patch)=>writeFile(daemon.control,JSON.stringify({...await daemonControl(),...patch}));
@@ -82,5 +96,5 @@ export async function lifecycleFixture(t, full = true, variant = '') {
     await writeFile(daemon.state,JSON.stringify(data));
   };
   const daemonActions=async()=>{try{return (await readFile(daemon.ledger,'utf8')).trim().split('\n').filter(Boolean).map((line)=>JSON.parse(line));}catch(error){if(error.code==='ENOENT')return [];throw error;}};
-  return {tmp,repo,root,pkg,descriptor,generated,run,runWith,state:daemon.state,daemonState,daemonActions,daemonControl,setDaemonControl,cloneResources,bin};
+  return {tmp,repo,root,pkg,descriptor,generated,run,runWith,state:daemon.state,daemonState,daemonActions,daemonControl,setDaemonControl,cloneResources,bin,daemon,healthy};
 }

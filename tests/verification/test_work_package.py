@@ -28,19 +28,46 @@ REQUEST = {
 }
 
 
-def fixture(root, code="print('fixture')"):
-    _write_declarations(root, [{
-        "check_id": "fixture.check", "module": "fixture",
-        "command": [sys.executable, "-c", code], "cwd": ".",
-        "timeout_seconds": 5, "scope": "repository-baseline", "triggers": [],
-    }])
+COMPLETE_RESULT = {
+    "status": "PASS",
+    "checks_run": 1,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "reason": "",
+    "fixture": "fixture",
+}
+
+
+def fixture(root, code=None):
+    if code is None:
+        code = "print(" + repr(json.dumps(COMPLETE_RESULT)) + ")"
+    _write_declarations(
+        root,
+        [
+            {
+                "check_id": "fixture.check",
+                "module": "fixture",
+                "command": [sys.executable, "-c", code],
+                "cwd": ".",
+                "timeout_seconds": 5,
+                "scope": "repository-baseline",
+                "triggers": [],
+            }
+        ],
+    )
 
 
 class WorkPackageTests(unittest.TestCase):
     def test_rejects_unbounded_config_and_injected_identity(self):
-        for key, value in (("budget_seconds", True), ("budget_seconds", 7201),
-                           ("check_ids", []), ("check_ids", ["x", "x"]),
-                           ("agent_id", "fake"), ("command", ["anything"])):
+        for key, value in (
+            ("budget_seconds", True),
+            ("budget_seconds", 7201),
+            ("check_ids", []),
+            ("check_ids", ["x", "x"]),
+            ("agent_id", "fake"),
+            ("command", ["anything"]),
+        ):
             request = {**REQUEST, key: value}
             with self.subTest(key=key, value=value), self.assertRaises(ValueError):
                 validate_request(request)
@@ -55,15 +82,23 @@ class WorkPackageTests(unittest.TestCase):
             self.assertNotIn("schema_version", result["selected_report"])
             self.assertNotIn("result", result["selected_report"])
             self.assertEqual(result["summary"]["commands_executed"], 1)
-            output = result["selected_report"]["checks"][0]["process"]["output_artifacts"]["stdout"]
-            self.assertEqual((root / output["locator"]).read_text(), "fixture\n")
-            saved = json.loads((root / result["diagnostic_artifact"]["locator"]).read_text())
+            output = result["selected_report"]["checks"][0]["process"][
+                "output_artifacts"
+            ]["stdout"]
+            self.assertEqual(
+                (root / output["locator"]).read_text(),
+                json.dumps(COMPLETE_RESULT) + "\n",
+            )
+            saved = json.loads(
+                (root / result["diagnostic_artifact"]["locator"]).read_text()
+            )
             self.assertEqual(saved["selected_result"], "PASS")
             with self.assertRaises(ValueError):
                 read_report(root, result["diagnostic_id"])
 
     def test_partial_success_is_only_selected_success_not_full_qualification(self):
         import yaml
+
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fixture(root)
@@ -82,11 +117,16 @@ class WorkPackageTests(unittest.TestCase):
             self.assertEqual(result["summary"]["commands_executed"], 1)
 
     def test_unsafe_output_directory_does_not_write_outside_repository(self):
-        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as other:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            tempfile.TemporaryDirectory() as other,
+        ):
             root = Path(directory)
             fixture(root)
-            (root / 'tmp/quality').mkdir(parents=True)
-            (root / 'tmp/quality/diagnostics').symlink_to(other, target_is_directory=True)
+            (root / "tmp/quality").mkdir(parents=True)
+            (root / "tmp/quality/diagnostics").symlink_to(
+                other, target_is_directory=True
+            )
             with self.assertRaises(ValueError):
                 execute(root, REQUEST)
             self.assertEqual(list(Path(other).iterdir()), [])
@@ -97,7 +137,9 @@ class WorkPackageTests(unittest.TestCase):
             fixture(root, "raise AssertionError('business fixture')")
             result = execute(root, REQUEST)
             self.assertEqual(result["selected_result"], "FAIL")
-            self.assertEqual(result["summary"]["findings"][0]["failure_layer"], "check-needs-triage")
+            self.assertEqual(
+                result["summary"]["findings"][0]["failure_layer"], "check-needs-triage"
+            )
             unknown = execute(root, {**REQUEST, "check_ids": ["missing"]})
             self.assertEqual(unknown["selected_result"], "FAIL")
 
@@ -116,7 +158,11 @@ class WorkPackageTests(unittest.TestCase):
             root = Path(directory)
             fixture(root)
             from scripts.verification.kernel import run_check_process
-            with patch("scripts.verification.work_package.run_check_process", wraps=run_check_process) as run:
+
+            with patch(
+                "scripts.verification.work_package.run_check_process",
+                wraps=run_check_process,
+            ) as run:
                 execute(root, {**REQUEST, "budget_seconds": 2})
             self.assertGreater(run.call_args.args[3], 0)
             self.assertLessEqual(run.call_args.args[3], 2)
@@ -141,17 +187,38 @@ class ExecutionBudgetTests(unittest.TestCase):
 
 class SummaryTests(unittest.TestCase):
     def test_partial_selection_cannot_hide_missing_failed_or_empty_checks(self):
-        original = {"result": "BLOCKED", "reason": "partial-check-selection",
-                    "checks": [], "scope_review": {"checks_selected": 1}}
+        original = {
+            "result": "BLOCKED",
+            "reason": "partial-check-selection",
+            "checks": [],
+            "scope_review": {"checks_selected": 1},
+        }
         self.assertEqual(selected_result(original), "BLOCKED")
-        for status, exit_reason in (("FAIL", "exited"), ("BLOCKED", "not-run"), ("PASS", "not-run")):
-            report = {**original, "checks": [{"status": status, "process": {"exit_reason": exit_reason}}]}
+        for status, exit_reason in (
+            ("FAIL", "exited"),
+            ("BLOCKED", "not-run"),
+            ("PASS", "not-run"),
+        ):
+            report = {
+                **original,
+                "checks": [{"status": status, "process": {"exit_reason": exit_reason}}],
+            }
             self.assertNotEqual(selected_result(report), "PASS")
-        self.assertNotEqual(selected_result({**original, "scope_review": {"checks_selected": 0}}), "PASS")
+        self.assertNotEqual(
+            selected_result({**original, "scope_review": {"checks_selected": 0}}),
+            "PASS",
+        )
 
     def test_alias_duration_counted_once_and_unknown_metrics_stay_unknown(self):
-        original = {"check_id": "first", "status": "PASS", "process": {
-            "exit_reason": "exited", "executed_argv": ["check"], "duration_seconds": 2.5}}
+        original = {
+            "check_id": "first",
+            "status": "PASS",
+            "process": {
+                "exit_reason": "exited",
+                "executed_argv": ["check"],
+                "duration_seconds": 2.5,
+            },
+        }
         alias = copy.deepcopy(original)
         alias["process"].update(exit_reason="deduplicated", executed_argv=[])
         result = summarize({"checks": [original, alias]})

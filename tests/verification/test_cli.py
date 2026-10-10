@@ -14,22 +14,39 @@ import yaml
 
 from scripts import check_changes, check_repository
 from scripts.verification import diagnose as diagnostic_cli
+from tests.verification.declaration_fixtures import write_declarations
 
 
 def _init_git_repo(root: Path) -> str:
     subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"], cwd=root, check=True
+    )
     subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
     (root / "initial.txt").write_text("initial")
     (root / ".gitignore").write_text("harness/\ntmp/\n")
     subprocess.run(["git", "add", "."], cwd=root, check=True)
-    subprocess.run(["git", "commit", "-m", "init"], cwd=root, check=True, capture_output=True)
-    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+    subprocess.run(
+        ["git", "commit", "-m", "init"], cwd=root, check=True, capture_output=True
+    )
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
 
 
 def _write_declarations(root: Path, *, scope: str, result: str = "PASS") -> None:
     (root / "harness").mkdir(exist_ok=True)
-    command = ["python3", "-c", "pass" if result == "PASS" else "raise SystemExit(1)"]
+    command = [
+        "python3",
+        "-c",
+        "import json; print(json.dumps({'status':'PASS','checks_run':1,'failures':0,'errors':0,'skipped':0,'reason':''}))"
+        if result == "PASS"
+        else "raise SystemExit(1)",
+    ]
     declaration = {
         "check_id": "cli.fixture",
         "module": "test",
@@ -42,9 +59,8 @@ def _write_declarations(root: Path, *, scope: str, result: str = "PASS") -> None
         "module_dependencies": [],
         "required_environment": ["python3"],
         "input_paths": ["initial.txt"],
-        "result_contract": {"type": "exit-code", "completeness_guarantee": "fixture-owned command completion"},
     }
-    (root / "harness/module-checks.yaml").write_text(yaml.safe_dump({"schema_version": "lexiflow.module-checks.v1", "checks": [declaration]}))
+    write_declarations(root / "harness/module-checks.yaml", [declaration])
 
 
 def _invoke(function, argv: list[str], root: Path) -> tuple[int, dict]:
@@ -73,7 +89,9 @@ class TestDailyAndDiagnosticCLI(unittest.TestCase):
             _write_declarations(root, scope="change-targeted")
             code, report = _invoke(check_changes.main, [], root)
             self.assertEqual((code, report["result"]), (0, "PASS"))
-            diagnostic = diagnostic_cli.diagnose(root, "change", base=base, expected_paths=("backend/",))
+            diagnostic = diagnostic_cli.diagnose(
+                root, "change", base=base, expected_paths=("backend/",)
+            )
             self.assertEqual(diagnostic["kind"], "diagnostic")
             self.assertIs(diagnostic["full_repository_executed"], False)
             self.assertIn("scope_review", diagnostic["selected_report"])
@@ -83,7 +101,9 @@ class TestDailyAndDiagnosticCLI(unittest.TestCase):
             root = Path(directory)
             (root / "initial.txt").write_text("fixture")
             _write_declarations(root, scope="repository-baseline")
-            result = diagnostic_cli.diagnose(root, "repository", check_ids=("cli.fixture",))
+            result = diagnostic_cli.diagnose(
+                root, "repository", check_ids=("cli.fixture",)
+            )
             self.assertEqual(result["selected_result"], "PASS")
             self.assertIs(result["full_repository_executed"], False)
             self.assertNotIn("publication", result["selected_report"])
@@ -91,8 +111,15 @@ class TestDailyAndDiagnosticCLI(unittest.TestCase):
             self.assertNotIn("scope", result["selected_report"])
 
     def test_daily_overrides_are_rejected(self):
-        for entry, option in ((check_changes.main, "--base"), (check_repository.main, "--check-id")):
-            with self.subTest(option=option), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+        for entry, option in (
+            (check_changes.main, "--base"),
+            (check_repository.main, "--check-id"),
+        ):
+            with (
+                self.subTest(option=option),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
                 entry([option, "fixture"])
 
 

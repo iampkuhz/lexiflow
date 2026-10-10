@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { once } from "node:events";
 
 const SAFE_ENV_KEYS = ["PATH", "HOME", "TMPDIR", "TMP", "TEMP", "USER", "LOGNAME", "LANG"];
 
@@ -38,4 +39,32 @@ export function createIncrementalFetch(originalFetch, requests, delayMs = 250) {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, delayMs));
     return originalFetch(...args);
   };
+}
+
+function killProcessGroup(pid, signal) {
+  try {
+    globalThis.process.kill(-pid, signal);
+  } catch (error) {
+    if (error.code !== "ESRCH") throw error;
+  }
+}
+
+/** 关闭合成 API，并在等待结束后释放已无用途的宽限计时器。 */
+export async function stopApi(child) {
+  if (child.exitCode !== null) return;
+  killProcessGroup(child.pid, "SIGTERM");
+  let timer;
+  try {
+    await Promise.race([
+      once(child, "close"),
+      new Promise(resolve => { timer = setTimeout(resolve, 10_000); })
+    ]);
+  } finally {
+    // Promise.race 不取消败者；API 已关闭时不能让十秒 timer 继续保持 Node 存活。
+    clearTimeout(timer);
+  }
+  if (child.exitCode === null) {
+    killProcessGroup(child.pid, "SIGKILL");
+    await once(child, "close");
+  }
 }

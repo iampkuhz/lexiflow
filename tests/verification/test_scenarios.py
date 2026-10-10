@@ -4,6 +4,7 @@ Covers: no declared checks, environment BLOCKED, check PASS/FAIL,
 coverage gaps, no git changes, input drift, module dependency
 resolution, and report schema completeness.
 """
+
 from __future__ import annotations
 
 import json
@@ -22,6 +23,7 @@ from scripts.verification.kernel import (
     snapshot_check_inputs,
 )
 from scripts.verification.scenarios import _execute
+from tests.verification.declaration_fixtures import write_declarations
 
 
 def _complete_check(check: dict) -> dict:
@@ -29,60 +31,99 @@ def _complete_check(check: dict) -> dict:
     complete.setdefault("module_dependencies", [])
     complete.setdefault("required_environment", [])
     complete.setdefault("input_paths", [])
-    complete.setdefault("result_contract", {"type": "exit-code", "completeness_guarantee": "fixture-owned command completion"})
+    complete.setdefault(
+        "result_contract",
+        {
+            "type": "exit-code",
+            "completeness_guarantee": "fixture-owned command completion",
+        },
+    )
     return complete
 
 
 def _write_declarations(root: Path, checks: list[dict]) -> None:
-    harness = root / "harness"
-    harness.mkdir(exist_ok=True)
-    data = {
-        "schema_version": "lexiflow.module-checks.v1",
-        "checks": [_complete_check(check) for check in checks],
-    }
-    (harness / "module-checks.yaml").write_text(
-        yaml.dump(data, default_flow_style=False), encoding="utf-8",
+    write_declarations(
+        root / "harness" / "module-checks.yaml",
+        [_complete_check(check) for check in checks],
     )
 
 
 def _init_git_repo(tmpdir: Path) -> str:
-    subprocess.run(["git", "init"], cwd=str(tmpdir), check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(["git", "config", "user.email", "test@test.com"],
-                   cwd=str(tmpdir), check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(["git", "config", "user.name", "Test"],
-                   cwd=str(tmpdir), check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(
+        ["git", "init"],
+        cwd=str(tmpdir),
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=str(tmpdir),
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=str(tmpdir),
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     (tmpdir / "initial.txt").write_text("initial")
     # Ignore harness/ so test declarations don't pollute git diff
     (tmpdir / ".gitignore").write_text("harness/\ntmp/\n")
-    subprocess.run(["git", "add", "."], cwd=str(tmpdir), check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(["git", "commit", "-m", "init"], cwd=str(tmpdir), check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(tmpdir),
-                       capture_output=True, text=True, check=True)
+    subprocess.run(
+        ["git", "add", "."],
+        cwd=str(tmpdir),
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=str(tmpdir),
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    r = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=str(tmpdir),
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     return r.stdout.strip()
 
 
 def _pass_runner(argv, cwd, env, timeout, executable=None):
     return {
-        "status": "PASS", "exit_code": 0, "exit_reason": "exited",
-        "stdout": "", "stderr": "", "duration_seconds": 0.01,
+        "status": "PASS",
+        "exit_code": 0,
+        "exit_reason": "exited",
+        "stdout": '{"status":"PASS","checks_run":1,"failures":0,"errors":0,"skipped":0,"reason":""}',
+        "stderr": "",
+        "duration_seconds": 0.01,
         "started_at": "2026-01-01T00:00:00Z",
         "finished_at": "2026-01-01T00:00:00Z",
-        "timed_out": False, "executable": sys.executable,
+        "timed_out": False,
+        "executable": sys.executable,
     }
 
 
 def _fail_runner(argv, cwd, env, timeout, executable=None):
     return {
-        "status": "FAIL", "exit_code": 1, "exit_reason": "exited",
-        "stdout": "", "stderr": "error", "duration_seconds": 0.01,
+        "status": "FAIL",
+        "exit_code": 1,
+        "exit_reason": "exited",
+        "stdout": "",
+        "stderr": "error",
+        "duration_seconds": 0.01,
         "started_at": "2026-01-01T00:00:00Z",
         "finished_at": "2026-01-01T00:00:00Z",
-        "timed_out": False, "executable": sys.executable,
+        "timed_out": False,
+        "executable": sys.executable,
     }
 
 
@@ -93,76 +134,126 @@ class TestReleaseRuntimePipeSelection(unittest.TestCase):
         check = {
             "check_id": check_id,
             "module": f"module-{check_id}",
-            "command": list(RELEASE_RUNTIME_CHILD_COMMAND) if active else ["bash", "ops/docker/tests/update-recovery.sh"],
+            "command": list(RELEASE_RUNTIME_CHILD_COMMAND)
+            if active
+            else ["bash", "ops/docker/tests/update-recovery.sh"],
             "executable": "python3" if active else "bash",
-            "cwd": ".", "timeout_seconds": 10, "scope": scope,
+            "cwd": ".",
+            "timeout_seconds": 10,
+            "scope": scope,
             "triggers": [{"path": "ops/release/"}],
-            "module_dependencies": [], "required_environment": [], "input_paths": [],
+            "module_dependencies": [],
+            "required_environment": [],
+            "input_paths": [],
             "result_contract": {
                 "type": "json-stdout" if active else "exit-code",
-                **({"required_fields": ["status", "reason"], "allowed_statuses": ["PASS", "BLOCKED", "FAIL"]}
-                   if active else {"completeness_guarantee": "synthetic runner owns completion"}),
+                **(
+                    {
+                        "required_fields": ["status", "reason"],
+                        "allowed_statuses": ["PASS", "BLOCKED", "FAIL"],
+                    }
+                    if active
+                    else {"completeness_guarantee": "synthetic runner owns completion"}
+                ),
             },
         }
         if scope == "change-targeted":
-            check["selection_reasons"] = [{
-                "kind": "changed-file", "changed_file": "ops/release/lifecycle.mjs",
-                "trigger_path": "ops/release/",
-            }]
+            check["selection_reasons"] = [
+                {
+                    "kind": "changed-file",
+                    "changed_file": "ops/release/lifecycle.mjs",
+                    "trigger_path": "ops/release/",
+                }
+            ]
         return check
 
     def test_both_active_lifecycle_ids_each_receive_their_exact_context(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            baseline = self._check("eng.release.lifecycle-runtime", "repository-baseline")
-            change = self._check("eng.release.lifecycle-runtime-on-change", "change-targeted")
+            baseline = self._check(
+                "eng.release.lifecycle-runtime", "repository-baseline"
+            )
+            change = self._check(
+                "eng.release.lifecycle-runtime-on-change", "change-targeted"
+            )
             checks = [baseline, change]
-            frozen = {check["check_id"]: snapshot_check_inputs(root, check) for check in checks}
+            frozen = {
+                check["check_id"]: snapshot_check_inputs(root, check)
+                for check in checks
+            }
             received = []
 
             def runner(argv, cwd, env, timeout, executable=None, *, stdin_payload=None):
                 envelope = json.loads(stdin_payload)
                 received.append(envelope)
                 report = {
-                    "status": "PASS", "reason": "",
+                    "status": "PASS",
+                    "reason": "",
                     "run_id": envelope["run_id"],
                     "check_id": envelope["check_id"],
                     "verify_input_fingerprint": envelope["snapshot"]["fingerprint"],
                 }
                 return {
-                    "status": "PASS", "exit_code": 0, "exit_reason": "exited",
+                    "status": "PASS",
+                    "exit_code": 0,
+                    "exit_reason": "exited",
                     "stdout": json.dumps(report, sort_keys=True, separators=(",", ":")),
-                    "stderr": "", "duration_seconds": 0.01,
-                    "started_at": "2026-01-01T00:00:00Z", "finished_at": "2026-01-01T00:00:00Z",
-                    "timed_out": False, "executable": sys.executable,
+                    "stderr": "",
+                    "duration_seconds": 0.01,
+                    "started_at": "2026-01-01T00:00:00Z",
+                    "finished_at": "2026-01-01T00:00:00Z",
+                    "timed_out": False,
+                    "executable": sys.executable,
                 }
 
             results = _execute(root, checks, frozen, True, "parent-run-123", runner)
-        self.assertEqual([entry["check_id"] for entry in received], [c["check_id"] for c in checks])
+        self.assertEqual(
+            [entry["check_id"] for entry in received], [c["check_id"] for c in checks]
+        )
         self.assertEqual([result["status"] for result in results], ["PASS", "PASS"])
         self.assertEqual(received[0]["effective_check"], baseline)
         self.assertEqual(received[1]["effective_check"], change)
         self.assertNotIn("selection_reasons", received[0]["effective_check"])
-        self.assertEqual(received[1]["effective_check"]["selection_reasons"], change["selection_reasons"])
+        self.assertEqual(
+            received[1]["effective_check"]["selection_reasons"],
+            change["selection_reasons"],
+        )
         for entry, check in zip(received, checks, strict=True):
             self.assertEqual(entry["run_id"], "parent-run-123")
             self.assertEqual(entry["check_config_fingerprint"], fingerprint_json(check))
             self.assertEqual(entry["snapshot"], frozen[check["check_id"]])
-            self.assertEqual(set(entry["snapshot"]), {"fingerprint", "files", "missing"})
+            self.assertEqual(
+                set(entry["snapshot"]), {"fingerprint", "files", "missing"}
+            )
 
-    def test_legacy_lifecycle_registration_and_other_check_keep_old_runner_contract(self):
+    def test_legacy_lifecycle_registration_and_other_check_keep_old_runner_contract(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             checks = [
-                self._check("eng.release.lifecycle-runtime", "repository-baseline", active=False),
-                self._check("eng.release.lifecycle-runtime-on-change", "change-targeted", active=False),
+                self._check(
+                    "eng.release.lifecycle-runtime", "repository-baseline", active=False
+                ),
+                self._check(
+                    "eng.release.lifecycle-runtime-on-change",
+                    "change-targeted",
+                    active=False,
+                ),
             ]
-            frozen = {check["check_id"]: snapshot_check_inputs(root, check) for check in checks}
+            frozen = {
+                check["check_id"]: snapshot_check_inputs(root, check)
+                for check in checks
+            }
             calls = []
+
             def legacy_runner(argv, cwd, env, timeout, executable=None):
                 calls.append((argv, executable))
                 return _pass_runner(argv, cwd, env, timeout, executable)
-            results = _execute(root, checks, frozen, True, "parent-run-legacy", legacy_runner)
+
+            results = _execute(
+                root, checks, frozen, True, "parent-run-legacy", legacy_runner
+            )
         self.assertEqual(len(calls), 1)
         self.assertEqual(results[1]["process"]["exit_reason"], "deduplicated")
 
@@ -171,9 +262,11 @@ class TestReleaseRuntimePipeSelection(unittest.TestCase):
             other = self._check("other.lifecycle-like-check", "repository-baseline")
             frozen = {other["check_id"]: snapshot_check_inputs(root, other)}
             calls = []
+
             def ordinary_runner(argv, cwd, env, timeout, executable=None):
                 calls.append((argv, executable))
                 return _pass_runner(argv, cwd, env, timeout, executable)
+
             _execute(root, [other], frozen, True, "other-run", ordinary_runner)
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0][0], list(RELEASE_RUNTIME_CHILD_COMMAND))
@@ -189,15 +282,24 @@ class TestVerifyRepository(unittest.TestCase):
     def test_no_checks_for_scope_fails(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _write_declarations(root, [{
-                "check_id": "a",
-                "module": "test",
-                "command": ["python3", "-c", "pass"],
-                "cwd": ".",
-                "timeout_seconds": 10,
-                "scope": "change-targeted",
-                "triggers": [{"path": "test/"}],
-            }])
+            _write_declarations(
+                root,
+                [
+                    {
+                        "check_id": "a",
+                        "module": "test",
+                        "command": [
+                            "python3",
+                            "-c",
+                            "import json; print(json.dumps({'status':'PASS','checks_run':1,'failures':0,'errors':0,'skipped':0,'reason':''}))",
+                        ],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "change-targeted",
+                        "triggers": [{"path": "test/"}],
+                    }
+                ],
+            )
             report = verify_repository(tmpdir)
         self.assertEqual(report["result"], "FAIL")
         self.assertEqual(report["reason"], "no-declared-checks")
@@ -205,16 +307,21 @@ class TestVerifyRepository(unittest.TestCase):
     def test_check_pass(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _write_declarations(root, [{
-                "check_id": "test.pass",
-                "module": "test",
-                "command": ["python3", "-c", "pass"],
-                "cwd": ".",
-                "timeout_seconds": 10,
-                "scope": "repository-baseline",
-                "triggers": [{"path": "test/"}],
-                "required_environment": [],
-            }])
+            _write_declarations(
+                root,
+                [
+                    {
+                        "check_id": "test.pass",
+                        "module": "test",
+                        "command": ["python3", "-c", "pass"],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "repository-baseline",
+                        "triggers": [{"path": "test/"}],
+                        "required_environment": [],
+                    }
+                ],
+            )
             report = verify_repository(tmpdir, runner=_pass_runner)
         self.assertEqual(report["result"], "PASS")
         self.assertEqual(len(report["checks"]), 1)
@@ -223,32 +330,42 @@ class TestVerifyRepository(unittest.TestCase):
     def test_check_fail(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _write_declarations(root, [{
-                "check_id": "test.fail",
-                "module": "test",
-                "command": ["python3", "-c", "import sys; sys.exit(1)"],
-                "cwd": ".",
-                "timeout_seconds": 10,
-                "scope": "repository-baseline",
-                "triggers": [{"path": "test/"}],
-                "required_environment": [],
-            }])
+            _write_declarations(
+                root,
+                [
+                    {
+                        "check_id": "test.fail",
+                        "module": "test",
+                        "command": ["python3", "-c", "import sys; sys.exit(1)"],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "repository-baseline",
+                        "triggers": [{"path": "test/"}],
+                        "required_environment": [],
+                    }
+                ],
+            )
             report = verify_repository(tmpdir, runner=_fail_runner)
         self.assertEqual(report["result"], "FAIL")
 
     def test_environment_blocked(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _write_declarations(root, [{
-                "check_id": "test.blocked",
-                "module": "test",
-                "command": ["python3", "-c", "pass"],
-                "cwd": ".",
-                "timeout_seconds": 10,
-                "scope": "repository-baseline",
-                "triggers": [{"path": "test/"}],
-                "required_environment": ["nonexistent-tool-xyz"],
-            }])
+            _write_declarations(
+                root,
+                [
+                    {
+                        "check_id": "test.blocked",
+                        "module": "test",
+                        "command": ["python3", "-c", "pass"],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "repository-baseline",
+                        "triggers": [{"path": "test/"}],
+                        "required_environment": ["nonexistent-tool-xyz"],
+                    }
+                ],
+            )
             report = verify_repository(tmpdir)
         self.assertEqual(report["result"], "BLOCKED")
         self.assertEqual(report["checks"][0]["status"], "BLOCKED")
@@ -258,16 +375,29 @@ class TestVerifyRepository(unittest.TestCase):
         calls = []
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _write_declarations(root, [{
-                "check_id": name, "module": "test",
-                "command": ["python3", "-c", "pass"], "cwd": ".",
-                "timeout_seconds": 10, "scope": "repository-baseline",
-                "triggers": [{"path": "test/"}],
-                "required_environment": ["missing-tool-for-fixture"] if name == "first" else [],
-            } for name in ("first", "second")])
+            _write_declarations(
+                root,
+                [
+                    {
+                        "check_id": name,
+                        "module": "test",
+                        "command": ["python3", "-c", "pass"],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "repository-baseline",
+                        "triggers": [{"path": "test/"}],
+                        "required_environment": ["missing-tool-for-fixture"]
+                        if name == "first"
+                        else [],
+                    }
+                    for name in ("first", "second")
+                ],
+            )
             report = verify_repository(
                 root,
-                runner=lambda *args, **kwargs: calls.append(args) or _pass_runner(*args[:4]),
+                runner=lambda *args, **kwargs: (
+                    calls.append(args) or _pass_runner(*args[:4])
+                ),
             )
         self.assertEqual(calls, [])
         self.assertEqual(report["checks"][0]["reason"], "missing-environment")
@@ -277,16 +407,21 @@ class TestVerifyRepository(unittest.TestCase):
     def test_report_schema_fields(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _write_declarations(root, [{
-                "check_id": "test.schema",
-                "module": "test",
-                "command": ["python3", "-c", "pass"],
-                "cwd": ".",
-                "timeout_seconds": 10,
-                "scope": "repository-baseline",
-                "triggers": [{"path": "test/"}],
-                "required_environment": [],
-            }])
+            _write_declarations(
+                root,
+                [
+                    {
+                        "check_id": "test.schema",
+                        "module": "test",
+                        "command": ["python3", "-c", "pass"],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "repository-baseline",
+                        "triggers": [{"path": "test/"}],
+                        "required_environment": [],
+                    }
+                ],
+            )
             report = verify_repository(tmpdir, runner=_pass_runner)
         self.assertEqual(report["schema_version"], "lexiflow.verification-report.v1")
         self.assertIn("result", report)
@@ -299,28 +434,31 @@ class TestVerifyRepository(unittest.TestCase):
     def test_check_ids_filter(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _write_declarations(root, [
-                {
-                    "check_id": "a",
-                    "module": "test",
-                    "command": ["python3", "-c", "pass # first"],
-                    "cwd": ".",
-                    "timeout_seconds": 10,
-                    "scope": "repository-baseline",
-                    "triggers": [{"path": "test/"}],
-                    "required_environment": [],
-                },
-                {
-                    "check_id": "b",
-                    "module": "test",
-                    "command": ["python3", "-c", "pass # second"],
-                    "cwd": ".",
-                    "timeout_seconds": 10,
-                    "scope": "repository-baseline",
-                    "triggers": [{"path": "test/"}],
-                    "required_environment": [],
-                },
-            ])
+            _write_declarations(
+                root,
+                [
+                    {
+                        "check_id": "a",
+                        "module": "test",
+                        "command": ["python3", "-c", "pass # first"],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "repository-baseline",
+                        "triggers": [{"path": "test/"}],
+                        "required_environment": [],
+                    },
+                    {
+                        "check_id": "b",
+                        "module": "test",
+                        "command": ["python3", "-c", "pass # second"],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "repository-baseline",
+                        "triggers": [{"path": "test/"}],
+                        "required_environment": [],
+                    },
+                ],
+            )
             report = verify_repository(tmpdir, check_ids=["a"], runner=_pass_runner)
         self.assertEqual(len(report["checks"]), 1)
         self.assertEqual(report["checks"][0]["check_id"], "a")
@@ -337,28 +475,31 @@ class TestVerifyRepository(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _write_declarations(root, [
-                {
-                    "check_id": "first",
-                    "module": "test",
-                    "command": ["python3", "-c", "pass # first"],
-                    "cwd": ".",
-                    "timeout_seconds": 10,
-                    "scope": "repository-baseline",
-                    "triggers": [{"path": "test/"}],
-                    "required_environment": [],
-                },
-                {
-                    "check_id": "second",
-                    "module": "test",
-                    "command": ["python3", "-c", "pass # second"],
-                    "cwd": ".",
-                    "timeout_seconds": 10,
-                    "scope": "repository-baseline",
-                    "triggers": [{"path": "test/"}],
-                    "required_environment": [],
-                },
-            ])
+            _write_declarations(
+                root,
+                [
+                    {
+                        "check_id": "first",
+                        "module": "test",
+                        "command": ["python3", "-c", "pass # first"],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "repository-baseline",
+                        "triggers": [{"path": "test/"}],
+                        "required_environment": [],
+                    },
+                    {
+                        "check_id": "second",
+                        "module": "test",
+                        "command": ["python3", "-c", "pass # second"],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "repository-baseline",
+                        "triggers": [{"path": "test/"}],
+                        "required_environment": [],
+                    },
+                ],
+            )
             report = verify_repository(tmpdir, runner=counting_runner)
         self.assertEqual(call_count, 1)
         self.assertEqual(report["result"], "FAIL")
@@ -370,34 +511,59 @@ class TestVerifyRepository(unittest.TestCase):
 
     def test_diagnostic_continues_past_failure_without_full_pass_identity(self):
         calls = []
+
         def runner(argv, cwd, env, timeout, executable=None):
             calls.append(argv[-1])
-            return _fail_runner(argv, cwd, env, timeout, executable) if len(calls) == 1 else _pass_runner(argv, cwd, env, timeout, executable)
+            return (
+                _fail_runner(argv, cwd, env, timeout, executable)
+                if len(calls) == 1
+                else _pass_runner(argv, cwd, env, timeout, executable)
+            )
+
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _write_declarations(root, [{
-                "check_id": name, "module": "test",
-                "command": ["python3", "-c", f"pass # {name}"], "cwd": ".",
-                "timeout_seconds": 10, "scope": "repository-baseline",
-                "triggers": [{"path": "test/"}], "required_environment": [],
-            } for name in ("first", "second")])
+            _write_declarations(
+                root,
+                [
+                    {
+                        "check_id": name,
+                        "module": "test",
+                        "command": ["python3", "-c", f"pass # {name}"],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "repository-baseline",
+                        "triggers": [{"path": "test/"}],
+                        "required_environment": [],
+                    }
+                    for name in ("first", "second")
+                ],
+            )
             report = verify_repository(root, runner=runner, execution_mode="diagnostic")
         self.assertEqual(len(calls), 2)
         self.assertEqual(report["result"], "FAIL")
-        self.assertEqual([item["status"] for item in report["checks"]], ["FAIL", "PASS"])
+        self.assertEqual(
+            [item["status"] for item in report["checks"]], ["FAIL", "PASS"]
+        )
 
     def test_delivery_stops_before_runner_when_later_check_input_drifted(self):
         calls = []
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             (root / "future.txt").write_text("before", encoding="utf-8")
-            checks = [{
-                "check_id": name, "module": "test",
-                "command": ["python3", "-c", f"pass # {name}"], "cwd": ".",
-                "timeout_seconds": 10, "scope": "repository-baseline",
-                "triggers": [{"path": "test/"}], "required_environment": [],
-                "input_paths": ["future.txt"] if name == "docker.runner" else [],
-            } for name in ("mutator", "docker.runner", "later")]
+            checks = [
+                {
+                    "check_id": name,
+                    "module": "test",
+                    "command": ["python3", "-c", f"pass # {name}"],
+                    "cwd": ".",
+                    "timeout_seconds": 10,
+                    "scope": "repository-baseline",
+                    "triggers": [{"path": "test/"}],
+                    "required_environment": [],
+                    "input_paths": ["future.txt"] if name == "docker.runner" else [],
+                }
+                for name in ("mutator", "docker.runner", "later")
+            ]
             _write_declarations(root, checks)
 
             def runner(argv, cwd, env, timeout, executable=None):
@@ -427,15 +593,24 @@ class TestVerifyChanges(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             base = _init_git_repo(root)
-            _write_declarations(root, [{
-                "check_id": "test.check",
-                "module": "test",
-                "command": ["python3", "-c", "pass"],
-                "cwd": ".",
-                "timeout_seconds": 10,
-                "scope": "change-targeted",
-                "triggers": [{"path": "test/"}],
-            }])
+            _write_declarations(
+                root,
+                [
+                    {
+                        "check_id": "test.check",
+                        "module": "test",
+                        "command": [
+                            "python3",
+                            "-c",
+                            "import json; print(json.dumps({'status':'PASS','checks_run':1,'failures':0,'errors':0,'skipped':0,'reason':''}))",
+                        ],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "change-targeted",
+                        "triggers": [{"path": "test/"}],
+                    }
+                ],
+            )
             report = verify_changes(tmpdir, base=base)
         self.assertEqual(report["result"], "PASS")
         self.assertEqual(report["scope_review"]["kind"], "no-changes")
@@ -444,15 +619,20 @@ class TestVerifyChanges(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             base = _init_git_repo(root)
-            _write_declarations(root, [{
-                "check_id": "test.check",
-                "module": "test",
-                "command": ["python3", "-c", "pass"],
-                "cwd": ".",
-                "timeout_seconds": 10,
-                "scope": "change-targeted",
-                "triggers": [{"path": "backend/"}],
-            }])
+            _write_declarations(
+                root,
+                [
+                    {
+                        "check_id": "test.check",
+                        "module": "test",
+                        "command": ["python3", "-c", "pass"],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "change-targeted",
+                        "triggers": [{"path": "backend/"}],
+                    }
+                ],
+            )
             (root / "unrelated.txt").write_text("change")
             report = verify_changes(tmpdir, base=base)
         self.assertEqual(report["result"], "BLOCKED")
@@ -462,16 +642,21 @@ class TestVerifyChanges(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             base = _init_git_repo(root)
-            _write_declarations(root, [{
-                "check_id": "test.check",
-                "module": "test",
-                "command": ["python3", "-c", "pass"],
-                "cwd": ".",
-                "timeout_seconds": 10,
-                "scope": "change-targeted",
-                "triggers": [{"path": "backend/"}],
-                "required_environment": [],
-            }])
+            _write_declarations(
+                root,
+                [
+                    {
+                        "check_id": "test.check",
+                        "module": "test",
+                        "command": ["python3", "-c", "pass"],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "change-targeted",
+                        "triggers": [{"path": "backend/"}],
+                        "required_environment": [],
+                    }
+                ],
+            )
             (root / "backend").mkdir()
             (root / "backend" / "file.py").write_text("code")
             report = verify_changes(tmpdir, base=base, runner=_pass_runner)
@@ -483,20 +668,26 @@ class TestVerifyChanges(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             base = _init_git_repo(root)
-            _write_declarations(root, [{
-                "check_id": "test.check",
-                "module": "test",
-                "command": ["python3", "-c", "pass"],
-                "cwd": ".",
-                "timeout_seconds": 10,
-                "scope": "change-targeted",
-                "triggers": [{"path": "backend/"}],
-                "required_environment": [],
-            }])
+            _write_declarations(
+                root,
+                [
+                    {
+                        "check_id": "test.check",
+                        "module": "test",
+                        "command": ["python3", "-c", "pass"],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "change-targeted",
+                        "triggers": [{"path": "backend/"}],
+                        "required_environment": [],
+                    }
+                ],
+            )
             (root / "backend").mkdir()
             (root / "backend" / "file.py").write_text("code")
             report = verify_changes(
-                tmpdir, base=base,
+                tmpdir,
+                base=base,
                 expected_paths=("backend/",),
                 runner=_pass_runner,
             )
@@ -507,22 +698,28 @@ class TestVerifyChanges(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             base = _init_git_repo(root)
-            _write_declarations(root, [{
-                "check_id": "test.check",
-                "module": "test",
-                "command": ["python3", "-c", "pass"],
-                "cwd": ".",
-                "timeout_seconds": 10,
-                "scope": "change-targeted",
-                "triggers": [{"path": "backend/"}],
-                "required_environment": [],
-            }])
+            _write_declarations(
+                root,
+                [
+                    {
+                        "check_id": "test.check",
+                        "module": "test",
+                        "command": ["python3", "-c", "pass"],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                        "scope": "change-targeted",
+                        "triggers": [{"path": "backend/"}],
+                        "required_environment": [],
+                    }
+                ],
+            )
             (root / "backend").mkdir()
             (root / "backend" / "file.py").write_text("code")
             (root / "other").mkdir()
             (root / "other" / "file.py").write_text("code")
             report = verify_changes(
-                tmpdir, base=base,
+                tmpdir,
+                base=base,
                 expected_paths=("backend/",),
                 runner=_pass_runner,
             )

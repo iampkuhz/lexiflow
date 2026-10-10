@@ -69,6 +69,8 @@ test('生成固定、双平台且无宿主路径的确定性 argv 计划', async
     assert.deepEqual(Object.keys(result), ['schemaVersion', 'softwareVersion', 'sourceCommit', 'buildIdentity', 'jar', 'templates', 'baseImageLock', 'platforms']);
     const labels = ['org.opencontainers.image.version=' + result.softwareVersion, 'org.opencontainers.image.revision=' + result.sourceCommit,
       'io.lexiflow.build-id=' + result.buildIdentity.buildId, 'io.lexiflow.source-sha256=' + result.buildIdentity.sourceSha256].flatMap((label) => ['--label', label]);
+    const apiLabels = [...labels, '--label', 'io.lexiflow.image-role=api', '--label', `io.lexiflow.deployment-version=${result.buildIdentity.baseVersion.toLowerCase()}`];
+    const postgresLabels = [...labels, '--label', 'io.lexiflow.image-role=postgres', '--label', `io.lexiflow.deployment-version=${result.buildIdentity.baseVersion.toLowerCase()}`];
     assert.deepEqual(result.baseImageLock, { path: lockPath, bytes: Buffer.byteLength(`${JSON.stringify({ schemaVersion: 1, baseImages: lockImages }, null, 2)}\n`), sha256: hash(`${JSON.stringify({ schemaVersion: 1, baseImages: lockImages }, null, 2)}\n`) });
     assert.deepEqual(result.templates.map((item) => item.path), templates);
     assert.deepEqual(result.platforms.map((item) => item.platform), ['linux/amd64', 'linux/arm64']);
@@ -76,14 +78,14 @@ test('生成固定、双平台且无宿主路径的确定性 argv 计划', async
       [
         ['docker', 'image', 'inspect', 'sha256:' + 'a'.repeat(64)],
         ['docker', 'image', 'inspect', 'sha256:' + 'b'.repeat(64)],
-        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/amd64', ...labels, '--build-arg', `JAVA_RUNTIME_IMAGE=${runtime('java', 'a').reference}`, '--file', 'Dockerfile', '--iidfile', 'api.iid', '.'],
-        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/amd64', ...labels, '--build-arg', `POSTGRES_RUNTIME_IMAGE=${runtime('postgres', 'b').reference}`, '--file', 'Dockerfile.postgres', '--iidfile', 'postgres.iid', '.'],
+        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/amd64', ...apiLabels, '--build-arg', `JAVA_RUNTIME_IMAGE=${runtime('java', 'a').reference}`, '--file', 'Dockerfile', '--iidfile', 'api.iid', '.'],
+        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/amd64', ...postgresLabels, '--build-arg', `POSTGRES_RUNTIME_IMAGE=${runtime('postgres', 'b').reference}`, '--file', 'Dockerfile.postgres', '--iidfile', 'postgres.iid', '.'],
       ],
       [
         ['docker', 'image', 'inspect', 'sha256:' + 'c'.repeat(64)],
         ['docker', 'image', 'inspect', 'sha256:' + 'd'.repeat(64)],
-        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/arm64', ...labels, '--build-arg', `JAVA_RUNTIME_IMAGE=${runtime('java', 'c').reference}`, '--file', 'Dockerfile', '--iidfile', 'api.iid', '.'],
-        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/arm64', ...labels, '--build-arg', `POSTGRES_RUNTIME_IMAGE=${runtime('postgres', 'd').reference}`, '--file', 'Dockerfile.postgres', '--iidfile', 'postgres.iid', '.'],
+        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/arm64', ...apiLabels, '--build-arg', `JAVA_RUNTIME_IMAGE=${runtime('java', 'c').reference}`, '--file', 'Dockerfile', '--iidfile', 'api.iid', '.'],
+        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/arm64', ...postgresLabels, '--build-arg', `POSTGRES_RUNTIME_IMAGE=${runtime('postgres', 'd').reference}`, '--file', 'Dockerfile.postgres', '--iidfile', 'postgres.iid', '.'],
       ],
     ]);
     assert.ok(!JSON.stringify(result).includes(f.root));

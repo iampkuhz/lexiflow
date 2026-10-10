@@ -4,11 +4,12 @@ from pathlib import Path
 from unittest.mock import patch
 import yaml
 from scripts.verification import freeze_inputs,persist_report,read_report,verify_repository
+from tests.verification.declaration_fixtures import write_declarations
 
 def check(cid,scope="repository-baseline"):
  return {"check_id":cid,"module":cid,"command":["python3","-c","pass"],"executable":"python3","cwd":".","timeout_seconds":5,"scope":scope,"triggers":[{"path":"x"}],"module_dependencies":[],"required_environment":[],"input_paths":["input.txt"],"result_contract":{"type":"exit-code","completeness_guarantee":"fixture"}}
 def repo(root,checks):
- (root/"harness").mkdir();(root/"input.txt").write_text("x");(root/"harness/module-checks.yaml").write_text(yaml.safe_dump({"schema_version":"lexiflow.module-checks.v1","checks":checks}))
+ (root/"harness").mkdir();(root/"input.txt").write_text("x");write_declarations(root/"harness/module-checks.yaml",checks)
 class TestReportPublicationSafety(unittest.TestCase):
  def report(self):return {"schema_version":"lexiflow.verification-report.v1","run_id":str(uuid.uuid4()),"result":"FAIL","reason":"fixture-diagnostic","scope":"change-targeted","checks":[],"input_fingerprint":"","configuration_fingerprint":"","coverage_gaps":["fixture"],"scope_review":{"kind":"error","checks_declared":0,"checks_executed":0}}
  def test_atomic_immutable_publish_and_duplicate_json_read(self):
@@ -54,7 +55,7 @@ class TestFrozenAndDedupSafety(unittest.TestCase):
   with tempfile.TemporaryDirectory() as tmp:
    root=Path(tmp);base=check("base");extra=check("extra","change-targeted");repo(root,[base,extra]);freeze=freeze_inputs(root,required_check_ids=["extra"]);calls=[]
    def runner(*args):
-    calls.append(args);return {"exit_code":0,"exit_reason":"exited","timed_out":False,"stdout":"","stderr":"","executed_argv":["python3"]}
+    calls.append(args);return {"exit_code":0,"exit_reason":"exited","timed_out":False,"stdout":'{"status":"PASS","checks_run":1,"failures":0,"errors":0,"skipped":0,"reason":""}',"stderr":"","executed_argv":["python3"]}
    report=verify_repository(root,required_check_ids=["extra"],frozen_inputs=freeze,runner=runner)
    self.assertEqual(report["result"],"PASS");self.assertEqual(len(calls),1);self.assertEqual(report["checks"][1]["process"]["exit_reason"],"deduplicated")
 if __name__=="__main__":unittest.main()

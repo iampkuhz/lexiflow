@@ -3,7 +3,7 @@ import { constants, createReadStream } from 'node:fs';
 import { lstat } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import path from 'node:path';
-import { checkReleaseSource, resolveBuildIdentity, validateBuildIdentity, assertBuildIdentityMatches } from './version.mjs';
+import { resolveCleanBuildIdentity, validateBuildIdentity, assertBuildIdentityMatches } from './version.mjs';
 import { verifyExtensionIdentity } from './embedded-identity.mjs';
 
 const roles = new Set(['api-image', 'postgres-image', 'compose', 'dataset', 'extension', 'sql', 'license', 'runtime-entry']);
@@ -127,13 +127,13 @@ export function createManifest(descriptor, source) {
 export async function buildManifest({ repoRoot, descriptor, artifactRoot }) {
   if (typeof artifactRoot !== 'string' || !artifactRoot || /[\u0000\r\n]/.test(artifactRoot)) bad('INVALID_ARTIFACT_ROOT');
   let source;
-  try { checkReleaseSource(repoRoot); source = resolveBuildIdentity(repoRoot); } catch { bad('RELEASE_SOURCE_REJECTED'); }
+  try { source = resolveCleanBuildIdentity(repoRoot); } catch { bad('RELEASE_SOURCE_REJECTED'); }
   const manifest = createManifest(descriptor, source);
   for (const item of manifest.artifacts) await verifyContainedFile(artifactRoot, item.path, item.bytes, item.sha256);
   const extension = manifest.artifacts.find(item => item.role === 'extension');
   await verifyExtensionIdentity(path.join(artifactRoot, extension.path), source);
   await verifyContainedFile(artifactRoot, extension.path, extension.bytes, extension.sha256);
-  try { checkReleaseSource(repoRoot); assertBuildIdentityMatches(resolveBuildIdentity(repoRoot), source); } catch { bad('RELEASE_SOURCE_CHANGED'); }
+  try { assertBuildIdentityMatches(resolveCleanBuildIdentity(repoRoot), source); } catch { bad('RELEASE_SOURCE_CHANGED'); }
   return manifest;
 }
 

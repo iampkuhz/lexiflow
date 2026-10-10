@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 
 import yaml
+from scripts.verification.declarations import load_declarations
+from tests.verification.declaration_fixtures import declaration_document
 
 from scripts.verification import verify_repository
 
@@ -15,9 +17,7 @@ from scripts.verification import verify_repository
 class BackendCheckDeclarationTest(unittest.TestCase):
     def test_scope_variants_execute_delivery_once(self):
         repository = Path(__file__).resolve().parents[2]
-        declarations = yaml.safe_load(
-            (repository / "harness/module-checks.yaml").read_text()
-        )
+        declarations = load_declarations(repository)
         ids = {"eng.backend.delivery", "eng.backend.delivery-on-change"}
         checks = [
             copy.deepcopy(c) for c in declarations["checks"] if c["check_id"] in ids
@@ -47,10 +47,7 @@ class BackendCheckDeclarationTest(unittest.TestCase):
             (root / "input.txt").write_text("fixture")
             (root / "harness/module-checks.yaml").write_text(
                 yaml.safe_dump(
-                    {
-                        "schema_version": "lexiflow.module-checks.v1",
-                        "checks": checks,
-                    }
+                    declaration_document(checks)
                 )
             )
             report = verify_repository(

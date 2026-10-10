@@ -10,6 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from scripts.environment.git_runtime import prepend_prepared_git
 from scripts.environment.java_runtime import JavaRuntimeError, resolve_java_home
 
 
@@ -246,6 +247,10 @@ def execution_environment(
             if not value:
                 raise JavaRuntimeError("explicit Redis test endpoint is unavailable")
             values["LEXIFLOW_REDIS_TEST_ENDPOINT"] = value
+    final_path = values.get("PATH", source.get("PATH", ""))
+    prepared_path = prepend_prepared_git(repo, final_path, check_decl)
+    if prepared_path != final_path:
+        values["PATH"] = prepared_path
     return values
 
 

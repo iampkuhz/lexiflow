@@ -10,7 +10,7 @@ import os
 import unittest
 from pathlib import Path
 
-from scripts.repository import docs_check, policy_projection, python_quality
+from scripts.repository import docs_check, python_quality
 from scripts.repository.planning_validator import PlanningValidator
 
 
@@ -105,13 +105,16 @@ def run(root: Path, mode: str) -> dict[str, object]:
             },
         )
     if mode == "policy":
-        drift = policy_projection.run(root, write=False)
+        validator = PlanningValidator(root)
+        validator.policy = validator._load_yaml("harness/agent-policy.manifest.yaml")
+        validator.check_policy_contract()
+        failures = len(validator.errors) + len(validator._load_errors)
         return _report(
-            "PASS" if not drift else "FAIL",
+            "PASS" if not failures else "FAIL",
             1,
-            failures=len(drift),
-            reason="" if not drift else "policy-projection-drift",
-            detail=drift,
+            failures=failures,
+            reason="" if not failures else "policy-contract-invalid",
+            detail=validator.errors + validator._load_errors,
         )
     if mode == "planning":
         validator = PlanningValidator(root)

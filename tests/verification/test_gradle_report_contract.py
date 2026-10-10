@@ -3,6 +3,7 @@ from pathlib import Path
 import unittest
 
 import yaml
+from scripts.verification.declarations import load_declarations
 
 from scripts.verification.release_source_bridge import FIXED_FILES
 
@@ -88,7 +89,7 @@ class GradleReportContractTest(unittest.TestCase):
             "backend/verification/integration/build.gradle.kts",
         }
         self.assertTrue(paths.issubset(FIXED_FILES))
-        registry = yaml.safe_load((ROOT / "harness/module-checks.yaml").read_text())
+        registry = load_declarations(ROOT)
         checks = {item["check_id"]: item for item in registry["checks"]}
         for check_id in (
             "eng.backend.delivery", "eng.backend.delivery-on-change",

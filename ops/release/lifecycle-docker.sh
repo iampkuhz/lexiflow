@@ -40,15 +40,22 @@ lf_docker_run() (
   ) &
   child=$!
   (
-    sleeper= grace=
+    sleeper= grace= critical=0 cancelled=
     timer_cleanup() {
       trap - EXIT HUP INT TERM
       if [ -n "$sleeper" ]; then kill -TERM "$sleeper" 2>/dev/null || :; wait "$sleeper" 2>/dev/null || :; fi
       if [ -n "$grace" ]; then kill -TERM "$grace" 2>/dev/null || :; wait "$grace" 2>/dev/null || :; fi
     }
     trap timer_cleanup EXIT
-    trap 'exit 0' HUP INT TERM
+    # 后台启动与 $! 登记之间只暂存取消；登记后立即清理，避免遗弃 helper。
+    cancel_timer() {
+      if [ "$critical" -eq 1 ]; then cancelled=1; else exit 0; fi
+    }
+    trap cancel_timer HUP INT TERM
+    critical=1
     sleep "$budget" >/dev/null 2>&1 & sleeper=$!
+    critical=0
+    if [ -n "$cancelled" ]; then exit 0; fi
     wait "$sleeper" 2>/dev/null
     timer_status=$?
     sleeper=
@@ -59,7 +66,10 @@ lf_docker_run() (
       exit 1
     fi
     kill -TERM "$child" 2>/dev/null || :
+    critical=1
     sleep 1 >/dev/null 2>&1 & grace=$!
+    critical=0
+    if [ -n "$cancelled" ]; then exit 0; fi
     wait "$grace" 2>/dev/null || :
     grace=
     kill -KILL "$child" 2>/dev/null || :

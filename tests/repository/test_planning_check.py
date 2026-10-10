@@ -13,30 +13,10 @@ from pathlib import Path
 import yaml
 
 from scripts.repository.catalog import catalog_tasks
-from scripts.repository.planning_validator import (
-    PlanningValidator,
-    _load_canonical_from_policy,
-)
+from scripts.repository.planning_validator import PlanningValidator
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY = yaml.safe_load((ROOT / "harness" / "agent-policy.manifest.yaml").read_text())
-CANONICAL = _load_canonical_from_policy(POLICY)
-
-
-def _base_handoff_contract():
-    return {
-        "caller_required_input": list(CANONICAL["caller_fields"]),
-        "runner_bound_identity": copy.deepcopy(CANONICAL["runner_identity"]),
-        "result_required_output": list(CANONICAL["result_fields"]),
-        "current_runner_adapter": {
-            **copy.deepcopy(CANONICAL["adapter_flags"]),
-            **copy.deepcopy(CANONICAL["adapter_metadata"]),
-            "enforced_caller_fields": list(CANONICAL["adapter_enforced_fields"]),
-        },
-        "caller_field_schema": copy.deepcopy(CANONICAL["caller_field_schema"]),
-    }
-
-
 def _base_valid_catalog():
     return {
         "schema_version": "lexiflow.workstreams.v1",
@@ -83,22 +63,22 @@ def _base_valid_catalog():
                 {
                     "scope": "governance.architecture",
                     "owner": "LF-WS-ARCH",
-                    "proposed_paths": ["docs/architecture/**", "docs/adr/**"],
+                    "proposed_paths": ["docs/system.md", "docs/system/**", "docs/adr/**"],
                 },
                 {
                     "scope": "governance.development",
                     "owner": "LF-WS-QLT",
-                    "proposed_paths": ["docs/development/**"],
+                    "proposed_paths": ["docs/scenarios/**", "docs/reference/**", "docs/reference.md"],
                 },
                 {
                     "scope": "governance.product",
                     "owner": "LF-WS-PRD",
-                    "proposed_paths": ["docs/product/**"],
+                    "proposed_paths": ["docs/reference/product-glossary.md"],
                 },
                 {
                     "scope": "governance.acceptance",
                     "owner": "LF-WS-QLT",
-                    "proposed_paths": ["docs/product/product-brief.md"],
+                    "proposed_paths": ["docs/system/experience.md"],
                 },
                 {
                     "scope": "governance.entrypoints",
@@ -162,9 +142,6 @@ def _base_valid_catalog():
                 },
             },
         ],
-        "orchestration_policy": {
-            "handoff_contract": _base_handoff_contract(),
-        },
         "workstreams": [
             {
                 "id": "LF-WS-ARCH",
@@ -276,33 +253,13 @@ def _base_valid_catalog():
     }
 
 
-def _base_template():
-    return {
-        "schema_version": "lexiflow.task.v1",
-        "handoff_contract": _base_handoff_contract(),
-    }
-
-
 def _base_policy():
-    return {
-        "schemaVersion": 1,
-        "subagent_protocol": _base_handoff_contract(),
-    }
-
-
-def _base_runtime():
-    return {
-        "schemaVersion": 1,
-        "subagent_protocol": _base_handoff_contract(),
-    }
+    return copy.deepcopy(POLICY)
 
 
 def _validate(
     data,
-    template=None,
     policy=None,
-    runtime=None,
-    use_default_runtime=True,
     fill_required=True,
 ):
     if fill_required:
@@ -315,13 +272,7 @@ def _validate(
                         )
     v = PlanningValidator.from_data(
         data,
-        template_data=template if template is not None else _base_template(),
         policy_data=policy if policy is not None else _base_policy(),
-        runtime_data=(
-            runtime
-            if not use_default_runtime or runtime is not None
-            else _base_runtime()
-        ),
         module_checks_data={
             "checks": [
                 {"check_id": "eng.repository.planning", "scope": "repository-baseline"}
@@ -414,9 +365,6 @@ class TestPlanningOnlyCatalog(unittest.TestCase):
         result = _validate(data)
         self.assertNotEqual("PASS", result["status"])
         self.assertTrue(any("owner-not-found" in error for error in result["errors"]))
-        data = self.empty_catalog()
-        data["orchestration_policy"]["handoff_contract"]["caller_required_input"] = []
-        self.assertNotEqual("PASS", _validate(data)["status"])
 
 
 class TestPopulatedCatalog(unittest.TestCase):
@@ -704,83 +652,25 @@ class TestAmbiguousOwner(unittest.TestCase):
         self.assertTrue(any("empty-scope-name" in e for e in result["errors"]))
 
 
-class TestCrossSourceHandoff(unittest.TestCase):
-    def test_all_four_sources_required(self):
-        result = _validate(
-            _base_valid_catalog(), runtime=None, use_default_runtime=False
-        )
-        self.assertEqual(result["status"], "BLOCKED")
-        self.assertTrue(any("cross-source-incomplete" in e for e in result["errors"]))
-
-    def test_canonical_caller_count_enforced(self):
-        policy = _base_policy()
-        policy["subagent_protocol"]["caller_required_input"] = list(
-            CANONICAL["caller_fields"]
-        )[:-1]
-        result = _validate(_base_valid_catalog(), policy=policy)
-        self.assertEqual(result["status"], "BLOCKED")
-        self.assertTrue(any("canonical-caller-count" in e for e in result["errors"]))
-
-    def test_canonical_result_count_enforced(self):
-        policy = _base_policy()
-        policy["subagent_protocol"]["result_required_output"] = [
-            "status",
-            "changed_files",
-        ]
-        result = _validate(_base_valid_catalog(), policy=policy)
-        self.assertEqual(result["status"], "BLOCKED")
-        self.assertTrue(any("canonical-result-count" in e for e in result["errors"]))
-
-    def test_caller_field_mismatch_fails(self):
-        policy = _base_policy()
-        policy["subagent_protocol"]["caller_required_input"] = list(
-            CANONICAL["caller_fields"]
-        )[:-1]
-        result = _validate(_base_valid_catalog(), policy=policy)
-        self.assertEqual(result["status"], "BLOCKED")
-        self.assertTrue(
-            any("cross-source-caller-mismatch" in e for e in result["errors"])
-        )
-
-    def test_runner_identity_metadata_mismatch_fails(self):
-        policy = _base_policy()
-        policy["subagent_protocol"]["runner_bound_identity"]["client"][
-            "value"
-        ] = "wrong"
-        result = _validate(_base_valid_catalog(), policy=policy)
-        self.assertEqual(result["status"], "BLOCKED")
-        self.assertTrue(
-            any("cross-source-identity-mismatch" in e for e in result["errors"])
-        )
-
-    def test_adapter_metadata_mismatch_fails(self):
-        policy = _base_policy()
-        policy["subagent_protocol"]["current_runner_adapter"][
-            "target_schema_enforced"
-        ] = False
-        result = _validate(_base_valid_catalog(), policy=policy)
-        self.assertEqual(result["status"], "BLOCKED")
-        self.assertTrue(
-            any("cross-source-adapter-mismatch" in e for e in result["errors"])
-        )
-
-    def test_schema_key_value_mismatch_fails(self):
-        policy = _base_policy()
-        policy["subagent_protocol"]["caller_field_schema"]["goal"] = "different-type"
-        result = _validate(_base_valid_catalog(), policy=policy)
-        self.assertEqual(result["status"], "BLOCKED")
-        self.assertTrue(
-            any("cross-source-schema-mismatch" in e for e in result["errors"])
-        )
-
-    def test_consistent_sources_pass(self):
-        result = _validate(
-            _base_valid_catalog(),
-            template=_base_template(),
-            policy=_base_policy(),
-            runtime=_base_runtime(),
-        )
+class TestPolicyContract(unittest.TestCase):
+    def test_unique_policy_source_is_valid_without_runtime_or_template_mirrors(self):
+        result = _validate(_base_valid_catalog(), policy=_base_policy())
         self.assertEqual(result["status"], "PASS")
+        self.assertIn("policy_contract", result["checks_run"])
+
+    def test_missing_policy_identity_boundary_fails_closed(self):
+        policy = _base_policy()
+        del policy["codex_dispatch"]["acceptance"]["implementer_must_not_validate_or_review"]
+        result = _validate(_base_valid_catalog(), policy=policy)
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertTrue(any("policy-contract" in error for error in result["errors"]))
+
+    def test_malformed_policy_field_schema_fails_closed(self):
+        policy = _base_policy()
+        policy["subagent_protocol"]["caller_field_schema"] = []
+        result = _validate(_base_valid_catalog(), policy=policy)
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertTrue(any("caller_field_schema" in error for error in result["errors"]))
 
 
 class TestInvalidDepType(unittest.TestCase):

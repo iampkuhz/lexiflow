@@ -11,7 +11,7 @@
 
 ## 1.2. 当前未完成项
 
-- Agent/Gate 优化及文档精简需要在当前输入下重新冻结，完成独立 validation、review 和 Catalog 条件核对。旧 schema 的本机 Gate 记录已按用户明确授权删除、不留备份，不能再作为有效验收依据。
+- 最近完成的独立开发检查为 25 项 PASS、22 次物理执行、757 项冻结输入无漂移，墙钟 21 分 37 秒；仅证明当时的累计混合变更。配置精简已继续修改输入，最终结论须读本轮冻结报告，不继承先前 PASS；Formal、完整 Repository baseline 与正式发行未在本轮验收。
 - 用户机器上的真实 Chrome/YouTube 最终体验仍需确认，包括连续字幕、跳转、原生换行、同词不同位置、常见短词误提示和旧提示失效；合成 E2E 不能代替真实观看。
 - 正式发行仍需同一真实候选的构建、安装/更新/恢复、完整资源窗口与资料许可证据，以及可核验的独立验收链。短采样、单项机制测试或本机启动成功均不代替这些条件。
 - Git 集成与发布按本次明确授权执行；不存在由旧阶段记录继承的自动提交、合并或推送许可。
@@ -19,8 +19,8 @@
 ## 1.3. 当前入口
 
 - 工作项、版本和依赖：[任务清单](tasks.md)与 [Catalog](../../../../planning/workstreams.yaml)。
-- 工程验证与身份交接：[交付主干](../../../development/change-delivery.md)。
-- 当前运行边界：[发布与使用](release.md)、[架构与数据](../../../architecture/overview.md)。
+- 工程验证与身份交接：[交付主干](../../../reference/checks.md)。
+- 当前运行边界：[发布与使用](release.md)、[架构与数据](../../../system.md)。
 - 后续能力不阻断基础观看，见[待办池](../future.md)。
 
 ## 1.4. 工程架构与治理问题
@@ -30,63 +30,60 @@
 | 标识／类别 | 当前问题与证据 | 需要确认的设计及验收边界 |
 | --- | --- | --- |
 | ARCH-GATE-01：执行层次设计 | [submit](../../../../scripts/delivery_gate/submit.py) 要求开发来源报告；[validate](../../../../scripts/delivery_gate/validate.py) 仍独立执行计划。高风险开发与正式验证可能覆盖相近昂贵 Check；[复用合同](../../../../harness/agent-policy.manifest.yaml) 禁止自检到 Formal 及跨交付复用 | 评估两次完整覆盖是否都必要、各自提供何种不可替代证明，以及能否在独立身份／输入冻结／必需覆盖均保留的前提下缩短关键路径。现有证据支持设计评估，不证明重复本身是 bug，不授权省略任一层 |
-| ARCH-GATE-02：环境责任设计 | [Hook](../../../../scripts/verification/delivery_hook.py) 自动拥有隔离服务 lease；[development CLI](../../../../scripts/verification/development.py) 与 [Formal validate](../../../../scripts/delivery_gate/validate.py) 依赖调用者确认环境，详见[环境说明](../../../development/operations/verification-environment.md) | 评估“执行同一检查能力”是否需要统一受控环境准备与清理的接口，或维持不同职责但建立一致用户入口。不得复用已清理 lease、开发库／未知资源，也不默认安装或下载；需用失败／取消／归属回归证明 |
-| ARCH-DOC-01：事实归属设计 | `product/`、`architecture/`、`development/` 使用不同视角，场景与能力页也可能重复流程解释；目录不同本身不证明事实重复 | 先按事实的唯一维护位置核对重复正文、规则副本与跨页同步成本，再确定合并或唯一正文位置。roadmap 状态与 user 操作仍独立；“执行流程”维护完整运行路径，“优化流程”只维护改进任务并回链。目录合并是本次尚未完成的明确要求，不再仅作问题备案；拟按系统主题、真实场景与查阅入口收敛，保留 roadmap／user。外部索引、路径绑定与文档约定的同步授权仍待确认 |
+| ARCH-GATE-02：环境责任设计 | [Hook](../../../../scripts/verification/delivery_hook.py) 自动拥有隔离服务 lease；[development CLI](../../../../scripts/verification/development.py) 与 [Formal validate](../../../../scripts/delivery_gate/validate.py) 依赖调用者确认环境，详见[环境说明](../../../scenarios/verification-environment.md) | 评估“执行同一检查能力”是否需要统一受控环境准备与清理的接口，或维持不同职责但建立一致用户入口。不得复用已清理 lease、开发库／未知资源，也不默认安装或下载；需用失败／取消／归属回归证明 |
+| ARCH-GATE-03：开发检查预算 | 释放应用内存后的独立 Stop 为 1462.68 秒（24 分 23 秒）；23 次物理命令、18 项同事务复用、741 项输入无漂移。实测比同代码主要对照少 118.50 秒，不能把单次差异全归因于环境 | Docker 合同 448.04 秒、Verify 与 Gate 工具自测合计 251.60 秒；Java delivery 与构建合同共 283.52 秒。外层未细分差额仅 21.05 秒。选择范围与内部执行成本都需处理，不减断言、不放宽超时、不跨交付复用；逐项证据在 round5-memory-freeze 的 ignored 目录 |
+| ARCH-GATE-04：检查取消边界 | Verify 对整个 Check 进程组使用 0.5 秒 TERM 宽限；Docker 夹具内存在独立进程组 | 本轮不采用额外 worker 并行：无法在该边界内证明取消后回收。原型仅留临时证据，源码已恢复；后续若重做并行，应先定义和验证完整进程归属与取消协议，不能扩大超时掩盖问题 |
+| ARCH-GATE-05：Docker helper 回收 | 已从 [真实 timer 源码](../../../../ops/release/lifecycle-docker.sh) 在后台启动与 PID 登记之间加入同步探针：旧 handler 会遗弃存活 helper；现行逻辑在登记后兑现取消并完整回收 | [直接回归](../../../../ops/docker/tests/test_docker_bounds.py) 保留全部原断言，确定性覆盖 budget 与 grace 两个窗口及旧 handler 反例；10 项直接测试及完整独立 Stop 中相同 10 项均通过，独立源码／冻结证据审查无阻断。原故障 PID 属于哪个 helper 无法追溯；这是已修复机制的开发验证，不是永不重现或整轮提速保证 |
+| ARCH-GATE-06：性能测量环境 | 经用户明确授权删除 LexiFlow 容器、保留卷，并终止 Chrome 与 IntelliJ 后完成一次整轮复测；运行期间采集 26 个内存样本，swap 约 12.5–13.6 GiB，压缩内存仍有波动 | 释放内存有改善但不足以解决整体等待，不能归咎单个应用或以环境变化代替源码优化。仅精确处理已获授权的资源，不关闭未知进程；原始样本位于 round5-memory-freeze 临时证据 |
+| ARCH-GATE-07：风险等级与默认检查范围耦合 | 日常入口已改为按变化选择，不因高风险追加全仓基线。消费审查发现的 API→扩展 E2E、Verification/策略/环境/Catalog→Gate 与 Verification fixture 输入遗漏已补齐；21 对声明、精确冻结场景及四个 Python 工程模块的递归静态导入均纳入直接回归 | LF-TSK-QLT-2118 v2 的定向回归及独立源码复核通过；最新完成的开发检查已覆盖选择矩阵和 Docker 固定分组，无覆盖缺口。这不是 Formal 验收。Formal 高风险基线与 review、显式完整 Verify 和发行仍保留 |
+| ARCH-GATE-08：生命周期检查耗时与诊断 | 原入口复测仍曾触发 120 秒上限，主要成本在模型之外。测试客户端现已将两次逐流计数合为一次 `wc`、两步清理合为显式非递归 `rm -d`；每请求少启动两个工具进程，未减少身份查询、模型执行或断言 | 最新完整生命周期检查 7 项 PASS、0 跳过，747 项冻结文件无漂移，独立只读复核通过；包装墙钟 114.22 秒包含末尾哈希快照，不是精确子进程时长。距原上限仍近，单次样本不证明稳定裕量或整轮收益。原六项用例全部保留，新增长度损坏／响应缺失／未知残留回归；已纳入最新完成的正常 Stop；不代表正式发行验收 |
+| ARCH-GATE-09：测试入口超时后的后代回收 | [runTests](../../../../ops/release/check.mjs) 已用本次 spawn 创建的私有进程组回收测试后代，timeout／输出超限及上级 TERM／INT 都立即强杀该组；不增加原取消宽限 | LF-TSK-QLT-2120 的 5 项定点回归及独立只读复核通过。真实系统信号测试保持上级 0.5 秒强杀边界，核对 supervisor／worker 已退出、独立哨兵仍活与监听器恢复；原测试保留。证据仅覆盖当前 POSIX 环境，已纳入最新完成的正常 Stop；此修复不证明生命周期耗时问题已解决 |
 | ARCH-SCRIPT-01：脚本入口设计 | [delivery_gate/__main__.py](../../../../scripts/delivery_gate/__main__.py) 统一分派子命令；`submit.py`、`validate.py`、`review.py`、`check.py` 分别提供场景 API，不是独立 CLI | 按文件优先说明职责，区分公开 CLI、内部函数与人工步骤。是否进一步要求每种流程独立可执行文件、一个公开入口，需单独评估；本次只如实标注入口，不改文件结构或接口 |
-| GOV-DOC-01：文档合同归属 | 读者提出的维护要求曾保存在总入口；[documentation-policy](../../../../harness/documentation-policy.yaml) 已有层级、导航、图源等合同，但未完整表达场景命名、执行／优化分离、耗时和 IDE 复核要求 | 原则性 Agent 要求归 Harness，操作与解释归 docs，未决问题归本页。需将缺口补入现有 policy 后检查消费者与必要回归；不能把这里的待办当成已生效规范。本次仅可写 docs，Harness 未修改 |
+| ARCH-CONFIG-01：固定协议与运行参数 | [Stop 配置](../../../../harness/delivery-hooks.json) 只保留模式、期限与进度间隔；事件、停用变量名、中间标记固定在入口实现 | 配置精简已实现，最终开发验证以本轮冻结证据为准；不改变期限上限、进度、取消、停用未验证及独立验收语义，不宣称分钟级提速 |
+| ARCH-CONFIG-02：配置职责与失效范围 | [Check 声明](../../../../harness/module-checks.yaml) 已分离唯一执行定义与选择列表；共享 Agent 规则只维护在 policy，删除同步投影链；仍按完整声明字节绑定输入 | 继续评估剩余声明归实际实现模块、Catalog 规约与任务数据分离、路径输入去重；需逐消费者证明覆盖完整，不能只搬目录或扩大自由配置。见[配置地图](../../../reference/configuration.md) |
+| ARCH-GATE-10：变更类型与验收范围的分类标准 | 用户认可开发反馈、任务验收、正式发行三种结果；倾向规约 Markdown 归说明类，而不是仅因目录位置触发高风险全仓验收。当前机器判据仍按现行路径与内容执行 | 说明与规约、模块内行为、执行契约与工程机制的分类，以及正式高风险基线的必要性，先形成有覆盖证明的方案；不把阅读分类当作现有选择算法已改变。正式范围调整与目录改名尚未授权直接实施 |
 
-## 1.5. 文档合同补足与表达复核
+## 1.5. 文档整理与验证边界
 
-以下是 `GOV-DOC-01` 的合同补足待办，不是新增自动门禁；归属以 [AGENTS.md](../../../../AGENTS.md)、[Harness](../../../../harness/README.md) 为准。
+目录与合同整理已落地：唯一工程入口是 [docs/README](../../../README.md)，系统主题、真实任务和查阅分别位于 system、scenarios、reference；roadmap 与 user 保留独立职责。原三个视角目录已合并删除，Harness、Catalog、风险路径及引用者同步，未降低门禁覆盖。
 
-| 原则性内容 | Harness 归属 | docs 中的表达／维护位置 |
+工作区实现已获用户认可，文档据其实际行为同步；该认可不替代当前输入的自动检查或 Formal 验收。本轮纠正原生路由／既有 Qoder 记录边界、日常 Hook 的服务准备和 Git Hook 资产检查说明，补齐窗口、工具链及部署／发行脚本定位。用户已批准并实施三体系阅读结构：质量检查、交付验收、工程协作与运行支撑；按整体模型、分体系说明、操作与实现细节下钻，理解审查与日常操作分别进入。检查库存移至按需 Reference，脚本按 CLI、适配器、内部库与人工步骤标识。不改变门禁逻辑、检查集合或脚本接口；本轮证据与此前批次分开，未签发 Formal receipt。
+
+| 用户要求 | 当前实现 | 核对入口 |
 | --- | --- | --- |
-| 同一事实明确唯一维护位置；场景引用合同，不创建规则副本 | `documentation-policy.information_architecture` 与导航合同 | 总入口只给归属和真源链接；目录整理以前置重复审计为依据 |
-| 通用生命周期不绑定某个特定任务；场景按工作目标命名；运行与优化分开 | `documentation-policy.reader_navigation.overview / workflow` | 运行步骤只在执行页完整维护，优化页引用；能力页解释内部调用与参数 |
-| 总—分叙述；节点的输入／输出／职责可区分；主干纵向，真实结果左右分支且失败提前结束 | `documentation-policy.reader_navigation.workflow` 与图文审阅合同 | 图先展示整件事，再展开复杂层次；不把空的 helper 是否执行画成流程分支 |
-| 术语明确指向模块／文件或执行者；执行图注释固定入口／作用／预期；节点表只留核心作用和链接；展开图标出父节点与公开入口 | `reader_navigation.workflow` 与图文审阅合同 | 不把人员职责冒充脚本入口；真实人工步骤注明无脚本，说明只在必要处展开 |
-| 执行节点有预期秒／分钟；估算与实测明确区分；机器、Agent、准备与等待分开；父子不重复计时 | 图文审阅合同的预算说明 | 场景保存有前提的规划预算和来源，不当性能保证，不为补数字重跑重套件 |
-| IDE 内链实际可用；静态 slug 通过不证明标题定位成功 | 导航复核合同 | 主导航使用相对文件链接；需要片段定位时实际点击复核，并保留被引用旧锚点 |
-| 中文加粗结束标记后与后文分隔，避免标点与汉字紧贴造成失效；复核 IDE 实际渲染 | 导航／图文复核合同 | 使用 `**短句。** 后文`；不写 `** 文本**`，开始标记内侧不加空格 |
-| 文档表达问题与实际设计问题分开；未决设计不能写成已确定规则 | 既有 `selected_solution_only`、`maintenance` 与问题记录边界 | 已确定操作写 docs；问题与决策条件只在本状态页，决策后按真实范围进入 OpenSpec |
+| 一个生命周期，阶段清晰 | 通用范围与验收合并；实现自检和交付证明分层；维护包括文档，无额外反馈阶段 | [总入口](../../../README.md) |
+| 场景不是组件 | 修改导入、执行门禁、优化门禁分别成页；优化页回链执行页，不复制运行子图 | [功能变更](../../../scenarios/change-lexicon-import.md)、[执行](../../../scenarios/run-repository-gates.md)、[优化](../../../scenarios/optimize-repository-gates.md) |
+| 阅读分层；目的先于实现清单 | 总览区分三体系；操作入口按目标选择；逐项检查库存侧链到 Reference，不把用途、场景、范围、入口混为层次 | [工程总览](../../../system/engineering.md)、[执行场景](../../../scenarios/run-repository-gates.md)、[检查清单](../../../reference/verification/check-catalog.md) |
+| 原则属于 Harness | 文档合同已归入现有 policy，docs 只保留导航与维护操作，不另存原则清单 | [documentation-policy](../../../../harness/documentation-policy.yaml)、[维护步骤](../../../scenarios/maintain-documentation.md) |
+| 唯一正文及关联引用 | 来源／字幕合并；决策理由随系统主题维护；总入口和本机操作索引合并；未改图保留字节，修订的共用检查图重新校验、渲染与视觉核对后复制正文 | [系统](../../../system.md)、[本机开发](../../../scenarios/local-development.md) |
+| IDE 链接和加粗 | 主导航采用相对文件链接；结束加粗标记与后文分隔 | 相对链接与片段已静态核对；本轮未重新执行 IDE 实点，阅读效果由用户 review 确认 |
 
-当前阅读入口位于[总入口](../../../development/overview.md)、[优化场景](../../../development/scenarios/optimize-repository-gates.md)、[执行场景](../../../development/scenarios/run-repository-gates.md)。合并事实／合同定界阶段、解释三层检查、补上文档维护、删除末尾反馈节点属于表达调整，不等于改变门禁实现；具体阅读效果仍需用户确认。架构问题是否解决只看上述具体决策与对应当前输入证据，不以样板写完或静态检查通过代替。
-
-### 1.5.1. 本次文档整理的完成条件
-
-以本会话逐条要求验收，不以“已有台账”或文档静态检查通过代替完成。以下记录执行状态，不新增规范。
-
-| 工作项 | 当前结论 | 剩余工作／验收证据 |
-| --- | --- | --- |
-| 合并三类文档目录 | 未完成：`product/`、`architecture/`、`development/` 仍在 | 按主题合并唯一正文，保留 user／roadmap；同步外部索引、范围绑定与链接后删除原目录，不留平行手册 |
-| 清除重复事实 | 部分完成：来源／字幕已合并；架构取舍已随对应主题维护；删除重复自检表和 Hook 说明 | 随目录合并继续核对总入口与系统摘要；字段、限制与并行修改不能丢失 |
-| 文档原则进入 Harness | 未完成：`GOV-DOC-01` 仅是待办 | 授权后补现有 policy，docs 删除原则副本，仅保留操作说明和引用 |
-| 通用生命周期 | 已有：定界合并、输入／动作／输出、实现与验收分层、持续文档维护 | 合并总入口，避免另一张并列导航再次定义同一生命周期 |
-| 真实任务与能力分开 | 已有修改导入、执行门禁、优化门禁三种任务 | 目录整理后仍按任务进入；Hook／Verify／Formal 作为能力展开，执行与优化不复制流程 |
-| 直接自检图 | 已补入[执行场景 A](../../../development/scenarios/run-repository-gates.md) | 已渲染、视觉复核、核对正文图源；按改动选择检查，失败回修再交接 |
-| 完整 Verify／诊断图 | 已补入[Verify](../../../development/change-delivery/verification.md) | 已渲染、视觉复核、核对正文图源；包含范围分支、交付早停、诊断继续与输出边界 |
-| Stop 图的入口分支 | 已补入[执行场景 B](../../../development/scenarios/run-repository-gates.md) | 已渲染、视觉复核、核对正文图源；未执行出口与结果分析分开，不签虚假 PASS |
-| 独立验收、CI、发行及共用检查链 | 已有对应图，不再重复生成 | 新路径中保留已验证图源；核对触发、脚本入口、审批与失败去向 |
-| 图中说明与短表 | 已有入口／作用／预期、规划与实测区分、三列短表和 B／C 父入口 | 新图继续核对；实际查看左右分支、纵向深度及命令字面量，不能仅凭源码判通过 |
-| IntelliJ 链接与加粗 | 文件链接和结束加粗后空格已修正，有旧路径抽查 | 迁移后重新抽查实际导航；保留仍被引用的锚点，静态检查不代替 IDE 点击 |
-| 问题分类与优化状态 | 已分别记录表达问题、设计问题和源码已有但验收待补的机制 | 根据最新源码复核；不把设计提案、估算或局部测试写成性能已解决 |
-| 最终检查与交接 | 尚未完成 | 逐条确认本表；复核受管文件范围、他人修改、图源哈希、静态检查及未执行的验收边界 |
-
-目录迁移会影响 Harness、Catalog、根 README 和少量源码注释／测试夹具的路径引用。当前仍遵守仅写 docs 的边界；未获扩展授权前，不删除会使这些消费者失效的原路径，也不以跳转副本冒充合并完成。
+文档内容与文件地图已做独立只读复核。最新完成的静态检查覆盖 58 个文件、25 张内嵌图；现有正文图源有校验与预览证据。配置精简同步两张相关图，按 skill 重新渲染与视觉核对后复制正文，最终检查以统一冻结后的报告为准，不借文档自检声称 Formal 或真实发行通过。
 
 ## 1.6. 待优化清单与已实现机制的验收缺口
 
-本清单针对现行处理逻辑，不是文档排版待办。设计待确认、执行待优化、源码已有改进但未完成性能验收分别记录；只读核对不签发正式验证。详细约束继续由 Harness 维护。
+只保留现行机制、仍需决策的边界和最新完成的整轮证据；原始运行日志留在 ignored 目录，不在此维护轮次流水账。
 
-| 优先级／状态 | 事实与维护真源 | 优化方向与验收边界 |
+| 状态 | 已实现或待处理内容 | 核对与验收边界 |
 | --- | --- | --- |
-| P1 · 设计待确认：风险与基线成本耦合 | [risk_classification](../../../../harness/agent-policy.manifest.yaml) 将大量 docs、OpenSpec、ops、scripts 等变化列为高风险；[development.py](../../../../scripts/verification/development.py) 选择开发变化检查加非发行完整基线 | 分离“审查风险”与“必需检查集合”的设计评估，先建立覆盖完整的 docs-only／局部工程合同，不为降耗直接降风险。用路径／内容／依赖矩阵及相同冻结输入对照证明无覆盖缺口 |
-| P1 · 待优化：Git 提醒仍指向两种完整 Verify | [.githooks/pre-commit](../../../../.githooks/pre-commit) 每次 commit 提醒同时运行完整 Change／Repository，与 [Harness](../../../../harness/README.md) 的日常风险驱动开发入口不一致；提醒本身不执行检查 | 更新受管 Hook 提示及安装／资产校验回归，默认引导开发入口，完整基线只在显式要求或发行时运行；保留不锁编辑／commit 的边界，不能用提醒代替检查 |
-| P1 · 待优化：非交付 Stop 依赖人工标记 | [delivery_hook.py](../../../../scripts/verification/delivery_hook.py) 只识别精确末尾中间标记；只读或等待回合漏标且有 diff 时仍执行检查 | 优先让调用方明确回合意图；若增加集成信号，只接受窄而显式的非交付类型，不推断聊天语义。补标记位置与各中间回合测试，正常交付仍必须执行，跳过不叫 PASS |
-| P2 · 设计待确认：开发到 Formal 的重复执行 | `ARCH-GATE-01`：来源报告与独立 validate 提供不同证明，跨交付／自检到 Formal 复用被禁止 | 先统计真实重复进程，而非把 review／check 算成测试。需要证据交接优化时先设计独立身份、输入当前性与完整覆盖合同；本次不授权省略任何层 |
-| P2 · 设计待确认：环境入口不统一 | `ARCH-GATE-02`：Hook 自动 lease，显式开发／Formal 由调用者确认隔离环境 | 确定统一受控准备接口或一致操作入口；验收准备失败、取消、清理与资源归属，不复用已清理 lease 或开发库 |
-| P2 · 已有源码改进，验收待补：去重、早停与一次服务准备 | [scenarios.py](../../../../scripts/verification/scenarios.py)、[test_services.py](../../../../scripts/environment/test_services.py) 已实现同事务精确等价成功 Check 复用、交付失败早停、多 profile 一次 lease；Hook 有单项超时、总预算与有限失败重入 | 核对实际调用次数、未运行项状态、不同工具／环境不复用和清理证明；修复重入仍重新检查。机制存在不等于整项优化通过，也不证明所有套件／跨调用重复已消除 |
-| P2 · 已有源码改进，性能待补证：套件内部计时 | [Verification adapter](../../../../tests/verification/module_check_adapter.py)、[Docker adapter](../../../../ops/docker/tests/module_check_adapter.py) 记录测试／阶段计时；[效率直接测试](../../../../tests/verification/test_development_efficiency.py)主要证明合成字段机制 | 在相同环境与相同 profile 下收集可比摘要，检查测试数、skip 与覆盖一致，区分耗时方差和因果；没有可比端到端样本，不宣称提速 |
-| P3 · 治理待补：文档原则进入机器真源 | `GOV-DOC-01`：要求已记录在本页，但本次只写 docs，未修改 Harness | 在另行授权后补现有 documentation-policy 的场景、节点预算、IDE 与执行／优化约定，并核对消费者；不把 docs 待办当成已生效 Agent 规则 |
+| 已完成开发验证 | 日常按变更与消费依赖选择；Docker 固定为 surface、shell、local、node，保留聚合基线 | [选择与检查声明](../../../../harness/module-checks.yaml)；未知输入、删除、遗漏和重复失败关闭。单行 Java 不因“高风险”自动触发全部 Docker，实际范围仍取决于同工作区累计 diff |
+| 已完成开发验证 | 非安装场景改用每例独立准备，首次安装覆盖保留在专门测试；真实状态对照、损坏拒绝与隔离检查共 43 例 | [准备合同](../../../../openspec/changes/gate-test-performance/ready-precondition.md)；最新完成整轮中这 43 例合计 181.85 秒，包含新增对照成本，不缓存 PASS |
+| 已完成开发验证 | 批量写 Git 索引、合并 Git 元数据读取、按内容复用纯 YAML 解析、有限测试模型常驻及心跳虚拟时钟 | [性能优化合同](../../../../openspec/changes/gate-test-performance/proposal.md)；保留源身份重读、可变状态隔离、原测试断言、失败与取消回收，不用微基准比例外推整轮 |
+| 已完成开发验证 | fake Docker 正常响应清理合并一次显式文件删除 | [清理合同](../../../../openspec/changes/gate-test-performance/ownership-cleanup.md)；正常 Stop 已覆盖 5 项新增回归；保留未知文件拒绝、部分失败、清理间隙取消与私有进程回收，不为小收益引入通用框架 |
+| 不采纳 | Gradle 并行实验、共享 Git fixture seed | 并行未证明整轮收益且有取消边界成本；单次 build fixture 的 Git 准备仅约 0.11 秒，没有引入跨例共享复杂度的收益证据 |
+| 待优化 | [Git 提醒](../../../../.githooks/pre-commit)仍同时指向完整 Change／Repository Verify；非交付 Stop 仍依赖明确的中间标记 | 提醒应与日常入口一致；非交付意图不能通过猜测聊天语义判定。两项不得借机跳过正常交付检查 |
+| 待决策 | 正式高风险验收范围、剩余配置职责分离、脚本目录命名与环境入口统一 | 见 1.4；先给具体调整及覆盖证明，再由用户确认。独立验证不消费实现者 PASS 代替执行 |
 
-submit／冻结只绑定输入，不运行 Java 扫描；正式 validate 执行检查；review 和 check 只核对证据。这些职责分离本身未被证明有缺陷。quick CI、开发检查、完整 Repository 与 Formal 的集合不同，不能把它们都称为“全套检查”或互相替代。
+最近完成的正常 Stop 为 `cd075d6d-026b-4307-95e8-a8b9c5015af9`：25 项逻辑 PASS、22 次物理执行、3 项合法同事务别名；Verification 571 例、Gate 122 例、Docker Python 197 例与 Node 130 例均无失败或跳过。757 项输入无漂移，隔离 PostgreSQL／Redis 已清理，窗口再次取得与释放通过；原始证据及独立审查在 ignored `tmp/quality/gate-test-performance/round24-cleanup-freeze/`。
+
+该次墙钟 1296.69 秒，物理检查合计 1282.60 秒，外层差额 14.09 秒；主要成本为 Docker local 258.20 秒、shell 176.12 秒、Verify 126.76 秒、Gate 120.78 秒、生命周期 96.68 秒。单次结果不能作为稳定时限或优化因果证据；本轮配置精简主要减少维护成本，不承诺整轮提速。
+
+submit／冻结只绑定输入；正式 validate 执行检查；review 和 check 只核对证据。quick CI、开发检查、完整 Repository 与 Formal 的集合不同，不能互相替代。
+
+## 1.7. 文件地图与配置职责审查
+
+本次接手将真实文件编号串入[工程目录与生命周期](../../../system/engineering.md)，[脚本索引](../../../reference/scripts.md#16-文件编号索引)维护唯一 F01—F23 映射，[执行场景](../../../scenarios/run-repository-gates.md)按开发反馈、任务验收与正式发行说明交接。规约写作要求已同步到 Harness；没有修改风险选择、脚本接口或验收独立性。
+
+配置精简合同见 [OpenSpec](../../../../openspec/changes/simplify-engineering-configuration/proposal.md)。本轮删除固定协议配置、重复执行定义、共享规则副本及投影工具；消费关系更新在[配置地图](../../../reference/configuration.md)。检查选择、资源保护与独立验收不随精简改变；不作目录／命令批量改名或正式验收范围调整。
+
+用户已确认其他会话停止写入。本轮子任务只做轻量自检，集中整合后冻结输入，由独立执行者运行一次正常 Stop，审查者只读冻结差异与证据。运行结果留在 ignored `tmp/quality/configuration-simplification/final-validation/`，不能把子任务完成或旧输入 PASS 当作本轮验收，也不签发 Formal receipt。

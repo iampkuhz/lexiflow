@@ -53,7 +53,9 @@ class ToolchainTests(unittest.TestCase):
             for mode in (0o750, 0o4755, 0o2755):
                 program.chmod(mode)
                 changed = resolve_toolchain(check, env)
-                self.assertEqual(original["executor"]["sha256"], changed["executor"]["sha256"])
+                self.assertEqual(
+                    original["executor"]["sha256"], changed["executor"]["sha256"]
+                )
                 self.assertEqual(mode, changed["executor"]["mode"])
                 self.assertNotEqual(original, changed)
 

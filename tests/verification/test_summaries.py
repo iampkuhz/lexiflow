@@ -19,6 +19,7 @@ class SummaryLocationTest(unittest.TestCase):
             ("user-approval-missing", "authorization"),
             ("python-docstrings-failed", "static-check"),
             ("documentation-governance-failed", "static-check"),
+            ("policy-contract-invalid", "static-check"),
             ("prior-check-failed", "prerequisite"),
             ("non-zero-exit", "check-needs-triage"),
             ("fixture failed product defect", "check-needs-triage"),

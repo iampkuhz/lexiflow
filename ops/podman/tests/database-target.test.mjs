@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
+import { canonicalJson } from '../../dataset/generation-version.mjs';
 import { probeExternal, inspectDevelopmentTrust } from '../database-target.mjs';
 import { assertDevelopmentTargetIdentity } from '../unified-local.mjs';
 
@@ -89,7 +91,7 @@ test('development trust is recognized only by exact current Compose, running ima
   try {
     const result = await inspectDevelopmentTrust({ repo: f.repo, run: f.run });
     assert.equal(result.user, 'postgres'); assert.match(result.fingerprint, /^[a-f0-9]{64}$/);
-    assert.match(result.composeSha256, /^[a-f0-9]{64}$/);
+    assert.equal(result.composeSha256, undefined);
     assert.deepEqual(f.calls.map(args => args[0]), ['ps', 'inspect']);
     for (const mutate of [
       row => { row.ImageName = 'docker.io/library/postgres:170-alpine'; },
@@ -109,19 +111,49 @@ test('development trust is recognized only by exact current Compose, running ima
   } finally { f.cleanup(); }
 });
 
-test('Redis and comments are not trust authorization, but their bytes remain frozen across execution', async () => {
+test('Redis, comments, links, formatting and mapping order do not change database identity', async () => {
   const f = developmentFixture();
   try {
+    const oldComposeSha = crypto.createHash('sha256').update(fs.readFileSync(f.compose)).digest('hex');
     const first = await inspectDevelopmentTrust({ repo: f.repo, run: f.run });
     fs.appendFileSync(f.compose, '\n# harmless local note\n');
     fs.writeFileSync(f.compose, fs.readFileSync(f.compose, 'utf8').replace('image: docker.io/library/redis:7', 'image: docker.io/library/redis:7-alpine'));
+    let irrelevant = fs.readFileSync(f.compose, 'utf8')
+      .replace('    command: ["redis-server", "--save", "", "--appendonly", "no"]', '    command: >\n      redis-server --appendonly no')
+      .replace('    healthcheck:\n      test: ["CMD", "redis-cli", "ping"]', '    volumes:\n      - redis-cache:/data\n    healthcheck:\n      test: ["CMD", "redis-cli", "ping"]');
+    irrelevant = irrelevant.replace('volumes:\n  lexiflow-postgres-data:\n', 'volumes:\n  lexiflow-postgres-data:\n  redis-cache:\n    driver: local\n    driver_opts:\n      type: tmpfs\n');
+    fs.writeFileSync(f.compose, irrelevant);
+    let source = fs.readFileSync(f.compose, 'utf8').replace('name: lexiflow-local', '"name": "lexiflow-local"')
+      .replace('POSTGRES_DB: lexiflow', "'POSTGRES_DB': 'lexiflow'")
+      .replace('POSTGRES_HOST_AUTH_METHOD: trust', 'POSTGRES_HOST_AUTH_METHOD: "trust"')
+      .replace('image: docker.io/library/postgres:17-alpine', "image: 'docker.io/library/postgres:17-alpine'")
+      .replace("'POSTGRES_DB': 'lexiflow'\n      POSTGRES_HOST_AUTH_METHOD: \"trust\"", "POSTGRES_HOST_AUTH_METHOD: \"trust\"\n      'POSTGRES_DB': 'lexiflow'");
+    fs.writeFileSync(f.compose, source.replace('    ports:\n      - "127.0.0.1:15432:5432"', '    ports:\n      - \'127.0.0.1:15432:5432\''));
+    const formatted = fs.readFileSync(f.compose, 'utf8');
+    assert.match(formatted, /POSTGRES_HOST_AUTH_METHOD:[^\n]*\n\s+['"]?POSTGRES_DB['"]?:/);
     const later = await inspectDevelopmentTrust({ repo: f.repo, run: f.run });
+    fs.writeFileSync(f.compose, formatted.replace(/^ +/gm, spaces => ' '.repeat(spaces.length * 2)));
+    assert.equal((await inspectDevelopmentTrust({ repo: f.repo, run: f.run })).fingerprint, later.fingerprint);
     assert.equal(later.containerId, first.containerId);
-    assert.notEqual(later.composeSha256, first.composeSha256);
-    assert.notEqual(later.fingerprint, first.fingerprint);
+    assert.equal(later.composeSha256, undefined);
+    assert.equal(later.fingerprint, first.fingerprint);
+    assert.equal((await assertDevelopmentTargetIdentity({ repo: f.repo, run: f.run, state: {
+      databaseTarget: { kind: 'external', authMode: 'development-trust', port: 15432,
+        host: '127.0.0.1', user: 'postgres', developmentIdentityFingerprint: first.fingerprint, developmentIdentity: first } } })).fingerprint, first.fingerprint);
+    const { fingerprint: _fingerprint, ...legacyFacts } = first;
+    legacyFacts.composeSha256 = oldComposeSha;
+    const legacyIdentity = { ...first, fingerprint: crypto.createHash('sha256')
+      .update(canonicalJson(legacyFacts)).digest('hex') };
+    legacyIdentity.composeSha256 = oldComposeSha;
+    assert.equal((await assertDevelopmentTargetIdentity({ repo: f.repo, run: f.run, state: {
+      databaseTarget: { kind: 'external', authMode: 'development-trust', port: 15432,
+        host: '127.0.0.1', user: 'postgres', developmentIdentityFingerprint: legacyIdentity.fingerprint,
+        developmentIdentity: legacyIdentity } } })).fingerprint, first.fingerprint);
+    const tamperedLegacy = { ...legacyIdentity, composeSha256: '0'.repeat(64) };
     await assert.rejects(assertDevelopmentTargetIdentity({ repo: f.repo, run: f.run, state: {
       databaseTarget: { kind: 'external', authMode: 'development-trust', port: 15432,
-        developmentIdentityFingerprint: first.fingerprint, developmentIdentity: first } } }), /DEVELOPMENT_DATABASE_IDENTITY_DRIFT/);
+        host: '127.0.0.1', user: 'postgres', developmentIdentityFingerprint: tamperedLegacy.fingerprint,
+        developmentIdentity: tamperedLegacy } } }), /DEVELOPMENT_DATABASE_RECORD_INVALID/);
   } finally { f.cleanup(); }
 });
 
@@ -139,6 +171,58 @@ test('development trust has no password mount or inherited password environment 
     for (const { args } of f.calls) {
       assert.ok(!args.includes('--volume')); assert.ok(args.includes('PGPASSWORD=')); assert.ok(args.includes('PGPASSFILE='));
       assert.ok(args.join(' ').includes('unset PGPASSWORD PGPASSFILE')); assert.ok(args.join(' ').includes('--no-password'));
+    }
+  } finally { f.cleanup(); }
+});
+
+test('database-affecting Compose fields and data-volume options are rejected', async () => {
+  const f = developmentFixture();
+  try {
+    for (const replacement of [
+      ['    healthcheck:', '    command: ["sh", "-c", "echo unsafe"]\n    healthcheck:'],
+      ['      POSTGRES_HOST_AUTH_METHOD: trust', '      POSTGRES_HOST_AUTH_METHOD: password'],
+      ['  lexiflow-postgres-data:\n', '  lexiflow-postgres-data:\n    external: true\n'],
+      ['  lexiflow-postgres-data:\n', '  lexiflow-postgres-data:\n    driver: other\n'],
+    ]) {
+      const original = fs.readFileSync(f.compose, 'utf8');
+      fs.writeFileSync(f.compose, original.replace(...replacement));
+      await assert.rejects(inspectDevelopmentTrust({ repo: f.repo, run: f.run }), /DEVELOPMENT_DATABASE_SOURCE_INVALID/);
+      fs.writeFileSync(f.compose, original);
+    }
+  } finally { f.cleanup(); }
+});
+
+test('indentless PostgreSQL lists preserve the same database facts', async () => {
+  const f = developmentFixture();
+  try {
+    const first = await inspectDevelopmentTrust({ repo: f.repo, run: f.run });
+    fs.writeFileSync(f.compose, fs.readFileSync(f.compose, 'utf8')
+      .replace('      - "127.0.0.1:15432:5432"', '    - "127.0.0.1:15432:5432"')
+      .replace('      - lexiflow-postgres-data:/var/lib/postgresql/data', '    - lexiflow-postgres-data:/var/lib/postgresql/data'));
+    assert.deepEqual(await inspectDevelopmentTrust({ repo: f.repo, run: f.run }), first);
+  } finally { f.cleanup(); }
+});
+
+test('database declarations cannot inherit trust through a prototype key', async () => {
+  const f = developmentFixture();
+  try {
+    fs.writeFileSync(f.compose, fs.readFileSync(f.compose, 'utf8').replace(
+      '      POSTGRES_DB: lexiflow\n      POSTGRES_HOST_AUTH_METHOD: trust',
+      '      __proto__: {"POSTGRES_DB":"lexiflow","POSTGRES_HOST_AUTH_METHOD":"trust"}'));
+    await assert.rejects(inspectDevelopmentTrust({ repo: f.repo, run: f.run }), /DEVELOPMENT_DATABASE_SOURCE_INVALID/);
+    assert.equal(f.calls.length, 0);
+  } finally { f.cleanup(); }
+});
+
+test('record corruption is not normalized away when comparing database facts', async () => {
+  const f = developmentFixture();
+  try {
+    const first = await inspectDevelopmentTrust({ repo: f.repo, run: f.run });
+    for (const identity of [{ ...first, composeSha256: 'invalid' }, { ...first, fingerprint: 'f'.repeat(64) }]) {
+      await assert.rejects(assertDevelopmentTargetIdentity({ repo: f.repo, run: f.run, state: {
+        databaseTarget: { kind: 'external', authMode: 'development-trust', port: 15432,
+          host: '127.0.0.1', user: 'postgres', developmentIdentityFingerprint: identity.fingerprint,
+          developmentIdentity: identity } } }), /DEVELOPMENT_DATABASE_RECORD_INVALID/);
     }
   } finally { f.cleanup(); }
 });

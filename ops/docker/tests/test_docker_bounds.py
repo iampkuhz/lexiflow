@@ -5,6 +5,7 @@ import pathlib
 import sys
 import subprocess
 import shlex
+import signal
 import tempfile
 import time
 import unittest
@@ -100,6 +101,69 @@ class DockerBoundsTest(unittest.TestCase):
         self.assertEqual(result.stdout + result.stderr, b"")
         self.assert_helpers_reaped(directories, sleepers)
 
+    def test_timer_registration_cancellation_reaps_owned_sleep_helper(self):
+        # 从实际源码抽取 timer，在 & 与 $! 登记之间加入同步门；不靠调度概率。
+        source = SOURCE.read_text()
+        start = source.index("    sleeper= grace=")
+        end = source.index("  ) &\n  timer=$!", start)
+        timer_source = source[start:end]
+        self.assertIn("trap cancel_timer HUP INT TERM", timer_source)
+        for field, launch in (("sleeper", 'sleep "$budget"'), ("grace", "sleep 1")):
+            for immediate_exit in (True, False):
+                with self.subTest(helper=field, old_handler=immediate_exit):
+                    work = self.root / f"registration-{field}-{immediate_exit}"
+                    work.mkdir()
+                    q = lambda name: shlex.quote(str(work / name))
+                    marker = f"{launch} >/dev/null 2>&1 & {field}=$!"
+                    self.assertEqual(timer_source.count(marker), 1)
+                    # 仅私有探针用 30 秒 helper 保证存活可观察；产品预算未改。
+                    gate = ("/bin/sleep 30 >/dev/null 2>&1 &\n"
+                            f"    printf '%s\\n' \"$!\" > {q('helper')}\n"
+                            f"    while [ ! -e {q('release')} ]; do :; done\n"
+                            f"    {field}=$!")
+                    body = timer_source.replace(marker, gate)
+                    acknowledge = f"printf '1\\n' > {q('signalled')}"
+                    body = body.replace("cancel_timer() {", "cancel_timer() {\n      " + acknowledge)
+                    if immediate_exit:
+                        body = body.replace("trap cancel_timer HUP INT TERM",
+                                            "trap " + shlex.quote(acknowledge + "; exit 0") + " HUP INT TERM")
+                    script = work / "probe.sh"
+                    # 外层保持存活，确保 finally 回收的是仍由本 Popen 持有的组。
+                    script.write_text(
+                        f"dir={shlex.quote(str(work))}\nbudget=0\n"
+                        "/bin/sleep 30 & child=$!\n(\n" + body + "\n) & timer=$!\n"
+                        f"printf '%s\\n' \"$timer\" > {q('timer')}\n"
+                        "wait \"$timer\" 2>/dev/null; status=$?\n"
+                        f"printf '%s\\n' \"$status\" > {q('done')}\n"
+                        "while :; do /bin/sleep 1; done\n")
+                    process = subprocess.Popen(["/bin/sh", str(script)], start_new_session=True,
+                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    try:
+                        def wait_file(name):
+                            deadline = time.monotonic() + 3
+                            path = work / name
+                            while (not path.exists() or not path.read_text().strip()) and time.monotonic() < deadline:
+                                self.assertIsNone(process.poll(), "probe exited before synchronization")
+                                time.sleep(.005)
+                            self.assertTrue(path.exists() and path.read_text().strip(), name)
+                            return int(path.read_text())
+                        helper = wait_file("helper")
+                        timer = wait_file("timer")
+                        os.kill(timer, signal.SIGTERM)
+                        self.assertEqual(wait_file("signalled"), 1)
+                        (work / "release").touch()
+                        self.assertEqual(wait_file("done"), 0)
+                        if immediate_exit:
+                            os.kill(helper, 0)  # 旧 handler 的反例：helper 仍存活。
+                        else:
+                            with self.assertRaises(ProcessLookupError):
+                                os.kill(helper, 0)
+                    finally:
+                        if process.poll() is None:
+                            # 未 wait/reap 组长前一次回收本探针组，不信号未知 PID。
+                            os.killpg(process.pid, signal.SIGKILL)
+                        process.wait(timeout=3)
+
     def test_each_stream_bounded_during_capture(self):
         directories, sleepers = self.trace_helpers()
         for stream in ("stdout", "stderr"):
@@ -171,13 +235,24 @@ class DockerBoundsTest(unittest.TestCase):
     def test_timer_failure_terminates_its_cli_instead_of_removing_deadline(self):
         directories, sleepers = self.trace_helpers()
         pidfile = self.root / "pid"
-        self.stub("sleep", '/bin/sleep 0.1\nprintf "private timer failure\\n" >&2\nexit 7\n')
-        self.stub("docker", f'trap "" TERM\nprintf "%s\\n" "$$" > {shlex.quote(str(pidfile))}\n'
+        observed = self.root / "timer-observed-pid"
+        # 工具故障只能在 CLI 确已启动后注入；固定等待不能证明 PID 已登记。
+        self.stub("sleep", f'printf "%s:%s\\n" "$$" "$1" >> {shlex.quote(str(sleepers))}\n'
+                           'attempts=0\n'
+                           f'while [ ! -s {shlex.quote(str(pidfile))} ] && [ "$attempts" -lt 100 ]; do\n'
+                           '  /bin/sleep 0.005; attempts=$((attempts + 1))\ndone\n'
+                           f'[ -s {shlex.quote(str(pidfile))} ] || exit 9\n'
+                           f'read -r child_pid < {shlex.quote(str(pidfile))}\n'
+                           f'printf "%s\\n" "$child_pid" > {shlex.quote(str(observed))}\n'
+                           'printf "private timer failure\\n" >&2\nexit 7\n')
+        self.stub("docker", f'trap "" TERM\n/bin/sleep 0.2\nprintf "%s\\n" "$$" > {shlex.quote(str(pidfile))}\n'
                             'while :; do :; done\n')
         result = self.run_shell('lf_docker_run 30 docker info', timeout=3,
                                 env={})
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout + result.stderr, b"")
+        self.assertTrue(observed.exists(), "timer failure injected before CLI handshake")
+        self.assertEqual(observed.read_text(), pidfile.read_text())
         with self.assertRaises(ProcessLookupError):
             os.kill(int(pidfile.read_text()), 0)
         self.assert_helpers_reaped(directories, sleepers)

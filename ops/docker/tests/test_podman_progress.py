@@ -20,17 +20,61 @@ class CommandProgressTest(unittest.TestCase):
         self.log = self.root / 'private.log'
         self.node = shutil.which('node')
         self.pidfile = self.root / 'child.pid'
+        self.advance = self.root / 'advance-heartbeat'
+        self.release = self.root / 'release-child'
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def launch(self, child, timeout=6000, announce=True, command=None):
+    def launch(self, child, timeout=6000, announce=True, command=None, heartbeat_clock=False):
         argv = ['-e', child] if command is None else []
         options = {'cwd': str(self.root), 'timeout': timeout, 'logFile': str(self.log),
                    'capture': True, 'label': '测试子步骤', 'announce': announce}
+        invocation = f'runCommand({json.dumps(command or self.node)}, {json.dumps(argv)}, {json.dumps(options)})'
+        clock_driver = ''
+        if heartbeat_clock:
+            # 仅推进本例 interval；真实子进程、日志流、deadline 与取消均不使用假时钟。
+            clock_driver = f'''
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {{mock}} from 'node:test';
+import {{HEARTBEAT_MS}} from {json.dumps(HELPER)};
+async function checkedHeartbeat() {{
+  assert.equal(HEARTBEAT_MS, 20000);
+  mock.timers.enable({{apis: ['setInterval']}});
+  const originalLog = console.log;
+  let beats = 0;
+  console.log = (...args) => {{
+    if (String(args[0]).includes('仍在')) beats++;
+    originalLog(...args);
+  }};
+  const running = {invocation};
+  // 立即登记 rejection；错误仍由下面的 await 抛出，不能成为提前的 unhandled rejection。
+  running.catch(() => {{}});
+  try {{
+    const until = Date.now() + 10000;
+    while (!fs.existsSync({json.dumps(str(self.advance))}) && Date.now() < until)
+      await new Promise(resolve => setTimeout(resolve, 5));
+    assert.ok(fs.existsSync({json.dumps(str(self.advance))}), 'parent log observation missing');
+    mock.timers.tick(19999); assert.equal(beats, 0, 'heartbeat before 20 seconds');
+    mock.timers.tick(1); assert.equal(beats, 1, 'missing heartbeat at 20 seconds');
+    mock.timers.tick(19999); assert.equal(beats, 1, 'duplicate heartbeat before 40 seconds');
+    fs.writeFileSync({json.dumps(str(self.release))}, '');
+    const result = await running;
+    mock.timers.tick(1); assert.equal(beats, 1, 'heartbeat timer survived command completion');
+    return result;
+  }} finally {{
+    fs.writeFileSync({json.dumps(str(self.release))}, '');
+    await running.catch(() => {{}});
+    mock.timers.reset();
+    console.log = originalLog;
+  }}
+}}
+'''
         source = f'''import {{runCommand}} from {json.dumps(HELPER)};
+{clock_driver}
 try {{
-const result = await runCommand({json.dumps(command or self.node)}, {json.dumps(argv)}, {json.dumps(options)});
+const result = await {'checkedHeartbeat()' if heartbeat_clock else invocation};
 console.log(result?.includes('PRIVATE-FIXTURE') ? 'CAPTURE_OK' : 'DONE');
 }} catch(error) {{ console.error(error.message); process.exitCode=1; }}
 '''
@@ -45,7 +89,13 @@ console.log(result?.includes('PRIVATE-FIXTURE') ? 'CAPTURE_OK' : 'DONE');
         return proc.returncode, out, err
 
     def test_streams_private_log_before_exit_with_one_twenty_second_heartbeat(self):
-        proc = self.launch("console.log('PRIVATE-FIXTURE'); console.error('PRIVATE-STDERR'); setTimeout(()=>{},21000)", timeout=26000)
+        child = f"""console.log('PRIVATE-FIXTURE'); console.error('PRIVATE-STDERR');
+const fs = require('fs');
+function waitForRelease() {{
+  if (!fs.existsSync({json.dumps(str(self.release))})) setTimeout(waitForRelease, 5);
+}}
+waitForRelease();"""
+        proc = self.launch(child, timeout=26000, heartbeat_clock=True)
         try:
             until=time.monotonic()+4
             while time.monotonic()<until:
@@ -55,6 +105,7 @@ console.log(result?.includes('PRIVATE-FIXTURE') ? 'CAPTURE_OK' : 'DONE');
             self.assertIn('PRIVATE-FIXTURE',self.log.read_text())
             self.assertIn('PRIVATE-STDERR',self.log.read_text())
             self.assertEqual(self.log.stat().st_mode & 0o777,0o600)
+            self.advance.touch()
             code,out,err=self.finish(proc)
             self.assertEqual(code,0,err)
             self.assertEqual(out.count('仍在'),1,out)
@@ -64,7 +115,11 @@ console.log(result?.includes('PRIVATE-FIXTURE') ? 'CAPTURE_OK' : 'DONE');
             self.assertNotIn('PRIVATE-STDERR',out+err)
             self.assertLessEqual(len(out.splitlines()),4)
         finally:
-            if proc.poll() is None: proc.kill();proc.communicate()
+            # 即使父断言失败，也先允许本例子进程自然退出并让 runCommand 清理。
+            if proc.poll() is None:
+                self.advance.touch(); self.release.touch()
+                try: proc.communicate(timeout=6)
+                except subprocess.TimeoutExpired: proc.kill(); proc.communicate()
 
     def test_fast_auxiliary_command_is_silent(self):
         code,out,err=self.finish(self.launch("console.log('PRIVATE-FIXTURE')",announce=False))

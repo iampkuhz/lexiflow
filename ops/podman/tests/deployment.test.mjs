@@ -41,7 +41,7 @@ test('interactive confirmation accepts only y/yes/是 and defaults to refusal', 
     input.write(`${answer}\n`);
     assert.equal(await pending, expected);
     assert.match(output.text, /127\.0\.0\.1:15432\/lexiflow[\s\S]*lexiflow_release[\s\S]*\[y\/N\]/);
-    assert.equal(output.text.split('使用本机 LexiFlow 数据库，并在数据导入版本变化时自动替换资料？[y/N]').length - 1, 1);
+    assert.equal(output.text.split('继续安装并使用本机 LexiFlow 数据库？[y/N]').length - 1, 1);
     assert.equal(input.listenerCount('data'), 0);
   }
 });

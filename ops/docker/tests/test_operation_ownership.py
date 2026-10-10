@@ -149,9 +149,8 @@ case "$status" in
   0|[1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5]) ;;
   *) transport_error;;
 esac
-rm -f "$req/argv.claimed" "$req/stdout" "$req/stderr" "$req/status" "$req/done" || transport_error
+rm -f "$req/argv.claimed" "$req/stdout" "$req/stderr" "$req/status" "$req/done" "$active" || transport_error
 rmdir "$req" || transport_error
-rm -f "$active" || transport_error
 trap - HUP INT TERM
 exit "$status"
 '''
@@ -408,6 +407,113 @@ sys.exit(9)
         result = self.run_case("stop-replaced", "stop")
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(any(c[:2] == ["container", "rm"] for c in self.commands()))
+
+
+class OperationOwnershipCleanupTest(unittest.TestCase):
+    """直接测试清理传输；业务语义仍由原测试类覆盖。"""
+
+    def setUp(self):
+        self.fixture = OperationOwnershipTest("test_stop_uses_full_ids_and_never_deletes_resources")
+        self.addCleanup(self._cleanup_fixture)
+        # 服务启动时编译一次：在启动前提供仅用于传输回归的模型。
+        self.fixture.cli = lambda: (
+            "import sys\nprint('business-out')\n"
+            "print('business-err', file=sys.stderr)\nsys.exit(int(sys.argv[-1]))\n"
+        )
+        self.fixture.setUp()
+
+    def _cleanup_fixture(self):
+        self.assertTrue(self.fixture.doCleanups(), "private fixture cleanup failed")
+        process = getattr(self.fixture, "server_process", None)
+        if process is not None:
+            self.assertIs(_owned_group_exists(process.pid), False)
+
+    def _start_client(self, status=0):
+        return subprocess.Popen([str(self.fixture.bin / "docker"), "cleanup-test", str(status)],
+                                env=self.fixture.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                start_new_session=True)
+
+    def _run_client(self, status=0):
+        process = self._start_client(status)
+        try:
+            stdout, stderr = process.communicate(timeout=3)
+        finally:
+            if process.returncode is None:
+                self.fixture._terminate_owned(process)
+        self.assertIs(_owned_group_exists(process.pid), False)
+        return process.returncode, stdout, stderr
+
+    def _write_rm(self, body):
+        wrapper = self.fixture.bin / "rm"
+        wrapper.write_text("#!/bin/sh\n" + body + '\nexec /bin/rm "$@"\n')
+        wrapper.chmod(0o755)
+
+    def _assert_no_requests(self):
+        self.assertEqual([p.name for p in self.fixture.mailbox.iterdir()
+                          if p.name.startswith(("active.", "req."))], [])
+
+    def test_success_preserves_output_cleans_mailbox_and_runs_one_batch_rm(self):
+        rm_log = self.fixture.root / "rm.log"
+        self._write_rm('printf "%s\\n" "$*" >> ' + shlex.quote(str(rm_log)))
+        self.assertEqual(self._run_client(), (0, b"business-out\n", b"business-err\n"))
+        self.assertEqual(len(rm_log.read_text().splitlines()), 1)
+        self.assertIn("/active.", rm_log.read_text())
+        self._assert_no_requests()
+        self.assertFalse((self.fixture.mailbox / "transport-failed").exists())
+
+    def test_nonzero_business_exit_preserves_outputs_and_cleans(self):
+        self.assertEqual(self._run_client(23), (23, b"business-out\n", b"business-err\n"))
+        self._assert_no_requests()
+        self.assertFalse((self.fixture.mailbox / "transport-failed").exists())
+
+    def test_partial_rm_failure_is_sticky_after_deleting_existing_response_file(self):
+        deleted = self.fixture.root / "partial-deleted"
+        self._write_rm('for p do case "$p" in */stdout)\n'
+                       '  if [ -f "$p" ]; then /bin/rm "$p" || exit 42;\n'
+                       '    [ ! -e "$p" ] || exit 43; : > ' + shlex.quote(str(deleted)) + '; exit 41; fi;;\n'
+                       'esac; done')
+        self.assertEqual(self._run_client()[0], 97)
+        self.assertTrue(deleted.is_file(), "existing response file was not deleted before failure")
+        self.assertTrue((self.fixture.mailbox / "transport-failed").is_file())
+        self._assert_no_requests()
+
+    def test_unknown_request_file_is_preserved_and_rmdir_failure_is_sticky(self):
+        self._write_rm('for p do case "$p" in */argv.claimed)\n'
+                       '  if [ -f "$p" ]; then req=${p%/argv.claimed}; /bin/rm "$@" || exit $?;\n'
+                       '    printf "%s" keep > "$req/unknown"; exit 0; fi;;\n'
+                       'esac; done')
+        self.assertEqual(self._run_client()[0], 97)
+        self.assertTrue((self.fixture.mailbox / "transport-failed").is_file())
+        unknown = list(self.fixture.mailbox.glob("req.*/unknown"))
+        self.assertEqual(len(unknown), 1)
+        self.assertEqual(unknown[0].read_text(), "keep")
+
+    def test_term_between_batch_rm_and_rmdir_fails_closed(self):
+        gate = self.fixture.root / "rm-finished"
+        release = self.fixture.root / "release-rmdir"
+        self._write_rm('active=; for p do case "$p" in */active.*) active=1;; esac; done\n'
+                       '/bin/rm "$@" || exit $?\n'
+                       'if [ -n "$active" ]; then : > ' + shlex.quote(str(gate)) +
+                       '; while [ ! -f ' + shlex.quote(str(release)) + ' ]; do /bin/sleep 0.01; done; fi\nexit 0')
+        process = self._start_client()
+        try:
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and not gate.exists() and process.poll() is None:
+                time.sleep(0.005)
+            self.assertTrue(gate.exists(), "batch rm handshake was not reached")
+            self.assertEqual(len(list(self.fixture.mailbox.glob("req.*"))), 1)
+            self.assertEqual(list(self.fixture.mailbox.glob("active.*")), [])
+            os.kill(process.pid, signal.SIGTERM)
+            release.touch()
+            stdout, stderr = process.communicate(timeout=3)
+            self.assertEqual(process.returncode, 97, (stdout, stderr))
+            self.assertTrue((self.fixture.mailbox / "transport-failed").is_file())
+            self._assert_no_requests()
+        finally:
+            release.touch()
+            if process.returncode is None:
+                self.fixture._terminate_owned(process)
+            self.assertIs(_owned_group_exists(process.pid), False)
 
 
 def _serve_fake_cli(root):

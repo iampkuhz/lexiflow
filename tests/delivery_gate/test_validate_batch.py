@@ -5,6 +5,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 import yaml
+from scripts.verification.declarations import load_declarations
+from tests.delivery_gate.fixtures import write_declarations
 
 from scripts.delivery_gate.validate import (
     ValidationError,
@@ -33,17 +35,13 @@ from tests.delivery_gate.fixtures import (
 class ReusableDeliveryGateFixture(DeliveryGateFixture):
     def _write_declarations(self):
         super()._write_declarations()
-        declarations = yaml.safe_load(
-            (self.root / "harness/module-checks.yaml").read_text()
-        )
+        declarations = load_declarations(self.root)
         next(
             check
             for check in declarations["checks"]
             if check["check_id"] == "fixture.change"
         )["transaction_reuse"] = True
-        (self.root / "harness/module-checks.yaml").write_text(
-            yaml.safe_dump(declarations, sort_keys=False)
-        )
+        write_declarations(self.root / "harness/module-checks.yaml", declarations["checks"])
 
 
 class ValidateBatchTests(unittest.TestCase):

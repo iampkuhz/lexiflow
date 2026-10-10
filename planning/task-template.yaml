@@ -1,6 +1,6 @@
 # Task 填写模板；占位符须替换为实际值，不能直接作为派发输入。
 # 先确定 goal/scope/acceptance，再填 execution；身份字段由真实 runner 绑定。
-# 共享投影保持与 policy 一致，新增 Task 不等于得到阶段批准。
+# 共享规则直接读取 harness/agent-policy.manifest.yaml；新增 Task 不等于得到阶段批准。
 schema_version: "lexiflow.task.v1"
 
 
@@ -141,111 +141,12 @@ acceptance:
   skipped_semantics: "skipped、not-run、unavailable 或 excluded 均不能产生 PASS。"
 
 
-# 执行配置；共享 agent_dispatch 和 model_policy 值由 policy 投影。
+# 执行配置；共享策略以 harness/agent-policy.manifest.yaml 为唯一来源。
 execution:
-  agent_dispatch:
-    primary: native-codex
-    default_implementer: native-codex
-    fallback_model: gpt-6-luna
-    fallback_reasoning_effort: medium
-    model_selection_basis: subagent_protocol.codex_model_policy
-    qoder_automatic_dispatch: forbidden
-    legacy_qoder_actions: read-only-status-result-validation-and-ack-only
-    validation_and_review: native-codex-subagents-not-qoder-or-create-thread
-    max_consecutive_failures: 3
-    failure_unit: legacy-qoder-attempt-and-native-fallback-both-unavailable-in-one-dispatch-attempt
-    success_effect: reset-consecutive-failures-preserve-history
-    identity: current-parent-repo-work-package-ordered-task-versions
-    replay_effect: no-new-attempt-or-counter-increment
-    unknown_start_effect: preserve-attempt-no-fallback-no-redispatch
-    execution_and_review_failures: separate-from-dispatch-failures
-    stop_effect: stop-package-dispatch-no-fourth-attempt-not-goal-status-change
-    host_wait_policy: reject-active-or-unknown-goal-without-supported-wait-adapter
-    host_wait_evidence: current-runtime-derived-read-only-goal-state
-    host_wait_caller_override: forbidden
-    host_mutations: forbidden
-    fallback_execution_owner: current-parent-native-codex-collaboration-tool
-    fallback_result_evidence: identity-bound-native-tool-result-not-self-reported-pass
-    codex_wait: native-collaboration-events-not-qoder-terminal-callback
-    safety_preconditions: identity-write-scope-no-duplicate-execution
   preferred_implementer: "qoder"
   fallback_implementer: "main-agent"
   estimated_task_minutes: 45
-  allowed_task_minutes: {min: 20, max: 90}
   expected_run_kinds: ["implementation", "independent_review"]
-  qoder:
-    max_active_program_runs: 1
-    recursive_delegation: false
-    permission_mode: "bypass_permissions"
-    max_rework_rounds: 1
-    max_total_runs_per_task_before_main_review: 2
-    max_prompt_characters: 8000
-    dispatch_unit: "coherent-work-package"
-    work_package_estimated_minutes:
-      min: 10
-      max: 360
-    work_package_estimate_source: caller-declared-estimate-or-exact-current-catalog-sum-when-catalog-is-used
-    minimum_catalog_tasks: 1
-    agent_profile_required: true
-    harness_manifest_required: true
-    structured_result_required: true
-    prompt_context_policy: 使用有界的文件 locator；handoff 不重复粘贴设计文档。
-    resume_same_session_for_rework: true
-  codex_subagent:
-    allowed: true
-    model_policy:
-      default_model: gpt-6-luna
-      routine_model: gpt-6-luna
-      routine_reasoning_effort: low
-      routing_source: harness/agent-policy.manifest.yaml#subagent_protocol.codex_model_policy
-      explicit_model_argument_required: true
-      allowed_escalation_models:
-      - gpt-6-sol
-      user_only_models:
-      - gpt-6-astra
-      qoder_model_policy: separate-runner-controlled
-      default_reasoning_effort: medium
-    requires_non_overlapping_write_scope: true
-    may_delegate_only_independent_subtasks: true
-    max_active_subagents: 6
-    default_fork_turns: "none"
-    full_history_fork_requires_explicit_exception: true
-    completion_signal_fields: [status, work_package_id, task_ids, run_id, artifact_locators, validation_commands,
-      blocking_findings]
-    max_blocking_findings: 3
-    full_context_or_logs_in_callback: false
-    delegation_work_package:
-      unit: coherent-set-of-catalog-tasks
-      identity_fields:
-      - work_package_id
-      - task_ids
-      work_package_id_rule: caller-stable-non-run-identity
-      task_ids_rule: exact-ordered-catalog-task-identities
-      per_task_outcome_evidence_required: true
-      preferred_minutes:
-        min: 10
-        max: 360
-      minimum_total_estimated_minutes: 10
-      target_maximum_total_estimated_minutes: 360
-      minimum_catalog_tasks: 1
-      must_share:
-      - primary_owner
-      - contract_boundary
-      - compatible_write_scope
-      required_outcomes:
-      - implementation_or_design
-      - direct_validation
-      - acceptance_evidence
-      proactive_dispatch:
-        threshold_minutes: 10
-        prefer_when:
-        - isolated-subtask-requires-large-new-context
-        - acceptance-is-confirmable-by-compact-result-or-deterministic-command
-        - non-overlapping-write-scope
-      main_agent_only_when:
-      - deterministic-task-at-or-under-10-minutes
-      - isolated_read_only_review
-      turn_or_token_count_is_not_acceptance_evidence: true
   main_session:
     callback_first: true
     busy_wait_forbidden: true
@@ -256,122 +157,6 @@ execution:
 
 
 # caller 只提供工作包信息；runner 生成并绑定身份，不手写假身份。
-handoff_contract:
-  caller_required_input:
-  - goal
-  - task_id
-  - task_source
-  - task_version
-  - change_version
-  - work_package_id
-  - task_ids
-  - task_versions
-  - change_versions
-  - estimated_minutes
-  - primary_owner
-  - contract_boundary
-  - agent_profile
-  - harness_manifest
-  - allowed_files
-  - forbidden_files
-  - required_context
-  - expected_output
-  - acceptance_criteria
-  - acceptance_evidence
-  - validation_command
-  - failure_policy
-  - parent_client
-  runner_bound_identity:
-    parent_session_id:
-      source: "caller-or-CODEX_THREAD_ID"
-      required_in_persisted_task: true
-    agent_id:
-      source: "runner-generated-at-dispatch"
-      caller_must_omit: true
-    run_id:
-      source: "runner-generated-at-dispatch"
-      caller_must_omit: true
-    session_id:
-      source: "runner-generated-or-resume-record"
-      caller_must_omit_on_start: true
-    client:
-      source: "runner-forced"
-      value: "qoder"
-  result_required_output:
-  - status
-  - work_package_id
-  - task_ids
-  - task_versions
-  - change_versions
-  - run_id
-  - outcomes
-  - changed_files
-  - validation
-  - acceptance_evidence
-  - effect_checks
-  - risks
-  current_runner_adapter:
-    enforced_caller_fields:
-    - goal
-    - task_id
-    - task_source
-    - task_version
-    - change_version
-    - work_package_id
-    - task_ids
-    - task_versions
-    - change_versions
-    - estimated_minutes
-    - primary_owner
-    - contract_boundary
-    - agent_profile
-    - harness_manifest
-    - allowed_files
-    - forbidden_files
-    - required_context
-    - expected_output
-    - acceptance_criteria
-    - acceptance_evidence
-    - validation_command
-    - failure_policy
-    - parent_client
-    target_schema_enforced: true
-    runtime_identity_enforced: true
-    result_fields_required_in_prompt: true
-    agent_profile_cli_binding: true
-    harness_manifest_preflight: true
-    catalog_package_preflight: advisory-when-present
-    catalog_estimate_rule: caller-10-to-360-or-exact-current-catalog-sum-when-catalog-is-used
-    structured_result_required: true
-    implementation_status: IMPLEMENTED
-    conformance_test: tests/agents/test_qoder_runner.py
-    owner_task: LF-TSK-QLT-0006
-    owner_task_version: 2
-    owner_change_version: 2.0.0
-  caller_field_schema:
-    goal: non-empty-string
-    task_id: stable-task-id-string
-    task_source: non-empty-string
-    task_version: positive-integer
-    change_version: semver-string
-    work_package_id: stable-work-package-id-string
-    task_ids: ordered-unique-list-minimum-one
-    task_versions: exact-task-id-to-positive-integer-map
-    change_versions: exact-task-id-to-semver-map
-    estimated_minutes: integer-10-to-360
-    primary_owner: non-empty-string
-    contract_boundary: non-empty-string
-    agent_profile: project-qoder-agent-name
-    harness_manifest: repository-relative-hash-bound-json
-    allowed_files: non-empty-string
-    forbidden_files: non-empty-string
-    required_context: non-empty-string
-    expected_output: non-empty-string
-    acceptance_criteria: non-empty-list-of-strings
-    acceptance_evidence: non-empty-list-of-strings
-    validation_command: non-empty-string
-    failure_policy: non-empty-string
-    parent_client: exact-string-codex
 change_control:
   dispatched_scope_is_immutable: true
   version_rules:

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from scripts.verification.yaml_input import parse_yaml_input
 
 from scripts.delivery_gate.records import (
     RecordError,
@@ -27,7 +28,7 @@ def acceptance_plan(
 ) -> dict[str, Any]:
     """由机器评估和当前 Task 要求导出唯一层计划；任何层都不允许实现者自签验证。"""
     try:
-        policy = yaml.safe_load(
+        policy = parse_yaml_input(
             read_regular_bytes(repo, "harness/agent-policy.manifest.yaml")
         )
         settings = policy["risk_classification"]

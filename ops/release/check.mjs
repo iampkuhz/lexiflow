@@ -39,29 +39,41 @@ export function runTests(options = {}) {
   const maxOutputBytes = options.maxOutputBytes ?? 100_000;
   return new Promise((resolve) => {
     let child;
-    try { child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] }); }
+    // 私有组包含测试 worker；上级取消须立即转发，不能逃离 Verify 的强杀窗口。
+    const processGroupSupported = process.platform !== 'win32';
+    try { child = spawn(command, args, { detached: processGroupSupported, stdio: ['ignore', 'pipe', 'pipe'] }); }
     catch { resolve(failed('test process could not start', 1)); return; }
-    let stdout = ''; let stderr = ''; let bytes = 0; let overflow = false; let timedOut = false; let settled = false;
+    let stdout = ''; let stderr = ''; let bytes = 0; let overflow = false; let timedOut = false; let cancelled = false; let settled = false;
+    const killOwnedGroup = () => {
+      if (!processGroupSupported || !child.pid) { child.kill('SIGKILL'); return; }
+      try { process.kill(-child.pid, 'SIGKILL'); }
+      catch (error) { if (error.code !== 'ESRCH') child.kill('SIGKILL'); }
+    };
+    const onCancel = () => { cancelled = true; killOwnedGroup(); };
+    process.on('SIGTERM', onCancel);
+    process.on('SIGINT', onCancel);
     const collect = (stream, chunk) => {
       const available = Math.max(0, maxOutputBytes - bytes);
       const bounded = chunk.subarray(0, available);
       bytes += bounded.length;
       if (stream === 'out') stdout += bounded.toString('utf8'); else stderr += bounded.toString('utf8');
-      if (bounded.length < chunk.length) { overflow = true; child.kill('SIGKILL'); }
+      if (bounded.length < chunk.length) { overflow = true; killOwnedGroup(); }
     };
     child.stdout.on('data', (chunk) => collect('out', chunk));
     child.stderr.on('data', (chunk) => collect('err', chunk));
-    const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, timeoutMs);
+    const timer = setTimeout(() => { timedOut = true; killOwnedGroup(); }, timeoutMs);
     const finish = (result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      process.removeListener('SIGTERM', onCancel);
+      process.removeListener('SIGINT', onCancel);
       if (stderr) process.stderr.write(stderr);
       if (result.status !== 'PASS' && stdout) process.stderr.write(`TAP output (bounded):\n${stdout}`);
       resolve(result);
     };
     child.on('error', () => finish(failed('test process could not start', 1)));
-    child.on('close', (code, signal) => finish(timedOut ? failed('test process timed out', 1) : overflow ? failed('test process output exceeded limit', 1) : signal ? failed('test process cancelled', 1) : evaluateTapSummary(stdout, code ?? 1)));
+    child.on('close', (code, signal) => finish(timedOut ? failed('test process timed out', 1) : overflow ? failed('test process output exceeded limit', 1) : cancelled || signal ? failed('test process cancelled', 1) : evaluateTapSummary(stdout, code ?? 1)));
   });
 }
 

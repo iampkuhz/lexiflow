@@ -13,6 +13,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from scripts.environment.git_runtime import parse_prepared_git_wrapper
+
 _TOOLS = frozenset(
     {
         "python3",
@@ -113,7 +115,13 @@ def _named_tool(
     locator = shutil.which(name, path=env.get("PATH", ""))
     if not locator:
         raise ToolchainUnavailable(f"required tool unavailable: {name}")
-    return _executable_stamp(locator, env, seen)
+    stamp = _executable_stamp(locator, env, seen)
+    if name == "git":
+        target = parse_prepared_git_wrapper(locator)
+        if target is not None:
+            # Bind both the executable wrapper/shell and the actual Git payload.
+            stamp["prepared_target"] = _executable_stamp(str(target), env, seen)
+    return stamp
 
 
 def _yaml_package() -> dict[str, Any]:

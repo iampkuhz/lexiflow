@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync, copyFileSync
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
+import childProcess from 'node:child_process';
 import * as fs from 'node:fs';
 import fsDefault from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
@@ -271,4 +272,369 @@ test('snapshot date must be a real calendar date and is bound into the developme
     assert.throws(() => validateBuildIdentity({ ...expected,
       softwareVersion: expected.softwareVersion.replace('.20261006.', '.20261007.') }), /INVALID_BUILD_IDENTITY/);
   });
+});
+
+test('combined snapshot metadata matches the two-command Git oracle across repository states', async () => {
+  const { resolveBuildIdentity } = await import('../version.mjs');
+  for (const state of ['clean', 'staged', 'unstaged', 'untracked', 'head']) {
+    withFixture({}, root => {
+      if (state === 'staged') { writeFileSync(path.join(root, 'source'), 'staged'); git(root, 'add', 'source'); }
+      if (state === 'unstaged') writeFileSync(path.join(root, 'source'), 'unstaged');
+      if (state === 'untracked') writeFileSync(path.join(root, 'new-file'), 'new');
+      if (state === 'head') { git(root, 'commit', '--allow-empty', '-qm', 'second'); }
+      const original = childProcess.execFileSync;
+      let oracle = false;
+      const actualCommands = [];
+      const counts = { combined: 0, show: 0, status: 0, lsFiles: 0 };
+      childProcess.execFileSync = function (command, args, options) {
+        if (!oracle && command === 'git') actualCommands.push(args.slice(2));
+        if (command === 'git' && args.includes('--show-toplevel') && args.includes('--verify')) {
+          counts.combined++;
+          if (!oracle) return original.call(this, command, args, options);
+          const top = original.call(this, command, ['-C', root, 'rev-parse', '--show-toplevel'], options);
+          const head = original.call(this, command, ['-C', root, 'rev-parse', '--verify', 'HEAD^{commit}'], options);
+          return `${top}${head}`;
+        }
+        if (command === 'git' && args[2] === 'show') counts.show++;
+        if (command === 'git' && args[2] === 'status') counts.status++;
+        if (command === 'git' && args[2] === 'ls-files') counts.lsFiles++;
+        return original.call(this, command, args, options);
+      };
+      syncBuiltinESMExports();
+      try {
+        const identity = resolveBuildIdentity(root);
+        assert.equal(actualCommands.length, 16, `${state} physical Git commands`);
+        assert.deepEqual(counts, { combined: 4, show: 4, status: 4, lsFiles: 4 });
+        oracle = true;
+        assert.deepEqual(resolveBuildIdentity(root), identity, `${state} identity oracle`);
+        assert.deepEqual(counts, { combined: 8, show: 8, status: 8, lsFiles: 8 });
+      } finally { childProcess.execFileSync = original; syncBuiltinESMExports(); }
+    });
+  }
+});
+
+test('clean release identity keeps four Git snapshots, two stable scans, and rejects dirty states', async () => {
+  const { resolveBuildIdentity, resolveCleanBuildIdentity } = await import('../version.mjs');
+  withFixture({ ignore: true }, root => {
+    mkdirSync(path.join(root, 'ignored')); writeFileSync(path.join(root, 'ignored/private'), 'ignored');
+    const original = childProcess.execFileSync;
+    const counts = { combined: 0, show: 0, status: 0, lsFiles: 0 };
+    let expectedBuffer = 100_000;
+    childProcess.execFileSync = function (command, args, options) {
+      if (command === 'git' && args.includes('--show-toplevel') && args.includes('--verify')) counts.combined++;
+      if (command === 'git' && args[2] === 'show') counts.show++;
+      if (command === 'git' && args[2] === 'status') {
+        counts.status++;
+        assert.equal(options.maxBuffer, expectedBuffer);
+      }
+      if (command === 'git' && args[2] === 'ls-files') counts.lsFiles++;
+      return original.call(this, command, args, options);
+    };
+    syncBuiltinESMExports();
+    try {
+      const clean = resolveCleanBuildIdentity(root);
+      assert.equal(clean.channel, 'release');
+      assert.equal(clean.dirty, false);
+      assert.deepEqual(counts, { combined: 4, show: 4, status: 4, lsFiles: 4 });
+      expectedBuffer = 8 * 1024 * 1024;
+      assert.deepEqual(resolveBuildIdentity(root), clean, 'ordinary resolver retains its existing status bound');
+      assert.deepEqual(counts, { combined: 8, show: 8, status: 8, lsFiles: 8 });
+    } finally { childProcess.execFileSync = original; syncBuiltinESMExports(); }
+  });
+  for (const [state, mutate] of [
+    ['staged', root => { writeFileSync(path.join(root, 'source'), 'dirty'); git(root, 'add', 'source'); }],
+    ['unstaged', root => writeFileSync(path.join(root, 'source'), 'dirty')],
+    ['untracked', root => writeFileSync(path.join(root, 'new-file'), 'dirty')],
+    ['deleted', root => unlinkSync(path.join(root, 'source'))],
+  ]) withFixture({}, root => {
+    mutate(root);
+    assert.equal(resolveBuildIdentity(root).dirty, true, `${state}: ordinary identity supports dirty trees`);
+    assert.throws(() => resolveCleanBuildIdentity(root), /release input must be clean/, state);
+  });
+  withFixture({}, root => {
+    writeFileSync(path.join(root, 'ops/release/version.txt'), '1.2.3-SNAPSHOT\n');
+    git(root, 'add', '.'); git(root, 'commit', '-qm', 'snapshot');
+    assert.equal(resolveCleanBuildIdentity(root).channel, 'snapshot');
+  });
+});
+
+test('clean identity maps porcelain overflow to release rejection inside its four snapshots', async () => {
+  const { resolveCleanBuildIdentity } = await import('../version.mjs');
+  withFixture({}, root => {
+    const original = childProcess.execFileSync;
+    let statusCalls = 0;
+    childProcess.execFileSync = function (command, args, options) {
+      if (command === 'git' && args[2] === 'status') {
+        statusCalls++;
+        assert.equal(options.maxBuffer, 100_000);
+        const error = new Error('synthetic ENOBUFS'); error.code = 'ENOBUFS'; throw error;
+      }
+      return original.call(this, command, args, options);
+    };
+    syncBuiltinESMExports();
+    try {
+      assert.throws(() => resolveCleanBuildIdentity(root), /build source identity unavailable/);
+      assert.equal(statusCalls, 1);
+    } finally { childProcess.execFileSync = original; syncBuiltinESMExports(); }
+  });
+});
+
+test('clean resolver rejects missing/invalid source, wrong roots, absent HEAD, and tracked symlinks', async () => {
+  const { resolveCleanBuildIdentity } = await import('../version.mjs');
+  withFixture({}, root => {
+    unlinkSync(path.join(root, 'ops/release/version.txt'));
+    git(root, 'add', '-u'); git(root, 'commit', '-qm', 'missing version');
+    assert.throws(() => resolveCleanBuildIdentity(root), /build source identity unavailable/);
+  });
+  withFixture({}, root => {
+    writeFileSync(path.join(root, 'ops/release/version.txt'), '0.0.0\n');
+    git(root, 'add', '.'); git(root, 'commit', '-qm', 'invalid version');
+    assert.throws(() => resolveCleanBuildIdentity(root), /build source identity unavailable/);
+  });
+  withFixture({ head: false }, root => assert.throws(() => resolveCleanBuildIdentity(root), /build source identity unavailable/));
+  withFixture({}, root => assert.throws(() => resolveCleanBuildIdentity(path.join(root, 'ops')), /build source identity unavailable/));
+  const noRepo = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-clean-no-git-'));
+  try { assert.throws(() => resolveCleanBuildIdentity(noRepo), /build source identity unavailable/); } finally { rmSync(noRepo, { recursive: true, force: true }); }
+  withFixture({}, root => {
+    unlinkSync(path.join(root, 'source'));
+    fs.symlinkSync('ops/release/version.txt', path.join(root, 'source'));
+    git(root, 'add', '-A'); git(root, 'commit', '-qm', 'tracked symlink');
+    assert.throws(() => resolveCleanBuildIdentity(root), /build source symlink forbidden/);
+  });
+});
+
+test('clean resolver rejects a tracked scan drift detected while opening an input', async () => {
+  const { resolveCleanBuildIdentity } = await import('../version.mjs');
+  withFixture({}, root => {
+    const originalOpen = fsDefault.openSync;
+    let changed = false;
+    fsDefault.openSync = function patchedOpen(filename, ...args) {
+      const fd = originalOpen.call(this, filename, ...args);
+      if (!changed && String(filename) === path.join(root, 'source')) {
+        changed = true;
+        writeFileSync(path.join(root, 'source'), 'raced');
+      }
+      return fd;
+    };
+    syncBuiltinESMExports();
+    try {
+      assert.throws(() => resolveCleanBuildIdentity(root), /build source changed during identity scan/);
+      assert.equal(changed, true);
+    } finally { fsDefault.openSync = originalOpen; syncBuiltinESMExports(); }
+  });
+});
+
+test('combined snapshot metadata supports roots with spaces, Unicode, and internal newlines', async () => {
+  const { resolveBuildIdentity } = await import('../version.mjs');
+  const parent = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-'));
+  const root = path.join(parent, '空 格\nrepo');
+  try {
+    mkdirSync(root); git(root, 'init', '-q'); git(root, 'config', 'user.email', 'fixture@example.invalid'); git(root, 'config', 'user.name', 'Fixture');
+    mkdirSync(path.join(root, 'ops/release'), { recursive: true });
+    writeFileSync(path.join(root, 'ops/release/version.txt'), '1.2.3\n'); writeFileSync(path.join(root, 'source'), 'fixture');
+    git(root, 'add', '.'); git(root, 'commit', '-qm', 'fixture');
+    const actual = resolveBuildIdentity(root);
+    assert.equal(actual.sourceCommit, execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim());
+  } finally { rmSync(parent, { recursive: true, force: true }); }
+});
+
+test('combined rev-parse rejects malformed or failed output and preserves no-HEAD rejection', async () => {
+  const { resolveBuildIdentity } = await import('../version.mjs');
+  for (const malformed of [() => 'malformed', root => `${root}\n`, root => `${root}\nnot-a-commit`]) {
+    withFixture({}, root => {
+      const original = childProcess.execFileSync;
+      childProcess.execFileSync = function (command, args, options) {
+        if (command === 'git' && args.includes('--show-toplevel') && args.includes('--verify')) return malformed(root);
+        return original.call(this, command, args, options);
+      };
+      syncBuiltinESMExports();
+      try { assert.throws(() => resolveBuildIdentity(root), /build source identity unavailable/); }
+      finally { childProcess.execFileSync = original; syncBuiltinESMExports(); }
+    });
+  }
+  withFixture({}, root => {
+    const original = childProcess.execFileSync;
+    childProcess.execFileSync = function (command, args, options) {
+      if (command === 'git' && args.includes('--show-toplevel') && args.includes('--verify')) throw new Error('synthetic git failure');
+      return original.call(this, command, args, options);
+    };
+    syncBuiltinESMExports();
+    try { assert.throws(() => resolveBuildIdentity(root), /build source identity unavailable/); }
+    finally { childProcess.execFileSync = original; syncBuiltinESMExports(); }
+  });
+  withFixture({ head: false }, root => assert.throws(() => resolveBuildIdentity(root), /build source identity unavailable/));
+  withFixture({}, root => assert.throws(() => resolveBuildIdentity(path.join(root, 'ops')), /build source identity unavailable/));
+});
+
+test('SHA-256 Git object identity uses an actual 64-digit commit', async () => {
+  const { resolveBuildIdentity } = await import('../version.mjs');
+  const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-sha256-'));
+  try {
+    git(root, 'init', '-q', '--object-format=sha256');
+    git(root, 'config', 'user.email', 'fixture@example.invalid'); git(root, 'config', 'user.name', 'Fixture');
+    mkdirSync(path.join(root, 'ops/release'), { recursive: true });
+    writeFileSync(path.join(root, 'ops/release/version.txt'), '1.2.3\n'); writeFileSync(path.join(root, 'source'), 'fixture');
+    git(root, 'add', '.'); git(root, 'commit', '-qm', 'fixture');
+    assert.match(resolveBuildIdentity(root).sourceCommit, /^[a-f0-9]{64}$/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+function runnerChildScript(readyFile, heartbeatFile, workerReadyFile, overflow = false) {
+  const workerCode = `const fs=require('node:fs');process.on('SIGTERM',()=>{});fs.writeFileSync(${JSON.stringify(heartbeatFile)},'x');fs.writeFileSync(${JSON.stringify(workerReadyFile)},JSON.stringify({worker:process.pid}));setInterval(()=>fs.appendFileSync(${JSON.stringify(heartbeatFile)},'x'),20);`;
+  return `const fs=require('node:fs');const cp=require('node:child_process');const worker=cp.spawn(process.execPath,['-e',${JSON.stringify(workerCode)}],{stdio:'ignore'});const until=Date.now()+2500;const poll=()=>{if(fs.existsSync(${JSON.stringify(workerReadyFile)})){fs.writeFileSync(${JSON.stringify(readyFile)},JSON.stringify({supervisor:process.pid,worker:JSON.parse(fs.readFileSync(${JSON.stringify(workerReadyFile)},'utf8')).worker}));${overflow ? "process.stdout.write('x'.repeat(1000));" : ''}setInterval(()=>{},1000);return;}if(Date.now()>until)process.exit(3);setTimeout(poll,5)};poll();`;
+}
+
+async function waitForRunnerHandshake(readyFile) {
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(readyFile)) return JSON.parse(fs.readFileSync(readyFile, 'utf8'));
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  throw new Error('runner child handshake timed out');
+}
+
+function pidIsDead(pid) {
+  try { process.kill(pid, 0); return false; }
+  catch (error) { if (error.code === 'ESRCH') return true; throw error; }
+}
+
+async function assertRunnerPidsReaped(pids) {
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    if (pids.every(pidIsDead)) return;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  assert.deepEqual(pids.filter(pid => !pidIsDead(pid)), [], 'runner-owned supervisor and worker must be ESRCH before test cleanup');
+}
+
+function spawnTracked(command, args, options = {}) {
+  const child = childProcess.spawn(command, args, { ...options, stdio: options.stdio ?? 'ignore' });
+  child.exitResult = new Promise(resolve => child.once('close', (code, signal) => resolve({ code, signal })));
+  return child;
+}
+
+async function waitForExit(child, timeoutMs = 3000) {
+  let deadline;
+  try {
+    return await Promise.race([
+      child.exitResult,
+      new Promise((_, reject) => { deadline = setTimeout(() => reject(new Error(`owned process ${child.pid} did not exit within ${timeoutMs}ms`)), timeoutMs); }),
+    ]);
+  } finally { clearTimeout(deadline); }
+}
+
+async function assertSentinelAlive(pid) {
+  assert.doesNotThrow(() => process.kill(pid, 0), 'independent sentinel remains alive');
+}
+
+test('runner timeout and overflow kill their owned groups without touching a detached sentinel', async () => {
+  const { runTests } = await import('../check.mjs');
+  for (const mode of ['timeout', 'overflow']) {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-runner-'));
+    const readyFile = path.join(root, 'ready'); const heartbeatFile = path.join(root, 'heartbeat'); const workerReadyFile = path.join(root, 'worker-ready');
+    const sentinelReady = path.join(root, 'sentinel-ready');
+    let supervisor;
+    let sentinel;
+    try {
+      sentinel = spawnTracked(process.execPath, ['-e', `require('node:fs').writeFileSync(${JSON.stringify(sentinelReady)},'ready');setInterval(()=>{},1000)`], { detached: true });
+      sentinel.unref();
+      const sentinelPid = sentinel.pid;
+      const sentinelDeadline = Date.now() + 3000;
+      while (!fs.existsSync(sentinelReady) && Date.now() < sentinelDeadline) await new Promise(resolve => setTimeout(resolve, 10));
+      assert.ok(fs.existsSync(sentinelReady), 'independent sentinel handshake');
+      const args = ['-e', runnerChildScript(readyFile, heartbeatFile, workerReadyFile, mode === 'overflow')];
+      const resultPromise = runTests({ command: process.execPath, args, timeoutMs: mode === 'timeout' ? 3000 : 10000, maxOutputBytes: mode === 'overflow' ? 64 : 10000 });
+      const ready = await waitForRunnerHandshake(readyFile);
+      supervisor = ready.supervisor;
+      await assertSentinelAlive(sentinelPid);
+      const result = await resultPromise;
+      assert.equal(result.status, 'FAIL');
+      assert.equal(result.reason, mode === 'timeout' ? 'test process timed out' : 'test process output exceeded limit');
+      await assertRunnerPidsReaped([ready.supervisor, ready.worker]);
+      await assertSentinelAlive(sentinelPid);
+    } finally {
+      if (supervisor) { try { process.kill(-supervisor, 'SIGKILL'); } catch {} }
+      if (sentinel?.pid) { try { process.kill(-sentinel.pid, 'SIGKILL'); } catch {} }
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('runner forwards parent TERM and INT after a real worker handshake and restores listeners', async () => {
+  const { runTests } = await import('../check.mjs');
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-runner-cancel-'));
+    const readyFile = path.join(root, 'ready'); const heartbeatFile = path.join(root, 'heartbeat'); const workerReadyFile = path.join(root, 'worker-ready');
+    const termBefore = process.listenerCount('SIGTERM'); const intBefore = process.listenerCount('SIGINT');
+    let ready;
+    try {
+      const resultPromise = runTests({ command: process.execPath, args: ['-e', runnerChildScript(readyFile, heartbeatFile, workerReadyFile)], timeoutMs: 10000 });
+      ready = await waitForRunnerHandshake(readyFile);
+      process.emit(signal);
+      const result = await resultPromise;
+      assert.equal(result.status, 'FAIL'); assert.equal(result.reason, 'test process cancelled');
+      await assertRunnerPidsReaped([ready.supervisor, ready.worker]);
+      assert.equal(process.listenerCount('SIGTERM'), termBefore);
+      assert.equal(process.listenerCount('SIGINT'), intBefore);
+    } finally {
+      if (ready) {
+        try { process.kill(-ready.supervisor, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+        for (const pid of [ready.supervisor, ready.worker]) { try { process.kill(pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; } }
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('runner private child group does not escape real wrapper-group TERM and INT cancellation', async () => {
+  const wrapperModule = new URL('../check.mjs', import.meta.url).href;
+  for (const signal of ['SIGTERM', 'SIGINT']) {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-runner-wrapper-'));
+    const readyFile = path.join(root, 'ready'); const childReady = path.join(root, 'child-ready');
+    const heartbeatFile = path.join(root, 'heartbeat'); const workerReadyFile = path.join(root, 'worker-ready');
+    const sentinelReady = path.join(root, 'sentinel-ready');
+    const wrapperCode = `import fs from 'node:fs';import {runTests} from ${JSON.stringify(wrapperModule)};const args=['-e',${JSON.stringify(runnerChildScript(childReady, heartbeatFile, workerReadyFile))}];const pending=runTests({command:process.execPath,args,timeoutMs:15000});const end=Date.now()+4000;while(!fs.existsSync(${JSON.stringify(childReady)})&&Date.now()<end)await new Promise(r=>setTimeout(r,10));if(!fs.existsSync(${JSON.stringify(childReady)}))process.exit(4);fs.writeFileSync(${JSON.stringify(readyFile)},JSON.stringify({wrapper:process.pid,...JSON.parse(fs.readFileSync(${JSON.stringify(childReady)},'utf8'))}));const result=await pending;process.exitCode=result.status==='PASS'?0:1;`;
+    let wrapper; let sentinel;
+    let owned = []; let ownedGroupLeaders = [];
+    try {
+      sentinel = spawnTracked(process.execPath, ['-e', `require('node:fs').writeFileSync(${JSON.stringify(sentinelReady)},'ready');setInterval(()=>{},1000)`], { detached: true });
+      const sentinelPid = sentinel.pid;
+      const sentinelDeadline = Date.now() + 3000;
+      while (!fs.existsSync(sentinelReady) && Date.now() < sentinelDeadline) await new Promise(resolve => setTimeout(resolve, 10));
+      assert.ok(fs.existsSync(sentinelReady), 'independent sentinel handshake');
+      wrapper = spawnTracked(process.execPath, ['--input-type=module', '-e', wrapperCode], { detached: true });
+      const ready = await waitForRunnerHandshake(readyFile);
+      owned = [ready.wrapper, ready.supervisor, ready.worker];
+      ownedGroupLeaders = [ready.wrapper, ready.supervisor];
+      await assertSentinelAlive(sentinelPid);
+      process.kill(-wrapper.pid, signal);
+      await new Promise(resolve => setTimeout(resolve, 500));
+      if (!pidIsDead(ready.wrapper)) {
+        try { process.kill(-wrapper.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+      }
+      const exit = await waitForExit(wrapper, 3000);
+      assert.ok(exit.code !== 0 || exit.signal !== null, 'wrapper must not report successful completion');
+      await assertRunnerPidsReaped(owned);
+      await assertSentinelAlive(sentinelPid);
+    } finally {
+      if (wrapper?.pid && !pidIsDead(wrapper.pid)) { try { process.kill(-wrapper.pid, 'SIGKILL'); } catch {} }
+      // 组长退出不代表同组后代已退出；清理仍使用本次握手绑定的组。
+      for (const pid of ownedGroupLeaders) { try { process.kill(-pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; } }
+      if (wrapper) await waitForExit(wrapper, 3000).catch(() => {});
+      if (sentinel?.pid && !pidIsDead(sentinel.pid)) { try { process.kill(-sentinel.pid, 'SIGKILL'); } catch {} }
+      if (sentinel?.pid) await waitForExit(sentinel, 3000).catch(() => {});
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('runner preserves TAP pass, nonzero exit, and spawn-error results', async () => {
+  const { runTests } = await import('../check.mjs');
+  const tap = 'TAP version 13\n1..1\nok 1 - runner direct pass\n# tests 1\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n';
+  const pass = await runTests({ command: process.execPath, args: ['-e', `process.stdout.write(${JSON.stringify(tap)})`] });
+  assert.deepEqual(pass, { status: 'PASS', checks_run: 1, failures: 0, errors: 0, skipped: 0, reason: '' });
+  const nonzero = await runTests({ command: process.execPath, args: ['-e', 'process.exit(7)'] });
+  assert.equal(nonzero.status, 'FAIL');
+  const spawnError = await runTests({ command: '/not/a/real/runner', args: [] });
+  assert.equal(spawnError.status, 'FAIL'); assert.equal(spawnError.errors, 1);
 });

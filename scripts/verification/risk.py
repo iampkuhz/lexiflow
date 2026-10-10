@@ -22,6 +22,7 @@ from scripts.verification.scope import (
     select_checks_for_changes,
     uncovered_changed_paths,
 )
+from scripts.verification.yaml_input import parse_yaml_input
 
 _POLICY_PATHS = (
     "harness/agent-policy.manifest.yaml",
@@ -145,7 +146,7 @@ def _matches_pattern(path: str, pattern: str) -> bool:
 
 def _risk_policy(root: Path) -> dict[str, Any]:
     try:
-        document = yaml.safe_load(
+        document = parse_yaml_input(
             _read_regular(root, "harness/agent-policy.manifest.yaml")
         )
         policy = document["risk_classification"]
@@ -202,7 +203,7 @@ def _base_bytes(root: Path, base: str, path: str) -> bytes | None:
 def formal_only_ids(root: Path) -> set[str]:
     """读取正式发行专属 Check，并加入其变更视图 ID。"""
     try:
-        document = yaml.safe_load(_read_regular(root, "harness/ci-policy.yaml"))
+        document = parse_yaml_input(_read_regular(root, "harness/ci-policy.yaml"))
         identifiers = document["formal_only_check_ids"]
         if (
             not isinstance(identifiers, list)

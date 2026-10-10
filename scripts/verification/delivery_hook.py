@@ -12,6 +12,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY_PATH = "harness/delivery-hooks.json"
+STOP_EVENT = "Stop"
+DISABLE_ENVIRONMENT = "LEXIFLOW_DELIVERY_HOOK_DISABLE"
+INTERMEDIATE_MARKER = "<!-- lexiflow:intermediate -->"
 INPUT_LIMIT = 65536
 
 
@@ -40,7 +43,7 @@ def decision(status: str, detail: str, active: bool = False) -> dict:
 
 
 def read_policy(root: Path) -> dict:
-    """读取 Stop 策略并校验模式、超时和中间回合标记。"""
+    """读取 Stop 的运行参数并校验模式、超时和进度间隔。"""
     try:
         policy = json.loads((root / POLICY_PATH).read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -51,12 +54,8 @@ def read_policy(root: Path) -> dict:
         raise ValueError(f"{POLICY_PATH} 顶层必须是对象")
     if policy.get("mode") == "off":
         return policy
-    if policy.get("mode") != "enforce" or policy.get("event") != "Stop":
-        raise ValueError(f"{POLICY_PATH} 要求 mode=enforce、event=Stop")
-    if policy.get("disable_environment") != "LEXIFLOW_DELIVERY_HOOK_DISABLE":
-        raise ValueError(f"{POLICY_PATH} disable_environment 必须使用固定逃生变量")
-    if policy.get("intermediate_marker") != "<!-- lexiflow:intermediate -->":
-        raise ValueError(f"{POLICY_PATH} intermediate_marker 无效")
+    if policy.get("mode") != "enforce":
+        raise ValueError(f"{POLICY_PATH} 要求 mode=enforce")
     for key, maximum in (("timeout_seconds", 1800), ("heartbeat_seconds", 30)):
         value = policy.get(key)
         if type(value) is not int or not 1 <= value <= maximum:
@@ -257,13 +256,13 @@ def evaluate(root: Path, event: object) -> dict:
     """对单次 Stop 事件决定是否运行交付检查；中间回合不签 PASS。"""
     from scripts.verification.execution import Interrupted, bounded
 
-    if os.environ.get("LEXIFLOW_DELIVERY_HOOK_DISABLE") == "1":
+    if os.environ.get(DISABLE_ENVIRONMENT) == "1":
         return {
             "systemMessage": "LexiFlow 交付 BLOCKED：Hook 已显式停用，未验证，不代表 PASS。"
         }
     if not isinstance(event, dict):
         return decision("BLOCKED", "Hook 输入必须是 JSON 对象", True)
-    if event.get("hook_event_name") != "Stop":
+    if event.get("hook_event_name") != STOP_EVENT:
         return {}
     active = event.get("stop_hook_active") is True
     try:
@@ -274,12 +273,12 @@ def evaluate(root: Path, event: object) -> dict:
             }
         message = event.get("last_assistant_message")
         if isinstance(message, str) and message.rstrip().endswith(
-            "\n" + policy["intermediate_marker"]
+            "\n" + INTERMEDIATE_MARKER
         ):
             return {
                 "systemMessage": "LexiFlow：中间回合，未执行交付检查；不代表 PASS。"
             }
-        if message == policy["intermediate_marker"]:
+        if message == INTERMEDIATE_MARKER:
             return {
                 "systemMessage": "LexiFlow：中间回合，未执行交付检查；不代表 PASS。"
             }
@@ -345,7 +344,7 @@ def main() -> int:
             )
         )
         return 0
-    if os.environ.get("LEXIFLOW_DELIVERY_HOOK_DISABLE") == "1":
+    if os.environ.get(DISABLE_ENVIRONMENT) == "1":
         result = evaluate(ROOT, {})
     else:
         try:

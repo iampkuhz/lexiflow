@@ -4,7 +4,7 @@ import { lstatSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { isIP } from 'node:net';
 import path from 'node:path';
-import { checkReleaseSource, resolveBuildIdentity } from './version.mjs';
+import { resolveCleanBuildIdentity } from './version.mjs';
 import { verifyJarIdentity } from './embedded-identity.mjs';
 import { validateRelativePath, verifyContainedFile } from './manifest.mjs';
 
@@ -103,11 +103,14 @@ function buildCommands(platform, javaId, postgresId, javaReference, postgresRefe
     `io.lexiflow.build-id=${buildIdentity.buildId}`,
     `io.lexiflow.source-sha256=${buildIdentity.sourceSha256}`,
   ].flatMap((label) => ['--label', label]);
+  const deploymentVersion = buildIdentity.baseVersion.toLowerCase();
+  const apiLabels = [...labels, '--label', 'io.lexiflow.image-role=api', '--label', `io.lexiflow.deployment-version=${deploymentVersion}`];
+  const postgresLabels = [...labels, '--label', 'io.lexiflow.image-role=postgres', '--label', `io.lexiflow.deployment-version=${deploymentVersion}`];
   return [
     ['docker', 'image', 'inspect', javaId],
     ['docker', 'image', 'inspect', postgresId],
-    ['docker', 'build', '--pull=false', '--network=none', '--platform', platform, ...labels, '--build-arg', `JAVA_RUNTIME_IMAGE=${javaReference}`, '--file', 'Dockerfile', '--iidfile', 'api.iid', '.'],
-    ['docker', 'build', '--pull=false', '--network=none', '--platform', platform, ...labels, '--build-arg', `POSTGRES_RUNTIME_IMAGE=${postgresReference}`, '--file', 'Dockerfile.postgres', '--iidfile', 'postgres.iid', '.'],
+    ['docker', 'build', '--pull=false', '--network=none', '--platform', platform, ...apiLabels, '--build-arg', `JAVA_RUNTIME_IMAGE=${javaReference}`, '--file', 'Dockerfile', '--iidfile', 'api.iid', '.'],
+    ['docker', 'build', '--pull=false', '--network=none', '--platform', platform, ...postgresLabels, '--build-arg', `POSTGRES_RUNTIME_IMAGE=${postgresReference}`, '--file', 'Dockerfile.postgres', '--iidfile', 'postgres.iid', '.'],
   ];
 }
 
@@ -115,12 +118,9 @@ export async function prepareImageBuild(input) {
   if (!hasKeys(input, ['repoRoot', 'artifactRoot', 'descriptor'])) reject('INPUT_INVALID');
   const { repoRoot, artifactRoot, descriptor } = input;
   try { safeAbsoluteDirectory(repoRoot); safeAbsoluteDirectory(artifactRoot); } catch { reject('INPUT_INVALID'); }
-  let source;
-  try { source = checkReleaseSource(repoRoot); } catch { reject('RELEASE_SOURCE_REJECTED'); }
   let buildIdentity;
-  try { buildIdentity = resolveBuildIdentity(repoRoot); } catch { reject('RELEASE_SOURCE_REJECTED'); }
-  if (buildIdentity.dirty || buildIdentity.sourceCommit !== source.sourceCommit
-    || buildIdentity.softwareVersion !== source.softwareVersion) reject('RELEASE_SOURCE_REJECTED');
+  try { buildIdentity = resolveCleanBuildIdentity(repoRoot); } catch { reject('RELEASE_SOURCE_REJECTED'); }
+  const source = { softwareVersion: buildIdentity.softwareVersion, sourceCommit: buildIdentity.sourceCommit };
   try {
     if (!hasKeys(descriptor, ['schemaVersion', 'softwareVersion', 'sourceCommit', 'jar', 'baseImages'])
       || descriptor.schemaVersion !== 1 || descriptor.softwareVersion !== source.softwareVersion
@@ -182,12 +182,9 @@ export async function prepareImageBuild(input) {
       ];
       return { platform, buildIdentity, javaRuntime: { ...images.javaRuntime }, postgresRuntime: { ...images.postgresRuntime }, contextFiles, commands: buildCommands(platform, images.javaRuntime.imageId, images.postgresRuntime.imageId, images.javaRuntime.reference, images.postgresRuntime.reference, buildIdentity) };
     });
-    let finalSource;
-    try { finalSource = checkReleaseSource(repoRoot); } catch { reject('RELEASE_SOURCE_CHANGED'); }
     let finalBuildIdentity;
-    try { finalBuildIdentity = resolveBuildIdentity(repoRoot); } catch { reject('RELEASE_SOURCE_CHANGED'); }
-    if (source.sourceCommit !== finalSource.sourceCommit || source.softwareVersion !== finalSource.softwareVersion
-      || JSON.stringify(buildIdentity) !== JSON.stringify(finalBuildIdentity)) reject('RELEASE_SOURCE_CHANGED');
+    try { finalBuildIdentity = resolveCleanBuildIdentity(repoRoot); } catch { reject('RELEASE_SOURCE_CHANGED'); }
+    if (JSON.stringify(buildIdentity) !== JSON.stringify(finalBuildIdentity)) reject('RELEASE_SOURCE_CHANGED');
     const baseImageLock = { path: BASE_IMAGE_LOCK_PATH, bytes: lock.bytes, sha256: lock.sha256 };
     return { schemaVersion: 1, softwareVersion: source.softwareVersion, sourceCommit: source.sourceCommit, buildIdentity, jar, templates, baseImageLock, platforms };
   } catch (error) {

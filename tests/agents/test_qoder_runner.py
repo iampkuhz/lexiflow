@@ -268,27 +268,12 @@ class QoderRunnerContractTest(unittest.TestCase):
     def test_token_and_rework_limits_match_machine_contracts(self) -> None:
         root = Path(__file__).resolve().parents[2]
         policy = yaml.safe_load((root / "harness/agent-policy.manifest.yaml").read_text())
-        runtime = yaml.safe_load((root / "harness/agent-runtime.manifest.yaml").read_text())
-        workstreams = yaml.safe_load((root / "planning/workstreams.yaml").read_text())
-        template = yaml.safe_load((root / "planning/task-template.yaml").read_text())
-
-        qoder_contracts = (
-            policy["qoder_delegation"],
-            workstreams["orchestration_policy"]["qoder"],
-            template["execution"]["qoder"],
-        )
-        for contract in qoder_contracts:
-            self.assertEqual(contract["max_rework_rounds"], 1)
-            self.assertEqual(contract["max_total_runs_per_task_before_main_review"], 2)
-            self.assertEqual(contract["max_prompt_characters"], qoder_task.MAX_PROMPT_CHARACTERS)
-        self.assertEqual(policy["qoder_delegation"]["work_package"]["estimated_minutes"], {"min": 10, "max": 360})
-        self.assertEqual(policy["qoder_delegation"]["work_package"]["minimum_catalog_tasks"], 1)
-        self.assertEqual(workstreams["orchestration_policy"]["qoder"]["work_package_estimated_minutes"], {"min": 10, "max": 360})
-        self.assertEqual(template["execution"]["qoder"]["work_package_estimated_minutes"], {"min": 10, "max": 360})
-        self.assertEqual(
-            policy["subagent_protocol"]["caller_required_input"],
-            runtime["subagent_protocol"]["caller_required_input"],
-        )
+        contract = policy["qoder_delegation"]
+        self.assertEqual(contract["max_rework_rounds"], 1)
+        self.assertEqual(contract["max_total_runs_per_task_before_main_review"], 2)
+        self.assertEqual(contract["max_prompt_characters"], qoder_task.MAX_PROMPT_CHARACTERS)
+        self.assertEqual(contract["work_package"]["estimated_minutes"], {"min": 10, "max": 360})
+        self.assertEqual(contract["work_package"]["minimum_catalog_tasks"], 1)
         expected_codex_model_policy = {
             "default_model": "gpt-6-luna",
             "default_reasoning_effort": "medium",
@@ -313,71 +298,17 @@ class QoderRunnerContractTest(unittest.TestCase):
         policy_model = dict(policy["subagent_protocol"]["codex_model_policy"])
         policy_model.pop("routine_routing")
         self.assertEqual(policy_model, expected_codex_model_policy)
-        routing_source = "harness/agent-policy.manifest.yaml#subagent_protocol.codex_model_policy"
-        self.assertEqual(runtime["subagent_protocol"]["codex_model_policy"], {
-            **expected_codex_model_policy, "routing_source": routing_source,
-        })
-
-        codex_contracts = (
-            workstreams["orchestration_policy"]["codex_subagents"],
-            template["execution"]["codex_subagent"],
-        )
-        policy_package = policy["subagent_protocol"]["delegation_work_package"]
+        package = policy["subagent_protocol"]["delegation_work_package"]
+        self.assertEqual(package["identity_fields"], ["work_package_id", "task_ids"])
+        self.assertTrue(package["per_task_outcome_evidence_required"])
+        self.assertEqual(package["preferred_minutes"], {"min": 10, "max": 360})
+        self.assertEqual(package["minimum_total_estimated_minutes"], 10)
+        self.assertEqual(package["target_maximum_total_estimated_minutes"], 360)
+        self.assertEqual(package["minimum_catalog_tasks"], 1)
         completion_signal = policy["subagent_protocol"]["completion_signal"]
         self.assertEqual(completion_signal["allowed_fields_applies_to"], "qoder-task-signal")
         self.assertEqual(completion_signal["allowed_fields"], completion_signal["qoder_task_allowed_fields"])
         self.assertEqual(policy["subagent_protocol"]["caller_required_input_applies_to"], "qoder-task-handoff")
-        self.assertEqual(
-            runtime["subagent_protocol"]["codex_work_package_caller_required_input"],
-            policy["subagent_protocol"]["codex_work_package_caller_required_input"],
-        )
-        self.assertEqual(
-            runtime["subagent_protocol"]["codex_work_package_runner_identity"],
-            policy["subagent_protocol"]["codex_work_package_runner_identity"],
-        )
-        for contract in codex_contracts:
-            self.assertEqual(contract["model_policy"]["default_model"], "gpt-6-luna")
-            self.assertEqual(contract["model_policy"]["routine_model"], "gpt-6-luna")
-            self.assertEqual(contract["model_policy"]["routine_reasoning_effort"], "low")
-            self.assertEqual(contract["model_policy"]["routing_source"], routing_source)
-            self.assertTrue(contract["model_policy"]["explicit_model_argument_required"])
-            self.assertEqual(contract["model_policy"]["allowed_escalation_models"], ["gpt-6-sol"])
-            self.assertEqual(contract["model_policy"]["user_only_models"], ["gpt-6-astra"])
-            self.assertEqual(contract["max_active_subagents"], policy["codex_dispatch"]["max_active_subagents"])
-            self.assertEqual(contract["default_fork_turns"], "none")
-            self.assertEqual(
-                contract["completion_signal_fields"],
-                policy["subagent_protocol"]["completion_signal"]["codex_work_package_allowed_fields"],
-            )
-            self.assertEqual(contract["max_blocking_findings"], 3)
-            self.assertFalse(contract["full_context_or_logs_in_callback"])
-            package = contract["delegation_work_package"]
-            self.assertEqual(package, policy_package)
-            self.assertEqual(package["identity_fields"], ["work_package_id", "task_ids"])
-            self.assertTrue(package["per_task_outcome_evidence_required"])
-            self.assertEqual(package["preferred_minutes"], {"min": 10, "max": 360})
-            self.assertEqual(package["minimum_total_estimated_minutes"], 10)
-            self.assertEqual(package["target_maximum_total_estimated_minutes"], 360)
-            self.assertEqual(package["minimum_catalog_tasks"], 1)
-
-        runtime_package = runtime["subagent_protocol"]["delegation_work_package"]
-        self.assertEqual(runtime_package["source"], "harness/agent-policy.manifest.yaml")
-        self.assertEqual(runtime_package["identity_fields"], policy_package["identity_fields"])
-        self.assertEqual(runtime_package["preferred_minutes"], policy_package["preferred_minutes"])
-        self.assertEqual(
-            runtime_package["minimum_total_estimated_minutes"],
-            policy_package["minimum_total_estimated_minutes"],
-        )
-        self.assertEqual(
-            runtime_package["target_maximum_total_estimated_minutes"],
-            policy_package["target_maximum_total_estimated_minutes"],
-        )
-        self.assertEqual(runtime_package["minimum_catalog_tasks"], policy_package["minimum_catalog_tasks"])
-        self.assertEqual(
-            runtime_package["per_task_outcome_evidence_required"],
-            policy_package["per_task_outcome_evidence_required"],
-        )
-        self.assertEqual(runtime_package["completion_callback"], "compact-signal-only")
 
     def test_routine_model_routing_preserves_risk_and_role_boundaries(self) -> None:
         root = Path(__file__).resolve().parents[2]

@@ -240,8 +240,7 @@ def _kill_group(process: subprocess.Popen[bytes]) -> bool:
             # zombie. Successful direct-child reap plus confirmed group absence
             # is the cleanup postcondition, regardless of earlier signal errors.
             return True
-        if final_group_state is None:
-            return False
+        # Unknown is not proof of cleanup; keep observing within the same deadline.
         time.sleep(0.02)
     return False
 

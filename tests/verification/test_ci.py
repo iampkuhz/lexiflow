@@ -12,6 +12,8 @@ from unittest.mock import patch
 import yaml
 
 from scripts.verification import ci
+from scripts.verification.declarations import load_declarations
+from tests.verification.declaration_fixtures import write_declarations
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -24,12 +26,8 @@ class CiQuickTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / "harness").mkdir()
         (self.root / "scripts/repository").mkdir(parents=True)
-        self.declarations = yaml.safe_load(
-            (ROOT / "harness/module-checks.yaml").read_text()
-        )
-        (self.root / "harness/module-checks.yaml").write_text(
-            yaml.safe_dump(self.declarations)
-        )
+        self.declarations = load_declarations(ROOT)
+        write_declarations(self.root / "harness/module-checks.yaml", self.declarations["checks"])
         self.policy = {
             "schema_version": "lexiflow.ci-quick.v1",
             "always_required_check_ids": [
@@ -77,7 +75,7 @@ class CiQuickTests(unittest.TestCase):
         for path, expected in [
             ("backend/product/api/src/X.java", "eng.backend.delivery"),
             ("extension/src/content.ts", "eng.extension.quality"),
-            ("docs/product/x.md", "eng.repository.docs"),
+            ("docs/system/x.md", "eng.repository.docs"),
             ("ops/release/version.txt", "eng.release.version"),
         ]:
             with self.subTest(path=path):
@@ -251,14 +249,7 @@ class CiQuickTests(unittest.TestCase):
                 )
                 for check in declarations:
                     check["command"] = ["python3", "-c", f"print({payload!r})"]
-                (self.root / ci.MODULES).write_text(
-                    yaml.safe_dump(
-                        {
-                            "schema_version": "lexiflow.module-checks.v1",
-                            "checks": declarations,
-                        }
-                    )
-                )
+                write_declarations(self.root / ci.MODULES, declarations)
                 result = ci.run(self.root, execute=True)
                 self.assertEqual(result["status"], status, result)
                 self.assertEqual(result["checks_executed"], 1)

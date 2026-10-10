@@ -26,7 +26,7 @@ export function createDeploymentPlan(input) {
       || (target.authMode === 'development-trust' && (target.user !== 'postgres'
         || !/^[a-f0-9]{64}$/.test(target.developmentIdentityFingerprint ?? '')))) fail('DEPLOYMENT_DATABASE_TARGET_INVALID');
   if (!['DATABASE_ABSENT', 'OK', 'SCHEMA_MISSING', 'SCHEMA_INVALID', 'RECORD_MISSING', 'RECORD_INVALID', 'GENERATION_CHANGED'].includes(input.dataReason)) fail('DEPLOYMENT_DATA_REASON_INVALID');
-  if (!['NEW_INSTALL', 'BUILD_CHANGED', 'START_REQUIRED', 'CURRENT'].includes(input.applicationReason)) fail('DEPLOYMENT_APPLICATION_REASON_INVALID');
+  if (!['NEW_INSTALL', 'INSTALL_REFRESH', 'BUILD_CHANGED', 'START_REQUIRED', 'CURRENT'].includes(input.applicationReason)) fail('DEPLOYMENT_APPLICATION_REASON_INVALID');
   return sortValue({ schema: 1, operation: input.operation, installation: input.installation,
     target: { buildId: input.targetBuildId, generationVersion: input.generationVersion },
     database: { target, fingerprint: input.databaseFingerprint, takeover: Boolean(input.takeover), create: Boolean(input.createDatabase) },
@@ -55,7 +55,7 @@ export async function confirmDeploymentIntent({ port, user, schema = 'lexiflow_r
   const authority = authMode === 'development-trust' ? '已识别本仓库 PostgreSQL 17 开发容器，postgres 无密码 trust；仅管理 lexiflow_release，不接管容器、卷或 public。'
     : authMode === 'password' ? '沿用本安装记录的外部目标与受限凭据；仅管理 lexiflow_release，不接管数据库服务。'
       : '使用本安装专用 PostgreSQL；仅管理 lexiflow_release。';
-  output.write(`目标：127.0.0.1:${port}/lexiflow；用户 ${user}；schema ${schema}。${authority} 同版本且完整时复用，数据导入版本变化或完整性异常时替换；确认仅授权本次调用。\n使用本机 LexiFlow 数据库，并在数据导入版本变化时自动替换资料？[y/N] `);
+  output.write(`目标：127.0.0.1:${port}/lexiflow；用户 ${user}；schema ${schema}。${authority} 本次 install/upgrade 将替换同软件版本的本安装 API/托管 PostgreSQL 容器与镜像，保留数据库卷；失败后可能需要重试，不能回退已删除的同版本二进制。数据导入版本变化或完整性异常时替换资料；确认仅授权本次调用。\n继续安装并使用本机 LexiFlow 数据库？[y/N] `);
   const line = await new Promise((resolve, reject) => {
     let value = '';
     let settled = false;

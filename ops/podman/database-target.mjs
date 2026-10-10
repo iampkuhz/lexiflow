@@ -19,47 +19,112 @@ const schemaSql = `SELECT json_build_object(
 const clientScript = 'export PGPASSWORD="$(cat /run/secrets/db-password)"; exec psql --no-psqlrc --quiet --no-align --tuples-only --set ON_ERROR_STOP=1 --host host.containers.internal --port "$1" --username "$2" --dbname "$3" --command "$4"';
 const trustClientScript = 'unset PGPASSWORD PGPASSFILE; exec psql --no-psqlrc --quiet --no-align --tuples-only --no-password --set ON_ERROR_STOP=1 --host host.containers.internal --port "$1" --username "$2" --dbname "$3" --command "$4"';
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
-function developmentComposeSha256(source, port) {
+function composeFacts(source, port) {
   let content;
   try { content = fs.readFileSync(source, 'utf8'); } catch { fail('DEVELOPMENT_DATABASE_SOURCE_INVALID'); }
-  // 只核对 trust 的最小必要 Compose 子集；Redis、注释和 healthcheck 不授权数据库连接。
-  const lines = content.split(/\r?\n/).filter(line => line.trim() && !/^\s*#/.test(line));
-  const top = lines.filter(line => /^[a-z][a-z0-9_-]*:/.test(line));
-  const topNames = top.map(line => line.split(':', 1)[0]);
-  if (port !== 15432 || topNames.length !== 3 || !['name', 'services', 'volumes'].every(name => topNames.filter(value => value === name).length === 1)
-      || top.find(line => line.startsWith('name:')) !== 'name: lexiflow-local') fail('DEVELOPMENT_DATABASE_SOURCE_INVALID');
-  const servicesStart = lines.indexOf('services:');
-  const servicesEnd = lines.findIndex((line, index) => index > servicesStart && /^[a-z][a-z0-9_-]*:/.test(line));
-  const services = lines.slice(servicesStart + 1, servicesEnd < 0 ? undefined : servicesEnd);
-  const postgresHeaders = services.map((line, index) => /^  postgres:$/.test(line) ? index : -1).filter(index => index >= 0);
-  if (postgresHeaders.length !== 1) fail('DEVELOPMENT_DATABASE_SOURCE_INVALID');
-  const nextService = services.findIndex((line, index) => index > postgresHeaders[0] && /^  [a-z][a-z0-9_-]*:/.test(line));
-  const postgres = services.slice(postgresHeaders[0] + 1, nextService < 0 ? undefined : nextService);
-  if (postgres.some(line => !line.startsWith('    ') || /\$\{|<<:|[&*!]|PASSWORD|PASSFILE/i.test(line)))
-    fail('DEVELOPMENT_DATABASE_SOURCE_INVALID');
-  const sections = new Map();
-  let key;
-  for (const line of postgres) {
-    const header = /^    ([a-z][a-z0-9_-]*):(?: (.*))?$/.exec(line);
-    if (header) {
-      key = header[1];
-      if (sections.has(key) || !['image', 'environment', 'ports', 'volumes', 'healthcheck'].includes(key)) fail('DEVELOPMENT_DATABASE_SOURCE_INVALID');
-      sections.set(key, [line]);
+  // 仅接受无 tag/alias/合并键的 YAML 映射、列表与标量；不执行 YAML 扩展或隐式类型转换。
+  const lines = content.split(/\r?\n/).map(raw => {
+    if (/\t/.test(raw.slice(0, raw.search(/\S|$/)))) fail('DEVELOPMENT_DATABASE_SOURCE_INVALID');
+    let quote = '', escaped = false, end = raw.length;
+    for (let i = 0; i < raw.length; i++) {
+      const ch = raw[i];
+      if (escaped) { escaped = false; continue; }
+      if (quote === '"' && ch === '\\') { escaped = true; continue; }
+      if ((ch === '"' || ch === "'") && (!quote || quote === ch)) { quote = quote ? '' : ch; continue; }
+      if (ch === '#' && !quote && (i === 0 || /\s/.test(raw[i - 1]))) { end = i; break; }
+    }
+    const text = raw.slice(0, end).trimEnd();
+    return text.trim() ? { indent: text.length - text.trimStart().length, text: text.trimStart() } : null;
+  }).filter(Boolean);
+  // 只解析 root identity、postgres 与其声明的数据卷；其他服务/卷内容可以使用 YAML 的其他合法语法。
+  const relevant = [];
+  let area = null, service = null, databaseVolume = false, skipHealthcheck = false;
+  let serviceIndent = null, serviceFieldIndent = null, volumeIndent = null;
+  const nextChildIndent = (index, parentIndent) => lines.slice(index + 1)
+    .filter(item => item.indent > parentIndent)[0]?.indent ?? null;
+  const keyOf = text => {
+    const match = /^(?:([A-Za-z0-9_.-]+)|("[^"]+"|'[^']+')):\s*(.*)$/.exec(text);
+    if (!match) return null;
+    return match[1] ?? (match[2][0] === '"' ? JSON.parse(match[2]) : match[2].slice(1, -1).replace(/''/g, "'"));
+  };
+  for (const line of lines) {
+    if (line.indent === 0) {
+      const key = keyOf(line.text);
+      area = ['services', 'volumes'].includes(key) ? key : null;
+      service = null; databaseVolume = false; skipHealthcheck = false;
+      serviceIndent = area === 'services' ? nextChildIndent(lines.indexOf(line), line.indent) : null;
+      volumeIndent = area === 'volumes' ? nextChildIndent(lines.indexOf(line), line.indent) : null;
+      serviceFieldIndent = null;
+      if (key === 'name' || area) relevant.push(line);
+      continue;
+    }
+    if (area === 'services' && line.indent === serviceIndent) {
+      service = keyOf(line.text);
+      skipHealthcheck = false;
+      serviceFieldIndent = service === 'postgres' ? nextChildIndent(lines.indexOf(line), line.indent) : null;
+      if (service === 'postgres') relevant.push(line);
+      continue;
+    }
+    if (area === 'services' && service === 'postgres') {
+      if (line.indent === serviceFieldIndent && keyOf(line.text) !== null) skipHealthcheck = keyOf(line.text) === 'healthcheck';
+      if (!skipHealthcheck) relevant.push(line);
+    }
+    if (area === 'volumes' && line.indent === volumeIndent) {
+      databaseVolume = keyOf(line.text) === 'lexiflow-postgres-data';
+      if (databaseVolume) relevant.push(line);
+      continue;
+    }
+    if (area === 'volumes' && databaseVolume) relevant.push(line);
+  }
+  lines.splice(0, lines.length, ...relevant);
+  const scalar = value => {
+    if (value.startsWith('"')) { try { return JSON.parse(value); } catch { fail('DEVELOPMENT_DATABASE_SOURCE_INVALID'); } }
+    if (value.startsWith('[') || value.startsWith('{')) { try { return JSON.parse(value); } catch { fail('DEVELOPMENT_DATABASE_SOURCE_INVALID'); } }
+    if (value.startsWith("'")) {
+      if (!value.endsWith("'")) fail('DEVELOPMENT_DATABASE_SOURCE_INVALID');
+      return value.slice(1, -1).replace(/''/g, "'");
+    }
+    if (!value || /^(?:[&*!]|<<:|[|>])/.test(value) || /\$\{|\[|\]|\{|\}|\s+#/.test(value)) fail('DEVELOPMENT_DATABASE_SOURCE_INVALID');
+    return value;
+  };
+  const root = Object.create(null); const stack = [{ indent: -1, node: root }];
+  for (let i = 0; i < lines.length; i++) {
+    const { indent, text } = lines[i];
+    while (stack.length > 1 && (indent < stack.at(-1).indent
+      || indent === stack.at(-1).indent && !(text.startsWith('- ') && Array.isArray(stack.at(-1).node)))) stack.pop();
+    const parent = stack.at(-1).node;
+    if (text.startsWith('- ')) {
+      if (!Array.isArray(parent)) fail('DEVELOPMENT_DATABASE_SOURCE_INVALID');
+      parent.push(scalar(text.slice(2).trim()));
     } else {
-      if (!key || !line.startsWith('      ')) fail('DEVELOPMENT_DATABASE_SOURCE_INVALID');
-      sections.get(key).push(line);
+      const match = /^(?:([A-Za-z0-9_.-]+)|("[^"]+"|'[^']+')):\s*(.*)$/.exec(text);
+      if (!match || Array.isArray(parent) || typeof parent !== 'object') fail('DEVELOPMENT_DATABASE_SOURCE_INVALID');
+      const key = match[1] ?? scalar(match[2]);
+      if (Object.hasOwn(parent, key)) fail('DEVELOPMENT_DATABASE_SOURCE_INVALID');
+      const value = match[3];
+      if (value) parent[key] = scalar(value);
+      else {
+        const next = lines[i + 1];
+        if (next && next.indent >= indent && next.text.startsWith('- ')) parent[key] = [];
+        else parent[key] = Object.create(null);
+        stack.push({ indent, node: parent[key] });
+      }
     }
   }
-  const exact = (name, expected) => JSON.stringify(sections.get(name)) === JSON.stringify(expected);
-  if (!exact('image', ['    image: docker.io/library/postgres:17-alpine'])
-      || !exact('environment', ['    environment:', '      POSTGRES_DB: lexiflow', '      POSTGRES_HOST_AUTH_METHOD: trust'])
-      || !exact('ports', ['    ports:', '      - "127.0.0.1:15432:5432"'])
-      || !exact('volumes', ['    volumes:', '      - lexiflow-postgres-data:/var/lib/postgresql/data'])) fail('DEVELOPMENT_DATABASE_SOURCE_INVALID');
-  const volumesStart = lines.indexOf('volumes:');
-  const volumes = lines.slice(volumesStart + 1);
-  if (volumes.filter(line => line === '  lexiflow-postgres-data:').length !== 1
-      || volumes.some(line => /^    /.test(line))) fail('DEVELOPMENT_DATABASE_SOURCE_INVALID');
-  return sha(Buffer.from(content));
+  const postgres = root.services?.postgres, env = postgres?.environment;
+  const ports = postgres?.ports, mounts = postgres?.volumes;
+  const volumeRoot = root.volumes;
+  if (port !== 15432 || root.name !== 'lexiflow-local' || !postgres || typeof postgres !== 'object'
+    || postgres.image !== 'docker.io/library/postgres:17-alpine'
+      || !env || Array.isArray(env) || Object.keys(env).some(k => !['POSTGRES_DB', 'POSTGRES_HOST_AUTH_METHOD', 'POSTGRES_USER'].includes(k))
+      || env.POSTGRES_DB !== 'lexiflow' || env.POSTGRES_HOST_AUTH_METHOD !== 'trust'
+      || env.POSTGRES_USER !== undefined && env.POSTGRES_USER !== 'postgres'
+      || !Array.isArray(ports) || ports.length !== 1 || ports[0] !== '127.0.0.1:15432:5432'
+      || !Array.isArray(mounts) || mounts.length !== 1 || mounts[0] !== 'lexiflow-postgres-data:/var/lib/postgresql/data'
+      || Object.keys(postgres).some(key => !['image', 'environment', 'ports', 'volumes', 'healthcheck'].includes(key))
+      || !volumeRoot || typeof volumeRoot !== 'object' || !Object.hasOwn(volumeRoot, 'lexiflow-postgres-data')
+      || Object.keys(volumeRoot['lexiflow-postgres-data']).length !== 0) fail('DEVELOPMENT_DATABASE_SOURCE_INVALID');
+  return true;
 }
 
 function oneEnv(env, name) {
@@ -67,7 +132,7 @@ function oneEnv(env, name) {
   return matches.length === 1 ? matches[0].slice(name.length + 1) : undefined;
 }
 
-function isDevelopmentContainer(row, { repo, port, composeSha256 }) {
+function isDevelopmentContainer(row, { repo, port }) {
   const labels = row.Config?.Labels ?? row.Labels ?? {};
   const config = row.Config ?? {};
   const image = row.ImageName ?? config.Image ?? row.Image ?? '';
@@ -97,24 +162,23 @@ function isDevelopmentContainer(row, { repo, port, composeSha256 }) {
   const volumeValid = volume.length === 1 && volume[0].Type === 'volume'
     && volume[0].Name === 'lexiflow-local_lexiflow-postgres-data';
   const ownershipCandidate = labels['com.docker.compose.project'] === 'lexiflow-local'
-    && labels['com.docker.compose.service'] === 'postgres'
-    && targetMappings.length > 0;
+    && labels['com.docker.compose.service'] === 'postgres';
   if (!ownershipCandidate) return null;
-  const baseValid = labels['com.docker.compose.project'] === 'lexiflow-local'
-    && labels['com.docker.compose.service'] === 'postgres'
-    && labels['io.podman.compose.project'] === 'lexiflow-local'
-    && labels['io.podman.compose.service'] === 'postgres'
-    && image === 'docker.io/library/postgres:17-alpine'
-    && row.State?.Running === true;
-  if (!baseValid || !sourceMatches || targetMappings.length !== 1 || ports.length !== 1 || !envValid || !volumeValid
-      || typeof row.Id !== 'string' || !/^[a-f0-9]{64}$/.test(row.Id)
-      || typeof row.Image !== 'string' || !/^(?:sha256:)?[a-f0-9]{64}$/.test(row.Image)) fail('DEVELOPMENT_DATABASE_IDENTITY_MISMATCH');
+  if (labels['io.podman.compose.project'] !== 'lexiflow-local' || labels['io.podman.compose.service'] !== 'postgres'
+      || !sourceMatches) fail('DEVELOPMENT_DATABASE_REPOSITORY_CHANGED');
+  if (image !== 'docker.io/library/postgres:17-alpine') fail('DEVELOPMENT_DATABASE_IMAGE_CHANGED');
+  if (row.State?.Running !== true) fail('DEVELOPMENT_DATABASE_CONTAINER_CHANGED');
+  if (targetMappings.length !== 1 || ports.length !== 1) fail('DEVELOPMENT_DATABASE_PORT_CHANGED');
+  if (!envValid) fail('DEVELOPMENT_DATABASE_AUTH_CHANGED');
+  if (!volumeValid) fail('DEVELOPMENT_DATABASE_VOLUME_CHANGED');
+  if (typeof row.Id !== 'string' || !/^[a-f0-9]{64}$/.test(row.Id)
+      || typeof row.Image !== 'string' || !/^(?:sha256:)?[a-f0-9]{64}$/.test(row.Image)) fail('DEVELOPMENT_DATABASE_INSPECTION_INVALID');
   const facts = { containerId: row.Id, imageId: row.Image, imageName: image,
     composePath: labels['com.docker.compose.project.config_files'], workingDirectory: labels['com.docker.compose.project.working_dir'],
     composeProject: labels['com.docker.compose.project'], service: labels['com.docker.compose.service'],
     database: oneEnv(env, 'POSTGRES_DB'), authMethod: oneEnv(env, 'POSTGRES_HOST_AUTH_METHOD'),
     user: oneEnv(env, 'POSTGRES_USER') ?? 'postgres', hostIp: '127.0.0.1', hostPort: String(port), containerPort: '5432',
-    volumeName: volume[0].Name, volumeDestination: volume[0].Destination, composeSha256 };
+    volumeName: volume[0].Name, volumeDestination: volume[0].Destination };
   return { ...facts, fingerprint: sha(canonicalJson(facts)) };
 }
 
@@ -126,7 +190,7 @@ export async function inspectDevelopmentTrust({ run, repo, port = 15432 }) {
   if (!fs.existsSync(source)) return null;
   if (!fs.realpathSync(source).startsWith(`${fs.realpathSync(repo)}${path.sep}`))
     fail('DEVELOPMENT_DATABASE_SOURCE_INVALID');
-  const composeSha256 = developmentComposeSha256(source, port);
+  composeFacts(source, port);
   let ids;
   try { ids = (await run('podman', ['ps', '-q', '-a', '--filter', 'label=com.docker.compose.project=lexiflow-local'],
     { cwd: repo, capture: true, logOutput: false, timeout: 15000 })).trim().split(/\s+/).filter(Boolean); }
@@ -139,7 +203,7 @@ export async function inspectDevelopmentTrust({ run, repo, port = 15432 }) {
       const rows = JSON.parse(output);
       if (!Array.isArray(rows) || rows.length !== 1 || rows[0].Id !== id && !rows[0].Id?.startsWith(id))
         fail('DEVELOPMENT_DATABASE_INSPECTION_INVALID');
-      const identity = isDevelopmentContainer(rows[0], { repo: fs.realpathSync(repo), port, composeSha256 });
+      const identity = isDevelopmentContainer(rows[0], { repo: fs.realpathSync(repo), port });
       if (identity) found.push(identity);
     }
   } catch (error) {

@@ -7,6 +7,8 @@ import unittest
 from scripts.delivery_gate.acceptance import verify_plan
 from scripts.delivery_gate.records import RecordError
 from tests.delivery_gate.fixtures import DeliveryGateFixture
+from scripts.verification.declarations import load_declarations
+from tests.delivery_gate.fixtures import write_declarations
 
 
 class TestTaskSubjectAcceptance(unittest.TestCase):
@@ -53,10 +55,10 @@ class TestTaskSubjectAcceptance(unittest.TestCase):
             task["allowed_files"] = ["src/**"]
             catalog_path.write_text(yaml.safe_dump(catalog))
             declaration_path = fixture.root / "harness/module-checks.yaml"
-            declarations = yaml.safe_load(declaration_path.read_text())
+            declarations = load_declarations(fixture.root)
             for check in declarations["checks"]:
                 check["input_paths"].append("src")
-            declaration_path.write_text(yaml.safe_dump(declarations))
+            write_declarations(declaration_path, declarations["checks"])
             # 仅对隔离测试仓库固定 Catalog/输入声明，不改真实仓库 Git 状态。
             fixture._git("add", ".")
             fixture._git("commit", "-m", "fixture scope")

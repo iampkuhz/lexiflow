@@ -48,7 +48,20 @@ class LightweightOrchestrationTest(unittest.TestCase):
         cls.by_id = {check["check_id"]: check for check in cls.checks}
 
     def test_all_existing_ids_and_complete_baseline_remain(self):
-        expected = BASE_IDS | {check_id + "-on-change" for check_id in BASE_IDS}
+        expected = (
+            BASE_IDS
+            | {
+                check_id + "-on-change"
+                for check_id in BASE_IDS
+                if check_id != "eng.release.docker-contract"
+            }
+            | {
+                "eng.release.docker-surface-on-change",
+                "eng.release.docker-shell-on-change",
+                "eng.release.docker-local-on-change",
+                "eng.release.docker-node-on-change",
+            }
+        )
         self.assertEqual(expected, set(self.by_id))
         baseline = filter_checks_by_scope(self.checks, "repository-baseline")
         self.assertEqual(BASE_IDS, {check["check_id"] for check in baseline})
@@ -81,7 +94,9 @@ class LightweightOrchestrationTest(unittest.TestCase):
                 check = self.by_id["eng.repository." + name + suffix]
                 with self.subTest(check=check["check_id"]):
                     closed = resolve_module_dependencies([check], self.checks)
-                    self.assertEqual([check["check_id"]], [c["check_id"] for c in closed])
+                    self.assertEqual(
+                        [check["check_id"]], [c["check_id"] for c in closed]
+                    )
                     self.assertIn("scripts/repository", check["input_paths"])
 
     def test_docs_only_change_selects_docs_not_repository_unit_tests(self):
@@ -95,17 +110,23 @@ class LightweightOrchestrationTest(unittest.TestCase):
     def test_tool_source_changes_still_select_own_tests(self):
         for path, required in (
             ("scripts/repository/quality.py", "eng.repository.module-tests-on-change"),
-            ("scripts/verification/kernel.py", "eng.verification.module-tests-on-change"),
+            (
+                "scripts/verification/kernel.py",
+                "eng.verification.module-tests-on-change",
+            ),
         ):
             with self.subTest(path=path):
                 selected = select_checks_for_changes(self.checks, [path])
-                ids = {c["check_id"] for c in resolve_module_dependencies(selected, self.checks)}
+                ids = {
+                    c["check_id"]
+                    for c in resolve_module_dependencies(selected, self.checks)
+                }
                 self.assertIn(required, ids)
 
     def test_rule_input_snapshot_includes_actual_checker_source(self):
         for name, source in (
             ("docs", "docs_check.py"),
-            ("policy", "policy_projection.py"),
+            ("policy", "planning_validator.py"),
             ("planning", "planning_validator.py"),
             ("hooks", "quality.py"),
         ):
@@ -117,8 +138,11 @@ class LightweightOrchestrationTest(unittest.TestCase):
                 self.assertIn("scripts/repository/" + source, paths)
                 self.assertFalse(snapshot["missing"])
         self.assertIn(
-            "harness/policy-projections.yaml",
+            "harness/agent-policy.manifest.yaml",
             self.by_id["eng.repository.policy"]["input_paths"],
+        )
+        self.assertIn(
+            "scripts/repository", self.by_id["eng.repository.policy"]["input_paths"]
         )
 
     def test_backend_scope_views_keep_identical_operations(self):
@@ -129,9 +153,13 @@ class LightweightOrchestrationTest(unittest.TestCase):
             {k: v for k, v in baseline.items() if k not in selection},
             {k: v for k, v in change.items() if k not in selection},
         )
-        self.assertEqual(len(baseline["input_paths"]), len(set(baseline["input_paths"])))
+        self.assertEqual(
+            len(baseline["input_paths"]), len(set(baseline["input_paths"]))
+        )
         self.assertIn("deliveryFull", baseline["command"])
-        self.assertEqual(["backend"], self.by_id["eng.extension.quality"]["module_dependencies"])
+        self.assertEqual(
+            ["backend"], self.by_id["eng.extension.quality"]["module_dependencies"]
+        )
 
     def test_mechanical_javadoc_scopes_and_compact_constructor_stay_required(self):
         config = ET.parse(ROOT / "backend/gradle/config/checkstyle/checkstyle.xml")
@@ -140,7 +168,9 @@ class LightweightOrchestrationTest(unittest.TestCase):
             ("MissingJavadocType", "private"),
             ("MissingJavadocMethod", "public"),
         ):
-            values = {p.get("name"): p.get("value") for p in modules[name].findall("property")}
+            values = {
+                p.get("name"): p.get("value") for p in modules[name].findall("property")
+            }
             self.assertEqual(expected_scope, values["scope"])
             if name == "MissingJavadocMethod":
                 self.assertIn("COMPACT_CTOR_DEF", values["tokens"].split(","))

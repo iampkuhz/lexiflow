@@ -1,5 +1,5 @@
 # Agent 策略真源：先读边界，再按 subagent_protocol → agent_dispatch → runner 专属规则下钻。
-# 英文短值多为机器协议，不翻译；中文解释与术语表见 docs/development/reference/engineering-glossary.md。
+# 英文短值多为机器协议，不翻译；中文解释与术语表见 docs/reference/engineering-glossary.md。
 schemaVersion: 1
 
 # 范围护栏：受保护目录仍可按授权编辑，但不能越权、伪造身份或覆盖他人改动。
@@ -110,8 +110,12 @@ risk_classification:
   - backend/product/adapters/**
   - '**/port/**'
   - '**/contract/**'
-  - docs/architecture/**
-  - docs/development/**
+  - docs/system.md
+  - docs/system/**
+  - docs/scenarios/**
+  - docs/reference/**
+  - docs/reference.md
+  - docs/README.md
   - docs/roadmap/**
   local_owner_roots:
     lexicon: backend/product/lexicon/
@@ -670,7 +674,7 @@ qoder_delegation:
     ack_is_not_pass: true
     result_and_status_read_only: true
 
-# 客户端兼容投影的调度字段，值与既有模板一致。
+# Codex 调度规则唯一声明；runtime、模板和 Catalog 不保存共享副本。
 
 # Codex 原生协作：沿用工作包合同，通过 native collaboration event 收取结果。
 codex_dispatch:

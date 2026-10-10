@@ -22,6 +22,8 @@ from scripts.delivery_gate.candidate import (
 from scripts.delivery_gate.check import check_conditions
 from scripts.delivery_gate.records import canonical_bytes, delivery_gate_locator, publish_bytes, publish_json, load_submission
 from scripts.verification import verify_repository
+from scripts.verification.declarations import load_declarations
+from tests.delivery_gate.fixtures import write_declarations
 from scripts.environment.candidate_runtime_check import PHASE_IDS
 from tests.delivery_gate.fixtures import DeliveryGateFixture, VALIDATOR_SESSION, make_mock_runtime, mock_authority
 
@@ -60,7 +62,7 @@ class CandidateChainTests(unittest.TestCase):
         task = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"][0]
         task["required_check_ids"] = ["eng.release.candidate-runtime"]
         (self.f.root / "planning/workstreams.yaml").write_text(yaml.safe_dump(catalog, sort_keys=False))
-        declared = yaml.safe_load((self.f.root / "harness/module-checks.yaml").read_text())
+        declared = load_declarations(self.f.root)
         candidate = dict(declared["checks"][0])
         candidate.update(check_id="eng.release.candidate-runtime", module="release-candidate-runtime",
                          command=["python3", "-m", "scripts.environment.candidate_runtime_check"],
@@ -69,7 +71,7 @@ class CandidateChainTests(unittest.TestCase):
                                           "equals": {"failures": 0, "errors": 0, "skipped": 0}})
         declared["checks"] = [candidate if item["check_id"] == candidate["check_id"] else item
                                for item in declared["checks"]]
-        (self.f.root / "harness/module-checks.yaml").write_text(yaml.safe_dump(declared, sort_keys=False))
+        write_declarations(self.f.root / "harness/module-checks.yaml", declared["checks"])
         self.f._git("add", "harness/module-checks.yaml", "planning/workstreams.yaml")
         self.f._git("commit", "-m", "candidate declaration fixture")
         self.identity = {"schemaVersion": 1, "baseVersion": "2.0.0-SNAPSHOT",
@@ -90,7 +92,7 @@ class CandidateChainTests(unittest.TestCase):
 
         def runner(argv, _cwd, _env, _timeout, _executable=None, *, stdin_payload=None):
             if stdin_payload is None:
-                output = {"status": "PASS", "tests_run": 1, "failures": 0, "errors": 0, "skipped": 0}
+                output = {"status": "PASS", "checks_run": 1, "failures": 0, "errors": 0, "skipped": 0, "reason": ""}
             else:
                 envelope = json.loads(stdin_payload)
                 output = {"status": "PASS", "reason": "", "checks_run": len(PHASE_IDS),

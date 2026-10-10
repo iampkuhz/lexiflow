@@ -13,6 +13,7 @@ from unittest.mock import patch
 import yaml
 
 from scripts.verification.input_snapshot import snapshot_inputs
+from tests.verification.declaration_fixtures import write_declarations
 from scripts.verification.kernel import fingerprint_json, snapshot_check_inputs
 from scripts.verification.reports import _snapshot_shape, validate_report
 from scripts.verification.scenarios import freeze_inputs, verify_repository
@@ -81,32 +82,21 @@ class TestInputSnapshot(unittest.TestCase):
 
     @staticmethod
     def _declared(root: Path, input_path: str) -> None:
-        (root / "harness").mkdir()
-        (root / "harness" / "module-checks.yaml").write_text(
-            yaml.safe_dump(
+        write_declarations(
+            root / "harness" / "module-checks.yaml",
+            [
                 {
-                    "schema_version": "lexiflow.module-checks.v1",
-                    "checks": [
-                        {
-                            "check_id": "snapshot.test",
-                            "module": "snapshot",
-                            "command": ["python3", "-c", "pass"],
-                            "cwd": ".",
-                            "timeout_seconds": 10,
-                            "scope": "repository-baseline",
-                            "triggers": [{"path": "src/"}],
-                            "module_dependencies": [],
-                            "required_environment": [],
-                            "input_paths": [input_path],
-                            "result_contract": {
-                                "type": "exit-code",
-                                "completeness_guarantee": "fixture",
-                            },
-                        }
-                    ],
+                    "check_id": "snapshot.test",
+                    "module": "snapshot",
+                    "command": ["python3", "-c", "pass"],
+                    "timeout_seconds": 10,
+                    "scope": "repository-baseline",
+                    "triggers": [{"path": "src/"}],
+                    "module_dependencies": [],
+                    "required_environment": [],
+                    "input_paths": [input_path],
                 }
-            ),
-            encoding="utf-8",
+            ],
         )
 
     @staticmethod
@@ -115,7 +105,7 @@ class TestInputSnapshot(unittest.TestCase):
             "status": "PASS",
             "exit_code": 0,
             "exit_reason": "exited",
-            "stdout": "",
+            "stdout": '{"status":"PASS","checks_run":1,"failures":0,"errors":0,"skipped":0,"reason":""}',
             "stderr": "",
             "duration_seconds": 0.01,
             "started_at": "2026-01-01T00:00:00Z",

@@ -94,7 +94,7 @@ test('unknown path error containing DRIFT or CHANGED never echoes synthetic secr
       assert.equal(await runLocal(['install', '--dir', path.join(link, 'installation')]), 1);
     }
     assert.equal(messages.length, 2);
-    assert.ok(messages.every(message => message.includes('漂移') && !message.includes('synthetic-secret')));
+    assert.ok(messages.every(message => message.includes('UNEXPECTED') && !message.includes('synthetic-secret') && !message.includes('漂移')));
   } finally { console.error = original; fs.rmSync(parent, { recursive: true }); }
 });
 
@@ -121,5 +121,31 @@ test('trusted extension identity mismatch has a fixed Chinese diagnostic rather 
     assert.equal(messages.length, 1);
     assert.match(messages[0], /EXTENSION_IDENTITY_MISMATCH.*停止后续部署/);
     assert.doesNotMatch(messages[0], /UNEXPECTED/);
+  } finally { os.platform = originalPlatform; console.error = originalError; fs.rmSync(parent, { recursive: true }); }
+});
+
+test('known build failure reports its actual stage without copying the command exception', async () => {
+  const originalPlatform = os.platform, originalError = console.error, messages = [];
+  os.platform = () => { throw new Error('构建 PostgreSQL 镜像失败（退出码 125）；synthetic-secret'); };
+  console.error = value => messages.push(String(value));
+  const parent = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'lexiflow-local-build-error-'));
+  try {
+    assert.equal(await runLocal(['install', '--dir', path.join(parent, 'installation')]), 1);
+    assert.equal(messages.length, 1);
+    assert.match(messages[0], /^\[LexiFlow\] 构建 PostgreSQL 镜像失败：/);
+    assert.doesNotMatch(messages[0], /检查参数|synthetic-secret|退出码 125/);
+  } finally { os.platform = originalPlatform; console.error = originalError; fs.rmSync(parent, { recursive: true }); }
+});
+
+test('broad data failure does not guess that the request or dataset is invalid', async () => {
+  const originalPlatform = os.platform, originalError = console.error, messages = [];
+  os.platform = () => { throw new Error('DEPLOYMENT_DATABASE_FAIL:REQUEST_OR_DATA_INVALID'); };
+  console.error = value => messages.push(String(value));
+  const parent = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'lexiflow-local-data-error-'));
+  try {
+    assert.equal(await runLocal(['install', '--dir', path.join(parent, 'installation')]), 1);
+    assert.equal(messages.length, 1);
+    assert.match(messages[0], /数据库资料处理失败.*无法确定更具体原因/);
+    assert.doesNotMatch(messages[0], /请求或资料校验失败|UNEXPECTED/);
   } finally { os.platform = originalPlatform; console.error = originalError; fs.rmSync(parent, { recursive: true }); }
 });

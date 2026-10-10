@@ -2,6 +2,10 @@
 
 ## Requirements
 
+### Requirement: 当前派发路由与既有运行消费
+
+新实现、验证与审查 MUST 按 `harness/agent-policy.manifest.yaml` 的当前 `agent_dispatch` 使用原生 Codex 协作；模型与推理参数 MUST 从 `subagent_protocol.codex_model_policy` 显式选择。Qoder 新 `start`／`resume` MUST 被当前策略拒绝，不得把保留的 CLI、预检或生命周期源码当作派发许可。既有 Qoder 的身份、运行记录、终态 callback 与 ack SHALL 保留并按原绑定核对，不得删除、改写或冒充原生执行证据。以下 Qoder 生命周期约束仅适用于既有运行的核对与消费，不构成新的执行路由。
+
 ### Requirement: 子任务身份和文件所有权
 
 Catalog Task MUST 保持单一 owner、单一可验收 outcome 和独立 evidence identity，但 MUST NOT 机械映射为一次 Codex Sub-Agent 会话。当前 Catalog 是 owner、discovery、file claims、Task/version、acceptance 与 validation contract 的权威来源，不可由 caller 自报覆盖。每个 Qoder run MUST 有稳定 `task_id`；每个 Codex run MUST 有稳定 `work_package_id`、精确有序的 `task_ids[]`、唯一 agent/run identity、明确读写范围和验证命令。每个被聚合的 Task MUST 分别留下 outcome evidence；并行写范围 MUST NOT 重叠。
@@ -69,13 +73,13 @@ Codex 原生子代理同时最多 MUST 遵守 `harness/agent-policy.manifest.yam
 
 ### Requirement: Qoder 单运行
 
-同一宿主 OS 用户的所有 checkout 通过 Harness 派发的 Qoder 同时 MUST 最多运行一个任务；从派发到 CLI 退出 SHALL 连续持有同一文件锁，worker/CLI SHALL 继承该锁。前一 run 未确认终态或回调未 ack 时 SHALL NOT 启动下一 run。外部直接启动 CLI 不受该锁强制控制，进程预检 SHALL 对已观察到的外部运行 fail closed。
+既有 Qoder 运行的宿主 OS 用户级单运行、锁和身份事实 SHALL 按原始绑定核对；当前策略禁止新 start/resume，不因旧 run 已终态或 ack 而取得下一次派发许可。外部直接启动 CLI 不由仓库锁强制控制；已观察到的外部或未知运行 MUST NOT 被当作本工作包的完成或接手证据。
 
 #### Scenario: 前一 run 状态未知
 
 - **Given** Qoder preflight 或 completion 无法证明前一 run 已结束
-- **When** 队列中存在下一任务
-- **Then** 调度器 SHALL 保留任务等待
+- **When** 主 Agent 核对运行事实并决定后续工作
+- **Then** SHALL 保留未知运行与待处理事实，不推断已完成
 - **And** SHALL NOT 通过新 session 绕过单运行约束
 
 ### Requirement: 主 Agent 无 busy wait
@@ -84,18 +88,18 @@ Qoder 派发后 SHALL 保存 continuation 并立即交还控制权；主 LLM MUS
 
 ### Requirement: 宿主等待兼容性
 
-Qoder preflight、start 与 resume MUST 通过真实当前父会话绑定的只读宿主状态检查。宿主 Goal 活跃或状态未知、且没有受支持的外部等待适配器时，仓库入口 SHALL 在创建 Qoder 进程前拒绝该执行路径并返回 Codex 降级动作。调用者提供的能力布尔值、仓库提示词或 Goal 状态修改 MUST NOT 作为门控证据。该检查只证明派发时兼容性，不证明未来宿主模式不变或宿主调度器已经修复。
+既有 Qoder 的等待资格与 continuation SHALL 使用真实父会话绑定的只读宿主来源核对，不接受调用者自报能力、提示词或 Goal 状态修改。预检源码和既有资格记录不授予新 start/resume 权限；当前策略 SHALL 在创建新 Qoder 进程前拒绝该路径，后续原生 Codex 接手仍须满足原工作包身份、写域及重复执行保护。
 
 #### Scenario: 活跃 Goal 无外部等待支持
 
 - **Given** 当前父任务的真实 Goal 活跃且宿主没有受支持的等待接入
 - **When** 调用任一 Qoder 派发入口
-- **Then** SHALL 不创建 Qoder 运行，并请求原生 Codex 降级
+- **Then** SHALL 不创建 Qoder 运行；后续接手按当前原生路由核对工作包
 - **And** SHALL NOT 以暂停目标、改宿主数据库或循环唤醒实现等待
 
 ### Requirement: 组合调度失败
 
-跨执行器顺序、失败阈值与模型 SHALL 读取共享 policy 的 agent_dispatch。一次调度 SHALL 绑定同一父任务、仓库、工作包、任务版本与 attempt；Qoder 明确失败或不可用后 MUST 尝试 Codex 降级，只有双方均明确失败才增加连续调度失败。接单成功 SHALL 清连续计数但保留历史。回调重放、同任务在途、未知启动、执行失败与验收失败 MUST NOT 当作新一轮调度失败；身份和写域条件 MUST NOT 被降级绕过。
+当前派发 SHALL 直接使用共享 policy 的原生 Codex 路由，不先启动 Qoder，也不向 Qoder fallback。既有组合调度 attempt、失败计数和来源证据 SHALL 保留；读取旧失败不等于开始新的派发轮次。原生接手 SHALL 绑定同一父任务、仓库、工作包及任务版本，并用真实工具记录核对接单事实。回调重放、同任务在途、未知启动、执行失败与验收失败 MUST NOT 当作新一轮调度失败；身份、写域、计数和接手条件 SHALL 遵守当前 policy，不得通过改名或重置记录绕过。
 
 #### Scenario: 降级接单成功
 
@@ -120,13 +124,13 @@ Qoder preflight、start 与 resume MUST 通过真实当前父会话绑定的只�
 
 ### Requirement: 执行请求与启动资格
 
-明确的启动或继续请求 MUST 以实际派发、同步交付或可核验阻塞收尾，MUST NOT 只承诺下一步后结束。Qoder 预检 MUST 检查静态输入及只读启动资格快照；已知历史、预算、访问或进程阻塞 MUST 返回非零退出的 `BLOCKED`。预检 MUST NOT 分配 run、代表账号健康或代替派发锁内复查。具体执行与接手策略只在共享 policy 中维护。
+明确的启动或继续请求 MUST 以实际原生派发、同步交付或可核验阻塞收尾，MUST NOT 只承诺下一步后结束。既有 Qoder 预检、预算、访问和进程快照仅是有界事实，MUST NOT 分配新 run、代表在线账号健康或豁免当前禁用策略。已知阻塞 SHALL 保留来源并按当前 policy 处理，不能通过重命名 Task 或删除记录重新开始。
 
 #### Scenario: 预算耗尽且存在已知访问阻塞
 
 - **Given** 稳定 Task 的 Qoder 尝试预算耗尽，历史终态还记录访问失败
-- **When** 调用启动预检
-- **Then** SHALL 同时报告预算与访问阻塞，不再建议已耗尽的 resume
+- **When** 主 Agent 核对既有记录并准备接手
+- **Then** SHALL 同时报告预算与访问阻塞，不建议被禁用的 start/resume
 - **And** SHALL 保留历史与稳定 Task identity，由 Main 复核后按共享策略选择合规接手
 - **And** SHALL NOT 以新建同义 Task、改名或版本变化重置预算
 
@@ -148,6 +152,18 @@ Qoder preflight、start 与 resume MUST 通过真实当前父会话绑定的只�
 - **Then** run MAY 标记 finished
 - **And** completion 与 exit code 只构成 implementation evidence，不得替代独立 `validate`
 - **And** Task 只有 current-input Delivery Gate `check` receipt 验证所需 validation、风险要求的 review、依赖与批准后 MAY 标记 PASS
+
+### Requirement: 日常开发检查按消费闭包选择
+
+日常 `development-change` SHALL 根据完整真实 diff 中显式声明的 `triggers` 与模块消费依赖闭包选择 checks，不得因 `high-risk-engineering` 风险等级单独追加全仓 `development-baseline`。风险分类仍 MUST 保留；未知覆盖、依赖、依赖环及相关输入漂移 MUST 失败关闭，同工作区未提交变化 MUST 累计纳入。此日常选择规则 MUST NOT 改变显式完整 Change/Repository Verify 或 Formal 计划：独立 Formal 高风险验收仍 MUST 使用 `development-baseline` 并要求独立 review，正式发行 MUST 使用完整 `repository-baseline`。
+
+#### Scenario: 高风险日常选择与 Formal 计划区分
+
+- **Given** 完整真实 diff 被分类为 `high-risk-engineering`，且消费依赖闭包可确定
+- **When** 日常开发入口选择 `development-change` checks
+- **Then** checks SHALL 仅由显式触发与模块依赖闭包决定，不因风险等级单独追加全仓 `development-baseline`
+- **And** 未知覆盖、依赖、环或相关漂移 SHALL 阻断；独立 Formal 高风险计划仍使用 `development-baseline` 并要求 review
+- **And** 正式发行与显式完整 Repository Verify SHALL 保持完整 `repository-baseline`
 
 ### Requirement: 风险计划驱动的 Delivery Gate
 

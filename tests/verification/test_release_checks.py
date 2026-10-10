@@ -15,6 +15,7 @@ from scripts.verification import freeze_inputs, verify_repository
 from scripts.verification.declarations import load_declarations_snapshot
 from scripts.verification.kernel import snapshot_check_inputs
 from scripts.verification.scope import select_checks_for_changes
+from tests.verification.declaration_fixtures import write_declarations
 
 ROOT = Path(__file__).resolve().parents[2]
 BASE = "eng.release.version"
@@ -78,11 +79,7 @@ class ReleaseCheckDeclarationTest(unittest.TestCase):
         """创建与实际声明路径相同的合成冻结输入。"""
         checks = [copy.deepcopy(self.by_id[key]) for key in (BASE, BASE + "-on-change")]
         (root / "harness").mkdir()
-        (root / "harness/module-checks.yaml").write_text(
-            yaml.safe_dump(
-                {"schema_version": "lexiflow.module-checks.v1", "checks": checks}
-            )
-        )
+        write_declarations(root / "harness/module-checks.yaml", checks)
         for name in checks[0]["input_paths"]:
             path = root / name
             path.parent.mkdir(parents=True, exist_ok=True)

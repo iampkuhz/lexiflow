@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { verifyReleaseCandidate } from '../release/verified-candidate.mjs';
 import { readExtensionFiles } from '../release/archive-identity.mjs';
 import { writePreparedTree } from './prepare-workspace.mjs';
+import { versionedImageReference, deploymentImageTag } from './versioned-images.mjs';
+import { removeVersionedImage } from './versioned-images.mjs';
 
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const fail = code => { throw new Error(code); };
@@ -36,8 +38,11 @@ export async function readCandidate(request) {
   return { ...verified, artifacts, root: path.resolve(request.candidateDirectory) };
 }
 
-export async function installCandidateArtifacts(candidate, { run, installDir, apiPort, includePostgres = true, persistPlan = null }) {
+export async function installCandidateArtifacts(candidate, { run, installDir, apiPort, includeApi = true, includePostgres = true, persistPlan = null, baseVersion, installationId }) {
   if (apiPort !== 18080) fail('CANDIDATE_API_PORT_FIXED');
+  const deploymentVersion = deploymentImageTag(baseVersion);
+  if (typeof installationId !== 'string' || !/^[a-f0-9]{32}$/.test(installationId)) fail('CANDIDATE_INSTALLATION_REQUIRED');
+  if (baseVersion !== candidate.buildIdentity?.baseVersion) fail('CANDIDATE_IMAGE_IDENTITY_MISMATCH');
   const recheck = await verifyReleaseCandidate({ candidateDirectory: candidate.root, candidateSha256: candidate.candidateSha256 });
   if (recheck.manifestSha256 !== candidate.manifestSha256) fail('CANDIDATE_CHANGED');
   const api = candidate.artifacts['api-image:linux/arm64'];
@@ -52,20 +57,30 @@ export async function installCandidateArtifacts(candidate, { run, installDir, ap
         || !fs.readFileSync(composeFd).equals(supported)) fail('CANDIDATE_COMPOSE_UNSUPPORTED');
   } finally { fs.closeSync(composeFd); }
   const files = await readExtensionFiles(bytesPath(candidate.artifacts.extension), candidate.artifacts.extension.sha256);
-  for (const item of (includePostgres ? [api, pg] : [api])) {
+  for (const item of [includeApi ? api : null, includePostgres ? pg : null].filter(Boolean)) {
     const archive = bytesPath(item);
+    if (item === pg) await removeVersionedImage({ run, role: 'postgres', baseVersion, installationId });
     await run('podman', ['load', '-i', archive]);
     // Inspect only the digest bound by the verified manifest; never enumerate user images.
     const inspected = JSON.parse(await run('podman', ['image', 'inspect', item.imageDigest], { capture: true }));
     if (!Array.isArray(inspected) || inspected.length !== 1) fail('CANDIDATE_IMAGE_IDENTITY_MISMATCH');
-    const data = inspected[0], labels = data?.Config?.Labels || {}, identity = candidate.buildIdentity;
+    const data = inspected[0], identity = candidate.buildIdentity;
+    const topLabels = data?.Labels, configLabels = data?.Config?.Labels;
+    if (topLabels && configLabels && ['org.opencontainers.image.version', 'org.opencontainers.image.revision', 'io.lexiflow.build-id', 'io.lexiflow.source-sha256', 'io.lexiflow.deployment-version', 'io.lexiflow.image-role']
+      .some(key => topLabels[key] !== configLabels[key])) fail('CANDIDATE_IMAGE_IDENTITY_MISMATCH');
+    const labels = topLabels ?? configLabels ?? {};
     const actualId = String(data?.Id || '').replace(/^sha256:/, '');
     if (actualId !== item.imageDigest.slice(7)
         || data?.Os !== 'linux' || data?.Architecture !== 'arm64'
         || labels['org.opencontainers.image.version'] !== identity.softwareVersion
         || labels['org.opencontainers.image.revision'] !== identity.sourceCommit
         || labels['io.lexiflow.build-id'] !== identity.buildId
-        || labels['io.lexiflow.source-sha256'] !== identity.sourceSha256) fail('CANDIDATE_IMAGE_IDENTITY_MISMATCH');
+        || labels['io.lexiflow.source-sha256'] !== identity.sourceSha256
+        || labels['io.lexiflow.deployment-version'] !== deploymentVersion
+        || labels['io.lexiflow.image-role'] !== (item.role === 'api-image' ? 'api' : 'postgres')) fail('CANDIDATE_IMAGE_IDENTITY_MISMATCH');
+    const role = item.role === 'api-image' ? 'api' : 'postgres';
+    const reference = versionedImageReference(role, baseVersion);
+    await run('podman', ['tag', item.imageDigest, reference]);
     loadedImages.set(item.role, data.Id);
   }
   const stage = path.join(installDir, 'extension');

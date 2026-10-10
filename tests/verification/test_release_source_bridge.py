@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 from scripts.verification import release_source_bridge as bridge
+from tests.verification.declaration_fixtures import write_declarations
 
 
 class ReleaseSourceBridgeTests(unittest.TestCase):
@@ -48,6 +49,121 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
             .strip()
         )
 
+    def test_bulk_index_identity_matches_per_entry_oracle_across_states(self) -> None:
+        root = self.base / "identity-states"
+        root.mkdir()
+        (root / "路径 with space.txt").write_text("ordinary\n", encoding="utf-8")
+        executable = root / "可执行.sh"
+        executable.write_text("#!/bin/sh\n", encoding="utf-8")
+        executable.chmod(0o755)
+        (root / "link").symlink_to("路径 with space.txt")
+        self._git(root, "init", "--quiet")
+        self._git(root, "config", "core.hooksPath", os.devnull)
+        self._git(root, "add", "--all")
+        self._git(root, "commit", "--quiet", "-m", "identity states")
+        original = bridge._git
+
+        def per_entry(repo: Path, *args: str, env=None, input=None) -> bytes:
+            # Only replace transport with the prior algorithm, not identity reads.
+            if args == ("update-index", "-z", "--index-info"):
+                for row in input.split(b"\0"):
+                    if row:
+                        meta, path = row.split(b"\t", 1)
+                        mode, oid, stage = meta.decode("ascii").split()
+                        self.assertEqual(stage, "0")
+                        original(repo, "update-index", "--add", "--cacheinfo",
+                                 mode, oid, path.decode("utf-8"), env=env)
+                return b""
+            return original(repo, *args, env=env, input=input)
+
+        previous = None
+        for state in ("clean", "staged", "unstaged", "untracked", "executable", "head"):
+            with self.subTest(state=state):
+                if state == "staged":
+                    (root / "路径 with space.txt").write_text("staged\n")
+                    self._git(root, "add", "--", "路径 with space.txt")
+                elif state == "unstaged":
+                    executable.write_text("#!/bin/sh\n# unstaged\n")
+                elif state == "untracked":
+                    (root / "new.txt").write_text("new\n")
+                elif state == "executable":
+                    (root / "new.txt").chmod(0o755)
+                elif state == "head":
+                    self._git(root, "add", "--all")
+                    self._git(root, "commit", "--quiet", "-m", "next identity")
+                before = self._source_git_state(root)
+                with mock.patch.object(bridge, "_git", side_effect=per_entry):
+                    expected = bridge._git_identity(root)
+                with mock.patch.object(bridge, "_git", wraps=original) as git:
+                    actual = bridge._git_identity(root)
+                writes = [call for call in git.call_args_list
+                          if call.args[1:2] == ("update-index",)]
+                self.assertEqual(actual, expected)
+                self.assertEqual(len(writes), 1)
+                self.assertEqual(writes[0].args[1:], ("update-index", "-z", "--index-info"))
+                self.assertIn("路径 with space.txt".encode(), writes[0].kwargs["input"])
+                self.assertIn(b"120000 ", writes[0].kwargs["input"])
+                self.assertIn(b"100755 ", writes[0].kwargs["input"])
+                self.assertEqual(before, self._source_git_state(root))
+                if previous is not None:
+                    self.assertNotEqual(actual, previous)
+                previous = actual
+
+    def test_bulk_index_rejects_every_unsafe_row_before_write(self) -> None:
+        root = self._repo("unsafe-index")
+        original = bridge._git
+        rows = original(root, "ls-files", "--stage", "-z")
+        oid = rows.split(b"\t", 1)[0].split()[1]
+        invalid = [
+            b"invalid", b"100644 " + oid + b" 0\t../escape",
+            b"100644 " + oid + b" 0\t.env",
+            b"100644 " + oid + b" 0\tcontrol\nname",
+            b"100644 " + oid + b" 0\t\xff",
+            b"100644 " + oid + b" 1\tconflict",
+            b"160000 " + oid + b" 0\tsubmodule",
+            b"100644 " + b"0" * 40 + b" 0\tintent-to-add",
+        ]
+        before = self._source_git_state(root)
+        for row in invalid:
+            with self.subTest(row=row):
+                def injected(repo: Path, *args: str, env=None, input=None) -> bytes:
+                    if args == ("ls-files", "--stage", "-z"):
+                        return rows + row + b"\0"
+                    return original(repo, *args, env=env, input=input)
+                with mock.patch.object(bridge, "_git", side_effect=injected) as git:
+                    with self.assertRaises(bridge.BridgeError) as caught:
+                        bridge._git_identity(root)
+                self.assertEqual(caught.exception.status, "BLOCKED")
+                self.assertFalse(any(call.args[1:2] == ("update-index",)
+                                     for call in git.call_args_list))
+                self.assertEqual(before, self._source_git_state(root))
+
+    def test_empty_index_identity_uses_no_bulk_write(self) -> None:
+        root = self._repo("empty-index")
+        self._git(root, "read-tree", "--empty")
+        before = self._source_git_state(root)
+        with mock.patch.object(bridge, "_git", wraps=bridge._git) as git:
+            identity = bridge._git_identity(root)
+        self.assertEqual(identity["indexTree"], self._git(root, "hash-object", "-t", "tree", os.devnull))
+        self.assertFalse(any(call.args[1:2] == ("update-index",)
+                             for call in git.call_args_list))
+        self.assertEqual(before, self._source_git_state(root))
+
+    def test_bulk_write_process_failure_cannot_return_identity(self) -> None:
+        root = self._repo("failed-bulk")
+        before = self._source_git_state(root)
+        run = bridge.subprocess.run
+        def failed(argv, **kwargs):
+            if argv[3:6] == ["update-index", "-z", "--index-info"]:
+                raise subprocess.CalledProcessError(128, argv, stderr=b"synthetic")
+            return run(argv, **kwargs)
+        with mock.patch.object(bridge.subprocess, "run", side_effect=failed):
+            with self.assertRaises(bridge.BridgeError) as caught:
+                bridge._git_identity(root)
+        self.assertEqual((caught.exception.status, caught.exception.code),
+                         ("BLOCKED", "git-metadata-unavailable"))
+        self.assertEqual(before, self._source_git_state(root))
+
     def _repo(self, name: str = "repo", check_id: str = bridge.CHECK_ID) -> Path:
         root = self.base / name
         root.mkdir()
@@ -79,22 +195,20 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         paths = sorted(
             [*bridge.FIXED_FILES, *bridge.FIXED_DIRS, "harness/module-checks.yaml"]
         )
-        # Include the declaration itself in the snapshot; PyYAML parses the actual check shape.
-        doc = (
-            "schema_version: lexiflow.module-checks.v1\nchecks:\n"
-            f"  - check_id: {check_id}\n    module: synthetic\n"
-            "    command: [bash, synthetic.sh]\n    cwd: .\n    timeout_seconds: 1\n"
-            + (
-                "    scope: change-targeted\n    triggers: [{path: .gitignore}]\n"
-                if check_id == bridge.CHANGE_CHECK_ID
-                else "    scope: repository-baseline\n    triggers: []\n"
-            )
-            + "    module_dependencies: []\n"
-            "    required_environment: []\n    input_paths:\n"
-            + "".join(f"      - {p}\n" for p in paths)
-            + "    result_contract: {type: exit-code, completeness_guarantee: synthetic}\n"
+        write_declarations(
+            root / "harness/module-checks.yaml",
+            [{
+                "check_id": check_id,
+                "module": "synthetic",
+                "command": ["bash", "synthetic.sh"],
+                "timeout_seconds": 1,
+                "scope": "change-targeted" if check_id == bridge.CHANGE_CHECK_ID else "repository-baseline",
+                "triggers": [{"path": ".gitignore"}] if check_id == bridge.CHANGE_CHECK_ID else [],
+                "module_dependencies": [],
+                "required_environment": [],
+                "input_paths": paths,
+            }],
         )
-        (root / "harness/module-checks.yaml").write_text(doc, encoding="utf-8")
         self._git(root, "init", "--quiet")
         self._git(root, "config", "core.hooksPath", os.devnull)
         self._git(root, "add", "--all")
@@ -631,8 +745,8 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         out.mkdir()
         original_git = bridge._git
 
-        def extra_tree(repo: Path, *args: str, env=None) -> bytes:
-            result = original_git(repo, *args, env=env)
+        def extra_tree(repo: Path, *args: str, env=None, input=None) -> bytes:
+            result = original_git(repo, *args, env=env, input=input)
             if args and args[0] == "ls-tree":
                 return result + b"unexpected-member\n"
             return result
@@ -646,10 +760,10 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         out = self.base / "dirty-fixture-out"
         out.mkdir()
 
-        def dirty_fixture(repo: Path, *args: str, env=None) -> bytes:
+        def dirty_fixture(repo: Path, *args: str, env=None, input=None) -> bytes:
             if Path(repo).name == "fixture" and args and args[0] == "status":
                 return b" M injected\0"
-            return original_git(repo, *args, env=env)
+            return original_git(repo, *args, env=env, input=input)
 
         with mock.patch.object(bridge, "_git", side_effect=dirty_fixture):
             with self.assertRaises(bridge.BridgeError):

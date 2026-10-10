@@ -18,24 +18,24 @@ from scripts.verification.declarations import (
     filter_checks_by_scope,
     load_declarations,
 )
+from tests.verification.declaration_fixtures import declaration_document
 
 
 def _write_declarations(root: Path, data: dict) -> None:
     harness = root / "harness"
     harness.mkdir(exist_ok=True)
-    for check in data.get("checks", []):
-        check.setdefault("module_dependencies", [])
-        check.setdefault("required_environment", [])
-        check.setdefault("input_paths", [])
-        check.setdefault(
-            "result_contract",
-            {
-                "type": "exit-code",
-                "completeness_guarantee": "fixture-owned command completion",
-            },
-        )
+    document = declaration_document(data.get("checks", []))
+    if data.get("schema_version") not in {
+        None,
+        "lexiflow.module-checks.v2",
+    }:
+        document["schema_version"] = data["schema_version"]
+    if data.get("checks") is not None and len(data["checks"]) != len(
+        document["checks"]
+    ):
+        document["checks"] = data["checks"]
     (harness / "module-checks.yaml").write_text(
-        yaml.dump(data, default_flow_style=False),
+        yaml.dump(document, default_flow_style=False),
         encoding="utf-8",
     )
 
@@ -52,13 +52,139 @@ _VALID_CHECK = {
 
 
 class TestLoadDeclarations(unittest.TestCase):
+    def test_normalized_fixed_execution_contract_is_literal(self):
+        check = load_declarations(Path(__file__).resolve().parents[2])["checks"][0]
+        self.assertEqual(check["cwd"], ".")
+        self.assertEqual(check["executable"], "node")
+        self.assertEqual(
+            check["result_contract"],
+            {
+                "type": "json-stdout",
+                "required_fields": [
+                    "status",
+                    "checks_run",
+                    "failures",
+                    "errors",
+                    "skipped",
+                    "reason",
+                ],
+                "allowed_statuses": ["PASS", "BLOCKED", "FAIL"],
+                "minimum": {"checks_run": 1},
+                "equals": {"failures": 0, "errors": 0, "skipped": 0},
+            },
+        )
+
+    def test_unknown_and_unreferenced_execution_definitions_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _write_declarations(
+                root,
+                {
+                    "schema_version": "lexiflow.module-checks.v2",
+                    "checks": [_VALID_CHECK],
+                },
+            )
+            path = root / "harness/module-checks.yaml"
+            raw = yaml.safe_load(path.read_text())
+            raw["executions"]["fixture-0"]["cwd"] = "."
+            path.write_text(yaml.safe_dump(raw))
+            with self.assertRaises(DeclarationError):
+                load_declarations(root)
+
+            _write_declarations(
+                root,
+                {
+                    "schema_version": "lexiflow.module-checks.v2",
+                    "checks": [_VALID_CHECK],
+                },
+            )
+            raw = yaml.safe_load(path.read_text())
+            raw["executions"]["unused"] = dict(raw["executions"]["fixture-0"])
+            path.write_text(yaml.safe_dump(raw))
+            with self.assertRaises(DeclarationError):
+                load_declarations(root)
+
+    def test_shared_execution_normalization_isolated_per_check_and_load(self):
+        data = load_declarations(Path(__file__).resolve().parents[2])
+        paired = [
+            item
+            for item in data["checks"]
+            if item["check_id"]
+            in {"eng.release.version", "eng.release.version-on-change"}
+        ]
+        self.assertEqual(len(paired), 2)
+        paired[0]["command"].append("mutation")
+        paired[0]["input_paths"].append("mutation")
+        paired[0]["result_contract"]["required_fields"].append("mutation")
+        reread = load_declarations(Path(__file__).resolve().parents[2])
+        self.assertNotIn("mutation", paired[1]["command"])
+        self.assertNotIn("mutation", paired[1]["input_paths"])
+        self.assertNotIn("mutation", paired[1]["result_contract"]["required_fields"])
+        self.assertNotIn("mutation", reread["checks"][0]["command"])
+
+    def test_non_string_execution_reference_is_a_declaration_error(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _write_declarations(
+                root,
+                {
+                    "schema_version": "lexiflow.module-checks.v2",
+                    "checks": [_VALID_CHECK],
+                },
+            )
+            path = root / "harness/module-checks.yaml"
+            raw = yaml.safe_load(path.read_text())
+            raw["checks"][0]["execution"] = []
+            path.write_text(yaml.safe_dump(raw))
+            with self.assertRaises(DeclarationError):
+                load_declarations(root)
+
+    def test_non_string_check_id_and_scope_are_declaration_errors(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            _write_declarations(root, {"schema_version": "lexiflow.module-checks.v2", "checks": [_VALID_CHECK]})
+            path = root / "harness/module-checks.yaml"
+            raw = yaml.safe_load(path.read_text())
+            raw["checks"][0]["check_id"] = []
+            path.write_text(yaml.safe_dump(raw))
+            with self.assertRaises(DeclarationError):
+                load_declarations(root)
+            _write_declarations(root, {"schema_version": "lexiflow.module-checks.v2", "checks": [_VALID_CHECK]})
+            raw = yaml.safe_load(path.read_text())
+            raw["checks"][0]["scope"] = []
+            path.write_text(yaml.safe_dump(raw))
+            with self.assertRaises(DeclarationError):
+                load_declarations(root)
+
     def test_offline_reuse_is_explicit_and_runtime_remains_conservative(self):
-        checks = {check["check_id"]: check for check in load_declarations(Path(__file__).resolve().parents[2])["checks"]}
-        for name in ("docker-contract", "lifecycle-install", "lifecycle", "build"):
+        checks = {
+            check["check_id"]: check
+            for check in load_declarations(Path(__file__).resolve().parents[2])[
+                "checks"
+            ]
+        }
+        for name in ("lifecycle-install", "lifecycle", "build"):
             for suffix in ("", "-on-change"):
-                self.assertIs(checks["eng.release." + name + suffix]["transaction_reuse"], True)
+                self.assertIs(
+                    checks["eng.release." + name + suffix]["transaction_reuse"], True
+                )
+        self.assertIs(checks["eng.release.docker-contract"]["transaction_reuse"], True)
+        for group in ("surface", "shell", "local", "node"):
+            self.assertIs(
+                checks[f"eng.release.docker-{group}-on-change"]["transaction_reuse"],
+                True,
+            )
         for check_id, check in checks.items():
-            if any(token in check_id for token in ("lifecycle-runtime", "candidate-runtime", "python-quality", "eng.backend", "eng.extension")):
+            if any(
+                token in check_id
+                for token in (
+                    "lifecycle-runtime",
+                    "candidate-runtime",
+                    "python-quality",
+                    "eng.backend",
+                    "eng.extension",
+                )
+            ):
                 self.assertIs(check["transaction_reuse"], False, check_id)
 
     def test_valid_declarations(self):
@@ -67,12 +193,12 @@ class TestLoadDeclarations(unittest.TestCase):
             _write_declarations(
                 root,
                 {
-                    "schema_version": "lexiflow.module-checks.v1",
+                    "schema_version": "lexiflow.module-checks.v2",
                     "checks": [_VALID_CHECK],
                 },
             )
             data = load_declarations(root)
-            self.assertEqual(data["schema_version"], "lexiflow.module-checks.v1")
+            self.assertEqual(data["schema_version"], "lexiflow.module-checks.v2")
             self.assertEqual(len(data["checks"]), 1)
             self.assertIs(data["checks"][0]["transaction_reuse"], False)
 
@@ -83,7 +209,7 @@ class TestLoadDeclarations(unittest.TestCase):
             _write_declarations(
                 root,
                 {
-                    "schema_version": "lexiflow.module-checks.v1",
+                    "schema_version": "lexiflow.module-checks.v2",
                     "checks": [check],
                 },
             )
@@ -97,7 +223,6 @@ class TestLoadDeclarations(unittest.TestCase):
             _write_declarations(
                 root,
                 {
-                    "schema_version": "lexiflow.module-checks.v1",
                     "checks": [check],
                 },
             )
@@ -126,7 +251,6 @@ class TestLoadDeclarations(unittest.TestCase):
             _write_declarations(
                 root,
                 {
-                    "schema_version": "lexiflow.module-checks.v1",
                     "checks": [check],
                 },
             )
@@ -162,7 +286,6 @@ class TestLoadDeclarations(unittest.TestCase):
             _write_declarations(
                 root,
                 {
-                    "schema_version": "lexiflow.module-checks.v1",
                     "checks": [check],
                 },
             )
@@ -176,7 +299,6 @@ class TestLoadDeclarations(unittest.TestCase):
             _write_declarations(
                 root,
                 {
-                    "schema_version": "lexiflow.module-checks.v1",
                     "checks": [_VALID_CHECK, _VALID_CHECK],
                 },
             )
@@ -192,7 +314,6 @@ class TestLoadDeclarations(unittest.TestCase):
             _write_declarations(
                 root,
                 {
-                    "schema_version": "lexiflow.module-checks.v1",
                     "checks": [check],
                 },
             )
@@ -207,7 +328,6 @@ class TestLoadDeclarations(unittest.TestCase):
             _write_declarations(
                 root,
                 {
-                    "schema_version": "lexiflow.module-checks.v1",
                     "checks": [check],
                 },
             )
@@ -222,7 +342,6 @@ class TestLoadDeclarations(unittest.TestCase):
             _write_declarations(
                 root,
                 {
-                    "schema_version": "lexiflow.module-checks.v1",
                     "checks": [check],
                 },
             )
