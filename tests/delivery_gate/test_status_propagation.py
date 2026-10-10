@@ -10,11 +10,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.agents.codex.work_package import CodexWorkPackageError
-from scripts.agents.delegation.codex_cli import main as codex_main
-from scripts.delivery_gate.__main__ import main as gate_main
-from scripts.delivery_gate.producer import ProducerError, _codex
-from scripts.delivery_gate.submit import _err, submit
+from scripts.agents.work_packages.codex_work_package_publisher import CodexWorkPackageError
+from scripts.agents.work_packages.verify_codex_work_package import main as codex_main
+from scripts.acceptance.__main__ import main as gate_main
+from scripts.acceptance.evidence.implementation_run_evidence import ProducerError, _codex
+from scripts.acceptance.task_operations.submit_task_for_acceptance import _err, submit
 from tests.delivery_gate.fixtures import (
     DeliveryGateFixture,
     PRODUCER_SESSION,
@@ -28,7 +28,7 @@ class StatusPropagationTest(unittest.TestCase):
             with (
                 self.subTest(status=status),
                 patch(
-                    "scripts.agents.codex.work_package.CodexWorkPackagePublisher.verify",
+                    "scripts.agents.work_packages.codex_work_package_publisher.CodexWorkPackagePublisher.verify",
                     side_effect=CodexWorkPackageError(
                         "runtime-test", "fixture", status=status
                     ),
@@ -50,7 +50,7 @@ class StatusPropagationTest(unittest.TestCase):
                 with (
                     self.subTest(status=status),
                     patch(
-                        "scripts.agents.codex.work_package.CodexWorkPackagePublisher.verify",
+                        "scripts.agents.work_packages.codex_work_package_publisher.CodexWorkPackagePublisher.verify",
                         side_effect=CodexWorkPackageError(
                             "runtime-test", "fixture", status=status
                         ),
@@ -68,17 +68,16 @@ class StatusPropagationTest(unittest.TestCase):
         args = dict(
             task_id="LF-TSK-TEST-0001",
             change_report_id=fixture.report_id,
-            confirm_scope_report_id=fixture.report_id,
         )
         with patch(
-            "scripts.agents.local_codex_runtime.discover",
+            "scripts.agents.identity.codex_actor_identity.discover",
             return_value=make_mock_runtime(PRODUCER_SESSION),
         ):
             for status, exit_code in (("BLOCKED", 2), ("FAIL", 1)):
                 with (
                     self.subTest(status=status),
                     patch(
-                        "scripts.delivery_gate.submit.resolve_producer",
+                        "scripts.acceptance.task_operations.submit_task_for_acceptance.resolve_producer",
                         side_effect=ProducerError(
                             "producer-run-invalid", "fixture", status=status
                         ),
@@ -94,8 +93,6 @@ class StatusPropagationTest(unittest.TestCase):
                             "--task-id",
                             args["task_id"],
                             "--change-report-id",
-                            fixture.report_id,
-                            "--confirm-scope-report-id",
                             fixture.report_id,
                         ],
                         root=fixture.root,

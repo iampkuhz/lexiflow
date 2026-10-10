@@ -8,9 +8,9 @@ import test from 'node:test';
 import fsPromises from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { verifyReleaseCandidate } from '../verified-candidate.mjs';
-import { serializeManifest } from '../manifest.mjs';
-import { resolveBuildIdentity } from '../version.mjs';
+import { verifyReleaseCandidate } from '../integrity/release-candidate-verifier.mjs';
+import { serializeManifest } from '../integrity/release-artifact-manifest.mjs';
+import { resolveBuildIdentity } from '../integrity/source-build-identity.mjs';
 import { assembled } from './verified-candidate-fixture.mjs';
 import { extensionBytes } from './zip-fixture.mjs';
 

@@ -63,16 +63,16 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           if [ -z "$BASE_SHA" ] || printf '%s' "$BASE_SHA" | grep -Eq '^0+$'; then
-            xvfb-run -a python -m scripts.verification.ci quick --all
+            xvfb-run -a python -m scripts.triggers.run_ci_quick_checks quick --all
           else
-            xvfb-run -a python -m scripts.verification.ci quick --base "$BASE_SHA"
+            xvfb-run -a python -m scripts.triggers.run_ci_quick_checks quick --base "$BASE_SHA"
           fi
       - name: Build and smoke check extension archive
         id: package
         run: |
-          node extension/scripts/release.mjs > "$RUNNER_TEMP/extension-package.json"
+          node extension/scripts/packaging/package-extension-release.mjs > "$RUNNER_TEMP/extension-package.json"
           ZIP=$(node -e 'const d=require(process.argv[1]); console.log(`tmp/releases/${d.softwareVersion}/${d.sourceCommit}/${d.filename}`)' "$RUNNER_TEMP/extension-package.json")
-          node extension/scripts/archive-check.mjs "$ZIP" "$GITHUB_SHA"
+          node extension/scripts/checks/check-extension-archive.mjs "$ZIP" "$GITHUB_SHA"
           xvfb-run -a node extension/tests/archive-smoke.mjs "$ZIP" "$GITHUB_SHA"
           printf 'zip=%s\n' "$ZIP" >> "$GITHUB_OUTPUT"
       - name: Upload verified extension ZIP and checksum

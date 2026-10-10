@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 from unittest.mock import patch
 
-import module_check_adapter as adapter
+from scripts.checks.deployment import run_deployment_contract_tests as adapter
 
 
 def _synthetic_case(outcome="success"):
@@ -85,24 +85,33 @@ class DockerGroupContractTest(unittest.TestCase):
         clone[sid]["input_paths"] = list(clone[sid]["input_paths"]) + ["ops/docker/new-unknown.sh"]
         with self.assertRaisesRegex(ValueError, "surface source inventory mismatch"):
             adapter._preflight(self.root, clone, groups)
-        clone[sid]["input_paths"] = [path for path in self.declarations[sid]["input_paths"] if path != "ops/docker/Dockerfile"]
+        clone[sid]["input_paths"] = [path for path in self.declarations[sid]["input_paths"] if path != "ops/docker"]
         with self.assertRaisesRegex(ValueError, "surface source inventory mismatch"):
             adapter._preflight(self.root, clone, groups)
 
-    def test_real_filesystem_new_and_deleted_source_fail_closed(self):
+    def test_directory_source_membership_changes_are_frozen_and_stale_files_rejected(self):
+        from scripts.verification.planning.source_file_snapshot import snapshot_inputs
+
         source = self.root / "ops/docker/zz-docker-group-source-audit.tmp"
         self.assertFalse(source.exists())
         groups = adapter._members(self.declarations)
         clone = {key: dict(value) for key, value in self.declarations.items()}
         sid = adapter._GROUP_IDS["surface"]
         clone[sid]["input_paths"] = [*clone[sid]["input_paths"], source.relative_to(self.root).as_posix()]
+        before, missing = snapshot_inputs(self.root, self.declarations[sid])
+        self.assertEqual(missing, [])
         try:
             source.write_text("synthetic source\n")
-            with self.assertRaisesRegex(ValueError, "surface source inventory mismatch"):
-                adapter._preflight(self.root, self.declarations, groups, "surface")
+            after, missing = snapshot_inputs(self.root, self.declarations[sid])
+            self.assertEqual(missing, [])
+            self.assertNotEqual(before, after)
+            self.assertIn(source.relative_to(self.root).as_posix(), {item["locator"] for item in after})
+            adapter._preflight(self.root, self.declarations, groups, "surface")
             adapter._preflight(self.root, clone, groups, "surface")
         finally:
             source.unlink(missing_ok=True)
+        restored, missing = snapshot_inputs(self.root, self.declarations[sid])
+        self.assertEqual((restored, missing), (before, []))
         with self.assertRaisesRegex(ValueError, "surface source inventory mismatch"):
             adapter._preflight(self.root, clone, groups, "surface")
 
@@ -232,13 +241,13 @@ class DockerGroupContractTest(unittest.TestCase):
             identities = [case.id() for case in adapter._iter_cases(suite)]
             self.assertEqual(len(identities), len(set(identities)), name)
             self.assertFalse(any("SyntheticCase" in identity for identity in identities), name)
-        # 包含独立准备的真实安装对照、损坏拒绝和双实例隔离三个用例。
-        self.assertEqual(43, adapter._load_python(self.root, ["ops/docker/tests/test_podman_local.py"]).countTestCases())
+        # 包含独立准备的真实安装对照、损坏拒绝、双实例隔离和来源模板写入隔离用例。
+        self.assertEqual(44, adapter._load_python(self.root, ["ops/docker/tests/test_podman_local.py"]).countTestCases())
         self.assertEqual(12, adapter._load_python(self.root, ["ops/docker/tests/test_podman_fake_transport.py"]).countTestCases())
 
     def test_unknown_group_is_rejected_by_cli_and_stdout_is_single_json(self):
         stdout = io.StringIO()
-        with patch("sys.argv", ["module_check_adapter.py", "--group", "arbitrary"]), contextlib.redirect_stdout(stdout):
+        with patch("sys.argv", ["run_deployment_contract_tests.py", "--group", "arbitrary"]), contextlib.redirect_stdout(stdout):
             with self.assertRaises(SystemExit):
                 adapter.main()
         self.assertEqual("", stdout.getvalue())
@@ -298,7 +307,7 @@ class ModuleCheckAdapterTimingTest(unittest.TestCase):
             contextlib.redirect_stderr(stderr), contextlib.redirect_stdout(stdout),
         ):
             if main:
-                with patch("sys.argv", ["module_check_adapter.py"]):
+                with patch("sys.argv", ["run_deployment_contract_tests.py"]):
                     self.assertEqual(adapter.main(), 0)
                 self.assertEqual(stdout.getvalue().count("\n"), 1)
                 report = json.loads(stdout.getvalue())

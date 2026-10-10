@@ -1,4 +1,4 @@
-"""Tests for scripts.verification.declarations.
+"""Tests for scripts.verification.planning.check_definitions.
 
 Covers: YAML loading, schema validation, required fields, duplicate
 check IDs, invalid commands, scope filtering, check ID filtering.
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts.verification.declarations import (
+from scripts.verification.planning.check_definitions import (
     DeclarationError,
     filter_checks_by_ids,
     filter_checks_by_scope,
@@ -22,13 +22,10 @@ from tests.verification.declaration_fixtures import declaration_document
 
 
 def _write_declarations(root: Path, data: dict) -> None:
-    harness = root / "harness"
-    harness.mkdir(exist_ok=True)
+    harness = root / "config/engineering"
+    harness.mkdir(parents=True, exist_ok=True)
     document = declaration_document(data.get("checks", []))
-    if data.get("schema_version") not in {
-        None,
-        "lexiflow.module-checks.v2",
-    }:
+    if "schema_version" in data:
         document["schema_version"] = data["schema_version"]
     if data.get("checks") is not None and len(data["checks"]) != len(
         document["checks"]
@@ -42,7 +39,6 @@ def _write_declarations(root: Path, data: dict) -> None:
 
 _VALID_CHECK = {
     "check_id": "test.check",
-    "module": "test",
     "command": ["python3", "-c", "pass"],
     "cwd": ".",
     "timeout_seconds": 60,
@@ -74,19 +70,18 @@ class TestLoadDeclarations(unittest.TestCase):
             },
         )
 
-    def test_unknown_and_unreferenced_execution_definitions_fail_closed(self):
+    def test_unknown_check_fields_and_removed_execution_layer_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             _write_declarations(
                 root,
                 {
-                    "schema_version": "lexiflow.module-checks.v2",
                     "checks": [_VALID_CHECK],
                 },
             )
-            path = root / "harness/module-checks.yaml"
+            path = root / "config/engineering/module-checks.yaml"
             raw = yaml.safe_load(path.read_text())
-            raw["executions"]["fixture-0"]["cwd"] = "."
+            raw["checks"][0]["cwd"] = "."
             path.write_text(yaml.safe_dump(raw))
             with self.assertRaises(DeclarationError):
                 load_declarations(root)
@@ -94,45 +89,107 @@ class TestLoadDeclarations(unittest.TestCase):
             _write_declarations(
                 root,
                 {
-                    "schema_version": "lexiflow.module-checks.v2",
                     "checks": [_VALID_CHECK],
                 },
             )
             raw = yaml.safe_load(path.read_text())
-            raw["executions"]["unused"] = dict(raw["executions"]["fixture-0"])
+            raw["executions"] = {"unused": dict(raw["checks"][0])}
             path.write_text(yaml.safe_dump(raw))
             with self.assertRaises(DeclarationError):
                 load_declarations(root)
 
-    def test_shared_execution_normalization_isolated_per_check_and_load(self):
-        data = load_declarations(Path(__file__).resolve().parents[2])
-        paired = [
-            item
-            for item in data["checks"]
-            if item["check_id"]
-            in {"eng.release.version", "eng.release.version-on-change"}
+    def test_only_current_self_contained_schema_and_argv_are_accepted(self):
+        from scripts.verification.planning.check_definitions import _parse_declarations
+
+        document = declaration_document([_VALID_CHECK])
+        for command in ("python3 -c pass", None, ["python3", 1], [""]):
+            document["checks"][0]["command"] = command
+            with self.subTest(command=command), self.assertRaises(DeclarationError):
+                _parse_declarations(yaml.safe_dump(document).encode())
+        document = declaration_document([_VALID_CHECK])
+        document["schema_version"] = "lexiflow.module-checks.v3"
+        with self.assertRaises(DeclarationError) as caught:
+            _parse_declarations(yaml.safe_dump(document).encode())
+        self.assertEqual(caught.exception.code, "declarations-shape")
+
+    def test_input_and_trigger_paths_use_only_safe_literal_grammar(self):
+        from scripts.verification.planning.check_definitions import _parse_declarations
+
+        invalid = (
+            ".",
+            "a/../b",
+            "a//b",
+            "a/./b",
+            "/a",
+            "a\\b",
+            "a/*",
+            "a/?",
+            "a/[b]",
+            "a\x00",
+        )
+        for path in invalid:
+            for field in ("input_paths", "triggers"):
+                document = declaration_document([_VALID_CHECK])
+                check = document["checks"][0]
+                if field == "input_paths":
+                    check[field] = [path]
+                else:
+                    check["scenarios"] = ["change-targeted"]
+                    check[field] = [{"path": path}]
+                with (
+                    self.subTest(path=path, field=field),
+                    self.assertRaises(DeclarationError),
+                ):
+                    _parse_declarations(yaml.safe_dump(document).encode())
+
+    def test_real_registry_has_one_declaration_and_one_line_argv_per_check(self):
+        path = Path(__file__).resolve().parents[2] / "config/engineering/module-checks.yaml"
+        source = path.read_text()
+        raw = yaml.safe_load(source)
+        self.assertEqual(
+            set(raw), {"checks", "scenario_policy"}
+        )
+        self.assertEqual(len(raw["checks"]), 23)
+        command_lines = [
+            line for line in source.splitlines() if line.startswith("  command:")
         ]
-        self.assertEqual(len(paired), 2)
-        paired[0]["command"].append("mutation")
-        paired[0]["input_paths"].append("mutation")
-        paired[0]["result_contract"]["required_fields"].append("mutation")
-        reread = load_declarations(Path(__file__).resolve().parents[2])
-        self.assertNotIn("mutation", paired[1]["command"])
-        self.assertNotIn("mutation", paired[1]["input_paths"])
-        self.assertNotIn("mutation", paired[1]["result_contract"]["required_fields"])
-        self.assertNotIn("mutation", reread["checks"][0]["command"])
+        self.assertEqual(len(command_lines), 23)
+        self.assertTrue(
+            all(
+                line.startswith("  command: [") and line.endswith("]")
+                for line in command_lines
+            )
+        )
+        for check in raw["checks"]:
+            self.assertNotIn("execution", check)
+            self.assertIsInstance(check["command"], list)
+            self.assertTrue(check["input_paths"])
 
-    def test_non_string_execution_reference_is_a_declaration_error(self):
+    def test_canonical_scene_views_and_loads_are_isolated(self):
+        root = Path(__file__).resolve().parents[2]
+        data = load_declarations(root)
+        baseline = filter_checks_by_scope(data["checks"], "repository-baseline")
+        targeted = filter_checks_by_scope(data["checks"], "change-targeted")
+        paired = [
+            next(c for c in view if c["check_id"] == "eng.release.version")
+            for view in (baseline, targeted)
+        ]
+        paired[0]["command"].append("mutation")
+        paired[0]["triggers"].append({"path": "mutation"})
+        self.assertNotIn("mutation", paired[1]["command"])
+        self.assertNotIn({"path": "mutation"}, paired[1]["triggers"])
+        self.assertNotIn("mutation", load_declarations(root)["checks"][0]["command"])
+
+    def test_removed_execution_reference_is_a_declaration_error(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             _write_declarations(
                 root,
                 {
-                    "schema_version": "lexiflow.module-checks.v2",
                     "checks": [_VALID_CHECK],
                 },
             )
-            path = root / "harness/module-checks.yaml"
+            path = root / "config/engineering/module-checks.yaml"
             raw = yaml.safe_load(path.read_text())
             raw["checks"][0]["execution"] = []
             path.write_text(yaml.safe_dump(raw))
@@ -142,14 +199,24 @@ class TestLoadDeclarations(unittest.TestCase):
     def test_non_string_check_id_and_scope_are_declaration_errors(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
-            _write_declarations(root, {"schema_version": "lexiflow.module-checks.v2", "checks": [_VALID_CHECK]})
-            path = root / "harness/module-checks.yaml"
+            _write_declarations(
+                root,
+                {
+                    "checks": [_VALID_CHECK],
+                },
+            )
+            path = root / "config/engineering/module-checks.yaml"
             raw = yaml.safe_load(path.read_text())
             raw["checks"][0]["check_id"] = []
             path.write_text(yaml.safe_dump(raw))
             with self.assertRaises(DeclarationError):
                 load_declarations(root)
-            _write_declarations(root, {"schema_version": "lexiflow.module-checks.v2", "checks": [_VALID_CHECK]})
+            _write_declarations(
+                root,
+                {
+                    "checks": [_VALID_CHECK],
+                },
+            )
             raw = yaml.safe_load(path.read_text())
             raw["checks"][0]["scope"] = []
             path.write_text(yaml.safe_dump(raw))
@@ -164,10 +231,7 @@ class TestLoadDeclarations(unittest.TestCase):
             ]
         }
         for name in ("lifecycle-install", "lifecycle", "build"):
-            for suffix in ("", "-on-change"):
-                self.assertIs(
-                    checks["eng.release." + name + suffix]["transaction_reuse"], True
-                )
+            self.assertIs(checks["eng.release." + name]["transaction_reuse"], True)
         self.assertIs(checks["eng.release.docker-contract"]["transaction_reuse"], True)
         for group in ("surface", "shell", "local", "node"):
             self.assertIs(
@@ -193,12 +257,11 @@ class TestLoadDeclarations(unittest.TestCase):
             _write_declarations(
                 root,
                 {
-                    "schema_version": "lexiflow.module-checks.v2",
                     "checks": [_VALID_CHECK],
                 },
             )
             data = load_declarations(root)
-            self.assertEqual(data["schema_version"], "lexiflow.module-checks.v2")
+            self.assertNotIn("schema_version", data)
             self.assertEqual(len(data["checks"]), 1)
             self.assertIs(data["checks"][0]["transaction_reuse"], False)
 
@@ -209,7 +272,6 @@ class TestLoadDeclarations(unittest.TestCase):
             _write_declarations(
                 root,
                 {
-                    "schema_version": "lexiflow.module-checks.v2",
                     "checks": [check],
                 },
             )
@@ -238,7 +300,7 @@ class TestLoadDeclarations(unittest.TestCase):
                 "command": [
                     "python3",
                     "-m",
-                    "scripts.environment.release_runtime_check",
+                    "scripts.checks.release.source.check_synthetic_release_lifecycle",
                 ],
                 "executable": "python3",
                 "transaction_reuse": True,
@@ -276,7 +338,7 @@ class TestLoadDeclarations(unittest.TestCase):
             )
             with self.assertRaises(DeclarationError) as ctx:
                 load_declarations(root)
-            self.assertEqual(ctx.exception.code, "declarations-schema")
+            self.assertEqual(ctx.exception.code, "declarations-shape")
 
     def test_missing_required_field(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -348,25 +410,25 @@ class TestLoadDeclarations(unittest.TestCase):
             with self.assertRaises(DeclarationError):
                 load_declarations(root)
 
+    def test_invalid_targeted_triggers_rejected(self):
+        from scripts.verification.planning.check_definitions import _parse_declarations
+
+        document = declaration_document([_VALID_CHECK])
+        check = document["checks"][0]
+        check["scenarios"] = ["change-targeted"]
+        for triggers in (None, [{"path": "**"}], [{"path": "test/", "extra": True}]):
+            check["triggers"] = triggers
+            with self.subTest(triggers=triggers), self.assertRaises(DeclarationError):
+                _parse_declarations(yaml.safe_dump(document).encode())
+
 
 class TestFilterChecksByScope(unittest.TestCase):
-    def test_repository_baseline_only_matching(self):
-        checks = [
-            {"check_id": "a", "scope": "change-targeted"},
-            {"check_id": "b", "scope": "repository-baseline"},
-        ]
-        result = filter_checks_by_scope(checks, "repository-baseline")
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["check_id"], "b")
-
-    def test_change_targeted_only(self):
-        checks = [
-            {"check_id": "a", "scope": "change-targeted"},
-            {"check_id": "b", "scope": "repository-baseline"},
-        ]
-        result = filter_checks_by_scope(checks, "change-targeted")
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["check_id"], "a")
+    def test_scene_views_preserve_membership_without_duplicate_ids(self):
+        checks = load_declarations(Path(__file__).resolve().parents[2])["checks"]
+        self.assertEqual(len(checks), len({c["check_id"] for c in checks}))
+        self.assertEqual(len(checks), 23)
+        self.assertEqual(len(filter_checks_by_scope(checks, "repository-baseline")), 19)
+        self.assertEqual(len(filter_checks_by_scope(checks, "change-targeted")), 22)
 
 
 class TestFilterChecksByIds(unittest.TestCase):

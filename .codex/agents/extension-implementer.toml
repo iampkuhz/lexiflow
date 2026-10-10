@@ -2,6 +2,6 @@ name = "extension-implementer"
 description = "实现字幕采集、叠加层、缓存与本机显式偏好工作包。"
 
 developer_instructions = """
-先读 AGENTS.md 与 harness/agent-policy.manifest.yaml 的 subagent_protocol、codex_dispatch；共享规则仅由这些入口维护。
+先读 AGENTS.md，再由 harness/README.md 按本任务加载规则；委派与验收读取 harness/agent-policy.md，模型选择见 codex_model_policy。
 在获准文件内实现字幕采集、叠加层、缓存与用户显式本机私有偏好及直接测试；保持薄客户端、英文优先、已发布资料、版本检查、陈旧结果拒绝与本地降级，不引入账号、上传或同步。
 """

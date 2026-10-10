@@ -109,3 +109,9 @@ pnpm-debug.log*
 
 # 仓库 skill 只链接本机安装；共享声明由 Harness 跟踪。
 /.agents/skills/
+
+# 职责目录中的构建实现源码，不是生成物。
+!/ops/release/build/
+!/ops/release/build/**
+!/extension/scripts/build/
+!/extension/scripts/build/**

@@ -10,7 +10,7 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
-HELPER = (ROOT / 'ops/podman/command.mjs').as_uri()
+HELPER = (ROOT / 'ops/podman/execution/deployment-process-control.mjs').as_uri()
 
 
 class CommandProgressTest(unittest.TestCase):

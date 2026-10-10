@@ -8,11 +8,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { assembleReleaseCandidate } from '../../release/candidate.mjs';
-import { resolveBuildIdentity } from '../../release/version.mjs';
+import { assembleReleaseCandidate } from '../../release/build/release-candidate-assembler.mjs';
+import { resolveBuildIdentity } from '../../release/integrity/source-build-identity.mjs';
 import { extensionBytes, makeZip } from '../../release/tests/zip-fixture.mjs';
-import { dataGeneration } from '../../dataset/generation-version.mjs';
-import { readCandidate, installCandidateArtifacts } from '../candidate.mjs';
+import { dataGeneration } from '../../dataset/dataset-generation-identity.mjs';
+import { readCandidate, installCandidateArtifacts } from '../candidates/candidate-artifact-installer.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -23,8 +23,10 @@ async function assembled(baseVersion = '2.0.0-SNAPSHOT', sqlText = 'synthetic sc
   const artifactRoot = path.join(root, 'input'); await fs.mkdir(path.join(root, 'ops/release'), { recursive: true }); await fs.mkdir(artifactRoot);
   await fs.writeFile(path.join(root, '.gitignore'), '/input/\n/images/\n/output/\n/descriptor.json\n');
   await fs.writeFile(path.join(root, 'ops/release/version.txt'), `${baseVersion}\n`);
-  for (const file of ['version.mjs', 'runtime-entry.mjs', 'runtime-verification.sh', 'lifecycle-state.sh', 'lifecycle-docker.sh', 'lifecycle.sh'])
+  for (const file of ['integrity/source-build-identity.mjs', 'build/release-runtime-entry-generator.mjs', 'runtime/release-artifact-verification.sh', 'runtime/release-installation-state.sh', 'runtime/release-installation-docker.sh', 'runtime/release-installation-lifecycle.sh']) {
+    await fs.mkdir(path.dirname(path.join(root, 'ops/release', file)), { recursive: true });
     await fs.writeFile(path.join(root, 'ops/release', file), await fs.readFile(path.join(repo, 'ops/release', file)));
+  }
   execFileSync('git', ['init', '-q', root]); execFileSync('git', ['-C', root, 'add', '.']);
   execFileSync('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'clean candidate fixture']);
   const identity = resolveBuildIdentity(root), commit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
@@ -244,7 +246,7 @@ else: print('unexpected command '+json.dumps(a), file=sys.stderr); sys.exit(7)
 os.platform=()=> 'darwin'; os.arch=()=> 'arm64';
 net.createServer=()=>({ once(){return this;}, listen(_port,_host,cb){setImmediate(cb);return this;}, close(cb){setImmediate(cb);return this;} });
 http.get=(options,callback)=>{const req=new EventEmitter(); req.destroy=(err)=>{if(err)req.emit('error',err);req.emit('close');}; setImmediate(()=>{const env=fs.readFileSync(process.env.INSTALL_DIR+'/release.env','utf8');const image=env.match(/^LEXIFLOW_API_IMAGE=(.+)$/m)?.[1];const versions=JSON.parse(process.env.IMAGE_VERSIONS);const value=options.path.endsWith('/readiness')?{status:'UP'}:{mode:'formal',ready:true,reason:'OK',softwareVersion:versions[image],apiContract:'caption-hints.v2',datasetVersion:7};const res=Readable.from([Buffer.from(JSON.stringify(value))]);res.statusCode=200;res.on('end',()=>req.emit('close'));callback(res);});return req;};`);
-  const source = `import fs from 'node:fs'; import path from 'node:path'; import {runLocal} from ${JSON.stringify(pathToFileURL(path.join(repo,'ops/podman/local.mjs')).href)};\n`+
+  const source = `import fs from 'node:fs'; import path from 'node:path'; import {runLocal} from ${JSON.stringify(pathToFileURL(path.join(repo,'ops/podman/commands/manage-podman-installation.mjs')).href)};\n`+
     `async function deploy(action,input){let hash;const log=console.log;console.log=(...parts)=>{for(const part of parts){try{const row=JSON.parse(part);if(row.planHash)hash=row.planHash;}catch{}}log(...parts);};const planned=await runLocal([action,'--dir',${JSON.stringify(dir)},'--plan'],input);console.log=log;return planned===0&&hash?runLocal([action,'--dir',${JSON.stringify(dir)},'--confirm-plan',hash],input):1;}\n`+
     `if(await runLocal(['install'],${JSON.stringify(first.input)})===0)throw new Error('candidate default dir accepted'); if(await runLocal(['install','--dir',${JSON.stringify(dir)},'--api-port','18081'],${JSON.stringify(first.input)})===0)throw new Error('candidate port override accepted'); if(fs.existsSync(${JSON.stringify(dir)}))throw new Error('invalid inputs created installation');\n`+
     `fs.writeFileSync(${JSON.stringify(badLabelMarker)},'1'); const rejected=await deploy('install',${JSON.stringify(first.input)}); if(rejected===0)throw new Error('bad image labels accepted');\n`+

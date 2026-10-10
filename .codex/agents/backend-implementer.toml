@@ -2,6 +2,6 @@ name = "backend-implementer"
 description = "在明确边界内实现后端工作包及直接测试。"
 
 developer_instructions = """
-先读 AGENTS.md 与 harness/agent-policy.manifest.yaml 的 subagent_protocol、codex_dispatch；共享规则仅由这些入口维护。
+先读 AGENTS.md，再由 harness/README.md 按本任务加载规则；委派与验收读取 harness/agent-policy.md，模型选择见 codex_model_policy。
 按 Java 产品与模块合同，在获准文件内实现后端工作包及直接测试。
 """

@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.environment import release_promotion as p
+from ops.release.workflow import promote_verified_release as p
 
 SUBMISSION = "00000000-0000-0000-0000-000000000001"
 COMMIT = "a" * 40
@@ -25,6 +25,7 @@ def sha(data: bytes) -> str:
 class Fixture:
     def __init__(self, root: Path):
         self.root = root
+        (root / "LICENSE").write_bytes(b"MIT\n")
         self.candidate = root / "candidate"
         self.payload = self.candidate / "payload"
         self.payload.mkdir(parents=True)
@@ -55,6 +56,7 @@ class Fixture:
             ("license", "licenses/MIT.txt", b"MIT\n"),
             ("extension", "extension/package.zip", b"accepted extension zip bytes"),
             ("api-image", "images/api.tar", b"image bytes"),
+            ("postgres-image", "images/postgres.tar", b"postgres image bytes"),
         ):
             path = self.payload / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -62,6 +64,10 @@ class Fixture:
             self.artifacts.append(
                 {"role": role, "path": name, "bytes": len(data), "sha256": sha(data)}
             )
+            if role.endswith("-image"):
+                self.artifacts[-1].update(
+                    platform="linux/arm64", imageDigest="sha256:" + sha(data)
+                )
         self.manifest = {
             "buildIdentity": self.identity,
             "softwareVersion": "1.2.3",
@@ -112,6 +118,7 @@ class FakeGitHub:
     calls = []
     archive = None
     extension = None
+    registry = None
     fail = None
     list_assets = None
     immutable = True
@@ -129,6 +136,7 @@ class FakeGitHub:
         cls.calls = []
         cls.archive = None
         cls.extension = None
+        cls.registry = None
         cls.fail = None
         cls.list_assets = None
         cls.immutable = True
@@ -194,15 +202,43 @@ class FakeGitHub:
             type(self).archive = payload
         if name.endswith(".zip"):
             type(self).extension = payload
+        if name == "registry-images.json":
+            type(self).registry = payload
         return 201, item
 
 
 class PromotionTests(unittest.TestCase):
+    def registry(self, **kwargs):
+        kwargs["revalidate"]()
+        return {
+            "schemaVersion": "lexiflow.registry-images.v1",
+            "softwareVersion": kwargs["identity"]["softwareVersion"],
+            "sourceCommit": kwargs["identity"]["sourceCommit"],
+            "candidateSha256": kwargs["candidate_sha256"],
+            "manifestSha256": kwargs["manifest_sha256"],
+            "images": [
+                {
+                    "role": item["role"],
+                    "platform": "linux/arm64",
+                    "reference": f"ghcr.io/o/r-{'api' if item['role'] == 'api-image' else 'postgres'}:1.2.3",
+                    "manifestDigest": "sha256:" + "f" * 64,
+                    "imageId": item["imageDigest"],
+                    "archiveSha256": item["sha256"],
+                }
+                for item in kwargs["manifest"]["artifacts"]
+                if item["role"].endswith("-image")
+            ],
+        }
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.fixture = Fixture(Path(self.temp.name))
         self.patches = [
+            patch.object(
+                p.release_registry, "publish_images", side_effect=self.registry
+            ),
+            patch.object(p.release_registry, "verify_images", create=True),
             patch.object(p, "ROOT", self.fixture.root),
             patch.object(p, "LICENSE_TABLE", self.fixture.table),
             patch.object(
@@ -227,22 +263,20 @@ class PromotionTests(unittest.TestCase):
         )
 
     def test_prepare_full_asset_set_and_archive_bytes(self):
-        result = self.promote()
+        with (
+            patch.object(p, "_archive") as archive,
+            patch.object(p.tempfile, "mkdtemp") as workspace,
+        ):
+            result = self.promote()
         self.assertEqual(result["result"], "PASS")
+        self.assertEqual(result["scope"], "promotion-precheck")
         self.assertFalse(result["published"])
         self.assertEqual(result["tag"], "v1.2.3")
-        self.assertEqual(
-            {a["name"] for a in result["assets"]},
-            {
-                "lexiflow-1.2.3-macos-arm64.tar.gz",
-                "lexiflow-1.2.3-macos-arm64.tar.gz.sha256",
-                "lexiflow-extension-1.2.3.zip",
-                "lexiflow-extension-1.2.3.zip.sha256",
-                "candidate.json",
-                "manifest.json",
-                "manifest.json.sha256",
-            },
-        )
+        self.assertNotIn("assets", result)
+        archive.assert_not_called()
+        workspace.assert_not_called()
+        p.release_registry.publish_images.assert_not_called()
+        p.release_registry.verify_images.assert_not_called()
         with (
             patch.object(p, "GitHub", FakeGitHub),
             patch.object(p, "_repository", return_value=("o", "r")),
@@ -254,6 +288,31 @@ class PromotionTests(unittest.TestCase):
             published = self.promote(publish=True)
         self.assertTrue(published["published"])
         self.assertEqual(published["release_id"], 51)
+        registry = json.loads(FakeGitHub.registry)
+        self.assertEqual(
+            registry["candidateSha256"],
+            self.fixture.proof["candidate"]["candidateSha256"],
+        )
+        self.assertEqual(
+            registry["manifestSha256"],
+            self.fixture.proof["candidate"]["manifestSha256"],
+        )
+        self.assertEqual(
+            {item["role"] for item in registry["images"]},
+            {"api-image", "postgres-image"},
+        )
+        self.assertEqual(len(published["assets"]), 9)
+        p.release_registry.verify_images.assert_called_once_with(
+            registry,
+            owner="o",
+            repo="r",
+            expected={
+                "softwareVersion": "1.2.3",
+                "sourceCommit": COMMIT,
+                "candidateSha256": self.fixture.proof["candidate"]["candidateSha256"],
+                "manifestSha256": self.fixture.proof["candidate"]["manifestSha256"],
+            },
+        )
         extension_bytes = (self.fixture.payload / "extension/package.zip").read_bytes()
         self.assertEqual(FakeGitHub.extension, extension_bytes)
         extension_asset = next(
@@ -270,6 +329,7 @@ class PromotionTests(unittest.TestCase):
                     "lexiflow.sh",
                     "licenses/MIT.txt",
                     "images/api.tar",
+                    "images/postgres.tar",
                     "extension/package.zip",
                     "manifest.json",
                     "manifest.json.sha256",
@@ -308,6 +368,7 @@ class PromotionTests(unittest.TestCase):
                 p.PromotionError, "formal-candidate-proof-required"
             ):
                 self.promote()
+
         for value in ("1.2.3-SNAPSHOT.20261006.gabc", "1.2.3"):
             self.fixture.identity["softwareVersion"] = value
             self.fixture.refresh()
@@ -321,6 +382,106 @@ class PromotionTests(unittest.TestCase):
             p.PromotionError, "formal-release-identity-required"
         ):
             self.promote()
+
+    def test_registry_failure_blocks_draft_and_never_retries(self):
+        with (
+            patch.object(p, "GitHub", FakeGitHub),
+            patch.object(p, "_repository", return_value=("o", "r")),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
+            patch.object(
+                p.release_registry,
+                "publish_images",
+                side_effect=p.release_registry.RegistryError(
+                    "registry-push-unknown", stage="push", write_unknown=True
+                ),
+            ) as push,
+        ):
+            with self.assertRaises(p.PromotionError) as raised:
+                self.promote(publish=True)
+        self.assertEqual(raised.exception.stage, "registry-push")
+        push.assert_called_once()
+        self.assertFalse(any(call[2] == "POST" for call in FakeGitHub.calls))
+
+    def test_registry_mapping_mismatch_blocks_draft(self):
+        def wrong(**kwargs):
+            result = self.registry(**kwargs)
+            result["images"][0]["reference"] = "ghcr.io/other/api:1.2.3"
+            return result
+
+        with (
+            patch.object(p, "GitHub", FakeGitHub),
+            patch.object(p, "_repository", return_value=("o", "r")),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
+            patch.object(p.release_registry, "publish_images", side_effect=wrong),
+        ):
+            with self.assertRaisesRegex(p.PromotionError, "registry-mapping-invalid"):
+                self.promote(publish=True)
+        self.assertFalse(any(call[2] == "POST" for call in FakeGitHub.calls))
+
+    def test_registry_recheck_failure_preserves_draft(self):
+        with (
+            patch.object(p, "GitHub", FakeGitHub),
+            patch.object(p, "_repository", return_value=("o", "r")),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
+            patch.object(
+                p.release_registry,
+                "verify_images",
+                side_effect=p.release_registry.RegistryError(
+                    "registry-not-public", stage="anonymous-read"
+                ),
+                create=True,
+            ),
+        ):
+            with self.assertRaises(p.PromotionError) as raised:
+                self.promote(publish=True)
+        self.assertEqual(raised.exception.release_id, 51)
+        self.assertEqual(len(FakeGitHub.assets), 9)
+        self.assertFalse(
+            any(call[2] in ("PATCH", "DELETE") for call in FakeGitHub.calls)
+        )
+
+    def test_missing_image_role_blocks_precheck(self):
+        self.fixture.manifest["artifacts"] = [
+            item for item in self.fixture.artifacts if item["role"] != "postgres-image"
+        ]
+        self.fixture.refresh()
+        with self.assertRaisesRegex(p.PromotionError, "candidate-image-set-invalid"):
+            self.promote()
+
+    def test_project_license_drift_and_symlink_rejected(self):
+        own = self.fixture.root / "LICENSE"
+        own.write_bytes(b"different license")
+        with self.assertRaisesRegex(
+            p.PromotionError, "project-license-notice-mismatch"
+        ):
+            self.promote()
+        own.unlink()
+        own.symlink_to(self.fixture.payload / "licenses/MIT.txt")
+        with self.assertRaisesRegex(p.PromotionError, "project-license-invalid"):
+            self.promote()
+
+    def test_repository_self_license_binds_real_approved_notice(self):
+        root = Path(__file__).resolve().parents[2]
+        table = root / "ops/release/distribution-licenses.json"
+        licenses = json.loads(table.read_bytes())["licenses"]
+        approved = [item for item in licenses if item["component"] == "LexiFlow"]
+        self.assertEqual(len(approved), 1)
+        self.assertEqual(approved[0]["licenseId"], "MIT")
+        own = (root / "LICENSE").read_bytes()
+        self.assertIn(b"Copyright (c) 2026 LexiFlow contributors", own)
+        self.assertEqual(approved[0]["noticeBytes"], len(own))
+        self.assertEqual(approved[0]["noticeSha256"], sha(own))
+        with patch.object(p, "ROOT", root), patch.object(p, "LICENSE_TABLE", table):
+            p._license_check({"licenses": licenses})
 
     def test_platform_license_and_payload_rejections(self):
         self.fixture.manifest["platforms"] = ["linux/amd64"]
@@ -362,7 +523,7 @@ class PromotionTests(unittest.TestCase):
         with self.assertRaisesRegex(
             p.PromotionError, "candidate-artifact-hash-mismatch"
         ):
-            self.promote()
+            self.promote(publish=True)
 
     def test_license_table_bounded_duplicate_nonfinite_symlink(self):
         for data in (
@@ -433,7 +594,7 @@ class PromotionTests(unittest.TestCase):
 
                 def request(self, *args, **kwargs):
                     result = old(self, *args, **kwargs)
-                    if len(FakeGitHub.assets) == 7:
+                    if len(FakeGitHub.assets) == 9:
                         FakeGitHub.list_assets = mutate(FakeGitHub.assets)
                     return result
 
@@ -522,7 +683,7 @@ class PromotionTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 p.PromotionError, "candidate-artifact-hash-mismatch"
             ):
-                self.promote()
+                self.promote(publish=True)
         self.assertTrue(changed)
         for unsafe in ["../outside", "images//x", "/outside", "x/../y", "x\\y"]:
             with self.assertRaises(p.PromotionError):
@@ -530,17 +691,17 @@ class PromotionTests(unittest.TestCase):
                     {"path": unsafe, "role": "sql", "bytes": 1, "sha256": "a" * 64}
                 )
         with patch.object(p, "MAX_ASSET", 1), self.assertRaises(p.PromotionError):
-            self.promote()
+            self.promote(publish=True)
         target.unlink()
         target.symlink_to(self.fixture.payload / "lexiflow.sh")
         with self.assertRaisesRegex(p.PromotionError, "candidate-path-unsafe"):
-            self.promote()
+            self.promote(publish=True)
 
     def test_proof_drift_after_uploads_prevents_publish(self):
         original = self.fixture.consumer
 
         def drift(*args, **kwargs):
-            if len(FakeGitHub.assets) == 7:
+            if len(FakeGitHub.assets) == 9:
                 return {"result": "BLOCKED"}
             return original(*args, **kwargs)
 
@@ -557,7 +718,7 @@ class PromotionTests(unittest.TestCase):
                 self.promote(publish=True)
         self.assertEqual(caught.exception.release_id, 51)
         self.assertEqual(caught.exception.stage, "draft")
-        self.assertEqual(len(FakeGitHub.assets), 7)
+        self.assertEqual(len(FakeGitHub.assets), 9)
         self.assertFalse(any(call[2] == "PATCH" for call in FakeGitHub.calls))
 
     def test_cli_unknown_output_and_cleanup_preserve_remote_fact(self):

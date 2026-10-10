@@ -5,9 +5,12 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from scripts.verification.declarations import load_declarations_snapshot
-from scripts.verification.scope import (
-    resolve_module_dependencies,
+from scripts.verification.planning.check_definitions import (
+    load_declarations_snapshot,
+    filter_checks_by_scope,
+)
+from scripts.verification.execution.check_runner import snapshot_check_inputs
+from scripts.verification.planning.check_scope_selection import (
     select_checks_for_changes,
 )
 
@@ -29,54 +32,57 @@ class DeliverySelectionTest(unittest.TestCase):
             "backend/build.gradle.kts",
         ):
             with self.subTest(path=path):
-                self.assertIn("eng.backend.delivery-on-change", self.selected([path]))
-        check = next(
-            c for c in self.checks if c["check_id"] == "eng.backend.delivery-on-change"
-        )
+                self.assertIn("eng.backend.delivery", self.selected([path]))
+        check = next(c for c in self.checks if c["check_id"] == "eng.backend.delivery")
         self.assertIn("deliveryFull", check["command"])
 
     def test_scripts_or_tool_policy_require_python_quality(self):
         for path in (
             "scripts/new.py",
             "scripts/agents/removed.py",
-            "harness/python-quality.toml",
-            "harness/python-docstrings.toml",
+            "config/engineering/python-quality.toml",
+            "scripts/checks/repository/python/check_python_quality.py",
             "requirements-dev.txt",
         ):
             with self.subTest(path=path):
-                self.assertIn(
-                    "eng.repository.python-quality-on-change", self.selected([path])
-                )
+                self.assertIn("eng.repository.python-quality", self.selected([path]))
 
     def test_docs_only_does_not_select_language_quality(self):
         ids = self.selected(["docs/reference/hooks.md"])
-        self.assertNotIn("eng.repository.python-quality-on-change", ids)
-        self.assertNotIn("eng.backend.delivery-on-change", ids)
+        self.assertNotIn("eng.repository.python-quality", ids)
+        self.assertNotIn("eng.backend.delivery", ids)
 
     def test_both_client_hook_configs_select_and_freeze_hook_check(self):
         for path in (".codex/hooks.json", ".qoder/settings.json"):
             with self.subTest(path=path):
-                self.assertIn("eng.repository.hooks-on-change", self.selected([path]))
-                for check in self.checks:
-                    if check["check_id"] in (
-                        "eng.repository.hooks",
-                        "eng.repository.hooks-on-change",
-                    ):
-                        self.assertIn(path, check["input_paths"])
-                        self.assertIn("scripts/repository", check["input_paths"])
-                        self.assertIn(
-                            "scripts/verification/delivery_hook.py", check["input_paths"]
+                self.assertIn("eng.verification.module-tests", self.selected([path]))
+                check = next(
+                    c
+                    for c in self.checks
+                    if c["check_id"] == "eng.verification.module-tests"
+                )
+                self.assertIn(path, check["input_paths"])
+                self.assertTrue(
+                    any(
+                        "scripts/triggers/run_stop_checks.py" == p
+                        or "scripts/triggers/run_stop_checks.py".startswith(
+                            p.rstrip("/") + "/"
                         )
-                        self.assertEqual([], check["module_dependencies"])
-                        closed = resolve_module_dependencies([check], self.checks)
-                        self.assertEqual(
-                            [check["check_id"]], [c["check_id"] for c in closed]
-                        )
+                        for p in check["input_paths"]
+                    )
+                )
 
     def test_baseline_and_change_share_frozen_contract(self):
-        by_id = {c["check_id"]: c for c in self.checks}
+        by_id = {
+            c["check_id"]: c
+            for c in filter_checks_by_scope(self.checks, "repository-baseline")
+        }
+        changed_by_id = {
+            c["check_id"]: c
+            for c in filter_checks_by_scope(self.checks, "change-targeted")
+        }
         for check_id in ("eng.backend.delivery", "eng.repository.python-quality"):
-            base, change = by_id[check_id], by_id[check_id + "-on-change"]
+            base, change = by_id[check_id], changed_by_id[check_id]
             for key in (
                 "command",
                 "input_paths",
@@ -86,13 +92,31 @@ class DeliverySelectionTest(unittest.TestCase):
             ):
                 self.assertEqual(base[key], change[key], (check_id, key))
         self.assertIn(
-            "harness/python-quality.toml",
+            "config/engineering/python-quality.toml",
             by_id["eng.repository.python-quality"]["input_paths"],
         )
         self.assertIn(
-            "harness/python-docstrings.toml",
-            by_id["eng.repository.python-quality"]["input_paths"],
+            "scripts/checks/repository/python/check_python_quality.py",
+            {
+                item["locator"]
+                for item in snapshot_check_inputs(
+                    ROOT, by_id["eng.repository.python-quality"]
+                )["files"]
+            },
         )
+        for check_id in (
+            "eng.backend.delivery",
+            "eng.verification.module-tests",
+            "eng.release.lifecycle-runtime",
+            "eng.release.candidate-runtime",
+        ):
+            with self.subTest(check_id=check_id):
+                snapshot = snapshot_check_inputs(ROOT, by_id[check_id])
+                self.assertEqual([], snapshot["missing"])
+                self.assertIn(
+                    "scripts/environment/services/isolated_postgres_redis.py",
+                    {item["locator"] for item in snapshot["files"]},
+                )
 
 
 if __name__ == "__main__":

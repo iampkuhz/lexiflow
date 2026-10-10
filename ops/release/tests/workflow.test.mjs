@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, lstat, rm, symlink, realpath } fro
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { prepareWorkflow, resumePromotion, runCommand } from '../workflow.mjs';
+import { prepareWorkflow, resumePromotion, runCommand } from '../workflow/run-release-workflow.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const ident = (commit, version = '1.2.3') => {
@@ -27,6 +27,7 @@ async function fixture(t) {
   const previousDirectory = path.join(root, 'previous');
   await Promise.all([mkdir(noticesRoot), mkdir(previousDirectory)]);
   await mkdir(path.join(root, 'ops/release'), { recursive: true });
+  for (const directory of ['build', 'integrity', 'runtime']) await mkdir(path.join(root, 'ops/release', directory), { recursive: true });
   await mkdir(path.join(root, 'ops/docker'), { recursive: true });
   await mkdir(path.join(root, 'infra/postgres'), { recursive: true });
   await writeFile(path.join(root, 'ops/docker/compose.yaml'), 'compose');
@@ -67,7 +68,7 @@ function boundaries(f, overrides = {}) {
       await mkdir(folder, { recursive: true });
       await writeFile(path.join(folder, 'api-1.2.3.jar'), 'real jar bytes');
     }
-    if (command === 'node' && args.includes('extension/scripts/release.mjs')) {
+    if (command === 'node' && args.includes('extension/scripts/packaging/package-extension-release.mjs')) {
       const zip = Buffer.from('real extension zip');
       const folder = path.join(f.root, 'tmp/releases/1.2.3', targetIdentity.sourceCommit);
       await mkdir(folder, { recursive: true });
@@ -142,9 +143,9 @@ test('real staging bytes and exact builder/assembler contracts precede private h
   assert.equal((await lstat(path.join(quality, 'handoff.json'))).mode & 0o777, 0o600);
   const cmds = b.calls.filter(call => call[0] === 'command');
   assert.deepEqual(cmds.map(call => [call[1], call[2].slice(0, 3)]),
-    [['python3', ['-m', 'scripts.environment.java_exec', 'backend/gradlew']],
-      ['npm', ['ci']], ['node', ['extension/scripts/release.mjs']],
-      ['python3', ['-m', 'scripts.environment.java_exec', 'java']]]);
+    [['python3', ['-m', 'scripts.local.run_with_java_toolchain', 'backend/gradlew']],
+      ['npm', ['ci']], ['node', ['extension/scripts/packaging/package-extension-release.mjs']],
+      ['python3', ['-m', 'scripts.local.run_with_java_toolchain', 'java']]]);
   assert.ok(cmds[3][2].includes('--release-dataset'));
   assert.ok(cmds[3][2].includes('--expected-sha256'));
 });
@@ -253,13 +254,14 @@ test('resume binds UUID, host, source, original request and candidate; only publ
   const outputs = [];
   const run = async (_cmd, args, settings) => {
     outputs.push({ args, settings });
-    return JSON.stringify({ result: 'PASS', published: args.includes('--publish') });
+    return JSON.stringify({ result: 'PASS', scope: args.includes('--publish') ? 'promotion-publish' : 'promotion-precheck', published: args.includes('--publish') });
   };
   const common = { root: f.root, submissionId, releaseTag: 'v1.2.3',
     run, identityReader: () => targetIdentity, tagChecker: () => targetIdentity,
     verifier: b.options.verifyReleaseCandidate };
   assert.equal((await resumePromotion(common)).status, 'PASS');
   assert.equal(outputs[0].settings.env.GITHUB_TOKEN, undefined);
+  assert.equal(outputs[0].settings.env.LEXIFLOW_RELEASE_PODMAN_ENDPOINT, undefined);
   assert.equal((await resumePromotion({ ...common, releaseTag: 'v1.2.4' })).status, 'BLOCKED');
   assert.equal((await resumePromotion({ ...common, host: 'other-host' })).status, 'BLOCKED');
   const oldToken = process.env.GITHUB_TOKEN;
@@ -274,6 +276,7 @@ test('resume binds UUID, host, source, original request and candidate; only publ
     const published = await resumePromotion({ ...common, publish: true });
     assert.equal(published.status, 'PASS');
     assert.equal(outputs[1].settings.env.GITHUB_TOKEN, 'synthetic-test-token');
+    assert.equal(outputs[1].settings.env.LEXIFLOW_RELEASE_PODMAN_ENDPOINT, f.body.endpoint);
     assert.equal(outputs[1].settings.env.LEXIFLOW_RELEASE_CONFIG_TOKEN, 'synthetic-config-token');
     const unknown = await resumePromotion({ ...common, publish: true, run: async () => {
       const error = new Error('CHILD_FAILED');
@@ -313,8 +316,8 @@ test('resume binds UUID, host, source, original request and candidate; only publ
 
 
 test('private readers and unused release cache forwarding are not public interfaces', async t => {
-  const workflow = await import('../workflow.mjs');
-  const dockerCommand = await import('../build-command.mjs');
+  const workflow = await import('../workflow/run-release-workflow.mjs');
+  const dockerCommand = await import('../build/release-build-process.mjs');
   assert.equal(workflow.readBoundedJson, undefined);
   assert.equal(dockerCommand.dockerOutputLimit, undefined);
   const names = ['LEXIFLOW_RELEASE_GRADLE_CACHE', 'LEXIFLOW_RELEASE_NPM_CACHE'];

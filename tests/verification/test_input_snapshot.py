@@ -10,13 +10,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import yaml
 
-from scripts.verification.input_snapshot import snapshot_inputs
+from scripts.verification.planning.source_file_snapshot import snapshot_inputs
 from tests.verification.declaration_fixtures import write_declarations
-from scripts.verification.kernel import fingerprint_json, snapshot_check_inputs
-from scripts.verification.reports import _snapshot_shape, validate_report
-from scripts.verification.scenarios import freeze_inputs, verify_repository
+from scripts.verification.execution.check_runner import fingerprint_json, snapshot_check_inputs
+from scripts.verification.reports.verification_report_store import _snapshot_shape, validate_report
+from scripts.verification.execution.check_plan_runner import freeze_inputs
+from tests.verification.test_scenarios import verify_repository
 
 
 def _check(*paths: str) -> dict:
@@ -32,7 +32,7 @@ class TestInputSnapshot(unittest.TestCase):
                 with (
                     self.subTest(inputs=inputs),
                     patch(
-                        "scripts.verification.input_snapshot.os.read",
+                        "scripts.verification.planning.source_file_snapshot.os.read",
                         side_effect=AssertionError("invalid input read"),
                     ),
                 ):
@@ -45,9 +45,17 @@ class TestInputSnapshot(unittest.TestCase):
             root = Path(directory)
             (root / "build").mkdir()
             (root / "build" / "artifact").write_bytes(b"generated")
-            paths = ["build", "build/artifact", "cache.pyc", "node_modules/pkg/file"]
+            paths = [
+                "build",
+                "build/artifact",
+                "cache.pyc",
+                "node_modules/pkg/file",
+                "dist",
+                "src/dist/bundle.js",
+                "backend/gradle/build-logic/.kotlin/sessions/compiler.salive",
+            ]
             with patch(
-                "scripts.verification.input_snapshot.os.read",
+                "scripts.verification.planning.source_file_snapshot.os.read",
                 side_effect=AssertionError("explicit generated input read"),
             ):
                 files, missing = snapshot_inputs(root, _check(*paths))
@@ -57,6 +65,109 @@ class TestInputSnapshot(unittest.TestCase):
             self.assertEqual(
                 (result["result"], result["reason"]), ("FAIL", "input-missing")
             )
+
+    def test_kotlin_sessions_do_not_change_source_snapshot(self):
+        """Kotlin 自有缓存增删改不入源码，真实源码修改仍改变指纹。"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "backend/gradle/build-logic"
+            source.mkdir(parents=True)
+            entry = source / "build.gradle.kts"
+            entry.write_bytes(b"source")
+            check = _check("backend/gradle")
+            initial = snapshot_check_inputs(root, check)
+            sessions = source / ".kotlin/sessions"
+            sessions.mkdir(parents=True)
+            session = sessions / "compiler.salive"
+            session.write_bytes(b"running")
+            self.assertEqual(initial, snapshot_check_inputs(root, check))
+            session.write_bytes(b"updated")
+            self.assertEqual(initial, snapshot_check_inputs(root, check))
+            session.unlink()
+            self.assertEqual(initial, snapshot_check_inputs(root, check))
+            entry.write_bytes(b"modified source")
+            self.assertNotEqual(initial["fingerprint"], snapshot_check_inputs(root, check)["fingerprint"])
+
+    def test_source_build_directories_are_explicit_and_recursive_inputs(self):
+        """两个固定 build 源目录可冻结，其嵌套产物仍剪枝或显式拒绝。"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            paths = ("ops/release/build", "extension/scripts/build")
+            for locator in paths:
+                source = root / locator
+                source.mkdir(parents=True)
+                (source / "entry.mjs").write_bytes(b"source")
+                for generated in ("build", "dist", "node_modules", ".gradle", ".kotlin", "__pycache__"):
+                    (source / generated).mkdir()
+                    (source / generated / "artifact").write_bytes(b"generated")
+                (source / "cache.pyc").write_bytes(b"generated")
+            expected = [f"{path}/entry.mjs" for path in sorted(paths)]
+            for inputs in (paths, ("ops", "extension"), tuple(expected)):
+                files, missing = snapshot_inputs(root, _check(*inputs))
+                self.assertEqual(missing, [])
+                self.assertEqual(expected, [item["locator"] for item in files])
+            invalid = [f"{path}/build/artifact" for path in paths]
+            self.assertEqual(([], sorted(invalid)), snapshot_inputs(root, _check(*invalid)))
+
+    def test_source_build_changes_all_affect_snapshot(self):
+        """源码 build 集合的新增、删除和内容修改都改变冻结指纹。"""
+        for locator in ("ops/release/build", "extension/scripts/build"):
+            with self.subTest(locator=locator), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / locator
+                source.mkdir(parents=True)
+                entry = source / "entry.mjs"
+                entry.write_bytes(b"first")
+                check = _check(locator)
+                initial = snapshot_check_inputs(root, check)["fingerprint"]
+                entry.write_bytes(b"second")
+                modified = snapshot_check_inputs(root, check)["fingerprint"]
+                extra = source / "extra.mjs"
+                extra.write_bytes(b"extra")
+                added = snapshot_check_inputs(root, check)["fingerprint"]
+                entry.unlink()
+                deleted = snapshot_check_inputs(root, check)["fingerprint"]
+                self.assertEqual(4, len({initial, modified, added, deleted}))
+
+    def test_source_build_keeps_private_and_symlink_rejection(self):
+        """源码例外不允许私有内容或目录链接进入冻结输入。"""
+        for locator in ("ops/release/build", "extension/scripts/build"):
+            for unsafe in (".env", "secrets", "link"):
+                with self.subTest(locator=locator, unsafe=unsafe), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    source = root / locator
+                    source.mkdir(parents=True)
+                    (source / "entry").write_bytes(b"source")
+                    if unsafe == "link":
+                        (source / unsafe).symlink_to("entry")
+                    else:
+                        (source / unsafe).write_bytes(b"private")
+                    self.assertEqual(([], [locator]), snapshot_inputs(root, _check(locator)))
+
+    def test_dist_is_pruned_only_from_recursive_source_inputs(self):
+        """目录输入不消费构建产物，显式产物路径仍拒绝而非空成功。"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src" / "dist").mkdir(parents=True)
+            (root / "src" / "source.py").write_bytes(b"source")
+            (root / "src" / "dist" / "bundle.js").write_bytes(b"generated")
+            from scripts.verification.planning import source_file_snapshot as input_snapshot
+
+            original = input_snapshot._read_file
+            with patch.object(input_snapshot, "_read_file", wraps=original) as read:
+                files, missing = snapshot_inputs(root, _check("src"))
+            self.assertEqual(missing, [])
+            self.assertEqual([item["locator"] for item in files], ["src/source.py"])
+            self.assertEqual(
+                [call.args[2] for call in read.call_args_list], ["src/source.py"]
+            )
+            with patch.object(
+                input_snapshot, "_read_file", side_effect=AssertionError("dist read")
+            ):
+                paths = ["src/dist", "src/dist/bundle.js"]
+                self.assertEqual(
+                    snapshot_inputs(root, _check(*paths)), ([], sorted(paths))
+                )
 
     def test_excluded_directory_same_name_replacement_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -76,18 +187,17 @@ class TestInputSnapshot(unittest.TestCase):
                     changed = True
                 return data
 
-            with patch("scripts.verification.input_snapshot.os.read", side_effect=swap):
+            with patch("scripts.verification.planning.source_file_snapshot.os.read", side_effect=swap):
                 files, missing = snapshot_inputs(root, _check("src"))
             self.assertEqual((files, missing), ([], ["src"]))
 
     @staticmethod
     def _declared(root: Path, input_path: str) -> None:
         write_declarations(
-            root / "harness" / "module-checks.yaml",
+            root / "config" / "engineering" / "module-checks.yaml",
             [
                 {
                     "check_id": "snapshot.test",
-                    "module": "snapshot",
                     "command": ["python3", "-c", "pass"],
                     "timeout_seconds": 10,
                     "scope": "repository-baseline",
@@ -119,7 +229,7 @@ class TestInputSnapshot(unittest.TestCase):
             root = Path(directory)
             (root / "a").write_bytes(b"a")
             with patch(
-                "scripts.verification.input_snapshot._require_primitives",
+                "scripts.verification.planning.source_file_snapshot._require_primitives",
                 side_effect=OSError,
             ):
                 files, missing = snapshot_inputs(root, _check("a"))
@@ -134,7 +244,7 @@ class TestInputSnapshot(unittest.TestCase):
             (root / "alias").symlink_to("real", target_is_directory=True)
             (root / "real" / "link").symlink_to("nested", target_is_directory=True)
             with patch(
-                "scripts.verification.input_snapshot.os.read",
+                "scripts.verification.planning.source_file_snapshot.os.read",
                 side_effect=AssertionError("read"),
             ):
                 self.assertEqual(
@@ -154,7 +264,7 @@ class TestInputSnapshot(unittest.TestCase):
                 sizes.append(size)
                 return b"x" * size
 
-            with patch("scripts.verification.input_snapshot.os.read", side_effect=grow):
+            with patch("scripts.verification.planning.source_file_snapshot.os.read", side_effect=grow):
                 files, missing = snapshot_inputs(root, _check("a"))
             self.assertEqual((files, missing), ([], ["a"]))
             self.assertEqual(sizes, [2])
@@ -176,7 +286,7 @@ class TestInputSnapshot(unittest.TestCase):
                     replaced = True
                 return data
 
-            with patch("scripts.verification.input_snapshot.os.read", side_effect=swap):
+            with patch("scripts.verification.planning.source_file_snapshot.os.read", side_effect=swap):
                 files, missing = snapshot_inputs(root, _check("ancestor/nested/file"))
             self.assertEqual((files, missing), ([], ["ancestor/nested/file"]))
 
@@ -205,7 +315,7 @@ class TestInputSnapshot(unittest.TestCase):
                     return data
 
                 with patch(
-                    "scripts.verification.input_snapshot.os.read", side_effect=mutate
+                    "scripts.verification.planning.source_file_snapshot.os.read", side_effect=mutate
                 ):
                     files, missing = snapshot_inputs(root, _check("src"))
                 self.assertEqual((files, missing), ([], ["src"]))
@@ -220,7 +330,7 @@ class TestInputSnapshot(unittest.TestCase):
             (root / ".local").mkdir()
             (root / ".local" / "secret").write_bytes(b"private")
             with patch(
-                "scripts.verification.input_snapshot.os.read", wraps=os.read
+                "scripts.verification.planning.source_file_snapshot.os.read", wraps=os.read
             ) as reader:
                 files, missing = snapshot_inputs(root, _check("src"))
             self.assertEqual(
@@ -228,7 +338,7 @@ class TestInputSnapshot(unittest.TestCase):
             )
             self.assertEqual(reader.call_count, 2)
             with patch(
-                "scripts.verification.input_snapshot.os.read",
+                "scripts.verification.planning.source_file_snapshot.os.read",
                 side_effect=AssertionError("private read"),
             ):
                 self.assertEqual(
@@ -358,7 +468,7 @@ class TestInputSnapshot(unittest.TestCase):
                 return result
 
             with patch(
-                "scripts.verification.input_snapshot.os.read",
+                "scripts.verification.planning.source_file_snapshot.os.read",
                 side_effect=replace_after_read,
             ):
                 _files, missing = snapshot_inputs(root, _check("input"))

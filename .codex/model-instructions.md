@@ -1,1 +1,1 @@
-读取并遵守仓库根 AGENTS.md。子代理派发前读取当前 harness/agent-policy.manifest.yaml → subagent_protocol.codex_model_policy；其余共享规则读取该 policy 的 subagent_protocol、agent_dispatch、codex_dispatch 与 qoder_delegation。文档与本机 skill 接入读取 harness/documentation-policy.yaml。
+读取并遵守仓库根 AGENTS.md，再由 harness/README.md 按本任务加载相关规则。子代理派发前读取 harness/agent-policy.md 的 codex_model_policy；文档与本机 skill 接入读取 harness/documentation-policy.md。此文件仅是入口，不保存规则副本。

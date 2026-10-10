@@ -40,19 +40,19 @@ note right
 end note
 :S4 执行 Gradle 直接自检;
 note right
-入口：scripts/environment/java_exec.py → Gradle
+入口：scripts/local/run_with_java_toolchain.py → Gradle
 作用：静态与相关测试先反馈，失败留在本步骤
 <color:#995A00><b>预期：1–5 分钟（机器规划）</b></color>
 end note
 :S5 进入 B 开发交付检查;
 note right
-入口：scripts/verification/delivery_hook.py [B]
+入口：scripts/triggers/run_stop_checks.py [B]
 作用：风险决定覆盖；调用执行场景展开 B
 <color:#995A00><b>预期：25–30 分钟（高风险参考预算）</b></color>
 end note
 :S6 按任务进入 C 正式验收;
 note right
-入口：""scripts/delivery_gate/~_~_main~_~_.py"" [C]
+入口：""scripts/acceptance/~_~_main~_~_.py"" [C]
 作用：需要时独立验证并审查；无要求不自造正式链
 <color:#995A00><b>预期：35–50 分钟（高风险规划，仅适用时）</b></color>
 end note
@@ -78,9 +78,9 @@ endlegend
 | S1 | 把目标写成输入样例、输出断言和反例 | [词库合同](../system/lexicon.md)、[记录处理](lexicon-import/record-processing.md) |
 | S2 | 确定转换、领域、存储或命令职责，以及不改什么 | 下方 1.2 模块定位；[当前规范](../../openspec/specs/product-architecture/spec.md) |
 | S3 | 修改所在模块与相应测试，更新唯一正文 | [Lexicon](../../backend/product/lexicon/src)、[Adapters](../../backend/product/adapters/src) |
-| S4 | 静态／编译／直接回归先修错 | [java_exec.py](../../scripts/environment/java_exec.py)、[Gradle 任务](../reference/java-checks.md) |
-| S5 [B] | 取得风险要求的开发报告 | [delivery_hook.py](../../scripts/verification/delivery_hook.py) → [执行页 B](run-repository-gates.md) |
-| S6 [C] | Task 要求时取得独立正式验收链 | [delivery_gate/__main__.py](../../scripts/delivery_gate/__main__.py) → [执行页 C](run-repository-gates.md) |
+| S4 | 静态／编译／直接回归先修错 | [run_with_java_toolchain.py](../../scripts/local/run_with_java_toolchain.py)、[Gradle 任务](../reference/java-checks.md) |
+| S5 [B] | 取得风险要求的开发报告 | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py) → [执行页 B](run-repository-gates.md) |
+| S6 [C] | Task 要求时取得独立正式验收链 | [delivery_gate/__main__.py](../../scripts/acceptance/__main__.py) → [执行页 C](run-repository-gates.md) |
 | S7 | 交出 diff、证据、使用说明与数据处理边界 | [导入操作](lexicon-import.md)；Git 另按 [AGENTS.md](../../AGENTS.md)授权 |
 
 ## 1.2. 按实际变化定位模块
@@ -99,7 +99,7 @@ S2 的“范围与验收”是定义任务，不是运行 Harness/OpenSpec，不
 先按实际改动选 Gradle project 和测试类，例如转换行为的直接回归：
 
 ```bash
-python3 -m scripts.environment.java_exec backend/gradlew -p backend :adapters:test --tests io.lexiflow.lexicon.platform.importer.StardictCsvReaderTest
+python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend :adapters:test --tests io.lexiflow.lexicon.platform.importer.StardictCsvReaderTest
 ```
 
 静态任务与完整聚合的区别见[Java 检查](../reference/java-checks.md)。S4 是实现者快速反馈；B 是风险覆盖；C 是独立验收，不能互相冒充。直接测试失败回到实现，B／C 失败按[执行页](run-repository-gates.md)交接，不机械追加全部套件。

@@ -7,10 +7,10 @@
 所有 Java 命令从仓库根通过启动器进入：
 
 ```bash
-python3 -m scripts.environment.java_exec backend/gradlew -p backend <gradle-task> [gradle-options]
+python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend <gradle-task> [gradle-options]
 ```
 
-启动器选择仓库规定的 Java 与 Wrapper；不要直接以全局 `gradle` 或系统 Java 替代。根聚合、版本与项目依赖见 [build.gradle.kts](../../backend/build.gradle.kts)、[settings.gradle.kts](../../backend/settings.gradle.kts) 和 [java-product](../../harness/java-product.manifest.yaml)。模块依赖和任务在各自 `build.gradle.kts`，根构建只保留全局配置、共享 convention、跨模块检查和交付聚合。
+启动器选择仓库规定的 Java 与 Wrapper；不要直接以全局 `gradle` 或系统 Java 替代。根聚合、版本与项目依赖见 [build.gradle.kts](../../backend/build.gradle.kts)、[settings.gradle.kts](../../backend/settings.gradle.kts)。模块依赖和任务在各自 `build.gradle.kts`，根构建只保留全局配置、共享 convention、跨模块检查和交付聚合。
 
 ## 1.2. 常用任务
 
@@ -41,7 +41,7 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend <gradle-task
 测试、Checkstyle、PMD 的 HTML 默认关闭，XML 结果保留；JaCoCo 显式任务默认输出 XML。需要人工浏览时使用例如：
 
 ```bash
-python3 -m scripts.environment.java_exec backend/gradlew -p backend -PqualityHtmlReports=true jacocoRootReport
+python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend -PqualityHtmlReports=true jacocoRootReport
 ```
 
 该参数只控制浏览产物，不改变 Check 的成功标准。Javadoc 仍由普通 `check` 执行，因为它承载 DocLint/Werror 判定；其网站型输出随工具产生，不将其与无判定消费者的覆盖报告一起删除。旧报告文件可能仍留在 build 目录，必须核对本次命令与产物，不凭文件存在推断本次已经执行。

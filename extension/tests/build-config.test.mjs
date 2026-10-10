@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { localApiPort } from "../scripts/build-config.mjs";
+import { localApiPort } from "../scripts/build/extension-build-settings.mjs";
 
 test("local test port is explicit and cannot redirect captions to a remote endpoint", () => {
   assert.equal(localApiPort(undefined),18080);

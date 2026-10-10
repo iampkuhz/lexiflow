@@ -1,4 +1,15 @@
 {
   "schema_version": "lexiflow.distribution-licenses.v1",
-  "licenses": []
+  "licenses": [
+    {
+      "id": "lexiflow-mit",
+      "component": "LexiFlow",
+      "licenseId": "MIT",
+      "licenseName": "MIT License",
+      "sourceUrl": "https://github.com/iampkuhz/lexiflow/blob/main/LICENSE",
+      "noticePath": "LICENSE",
+      "noticeBytes": 1078,
+      "noticeSha256": "cf0fc402033e206378705c0230acf8e0e33ee966adac28139014861bb801fb5f"
+    }
+  ]
 }

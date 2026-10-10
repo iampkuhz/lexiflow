@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deploymentImageTag, versionedImageReference, versionedImageLabels, removeVersionedImage } from '../versioned-images.mjs';
+import { deploymentImageTag, versionedImageReference, versionedImageLabels, removeVersionedImage } from '../images/versioned-images.mjs';
 
 const id = `sha256:${'a'.repeat(64)}`, cid = 'b'.repeat(64), otherCid = 'c'.repeat(64);
 const ok = stdout => ({ commandExitCode: 0, stdout });

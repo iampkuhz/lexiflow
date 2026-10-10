@@ -1,44 +1,35 @@
-"""检查派发可见性合同；不把静态合同检查解释为客户端渲染验收。"""
+"""派发可见性的人类规则回归；静态文本不证明客户端渲染或真实启动。"""
 
-from pathlib import Path
 import unittest
-
-import yaml
+from pathlib import Path
 
 
 class AgentDispatchVisibilityTests(unittest.TestCase):
-    """保证聊天提示覆盖交接阶段，且不放宽真实启动和隐私边界。"""
+    """聊天交接覆盖调用前、返回后与终态；不放宽证据和隐私边界。"""
 
     def test_parent_messages_cover_every_dispatch_route(self):
         root = Path(__file__).resolve().parents[2]
-        policy = yaml.safe_load(
-            (root / "harness/agent-policy.manifest.yaml").read_text()
-        )
-        progress = policy["execution_progress"]
-        visible = progress["user_visible_dispatch"]
-        self.assertEqual("parent-agent", visible["owner"])
-        self.assertEqual(
-            "current-conversation-assistant-message", visible["surface"]
-        )
-        self.assertEqual(
-            {"qoder-start", "qoder-resume", "codex-spawn", "codex-followup", "fallback"},
-            set(visible["applies_to"]),
-        )
-        for phase in (
-            "before_dispatch", "after_dispatch", "asynchronous_handoff",
-            "after_completion", "privacy",
+        policy = (root / "harness/agent-policy.md").read_text()
+        for boundary in (
+            "spawn 与 followup",
+            "父代理在当前聊天正文",
+            "不能代替",
+            "调用前",
+            "返回后",
+            "终态后",
+            "启动证据",
+            "受理不是完成",
+            "原生 agent 标识",
+            "原生长事件等待",
+            "原始日志、凭据",
+            "本机私有路径或业务输入",
+            "回调包含精确 run_id",
         ):
-            with self.subTest(phase=phase):
-                self.assertTrue(visible[phase].strip())
-        self.assertEqual(
-            {"tool-output-only", "terminal-stdout-only", "local-log-only", "openspec-status-only"},
-            set(visible["not_a_substitute"]),
-        )
-        self.assertIn("启动证据", visible["after_dispatch"])
-        self.assertIn("尚未验收", visible["asynchronous_handoff"])
-        self.assertIn("不为展示进度增加轮询", visible["asynchronous_handoff"])
-        self.assertIn("started.json", progress["dispatch_evidence"])
-        self.assertTrue(policy["qoder_delegation"]["lifecycle"]["llm_polling_forbidden"])
+            with self.subTest(boundary=boundary):
+                self.assertIn(boundary, policy)
+        self.assertNotIn("asynchronous_handoff", policy)
+        self.assertNotIn("qoder_delegation", policy)
+        self.assertNotIn("schema_version:", policy)
 
 
 if __name__ == "__main__":

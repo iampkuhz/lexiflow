@@ -6,10 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { resolveBuildIdentity } from '../version.mjs';
+import { resolveBuildIdentity } from '../integrity/source-build-identity.mjs';
 import { jarBytes, extensionBytes } from './zip-fixture.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const cli = path.join(repo, 'ops/release/pipeline.mjs');
+const cli = path.join(repo, 'ops/release/workflow/run-release-build-pipeline.mjs');
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const git = (cwd, args) => execFileSync('git', ['-C', cwd, ...args], { timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'] });
 const run = (args, options = {}) => new Promise((resolve) => {
@@ -28,7 +28,8 @@ async function fixture() {
     await mkdir(artifactRoot);
     await mkdir(path.join(root, 'ops/docker'), { recursive: true });
     await mkdir(path.join(root, 'ops/release'), { recursive: true });
-    const templates = ['.dockerignore', 'Dockerfile', 'Dockerfile.postgres', 'bootstrap.sh', 'entrypoint.sh'];
+  for (const directory of ['build', 'integrity', 'runtime']) await mkdir(path.join(root, 'ops/release', directory), { recursive: true });
+    const templates = ['.dockerignore', 'Dockerfile', 'Dockerfile.postgres', 'initialize-postgres-app-role.sh', 'run-container-command.sh'];
     for (const n of templates)
         await writeFile(path.join(root, 'ops/docker', n), await readFile(path.join(repo, 'ops/docker', n)));
     const digest = (c) => `sha256:${c.repeat(64)}`;
@@ -36,7 +37,7 @@ async function fixture() {
         javaRuntime: { reference: `registry.example.invalid/java@${digest(i ? 'c' : 'a')}`, imageId: digest(i ? 'c' : 'a') },
         postgresRuntime: { reference: `registry.example.invalid/postgres@${digest(i ? 'd' : 'b')}`, imageId: digest(i ? 'd' : 'b') } }));
     await writeFile(path.join(root, 'ops/docker/base-images.json'), `${JSON.stringify({ schemaVersion: 1, baseImages }, null, 2)}\n`);
-    for (const n of ['version.mjs', 'manifest.mjs', 'runtime-entry.mjs', 'runtime-verification.sh', 'lifecycle-state.sh', 'lifecycle-docker.sh', 'lifecycle.sh'])
+    for (const n of ['integrity/source-build-identity.mjs', 'integrity/release-artifact-manifest.mjs', 'build/release-runtime-entry-generator.mjs', 'runtime/release-artifact-verification.sh', 'runtime/release-installation-state.sh', 'runtime/release-installation-docker.sh', 'runtime/release-installation-lifecycle.sh'])
         await writeFile(path.join(root, 'ops/release', n), await readFile(path.join(repo, 'ops/release', n)));
     await writeFile(path.join(root, 'ops/release/version.txt'), '2.0.0\n');
     await writeFile(path.join(root, '.gitignore'), '/artifact/\n');
@@ -221,7 +222,8 @@ test('导入不执行，符号链接 CLI 仍实际处理参数而非静默退出
     assert.equal(imported, '');
     const temporary = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-pipeline-link-')));
     try {
-        const link = path.join(temporary, 'pipeline.mjs');
+        const link = path.join(temporary, 'workflow/run-release-build-pipeline.mjs');
+        await mkdir(path.dirname(link), { recursive: true });
         await symlink(cli, link);
         assert.throws(() => execFileSync(process.execPath, [link, 'unknown'],
             { timeout: 5_000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }), (error) => {

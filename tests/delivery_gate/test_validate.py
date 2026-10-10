@@ -3,14 +3,14 @@
 from __future__ import annotations
 import unittest
 from unittest.mock import patch
-from scripts.delivery_gate.validate import ValidationError, validate_batch
+from scripts.acceptance.task_operations.run_independent_task_validation import ValidationError, validate_batch
 from tests.delivery_gate.fixtures import (
     DeliveryGateFixture,
     PRODUCER_SESSION,
     VALIDATOR_SESSION,
     make_mock_runtime,
 )
-from scripts.delivery_gate.validate import _verify_independence
+from scripts.acceptance.task_operations.run_independent_task_validation import _verify_independence
 
 
 class TestValidate(unittest.TestCase):
@@ -18,7 +18,7 @@ class TestValidate(unittest.TestCase):
         producer = {"actor_id": "codex-session-host", "session_id": "host"}
         submission = {
             "submitter_identity": producer,
-            "producer": {"identity": producer},
+            "producer": {"kind": "current-codex-task"},
         }
         _verify_independence(
             submission,
@@ -39,14 +39,14 @@ class TestValidate(unittest.TestCase):
     def tearDown(self):
         self.f.cleanup()
 
-    @patch("scripts.agents.local_codex_runtime.discover")
+    @patch("scripts.agents.identity.codex_actor_identity.discover")
     def test_self_validation_rejected(self, m):
         m.return_value = make_mock_runtime(PRODUCER_SESSION)
         with self.assertRaises(ValidationError) as c:
             validate_batch(self.f.root, submission_ids=[self.f.submission_id])[0]
         self.assertEqual(c.exception.code, "self-validation-forbidden")
 
-    @patch("scripts.agents.local_codex_runtime.discover")
+    @patch("scripts.agents.identity.codex_actor_identity.discover")
     def test_unmodified_full_input_drift_rejected(self, m):
         self.f.write("protected.py", "after\n")
         m.return_value = make_mock_runtime(VALIDATOR_SESSION)

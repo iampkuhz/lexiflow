@@ -33,7 +33,7 @@
 | Task / Catalog | Task 是计划中的任务，Catalog 是任务清单；一个工作包可覆盖多个 Task | [配置地图](configuration.md) |
 | WorkStream | 长期职责与模块归属的组织单位，不等于一次 run 或某个 workflow 阶段 | [配置地图](configuration.md) |
 | Work Package | 同一明确职责和范围下可有界验收的工作单元，不是每次 run 的别名 | [Agent workflow](../scenarios/delegate-work.md) |
-| Session / run | Session 是实际宿主会话，run 是一次具体执行；重试不创造新的 Task 身份 | [身份与事实](../scenarios/delegate-work/identity.md) |
+| Session / run | Session 是实际宿主会话，run 是一次具体执行；重试不创造新的 Task 身份 | [身份与交接](../scenarios/delegate-work.md) |
 | producer / validator / reviewer | 分别产出实现、执行验证、独立审查；不同名称不等于不同真实身份 | [Delivery Gate](delivery-gate.md) |
 | callback / ack | callback 是终态信号投递，ack 是消费确认；两者均不等于验收 PASS | [Agent 交接](../scenarios/delegate-work.md) |
 | submission | 绑定 Task、producer、报告和冻结输入的正式送验对象 | [submit](delivery-gate.md) |

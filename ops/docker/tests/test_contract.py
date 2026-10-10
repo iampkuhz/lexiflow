@@ -42,7 +42,7 @@ class DockerContractTest(unittest.TestCase):
                        "TEST_API": api + "|linux|arm64", "TEST_DATABASE": database + "|linux|arm64"}, True)]
             for overrides, passed in cases:
                 log.unlink(missing_ok=True)
-                result = subprocess.run(["/bin/sh", str(script), str(ROOT / "ops/release/lifecycle-docker.sh")],
+                result = subprocess.run(["/bin/sh", str(script), str(ROOT / "ops/release/runtime/release-installation-docker.sh")],
                                         env={**base, **overrides}, capture_output=True, text=True, timeout=3)
                 self.assertEqual(result.returncode == 0, passed, overrides)
                 self.assertEqual(result.stdout + result.stderr, "")
@@ -69,7 +69,7 @@ class DockerContractTest(unittest.TestCase):
                      "compose up -d --no-deps api", "healthy synthetic-api-1"]
             for failure in ("none", *steps):
                 log.unlink(missing_ok=True)
-                result = subprocess.run(["/bin/sh", str(script), str(ROOT / "ops/release/lifecycle-docker.sh")],
+                result = subprocess.run(["/bin/sh", str(script), str(ROOT / "ops/release/runtime/release-installation-docker.sh")],
                                         env={**os.environ, "TEST_LOG": str(log), "TEST_FAIL": failure},
                                         capture_output=True, text=True, timeout=3)
                 self.assertEqual(result.returncode == 0, failure == "none")
@@ -78,7 +78,7 @@ class DockerContractTest(unittest.TestCase):
                 self.assertEqual(result.stdout + result.stderr, "")
 
     def test_installation_signal_retains_lock_and_normal_exit_releases_only_owned_lock(self):
-        source = ROOT / "ops/release/lifecycle-state.sh"
+        source = ROOT / "ops/release/runtime/release-installation-state.sh"
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td).resolve()
             script = root / "signals.sh"
@@ -108,7 +108,7 @@ class DockerContractTest(unittest.TestCase):
                             self.assertEqual((installation / ".lock/token").read_text(), "replacement\n")
 
     def test_installation_hash_rejects_tool_failure_and_invalid_digest(self):
-        source = ROOT / "ops/release/runtime-verification.sh"
+        source = ROOT / "ops/release/runtime/release-artifact-verification.sh"
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td).resolve()
             script = root / "digest.sh"
@@ -149,15 +149,15 @@ class DockerContractTest(unittest.TestCase):
 
     def test_context_and_image_are_minimal_nonroot(self):
         ignore = (DOCKER / ".dockerignore").read_text()
-        self.assertEqual(ignore.splitlines(), ["*", "!Dockerfile", "!entrypoint.sh", "!lexiflow-api.jar", "!Dockerfile.postgres", "!bootstrap.sh"])
+        self.assertEqual(ignore.splitlines(), ["*", "!Dockerfile", "!run-container-command.sh", "!lexiflow-api.jar", "!Dockerfile.postgres", "!initialize-postgres-app-role.sh"])
         dockerfile = (DOCKER / "Dockerfile").read_text()
         self.assertIn("ARG JAVA_RUNTIME_IMAGE", dockerfile)
         self.assertIn("COPY --chown=10001:10001 lexiflow-api.jar", dockerfile)
         self.assertIn("USER 10001:10001", dockerfile)
-        self.assertIn("--chmod=0555 entrypoint.sh", dockerfile)
+        self.assertIn("--chmod=0555 run-container-command.sh", dockerfile)
         postgres = (DOCKER / "Dockerfile.postgres").read_text()
         self.assertIn("ARG POSTGRES_RUNTIME_IMAGE", postgres)
-        self.assertIn("COPY --chmod=0555 bootstrap.sh /docker-entrypoint-initdb.d/10-lexiflow-bootstrap.sh", postgres)
+        self.assertIn("COPY --chmod=0555 initialize-postgres-app-role.sh /docker-entrypoint-initdb.d/10-lexiflow-initialize-postgres-app-role.sh", postgres)
         self.assertNotIn("RUN ", postgres)
         self.assertEqual(dockerfile.count("RUN "), 1)
         self.assertIn("RUN mkdir /work && chown 10001:10001 /work", dockerfile)
@@ -229,9 +229,9 @@ class DockerContractTest(unittest.TestCase):
                             'test -z "${COMPOSE_FILE:-}${COMPOSE_PROJECT_NAME:-}${COMPOSE_ENV_FILES:-}${LEXIFLOW_APP_PASSWORD_FILE:-}" || exit 15\n'
                             'printf "%s\\n" "$@" > "$LOG"\n')
             stub.chmod(0o755)
-            source = ROOT / "ops/release/lifecycle-docker.sh"
+            source = ROOT / "ops/release/runtime/release-installation-docker.sh"
             script = root / "test.sh"
-            script.write_text((ROOT / "ops/release/lifecycle-state.sh").read_text() + '\nset -eu\n. "$1"\nlf_lock_check() { test "${LF_TEST_LOCK:-yes}" = yes; }\n'
+            script.write_text((ROOT / "ops/release/runtime/release-installation-state.sh").read_text() + '\nset -eu\n. "$1"\nlf_lock_check() { test "${LF_TEST_LOCK:-yes}" = yes; }\n'
                               'lf_compose up -d api || exit 23\n'
                               'test "$LEXIFLOW_COMPOSE_POSTGRES_PASSWORD" = poisoned\n'
                               'test "$LEXIFLOW_COMPOSE_APP_PASSWORD" = poisoned\n')
@@ -334,9 +334,9 @@ elif action == "rm":
 else: sys.exit(86)
 ''')
             stub.chmod(0o755)
-            source = ROOT / "ops/release/lifecycle-docker.sh"
+            source = ROOT / "ops/release/runtime/release-installation-docker.sh"
             script = root / "remove.sh"
-            script.write_text((ROOT / "ops/release/lifecycle-state.sh").read_text() + '\nset -eu\n. "$1"\nlf_lock_check() { test "${LF_TEST_LOCK:-yes}" = yes; }\nlf_docker_remove\n')
+            script.write_text((ROOT / "ops/release/runtime/release-installation-state.sh").read_text() + '\nset -eu\n. "$1"\nlf_lock_check() { test "${LF_TEST_LOCK:-yes}" = yes; }\nlf_docker_remove\n')
             env = {**os.environ, "PATH": str(bindir) + ":" + os.environ["PATH"],
                    "DOCKER_HOST": "unix:///synthetic.sock", "DOCKER_CONTEXT": "",
                    "LF_TEST_LOCK": "yes", "LF_PROJECT": project, "LF_ROOT": str(root),
@@ -411,7 +411,7 @@ else: sys.exit(7)
             base = {**os.environ, "PATH": str(bindir) + ":" + os.environ["PATH"],
                     "DOCKER_CONTEXT": "", "DOCKER_HOST": "", "DOCKER_TLS": "1", "DOCKER_TLS_VERIFY": "1",
                     "DOCKER_CERT_PATH": "/must-not-use", "LF_DOCKER_ENDPOINT": "unix:///forged.sock"}
-            source = ROOT / "ops/release/lifecycle-docker.sh"
+            source = ROOT / "ops/release/runtime/release-installation-docker.sh"
             cases = [
                 ({"DOCKER_HOST": "unix:///explicit.sock"}, "unix:///ok.sock", False, "unix:///explicit.sock"),
                 ({"DOCKER_CONTEXT": "desktop-local", "DOCKER_HOST": "tcp://ignored.invalid:2375"}, "unix:///context.sock", False, "unix:///context.sock"),
@@ -457,8 +457,8 @@ else: sys.exit(7)
             env0 = os.environ.copy()
             env0.update({"PATH": str(bindir) + ":" + env0["PATH"], "LOG": str(log), **(env or {})})
             # 仅在合成测试副本重定向固定路径，产品脚本不接受路径覆盖。
-            script_copy = pathlib.Path(td) / "entrypoint.sh"
-            script_copy.write_text((DOCKER / "entrypoint.sh").read_text()
+            script_copy = pathlib.Path(td) / "run-container-command.sh"
+            script_copy.write_text((DOCKER / "run-container-command.sh").read_text()
                                    .replace("/run/secrets/app-password", str(secrets / "app-password"))
                                    .replace("/dataset/dataset.zip", str(pathlib.Path(td) / "dataset.zip")))
             script_copy.chmod(0o755)
@@ -556,8 +556,8 @@ else: sys.exit(7)
             stub = bindir / "psql"
             stub.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$CAPTURE\"\ncat >> \"$CAPTURE\"\n")
             stub.chmod(0o755)
-            script = path / "bootstrap.sh"
-            script.write_text((DOCKER / "bootstrap.sh").read_text().replace("/run/secrets/app-password", str(secret)))
+            script = path / "initialize-postgres-app-role.sh"
+            script.write_text((DOCKER / "initialize-postgres-app-role.sh").read_text().replace("/run/secrets/app-password", str(secret)))
             env = {**os.environ, "PATH": str(bindir) + ":" + os.environ["PATH"], "CAPTURE": str(capture),
                    "POSTGRES_USER": "postgres", "POSTGRES_DB": "lexiflow"}
             result = subprocess.run(["sh", str(script)], text=True, capture_output=True, env=env, timeout=3)

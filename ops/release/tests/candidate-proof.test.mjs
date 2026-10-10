@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseStrict, verifyCandidateProof } from '../candidate-proof.mjs';
+import { parseStrict, verifyCandidateProof } from '../integrity/candidate-source-proof.mjs';
 import { assembled } from './verified-candidate-fixture.mjs';
 
 function request(f) {
@@ -65,7 +65,7 @@ test('CLI bridge rejects caller-shaped requests without producing proof output',
   assert.deepEqual(parseStrict(' \t\r\n{}\n'), {});
   assert.deepEqual(Object.keys(parseStrict('{"__proto__":1}')), ['__proto__']);
   assert.throws(() => parseStrict('{"__proto__":1,"__proto__":2}'));
-  const cli = fileURLToPath(new URL('../candidate-proof.mjs', import.meta.url));
+  const cli = fileURLToPath(new URL('../integrity/candidate-source-proof.mjs', import.meta.url));
   for (const [payload, args, expected] of [
     ['{}', [], 1],
     ['{}', ['extra'], 1],

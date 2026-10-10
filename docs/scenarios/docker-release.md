@@ -14,7 +14,7 @@
 
 从可信发行渠道取得完整发行包，先用该渠道的可信摘要验证整包或入口，再解包。同目录的 checksum 不能独立证明来源真实性；不要在核实来源前执行其中的脚本。不要重命名或移动它：私有安装记录会绑定 `lexiflow.sh` 的入口绝对路径和发行包身份。目录应包含 `lexiflow.sh`、`manifest.json`、`manifest.json.sha256` 及清单列出的制品；实际文件名和摘要以清单为准。不要自行补文件或修改摘要。
 
-当期目标宿主仅为 M 芯片 macOS，容器架构为 `linux/arm64`；其他宿主与 amd64 留待后续。主机需要 Docker Engine、Docker Compose plugin、可访问 daemon 的当前用户、POSIX `sh`，以及 `sha256sum` 或 `shasum`。发行入口会核对 daemon、Compose 和 Linux 架构；仓库实现识别 `linux/amd64`、`linux/arm64`，但这不等于任一发行已对这些平台发布或验收。仅在发行材料明确验证该主机组合后继续。普通用户不需要源码工具链、Node.js、Python、Java、Gradle 或词库 CSV。不要把 macOS 开发环境或 Windows 原生 shell 当作该发行入口已支持的证明。
+当期目标宿主仅为 M 芯片 macOS，容器架构为 `linux/arm64`；其他宿主与 amd64 留待后续。Podman 主机需要已启动的 Podman machine、本机 Unix endpoint、Docker 兼容 CLI（`docker`）及可连接该 endpoint 的 Docker Compose plugin、可访问 daemon 的当前用户、POSIX `sh`，以及 `sha256sum` 或 `shasum`；Podman 自身不替代本 shell 调用的 Docker CLI/Compose。Docker Engine 组合也须按具体发行材料验收。发行入口会核对 daemon、Compose 和 Linux 架构；仓库实现识别 `linux/amd64`、`linux/arm64`，但这不等于任一发行已对这些平台发布或验收。仅在发行材料明确验证该主机组合后继续。普通用户不需要源码工具链、Node.js、Python、Java、Gradle 或词库 CSV。不要把普通 macOS 开发环境或 Windows 原生 shell 当作该发行入口已支持的证明。
 
 在 shell 中设置 `RELEASE_DIR` 为发行目录、`ROOT` 为安装私有数据绝对路径。`ROOT` 的父目录必须存在，首次使用时 `ROOT` 不得存在；入口会创建它。`ROOT` 不是发行目录，也不能是其子项。路径中的空格须保留在双引号中。以下均为占位示例，不执行：
 
@@ -90,3 +90,21 @@ sh "$RELEASE_DIR/lexiflow.sh" delete "$ROOT" "$KEY" --confirm-delete-data
 | 状态文件无效、锁冲突或其他未知失败 | 保留 journal 和数据，记录固定错误码；不要手改 state、猜 PID 或删除资源。只有确认旧操作全部结束后，才可使用入口的 `unlock` 与精确 token 解除被放弃的锁；不确定时保留现场。 |
 
 生命周期入口不自动清理用户文件。示例命令和状态值是操作说明，不是已执行安装证据。实际平台兼容性、初始化、更新/恢复和独立验收以各自发行记录为准；文档检查通过仅证明链接与格式等静态约束。
+
+## 1.7. GHCR 镜像与 Podman endpoint
+
+发行的 `registry-images.json` 及摘要是完整离线包之外的独立资产。先从可信同一 Release 取得并验证它们，核对软件版本、commit、candidate/manifest 摘要及两份 `linux/arm64` 镜像，再按每项 `reference` 去除 `:<softwareVersion>`、追加 `@<manifestDigest>` 得到 digest reference。`imageId` 是镜像配置 ID，不可拿它替代 `manifestDigest` 拉取。
+
+对已核验的本机 Podman Unix endpoint 设置 `DOCKER_HOST`，并先检查 `docker info`、`docker compose version`；不指向 TCP 或其他机器。下例仅为占位操作说明：
+
+```sh
+export DOCKER_HOST='unix:///absolute/path/to/verified-podman.sock'
+docker info
+docker compose version
+podman pull 'ghcr.io/<owner>/<repo>-api@sha256:<api-manifest-digest>'
+podman pull 'ghcr.io/<owner>/<repo>-postgres@sha256:<postgres-manifest-digest>'
+```
+
+拉取后用 `podman image inspect` 核对 `Id` 与映射 `imageId` 一致、OS 为 Linux、架构为 ARM64，身份 label 与同一清单一致。随后仍从完整已核验离线包执行上述 `verify`、`prepare`、`activate`；入口加载配套 archive 并使用相同配置 ID，资料、SQL、扩展与许可材料不能省略。不要把单独拉到 API 镜像称为可用安装，也不要将源码 Node 入口与本 shell 入口指向同一安装目录。
+
+该操作合同不等于真实下载/安装证明；公开资产、匿名 digest 拉取、隔离 Podman 上完整初始化及 API/扩展就绪均须由对应发行的真实验收记录证明。

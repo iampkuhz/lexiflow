@@ -47,7 +47,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          node ops/release/version.mjs --tag "$RELEASE_TAG"
+          node ops/release/integrity/source-build-identity.mjs --tag "$RELEASE_TAG"
           printf 'commit=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Require dedicated runner readiness
         env:
@@ -89,7 +89,7 @@ jobs:
           test ! -e "$WORKSPACE/tmp/quality/release-workflow/handoff.json"
           test ! -d "$WORKSPACE/tmp/quality/release-workflow"
           cd "$WORKSPACE"
-          node ops/release/version.mjs --tag "$RELEASE_TAG"
+          node ops/release/integrity/source-build-identity.mjs --tag "$RELEASE_TAG"
           podman info >/dev/null
           podman compose version
       - name: Build and verify one complete ARM64 release candidate
@@ -99,23 +99,17 @@ jobs:
         run: |
           test -n "$REQUEST_FILE"
           cd "$WORKSPACE"
-          node ops/release/workflow.mjs prepare "$REQUEST_FILE"
-      - name: Full Change Verify on the same candidate and checkout
-        env:
-          WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
-        run: |
-          cd "$WORKSPACE"
-          python3 scripts/check_changes.py
+          node ops/release/workflow/run-release-workflow.mjs prepare "$REQUEST_FILE"
       - name: Full Repository Verify on the same candidate and checkout
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
         run: |
           cd "$WORKSPACE"
-          python3 scripts/check_repository.py
+          python3 scripts/verification/commands/run_repository_checks.py
       # Success here leaves a private native handoff; only distinct local
       # Codex actors can submit, validate, review and check Formal Gate.
 
-  promotion-dry-check:
+  promotion-precheck:
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && inputs.publish_confirmation == 'PUBLISH' && inputs.release_tag == github.ref_name
     runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
     environment: lexiflow-release-validation
@@ -132,16 +126,17 @@ jobs:
           test -n "$WORKSPACE"
           test -d "$WORKSPACE/.git"
           cd "$WORKSPACE"
-          node ops/release/workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG"
+          node ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG"
 
   promotion:
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && inputs.publish_confirmation == 'PUBLISH' && inputs.release_tag == github.ref_name
-    needs: promotion-dry-check
+    needs: promotion-precheck
     runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
     environment: lexiflow-release-promotion
     timeout-minutes: 45
     permissions:
       contents: write
+      packages: write
     steps:
       - name: Publish only after protected approval and fresh native evidence check
         env:
@@ -154,4 +149,4 @@ jobs:
           test -n "$WORKSPACE"
           test -d "$WORKSPACE/.git"
           cd "$WORKSPACE"
-          node ops/release/workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish
+          node ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish

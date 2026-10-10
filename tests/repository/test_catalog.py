@@ -9,9 +9,9 @@ import unittest
 
 import yaml
 
-from scripts.delivery_gate.records import RecordError
-from scripts.delivery_gate.requirements import load_task_requirements
-from scripts.delivery_gate.task_subject import derive_task_subject
+from scripts.acceptance.evidence.acceptance_record_store import RecordError
+from scripts.acceptance.task_definition.task_acceptance_requirements import load_task_requirements
+from scripts.acceptance.task_definition.task_acceptance_scope import derive_task_subject
 
 ROOT = Path(__file__).resolve().parents[2]
 TASK_ID = "LF-TSK-TEST-0001"
@@ -88,7 +88,6 @@ class CatalogRequirementsTest(unittest.TestCase):
                     "task_id": "LF-TSK-TEST-0002",
                     "required_task_version": 2,
                     "required_change_version": "2.0.0",
-                    "required_result": "PASS",
                 }
             ],
             value["dependencies"],
@@ -98,6 +97,18 @@ class CatalogRequirementsTest(unittest.TestCase):
         self.assertEqual(["fixture.check"], value["required_check_ids"])
         self.assertEqual("planning/workstreams.yaml", value["source"]["locator"])
         self.assertEqual(64, len(value["source"]["sha256"]))
+
+    def test_non_pass_dependency_source_is_rejected(self):
+        """投影省略固定 PASS 字段不意味着来源可以要求非 PASS。"""
+        task = self.catalog["workstreams"][0]["epics"][0]["capabilities"][0][
+            "seed_tasks"
+        ][0]
+        for result in ("FAIL", "BLOCKED", "SKIPPED"):
+            with self.subTest(result=result):
+                task["depends_on"][0]["required_result"] = result
+                self._write()
+                with self.assertRaisesRegex(RecordError, "task-dependencies-invalid"):
+                    load_task_requirements(self.root, TASK_ID)
 
     def test_invalid_topology_and_duplicate_ids_fail_closed(self):
         """无效拓扑或重复身份不能降级为无依赖。"""

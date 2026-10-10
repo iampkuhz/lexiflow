@@ -1,6 +1,6 @@
 # 将本条置于 WorkStream/Epic/Capability 的 seed_tasks；替换所有占位符。
 # owner 与 phase 继承祖先，仅真实不同的任务事实才显式覆盖。
-# ID、分解、依赖、版本、决策、身份与结果规则仅见 Harness planning_contract。
+# ID、分解、依赖、版本、决策、身份与结果规则仅见 harness/agent-policy.md 的工作范围与分解。
 id: LF-TSK-<DOMAIN>-NNNN
 title: <单一可验证的结果>
 priority: P1

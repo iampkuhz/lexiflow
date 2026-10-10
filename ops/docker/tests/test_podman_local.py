@@ -22,6 +22,53 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 class LocalEntryTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        temp = tempfile.TemporaryDirectory(prefix="lexiflow source template ")
+        cls.addClassCleanup(temp.cleanup)
+        cls._source_template = Path(temp.name).resolve() / "source"
+        cls._prepare_source(cls._source_template)
+        snapshot = cls._source_snapshot(cls._source_template)
+
+        def verify_template():
+            try:
+                if cls._source_snapshot(cls._source_template) != snapshot:
+                    raise AssertionError("shared source template was mutated")
+            finally:
+                del cls._source_template
+
+        # 先核不可变 source，再删除本进程模板；不缓存安装/provider 状态。
+        cls.addClassCleanup(verify_template)
+
+    @staticmethod
+    def _source_snapshot(root):
+        return {
+            str(path.relative_to(root)): (path.stat().st_mode, hashlib.sha256(path.read_bytes()).hexdigest())
+            for path in root.rglob('*') if path.is_file()
+        }
+
+    @staticmethod
+    def _prepare_source(repo):
+        for relative in ["ops/podman/commands/manage-podman-installation.mjs", "ops/podman/installation/installation-upgrade-workflow.mjs", "ops/podman/installation/installation-plan-records.mjs", "ops/podman/environment/local-database-target.mjs", "ops/podman/candidates/candidate-artifact-installer.mjs", "ops/podman/images/versioned-images.mjs", "ops/podman/images/image-slot-lock.mjs", "ops/podman/environment/java-build-environment.mjs", "ops/podman/execution/installation-operation-lock.mjs", "ops/podman/execution/deployment-process-control.mjs", "ops/podman/commands/diagnose-podman-installation.mjs", "ops/podman/installation/installation-update-transaction.mjs", "ops/podman/installation/installation-workspace-journal.mjs", "ops/podman/installation/installation-version-summary.mjs", "ops/podman/compose.validation.yaml",
+                         "ops/dataset/prepare_ecdict_bundle.py", "ops/podman/source-tools.Containerfile",
+                         "ops/docker/Dockerfile", "ops/docker/Dockerfile.postgres",
+                         "ops/docker/run-container-command.sh", "ops/docker/initialize-postgres-app-role.sh",
+                         "ops/dataset/ecdict-source.lock.json", "ops/dataset/generation-inputs.json", "ops/dataset/dataset-generation-identity.mjs",
+                         "infra/postgres/schema.sql", "ops/release/version.txt", "ops/release/integrity/source-build-identity.mjs", "ops/release/integrity/extension-archive-integrity.mjs"]:
+            dst = repo / relative
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / relative, dst)
+        (repo / 'fixture.txt').write_text('stable source fixture\n')
+        (repo / 'ops/dataset/generation-inputs.json').write_text(json.dumps({'schemaVersion': 1, 'include': ['fixture.txt']}))
+        # Build identity is calculated by the production resolver from Git-visible inputs.
+        (repo / ".gitignore").write_text("tmp/\n.local/\nbackend/product/api/build/\nextension/dist/\nextension/node_modules/\n")
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.email", "fixture@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.name", "Synthetic Fixture"], check=True)
+        # Resolver imports need the release module too; all resolver-visible files are committed as fixture source.
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-qm", "fixture"], check=True)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="lexiflow local ")
         self.root = Path(self.temp.name).resolve()
@@ -32,29 +79,17 @@ class LocalEntryTest(unittest.TestCase):
         self.calls = self.root / "calls"
         self.mode = self.root / "mode"
         self.mode.write_text("")
-        for relative in ["ops/podman/local.mjs", "ops/podman/unified-local.mjs", "ops/podman/deployment.mjs", "ops/podman/database-target.mjs", "ops/podman/candidate.mjs", "ops/podman/versioned-images.mjs", "ops/podman/image-slot-lock.mjs", "ops/podman/java-runtime.mjs", "ops/podman/process-lock.mjs", "ops/podman/command.mjs", "ops/podman/doctor.mjs", "ops/podman/upgrade.mjs", "ops/podman/prepare-workspace.mjs", "ops/podman/versions.mjs", "ops/podman/compose.validation.yaml",
-                         "ops/podman/fetch-ecdict.sh", "ops/podman/source-tools.Containerfile",
-                         "ops/docker/Dockerfile", "ops/docker/Dockerfile.postgres",
-                         "ops/docker/entrypoint.sh", "ops/docker/bootstrap.sh",
-                         "ops/dataset/ecdict-source.lock.json", "ops/dataset/generation-inputs.json", "ops/dataset/generation-version.mjs", "scripts/environment/ecdict_bundle.py",
-                         "infra/postgres/schema.sql", "ops/release/version.txt", "ops/release/version.mjs", "ops/release/archive-identity.mjs"]:
-            dst = self.repo / relative
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(ROOT / relative, dst)
-        (self.repo / 'fixture.txt').write_text('stable source fixture\n')
-        (self.repo / 'ops/dataset/generation-inputs.json').write_text(json.dumps({'schemaVersion': 1, 'include': ['fixture.txt']}))
-        # Build identity is calculated by the production resolver from Git-visible inputs.
-        (self.repo / ".gitignore").write_text("tmp/\n.local/\nbackend/product/api/build/\nextension/dist/\nextension/node_modules/\n")
-        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
-        subprocess.run(["git", "-C", str(self.repo), "config", "user.email", "fixture@example.invalid"], check=True)
-        subprocess.run(["git", "-C", str(self.repo), "config", "user.name", "Synthetic Fixture"], check=True)
-        # Resolver imports need the release module too; all resolver-visible files are committed as fixture source.
-        subprocess.run(["git", "-C", str(self.repo), "add", "-A"], check=True)
-        subprocess.run(["git", "-C", str(self.repo), "commit", "-qm", "fixture"], check=True)
+        # 仅合成 source/.git 模板共享；每例复制为独立可变 checkout。
+        # 手动构造的 standalone fixture 不依赖 unittest class 生命周期。
+        template = getattr(type(self), '_source_template', None)
+        if template is None:
+            self._prepare_source(self.repo)
+        else:
+            shutil.copytree(template, self.repo)
         (self.repo / "backend/product/api/build/internal/boot").mkdir(parents=True)
         (self.repo / "extension/dist").mkdir(parents=True)
-        self.program(self.repo / "backend/gradlew", "#!/bin/sh\nset -eu\nnode -e \"import('../ops/release/version.mjs').then(({resolveBuildIdentity})=>{const fs=require('fs'); fs.mkdirSync('product/api/build/internal/boot',{recursive:true}); fs.writeFileSync('product/api/build/internal/boot/api-internal.jar','synthetic');})\"\n")
-        self.program(self.bin / "npm", "#!/bin/sh\nset -eu\nif [ \"$1\" = run ] && [ \"$2\" = build ]; then node -e \"import('../ops/release/version.mjs').then(({resolveBuildIdentity})=>{const fs=require('fs'); const id=resolveBuildIdentity('..'); const port=process.env.LEXIFLOW_API_PORT; fs.mkdirSync('dist',{recursive:true}); fs.writeFileSync('dist/build-identity.json',JSON.stringify(id)); fs.writeFileSync('dist/manifest.json',JSON.stringify({version:id.chromeVersion,version_name:id.softwareVersion,host_permissions:['http://127.0.0.1:'+port+'/*']}));})\"; fi\n")
+        self.program(self.repo / "backend/gradlew", "#!/bin/sh\nset -eu\nnode -e \"import('../ops/release/integrity/source-build-identity.mjs').then(({resolveBuildIdentity})=>{const fs=require('fs'); fs.mkdirSync('product/api/build/internal/boot',{recursive:true}); fs.writeFileSync('product/api/build/internal/boot/api-internal.jar','synthetic');})\"\n")
+        self.program(self.bin / "npm", "#!/bin/sh\nset -eu\nif [ \"$1\" = run ] && [ \"$2\" = build ]; then node -e \"import('../ops/release/integrity/source-build-identity.mjs').then(({resolveBuildIdentity})=>{const fs=require('fs'); const id=resolveBuildIdentity('..'); const port=process.env.LEXIFLOW_API_PORT; fs.mkdirSync('dist',{recursive:true}); fs.writeFileSync('dist/build-identity.json',JSON.stringify(id)); fs.writeFileSync('dist/manifest.json',JSON.stringify({version:id.chromeVersion,version_name:id.softwareVersion,host_permissions:['http://127.0.0.1:'+port+'/*']}));})\"; fi\n")
         self.program(self.bin / "java", f'''#!/bin/sh
 if [ "$1" = -version ]; then echo 'openjdk version "25.0.1"' >&2; exit 0; fi
 if [ "$3" = --deployment-data ]; then
@@ -136,7 +171,7 @@ elif args[:1] in (['stop'],['rm']):
     sys.exit(1)
 elif args[:1]==['run']:
     if mode=='fetch-fail': sys.exit(9)
-    if mode=='slow-source-run' and '/kit/ops/podman/fetch-ecdict.sh' in args:
+    if mode=='slow-source-run' and '/kit/ops/dataset/prepare_ecdict_bundle.py' in args:
         import time
         print('private-source-output',flush=True);time.sleep(30)
     if '/bin/sh' in args:
@@ -162,7 +197,7 @@ elif args[:1]==['run']:
         csv='word,translation,oxford,tag,bnc,frq,exchange\\ntest,测试,1,,1,1,\\n';(data/'stardict.csv').write_text(csv)
         digest=hashlib.sha256(csv.encode()).hexdigest();lock=json.loads(Path(REPO,'ops/dataset/ecdict-source.lock.json').read_text())
         upstream={'repository_url':lock['repository_url'],'commit':lock['commit'],'files':lock['files'],'archive_member':{'sha256':lock['archive_member']['sha256'],'bytes':lock['archive_member']['bytes']}}
-        script="import {dataGeneration} from './ops/dataset/generation-version.mjs'; console.log(JSON.stringify(dataGeneration(JSON.parse(process.argv[1]))))"
+        script="import {dataGeneration} from './ops/dataset/dataset-generation-identity.mjs'; console.log(JSON.stringify(dataGeneration(JSON.parse(process.argv[1]))))"
         codeVersion=next(x.split('=',1)[1] for x in args if x.startswith('LEXIFLOW_GENERATION_CODE_VERSION='))
         import subprocess
         generation=json.loads(subprocess.check_output(['node','--input-type=module','-e',script,json.dumps({'codeVersion':codeVersion,'inputSha256':digest,'upstream':upstream})],cwd=REPO,text=True))
@@ -398,13 +433,13 @@ net.createServer=(...args)=>{{
 
     def expected_resolved_identity(self):
         result = subprocess.run([shutil.which('node'), '--input-type=module', '-e',
-                                 "import {resolveBuildIdentity} from './ops/release/version.mjs'; console.log(JSON.stringify(resolveBuildIdentity(process.cwd())))"],
+                                 "import {resolveBuildIdentity} from './ops/release/integrity/source-build-identity.mjs'; console.log(JSON.stringify(resolveBuildIdentity(process.cwd())))"],
                                 cwd=self.repo, capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
     def inspect_ready_images(self, state):
-        result = subprocess.run([shutil.which('node'), '--input-type=module', '-e', r'''import {versionedImageReference} from './ops/podman/versioned-images.mjs';
+        result = subprocess.run([shutil.which('node'), '--input-type=module', '-e', r'''import {versionedImageReference} from './ops/podman/images/versioned-images.mjs';
 const {baseVersion}=JSON.parse(process.argv[1]); console.log(JSON.stringify({api:versionedImageReference('api',baseVersion),postgres:versionedImageReference('postgres',baseVersion)}));''',
                                     json.dumps(state['buildIdentity'])], cwd=self.repo,
                                capture_output=True, text=True, timeout=15)
@@ -430,9 +465,9 @@ const {baseVersion}=JSON.parse(process.argv[1]); console.log(JSON.stringify({api
         upstream = {'repository_url': lock['repository_url'], 'commit': lock['commit'],
                     'files': lock['files'], 'archive_member': {
                         'sha256': lock['archive_member']['sha256'], 'bytes': lock['archive_member']['bytes']}}
-        script = r'''import { resolveBuildIdentity } from './ops/release/version.mjs';
-import { generationCodeVersion, dataGeneration } from './ops/dataset/generation-version.mjs';
-import { renderCompose } from './ops/podman/unified-local.mjs';
+        script = r'''import { resolveBuildIdentity } from './ops/release/integrity/source-build-identity.mjs';
+import { generationCodeVersion, dataGeneration } from './ops/dataset/dataset-generation-identity.mjs';
+import { renderCompose } from './ops/podman/installation/installation-upgrade-workflow.mjs';
 import { readFile } from 'node:fs/promises';
 const [apiPort, dbPort, inputSha256, upstreamJson] = process.argv.slice(1);
 const identity = resolveBuildIdentity(process.cwd());
@@ -520,10 +555,10 @@ console.log(JSON.stringify({ identity, generation, compose,
         lock = json.loads((self.repo / 'ops/dataset/ecdict-source.lock.json').read_text())
         upstream = {'repository_url': lock['repository_url'], 'commit': lock['commit'], 'files': lock['files'],
                     'archive_member': {'sha256': lock['archive_member']['sha256'], 'bytes': lock['archive_member']['bytes']}}
-        script = r'''import { resolveBuildIdentity } from './ops/release/version.mjs';
-import { generationCodeVersion, dataGeneration } from './ops/dataset/generation-version.mjs';
-import { versionedImageReference, versionedImageLabels } from './ops/podman/versioned-images.mjs';
-import { renderCompose } from './ops/podman/unified-local.mjs';
+        script = r'''import { resolveBuildIdentity } from './ops/release/integrity/source-build-identity.mjs';
+import { generationCodeVersion, dataGeneration } from './ops/dataset/dataset-generation-identity.mjs';
+import { versionedImageReference, versionedImageLabels } from './ops/podman/images/versioned-images.mjs';
+import { renderCompose } from './ops/podman/installation/installation-upgrade-workflow.mjs';
 import { readFile } from 'node:fs/promises';
 const [apiPort,dbPort,inputSha,upstreamJson]=process.argv.slice(1);
 const identity=resolveBuildIdentity(process.cwd()), codeVersion=await generationCodeVersion(process.cwd());
@@ -671,7 +706,7 @@ console.log(JSON.stringify({identity,generation,upstream,
             self.thread=threading.Thread(target=later, daemon=True);self.thread.start()
         elif not self.thread:
             self.server.server_close()
-        argv = [shutil.which('node'), '--import', str(self.preload), str(self.repo/'ops/podman/local.mjs'), action, '--dir', str(self.kit)]
+        argv = [shutil.which('node'), '--import', str(self.preload), str(self.repo/'ops/podman/commands/manage-podman-installation.mjs'), action, '--dir', str(self.kit)]
         if action == 'install': argv += ['--api-port', str(self.api_port), '--db-port', str(self.db_port)]
         env = {**os.environ, 'PATH':str(self.bin)+os.pathsep+os.environ['PATH']}
         if action in ('install', 'upgrade') and not any(value in extra for value in ('--plan', '--confirm-plan')):
@@ -684,7 +719,7 @@ console.log(JSON.stringify({identity,generation,upstream,
 
     def invoke_tty_confirmation(self, answer):
         master, slave = pty.openpty()
-        argv=[shutil.which('node'),'--import',str(self.preload),str(self.repo/'ops/podman/local.mjs'),
+        argv=[shutil.which('node'),'--import',str(self.preload),str(self.repo/'ops/podman/commands/manage-podman-installation.mjs'),
               'install','--dir',str(self.kit),'--api-port',str(self.api_port),'--db-port',str(self.db_port)]
         env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH']}
         process=subprocess.Popen(argv,stdin=slave,stdout=slave,stderr=slave,env=env,close_fds=True)
@@ -828,7 +863,7 @@ console.log(JSON.stringify({identity,generation,upstream,
 
     def test_confirmation_refusal_and_eof_do_not_prepare_or_create_install_state(self):
         # 非 TTY 的 CLI 必须显式 BLOCKED；拒绝路径由部署层本地确认合同覆盖。
-        argv=[shutil.which('node'),'--import',str(self.preload),str(self.repo/'ops/podman/local.mjs'),
+        argv=[shutil.which('node'),'--import',str(self.preload),str(self.repo/'ops/podman/commands/manage-podman-installation.mjs'),
               'install','--dir',str(self.kit),'--api-port',str(self.api_port),'--db-port',str(self.db_port)]
         env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH']}
         result=subprocess.run(argv,input='',env=env,capture_output=True,text=True,timeout=20)
@@ -1068,7 +1103,7 @@ console.log(JSON.stringify({identity,generation,upstream,
         state=(self.kit/'state.json').read_bytes()
         output=self.root/'follow-output'
         with output.open('w') as out:
-            child=subprocess.Popen([shutil.which('node'),'--import',str(self.preload),str(self.repo/'ops/podman/local.mjs'),'logs','--dir',str(self.kit)],env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH']},stdout=out,stderr=out)
+            child=subprocess.Popen([shutil.which('node'),'--import',str(self.preload),str(self.repo/'ops/podman/commands/manage-podman-installation.mjs'),'logs','--dir',str(self.kit)],env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH']},stdout=out,stderr=out)
             try:
                 deadline=time.monotonic()+10
                 while time.monotonic()<deadline and 'synthetic-follow-stderr' not in output.read_text():
@@ -1097,6 +1132,20 @@ console.log(JSON.stringify({identity,generation,upstream,
         result=self.invoke('logs')
         self.assertNotEqual(result.returncode,0)
         self.assertIn('退出码 9',result.stderr)
+
+    def test_source_template_copies_are_mutably_isolated(self):
+        source_before = (self.repo / 'fixture.txt').read_bytes()
+        git_before = (self.repo / '.git/config').read_bytes()
+        template_before = self._source_snapshot(self._source_template)
+        with tempfile.TemporaryDirectory(prefix="lexiflow source copy ") as temp:
+            other = Path(temp) / 'source'
+            shutil.copytree(self._source_template, other)
+            (other / 'fixture.txt').write_text('independent mutation\n')
+            (other / '.git/config').write_text('independent git mutation\n')
+            self.assertEqual((self.repo / 'fixture.txt').read_bytes(), source_before)
+            self.assertEqual((self.repo / '.git/config').read_bytes(), git_before)
+            self.assertEqual(self._source_snapshot(self._source_template), template_before)
+        self.assertFalse(other.exists())
 
     def test_logs_fixture_instances_are_isolated(self):
         first_state=self.prepare_logs_fixture()
@@ -1204,7 +1253,7 @@ console.log(JSON.stringify({identity,generation,upstream,
 
             for case in (self, reference):
                 state = json.loads((case.kit / 'state.json').read_text())
-                identity_script = r'''import { renderCompose } from './ops/podman/unified-local.mjs';
+                identity_script = r'''import { renderCompose } from './ops/podman/installation/installation-upgrade-workflow.mjs';
 const [api,db]=process.argv.slice(1); console.log(renderCompose(process.cwd(),
  {apiPort:Number(api),dbPort:Number(db),external:false,dbUser:'lexiflow',authMode:'managed'}));'''
                 rendered = subprocess.run([shutil.which('node'), '--input-type=module', '-e', identity_script,
@@ -1340,7 +1389,7 @@ const [api,db]=process.argv.slice(1); console.log(renderCompose(process.cwd(),
         self.assertEqual(result.returncode,0,result.stderr)
         old_hash=next(json.loads(line)['planHash'] for line in result.stdout.splitlines() if line.startswith('{'))
         self.assertFalse((self.kit/'state.json').exists())
-        with (self.repo/'ops/release/version.mjs').open('a') as stream:
+        with (self.repo/'ops/release/integrity/source-build-identity.mjs').open('a') as stream:
             stream.write('\n// synthetic source identity dependency change\n')
         offset = len(self.calls.read_text().splitlines())
         result = self.invoke('install','--confirm-plan',old_hash)
@@ -1440,7 +1489,7 @@ Object.defineProperty(globalThis, 'performance', {
         planned=self.invoke('install','--plan');self.assertEqual(planned.returncode,0,planned.stderr)
         plan_hash=next(json.loads(line)['planHash'] for line in planned.stdout.splitlines() if line.startswith('{'))
         self.mode.write_text('slow-pull')
-        argv=[shutil.which('node'),'--import',str(self.preload),str(self.repo/'ops/podman/local.mjs'),'install','--dir',str(self.kit),'--api-port',str(self.api_port),'--db-port',str(self.db_port),'--confirm-plan',plan_hash]
+        argv=[shutil.which('node'),'--import',str(self.preload),str(self.repo/'ops/podman/commands/manage-podman-installation.mjs'),'install','--dir',str(self.kit),'--api-port',str(self.api_port),'--db-port',str(self.db_port),'--confirm-plan',plan_hash]
         proc=subprocess.Popen(argv,env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH']},stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
         try:
             until=time.monotonic()+10
@@ -1464,14 +1513,14 @@ Object.defineProperty(globalThis, 'performance', {
     def test_cancel_during_source_run_removes_only_owned_untagged_tool_image(self):
         self.server.server_close()
         self.mode.write_text('slow-source-run')
-        argv=[shutil.which('node'),'--import',str(self.preload),str(self.repo/'ops/podman/local.mjs'),
+        argv=[shutil.which('node'),'--import',str(self.preload),str(self.repo/'ops/podman/commands/manage-podman-installation.mjs'),
               'install','--dir',str(self.kit),'--api-port',str(self.api_port),'--db-port',str(self.db_port),'--plan']
         proc=subprocess.Popen(argv,env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH']},
                               stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
         try:
             until=time.monotonic()+10
             while time.monotonic()<until:
-                if self.calls.exists() and any('/kit/ops/podman/fetch-ecdict.sh' in json.loads(line)
+                if self.calls.exists() and any('/kit/ops/dataset/prepare_ecdict_bundle.py' in json.loads(line)
                                                for line in self.calls.read_text().splitlines()): break
                 time.sleep(.02)
             self.assertIsNone(proc.poll())
@@ -1555,7 +1604,7 @@ if(phase==='retire' && from.endsWith('/.lock') && to.includes('/.lock-retired-')
 return result;};
 syncBuiltinESMExports();
 """)
-                argv = [shutil.which('node'), '--import', str(self.preload), '--import', str(crash), str(self.repo/'ops/podman/local.mjs'), 'up', '--dir', str(self.kit)]
+                argv = [shutil.which('node'), '--import', str(self.preload), '--import', str(crash), str(self.repo/'ops/podman/commands/manage-podman-installation.mjs'), 'up', '--dir', str(self.kit)]
                 proc = subprocess.run(argv, env={**os.environ, 'PATH':str(self.bin)+os.pathsep+os.environ['PATH']}, capture_output=True, text=True, timeout=15)
                 self.assertEqual(proc.returncode, -signal.SIGKILL, proc.stderr)
                 self.assertEqual(marker.read_text(), phase)

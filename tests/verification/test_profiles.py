@@ -1,3 +1,5 @@
+"""冻结开发和基线 profile 并校核发布报告与输入新鲜度。"""
+
 from __future__ import annotations
 
 import copy
@@ -6,7 +8,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import yaml
 
 from scripts.verification import (
     freeze_inputs,
@@ -21,7 +22,6 @@ from tests.verification.declaration_fixtures import write_declarations
 def _check(check_id: str, scope: str = "repository-baseline") -> dict:
     return {
         "check_id": check_id,
-        "module": check_id,
         "command": [
             "python3",
             "-c",
@@ -51,16 +51,16 @@ class DevelopmentProfileFreezeTests(unittest.TestCase):
                 _check("eng.release.candidate-runtime"),
                 _check("synthetic.release.lifecycle"),
             ]
-            write_declarations(root / "harness/module-checks.yaml", checks)
-            (root / "harness/ci-policy.yaml").write_text(
-                yaml.safe_dump(
-                    {
-                        "formal_only_check_ids": [
-                            "eng.release.lifecycle-runtime",
-                            "eng.release.candidate-runtime",
-                        ]
-                    }
-                )
+            write_declarations(
+                root / "config/engineering/module-checks.yaml",
+                checks,
+                ci_quick={
+                    "always_required_check_ids": [],
+                    "formal_only_check_ids": [
+                        "eng.release.lifecycle-runtime",
+                        "eng.release.candidate-runtime",
+                    ],
+                },
             )
             freeze = freeze_inputs(root, verification_scope="development-baseline")
             self.assertEqual(freeze["result"], "PASS")
@@ -81,13 +81,12 @@ class DevelopmentProfileFreezeTests(unittest.TestCase):
             (root / "src").mkdir()
             (root / "src/input.txt").write_text("fixture")
             write_declarations(
-                root / "harness/module-checks.yaml",
+                root / "config/engineering/module-checks.yaml",
                 [_check("eng.release.lifecycle-runtime")],
-            )
-            (root / "harness/ci-policy.yaml").write_text(
-                yaml.safe_dump(
-                    {"formal_only_check_ids": ["eng.release.lifecycle-runtime"]}
-                )
+                ci_quick={
+                    "always_required_check_ids": [],
+                    "formal_only_check_ids": ["eng.release.lifecycle-runtime"],
+                },
             )
             freeze = freeze_inputs(
                 root,
@@ -104,11 +103,8 @@ class DevelopmentProfileFreezeTests(unittest.TestCase):
             (root / "src").mkdir()
             (root / "src/input.txt").write_text("seed")
             write_declarations(
-                root / "harness/module-checks.yaml",
+                root / "config/engineering/module-checks.yaml",
                 [_check("src.check", "change-targeted")],
-            )
-            (root / "harness/ci-policy.yaml").write_text(
-                yaml.safe_dump({"formal_only_check_ids": ["release.runtime"]})
             )
             for args in (
                 ("init",),
@@ -149,13 +145,18 @@ class DevelopmentProfileFreezeTests(unittest.TestCase):
             persist_report(root, report)
             loaded, _ = read_report(root, report["run_id"])
             self.assertEqual(loaded, report)
-            (root / "harness/ci-policy.yaml").write_text(
-                yaml.safe_dump({"formal_only_check_ids": ["other.runtime"]})
+            declarations_path = root / "config/engineering/module-checks.yaml"
+            original = declarations_path.read_bytes()
+            write_declarations(
+                declarations_path,
+                [_check("src.check", "change-targeted")],
+                ci_quick={
+                    "always_required_check_ids": ["src.check"],
+                    "formal_only_check_ids": [],
+                },
             )
             self.assertFalse(verify_frozen_inputs(root, freeze))
-            (root / "harness/ci-policy.yaml").write_text(
-                yaml.safe_dump({"formal_only_check_ids": ["release.runtime"]})
-            )
+            declarations_path.write_bytes(original)
             self.assertTrue(verify_frozen_inputs(root, freeze))
             forged = copy.deepcopy(freeze)
             forged["changed_files"] = []
@@ -174,11 +175,9 @@ class DevelopmentProfileFreezeTests(unittest.TestCase):
             (root / "src").mkdir()
             (root / "src/input.txt").write_text("fixture")
             checks = [_check("baseline.one"), _check("eng.release.lifecycle-runtime")]
-            write_declarations(root / "harness/module-checks.yaml", checks)
+            write_declarations(root / "config/engineering/module-checks.yaml", checks)
             freeze = freeze_inputs(root)
-            report = verify_profile(
-                root, frozen_inputs=freeze, execution_mode="diagnostic"
-            )
+            report = verify_profile(root, frozen_inputs=freeze)
             self.assertEqual(report["result"], "PASS")
             self.assertEqual(report["scope"], "repository-baseline")
             self.assertEqual(
@@ -188,6 +187,11 @@ class DevelopmentProfileFreezeTests(unittest.TestCase):
             persist_report(root, report)
             loaded, _ = read_report(root, report["run_id"])
             self.assertEqual(loaded, report)
+            self.assertTrue(all("module" not in check for check in loaded["checks"]))
+            forged = copy.deepcopy(report)
+            forged["checks"][0]["module"] = "removed-presentation-label"
+            with self.assertRaisesRegex(ValueError, "verification report check invalid"):
+                persist_report(root, forged)
 
 
 if __name__ == "__main__":

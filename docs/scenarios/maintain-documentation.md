@@ -1,6 +1,6 @@
 # 1. 图文维护：更新唯一正文并验证阅读效果
 
-> 上级：[仓库生命周期](../README.md)。原则与机器规则见 [documentation-policy](../../harness/documentation-policy.yaml)；本页只讲实际更新步骤，不新增 Agent 规则。
+> 上级：[仓库生命周期](../README.md)。人类文档规则见 [documentation-policy](../../harness/documentation-policy.md)；本页只讲实际更新步骤，不新增 Agent 规则。
 
 ## 1.1. 从更新到交接
 
@@ -50,7 +50,7 @@ note right
 end note
 :S6 执行静态检查并交接;
 note right
-入口：scripts/repository/docs_check.py
+入口：scripts/checks/repository/documentation/check_documentation.py
 作用：核对链接、锚点、标题与围栏，说明验证边界
 <color:#995A00><b>预期：1–5 秒（机器规划；审阅另计）</b></color>
 end note
@@ -65,12 +65,12 @@ endlegend
 
 | 节点 | 核心作用 | 操作入口 |
 | --- | --- | --- |
-| S1 | 找到事实真源、唯一正文与引用者 | [生命周期归属导航](../README.md)、[documentation-policy](../../harness/documentation-policy.yaml) |
+| S1 | 找到事实真源、唯一正文与引用者 | [生命周期归属导航](../README.md)、[documentation-policy](../../harness/documentation-policy.md) |
 | S2 | 按实际范围更新正文；图源先写临时稿 | Markdown；本机 `feipi-plantuml-generate-diagram` skill |
 | S3 | 执行对应图型的 schema／覆盖／布局／渲染校验 | skill 的 `scripts/validate_package.sh`；一批复用一次 preflight 回执 |
 | S4 | 查看图，再原样复制并核对 hash | 正文 fenced `plantuml`；调试产物只留 ignored tmp |
 | S5 | 在实际 IDE 中点击内链与查看格式 | IntelliJ Markdown 预览；没有实际点击不能称定位通过 |
-| S6 | 静态检查并说明验证范围 | [docs_check.py](../../scripts/repository/docs_check.py) |
+| S6 | 静态检查并说明验证范围 | [check_documentation.py](../../scripts/checks/repository/documentation/check_documentation.py) |
 
 无图源修改不重复渲染；技能不可用或无法视觉复核记 BLOCKED，具体修复次数和失败边界只引用 skill。状态记录见[问题台账](../roadmap/master-plan/phase2/status.md)，不写进长期操作步骤。
 
@@ -78,7 +78,7 @@ endlegend
 
 | 本次要改的内容 | 查哪里 | 不做什么 |
 | --- | --- | --- |
-| Agent 规则／文档原则 | Harness 真源与消费者 | 查 [documentation-policy](../../harness/documentation-policy.yaml) 并同步引用者 |
+| Agent 规则／文档原则 | Harness 真源与消费者 | 查 [documentation-policy](../../harness/documentation-policy.md) 并同步引用者 |
 | 执行某流程 | 对应执行场景／操作页 | 不在优化任务页重复完整执行子图 |
 | 优化某流程 | 优化任务与源码／直接测试 | 不把待确认设计写成现行事实 |
 | 合同字段与模块行为 | 对应领域合同和源码 | 不在产品价值页、路线图重复维护字段表 |
@@ -99,7 +99,7 @@ endlegend
 从仓库根执行：
 
 ```bash
-python3 -m scripts.repository.docs_check
+python3 -m scripts.checks.repository.documentation.check_documentation
 ```
 
 核对标题层级、文件链接、仍被引用的锚点、围栏和源码引用。静态 PASS 只证明相应结构检查，不证明语义、实际图形或 Formal。文档改动仍按真实风险触发现行交付检查，不能因为只改 docs 就自行豁免，见[执行门禁](run-repository-gates.md)。

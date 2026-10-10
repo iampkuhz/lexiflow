@@ -1,0 +1,34 @@
+high_risk_paths:
+- LICENSE
+- AGENTS.md
+- harness/**
+- .codex/**
+- .qoder/**
+- openspec/**
+- planning/**
+- scripts/**
+- tests/**
+- infra/**
+- ops/**
+- .github/**
+- backend/*.kts
+- backend/**/*.kts
+- backend/gradle/**
+- backend/gradle.properties
+- backend/buildSrc/**
+- backend/verification/**
+- backend/product/api/**
+- backend/product/adapters/**
+- '**/port/**'
+- '**/contract/**'
+- docs/system.md
+- docs/system/**
+- docs/scenarios/**
+- docs/reference/**
+- docs/reference.md
+- docs/README.md
+- docs/roadmap/**
+local_owner_roots:
+  lexicon: backend/product/lexicon/
+  enrichment: backend/product/enrichment/
+  extension: extension/src/

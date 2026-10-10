@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createHash } from "node:crypto";
-import { PACKAGE_FILES, createExtensionZip, publishExtensionArchive, packageRelease } from "../scripts/release.mjs";
-import { checkExtensionArchive } from "../scripts/archive-check.mjs";
+import { PACKAGE_FILES, createExtensionZip, publishExtensionArchive, packageRelease } from "../scripts/packaging/package-extension-release.mjs";
+import { checkExtensionArchive } from "../scripts/checks/check-extension-archive.mjs";
 import { zipSync } from "fflate";
-import { resolveBuildIdentity, chromeVersion } from "../../ops/release/version.mjs";
+import { resolveBuildIdentity, chromeVersion } from "../../ops/release/integrity/source-build-identity.mjs";
 
 const buildIdentity = resolveBuildIdentity();
 const version = buildIdentity.softwareVersion;
@@ -49,7 +49,7 @@ test("ZIP has exact allowlist, stable bytes and matching SHA-256 across timezone
     assert.deepEqual(first.archive, second.archive);
     assert.equal(first.descriptor.sha256, createHash("sha256").update(first.archive).digest("hex"));
     for (const file of PACKAGE_FILES) assert.deepEqual(Buffer.from(first.unzip()[file]), await readFile(path.join(root, "dist", file)));
-    const modulePath = new URL("../scripts/release.mjs", import.meta.url).pathname;
+    const modulePath = new URL("../scripts/packaging/package-extension-release.mjs", import.meta.url).pathname;
     const script = `import {createExtensionZip} from ${JSON.stringify(new URL(`file://${modulePath}`).href)}; const r=await createExtensionZip({root:${JSON.stringify(root)},buildIdentity:${JSON.stringify(buildIdentity)}}); process.stdout.write(Buffer.from(r.archive).toString('base64'))`;
     for (const TZ of ["Pacific/Honolulu", "Pacific/Kiritimati"]) {
       const other = execFileSync(process.execPath, ["--input-type=module", "-e", script], { env: { ...process.env, TZ }, encoding: "utf8" });
@@ -91,14 +91,14 @@ test("requires and verifies the complete embedded extension identity", async () 
 test("rejects dirty Git input and safely reuses only byte-identical output", async () => {
   const repo = await realpath(await mkdtemp(path.join(tmpdir(), "lexiflow-dirty-git-")));
   try {
-    await mkdir(path.join(repo, "ops/release"), { recursive: true });
+    await mkdir(path.join(repo, "ops/release/integrity"), { recursive: true });
     await writeFile(path.join(repo, "ops/release/version.txt"), `2.0.0\n`);
     execFileSync("git", ["init", "-q", repo]);
     execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "add", "."]);
     execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture"]);
     await writeFile(path.join(repo, "dirty.txt"), "uncommitted");
     await assert.rejects(packageRelease({ repoRoot: repo }), /release input must be clean/u);
-    const dirtyScript = `import {checkReleaseSource} from ${JSON.stringify(new URL("../../ops/release/version.mjs", import.meta.url).href)}; checkReleaseSource(${JSON.stringify(repo)})`;
+    const dirtyScript = `import {checkReleaseSource} from ${JSON.stringify(new URL("../../ops/release/integrity/source-build-identity.mjs", import.meta.url).href)}; checkReleaseSource(${JSON.stringify(repo)})`;
     const dirty = spawnSync(process.execPath, ["--input-type=module", "-e", dirtyScript], { encoding: "utf8" });
     assert.notEqual(dirty.status, 0);
     assert.match(dirty.stderr, /release input must be clean/u);
@@ -192,10 +192,10 @@ test("rejects symlinked source ancestors, non-regular artifact targets, and unkn
     await rm(path.join(output, artifact.descriptor.filename));
     await mkdir(path.join(output, artifact.descriptor.filename));
     await assert.rejects(publishExtensionArchive(artifact.archive, `${artifact.descriptor.sha256}  ${artifact.descriptor.filename}\n`, output, artifact.descriptor.filename), /not a regular file/u);
-    const moduleUrl = new URL("../scripts/release.mjs", import.meta.url).href;
+    const moduleUrl = new URL("../scripts/packaging/package-extension-release.mjs", import.meta.url).href;
     const imported = spawnSync(process.execPath, ["-e", `import(${JSON.stringify(moduleUrl)})`], { encoding: "utf8" });
     assert.equal(imported.status, 0, imported.stderr);
-    const args = spawnSync(process.execPath, [new URL("../scripts/release.mjs", import.meta.url).pathname, "--version"], { encoding: "utf8" });
+    const args = spawnSync(process.execPath, [new URL("../scripts/packaging/package-extension-release.mjs", import.meta.url).pathname, "--version"], { encoding: "utf8" });
     assert.notEqual(args.status, 0);
     assert.match(args.stderr, /unexpected arguments/u);
   } finally { await cleanup(); }
@@ -209,8 +209,8 @@ test("clean release CLI rebuilds stale dist at port 18080 and emits only its JSO
     for (const name of ["scripts", "src", "assets", "manifest.json", "package.json", "package-lock.json", "tsconfig.json"]) {
       await cp(new URL(`../${name}`, import.meta.url), path.join(extension, name), { recursive: true });
     }
-    await mkdir(path.join(repo, "ops/release"), { recursive: true });
-    await cp(new URL("../../ops/release/version.mjs", import.meta.url), path.join(repo, "ops/release/version.mjs"));
+    await mkdir(path.join(repo, "ops/release/integrity"), { recursive: true });
+    await cp(new URL("../../ops/release/integrity/source-build-identity.mjs", import.meta.url), path.join(repo, "ops/release/integrity/source-build-identity.mjs"));
     await writeFile(path.join(repo, "ops/release/version.txt"), "2.0.0\n");
     await symlink(path.resolve(path.dirname(new URL("../package.json", import.meta.url).pathname), "node_modules"), path.join(extension, "node_modules"));
     await writeFile(path.join(repo, ".gitignore"), "/tmp/\n/extension/dist/\n/extension/node_modules\n");
@@ -219,7 +219,7 @@ test("clean release CLI rebuilds stale dist at port 18080 and emits only its JSO
     execFileSync("git", ["init", "-q", repo]);
     execFileSync("git", ["-C", repo, "add", "."]);
     execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "clean release fixture"]);
-    const cli = path.join(extension, "scripts/release.mjs");
+    const cli = path.join(extension, "scripts/packaging/package-extension-release.mjs");
     const result = spawnSync(process.execPath, [cli], { cwd: repo, encoding: "utf8", env: { ...process.env, LEXIFLOW_API_PORT: "19876" } });
     assert.equal(result.status, 0, result.stderr);
     const descriptor = JSON.parse(result.stdout);

@@ -2,28 +2,26 @@
 
 from __future__ import annotations
 import subprocess, tempfile, uuid
+from functools import cache
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from datetime import UTC, datetime
 from unittest.mock import patch
-from scripts.delivery_gate.records import (
+from scripts.acceptance.evidence.acceptance_record_store import (
     delivery_gate_locator,
     canonical_bytes,
     publish_bytes,
     publish_json,
-    sha256_bytes,
 )
-from scripts.delivery_gate.acceptance import acceptance_plan, binding
-from scripts.verification.risk import assess
-from scripts.delivery_gate.requirements import load_task_requirements
-from scripts.delivery_gate.source_snapshot import review_patch
-from scripts.delivery_gate.task_subject import derive_task_subject
+from scripts.acceptance.task_definition.task_acceptance_plan import acceptance_plan
+from scripts.verification.planning.change_risk_assessment import assess
+from scripts.acceptance.task_definition.task_acceptance_requirements import load_task_requirements
+from scripts.acceptance.evidence.task_review_diff import review_patch
+from scripts.acceptance.task_definition.task_acceptance_scope import derive_task_subject, subject_paths
 from scripts.verification import (
     freeze_inputs,
     persist_report,
     read_report,
-    verify_changes,
     verify_profile,
 )
 import yaml
@@ -37,27 +35,33 @@ def write_declarations(path, checks):
         "required_environment",
         "input_paths",
     )
-    selection_fields = (
-        "check_id",
-        "module",
-        "scope",
-        "triggers",
-        "module_dependencies",
-    )
     document = {
-        "schema_version": "lexiflow.module-checks.v2",
-        "description": "Gate fixture",
-        "executions": {},
         "checks": [],
+        "scenario_policy": {
+            "ci_quick": {"always_required_check_ids": [], "formal_only_check_ids": []}
+        },
     }
-    for index, check in enumerate(checks):
-        name = f"gate-fixture-{index}"
+    for check in checks:
         execution = {field: check[field] for field in execution_fields}
         execution["transaction_reuse"] = check.get("transaction_reuse", False)
-        document["executions"][name] = execution
+        scenarios = check.get("scenarios") or [check["scope"]]
+        if "triggers" in check:
+            execution["triggers"] = check["triggers"]
         document["checks"].append(
-            {**{field: check[field] for field in selection_fields}, "execution": name}
+            {
+                "check_id": check["check_id"],
+                "module_dependencies": check.get("module_dependencies", []),
+                "scenarios": scenarios,
+                **execution,
+            }
         )
+    document["scenario_policy"]["ci_quick"]["formal_only_check_ids"] = [
+        check["check_id"]
+        for check in document["checks"]
+        if check["check_id"]
+        in {"eng.release.lifecycle-runtime", "eng.release.candidate-runtime"}
+        and "repository-baseline" in check["scenarios"]
+    ]
     path.write_text(yaml.safe_dump(document, sort_keys=False))
 
 
@@ -94,22 +98,17 @@ def make_mock_runtime(session_id: str) -> MockRuntime:
 
 
 def mock_authority(session_id: str):
-    from scripts.delivery_gate.records import canonical_bytes, sha256_bytes
-
-    runtime = make_mock_runtime(session_id)
     return {
         "trust_boundary": "trusted-local-user-not-platform-cryptographic-attestation",
-        "verifier": "scripts.agents.local_codex_runtime.discover",
+        "verifier": "scripts.agents.identity.codex_actor_identity.discover",
         "verified_at": "2026-09-21T00:00:00Z",
-        "identity_sha256": sha256_bytes(canonical_bytes(runtime.context)),
-        "proof_sha256": sha256_bytes(canonical_bytes(runtime.proof)),
     }
 
 
 class DeliveryGateFixture:
     def __init__(self):
         self.proof_patch = patch(
-            "scripts.agents.local_codex_runtime.verify_proof", return_value=None
+            "scripts.agents.identity.codex_actor_identity.verify_proof", return_value=None
         )
         self.proof_patch.start()
         self.temp = tempfile.TemporaryDirectory()
@@ -118,15 +117,35 @@ class DeliveryGateFixture:
         self.validation_id = None
         self.review_id = None
         self.report_id = None
-        self._write_catalog()
-        self._write_declarations()
-        self.write("protected.py", "before\n")
-        self.write(".gitignore", "tmp/\n__pycache__/\n")
-        self._git("init")
-        self._git("config", "user.email", "fixture@example.test")
-        self._git("config", "user.name", "fixture")
-        self._git("add", ".")
-        self._git("commit", "-m", "base")
+        for relative, content, mode in self._base_files():
+            self.write(relative, content).chmod(mode)
+
+    @classmethod
+    @cache
+    def _base_files(cls):
+        """只复用合成基仓字节；每个实例重新写文件，绝不共享 Git 或证据状态。"""
+        with tempfile.TemporaryDirectory() as directory:
+            base = object.__new__(cls)
+            base.root = Path(directory)
+            base._write_catalog()
+            base._write_declarations()
+            base.write("protected.py", "before\n")
+            base.write(".gitignore", "tmp/\n__pycache__/\n")
+            base._git("init")
+            base._git("config", "user.email", "fixture@example.test")
+            base._git("config", "user.name", "fixture")
+            base._git("add", ".")
+            base._git("commit", "-m", "base")
+            # 不保留临时路径、可变容器或硬链接；子类的声明各自冻结。
+            return tuple(
+                (
+                    str(path.relative_to(base.root)),
+                    path.read_bytes(),
+                    path.stat().st_mode & 0o777,
+                )
+                for path in sorted(base.root.rglob("*"))
+                if path.is_file()
+            )
 
     def cleanup(self):
         self.proof_patch.stop()
@@ -176,12 +195,12 @@ class DeliveryGateFixture:
     def _write_declarations(self):
         project_root = Path(__file__).resolve().parents[2]
         self.write(
-            "harness/agent-policy.manifest.yaml",
-            (project_root / "harness/agent-policy.manifest.yaml").read_bytes(),
+            "config/engineering/risk.yaml",
+            (project_root / "config/engineering/risk.yaml").read_bytes(),
         )
         self.write(
-            "harness/ci-policy.yaml",
-            (project_root / "harness/ci-policy.yaml").read_bytes(),
+            "scripts/verification/planning/change_risk_assessment.py",
+            (project_root / "scripts/verification/planning/change_risk_assessment.py").read_bytes(),
         )
         self.write(
             "fixture_check.py",
@@ -198,68 +217,60 @@ class DeliveryGateFixture:
             "input_paths": [
                 "fixture_check.py",
                 "protected.py",
-                "harness/module-checks.yaml",
+                "config/engineering/module-checks.yaml",
             ],
         }
         checks = [
             {
                 "check_id": "fixture.baseline",
-                "module": "fixture.baseline",
                 "scope": "repository-baseline",
                 **common,
             },
             {
                 "check_id": "fixture.change",
-                "module": "fixture.change",
                 "scope": "change-targeted",
                 **common,
             },
         ]
-        # Risk assessment validates every formal-only selector against declarations;
-        # these fixture-only formal checks are intentionally not selected by src/ changes.
-        checks.extend(
-            [
+        # Canonical release checks expose both latest scenario views without aliases.
+        for check_id, trigger in (
+            (
+                "eng.release.lifecycle-runtime",
+                "never/fixture-lifecycle/",
+            ),
+            (
+                "eng.release.candidate-runtime",
+                "never/fixture-candidate/",
+            ),
+        ):
+            checks.append(
                 {
-                    "check_id": "eng.release.lifecycle-runtime",
-                    "module": "release-lifecycle-runtime",
-                    "scope": "repository-baseline",
-                    **{**common, "triggers": [{"path": "never/fixture-lifecycle/**"}]},
-                },
-                {
-                    "check_id": "eng.release.lifecycle-runtime-on-change",
-                    "module": "release-lifecycle-runtime",
-                    "scope": "change-targeted",
-                    **{**common, "triggers": [{"path": "never/fixture-lifecycle/**"}]},
-                },
-                {
-                    "check_id": "eng.release.candidate-runtime",
-                    "module": "release-candidate-runtime",
-                    "scope": "repository-baseline",
-                    **{**common, "triggers": [{"path": "never/fixture-candidate/**"}]},
-                },
-                {
-                    "check_id": "eng.release.candidate-runtime-on-change",
-                    "module": "release-candidate-runtime",
-                    "scope": "change-targeted",
-                    **{**common, "triggers": [{"path": "never/fixture-candidate/**"}]},
-                },
-            ]
-        )
-        write_declarations(self.root / "harness/module-checks.yaml", checks)
+                    "check_id": check_id,
+                    **common,
+                    "scenarios": ["repository-baseline", "change-targeted"],
+                    "triggers": [{"path": trigger}],
+                }
+            )
+        write_declarations(self.root / "config/engineering/module-checks.yaml", checks)
 
-    def create_verification_report(self, *_, result="PASS", changed_files=None, **__):
+    def create_verification_report(self, *, result="PASS"):
         self.write("src/test.py", "content of src/test.py\n")
-        report = verify_changes(self.root, base="HEAD")
+        report = verify_profile(
+            self.root,
+            frozen_inputs=freeze_inputs(
+                self.root, base="HEAD", verification_scope="development-change"
+            ),
+        )
         if result != "PASS":
             report = {**report, "result": result}
         descriptor = persist_report(self.root, report)
         self.report_id = report["run_id"]
         return {**report, "publication": descriptor}
 
-    def create_submission(self, **_):
+    def create_submission(self, *, task_id=TASK_ID):
         if not self.report_id:
             self.create_verification_report()
-        requirements = load_task_requirements(self.root, TASK_ID)
+        requirements = load_task_requirements(self.root, task_id)
         report, desc = read_report(self.root, self.report_id)
         full_changed = report["scope_review"]["changed_files"]
         subject = derive_task_subject(self.root, requirements, full_changed)
@@ -267,7 +278,7 @@ class DeliveryGateFixture:
             self.root,
             base=report["base"],
             required_check_ids=tuple(requirements["required_check_ids"]),
-            _subject_paths=tuple(subject["changed_files"]),
+            _subject_paths=tuple(subject_paths(subject)),
         )
         plan = acceptance_plan(self.root, risk, requirements)
         freeze = freeze_inputs(
@@ -275,48 +286,33 @@ class DeliveryGateFixture:
             required_check_ids=requirements["required_check_ids"],
             verification_scope=plan["verification_scope"],
             base=risk["base"],
-            _subject_changed_files=subject["changed_files"]
+            _subject_changed_files=subject_paths(subject)
             if plan["verification_scope"] == "development-change"
             else None,
         )
         sid = str(uuid.uuid4())
         self.submission_id = sid
-        changed = subject["changed_files"]
-        snaps = {
-            x: {
-                "state": "present",
-                "sha256": sha256_bytes((self.root / x).read_bytes()),
-            }
-            for x in changed
-        }
+        changed = subject_paths(subject)
         patch = publish_bytes(
             self.root,
-            f"tmp/quality/delivery-gate/submissions/{sid}.diff.patch",
+            f"tmp/quality/delivery-gate/current/submissions/{sid}.diff.patch",
             review_patch(self.root, risk["base"], changed),
         )
         runtime = make_mock_runtime(PRODUCER_SESSION)
         authority = mock_authority(PRODUCER_SESSION)
         record = {
-            "schema_version": "lexiflow.delivery-gate-submission.v5",
+            "schema_version": "lexiflow.delivery-gate-submission.v6",
             "submission_id": sid,
             "task_requirements": requirements,
             "risk_assessment": risk,
             "acceptance_plan": plan,
             "change_report": desc,
-            "scope_confirmation": self.report_id,
-            "scope_base": "HEAD",
             "diff": patch,
             "submitter_identity": runtime.context,
             "runtime_proof": runtime.proof,
             "authority": authority,
-            "producer": {
-                "kind": "current-codex-task",
-                "identity": runtime.context,
-                "runtime_proof": runtime.proof,
-                "authority": authority,
-            },
+            "producer": {"kind": "current-codex-task"},
             "verification_freeze": freeze,
-            "changed_file_snapshots": snaps,
             "task_subject": subject,
             "created_at": "2026-09-21T00:00:00Z",
         }
@@ -324,7 +320,7 @@ class DeliveryGateFixture:
         return record
 
     def create_validation(self, submission_id=None, result="PASS"):
-        from scripts.delivery_gate.records import load_submission
+        from scripts.acceptance.evidence.acceptance_record_store import load_submission
 
         sid = submission_id or self.submission_id
         sub = load_submission(self.root, sid)
@@ -341,15 +337,14 @@ class DeliveryGateFixture:
             }
         desc = publish_bytes(
             self.root,
-            f"tmp/quality/delivery-gate/validations/{vid}/report.json",
+            f"tmp/quality/delivery-gate/current/validations/{vid}/report.json",
             canonical_bytes(report),
         )
         rec = {
-            "schema_version": "lexiflow.delivery-gate-validation.v4",
+            "schema_version": "lexiflow.delivery-gate-validation.v5",
             "validation_id": vid,
             "submission_id": sid,
             "submission_content_hash": sub["content_hash"],
-            **binding(sub),
             "validator_identity": make_mock_runtime(VALIDATOR_SESSION).context,
             "runtime_proof": make_mock_runtime(VALIDATOR_SESSION).proof,
             "authority": mock_authority(VALIDATOR_SESSION),
@@ -363,7 +358,7 @@ class DeliveryGateFixture:
         return rec
 
     def create_review(self, submission_id=None, validation_id=None, decision="PASS"):
-        from scripts.delivery_gate.records import load_layer, load_submission
+        from scripts.acceptance.evidence.acceptance_record_store import load_layer, load_submission
 
         sid, vid = (
             submission_id or self.submission_id,
@@ -376,12 +371,11 @@ class DeliveryGateFixture:
         rid = str(uuid.uuid4())
         self.review_id = rid
         rec = {
-            "schema_version": "lexiflow.delivery-gate-review.v4",
+            "schema_version": "lexiflow.delivery-gate-review.v5",
             "review_id": rid,
             "submission_id": sid,
             "validation_id": vid,
             "submission_content_hash": sub["content_hash"],
-            **binding(sub),
             "validation_content_hash": val["content_hash"],
             "reviewer_identity": make_mock_runtime(REVIEWER_SESSION).context,
             "runtime_proof": make_mock_runtime(REVIEWER_SESSION).proof,

@@ -13,7 +13,7 @@
 准备 Java 25、Node.js 22+ 和已运行的 Podman/Compose 后，在仓库根目录执行：
 
 ```sh
-node ops/podman/local.mjs install
+node ops/podman/commands/manage-podman-installation.mjs install
 ```
 
 脚本自动构建镜像、下载精简词库、初始化 PostgreSQL 并启动应用。成功后在 `chrome://extensions` 开启开发者模式，按输出的固定目录加载已解压扩展。
@@ -21,9 +21,9 @@ node ops/podman/local.mjs install
 已有安装使用以下命令；重复 `install` 只核对身份、提示升级，不执行升级。
 
 ```sh
-node ops/podman/local.mjs upgrade  # 原目录升级，保留数据库、密码和端口
-node ops/podman/local.mjs version  # 区分安装、本地源码与可查询的 GitHub 正式版
-node ops/podman/local.mjs logs     # 持续查看本机新日志，Ctrl+C 退出
+node ops/podman/commands/manage-podman-installation.mjs upgrade  # 原目录升级，保留数据库、密码和端口
+node ops/podman/commands/manage-podman-installation.mjs version  # 区分安装、本地源码与可查询的 GitHub 正式版
+node ops/podman/commands/manage-podman-installation.mjs logs     # 持续查看本机新日志，Ctrl+C 退出
 ```
 
 升级后重新加载原扩展并刷新视频；无需重装。自定义安装目录须继续使用原 `--dir /absolute/install-dir`。

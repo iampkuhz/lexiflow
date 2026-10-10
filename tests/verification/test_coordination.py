@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.verification.coordination import WindowError, verification_window
+from scripts.verification.execution.checkout_verification_window import WindowError, verification_window
 
 
 class VerificationWindowTests(unittest.TestCase):
@@ -18,7 +18,7 @@ class VerificationWindowTests(unittest.TestCase):
             root = Path(temporary)
             script = """from pathlib import Path
 import sys, time
-from scripts.verification.coordination import verification_window
+from scripts.verification.execution.checkout_verification_window import verification_window
 with verification_window(Path(sys.argv[1])):
     print('HELD', flush=True)
     time.sleep(1.2)
@@ -54,23 +54,25 @@ with verification_window(Path(sys.argv[1])):
     def test_public_api_never_executes_while_another_window_is_held(self):
         from unittest.mock import Mock
         from scripts.verification import verify_repository
-        from tests.verification.test_work_package import fixture
-        from tests.verification.test_scenarios import _pass_runner
+        from tests.verification.test_cli import _write_declarations
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            fixture(root)
-            runner = Mock(side_effect=_pass_runner)
+            (root / "initial.txt").write_text("fixture")
+            _write_declarations(root, scope="repository-baseline")
+            runner = Mock()
             with verification_window(root) as window:
-                blocked = verify_repository(root, runner=runner)
+                blocked = verify_repository(root, progress_observer=runner)
                 self.assertEqual(blocked["result"], "BLOCKED")
                 self.assertEqual(blocked["reason"], "verification-window-busy")
                 runner.assert_not_called()
-                report = verify_repository(root, runner=runner, _window=window)
+                report = verify_repository(
+                    root, progress_observer=runner, _window=window
+                )
                 self.assertEqual(report["result"], "PASS", report)
-                self.assertEqual(runner.call_count, 1)
+                self.assertGreaterEqual(runner.call_count, 2)
             runner.reset_mock()
-            stale = verify_repository(root, runner=runner, _window=window)
+            stale = verify_repository(root, progress_observer=runner, _window=window)
             self.assertEqual(stale["result"], "BLOCKED")
             runner.assert_not_called()
 
@@ -111,7 +113,7 @@ with verification_window(Path(sys.argv[1])):
     def test_constructed_or_duck_typed_window_cannot_authorize_execution(self):
         from unittest.mock import Mock
         from scripts.verification import verify_repository
-        from scripts.verification.coordination import VerificationWindow
+        from scripts.verification.execution.checkout_verification_window import VerificationWindow
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -119,7 +121,9 @@ with verification_window(Path(sys.argv[1])):
                 forged = VerificationWindow(root, held._directory_fd, held._lock_fd)
                 for value in (forged, Mock()):
                     runner = Mock()
-                    result = verify_repository(root, runner=runner, _window=value)
+                    result = verify_repository(
+                        root, progress_observer=runner, _window=value
+                    )
                     self.assertEqual(result["result"], "BLOCKED")
                     runner.assert_not_called()
 

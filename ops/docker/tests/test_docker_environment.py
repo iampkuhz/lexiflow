@@ -5,8 +5,8 @@ import subprocess
 import tempfile
 import unittest
 
-SOURCE = pathlib.Path(__file__).resolve().parents[2] / "release/lifecycle-docker.sh"
-STATE = SOURCE.with_name("lifecycle-state.sh")
+SOURCE = pathlib.Path(__file__).resolve().parents[2] / "release/runtime/release-installation-docker.sh"
+STATE = SOURCE.with_name("release-installation-state.sh")
 PRODUCT = {
     "LEXIFLOW_PLATFORM": "linux/amd64",
     "LEXIFLOW_API_IMAGE": "api@sha256:fixed",

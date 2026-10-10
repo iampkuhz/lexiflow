@@ -6,14 +6,14 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { prepareImageBuild } from '../build.mjs';
+import { prepareImageBuild } from '../build/release-image-build-plan.mjs';
 import { jarBytes, makeZip } from './zip-fixture.mjs';
-import { resolveBuildIdentity } from '../version.mjs';
+import { resolveBuildIdentity } from '../integrity/source-build-identity.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const args = (f, descriptor = f.descriptor) => ({ repoRoot: f.root, artifactRoot: f.artifactRoot, descriptor });
 const hash = (value) => createHash('sha256').update(value).digest('hex');
-const templates = ['ops/docker/.dockerignore', 'ops/docker/Dockerfile', 'ops/docker/Dockerfile.postgres', 'ops/docker/bootstrap.sh', 'ops/docker/entrypoint.sh'];
+const templates = ['ops/docker/.dockerignore', 'ops/docker/Dockerfile', 'ops/docker/Dockerfile.postgres', 'ops/docker/initialize-postgres-app-role.sh', 'ops/docker/run-container-command.sh'];
 const lockPath = 'ops/docker/base-images.json';
 const lockImages = [
   { platform: 'linux/amd64', javaRuntime: { reference: `registry.example.invalid/java@sha256:${'a'.repeat(64)}`, imageId: `sha256:${'a'.repeat(64)}` }, postgresRuntime: { reference: `registry.example.invalid/postgres@sha256:${'b'.repeat(64)}`, imageId: `sha256:${'b'.repeat(64)}` } },
@@ -25,13 +25,14 @@ const git = (root, args, options = {}) => execFileSync('git', ['-C', root, ...ar
 async function fixture() {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-build-')));
   await mkdir(path.join(root, 'ops/release'), { recursive: true });
+  for (const directory of ['build', 'integrity', 'runtime']) await mkdir(path.join(root, 'ops/release', directory), { recursive: true });
   await mkdir(path.join(root, 'ops/docker'), { recursive: true });
   for (const relative of templates) {
     const source = path.join(repo, relative); const target = path.join(root, relative);
     await writeFile(target, await readFile(source));
   }
   await writeFile(path.join(root, lockPath), `${JSON.stringify({ schemaVersion: 1, baseImages: lockImages }, null, 2)}\n`);
-  for (const name of ['version.mjs', 'manifest.mjs']) await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repo, 'ops/release', name)));
+  for (const name of ['integrity/source-build-identity.mjs', 'integrity/release-artifact-manifest.mjs']) await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repo, 'ops/release', name)));
   await writeFile(path.join(root, 'ops/release/version.txt'), '2.0.0\n');
   await writeFile(path.join(root, '.gitignore'), '/artifact/\n');
   execFileSync('git', ['init', '-q', root], { timeout: 10_000 });
@@ -299,12 +300,12 @@ test('拒绝 artifact 根/父路径 symlink 与 clean 已提交模板 symlink', 
 test('拒绝clean tree中的ignored模板替身', async () => {
   const f = await fixture();
   try {
-    git(f.root, ['rm', '-q', 'ops/docker/bootstrap.sh']);
-    await writeFile(path.join(f.root, '.gitignore'), '/artifact/\n/ops/docker/bootstrap.sh\n');
+    git(f.root, ['rm', '-q', 'ops/docker/initialize-postgres-app-role.sh']);
+    await writeFile(path.join(f.root, '.gitignore'), '/artifact/\n/ops/docker/initialize-postgres-app-role.sh\n');
     git(f.root, ['add', '.gitignore']);
     git(f.root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'ignore removed template']);
     f.descriptor.sourceCommit = git(f.root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    await writeFile(path.join(f.root, 'ops/docker/bootstrap.sh'), 'ignored replacement\n');
+    await writeFile(path.join(f.root, 'ops/docker/initialize-postgres-app-role.sh'), 'ignored replacement\n');
     assert.equal(git(f.root, ['status', '--porcelain=v1', '--untracked-files=all'], { encoding: 'utf8' }).trim(), '');
     await assert.rejects(prepareImageBuild(args(f)), { message: 'TEMPLATE_INVALID' });
   } finally { await f.cleanup(); }

@@ -13,9 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from scripts.environment import test_services as services
-from scripts.verification import delivery_hook
-from tests.verification.test_fixture_e2e import _init_git_repo, _write_declarations
+from scripts.environment.services import isolated_postgres_redis as services
 
 ROOT = Path(__file__).resolve().parents[2]
 REQUIRED = set(services.SERVICES)
@@ -101,10 +99,6 @@ class TestManagedTestServices(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        (self.root / "harness").mkdir()
-        (self.root / services.POLICY_PATH).write_bytes(
-            (ROOT / services.POLICY_PATH).read_bytes()
-        )
         self.fake = FakePodman()
         patch = mock.patch.object(services, "_command", self.fake)
         patch.start()
@@ -121,49 +115,23 @@ class TestManagedTestServices(unittest.TestCase):
         self.assertEqual(1, len(paths))
         return json.loads(paths[0].read_text())
 
-    def test_dataset_import_profile_is_explicit_and_bounded(self):
-        with services.isolated_test_services(
-            self.root,
-            {"postgres-test-jdbc-url"},
-            self.messages.append,
-            postgres_profile="dataset-import",
-        ):
-            create = next(args for args, _ in self.fake.calls if args[0] == "create")
-            self.assertEqual("3072m", create[create.index("--memory") + 1])
-            self.assertEqual(
-                "/var/lib/postgresql/data:rw,size=2048m",
-                create[create.index("--tmpfs") + 1],
-            )
-        self.assertTrue(self.receipt()["cleanup_verified"])
-
-    def test_standard_profile_does_not_expand_default_tests(self):
+    def test_postgres_uses_only_bounded_limits_and_records_actual_capacity(self):
         with self.context({"postgres-test-jdbc-url"}):
             create = next(args for args, _ in self.fake.calls if args[0] == "create")
             self.assertEqual("512m", create[create.index("--memory") + 1])
             self.assertIn("/var/lib/postgresql/data:rw,size=256m", create)
+        resource = self.receipt()["resources"][0]
+        self.assertEqual(
+            resource["postgres_limits"], {"memory_mib": 512, "data_tmpfs_mib": 256}
+        )
+        self.assertNotIn("postgres_profile", resource)
+        self.assertTrue(self.receipt()["cleanup_verified"])
 
-    def test_unknown_profile_fails_before_podman(self):
-        with self.assertRaises(services.TestServicesError):
-            with services.isolated_test_services(
-                self.root, REQUIRED, self.messages.append, postgres_profile="unbounded"
-            ):
-                self.fail("unknown profile accepted")
-        self.assertFalse(self.fake.calls)
-
-    def test_invalid_profile_capacity_fails_before_podman(self):
-        policy = json.loads((self.root / services.POLICY_PATH).read_text())
-        policy["postgres_profiles"]["dataset-import"]["memory_mib"] = True
-        (self.root / services.POLICY_PATH).write_text(json.dumps(policy))
-        with self.assertRaises(services.TestServicesError):
-            with self.context():
-                self.fail("invalid capacity accepted")
-        self.assertFalse(self.fake.calls)
-
-    def test_unneeded_services_never_touch_podman_or_policy(self):
-        (self.root / services.POLICY_PATH).unlink()
+    def test_unneeded_services_never_touch_podman_or_create_receipts(self):
         with self.context(set()) as env:
             self.assertEqual({}, env)
         self.assertFalse(self.fake.calls)
+        self.assertFalse((self.root / "tmp").exists())
 
     def test_managed_endpoints_override_inherited_values_and_are_restored(self):
         inherited = {key: "private-canary" for key in services.ENV_KEYS.values()}
@@ -260,10 +228,39 @@ class TestManagedTestServices(unittest.TestCase):
                     pass
         self.assertFalse(any(args[0] == "create" for args, _ in self.fake.calls))
 
+    def test_all_fixed_images_are_inspected_before_any_resource_is_created(self):
+        with self.context():
+            pass
+        image_calls = [
+            (index, args[-1])
+            for index, (args, _) in enumerate(self.fake.calls)
+            if args[:2] == ["image", "inspect"]
+        ]
+        self.assertEqual(
+            ["docker.io/library/postgres:17", "docker.io/library/redis:7"],
+            [tag for _, tag in image_calls],
+        )
+        first_create = next(
+            index
+            for index, (args, _) in enumerate(self.fake.calls)
+            if args[0] == "create"
+        )
+        self.assertLess(max(index for index, _ in image_calls), first_create)
+
+    def test_missing_second_image_still_creates_no_resource(self):
+        def command(args, timeout=10, *, check=True):
+            if args[:2] == ["image", "inspect"] and args[-1].endswith("redis:7"):
+                return subprocess.CompletedProcess(args, 1, "", "missing redis")
+            return self.fake(args, timeout, check=check)
+
+        with mock.patch.object(services, "_command", side_effect=command):
+            with self.assertRaisesRegex(services.TestServicesError, "不自动 pull"):
+                with self.context():
+                    self.fail("must not yield without both local images")
+        self.assertFalse(any(args[0] == "create" for args, _ in self.fake.calls))
+        self.assertFalse((self.root / "tmp").exists())
+
     def test_readiness_deadline_cleans_all_created_resources(self):
-        policy = json.loads((self.root / services.POLICY_PATH).read_text())
-        policy["readiness_timeout_seconds"] = 1
-        (self.root / services.POLICY_PATH).write_text(json.dumps(policy))
         self.fake.not_ready = True
         clock = [0]
 
@@ -274,10 +271,41 @@ class TestManagedTestServices(unittest.TestCase):
             mock.patch.object(services.time, "monotonic", side_effect=lambda: clock[0]),
             mock.patch.object(services.time, "sleep", side_effect=sleep),
         ):
-            with self.assertRaisesRegex(services.TestServicesError, "1 秒内未就绪"):
+            with self.assertRaisesRegex(services.TestServicesError, "30 秒内未就绪"):
                 with self.context():
                     pass
         self.assertFalse(self.fake.resources)
+
+    def test_readiness_probe_and_sleep_share_the_thirty_second_deadline(self):
+        clock = [0.0]
+        probe_timeouts = []
+        sleep_durations = []
+
+        def command(args, timeout=10, *, check=True):
+            if args[0] == "exec":
+                probe_timeouts.append(timeout)
+                clock[0] += 29.5 if len(probe_timeouts) == 1 else timeout
+                return subprocess.CompletedProcess(args, 1, "", "not ready")
+            return self.fake(args, timeout, check=check)
+
+        def sleep(duration):
+            sleep_durations.append(duration)
+            clock[0] += duration
+
+        with (
+            mock.patch.object(services, "_command", side_effect=command),
+            mock.patch.object(services.time, "monotonic", side_effect=lambda: clock[0]),
+            mock.patch.object(services.time, "sleep", side_effect=sleep),
+        ):
+            with self.assertRaisesRegex(services.TestServicesError, "30 秒内未就绪"):
+                with self.context({"postgres-test-jdbc-url"}):
+                    self.fail("deadline must not yield")
+        self.assertEqual(30.0, clock[0])
+        self.assertEqual(3, probe_timeouts[0])
+        self.assertAlmostEqual(0.3, probe_timeouts[1])
+        self.assertTrue(all(0 <= duration <= 0.2 for duration in sleep_durations))
+        self.assertFalse(self.fake.resources)
+        self.assertTrue(self.receipt()["cleanup_verified"])
 
     def test_non_loopback_mapping_is_rejected_and_cleaned(self):
         self.fake.public_port = True
@@ -287,55 +315,61 @@ class TestManagedTestServices(unittest.TestCase):
         self.assertFalse(self.fake.resources)
 
     def test_hook_runs_daily_profile_without_exported_test_addresses(self):
+        from scripts.triggers import run_stop_checks as delivery_hook
+        from tests.verification.test_fixture_e2e import _init_git_repo
+
         _init_git_repo(self.root)
-        (self.root / ".gitignore").write_text("harness/\ntmp/\nfixture/\n")
+        (self.root / ".gitignore").write_text("config/\nscripts/\ntmp/\nfixture/\n")
         (self.root / "fixture").mkdir()
         (self.root / "fixture/check.py").write_text(
             "import os\nassert os.environ['LEXIFLOW_REDIS_TEST_ENDPOINT']=='127.0.0.1:56379'\n"
-            "print('{\"status\":\"PASS\",\"checks_run\":1,\"failures\":0,\"errors\":0,\"skipped\":0,\"reason\":\"\"}')\n"
+            'print(\'{"status":"PASS","checks_run":1,"failures":0,"errors":0,"skipped":0,"reason":""}\')\n'
         )
-        (self.root / "harness/delivery-hooks.json").write_bytes(
-            (ROOT / "harness/delivery-hooks.json").read_bytes()
+        (self.root / "scripts/verification/planning").mkdir(parents=True)
+        (self.root / "scripts/verification/planning/change_risk_assessment.py").write_bytes(
+            (ROOT / "scripts/verification/planning/change_risk_assessment.py").read_bytes()
         )
-        (self.root / "harness/agent-policy.manifest.yaml").write_bytes(
-            (ROOT / "harness/agent-policy.manifest.yaml").read_bytes()
+        (self.root / "config/engineering").mkdir(parents=True)
+        (self.root / "config/engineering/risk.yaml").write_text(
+            "high_risk_paths: [config/**]\nlocal_owner_roots: {lexicon: backend/product/lexicon/}\n"
         )
-        (self.root / "harness/ci-policy.yaml").write_text(
-            "formal_only_check_ids: [fixture.formal]\n"
-        )
-        _write_declarations(
-            self.root,
-            [
+        (self.root / "config/engineering/module-checks.yaml").write_text(
+            json.dumps(
                 {
-                    "check_id": "fixture." + scope,
-                    "module": scope,
-                    "command": ["python3", "fixture/check.py"],
-                    "executable": "python3",
-                    "cwd": ".",
-                    "timeout_seconds": 5,
-                    "scope": scope,
-                    "triggers": [{"path": ".gitignore"}],
-                    "input_paths": ["fixture/check.py"],
-                    "required_environment": sorted(REQUIRED),
+                    "checks": [
+                        {
+                            "check_id": "fixture.services",
+                            "command": ["python3", "fixture/check.py"],
+                            "timeout_seconds": 5,
+                            "input_paths": ["fixture/check.py"],
+                            "required_environment": sorted(REQUIRED),
+                            "scenarios": ["change-targeted", "repository-baseline"],
+                            "triggers": [{"path": ".gitignore"}],
+                            "module_dependencies": [],
+                        },
+                        {
+                            "check_id": "fixture.formal",
+                            "command": [
+                                "python3",
+                                "-c",
+                                "raise SystemExit('formal must not execute')",
+                            ],
+                            "timeout_seconds": 5,
+                            "input_paths": ["fixture/check.py"],
+                            "required_environment": [],
+                            "scenarios": ["change-targeted", "repository-baseline"],
+                            "triggers": [{"path": "formal-input"}],
+                            "module_dependencies": [],
+                        },
+                    ],
+                    "scenario_policy": {
+                        "ci_quick": {
+                            "always_required_check_ids": [],
+                            "formal_only_check_ids": ["fixture.formal"],
+                        }
+                    },
                 }
-                for scope in ("change-targeted", "repository-baseline")
-            ] + [
-                {
-                    "check_id": identifier,
-                    "module": identifier,
-                    "command": ["python3", "-c", "raise SystemExit('formal must not execute')"],
-                    "cwd": ".",
-                    "timeout_seconds": 5,
-                    "scope": scope,
-                    "triggers": [{"path": "formal-input"}],
-                    "input_paths": ["fixture/check.py"],
-                    "required_environment": [],
-                }
-                for identifier, scope in (
-                    ("fixture.formal", "repository-baseline"),
-                    ("fixture.formal-on-change", "change-targeted"),
-                )
-            ],
+            )
         )
         env = {
             k: v
@@ -352,28 +386,37 @@ class TestManagedTestServices(unittest.TestCase):
         self.assertNotIn("decision", output)
         reports = list((self.root / "tmp/quality/verification-reports").glob("*.json"))
         self.assertEqual(1, len(reports))
-        self.assertEqual("development-change", json.loads(reports[0].read_text())["scope"])
+        self.assertEqual(
+            "development-change", json.loads(reports[0].read_text())["scope"]
+        )
         self.assertTrue(self.receipt()["cleanup_verified"])
 
     def test_progress_distinguishes_gradle_pass_from_unexecuted_blocked(self):
-        report = {
-            "checks": [
-                {"check_id": "eng.backend.delivery", "status": "PASS", "reason": ""},
-                {
-                    "check_id": "eng.backend.delivery-on-change",
-                    "status": "BLOCKED",
-                    "reason": "missing-environment",
-                    "environment": {"missing": ["postgres-test-jdbc-url"]},
-                },
-            ]
-        }
-        stream = io.StringIO()
-        with contextlib.redirect_stderr(stream):
-            delivery_hook.report_progress(report)
-        self.assertIn(
-            "Java/Gradle deliveryFull [eng.backend.delivery] PASS", stream.getvalue()
-        )
-        self.assertIn("未执行，缺少 postgres-test-jdbc-url", stream.getvalue())
+        from scripts.triggers import run_stop_checks as delivery_hook
+
+        for status, reason, environment in (
+            ("PASS", "", {}),
+            ("BLOCKED", "missing-environment", {"missing": ["postgres-test-jdbc-url"]}),
+        ):
+            stream = io.StringIO()
+            report = {
+                "checks": [
+                    {
+                        "check_id": "eng.backend.delivery",
+                        "status": status,
+                        "reason": reason,
+                        "environment": environment,
+                    }
+                ]
+            }
+            with contextlib.redirect_stderr(stream):
+                delivery_hook.report_progress(report)
+            self.assertIn(
+                f"Java/Gradle deliveryFull [eng.backend.delivery] {status}",
+                stream.getvalue(),
+            )
+            if status == "BLOCKED":
+                self.assertIn("未执行，缺少 postgres-test-jdbc-url", stream.getvalue())
 
 
 class TestPodmanClientTimeout(unittest.TestCase):

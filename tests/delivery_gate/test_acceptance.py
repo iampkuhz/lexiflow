@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.delivery_gate.acceptance import verify_plan
-from scripts.delivery_gate.records import RecordError
+from scripts.acceptance.task_definition.task_acceptance_plan import verify_plan
+from scripts.acceptance.evidence.acceptance_record_store import RecordError
 from tests.delivery_gate.fixtures import DeliveryGateFixture
-from scripts.verification.declarations import load_declarations
+from scripts.verification.planning.check_definitions import load_declarations
 from tests.delivery_gate.fixtures import write_declarations
 
 
@@ -39,7 +39,7 @@ class TestTaskSubjectAcceptance(unittest.TestCase):
             verify_plan(self.fixture.root, self.submission)
 
     def test_policy_drift_fails(self):
-        policy = self.fixture.root / "harness/agent-policy.manifest.yaml"
+        policy = self.fixture.root / "config/engineering/risk.yaml"
         policy.write_bytes(policy.read_bytes() + b"\n")
         with self.assertRaises(RecordError):
             verify_plan(self.fixture.root, self.submission)
@@ -51,10 +51,12 @@ class TestTaskSubjectAcceptance(unittest.TestCase):
         try:
             catalog_path = fixture.root / "planning/workstreams.yaml"
             catalog = yaml.safe_load(catalog_path.read_text())
-            task = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"][0]
+            task = catalog["workstreams"][0]["epics"][0]["capabilities"][0][
+                "seed_tasks"
+            ][0]
             task["allowed_files"] = ["src/**"]
             catalog_path.write_text(yaml.safe_dump(catalog))
-            declaration_path = fixture.root / "harness/module-checks.yaml"
+            declaration_path = fixture.root / "config/engineering/module-checks.yaml"
             declarations = load_declarations(fixture.root)
             for check in declarations["checks"]:
                 check["input_paths"].append("src")
@@ -71,8 +73,12 @@ class TestTaskSubjectAcceptance(unittest.TestCase):
 
     def test_task_subject_metadata_tampering_fails(self):
         import copy
-        for field, value in (("task_paths", []), ("dependency_paths", ["unrelated.txt"]),
-                             ("selected_check_ids", [])):
+
+        for field, value in (
+            ("task_paths", []),
+            ("dependency_paths", ["unrelated.txt"]),
+            ("selected_check_ids", []),
+        ):
             with self.subTest(field=field):
                 tampered = copy.deepcopy(self.submission)
                 tampered["task_subject"][field] = value

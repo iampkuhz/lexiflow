@@ -105,7 +105,7 @@ endlegend
 | 内容 | 唯一真源／维护入口 |
 | --- | --- |
 | 工作范围、身份、风险、Git 与结果规则 | [AGENTS.md](../AGENTS.md)、[Harness](../harness/README.md) |
-| 文档原则与图源制作合同 | [documentation-policy](../harness/documentation-policy.yaml) |
+| 文档原则与图源制作合同 | [documentation-policy](../harness/documentation-policy.md) |
 | 产品与领域长期不变量 | [OpenSpec 产品架构规范](../openspec/specs/product-architecture/spec.md) |
 | 执行流程／优化任务 | [执行场景](scenarios/run-repository-gates.md)／[优化场景](scenarios/optimize-repository-gates.md)；优化页引用执行页，不复制子流程 |
 | 脚本实际行为与文件职责 | 源码与直接测试；[Scripts 索引](reference/scripts.md) |

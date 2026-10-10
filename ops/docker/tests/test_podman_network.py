@@ -14,7 +14,7 @@ class NetworkTest(unittest.TestCase):
 
     def test_runtime_total_budget_and_environment_proxy_bypass(self):
         self.node(r'''
-import {runtime} from './ops/podman/doctor.mjs';import http from 'node:http';import assert from 'node:assert/strict';
+import {runtime} from './ops/podman/commands/diagnose-podman-installation.mjs';import http from 'node:http';import assert from 'node:assert/strict';
 process.env.HTTP_PROXY='http://127.0.0.1:1';process.env.HTTPS_PROXY=process.env.HTTP_PROXY;process.env.ALL_PROXY=process.env.HTTP_PROXY;process.env.NODE_USE_ENV_PROXY='1';
 let hang=false;const server=http.createServer((req,res)=>{
  if(hang)return;
@@ -29,7 +29,7 @@ try{
 
     def test_malformed_or_aborted_response_is_rejected(self):
         self.node(r'''
-import {runtime} from './ops/podman/doctor.mjs';import http from 'node:http';import assert from 'node:assert/strict';
+import {runtime} from './ops/podman/commands/diagnose-podman-installation.mjs';import http from 'node:http';import assert from 'node:assert/strict';
 const server=http.createServer((req,res)=>{res.writeHead(200,{'Content-Length':'100'});res.write('{');setTimeout(()=>res.destroy(),10);});
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 try{await assert.rejects(runtime(server.address().port,'0.1.0',300));}

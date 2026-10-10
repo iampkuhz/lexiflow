@@ -1,6 +1,6 @@
 *
 !Dockerfile
-!entrypoint.sh
+!run-container-command.sh
 !lexiflow-api.jar
 !Dockerfile.postgres
-!bootstrap.sh
+!initialize-postgres-app-role.sh

@@ -43,9 +43,9 @@ API、页面聚合诊断与 service worker 的观察方法见[扩展 E2E 与诊�
 
 ## 1.4. Agent 尚未完成或收到重复 callback
 
-先绑定明确 run/Task/Session，不扫描“最新”日志猜归属。STARTING、未知占用和 observation timeout 不构成重派许可。新派发只用 Codex 原生协作事件。Qoder 仅核对既有运行，在 AWAITING_CALLBACK 时结束当前轮，不 start/resume 或重派。
+先绑定明确工作包、run、Task 与真实 actor，不扫描“最新”日志猜归属。派发与终态以 Codex 原生协作工具返回为准；未知运行或等待超时不构成重派许可。
 
-匹配终态 callback 后核对事实，再显式 ack；已 ack/superseded 的重复事件直接结束。调度失败、执行失败、验收失败分别计数和处理，不改 Task identity 重置预算。详见 [Agent workflow](../scenarios/delegate-work.md)与[身份/事实](../scenarios/delegate-work/identity.md)。
+收到匹配原生终态后重核冻结工作包、来源与产物；重复事件不重复执行。派发失败、执行失败、验收失败按实际失败层处理，不改 Task identity 重置预算。详见 [Agent workflow](../scenarios/delegate-work.md)。
 
 ## 1.5. 记录并回到流程
 
@@ -58,6 +58,6 @@ API、页面聚合诊断与 service worker 的观察方法见[扩展 E2E 与诊�
 | 本次改动跑哪个？ | 从真实 diff 选择开发检查，见[编码后执行门禁](../scenarios/run-repository-gates.md)；Formal 要求另走[交付验收体系](../system/delivery-acceptance.md)。 |
 | Stop 通过就等于验收吗？ | 不等于。Stop 执行开发检查；Task 的独立性、证据和批准由[交付验收体系](../system/delivery-acceptance.md)判断。 |
 | 独立 validation 会重复造一套引擎吗？ | 不会；它复用[质量检查体系](../system/quality-checks.md)的检查能力，review 与 receipt 核对则消费冻结证据。 |
-| `scripts/repository/` 管什么？ | 仓库文档、策略合同、Catalog 与脚本质量等工程治理，不是产品业务；按职责查[脚本索引](scripts.md)。 |
-| `scripts/delivery_gate/` 包含什么、不包含什么？ | 它实现正式送验、独立验证、review 与条件核对；不代表所有检查能力，也不另建质量检查引擎，见[交付验收体系](../system/delivery-acceptance.md)。 |
+| `scripts/checks/repository/` 管什么？ | 仓库文档、策略合同、Catalog 与脚本质量等工程治理，不是产品业务；按职责查[脚本索引](scripts.md)。 |
+| `scripts/acceptance/` 包含什么、不包含什么？ | 它实现正式送验、独立验证、review 与条件核对；不代表所有检查能力，也不另建质量检查引擎，见[交付验收体系](../system/delivery-acceptance.md)。 |
 | 直接命令为何 BLOCKED，或为什么 diff 范围比预期大？ | 缺少 `required_environment` 时是环境阻断，不是断言失败；开发检查按真实完整 diff 与依赖闭包选择，不用预期路径缩小范围。见[隔离环境](../scenarios/verification-environment.md)与[质量检查体系](../system/quality-checks.md)。 |

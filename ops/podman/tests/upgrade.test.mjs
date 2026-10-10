@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { activatePreparedTarget } from '../unified-local.mjs';
-import { treeDigest, verifyExtension, installationRecord, publishRecord } from '../upgrade.mjs';
-import { versionSummary } from '../versions.mjs';
+import { activatePreparedTarget } from '../installation/installation-upgrade-workflow.mjs';
+import { treeDigest, verifyExtension, installationRecord, publishRecord } from '../installation/installation-update-transaction.mjs';
+import { versionSummary } from '../installation/installation-version-summary.mjs';
 
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const identity = n => ({ schemaVersion: 1, baseVersion: '2.0.0-SNAPSHOT', softwareVersion: `2.0.0-SNAPSHOT.20261006.g${n.repeat(7)}`,

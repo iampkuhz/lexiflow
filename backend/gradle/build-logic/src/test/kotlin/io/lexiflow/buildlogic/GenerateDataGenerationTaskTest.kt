@@ -14,7 +14,7 @@ class GenerateDataGenerationTaskTest {
     @TempDir lateinit var directory: File
 
     private fun task(scriptBody: String): GenerateDataGenerationTask {
-        File(directory, "ops/dataset/generation-version.mjs").apply {
+        File(directory, "ops/dataset/dataset-generation-identity.mjs").apply {
             parentFile.mkdirs()
             writeText(scriptBody)
         }

@@ -8,14 +8,14 @@ from unittest.mock import patch
 
 import yaml
 
-from scripts.delivery_gate.acceptance import verify_plan
-from scripts.delivery_gate.check import check_conditions
-from scripts.delivery_gate.candidate import CandidateProofError, _extract
-from scripts.delivery_gate.consume import consume_existing_pass
-from scripts.delivery_gate.records import RecordError, load_submission
-from scripts.delivery_gate.review import ReviewError, review
-from scripts.delivery_gate.submit import submit
-from scripts.delivery_gate.validate import ValidationError, validate_batch
+from scripts.acceptance.task_definition.task_acceptance_plan import verify_plan
+from scripts.acceptance.task_operations.evaluate_task_acceptance import check_conditions
+from scripts.acceptance.evidence.verify_candidate_acceptance_evidence import CandidateProofError, _extract
+from scripts.acceptance.evidence.verify_existing_acceptance_chain import consume_existing_pass
+from scripts.acceptance.evidence.acceptance_record_store import RecordError, load_submission
+from scripts.acceptance.task_operations.record_independent_task_review import ReviewError, review
+from scripts.acceptance.task_operations.submit_task_for_acceptance import submit
+from scripts.acceptance.task_operations.run_independent_task_validation import ValidationError, validate_batch
 from scripts.verification import freeze_inputs, persist_report, verify_profile
 from tests.delivery_gate.fixtures import (
     DeliveryGateFixture,
@@ -24,7 +24,7 @@ from tests.delivery_gate.fixtures import (
     TASK_ID,
     make_mock_runtime,
 )
-from scripts.verification.declarations import load_declarations
+from scripts.verification.planning.check_definitions import load_declarations
 from tests.delivery_gate.fixtures import write_declarations
 
 
@@ -39,7 +39,7 @@ class RiskAcceptanceTest(unittest.TestCase):
         task["allowed_files"] = ["docs/user/**"]
         task["file_claims"] = [{"path": "docs/user/**"}]
         path.write_text(yaml.safe_dump(catalog))
-        path = root / "harness/module-checks.yaml"
+        path = root / "config/engineering/module-checks.yaml"
         checks = load_declarations(root)
         for check in checks["checks"]:
             if check["check_id"].startswith("fixture.") and check["check_id"] in {
@@ -54,6 +54,26 @@ class RiskAcceptanceTest(unittest.TestCase):
         self.f._git("commit", "-m", "local contract fixture")
         self.f.write("docs/user/help.md", "清楚的说明。\n")
 
+    def test_acceptance_levels_are_implementation_owned_without_policy_reads(self):
+        from scripts.acceptance.task_definition.task_acceptance_plan import acceptance_plan
+        from scripts.verification.planning.change_risk_assessment import RISK_LEVELS, INDEPENDENT_REVIEW_LEVELS, RISK_ASSESSMENT_SCHEMA
+
+        for level in RISK_LEVELS:
+            with self.subTest(level=level), patch(
+                "pathlib.Path.read_bytes",
+                side_effect=AssertionError("human rules must not be machine inputs"),
+            ):
+                plan = acceptance_plan(
+                    self.f.root,
+                    {"schema_version": RISK_ASSESSMENT_SCHEMA, "level": level, "coverage_gaps": [], "required_check_ids": []},
+                    {"required_check_ids": []},
+                )
+            self.assertTrue(plan["validator_independent"])
+            self.assertEqual(
+                ["TASK_VALIDATION"] + (["INDEPENDENT_REVIEW"] if level in INDEPENDENT_REVIEW_LEVELS else []),
+                plan["required_layers"],
+            )
+
     def _submit(self):
         freeze = freeze_inputs(
             self.f.root, verification_scope="development-change", base="HEAD"
@@ -63,14 +83,13 @@ class RiskAcceptanceTest(unittest.TestCase):
         self.assertEqual("PASS", report["result"], report)
         persist_report(self.f.root, report)
         with patch(
-            "scripts.agents.local_codex_runtime.discover",
+            "scripts.agents.identity.codex_actor_identity.discover",
             return_value=make_mock_runtime(PRODUCER_SESSION),
         ):
             result = submit(
                 self.f.root,
                 task_id=TASK_ID,
                 change_report_id=report["run_id"],
-                confirm_scope_report_id=report["run_id"],
             )
         self.assertEqual("PASS", result["result"])
         return result["submission_id"]
@@ -83,13 +102,13 @@ class RiskAcceptanceTest(unittest.TestCase):
             ["TASK_VALIDATION"], submission["acceptance_plan"]["required_layers"]
         )
         with patch(
-            "scripts.agents.local_codex_runtime.discover",
+            "scripts.agents.identity.codex_actor_identity.discover",
             return_value=make_mock_runtime(PRODUCER_SESSION),
         ):
             with self.assertRaisesRegex(ValidationError, "self-validation-forbidden"):
                 validate_batch(self.f.root, submission_ids=[sid])[0]
         with patch(
-            "scripts.agents.local_codex_runtime.discover",
+            "scripts.agents.identity.codex_actor_identity.discover",
             return_value=make_mock_runtime(VALIDATOR_SESSION),
         ):
             validation = validate_batch(self.f.root, submission_ids=[sid])[0]
@@ -99,7 +118,6 @@ class RiskAcceptanceTest(unittest.TestCase):
                 self.f.root,
                 validation_id=validation["validation_id"],
                 findings=[],
-                decision="PASS",
             )
         checked = check_conditions(self.f.root, submission_id=sid)
         self.assertEqual("PASS", checked["result"], checked)
@@ -117,7 +135,7 @@ class RiskAcceptanceTest(unittest.TestCase):
         sid = self._submit()
         self.f.write("unrelated.txt", "not part of frozen dependency closure\n")
         with patch(
-            "scripts.agents.local_codex_runtime.discover",
+            "scripts.agents.identity.codex_actor_identity.discover",
             return_value=make_mock_runtime(VALIDATOR_SESSION),
         ):
             validation = validate_batch(self.f.root, submission_ids=[sid])[0]
@@ -130,11 +148,16 @@ class RiskAcceptanceTest(unittest.TestCase):
         path = self.f.root / "planning/workstreams.yaml"
         catalog = yaml.safe_load(path.read_text())
         task = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"][0]
-        ci = yaml.safe_load((self.f.root / "harness/ci-policy.yaml").read_text())
-        release_id = ci["formal_only_check_ids"][0]
+        module_path = self.f.root / "config/engineering/module-checks.yaml"
+        declaration = yaml.safe_load(module_path.read_text())
+        release_id = "eng.release.candidate-runtime"
+        declaration["scenario_policy"]["ci_quick"]["formal_only_check_ids"] = [
+            release_id
+        ]
+        module_path.write_text(yaml.safe_dump(declaration))
         task["required_check_ids"].append(release_id)
         path.write_text(yaml.safe_dump(catalog))
-        self.f._git("add", "planning/workstreams.yaml")
+        self.f._git("add", "planning/workstreams.yaml", "config/engineering/module-checks.yaml")
         self.f._git("commit", "-m", "release requirement fixture")
         sid = self._submit()
         submission = load_submission(self.f.root, sid)
@@ -147,7 +170,7 @@ class RiskAcceptanceTest(unittest.TestCase):
             {item["check_id"] for item in submission["verification_freeze"]["checks"]},
         )
         with patch(
-            "scripts.agents.local_codex_runtime.discover",
+            "scripts.agents.identity.codex_actor_identity.discover",
             return_value=make_mock_runtime(VALIDATOR_SESSION),
         ):
             validation = validate_batch(self.f.root, submission_ids=[sid])[0]

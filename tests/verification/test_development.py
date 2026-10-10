@@ -8,17 +8,16 @@ import json
 import unittest
 from unittest.mock import patch
 
-import yaml
-from scripts.verification.declarations import load_declarations
+from scripts.verification.planning.check_definitions import load_declarations
 from tests.verification.declaration_fixtures import write_declarations
 
-from scripts.delivery_gate.acceptance import acceptance_plan
-from scripts.verification.development import (
+from scripts.acceptance.task_definition.task_acceptance_plan import acceptance_plan
+from scripts.verification.commands.run_development_checks import (
     prepare_development,
     execute_development,
     main,
 )
-from scripts.verification.scenarios import freeze_inputs
+from scripts.verification.execution.check_plan_runner import freeze_inputs
 from tests.delivery_gate.fixtures import DeliveryGateFixture
 
 
@@ -27,39 +26,46 @@ class DevelopmentTest(unittest.TestCase):
         self.f = DeliveryGateFixture()
         self.addCleanup(self.f.cleanup)
 
-    def test_unknown_engineering_diff_uses_daily_targeted_view_without_formal_runtime(self):
+    def test_unknown_engineering_diff_uses_daily_targeted_view_without_formal_runtime(
+        self,
+    ):
         self.f.write("src/test.py", "source subject\n")
         prepared = prepare_development(self.f.root)
         self.assertEqual("high-risk-engineering", prepared["risk_assessment"]["level"])
         self.assertEqual(
-            ["development-change"],
-            [item["verification_scope"] for item in prepared["frozen_profiles"]],
+            "development-change",
+            prepared["frozen_profile"]["verification_scope"],
         )
         actual = execute_development(self.f.root, prepared=prepared)
         self.assertEqual("PASS", actual["result"], actual)
-        self.assertEqual(1, len(actual["reports"]))
+        self.assertIsInstance(actual["report"], dict)
         self.assertFalse(actual["formal_receipt_issued"])
-        for report in actual["reports"]:
+        for report in [actual["report"]]:
             self.assertNotEqual("repository-baseline", report["scope"])
             self.assertFalse(
                 any("release" in check["check_id"] for check in report["checks"])
             )
 
     def test_plain_user_document_is_single_view_and_unrelated_write_is_allowed(self):
-        path = self.f.root / "harness/module-checks.yaml"
+        path = self.f.root / "config/engineering/module-checks.yaml"
         declarations = load_declarations(self.f.root)
         for check in declarations["checks"]:
             if check["check_id"] in {"fixture.change", "fixture.baseline"}:
-                check["triggers"].append({"path": "docs/user/"})
+                if "change-targeted" in check["scenarios"]:
+                    check["triggers"].append({"path": "docs/user/"})
                 check["input_paths"].append("docs/user")
-        write_declarations(path, declarations["checks"])
+        write_declarations(
+            path,
+            declarations["checks"],
+            ci_quick=declarations["scenario_policy"]["ci_quick"],
+        )
         self.f.write("docs/user/help.md", "原说明。\n")
         self.f._git("add", ".")
         self.f._git("commit", "-m", "user docs fixture")
         self.f.write("docs/user/help.md", "普通说明。\n")
         prepared = prepare_development(self.f.root)
         self.assertEqual("local-function", prepared["risk_assessment"]["level"])
-        self.assertEqual(1, len(prepared["frozen_profiles"]))
+        self.assertIsInstance(prepared["frozen_profile"], dict)
         self.f.write("unrelated.txt", "unrelated\n")
         actual = execute_development(self.f.root, prepared=prepared)
         self.assertEqual("PASS", actual["result"], actual)
@@ -77,10 +83,10 @@ class DevelopmentTest(unittest.TestCase):
 
         prepared = prepare_development(self.f.root)
         self.assertEqual("high-risk-engineering", prepared["risk_assessment"]["level"])
-        self.assertEqual(["development-change"], [
-            profile["verification_scope"] for profile in prepared["frozen_profiles"]
-        ])
-        changed = prepared["frozen_profiles"][0]["changed_files"]
+        self.assertEqual(
+            "development-change", prepared["frozen_profile"]["verification_scope"]
+        )
+        changed = prepared["frozen_profile"]["changed_files"]
         self.assertEqual(["src/deleted.py", "src/untracked.py"], changed)
 
     def test_uncovered_unknown_path_blocks_daily_preparation(self):
@@ -110,27 +116,31 @@ class DevelopmentTest(unittest.TestCase):
         self.f.write("src/test.py", "source\n")
         prepared = prepare_development(self.f.root)
         prepared["risk_assessment"]["level"] = "mechanical"
-        with patch("scripts.verification.verify_profiles") as execute:
+        with patch("scripts.verification.verify_profile") as execute:
             result = execute_development(self.f.root, prepared=prepared)
         self.assertEqual("FAIL", result["result"])
         execute.assert_not_called()
 
     def test_formal_runtime_selectors_are_excluded_only_from_daily_freeze(self):
-        declarations_path = self.f.root / "harness/module-checks.yaml"
+        declarations_path = self.f.root / "config/engineering/module-checks.yaml"
         declarations = load_declarations(self.f.root)
         api_paths = ["backend/product/api/src/main/java/example/Api.java"]
         lexicon_paths = ["backend/product/lexicon/src/main/java/example/Entry.java"]
         for check in declarations["checks"]:
             if check["check_id"] in {
                 "fixture.change",
-                "eng.release.lifecycle-runtime-on-change",
-                "eng.release.candidate-runtime-on-change",
+                "eng.release.lifecycle-runtime",
+                "eng.release.candidate-runtime",
             }:
                 check["triggers"] = [
                     {"path": path.rsplit("/", 1)[0] + "/"}
                     for path in api_paths + lexicon_paths
                 ]
-        write_declarations(declarations_path, declarations["checks"])
+        write_declarations(
+            declarations_path,
+            declarations["checks"],
+            ci_quick=declarations["scenario_policy"]["ci_quick"],
+        )
 
         frozen = freeze_inputs(
             self.f.root,
@@ -141,8 +151,8 @@ class DevelopmentTest(unittest.TestCase):
         self.assertEqual("PASS", frozen["result"], frozen)
         selected = {check["check_id"] for check in frozen["checks"]}
         self.assertIn("fixture.change", selected)
-        self.assertNotIn("eng.release.lifecycle-runtime-on-change", selected)
-        self.assertNotIn("eng.release.candidate-runtime-on-change", selected)
+        self.assertNotIn("eng.release.lifecycle-runtime", selected)
+        self.assertNotIn("eng.release.candidate-runtime", selected)
 
         high_risk = {
             "schema_version": "lexiflow.risk-assessment.v1",

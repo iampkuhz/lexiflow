@@ -91,7 +91,7 @@ Node 发布工具通过 `version.mjs` 读取、校验版本；Gradle 配置阶�
 
 本机 Podman 的部署 tag 只消费基础版本并转为小写，例如 `2.0.0-snapshot`；不得消费上述完整展示版本、commit、未提交摘要、构建 ID 或安装 ID。API 与受管 PostgreSQL 各占一个同版本镜像槽位，启动记录绑定实际 image ID；完整构建身份仍由内嵌资源和 label 核验。一次性来源工具不保留部署 tag 或 idle 镜像。明确安装/升级须先核验并删除同版本的本安装容器和精确镜像 tag 再准备新制品，保留数据卷及账号；其他安装引用或未知归属阻断。删除旧镜像后的失败只能保留数据并向前重试，不承诺同版本二进制回退。正式发行清单的不可变 digest 和晋升资格合同不变。
 
-源码调试允许工作区改动；显式 `-Prelease=true` 的 Gradle 构建在执行阶段调用 `node ops/release/version.mjs --release` 核对真实 Git 根、有效 HEAD，以及包括未跟踪文件的工作区/暂存区清洁状态。Git 不可用、空仓库或脏输入都拒绝，忽略的本机运行产物不当成发行源码；错误仅给固定原因，不打印私有文件名。Gradle 随后消费默认 Node 接口的完整身份 JSON，并核对资格摘要与完整身份的版本、commit 一致且输入清洁；资格摘要不能替代 JAR 内的完整身份。检查不创建 tag、不提交、不上传。此处只证明发行输入资格，不代替后续许可、制品清单或 Docker 验收。
+源码调试允许工作区改动；显式 `-Prelease=true` 的 Gradle 构建在执行阶段调用 `node ops/release/integrity/source-build-identity.mjs --release` 核对真实 Git 根、有效 HEAD，以及包括未跟踪文件的工作区/暂存区清洁状态。Git 不可用、空仓库或脏输入都拒绝，忽略的本机运行产物不当成发行源码；错误仅给固定原因，不打印私有文件名。Gradle 随后消费默认 Node 接口的完整身份 JSON，并核对资格摘要与完整身份的版本、commit 一致且输入清洁；资格摘要不能替代 JAR 内的完整身份。检查不创建 tag、不提交、不上传。此处只证明发行输入资格，不代替后续许可、制品清单或 Docker 验收。
 
 版本模块的 `check.mjs` 运行真实 Node 单测，并拒绝零测试、缺失结果、跳过、取消和失败；不以退出零直接判断通过。OPS-2003 的最小接线包括独立 release-version Check 的双 scope 声明、版本文件到后端的触发与冻结输入，以及声明回归测试；父代理集成 Harness 部分，不把 Node 测试塞进产品 Java 模块。QLT-2004 继续负责后续完整 Docker/发布验收入口，不等待它才验证版本基础。
 
@@ -103,7 +103,7 @@ Node 发布工具通过 `version.mjs` 读取、校验版本；Gradle 配置阶�
 
 #### 1.6.3.1. 扩展构建与 ZIP 合同
 
-`extension/manifest.json` 仅是无版本模板，私有 npm 工程及根 lock 元数据不再单独维护产品版本。普通构建和打包均调用统一 `ops/release/version.mjs`，生成 manifest 的 version；构建脚本不再允许版本覆盖参数。调试仍可显式选择本机端口，发行包固定 `http://127.0.0.1:18080/*`，不能把测试端口或远程地址带给使用者。
+`extension/manifest.json` 仅是无版本模板，私有 npm 工程及根 lock 元数据不再单独维护产品版本。普通构建和打包均调用统一 `ops/release/integrity/source-build-identity.mjs`，生成 manifest 的 version；构建脚本不再允许版本覆盖参数。调试仍可显式选择本机端口，发行包固定 `http://127.0.0.1:18080/*`，不能把测试端口或远程地址带给使用者。
 
 `npm --prefix extension run package` 在核对干净 Git 输入后重新构建，不能打包此前残留的 dist；完成后再次核对版本及源码身份。ZIP 使用锁定的构建期 ZIP 库，按固定顺序、固定 ZIP 时间与压缩参数生成，相同输入的字节及 SHA-256 一致；不手写归档格式，也不要求使用者安装打包工具。
 
@@ -111,7 +111,7 @@ Node 发布工具通过 `version.mjs` 读取、校验版本；Gradle 配置阶�
 
 输出位于 ignored `tmp/releases/<软件版本>/<源码提交>/`，包含 `lexiflow-extension-<版本>.zip` 和对应 `.sha256`，标准输出给出软件版本、源码提交、文件名、字节数与摘要供后续发布清单消费。重复运行相同内容可复用；同一路径已有不同内容则拒绝，不删除或覆盖旧制品。输出不等于上传商店或公开发布。
 
-自动消费描述符使用 `npm --silent --prefix extension run package`，避免 npm 自身的启动横幅；也可从仓库根直接执行 `node extension/scripts/release.mjs`。两者使用同一正式入口，不支持绕过干净源码检查或覆盖版本。
+自动消费描述符使用 `npm --silent --prefix extension run package`，避免 npm 自身的启动横幅；也可从仓库根直接执行 `node extension/scripts/packaging/package-extension-release.mjs`。两者使用同一正式入口，不支持绕过干净源码检查或覆盖版本。
 
 直接测试覆盖版本生成、manifest/权限、ZIP 准确文件集合与字节、确定性、摘要、缺文件和符号链接，以及拒绝错误或脏发行输入。既有合成浏览器回归从同一打包函数产生的 ZIP 解包加载扩展；仅在临时测试副本调整到隔离 API，不更改发行包权限，不把合成页面结果称为真实 YouTube 验收。
 
@@ -136,14 +136,14 @@ Node 发布工具通过 `version.mjs` 读取、校验版本；Gradle 配置阶�
 构建机从仓库根调用以下固定参数入口：
 
 ```sh
-node ops/release/package.mjs \
+node ops/release/build/package-release-artifacts.mjs \
   --source-repo /absolute/clean-source \
   --descriptor-file /absolute/release-input.json \
   --artifact-root /absolute/prebuilt-artifacts \
   --output-directory /absolute/output/release
 ```
 
-描述符顶层字段为 `schemaVersion`、`softwareVersion`、`sourceCommit`、`apiContract`、`sqlVersion`、`dataset`、`platforms`、`artifacts`、`licenses`；严格字段和合成样例见 `ops/release/manifest.mjs` 与 `ops/release/tests/manifest.test.mjs`。装配过程不修改源码、描述符或制品。
+描述符顶层字段为 `schemaVersion`、`softwareVersion`、`sourceCommit`、`apiContract`、`sqlVersion`、`dataset`、`platforms`、`artifacts`、`licenses`；严格字段和合成样例见 `ops/release/integrity/release-artifact-manifest.mjs` 与 `ops/release/tests/manifest.test.mjs`。装配过程不修改源码、描述符或制品。
 
 `eng.release.manifest` 运行真实清单测试，冻结清单、装配入口、直接测试、版本读取器和许可说明；零测试、跳过、失败或输出不完整都不能 PASS。
 
@@ -168,7 +168,7 @@ node ops/release/package.mjs \
 
 #### 1.6.5.2. ECDICT 精简来源输入
 
-离线来源生成器使用锁定提交与文件摘要的 ECDICT 基础版 `ecdict.csv`，不把全量词库随机或按字母序截成固定数量；达不到预期体积也不得额外截断。目标是保守精简约三分之一，而非硬配额；有 `bnc/frq` 正排名、Oxford、Collins 或考试标记的候选受保护。无上述标记时，仅按纯专名、纯冷门机构缩写、已验证原型词形覆盖的重复记录，以及全部释义明确属于选定冷僻领域的记录作有据剔除；混合普通义项或不能判断的保留。连字符、网络来源、长度或缺音标本身不构成删除理由。
+离线来源生成器只消费已提取且提交与文件摘要锁定的 ECDICT 基础版 `ecdict.csv`；必需显式 `--generation-code-version`，不接受 tar、不以自动 Node 调用补填 codeVersion，不把全量词库随机或按字母序截成固定数量；达不到预期体积也不得额外截断。目标是保守精简约三分之一，而非硬配额；有 `bnc/frq` 正排名、Oxford、Collins 或考试标记的候选受保护。无上述标记时，仅按纯专名、纯冷门机构缩写、已验证原型词形覆盖的重复记录，以及全部释义明确属于选定冷僻领域的记录作有据剔除；混合普通义项或不能判断的保留。连字符、网络来源、长度或缺音标本身不构成删除理由。
 
 基础词集合与词形覆盖不能因精简丢失；既有受审查中文映射使用锁定完整源中的精确原记录，逐条记录来源文件与原始行号，不把补充来源伪装成基础版原文。每次生成提供保留/剔除计数与可追溯原因，完整明细留在本次 ignored 输出目录，不包含用户观看数据。
 
@@ -282,8 +282,8 @@ Compose 只装配 PostgreSQL、一次性资料初始化和 API，所有镜像均
 发行构建机使用固定命令串联两个步骤；普通安装使用者不执行这些命令，也不需要 Node。
 
 ```sh
-node ops/release/pipeline.mjs images /absolute/images-request.json
-node ops/release/pipeline.mjs assemble /absolute/assemble-request.json
+node ops/release/workflow/run-release-build-pipeline.mjs images /absolute/images-request.json
+node ops/release/workflow/run-release-build-pipeline.mjs assemble /absolute/assemble-request.json
 ```
 
 在各自匹配的平台构建机执行一次 `images`，固定两份候选摘要并完成受控交接后，才填写并执行 `assemble`。两个请求都是普通 JSON 文件，最大 2,000,000 字节，文件及祖先不能是符号链接；路径必须绝对。命令拒绝未知模式、额外参数和自定义 runner/argv，不执行 shell 字符串。

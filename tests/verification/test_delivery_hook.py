@@ -16,14 +16,15 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from scripts.verification import delivery_hook as hook
-from tests.verification.test_fixture_e2e import _init_git_repo, _write_declarations
+from scripts.triggers import run_stop_checks as hook
+from tests.verification.test_fixture_e2e import _init_git_repo
+from tests.verification.declaration_fixtures import write_declarations
 
 ROOT = Path(__file__).resolve().parents[2]
-ENTRY = ROOT / "scripts/verification/delivery_hook.py"
+ENTRY = ROOT / "scripts/triggers/run_stop_checks.py"
 EVENT = {"hook_event_name": "Stop", "stop_hook_active": False}
 MARKER = "<!-- lexiflow:intermediate -->"
-COMPLETE_OUTPUT = "\nprint('{\"status\":\"PASS\",\"checks_run\":1,\"failures\":0,\"errors\":0,\"skipped\":0,\"reason\":\"\"}')\n"
+COMPLETE_OUTPUT = '\nprint(\'{"status":"PASS","checks_run":1,"failures":0,"errors":0,"skipped":0,"reason":""}\')\n'
 
 
 class DeliveryHookTest(unittest.TestCase):
@@ -31,15 +32,10 @@ class DeliveryHookTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        (self.root / "harness").mkdir()
-        self.policy = self.root / hook.POLICY_PATH
-        self.policy.write_bytes((ROOT / hook.POLICY_PATH).read_bytes())
-        (self.root / "harness/agent-policy.manifest.yaml").write_bytes(
-            (ROOT / "harness/agent-policy.manifest.yaml").read_bytes()
-        )
-        (self.root / "harness/ci-policy.yaml").write_text(
-            "formal_only_check_ids: [fixture.formal]\n"
-        )
+        for relative in ("config/engineering/risk.yaml", "scripts/verification/planning/change_risk_assessment.py"):
+            target = self.root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((ROOT / relative).read_bytes())
         patch = mock.patch.dict(os.environ, {"LEXIFLOW_DELIVERY_HOOK_DISABLE": "0"})
         patch.start()
         self.addCleanup(patch.stop)
@@ -50,7 +46,7 @@ class DeliveryHookTest(unittest.TestCase):
 
     def fixture(self, body="pass", environment=None):
         _init_git_repo(self.root)
-        (self.root / ".gitignore").write_text("harness/\ntmp/\nfixture/\n")
+        (self.root / ".gitignore").write_text("config/\nscripts/\ntmp/\nfixture/\n")
         (self.root / "fixture").mkdir()
         (self.root / "fixture/check.py").write_text(body + COMPLETE_OUTPUT)
         (self.root / "initial.txt").write_text("changed")
@@ -59,7 +55,6 @@ class DeliveryHookTest(unittest.TestCase):
             checks.append(
                 {
                     "check_id": "fixture." + scope,
-                    "module": scope,
                     "command": ["python3", "fixture/check.py"],
                     "executable": "python3",
                     "cwd": ".",
@@ -77,10 +72,7 @@ class DeliveryHookTest(unittest.TestCase):
         formal = [
             {
                 "check_id": identifier,
-                "module": identifier,
-                "scope": "change-targeted"
-                if identifier.endswith("on-change")
-                else "repository-baseline",
+                "scope": "repository-baseline",
                 "command": [
                     sys.executable,
                     "-c",
@@ -91,9 +83,20 @@ class DeliveryHookTest(unittest.TestCase):
                 "triggers": [{"path": "formal-input"}],
                 "input_paths": ["initial.txt"],
             }
-            for identifier in ("fixture.formal", "fixture.formal-on-change")
+            for identifier in ("fixture.formal",)
         ]
-        _write_declarations(self.root, [*checks, *formal])
+        # 同一规范 Check 在两个场景间共享唯一操作，不产生 alias。
+        formal = [formal[0]]
+        formal[0]["scenarios"] = ["repository-baseline", "change-targeted"]
+        formal[0]["triggers"] = [{"path": "formal-input"}]
+        write_declarations(
+            self.root / "config/engineering/module-checks.yaml",
+            [*checks, *formal],
+            ci_quick={
+                "always_required_check_ids": [],
+                "formal_only_check_ids": ["fixture.formal"],
+            },
+        )
 
     def reports(self):
         return [
@@ -124,7 +127,9 @@ class DeliveryHookTest(unittest.TestCase):
         reports = self.reports()
         self.assertEqual(2, len(reports))
         self.assertEqual(2, len({report["run_id"] for report in reports}))
-        self.assertTrue(all(report["scope"] == "development-change" for report in reports))
+        self.assertTrue(
+            all(report["scope"] == "development-change" for report in reports)
+        )
         self.assertIn(original, reports)
 
     def test_failed_check_blocks_and_does_not_execute_repository(self):
@@ -150,8 +155,12 @@ class DeliveryHookTest(unittest.TestCase):
         output = self.evaluate({**EVENT, "stop_hook_active": True})
         self.assertIn("交付 PASS", output["systemMessage"])
         self.assertEqual(2, len(self.reports()))
-        self.assertEqual({"FAIL", "PASS"}, {report["result"] for report in self.reports()})
-        self.assertTrue(all(report["scope"] == "development-change" for report in self.reports()))
+        self.assertEqual(
+            {"FAIL", "PASS"}, {report["result"] for report in self.reports()}
+        )
+        self.assertTrue(
+            all(report["scope"] == "development-change" for report in self.reports())
+        )
 
     def test_missing_environment_is_blocked_not_pass(self):
         self.fixture(environment=["nonexistent-lexiflow-hook-test"])
@@ -213,12 +222,9 @@ class DeliveryHookTest(unittest.TestCase):
         execute.assert_called_once()
 
     @mock.patch.object(hook, "execute_delivery")
-    def test_explicit_disable_and_off_are_not_pass(self, execute):
+    def test_explicit_disable_is_not_pass(self, execute):
         with mock.patch.dict(os.environ, {"LEXIFLOW_DELIVERY_HOOK_DISABLE": "1"}):
-            self.policy.write_text("invalid")
             self.assertIn("未验证", self.evaluate()["systemMessage"])
-        self.policy.write_text('{"mode":"off"}')
-        self.assertIn("未验证", self.evaluate()["systemMessage"])
         execute.assert_not_called()
 
     @mock.patch.object(hook, "_execute_delivery")
@@ -239,11 +245,9 @@ class DeliveryHookTest(unittest.TestCase):
         self.fixture(
             "import os,time\nfrom pathlib import Path\nPath('tmp/child.pid').write_text(str(os.getpid()))\ntime.sleep(60)"
         )
-        policy = json.loads(self.policy.read_text())
         # 给真实预检与进程启动留出余量；总预算仍短于单项 10 秒及子进程 60 秒。
-        policy["timeout_seconds"] = 5
-        self.policy.write_text(json.dumps(policy))
-        output = self.evaluate()
+        with mock.patch.object(hook, "DELIVERY_TIMEOUT_SECONDS", 5):
+            output = self.evaluate()
         self.assertIn("总执行超过 5 秒", output["stopReason"])
         pid = int((self.root / "tmp/child.pid").read_text())
         with self.assertRaises(ProcessLookupError):
@@ -253,78 +257,79 @@ class DeliveryHookTest(unittest.TestCase):
         ) as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
-    def test_policy_error_names_file_and_position(self):
-        self.policy.write_text('{\n "mode": bad\n}')
-        output = self.evaluate()
-        self.assertIn(hook.POLICY_PATH, output["reason"])
-        self.assertIn("第 2 行", output["reason"])
+    def test_stop_limits_are_fixed_without_configuration_input(self):
+        self.assertEqual(1800, hook.DELIVERY_TIMEOUT_SECONDS)
+        self.assertEqual(30, hook.HEARTBEAT_SECONDS)
+        self.assertFalse(hasattr(hook, "read_policy"))
+        self.assertFalse(hasattr(hook, "POLICY_PATH"))
 
-    def test_heartbeat_policy_accepts_thirty_seconds_and_rejects_out_of_range(self):
-        policy = hook.read_policy(self.root)
-        self.assertEqual(30, policy["heartbeat_seconds"])
-        for interval in (0, 31, True):
-            with self.subTest(interval=interval):
-                self.policy.write_text(
-                    json.dumps({**policy, "heartbeat_seconds": interval})
-                )
-                with self.assertRaisesRegex(
-                    ValueError, "heartbeat_seconds 必须是 1..30"
-                ):
-                    hook.read_policy(self.root)
+    def test_heartbeat_uses_fixed_interval_without_wall_clock_wait(self):
+        stream = io.StringIO()
+        event = {
+            "event": "heartbeat",
+            "argv": ["python3", "fixture.py"],
+            "elapsed_seconds": 0,
+        }
+        with (
+            contextlib.redirect_stderr(stream),
+            mock.patch.object(
+                hook.time, "monotonic", side_effect=[100, 129, 130, 130, 159, 160, 160]
+            ),
+        ):
+            observe = hook.progress_observer()
+            observe({"event": "started", "argv": event["argv"], "timeout_seconds": 180})
+            for elapsed in (29, 30, 59, 60):
+                observe({**event, "elapsed_seconds": elapsed})
+        self.assertEqual(2, stream.getvalue().count("仍在执行"))
+        self.assertIn("已用 30s", stream.getvalue())
+        self.assertIn("已用 60s", stream.getvalue())
 
     def test_heartbeat_is_stderr_and_immediate(self):
         stream = io.StringIO()
-        with contextlib.redirect_stderr(stream):
-            result = hook.run_with_progress(1)(
+        with (
+            contextlib.redirect_stderr(stream),
+            mock.patch.object(hook, "HEARTBEAT_SECONDS", 1),
+        ):
+            from scripts.verification.execution.check_runner import run_check_process
+
+            result = run_check_process(
                 [sys.executable, "-c", "import time;time.sleep(1.1)"],
                 str(self.root),
                 {},
                 5,
-                None,
+                progress_observer=hook.progress_observer(),
             )
         self.assertEqual(0, result["exit_code"])
         self.assertIn("开始", stream.getvalue())
         self.assertIn("仍在执行", stream.getvalue())
-        self.assertIn(
-            "命令执行成功（退出码 0；检查结果及输入一致性待校验）", stream.getvalue()
-        )
+        self.assertIn("命令结束：", stream.getvalue())
         self.assertNotIn("PASS", stream.getvalue())
 
     def test_process_outcomes_are_explicit_and_do_not_grant_gate_pass(self):
-        cases = (
-            (0, "exited", False, "命令执行成功"),
-            (1, "exited", False, "命令执行失败（退出码 1）"),
-            (-15, "exited", False, "命令执行失败：被信号 15 终止"),
-            (-9, "timeout", True, "命令执行失败：超时（单项上限 5s）"),
-            (None, "spawn-error", False, "命令执行失败：进程未能启动"),
-        )
-        for code, reason, timed_out, expected in cases:
+        for code, reason in (
+            (0, "exited"),
+            (1, "exited"),
+            (-15, "exited"),
+            (-9, "timeout"),
+            (None, "spawn-error"),
+        ):
             with self.subTest(reason=reason, code=code):
-                result = {
+                stream = io.StringIO()
+                event = {
+                    "event": "finished",
+                    "argv": ["python3", "fixture.py"],
                     "exit_code": code,
                     "exit_reason": reason,
-                    "timed_out": timed_out,
-                    "stdout": '{"result":"FAIL"}',
                 }
-                stream = io.StringIO()
-                with (
-                    mock.patch(
-                        "scripts.verification.kernel.run_check_process",
-                        return_value=result,
-                    ),
-                    contextlib.redirect_stderr(stream),
-                ):
-                    actual = hook.run_with_progress(1)(
-                        ["python3", "-m", "scripts.delivery_gate.quality"],
-                        str(self.root),
-                        {},
-                        5,
-                        None,
-                    )
-                self.assertIs(result, actual)
-                self.assertIn(expected, stream.getvalue())
+                with contextlib.redirect_stderr(stream):
+                    result = hook.progress_observer()(event)
+                self.assertIsNone(result)
+                self.assertIn(f"({reason}, exit={code})", stream.getvalue())
+                self.assertIn("判定待校验", stream.getvalue())
                 self.assertNotIn("PASS", stream.getvalue())
-                self.assertNotIn("命令退出", stream.getvalue())
+                self.assertEqual(
+                    {"event", "argv", "exit_code", "exit_reason"}, set(event)
+                )
 
     def test_terminal_never_waits_for_eof(self):
         master, slave = pty.openpty()
@@ -456,7 +461,6 @@ class DeliveryHookTest(unittest.TestCase):
             [
                 {
                     "check_id": "fixture.ruff." + scope,
-                    "module": scope,
                     "command": [
                         sys.executable,
                         "-m",

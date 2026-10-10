@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import tomllib
 import unittest
 from pathlib import Path
 
+import tomllib
 import yaml
 
-from scripts.agents.module_tests import evaluate_suite
+from scripts.checks.tool_tests.run_agent_tool_tests import evaluate_suite
 
 
 class AgentRoleEntryTest(unittest.TestCase):
@@ -36,27 +36,26 @@ class AgentRoleEntryTest(unittest.TestCase):
                     self.assertNotIn("sandbox_mode", role)
                 for entry in (
                     "AGENTS.md",
-                    "harness/agent-policy.manifest.yaml",
-                    "subagent_protocol",
-                    "codex_dispatch",
+                    "harness/agent-policy.md",
+                    "harness/README.md",
+                    "codex_model_policy",
                 ):
                     self.assertIn(entry, role["developer_instructions"])
 
-    def test_qoder_preserves_complete_context_and_role_tools(self) -> None:
+    def test_qoder_preserves_manual_context_and_role_tools(self) -> None:
         entry = (self.root / ".qoder/AGENTS.md").read_text()
         for context in (
             "AGENTS.md",
-            ".qoder/AGENTS.md",
-            "harness_manifest",
-            "required_context",
-            ".qoder/agents/<agent_profile>.md",
-            "harness/agent-policy.manifest.yaml",
-            "subagent_protocol",
-            "qoder_delegation",
-            "harness/documentation-policy.yaml",
+            "harness/README.md",
+            "harness/README.md",
+            "harness/agent-policy.md",
+            "harness/documentation-policy.md",
             "SKILL.md",
         ):
             self.assertIn(context, entry)
+        self.assertIn("不提供仓库委派、回调或证据消费链", entry)
+        for retired in ("harness_manifest", "required_context", "qoder_delegation"):
+            self.assertNotIn(retired, entry)
         for name in (
             "backend-implementer",
             "extension-implementer",
@@ -77,13 +76,17 @@ class AgentRoleEntryTest(unittest.TestCase):
                 for context in (
                     ".qoder/AGENTS.md",
                     "AGENTS.md",
-                    "harness_manifest",
-                    "required_context",
-                    "harness/agent-policy.manifest.yaml",
-                    "subagent_protocol",
-                    "qoder_delegation",
+                    "harness/agent-policy.md",
+                    "harness/documentation-policy.md",
+                    "SKILL.md",
                 ):
                     self.assertIn(context, body)
+                for retired in (
+                    "harness_manifest",
+                    "required_context",
+                    "qoder_delegation",
+                ):
+                    self.assertNotIn(retired, body)
                 if name == "quality-verifier":
                     self.assertIn("只读", body)
                     self.assertIn("不修复", body)
@@ -117,17 +120,23 @@ class AgentRoleEntryTest(unittest.TestCase):
         config = tomllib.loads((self.root / ".codex/config.toml").read_text())
         entry = (self.root / ".codex" / config["model_instructions_file"]).read_text()
         self.assertIn("AGENTS.md", entry)
-        self.assertIn("harness/agent-policy.manifest.yaml", entry)
-        self.assertIn("subagent_protocol.codex_model_policy", entry)
-        self.assertIn("harness/documentation-policy.yaml", entry)
+        self.assertIn("harness/agent-policy.md", entry)
+        self.assertIn("codex_model_policy", entry)
+        self.assertIn("harness/documentation-policy.md", entry)
         self.assertNotIn("显式传递", entry)
         self.assertNotIn("升级必须", entry)
-        policy = yaml.safe_load(
-            (self.root / "harness/agent-policy.manifest.yaml").read_text()
-        )
-        self.assertIsInstance(policy["subagent_protocol"]["codex_model_policy"], dict)
-        for section in ("agent_dispatch", "codex_dispatch", "qoder_delegation"):
-            self.assertIsInstance(policy[section], dict)
+        policy = (self.root / "harness/agent-policy.md").read_text()
+        self.assertIn("codex_model_policy", policy)
+        self.assertIn("独立性", policy)
+        self.assertNotIn("qoder_delegation", policy)
+        for retired in (
+            "caller_required_input",
+            "runner_bound_identity",
+            "result_required_output",
+            "caller_field_schema",
+            "qoder_model_policy",
+        ):
+            self.assertNotIn(retired, policy)
 
 
 class AgentQualityResultTest(unittest.TestCase):
@@ -145,3 +154,46 @@ class AgentQualityResultTest(unittest.TestCase):
         )
         self.assertEqual("FAIL", report["status"])
         self.assertEqual(1, report["skipped"])
+
+
+class StrictDispatchPathTest(unittest.TestCase):
+    def test_public_parser_and_intersection_share_one_strict_grammar(self):
+        from scripts.agents.work_packages.work_package_contract_checks import (
+            dispatch_paths_intersect,
+            match_dispatch_path_v1,
+            parse_dispatch_path_v1,
+        )
+
+        self.assertEqual(
+            parse_dispatch_path_v1("scripts/**"), ("subtree", ("scripts",))
+        )
+        self.assertEqual(parse_dispatch_path_v1("scripts/*"), ("child", ("scripts",)))
+        self.assertEqual(parse_dispatch_path_v1("AGENTS.md"), ("exact", ("AGENTS.md",)))
+        self.assertTrue(match_dispatch_path_v1("scripts/a.py", "scripts/*"))
+        self.assertFalse(match_dispatch_path_v1("scripts/nested/a.py", "scripts/*"))
+        self.assertTrue(dispatch_paths_intersect("scripts/**", "scripts/nested/*"))
+        self.assertFalse(dispatch_paths_intersect("scripts/*", "scripts/nested/*"))
+        self.assertFalse(dispatch_paths_intersect("scripts/a.py", "scripts/a.py.extra"))
+
+    def test_unsafe_partial_or_nonterminal_patterns_are_rejected(self):
+        from scripts.agents.work_packages.work_package_contract_checks import AgentContractError, parse_dispatch_path_v1
+
+        for pattern in (
+            "/etc/passwd",
+            "../scripts",
+            "scripts/a*.py",
+            "scripts/**/x",
+            "scripts//x",
+            "scripts/./x",
+            "scripts/latest/x",
+            "scripts/[x]",
+            "scripts/a,b",
+            "C:/scripts",
+            "scripts/?",
+            "scripts/{x}",
+            "scripts/a\n",
+            "scripts/a\x00",
+            "scripts/e\u0301.py",
+        ):
+            with self.subTest(pattern=pattern), self.assertRaises(AgentContractError):
+                parse_dispatch_path_v1(pattern)

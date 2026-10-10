@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { runCommand } from '../command.mjs';
+import { runCommand } from '../execution/deployment-process-control.mjs';
 
-const moduleUrl = new URL('../command.mjs', import.meta.url).href;
+const moduleUrl = new URL('../execution/deployment-process-control.mjs', import.meta.url).href;
 
 function viewer(code, options = {}) {
   const script = `import {runCommand} from ${JSON.stringify(moduleUrl)};

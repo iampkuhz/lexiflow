@@ -1,0 +1,50 @@
+"""在精确选定的 Temurin 25 下执行调用者指定的命令。"""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+from typing import Mapping, Sequence
+
+from scripts.environment.toolchains.java_toolchain_selection import (
+    JavaRuntimeError,
+    resolve_java_home,
+)
+from scripts.environment.configuration.local_runtime_settings import (
+    command_local_config,
+)
+
+
+def command_environment(
+    root: Path, environ: Mapping[str, str] | None = None
+) -> dict[str, str]:
+    """合并本机私有配置并选择 JDK，仅修改子进程环境，保留原终端输入输出。"""
+
+    source = dict(os.environ if environ is None else environ)
+    source.update(command_local_config(root, source))
+    java_home = resolve_java_home(root, source)
+    source["JAVA_HOME"] = str(java_home)
+    source["PATH"] = os.pathsep.join(
+        [str(java_home / "bin"), source.get("PATH", "")]
+    ).rstrip(os.pathsep)
+    return source
+
+
+def main(arguments: Sequence[str] | None = None, *, root: Path | None = None) -> int:
+    """在完成 Temurin 25 选择后，以调用者命令替换当前进程。"""
+
+    argv = list(sys.argv[1:] if arguments is None else arguments)
+    if not argv:
+        raise JavaRuntimeError("java_exec requires a command")
+    repository = (root or Path(__file__).resolve().parents[2]).resolve()
+    os.execvpe(argv[0], argv, command_environment(repository))
+    return 127
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except JavaRuntimeError as exc:
+        print(f"Java environment FAIL: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc

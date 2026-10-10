@@ -38,12 +38,12 @@ E1 的 API 端口由扩展构建参数与 host permission 共同绑定，默认 
 
 | 任务 | 命令或操作 | 成功判据 |
 | --- | --- | --- |
-| 确认 Java | `python3 -m scripts.environment.java_exec java -version` | 选择到 Temurin Java 25 |
-| 准备 API | 本机 runtime 配置后运行 `python3 -m scripts.environment.start_api` | 健康检查成功且日志显示非零已发布资料版本 |
+| 确认 Java | `python3 -m scripts.local.run_with_java_toolchain java -version` | 选择到 Temurin Java 25 |
+| 准备 API | 本机 runtime 配置后运行 `python3 -m scripts.local.start_local_api` | 健康检查成功且日志显示非零已发布资料版本 |
 | 加载扩展 | `npm ci`、`npm run build`，Chrome 加载 `extension/dist` | 扩展弹窗显示就绪，观看保持英文且仅对合格词段提示 |
 
 ```bash
-python3 -m scripts.environment.java_exec java -version
+python3 -m scripts.local.run_with_java_toolchain java -version
 ```
 
 如果提示找不到 Java 25，安装 Eclipse Temurin 25 后用 `export LEXIFLOW_JAVA_HOME=/absolute/path/to/jdk-25` 指定；不要使用系统里的其他 Java 版本替代。
@@ -53,7 +53,7 @@ python3 -m scripts.environment.java_exec java -version
 先在仓库根编译 API，并创建本机配置目录：
 
 ```bash
-python3 -m scripts.environment.java_exec backend/gradlew -p backend :api:bootJar
+python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend :api:bootJar
 mkdir -p .local/lexiflow
 ```
 
@@ -78,7 +78,7 @@ chmod 600 .local/lexiflow/runtime.json
 当前 API 不读取、不需要、也不会调用模型服务。完成本机配置后，在任意新终端，完整词库启动方式：
 
 ```bash
-python3 -m scripts.environment.start_api
+python3 -m scripts.local.start_local_api
 ```
 
 启动前先确认数据库运行且词库已发布。启动器从 `.local/lexiflow/runtime.json` 读取 `JDBC_URL`，显式环境变量优先；缺失或空白时返回 `BLOCKED`，不转入演示词库。它不会自动读取 `.env`，也不会继承被终止的旧 API 环境变量。配置文件格式错误或包含未知键时明确停止，不打印配置值。

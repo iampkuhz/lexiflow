@@ -1,4 +1,0 @@
-#!/bin/sh
-# 只提醒日常自检，不执行检查或控制 commit。
-printf '%s\n' 'LexiFlow 提醒：交接前运行 python3 -m scripts.verification.development。' >&2
-exit 0

@@ -11,9 +11,9 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[3]
-STATE = ROOT / "ops/release/lifecycle-state.sh"
-LIFECYCLE = ROOT / "ops/release/lifecycle.sh"
-VERIFIER_HASH = (ROOT / "ops/release/runtime-verification.sh").read_text().split("# 在 cd -P", 1)[0]
+STATE = ROOT / "ops/release/runtime/release-installation-state.sh"
+LIFECYCLE = ROOT / "ops/release/runtime/release-installation-lifecycle.sh"
+VERIFIER_HASH = (ROOT / "ops/release/runtime/release-artifact-verification.sh").read_text().split("# 在 cd -P", 1)[0]
 KEY = "a" * 64
 INSTALL = "b" * 32
 TOKEN = "c" * 32

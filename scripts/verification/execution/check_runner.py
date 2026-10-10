@@ -1,0 +1,747 @@
+"""封闭 Module Check 的执行内核，负责运行进程并产生报告与证据。"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+import uuid
+from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from scripts.verification.planning.check_definitions import REGISTRY_PATH
+from scripts.verification.planning.source_file_snapshot import snapshot_inputs
+
+REPORT_SCHEMA = "lexiflow.verification-report.v1"
+VERIFY_CHILD_INPUT_SCHEMA = "lexiflow.verify-child-input.v2"
+VERIFY_CHILD_INPUT_MAX_BYTES = 1_048_576
+RELEASE_RUNTIME_CHECK_IDS = frozenset({"eng.release.lifecycle-runtime"})
+RELEASE_RUNTIME_CHILD_COMMAND = (
+    "python3",
+    "-m",
+    "scripts.checks.release.source.check_synthetic_release_lifecycle",
+)
+CANDIDATE_RUNTIME_CHECK_IDS = frozenset({"eng.release.candidate-runtime"})
+CANDIDATE_RUNTIME_CHILD_COMMAND = (
+    "python3",
+    "-m",
+    "scripts.checks.release.candidate.check_candidate_installation_lifecycle",
+)
+_ALLOWED_ENV_KEYS = frozenset(
+    {
+        "USER",
+        "LOGNAME",
+        "LANG",
+        "LC_ALL",
+        "LANGUAGE",
+        "TERM",
+        "TZ",
+        "PYTHONDONTWRITEBYTECODE",
+        "PYTHONHASHSEED",
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "PATH",
+    }
+)
+_SECRET_PREFIXES = ("CODEX", "QODER", "CLAUDE", "ANTHROPIC", "OPENAI", "LEXIFLOW_GATE_")
+_SECRET_SUBSTRINGS = (
+    "API_KEY",
+    "API_TOKEN",
+    "API_SECRET",
+    "SECRET_KEY",
+    "CREDENTIAL",
+    "PRIVATE_KEY",
+    "ACCESS_TOKEN",
+    "AUTH_TOKEN",
+)
+_TERM_GRACE = 0.5
+
+
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def sha256_bytes(data: bytes) -> str:
+    """计算冻结输入或报告字节的 SHA-256 摘要。"""
+    return hashlib.sha256(data).hexdigest()
+
+
+def fingerprint_json(value: Any) -> str:
+    """规范化 JSON 后计算输入指纹，绑定本轮检查闭包。"""
+    return sha256_bytes(
+        json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    )
+
+
+def is_release_runtime_child_check(check: dict[str, Any]) -> bool:
+    """只识别固定 runtime Check 与对应 Python 命令构成的父端 stdin 接线。"""
+    command = check.get("command")
+    return (
+        isinstance(check.get("check_id"), str)
+        and isinstance(command, list)
+        and (
+            (
+                check["check_id"] in RELEASE_RUNTIME_CHECK_IDS
+                and tuple(command) == RELEASE_RUNTIME_CHILD_COMMAND
+            )
+            or (
+                check["check_id"] in CANDIDATE_RUNTIME_CHECK_IDS
+                and tuple(command) == CANDIDATE_RUNTIME_CHILD_COMMAND
+            )
+        )
+        and check.get("executable") == "python3"
+    )
+
+
+def build_child_environment(
+    *,
+    runtime_environment: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """以安全基线和已预检的不透明运行值构建子进程环境；不把秘密写入报告。"""
+
+    source = dict(os.environ)
+    env: dict[str, str] = {}
+    for key, value in source.items():
+        if (
+            key not in _ALLOWED_ENV_KEYS
+            or any(key.startswith(prefix) for prefix in _SECRET_PREFIXES)
+            or any(part in key for part in _SECRET_SUBSTRINGS)
+        ):
+            continue
+        env[key] = value
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env.setdefault("PYTHONHASHSEED", "0")
+    # environment 模块校验并限制这些值；内核仅将其作为不透明值传入子进程，
+    # 绝不把子进程环境序列化到报告。
+    if runtime_environment:
+        env.update(runtime_environment)
+    return env
+
+
+def probe_python_package_yaml(
+    child_env: dict[str, str], cwd: str | Path, timeout_seconds: int = 5
+) -> dict[str, Any]:
+    """通过受控进程组验证 Check 同解释器能导入 yaml。"""
+    result = run_check_process(
+        [sys.executable, "-c", "import yaml; print(yaml.__file__)"],
+        str(cwd),
+        child_env,
+        timeout_seconds,
+        sys.executable,
+    )
+    available = result.get("status") == "PASS" and result.get("exit_code") == 0
+    return {
+        "available": available,
+        "subprocess_verified": available,
+        "origin": result.get("stdout", "").strip() if available else "",
+        "error": result.get("exit_reason", "") if not available else "",
+    }
+
+
+def operation_config(check: dict[str, Any]) -> dict[str, Any]:
+    """从父端场景资格中分离唯一实际操作；资格仍由父报告冻结。"""
+    return {
+        key: value
+        for key, value in check.items()
+        if key not in {"scope", "triggers", "scenarios", "selection_reasons"}
+    }
+
+
+def resolve_child_check(root: Path, check_id: str) -> dict[str, Any]:
+    """从当前声明重建固定子进程操作，不接收 caller 的可执行配置。"""
+    from scripts.verification.planning.check_definitions import load_declarations
+
+    matches = [
+        c for c in load_declarations(root)["checks"] if c["check_id"] == check_id
+    ]
+    if len(matches) != 1:
+        raise ValueError("check-identity-mismatch")
+    check = operation_config(matches[0])
+    check["input_paths"] = list(dict.fromkeys([*check["input_paths"], REGISTRY_PATH]))
+    if not is_release_runtime_child_check(check):
+        raise ValueError("verify-context-invalid")
+    return check
+
+
+def decode_child_request(
+    root: Path, payload: Any
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    """固定 child envelope 精确解码并核对当前完整快照，拒绝自报配置。"""
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {"schema_version", "run_id", "check_id", "snapshot"}
+        or payload.get("schema_version") != VERIFY_CHILD_INPUT_SCHEMA
+    ):
+        raise ValueError("verify-context-invalid")
+    run_id = payload["run_id"]
+    if not isinstance(run_id, str) or str(uuid.UUID(run_id)) != run_id:
+        raise ValueError("verify-context-invalid")
+    check = resolve_child_check(root, payload["check_id"])
+    snapshot = payload["snapshot"]
+    if (
+        not isinstance(snapshot, dict)
+        or fingerprint_json(snapshot)
+        != fingerprint_json(snapshot_check_inputs(root, check))
+        or snapshot.get("missing")
+    ):
+        raise ValueError("verify-snapshot-mismatch")
+    return check, snapshot, run_id
+
+
+def snapshot_check_inputs(root: Path, check: dict[str, Any]) -> dict[str, Any]:
+    """对实际声明的输入文件和完整不可变 Check 配置取哈希。"""
+    files, missing = snapshot_inputs(root, check)
+    inventory = None
+    if check.get("check_id") == "eng.repository.planning":
+        from scripts.checks.repository.catalog.task_catalog_rules import (
+            repository_source_inventory,
+        )
+
+        inventory = repository_source_inventory(root)
+        files = [
+            *files,
+            {
+                "locator": "@repository-source-inventory",
+                "sha256": fingerprint_json(inventory),
+                "size_bytes": len(json.dumps(inventory, sort_keys=True).encode()),
+                "executable": False,
+            },
+        ]
+    value = {
+        "check_config": operation_config(check),
+        "files": files,
+        "missing": missing,
+    }
+    return {"fingerprint": fingerprint_json(value), "files": files, "missing": missing}
+
+
+def _terminate_group(pid: int) -> None:
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        return
+    deadline = time.monotonic() + _TERM_GRACE
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pid, 0)
+        except (ProcessLookupError, PermissionError):
+            return
+        time.sleep(0.05)
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+
+def run_check_process(
+    argv: list[str],
+    cwd: str,
+    env: dict[str, str],
+    timeout_seconds: int,
+    executable: str | None = None,
+    *,
+    stdin_payload: bytes | None = None,
+    progress_observer: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    """运行声明 argv；唯有固定子进程可选用有界匿名 stdin payload。"""
+    executed = list(argv)
+    if executable == "python3" and argv[0] == "python3":
+        executed[0] = sys.executable
+    started_at, started = _utc_now(), time.monotonic()
+    if stdin_payload is not None and (
+        not isinstance(stdin_payload, bytes)
+        or len(stdin_payload) > VERIFY_CHILD_INPUT_MAX_BYTES
+    ):
+        return {
+            "status": "BLOCKED",
+            "exit_code": None,
+            "exit_reason": "verify-context-unavailable",
+            "stdout": "",
+            "stderr": "",
+            "duration_seconds": 0.0,
+            "started_at": started_at,
+            "finished_at": _utc_now(),
+            "timed_out": False,
+            "executable": executed[0],
+            "executed_argv": [],
+        }
+    try:
+        proc = subprocess.Popen(
+            executed,
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.PIPE if stdin_payload is not None else subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+            shell=False,
+        )
+    except OSError as exc:
+        return {
+            "status": "FAIL",
+            "exit_code": None,
+            "exit_reason": "spawn-error",
+            "stdout": "",
+            "stderr": str(exc),
+            "duration_seconds": 0.0,
+            "started_at": started_at,
+            "finished_at": _utc_now(),
+            "timed_out": False,
+            "executable": executed[0],
+            "executed_argv": executed,
+        }
+    stdout, stderr = b"", b""
+    timed_out, reason, interrupted = False, "exited", None
+    try:
+        if progress_observer is not None:
+            progress_observer(
+                {
+                    "event": "started",
+                    "argv": list(executed),
+                    "timeout_seconds": timeout_seconds,
+                }
+            )
+        deadline = started + timeout_seconds
+        first = True
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(executed, timeout_seconds)
+            try:
+                stdout, stderr = proc.communicate(
+                    input=stdin_payload if first else None,
+                    timeout=min(remaining, 1) if progress_observer else remaining,
+                )
+                break
+            except subprocess.TimeoutExpired:
+                first = False
+                if not progress_observer or time.monotonic() >= deadline:
+                    raise
+                progress_observer(
+                    {
+                        "event": "heartbeat",
+                        "argv": list(executed),
+                        "elapsed_seconds": int(time.monotonic() - started),
+                    }
+                )
+    except subprocess.TimeoutExpired:
+        timed_out, reason = True, "timeout"
+    except BaseException as exc:
+        interrupted = exc
+        reason = "cancelled"
+    finally:
+        # 总预算可能正好在单项 timeout 的回收窗口到期。回收本次进程组期间
+        # 延迟信号，完成 wait/管道关闭后再传播，不能让第二个异常跳过清理。
+        blocked_signals = {signal.SIGALRM, signal.SIGTERM, signal.SIGINT}
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, blocked_signals)
+        try:
+            if timed_out or interrupted is not None:
+                _terminate_group(proc.pid)
+                try:
+                    stdout, stderr = proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    stdout, stderr = proc.communicate(timeout=5)
+        finally:
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                if pipe is not None and not pipe.closed:
+                    pipe.close()
+            try:
+                signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+            except BaseException as exc:
+                interrupted = exc
+                reason = "cancelled"
+    result = {
+        "status": "FAIL" if timed_out or proc.returncode != 0 else "PASS",
+        "exit_code": proc.returncode,
+        "exit_reason": reason,
+        "stdout": stdout.decode("utf-8", errors="replace"),
+        "stderr": stderr.decode("utf-8", errors="replace"),
+        "duration_seconds": round(time.monotonic() - started, 6),
+        "started_at": started_at,
+        "finished_at": _utc_now(),
+        "timed_out": timed_out,
+        "executable": executed[0],
+        "executed_argv": executed,
+    }
+
+    if progress_observer is not None:
+        try:
+            progress_observer(
+                {
+                    "event": "finished",
+                    "argv": list(executed),
+                    "exit_code": result["exit_code"],
+                    "exit_reason": reason,
+                }
+            )
+        except BaseException as exc:
+            if interrupted is None:
+                interrupted = exc
+    if interrupted is not None:
+        # 受控取消仍把原始输出交给调用层保存；不将取消转成退出零。
+        interrupted.process_result = result
+        raise interrupted
+    return result
+
+
+def _write_output_artifacts(
+    root: Path, run_id: str, check_id: str, process: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
+    safe_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", check_id)
+    directory = root / "tmp" / "quality" / "verification" / run_id
+    directory.mkdir(parents=True, exist_ok=True)
+    artifacts: dict[str, dict[str, Any]] = {}
+    for kind in ("stdout", "stderr"):
+        path = directory / f"{safe_id}.{kind}.log"
+        data = str(process.get(kind, "")).encode("utf-8")
+        path.write_bytes(data)
+        artifacts[kind] = {
+            "locator": path.relative_to(root).as_posix(),
+            "sha256": sha256_bytes(data),
+            "bytes": len(data),
+        }
+    return artifacts
+
+
+def _evaluate_result_contract(
+    contract: dict[str, Any], process: dict[str, Any]
+) -> tuple[str, str, dict[str, Any]]:
+    """把进程退出、结构化结果与声明的完整性条件合并为 Check 状态。缺必需证据时不能因退出码为零而返回 PASS；保留原始 BLOCKED 或 FAIL 诊断。"""
+    if process.get("timed_out"):
+        return "FAIL", "timeout", {}
+    if process.get("exit_reason") == "spawn-error":
+        return "FAIL", "spawn-error", {}
+    if process.get("exit_code") != 0:
+        return "FAIL", "non-zero-exit", {}
+    if contract["type"] == "exit-code":
+        return (
+            "PASS",
+            "",
+            {
+                "kind": "exit-code",
+                "completeness_guarantee": contract["completeness_guarantee"],
+            },
+        )
+    try:
+        report = json.loads(str(process.get("stdout", "")).strip())
+    except json.JSONDecodeError:
+        return "FAIL", "result-report-invalid", {}
+    if not isinstance(report, dict):
+        return "FAIL", "result-report-invalid", {}
+    missing = [field for field in contract["required_fields"] if field not in report]
+    if missing:
+        return "FAIL", "result-report-missing-fields", {"missing_fields": missing}
+    reported_status = report.get("status")
+    if reported_status not in {"PASS", "BLOCKED", "FAIL"}:
+        return "FAIL", "result-report-invalid-status", {"report": report}
+    if reported_status not in contract["allowed_statuses"]:
+        return "FAIL", "result-status-unexpected", {"report": report}
+    # 完整性阈值只约束声称 PASS 的结果。即使执行的 Check 数为零，模块仍可
+    # 返回有类型的 BLOCKED/FAIL；不得提升或掩盖原始诊断。
+    if reported_status != "PASS":
+        return reported_status, report.get("reason", ""), {"report": report}
+    for field, minimum in contract.get("minimum", {}).items():
+        value = report.get(field)
+        if not isinstance(value, int) or value < minimum:
+            return (
+                "FAIL",
+                "result-report-incomplete",
+                {"report": report, "field": field},
+            )
+    for field, expected in contract.get("equals", {}).items():
+        if report.get(field) != expected:
+            return (
+                "FAIL",
+                "result-report-incomplete",
+                {"report": report, "field": field},
+            )
+    return reported_status, report.get("reason", ""), {"report": report}
+
+
+def _not_run_result(
+    check: dict[str, Any], reason: str, extra: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    return {
+        "check_id": check["check_id"],
+        "status": "FAIL",
+        "reason": reason,
+        "process": {
+            "executed_argv": [],
+            "exit_code": None,
+            "exit_reason": "not-run",
+            "duration_seconds": 0,
+            "timed_out": False,
+            "started_at": "",
+            "finished_at": "",
+            "output_artifacts": {},
+        },
+        "input_snapshot": {"pre": {}, "post": {}},
+        **(extra or {}),
+    }
+
+
+def execute_single_check(
+    check: dict[str, Any],
+    repo_root: Path,
+    env: dict[str, str],
+    progress_observer: Callable[[dict[str, Any]], None] | None = None,
+    run_id: str | None = None,
+    frozen_pre: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """为单个声明的 Check 建立输入快照与受控子进程环境，执行固定 argv 并收集有界证据。返回本次真实执行结果；异常和缺失证据不得被推断为 PASS。"""
+    repo_root = repo_root.resolve()
+    if (
+        not isinstance(run_id, str)
+        or str(uuid.UUID(run_id)) != run_id
+        or frozen_pre is None
+    ):
+        raise ValueError("run_id and frozen_pre are required")
+    observed_before_execution = snapshot_check_inputs(repo_root, check)
+    pre = frozen_pre
+    if pre["missing"]:
+        return _not_run_result(
+            check,
+            "input-missing",
+            {
+                "input_snapshot": {
+                    "pre": pre,
+                    "before_execution": observed_before_execution,
+                    "post": {},
+                },
+            },
+        )
+    if pre["fingerprint"] != observed_before_execution["fingerprint"]:
+        return _not_run_result(
+            check,
+            "input-drift",
+            {
+                "input_snapshot": {
+                    "pre": pre,
+                    "before_execution": observed_before_execution,
+                    "post": {},
+                },
+            },
+        )
+    cwd_rel = check["cwd"]
+    cwd_path = (repo_root / cwd_rel).resolve()
+    if repo_root not in (cwd_path, *cwd_path.parents) or not cwd_path.is_dir():
+        return _not_run_result(
+            check,
+            "invalid-working-directory",
+            {
+                "input_snapshot": {
+                    "pre": pre,
+                    "before_execution": observed_before_execution,
+                    "post": {},
+                }
+            },
+        )
+    child_transport = is_release_runtime_child_check(check)
+    stdin_payload: bytes | None = None
+    if child_transport:
+        if not isinstance(run_id, str) or not run_id.strip():
+            blocked = _not_run_result(
+                check,
+                "verify-context-unavailable",
+                {
+                    "input_snapshot": {
+                        "pre": pre,
+                        "before_execution": observed_before_execution,
+                        "post": {},
+                    }
+                },
+            )
+            blocked["status"] = "BLOCKED"
+            return blocked
+        if set(pre) != {"fingerprint", "files", "missing"}:
+            return _not_run_result(
+                check,
+                "verify-context-invalid",
+                {
+                    "input_snapshot": {
+                        "pre": pre,
+                        "before_execution": observed_before_execution,
+                        "post": {},
+                    }
+                },
+            )
+        envelope = {
+            "schema_version": VERIFY_CHILD_INPUT_SCHEMA,
+            "run_id": run_id,
+            "check_id": check["check_id"],
+            "snapshot": pre,
+        }
+        try:
+            stdin_payload = json.dumps(
+                envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+        except (TypeError, ValueError):
+            return _not_run_result(
+                check,
+                "verify-context-invalid",
+                {
+                    "input_snapshot": {
+                        "pre": pre,
+                        "before_execution": observed_before_execution,
+                        "post": {},
+                    }
+                },
+            )
+        if len(stdin_payload) > VERIFY_CHILD_INPUT_MAX_BYTES:
+            blocked = _not_run_result(
+                check,
+                "verify-context-unavailable",
+                {
+                    "input_snapshot": {
+                        "pre": pre,
+                        "before_execution": observed_before_execution,
+                        "post": {},
+                    }
+                },
+            )
+            blocked["status"] = "BLOCKED"
+            return blocked
+    # 在重命令前验证 python-package-yaml 实际可导入（使用安全子环境）。
+    # 这比 runtime.diagnose 的 find_spec 更可靠，因为使用与 Check 相同的环境。
+    if "python-package-yaml" in check.get("required_environment", []):
+        yaml_probe = probe_python_package_yaml(env, cwd_path)
+        if not yaml_probe["available"]:
+            blocked = _not_run_result(
+                check,
+                "python-package-yaml-unavailable-in-child-env",
+                {
+                    "input_snapshot": {
+                        "pre": pre,
+                        "before_execution": observed_before_execution,
+                        "post": {},
+                    },
+                    "yaml_probe": yaml_probe,
+                },
+            )
+            blocked["status"] = "BLOCKED"
+            return blocked
+    try:
+        if child_transport:
+            process = run_check_process(
+                list(check["command"]),
+                str(cwd_path),
+                env,
+                check["timeout_seconds"],
+                check.get("executable"),
+                stdin_payload=stdin_payload,
+                progress_observer=progress_observer,
+            )
+        else:
+            process = run_check_process(
+                list(check["command"]),
+                str(cwd_path),
+                env,
+                check["timeout_seconds"],
+                check.get("executable"),
+                progress_observer=progress_observer,
+            )
+    except BaseException as exc:
+        process = getattr(exc, "process_result", None)
+        if isinstance(process, dict):
+            exc.output_artifacts = _write_output_artifacts(
+                repo_root, run_id, check["check_id"], process
+            )
+            exc.check_id = check["check_id"]
+        raise
+    artifacts = _write_output_artifacts(repo_root, run_id, check["check_id"], process)
+    post = snapshot_check_inputs(repo_root, check)
+    status, reason, completeness = _evaluate_result_contract(
+        check["result_contract"], process
+    )
+    if pre["fingerprint"] != post["fingerprint"]:
+        status, reason = "FAIL", "input-drift"
+    elif (
+        child_transport
+        and not process.get("timed_out")
+        and process.get("exit_code") == 0
+    ):
+        report = completeness.get("report")
+        contract = check.get("result_contract", {})
+        if contract.get("type") != "json-stdout" or (
+            status in {"PASS", "BLOCKED"}
+            and (
+                isinstance(report, dict)
+                and report.get("status") in {"PASS", "BLOCKED", "FAIL"}
+                and report.get("status") in contract.get("allowed_statuses", [])
+            )
+            and (
+                report.get("run_id") != run_id
+                or report.get("check_id") != check["check_id"]
+                or report.get("verify_input_fingerprint") != pre["fingerprint"]
+            )
+        ):
+            status, reason = "FAIL", "verify-context-invalid"
+    return {
+        "check_id": check["check_id"],
+        "status": status,
+        "reason": reason,
+        "process": {
+            "executed_argv": process.get("executed_argv")
+            or [process.get("executable", ""), *check["command"][1:]],
+            "exit_code": process.get("exit_code"),
+            "exit_reason": process.get("exit_reason", ""),
+            "duration_seconds": process.get("duration_seconds", 0),
+            "timed_out": process.get("timed_out", False),
+            "started_at": process.get("started_at", ""),
+            "finished_at": process.get("finished_at", ""),
+            "output_artifacts": artifacts,
+        },
+        "input_snapshot": {
+            "pre": pre,
+            "before_execution": observed_before_execution,
+            "post": post,
+        },
+        "result_contract": completeness,
+    }
+
+
+def aggregate_results(results: list[dict[str, Any]]) -> tuple[str, str]:
+    """按 FAIL、BLOCKED、PASS 优先级聚合已选 Check 的真实结果。"""
+    if not results:
+        return "FAIL", "no-checks-executed"
+    failed = next(
+        (
+            result.get("reason") or "check-failed"
+            for result in results
+            if result.get("status") not in {"PASS", "BLOCKED"}
+        ),
+        "",
+    )
+    if failed:
+        return "FAIL", failed
+    blocked = next(
+        (
+            result.get("reason") or "check-blocked"
+            for result in results
+            if result.get("status") == "BLOCKED"
+        ),
+        "",
+    )
+    return ("BLOCKED", blocked) if blocked else ("PASS", "")
+
+
+def compute_coverage_gap(
+    declared: list[dict[str, Any]], executed_ids: set[str]
+) -> list[str]:
+    """识别声明范围中未由执行 Check 覆盖的必需能力。"""
+    return [
+        check["check_id"] for check in declared if check["check_id"] not in executed_ids
+    ]

@@ -31,14 +31,14 @@ head -n 1 "$STARDICT_CSV"
 文件路径和首行正确后，执行不连接数据库的完整校验：
 
 ```bash
-python3 -m scripts.environment.java_exec backend/gradlew -p backend lexiconValidate
+python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend lexiconValidate
 ```
 
 再检查基础词选择与预热候选；它们是只读报告，不会发布资料：
 
 ```bash
-python3 -m scripts.environment.java_exec backend/gradlew -p backend lexiconBasicReport
-python3 -m scripts.environment.java_exec backend/gradlew -p backend lexiconPrewarmReport
+python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend lexiconBasicReport
+python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend lexiconPrewarmReport
 ```
 
 `validate` 流式扫描原始 CSV，执行与发布一致的领域投影和跨行 canonical 表面校验，输出 `entries`、归并的派生词数和跳过原因；它不连接数据库，不保留原始行或完整领域词条；为检出跨行重复，保留随唯一 lemma/alias 数量增长的 canonical 表面索引。`basic-report` 输出基础词实际数量、名单及摘要、重复表达清洗数量，不连接数据库。`lexiconPrewarmReport` 使用默认 2000 个候选，用于人工检查频率、复杂词表与 Oxford 排除。
@@ -50,7 +50,7 @@ python3 -m scripts.environment.java_exec backend/gradlew -p backend lexiconPrewa
 已有表时先做[结构检查](#15-已有开发库结构不匹配时)。结构变化或完整重建时先核对本项目数据库及使用它的 API，协调停用并核验备份；不得操作其他项目库。完整导入发布后再启动应用。重建需同步失效对应缓存，并避免资料身份与本机偏好旧引用混淆；命令不会自动清理缓存、偏好或本机文件。
 
 ```bash
-python3 -m scripts.environment.java_exec backend/gradlew -p backend lexiconRebuild
+python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend lexiconRebuild
 ```
 
 `lexiconRebuild` 是**一个 Gradle 任务**，内部按“来源预检 → 目标检查与人工确认 → 结构重建 → 全量导入与发布”四个阶段执行。日志以 `[lexiconRebuild 阶段 n/4]` 标出阶段开始、完成与内部步骤；来源统计和发布结果属于相应阶段的内部输出，不是独立 Gradle 任务。仅实际执行时，每 3 分钟输出当前内部步骤与该阶段已用时间；这只是存活状态，不是完成百分比或成功保证。等待输入时停止心跳，只显示一次精确文本、Enter 和取消方法；请直接在原终端输入，未输入不是执行进度。默认 plain console 不显示 Gradle 动态百分比。

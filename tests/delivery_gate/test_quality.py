@@ -4,7 +4,7 @@ import unittest
 import contextlib
 import io
 
-from scripts.delivery_gate.quality import evaluate_suite
+from scripts.checks.tool_tests.run_acceptance_tool_tests import evaluate_suite
 
 
 class DeliveryGateQualityResultTest(unittest.TestCase):
@@ -17,7 +17,9 @@ class DeliveryGateQualityResultTest(unittest.TestCase):
             def test_skip(self) -> None:
                 pass
 
-        report = evaluate_suite(unittest.defaultTestLoader.loadTestsFromTestCase(Skipped))
+        report = evaluate_suite(
+            unittest.defaultTestLoader.loadTestsFromTestCase(Skipped)
+        )
         self.assertEqual("FAIL", report["status"])
         self.assertEqual(1, report["skipped"])
         self.assertEqual(1, len(report["detail"]["skipped_tests"]))
@@ -32,7 +34,9 @@ class DeliveryGateQualityResultTest(unittest.TestCase):
 
         diagnostic = io.StringIO()
         with contextlib.redirect_stderr(diagnostic):
-            report = evaluate_suite(unittest.defaultTestLoader.loadTestsFromTestCase(Failed))
+            report = evaluate_suite(
+                unittest.defaultTestLoader.loadTestsFromTestCase(Failed)
+            )
         self.assertEqual("FAIL", report["status"])
         self.assertEqual(1, len(report["detail"]["failed_tests"]))
         self.assertEqual(1, len(report["detail"]["error_tests"]))

@@ -7,14 +7,14 @@
 
 | 任务 | 命令 | 成功判据 |
 | --- | --- | --- |
-| 首次源码部署 | `node ops/podman/local.mjs install` | 输出就绪，列出 API、扩展目录与数据库连接信息 |
-| 日常启动/停止 | `node ops/podman/local.mjs up` / `stop` | `up` 输出本机就绪（不代表正式发行验收）；`stop` 保留资料 |
-| 源码升级 | 拉取所需源码后运行 `node ops/podman/local.mjs upgrade` | 升级完成并就绪，Chrome 刷新原扩展 |
-| 故障自检 | `node ops/podman/local.mjs doctor` | 获得 `PASS` / `BLOCKED` / `FAIL` 固定检查摘要；不执行修复 |
+| 首次源码部署 | `node ops/podman/commands/manage-podman-installation.mjs install` | 输出就绪，列出 API、扩展目录与数据库连接信息 |
+| 日常启动/停止 | `node ops/podman/commands/manage-podman-installation.mjs up` / `stop` | `up` 输出本机就绪（不代表正式发行验收）；`stop` 保留资料 |
+| 源码升级 | 拉取所需源码后运行 `node ops/podman/commands/manage-podman-installation.mjs upgrade` | 升级完成并就绪，Chrome 刷新原扩展 |
+| 故障自检 | `node ops/podman/commands/manage-podman-installation.mjs doctor` | 获得 `PASS` / `BLOCKED` / `FAIL` 固定检查摘要；不执行修复 |
 
 需要 M 芯片 Mac、Java 25 JDK、Node.js 22 或以上（含 npm）、Podman 和可用的 Compose provider，以及 Chrome。首次安装需要访问 Maven、npm、GitHub 和容器镜像源；无需安装本机 PostgreSQL、Python 或 Docker Desktop。
 
-在包含本指南和 `ops/podman/local.mjs` 的源码仓库根目录打开终端：
+在包含本指南和 `ops/podman/commands/manage-podman-installation.mjs` 的源码仓库根目录打开终端：
 
 ```sh
 java -version
@@ -39,7 +39,7 @@ Podman machine 未创建时运行 `podman machine init`，已有但未运行时�
 ## 1.2. 首次部署：一条命令
 
 ```sh
-node ops/podman/local.mjs install
+node ops/podman/commands/manage-podman-installation.mjs install
 ```
 
 脚本开头展示本次数据库目标、同版本容器和镜像替换范围、数据保留及失败重试边界，只询问一次“继续安装并使用本机 LexiFlow 数据库？[y/N]”。输入 `y`、`yes` 或“是”后自动连接、检测版本、准备并校验 Java、扩展、镜像与公开 ECDICT 输入，必要时重建专用 schema 并全量导入，最后启动应用并检查正式就绪。回车或选择否不部署；取消或输入结束也不会执行部署。无需填写用户名、密码或复制 hash，确认只对本次运行有效。
@@ -59,7 +59,7 @@ node ops/podman/local.mjs install
 也可以首次安装时指定空闲端口：
 
 ```sh
-node ops/podman/local.mjs install --api-port 18081 --db-port 15433
+node ops/podman/commands/manage-podman-installation.mjs install --api-port 18081 --db-port 15433
 ```
 
 扩展也会自动使用指定的 API 端口。已有安装不能直接改端口；不要停止归属不明的服务来腾端口。
@@ -83,16 +83,16 @@ Chrome 默认与 Podman 在同一台 Mac；不要为了远程浏览器直接将 
 
 ```sh
 # 查看容器及应用是否正式就绪
-node ops/podman/local.mjs status
+node ops/podman/commands/manage-podman-installation.mjs status
 
 # 停止，保留数据库和词库
-node ops/podman/local.mjs stop
+node ops/podman/commands/manage-podman-installation.mjs stop
 
 # 再次启动，不重建镜像、不下载、不重新导入
-node ops/podman/local.mjs up
+node ops/podman/commands/manage-podman-installation.mjs up
 
 # 持续查看新产生的服务日志（Ctrl+C 退出）
-node ops/podman/local.mjs logs
+node ops/podman/commands/manage-podman-installation.mjs logs
 ```
 
 单独出现且少于三个字母的词（如 `UH`、`UM`、`AI`、`TV`）不显示提示；三字母词与完整短语按原有规则处理，短语不会因包含短词而被整体过滤。导入规则变化纳入数据生成版本，部署时据此决定重导；原始来源文件用于离线追溯，数据库不逐词复制来源字段；短词不作为有效提示发布。
@@ -115,7 +115,7 @@ node ops/podman/local.mjs logs
 拉取所需源码后，在原仓库执行一条命令原地升级：
 
 ```sh
-node ops/podman/local.mjs upgrade
+node ops/podman/commands/manage-podman-installation.mjs upgrade
 ```
 
 它沿用安装身份、数据库目标、端口、凭据和 Chrome 扩展目录；旧 API 停机不妨碍检测升级。开头确认一次后，脚本每次重新准备并替换应用镜像与容器，独立判断是否需要数据重导。准备和输入校验失败不修改数据库；需要重导时，专用 schema 重建、全量写入、发布校验和版本记录在同一事务提交，失败回滚原结构和数据。升级成功后，在 `chrome://extensions` **重新加载原插件**，再刷新视频页面，不删除重装或选择新目录。
@@ -125,7 +125,7 @@ node ops/podman/local.mjs upgrade
 查询已安装、本地源码和 GitHub 最新正式版：
 
 ```sh
-node ops/podman/local.mjs version
+node ops/podman/commands/manage-podman-installation.mjs version
 ```
 
 网络失败或还没有正式发行时显示“未知”，不影响本机使用。开发版本如 `2.0.0-SNAPSHOT.20261006.gabc1234`，日期取 Git 提交者时间并固定为 Asia/Shanghai（UTC+08:00），不是本次构建日期；未提交改动附加 `dirty` 和输入摘要，同一输入不会因隔天构建而改变版本号。正式版仍使用纯数字版本。Chrome 展示完整 `version_name`，数字 `version` 单独映射。安装记录在受管目录 `installation-records/`，包含时间、原版本、结果、完整 commit、构建/制品摘要与独立的词库资料身份；该目录属于本机私有运行数据，不上传。
@@ -176,13 +176,13 @@ ssh -N -L 15433:127.0.0.1:15432 用户名@部署Mac的地址
 先用一条命令自检，无需记住多条排查命令；尚未安装也可以执行：
 
 ```sh
-node ops/podman/local.mjs doctor
+node ops/podman/commands/manage-podman-installation.mjs doctor
 ```
 
 需要把结果发给协助排查的人时，生成简短摘要：
 
 ```sh
-node ops/podman/local.mjs doctor --json
+node ops/podman/commands/manage-podman-installation.mjs doctor --json
 ```
 
 自定义安装目录时加同一个 `--dir /绝对路径`。报告只含固定检查项、状态、工具版本和下一步，不含密码、完整配置、宿主路径、数据库内容或原始日志。自检不会创建安装目录、抢安装锁、下载或启动/停止容器。`PASS` 只是本机检查通过；`BLOCKED` 表示缺工具、未安装、服务未启动等前置问题；`FAIL` 表示状态损坏、归属或协议不符。未安装时返回非零是预期，不代表代码坏了。

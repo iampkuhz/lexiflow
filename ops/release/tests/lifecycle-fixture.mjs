@@ -3,10 +3,10 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile, cp, rm, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { resolveBuildIdentity } from '../version.mjs';
+import { resolveBuildIdentity } from '../integrity/source-build-identity.mjs';
 import { extensionBytes } from './zip-fixture.mjs';
-import { packageManifest } from '../package.mjs';
-import { generateRuntimeEntry } from '../runtime-entry.mjs';
+import { packageManifest } from '../build/package-release-artifacts.mjs';
+import { generateRuntimeEntry } from '../build/release-runtime-entry-generator.mjs';
 import { createTransport } from './fake-docker-daemon.mjs';
 
 const sha = (value) => createHash('sha256').update(value).digest('hex');
@@ -16,8 +16,9 @@ export async function lifecycleFixture(t, full = true, variant = '') {
   let daemonOwnsTmp=false;
   t.after(async()=>{if(!daemonOwnsTmp) await rm(tmp,{recursive:true,force:true});});
   const repo = path.join(tmp, 'repo'); await mkdir(path.join(repo, 'ops/release'), { recursive: true });
+  for (const directory of ['build', 'integrity', 'runtime']) await mkdir(path.join(repo, 'ops/release', directory), { recursive: true });
   const local = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-  for (const name of ['version.txt','runtime-entry.mjs','runtime-verification.sh','lifecycle-state.sh','lifecycle-docker.sh','lifecycle.sh']) await cp(path.join(local,name),path.join(repo,'ops/release',name));
+  for (const name of ['version.txt','build/release-runtime-entry-generator.mjs','runtime/release-artifact-verification.sh','runtime/release-installation-state.sh','runtime/release-installation-docker.sh','runtime/release-installation-lifecycle.sh']) await cp(path.join(local,name),path.join(repo,'ops/release',name));
   await writeFile(path.join(repo, 'ops/release/version.txt'), '0.1.0\n');
   execFileSync('git', ['init', '-q', repo]);
   execFileSync('git', ['-C', repo, 'config', 'user.email', 'fixture@example.invalid']);
@@ -45,8 +46,8 @@ export async function lifecycleFixture(t, full = true, variant = '') {
   } else if (full === 'owner-init-fault') {
     // Test-only synthetic fault: exercise the real generated prepare path while
     // making the real lf_owner_init stop after mkdir and before owner publish.
-    const { generateRuntimeEntry } = await import('../runtime-entry.mjs');
-    const [state,docker,lifecycle]=await Promise.all(['lifecycle-state.sh','lifecycle-docker.sh','lifecycle.sh']
+    const { generateRuntimeEntry } = await import('../build/release-runtime-entry-generator.mjs');
+    const [state,docker,lifecycle]=await Promise.all(['runtime/release-installation-state.sh','runtime/release-installation-docker.sh','runtime/release-installation-lifecycle.sh']
       .map((name)=>readFile(path.resolve(local,name),'utf8')));
     const lifecycleBody=`${state}\n${docker}\nlf_random_hex() { return 1; }\n${lifecycle}`;
     generated=await generateRuntimeEntry({repoRoot:repo,descriptor,artifactRoot:root,lifecycleBody});
@@ -54,7 +55,7 @@ export async function lifecycleFixture(t, full = true, variant = '') {
     let body=`lf_verify_release || exit 1\nlf_select_platform linux/amd64 || exit 1\nif [ "\${1:-}" = verify ]; then exit 0; fi\nexit 64`;
     if (full === 'adapter') {
       body=`lf_verify_release || exit 1\nlf_select_platform linux/amd64 || exit 1\ncase "\${1:-}" in\n _fixture_init) LF_ROOT=$2; parent=$(dirname -- "$LF_ROOT"); lf_owner_init && lf_state_load && printf '%s|%s|%s\\n' "$LF_INSTALL_ID" "$LF_PHASE" "$LF_ACTIVE";;\n _fixture_write) LF_ROOT=$2; lf_state_load && lf_lock_acquire && lf_state_write prepared none none $3 none none;;\n _fixture_load) LF_ROOT=$2; lf_state_load && printf '%s|%s|%s\\n' "$LF_PHASE" "$LF_ACTIVE" "$LF_CANDIDATE";;\n *) exit 64;;\nesac`;
-      const [state,docker]=await Promise.all(['lifecycle-state.sh','lifecycle-docker.sh'].map((name)=>readFile(path.resolve(local,name),'utf8')));
+      const [state,docker]=await Promise.all(['runtime/release-installation-state.sh','runtime/release-installation-docker.sh'].map((name)=>readFile(path.resolve(local,name),'utf8')));
       body=`${state}\n${docker}\n${body}`;
     }
     generated=await generateRuntimeEntry({repoRoot:repo,descriptor,artifactRoot:root,lifecycleBody:body});

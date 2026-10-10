@@ -6,7 +6,9 @@ import contextlib
 import io
 import unittest
 
-from scripts.repository import docs_check, hooks, local_skills, planning_check
+from scripts.checks.repository.documentation import check_documentation as docs_check
+from scripts.local import manage_local_skill_links as local_skills
+from scripts.checks.repository.catalog import check_task_catalog as planning_check
 
 
 class PublicCliContractTest(unittest.TestCase):
@@ -16,7 +18,6 @@ class PublicCliContractTest(unittest.TestCase):
             (planning_check.main, ["--root", "."]),
             (planning_check.main, ["--verbose"]),
             (local_skills.main, ["check", "--source", "/tmp"]),
-            (hooks.main, ["doctor", "--root", "."]),
         )
         for entry, argv in calls:
             with self.subTest(entry=entry.__module__, argv=argv), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

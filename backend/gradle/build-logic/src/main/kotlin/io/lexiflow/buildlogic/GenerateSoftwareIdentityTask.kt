@@ -19,7 +19,7 @@ import javax.inject.Inject
  * 类型化身份生成任务：在执行阶段调用 Node 生成完整身份。
  *
  * - 配置阶段不执行 Node/Git，仅声明输入/输出。
- * - 执行阶段通过 [ExecOperations] 调用 node ops/release/version.mjs。
+ * - 执行阶段通过 [ExecOperations] 调用 node ops/release/integrity/source-build-identity.mjs。
  * - 不使用 @CacheableTask，因为身份依赖 Git 状态（dirty/sourceSha256）。
  * - outputs.upToDateWhen { false } 确保每次执行都重新生成。
  */

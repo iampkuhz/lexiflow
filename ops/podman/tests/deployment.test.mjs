@@ -6,7 +6,7 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { createDeploymentPlan, deploymentPlanHash, confirmDeploymentPlan, confirmDeploymentIntent, writeOperationJournal, readOperationJournal, executeDeployment } from '../deployment.mjs';
+import { createDeploymentPlan, deploymentPlanHash, confirmDeploymentPlan, confirmDeploymentIntent, writeOperationJournal, readOperationJournal, executeDeployment } from '../installation/installation-plan-records.mjs';
 
 const hex = 'a'.repeat(64);
 const plan = extra => createDeploymentPlan({ operation: 'install', installation: 'local-x', targetBuildId: hex,
@@ -59,7 +59,7 @@ test('interactive confirmation EOF and cancellation terminate promptly without c
 });
 
 test('confirmation terminates a real child process with stdin still open', async () => {
-  const moduleUrl = new URL('../deployment.mjs', import.meta.url).href;
+  const moduleUrl = new URL('../installation/installation-plan-records.mjs', import.meta.url).href;
   for (const answer of ['y\n', 'n\n', null, 'abort']) {
     const script = `import { confirmDeploymentIntent } from ${JSON.stringify(moduleUrl)};
       process.stdin.isTTY = true; process.stdout.isTTY = true;

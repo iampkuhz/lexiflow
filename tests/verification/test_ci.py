@@ -11,8 +11,8 @@ from unittest.mock import patch
 
 import yaml
 
-from scripts.verification import ci
-from scripts.verification.declarations import load_declarations
+from scripts.triggers import run_ci_quick_checks as ci
+from scripts.verification.planning.check_definitions import load_declarations
 from tests.verification.declaration_fixtures import write_declarations
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,27 +25,33 @@ class CiQuickTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         (self.root / "harness").mkdir()
-        (self.root / "scripts/repository").mkdir(parents=True)
+        (self.root / "scripts/checks/repository").mkdir(parents=True)
         self.declarations = load_declarations(ROOT)
-        write_declarations(self.root / "harness/module-checks.yaml", self.declarations["checks"])
+        write_declarations(
+            self.root / "config/engineering/module-checks.yaml", self.declarations["checks"]
+        )
         self.policy = {
-            "schema_version": "lexiflow.ci-quick.v1",
             "always_required_check_ids": [
                 "eng.release.version",
                 "eng.repository.docs",
-                "eng.repository.policy",
             ],
-            "formal_only_check_ids": ["eng.release.lifecycle-runtime", "eng.release.candidate-runtime"],
+            "formal_only_check_ids": [
+                "eng.release.lifecycle-runtime",
+                "eng.release.candidate-runtime",
+            ],
         }
         self._write_policy()
-        (self.root / "scripts/repository/quality.py").write_text("fixture")
+        (self.root / "scripts/checks/repository/run_repository_check_group.py").write_text("fixture")
         self.base_patches()
 
     def tearDown(self) -> None:
         self.temp.cleanup()
 
     def _write_policy(self) -> None:
-        (self.root / "harness/ci-policy.yaml").write_text(yaml.safe_dump(self.policy))
+        path = self.root / ci.MODULES
+        document = yaml.safe_load(path.read_bytes())
+        document["scenario_policy"]["ci_quick"] = self.policy
+        path.write_text(yaml.safe_dump(document))
 
     def base_patches(self, changed: list[str] | None = None) -> None:
         self.base_context = patch.object(ci, "_base", return_value="a" * 40)
@@ -59,16 +65,41 @@ class CiQuickTests(unittest.TestCase):
 
     def test_public_summary_excludes_private_payloads(self) -> None:
         secret = "private-caption-and-token-value"
-        result = {"kind": "ci-quick", "status": "FAIL", "diagnostic": secret,
-                  "selected_diagnostic": {"selected_report": {"checks": [{
-                      "check_id": "eng.fixture", "status": "FAIL", "reason": secret,
-                      "process": {"exit_code": 1, "stderr": secret},
-                      "result_contract": {"report": {"checks_run": 2, "detail": {
-                          "failed_tests": ["tests.fixture.Test.test_failure", secret + " /private"],
-                          "issues": [secret], "traceback": secret}}}}]}}}
+        result = {
+            "kind": "ci-quick",
+            "status": "FAIL",
+            "diagnostic": secret,
+            "selected_diagnostic": {
+                "selected_report": {
+                    "checks": [
+                        {
+                            "check_id": "eng.fixture",
+                            "status": "FAIL",
+                            "reason": secret,
+                            "process": {"exit_code": 1, "stderr": secret},
+                            "result_contract": {
+                                "report": {
+                                    "checks_run": 2,
+                                    "detail": {
+                                        "failed_tests": [
+                                            "tests.fixture.Test.test_failure",
+                                            secret + " /private",
+                                        ],
+                                        "issues": [secret],
+                                        "traceback": secret,
+                                    },
+                                }
+                            },
+                        }
+                    ]
+                }
+            },
+        }
         summary = ci.public_summary(result, self.root)
         self.assertNotIn(secret, json.dumps(summary))
-        self.assertEqual(summary["checks"][0]["test_ids"], ["tests.fixture.Test.test_failure"])
+        self.assertEqual(
+            summary["checks"][0]["test_ids"], ["tests.fixture.Test.test_failure"]
+        )
         self.assertFalse(summary["formal_eligible"])
 
     def test_real_backend_extension_docs_and_version_mapping(self) -> None:
@@ -87,21 +118,28 @@ class CiQuickTests(unittest.TestCase):
         plan = ci.make_plan(self.root)
         self.assertEqual(plan["checks_executed"], 0)
         with patch.object(
-            ci, "changed_paths", return_value=["ops/release/runtime-entry.mjs"]
+            ci, "changed_paths", return_value=["ops/release/build/release-runtime-entry-generator.mjs"]
         ):
             plan = ci.make_plan(self.root)
         self.assertNotIn("eng.release.lifecycle-runtime", plan["selected_check_ids"])
-        self.assertEqual(set(plan["deferred_for_formal"]), {"eng.release.lifecycle-runtime", "eng.release.candidate-runtime"})
+        self.assertEqual(
+            set(plan["deferred_for_formal"]),
+            {"eng.release.lifecycle-runtime", "eng.release.candidate-runtime"},
+        )
         self.assertNotIn("eng.release.candidate-runtime", plan["selected_check_ids"])
+
+    def test_run_rejects_retired_execute_mode(self):
+        with self.assertRaises(TypeError):
+            ci.run(self.root, execute=False)
 
     def test_uncovered_unknown_and_missing_profile_fail(self) -> None:
         with patch.object(ci, "changed_paths", return_value=["mystery.file"]):
-            self.assertEqual(ci.run(self.root, execute=False)["status"], "FAIL")
+            self.assertEqual(ci.run(self.root)["status"], "FAIL")
         self.policy["always_required_check_ids"] = ["unknown.id"]
         self._write_policy()
-        self.assertEqual(ci.run(self.root, execute=False)["status"], "FAIL")
-        (self.root / ci.POLICY).unlink()
-        self.assertEqual(ci.run(self.root, execute=False)["status"], "FAIL")
+        self.assertEqual(ci.run(self.root)["status"], "FAIL")
+        (self.root / ci.MODULES).unlink()
+        self.assertEqual(ci.run(self.root)["status"], "FAIL")
 
     def test_formal_dependency_closure_is_rejected(self) -> None:
         baseline = next(
@@ -109,116 +147,60 @@ class CiQuickTests(unittest.TestCase):
             for item in self.declarations["checks"]
             if item["check_id"] == "eng.extension.quality"
         )
-        baseline["module_dependencies"] = ["release-lifecycle-runtime"]
-        (self.root / ci.MODULES).write_text(yaml.safe_dump(self.declarations))
+        baseline["module_dependencies"] = ["eng.release.lifecycle-runtime"]
+        write_declarations(self.root / ci.MODULES, self.declarations["checks"])
         self.policy["always_required_check_ids"] = ["eng.extension.quality"]
         self._write_policy()
         with patch.object(ci, "changed_paths", return_value=[]):
-            self.assertEqual(ci.run(self.root, execute=False)["status"], "FAIL")
+            self.assertEqual(ci.run(self.root)["status"], "FAIL")
 
     def test_invalid_policy_fields_and_always_formal_rejected(self) -> None:
         self.policy["extra"] = True
         self._write_policy()
-        self.assertEqual(ci.run(self.root, execute=False)["status"], "FAIL")
+        self.assertEqual(ci.run(self.root)["status"], "FAIL")
         self.policy.pop("extra")
         self.policy["always_required_check_ids"] = ["eng.release.lifecycle-runtime"]
         self._write_policy()
-        self.assertEqual(ci.run(self.root, execute=False)["status"], "FAIL")
+        self.assertEqual(ci.run(self.root)["status"], "FAIL")
 
     def test_base_injection_and_noncommit_rejected(self) -> None:
         self.base_context.stop()
-        self.assertEqual(ci.run(self.root, "x" * 39, execute=False)["status"], "FAIL")
+        self.assertEqual(ci.run(self.root, "x" * 39)["status"], "FAIL")
         with patch.object(
             ci.subprocess,
             "run",
             return_value=subprocess.CompletedProcess([], 1, "", ""),
         ):
-            self.assertEqual(
-                ci.run(self.root, "a" * 40, execute=False)["status"], "FAIL"
-            )
+            self.assertEqual(ci.run(self.root, "a" * 40)["status"], "FAIL")
 
-    def test_results_are_order_independent_but_exact_set_required(self) -> None:
+    def test_ci_does_not_convert_partial_repository_qualification(self):
+        import inspect
+
+        source = inspect.getsource(ci.run)
+        self.assertNotIn("diagnose(", source)
+        self.assertNotIn("partial-check-selection", source)
+        self.assertIn("_execute(", source)
+
+    def test_profile_drift_after_plan_fails_before_execution(self):
         plan = ci.make_plan(self.root)
-        ids = plan["selected_check_ids"]
-        checks = [{"check_id": item, "status": "PASS"} for item in reversed(ids)]
-        report = {
-            "checks": checks,
-            "coverage_gaps": [],
-            "executed_check_ids": ids,
-            "reason": "partial-check-selection",
-        }
-        with patch.object(
-            ci,
-            "diagnose",
-            return_value={"selected_result": "BLOCKED", "selected_report": report},
-        ):
-            outcome = ci.run(self.root, execute=True)
-        self.assertEqual(outcome["status"], "PASS")
-        self.assertEqual(outcome["selected_diagnostic"]["selected_result"], "BLOCKED")
-        self.assertFalse(outcome["formal_eligible"])
-        for altered in (
-            checks + [checks[0]],
-            checks[:-1],
-            checks + [{"check_id": "extra", "status": "PASS"}],
-        )[:]:
-            report["checks"] = altered
-            with patch.object(
-                ci,
-                "diagnose",
-                return_value={"selected_result": "BLOCKED", "selected_report": report},
-            ):
-                self.assertEqual(ci.run(self.root, execute=True)["status"], "FAIL")
-
-    def test_real_blocked_and_fail_are_not_upgraded(self) -> None:
-        plan = ci.make_plan(self.root)
-        ids = plan["selected_check_ids"]
-        for status in ("BLOCKED", "FAIL"):
-            report = {
-                "checks": [{"check_id": item, "status": "PASS"} for item in ids],
-                "coverage_gaps": [],
-                "executed_check_ids": ids,
-                "reason": "environment-unavailable",
-            }
-            result = {"selected_result": status, "selected_report": report}
-            with patch.object(ci, "diagnose", return_value=result):
-                self.assertEqual(ci.run(self.root, execute=True)["status"], status)
-
-    def test_profile_and_source_drift_after_plan_fail(self) -> None:
-        (self.root / "scripts/repository/quality.py").write_text("initial")
-        with patch.object(ci, "changed_paths", return_value=[]):
-            plan = ci.make_plan(self.root)
-        ids = plan["selected_check_ids"]
-        report = {
-            "checks": [{"check_id": item, "status": "PASS"} for item in ids],
-            "coverage_gaps": [],
-            "executed_check_ids": ids,
-            "reason": "partial-check-selection",
-        }
-
-        def drift_source(*args, **kwargs):
-            (self.root / "scripts/repository/quality.py").write_text("changed")
-            return {"selected_result": "BLOCKED", "selected_report": report}
-
-        with (
-            patch.object(ci, "make_plan", return_value=plan),
-            patch.object(ci, "diagnose", side_effect=drift_source),
-        ):
-            self.assertEqual(ci.run(self.root, execute=True)["status"], "FAIL")
-
+        (self.root / ci.MODULES).write_text(
+            (self.root / ci.MODULES).read_text() + "# drift\n"
+        )
         with patch.object(ci, "make_plan", return_value=plan):
-            (self.root / "harness/ci-policy.yaml").write_text(
-                (self.root / "harness/ci-policy.yaml").read_text() + "# drift\n"
-            )
-            self.assertEqual(ci.run(self.root, execute=True)["status"], "FAIL")
+            self.assertEqual(ci.run(self.root)["status"], "FAIL")
 
     def test_real_diagnostic_executes_synthetic_command_without_formal_publication(
         self,
     ) -> None:
-        """使用真实 Diagnose/Kernel 执行合成命令，不把 partial 报告升级成 Formal。"""
+        """使用真实固定 Kernel 执行合成命令，CI 不转换诊断或部分仓库资格。"""
         self.policy["always_required_check_ids"] = ["eng.release.version"]
         self._write_policy()
         declarations = []
-        for check_id in ("eng.release.version", "eng.release.lifecycle-runtime", "eng.release.candidate-runtime"):
+        for check_id in (
+            "eng.release.version",
+            "eng.release.lifecycle-runtime",
+            "eng.release.candidate-runtime",
+        ):
             check = dict(
                 next(
                     item
@@ -249,21 +231,17 @@ class CiQuickTests(unittest.TestCase):
                 )
                 for check in declarations:
                     check["command"] = ["python3", "-c", f"print({payload!r})"]
-                write_declarations(self.root / ci.MODULES, declarations)
-                result = ci.run(self.root, execute=True)
+                write_declarations(
+                    self.root / ci.MODULES, declarations, ci_quick=self.policy
+                )
+                result = ci.run(self.root)
                 self.assertEqual(result["status"], status, result)
                 self.assertEqual(result["checks_executed"], 1)
                 self.assertFalse(result["formal_eligible"])
                 self.assertFalse(result["full_repository_executed"])
                 diagnostic = result["selected_diagnostic"]
-                self.assertEqual(
-                    diagnostic["selected_result"],
-                    status,
-                )
-                self.assertEqual(
-                    diagnostic["qualification_result"],
-                    "BLOCKED" if status == "PASS" else "FAIL",
-                )
+                self.assertEqual(diagnostic["kind"], "ci-quick-execution")
+                self.assertNotIn("qualification_result", diagnostic)
                 self.assertNotIn("publication", diagnostic["selected_report"])
 
     def test_all_mode_uses_git_visible_paths_and_mutual_exclusion(self) -> None:
@@ -271,9 +249,7 @@ class CiQuickTests(unittest.TestCase):
             plan = ci.make_plan(self.root, all_paths=True)
         self.assertEqual(plan["base"], "all")
         self.assertIn("eng.extension.quality", plan["selected_check_ids"])
-        self.assertEqual(
-            ci.run(self.root, "a" * 40, execute=False, all_paths=True)["status"], "FAIL"
-        )
+        self.assertEqual(ci.run(self.root, "a" * 40, all_paths=True)["status"], "FAIL")
 
 
 if __name__ == "__main__":

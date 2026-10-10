@@ -12,4 +12,4 @@
 | 准备运行环境或定位失败 | [验证环境](../scenarios/verification-environment.md)、[排障](troubleshooting.md) | 不把缺环境称为检查通过 |
 | 了解 CI 与发行检查入口 | [GitHub Actions](../scenarios/github-actions.md)、[Docker 发行](../scenarios/docker-release.md) | 不把普通 CI 与完整发行验证混成一种范围 |
 
-质量检查产出输入上的事实报告；交付验收独立判断 Task 证据充分性、独立性、当前性及依赖批准。场景、检查范围、CLI／Stop／CI 入口与 actor 是不同维度，不构成并列门禁层次。唯一机器合同见 [Harness](../../harness/README.md)。
+质量检查产出输入上的事实报告；交付验收独立判断 Task 证据充分性、独立性、当前性及依赖批准。场景、检查范围、CLI／Stop／CI 入口与 actor 是不同维度，不构成并列门禁层次。规则与配置导航见 [Harness](../../harness/README.md)。

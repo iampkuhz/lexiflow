@@ -6,13 +6,13 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { runDocker } from '../build-command.mjs';
-import { buildCandidateImages } from '../build-execution.mjs';
-import { resolveBuildIdentity } from '../version.mjs';
+import { runDocker } from '../build/release-build-process.mjs';
+import { buildCandidateImages } from '../build/release-image-builder.mjs';
+import { resolveBuildIdentity } from '../integrity/source-build-identity.mjs';
 import { jarBytes, makeZip } from './zip-fixture.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const templates = ['ops/docker/.dockerignore', 'ops/docker/Dockerfile', 'ops/docker/Dockerfile.postgres', 'ops/docker/bootstrap.sh', 'ops/docker/entrypoint.sh'];
+const templates = ['ops/docker/.dockerignore', 'ops/docker/Dockerfile', 'ops/docker/Dockerfile.postgres', 'ops/docker/initialize-postgres-app-role.sh', 'ops/docker/run-container-command.sh'];
 const hash = (data) => createHash('sha256').update(data).digest('hex');
 const ids = { 'linux/amd64': ['sha256:' + 'a'.repeat(64), 'sha256:' + 'b'.repeat(64)], 'linux/arm64': ['sha256:' + 'c'.repeat(64), 'sha256:' + 'd'.repeat(64)] };
 const finalIds = { 'linux/amd64': ['sha256:' + 'e'.repeat(64), 'sha256:' + 'f'.repeat(64)], 'linux/arm64': ['sha256:' + '1'.repeat(64), 'sha256:' + '2'.repeat(64)] };
@@ -21,13 +21,14 @@ const git = (root, args, options = {}) => execFileSync('git', ['-C', root, ...ar
 async function fixture() {
   const root = await realpath(await import('node:fs/promises').then(({ mkdtemp }) => mkdtemp(path.join(os.tmpdir(), 'lexiflow-execution-'))));
   await mkdir(path.join(root, 'ops/release'), { recursive: true });
+  for (const directory of ['build', 'integrity', 'runtime']) await mkdir(path.join(root, 'ops/release', directory), { recursive: true });
   await mkdir(path.join(root, 'ops/docker'), { recursive: true });
   for (const relative of templates) await writeFile(path.join(root, relative), await readFile(path.join(repo, relative)));
   const syntheticLock = ['linux/amd64', 'linux/arm64'].map((platform) => ({ platform,
     javaRuntime: { reference: `registry.example.invalid/library/java@${ids[platform][0]}`, imageId: ids[platform][0] },
     postgresRuntime: { reference: `registry.example.invalid/library/postgres@${ids[platform][1]}`, imageId: ids[platform][1] } }));
   await writeFile(path.join(root, 'ops/docker/base-images.json'), `${JSON.stringify({ schemaVersion: 1, baseImages: syntheticLock }, null, 2)}\n`);
-  for (const name of ['version.mjs', 'manifest.mjs']) await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repo, 'ops/release', name)));
+  for (const name of ['integrity/source-build-identity.mjs', 'integrity/release-artifact-manifest.mjs']) await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repo, 'ops/release', name)));
   await writeFile(path.join(root, 'ops/release/version.txt'), '2.0.0\n');
   await writeFile(path.join(root, '.gitignore'), '/artifact/\n');
   execFileSync('git', ['init', '-q', root], { timeout: 10_000 });
@@ -74,7 +75,7 @@ if (op === 'image' && args[1] === 'inspect') {
 }
 if (op === 'build') {
   const platform = args[args.indexOf('--platform') + 1]; const iid = args[args.indexOf('--iidfile') + 1];
-  const expected = ['.dockerignore','Dockerfile','Dockerfile.postgres','bootstrap.sh','entrypoint.sh','lexiflow-api.jar'];
+  const expected = ['.dockerignore','Dockerfile','Dockerfile.postgres','initialize-postgres-app-role.sh','lexiflow-api.jar','run-container-command.sh'];
   const actual = fs.readdirSync(process.cwd()).sort(); fs.appendFileSync(path.join(root, 'contexts.jsonl'), JSON.stringify({ platform, files: actual }) + '\\n');
   if (JSON.stringify(actual) !== JSON.stringify(expected)) { process.stderr.write('wrong context'); process.exit(31); }
   const imageIndex = iid.startsWith('api') ? 0 : 1;

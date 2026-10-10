@@ -29,32 +29,32 @@
 
 | 标识／类别 | 当前问题与证据 | 需要确认的设计及验收边界 |
 | --- | --- | --- |
-| ARCH-GATE-01：执行层次设计 | [submit](../../../../scripts/delivery_gate/submit.py) 要求开发来源报告；[validate](../../../../scripts/delivery_gate/validate.py) 仍独立执行计划。高风险开发与正式验证可能覆盖相近昂贵 Check；[复用合同](../../../../harness/agent-policy.manifest.yaml) 禁止自检到 Formal 及跨交付复用 | 评估两次完整覆盖是否都必要、各自提供何种不可替代证明，以及能否在独立身份／输入冻结／必需覆盖均保留的前提下缩短关键路径。现有证据支持设计评估，不证明重复本身是 bug，不授权省略任一层 |
-| ARCH-GATE-02：环境责任设计 | [Hook](../../../../scripts/verification/delivery_hook.py) 自动拥有隔离服务 lease；[development CLI](../../../../scripts/verification/development.py) 与 [Formal validate](../../../../scripts/delivery_gate/validate.py) 依赖调用者确认环境，详见[环境说明](../../../scenarios/verification-environment.md) | 评估“执行同一检查能力”是否需要统一受控环境准备与清理的接口，或维持不同职责但建立一致用户入口。不得复用已清理 lease、开发库／未知资源，也不默认安装或下载；需用失败／取消／归属回归证明 |
+| ARCH-GATE-01：执行层次设计 | [submit](../../../../scripts/acceptance/task_operations/submit_task_for_acceptance.py) 要求开发来源报告；[validate](../../../../scripts/acceptance/task_operations/run_independent_task_validation.py) 仍独立执行计划。高风险开发与正式验证可能覆盖相近昂贵 Check；[复用合同](../../../../harness/agent-policy.md) 禁止自检到 Formal 及跨交付复用 | 评估两次完整覆盖是否都必要、各自提供何种不可替代证明，以及能否在独立身份／输入冻结／必需覆盖均保留的前提下缩短关键路径。现有证据支持设计评估，不证明重复本身是 bug，不授权省略任一层 |
+| ARCH-GATE-02：环境责任设计 | [Hook](../../../../scripts/triggers/run_stop_checks.py) 自动拥有隔离服务 lease；[development CLI](../../../../scripts/verification/commands/run_development_checks.py) 与 [Formal validate](../../../../scripts/acceptance/task_operations/run_independent_task_validation.py) 依赖调用者确认环境，详见[环境说明](../../../scenarios/verification-environment.md) | 评估“执行同一检查能力”是否需要统一受控环境准备与清理的接口，或维持不同职责但建立一致用户入口。不得复用已清理 lease、开发库／未知资源，也不默认安装或下载；需用失败／取消／归属回归证明 |
 | ARCH-GATE-03：开发检查预算 | 释放应用内存后的独立 Stop 为 1462.68 秒（24 分 23 秒）；23 次物理命令、18 项同事务复用、741 项输入无漂移。实测比同代码主要对照少 118.50 秒，不能把单次差异全归因于环境 | Docker 合同 448.04 秒、Verify 与 Gate 工具自测合计 251.60 秒；Java delivery 与构建合同共 283.52 秒。外层未细分差额仅 21.05 秒。选择范围与内部执行成本都需处理，不减断言、不放宽超时、不跨交付复用；逐项证据在 round5-memory-freeze 的 ignored 目录 |
 | ARCH-GATE-04：检查取消边界 | Verify 对整个 Check 进程组使用 0.5 秒 TERM 宽限；Docker 夹具内存在独立进程组 | 本轮不采用额外 worker 并行：无法在该边界内证明取消后回收。原型仅留临时证据，源码已恢复；后续若重做并行，应先定义和验证完整进程归属与取消协议，不能扩大超时掩盖问题 |
-| ARCH-GATE-05：Docker helper 回收 | 已从 [真实 timer 源码](../../../../ops/release/lifecycle-docker.sh) 在后台启动与 PID 登记之间加入同步探针：旧 handler 会遗弃存活 helper；现行逻辑在登记后兑现取消并完整回收 | [直接回归](../../../../ops/docker/tests/test_docker_bounds.py) 保留全部原断言，确定性覆盖 budget 与 grace 两个窗口及旧 handler 反例；10 项直接测试及完整独立 Stop 中相同 10 项均通过，独立源码／冻结证据审查无阻断。原故障 PID 属于哪个 helper 无法追溯；这是已修复机制的开发验证，不是永不重现或整轮提速保证 |
+| ARCH-GATE-05：Docker helper 回收 | 已从 [真实 timer 源码](../../../../ops/release/runtime/release-installation-docker.sh) 在后台启动与 PID 登记之间加入同步探针：旧 handler 会遗弃存活 helper；现行逻辑在登记后兑现取消并完整回收 | [直接回归](../../../../ops/docker/tests/test_docker_bounds.py) 保留全部原断言，确定性覆盖 budget 与 grace 两个窗口及旧 handler 反例；10 项直接测试及完整独立 Stop 中相同 10 项均通过，独立源码／冻结证据审查无阻断。原故障 PID 属于哪个 helper 无法追溯；这是已修复机制的开发验证，不是永不重现或整轮提速保证 |
 | ARCH-GATE-06：性能测量环境 | 经用户明确授权删除 LexiFlow 容器、保留卷，并终止 Chrome 与 IntelliJ 后完成一次整轮复测；运行期间采集 26 个内存样本，swap 约 12.5–13.6 GiB，压缩内存仍有波动 | 释放内存有改善但不足以解决整体等待，不能归咎单个应用或以环境变化代替源码优化。仅精确处理已获授权的资源，不关闭未知进程；原始样本位于 round5-memory-freeze 临时证据 |
 | ARCH-GATE-07：风险等级与默认检查范围耦合 | 日常入口已改为按变化选择，不因高风险追加全仓基线。消费审查发现的 API→扩展 E2E、Verification/策略/环境/Catalog→Gate 与 Verification fixture 输入遗漏已补齐；21 对声明、精确冻结场景及四个 Python 工程模块的递归静态导入均纳入直接回归 | LF-TSK-QLT-2118 v2 的定向回归及独立源码复核通过；最新完成的开发检查已覆盖选择矩阵和 Docker 固定分组，无覆盖缺口。这不是 Formal 验收。Formal 高风险基线与 review、显式完整 Verify 和发行仍保留 |
 | ARCH-GATE-08：生命周期检查耗时与诊断 | 原入口复测仍曾触发 120 秒上限，主要成本在模型之外。测试客户端现已将两次逐流计数合为一次 `wc`、两步清理合为显式非递归 `rm -d`；每请求少启动两个工具进程，未减少身份查询、模型执行或断言 | 最新完整生命周期检查 7 项 PASS、0 跳过，747 项冻结文件无漂移，独立只读复核通过；包装墙钟 114.22 秒包含末尾哈希快照，不是精确子进程时长。距原上限仍近，单次样本不证明稳定裕量或整轮收益。原六项用例全部保留，新增长度损坏／响应缺失／未知残留回归；已纳入最新完成的正常 Stop；不代表正式发行验收 |
-| ARCH-GATE-09：测试入口超时后的后代回收 | [runTests](../../../../ops/release/check.mjs) 已用本次 spawn 创建的私有进程组回收测试后代，timeout／输出超限及上级 TERM／INT 都立即强杀该组；不增加原取消宽限 | LF-TSK-QLT-2120 的 5 项定点回归及独立只读复核通过。真实系统信号测试保持上级 0.5 秒强杀边界，核对 supervisor／worker 已退出、独立哨兵仍活与监听器恢复；原测试保留。证据仅覆盖当前 POSIX 环境，已纳入最新完成的正常 Stop；此修复不证明生命周期耗时问题已解决 |
-| ARCH-SCRIPT-01：脚本入口设计 | [delivery_gate/__main__.py](../../../../scripts/delivery_gate/__main__.py) 统一分派子命令；`submit.py`、`validate.py`、`review.py`、`check.py` 分别提供场景 API，不是独立 CLI | 按文件优先说明职责，区分公开 CLI、内部函数与人工步骤。是否进一步要求每种流程独立可执行文件、一个公开入口，需单独评估；本次只如实标注入口，不改文件结构或接口 |
-| ARCH-CONFIG-01：固定协议与运行参数 | [Stop 配置](../../../../harness/delivery-hooks.json) 只保留模式、期限与进度间隔；事件、停用变量名、中间标记固定在入口实现 | 配置精简已实现，最终开发验证以本轮冻结证据为准；不改变期限上限、进度、取消、停用未验证及独立验收语义，不宣称分钟级提速 |
-| ARCH-CONFIG-02：配置职责与失效范围 | [Check 声明](../../../../harness/module-checks.yaml) 已分离唯一执行定义与选择列表；共享 Agent 规则只维护在 policy，删除同步投影链；仍按完整声明字节绑定输入 | 继续评估剩余声明归实际实现模块、Catalog 规约与任务数据分离、路径输入去重；需逐消费者证明覆盖完整，不能只搬目录或扩大自由配置。见[配置地图](../../../reference/configuration.md) |
+| ARCH-GATE-09：测试入口超时后的后代回收 | [runTests](../../../../ops/release/test_tools/run-release-tool-tests.mjs) 已用本次 spawn 创建的私有进程组回收测试后代，timeout／输出超限及上级 TERM／INT 都立即强杀该组；不增加原取消宽限 | LF-TSK-QLT-2120 的 5 项定点回归及独立只读复核通过。真实系统信号测试保持上级 0.5 秒强杀边界，核对 supervisor／worker 已退出、独立哨兵仍活与监听器恢复；原测试保留。证据仅覆盖当前 POSIX 环境，已纳入最新完成的正常 Stop；此修复不证明生命周期耗时问题已解决 |
+| ARCH-SCRIPT-01：脚本入口设计 | [delivery_gate/__main__.py](../../../../scripts/acceptance/__main__.py) 统一分派子命令；`submit.py`、`validate.py`、`review.py`、`check.py` 分别提供场景 API，不是独立 CLI | 按文件优先说明职责，区分公开 CLI、内部函数与人工步骤。是否进一步要求每种流程独立可执行文件、一个公开入口，需单独评估；本次只如实标注入口，不改文件结构或接口 |
+| ARCH-CONFIG-01：固定协议与运行参数 | [Stop 入口](../../../../scripts/triggers/run_stop_checks.py) 固定期限与进度间隔；事件、停用变量名、中间标记也由入口实现 | 配置精简已实现，最终开发验证以本轮冻结证据为准；不改变期限上限、进度、取消、停用未验证及独立验收语义，不宣称分钟级提速 |
+| ARCH-CONFIG-02：配置职责与失效范围 | [Check 声明](../../../../config/engineering/module-checks.yaml) 统一 Check、场景资格与 triggers，CI 集合共用 Registry；人类规则在 Harness Markdown，机器配置在 config/engineering，固定合同归实现；仍按完整声明字节绑定输入 | 继续评估剩余声明归实际实现模块、Catalog 规约与任务数据分离、路径输入去重；需逐消费者证明覆盖完整，不能只搬目录或扩大自由配置。见[配置地图](../../../reference/configuration.md) |
 | ARCH-GATE-10：变更类型与验收范围的分类标准 | 用户认可开发反馈、任务验收、正式发行三种结果；倾向规约 Markdown 归说明类，而不是仅因目录位置触发高风险全仓验收。当前机器判据仍按现行路径与内容执行 | 说明与规约、模块内行为、执行契约与工程机制的分类，以及正式高风险基线的必要性，先形成有覆盖证明的方案；不把阅读分类当作现有选择算法已改变。正式范围调整与目录改名尚未授权直接实施 |
 
 ## 1.5. 文档整理与验证边界
 
 目录与合同整理已落地：唯一工程入口是 [docs/README](../../../README.md)，系统主题、真实任务和查阅分别位于 system、scenarios、reference；roadmap 与 user 保留独立职责。原三个视角目录已合并删除，Harness、Catalog、风险路径及引用者同步，未降低门禁覆盖。
 
-工作区实现已获用户认可，文档据其实际行为同步；该认可不替代当前输入的自动检查或 Formal 验收。本轮纠正原生路由／既有 Qoder 记录边界、日常 Hook 的服务准备和 Git Hook 资产检查说明，补齐窗口、工具链及部署／发行脚本定位。用户已批准并实施三体系阅读结构：质量检查、交付验收、工程协作与运行支撑；按整体模型、分体系说明、操作与实现细节下钻，理解审查与日常操作分别进入。检查库存移至按需 Reference，脚本按 CLI、适配器、内部库与人工步骤标识。不改变门禁逻辑、检查集合或脚本接口；本轮证据与此前批次分开，未签发 Formal receipt。
+本轮文档按深度精简实现同步：开发只保留唯一 diff 报告与精确诊断，Registry 合并 canonical Check/scene 和 CI policy，Git 提醒入口删除，环境与来源身份保持真实认证，Codex 每 Task 只引用不可变父合同，Gate 使用唯一活动 namespace 和最新 schema。六个受影响图已从 ignored 草稿实际校验、渲染、查看并原样复制；文档静态检查通过只证明链接和结构，不构成独立验收。用户已确认无外部旧运行或收据需要续用，Qoder 委派与旧事实消费说明已退役；仅保留手工客户端 Stop 与权限 profile。源码集成与独立验收按后续真实证据报告。
 
 | 用户要求 | 当前实现 | 核对入口 |
 | --- | --- | --- |
 | 一个生命周期，阶段清晰 | 通用范围与验收合并；实现自检和交付证明分层；维护包括文档，无额外反馈阶段 | [总入口](../../../README.md) |
 | 场景不是组件 | 修改导入、执行门禁、优化门禁分别成页；优化页回链执行页，不复制运行子图 | [功能变更](../../../scenarios/change-lexicon-import.md)、[执行](../../../scenarios/run-repository-gates.md)、[优化](../../../scenarios/optimize-repository-gates.md) |
 | 阅读分层；目的先于实现清单 | 总览区分三体系；操作入口按目标选择；逐项检查库存侧链到 Reference，不把用途、场景、范围、入口混为层次 | [工程总览](../../../system/engineering.md)、[执行场景](../../../scenarios/run-repository-gates.md)、[检查清单](../../../reference/verification/check-catalog.md) |
-| 原则属于 Harness | 文档合同已归入现有 policy，docs 只保留导航与维护操作，不另存原则清单 | [documentation-policy](../../../../harness/documentation-policy.yaml)、[维护步骤](../../../scenarios/maintain-documentation.md) |
+| 原则属于 Harness | 文档人类规则在 Harness Markdown，docs 只保留导航与维护操作，不另存原则清单 | [documentation-policy](../../../../harness/documentation-policy.md)、[维护步骤](../../../scenarios/maintain-documentation.md) |
 | 唯一正文及关联引用 | 来源／字幕合并；决策理由随系统主题维护；总入口和本机操作索引合并；未改图保留字节，修订的共用检查图重新校验、渲染与视觉核对后复制正文 | [系统](../../../system.md)、[本机开发](../../../scenarios/local-development.md) |
 | IDE 链接和加粗 | 主导航采用相对文件链接；结束加粗标记与后文分隔 | 相对链接与片段已静态核对；本轮未重新执行 IDE 实点，阅读效果由用户 review 确认 |
 
@@ -66,12 +66,12 @@
 
 | 状态 | 已实现或待处理内容 | 核对与验收边界 |
 | --- | --- | --- |
-| 已完成开发验证 | 日常按变更与消费依赖选择；Docker 固定为 surface、shell、local、node，保留聚合基线 | [选择与检查声明](../../../../harness/module-checks.yaml)；未知输入、删除、遗漏和重复失败关闭。单行 Java 不因“高风险”自动触发全部 Docker，实际范围仍取决于同工作区累计 diff |
+| 已完成开发验证 | 日常按变更与消费依赖选择；Docker 固定为 surface、shell、local、node，保留聚合基线 | [选择与检查声明](../../../../config/engineering/module-checks.yaml)；未知输入、删除、遗漏和重复失败关闭。单行 Java 不因“高风险”自动触发全部 Docker，实际范围仍取决于同工作区累计 diff |
 | 已完成开发验证 | 非安装场景改用每例独立准备，首次安装覆盖保留在专门测试；真实状态对照、损坏拒绝与隔离检查共 43 例 | [准备合同](../../../../openspec/changes/gate-test-performance/ready-precondition.md)；最新完成整轮中这 43 例合计 181.85 秒，包含新增对照成本，不缓存 PASS |
 | 已完成开发验证 | 批量写 Git 索引、合并 Git 元数据读取、按内容复用纯 YAML 解析、有限测试模型常驻及心跳虚拟时钟 | [性能优化合同](../../../../openspec/changes/gate-test-performance/proposal.md)；保留源身份重读、可变状态隔离、原测试断言、失败与取消回收，不用微基准比例外推整轮 |
 | 已完成开发验证 | fake Docker 正常响应清理合并一次显式文件删除 | [清理合同](../../../../openspec/changes/gate-test-performance/ownership-cleanup.md)；正常 Stop 已覆盖 5 项新增回归；保留未知文件拒绝、部分失败、清理间隙取消与私有进程回收，不为小收益引入通用框架 |
 | 不采纳 | Gradle 并行实验、共享 Git fixture seed | 并行未证明整轮收益且有取消边界成本；单次 build fixture 的 Git 准备仅约 0.11 秒，没有引入跨例共享复杂度的收益证据 |
-| 待优化 | [Git 提醒](../../../../.githooks/pre-commit)仍同时指向完整 Change／Repository Verify；非交付 Stop 仍依赖明确的中间标记 | 提醒应与日常入口一致；非交付意图不能通过猜测聊天语义判定。两项不得借机跳过正常交付检查 |
+| 实施待独立验收 | 仓库 Git 提醒 Hook 已删除；Stop 通过精确中间标记区分真正非交付回合 | 普通交付不使用中间标记，不据此声明 PASS；客户端真实触发仍须独立确认 |
 | 待决策 | 正式高风险验收范围、剩余配置职责分离、脚本目录命名与环境入口统一 | 见 1.4；先给具体调整及覆盖证明，再由用户确认。独立验证不消费实现者 PASS 代替执行 |
 
 最近完成的正常 Stop 为 `cd075d6d-026b-4307-95e8-a8b9c5015af9`：25 项逻辑 PASS、22 次物理执行、3 项合法同事务别名；Verification 571 例、Gate 122 例、Docker Python 197 例与 Node 130 例均无失败或跳过。757 项输入无漂移，隔离 PostgreSQL／Redis 已清理，窗口再次取得与释放通过；原始证据及独立审查在 ignored `tmp/quality/gate-test-performance/round24-cleanup-freeze/`。
@@ -82,8 +82,6 @@ submit／冻结只绑定输入；正式 validate 执行检查；review 和 check
 
 ## 1.7. 文件地图与配置职责审查
 
-本次接手将真实文件编号串入[工程目录与生命周期](../../../system/engineering.md)，[脚本索引](../../../reference/scripts.md#16-文件编号索引)维护唯一 F01—F23 映射，[执行场景](../../../scenarios/run-repository-gates.md)按开发反馈、任务验收与正式发行说明交接。规约写作要求已同步到 Harness；没有修改风险选择、脚本接口或验收独立性。
+[工程目录与生命周期](../../../system/engineering.md)和[脚本索引](../../../reference/scripts.md#16-文件编号索引)只引用实际存在的文件；开发反馈、完整 Repository、正式 Task 与发行交接范围保持分离。当前深度精简实现及逐包直接证据留在 ignored `tmp/quality/deep-simplification/`；独立集成验证、Formal 与公开发布尚未完成，不继承旧输入 PASS。
 
-配置精简合同见 [OpenSpec](../../../../openspec/changes/simplify-engineering-configuration/proposal.md)。本轮删除固定协议配置、重复执行定义、共享规则副本及投影工具；消费关系更新在[配置地图](../../../reference/configuration.md)。检查选择、资源保护与独立验收不随精简改变；不作目录／命令批量改名或正式验收范围调整。
-
-用户已确认其他会话停止写入。本轮子任务只做轻量自检，集中整合后冻结输入，由独立执行者运行一次正常 Stop，审查者只读冻结差异与证据。运行结果留在 ignored `tmp/quality/configuration-simplification/final-validation/`，不能把子任务完成或旧输入 PASS 当作本轮验收，也不签发 Formal receipt。
+文档消费关系见[配置地图](../../../reference/configuration.md)，操作接口见[执行场景](../../../scenarios/run-repository-gates.md)。父任务冻结最终输入后交给真实独立执行者运行所需检查，review/catalog 只读核对证据，不重跑命令。已退役链的 ignored 原始记录保留字节，不再消费。

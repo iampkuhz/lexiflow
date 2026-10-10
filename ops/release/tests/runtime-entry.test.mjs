@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, realpath, rename, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { generateRuntimeEntry } from '../runtime-entry.mjs';
-import { resolveBuildIdentity } from '../version.mjs';
+import { generateRuntimeEntry } from '../build/release-runtime-entry-generator.mjs';
+import { resolveBuildIdentity } from '../integrity/source-build-identity.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { cp, rm } from 'node:fs/promises';
 import { extensionBytes } from './zip-fixture.mjs';
-import { packageManifest } from '../package.mjs';
-import { manifestSha256, serializeManifest } from '../manifest.mjs';
+import { packageManifest } from '../build/package-release-artifacts.mjs';
+import { manifestSha256, serializeManifest } from '../integrity/release-artifact-manifest.mjs';
 import fsPromises from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 
@@ -19,7 +19,7 @@ async function cleanFixture(t) {
   const temp = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-runtime-entry-fixture-')));
   const repo = path.join(temp, 'repo');
   await mkdir(repo);
-  for (const item of ['ops/release', 'ops/release/tests']) await mkdir(path.join(repo, item), { recursive: true });
+  for (const item of ['ops/release', 'ops/release/tests', 'ops/release/runtime']) await mkdir(path.join(repo, item), { recursive: true });
   const original = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
   await cp(path.join(original, 'version.txt'), path.join(repo, 'ops/release/version.txt'));
   execFileSync('git', ['init', '-q', repo]);
@@ -321,7 +321,7 @@ test('verified runtime facts stay in the shell and are not exported to child env
 
 test('default lifecycle body retains NUL rejection after reading source-root templates', async t => {
   const f = await cleanFixture(t);
-  for (const [name, content] of [['lifecycle-state.sh', '# state\n'], ['lifecycle-docker.sh', '# docker\n'], ['lifecycle.sh', 'invalid\u0000body']]) {
+  for (const [name, content] of [['runtime/release-installation-state.sh', '# state\n'], ['runtime/release-installation-docker.sh', '# docker\n'], ['runtime/release-installation-lifecycle.sh', 'invalid\u0000body']]) {
     await writeFile(path.join(f.repo, 'ops/release', name), content);
   }
   execFileSync('git', ['-C', f.repo, 'add', '.']);

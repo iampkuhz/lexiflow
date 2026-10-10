@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { canonicalJson } from '../../dataset/generation-version.mjs';
-import { probeExternal, inspectDevelopmentTrust } from '../database-target.mjs';
-import { assertDevelopmentTargetIdentity } from '../unified-local.mjs';
+import { canonicalJson } from '../../dataset/dataset-generation-identity.mjs';
+import { probeExternal, inspectDevelopmentTrust } from '../environment/local-database-target.mjs';
+import { assertDevelopmentTargetIdentity } from '../installation/installation-upgrade-workflow.mjs';
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'lexiflow-db-target-'));

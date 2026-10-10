@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { cleanupPreparedTree, writePreparedTree } from '../prepare-workspace.mjs';
+import { cleanupPreparedTree, writePreparedTree } from '../installation/installation-workspace-journal.mjs';
 
 function fixture() { const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiflow-prepare-')); return { dir, work: path.join(dir, 'work') }; }
 test('known partial bytes are safely cleaned after a persisted pending intent', async () => {
