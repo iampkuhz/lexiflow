@@ -21,7 +21,6 @@ agent_contract:
   module_boundaries: harness/module-boundaries.yaml
   java_product: harness/java-product.manifest.yaml
   documentation_policy: harness/documentation-policy.yaml
-  policy_projections: harness/policy-projections.yaml
   delivery_hooks: harness/delivery-hooks.json
   test_services: harness/test-services.json
   python_quality: harness/python-quality.toml
@@ -43,7 +42,6 @@ public_executables:
   java_exec: python3 -m scripts.environment.java_exec <native-command>
   local_api: python3 -m scripts.environment.start_api
   docs_check: python3 -m scripts.repository.docs_check
-  policy_projection: python3 -m scripts.repository.policy_projection
   local_skills: python3 -m scripts.repository.local_skills
   python_quality: python3 -m scripts.repository.python_quality
   delivery_hook: python3 scripts/verification/delivery_hook.py
@@ -95,17 +93,20 @@ quality:
   - FAIL
 docs:
 - docs/README.md
-- docs/product/product-brief.md
-- docs/product/glossary.md
-- docs/architecture/overview.md
-- docs/architecture/flows.md
-- docs/development/overview.md
-- docs/development/change-delivery.md
-- docs/development/agent-workflow.md
-- docs/development/operations.md
-- docs/development/operations/github-actions.md
-- docs/development/reference.md
-- docs/development/troubleshooting.md
+- docs/system/experience.md
+- docs/reference/product-glossary.md
+- docs/system.md
+- docs/system/engineering.md
+- docs/system/quality-checks.md
+- docs/system/delivery-acceptance.md
+- docs/system/engineering-support.md
+- docs/system/flows.md
+- docs/reference/checks.md
+- docs/scenarios/delegate-work.md
+- docs/scenarios/local-development.md
+- docs/scenarios/github-actions.md
+- docs/reference.md
+- docs/reference/troubleshooting.md
 - docs/roadmap/master-plan.md
 - docs/roadmap/master-plan/phase2.md
 - docs/roadmap/master-plan/phase2/design.md

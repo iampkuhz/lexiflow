@@ -9,12 +9,16 @@ import unittest
 from unittest.mock import patch
 
 import yaml
+from scripts.verification.declarations import load_declarations
+from tests.verification.declaration_fixtures import write_declarations
 
+from scripts.delivery_gate.acceptance import acceptance_plan
 from scripts.verification.development import (
     prepare_development,
     execute_development,
     main,
 )
+from scripts.verification.scenarios import freeze_inputs
 from tests.delivery_gate.fixtures import DeliveryGateFixture
 
 
@@ -23,17 +27,17 @@ class DevelopmentTest(unittest.TestCase):
         self.f = DeliveryGateFixture()
         self.addCleanup(self.f.cleanup)
 
-    def test_unknown_engineering_diff_requires_two_views_without_formal_runtime(self):
+    def test_unknown_engineering_diff_uses_daily_targeted_view_without_formal_runtime(self):
         self.f.write("src/test.py", "source subject\n")
         prepared = prepare_development(self.f.root)
         self.assertEqual("high-risk-engineering", prepared["risk_assessment"]["level"])
         self.assertEqual(
-            ["development-change", "development-baseline"],
+            ["development-change"],
             [item["verification_scope"] for item in prepared["frozen_profiles"]],
         )
         actual = execute_development(self.f.root, prepared=prepared)
         self.assertEqual("PASS", actual["result"], actual)
-        self.assertEqual(2, len(actual["reports"]))
+        self.assertEqual(1, len(actual["reports"]))
         self.assertFalse(actual["formal_receipt_issued"])
         for report in actual["reports"]:
             self.assertNotEqual("repository-baseline", report["scope"])
@@ -43,12 +47,12 @@ class DevelopmentTest(unittest.TestCase):
 
     def test_plain_user_document_is_single_view_and_unrelated_write_is_allowed(self):
         path = self.f.root / "harness/module-checks.yaml"
-        declarations = yaml.safe_load(path.read_text())
+        declarations = load_declarations(self.f.root)
         for check in declarations["checks"]:
             if check["check_id"] in {"fixture.change", "fixture.baseline"}:
                 check["triggers"].append({"path": "docs/user/"})
                 check["input_paths"].append("docs/user")
-        path.write_text(yaml.safe_dump(declarations))
+        write_declarations(path, declarations["checks"])
         self.f.write("docs/user/help.md", "原说明。\n")
         self.f._git("add", ".")
         self.f._git("commit", "-m", "user docs fixture")
@@ -63,6 +67,26 @@ class DevelopmentTest(unittest.TestCase):
         self.assertEqual(
             "FAIL", execute_development(self.f.root, prepared=prepared)["result"]
         )
+
+    def test_deleted_and_untracked_subjects_remain_in_daily_change_coverage(self):
+        self.f.write("src/deleted.py", "tracked source\n")
+        self.f._git("add", "src/deleted.py")
+        self.f._git("commit", "-m", "add tracked source")
+        (self.f.root / "src/deleted.py").unlink()
+        self.f.write("src/untracked.py", "new source\n")
+
+        prepared = prepare_development(self.f.root)
+        self.assertEqual("high-risk-engineering", prepared["risk_assessment"]["level"])
+        self.assertEqual(["development-change"], [
+            profile["verification_scope"] for profile in prepared["frozen_profiles"]
+        ])
+        changed = prepared["frozen_profiles"][0]["changed_files"]
+        self.assertEqual(["src/deleted.py", "src/untracked.py"], changed)
+
+    def test_uncovered_unknown_path_blocks_daily_preparation(self):
+        self.f.write("unmapped/new.py", "unknown path\n")
+        with self.assertRaisesRegex(ValueError, "development-coverage-gap"):
+            prepare_development(self.f.root)
 
     def test_cli_has_no_scope_or_risk_override_and_clean_is_not_pass(self):
         for args in (
@@ -90,6 +114,51 @@ class DevelopmentTest(unittest.TestCase):
             result = execute_development(self.f.root, prepared=prepared)
         self.assertEqual("FAIL", result["result"])
         execute.assert_not_called()
+
+    def test_formal_runtime_selectors_are_excluded_only_from_daily_freeze(self):
+        declarations_path = self.f.root / "harness/module-checks.yaml"
+        declarations = load_declarations(self.f.root)
+        api_paths = ["backend/product/api/src/main/java/example/Api.java"]
+        lexicon_paths = ["backend/product/lexicon/src/main/java/example/Entry.java"]
+        for check in declarations["checks"]:
+            if check["check_id"] in {
+                "fixture.change",
+                "eng.release.lifecycle-runtime-on-change",
+                "eng.release.candidate-runtime-on-change",
+            }:
+                check["triggers"] = [
+                    {"path": path.rsplit("/", 1)[0] + "/"}
+                    for path in api_paths + lexicon_paths
+                ]
+        write_declarations(declarations_path, declarations["checks"])
+
+        frozen = freeze_inputs(
+            self.f.root,
+            verification_scope="development-change",
+            base="HEAD",
+            _subject_changed_files=sorted(api_paths + lexicon_paths),
+        )
+        self.assertEqual("PASS", frozen["result"], frozen)
+        selected = {check["check_id"] for check in frozen["checks"]}
+        self.assertIn("fixture.change", selected)
+        self.assertNotIn("eng.release.lifecycle-runtime-on-change", selected)
+        self.assertNotIn("eng.release.candidate-runtime-on-change", selected)
+
+        high_risk = {
+            "schema_version": "lexiflow.risk-assessment.v1",
+            "level": "high-risk-engineering",
+            "coverage_gaps": [],
+            "required_check_ids": ["fixture.change"],
+        }
+        plan = acceptance_plan(
+            self.f.root,
+            high_risk,
+            {"required_check_ids": ["fixture.change"]},
+        )
+        self.assertEqual("development-baseline", plan["verification_scope"])
+        self.assertEqual(
+            ["TASK_VALIDATION", "INDEPENDENT_REVIEW"], plan["required_layers"]
+        )
 
 
 if __name__ == "__main__":

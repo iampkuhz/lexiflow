@@ -286,12 +286,13 @@ class TestManagedTestServices(unittest.TestCase):
                 pass
         self.assertFalse(self.fake.resources)
 
-    def test_hook_runs_both_verify_without_exported_test_addresses(self):
+    def test_hook_runs_daily_profile_without_exported_test_addresses(self):
         _init_git_repo(self.root)
         (self.root / ".gitignore").write_text("harness/\ntmp/\nfixture/\n")
         (self.root / "fixture").mkdir()
         (self.root / "fixture/check.py").write_text(
             "import os\nassert os.environ['LEXIFLOW_REDIS_TEST_ENDPOINT']=='127.0.0.1:56379'\n"
+            "print('{\"status\":\"PASS\",\"checks_run\":1,\"failures\":0,\"errors\":0,\"skipped\":0,\"reason\":\"\"}')\n"
         )
         (self.root / "harness/delivery-hooks.json").write_bytes(
             (ROOT / "harness/delivery-hooks.json").read_bytes()
@@ -349,10 +350,9 @@ class TestManagedTestServices(unittest.TestCase):
             output = delivery_hook.evaluate(self.root, {"hook_event_name": "Stop"})
         self.assertIn("交付 PASS", output["systemMessage"])
         self.assertNotIn("decision", output)
-        self.assertEqual(
-            2,
-            len(list((self.root / "tmp/quality/verification-reports").glob("*.json"))),
-        )
+        reports = list((self.root / "tmp/quality/verification-reports").glob("*.json"))
+        self.assertEqual(1, len(reports))
+        self.assertEqual("development-change", json.loads(reports[0].read_text())["scope"])
         self.assertTrue(self.receipt()["cleanup_verified"])
 
     def test_progress_distinguishes_gradle_pass_from_unexecuted_blocked(self):

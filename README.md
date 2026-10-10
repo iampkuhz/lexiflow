@@ -32,8 +32,8 @@ node ops/podman/local.mjs logs     # 持续查看本机新日志，Ctrl+C 退出
 
 CSV、词库 ZIP、密码与安装文件不进入 Git。本机可运行不等于正式验收通过，进展见[执行状态](docs/roadmap/master-plan/phase2/status.md)。
 
-既有 Docker 发行入口的操作仍见[生命周期指南](docs/development/operations/docker-release.md)，不得与 Podman 验证项目混用同一数据空间。
+既有 Docker 发行入口的操作仍见[生命周期指南](docs/scenarios/docker-release.md)，不得与 Podman 验证项目混用同一数据空间。
 
 ## 本地启动
 
-macOS 源码开发者进入[本机编译、配置与启动](docs/development/operations/local-experience.md#12-初始化本地配置再启动确定性-api)。开发工具链和词库重建只用于开发库，不用于 Docker 发行安装数据。
+macOS 源码开发者进入[本机编译、配置与启动](docs/scenarios/local-development.md)。开发工具链和词库重建只用于开发库，不用于 Docker 发行安装数据。

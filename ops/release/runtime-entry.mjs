@@ -3,7 +3,7 @@ import { lstat, link, open, readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createManifest, serializeManifest, verifyContainedFile } from './manifest.mjs';
-import { checkReleaseSource, resolveBuildIdentity, assertBuildIdentityMatches } from './version.mjs';
+import { resolveCleanBuildIdentity, assertBuildIdentityMatches } from './version.mjs';
 
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 const fail = (code) => { throw new Error(code); };
@@ -74,7 +74,7 @@ async function makeScript(body, manifest) {
 }
 
 function sourceIdentity(repoRoot) {
-  try { checkReleaseSource(repoRoot); return resolveBuildIdentity(repoRoot); } catch { fail('RELEASE_SOURCE_REJECTED'); }
+  try { return resolveCleanBuildIdentity(repoRoot); } catch { fail('RELEASE_SOURCE_REJECTED'); }
 }
 async function assertNoSymlinkPath(target) {
   const absolute = path.resolve(target); let cursor = path.parse(absolute).root;

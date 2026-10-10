@@ -58,4 +58,4 @@
 
 从后续待办池抽取时，先对齐瓶颈、收益或语义质量目标，再展开具体合同；不按技术名词预建任务，不将本页全部内容自动塞入同一阶段。
 
-共享边界：[运行安全](../../architecture/runtime-safety.md)、[词库合同](../../architecture/lexicon-contract.md)。执行情况只看[状态页](phase2/status.md)。
+共享边界：[运行安全](../../system/runtime-safety.md)、[词库合同](../../system/lexicon.md)。执行情况只看[状态页](phase2/status.md)。

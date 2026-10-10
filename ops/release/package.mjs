@@ -6,7 +6,7 @@ import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildManifest, manifestSha256, serializeManifest, verifyContainedFile } from './manifest.mjs';
-import { checkReleaseSource, resolveBuildIdentity, assertBuildIdentityMatches } from './version.mjs';
+import { resolveCleanBuildIdentity, assertBuildIdentityMatches } from './version.mjs';
 
 function reject(code) { throw new Error(code); }
 async function assertNoSymlinkPath(target, allowMissing = true) {
@@ -63,12 +63,11 @@ export async function packageManifest({ repoRoot, descriptorFile, artifactRoot, 
   await assertNoSymlinkPath(descriptorPath, false); await assertNoSymlinkPath(root, false); await assertNoSymlinkPath(output, true);
   if (within(root, output)) reject('OUTPUT_INSIDE_ARTIFACT_ROOT');
   const descriptor = await readDescriptor(descriptorPath);
-  checkReleaseSource(path.resolve(repoRoot));
-  const sourceIdentity = resolveBuildIdentity(path.resolve(repoRoot));
+  const sourceIdentity = resolveCleanBuildIdentity(path.resolve(repoRoot));
   const manifest = await buildManifest({ repoRoot: path.resolve(repoRoot), descriptor, artifactRoot: root });
   const assertSourceUnchanged = () => {
     let current;
-    try { checkReleaseSource(path.resolve(repoRoot)); current = resolveBuildIdentity(path.resolve(repoRoot)); } catch { reject('RELEASE_SOURCE_CHANGED'); }
+    try { current = resolveCleanBuildIdentity(path.resolve(repoRoot)); } catch { reject('RELEASE_SOURCE_CHANGED'); }
     try { assertBuildIdentityMatches(current, sourceIdentity); } catch { reject('RELEASE_SOURCE_CHANGED'); }
   };
   assertSourceUnchanged();

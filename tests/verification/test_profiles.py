@@ -15,13 +15,18 @@ from scripts.verification import (
     verify_frozen_inputs,
     verify_profile,
 )
+from tests.verification.declaration_fixtures import write_declarations
 
 
 def _check(check_id: str, scope: str = "repository-baseline") -> dict:
     return {
         "check_id": check_id,
         "module": check_id,
-        "command": ["python3", "-c", "pass"],
+        "command": [
+            "python3",
+            "-c",
+            "import json; print(json.dumps({'status':'PASS','checks_run':1,'failures':0,'errors':0,'skipped':0,'reason':''}))",
+        ],
         "executable": "python3",
         "cwd": ".",
         "timeout_seconds": 5,
@@ -46,11 +51,7 @@ class DevelopmentProfileFreezeTests(unittest.TestCase):
                 _check("eng.release.candidate-runtime"),
                 _check("synthetic.release.lifecycle"),
             ]
-            (root / "harness/module-checks.yaml").write_text(
-                yaml.safe_dump(
-                    {"schema_version": "lexiflow.module-checks.v1", "checks": checks}
-                )
-            )
+            write_declarations(root / "harness/module-checks.yaml", checks)
             (root / "harness/ci-policy.yaml").write_text(
                 yaml.safe_dump(
                     {
@@ -79,13 +80,9 @@ class DevelopmentProfileFreezeTests(unittest.TestCase):
             (root / "harness").mkdir()
             (root / "src").mkdir()
             (root / "src/input.txt").write_text("fixture")
-            (root / "harness/module-checks.yaml").write_text(
-                yaml.safe_dump(
-                    {
-                        "schema_version": "lexiflow.module-checks.v1",
-                        "checks": [_check("eng.release.lifecycle-runtime")],
-                    }
-                )
+            write_declarations(
+                root / "harness/module-checks.yaml",
+                [_check("eng.release.lifecycle-runtime")],
             )
             (root / "harness/ci-policy.yaml").write_text(
                 yaml.safe_dump(
@@ -106,13 +103,9 @@ class DevelopmentProfileFreezeTests(unittest.TestCase):
             (root / "harness").mkdir()
             (root / "src").mkdir()
             (root / "src/input.txt").write_text("seed")
-            (root / "harness/module-checks.yaml").write_text(
-                yaml.safe_dump(
-                    {
-                        "schema_version": "lexiflow.module-checks.v1",
-                        "checks": [_check("src.check", "change-targeted")],
-                    }
-                )
+            write_declarations(
+                root / "harness/module-checks.yaml",
+                [_check("src.check", "change-targeted")],
             )
             (root / "harness/ci-policy.yaml").write_text(
                 yaml.safe_dump({"formal_only_check_ids": ["release.runtime"]})
@@ -181,11 +174,7 @@ class DevelopmentProfileFreezeTests(unittest.TestCase):
             (root / "src").mkdir()
             (root / "src/input.txt").write_text("fixture")
             checks = [_check("baseline.one"), _check("eng.release.lifecycle-runtime")]
-            (root / "harness/module-checks.yaml").write_text(
-                yaml.safe_dump(
-                    {"schema_version": "lexiflow.module-checks.v1", "checks": checks}
-                )
-            )
+            write_declarations(root / "harness/module-checks.yaml", checks)
             freeze = freeze_inputs(root)
             report = verify_profile(
                 root, frozen_inputs=freeze, execution_mode="diagnostic"

@@ -1,4 +1,4 @@
-"""文档治理、本机 skill 与共享策略投影的独立回归。"""
+"""文档治理、本机 skill 与共享策略的独立回归。"""
 import subprocess
 import tempfile
 import unittest
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts.repository import docs_check, local_skills, policy_projection
+from scripts.repository import docs_check, local_skills
 
 
 class DocumentationTests(unittest.TestCase):
@@ -47,7 +47,7 @@ class DocumentationTests(unittest.TestCase):
         for check_id in ('eng.repository.module-tests', 'eng.repository.module-tests-on-change'):
             check = next(item for item in registry['checks'] if item['check_id'] == check_id)
             self.assertIn({'path': '.gitignore'}, check['triggers'])
-            self.assertIn('.gitignore', check['input_paths'])
+            self.assertIn('.gitignore', registry['executions'][check['execution']]['input_paths'])
 
     def test_diagram_workflow_uses_tmp_drafts_and_markdown_final_source(self):
         root = Path(__file__).resolve().parents[2]
@@ -71,6 +71,36 @@ class DocumentationTests(unittest.TestCase):
         self.assertNotIn('overview_roots', architecture)
         self.assertNotIn('overview_max_bytes', architecture)
         self.assertIn('不设固定模板、数量或字节预算', architecture['rule'])
+
+    def test_documentation_policy_consolidation_contract(self):
+        root = Path(__file__).resolve().parents[2]
+        policy = yaml.safe_load((root / 'harness/documentation-policy.yaml').read_text())
+        architecture = policy['information_architecture']
+        self.assertEqual(architecture['lifecycle_entry'], 'docs/README.md')
+        self.assertEqual(architecture['canonical_roots'], {
+            'system': 'docs/system.md', 'system_details': 'docs/system/',
+            'scenarios': 'docs/scenarios/', 'reference': 'docs/reference.md',
+            'reference_details': 'docs/reference/', 'roadmap': 'docs/roadmap/',
+            'user': 'docs/user/'})
+        self.assertEqual(architecture['source_of_truth']['engineering_rules'],
+                         ['AGENTS.md', 'harness/'])
+        self.assertEqual(architecture['source_of_truth']['execution_state'], 'status-page-only')
+        self.assertEqual(architecture['organization']['principle'], 'unique-body-per-fact')
+        self.assertTrue(architecture['organization'][
+            'optimized_workflows_reference_execution_workflows_without_copying_subflows'])
+        self.assertEqual(architecture['note_contract']['abstract_stage'], ['input', 'action', 'output'])
+        self.assertEqual(architecture['note_contract']['concrete_execution'],
+                         ['entrypoint', 'purpose', 'expected-duration'])
+        self.assertTrue(architecture['note_contract']['unknown_is_not_expected'])
+        self.assertTrue(architecture['organization']['omit_empty_helper_branches'])
+        for locator in architecture['canonical_roots'].values():
+            self.assertTrue((root / locator).exists(), locator)
+        for obsolete in ('architecture', 'product', 'development'):
+            self.assertFalse((root / 'docs' / obsolete).exists(), obsolete)
+        self.assertEqual(policy['terminology']['engineering_glossary'],
+                         'docs/reference/engineering-glossary.md')
+        self.assertEqual(policy['terminology']['product_glossary'],
+                         'docs/reference/product-glossary.md')
 
     def test_documentation_rejects_candidate_solution_headings(self):
         policy = {'selected_solution_only': {
@@ -301,79 +331,27 @@ class DocumentationTests(unittest.TestCase):
             self.assertEqual((root / '.agents/skills/demo').resolve(), (source / 'demo').resolve())
             self.assertTrue((root / '.agents/skills/demo/installed-resource').is_file())
 
-    def test_projection_no_mutation_and_explicit_write(self):
-        with tempfile.TemporaryDirectory() as d:
-            root = Path(d)
-            (root / 'harness').mkdir()
-            (root / 'harness/policy.yaml').write_text('model:\n  name: luna\n  values: [1, 2]\n')
-            (root / 'harness/policy-projections.yaml').write_text(yaml.safe_dump({
-                'source': 'harness/policy.yaml', 'projections': [
-                    {'file': 'target.yaml', 'target': 'execution.model', 'source': 'model'}]}))
-            target = root / 'target.yaml'
-            original = '# 保留\nexecution:\n  model:\n    name: wrong\n    values: [3]\nother: hand-written\n'
-            target.write_text(original)
-            self.assertTrue(policy_projection.run(root))
-            self.assertEqual(target.read_text(), original)
-            policy_projection.run(root, write=True)
-            self.assertEqual(policy_projection.run(root), [])
-            self.assertIn('# 保留', target.read_text())
-            self.assertEqual(yaml.safe_load(target.read_text())['other'], 'hand-written')
-            self.assertEqual(yaml.safe_load(target.read_text())['execution']['model']['values'], [1, 2])
-
-    def test_repository_projections_match(self):
-        root = Path(__file__).resolve().parents[2]
-        self.assertEqual(policy_projection.run(root), [])
-
-    def test_dispatch_policy_reaches_all_runtime_consumers(self):
+    def test_dispatch_policy_is_the_single_runtime_source(self):
         root = Path(__file__).resolve().parents[2]
         policy = yaml.safe_load((root / 'harness/agent-policy.manifest.yaml').read_text())
-        expected = policy['agent_dispatch']
-        self.assertEqual(expected['primary'], 'native-codex')
-        self.assertEqual(expected['default_implementer'], 'native-codex')
-        self.assertTrue(expected['qoder_automatic_dispatch'] == 'forbidden')
-        self.assertEqual(policy['qoder_delegation']['default_implementer'], 'legacy-records-only')
-        self.assertTrue(expected['failure_unit'].startswith('legacy-'))
-        self.assertIn('原生 Codex 子代理', (root / 'harness/README.md').read_text())
-        self.assertNotIn('实现优先 Qoder', (root / 'harness/README.md').read_text())
-        self.assertEqual(expected['fallback_model'], 'gpt-6-luna')
-        self.assertEqual(expected['max_consecutive_failures'], 3)
-        rules = yaml.safe_load((root / 'harness/policy-projections.yaml').read_text())['projections']
-        consumers = {
-            ('harness/agent-runtime.manifest.yaml', 'agent_dispatch'),
-            ('planning/task-template.yaml', 'execution.agent_dispatch'),
-            ('planning/workstreams.yaml', 'orchestration_policy.agent_dispatch'),
-        }
-        projected = {(r['file'], r['target']) for r in rules if r.get('source') == 'agent_dispatch'}
-        self.assertEqual(projected, consumers)
-        for name, target in consumers:
-            current = yaml.safe_load((root / name).read_text())
-            self.assertEqual(policy_projection.lookup(current, target), expected)
-
-    def test_native_acceptance_and_exception_task_have_one_policy_source(self):
-        root = Path(__file__).resolve().parents[2]
-        policy = yaml.safe_load((root / 'harness/agent-policy.manifest.yaml').read_text())
+        dispatch = policy['agent_dispatch']
+        self.assertEqual(dispatch['primary'], 'native-codex')
+        self.assertEqual(dispatch['fallback_model'], 'gpt-6-luna')
+        self.assertEqual(dispatch['max_consecutive_failures'], 3)
         runtime = yaml.safe_load((root / 'harness/agent-runtime.manifest.yaml').read_text())
-        dispatch = policy['codex_dispatch']
-        self.assertEqual(runtime['codex_dispatch'], dispatch)
-        self.assertFalse(dispatch['acceptance']['independent_host_session_required'])
-        self.assertFalse(dispatch['acceptance']['extra_independence_attestation_required'])
-        self.assertTrue(dispatch['acceptance']['implementer_must_not_validate_or_review'])
-        exception = dispatch['new_session_exception']
-        self.assertEqual(exception['minimum_passed_subagent_validation_rounds'], 2)
-        self.assertEqual(exception['default'], 'forbidden-for-internal-delegation')
-        self.assertEqual(len(exception['required_evidence']), 4)
-        self.assertTrue(exception['explicit_create_thread_model_and_thinking_required'])
-        self.assertTrue(exception['verify_actual_model_after_start'])
-        model = policy['subagent_protocol']['codex_model_policy']
-        self.assertEqual(model['applies_to'], 'codex-delegated-work-including-exception-task')
-        self.assertEqual(model['default_model'], 'gpt-6-luna')
-        self.assertEqual(policy['agent_dispatch']['fallback_model'], model['default_model'])
+        self.assertNotIn('agent_dispatch', runtime)
+        self.assertNotIn('codex_dispatch', runtime)
+        self.assertIn('agent-policy.manifest.yaml', (root / 'harness/agent-runtime.manifest.yaml').read_text())
 
-    def test_projection_preserves_indented_sibling_after_block_mapping(self):
-        source = 'execution:\n  model:\n    name: old\n  caller_field_schema:\n    goal: string\n'
-        updated = policy_projection.replace_block(source, 'execution.model', {'name': 'new'})
-        self.assertEqual(yaml.safe_load(updated), {'execution': {
-            'model': {'name': 'new'}, 'caller_field_schema': {'goal': 'string'}}})
+    def test_policy_has_actual_acceptance_identity_boundary(self):
+        root = Path(__file__).resolve().parents[2]
+        policy = yaml.safe_load((root / 'harness/agent-policy.manifest.yaml').read_text())
+        acceptance = policy['codex_dispatch']['acceptance']
+        self.assertTrue(acceptance['implementer_must_not_validate_or_review'])
+        self.assertTrue(acceptance['reviewer_must_differ_from_validator'])
+        exception = policy['codex_dispatch']['new_session_exception']
+        self.assertEqual(exception['default'], 'forbidden-for-internal-delegation')
+        self.assertTrue(exception['verify_actual_model_after_start'])
 
 
 if __name__ == '__main__':

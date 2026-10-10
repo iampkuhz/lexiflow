@@ -6,7 +6,7 @@ import contextlib
 import io
 import unittest
 
-from scripts.repository import docs_check, hooks, local_skills, planning_check, policy_projection
+from scripts.repository import docs_check, hooks, local_skills, planning_check
 
 
 class PublicCliContractTest(unittest.TestCase):
@@ -15,7 +15,6 @@ class PublicCliContractTest(unittest.TestCase):
             (docs_check.main, ["--root", "."]),
             (planning_check.main, ["--root", "."]),
             (planning_check.main, ["--verbose"]),
-            (policy_projection.main, ["--check", "--root", "."]),
             (local_skills.main, ["check", "--source", "/tmp"]),
             (hooks.main, ["doctor", "--root", "."]),
         )

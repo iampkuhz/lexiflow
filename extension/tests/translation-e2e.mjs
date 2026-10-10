@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
-import { once } from "node:events";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm, readFile, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,7 +8,7 @@ import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import { openActionPopup } from "./action-popup.mjs";
-import { createApiLaunchSpec } from "./e2e-runtime.mjs";
+import { createApiLaunchSpec, stopApi } from "./e2e-runtime.mjs";
 import { resolveBuildIdentity } from "../../ops/release/version.mjs";
 import { createExtensionZip } from "../scripts/release.mjs";
 
@@ -73,24 +72,6 @@ async function waitForApi(process) {
     await delay(1000);
   }
   throw new Error(`API did not become ready:\n${logs}`);
-}
-
-function killProcessGroup(pid, signal) {
-  try {
-    globalThis.process.kill(-pid, signal);
-  } catch (error) {
-    if (error.code !== "ESRCH") throw error;
-  }
-}
-
-async function stop(child) {
-  if (child.exitCode !== null) return;
-  killProcessGroup(child.pid, "SIGTERM");
-  await Promise.race([once(child, "close"), delay(10_000)]);
-  if (child.exitCode === null) {
-    killProcessGroup(child.pid, "SIGKILL");
-    await once(child, "close");
-  }
 }
 
 function youtubeFixture() {
@@ -420,6 +401,6 @@ try {
   }
 } finally {
   await context?.close();
-  if (api !== undefined) await stop(api);
+  if (api !== undefined) await stopApi(api);
   if (userDataDir !== undefined) await rm(userDataDir, { recursive: true, force: true });
 }

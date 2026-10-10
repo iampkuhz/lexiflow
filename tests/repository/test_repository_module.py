@@ -65,7 +65,7 @@ class RepositoryModuleBoundaryTest(unittest.TestCase):
     def test_repository_module_files_exist(self):
         expected = {
             "__init__.py", "catalog.py", "planning_check.py", "planning_validator.py",
-            "task_source.py", "docs_check.py", "policy_projection.py",
+            "task_source.py", "docs_check.py",
             "local_skills.py", "hooks.py",
             "quality.py",
         }
@@ -167,7 +167,6 @@ class HarnessRetirementTest(unittest.TestCase):
 
     RETIRED_FILES = {
         "scripts/harness/docs_check.py",
-        "scripts/harness/policy_projection.py",
         "scripts/harness/local_skills.py",
         "scripts/harness/hooks.py",
     }

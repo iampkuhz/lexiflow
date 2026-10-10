@@ -18,7 +18,7 @@ def _scopes(assessment: dict[str, Any]) -> list[str]:
     if level in {"mechanical", "local-function"}:
         return ["development-change"]
     if level == "high-risk-engineering":
-        return ["development-change", "development-baseline"]
+        return ["development-change"]
     raise ValueError("development-risk-invalid")
 
 

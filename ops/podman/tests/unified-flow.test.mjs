@@ -23,7 +23,7 @@ function fixture({ candidateMode = false, failReady = false, failApply = false, 
   write(path.join(repo, '.gitignore'), 'tmp/\nbackend/product/api/build/\nextension/dist/\nextension/node_modules/\n');
   write(path.join(repo, 'fixture.txt'), 'fixed source\n');
   write(path.join(repo, 'application.txt'), 'fixed application\n');
-  write(path.join(repo, 'ops/release/version.txt'), '2.0.0-SNAPSHOT\n');
+  write(path.join(repo, 'ops/release/version.txt'), '9.0.0-SNAPSHOT\n');
   write(path.join(repo, 'ops/dataset/generation-inputs.json'), JSON.stringify({ schemaVersion: 1, include: ['fixture.txt'] }));
   fs.copyFileSync(path.join(root, 'ops/dataset/generation-version.mjs'), path.join(repo, 'ops/dataset/generation-version.mjs'));
   fs.copyFileSync(path.join(root, 'ops/dataset/ecdict-source.lock.json'), path.join(repo, 'ops/dataset/ecdict-source.lock.json'));
@@ -44,7 +44,7 @@ function fixture({ candidateMode = false, failReady = false, failApply = false, 
   const locked = JSON.parse(fs.readFileSync(path.join(repo, 'ops/dataset/ecdict-source.lock.json'), 'utf8'));
   const upstream = { repository_url: locked.repository_url, commit: locked.commit, files: locked.files,
     archive_member: { sha256: locked.archive_member.sha256, bytes: locked.archive_member.bytes } };
-  let candidate, request, generation, dbPort, created = false, credential, pgToolPresent = !missingPgTool;
+  let candidate, request, generation, dbPort, created = false, credential, pgToolPresent = !missingPgTool, sourceToolsOwner = null;
   const developmentId = 'd'.repeat(64);
   const developmentRow = { Id: developmentId, Image: image('e'), ImageName: 'docker.io/library/postgres:17-alpine',
     Config: { Image: 'docker.io/library/postgres:17-alpine', Env: ['POSTGRES_DB=lexiflow', 'POSTGRES_HOST_AUTH_METHOD=trust'],
@@ -93,6 +93,14 @@ function fixture({ candidateMode = false, failReady = false, failApply = false, 
       reason: !committedGeneration ? 'SCHEMA_MISSING' : committedGeneration !== generation.generationVersion ? 'GENERATION_CHANGED' : 'OK',
       generationVersion: committedGeneration ?? null, datasetVersion: committedGeneration ? 7 : null });
     if (command !== 'podman') throw new Error('unexpected command');
+    if (argv[0] === 'build' && argv.includes('--iidfile')) {
+      write(argv[argv.indexOf('--iidfile') + 1], image('e'));
+      sourceToolsOwner = argv.find(value => value.startsWith('io.lexiflow.source-tools-owner='))?.split('=')[1]; return '';
+    }
+    if (argv[0] === 'image' && argv[1] === 'exists') throw Object.assign(new Error('image absent'), { commandExitCode: 1 });
+    if (argv[0] === 'image' && argv[1] === 'inspect' && argv.includes('{{json .Labels}}') && sourceToolsOwner)
+      return JSON.stringify({ 'io.lexiflow.source-tools-owner': sourceToolsOwner });
+    if (argv[0] === 'rmi' || argv[0] === 'tag') return '';
     if (developmentTrust && argv[0] === 'ps' && argv.includes('-q')) return developmentId;
     if (developmentTrust && argv[0] === 'inspect' && argv[1] === developmentId) return JSON.stringify([developmentRow]);
     if (argv[0] === 'run' && argv.includes('/bin/sh')) {
@@ -111,6 +119,11 @@ function fixture({ candidateMode = false, failReady = false, failApply = false, 
       write(path.join(dataRoot, 'source-summary.json'), JSON.stringify({ csv_sha256: hash(csv), generation }));
       return 'dataset_dir=/data/ecdict-source.ABC123\n';
     }
+    if (argv[0] === 'image' && argv[1] === 'inspect' && argv.includes('--format') && argv[argv.indexOf('--format') + 1] === 'json')
+      return JSON.stringify([{ Id: argv.at(-1), Os: 'linux', Architecture: 'arm64', Labels: {
+        'org.opencontainers.image.version': identity.softwareVersion, 'org.opencontainers.image.revision': identity.sourceCommit,
+        'io.lexiflow.build-id': identity.buildId, 'io.lexiflow.source-sha256': identity.sourceSha256,
+        'io.lexiflow.image-role': 'api', 'io.lexiflow.deployment-version': identity.baseVersion.toLowerCase() } }]);
     if (argv[0] === 'run' && argv.includes('--deployment-data')) {
       if (argv.includes('apply')) { if (structuredFailure) throw Object.assign(new Error('safe command exit'), { commandExitCode: 1,
           stdout: JSON.stringify({ status: 'FAIL', reason: 'REQUEST_OR_DATA_INVALID' }) });
@@ -181,6 +194,11 @@ test('source actual planner uses Java inspect, then applies through built API im
     assert.ok(f.calls.filter(call => call.startsWith('podman:run') && call.includes('--deployment-data')).every(call =>
       call.includes('--cap-drop=ALL --cap-add=DAC_OVERRIDE') && call.includes('--read-only') && call.includes('--security-opt=no-new-privileges')));
     assert.ok(f.calls.filter(call => call.includes('/kit/ops/podman/fetch-ecdict.sh')).every(call => !call.includes('DAC_OVERRIDE')));
+    const postgresBuild = f.calls.find(call => call.startsWith('podman:build') && call.endsWith('/postgres'));
+    const postgresContext = postgresBuild?.split(' ').at(-1);
+    assert.ok(postgresBuild?.includes(`-f ${path.join(postgresContext, 'Dockerfile.postgres')}`),
+      'fresh managed PostgreSQL build must select the non-default Dockerfile explicitly');
+    assert.ok(fs.existsSync(path.join(postgresContext, 'Dockerfile.postgres')));
     assert.ok(f.calls.indexOf('compose:up -d --no-deps --force-recreate api') > f.calls.findIndex(call => call.startsWith('podman:run') && call.includes('--deployment-data apply')));
     const state = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json')));
     assert.equal(state.phase, 'ready'); assert.equal(state.generationVersion.length, 64);
@@ -262,7 +280,7 @@ test('recognized development trust uses no secret and freezes container identity
       && call.includes('LEXIFLOW_DEPLOYMENT_DB_PASSWORD_FILE')));
     const before = f.calls.length;
     f.developmentRow.Image = image('f');
-    await assert.rejects(f.plan(), /DEVELOPMENT_DATABASE_IDENTITY_DRIFT/);
+    await assert.rejects(f.plan(), /DEVELOPMENT_DATABASE_IMAGE_CHANGED/);
     assert.equal(f.calls.slice(before).some(call => call.includes('--deployment-data') || call.startsWith('./gradlew:')), false);
   } finally { if (listener) await new Promise(resolve => listener.close(resolve)); f.cleanup(); }
 });
@@ -290,7 +308,7 @@ test('ordinary interaction asks once before heavy work and emits no machine plan
     const input = new PassThrough(); input.isTTY = true; const output = { isTTY: true, text: '', write(value) { this.text += value; } };
     input.write('n\n');
     assert.equal(await runUnifiedDeployment(f.ctx({ confirmInput: input, confirmOutput: output })), 0);
-    assert.equal(f.calls.length, 0); assert.equal(fs.existsSync(f.dir), false);
+    assert.equal(f.calls.filter(call => !String(call).startsWith('progress:')).length, 0); assert.equal(fs.existsSync(f.dir), false);
     assert.match(output.text, /127\.0\.0\.1:[\s\S]*lexiflow_release[\s\S]*\[y\/N\]/);
     const yes = new PassThrough(); yes.isTTY = true; yes.write('yes\n');
     const lines = [], original = console.log; console.log = value => lines.push(String(value));
@@ -312,7 +330,7 @@ test('non-TTY, EOF and cancellation block before build, connection or state writ
     await assert.rejects(pending, /DEPLOYMENT_CONFIRMATION_EOF/);
     const controller = new AbortController(); controller.abort();
     await assert.rejects(runUnifiedDeployment({ ...f.ctx({ confirmInput: ended, confirmOutput: output }), signal: controller.signal }), /DEPLOYMENT_CONFIRMATION_CANCELLED/);
-    assert.equal(f.calls.length, 0); assert.equal(fs.existsSync(f.dir), false);
+    assert.equal(f.calls.filter(call => !String(call).startsWith('progress:')).length, 0); assert.equal(fs.existsSync(f.dir), false);
   } finally { f.cleanup(); }
 });
 
@@ -326,7 +344,7 @@ test('candidate package verification is deferred until after ordinary consent', 
     ctx.candidate = undefined;
     ctx.candidateAdapter.readCandidate = async () => { f.calls.push('candidate-read'); return f.candidate; };
     assert.equal(await runUnifiedDeployment(ctx), 0);
-    assert.deepEqual(f.calls, []);
+    assert.deepEqual(f.calls.filter(call => !String(call).startsWith('progress:')), []);
     assert.equal(fs.existsSync(f.dir), false);
   } finally { f.cleanup(); }
 });
@@ -403,5 +421,39 @@ test('source drift during extension build blocks before API image build, databas
     assert.equal(f.calls.some(call => call.includes('--deployment-data apply')), false);
     assert.equal(f.calls.some(call => call.startsWith('compose:')), false);
     assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'deployment.json'))).stage, 'planned');
+  } finally { f.cleanup(); }
+});
+
+test('ordinary consent blocks source changes after yes before the first build identity read', async () => {
+  const f = fixture();
+  try {
+    await f.setup();
+    const input = new PassThrough(); input.isTTY = true; input.write('y\n');
+    const ctx = f.ctx({ confirmInput: input, confirmOutput: { isTTY: true, write() {} } });
+    const progress = ctx.progress;
+    ctx.progress = text => {
+      progress(text);
+      if (text === '确认完成，开始连接目标与准备阶段') f.changeApplication();
+    };
+    await assert.rejects(runUnifiedDeployment(ctx), /DEPLOYMENT_INPUT_DRIFT/);
+    assert.equal(f.calls.some(call => call.startsWith('./gradlew:') || call.startsWith('podman:run')), false);
+    assert.equal(fs.existsSync(f.dir), false);
+  } finally { f.cleanup(); }
+});
+
+test('ordinary consent blocks recorded credential changes before its first connection read', async () => {
+  const f = fixture();
+  try {
+    await f.setup();
+    const plan = await f.plan(); await runUnifiedDeployment(f.ctx({ confirmPlan: plan.planHash }));
+    const input = new PassThrough(); input.isTTY = true; input.write('y\n');
+    const ctx = f.ctx({ confirmInput: input, confirmOutput: { isTTY: true, write() {} } });
+    const before = f.calls.length, progress = ctx.progress;
+    ctx.progress = text => {
+      progress(text);
+      if (text === '确认完成，开始连接目标与准备阶段') fs.writeFileSync(path.join(f.dir, 'secrets/app-password'), 'changed-private-fixture\n');
+    };
+    await assert.rejects(runUnifiedDeployment(ctx), /DEPLOYMENT_SECRET_DRIFT/);
+    assert.equal(f.calls.slice(before).some(call => call.startsWith('./gradlew:') || call.startsWith('podman:run')), false);
   } finally { f.cleanup(); }
 });

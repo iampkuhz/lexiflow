@@ -23,6 +23,7 @@ import sys
 import tempfile
 import time
 import unittest
+from scripts.verification.declarations import load_declarations
 import venv
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -208,17 +209,17 @@ class TestOpsAdapterTiming(unittest.TestCase):
         suite.addTest(SlowCase("test_slow"))
 
         fake_node = MagicMock()
-        fake_node.stdout = json.dumps({"status": "PASS", "checks_run": 3})
+        fake_node.stdout = json.dumps({"status": "PASS", "checks_run": 3, "failures": 0, "errors": 0, "skipped": 0})
         fake_node.stderr = ""
         fake_node.returncode = 0
 
-        with patch.object(mod, "subprocess") as mock_sub, patch.object(
-            mod.unittest.defaultTestLoader, "discover", return_value=suite
-        ):
-            mock_sub.run.return_value = fake_node
-            mock_sub.TimeoutExpired = subprocess.TimeoutExpired
+        # 只替换被测阶段的输入；不能用 Node 文本响应覆盖真实 Git 库存查询。
+        with patch.object(mod, "_preflight"), patch.object(
+            mod, "_load_python", return_value=suite
+        ), patch.object(mod, "_node_run", return_value=(fake_node, 0.01, json.loads(fake_node.stdout))):
             report = mod.run_tests()
 
+        self.assertEqual(report["status"], "PASS")
         self.assertIn("python_unittest_duration_seconds", report)
         self.assertIn("node_suite_duration_seconds", report)
         self.assertIn("total_duration_seconds", report)
@@ -239,17 +240,13 @@ class TestOpsAdapterTiming(unittest.TestCase):
         suite.addTest(FailingCase("test_fail"))
 
         fake_node = MagicMock()
-        fake_node.stdout = json.dumps({"status": "PASS", "checks_run": 0})
+        fake_node.stdout = json.dumps({"status": "PASS", "checks_run": 3, "failures": 0, "errors": 0, "skipped": 0})
         fake_node.stderr = ""
         fake_node.returncode = 0
 
-        with contextlib.redirect_stderr(io.StringIO()), patch.object(
-            mod, "subprocess"
-        ) as mock_sub, patch.object(
-            mod.unittest.defaultTestLoader, "discover", return_value=suite
-        ):
-            mock_sub.run.return_value = fake_node
-            mock_sub.TimeoutExpired = subprocess.TimeoutExpired
+        with contextlib.redirect_stderr(io.StringIO()), patch.object(mod, "_preflight"), patch.object(
+            mod, "_load_python", return_value=suite
+        ), patch.object(mod, "_node_run", return_value=(fake_node, 0.01, json.loads(fake_node.stdout))):
             report = mod.run_tests()
 
         self.assertEqual(report["status"], "FAIL")
@@ -314,15 +311,20 @@ class TestAdapterCompleteness(unittest.TestCase):
             def test_skip(self):
                 self.skipTest("synthetic skip must make adapter FAIL")
 
-        node = subprocess.CompletedProcess([], 0, json.dumps({"status":"PASS", "checks_run":1}), "")
+        node = subprocess.CompletedProcess([], 0, json.dumps({"status":"PASS", "checks_run":1, "failures":0, "errors":0, "skipped":0}), "")
         for module in [verification, ops]:
             for name, expected in [("test_ok", "PASS"), ("test_failure", "FAIL"), ("test_skip", "FAIL"), (None, "FAIL")]:
                 with self.subTest(adapter=module.__name__, case=name):
                     suite = unittest.TestSuite([Case(name)] if name else [])
-                    with contextlib.redirect_stderr(io.StringIO()), patch.object(
-                        unittest.defaultTestLoader, "discover", return_value=suite
-                    ), patch.object(ops.subprocess, "run", return_value=node):
-                        report = verification.verification_tests(ROOT) if module is verification else ops.run_tests()
+                    with contextlib.redirect_stderr(io.StringIO()), contextlib.ExitStack() as stack:
+                        if module is verification:
+                            stack.enter_context(patch.object(unittest.defaultTestLoader, "discover", return_value=suite))
+                            report = verification.verification_tests(ROOT)
+                        else:
+                            stack.enter_context(patch.object(ops, "_preflight"))
+                            stack.enter_context(patch.object(ops, "_load_python", return_value=suite))
+                            stack.enter_context(patch.object(ops, "_node_run", return_value=(node, 0.01, json.loads(node.stdout))))
+                            report = ops.run_tests()
                     self.assertEqual(report["status"], expected)
                     self.assertGreaterEqual(report["python_unittest_duration_seconds"], 0)
                     if name:
@@ -336,9 +338,7 @@ class TestModuleChecksBuildContractOrder(unittest.TestCase):
 
     def test_build_contract_before_verification(self):
         """build-contract 应在 verification 之前声明。"""
-        import yaml
-
-        data = yaml.safe_load((ROOT / "harness" / "module-checks.yaml").read_text())
+        data = load_declarations(ROOT)
         ids = [c["check_id"] for c in data["checks"]]
         bc_baseline = ids.index("eng.backend.build-contract")
         bc_change = ids.index("eng.backend.build-contract-on-change")
@@ -412,13 +412,11 @@ class TestInputDriftWithRealFileChange(unittest.TestCase):
 class TestSelectChecksOrdering(unittest.TestCase):
     """验证真实选择、依赖拓扑与路径精确匹配。"""
     def test_selection_and_dependency_order(self):
-        import yaml
-
         from scripts.verification.scope import (
             resolve_module_dependencies,
             select_checks_for_changes,
         )
-        checks = yaml.safe_load((ROOT / "harness/module-checks.yaml").read_text())["checks"]
+        checks = load_declarations(ROOT)["checks"]
         selected = select_checks_for_changes(checks, ["backend/settings.gradle.kts", "scripts/verification/kernel.py"])
         ordered = resolve_module_dependencies(selected, checks)
         ids = [item["check_id"] for item in ordered]

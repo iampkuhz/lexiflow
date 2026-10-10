@@ -1,12 +1,11 @@
 """Planning Catalog 的静态一致性检查。
 
-依次核对 ID、owner、dependency 类型与 producer、DAG、阶段前置条件及 handoff 投影。
+依次核对 ID、owner、dependency 类型与 producer、DAG、阶段前置条件及唯一策略合同。
 这是 Repository 维护能力，不负责启动产品测试，也不授予 Task 执行权限。"""
 
 import re
 from collections import deque
 from pathlib import Path
-from typing import Any
 
 import yaml
 
@@ -38,53 +37,6 @@ COMMON_REQUIRED_FIELDS = {
     "required_task_version",
     "required_change_version",
 }
-
-
-def _load_canonical_from_policy(policy: dict | None) -> dict[str, Any]:
-    """从 policy 唯一真源提取 handoff contract。
-
-    返回 caller/result 字段、runner 身份、adapter 约束及 schema；真源不可用时返回 None，
-    由调用者拒绝继续，不能把缺失 contract 当作空 contract。"""
-    if not isinstance(policy, dict):
-        return None
-    sp = policy.get("subagent_protocol", {})
-    if not isinstance(sp, dict):
-        return None
-    caller = sp.get("caller_required_input")
-    result = sp.get("result_required_output")
-    identity = sp.get("runner_bound_identity")
-    adapter = sp.get("current_runner_adapter", {})
-    schema = sp.get("caller_field_schema")
-    if not isinstance(caller, list) or not isinstance(result, list):
-        return None
-    adapter_flags = {
-        "target_schema_enforced": adapter.get("target_schema_enforced"),
-        "runtime_identity_enforced": adapter.get("runtime_identity_enforced"),
-        "result_fields_required_in_prompt": adapter.get(
-            "result_fields_required_in_prompt"
-        ),
-        "agent_profile_cli_binding": adapter.get("agent_profile_cli_binding"),
-        "harness_manifest_preflight": adapter.get("harness_manifest_preflight"),
-        "catalog_package_preflight": adapter.get("catalog_package_preflight"),
-        "catalog_estimate_rule": adapter.get("catalog_estimate_rule"),
-        "structured_result_required": adapter.get("structured_result_required"),
-    }
-    adapter_metadata = {
-        "implementation_status": adapter.get("implementation_status"),
-        "conformance_test": adapter.get("conformance_test"),
-        "owner_task": adapter.get("owner_task"),
-        "owner_task_version": adapter.get("owner_task_version"),
-        "owner_change_version": adapter.get("owner_change_version"),
-    }
-    return {
-        "caller_fields": list(caller),
-        "result_fields": list(result),
-        "runner_identity": identity,
-        "adapter_flags": adapter_flags,
-        "adapter_metadata": adapter_metadata,
-        "caller_field_schema": schema,
-        "adapter_enforced_fields": list(adapter.get("enforced_caller_fields", [])),
-    }
 
 
 EXCLUDED_PATH_PATTERNS = [
@@ -268,9 +220,7 @@ class PlanningValidator:
         self._structure_errors = []
         self._check_failures = []
         self.ws = None
-        self.template = None
         self.policy = None
-        self.runtime = None
         self.module_checks = None
         self.tasks = {}
         self.workstreams = {}
@@ -283,9 +233,7 @@ class PlanningValidator:
     def from_data(
         cls,
         ws_data,
-        template_data=None,
         policy_data=None,
-        runtime_data=None,
         module_checks_data=None,
     ):
         """由已加载的规划数据构造校验器，供隔离测试复用。"""
@@ -295,9 +243,7 @@ class PlanningValidator:
         obj._structure_errors = []
         obj._check_failures = []
         obj.ws = ws_data
-        obj.template = template_data
         obj.policy = policy_data
-        obj.runtime = runtime_data
         obj.module_checks = module_checks_data
         obj.tasks = {}
         obj.workstreams = {}
@@ -323,9 +269,8 @@ class PlanningValidator:
     def load_sources(self):
         """读取 Catalog 与共享策略真源，缺项不能当作空规划。"""
         self.ws = self._load_yaml("planning/workstreams.yaml")
-        self.template = self._load_yaml("planning/task-template.yaml")
         self.policy = self._load_yaml("harness/agent-policy.manifest.yaml")
-        self.runtime = self._load_yaml("harness/agent-runtime.manifest.yaml")
+        # Catalog 只消费选择列表中的身份与 scope；执行定义由 Verify 加载器校验。
         self.module_checks = self._load_yaml("harness/module-checks.yaml")
         if self.ws:
             self._build_catalog()
@@ -572,47 +517,8 @@ class PlanningValidator:
             valid_scopes.append(scope)
         self.path_scopes = valid_scopes
 
-        handoff_contracts = []
-        orchestration_policy = self.ws.get("orchestration_policy")
-        if orchestration_policy is not None and not isinstance(
-            orchestration_policy, dict
-        ):
-            self._structure_errors.append(
-                "invalid-structure: orchestration_policy is not a map"
-            )
-        elif isinstance(orchestration_policy, dict):
-            handoff_contracts.append(
-                ("workstreams", orchestration_policy.get("handoff_contract"))
-            )
-
-        for source_name, source, contract_key in (
-            ("template", self.template, "handoff_contract"),
-            ("policy", self.policy, "subagent_protocol"),
-            ("runtime", self.runtime, "subagent_protocol"),
-        ):
-            if source is None:
-                continue
-            if not isinstance(source, dict):
-                self._structure_errors.append(
-                    f"invalid-structure: {source_name} source is not a map"
-                )
-                continue
-            handoff_contracts.append((source_name, source.get(contract_key)))
-
-        for source_name, contract in handoff_contracts:
-            if contract is None:
-                continue
-            if not isinstance(contract, dict):
-                self._structure_errors.append(
-                    f"invalid-structure: {source_name} handoff contract is not a map"
-                )
-                continue
-            for field in ("current_runner_adapter", "caller_field_schema"):
-                value = contract.get(field)
-                if value is not None and not isinstance(value, dict):
-                    self._structure_errors.append(
-                        f"invalid-structure: {source_name} handoff {field} is not a map"
-                    )
+        # Shared handoff rules live only in agent-policy; task/runtime/catalog
+        # projections are intentionally not required or compared here.
 
     def _check(self, fn):
         """隔离单项 checker 的异常并记录失败，避免一个异常吞掉完整检查清单。"""
@@ -1176,243 +1082,51 @@ class PlanningValidator:
                 self.errors.append(f"duplicate-scope: {sid!r}")
             seen_scopes[sid] = True
 
-    def check_cross_source_handoff(self):
-        """从 policy 真源核对模板、Catalog 与 runtime 的共享投影，防止多套 handoff 合同漂移。"""
-        sources = {}
-        if self.ws:
-            ho = self.ws.get("orchestration_policy", {}).get("handoff_contract", {})
-            if ho:
-                sources["workstreams"] = ho
-        if self.template:
-            t = self.template.get("handoff_contract", {})
-            if t:
-                sources["template"] = t
-        if self.policy:
-            p = self.policy.get("subagent_protocol", {})
-            if p:
-                sources["policy"] = p
-        if self.runtime:
-            r = self.runtime.get("subagent_protocol", {})
-            if r:
-                sources["runtime"] = r
-
-        if len(sources) < 4:
-            missing = [
-                s
-                for s in ("workstreams", "template", "policy", "runtime")
-                if s not in sources
-            ]
-            self.errors.append(
-                f"cross-source-incomplete: missing handoff data from {missing}"
-            )
+    def check_policy_contract(self):
+        """检查唯一共享策略真源具备实际消费者需要的基本结构。"""
+        if not isinstance(self.policy, dict):
+            self.errors.append("policy-contract: agent policy must be a mapping")
             return
-
-        # 只从 policy 加载规范真源，逐一核对其他投影。
-        canonical = _load_canonical_from_policy(self.policy)
-        if canonical is None:
-            self.errors.append(
-                "cross-source-handoff: cannot load canonical reference from policy"
-            )
+        for section in (
+            "agent_dispatch",
+            "subagent_protocol",
+            "qoder_delegation",
+            "codex_dispatch",
+        ):
+            if not isinstance(self.policy.get(section), dict):
+                self.errors.append(f"policy-contract: {section} must be a mapping")
+        sp = self.policy.get("subagent_protocol")
+        if not isinstance(sp, dict):
             return
-        canonical_caller = canonical["caller_fields"]
-        canonical_result = canonical["result_fields"]
-        canonical_identity = canonical["runner_identity"]
-        canonical_adapter_flags = canonical["adapter_flags"]
-        canonical_adapter_metadata = canonical["adapter_metadata"]
-        canonical_schema = canonical["caller_field_schema"]
-        canonical_enforced = canonical["adapter_enforced_fields"]
-
-        names = list(sources.keys())
-
-        def _extract_field_names(value):
-            if isinstance(value, list):
-                return list(value)
-            if isinstance(value, dict):
-                return list(value.keys())
-            return []
-
-        for n in names:
-            caller_fields = _extract_field_names(
-                sources[n].get("caller_required_input")
-            )
-            if len(caller_fields) != len(canonical_caller):
+        for field, expected in (
+            ("caller_required_input", list),
+            ("result_required_output", list),
+            ("runner_bound_identity", dict),
+            ("current_runner_adapter", dict),
+            ("caller_field_schema", dict),
+            ("codex_model_policy", dict),
+            ("delegation_work_package", dict),
+        ):
+            if not isinstance(sp.get(field), expected):
                 self.errors.append(
-                    f"canonical-caller-count: {n} has {len(caller_fields)} caller fields, "
-                    f"expected {len(canonical_caller)}"
+                    f"policy-contract: subagent_protocol.{field} has invalid shape"
                 )
-            if caller_fields != canonical_caller:
-                self.errors.append(
-                    f"canonical-caller-fields: {n} caller_required_input does not match "
-                    f"canonical field names and order"
-                )
-
-        for n in names:
-            result_fields = _extract_field_names(
-                sources[n].get("result_required_output")
-            )
-            if len(result_fields) != len(canonical_result):
-                self.errors.append(
-                    f"canonical-result-count: {n} has {len(result_fields)} result fields, "
-                    f"expected {len(canonical_result)}"
-                )
-            if result_fields != canonical_result:
-                self.errors.append(
-                    f"canonical-result-fields: {n} result_required_output does not match "
-                    f"canonical field names and order"
-                )
-
-        for n in names:
-            identity = sources[n].get("runner_bound_identity", {})
-            if identity != canonical_identity:
-                self.errors.append(
-                    f"canonical-runner-identity: {n} runner_bound_identity does not match "
-                    f"canonical mapping"
-                )
-
-        for n in names:
-            adapter = sources[n].get("current_runner_adapter", {})
-            if not isinstance(adapter, dict):
-                self.errors.append(
-                    f"canonical-adapter-structure: {n} current_runner_adapter must be a map"
-                )
-                continue
-            ecf = adapter.get("enforced_caller_fields", [])
-            if list(ecf) != canonical_enforced:
-                self.errors.append(
-                    f"canonical-adapter-enforced-fields: {n} enforced_caller_fields does not "
-                    f"match canonical caller fields"
-                )
-            flags = {
-                "target_schema_enforced": adapter.get("target_schema_enforced"),
-                "runtime_identity_enforced": adapter.get("runtime_identity_enforced"),
-                "result_fields_required_in_prompt": adapter.get(
-                    "result_fields_required_in_prompt"
-                ),
-                "agent_profile_cli_binding": adapter.get("agent_profile_cli_binding"),
-                "harness_manifest_preflight": adapter.get("harness_manifest_preflight"),
-                "catalog_package_preflight": adapter.get("catalog_package_preflight"),
-                "catalog_estimate_rule": adapter.get("catalog_estimate_rule"),
-                "structured_result_required": adapter.get("structured_result_required"),
-            }
-            if flags != canonical_adapter_flags:
-                self.errors.append(
-                    f"canonical-adapter-flags: {n} adapter enforcement flags do not match "
-                    f"canonical values"
-                )
-            metadata = {
-                "implementation_status": adapter.get("implementation_status"),
-                "conformance_test": adapter.get("conformance_test"),
-                "owner_task": adapter.get("owner_task"),
-                "owner_task_version": adapter.get("owner_task_version"),
-                "owner_change_version": adapter.get("owner_change_version"),
-            }
-            if metadata != canonical_adapter_metadata:
-                self.errors.append(
-                    f"canonical-adapter-metadata: {n} adapter owner metadata does not match "
-                    f"canonical values"
-                )
-
-        for n in names:
-            schema = sources[n].get("caller_field_schema")
-            if schema is not None and (
-                not isinstance(schema, dict) or schema != canonical_schema
-            ):
-                self.errors.append(
-                    f"canonical-caller-field-schema: {n} caller_field_schema does not match "
-                    f"canonical key-value mapping"
-                )
-
-        if not any(
-            isinstance(sources[n].get("caller_field_schema"), dict) for n in names
+        dispatch = self.policy.get("agent_dispatch")
+        if isinstance(dispatch, dict) and not isinstance(
+            dispatch.get("fallback_model"), str
         ):
             self.errors.append(
-                "canonical-caller-field-schema: all sources omit caller_field_schema"
+                "policy-contract: agent_dispatch.fallback_model is required"
             )
-
-        caller_lists = {
-            n: _extract_field_names(sources[n].get("caller_required_input"))
-            for n in names
-        }
-        for i in range(1, len(names)):
-            if caller_lists[names[i]] != caller_lists[names[0]]:
+        codex = self.policy.get("codex_dispatch")
+        if isinstance(codex, dict):
+            acceptance = codex.get("acceptance")
+            if not isinstance(acceptance, dict) or not isinstance(
+                acceptance.get("implementer_must_not_validate_or_review"), bool
+            ):
                 self.errors.append(
-                    f"cross-source-caller-mismatch: {names[0]} vs {names[i]} "
-                    f"caller_required_input differs"
+                    "policy-contract: codex_dispatch.acceptance identity boundary is required"
                 )
-                break
-
-        result_lists = {
-            n: _extract_field_names(sources[n].get("result_required_output"))
-            for n in names
-        }
-        for i in range(1, len(names)):
-            if result_lists[names[i]] != result_lists[names[0]]:
-                self.errors.append(
-                    f"cross-source-result-mismatch: {names[0]} vs {names[i]} "
-                    f"result_required_output differs"
-                )
-                break
-
-        identity_maps = {n: sources[n].get("runner_bound_identity", {}) for n in names}
-        for i in range(1, len(names)):
-            if identity_maps[names[i]] != identity_maps[names[0]]:
-                self.errors.append(
-                    f"cross-source-identity-mismatch: {names[0]} vs {names[i]} "
-                    f"runner_bound_identity metadata differs"
-                )
-                break
-
-        adapter_maps = {}
-        for n in names:
-            adapter = sources[n].get("current_runner_adapter", {})
-            if isinstance(adapter, dict):
-                adapter_maps[n] = {
-                    "target_schema_enforced": adapter.get("target_schema_enforced"),
-                    "runtime_identity_enforced": adapter.get(
-                        "runtime_identity_enforced"
-                    ),
-                    "result_fields_required_in_prompt": adapter.get(
-                        "result_fields_required_in_prompt"
-                    ),
-                    "agent_profile_cli_binding": adapter.get(
-                        "agent_profile_cli_binding"
-                    ),
-                    "harness_manifest_preflight": adapter.get(
-                        "harness_manifest_preflight"
-                    ),
-                    "catalog_package_preflight": adapter.get(
-                        "catalog_package_preflight"
-                    ),
-                    "catalog_estimate_rule": adapter.get("catalog_estimate_rule"),
-                    "structured_result_required": adapter.get(
-                        "structured_result_required"
-                    ),
-                    "enforced_caller_fields": adapter.get("enforced_caller_fields", []),
-                }
-            else:
-                adapter_maps[n] = {}
-        for i in range(1, len(names)):
-            if adapter_maps[names[i]] != adapter_maps[names[0]]:
-                self.errors.append(
-                    f"cross-source-adapter-mismatch: {names[0]} vs {names[i]} "
-                    f"current_runner_adapter metadata differs"
-                )
-                break
-
-        schema_maps = {}
-        for n in names:
-            s = sources[n].get("caller_field_schema")
-            if s is not None and isinstance(s, dict):
-                schema_maps[n] = s
-        schema_names = list(schema_maps.keys())
-        if len(schema_names) >= 2:
-            for i in range(1, len(schema_names)):
-                if schema_maps[schema_names[i]] != schema_maps[schema_names[0]]:
-                    self.errors.append(
-                        f"cross-source-schema-mismatch: {schema_names[0]} vs {schema_names[i]} "
-                        f"caller_field_schema key-value mapping differs"
-                    )
-                    break
 
     def check_repo_path_ownership(self):
         """将非运行产物文件映射到 owner；发现无 owner 或歧义时保留文件路径。"""
@@ -1499,7 +1213,7 @@ class PlanningValidator:
             ("no_later_phase_edges", self.check_no_later_phase_edges),
             ("phase_entry", self.check_phase_entry),
             ("owners", self.check_owners),
-            ("cross_source_handoff", self.check_cross_source_handoff),
+            ("policy_contract", self.check_policy_contract),
             ("repo_path_ownership", self.check_repo_path_ownership),
         ]
         checks_run = []

@@ -83,18 +83,21 @@ test('candidate adapter consumes a clean assembled archive and loads only inspec
   const ids = { api: candidate.artifacts['api-image:linux/arm64'].imageDigest, postgres: candidate.artifacts['postgres-image:linux/arm64'].imageDigest }, calls = [];
   const run = async (_cmd, argv, options = {}) => {
     calls.push(argv);
+    if (argv[0] === 'image' && argv[1] === 'exists') return { commandExitCode: 1, stdout: '' };
     if (argv[0] === 'images') return JSON.stringify([{ Id: ids.api }, { Id: ids.postgres }]);
     if (argv[0] === 'image' && argv[1] === 'inspect') {
       const id = argv.at(-1);
       return JSON.stringify([{ Id: id, Os: 'linux', Architecture: 'arm64', Config: { Labels: {
         'org.opencontainers.image.version': f.identity.softwareVersion, 'org.opencontainers.image.revision': f.identity.sourceCommit,
         'io.lexiflow.build-id': f.identity.buildId, 'io.lexiflow.source-sha256': f.identity.sourceSha256,
+        'io.lexiflow.image-role': id === ids.api ? 'api' : 'postgres',
+        'io.lexiflow.deployment-version': f.identity.baseVersion.toLowerCase(),
       } } }]);
     }
     return '';
   };
   const installDir = path.join(f.root, 'installation'); await fs.mkdir(installDir);
-  const result = await installCandidateArtifacts(candidate, { run, installDir, apiPort: 18080 });
+  const result = await installCandidateArtifacts(candidate, { run, installDir, apiPort: 18080, baseVersion: f.identity.baseVersion, installationId: '1'.repeat(32) });
   assert.equal(result.apiImage, ids.api); assert.equal(result.postgresImage, ids.postgres);
   assert.ok(calls.some(argv => argv[0] === 'load'));
   assert.equal(await fs.readFile(path.join(installDir, 'extension/manifest.json'), 'utf8').then(text => JSON.parse(text).version_name), f.identity.softwareVersion);
@@ -102,10 +105,10 @@ test('candidate adapter consumes a clean assembled archive and loads only inspec
   await assert.rejects(readCandidate({ ...f.input, candidateSha256: '0'.repeat(64) }), /CANDIDATE/);
   const prep = path.join(f.root, 'upgrade-prep'); await fs.mkdir(prep);
   const before = calls.filter(argv => argv[0] === 'load').length;
-  await installCandidateArtifacts(candidate, { run, installDir: prep, apiPort: 18080, includePostgres: false });
+  await installCandidateArtifacts(candidate, { run, installDir: prep, apiPort: 18080, includePostgres: false, baseVersion: f.identity.baseVersion, installationId: '1'.repeat(32) });
   assert.equal(calls.filter(argv => argv[0] === 'load').length, before + 1, 'upgrade preparation must not load PostgreSQL');
   await fs.writeFile(path.join(prep, 'extension/unknown'), 'private');
-  await assert.rejects(installCandidateArtifacts(candidate, { run, installDir: prep, apiPort: 18080, includePostgres: false }), /EXTENSION_TARGET_EXISTS/);
+  await assert.rejects(installCandidateArtifacts(candidate, { run, installDir: prep, apiPort: 18080, includePostgres: false, baseVersion: f.identity.baseVersion, installationId: '1'.repeat(32) }), /EXTENSION_TARGET_EXISTS/);
   assert.equal(await fs.readFile(path.join(prep, 'extension/unknown'), 'utf8'), 'private');
 });
 
@@ -113,71 +116,125 @@ test('candidate request rejects caller-injected fields', async () => {
   await assert.rejects(readCandidate({ candidateDirectory: '/tmp/candidate', candidateSha256: 'a'.repeat(64), pass: true }), /ARGUMENTS_INVALID/);
 });
 
-test('runLocal installs, repeats, upgrades and no-ops candidates through shared lifecycle with isolated Podman/network substitutes', async t => {
-  const first = await assembled('2.0.0-SNAPSHOT'), second = await assembled('2.0.1-SNAPSHOT');
-  const incompatible = await assembled('2.0.2-SNAPSHOT', 'incompatible schema\n');
+test('runLocal installs, refreshes, upgrades and retries candidates through shared lifecycle with isolated Podman/network substitutes', async t => {
+  const first = await assembled('8.0.0-SNAPSHOT'), second = await assembled('8.0.1-SNAPSHOT');
+  const incompatible = await assembled('8.0.2-SNAPSHOT', 'incompatible schema\n');
   t.after(async () => { await first.cleanup(); await second.cleanup(); await incompatible.cleanup(); });
   const root = path.join(first.root, 'local-run'), dir = path.join(root, 'private-install'), bin = path.join(root, 'bin');
   await fs.mkdir(bin, { recursive: true }); const callsFile = path.join(root, 'podman-calls.jsonl');
   const badLabelMarker = path.join(root, 'bad-label-once'), failMarker = path.join(root, 'api-start-failure');
   const cancelMarker = path.join(root, 'cancel-once');
   const imageMap = {};
+  const archiveMap = {};
   for (const candidate of [first, second, incompatible]) for (const role of ['api-image', 'postgres-image']) {
     const key = role + ':linux/arm64';
     const proof = await readCandidate(candidate.input), artifact = proof.artifacts[key];
     imageMap[artifact.imageDigest] = { Id: artifact.imageDigest, Os: 'linux', Architecture: 'arm64', Config: { Labels: {
       'org.opencontainers.image.version': proof.buildIdentity.softwareVersion, 'org.opencontainers.image.revision': proof.buildIdentity.sourceCommit,
       'io.lexiflow.build-id': proof.buildIdentity.buildId, 'io.lexiflow.source-sha256': proof.buildIdentity.sourceSha256,
+      'io.lexiflow.image-role': role === 'api-image' ? 'api' : 'postgres',
+      'io.lexiflow.deployment-version': proof.buildIdentity.baseVersion.toLowerCase(),
     } } };
+    imageMap[artifact.imageDigest].Labels = { ...imageMap[artifact.imageDigest].Config.Labels };
+    archiveMap[path.join(candidate.candidateDirectory, 'payload', ...artifact.path.split('/'))] = artifact.imageDigest;
   }
   const podman = '#!/usr/bin/env python3\n';
   const podmanBody = String.raw`
-import json, os, signal, sys
+import json, os, signal, sys, hashlib
 from pathlib import Path
-CALLS=Path(${JSON.stringify(callsFile)}); images=json.loads(${JSON.stringify(JSON.stringify(imageMap))}); kit=Path(${JSON.stringify(dir)})
+CALLS=Path(${JSON.stringify(callsFile)}); initial=json.loads(${JSON.stringify(JSON.stringify(imageMap))}); archives=json.loads(${JSON.stringify(JSON.stringify(archiveMap))}); kit=Path(${JSON.stringify(dir)})
+DB=Path(${JSON.stringify(path.join(root, 'podman-state.json'))})
 GENERATION=${JSON.stringify(first.generation.generationVersion)}
 BAD_LABEL=Path(${JSON.stringify(badLabelMarker)}); FAIL_API=Path(${JSON.stringify(failMarker)}); CANCEL=Path(${JSON.stringify(cancelMarker)})
 a=sys.argv[1:]; CALLS.open('a').write(json.dumps(a)+'\n')
-labels={}
+s=json.loads(DB.read_text()) if DB.exists() else {'loaded':{},'tags':{},'containers':{},'generation':None,'datasetVersion':None,'sequence':0}
+def save(): DB.write_text(json.dumps(s))
+def image(key):
+    ident=s['tags'].get(key,key)
+    return s['loaded'].get(ident)
+def env(name):
+    return next((line.split('=',1)[1] for line in (kit/'release.env').read_text().splitlines() if line.startswith(name+'=')),None)
+def labels(role):
+    state=json.loads((kit/'state.json').read_text())
+    return {'lexiflow.installation':state['id'],'com.docker.compose.project':state['project'],'com.docker.compose.service':role}
 if a[:1]==['info']: print('{}')
-elif a[:2]==['compose','version']: print('podman compose test')
+elif a[:2]==['image','exists']:
+    sys.exit(0 if a[2] in s['tags'] else 1)
 elif a[:1]==['load']:
     if CANCEL.exists(): CANCEL.unlink(); os.kill(os.getppid(),signal.SIGINT)
-    print('UNTRUSTED load output ignored')
+    ident=archives.get(a[-1]);
+    if ident is None: sys.exit(7)
+    s['loaded'][ident]=initial[ident]
+    save(); print('UNTRUSTED load output ignored')
+elif a[:1]==['tag']:
+    if image(a[1]) is None: sys.exit(7)
+    s['tags'][a[2]]=s['tags'].get(a[1],a[1]); save()
+elif a[:1]==['rmi']:
+    if a[-1] not in s['tags']: sys.exit(7)
+    del s['tags'][a[-1]]; save()
 elif a[:2]==['image','inspect']:
-    fmt=a[a.index('--format')+1] if '--format' in a else None; key=a[-1]; item=images.get(key)
-    if item is None:
-        env=(kit/'release.env').read_text(); key=next(x.split('=',1)[1] for x in env.splitlines() if x.startswith('LEXIFLOW_API_IMAGE=')); item=images[key]
-    if BAD_LABEL.exists() and fmt is None: BAD_LABEL.unlink(); item={**item,'Config':{**item['Config'],'Labels':{**item['Config']['Labels'],'io.lexiflow.build-id':'0'*64}}}
+    fmt=a[a.index('--format')+1] if '--format' in a else None; key=a[2] if a[2]!='--format' else a[-1]; item=image(key)
+    if item is None: print('missing image',file=sys.stderr); sys.exit(1)
+    if BAD_LABEL.exists() and fmt in (None,'json'): BAD_LABEL.unlink(); item={**item,'Labels':{**item['Config']['Labels'],'io.lexiflow.build-id':'0'*64}}
     if fmt=='{{json .Labels}}': print(json.dumps(item['Config']['Labels']))
     elif fmt=='{{json .Os}} {{json .Architecture}}': print('"linux" "arm64"')
     elif fmt=='{{.Id}}': print(item['Id'])
     else: print(json.dumps([item]))
 elif a[:1]==['ps']:
-    if '-a' in a: print('[]')
-    else:
-        state=json.loads((kit/'state.json').read_text()); env=(kit/'release.env').read_text()
-        key=next(x.split('=',1)[1] for x in env.splitlines() if x.startswith('LEXIFLOW_API_IMAGE='))
-        print(json.dumps([{'Id':'f'*64,'Labels':{'lexiflow.installation':state['id'],'com.docker.compose.project':state['project'],'com.docker.compose.service':'api'}}]))
-elif a[:1] in (['volume'],['network']): print('[]')
+    rows=list(s['containers'].values()); rows=rows if '-a' in a else [row for row in rows if row['State']['Running']]
+    if '--filter' in a:
+        ancestor=a[a.index('--filter')+1].split('=',1)[1]
+        rows=[row for row in rows if row['Image'].replace('sha256:','')==ancestor]
+        print('\n'.join(row['Id'] for row in rows))
+    else: print(json.dumps([{'Id':row['Id'],'Labels':row['Config']['Labels']} for row in rows]))
+elif a[:2]==['container','inspect']:
+    row=s['containers'].get(a[2]);
+    if row is None: sys.exit(1)
+    print(json.dumps([row]))
 elif a[:1]==['inspect']:
-    env=(kit/'release.env').read_text(); key=next(x.split('=',1)[1] for x in env.splitlines() if x.startswith('LEXIFLOW_API_IMAGE=')); print(images[key]['Id'])
+    row=s['containers'].get(a[-1]);
+    if row is None: sys.exit(1)
+    print(row['Image'])
+elif a[:1]==['stop']:
+    row=s['containers'].get(a[-1]);
+    if row is None: sys.exit(1)
+    row['State']['Running']=False; save()
+elif a[:1]==['rm']:
+    if a[-1] not in s['containers']: sys.exit(1)
+    del s['containers'][a[-1]]; save()
+elif a[:1] in (['volume'],['network']): print('[]')
 elif a[:1]==['run'] and '--deployment-data' in a:
-    if 'apply' in a: print(json.dumps({'status':'PASS','rebuilt':True,'generationVersion':GENERATION,'datasetVersion':7}))
+    if 'apply' in a:
+        s['generation']=GENERATION; s['datasetVersion']=7; save()
+        print(json.dumps({'status':'PASS','rebuilt':True,'generationVersion':GENERATION,'datasetVersion':7}))
     else:
-        state=json.loads((kit/'state.json').read_text()) if (kit/'state.json').exists() else {}
-        complete=state.get('phase') in ('initialized','ready')
+        complete=s['generation'] is not None
         print(json.dumps({'status':'PASS','database':'lexiflow','schema':'lexiflow_release','fingerprint':'f'*64,
           'needsRebuild':not complete,'reason':'OK' if complete else 'SCHEMA_MISSING',
-          'generationVersion':GENERATION if complete else None,'datasetVersion':7 if complete else None}))
+          'generationVersion':s['generation'],'datasetVersion':s['datasetVersion']}))
 elif a[:1]==['compose'] and 'logs' in a: print('synthetic logs')
 elif a[:1]==['compose'] and 'ps' in a: print('synthetic status')
 elif a[:1]==['compose'] and 'run' in a: pass
 elif a[:1]==['compose'] and 'config' in a: print('valid')
-elif a[:1]==['compose'] and 'up' in a and a[-1]=='api' and FAIL_API.exists():
-    FAIL_API.unlink(); sys.exit(8)
-elif a[:1]==['compose'] and 'up' in a: pass
-elif a[:1]==['compose'] and 'stop' in a: pass
+elif a[:1]==['compose'] and 'up' in a:
+    role=a[-1]
+    if role=='api' and FAIL_API.exists(): FAIL_API.unlink(); sys.exit(8)
+    ref=env('LEXIFLOW_'+('API' if role=='api' else 'POSTGRES')+'_IMAGE')
+    item=image(ref)
+    if item is None: print('compose image absent',file=sys.stderr); sys.exit(7)
+    existing=[row for row in s['containers'].values() if row['Config']['Labels']['com.docker.compose.service']==role]
+    if existing and '--force-recreate' not in a and existing[0]['Image']==item['Id']:
+        existing[0]['State']['Running']=True; save(); sys.exit(0)
+    for row in existing: del s['containers'][row['Id']]
+    s['sequence']+=1
+    ident=hashlib.sha256((role+item['Id']+str(s['sequence'])).encode()).hexdigest()
+    s['containers'][ident]={'Id':ident,'Image':item['Id'],'Config':{'Labels':labels(role)},'State':{'Running':True}}
+    save()
+elif a[:1]==['compose'] and 'stop' in a:
+    for role in a[a.index('stop')+1:]:
+        for row in s['containers'].values():
+            if row['Config']['Labels']['com.docker.compose.service']==role: row['State']['Running']=False
+    save()
 else: print('unexpected command '+json.dumps(a), file=sys.stderr); sys.exit(7)
 `;
   const script = podman + podmanBody;
@@ -195,10 +252,10 @@ http.get=(options,callback)=>{const req=new EventEmitter(); req.destroy=(err)=>{
     `const repeat=await deploy('install',${JSON.stringify(first.input)}); if(repeat!==0)process.exitCode=repeat;\n`+
     `const beforeUpgrade=JSON.parse(fs.readFileSync(${JSON.stringify(path.join(dir,'state.json'))},'utf8')); const oldPassword=fs.readFileSync(${JSON.stringify(path.join(dir,'secrets/app-password'))}); const oldDataset=fs.readFileSync(path.join(beforeUpgrade.dataset,'dataset.zip')); fs.writeFileSync(${JSON.stringify(path.join(root,'before-upgrade.json'))},JSON.stringify({state:beforeUpgrade,password:oldPassword.toString('hex'),dataset:oldDataset.toString('hex')})); fs.writeFileSync(${JSON.stringify(failMarker)},'1');\n`+
     `const failed=await deploy('upgrade',${JSON.stringify(second.input)}); if(failed===0)throw new Error('failed API start accepted');\n`+
-    `const pending=JSON.parse(fs.readFileSync(${JSON.stringify(path.join(dir,'state.json'))},'utf8')); if(pending.phase!=='initialized'||pending.buildIdentity.buildId===beforeUpgrade.buildIdentity.buildId||pending.postgresImage!==beforeUpgrade.postgresImage||pending.apiPort!==beforeUpgrade.apiPort||pending.dbPort!==beforeUpgrade.dbPort)throw new Error('forward target not preserved'); if(!fs.readFileSync(${JSON.stringify(path.join(dir,'secrets/app-password'))}).equals(oldPassword))throw new Error('password changed');\n`+
+    `const pending=JSON.parse(fs.readFileSync(${JSON.stringify(path.join(dir,'state.json'))},'utf8')); if(pending.phase!=='initialized'||pending.buildIdentity.buildId===beforeUpgrade.buildIdentity.buildId||pending.postgresImage===beforeUpgrade.postgresImage||pending.apiPort!==beforeUpgrade.apiPort||pending.dbPort!==beforeUpgrade.dbPort)throw new Error('forward target not preserved'); if(!fs.readFileSync(${JSON.stringify(path.join(dir,'secrets/app-password'))}).equals(oldPassword))throw new Error('password changed');\n`+
     `const recovery=await runLocal(['recover','--dir',${JSON.stringify(dir)}]); if(recovery!==0)process.exitCode=recovery;\n`+
     `fs.writeFileSync(${JSON.stringify(cancelMarker)},'1'); const cancelled=await deploy('upgrade',${JSON.stringify(incompatible.input)}); if(cancelled===0)throw new Error('cancelled upgrade accepted'); if(JSON.parse(fs.readFileSync(${JSON.stringify(path.join(dir,'state.json'))},'utf8')).apiImage!==pending.apiImage)throw new Error('cancel changed installed target');\n`+
-    `const noop=await deploy('upgrade',${JSON.stringify(second.input)}); if(noop!==0)process.exitCode=noop;\n`+
+    `const refresh=await deploy('upgrade',${JSON.stringify(second.input)}); if(refresh!==0)process.exitCode=refresh;\n`+
     `if(await deploy('install',${JSON.stringify(second.input)})!==0)throw new Error('repeat install after upgrade rejected');\n`+
     `const sqlUpgrade=await deploy('upgrade',${JSON.stringify(incompatible.input)}); if(sqlUpgrade!==0)process.exitCode=sqlUpgrade;\n`+
     `for(const action of ['up','status','logs','stop']) { const code=await runLocal([action,'--dir',${JSON.stringify(dir)}]); if(code!==0)throw new Error(action+' requires candidate again or failed'); }\n`;
@@ -211,7 +268,7 @@ http.get=(options,callback)=>{const req=new EventEmitter(); req.destroy=(err)=>{
   assert.equal(installed.apiPort, 18080); assert.equal(installed.packageType, 'release-package');
   const before = JSON.parse(await fs.readFile(path.join(root, 'before-upgrade.json'), 'utf8'));
   assert.equal(installed.id, before.state.id); assert.equal(installed.project, before.state.project);
-  assert.equal(installed.postgresImage, before.state.postgresImage); assert.equal(installed.apiPort, before.state.apiPort); assert.equal(installed.dbPort, before.state.dbPort);
+  assert.notEqual(installed.postgresImage, before.state.postgresImage); assert.equal(installed.apiPort, before.state.apiPort); assert.equal(installed.dbPort, before.state.dbPort);
   assert.deepEqual(installed.datasetIdentity, before.state.datasetIdentity);
   assert.equal((await fs.readFile(path.join(dir, 'secrets/app-password'))).toString('hex'), before.password);
   assert.equal((await fs.readFile(path.join(installed.dataset, 'dataset.zip'))).toString('hex'), before.dataset);

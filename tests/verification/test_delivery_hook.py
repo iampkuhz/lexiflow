@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ENTRY = ROOT / "scripts/verification/delivery_hook.py"
 EVENT = {"hook_event_name": "Stop", "stop_hook_active": False}
 MARKER = "<!-- lexiflow:intermediate -->"
+COMPLETE_OUTPUT = "\nprint('{\"status\":\"PASS\",\"checks_run\":1,\"failures\":0,\"errors\":0,\"skipped\":0,\"reason\":\"\"}')\n"
 
 
 class DeliveryHookTest(unittest.TestCase):
@@ -47,11 +48,11 @@ class DeliveryHookTest(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             return hook.evaluate(self.root, event or EVENT)
 
-    def fixture(self, body="print('executed')", environment=None):
+    def fixture(self, body="pass", environment=None):
         _init_git_repo(self.root)
         (self.root / ".gitignore").write_text("harness/\ntmp/\nfixture/\n")
         (self.root / "fixture").mkdir()
-        (self.root / "fixture/check.py").write_text(body)
+        (self.root / "fixture/check.py").write_text(body + COMPLETE_OUTPUT)
         (self.root / "initial.txt").write_text("changed")
         checks = []
         for scope in ("change-targeted", "repository-baseline"):
@@ -100,7 +101,7 @@ class DeliveryHookTest(unittest.TestCase):
             for p in (self.root / "tmp/quality/verification-reports").glob("*.json")
         ]
 
-    def test_real_checks_and_two_immutable_reports_are_required_for_pass(self):
+    def test_real_checks_and_one_daily_report_are_required_for_pass(self):
         self.fixture(
             "from pathlib import Path\np=Path('tmp/count'); p.write_text(p.read_text()+'x' if p.exists() else 'x')"
         )
@@ -108,7 +109,8 @@ class DeliveryHookTest(unittest.TestCase):
         self.assertNotIn("decision", output)
         self.assertIn("交付 PASS", output["systemMessage"])
         self.assertEqual("x", (self.root / "tmp/count").read_text())
-        self.assertEqual(2, len(self.reports()))
+        self.assertEqual(1, len(self.reports()))
+        self.assertEqual("development-change", self.reports()[0]["scope"])
         self.assertTrue(all(r["result"] == "PASS" for r in self.reports()))
 
     def test_same_input_is_not_granted_an_old_cached_pass(self):
@@ -116,9 +118,14 @@ class DeliveryHookTest(unittest.TestCase):
             "from pathlib import Path\np=Path('tmp/count'); p.write_text(p.read_text()+'x' if p.exists() else 'x')"
         )
         self.evaluate()
+        original = self.reports()[0]
         self.evaluate()
         self.assertEqual("xx", (self.root / "tmp/count").read_text())
-        self.assertEqual(4, len(self.reports()))
+        reports = self.reports()
+        self.assertEqual(2, len(reports))
+        self.assertEqual(2, len({report["run_id"] for report in reports}))
+        self.assertTrue(all(report["scope"] == "development-change" for report in reports))
+        self.assertIn(original, reports)
 
     def test_failed_check_blocks_and_does_not_execute_repository(self):
         self.fixture("raise SystemExit(1)")
@@ -139,10 +146,12 @@ class DeliveryHookTest(unittest.TestCase):
     def test_reentry_repair_is_really_verified(self):
         self.fixture("raise SystemExit(1)")
         self.assertEqual("block", self.evaluate()["decision"])
-        (self.root / "fixture/check.py").write_text("print('fixed')")
+        (self.root / "fixture/check.py").write_text("pass" + COMPLETE_OUTPUT)
         output = self.evaluate({**EVENT, "stop_hook_active": True})
         self.assertIn("交付 PASS", output["systemMessage"])
-        self.assertEqual(3, len(self.reports()))
+        self.assertEqual(2, len(self.reports()))
+        self.assertEqual({"FAIL", "PASS"}, {report["result"] for report in self.reports()})
+        self.assertTrue(all(report["scope"] == "development-change" for report in self.reports()))
 
     def test_missing_environment_is_blocked_not_pass(self):
         self.fixture(environment=["nonexistent-lexiflow-hook-test"])

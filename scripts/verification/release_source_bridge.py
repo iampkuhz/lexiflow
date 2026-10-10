@@ -195,7 +195,12 @@ def _blocked(code: str) -> None:
     raise BridgeError("BLOCKED", code)
 
 
-def _git(root: Path, *args: str, env: dict[str, str] | None = None) -> bytes:
+def _git(
+    root: Path,
+    *args: str,
+    env: dict[str, str] | None = None,
+    input: bytes | None = None,
+) -> bytes:
     merged = dict(FIXED_ENV)
     merged["PATH"] = os.defpath
     if env:
@@ -208,6 +213,7 @@ def _git(root: Path, *args: str, env: dict[str, str] | None = None) -> bytes:
             stderr=subprocess.PIPE,
             env=merged,
             timeout=30,
+            input=input,
         ).stdout
     except (OSError, subprocess.SubprocessError):
         _blocked("git-metadata-unavailable")
@@ -531,6 +537,7 @@ def _git_identity(root: Path) -> dict[str, Any]:
             }
             _git(root, "read-tree", "--empty", env=idxenv)
             entries = _git(root, "ls-files", "--stage", "-z")
+            index_info: list[bytes] = []
             for entry in entries.split(b"\0"):
                 if not entry:
                     continue
@@ -544,15 +551,16 @@ def _git_identity(root: Path) -> dict[str, Any]:
                     _blocked("git-path-unrepresentable")
                 if stage != "0" or mode == "160000" or set(oid) == {"0"}:
                     _blocked("git-index-unrepresentable")
+                index_info.append(f"{mode} {oid} 0\t".encode("ascii") + path + b"\0")
+            # 全部条目校验后一次写入私有索引；不缓存身份或减少漂移检查。
+            if index_info:
                 _git(
                     root,
                     "update-index",
-                    "--add",
-                    "--cacheinfo",
-                    mode,
-                    oid,
-                    name,
+                    "-z",
+                    "--index-info",
                     env=idxenv,
+                    input=b"".join(index_info),
                 )
             tree = _git_text(root, "write-tree", env=idxenv)
         # raw_index binds the real index bytes as well as its semantic tree.

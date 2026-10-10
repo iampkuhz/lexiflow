@@ -11,6 +11,7 @@ from unittest.mock import patch
 import yaml
 
 from scripts.verification.risk import assess, formal_only_ids
+from tests.verification.declaration_fixtures import write_declarations
 
 
 class RiskAssessmentTest(unittest.TestCase):
@@ -103,11 +104,7 @@ class RiskAssessmentTest(unittest.TestCase):
                     },
                 }
             )
-        (self.root / "harness/module-checks.yaml").write_text(
-            yaml.safe_dump(
-                {"schema_version": "lexiflow.module-checks.v1", "checks": checks}
-            )
-        )
+        write_declarations(self.root / "harness/module-checks.yaml", checks)
 
     def _assess(self, path: str, content: bytes, *, required=()):
         target = self.root / path

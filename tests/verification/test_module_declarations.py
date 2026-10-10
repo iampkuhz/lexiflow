@@ -12,6 +12,7 @@ import unittest
 from pathlib import Path
 
 import yaml
+from scripts.verification.declarations import load_declarations
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -34,10 +35,10 @@ class ModuleChecksDeclarationTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.document = yaml.safe_load(MODULE_CHECKS_PATH.read_text(encoding="utf-8"))
+        cls.document = load_declarations(ROOT)
 
     def test_schema_version_is_declared(self) -> None:
-        self.assertEqual("lexiflow.module-checks.v1", self.document["schema_version"])
+        self.assertEqual("lexiflow.module-checks.v2", self.document["schema_version"])
 
     def test_pending_product_coverage_placeholder_is_removed(self) -> None:
         check_ids = [check["check_id"] for check in self.document["checks"]]
@@ -180,7 +181,7 @@ class ExtensionQualityEntryTest(unittest.TestCase):
     def test_product_checks_have_strict_public_contracts_and_source_inputs(
         self,
     ) -> None:
-        document = yaml.safe_load(MODULE_CHECKS_PATH.read_text(encoding="utf-8"))
+        document = load_declarations(ROOT)
         checks = {check["check_id"]: check for check in document["checks"]}
         for check_id in (
             "eng.backend.delivery",

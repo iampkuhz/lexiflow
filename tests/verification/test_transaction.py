@@ -25,6 +25,7 @@ from scripts.verification import (
 )
 from scripts.verification.reports import validate_report
 from scripts.verification.kernel import RELEASE_RUNTIME_CHILD_COMMAND
+from tests.verification.declaration_fixtures import write_declarations
 
 
 def _check(check_id: str, scope: str, command=None, *, reuse=True) -> dict:
@@ -53,7 +54,7 @@ def _runner_result(argv, cwd, env, timeout, executable=None):
         "status": "PASS",
         "exit_code": 0,
         "exit_reason": "exited",
-        "stdout": "",
+        "stdout": '{"status":"PASS","checks_run":1,"failures":0,"errors":0,"skipped":0,"reason":""}',
         "stderr": "",
         "duration_seconds": 0.01,
         "started_at": "2026-10-04T00:00:00Z",
@@ -106,13 +107,7 @@ class ProfileTransactionTests(unittest.TestCase):
             change["result_contract"] = copy.deepcopy(contract)
             baseline["transaction_reuse"] = False
             change["transaction_reuse"] = False
-        declaration = {
-            "schema_version": "lexiflow.module-checks.v1",
-            "checks": [baseline, change],
-        }
-        (root / "harness/module-checks.yaml").write_text(
-            yaml.safe_dump(declaration, sort_keys=False)
-        )
+        write_declarations(root / "harness/module-checks.yaml", [baseline, change])
         base = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=root, text=True
         ).strip()
@@ -297,7 +292,9 @@ class ProfileTransactionTests(unittest.TestCase):
                         else:
                             path = root / "harness/module-checks.yaml"
                             declaration = yaml.safe_load(path.read_text())
-                            declaration["checks"][0]["timeout_seconds"] = 6
+                            declaration["executions"][
+                                declaration["checks"][0]["execution"]
+                            ]["timeout_seconds"] = 6
                             path.write_text(
                                 yaml.safe_dump(declaration, sort_keys=False)
                             )
@@ -331,8 +328,9 @@ class ProfileTransactionTests(unittest.TestCase):
             for check in declaration["checks"]
             if check["check_id"] == "fixture.on-change"
         )
-        changed["command"] = ["python3", "-c", "pass; # changed config"]
-        changed["input_paths"].append("src/other-input.txt")
+        execution = declaration["executions"][changed["execution"]]
+        execution["command"] = ["python3", "-c", "pass; # changed config"]
+        execution["input_paths"].append("src/other-input.txt")
         declaration_path.write_text(yaml.safe_dump(declaration, sort_keys=False))
         baseline = freeze_inputs(root, verification_scope="development-baseline")
         change = freeze_inputs(
@@ -393,10 +391,9 @@ class ProfileTransactionTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         declaration_path = root / "harness/module-checks.yaml"
         declaration = yaml.safe_load(declaration_path.read_text())
-        for check in declaration["checks"]:
-            check["command"] = ["node", "-e", "pass"]
-            check["executable"] = "node"
-            check["required_environment"] = ["node"]
+        for execution in declaration["executions"].values():
+            execution["command"] = ["node", "-e", "pass"]
+            execution["required_environment"] = ["node"]
         declaration_path.write_text(yaml.safe_dump(declaration, sort_keys=False))
         baseline = freeze_inputs(root, verification_scope="development-baseline")
         change = freeze_inputs(
@@ -448,6 +445,10 @@ class ProfileTransactionTests(unittest.TestCase):
             payload = {
                 "status": "PASS",
                 "reason": "",
+                "checks_run": 1,
+                "failures": 0,
+                "errors": 0,
+                "skipped": 0,
                 "run_id": envelope["run_id"],
                 "check_id": envelope["check_id"],
                 "verify_input_fingerprint": envelope["snapshot"]["fingerprint"],
@@ -492,7 +493,32 @@ class ProfileTransactionTests(unittest.TestCase):
         declaration = yaml.safe_load(declaration_path.read_text())
         extra = _check("fixture.expensive", "repository-baseline")
         extra["command"] = ["python3", "-c", "print('expensive')"]
-        declaration["checks"].append(extra)
+        execution_id = "extra-fixture"
+        declaration["executions"][execution_id] = {
+            key: extra[key]
+            for key in (
+                "command",
+                "timeout_seconds",
+                "required_environment",
+                "input_paths",
+                "transaction_reuse",
+            )
+        }
+        declaration["checks"].append(
+            {
+                **{
+                    key: extra[key]
+                    for key in (
+                        "check_id",
+                        "module",
+                        "scope",
+                        "triggers",
+                        "module_dependencies",
+                    )
+                },
+                "execution": execution_id,
+            }
+        )
         declaration_path.write_text(yaml.safe_dump(declaration, sort_keys=False))
         baseline = freeze_inputs(root, verification_scope="development-baseline")
         calls = []
@@ -584,7 +610,32 @@ class ProfileTransactionTests(unittest.TestCase):
         declarations = yaml.safe_load(declarations_path.read_text())
         later = _check("fixture.change-later", "change-targeted")
         later["input_paths"] = ["src/later.txt"]
-        declarations["checks"].append(later)
+        execution_id = "later-fixture"
+        declarations["executions"][execution_id] = {
+            key: later[key]
+            for key in (
+                "command",
+                "timeout_seconds",
+                "required_environment",
+                "input_paths",
+                "transaction_reuse",
+            )
+        }
+        declarations["checks"].append(
+            {
+                **{
+                    key: later[key]
+                    for key in (
+                        "check_id",
+                        "module",
+                        "scope",
+                        "triggers",
+                        "module_dependencies",
+                    )
+                },
+                "execution": execution_id,
+            }
+        )
         declarations_path.write_text(yaml.safe_dump(declarations, sort_keys=False))
         repository = freeze_inputs(root, verification_scope="repository-baseline")
         changed = freeze_inputs(

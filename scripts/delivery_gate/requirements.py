@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 import yaml
+from scripts.verification.yaml_input import parse_yaml_input
 from scripts.delivery_gate.records import (
     RecordError,
     canonical_bytes,
@@ -91,7 +92,9 @@ def _dependencies(task: dict[str, Any], task_id: str) -> list[dict[str, Any]]:
 def load_task_requirements(root: Path, task_id: str) -> dict[str, Any]:
     """从当前 Catalog 加载单个 Task 的要求和版本，不从旧 submission 推断。返回经核对的范围及必需 Check，未知或不完整 Task 直接失败。"""
     try:
-        catalog = yaml.safe_load(read_regular_bytes(root, "planning/workstreams.yaml"))
+        catalog = parse_yaml_input(
+            read_regular_bytes(root, "planning/workstreams.yaml")
+        )
         entries = _catalog_tasks(catalog)
     except (OSError, yaml.YAMLError, ValueError, TypeError, AttributeError) as exc:
         raise RecordError("task-catalog-invalid", str(exc)) from None

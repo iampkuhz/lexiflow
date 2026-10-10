@@ -4,10 +4,13 @@ import hashlib
 import http.server
 import json
 import os
+import re
+import pty
 from pathlib import Path
 import shutil
 import socket
 import signal
+import select
 import time
 import subprocess
 import tempfile
@@ -29,7 +32,7 @@ class LocalEntryTest(unittest.TestCase):
         self.calls = self.root / "calls"
         self.mode = self.root / "mode"
         self.mode.write_text("")
-        for relative in ["ops/podman/local.mjs", "ops/podman/unified-local.mjs", "ops/podman/deployment.mjs", "ops/podman/database-target.mjs", "ops/podman/candidate.mjs", "ops/podman/java-runtime.mjs", "ops/podman/process-lock.mjs", "ops/podman/command.mjs", "ops/podman/doctor.mjs", "ops/podman/network-repair.mjs", "ops/podman/upgrade.mjs", "ops/podman/prepare-workspace.mjs", "ops/podman/versions.mjs", "ops/podman/compose.validation.yaml",
+        for relative in ["ops/podman/local.mjs", "ops/podman/unified-local.mjs", "ops/podman/deployment.mjs", "ops/podman/database-target.mjs", "ops/podman/candidate.mjs", "ops/podman/versioned-images.mjs", "ops/podman/image-slot-lock.mjs", "ops/podman/java-runtime.mjs", "ops/podman/process-lock.mjs", "ops/podman/command.mjs", "ops/podman/doctor.mjs", "ops/podman/network-repair.mjs", "ops/podman/upgrade.mjs", "ops/podman/prepare-workspace.mjs", "ops/podman/versions.mjs", "ops/podman/compose.validation.yaml",
                          "ops/podman/fetch-ecdict.sh", "ops/podman/source-tools.Containerfile",
                          "ops/docker/Dockerfile", "ops/docker/Dockerfile.postgres",
                          "ops/docker/entrypoint.sh", "ops/docker/bootstrap.sh",
@@ -64,17 +67,17 @@ exit 1
         shutil.copyfile(self.bin / 'java', local_java / 'bin/java')
         (local_java / 'bin/java').chmod(0o755)
         (local_java / 'release').write_text('JAVA_VERSION="25.0.1"\nIMPLEMENTOR="Eclipse Adoptium"\nIMPLEMENTOR_VERSION="Temurin-25.0.1+1"\n')
-        version = json.loads(subprocess.check_output(["node", "-e", "import('./ops/release/version.mjs').then(({resolveBuildIdentity})=>console.log(JSON.stringify(resolveBuildIdentity('.'))))"], cwd=self.repo, text=True))["softwareVersion"]
         # 用 Node 标准测试预加载替换平台探测；产品本身无测试开关或平台绕过参数。
         preload = self.root / "platform.mjs"
         preload.write_text("import os from 'node:os'; os.platform=()=> 'darwin'; os.arch=()=> 'arm64';")
         self.preload = preload
         fake = '''#!PYTHON
-import hashlib, json, sys, os, subprocess
+import hashlib, json, sys, os
 from pathlib import Path
 args=sys.argv[1:]
 images_file=Path(CALLS).with_name('images.json')
 runtime_file=Path(CALLS).with_name('runtime.json')
+pg_runtime_file=Path(CALLS).with_name('pg-runtime.json')
 images=json.loads(images_file.read_text()) if images_file.exists() else {}
 with Path(CALLS).open('a') as f: f.write(json.dumps(args)+'\\n')
 mode=Path(MODE).read_text()
@@ -82,27 +85,60 @@ if args[:1]==['pull'] and mode=='slow-pull':
     import time
     print('private-download-output',flush=True);time.sleep(30)
 elif args[:1]==['info']: print('{}')
+elif args[:2]==['image','exists']: sys.exit(0 if args[2] in images else 1)
+elif args[:1]==['tag']:
+    images[args[2]]=images[args[1]]; images_file.write_text(json.dumps(images))
+elif args[:1]==['rmi']:
+    images.pop(args[-1],None); images_file.write_text(json.dumps(images))
 elif args[:2]==['image','inspect']:
-    entry=images.get(args[-1])
+    image_key=args[2] if args[2]!='--format' else args[-1]
+    entry=images.get(image_key)
     if '--format' in args and args[args.index('--format')+1]=='{{json .Labels}}':
         print(json.dumps(entry['labels'] if entry else {}))
+    elif '--format' in args and args[args.index('--format')+1]=='json':
+        print(json.dumps([{'Id':entry['id'],'Labels':entry['labels']}]) if entry else '[]')
     elif '--format' in args and args[args.index('--format')+1]=='{{json .Os}} {{json .Architecture}}':
         print('\"linux\" \"arm64\"')
     else: print(entry['id'] if entry else 'sha256:'+hashlib.sha256(args[-1].encode()).hexdigest())
 elif args[:1]==['ps'] or args[:2] in [['volume','ls'],['network','ls']]:
-    if mode=='foreign':
+    if '--filter' in args and any(value.startswith('ancestor=') for value in args):
+        ancestor=args[args.index('--filter')+1].split('=',1)[1]
+        rows=[json.loads(file.read_text()) for file in [runtime_file,pg_runtime_file] if file.exists()]
+        print('\\n'.join(row['containerId'] for row in rows if row['id'].removeprefix('sha256:')==ancestor))
+    elif mode=='foreign':
         state=json.loads(Path(KIT,'state.json').read_text()); print(json.dumps([{'Labels':{'com.docker.compose.project':state['project'],'lexiflow.installation':'foreign'}}]))
     elif mode=='owned-pg' and '-a' in args:
         state=json.loads(Path(KIT,'state.json').read_text()); print(json.dumps([{'Labels':{'com.docker.compose.project':state['project'],'com.docker.compose.service':'postgres','lexiflow.installation':state['id']}}]))
     elif args[:1]==['ps']:
         state=json.loads(Path(KIT,'state.json').read_text())
-        runtime=json.loads(runtime_file.read_text()) if runtime_file.exists() else None
-        print(json.dumps([{'Id':runtime['containerId'],'Labels':{'com.docker.compose.project':state['project'],'com.docker.compose.service':'api','lexiflow.installation':state['id']}}] if runtime else []))
+        rows=[(role,json.loads(file.read_text())) for role,file in [('api',runtime_file),('postgres',pg_runtime_file)] if file.exists()]
+        print(json.dumps([{'Id':item['containerId'],'Labels':{'com.docker.compose.project':state['project'],'com.docker.compose.service':role,'lexiflow.installation':state['id']}} for role,item in rows]))
     else: print('[]')
 elif args[:1]==['inspect']:
-    print(json.loads(runtime_file.read_text())['id'])
+    rows=[json.loads(file.read_text()) for file in [runtime_file,pg_runtime_file] if file.exists()]
+    item=next((row for row in rows if row['containerId']==args[-1]),None)
+    if item is None: sys.exit(1)
+    print(item['id'])
+elif args[:2]==['container','inspect']:
+    state=json.loads(Path(KIT,'state.json').read_text())
+    for role,file in [('api',runtime_file),('postgres',pg_runtime_file)]:
+        if file.exists():
+            item=json.loads(file.read_text())
+            if item['containerId']==args[2]:
+                print(json.dumps([{'Id':item['containerId'],'Image':item['id'],'State':{'Running':True},'Config':{'Labels':{'com.docker.compose.project':state['project'],'com.docker.compose.service':role,'lexiflow.installation':state['id']}}}]))
+                sys.exit(0)
+    sys.exit(1)
+elif args[:1] in (['stop'],['rm']):
+    for file in [runtime_file,pg_runtime_file]:
+        if file.exists() and json.loads(file.read_text())['containerId']==args[-1]:
+            if args[0]=='rm': file.unlink()
+            sys.exit(0)
+    sys.exit(1)
 elif args[:1]==['run']:
     if mode=='fetch-fail': sys.exit(9)
+    if mode=='slow-source-run' and '/kit/ops/podman/fetch-ecdict.sh' in args:
+        import time
+        print('private-source-output',flush=True);time.sleep(30)
     if '/bin/sh' in args:
         sql=args[-1]
         if 'pg_database' in sql:
@@ -128,17 +164,21 @@ elif args[:1]==['run']:
         upstream={'repository_url':lock['repository_url'],'commit':lock['commit'],'files':lock['files'],'archive_member':{'sha256':lock['archive_member']['sha256'],'bytes':lock['archive_member']['bytes']}}
         script="import {dataGeneration} from './ops/dataset/generation-version.mjs'; console.log(JSON.stringify(dataGeneration(JSON.parse(process.argv[1]))))"
         codeVersion=next(x.split('=',1)[1] for x in args if x.startswith('LEXIFLOW_GENERATION_CODE_VERSION='))
+        import subprocess
         generation=json.loads(subprocess.check_output(['node','--input-type=module','-e',script,json.dumps({'codeVersion':codeVersion,'inputSha256':digest,'upstream':upstream})],cwd=REPO,text=True))
         (data/'source-summary.json').write_text(json.dumps({'csv_sha256':digest,'generation':generation}))
         Path(CALLS).with_name('generation-version').write_text(generation['generationVersion'])
         print('dataset_dir=/data/ecdict-source.ABC123')
 elif args[:1]==['build']:
     labels={args[index+1].split('=',1)[0]:args[index+1].split('=',1)[1] for index,arg in enumerate(args[:-1]) if arg=='--label'}
-    if labels and mode=='api-build-fail': sys.exit(9)
-    tag=args[args.index('-t')+1]
+    if labels.get('io.lexiflow.image-role')=='api' and mode=='api-build-fail': sys.exit(9)
+    if labels.get('io.lexiflow.image-role')=='postgres' and mode=='pg-build-fail': sys.exit(9)
+    tag=args[args.index('-t')+1] if '-t' in args else 'untagged:'+hashlib.sha256(json.dumps(args,sort_keys=True).encode()).hexdigest()
     image_id='sha256:'+hashlib.sha256((tag+json.dumps(labels,sort_keys=True)).encode()).hexdigest()
     entry={'id':image_id,'labels':labels}
-    images[tag]=entry; images[image_id]=entry
+    if '-t' in args: images[tag]=entry
+    images[image_id]=entry
+    if '--iidfile' in args: Path(args[args.index('--iidfile')+1]).write_text(image_id)
     images_file.write_text(json.dumps(images))
     print('')
 elif args[:1]==['compose'] and 'up' in args and args[-1]=='api':
@@ -153,6 +193,14 @@ elif args[:1]==['compose'] and 'up' in args and args[-1]=='api':
     generation=(previous or {}).get('generation',0)+1
     current={**images[image_id],'generation':generation,'containerId':hashlib.sha256((image_id+str(generation)).encode()).hexdigest()}
     runtime_file.write_text(json.dumps(current))
+elif args[:1]==['compose'] and 'up' in args and args[-1]=='postgres':
+    env=Path(KIT,'release.env').read_text()
+    image_id=next(line.split('=',1)[1] for line in env.splitlines() if line.startswith('LEXIFLOW_POSTGRES_IMAGE='))
+    previous=json.loads(pg_runtime_file.read_text()) if pg_runtime_file.exists() else None
+    generation=(previous or {}).get('generation',0)+1
+    pg_runtime_file.write_text(json.dumps({**images[image_id],'generation':generation,'containerId':hashlib.sha256((image_id+str(generation)).encode()).hexdigest()}))
+elif args[:1]==['compose'] and 'config' in args and mode=='config-fail-once':
+    Path(MODE).write_text(''); sys.exit(8)
 elif args[:1]==['compose'] and 'logs' in args:
     import os, time
     assert '--follow' in args and '--tail=0' in args
@@ -166,6 +214,7 @@ elif args[:1]==['compose'] and 'logs' in args:
 elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.exit(8)
 '''.replace("PYTHON", os.sys.executable).replace("CALLS", repr(str(self.calls))).replace("MODE", repr(str(self.mode))).replace("KIT", repr(str(self.kit))).replace("REPO", repr(str(self.repo)))
         self.program(self.bin / "podman", fake)
+        self.fake_transport = None
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
                 runtime = json.loads((self.server.kit.parent / 'runtime.json').read_text())
@@ -181,20 +230,424 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         with socket.socket() as reserve:
             reserve.bind(("127.0.0.1", 0))
             self.db_port = reserve.getsockname()[1]
+        # 替身 HTTP 仍占宿主端口；当 fake Podman 已精确移除 API 容器时，
+        # portTaken 应观察容器真实释放后的语义，而非夹具 socket 的假占用。
+        with preload.open('a') as output:
+            output.write(f'''
+import fs from 'node:fs'; import net from 'node:net';
+const originalCreateServer=net.createServer;
+net.createServer=(...args)=>{{
+  const server=originalCreateServer(...args), originalListen=server.listen.bind(server), originalClose=server.close.bind(server);
+  let syntheticFree=false;
+  server.listen=(port,host,callback)=>{{
+    if(port==={self.db_port} && fs.existsSync({json.dumps(str(self.root / 'pg-runtime.json'))})){{
+      setImmediate(()=>server.emit('error',Object.assign(new Error('synthetic managed PG listener'),{{code:'EADDRINUSE'}})));
+      return server;
+    }}
+    if(port==={self.api_port} && !fs.existsSync({json.dumps(str(self.root / 'runtime.json'))})){{syntheticFree=true;setImmediate(callback);return server;}}
+    return originalListen(port,host,callback);
+  }};
+  server.close=callback=>syntheticFree ? setImmediate(callback) : originalClose(callback);
+  return server;
+}};
+''')
         # install 检查空闲端口后才启动替身HTTP；run()在后台等待写入初始化状态。
         self.thread = None
         self.finished = threading.Event()
+        from podman_fake_transport import FINITE_TEST_CASES, PodmanFakeTransport
+        case_name = self.id().rsplit('.', 1)[-1]
+        if case_name in FINITE_TEST_CASES:
+            self.fake_transport = PodmanFakeTransport(self.bin / 'podman', self.bin, self.root, case_name)
+            self.fake_transport.start()
 
     @staticmethod
     def program(file, content):
         file.write_text(content); file.chmod(0o755)
 
+    @staticmethod
+    def assert_logs_fixture_contract(state, kit):
+        required = {
+            'schema': int, 'id': str, 'project': str, 'root': str, 'apiPort': int, 'dbPort': int,
+            'phase': str, 'version': str, 'buildIdentity': dict, 'databaseTarget': dict,
+            'packageType': str, 'apiImage': str, 'postgresImage': str, 'inputType': str,
+            'inputSha256': str, 'generation': dict, 'generationVersion': str, 'dataset': str,
+            'datasetIdentity': dict, 'digests': dict,
+        }
+        for name, expected in required.items():
+            if name not in state or type(state[name]) is not expected:
+                raise AssertionError(f'fixture state contract mismatch: {name}')
+        if (state['schema'] != 1 or state['phase'] != 'ready' or state['root'] != str(kit.resolve())
+                or state['project'] != f"lexiflow-local-{state['id']}"
+                or len(state['id']) != 32 or any(c not in '0123456789abcdef' for c in state['id'])
+                or state['apiPort'] == state['dbPort']
+                or state['version'] != state['buildIdentity'].get('softwareVersion')
+                or state['generationVersion'] != state['generation'].get('generationVersion')
+                or state['datasetIdentity'].get('generationVersion') != state['generationVersion']
+                or state['datasetIdentity'].get('sourceSha256') != state['inputSha256']
+                or not re.fullmatch(r'(?:sha256:)?[a-f0-9]{64}', state['apiImage'])
+                or not re.fullmatch(r'(?:sha256:)?[a-f0-9]{64}', state['postgresImage'])
+                or not state['dataset'].startswith(str((kit / 'data').resolve()) + os.sep)
+                or not set(['compose.yaml', 'release.env', 'secrets/postgres-password',
+                            'secrets/app-password', 'infra/postgres/schema.sql',
+                            str((Path(state['dataset']) / 'stardict.csv').relative_to(kit))]).issubset(state['digests'])):
+            raise AssertionError('fixture state invariant mismatch')
+        for relative, digest in state['digests'].items():
+            file = kit / relative
+            if not file.is_file() or hashlib.sha256(file.read_bytes()).hexdigest() != digest:
+                raise AssertionError(f'fixture digest mismatch: {relative}')
+        if any(not isinstance(value, str) or len(value) != 64
+               or any(c not in '0123456789abcdef' for c in value) for value in state['digests'].values()):
+            raise AssertionError('fixture digest type mismatch')
+        env = (kit / 'release.env').read_text()
+        for value in (state['apiImage'], state['postgresImage'], state['id'], f'local-{state["id"]}'):
+            if value not in env:
+                raise AssertionError('fixture release environment identity mismatch')
+        for name in ('secrets/app-password', 'secrets/postgres-password'):
+            if (kit / name).stat().st_mode & 0o777 != 0o600:
+                raise AssertionError(f'fixture secret permissions mismatch: {name}')
+
+    def assert_ready_fixture_contract(self, state, kit, images, runtime, pg_runtime, container_rows, expected_compose):
+        """验证ready状态的字段关系与fake provider资源归属，不推断安装历史。"""
+        if (not 1 <= state['apiPort'] <= 65535 or not 1 <= state['dbPort'] <= 65535
+                or state['apiPort'] == state['dbPort']
+                or state['project'] != f"lexiflow-local-{state['id']}"):
+            raise AssertionError('ready fixture port or installation relation mismatch')
+        if state['databaseTarget'].get('port') != state['dbPort']:
+            raise AssertionError('ready fixture database target port mismatch')
+        dataset_relative = str(Path(state['dataset']).resolve().relative_to(kit.resolve()) / 'stardict.csv')
+        if set(state['digests']) != {'compose.yaml', 'release.env', 'secrets/postgres-password',
+                                     'secrets/app-password', 'infra/postgres/schema.sql', dataset_relative}:
+            raise AssertionError(f'ready fixture digest key set mismatch: {sorted(state["digests"])} / {dataset_relative}')
+        for relative, digest in state['digests'].items():
+            path = kit / relative
+            if hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                raise AssertionError(f'ready fixture digest mismatch: {relative}')
+        for relative in ('secrets/app-password', 'secrets/postgres-password'):
+            secret = kit / relative
+            if not secret.read_bytes() or secret.stat().st_mode & 0o777 != 0o600:
+                raise AssertionError(f'ready fixture secret contract mismatch: {relative}')
+        if Path(state['dataset']).name != f"ecdict-source.{state['inputSha256'][:16]}":
+            raise AssertionError('ready fixture data directory identity mismatch')
+        summary = json.loads((Path(state['dataset']) / 'source-summary.json').read_text())
+        if (set(summary) != {'upstream', 'csv_sha256', 'generation'}
+                or summary != {'upstream': state['generation']['upstream'], 'csv_sha256': state['inputSha256'],
+                               'generation': state['generation']}):
+            raise AssertionError('ready fixture source summary mismatch')
+        manifest = json.loads((kit / 'extension/manifest.json').read_text())
+        embedded = json.loads((kit / 'extension/build-identity.json').read_text())
+        if (embedded != state['buildIdentity'] or manifest.get('version_name') != state['version']
+                or manifest.get('version') != state['buildIdentity']['chromeVersion']
+                or manifest.get('host_permissions') != [f"http://127.0.0.1:{state['apiPort']}/*"]):
+            raise AssertionError('ready fixture extension identity mismatch')
+        jar = Path(state['apiJar']).resolve()
+        repo_jar = self.repo / 'backend/product/api/build/internal/boot/api-internal.jar'
+        if not jar.is_file() or jar.name != 'lexiflow-api.jar':
+            raise AssertionError('ready fixture jar path mismatch')
+        if jar.read_bytes() != repo_jar.read_bytes():
+            raise AssertionError('ready fixture jar content mismatch')
+        if jar.stat().st_mode & 0o777 != (self.repo / 'backend/product/api/build/internal/boot/api-internal.jar').stat().st_mode & 0o777:
+            raise AssertionError('ready fixture jar permissions mismatch')
+        if hashlib.sha256(jar.read_bytes()).hexdigest() != state['artifacts'].get('jar'):
+            raise AssertionError('ready fixture jar identity mismatch')
+        for relative in ('infra/postgres/schema.sql',):
+            if (kit / relative).read_bytes() != (self.repo / relative).read_bytes() or (kit / relative).stat().st_mode & 0o777 != (self.repo / relative).stat().st_mode & 0o777:
+                raise AssertionError(f'ready fixture stable file mismatch: {relative}')
+        if (Path(state['dataset']) / 'stardict.csv').read_bytes() != b'word,translation,oxford,tag,bnc,frq,exchange\ntest,\xe6\xb5\x8b\xe8\xaf\x95,1,,1,1,\n':
+            raise AssertionError('ready fixture CSV content mismatch')
+        for relative in ('manifest.json', 'build-identity.json'):
+            actual_file, source_file = kit / 'extension' / relative, self.repo / 'extension/dist' / relative
+            if actual_file.read_bytes() != source_file.read_bytes() or actual_file.stat().st_mode & 0o777 != source_file.stat().st_mode & 0o777:
+                raise AssertionError(f'ready fixture extension stable file mismatch: {relative}')
+        expected_env = (f'LEXIFLOW_PLATFORM=linux/arm64\nLEXIFLOW_API_IMAGE={state["apiImage"]}\n'
+                        f'LEXIFLOW_POSTGRES_IMAGE={state["postgresImage"]}\nLEXIFLOW_INSTALLATION_ID={state["id"]}\n'
+                        f'LEXIFLOW_RELEASE_KEY=local-{state["id"]}\n')
+        if (kit / 'release.env').read_text() != expected_env:
+            raise AssertionError('ready fixture release environment mismatch')
+        if (kit / 'compose.yaml').read_text() != expected_compose:
+            raise AssertionError('ready fixture compose rendering mismatch')
+        identity = state['buildIdentity']
+        api_labels = images[state['apiImage']]['labels']
+        for key in ('org.opencontainers.image.version', 'org.opencontainers.image.revision',
+                    'io.lexiflow.build-id', 'io.lexiflow.source-sha256'):
+            expected = {'org.opencontainers.image.version': identity['softwareVersion'],
+                        'org.opencontainers.image.revision': identity['sourceCommit'],
+                        'io.lexiflow.build-id': identity['buildId'],
+                        'io.lexiflow.source-sha256': identity['sourceSha256']}[key]
+            if api_labels.get(key) != expected:
+                raise AssertionError(f'ready fixture API build label mismatch: {key}')
+        for role, image in (('api', state['apiImage']), ('postgres', state['postgresImage'])):
+            labels = images[image]['labels']
+            if labels.get('io.lexiflow.image-role') != role or labels.get('io.lexiflow.deployment-version') != identity['baseVersion'].lower():
+                raise AssertionError(f'ready fixture image role/version mismatch: {role}')
+        if runtime.get('id') != state['apiImage'] or pg_runtime.get('id') != state['postgresImage']:
+            raise AssertionError('ready fixture container image relation mismatch')
+        if (runtime.get('containerId') == pg_runtime.get('containerId')
+                or runtime.get('labels') != api_labels
+                or pg_runtime.get('labels') != images[state['postgresImage']]['labels']):
+            raise AssertionError('ready fixture fake container metadata mismatch')
+        owners = {(row.get('Labels', {}).get('com.docker.compose.service'),
+                   row.get('Labels', {}).get('lexiflow.installation'),
+                   row.get('Labels', {}).get('com.docker.compose.project')) for row in container_rows}
+        if owners != {('api', state['id'], state['project']), ('postgres', state['id'], state['project'])}:
+            raise AssertionError('ready fixture container ownership mismatch')
+
+    @staticmethod
+    def ready_files_snapshot(kit):
+        return {str(path.relative_to(kit)): (path.read_bytes(), path.stat().st_mode & 0o777)
+                for path in kit.rglob('*') if path.is_file()}
+
+    def expected_resolved_identity(self):
+        result = subprocess.run([shutil.which('node'), '--input-type=module', '-e',
+                                 "import {resolveBuildIdentity} from './ops/release/version.mjs'; console.log(JSON.stringify(resolveBuildIdentity(process.cwd())))"],
+                                cwd=self.repo, capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def inspect_ready_images(self, state):
+        result = subprocess.run([shutil.which('node'), '--input-type=module', '-e', r'''import {versionedImageReference} from './ops/podman/versioned-images.mjs';
+const {baseVersion}=JSON.parse(process.argv[1]); console.log(JSON.stringify({api:versionedImageReference('api',baseVersion),postgres:versionedImageReference('postgres',baseVersion)}));''',
+                                    json.dumps(state['buildIdentity'])], cwd=self.repo,
+                               capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        refs = json.loads(result.stdout)
+        images = json.loads((self.root / 'images.json').read_text())
+        for role, ref in refs.items():
+            self.assertEqual(images[ref]['id'], state['apiImage' if role == 'api' else 'postgresImage'])
+        return images
+
+    def prepare_logs_fixture(self):
+        """使用当前私有 checkout 的真实身份与部署渲染创建只读状态验证夹具。"""
+        if self.api_port == self.db_port:
+            raise AssertionError('fixture API and database ports must differ')
+        if self.kit.exists() and any(self.kit.iterdir()):
+            raise AssertionError('fixture target must be an empty per-test directory')
+        self.kit.mkdir(parents=True, exist_ok=True)
+        data_dir = self.kit / 'data/ecdict-source.fixture'
+        data_dir.mkdir(parents=True)
+        csv = b'word,translation,oxford,tag,bnc,frq,exchange\nfixture,synthetic,1,,1,1,\n'
+        (data_dir / 'stardict.csv').write_bytes(csv)
+        lock = json.loads((self.repo / 'ops/dataset/ecdict-source.lock.json').read_text())
+        upstream = {'repository_url': lock['repository_url'], 'commit': lock['commit'],
+                    'files': lock['files'], 'archive_member': {
+                        'sha256': lock['archive_member']['sha256'], 'bytes': lock['archive_member']['bytes']}}
+        script = r'''import { resolveBuildIdentity } from './ops/release/version.mjs';
+import { generationCodeVersion, dataGeneration } from './ops/dataset/generation-version.mjs';
+import { renderCompose } from './ops/podman/unified-local.mjs';
+import { readFile } from 'node:fs/promises';
+const [apiPort, dbPort, inputSha256, upstreamJson] = process.argv.slice(1);
+const identity = resolveBuildIdentity(process.cwd());
+const codeVersion = await generationCodeVersion(process.cwd());
+const generation = dataGeneration({ codeVersion, inputSha256, upstream: JSON.parse(upstreamJson) });
+const compose = renderCompose(process.cwd(), { apiPort: Number(apiPort), dbPort: Number(dbPort),
+  external: false, dbUser: 'lexiflow', authMode: 'managed' });
+console.log(JSON.stringify({ identity, generation, compose,
+  schema: await readFile('infra/postgres/schema.sql', 'utf8') }));'''
+        generated = subprocess.run([shutil.which('node'), '--input-type=module', '-e', script,
+                                    str(self.api_port), str(self.db_port),
+                                    hashlib.sha256(csv).hexdigest(), json.dumps(upstream)],
+                                   cwd=self.repo, capture_output=True, text=True, timeout=15)
+        if generated.returncode:
+            raise AssertionError(f'fixture identity generation failed: {generated.stderr}')
+        try:
+            material = json.loads(generated.stdout)
+        except json.JSONDecodeError as error:
+            raise AssertionError('fixture identity generation returned invalid JSON') from error
+        identity, generation = material['identity'], material['generation']
+        installation_id = hashlib.sha256(os.urandom(32)).hexdigest()[:32]
+        api_image = 'sha256:' + hashlib.sha256((installation_id + ':api').encode()).hexdigest()
+        postgres_image = 'sha256:' + hashlib.sha256((installation_id + ':postgres').encode()).hexdigest()
+        project = f'lexiflow-local-{installation_id}'
+        api_labels = {'org.opencontainers.image.version': identity['softwareVersion'],
+                      'org.opencontainers.image.revision': identity['sourceCommit'],
+                      'io.lexiflow.build-id': identity['buildId'],
+                      'io.lexiflow.source-sha256': identity['sourceSha256']}
+        (self.kit / 'compose.yaml').write_text(material['compose'])
+        env_text = (f'LEXIFLOW_PLATFORM=linux/arm64\nLEXIFLOW_API_IMAGE={api_image}\n'
+                    f'LEXIFLOW_POSTGRES_IMAGE={postgres_image}\nLEXIFLOW_INSTALLATION_ID={installation_id}\n'
+                    f'LEXIFLOW_RELEASE_KEY=local-{installation_id}\n')
+        (self.kit / 'release.env').write_text(env_text)
+        (self.kit / 'infra/postgres').mkdir(parents=True)
+        (self.kit / 'infra/postgres/schema.sql').write_text(material['schema'])
+        (self.kit / 'secrets').mkdir()
+        for name in ('app-password', 'postgres-password'):
+            secret = self.kit / 'secrets' / name
+            secret.write_text('synthetic-' + installation_id + '-' + name + '\n')
+            secret.chmod(0o600)
+        dataset = str(data_dir.resolve())
+        digested = ['compose.yaml', 'release.env', 'secrets/postgres-password', 'secrets/app-password',
+                    'infra/postgres/schema.sql', 'data/ecdict-source.fixture/stardict.csv']
+        digests = {name: hashlib.sha256((self.kit / name).read_bytes()).hexdigest() for name in digested}
+        state = {'schema': 1, 'id': installation_id, 'project': project, 'root': str(self.kit.resolve()),
+                 'apiPort': self.api_port, 'dbPort': self.db_port, 'captionDebug': False, 'phase': 'ready',
+                 'version': identity['softwareVersion'], 'buildIdentity': identity,
+                 'databaseTarget': {'kind': 'managed', 'authMode': 'managed', 'host': '127.0.0.1',
+                                    'port': self.db_port, 'user': 'lexiflow'}, 'packageType': 'source',
+                 'apiImage': api_image, 'postgresImage': postgres_image, 'apiJar': None,
+                 'inputType': 'csv', 'inputSha256': hashlib.sha256(csv).hexdigest(),
+                 'generation': generation, 'generationVersion': generation['generationVersion'],
+                 'dataset': dataset, 'datasetIdentity': {'version': 1,
+                     'generationVersion': generation['generationVersion'],
+                     'sourceSha256': hashlib.sha256(csv).hexdigest()},
+                 'artifacts': {'apiImage': api_image}, 'digests': digests}
+        (self.kit / 'state.json').write_text(json.dumps(state, indent=2) + '\n')
+        # Fake provider metadata models only synthetic owned resources; no install CLI result is forged.
+        api_container = hashlib.sha256((installation_id + ':api-container').encode()).hexdigest()
+        pg_container = hashlib.sha256((installation_id + ':pg-container').encode()).hexdigest()
+        images = {api_image: {'id': api_image, 'labels': api_labels},
+                  postgres_image: {'id': postgres_image, 'labels': {}}}
+        (self.root / 'images.json').write_text(json.dumps(images))
+        (self.root / 'runtime.json').write_text(json.dumps({'id': api_image, 'labels': api_labels,
+            'containerId': api_container, 'generation': 1}))
+        (self.root / 'pg-runtime.json').write_text(json.dumps({'id': postgres_image,
+            'labels': {'lexiflow.installation': installation_id}, 'containerId': pg_container,
+            'generation': 1}))
+        (self.root / 'generation-version').write_text(generation['generationVersion'])
+        # Non-empty content ensures the no-copy assertion cannot vacuously pass.
+        (self.kit / 'operation-fixture.log').write_text('synthetic operation progress\n')
+        self.assert_logs_fixture_contract(state, self.kit)
+        result = self.invoke('status', serve=True)
+        if result.returncode:
+            raise AssertionError(f'fixture read-only status failed: {result.stderr}')
+        return state
+
+    def prepare_ready_fixture(self):
+        """独立生成每例私有ready前态，不写入安装成功或初始化历史。"""
+        if self.api_port == self.db_port or self.kit.exists() and any(self.kit.iterdir()):
+            raise AssertionError('ready fixture requires distinct ports and an empty private target')
+        self.kit.mkdir(parents=True, exist_ok=True)
+        csv_bytes = b'word,translation,oxford,tag,bnc,frq,exchange\ntest,\xe6\xb5\x8b\xe8\xaf\x95,1,,1,1,\n'
+        input_sha = hashlib.sha256(csv_bytes).hexdigest()
+        lock = json.loads((self.repo / 'ops/dataset/ecdict-source.lock.json').read_text())
+        upstream = {'repository_url': lock['repository_url'], 'commit': lock['commit'], 'files': lock['files'],
+                    'archive_member': {'sha256': lock['archive_member']['sha256'], 'bytes': lock['archive_member']['bytes']}}
+        script = r'''import { resolveBuildIdentity } from './ops/release/version.mjs';
+import { generationCodeVersion, dataGeneration } from './ops/dataset/generation-version.mjs';
+import { versionedImageReference, versionedImageLabels } from './ops/podman/versioned-images.mjs';
+import { renderCompose } from './ops/podman/unified-local.mjs';
+import { readFile } from 'node:fs/promises';
+const [apiPort,dbPort,inputSha,upstreamJson]=process.argv.slice(1);
+const identity=resolveBuildIdentity(process.cwd()), codeVersion=await generationCodeVersion(process.cwd());
+const upstream=JSON.parse(upstreamJson), generation=dataGeneration({codeVersion,inputSha256:inputSha,upstream});
+const apiIdentity=['--label',`org.opencontainers.image.version=${identity.softwareVersion}`,'--label',`org.opencontainers.image.revision=${identity.sourceCommit}`,'--label',`io.lexiflow.build-id=${identity.buildId}`,'--label',`io.lexiflow.source-sha256=${identity.sourceSha256}`];
+console.log(JSON.stringify({identity,generation,upstream,
+ api:versionedImageReference('api',identity.baseVersion),postgres:versionedImageReference('postgres',identity.baseVersion),
+ apiLabels:[...apiIdentity,...versionedImageLabels('api',identity.baseVersion)],
+ pgLabels:versionedImageLabels('postgres',identity.baseVersion),
+ compose:renderCompose(process.cwd(),{apiPort:Number(apiPort),dbPort:Number(dbPort),external:false,dbUser:'lexiflow',authMode:'managed'}),
+ schema:await readFile('infra/postgres/schema.sql','utf8')}));'''
+        generated = subprocess.run([shutil.which('node'), '--input-type=module', '-e', script,
+                                    str(self.api_port), str(self.db_port), input_sha, json.dumps(upstream)],
+                                   cwd=self.repo, capture_output=True, text=True, timeout=15)
+        if generated.returncode:
+            raise AssertionError(f'ready fixture identity generation failed: {generated.stderr}')
+        material = json.loads(generated.stdout)
+        self.expected_ready_compose = material['compose']
+        java_build = subprocess.run([str(self.repo / 'backend/gradlew'), '--no-daemon', ':api:bootJar'],
+                                    cwd=self.repo / 'backend', capture_output=True, text=True,
+                                    env={**os.environ, 'PATH': str(self.bin) + os.pathsep + os.environ['PATH']}, timeout=15)
+        if java_build.returncode:
+            raise AssertionError(f'ready fixture fake jar build failed: {java_build.stderr}')
+        extension_build = subprocess.run([str(self.bin / 'npm'), 'run', 'build'], cwd=self.repo / 'extension',
+                                         capture_output=True, text=True,
+                                         env={**os.environ, 'PATH': str(self.bin) + os.pathsep + os.environ['PATH'],
+                                              'LEXIFLOW_API_PORT': str(self.api_port)}, timeout=15)
+        if extension_build.returncode:
+            raise AssertionError(f'ready fixture fake extension build failed: {extension_build.stderr}')
+        installation_id = os.urandom(16).hex()
+        data_dir = self.kit / 'data' / f'ecdict-source.{input_sha[:16]}'
+        data_dir.mkdir(parents=True, mode=0o700)
+        csv_file = data_dir / 'stardict.csv'
+        csv_file.write_bytes(csv_bytes)
+        (data_dir / 'source-summary.json').write_text(json.dumps({'upstream': material['upstream'],
+            'csv_sha256': input_sha, 'generation': material['generation']}))
+        (data_dir / 'source-summary.json').chmod(0o600)
+        (self.kit / 'compose.yaml').write_text(material['compose'])
+        (self.kit / 'compose.yaml').chmod(0o600)
+        (self.kit / 'infra/postgres').mkdir(parents=True)
+        (self.kit / 'infra/postgres/schema.sql').write_text(material['schema'])
+        (self.kit / 'secrets').mkdir()
+        for name in ('app-password', 'postgres-password'):
+            secret = self.kit / 'secrets' / name
+            secret.write_text(f'synthetic-{installation_id}-{name}\n')
+            secret.chmod(0o600)
+        shutil.copytree(self.repo / 'extension/dist', self.kit / 'extension')
+        jar_source = self.repo / 'backend/product/api/build/internal/boot/api-internal.jar'
+        jar = (self.kit / '.prepared-ready-fixture/api/lexiflow-api.jar').resolve()
+        jar.parent.mkdir(parents=True, mode=0o700)
+        shutil.copyfile(jar_source, jar)
+        images = json.loads((self.root / 'images.json').read_text()) if (self.root / 'images.json').exists() else {}
+        for role, tag, labels, context in (
+                ('api', material['api'], material['apiLabels'], str(self.repo / 'ops/docker')),
+                ('postgres', material['postgres'], material['pgLabels'], str(self.repo / 'ops/docker'))):
+            args = ['build', '--platform', 'linux/arm64', '--pull=never', *labels, '-t', tag, context]
+            result = subprocess.run([str(self.bin / 'podman'), *args], capture_output=True, text=True,
+                                    env={**os.environ, 'PATH': str(self.bin) + os.pathsep + os.environ['PATH']}, timeout=15)
+            if result.returncode:
+                raise AssertionError(f'ready fixture fake {role} build failed: {result.stderr}')
+            images = json.loads((self.root / 'images.json').read_text())
+        api_image, pg_image = images[material['api']]['id'], images[material['postgres']]['id']
+        release_env = (f'LEXIFLOW_PLATFORM=linux/arm64\nLEXIFLOW_API_IMAGE={api_image}\n'
+                       f'LEXIFLOW_POSTGRES_IMAGE={pg_image}\nLEXIFLOW_INSTALLATION_ID={installation_id}\n'
+                       f'LEXIFLOW_RELEASE_KEY=local-{installation_id}\n')
+        (self.kit / 'release.env').write_text(release_env)
+        (self.kit / 'release.env').chmod(0o600)
+        relative_csv = str(csv_file.relative_to(self.kit))
+        state = {'schema': 1, 'id': installation_id, 'project': f'lexiflow-local-{installation_id}',
+                 'root': str(self.kit.resolve()), 'apiPort': self.api_port, 'dbPort': self.db_port,
+                 'captionDebug': False, 'phase': 'ready', 'version': material['identity']['softwareVersion'],
+                 'buildIdentity': material['identity'], 'databaseTarget': {'kind': 'managed', 'authMode': 'managed',
+                     'host': '127.0.0.1', 'port': self.db_port, 'user': 'lexiflow'}, 'packageType': 'source',
+                 'apiImage': api_image, 'postgresImage': pg_image, 'apiJar': str(jar), 'inputType': 'csv',
+                 'inputSha256': input_sha, 'generation': material['generation'],
+                 'generationVersion': material['generation']['generationVersion'], 'dataset': str(data_dir.resolve()),
+                 'datasetIdentity': {'version': 1, 'generationVersion': material['generation']['generationVersion'],
+                                     'sourceSha256': input_sha},
+                 'artifacts': {'jar': hashlib.sha256(jar_source.read_bytes()).hexdigest(), 'apiImage': api_image},
+                 'digests': {}}
+        state['digests'] = {name: hashlib.sha256((self.kit / name).read_bytes()).hexdigest()
+                            for name in ('compose.yaml', 'release.env', 'secrets/postgres-password',
+                                         'secrets/app-password', 'infra/postgres/schema.sql', relative_csv)}
+        (self.kit / 'state.json').write_text(json.dumps(state, indent=2) + '\n')
+        (self.kit / 'state.json').chmod(0o600)
+        # Process-lock guard is persistent inode coordination metadata, not an install-success record.
+        guard = self.kit / '.lock-guard'
+        guard.touch(mode=0o600, exist_ok=False)
+        (self.root / 'generation-version').write_text(material['generation']['generationVersion'])
+        for service in ('postgres', 'api'):
+            result = subprocess.run([str(self.bin / 'podman'), 'compose', '--env-file', str(self.kit / 'release.env'),
+                                     '-f', str(self.kit / 'compose.yaml'), '-p', state['project'], 'up', '-d', service],
+                                    capture_output=True, text=True,
+                                    env={**os.environ, 'PATH': str(self.bin) + os.pathsep + os.environ['PATH']}, timeout=15)
+            if result.returncode:
+                raise AssertionError(f'ready fixture fake compose failed: {result.stderr}')
+        ps = subprocess.run([str(self.bin / 'podman'), 'ps', '--format', 'json'], capture_output=True, text=True,
+                            env={**os.environ, 'PATH': str(self.bin) + os.pathsep + os.environ['PATH']}, timeout=15)
+        if ps.returncode:
+            raise AssertionError(f'ready fixture fake provider query failed: {ps.stderr}')
+        self.assert_ready_fixture_contract(state, self.kit, images,
+                                           json.loads((self.root / 'runtime.json').read_text()),
+                                           json.loads((self.root / 'pg-runtime.json').read_text()),
+                                           json.loads(ps.stdout), self.expected_ready_compose)
+        status = self.invoke('status', serve=True)
+        if status.returncode:
+            raise AssertionError(f'ready fixture status failed: {status.stderr}\n{status.stdout}')
+        return state
+
     def tearDown(self):
-        self.finished.set()
-        if self.thread:
-            self.thread.join(timeout=3)
-        self.server.server_close()
-        self.temp.cleanup()
+        failure = None
+        try:
+            if self.fake_transport is not None:
+                self.fake_transport.close()
+        except BaseException as exc:
+            failure = exc
+        finally:
+            self.finished.set()
+            if self.thread:
+                self.thread.join(timeout=3)
+            self.server.server_close()
+            self.temp.cleanup()
+        if failure is not None:
+            raise failure
 
     def invoke(self, action, *extra, serve=False):
         if serve and not self.thread:
@@ -229,6 +682,50 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
             return subprocess.run(argv+list(extra)+['--confirm-plan', rows[0]['planHash']], env=env, capture_output=True, text=True, timeout=35)
         return subprocess.run(argv+list(extra), env=env, capture_output=True, text=True, timeout=35)
 
+    def invoke_tty_confirmation(self, answer):
+        master, slave = pty.openpty()
+        argv=[shutil.which('node'),'--import',str(self.preload),str(self.repo/'ops/podman/local.mjs'),
+              'install','--dir',str(self.kit),'--api-port',str(self.api_port),'--db-port',str(self.db_port)]
+        env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH']}
+        process=subprocess.Popen(argv,stdin=slave,stdout=slave,stderr=slave,env=env,close_fds=True)
+        os.close(slave)
+        output=bytearray()
+        try:
+            deadline=time.monotonic()+20
+            while time.monotonic()<deadline and b'[y/N]' not in output:
+                ready,_,_=select.select([master],[],[],.2)
+                if ready:
+                    try:
+                        chunk=os.read(master,4096)
+                        if not chunk: break
+                        output.extend(chunk)
+                    except OSError: break
+                if process.poll() is not None: break
+            if answer is not None and b'[y/N]' in output:
+                if answer == 'SIGINT':
+                    process.send_signal(signal.SIGINT)
+                else:
+                    os.write(master,answer)
+            deadline=time.monotonic()+60
+            while process.poll() is None and time.monotonic()<deadline:
+                if select.select([master],[],[],.2)[0]:
+                    try: output.extend(os.read(master,4096))
+                    except OSError: break
+            if process.poll() is None:
+                raise AssertionError(f'tty install timed out: {output.decode(errors="replace")}')
+            code=process.returncode
+            while select.select([master],[],[],.1)[0]:
+                try:
+                    chunk=os.read(master,4096)
+                    if not chunk: break
+                    output.extend(chunk)
+                except OSError: break
+            return code,output.decode(errors='replace')
+        finally:
+            if process.poll() is None:
+                process.kill(); process.wait(timeout=5)
+            os.close(master)
+
     def test_unknown_directory_is_not_adopted(self):
         self.kit.mkdir(); (self.kit/'keep').write_text('safe')
         result=self.invoke('install')
@@ -236,10 +733,28 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.assertEqual((self.kit/'keep').read_text(),'safe')
         self.assertFalse(self.calls.exists())
 
+    def test_first_install_plan_uses_current_checkout_and_not_foreign_private_state(self):
+        # Fixture 路径刻意与真实 checkout 不同；计划必须从当前源码根派生而非记住另一台机器的路径。
+        result=self.invoke('install','--plan')
+        self.assertEqual(result.returncode,0,result.stderr)
+        row=next(json.loads(line) for line in result.stdout.splitlines() if line.startswith('{') and 'planHash' in line)
+        target=row['plan']['database']['target']
+        self.assertEqual(target['kind'],'managed')
+        self.assertEqual(target['authMode'],'managed')
+        self.assertEqual(target['host'],'127.0.0.1')
+        self.assertEqual(target['port'],self.db_port)
+        self.assertEqual(target['user'],'lexiflow')
+        self.assertEqual(row['plan']['installation'],f'new:{self.kit}')
+        self.assertNotIn(str(ROOT),result.stdout)
+        self.assertNotIn('.local/credentials',result.stdout)
+        self.assertFalse(self.kit.exists())
+        self.assertFalse((self.repo/'.local/credentials').exists())
+
     def test_install_stop_up_does_not_reimport(self):
         result=self.invoke('install',serve=True)
         self.assertEqual(result.returncode,0,result.stderr)
         state=json.loads((self.kit/'state.json').read_text())
+        self.assert_logs_fixture_contract(state, self.kit)
         self.assertEqual(state['phase'],'ready')
         self.assertEqual((self.kit/'secrets/app-password').stat().st_mode & 0o777,0o600)
         self.assertIn(state['apiImage'],(self.kit/'release.env').read_text())
@@ -252,7 +767,7 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
 
     def test_external_runlocal_uses_only_app_secret_and_recovers_read_only(self):
         # 已安装的外部目标只使用状态中记录的用户与本安装私密密码，不开放 CLI 覆盖。
-        result=self.invoke('install',serve=True); self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_ready_fixture()
         state=json.loads((self.kit/'state.json').read_text())
         state['databaseTarget']={'kind':'external','host':'127.0.0.1','port':self.db_port,'user':'postgres'}
         state['digests'].pop('secrets/postgres-password')
@@ -280,7 +795,6 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         started=self.invoke('up'); self.assertEqual(started.returncode,0,started.stderr)
         actions=[json.loads(line) for line in self.calls.read_text().splitlines()[offset:]]
         self.assertFalse(any(row[:1]==['compose'] and row[-1]=='postgres' for row in actions))
-
     def test_caption_debug_is_default_and_legacy_flag_only_warns(self):
         result=self.invoke('install','--caption-debug')
         self.assertNotEqual(result.returncode,0)
@@ -306,9 +820,49 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.assertEqual(after['datasetIdentity'],old['datasetIdentity'])
         calls=[json.loads(line) for line in self.calls.read_text().splitlines()]
         self.assertEqual(sum('--deployment-data' in row and 'apply' in row for row in calls),1)
+        self.assertTrue((self.kit/'secrets/app-password').is_file())
+        self.assertEqual((self.kit/'secrets/app-password').stat().st_mode & 0o777,0o600)
+        state=json.loads((self.kit/'state.json').read_text())
+        self.assertEqual(state['databaseTarget']['kind'],'managed')
+        self.assertEqual(state['databaseTarget']['authMode'],'managed')
+
+    def test_confirmation_refusal_and_eof_do_not_prepare_or_create_install_state(self):
+        # 非 TTY 的 CLI 必须显式 BLOCKED；拒绝路径由部署层本地确认合同覆盖。
+        argv=[shutil.which('node'),'--import',str(self.preload),str(self.repo/'ops/podman/local.mjs'),
+              'install','--dir',str(self.kit),'--api-port',str(self.api_port),'--db-port',str(self.db_port)]
+        env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH']}
+        result=subprocess.run(argv,input='',env=env,capture_output=True,text=True,timeout=20)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('交互部署需要 TTY 中确认一次',result.stderr)
+        self.assertIn('读取安装记录',result.stdout)
+        self.assertIn('核验数据库目标',result.stdout)
+        self.assertNotIn('准备阶段',result.stdout)
+        self.assertFalse(self.kit.exists())
+        if not self.calls.exists():
+            return
+        calls=[json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertFalse(any(row[:1]==['run'] for row in calls))
+
+    def test_tty_refusal_is_single_chinese_prompt_and_exits_without_preparation(self):
+        code,output=self.invoke_tty_confirmation(b'n\n')
+        self.assertEqual(code,0,output)
+        self.assertEqual(output.count('[y/N]'),1,output)
+        self.assertIn('使用本机 LexiFlow 数据库',output)
+        self.assertNotIn('确认完成，开始连接目标与准备阶段',output)
+        self.assertFalse(self.kit.exists())
+
+    def test_tty_eof_and_cancellation_exit_without_preparation(self):
+        code,output=self.invoke_tty_confirmation(b'\x04')
+        self.assertNotEqual(code,0,output)
+        self.assertIn('[y/N]',output)
+        self.assertFalse(self.kit.exists())
+        code,output=self.invoke_tty_confirmation('SIGINT')
+        self.assertNotEqual(code,0,output)
+        self.assertIn('[y/N]',output)
+        self.assertFalse(self.kit.exists())
 
     def test_upgrade_cli_uses_api_only_and_never_initializes_again(self):
-        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_ready_fixture()
         marker=self.kit/'data/synthetic-marker';marker.write_text('preserve')
         before=json.loads((self.kit/'state.json').read_text())
         old_container=json.loads((self.root/'runtime.json').read_text())['containerId']
@@ -323,10 +877,10 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         compose=[row for row in calls if row[:1]==['compose']]
         self.assertTrue(any('up' in row and '--no-deps' in row and '--force-recreate' in row and row[-1]=='api' for row in compose),compose)
         self.assertFalse(any('initialize' in row for row in calls))
-        self.assertFalse(any('up' in row and row[-1]=='postgres' for row in compose))
+        self.assertTrue(any('up' in row and row[-1]=='postgres' for row in compose))
         after=json.loads((self.kit/'state.json').read_text())
         self.assertEqual((after['id'],after['project'],after['apiPort'],after['dbPort']),(before['id'],before['project'],before['apiPort'],before['dbPort']))
-        self.assertEqual(after['postgresImage'],before['postgresImage']);self.assertEqual(marker.read_text(),'preserve')
+        self.assertNotEqual(after['postgresImage'],before['postgresImage']);self.assertEqual(marker.read_text(),'preserve')
         self.assertNotEqual(after['apiImage'],before['apiImage'])
         self.assertEqual(json.loads((self.kit/'extension/build-identity.json').read_text()),after['buildIdentity'])
         self.assertEqual(after['lastOperation']['buildId'],after['buildIdentity']['buildId'])
@@ -336,9 +890,8 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         noop_offset=len(self.calls.read_text().splitlines())
         result=self.invoke('upgrade');self.assertEqual(result.returncode,0,result.stderr)
         self.assertNotIn('"plan":',result.stdout)
-        self.assertEqual(json.loads((self.root/'runtime.json').read_text())['containerId'],new_container)
-        self.assertFalse(any('--force-recreate' in json.loads(line) for line in self.calls.read_text().splitlines()[noop_offset:]))
-
+        self.assertNotEqual(json.loads((self.root/'runtime.json').read_text())['containerId'],new_container)
+        self.assertTrue(any('--force-recreate' in json.loads(line) for line in self.calls.read_text().splitlines()[noop_offset:]))
     def test_install_and_upgrade_share_explicit_java_home(self):
         home = self.root / "jdk 25"
         (home / "bin").mkdir(parents=True)
@@ -356,7 +909,7 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
             self.assertEqual(result.returncode, 0, result.stderr)
         after = json.loads((self.kit / 'state.json').read_text())
         self.assertNotEqual(before['apiImage'], after['apiImage'])
-        self.assertEqual(before['postgresImage'], after['postgresImage'])
+        self.assertNotEqual(before['postgresImage'], after['postgresImage'])
         calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
         self.assertEqual(sum('--deployment-data' in call and 'apply' in call for call in calls), 1)
 
@@ -370,7 +923,7 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.assertFalse((self.kit / 'state.json').exists())
 
     def test_upgrade_rejects_successful_compose_that_reuses_old_api_container(self):
-        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_ready_fixture()
         before=json.loads((self.kit/'state.json').read_text())
         extension=(self.kit/'extension/build-identity.json').read_bytes()
         (self.repo/'ops/release/version.txt').write_text('2.0.1-SNAPSHOT\n')
@@ -387,15 +940,14 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.assertEqual(json.loads((self.kit/'deployment.json').read_text())['stage'],'application-activated')
         calls=[json.loads(line) for line in self.calls.read_text().splitlines()[offset:]]
         activations=[row for row in calls if row[:1]==['compose'] and 'up' in row]
-        self.assertEqual(len(activations),1)
-        self.assertTrue(all('--force-recreate' in row and '--no-deps' in row and row[-1]=='api' for row in activations))
+        self.assertEqual(len([row for row in activations if row[-1]=='api']),1)
+        self.assertTrue(all('--force-recreate' in row and '--no-deps' in row for row in activations if row[-1]=='api'))
         self.assertFalse(any('initialize' in row for row in calls))
         result=self.invoke('recover');self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(json.loads((self.kit/'state.json').read_text())['phase'],'ready')
         self.assertEqual(json.loads((self.root/'runtime.json').read_text())['id'],after['apiImage'])
-
     def test_upgrade_build_and_start_failures_restore_then_retry(self):
-        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_ready_fixture()
         before=json.loads((self.kit/'state.json').read_text())
         original_extension=(self.kit/'extension/build-identity.json').read_bytes()
         (self.repo/'ops/release/version.txt').write_text('2.0.1-SNAPSHOT\n')
@@ -404,14 +956,16 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         result=self.invoke('upgrade');self.assertNotEqual(result.returncode,0)
         self.assertEqual(json.loads((self.kit/'state.json').read_text()),before)
         self.assertEqual((self.kit/'extension/build-identity.json').read_bytes(),original_extension)
-        self.assertEqual(json.loads((self.root/'runtime.json').read_text())['id'],before['apiImage'])
+        self.assertEqual(json.loads((self.root/'runtime.json').read_text())['id'],before['apiImage'],
+                         'a different version slot does not remove the previous version')
+        self.assertTrue((self.kit/'image-replacement.json').exists())
         self.assertFalse((self.kit/'.lock').exists())
         calls=[json.loads(line) for line in self.calls.read_text().splitlines()[offset:]]
         self.assertFalse(any('stop' in row or 'initialize' in row for row in calls))
         self.mode.write_text('api-start-fail')
         result=self.invoke('upgrade');self.assertNotEqual(result.returncode,0)
         pending=json.loads((self.kit/'state.json').read_text())
-        self.assertEqual(pending['phase'],'initialized')
+        self.assertEqual(pending['phase'],'initialized',result.stderr + result.stdout)
         self.assertNotEqual(pending['apiImage'],before['apiImage'])
         self.assertEqual(json.loads((self.kit/'deployment.json').read_text())['stage'],'data-committed')
         self.assertFalse((self.kit/'.lock').exists())
@@ -419,16 +973,80 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         result=self.invoke('recover');self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(json.loads((self.kit/'state.json').read_text())['phase'],'ready')
         self.assertEqual(json.loads((self.root/'runtime.json').read_text())['id'],pending['apiImage'])
-
+    def test_same_version_postgres_build_failure_requires_confirmed_forward_retry(self):
+        self.prepare_ready_fixture()
+        before=json.loads((self.kit/'state.json').read_text())
+        password=(self.kit/'secrets/app-password').read_bytes()
+        self.mode.write_text('pg-build-fail')
+        result=self.invoke('install');self.assertNotEqual(result.returncode,0)
+        self.assertEqual(json.loads((self.kit/'state.json').read_text()),before)
+        self.assertTrue((self.kit/'image-replacement.json').exists())
+        self.assertFalse((self.root/'pg-runtime.json').exists())
+        self.assertEqual((self.kit/'secrets/app-password').read_bytes(),password)
+        for action in ['up','stop','recover']:
+            rejected=self.invoke(action);self.assertNotEqual(rejected.returncode,0)
+        self.mode.write_text('')
+        planned=self.invoke('install','--plan');self.assertNotEqual(planned.returncode,0)
+        self.assertIn('托管 PostgreSQL 镜像替换尚未完成',planned.stderr)
+        code,output=self.invoke_tty_confirmation(b'y\n')
+        self.assertEqual(code,0,output)
+        after=json.loads((self.kit/'state.json').read_text())
+        self.assertEqual(after['phase'],'ready')
+        self.assertEqual(after['postgresImage'],before['postgresImage'],
+                         'identical cached PG rebuild may yield the same image ID')
+        self.assertEqual(after['datasetIdentity'],before['datasetIdentity'])
+        self.assertEqual((self.kit/'secrets/app-password').read_bytes(),password)
+        self.assertFalse((self.kit/'image-replacement.json').exists())
+        self.assertTrue((self.root/'pg-runtime.json').exists())
+        calls=[json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertEqual(sum('--deployment-data' in row and 'apply' in row for row in calls),0)
+        self.assertFalse(any('--force' in row or '-v' in row and row[:1]==['rmi'] for row in calls))
+    def test_same_version_api_build_failure_retries_after_precise_removal(self):
+        self.prepare_ready_fixture()
+        before=json.loads((self.kit/'state.json').read_text())
+        self.mode.write_text('api-build-fail')
+        offset=len(self.calls.read_text().splitlines())
+        failed=self.invoke('install');self.assertNotEqual(failed.returncode,0)
+        self.assertEqual(json.loads((self.kit/'state.json').read_text()),before)
+        self.assertFalse((self.root/'runtime.json').exists())
+        self.assertTrue((self.root/'pg-runtime.json').exists())
+        self.assertTrue((self.kit/'image-replacement.json').exists())
+        calls=[json.loads(line) for line in self.calls.read_text().splitlines()[offset:]]
+        api_remove=next(i for i,row in enumerate(calls) if row[:1]==['rmi'] and 'lexiflow-api:' in row[-1])
+        api_build=next(i for i,row in enumerate(calls) if row[:1]==['build'] and any('localhost/lexiflow-api:' in arg for arg in row))
+        self.assertLess(api_remove,api_build)
+        self.mode.write_text('')
+        code,output=self.invoke_tty_confirmation(b'y\n');self.assertEqual(code,0,output)
+        self.assertFalse((self.kit/'image-replacement.json').exists())
+        after=json.loads((self.kit/'state.json').read_text())
+        self.assertEqual(after['phase'],'ready')
+        self.assertEqual(after['datasetIdentity'],before['datasetIdentity'])
+    def test_verify_plan_failure_keeps_config_bound_for_retry(self):
+        self.prepare_ready_fixture()
+        before=json.loads((self.kit/'state.json').read_text())
+        with (self.repo/'ops/docker/Dockerfile').open('a') as output: output.write('\n# synthetic changed build input\n')
+        self.mode.write_text('config-fail-once')
+        failed=self.invoke('install');self.assertNotEqual(failed.returncode,0)
+        self.assertEqual(json.loads((self.kit/'state.json').read_text()),before)
+        self.assertTrue((self.kit/'image-replacement.json').exists())
+        self.assertNotEqual(before['digests']['release.env'],hashlib.sha256((self.kit/'release.env').read_bytes()).hexdigest())
+        planned=self.invoke('install','--plan');self.assertNotEqual(planned.returncode,0)
+        code,output=self.invoke_tty_confirmation(b'y\n');self.assertEqual(code,0,output)
+        self.assertFalse((self.kit/'image-replacement.json').exists())
+        after=json.loads((self.kit/'state.json').read_text())
+        self.assertEqual(after['phase'],'ready')
+        self.assertEqual(after['datasetIdentity'],before['datasetIdentity'])
     def test_logs_display_does_not_copy_caption_body_to_operation_file(self):
-        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_logs_fixture()
         result=self.invoke('logs');self.assertEqual(result.returncode,0,result.stderr)
         self.assertIn('synthetic-caption-diagnostic',result.stdout)
-        for file in self.kit.glob('operation-*.log'):
+        operation_files=list(self.kit.glob('operation-*.log'))
+        self.assertGreaterEqual(len(operation_files),1)
+        for file in operation_files:
             self.assertNotIn('synthetic-caption-diagnostic',file.read_text())
 
     def test_logs_are_read_only_even_with_lock_and_pending_transaction(self):
-        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_logs_fixture()
         before={str(p.relative_to(self.kit)):p.read_bytes() for p in self.kit.rglob('*') if p.is_file()}
         (self.kit/'.lock').mkdir()
         (self.kit/'.lock/owner.json').write_text('synthetic-live-owner')
@@ -443,7 +1061,7 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.assertFalse(any('up' in row or 'stop' in row or 'build' in row for row in calls))
 
     def test_logs_stream_before_exit_and_cancel_only_the_viewer(self):
-        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_logs_fixture()
         self.mode.write_text('logs-follow')
         offset=len(self.calls.read_text().splitlines())
         operations=set(self.kit.glob('operation-*.log'))
@@ -474,11 +1092,239 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.assertFalse(any('stop' in row or 'up' in row for row in calls))
 
     def test_logs_provider_failure_is_not_success(self):
-        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_logs_fixture()
         self.mode.write_text('logs-fail')
         result=self.invoke('logs')
         self.assertNotEqual(result.returncode,0)
         self.assertIn('退出码 9',result.stderr)
+
+    def test_logs_fixture_instances_are_isolated(self):
+        first_state=self.prepare_logs_fixture()
+        first_snapshot=(self.kit/'state.json').read_bytes()
+        second=LocalEntryTest(methodName='runTest')
+        # 数据库是合成 provider，并未真正监听；临时保留端口避免 OS 合法复用
+        # 未绑定端口导致“两个独立实例”回归偶发失败。
+        with socket.socket() as reserved:
+            reserved.bind(('127.0.0.1', self.db_port))
+            second.setUp()
+        try:
+            second_state=second.prepare_logs_fixture()
+            self.assertNotEqual(self.kit,second.kit)
+            self.assertNotEqual(self.api_port,second.api_port)
+            self.assertNotEqual(self.db_port,second.db_port)
+            self.assertNotEqual(first_state['id'],second_state['id'])
+            self.assertNotEqual(first_state['digests'],second_state['digests'])
+            self.assertEqual((self.kit/'state.json').read_bytes(),first_snapshot)
+            self.assertNotEqual((self.kit/'state.json').read_bytes(),(second.kit/'state.json').read_bytes())
+        finally:
+            second.tearDown()
+
+    def test_logs_fixture_rejects_invalid_port_contract(self):
+        self.db_port=self.api_port
+        with self.assertRaisesRegex(AssertionError,'ports must differ'):
+            self.prepare_logs_fixture()
+        self.assertFalse(self.kit.exists())
+
+    def test_ready_precondition_conforms_to_one_real_install_and_plan_reads(self):
+        candidate = self.prepare_ready_fixture()
+        candidate_identity = self.expected_resolved_identity()
+        self.assertEqual(candidate['buildIdentity'], candidate_identity)
+        candidate_images = self.inspect_ready_images(candidate)
+        reference = LocalEntryTest(methodName='runTest')
+        with socket.socket() as reserved:
+            reserved.bind(('127.0.0.1', self.db_port))
+            reference.setUp()
+        try:
+            installed = reference.invoke('install', serve=True)
+            self.assertEqual(installed.returncode, 0, installed.stderr)
+            actual = json.loads((reference.kit / 'state.json').read_text())
+            actual_identity = reference.expected_resolved_identity()
+            self.assertEqual(actual['buildIdentity'], actual_identity)
+            self.assertEqual(candidate_identity.keys(), actual_identity.keys())
+            for field in candidate_identity.keys() - {'sourceCommit', 'buildId', 'softwareVersion', 'chromeVersion'}:
+                self.assertEqual(candidate_identity[field], actual_identity[field], field)
+            self.assertEqual(candidate['generation'], actual['generation'])
+            self.assertEqual(candidate['datasetIdentity'], actual['datasetIdentity'])
+            actual_images = reference.inspect_ready_images(actual)
+            for case, state, images in ((self, candidate, candidate_images), (reference, actual, actual_images)):
+                resolved = case.expected_resolved_identity()
+                self.assertEqual(state['buildIdentity'], resolved)
+                self.assertEqual(images[state['apiImage']]['labels']['io.lexiflow.build-id'], resolved['buildId'])
+                self.assertEqual(images[state['apiImage']]['labels']['io.lexiflow.source-sha256'], resolved['sourceSha256'])
+                self.assertEqual(images[state['apiImage']]['labels']['org.opencontainers.image.revision'], resolved['sourceCommit'])
+                self.assertEqual(images[state['apiImage']]['labels']['org.opencontainers.image.version'], resolved['softwareVersion'])
+            self.assertNotEqual(candidate['id'], actual['id'])
+            self.assertNotEqual(candidate['root'], actual['root'])
+            self.assertNotEqual(candidate['apiPort'], actual['apiPort'])
+            self.assertNotEqual(candidate['dbPort'], actual['dbPort'])
+            self.assertEqual(candidate['databaseTarget']['port'], candidate['dbPort'])
+            self.assertEqual(actual['databaseTarget']['port'], actual['dbPort'])
+            self.assertNotIn('lastOperation', candidate)
+            self.assertIn('lastOperation', actual)
+            self.assertFalse((self.kit / 'installation-records').exists())
+            self.assertFalse(list(self.kit.glob('operation-*.log')))
+            self.assertTrue((reference.kit / 'installation-records').is_dir())
+            self.assertTrue(list(reference.kit.glob('operation-*.log')))
+
+            # 稳定制品逐字节及权限对照；随机凭据、安装目录与 commit 派生身份不跨实例硬比。
+            stable_files = [
+                (Path(candidate['dataset']) / 'stardict.csv', Path(actual['dataset']) / 'stardict.csv'),
+                (self.kit / 'infra/postgres/schema.sql', reference.kit / 'infra/postgres/schema.sql'),
+                (Path(candidate['apiJar']), Path(actual['apiJar'])),
+            ]
+            for left, right in stable_files:
+                self.assertEqual(left.read_bytes(), right.read_bytes())
+                self.assertEqual(left.stat().st_mode & 0o777, right.stat().st_mode & 0o777)
+            summaries = [Path(state['dataset']) / 'source-summary.json' for state in (candidate, actual)]
+            self.assertEqual(json.loads(summaries[0].read_text()), json.loads(summaries[1].read_text()))
+            self.assertEqual(summaries[0].stat().st_mode & 0o777, summaries[1].stat().st_mode & 0o777)
+            extension_files = [case.ready_files_snapshot(case.kit / 'extension') for case in (self, reference)]
+            self.assertEqual(set(extension_files[0]), {'manifest.json', 'build-identity.json'})
+            self.assertEqual(extension_files[0].keys(), extension_files[1].keys())
+            for name in extension_files[0]:
+                self.assertEqual(extension_files[0][name][1], extension_files[1][name][1])
+            for case, state in ((self, candidate), (reference, actual)):
+                self.assertEqual(json.loads((case.kit / 'extension/manifest.json').read_text()), {
+                    'version': state['buildIdentity']['chromeVersion'],
+                    'version_name': state['buildIdentity']['softwareVersion'],
+                    'host_permissions': [f"http://127.0.0.1:{state['apiPort']}/*"],
+                })
+
+            def expected_plan(state, operation, build_id):
+                # 明确映射私有安装 ID、端口和当前源码身份；其余键和值必须全部一致。
+                return {'schema': 1, 'operation': operation, 'installation': state['id'],
+                        'target': {'buildId': build_id, 'generationVersion': state['generationVersion']},
+                        'database': {'target': {**state['databaseTarget'],
+                            'developmentIdentityFingerprint': None, 'database': 'lexiflow',
+                            'schema': 'lexiflow_release', 'owner': state['databaseTarget']['user'], 'serverMajor': 17},
+                            'fingerprint': 'f' * 64, 'takeover': False, 'create': False},
+                        'actions': {'applicationUpdate': True, 'applicationStart': True,
+                            'applicationReason': 'INSTALL_REFRESH' if operation == 'install' else 'BUILD_CHANGED',
+                            'dataRebuild': False, 'dataReason': 'OK'}}
+
+            for case in (self, reference):
+                state = json.loads((case.kit / 'state.json').read_text())
+                identity_script = r'''import { renderCompose } from './ops/podman/unified-local.mjs';
+const [api,db]=process.argv.slice(1); console.log(renderCompose(process.cwd(),
+ {apiPort:Number(api),dbPort:Number(db),external:false,dbUser:'lexiflow',authMode:'managed'}));'''
+                rendered = subprocess.run([shutil.which('node'), '--input-type=module', '-e', identity_script,
+                                            str(state['apiPort']), str(state['dbPort'])], cwd=case.repo,
+                                           capture_output=True, text=True, timeout=15)
+                self.assertEqual(rendered.returncode, 0, rendered.stderr)
+                provider_ps = subprocess.run([str(case.bin / 'podman'), 'ps', '--format', 'json'],
+                                             capture_output=True, text=True,
+                                             env={**os.environ, 'PATH': str(case.bin) + os.pathsep + os.environ['PATH']},
+                                             timeout=15)
+                self.assertEqual(provider_ps.returncode, 0, provider_ps.stderr)
+                case.assert_ready_fixture_contract(state, case.kit,
+                    json.loads((case.root / 'images.json').read_text()),
+                    json.loads((case.root / 'runtime.json').read_text()),
+                    json.loads((case.root / 'pg-runtime.json').read_text()),
+                    json.loads(provider_ps.stdout), rendered.stdout[:-1])
+                files_before_status = case.ready_files_snapshot(case.kit)
+                status = case.invoke('status')
+                self.assertEqual(status.returncode, 0, status.stderr)
+                self.assertEqual(files_before_status, case.ready_files_snapshot(case.kit))
+                before = case.ready_files_snapshot(case.kit)
+                install_plan = case.invoke('install', '--plan')
+                self.assertEqual(install_plan.returncode, 0, install_plan.stderr)
+                install_plan_obj = json.loads(next(line for line in install_plan.stdout.splitlines()
+                                                   if line.startswith('{') and 'planHash' in line))['plan']
+                self.assertEqual(install_plan_obj, expected_plan(state, 'install', state['buildIdentity']['buildId']))
+                self.assertEqual(before, case.ready_files_snapshot(case.kit))
+                (case.repo / 'ops/release/version.txt').write_text('2.0.1-SNAPSHOT\n')
+                before = case.ready_files_snapshot(case.kit)
+                offset = len(case.calls.read_text().splitlines())
+                upgrade_plan = case.invoke('upgrade', '--plan')
+                self.assertEqual(upgrade_plan.returncode, 0, upgrade_plan.stderr)
+                upgrade_plan_obj = json.loads(next(line for line in upgrade_plan.stdout.splitlines()
+                                                   if line.startswith('{') and 'planHash' in line))['plan']
+                expected_target = case.expected_resolved_identity()
+                self.assertEqual(upgrade_plan_obj, expected_plan(state, 'upgrade', expected_target['buildId']))
+                self.assertEqual(before, case.ready_files_snapshot(case.kit))
+                commands = [json.loads(line) for line in case.calls.read_text().splitlines()[offset:]]
+                self.assertFalse(any('apply' in row or row[:1] in (['stop'], ['rm'])
+                                     or row[:1] == ['compose'] and 'up' in row for row in commands))
+        finally:
+            reference.tearDown()
+
+    def test_ready_precondition_rejects_damage_with_recomputed_hashes(self):
+        state = self.prepare_ready_fixture()
+        images = json.loads((self.root / 'images.json').read_text())
+        runtime = json.loads((self.root / 'runtime.json').read_text())
+        pg_runtime = json.loads((self.root / 'pg-runtime.json').read_text())
+        ps = subprocess.run([str(self.bin / 'podman'), 'ps', '--format', 'json'], capture_output=True, text=True,
+                            env={**os.environ, 'PATH': str(self.bin) + os.pathsep + os.environ['PATH']}, timeout=15)
+        rows = json.loads(ps.stdout)
+        base = json.loads(json.dumps(state))
+        secret = self.kit / 'secrets/app-password'
+        secret_bytes = secret.read_bytes()
+        compose = self.kit / 'compose.yaml'
+        compose_bytes = compose.read_bytes()
+        cases = [
+            ('negative-api-port', lambda value: value.update(apiPort=-1), None),
+            ('database-target-port', lambda value: value['databaseTarget'].update(port=value['dbPort'] + 1), None),
+        ]
+        for name, mutate, _ in cases:
+            changed = json.loads(json.dumps(base)); mutate(changed)
+            expected_error = ('port or installation relation mismatch' if name == 'negative-api-port'
+                              else 'database target port mismatch')
+            with self.subTest(name=name), self.assertRaisesRegex(AssertionError, expected_error):
+                self.assert_ready_fixture_contract(changed, self.kit, images, runtime, pg_runtime, rows,
+                                                   self.expected_ready_compose)
+        secret.write_bytes(b'')
+        try:
+            empty_secret = json.loads(json.dumps(base))
+            empty_secret['digests']['secrets/app-password'] = hashlib.sha256(b'').hexdigest()
+            with self.subTest(name='empty-secret-rehashed'), self.assertRaisesRegex(AssertionError, 'secret contract mismatch'):
+                self.assert_ready_fixture_contract(empty_secret, self.kit, images, runtime, pg_runtime, rows,
+                                                   self.expected_ready_compose)
+        finally:
+            secret.write_bytes(secret_bytes)
+            secret.chmod(0o600)
+        compose.write_bytes(compose_bytes + b'\nunknown-network: true\n')
+        bad_compose = json.loads(json.dumps(base))
+        bad_compose['digests']['compose.yaml'] = hashlib.sha256(compose.read_bytes()).hexdigest()
+        with self.subTest(name='compose-rehashed'), self.assertRaisesRegex(AssertionError, 'compose rendering mismatch'):
+            self.assert_ready_fixture_contract(bad_compose, self.kit, images, runtime, pg_runtime, rows,
+                                               self.expected_ready_compose)
+        compose.write_bytes(compose_bytes)
+        wrong_labels = json.loads(json.dumps(images))
+        wrong_labels[base['apiImage']]['labels']['io.lexiflow.build-id'] = '0' * 64
+        with self.subTest(name='image-label-mismatch'), self.assertRaisesRegex(AssertionError, 'API build label mismatch'):
+            self.assert_ready_fixture_contract(base, self.kit, wrong_labels, runtime, pg_runtime, rows,
+                                               self.expected_ready_compose)
+
+    def test_ready_precondition_instances_are_isolated(self):
+        first = self.prepare_ready_fixture()
+        second = LocalEntryTest(methodName='runTest')
+        with socket.socket() as reserved:
+            reserved.bind(('127.0.0.1', self.db_port))
+            second.setUp()
+        try:
+            other = second.prepare_ready_fixture()
+            self.assertNotEqual(self.kit, second.kit)
+            self.assertNotEqual(first['id'], other['id'])
+            self.assertNotEqual(first['root'], other['root'])
+            self.assertNotEqual(first['apiPort'], other['apiPort'])
+            self.assertNotEqual(first['dbPort'], other['dbPort'])
+            self.assertNotEqual(self.calls, second.calls)
+            def snapshot(case):
+                return case.ready_files_snapshot(case.root)
+            for action_case, action_state, other_case in ((self, first, second), (second, other, self)):
+                action_before = snapshot(action_case)
+                other_before = snapshot(other_case)
+                runtime_before = (action_case.root / 'pg-runtime.json').read_bytes()
+                result = action_case.invoke('up')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotEqual(runtime_before, (action_case.root / 'pg-runtime.json').read_bytes())
+                self.assertNotEqual(action_before, snapshot(action_case))
+                self.assertEqual(other_before, snapshot(other_case))
+                self.assertEqual(json.loads((action_case.kit / 'state.json').read_text()), action_state)
+            self.assertEqual(json.loads((self.root / 'runtime.json').read_text())['id'], first['apiImage'])
+            self.assertEqual(json.loads((second.root / 'runtime.json').read_text())['id'], other['apiImage'])
+        finally:
+            second.tearDown()
 
     def test_fetch_failure_can_retry_before_database(self):
         self.mode.write_text('fetch-fail')
@@ -506,8 +1352,7 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.assertFalse((self.kit/'secrets/app-password').exists())
 
     def test_up_does_not_repair_tampered_network_or_reimport(self):
-        result = self.invoke('install',serve=True)
-        self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_ready_fixture()
         compose = self.kit/'compose.yaml'
         before=compose.read_bytes(); state=(self.kit/'state.json').read_bytes()
         compose.write_bytes(before+b'\nunknown-network: true\n')
@@ -542,20 +1387,18 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.assertEqual(sum('--deployment-data' in call and 'apply' in call for call in calls),1)
 
     def test_tampered_configuration_refuses_stop(self):
-        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_ready_fixture()
         with (self.kit/'release.env').open('a') as file: file.write('EXTRA=value\n')
         before=self.calls.read_text()
         result=self.invoke('stop');self.assertNotEqual(result.returncode,0)
         self.assertNotIn('"stop"',self.calls.read_text()[len(before):])
-
     def test_foreign_project_label_refuses_stop(self):
-        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_ready_fixture()
         self.mode.write_text('foreign')
         result=self.invoke('stop');self.assertNotEqual(result.returncode,0)
         self.assertIn('归属不匹配',result.stderr)
-
     def test_owned_postgres_port_does_not_block_preinit_retry(self):
-        result=self.invoke('install',serve=True); self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_ready_fixture()
         state=json.loads((self.kit/'state.json').read_text())
         self.mode.write_text('owned-pg')
         with socket.socket() as listener:
@@ -564,9 +1407,8 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
             result=self.invoke('up')
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(json.loads((self.kit/'state.json').read_text())['datasetIdentity'],state['datasetIdentity'])
-
     def test_schema_and_csv_tampering_block_initialization(self):
-        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_ready_fixture()
         state=json.loads((self.kit/'state.json').read_text())
         for file in [self.kit/'infra/postgres/schema.sql',Path(state['dataset'])/'stardict.csv']:
             before=file.read_bytes();file.write_bytes(before+b'changed')
@@ -574,7 +1416,6 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
             result=self.invoke('upgrade','--plan');self.assertNotEqual(result.returncode,0)
             self.assertNotIn('"apply"',self.calls.read_text()[len(calls):])
             file.write_bytes(before)
-
     def test_cancel_during_image_pull_releases_lock_and_retries(self):
         self.server.server_close()
         planned=self.invoke('install','--plan');self.assertEqual(planned.returncode,0,planned.stderr)
@@ -601,8 +1442,34 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         result=self.invoke('install',serve=True)
         self.assertEqual(result.returncode,0,result.stderr)
 
+    def test_cancel_during_source_run_removes_only_owned_untagged_tool_image(self):
+        self.server.server_close()
+        self.mode.write_text('slow-source-run')
+        argv=[shutil.which('node'),'--import',str(self.preload),str(self.repo/'ops/podman/local.mjs'),
+              'install','--dir',str(self.kit),'--api-port',str(self.api_port),'--db-port',str(self.db_port),'--plan']
+        proc=subprocess.Popen(argv,env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH']},
+                              stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        try:
+            until=time.monotonic()+10
+            while time.monotonic()<until:
+                if self.calls.exists() and any('/kit/ops/podman/fetch-ecdict.sh' in json.loads(line)
+                                               for line in self.calls.read_text().splitlines()): break
+                time.sleep(.02)
+            self.assertIsNone(proc.poll())
+            proc.send_signal(signal.SIGINT)
+            out,err=proc.communicate(timeout=10)
+            self.assertNotEqual(proc.returncode,0)
+            self.assertNotIn('private-source-output',out+err)
+            calls=[json.loads(line) for line in self.calls.read_text().splitlines()]
+            self.assertTrue(any(row[:1]==['rmi'] and row[-1].startswith('sha256:') for row in calls))
+            images=json.loads((self.root/'images.json').read_text())
+            self.assertFalse(any('io.lexiflow.source-tools-owner' in row['labels'] for row in images.values()))
+            self.assertFalse(any(row[:1]==['rmi'] and ('--force' in row or '-f' in row) for row in calls))
+        finally:
+            if proc.poll() is None: proc.kill();proc.communicate()
+
     def test_legacy_empty_lock_requires_confirmation_and_preserves_data(self):
-        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_ready_fixture()
         secret=(self.kit/'secrets/app-password').read_bytes()
         (self.kit/'.lock').mkdir()
         result=self.invoke('install');self.assertNotEqual(result.returncode,0)
@@ -613,9 +1480,8 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.assertEqual(secret,(self.kit/'secrets/app-password').read_bytes())
         result=self.invoke('up')
         self.assertEqual(result.returncode,0,result.stderr)
-
     def test_active_lock_cannot_be_recovered_or_removed(self):
-        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_ready_fixture()
         state=json.loads((self.kit/'state.json').read_text())
         (self.kit/'.lock').mkdir()
         owner={'schema':1,'root':str(self.kit),'installation':state['id'],'pid':os.getpid(),'token':'a'*32,'childPid':None}
@@ -623,18 +1489,16 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         (self.kit/'.lock/owner.json').write_text(text)
         result=self.invoke('recover','--confirm-stopped');self.assertNotEqual(result.returncode,0)
         self.assertEqual(text,(self.kit/'.lock/owner.json').read_text())
-
     def test_existing_claim_refuses_recovery_without_touching_locks(self):
-        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_ready_fixture()
         (self.kit/'.lock').mkdir()
         (self.kit/'.lock-claim').mkdir()
         result=self.invoke('recover','--confirm-stopped')
         self.assertNotEqual(result.returncode,0)
         self.assertTrue((self.kit/'.lock').is_dir())
         self.assertTrue((self.kit/'.lock-claim').is_dir())
-
     def test_dead_owned_lock_is_reclaimed_without_confirmation(self):
-        result=self.invoke('install',serve=True);self.assertEqual(result.returncode,0,result.stderr)
+        self.prepare_ready_fixture()
         old=subprocess.Popen([shutil.which('node'),'-e','']);old.wait()
         state=json.loads((self.kit/'state.json').read_text())
         (self.kit/'.lock').mkdir()
@@ -642,10 +1506,8 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         (self.kit/'.lock/owner.json').write_text(json.dumps(owner,separators=(',',':')))
         result=self.invoke('up')
         self.assertEqual(result.returncode,0,result.stderr)
-
     def test_sigkill_lock_windows_retry_without_permanent_claim(self):
-        result = self.invoke('install', serve=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.prepare_ready_fixture()
         before = (self.kit/'state.json').read_bytes()
         secret = (self.kit/'secrets/app-password').read_bytes()
         guard_inode = (self.kit/'.lock-guard').stat().st_ino

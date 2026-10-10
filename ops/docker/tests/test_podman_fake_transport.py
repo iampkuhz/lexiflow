@@ -1,0 +1,278 @@
+"""Podman fake transport 的字节语义、隔离和失败关闭回归。"""
+import json
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from unittest.mock import patch
+
+from podman_fake_transport import (
+    FINITE_TEST_CASES,
+    MAX_REQUEST_BYTES,
+    PodmanFakeTransport,
+    TransportError,
+    _decode_args,
+    _decode_env,
+)
+
+
+MODEL = '''import json, os, sys
+from pathlib import Path
+args = sys.argv[1:]
+counter = globals().get('counter', 0) + 1
+mode = Path(os.environ['MODE_FILE']).read_text()
+state = Path(os.environ['STATE_FILE'])
+with state.open('a', encoding='utf-8') as output:
+    output.write(json.dumps({'args': args, 'mode': mode, 'cwd': os.getcwd(), 'ctx': os.environ.get('CTX'), 'counter': counter}, ensure_ascii=False) + '\\n')
+sys.stdout.buffer.write(json.dumps({'args': args, 'mode': mode, 'cwd': os.getcwd(), 'ctx': os.environ.get('CTX'), 'counter': counter}, ensure_ascii=False).encode('utf-8'))
+sys.stderr.buffer.write(('err:' + mode).encode('utf-8'))
+kind = os.environ.get('EXIT_KIND', 'int')
+if kind == 'large': sys.stdout.buffer.write(b'x' * 300000)
+if kind == 'none': sys.exit()
+if kind == 'text': sys.exit('synthetic-exit')
+if kind == 'exception': raise ValueError('synthetic-model-error')
+sys.exit(int(os.environ.get('EXIT_STATUS', '0')))
+'''
+
+
+class PodmanFakeTransportTest(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='lf transport 雪\n')
+        self.root = Path(self.temp.name).resolve()
+        self.bin = self.root / 'bin'
+        self.bin.mkdir()
+        self.model = self.bin / 'podman'
+        self.model.write_text('#!/usr/bin/env python3\n' + MODEL)
+        self.model.chmod(0o700)
+        self.mode = self.root / 'mode file'
+        self.mode.write_text('first')
+        self.state = self.root / 'state file'
+        self.state.write_text('')
+        self.case = 'test_transport_equivalence_and_context'
+        self.transport = PodmanFakeTransport(self.model, self.bin, self.root, self.case)
+        self.transport.start()
+        self.addCleanup(self._cleanup)
+
+    def _cleanup(self):
+        try:
+            self.transport.close()
+        finally:
+            self.temp.cleanup()
+
+    def _context(self):
+        return {**os.environ, 'MODE_FILE': str(self.mode), 'STATE_FILE': str(self.state),
+                'CTX': '雪 "quoted"\nline'}
+
+    def _call(self, argv, env):
+        return subprocess.run([str(self.bin / 'podman'), *argv], cwd=self.root, env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+
+    def _standalone(self, model, argv, env):
+        return subprocess.run([sys.executable, str(model), *argv], cwd=self.root, env=env,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+
+    def _await_drained(self, transport):
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and list(transport.mailbox.glob('q.*')):
+            time.sleep(.002)
+        self.assertEqual(list(transport.mailbox.glob('q.*')), [])
+
+    def test_transport_equivalence_and_context(self):
+        original = self.transport.model
+        baseline_mode = self.root / 'baseline-mode'
+        baseline_state = self.root / 'baseline-state'
+        transport_state = self.state
+        args = ['probe', 'space value', '雪', '"quoted"', "back\\slash", 'line1\nline2', '']
+        baseline_env = {**self._context(), 'MODE_FILE': str(baseline_mode), 'STATE_FILE': str(baseline_state)}
+        transported_env = self._context()
+        for mode in ('first', 'changed'):
+            baseline_mode.write_text(mode)
+            self.mode.write_text(mode)
+            expected = self._standalone(original, args, baseline_env)
+            actual = self._call(args, transported_env)
+            self.assertEqual((actual.stdout, actual.stderr, actual.returncode),
+                             (expected.stdout, expected.stderr, expected.returncode))
+        self.assertEqual(baseline_state.read_bytes(), transport_state.read_bytes())
+        self._await_drained(self.transport)
+        self.assertNotIn('test_cancel_during_image_pull_releases_lock_and_retries', FINITE_TEST_CASES)
+        self.assertNotIn('test_cancel_during_source_run_removes_only_owned_untagged_tool_image', FINITE_TEST_CASES)
+
+    def test_empty_argv_and_exit_semantics(self):
+        env = {**self._context(), 'EXIT_STATUS': '7'}
+        actual = self._call([], env)
+        expected = self._standalone(self.transport.model, [], env)
+        self.assertEqual((actual.stdout, actual.stderr, actual.returncode),
+                         (expected.stdout, expected.stderr, expected.returncode))
+        for kind in ('none', 'text'):
+            with self.subTest(kind=kind):
+                env = {**self._context(), 'EXIT_KIND': kind}
+                actual = self._call([], env)
+                expected = self._standalone(self.transport.model, [], env)
+                self.assertEqual((actual.stdout, actual.stderr, actual.returncode),
+                                 (expected.stdout, expected.stderr, expected.returncode))
+        error = self._call(['probe'], {**self._context(), 'EXIT_KIND': 'exception'})
+        native_error = self._standalone(self.transport.model, ['probe'],
+                                        {**self._context(), 'EXIT_KIND': 'exception'})
+        self.assertEqual((error.stdout, error.stderr, error.returncode),
+                         (native_error.stdout,
+                          native_error.stderr.replace(os.fsencode(str(self.transport.model)),
+                                                      os.fsencode(str(self.bin / 'podman'))),
+                          native_error.returncode))
+
+    def test_bad_frames_and_limits_fail_closed(self):
+        for frame in (b'', b'x\n', b'1\na', b'2\na\0', b'1\na\0extra\0'):
+            with self.subTest(frame=frame), self.assertRaises(TransportError):
+                _decode_args(frame)
+        with self.assertRaises(TransportError):
+            _decode_args(b'1\n' + b'x' * MAX_REQUEST_BYTES)
+        for frame in (b'a=1', b'=bad\0', b'A=1\0A=2\0', b'A=1\0B'):
+            with self.subTest(frame=frame), self.assertRaises(TransportError):
+                _decode_env(frame)
+
+    def test_each_transport_has_private_server_and_mailbox(self):
+        other_root = self.root / 'other 雪'
+        other_root.mkdir()
+        other_bin = other_root / 'bin'
+        other_bin.mkdir()
+        other_model = other_bin / 'podman'
+        other_model.write_text('#!/usr/bin/env python3\n' + MODEL)
+        other_model.chmod(0o700)
+        other_mode = other_root / 'mode'
+        other_mode.write_text('other')
+        other_state = other_root / 'state'
+        other_state.write_text('')
+        other = PodmanFakeTransport(other_model, other_bin, other_root, self.case)
+        other.start()
+        try:
+            self.assertNotEqual(self.transport.server.pid, other.server.pid)
+            self.assertNotEqual(self.transport.mailbox, other.mailbox)
+            env_a = self._context()
+            env_b = {**os.environ, 'MODE_FILE': str(other_mode),
+                     'STATE_FILE': str(other_state), 'CTX': 'other'}
+            a = self._call(['probe'], env_a)
+            b = subprocess.run([str(other_bin / 'podman'), 'probe'], cwd=other_root, env=env_b,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+            self.assertIn(b'first', a.stdout)
+            self.assertIn(b'other', b.stdout)
+            self._await_drained(self.transport)
+            self._await_drained(other)
+        finally:
+            other.close()
+            other.temp_cleanup = None
+            import shutil
+            shutil.rmtree(other_root)
+
+    def test_server_crash_makes_transport_fail_not_empty_success(self):
+        self.transport.server.kill()
+        self.transport.server.wait(timeout=2)
+        result = self._call(['probe'], self._context())
+        self.assertNotEqual(result.returncode, 0)
+        with self.assertRaises(TransportError):
+            self.transport.close()
+
+    def test_unknown_residual_is_sticky_failure(self):
+        (self.transport.mailbox / 'q.999.unknown').write_text('unexpected')
+        result = self._call(['probe'], self._context())
+        self.assertEqual(result.returncode, 97)
+        self.assertTrue((self.transport.mailbox / 'server.failed').is_file())
+        with self.assertRaises(TransportError):
+            self.transport.close()
+
+    def test_model_output_over_limit_fails_closed(self):
+        result = self._call(['probe'], {**self._context(), 'EXIT_KIND': 'large'})
+        self.assertEqual(result.returncode, 97)
+        with self.assertRaises(TransportError):
+            self.transport.close()
+
+    def test_malformed_published_request_fails_closed(self):
+        base = self.transport.mailbox / 'q.999'
+        Path(str(base) + '.args').write_bytes(b'1\nnot-terminated')
+        Path(str(base) + '.env').write_bytes(b'')
+        Path(str(base) + '.cwd').write_bytes(os.fsencode(str(self.root)) + b'\n')
+        Path(str(base) + '.ready').touch()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and not (self.transport.mailbox / 'server.failed').exists():
+            time.sleep(.002)
+        self.assertTrue((self.transport.mailbox / 'server.failed').exists())
+        with self.assertRaises(TransportError):
+            self.transport.close()
+
+    def test_native_fallback_preserves_argv_and_never_uses_server(self):
+        before = int((self.transport.mailbox / 'server.count').read_text()) if (self.transport.mailbox / 'server.count').exists() else 0
+        for args in (['pull', 'space value', ''], ['run', '雪', ''],
+                     ['compose', '--project-name', 'x', 'logs', '--follow'],
+                     ['unlisted', 'quoted "value"', '']):
+            with self.subTest(args=args):
+                expected = self._standalone(self.transport.model, args, self._context())
+                actual = self._call(args, self._context())
+                self.assertEqual((actual.stdout, actual.stderr, actual.returncode),
+                                 (expected.stdout, expected.stderr, expected.returncode))
+        after = int((self.transport.mailbox / 'server.count').read_text()) if (self.transport.mailbox / 'server.count').exists() else 0
+        self.assertEqual(after, before)
+
+    def test_corrupt_response_length_is_sticky_failure(self):
+        fake_wc = self.root / 'bad-wc'
+        fake_wc.write_text('#!/bin/sh\nprintf "0 %s\\n0 %s\\n0 total\\n" "$2" "$3"\n')
+        fake_wc.chmod(0o700)
+        import podman_fake_transport as module
+        real_which = module.shutil.which
+        with patch.object(module.shutil, 'which', side_effect=lambda name, path=None: str(fake_wc) if name == 'wc' else real_which(name, path=path)):
+            self.transport._write_wrapper()
+        result = self._call(['probe'], self._context())
+        self.assertEqual(result.returncode, 97)
+        with self.assertRaises(TransportError):
+            self.transport.close()
+
+    def test_real_podman_model_native_transport_equivalence(self):
+        from test_podman_local import LocalEntryTest
+        transported = LocalEntryTest('test_verify_plan_failure_keeps_config_bound_for_retry')
+        native = LocalEntryTest('test_verify_plan_failure_keeps_config_bound_for_retry')
+        native.id = lambda: 'test_podman_local.LocalEntryTest.native_only'
+        transported.setUp()
+        native.setUp()
+        try:
+            self.assertIsNotNone(transported.fake_transport)
+            self.assertIsNone(native.fake_transport)
+            steps = (['info'], ['image', 'exists', 'unknown'],
+                     ['build', '-t', 'synthetic:one', '--label', 'io.lexiflow.image-role=api', '/tmp'],
+                     ['image', 'exists', 'synthetic:one'],
+                     ['image', 'inspect', '--format', 'json', 'unknown'], ['network', 'ls'])
+            for mode in ('', 'api-build-fail'):
+                transported.mode.write_text(mode)
+                native.mode.write_text(mode)
+                for args in steps:
+                    got = subprocess.run([str(transported.bin / 'podman'), *args], cwd=transported.root,
+                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+                    expected = subprocess.run([str(native.bin / 'podman'), *args], cwd=native.root,
+                                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+                    self.assertEqual((got.stdout, got.stderr, got.returncode),
+                                     (expected.stdout, expected.stderr, expected.returncode))
+            self.assertEqual(transported.calls.read_bytes(), native.calls.read_bytes())
+            self.assertEqual(len(transported.calls.read_text().splitlines()), 12)
+            self.assertEqual((transported.root / 'images.json').read_bytes(),
+                             (native.root / 'images.json').read_bytes())
+            self._await_drained(transported.fake_transport)
+            self.assertEqual(int((transported.fake_transport.mailbox / 'server.count').read_text()), 12)
+        finally:
+            try:
+                transported.tearDown()
+            finally:
+                native.tearDown()
+
+    def test_original_cancel_case_does_not_start_server(self):
+        from test_podman_local import LocalEntryTest
+        original = LocalEntryTest('test_cancel_during_image_pull_releases_lock_and_retries')
+        original.setUp()
+        try:
+            self.assertIsNone(original.fake_transport)
+            self.assertFalse((original.root / 'podman-transport').exists())
+        finally:
+            original.tearDown()
+
+
+if __name__ == '__main__':
+    unittest.main()

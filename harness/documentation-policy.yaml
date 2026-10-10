@@ -34,8 +34,54 @@ skills:
     trigger: 仅在创建、重构或审计 skill 本身时读取完整 SKILL.md
 skill_missing: BLOCKED
 information_architecture:
-  detail_placement: sibling-directory-with-parent-stem-when-needed
+  lifecycle_entry: docs/README.md
+  canonical_roots:
+    system: docs/system.md
+    system_details: docs/system/
+    scenarios: docs/scenarios/
+    reference: docs/reference.md
+    reference_details: docs/reference/
+    roadmap: docs/roadmap/
+    user: docs/user/
+  source_of_truth:
+    lifecycle_navigation: docs/README.md
+    system_facts: [docs/system.md, docs/system/]
+    reader_tasks: docs/scenarios/
+    parameters_and_entrypoints: [docs/reference.md, docs/reference/]
+    roadmap_and_user_content: [docs/roadmap/, docs/user/]
+    execution_state: status-page-only
+    engineering_rules: [AGENTS.md, harness/]
+  organization:
+    principle: unique-body-per-fact
+    optimized_workflows_reference_execution_workflows_without_copying_subflows: true
+    separate_design_questions_from_style_feedback: true
+    overview_order: [purpose-and-boundaries, whole-system-diagram, stages, deep-links]
+    diagram_source_context: parent-node-and-real-entrypoint
+    activity_layout: vertical-success-depth-with-left-right-real-branches-and-early-failure-exits
+    omit_empty_helper_branches: true
+    scenario_naming: reader-goal-not-component-name
+  note_contract:
+    abstract_stage: [input, action, output]
+    concrete_execution: [entrypoint, purpose, expected-duration]
+    entrypoint: real-script-or-file-or-manual-role
+    duration: each-execution-node-has-seconds-or-minutes-budget
+    duration_label: distinguish-planned-from-measured
+    duration_accounting: separate-machine-agent-preparation-and-waiting-no-parent-child-double-count
+    duration_semantics: planning-budget-not-timeout-sla-or-pass-condition
+    unknown_is_not_expected: true
+    no_expensive_suite_for_numeric-estimates: true
+  prose:
+    prefer_short_tables: true
+    node_table_preferred_columns: 3
+    keep_reasons_short: true
+    avoid_owner_in_chinese_prose: true
+    preserve_machine_field_owner: true
+    relative_file_links: true
+    validate_fragments_in_ide: true
+    markdown_bold: commonmark-delimiter-boundaries
+    bold_spacing: closing-marker-followed-by-space-not-opening-marker
   rule: 方针、原则和大功能模块的父页保留目的、核心模型、边界和确定结论；只有确有步骤、字段、命令、示例或诊断需要展开时，才在同名子目录补充细节。子目录的文件数量、拆分主题与篇幅按信息复杂度决定，不设固定模板、数量或字节预算；细节页只保留执行或核对所必需的信息，不重复父页背景、不机械保留旧正文。
+  detail_placement: sibling-directory-with-parent-stem-when-needed
 selected_solution_only:
   documentation_roots: [docs]
   prohibited_heading_patterns:
@@ -65,11 +111,26 @@ reader_navigation:
     primary_questions: [怎么取得并校验发行产物, 怎么初始化并启动服务, 怎么安装扩展并确认可用]
     rule: 根 README 以 M 芯片 macOS 上使用 Podman Compose 和 Chrome 的使用者为主线，按三个问题给出在发行目录可执行的最短顺序、必要前置条件和成功判据；预制发行不要求开发工具；用户明确选择源码构建时列明 Java 25、Node/npm 等工具和构建步骤，词库由脚本从公开固定来源获取，不要求提供开发数据库。macOS 源码编译调试保留按需入口；Harness、Gate、架构原理、诊断参数及详细失败恢复留在对应开发文档，以链接按需进入。未完成验收的发行不得写成已可获取或已受支持。
     media_intro: 效果图或动图前用一句 quote line 说明展示内容；必要的示意性质简短点明，不堆叠按钮、时延等免责解释。
-  overview: 先给目的、边界和主图，再解释阶段与深入入口；不以目录清单代替系统模型。
+  engineering_entry: docs/system/engineering.md
+  engineering_audience: 第一次接手仓库的开发者
+  engineering_result_goals: [开发反馈, 任务验收, 正式发行]
+  engineering_file_navigation:
+    index: docs/reference/scripts.md
+    identity: 一个编号绑定一个真实文件，目录图和生命周期图共用；不为 Markdown 章节编号。
+    overview: 总图选择正式入口和关键门禁文件，分图展开内部实现，测试从对应实现下钻。
+    node_kind: 区分可执行入口、触发适配器、内部库和机器声明；声明不是执行步骤。
+    reading: 先用粗体短标题与解释组成总分列表，再展示目录和生命周期；不把历史争论或未解释术语放进新开发者主线。
+    boundary: 结果目标、检查范围与触发入口分别说明；未实施的分类、配置精简或验收范围调整留在 OpenSpec 设计中，不冒充现行规则。
+  engineering_systems: [质量检查体系, 交付验收体系, 工程协作与运行支撑体系]
+  engineering_reading_levels: [整体模型, 分体系说明, 操作与实现细节]
+  engineering_reading_routes: [理解与审查, 日常操作]
+  engineering_dimensions: [用途与执行者, 使用场景, 检查范围, 触发入口]
+  engineering_rule: 三个体系按职责区分，协作与运行支撑不是顺序阶段；用途、场景、范围和入口不可并列为门禁层次。独立验证复用质量检查能力，验收另外判定证据；脚本索引区分公开 CLI、触发适配器、内部库和人工步骤，说明输入、输出及副作用。
+  overview: 先给目的、边界和主图，再解释阶段或能力关系与深入入口；不以目录清单代替系统模型。
   workflow: 明确当前位置、前置输入、输出交接、失败去向和回到上级的路径；调用关系与阶段顺序分别说明。
   reference: standalone checker 和字段参数按需查阅；有状态的 status/result 仍属于对应 workflow，有副作用的 install/link/start 单列说明。
   source_comments: 注释解释 contract、不变量、边界和设计原因；先恢复代码结构，不以模板空话、注释数量或中文比例作为质量证据。
 terminology:
-  engineering_glossary: docs/development/reference/engineering-glossary.md
-  product_glossary: docs/product/glossary.md
+  engineering_glossary: docs/reference/engineering-glossary.md
+  product_glossary: docs/reference/product-glossary.md
   rule: 中文承担叙述与连接，Harness、Quality Gate 等规范术语保持英文；字段、标识符、命令、路径、API、schema 与机器消费的固定值保持原样。

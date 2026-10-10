@@ -64,6 +64,17 @@ export async function runLocal(argv, candidateRequest) {
     const label = commandLabel(command, argv);
     return runCommand(command, argv, { cwd, timeout, capture, env, logFile: logOutput ? logFile : undefined, label: label || `执行 ${command} 检查`, announce: Boolean(label), onStart: pid => writeLock(pid), onClose: ({ groupGone }) => { if (groupGone) writeLock(null); } });
   }
+  async function cleanupOwnSourceTools(toolsId, owner) {
+    if (!/^sha256:[a-f0-9]{64}$/.test(toolsId) || !/^lexiflow-source-tools-[a-f0-9]{32}$/.test(owner))
+      fail('DEPLOYMENT_SOURCE_TOOLS_IMAGE_INVALID');
+    // 唯一受限的取消后命令路径：仅本轮 iidfile 的完整 ID 与唯一 owner 标签。
+    const cleanupRun = argv => runCommand('podman', argv, { cwd: repo, env: environment, capture: true,
+      timeout: 30000, label: '清理本轮来源工具镜像', onStart: pid => writeLock(pid),
+      onClose: ({ groupGone }) => { if (groupGone) writeLock(null); } });
+    const labels = JSON.parse(await cleanupRun(['image', 'inspect', '--format', '{{json .Labels}}', toolsId]));
+    if (labels?.['io.lexiflow.source-tools-owner'] !== owner) fail('DEPLOYMENT_SOURCE_TOOLS_IMAGE_INVALID');
+    await cleanupRun(['rmi', toolsId]);
+  }
   function save() {
     const next = path.join(dir, `.state-${crypto.randomBytes(16).toString('hex')}.next`);
     fs.writeFileSync(next, JSON.stringify(state, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
@@ -81,7 +92,22 @@ export async function runLocal(argv, candidateRequest) {
     }));
   }
   function verifyConfig(installed = state) {
-    if (JSON.stringify(digestFiles(installed)) !== JSON.stringify(installed.digests)) fail('安装配置或密码发生变化，拒绝操作；不要手改受管目录');
+    const actual = digestFiles(installed);
+    if (JSON.stringify(actual) === JSON.stringify(installed.digests)) return;
+    const marker = path.join(dir, 'image-replacement.json');
+    if (fs.existsSync(marker)) {
+      regular(marker);
+      const pending = JSON.parse(fs.readFileSync(marker, 'utf8'));
+      const expected = installed.digests;
+      if (pending.schema === 1 && pending.installationId === installed.id && pending.root === dir
+          && pending.stateSha256 === sha(fs.readFileSync(path.join(dir, 'state.json')))
+          && Array.isArray(pending.allowedEnvSha256) && pending.allowedEnvSha256.length <= 4
+          && pending.allowedEnvSha256.every(value => /^[a-f0-9]{64}$/.test(value))
+          && pending.allowedEnvSha256.includes(actual['release.env'])
+          && expected && Object.keys(actual).length === Object.keys(expected).length
+          && Object.entries(actual).every(([name, digest]) => name === 'release.env' || expected[name] === digest)) return;
+    }
+    fail('安装配置或密码发生变化，拒绝操作；不要手改受管目录');
   }
   function composeArgs(...argv) {
     return ['compose', '--env-file', 'release.env', '-p', state.project, '-f', 'compose.yaml', ...(state.captionDebug ? ['-f', 'caption-debug.yaml'] : []), ...argv];
@@ -313,16 +339,21 @@ export async function runLocal(argv, candidateRequest) {
         },
         saveState: next => { state = next; save(); }, setState: next => { state = next; },
         getState: () => state, progress: text => { step = text; console.log(`[LexiFlow] ${text}`); },
-        imageLabels, digestFiles, planOnly, confirmPlan, signal: abort.signal, reportReady: summary,
+        imageLabels, digestFiles, cleanupOwnSourceTools, planOnly, confirmPlan, signal: abort.signal, reportReady: summary,
         interrupted: () => interrupted, setLogFile: file => { logFile = file; console.log(`[LexiFlow] 本次运行私有日志：${file}`); } });
     }
     if (!fs.existsSync(dir)) fail('尚未安装，请先运行 install');
+    step = '读取安装记录';
     state = loadState();
     if (!['new', 'initialized', 'ready'].includes(state.phase)) fail('DEPLOYMENT_INSTALL_STATE_INVALID');
+    const replacementPending = fs.existsSync(path.join(dir, 'image-replacement.json'));
+    if (replacementPending && action !== 'recover') fail('DEPLOYMENT_PENDING_REPLAN_REQUIRED');
     await assertDevelopmentTargetIdentity({ repo, state, run });
     if (action === 'recover') {
       const journalFile = path.join(dir, 'deployment.json');
       const journal = fs.existsSync(journalFile) ? readOperationJournal(journalFile) : null;
+      if (replacementPending && (!journal || journal.stage === 'complete'
+          || !fs.existsSync(path.join(dir, 'prepared-target.json')))) fail('DEPLOYMENT_PENDING_REPLAN_REQUIRED');
       if (journal && journal.stage !== 'complete') {
         const preparedFile = path.join(dir, 'prepared-target.json');
         if (!fs.existsSync(preparedFile)) fail('DEPLOYMENT_RECOVERY_PREPARED_TARGET_MISSING');
@@ -347,6 +378,10 @@ export async function runLocal(argv, candidateRequest) {
           setState: value => { state = value; }, saveState: value => { state = value; save(); }, compose, ready,
           verifyDevelopmentIdentity: targetState => assertDevelopmentTargetIdentity({ repo, state: targetState, run }) });
         writeOperationJournal(journalFile, { ...journal, stage: 'complete' });
+        if (replacementPending) {
+          verifyConfig();
+          fs.unlinkSync(path.join(dir, 'image-replacement.json'));
+        }
         console.log('[LexiFlow] 已按数据库成功记录恢复目标应用；未重导资料。'); return 0;
       }
       if (!state.generation || !state.inputSha256) {
@@ -367,6 +402,7 @@ export async function runLocal(argv, candidateRequest) {
         acquireLock(confirmStopped);
       console.log('[LexiFlow] 数据库记录与安装状态一致，无待恢复操作。'); return 0;
     }
+    step = '核验安装状态';
     if (!['initialized', 'ready'].includes(state.phase) || !state.generationVersion || !state.datasetIdentity || !state.digests) fail('DEPLOYMENT_STATE_PENDING');
     verifyConfig();
     await run('podman', ['info'], { timeout: 30000 }); await ownedResources();
@@ -407,13 +443,38 @@ export async function runLocal(argv, candidateRequest) {
   catch (error) {
     const code = String(error?.message ?? '');
     const known = {
+      DEPLOYMENT_INPUT_DRIFT: '确认后的源码、资料或制品输入与本次计划不符，拒绝继续部署。',
+      DEPLOYMENT_SECRET_DRIFT: '已记录的数据库凭据在确认后发生变化，拒绝继续连接或部署。',
+      DEPLOYMENT_SOURCE_DRIFT: '已缓存来源、资料摘要或生成记录不符合本次公开固定来源，拒绝部署。',
+      DEPLOYMENT_DATABASE_DRIFT: '确认后的数据库对象、权限或成功记录发生变化，拒绝写入。',
+      DEPLOYMENT_TARGET_CHANGED: '指定目标与已有安装记录不同，拒绝更换目标。',
+      DEPLOYMENT_REPLACEMENT_RECORD_INVALID: '镜像替换记录与本安装状态不符，保留现场；请核对原安装输入。',
+      DEPLOYMENT_REPLACEMENT_TARGET_CHANGED: '未完成的镜像替换绑定原构建与资料输入；恢复后只能使用相同输入再次明确确认，拒绝改用其他目标。',
+      DEPLOYMENT_REPLACEMENT_RECOVERY_REQUIRES_CONFIRMED_INSTALL: '托管 PostgreSQL 镜像替换尚未完成；--plan 不改变部署资源，请在 TTY 中重新运行 install/upgrade 并明确确认原目标。',
+      DEPLOYMENT_SQL_DRIFT: '准备的数据库结构文件与本次输入不同，拒绝部署。',
+      DEPLOYMENT_DATA_COPY_DRIFT: '复制的资料与已校验输入不同，拒绝部署。',
+      CANDIDATE_CHANGED: '候选包内容与已校验输入不同，拒绝部署。',
+      CANDIDATE_TARGET_DRIFT: '候选验证目标与本次计划不同，拒绝部署。',
+      DEPLOYMENT_RECOVERY_DATABASE_DRIFT: '恢复核对的数据库对象或成功记录发生变化，拒绝继续。',
+      DEPLOYMENT_RECOVERY_FACT_DRIFT: '数据库成功记录、资料或凭据与恢复目标不符，拒绝继续。',
+      DEPLOYMENT_RECOVERY_CONFIG_DRIFT: '安装配置与原安装及准备的目标均不符，拒绝恢复。',
+      DEPLOYMENT_RECOVERY_EXTENSION_DRIFT: '扩展制品与已核验恢复目标不符，拒绝恢复。',
+      DEPLOYMENT_RECOVERY_SQL_DRIFT: '数据库结构文件与已核验恢复目标不符，拒绝恢复。',
       DEPLOYMENT_DATABASE_CREDENTIAL_REQUIRED: '本机数据库端口已占用，但没有本安装记录的受限数据库凭据；拒绝连接或创建新密码。',
       DEVELOPMENT_DATABASE_SOURCE_INVALID: '本仓库开发数据库 Compose 配置不符合已授权的无密码目标，拒绝连接。',
       DEVELOPMENT_DATABASE_IDENTITY_MISMATCH: '开发数据库容器的配置、标签、映射或卷不符合本仓库目标，拒绝连接。',
-      DEVELOPMENT_DATABASE_IDENTITY_DRIFT: '开发数据库容器身份已漂移，拒绝继续部署或恢复。',
+      DEVELOPMENT_DATABASE_IDENTITY_DRIFT: '开发数据库当前容器或目标事实与已核验记录不符，拒绝继续部署或恢复。',
+      DEVELOPMENT_DATABASE_RECORD_INVALID: '安装记录中的开发数据库信息损坏或不完整，拒绝连接。',
+      DEVELOPMENT_DATABASE_TARGET_UNAVAILABLE: '未找到可核验的本仓库 PostgreSQL 开发目标，拒绝连接。',
+      DEVELOPMENT_DATABASE_CONTAINER_CHANGED: '开发数据库容器 ID 与安装记录不同，拒绝继续部署。',
+      DEVELOPMENT_DATABASE_IMAGE_CHANGED: '开发数据库镜像与安装记录不同，拒绝继续部署。',
+      DEVELOPMENT_DATABASE_REPOSITORY_CHANGED: '开发数据库 Compose 仓库路径或项目归属与安装记录不同，拒绝继续部署。',
+      DEVELOPMENT_DATABASE_AUTH_CHANGED: '开发数据库、用户或认证模式与安装记录不同，拒绝继续部署。',
+      DEVELOPMENT_DATABASE_PORT_CHANGED: '开发数据库 loopback 端口映射与安装记录不同，拒绝继续部署。',
+      DEVELOPMENT_DATABASE_VOLUME_CHANGED: '开发数据库数据卷或挂载目标与安装记录不同，拒绝继续部署。',
       DEVELOPMENT_DATABASE_AMBIGUOUS: '检测到多个开发数据库目标，拒绝猜测或连接。',
       DEVELOPMENT_DATABASE_INSPECTION_INVALID: '开发数据库容器检查输入或结果无效，拒绝连接。',
-      DEVELOPMENT_DATABASE_INSPECTION_UNAVAILABLE: '无法只读确认开发数据库容器身份，拒绝连接。',
+      DEVELOPMENT_DATABASE_INSPECTION_UNAVAILABLE: '无法只读核验开发数据库容器归属，拒绝连接。',
       DEPLOYMENT_INSPECTION_STATE_INVALID: '安装记录中的数据库目标信息无效，拒绝只读检查。',
       DEPLOYMENT_STATE_PENDING: '安装记录或数据库成功事实不完整、不一致；请先显式重新计划或恢复。',
       DATABASE_AUTH_OR_CONNECT_FAILED: '无法连接或认证已有 lexiflow 数据库；不会猜测具体是网络还是密码错误。',
@@ -423,7 +484,7 @@ export async function runLocal(argv, candidateRequest) {
       DEPLOYMENT_CONFIRMATION_REQUIRED: '交互部署需要 TTY 中确认一次；非交互请先 --plan，再使用 --confirm-plan。',
       DEPLOYMENT_CONFIRMATION_EOF: '确认输入已结束，未执行部署。',
       DEPLOYMENT_CONFIRMATION_CANCELLED: '确认已取消，未执行部署。',
-      DEPLOYMENT_PLAN_CHANGED: 'DEPLOYMENT_PLAN_CHANGED：计划已漂移，请重新 --plan；未执行部署。',
+      DEPLOYMENT_PLAN_CHANGED: 'DEPLOYMENT_PLAN_CHANGED：计划输入已发生变化，请重新 --plan；未执行部署。',
       DEPLOYMENT_API_PORT_OCCUPIED: 'API 端口已被非本安装服务占用，拒绝接管。',
       DEPLOYMENT_DATABASE_PORT_OCCUPIED: '数据库端口已被非本安装服务占用，拒绝接管。',
       DEPLOYMENT_SECRET_INVALID: '本安装数据库密码文件不是受限普通文件，或权限、归属不符。',
@@ -457,10 +518,10 @@ export async function runLocal(argv, candidateRequest) {
       'DEPLOYMENT_DATABASE_BLOCKED:POSTGRES_17_REQUIRED': '目标数据库不是 PostgreSQL 17。',
       'DEPLOYMENT_DATABASE_BLOCKED:SCHEMA_OWNER_MISMATCH': '目标 schema 所有者与已记录用户不符。',
       'DEPLOYMENT_DATABASE_BLOCKED:SCHEMA_CREATE_PERMISSION_REQUIRED': '目标用户缺少 schema CREATE 权限。',
-      'DEPLOYMENT_DATABASE_BLOCKED:FINGERPRINT_DRIFT': '数据库观测指纹已漂移，拒绝写入。',
+      'DEPLOYMENT_DATABASE_BLOCKED:FINGERPRINT_DRIFT': '确认后的数据库观测发生变化，拒绝写入。',
       'DEPLOYMENT_DATABASE_BLOCKED:CROSS_SCHEMA_DEPENDENCY': '目标 schema 存在跨 schema 依赖，拒绝重建。',
       'DEPLOYMENT_DATABASE_FAIL:REQUEST_INVALID': '数据库请求内容无效，未执行写入。',
-      'DEPLOYMENT_DATABASE_FAIL:REQUEST_OR_DATA_INVALID': '数据库请求或资料校验失败，未确认写入。',
+      'DEPLOYMENT_DATABASE_FAIL:REQUEST_OR_DATA_INVALID': '数据库资料处理失败，未确认写入；安全响应无法确定更具体原因。',
     };
     const commandStages = ['编译 Java 应用', '安装扩展依赖', '构建 Chrome 扩展', '构建 API 镜像', '构建 PostgreSQL 镜像', '构建词库工具镜像',
       '拉取 Java 25 基础镜像', '拉取 PostgreSQL 17 基础镜像', '下载、校验并精简 ECDICT', '校验资料与 PostgreSQL', '提交资料到 PostgreSQL', '检查 PostgreSQL 目标'];
@@ -470,11 +531,10 @@ export async function runLocal(argv, candidateRequest) {
       : code.includes('收到中断请求') || code.startsWith('安装已取消') ? '收到中断请求；部署已取消，已保留可核对的状态。'
       : code.startsWith('API 就绪等待超时') ? 'API 就绪等待超时；数据若已提交将保留，不能误报部署成功。'
         : code.startsWith('API 响应协议或软件版本不匹配') ? 'API 响应协议或软件版本不匹配；数据若已提交将保留。'
-          : code.includes('DRIFT') || code.includes('CHANGED') ? '目标、输入或凭据已漂移；拒绝继续写入。'
       : code.startsWith('DEPLOYMENT_DATABASE_BLOCKED:') ? '数据库检查被阻断；请核对连接、PostgreSQL 17 和 schema 权限。'
         : commandStage ? `${commandStage}失败；可检查本安装运行日志、工具与运行环境。`
           : ['install', 'upgrade'].includes(action) ? '部署检查或执行失败（UNEXPECTED）；未确认的阶段不视为成功。' : code);
-    console.error(`[LexiFlow] ${step}失败：${message}`); return 1;
+    console.error(`[LexiFlow] ${commandStage ?? step}失败：${message}`); return 1;
   }
   finally {
     process.removeListener('SIGINT', markInterrupted); process.removeListener('SIGTERM', markInterrupted);

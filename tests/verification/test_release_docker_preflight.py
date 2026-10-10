@@ -12,7 +12,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 from scripts.environment import release_docker_preflight as preflight_module
 
@@ -462,6 +462,76 @@ elif "compose" in args:
             "daemon-identity-changed",
             preflight_module.recheck(binding).reason,
         )
+
+    def test_kill_group_observes_unknown_until_confirmed_absence(self) -> None:
+        """短暂未知可在原期限内消退，持续未知或存活不能通过。"""
+        class Clock:
+            now = 0.0
+
+            def monotonic(self) -> float:
+                return self.now
+
+            def sleep(self, duration: float) -> None:
+                self.now += duration
+
+        for states, expected in (
+            ([False, None, False], True),
+            ([False, None], False),
+            ([False, True], False),
+        ):
+            with self.subTest(states=states):
+                clock = Clock()
+                process = Mock(pid=4242)
+                process.wait.return_value = 0
+                observed = iter(states)
+
+                def next_state(pid: int) -> bool | None:
+                    self.assertEqual(4242, pid)
+                    nonlocal observed_state
+                    try:
+                        observed_state = next(observed)
+                    except StopIteration:
+                        pass
+                    return observed_state
+
+                observed_state = states[-1]
+                events = []
+
+                def reap(_process):
+                    events.append("reap")
+                    return True
+
+                def send_signal(pid, sig):
+                    events.append((pid, sig))
+
+                with (
+                    patch.object(preflight_module.time, "monotonic", clock.monotonic),
+                    patch.object(preflight_module.time, "sleep", clock.sleep),
+                    patch.object(preflight_module, "_group_state", side_effect=next_state) as group_state,
+                    patch.object(preflight_module, "_reap_direct_child", side_effect=reap),
+                    patch.object(preflight_module.os, "killpg", side_effect=send_signal) as killpg,
+                ):
+                    self.assertEqual(expected, preflight_module._kill_group(process))
+                self.assertAlmostEqual(0.02 if expected else 1.0, clock.now, places=7)
+                if expected:
+                    self.assertEqual(3, group_state.call_count)
+                else:
+                    self.assertGreater(group_state.call_count, 3)
+                self.assertEqual([call(4242, signal.SIGTERM)], killpg.call_args_list)
+                self.assertEqual([(4242, signal.SIGTERM), "reap"], events)
+
+    def test_kill_group_fails_when_direct_child_reap_fails(self) -> None:
+        """直接子进程未确认回收时，不开始组消失的成功判断。"""
+        process = Mock(pid=4242)
+        with (
+            patch.object(preflight_module, "_group_state", return_value=False),
+            patch.object(preflight_module, "_reap_direct_child", return_value=False),
+            patch.object(preflight_module.os, "killpg") as killpg,
+            patch.object(preflight_module.time, "monotonic") as monotonic,
+        ):
+            self.assertFalse(preflight_module._kill_group(process))
+        self.assertEqual([call(4242, signal.SIGTERM)], killpg.call_args_list)
+        monotonic.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -44,13 +44,23 @@ function gitOutput(root, ...args) {
   });
 }
 
-function gitSnapshot(root) {
-  const repository = realpathSync(gitOutput(root, 'rev-parse', '--show-toplevel').trim());
+function gitSnapshot(root, { clean = false } = {}) {
+  // 一次进程读取同一快照的根路径与 HEAD；仍保留每轮完整 Git/文件校验。
+  // 从末尾分隔 commit，根路径内部的换行不作为字段边界。
+  const identity = gitOutput(root, 'rev-parse', '--show-toplevel', '--verify', 'HEAD^{commit}').trim();
+  const separator = identity.lastIndexOf('\n');
+  if (separator < 0) throw new Error();
+  const repository = realpathSync(identity.slice(0, separator).trim());
   if (repository !== realpathSync(root)) throw new Error();
-  const sourceCommit = gitOutput(root, 'rev-parse', '--verify', 'HEAD^{commit}').trim();
+  const sourceCommit = identity.slice(separator + 1).trim();
   if (!/^[a-f0-9]{40,64}$/.test(sourceCommit)) throw new Error();
   const sourceDate = sourceDateForCommit(root, sourceCommit);
-  const dirty = gitOutput(root, 'status', '--porcelain=v1', '--untracked-files=all').length > 0;
+  const status = execFileSync('git', ['-C', root, 'status', '--porcelain=v1', '--untracked-files=all'], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000,
+    maxBuffer: clean ? 100_000 : 8 * 1024 * 1024,
+  });
+  const dirty = status.length > 0;
+  if (clean && dirty) throw new Error('release input must be clean');
   const files = [...new Set(gitOutput(root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard').split('\0').filter(Boolean))].sort();
   return { repository, sourceCommit, sourceDate, dirty, files };
 }
@@ -118,8 +128,8 @@ function readStableFile(root, relative) {
   } finally { if (fd !== undefined) closeSync(fd); }
 }
 
-function snapshot(root) {
-  const start = gitSnapshot(root);
+function snapshot(root, options) {
+  const start = gitSnapshot(root, options);
   const inputs = [];
   const files = [];
   let baseVersion;
@@ -133,19 +143,20 @@ function snapshot(root) {
     }
   }
   if (!baseVersion) throw new Error();
-  const end = gitSnapshot(root);
+  const end = gitSnapshot(root, options);
   if (JSON.stringify(start) !== JSON.stringify(end)) throw new Error('build source changed during identity scan');
   return { git: start, inputs, files, baseVersion, sourceSha256: digest(JSON.stringify(inputs)) };
 }
 
 /** 构建只读取 Git 可见输入，ignored 的字幕、数据库、缓存与运行日志不参与。 */
-export function resolveBuildIdentity(root = repositoryRoot) {
+function resolveIdentity(root, { clean = false } = {}) {
   let first, second;
   try {
-    first = snapshot(root);
-    second = snapshot(root);
+    first = snapshot(root, { clean });
+    second = snapshot(root, { clean });
   } catch (error) {
-    if (error.message === 'build source symlink forbidden' || error.message === 'build source changed during identity scan') throw error;
+    if (error.message === 'build source symlink forbidden' || error.message === 'build source changed during identity scan'
+      || error.message === 'release input must be clean') throw error;
     throw new Error('build source identity unavailable');
   }
   if (JSON.stringify(first.git) !== JSON.stringify(second.git)
@@ -154,6 +165,16 @@ export function resolveBuildIdentity(root = repositoryRoot) {
     || first.baseVersion !== second.baseVersion) throw new Error('build source changed during identity scan');
   return derivedIdentity({ baseVersion: first.baseVersion, sourceCommit: first.git.sourceCommit,
     sourceDate: first.git.sourceDate, sourceSha256: first.sourceSha256, dirty: first.git.dirty });
+}
+
+/** 构建仅接受干净源码，并在完整身份扫描的四个 Git 快照中核验资格。 */
+export function resolveCleanBuildIdentity(root = repositoryRoot) {
+  return resolveIdentity(root, { clean: true });
+}
+
+/** 完整身份允许开发期脏源码；发行资格由独立调用者决定。 */
+export function resolveBuildIdentity(root = repositoryRoot) {
+  return resolveIdentity(root);
 }
 
 // 所有制品消费者共享此派生规则，不能只比对可伪造的版本与 commit。

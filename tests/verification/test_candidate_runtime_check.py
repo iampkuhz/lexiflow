@@ -14,6 +14,7 @@ from unittest.mock import patch
 import yaml
 
 from scripts.environment import candidate_runtime_check as check
+from scripts.verification.declarations import load_declarations
 from scripts.environment import runtime as environment
 from scripts.verification.kernel import fingerprint_json, snapshot_check_inputs
 
@@ -171,7 +172,7 @@ class CandidateRuntimeCheckTests(unittest.TestCase):
             check._validate_result({"schemaVersion": "lexiflow.candidate-runtime.v1", "status": status}, self.request)
 
     def test_both_declarations_are_complete_and_excluded_from_quick(self):
-        document = yaml.safe_load((ROOT / "harness/module-checks.yaml").read_text())
+        document = load_declarations(ROOT)
         for identifier in check.CANDIDATE_RUNTIME_CHECK_IDS:
             declared = next(item for item in document["checks"] if item["check_id"] == identifier)
             self.assertEqual(declared["command"], ["python3", "-m", "scripts.environment.candidate_runtime_check"])

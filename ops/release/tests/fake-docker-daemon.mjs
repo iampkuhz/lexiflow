@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 // 生命周期合成 Docker daemon：只保存非秘密资源状态与动作摘要。
 import { createHash } from 'node:crypto';
-import { readFile, writeFile, appendFile } from 'node:fs/promises';
-
-const [statePath, ledgerPath, controlPath] = process.argv.slice(2);
-const argv = process.argv.slice(5);
-const fail = () => process.exit(64);
+import { readFile, writeFile, appendFile, mkdir, readdir, rm } from 'node:fs/promises';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
+import { format } from 'node:util';
+class ModelExit extends Error { constructor(status){super('model exit');this.status=status;} }
+export async function execute(statePath, ledgerPath, controlPath, argvInput, env={}) {
+ const argv=[...argvInput]; let stdout=''; const stderr=''; const log=(...args)=>{stdout+=format(...args)+'\n';};
+const fail = () => { throw new ModelExit(64); };
 const sha = (text) => createHash('sha256').update(text).digest('hex');
-if (!statePath || !ledgerPath || !controlPath || !argv.length) fail();
+if (!statePath || !ledgerPath || !controlPath || !argv.length) return {status:64,stdout,stderr};
 function valueAfter(args, flag) { const at = args.indexOf(flag); return at < 0 ? null : args[at + 1]; }
 
 async function load() { return JSON.parse(await readFile(statePath, 'utf8')); }
@@ -44,7 +47,7 @@ try {
   const all = await load();
   const control = JSON.parse(await readFile(controlPath, 'utf8'));
   if (argv[0] === 'context' && argv[1] === 'inspect') {
-    if (argv.includes('--format')) { console.log(control.contextEndpoint); await record('context-inspect'); process.exit(0); }
+    if (argv.includes('--format')) { log(control.contextEndpoint); await record('context-inspect'); throw new ModelExit(0); }
     fail();
   }
   const endpoint = host(argv);
@@ -54,12 +57,12 @@ try {
   const [command, subcommand] = argv;
   if (command === 'compose') {
     const project = valueAfter(argv, '--project-name');
-    const installation = process.env.LEXIFLOW_INSTALLATION_ID;
-    const release = process.env.LEXIFLOW_RELEASE_KEY;
+    const installation = env.LEXIFLOW_INSTALLATION_ID;
+    const release = env.LEXIFLOW_RELEASE_KEY;
     const operationAt = argv.indexOf('-f') + 2;
     const operation = argv[operationAt];
-    if (argv[1] === 'version') { console.log('Docker Compose version v2.0.0'); await record('compose-version',null,daemonName); process.exit(0); }
-    if (control.composeFail === true) { await record('compose-failed', { project, operation },daemonName); process.exit(71); }
+    if (argv[1] === 'version') { log('Docker Compose version v2.0.0'); await record('compose-version',null,daemonName); throw new ModelExit(0); }
+    if (control.composeFail === true) { await record('compose-failed', { project, operation },daemonName); throw new ModelExit(71); }
     if (!project || !installation || !release || !/^[a-f0-9]{32}$/.test(installation) || !/^[a-f0-9]{64}$/.test(release)) fail();
     if (operation === 'up') {
       const service = argv.at(-1);
@@ -70,14 +73,14 @@ try {
       } else if (service === 'api') {
         makeResource(data, 'container', `${project}-api-1`, project, installation, release);
       } else fail();
-      await save(all); await record('compose-up', { project, installation, release, service },daemonName); process.exit(0);
+      await save(all); await record('compose-up', { project, installation, release, service },daemonName); throw new ModelExit(0);
     }
     if (operation === 'run') {
       const name = valueAfter(argv, '--name');
       const role = argv.at(-1);
       if (!name || role !== 'initialize' && role !== 'api') fail();
       if (role === 'api') makeResource(data, 'container', name, project, installation, release);
-      await save(all); await record('compose-run', { project, installation, release, role, name },daemonName); process.exit(0);
+      await save(all); await record('compose-run', { project, installation, release, role, name },daemonName); throw new ModelExit(0);
     }
     fail();
   }
@@ -85,7 +88,7 @@ try {
     const format = valueAfter(argv, '--format');
     if (format === '{{.ID}}') {
       if (control.idQueryFail === true) { await record('info-failed',{format},daemonName); fail(); }
-      console.log(control.idOverride ?? data.id);
+      log(control.idOverride ?? data.id);
       if (control.switchAfterIdQueries) {
         const {remaining,endpoint:switchEndpoint,target} = control.switchAfterIdQueries;
         if (remaining === 1) {
@@ -95,26 +98,26 @@ try {
         await writeFile(controlPath,JSON.stringify(control));
       }
     }
-    else if (format === '{{.OSType}}') console.log('linux');
-    else if (format === '{{.Architecture}}') console.log('x86_64');
+    else if (format === '{{.OSType}}') log('linux');
+    else if (format === '{{.Architecture}}') log('x86_64');
     else fail();
-    await record('info', { format },daemonName); process.exit(0);
+    await record('info', { format },daemonName); throw new ModelExit(0);
   }
-  if (command === 'load') { if (!valueAfter(argv, '-i')) fail(); await record('image-load',null,daemonName); process.exit(0); }
+  if (command === 'load') { if (!valueAfter(argv, '-i')) fail(); await record('image-load',null,daemonName); throw new ModelExit(0); }
   if (command === 'image' && subcommand === 'inspect') {
     const image = argv.at(-1);
     if (!image?.startsWith('sha256:')) fail();
-    console.log(`${image}|linux|amd64`); await record('image-inspect', { image },daemonName); process.exit(0);
+    log(`${image}|linux|amd64`); await record('image-inspect', { image },daemonName); throw new ModelExit(0);
   }
   if (command === 'inspect' && argv.includes('--format')) {
     const id = argv.at(-1); const format = valueAfter(argv, '--format');
     const resource = data.resources.find((item) => item.id === id);
-    if (!resource) process.exit(2);
-    if (format === '{{.State.Running}}' && resource.kind === 'container') console.log(String(resource.running));
-    else if (format === '{{.State.Health.Status}}' && resource.kind === 'container') console.log(resource.health);
-    else if (argv.includes('container') || resource.kind === 'container') console.log(renderResource(resource, 'container'));
-    else console.log(renderResource(resource, resource.kind));
-    await record('inspect', { kind: resource.kind, id: resource.id, name: resource.name },daemonName); process.exit(0);
+    if (!resource) throw new ModelExit(2);
+    if (format === '{{.State.Running}}' && resource.kind === 'container') log(String(resource.running));
+    else if (format === '{{.State.Health.Status}}' && resource.kind === 'container') log(resource.health);
+    else if (argv.includes('container') || resource.kind === 'container') log(renderResource(resource, 'container'));
+    else log(renderResource(resource, resource.kind));
+    await record('inspect', { kind: resource.kind, id: resource.id, name: resource.name },daemonName); throw new ModelExit(0);
   }
   if (['container', 'network', 'volume'].includes(command)) {
     const kind = command;
@@ -128,26 +131,162 @@ try {
       for (const resource of data.resources.filter((item) => item.kind === kind && filters.some((filter) =>
         filter === `name=${item.project}` || filter === `label=com.docker.compose.project=${item.project}` ||
         (filter.startsWith('name=') && item.name.includes(filter.slice(5)))))) {
-        console.log(`${resource.id}|${kind === 'container' ? resource.name : resource.name}`);
+        log(`${resource.id}|${kind === 'container' ? resource.name : resource.name}`);
       }
-      await record('list', { kind, filters },daemonName); process.exit(0);
+      await record('list', { kind, filters },daemonName); throw new ModelExit(0);
     }
     if (subcommand === 'inspect' && argv.includes('--format')) {
       const id = argv.at(-1); const resource = data.resources.find((item) => item.kind === kind && item.id === id);
-      if (!resource) process.exit(2);
-      console.log(renderResource(resource, kind)); await record('inspect', { kind, id, name: resource.name },daemonName); process.exit(0);
+      if (!resource) throw new ModelExit(2);
+      log(renderResource(resource, kind)); await record('inspect', { kind, id, name: resource.name },daemonName); throw new ModelExit(0);
     }
     if (subcommand === 'stop' && kind === 'container') {
       const id = argv.at(-1); const resource = data.resources.find((item) => item.kind === kind && item.id === id);
-      if (!resource || !valueAfter(argv, '--time')) process.exit(2);
-      resource.running = false; await save(all); await record('stop', { kind, id, name: resource.name },daemonName); process.exit(0);
+      if (!resource || !valueAfter(argv, '--time')) throw new ModelExit(2);
+      resource.running = false; await save(all); await record('stop', { kind, id, name: resource.name },daemonName); throw new ModelExit(0);
     }
     if (subcommand === 'rm') {
       const id = argv.at(-1); const index = data.resources.findIndex((item) => item.kind === kind && item.id === id);
-      if (index < 0) process.exit(2);
+      if (index < 0) throw new ModelExit(2);
       const resource = data.resources[index]; data.resources.splice(index, 1);
-      await save(all); await record('remove', { kind, id, name: resource.name, project: resource.project },daemonName); process.exit(0);
+      await save(all); await record('remove', { kind, id, name: resource.name, project: resource.project },daemonName); throw new ModelExit(0);
     }
   }
   fail();
-} catch { process.exit(70); }
+} catch (error) { return {status:error instanceof ModelExit ? error.status : 70,stdout,stderr}; }
+
+}
+
+// 每次真实 Docker CLI 都经私有目录传输；模型本身没有 transport 分支。
+export async function createTransport({state,ledger,control,directory}) {
+  await mkdir(directory,{recursive:true,mode:0o700});
+  const failed=`${directory}/failed`;
+  const worker=new Worker(new URL(import.meta.url),{workerData:{state,ledger,control,directory}});
+  let closed=false, readySettled=false, resolveReady, rejectReady, fatalError=null;
+  const ready=new Promise((resolve,reject)=>{resolveReady=resolve;rejectReady=reject;});
+  const markFatal=(error)=>{
+    const message=error instanceof Error ? error.message : String(error);
+    fatalError ||= new Error(message);
+    if(!closed) {
+      try { writeFileSync(failed,`${message}\n`,{flag:'wx',mode:0o600}); }
+      catch (writeError) { if(writeError.code!=='EEXIST') fatalError=writeError; }
+    }
+    if(!readySettled){readySettled=true;rejectReady(new Error(message));}
+  };
+  worker.on('message',message=>{
+    if(message==='ready' && !readySettled){readySettled=true;resolveReady();}
+    else if(message?.fatal) markFatal(message.fatal);
+  });
+  worker.on('error',markFatal);
+  worker.on('exit',code=>{if(!closed) markFatal(`worker exited unexpectedly: ${code}`);});
+  const timer=setTimeout(()=>markFatal('worker ready timeout'),5000);
+  try { await ready; }
+  catch(error){closed=true;await worker.terminate();await rm(directory,{recursive:true,force:true});throw error;}
+  finally {clearTimeout(timer);}
+  worker.unref();
+  return {
+    directory, worker,
+    get fatal(){if(fatalError)return fatalError;try{return new Error(readFileSync(failed,'utf8').trim());}catch(error){if(error.code==='ENOENT')return null;throw error;}},
+    assertHealthy(){const error=this.fatal;if(error)throw error;},
+    clientSource(){return `#!/bin/sh
+box='${directory.replaceAll("'", "'\\''")}'
+fail() { printf '%s\\n' "transport failure: $1" > "$box/failed"; exit 97; }
+[ ! -e "$box/failed" ] || exit 97
+req="$box/q.$$"
+mkdir -m 700 "$req" || fail 'request directory'
+trap 'printf "%s\\n" "transport signal" > "$box/failed"; exit 97' HUP INT TERM
+printf '%s\\n' "$#" > "$req/count" || fail 'argument count'
+{ printf '%s\\000' "\${LEXIFLOW_INSTALLATION_ID-}" "\${LEXIFLOW_RELEASE_KEY-}"; for arg do printf '%s\\000' "$arg"; done; } > "$req/args" || fail 'arguments'
+# Empty marker creation publishes only fully closed args/count files.
+: > "$req/ready" || fail 'ready publish'
+n=0
+while [ ! -f "$req/done" ]; do
+ [ ! -e "$box/failed" ] || exit 97
+ n=$((n+1)); [ "$n" -lt 5000 ] || fail 'response timeout'
+ if [ "$n" -gt 200 ]; then sleep 0.002; fi
+done
+[ -f "$req/out" ] && [ -f "$req/err" ] && [ -f "$req/status" ] && [ -f "$req/lengths" ] || fail 'incomplete response'
+IFS=' ' read -r outlen errlen < "$req/lengths" || fail 'response lengths'
+# One wc keeps both byte counts tied to the same request snapshot; validate its
+# complete six-token shape and fixed filenames before using either length.
+counts=$(cd "$req" && wc -c out err) || fail 'response byte counts'
+set -- $counts
+[ "$#" -eq 6 ] && [ "$2" = out ] && [ "$4" = err ] && [ "$6" = total ] || fail 'response byte counts'
+[ "$1" -eq "$outlen" ] && [ "$3" -eq "$errlen" ] || fail 'response length mismatch'
+exec 3< "$req/status" || fail 'response status'
+IFS= read -r status <&3 || fail 'response status'
+extra=
+if IFS= read -r extra <&3 || [ -n "$extra" ]; then fail 'trailing status'; fi
+exec 3<&-
+case "$status" in ''|*[!0-9]*) fail 'invalid status';; esac
+[ "$status" -ge 0 ] && [ "$status" -le 255 ] || fail 'status range'
+[ ! -s "$req/out" ] || cat "$req/out" || fail 'stdout'
+[ ! -s "$req/err" ] || cat "$req/err" >&2 || fail 'stderr'
+# rm -d is non-recursive: the explicit known file list is removed and the
+# request directory must then be empty, so unknown residue fails closed.
+rm -d -- "$req/args" "$req/count" "$req/out" "$req/err" "$req/status" "$req/lengths" "$req/done" "$req" || fail 'response cleanup'
+trap - HUP INT TERM
+exit "$status"
+`;},
+    async close(){
+      let failure=this.fatal;
+      try { const pending=(await readdir(directory)).filter(name=>name!=='failed');
+        if(pending.length) failure ||= new Error(`transport residue: ${pending.join(',')}`);
+      } catch(error){failure ||= error;}
+      closed=true;
+      try { await worker.terminate(); } catch(error){failure ||= error;}
+      try { await rm(directory,{recursive:true,force:true}); } catch(error){failure ||= error;}
+      if(failure)throw failure;
+    },
+  };
+}
+
+if(!isMainThread && workerData?.directory){
+  const {state,ledger,control,directory}=workerData;
+  let busy=false, failed=false;
+  const poison=async error=>{
+    failed=true;
+    try {await writeFile(`${directory}/failed`,`${String(error)}\n`,{flag:'wx',mode:0o600});}
+    catch(writeError){if(writeError.code!=='EEXIST') parentPort.postMessage({fatal:String(writeError)});}
+    parentPort.postMessage({fatal:String(error)});
+  };
+  // Consumers cannot read any response until the final empty done marker exists.
+  const publish=(path,data)=>writeFile(path,data,{flag:'wx',mode:0o600});
+  const scan=async()=>{
+    if(busy||failed)return;
+    busy=true;
+    try {
+      for(const name of (await readdir(directory)).filter(name=>name.startsWith('q.')).sort()){
+        const prefix=`${directory}/${name}`;
+        let entries;
+        try { entries=await readdir(prefix); }
+        catch(error){if(error.code==='ENOENT')continue;throw error;}
+        if(!entries.includes('ready'))continue;
+        const countText=(await readFile(`${prefix}/count`,'utf8')).trim();
+        if(!/^(0|[1-9][0-9]*)$/.test(countText))throw new Error('malformed argument count');
+        const count=Number(countText);
+        if(!Number.isSafeInteger(count))throw new Error('argument count range');
+        const bytes=await readFile(`${prefix}/args`);
+        if(!bytes.length||bytes.at(-1)!==0)throw new Error('malformed argv terminator');
+        const fields=bytes.subarray(0,-1).toString('utf8').split('\0');
+        if(fields.length!==count+2)throw new Error('malformed request fields');
+        await rm(`${prefix}/ready`);
+        const [installation,release,...argv]=fields;
+        const result=await execute(state,ledger,control,argv,{LEXIFLOW_INSTALLATION_ID:installation,LEXIFLOW_RELEASE_KEY:release});
+        await publish(`${prefix}/out`,result.stdout);
+        await publish(`${prefix}/err`,result.stderr);
+        await publish(`${prefix}/status`,`${result.status}\n`);
+        await publish(`${prefix}/lengths`,`${Buffer.byteLength(result.stdout)} ${Buffer.byteLength(result.stderr)}\n`);
+        await publish(`${prefix}/done`,'');
+      }
+    }catch(error){await poison(error);}finally{busy=false;}
+  };
+  setInterval(scan,2);
+  parentPort.postMessage('ready');
+}
+
+if(isMainThread && process.argv[1]===new URL(import.meta.url).pathname){
+  const [state,ledger,control,...argv]=process.argv.slice(2);
+  const result=await execute(state,ledger,control,argv,process.env);
+  process.stdout.write(result.stdout);process.stderr.write(result.stderr);process.exitCode=result.status;
+}

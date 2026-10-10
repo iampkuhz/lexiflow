@@ -8,7 +8,7 @@ import path from 'node:path';
 import { createManifest, verifyContainedFile, validateRelativePath } from './manifest.mjs';
 import { generateLifecycleEntry } from './lifecycle.mjs';
 import { packageManifest } from './package.mjs';
-import { checkReleaseSource, parseSoftwareVersion, resolveBuildIdentity, validateBuildIdentity } from './version.mjs';
+import { parseSoftwareVersion, resolveCleanBuildIdentity, validateBuildIdentity } from './version.mjs';
 
 const fail = (code) => { throw new Error(code); };
 const hash = () => createHash('sha256');
@@ -158,11 +158,9 @@ export async function assembleReleaseCandidate(input) {
   }
   const roots = [repo, artifacts];
   for (const root of roots) if (within(root, parent) || within(parent, root)) fail('OUTPUT_PARENT_INVALID');
-  let source;
-  try { source = checkReleaseSource(repo); } catch { fail('RELEASE_SOURCE_REJECTED'); }
   let buildIdentity;
-  try { buildIdentity = resolveBuildIdentity(repo); } catch { fail('RELEASE_SOURCE_REJECTED'); }
-  if (buildIdentity.dirty || buildIdentity.sourceCommit !== source.sourceCommit || buildIdentity.softwareVersion !== source.softwareVersion) fail('RELEASE_SOURCE_REJECTED');
+  try { buildIdentity = resolveCleanBuildIdentity(repo); } catch { fail('RELEASE_SOURCE_REJECTED'); }
+  const source = { softwareVersion: buildIdentity.softwareVersion, sourceCommit: buildIdentity.sourceCommit };
   const byPlatform = new Map();
   for (const item of imageCandidates) {
     if (!exactKeys(item, ['directory', 'sha256']) || typeof item.directory !== 'string' || !path.isAbsolute(item.directory)
@@ -236,12 +234,9 @@ export async function assembleReleaseCandidate(input) {
     const manifestText = await readFile(path.join(payload, 'manifest.json'), 'utf8');
     const manifestSha256 = createHash('sha256').update(manifestText).digest('hex');
     for (const { directory, imageCandidate } of imageCandidatesByPlatform) await snapshot(imageCandidate, directory, artifacts, descriptor);
-    let currentSource;
-    try { currentSource = checkReleaseSource(repo); } catch { fail('RELEASE_SOURCE_CHANGED'); }
     let currentBuildIdentity;
-    try { currentBuildIdentity = resolveBuildIdentity(repo); } catch { fail('RELEASE_SOURCE_CHANGED'); }
-    if (currentSource.sourceCommit !== source.sourceCommit || currentSource.softwareVersion !== source.softwareVersion
-      || !sameIdentity(currentBuildIdentity, buildIdentity)) fail('RELEASE_SOURCE_CHANGED');
+    try { currentBuildIdentity = resolveCleanBuildIdentity(repo); } catch { fail('RELEASE_SOURCE_CHANGED'); }
+    if (!sameIdentity(currentBuildIdentity, buildIdentity)) fail('RELEASE_SOURCE_CHANGED');
     await rm(work, { recursive: true, force: false });
     const candidate = { schemaVersion: 1, kind: 'lexiflow-release-candidate', buildIdentity, softwareVersion: source.softwareVersion,
       sourceCommit: source.sourceCommit, manifestPath: 'payload/manifest.json', manifestSha256,

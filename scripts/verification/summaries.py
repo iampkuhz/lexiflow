@@ -56,7 +56,7 @@ def failure_layer(check: dict[str, Any]) -> str:
         "python-quality-failed",
         "python-docstrings-failed",
         "documentation-governance-failed",
-        "policy-projection-drift",
+        "policy-contract-invalid",
         "planning-catalog-invalid",
     }:
         return "static-check"

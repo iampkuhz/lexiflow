@@ -14,18 +14,18 @@
 - **发布与使用闭环**：以[发布与使用闭环](release.md)为计划与验收入口；发行、安装或真实平台未验收前不得宣称支持。
 - 观测是各功能的验收要求，不另建观测业务阶段；未来性能和模型事项不混入本阶段。
 
-冻结后按 Catalog 收紧文件范围与验收断言。超出 Catalog 工作包限制时先拆分，不用大 glob 扩大授权。模块职责见[边界合同](../../../architecture/boundaries.md)，具体实现行为见对应系统合同与源码。
+冻结后按 Catalog 收紧文件范围与验收断言。超出 Catalog 工作包限制时先拆分，不用大 glob 扩大授权。模块职责见[边界合同](../../../system/modules.md)，具体实现行为见对应系统合同与源码。
 
 ## 1.3. 验收与深入入口
 
 - 产品主线的跨模块场景：[主线集成验收合同](acceptance.md)。
 - 制品、安装、升级、恢复与发行：[发布与使用闭环](release.md)。
-- Agent 调度与质量门禁：[Agent workflow](../../../development/agent-workflow.md)及[交付主干](../../../development/change-delivery.md)。
+- Agent 调度与质量门禁：[Agent workflow](../../../scenarios/delegate-work.md)及[交付主干](../../../reference/checks.md)。
 - 后续模型与性能规划：[后续待办池](../future.md)，不混入本阶段。
 
 ## 1.4. 准备与交付证据的区别
 
-准备阶段只核对文档、Catalog 与策略投影，不证明产品行为。正式实现后，直接测试及风险要求的验证由独立 `TASK_VALIDATION` 按冻结计划执行；`INDEPENDENT_REVIEW` 只读冻结 diff/evidence，`CATALOG_DECISION` 只核对 receipt 与依赖 hash DAG。发行仍需完整 Repository Verify；必需检查未运行、跳过或缺环境不得称 PASS。身份和执行入口以[Harness](../../../../harness/README.md)为准。
+准备阶段只核对文档、Catalog 与唯一策略合同，不证明产品行为。正式实现后，直接测试及风险要求的验证由独立 `TASK_VALIDATION` 按冻结计划执行；`INDEPENDENT_REVIEW` 只读冻结 diff/evidence，`CATALOG_DECISION` 只核对 receipt 与依赖 hash DAG。发行仍需完整 Repository Verify；必需检查未运行、跳过或缺环境不得称 PASS。身份和执行入口以[Harness](../../../../harness/README.md)为准。
 
 ## 1.5. 计划整合与共享入口
 

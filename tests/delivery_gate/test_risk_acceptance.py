@@ -24,6 +24,8 @@ from tests.delivery_gate.fixtures import (
     TASK_ID,
     make_mock_runtime,
 )
+from scripts.verification.declarations import load_declarations
+from tests.delivery_gate.fixtures import write_declarations
 
 
 class RiskAcceptanceTest(unittest.TestCase):
@@ -38,7 +40,7 @@ class RiskAcceptanceTest(unittest.TestCase):
         task["file_claims"] = [{"path": "docs/user/**"}]
         path.write_text(yaml.safe_dump(catalog))
         path = root / "harness/module-checks.yaml"
-        checks = yaml.safe_load(path.read_text())
+        checks = load_declarations(root)
         for check in checks["checks"]:
             if check["check_id"].startswith("fixture.") and check["check_id"] in {
                 "fixture.baseline",
@@ -46,7 +48,7 @@ class RiskAcceptanceTest(unittest.TestCase):
             }:
                 check["triggers"] = [{"path": "docs/user/"}]
                 check["input_paths"].append("docs/user")
-        path.write_text(yaml.safe_dump(checks))
+        write_declarations(path, checks["checks"])
         self.f.write("docs/user/help.md", "简单说明。\n")
         self.f._git("add", ".")
         self.f._git("commit", "-m", "local contract fixture")

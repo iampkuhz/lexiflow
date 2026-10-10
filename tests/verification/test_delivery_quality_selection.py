@@ -49,7 +49,7 @@ class DeliverySelectionTest(unittest.TestCase):
                 )
 
     def test_docs_only_does_not_select_language_quality(self):
-        ids = self.selected(["docs/development/change-delivery/hooks.md"])
+        ids = self.selected(["docs/reference/hooks.md"])
         self.assertNotIn("eng.repository.python-quality-on-change", ids)
         self.assertNotIn("eng.backend.delivery-on-change", ids)
 
