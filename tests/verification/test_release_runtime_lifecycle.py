@@ -13,8 +13,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from scripts.environment.release_runtime_check import ConsumerError
-from scripts.environment import release_runtime_lifecycle as lifecycle
+from scripts.checks.release.source.check_synthetic_release_lifecycle import (
+    ConsumerError,
+)
+from scripts.checks.release.source import release_installation_checks as lifecycle
 
 
 class TestReleaseRuntimeLifecycle(unittest.TestCase):
@@ -161,12 +163,12 @@ class TestReleaseRuntimeLifecycle(unittest.TestCase):
                 patch.object(lifecycle, "_status", side_effect=fake_status),
                 patch.object(lifecycle, "_assert_runtime", side_effect=fake_probe),
                 patch(
-                    "scripts.environment.release_docker_preflight.recheck",
+                    "ops.release.host_resources.release_docker_preflight.recheck",
                     return_value=SimpleNamespace(status="PASS"),
                 ),
             ):
                 result = lifecycle.execute_lifecycle(
-                    root, evidence, tuple(bindings), {"PATH": "/usr/bin:/bin"}
+                    root, evidence, bindings[0], {"PATH": "/usr/bin:/bin"}
                 )
             self.assertEqual(len(result["platforms"]), 1)
             self.assertEqual(result["platforms"][0]["platform"], "linux/arm64")
@@ -296,7 +298,7 @@ class TestReleaseRuntimeLifecycle(unittest.TestCase):
 
     def test_missing_candidates_rejected(self):
         with self.assertRaisesRegex(ConsumerError, "release-candidate-not-assembled"):
-            lifecycle.execute_lifecycle(None, {}, (), {})
+            lifecycle.execute_lifecycle(None, {}, None, {})
 
     def test_postgres_unhealthy_is_not_accepted_when_api_is_healthy(self):
         binding = SimpleNamespace(

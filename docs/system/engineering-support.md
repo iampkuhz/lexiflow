@@ -11,7 +11,7 @@
 | 能力 | 提供什么 | 深入入口 |
 | --- | --- | --- |
 | 工作包与委派 | 目标、范围、上下文、验收与回调交接；限制并行写入冲突 | [委派工作](../scenarios/delegate-work.md) |
-| actor 与执行边界 | 真实实现、验证、审查身份；完成与验收分开 | [Harness 身份合同](../../harness/agent-policy.manifest.yaml)、[验收体系](delivery-acceptance.md) |
+| actor 与执行边界 | 真实实现、验证、审查身份；完成与验收分开 | [Harness 身份合同](../../harness/agent-policy.md)、[验收体系](delivery-acceptance.md) |
 | 工具链与配置 | Java、Python、客户端接入及可核对的运行配置 | [配置查阅](../reference/configuration.md)、[独立工具](../reference/standalone-tools.md) |
 | 隔离资源与执行窗口 | 测试服务准备、归属、取消及清理；窗口不锁编辑 | [验证环境](../scenarios/verification-environment.md)、[检查体系](quality-checks.md) |
 | 本机运行与发行配套 | 本机启动、资料与候选构建的可执行能力 | [本机开发](../scenarios/local-development.md)、[发行流程](../scenarios/docker-release.md) |

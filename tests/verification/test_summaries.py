@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from scripts.verification.summaries import failure_layer, summarize
+from scripts.verification.reports.verification_report_summary import failure_layer, summarize
 
 
 class SummaryLocationTest(unittest.TestCase):

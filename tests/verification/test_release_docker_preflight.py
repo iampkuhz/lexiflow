@@ -12,9 +12,9 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, call, patch
+from unittest.mock import patch
 
-from scripts.environment import release_docker_preflight as preflight_module
+from ops.release.host_resources import release_docker_preflight as preflight_module
 
 
 class ReleaseDockerPreflightTest(unittest.TestCase):
@@ -33,7 +33,7 @@ class ReleaseDockerPreflightTest(unittest.TestCase):
         self.info = {
             "ID": "daemon-123",
             "OSType": "linux",
-            "Architecture": "x86_64",
+            "Architecture": "arm64",
             "ServerVersion": "27.0",
         }
         self.mode = "ok"
@@ -171,7 +171,7 @@ elif "compose" in args:
         path.chmod(0o755)
 
     def _preflight(self):
-        return preflight_module.preflight("linux/amd64", self.environment)
+        return preflight_module.preflight(self.environment)
 
     def _assert_process_gone(self, pid: int) -> None:
         deadline = time.monotonic() + 2
@@ -226,17 +226,22 @@ elif "compose" in args:
         self.assertEqual("PASS", preflight_module.recheck(result.binding).status)
 
     def test_explicit_unix_host_is_required(self) -> None:
-        for endpoint in ("", "tcp://example.invalid:2376", "unix:///socket?query=x", "unix:///socket#fragment"):
+        for endpoint in (
+            "",
+            "tcp://example.invalid:2376",
+            "unix:///socket?query=x",
+            "unix:///socket#fragment",
+        ):
             with self.subTest(endpoint=endpoint):
                 invalid = dict(self.environment, DOCKER_HOST=endpoint)
-                self.assertEqual("invalid-host", preflight_module.preflight("linux/amd64", invalid).reason)
+                self.assertEqual(
+                    "invalid-host", preflight_module.preflight(invalid).reason
+                )
         self.assertFalse(self.log.exists())
 
     def test_environment_is_filtered_and_values_are_not_returned(self) -> None:
         secret = "do-not-leak-secret"
-        result = preflight_module.preflight(
-            "linux/amd64", dict(self.environment, API_TOKEN=secret)
-        )
+        result = preflight_module.preflight(dict(self.environment, API_TOKEN=secret))
         self.assertEqual("PASS", result.status)
         rendered = repr(result)
         self.assertNotIn(secret, rendered)
@@ -249,7 +254,9 @@ elif "compose" in args:
         self.assertNotIn(secret, repr(failed))
 
     def test_context_and_user_config_are_not_discovery_inputs(self) -> None:
-        self.environment.update(DOCKER_CONTEXT="bad context", DOCKER_CONFIG="/untrusted/config")
+        self.environment.update(
+            DOCKER_CONTEXT="bad context", DOCKER_CONFIG="/untrusted/config"
+        )
         result = self._preflight()
         self.assertEqual("PASS", result.status)
         self.assertEqual({key for key, _ in result.binding.environment}, {"PATH"})
@@ -271,9 +278,7 @@ elif "compose" in args:
                 with patch.object(
                     preflight_module.shutil, "which", return_value=None
                 ) as find_cli:
-                    result = preflight_module.preflight(
-                        "linux/amd64", environment
-                    )
+                    result = preflight_module.preflight(environment)
                 self.assertEqual("docker-cli-missing", result.reason)
                 find_cli.assert_called_once_with("docker", path="/usr/bin:/bin")
 
@@ -311,22 +316,15 @@ elif "compose" in args:
         self._write_cli()
         self.assertEqual("docker-info-invalid", self._preflight().reason)
 
-    def test_platform_mapping_and_mismatch(self) -> None:
-        self.info["Architecture"] = "aarch64"
-        self._write_cli()
-        self.assertEqual("BLOCKED", self._preflight().status)
-        self.assertEqual(
-            "PASS",
-            preflight_module.preflight(
-                "linux/arm64", self.environment
-            ).status,
-        )
-        self.assertEqual(
-            "invalid-target-platform",
-            preflight_module.preflight(
-                "linux/ppc64", self.environment
-            ).reason,
-        )
+    def test_only_arm64_daemon_is_supported(self) -> None:
+        for arch, expected in (
+            ("arm64", "PASS"),
+            ("aarch64", "PASS"),
+            ("x86_64", "BLOCKED"),
+        ):
+            self.info["Architecture"] = arch
+            self._write_cli()
+            self.assertEqual(expected, self._preflight().status)
 
     def test_compose_failure_is_blocked(self) -> None:
         self.mode = "compose-fail"
@@ -334,7 +332,7 @@ elif "compose" in args:
         self.assertEqual("compose-unavailable", self._preflight().reason)
 
     def test_cleanup_failure_is_a_fixed_fail_not_environment_blocked(self) -> None:
-        info = b'"daemon-123"|"linux"|"x86_64"|"27.0"\n'
+        info = b'"daemon-123"|"linux"|"arm64"|"27.0"\n'
         with patch.object(
             preflight_module,
             "_run_bounded",
@@ -428,75 +426,15 @@ elif "compose" in args:
             preflight_module.recheck(binding).reason,
         )
 
-    def test_kill_group_observes_unknown_until_confirmed_absence(self) -> None:
-        """短暂未知可在原期限内消退，持续未知或存活不能通过。"""
-        class Clock:
-            now = 0.0
+    def test_common_supervision_cleanup_failure_maps_to_fail(self):
+        from ops.release.host_resources.release_process_control import ProcessError
 
-            def monotonic(self) -> float:
-                return self.now
-
-            def sleep(self, duration: float) -> None:
-                self.now += duration
-
-        for states, expected in (
-            ([False, None, False], True),
-            ([False, None], False),
-            ([False, True], False),
+        with patch.object(
+            preflight_module.release_process,
+            "run_owned",
+            side_effect=ProcessError("FAIL", "release-process-group-signal-denied"),
         ):
-            with self.subTest(states=states):
-                clock = Clock()
-                process = Mock(pid=4242)
-                process.wait.return_value = 0
-                observed = iter(states)
-
-                def next_state(pid: int) -> bool | None:
-                    self.assertEqual(4242, pid)
-                    nonlocal observed_state
-                    try:
-                        observed_state = next(observed)
-                    except StopIteration:
-                        pass
-                    return observed_state
-
-                observed_state = states[-1]
-                events = []
-
-                def reap(_process):
-                    events.append("reap")
-                    return True
-
-                def send_signal(pid, sig):
-                    events.append((pid, sig))
-
-                with (
-                    patch.object(preflight_module.time, "monotonic", clock.monotonic),
-                    patch.object(preflight_module.time, "sleep", clock.sleep),
-                    patch.object(preflight_module, "_group_state", side_effect=next_state) as group_state,
-                    patch.object(preflight_module, "_reap_direct_child", side_effect=reap),
-                    patch.object(preflight_module.os, "killpg", side_effect=send_signal) as killpg,
-                ):
-                    self.assertEqual(expected, preflight_module._kill_group(process))
-                self.assertAlmostEqual(0.02 if expected else 1.0, clock.now, places=7)
-                if expected:
-                    self.assertEqual(3, group_state.call_count)
-                else:
-                    self.assertGreater(group_state.call_count, 3)
-                self.assertEqual([call(4242, signal.SIGTERM)], killpg.call_args_list)
-                self.assertEqual([(4242, signal.SIGTERM), "reap"], events)
-
-    def test_kill_group_fails_when_direct_child_reap_fails(self) -> None:
-        """直接子进程未确认回收时，不开始组消失的成功判断。"""
-        process = Mock(pid=4242)
-        with (
-            patch.object(preflight_module, "_group_state", return_value=False),
-            patch.object(preflight_module, "_reap_direct_child", return_value=False),
-            patch.object(preflight_module.os, "killpg") as killpg,
-            patch.object(preflight_module.time, "monotonic") as monotonic,
-        ):
-            self.assertFalse(preflight_module._kill_group(process))
-        self.assertEqual([call(4242, signal.SIGTERM)], killpg.call_args_list)
-        monotonic.assert_called_once()
+            self.assertEqual("FAIL", self._preflight().status)
 
 
 if __name__ == "__main__":

@@ -1,21 +1,21 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, lstat, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, lstat, readFile, realpath, rm, symlink, writeFile, cp } from 'node:fs/promises';
 import fsPromises from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { packageManifest } from '../package.mjs';
-import { buildManifest, createManifest, serializeManifest } from '../manifest.mjs';
-import { resolveBuildIdentity } from '../version.mjs';
+import { packageManifest } from '../build/package-release-artifacts.mjs';
+import { buildManifest, createManifest, serializeManifest } from '../integrity/release-artifact-manifest.mjs';
+import { resolveBuildIdentity } from '../integrity/source-build-identity.mjs';
 import { extensionBytes } from './zip-fixture.mjs';
-import { generateRuntimeEntry } from '../runtime-entry.mjs';
+import { generateRuntimeEntry } from '../build/release-runtime-entry-generator.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const packageCli = path.join(repoRoot, 'ops/release/package.mjs');
+const packageCli = path.join(repoRoot, 'ops/release/build/package-release-artifacts.mjs');
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 async function filesUnder(root, relative = '') {
   const fs = await import('node:fs/promises'); const files = [];
@@ -26,11 +26,12 @@ async function filesUnder(root, relative = '') {
   return files;
 }
 
-async function fixture() {
+async function createFixture() {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'lexiflow-manifest-')));
   await mkdir(path.join(root, 'ops/release'), { recursive: true });
+  for (const directory of ['build', 'integrity', 'runtime']) await mkdir(path.join(root, 'ops/release', directory), { recursive: true });
   await writeFile(path.join(root, 'ops/release/version.txt'), '2.0.0\n');
-  await writeFile(path.join(root, 'ops/release/version.mjs'), await readFile(path.join(repoRoot, 'ops/release/version.mjs')));
+  await writeFile(path.join(root, 'ops/release/integrity/source-build-identity.mjs'), await readFile(path.join(repoRoot, 'ops/release/integrity/source-build-identity.mjs')));
   await writeFile(path.join(root, '.gitignore'), '/input/\n/descriptor.json\n/release/\n/out/\n/alias/\n/.*.manifest-*/\n');
   execFileSync('git', ['init', '-q', root]);
   execFileSync('git', ['-C', root, 'add', '.']);
@@ -69,6 +70,41 @@ async function fixture() {
   const descriptorFile = path.join(root, 'descriptor.json'); await writeFile(descriptorFile, JSON.stringify(descriptor));
   return { root, artifactRoot, descriptor, descriptorFile, licenses, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
+
+// 基线只生成一次真实合成 Git/制品/entry；每例均有私有完整复制，
+// packageManifest/buildManifest 仍对当前复制执行真实身份、路径、摘要和发布校验。
+let fixtureSeed;
+test.after(async () => { if (fixtureSeed) await (await fixtureSeed).cleanup(); });
+async function fixture() {
+  const seed = await (fixtureSeed ??= createFixture());
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'lexiflow-manifest-')));
+  try {
+    await cp(seed.root, root, { recursive: true });
+    const descriptor = structuredClone(seed.descriptor);
+    return { root, artifactRoot: path.join(root, 'input'), descriptor,
+      descriptorFile: path.join(root, 'descriptor.json'), licenses: descriptor.licenses,
+      cleanup: () => rm(root, { recursive: true, force: true }) };
+  } catch (error) { await rm(root, { recursive: true, force: true }); throw error; }
+}
+
+test('copied manifest fixtures isolate source, artifacts, descriptor objects and cleanup', async () => {
+  const first = await fixture(), second = await fixture();
+  try {
+    const expected = resolveBuildIdentity(second.root);
+    assert.deepEqual(resolveBuildIdentity(first.root), expected);
+    await writeFile(path.join(first.root, 'ops/release/version.txt'), '3.0.0\n');
+    execFileSync('git', ['-C', first.root, 'add', '.']);
+    execFileSync('git', ['-C', first.root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'private edit']);
+    assert.notEqual(resolveBuildIdentity(first.root).sourceCommit, expected.sourceCommit);
+    await writeFile(path.join(first.artifactRoot, 'compose.yaml'), 'private artifact edit');
+    first.descriptor.artifacts[0].sha256 = '0'.repeat(64);
+    assert.deepEqual(resolveBuildIdentity(second.root), expected);
+    assert.equal(await readFile(path.join(second.artifactRoot, 'compose.yaml'), 'utf8'), 'synthetic compose fixture');
+    assert.deepEqual(JSON.parse(await readFile(second.descriptorFile, 'utf8')), second.descriptor);
+    await first.cleanup();
+    assert.equal((await buildManifest({ descriptor: second.descriptor, repoRoot: second.root, artifactRoot: second.artifactRoot })).softwareVersion, '2.0.0');
+  } finally { await first.cleanup(); await second.cleanup(); }
+});
 
 function cliArgs(f, outputDirectory) { return [packageCli, '--source-repo', f.root, '--descriptor-file', f.descriptorFile, '--artifact-root', f.artifactRoot, '--output-directory', outputDirectory]; }
 

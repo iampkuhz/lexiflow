@@ -6,16 +6,16 @@ the validator produces a precise diagnostic.
 
 import copy
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 import yaml
 
-from scripts.repository.planning_validator import PlanningValidator
+from scripts.checks.repository.catalog.task_catalog_rules import PlanningValidator
 
 ROOT = Path(__file__).resolve().parents[2]
-POLICY = yaml.safe_load((ROOT / "harness" / "agent-policy.manifest.yaml").read_text())
 
 
 def _base_valid_catalog():
@@ -90,9 +90,9 @@ def _base_valid_catalog():
                         ".gitignore",
                         "docs/README.md",
                         "harness/README.md",
-                        "harness/manifest.yaml",
-                        "harness/module-boundaries.yaml",
-                        "harness/agent-policy.manifest.yaml",
+                        "config/engineering/**",
+                        "harness/module-boundaries.md",
+                        "harness/agent-policy.md",
                         "scripts/README.md",
                     ],
                 },
@@ -102,15 +102,6 @@ def _base_valid_catalog():
                     "proposed_paths": [".codex/**", ".qoder/**"],
                 },
             ],
-        },
-        "phase_entry_validation": {
-            "effective_phase": "task.phase overrides capability.phase",
-            "entry_task_definition": "P2+ task",
-            "approval_evidence_inheritance": {},
-            "rules": [],
-            "entry_tasks": {
-                "P2": ["LF-TSK-ARCH-0003"],
-            },
         },
         "phase_gates": [
             {
@@ -253,13 +244,8 @@ def _base_valid_catalog():
     }
 
 
-def _base_policy():
-    return copy.deepcopy(POLICY)
-
-
 def _validate(
     data,
-    policy=None,
     fill_required=True,
 ):
     if fill_required:
@@ -272,10 +258,12 @@ def _validate(
                         )
     v = PlanningValidator.from_data(
         data,
-        policy_data=policy if policy is not None else _base_policy(),
         module_checks_data={
             "checks": [
-                {"check_id": "eng.repository.planning", "scope": "repository-baseline"}
+                {
+                    "check_id": "eng.repository.planning",
+                    "scenarios": ["repository-baseline"],
+                }
             ]
         },
     )
@@ -283,6 +271,7 @@ def _validate(
     # checkout when the ownership check walks the repository root.
     with tempfile.TemporaryDirectory(prefix="lexiflow-planning-fixture-") as root:
         v.root = Path(root)
+        subprocess.run(["git", "init", "-q"], cwd=v.root, check=True)
         return v.run_all()
 
 
@@ -301,7 +290,7 @@ class TestValidCatalog(unittest.TestCase):
         result = _validate(_base_valid_catalog())
         self.assertEqual(result["status"], "PASS")
         self.assertEqual(result["task_count"], 4)
-        self.assertEqual(len(result["checks_run"]), 12)
+        self.assertEqual(len(result["checks_run"]), 11)
 
 
 class TestPlanningOnlyCatalog(unittest.TestCase):
@@ -309,7 +298,6 @@ class TestPlanningOnlyCatalog(unittest.TestCase):
         data = _base_valid_catalog()
         data["program"] = {"id": "LF-PRG-001", "catalog_mode": "planning-only"}
         data.pop("phase_gates")
-        data.pop("phase_entry_validation")
         for workstream in data["workstreams"]:
             workstream["epics"] = []
         return data
@@ -318,7 +306,7 @@ class TestPlanningOnlyCatalog(unittest.TestCase):
         result = _validate(self.empty_catalog())
         self.assertEqual("PASS", result["status"], result["errors"])
         self.assertEqual(0, result["task_count"])
-        self.assertEqual(12, len(result["checks_run"]))
+        self.assertEqual(11, len(result["checks_run"]))
 
     def test_empty_catalog_without_explicit_mode_still_fails(self):
         data = self.empty_catalog()
@@ -331,7 +319,7 @@ class TestPlanningOnlyCatalog(unittest.TestCase):
         self.assertIn("invalid-program-structure", _validate(data)["errors"])
 
     def test_empty_catalog_cannot_retain_gate_or_entry_task(self):
-        for field in ("phase_gates", "phase_entry_validation"):
+        for field in ("phase_gates",):
             with self.subTest(field=field):
                 data = self.empty_catalog()
                 data[field] = _base_valid_catalog()[field]
@@ -359,7 +347,7 @@ class TestPlanningOnlyCatalog(unittest.TestCase):
             "planning-only-catalog-has-execution-state", _validate(data)["errors"]
         )
 
-    def test_empty_planning_mode_preserves_ownership_and_policy_checks(self):
+    def test_empty_planning_mode_preserves_ownership_checks(self):
         data = self.empty_catalog()
         data["path_ownership"]["scopes"][0]["owner"] = "LF-WS-MISSING"
         result = _validate(data)
@@ -379,7 +367,15 @@ class TestPopulatedCatalog(unittest.TestCase):
                 "id": "LF-TSK-ARCH-0005",
                 "title": "extra",
                 "priority": "P1",
-                "depends_on": [],
+                "depends_on": [
+                    {
+                        "task_id": "LF-TSK-ARCH-0001",
+                        "type": "hard",
+                        "required_task_version": 1,
+                        "required_change_version": "1.0.0",
+                        "required_result": "PASS",
+                    }
+                ],
                 "task_version": 1,
                 "change_version": "1.0.0",
             }
@@ -621,6 +617,54 @@ class TestPhaseEntryAncestryGap(unittest.TestCase):
             any("phase-entry-hard-dep-result-not-pass" in e for e in result["errors"])
         )
 
+    def test_gate_is_unique_phase_entry_source(self):
+        data = _base_valid_catalog()
+        data["phase_entry_validation"] = {"entry_tasks": {"P2": ["LF-TSK-ARCH-0003"]}}
+        self.assertTrue(any("retired" in issue for issue in _validate(data)["errors"]))
+        data.pop("phase_entry_validation")
+        data["phase_gates"].append({**data["phase_gates"][1], "id": "G3"})
+        self.assertTrue(
+            any("duplicate-gate-phase" in issue for issue in _validate(data)["errors"])
+        )
+
+    def test_gate_entry_must_exist_and_belong_to_phase(self):
+        for phase in ("P1", "P2"):
+            data = _base_valid_catalog()
+            gate = next(item for item in data["phase_gates"] if item["phase"] == phase)
+            gate["entry_tasks"] = ["LF-TSK-ARCH-9999"]
+            self.assertTrue(
+                any(
+                    "phase-entry-task-missing" in issue
+                    for issue in _validate(data)["errors"]
+                )
+            )
+            gate["entry_tasks"] = [
+                "LF-TSK-ARCH-0003" if phase == "P1" else "LF-TSK-ARCH-0001"
+            ]
+            self.assertTrue(
+                any(
+                    "phase-entry-task-phase-mismatch" in issue
+                    for issue in _validate(data)["errors"]
+                )
+            )
+
+    def test_phase_entry_approval_version_and_result_remain_required(self):
+        fields = {
+            "required_exit_task_version": 99,
+            "required_exit_change_version": "9.0.0",
+            "required_gate_result": "FAIL",
+            "required_user_approval": "PENDING",
+            "previous_gate_id": "G9",
+            "previous_gate_exit_task_id": "LF-TSK-ARCH-0001",
+        }
+        for field, value in fields.items():
+            with self.subTest(field=field):
+                data = _base_valid_catalog()
+                _find_task(data, "LF-TSK-ARCH-0003")["phase_entry_prerequisite"][
+                    field
+                ] = value
+                self.assertEqual("BLOCKED", _validate(data)["status"])
+
 
 class TestAmbiguousOwner(unittest.TestCase):
     def test_ambiguous_path_ownership_fails(self):
@@ -651,28 +695,24 @@ class TestAmbiguousOwner(unittest.TestCase):
         self.assertTrue(any("empty-scope-name" in e for e in result["errors"]))
 
 
-class TestPolicyContract(unittest.TestCase):
-    def test_unique_policy_source_is_valid_without_runtime_or_template_mirrors(self):
-        result = _validate(_base_valid_catalog(), policy=_base_policy())
-        self.assertEqual(result["status"], "PASS")
-        self.assertIn("policy_contract", result["checks_run"])
+class TestPlanningSources(unittest.TestCase):
+    def test_policy_is_not_a_machine_input(self):
+        validator = PlanningValidator.from_data(_base_valid_catalog())
+        self.assertFalse(hasattr(validator, "policy"))
+        self.assertFalse(hasattr(validator, "check_policy_contract"))
+        result = _validate(_base_valid_catalog())
+        self.assertEqual("PASS", result["status"])
+        self.assertNotIn("policy_contract", result["checks_run"])
 
-    def test_missing_policy_identity_boundary_fails_closed(self):
-        policy = _base_policy()
-        del policy["codex_dispatch"]["acceptance"][
-            "implementer_must_not_validate_or_review"
-        ]
-        result = _validate(_base_valid_catalog(), policy=policy)
-        self.assertEqual(result["status"], "BLOCKED")
-        self.assertTrue(any("policy-contract" in error for error in result["errors"]))
+    def test_load_sources_reads_only_catalog_and_check_config(self):
+        from unittest.mock import patch
 
-    def test_malformed_policy_field_schema_fails_closed(self):
-        policy = _base_policy()
-        policy["subagent_protocol"]["caller_field_schema"] = []
-        result = _validate(_base_valid_catalog(), policy=policy)
-        self.assertEqual(result["status"], "BLOCKED")
-        self.assertTrue(
-            any("caller_field_schema" in error for error in result["errors"])
+        validator = PlanningValidator(ROOT)
+        with patch.object(validator, "_load_yaml", return_value=None) as load:
+            validator.load_sources()
+        self.assertEqual(
+            ["planning/workstreams.yaml", "config/engineering/module-checks.yaml"],
+            [call.args[0] for call in load.call_args_list],
         )
 
 
@@ -814,7 +854,17 @@ class TestRepoIntegration(unittest.TestCase):
             for capability in epic.get("capabilities", [])
             for task in capability.get("seed_tasks", [])
         }
-        allowed_states = set(v.policy["planning_contract"]["planning_states"])
+        allowed_states = {
+            "DRAFT",
+            "READY",
+            "DISPATCHED",
+            "IN_PROGRESS",
+            "REVIEW",
+            "DONE",
+            "BLOCKED",
+            "SUPERSEDED",
+            "CANCELLED",
+        }
         for task in phase2:
             contract = raw_tasks[task["id"]]
             self.assertIn(contract["lifecycle_state"], allowed_states)
@@ -823,7 +873,7 @@ class TestRepoIntegration(unittest.TestCase):
             self.assertIsInstance(contract["forbidden_files"], list)
             self.assertTrue(contract["deliverable"].strip())
         self.assertFalse(v.gates, "No historical gates may authorize foundation work")
-        self.assertEqual(len(result["checks_run"]), 12)
+        self.assertEqual(len(result["checks_run"]), 11)
 
 
 class TestOwnerResolver(unittest.TestCase):
@@ -831,6 +881,8 @@ class TestOwnerResolver(unittest.TestCase):
         validator = PlanningValidator.from_data(_base_valid_catalog())
         with tempfile.TemporaryDirectory() as directory:
             validator.root = Path(directory)
+            subprocess.run(["git", "init", "-q"], cwd=validator.root, check=True)
+            (validator.root / ".gitignore").write_text(".DS_Store\n.ruff_cache/\n")
             (validator.root / ".DS_Store").write_bytes(b"fixture")
             nested = validator.root / "unowned"
             nested.mkdir()

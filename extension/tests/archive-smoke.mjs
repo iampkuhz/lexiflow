@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { checkExtensionArchive } from '../scripts/archive-check.mjs';
+import { checkExtensionArchive } from '../scripts/checks/check-extension-archive.mjs';
 
 /** Load the verified archive in an isolated Playwright Chromium profile (not a manual Chrome install). */
 export async function smokeExtensionArchive(zipPath, expectedCommit) {

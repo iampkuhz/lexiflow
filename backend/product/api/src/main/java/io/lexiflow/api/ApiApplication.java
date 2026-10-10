@@ -13,6 +13,7 @@ import io.lexiflow.lexicon.platform.persistence.PostgresPersistenceConfiguration
 import io.lexiflow.observability.platform.FileSegmentAnalysisStore;
 import io.lexiflow.observability.platform.SegmentAnalysisStore;
 import io.lexiflow.observability.platform.StructuredEventLogger;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
@@ -85,11 +86,16 @@ public class ApiApplication {
   private static Path configuredAnalysisPath() {
     var configured = System.getenv("LEXIFLOW_SEGMENT_LOG_PATH");
     if (configured != null && !configured.isBlank()) return Path.of(configured);
-    for (var current = Path.of("").toAbsolutePath().normalize();
+    return locateRepositoryRoot(Path.of("")).resolve("tmp/analysis/caption-segments.jsonl");
+  }
+
+  static Path locateRepositoryRoot(Path start) {
+    for (var current = start.toAbsolutePath().normalize();
         current != null;
         current = current.getParent()) {
-      if (java.nio.file.Files.isRegularFile(current.resolve("harness/manifest.yaml")))
-        return current.resolve("tmp/analysis/caption-segments.jsonl");
+      if (Files.isRegularFile(current.resolve("AGENTS.md"))
+          && Files.isRegularFile(current.resolve("backend/settings.gradle.kts"))
+          && Files.isDirectory(current.resolve("backend/product/api"))) return current;
     }
     throw new IllegalStateException("LexiFlow repository root is required for analysis log");
   }

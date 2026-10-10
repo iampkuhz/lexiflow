@@ -12,7 +12,7 @@
 
 ## 1.2. 核心文件目录
 
-F 编号只绑定一个真实脚本或门禁声明文件；目录节点用于定位，所有叶子均为真实文件。下图覆盖开发、验证、验收和发行交接的 23 个核心文件，不是全仓脚本清单。具体命令和类型见[脚本索引](../reference/scripts.md)。
+F 编号只绑定一个真实实现、机器配置或人类规则文件；目录节点用于定位，所有叶子均为真实文件。下图覆盖开发、验证、验收和发行交接的 20 个核心文件，不是全仓脚本清单。具体命令和类型见[脚本索引](../reference/scripts.md)。
 
 ```plantuml
 @startmindmap
@@ -65,12 +65,11 @@ title 目录视角<U+FF1A>叶子节点是实际文件
 ++++[#DBEAFE] F17 java<U+005F>exec<U+002E>py
 ++++[#DBEAFE] F18 start<U+005F>api<U+002E>py
 ++++[#DBEAFE] F19 test<U+005F>services<U+002E>py
-+++[#DBEAFE] F01 check<U+005F>changes<U+002E>py
 +++[#DBEAFE] F02 check<U+005F>repository<U+002E>py
 ++[#D1FAE5] D6 harness<U+002F>
++++[#D1FAE5] F22 agent<U+002D>policy<U+002E>md
+++[#D1FAE5] D9 config<U+002F>engineering<U+002F>
 +++[#D1FAE5] F20 module<U+002D>checks<U+002E>yaml
-+++[#D1FAE5] F21 delivery<U+002D>hooks<U+002E>json
-+++[#D1FAE5] F22 agent<U+002D>policy<U+002E>manifest<U+002E>yaml
 ++[#FEF3C7] D7 ops<U+002F>
 +++[#FEF3C7] D8 release<U+002F>
 ++++[#FEF3C7] F23 workflow<U+002E>mjs
@@ -106,8 +105,8 @@ note right
 end note
 :S2 定义变更任务;
 note right
-输入：开发目标与 [F22] agent-policy.manifest.yaml
-动作：人工定界；改Catalog/策略时按需核对
+输入：开发目标与 [F22] agent-policy.md
+动作：人工定界；改Catalog时按需核对
       [F15] planning_check.py
 输出：任务定义与工作边界
 end note
@@ -132,11 +131,10 @@ note right
 end note
 note left
 内部共用链：
-[F20] module-checks.yaml
+[F20] config/engineering/module-checks.yaml
 → [F07] scenarios.py
-Stop资源与配置：
+Stop资源：
 [F19] test_services.py（内部库）
-[F21] delivery-hooks.json
 end note
 if (开发检查通过？) then (通过)
 else (失败或阻断：F05 diagnose.py 定位)
@@ -146,8 +144,7 @@ if (本次明确要求完整验证？) then (是)
 :S5 执行完整验证;
 note right
 输入：本次明确要求的完整验证范围
-动作：[F01] check_changes.py
-      或 [F02] check_repository.py
+动作：[F02] check_repository.py
 输出：相应范围的完整报告
 end note
 if (完整验证通过？) then (通过)
@@ -217,7 +214,7 @@ stop
 legend bottom
 F编号指向目录树中的同一实际文件；S编号只表示开发阶段。
 失败后用 F05 diagnose.py 按需定位；缺环境回到环境准备，修复后重进相关阶段。
-F03与F04选入口，不要求重复跑；只有Stop自动调用F19准备并清理资源。
+F03与F04选入口，不要求重复跑；Stop与精确diagnose自动调用F19准备并清理资源。
 正式命令通过F08的模块CLI进入；F09—F12是内部API，不直接执行文件。
 endlegend
 @enduml
@@ -229,10 +226,10 @@ endlegend
 | --- | --- | --- |
 | 准备与定界 | 开发目标／环境 → 定义变更边界并准备需要的本机工具 → 可执行工作范围 | F17、F18、F22；必要时 F15 |
 | 实现与直接反馈 | 任务与修改 → 按受影响部分做静态、编译或直接回归 → 修改及反馈 | F13、F14、F17；必要时产品模块原生命令 |
-| 开发报告 | 停止相关写入的完整 diff → 按显式 triggers 与消费依赖选择日常 checks → 绑定本次输入的开发报告 | F03 或 F04；F20、F07；Stop 资源路径涉及 F19、F21；失败定位 F05 |
-| 可选完整验证 | 明确要求的完整范围 → Change 或 Repository baseline → 完整验证报告 | F01 或 F02；失败定位 F05 |
+| 开发报告 | 停止相关写入的完整 diff → 按显式 triggers 与消费依赖选择日常 checks → 绑定本次输入的开发报告 | F03 或 F04；F20、F07；Stop 资源路径涉及 F19；失败定位 F05 |
+| 可选完整验证 | 明确要求的完整范围 → Repository baseline → 完整验证报告 | F02；失败定位 F05 |
 | 任务验收 | Task 与当前有效报告 → 冻结输入、独立验证、适用审查与条件核对 → Task 验收证据 | F08 分派 F09–F12；独立验证复用 F07 |
-| 正式发行 | 授权集成源码与发行请求 → 准备候选、完整验证、绑定候选的独立验收及显式晋升 → 发行交接 | F23；F01／F02；F08–F12 |
+| 正式发行 | 授权集成源码与发行请求 → 准备候选、完整验证、绑定候选的独立验收及显式晋升 → 发行交接 | F23；F03／F02；F08–F12 |
 
 失败或阻断回到相应实现、环境准备或证据补齐；相关输入变化后重新执行受影响步骤。F05 用于定位，不代替报告。开发报告不是 Task 验收；Formal review 与 check 只读冻结证据，不重跑检查。Stop 会准备并清理隔离服务，显式 development CLI 调用者则须自行准备环境。
 
@@ -244,4 +241,4 @@ endlegend
 - [编码后执行门禁](../scenarios/run-repository-gates.md)：按开发反馈、任务验收或发行目标选实际操作入口。
 - [脚本索引](../reference/scripts.md)：公开 CLI、触发适配器、内部库及声明的完整索引。
 
-长期规则只在 [Harness](../../harness/README.md) 与 [工程规则](../../AGENTS.md) 维护；本文解释模型和导航，不复制机器合同。
+长期人类规则只在 [Harness](../../harness/README.md) 与 [工程规则](../../AGENTS.md) 维护；本文解释模型和导航，不复制机器合同。

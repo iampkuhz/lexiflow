@@ -4,9 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { acquireProcessLock } from '../process-lock.mjs';
+import { acquireProcessLock } from '../execution/installation-operation-lock.mjs';
 
-const modulePath = path.resolve(import.meta.dirname, '..', 'process-lock.mjs');
+const modulePath = path.resolve(import.meta.dirname, '../execution/installation-operation-lock.mjs');
 const helper = String.raw`import { pathToFileURL } from 'node:url';
 const { acquireProcessLock } = await import(pathToFileURL(process.argv[1]));
 const release=acquireProcessLock(process.argv[2]);

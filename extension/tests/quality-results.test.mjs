@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { evaluateBrowserResult, evaluateUnitResult } from "../scripts/quality-results.mjs";
+import { evaluateBrowserResult, evaluateUnitResult } from "../scripts/checks/extension-test-results.mjs";
 
 const normalTap = `TAP version 13
 # Subtest: bounded protocol
@@ -59,11 +59,11 @@ test("browser adapter requires an E2E-owned successful execution report", () => 
 test("quality command preserves browser assertion diagnostics without corrupting stdout", async () => {
   const root = await mkdtemp(join(tmpdir(), "lexiflow-quality-diagnostics-"));
   try {
-    for (const folder of ["scripts", "tests", "node_modules/playwright"]) {
+    for (const folder of ["scripts/checks", "tests", "node_modules/playwright"]) {
       await mkdir(join(root, folder), { recursive: true });
     }
-    for (const file of ["quality-check.mjs", "quality-results.mjs"]) {
-      await cp(new URL(`../scripts/${file}`, import.meta.url), join(root, "scripts", file));
+    for (const file of ["run-extension-checks.mjs", "extension-test-results.mjs"]) {
+      await cp(new URL(`../scripts/checks/${file}`, import.meta.url), join(root, "scripts/checks", file));
     }
     await writeFile(join(root, "package.json"), JSON.stringify({
       type: "module", scripts: { build: "node -e \"process.exit(0)\"" }
@@ -80,7 +80,7 @@ test("quality command preserves browser assertion diagnostics without corrupting
     const env = { ...process.env };
     // This is a separate CLI invocation, not a recursive node:test worker.
     delete env.NODE_TEST_CONTEXT;
-    const result = spawnSync(process.execPath, [join(root, "scripts/quality-check.mjs")], { env, encoding: "utf8", timeout: 20_000 });
+    const result = spawnSync(process.execPath, [join(root, "scripts/checks/run-extension-checks.mjs")], { env, encoding: "utf8", timeout: 20_000 });
     assert.equal(result.error, undefined);
     assert.equal(result.status, 0);
     assert.equal(JSON.parse(result.stdout).status, "FAIL");

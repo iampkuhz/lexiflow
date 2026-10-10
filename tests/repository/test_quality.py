@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from scripts.repository.quality import evaluate_suite, run
+from scripts.checks.repository.run_repository_check_group import evaluate_suite, run
 
 
 class RepositoryQualityResultTest(unittest.TestCase):
@@ -43,7 +43,7 @@ class RepositoryQualityResultTest(unittest.TestCase):
     def test_documentation_failure_preserves_location(self) -> None:
         issues = ["docs/demo.md: 失效链接：missing.md"]
         with mock.patch(
-            "scripts.repository.quality.docs_check.run",
+            "scripts.checks.repository.run_repository_check_group.docs_check.run",
             return_value={
                 "status": "FAIL",
                 "files": 1,
@@ -56,47 +56,20 @@ class RepositoryQualityResultTest(unittest.TestCase):
         self.assertEqual(1, report["failures"])
         self.assertEqual(issues, report["detail"]["issues"])
 
-    def test_python_gate_requires_ruff_and_docstrings(self) -> None:
-        """任一静态工具缺失或发现问题都不能形成完整 Python PASS。"""
-        base = {
-            "status": "PASS",
-            "checks_run": 2,
-            "failures": 0,
-            "errors": 0,
-            "skipped": 0,
-            "reason": "",
-            "detail": [],
-        }
-        docs = {**base, "checks_run": 1}
-        with (
-            mock.patch(
-                "scripts.repository.quality.python_quality.run", return_value=base
-            ),
-            mock.patch(
-                "scripts.repository.quality.python_quality.run_docstrings",
-                return_value=docs,
-            ),
-        ):
-            report = run(Path("."), "python")
-        self.assertEqual(("PASS", 3), (report["status"], report["checks_run"]))
+    def test_python_machine_adapter_preserves_complete_result(self):
+        report = {"status": "BLOCKED", "checks_run": 2, "failures": 0, "errors": 0, "skipped": 0, "reason": "python-quality-incomplete", "detail": {"ruff": {}, "docstrings": {}}}
+        with mock.patch("scripts.checks.repository.run_repository_check_group.python_quality.run", return_value=report):
+            self.assertIs(report, run(Path("."), "python"))
 
-        for status in ("FAIL", "BLOCKED"):
-            with (
-                self.subTest(status=status),
-                mock.patch(
-                    "scripts.repository.quality.python_quality.run",
-                    return_value=base,
-                ),
-                mock.patch(
-                    "scripts.repository.quality.python_quality.run_docstrings",
-                    return_value={
-                        **docs,
-                        "status": status,
-                        "checks_run": 0,
-                        "failures": int(status == "FAIL"),
-                    },
-                ),
-            ):
-                report = run(Path("."), "python")
-            self.assertEqual(status, report["status"])
-            self.assertEqual(2, report["checks_run"])
+    def test_machine_transport_is_zero_exit_on_failed_check(self):
+        import contextlib
+        import io
+        import json
+        from scripts.checks.repository import run_repository_check_group as quality
+        with mock.patch.object(quality, "run", return_value={"status": "FAIL"}), contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(0, quality.main(["--mode", "python"]))
+        self.assertEqual("FAIL", json.loads(output.getvalue())["status"])
+
+    def test_retired_hook_mode_rejected(self):
+        with self.assertRaises(ValueError):
+            run(Path("."), "hooks")

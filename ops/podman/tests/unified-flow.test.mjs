@@ -7,9 +7,9 @@ import crypto from 'node:crypto';
 import net from 'node:net';
 import { PassThrough } from 'node:stream';
 import { execFileSync } from 'node:child_process';
-import { runUnifiedDeployment } from '../unified-local.mjs';
-import { generationCodeVersion, dataGeneration } from '../../dataset/generation-version.mjs';
-import { resolveBuildIdentity } from '../../release/version.mjs';
+import { runUnifiedDeployment } from '../installation/installation-upgrade-workflow.mjs';
+import { generationCodeVersion, dataGeneration } from '../../dataset/dataset-generation-identity.mjs';
+import { resolveBuildIdentity } from '../../release/integrity/source-build-identity.mjs';
 import { makeZip } from '../../release/tests/zip-fixture.mjs';
 
 const root = path.resolve(import.meta.dirname, '../../..');
@@ -25,10 +25,10 @@ function fixture({ candidateMode = false, failReady = false, failApply = false, 
   write(path.join(repo, 'application.txt'), 'fixed application\n');
   write(path.join(repo, 'ops/release/version.txt'), '9.0.0-SNAPSHOT\n');
   write(path.join(repo, 'ops/dataset/generation-inputs.json'), JSON.stringify({ schemaVersion: 1, include: ['fixture.txt'] }));
-  fs.copyFileSync(path.join(root, 'ops/dataset/generation-version.mjs'), path.join(repo, 'ops/dataset/generation-version.mjs'));
+  fs.copyFileSync(path.join(root, 'ops/dataset/dataset-generation-identity.mjs'), path.join(repo, 'ops/dataset/dataset-generation-identity.mjs'));
   fs.copyFileSync(path.join(root, 'ops/dataset/ecdict-source.lock.json'), path.join(repo, 'ops/dataset/ecdict-source.lock.json'));
   fs.mkdirSync(path.join(repo, 'ops/docker'), { recursive: true });
-  for (const name of ['Dockerfile', 'Dockerfile.postgres', 'entrypoint.sh', 'bootstrap.sh']) fs.copyFileSync(path.join(root, 'ops/docker', name), path.join(repo, 'ops/docker', name));
+  for (const name of ['Dockerfile', 'Dockerfile.postgres', 'run-container-command.sh', 'initialize-postgres-app-role.sh']) fs.copyFileSync(path.join(root, 'ops/docker', name), path.join(repo, 'ops/docker', name));
   fs.mkdirSync(path.join(repo, 'infra/postgres'), { recursive: true });
   fs.copyFileSync(path.join(root, 'infra/postgres/schema.sql'), path.join(repo, 'infra/postgres/schema.sql'));
   if (developmentTrust) {
@@ -111,7 +111,7 @@ function fixture({ candidateMode = false, failReady = false, failApply = false, 
         owner: developmentTrust ? 'postgres' : 'lexiflow', canCreateSchema: true });
       throw new Error('unexpected SQL');
     }
-    if (argv[0] === 'run' && argv.includes('/kit/ops/podman/fetch-ecdict.sh')) {
+    if (argv[0] === 'run' && argv.includes('/kit/ops/dataset/prepare_ecdict_bundle.py')) {
       const mount = argv.find(arg => arg.endsWith(':/data'));
       const dataRoot = path.join(mount.slice(0, -6), 'ecdict-source.ABC123');
       write(path.join(dataRoot, 'stardict.csv'), csv);
@@ -194,7 +194,10 @@ test('source actual planner uses Java inspect, then applies through built API im
     assert.ok(f.calls.some(call => call.startsWith('podman:run') && call.includes('--deployment-data apply')));
     assert.ok(f.calls.filter(call => call.startsWith('podman:run') && call.includes('--deployment-data')).every(call =>
       call.includes('--cap-drop=ALL --cap-add=DAC_OVERRIDE') && call.includes('--read-only') && call.includes('--security-opt=no-new-privileges')));
-    assert.ok(f.calls.filter(call => call.includes('/kit/ops/podman/fetch-ecdict.sh')).every(call => !call.includes('DAC_OVERRIDE')));
+    const sourceRuns = f.calls.filter(call => call.startsWith('podman:run') && call.includes('/kit/ops/dataset/prepare_ecdict_bundle.py'));
+    assert.equal(sourceRuns.length, 2, 'plan and confirmed execution each prepare the frozen source');
+    assert.ok(sourceRuns.every(call => call.endsWith('/kit/ops/dataset/prepare_ecdict_bundle.py /kit /data')
+      && call.includes('LEXIFLOW_GENERATION_CODE_VERSION=') && !call.includes('DAC_OVERRIDE') && !call.includes('--entrypoint')));
     const postgresBuild = f.calls.find(call => call.startsWith('podman:build') && call.endsWith('/postgres'));
     const postgresContext = postgresBuild?.split(' ').at(-1);
     assert.ok(postgresBuild?.includes(`-f ${path.join(postgresContext, 'Dockerfile.postgres')}`),

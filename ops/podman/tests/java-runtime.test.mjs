@@ -5,7 +5,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { javaBuildEnvironment } from '../java-runtime.mjs';
+import { javaBuildEnvironment } from '../environment/java-build-environment.mjs';
 
 const temurin = 'openjdk version "25.0.4" 2026-07-21 LTS\nOpenJDK Runtime Environment Temurin-25.0.4+7 (build 25.0.4+7-LTS)\n';
 function probe(t, result) {

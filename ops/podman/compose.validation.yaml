@@ -48,7 +48,7 @@ services:
     mem_limit: 1280m
     stop_grace_period: 30s
     healthcheck:
-      test: [CMD, /app/entrypoint.sh, health]
+      test: [CMD, /app/run-container-command.sh, health]
       interval: 30s
       timeout: 5s
       retries: 3

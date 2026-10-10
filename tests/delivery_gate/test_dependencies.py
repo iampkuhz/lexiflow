@@ -7,6 +7,7 @@ Verifies:
 - verification -> delivery_gate is forbidden
 - delivery gate does not import root CLI or create execution callbacks
 """
+
 from __future__ import annotations
 
 import ast
@@ -14,7 +15,7 @@ import unittest
 from pathlib import Path
 
 
-DELIVERY_GATE_ROOT = Path(__file__).resolve().parents[2] / "scripts" / "delivery_gate"
+DELIVERY_GATE_ROOT = Path(__file__).resolve().parents[2] / "scripts" / "acceptance"
 AGENTS_ROOT = Path(__file__).resolve().parents[2] / "scripts" / "agents"
 VERIFICATION_ROOT = Path(__file__).resolve().parents[2] / "scripts" / "verification"
 
@@ -32,10 +33,14 @@ def _collect_imports(directory: Path) -> list[tuple[str, str]]:
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    imports.append((str(py_file.relative_to(directory.parent.parent)), alias.name))
+                    imports.append(
+                        (str(py_file.relative_to(directory.parent.parent)), alias.name)
+                    )
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
-                    imports.append((str(py_file.relative_to(directory.parent.parent)), node.module))
+                    imports.append(
+                        (str(py_file.relative_to(directory.parent.parent)), node.module)
+                    )
     return imports
 
 
@@ -48,13 +53,19 @@ def _collect_dynamic_imports(directory: Path) -> list[tuple[str, str]]:
             if not isinstance(node, ast.Call) or not node.args:
                 continue
             literal = node.args[0]
-            if not isinstance(literal, ast.Constant) or not isinstance(literal.value, str):
+            if not isinstance(literal, ast.Constant) or not isinstance(
+                literal.value, str
+            ):
                 continue
             direct = isinstance(node.func, ast.Name) and node.func.id == "__import__"
-            via_importlib = (isinstance(node.func, ast.Attribute)
-                             and node.func.attr == "import_module")
+            via_importlib = (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "import_module"
+            )
             if direct or via_importlib:
-                found.append((str(py_file.relative_to(directory.parent.parent)), literal.value))
+                found.append(
+                    (str(py_file.relative_to(directory.parent.parent)), literal.value)
+                )
     return found
 
 
@@ -63,7 +74,9 @@ class TestDeliveryGateDependencyDirection(unittest.TestCase):
 
     def test_delivery_gate_can_import_verification(self) -> None:
         imports = _collect_imports(DELIVERY_GATE_ROOT)
-        verification_imports = [m for _, m in imports if m.startswith("scripts.verification")]
+        verification_imports = [
+            m for _, m in imports if m.startswith("scripts.verification")
+        ]
         self.assertTrue(
             any(m == "scripts.verification" for m in verification_imports),
             "delivery gate should import scripts.verification public API",
@@ -83,35 +96,49 @@ class TestReverseDependenciesForbidden(unittest.TestCase):
 
     def test_agents_does_not_import_delivery_gate(self) -> None:
         imports = _collect_imports(AGENTS_ROOT)
-        delivery_gate_imports = [m for _, m in imports if "scripts.delivery_gate" in m]
+        delivery_gate_imports = [m for _, m in imports if "scripts.acceptance" in m]
         self.assertEqual(
-            delivery_gate_imports, [],
+            delivery_gate_imports,
+            [],
             f"agents must not import delivery_gate: {delivery_gate_imports}",
         )
 
     def test_verification_does_not_import_delivery_gate(self) -> None:
         imports = _collect_imports(VERIFICATION_ROOT)
-        delivery_gate_imports = [m for _, m in imports if "scripts.delivery_gate" in m]
+        delivery_gate_imports = [m for _, m in imports if "scripts.acceptance" in m]
         self.assertEqual(
-            delivery_gate_imports, [],
+            delivery_gate_imports,
+            [],
             f"verification must not import delivery_gate: {delivery_gate_imports}",
         )
 
     def test_lazy_reverse_imports_are_forbidden(self) -> None:
         for directory in (AGENTS_ROOT, VERIFICATION_ROOT):
             imports = _collect_dynamic_imports(directory)
-            reverse = [(file, name) for file, name in imports
-                       if name == "scripts.delivery_gate" or name.startswith("scripts.delivery_gate.")]
+            reverse = [
+                (file, name)
+                for file, name in imports
+                if name == "scripts.acceptance"
+                or name.startswith("scripts.acceptance.")
+            ]
             self.assertEqual([], reverse, f"lazy reverse imports found: {reverse}")
 
     def test_product_sources_do_not_depend_on_engineering_control_plane(self) -> None:
         root = Path(__file__).resolve().parents[2]
-        forbidden = ("scripts.agents", "scripts.delivery_gate", "scripts.verification",
-                     "scripts.repository")
+        forbidden = (
+            "scripts.agents",
+            "scripts.acceptance",
+            "scripts.verification",
+            "scripts.repository",
+        )
         violations = []
         for base in (root / "backend", root / "extension" / "src"):
             for source in base.rglob("*"):
-                if not source.is_file() or "build" in source.parts or "dist" in source.parts:
+                if (
+                    not source.is_file()
+                    or "build" in source.parts
+                    or "dist" in source.parts
+                ):
                     continue
                 if source.suffix not in {".java", ".kt", ".kts", ".ts", ".js", ".mjs"}:
                     continue
@@ -126,9 +153,8 @@ class TestNoCLICallback(unittest.TestCase):
     """Delivery Gate internal API must not callback to outer CLI."""
 
     def test_no_subprocess_cli_callback_in_review(self) -> None:
-        review_file = DELIVERY_GATE_ROOT / "review.py"
-        if not review_file.is_file():
-            self.skipTest("review.py not yet created")
+        review_file = DELIVERY_GATE_ROOT / "task_operations" / "record_independent_task_review.py"
+        self.assertTrue(review_file.is_file(), review_file)
         source = review_file.read_text()
         tree = ast.parse(source)
         for node in ast.walk(tree):
@@ -137,12 +163,13 @@ class TestNoCLICallback(unittest.TestCase):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == "subprocess":
-                        self.fail("review.py must not import subprocess (no CLI callback)")
+                        self.fail(
+                            "review.py must not import subprocess (no CLI callback)"
+                        )
 
     def test_no_subprocess_cli_callback_in_check(self) -> None:
-        check_file = DELIVERY_GATE_ROOT / "check.py"
-        if not check_file.is_file():
-            self.skipTest("check.py not yet created")
+        check_file = DELIVERY_GATE_ROOT / "task_operations" / "evaluate_task_acceptance.py"
+        self.assertTrue(check_file.is_file(), check_file)
         source = check_file.read_text()
         tree = ast.parse(source)
         for node in ast.walk(tree):
@@ -151,35 +178,46 @@ class TestNoCLICallback(unittest.TestCase):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == "subprocess":
-                        self.fail("check.py must not import subprocess (no CLI callback)")
+                        self.fail(
+                            "check.py must not import subprocess (no CLI callback)"
+                        )
 
 
 class TestIdentityFromRuntime(unittest.TestCase):
     """Identity must come from runtime discovery, not caller parameters."""
 
     def test_validate_uses_discover(self) -> None:
-        validate_file = DELIVERY_GATE_ROOT / "validate.py"
-        if not validate_file.is_file():
-            self.skipTest("validate.py not yet created")
+        validate_file = DELIVERY_GATE_ROOT / "task_operations" / "run_independent_task_validation.py"
+        self.assertTrue(validate_file.is_file(), validate_file)
         source = validate_file.read_text()
         self.assertIn("discover", source, "validate.py must use runtime discovery")
-        self.assertIn("_discover_runtime", source, "validate.py must have _discover_runtime function")
+        self.assertIn(
+            "_discover_runtime",
+            source,
+            "validate.py must have _discover_runtime function",
+        )
 
     def test_review_uses_discover(self) -> None:
-        review_file = DELIVERY_GATE_ROOT / "review.py"
-        if not review_file.is_file():
-            self.skipTest("review.py not yet created")
+        review_file = DELIVERY_GATE_ROOT / "task_operations" / "record_independent_task_review.py"
+        self.assertTrue(review_file.is_file(), review_file)
         source = review_file.read_text()
         self.assertIn("discover", source, "review.py must use runtime discovery")
-        self.assertIn("_discover_runtime", source, "review.py must have _discover_runtime function")
+        self.assertIn(
+            "_discover_runtime",
+            source,
+            "review.py must have _discover_runtime function",
+        )
 
     def test_submit_uses_discover(self) -> None:
-        submit_file = DELIVERY_GATE_ROOT / "submit.py"
-        if not submit_file.is_file():
-            self.skipTest("submit.py not yet created")
+        submit_file = DELIVERY_GATE_ROOT / "task_operations" / "submit_task_for_acceptance.py"
+        self.assertTrue(submit_file.is_file(), submit_file)
         source = submit_file.read_text()
         self.assertIn("discover", source, "submit.py must use runtime discovery")
-        self.assertIn("_discover_runtime", source, "submit.py must have _discover_runtime function")
+        self.assertIn(
+            "_discover_runtime",
+            source,
+            "submit.py must have _discover_runtime function",
+        )
 
 
 if __name__ == "__main__":

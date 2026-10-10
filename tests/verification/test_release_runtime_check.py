@@ -15,7 +15,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from scripts.environment.release_runtime_check import (
+from scripts.checks.release.source.check_synthetic_release_lifecycle import (
     ConsumerError,
     ENVELOPE_FIELDS,
     MAX_ENVELOPE,
@@ -24,15 +24,10 @@ from scripts.environment.release_runtime_check import (
 
 
 def envelope() -> dict[str, object]:
-    from scripts.verification.kernel import fingerprint_json
-
-    check = {"check_id": "eng.release.lifecycle-runtime"}
     return {
-        "schema_version": "lexiflow.verify-child-input.v1",
-        "run_id": "run-1",
-        "check_id": check["check_id"],
-        "check_config_fingerprint": fingerprint_json(check),
-        "effective_check": check,
+        "schema_version": "lexiflow.verify-child-input.v2",
+        "run_id": "12345678-1234-4234-8234-123456789012",
+        "check_id": "eng.release.lifecycle-runtime",
         "snapshot": {"fingerprint": "a" * 64, "files": [], "missing": []},
     }
 
@@ -45,7 +40,9 @@ class BufferedInput:
 class TestReleaseRuntimeEnvelope(unittest.TestCase):
     def test_supported_host_is_measured_not_environment_override(self):
         from types import SimpleNamespace
-        from scripts.environment import release_runtime_check as runtime
+        from scripts.checks.release.source import (
+            check_synthetic_release_lifecycle as runtime,
+        )
 
         for system, machine, allowed in (
             ("darwin", "arm64", True),
@@ -73,7 +70,9 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
 
     def test_release_bindings_require_only_arm64_and_block_when_missing(self):
         from types import SimpleNamespace
-        from scripts.environment import release_runtime_check as runtime
+        from scripts.checks.release.source import (
+            check_synthetic_release_lifecycle as runtime,
+        )
 
         binding = SimpleNamespace(
             endpoint="unix:///private/docker.sock",
@@ -90,17 +89,18 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
                 ),
             ) as preflight,
         ):
-            result = runtime._bindings(
+            result = runtime._binding(
                 {"LEXIFLOW_RELEASE_ARM64_DOCKER_HOST": "unix:///private/docker.sock"},
             )
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].target_platform, "linux/arm64")
-        preflight.assert_called_once_with("linux/arm64", {"DOCKER_HOST": "unix:///private/docker.sock", "PATH": ""})
+        self.assertIs(result, binding)
+        preflight.assert_called_once_with(
+            {"DOCKER_HOST": "unix:///private/docker.sock", "PATH": ""}
+        )
         with patch.object(runtime, "_require_supported_host"):
             with self.assertRaisesRegex(
                 ConsumerError, "BLOCKED/missing-lexiflow-release-arm64-docker-host"
             ):
-                runtime._bindings({})
+                runtime._binding({})
 
     def test_accepts_exact_schema_and_snapshot_without_check_id(self):
         value = _read_envelope(BufferedInput(json.dumps(envelope()).encode()))
@@ -134,19 +134,11 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
         with self.assertRaises(ConsumerError):
             _read_envelope(BufferedInput(json.dumps(bad).encode()))
 
-    def test_candidate_only_response_must_include_real_directory(self):
-        from scripts.environment.release_runtime_check import _run_json_command
-
-        with patch(
-            "scripts.environment.release_runtime_check._run_bounded",
-            return_value=(b'{"status":"PASS","scope":"candidate-only"}\n', b""),
-        ):
-            with self.assertRaises(ConsumerError):
-                _run_json_command(["node", "pipeline.mjs"], Path("."), {}, 1)
-
     def test_bridge_cleanup_failure_is_fail_and_retains_scratch(self):
-        from scripts.verification.release_source_bridge import BridgeError
-        from scripts.environment.release_runtime_check import run_consumer
+        from scripts.checks.release.source.frozen_source_fixture import BridgeError
+        from scripts.checks.release.source.check_synthetic_release_lifecycle import (
+            run_consumer,
+        )
 
         with tempfile.TemporaryDirectory(prefix="runtime-cleanup-failure-") as parent:
             scratch = Path(parent) / "scratch"
@@ -154,15 +146,19 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
             value = envelope()
             with (
                 patch(
-                    "scripts.environment.release_runtime_check.tempfile.mkdtemp",
+                    "scripts.checks.release.source.check_synthetic_release_lifecycle.decode_child_request",
+                    return_value=({}, value["snapshot"], value["run_id"]),
+                ),
+                patch(
+                    "scripts.checks.release.source.check_synthetic_release_lifecycle.tempfile.mkdtemp",
                     return_value=str(scratch),
                 ),
                 patch(
-                    "scripts.environment.release_runtime_check.shutil.rmtree",
+                    "scripts.checks.release.source.check_synthetic_release_lifecycle.shutil.rmtree",
                     side_effect=OSError("cleanup denied"),
                 ),
                 patch(
-                    "scripts.environment.release_runtime_check.consume_verify_snapshot",
+                    "scripts.checks.release.source.check_synthetic_release_lifecycle.consume_verify_snapshot",
                     side_effect=BridgeError("BLOCKED", "source-unavailable"),
                 ),
             ):
@@ -177,25 +173,80 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
             self.assertTrue((scratch / "source-parent").is_dir())
 
     def test_fixed_bridge_consumes_complete_verify_context_and_cleans_failure(self):
-        from scripts.verification.release_source_bridge import BridgeError
-        from scripts.environment import release_runtime_check as runtime
+        from scripts.checks.release.source.frozen_source_fixture import BridgeError
+        from scripts.checks.release.source import (
+            check_synthetic_release_lifecycle as runtime,
+        )
 
         with tempfile.TemporaryDirectory() as directory:
             scratch = Path(directory).resolve() / "scratch"
             scratch.mkdir()
             value = envelope()
-            with patch.object(runtime.tempfile, "mkdtemp", return_value=str(scratch)), patch.object(runtime, "consume_verify_snapshot", side_effect=BridgeError("BLOCKED", "source-unavailable")) as bridge:
-                with self.assertRaisesRegex(ConsumerError, "BLOCKED/source-unavailable"):
+            with (
+                patch.object(
+                    runtime,
+                    "decode_child_request",
+                    return_value=({}, value["snapshot"], value["run_id"]),
+                ),
+                patch.object(runtime.tempfile, "mkdtemp", return_value=str(scratch)),
+                patch.object(
+                    runtime,
+                    "consume_verify_snapshot",
+                    side_effect=BridgeError("BLOCKED", "source-unavailable"),
+                ) as bridge,
+            ):
+                with self.assertRaisesRegex(
+                    ConsumerError, "BLOCKED/source-unavailable"
+                ):
                     runtime.run_consumer(directory, value, environ={})
             bridge.assert_called_once_with(
-                Path(directory).resolve(), value["effective_check"],
-                {key: value[key] for key in ("run_id", "check_id", "check_config_fingerprint")},
-                value["snapshot"], scratch / "source-parent",
+                Path(directory).resolve(),
+                {key: value[key] for key in ("run_id", "check_id")},
+                value["snapshot"],
+                scratch / "source-parent",
             )
             self.assertFalse(scratch.exists())
 
+    def test_public_bounded_process_boundary_preserves_fail_closed_facts(self):
+        """共用 ops 边界只接受零退出及完整清理，不依赖 synthetic 检查。"""
+        from ops.release.host_resources import release_process_control as process
+
+        good = process.ProcessFacts(0, b"out", b"err", False, False, True)
+        with patch.object(process, "run_owned", return_value=good):
+            self.assertEqual(
+                process.run_bounded(["unused"], Path.cwd(), {}, 1),
+                (b"out", b"err"),
+            )
+        cases = (
+            (
+                process.ProcessFacts(0, b"", b"", False, True, True),
+                "release-command-output-limit",
+            ),
+            (
+                process.ProcessFacts(None, b"", b"", True, False, True),
+                "release-command-timeout",
+            ),
+            (
+                process.ProcessFacts(7, b"", b"", False, False, True),
+                "release-command-failed",
+            ),
+            (
+                process.ProcessFacts(0, b"", b"", False, False, False),
+                "release-command-failed",
+            ),
+        )
+        for facts, reason in cases:
+            with (
+                self.subTest(reason=reason),
+                patch.object(process, "run_owned", return_value=facts),
+            ):
+                with self.assertRaisesRegex(process.ProcessError, reason):
+                    process.run_bounded(["unused"], Path.cwd(), {}, 1)
+
     def test_bounded_runner_collects_and_reaps_each_process_path(self):
-        from scripts.environment.release_runtime_check import _run_bounded
+        from scripts.checks.release.source.check_synthetic_release_lifecycle import (
+            _run_bounded,
+        )
 
         with tempfile.TemporaryDirectory(prefix="bounded-process-test-") as tmp:
             root = Path(tmp)
@@ -247,20 +298,74 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
                 self._assert_process_stops(int(child_pid.read_text(encoding="ascii")))
 
     def test_bounded_command_consumes_private_input_stream(self):
-        from scripts.environment.release_runtime_check import _run_bounded
+        from scripts.checks.release.source.check_synthetic_release_lifecycle import (
+            _run_bounded,
+        )
 
         with tempfile.TemporaryFile() as stream:
             stream.write(b'{"candidate":"fixed"}')
             stream.seek(0)
             stdout, stderr = _run_bounded(
-                [sys.executable, "-c", "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"],
-                Path.cwd(), os.environ, 5, input_stream=stream,
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())",
+                ],
+                Path.cwd(),
+                os.environ,
+                5,
+                input_stream=stream,
             )
         self.assertEqual(stdout, b'{"candidate":"fixed"}')
         self.assertEqual(stderr, b"")
 
+    def test_common_supervisor_returns_actual_exit_timeout_and_overflow_facts(self):
+        from ops.release.host_resources import (
+            release_process_control as release_process,
+        )
+
+        facts = release_process.run_owned(
+            [sys.executable, "-c", "import sys; print('exit'); sys.exit(7)"],
+            Path.cwd(),
+            os.environ,
+            5,
+        )
+        self.assertEqual(facts.returncode, 7)
+        self.assertEqual(facts.stdout, b"exit\n")
+        self.assertTrue(facts.cleanup_succeeded)
+        timeout = release_process.run_owned(
+            [sys.executable, "-c", "import time; time.sleep(5)"],
+            Path.cwd(),
+            os.environ,
+            0.1,
+        )
+        self.assertTrue(timeout.timed_out)
+        self.assertIsNotNone(timeout.returncode)
+        self.assertNotEqual(timeout.returncode, 0)
+        flood = release_process.run_owned(
+            [sys.executable, "-c", "print('x' * 4096)"], Path.cwd(), os.environ, 5, 128
+        )
+        self.assertTrue(flood.overflow)
+        self.assertTrue(flood.cleanup_succeeded)
+
+    def test_signal_denial_never_returns_cleanup_success(self):
+        from ops.release.host_resources import (
+            release_process_control as release_process,
+        )
+
+        with (
+            patch.object(release_process.sys, "platform", "linux"),
+            patch.object(os, "killpg", side_effect=PermissionError),
+        ):
+            with self.assertRaisesRegex(
+                release_process.ProcessError, "release-process-group-signal-denied"
+            ):
+                release_process.run_owned(
+                    [sys.executable, "-c", "print('done')"], Path.cwd(), os.environ, 5
+                )
+
     def test_process_group_signals_and_registry_removal_precede_reap(self):
-        from scripts.environment import release_runtime_check as runtime
+        from ops.release.host_resources import release_process_control as runtime
 
         events: list[tuple[str, int]] = []
         real_wait = subprocess.Popen.wait
@@ -272,8 +377,12 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
             return real_wait(process, *args, **kwargs)
 
         def tracked_killpg(pgid, sig):
-            events.append(("signal", pgid))
-            self.assertIn(pgid, runtime._ACTIVE_PROCESS_GROUPS)
+            if sig == 0:
+                events.append(("observe", pgid))
+                self.assertNotIn(pgid, runtime._ACTIVE_PROCESS_GROUPS)
+            else:
+                events.append(("signal", pgid))
+                self.assertIn(pgid, runtime._ACTIVE_PROCESS_GROUPS)
             return real_killpg(pgid, sig)
 
         with tempfile.TemporaryDirectory(prefix="bounded-lifetime-test-") as tmp:
@@ -283,16 +392,73 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
                 patch.object(subprocess.Popen, "wait", tracked_wait),
                 patch.object(os, "killpg", tracked_killpg),
             ):
-                output, _ = runtime._run_bounded(
+                facts = runtime.run_owned(
                     [sys.executable, str(script)], Path(tmp), os.environ, 5
                 )
-            self.assertEqual(output, b"ok\n")
+            self.assertEqual(facts.stdout, b"ok\n")
         reap_index = next(i for i, event in enumerate(events) if event[0] == "wait")
         self.assertTrue(any(event[0] == "signal" for event in events[:reap_index]))
         self.assertFalse(any(event[0] == "signal" for event in events[reap_index:]))
 
+    def test_post_reap_unknown_or_live_group_is_not_cleanup_success(self):
+        from ops.release.host_resources import (
+            release_process_control as release_process,
+        )
+
+        class Clock:
+            now = 0.0
+
+            def monotonic(self):
+                return self.now
+
+            def sleep(self, duration):
+                self.now += duration
+
+        for states, expected in (
+            ([None, False], True),
+            ([None], False),
+            ([True], False),
+        ):
+            clock = Clock()
+            observed = iter(states)
+            last = states[-1]
+
+            def probe(pgid, sig):
+                nonlocal last
+                self.assertEqual((pgid, sig), (4242, 0))
+                last = next(observed, last)
+                if last is False:
+                    raise ProcessLookupError
+                if last is None:
+                    raise PermissionError
+
+            with (
+                patch.object(release_process.time, "monotonic", clock.monotonic),
+                patch.object(release_process.time, "sleep", clock.sleep),
+                patch.object(release_process.os, "killpg", side_effect=probe),
+            ):
+                self.assertEqual(
+                    release_process._group_absent_after_reap(4242), expected
+                )
+                self.assertLessEqual(clock.now, 1.02)
+
+    def test_post_reap_group_failure_is_a_process_fail(self):
+        from ops.release.host_resources import (
+            release_process_control as release_process,
+        )
+
+        with patch.object(
+            release_process, "_group_absent_after_reap", return_value=False
+        ):
+            with self.assertRaisesRegex(
+                release_process.ProcessError, "release-command-cleanup-failed"
+            ):
+                release_process.run_owned(
+                    [sys.executable, "-c", "print('done')"], Path.cwd(), os.environ, 5
+                )
+
     def test_unsupported_waitid_blocks_before_spawn(self):
-        from scripts.environment import release_runtime_check as runtime
+        from ops.release.host_resources import release_process_control as runtime
 
         with tempfile.TemporaryDirectory(prefix="bounded-no-waitid-") as tmp:
             with (
@@ -300,13 +466,13 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
                 patch.object(subprocess, "Popen") as popen,
             ):
                 with self.assertRaisesRegex(
-                    ConsumerError, "BLOCKED/release-process-lifetime-unsupported"
+                    runtime.ProcessError, "BLOCKED/release-process-lifetime-unsupported"
                 ):
-                    runtime._run_bounded(["unused"], Path(tmp), {}, 1)
+                    runtime.run_owned(["unused"], Path(tmp), {}, 1)
                 popen.assert_not_called()
 
     def test_darwin_permission_error_requires_exact_zombie_group(self):
-        from scripts.environment import release_runtime_check as runtime
+        from ops.release.host_resources import release_process_control as runtime
 
         class Group:
             def __init__(self, members):
@@ -335,15 +501,15 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
             runtime._signal_process_group(41001, 15)
             with patch.object(runtime, "_DARWIN_LIBPROC", Group([41001, 41002])):
                 with self.assertRaisesRegex(
-                    ConsumerError, "FAIL/release-process-group-signal-denied"
+                    runtime.ProcessError, "FAIL/release-process-group-signal-denied"
                 ):
                     runtime._signal_process_group(41001, 15)
             with patch.object(runtime, "_DARWIN_LIBPROC", Group([41002])):
-                with self.assertRaises(ConsumerError):
+                with self.assertRaises(runtime.ProcessError):
                     runtime._signal_process_group(41001, 15)
 
     def test_darwin_rechecks_reaped_member_before_accepting_permission_error(self):
-        from scripts.environment import release_runtime_check as runtime
+        from ops.release.host_resources import release_process_control as runtime
 
         class ReapedDescendant:
             listings = 0
@@ -384,14 +550,14 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
             patch.object(runtime, "_DARWIN_LIBPROC", unknown),
         ):
             with self.assertRaisesRegex(
-                ConsumerError, "FAIL/release-process-group-signal-denied"
+                runtime.ProcessError, "FAIL/release-process-group-signal-denied"
             ):
                 runtime._signal_process_group(41001, 15)
         self.assertGreaterEqual(unknown.listings, 2)
         self.assertLessEqual(unknown.listings, 12)
 
     def test_darwin_waits_boundedly_for_live_member_to_become_zombie(self):
-        from scripts.environment import release_runtime_check as runtime
+        from ops.release.host_resources import release_process_control as runtime
 
         class Clock:
             now = 0.0
@@ -451,7 +617,7 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
             patch.object(runtime.time, "sleep", clock.sleep),
         ):
             with self.assertRaisesRegex(
-                ConsumerError, "FAIL/release-process-group-signal-denied"
+                runtime.ProcessError, "FAIL/release-process-group-signal-denied"
             ):
                 runtime._signal_process_group(41001, 15)
         self.assertGreaterEqual(persistent.listings, 2)
@@ -477,7 +643,7 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
             )
             worker.write_text(
                 "import os,sys; from pathlib import Path; "
-                "from scripts.environment.release_runtime_check import _run_bounded; "
+                "from scripts.checks.release.source.check_synthetic_release_lifecycle import _run_bounded; "
                 "_run_bounded([sys.executable,sys.argv[1],sys.argv[2],sys.argv[4],sys.argv[3]], "
                 "Path(sys.argv[5]), os.environ, 30)\n",
                 encoding="utf-8",
@@ -548,53 +714,35 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
         self.fail(f"owned process {pid} survived process-group cleanup")
 
     def test_real_stdin_envelope_is_consumed_by_source_bridge(self):
-        from scripts.verification.declarations import load_declarations
-        from scripts.verification.kernel import snapshot_check_inputs
-        from scripts.verification.release_source_bridge import consume_verify_snapshot
-        from scripts.environment.release_runtime_check import _read_envelope
+        from scripts.verification.execution.check_runner import (
+            resolve_child_check,
+            snapshot_check_inputs,
+        )
+        from scripts.checks.release.source.frozen_source_fixture import (
+            consume_verify_snapshot,
+        )
 
         root = Path(__file__).resolve().parents[2]
-        checks = load_declarations(root)["checks"]
-        check = next(
-            item
-            for item in checks
-            if item["check_id"] == "eng.release.lifecycle-runtime"
-        )
-        effective = dict(check)
-        effective["input_paths"] = list(
-            dict.fromkeys([*check["input_paths"], "harness/module-checks.yaml"])
-        )
-        snapshot = snapshot_check_inputs(root, effective)
+        check = resolve_child_check(root, "eng.release.lifecycle-runtime")
+        snapshot = snapshot_check_inputs(root, check)
         context = {
-            "run_id": "synthetic-runtime-test",
+            "run_id": "12345678-1234-4234-8234-123456789012",
             "check_id": check["check_id"],
-            "check_config_fingerprint": __import__(
-                "scripts.verification.kernel", fromlist=["fingerprint_json"]
-            ).fingerprint_json(effective),
         }
         value = {
-            "schema_version": "lexiflow.verify-child-input.v1",
+            "schema_version": "lexiflow.verify-child-input.v2",
             **context,
-            "effective_check": effective,
             "snapshot": snapshot,
         }
-        envelope = _read_envelope(BufferedInput(json.dumps(value).encode("utf-8")))
+        got = _read_envelope(BufferedInput(json.dumps(value).encode()))
         with tempfile.TemporaryDirectory(
             prefix="release-runtime-bridge-test-"
         ) as directory:
-            output = Path(directory).resolve()
-            output_parent = output / "out"
-            output_parent.mkdir()
-            result = consume_verify_snapshot(
-                root,
-                envelope["effective_check"],
-                context,
-                envelope["snapshot"],
-                output_parent,
-            )
+            output = Path(directory).resolve() / "out"
+            output.mkdir()
+            result = consume_verify_snapshot(root, context, got["snapshot"], output)
             provenance = result["provenance"]
             self.assertEqual(
                 provenance["verifyInputFingerprint"], snapshot["fingerprint"]
             )
-            self.assertIs(provenance["verificationRunBound"], False)
             self.assertIs(provenance["formalReleaseEligible"], False)

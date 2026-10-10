@@ -7,11 +7,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.environment import java_exec
+from scripts.local import run_with_java_toolchain as java_exec
 
-from scripts.environment.java_exec import command_environment
-from scripts.environment.java_runtime import JavaRuntimeError
-from scripts.environment.local_config import command_local_config
+from scripts.local.run_with_java_toolchain import command_environment
+from scripts.environment.toolchains.java_toolchain_selection import JavaRuntimeError
+from scripts.environment.configuration.local_runtime_settings import command_local_config
 
 
 class LocalConfigTest(unittest.TestCase):

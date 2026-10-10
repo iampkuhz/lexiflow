@@ -1,0 +1,5 @@
+# scripts 的最低 Python 语法支持与有界 Ruff lint 选择；工具版本由 requirements-dev.txt 固定。
+target-version = "py312"
+
+[lint]
+select = ["E4", "E7", "E9", "F", "D100", "D300", "D419"]

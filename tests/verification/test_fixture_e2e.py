@@ -16,7 +16,8 @@ from pathlib import Path
 
 import yaml
 
-from scripts.verification.scenarios import verify_changes, verify_repository
+from scripts.verification.execution.check_plan_runner import verify_repository
+from scripts.verification.commands.diagnose_repository_check import diagnose
 from tests.verification.declaration_fixtures import write_declarations
 
 
@@ -43,7 +44,7 @@ def _init_git_repo(tmpdir: Path) -> str:
         stderr=subprocess.DEVNULL,
     )
     (tmpdir / "initial.txt").write_text("initial")
-    (tmpdir / ".gitignore").write_text("harness/\ntmp/\n")
+    (tmpdir / ".gitignore").write_text("config/\ntmp/\n")
     subprocess.run(
         ["git", "add", "."],
         cwd=str(tmpdir),
@@ -85,7 +86,7 @@ def _complete_check(check: dict) -> dict:
 
 def _write_declarations(root: Path, checks: list[dict]) -> None:
     write_declarations(
-        root / "harness" / "module-checks.yaml",
+        root / "config" / "engineering" / "module-checks.yaml",
         [_complete_check(check) for check in checks],
     )
 
@@ -101,7 +102,6 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
                 [
                     {
                         "check_id": "fixture.pass",
-                        "module": "fixture",
                         "command": [
                             "python3",
                             "-c",
@@ -112,7 +112,6 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
                         "scope": "repository-baseline",
                         "triggers": [{"path": "fixture/"}],
                         "required_environment": ["python3"],
-                        "consumed_inputs": [],
                     }
                 ],
             )
@@ -129,7 +128,6 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
                 [
                     {
                         "check_id": "fixture.fail",
-                        "module": "fixture",
                         "command": [
                             "python3",
                             "-c",
@@ -140,7 +138,6 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
                         "scope": "repository-baseline",
                         "triggers": [{"path": "fixture/"}],
                         "required_environment": ["python3"],
-                        "consumed_inputs": [],
                     }
                 ],
             )
@@ -156,7 +153,6 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
                 [
                     {
                         "check_id": "fixture.blocked",
-                        "module": "fixture",
                         "command": [
                             "python3",
                             "-c",
@@ -167,7 +163,6 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
                         "scope": "repository-baseline",
                         "triggers": [{"path": "fixture/"}],
                         "required_environment": ["nonexistent-binary-xyz"],
-                        "consumed_inputs": [],
                     }
                 ],
             )
@@ -183,7 +178,6 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
                 [
                     {
                         "check_id": "fixture.json",
-                        "module": "fixture",
                         "command": [
                             "python3",
                             "-c",
@@ -194,7 +188,6 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
                         "scope": "repository-baseline",
                         "triggers": [{"path": "fixture/"}],
                         "required_environment": ["python3"],
-                        "consumed_inputs": [],
                     }
                 ],
             )
@@ -214,20 +207,19 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
             catalog = yaml.safe_load(catalog_path.read_text())
             catalog["workstreams"] = "invalid-topology"
             catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False))
-            (root / "harness").mkdir()
-            for name in ("agent-policy.manifest.yaml",):
-                shutil.copy2(repository / "harness" / name, root / "harness" / name)
+            target = root / "scripts/checks/repository/catalog/task_catalog_rules.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(repository / "scripts/checks/repository/catalog/task_catalog_rules.py", target)
             marker = root / "product-ran"
             _write_declarations(
                 root,
                 [
                     {
                         "check_id": "fixture.planning",
-                        "module": "planning",
                         "command": [
                             "python3",
                             "-c",
-                            "from contextlib import redirect_stdout; from pathlib import Path; import sys,json; from scripts.repository.planning_check import main; rc=main([], root=Path('.')); print(json.dumps({'status':'PASS','checks_run':1,'failures':0,'errors':0,'skipped':0,'reason':''})); raise SystemExit(rc)",
+                            "from contextlib import redirect_stdout; from pathlib import Path; import sys,json; from scripts.checks.repository.catalog.check_task_catalog import main; rc=main([], root=Path('.')); print(json.dumps({'status':'PASS','checks_run':1,'failures':0,'errors':0,'skipped':0,'reason':''})); raise SystemExit(rc)",
                         ],
                         "cwd": ".",
                         "timeout_seconds": 30,
@@ -236,12 +228,11 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
                         "required_environment": ["python3"],
                         "input_paths": [
                             "planning",
-                            "harness/agent-policy.manifest.yaml",
+                            "scripts/checks/repository/catalog/task_catalog_rules.py",
                         ],
                     },
                     {
                         "check_id": "fixture.product",
-                        "module": "product",
                         "command": [
                             "python3",
                             "-c",
@@ -256,11 +247,12 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
                     },
                 ],
             )
-            report = verify_repository(root, execution_mode="diagnostic")
+            report = diagnose(root, check_ids=("fixture.planning", "fixture.product"))
             self.assertEqual("yes", marker.read_text())
-        self.assertEqual("FAIL", report["result"])
+        self.assertEqual("FAIL", report["selected_result"])
         self.assertEqual(
-            ["FAIL", "PASS"], [item["status"] for item in report["checks"]]
+            ["FAIL", "PASS"],
+            [item["status"] for item in report["selected_report"]["checks"]],
         )
 
     def test_delivery_stops_product_after_invalid_planning(self):
@@ -272,19 +264,18 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
             catalog = yaml.safe_load(catalog_path.read_text())
             catalog["workstreams"] = "invalid-topology"
             catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False))
-            (root / "harness").mkdir()
-            for name in ("agent-policy.manifest.yaml",):
-                shutil.copy2(repository / "harness" / name, root / "harness" / name)
+            target = root / "scripts/checks/repository/catalog/task_catalog_rules.py"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(repository / "scripts/checks/repository/catalog/task_catalog_rules.py", target)
             _write_declarations(
                 root,
                 [
                     {
                         "check_id": "fixture.planning",
-                        "module": "planning",
                         "command": [
                             "python3",
                             "-c",
-                            "from pathlib import Path; import json; from scripts.repository.planning_check import main; rc=main([], root=Path('.')); print(json.dumps({'status':'PASS','checks_run':1,'failures':0,'errors':0,'skipped':0,'reason':''})); raise SystemExit(rc)",
+                            "from pathlib import Path; import json; from scripts.checks.repository.catalog.check_task_catalog import main; rc=main([], root=Path('.')); print(json.dumps({'status':'PASS','checks_run':1,'failures':0,'errors':0,'skipped':0,'reason':''})); raise SystemExit(rc)",
                         ],
                         "cwd": ".",
                         "timeout_seconds": 30,
@@ -293,12 +284,11 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
                         "required_environment": ["python3"],
                         "input_paths": [
                             "planning",
-                            "harness/agent-policy.manifest.yaml",
+                            "scripts/checks/repository/catalog/task_catalog_rules.py",
                         ],
                     },
                     {
                         "check_id": "fixture.product",
-                        "module": "product",
                         "command": [
                             "python3",
                             "-c",
@@ -320,124 +310,6 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
             ["FAIL", "BLOCKED"], [item["status"] for item in report["checks"]]
         )
         self.assertEqual("not-run", report["checks"][1]["process"]["exit_reason"])
-
-
-class TestFixtureChangeVerify(unittest.TestCase):
-    """End-to-end test for change verification with real git."""
-
-    def test_no_changes_real(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            base = _init_git_repo(root)
-            _write_declarations(
-                root,
-                [
-                    {
-                        "check_id": "fixture.change",
-                        "module": "fixture",
-                        "command": [
-                            "python3",
-                            "-c",
-                            "import json; print(json.dumps({'status':'PASS','checks_run':1,'failures':0,'errors':0,'skipped':0,'reason':''}))",
-                        ],
-                        "cwd": ".",
-                        "timeout_seconds": 30,
-                        "scope": "change-targeted",
-                        "triggers": [{"path": "src/"}],
-                    }
-                ],
-            )
-            report = verify_changes(tmpdir, base=base)
-        self.assertEqual(report["result"], "PASS")
-        self.assertEqual(report["scope_review"]["kind"], "no-changes")
-
-    def test_matching_change_real(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            base = _init_git_repo(root)
-            _write_declarations(
-                root,
-                [
-                    {
-                        "check_id": "fixture.change",
-                        "module": "fixture",
-                        "command": [
-                            "python3",
-                            "-c",
-                            "import json; print(json.dumps({'status':'PASS','checks_run':1,'failures':0,'errors':0,'skipped':0,'reason':''}))",
-                        ],
-                        "cwd": ".",
-                        "timeout_seconds": 30,
-                        "scope": "change-targeted",
-                        "triggers": [{"path": "src/"}],
-                        "required_environment": ["python3"],
-                        "consumed_inputs": [],
-                    }
-                ],
-            )
-            (root / "src").mkdir()
-            (root / "src" / "main.py").write_text("print('hello')")
-            report = verify_changes(tmpdir, base=base)
-        self.assertEqual(report["result"], "PASS")
-        self.assertEqual(len(report["checks"]), 1)
-
-    def test_coverage_gap_real(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            base = _init_git_repo(root)
-            _write_declarations(
-                root,
-                [
-                    {
-                        "check_id": "fixture.change",
-                        "module": "fixture",
-                        "command": [
-                            "python3",
-                            "-c",
-                            "import json; print(json.dumps({'status':'PASS','checks_run':1,'failures':0,'errors':0,'skipped':0,'reason':''}))",
-                        ],
-                        "cwd": ".",
-                        "timeout_seconds": 30,
-                        "scope": "change-targeted",
-                        "triggers": [{"path": "backend/"}],
-                    }
-                ],
-            )
-            (root / "unrelated.txt").write_text("change")
-            report = verify_changes(tmpdir, base=base)
-        self.assertEqual(report["result"], "BLOCKED")
-        self.assertIn("no-check-matched", report["coverage_gaps"])
-
-    def test_input_drift_real(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            base = _init_git_repo(root)
-            (root / "input.txt").write_text("original")
-            _write_declarations(
-                root,
-                [
-                    {
-                        "check_id": "fixture.drift",
-                        "module": "fixture",
-                        "command": [
-                            "python3",
-                            "-c",
-                            "from pathlib import Path; import json; Path('input.txt').write_text('modified'); print(json.dumps({'status':'PASS','checks_run':1,'failures':0,'errors':0,'skipped':0,'reason':''}))",
-                        ],
-                        "cwd": ".",
-                        "timeout_seconds": 30,
-                        "scope": "change-targeted",
-                        "triggers": [{"path": "src/"}],
-                        "input_paths": ["input.txt"],
-                        "required_environment": ["python3"],
-                    }
-                ],
-            )
-            (root / "src").mkdir()
-            (root / "src" / "file.py").write_text("code")
-            report = verify_changes(tmpdir, base=base)
-        self.assertEqual(report["checks"][0]["status"], "FAIL")
-        self.assertEqual(report["checks"][0]["reason"], "input-drift")
 
 
 if __name__ == "__main__":

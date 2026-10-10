@@ -33,12 +33,22 @@ def _copy_backend_fixture(source: Path, target: Path) -> None:
     shutil.copytree(source, target, ignore=ignore)
 
 
+def _copy_repository_fixture(source: Path, target: Path) -> None:
+    """保留两个实际源码 build 目录，只排除其余生成状态。"""
+    source_build_directories = {ROOT / "ops/release/build", ROOT / "extension/scripts/build"}
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        parent = Path(directory)
+        return {name for name in names if name in {".gradle", ".git"}
+                or name == "build" and parent / name not in source_build_directories}
+    shutil.copytree(source, target, ignore=ignore)
+
+
 def _fixture_gradle(backend: Path, *args: str, env: dict[str, str] | None = None,
                     timeout: int = 600, label: str = "fixture-gradle") -> subprocess.CompletedProcess[str]:
     """Run fixture Gradle directly so no caller checkout or Java selector is involved."""
     environment = os.environ.copy()
     environment.update(env or {})
-    from scripts.environment.java_runtime import resolve_java_home
+    from scripts.environment.toolchains.java_toolchain_selection import resolve_java_home
     jdk = resolve_java_home(ROOT, environment)
     environment["JAVA_HOME"] = str(jdk)
     environment["PATH"] = os.pathsep.join([str(jdk / "bin"), environment.get("PATH", "")])
@@ -89,7 +99,7 @@ def _gradle(init_script: str, *tasks: str) -> subprocess.CompletedProcess[str]:
         environment["JDBC_URL"] = "jdbc:postgresql://127.0.0.1:1/lexiflow_test"
         environment["STARDICT_CSV"] = str(ROOT / "tmp" / "synthetic-stardict.csv")
         return subprocess.run(
-            [sys.executable, "-m", "scripts.environment.java_exec", "backend/gradlew",
+            [sys.executable, "-m", "scripts.local.run_with_java_toolchain", "backend/gradlew",
              "-p", "backend", "--no-configuration-cache", "--init-script", str(init), *tasks],
             cwd=ROOT, env=environment, text=True, capture_output=True, timeout=600,
         )
@@ -238,20 +248,19 @@ class GradleIdentityResourceTest(unittest.TestCase):
             shutil.copy2(ROOT / ".gitignore", cls.root / ".gitignore")
         for relative in (
             "ops/release", "ops/dataset", "infra/postgres/schema.sql",
-            "scripts/environment/ecdict_bundle.py", "ops/podman/fetch-ecdict.sh",
             "ops/podman/source-tools.Containerfile",
         ):
             source, target = ROOT / relative, cls.root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             if source.is_dir():
-                shutil.copytree(source, target, ignore=shutil.ignore_patterns("build", ".gradle", ".git"))
+                _copy_repository_fixture(source, target)
             else:
                 shutil.copy2(source, target)
         cls.git = shutil.which("git")
         if not cls.git:
             raise RuntimeError("git executable is required for fixture identity tests")
         subprocess.run([cls.git, "init", "-q"], cwd=cls.root, check=True)
-        subprocess.run([cls.git, "add", "backend", "ops", "scripts", "infra", ".gitignore"],
+        subprocess.run([cls.git, "add", "backend", "ops", "infra", ".gitignore"],
                        cwd=cls.root, check=True)
         subprocess.run([cls.git, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                         "commit", "-qm", "fixture"], cwd=cls.root, check=True)
@@ -277,7 +286,7 @@ class GradleIdentityResourceTest(unittest.TestCase):
             path.write_text(f"#!/bin/sh\necho {executable} >> '{calls}'\nexit 97\n", encoding="utf-8")
             path.chmod(0o755)
         # Keep shell utilities and the explicitly selected JDK, but expose no real Node/Git.
-        from scripts.environment.java_runtime import resolve_java_home
+        from scripts.environment.toolchains.java_toolchain_selection import resolve_java_home
         java_home = str(resolve_java_home(ROOT, os.environ))
         environment = {"PATH": os.pathsep.join([str(sentinels), "/bin", "/usr/bin", f"{java_home}/bin"]),
                        "JAVA_HOME": java_home}
@@ -308,7 +317,7 @@ public class IdeaModelProbe {
         tooling = [path for path in distributions if path.name == f"gradle-tooling-api-{expected_version}.jar"]
         self.assertTrue(tooling, "Gradle wrapper distribution tooling API jar is not cached")
         gradle_lib = tooling[0].parent
-        from scripts.environment.java_runtime import resolve_java_home
+        from scripts.environment.toolchains.java_toolchain_selection import resolve_java_home
         compiler = resolve_java_home(ROOT, os.environ) / "bin/javac"
         self.assertTrue(compiler.is_file(), "javac from the configured JDK is required")
         classpath = os.pathsep.join([str(gradle_lib / "*"), str(gradle_lib / "plugins/*")])
@@ -323,7 +332,7 @@ public class IdeaModelProbe {
             path = sentinels / executable
             path.write_text(f"#!/bin/sh\necho {executable} >> '{calls}'\nexit 97\n", encoding="utf-8")
             path.chmod(0o755)
-        from scripts.environment.java_runtime import resolve_java_home
+        from scripts.environment.toolchains.java_toolchain_selection import resolve_java_home
         java_home = str(resolve_java_home(ROOT, os.environ))
         env = {"PATH": os.pathsep.join([str(sentinels), "/bin", "/usr/bin", f"{java_home}/bin"]),
                "JAVA_HOME": java_home}
@@ -354,7 +363,7 @@ public class IdeaModelProbe {
         no_node_temp = tempfile.TemporaryDirectory(prefix="no-node-", dir=ROOT / "tmp")
         self.addCleanup(no_node_temp.cleanup)
         no_node = Path(no_node_temp.name)
-        from scripts.environment.java_runtime import resolve_java_home
+        from scripts.environment.toolchains.java_toolchain_selection import resolve_java_home
         java_home = str(resolve_java_home(ROOT, os.environ))
         env = {"PATH": os.pathsep.join([str(no_node), "/bin", "/usr/bin", f"{java_home}/bin"]),
                "JAVA_HOME": java_home}
@@ -434,7 +443,7 @@ public class IdeaModelProbe {
         node = shutil.which("node")
         self.assertIsNotNone(node, "real Node is required for source-of-truth comparison")
         started = time.perf_counter()
-        canonical = subprocess.run([node, "ops/release/version.mjs"], cwd=self.root, text=True,
+        canonical = subprocess.run([node, "ops/release/integrity/source-build-identity.mjs"], cwd=self.root, text=True,
                                    capture_output=True, timeout=30)
         _record_fixture_result(label + "-node-source", canonical, time.perf_counter() - started)
         self.assertEqual(canonical.returncode, 0, canonical.stderr)
@@ -476,12 +485,11 @@ class GradleStaticBeforeDeliveryFailureTest(unittest.TestCase):
         _copy_backend_fixture(ROOT / "backend", backend)
         # Build scripts resolve repository inputs relative to backend's parent directory.
         for relative in ("ops/release", "ops/dataset", "infra/postgres/schema.sql",
-                         "scripts/environment/ecdict_bundle.py", "ops/podman/fetch-ecdict.sh",
                          "ops/podman/source-tools.Containerfile"):
             source, target = ROOT / relative, fixture_root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             if source.is_dir():
-                shutil.copytree(source, target, ignore=shutil.ignore_patterns("build", ".gradle", ".git"))
+                _copy_repository_fixture(source, target)
             else:
                 shutil.copy2(source, target)
         if (ROOT / ".gitignore").exists():
@@ -489,7 +497,7 @@ class GradleStaticBeforeDeliveryFailureTest(unittest.TestCase):
         git = shutil.which("git")
         self.assertIsNotNone(git, "git executable is required for identity fixture")
         subprocess.run([git, "init", "-q"], cwd=fixture_root, check=True)
-        subprocess.run([git, "add", "backend", "ops", "scripts", "infra", ".gitignore"],
+        subprocess.run([git, "add", "backend", "ops", "infra", ".gitignore"],
                        cwd=fixture_root, check=True)
         subprocess.run([git, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                         "commit", "-qm", "fixture"], cwd=fixture_root, check=True)

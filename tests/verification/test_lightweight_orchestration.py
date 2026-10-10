@@ -6,9 +6,9 @@ import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from scripts.verification.declarations import filter_checks_by_scope, load_declarations
-from scripts.verification.kernel import snapshot_check_inputs
-from scripts.verification.scope import (
+from scripts.verification.planning.check_definitions import filter_checks_by_scope, load_declarations
+from scripts.verification.execution.check_runner import snapshot_check_inputs
+from scripts.verification.planning.check_scope_selection import (
     resolve_module_dependencies,
     select_checks_for_changes,
 )
@@ -22,9 +22,7 @@ BASE_IDS = {
     "eng.delivery-gate.module-tests",
     "eng.repository.module-tests",
     "eng.repository.docs",
-    "eng.repository.policy",
     "eng.repository.planning",
-    "eng.repository.hooks",
     "eng.repository.python-quality",
     "eng.extension.quality",
     "eng.release.version",
@@ -48,20 +46,19 @@ class LightweightOrchestrationTest(unittest.TestCase):
         cls.by_id = {check["check_id"]: check for check in cls.checks}
 
     def test_all_existing_ids_and_complete_baseline_remain(self):
-        expected = (
-            BASE_IDS
-            | {
-                check_id + "-on-change"
-                for check_id in BASE_IDS
-                if check_id != "eng.release.docker-contract"
-            }
-            | {
-                "eng.release.docker-surface-on-change",
-                "eng.release.docker-shell-on-change",
-                "eng.release.docker-local-on-change",
-                "eng.release.docker-node-on-change",
-            }
+        expected = BASE_IDS | {
+            "eng.release.docker-surface-on-change",
+            "eng.release.docker-shell-on-change",
+            "eng.release.docker-local-on-change",
+            "eng.release.docker-node-on-change",
+        }
+        self.assertEqual(23, len(self.checks))
+        self.assertEqual(
+            22, len(filter_checks_by_scope(self.checks, "change-targeted"))
         )
+        for check in self.checks:
+            self.assertNotIn("scope", check)
+            self.assertNotIn("module", check)
         self.assertEqual(expected, set(self.by_id))
         baseline = filter_checks_by_scope(self.checks, "repository-baseline")
         self.assertEqual(BASE_IDS, {check["check_id"] for check in baseline})
@@ -70,49 +67,53 @@ class LightweightOrchestrationTest(unittest.TestCase):
 
     def test_light_checks_and_java_delivery_precede_framework_self_tests(self):
         selected = select_checks_for_changes(
-            self.checks, ["harness/module-checks.yaml"]
+            self.checks, ["config/engineering/module-checks.yaml"]
         )
         closed = resolve_module_dependencies(selected, self.checks)
         ids = [check["check_id"] for check in closed]
-        java = ids.index("eng.backend.delivery-on-change")
+        java = ids.index("eng.backend.delivery")
         for name in ("version",):
-            self.assertLess(ids.index("eng.release." + name + "-on-change"), java)
-        for name in ("docs", "policy", "planning", "hooks", "python-quality"):
-            self.assertLess(ids.index("eng.repository." + name + "-on-change"), java)
+            self.assertLess(ids.index("eng.release." + name), java)
+        for name in ("docs", "planning", "python-quality"):
+            self.assertLess(ids.index("eng.repository." + name), java)
         for check_id in (
-            "eng.backend.build-contract-on-change",
-            "eng.verification.module-tests-on-change",
-            "eng.agents.module-tests-on-change",
-            "eng.delivery-gate.module-tests-on-change",
-            "eng.repository.module-tests-on-change",
+            "eng.backend.build-contract",
+            "eng.verification.module-tests",
+            "eng.agents.module-tests",
+            "eng.delivery-gate.module-tests",
+            "eng.repository.module-tests",
         ):
             self.assertLess(java, ids.index(check_id))
 
     def test_independent_rule_check_does_not_pull_tool_test_suites(self):
-        for name in ("docs", "policy", "planning", "hooks"):
-            for suffix in ("", "-on-change"):
-                check = self.by_id["eng.repository." + name + suffix]
+        for name in ("docs", "planning"):
+            for scope in ("repository-baseline", "change-targeted"):
+                check = next(
+                    c
+                    for c in filter_checks_by_scope(self.checks, scope)
+                    if c["check_id"] == "eng.repository." + name
+                )
                 with self.subTest(check=check["check_id"]):
                     closed = resolve_module_dependencies([check], self.checks)
                     self.assertEqual(
                         [check["check_id"]], [c["check_id"] for c in closed]
                     )
-                    self.assertIn("scripts/repository", check["input_paths"])
+                    self.assertIn("scripts/checks/repository", check["input_paths"])
 
     def test_docs_only_change_selects_docs_not_repository_unit_tests(self):
         selected = select_checks_for_changes(self.checks, ["docs/user/example.md"])
         closed = resolve_module_dependencies(selected, self.checks)
         self.assertEqual(
-            {"eng.repository.docs-on-change"},
+            {"eng.repository.docs"},
             {check["check_id"] for check in closed},
         )
 
     def test_tool_source_changes_still_select_own_tests(self):
         for path, required in (
-            ("scripts/repository/quality.py", "eng.repository.module-tests-on-change"),
+            ("scripts/checks/repository/run_repository_check_group.py", "eng.repository.module-tests"),
             (
-                "scripts/verification/kernel.py",
-                "eng.verification.module-tests-on-change",
+                "scripts/verification/execution/check_runner.py",
+                "eng.verification.module-tests",
             ),
         ):
             with self.subTest(path=path):
@@ -125,30 +126,29 @@ class LightweightOrchestrationTest(unittest.TestCase):
 
     def test_rule_input_snapshot_includes_actual_checker_source(self):
         for name, source in (
-            ("docs", "docs_check.py"),
-            ("policy", "planning_validator.py"),
-            ("planning", "planning_validator.py"),
-            ("hooks", "quality.py"),
+            ("docs", "documentation/check_documentation.py"),
+            ("planning", "catalog/task_catalog_rules.py"),
         ):
             with self.subTest(name=name):
                 check = self.by_id["eng.repository." + name]
                 snapshot = snapshot_check_inputs(ROOT, check)
                 paths = {item["locator"] for item in snapshot["files"]}
-                self.assertIn("scripts/repository/quality.py", paths)
-                self.assertIn("scripts/repository/" + source, paths)
+                self.assertIn("scripts/checks/repository/run_repository_check_group.py", paths)
+                self.assertIn("scripts/checks/repository/" + source, paths)
                 self.assertFalse(snapshot["missing"])
-        self.assertIn(
-            "harness/agent-policy.manifest.yaml",
-            self.by_id["eng.repository.policy"]["input_paths"],
-        )
-        self.assertIn(
-            "scripts/repository", self.by_id["eng.repository.policy"]["input_paths"]
-        )
 
     def test_backend_scope_views_keep_identical_operations(self):
-        baseline = self.by_id["eng.backend.delivery"]
-        change = self.by_id["eng.backend.delivery-on-change"]
-        selection = {"check_id", "module", "scope", "triggers"}
+        baseline = next(
+            c
+            for c in filter_checks_by_scope(self.checks, "repository-baseline")
+            if c["check_id"] == "eng.backend.delivery"
+        )
+        change = next(
+            c
+            for c in filter_checks_by_scope(self.checks, "change-targeted")
+            if c["check_id"] == "eng.backend.delivery"
+        )
+        selection = {"check_id", "scope", "triggers"}
         self.assertEqual(
             {k: v for k, v in baseline.items() if k not in selection},
             {k: v for k, v in change.items() if k not in selection},
@@ -158,7 +158,8 @@ class LightweightOrchestrationTest(unittest.TestCase):
         )
         self.assertIn("deliveryFull", baseline["command"])
         self.assertEqual(
-            ["backend"], self.by_id["eng.extension.quality"]["module_dependencies"]
+            ["eng.backend.delivery"],
+            self.by_id["eng.extension.quality"]["module_dependencies"],
         )
 
     def test_mechanical_javadoc_scopes_and_compact_constructor_stay_required(self):

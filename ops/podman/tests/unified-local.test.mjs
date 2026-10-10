@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runLocal } from '../local.mjs';
-import { renderCompose, readPreparedTarget } from '../unified-local.mjs';
+import { runLocal } from '../commands/manage-podman-installation.mjs';
+import { renderCompose, readPreparedTarget } from '../installation/installation-upgrade-workflow.mjs';
 
 test('source and candidate use the same structured managed Compose without initializer dependency', () => {
   const managed = JSON.parse(renderCompose('/unused', { apiPort: 18080, dbPort: 15432, external: false, dbUser: 'lexiflow' }));

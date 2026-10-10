@@ -4,20 +4,21 @@ import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assembleReleaseCandidate } from '../candidate.mjs';
+import { assembleReleaseCandidate } from '../build/release-candidate-assembler.mjs';
 import { extensionBytes } from './zip-fixture.mjs';
-import { resolveBuildIdentity } from '../version.mjs';
+import { resolveBuildIdentity } from '../integrity/source-build-identity.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 export async function fixture(baseVersion = '2.0.0') {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'lexiflow-candidate-fixture-')));
   await mkdir(path.join(root, 'ops/release'), { recursive: true });
+  for (const directory of ['build', 'integrity', 'runtime']) await mkdir(path.join(root, 'ops/release', directory), { recursive: true });
   await writeFile(path.join(root, 'ops/release/version.txt'), `${baseVersion}\n`);
-  await writeFile(path.join(root, 'ops/release/version.mjs'), await readFile(path.join(repoRoot, 'ops/release/version.mjs')));
-  await writeFile(path.join(root, 'ops/release/runtime-entry.mjs'), await readFile(path.join(repoRoot, 'ops/release/runtime-entry.mjs')));
-  await writeFile(path.join(root, 'ops/release/runtime-verification.sh'), await readFile(path.join(repoRoot, 'ops/release/runtime-verification.sh')));
-  for (const name of ['lifecycle-state.sh', 'lifecycle-docker.sh', 'lifecycle.sh']) {
+  await writeFile(path.join(root, 'ops/release/integrity/source-build-identity.mjs'), await readFile(path.join(repoRoot, 'ops/release/integrity/source-build-identity.mjs')));
+  await writeFile(path.join(root, 'ops/release/build/release-runtime-entry-generator.mjs'), await readFile(path.join(repoRoot, 'ops/release/build/release-runtime-entry-generator.mjs')));
+  await writeFile(path.join(root, 'ops/release/runtime/release-artifact-verification.sh'), await readFile(path.join(repoRoot, 'ops/release/runtime/release-artifact-verification.sh')));
+  for (const name of ['runtime/release-installation-state.sh', 'runtime/release-installation-docker.sh', 'runtime/release-installation-lifecycle.sh']) {
     await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repoRoot, 'ops/release', name)));
   }
   await writeFile(path.join(root, '.gitignore'), '/input/\n/images/\n/output/\n/descriptor.json\n');

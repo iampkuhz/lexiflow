@@ -1,5 +1,0 @@
-{
-  "mode": "enforce",
-  "timeout_seconds": 1800,
-  "heartbeat_seconds": 30
-}

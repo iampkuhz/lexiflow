@@ -17,12 +17,11 @@
 | 使用时机 | 入口与前置 | 产物与失败去向 |
 | --- | --- | --- |
 | 快速反馈本次实现 | 所改模块原生静态／编译／直接回归；改动范围明确且依赖已就绪 | 命令输出与实际范围；失败先修实现或环境，再按需取得开发报告 |
-| 日常开发报告（CLI） | `python3 -m scripts.verification.development`；先按[验证环境](verification-environment.md)准备，CLI 不自动启动隔离服务 | 按变化与消费依赖选择的 `development-change` 报告；FAIL／BLOCKED 返回对应实现或环境，修复后重新检查 |
-| 日常开发报告（Stop） | 正常 Stop → `delivery_hook.py`；同样按完整 diff 选择 `development-change`，Stop 自动准备并清理本次隔离服务 | 开发 verification report，不是 Formal receipt；首次 FAIL／BLOCKED 请求修复，续轮失败停止自动重试 |
-| 显式完整 Change Verify | `python3 scripts/check_changes.py`；需先准备所需工具和环境，空 diff 会运行全部声明 | 完整 Change report；缺环境为 BLOCKED，断言或漂移为 FAIL，按报告回到修复／准备 |
-| 显式完整 Repository Verify | `python3 scripts/check_repository.py`；需先准备完整基线环境，执行 `repository-baseline` | Repository baseline report；根据失败 Check 或阻断原因修复／准备，不以局部开发 PASS 替代 |
-| 任务独立验收 | F08：`python3 -m scripts.delivery_gate <subcommand>`；Task／计划冻结且身份分离；高风险仍用 `development-baseline`＋独立 review | validation、适用 review 与验收链；失败回修，证据缺项补齐后重核，相关输入变化须重新送验 |
-| 正式发行 | F23：[workflow.mjs](../../ops/release/workflow.mjs) 准备候选，按发行计划取得完整 `repository-baseline` 与绑定候选的独立验收 | 证据齐备后显式授权晋升／发布；开发报告和 PR quick CI 均不能替代 |
+| 日常开发报告（CLI） | `python3 -m scripts.verification.commands.run_development_checks`；先按[验证环境](verification-environment.md)准备，CLI 不自动启动隔离服务 | 按变化与消费依赖选择的 `development-change` 报告；FAIL／BLOCKED 返回对应实现或环境，修复后重新检查 |
+| 日常开发报告（Stop） | 正常 Stop → `run_stop_checks.py`；同样按完整 diff 选择 `development-change`，Stop 自动准备并清理本次隔离服务 | 开发 verification report，不是 Formal receipt；首次 FAIL／BLOCKED 请求修复，续轮失败停止自动重试 |
+| 显式完整 Repository Verify | `python3 scripts/verification/commands/run_repository_checks.py`；需先准备完整基线环境，执行 `repository-baseline` | Repository baseline report；根据失败 Check 或阻断原因修复／准备，不以局部开发 PASS 替代 |
+| 任务独立验收 | F08：`python3 -m scripts.acceptance <subcommand>`；Task／计划冻结且身份分离；高风险仍用 `development-baseline`＋独立 review | validation、适用 review 与验收链；失败回修，证据缺项补齐后重核，相关输入变化须重新送验 |
+| 正式发行 | F23：[run-release-workflow.mjs](../../ops/release/workflow/run-release-workflow.mjs) 准备候选，按发行计划取得完整 `repository-baseline` 与绑定候选的独立验收 | 证据齐备后显式授权晋升／发布；开发报告和 PR quick CI 均不能替代 |
 
 开发 Stop 的日常检查不是 Formal Gate；显式完整 Verify 也不读取 Task 身份或批准记录。三个体系的职责关系见[工程治理总览](../system/engineering.md)，检查机制见[Verify](../reference/verification.md)。
 
@@ -63,7 +62,7 @@ note right
 end note
 :S3 执行 B 开发交付检查;
 note right
-入口：scripts/verification/delivery_hook.py [B]
+入口：scripts/triggers/run_stop_checks.py [B]
 作用：按完整 diff 的显式 triggers 与消费依赖闭包选择日常 checks
 <color:#995A00><b>广泛工程 diff 规划：25–30 分钟；局部 1–5 分钟</b></color>
 end note
@@ -76,7 +75,7 @@ end note
 if (开发报告完整且有效？) then (PASS)
 :S5 落实 C 正式验收要求;
 note right
-入口：""scripts/delivery_gate/~_~_main~_~_.py"" [C]
+入口：""scripts/acceptance/~_~_main~_~_.py"" [C]
 作用：按任务要求取得正式链；不需要时不调用 C
 <color:#995A00><b>预期：高风险 35–50 分钟；无需时核对 30–60 秒</b></color>
 end note
@@ -108,7 +107,7 @@ stop
 endif
 legend bottom
 结果决定真实交接：开发是否通过、本次要求的证据是否齐备。
-[B] 展开 1.3：delivery_hook.py；[C] 展开 1.4：""delivery_gate/~_~_main~_~_.py""。
+[B] 展开 1.3：run_stop_checks.py；[C] 展开 1.4：""acceptance/~_~_main~_~_.py""。
 不需要 Formal 时不进入 [C]；只交接本次要求的开发证据。
 S3 按完整 diff 的显式 triggers 与消费依赖闭包选取日常 checks；高风险本身不追加全仓 baseline。详见本页 1.3。
 S2 通过才可交接到 S3；直接失败停在实现者修复，不触发后续重检查。
@@ -120,8 +119,8 @@ endlegend
 | 图中节点 | 核心作用 | 入口／说明 |
 | --- | --- | --- |
 | S2 [A] 直接自检 | 实现者先修相关错误 | 下方 A 表的原生检查 |
-| S3 [B] 开发检查 | 取得风险所需开发报告 | [delivery_hook.py](../../scripts/verification/delivery_hook.py) → 1.3 [B] |
-| S5 [C] 正式验收 | 需要时取得独立验收链 | [delivery_gate/__main__.py](../../scripts/delivery_gate/__main__.py) → 1.4 [C] |
+| S3 [B] 开发检查 | 取得风险所需开发报告 | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py) → 1.3 [B] |
+| S5 [C] 正式验收 | 需要时取得独立验收链 | [delivery_gate/__main__.py](../../scripts/acceptance/__main__.py) → 1.4 [C] |
 
 其他节点是确认、读报告或交接材料，没有对应自动脚本。直接自检失败先修实现；开发报告失败不送正式验收；没有授权不操作 Git。
 
@@ -133,7 +132,7 @@ endlegend
 | B：开发检查 | 真实 diff 与风险所需完整检查闭包 | 工作包安排未参与实现的执行者；Hook 只产开发报告，不签 Formal 身份收据 |
 | C：正式验收 | 冻结 Task／输入／计划的独立执行及适用审查 | validator 与 producer／submitter 分离；reviewer 再分离；review／check 不重跑测试 |
 
-A／B／C 是阅读代号而非统一层级；可按目标直接选择适用路径。身份与分工以 [agent-policy](../../harness/agent-policy.manifest.yaml) 为准；开发报告不能直接升级为 Formal validation。
+A／B／C 是阅读代号而非统一层级；可按目标直接选择适用路径。身份与分工以 [agent-policy](../../harness/agent-policy.md) 为准；开发报告不能直接升级为 Formal validation。
 
 **对应总图 S2 [A]。** 文件映射：`docs_check.py` 是 F13，`python_quality.py` 是 F14，`java_exec.py` 是 F17。 以下是实现者选择和交接过程，不是新增自动脚本；S2 的实际命令按图下语言表选择。
 
@@ -201,16 +200,16 @@ endlegend
 
 | A：改动类型 | 直接检查 | 入口文件／说明 |
 | --- | --- | --- |
-| Python 工具 | `python3 -m scripts.repository.python_quality`；相关 `python3 -m unittest <测试模块>` | [python_quality.py](../../scripts/repository/python_quality.py)、对应[直接测试](../../tests) |
-| Java 产品 | 经 `java_exec` 运行相关 Gradle 静态／编译／测试任务 | [java_exec.py](../../scripts/environment/java_exec.py)、[原生任务](../reference/java-checks.md) |
+| Python 工具 | `python3 -m scripts.checks.repository.python.check_python_quality`；相关 `python3 -m unittest <测试模块>` | [check_python_quality.py](../../scripts/checks/repository/python/check_python_quality.py)、对应[直接测试](../../tests) |
+| Java 产品 | 经 `java_exec` 运行相关 Gradle 静态／编译／测试任务 | [run_with_java_toolchain.py](../../scripts/local/run_with_java_toolchain.py)、[原生任务](../reference/java-checks.md) |
 | 扩展 | `npm --prefix extension run build`；相关 `node --test` | [package.json](../../extension/package.json)、[直接测试](../../extension/tests) |
-| 文档 | `python3 -m scripts.repository.docs_check` | [docs_check.py](../../scripts/repository/docs_check.py) |
+| 文档 | `python3 -m scripts.checks.repository.documentation.check_documentation` | [check_documentation.py](../../scripts/checks/repository/documentation/check_documentation.py) |
 
 按修改选择，不把所有语言检查都跑一遍。
 
 ## 1.3. 展开 B：Stop 交付检查怎样执行
 
-**对应总图 S3 [B]。** 文件映射：Stop 入口 F04 调用开发检查 F03 与测试资源 F19，声明 F20 和配置 F21 作为输入，不是执行步骤。 公开入口：[delivery_hook.py](../../scripts/verification/delivery_hook.py)::`main()`，接收客户端 Stop 输入；手工调用方式见 [Hook 说明](../reference/hooks.md)。
+**对应总图 S3 [B]。** 文件映射：Stop 入口 F04 调用开发检查 F03 与测试资源 F19，声明 F20 作为输入，不是执行步骤。 公开入口：[run_stop_checks.py](../../scripts/triggers/run_stop_checks.py)::`main()`，接收客户端 Stop 输入；手工调用方式见 [Hook 说明](../reference/hooks.md)。
 
 图中其余文件是内部实现，不是需要依次手动运行的脚本。
 
@@ -230,45 +229,45 @@ title B｜Stop：先判断是否交付，再检查与收尾
 start
 :S1 分类入口与回合;
 note right
-入口：scripts/verification/delivery_hook.py::main / evaluate
+入口：scripts/triggers/run_stop_checks.py::main / evaluate
 作用：校验输入、事件、启用状态、末行标记与真实 diff
 <color:#995A00><b>预期：1–5 秒（规划；输入等待上限 3 秒）</b></color>
 end note
 if (有效 Stop、启用、交付且有 diff？) then (需要检查)
 :S2 取得窗口并冻结风险;
 note right
-入口：delivery_hook.py → coordination.py / development.py
-作用：按完整 diff 的显式 triggers 与模块消费依赖闭包选取 profiles；高风险不追加全仓基线
+入口<U+FF1A>run<U+005F>stop<U+005F>checks<U+002E>py <U+2192> checkout<U+005F>verification<U+005F>window<U+002E>py <U+002F> run<U+005F>development<U+005F>checks<U+002E>py
+作用：按完整 diff 的显式 triggers 与模块消费依赖闭包冻结一个 development-change profile；高风险不追加全仓基线
 <color:#995A00><b>预期：1–10 秒（机器规划）</b></color>
 end note
 :S3 准备隔离服务;
 note right
-入口：test_services.py::isolated_test_services
+入口<U+FF1A>isolated<U+005F>postgres<U+005F>redis<U+002E>py<U+003A><U+003A>isolated<U+005F>test<U+005F>services
 作用：按风险闭包一次准备本次 PostgreSQL／Redis
 <color:#995A00><b>预期：10–30 秒（引擎／镜像就绪规划）</b></color>
 end note
 :S4 执行风险检查;
 note right
-入口：development.py::execute_development
+入口<U+FF1A>run<U+005F>development<U+005F>checks<U+002E>py<U+003A><U+003A>execute<U+005F>development
 作用：执行日常 development-change 选择；高风险不单独追加全仓 development-baseline
 <color:#995A00><b>广泛工程 diff 规划：25–30 分钟；局部 1–5 分钟</b></color>
 end note
 :S5 清理自有资源;
 note right
-入口：test_services.py::isolated_test_services
+入口<U+FF1A>isolated<U+005F>postgres<U+005F>redis<U+002E>py<U+003A><U+003A>isolated<U+005F>test<U+005F>services
 作用：finally 清理本次 lease，不清理未知资源
 <color:#995A00><b>预期：10–30 秒（机器规划）</b></color>
 end note
 :S6 分析执行结果;
 note right
-入口：delivery_hook.py::execute_delivery / evaluate
+入口：run_stop_checks.py::execute_delivery / evaluate
 作用：合并准备、检查、漂移与清理结果
 <color:#995A00><b>预期：1–5 秒（机器规划）</b></color>
 end note
 if (必需检查与清理全部通过？) then (PASS)
 :S7 交出开发报告;
 note right
-入口：delivery_hook.py::decision
+入口：run_stop_checks.py::decision
 作用：输出开发 PASS 及报告，不签正式 validation
 <color:#995A00><b>预期：不超过 1 秒（机器规划）</b></color>
 end note
@@ -276,7 +275,7 @@ stop
 else (FAIL / BLOCKED)
 :S8 交还阻断原因;
 note right
-入口：delivery_hook.py::decision
+入口：run_stop_checks.py::decision
 作用：普通首次阻断；续轮或窗口冲突停止自动重试
 <color:#995A00><b>预期：不超过 1 秒（机器规划）</b></color>
 end note
@@ -285,7 +284,7 @@ endif
 else (不运行)
 :S9 输出未检查原因;
 note right
-入口：delivery_hook.py::evaluate
+入口：run_stop_checks.py::evaluate
 作用：中间／无 diff 不签 PASS；停用或异常为 BLOCKED
 <color:#995A00><b>预期：不超过 1 秒（机器规划）</b></color>
 end note
@@ -302,18 +301,18 @@ endlegend
 
 | 节点 | 核心作用 | 实现文件 |
 | --- | --- | --- |
-| S1／S9 入口与未执行 | 区分真实交付、中间回合、无 diff、停用和异常输入；不签虚假 PASS | [delivery_hook.py](../../scripts/verification/delivery_hook.py) |
-| S2 窗口与冻结 | 非等待窗口内固定真实风险及检查范围 | [coordination.py](../../scripts/verification/coordination.py)、[development.py](../../scripts/verification/development.py) |
-| S3／S5 准备与清理 | 一次准备并清理本次隔离资源 | [test_services.py](../../scripts/environment/test_services.py) |
-| S4 检查执行 | 执行所需 Check；首个失败早停 | [development.py](../../scripts/verification/development.py)、[检查声明](../../harness/module-checks.yaml) |
-| S6–S8 结果与协议 | 分析真实结果；输出开发报告或阻断，续轮失败终止重试 | [delivery_hook.py](../../scripts/verification/delivery_hook.py)、[Stop 策略](../../harness/delivery-hooks.json) |
+| S1／S9 入口与未执行 | 区分真实交付、中间回合、无 diff、停用和异常输入；不签虚假 PASS | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py) |
+| S2 窗口与冻结 | 非等待窗口内固定真实风险及检查范围 | [checkout_verification_window.py](../../scripts/verification/execution/checkout_verification_window.py)、[run_development_checks.py](../../scripts/verification/commands/run_development_checks.py) |
+| S3／S5 准备与清理 | 一次准备并清理本次隔离资源 | [isolated_postgres_redis.py](../../scripts/environment/services/isolated_postgres_redis.py) |
+| S4 检查执行 | 执行所需 Check；首个失败早停 | [run_development_checks.py](../../scripts/verification/commands/run_development_checks.py)、[检查声明](../../config/engineering/module-checks.yaml) |
+| S6–S8 结果与协议 | 分析真实结果；输出开发报告或阻断，续轮失败终止重试 | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py) |
 
 准备失败不执行检查；清理不确定不能 PASS。无 diff 或中间回合也不签 PASS。每个 Check 的内部命令与耗时见[共用检查链](../reference/verification.md)。
 
-显式开发入口是 [development.py](../../scripts/verification/development.py)::`main()`，不自动创建服务。按[隔离环境说明](verification-environment.md)准备后运行：
+显式开发入口是 [run_development_checks.py](../../scripts/verification/commands/run_development_checks.py)::`main()`，不自动创建服务。按[隔离环境说明](verification-environment.md)准备后运行：
 
 ```sh
-.local/lexiflow-python/bin/python -m scripts.verification.development
+.local/lexiflow-python/bin/python -m scripts.verification.commands.run_development_checks
 ```
 
 显式 CLI 与正常 Stop 不会自动跨调用去重，普通交付不能绕过 Stop。完整 Verify／diagnose／quick CI 按目的另选，入口见[Verify](../reference/verification.md)与[CI](github-actions.md)。
@@ -322,7 +321,7 @@ endlegend
 
 ## 1.4. 展开 C：正式验证、审查与条件核对
 
-**对应总图 S5 [C]。** F08 分派 F09 `submit.py`、F10 `validate.py`、F11 `review.py`、F12 `check.py`。 CLI 入口：[delivery_gate/__main__.py](../../scripts/delivery_gate/__main__.py)::`main()`；命令为 `python3 -m scripts.delivery_gate <子命令> ...`，参数见 [Delivery Gate](../reference/delivery-gate.md)。
+**对应总图 S5 [C]。** F08 分派 F09 `submit.py`、F10 `validate.py`、F11 `review.py`、F12 `check.py`。 CLI 入口：[delivery_gate/__main__.py](../../scripts/acceptance/__main__.py)::`main()`；命令为 `python3 -m scripts.acceptance <子命令> ...`，参数见 [Delivery Gate](../reference/delivery-gate.md)。
 
 `submit.py`、`validate.py`、`review.py`、`check.py` 是独立职责的实现文件，不是各自可直接运行的 CLI。各阶段由不同职责的执行者交接，不是一个 actor 连续自签。
 
@@ -423,10 +422,10 @@ endlegend
 
 | 节点／子命令 | 核心作用 | 实现文件 |
 | --- | --- | --- |
-| S1 `submit` | 冻结真实 Task、来源报告与送验输入 | [submit.py](../../scripts/delivery_gate/submit.py) |
-| S3 `validate` | 独立执行冻结计划并发布验证证据 | [validate.py](../../scripts/delivery_gate/validate.py) |
-| S4 `review` | 只发布独立审阅形成的真实意见；不适用不发布 | [review.py](../../scripts/delivery_gate/review.py) |
-| S5 `check` | 核对证据、依赖与必要批准，不重跑测试 | [check.py](../../scripts/delivery_gate/check.py) |
+| S1 `submit` | 冻结真实 Task、来源报告与送验输入 | [submit_task_for_acceptance.py](../../scripts/acceptance/task_operations/submit_task_for_acceptance.py) |
+| S3 `validate` | 独立执行冻结计划并发布验证证据 | [run_independent_task_validation.py](../../scripts/acceptance/task_operations/run_independent_task_validation.py) |
+| S4 `review` | 只发布独立审阅形成的真实意见；不适用不发布 | [record_independent_task_review.py](../../scripts/acceptance/task_operations/record_independent_task_review.py) |
+| S5 `check` | 核对证据、依赖与必要批准，不重跑测试 | [evaluate_task_acceptance.py](../../scripts/acceptance/task_operations/evaluate_task_acceptance.py) |
 
 S2 环境确认、S6 读结果、S7–S10 交接或分析均没有统一自动脚本。缺条件可补齐后重核；相关输入改变须重新送验；已清理的 Hook lease 不能传给 validate。
 

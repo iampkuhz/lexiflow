@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from scripts.verification import release_source_bridge as bridge
+from scripts.checks.release.source import frozen_source_fixture as bridge
 from tests.verification.declaration_fixtures import write_declarations
 
 
@@ -49,153 +49,234 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
             .strip()
         )
 
-    def test_bulk_index_identity_matches_per_entry_oracle_across_states(self) -> None:
-        root = self.base / "identity-states"
-        root.mkdir()
-        (root / "路径 with space.txt").write_text("ordinary\n", encoding="utf-8")
-        executable = root / "可执行.sh"
-        executable.write_text("#!/bin/sh\n", encoding="utf-8")
-        executable.chmod(0o755)
-        (root / "link").symlink_to("路径 with space.txt")
-        self._git(root, "init", "--quiet")
-        self._git(root, "config", "core.hooksPath", os.devnull)
-        self._git(root, "add", "--all")
-        self._git(root, "commit", "--quiet", "-m", "identity states")
-        original = bridge._git
+    def test_real_declared_closure_preserves_transitive_node_and_build_inputs(
+        self,
+    ) -> None:
+        import re
+        from scripts.verification.execution.check_runner import (
+            resolve_child_check,
+            snapshot_check_inputs,
+        )
 
-        def per_entry(repo: Path, *args: str, env=None, input=None) -> bytes:
-            # Only replace transport with the prior algorithm, not identity reads.
-            if args == ("update-index", "-z", "--index-info"):
-                for row in input.split(b"\0"):
-                    if row:
-                        meta, path = row.split(b"\t", 1)
-                        mode, oid, stage = meta.decode("ascii").split()
-                        self.assertEqual(stage, "0")
-                        original(
-                            repo,
-                            "update-index",
-                            "--add",
-                            "--cacheinfo",
-                            mode,
-                            oid,
-                            path.decode("utf-8"),
-                            env=env,
-                        )
-                return b""
-            return original(repo, *args, env=env, input=input)
-
-        previous = None
-        for state in ("clean", "staged", "unstaged", "untracked", "executable", "head"):
-            with self.subTest(state=state):
-                if state == "staged":
-                    (root / "路径 with space.txt").write_text("staged\n")
-                    self._git(root, "add", "--", "路径 with space.txt")
-                elif state == "unstaged":
-                    executable.write_text("#!/bin/sh\n# unstaged\n")
-                elif state == "untracked":
-                    (root / "new.txt").write_text("new\n")
-                elif state == "executable":
-                    (root / "new.txt").chmod(0o755)
-                elif state == "head":
-                    self._git(root, "add", "--all")
-                    self._git(root, "commit", "--quiet", "-m", "next identity")
-                before = self._source_git_state(root)
-                with mock.patch.object(bridge, "_git", side_effect=per_entry):
-                    expected = bridge._git_identity(root)
-                with mock.patch.object(bridge, "_git", wraps=original) as git:
-                    actual = bridge._git_identity(root)
-                writes = [
-                    call
-                    for call in git.call_args_list
-                    if call.args[1:2] == ("update-index",)
-                ]
-                self.assertEqual(actual, expected)
-                self.assertEqual(len(writes), 1)
-                self.assertEqual(
-                    writes[0].args[1:], ("update-index", "-z", "--index-info")
+        root = Path(__file__).resolve().parents[2]
+        for check_id in (
+            "eng.release.lifecycle-runtime",
+            "eng.release.candidate-runtime",
+        ):
+            check = resolve_child_check(root, check_id)
+            snapshot = snapshot_check_inputs(root, check)
+            self.assertEqual(snapshot["missing"], [])
+            files = {f["locator"] for f in snapshot["files"]}
+            self.assertEqual({f["locator"] for f in bridge._closure(snapshot)}, files)
+            entries = [
+                "ops/release/test_tools/build-synthetic-release-candidates.mjs",
+                "extension/scripts/packaging/package-extension-release.mjs",
+            ]
+            visited = set()
+            while entries:
+                locator = entries.pop()
+                if locator in visited:
+                    continue
+                visited.add(locator)
+                self.assertIn(locator, files)
+                text = (root / locator).read_text()
+                for relative in re.findall(
+                    r"(?:from\s+|import\s*\()[\"'](\.[^\"']+)[\"']", text
+                ):
+                    target = (root / locator).parent.joinpath(relative).resolve()
+                    if target.is_file():
+                        entries.append(target.relative_to(root).as_posix())
+            self.assertIn("backend/gradlew", files)
+            self.assertIn("backend/product/api/build.gradle.kts", files)
+            self.assertIn("backend/verification/integration/build.gradle.kts", files)
+            self.assertTrue(
+                any(
+                    p.startswith("backend/verification/integration/src/")
+                    and p.endswith(".java")
+                    for p in files
                 )
-                self.assertIn("路径 with space.txt".encode(), writes[0].kwargs["input"])
-                self.assertIn(b"120000 ", writes[0].kwargs["input"])
-                self.assertIn(b"100755 ", writes[0].kwargs["input"])
-                self.assertEqual(before, self._source_git_state(root))
-                if previous is not None:
-                    self.assertNotEqual(actual, previous)
-                previous = actual
+            )
+            self.assertIn("extension/package-lock.json", files)
+            self.assertIn("infra/postgres/schema.sql", files)
 
-    def test_bulk_index_rejects_every_unsafe_row_before_write(self) -> None:
-        root = self._repo("unsafe-index")
-        original = bridge._git
-        rows = original(root, "ls-files", "--stage", "-z")
-        oid = rows.split(b"\t", 1)[0].split()[1]
-        invalid = [
-            b"invalid",
-            b"100644 " + oid + b" 0\t../escape",
-            b"100644 " + oid + b" 0\t.env",
-            b"100644 " + oid + b" 0\tcontrol\nname",
-            b"100644 " + oid + b" 0\t\xff",
-            b"100644 " + oid + b" 1\tconflict",
-            b"160000 " + oid + b" 0\tsubmodule",
-            b"100644 " + b"0" * 40 + b" 0\tintent-to-add",
+    def test_real_frozen_fixture_executes_gradle_generation_identity(self) -> None:
+        """只从真实 lifecycle 冻结闭包建 fixture，执行 bootJar 固定资料生成器。"""
+        from scripts.verification.execution.check_runner import (
+            resolve_child_check,
+            snapshot_check_inputs,
+        )
+
+        root = Path(__file__).resolve().parents[2]
+        check = resolve_child_check(root, bridge.CHECK_ID)
+        snapshot = snapshot_check_inputs(root, check)
+        output = self.base / "real-generation-output"
+        output.mkdir()
+        result = bridge.consume_verify_snapshot(
+            root,
+            {
+                "run_id": "10000000-0000-4000-8000-000000000001",
+                "check_id": bridge.CHECK_ID,
+            },
+            snapshot,
+            output,
+        )
+        fixture = Path(result["fixture"])
+        executed = subprocess.run(
+            [
+                "node",
+                "ops/dataset/dataset-generation-identity.mjs",
+                "--print-code-version",
+            ],
+            cwd=fixture,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        self.assertEqual(executed.returncode, 0, executed.stderr)
+        self.assertRegex(executed.stdout.strip(), r"^[0-9a-f]{64}$")
+        task_path = "backend/gradle/build-logic/src/main/kotlin/io/lexiflow/buildlogic/GenerateDataGenerationTask.kt"
+        frozen_paths = {item["locator"] for item in snapshot["files"]}
+        self.assertIn(task_path, frozen_paths)
+        task = (fixture / task_path).read_text()
+        self.assertIn(
+            'commandLine(node, File(repoRoot.get(), "ops/dataset/dataset-generation-identity.mjs").absolutePath, "--output-dir", outputDirectory.get().asFile.absolutePath)',
+            task,
+        )
+        api = (fixture / "backend/product/api/build.gradle.kts").read_text()
+        self.assertRegex(
+            api,
+            r'tasks.named<BootJar>\("bootJar"\)\s*\{[^}]*dependsOn\(generateDataGeneration\)',
+        )
+        reads = self._generation_reads(fixture)
+        self.assertTrue(reads.issubset(frozen_paths), sorted(reads - frozen_paths))
+        self.assertTrue(bridge.BUILD_GENERATION_FILES.issubset(reads))
+        expected_rows = [
+            [path, hashlib.sha256((fixture / path).read_bytes()).hexdigest()]
+            for path in sorted(reads)
         ]
-        before = self._source_git_state(root)
-        for row in invalid:
-            with self.subTest(row=row):
-
-                def injected(repo: Path, *args: str, env=None, input=None) -> bytes:
-                    if args == ("ls-files", "--stage", "-z"):
-                        return rows + row + b"\0"
-                    return original(repo, *args, env=env, input=input)
-
-                with mock.patch.object(bridge, "_git", side_effect=injected) as git:
-                    with self.assertRaises(bridge.BridgeError) as caught:
-                        bridge._git_identity(root)
-                self.assertEqual(caught.exception.status, "BLOCKED")
-                self.assertFalse(
-                    any(
-                        call.args[1:2] == ("update-index",)
-                        for call in git.call_args_list
+        expected_code = hashlib.sha256(
+            json.dumps(
+                expected_rows, ensure_ascii=False, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
+        self.assertEqual(executed.stdout.strip(), expected_code)
+        # 每项 manifest 展开读取都逐项失效；仅改临时已复制事实，绝不补拷 root 未冻结文件。
+        original_fingerprint = snapshot_check_inputs(fixture, check)["fingerprint"]
+        for path in sorted(reads):
+            with self.subTest(required_read=path):
+                file = fixture / path
+                content, mode = file.read_bytes(), file.stat().st_mode & 0o777
+                try:
+                    file.unlink()
+                    absent = subprocess.run(
+                        [
+                            "node",
+                            "ops/dataset/dataset-generation-identity.mjs",
+                            "--print-code-version",
+                        ],
+                        cwd=fixture,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        check=False,
                     )
+                    if absent.returncode == 0:
+                        # /** 枚举中删掉成员不会 ENOENT，但必须改变真实读取身份。
+                        self.assertNotEqual(absent.stdout.strip(), expected_code, path)
+                    self.assertNotEqual(
+                        snapshot_check_inputs(fixture, check)["fingerprint"],
+                        original_fingerprint,
+                        path,
+                    )
+                    file.write_bytes(content + b"\n")
+                    file.chmod(mode)
+                    changed = subprocess.run(
+                        [
+                            "node",
+                            "ops/dataset/dataset-generation-identity.mjs",
+                            "--print-code-version",
+                        ],
+                        cwd=fixture,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        check=False,
+                    )
+                    self.assertEqual(changed.returncode, 0, changed.stderr)
+                    self.assertNotEqual(changed.stdout.strip(), expected_code, path)
+                    self.assertNotEqual(
+                        snapshot_check_inputs(fixture, check)["fingerprint"],
+                        original_fingerprint,
+                        path,
+                    )
+                finally:
+                    file.write_bytes(content)
+                    file.chmod(mode)
+        self.assertEqual(
+            snapshot_check_inputs(fixture, check)["fingerprint"], original_fingerprint
+        )
+        self.assertFalse(result["verificationRunBound"])
+        self.assertFalse(result["formalReleaseEligible"])
+
+    def _generation_reads(self, root: Path) -> set[str]:
+        """测试只展开固定生成器现行 manifest 的精确文件与 /** 目录读取。"""
+        manifest = json.loads(
+            (root / "ops/dataset/generation-inputs.json").read_bytes()
+        )
+        self.assertEqual(manifest["schemaVersion"], 1)
+        reads = {
+            "ops/dataset/dataset-generation-identity.mjs",
+            "ops/dataset/generation-inputs.json",
+        }
+        for pattern in manifest["include"]:
+            if pattern.endswith("/**"):
+                directory = root / pattern[:-3]
+                self.assertTrue(directory.is_dir(), pattern)
+                reads.update(
+                    p.relative_to(root).as_posix()
+                    for p in directory.rglob("*")
+                    if p.is_file()
                 )
-                self.assertEqual(before, self._source_git_state(root))
+            else:
+                self.assertTrue((root / pattern).is_file(), pattern)
+                reads.add(pattern)
+        return reads
 
-    def test_empty_index_identity_uses_no_bulk_write(self) -> None:
-        root = self._repo("empty-index")
-        self._git(root, "read-tree", "--empty")
-        before = self._source_git_state(root)
-        with mock.patch.object(bridge, "_git", wraps=bridge._git) as git:
-            identity = bridge._git_identity(root)
-        self.assertEqual(
-            identity["indexTree"],
-            self._git(root, "hash-object", "-t", "tree", os.devnull),
+    def test_generation_build_anchors_required_only_by_actual_build_bridge(
+        self,
+    ) -> None:
+        """bootJar bridge 拒绝缺生成器的合法快照，预建 candidate 最低闭包不伪扩。"""
+        from scripts.verification.execution.check_runner import (
+            resolve_child_check,
+            snapshot_check_inputs,
         )
-        self.assertFalse(
-            any(call.args[1:2] == ("update-index",) for call in git.call_args_list)
+
+        repository = Path(__file__).resolve().parents[2]
+        candidate = snapshot_check_inputs(
+            repository, resolve_child_check(repository, "eng.release.candidate-runtime")
         )
-        self.assertEqual(before, self._source_git_state(root))
+        self.assertEqual(len(bridge._closure(candidate)), len(candidate["files"]))
+        root = self._repo("missing-build-generation")
+        from scripts.verification.planning.check_definitions import load_declarations
 
-    def test_bulk_write_process_failure_cannot_return_identity(self) -> None:
-        root = self._repo("failed-bulk")
-        before = self._source_git_state(root)
-        run = bridge.subprocess.run
-
-        def failed(argv, **kwargs):
-            if argv[3:6] == ["update-index", "-z", "--index-info"]:
-                raise subprocess.CalledProcessError(128, argv, stderr=b"synthetic")
-            return run(argv, **kwargs)
-
-        with mock.patch.object(bridge.subprocess, "run", side_effect=failed):
-            with self.assertRaises(bridge.BridgeError) as caught:
-                bridge._git_identity(root)
-        self.assertEqual(
-            (caught.exception.status, caught.exception.code),
-            ("BLOCKED", "git-metadata-unavailable"),
-        )
-        self.assertEqual(before, self._source_git_state(root))
+        check = load_declarations(root)["checks"][0]
+        check["input_paths"] = [
+            p for p in check["input_paths"] if p not in bridge.BUILD_GENERATION_FILES
+        ]
+        write_declarations(root / "config/engineering/module-checks.yaml", [check])
+        context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)[1:]
+        out = self.base / "missing-build-generation-out"
+        out.mkdir()
+        with self.assertRaises(bridge.BridgeError) as caught:
+            bridge.consume_verify_snapshot(root, context, snapshot, out)
+        self.assertEqual(caught.exception.code, "release-generation-closure-incomplete")
+        self.assertEqual(list(out.iterdir()), [])
 
     def _repo(self, name: str = "repo", check_id: str = bridge.CHECK_ID) -> Path:
         root = self.base / name
         root.mkdir()
-        all_files = set(bridge.FIXED_FILES)
+        all_files = set(bridge.FIXED_FILES | bridge.BUILD_GENERATION_FILES)
         dirs = {
             "backend/gradle/build-logic": "src/main/kotlin/Convention.kt",
             "backend/gradle/config": "quality.gradle.kts",
@@ -207,7 +288,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
             "backend/verification/integration": "src/test/java/IntegrationTest.java",
             "backend/verification/quality-gates": "src/test/java/QualityTest.java",
             "extension/assets": "icon.svg",
-            "extension/scripts": "build.mjs",
+            "extension/scripts": "build/build-extension.mjs",
             "extension/src": "entry.ts",
         }
         for directory, relative in dirs.items():
@@ -221,21 +302,29 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
                 target.chmod(0o755)
         (root / "harness").mkdir()
         paths = sorted(
-            [*bridge.FIXED_FILES, *bridge.FIXED_DIRS, "harness/module-checks.yaml"]
+            [
+                *bridge.FIXED_FILES,
+                *bridge.BUILD_GENERATION_FILES,
+                *bridge.FIXED_DIRS,
+                "config/engineering/module-checks.yaml",
+            ]
         )
         write_declarations(
-            root / "harness/module-checks.yaml",
+            root / "config/engineering/module-checks.yaml",
             [
                 {
                     "check_id": check_id,
-                    "module": "synthetic",
-                    "command": ["bash", "synthetic.sh"],
+                    "command": [
+                        "python3",
+                        "-m",
+                        "scripts.checks.release.source.check_synthetic_release_lifecycle",
+                    ],
                     "timeout_seconds": 1,
                     "scope": "change-targeted"
-                    if check_id == bridge.CHANGE_CHECK_ID
+                    if check_id == bridge.CHECK_ID
                     else "repository-baseline",
                     "triggers": [{"path": ".gitignore"}]
-                    if check_id == bridge.CHANGE_CHECK_ID
+                    if check_id == bridge.CHECK_ID
                     else [],
                     "module_dependencies": [],
                     "required_environment": [],
@@ -245,13 +334,21 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         )
         self._git(root, "init", "--quiet")
         self._git(root, "config", "core.hooksPath", os.devnull)
+        # 合成基线不得启动后台维护，避免对象库只读断言和清理被异步打包干扰。
+        self._git(root, "config", "gc.auto", "0")
+        self._git(root, "config", "maintenance.auto", "false")
         self._git(root, "add", "--all")
         self._git(root, "commit", "--quiet", "-m", "synthetic baseline")
         return root
 
     def _consumer_inputs(self, root: Path, check_id: str, reasons=None):
-        from scripts.verification.declarations import load_declarations_snapshot
-        from scripts.verification.scenarios import _freeze_selection, _runtime_checks
+        from scripts.verification.planning.check_definitions import (
+            load_declarations_snapshot,
+        )
+        from scripts.verification.execution.check_plan_runner import (
+            _freeze_selection,
+            _runtime_checks,
+        )
 
         declarations, declaration = load_declarations_snapshot(root)
         declared = next(
@@ -264,127 +361,10 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         frozen, unchanged = _freeze_selection(root, [effective], declaration)
         self.assertTrue(unchanged)
         context = {
-            "run_id": "synthetic-verify-run",
+            "run_id": "10000000-0000-4000-8000-000000000001",
             "check_id": check_id,
-            "check_config_fingerprint": bridge.fingerprint_json(effective),
         }
         return effective, context, frozen[check_id]
-
-    def test_verify_consumer_accepts_both_fixed_check_ids(self) -> None:
-        for index, check_id in enumerate((bridge.CHECK_ID, bridge.CHANGE_CHECK_ID)):
-            with self.subTest(check_id=check_id):
-                root = self._repo(f"consumer-{index}", check_id)
-                reasons = (
-                    [
-                        {
-                            "kind": "changed-file",
-                            "changed_file": ".gitignore",
-                            "trigger_path": ".gitignore",
-                        }
-                    ]
-                    if check_id == bridge.CHANGE_CHECK_ID
-                    else None
-                )
-                effective, context, snapshot = self._consumer_inputs(
-                    root, check_id, reasons
-                )
-                output = self.base / f"consumer-out-{index}"
-                output.mkdir()
-                with mock.patch.object(
-                    bridge, "snapshot_check_inputs", wraps=bridge.snapshot_check_inputs
-                ) as freshness:
-                    result = bridge.consume_verify_snapshot(
-                        root, effective, context, snapshot, output
-                    )
-                self.assertGreaterEqual(freshness.call_count, 4)
-                self.assertFalse(result["verificationRunBound"])
-                self.assertFalse(result["formalReleaseEligible"])
-                self.assertEqual(
-                    result["provenance"]["verifyInputFingerprint"],
-                    snapshot["fingerprint"],
-                )
-                self.assertEqual(result["provenance"]["verifyContext"], context)
-
-    def test_verify_consumer_rejects_context_extra_fields_and_wrong_selection_reason(
-        self,
-    ) -> None:
-        root = self._repo("consumer-invalid", bridge.CHANGE_CHECK_ID)
-        reason = [
-            {
-                "kind": "changed-file",
-                "changed_file": ".gitignore",
-                "trigger_path": ".gitignore",
-            }
-        ]
-        effective, context, snapshot = self._consumer_inputs(
-            root, bridge.CHANGE_CHECK_ID, reason
-        )
-        output = self.base / "consumer-invalid-out"
-        output.mkdir()
-        with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(
-                root, effective, {**context, "extra": True}, snapshot, output
-            )
-        bad_reason = [
-            {
-                "kind": "changed-file",
-                "changed_file": "secret.txt",
-                "trigger_path": ".gitignore",
-            }
-        ]
-        bad_effective, bad_context, _ = self._consumer_inputs(
-            root, bridge.CHANGE_CHECK_ID, bad_reason
-        )
-        with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(
-                root, bad_effective, bad_context, snapshot, output
-            )
-        self.assertEqual(list(output.iterdir()), [])
-
-    def test_verify_consumer_rejects_snapshot_mismatch_and_added_input_path(
-        self,
-    ) -> None:
-        root = self._repo("consumer-snapshot")
-        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
-        output = self.base / "consumer-snapshot-out"
-        output.mkdir()
-        changed = {**snapshot, "fingerprint": "0" * 64}
-        with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(root, effective, context, changed, output)
-        expanded = {
-            **effective,
-            "input_paths": [*effective["input_paths"], "unlisted.txt"],
-        }
-        context = {
-            **context,
-            "check_config_fingerprint": bridge.fingerprint_json(expanded),
-        }
-        with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(root, expanded, context, snapshot, output)
-        self.assertEqual(list(output.iterdir()), [])
-
-    def test_verify_consumer_rejects_boolean_integer_type_collisions(self) -> None:
-        root = self._repo("consumer-type-collisions")
-        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
-        output = self.base / "consumer-type-out"
-        output.mkdir()
-        malformed = {**effective, "timeout_seconds": True}
-        self.assertEqual(
-            malformed, effective
-        )  # Ordinary Python equality is insufficient.
-        with self.assertRaises(bridge.BridgeError) as caught:
-            bridge.consume_verify_snapshot(root, malformed, context, snapshot, output)
-        self.assertEqual(caught.exception.code, "verify-context-invalid")
-        malformed_snapshot = json.loads(json.dumps(snapshot))
-        item = malformed_snapshot["files"][0]
-        item["executable"] = int(item["executable"])
-        self.assertEqual(malformed_snapshot, snapshot)
-        with self.assertRaises(bridge.BridgeError) as caught:
-            bridge.consume_verify_snapshot(
-                root, effective, context, malformed_snapshot, output
-            )
-        self.assertEqual(caught.exception.code, "verify-snapshot-mismatch")
-        self.assertEqual(list(output.iterdir()), [])
 
     def test_verify_consumer_detects_copy_time_source_drift(self) -> None:
         root = self._repo("consumer-copy-drift")
@@ -404,9 +384,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
 
         with mock.patch.object(bridge, "_read_source", side_effect=drift_during_copy):
             with self.assertRaises(bridge.BridgeError):
-                bridge.consume_verify_snapshot(
-                    root, effective, context, snapshot, output
-                )
+                bridge.consume_verify_snapshot(root, context, snapshot, output)
         self.assertEqual(list(output.iterdir()), [])
 
     def test_baseline_verify_snapshot_and_fixture_are_mechanism_only(self) -> None:
@@ -414,9 +392,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         output = self.base / "out"
         output.mkdir()
-        result = bridge.consume_verify_snapshot(
-            root, effective, context, snapshot, output
-        )
+        result = bridge.consume_verify_snapshot(root, context, snapshot, output)
         self.assertFalse(result["verificationRunBound"])
         self.assertFalse(result["formalReleaseEligible"])
         self.assertEqual(result["provenance"]["kind"], bridge.KIND)
@@ -442,7 +418,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         out = self.base / "readonly-out"
         out.mkdir()
-        bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+        bridge.consume_verify_snapshot(root, context, snapshot, out)
         self.assertEqual(before, self._source_git_state(root))
 
     def _source_git_state(
@@ -460,57 +436,6 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         }
         return index, content
 
-    def test_staged_change_changes_index_identity(self) -> None:
-        root = self._repo()
-        original = bridge._git_identity(root)
-        target = root / ".gitignore"
-        target.write_text(target.read_text() + "staged\n")
-        self._git(root, "add", ".gitignore")
-        changed = bridge._git_identity(root)
-        self.assertEqual(original["head"], changed["head"])
-        self.assertNotEqual(original["indexTree"], changed["indexTree"])
-
-    def test_unstaged_change_changes_dirty_identity(self) -> None:
-        root = self._repo()
-        original = bridge._git_identity(root)
-        target = root / ".gitignore"
-        target.write_text(target.read_text() + "unstaged\n")
-        changed = bridge._git_identity(root)
-        self.assertEqual(original["head"], changed["head"])
-        self.assertNotEqual(original["dirtyFingerprint"], changed["dirtyFingerprint"])
-
-    def test_untracked_content_and_executable_bit_change_identity(self) -> None:
-        root = self._repo()
-        path = root / "untracked-synthetic.txt"
-        path.write_text("one\n")
-        first = bridge._git_identity(root)
-        path.write_text("two\n")
-        second = bridge._git_identity(root)
-        self.assertNotEqual(first["dirtyFingerprint"], second["dirtyFingerprint"])
-        path.chmod(0o755)
-        third = bridge._git_identity(root)
-        self.assertNotEqual(second["dirtyFingerprint"], third["dirtyFingerprint"])
-
-    def test_head_change_changes_identity(self) -> None:
-        root = self._repo()
-        first = bridge._git_identity(root)
-        (root / "synthetic-extra.txt").write_text("head two\n")
-        self._git(root, "add", "synthetic-extra.txt")
-        self._git(root, "commit", "--quiet", "-m", "second synthetic commit")
-        second = bridge._git_identity(root)
-        self.assertNotEqual(first["head"], second["head"])
-
-    def test_index_worktree_cross_drift_is_rejected(self) -> None:
-        root = self._repo()
-        p = root / ".gitignore"
-        p.write_text(p.read_text() + "index\n")
-        self._git(root, "add", ".gitignore")
-        p.write_text(p.read_text() + "worktree\n")
-        with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(
-                root, *self._consumer_inputs(root, bridge.CHECK_ID), self.base
-            )
-
     def test_freeze_then_source_edit_or_removal_is_rejected(self) -> None:
         for remove in (False, True):
             root = self._repo("remove" if remove else "edit")
@@ -523,7 +448,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
             out = self.base / ("out-remove" if remove else "out-edit")
             out.mkdir()
             with self.assertRaises(bridge.BridgeError):
-                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+                bridge.consume_verify_snapshot(root, context, snapshot, out)
 
     def test_added_file_after_freeze_is_rejected(self) -> None:
         root = self._repo()
@@ -532,7 +457,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         out = self.base / "out"
         out.mkdir()
         with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+            bridge.consume_verify_snapshot(root, context, snapshot, out)
 
     def test_required_verify_input_missing_is_rejected(self) -> None:
         root = self._repo()
@@ -540,7 +465,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         path.unlink()
         with self.assertRaises(bridge.BridgeError) as caught:
             bridge.consume_verify_snapshot(
-                root, *self._consumer_inputs(root, bridge.CHECK_ID), self.base
+                root, *self._consumer_inputs(root, bridge.CHECK_ID)[1:], self.base
             )
         self.assertEqual(
             (caught.exception.status, caught.exception.code),
@@ -554,11 +479,11 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         out.mkdir()
         with self.assertRaises(bridge.BridgeError) as caught:
             bridge.consume_verify_snapshot(
-                root, {**effective, "check_id": "forged"}, context, snapshot, out
+                root, {**context, "check_id": "forged"}, snapshot, out
             )
         self.assertEqual(caught.exception.code, "verify-context-invalid")
         with self.assertRaises(bridge.BridgeError) as caught:
-            bridge.consume_verify_snapshot(root, effective, context, object(), out)
+            bridge.consume_verify_snapshot(root, context, object(), out)
         self.assertEqual(caught.exception.code, "verify-snapshot-mismatch")
         self.assertEqual(list(out.iterdir()), [])
 
@@ -571,15 +496,15 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         out.mkdir()
         snapshot["files"] = snapshot["files"][:-1]
         with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+            bridge.consume_verify_snapshot(root, context, snapshot, out)
         effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         snapshot["files"].append(dict(snapshot["files"][0]))
         with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+            bridge.consume_verify_snapshot(root, context, snapshot, out)
         effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         snapshot["files"].reverse()
         with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+            bridge.consume_verify_snapshot(root, context, snapshot, out)
         effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         snapshot["files"].append(
             {
@@ -590,20 +515,28 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
             }
         )
         with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+            bridge.consume_verify_snapshot(root, context, snapshot, out)
 
-    def test_self_reported_verified_and_fake_check_identity_are_rejected(self) -> None:
-        root = self._repo()
-        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
-        out = self.base / "out"
-        out.mkdir()
-        snapshot["verified"] = True
-        with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
-        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
-        effective["check_id"] = "forged"
-        with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+    def test_source_build_directories_are_not_generated_artifacts(self) -> None:
+        """只允许两个精确源码目录，不把同名内部产物放入冻结闭包。"""
+        for path in (
+            "ops/release/build/release-image-builder.mjs",
+            "extension/scripts/build/build-extension.mjs",
+        ):
+            with self.subTest(path=path):
+                self.assertFalse(bridge._generated(path))
+        for path in (
+            "ops/release/build/build/generated.txt",
+            "ops/release/build/dist/generated.txt",
+            "extension/scripts/build/node_modules/package.js",
+            "extension/scripts/build/__pycache__/module.pyc",
+            "backend/product/api/build/app.jar",
+            "other/build/source.mjs",
+            "backend/gradle/build-logic/.kotlin/sessions/compiler.salive",
+            "ops/release/build/.kotlin/errors/error.log",
+        ):
+            with self.subTest(path=path):
+                self.assertTrue(bridge._generated(path))
 
     def test_fixed_release_closure_rejects_missing_and_generated_extras(self) -> None:
         root = self._repo()
@@ -643,7 +576,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         before = self._source_git_state(root)
         with mock.patch.object(bridge, "_read_source") as copier:
             with self.assertRaises(bridge.BridgeError) as caught:
-                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+                bridge.consume_verify_snapshot(root, context, snapshot, out)
         self.assertEqual(
             (caught.exception.status, caught.exception.code),
             ("BLOCKED", "git-attributes-unrepresentable"),
@@ -657,39 +590,21 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         (root / "extension/src/.env").write_text("private synthetic\n")
         with self.assertRaises(bridge.BridgeError):
             bridge.consume_verify_snapshot(
-                root, *self._consumer_inputs(root, bridge.CHECK_ID), self.base
+                root, *self._consumer_inputs(root, bridge.CHECK_ID)[1:], self.base
             )
-
-    def test_private_git_input_outside_check_snapshot_is_rejected(self) -> None:
-        root = self._repo("private-git-input")
-        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
-        (root / ".env").write_text("synthetic private Git input\n")
-        out = self.base / "private-git-out"
-        out.mkdir()
-        before = self._source_git_state(root)
-        with mock.patch.object(bridge, "_read_dirty_path") as dirty_reader:
-            with self.assertRaises(bridge.BridgeError) as caught:
-                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
-        self.assertEqual(
-            (caught.exception.status, caught.exception.code),
-            ("BLOCKED", "git-path-unrepresentable"),
-        )
-        dirty_reader.assert_not_called()
-        self.assertEqual(list(out.iterdir()), [])
-        self.assertEqual(before, self._source_git_state(root))
 
     def test_symlink_fifo_special_and_case_collision_are_rejected(self) -> None:
         root = self._repo()
         (root / "extension/src/link.ts").symlink_to(root / "extension/src/entry.ts")
         with self.assertRaises(bridge.BridgeError):
             bridge.consume_verify_snapshot(
-                root, *self._consumer_inputs(root, bridge.CHECK_ID), self.base
+                root, *self._consumer_inputs(root, bridge.CHECK_ID)[1:], self.base
             )
         root = self._repo("fifo")
         os.mkfifo(root / "extension/src/fifo.ts")
         with self.assertRaises(bridge.BridgeError):
             bridge.consume_verify_snapshot(
-                root, *self._consumer_inputs(root, bridge.CHECK_ID), self.base
+                root, *self._consumer_inputs(root, bridge.CHECK_ID)[1:], self.base
             )
         effective, context, snapshot = self._consumer_inputs(
             self._repo("case"), bridge.CHECK_ID
@@ -710,10 +625,10 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         out.mkdir()
         with mock.patch.object(bridge, "_read_source", return_value=b"tampered"):
             with self.assertRaises(bridge.BridgeError):
-                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+                bridge.consume_verify_snapshot(root, context, snapshot, out)
         item["size_bytes"] += 1
         with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+            bridge.consume_verify_snapshot(root, context, snapshot, out)
         self.assertTrue(callable(original))
         self.assertEqual(list(out.iterdir()), [])
 
@@ -735,7 +650,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
             mock.patch.object(bridge.os, "read", side_effect=short_source_read),
         ):
             with self.assertRaises(bridge.BridgeError):
-                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+                bridge.consume_verify_snapshot(root, context, snapshot, out)
         self.assertEqual(list(out.iterdir()), [])
 
         root = self._repo("mode")
@@ -749,24 +664,22 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
             side_effect=lambda fd, mode: real_fchmod(fd, mode ^ 0o111),
         ):
             with self.assertRaises(bridge.BridgeError):
-                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+                bridge.consume_verify_snapshot(root, context, snapshot, out)
         self.assertEqual(list(out.iterdir()), [])
 
     def test_output_inside_existing_or_symlink_parent_is_rejected(self) -> None:
         root = self._repo()
         effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(
-                root, effective, context, snapshot, root / "extension"
-            )
+            bridge.consume_verify_snapshot(root, context, snapshot, root / "extension")
         existing = self.base / "exists"
         existing.write_text("not a directory")
         with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(root, effective, context, snapshot, existing)
+            bridge.consume_verify_snapshot(root, context, snapshot, existing)
         link = self.base / "link"
         link.symlink_to(self.base, target_is_directory=True)
         with self.assertRaises(bridge.BridgeError):
-            bridge.consume_verify_snapshot(root, effective, context, snapshot, link)
+            bridge.consume_verify_snapshot(root, context, snapshot, link)
 
     def test_atomic_publish_race_preserves_empty_nonempty_and_symlink_targets(
         self,
@@ -796,9 +709,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
                 bridge, "_publish_noreplace", side_effect=race_after_precheck
             ):
                 with self.assertRaises(bridge.BridgeError) as caught:
-                    bridge.consume_verify_snapshot(
-                        root, effective, context, snapshot, out
-                    )
+                    bridge.consume_verify_snapshot(root, context, snapshot, out)
             self.assertEqual(
                 (caught.exception.status, caught.exception.code),
                 ("FAIL", "output-target-exists"),
@@ -861,7 +772,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
 
         with mock.patch.object(bridge, "_git", side_effect=extra_tree):
             with self.assertRaises(bridge.BridgeError):
-                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+                bridge.consume_verify_snapshot(root, context, snapshot, out)
 
         root = self._repo("dirty-fixture")
         effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
@@ -875,7 +786,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
 
         with mock.patch.object(bridge, "_git", side_effect=dirty_fixture):
             with self.assertRaises(bridge.BridgeError):
-                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+                bridge.consume_verify_snapshot(root, context, snapshot, out)
 
         root = self._repo("wrong-tree")
         effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
@@ -890,7 +801,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
 
         with mock.patch.object(bridge, "_git_text", side_effect=wrong_tree):
             with self.assertRaises(bridge.BridgeError):
-                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+                bridge.consume_verify_snapshot(root, context, snapshot, out)
 
     def test_repeated_same_input_has_canonical_identical_provenance(self) -> None:
         root = self._repo()
@@ -898,9 +809,9 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         a, b = self.base / "out-a", self.base / "out-b"
         a.mkdir()
         b.mkdir()
-        first = bridge.consume_verify_snapshot(root, effective, context, snapshot, a)
+        first = bridge.consume_verify_snapshot(root, context, snapshot, a)
         second = bridge.consume_verify_snapshot(
-            root, *self._consumer_inputs(root, bridge.CHECK_ID), b
+            root, *self._consumer_inputs(root, bridge.CHECK_ID)[1:], b
         )
         self.assertEqual(first["provenanceBytes"], second["provenanceBytes"])
         self.assertEqual(
@@ -919,7 +830,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
             side_effect=bridge.BridgeError("FAIL", "copy-injected"),
         ):
             with self.assertRaises(bridge.BridgeError):
-                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+                bridge.consume_verify_snapshot(root, context, snapshot, out)
         self.assertFalse(
             any(p.name.startswith("release-source-") for p in out.iterdir())
         )

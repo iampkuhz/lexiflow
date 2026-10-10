@@ -23,7 +23,7 @@ abstract class GenerateDataGenerationTask : DefaultTask() {
     @TaskAction fun generate() {
         val node = nodeExecutable(getProviders().environmentVariable("PATH").getOrElse(""))
         getExecOperations().exec {
-            commandLine(node, File(repoRoot.get(), "ops/dataset/generation-version.mjs").absolutePath, "--output-dir", outputDirectory.get().asFile.absolutePath)
+            commandLine(node, File(repoRoot.get(), "ops/dataset/dataset-generation-identity.mjs").absolutePath, "--output-dir", outputDirectory.get().asFile.absolutePath)
             workingDir(repoRoot.get())
         }
     }

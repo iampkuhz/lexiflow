@@ -10,9 +10,9 @@ from unittest.mock import patch
 
 import yaml
 
-from scripts.delivery_gate.__main__ import _cmd_validate, main
-from scripts.delivery_gate.acceptance import verify_plan
-from scripts.delivery_gate.records import (
+from scripts.acceptance.__main__ import _cmd_validate, main
+from scripts.acceptance.task_definition.task_acceptance_plan import verify_plan
+from scripts.acceptance.evidence.acceptance_record_store import (
     RecordError,
     canonical_bytes,
     content_hash,
@@ -21,9 +21,9 @@ from scripts.delivery_gate.records import (
     read_json,
     sha256_bytes,
 )
-from scripts.delivery_gate.requirements import load_task_requirements
-from scripts.delivery_gate.review import ReviewError, review
-from scripts.delivery_gate.validate import _verify_frozen
+from scripts.acceptance.task_definition.task_acceptance_requirements import load_task_requirements
+from scripts.acceptance.task_operations.record_independent_task_review import ReviewError, review
+from scripts.acceptance.task_operations.run_independent_task_validation import _verify_frozen
 from tests.delivery_gate.fixtures import (
     TASK_ID,
     DeliveryGateFixture,
@@ -90,7 +90,10 @@ class TestCanonicalRequirements(unittest.TestCase):
                 with self.assertRaisesRegex(RecordError, "task-dependencies-invalid"):
                     self._load()
         self.task["depends_on"] = [valid]
-        self.assertEqual(self._load()["dependencies"], [valid])
+        self.assertEqual(
+            self._load()["dependencies"],
+            [{key: value for key, value in valid.items() if key != "required_result"}],
+        )
         self.task["depends_on"] = [valid, valid]
         with self.assertRaisesRegex(RecordError, "task-dependencies-invalid"):
             self._load()
@@ -126,7 +129,7 @@ class TestFrozenRequirementEquivalence(unittest.TestCase):
 
     def test_plan_loads_complete_requirements_exactly_once(self):
         with patch(
-            "scripts.delivery_gate.acceptance.load_task_requirements",
+            "scripts.acceptance.task_definition.task_acceptance_plan.load_task_requirements",
             wraps=load_task_requirements,
         ) as load:
             self.assertEqual(
@@ -177,9 +180,9 @@ class TestSimplifiedEntryPoints(unittest.TestCase):
         result = {"submission_id": "one", "validation_id": "v", "result": "PASS"}
         with (
             patch(
-                "scripts.delivery_gate.validate.validate_batch", return_value=[result]
+                "scripts.acceptance.task_operations.run_independent_task_validation.validate_batch", return_value=[result]
             ) as validate,
-            patch("scripts.delivery_gate.__main__._output") as output,
+            patch("scripts.acceptance.__main__._output") as output,
         ):
             _cmd_validate(Namespace(repo_root="root", submission_id=["one"]))
         validate.assert_called_once_with("root", submission_ids=["one"])
@@ -188,16 +191,14 @@ class TestSimplifiedEntryPoints(unittest.TestCase):
     def test_review_cli_only_requires_validation_and_explicit_opinion(self):
         with (
             patch(
-                "scripts.delivery_gate.review.review", return_value={"result": "PASS"}
+                "scripts.acceptance.task_operations.record_independent_task_review.review", return_value={"result": "PASS"}
             ) as reviewer,
-            patch("scripts.delivery_gate.__main__._output", return_value=0),
+            patch("scripts.acceptance.__main__._output", return_value=0),
         ):
-            self.assertEqual(
-                main(["review", "--validation-id", "v", "--decision", "PASS"]), 0
-            )
+            self.assertEqual(main(["review", "--validation-id", "v"]), 0)
         self.assertEqual(
             reviewer.call_args.kwargs,
-            {"validation_id": "v", "decision": "PASS", "findings": []},
+            {"validation_id": "v", "findings": []},
         )
 
     def test_read_json_never_accepts_unhashed_records(self):
@@ -214,7 +215,7 @@ class TestDerivedReviewBinding(unittest.TestCase):
         self.fixture.create_submission()
         self.fixture.create_validation()
         self.runtime = patch(
-            "scripts.agents.local_codex_runtime.discover",
+            "scripts.agents.identity.codex_actor_identity.discover",
             return_value=make_mock_runtime(REVIEWER_SESSION),
         )
         self.runtime.start()
@@ -225,7 +226,6 @@ class TestDerivedReviewBinding(unittest.TestCase):
         return review(
             self.fixture.root,
             validation_id=self.fixture.validation_id,
-            decision="PASS",
             findings=[
                 {
                     "finding_id": "f",
@@ -238,7 +238,7 @@ class TestDerivedReviewBinding(unittest.TestCase):
 
     def test_review_derives_subject_without_rerunning_checks(self):
         with patch(
-            "scripts.verification.scenarios.execute_single_check",
+            "scripts.verification.execution.check_plan_runner.execute_single_check",
             side_effect=AssertionError("review must not run checks"),
         ):
             result = self._review()
@@ -270,5 +270,5 @@ class TestDerivedReviewBinding(unittest.TestCase):
                 with self.assertRaises(ReviewError):
                     self._review()
         self.assertFalse(
-            (self.fixture.root / "tmp/quality/delivery-gate/reviews").exists()
+            (self.fixture.root / "tmp/quality/delivery-gate/current/reviews").exists()
         )

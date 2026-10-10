@@ -9,8 +9,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import { openActionPopup } from "./action-popup.mjs";
 import { createApiLaunchSpec, stopApi } from "./e2e-runtime.mjs";
-import { resolveBuildIdentity } from "../../ops/release/version.mjs";
-import { createExtensionZip } from "../scripts/release.mjs";
+import { resolveBuildIdentity } from "../../ops/release/integrity/source-build-identity.mjs";
+import { createExtensionZip } from "../scripts/packaging/package-extension-release.mjs";
 
 const extensionRoot = resolve(import.meta.dirname, "..");
 const repositoryRoot = resolve(extensionRoot, "..");
@@ -24,7 +24,7 @@ function assertApiResources() {
   if (!existsSync(resolve(repositoryRoot, "backend/gradlew"))) {
     throw new ApiResourceUnavailable("api-launcher-resource-unavailable");
   }
-  const java = spawnSync("python3", ["-c", "from pathlib import Path; from scripts.environment.java_runtime import resolve_java_home; import os; print(resolve_java_home(Path('.'), os.environ))"], {
+  const java = spawnSync("python3", ["-c", "from pathlib import Path; from scripts.environment.toolchains.java_toolchain_selection import resolve_java_home; import os; print(resolve_java_home(Path('.'), os.environ))"], {
     cwd: repositoryRoot,
     encoding: "utf8"
   });

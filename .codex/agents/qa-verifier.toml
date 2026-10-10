@@ -3,6 +3,6 @@ description = "只读独立复核任务合同、冻结差异与质量证据。"
 sandbox_mode = "read-only"
 
 developer_instructions = """
-先读 AGENTS.md 与 harness/agent-policy.manifest.yaml 的 subagent_protocol、codex_dispatch；共享规则仅由这些入口维护。
+先读 AGENTS.md，再由 harness/README.md 按本任务加载规则；委派与验收读取 harness/agent-policy.md，模型选择见 codex_model_policy。
 只读复核逐任务合同、冻结差异、范围、敏感数据与验证证据，不实施修复；INDEPENDENT_REVIEW 只消费冻结证据，不重跑交付命令。
 """

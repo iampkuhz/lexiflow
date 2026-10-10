@@ -28,7 +28,7 @@ val generateSoftwareIdentity = tasks.register<GenerateSoftwareIdentityTask>("gen
     repoRoot.set(repositoryRoot)
     this.release.set(releaseMode)
     versionFile.set(layout.projectDirectory.file(versionFilePath))
-    versionScript.set(layout.projectDirectory.file(File(repositoryRoot, "ops/release/version.mjs").absolutePath))
+    versionScript.set(layout.projectDirectory.file(File(repositoryRoot, "ops/release/integrity/source-build-identity.mjs").absolutePath))
     outputDirectory.set(layout.buildDirectory.dir("generated/software-identity"))
     manifestFile.set(layout.buildDirectory.file("generated/software-identity-manifest/MANIFEST.MF"))
 }

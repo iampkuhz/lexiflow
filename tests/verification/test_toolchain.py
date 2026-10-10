@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from scripts.environment.toolchain import ToolchainUnavailable, resolve_toolchain
+from scripts.environment.toolchains.toolchain_identity import ToolchainUnavailable, resolve_toolchain
 
 
 def _script(path: Path, body: str) -> None:
@@ -106,7 +107,7 @@ class ToolchainTests(unittest.TestCase):
                 "required_environment": ["python-package-yaml"],
             }
             with patch(
-                "scripts.environment.toolchain.importlib.util.find_spec",
+                "scripts.environment.toolchains.toolchain_identity.importlib.util.find_spec",
                 return_value=spec,
             ):
                 first = resolve_toolchain(check, {"PATH": os.environ.get("PATH", "")})
@@ -132,7 +133,7 @@ class ToolchainTests(unittest.TestCase):
             check["command"] = ["sh", "-c", "pass"]
             env = {"PATH": f"{root}:/bin:/usr/bin"}
             with patch(
-                "scripts.environment.toolchain.shutil.which",
+                "scripts.environment.toolchains.toolchain_identity.shutil.which",
                 side_effect=lambda name, path: (
                     str(root / name)
                     if (root / name).exists()
@@ -172,6 +173,138 @@ class ToolchainTests(unittest.TestCase):
             }
             with self.assertRaises(ToolchainUnavailable):
                 resolve_toolchain(check, {"PATH": "/bin:/usr/bin"})
+
+
+class AppleGitPayloadTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+        self.payload = self.root / "payload-git"
+        self.shim = self.root / "shim-git"
+        self.dispatcher = self.root / "xcrun"
+        for path in (self.payload, self.shim, self.dispatcher):
+            _script(path, "exit 0")
+        self.check = {"command": ["git"], "required_environment": ["git"]}
+        self.env = {"PATH": "/bin:/usr/bin", "DEVELOPER_DIR": "/selected-developer"}
+        from scripts.environment.toolchains import toolchain_identity as toolchain
+
+        original = toolchain._executable_stamp
+
+        def system_stamp(locator, env, seen=frozenset()):
+            fixture = {
+                "/usr/bin/git": self.shim,
+                "/usr/bin/xcrun": self.dispatcher,
+            }.get(locator)
+            if fixture is None:
+                return original(locator, env, seen)
+            if locator in seen:
+                raise ToolchainUnavailable("executable shebang cycle or depth exceeded")
+            stamp = original(str(fixture), env, seen)
+            stamp.update(path=locator, realpath=locator)
+            return stamp
+
+        for patcher in (
+            patch.object(toolchain.sys, "platform", "darwin"),
+            patch.object(toolchain.shutil, "which", return_value="/usr/bin/git"),
+            patch.object(toolchain, "_executable_stamp", side_effect=system_stamp),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = patch.object(
+            toolchain.subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess(
+                [], 0, str(self.payload) + "\n", ""
+            ),
+        )
+        self.probe = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def resolve(self):
+        return resolve_toolchain(self.check, self.env)
+
+    def test_real_payload_bytes_modes_and_dispatcher_are_bound_not_just_shim(self):
+        before = self.resolve()
+        self.assertEqual(
+            before["executor"]["apple_payload"]["realpath"], str(self.payload)
+        )
+        self.assertEqual(
+            before["executor"]["apple_dispatcher"]["path"], "/usr/bin/xcrun"
+        )
+        _script(self.payload, "exit 1")
+        changed = self.resolve()
+        self.assertEqual(before["executor"]["sha256"], changed["executor"]["sha256"])
+        self.assertNotEqual(
+            before["executor"]["apple_payload"]["sha256"],
+            changed["executor"]["apple_payload"]["sha256"],
+        )
+        self.payload.chmod(0o750)
+        mode_changed = self.resolve()
+        self.assertEqual(mode_changed["executor"]["apple_payload"]["mode"], 0o750)
+        self.assertNotEqual(changed, mode_changed)
+        _script(self.dispatcher, "exit 2")
+        self.assertNotEqual(mode_changed, self.resolve())
+        args, kwargs = self.probe.call_args
+        self.assertEqual(args[0], ["/usr/bin/xcrun", "--find", "git"])
+        self.assertEqual(kwargs["env"], self.env)
+        self.assertEqual(kwargs["timeout"], 5)
+        self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
+
+    def test_payload_selection_and_symlink_target_change_are_rechecked(self):
+        before = self.resolve()
+        other = self.root / "other-git"
+        _script(other, "exit 2")
+        self.probe.return_value.stdout = str(other)
+        after = self.resolve()
+        self.assertNotEqual(before, after)
+        self.payload.unlink()
+        self.payload.symlink_to(other)
+        self.probe.return_value.stdout = str(self.payload)
+        linked = self.resolve()
+        self.assertEqual(linked["executor"]["apple_payload"]["realpath"], str(other))
+
+    def test_unknown_selection_missing_payload_or_recursive_shim_fail_closed(self):
+        for result in (
+            subprocess.CompletedProcess([], 1, str(self.payload), "failed"),
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, "relative/git", ""),
+            subprocess.CompletedProcess([], 0, str(self.root / "missing"), ""),
+            subprocess.CompletedProcess([], 0, "/usr/bin/git", ""),
+        ):
+            with self.subTest(result=result):
+                self.probe.return_value = result
+                with self.assertRaises(ToolchainUnavailable):
+                    self.resolve()
+        self.probe.return_value = subprocess.CompletedProcess(
+            [], 0, str(self.payload), ""
+        )
+        self.payload.chmod(0o644)
+        with self.assertRaises(ToolchainUnavailable):
+            self.resolve()
+
+    def test_payload_alias_back_to_shim_fails_closed(self):
+        alias = self.root / "recursive-alias"
+        alias.symlink_to("/usr/bin/git")
+        self.probe.return_value = subprocess.CompletedProcess([], 0, str(alias), "")
+        with self.assertRaises(ToolchainUnavailable):
+            self.resolve()
+
+    def test_xcrun_timeout_or_spawn_failure_never_qualifies_shim_only(self):
+        for error in (subprocess.TimeoutExpired("xcrun", 5), OSError("missing")):
+            self.probe.side_effect = error
+            with self.subTest(error=error), self.assertRaises(ToolchainUnavailable):
+                self.resolve()
+
+    def test_non_apple_or_native_path_git_does_not_use_dispatch_probe(self):
+        with patch("scripts.environment.toolchains.toolchain_identity.sys.platform", "linux"):
+            self.assertNotIn("apple_payload", self.resolve()["executor"])
+        self.probe.assert_not_called()
+        with patch(
+            "scripts.environment.toolchains.toolchain_identity.shutil.which", return_value=str(self.payload)
+        ):
+            self.assertNotIn("apple_payload", self.resolve()["executor"])
+        self.probe.assert_not_called()
 
 
 if __name__ == "__main__":

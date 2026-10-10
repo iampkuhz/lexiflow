@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync, copyFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, unlinkSync, copyFileSync, cpSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -8,22 +8,47 @@ import childProcess from 'node:child_process';
 import * as fs from 'node:fs';
 import fsDefault from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
-import { parseVersion, resolveCleanBuildIdentity, checkReleaseSource } from '../version.mjs';
-import { evaluateTapSummary, runTests } from '../check.mjs';
+import { parseVersion, resolveCleanBuildIdentity, checkReleaseSource } from '../integrity/source-build-identity.mjs';
+import { evaluateTapSummary, runTests } from '../test_tools/run-release-tool-tests.mjs';
 
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, stdio: 'ignore', timeout: 10_000, env: { ...process.env, GIT_AUTHOR_DATE: '2026-10-05T00:00:00Z', GIT_COMMITTER_DATE: '2026-10-05T18:00:00Z' } });
-function fixture({ head = true, ignore = false } = {}) {
+function createFixture({ head = true, ignore = false } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-release-'));
   git(root, 'init', '-q'); git(root, 'config', 'user.email', 'fixture@example.invalid'); git(root, 'config', 'user.name', 'Fixture');
-  mkdirSync(path.join(root, 'ops/release'), { recursive: true });
+  mkdirSync(path.join(root, 'ops/release/integrity'), { recursive: true });
   writeFileSync(path.join(root, 'ops/release/version.txt'), '1.2.3\n');
   writeFileSync(path.join(root, 'source'), 'fixture');
   if (ignore) writeFileSync(path.join(root, '.gitignore'), 'ignored/\n');
   if (head) { git(root, 'add', '.'); git(root, 'commit', '-qm', 'fixture'); }
   return root;
 }
+// 每次测试进程只生成三类不变合成 Git 基线；每例复制完整独立目录，
+// 不共享 index、refs、工作树或身份解析结果，也不复用任何验证 PASS。
+const fixtureSeeds = new Map();
+test.after(() => { for (const root of fixtureSeeds.values()) rmSync(root, { recursive: true, force: true }); });
+function fixture({ head = true, ignore = false } = {}) {
+  const key = JSON.stringify({ head, ignore });
+  if (!fixtureSeeds.has(key)) fixtureSeeds.set(key, createFixture({ head, ignore }));
+  const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-release-'));
+  try { cpSync(fixtureSeeds.get(key), root, { recursive: true }); return root; }
+  catch (error) { rmSync(root, { recursive: true, force: true }); throw error; }
+}
 const withFixture = (options, body) => { const root = fixture(options); try { body(root); } finally { rmSync(root, { recursive: true, force: true }); } };
 const summary = (n = 1) => `TAP version 13\n${Array.from({ length: n }, (_, i) => `ok ${i + 1} - valid`).join('\n')}\n1..${n}\n# tests ${n}\n# pass ${n}\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n`;
+
+test('copied version fixtures isolate worktree, index, refs and cleanup', () => {
+  const first = fixture(), second = fixture();
+  try {
+    const expected = resolveCleanBuildIdentity(second);
+    assert.deepEqual(resolveCleanBuildIdentity(first), expected);
+    writeFileSync(path.join(first, 'source'), 'independent edit');
+    git(first, 'add', 'source'); git(first, 'commit', '-qm', 'independent commit');
+    assert.notEqual(resolveCleanBuildIdentity(first).sourceCommit, expected.sourceCommit);
+    assert.deepEqual(resolveCleanBuildIdentity(second), expected);
+    rmSync(first, { recursive: true, force: true });
+    assert.deepEqual(resolveCleanBuildIdentity(second), expected);
+  } finally { rmSync(first, { recursive: true, force: true }); rmSync(second, { recursive: true, force: true }); }
+});
 
 test('version contract accepts boundaries and one final newline only', () => {
   for (const value of ['0.1.0', '65535.2.3\n', '1.2.3\r\n']) assert.ok(parseVersion(value));
@@ -63,14 +88,14 @@ test('release source rejects subdirectory, empty repository and nonrepository', 
   try { assert.throws(() => checkReleaseSource(root)); } finally { rmSync(root, { recursive: true, force: true }); }
 });
 test('release source rejects missing Git executable with fixed reason', () => withFixture({}, (root) => {
-  const script = `import {checkReleaseSource} from ${JSON.stringify(new URL('../version.mjs', import.meta.url).href)}; try { checkReleaseSource(process.argv[1]); process.exit(2); } catch (error) { process.stdout.write(error.message); }`;
+  const script = `import {checkReleaseSource} from ${JSON.stringify(new URL('../integrity/source-build-identity.mjs', import.meta.url).href)}; try { checkReleaseSource(process.argv[1]); process.exit(2); } catch (error) { process.stdout.write(error.message); }`;
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', script, root], { encoding: 'utf8', env: { ...process.env, PATH: '' } });
   assert.equal(result.status, 0);
   assert.equal(result.stdout, 'build source identity unavailable');
   assert.equal(result.stderr, '');
 }));
 test('version CLI rejects invalid arguments and dirty release without leaking paths', () => withFixture({}, (root) => {
-  const cli = path.resolve('ops/release/version.mjs');
+  const cli = path.resolve('ops/release/integrity/source-build-identity.mjs');
   const invalid = spawnSync(process.execPath, [cli, '--unknown'], { encoding: 'utf8' });
   assert.equal(invalid.status, 1);
   assert.equal(invalid.stdout, '');
@@ -79,9 +104,9 @@ test('version CLI rejects invalid arguments and dirty release without leaking pa
   assert.throws(() => checkReleaseSource(root), (error) => !error.message.includes(root) && !error.message.includes('new-file'));
 }));
 test('release CLI qualifies its own clean source and rejects dirty source', () => withFixture({}, (root) => {
-  const cli = path.join(root, 'ops/release/version.mjs');
-  copyFileSync(new URL('../version.mjs', import.meta.url), cli);
-  git(root, 'add', 'ops/release/version.mjs');
+  const cli = path.join(root, 'ops/release/integrity/source-build-identity.mjs');
+  copyFileSync(new URL('../integrity/source-build-identity.mjs', import.meta.url), cli);
+  git(root, 'add', 'ops/release/integrity/source-build-identity.mjs');
   git(root, 'commit', '-qm', 'synthetic CLI');
   const clean = spawnSync(process.execPath, [cli, '--release'], { encoding: 'utf8', timeout: 10000 });
   assert.equal(clean.status, 0, clean.stderr);
@@ -111,7 +136,7 @@ test('runner handles exit failure, timeout, overflow and spawn error', async () 
 });
 
 test('snapshot input and Chrome channel mapping are deterministic and ordered', async () => {
-  const { chromeVersion } = await import('../version.mjs');
+  const { chromeVersion } = await import('../integrity/source-build-identity.mjs');
   assert.equal(parseVersion('2.0.0-SNAPSHOT\n'), '2.0.0-SNAPSHOT');
   assert.equal(chromeVersion('2.0.0-SNAPSHOT.20261006.gabc1234.dirty.123456789abc'), '2.0.0.0');
   assert.equal(chromeVersion('2.0.0'), '2.0.0.1');
@@ -120,7 +145,7 @@ test('snapshot input and Chrome channel mapping are deterministic and ordered', 
   assert.throws(() => parseVersion('2.0.0-SNAPSHOT.20261006.gabc1234'));
 });
 test('build identity binds commit and content, not time, staging or ignored local data', async () => {
-  const { resolveBuildIdentity } = await import('../version.mjs');
+  const { resolveBuildIdentity } = await import('../integrity/source-build-identity.mjs');
   withFixture({ ignore: true }, root => {
     const clean = resolveBuildIdentity(root);
     assert.equal(clean.softwareVersion, '1.2.3');
@@ -145,10 +170,17 @@ test('build identity binds commit and content, not time, staging or ignored loca
     assert.notEqual(resolveBuildIdentity(root).buildId, second.buildId);
     unlinkSync(path.join(root, 'source'));
     assert.doesNotThrow(() => resolveBuildIdentity(root));
+    const beforeLicense = resolveBuildIdentity(root);
+    writeFileSync(path.join(root, 'LICENSE'), 'synthetic authorized notice');
+    const withLicense = resolveBuildIdentity(root);
+    assert.notEqual(withLicense.sourceSha256, beforeLicense.sourceSha256);
+    assert.notEqual(withLicense.buildId, beforeLicense.buildId);
+    writeFileSync(path.join(root, 'LICENSE'), 'synthetic changed notice');
+    assert.notEqual(resolveBuildIdentity(root).sourceSha256, withLicense.sourceSha256);
   });
 });
 test('clean snapshots retain full commit identity and cannot become formal tags', async () => {
-  const { resolveBuildIdentity, checkReleaseTag } = await import('../version.mjs');
+  const { resolveBuildIdentity, checkReleaseTag } = await import('../integrity/source-build-identity.mjs');
   withFixture({}, root => {
     writeFileSync(path.join(root, 'ops/release/version.txt'), '2.0.0-SNAPSHOT\n');
     git(root, 'add', '.'); git(root, 'commit', '-qm', 'snapshot');
@@ -161,7 +193,7 @@ test('clean snapshots retain full commit identity and cannot become formal tags'
   });
 });
 test('formal tag requires clean numeric version and tag at exact HEAD', async () => {
-  const { checkReleaseTag } = await import('../version.mjs');
+  const { checkReleaseTag } = await import('../integrity/source-build-identity.mjs');
   withFixture({}, root => {
     assert.throws(() => checkReleaseTag('v1.2.3', root));
     git(root, 'tag', 'v1.2.3');
@@ -174,7 +206,7 @@ test('formal tag requires clean numeric version and tag at exact HEAD', async ()
   });
 });
 test('build identity refuses symlinks rather than hashing external private input', async () => {
-  const { resolveBuildIdentity } = await import('../version.mjs');
+  const { resolveBuildIdentity } = await import('../integrity/source-build-identity.mjs');
   const { symlinkSync } = await import('node:fs');
   withFixture({}, root => {
     symlinkSync('/nonexistent-private-source', path.join(root, 'link'));
@@ -198,7 +230,7 @@ const identityRaces = [
     ['version change', root => ({ trigger: 'source', change: () => { fs.writeFileSync(path.join(root, 'ops/release/version.txt'), '1.2.4\n'); } })],
   ];
 for (const [name, mutate] of identityRaces) test(`identity rejects ${name} observed during bounded snapshots`, async () => {
-  const { resolveBuildIdentity } = await import('../version.mjs');
+  const { resolveBuildIdentity } = await import('../integrity/source-build-identity.mjs');
   withFixture({}, root => {
     const originalOpen = fsDefault.openSync;
     let changed = false;
@@ -215,7 +247,7 @@ for (const [name, mutate] of identityRaces) test(`identity rejects ${name} obser
 });
 
 test('identity rejects file bytes changed and restored during an FD read', async () => {
-  const { resolveBuildIdentity } = await import('../version.mjs');
+  const { resolveBuildIdentity } = await import('../integrity/source-build-identity.mjs');
   withFixture({}, root => {
     const originalOpen = fsDefault.openSync;
     const originalRead = fsDefault.readSync;
@@ -247,14 +279,14 @@ test('identity rejects file bytes changed and restored during an FD read', async
 
 
 test('snapshot date uses committer date in UTC+08 and ignores build clock and host timezone', async () => {
-  const { resolveBuildIdentity } = await import('../version.mjs');
+  const { resolveBuildIdentity } = await import('../integrity/source-build-identity.mjs');
   withFixture({}, root => {
     writeFileSync(path.join(root, 'ops/release/version.txt'), '2.0.0-SNAPSHOT\n');
     git(root, 'add', '.'); git(root, 'commit', '-qm', 'dated snapshot');
     const expected = resolveBuildIdentity(root);
     assert.match(expected.softwareVersion, /^2\.0\.0-SNAPSHOT\.20261006\.g[a-f0-9]{7}$/);
     assert.equal(checkReleaseSource(root).softwareVersion, expected.softwareVersion);
-    const script = `import {resolveBuildIdentity} from ${JSON.stringify(new URL('../version.mjs', import.meta.url).href)}; Date.now = () => 1; console.log(JSON.stringify(resolveBuildIdentity(process.argv[1])));`;
+    const script = `import {resolveBuildIdentity} from ${JSON.stringify(new URL('../integrity/source-build-identity.mjs', import.meta.url).href)}; Date.now = () => 1; console.log(JSON.stringify(resolveBuildIdentity(process.argv[1])));`;
     for (const TZ of ['UTC', 'Pacific/Honolulu', 'Pacific/Auckland']) {
       const result = spawnSync(process.execPath, ['--input-type=module', '-e', script, root], {
         encoding: 'utf8', timeout: 10000, env: { ...process.env, TZ },
@@ -266,7 +298,7 @@ test('snapshot date uses committer date in UTC+08 and ignores build clock and ho
 });
 
 test('snapshot date must be a real calendar date and is bound into the development build ID', async () => {
-  const { parseSoftwareVersion, resolveBuildIdentity, validateBuildIdentity } = await import('../version.mjs');
+  const { parseSoftwareVersion, resolveBuildIdentity, validateBuildIdentity } = await import('../integrity/source-build-identity.mjs');
   assert.equal(parseSoftwareVersion('2.0.0-SNAPSHOT.20240229.gabc1234'), '2.0.0-SNAPSHOT.20240229.gabc1234');
   for (const date of ['20260229', '20260431', '20261301', '20260001', '00000101', '2026106']) {
     assert.throws(() => parseSoftwareVersion(`2.0.0-SNAPSHOT.${date}.gabc1234`));
@@ -282,7 +314,7 @@ test('snapshot date must be a real calendar date and is bound into the developme
 });
 
 test('combined snapshot metadata matches the two-command Git oracle across repository states', async () => {
-  const { resolveBuildIdentity } = await import('../version.mjs');
+  const { resolveBuildIdentity } = await import('../integrity/source-build-identity.mjs');
   for (const state of ['clean', 'staged', 'unstaged', 'untracked', 'head']) {
     withFixture({}, root => {
       if (state === 'staged') { writeFileSync(path.join(root, 'source'), 'staged'); git(root, 'add', 'source'); }
@@ -321,7 +353,7 @@ test('combined snapshot metadata matches the two-command Git oracle across repos
 });
 
 test('clean release identity keeps four Git snapshots, two stable scans, and rejects dirty states', async () => {
-  const { resolveBuildIdentity, resolveCleanBuildIdentity } = await import('../version.mjs');
+  const { resolveBuildIdentity, resolveCleanBuildIdentity } = await import('../integrity/source-build-identity.mjs');
   withFixture({ ignore: true }, root => {
     mkdirSync(path.join(root, 'ignored')); writeFileSync(path.join(root, 'ignored/private'), 'ignored');
     const original = childProcess.execFileSync;
@@ -366,7 +398,7 @@ test('clean release identity keeps four Git snapshots, two stable scans, and rej
 });
 
 test('clean identity maps porcelain overflow to release rejection inside its four snapshots', async () => {
-  const { resolveCleanBuildIdentity } = await import('../version.mjs');
+  const { resolveCleanBuildIdentity } = await import('../integrity/source-build-identity.mjs');
   withFixture({}, root => {
     const original = childProcess.execFileSync;
     let statusCalls = 0;
@@ -387,7 +419,7 @@ test('clean identity maps porcelain overflow to release rejection inside its fou
 });
 
 test('clean resolver rejects missing/invalid source, wrong roots, absent HEAD, and tracked symlinks', async () => {
-  const { resolveCleanBuildIdentity } = await import('../version.mjs');
+  const { resolveCleanBuildIdentity } = await import('../integrity/source-build-identity.mjs');
   withFixture({}, root => {
     unlinkSync(path.join(root, 'ops/release/version.txt'));
     git(root, 'add', '-u'); git(root, 'commit', '-qm', 'missing version');
@@ -411,7 +443,7 @@ test('clean resolver rejects missing/invalid source, wrong roots, absent HEAD, a
 });
 
 test('clean resolver rejects a tracked scan drift detected while opening an input', async () => {
-  const { resolveCleanBuildIdentity } = await import('../version.mjs');
+  const { resolveCleanBuildIdentity } = await import('../integrity/source-build-identity.mjs');
   withFixture({}, root => {
     const originalOpen = fsDefault.openSync;
     let changed = false;
@@ -432,12 +464,12 @@ test('clean resolver rejects a tracked scan drift detected while opening an inpu
 });
 
 test('combined snapshot metadata supports roots with spaces, Unicode, and internal newlines', async () => {
-  const { resolveBuildIdentity } = await import('../version.mjs');
+  const { resolveBuildIdentity } = await import('../integrity/source-build-identity.mjs');
   const parent = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-'));
   const root = path.join(parent, '空 格\nrepo');
   try {
     mkdirSync(root); git(root, 'init', '-q'); git(root, 'config', 'user.email', 'fixture@example.invalid'); git(root, 'config', 'user.name', 'Fixture');
-    mkdirSync(path.join(root, 'ops/release'), { recursive: true });
+    mkdirSync(path.join(root, 'ops/release/integrity'), { recursive: true });
     writeFileSync(path.join(root, 'ops/release/version.txt'), '1.2.3\n'); writeFileSync(path.join(root, 'source'), 'fixture');
     git(root, 'add', '.'); git(root, 'commit', '-qm', 'fixture');
     const actual = resolveBuildIdentity(root);
@@ -446,7 +478,7 @@ test('combined snapshot metadata supports roots with spaces, Unicode, and intern
 });
 
 test('combined rev-parse rejects malformed or failed output and preserves no-HEAD rejection', async () => {
-  const { resolveBuildIdentity } = await import('../version.mjs');
+  const { resolveBuildIdentity } = await import('../integrity/source-build-identity.mjs');
   for (const malformed of [() => 'malformed', root => `${root}\n`, root => `${root}\nnot-a-commit`]) {
     withFixture({}, root => {
       const original = childProcess.execFileSync;
@@ -474,12 +506,12 @@ test('combined rev-parse rejects malformed or failed output and preserves no-HEA
 });
 
 test('SHA-256 Git object identity uses an actual 64-digit commit', async () => {
-  const { resolveBuildIdentity } = await import('../version.mjs');
+  const { resolveBuildIdentity } = await import('../integrity/source-build-identity.mjs');
   const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-sha256-'));
   try {
     git(root, 'init', '-q', '--object-format=sha256');
     git(root, 'config', 'user.email', 'fixture@example.invalid'); git(root, 'config', 'user.name', 'Fixture');
-    mkdirSync(path.join(root, 'ops/release'), { recursive: true });
+    mkdirSync(path.join(root, 'ops/release/integrity'), { recursive: true });
     writeFileSync(path.join(root, 'ops/release/version.txt'), '1.2.3\n'); writeFileSync(path.join(root, 'source'), 'fixture');
     git(root, 'add', '.'); git(root, 'commit', '-qm', 'fixture');
     assert.match(resolveBuildIdentity(root).sourceCommit, /^[a-f0-9]{64}$/);
@@ -535,7 +567,7 @@ async function assertSentinelAlive(pid) {
 }
 
 test('runner timeout and overflow kill their owned groups without touching a detached sentinel', async () => {
-  const { runTests } = await import('../check.mjs');
+  const { runTests } = await import('../test_tools/run-release-tool-tests.mjs');
   for (const mode of ['timeout', 'overflow']) {
     const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-runner-'));
     const readyFile = path.join(root, 'ready'); const heartbeatFile = path.join(root, 'heartbeat'); const workerReadyFile = path.join(root, 'worker-ready');
@@ -568,7 +600,7 @@ test('runner timeout and overflow kill their owned groups without touching a det
 });
 
 test('runner forwards parent TERM and INT after a real worker handshake and restores listeners', async () => {
-  const { runTests } = await import('../check.mjs');
+  const { runTests } = await import('../test_tools/run-release-tool-tests.mjs');
   for (const signal of ['SIGTERM', 'SIGINT']) {
     const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-runner-cancel-'));
     const readyFile = path.join(root, 'ready'); const heartbeatFile = path.join(root, 'heartbeat'); const workerReadyFile = path.join(root, 'worker-ready');
@@ -594,7 +626,7 @@ test('runner forwards parent TERM and INT after a real worker handshake and rest
 });
 
 test('runner private child group does not escape real wrapper-group TERM and INT cancellation', async () => {
-  const wrapperModule = new URL('../check.mjs', import.meta.url).href;
+  const wrapperModule = new URL('../test_tools/run-release-tool-tests.mjs', import.meta.url).href;
   for (const signal of ['SIGTERM', 'SIGINT']) {
     const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-runner-wrapper-'));
     const readyFile = path.join(root, 'ready'); const childReady = path.join(root, 'child-ready');
@@ -636,7 +668,7 @@ test('runner private child group does not escape real wrapper-group TERM and INT
 });
 
 test('runner preserves TAP pass, nonzero exit, and spawn-error results', async () => {
-  const { runTests } = await import('../check.mjs');
+  const { runTests } = await import('../test_tools/run-release-tool-tests.mjs');
   const tap = 'TAP version 13\n1..1\nok 1 - runner direct pass\n# tests 1\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n';
   const pass = await runTests({ command: process.execPath, args: ['-e', `process.stdout.write(${JSON.stringify(tap)})`] });
   assert.deepEqual(pass, { status: 'PASS', checks_run: 1, failures: 0, errors: 0, skipped: 0, reason: '' });
@@ -647,10 +679,10 @@ test('runner preserves TAP pass, nonzero exit, and spawn-error results', async (
 });
 
 test('fixed CLI suites preserve exact files and budgets and reject free-form overrides', () => {
-  const entry = path.resolve('ops/release/check.mjs');
+  const entry = path.resolve('ops/release/test_tools/run-release-tool-tests.mjs');
   const expected = {
     version: [30_000, ['version']],
-    build: [170_000, ['archive-identity', 'embedded-identity', 'build', 'build-execution', 'candidate', 'verified-candidate', 'candidate-proof', 'pipeline', 'workflow']],
+    build: [170_000, ['archive-identity', 'embedded-identity', 'build', 'build-execution', 'candidate', 'verified-candidate', 'candidate-proof', 'pipeline', 'workflow', 'synthetic-candidates']],
     manifest: [80_000, ['manifest']],
     'runtime-entry': [80_000, ['runtime-entry']],
     lifecycle: [120_000, ['lifecycle']],
@@ -661,14 +693,14 @@ test('fixed CLI suites preserve exact files and budgets and reject free-form ove
     const calls=[];cp.spawn=(command,args,options)=>{calls.push({command,args});return spawn(process.execPath,['-e',${JSON.stringify(`process.stdout.write(${JSON.stringify(summary())})`)}],options)};syncBuiltinESMExports();
     process.argv=[process.execPath,${JSON.stringify(entry)},...JSON.parse(process.argv[1])];
     const output=[];console.log=value=>output.push(JSON.parse(value));
-    await import(${JSON.stringify(new URL('../check.mjs', import.meta.url).href)});
+    await import(${JSON.stringify(new URL('../test_tools/run-release-tool-tests.mjs', import.meta.url).href)});
     process.on('beforeExit',()=>process.stdout.write(JSON.stringify({calls,timers,output})));`;
   for (const [suite, [budget, names]] of Object.entries(expected)) {
     const argv = suite === 'version' ? [] : ['--suite', suite];
     const run = spawnSync(process.execPath, ['--input-type=module', '-e', script, JSON.stringify(argv)], { encoding: 'utf8', timeout: 10_000 });
     assert.equal(run.status, 0, run.stderr);
     const { calls, timers, output } = JSON.parse(run.stdout);
-    assert.deepEqual(calls, [{ command: process.execPath, args: ['--test', '--test-reporter=tap', ...names.map(name => path.join(path.dirname(entry), `tests/${name}.test.mjs`))] }]);
+    assert.deepEqual(calls, [{ command: process.execPath, args: [...(suite === 'build' ? ['--experimental-test-module-mocks'] : []), '--test', '--test-reporter=tap', ...names.map(name => path.join(path.dirname(entry), `../tests/${name}.test.mjs`))] }]);
     assert.deepEqual(timers, [budget]);
     assert.equal(output[0].status, 'PASS');
   }

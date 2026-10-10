@@ -1,7 +1,7 @@
 """Repository module boundary and dependency direction tests.
 
-These tests verify that scripts.repository:
-1. Does not import forbidden modules (gates, harness, acceptance, agents)
+These tests verify that scripts.checks.repository:
+1. Does not import execution modules; planning may use four pure path contracts
 2. Has complete test coverage entry point
 3. Maintains correct dependency direction (no reverse imports)
 """
@@ -19,73 +19,133 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-REPOSITORY_DIR = REPO_ROOT / "scripts" / "repository"
+REPOSITORY_DIR = REPO_ROOT / "scripts" / "checks" / "repository"
 
 FORBIDDEN_IMPORTS = {
     "scripts.gates",
     "scripts.harness",
-    "scripts.delivery_gate",
+    "scripts.acceptance",
     "scripts.agents",
     "scripts.verification",
     "scripts.environment",
 }
 
 
-def _collect_imports(filepath: Path) -> list[str]:
-    """Extract all import module names from a Python file."""
-    try:
-        tree = ast.parse(filepath.read_text(encoding="utf-8"))
-    except (SyntaxError, OSError):
-        return []
-    imports = []
+PLANNING_CONTRACT_SYMBOLS = {
+    "AgentContractError",
+    "dispatch_paths_intersect",
+    "match_dispatch_path_v1",
+    "parse_dispatch_path_v1",
+}
+
+
+def _forbidden_imports(tree: ast.AST, module_name: str) -> list[str]:
+    """Only planning_validator may import the named pure contracts, not agents."""
+    violations = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                imports.append(alias.name)
+            imports = [alias.name for alias in node.names]
         elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                imports.append(node.module)
-    return imports
+            if (
+                module_name == "scripts.checks.repository.catalog.task_catalog_rules"
+                and node.level == 0
+                and node.module == "scripts.agents.work_packages.work_package_contract_checks"
+                and all(alias.name in PLANNING_CONTRACT_SYMBOLS for alias in node.names)
+            ):
+                continue
+            prefix = module_name.split(".")[:-node.level] if node.level else []
+            parts = [*prefix, *node.module.split(".")] if node.module else prefix
+            module = ".".join(parts)
+            imports = [module, *(f"{module}.{alias.name}" for alias in node.names)]
+        else:
+            continue
+        for imported in imports:
+            if any(
+                imported == forbidden or imported.startswith(forbidden + ".")
+                for forbidden in FORBIDDEN_IMPORTS
+            ):
+                violations.append(imported)
+    return violations
 
 
 class RepositoryModuleBoundaryTest(unittest.TestCase):
-    """scripts.repository must not import forbidden modules."""
+    """scripts.checks.repository may reuse pure grammar, never execution modules."""
 
     def test_no_forbidden_imports_in_repository_module(self):
         violations = []
         for py_file in sorted(REPOSITORY_DIR.glob("**/*.py")):
             if "__pycache__" in str(py_file):
                 continue
-            for imp in _collect_imports(py_file):
-                for forbidden in FORBIDDEN_IMPORTS:
-                    if imp == forbidden or imp.startswith(forbidden + "."):
-                        violations.append(f"{py_file.relative_to(REPO_ROOT)}: {imp}")
+            module = ".".join(py_file.relative_to(REPO_ROOT).with_suffix("").parts)
+            tree = ast.parse(py_file.read_text(encoding="utf-8"))
+            for imp in _forbidden_imports(tree, module):
+                violations.append(f"{py_file.relative_to(REPO_ROOT)}: {imp}")
         self.assertEqual(violations, [], f"forbidden imports found: {violations}")
+
+    def test_planning_allows_only_named_pure_contracts(self):
+        source = "from scripts.agents.work_packages.work_package_contract_checks import " + ", ".join(
+            sorted(PLANNING_CONTRACT_SYMBOLS)
+        )
+        tree = ast.parse(source)
+        self.assertEqual(
+            [], _forbidden_imports(tree, "scripts.checks.repository.catalog.task_catalog_rules")
+        )
+        self.assertTrue(_forbidden_imports(tree, "scripts.checks.repository.run_repository_check_group"))
+
+    def test_execution_and_unrestricted_contract_imports_remain_forbidden(self):
+        sources = (
+            "import scripts.agents.work_packages.work_package_contract_checks",
+            "from scripts.agents.work_packages.work_package_contract_checks import *",
+            "from scripts.agents.work_packages.work_package_contract_checks import validate_caller_contract",
+            "from scripts.agents.work_packages.work_package_contract_checks import parse_dispatch_path_v1, unknown",
+            "from scripts.agents import contracts",
+            "from scripts import agents",
+            "from ....agents.work_packages.work_package_contract_checks import parse_dispatch_path_v1",
+            "from scripts.agents.delegation import codex_cli",
+            "from scripts.agents import local_codex_runtime",
+            "from scripts.acceptance import submit",
+            "from scripts.verification import development",
+            "from scripts.environment import java_exec",
+        )
+        for source in sources:
+            with self.subTest(source=source):
+                self.assertTrue(
+                    _forbidden_imports(
+                        ast.parse(source), "scripts.checks.repository.catalog.task_catalog_rules"
+                    )
+                )
+
+    def test_retired_git_hook_entries_are_absent(self):
+        """禁止复活已退役 Git Hook，不要求保留空目录或配置壳。"""
+        for name in ("pre-commit", "post-commit"):
+            path = REPO_ROOT / ".githooks" / name
+            with self.subTest(name=name):
+                self.assertFalse(path.exists() or path.is_symlink())
 
     def test_repository_module_files_exist(self):
         expected = {
-            "__init__.py", "planning_check.py", "planning_validator.py",
-            "docs_check.py",
-            "local_skills.py", "hooks.py",
-            "quality.py",
+            "__init__.py", "run_repository_check_group.py",
+            "catalog/check_task_catalog.py", "catalog/task_catalog_rules.py",
+            "documentation/check_documentation.py", "python/check_python_quality.py",
+            "python/chinese_docstring_rule.py",
         }
-        actual = {p.name for p in REPOSITORY_DIR.glob("*.py") if "__pycache__" not in str(p)}
-        missing = expected - actual
-        self.assertEqual(missing, set(), f"missing repository module files: {missing}")
-        self.assertNotIn("__main__.py", actual, "planning has its own named entry")
+        actual = {p.relative_to(REPOSITORY_DIR).as_posix() for p in REPOSITORY_DIR.rglob("*.py")}
+        self.assertEqual(expected - actual, set())
+        self.assertNotIn("__main__.py", actual)
+        self.assertNotIn("hooks.py", actual)
+        self.assertEqual([], list((REPO_ROOT / "scripts/repository").rglob("*.py")))
 
     def test_planning_check_has_cli_entry(self):
-        """planning_check.py must have a CLI entry point."""
-        planning_check = REPOSITORY_DIR / "planning_check.py"
-        content = planning_check.read_text(encoding="utf-8")
-        self.assertIn("def main(", content, "planning_check.py must have main() function")
-        self.assertIn('if __name__', content, "planning_check.py must have __name__ guard")
+        """目录整理后真实 Catalog CLI 保持可调用。"""
+        content = (REPOSITORY_DIR / "catalog/check_task_catalog.py").read_text(encoding="utf-8")
+        self.assertIn("def main(", content)
+        self.assertIn('if __name__', content)
 
     def test_planning_cli_real_positive_and_negative_fixtures(self):
-        from scripts.repository.planning_check import main
+        from scripts.checks.repository.catalog.check_task_catalog import main
 
         passed = subprocess.run(
-            [sys.executable, "-m", "scripts.repository.planning_check"],
+            [sys.executable, "-m", "scripts.checks.repository.catalog.check_task_catalog"],
             cwd=REPO_ROOT, text=True, capture_output=True, check=False,
         )
         self.assertEqual(0, passed.returncode, passed.stderr)
@@ -93,9 +153,11 @@ class RepositoryModuleBoundaryTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             shutil.copytree(REPO_ROOT / "planning", root / "planning")
-            (root / "harness").mkdir()
-            for name in ("agent-policy.manifest.yaml", "module-checks.yaml"):
-                shutil.copy2(REPO_ROOT / "harness" / name, root / "harness" / name)
+            (root / "config/engineering").mkdir(parents=True)
+            shutil.copy2(
+                REPO_ROOT / "config/engineering/module-checks.yaml",
+                root / "config/engineering/module-checks.yaml",
+            )
             catalog = root / "planning" / "workstreams.yaml"
             catalog.write_text(catalog.read_text().replace(
                 "catalog_mode: execution", "catalog_mode: planning-only", 1))
@@ -163,7 +225,7 @@ class ToolchainRetirementTest(unittest.TestCase):
 
 
 class HarnessRetirementTest(unittest.TestCase):
-    """scripts/harness/ must be retired; files moved to scripts/repository/."""
+    """scripts/harness/ must be retired; files moved to scripts/checks/repository/."""
 
     RETIRED_FILES = {
         "scripts/harness/docs_check.py",

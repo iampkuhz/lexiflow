@@ -10,61 +10,8 @@ import uuid
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.agents.codex.runtime_binding import CodexRuntimeBinding, CodexRuntimeError
-from scripts.agents.local_codex_runtime import discover, verify_proof
-
-
-class CodexRuntimeBindingTest(unittest.TestCase):
-    def setUp(self) -> None:
-        self.caller = {"goal": "fixture"}
-        self.host = {
-            "parent_session_id": str(uuid.uuid4()),
-            "agent_id": "runtime_fixture",
-            "session_id": str(uuid.uuid4()),
-            "client": "codex",
-            "parent_client": "codex",
-        }
-        self.run_id = str(uuid.uuid4())
-
-    def test_host_binding_is_stable_but_cannot_persist_without_native_proof(
-        self,
-    ) -> None:
-        first = CodexRuntimeBinding.create(self.caller, self.host, self.run_id)
-        second = CodexRuntimeBinding.create(self.caller, self.host, str(uuid.uuid4()))
-        self.assertEqual(first.identity["agent_id"], second.identity["agent_id"])
-        self.assertEqual(first.identity["session_id"], second.identity["session_id"])
-        with tempfile.TemporaryDirectory() as root:
-            with self.assertRaises(CodexRuntimeError) as caught:
-                first.persist_immutable(root)
-            self.assertEqual(caught.exception.status, "BLOCKED")
-
-    def test_missing_host_metadata_blocks_and_caller_identity_fails(self) -> None:
-        with self.assertRaises(CodexRuntimeError) as blocked:
-            CodexRuntimeBinding.create(self.caller, None, self.run_id)
-        self.assertEqual(blocked.exception.status, "BLOCKED")
-        caller = {**self.caller, "agent_id": "forged"}
-        with self.assertRaisesRegex(CodexRuntimeError, "caller-identity-injection"):
-            CodexRuntimeBinding.create(caller, self.host, self.run_id)
-
-    def test_all_caller_identity_fields_are_rejected_including_parent_route(self):
-        for field in (*self.host, "run_id"):
-            with self.subTest(field=field):
-                with self.assertRaisesRegex(
-                    CodexRuntimeError, "caller-identity-injection"
-                ):
-                    CodexRuntimeBinding.create(
-                        {**self.caller, field: "codex"}, self.host, self.run_id
-                    )
-
-    def test_trusted_host_route_is_still_required(self):
-        for field in ("client", "parent_client"):
-            with self.subTest(field=field):
-                with self.assertRaisesRegex(
-                    CodexRuntimeError, "host must be Codex routed"
-                ):
-                    CodexRuntimeBinding.create(
-                        self.caller, {**self.host, field: "qoder"}, self.run_id
-                    )
+from scripts.agents.identity.codex_identity_binding import _CodexRuntimeBinding, CodexRuntimeError
+from scripts.agents.identity.codex_actor_identity import discover, verify_proof
 
 
 class NativeCodexRuntimeTest(unittest.TestCase):
@@ -126,13 +73,22 @@ class NativeCodexRuntimeTest(unittest.TestCase):
 
     def test_shared_host_native_subagent_resolves_and_proof_survives_log_growth(self):
         runtime = discover(self.root)
-        binding = runtime.bind({}, str(uuid.uuid4()))
-        one = binding.persist_immutable(self.root)
-        self.assertEqual(binding.persist_immutable(self.root), one)
-        changed = dict(binding.identity)
-        changed["agent_id"] = "other_actor"
+        identity = {
+            "agent_id": runtime.context["actor_id"],
+            "run_id": str(uuid.uuid4()),
+            "parent_client": "codex",
+            **{
+                key: runtime.context[key]
+                for key in ("session_id", "parent_session_id", "client")
+            },
+        }
+        binding = _CodexRuntimeBinding(identity, runtime.proof)
+        binding.persist_immutable(self.root)
+        with self.assertRaisesRegex(CodexRuntimeError, "runtime-binding-collision"):
+            binding.persist_immutable(self.root)
+        changed = {**identity, "run_id": str(uuid.uuid4()), "agent_id": "other_actor"}
         with self.assertRaisesRegex(CodexRuntimeError, "runtime-identity-drift"):
-            CodexRuntimeBinding(changed, runtime.proof).persist_immutable(self.root)
+            _CodexRuntimeBinding(changed, runtime.proof).persist_immutable(self.root)
         self.assertEqual(
             runtime.context,
             {
@@ -196,3 +152,19 @@ class NativeCodexRuntimeTest(unittest.TestCase):
             verify_proof(
                 self.root, runtime.proof, {**runtime.context, "actor_id": "other"}
             )
+
+    def test_session_only_route_cannot_discover_actor(self):
+        with patch.dict(os.environ, {"CODEX_THREAD_ID": ""}):
+            with self.assertRaises(CodexRuntimeError) as caught:
+                discover(self.root)
+        self.assertEqual(caught.exception.status, "BLOCKED")
+
+    def test_public_identity_factory_and_main_materializer_are_removed(self):
+        import scripts.agents.identity.codex_identity_binding as binding
+        import scripts.agents.identity.codex_actor_identity as runtime
+
+        for name in ("CodexRuntimeBinding", "bind_trusted_host_context"):
+            self.assertFalse(hasattr(binding, name))
+        for name in ("bind_main_task", "main"):
+            self.assertFalse(hasattr(runtime, name))
+        self.assertFalse(hasattr(runtime.LocalCodexRuntime, "bind"))

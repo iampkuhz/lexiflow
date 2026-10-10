@@ -1,14 +1,12 @@
 # Agent 执行入口
 
-流程见 [Agent workflow](../../docs/scenarios/delegate-work.md)，Session/callback/ack 见[身份与运行事实](../../docs/scenarios/delegate-work/identity.md)。
+流程、身份来源与交接见 [Agent workflow](../../docs/scenarios/delegate-work.md)。
 
-`delegation/` 只放从当前任务调用或核对另一 Agent 工作包的公开命令；`codex/` 与 `qoder/` 保存各执行器自身的身份、事实和运行能力。
+`identity/` 保存可信原生身份绑定；`work_packages/` 核对冻结合同、发布与重核完成事实。
 
 - 新派发使用当前父任务下的原生 Codex 协作工具，不通过仓库 CLI 启动子代理。
-- `delegation/qoder_cli.py`：核对既有 Qoder 运行的 status/result/validate-result/ack；当前 policy 拒绝新 start/resume。`qoder/cli.py` 解析参数，`qoder/runner.py` 保留策略拒绝与运行事实消费能力，`qoder/handoff.py` 核对既有交接合同；文件存在不表示当前允许派发。
-- `local_codex_runtime.py`、`codex/runtime_binding.py`：真实本机身份来源。
-- `codex/work_package.py`、`qoder/facts.py`：各 Agent 的工作包原始执行事实；`delegation/codex_cli.py` 只解析跨 Agent 工作包核对命令。
-- `qoder/lifecycle.py`、`qoder/callback.py`：运行状态与终态交接。
-- `module_tests.py`：运行 Agent 工具模块自身测试，不评判被委派任务是否完成或通过正式验收。
+- `identity/codex_actor_identity.py`：唯一 `bind_work_package(repo_root, caller_contract)` 包级入口，内部认证原生身份并一次冻结由当前 Catalog 派生的完整包合同；`identity/codex_identity_binding.py` 不接受 caller 身份注入。
+- `work_packages/codex_work_package_publisher.py` 的 `CodexWorkPackagePublisher(repo_root).publish(run_id, outcomes)` 发布每 Task projection/outcome 和最后唯一 completion；`verify(run_id)` 重核来源并完整派生内存 producer_view，不保存 Main projection、Task packet/plan 或 signal 镜像。`work_packages/verify_codex_work_package.py` 只解析跨 Agent 工作包核对命令。
+- `../checks/tool_tests/run_agent_tool_tests.py`：运行 Agent 工具模块自身测试，不评判被委派任务是否完成或通过正式验收。
 
-调度、模型和等待规则以 [Harness policy](../../harness/agent-policy.manifest.yaml) 为准。本模块不导入 Delivery Gate，不签发 validation/review；执行完成不等于验收。更多文件职责见 [Scripts Reference](../../docs/reference/scripts.md)。
+调度、模型和等待规则以 [Harness policy](../../harness/agent-policy.md) 为准。本模块不导入 Delivery Gate，不签发 validation/review；执行完成不等于验收。更多文件职责见 [Scripts Reference](../../docs/reference/scripts.md)。

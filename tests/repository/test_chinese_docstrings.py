@@ -10,27 +10,35 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts.checks.repository.python.check_python_quality import PYLINT_ARGUMENTS
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
 class ChineseDocstringTest(unittest.TestCase):
     """隔离源码夹具并经官方插件加载路径运行规则，不 mock AST 或规则结果。"""
 
-    def lint(self, source: str) -> tuple[int, list]:
+    def lint(self, source: str, *, external_config: bool = False) -> tuple[int, list]:
         """运行限时 Pylint 并解析结构化诊断，保证真实插件能加载。"""
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "sample.py"
             path.write_text(source)
+            if external_config:
+                (Path(directory) / ".pylintrc").write_text(
+                    "[MAIN]\nload-plugins=nonexistent_external_plugin\n"
+                    "[REPORTS]\noutput-format=text\n"
+                )
             result = subprocess.run(
                 [
                     sys.executable,
                     "-m",
                     "pylint",
                     "--rcfile",
-                    str(ROOT / "harness/python-docstrings.toml"),
+                    os.devnull,
+                    *PYLINT_ARGUMENTS,
                     str(path),
                 ],
-                cwd=ROOT,
+                cwd=Path(directory),
                 env={**os.environ, "PYTHONPATH": str(ROOT)},
                 text=True,
                 capture_output=True,
@@ -40,9 +48,15 @@ class ChineseDocstringTest(unittest.TestCase):
         self.assertEqual("", result.stderr)
         return result.returncode, json.loads(result.stdout)
 
+    def test_external_default_config_cannot_change_the_fixed_contract(self):
+        """用户和工作目录的默认 rc 不得改变插件或诊断格式。"""
+        code, findings = self.lint('"""English module."""\n', external_config=True)
+        self.assertNotEqual(0, code)
+        self.assertEqual(["C9002"], [finding["message-id"] for finding in findings])
+
     def test_plugin_has_no_language_override_option(self):
         """规则固定中文范围，不注册可将英文放行的配置通道。"""
-        from scripts.repository.chinese_docstrings import ChineseDocstringChecker
+        from scripts.checks.repository.python.chinese_docstring_rule import ChineseDocstringChecker
 
         self.assertEqual((), ChineseDocstringChecker.options)
 

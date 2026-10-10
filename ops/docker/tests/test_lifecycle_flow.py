@@ -9,10 +9,10 @@ from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[3]
-VERIFIER_HASH = (REPO / "ops/release/runtime-verification.sh").read_text().split("# 在 cd -P", 1)[0]
-STATE = (REPO / "ops/release/lifecycle-state.sh").read_text()
-DOCKER = (REPO / "ops/release/lifecycle-docker.sh").read_text()
-FLOW = (REPO / "ops/release/lifecycle.sh").read_text()
+VERIFIER_HASH = (REPO / "ops/release/runtime/release-artifact-verification.sh").read_text().split("# 在 cd -P", 1)[0]
+STATE = (REPO / "ops/release/runtime/release-installation-state.sh").read_text()
+DOCKER = (REPO / "ops/release/runtime/release-installation-docker.sh").read_text()
+FLOW = (REPO / "ops/release/runtime/release-installation-lifecycle.sh").read_text()
 A, B, C = ("a" * 64, "b" * 64, "c" * 64)
 PORTS = r'''
 LF_PLATFORM=linux/amd64

@@ -37,7 +37,7 @@ class PodmanComposeContractTest(unittest.TestCase):
 
     def test_template_matches_shared_managed_deployment_compose(self):
         command = (
-            "import {renderCompose} from './ops/podman/unified-local.mjs';"
+            "import {renderCompose} from './ops/podman/installation/installation-upgrade-workflow.mjs';"
             "console.log(renderCompose(process.cwd(),"
             "{apiPort:18080,dbPort:15432,external:false,dbUser:'lexiflow'}));"
         )

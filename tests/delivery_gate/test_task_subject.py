@@ -1,13 +1,14 @@
 from __future__ import annotations
+from scripts.acceptance.task_definition.task_acceptance_scope import subject_paths
 
 import unittest
 import copy
 import yaml
 
-from scripts.delivery_gate.task_subject import derive_task_subject
+from scripts.acceptance.task_definition.task_acceptance_scope import derive_task_subject
 from tests.delivery_gate.fixtures import DeliveryGateFixture, TASK_ID
-from scripts.delivery_gate.requirements import load_task_requirements
-from scripts.verification.declarations import load_declarations
+from scripts.acceptance.task_definition.task_acceptance_requirements import load_task_requirements
+from scripts.verification.planning.check_definitions import load_declarations
 from tests.delivery_gate.fixtures import write_declarations
 
 
@@ -38,31 +39,64 @@ class TestTaskSubject(unittest.TestCase):
             self.fixture.root, self.requirements, ["src/test.py"]
         )
         self.assertEqual(subject["task_paths"], ["src/test.py"])
-        self.assertEqual(subject["changed_files"], ["src/test.py"])
+        self.assertEqual(subject_paths(subject), ["src/test.py"])
 
     def test_actual_check_input_is_dependency_not_task_body(self):
         self.fixture.write("src/test.py", "changed")
         self.fixture.write("protected.py", "dependency changed")
         subject = derive_task_subject(
-            self.fixture.root, self.requirements,
+            self.fixture.root,
+            self.requirements,
             ["src/test.py", "protected.py"],
         )
         self.assertEqual(subject["task_paths"], ["src/test.py"])
         self.assertEqual(subject["dependency_paths"], ["protected.py"])
-        self.assertEqual(subject["changed_files"], ["protected.py", "src/test.py"])
+        self.assertEqual(subject_paths(subject), ["protected.py", "src/test.py"])
 
     def test_dependency_expansion_reaches_fixed_point(self):
-        path = self.fixture.root / "harness/module-checks.yaml"
+        path = self.fixture.root / "config/engineering/module-checks.yaml"
         declarations = load_declarations(self.fixture.root)
-        first = next(x for x in declarations["checks"] if x["check_id"] == "fixture.change")
+        first = next(
+            x for x in declarations["checks"] if x["check_id"] == "fixture.change"
+        )
         first["input_paths"].append("dep-one")
         second = copy.deepcopy(first)
-        second.update(check_id="fixture.cascade", module="fixture.cascade",
-                      triggers=[{"path": "dep-one/"}], input_paths=["dep-two"])
+        second.update(
+            check_id="fixture.cascade",
+            module="fixture.cascade",
+            triggers=[{"path": "dep-one/"}],
+            input_paths=["dep-two"],
+        )
         declarations["checks"].append(second)
         write_declarations(path, declarations["checks"])
-        subject = derive_task_subject(self.fixture.root, self.requirements,
-                                     ["dep-one/new.py", "dep-two/new.py", "src/test.py", "unrelated.txt"])
+        subject = derive_task_subject(
+            self.fixture.root,
+            self.requirements,
+            ["dep-one/new.py", "dep-two/new.py", "src/test.py", "unrelated.txt"],
+        )
         self.assertEqual(["src/test.py"], subject["task_paths"])
-        self.assertEqual(["dep-one/new.py", "dep-two/new.py"], subject["dependency_paths"])
-        self.assertIn("fixture.cascade", subject["selected_check_ids"])
+        self.assertEqual(
+            ["dep-one/new.py", "dep-two/new.py"], subject["dependency_paths"]
+        )
+        self.assertNotIn("selected_check_ids", subject)
+
+    def test_required_repository_only_check_still_expands_subject_inputs(self):
+        declarations = load_declarations(self.fixture.root)
+        required = next(
+            check
+            for check in declarations["checks"]
+            if check["check_id"] == "fixture.baseline"
+        )
+        required["input_paths"].append("repository-only-input")
+        write_declarations(
+            self.fixture.root / "config/engineering/module-checks.yaml", declarations["checks"]
+        )
+        self.requirements["required_check_ids"].append("fixture.baseline")
+        subject = derive_task_subject(
+            self.fixture.root,
+            self.requirements,
+            ["src/test.py", "repository-only-input/source.py"],
+        )
+        self.assertEqual(
+            subject["dependency_paths"], ["repository-only-input/source.py"]
+        )

@@ -77,7 +77,7 @@ else: sys.exit(88)
 
     def invoke(self, directory=None):
         before=self.snapshot()
-        result=subprocess.run([shutil.which('node'),'--import',str(self.preload),str(ROOT/'ops/podman/local.mjs'),'doctor','--json','--dir',directory or str(self.install)],env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH']},capture_output=True,text=True,timeout=15)
+        result=subprocess.run([shutil.which('node'),'--import',str(self.preload),str(ROOT/'ops/podman/commands/manage-podman-installation.mjs'),'doctor','--json','--dir',directory or str(self.install)],env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH']},capture_output=True,text=True,timeout=15)
         self.assertEqual(before,self.snapshot())
         self.assertNotIn('PRIVATE-FIXTURE',result.stdout+result.stderr)
         self.assertNotIn(str(self.root),result.stdout+result.stderr)

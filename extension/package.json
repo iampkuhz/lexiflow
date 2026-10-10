@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "package": "node scripts/release.mjs",
+    "build": "node scripts/build/build-extension.mjs",
+    "package": "node scripts/packaging/package-extension-release.mjs",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "quality:check": "node scripts/quality-check.mjs",
+    "quality:check": "node scripts/checks/run-extension-checks.mjs",
     "e2e": "npm run build && node tests/translation-e2e.mjs"
   },
   "devDependencies": {

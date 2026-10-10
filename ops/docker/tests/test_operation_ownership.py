@@ -10,7 +10,7 @@ import tempfile
 import time
 import unittest
 
-SOURCE = pathlib.Path(__file__).resolve().parents[2] / "release/lifecycle-docker.sh"
+SOURCE = pathlib.Path(__file__).resolve().parents[2] / "release/runtime/release-installation-docker.sh"
 PROJECT = "lf_" + "a" * 32 + "_" + "b" * 16
 INSTALL = "a" * 32
 RELEASE = "b" * 64
@@ -66,7 +66,7 @@ class OperationOwnershipTest(unittest.TestCase):
         stub.write_text(self._shell_client())
         stub.chmod(0o755)
         self.script = self.root / "run.sh"
-        self.script.write_text(SOURCE.with_name("lifecycle-state.sh").read_text() + '\nset -eu\n. "$1"\nlf_lock_check() { test -f "$LF_TEST_LOCK_FILE"; }\n'
+        self.script.write_text(SOURCE.with_name("release-installation-state.sh").read_text() + '\nset -eu\n. "$1"\nlf_lock_check() { test -f "$LF_TEST_LOCK_FILE"; }\n'
                               'lf_docker_endpoint() { LF_DOCKER_ENDPOINT=unix:///fake.sock; }\n'
                               +
                               'LF_ROOT=/tmp/fake LF_PLATFORM=linux/amd64 LF_API_IMAGE=sha256:' + 'e'*64 +
@@ -128,10 +128,11 @@ while [ "$count" -lt 1000 ]; do
 done
 if [ ! -f "$req/done" ]; then
   count=0
-  while [ "$count" -lt 5 ]; do
+  # Keep the same five-second nominal waiting budget, without whole-second response latency.
+  while [ "$count" -lt 500 ]; do
     [ ! -f "$req/done" ] || break
     kill -0 "$server_pid" 2>/dev/null || transport_error
-    sleep 1 || transport_error
+    sleep 0.01 || transport_error
     count=$((count + 1))
   done
 fi
@@ -460,6 +461,25 @@ class OperationOwnershipCleanupTest(unittest.TestCase):
         self.assertIn("/active.", rm_log.read_text())
         self._assert_no_requests()
         self.assertFalse((self.fixture.mailbox / "transport-failed").exists())
+
+    def test_delayed_business_response_preserves_outputs_and_cleans(self):
+        fixture = OperationOwnershipTest("test_stop_uses_full_ids_and_never_deletes_resources")
+        fixture.cli = lambda: (
+            "import time,sys\ntime.sleep(.02)\nprint('business-out')\n"
+            "print('business-err',file=sys.stderr)\nsys.exit(int(sys.argv[-1]))\n"
+        )
+        fixture.setUp()
+        try:
+            result = subprocess.run([str(fixture.bin / "docker"), "cleanup-test", "23"],
+                                    env=fixture.env, capture_output=True, timeout=3)
+            self.assertEqual((result.returncode, result.stdout, result.stderr),
+                             (23, b"business-out\n", b"business-err\n"))
+            self.assertEqual(list(fixture.mailbox.glob("req.*")), [])
+            self.assertEqual(list(fixture.mailbox.glob("active.*")), [])
+            self.assertFalse((fixture.mailbox / "transport-failed").exists())
+        finally:
+            self.assertTrue(fixture.doCleanups())
+            self.assertIs(_owned_group_exists(fixture.server_pid), False)
 
     def test_nonzero_business_exit_preserves_outputs_and_cleans(self):
         self.assertEqual(self._run_client(23), (23, b"business-out\n", b"business-err\n"))

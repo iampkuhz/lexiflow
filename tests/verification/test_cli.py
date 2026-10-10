@@ -10,10 +10,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import yaml
 
-from scripts import check_changes, check_repository
-from scripts.verification import diagnose as diagnostic_cli
+from scripts.verification.commands import run_repository_checks as check_repository
+from scripts.verification.commands import diagnose_repository_check as diagnostic_cli
 from tests.verification.declaration_fixtures import write_declarations
 
 
@@ -49,7 +48,6 @@ def _write_declarations(root: Path, *, scope: str, result: str = "PASS") -> None
     ]
     declaration = {
         "check_id": "cli.fixture",
-        "module": "test",
         "command": command,
         "executable": "python3",
         "cwd": ".",
@@ -60,7 +58,7 @@ def _write_declarations(root: Path, *, scope: str, result: str = "PASS") -> None
         "required_environment": ["python3"],
         "input_paths": ["initial.txt"],
     }
-    write_declarations(root / "harness/module-checks.yaml", [declaration])
+    write_declarations(root / "config/engineering/module-checks.yaml", [declaration])
 
 
 def _invoke(function, argv: list[str], root: Path) -> tuple[int, dict]:
@@ -82,28 +80,12 @@ class TestDailyAndDiagnosticCLI(unittest.TestCase):
             code, report = _invoke(check_repository.main, [], root)
             self.assertEqual((code, report["result"]), (1, "FAIL"))
 
-    def test_change_daily_and_diagnostic_have_distinct_evidence(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            base = _init_git_repo(root)
-            _write_declarations(root, scope="change-targeted")
-            code, report = _invoke(check_changes.main, [], root)
-            self.assertEqual((code, report["result"]), (0, "PASS"))
-            diagnostic = diagnostic_cli.diagnose(
-                root, "change", base=base, expected_paths=("backend/",)
-            )
-            self.assertEqual(diagnostic["kind"], "diagnostic")
-            self.assertIs(diagnostic["full_repository_executed"], False)
-            self.assertIn("scope_review", diagnostic["selected_report"])
-
     def test_repository_selection_is_diagnostic_only(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "initial.txt").write_text("fixture")
             _write_declarations(root, scope="repository-baseline")
-            result = diagnostic_cli.diagnose(
-                root, "repository", check_ids=("cli.fixture",)
-            )
+            result = diagnostic_cli.diagnose(root, check_ids=("cli.fixture",))
             self.assertEqual(result["selected_result"], "PASS")
             self.assertIs(result["full_repository_executed"], False)
             self.assertNotIn("publication", result["selected_report"])
@@ -111,10 +93,7 @@ class TestDailyAndDiagnosticCLI(unittest.TestCase):
             self.assertNotIn("scope", result["selected_report"])
 
     def test_daily_overrides_are_rejected(self):
-        for entry, option in (
-            (check_changes.main, "--base"),
-            (check_repository.main, "--check-id"),
-        ):
+        for entry, option in ((check_repository.main, "--check-id"),):
             with (
                 self.subTest(option=option),
                 contextlib.redirect_stderr(io.StringIO()),

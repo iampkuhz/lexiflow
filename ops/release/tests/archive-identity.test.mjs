@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, realpath, writeFile, symlink, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { readZipEntries, readExtensionFiles } from '../archive-identity.mjs';
+import { readZipEntries, readExtensionFiles } from '../integrity/extension-archive-integrity.mjs';
 import { createHash } from 'node:crypto';
 import { makeZip } from './zip-fixture.mjs';
 

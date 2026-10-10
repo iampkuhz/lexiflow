@@ -6,16 +6,16 @@ import copy
 import unittest
 from unittest.mock import patch
 
-from scripts.delivery_gate.acceptance import verify_plan
-from scripts.delivery_gate.records import (
+from scripts.acceptance.task_definition.task_acceptance_plan import verify_plan
+from scripts.acceptance.evidence.acceptance_record_store import (
     RecordError,
     load_submission,
     publish_bytes,
     read_bound_bytes,
 )
-from scripts.delivery_gate.source_snapshot import review_patch
-from scripts.delivery_gate.submit import submit
-from scripts.verification import risk
+from scripts.acceptance.evidence.task_review_diff import review_patch
+from scripts.acceptance.task_operations.submit_task_for_acceptance import submit
+from scripts.verification.planning import change_risk_assessment as risk
 from tests.delivery_gate.fixtures import (
     DeliveryGateFixture,
     TASK_ID,
@@ -55,14 +55,13 @@ class SourceSnapshotTest(unittest.TestCase):
     ):
         self.f.create_verification_report()
         with patch(
-            "scripts.agents.local_codex_runtime.discover",
+            "scripts.agents.identity.codex_actor_identity.discover",
             return_value=make_mock_runtime(PRODUCER_SESSION),
         ):
             created = submit(
                 self.f.root,
                 task_id=TASK_ID,
                 change_report_id=self.f.report_id,
-                confirm_scope_report_id=self.f.report_id,
             )
         submission = load_submission(self.f.root, created["submission_id"])
         self.assertEqual(
@@ -76,7 +75,7 @@ class SourceSnapshotTest(unittest.TestCase):
         verify_plan(self.f.root, submission)
         forged = copy.deepcopy(submission)
         forged["diff"] = publish_bytes(
-            self.f.root, "tmp/quality/delivery-gate/omitted.patch", b""
+            self.f.root, "tmp/quality/delivery-gate/current/omitted.patch", b""
         )
         with self.assertRaisesRegex(RecordError, "review patch does not cover"):
             verify_plan(self.f.root, forged)

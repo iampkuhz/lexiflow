@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, realpath, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { validateBuildIdentity, assertBuildIdentityMatches } from '../version.mjs';
-import { verifyJarIdentity, verifyExtensionIdentity } from '../embedded-identity.mjs';
+import { validateBuildIdentity, assertBuildIdentityMatches } from '../integrity/source-build-identity.mjs';
+import { verifyJarIdentity, verifyExtensionIdentity } from '../integrity/artifact-build-identity.mjs';
 import { makeZip, jarBytes, extensionBytes } from './zip-fixture.mjs';
 
 function identity({ dirty = false, snapshot = false, sourceSha256 = 'b'.repeat(64) } = {}) {

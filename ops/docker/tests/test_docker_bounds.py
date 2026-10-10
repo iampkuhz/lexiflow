@@ -10,7 +10,7 @@ import tempfile
 import time
 import unittest
 
-SOURCE = pathlib.Path(__file__).resolve().parents[2] / "release/lifecycle-docker.sh"
+SOURCE = pathlib.Path(__file__).resolve().parents[2] / "release/runtime/release-installation-docker.sh"
 
 
 class DockerBoundsTest(unittest.TestCase):
@@ -54,7 +54,7 @@ class DockerBoundsTest(unittest.TestCase):
                     os.kill(int(line.split(":", 1)[0]), 0)
 
     def write_shell(self, tail, real_endpoint=False):
-        head = SOURCE.with_name("lifecycle-state.sh").read_text() + '\n. "$1"\n'
+        head = SOURCE.with_name("release-installation-state.sh").read_text() + '\n. "$1"\n'
         if not real_endpoint:
             head += 'lf_docker_endpoint() { LF_DOCKER_ENDPOINT=unix:///synthetic.sock; }\n'
         self.script.write_text(head + tail + "\n")

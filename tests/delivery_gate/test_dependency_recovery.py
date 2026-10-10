@@ -9,9 +9,9 @@ from unittest.mock import patch
 
 import yaml
 
-from scripts.delivery_gate.check import check_conditions
-from scripts.delivery_gate.source_snapshot import review_patch
-from scripts.delivery_gate.records import (
+from scripts.acceptance.task_operations.evaluate_task_acceptance import check_conditions
+from scripts.acceptance.evidence.task_review_diff import review_patch
+from scripts.acceptance.evidence.acceptance_record_store import (
     RecordError,
     content_hash,
     delivery_gate_locator,
@@ -30,7 +30,20 @@ class TestDependencyRecovery(unittest.TestCase):
         catalog = yaml.safe_load(path.read_text())
         tasks = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"]
         tasks[0]["depends_on"] = []
-        tasks.append({**tasks[0], "id": "LF-TSK-TEST-0002", "depends_on": [{"task_id": TASK_ID, "required_task_version": 1, "required_change_version": "1.0.0", "required_result": "PASS"}]})
+        tasks.append(
+            {
+                **tasks[0],
+                "id": "LF-TSK-TEST-0002",
+                "depends_on": [
+                    {
+                        "task_id": TASK_ID,
+                        "required_task_version": 1,
+                        "required_change_version": "1.0.0",
+                        "required_result": "PASS",
+                    }
+                ],
+            }
+        )
         path.write_text(yaml.safe_dump(catalog, sort_keys=False))
         self.f._git("add", "planning/workstreams.yaml")
         self.f._git("commit", "-m", "dependency recovery fixture catalog")
@@ -46,56 +59,8 @@ class TestDependencyRecovery(unittest.TestCase):
         return self._dependent_submission()
 
     def _dependent_submission(self) -> dict:
-        """Build a fixture submission with the task-2 requirements snapshot."""
-        from scripts.delivery_gate.records import publish_bytes, sha256_bytes
-        from scripts.delivery_gate.requirements import load_task_requirements
-        from scripts.verification import freeze_inputs, read_report
-
-        base = self.f.create_submission()
-        requirements = load_task_requirements(self.f.root, "LF-TSK-TEST-0002")
-        sid = str(uuid.uuid4())
-        report, descriptor = read_report(self.f.root, self.f.report_id)
-        diff = publish_bytes(
-            self.f.root,
-            f"tmp/quality/delivery-gate/submissions/{sid}.diff.patch",
-            review_patch(
-                self.f.root,
-                base["risk_assessment"]["base"],
-                report["scope_review"]["changed_files"],
-            ),
-        )
-        snapshots = {
-            name: {
-                "state": "present",
-                "sha256": sha256_bytes((self.f.root / name).read_bytes()),
-            }
-            for name in report["scope_review"]["changed_files"]
-        }
-        from scripts.delivery_gate.acceptance import acceptance_plan
-
-        plan = acceptance_plan(self.f.root, base["risk_assessment"], requirements)
-        record = {
-            **base,
-            "acceptance_plan": plan,
-            "submission_id": sid,
-            "task_requirements": requirements,
-            "change_report": descriptor,
-            "verification_freeze": freeze_inputs(
-                self.f.root,
-                required_check_ids=requirements["required_check_ids"],
-                verification_scope=plan["verification_scope"],
-                base=base["risk_assessment"]["base"],
-            ),
-            "changed_file_snapshots": snapshots,
-            "diff": diff,
-        }
-        record.pop("content_hash", None)
-        publish_json(
-            self.f.root,
-            delivery_gate_locator("submissions", sid),
-            record,
-        )
-        return load_submission(self.f.root, sid)
+        record = self.f.create_submission(task_id="LF-TSK-TEST-0002")
+        return load_submission(self.f.root, record["submission_id"])
 
     def _complete(self, result: str = "PASS") -> dict:
         submission = self._submit()
@@ -169,7 +134,7 @@ class TestDependencyRecovery(unittest.TestCase):
     def test_corrupt_submission_blocks_before_candidate_filtering(self) -> None:
         self._complete()
         dependent = self._dependent_with_receipts()
-        from scripts.delivery_gate.records import list_submissions
+        from scripts.acceptance.evidence.acceptance_record_store import list_submissions
 
         source = next(
             record
@@ -189,7 +154,7 @@ class TestDependencyRecovery(unittest.TestCase):
     def test_mocked_candidate_scan_is_reached_with_valid_dependent(self) -> None:
         dependent = self._dependent_with_receipts()
         with patch(
-            "scripts.delivery_gate.check.list_submissions",
+            "scripts.acceptance.task_operations.evaluate_task_acceptance.list_submissions",
             side_effect=RecordError("record-tampered", "fixture"),
         ) as mocked:
             # Public check catches candidate scan failure and fails closed.
@@ -201,7 +166,7 @@ class TestDependencyRecovery(unittest.TestCase):
 
     def test_corrupt_pass_check_and_duplicate_receipts_block(self) -> None:
         passed = self._complete()
-        from scripts.delivery_gate.records import list_layer
+        from scripts.acceptance.evidence.acceptance_record_store import list_layer
 
         check = list_layer(
             self.f.root, "checks", "submission_id", passed["submission_id"]
@@ -222,7 +187,7 @@ class TestDependencyRecovery(unittest.TestCase):
         self.setUp()
         passed = self._complete()
         original = self.f.validation_id
-        from scripts.delivery_gate.records import load_layer
+        from scripts.acceptance.evidence.acceptance_record_store import load_layer
 
         duplicate = dict(load_layer(self.f.root, "validations", original))
         duplicate["validation_id"] = str(uuid.uuid4())
@@ -283,7 +248,7 @@ class TestDependencyRecovery(unittest.TestCase):
     def test_invalid_result_cannot_disguise_corrupt_evidence_as_failed_history(
         self,
     ) -> None:
-        from scripts.delivery_gate.records import list_layer
+        from scripts.acceptance.evidence.acceptance_record_store import list_layer
 
         for layer, value in (
             ("validations", "UNKNOWN"),
@@ -351,7 +316,7 @@ class TestDependencyRecovery(unittest.TestCase):
 
     def test_nested_dependency_receipt_drift_blocks_pass_candidate(self) -> None:
         passed = self._complete()
-        from scripts.delivery_gate.records import list_layer
+        from scripts.acceptance.evidence.acceptance_record_store import list_layer
 
         check = list_layer(
             self.f.root, "checks", "submission_id", passed["submission_id"]
@@ -379,7 +344,14 @@ class TestDependencyRecovery(unittest.TestCase):
         task2 = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"][
             1
         ]
-        task2["depends_on"] = [{"task_id": TASK_ID, "required_task_version": 9, "required_change_version": "1.0.0", "required_result": "PASS"}]
+        task2["depends_on"] = [
+            {
+                "task_id": TASK_ID,
+                "required_task_version": 9,
+                "required_change_version": "1.0.0",
+                "required_result": "PASS",
+            }
+        ]
         catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False))
         self.f._git("add", "planning/workstreams.yaml")
         self.f._git("commit", "-m", "version constraint fixture")
@@ -401,7 +373,14 @@ class TestDependencyRecovery(unittest.TestCase):
         task1 = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"][
             0
         ]
-        task1["depends_on"] = [{"task_id": "LF-TSK-TEST-9999", "required_task_version": 1, "required_change_version": "1.0.0", "required_result": "PASS"}]
+        task1["depends_on"] = [
+            {
+                "task_id": "LF-TSK-TEST-9999",
+                "required_task_version": 1,
+                "required_change_version": "1.0.0",
+                "required_result": "PASS",
+            }
+        ]
         catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False))
         outcome = check_conditions(
             self.f.root, submission_id=dependent["submission_id"]

@@ -9,12 +9,13 @@ from unittest.mock import patch
 
 import yaml
 
-from scripts.delivery_gate.check import (
+from scripts.acceptance.task_operations.evaluate_task_acceptance import (
     _dependency_status,
     _EvaluationContext,
+    _EvidenceInspection,
     check_conditions,
 )
-from scripts.delivery_gate.records import (
+from scripts.acceptance.evidence.acceptance_record_store import (
     delivery_gate_locator,
     load_layer,
     load_submission,
@@ -75,122 +76,40 @@ class TestEvaluationContext(unittest.TestCase):
             )
         return nodes, records
 
-    def _run_diamond(self, *, use_context: bool):
+    def test_shared_diamond_inspects_once_per_stage_with_required_context(self):
         nodes, records = self._diamond()
-        reads = {
-            "submissions": 0,
-            "layer_scans": 0,
-            "requirements": 0,
-            "records": 0,
-            "evidence": 0,
-            "bound": 0,
-        }
-        visited: set[str] = set()
-        indexed_contexts: set[int] = set()
+        inspections = []
 
-        def requirements(_repo: Path, task_id: str):
-            reads["requirements"] += 1
-            return nodes[task_id]["task_requirements"]
+        def inspect(_repo, node, *args):
+            inspections.append(node["task_requirements"]["task_id"])
+            return _EvidenceInspection((), True)
 
-        def get_records(_repo: Path, node, context=None):
-            reads["records"] += 1
-            visited.add(node["submission_id"])
-            if context is None:
-                reads["layer_scans"] += 3
-            elif id(context) not in indexed_contexts:
-                indexed_contexts.add(id(context))
-                reads["layer_scans"] += 3
-            return records[node["submission_id"]]
-
-        def submissions(_repo: Path):
-            reads["submissions"] += 1
-            return list(nodes.values())
-
-        def evidence(*_args):
-            reads["evidence"] += 1
-            return []
-
-        def bound(*_args):
-            reads["bound"] += 1
-            return []
-
-        context = (
-            _EvaluationContext(submissions=list(nodes.values()))
-            if use_context
-            else None
-        )
-        if use_context:
-            reads["submissions"] += 1
-            reads["layer_scans"] += 3
-            indexed_contexts.add(id(context))
-        started = perf_counter()
         with (
             patch(
-                "scripts.delivery_gate.check.load_task_requirements",
-                side_effect=requirements,
-            ),
+                "scripts.acceptance.task_operations.evaluate_task_acceptance.load_task_requirements",
+                side_effect=lambda repo, task: nodes[task]["task_requirements"],
+            ) as requirements,
             patch(
-                "scripts.delivery_gate.check.list_submissions",
-                side_effect=submissions,
-            ),
-            patch("scripts.delivery_gate.check._records", side_effect=get_records),
+                "scripts.acceptance.task_operations.evaluate_task_acceptance._records",
+                side_effect=lambda repo, node, context: records[node["submission_id"]],
+            ) as reads,
             patch(
-                "scripts.delivery_gate.check._existing_evidence_errors",
-                side_effect=evidence,
+                "scripts.acceptance.task_operations.evaluate_task_acceptance._inspect_dependency", side_effect=inspect
             ),
-            patch("scripts.delivery_gate.check._bound_chain", side_effect=bound),
-            patch("scripts.delivery_gate.check.review_required", return_value=False),
+            patch("scripts.acceptance.task_operations.evaluate_task_acceptance.review_required", return_value=False),
         ):
-            result = _dependency_status(Path("/unused"), nodes["D"], context=context)
-            # Both paths include a final no-cache-independent snapshot and source recheck.
-            if use_context:
-                reads["submissions"] += 1
-                reads["layer_scans"] += 3
-            fresh_context = (
-                _EvaluationContext(submissions=list(nodes.values()))
-                if use_context
-                else None
+            context = _EvaluationContext(submissions=list(nodes.values()))
+            result = _dependency_status(Path("/unused"), nodes["D"], set(), context)
+            self.assertTrue(result[0])
+            self.assertEqual(inspections, ["B", "A", "C"])
+            self.assertEqual(requirements.call_count, 4)
+            self.assertEqual(reads.call_count, 3)
+            fresh = _EvaluationContext(submissions=list(nodes.values()))
+            self.assertEqual(
+                _dependency_status(Path("/unused"), nodes["D"], set(), fresh), result
             )
-            if use_context:
-                indexed_contexts.add(id(fresh_context))
-            fresh = _dependency_status(
-                Path("/unused"), nodes["D"], context=fresh_context
-            )
-            for sid in sorted(visited):
-                node = next(
-                    item for item in nodes.values() if item["submission_id"] == sid
-                )
-                validation, review, check = get_records(
-                    Path("/unused"), node, fresh_context
-                )
-                evidence(Path("/unused"), node, validation, review, check)
-                if check and check.get("result") == "PASS":
-                    bound(Path("/unused"), node, validation, review)
-            elapsed = perf_counter() - started
-        self.assertEqual(fresh, result)
-        return result, reads, elapsed
-
-    def test_shared_diamond_reuses_receipt_and_hash_chain_once_per_evaluation(
-        self,
-    ) -> None:
-        baseline, before, before_seconds = self._run_diamond(use_context=False)
-        optimized, after, after_seconds = self._run_diamond(use_context=True)
-        self.assertEqual(optimized, baseline)
-        self.assertTrue(optimized[0])
-        self.assertEqual(before["requirements"], 10)
-        self.assertEqual(after["requirements"], 8)
-        self.assertEqual(before["records"], 11)
-        self.assertEqual(after["records"], 9)
-        self.assertEqual(before["evidence"], 11)
-        self.assertEqual(after["evidence"], 9)
-        self.assertEqual(before["bound"], 11)
-        self.assertEqual(after["bound"], 9)
-        self.assertEqual(before["submissions"], 8)
-        self.assertEqual(after["submissions"], 2)
-        self.assertEqual(before["layer_scans"], 33)
-        self.assertEqual(after["layer_scans"], 6)
-        self.assertGreater(before_seconds, 0)
-        self.assertGreater(after_seconds, 0)
+            self.assertEqual(inspections, ["B", "A", "C", "B", "A", "C"])
+            self.assertEqual(requirements.call_count, 8)
 
     def test_cycle_is_fail_closed_and_detected_before_memo_lookup(self) -> None:
         node = {

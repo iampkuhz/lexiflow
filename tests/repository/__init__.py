@@ -1,1 +1,1 @@
-"""Tests for the scripts.repository module."""
+"""Tests for the scripts.checks.repository module."""

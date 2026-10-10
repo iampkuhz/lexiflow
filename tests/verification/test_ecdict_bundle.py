@@ -13,7 +13,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.environment import ecdict_bundle as bundle
+from ops.dataset import prepare_ecdict_bundle as bundle
 
 
 def _row(word: str, translation: str = "中文释义", **changes: str) -> dict[str, str]:
@@ -208,6 +208,7 @@ class EcdictBundleTests(unittest.TestCase):
             mapping,
             b"source_row\n2\ns:8\n",
         )
+
     def test_compact_manifest_declares_schema_and_reversible_mapping(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -220,7 +221,9 @@ class EcdictBundleTests(unittest.TestCase):
                 ),
                 patch.object(bundle, "_verify_sources"),
             ):
-                bundle.build(root, root / "bundle.zip")
+                bundle.build(
+                    root, root / "bundle.zip", generation_code_version="a" * 64
+                )
             with zipfile.ZipFile(root / "bundle.zip") as archive:
                 manifest = json.loads(archive.read("manifest.json"))
                 self.assertEqual(manifest["schema_version"], 2)
@@ -238,43 +241,92 @@ class EcdictBundleTests(unittest.TestCase):
                 published = list(csv.DictReader(io.StringIO(mapping.decode("utf-8"))))
                 self.assertEqual(len(published), 4)
                 self.assertTrue(all(set(row) == {"source_row"} for row in published))
-                self.assertEqual(sum(row["source_row"].startswith("s:") for row in published), 3)
-                compact = list(csv.DictReader(io.StringIO(archive.read("stardict.csv").decode("utf-8"))))
+                self.assertEqual(
+                    sum(row["source_row"].startswith("s:") for row in published), 3
+                )
+                compact = list(
+                    csv.DictReader(
+                        io.StringIO(archive.read("stardict.csv").decode("utf-8"))
+                    )
+                )
                 self.assertEqual(len(compact), len(published))
-                for name, data in (("source-rows.csv", mapping), ("stardict.csv", archive.read("stardict.csv"))):
-                    self.assertEqual(manifest["members"][name], {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+                for name, data in (
+                    ("source-rows.csv", mapping),
+                    ("stardict.csv", archive.read("stardict.csv")),
+                ):
+                    self.assertEqual(
+                        manifest["members"][name],
+                        {
+                            "bytes": len(data),
+                            "sha256": hashlib.sha256(data).hexdigest(),
+                        },
+                    )
 
     def test_multiline_source_records_preserve_published_record_ordinals(self) -> None:
-        base = [_row("before", "多行\n中文释义"), _row("oxford", "证据\n释义", oxford="1"), _row("after")]
-        full = [_row("other", "全文\n释义"), _row("literally"), _row("sustainability"), _row("stream of data")]
+        base = [
+            _row("before", "多行\n中文释义"),
+            _row("oxford", "证据\n释义", oxford="1"),
+            _row("after"),
+        ]
+        full = [
+            _row("other", "全文\n释义"),
+            _row("literally"),
+            _row("sustainability"),
+            _row("stream of data"),
+        ]
         selected, _, _ = bundle._build_rows(_csv(base), _csv(full))
         data, mapping = bundle._serialize(selected)
         compact = list(csv.DictReader(io.StringIO(data.decode("utf-8"), newline="")))
         markers = list(csv.DictReader(io.StringIO(mapping.decode("utf-8"), newline="")))
-        expected = {"before": "2", "oxford": "3", "after": "4", "literally": "s:3", "sustainability": "s:4", "stream of data": "s:5"}
+        expected = {
+            "before": "2",
+            "oxford": "3",
+            "after": "4",
+            "literally": "s:3",
+            "sustainability": "s:4",
+            "stream of data": "s:5",
+        }
         self.assertEqual(len(compact), len(markers))
         for row, marker in zip(compact, markers, strict=True):
             self.assertEqual(marker, {"source_row": expected[row["word"]]})
-        self.assertEqual(next(row for row in compact if row["word"] == "oxford")["translation"], "证据\n释义")
+        self.assertEqual(
+            next(row for row in compact if row["word"] == "oxford")["translation"],
+            "证据\n释义",
+        )
 
     def test_duplicate_oxford_records_keep_distinct_source_ordinals(self) -> None:
-        base = [_row("before", "多行\n释义"), _row("evidence", "第一条\n释义", oxford="1"), _row("evidence", "第二条", oxford="1")]
+        base = [
+            _row("before", "多行\n释义"),
+            _row("evidence", "第一条\n释义", oxford="1"),
+            _row("evidence", "第二条", oxford="1"),
+        ]
         selected, counts, _ = bundle._build_rows(_csv(base), _full([]))
         self.assertEqual(counts["oxford_support_rows_seen"], 2)
         data, mapping = bundle._serialize(selected)
         rows = list(csv.DictReader(io.StringIO(data.decode("utf-8"), newline="")))
         markers = list(csv.DictReader(io.StringIO(mapping.decode("utf-8"), newline="")))
-        evidence = [(row["translation"], marker["source_row"]) for row, marker in zip(rows, markers, strict=True) if row["word"] == "evidence"]
+        evidence = [
+            (row["translation"], marker["source_row"])
+            for row, marker in zip(rows, markers, strict=True)
+            if row["word"] == "evidence"
+        ]
         self.assertEqual(evidence, [("第一条\n释义", "3"), ("第二条", "4")])
 
-    def test_source_reader_requires_exact_header_and_complete_record_shape(self) -> None:
-        for invalid in (b"wrong,header\na,b\n", ",".join(bundle.HEADER).encode() + b"\nword\n", _csv([_row("word")]) + b"a,b,c,d,e,f,g,h,i,j,k,l,m,n\n", _csv([_row("word")]) + b"\xff\n"):
+    def test_source_reader_requires_exact_header_and_complete_record_shape(
+        self,
+    ) -> None:
+        for invalid in (
+            b"wrong,header\na,b\n",
+            ",".join(bundle.HEADER).encode() + b"\nword\n",
+            _csv([_row("word")]) + b"a,b,c,d,e,f,g,h,i,j,k,l,m,n\n",
+            _csv([_row("word")]) + b"\xff\n",
+        ):
             with self.subTest(invalid=invalid), self.assertRaises(bundle.BundleError):
-                list(bundle._iter_rows(invalid, bundle.HEADER))
+                list(bundle._iter_rows(invalid))
 
     def test_invalid_header_and_source_hash_fail_closed(self) -> None:
         with self.assertRaises(bundle.BundleError):
-            list(bundle._iter_rows(b"wrong,header\na,b\n", bundle.HEADER))
+            list(bundle._iter_rows(b"wrong,header\na,b\n"))
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
             (repo / "stardict.csv").write_bytes(b"untrusted")
@@ -293,7 +345,7 @@ class EcdictBundleTests(unittest.TestCase):
             output = root / "existing.zip"
             output.write_bytes(b"keep")
             with self.assertRaises(bundle.BundleError):
-                bundle.build(root, output)
+                bundle.build(root, output, generation_code_version="a" * 64)
             self.assertEqual(output.read_bytes(), b"keep")
 
     def test_build_rejects_limits_and_cleans_atomic_failures(self) -> None:
@@ -349,7 +401,7 @@ class EcdictBundleTests(unittest.TestCase):
                             )
                         )
                     with self.assertRaises((bundle.BundleError, OSError)):
-                        bundle.build(root, output)
+                        bundle.build(root, output, generation_code_version="a" * 64)
                     if failure not in ("csv-limit", "zip-limit"):
                         final_check.assert_called_once()
                 self.assertFalse(output.exists())
@@ -367,11 +419,9 @@ class EcdictBundleTests(unittest.TestCase):
                 patch.object(
                     bundle, "_read_full_csv", return_value=(b"full", "full-hash")
                 ),
+                self.assertRaisesRegex(bundle.BundleError, "changed"),
             ):
-                with self.assertRaisesRegex(bundle.BundleError, "changed"):
-                    bundle._verify_sources(
-                        root, {"files": {}}, "initial-hash", "full-hash"
-                    )
+                bundle._verify_sources(root, {"files": {}}, "initial-hash", "full-hash")
 
     def test_zip_member_order_timestamp_mode_and_hashes(self) -> None:
         members = {
@@ -406,6 +456,20 @@ class EcdictBundleTests(unittest.TestCase):
                         hashlib.sha256(archive.read(info.filename)).hexdigest(),
                         hashlib.sha256(members[info.filename]).hexdigest(),
                     )
+
+    def test_extracted_csv_is_required_without_archive_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(bundle.subprocess, "Popen") as process,
+                self.assertRaises(bundle.BundleError),
+            ):
+                bundle._read_full_csv(Path(directory))
+            process.assert_not_called()
+
+    def test_cli_rejects_generator_source_override(self):
+        self.assertEqual(
+            bundle.main(["--source-repo", "repo", "--output", "bundle.zip"]), 2
+        )
 
 
 if __name__ == "__main__":

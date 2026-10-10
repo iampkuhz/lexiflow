@@ -12,11 +12,12 @@ import unittest
 from pathlib import Path
 
 import yaml
-from scripts.verification.declarations import load_declarations
+from tests.verification.declaration_fixtures import input_closure
+from scripts.verification.planning.check_definitions import load_declarations
 
 
 ROOT = Path(__file__).resolve().parents[2]
-MODULE_CHECKS_PATH = ROOT / "harness" / "module-checks.yaml"
+MODULE_CHECKS_PATH = ROOT / "config" / "engineering" / "module-checks.yaml"
 
 RETIRED_MODULES = {
     "scripts/toolchain/lexicon_import.py",
@@ -25,8 +26,8 @@ RETIRED_MODULES = {
 }
 
 RETAINED_MODULES = {
-    "scripts/environment/java_runtime.py",
-    "scripts/environment/java_exec.py",
+    "scripts/environment/toolchains/java_toolchain_selection.py",
+    "scripts/local/run_with_java_toolchain.py",
 }
 
 
@@ -37,8 +38,8 @@ class ModuleChecksDeclarationTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.document = load_declarations(ROOT)
 
-    def test_schema_version_is_declared(self) -> None:
-        self.assertEqual("lexiflow.module-checks.v2", self.document["schema_version"])
+    def test_protocol_is_not_repeated_as_configuration(self) -> None:
+        self.assertEqual({"checks", "scenario_policy"}, set(self.document))
 
     def test_pending_product_coverage_placeholder_is_removed(self) -> None:
         check_ids = [check["check_id"] for check in self.document["checks"]]
@@ -52,7 +53,6 @@ class ModuleChecksDeclarationTest(unittest.TestCase):
         ]
         self.assertEqual(1, len(backend_checks), "backend delivery check must exist")
         check = backend_checks[0]
-        self.assertEqual("backend", check["module"])
         self.assertIn("deliveryFull", " ".join(str(a) for a in check["command"]))
         self.assertEqual("exit-code", check["result_contract"]["type"])
 
@@ -64,11 +64,45 @@ class ModuleChecksDeclarationTest(unittest.TestCase):
         ]
         self.assertEqual(1, len(ext_checks), "extension quality check must exist")
         check = ext_checks[0]
-        self.assertEqual("extension", check["module"])
         self.assertEqual(
-            ["node", "extension/scripts/quality-check.mjs"], check["command"]
+            ["node", "extension/scripts/checks/run-extension-checks.mjs"], check["command"]
         )
         self.assertEqual("json-stdout", check["result_contract"]["type"])
+
+    def test_docker_group_members_remain_exact_and_nonoverlapping(self) -> None:
+        from scripts.checks.deployment.run_deployment_contract_tests import _members
+
+        checks = {check["check_id"]: check for check in self.document["checks"]}
+        members = _members(checks)
+        expected = {
+            "surface": {
+                "test_contract.py",
+                "test_module_check_adapter.py",
+                "test_podman_compose_contract.py",
+            },
+            "shell": {
+                "test_docker_bounds.py",
+                "test_docker_environment.py",
+                "test_lifecycle_flow.py",
+                "test_operation_ownership.py",
+                "test_secret_publication.py",
+                "test_state_records.py",
+            },
+            "local": {
+                "test_ecdict_fetch.py",
+                "test_podman_doctor.py",
+                "test_podman_fake_transport.py",
+                "test_podman_local.py",
+                "test_podman_network.py",
+                "test_podman_progress.py",
+            },
+        }
+        for group, names in expected.items():
+            self.assertEqual(names, {Path(path).name for path in members[group]})
+        self.assertTrue(members["node"])
+        self.assertTrue(all(path.endswith(".test.mjs") for path in members["node"]))
+        flattened = [path for paths in members.values() for path in paths]
+        self.assertEqual(len(flattened), len(set(flattened)))
 
     def test_all_engineering_modules_have_baseline_and_change_entries(self) -> None:
         checks = {check["check_id"]: check for check in self.document["checks"]}
@@ -78,16 +112,17 @@ class ModuleChecksDeclarationTest(unittest.TestCase):
             "eng.delivery-gate.module-tests",
             "eng.repository.module-tests",
             "eng.repository.docs",
-            "eng.repository.policy",
             "eng.repository.planning",
-            "eng.repository.hooks",
             "eng.backend.delivery",
             "eng.extension.quality",
         }
         for check_id in expected:
             with self.subTest(check_id=check_id):
                 self.assertIn(check_id, checks)
-                self.assertIn(check_id + "-on-change", checks)
+                self.assertEqual(
+                    set(checks[check_id]["scenarios"]),
+                    {"repository-baseline", "change-targeted"},
+                )
 
     def test_repository_module_tests_check_is_registered(self) -> None:
         repo_checks = [
@@ -97,9 +132,8 @@ class ModuleChecksDeclarationTest(unittest.TestCase):
         ]
         self.assertEqual(1, len(repo_checks), "repository unit test check must exist")
         check = repo_checks[0]
-        self.assertEqual("repository", check["module"])
         self.assertIn(
-            "scripts.repository.quality", " ".join(str(a) for a in check["command"])
+            "scripts.checks.repository.run_repository_check_group", " ".join(str(a) for a in check["command"])
         )
 
     def test_structured_python_module_contract_rejects_empty_or_skipped(self) -> None:
@@ -176,7 +210,7 @@ class ExtensionQualityEntryTest(unittest.TestCase):
         )
         scripts = package_json.get("scripts", {})
         self.assertIn("quality:check", scripts)
-        self.assertIn("quality-check.mjs", scripts["quality:check"])
+        self.assertIn("scripts/checks/run-extension-checks.mjs", scripts["quality:check"])
 
     def test_product_checks_have_strict_public_contracts_and_source_inputs(
         self,
@@ -185,13 +219,11 @@ class ExtensionQualityEntryTest(unittest.TestCase):
         checks = {check["check_id"]: check for check in document["checks"]}
         for check_id in (
             "eng.backend.delivery",
-            "eng.backend.delivery-on-change",
             "eng.extension.quality",
-            "eng.extension.quality-on-change",
         ):
             with self.subTest(check_id=check_id):
                 check = checks[check_id]
-                self.assertNotIn("backend", check["input_paths"])
+                self.assertNotIn("backend", input_closure(ROOT, check))
         self.assertEqual(
             "exit-code", checks["eng.backend.delivery"]["result_contract"]["type"]
         )
@@ -204,10 +236,11 @@ class ExtensionQualityEntryTest(unittest.TestCase):
         )
         self.assertIn(
             "extension/package-lock.json",
-            checks["eng.extension.quality"]["input_paths"],
+            input_closure(ROOT, checks["eng.extension.quality"]),
         )
         self.assertEqual(
             [
+                "python3",
                 "java-25-temurin",
                 "node",
                 "git",

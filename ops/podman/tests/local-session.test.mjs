@@ -8,10 +8,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runLocal } from '../local.mjs';
-import { doctor } from '../doctor.mjs';
+import { runLocal } from '../commands/manage-podman-installation.mjs';
+import { doctor } from '../commands/diagnose-podman-installation.mjs';
 
-const cli = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../local.mjs');
+const cli = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../commands/manage-podman-installation.mjs');
 const quiet = async callback => {
   const original = console.log;
   const errors = console.error;

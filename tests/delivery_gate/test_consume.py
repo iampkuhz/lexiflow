@@ -9,9 +9,13 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
 
-from scripts.delivery_gate.check import check_conditions
-from scripts.delivery_gate.consume import consume_existing_pass
-from scripts.delivery_gate.records import content_hash, delivery_gate_locator, publish_json
+from scripts.acceptance.task_operations.evaluate_task_acceptance import check_conditions
+from scripts.acceptance.evidence.verify_existing_acceptance_chain import consume_existing_pass
+from scripts.acceptance.evidence.acceptance_record_store import (
+    content_hash,
+    delivery_gate_locator,
+    publish_json,
+)
 from tests.delivery_gate.fixtures import DeliveryGateFixture
 
 
@@ -47,18 +51,22 @@ def _rewrite(path: Path, change):
 def _consume_readonly(test, fixture):
     before = _tree(fixture.root)
     forbidden = (
-        "scripts.delivery_gate.check.publish_json",
-        "scripts.delivery_gate.records.publish_json",
-        "scripts.delivery_gate.records.publish_bytes",
-        "scripts.delivery_gate.validate.verify_profiles",
-        "scripts.delivery_gate.validate.validate_batch",
-        "scripts.delivery_gate.review.review",
-        "scripts.verification.verify_changes",
+        "scripts.acceptance.task_operations.evaluate_task_acceptance.publish_json",
+        "scripts.acceptance.evidence.acceptance_record_store.publish_json",
+        "scripts.acceptance.evidence.acceptance_record_store.publish_bytes",
+        "scripts.acceptance.task_operations.run_independent_task_validation.verify_profiles",
+        "scripts.acceptance.task_operations.run_independent_task_validation.validate_batch",
+        "scripts.acceptance.task_operations.record_independent_task_review.review",
         "scripts.verification.verify_repository",
     )
     with ExitStack() as stack:
-        mocks = [stack.enter_context(patch(name, side_effect=AssertionError(name))) for name in forbidden]
-        result = consume_existing_pass(fixture.root, submission_id=fixture.submission_id)
+        mocks = [
+            stack.enter_context(patch(name, side_effect=AssertionError(name)))
+            for name in forbidden
+        ]
+        result = consume_existing_pass(
+            fixture.root, submission_id=fixture.submission_id
+        )
         for mock in mocks:
             mock.assert_not_called()
     test.assertEqual(before, _tree(fixture.root))
@@ -74,10 +82,18 @@ class TestConsumeExisting(unittest.TestCase):
         self.f = DeliveryGateFixture()
         self.f.create_submission()
         self.validation = self.f.create_validation()
-        self.validation = json.loads(_receipt_path(self.f.root, "validations", self.validation["validation_id"]).read_text())
+        self.validation = json.loads(
+            _receipt_path(
+                self.f.root, "validations", self.validation["validation_id"]
+            ).read_text()
+        )
         self.review = self.f.create_review()
-        self.review = json.loads(_receipt_path(self.f.root, "reviews", self.review["review_id"]).read_text())
-        self.submission = json.loads(_receipt_path(self.f.root, "submissions", self.f.submission_id).read_text())
+        self.review = json.loads(
+            _receipt_path(self.f.root, "reviews", self.review["review_id"]).read_text()
+        )
+        self.submission = json.loads(
+            _receipt_path(self.f.root, "submissions", self.f.submission_id).read_text()
+        )
         self.check = check_conditions(self.f.root, submission_id=self.f.submission_id)
         self.assertEqual(self.check["result"], "PASS")
 
@@ -95,45 +111,60 @@ class TestConsumeExisting(unittest.TestCase):
             self.assertEqual(result["result"], "PASS")
             self.assertEqual(result["submission_id"], self.f.submission_id)
             proof = result["proof"]
-            self.assertEqual(proof, {
-                "submission_id": self.f.submission_id,
-                "submission_content_hash": self.submission["content_hash"],
-                "validation_id": self.validation["validation_id"],
-                "validation_content_hash": self.validation["content_hash"],
-                "review_id": self.review["review_id"],
-                "review_content_hash": self.review["content_hash"],
-                "check_id": self.check["check_id"],
-                "check_content_hash": self.check["content_hash"],
-                "task_id": "LF-TSK-TEST-0001",
-                "task_version": 1,
-                "change_version": "1.0.0",
-                "frozen_input_fingerprint": self.validation["frozen_input_fingerprint"],
-                "verification_report": self.validation["verification_report"],
-            })
+            self.assertEqual(
+                proof,
+                {
+                    "submission_id": self.f.submission_id,
+                    "submission_content_hash": self.submission["content_hash"],
+                    "validation_id": self.validation["validation_id"],
+                    "validation_content_hash": self.validation["content_hash"],
+                    "review_id": self.review["review_id"],
+                    "review_content_hash": self.review["content_hash"],
+                    "check_id": self.check["check_id"],
+                    "check_content_hash": self.check["content_hash"],
+                    "task_id": "LF-TSK-TEST-0001",
+                    "task_version": 1,
+                    "change_version": "1.0.0",
+                    "frozen_input_fingerprint": self.validation[
+                        "frozen_input_fingerprint"
+                    ],
+                    "verification_report": self.validation["verification_report"],
+                },
+            )
             self.assertEqual(result["check_id"], self.check["check_id"])
 
     def test_missing_check_never_publishes(self):
-        shutil.rmtree(self.f.root / "tmp/quality/delivery-gate/checks")
+        shutil.rmtree(self.f.root / "tmp/quality/delivery-gate/current/checks")
         before = _tree(self.f.root)
         result = self._consume_snapshot()
         self.assertEqual(before, _tree(self.f.root))
-        self.assertEqual((result["result"], result["reason"]), ("BLOCKED", "check-missing"))
+        self.assertEqual(
+            (result["result"], result["reason"]), ("BLOCKED", "check-missing")
+        )
         self.assertNotIn("proof", result)
 
     def test_missing_validation_and_review_fail_closed(self):
-        shutil.rmtree(self.f.root / "tmp/quality/delivery-gate/validations")
+        shutil.rmtree(self.f.root / "tmp/quality/delivery-gate/current/validations")
         result = self._consume_snapshot()
-        self.assertEqual((result["result"], result["reason"]), ("BLOCKED", "validation-missing"))
+        self.assertEqual(
+            (result["result"], result["reason"]), ("BLOCKED", "validation-missing")
+        )
         self.assertNotIn("proof", result)
 
     def test_missing_review_fail_closed(self):
-        shutil.rmtree(self.f.root / "tmp/quality/delivery-gate/reviews")
+        shutil.rmtree(self.f.root / "tmp/quality/delivery-gate/current/reviews")
         result = self._consume_snapshot()
-        self.assertEqual((result["result"], result["reason"]), ("BLOCKED", "review-missing"))
+        self.assertEqual(
+            (result["result"], result["reason"]), ("BLOCKED", "review-missing")
+        )
         self.assertNotIn("proof", result)
 
     def test_duplicate_check_and_review_are_rejected(self):
-        for kind, record_id in (("checks", self.check["check_id"]), ("reviews", self.review["review_id"]), ("validations", self.validation["validation_id"])):
+        for kind, record_id in (
+            ("checks", self.check["check_id"]),
+            ("reviews", self.review["review_id"]),
+            ("validations", self.validation["validation_id"]),
+        ):
             source = _receipt_path(self.f.root, kind, record_id)
             duplicate_id = str(uuid.uuid4())
             target = _receipt_path(self.f.root, kind, duplicate_id)
@@ -141,7 +172,9 @@ class TestConsumeExisting(unittest.TestCase):
             shutil.copyfile(source, target)
             _rewrite(target, lambda r: r.update({kind[:-1] + "_id": duplicate_id}))
             result = self._consume_snapshot()
-            self.assertEqual((result["result"], result["reason"]), ("BLOCKED", "ambiguous-receipt"))
+            self.assertEqual(
+                (result["result"], result["reason"]), ("BLOCKED", "ambiguous-receipt")
+            )
             self.assertNotIn("proof", result)
             shutil.rmtree(target.parent)
 
@@ -166,7 +199,12 @@ class TestConsumeExisting(unittest.TestCase):
         self.assertNotIn("proof", result)
 
     def test_validation_report_bytes_must_match_bound_descriptor(self):
-        report_path = _receipt_path(self.f.root, "validations", self.validation["validation_id"]).parent / "report.json"
+        report_path = (
+            _receipt_path(
+                self.f.root, "validations", self.validation["validation_id"]
+            ).parent
+            / "report.json"
+        )
         report_path.chmod(0o600)
         report_path.write_bytes(report_path.read_bytes() + b"tamper")
         report_path.chmod(0o400)
@@ -175,56 +213,93 @@ class TestConsumeExisting(unittest.TestCase):
         self.assertNotIn("proof", result)
 
     def test_non_pass_and_wrong_layer_bindings_are_rejected(self):
-        val_path = _receipt_path(self.f.root, "validations", self.validation["validation_id"])
+        val_path = _receipt_path(
+            self.f.root, "validations", self.validation["validation_id"]
+        )
         _rewrite(val_path, lambda r: r.update(result="FAIL"))
         result = self._consume_snapshot()
         self.assertEqual(result["result"], "FAIL")
         self.assertNotIn("proof", result)
-        _rewrite(val_path, lambda r: r.update(
-            result="PASS", submission_id=self.f.submission_id,
-        ))
+        _rewrite(
+            val_path,
+            lambda r: r.update(
+                result="PASS",
+                submission_id=self.f.submission_id,
+            ),
+        )
         review_path = _receipt_path(self.f.root, "reviews", self.review["review_id"])
         _rewrite(review_path, lambda r: r.update(validation_id=str(uuid.uuid4())))
         result = self._consume_snapshot()
         self.assertEqual(result["result"], "FAIL")
         self.assertNotIn("proof", result)
-        _rewrite(val_path, lambda r: r.update(result="PASS", submission_id=str(uuid.uuid4())))
+        _rewrite(
+            val_path, lambda r: r.update(result="PASS", submission_id=str(uuid.uuid4()))
+        )
         result = self._consume_snapshot()
-        self.assertEqual((result["result"], result["reason"]), ("BLOCKED", "validation-missing"))
+        self.assertEqual(
+            (result["result"], result["reason"]), ("BLOCKED", "validation-missing")
+        )
         self.assertNotIn("proof", result)
 
     def test_self_validation_and_review_are_rejected_even_with_valid_authority(self):
-        val_path = _receipt_path(self.f.root, "validations", self.validation["validation_id"])
-        producer = self.submission["producer"]
-        _rewrite(val_path, lambda r: r.update(
-            validator_identity=producer["identity"],
-            runtime_proof=producer["runtime_proof"],
-            authority=producer["authority"],
-        ))
+        val_path = _receipt_path(
+            self.f.root, "validations", self.validation["validation_id"]
+        )
+        producer = {
+            "identity": self.submission["submitter_identity"],
+            "runtime_proof": self.submission["runtime_proof"],
+            "authority": self.submission["authority"],
+        }
+        _rewrite(
+            val_path,
+            lambda r: r.update(
+                validator_identity=producer["identity"],
+                runtime_proof=producer["runtime_proof"],
+                authority=producer["authority"],
+            ),
+        )
         result = self._consume_snapshot()
-        self.assertIn("self-validation-forbidden", result["conditions"]["hash_dag_errors"])
+        self.assertIn(
+            "self-validation-forbidden", result["conditions"]["hash_dag_errors"]
+        )
         self.assertNotIn("proof", result)
-        _rewrite(val_path, lambda r: r.update(
-            validator_identity=self.validation["validator_identity"],
-            runtime_proof=self.validation["runtime_proof"],
-            authority=self.validation["authority"],
-        ))
+        _rewrite(
+            val_path,
+            lambda r: r.update(
+                validator_identity=self.validation["validator_identity"],
+                runtime_proof=self.validation["runtime_proof"],
+                authority=self.validation["authority"],
+            ),
+        )
         review_path = _receipt_path(self.f.root, "reviews", self.review["review_id"])
-        _rewrite(review_path, lambda r: r.update(
-            reviewer_identity=self.validation["validator_identity"],
-            runtime_proof=self.validation["runtime_proof"],
-            authority=self.validation["authority"],
-        ))
+        _rewrite(
+            review_path,
+            lambda r: r.update(
+                reviewer_identity=self.validation["validator_identity"],
+                runtime_proof=self.validation["runtime_proof"],
+                authority=self.validation["authority"],
+            ),
+        )
         result = self._consume_snapshot()
-        self.assertIn("reviewer-not-independent", result["conditions"]["hash_dag_errors"])
+        self.assertIn(
+            "reviewer-not-independent", result["conditions"]["hash_dag_errors"]
+        )
         self.assertNotIn("proof", result)
 
     def test_changed_dependency_requirement_is_not_pass(self):
         catalog_path = self.f.root / "planning/workstreams.yaml"
         import yaml
+
         catalog = yaml.safe_load(catalog_path.read_text())
         task = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"][0]
-        task["depends_on"] = [{"task_id": "LF-TSK-TEST-0099", "required_task_version": 1, "required_change_version": "1.0.0", "required_result": "PASS"}]
+        task["depends_on"] = [
+            {
+                "task_id": "LF-TSK-TEST-0099",
+                "required_task_version": 1,
+                "required_change_version": "1.0.0",
+                "required_result": "PASS",
+            }
+        ]
         catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False))
         result = self._consume_snapshot()
         self.assertNotEqual(result["result"], "PASS")
@@ -234,7 +309,9 @@ class TestConsumeExisting(unittest.TestCase):
         check_path = _receipt_path(self.f.root, "checks", self.check["check_id"])
         _rewrite(check_path, lambda r: r.update(reason="unexpected"))
         result = self._consume_snapshot()
-        self.assertEqual((result["result"], result["reason"]), ("BLOCKED", "existing-check-mismatch"))
+        self.assertEqual(
+            (result["result"], result["reason"]), ("BLOCKED", "existing-check-mismatch")
+        )
         _rewrite(check_path, lambda r: r.update(reason=""))
         review_path = _receipt_path(self.f.root, "reviews", self.review["review_id"])
         _rewrite(review_path, lambda r: r.update(result="FAIL"))
@@ -257,20 +334,46 @@ class TestConsumeExisting(unittest.TestCase):
             other.cleanup()
 
     def test_cli_three_exit_codes_and_rejects_actor_candidate(self):
-        from scripts.delivery_gate.__main__ import main
+        from scripts.acceptance.__main__ import main
         from contextlib import redirect_stdout
         from io import StringIO
+
         for status, code in (("PASS", 0), ("BLOCKED", 2), ("FAIL", 1)):
-            with patch("scripts.delivery_gate.consume.consume_existing_pass", return_value={"result": status, "published": False, "delivery_rerun": False}), redirect_stdout(StringIO()):
-                self.assertEqual(main(["consume-existing", "--submission-id", self.f.submission_id], root=self.f.root), code)
+            with (
+                patch(
+                    "scripts.acceptance.evidence.verify_existing_acceptance_chain.consume_existing_pass",
+                    return_value={
+                        "result": status,
+                        "published": False,
+                        "delivery_rerun": False,
+                    },
+                ),
+                redirect_stdout(StringIO()),
+            ):
+                self.assertEqual(
+                    main(
+                        ["consume-existing", "--submission-id", self.f.submission_id],
+                        root=self.f.root,
+                    ),
+                    code,
+                )
         for extra in (("--actor", "someone"), ("--candidate", "anything")):
             with self.assertRaises(SystemExit):
-                main(["consume-existing", "--submission-id", self.f.submission_id, *extra], root=self.f.root)
+                main(
+                    [
+                        "consume-existing",
+                        "--submission-id",
+                        self.f.submission_id,
+                        *extra,
+                    ],
+                    root=self.f.root,
+                )
 
 
 class TestConsumeDependencyAndApproval(unittest.TestCase):
     def setUp(self):
         from tests.delivery_gate import test_security_contract
+
         self.scenario = test_security_contract.TestDependencyDagAndApproval()
         self.scenario.setUp()
         self.f = self.scenario.f
@@ -286,24 +389,37 @@ class TestConsumeDependencyAndApproval(unittest.TestCase):
 
     def test_transitive_dependency_check_removed_from_existing_pass_chain(self):
         self.assertEqual(_consume_readonly(self, self.f)["result"], "PASS")
-        shutil.rmtree(_receipt_path(self.f.root, "checks", self.first_check["check_id"]).parent)
+        shutil.rmtree(
+            _receipt_path(self.f.root, "checks", self.first_check["check_id"]).parent
+        )
         result = _consume_readonly(self, self.f)
-        self.assertEqual((result["result"], result["reason"]), ("BLOCKED", "dependency-not-pass"))
+        self.assertEqual(
+            (result["result"], result["reason"]), ("BLOCKED", "dependency-not-pass")
+        )
 
     def test_bound_approval_removed_from_existing_pass_chain(self):
         self.scenario._submission("LF-TSK-TEST-0003")
         approval = {
             "schema_version": "lexiflow.user-approval.v1",
-            "approval_id": str(uuid.uuid4()), "gate_id": "G1", "decision": "APPROVED",
-            "subject_task_id": "LF-TSK-TEST-0002", "subject_task_version": 1,
+            "approval_id": str(uuid.uuid4()),
+            "gate_id": "G1",
+            "decision": "APPROVED",
+            "subject_task_id": "LF-TSK-TEST-0002",
+            "subject_task_version": 1,
             "subject_change_version": "1.0.0",
             "subject_check_content_hash": self.second_check["content_hash"],
-            "statement": "Synthetic fixture approval", "approved_at": "2026-09-21T00:00:00Z",
+            "statement": "Synthetic fixture approval",
+            "approved_at": "2026-09-21T00:00:00Z",
         }
-        locator = "tmp/quality/delivery-gate/approvals/G1.json"
+        locator = "tmp/quality/delivery-gate/current/approvals/G1.json"
         publish_json(self.f.root, locator, approval)
-        self.assertEqual(check_conditions(self.f.root, submission_id=self.f.submission_id)["result"], "PASS")
+        self.assertEqual(
+            check_conditions(self.f.root, submission_id=self.f.submission_id)["result"],
+            "PASS",
+        )
         self.assertEqual(_consume_readonly(self, self.f)["result"], "PASS")
         (self.f.root / locator).unlink()
         result = _consume_readonly(self, self.f)
-        self.assertEqual((result["result"], result["reason"]), ("BLOCKED", "user-approval-missing"))
+        self.assertEqual(
+            (result["result"], result["reason"]), ("BLOCKED", "user-approval-missing")
+        )

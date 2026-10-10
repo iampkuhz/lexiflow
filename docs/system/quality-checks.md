@@ -65,9 +65,9 @@ stop
 | 读者问题 | 深入位置 |
 | --- | --- |
 | 编码后如何选日常检查、如何从阻断回到修复 | [编码后执行门禁](../scenarios/run-repository-gates.md) |
-| 如何选择完整 Change／Repository Verify、诊断问题及阅读实现契约 | [Verify 机制](../reference/verification.md) |
+| 如何选择开发报告／完整 Repository Verify、诊断问题及阅读实现契约 | [Verify 机制](../reference/verification.md) |
 | 单项 Check 的入口、职责与样本预算是什么 | [共用 Check 清单](../reference/verification/check-catalog.md) |
-| Stop 如何触发、失败如何恢复，Git Hook 实际检查什么 | [交付 Hook](../reference/hooks.md) |
+| Stop 如何触发、失败如何恢复，如何确认真实客户端触发 | [交付 Hook](../reference/hooks.md) |
 | 何时需要独立验证、审查和条件裁决 | [交付验收体系](delivery-acceptance.md) |
 
 选择合同和检查声明由 [Harness](../../harness/README.md) 维护；本页只概述质量检查职责，不复制逐项触发条件、脚本参数或机器字段。工程协作身份、工具与隔离资源见[运行支撑体系](engineering-support.md)。

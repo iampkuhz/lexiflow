@@ -3,6 +3,7 @@
 Ensures the new verification and environment modules do NOT import
 scripts.gates, scripts.harness, or any task/phase/identity modules.
 """
+
 from __future__ import annotations
 
 import ast
@@ -18,14 +19,13 @@ _FORBIDDEN_IMPORTS = (
 
 _MODULES_TO_CHECK = [
     "scripts/verification/__init__.py",
-    "scripts/verification/kernel.py",
-    "scripts/verification/scope.py",
-    "scripts/verification/declarations.py",
-    "scripts/verification/scenarios.py",
+    "scripts/verification/execution/check_runner.py",
+    "scripts/verification/planning/check_scope_selection.py",
+    "scripts/verification/planning/check_definitions.py",
+    "scripts/verification/execution/check_plan_runner.py",
     "scripts/environment/__init__.py",
-    "scripts/environment/runtime.py",
-    "scripts/check_changes.py",
-    "scripts/check_repository.py",
+    "scripts/environment/configuration/verification_environment.py",
+    "scripts/verification/commands/run_repository_checks.py",
 ]
 
 
@@ -71,11 +71,13 @@ class TestNoForbiddenImports(unittest.TestCase):
                 continue
             source = full_path.read_text(encoding="utf-8")
             self.assertNotIn(
-                "workstreams.yaml", source,
+                "workstreams.yaml",
+                source,
                 f"{module_path} references workstreams.yaml",
             )
             self.assertNotIn(
-                "task_validation", source,
+                "task_validation",
+                source,
                 f"{module_path} references task_validation",
             )
 
@@ -88,11 +90,13 @@ class TestNoForbiddenImports(unittest.TestCase):
                 continue
             source = full_path.read_text(encoding="utf-8")
             self.assertNotIn(
-                "phase-task-contract", source,
+                "phase-task-contract",
+                source,
                 f"{module_path} references phase-task-contract",
             )
             self.assertNotIn(
-                "phase_profile", source,
+                "phase_profile",
+                source,
                 f"{module_path} references phase_profile",
             )
 
@@ -106,7 +110,8 @@ class TestNoForbiddenImports(unittest.TestCase):
             source = full_path.read_text(encoding="utf-8")
             for term in ("issuer_packet", "evidence_packet", "local_issuer"):
                 self.assertNotIn(
-                    term, source,
+                    term,
+                    source,
                     f"{module_path} references {term}",
                 )
 

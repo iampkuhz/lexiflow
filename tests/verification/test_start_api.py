@@ -8,7 +8,7 @@ import subprocess
 import unittest
 from unittest.mock import Mock, patch
 
-from scripts.environment import start_api as api
+from scripts.local import start_local_api as api
 
 
 class PortPreparationTest(unittest.TestCase):

@@ -19,8 +19,7 @@
     "backend/product/api/gradle.lockfile",
     "infra/postgres/schema.sql",
     "ops/dataset/ecdict-source.lock.json",
-    "scripts/environment/ecdict_bundle.py",
-    "ops/podman/fetch-ecdict.sh",
+    "ops/dataset/prepare_ecdict_bundle.py",
     "ops/podman/source-tools.Containerfile"
   ]
 }

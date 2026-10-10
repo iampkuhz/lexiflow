@@ -8,18 +8,30 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import uuid
 from unittest.mock import patch
 from pathlib import Path
 
-import yaml
 
-from scripts.verification.kernel import execute_single_check
-from scripts.verification.scenarios import verify_changes, verify_repository
+from scripts.verification.execution.check_runner import execute_single_check, snapshot_check_inputs
+from scripts.verification.execution.check_plan_runner import verify_repository
 from tests.verification.declaration_fixtures import write_declarations
 
 _PASS_OUTPUT = (
     '{"status":"PASS","checks_run":1,"failures":0,"errors":0,"skipped":0,"reason":""}'
 )
+
+
+def _execute_check(check, root, env, *, runner, run_id=None):
+    """用内核测试替身执行固定接口，冻结真实快照并分配规范运行身份。"""
+    with patch("scripts.verification.execution.check_runner.run_check_process", side_effect=runner):
+        return execute_single_check(
+            check,
+            root,
+            env,
+            run_id=run_id or str(uuid.uuid4()),
+            frozen_pre=snapshot_check_inputs(root, check),
+        )
 
 
 def _check(
@@ -32,7 +44,6 @@ def _check(
 ) -> dict:
     return {
         "check_id": check_id,
-        "module": check_id,
         "command": [
             "python3",
             "-c",
@@ -55,7 +66,7 @@ def _check(
 
 def _write(root: Path, checks: list[dict]) -> None:
     (root / "harness").mkdir(exist_ok=True)
-    write_declarations(root / "harness" / "module-checks.yaml", checks)
+    write_declarations(root / "config" / "engineering" / "module-checks.yaml", checks)
 
 
 def _git(root: Path) -> str:
@@ -103,11 +114,11 @@ class TestResultProtocol(unittest.TestCase):
         }
         check = _check("result.protocol", contract=contract)
         with tempfile.TemporaryDirectory() as temp:
-            empty = execute_single_check(
+            empty = _execute_check(
                 check,
                 Path(temp),
                 {},
-                runner=lambda *_: {
+                runner=lambda *_, **kwargs: {
                     "exit_code": 0,
                     "exit_reason": "exited",
                     "timed_out": False,
@@ -116,11 +127,11 @@ class TestResultProtocol(unittest.TestCase):
                     "executed_argv": ["python3"],
                 },
             )
-            skipped = execute_single_check(
+            skipped = _execute_check(
                 check,
                 Path(temp),
                 {},
-                runner=lambda *_: {
+                runner=lambda *_, **kwargs: {
                     "exit_code": 0,
                     "exit_reason": "exited",
                     "timed_out": False,
@@ -144,11 +155,11 @@ class TestResultProtocol(unittest.TestCase):
         }
         check = _check("result.blocked", contract=contract)
         with tempfile.TemporaryDirectory() as temp:
-            result = execute_single_check(
+            result = _execute_check(
                 check,
                 Path(temp),
                 {},
-                runner=lambda *_: {
+                runner=lambda *_, **kwargs: {
                     "exit_code": 0,
                     "exit_reason": "exited",
                     "timed_out": False,
@@ -174,7 +185,7 @@ class TestResultProtocol(unittest.TestCase):
             check = _check("result.drift")
             check["input_paths"] = ["input.txt"]
 
-            def mutate(*_args):
+            def mutate(*_args, **kwargs):
                 (root / "input.txt").write_text("after")
                 return {
                     "exit_code": 0,
@@ -185,8 +196,8 @@ class TestResultProtocol(unittest.TestCase):
                     "executed_argv": ["python3"],
                 }
 
-            result = execute_single_check(
-                check, root, {}, runner=mutate, run_id="input-drift"
+            result = _execute_check(
+                check, root, {}, runner=mutate, run_id=str(uuid.uuid4())
             )
             artifact = root / result["process"]["output_artifacts"]["stderr"]["locator"]
             self.assertEqual(result["reason"], "input-drift")
@@ -202,7 +213,7 @@ class TestResultProtocol(unittest.TestCase):
         check.pop("executable", None)
         seen: list[list[str]] = []
 
-        def runner(argv, *_args):
+        def runner(argv, *_args, **kwargs):
             seen.append(argv)
             return {
                 "exit_code": 0,
@@ -214,162 +225,110 @@ class TestResultProtocol(unittest.TestCase):
             }
 
         with tempfile.TemporaryDirectory() as temp:
-            result = execute_single_check(check, Path(temp), {}, runner=runner)
+            result = _execute_check(check, Path(temp), {}, runner=runner)
         self.assertEqual(result["status"], "PASS")
         self.assertEqual(seen, [["git", "--version"]])
 
 
-class TestPublicCoverageRules(unittest.TestCase):
-    def test_unknown_and_partial_repository_selection_cannot_pass(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            _write(root, [_check("one"), _check("two")])
-            unknown = verify_repository(root, check_ids=["missing"])
-            partial = verify_repository(root, check_ids=["one"])
-        self.assertEqual(unknown["reason"], "unknown-check-id")
-        self.assertEqual(partial["result"], "BLOCKED")
-        self.assertEqual(partial["reason"], "partial-check-selection")
-
-    def test_public_repository_detects_declaration_config_drift(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            _write(root, [_check("drift")])
-
-            def mutate(_argv, _cwd, _env, _timeout, _executable):
-                path = root / "harness" / "module-checks.yaml"
-                path.write_text(
-                    path.read_text(encoding="utf-8") + "# changed during run\n",
-                    encoding="utf-8",
-                )
-                return {
-                    "exit_code": 0,
-                    "exit_reason": "exited",
-                    "timed_out": False,
-                    "stdout": _PASS_OUTPUT,
-                    "stderr": "",
-                    "executed_argv": ["python3"],
-                }
-
-            report = verify_repository(root, runner=mutate)
-        self.assertEqual(report["result"], "FAIL")
-        self.assertEqual(report["checks"][0]["reason"], "input-drift")
-
-    def test_replacing_config_after_load_before_first_check_fails_frozen_run(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            checks = [_check("frozen")]
-            _write(root, checks)
-            before = (
-                __import__("hashlib")
-                .sha256((root / "harness" / "module-checks.yaml").read_bytes())
-                .hexdigest()
-            )
-            from scripts.verification import scenarios
-
-            original = scenarios.load_declarations_snapshot
-            calls = 0
-
-            def load_then_replace(path: Path):
-                nonlocal calls
-                data, snapshot = original(path)
-                replacement = _check("frozen")
-                replacement["command"] = ["python3", "-c", "raise SystemExit(99)"]
-                _write(root, [replacement])
-                return data, snapshot
-
-            def runner(*_args):
-                nonlocal calls
-                calls += 1
-                return {
-                    "exit_code": 0,
-                    "exit_reason": "exited",
-                    "timed_out": False,
-                    "stdout": _PASS_OUTPUT,
-                    "stderr": "",
-                    "executed_argv": ["python3"],
-                }
-
-            with patch(
-                "scripts.verification.scenarios.load_declarations_snapshot",
-                side_effect=load_then_replace,
-            ):
-                report = verify_repository(root, runner=runner)
-        self.assertEqual(report["result"], "FAIL")
-        self.assertEqual(report["checks"][0]["reason"], "input-drift")
-        self.assertEqual(calls, 0)
-        self.assertEqual(report["declaration_sha256"], before)
-
-    def test_later_check_mutating_earlier_input_fails_full_frozen_closure(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            (root / "a.txt").write_text("a-before")
-            (root / "b.txt").write_text("b-before")
-            first, second = _check("first"), _check("second")
-            first["input_paths"] = ["a.txt"]
-            second["input_paths"] = ["b.txt"]
-            first["command"] = ["python3", "-c", "pass # first"]
-            second["command"] = ["python3", "-c", "pass # second"]
-            _write(root, [first, second])
-
-            def runner(argv, *_args):
-                if argv[-1] == "pass # second":
-                    (root / "a.txt").write_text("a-after")
-                return {
-                    "exit_code": 0,
-                    "exit_reason": "exited",
-                    "timed_out": False,
-                    "stdout": _PASS_OUTPUT,
-                    "stderr": "",
-                    "executed_argv": argv,
-                }
-
-            report = verify_repository(root, runner=runner)
-        checks = {item["check_id"]: item for item in report["checks"]}
-        self.assertEqual(report["result"], "FAIL")
-        self.assertEqual(checks["first"]["reason"], "input-drift")
-        self.assertEqual(checks["second"]["status"], "PASS")
-
-    def test_partial_changed_path_coverage_blocks_public_api(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            base = _git(root)
-            _write(
-                root, [_check("src-only", scope="change-targeted", triggers=["src/"])]
-            )
-            (root / "src").mkdir()
-            (root / "src" / "a.py").write_text("x")
-            (root / "other").mkdir()
-            (root / "other" / "b.py").write_text("x")
-            report = verify_changes(root, base=base)
-        self.assertEqual(report["result"], "BLOCKED")
-        self.assertIn("uncovered-path:other/b.py", report["coverage_gaps"])
-
-    def test_no_diff_runs_full_set_and_dependency_errors_are_deterministic(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            _write(
-                root, [_check("baseline"), _check("targeted", scope="change-targeted")]
-            )
-            base = _git(root)
-            full = verify_changes(root, base=base)
-        self.assertEqual(
-            {item["check_id"] for item in full["checks"]}, {"baseline", "targeted"}
-        )
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            _write(
-                root,
-                [
-                    _check("cycle-a", dependencies=["cycle-b"]),
-                    _check("cycle-b", dependencies=["cycle-a"]),
-                ],
-            )
-            cycle = verify_repository(root)
-        self.assertEqual(cycle["reason"], "module-dependency-cycle")
-
-
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFixedExecutionBoundary(unittest.TestCase):
+    """旧调用者执行器和诊断模式不能穿透产品执行接口。"""
+
+    def test_public_scenarios_reject_runner_and_execution_mode(self):
+        from scripts.verification.execution.check_plan_runner import verify_profile, verify_profiles
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            _write(root, [_check("fixed")])
+            freeze = __import__(
+                "scripts.verification", fromlist=["freeze_inputs"]
+            ).freeze_inputs(root)
+            for execute, kwargs in (
+                (verify_repository, {}),
+                (verify_profile, {"frozen_inputs": freeze}),
+                (verify_profiles, {"frozen_profiles": [freeze]}),
+            ):
+                for removed in (
+                    {"runner": lambda *_: {}},
+                    {"execution_mode": "diagnostic"},
+                ):
+                    with self.subTest(
+                        execute=execute.__name__, removed=next(iter(removed))
+                    ):
+                        with self.assertRaises(TypeError):
+                            execute(root, **kwargs, **removed)
+            with self.assertRaises(TypeError):
+                execute_single_check(_check("fixed"), root, {}, runner=lambda *_: {})
+
+    def test_formal_batch_rejects_caller_progress_observer(self):
+        from scripts.verification.execution.check_plan_runner import verify_profiles
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            with self.assertRaises(TypeError):
+                verify_profiles(
+                    root, frozen_profiles=[{}], progress_observer=lambda event: None
+                )
+
+    def test_progress_observer_cannot_replace_nonzero_process_result(self):
+        events = []
+
+        def observer(event):
+            events.append(event)
+            return {"status": "PASS", "exit_code": 0}
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            check = _check("observer.fixed")
+            check["command"] = [sys.executable, "-c", "raise SystemExit(7)"]
+            report = execute_single_check(
+                check,
+                root,
+                {},
+                run_id=str(uuid.uuid4()),
+                frozen_pre=snapshot_check_inputs(root, check),
+                progress_observer=observer,
+            )
+        self.assertEqual("FAIL", report["status"])
+        self.assertEqual("non-zero-exit", report["reason"])
+        self.assertEqual(7, report["process"]["exit_code"])
+        self.assertEqual(["started", "finished"], [event["event"] for event in events])
+        self.assertEqual({"event", "argv", "timeout_seconds"}, set(events[0]))
+        self.assertEqual({"event", "argv", "exit_code", "exit_reason"}, set(events[1]))
+
+    def test_profile_batch_rejects_empty_and_more_than_sixteen_before_process(self):
+        from scripts.verification.execution.check_plan_runner import verify_profiles
+
+        with tempfile.TemporaryDirectory() as temp:
+            for profiles in ([], [{}] * 17):
+                with (
+                    self.subTest(size=len(profiles)),
+                    patch("scripts.verification.execution.check_runner.run_check_process") as process,
+                ):
+                    with self.assertRaisesRegex(ValueError, "one to sixteen"):
+                        verify_profiles(Path(temp), frozen_profiles=profiles)
+                    process.assert_not_called()
+
+    def test_single_check_requires_uuid_and_frozen_snapshot_before_process(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            check = _check("fixed")
+            frozen = snapshot_check_inputs(root, check)
+            for kwargs in (
+                {},
+                {"run_id": str(uuid.uuid4())},
+                {"run_id": "caller-alias", "frozen_pre": frozen},
+            ):
+                with (
+                    self.subTest(kwargs=kwargs),
+                    patch("scripts.verification.execution.check_runner.run_check_process") as process,
+                ):
+                    with self.assertRaises(ValueError):
+                        execute_single_check(check, root, {}, **kwargs)
+                    process.assert_not_called()
 
 
 class TestControlledRuntimeInjection(unittest.TestCase):
@@ -432,7 +391,6 @@ class TestDeliveryGatePublicContract(unittest.TestCase):
             checks = [
                 {
                     "check_id": "base",
-                    "module": "base",
                     "command": command,
                     "timeout_seconds": 5,
                     "scope": "repository-baseline",
@@ -443,7 +401,6 @@ class TestDeliveryGatePublicContract(unittest.TestCase):
                 },
                 {
                     "check_id": "extra",
-                    "module": "extra",
                     "command": command,
                     "timeout_seconds": 5,
                     "scope": "change-targeted",
@@ -453,7 +410,7 @@ class TestDeliveryGatePublicContract(unittest.TestCase):
                     "input_paths": ["one.py"],
                 },
             ]
-            write_declarations(root / "harness/module-checks.yaml", checks)
+            write_declarations(root / "config/engineering/module-checks.yaml", checks)
             freeze = freeze_inputs(root, required_check_ids=("extra",))
             self.assertEqual(freeze["result"], "PASS")
             report = verify_repository(
@@ -477,11 +434,10 @@ class TestDeliveryGatePublicContract(unittest.TestCase):
                 "import json; print(json.dumps({'status':'PASS','checks_run':1,'failures':0,'errors':0,'skipped':0,'reason':''}))",
             ]
             write_declarations(
-                root / "harness/module-checks.yaml",
+                root / "config/engineering/module-checks.yaml",
                 [
                     {
                         "check_id": "base",
-                        "module": "base",
                         "command": command,
                         "timeout_seconds": 5,
                         "scope": "repository-baseline",

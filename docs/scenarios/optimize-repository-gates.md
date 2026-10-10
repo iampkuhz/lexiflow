@@ -42,19 +42,19 @@ note right
 end note
 :S4 执行直接自检;
 note right
-入口：scripts/repository/python_quality.py + 相关 unittest
+入口：scripts/checks/repository/python/check_python_quality.py + 相关 unittest
 作用：检查静态质量和直接回归，失败先修复
 <color:#995A00><b>预期：1–5 分钟（机器规划）</b></color>
 end note
 :S5 执行 B 开发交付检查;
 note right
-入口：scripts/verification/delivery_hook.py [B]
+入口：scripts/triggers/run_stop_checks.py [B]
 作用：按完整 diff 的显式 triggers 与模块消费依赖闭包执行日常 development-change，产生开发报告
 <color:#995A00><b>广泛工程 diff 规划：25–30 分钟；局部 1–5 分钟</b></color>
 end note
 :S6 完成 C 正式独立验收;
 note right
-入口：""scripts/delivery_gate/~_~_main~_~_.py"" [C]
+入口：""scripts/acceptance/~_~_main~_~_.py"" [C]
 作用：取得独立验证、适用审查与条件核对的证据
 <color:#995A00><b>预期：35–50 分钟（高风险规划）</b></color>
 end note
@@ -77,12 +77,12 @@ endlegend
 
 | 阶段 | 作用／产物 | 入口／说明 |
 | --- | --- | --- |
-| S1 定位 | 慢节点与需要保留的证明范围 | 阅读既有报告；[检查声明](../../harness/module-checks.yaml) |
-| S2 定界 | 修改文件列表、非目标与验收要求 | 人工／Agent 定义任务；[现行合同](../../harness/agent-policy.manifest.yaml)、[OpenSpec](../../openspec/changes) |
+| S1 定位 | 慢节点与需要保留的证明范围 | 阅读既有报告；[检查声明](../../config/engineering/module-checks.yaml) |
+| S2 定界 | 修改文件列表、非目标与验收要求 | 人工／Agent 定义任务；[现行合同](../../harness/agent-policy.md)、[OpenSpec](../../openspec/changes) |
 | S3 实现 | 代码、测试和说明的最小 diff | [Scripts 文件职责](../reference/scripts.md) |
-| S4 直接自检 | 静态质量与相关回归结果 | [python_quality.py](../../scripts/repository/python_quality.py)、[编排直接测试](../../tests/verification/test_lightweight_orchestration.py) |
-| S5 [B] 开发检查 | 实际变化与消费依赖所需开发报告 | [delivery_hook.py](../../scripts/verification/delivery_hook.py)；[执行页 1.3 B](run-repository-gates.md) |
-| S6 [C] 正式验收 | 独立验证与适用审查的完整证据链 | [delivery_gate/__main__.py](../../scripts/delivery_gate/__main__.py)；[执行页 1.4 C](run-repository-gates.md) |
+| S4 直接自检 | 静态质量与相关回归结果 | [check_python_quality.py](../../scripts/checks/repository/python/check_python_quality.py)、[编排直接测试](../../tests/verification/test_lightweight_orchestration.py) |
+| S5 [B] 开发检查 | 实际变化与消费依赖所需开发报告 | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py)；[执行页 1.3 B](run-repository-gates.md) |
+| S6 [C] 正式验收 | 独立验证与适用审查的完整证据链 | [delivery_gate/__main__.py](../../scripts/acceptance/__main__.py)；[执行页 1.4 C](run-repository-gates.md) |
 | S7 交接 | diff、有效证据与准确说明 | 人工／Agent 整理；Git 另需[授权](../../AGENTS.md) |
 
 S2 只确定任务，不运行 OpenSpec 或 Harness，也不执行代码扫描。涉及 Java 的修改在 S4 选择 Gradle 直接检查；本例的 Python 改动选择静态质量与相关 `unittest`。
@@ -111,9 +111,9 @@ S2 只确定任务，不运行 OpenSpec 或 Harness，也不执行代码扫描�
 
 | 修改主题 | 规则真源 | 实现／直接测试 |
 | --- | --- | --- |
-| 检查选择、输入与复用 | [module-checks](../../harness/module-checks.yaml)、[agent-policy](../../harness/agent-policy.manifest.yaml) | [scope.py](../../scripts/verification/scope.py)、[scenarios.py](../../scripts/verification/scenarios.py)、[编排回归](../../tests/verification/test_lightweight_orchestration.py) |
-| Stop 与服务清理 | [delivery-hooks](../../harness/delivery-hooks.json)、[test-services](../../harness/test-services.json) | [delivery_hook.py](../../scripts/verification/delivery_hook.py)、[test_services.py](../../scripts/environment/test_services.py)、[Hook 回归](../../tests/verification/test_delivery_hook.py) |
-| 正式身份与证据链 | [agent-policy](../../harness/agent-policy.manifest.yaml) | [Delivery Gate 文件](../../scripts/delivery_gate)、[直接测试](../../tests/delivery_gate) |
-| CI 与发行集合 | [ci-policy](../../harness/ci-policy.yaml) | [ci.py](../../scripts/verification/ci.py)、[CI 回归](../../tests/verification/test_ci.py) |
+| 检查选择、输入与复用 | [module-checks](../../config/engineering/module-checks.yaml)、[agent-policy](../../harness/agent-policy.md) | [check_scope_selection.py](../../scripts/verification/planning/check_scope_selection.py)、[check_plan_runner.py](../../scripts/verification/execution/check_plan_runner.py)、[编排回归](../../tests/verification/test_lightweight_orchestration.py) |
+| Stop 与服务清理 | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py)、[isolated_postgres_redis.py](../../scripts/environment/services/isolated_postgres_redis.py) | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py)、[isolated_postgres_redis.py](../../scripts/environment/services/isolated_postgres_redis.py)、[Hook 回归](../../tests/verification/test_delivery_hook.py) |
+| 正式身份与证据链 | [agent-policy](../../harness/agent-policy.md) | [Delivery Gate 文件](../../scripts/acceptance)、[直接测试](../../tests/delivery_gate) |
+| CI 与发行集合 | [module-checks 场景策略](../../config/engineering/module-checks.yaml) | [run_ci_quick_checks.py](../../scripts/triggers/run_ci_quick_checks.py)、[CI 回归](../../tests/verification/test_ci.py) |
 
 预期是规划预算；S5／S6 已包含子步骤，不能重复累加。样本与估算前提只在[执行页](run-repository-gates.md)维护。返回[总入口](../README.md)。

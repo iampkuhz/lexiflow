@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { acquireImageSlotLock } from '../image-slot-lock.mjs';
+import { acquireImageSlotLock } from '../images/image-slot-lock.mjs';
 
 test('image slot lock is non-waiting, shared per host user and isolated by base version', () => {
   const release = acquireImageSlotLock('7.0.0-SNAPSHOT');

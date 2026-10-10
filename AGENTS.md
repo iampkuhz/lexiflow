@@ -8,7 +8,7 @@
 - 先定位、按需读取；不覆盖或回滚他人改动。
 - 不提交密钥、token、真实字幕、观看历史、模型输入输出或本地运行数据。
 - 非平凡产品、agent、harness、gate 或跨模块变更先创建或复用 `openspec/changes/<id>/`。
-- 规则仅在 `AGENTS.md` 与 `harness/`；客户端仅入口。
+- 人类规则仅在 `AGENTS.md` 与 `harness/*.md`；机器工程配置在 `config/engineering/`，固定协议归代码；客户端仅入口。
 - 图源只在 Markdown 的 fenced `plantuml`；先在 ignored `tmp/diagrams/` 校验/预览，再原样复制正文。禁止提交调试产物或由正文链接它们。
 - 开发期全仓无历史兼容，仅最新逻辑/SQL；结构变更重建重导，边界见 Harness。
 - 文档仅最新版；非 comparison/diff 路径和标题禁版本对照/迁移历史；执行状态仅状态页。
@@ -25,11 +25,10 @@
 
 ## 按需加载共享规则
 
-- 开始任务先读 `harness/README.md` 与 `harness/manifest.yaml`，按工作类型加载对应合同；长期规范在 `openspec/specs/`，当前变更在 `openspec/changes/`。
-- 子任务前读 `harness/agent-policy.manifest.yaml` 的 `subagent_protocol` 与 `qoder_delegation`；超过 10 分钟且范围可隔离、或需大量新上下文而可简洁验收的任务优先派发。模型显式按 `codex_model_policy` 选择，遵守范围、身份、回调和并发合同。
-- 客户端 Session/checkout 边界与共享规则见 `harness/agent-policy.manifest.yaml`；客户端、任务模板与 Catalog 不保存副本。
-- 调用者不伪造 runner 身份；实现者不能自行签发 validation/review；完成或退出零不等于验收。集成验证串行，不覆盖其他写入者的修改。
-- 修改文档先读 `harness/documentation-policy.yaml`，按其 skill 声明及图源流程执行；本机接入见 `harness/README.md`，缺工具不得假装完成。
+- 开始任务先读 `harness/README.md`，再按任务加载相关规则，不强制读取全部；长期规范在 `openspec/specs/`，当前变更在 `openspec/changes/`。
+- 子任务前读 `harness/agent-policy.md` 的 `codex_model_policy` 与相关协作规则；按完整工作包显式选择模型与 reasoning，遵守范围、时间、并发、身份和用户可见交接边界。
+- 客户端 Session/checkout、委派与独立验收见 `harness/agent-policy.md`；客户端、任务模板与 Catalog 不保存规则副本。
+- 修改文档先读 `harness/documentation-policy.md`，按其 skill 声明及图源流程执行；本机接入见 `harness/README.md`，缺工具不得假装完成。
 
 ## 验证与 Git
 
