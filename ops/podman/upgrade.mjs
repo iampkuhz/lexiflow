@@ -7,13 +7,6 @@ export const sha256 = value => crypto.createHash('sha256').update(value).digest(
 const fail = code => { throw new Error(code); };
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
-export const API_LOGGING = '    logging:\n      driver: k8s-file\n      options:\n        max-size: 10mb\n';
-export function boundedApiLogging(compose) {
-  if (compose.includes(API_LOGGING)) return compose;
-  const marker = '    command: [api]\n';
-  if (compose.split(marker).length !== 2) fail('UPGRADE_COMPOSE_UNSUPPORTED');
-  return compose.replace(marker, marker + API_LOGGING);
-}
 export function privateFile(root, relative) {
   if (fs.lstatSync(root).isSymbolicLink()) fail('INSTALL_SYMLINK_REJECTED');
   if (path.isAbsolute(relative) || relative.split('/').some(part => !part || part === '..' || part === '.')) fail('UNSAFE_INSTALL_PATH');
@@ -25,15 +18,6 @@ export function privateFile(root, relative) {
   }
   if (!fs.lstatSync(cursor).isFile()) fail('INSTALL_FILE_REQUIRED');
   return cursor;
-}
-export function atomicJson(file, value) {
-  atomicText(file, JSON.stringify(value, null, 2) + '\n');
-}
-export function atomicText(file, text) {
-  const temporary = `${file}.${crypto.randomBytes(16).toString('hex')}.next`;
-  const fd = fs.openSync(temporary, 'wx', 0o600);
-  try { fs.writeFileSync(fd, text); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-  fs.renameSync(temporary, file);
 }
 export function treeDigest(root) {
   const entries = [];

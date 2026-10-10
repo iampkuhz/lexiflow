@@ -85,7 +85,7 @@ def bind_trusted_host_context(
         raise CodexRuntimeError(
             "caller-contract-invalid", "caller contract must be an object"
         )
-    forbidden = set(_IDENTITY) - {"parent_client"}
+    forbidden = set(_IDENTITY)
     if forbidden & set(caller_contract):
         raise CodexRuntimeError(
             "caller-identity-injection", "caller contract cannot supply runner identity"

@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 STATE = ROOT / "ops/release/lifecycle-state.sh"
 LIFECYCLE = ROOT / "ops/release/lifecycle.sh"
+VERIFIER_HASH = (ROOT / "ops/release/runtime-verification.sh").read_text().split("# 在 cd -P", 1)[0]
 KEY = "a" * 64
 TOKEN = "b" * 32
 INSTALL = "c" * 32
@@ -33,9 +34,9 @@ class StateRecordTests(unittest.TestCase):
         (self.root / ".lock/token").write_text(TOKEN + "\n")
         self.entry = self.base / "test.sh"
         self.script = self.base / "test.sh"
-        lifecycle = LIFECYCLE.read_text().split("lf_load_release()", 1)[0]
+        lifecycle = LIFECYCLE.read_text().split('if [ "${1:-}" = _project ]; then', 1)[0]
         self.script.write_text(
-            "#!/bin/sh\nset -eu\n" + STATE.read_text() + "\n" + lifecycle + "\n"
+            "#!/bin/sh\nset -eu\n" + VERIFIER_HASH + "\n" + STATE.read_text() + "\n" + lifecycle + "\n"
             f"LF_ROOT='{self.root!s}'\nLF_INSTALL_ID={INSTALL}\nLF_LOCK_TOKEN={TOKEN}\n"
             f"LF_RELEASE_KEY={KEY}\nLF_PLATFORM=linux/amd64\n"
             f"LF_PROJECT=lf_{INSTALL}_{KEY[:16]}\n"
@@ -52,13 +53,13 @@ class StateRecordTests(unittest.TestCase):
 
     def seed_record(self) -> bytes:
         digest = hashlib.sha256(self.entry.read_bytes()).hexdigest()
-        rec = (f"key={KEY}\nentry={self.entry}\nsha256={digest}\nplatform=linux/amd64\nproject=lf_{INSTALL}_{KEY[:16]}\n").encode()
+        rec = (f"key={KEY}\nentry={self.entry}\nsha256={digest}\nplatform=linux/amd64\n").encode()
         path = self.root / "releases" / KEY / "record"
         path.write_bytes(rec)
         return rec
 
     def state_shell(self, body: str) -> subprocess.CompletedProcess[str]:
-        prefix = STATE.read_text() + "\n" + f"LF_ROOT={shlex.quote(str(self.root))}\nLF_INSTALL_ID={INSTALL}\nLF_LOCK_TOKEN={TOKEN}\n"
+        prefix = VERIFIER_HASH + "\n" + STATE.read_text() + "\n" + f"LF_ROOT={shlex.quote(str(self.root))}\nLF_INSTALL_ID={INSTALL}\nLF_LOCK_TOKEN={TOKEN}\n"
         return subprocess.run(["/bin/sh", "-c", prefix + body], text=True, capture_output=True, timeout=10)
 
     def state_bytes(self, phase: str = "idle", active: str = "none", previous: str = "none", candidate: str = "none", deleting: str = "none", resume: str = "none") -> bytes:
@@ -144,18 +145,21 @@ class StateRecordTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_random_and_digest_reject_non_ascii_or_failed_tool_output(self) -> None:
+        digest_input = self.base / "digest input"
+        digest_input.write_bytes(b"abc")
+        digest_path = shlex.quote(str(digest_input))
         for value, code in (("A" * 64, 0), ("é" * 64, 0), ("a" * 63, 0), ("a" * 64, 1)):
             with self.subTest(value=value, code=code):
                 quoted = shlex.quote(value)
                 for body in (f"od() {{ printf '%s' {quoted}; return {code}; }}; lf_random_hex 32",
-                             f"sha256sum() {{ printf '%s  synthetic' {quoted}; return {code}; }}; lf_sha synthetic"):
+                             f"sha256sum() {{ printf '%s  -' {quoted}; return {code}; }}; lf_sha256 {digest_path}"):
                     result = self.state_shell(body)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertEqual(result.stdout + result.stderr, "")
         value = "abcdef0123456789" * 4
         result = self.state_shell(f"od() {{ printf '%s' {value}; }}; lf_random_hex 32")
         self.assertEqual((result.returncode, result.stdout), (0, value + "\n"))
-        result = self.state_shell(f"sha256sum() {{ printf '%s  synthetic' {value}; }}; lf_sha synthetic")
+        result = self.state_shell(f"sha256sum() {{ printf '%s  -' {value}; }}; lf_sha256 {digest_path}")
         self.assertEqual((result.returncode, result.stdout), (0, value + "\n"))
 
     def test_state_load_exact_bytes_and_atomic_failure(self) -> None:
@@ -318,7 +322,7 @@ class StateRecordTests(unittest.TestCase):
         self.assertEqual(self.run_script().returncode, 0)
         record = self.root / "releases" / KEY / "record"
         valid = record.read_bytes()
-        for malformed in (valid.replace(b"platform=linux/amd64", b"platform=linux/other"), valid.replace(b"project=lf_", b"project=xx_"), valid + b"\n", valid + b"\0"):
+        for malformed in (valid.replace(b"platform=linux/amd64", b"platform=linux/other"), valid + b"project=xx_override\n", valid + b"\n", valid + b"\0"):
             record.write_bytes(malformed)
             self.assertNotEqual(self.run_script().returncode, 0)
             self.assertEqual(record.read_bytes(), malformed)
@@ -364,7 +368,8 @@ class StateRecordTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         d = self.root / "releases" / KEY
         rec = (d / "record").read_bytes()
-        self.assertEqual(len(rec.splitlines()), 5)
+        self.assertEqual(len(rec.splitlines()), 4)
+        self.assertNotIn(b"project=", rec)
         self.assertEqual(self.run_script().returncode, 0)
         (d / "postgres-password").unlink()
         self.assertEqual(self.run_script().returncode, 0)
@@ -375,9 +380,16 @@ class StateRecordTests(unittest.TestCase):
         self.assertEqual((d / "record").read_bytes(), rec)
         self.assertFalse(list(d.glob(".record-*")))
 
+    def test_project_is_derived_and_cannot_be_overridden(self) -> None:
+        self.script.write_text(self.script.read_text().replace(
+            f"LF_PROJECT=lf_{INSTALL}_{KEY[:16]}", "LF_PROJECT=wrong_override"))
+        result = self.run_script()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / "releases" / KEY / "record").exists())
+
     def test_abs_root_rejects_bad_paths_and_allows_spaces(self) -> None:
         for value in ("relative", "/", str(self.base) + "//x", str(self.base) + "/./x", str(self.base) + "/../x", str(self.base) + "/line\nbreak"):
-            p = subprocess.run(["/bin/sh", "-c", STATE.read_text() + "\n" + LIFECYCLE.read_text().split("lf_select_runtime()", 1)[0] + "\nlf_abs_root \"$1\"", "sh", value], capture_output=True, timeout=10)
+            p = subprocess.run(["/bin/sh", "-c", STATE.read_text() + "\n" + LIFECYCLE.read_text().split('if [ "${1:-}" = _project ]; then', 1)[0] + "\nlf_abs_root \"$1\"", "sh", value], capture_output=True, timeout=10)
             self.assertNotEqual(p.returncode, 0, value)
         self.assertEqual(self.run_script().returncode, 0)
 

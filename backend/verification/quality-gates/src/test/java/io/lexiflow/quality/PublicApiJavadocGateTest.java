@@ -55,7 +55,7 @@ class PublicApiJavadocGateTest {
         new JavaSourceFile(
             path, JavaSourceDiscovery.normalize(directory.relativize(path)), content);
     var sources = List.of(source);
-    var context = new JavaSourceContext(sources, ParsedJavaSources.parse(directory, sources));
+    var context = new JavaSourceContext(sources, ParsedJavaSources.parse(sources));
 
     var violations = new PublicApiJavadocGate().evaluate(context);
 
@@ -87,7 +87,7 @@ class PublicApiJavadocGateTest {
         List.of(
             new JavaSourceFile(
                 path, JavaSourceDiscovery.normalize(directory.relativize(path)), content));
-    var context = new JavaSourceContext(sources, ParsedJavaSources.parse(directory, sources));
+    var context = new JavaSourceContext(sources, ParsedJavaSources.parse(sources));
     var violations = new PublicApiJavadocGate().evaluate(context);
     assertEquals(
         List.of(
@@ -110,8 +110,25 @@ class PublicApiJavadocGateTest {
         new JavaSourceFile(
             path, JavaSourceDiscovery.normalize(directory.relativize(path)), content);
     var sources = List.of(source);
-    var context = new JavaSourceContext(sources, ParsedJavaSources.parse(directory, sources));
+    var context = new JavaSourceContext(sources, ParsedJavaSources.parse(sources));
 
     assertTrue(new PublicApiJavadocGate().evaluate(context).isEmpty());
+  }
+
+  @Test
+  void constructorsAreExcludedWhileMethodDiagnosticsKeepTheirName() throws Exception {
+    var path = directory.resolve("product/api/src/main/java/example/Api.java");
+    Files.createDirectories(path.getParent());
+    var content =
+        "package example; public class Api { public Api(String value) {} public void run() {} }";
+    Files.writeString(path, content);
+    var source =
+        new JavaSourceFile(
+            path, JavaSourceDiscovery.normalize(directory.relativize(path)), content);
+    var sources = List.of(source);
+    var context = new JavaSourceContext(sources, ParsedJavaSources.parse(sources));
+    var violations = new PublicApiJavadocGate().evaluate(context);
+    assertEquals(1, violations.size());
+    assertEquals("run", violations.getFirst().attributes().get("member"));
   }
 }

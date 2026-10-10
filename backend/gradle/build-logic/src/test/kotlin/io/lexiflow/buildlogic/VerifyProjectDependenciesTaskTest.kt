@@ -33,6 +33,31 @@ class VerifyProjectDependenciesTaskTest {
     }
 
     @Test
+    fun fixedWhitelistIsAcyclicIndependentlyOfSubmittedGraph() {
+        // 独立拓扑排序覆盖实际白名单全集；未来允许边变化不能静默引入环。
+        val allowed = VerifyProjectDependenciesTask.allowedDependencies
+        val remaining = allowed.keys.toMutableSet()
+        while (remaining.isNotEmpty()) {
+            val sinks = remaining.filter { node -> allowed.getValue(node).none { it in remaining } }
+            assertTrue(sinks.isNotEmpty(), "Architecture whitelist contains a cycle: $remaining")
+            assertTrue(allowed.values.flatten().all { it in allowed.keys })
+            remaining.removeAll(sinks.toSet())
+        }
+    }
+
+    @Test
+    fun rejectsSelfDependencyAndCycleClosingEdges() {
+        for (source in graph().keys) {
+            val graph = graph()
+            graph[source] = graph.getValue(source) + source
+            assertThrows(GradleException::class.java) { verify(graph) }
+        }
+        val cyclic = graph()
+        cyclic[":lexicon"] = listOf(":api")
+        assertThrows(GradleException::class.java) { verify(cyclic) }
+    }
+
+    @Test
     fun acceptsDeclaredDomainGraph() {
         verify(graph())
         assertEquals("PASS\n", File(directory, "result.txt").readText())

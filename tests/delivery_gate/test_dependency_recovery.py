@@ -29,8 +29,8 @@ class TestDependencyRecovery(unittest.TestCase):
         path = self.f.root / "planning/workstreams.yaml"
         catalog = yaml.safe_load(path.read_text())
         tasks = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"]
-        tasks[0]["dependencies"] = []
-        tasks.append({**tasks[0], "id": "LF-TSK-TEST-0002", "dependencies": [TASK_ID]})
+        tasks[0]["depends_on"] = []
+        tasks.append({**tasks[0], "id": "LF-TSK-TEST-0002", "depends_on": [{"task_id": TASK_ID, "required_task_version": 1, "required_change_version": "1.0.0", "required_result": "PASS"}]})
         path.write_text(yaml.safe_dump(catalog, sort_keys=False))
         self.f._git("add", "planning/workstreams.yaml")
         self.f._git("commit", "-m", "dependency recovery fixture catalog")
@@ -379,7 +379,7 @@ class TestDependencyRecovery(unittest.TestCase):
         task2 = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"][
             1
         ]
-        task2["dependencies"] = [{"task_id": TASK_ID, "required_task_version": 9}]
+        task2["depends_on"] = [{"task_id": TASK_ID, "required_task_version": 9, "required_change_version": "1.0.0", "required_result": "PASS"}]
         catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False))
         self.f._git("add", "planning/workstreams.yaml")
         self.f._git("commit", "-m", "version constraint fixture")
@@ -401,7 +401,7 @@ class TestDependencyRecovery(unittest.TestCase):
         task1 = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"][
             0
         ]
-        task1["dependencies"] = ["LF-TSK-TEST-9999"]
+        task1["depends_on"] = [{"task_id": "LF-TSK-TEST-9999", "required_task_version": 1, "required_change_version": "1.0.0", "required_result": "PASS"}]
         catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False))
         outcome = check_conditions(
             self.f.root, submission_id=dependent["submission_id"]

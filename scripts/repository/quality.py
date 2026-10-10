@@ -132,7 +132,7 @@ def run(root: Path, mode: str) -> dict[str, object]:
             },
         )
     if mode == "hooks":
-        paths = [root / ".githooks" / "pre-commit", root / ".githooks" / "post-commit"]
+        paths = [root / ".githooks" / "pre-commit"]
         issues = [
             p.relative_to(root).as_posix()
             for p in paths

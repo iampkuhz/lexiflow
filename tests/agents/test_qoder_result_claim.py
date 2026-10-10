@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from scripts.agents.qoder import runner as qoder_task
-from scripts.agents.qoder.callback import _callback_claim_path
+from scripts.agents.qoder.lifecycle import callback_claim_path
 
 
 class ResultClaimTest(unittest.TestCase):
@@ -20,7 +20,7 @@ class ResultClaimTest(unittest.TestCase):
             run.mkdir(parents=True)
             (root / ".git").mkdir()
             (run / "completion.json").write_text('{"status":"failed"}')
-            _callback_claim_path(run).write_text("{}")
+            callback_claim_path(run).write_text("{}")
             with (
                 mock.patch.object(Path, "cwd", return_value=root),
                 mock.patch.object(qoder_task, "_reject_parent_polling"),

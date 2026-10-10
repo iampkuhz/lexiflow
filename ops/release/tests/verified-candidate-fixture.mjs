@@ -17,7 +17,7 @@ export async function fixture(baseVersion = '2.0.0') {
   await writeFile(path.join(root, 'ops/release/version.mjs'), await readFile(path.join(repoRoot, 'ops/release/version.mjs')));
   await writeFile(path.join(root, 'ops/release/runtime-entry.mjs'), await readFile(path.join(repoRoot, 'ops/release/runtime-entry.mjs')));
   await writeFile(path.join(root, 'ops/release/runtime-verification.sh'), await readFile(path.join(repoRoot, 'ops/release/runtime-verification.sh')));
-  for (const name of ['lifecycle.mjs', 'lifecycle-state.sh', 'lifecycle-docker.sh', 'lifecycle.sh']) {
+  for (const name of ['lifecycle-state.sh', 'lifecycle-docker.sh', 'lifecycle.sh']) {
     await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repoRoot, 'ops/release', name)));
   }
   await writeFile(path.join(root, '.gitignore'), '/input/\n/images/\n/output/\n/descriptor.json\n');
@@ -85,6 +85,8 @@ export async function fixture(baseVersion = '2.0.0') {
     const marker = `${JSON.stringify(imageCandidate, null, 2)}\n`; await writeFile(path.join(directory, 'candidate.json'), marker);
     imageCandidateDirectories.push({ directory, sha256: hash(Buffer.from(marker)) });
   }
+  descriptor.artifacts = records.map(record => ['api-image', 'postgres-image'].includes(record.role)
+    ? { role: record.role, platform: record.platform, licenseIds: record.licenseIds } : record);
   const descriptorFile = path.join(root, 'descriptor.json'); await writeFile(descriptorFile, JSON.stringify(descriptor));
   return { root, artifactRoot, imageCandidateDirectories: imageCandidateDirectories.map(({ directory, sha256 }, index) => ({ directory, sha256, platform: index === 0 ? 'linux/amd64' : 'linux/arm64' })), outputParent, descriptor, descriptorFile,
     cleanup: async () => { await rm(root, { recursive: true, force: true }); await rm(outputParent, { recursive: true, force: true }); for (const { directory } of imageCandidateDirectories) await rm(directory, { recursive: true, force: true }); } };

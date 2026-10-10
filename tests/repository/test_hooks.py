@@ -14,7 +14,7 @@ class TestHooks(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         (self.root / ".githooks").mkdir()
-        for name in ("pre-commit", "post-commit"):
+        for name in ("pre-commit",):
             (self.root / ".githooks" / name).write_text("#!/bin/sh\n")
 
     def tearDown(self):
@@ -41,9 +41,10 @@ class TestHooks(unittest.TestCase):
             text=True, capture_output=True, check=False,
         )
         self.assertEqual(0, result.returncode)
-        for entry in ("scripts/check_changes.py", "scripts/check_repository.py"):
-            self.assertTrue((root / entry).is_file())
-            self.assertIn(entry, result.stderr)
+        self.assertIn("python3 -m scripts.verification.development", result.stderr)
+        self.assertNotIn("check_changes.py", result.stderr)
+        self.assertNotIn("check_repository.py", result.stderr)
+        self.assertFalse((root / ".githooks/post-commit").exists())
         self.assertNotIn("scripts/gates/", result.stderr)
 
 

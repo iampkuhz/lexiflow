@@ -45,40 +45,32 @@ def _catalog_tasks(catalog: Any) -> dict[str, dict[str, Any]]:
 
 
 def _dependencies(task: dict[str, Any], task_id: str) -> list[dict[str, Any]]:
-    raw = task.get("depends_on", task.get("dependencies", []))
+    raw = task.get("depends_on")
     result = []
     if not isinstance(raw, list):
         raise RecordError("task-dependencies-invalid", task_id)
     for item in raw:
-        if isinstance(item, str):
-            dep = {
-                "task_id": item,
-                "required_task_version": None,
-                "required_change_version": None,
-                "required_result": "PASS",
-            }
-        elif isinstance(item, dict):
-            dep = {
-                "task_id": item.get("task_id"),
-                "required_task_version": item.get("required_task_version"),
-                "required_change_version": item.get("required_change_version"),
-                "required_result": item.get("required_result", "PASS"),
-            }
-        else:
+        if not isinstance(item, dict):
             raise RecordError("task-dependencies-invalid", task_id)
+        dep = {
+            "task_id": item.get("task_id"),
+            "required_task_version": item.get("required_task_version"),
+            "required_change_version": item.get("required_change_version"),
+            "required_result": item.get("required_result", "PASS"),
+        }
         if (
             not isinstance(dep["task_id"], str)
             or not dep["task_id"]
             or dep["required_result"] != "PASS"
         ):
             raise RecordError("task-dependencies-invalid", task_id)
-        if dep["required_task_version"] is not None and (
+        if (
             isinstance(dep["required_task_version"], bool)
             or not isinstance(dep["required_task_version"], int)
             or dep["required_task_version"] < 1
         ):
             raise RecordError("task-dependencies-invalid", task_id)
-        if dep["required_change_version"] is not None and (
+        if (
             not isinstance(dep["required_change_version"], str)
             or not dep["required_change_version"]
         ):
@@ -102,7 +94,7 @@ def load_task_requirements(root: Path, task_id: str) -> dict[str, Any]:
     if entry is None:
         raise RecordError("task-not-found", task_id)
     task = entry["task"]
-    version = task.get("task_version", task.get("version"))
+    version = task.get("task_version")
     change = task.get("change_version")
     if (
         isinstance(version, bool)
@@ -163,15 +155,3 @@ def load_task_requirements(root: Path, task_id: str) -> dict[str, Any]:
             "sha256": sha256_bytes(canonical_bytes(projection)),
         },
     }
-
-
-def requirements_are_current(root: Path, requirements: Any) -> bool:
-    """重读当前 Catalog 要求并比较已冻结送验要求是否仍有效。"""
-    if not isinstance(requirements, dict) or not isinstance(
-        requirements.get("task_id"), str
-    ):
-        return False
-    try:
-        return load_task_requirements(root, requirements["task_id"]) == requirements
-    except RecordError:
-        return False

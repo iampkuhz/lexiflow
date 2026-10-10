@@ -1,5 +1,4 @@
 import io.lexiflow.buildlogic.BuildIdentity
-import io.lexiflow.buildlogic.BuildIdentityExtension
 import io.lexiflow.buildlogic.VerifyNoSkippedTestsTask
 import io.lexiflow.buildlogic.VerifyProductLanguageTask
 import io.lexiflow.buildlogic.VerifyProjectDependenciesTask
@@ -23,7 +22,6 @@ if (requestedRelease != null && requestedRelease !in setOf("true", "false")) thr
 val repoRoot = rootDir.parentFile
 val baseVersion = BuildIdentity.readBaseVersion(repoRoot)
 version = baseVersion
-extensions.add(BuildIdentityExtension::class.java, "buildIdentity", BuildIdentityExtension(baseVersion))
 
 val deliveryRequested = gradle.startParameter.taskNames.any {
     it.substringAfterLast(':') in setOf("check", "deliveryFull")

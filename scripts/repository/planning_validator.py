@@ -21,14 +21,6 @@ ID_PATTERNS = {
     "gate": re.compile(r"^G\d+$"),
 }
 
-CANONICAL_ID_POLICY = {
-    "program": "LF-PRG-NNN",
-    "workstream": "LF-WS-{DOMAIN}",
-    "epic": "LF-EP-{DOMAIN}-NNN",
-    "capability": "LF-CP-{DOMAIN}-NNN",
-    "task": "LF-TSK-{DOMAIN}-NNNN",
-}
-
 ALLOWED_DEP_TYPES = {"hard", "soft", "contract"}
 
 COMMON_REQUIRED_FIELDS = {
@@ -237,20 +229,10 @@ class PlanningValidator:
         module_checks_data=None,
     ):
         """由已加载的规划数据构造校验器，供隔离测试复用。"""
-        obj = cls.__new__(cls)
-        obj.root = Path(".")
-        obj._load_errors = []
-        obj._structure_errors = []
-        obj._check_failures = []
+        obj = cls(Path("."))
         obj.ws = ws_data
         obj.policy = policy_data
         obj.module_checks = module_checks_data
-        obj.tasks = {}
-        obj.workstreams = {}
-        obj.gates = []
-        obj.path_scopes = []
-        obj.phase_entry_tasks = {}
-        obj.errors = []
         obj._build_catalog()
         return obj
 
@@ -398,7 +380,9 @@ class PlanningValidator:
                         self.errors.append(f"duplicate-capability-id: {cid}")
                     seen_cap_ids.add(cid)
 
-                    cap_phase = cap.get("phase", "P1")
+                    cap_phase = cap.get(
+                        "phase", epic.get("phase", ws.get("phase", "P1"))
+                    )
                     if not isinstance(cap_phase, str) or not PHASE_RE.match(cap_phase):
                         self.errors.append(
                             f"invalid-phase: capability {cid} phase={cap_phase!r}"
@@ -531,17 +515,6 @@ class PlanningValidator:
 
     def check_all_entity_ids(self):
         """核对各层 ID 格式及唯一性；名称说明不能代替稳定 ID。"""
-        id_policy = self.ws.get("id_policy")
-        if not isinstance(id_policy, dict):
-            self.errors.append("invalid-id-policy: id_policy must be a map")
-        else:
-            for entity, expected in CANONICAL_ID_POLICY.items():
-                actual = id_policy.get(entity)
-                if actual != expected:
-                    self.errors.append(
-                        f"invalid-id-policy: {entity}={actual!r} expected {expected!r}"
-                    )
-
         program = self.ws.get("program") or {}
         pid = program.get("id", "")
         if not ID_PATTERNS["program"].match(str(pid)):
@@ -1014,13 +987,6 @@ class PlanningValidator:
 
     def check_owners(self):
         """核对 scope 声明、owner 存在性与重叠关系，不修改路径 claim。"""
-        resolution = (self.ws.get("path_ownership") or {}).get("resolution", "")
-        if not isinstance(resolution, str) or "most-specific" not in resolution.lower():
-            self.errors.append(
-                f"invalid-path-ownership-resolution: {resolution!r} "
-                f"must use most-specific-wins resolution"
-            )
-
         for scope in self.path_scopes:
             sid = scope.get("scope", "")
             owner = scope.get("owner", "")

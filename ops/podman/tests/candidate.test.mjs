@@ -23,7 +23,7 @@ async function assembled(baseVersion = '2.0.0-SNAPSHOT', sqlText = 'synthetic sc
   const artifactRoot = path.join(root, 'input'); await fs.mkdir(path.join(root, 'ops/release'), { recursive: true }); await fs.mkdir(artifactRoot);
   await fs.writeFile(path.join(root, '.gitignore'), '/input/\n/images/\n/output/\n/descriptor.json\n');
   await fs.writeFile(path.join(root, 'ops/release/version.txt'), `${baseVersion}\n`);
-  for (const file of ['version.mjs', 'runtime-entry.mjs', 'runtime-verification.sh', 'lifecycle.mjs', 'lifecycle-state.sh', 'lifecycle-docker.sh', 'lifecycle.sh'])
+  for (const file of ['version.mjs', 'runtime-entry.mjs', 'runtime-verification.sh', 'lifecycle-state.sh', 'lifecycle-docker.sh', 'lifecycle.sh'])
     await fs.writeFile(path.join(root, 'ops/release', file), await fs.readFile(path.join(repo, 'ops/release', file)));
   execFileSync('git', ['init', '-q', root]); execFileSync('git', ['-C', root, 'add', '.']);
   execFileSync('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'clean candidate fixture']);
@@ -46,7 +46,7 @@ async function assembled(baseVersion = '2.0.0-SNAPSHOT', sqlText = 'synthetic sc
       const relative = `images/${platform.replace('/', '-')}/${filename}`, bytes = Buffer.from(`${platform}:${role}`);
       await fs.mkdir(path.dirname(path.join(artifactRoot, relative)), { recursive: true }); await fs.writeFile(path.join(artifactRoot, relative), bytes);
       const record = { role, platform, path: relative, bytes: bytes.length, sha256: hash(bytes), imageDigest, licenseIds };
-      records.push(record); shardRecords.push(record);
+      records.push({ role, platform, licenseIds }); shardRecords.push(record);
       const copy = path.join(shard, relative); await fs.mkdir(path.dirname(copy), { recursive: true }); await fs.writeFile(copy, bytes);
     }
     const baseImages = [{ platform, javaRuntime: { reference: `registry.example.invalid/java/runtime@sha256:${'1'.repeat(64)}`, imageId: `sha256:${'c'.repeat(64)}` }, postgresRuntime: { reference: `registry.example.invalid/postgres/runtime@sha256:${'2'.repeat(64)}`, imageId: `sha256:${'d'.repeat(64)}` } }];

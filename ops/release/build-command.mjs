@@ -60,5 +60,3 @@ export function runDocker(args, { cwd, configDirectory, endpoint, timeoutMs = 30
     child.once('error', () => { if (!closed) stop('DOCKER_UNAVAILABLE'); });
   });
 }
-
-export const dockerOutputLimit = OUTPUT_LIMIT;

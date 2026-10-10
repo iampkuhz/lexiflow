@@ -462,7 +462,7 @@ export async function runUnifiedDeployment(ctx) {
       }
     } else observation = await inspect();
     if (authMode === 'development-trust') developmentIdentity = await assertDevelopmentIdentity(developmentIdentity);
-    const binaryUpdate = true; // 每次 install/upgrade 都准备并应用本次目标。
+    // 每次 install/upgrade 都刷新并启动目标应用；资料重建仍由数据库事实决定。
     const applicationReason = fresh ? 'NEW_INSTALL' : installed.buildIdentity?.buildId !== identity.buildId ? 'BUILD_CHANGED' : 'INSTALL_REFRESH';
     const plan = createDeploymentPlan({ operation: action, installation: installed?.id ?? `new:${dir}`, targetBuildId: identity.buildId,
       generationVersion: generation.generationVersion, databaseFingerprint: observation.fingerprint,
@@ -471,7 +471,7 @@ export async function runUnifiedDeployment(ctx) {
         host: '127.0.0.1', port: dbPort, database: 'lexiflow', schema: 'lexiflow_release', user: dbUser, owner: dbUser, serverMajor: 17 },
       takeover: external, databaseAuthority: external ? { verified: true } : undefined,
       createDatabase: !external && observation.fingerprint === missing,
-      applicationUpdate: binaryUpdate, applicationStart: binaryUpdate || !apiListener || observation.needsRebuild || installed?.phase !== 'ready',
+      applicationUpdate: true, applicationStart: true,
       applicationReason, dataRebuild: observation.needsRebuild,
       dataReason: observation.reason ?? 'OK' });
     const planHash = deploymentPlanHash(plan);
@@ -532,9 +532,6 @@ export async function runUnifiedDeployment(ctx) {
         }
         // 删除仅限当前 software-version 槽位；helper 在任何变更前完成完整归属预检。
         await removeVersionedImage({ run, role: 'api', baseVersion: identity.baseVersion, installationId: current.id });
-        if (!plan.actions.applicationUpdate && !plan.actions.dataRebuild) return {
-          dataFile: dataset, noChange: !plan.actions.applicationStart, startOnly: plan.actions.applicationStart,
-          apiImage: installed.apiImage };
         const secretDir = path.join(dir, 'secrets'); fs.mkdirSync(secretDir, { recursive: true, mode: 0o700 });
         for (const name of authMode === 'development-trust' ? [] : external ? ['app-password'] : ['postgres-password', 'app-password']) {
           const file = path.join(secretDir, name);
@@ -664,7 +661,7 @@ export async function runUnifiedDeployment(ctx) {
       },
       stopApplication: async () => {
         ctx.progress('停止本安装应用');
-        if (!fresh && (plan.actions.applicationUpdate || plan.actions.dataRebuild)) await ctx.compose('stop', 'api');
+        if (!fresh) await ctx.compose('stop', 'api');
       },
       applyData: async (_plan, preparedData) => {
         ctx.progress('核对或提交资料');
@@ -685,8 +682,6 @@ export async function runUnifiedDeployment(ctx) {
       },
       activateApplication: async (_plan, preparedData, committed) => {
         ctx.progress('激活目标应用');
-        if (preparedData.noChange) return;
-        if (preparedData.startOnly) { await ctx.compose('up', '-d', '--no-deps', 'api'); return; }
         current = { ...current, phase: 'initialized', datasetIdentity: { version: committed.datasetVersion, generationVersion: generation.generationVersion, sourceSha256: inputSha256 } };
         ctx.setState(current);
         if (preparedData.nextSql) fs.renameSync(preparedData.nextSql, path.join(dir, 'infra/postgres/schema.sql'));
@@ -705,12 +700,6 @@ export async function runUnifiedDeployment(ctx) {
       },
       verifyApplication: async () => {
         ctx.progress('验证应用就绪');
-        if (!plan.actions.applicationUpdate && !plan.actions.dataRebuild) {
-          await ctx.ready(current);
-          if (authMode === 'development-trust') developmentIdentity = await assertDevelopmentIdentity(developmentIdentity);
-          if (current.phase !== 'ready') { current.phase = 'ready'; current.digests = ctx.digestFiles(current); ctx.saveState(current); }
-          return;
-        }
         await ctx.ready(current);
         if (authMode === 'development-trust') developmentIdentity = await assertDevelopmentIdentity(developmentIdentity);
         current.phase = 'ready';

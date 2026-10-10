@@ -22,6 +22,9 @@ context_hygiene:
   platform_configs_are_entry_points: true
   runtime_state_in_harness: false
 
+# Session 生命周期与 checkout 由客户端管理；读写不要求统一仓库状态。
+# 分支、commit 与集成仍须用户明示；客户端入口见 manifest.platform_entries。
+
 # 执行与交接：区分计划、已派发、真实启动及正式验收。
 execution_progress:
   rule: 用户明确要求启动或继续时，在授权范围内实际执行到派发、同步交付或可核验阻塞；不得仅阅读配置、描述下一步后结束，也不得暗示回合结束后会自动继续。
@@ -78,6 +81,33 @@ architecture:
   - cross-domain-table-access
   - extension-as-service-source-of-truth
   - english-caption-waits-for-model
+
+# 规划规则只在此维护；Catalog 保存项目事实，字段结构/ID格式由实际校验器核对。
+planning_contract:
+  identity: 已分配ID不得复用或重定义；阶段、priority、milestone、lifecycle可变而ID稳定；移除Task保留provenance，不把旧ID分配给新结果。run为UUID，显示别名为task_id-RNNN，不作证据身份。
+  acceptance_case: LF-AC-{DOMAIN}-NNN
+  acceptance_case_aliases: ["LF-{DOMAIN}-NNN", ARCH-NNN, FLOW-NNN, LEARN-NNN, SOURCE-NNN, FAIL-NNN, OBS-NNN]
+  priorities:
+    P0: 当前Gate或milestone必需的事实、核心链路、安全或数据完整性。
+    P1: 重要的质量、性能、可运维性或主要体验。
+    P2: 有明确fallback的实用改进。
+    P3: 仅证据触发的探索或后续扩展。
+  requirement_levels:
+    MUST: 必须满足。
+    SHOULD: 默认满足，除非明确接受trade-off。
+    CAN_EVOLVE: 证据足以支持时实施。
+  planning_states: [DRAFT, READY, DISPATCHED, IN_PROGRESS, REVIEW, DONE, BLOCKED, SUPERSEDED, CANCELLED]
+  planning_state_is_not_acceptance: true
+  decomposition:
+    target_acceptance_assertions: {min: 1, max: 5}
+    target_major_production_files_per_task: {max: 8}
+    split_when: 跨多个Bounded Context、多个主要文件归属、Provider contract和两个以上consumer同步变化、独立validation环境、超过既有Task时间预算或新结果可独立验收。
+    keep_together: 实现与直接测试；共享归属、file claim、风险和验收结果的连续小工作。
+    discovery: 独立范围分配新Task ID和discovered_from边，不静默扩大已派发Task。
+  dependencies: DAG仅用hard/soft/contract及真实discovered_from/supersedes关系；soft仅建议先后不阻READY；hard要求PASS；contract精确绑定唯一producer的name/version、Task正整数版本、change/contract SemVer及PASS。同producer每个name只声明一次；阶段号不隐含依赖；公共contract变更串行，集成依赖全部贡献者。
+  changes: 已派发scope不可变；范围/验收变化递增task_version。change_version的patch只澄清、minor增加范围/证据/验收、major改变目标/归属边界/contract；版本不授予历史兼容。contract变更须完整consumer inventory并同步最新消费者、重建重导结构及明确失败恢复；禁止保留兼容窗口或旧逻辑。同一实现者最多返工1轮，耗尽后拆Task、转交、Main接手或BLOCKED，不重置身份绕过预算。
+  evidence: latest指针不是证据；实际runner的不可变布局绑定Task/version/change/actor/client/parent、输入snapshot、changed files和file claims、validation命令/退出/日志/类型化结果、验收映射/effect checks及风险/fallback/失败恢复/限制。独立review消费冻结证据；Main核验真实交接，不自签正式验收。callback-only和无独立review的agent零退出不是PASS。
+  decisions: 重要架构/contract/安全/数据/成本决策或阶段Gate要求时，在OpenSpec记录唯一决定、trade-off理由和可观察重新评估条件。Task本身为阶段Gate或改变用户已批范围/产品行为，须用户确认。
 
 # 工作包公共 contract：模型选择、身份、caller 输入、runner 输出与结果核对。
 # 风险等级来自实际差异、内容与依赖闭包；未知不降级，Task要求只能增加检查。
@@ -240,23 +270,6 @@ subagent_protocol:
     - artifact_locators
     - validation_commands
     - blocking_findings
-    allowed_fields_applies_to: qoder-task-signal
-    qoder_task_allowed_fields:
-    - status
-    - work_package_id
-    - task_ids
-    - run_id
-    - artifact_locators
-    - validation_commands
-    - blocking_findings
-    codex_work_package_allowed_fields:
-    - status
-    - work_package_id
-    - task_ids
-    - run_id
-    - artifact_locators
-    - validation_commands
-    - blocking_findings
     full_context_or_logs_in_callback: forbidden
     main_agent_confirmation: verify-canonical-artifact-hashes-and-run-risk-selected-validation
   task_sizing_minutes:
@@ -276,8 +289,6 @@ subagent_protocol:
     preferred_minutes:
       min: 10
       max: 360
-    minimum_total_estimated_minutes: 10
-    target_maximum_total_estimated_minutes: 360
     minimum_catalog_tasks: 1
     must_share:
     - primary_owner
@@ -336,16 +347,11 @@ subagent_protocol:
   - task_versions
   - change_versions
   - estimated_minutes
-  - primary_owner
   - contract_boundary
   - allowed_files
   - forbidden_files
   - required_context
-  - expected_outputs_by_task
-  - acceptance_by_task
-  - validation_commands
   - failure_policy
-  - parent_client
   codex_work_package_runner_identity:
     parent_session_id: runtime-bound-parent-session
     agent_id: codex-runtime-bound-stable-actor
@@ -359,9 +365,9 @@ subagent_protocol:
     - run_id
     - session_id
     - client
+    - parent_client
   codex_work_package_result:
     schema_version: lexiflow.codex-work-package-result.v1
-    schema_locator: harness/codex-work-package-result.schema.json
     publisher: scripts/agents/codex/work_package.py
     layout: tmp/quality/codex-work-packages/{run_id}/tasks/{task_id}/{task-projection,outcome,completion,signal}.json
     completion_locator: tmp/quality/codex-work-packages/{run_id}/package-completion.json
@@ -452,30 +458,6 @@ subagent_protocol:
   - effect_checks
   - risks
   current_runner_adapter:
-    enforced_caller_fields:
-    - goal
-    - task_id
-    - task_source
-    - task_version
-    - change_version
-    - work_package_id
-    - task_ids
-    - task_versions
-    - change_versions
-    - estimated_minutes
-    - primary_owner
-    - contract_boundary
-    - agent_profile
-    - harness_manifest
-    - allowed_files
-    - forbidden_files
-    - required_context
-    - expected_output
-    - acceptance_criteria
-    - acceptance_evidence
-    - validation_command
-    - failure_policy
-    - parent_client
     target_schema_enforced: true
     runtime_identity_enforced: true
     result_fields_required_in_prompt: true
@@ -484,11 +466,7 @@ subagent_protocol:
     catalog_package_preflight: advisory-when-present
     catalog_estimate_rule: caller-10-to-360-or-exact-current-catalog-sum-when-catalog-is-used
     structured_result_required: true
-    implementation_status: IMPLEMENTED
     conformance_test: tests/agents/test_qoder_runner.py
-    owner_task: LF-TSK-QLT-0006
-    owner_task_version: 2
-    owner_change_version: 2.0.0
   caller_field_schema:
     goal: non-empty-string
     task_id: stable-task-id-string
@@ -623,9 +601,6 @@ qoder_delegation:
     forbidden: 不得为重置预算而新建同义 Task、改 anchor/package/version、删除运行数据或伪造恢复确认；只有范围真实改变才按变更合同更新版本。
   max_prompt_characters: 8000
   work_package:
-    estimated_minutes:
-      min: 10
-      max: 360
     estimated_minutes_source: caller-declared-estimate-or-exact-current-catalog-sum-when-catalog-is-used
     minimum_catalog_tasks: 1
     must_share:
@@ -683,16 +658,6 @@ codex_dispatch:
   max_active_subagents: 6
   default_fork_turns: none
   full_history_fork_requires_explicit_exception: true
-  completion_signal_fields:
-  - status
-  - work_package_id
-  - task_ids
-  - run_id
-  - artifact_locators
-  - validation_commands
-  - blocking_findings
-  max_blocking_findings: 3
-  full_context_or_logs_in_callback: false
   acceptance:
     default: distinct-native-subagents-in-current-parent
     independent_host_session_required: false

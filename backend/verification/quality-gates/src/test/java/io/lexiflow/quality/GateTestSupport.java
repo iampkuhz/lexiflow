@@ -26,6 +26,6 @@ final class GateTestSupport {
             path.toAbsolutePath().normalize(),
             JavaSourceDiscovery.normalize(root.relativize(path)),
             content);
-    return new JavaSourceContext(List.of(source), ParsedJavaSources.parse(root, List.of(source)));
+    return new JavaSourceContext(List.of(source), ParsedJavaSources.parse(List.of(source)));
   }
 }

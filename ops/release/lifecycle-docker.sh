@@ -251,7 +251,6 @@ lf_compose() (
   LF_COMPOSE_FILE_ENV="LEXIFLOW_DATASET_FILE=$LF_RELEASE_ROOT/$LF_DATASET_PATH"
   LF_COMPOSE_INSTALL_ENV="LEXIFLOW_INSTALLATION_ID=$LF_INSTALL_ID"
   LF_COMPOSE_KEY_ENV="LEXIFLOW_RELEASE_KEY=$LF_CURRENT_KEY"
-  LF_COMPOSE_ARGS=""
   # All fixed Compose business operations use the same private-FD bootstrap.
   # The caller's stdin is intentionally not used as a credential transport.
   lf_compose_invoke() {
@@ -282,7 +281,6 @@ lf_docker_import() {
   api_identity=$(lf_docker image inspect --format '{{.Id}}|{{.Os}}|{{.Architecture}}' "$LF_API_IMAGE" 2>/dev/null) || return 1
   database_identity=$(lf_docker image inspect --format '{{.Id}}|{{.Os}}|{{.Architecture}}' "$LF_POSTGRES_IMAGE" 2>/dev/null) || return 1
   [ "$api_identity" = "$LF_API_IMAGE|linux|$architecture" ] && [ "$database_identity" = "$LF_POSTGRES_IMAGE|linux|$architecture" ] || return 1
-  LF_API_ID=$LF_API_IMAGE LF_DB_ID=$LF_POSTGRES_IMAGE
 }
 lf_wait_healthy() {
   local name="$1" i=0 status= id= seen= running=

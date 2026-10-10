@@ -16,7 +16,7 @@ import sys
 import tempfile
 import struct
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Mapping
 
 from scripts.environment import release_docker_preflight
 from scripts.verification.kernel import fingerprint_json, snapshot_check_inputs
@@ -284,7 +284,7 @@ def _check_environment(repo: Path, environ: Mapping[str, str]) -> list[str]:
     return missing
 
 
-def _bindings(repo: Path, env: Mapping[str, str]) -> tuple[Any, ...]:
+def _bindings(env: Mapping[str, str]) -> tuple[Any, ...]:
     result = []
     _require_supported_host()
     for platform in RELEASE_PLATFORMS:
@@ -295,7 +295,7 @@ def _bindings(repo: Path, env: Mapping[str, str]) -> tuple[Any, ...]:
         if not endpoint.startswith("unix://"):
             raise ConsumerError("FAIL", "release-docker-endpoint-invalid")
         info = release_docker_preflight.preflight(
-            repo, platform, {"DOCKER_HOST": endpoint, "PATH": env.get("PATH", "")}
+            platform, {"DOCKER_HOST": endpoint, "PATH": env.get("PATH", "")}
         )
         if info.status != "PASS" or info.binding is None:
             raise ConsumerError(info.status, info.reason)
@@ -310,8 +310,6 @@ def run_consumer(
     envelope: Mapping[str, Any],
     *,
     environ: Mapping[str, str] | None = None,
-    bridge: Callable[..., dict[str, Any]] = consume_verify_snapshot,
-    run_pipeline: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """消费原始Verify快照并串联构件、候选与安装生命周期。"""
     _install_termination_handler()
@@ -331,7 +329,7 @@ def run_consumer(
     source_parent = scratch_path / "source-parent"
     source_parent.mkdir(mode=0o700)
     try:
-        fixture = bridge(
+        fixture = consume_verify_snapshot(
             repo,
             envelope["effective_check"],
             context,
@@ -358,17 +356,11 @@ def run_consumer(
         if missing:
             raise ConsumerError("BLOCKED", "missing-environment")
         # Native endpoints are checked before any build or Docker side effect.
-        bindings = _bindings(fixture_root, env)
-        evidence = (
-            run_pipeline(fixture_root, scratch_path, bindings, env)
-            if run_pipeline
-            else produce_candidates(fixture_root, scratch_path, env, bindings)
-        )
+        bindings = _bindings(env)
+        evidence = produce_candidates(fixture_root, scratch_path, env, bindings)
         if not isinstance(evidence, dict) or evidence.get("status", "PASS") != "PASS":
             raise ConsumerError("FAIL", "release-runtime-evidence-invalid")
-        lifecycle = execute_lifecycle(
-            fixture_root, scratch_path, evidence, bindings, env
-        )
+        lifecycle = execute_lifecycle(scratch_path, evidence, bindings, env)
         result = {
             "status": "PASS",
             "run_id": context["run_id"],

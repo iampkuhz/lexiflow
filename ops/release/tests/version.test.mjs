@@ -8,7 +8,7 @@ import childProcess from 'node:child_process';
 import * as fs from 'node:fs';
 import fsDefault from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
-import { parseVersion, readVersion, checkReleaseSource } from '../version.mjs';
+import { parseVersion, resolveCleanBuildIdentity, checkReleaseSource } from '../version.mjs';
 import { evaluateTapSummary, runTests } from '../check.mjs';
 
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, stdio: 'ignore', timeout: 10_000, env: { ...process.env, GIT_AUTHOR_DATE: '2026-10-05T00:00:00Z', GIT_COMMITTER_DATE: '2026-10-05T18:00:00Z' } });
@@ -29,12 +29,19 @@ test('version contract accepts boundaries and one final newline only', () => {
   for (const value of ['0.1.0', '65535.2.3\n', '1.2.3\r\n']) assert.ok(parseVersion(value));
   for (const value of ['', '0.0.0', '01.2.3', '1.02.3', '1.2.65536', '99999.2.3', '1.2.3\n\n', '1.2.3\r', ' 1.2.3', '1.2.3 ', '1.2.3x', '\uFEFF1.2.3', '１.2.3']) assert.throws(() => parseVersion(value));
 });
-test('readVersion uses requested file and rejects missing source', async () => {
-  const root = fixture();
-  try {
-    assert.equal(await readVersion(path.join(root, 'ops/release/version.txt')), '1.2.3');
-    await assert.rejects(readVersion(path.join(root, 'absent')));
-  } finally { rmSync(root, { recursive: true, force: true }); }
+test('release projection reads the version from the same full source scan and rejects committed missing/invalid input', () => {
+  withFixture({}, root => {
+    const { softwareVersion, sourceCommit } = resolveCleanBuildIdentity(root);
+    assert.deepEqual(checkReleaseSource(root), { softwareVersion, sourceCommit });
+    for (const value of ['', '0.0.0']) {
+      writeFileSync(path.join(root, 'ops/release/version.txt'), value);
+      git(root, 'add', '.'); git(root, 'commit', '-qm', 'invalid version');
+      assert.throws(() => checkReleaseSource(root), /build source identity unavailable/);
+    }
+    unlinkSync(path.join(root, 'ops/release/version.txt'));
+    git(root, 'add', '-u'); git(root, 'commit', '-qm', 'missing version');
+    assert.throws(() => checkReleaseSource(root), /build source identity unavailable/);
+  });
 });
 test('release source accepts clean root and ignored local output', () => withFixture({ ignore: true }, (root) => {
   mkdirSync(path.join(root, 'ignored')); writeFileSync(path.join(root, 'ignored/private'), 'x');
@@ -59,7 +66,7 @@ test('release source rejects missing Git executable with fixed reason', () => wi
   const script = `import {checkReleaseSource} from ${JSON.stringify(new URL('../version.mjs', import.meta.url).href)}; try { checkReleaseSource(process.argv[1]); process.exit(2); } catch (error) { process.stdout.write(error.message); }`;
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', script, root], { encoding: 'utf8', env: { ...process.env, PATH: '' } });
   assert.equal(result.status, 0);
-  assert.equal(result.stdout, 'release input is not a Git repository');
+  assert.equal(result.stdout, 'build source identity unavailable');
   assert.equal(result.stderr, '');
 }));
 test('version CLI rejects invalid arguments and dirty release without leaking paths', () => withFixture({}, (root) => {
@@ -637,4 +644,87 @@ test('runner preserves TAP pass, nonzero exit, and spawn-error results', async (
   assert.equal(nonzero.status, 'FAIL');
   const spawnError = await runTests({ command: '/not/a/real/runner', args: [] });
   assert.equal(spawnError.status, 'FAIL'); assert.equal(spawnError.errors, 1);
+});
+
+test('fixed CLI suites preserve exact files and budgets and reject free-form overrides', () => {
+  const entry = path.resolve('ops/release/check.mjs');
+  const expected = {
+    version: [30_000, ['version']],
+    build: [170_000, ['archive-identity', 'embedded-identity', 'build', 'build-execution', 'candidate', 'verified-candidate', 'candidate-proof', 'pipeline', 'workflow']],
+    manifest: [80_000, ['manifest']],
+    'runtime-entry': [80_000, ['runtime-entry']],
+    lifecycle: [120_000, ['lifecycle']],
+    'lifecycle-install': [120_000, ['lifecycle-install']],
+  };
+  const script = `import cp from 'node:child_process';import {syncBuiltinESMExports} from 'node:module';
+    const spawn=cp.spawn;const timers=[];const timer=globalThis.setTimeout;globalThis.setTimeout=(fn,ms,...args)=>{timers.push(ms);return timer(fn,ms,...args)};
+    const calls=[];cp.spawn=(command,args,options)=>{calls.push({command,args});return spawn(process.execPath,['-e',${JSON.stringify(`process.stdout.write(${JSON.stringify(summary())})`)}],options)};syncBuiltinESMExports();
+    process.argv=[process.execPath,${JSON.stringify(entry)},...JSON.parse(process.argv[1])];
+    const output=[];console.log=value=>output.push(JSON.parse(value));
+    await import(${JSON.stringify(new URL('../check.mjs', import.meta.url).href)});
+    process.on('beforeExit',()=>process.stdout.write(JSON.stringify({calls,timers,output})));`;
+  for (const [suite, [budget, names]] of Object.entries(expected)) {
+    const argv = suite === 'version' ? [] : ['--suite', suite];
+    const run = spawnSync(process.execPath, ['--input-type=module', '-e', script, JSON.stringify(argv)], { encoding: 'utf8', timeout: 10_000 });
+    assert.equal(run.status, 0, run.stderr);
+    const { calls, timers, output } = JSON.parse(run.stdout);
+    assert.deepEqual(calls, [{ command: process.execPath, args: ['--test', '--test-reporter=tap', ...names.map(name => path.join(path.dirname(entry), `tests/${name}.test.mjs`))] }]);
+    assert.deepEqual(timers, [budget]);
+    assert.equal(output[0].status, 'PASS');
+  }
+  for (const argv of [['--suite', 'version'], ['--suite', 'missing'], ['--suite', '../version'], ['--command', 'sh'], ['--suite', 'build', '--timeout', '1'], ['--suite']]) {
+    const run = spawnSync(process.execPath, ['--input-type=module', '-e', script, JSON.stringify(argv)], { encoding: 'utf8', timeout: 10_000 });
+    assert.equal(run.status, 1);
+    const { calls, timers, output } = JSON.parse(run.stdout);
+    assert.deepEqual(calls, []); assert.deepEqual(timers, []);
+    assert.equal(output[0].status, 'FAIL'); assert.equal(output[0].reason, 'invalid arguments');
+  }
+});
+
+test('release projection uses one 15 second deadline for every Git process and source read', t => {
+  withFixture({}, root => {
+    const original = childProcess.execFileSync;
+    let elapsed = 0;
+    t.mock.method(performance, 'now', () => elapsed);
+    const budgets = [];
+    childProcess.execFileSync = function (command, args, options) {
+      if (command === 'git') {
+        budgets.push(options.timeout);
+        assert.equal(options.timeout, Math.min(10_000, 15_000 - elapsed));
+        const result = original.call(this, command, args, options);
+        elapsed += 1100;
+        return result;
+      }
+      return original.call(this, command, args, options);
+    };
+    syncBuiltinESMExports();
+    try {
+      assert.throws(() => checkReleaseSource(root), /build source identity timed out/);
+      assert.ok(budgets.some(ms => ms < 10_000), 'late subprocesses consume remaining total budget');
+      assert.ok(budgets.every(ms => ms > 0));
+      assert.ok(budgets.length < 16, 'expired deadline does not start another full Git snapshot');
+    } finally { childProcess.execFileSync = original; syncBuiltinESMExports(); t.mock.restoreAll(); }
+  });
+});
+
+test('source file reads consume the same deadline and close the active file on expiry', t => {
+  withFixture({}, root => {
+    const read = fsDefault.readSync; const close = fsDefault.closeSync;
+    let elapsed = 0; let openedFd; let closed = false;
+    t.mock.method(performance, 'now', () => elapsed);
+    fsDefault.readSync = function (fd, ...args) {
+      openedFd = fd;
+      const count = read.call(this, fd, ...args);
+      elapsed = 15_001;
+      return count;
+    };
+    fsDefault.closeSync = function (fd) { if (fd === openedFd) closed = true; return close.call(this, fd); };
+    syncBuiltinESMExports();
+    try {
+      assert.throws(() => checkReleaseSource(root), /build source identity timed out/);
+      assert.ok(closed, 'timed-out source read still releases its own descriptor');
+    } finally {
+      fsDefault.readSync = read; fsDefault.closeSync = close; syncBuiltinESMExports(); t.mock.restoreAll();
+    }
+  });
 });

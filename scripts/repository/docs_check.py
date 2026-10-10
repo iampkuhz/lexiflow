@@ -67,15 +67,13 @@ def check_file(
     file,
     forbidden_extensions=(".puml", ".svg", ".png"),
     *,
-    text=None,
     parsed=None,
     anchor_index=None,
     documents=None,
 ):
     """检查单个 Markdown 文件的链接、标题与图源围栏。"""
     issues = []
-    text = file.read_text() if text is None else text
-    outside, diagrams, errors = parse(text) if parsed is None else parsed
+    outside, diagrams, errors = parse(file.read_text()) if parsed is None else parsed
     issues.extend(errors)
     prose = "\n".join(line for _, line in outside)
     prose = re.sub(r"(`+).*?\1", "", prose)
@@ -138,14 +136,9 @@ def _anchors_for(file, anchor_index, documents=None):
         return anchors(file.read_text())
     if resolved not in anchor_index:
         # 复用显式传入的当前 run 文档缓存；不使用跨调用模块状态。
-        text, parsed = (
-            documents.get(resolved, (None, None))
-            if documents is not None
-            else (None, None)
-        )
+        parsed = documents.get(resolved) if documents is not None else None
         if parsed is None:
-            text = file.read_text()
-            parsed = parse(text)
+            parsed = parse(file.read_text())
         anchor_index[resolved] = anchors_from_parsed(parsed)
     return anchor_index[resolved]
 
@@ -204,16 +197,11 @@ def check_selected_solution_only(root, policy, *, documents=None):
         if not directory.is_dir():
             continue
         for file in sorted(directory.rglob("*.md")):
-            text, parsed = (
-                documents.get(file.resolve(), (None, None))
-                if documents is not None
-                else (None, None)
-            )
+            parsed = documents.get(file.resolve()) if documents is not None else None
             if parsed is None:
-                text = file.read_text()
-                parsed = parse(text)
+                parsed = parse(file.read_text())
                 if documents is not None:
-                    documents[file.resolve()] = (text, parsed)
+                    documents[file.resolve()] = parsed
             for line_number, line in parsed[0]:
                 match = re.match(r"^#{1,6}\s+(.+?)(?:\s+#+)?$", line)
                 if match and any(
@@ -265,16 +253,11 @@ def check_version_comparisons(root, policy, *, documents=None):
         if not directory.is_dir():
             continue
         for file in sorted(directory.rglob("*.md")):
-            text, parsed = (
-                documents.get(file.resolve(), (None, None))
-                if documents is not None
-                else (None, None)
-            )
+            parsed = documents.get(file.resolve()) if documents is not None else None
             if parsed is None:
-                text = file.read_text()
-                parsed = parse(text)
+                parsed = parse(file.read_text())
                 if documents is not None:
-                    documents[file.resolve()] = (text, parsed)
+                    documents[file.resolve()] = parsed
             outside, _, _ = parsed
             prose = "\n".join(line for _, line in outside)
             title = next(
@@ -314,8 +297,7 @@ def run(root):
     def document(file):
         key = file.resolve()
         if key not in documents:
-            text = file.read_text()
-            documents[key] = (text, parse(text))
+            documents[key] = parse(file.read_text())
         return documents[key]
 
     anchor_index = {}
@@ -328,12 +310,11 @@ def run(root):
     issues.extend(check_version_comparisons(root, policy, documents=documents))
     count = 0
     for file in files:
-        text, parsed = document(file)
+        parsed = document(file)
         errors, diagrams = check_file(
             root,
             file,
             policy["forbidden_diagram_link_extensions"],
-            text=text,
             parsed=parsed,
             anchor_index=anchor_index,
             documents=documents,

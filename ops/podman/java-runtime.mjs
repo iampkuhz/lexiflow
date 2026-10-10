@@ -25,27 +25,19 @@ function exactTemurinHome(home, source) {
   }
 }
 
-export function javaBuildEnvironment(environment, { repo } = {}) {
+export function javaBuildEnvironment(environment, { repo }) {
+  if (typeof repo !== 'string' || !path.isAbsolute(repo)) throw new Error('JAVA_REPOSITORY_REQUIRED：必须提供工作区绝对路径');
   const env = { ...environment };
-  let home = env.JAVA_HOME;
-  let source = home ? 'JAVA_HOME' : 'PATH';
-  if (repo) {
-    const explicit = env.LEXIFLOW_JAVA_HOME?.trim();
-    const candidates = [path.join(repo, '.local/toolchains/jdk-25/Contents/Home'), path.join(repo, '.local/toolchains/jdk-25')];
-    if (explicit) { home = explicit; source = 'LEXIFLOW_JAVA_HOME'; }
-    else {
-      const local = candidates.find(candidate => fs.existsSync(candidate));
-      if (local) { home = local; source = 'repository-local'; }
-      else if (!home) throw new Error('JAVA_25_UNAVAILABLE：未找到仓库本地或继承的 Eclipse Temurin 25 JDK');
-    }
-    exactTemurinHome(home, source);
-    env.JAVA_HOME = home;
-  }
-  if (home) {
-    if (!path.isAbsolute(home)) throw new Error('JAVA_HOME_INVALID：JAVA_HOME 必须是 JDK 25 的绝对路径');
-    env.PATH = [path.join(home, 'bin'), env.PATH].filter(Boolean).join(path.delimiter);
-  }
-  const command = home ? path.join(home, 'bin', 'java') : 'java';
+  const explicit = env.LEXIFLOW_JAVA_HOME?.trim();
+  const candidates = [path.join(repo, '.local/toolchains/jdk-25/Contents/Home'), path.join(repo, '.local/toolchains/jdk-25')];
+  const local = explicit ? null : candidates.find(candidate => fs.existsSync(candidate));
+  const home = explicit || local || env.JAVA_HOME;
+  const source = explicit ? 'LEXIFLOW_JAVA_HOME' : local ? 'repository-local' : 'JAVA_HOME';
+  if (!home) throw new Error('JAVA_25_UNAVAILABLE：未找到仓库本地或继承的 Eclipse Temurin 25 JDK');
+  exactTemurinHome(home, source);
+  env.JAVA_HOME = home;
+  env.PATH = [path.join(home, 'bin'), env.PATH].filter(Boolean).join(path.delimiter);
+  const command = path.join(home, 'bin', 'java');
   const result = spawnSync(command, ['-version'], {
     env, encoding: 'utf8', timeout: 10000, maxBuffer: 64 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],

@@ -50,7 +50,6 @@ def _consume_readonly(test, fixture):
         "scripts.delivery_gate.check.publish_json",
         "scripts.delivery_gate.records.publish_json",
         "scripts.delivery_gate.records.publish_bytes",
-        "scripts.delivery_gate.validate.validate",
         "scripts.delivery_gate.validate.verify_profiles",
         "scripts.delivery_gate.validate.validate_batch",
         "scripts.delivery_gate.review.review",
@@ -225,7 +224,7 @@ class TestConsumeExisting(unittest.TestCase):
         import yaml
         catalog = yaml.safe_load(catalog_path.read_text())
         task = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"][0]
-        task["depends_on"] = ["LF-TSK-TEST-0099"]
+        task["depends_on"] = [{"task_id": "LF-TSK-TEST-0099", "required_task_version": 1, "required_change_version": "1.0.0", "required_result": "PASS"}]
         catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False))
         result = self._consume_snapshot()
         self.assertNotEqual(result["result"], "PASS")

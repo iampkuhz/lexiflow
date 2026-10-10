@@ -34,7 +34,6 @@ function regularBytes(file, maxBytes) {
   }
   finally { fs.closeSync(fd); }
 }
-export function readBoundedFile(file, maxBytes) { return regularBytes(file, maxBytes); }
 
 /** 计划和每个待写块先写入事务 journal，再对工作区产生副作用。 */
 export async function writePreparedTree(root, files, persist) {
@@ -133,5 +132,3 @@ export function cleanupPreparedTree(root, plan, { preserve = [] } = {}) {
   for (const name of files.keys()) { const file = path.join(root, ...name.split('/')); if (infoOrNull(file)) fs.unlinkSync(file); }
   for (const name of [...plan.directories].sort((a, b) => b.split('/').length - a.split('/').length)) { const dir = path.join(root, ...name.split('/')); if (infoOrNull(dir)) fs.rmdirSync(dir); }
 }
-
-export const preparationLimits = { chunkBytes: CHUNK, maxFiles: MAX_FILES, maxBytes: MAX_BYTES, maxJournalBytes: MAX_JOURNAL_BYTES };

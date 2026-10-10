@@ -88,12 +88,23 @@ def review_required(submission: dict[str, Any]) -> bool:
 
 def verify_plan(repo: Path, submission: dict[str, Any]) -> None:
     """重算冻结主体的风险和层要求；额外无关写入不改变已绑定主体或授权低风险。"""
+    requirements = submission.get("task_requirements")
+    if not isinstance(requirements, dict) or not isinstance(
+        requirements.get("task_id"), str
+    ):
+        raise RecordError("task-requirements-drift", "task requirements invalid")
+    try:
+        current_requirements = load_task_requirements(repo, requirements["task_id"])
+    except RecordError as exc:
+        raise RecordError("task-requirements-drift", str(exc)) from None
+    if current_requirements != requirements:
+        raise RecordError(
+            "task-requirements-drift", "task source/version/dependencies changed"
+        )
     try:
         original = submission["risk_assessment"]
-        requirements = submission["task_requirements"]
         paths = tuple(sorted(submission["changed_file_snapshots"]))
         task_subject = submission["task_subject"]
-        current_requirements = load_task_requirements(repo, requirements["task_id"])
         current_subject = derive_task_subject(
             repo, current_requirements, changed_paths(repo, original["base"])
         )
@@ -106,7 +117,6 @@ def verify_plan(repo: Path, submission: dict[str, Any]) -> None:
             original["changed_files"] != list(paths)
             or task_subject.get("changed_files") != list(paths)
             or current_subject != task_subject
-            or current_requirements != requirements
             or not set(paths).issubset(set(report["scope_review"]["changed_files"]))
             or original["file_snapshots"] != submission["changed_file_snapshots"]
             or report.get("result") != "PASS"

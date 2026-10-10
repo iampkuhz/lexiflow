@@ -39,7 +39,15 @@ class TestEvaluationContext(unittest.TestCase):
                     "task_id": task,
                     "task_version": 1,
                     "change_version": "1.0.0",
-                    "dependencies": [{"task_id": dep} for dep in dependencies],
+                    "dependencies": [
+                        {
+                            "task_id": dep,
+                            "required_task_version": 1,
+                            "required_change_version": "1.0.0",
+                            "required_result": "PASS",
+                        }
+                        for dep in dependencies
+                    ],
                 },
             }
             nodes[task] = node
@@ -268,7 +276,7 @@ class TestEvaluationFreshness(unittest.TestCase):
             task = catalog["workstreams"][0]["epics"][0]["capabilities"][0][
                 "seed_tasks"
             ][0]
-            task["version"] += 1
+            task["task_version"] += 1
             catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False))
             return original(context, repo)
 

@@ -50,12 +50,11 @@ class BuildCheckTest(unittest.TestCase):
             "result_contract",
         ):
             self.assertEqual(base[key], change[key], key)
-        self.assertEqual(["node", "ops/release/build-check.mjs"], base["command"])
+        self.assertEqual(["node", "ops/release/check.mjs", "--suite", "build"], base["command"])
         self.assertEqual(["node", "git", "sh", "/bin/sh", "mkfifo"], base["required_environment"])
         self.assertEqual([], base["module_dependencies"])
         for name in (
             "manifest.mjs",
-            "build-check.mjs",
             "tests/build.test.mjs",
             "build.mjs",
             "build-command.mjs",
@@ -68,7 +67,6 @@ class BuildCheckTest(unittest.TestCase):
             "package.mjs",
             "runtime-entry.mjs",
             "runtime-verification.sh",
-            "lifecycle.mjs",
             "lifecycle-state.sh",
             "lifecycle-docker.sh",
             "lifecycle.sh",

@@ -280,14 +280,11 @@ def bind_main_task(repo_root: str | Path, task_id: str) -> dict[str, Any]:
     root = Path(repo_root).resolve()
     runtime = discover(root)
     run_id = str(uuid.uuid4())
-    binding = runtime.bind({"parent_client": "codex"}, run_id)
+    binding = runtime.bind({}, run_id)
     projection = build_codex_main_task_projection(
         root,
         task_id,
         binding.identity,
-        goal="Record current source for explicit independent Gate validation",
-        required_context="AGENTS.md; harness/README.md; current catalog task",
-        failure_policy="BLOCKED on missing current evidence; never infer acceptance",
     )
     descriptor = binding.persist_immutable(root)
     path = root / Path(descriptor["locator"]).parent / "main-task-projection.json"

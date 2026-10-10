@@ -190,9 +190,7 @@ def build_local_inputs(
         raise ConsumerError("FAIL", "synthetic-generations-not-distinct")
     return {
         "home": home,
-        "gradle_home": gradle_home,
         "fixtures": fixtures,
-        "fixture_root": repo,
         "artifact_root": artifact_root,
         "producer": report,
     }
@@ -230,7 +228,7 @@ def produce_candidates(
     from scripts.environment.release_runtime_check import _run_json_command
 
     inputs = build_local_inputs(repo, scratch, env)
-    fixture = Path(inputs["fixture_root"])
+    fixture = repo
     pipeline_env = {
         "PATH": env.get("PATH", os.defpath),
         "HOME": str(inputs["home"]),
@@ -265,9 +263,6 @@ def produce_candidates(
             output.write(data)
     dataset_records = inputs["producer"]["datasets"]
     candidates = []
-    lock = json.loads(
-        (fixture / "ops/docker/base-images.json").read_text(encoding="utf-8")
-    )
     platforms = tuple(binding.target_platform for binding in bindings)
     for platform, binding in zip(platforms, bindings, strict=True):
         request = {
@@ -284,11 +279,6 @@ def produce_candidates(
                         _read_regular(artifact_root / "api.jar", 1024 * 1024 * 1024)
                     ).hexdigest(),
                 },
-                "baseImages": [
-                    item
-                    for item in lock["baseImages"]
-                    if item.get("platform") == platform
-                ],
             },
             "outputParent": str(output_parent),
             "endpoint": binding.endpoint,
@@ -428,12 +418,10 @@ def produce_candidates(
                 or hashlib.sha256(data).hexdigest() != item["sha256"]
             ):
                 raise ConsumerError("FAIL", "image-candidate-artifact-mismatch")
-            target = artifact_root / expected_roles[item["role"]]
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
             artifact_records.append(
                 {
-                    **item,
+                    "role": item["role"],
+                    "platform": expected_platform,
                     "licenseIds": ["lexiflow", "api-runtime"]
                     if item["role"] == "api-image"
                     else ["postgresql"],

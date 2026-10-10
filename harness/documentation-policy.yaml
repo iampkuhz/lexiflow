@@ -11,10 +11,8 @@ canonical_diagram_source: markdown-plantuml-fence
 local_artifact_root: tmp/diagrams/
 forbidden_diagram_link_extensions: [.puml, .svg, .png]
 diagram_workflow:
-  draft_root: tmp/diagrams/
   draft_layout: tmp/diagrams/<document-slug>/<diagram-id>/
   draft_source: source.puml
-  final_source: markdown-plantuml-fence
   required_order:
     - 在 draft_layout 写入或修改 source.puml，不直接编辑正文图源。
     - 按 PlantUML skill 校验并渲染 source.puml；渲染、brief、回执和预览留在同一临时目录。

@@ -207,10 +207,8 @@ class ProfileTransactionTests(unittest.TestCase):
                 "after": [x["result"] for x in after_reports],
             },
         }
-        output = (
-            Path(__file__).resolve().parents[2]
-            / "tmp/quality/agent-quality-workflow/transaction"
-        )
+        # 测量仅属于本次合成 fixture，不覆盖仓库中的历史运行证据。
+        output = root / "tmp/quality/transaction-measurement"
         output.mkdir(parents=True, exist_ok=True)
         (output / "before-after.json").write_text(
             json.dumps(evidence, sort_keys=True, indent=2) + "\n", encoding="utf-8"
@@ -274,6 +272,31 @@ class ProfileTransactionTests(unittest.TestCase):
                 for check in report["checks"]
             )
         )
+
+    def test_stale_later_profile_blocks_transaction_before_any_command(self):
+        temp, root, baseline, change = self._fixture()
+        self.addCleanup(temp.cleanup)
+        stale_change = copy.deepcopy(change)
+        stale_change["input_fingerprint"] = "0" * 64
+        calls = []
+        reports = verify_profiles(
+            root,
+            frozen_profiles=[baseline, stale_change],
+            runner=lambda *args, **kwargs: (
+                calls.append(args[0]) or _runner_result(*args)
+            ),
+        )
+        self.assertEqual(calls, [])
+        self.assertEqual([report["result"] for report in reports], ["BLOCKED", "FAIL"])
+        self.assertEqual(
+            [report["reason"] for report in reports],
+            ["transaction-preflight-blocked", "frozen-input-mismatch"],
+        )
+        self.assertEqual(
+            [report["scope"] for report in reports],
+            ["development-baseline", "development-change"],
+        )
+        self.assertTrue(all(report["checks"] == [] for report in reports))
 
     def test_input_directory_drift_prevents_reuse(self):
         for mutation in ("content", "new-file", "configuration"):

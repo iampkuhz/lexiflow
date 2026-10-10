@@ -6,7 +6,7 @@ import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { createManifest, verifyContainedFile, validateRelativePath } from './manifest.mjs';
-import { generateLifecycleEntry } from './lifecycle.mjs';
+import { generateRuntimeEntry } from './runtime-entry.mjs';
 import { packageManifest } from './package.mjs';
 import { parseSoftwareVersion, resolveCleanBuildIdentity, validateBuildIdentity } from './version.mjs';
 
@@ -194,12 +194,13 @@ export async function assembleReleaseCandidate(input) {
     || descriptor.artifacts.some((item) => !item || item?.role === 'runtime-entry' || item?.path === 'lexiflow.sh')) fail('DESCRIPTOR_INVALID');
   if (descriptor.softwareVersion !== source.softwareVersion || descriptor.sourceCommit !== source.sourceCommit) fail('SOURCE_IDENTITY_MISMATCH');
   const imageRecords = new Map(imageCandidatesByPlatform.flatMap(({ imageCandidate }) => imageCandidate.candidate.artifacts.map((record) => [`${record.role}:${record.platform}`, record])));
-  for (const record of descriptor.artifacts.filter((item) => item.role === 'api-image' || item.role === 'postgres-image')) {
+  descriptor.artifacts = descriptor.artifacts.map(record => {
+    if (record.role !== 'api-image' && record.role !== 'postgres-image') return record;
     const candidateRecord = imageRecords.get(`${record.role}:${record.platform}`);
-    if (!candidateRecord || !exactKeys(record, ['role', 'path', 'bytes', 'sha256', 'licenseIds', 'platform', 'imageDigest'])
-      || record.path !== candidateRecord.path || record.bytes !== candidateRecord.bytes || record.sha256 !== candidateRecord.sha256
-      || record.imageDigest !== candidateRecord.imageDigest) fail('IMAGE_DESCRIPTOR_MISMATCH');
-  }
+    if (!candidateRecord || !exactKeys(record, ['role', 'platform', 'licenseIds'])) fail('IMAGE_DESCRIPTOR_MISMATCH');
+    // 制品事实只来自已绑定预期 marker 摘要的记录，随后仍核实际归档字节。
+    return { ...candidateRecord, licenseIds: record.licenseIds };
+  });
   if (descriptor.artifacts.filter((item) => item.role === 'api-image' || item.role === 'postgres-image').length !== 2 * expectedPlatforms.length) fail('IMAGE_DESCRIPTOR_MISMATCH');
   const licenses = descriptor.licenses.find((item) => item?.component === 'LexiFlow');
   if (!licenses) fail('RUNTIME_ENTRY_LICENSE_MISSING');
@@ -225,7 +226,7 @@ export async function assembleReleaseCandidate(input) {
       await noSymlinkPath(file);
       if (!(await lstat(file)).isFile()) fail('INPUT_PATH_INVALID');
     }
-    const generated = await generateLifecycleEntry({ repoRoot: repo, descriptor, artifactRoot: staging });
+    const generated = await generateRuntimeEntry({ repoRoot: repo, descriptor, artifactRoot: staging });
     const completeDescriptor = { ...descriptor, artifacts: [...descriptor.artifacts, generated.artifact] };
     const descriptorFile = path.join(work, 'descriptor.json');
     await writeFile(descriptorFile, `${JSON.stringify(completeDescriptor, null, 2)}\n`, { flag: 'wx', mode: 0o600 });

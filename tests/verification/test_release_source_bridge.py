@@ -71,8 +71,16 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
                         meta, path = row.split(b"\t", 1)
                         mode, oid, stage = meta.decode("ascii").split()
                         self.assertEqual(stage, "0")
-                        original(repo, "update-index", "--add", "--cacheinfo",
-                                 mode, oid, path.decode("utf-8"), env=env)
+                        original(
+                            repo,
+                            "update-index",
+                            "--add",
+                            "--cacheinfo",
+                            mode,
+                            oid,
+                            path.decode("utf-8"),
+                            env=env,
+                        )
                 return b""
             return original(repo, *args, env=env, input=input)
 
@@ -96,11 +104,16 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
                     expected = bridge._git_identity(root)
                 with mock.patch.object(bridge, "_git", wraps=original) as git:
                     actual = bridge._git_identity(root)
-                writes = [call for call in git.call_args_list
-                          if call.args[1:2] == ("update-index",)]
+                writes = [
+                    call
+                    for call in git.call_args_list
+                    if call.args[1:2] == ("update-index",)
+                ]
                 self.assertEqual(actual, expected)
                 self.assertEqual(len(writes), 1)
-                self.assertEqual(writes[0].args[1:], ("update-index", "-z", "--index-info"))
+                self.assertEqual(
+                    writes[0].args[1:], ("update-index", "-z", "--index-info")
+                )
                 self.assertIn("路径 with space.txt".encode(), writes[0].kwargs["input"])
                 self.assertIn(b"120000 ", writes[0].kwargs["input"])
                 self.assertIn(b"100755 ", writes[0].kwargs["input"])
@@ -115,7 +128,8 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         rows = original(root, "ls-files", "--stage", "-z")
         oid = rows.split(b"\t", 1)[0].split()[1]
         invalid = [
-            b"invalid", b"100644 " + oid + b" 0\t../escape",
+            b"invalid",
+            b"100644 " + oid + b" 0\t../escape",
             b"100644 " + oid + b" 0\t.env",
             b"100644 " + oid + b" 0\tcontrol\nname",
             b"100644 " + oid + b" 0\t\xff",
@@ -126,16 +140,22 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         before = self._source_git_state(root)
         for row in invalid:
             with self.subTest(row=row):
+
                 def injected(repo: Path, *args: str, env=None, input=None) -> bytes:
                     if args == ("ls-files", "--stage", "-z"):
                         return rows + row + b"\0"
                     return original(repo, *args, env=env, input=input)
+
                 with mock.patch.object(bridge, "_git", side_effect=injected) as git:
                     with self.assertRaises(bridge.BridgeError) as caught:
                         bridge._git_identity(root)
                 self.assertEqual(caught.exception.status, "BLOCKED")
-                self.assertFalse(any(call.args[1:2] == ("update-index",)
-                                     for call in git.call_args_list))
+                self.assertFalse(
+                    any(
+                        call.args[1:2] == ("update-index",)
+                        for call in git.call_args_list
+                    )
+                )
                 self.assertEqual(before, self._source_git_state(root))
 
     def test_empty_index_identity_uses_no_bulk_write(self) -> None:
@@ -144,24 +164,32 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         before = self._source_git_state(root)
         with mock.patch.object(bridge, "_git", wraps=bridge._git) as git:
             identity = bridge._git_identity(root)
-        self.assertEqual(identity["indexTree"], self._git(root, "hash-object", "-t", "tree", os.devnull))
-        self.assertFalse(any(call.args[1:2] == ("update-index",)
-                             for call in git.call_args_list))
+        self.assertEqual(
+            identity["indexTree"],
+            self._git(root, "hash-object", "-t", "tree", os.devnull),
+        )
+        self.assertFalse(
+            any(call.args[1:2] == ("update-index",) for call in git.call_args_list)
+        )
         self.assertEqual(before, self._source_git_state(root))
 
     def test_bulk_write_process_failure_cannot_return_identity(self) -> None:
         root = self._repo("failed-bulk")
         before = self._source_git_state(root)
         run = bridge.subprocess.run
+
         def failed(argv, **kwargs):
             if argv[3:6] == ["update-index", "-z", "--index-info"]:
                 raise subprocess.CalledProcessError(128, argv, stderr=b"synthetic")
             return run(argv, **kwargs)
+
         with mock.patch.object(bridge.subprocess, "run", side_effect=failed):
             with self.assertRaises(bridge.BridgeError) as caught:
                 bridge._git_identity(root)
-        self.assertEqual((caught.exception.status, caught.exception.code),
-                         ("BLOCKED", "git-metadata-unavailable"))
+        self.assertEqual(
+            (caught.exception.status, caught.exception.code),
+            ("BLOCKED", "git-metadata-unavailable"),
+        )
         self.assertEqual(before, self._source_git_state(root))
 
     def _repo(self, name: str = "repo", check_id: str = bridge.CHECK_ID) -> Path:
@@ -197,17 +225,23 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         )
         write_declarations(
             root / "harness/module-checks.yaml",
-            [{
-                "check_id": check_id,
-                "module": "synthetic",
-                "command": ["bash", "synthetic.sh"],
-                "timeout_seconds": 1,
-                "scope": "change-targeted" if check_id == bridge.CHANGE_CHECK_ID else "repository-baseline",
-                "triggers": [{"path": ".gitignore"}] if check_id == bridge.CHANGE_CHECK_ID else [],
-                "module_dependencies": [],
-                "required_environment": [],
-                "input_paths": paths,
-            }],
+            [
+                {
+                    "check_id": check_id,
+                    "module": "synthetic",
+                    "command": ["bash", "synthetic.sh"],
+                    "timeout_seconds": 1,
+                    "scope": "change-targeted"
+                    if check_id == bridge.CHANGE_CHECK_ID
+                    else "repository-baseline",
+                    "triggers": [{"path": ".gitignore"}]
+                    if check_id == bridge.CHANGE_CHECK_ID
+                    else [],
+                    "module_dependencies": [],
+                    "required_environment": [],
+                    "input_paths": paths,
+                }
+            ],
         )
         self._git(root, "init", "--quiet")
         self._git(root, "config", "core.hooksPath", os.devnull)
@@ -215,29 +249,26 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         self._git(root, "commit", "--quiet", "-m", "synthetic baseline")
         return root
 
-    def _freeze(self, root: Path):
-        return bridge.freeze_release_source(root, bridge.CHECK_ID)
-
     def _consumer_inputs(self, root: Path, check_id: str, reasons=None):
-        from scripts.verification.declarations import load_declarations
+        from scripts.verification.declarations import load_declarations_snapshot
+        from scripts.verification.scenarios import _freeze_selection, _runtime_checks
 
+        declarations, declaration = load_declarations_snapshot(root)
         declared = next(
-            check
-            for check in load_declarations(root)["checks"]
-            if check["check_id"] == check_id
+            check for check in declarations["checks"] if check["check_id"] == check_id
         )
-        effective = dict(declared)
-        effective["input_paths"] = list(
-            dict.fromkeys([*declared["input_paths"], "harness/module-checks.yaml"])
-        )
+        selected = dict(declared)
         if reasons is not None:
-            effective["selection_reasons"] = reasons
+            selected["selection_reasons"] = reasons
+        effective = _runtime_checks([selected])[0]
+        frozen, unchanged = _freeze_selection(root, [effective], declaration)
+        self.assertTrue(unchanged)
         context = {
             "run_id": "synthetic-verify-run",
             "check_id": check_id,
             "check_config_fingerprint": bridge.fingerprint_json(effective),
         }
-        return effective, context, bridge.snapshot_check_inputs(root, effective)
+        return effective, context, frozen[check_id]
 
     def test_verify_consumer_accepts_both_fixed_check_ids(self) -> None:
         for index, check_id in enumerate((bridge.CHECK_ID, bridge.CHANGE_CHECK_ID)):
@@ -260,13 +291,12 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
                 output = self.base / f"consumer-out-{index}"
                 output.mkdir()
                 with mock.patch.object(
-                    bridge,
-                    "freeze_release_source",
-                    side_effect=AssertionError("must not refreeze"),
-                ):
+                    bridge, "snapshot_check_inputs", wraps=bridge.snapshot_check_inputs
+                ) as freshness:
                     result = bridge.consume_verify_snapshot(
                         root, effective, context, snapshot, output
                     )
+                self.assertGreaterEqual(freshness.call_count, 4)
                 self.assertFalse(result["verificationRunBound"])
                 self.assertFalse(result["formalReleaseEligible"])
                 self.assertEqual(
@@ -379,17 +409,28 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
                 )
         self.assertEqual(list(output.iterdir()), [])
 
-    def test_baseline_freeze_and_fixture_are_mechanism_only(self) -> None:
+    def test_baseline_verify_snapshot_and_fixture_are_mechanism_only(self) -> None:
         root = self._repo()
-        frozen = self._freeze(root)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         output = self.base / "out"
         output.mkdir()
-        result = bridge.create_release_source_fixture(root, frozen, output)
+        result = bridge.consume_verify_snapshot(
+            root, effective, context, snapshot, output
+        )
         self.assertFalse(result["verificationRunBound"])
         self.assertFalse(result["formalReleaseEligible"])
         self.assertEqual(result["provenance"]["kind"], bridge.KIND)
         self.assertEqual(result["provenance"]["purpose"], bridge.PURPOSE)
         self.assertTrue((Path(result["directory"]) / "provenance.json").is_file())
+        self.assertEqual(result["provenance"]["verifyContext"], context)
+        for item in result["provenance"]["files"]:
+            source = root / item["sourcePath"]
+            copied = Path(result["fixture"]) / item["fixturePath"]
+            self.assertEqual(source.read_bytes(), copied.read_bytes())
+            self.assertEqual(
+                copied.stat().st_mode & 0o777,
+                0o755 if source.stat().st_mode & 0o111 else 0o644,
+            )
         self.assertEqual(
             result["provenance"]["files"],
             sorted(result["provenance"]["files"], key=lambda item: item["sourcePath"]),
@@ -398,10 +439,10 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
     def test_source_index_and_object_store_remain_byte_identical(self) -> None:
         root = self._repo()
         before = self._source_git_state(root)
-        frozen = self._freeze(root)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         out = self.base / "readonly-out"
         out.mkdir()
-        bridge.create_release_source_fixture(root, frozen, out)
+        bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
         self.assertEqual(before, self._source_git_state(root))
 
     def _source_git_state(
@@ -421,7 +462,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
 
     def test_staged_change_changes_index_identity(self) -> None:
         root = self._repo()
-        original = self._freeze(root).identity
+        original = bridge._git_identity(root)
         target = root / ".gitignore"
         target.write_text(target.read_text() + "staged\n")
         self._git(root, "add", ".gitignore")
@@ -431,7 +472,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
 
     def test_unstaged_change_changes_dirty_identity(self) -> None:
         root = self._repo()
-        original = self._freeze(root).identity
+        original = bridge._git_identity(root)
         target = root / ".gitignore"
         target.write_text(target.read_text() + "unstaged\n")
         changed = bridge._git_identity(root)
@@ -466,12 +507,14 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         self._git(root, "add", ".gitignore")
         p.write_text(p.read_text() + "worktree\n")
         with self.assertRaises(bridge.BridgeError):
-            self._freeze(root)
+            bridge.consume_verify_snapshot(
+                root, *self._consumer_inputs(root, bridge.CHECK_ID), self.base
+            )
 
     def test_freeze_then_source_edit_or_removal_is_rejected(self) -> None:
         for remove in (False, True):
             root = self._repo("remove" if remove else "edit")
-            frozen = self._freeze(root)
+            effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
             path = root / "ops/release/version.txt"
             if remove:
                 path.unlink()
@@ -480,59 +523,65 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
             out = self.base / ("out-remove" if remove else "out-edit")
             out.mkdir()
             with self.assertRaises(bridge.BridgeError):
-                bridge.create_release_source_fixture(root, frozen, out)
+                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
 
     def test_added_file_after_freeze_is_rejected(self) -> None:
         root = self._repo()
-        frozen = self._freeze(root)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         (root / "extension/src/added.ts").write_text("synthetic\n")
         out = self.base / "out"
         out.mkdir()
         with self.assertRaises(bridge.BridgeError):
-            bridge.create_release_source_fixture(root, frozen, out)
+            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
 
-    def test_required_frozen_input_missing_is_blocked(self) -> None:
+    def test_required_verify_input_missing_is_rejected(self) -> None:
         root = self._repo()
         path = root / "ops/release/third-party-notices.md"
         path.unlink()
         with self.assertRaises(bridge.BridgeError) as caught:
-            self._freeze(root)
+            bridge.consume_verify_snapshot(
+                root, *self._consumer_inputs(root, bridge.CHECK_ID), self.base
+            )
         self.assertEqual(
             (caught.exception.status, caught.exception.code),
-            ("BLOCKED", "missing-frozen-input"),
+            ("FAIL", "verify-snapshot-mismatch"),
         )
 
-    def test_wrong_check_id_and_forged_frozen_object_are_rejected(self) -> None:
+    def test_wrong_check_id_and_forged_snapshot_are_rejected(self) -> None:
         root = self._repo()
-        with self.assertRaises(bridge.BridgeError):
-            bridge.freeze_release_source(
-                root, "eng.release.lifecycle-runtime-on-change"
-            )
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         out = self.base / "out"
         out.mkdir()
-        with self.assertRaises(bridge.BridgeError):
-            bridge.create_release_source_fixture(root, object(), out)
+        with self.assertRaises(bridge.BridgeError) as caught:
+            bridge.consume_verify_snapshot(
+                root, {**effective, "check_id": "forged"}, context, snapshot, out
+            )
+        self.assertEqual(caught.exception.code, "verify-context-invalid")
+        with self.assertRaises(bridge.BridgeError) as caught:
+            bridge.consume_verify_snapshot(root, effective, context, object(), out)
+        self.assertEqual(caught.exception.code, "verify-snapshot-mismatch")
+        self.assertEqual(list(out.iterdir()), [])
 
     def test_missing_duplicate_unsorted_or_unknown_snapshot_locator_rejected(
         self,
     ) -> None:
         root = self._repo()
-        frozen = self._freeze(root)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         out = self.base / "out"
         out.mkdir()
-        frozen.snapshot["files"] = frozen.snapshot["files"][:-1]
+        snapshot["files"] = snapshot["files"][:-1]
         with self.assertRaises(bridge.BridgeError):
-            bridge.create_release_source_fixture(root, frozen, out)
-        frozen = self._freeze(root)
-        frozen.snapshot["files"].append(dict(frozen.snapshot["files"][0]))
+            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
+        snapshot["files"].append(dict(snapshot["files"][0]))
         with self.assertRaises(bridge.BridgeError):
-            bridge.create_release_source_fixture(root, frozen, out)
-        frozen = self._freeze(root)
-        frozen.snapshot["files"].reverse()
+            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
+        snapshot["files"].reverse()
         with self.assertRaises(bridge.BridgeError):
-            bridge.create_release_source_fixture(root, frozen, out)
-        frozen = self._freeze(root)
-        frozen.snapshot["files"].append(
+            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
+        snapshot["files"].append(
             {
                 "locator": "unknown/synthetic",
                 "sha256": "0" * 64,
@@ -541,79 +590,136 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
             }
         )
         with self.assertRaises(bridge.BridgeError):
-            bridge.create_release_source_fixture(root, frozen, out)
+            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
 
     def test_self_reported_verified_and_fake_check_identity_are_rejected(self) -> None:
         root = self._repo()
-        frozen = self._freeze(root)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         out = self.base / "out"
         out.mkdir()
-        frozen.snapshot["verified"] = True
+        snapshot["verified"] = True
         with self.assertRaises(bridge.BridgeError):
-            bridge.create_release_source_fixture(root, frozen, out)
-        frozen = self._freeze(root)
-        frozen.check["check_id"] = "forged"
+            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
+        effective["check_id"] = "forged"
         with self.assertRaises(bridge.BridgeError):
-            bridge.create_release_source_fixture(root, frozen, out)
+            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
 
     def test_fixed_release_closure_rejects_missing_and_generated_extras(self) -> None:
         root = self._repo()
-        frozen = self._freeze(root)
-        files = frozen.snapshot["files"]
-        frozen.snapshot["files"] = [
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
+        files = snapshot["files"]
+        snapshot["files"] = [
             x for x in files if x["locator"] != "ops/docker/compose.yaml"
         ]
         with self.assertRaises(bridge.BridgeError):
-            bridge._closure(frozen.snapshot)
+            bridge._closure(snapshot)
         with self.assertRaises(bridge.BridgeError):
             bridge._closure({"files": [{"locator": "extension/dist/app.js"}]})
+        with self.assertRaises(bridge.BridgeError) as caught:
+            bridge._closure(
+                {
+                    "files": [
+                        x
+                        for x in files
+                        if x["locator"] != "ops/release/third-party-notices.md"
+                    ]
+                }
+            )
+        self.assertEqual(
+            (caught.exception.status, caught.exception.code),
+            ("BLOCKED", "missing-frozen-input"),
+        )
+
+    def test_git_attributes_transformations_are_rejected_before_copy(self) -> None:
+        root = self._repo("attributes")
+        # 本机 Git attributes 不在复制闭包内，但必须禁止其转换已冻结源码。
+        attributes = root / ".git/info/attributes"
+        attributes.parent.mkdir()
+        attributes.write_text("ops/release/version.txt text eol=crlf\n")
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
+        out = self.base / "attributes-out"
+        out.mkdir()
+        before = self._source_git_state(root)
+        with mock.patch.object(bridge, "_read_source") as copier:
+            with self.assertRaises(bridge.BridgeError) as caught:
+                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+        self.assertEqual(
+            (caught.exception.status, caught.exception.code),
+            ("BLOCKED", "git-attributes-unrepresentable"),
+        )
+        copier.assert_not_called()
+        self.assertEqual(list(out.iterdir()), [])
+        self.assertEqual(before, self._source_git_state(root))
 
     def test_private_paths_rejected_before_target_file_read(self) -> None:
         root = self._repo()
         (root / "extension/src/.env").write_text("private synthetic\n")
         with self.assertRaises(bridge.BridgeError):
-            self._freeze(root)
+            bridge.consume_verify_snapshot(
+                root, *self._consumer_inputs(root, bridge.CHECK_ID), self.base
+            )
+
+    def test_private_git_input_outside_check_snapshot_is_rejected(self) -> None:
+        root = self._repo("private-git-input")
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
+        (root / ".env").write_text("synthetic private Git input\n")
+        out = self.base / "private-git-out"
+        out.mkdir()
+        before = self._source_git_state(root)
+        with mock.patch.object(bridge, "_read_dirty_path") as dirty_reader:
+            with self.assertRaises(bridge.BridgeError) as caught:
+                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
+        self.assertEqual(
+            (caught.exception.status, caught.exception.code),
+            ("BLOCKED", "git-path-unrepresentable"),
+        )
+        dirty_reader.assert_not_called()
+        self.assertEqual(list(out.iterdir()), [])
+        self.assertEqual(before, self._source_git_state(root))
 
     def test_symlink_fifo_special_and_case_collision_are_rejected(self) -> None:
         root = self._repo()
         (root / "extension/src/link.ts").symlink_to(root / "extension/src/entry.ts")
         with self.assertRaises(bridge.BridgeError):
-            self._freeze(root)
+            bridge.consume_verify_snapshot(
+                root, *self._consumer_inputs(root, bridge.CHECK_ID), self.base
+            )
         root = self._repo("fifo")
         os.mkfifo(root / "extension/src/fifo.ts")
         with self.assertRaises(bridge.BridgeError):
-            self._freeze(root)
-        frozen = self._freeze(self._repo("case"))
-        first = frozen.snapshot["files"][0]
-        frozen.snapshot["files"].append(
-            {**first, "locator": first["locator"].swapcase()}
+            bridge.consume_verify_snapshot(
+                root, *self._consumer_inputs(root, bridge.CHECK_ID), self.base
+            )
+        effective, context, snapshot = self._consumer_inputs(
+            self._repo("case"), bridge.CHECK_ID
         )
+        first = snapshot["files"][0]
+        snapshot["files"].append({**first, "locator": first["locator"].swapcase()})
         with self.assertRaises(bridge.BridgeError):
-            bridge._closure(frozen.snapshot)
+            bridge._closure(snapshot)
 
     def test_copy_hash_size_and_executable_mode_mismatch_are_rejected(self) -> None:
         root = self._repo()
-        frozen = self._freeze(root)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         item = next(
-            x
-            for x in frozen.snapshot["files"]
-            if x["locator"] == "ops/release/version.txt"
+            x for x in snapshot["files"] if x["locator"] == "ops/release/version.txt"
         )
         original = bridge._read_source
         out = self.base / "out"
         out.mkdir()
         with mock.patch.object(bridge, "_read_source", return_value=b"tampered"):
             with self.assertRaises(bridge.BridgeError):
-                bridge.create_release_source_fixture(root, frozen, out)
+                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
         item["size_bytes"] += 1
         with self.assertRaises(bridge.BridgeError):
-            bridge.create_release_source_fixture(root, frozen, out)
+            bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
         self.assertTrue(callable(original))
         self.assertEqual(list(out.iterdir()), [])
 
     def test_short_read_and_copy_executable_bit_mismatch_are_rejected(self) -> None:
         root = self._repo()
-        frozen = self._freeze(root)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         out = self.base / "short-read-out"
         out.mkdir()
         watched_inode = (root / ".gitignore").stat().st_ino
@@ -625,17 +731,15 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
             return real_read(fd, size)
 
         with (
-            mock.patch.object(
-                bridge, "snapshot_check_inputs", return_value=frozen.snapshot
-            ),
+            mock.patch.object(bridge, "snapshot_check_inputs", return_value=snapshot),
             mock.patch.object(bridge.os, "read", side_effect=short_source_read),
         ):
             with self.assertRaises(bridge.BridgeError):
-                bridge.create_release_source_fixture(root, frozen, out)
+                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
         self.assertEqual(list(out.iterdir()), [])
 
         root = self._repo("mode")
-        frozen = self._freeze(root)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         out = self.base / "mode-out"
         out.mkdir()
         real_fchmod = bridge.os.fchmod
@@ -645,29 +749,31 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
             side_effect=lambda fd, mode: real_fchmod(fd, mode ^ 0o111),
         ):
             with self.assertRaises(bridge.BridgeError):
-                bridge.create_release_source_fixture(root, frozen, out)
+                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
         self.assertEqual(list(out.iterdir()), [])
 
     def test_output_inside_existing_or_symlink_parent_is_rejected(self) -> None:
         root = self._repo()
-        frozen = self._freeze(root)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         with self.assertRaises(bridge.BridgeError):
-            bridge.create_release_source_fixture(root, frozen, root / "extension")
+            bridge.consume_verify_snapshot(
+                root, effective, context, snapshot, root / "extension"
+            )
         existing = self.base / "exists"
         existing.write_text("not a directory")
         with self.assertRaises(bridge.BridgeError):
-            bridge.create_release_source_fixture(root, frozen, existing)
+            bridge.consume_verify_snapshot(root, effective, context, snapshot, existing)
         link = self.base / "link"
         link.symlink_to(self.base, target_is_directory=True)
         with self.assertRaises(bridge.BridgeError):
-            bridge.create_release_source_fixture(root, frozen, link)
+            bridge.consume_verify_snapshot(root, effective, context, snapshot, link)
 
     def test_atomic_publish_race_preserves_empty_nonempty_and_symlink_targets(
         self,
     ) -> None:
         for kind in ("empty-directory", "nonempty-directory", "symlink"):
             root = self._repo(kind)
-            frozen = self._freeze(root)
+            effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
             out = self.base / f"race-out-{kind}"
             out.mkdir()
             target_record: dict[str, object] = {}
@@ -690,7 +796,9 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
                 bridge, "_publish_noreplace", side_effect=race_after_precheck
             ):
                 with self.assertRaises(bridge.BridgeError) as caught:
-                    bridge.create_release_source_fixture(root, frozen, out)
+                    bridge.consume_verify_snapshot(
+                        root, effective, context, snapshot, out
+                    )
             self.assertEqual(
                 (caught.exception.status, caught.exception.code),
                 ("FAIL", "output-target-exists"),
@@ -740,7 +848,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         self,
     ) -> None:
         root = self._repo()
-        frozen = self._freeze(root)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         out = self.base / "extra-out"
         out.mkdir()
         original_git = bridge._git
@@ -753,10 +861,10 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
 
         with mock.patch.object(bridge, "_git", side_effect=extra_tree):
             with self.assertRaises(bridge.BridgeError):
-                bridge.create_release_source_fixture(root, frozen, out)
+                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
 
         root = self._repo("dirty-fixture")
-        frozen = self._freeze(root)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         out = self.base / "dirty-fixture-out"
         out.mkdir()
 
@@ -767,10 +875,10 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
 
         with mock.patch.object(bridge, "_git", side_effect=dirty_fixture):
             with self.assertRaises(bridge.BridgeError):
-                bridge.create_release_source_fixture(root, frozen, out)
+                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
 
         root = self._repo("wrong-tree")
-        frozen = self._freeze(root)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         out = self.base / "wrong-tree-out"
         out.mkdir()
         original_git_text = bridge._git_text
@@ -782,16 +890,18 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
 
         with mock.patch.object(bridge, "_git_text", side_effect=wrong_tree):
             with self.assertRaises(bridge.BridgeError):
-                bridge.create_release_source_fixture(root, frozen, out)
+                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
 
     def test_repeated_same_input_has_canonical_identical_provenance(self) -> None:
         root = self._repo()
-        frozen = self._freeze(root)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         a, b = self.base / "out-a", self.base / "out-b"
         a.mkdir()
         b.mkdir()
-        first = bridge.create_release_source_fixture(root, frozen, a)
-        second = bridge.create_release_source_fixture(root, self._freeze(root), b)
+        first = bridge.consume_verify_snapshot(root, effective, context, snapshot, a)
+        second = bridge.consume_verify_snapshot(
+            root, *self._consumer_inputs(root, bridge.CHECK_ID), b
+        )
         self.assertEqual(first["provenanceBytes"], second["provenanceBytes"])
         self.assertEqual(
             hashlib.sha256(first["provenanceBytes"]).hexdigest(),
@@ -800,7 +910,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
 
     def test_failed_publication_leaves_no_success_receipt(self) -> None:
         root = self._repo()
-        frozen = self._freeze(root)
+        effective, context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)
         out = self.base / "out"
         out.mkdir()
         with mock.patch.object(
@@ -809,7 +919,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
             side_effect=bridge.BridgeError("FAIL", "copy-injected"),
         ):
             with self.assertRaises(bridge.BridgeError):
-                bridge.create_release_source_fixture(root, frozen, out)
+                bridge.consume_verify_snapshot(root, effective, context, snapshot, out)
         self.assertFalse(
             any(p.name.startswith("release-source-") for p in out.iterdir())
         )

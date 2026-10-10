@@ -11,7 +11,6 @@ from tests.delivery_gate.fixtures import write_declarations
 from scripts.delivery_gate.validate import (
     ValidationError,
     _bind_terminal_report,
-    validate,
     validate_batch,
 )
 from scripts.delivery_gate.records import (
@@ -298,7 +297,7 @@ class ValidateBatchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValidationError, "validation-already-published"):
             validate_batch(self.fixture.root, submission_ids=[self.first, self.second])
         # 新 API 调用取得新事务；字节相同的检查也必须重新实际执行。
-        rerun = validate(self.fixture.root, submission_id=self.third)
+        rerun = validate_batch(self.fixture.root, submission_ids=[self.third])[0]
         self.assertIsInstance(rerun, dict)
         self.assertEqual(rerun["submission_id"], self.third)
         rerun_record = load_layer(

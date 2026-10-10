@@ -19,7 +19,6 @@ val platformSourceSets = extensions.getByType<SourceSetContainer>()
 // 源码导入入口与 API JAR 使用同一生成器，不依赖 API 才能获得身份资源。
 val generateDataGeneration = tasks.register<GenerateDataGenerationTask>("generateDataGeneration") {
     repoRoot.set(rootProject.projectDir.parentFile)
-    script.set(File(repoRoot.get(), "ops/dataset/generation-version.mjs"))
     outputDirectory.set(layout.buildDirectory.dir("generated/data-generation"))
 }
 tasks.named<ProcessResources>("processResources") {

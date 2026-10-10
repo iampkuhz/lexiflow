@@ -15,14 +15,25 @@ function probe(t, result) {
   return stub;
 }
 
-test('explicit JAVA_HOME is shared by probe and build without mutating the caller', t => {
-  const stub = probe(t);
-  const env = { JAVA_HOME: '/sdkman/java/current', PATH: '/another/jdk/bin:/usr/bin', HOME: '/home/test' };
-  const selected = javaBuildEnvironment(env);
-  assert.deepEqual(env, { JAVA_HOME: '/sdkman/java/current', PATH: '/another/jdk/bin:/usr/bin', HOME: '/home/test' });
-  assert.equal(selected.PATH, '/sdkman/java/current/bin:/another/jdk/bin:/usr/bin');
+function workspace(t) {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiflow java repo '));
+  t.after(() => fs.rmSync(repo, { recursive: true, force: true }));
+  const home = path.join(repo, 'inherited');
+  fs.mkdirSync(path.join(home, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(home, 'release'), 'JAVA_VERSION="25.0.4"\nIMPLEMENTOR="Eclipse Adoptium"\nIMPLEMENTOR_VERSION="Temurin-25.0.4+7"\n');
+  fs.writeFileSync(path.join(home, 'bin/java'), '#!/bin/sh\n', { mode: 0o755 });
+  return { repo, home };
+}
+
+test('workspace-selected JAVA_HOME is shared by probe and build without mutating the caller', t => {
+  const stub = probe(t), { repo, home } = workspace(t);
+  const env = { JAVA_HOME: home, PATH: '/another/jdk/bin:/usr/bin', HOME: '/home/test' };
+  const original = { ...env };
+  const selected = javaBuildEnvironment(env, { repo });
+  assert.deepEqual(env, original);
+  assert.equal(selected.PATH, `${home}/bin:/another/jdk/bin:/usr/bin`);
   const [command, args, options] = stub.mock.calls[0].arguments;
-  assert.equal(command, '/sdkman/java/current/bin/java');
+  assert.equal(command, path.join(home, 'bin/java'));
   assert.deepEqual(args, ['-version']);
   assert.deepEqual(options.env, selected);
   assert.equal(options.timeout, 10000);
@@ -30,12 +41,16 @@ test('explicit JAVA_HOME is shared by probe and build without mutating the calle
   assert.deepEqual(Object.keys(selected).sort(), Object.keys(env).sort());
 });
 
-test('without JAVA_HOME use PATH unchanged, including an empty JAVA_HOME', t => {
-  const stub = probe(t);
-  for (const env of [{ PATH: '/jdk/bin' }, { PATH: '/jdk/bin', JAVA_HOME: '' }]) {
-    assert.deepEqual(javaBuildEnvironment(env), env);
+test('repository is required and PATH-only Java is never probed', t => {
+  const stub = probe(t), { repo } = workspace(t);
+  assert.throws(() => javaBuildEnvironment({ PATH: '/jdk/bin' }), TypeError);
+  for (const bad of [undefined, '', 'relative']) {
+    assert.throws(() => javaBuildEnvironment({ PATH: '/jdk/bin' }, { repo: bad }), /JAVA_REPOSITORY_REQUIRED/);
   }
-  assert.equal(stub.mock.calls[0].arguments[0], 'java');
+  for (const env of [{ PATH: '/jdk/bin' }, { PATH: '/jdk/bin', JAVA_HOME: '' }]) {
+    assert.throws(() => javaBuildEnvironment(env, { repo }), /JAVA_25_UNAVAILABLE/);
+  }
+  assert.equal(stub.mock.callCount(), 0);
 });
 
 for (const [name, result] of [
@@ -46,7 +61,8 @@ for (const [name, result] of [
   ['CRLF', { stderr: temurin.replaceAll('\n', '\r\n') }],
 ]) test(`accept Java 25 output: ${name}`, t => {
   probe(t, result);
-  assert.deepEqual(javaBuildEnvironment({ PATH: '/jdk/bin' }), { PATH: '/jdk/bin' });
+  const { repo, home } = workspace(t);
+  assert.equal(javaBuildEnvironment({ JAVA_HOME: home, PATH: '/jdk/bin' }, { repo }).JAVA_HOME, home);
 });
 
 for (const [name, result, code] of [
@@ -66,7 +82,8 @@ for (const [name, result, code] of [
   ['EA', { stderr: 'openjdk version "25-ea"\n' }, 'JAVA_VERSION_UNSUPPORTED'],
 ]) test(`classify ${name} without disclosing raw tool output`, t => {
   const stub = probe(t, { stdout: 'private-output', ...result });
-  assert.throws(() => javaBuildEnvironment({ JAVA_HOME: '/explicit/jdk', PATH: '/fallback' }), error => {
+  const { repo, home } = workspace(t);
+  assert.throws(() => javaBuildEnvironment({ JAVA_HOME: home, PATH: '/fallback' }, { repo }), error => {
     assert.match(error.message, new RegExp(`^${code}：`));
     assert.match(error.message, /Java 来源=JAVA_HOME/);
     assert.doesNotMatch(error.message, /private-output/);
@@ -76,8 +93,8 @@ for (const [name, result, code] of [
 });
 
 test('relative JAVA_HOME is rejected before launching a subprocess', t => {
-  const stub = probe(t);
-  assert.throws(() => javaBuildEnvironment({ JAVA_HOME: 'relative' }), /JAVA_HOME_INVALID/);
+  const stub = probe(t), { repo } = workspace(t);
+  assert.throws(() => javaBuildEnvironment({ JAVA_HOME: 'relative' }, { repo }), /JAVA_HOME_INVALID/);
   assert.equal(stub.mock.callCount(), 0);
 });
 
@@ -88,12 +105,13 @@ test('real subprocess handles SDKMAN-style current symlink and spaces ahead of a
   fs.mkdirSync(path.join(home, 'bin'), { recursive: true }); fs.mkdirSync(other);
   fs.writeFileSync(path.join(home, 'bin/java'), '#!/bin/sh\nprintf \'openjdk version "25.0.4"\\n\' >&2\n', { mode: 0o755 });
   fs.writeFileSync(path.join(other, 'java'), '#!/bin/sh\nprintf \'openjdk version "26.0.2"\\n\' >&2\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(home, 'release'), 'JAVA_VERSION="25.0.4"\nIMPLEMENTOR="Eclipse Adoptium"\nIMPLEMENTOR_VERSION="Temurin-25.0.4+7"\n');
   fs.symlinkSync(home, current, 'dir');
   const env = { JAVA_HOME: current, PATH: other };
   // 旧预检只使用 PATH，会拒绝明明已由 JAVA_HOME 选定的 Java 25。
   const old = childProcess.spawnSync('java', ['-version'], { env, encoding: 'utf8' });
   assert.equal(old.status, 0); assert.match(old.stderr, /26\.0\.2/);
-  const selected = javaBuildEnvironment(env);
+  const selected = javaBuildEnvironment(env, { repo: root });
   const build = childProcess.spawnSync('/bin/sh', ['-c', '"$JAVA_HOME/bin/java" -version; java -version'], { env: selected, encoding: 'utf8' });
   assert.equal(build.status, 0);
   assert.equal([...build.stderr.matchAll(/25\.0\.4/g)].length, 2);
@@ -121,4 +139,19 @@ test('production selection prefers explicit then repository-local then inherited
   fs.rmSync(path.join(repo, '.local'), { recursive: true, force: true });
   assert.equal(javaBuildEnvironment(base, { repo }).JAVA_HOME, inherited);
   assert.throws(() => javaBuildEnvironment({ PATH: '/java26/bin' }, { repo }), /JAVA_25_UNAVAILABLE/);
+});
+
+test('workspace selection rejects wrong vendor, major, malformed release and non-executable before probe', t => {
+  const stub = probe(t), { repo, home } = workspace(t);
+  const release = path.join(home, 'release'), original = fs.readFileSync(release, 'utf8');
+  for (const bad of [original.replace('Eclipse Adoptium', 'Other Vendor'),
+    original.replace('JAVA_VERSION="25.0.4"', 'JAVA_VERSION="26.0.4"'),
+    original.replace('Temurin-25.0.4+7', 'Other-25.0.4+7'), original + 'JAVA_VERSION="25.0.4"\n']) {
+    fs.writeFileSync(release, bad);
+    assert.throws(() => javaBuildEnvironment({ JAVA_HOME: home }, { repo }), /JAVA_RELEASE_INVALID/);
+  }
+  fs.writeFileSync(release, original);
+  fs.chmodSync(path.join(home, 'bin/java'), 0o644);
+  assert.throws(() => javaBuildEnvironment({ JAVA_HOME: home }, { repo }), /JAVA_RELEASE_INVALID/);
+  assert.equal(stub.mock.callCount(), 0);
 });

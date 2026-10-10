@@ -40,6 +40,12 @@ class ChineseDocstringTest(unittest.TestCase):
         self.assertEqual("", result.stderr)
         return result.returncode, json.loads(result.stdout)
 
+    def test_plugin_has_no_language_override_option(self):
+        """规则固定中文范围，不注册可将英文放行的配置通道。"""
+        from scripts.repository.chinese_docstrings import ChineseDocstringChecker
+
+        self.assertEqual((), ChineseDocstringChecker.options)
+
     def test_english_adapter_is_rejected_with_module_and_function_locations(self):
         """模块英文说明和公共函数缺失说明分别定位，不被正文中文数据掩盖。"""
         code, findings = self.lint(

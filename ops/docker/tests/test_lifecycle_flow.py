@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[3]
+VERIFIER_HASH = (REPO / "ops/release/runtime-verification.sh").read_text().split("# 在 cd -P", 1)[0]
 STATE = (REPO / "ops/release/lifecycle-state.sh").read_text()
 DOCKER = (REPO / "ops/release/lifecycle-docker.sh").read_text()
 FLOW = (REPO / "ops/release/lifecycle.sh").read_text()
@@ -55,7 +56,7 @@ class FlowTests(unittest.TestCase):
             entry.write_text(
                 "#!/bin/sh\n"
                 f"EXPECTED_KEY={key}\nLF_RELEASE_KEY={key}\n"
-                + STATE + "\n" + DOCKER + "\n" + PORTS + "\n" + FLOW
+                + VERIFIER_HASH + "\n" + STATE + "\n" + DOCKER + "\n" + PORTS + "\n" + FLOW
             )
             entry.chmod(0o700)
             self.entries[key] = entry
@@ -193,7 +194,7 @@ class FlowTests(unittest.TestCase):
         lock.mkdir()
         (lock / "token").write_text(token + "\n")
         owner = self.root / "owner"
-        install = owner.read_text().strip()
+        self.assertRegex(owner.read_text().strip(), r"^[a-f0-9]{32}$")
         record = self.root / "releases" / A / "record"
         original = record.read_bytes()
         self.call(A, "_project", str(self.root), A, token, "verify-record")
@@ -201,7 +202,8 @@ class FlowTests(unittest.TestCase):
             before = self.events.read_text()
             self.call(A, "_project", str(self.root), key, secret, "stop", ok=False)
             self.assertEqual(self.events.read_text(), before)
-        record.write_bytes(original.replace(f"lf_{install}_".encode(), b"bad_"))
+        self.assertNotIn(b"project=", original)
+        record.write_bytes(original + b"project=forged\n")
         self.call(A, "_project", str(self.root), A, token, "stop", ok=False)
         record.write_bytes(original)
         b_entry = self.entries[B]

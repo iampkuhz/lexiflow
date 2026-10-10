@@ -114,7 +114,7 @@ test('real staging bytes and exact builder/assembler contracts precede private h
   const images = stages[1][1], assemble = stages[2][1];
   assert.deepEqual(Object.keys(images).sort(), ['artifactRoot', 'descriptor', 'endpoint', 'outputParent', 'platform', 'repoRoot']);
   assert.equal(images.platform, 'linux/arm64');
-  assert.deepEqual(images.descriptor.baseImages, [{ platform: 'linux/arm64' }]);
+  assert.deepEqual(Object.keys(images.descriptor).sort(), ['jar', 'schemaVersion', 'softwareVersion', 'sourceCommit']);
   assert.equal(images.endpoint, f.body.endpoint);
   assert.deepEqual(images.descriptor.jar, { path: 'api.jar', bytes: 14, sha256: sha('real jar bytes') });
   assert.deepEqual(assemble.imageCandidates, [{ directory: path.join(f.outputParent, 'images', 'image-candidate'),
@@ -124,6 +124,10 @@ test('real staging bytes and exact builder/assembler contracts precede private h
       { role: 'postgres-image', platform: 'linux/arm64', path: 'images/linux-arm64/postgres-image.tar', bytes: 2,
         sha256: sha('pg'), imageDigest: `sha256:${sha('image-pg')}` },
     ] })) }]);
+  assert.deepEqual(assemble.descriptor.artifacts.filter(a => ['api-image', 'postgres-image'].includes(a.role)), [
+    { role: 'api-image', platform: 'linux/arm64', licenseIds: ['license-0', 'license-1'] },
+    { role: 'postgres-image', platform: 'linux/arm64', licenseIds: ['license-2'] },
+  ]);
   assert.equal(assemble.descriptor.apiContract, 'caption-hints.v2');
   assert.deepEqual(assemble.descriptor.dataset, { releaseId: 'r1', preparationId: 'p1', ruleId: 'rule1' });
   assert.deepEqual(assemble.descriptor.artifacts.filter(a => a.role === 'license').map(a => a.path), ['notice.txt']);
@@ -305,4 +309,21 @@ test('resume binds UUID, host, source, original request and candidate; only publ
   await writeFile(f.request, JSON.stringify({ ...f.body, endpoint: 'unix:///other.sock' }));
   assert.equal((await resumePromotion(common)).status, 'BLOCKED');
   assert.equal(outputs.length, 2);
+});
+
+
+test('private readers and unused release cache forwarding are not public interfaces', async t => {
+  const workflow = await import('../workflow.mjs');
+  const dockerCommand = await import('../build-command.mjs');
+  assert.equal(workflow.readBoundedJson, undefined);
+  assert.equal(dockerCommand.dockerOutputLimit, undefined);
+  const names = ['LEXIFLOW_RELEASE_GRADLE_CACHE', 'LEXIFLOW_RELEASE_NPM_CACHE'];
+  const previous = names.map(name => process.env[name]);
+  for (const name of names) process.env[name] = 'synthetic-unused-cache';
+  t.after(() => names.forEach((name, index) => { if (previous[index] === undefined) delete process.env[name]; else process.env[name] = previous[index]; }));
+  const f = await fixture(t); const b = boundaries(f);
+  assert.equal((await prepareWorkflow(f.request, b.options)).status, 'PASS');
+  for (const call of b.calls.filter(call => call[0] === 'command')) {
+    for (const name of names) assert.ok(!Object.hasOwn(call[3].env, name));
+  }
 });

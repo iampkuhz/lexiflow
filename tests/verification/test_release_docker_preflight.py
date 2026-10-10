@@ -162,8 +162,6 @@ elif "info" in args:
         json.dumps(info.get(key))
         for key in ("ID", "OSType", "Architecture", "ServerVersion")
     ))
-elif args[:2] == ["context", "inspect"]:
-    print(json.dumps("unix://{self.socket_path}"))
 elif "compose" in args:
     if mode == "compose-fail": sys.exit(1)
     print("Docker Compose version v2")
@@ -173,7 +171,7 @@ elif "compose" in args:
         path.chmod(0o755)
 
     def _preflight(self):
-        return preflight_module.preflight(self.root, "linux/amd64", self.environment)
+        return preflight_module.preflight("linux/amd64", self.environment)
 
     def _assert_process_gone(self, pid: int) -> None:
         deadline = time.monotonic() + 2
@@ -227,22 +225,17 @@ elif "compose" in args:
         )
         self.assertEqual("PASS", preflight_module.recheck(result.binding).status)
 
-    def test_environment_conflict_and_remote_host_are_fixed_failures(self) -> None:
-        conflicted = dict(self.environment, DOCKER_CONTEXT="default")
-        remote = dict(self.environment, DOCKER_HOST="tcp://example.invalid:2376")
-        self.assertEqual(
-            "host-context-conflict",
-            preflight_module.preflight(self.root, "linux/amd64", conflicted).reason,
-        )
-        self.assertEqual(
-            "invalid-host",
-            preflight_module.preflight(self.root, "linux/amd64", remote).reason,
-        )
+    def test_explicit_unix_host_is_required(self) -> None:
+        for endpoint in ("", "tcp://example.invalid:2376", "unix:///socket?query=x", "unix:///socket#fragment"):
+            with self.subTest(endpoint=endpoint):
+                invalid = dict(self.environment, DOCKER_HOST=endpoint)
+                self.assertEqual("invalid-host", preflight_module.preflight("linux/amd64", invalid).reason)
+        self.assertFalse(self.log.exists())
 
     def test_environment_is_filtered_and_values_are_not_returned(self) -> None:
         secret = "do-not-leak-secret"
         result = preflight_module.preflight(
-            self.root, "linux/amd64", dict(self.environment, API_TOKEN=secret)
+            "linux/amd64", dict(self.environment, API_TOKEN=secret)
         )
         self.assertEqual("PASS", result.status)
         rendered = repr(result)
@@ -255,44 +248,17 @@ elif "compose" in args:
         self.assertEqual("docker-daemon-unavailable", failed.reason)
         self.assertNotIn(secret, repr(failed))
 
-    def test_context_name_validation_and_remote_context_rejection(self) -> None:
+    def test_context_and_user_config_are_not_discovery_inputs(self) -> None:
+        self.environment.update(DOCKER_CONTEXT="bad context", DOCKER_CONFIG="/untrusted/config")
+        result = self._preflight()
+        self.assertEqual("PASS", result.status)
+        self.assertEqual({key for key, _ in result.binding.environment}, {"PATH"})
+        commands = [json.loads(line) for line in self.log.read_text().splitlines()]
+        self.assertTrue(all("context" not in argv for argv in commands))
         self.environment.pop("DOCKER_HOST")
-        self.environment.pop("DOCKER_CONTEXT", None)
-        self.assertEqual("PASS", self._preflight().status)
-        commands = [json.loads(line) for line in self.log.read_text().splitlines()]
-        self.assertEqual(
-            ["context", "inspect", "--format", preflight_module._CONTEXT_FORMAT],
-            commands[0],
-        )
-        self.log.write_text("", encoding="utf-8")
-        self.environment["DOCKER_CONTEXT"] = "work"
-        self.assertEqual("PASS", self._preflight().status)
-        commands = [json.loads(line) for line in self.log.read_text().splitlines()]
-        self.assertEqual(
-            [
-                "context",
-                "inspect",
-                "work",
-                "--format",
-                preflight_module._CONTEXT_FORMAT,
-            ],
-            commands[0],
-        )
-        self.log.write_text("", encoding="utf-8")
-        self.environment["DOCKER_CONTEXT"] = "bad context"
-        self.assertEqual("invalid-context", self._preflight().reason)
-        self.environment["DOCKER_CONTEXT"] = "work"
-        self.mode = "remote-context"
-        # 直接替换 runner 输出，避免真实 context 查询。
-        self._write_cli()
-        with patch.object(
-            preflight_module,
-            "_run_bounded",
-            return_value=preflight_module._CommandResult(
-                "exited", 0, b'"tcp://remote:2376"'
-            ),
-        ):
-            self.assertEqual("docker-context-remote", self._preflight().reason)
+        with patch.object(preflight_module, "_run_bounded") as run:
+            self.assertEqual("invalid-host", self._preflight().reason)
+            run.assert_not_called()
 
     def test_empty_or_missing_path_uses_fixed_search_path(self) -> None:
         for path_entry in ({"PATH": ""}, {}):
@@ -306,7 +272,7 @@ elif "compose" in args:
                     preflight_module.shutil, "which", return_value=None
                 ) as find_cli:
                     result = preflight_module.preflight(
-                        self.root, "linux/amd64", environment
+                        "linux/amd64", environment
                     )
                 self.assertEqual("docker-cli-missing", result.reason)
                 find_cli.assert_called_once_with("docker", path="/usr/bin:/bin")
@@ -352,13 +318,13 @@ elif "compose" in args:
         self.assertEqual(
             "PASS",
             preflight_module.preflight(
-                self.root, "linux/arm64", self.environment
+                "linux/arm64", self.environment
             ).status,
         )
         self.assertEqual(
             "invalid-target-platform",
             preflight_module.preflight(
-                self.root, "linux/ppc64", self.environment
+                "linux/ppc64", self.environment
             ).reason,
         )
 
@@ -383,16 +349,15 @@ elif "compose" in args:
             (result.status, result.reason),
         )
 
-        self.environment.pop("DOCKER_HOST")
         with patch.object(
             preflight_module,
             "_run_bounded",
             return_value=preflight_module._CommandResult("cleanup-failed", None, b""),
         ):
-            context_failure = self._preflight()
+            info_failure = self._preflight()
         self.assertEqual(
             ("FAIL", "docker-process-cleanup-failed"),
-            (context_failure.status, context_failure.reason),
+            (info_failure.status, info_failure.reason),
         )
 
         self.environment["DOCKER_HOST"] = f"unix://{self.socket_path}"

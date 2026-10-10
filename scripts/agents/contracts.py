@@ -254,12 +254,60 @@ def validate_codex_work_package_task_projection(
         ):
             raise AgentContractError("CONTRACT_INVALID", f"{path}.{field} is invalid")
     caller = raw["caller_contract"]
+    caller_fields = {
+        "goal",
+        "work_package_id",
+        "task_ids",
+        "task_versions",
+        "change_versions",
+        "estimated_minutes",
+        "primary_owner",
+        "contract_boundary",
+        "allowed_files",
+        "forbidden_files",
+        "required_context",
+        "expected_outputs_by_task",
+        "acceptance_by_task",
+        "validation_commands",
+        "failure_policy",
+        "parent_client",
+    }
     if (
         not isinstance(caller, Mapping)
+        or set(caller) != caller_fields
+        or caller.get("parent_client") != raw["parent_client"]
         or caller.get("work_package_id") != raw["work_package_id"]
         or caller.get("task_ids") != ids
     ):
         raise AgentContractError("CONTRACT_INVALID", "caller contract drifted")
+    task_id = raw["task_id"]
+    for field in (
+        "task_versions",
+        "change_versions",
+        "expected_outputs_by_task",
+        "acceptance_by_task",
+        "validation_commands",
+    ):
+        if not isinstance(caller[field], Mapping) or set(caller[field]) != set(ids):
+            raise AgentContractError("CONTRACT_INVALID", "caller Task maps drifted")
+    acceptance = caller["acceptance_by_task"][task_id]
+    if (
+        not isinstance(acceptance, Mapping)
+        or set(acceptance) != {"acceptance_criteria", "acceptance_evidence"}
+        or caller["task_versions"][task_id] != raw["task_version"]
+        or caller["change_versions"][task_id] != raw["change_version"]
+        or caller["expected_outputs_by_task"][task_id] != raw["expected_output"]
+        or caller["validation_commands"][task_id] != raw["validation_command"]
+        or any(
+            acceptance[field] != raw[field]
+            for field in ("acceptance_criteria", "acceptance_evidence")
+        )
+        or any(
+            caller[field] != raw[field]
+            for field in ("allowed_files", "forbidden_files")
+        )
+    ):
+        raise AgentContractError("CONTRACT_INVALID", "frozen Task contract drifted")
 
 
 def validate_codex_main_task_projection(raw: Any, path: str = "raw task") -> None:

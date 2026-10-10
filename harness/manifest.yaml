@@ -16,7 +16,6 @@ architecture:
   first_content_adapter: youtube
 agent_contract:
   policy_manifest: harness/agent-policy.manifest.yaml
-  runtime_manifest: harness/agent-runtime.manifest.yaml
   ci_policy: harness/ci-policy.yaml
   module_boundaries: harness/module-boundaries.yaml
   java_product: harness/java-product.manifest.yaml
@@ -25,16 +24,15 @@ agent_contract:
   test_services: harness/test-services.json
   python_quality: harness/python-quality.toml
   python_docstrings: harness/python-docstrings.toml
-  qoder_harness_schema: harness/qoder-harness.schema.json
-  qoder_result_schema: harness/qoder-result.schema.json
   validation_mode: explicit
   planning_system: openspec
   platform_entries:
+    codex_config: .codex/config.toml
+    qoder_context: .qoder/AGENTS.md
     codex_agents: .codex/agents/
     qoder_agents: .qoder/agents/
     codex_hooks: .codex/hooks.json
     qoder_hooks: .qoder/settings.json
-  delivery_gate_records_schema: harness/delivery-gate-records.schema.json
 public_executables:
   local_podman: node ops/podman/local.mjs install|upgrade|version|up|status|stop|logs|recover|doctor
   release_candidate: node ops/release/pipeline.mjs images|assemble|verify /absolute/request.json
@@ -79,9 +77,6 @@ script_governance:
   - no-product-runtime-import
   promotion: explicit-user-approved-contract-and-tests
 quality:
-  delivery_command: python3 -m scripts.verification.development
-  repository_baseline_command: python3 scripts/check_repository.py
-  full_command: python3 -m scripts.delivery_gate validate --submission-id <submission-id>
   layering:
     submit: binds-PASS-change-verify-task-requirements-and-producer-runtime
     validate: independent-verification-public-api-on-frozen-input
@@ -91,32 +86,6 @@ quality:
   - PASS
   - BLOCKED
   - FAIL
-docs:
-- docs/README.md
-- docs/system/experience.md
-- docs/reference/product-glossary.md
-- docs/system.md
-- docs/system/engineering.md
-- docs/system/quality-checks.md
-- docs/system/delivery-acceptance.md
-- docs/system/engineering-support.md
-- docs/system/flows.md
-- docs/reference/checks.md
-- docs/scenarios/delegate-work.md
-- docs/scenarios/local-development.md
-- docs/scenarios/github-actions.md
-- docs/reference.md
-- docs/reference/troubleshooting.md
-- docs/roadmap/master-plan.md
-- docs/roadmap/master-plan/phase2.md
-- docs/roadmap/master-plan/phase2/design.md
-- docs/roadmap/master-plan/phase2/tasks.md
-- docs/roadmap/master-plan/phase2/status.md
-- docs/roadmap/master-plan/future.md
-- docs/roadmap/master-plan/performance.md
-- docs/roadmap/master-plan/improvement.md
-- openspec/specs/product-architecture/spec.md
-- openspec/specs/agent-execution/spec.md
 local_only:
 - .env
 - .local/

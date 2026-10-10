@@ -27,6 +27,5 @@ export function githubLatestRelease() {
   });
 }
 export function versionSummary(state, target, latest = null) {
-  return { installed: state?.version ?? null, local: target.softwareVersion, latestRelease: latest,
-    needsUpgrade: !state ? null : state.buildIdentity?.buildId !== target.buildId };
+  return { installed: state?.version ?? null, local: target.softwareVersion, latestRelease: latest };
 }

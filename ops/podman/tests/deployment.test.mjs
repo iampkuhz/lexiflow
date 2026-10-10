@@ -6,7 +6,7 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { createDeploymentPlan, deploymentPlanHash, confirmDeploymentPlan, confirmDeploymentIntent, writeOperationJournal, readOperationJournal, executeDeployment, recoverDeployment } from '../deployment.mjs';
+import { createDeploymentPlan, deploymentPlanHash, confirmDeploymentPlan, confirmDeploymentIntent, writeOperationJournal, readOperationJournal, executeDeployment } from '../deployment.mjs';
 
 const hex = 'a'.repeat(64);
 const plan = extra => createDeploymentPlan({ operation: 'install', installation: 'local-x', targetBuildId: hex,
@@ -121,20 +121,5 @@ test('shared executor writes nothing before an exact one-run confirmation', asyn
   try {
     await assert.rejects(executeDeployment({ plan: plan(), confirmedHash: 'f'.repeat(64), journalFile: file, callbacks: {} }), /DEPLOYMENT_CONFIRMATION_REQUIRED/);
     assert.equal(fs.existsSync(file), false);
-  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
-});
-
-test('recovery activates a database-committed target but preserves uncommitted state', async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiflow-recovery-'));
-  const file = path.join(directory, 'operation.json');
-  try {
-    writeOperationJournal(file, { schema: 1, operation: 'd'.repeat(32), planHash: deploymentPlanHash(plan()), stage: 'data-committed' });
-    const calls = [];
-    const callbacks = { targetGenerationVersion: 'b'.repeat(64), inspectDatabase: async () => ({ status: 'PASS', generationVersion: 'b'.repeat(64) }),
-      activateTarget: async () => calls.push('activate'), verifyTarget: async () => calls.push('verify') };
-    assert.deepEqual(await recoverDeployment({ journalFile: file, callbacks }), { status: 'PASS', action: 'activate-committed-target' });
-    assert.deepEqual(calls, ['activate', 'verify']);
-    const pending = await recoverDeployment({ journalFile: file, callbacks: { ...callbacks, inspectDatabase: async () => ({ status: 'PASS', generationVersion: 'e'.repeat(64) }) } });
-    assert.equal(pending.status, 'BLOCKED');
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

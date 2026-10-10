@@ -17,15 +17,13 @@ from typing import Mapping
 from urllib.parse import urlsplit
 
 _TARGETS = {"linux/amd64": {"amd64", "x86_64"}, "linux/arm64": {"arm64", "aarch64"}}
-_ENV_KEYS = {"PATH", "HOME", "DOCKER_CONFIG", "DOCKER_HOST", "DOCKER_CONTEXT"}
+_ENV_KEYS = {"PATH", "DOCKER_HOST"}
 _MAX_OUTPUT = 256 * 1024
 _TIMEOUT = 30.0
 _ID = re.compile(r"[A-Za-z0-9._:-]{1,128}\Z", re.ASCII)
-_CONTEXT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}\Z", re.ASCII)
 _INFO_FORMAT = (
     "{{json .ID}}|{{json .OSType}}|{{json .Architecture}}|{{json .ServerVersion}}"
 )
-_CONTEXT_FORMAT = "{{json .Endpoints.docker.Host}}"
 
 
 @dataclass(frozen=True, repr=False)
@@ -75,15 +73,8 @@ def _safe_environment(
         if any(ord(char) < 32 or ord(char) == 127 for char in value):
             return None, "invalid-environment"
         values[key] = value
-    host, context = values.get("DOCKER_HOST", ""), values.get("DOCKER_CONTEXT", "")
-    if host and context:
-        return None, "host-context-conflict"
-    if host:
-        endpoint = _socket_endpoint(host)
-        if endpoint is None:
-            return None, "invalid-host"
-    elif context and not _CONTEXT.fullmatch(context):
-        return None, "invalid-context"
+    if _socket_endpoint(values.get("DOCKER_HOST", "")) is None:
+        return None, "invalid-host"
     return values, None
 
 
@@ -112,11 +103,7 @@ def _socket_endpoint(endpoint: str) -> tuple[str, str] | None:
 
 
 def _command_environment(values: Mapping[str, str]) -> dict[str, str]:
-    env = {"PATH": values.get("PATH") or "/usr/bin:/bin"}
-    for key in ("HOME", "DOCKER_CONFIG"):
-        if values.get(key):
-            env[key] = values[key]
-    return env
+    return {"PATH": values.get("PATH") or "/usr/bin:/bin"}
 
 
 def _group_state(pid: int) -> bool | None:
@@ -394,30 +381,6 @@ def stat_is_socket(mode: int) -> bool:
     return stat.S_ISSOCK(mode)
 
 
-def _context_endpoint(
-    docker: str, context: str | None, env: Mapping[str, str]
-) -> tuple[str | None, str | None]:
-    argv = [docker, "context", "inspect"]
-    if context is not None:
-        argv.append(context)
-    argv.extend(("--format", _CONTEXT_FORMAT))
-    result = _run_bounded(argv, env)
-    if result.status == "cleanup-failed":
-        return None, "docker-process-cleanup-failed"
-    if result.status == "missing-cli":
-        return None, "docker-cli-missing"
-    if result.status in {"timeout", "output-limit", "unsupported-platform"}:
-        return None, "docker-context-unavailable"
-    if result.status != "exited" or result.returncode != 0:
-        return None, "docker-context-unavailable"
-    try:
-        endpoint = json.loads(result.stdout.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return None, "docker-context-invalid"
-    parsed = _socket_endpoint(endpoint) if isinstance(endpoint, str) else None
-    return (parsed[0], None) if parsed else (None, "docker-context-remote")
-
-
 def _daemon_id(
     docker: str, endpoint: str, env: Mapping[str, str]
 ) -> tuple[dict[str, str] | None, str | None]:
@@ -446,15 +409,10 @@ def _daemon_id(
 
 
 def preflight(
-    repo_root: str | Path,
     target_platform: str,
     environment: Mapping[str, str],
 ) -> PreflightResult:
-    """发现并绑定本机 Docker daemon。
-
-    仅执行只读 context、info 与 compose version。
-    """
-    del repo_root  # 此窄只读预检不需要访问仓库或用户配置文件。
+    """以显式 Unix endpoint 只读核验并绑定本机 Docker daemon。"""
     if not isinstance(target_platform, str) or target_platform not in _TARGETS:
         return _result("FAIL", "invalid-target-platform")
     values, error = _safe_environment(environment)
@@ -465,26 +423,7 @@ def preflight(
     docker = shutil.which("docker", path=command_env.get("PATH", ""))
     if not docker:
         return _result("BLOCKED", "docker-cli-missing")
-    if values.get("DOCKER_HOST"):
-        endpoint = values["DOCKER_HOST"]
-    else:
-        context = values.get("DOCKER_CONTEXT") or None
-        if context is not None and not _CONTEXT.fullmatch(context):
-            return _result("FAIL", "invalid-context")
-        endpoint, context_error = _context_endpoint(docker, context, command_env)
-        if context_error:
-            status = (
-                "FAIL"
-                if context_error
-                in {
-                    "docker-context-invalid",
-                    "docker-context-remote",
-                    "docker-process-cleanup-failed",
-                }
-                else "BLOCKED"
-            )
-            return _result(status, context_error)
-        assert endpoint is not None
+    endpoint = values["DOCKER_HOST"]
     socket_identity = _inspect_socket(endpoint)
     if socket_identity is None:
         return _result("BLOCKED", "local-socket-unavailable")

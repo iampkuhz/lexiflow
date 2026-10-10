@@ -109,7 +109,6 @@ gradle.projectsEvaluated {
       }
       def orderAfter = { String path -> task(path).mustRunAfter.getDependencies(task(path)).collect { it.path }.sort() }
       def dependencyNames = { String path -> task(path).taskDependencies.getDependencies(task(path)).collect { it.path }.sort() }
-      def identity = rootProject.extensions.getByName("buildIdentity")
       def graph = task(":verifyProjectDependencies").dependencyGraph.get()
       def payload = [
         deliveryFull: direct(task(":deliveryFull")), check: direct(task(":check")),
@@ -118,7 +117,7 @@ gradle.projectsEvaluated {
           ":integration-tests:runtimeSmokeTest":orderAfter(":integration-tests:runtimeSmokeTest"),
           ":api:bootJar":orderAfter(":api:bootJar")],
         apiTestDependencies: dependencyNames(":api:test"),
-        graph: graph, identity: [baseVersion:identity.baseVersion],
+        graph: graph, identity: [baseVersion:rootProject.version.toString()],
         javaExec: [":adapters:lexiconValidate":exec(":adapters:lexiconValidate"),
           ":adapters:lexiconPublish":exec(":adapters:lexiconPublish"),
           ":adapters:lexiconBasicReport":exec(":adapters:lexiconBasicReport"),

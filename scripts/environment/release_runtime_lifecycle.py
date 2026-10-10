@@ -240,7 +240,6 @@ def _assert_runtime(
 
 
 def execute_lifecycle(
-    repo: Path,
     scratch: Path,
     evidence: Mapping[str, Any],
     bindings: tuple[Any, ...],

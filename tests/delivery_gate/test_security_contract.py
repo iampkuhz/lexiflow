@@ -6,7 +6,7 @@ from unittest.mock import patch
 import yaml
 from scripts.delivery_gate.authority import verify_authority
 from scripts.delivery_gate.check import check_conditions
-from scripts.delivery_gate.records import RecordError,delivery_gate_locator,content_hash,list_layer,list_submissions,load_layer,load_submission,publish_json,read_json
+from scripts.delivery_gate.records import RecordError,delivery_gate_locator,content_hash,list_layer,list_submissions,load_layer,load_submission,publish_json,parse_json,read_regular_bytes
 from scripts.delivery_gate.producer import resolve_producer
 from scripts.delivery_gate.validate import ValidationError, _verify_producer
 from tests.delivery_gate.fixtures import DeliveryGateFixture,PRODUCER_SESSION,mock_authority,make_mock_runtime
@@ -22,13 +22,13 @@ class TestRecordSafety(unittest.TestCase):
  def test_duplicate_keys_symlink_and_fifo_rejected(self):
   with tempfile.TemporaryDirectory() as tmp:
    root=Path(tmp);path=root/"x.json";path.write_text('{"a":1,"a":2}')
-   with self.assertRaisesRegex(RecordError,"duplicate JSON key"):read_json(root,"x.json","fixture",require_hash=False)
+   with self.assertRaisesRegex(RecordError,"duplicate JSON key"):parse_json(read_regular_bytes(root,"x.json"),"fixture")
    path.unlink();outside=root/"outside";outside.write_text("x");path.symlink_to(outside)
-   with self.assertRaisesRegex(RecordError,"unsafe-path"):read_json(root,"x.json","fixture",require_hash=False)
+   with self.assertRaisesRegex(RecordError,"unsafe-path"):parse_json(read_regular_bytes(root,"x.json"),"fixture")
    path.unlink()
    if hasattr(os,"mkfifo"):
     os.mkfifo(path)
-    with self.assertRaisesRegex(RecordError,"unsafe-path"):read_json(root,"x.json","fixture",require_hash=False)
+    with self.assertRaisesRegex(RecordError,"unsafe-path"):parse_json(read_regular_bytes(root,"x.json"),"fixture")
  def test_dangling_record_directories_are_not_treated_as_empty(self):
   with tempfile.TemporaryDirectory() as tmp:
    root=Path(tmp);base=root/"tmp/quality/delivery-gate";base.mkdir(parents=True)
@@ -75,7 +75,7 @@ class TestDependencyDagAndApproval(unittest.TestCase):
  def tearDown(self):self.f.cleanup()
  def _catalog(self):
   def task(tid,deps=None,approval=None):
-   value={"id":tid,"version":1,"change_version":"1.0.0","dependencies":deps or [],"required_check_ids":["fixture.change"],"allowed_files":["src/test.py"],"forbidden_files":[],"file_claims":[{"path":"src/**"}]}
+   value={"id":tid,"task_version":1,"change_version":"1.0.0","depends_on":[{"task_id":dep,"required_task_version":1,"required_change_version":"1.0.0","required_result":"PASS"} for dep in (deps or [])],"required_check_ids":["fixture.change"],"allowed_files":["src/test.py"],"forbidden_files":[],"file_claims":[{"path":"src/**"}]}
    if approval:value["phase_entry_prerequisite"]={"previous_gate_id":"G1","previous_gate_exit_task_id":approval,"required_user_approval":"APPROVED"}
    return value
   tasks=[task("LF-TSK-TEST-0001"),task("LF-TSK-TEST-0002",["LF-TSK-TEST-0001"]),task("LF-TSK-TEST-0003",["LF-TSK-TEST-0002"],"LF-TSK-TEST-0002")]

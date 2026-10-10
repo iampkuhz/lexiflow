@@ -9,7 +9,6 @@
 | 文件 | 已确认的消费者 | 性质与维护边界 |
 | --- | --- | --- |
 | [agent-policy.manifest.yaml](../../harness/agent-policy.manifest.yaml) | [风险评估](../../scripts/verification/risk.py)、[验收计划](../../scripts/delivery_gate/acceptance.py)、[Agent 派发](../../scripts/agents/dispatch_fallback.py)、[规划校验](../../scripts/repository/planning_validator.py) | 运行读取；共享策略真源，包含多个职责段 |
-| [agent-runtime.manifest.yaml](../../harness/agent-runtime.manifest.yaml) | Agent 按客户端运行边界读取 | 规约上下文；只保留独有运行边界，共享规则直接读 policy |
 | [module-checks.yaml](../../harness/module-checks.yaml) | [声明加载](../../scripts/verification/declarations.py)、[选择闭包](../../scripts/verification/scope.py)、[任务主体](../../scripts/delivery_gate/task_subject.py) | 运行读取；`executions` 唯一维护命令、输入、环境与期限，`checks` 只选择执行定义及触发／依赖；固定结果判据在加载器 |
 | [delivery-hooks.json](../../harness/delivery-hooks.json) | [delivery_hook.py](../../scripts/verification/delivery_hook.py) | 运行读取；Stop 启用模式、期限与进度间隔；事件、停用变量名及中间标记是入口固定协议 |
 | [test-services.json](../../harness/test-services.json) | [test_services.py](../../scripts/environment/test_services.py) | 运行读取；隔离资源准备、就绪与清理，见[验证环境](../scenarios/verification-environment.md) |
@@ -18,18 +17,13 @@
 | [java-product.manifest.yaml](../../harness/java-product.manifest.yaml) | [Java／门禁分层测试](../../tests/verification/test_quality_gate_layering.py) | 已确认测试读取；构建操作回到[Java 检查](java-checks.md) |
 | [module-boundaries.yaml](../../harness/module-boundaries.yaml) | 从[系统边界](../system/modules.md)查阅 | 领域合同；未确认直接解析消费者，不据此删除 |
 | [manifest.yaml](../../harness/manifest.yaml) | [API 启动入口](../../backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java)检查存在；Agent 按工程入口读取 | 导航索引；存在性探测不等于解析字段 |
-| [codex-work-package-result.schema.json](../../harness/codex-work-package-result.schema.json) | 对照[工作包实现](../../scripts/agents/codex/work_package.py) | Schema 合同；未确认该 Schema 文件被动态加载校验 |
-| [delivery-gate-records.schema.json](../../harness/delivery-gate-records.schema.json) | 对照[验收记录实现](../../scripts/delivery_gate/records.py) | Schema 合同；文件存在不等于正式记录已被验收 |
-| [qoder-harness.schema.json](../../harness/qoder-harness.schema.json) | 对照[历史 runner](../../scripts/agents/qoder/runner.py) | Schema 合同；未确认动态加载；不授予新 Qoder 派发资格 |
-| [qoder-result.schema.json](../../harness/qoder-result.schema.json) | 对照[历史运行读取](../../scripts/agents/qoder/read_model.py) | Schema 合同；未确认动态加载；不是执行结果 |
 
 ### 1.1.1. 任务与规划
 
 | 文件 | 已确认的消费者 | 性质与维护边界 |
 | --- | --- | --- |
-| [workstreams.yaml](../../planning/workstreams.yaml) | [Catalog](../../scripts/repository/catalog.py)、[任务要求](../../scripts/delivery_gate/requirements.py)、[规划校验](../../scripts/repository/planning_validator.py) | 运行读取；任务、依赖与范围，不保存 Agent 策略副本，也不是运行报告 |
+| [workstreams.yaml](../../planning/workstreams.yaml) | [任务要求](../../scripts/delivery_gate/requirements.py)、[规划校验](../../scripts/repository/planning_validator.py) | 运行读取；任务、依赖与范围，不保存 Agent 策略副本，也不是运行报告 |
 | [task-template.yaml](../../planning/task-template.yaml) | 人与 Agent 填写 Task 时读取 | 任务数据模板；不复制模型路由、调度与交接合同 |
-| [qoder-harness-template.json](../../planning/qoder-harness-template.json) | 工作包路径引用 | 未确认解析消费者；引用或哈希不等于模板被实际实例化 |
 
 ## 1.2. 修改唯一事实
 

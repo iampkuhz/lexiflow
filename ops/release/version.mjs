@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync, realpathSync, lstatSync, openSync, closeSync, fstatSync, readSync, constants } from 'node:fs';
+import { realpathSync, lstatSync, openSync, closeSync, fstatSync, readSync, constants } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,11 +10,6 @@ export function parseVersion(raw) {
   const parts = value.replace(/-SNAPSHOT$/, '').split('.').map(Number);
   if (parts.some((part) => part > 65535) || parts.every((part) => part === 0)) throw new Error('invalid software version');
   return value;
-}
-
-export async function readVersion(source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'version.txt')) {
-  try { return parseVersion(await readFile(source, 'utf8')); }
-  catch { throw new Error('software version missing or invalid'); }
 }
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -30,38 +24,45 @@ function validateSourceDate(value) {
 }
 
 // Git committer timestamp + 固定 UTC+08:00；与构建时钟、本机 TZ 和作者日期无关。
-function sourceDateForCommit(root, commit) {
-  const seconds = gitOutput(root, 'show', '-s', '--format=%ct', commit).trim();
+function sourceDateForCommit(root, commit, deadline) {
+  const seconds = gitOutput(root, deadline, 'show', '-s', '--format=%ct', commit).trim();
   if (!/^[0-9]+$/.test(seconds) || !Number.isSafeInteger(Number(seconds))) throw new Error('invalid commit timestamp');
   const date = new Date((Number(seconds) + 8 * 60 * 60) * 1000);
   if (!Number.isFinite(date.getTime())) throw new Error('invalid commit timestamp');
   return validateSourceDate(date.toISOString().slice(0, 10).replaceAll('-', ''));
 }
 
-function gitOutput(root, ...args) {
+// 所有 Git 子进程及文件扫描共享同一总预算，不能每轮重新开始计时。
+function remainingBudget(deadline) {
+  const remaining = Math.ceil(deadline - performance.now());
+  if (remaining <= 0) throw new Error('build source identity timed out');
+  return Math.min(10_000, remaining);
+}
+
+function gitOutput(root, deadline, ...args) {
   return execFileSync('git', ['-C', root, ...args], {
-    encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000, maxBuffer: 8 * 1024 * 1024,
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: remainingBudget(deadline), maxBuffer: 8 * 1024 * 1024,
   });
 }
 
-function gitSnapshot(root, { clean = false } = {}) {
+function gitSnapshot(root, { clean = false, deadline } = {}) {
   // 一次进程读取同一快照的根路径与 HEAD；仍保留每轮完整 Git/文件校验。
   // 从末尾分隔 commit，根路径内部的换行不作为字段边界。
-  const identity = gitOutput(root, 'rev-parse', '--show-toplevel', '--verify', 'HEAD^{commit}').trim();
+  const identity = gitOutput(root, deadline, 'rev-parse', '--show-toplevel', '--verify', 'HEAD^{commit}').trim();
   const separator = identity.lastIndexOf('\n');
   if (separator < 0) throw new Error();
   const repository = realpathSync(identity.slice(0, separator).trim());
   if (repository !== realpathSync(root)) throw new Error();
   const sourceCommit = identity.slice(separator + 1).trim();
   if (!/^[a-f0-9]{40,64}$/.test(sourceCommit)) throw new Error();
-  const sourceDate = sourceDateForCommit(root, sourceCommit);
+  const sourceDate = sourceDateForCommit(root, sourceCommit, deadline);
   const status = execFileSync('git', ['-C', root, 'status', '--porcelain=v1', '--untracked-files=all'], {
-    encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000,
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: remainingBudget(deadline),
     maxBuffer: clean ? 100_000 : 8 * 1024 * 1024,
   });
   const dirty = status.length > 0;
   if (clean && dirty) throw new Error('release input must be clean');
-  const files = [...new Set(gitOutput(root, 'ls-files', '-z', '--cached', '--others', '--exclude-standard').split('\0').filter(Boolean))].sort();
+  const files = [...new Set(gitOutput(root, deadline, 'ls-files', '-z', '--cached', '--others', '--exclude-standard').split('\0').filter(Boolean))].sort();
   return { repository, sourceCommit, sourceDate, dirty, files };
 }
 
@@ -69,7 +70,8 @@ function statIdentity(stat) {
   return [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs, stat.mode].map(String).join(':');
 }
 
-function readStableFile(root, relative) {
+function readStableFile(root, relative, deadline) {
+  remainingBudget(deadline);
   let current = root;
   const parts = relative.split('/');
   if (path.isAbsolute(relative) || parts.some(part => !part || part === '..' || part === '.' || part === '.git')) throw new Error('invalid build source path');
@@ -107,6 +109,7 @@ function readStableFile(root, relative) {
     const versionChunks = [];
     if (version && remaining > 128n) throw new Error('invalid software version');
     while (remaining > 0n) {
+      remainingBudget(deadline);
       const length = Number(remaining < BigInt(buffer.length) ? remaining : BigInt(buffer.length));
       const count = readSync(fd, buffer, 0, length, null);
       if (!count) throw new Error('build source changed during identity scan');
@@ -114,7 +117,9 @@ function readStableFile(root, relative) {
       if (version) versionChunks.push(Buffer.from(buffer.subarray(0, count)));
       remaining -= BigInt(count);
     }
+    remainingBudget(deadline);
     if (readSync(fd, buffer, 0, 1, null) !== 0) throw new Error('build source changed during identity scan');
+    remainingBudget(deadline);
     const after = fstatSync(fd, { bigint: true });
     const pathAfter = lstatSync(filename, { bigint: true });
     if (beforeId !== statIdentity(after) || beforeId !== statIdentity(pathAfter) || pathAfter.isSymbolicLink()) throw new Error('build source changed during identity scan');
@@ -134,7 +139,7 @@ function snapshot(root, options) {
   const files = [];
   let baseVersion;
   for (const relative of start.files) {
-    const file = readStableFile(root, relative);
+    const file = readStableFile(root, relative, options.deadline);
     inputs.push(file.input);
     files.push([relative, file.stable]);
     if (relative === 'ops/release/version.txt' && file.input[1] !== 'deleted') {
@@ -150,21 +155,25 @@ function snapshot(root, options) {
 
 /** 构建只读取 Git 可见输入，ignored 的字幕、数据库、缓存与运行日志不参与。 */
 function resolveIdentity(root, { clean = false } = {}) {
+  const deadline = performance.now() + 15_000;
   let first, second;
   try {
-    first = snapshot(root, { clean });
-    second = snapshot(root, { clean });
+    first = snapshot(root, { clean, deadline });
+    second = snapshot(root, { clean, deadline });
+    remainingBudget(deadline);
   } catch (error) {
     if (error.message === 'build source symlink forbidden' || error.message === 'build source changed during identity scan'
-      || error.message === 'release input must be clean') throw error;
+      || error.message === 'release input must be clean' || error.message === 'build source identity timed out') throw error;
     throw new Error('build source identity unavailable');
   }
   if (JSON.stringify(first.git) !== JSON.stringify(second.git)
     || JSON.stringify(first.inputs) !== JSON.stringify(second.inputs)
     || JSON.stringify(first.files) !== JSON.stringify(second.files)
     || first.baseVersion !== second.baseVersion) throw new Error('build source changed during identity scan');
-  return derivedIdentity({ baseVersion: first.baseVersion, sourceCommit: first.git.sourceCommit,
+  const identity = derivedIdentity({ baseVersion: first.baseVersion, sourceCommit: first.git.sourceCommit,
     sourceDate: first.git.sourceDate, sourceSha256: first.sourceSha256, dirty: first.git.dirty });
+  remainingBudget(deadline);
+  return identity;
 }
 
 /** 构建仅接受干净源码，并在完整身份扫描的四个 Git 快照中核验资格。 */
@@ -235,31 +244,14 @@ export function checkReleaseTag(tag, root = repositoryRoot) {
   const identity = resolveBuildIdentity(root);
   if (identity.dirty || identity.channel !== 'release' || tag !== `v${identity.softwareVersion}`) throw new Error('release tag identity mismatch');
   let taggedCommit;
-  try { taggedCommit = gitOutput(root, 'rev-parse', '--verify', `refs/tags/${tag}^{commit}`).trim(); }
+  try { taggedCommit = gitOutput(root, performance.now() + 15_000, 'rev-parse', '--verify', `refs/tags/${tag}^{commit}`).trim(); }
   catch { throw new Error('release tag unavailable'); }
   if (taggedCommit !== identity.sourceCommit) throw new Error('release tag commit mismatch');
   return identity;
 }
 
-export function checkReleaseSource(repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')) {
-  const git = (...args) => execFileSync('git', ['-C', repoRoot, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000, maxBuffer: 100_000 }).trim();
-  let root;
-  try { root = git('rev-parse', '--show-toplevel'); }
-  catch { throw new Error('release input is not a Git repository'); }
-  try { if (realpathSync(root) !== realpathSync(repoRoot)) throw new Error('release input must be repository root'); }
-  catch (error) { if (error.message === 'release input must be repository root') throw error; throw new Error('release input must be repository root'); }
-  let softwareVersion;
-  try { softwareVersion = parseVersion(readFileSync(path.join(repoRoot, 'ops/release/version.txt'), 'utf8')); }
-  catch { throw new Error('software version missing or invalid'); }
-  let sourceCommit;
-  try { sourceCommit = git('rev-parse', '--verify', 'HEAD^{commit}'); }
-  catch { throw new Error('release input lacks valid HEAD'); }
-  if (!/^[0-9a-f]{40,64}$/.test(sourceCommit)) throw new Error('release input lacks valid HEAD');
-  let status;
-  try { status = git('status', '--porcelain=v1', '--untracked-files=all'); }
-  catch { throw new Error('release input status unavailable'); }
-  if (status) throw new Error('release input must be clean');
-  if (softwareVersion.endsWith('-SNAPSHOT')) softwareVersion = `${softwareVersion}.${sourceDateForCommit(repoRoot, sourceCommit)}.g${sourceCommit.slice(0, 7)}`;
+export function checkReleaseSource(repoRoot = repositoryRoot) {
+  const { softwareVersion, sourceCommit } = resolveCleanBuildIdentity(repoRoot);
   return { softwareVersion, sourceCommit };
 }
 

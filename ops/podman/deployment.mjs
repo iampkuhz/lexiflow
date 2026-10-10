@@ -117,20 +117,3 @@ export async function executeDeployment({ plan, confirmedHash, journalFile, call
   save('complete');
   return { planHash, committed, prepared, operation };
 }
-
-/** 恢复以数据库的已提交 generation 为事实，不按本机 journal 猜测是否成功。 */
-export async function recoverDeployment({ journalFile, callbacks }) {
-  const journal = readOperationJournal(journalFile);
-  const database = await callbacks.inspectDatabase();
-  if (!database || database.status !== 'PASS') fail('DEPLOYMENT_RECOVERY_DATABASE_UNAVAILABLE');
-  const committed = database.generationVersion === callbacks.targetGenerationVersion;
-  if (committed) {
-    await callbacks.activateTarget();
-    await callbacks.verifyTarget();
-    journal.stage = 'complete';
-    writeOperationJournal(journalFile, journal);
-    return { status: 'PASS', action: 'activate-committed-target' };
-  }
-  // 未提交：不自动恢复/清理数据，也不回切或杀进程；由显式重计划继续。
-  return { status: 'BLOCKED', action: 'preserve-and-replan', stage: journal.stage };
-}

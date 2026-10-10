@@ -136,10 +136,6 @@ def _head(root: Path) -> str:
     return _git(root, "rev-parse", "--verify", "HEAD").decode("ascii").strip()
 
 
-def _changed(root: Path, base: str) -> list[str]:
-    return changed_paths(root, base)
-
-
 def _matches_pattern(path: str, pattern: str) -> bool:
     return fnmatch.fnmatchcase(path, pattern) or PurePosixPath(path).match(pattern)
 
@@ -185,7 +181,7 @@ def _risk_policy(root: Path) -> dict[str, Any]:
         raise ValueError("risk-assessment-policy-invalid") from exc
 
 
-def _state_hash(root: Path, path: str, _base: str) -> dict[str, str]:
+def _state_hash(root: Path, path: str) -> dict[str, str]:
     try:
         content = _read_regular(root, path)
     except FileNotFoundError:
@@ -311,7 +307,7 @@ def _check_snapshot(
 ) -> tuple[list[str], list[str], dict[str, str], dict[str, Any], list[str]]:
     head = _head(root)
     if subject_paths is None:
-        paths = _changed(root, base)
+        paths = changed_paths(root, base)
     else:
         if (
             not subject_paths
@@ -336,7 +332,7 @@ def _check_snapshot(
         for path in paths
     ):
         raise ValueError("risk-assessment-private-path")
-    files = {path: _state_hash(root, path, base) for path in paths}
+    files = {path: _state_hash(root, path) for path in paths}
     module_checks_bytes = _read_regular(root, "harness/module-checks.yaml")
     declarations = _parse_declarations(module_checks_bytes)
     checks = declarations["checks"]

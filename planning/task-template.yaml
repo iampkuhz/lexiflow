@@ -1,207 +1,33 @@
-# Task 填写模板；占位符须替换为实际值，不能直接作为派发输入。
-# 先确定 goal/scope/acceptance，再填 execution；身份字段由真实 runner 绑定。
-# 共享规则直接读取 harness/agent-policy.manifest.yaml；新增 Task 不等于得到阶段批准。
-schema_version: "lexiflow.task.v1"
-
-
-# 稳定身份与版本；标题用结果描述，不用一组模糊动作。
-identity:
-  program_id: "LF-PRG-001"
-  workstream_id: "LF-WS-<DOMAIN>"
-  epic_id: "LF-EP-<DOMAIN>-NNN"
-  capability_id: "LF-CP-<DOMAIN>-NNN"
-  task_id: "LF-TSK-<DOMAIN>-NNNN"
-  task_version: 1
-  change_version: "1.0.0"
-  title: "<单一可验证的结果>"
-  task_source: "<已批准的 Gate、路线图项、缺陷或 discovered_from Task>"
-  discovered_from: null
-  supersedes: null
-
-
-# 分类用于计划组织；不隐式授予阶段或 Gate 权限。
-classification:
-  phase: "<明确批准的 Task 阶段>"
-  gate: null
-  milestone_slices: []
-  priority: "P0"
-  requirement_level: "MUST"
-  kind: "design"
-  lifecycle_state: "DRAFT"
-  risk_level: "medium"
-  concurrency_group: "<contract 或路径锁名称>"
-
-
-# 先说明问题、可观察结果及不做什么。
-goal:
-  problem: "<当前缺失或错误的问题>"
-  outcome: "<完成后可观察的状态>"
-  non_goals:
-    - "<明确排除的行为>"
-  assumptions:
-    - id: "ASM-001"
-      statement: "<假设>"
-      validation: "<验证方式与时间>"
-
-
-# 写入范围、禁止范围和必需上下文；窄范围路径便于并发隔离。
-scope:
-  logical_scopes:
-    - "<已在 workstreams.yaml.path_ownership 登记的范围>"
-  allowed_files:
-    - "<精确文件或窄范围 glob>"
-  forbidden_files:
-    - "<受保护或超出 owner 的路径>"
-  required_context:
-    - "docs/roadmap/master-plan.md"
-    - "planning/workstreams.yaml"
-  file_claims:
-    - path: "<精确路径或窄范围 glob>"
-      mode: "write"
-      owner: "LF-WS-<DOMAIN>"
-
-ownership:
-  primary_owner: "LF-WS-<DOMAIN>"
-  contract_owner: "LF-WS-<DOMAIN>"
-  reviewers:
-    - "<独立的 Domain、质量、安全或隐私 owner>"
-  integration_owner: "LF-WS-QLT"
-
-
-# 依赖绑定精确版本；soft 边只建议顺序，不制造额外阻断。
-dependencies:
-  depends_on:
-    - task_id: "LF-TSK-<DOMAIN>-NNNN"
-      type: "hard"
-      required_task_version: 1
-      required_change_version: "1.0.0"
-      required_result: "PASS"
-    - task_id: "LF-TSK-<DOMAIN>-NNNN"
-      type: "soft"
-      required_task_version: 1
-      required_change_version: "1.0.0"
-    - task_id: "LF-TSK-<DOMAIN>-NNNN"
-      type: "contract"
-      required_task_version: 1
-      required_change_version: "1.0.0"
-      required_result: "PASS"
-      contract_name: "<schema、API、event、Provider 或 UI contract>"
-      required_contract_version: "1.0.0"
-  allowed_types: ["hard", "soft", "contract"]
-
-produced_contracts:
-  - name: "<contract 边所消费的名称>"
-    version: "1.0.0"
-contract_producer_rule: "每条 contract 边必须唯一对应一个 producer 声明；其 name 和 version 必须与 contract_name、required_contract_version 精确匹配。"
-
-# 阶段编号或历史 Gate 批准不会隐式激活 Task。
-# 分解实际工作时，显式声明已批准的前置条件。
-phase_entry_prerequisite: null
-
-
-# 非平凡决策记录唯一结论、代价与重新评估条件。
-decision_record:
-  required: false
-  required_when:
-    - "Task 涉及重要的架构、contract、安全、数据或成本决策。"
-    - "阶段 Gate 要求记录确定的决策、trade-off 理由与重新评估条件。"
-  selected_decision: "<已确定的唯一方案>"
-  trade_off_rationale: "<接受的成本或边界及其理由>"
-  revisit_condition: "<触发新 OpenSpec 决策的可观察条件>"
-  user_confirmation_required: false
-  user_confirmation_required_when:
-    - "Task 本身是阶段 Gate。"
-    - "决策改变用户已批准的范围或产品行为。"
-
-deliverables:
-  - id: "DEL-001"
-    description: "<具体产物或行为>"
-    path_or_locator: "<路径、receipt、URL 或命令输出>"
-
-
-# 把交付物映射到可观察断言、确定性命令与证据。
-acceptance:
-  criteria:
-    - id: "LF-AC-<DOMAIN>-NNN"
-      statement: "<单一可观察断言>"
-      evidence_type: "automated_test"
-      evidence_locator: "<测试 ID、receipt key、文档章节、metric 或截图>"
-  legacy_id_policy: "已有 LF-<DOMAIN>-NNN 与 ARCH/FLOW/LEARN/SOURCE/TENANT/FAIL/OBS-NNN 保持有效且不可变。"
-  validation_commands:
-    - command: "<确定性命令>"
-      required: true
-      timeout_seconds: 600
-      expected: "退出码为 0，且所有断言均已执行。"
-  effect_checks:
-    behavior: "<预期行为检查>"
-    regression: "<受影响的回归范围>"
-    performance: "<预算或不适用原因>"
-    security_privacy: "<检查或不适用原因>"
-    data_migration: "<检查或不适用原因>"
-  skipped_semantics: "skipped、not-run、unavailable 或 excluded 均不能产生 PASS。"
-
-
-# 执行配置；共享策略以 harness/agent-policy.manifest.yaml 为唯一来源。
-execution:
-  preferred_implementer: "qoder"
-  fallback_implementer: "main-agent"
-  estimated_task_minutes: 45
-  expected_run_kinds: ["implementation", "independent_review"]
-  main_session:
-    callback_first: true
-    busy_wait_forbidden: true
-    end_turn_when_no_independent_work: true
-    fallback_first_probe_after_seconds: 300
-    fallback_min_subsequent_probe_interval_seconds: 600
-    no_llm_watchdog_allowed: true
-
-
-# caller 只提供工作包信息；runner 生成并绑定身份，不手写假身份。
-change_control:
-  dispatched_scope_is_immutable: true
-  version_rules:
-    patch: "仅澄清说明，验收和 contract 不变。"
-    minor: "兼容地增加范围或验收。"
-    major: "目标、contract、兼容性或 ownership 边界变化。"
-  contract_change_requires:
-    - "affected consumer list"
-    - "migration tasks"
-    - "compatibility window"
-    - "rollback strategy"
-  rework:
-    max_rounds_per_implementer: 2
-    preserve_task_id: true
-    increment_run_id: true
-    increment_task_version_when_scope_changes: true
-    after_exhaustion: "拆分 Task、交由 specialist/Main Agent，或向 Gate 返回 BLOCKED。"
-
-risks:
-  - id: "RSK-001"
-    description: "<失败模式>"
-    likelihood: "medium"
-    impact: "medium"
-    mitigation: "<预防措施>"
-    trigger: "<可观察信号>"
-    fallback_or_rollback: "<安全动作>"
-
-
-# 结果报告模板，不是预签发的 PASS；每项以真实执行事实填写。
-result_contract:
-  status: "<PASS, FAIL, or BLOCKED>"
-  allowed_status_values: ["PASS", "FAIL", "BLOCKED"]
-  changed_files: []
-  validation:
-    - command: "<命令>"
-      status: "PASS"
-      receipt: "<不可变结果路径>"
-  acceptance_evidence: []
-  effect_checks: []
-  risks: []
-  callback:
-    completion_record_written_first: true
-    delivery_status: "<queued, delivered, failed, or unavailable>"
-    delivery_is_acceptance: false
-  main_agent_review:
-    status: "<PASS, FAIL, or BLOCKED>"
-    reviewer: "<真实身份>"
-    receipt: "<不可变 review 路径>"
+# 将本条置于 WorkStream/Epic/Capability 的 seed_tasks；替换所有占位符。
+# owner 与 phase 继承祖先，仅真实不同的任务事实才显式覆盖。
+# ID、分解、依赖、版本、决策、身份与结果规则仅见 Harness planning_contract。
+id: LF-TSK-<DOMAIN>-NNNN
+title: <单一可验证的结果>
+priority: P1
+task_version: 1
+change_version: 1.0.0
+task_source: <已批准的 OpenSpec 或任务来源 locator>
+estimated_minutes: 45
+kind: implementation
+lifecycle_state: DRAFT
+allowed_files:
+- <精确文件或窄范围路径>
+forbidden_files:
+- secrets/**
+- .local/**
+- data/**
+- .env
+expected_output: <可观察结果、明确非目标与需验证的实际假设>
+deliverable: <具体产物或行为及定位方式>
+acceptance_criteria:
+- <单一可观察断言；效果、性能、安全、数据边界写具体事实或引用 OpenSpec>
+acceptance_evidence:
+- <测试、冻结证据或实际产物 locator；计划状态不是验收>
+validation_command: <确定性命令>
+required_check_ids:
+- <当前 Registry Check ID>
+depends_on: []
+# 真实依赖在 depends_on 声明 task_id/type/required_task_version/required_change_version。
+# hard 另需 required_result；contract 另需 contract_name/required_contract_version/required_result。
+# producer 才声明 produced_contracts 的 name/version；真实阶段前置才声明 phase_entry_prerequisite。
+# 发现或替代关系按事实填写 discovered_from/supersedes，批准决策通过 task_source 引用。

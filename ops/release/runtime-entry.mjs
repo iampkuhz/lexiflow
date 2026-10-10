@@ -94,9 +94,15 @@ async function existingSame(target, expected) {
 }
 
 export async function generateRuntimeEntry({ repoRoot, descriptor, artifactRoot, lifecycleBody }) {
-  if (![repoRoot, artifactRoot].every((item) => typeof item === 'string' && item.length && !/[\u0000\r\n]/.test(item)) || typeof lifecycleBody !== 'string' || /\u0000/.test(lifecycleBody)) fail('ARGUMENTS_INVALID');
+  if (![repoRoot, artifactRoot].every((item) => typeof item === 'string' && item.length && !/[\u0000\r\n]/.test(item)) || (lifecycleBody !== undefined && (typeof lifecycleBody !== 'string' || /\u0000/.test(lifecycleBody)))) fail('ARGUMENTS_INVALID');
   const sourceRoot = path.resolve(repoRoot);
   const first = sourceIdentity(sourceRoot);
+  if (lifecycleBody === undefined) {
+    const parts = await Promise.all(['lifecycle-state.sh', 'lifecycle-docker.sh', 'lifecycle.sh']
+      .map(name => readFile(path.join(sourceRoot, 'ops/release', name), 'utf8')));
+    lifecycleBody = parts.join('\n');
+    if (/\u0000/.test(lifecycleBody)) fail('ARGUMENTS_INVALID');
+  }
   if (descriptor?.artifacts?.some((item) => item.role === 'runtime-entry' || item.path === 'lexiflow.sh')) fail('RUNTIME_ENTRY_ALREADY_DECLARED');
   const license = descriptor?.licenses?.find((item) => item.component === 'LexiFlow');
   if (!license) fail('RUNTIME_ENTRY_LICENSE_MISSING');

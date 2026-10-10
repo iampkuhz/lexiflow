@@ -14,16 +14,17 @@ class DocumentationTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         entry = root / 'docs/roadmap/master-plan.md'
         content = entry.read_text()
-        manifest = yaml.safe_load((root / 'harness/manifest.yaml').read_text())
+        lifecycle = (root / 'docs/README.md').read_text()
+        phase = (root / 'docs/roadmap/master-plan/phase2.md').read_text()
+        self.assertIn('roadmap/master-plan.md', lifecycle)
         for name in ('phase2', 'future'):
             relative = f'docs/roadmap/master-plan/{name}.md'
             self.assertTrue((root / relative).is_file())
-            self.assertIn(relative, manifest['docs'])
             self.assertIn(f'master-plan/{name}.md', content)
         for name in ('design', 'tasks', 'status'):
             relative = f'docs/roadmap/master-plan/phase2/{name}.md'
             self.assertTrue((root / relative).is_file())
-            self.assertIn(relative, manifest['docs'])
+            self.assertIn(f'phase2/{name}.md', phase)
         for obsolete in ('foundation.md', 'foundation/experience.md', 'foundation/acceptance.md', 'status.md'):
             self.assertFalse((root / 'docs/roadmap/master-plan' / obsolete).exists())
         self.assertIn('master-plan/phase2/status.md', content)
@@ -55,9 +56,9 @@ class DocumentationTests(unittest.TestCase):
         workflow = policy['diagram_workflow']
         self.assertEqual(policy['canonical_diagram_source'], 'markdown-plantuml-fence')
         self.assertEqual(policy['local_artifact_root'], 'tmp/diagrams/')
-        self.assertEqual(workflow['draft_root'], 'tmp/diagrams/')
+        self.assertNotIn('draft_root', workflow)
         self.assertEqual(workflow['draft_source'], 'source.puml')
-        self.assertEqual(workflow['final_source'], 'markdown-plantuml-fence')
+        self.assertNotIn('final_source', workflow)
         self.assertEqual(len(workflow['required_order']), 5)
         self.assertIn('不得存放新的 PUML', workflow['docs_artifact_rule'])
         self.assertIn('/tmp/', (root / '.gitignore').read_text())
@@ -338,10 +339,10 @@ class DocumentationTests(unittest.TestCase):
         self.assertEqual(dispatch['primary'], 'native-codex')
         self.assertEqual(dispatch['fallback_model'], 'gpt-6-luna')
         self.assertEqual(dispatch['max_consecutive_failures'], 3)
-        runtime = yaml.safe_load((root / 'harness/agent-runtime.manifest.yaml').read_text())
-        self.assertNotIn('agent_dispatch', runtime)
-        self.assertNotIn('codex_dispatch', runtime)
-        self.assertIn('agent-policy.manifest.yaml', (root / 'harness/agent-runtime.manifest.yaml').read_text())
+        self.assertFalse((root / 'harness/agent-runtime.manifest.yaml').exists())
+        policy_text = (root / 'harness/agent-policy.manifest.yaml').read_text()
+        self.assertIn('Session 生命周期与 checkout 由客户端管理', policy_text)
+        self.assertIn('读写不要求统一仓库状态', policy_text)
 
     def test_policy_has_actual_acceptance_identity_boundary(self):
         root = Path(__file__).resolve().parents[2]

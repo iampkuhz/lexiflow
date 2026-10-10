@@ -122,7 +122,7 @@ export async function prepareImageBuild(input) {
   try { buildIdentity = resolveCleanBuildIdentity(repoRoot); } catch { reject('RELEASE_SOURCE_REJECTED'); }
   const source = { softwareVersion: buildIdentity.softwareVersion, sourceCommit: buildIdentity.sourceCommit };
   try {
-    if (!hasKeys(descriptor, ['schemaVersion', 'softwareVersion', 'sourceCommit', 'jar', 'baseImages'])
+    if (!hasKeys(descriptor, ['schemaVersion', 'softwareVersion', 'sourceCommit', 'jar'])
       || descriptor.schemaVersion !== 1 || descriptor.softwareVersion !== source.softwareVersion
       || descriptor.sourceCommit !== source.sourceCommit) reject('SOURCE_IDENTITY_MISMATCH');
     if (!hasKeys(descriptor.jar, ['path', 'bytes', 'sha256']) || typeof descriptor.jar.path !== 'string'
@@ -130,24 +130,10 @@ export async function prepareImageBuild(input) {
       || typeof descriptor.jar.sha256 !== 'string' || !HASH.test(descriptor.jar.sha256)) reject('JAR_INVALID');
     validateRelativePath(descriptor.jar.path);
     await verifyContainedFile(artifactRoot, descriptor.jar.path, descriptor.jar.bytes, descriptor.jar.sha256);
-    if (!Array.isArray(descriptor.baseImages) || descriptor.baseImages.length < 1 || descriptor.baseImages.length > PLATFORMS.length) reject('BASE_IMAGES_INVALID');
-    const byPlatform = new Map();
-    for (const item of descriptor.baseImages) {
-      if (!hasKeys(item, ['platform', 'javaRuntime', 'postgresRuntime']) || !PLATFORMS.includes(item.platform)
-        || byPlatform.has(item.platform) || !validRuntime(item.javaRuntime) || !validRuntime(item.postgresRuntime)) reject('BASE_IMAGES_INVALID');
-      byPlatform.set(item.platform, item);
-    }
-    const selectedPlatforms = PLATFORMS.filter((platform) => byPlatform.has(platform));
     let lock;
     try { lock = await readBaseImageLock(repoRoot); } catch { reject('BASE_IMAGES_INVALID'); }
-    const lockedBaseImages = lock.baseImages;
-    for (const platform of selectedPlatforms) {
-      const descriptorImages = byPlatform.get(platform);
-      const lockedImages = lockedBaseImages.find((item) => item.platform === platform);
-      const matches = (left, right) => left.reference === right.reference && left.imageId === right.imageId;
-      if (!matches(descriptorImages.javaRuntime, lockedImages.javaRuntime)
-        || !matches(descriptorImages.postgresRuntime, lockedImages.postgresRuntime)) reject('BASE_IMAGES_INVALID');
-    }
+    const byPlatform = new Map(lock.baseImages.map(item => [item.platform, item]));
+    const selectedPlatforms = PLATFORMS.filter(platform => byPlatform.has(platform));
     const templates = [];
     for (const relative of TEMPLATE_PATHS) {
       const tracked = (() => {

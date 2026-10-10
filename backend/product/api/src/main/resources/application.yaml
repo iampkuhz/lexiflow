@@ -11,11 +11,6 @@ spring:
   threads:
     virtual:
       enabled: true
-lexiflow:
-  segment-analysis:
-    enabled: false
-  caption-debug:
-    enabled: true
 logging:
   level:
     com.zaxxer.hikari: OFF

@@ -64,8 +64,8 @@ class RepositoryModuleBoundaryTest(unittest.TestCase):
 
     def test_repository_module_files_exist(self):
         expected = {
-            "__init__.py", "catalog.py", "planning_check.py", "planning_validator.py",
-            "task_source.py", "docs_check.py",
+            "__init__.py", "planning_check.py", "planning_validator.py",
+            "docs_check.py",
             "local_skills.py", "hooks.py",
             "quality.py",
         }
@@ -94,7 +94,7 @@ class RepositoryModuleBoundaryTest(unittest.TestCase):
             root = Path(directory)
             shutil.copytree(REPO_ROOT / "planning", root / "planning")
             (root / "harness").mkdir()
-            for name in ("agent-policy.manifest.yaml", "agent-runtime.manifest.yaml", "module-checks.yaml"):
+            for name in ("agent-policy.manifest.yaml", "module-checks.yaml"):
                 shutil.copy2(REPO_ROOT / "harness" / name, root / "harness" / name)
             catalog = root / "planning" / "workstreams.yaml"
             catalog.write_text(catalog.read_text().replace(

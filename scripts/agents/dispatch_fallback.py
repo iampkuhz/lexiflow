@@ -1,4 +1,4 @@
-"""Qoder 到 Codex 的 fail-closed 派发协调器。只记录调度事实和原生协作结果，不代替原生工具启动 agent。"""
+"""消费既有 Qoder/fallback ledger 与原生协作结果；不创建派发 attempt。"""
 
 from __future__ import annotations
 
@@ -6,10 +6,8 @@ import fcntl
 import hashlib
 import json
 import os
-import sqlite3
 import stat
 import tempfile
-import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping
@@ -42,7 +40,7 @@ def _policy(root: Path) -> dict[str, Any]:
         raise DispatchFallbackError("dispatch-policy-unavailable", str(exc)) from None
     if (
         not isinstance(value, dict)
-        or value.get("primary") not in {"qoder", "native-codex"}
+        or value.get("primary") != "native-codex"
         or not isinstance(value.get("fallback_model"), str)
         or not value["fallback_model"]
         or not isinstance(value.get("fallback_reasoning_effort"), str)
@@ -50,8 +48,6 @@ def _policy(root: Path) -> dict[str, Any]:
         or isinstance(value.get("max_consecutive_failures"), bool)
         or not isinstance(value.get("max_consecutive_failures"), int)
         or value["max_consecutive_failures"] < 1
-        or value.get("host_wait_policy")
-        != "reject-active-or-unknown-goal-without-supported-wait-adapter"
     ):
         raise DispatchFallbackError(
             "dispatch-policy-invalid",
@@ -93,66 +89,6 @@ def _safe_owned_file(path: Path) -> None:
         )
 
 
-def host_wait_snapshot(root: str | Path) -> dict[str, str]:
-    """只读当前可信 Session 的 Goal 状态；调用者不能用能力位声明自己可等待。"""
-    repo = Path(root).resolve()
-    _policy(repo)
-    try:
-        runtime = discover(repo)
-    except CodexRuntimeError as exc:
-        return {"state": "unknown", "reason": exc.code}
-    db = (
-        Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
-        / "goals_1.sqlite"
-    )
-    try:
-        _safe_owned_file(db)
-        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=0)
-        try:
-            row = con.execute(
-                "SELECT status FROM thread_goals WHERE thread_id = ?",
-                (runtime.context["parent_session_id"],),
-            ).fetchone()
-        finally:
-            con.close()
-    except (OSError, sqlite3.Error, DispatchFallbackError):
-        return {"state": "unknown", "reason": "goal-state-unavailable"}
-    if row is None:
-        return {"state": "inactive", "reason": "no-goal"}
-    status = row[0]
-    if status == "active":
-        return {"state": "active", "reason": "active-goal"}
-    if isinstance(status, str) and status in {
-        "paused",
-        "blocked",
-        "usage_limited",
-        "budget_limited",
-        "complete",
-    }:
-        return {"state": "inactive", "reason": "nonactive-goal"}
-    return {"state": "unknown", "reason": "goal-state-invalid"}
-
-
-def host_wait_decision(root: str | Path) -> dict[str, Any] | None:
-    """根据当前宿主等待能力和 Goal 状态决定是否允许派发。"""
-    repo = Path(root).resolve()
-    policy = _policy(repo)
-    snapshot = host_wait_snapshot(repo)
-    if snapshot["state"] == "inactive":
-        return None
-    return {
-        "status": "BLOCKED",
-        "code": "HOST_WAIT_UNSUPPORTED",
-        "qoder": "not-started",
-        "next_action": "fallback-to-codex-terra",
-        "host_goal": snapshot,
-        "fallback": {
-            "model": policy["fallback_model"],
-            "reasoning_effort": policy["fallback_reasoning_effort"],
-        },
-    }
-
-
 def _identity(root: Path, task: Mapping[str, Any]) -> tuple[dict[str, Any], str]:
     try:
         runtime = discover(root)
@@ -179,30 +115,8 @@ def _identity(root: Path, task: Mapping[str, Any]) -> tuple[dict[str, Any], str]
     return identity, hashlib.sha256(encoded).hexdigest()
 
 
-def _root(root: Path, key: str) -> Path:
-    path = root
-    for part in ("tmp", "quality", "agent-dispatch", key):
-        path = path / part
-        if path.exists():
-            mode = path.lstat().st_mode
-            if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
-                raise DispatchFallbackError(
-                    "dispatch-state-unsafe", "dispatch state directory is unsafe"
-                )
-        else:
-            try:
-                path.mkdir(mode=0o700)
-            except FileExistsError:
-                mode = path.lstat().st_mode
-                if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
-                    raise DispatchFallbackError(
-                        "dispatch-state-unsafe", "dispatch state directory is unsafe"
-                    ) from None
-    return path
-
-
-def _existing_root(root: Path, key: str) -> Path | None:
-    """仅预检已有 ledger 的位置，不分配目录或锁。"""
+def _existing_root(root: Path, key: str) -> Path:
+    """定位既有 ledger，不创建目录，缺失时失败关闭。"""
     path = root
     for part in ("tmp", "quality", "agent-dispatch", key):
         path = path / part
@@ -211,7 +125,9 @@ def _existing_root(root: Path, key: str) -> Path | None:
                 raise DispatchFallbackError(
                     "dispatch-state-unsafe", "dispatch state directory is unsafe"
                 )
-            return None
+            raise DispatchFallbackError(
+                "dispatch-state-unavailable", "historical ledger is missing"
+            )
         mode = path.lstat().st_mode
         if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
             raise DispatchFallbackError(
@@ -242,13 +158,9 @@ def _read(path: Path, identity: dict[str, Any]) -> dict[str, Any]:
             "dispatch-state-unsafe", "state file is not a regular file"
         )
     if not path.exists():
-        return {
-            "schema_version": _SCHEMA,
-            "identity": identity,
-            "consecutive_failures": 0,
-            "history": [],
-            "attempts": {},
-        }
+        raise DispatchFallbackError(
+            "dispatch-state-unavailable", "historical state is missing"
+        )
     try:
         value = _json_value(path.read_text(encoding="utf-8"), "dispatch state")
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -312,82 +224,13 @@ def _write(path: Path, state: dict[str, Any]) -> None:
             os.unlink(temp)
 
 
-def ledger_decision(root: str | Path, task: Mapping[str, Any]) -> dict[str, Any] | None:
-    """只读 pending 与 stop 协调状态，不创建 ledger 文件。"""
-    repo = Path(root).resolve()
-    policy = _policy(repo)
-    identity, key = _identity(repo, task)
-    directory = _existing_root(repo, key)
-    if directory is None:
-        return None
-    state = _read(directory / "state.json", identity)
-    if state["consecutive_failures"] >= policy["max_consecutive_failures"]:
-        return {
-            "status": "BLOCKED",
-            "code": "DISPATCH_STOPPED",
-            "next_action": "stop-package-dispatch",
-            "consecutive_failures": state["consecutive_failures"],
-        }
-    for attempt_id, attempt in state["attempts"].items():
-        if attempt["qoder"].get("status") == "pending" or attempt.get("terra", {}).get(
-            "status"
-        ) in {"required", "pending", "dispatched"}:
-            return {
-                "status": "BLOCKED",
-                "code": "DISPATCH_PENDING",
-                "next_action": "do-not-redispatch",
-                "attempt_id": attempt_id,
-            }
-    return None
-
-
-def begin_qoder_attempt(
-    root: str | Path, task: Mapping[str, Any], attempt_id: str
-) -> None:
-    """记录一次正式 Qoder start/resume；若同一身份已停止或待决，拒绝重复派发。"""
-    repo = Path(root).resolve()
-    policy = _policy(repo)
-    identity, key = _identity(repo, task)
-    if not isinstance(attempt_id, str) or not attempt_id:
-        raise DispatchFallbackError(
-            "dispatch-attempt-invalid", "attempt_id is required"
-        )
-    directory = _root(repo, key)
-    path = directory / "state.json"
-    with _locked(directory):
-        state = _read(path, identity)
-        if state["consecutive_failures"] >= policy["max_consecutive_failures"]:
-            raise DispatchFallbackError(
-                "dispatch-stopped", "three consecutive paired failures already recorded"
-            )
-        old = state["attempts"].get(attempt_id)
-        if old is not None:
-            if old.get("qoder", {}).get("status") == "pending":
-                return
-            raise DispatchFallbackError(
-                "dispatch-replay-conflict", "attempt already transitioned"
-            )
-        for previous in state["attempts"].values():
-            if previous.get("qoder", {}).get("status") == "pending" or previous.get(
-                "terra", {}
-            ).get("status") in {"required", "pending", "dispatched"}:
-                raise DispatchFallbackError(
-                    "dispatch-pending", "an earlier pair is awaiting a verified outcome"
-                )
-        state["attempts"][attempt_id] = {
-            "qoder": {"status": "pending"},
-            "created_at": time.time(),
-        }
-        _write(path, state)
-
-
 def mark_qoder_started(
     root: str | Path, task: Mapping[str, Any], attempt_id: str
 ) -> None:
     """记录真实 qodercli Popen。它是派发成功证据，不是任务验收。"""
     repo = Path(root).resolve()
     identity, key = _task_identity(repo, task)
-    directory = _root(repo, key)
+    directory = _existing_root(repo, key)
     path = directory / "state.json"
     with _locked(directory):
         state = _read(path, identity)
@@ -435,7 +278,7 @@ def mark_qoder_unavailable(
     repo = Path(root).resolve()
     policy = _policy(repo)
     identity, key = _task_identity(repo, task)
-    directory = _root(repo, key)
+    directory = _existing_root(repo, key)
     path = directory / "state.json"
     with _locked(directory):
         state = _read(path, identity)
@@ -453,117 +296,6 @@ def mark_qoder_unavailable(
             {"attempt_id": attempt_id, "event": "qoder-unavailable", "reason": reason}
         )
         _write(path, state)
-    return {
-        "status": "BLOCKED",
-        "code": "TERRA_REQUIRED",
-        "attempt_id": attempt_id,
-        "next_action": "spawn-codex-subagent",
-        "fallback": {
-            "model": policy["fallback_model"],
-            "reasoning_effort": policy["fallback_reasoning_effort"],
-        },
-        "work_package_id": task["work_package_id"],
-        "task_ids": task["task_ids"],
-    }
-
-
-def begin_terra_fallback(
-    root: str | Path, task: Mapping[str, Any], attempt_id: str, reason: str
-) -> dict[str, Any]:
-    """记录 Qoder 不可用的同一尝试，并生成原生 Codex fallback 请求。"""
-    repo = Path(root).resolve()
-    policy = _policy(repo)
-    identity, key = _identity(repo, task)
-    if (
-        not isinstance(attempt_id, str)
-        or not attempt_id
-        or not isinstance(reason, str)
-        or not reason
-    ):
-        raise DispatchFallbackError(
-            "dispatch-attempt-invalid", "attempt_id and reason are required"
-        )
-    directory = _root(repo, key)
-    path = directory / "state.json"
-    with _locked(directory):
-        state = _read(path, identity)
-        if state["consecutive_failures"] >= policy["max_consecutive_failures"]:
-            return {
-                "status": "BLOCKED",
-                "code": "DISPATCH_STOPPED",
-                "attempt_id": attempt_id,
-                "next_action": "stop-package-dispatch",
-                "consecutive_failures": state["consecutive_failures"],
-            }
-        attempt = state["attempts"].get(attempt_id)
-        if attempt is None:
-            for previous in state["attempts"].values():
-                if previous.get("qoder", {}).get("status") == "pending" or previous.get(
-                    "terra", {}
-                ).get("status") in {"required", "pending", "dispatched"}:
-                    raise DispatchFallbackError(
-                        "dispatch-pending",
-                        "an earlier pair is awaiting a verified outcome",
-                    )
-        if attempt is None:
-            attempt = {
-                "qoder": {"status": "unavailable", "reason": reason},
-                "terra": {"status": "required"},
-                "created_at": time.time(),
-            }
-            state["attempts"][attempt_id] = attempt
-            state["history"].append(
-                {
-                    "attempt_id": attempt_id,
-                    "event": "qoder-unavailable",
-                    "reason": reason,
-                }
-            )
-            _write(path, state)
-        elif attempt.get("qoder", {}).get("status") == "pending":
-            attempt["qoder"] = {"status": "unavailable", "reason": reason}
-            attempt["terra"] = {"status": "required"}
-            state["history"].append(
-                {
-                    "attempt_id": attempt_id,
-                    "event": "qoder-unavailable",
-                    "reason": reason,
-                }
-            )
-            _write(path, state)
-        elif attempt.get("qoder", {}).get("status") != "unavailable":
-            raise DispatchFallbackError(
-                "dispatch-replay-conflict",
-                "attempt already has a different Qoder state",
-            )
-        terra = attempt.get("terra", {})
-        if terra.get("status") == "dispatched":
-            return {
-                "status": "PASS",
-                "code": "TERRA_ALREADY_DISPATCHED",
-                "attempt_id": attempt_id,
-                "native_call_id": terra.get("call_id"),
-                "task_name": terra.get("task_name"),
-            }
-        if terra.get("status") == "unavailable":
-            return {
-                "status": "BLOCKED",
-                "code": "BOTH_DISPATCH_UNAVAILABLE",
-                "attempt_id": attempt_id,
-                "consecutive_failures": state["consecutive_failures"],
-            }
-        if terra.get("status") == "pending":
-            return {
-                "status": "BLOCKED",
-                "code": "TERRA_RESULT_UNKNOWN",
-                "attempt_id": attempt_id,
-                "next_action": "do-not-redispatch",
-            }
-        if terra.get("status") == "completed":
-            raise DispatchFallbackError(
-                "dispatch-replay-conflict",
-                "completed Terra attempt needs a new attempt id",
-            )
     return {
         "status": "BLOCKED",
         "code": "TERRA_REQUIRED",
@@ -758,7 +490,7 @@ def record_terra_fallback(
                 "native-tool-call-unavailable",
                 "native spawn/list call is not in this parent rollout",
             )
-        directory = _root(repo, key)
+        directory = _existing_root(repo, key)
         path = directory / "state.json"
         with _locked(directory):
             state = _read(path, identity)
@@ -788,7 +520,7 @@ def record_terra_fallback(
             "native-tool-call-invalid",
             "native call does not bind this package and attempt",
         )
-    directory = _root(repo, key)
+    directory = _existing_root(repo, key)
     path = directory / "state.json"
     with _locked(directory):
         state = _read(path, identity)

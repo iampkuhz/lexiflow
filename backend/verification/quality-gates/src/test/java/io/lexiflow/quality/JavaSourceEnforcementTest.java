@@ -48,7 +48,7 @@ class JavaSourceEnforcementTest {
       }
     }
     var all = JavaSourceDiscovery.discover(directory);
-    var context = new JavaSourceContext(all, ParsedJavaSources.parse(directory, all));
+    var context = new JavaSourceContext(all, ParsedJavaSources.parse(all));
     assertEquals(values.size() * 2, new NoPmdSuppressionsGate().evaluate(context).size());
   }
 
@@ -65,7 +65,7 @@ class JavaSourceEnforcementTest {
         }
         """);
     var all = JavaSourceDiscovery.discover(directory);
-    var context = new JavaSourceContext(all, ParsedJavaSources.parse(directory, all));
+    var context = new JavaSourceContext(all, ParsedJavaSources.parse(all));
     var violations = new NoPmdSuppressionsGate().evaluate(context);
     assertEquals(1, violations.size());
     assertEquals("NOPMD", violations.getFirst().attributes().get("pmdRule"));

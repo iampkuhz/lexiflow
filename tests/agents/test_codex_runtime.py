@@ -1,3 +1,5 @@
+"""校验可信 Codex 身份、原生来源及拒绝调用者注入。"""
+
 from __future__ import annotations
 
 import json
@@ -14,7 +16,7 @@ from scripts.agents.local_codex_runtime import discover, verify_proof
 
 class CodexRuntimeBindingTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.caller = {"goal": "fixture", "parent_client": "codex"}
+        self.caller = {"goal": "fixture"}
         self.host = {
             "parent_session_id": str(uuid.uuid4()),
             "agent_id": "runtime_fixture",
@@ -43,6 +45,26 @@ class CodexRuntimeBindingTest(unittest.TestCase):
         caller = {**self.caller, "agent_id": "forged"}
         with self.assertRaisesRegex(CodexRuntimeError, "caller-identity-injection"):
             CodexRuntimeBinding.create(caller, self.host, self.run_id)
+
+    def test_all_caller_identity_fields_are_rejected_including_parent_route(self):
+        for field in (*self.host, "run_id"):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(
+                    CodexRuntimeError, "caller-identity-injection"
+                ):
+                    CodexRuntimeBinding.create(
+                        {**self.caller, field: "codex"}, self.host, self.run_id
+                    )
+
+    def test_trusted_host_route_is_still_required(self):
+        for field in ("client", "parent_client"):
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(
+                    CodexRuntimeError, "host must be Codex routed"
+                ):
+                    CodexRuntimeBinding.create(
+                        self.caller, {**self.host, field: "qoder"}, self.run_id
+                    )
 
 
 class NativeCodexRuntimeTest(unittest.TestCase):
@@ -104,7 +126,7 @@ class NativeCodexRuntimeTest(unittest.TestCase):
 
     def test_shared_host_native_subagent_resolves_and_proof_survives_log_growth(self):
         runtime = discover(self.root)
-        binding = runtime.bind({"parent_client": "codex"}, str(uuid.uuid4()))
+        binding = runtime.bind({}, str(uuid.uuid4()))
         one = binding.persist_immutable(self.root)
         self.assertEqual(binding.persist_immutable(self.root), one)
         changed = dict(binding.identity)

@@ -36,7 +36,7 @@ async function fixture() {
         javaRuntime: { reference: `registry.example.invalid/java@${digest(i ? 'c' : 'a')}`, imageId: digest(i ? 'c' : 'a') },
         postgresRuntime: { reference: `registry.example.invalid/postgres@${digest(i ? 'd' : 'b')}`, imageId: digest(i ? 'd' : 'b') } }));
     await writeFile(path.join(root, 'ops/docker/base-images.json'), `${JSON.stringify({ schemaVersion: 1, baseImages }, null, 2)}\n`);
-    for (const n of ['version.mjs', 'manifest.mjs', 'runtime-entry.mjs', 'runtime-verification.sh', 'lifecycle.mjs', 'lifecycle-state.sh', 'lifecycle-docker.sh', 'lifecycle.sh'])
+    for (const n of ['version.mjs', 'manifest.mjs', 'runtime-entry.mjs', 'runtime-verification.sh', 'lifecycle-state.sh', 'lifecycle-docker.sh', 'lifecycle.sh'])
         await writeFile(path.join(root, 'ops/release', n), await readFile(path.join(repo, 'ops/release', n)));
     await writeFile(path.join(root, 'ops/release/version.txt'), '2.0.0\n');
     await writeFile(path.join(root, '.gitignore'), '/artifact/\n');
@@ -47,7 +47,7 @@ async function fixture() {
     const commit = git(root, ['rev-parse', 'HEAD']).toString().trim();
     const jar = jarBytes(resolveBuildIdentity(root));
     await writeFile(path.join(artifactRoot, 'app.jar'), jar);
-    const descriptor = { schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit: commit, jar: { path: 'app.jar', bytes: jar.length, sha256: sha(jar) }, baseImages };
+    const descriptor = { schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit: commit, jar: { path: 'app.jar', bytes: jar.length, sha256: sha(jar) } };
     const out = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-pipeline-out-')));
     const fake = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-pipeline-docker-')));
     const bin = path.join(fake, 'bin');
@@ -110,7 +110,7 @@ test('CLI images 输出实际交接 assemble 并保留匹配候选目录', async
         }
         const add = (role, p, data, more = {}) => { artifacts.push({ role, path: p, bytes: data.length, sha256: sha(data), licenseIds: ['lexiflow'], ...more }); return writeFile(path.join(f.artifactRoot, p), data); };
         for (const x of records) {
-            artifacts.push({ ...x, licenseIds: x.role === 'api-image' ? ['lexiflow', 'api'] : ['pg'] });
+            artifacts.push({ role: x.role, platform: x.platform, licenseIds: x.role === 'api-image' ? ['lexiflow', 'api'] : ['pg'] });
             await mkdir(path.dirname(path.join(f.artifactRoot, x.path)), { recursive: true });
             await writeFile(path.join(f.artifactRoot, x.path), await readFile(path.join(x.platform === 'linux/arm64' ? armDir : imageDir, x.path)));
         }

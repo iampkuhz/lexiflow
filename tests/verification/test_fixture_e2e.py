@@ -215,7 +215,7 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
             catalog["workstreams"] = "invalid-topology"
             catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False))
             (root / "harness").mkdir()
-            for name in ("agent-policy.manifest.yaml", "agent-runtime.manifest.yaml"):
+            for name in ("agent-policy.manifest.yaml",):
                 shutil.copy2(repository / "harness" / name, root / "harness" / name)
             marker = root / "product-ran"
             _write_declarations(
@@ -237,7 +237,6 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
                         "input_paths": [
                             "planning",
                             "harness/agent-policy.manifest.yaml",
-                            "harness/agent-runtime.manifest.yaml",
                         ],
                     },
                     {
@@ -274,7 +273,7 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
             catalog["workstreams"] = "invalid-topology"
             catalog_path.write_text(yaml.safe_dump(catalog, sort_keys=False))
             (root / "harness").mkdir()
-            for name in ("agent-policy.manifest.yaml", "agent-runtime.manifest.yaml"):
+            for name in ("agent-policy.manifest.yaml",):
                 shutil.copy2(repository / "harness" / name, root / "harness" / name)
             _write_declarations(
                 root,
@@ -295,7 +294,6 @@ class TestFixtureRepositoryVerify(unittest.TestCase):
                         "input_paths": [
                             "planning",
                             "harness/agent-policy.manifest.yaml",
-                            "harness/agent-runtime.manifest.yaml",
                         ],
                     },
                     {

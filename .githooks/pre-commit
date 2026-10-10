@@ -1,4 +1,4 @@
 #!/bin/sh
-# 只提醒，不控制编辑或 commit；变更准备好后由调用者显式运行两种 Verify。
-printf '%s\n' 'LexiFlow 提醒：交接前运行 python3 scripts/check_changes.py 和 python3 scripts/check_repository.py。' >&2
+# 只提醒日常自检，不执行检查或控制 commit。
+printf '%s\n' 'LexiFlow 提醒：交接前运行 python3 -m scripts.verification.development。' >&2
 exit 0

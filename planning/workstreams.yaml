@@ -1,4 +1,4 @@
-# WorkStream Catalog：先读分解/依赖规则，再按 path_ownership 查 owner，最后定位 Task。
+# WorkStream Catalog：固定规则见 harness/agent-policy.manifest.yaml 的 planning_contract。
 # scope ownership 不是阶段授权；seed_tasks 的状态与实际 evidence 分开判断。
 schema_version: lexiflow.workstreams.v1
 program:
@@ -9,30 +9,6 @@ program:
   source_roadmap: docs/roadmap/master-plan.md
   phase_definition: P1 为 foundation 基础体验；P2 为提示处理主线、功能分层与 macOS 调试/Docker 发布闭环。任务草案不代表验收通过，启动与集成约束见 docs/roadmap/master-plan/phase2/tasks.md；后续事项不预分期。
 
-# ID 表达稳定身份；版本与 lifecycle state 表达变化。
-id_policy:
-  program: LF-PRG-NNN
-  workstream: LF-WS-{DOMAIN}
-  epic: LF-EP-{DOMAIN}-NNN
-  capability: LF-CP-{DOMAIN}-NNN
-  task: LF-TSK-{DOMAIN}-NNNN
-  run_uuid: UUID
-  run_display_alias: '{task_id}-RNNN'
-  acceptance_case: LF-AC-{DOMAIN}-NNN
-  acceptance_case_aliases:
-  - LF-{DOMAIN}-NNN
-  - ARCH-NNN
-  - FLOW-NNN
-  - LEARN-NNN
-  - SOURCE-NNN
-  - FAIL-NNN
-  - OBS-NNN
-  immutable_rules:
-  - "已分配的 ID 不得复用或重新定义。"
-  - "阶段、优先级、milestone 与 lifecycle state 可变，ID 保持不变。"
-  - "已移除的 Task ID 不得分配给新的产品结果；来源历史保留 provenance。"
-
-# Domain code 的中文解释；code 本身不可翻译或重新分配。
 domain_codes:
   ARCH: "架构与决策"
   QLT: "Agent Harness、Quality Gate 与验收证据"
@@ -50,151 +26,7 @@ domain_codes:
   OPS: "构建、部署、发布、备份与运维"
   ADP: "后续 Content Adapter"
 
-# 优先级解释，不代替正式 dependency 或阶段批准。
-priority_policy:
-  P0: "当前 Gate 或 milestone 的必需项，涉及事实、核心链路、安全或数据完整性。"
-  P1: "重要的质量、性能、可运维性或主要体验。"
-  P2: "有明确 fallback 的实用改进。"
-  P3: "探索或后续扩展，仅在证据触发时展开。"
-requirement_levels:
-  MUST: "所述能力必须满足。"
-  SHOULD: "默认应满足，除非明确接受相关 trade-off。"
-  CAN_EVOLVE: "延后到证据足以支持实施时。"
-
-# 计划状态与结果状态分离；只有执行证据能证明 PASS。
-lifecycle:
-  planning_states:
-  - DRAFT
-  - READY
-  - DISPATCHED
-  - IN_PROGRESS
-  - REVIEW
-  - DONE
-  - BLOCKED
-  - SUPERSEDED
-  - CANCELLED
-  result_states:
-  - PASS
-  - FAIL
-  - BLOCKED
-  non_pass_conditions:
-  - skipped
-  - not-run
-  - unavailable
-  - excluded
-  - callback-only
-  - agent-exit-zero-without-review
-  aggregation_order:
-  - FAIL
-  - BLOCKED
-  - PASS
-
-# 拆分标准针对 Catalog Task，不针对 Agent Session 数量。
-decomposition_policy:
-  applies_to: catalog-task-not-agent-session
-  target_implementation_run_minutes:
-    min: 20
-    max: 90
-  target_acceptance_assertions:
-    min: 1
-    max: 5
-  target_major_production_files_per_task:
-    max: 8
-  split_when:
-  - "变更跨越多个 Bounded Context。"
-  - "需要多个主要文件 owner。"
-  - "Provider contract 与两个以上 consumer 同时变化。"
-  - "需要各自独立的 validation 环境。"
-  - "单次 implementation run 预计超过 90 分钟。"
-  - "新发现的结果可以独立验收。"
-  keep_together:
-  - "实现与其直接测试。"
-  - "共享 owner、file claim、风险和验收结果的小型连续工作。"
-  discovery_rule: "新的独立范围分配新 Task ID 和 discovered_from 边；不得静默扩大已派发 Task 的范围。"
-
-# dependency 边明确绑定 Task/change/contract 版本，避免口头前置关系。
-dependency_edge_schema:
-  allowed_types:
-  - hard
-  - soft
-  - contract
-  common_required_fields:
-  - task_id
-  - type
-  - required_task_version
-  - required_change_version
-  hard_required_fields:
-  - required_result
-  soft_semantics: "仅建议先后顺序，不阻断 READY。"
-  contract_required_fields:
-  - contract_name
-  - required_contract_version
-  - required_result
-  contract_producer_required_fields:
-  - produced_contracts
-  produced_contract_schema:
-    required_fields:
-    - name
-    - version
-    uniqueness: "Producer Task 对每个 contract name 只声明一次；name 和 version 必须与所有 consumer 边精确一致。"
-  version_rules:
-    required_task_version: "精确匹配 Producer Task 的正整数版本。"
-    required_change_version: "精确匹配 Producer change 的 SemVer。"
-    required_contract_version: "contract 边精确匹配所消费 contract 的 SemVer。"
-dependency_policy:
-  graph: DAG
-  allowed_edges:
-  - hard
-  - soft
-  - contract
-  - discovered_from
-  - supersedes
-  hard_dependency_requires: PASS
-  contract_dependency_requires_exact_version: true
-  phase_number_is_not_an_implicit_dependency: true
-  public_contract_changes_are_serialized: true
-  integration_depends_on_all_contributors: true
-
-# Agent 调度、身份与交接规则直接读取 harness/agent-policy.manifest.yaml。
-
-# 范围变化需更新版本，不静默扩大已派发任务。
-change_control:
-  task_id_is_stable: true
-  dispatched_scope_is_immutable: true
-  task_version: "已派发范围或验收发生变化时递增。"
-  change_version:
-    patch: "仅澄清说明，不改变验收或 contract。"
-    minor: "兼容地增加范围、证据或验收。"
-    major: "目标、owner 边界、contract 或兼容性变化。"
-  max_rework_rounds_per_implementer: 1
-  exhausted_rework_actions:
-  - split-task
-  - transfer-owner
-  - main-agent-takeover
-  - return-BLOCKED-to-gate
-  contract_change_requires:
-  - consumer inventory
-  - migration tasks
-  - compatibility window
-  - rollback strategy
-
-# 证据绑定身份、输入和结果，不能用完成通知替代 receipt。
-evidence_policy:
-  immutable_run_directory: tmp/quality/runs/{run_uuid}/
-  latest_pointer_is_not_evidence: true
-  required:
-  - "精确的 Task ID、Task version、change version、agent/client 与 parent Session。"
-  - "输入 snapshot，以及 changed-file 与 file claim 的一致性核对。"
-  - "Validation 命令、退出码、日志及类型化结果。"
-  - "验收用例映射与 effect checks。"
-  - "风险、fallback、rollback 与剩余限制。"
-  - "Main Agent 的独立 review receipt。"
-  pass_requires_all_required_validation: true
-
-# 最具体的路径范围决定 owner；跨 owner 修改先对齐公开 contract。
 path_ownership:
-  # 此值被 planning_check 按英文前缀匹配；中文含义见本节注释，不翻译机器值。
-  resolution: Most-specific logical scope wins; path ownership is independent of product stage approval.
   scopes:
   - scope: governance.roadmap
     owner: LF-WS-ARCH
@@ -219,7 +51,6 @@ path_ownership:
     - tests/__init__.py
     - scripts/check_changes.py
     - scripts/check_repository.py
-    - scripts/architecture-review.md
     - docs/system/experience.md
   - scope: product.experience
     owner: LF-WS-PRD
@@ -379,8 +210,6 @@ path_ownership:
     owner: LF-WS-QLT
     proposed_paths:
     - requirements-dev.txt
-  current_path_claims_are_enforced: true
-  path_field: proposed_paths
 
 # 按领域阅读使命 → Epic → Capability → Task；不要按目录顺序当作执行链。
 workstreams:
@@ -399,12 +228,10 @@ workstreams:
       - id: LF-TSK-ARCH-2001
         title: 核对用户启动通知、收尾证据与最新主干起点
         priority: P0
-        phase: P2
         task_version: 3
         change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 30
-        owner: LF-WS-ARCH
         kind: design
         lifecycle_state: DRAFT
         allowed_files:
@@ -427,9 +254,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-QLT-2003
-        - LF-TSK-QLT-2005
         depends_on:
         - task_id: LF-TSK-QLT-2003
           type: hard
@@ -445,12 +269,10 @@ workstreams:
       - id: LF-TSK-ARCH-2002
         title: 冻结词段分类、预处理资格及排序规则表
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 75
-        owner: LF-WS-ARCH
         kind: design
         lifecycle_state: DRAFT
         allowed_files:
@@ -473,8 +295,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-ARCH-2001
         depends_on:
         - task_id: LF-TSK-ARCH-2001
           type: hard
@@ -485,12 +305,10 @@ workstreams:
       - id: LF-TSK-ARCH-2003
         title: 冻结预处理、启动、同步主线与跨模块接口
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-ARCH
         kind: design
         lifecycle_state: DRAFT
         allowed_files:
@@ -514,8 +332,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-ARCH-2002
         depends_on:
         - task_id: LF-TSK-ARCH-2002
           type: hard
@@ -526,12 +342,10 @@ workstreams:
       - id: LF-TSK-ARCH-2004
         title: 按冻结主线形成架构和执行时序图
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
-        owner: LF-WS-ARCH
         kind: design
         lifecycle_state: DRAFT
         allowed_files:
@@ -553,9 +367,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-ARCH-2003
-        - LF-TSK-OBS-2001
         depends_on:
         - task_id: LF-TSK-ARCH-2003
           type: hard
@@ -571,12 +382,10 @@ workstreams:
       - id: LF-TSK-ARCH-2005
         title: 同步最终功能文档并核对阶段交付证据
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
-        owner: LF-WS-ARCH
         kind: design
         lifecycle_state: DRAFT
         allowed_files:
@@ -602,10 +411,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-QLT-2002
-        - LF-TSK-QLT-2001
-        - LF-TSK-ARCH-2004
         depends_on:
         - task_id: LF-TSK-QLT-2002
           type: hard
@@ -626,12 +431,10 @@ workstreams:
       - id: LF-TSK-ARCH-2006
         title: 冻结双运行形式、发布身份和使用闭环合同
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 60
-        owner: LF-WS-ARCH
         kind: design
         lifecycle_state: DRAFT
         allowed_files:
@@ -654,8 +457,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-ARCH-2003
         depends_on:
         - task_id: LF-TSK-ARCH-2003
           type: hard
@@ -666,12 +467,10 @@ workstreams:
       - id: LF-TSK-ARCH-2007
         title: 编写双运行入口和用户安装更新指南
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 60
-        owner: LF-WS-ARCH
         kind: design
         lifecycle_state: READY
         allowed_files:
@@ -696,9 +495,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-QLT-2004
-        - LF-TSK-OPS-2008
         depends_on:
         - task_id: LF-TSK-QLT-2004
           type: hard
@@ -707,8 +503,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-OPS-2008
           type: hard
-          required_task_version: 3
-          required_change_version: 3.0.0
+          required_task_version: 4
+          required_change_version: 3.1.0
           required_result: PASS
         deliverable: 编写双运行入口和用户安装更新指南及直接验收证据。
 - id: LF-WS-QLT
@@ -726,18 +522,15 @@ workstreams:
       - id: LF-TSK-QLT-2101
         title: 统一调度、自检与可信身份合同
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - AGENTS.md
         - harness/agent-policy.manifest.yaml
-        - harness/agent-runtime.manifest.yaml
         - harness/README.md
         - scripts/agents/**
         - tests/agents/**
@@ -766,22 +559,19 @@ workstreams:
         - eng.delivery-gate.module-tests
         - eng.repository.policy
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 策略、投影、消费者一致；开发自检不能签发独立验收。；真实来源和三态错误贯通，伪造与缺失证据分别拒绝；不以调用者声明替代运行身份。
       - id: LF-TSK-QLT-2102
         title: 聚合文档诊断并复用解析
         priority: P0
-        phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 45
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
-        - ops/release/manifest-check.mjs
+        - ops/release/check.mjs
         - ops/docker/tests/module_check_adapter.py
         - ops/release/tests/manifest.test.mjs
         - extension/tests/popup.test.mjs
@@ -827,18 +617,15 @@ workstreams:
         - eng.backend.delivery
         - eng.repository.policy
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 完整列出职责、参数含义和范围缺项；格式规范不删除。；孤立短语不误报嵌入词语；同次 Markdown 解析计数下降。
       - id: LF-TSK-QLT-2103
         title: 统一有界执行与失效早停
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -870,18 +657,15 @@ workstreams:
         - eng.verification.module-tests
         - eng.repository.policy
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: delivery 失败早停、diagnostic 收集独立问题且不冒充完整交付。；共用冻结、预算、取消、进程归属和安全报告出版；漂移后昂贵检查不执行。
       - id: LF-TSK-QLT-2104
         title: 按实际风险分层并协调验证窗口
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -914,18 +698,15 @@ workstreams:
         - eng.delivery-gate.module-tests
         - eng.repository.policy
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 按真实 diff 与闭包区分机械、局部、高风险和发行；缺数据不降级。；局部完成不依赖正式发行，高风险独立性保留；共享 checkout 全仓串行窗口仍识别漂移。
       - id: LF-TSK-QLT-2105
         title: 在同次验收事务内复用等价执行
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -961,18 +742,15 @@ workstreams:
         - eng.delivery-gate.module-tests
         - eng.repository.policy
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 复用现有 alias，绑定完整输入、环境、配置、执行者和副作用；不接受永久缓存。；不同视图保留完整覆盖证明，自检不能替代独立验证，前后新鲜度检查不删除。
       - id: LF-TSK-QLT-2106
         title: 合并同次证据核验及依赖访问
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -996,18 +774,15 @@ workstreams:
         - eng.delivery-gate.module-tests
         - eng.repository.policy
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 索引和节点结果仅同次求值复用，减少重复身份、附件和DAG访问。；保留多候选、hash、版本、循环、漂移和发布前重核；先后计数有可重复证据。
       - id: LF-TSK-QLT-2107
         title: 分离 Gradle 合格判定与浏览报告
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1034,18 +809,15 @@ workstreams:
         - eng.backend.delivery
         - eng.repository.policy
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 逐项核实 Javadoc、JaCoCo、HTML 的实际消费者，无消费者浏览产物按需生成。；DocLint、文档完整性、静态分析和测试覆盖判定保留并直接回归。
       - id: LF-TSK-QLT-2108
         title: 核实历史基线与组合收益
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1072,18 +844,15 @@ workstreams:
         - eng.repository.docs
         - eng.repository.policy
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 分别记录派发、验证轮次、命令时间、关键路径墙钟、访问计数和可获得token；未知不猜测。；十四项逐条追溯，组合不累加并行时间或重复收益；独立复核不由放宽后的门禁自证。
       - id: LF-TSK-QLT-2109
         title: 合并文档真源与生命周期入口并同步引用
         priority: P0
-        phase: P2
         task_version: 3
         change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1100,7 +869,6 @@ workstreams:
         - tests/repository/test_documentation_governance.py
         - tests/repository/test_planning_check.py
         - scripts/agents/README.md
-        - scripts/architecture-review.md
         - ops/release/third-party-notices.md
         - harness/agent-policy.manifest.yaml
         - harness/module-checks.yaml
@@ -1130,18 +898,15 @@ workstreams:
         - eng.repository.planning
         - eng.repository.policy
         - eng.repository.module-tests
-        dependencies: []
         depends_on: []
         deliverable: 合并重复文档入口，以生命周期连接系统主题、任务场景和查阅索引；同步 Harness 原则、Catalog、路径引用及直接测试，保留必要合同与行为边界。
       - id: LF-TSK-QLT-2110
         title: 批量构造来源身份临时索引以降低门禁测试开销
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1168,18 +933,15 @@ workstreams:
         required_check_ids:
         - eng.verification.module-tests
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 来源身份计算的常数次 Git 调用、等价与隔离回归，以及保持覆盖的开发检查性能证据。
       - id: LF-TSK-QLT-2111
         title: 复用相同 YAML 字节的纯解析以降低门禁开销
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 45
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1211,18 +973,15 @@ workstreams:
         - eng.verification.module-tests
         - eng.delivery-gate.module-tests
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 有界纯解析复用及隔离回归，保留新鲜输入和独立验收的实际性能证据。
       - id: LF-TSK-QLT-2112
         title: 合并同一快照的 Git 元数据读取以降低发行检查开销
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 45
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1250,18 +1009,15 @@ workstreams:
         - eng.release.version
         - eng.release.manifest
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: Git 元数据批量读取的最小实现、真实等价与漂移回归，以及不减覆盖的执行证据。
       - id: LF-TSK-QLT-2113
         title: 消除生命周期测试重复启动合成 Docker 模型的开销
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1291,18 +1047,15 @@ workstreams:
         - eng.release.lifecycle-install
         - eng.verification.module-tests
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 常驻合成模型的测试内部优化、无缓存与失败关闭回归、当前冻结输入的独立性能证据。
       - id: LF-TSK-QLT-2114
         title: 消除门禁测试的空等计时器并验证整轮收益
         priority: P0
-        phase: P2
         task_version: 3
         change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1331,18 +1084,15 @@ workstreams:
         required_check_ids:
         - eng.extension.quality
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 不减覆盖的等待清理优化及完整开发检查耗时证据。
       - id: LF-TSK-QLT-2115
         title: 修复 Docker deadline helper 回收竞态以避免整轮失败重跑
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 1.1.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1370,18 +1120,15 @@ workstreams:
         required_check_ids:
         - eng.release.docker-contract
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: Docker deadline helper 的可靠终止回收及不牺牲覆盖的交付证据。
       - id: LF-TSK-QLT-2116
         title: 消除重复 Git 工具启动成本并保持工具链证据一致
         priority: P0
-        phase: P2
         task_version: 3
         change_version: 1.2.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1418,18 +1165,15 @@ workstreams:
         - eng.verification.module-tests
         - eng.release.version
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 不削弱来源检查或工具链身份的固定启动成本优化。
       - id: LF-TSK-QLT-2117
         title: 使用 Gradle 原生有界调度降低静态质量检查串行成本
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1459,18 +1203,15 @@ workstreams:
         - eng.backend.delivery
         - eng.backend.build-contract
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 不减覆盖的原生有界 Gradle 调度及整轮耗时证据。
       - id: LF-TSK-QLT-2118
         title: 按变更影响选择日常门禁并证明覆盖与独立验收边界
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 1.1.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1519,18 +1260,15 @@ workstreams:
         - eng.repository.policy
         - eng.repository.planning
         - eng.repository.docs
-        dependencies: []
         depends_on: []
         deliverable: 依赖覆盖完整的日常门禁选择及可核验耗时证据。
       - id: LF-TSK-QLT-2119
         title: 移除本机部署测试夹具未消费的身份预计算
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 20
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1555,18 +1293,15 @@ workstreams:
         required_check_ids:
         - eng.release.docker-contract
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 无消费者的重复准备移除及保留身份检查的证据。
       - id: LF-TSK-QLT-2120
         title: 回收发行测试入口超时后的受控子进程
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1595,18 +1330,15 @@ workstreams:
         - eng.release.lifecycle
         - eng.verification.module-tests
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 不增加预算的测试进程回收与不误杀、不漏取消的证据。
       - id: LF-TSK-QLT-2121
         title: 保留 Docker 合同超时前的逐例和分阶段耗时证据
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 30
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1633,18 +1365,15 @@ workstreams:
         required_check_ids:
         - eng.release.docker-contract
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 超时可用的耗时证据，不改变检查结论或预算。
       - id: LF-TSK-QLT-2122
         title: 延后加载本机部署测试客户端的非通用依赖
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 20
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1670,18 +1399,15 @@ workstreams:
         required_check_ids:
         - eng.release.docker-contract
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 不改变覆盖的客户端加载成本降低及有边界的测量证据。
       - id: LF-TSK-QLT-2123
         title: 划清本机部署测试的场景验证与重复前置成本
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 30
-        owner: LF-WS-QLT
         kind: design
         lifecycle_state: READY
         allowed_files:
@@ -1705,18 +1431,15 @@ workstreams:
         validation_command: python3 -m scripts.repository.planning_check
         required_check_ids:
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 可核验的场景分层设计及覆盖边界，不冒充性能实现或正式验收。
       - id: LF-TSK-QLT-2124
         title: 将纯日志场景的安装前置改为独立已安装夹具
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1743,18 +1466,15 @@ workstreams:
         required_check_ids:
         - eng.release.docker-contract
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 测试前置成本降低，不降低产品场景覆盖或独立验收。
       - id: LF-TSK-QLT-2125
         title: 在既有回收期限内确认短暂未知的进程组状态
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 1.1.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 30
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1780,18 +1500,15 @@ workstreams:
         required_check_ids:
         - eng.verification.module-tests
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 消除短暂未知状态的过早失败，保持清理判据和时限，不冒充整轮性能通过。
       - id: LF-TSK-QLT-2126
         title: 设计 Docker 场景层的分钟级降耗
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
-        owner: LF-WS-QLT
         kind: design
         lifecycle_state: READY
         allowed_files:
@@ -1816,18 +1533,15 @@ workstreams:
         required_check_ids:
         - eng.release.docker-contract
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 针对主要耗时节点的可实施设计，不以局部微优化代替整轮目标。
       - id: LF-TSK-QLT-2127
         title: 设计 Verify 与 Gate 夹具的分钟级降耗
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 45
-        owner: LF-WS-QLT
         kind: design
         lifecycle_state: READY
         allowed_files:
@@ -1852,18 +1566,15 @@ workstreams:
         required_check_ids:
         - eng.verification.module-tests
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 针对主要耗时节点的可实施设计，不以局部微优化代替整轮目标。
       - id: LF-TSK-QLT-2128
         title: 设计发行构建回归的重复成本消除
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 45
-        owner: LF-WS-QLT
         kind: design
         lifecycle_state: READY
         allowed_files:
@@ -1888,18 +1599,15 @@ workstreams:
         required_check_ids:
         - eng.release.build
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 针对主要耗时节点的可实施设计，不以局部微优化代替整轮目标。
       - id: LF-TSK-QLT-2129
         title: 合并发行链同阶段的重复源码资格检查
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1940,18 +1648,15 @@ workstreams:
         - eng.release.manifest
         - eng.release.runtime-entry
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 不削弱源码完整性和独立验收的发行资格检查去重。
       - id: LF-TSK-QLT-2130
         title: 减少本机部署测试有限替身请求的进程启动成本
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -1981,18 +1686,15 @@ workstreams:
         required_check_ids:
         - eng.release.docker-contract
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 降低本机部署测试启动开销，保持进程可观察性、覆盖和独立验证。
       - id: LF-TSK-QLT-2131
         title: 按依赖拆分日常 Docker 合同检查
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 1.1.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -2029,18 +1731,15 @@ workstreams:
         - eng.release.docker-contract
         - eng.verification.module-tests
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 局部变化不再运行无关 Docker 测试，覆盖与完整验收不缩水。
       - id: LF-TSK-QLT-2132
         title: 消除心跳测试的真实空等
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 30
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -2064,18 +1763,15 @@ workstreams:
         required_check_ids:
         - eng.release.docker-contract
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 消除一个确定的测试空等，不改变真实心跳合同或验收独立性。
       - id: LF-TSK-QLT-2133
         title: 消除非安装场景的重复成功安装前置
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -2102,18 +1798,15 @@ workstreams:
         required_check_ids:
         - eng.release.docker-contract
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 减少重复安装准备而不削减安装及后续行为覆盖，保持独立验收。
       - id: LF-TSK-QLT-2134
         title: 合并测试客户端的显式清理进程
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 45
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -2139,18 +1832,15 @@ workstreams:
         required_check_ids:
         - eng.release.docker-contract
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 减少重复清理进程而不削减行为、安全覆盖或验收独立性。
       - id: LF-TSK-QLT-2135
         title: 去重检查执行定义与固定结果合同
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -2191,18 +1881,15 @@ workstreams:
         - eng.verification.module-tests
         - eng.release.docker-contract
         - eng.repository.planning
-        dependencies: []
         depends_on: []
         deliverable: 唯一执行定义、固定成功合同、原检查身份及场景选择保持；加载器和直接消费者闭环更新。
       - id: LF-TSK-QLT-2136
         title: 删除 Stop 配置中的固定协议副本
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 30
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -2240,22 +1927,18 @@ workstreams:
         required_check_ids:
         - eng.verification.module-tests
         - eng.repository.hooks
-        dependencies: []
         depends_on: []
         deliverable: 固定协议只在实现定义，模式与时间配置保留原行为；正常交付仍执行，中间回合不伪造 PASS。
       - id: LF-TSK-QLT-2137
         title: 收敛 Agent 规则副本与同步维护
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
-        - harness/agent-runtime.manifest.yaml
         - harness/policy-projections.yaml
         - planning/task-template.yaml
         - scripts/repository/policy_projection.py
@@ -2290,18 +1973,326 @@ workstreams:
         - eng.repository.policy
         - eng.repository.planning
         - eng.repository.module-tests
-        dependencies: []
         depends_on: []
         deliverable: 删除可证明重复的规则投影和同步步骤；保留唯一策略、真实消费者检查与身份安全合同。
+      - id: LF-TSK-QLT-2138
+        title: 精简后端原生构建与 Java 门禁
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/simplify-gate-and-script-files/proposal.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - backend/gradle/build-logic/**
+        - backend/build.gradle.kts
+        - backend/gradle/libs.versions.toml
+        - backend/product/api/src/main/resources/application.yaml
+        - backend/verification/quality-gates/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 后端原生构建与 Java 门禁的精简实现、调用者同步和直接回归证据。
+        deliverable: 后端原生构建与 Java 门禁的精简实现、调用者同步和直接回归证据。
+        acceptance_criteria:
+        - 减少重复入口、参数或函数，调用者完整接入。
+        - 保留安全、来源锁、失败关闭、检查范围及历史消费。
+        acceptance_evidence:
+        - 直接检查和冻结差异；独立验收另行执行，不自签 receipt。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        depends_on: []
+      - id: LF-TSK-QLT-2139
+        title: 精简本机 Podman 脚本
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/simplify-gate-and-script-files/proposal.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/podman/**
+        - ops/docker/entrypoint.sh
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 本机 Podman 脚本的精简实现、调用者同步和直接回归证据。
+        deliverable: 本机 Podman 脚本的精简实现、调用者同步和直接回归证据。
+        acceptance_criteria:
+        - 减少重复入口、参数或函数，调用者完整接入。
+        - 保留安全、来源锁、失败关闭、检查范围及历史消费。
+        acceptance_evidence:
+        - 直接检查和冻结差异；独立验收另行执行，不自签 receipt。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        depends_on: []
+      - id: LF-TSK-QLT-2140
+        title: 精简Codex 工作包
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/simplify-gate-and-script-files/proposal.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/agents/codex/**
+        - tests/agents/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: Codex 工作包的精简实现、调用者同步和直接回归证据。
+        deliverable: Codex 工作包的精简实现、调用者同步和直接回归证据。
+        acceptance_criteria:
+        - 减少重复入口、参数或函数，调用者完整接入。
+        - 保留安全、来源锁、失败关闭、检查范围及历史消费。
+        acceptance_evidence:
+        - 直接检查和冻结差异；独立验收另行执行，不自签 receipt。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        depends_on: []
+      - id: LF-TSK-QLT-2141
+        title: 精简Qoder 历史消费
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/simplify-gate-and-script-files/proposal.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/agents/qoder/**
+        - scripts/agents/dispatch_fallback.py
+        - tests/agents/**
+        - tests/agents/test_lifecycle_records.py
+        - tests/agents/test_dispatch_fallback.py
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: Qoder 历史消费的精简实现、调用者同步和直接回归证据。
+        deliverable: Qoder 历史消费的精简实现、调用者同步和直接回归证据。
+        acceptance_criteria:
+        - 减少重复入口、参数或函数，调用者完整接入。
+        - 保留安全、来源锁、失败关闭、检查范围及历史消费。
+        acceptance_evidence:
+        - 直接检查和冻结差异；独立验收另行执行，不自签 receipt。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        depends_on: []
+      - id: LF-TSK-QLT-2142
+        title: 精简Delivery Gate
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/simplify-gate-and-script-files/proposal.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/delivery_gate/**
+        - tests/delivery_gate/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: Delivery Gate的精简实现、调用者同步和直接回归证据。
+        deliverable: Delivery Gate的精简实现、调用者同步和直接回归证据。
+        acceptance_criteria:
+        - 减少重复入口、参数或函数，调用者完整接入。
+        - 保留安全、来源锁、失败关闭、检查范围及历史消费。
+        acceptance_evidence:
+        - 直接检查和冻结差异；独立验收另行执行，不自签 receipt。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        depends_on: []
+      - id: LF-TSK-QLT-2143
+        title: 精简Verify 冻结与状态
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/simplify-gate-and-script-files/proposal.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/verification/**
+        - tests/verification/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: Verify 冻结与状态的精简实现、调用者同步和直接回归证据。
+        deliverable: Verify 冻结与状态的精简实现、调用者同步和直接回归证据。
+        acceptance_criteria:
+        - 减少重复入口、参数或函数，调用者完整接入。
+        - 保留安全、来源锁、失败关闭、检查范围及历史消费。
+        acceptance_evidence:
+        - 直接检查和冻结差异；独立验收另行执行，不自签 receipt。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        depends_on: []
+      - id: LF-TSK-QLT-2144
+        title: 精简发行 Node 与 Shell
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/simplify-gate-and-script-files/proposal.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 发行 Node 与 Shell的精简实现、调用者同步和直接回归证据。
+        deliverable: 发行 Node 与 Shell的精简实现、调用者同步和直接回归证据。
+        acceptance_criteria:
+        - 减少重复入口、参数或函数，调用者完整接入。
+        - 保留安全、来源锁、失败关闭、检查范围及历史消费。
+        acceptance_evidence:
+        - 直接检查和冻结差异；独立验收另行执行，不自签 receipt。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        depends_on: []
+      - id: LF-TSK-QLT-2145
+        title: 精简环境 Python
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/simplify-gate-and-script-files/proposal.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/environment/**
+        - tests/verification/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 环境 Python的精简实现、调用者同步和直接回归证据。
+        deliverable: 环境 Python的精简实现、调用者同步和直接回归证据。
+        acceptance_criteria:
+        - 减少重复入口、参数或函数，调用者完整接入。
+        - 保留安全、来源锁、失败关闭、检查范围及历史消费。
+        acceptance_evidence:
+        - 直接检查和冻结差异；独立验收另行执行，不自签 receipt。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        depends_on: []
+      - id: LF-TSK-QLT-2146
+        title: 精简Repository 与 Catalog
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/simplify-gate-and-script-files/proposal.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/repository/**
+        - planning/**
+        - tests/repository/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: Repository 与 Catalog的精简实现、调用者同步和直接回归证据。
+        deliverable: Repository 与 Catalog的精简实现、调用者同步和直接回归证据。
+        acceptance_criteria:
+        - 减少重复入口、参数或函数，调用者完整接入。
+        - 保留安全、来源锁、失败关闭、检查范围及历史消费。
+        acceptance_evidence:
+        - 直接检查和冻结差异；独立验收另行执行，不自签 receipt。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        depends_on: []
+      - id: LF-TSK-QLT-2147
+        title: 精简客户端配置与角色入口
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/simplify-gate-and-script-files/proposal.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - .codex/agents/**
+        - .codex/model-instructions.md
+        - .qoder/AGENTS.md
+        - .qoder/agents/**
+        - extension/manifest.json
+        - extension/tsconfig.json
+        - tests/agents/test_quality.py
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 客户端配置与角色入口的精简实现、调用者同步和直接回归证据。
+        deliverable: 客户端配置与角色入口的精简实现、调用者同步和直接回归证据。
+        acceptance_criteria:
+        - 减少重复入口、参数或函数，调用者完整接入。
+        - 保留安全、来源锁、失败关闭、检查范围及历史消费。
+        acceptance_evidence:
+        - 直接检查和冻结差异；独立验收另行执行，不自签 receipt。
+        validation_command: python3 -m scripts.repository.planning_check
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.policy
+        depends_on: []
       - id: LF-TSK-QLT-2001
         title: 串行核验完整主线及跨模块验收矩阵
         priority: P0
-        phase: P2
         task_version: 3
         change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -2334,11 +2325,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-OBS-2003
-        - LF-TSK-API-2002
-        - LF-TSK-EXT-2002
-        - LF-TSK-OPS-2002
         depends_on:
         - task_id: LF-TSK-OBS-2003
           type: hard
@@ -2364,12 +2350,10 @@ workstreams:
       - id: LF-TSK-QLT-2002
         title: 验证干净环境发布闭环和资源门槛
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: DRAFT
         allowed_files:
@@ -2394,15 +2378,11 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-OPS-2008
-        - LF-TSK-ARCH-2007
-        - LF-TSK-QLT-2001
         depends_on:
         - task_id: LF-TSK-OPS-2008
           type: hard
-          required_task_version: 3
-          required_change_version: 3.0.0
+          required_task_version: 4
+          required_change_version: 3.1.0
           required_result: PASS
         - task_id: LF-TSK-ARCH-2007
           type: hard
@@ -2418,12 +2398,10 @@ workstreams:
       - id: LF-TSK-QLT-2003
         title: 整合二期任务、授权边界与发布交付目标
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: design
         lifecycle_state: READY
         allowed_files:
@@ -2458,18 +2436,15 @@ workstreams:
         - eng.repository.planning
         - eng.repository.policy
         - eng.repository.module-tests
-        dependencies: []
         depends_on: []
         deliverable: 整合完整二期设计、图源、任务、授权与发布交付目标；本 Task 验收设计包，不代表产品实现或子任务已验收。
       - id: LF-TSK-QLT-2005
         title: 修复失败送验后成功依赖回执的唯一选择
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -2498,8 +2473,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-QLT-2003
         depends_on:
         - task_id: LF-TSK-QLT-2003
           type: hard
@@ -2510,18 +2483,15 @@ workstreams:
       - id: LF-TSK-QLT-2006
         title: 分离 Codex 原生并发与 Qoder 宿主单并发
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 30
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - .codex/config.toml
         - harness/agent-policy.manifest.yaml
-        - harness/agent-runtime.manifest.yaml
         - planning/task-template.yaml
         - planning/workstreams.yaml
         - tests/agents/test_qoder_runner.py
@@ -2546,8 +2516,6 @@ workstreams:
         - eng.repository.planning
         - eng.repository.policy
         discovered_from: LF-TSK-QLT-2003
-        dependencies:
-        - LF-TSK-QLT-2003
         depends_on:
         - task_id: LF-TSK-QLT-2003
           type: soft
@@ -2557,12 +2525,10 @@ workstreams:
       - id: LF-TSK-QLT-2004
         title: 将发布验收与使用入口接入共享工程合同
         priority: P0
-        phase: P2
         task_version: 3
         change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: DRAFT
         allowed_files:
@@ -2615,24 +2581,20 @@ workstreams:
         - eng.repository.planning
         - eng.repository.policy
         - eng.verification.module-tests
-        dependencies:
-        - LF-TSK-OPS-2008
         depends_on:
         - task_id: LF-TSK-OPS-2008
           type: hard
-          required_task_version: 3
-          required_change_version: 3.0.0
+          required_task_version: 4
+          required_change_version: 3.1.0
           required_result: PASS
         deliverable: 将发布验收与使用入口接入共享工程合同及可核对直接证据。
       - id: LF-TSK-QLT-2007
         title: 只读消费已有独立 Formal 验收链
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 75
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -2667,8 +2629,6 @@ workstreams:
         - eng.repository.planning
         - eng.repository.policy
         discovered_from: LF-TSK-QLT-2004
-        dependencies:
-        - LF-TSK-QLT-2003
         depends_on:
         - task_id: LF-TSK-QLT-2003
           type: soft
@@ -2679,12 +2639,10 @@ workstreams:
       - id: LF-TSK-QLT-2008
         title: 联合消费候选运行与已有 Formal 证据
         priority: P0
-        phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-QLT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -2698,7 +2656,7 @@ workstreams:
         - ops/release/tests/candidate-proof.test.mjs
         - ops/release/tests/verified-candidate.test.mjs
         - ops/release/tests/verified-candidate-fixture.mjs
-        - ops/release/build-check.mjs
+        - ops/release/check.mjs
         - harness/module-checks.yaml
         - harness/manifest.yaml
         - planning/workstreams.yaml
@@ -2727,9 +2685,6 @@ workstreams:
         - eng.repository.planning
         - eng.repository.policy
         discovered_from: LF-TSK-QLT-2007
-        dependencies:
-        - LF-TSK-QLT-2007
-        - LF-TSK-OPS-2015
         depends_on:
         - task_id: LF-TSK-QLT-2007
           type: soft
@@ -2761,12 +2716,10 @@ workstreams:
       - id: LF-TSK-DAT-2001
         title: 落实发布投影字段与数据库约束
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
-        owner: LF-WS-DAT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -2796,8 +2749,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-LEX-2003
         depends_on:
         - task_id: LF-TSK-LEX-2003
           type: hard
@@ -2820,13 +2771,21 @@ workstreams:
       - id: LF-TSK-LEX-1001
         title: 已发布资料服务契约
         priority: P0
-        phase: P1
         task_version: 2
         change_version: 1.1.0
         task_source: docs/roadmap/master-plan/phase2.md
         estimated_minutes: 40
-        allowed_files: backend/product/lexicon/**, backend/product/adapters/**
-        forbidden_files: 除 allowed_files 外的所有文件；尤其 AGENTS.md、harness/**、planning/** 与其他写入者范围
+        allowed_files:
+        - backend/product/lexicon/**
+        - backend/product/adapters/**
+        forbidden_files:
+        - AGENTS.md
+        - harness/**
+        - planning/**
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 去除首义便利接口；数据库版本与真实资料使用安全，导入不猜义。
         acceptance_criteria:
         - 去除首义便利接口；数据库版本与真实资料使用安全，导入不猜义。
@@ -2838,17 +2797,14 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies: []
         depends_on: []
       - id: LF-TSK-LEX-1101
         title: 共享 StarDict 首义解析与安全校验
         priority: P0
-        phase: P1
         task_version: 1
         change_version: 1.0.0
         task_source: docs/scenarios/lexicon-import/record-processing.md
         estimated_minutes: 30
-        owner: LF-WS-LEX
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -2872,18 +2828,15 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies: []
         depends_on: []
         deliverable: 首义/多义/字符安全公共纯函数及正反例测试
       - id: LF-TSK-LEX-1102
         title: 合并确定性来源清洗与正反例
         priority: P0
-        phase: P1
         task_version: 1
         change_version: 1.0.0
         task_source: docs/scenarios/lexicon-import/record-processing.md
         estimated_minutes: 50
-        owner: LF-WS-LEX
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -2908,18 +2861,15 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies: []
         depends_on: []
         deliverable: 合并清洗Result及入选步骤正反例/组合保护测试
       - id: LF-TSK-LEX-1103
         title: 接入准备结果与基础词组合过滤并回放验收
         priority: P0
-        phase: P1
         task_version: 1
         change_version: 1.0.0
         task_source: docs/scenarios/lexicon-import/record-processing.md
         estimated_minutes: 90
-        owner: LF-WS-LEX
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -2948,7 +2898,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies: []
         depends_on: []
         deliverable: 一次准备结果用于精简词条/词形发布；共享低信息合同、独立 all_basic_phrase、真实基线净收益和全量回归证据。
   - id: LF-EP-LEX-200
@@ -2961,12 +2910,10 @@ workstreams:
       - id: LF-TSK-LEX-2001
         title: 实现预处理分类与独立提示和缓存资格
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-LEX
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -3000,8 +2947,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-ARCH-2004
         depends_on:
         - task_id: LF-TSK-ARCH-2004
           type: hard
@@ -3012,12 +2957,10 @@ workstreams:
       - id: LF-TSK-LEX-2002
         title: 实现短语质量与默认释义的发布前判定
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 75
-        owner: LF-WS-LEX
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -3047,8 +2990,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-LEX-2001
         depends_on:
         - task_id: LF-TSK-LEX-2001
           type: hard
@@ -3059,12 +3000,10 @@ workstreams:
       - id: LF-TSK-LEX-2003
         title: 原子切换准确词形合同与全部查询消费者
         priority: P0
-        phase: P2
         task_version: 3
         change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-LEX
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -3103,8 +3042,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-LEX-2002
         depends_on:
         - task_id: LF-TSK-LEX-2002
           type: hard
@@ -3115,12 +3052,10 @@ workstreams:
       - id: LF-TSK-LEX-2004
         title: 拆分版本缓存管理与导入应用编排
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-LEX
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -3157,8 +3092,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-LEX-2003
         depends_on:
         - task_id: LF-TSK-LEX-2003
           type: hard
@@ -3186,13 +3119,20 @@ workstreams:
       - id: LF-TSK-ENR-1001
         title: 可靠词义资格与歧义放弃
         priority: P0
-        phase: P1
         task_version: 3
         change_version: 1.2.0
         task_source: docs/roadmap/master-plan/phase2.md
         estimated_minutes: 40
-        allowed_files: backend/product/enrichment/**
-        forbidden_files: 除 allowed_files 外的所有文件；尤其 AGENTS.md、harness/**、planning/** 与其他写入者范围
+        allowed_files:
+        - backend/product/enrichment/**
+        forbidden_files:
+        - AGENTS.md
+        - harness/**
+        - planning/**
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 单一简短中文表达可用；完全重复领域表达归并；不同义项、非法列表与同范围词条歧义放弃。
         acceptance_criteria:
         - 单一简短中文表达可用；完全重复领域表达归并；不同义项、非法列表与同范围词条歧义放弃。
@@ -3205,18 +3145,24 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies: []
         depends_on: []
       - id: LF-TSK-ENR-1002
         title: 稳定词段匹配与非重叠展示
         priority: P0
-        phase: P1
         task_version: 2
         change_version: 1.1.0
         task_source: docs/roadmap/master-plan/phase2.md
         estimated_minutes: 40
-        allowed_files: backend/product/enrichment/**
-        forbidden_files: 除 allowed_files 外的所有文件；尤其 AGENTS.md、harness/**、planning/** 与其他写入者范围
+        allowed_files:
+        - backend/product/enrichment/**
+        forbidden_files:
+        - AGENTS.md
+        - harness/**
+        - planning/**
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 词形、别名、Unicode 与标点范围正确；价值排序、去重、非重叠、无固定三条上限且乱序稳定。
         acceptance_criteria:
         - 词形、别名、Unicode 与标点范围正确；价值排序、去重、非重叠、无固定三条上限且乱序稳定。
@@ -3228,7 +3174,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies: []
         depends_on: []
   - id: LF-EP-ENR-200
     name: 第二阶段提示处理主线
@@ -3240,12 +3185,10 @@ workstreams:
       - id: LF-TSK-ENR-2001
         title: 分离原文位置匹配与发布候选资格检查
         priority: P0
-        phase: P2
         task_version: 3
         change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-ENR
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -3279,8 +3222,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-LEX-2004
         depends_on:
         - task_id: LF-TSK-LEX-2004
           type: hard
@@ -3291,12 +3232,10 @@ workstreams:
       - id: LF-TSK-ENR-2002
         title: 实现增量编排、默认义资格与提示选择边界
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-ENR
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -3338,8 +3277,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-ENR-2001
         depends_on:
         - task_id: LF-TSK-ENR-2001
           type: hard
@@ -3367,13 +3304,21 @@ workstreams:
       - id: LF-TSK-API-1001
         title: 版本化查询与分段耗时
         priority: P0
-        phase: P1
         task_version: 3
         change_version: 1.2.0
         task_source: docs/roadmap/master-plan/phase2.md
         estimated_minutes: 60
-        allowed_files: backend/product/api/src/**, backend/product/enrichment/src/**
-        forbidden_files: 除 allowed_files 外的所有文件；尤其 AGENTS.md、harness/**、planning/** 与其他写入者范围
+        allowed_files:
+        - backend/product/api/src/**
+        - backend/product/enrichment/src/**
+        forbidden_files:
+        - AGENTS.md
+        - harness/**
+        - planning/**
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 版本化查询及分段观测；每条提示绑定合法 entry UUID、sense UUID 和同一发布版本，前端可验证来源。
         acceptance_criteria:
         - 资料版本绑定；查询/规则/总耗时与原因可见且无原文日志；后端异常安全失败。
@@ -3386,7 +3331,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies: []
         depends_on: []
   - id: LF-EP-API-200
     name: 第二阶段提示处理主线
@@ -3398,12 +3342,10 @@ workstreams:
       - id: LF-TSK-API-2001
         title: 落实启动模式和已发布资料装载
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-API
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -3456,10 +3398,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-OPS-2002
-        - LF-TSK-ENR-2002
-        - LF-TSK-OBS-2002
         depends_on:
         - task_id: LF-TSK-OPS-2002
           type: hard
@@ -3480,12 +3418,10 @@ workstreams:
       - id: LF-TSK-API-2002
         title: 连接请求主线、HTTP 映射和终态日志
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-API
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -3541,9 +3477,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-API-2001
-        - LF-TSK-OBS-2002
         depends_on:
         - task_id: LF-TSK-API-2001
           type: hard
@@ -3559,12 +3492,10 @@ workstreams:
       - id: LF-TSK-API-2003
         title: 提供发布就绪合同并隔离发行包敏感记录授权
         priority: P0
-        phase: P2
         task_version: 3
         change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
-        owner: LF-WS-API
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -3600,9 +3531,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-API-2002
-        - LF-TSK-ARCH-2006
         depends_on:
         - task_id: LF-TSK-API-2002
           type: hard
@@ -3630,14 +3558,25 @@ workstreams:
       - id: LF-TSK-EXT-1001
         title: 协议与字幕生命周期
         priority: P0
-        phase: P1
         task_version: 2
         change_version: 1.1.0
         task_source: docs/roadmap/master-plan/phase2.md
         estimated_minutes: 60
-        allowed_files: extension/src/protocol.ts, extension/src/stream.ts, extension/src/background.ts,
-          extension/tests/protocol.test.mjs, extension/tests/stream.test.mjs, extension/tests/background.test.mjs
-        forbidden_files: 除 allowed_files 外的所有文件；尤其 AGENTS.md、harness/**、planning/** 与其他写入者范围
+        allowed_files:
+        - extension/src/protocol.ts
+        - extension/src/stream.ts
+        - extension/src/background.ts
+        - extension/tests/protocol.test.mjs
+        - extension/tests/stream.test.mjs
+        - extension/tests/background.test.mjs
+        forbidden_files:
+        - AGENTS.md
+        - harness/**
+        - planning/**
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 拒绝无效释义；每次字幕切换及时失效，晚到结果不可显示，超时和取消可区分。
         acceptance_criteria:
         - 拒绝无效释义；每次字幕切换及时失效，晚到结果不可显示，超时和取消可区分。
@@ -3650,21 +3589,36 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies: []
         depends_on: []
       - id: LF-TSK-EXT-1002
         title: 可读提示与本机显式抑制
         priority: P0
-        phase: P1
         task_version: 3
         change_version: 1.2.0
         task_source: docs/roadmap/master-plan/phase2.md
         estimated_minutes: 80
-        allowed_files: extension/src/content.ts, extension/src/overlay.ts, extension/src/preferences.ts,
-          extension/src/diagnostics.ts, extension/src/background.ts, extension/manifest.json, extension/scripts/build.mjs,
-          extension/scripts/build-config.mjs, extension/tests/**, extension/src/caption-source.ts, extension/src/popup.ts,
-          extension/src/popup.html, extension/src/popup.css
-        forbidden_files: 除 allowed_files 外的所有文件；尤其 AGENTS.md、harness/**、planning/** 与其他写入者范围
+        allowed_files:
+        - extension/src/content.ts
+        - extension/src/overlay.ts
+        - extension/src/preferences.ts
+        - extension/src/diagnostics.ts
+        - extension/src/background.ts
+        - extension/manifest.json
+        - extension/scripts/build.mjs
+        - extension/scripts/build-config.mjs
+        - extension/tests/**
+        - extension/src/caption-source.ts
+        - extension/src/popup.ts
+        - extension/src/popup.html
+        - extension/src/popup.css
+        forbidden_files:
+        - AGENTS.md
+        - harness/**
+        - planning/**
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 英文增强层绘制前就绪、保留来源分行；当前页面开关与本机抑制可恢复；分段耗时和丢弃计数，不上传。
         acceptance_criteria:
         - 英文增强层绘制前就绪、保留来源分行；当前页面开关与本机抑制可恢复；分段耗时和丢弃计数，不上传。
@@ -3677,17 +3631,14 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies: []
         depends_on: []
       - id: LF-TSK-EXT-1003
         title: 增量字幕双快照与稳定提示闭环
         priority: P0
-        phase: P1
         task_version: 1
         change_version: 1.0.0
         task_source: openspec/specs/product-architecture/spec.md
         estimated_minutes: 90
-        owner: LF-WS-EXT
         allowed_files:
         - backend/product/**
         - extension/**
@@ -3714,7 +3665,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies: []
         depends_on: []
   - id: LF-EP-EXT-200
     name: 第二阶段提示处理主线
@@ -3726,12 +3676,10 @@ workstreams:
       - id: LF-TSK-EXT-2001
         title: 收拢页面生命周期与采集快照协调
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-EXT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -3765,8 +3713,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-API-2002
         depends_on:
         - task_id: LF-TSK-API-2002
           type: hard
@@ -3777,12 +3723,10 @@ workstreams:
       - id: LF-TSK-EXT-2002
         title: 对齐客户端观测和显示边界
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-EXT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -3823,8 +3767,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-EXT-2001
         depends_on:
         - task_id: LF-TSK-EXT-2001
           type: hard
@@ -3835,12 +3777,10 @@ workstreams:
       - id: LF-TSK-EXT-2003
         title: 让扩展构建消费统一版本并产出匹配扩展包
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
-        owner: LF-WS-EXT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -3876,8 +3816,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-OPS-2003
         depends_on:
         - task_id: LF-TSK-OPS-2003
           type: hard
@@ -3888,12 +3826,10 @@ workstreams:
       - id: LF-TSK-EXT-2004
         title: 展示服务与资料状态并拒绝不匹配协议
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
-        owner: LF-WS-EXT
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -3934,10 +3870,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-API-2003
-        - LF-TSK-EXT-2002
-        - LF-TSK-EXT-2003
         depends_on:
         - task_id: LF-TSK-API-2003
           type: hard
@@ -3980,12 +3912,10 @@ workstreams:
       - id: LF-TSK-OBS-2001
         title: 冻结结构化日志模板、事件和打印时机
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
-        owner: LF-WS-OBS
         kind: design
         lifecycle_state: DRAFT
         allowed_files:
@@ -4008,8 +3938,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-ARCH-2003
         depends_on:
         - task_id: LF-TSK-ARCH-2003
           type: hard
@@ -4020,12 +3948,10 @@ workstreams:
       - id: LF-TSK-OBS-2002
         title: 实现普通结构化观测与敏感记录适配器
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-OBS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -4068,9 +3994,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-OBS-2001
-        - LF-TSK-ENR-2002
         depends_on:
         - task_id: LF-TSK-OBS-2001
           type: hard
@@ -4086,12 +4009,10 @@ workstreams:
       - id: LF-TSK-OBS-2003
         title: 接通导入步骤和缓存版本事件
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-OBS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -4148,10 +4069,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-OBS-2002
-        - LF-TSK-API-2001
-        - LF-TSK-OPS-2002
         depends_on:
         - task_id: LF-TSK-OBS-2002
           type: hard
@@ -4184,13 +4101,21 @@ workstreams:
       - id: LF-TSK-OPS-1001
         title: 本机闭环与真实观看验收
         priority: P0
-        phase: P1
         task_version: 4
         change_version: 1.3.0
         task_source: docs/roadmap/master-plan/phase2.md
         estimated_minutes: 90
-        allowed_files: extension/tests/**, docs/roadmap/master-plan/phase2/status.md
-        forbidden_files: 除 allowed_files 外的所有文件；尤其 AGENTS.md、harness/**、planning/** 与其他写入者范围
+        allowed_files:
+        - extension/tests/**
+        - docs/roadmap/master-plan/phase2/status.md
+        forbidden_files:
+        - AGENTS.md
+        - harness/**
+        - planning/**
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
         expected_output: 逐项证据齐备后运行 E2E、完整真实视频与截图检查；记录覆盖与分段时延。
         acceptance_criteria:
         - 逐项证据齐备后运行 E2E、完整真实视频与截图检查；记录覆盖与分段时延。
@@ -4204,13 +4129,6 @@ workstreams:
         - eng.repository.planning
         - eng.repository.policy
         - eng.extension.quality
-        dependencies:
-        - LF-TSK-ENR-1001
-        - LF-TSK-ENR-1002
-        - LF-TSK-API-1001
-        - LF-TSK-EXT-1001
-        - LF-TSK-EXT-1002
-        - LF-TSK-LEX-1001
         depends_on:
         - task_id: LF-TSK-ENR-1001
           type: hard
@@ -4252,12 +4170,10 @@ workstreams:
       - id: LF-TSK-OPS-2001
         title: 适配 PostgreSQL 读写边界与原子发布
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -4293,9 +4209,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-DAT-2001
-        - LF-TSK-LEX-2004
         depends_on:
         - task_id: LF-TSK-DAT-2001
           type: hard
@@ -4311,12 +4224,10 @@ workstreams:
       - id: LF-TSK-OPS-2002
         title: 将导入 CLI 收敛为入口和来源适配
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -4353,8 +4264,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-OPS-2001
         depends_on:
         - task_id: LF-TSK-OPS-2001
           type: hard
@@ -4365,12 +4274,10 @@ workstreams:
       - id: LF-TSK-OPS-2003
         title: 建立软件版本真源并接入后端构建
         priority: P0
-        phase: P2
         task_version: 2
         change_version: 2.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -4408,8 +4315,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-ARCH-2006
         depends_on:
         - task_id: LF-TSK-ARCH-2006
           type: hard
@@ -4420,12 +4325,10 @@ workstreams:
       - id: LF-TSK-OPS-2004
         title: 实现发布清单、摘要和许可材料打包
         priority: P0
-        phase: P2
-        task_version: 2
-        change_version: 2.0.0
+        task_version: 3
+        change_version: 2.1.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -4433,7 +4336,7 @@ workstreams:
         - ops/release/package.mjs
         - ops/release/tests/manifest.test.mjs
         - ops/release/third-party-notices.md
-        - ops/release/manifest-check.mjs
+        - ops/release/check.mjs
         - harness/module-checks.yaml
         - tests/verification/test_release_manifest_checks.py
         - planning/workstreams.yaml
@@ -4458,9 +4361,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-OPS-2003
-        - LF-TSK-EXT-2003
         depends_on:
         - task_id: LF-TSK-OPS-2003
           type: hard
@@ -4476,12 +4376,10 @@ workstreams:
       - id: LF-TSK-OPS-2009
         title: 导出并校验已发布资料快照
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -4512,9 +4410,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-OPS-2001
-        - LF-TSK-OPS-2004
         depends_on:
         - task_id: LF-TSK-OPS-2001
           type: hard
@@ -4523,19 +4418,17 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-OPS-2004
           type: hard
-          required_task_version: 2
-          required_change_version: 2.0.0
+          required_task_version: 3
+          required_change_version: 2.1.0
           required_result: PASS
         deliverable: 导出并校验已发布资料快照及直接验收证据。
       - id: LF-TSK-OPS-2005
         title: 实现资料包安全初始化与管理入口
         priority: P0
-        phase: P2
         task_version: 5
         change_version: 5.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -4580,8 +4473,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-OPS-2009
         depends_on:
         - task_id: LF-TSK-OPS-2009
           type: hard
@@ -4592,12 +4483,10 @@ workstreams:
       - id: LF-TSK-OPS-2006
         title: 封装 API 镜像和私网数据库 Compose
         priority: P0
-        phase: P2
         task_version: 3
         change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -4605,7 +4494,6 @@ workstreams:
         - ops/podman/local.mjs
         - ops/podman/command.mjs
         - ops/podman/doctor.mjs
-        - ops/podman/network-repair.mjs
         - ops/docker/tests/test_podman_network.py
         - ops/docker/tests/test_podman_doctor.py
         - ops/docker/tests/test_podman_progress.py
@@ -4645,9 +4533,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-OPS-2005
-        - LF-TSK-API-2003
         depends_on:
         - task_id: LF-TSK-OPS-2005
           type: hard
@@ -4663,12 +4548,10 @@ workstreams:
       - id: LF-TSK-OPS-2010
         title: 生成无宿主语言依赖的发行校验入口
         priority: P0
-        phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -4677,7 +4560,7 @@ workstreams:
         - ops/release/runtime-verification.sh
         - ops/release/tests/manifest.test.mjs
         - ops/release/tests/runtime-entry.test.mjs
-        - ops/release/runtime-entry-check.mjs
+        - ops/release/check.mjs
         - harness/module-checks.yaml
         - tests/verification/test_runtime_entry_checks.py
         - planning/workstreams.yaml
@@ -4702,24 +4585,20 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-OPS-2004
         depends_on:
         - task_id: LF-TSK-OPS-2004
           type: hard
-          required_task_version: 2
-          required_change_version: 2.0.0
+          required_task_version: 3
+          required_change_version: 2.1.0
           required_result: PASS
         deliverable: 受完整清单绑定的 POSIX shell 发行校验入口生成器及真实 shell 直接测试。
       - id: LF-TSK-OPS-2011
         title: 实现私有安装状态与受控 Docker 资源准备
         priority: P0
-        phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -4736,7 +4615,7 @@ workstreams:
         - ops/docker/tests/test_secret_publication.py
         - ops/docker/tests/test_state_records.py
         - ops/docker/tests/test_lifecycle_flow.py
-        - ops/release/lifecycle-install-check.mjs
+        - ops/release/check.mjs
         - harness/module-checks.yaml
         - tests/verification/test_lifecycle_checks.py
         - tests/verification/test_docker_contract_checks.py
@@ -4762,14 +4641,11 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-OPS-2010
-        - LF-TSK-OPS-2006
         depends_on:
         - task_id: LF-TSK-OPS-2010
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 1.1.0
           required_result: PASS
         - task_id: LF-TSK-OPS-2006
           type: hard
@@ -4780,21 +4656,19 @@ workstreams:
       - id: LF-TSK-OPS-2007
         title: 实现匹配制品更新与失败恢复操作
         priority: P0
-        phase: P2
-        task_version: 3
-        change_version: 3.0.0
+        task_version: 4
+        change_version: 3.1.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
-        - ops/release/lifecycle.mjs
+        - ops/release/runtime-entry.mjs
         - ops/release/lifecycle.sh
         - ops/release/tests/lifecycle.test.mjs
         - ops/docker/tests/test_state_records.py
         - ops/docker/tests/test_lifecycle_flow.py
-        - ops/release/lifecycle-check.mjs
+        - ops/release/check.mjs
         - ops/docker/tests/update-recovery.sh
         - harness/module-checks.yaml
         - tests/verification/test_lifecycle_checks.py
@@ -4822,24 +4696,20 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-OPS-2011
         depends_on:
         - task_id: LF-TSK-OPS-2011
           type: hard
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 1.1.0
           required_result: PASS
         deliverable: 实现匹配制品更新与失败恢复操作及直接验收证据。
       - id: LF-TSK-OPS-2008
         title: 串联 Apple Silicon 构建与受控发布流水线
         priority: P0
-        phase: P2
-        task_version: 3
-        change_version: 3.0.0
+        task_version: 4
+        change_version: 3.1.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -4855,7 +4725,7 @@ workstreams:
         - ops/release/tests/pipeline.test.mjs
         - harness/manifest.yaml
         - .github/workflows/release.yml
-        - ops/release/build-check.mjs
+        - ops/release/check.mjs
         - harness/module-checks.yaml
         - tests/verification/test_build_checks.py
         - planning/workstreams.yaml
@@ -4880,16 +4750,11 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies:
-        - LF-TSK-OPS-2004
-        - LF-TSK-OPS-2006
-        - LF-TSK-OPS-2007
-        - LF-TSK-EXT-2004
         depends_on:
         - task_id: LF-TSK-OPS-2004
           type: hard
-          required_task_version: 2
-          required_change_version: 2.0.0
+          required_task_version: 3
+          required_change_version: 2.1.0
           required_result: PASS
         - task_id: LF-TSK-OPS-2006
           type: hard
@@ -4898,8 +4763,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-OPS-2007
           type: hard
-          required_task_version: 3
-          required_change_version: 3.0.0
+          required_task_version: 4
+          required_change_version: 3.1.0
           required_result: PASS
         - task_id: LF-TSK-EXT-2004
           type: hard
@@ -4912,12 +4777,10 @@ workstreams:
       - id: LF-TSK-OPS-2012
         title: 校验实际候选目录与运行消费身份
         priority: P0
-        phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -4925,7 +4788,7 @@ workstreams:
         - ops/release/tests/verified-candidate.test.mjs
         - ops/release/pipeline.mjs
         - ops/release/tests/pipeline.test.mjs
-        - ops/release/build-check.mjs
+        - ops/release/check.mjs
         - scripts/verification/release_source_bridge.py
         - tests/verification/test_release_source_bridge.py
         - tests/verification/test_module_declarations.py
@@ -4954,25 +4817,21 @@ workstreams:
         - eng.repository.planning
         - eng.repository.policy
         discovered_from: LF-TSK-OPS-2008
-        dependencies:
-        - LF-TSK-OPS-2008
         depends_on:
         - task_id: LF-TSK-OPS-2008
           type: soft
-          required_task_version: 3
-          required_change_version: 3.0.0
+          required_task_version: 4
+          required_change_version: 3.1.0
         deliverable: 运行和晋升可复用的候选实际字节完整性核验及绑定身份。
 
 
       - id: LF-TSK-OPS-2013
         title: 共享本机安装执行会话
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 45
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -5002,25 +4861,21 @@ workstreams:
         - eng.repository.planning
         - eng.repository.policy
         discovered_from: LF-TSK-OPS-2012
-        dependencies:
-        - LF-TSK-OPS-2012
         depends_on:
         - task_id: LF-TSK-OPS-2012
           type: soft
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 1.1.0
         deliverable: 可复用但不暴露任意注入点的本机执行会话与 CLI 回归证据。
 
 
       - id: LF-TSK-OPS-2014
         title: 将实际候选接入本机安装与升级事务
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -5059,9 +4914,6 @@ workstreams:
         - eng.repository.planning
         - eng.repository.policy
         discovered_from: LF-TSK-OPS-2013
-        dependencies:
-        - LF-TSK-OPS-2013
-        - LF-TSK-OPS-2012
         depends_on:
         - task_id: LF-TSK-OPS-2013
           type: soft
@@ -5069,19 +4921,17 @@ workstreams:
           required_change_version: 1.0.0
         - task_id: LF-TSK-OPS-2012
           type: soft
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 1.1.0
         deliverable: 与现有本机事务一体的实际候选消费路径及直接回归证据。
 
       - id: LF-TSK-OPS-2015
         title: 执行同候选 ARM64 原生安装升级验收
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -5127,8 +4977,6 @@ workstreams:
         - eng.repository.planning
         - eng.repository.policy
         discovered_from: LF-TSK-OPS-2014
-        dependencies:
-        - LF-TSK-OPS-2014
         depends_on:
         - task_id: LF-TSK-OPS-2014
           type: soft
@@ -5140,12 +4988,10 @@ workstreams:
       - id: LF-TSK-OPS-2016
         title: 有界恢复升级准备失败的私有工作目录
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -5180,8 +5026,6 @@ workstreams:
         - eng.repository.planning
         - eng.repository.policy
         discovered_from: LF-TSK-OPS-2014
-        dependencies:
-        - LF-TSK-OPS-2014
         depends_on:
         - task_id: LF-TSK-OPS-2014
           type: soft
@@ -5193,12 +5037,10 @@ workstreams:
       - id: LF-TSK-OPS-2017
         title: 将已验收候选晋升为不可替换的 GitHub 发行
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -5233,36 +5075,31 @@ workstreams:
         - eng.repository.planning
         - eng.repository.policy
         discovered_from: LF-TSK-QLT-2008
-        dependencies:
-        - LF-TSK-QLT-2008
-        - LF-TSK-OPS-2012
         depends_on:
         - task_id: LF-TSK-QLT-2008
           type: soft
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 1.1.0
         - task_id: LF-TSK-OPS-2012
           type: soft
-          required_task_version: 1
-          required_change_version: 1.0.0
+          required_task_version: 2
+          required_change_version: 1.1.0
         deliverable: 不替换发行的晋升入口与有界公开资产及失败拒绝测试。
 
 
       - id: LF-TSK-OPS-2018
         title: 接通实际候选构建与同宿主独立验收发布工作流
         priority: P0
-        phase: P2
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - .github/workflows/release.yml
         - ops/release/workflow.mjs
-        - ops/release/build-check.mjs
+        - ops/release/check.mjs
         - ops/release/tests/workflow.test.mjs
         - tests/verification/test_ci_workflows.py
         - harness/manifest.yaml
@@ -5294,9 +5131,6 @@ workstreams:
         - eng.repository.planning
         - eng.repository.policy
         discovered_from: LF-TSK-OPS-2017
-        dependencies:
-        - LF-TSK-OPS-2017
-        - LF-TSK-OPS-2015
         depends_on:
         - task_id: LF-TSK-OPS-2017
           type: soft
@@ -5311,12 +5145,10 @@ workstreams:
       - id: LF-TSK-OPS-2019
         title: 实现软件版本镜像槽位与归属保护
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: openspec/changes/versioned-podman-images/tasks.md
         estimated_minutes: 60
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -5340,19 +5172,16 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies: []
         depends_on: []
         deliverable: 实现软件版本镜像槽位与归属保护及直接测试。
 
       - id: LF-TSK-OPS-2020
         title: 接通稳定版本 Podman 镜像安装流程
         priority: P0
-        phase: P2
         task_version: 1
         change_version: 1.0.0
         task_source: openspec/changes/versioned-podman-images/tasks.md
         estimated_minutes: 60
-        owner: LF-WS-OPS
         kind: implementation
         lifecycle_state: READY
         allowed_files:
@@ -5393,7 +5222,6 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.repository.policy
-        dependencies: []
         depends_on: []
         deliverable: 接通稳定版本 Podman 镜像安装流程及直接测试。
 

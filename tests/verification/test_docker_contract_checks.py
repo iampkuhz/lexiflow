@@ -78,7 +78,6 @@ class DockerContractCheckTest(unittest.TestCase):
             "ops/release/package.mjs",
             "ops/release/archive-identity.mjs",
             "ops/release/embedded-identity.mjs",
-            "ops/release/lifecycle.mjs",
             "ops/release/runtime-entry.mjs",
             "ops/release/runtime-verification.sh",
             "ops/release/tests/zip-fixture.mjs",

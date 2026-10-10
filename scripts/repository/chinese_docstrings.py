@@ -25,22 +25,12 @@ class ChineseDocstringChecker(BaseChecker):
             "普通字符串或行注释不能代替所属定义的中文文档字符串。",
         ),
     }
-    options = (
-        (
-            "docstring-language-pattern",
-            {
-                "default": r"[\u3400-\u4dbf\u4e00-\u9fff]",
-                "type": "regexp",
-                "help": "文档说明须匹配的语言表达式；只检查存在性，不宣称语义质量。",
-            },
-        ),
-    )
 
     def _check(self, node, label: str) -> None:
         doc = node.doc_node
         if doc is None or not doc.value.strip():
             self.add_message("missing-chinese-docstring", node=node, args=(label,))
-        elif not re.search(self.linter.config.docstring_language_pattern, doc.value):
+        elif not re.search(r"[\u3400-\u4dbf\u4e00-\u9fff]", doc.value):
             self.add_message("non-chinese-docstring", node=doc, args=(label,))
 
     @staticmethod

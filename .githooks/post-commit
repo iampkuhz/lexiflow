@@ -1,3 +1,0 @@
-#!/bin/sh
-# Verify 不控制 commit；Hook 不修改 change context。
-exit 0

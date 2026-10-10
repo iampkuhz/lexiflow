@@ -2,35 +2,35 @@ package io.lexiflow.quality;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * 固定规则顺序的 Java source gate 报告。
  *
- * @param status 整体状态。
  * @param sourceCount 输入源码数量。
  * @param evaluations 各规则类型化结果。
  */
-public record GateReport(GateStatus status, int sourceCount, List<GateEvaluation> evaluations) {
+public record GateReport(int sourceCount, List<GateEvaluation> evaluations) {
 
-  /** 校验整体状态并冻结规则结果。 */
+  /** 校验源码数量与规则结果非空，并冻结规则结果。 */
   public GateReport {
-    Objects.requireNonNull(status, "status");
     evaluations = List.copyOf(evaluations);
     if (sourceCount < 0 || evaluations.isEmpty()) {
       throw new IllegalArgumentException("gate report must contain rule evaluations");
     }
-    var hasFailure = evaluations.stream().anyMatch(item -> item.status() == GateStatus.FAIL);
-    if (hasFailure != (status == GateStatus.FAIL)) {
-      throw new IllegalArgumentException("report status must match evaluations");
-    }
+  }
+
+  /** 从各规则执行结果派生整体状态。 */
+  public GateStatus status() {
+    return evaluations.stream().anyMatch(item -> item.status() == GateStatus.FAIL)
+        ? GateStatus.FAIL
+        : GateStatus.PASS;
   }
 
   /** 生成稳定字段与数组顺序的 JSON。 */
   public String toJson() {
     var output = new StringBuilder();
     output.append("{\"schemaVersion\":\"lexiflow.java-source-gates.v1\"");
-    output.append(",\"status\":\"").append(status).append('\"');
+    output.append(",\"status\":\"").append(status()).append('\"');
     output.append(",\"sourceCount\":").append(sourceCount);
     output.append(",\"evaluations\":[");
     for (var index = 0; index < evaluations.size(); index++) {

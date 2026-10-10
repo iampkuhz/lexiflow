@@ -208,12 +208,6 @@ class EcdictBundleTests(unittest.TestCase):
             mapping,
             b"source_row\n2\ns:8\n",
         )
-        self.assertEqual(bundle.decode_source_row("2", 2), ("ecdict.csv", 2, 2))
-        self.assertEqual(bundle.decode_source_row("s:8", 3), ("stardict.csv", 8, 3))
-        for marker, subset in (("s:1", 2), ("0", 2), ("x:3", 2), ("2x", 2), ("2", 1)):
-            with self.subTest(marker=marker), self.assertRaises(bundle.BundleError):
-                bundle.decode_source_row(marker, subset)
-
     def test_compact_manifest_declares_schema_and_reversible_mapping(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -240,28 +234,47 @@ class EcdictBundleTests(unittest.TestCase):
                         "stardict.csv": "s:decimal_line_number",
                     },
                 )
-                decoded = bundle.decode_source_rows(archive.read("source-rows.csv"))
-                self.assertEqual(len(decoded), 4)
-                self.assertEqual(
-                    sum(source == "stardict.csv" for source, _, _ in decoded), 3
-                )
+                mapping = archive.read("source-rows.csv")
+                published = list(csv.DictReader(io.StringIO(mapping.decode("utf-8"))))
+                self.assertEqual(len(published), 4)
+                self.assertTrue(all(set(row) == {"source_row"} for row in published))
+                self.assertEqual(sum(row["source_row"].startswith("s:") for row in published), 3)
+                compact = list(csv.DictReader(io.StringIO(archive.read("stardict.csv").decode("utf-8"))))
+                self.assertEqual(len(compact), len(published))
+                for name, data in (("source-rows.csv", mapping), ("stardict.csv", archive.read("stardict.csv"))):
+                    self.assertEqual(manifest["members"][name], {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
 
-    def test_mapping_csv_requires_exact_header_and_one_value_per_record(self) -> None:
-        self.assertEqual(
-            bundle.decode_source_rows(b"source_row\n2\ns:8\n"),
-            [("ecdict.csv", 2, 2), ("stardict.csv", 8, 3)],
-        )
-        for invalid in (
-            b"source_file,source_row\nec,2\n",
-            b"source_row\n2,3\n",
-            b"source_row\nunknown:8\n",
-        ):
+    def test_multiline_source_records_preserve_published_record_ordinals(self) -> None:
+        base = [_row("before", "多行\n中文释义"), _row("oxford", "证据\n释义", oxford="1"), _row("after")]
+        full = [_row("other", "全文\n释义"), _row("literally"), _row("sustainability"), _row("stream of data")]
+        selected, _, _ = bundle._build_rows(_csv(base), _csv(full))
+        data, mapping = bundle._serialize(selected)
+        compact = list(csv.DictReader(io.StringIO(data.decode("utf-8"), newline="")))
+        markers = list(csv.DictReader(io.StringIO(mapping.decode("utf-8"), newline="")))
+        expected = {"before": "2", "oxford": "3", "after": "4", "literally": "s:3", "sustainability": "s:4", "stream of data": "s:5"}
+        self.assertEqual(len(compact), len(markers))
+        for row, marker in zip(compact, markers, strict=True):
+            self.assertEqual(marker, {"source_row": expected[row["word"]]})
+        self.assertEqual(next(row for row in compact if row["word"] == "oxford")["translation"], "证据\n释义")
+
+    def test_duplicate_oxford_records_keep_distinct_source_ordinals(self) -> None:
+        base = [_row("before", "多行\n释义"), _row("evidence", "第一条\n释义", oxford="1"), _row("evidence", "第二条", oxford="1")]
+        selected, counts, _ = bundle._build_rows(_csv(base), _full([]))
+        self.assertEqual(counts["oxford_support_rows_seen"], 2)
+        data, mapping = bundle._serialize(selected)
+        rows = list(csv.DictReader(io.StringIO(data.decode("utf-8"), newline="")))
+        markers = list(csv.DictReader(io.StringIO(mapping.decode("utf-8"), newline="")))
+        evidence = [(row["translation"], marker["source_row"]) for row, marker in zip(rows, markers, strict=True) if row["word"] == "evidence"]
+        self.assertEqual(evidence, [("第一条\n释义", "3"), ("第二条", "4")])
+
+    def test_source_reader_requires_exact_header_and_complete_record_shape(self) -> None:
+        for invalid in (b"wrong,header\na,b\n", ",".join(bundle.HEADER).encode() + b"\nword\n", _csv([_row("word")]) + b"a,b,c,d,e,f,g,h,i,j,k,l,m,n\n", _csv([_row("word")]) + b"\xff\n"):
             with self.subTest(invalid=invalid), self.assertRaises(bundle.BundleError):
-                bundle.decode_source_rows(invalid)
+                list(bundle._iter_rows(invalid, bundle.HEADER))
 
     def test_invalid_header_and_source_hash_fail_closed(self) -> None:
         with self.assertRaises(bundle.BundleError):
-            bundle._parse_rows(b"wrong,header\na,b\n", bundle.HEADER)
+            list(bundle._iter_rows(b"wrong,header\na,b\n", bundle.HEADER))
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory)
             (repo / "stardict.csv").write_bytes(b"untrusted")
