@@ -3,6 +3,8 @@
 > 位置：[仓库生命周期](../README.md) → GitHub Actions。普通工程反馈与正式发行是两层；任何快速检查都不是 Formal receipt。
 
 
+首次在 GitHub 发布请从[第一次 Release 操作手册](github-actions/first-release.md)按顺序执行：先管理员配置与材料，后标签候选、原生验收和手动晋升。本页保留工作流模型与合同，不以流程图代替实际操作步骤。
+
 ## 1.1. 分支与 PR：共享快速入口
 
 | 任务 | 命令或操作 | 成功判据 |

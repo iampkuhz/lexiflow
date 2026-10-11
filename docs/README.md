@@ -83,7 +83,7 @@ endlegend
 | S2 明确范围与验收 | 确定涉及的模块、文件、非目标与验收标准；适用于所有变更 | [任务与工作包](scenarios/delegate-work.md)、[现行约束](../harness/README.md) |
 | S3 实现并直接自检 | 修改功能、文档或工程工具，交出 diff 与直接检查结果 | [修改导入逻辑](scenarios/change-lexicon-import.md)、[优化门禁](scenarios/optimize-repository-gates.md)、[本机开发](scenarios/local-development.md) |
 | S4 取得交付与验收证据 | 执行现有门禁，取得开发报告；需要时取得正式验收链 | [编码后执行门禁](scenarios/run-repository-gates.md) |
-| S5 授权集成与发行 | 按用户授权集成；需要发行时另验真实候选 | [PR 检查／正式发行](scenarios/github-actions.md)、[安装与更新](scenarios/docker-release.md) |
+| S5 授权集成与发行 | 按用户授权集成；需要发行时另验真实候选 | [PR 检查](scenarios/github-actions.md)、[第一次 GitHub Release](scenarios/github-actions/first-release.md)、[安装与更新](scenarios/docker-release.md) |
 | S6 使用与文档维护 | 安装、排障，持续维护与行为一致的说明 | [用户操作](user/podman-macos.md)、[导入资料](scenarios/lexicon-import.md)、[排障](reference/troubleshooting.md)、[图文维护](scenarios/maintain-documentation.md) |
 
 一个任务可以跨多个阶段；只读答疑完成回答即可。计划和状态见 [roadmap](roadmap/master-plan.md)，日常使用见 [user](user/podman-macos.md)。
