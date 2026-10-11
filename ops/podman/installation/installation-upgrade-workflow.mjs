@@ -3,11 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { readZipEntries } from '../../release/integrity/extension-archive-integrity.mjs';
+import { readExtensionFiles } from '../../release/integrity/extension-archive-integrity.mjs';
+import { validateExtensionArchiveEntries, assertExtensionTreeMatches, materializeExtensionTree, readStableRegularFile } from '../../../extension/scripts/packaging/extension-archive-contract.mjs';
 import { generationCodeVersion, dataGeneration } from '../../dataset/dataset-generation-identity.mjs';
 import { canonicalJson, createDeploymentPlan, deploymentPlanHash, confirmDeploymentPlan, confirmDeploymentIntent, executeDeployment, readOperationJournal } from './installation-plan-records.mjs';
 import { javaBuildEnvironment } from '../environment/java-build-environment.mjs';
 import { installationRecord, publishRecord, verifyExtension, treeDigest } from './installation-update-transaction.mjs';
-import { resolveBuildIdentity } from '../../release/integrity/source-build-identity.mjs';
+import { resolveBuildIdentity, assertBuildIdentityMatches } from '../../release/integrity/source-build-identity.mjs';
 import { probeExternal, inspectDevelopmentTrust } from '../environment/local-database-target.mjs';
 import { versionedImageReference, versionedImageLabels, removeVersionedImage } from '../images/versioned-images.mjs';
 import { acquireImageSlotLock } from '../images/image-slot-lock.mjs';
@@ -15,6 +17,24 @@ import { acquireImageSlotLock } from '../images/image-slot-lock.mjs';
 const hex = /^[a-f0-9]{64}$/;
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const fail = code => { throw new Error(code); };
+const extensionArchiveRelative = identity => `extension-artifacts/${identity.buildId}/lexiflow-extension-${identity.softwareVersion}.zip`;
+async function verifyExtensionArchive(dir, descriptor, identity, apiPort, extensionDirectory) {
+  if (!descriptor || descriptor.path !== extensionArchiveRelative(identity) || descriptor.buildIdentity === undefined
+      || !Number.isSafeInteger(descriptor.bytes)
+      || descriptor.bytes < 22 || !hex.test(descriptor.sha256 ?? '')) fail('EXTENSION_ARCHIVE_METADATA_INVALID');
+  try { assertBuildIdentityMatches(descriptor.buildIdentity, identity); } catch { fail('EXTENSION_ARCHIVE_METADATA_INVALID'); }
+  const zip = path.join(dir, descriptor.path), sidecar = `${zip}.sha256`;
+  let bytes, filename = path.basename(zip), sidecarText, files;
+  try {
+    bytes = readStableRegularFile(zip, 64 * 1024 * 1024); sidecarText = readStableRegularFile(sidecar, 512).toString('utf8');
+    if (bytes.length !== descriptor.bytes || sha(bytes) !== descriptor.sha256
+        || sidecarText !== `${descriptor.sha256}  ${filename}\n`) fail('EXTENSION_ARCHIVE_INVALID');
+    files = await readExtensionFiles(zip, descriptor.sha256);
+  } catch (error) { if (error.message.startsWith('EXTENSION_ARCHIVE_')) throw error; fail('EXTENSION_ARCHIVE_INVALID'); }
+  validateExtensionArchiveEntries(files, { buildIdentity: identity, apiPort, filename });
+  if (extensionDirectory) assertExtensionTreeMatches(extensionDirectory, files);
+  return files;
+}
 const identityFacts = identity => {
   if (!identity || typeof identity !== 'object' || Array.isArray(identity)) return null;
   const { fingerprint, composeSha256, ...facts } = identity;
@@ -551,24 +571,35 @@ export async function runUnifiedDeployment(ctx) {
         const nextSql = path.join(dir, `.schema-${opId}.sql`);
         if (!fs.existsSync(sqlTarget)) fs.copyFileSync(sqlSource, sqlTarget);
         if (fileHash(sqlTarget) !== fileHash(sqlSource)) fs.copyFileSync(sqlSource, nextSql);
-        let apiImage, postgresImage = installed?.postgresImage, apiJar = installed?.apiJar;
+        let apiImage, postgresImage = installed?.postgresImage, apiJar = installed?.apiJar, extensionArchive;
         const candidateStage = !fresh ? path.join(dir, `.prepared-${opId}`) : dir;
         if (candidate) {
           if (!fresh) fs.mkdirSync(candidateStage, { recursive: true, mode: 0o700 });
-          const loaded = await ctx.candidateAdapter.installCandidateArtifacts(candidate, { run, installDir: candidateStage, apiPort,
+          const loaded = await ctx.candidateAdapter.installCandidateArtifacts(candidate, { run, installDir: candidateStage, archiveRoot: dir, apiPort,
             includePostgres: !external, baseVersion: identity.baseVersion, installationId: current.id });
           apiImage = loaded.apiImage; postgresImage = external ? installed?.postgresImage : loaded.postgresImage;
+          extensionArchive = loaded.extensionArchive;
         } else {
           const buildEnv = (ctx.javaEnvironment ?? javaBuildEnvironment)(ctx.environment, { repo });
           await run('npm', ['ci'], { cwd: path.join(repo, 'extension'), env: buildEnv });
           await run('npm', ['run', 'build'], { cwd: path.join(repo, 'extension'), env: { ...buildEnv, LEXIFLOW_API_PORT: String(apiPort) } });
           if (resolveBuildIdentity(repo).buildId !== identity.buildId) fail('DEPLOYMENT_INPUT_DRIFT');
+          const { createExtensionZip, publishExtensionArchive } = await import('../../../extension/scripts/packaging/package-extension-release.mjs');
+          const packaged = await createExtensionZip({ root: path.join(repo, 'extension'), buildIdentity: identity, apiPort });
+          const archiveDirectory = path.join(dir, 'extension-artifacts', identity.buildId);
+          await publishExtensionArchive(packaged.archive, `${packaged.descriptor.sha256}  ${packaged.descriptor.filename}\n`, archiveDirectory, packaged.descriptor.filename);
+          extensionArchive = { path: extensionArchiveRelative(identity), bytes: packaged.descriptor.bytes,
+            sha256: packaged.descriptor.sha256, buildIdentity: identity };
+          const zipPath = path.join(dir, extensionArchive.path);
+          const extensionFiles = await readExtensionFiles(zipPath, extensionArchive.sha256);
+          validateExtensionArchiveEntries(extensionFiles, { buildIdentity: identity, apiPort, filename: packaged.descriptor.filename });
+          const fixedExtension = fresh ? path.join(dir, 'extension') : path.join(dir, `.prepared-${opId}`, 'extension');
+          materializeExtensionTree(fixedExtension, extensionFiles);
+          await verifyExtensionArchive(dir, extensionArchive, identity, apiPort, fixedExtension);
           const stage = path.join(dir, `.prepared-${opId}`); fs.mkdirSync(path.join(stage, 'api'), { recursive: true, mode: 0o700 });
           for (const [from, to] of [[jar, 'lexiflow-api.jar'], [path.join(repo, 'ops/docker/Dockerfile'), 'Dockerfile'],
             [path.join(repo, 'ops/docker/run-container-command.sh'), 'run-container-command.sh']]) fs.copyFileSync(from, path.join(stage, 'api', to));
           apiJar = path.join(stage, 'api/lexiflow-api.jar');
-          fs.cpSync(path.join(repo, 'extension/dist'), path.join(stage, 'extension'), { recursive: true });
-          if (fresh) fs.cpSync(path.join(stage, 'extension'), path.join(dir, 'extension'), { recursive: true });
           const tag = versionedImageReference('api', identity.baseVersion);
           const base = 'docker.io/library/eclipse-temurin:25-jre';
           await run('podman', ['pull', '--platform', 'linux/arm64', base]);
@@ -604,11 +635,11 @@ export async function runUnifiedDeployment(ctx) {
           inputType: candidate ? 'package' : 'csv', inputSha256, generation,
           dataset: dataDir, datasetPackageSha256: candidate ? inputSha256 : undefined,
           version: identity.softwareVersion, buildIdentity: identity, generationVersion: generation.generationVersion,
-          artifacts: { ...(candidate ? { candidateSha256: candidate.candidateSha256, manifestSha256: candidate.manifestSha256 } : { jar: fileHash(jar) }), apiImage },
+          artifacts: { ...(candidate ? { candidateSha256: candidate.candidateSha256, manifestSha256: candidate.manifestSha256 } : { jar: fileHash(jar) }), apiImage, extensionArchive },
           digests: null };
         ctx.setState(current);
         if (fresh) ctx.saveState(current);
-        return { dataFile, apiImage, postgresImage, composeText, envText, nextSql: fs.existsSync(nextSql) ? nextSql : null,
+        return { dataFile, apiImage, postgresImage, composeText, envText, extensionArchive, nextSql: fs.existsSync(nextSql) ? nextSql : null,
           extensionStage: !fresh ? path.join(candidateStage, 'extension') : null };
       },
       verifyPlan: async (_plan, preparedData) => {
@@ -625,6 +656,8 @@ export async function runUnifiedDeployment(ctx) {
         }
         if (authMode !== 'development-trust') secret(path.join(dir, 'secrets/app-password'));
         if (preparedData.extensionStage) verifyExtension(preparedData.extensionStage, identity, apiPort);
+        await verifyExtensionArchive(dir, preparedData.extensionArchive, identity, apiPort,
+          preparedData.extensionStage ?? path.join(dir, 'extension'));
         if (preparedData.nextSql && fileHash(preparedData.nextSql) !== fileHash(candidate
           ? path.join(candidate.root, 'payload', ...candidate.artifacts.sql.path.split('/')) : path.join(repo, 'infra/postgres/schema.sql'))) fail('DEPLOYMENT_SQL_DRIFT');
         if (!external) {
@@ -697,10 +730,12 @@ export async function runUnifiedDeployment(ctx) {
           fs.renameSync(path.join(dir, 'extension'), path.join(dir, `.previous-extension-${opId}`));
           fs.renameSync(preparedData.extensionStage, path.join(dir, 'extension'));
         }
+        await verifyExtensionArchive(dir, current.artifacts.extensionArchive, identity, apiPort, path.join(dir, 'extension'));
       },
       verifyApplication: async () => {
         ctx.progress('验证应用就绪');
         await ctx.ready(current);
+        await verifyExtensionArchive(dir, current.artifacts.extensionArchive, identity, apiPort, path.join(dir, 'extension'));
         if (authMode === 'development-trust') developmentIdentity = await assertDevelopmentIdentity(developmentIdentity);
         current.phase = 'ready';
         current.lastOperation = installationRecord({ operation: opId, kind: action, previous: installed, target: identity,
@@ -768,6 +803,8 @@ export async function activatePreparedTarget({ dir, prepared, previous, fact, di
       fail('DEPLOYMENT_RECOVERY_EXTENSION_DRIFT');
     verifyExtension(prepared.extensionStage, target.buildIdentity, target.apiPort);
   } else verifyExtension(extension, target.buildIdentity, target.apiPort);
+  await verifyExtensionArchive(dir, target.artifacts?.extensionArchive, target.buildIdentity, target.apiPort,
+    activeExtension === prepared.extensionSha256 ? extension : prepared.extensionStage);
   if (prepared.nextSql) {
     if (fs.existsSync(prepared.nextSql)) {
       if (fileHash(prepared.nextSql) !== prepared.sqlSha256) fail('DEPLOYMENT_RECOVERY_SQL_DRIFT');
@@ -787,6 +824,7 @@ export async function activatePreparedTarget({ dir, prepared, previous, fact, di
     fs.renameSync(prepared.extensionStage, extension);
   }
   verifyExtension(extension, target.buildIdentity, target.apiPort);
+  await verifyExtensionArchive(dir, target.artifacts?.extensionArchive, target.buildIdentity, target.apiPort, extension);
   if (target.databaseTarget?.authMode === 'development-trust') {
     if (typeof verifyDevelopmentIdentity !== 'function') fail('DEVELOPMENT_DATABASE_TARGET_UNAVAILABLE');
     await verifyDevelopmentIdentity(target);
@@ -794,9 +832,14 @@ export async function activatePreparedTarget({ dir, prepared, previous, fact, di
   setState(target); target.digests = digestFiles(target); saveState(target);
   await compose('config'); await compose('up', '-d', '--no-deps', '--force-recreate', 'api');
   await ready(target);
+  await verifyExtensionArchive(dir, target.artifacts?.extensionArchive, target.buildIdentity, target.apiPort, extension);
   if (target.databaseTarget?.authMode === 'development-trust') await verifyDevelopmentIdentity(target);
   target.phase = 'ready'; target.digests = digestFiles(target); saveState(target);
   return target;
+}
+
+export async function verifyInstalledExtensionArchive(dir, state) {
+  return verifyExtensionArchive(dir, state?.artifacts?.extensionArchive, state?.buildIdentity, state?.apiPort, path.join(dir, 'extension'));
 }
 
 function portTaken(port) {

@@ -58,6 +58,23 @@ test("ZIP has exact allowlist, stable bytes and matching SHA-256 across timezone
   } finally { await cleanup(); }
 });
 
+test("shared ZIP packager supports bounded local API ports while production stays fixed", async () => {
+  const { root, cleanup } = await fixture();
+  try {
+    const distManifest = path.join(root, "dist/manifest.json");
+    const manifest = JSON.parse(await readFile(distManifest, "utf8"));
+    manifest.host_permissions = ["http://127.0.0.1:19123/*"];
+    await writeFile(distManifest, JSON.stringify(manifest));
+    const result = await createExtensionZip({ root, buildIdentity, apiPort: 19123 });
+    assert.deepEqual(JSON.parse(Buffer.from(result.unzip()["manifest.json"]).toString()).host_permissions,
+      ["http://127.0.0.1:19123/*"]);
+    for (const apiPort of [0, -1, 65536, 1.5, "19123"]) {
+      await assert.rejects(createExtensionZip({ root, buildIdentity, apiPort }), { message: "EXTENSION_API_PORT_INVALID" });
+    }
+    await assert.rejects(createExtensionZip({ root, buildIdentity }), /manifest host permissions mismatch/u);
+  } finally { await cleanup(); }
+});
+
 test("rejects missing files, root/path symlinks, bad manifest version and permissions", async () => {
   for (const mutate of [
     async ({ dist }) => rm(path.join(dist, "popup.css")),
@@ -114,7 +131,9 @@ test("rejects dirty Git input and safely reuses only byte-identical output", asy
     const original = await readFile(zip);
     await publishExtensionArchive(a.archive, checksum, output, a.descriptor.filename);
     assert.deepEqual(await readFile(zip), original);
-    await writeFile(path.join(root, "dist/popup.html"), "different");
+    await assert.rejects(publishExtensionArchive(a.archive, `0${checksum.slice(1)}`, output, a.descriptor.filename), /ARCHIVE_PUBLICATION_INVALID/u);
+    await assert.rejects(publishExtensionArchive(a.archive, checksum, output, '../escape.zip'), /ARCHIVE_PUBLICATION_INVALID/u);
+    await writeFile(path.join(root, "dist/popup.html"), '<link href="popup.css"><script src="popup.js"></script><!-- different -->');
     const changed = await createExtensionZip({ root, buildIdentity });
     await assert.rejects(publishExtensionArchive(changed.archive, `${changed.descriptor.sha256}  ${changed.descriptor.filename}\n`, output, changed.descriptor.filename), /different release artifact/u);
     assert.deepEqual(await readFile(zip), original);

@@ -16,6 +16,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+import zipfile
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -54,6 +55,7 @@ class LocalEntryTest(unittest.TestCase):
                          "ops/docker/Dockerfile", "ops/docker/Dockerfile.postgres",
                          "ops/docker/run-container-command.sh", "ops/docker/initialize-postgres-app-role.sh",
                          "ops/dataset/ecdict-source.lock.json", "ops/dataset/generation-inputs.json", "ops/dataset/dataset-generation-identity.mjs",
+                         "extension/scripts/packaging/package-extension-release.mjs", "extension/scripts/packaging/extension-archive-contract.mjs",
                          "infra/postgres/schema.sql", "ops/release/version.txt", "ops/release/integrity/source-build-identity.mjs", "ops/release/integrity/extension-archive-integrity.mjs"]:
             dst = repo / relative
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -62,6 +64,7 @@ class LocalEntryTest(unittest.TestCase):
         (repo / 'ops/dataset/generation-inputs.json').write_text(json.dumps({'schemaVersion': 1, 'include': ['fixture.txt']}))
         # Build identity is calculated by the production resolver from Git-visible inputs.
         (repo / ".gitignore").write_text("tmp/\n.local/\nbackend/product/api/build/\nextension/dist/\nextension/node_modules/\n")
+        shutil.copytree(ROOT / "extension/node_modules/fflate", repo / "extension/node_modules/fflate")
         subprocess.run(["git", "init", "-q", str(repo)], check=True)
         subprocess.run(["git", "-C", str(repo), "config", "user.email", "fixture@example.invalid"], check=True)
         subprocess.run(["git", "-C", str(repo), "config", "user.name", "Synthetic Fixture"], check=True)
@@ -89,7 +92,20 @@ class LocalEntryTest(unittest.TestCase):
         (self.repo / "backend/product/api/build/internal/boot").mkdir(parents=True)
         (self.repo / "extension/dist").mkdir(parents=True)
         self.program(self.repo / "backend/gradlew", "#!/bin/sh\nset -eu\nnode -e \"import('../ops/release/integrity/source-build-identity.mjs').then(({resolveBuildIdentity})=>{const fs=require('fs'); fs.mkdirSync('product/api/build/internal/boot',{recursive:true}); fs.writeFileSync('product/api/build/internal/boot/api-internal.jar','synthetic');})\"\n")
-        self.program(self.bin / "npm", "#!/bin/sh\nset -eu\nif [ \"$1\" = run ] && [ \"$2\" = build ]; then node -e \"import('../ops/release/integrity/source-build-identity.mjs').then(({resolveBuildIdentity})=>{const fs=require('fs'); const id=resolveBuildIdentity('..'); const port=process.env.LEXIFLOW_API_PORT; fs.mkdirSync('dist',{recursive:true}); fs.writeFileSync('dist/build-identity.json',JSON.stringify(id)); fs.writeFileSync('dist/manifest.json',JSON.stringify({version:id.chromeVersion,version_name:id.softwareVersion,host_permissions:['http://127.0.0.1:'+port+'/*']}));})\"; fi\n")
+        extension_builder = self.root / "build-extension-fixture.mjs"
+        extension_builder.write_text(r"""import fs from 'node:fs';
+import path from 'node:path';
+const repo=path.resolve('..');
+const {resolveBuildIdentity}=await import(path.join(repo,'ops/release/integrity/source-build-identity.mjs'));
+const {PACKAGE_FILES}=await import(path.join(repo,'extension/scripts/packaging/package-extension-release.mjs'));
+const id=resolveBuildIdentity(repo), port=process.env.LEXIFLOW_API_PORT;
+for(const name of PACKAGE_FILES){const target=path.join('dist',name);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,'synthetic resource\n');}
+fs.writeFileSync('dist/build-identity.json',JSON.stringify(id));
+fs.writeFileSync('dist/manifest.json',JSON.stringify({manifest_version:3,version:id.chromeVersion,version_name:id.softwareVersion,permissions:['storage'],host_permissions:['http://127.0.0.1:'+port+'/*'],background:{service_worker:'background.js'},action:{default_popup:'popup.html'}}));
+fs.writeFileSync('dist/popup.html','<script src="popup.js"></script><link href="popup.css" rel="stylesheet">');
+fs.writeFileSync('dist/popup.css','body{}');
+""")
+        self.program(self.bin / "npm", f"#!/bin/sh\nset -eu\nif [ \"$1\" = run ] && [ \"$2\" = build ]; then node {str(extension_builder)!r}; fi\n")
         self.program(self.bin / "java", f'''#!/bin/sh
 if [ "$1" = -version ]; then echo 'openjdk version "25.0.1"' >&2; exit 0; fi
 if [ "$3" = --deployment-data ]; then
@@ -341,6 +357,22 @@ net.createServer=(...args)=>{{
             if (kit / name).stat().st_mode & 0o777 != 0o600:
                 raise AssertionError(f'fixture secret permissions mismatch: {name}')
 
+    @staticmethod
+    def assert_extension_archive_fixture_contract(state, kit):
+        archive = state['artifacts']['extensionArchive']
+        expected_relative = f"extension-artifacts/{state['buildIdentity']['buildId']}/lexiflow-extension-{state['version']}.zip"
+        if archive['path'] != expected_relative or archive['buildIdentity'] != state['buildIdentity']:
+            raise AssertionError('ready fixture archive identity mismatch')
+        zip_path = kit / archive['path']
+        if zip_path.stat().st_size != archive['bytes'] or hashlib.sha256(zip_path.read_bytes()).hexdigest() != archive['sha256']:
+            raise AssertionError('ready fixture archive checksum mismatch')
+        if Path(str(zip_path) + '.sha256').read_text() != f"{archive['sha256']}  {zip_path.name}\n":
+            raise AssertionError('ready fixture archive sidecar mismatch')
+        with zipfile.ZipFile(zip_path) as archived:
+            actual_names = {str(file.relative_to(kit / 'extension')) for file in (kit / 'extension').rglob('*') if file.is_file()}
+            if actual_names != set(archived.namelist()) or any((kit / 'extension' / name).read_bytes() != archived.read(name) for name in actual_names):
+                raise AssertionError('ready fixture archive tree mismatch')
+
     def assert_ready_fixture_contract(self, state, kit, images, runtime, pg_runtime, container_rows, expected_compose):
         """验证ready状态的字段关系与fake provider资源归属，不推断安装历史。"""
         if (not 1 <= state['apiPort'] <= 65535 or not 1 <= state['dbPort'] <= 65535
@@ -374,6 +406,7 @@ net.createServer=(...args)=>{{
                 or manifest.get('version') != state['buildIdentity']['chromeVersion']
                 or manifest.get('host_permissions') != [f"http://127.0.0.1:{state['apiPort']}/*"]):
             raise AssertionError('ready fixture extension identity mismatch')
+        self.assert_extension_archive_fixture_contract(state, kit)
         jar = Path(state['apiJar']).resolve()
         repo_jar = self.repo / 'backend/product/api/build/internal/boot/api-internal.jar'
         if not jar.is_file() or jar.name != 'lexiflow-api.jar':
@@ -391,7 +424,7 @@ net.createServer=(...args)=>{{
             raise AssertionError('ready fixture CSV content mismatch')
         for relative in ('manifest.json', 'build-identity.json'):
             actual_file, source_file = kit / 'extension' / relative, self.repo / 'extension/dist' / relative
-            if actual_file.read_bytes() != source_file.read_bytes() or actual_file.stat().st_mode & 0o777 != source_file.stat().st_mode & 0o777:
+            if actual_file.read_bytes() != source_file.read_bytes() or actual_file.stat().st_mode & 0o777 != 0o600:
                 raise AssertionError(f'ready fixture extension stable file mismatch: {relative}')
         expected_env = (f'LEXIFLOW_PLATFORM=linux/arm64\nLEXIFLOW_API_IMAGE={state["apiImage"]}\n'
                         f'LEXIFLOW_POSTGRES_IMAGE={state["postgresImage"]}\nLEXIFLOW_INSTALLATION_ID={state["id"]}\n'
@@ -450,6 +483,31 @@ const {baseVersion}=JSON.parse(process.argv[1]); console.log(JSON.stringify({api
             self.assertEqual(images[ref]['id'], state['apiImage' if role == 'api' else 'postgresImage'])
         return images
 
+    def prepare_extension_archive(self, identity):
+        """用共享发行打包器创建每例私有 ZIP 与固定解压目录。"""
+        extension_build = subprocess.run([str(self.bin / 'npm'), 'run', 'build'], cwd=self.repo / 'extension',
+                                         capture_output=True, text=True,
+                                         env={**os.environ, 'PATH': str(self.bin) + os.pathsep + os.environ['PATH'],
+                                              'LEXIFLOW_API_PORT': str(self.api_port)}, timeout=15)
+        if extension_build.returncode:
+            raise AssertionError(f'ready fixture fake extension build failed: {extension_build.stderr}')
+        archive_script = r"""import path from 'node:path';
+import fs from 'node:fs';
+import {createExtensionZip,publishExtensionArchive} from './extension/scripts/packaging/package-extension-release.mjs';
+import {readExtensionFiles} from './ops/release/integrity/extension-archive-integrity.mjs';
+const [directory,identityJson,port]=process.argv.slice(1), identity=JSON.parse(identityJson);
+const packaged=await createExtensionZip({root:path.resolve('extension'),buildIdentity:identity,apiPort:Number(port)});
+const relative=`extension-artifacts/${identity.buildId}/${packaged.descriptor.filename}`, zip=path.join(directory,relative);
+await publishExtensionArchive(packaged.archive,`${packaged.descriptor.sha256}  ${packaged.descriptor.filename}\n`,path.dirname(zip),packaged.descriptor.filename);
+for(const [name,bytes] of await readExtensionFiles(zip,packaged.descriptor.sha256)){const target=path.join(directory,'extension',name);fs.mkdirSync(path.dirname(target),{recursive:true,mode:0o700});fs.writeFileSync(target,bytes,{flag:'wx',mode:0o600});}
+console.log(JSON.stringify({path:relative,bytes:packaged.descriptor.bytes,sha256:packaged.descriptor.sha256,buildIdentity:identity}));"""
+        packed = subprocess.run([shutil.which('node'), '--input-type=module', '-e', archive_script,
+                                 str(self.kit), json.dumps(identity), str(self.api_port)],
+                                cwd=self.repo, capture_output=True, text=True, timeout=15)
+        if packed.returncode:
+            raise AssertionError(f'fixture ZIP generation failed: {packed.stderr}')
+        return json.loads(packed.stdout)
+
     def prepare_logs_fixture(self):
         """使用当前私有 checkout 的真实身份与部署渲染创建只读状态验证夹具。"""
         if self.api_port == self.db_port:
@@ -488,6 +546,7 @@ console.log(JSON.stringify({ identity, generation, compose,
         except json.JSONDecodeError as error:
             raise AssertionError('fixture identity generation returned invalid JSON') from error
         identity, generation = material['identity'], material['generation']
+        extension_archive = self.prepare_extension_archive(identity)
         installation_id = hashlib.sha256(os.urandom(32)).hexdigest()[:32]
         api_image = 'sha256:' + hashlib.sha256((installation_id + ':api').encode()).hexdigest()
         postgres_image = 'sha256:' + hashlib.sha256((installation_id + ':postgres').encode()).hexdigest()
@@ -523,7 +582,7 @@ console.log(JSON.stringify({ identity, generation, compose,
                  'dataset': dataset, 'datasetIdentity': {'version': 1,
                      'generationVersion': generation['generationVersion'],
                      'sourceSha256': hashlib.sha256(csv).hexdigest()},
-                 'artifacts': {'apiImage': api_image}, 'digests': digests}
+                 'artifacts': {'apiImage': api_image, 'extensionArchive': extension_archive}, 'digests': digests}
         (self.kit / 'state.json').write_text(json.dumps(state, indent=2) + '\n')
         # Fake provider metadata models only synthetic owned resources; no install CLI result is forged.
         api_container = hashlib.sha256((installation_id + ':api-container').encode()).hexdigest()
@@ -540,6 +599,7 @@ console.log(JSON.stringify({ identity, generation, compose,
         # Non-empty content ensures the no-copy assertion cannot vacuously pass.
         (self.kit / 'operation-fixture.log').write_text('synthetic operation progress\n')
         self.assert_logs_fixture_contract(state, self.kit)
+        self.assert_extension_archive_fixture_contract(state, self.kit)
         result = self.invoke('status', serve=True)
         if result.returncode:
             raise AssertionError(f'fixture read-only status failed: {result.stderr}')
@@ -582,12 +642,6 @@ console.log(JSON.stringify({identity,generation,upstream,
                                     env={**os.environ, 'PATH': str(self.bin) + os.pathsep + os.environ['PATH']}, timeout=15)
         if java_build.returncode:
             raise AssertionError(f'ready fixture fake jar build failed: {java_build.stderr}')
-        extension_build = subprocess.run([str(self.bin / 'npm'), 'run', 'build'], cwd=self.repo / 'extension',
-                                         capture_output=True, text=True,
-                                         env={**os.environ, 'PATH': str(self.bin) + os.pathsep + os.environ['PATH'],
-                                              'LEXIFLOW_API_PORT': str(self.api_port)}, timeout=15)
-        if extension_build.returncode:
-            raise AssertionError(f'ready fixture fake extension build failed: {extension_build.stderr}')
         installation_id = os.urandom(16).hex()
         data_dir = self.kit / 'data' / f'ecdict-source.{input_sha[:16]}'
         data_dir.mkdir(parents=True, mode=0o700)
@@ -605,7 +659,7 @@ console.log(JSON.stringify({identity,generation,upstream,
             secret = self.kit / 'secrets' / name
             secret.write_text(f'synthetic-{installation_id}-{name}\n')
             secret.chmod(0o600)
-        shutil.copytree(self.repo / 'extension/dist', self.kit / 'extension')
+        extension_archive = self.prepare_extension_archive(material['identity'])
         jar_source = self.repo / 'backend/product/api/build/internal/boot/api-internal.jar'
         jar = (self.kit / '.prepared-ready-fixture/api/lexiflow-api.jar').resolve()
         jar.parent.mkdir(parents=True, mode=0o700)
@@ -637,7 +691,8 @@ console.log(JSON.stringify({identity,generation,upstream,
                  'generationVersion': material['generation']['generationVersion'], 'dataset': str(data_dir.resolve()),
                  'datasetIdentity': {'version': 1, 'generationVersion': material['generation']['generationVersion'],
                                      'sourceSha256': input_sha},
-                 'artifacts': {'jar': hashlib.sha256(jar_source.read_bytes()).hexdigest(), 'apiImage': api_image},
+                 'artifacts': {'jar': hashlib.sha256(jar_source.read_bytes()).hexdigest(), 'apiImage': api_image,
+                               'extensionArchive': extension_archive},
                  'digests': {}}
         state['digests'] = {name: hashlib.sha256((self.kit / name).read_bytes()).hexdigest()
                             for name in ('compose.yaml', 'release.env', 'secrets/postgres-password',
@@ -791,6 +846,17 @@ console.log(JSON.stringify({identity,generation,upstream,
         state=json.loads((self.kit/'state.json').read_text())
         self.assert_logs_fixture_contract(state, self.kit)
         self.assertEqual(state['phase'],'ready')
+        archive = state['artifacts']['extensionArchive']
+        zip_path = self.kit / archive['path']
+        self.assertIn(str(zip_path), result.stdout)
+        self.assertIn(str(zip_path) + '.sha256', result.stdout)
+        self.assertEqual(state['lastOperation']['artifacts']['extensionArchive'], archive)
+        self.assertEqual(hashlib.sha256(zip_path.read_bytes()).hexdigest(), archive['sha256'])
+        with zipfile.ZipFile(zip_path) as packaged:
+            self.assertEqual(set(packaged.namelist()), {str(file.relative_to(self.kit / 'extension'))
+                for file in (self.kit / 'extension').rglob('*') if file.is_file()})
+            for name in packaged.namelist():
+                self.assertEqual(packaged.read(name), (self.kit / 'extension' / name).read_bytes())
         self.assertEqual((self.kit/'secrets/app-password').stat().st_mode & 0o777,0o600)
         self.assertIn(state['apiImage'],(self.kit/'release.env').read_text())
         for action in ['stop','up','install','status']:
@@ -799,6 +865,24 @@ console.log(JSON.stringify({identity,generation,upstream,
         self.assertEqual(sum('--deployment-data' in call and 'apply' in call for call in calls),1)
         self.assertFalse(any('initialize' in call for call in calls))
         self.assertFalse(any('prune' in call or '-v' in call and 'down' in call for call in calls))
+
+    def test_status_and_up_reject_archive_sidecar_and_loaded_tree_tampering(self):
+        state = self.prepare_ready_fixture()
+        zip_path = self.kit / state['artifacts']['extensionArchive']['path']
+        files = [zip_path, Path(str(zip_path) + '.sha256'), self.kit / 'extension/content.js']
+        original_state = (self.kit / 'state.json').read_bytes()
+        for file in files:
+            original = file.read_bytes()
+            try:
+                file.write_bytes(original + b'tampered')
+                for action in ('status', 'up'):
+                    with self.subTest(file=file.name, action=action):
+                        result = self.invoke(action)
+                        self.assertNotEqual(result.returncode, 0, result.stdout)
+                        self.assertNotIn('就绪。API:', result.stdout)
+                        self.assertEqual((self.kit / 'state.json').read_bytes(), original_state)
+            finally:
+                file.write_bytes(original)
 
     def test_external_runlocal_uses_only_app_secret_and_recovers_read_only(self):
         # 已安装的外部目标只使用状态中记录的用户与本安装私密密码，不开放 CLI 覆盖。
@@ -1228,12 +1312,16 @@ console.log(JSON.stringify({identity,generation,upstream,
             self.assertEqual(json.loads(summaries[0].read_text()), json.loads(summaries[1].read_text()))
             self.assertEqual(summaries[0].stat().st_mode & 0o777, summaries[1].stat().st_mode & 0o777)
             extension_files = [case.ready_files_snapshot(case.kit / 'extension') for case in (self, reference)]
-            self.assertEqual(set(extension_files[0]), {'manifest.json', 'build-identity.json'})
+            self.assertEqual(set(extension_files[0]), {'manifest.json', 'build-identity.json', 'background.js', 'content.js',
+                'youtube-bridge.js', 'popup.js', 'popup.html', 'popup.css', 'assets/icon-16.png',
+                'assets/icon-32.png', 'assets/icon-48.png', 'assets/icon-128.png', 'assets/logo.svg'})
             self.assertEqual(extension_files[0].keys(), extension_files[1].keys())
             for name in extension_files[0]:
                 self.assertEqual(extension_files[0][name][1], extension_files[1][name][1])
             for case, state in ((self, candidate), (reference, actual)):
                 self.assertEqual(json.loads((case.kit / 'extension/manifest.json').read_text()), {
+                    'manifest_version': 3, 'permissions': ['storage'],
+                    'background': {'service_worker': 'background.js'}, 'action': {'default_popup': 'popup.html'},
                     'version': state['buildIdentity']['chromeVersion'],
                     'version_name': state['buildIdentity']['softwareVersion'],
                     'host_permissions': [f"http://127.0.0.1:{state['apiPort']}/*"],

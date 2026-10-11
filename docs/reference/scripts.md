@@ -70,6 +70,7 @@ Agent 运行记录内部库包括 [`codex_actor_identity.py`](../../scripts/agen
 | 类型 | 入口／实现 | 核心职责与阅读位置 |
 | --- | --- | --- |
 | CLI／内部事务 | [`manage-podman-installation.mjs`](../../ops/podman/commands/manage-podman-installation.mjs)／[`installation-upgrade-workflow.mjs`](../../ops/podman/installation/installation-upgrade-workflow.mjs) | 本机公开命令／安装、更新与恢复事务；见[用户操作](../user/podman-macos.md)、[安装与更新](../scenarios/docker-release.md) |
+| CLI／共享内部核心 | [`package-extension-release.mjs`](../../extension/scripts/packaging/package-extension-release.mjs)／[`extension-archive-contract.mjs`](../../extension/scripts/packaging/extension-archive-contract.mjs)／[`check-extension-archive.mjs`](../../extension/scripts/checks/check-extension-archive.mjs) | 正式发行源码准入／共享归档合同与发布／下载归档校验；本机部署复用确定性 ZIP、独占发布和受限归档验证，见[插件交付与加载](../user/podman-macos.md#13-加载-chrome-扩展) |
 | 内部库 | [`versioned-images.mjs`](../../ops/podman/images/versioned-images.mjs)／[`image-slot-lock.mjs`](../../ops/podman/images/image-slot-lock.mjs) | 基础版本镜像槽位／槽位写入互斥；见[部署镜像合同](../../openspec/specs/deployment-images/spec.md)，版本标签不替代完整构建身份 |
 | CLI／内部 workflow | [`run-release-workflow.mjs`](../../ops/release/workflow/run-release-workflow.mjs)／[`run-release-build-pipeline.mjs`](../../ops/release/workflow/run-release-build-pipeline.mjs) | 候选准备和既有证据续办／镜像、组装与完整性验证；见[发行步骤与请求字段](../scenarios/github-actions.md) |
 | Check adapter | [`run_deployment_contract_tests.py`](../../scripts/checks/deployment/run_deployment_contract_tests.py) | 日常 surface／shell／local／node 固定组与完整 Docker 合同；见[检查范围](verification.md)，分组入口不是新的部署命令 |
