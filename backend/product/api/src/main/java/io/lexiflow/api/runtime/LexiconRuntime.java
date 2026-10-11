@@ -162,8 +162,11 @@ public final class LexiconRuntime implements LexiconCatalog {
     long started = System.nanoTime();
     try {
       var result = cached.lookupForms(normalizedForms);
+      // 资格过滤后的空查询未读取发布身份，不能把未知身份当作明确的空发布。
+      if (result.publishedVersion().isEmpty())
+        return withAdditionalReads(result, recovery.versionReads(), recovery.prewarmReads());
       var warmup = cached.warmupStatus();
-      long version = result.publishedVersion().orElse(0);
+      long version = result.publishedVersion().orElseThrow();
       if (version == 0) {
         transition(new State(mode, Reason.NO_PUBLISHED_DATA, 0L, false), true, elapsedMs(started));
       } else if (warmup.degraded()) {
