@@ -286,6 +286,14 @@ test('resume binds UUID, host, source, original request and candidate; only publ
     } });
     assert.deepEqual(unknown, { status: 'BLOCKED', reason: 'PUBLISH_STATE_UNKNOWN',
       published: 'unknown', writeStage: 'upload', releaseId: 42 });
+    const registryUnknown = await resumePromotion({ ...common, publish: true, run: async () => {
+      const error = new Error('CHILD_FAILED');
+      error.publicOutput = JSON.stringify({ result: 'BLOCKED', published: 'unknown',
+        write_stage: 'registry-push', registry_role: 'api-image', release_id: null });
+      throw error;
+    } });
+    assert.deepEqual(registryUnknown, { status: 'BLOCKED', reason: 'PUBLISH_STATE_UNKNOWN',
+      published: 'unknown', writeStage: 'registry-push', registryRole: 'api-image', releaseId: null });
     const cleanup = await resumePromotion({ ...common, publish: true, run: async () => {
       const error = new Error('CHILD_FAILED');
       error.publicOutput = JSON.stringify({ result: 'BLOCKED', published: true,
