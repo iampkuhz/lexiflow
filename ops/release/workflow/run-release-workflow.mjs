@@ -480,7 +480,8 @@ export async function resumePromotion({ submissionId, releaseTag, publish = fals
           releaseId: state.release_id ?? null };
       if (publish && state?.published === 'unknown')
         return { status: 'BLOCKED', reason: 'PUBLISH_STATE_UNKNOWN', published: 'unknown',
-          writeStage: state.write_stage ?? null, releaseId: state.release_id ?? null };
+          writeStage: state.write_stage ?? null, releaseId: state.release_id ?? null,
+          ...(['api-image', 'postgres-image'].includes(state.registry_role) ? { registryRole: state.registry_role } : {}) };
       if (publish && state?.published !== false)
         return { status: 'BLOCKED', reason: 'PUBLISH_STATE_UNKNOWN', published: 'unknown',
           writeStage: null, releaseId: null };

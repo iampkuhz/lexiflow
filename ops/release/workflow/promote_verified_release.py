@@ -48,11 +48,17 @@ class PromotionError(ValueError):
     """不携带路径、响应体或凭据的受控失败。"""
 
     def __init__(
-        self, reason: str, *, stage: str | None = None, release_id: int | None = None
+        self,
+        reason: str,
+        *,
+        stage: str | None = None,
+        release_id: int | None = None,
+        registry_role: str | None = None,
     ):
         super().__init__(reason)
         self.stage = stage
         self.release_id = release_id
+        self.registry_role = registry_role
 
 
 def _fail(reason: str) -> None:
@@ -703,7 +709,9 @@ def _publish(
         _registry_assets(registry, owner, repo, registry_context, assets, meta)
     except release_registry.RegistryError as exc:
         raise PromotionError(
-            exc.reason, stage="registry-" + (exc.stage or "unknown")
+            exc.reason,
+            stage="registry-" + (exc.stage or "unknown"),
+            registry_role=exc.role,
         ) from None
     gate()
     try:
@@ -815,7 +823,10 @@ def _publish(
         )
     except release_registry.RegistryError as exc:
         raise PromotionError(
-            exc.reason, stage="registry-verify", release_id=release_id
+            exc.reason,
+            stage="registry-verify",
+            release_id=release_id,
+            registry_role=exc.role,
         ) from None
     draft_gate()
     try:
@@ -1234,6 +1245,8 @@ def main(argv: list[str] | None = None) -> int:
             result.update(
                 published="unknown", write_stage=exc.stage, release_id=exc.release_id
             )
+        if exc.registry_role in ("api-image", "postgres-image"):
+            result["registry_role"] = exc.registry_role
         print(json.dumps(result, sort_keys=True))
         return 2
     except Exception:
