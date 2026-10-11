@@ -42,6 +42,8 @@ sh "$RELEASE_DIR/lexiflow.sh" status "$ROOT"
 
 在 `manifest.json` 中定位 `role` 为 `extension` 的制品，按该项 `path`、字节数和 SHA-256 核对对应文件；核对 `metadata` 所标版本身份与服务发行一致。扩展制品为 ZIP，解压到固定目录。Chrome 打开 `chrome://extensions`，开启开发者模式，选择“加载已解压的扩展程序”，指向解包后包含扩展 `manifest.json` 的目录。扩展更新时加载对应新文件、在扩展管理页重新加载，并刷新 YouTube 标签页。
 
+源码本机部署的 ZIP 生成与归档校验复用正式发行核心，但不会获得正式发行资格；其受管输出与固定解压目录见[本机扩展加载](../user/podman-macos.md#13-加载-chrome-扩展)。正式发行使用已验收清单中的 ZIP，不改写端口、不用本机归档替换发行制品。
+
 此方式是开发者模式本机加载说明，不是 Chrome Web Store 发布或审核状态声明。若发行没有匹配且摘要可核验的扩展制品，停止安装并向发行提供方索取，不使用仓库 `extension/dist` 冒充已发布扩展。
 
 ## 1.4. 更新、回退与停止

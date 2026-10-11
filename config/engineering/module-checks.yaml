@@ -262,6 +262,7 @@ checks:
   - mktemp
   - mkfifo
   input_paths:
+  - extension/scripts/packaging
   - ops/release
   - ops/docker
   - ops/podman
@@ -293,6 +294,7 @@ checks:
   - mktemp
   - mkfifo
   input_paths:
+  - extension/scripts/packaging
   - scripts/checks/deployment/run_deployment_contract_tests.py
   - backend/product/api
   - ops/dataset
@@ -357,6 +359,7 @@ checks:
   - mktemp
   - mkfifo
   input_paths:
+  - extension/scripts/packaging
   - scripts/checks/deployment/run_deployment_contract_tests.py
   - infra/local/compose.yaml
   - infra/postgres/schema.sql
@@ -393,6 +396,7 @@ checks:
   - mktemp
   - mkfifo
   input_paths:
+  - extension/scripts/packaging
   - scripts/checks/deployment/run_deployment_contract_tests.py
   - infra/local/compose.yaml
   - infra/postgres/schema.sql

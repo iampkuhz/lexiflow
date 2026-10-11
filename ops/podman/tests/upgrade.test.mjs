@@ -7,19 +7,39 @@ import crypto from 'node:crypto';
 import { activatePreparedTarget } from '../installation/installation-upgrade-workflow.mjs';
 import { treeDigest, verifyExtension, installationRecord, publishRecord } from '../installation/installation-update-transaction.mjs';
 import { versionSummary } from '../installation/installation-version-summary.mjs';
+import { EXTENSION_PACKAGE_FILES as PACKAGE_FILES } from '../../../extension/scripts/packaging/extension-archive-contract.mjs';
+import { makeZip } from '../../release/tests/zip-fixture.mjs';
+import { assertExtensionTreeMatches, materializeExtensionTree } from '../../../extension/scripts/packaging/extension-archive-contract.mjs';
 
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
-const identity = n => ({ schemaVersion: 1, baseVersion: '2.0.0-SNAPSHOT', softwareVersion: `2.0.0-SNAPSHOT.20261006.g${n.repeat(7)}`,
-  chromeVersion: '2.0.0.0', sourceCommit: n.repeat(40), sourceSha256: 'a'.repeat(64), buildId: n.repeat(64), dirty: false, channel: 'snapshot' });
+const identity = n => {
+  const baseVersion = '2.0.0-SNAPSHOT', sourceCommit = n.repeat(40), sourceSha256 = 'a'.repeat(64), sourceDate = '20261006';
+  const softwareVersion = `2.0.0-SNAPSHOT.${sourceDate}.g${sourceCommit.slice(0, 7)}`;
+  const buildId = sha(JSON.stringify({ baseVersion, sourceCommit, sourceSha256, dirty: false, sourceDate }));
+  return { schemaVersion: 1, baseVersion, softwareVersion, chromeVersion: '2.0.0.0', sourceCommit, sourceSha256, buildId, dirty: false, channel: 'snapshot' };
+};
 function extension(dir, id) {
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'build-identity.json'), JSON.stringify(id));
-  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ version: id.chromeVersion, version_name: id.softwareVersion,
-    host_permissions: ['http://127.0.0.1:18080/*'] }));
-  fs.writeFileSync(path.join(dir, 'worker.js'), 'synthetic');
+  for (const name of PACKAGE_FILES) {
+    const bytes = Buffer.from(name === 'manifest.json'
+      ? JSON.stringify({ manifest_version: 3, version: id.chromeVersion, version_name: id.softwareVersion, permissions: ['storage'], host_permissions: ['http://127.0.0.1:18080/*'], background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' } })
+      : name === 'build-identity.json' ? JSON.stringify(id) : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>' : `fixture:${name}`);
+    const target = path.join(dir, ...name.split('/')); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, bytes);
+  }
+}
+function archive(dir, id) {
+  const filename = `lexiflow-extension-${id.softwareVersion}.zip`;
+  const entries = Object.fromEntries(PACKAGE_FILES.map(name => [name, Buffer.from(name === 'manifest.json'
+    ? JSON.stringify({ manifest_version: 3, version: id.chromeVersion, version_name: id.softwareVersion, permissions: ['storage'], host_permissions: ['http://127.0.0.1:18080/*'], background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' } })
+    : name === 'build-identity.json' ? JSON.stringify(id) : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>' : `fixture:${name}`)]));
+  const bytes = makeZip(Object.entries(entries)), digest = sha(bytes);
+  const relative = `extension-artifacts/${id.buildId}/${filename}`, target = path.join(dir, relative);
+  fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, bytes);
+  fs.writeFileSync(`${target}.sha256`, `${digest}  ${filename}\n`);
+  return { path: relative, bytes: bytes.length, sha256: digest, buildIdentity: id };
 }
 function fixture() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiflow-forward-upgrade-'));
+  const dir = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'lexiflow-forward-upgrade-'));
   const old = identity('1'), next = identity('2'), operation = 'b'.repeat(32);
   const dataFile = path.join(dir, 'data/ecdict-source.test/stardict.csv');
   fs.mkdirSync(path.dirname(dataFile), { recursive: true }); fs.writeFileSync(dataFile, 'synthetic-csv');
@@ -29,6 +49,7 @@ function fixture() {
   fs.writeFileSync(path.join(dir, 'compose.yaml'), 'old compose'); fs.writeFileSync(path.join(dir, 'release.env'), 'old env');
   extension(path.join(dir, 'extension'), old);
   const stage = path.join(dir, `.prepared-${operation}/extension`); extension(stage, next);
+  const nextArchive = archive(dir, next);
   fs.writeFileSync(path.join(dir, 'synthetic-marker.json'), '{"preserve":true}\n');
   const oldDigests = Object.fromEntries(['compose.yaml', 'release.env', 'infra/postgres/schema.sql']
     .map(name => [name, sha(fs.readFileSync(path.join(dir, name)))]));
@@ -37,6 +58,7 @@ function fixture() {
   const targetState = { ...previous, buildIdentity: next, version: next.softwareVersion,
     apiImage: 'sha256:' + 'd'.repeat(64), dataset: path.dirname(dataFile), inputSha256: sha(fs.readFileSync(dataFile)),
     generationVersion, generation: { generationVersion } };
+  targetState.artifacts = { extensionArchive: nextArchive };
   const prepared = { operation, targetState, dataFile, apiImage: targetState.apiImage,
     nextSql: stagedSql, extensionStage: stage, composeText: 'target compose', envText: 'target env',
     sqlSha256: sha('target sql'), extensionSha256: treeDigest(stage),
@@ -129,4 +151,15 @@ test('extension mismatch and immutable installation record publication remain gu
     assert.deepEqual(versionSummary({ version: f.old.softwareVersion }, f.next, null), {
       installed: f.old.softwareVersion, local: f.next.softwareVersion, latestRelease: null });
   } finally { f.cleanup(); }
+});
+
+test('shared extraction repairs only known byte-prefix leftovers and rejects unknown tree content', () => {
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'lexiflow-shared-extract-'));
+  const target = path.join(root, 'extension'), entries = new Map([['manifest.json', Buffer.from('complete')], ['assets/icon.png', Buffer.from('icon')]]);
+  try {
+    fs.mkdirSync(path.join(target, 'assets'), { recursive: true }); fs.writeFileSync(path.join(target, 'manifest.json'), 'com');
+    materializeExtensionTree(target, entries); assertExtensionTreeMatches(target, entries);
+    fs.writeFileSync(path.join(target, 'unknown'), 'private');
+    assert.throws(() => materializeExtensionTree(target, entries), /EXTENSION_TARGET_EXISTS/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

@@ -242,7 +242,7 @@ class DockerGroupContractTest(unittest.TestCase):
             self.assertEqual(len(identities), len(set(identities)), name)
             self.assertFalse(any("SyntheticCase" in identity for identity in identities), name)
         # 包含独立准备的真实安装对照、损坏拒绝、双实例隔离和来源模板写入隔离用例。
-        self.assertEqual(44, adapter._load_python(self.root, ["ops/docker/tests/test_podman_local.py"]).countTestCases())
+        self.assertEqual(45, adapter._load_python(self.root, ["ops/docker/tests/test_podman_local.py"]).countTestCases())
         self.assertEqual(12, adapter._load_python(self.root, ["ops/docker/tests/test_podman_fake_transport.py"]).countTestCases())
 
     def test_unknown_group_is_rejected_by_cli_and_stdout_is_single_json(self):

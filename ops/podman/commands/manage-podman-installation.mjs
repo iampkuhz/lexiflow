@@ -11,7 +11,7 @@ import { acquireProcessLock } from '../execution/installation-operation-lock.mjs
 import { doctor, runtime, runtimeDataset } from './diagnose-podman-installation.mjs';
 import { resolveBuildIdentity } from '../../release/integrity/source-build-identity.mjs';
 import { githubLatestRelease, versionSummary } from '../installation/installation-version-summary.mjs';
-import { runUnifiedDeployment, inspectInstalledDeployment, readPreparedTarget, activatePreparedTarget, assertDevelopmentTargetIdentity } from '../installation/installation-upgrade-workflow.mjs';
+import { runUnifiedDeployment, inspectInstalledDeployment, readPreparedTarget, activatePreparedTarget, assertDevelopmentTargetIdentity, verifyInstalledExtensionArchive } from '../installation/installation-upgrade-workflow.mjs';
 import { readOperationJournal, writeOperationJournal } from '../installation/installation-plan-records.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -177,7 +177,8 @@ export async function runLocal(argv, candidateRequest) {
     const credential = state.databaseTarget?.authMode === 'development-trust'
       ? '数据库认证: 已核对本仓库开发容器的显式 trust 配置；未生成密码文件。'
       : `密码文件（勿分享）: ${path.join(dir, 'secrets/app-password')}`;
-    console.log(`就绪。API: http://127.0.0.1:${state.apiPort}\nChrome 加载目录: ${path.join(dir, 'extension')}\nPostgreSQL: 127.0.0.1:${state.dbPort} / lexiflow / 用户 ${state.databaseTarget?.user ?? 'lexiflow'}\n${credential}`);
+    const extensionZip = state.artifacts?.extensionArchive?.path ? path.join(dir, state.artifacts.extensionArchive.path) : '缺少已绑定 ZIP（请显式 upgrade）';
+    console.log(`就绪。API: http://127.0.0.1:${state.apiPort}\nChrome 加载目录: ${path.join(dir, 'extension')}\n插件 ZIP: ${extensionZip}\n插件 SHA256: ${extensionZip === '缺少已绑定 ZIP（请显式 upgrade）' ? extensionZip : `${extensionZip}.sha256`}\nPostgreSQL: 127.0.0.1:${state.dbPort} / lexiflow / 用户 ${state.databaseTarget?.user ?? 'lexiflow'}\n${credential}`);
   }
   function writeLock(childPid) {
     if (!lockOwned) return;
@@ -345,6 +346,7 @@ export async function runLocal(argv, candidateRequest) {
     step = '读取安装记录';
     state = loadState();
     if (!['new', 'initialized', 'ready'].includes(state.phase)) fail('DEPLOYMENT_INSTALL_STATE_INVALID');
+    if (['status', 'up'].includes(action) && ['ready', 'initialized'].includes(state.phase)) await verifyInstalledExtensionArchive(dir, state);
     const replacementPending = fs.existsSync(path.join(dir, 'image-replacement.json'));
     if (replacementPending && action !== 'recover') fail('DEPLOYMENT_PENDING_REPLAN_REQUIRED');
     await assertDevelopmentTargetIdentity({ repo, state, run });
@@ -410,7 +412,7 @@ export async function runLocal(argv, candidateRequest) {
       if (fact.needsRebuild || fact.generationVersion !== state.generationVersion
           || fact.datasetVersion !== state.datasetIdentity.version) fail('DEPLOYMENT_STATE_PENDING');
     }
-    if (action === 'status') { console.log(await compose('ps')); await ready(); summary(); return 0; }
+    if (action === 'status') { console.log(await compose('ps')); await ready(); await verifyInstalledExtensionArchive(dir, state); summary(); return 0; }
     if (action === 'logs') {
       await runCommand('podman', composeArgs('logs', '--follow', '--tail=0', ...(state.databaseTarget?.kind === 'external' ? ['api'] : ['postgres', 'api'])),
         { cwd: dir, env: environment, follow: true, label: '查看服务日志' });
@@ -428,7 +430,7 @@ export async function runLocal(argv, candidateRequest) {
     if (fact.needsRebuild || fact.generationVersion !== state.generationVersion
         || fact.datasetVersion !== state.datasetIdentity.version) fail('DEPLOYMENT_STATE_PENDING');
     await compose('up', '-d', '--no-deps', 'api');
-    await ready(); return 0;
+    await ready(); await verifyInstalledExtensionArchive(dir, state); return 0;
   }
   function loadState() {
     const file = path.join(dir, 'state.json'); regular(file);
@@ -500,6 +502,16 @@ export async function runLocal(argv, candidateRequest) {
       DEPLOYMENT_GENERATION_INVALID: '数据生成身份无效。',
       DEPLOYMENT_SOURCE_UNAVAILABLE: '词库来源准备失败或未产生预期资料。',
       EXTENSION_IDENTITY_MISMATCH: 'EXTENSION_IDENTITY_MISMATCH：扩展构建身份或 API 端口与本次计划不符；停止后续部署，请保持源码稳定后重新运行。',
+      EXTENSION_API_PORT_INVALID: '扩展 API 端口不在 1–65535 范围内，未生成制品。',
+      EXTENSION_ARCHIVE_METADATA_INVALID: '安装记录缺少有效扩展 ZIP 身份；请显式运行 upgrade 生成并绑定配套归档。',
+      EXTENSION_ARCHIVE_INVALID: '扩展 ZIP、SHA256 sidecar 或文件身份校验失败；拒绝报告就绪。',
+      EXTENSION_ARCHIVE_IDENTITY_MISMATCH: '扩展 ZIP 的构建身份或 API 端口与本次安装不符。',
+      EXTENSION_ARCHIVE_TREE_MISMATCH: 'Chrome 固定扩展目录与绑定 ZIP 内容不一致。',
+      EXTENSION_ARCHIVE_CONFLICT: 'buildId 归档位置已有不同内容；拒绝覆盖不可变制品。',
+      ARCHIVE_FILE_SET_MISMATCH: '扩展 ZIP 文件白名单不匹配。',
+      ARCHIVE_MANIFEST_INVALID: '扩展 ZIP manifest 权限、版本或入口不符合合同。',
+      ARCHIVE_RESOURCE_MISSING: '扩展 ZIP 缺少 manifest、HTML 或 CSS 引用的资源。',
+      ARCHIVE_INVALID: '扩展 ZIP 结构或校验和无效。',
       JAVA_25_UNAVAILABLE: '未找到 Eclipse Temurin 25；请核对仓库本地 JDK 或显式环境配置。',
       JAVA_HOME_INVALID: '指定的 Java 路径不是绝对路径，未执行部署。',
       JAVA_RELEASE_INVALID: '选定的 Java 不是可执行的 Eclipse Temurin 25 JDK，未执行部署。',

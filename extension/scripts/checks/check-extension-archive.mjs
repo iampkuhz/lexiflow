@@ -5,8 +5,8 @@ import { constants } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readExtensionFiles } from '../../../ops/release/integrity/extension-archive-integrity.mjs';
-import { resolveBuildIdentity, assertBuildIdentityMatches, validateBuildIdentity, chromeVersion } from '../../../ops/release/integrity/source-build-identity.mjs';
-import { PACKAGE_FILES } from '../packaging/package-extension-release.mjs';
+import { resolveBuildIdentity } from '../../../ops/release/integrity/source-build-identity.mjs';
+import { EXTENSION_PACKAGE_FILES, validateExtensionArchiveEntries } from '../packaging/extension-archive-contract.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 function fail(code) { throw new Error(code); }
@@ -42,39 +42,9 @@ export async function checkExtensionArchive(zipPath, expectedCommit, repoRoot = 
   }
   const entries = await readExtensionFiles(target, sha256);
   const names = [...entries.keys()].sort();
-  if (JSON.stringify(names) !== JSON.stringify([...PACKAGE_FILES].sort())) fail('ARCHIVE_FILE_SET_MISMATCH');
-  let manifest, identity;
-  try {
-    manifest = JSON.parse(entries.get('manifest.json').toString('utf8'));
-    identity = JSON.parse(entries.get('build-identity.json').toString('utf8'));
-    validateBuildIdentity(identity);
-    if (identity.sourceCommit !== expectedCommit) fail('ARCHIVE_SOURCE_IDENTITY_MISMATCH');
-    if (expected) assertBuildIdentityMatches(identity, expected);
-  } catch { fail('ARCHIVE_IDENTITY_MISMATCH'); }
-  if (filename !== `lexiflow-extension-${identity.softwareVersion}.zip`) fail('ARCHIVE_FILENAME_MISMATCH');
-  if (manifest.manifest_version !== 3 || manifest.version !== chromeVersion(identity.softwareVersion) || manifest.version_name !== identity.softwareVersion
-    || JSON.stringify(manifest.permissions) !== '["storage"]'
-    || JSON.stringify(manifest.host_permissions) !== '["http://127.0.0.1:18080/*"]'
-    || manifest.background?.service_worker !== 'background.js' || manifest.action?.default_popup !== 'popup.html') fail('ARCHIVE_MANIFEST_INVALID');
-  const files = new Set(names);
-  const refs = [manifest.background.service_worker, manifest.action.default_popup,
-    ...Object.values(manifest.action.default_icon ?? {}), ...Object.values(manifest.icons ?? {}),
-    ...(manifest.content_scripts ?? []).flatMap(item => item.js ?? []), ...(manifest.content_scripts ?? []).flatMap(item => item.css ?? [])];
-  for (const ref of refs) if (!files.has(ref)) fail('ARCHIVE_RESOURCE_MISSING');
-  const html = entries.get('popup.html').toString('utf8');
-  const htmlRefs = [...html.matchAll(/(?:src|href)=["']([^"']+)["']/gu)].map(([, ref]) => ref);
-  if (htmlRefs.length === 0) fail('ARCHIVE_MANIFEST_INVALID');
-  for (const ref of htmlRefs) {
-    if (/^(?:https?:|data:|#)/iu.test(ref)) continue;
-    if (!files.has(ref)) fail('ARCHIVE_RESOURCE_MISSING');
-  }
-  const css = entries.get('popup.css').toString('utf8');
-  const cssRefs = [...css.matchAll(/url\(["']?([^"')]+)["']?\)|@import\s+["']([^"']+)["']/giu)];
-  for (const match of cssRefs) {
-    const ref = match[1] ?? match[2];
-    if (/^(?:https?:|data:|#)/iu.test(ref)) continue;
-    if (!files.has(ref)) fail('ARCHIVE_RESOURCE_MISSING');
-  }
+  const { manifest, identity } = validateExtensionArchiveEntries(entries, { buildIdentity: expected, apiPort: 18080, filename });
+  if (identity.sourceCommit !== expectedCommit) fail('ARCHIVE_SOURCE_IDENTITY_MISMATCH');
+  if (JSON.stringify(names) !== JSON.stringify([...EXTENSION_PACKAGE_FILES].sort())) fail('ARCHIVE_FILE_SET_MISMATCH');
   return { filename, sha256, bytes: bytes.length, buildIdentity: identity, entries };
 }
 

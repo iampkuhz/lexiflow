@@ -11,13 +11,25 @@ import { runUnifiedDeployment } from '../installation/installation-upgrade-workf
 import { generationCodeVersion, dataGeneration } from '../../dataset/dataset-generation-identity.mjs';
 import { resolveBuildIdentity } from '../../release/integrity/source-build-identity.mjs';
 import { makeZip } from '../../release/tests/zip-fixture.mjs';
+import { EXTENSION_PACKAGE_FILES as PACKAGE_FILES } from '../../../extension/scripts/packaging/extension-archive-contract.mjs';
+import { createExtensionZip } from '../../../extension/scripts/packaging/package-extension-release.mjs';
+import { readExtensionFiles } from '../../release/integrity/extension-archive-integrity.mjs';
 
 const root = path.resolve(import.meta.dirname, '../../..');
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const image = letter => `sha256:${letter.repeat(64)}`;
 function unusedPort() { return new Promise(resolve => { const server = net.createServer(); server.listen(0, '127.0.0.1', () => { const value = server.address().port; server.close(() => resolve(value)); }); }); }
 function write(file, content) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, content); }
-function fixture({ candidateMode = false, failReady = false, failApply = false, structuredFailure = false, externalMissing = false, missingPgTool = false, developmentTrust = false, sourceDriftDuringBuild = false } = {}) {
+function extensionFiles(identity, apiPort) {
+  return new Map(PACKAGE_FILES.map(name => [name, Buffer.from(name === 'manifest.json'
+    ? JSON.stringify({ manifest_version: 3, version: identity.chromeVersion, version_name: identity.softwareVersion,
+      permissions: ['storage'], host_permissions: [`http://127.0.0.1:${apiPort}/*`],
+      background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' } })
+    : name === 'build-identity.json' ? JSON.stringify(identity)
+    : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>' : `synthetic:${name}`)]));
+}
+function writeExtension(directory, files) { for (const [name, bytes] of files) write(path.join(directory, name), bytes); }
+function fixture({ apiPort = 18080, candidateMode = false, failReady = false, failApply = false, structuredFailure = false, externalMissing = false, missingPgTool = false, developmentTrust = false, sourceDriftDuringBuild = false } = {}) {
   const base = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'lexiflow-flow-'));
   const repo = path.join(base, 'source'), dir = path.join(base, 'install'); fs.mkdirSync(repo);
   write(path.join(repo, '.gitignore'), 'tmp/\nbackend/product/api/build/\nextension/dist/\nextension/node_modules/\n');
@@ -73,7 +85,7 @@ function fixture({ candidateMode = false, failReady = false, failApply = false, 
       request = { candidateDirectory: candidateDir, candidateSha256: candidate.candidateSha256 };
     }
   }
-  async function run(command, argv) {
+  async function run(command, argv, { env } = {}) {
     calls.push(`${command}:${argv.join(' ')}`);
     if (command === './gradlew') { identity = resolveBuildIdentity(repo); write(path.join(repo, 'backend/product/api/build/internal/boot/api-internal.jar'), 'synthetic jar'); return ''; }
     if (command === 'npm') {
@@ -82,9 +94,7 @@ function fixture({ candidateMode = false, failReady = false, failApply = false, 
           write(path.join(repo, 'application.txt'), 'changed application during build\n');
           identity = resolveBuildIdentity(repo);
         }
-        write(path.join(repo, 'extension/dist/build-identity.json'), JSON.stringify(identity));
-        write(path.join(repo, 'extension/dist/manifest.json'), JSON.stringify({ version: identity.chromeVersion,
-          version_name: identity.softwareVersion, host_permissions: ['http://127.0.0.1:18080/*'] }));
+        writeExtension(path.join(repo, 'extension/dist'), extensionFiles(identity, Number(env.LEXIFLOW_API_PORT)));
       }
       return '';
     }
@@ -144,17 +154,21 @@ function fixture({ candidateMode = false, failReady = false, failApply = false, 
   }
   function ctx({ planOnly = false, confirmPlan, confirmInput, confirmOutput } = {}) {
     let current;
-    return { repo, dir, action: 'install', apiPort: 18080, dbPort, seen: new Set(),
+    return { repo, dir, action: 'install', apiPort, dbPort, seen: new Set(),
       candidate, candidateRequest: request, candidateAdapter: { readCandidate: async () => candidate,
-        installCandidateArtifacts: async (_candidate, { installDir }) => {
+        installCandidateArtifacts: async (_candidate, { installDir, archiveRoot }) => {
           calls.push('candidate-install');
-          write(path.join(installDir, 'extension/build-identity.json'), JSON.stringify(identity));
-          write(path.join(installDir, 'extension/manifest.json'), JSON.stringify({ version: identity.chromeVersion,
-            version_name: identity.softwareVersion, host_permissions: ['http://127.0.0.1:18080/*'] }));
-          return { apiImage: image('a'), postgresImage: image('b') };
+          const files = extensionFiles(identity, apiPort), zip = makeZip([...files]);
+          writeExtension(path.join(installDir, 'extension'), files);
+          const filename = `lexiflow-extension-${identity.softwareVersion}.zip`;
+          const relative = `extension-artifacts/${identity.buildId}/${filename}`, digest = hash(zip);
+          write(path.join(archiveRoot, relative), zip);
+          write(path.join(archiveRoot, `${relative}.sha256`), `${digest}  ${filename}\n`);
+          return { apiImage: image('a'), postgresImage: image('b'),
+            extensionArchive: { path: relative, bytes: zip.length, sha256: digest, buildIdentity: identity } };
         } },
       // 编排 fixture 不读取真实 API 监听者；数据库占用场景仍使用独立测试端口。
-      portTaken: port => port === 18080 ? Promise.resolve(false) : new Promise(resolve => {
+      portTaken: port => port === apiPort ? Promise.resolve(false) : new Promise(resolve => {
         const server = net.createServer();
         server.once('error', error => resolve(error.code === 'EADDRINUSE'));
         server.listen(port, '127.0.0.1', () => server.close(() => resolve(false)));
@@ -469,6 +483,7 @@ for (const candidateMode of [false, true]) test(`unchanged ${candidateMode ? 'ca
     await runUnifiedDeployment(f.ctx({ confirmPlan: initial.planHash }));
     const initialState = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json')));
     let operation = initialState.lastOperation.operation;
+    const initialArchive = initialState.artifacts.extensionArchive;
     for (const action of ['install', 'upgrade']) {
       const planned = await f.plan(action);
       assert.equal(planned.plan.actions.applicationReason, 'INSTALL_REFRESH');
@@ -493,8 +508,53 @@ for (const candidateMode of [false, true]) test(`unchanged ${candidateMode ? 'ca
       assert.equal(state.generationVersion, initialState.generationVersion);
       assert.notEqual(state.lastOperation.operation, operation);
       assert.equal(state.lastOperation.kind, action);
+      assert.deepEqual(state.artifacts.extensionArchive, initialArchive);
+      assert.deepEqual(state.lastOperation.artifacts.extensionArchive, state.artifacts.extensionArchive);
+      const zipPath = path.join(f.dir, state.artifacts.extensionArchive.path);
+      assert.equal(hash(fs.readFileSync(zipPath)), state.artifacts.extensionArchive.sha256);
+      const files = await readExtensionFiles(zipPath, state.artifacts.extensionArchive.sha256);
+      assert.deepEqual([...files.keys()].sort(), [...PACKAGE_FILES].sort());
+      for (const [name, bytes] of files) assert.deepEqual(fs.readFileSync(path.join(f.dir, 'extension', name)), bytes);
       assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'deployment.json'))).stage, 'complete');
       operation = state.lastOperation.operation;
     }
+  } finally { f.cleanup(); }
+});
+
+for (const apiPort of [18080, 18081]) test(`source installation packages API port ${apiPort} with the shared release packer`, async () => {
+  const f = fixture({ apiPort });
+  try {
+    await f.setup(); const { planHash } = await f.plan();
+    await runUnifiedDeployment(f.ctx({ confirmPlan: planHash }));
+    const state = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json'))), descriptor = state.artifacts.extensionArchive;
+    const result = await createExtensionZip({ root: path.join(f.repo, 'extension'), buildIdentity: state.buildIdentity, apiPort });
+    const zipPath = path.join(f.dir, descriptor.path);
+    assert.deepEqual(fs.readFileSync(zipPath), Buffer.from(result.archive));
+    assert.equal(descriptor.sha256, result.descriptor.sha256);
+    assert.equal(descriptor.bytes, result.descriptor.bytes);
+    assert.deepEqual(descriptor.buildIdentity, state.buildIdentity);
+    assert.equal(fs.readFileSync(`${zipPath}.sha256`, 'utf8'), `${descriptor.sha256}  ${path.basename(zipPath)}\n`);
+    for (const [name, bytes] of await readExtensionFiles(zipPath, descriptor.sha256)) assert.deepEqual(fs.readFileSync(path.join(f.dir, 'extension', name)), bytes);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.dir, 'extension/manifest.json'))).host_permissions, [`http://127.0.0.1:${apiPort}/*`]);
+  } finally { f.cleanup(); }
+});
+
+for (const target of ['zip', 'sidecar', 'tree']) test(`tampering ${target} during readiness cannot publish a successful installation`, async () => {
+  const f = fixture();
+  try {
+    await f.setup(); const { planHash } = await f.plan(), ctx = f.ctx({ confirmPlan: planHash });
+    const originalReady = ctx.ready;
+    ctx.ready = async state => {
+      await originalReady(state);
+      const zipPath = path.join(f.dir, state.artifacts.extensionArchive.path);
+      const file = target === 'zip' ? zipPath : target === 'sidecar' ? `${zipPath}.sha256` : path.join(f.dir, 'extension/content.js');
+      fs.appendFileSync(file, 'tampered');
+    };
+    await assert.rejects(runUnifiedDeployment(ctx), /EXTENSION_ARCHIVE_(INVALID|TREE_MISMATCH)/);
+    const state = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json')));
+    assert.equal(state.phase, 'initialized');
+    assert.equal(state.lastOperation, undefined);
+    assert.equal(fs.existsSync(path.join(f.dir, 'installation-records')), false);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'deployment.json'))).stage, 'application-activated');
   } finally { f.cleanup(); }
 });

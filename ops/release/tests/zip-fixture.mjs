@@ -42,6 +42,10 @@ export function jarBytes(identity) {
 
 export function extensionBytes(identity) {
   const build = `${JSON.stringify(identity)}\n`;
-  const manifest = `${JSON.stringify({ manifest_version: 3, version: identity.chromeVersion, version_name: identity.softwareVersion, permissions: ['storage'], host_permissions: ['http://127.0.0.1:18080/*'] })}\n`;
-  return makeZip([['build-identity.json', build], ['manifest.json', manifest]]);
+  const manifest = `${JSON.stringify({ manifest_version: 3, version: identity.chromeVersion, version_name: identity.softwareVersion,
+    permissions: ['storage'], host_permissions: ['http://127.0.0.1:18080/*'], background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' } })}\n`;
+  const names = ['manifest.json', 'build-identity.json', 'background.js', 'content.js', 'youtube-bridge.js', 'popup.js', 'popup.html', 'popup.css',
+    'assets/icon-16.png', 'assets/icon-32.png', 'assets/icon-48.png', 'assets/icon-128.png', 'assets/logo.svg'];
+  return makeZip(names.map(name => [name, name === 'manifest.json' ? manifest : name === 'build-identity.json' ? build
+    : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>' : `synthetic:${name}`]));
 }
