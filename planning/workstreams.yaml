@@ -7315,8 +7315,8 @@ workstreams:
       - id: LF-TSK-OPS-2024
         title: 实现固定 GHCR 已验收镜像发布与摘要证明
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/first-release-v2/tasks.md
         estimated_minutes: 60
         kind: implementation
@@ -7346,8 +7346,8 @@ workstreams:
       - id: LF-TSK-OPS-2025
         title: 同步真实候选验收到统一重装与向前重试合同
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/first-release-v2/tasks.md
         estimated_minutes: 75
         kind: implementation
@@ -7380,8 +7380,8 @@ workstreams:
       - id: LF-TSK-OPS-2026
         title: 接通首发版本许可与 GHCR 晋升消费者
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/first-release-v2/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -7426,8 +7426,8 @@ workstreams:
       - id: LF-TSK-OPS-2027
         title: 独立执行首发实现最终完整开发 Hook
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/first-release-v2/tasks.md
         estimated_minutes: 90
         kind: design
@@ -7483,6 +7483,95 @@ workstreams:
         - eng.repository.docs
         depends_on: []
         deliverable: 独立只读复核首发冻结差异与开发证据的实现或只读检查产物及准确边界。
+      - id: LF-TSK-OPS-2029
+        title: 修正首发许可和方案的当前入口引用
+        priority: P0
+        task_version: 1
+        change_version: 1.2.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/third-party-notices.md
+        - openspec/changes/first-release-v2/**
+        - planning/workstreams.yaml
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 修正首发许可和方案的当前入口引用；仅真实范围证据，不签 Formal 或公开发布。
+        acceptance_criteria:
+        - 保持原有四项未提交修改，不覆盖他人工作、不自动 Git 操作。
+        - 缺必需环境、未执行或清理无法确认时保持 BLOCKED；不使用旧报告代替。
+        - 真实发行仍要求干净候选、专用宿主、许可及独立 Formal。
+        acceptance_evidence:
+        - 当次真实命令日志、原始 verification report 和精确清理收据。
+        validation_command: python3 -m scripts.checks.repository.run_repository_check_group --mode docs
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.docs
+        depends_on: []
+        deliverable: 修正首发许可和方案的当前入口引用的当前证据与准确边界。
+      - id: LF-TSK-OPS-2030
+        title: 独立执行首发完整 Repository Verify
+        priority: P0
+        task_version: 1
+        change_version: 1.2.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 90
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/quality/first-release-v2/repository-validation-resumed/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立执行首发完整 Repository Verify；仅真实范围证据，不签 Formal 或公开发布。
+        acceptance_criteria:
+        - 保持原有四项未提交修改，不覆盖他人工作、不自动 Git 操作。
+        - 缺必需环境、未执行或清理无法确认时保持 BLOCKED；不使用旧报告代替。
+        - 真实发行仍要求干净候选、专用宿主、许可及独立 Formal。
+        acceptance_evidence:
+        - 当次真实命令日志、原始 verification report 和精确清理收据。
+        validation_command: python3 scripts/verification/commands/run_repository_checks.py
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.docs
+        depends_on: []
+        deliverable: 独立执行首发完整 Repository Verify的当前证据与准确边界。
+      - id: LF-TSK-OPS-2031
+        title: 独立诊断合成发行 runtime 的真实阻塞层
+        priority: P0
+        task_version: 1
+        change_version: 1.2.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 45
+        kind: design
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2030
+        allowed_files:
+        - tmp/quality/first-release-v2/lifecycle-diagnostic-resumed/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 精确执行实际 eng.release.lifecycle-runtime；只暂时提供已存在本机 endpoint/cache，缺失或失败保持真实状态。
+        acceptance_criteria:
+        - 不重跑之前通过的完整仓库检查，不冒称完整 Repository PASS 或 Formal。
+        - 使用现有本机 ARM64 Podman 和构建 cache，不改机器、全局代理或用户配置，不伪造候选。
+        - 原始错误和精确 owned 清理结果可核验，冻结输入漂移失败关闭。
+        acceptance_evidence:
+        - 当次精确诊断 JSON、日志摘要、来源快照及隔离资源清理收据。
+        validation_command: python3 -m scripts.verification.commands.diagnose_repository_check --check-id eng.release.lifecycle-runtime
+        required_check_ids:
+        - eng.release.lifecycle-runtime
+        depends_on: []
+        deliverable: 合成发行实际生命周期的有界证据或具体阻塞层；不等同真实资料候选。
 - id: LF-WS-ADP
   code: ADP
   name: 后续 Content Adapter
