@@ -26,7 +26,11 @@ class CachedLexiconQueryServiceTest {
     repository.prewarm = repository.entries;
     var service = new CachedLexiconQueryService(repository, 8, 8, 0);
     int beforeReads = repository.versionReads;
-    assertEquals(List.of(), service.lookupForms(List.of("uh", "um", "a")).candidates());
+    var filtered = service.lookupForms(List.of("uh", "um", "a"));
+    assertEquals(List.of(), filtered.candidates());
+    assertEquals(java.util.OptionalLong.empty(), filtered.publishedVersion());
+    assertEquals(
+        io.lexiflow.lexicon.domain.model.LexiconLookupResult.Counts.zero(), filtered.counts());
     assertEquals(beforeReads, repository.versionReads);
     var result = service.lookupForms(List.of("uh", "um", "yak", "of course"));
     assertEquals(

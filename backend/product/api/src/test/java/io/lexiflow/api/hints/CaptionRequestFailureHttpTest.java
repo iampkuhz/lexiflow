@@ -124,6 +124,45 @@ class CaptionRequestFailureHttpTest {
   }
 
   @Test
+  void filteredShortWordsReturnAcknowledgedNoHintWithoutChangingReadiness() throws Exception {
+    var mapper = new tools.jackson.databind.ObjectMapper();
+    for (var text : List.of("AI", "UH", "UM", "I", "to", "it")) {
+      var captured = requestWithEvents(payload(segment("short", text, true)));
+      assertEquals(200, captured.response.statusCode());
+      var body = mapper.readTree(captured.response.body());
+      assertEquals("short", body.get("processedKeys").get(0).asString());
+      assertEquals(1, body.get("processedKeys").size());
+      assertEquals(0, body.get("hints").size());
+      assertEquals("NO_HINT", captured.terminal);
+      assertEquals(
+          "no-store", captured.response.headers().firstValue("Cache-Control").orElseThrow());
+      assertEquals(
+          new LexiconRuntime.State("formal", LexiconRuntime.Reason.OK, 7L, true), runtime.state());
+    }
+    assertEquals(0, SyntheticRepository.lookups.get());
+    assertEquals(200, post(payload(segment("phrase", "AI TV", true))).statusCode());
+    assertEquals(1, SyntheticRepository.lookups.get());
+    assertEquals(200, post(payload(segment("normal", "reliable", true))).statusCode());
+    assertEquals(2, SyntheticRepository.lookups.get());
+    try (var client = HttpClient.newHttpClient()) {
+      var ready = mapper.readTree(status(client).body());
+      assertTrue(ready.get("ready").asBoolean());
+      assertEquals("OK", ready.get("reason").asString());
+      assertEquals(7, ready.get("datasetVersion").asLong());
+    }
+  }
+
+  @Test
+  void filteredShortWordStillRejectsGenuinelyUnpublishedData() throws Exception {
+    SyntheticRepository.version = 0;
+    runtime.probe();
+    var captured = requestWithEvents(payload(segment("short", "AI", true)));
+    assertEquals(503, captured.response.statusCode());
+    assertEquals("NO_PUBLISHED_DATA", captured.terminal);
+    assertFalse(runtime.state().ready());
+  }
+
+  @Test
   void dependencyFailureUses503AndInternalFailureUsesFixed500WithoutPayload() throws Exception {
     SyntheticRepository.failure = Failure.DEPENDENCY;
     var dependency = requestWithEvents(payload(segment("new", "private-dependency", true)));

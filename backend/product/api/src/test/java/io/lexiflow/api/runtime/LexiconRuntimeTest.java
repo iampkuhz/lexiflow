@@ -16,6 +16,66 @@ import org.junit.jupiter.api.Test;
 
 class LexiconRuntimeTest {
   @Test
+  void filteredShortWordsKeepConfirmedReadyStateWithoutStorageReads() {
+    for (boolean degraded : List.of(false, true)) {
+      var repo = new MutableRepository();
+      repo.failPrewarm = degraded;
+      var runtime =
+          new LexiconRuntime("formal", repo, new StructuredEventLogger((level, json) -> {}));
+      var confirmed = runtime.state();
+      int beforeVersions = repo.versionReads;
+      int beforeWarmups = repo.prewarmReads;
+      for (var word : List.of("ai", "uh", "um", "i", "to", "it")) {
+        var result = runtime.lookupForms(List.of(word));
+        assertTrue(result.candidates().isEmpty());
+        assertTrue(result.publishedVersion().isEmpty());
+        assertEquals(
+            io.lexiflow.lexicon.domain.model.LexiconLookupResult.Counts.zero(), result.counts());
+        assertEquals(confirmed, runtime.state());
+      }
+      assertEquals(beforeVersions, repo.versionReads);
+      assertEquals(beforeWarmups, repo.prewarmReads);
+      assertEquals(7, runtime.lookupForms(List.of("quasar")).publishedVersion().orElseThrow());
+      assertTrue(runtime.state().ready());
+    }
+  }
+
+  @Test
+  void filteredShortWordRecoveryKeepsActualProbeCounts() {
+    var repo = new MutableRepository();
+    repo.version = 0;
+    var runtime =
+        new LexiconRuntime("formal", repo, new StructuredEventLogger((level, json) -> {}));
+    repo.version = 7;
+    int beforeVersions = repo.versionReads;
+    int beforeWarmups = repo.prewarmReads;
+    var result = runtime.lookupForms(List.of("ai"));
+    assertTrue(result.candidates().isEmpty());
+    assertTrue(result.publishedVersion().isEmpty());
+    assertEquals(repo.versionReads - beforeVersions, result.counts().versionReads());
+    assertEquals(1, result.counts().versionReads());
+    assertEquals(repo.prewarmReads - beforeWarmups, result.counts().prewarmReads());
+    assertEquals(2, result.counts().prewarmReads());
+    assertEquals(0, result.counts().queryKeys());
+    assertEquals(0, result.counts().dbBatches());
+    assertEquals(
+        new LexiconRuntime.State("formal", LexiconRuntime.Reason.OK, 7L, true), runtime.state());
+  }
+
+  @Test
+  void filteredShortWordsDoNotMakeUnpublishedRuntimeReady() {
+    var repo = new MutableRepository();
+    repo.version = 0;
+    var runtime =
+        new LexiconRuntime("formal", repo, new StructuredEventLogger((level, json) -> {}));
+    var failure =
+        assertThrows(LexiconNotReadyException.class, () -> runtime.lookupForms(List.of("ai")));
+    assertEquals(LexiconRuntime.Reason.NO_PUBLISHED_DATA, failure.reason());
+    assertFalse(runtime.state().ready());
+    assertEquals(0L, runtime.state().version());
+  }
+
+  @Test
   void realRuntimeCacheVersionChangeEmitsOneInvalidationEventAfterFirstBinding() {
     var events = new ArrayList<String>();
     var repo = new MutableRepository();
