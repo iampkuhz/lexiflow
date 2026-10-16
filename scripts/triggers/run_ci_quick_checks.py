@@ -314,6 +314,16 @@ def public_summary(result: dict[str, Any], root: Path) -> dict[str, Any]:
                         text,
                     )
                 )
+                # Python traceback 的行号与路径分离，只公开仓库代码定位。
+                locations.update(
+                    f"{filename}:{line}"
+                    for filename, line in re.findall(
+                        r'File "[^"\r\n]*?((?:tests|scripts|backend|extension|ops)/'
+                        r'[A-Za-z0-9_./-]+\.py)", line ([0-9]+)',
+                        text,
+                    )
+                    if (root / filename).is_file()
+                )
                 categories.update(
                     name
                     for name in (
