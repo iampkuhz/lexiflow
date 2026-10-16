@@ -131,7 +131,9 @@ test("rejects dirty Git input and safely reuses only byte-identical output", asy
     const original = await readFile(zip);
     await publishExtensionArchive(a.archive, checksum, output, a.descriptor.filename);
     assert.deepEqual(await readFile(zip), original);
-    await assert.rejects(publishExtensionArchive(a.archive, `0${checksum.slice(1)}`, output, a.descriptor.filename), /ARCHIVE_PUBLICATION_INVALID/u);
+    const corruptedChecksum = `${checksum[0] === "0" ? "1" : "0"}${checksum.slice(1)}`;
+    assert.notEqual(corruptedChecksum, checksum);
+    await assert.rejects(publishExtensionArchive(a.archive, corruptedChecksum, output, a.descriptor.filename), /ARCHIVE_PUBLICATION_INVALID/u);
     await assert.rejects(publishExtensionArchive(a.archive, checksum, output, '../escape.zip'), /ARCHIVE_PUBLICATION_INVALID/u);
     await writeFile(path.join(root, "dist/popup.html"), '<link href="popup.css"><script src="popup.js"></script><!-- different -->');
     const changed = await createExtensionZip({ root, buildIdentity });
