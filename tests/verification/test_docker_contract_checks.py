@@ -124,8 +124,8 @@ class DockerContractCheckTest(unittest.TestCase):
             "ops/release/runtime/release-installation-docker.sh",
             "ops/release/runtime/release-installation-state.sh",
             "ops/release/runtime/release-installation-lifecycle.sh",
-            "backend/product/api/src/main/java/io/lexiflow/api/release/RuntimeHealthCommand.java",
-            "backend/product/api/src/test/java/io/lexiflow/api/release/RuntimeHealthCommandTest.java",
+            "backend/product/api/src/main/java/io/lexiflow/api/runtime/ContainerHealthController.java",
+            "backend/product/api/src/test/java/io/lexiflow/api/runtime/ContainerHealthControllerTest.java",
             "requirements-dev.txt",
         ):
             self.assertIn(name, base_closure)

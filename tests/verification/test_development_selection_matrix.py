@@ -160,7 +160,7 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
                 "eng.release.docker-local-on-change",
                 "eng.release.docker-node-on-change",
             },
-            "backend/product/api/src/main/java/io/lexiflow/api/release/RuntimeHealthCommand.java": {
+            "backend/product/api/src/main/java/io/lexiflow/api/runtime/ContainerHealthController.java": {
                 "eng.backend.build-contract",
                 "eng.backend.delivery",
                 "eng.extension.quality",

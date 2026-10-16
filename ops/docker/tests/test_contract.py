@@ -1,16 +1,19 @@
 """Docker installation contract tests."""
 
-import json
 import hashlib
+import json
 import os
-import sys
 import pathlib
 import shlex
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 
 import yaml
+
+from ops.docker.tests.health_probe_fixture import HealthProbeFixture
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 DOCKER = ROOT / "ops/docker"
@@ -444,7 +447,9 @@ class DockerContractTest(unittest.TestCase):
         )
         self.assertNotIn("RUN ", postgres)
         self.assertEqual(dockerfile.count("RUN "), 1)
-        self.assertIn("RUN mkdir /work && chown 10001:10001 /work", dockerfile)
+        self.assertIn("mkdir /work && chown 10001:10001 /work", dockerfile)
+        for tool in ("/bin/bash", "/usr/bin/timeout", "/usr/bin/env"):
+            self.assertIn("test -x " + tool, dockerfile)
 
     def test_compose_is_private_bounded_and_health_ordered(self):
         cfg = yaml.safe_load((DOCKER / "compose.yaml").read_text())
@@ -927,6 +932,13 @@ else: sys.exit(7)
                 '#!/bin/sh\nprintf \'%s\\n\' "$*" > "$LOG"\nprintf \'JVM_ENV=%s|%s|%s\\n\' "${JAVA_TOOL_OPTIONS:-}" "${JDK_JAVA_OPTIONS:-}" "${_JAVA_OPTIONS:-}" >> "$LOG"\nprintf \'DB_ENV=%s|%s\\n\' "${SPRING_DATASOURCE_URL:-}" "${SPRING_DATASOURCE_USERNAME:-}" >> "$LOG"\nif [ -z "${SPRING_DATASOURCE_PASSWORD:-}" ]; then printf \'DB_PASSWORD_EMPTY=true\\n\' >> "$LOG"; else printf \'DB_PASSWORD_EMPTY=false\\n\' >> "$LOG"; fi\nexit "${JAVA_EXIT:-0}"\n'
             )
             stub.chmod(0o755)
+            timer = bindir / "timeout"
+            timer.write_text(
+                '#!/bin/sh\nprintf "%s\\n" "$*" > ' + shlex.quote(str(log))
+                + '\nprintf "JVM_ENV=%s|%s|%s\\n" "${JAVA_TOOL_OPTIONS:-}" "${JDK_JAVA_OPTIONS:-}" "${_JAVA_OPTIONS:-}" >> '
+                + shlex.quote(str(log)) + '\nexit 7\n'
+            )
+            timer.chmod(0o755)
             secrets = pathlib.Path(td) / "secrets"
             secrets.mkdir()
             if files:
@@ -947,6 +959,7 @@ else: sys.exit(7)
                 .read_text()
                 .replace("/run/secrets/app-password", str(secrets / "app-password"))
                 .replace("/dataset/dataset.zip", str(pathlib.Path(td) / "dataset.zip"))
+                .replace("/usr/bin/timeout", str(timer))
             )
             script_copy.chmod(0o755)
             (pathlib.Path(td) / "dataset.zip").write_text("synthetic")
@@ -969,7 +982,7 @@ else: sys.exit(7)
             env={"JAVA_TOOL_OPTIONS": "-Dsecret=LEAK"},
         )
         self.assertEqual(proc.returncode, 0)
-        self.assertIn("-Xms256m -Xmx768m", logged)
+        self.assertIn("-Xms64m -Xmx768m", logged)
         self.assertIn("-Dlexiflow.runtime.mode=formal", logged)
         self.assertIn("JVM_ENV=||", logged)
         self.assertNotIn("LEAK", logged)
@@ -1050,6 +1063,7 @@ else: sys.exit(7)
                 files={"app-password": password},
             )
             self.assertEqual(proc.returncode, 0)
+            self.assertIn("-Xms256m -Xmx768m", logged)
             self.assertIn("--release-dataset initialize --package", logged)
             self.assertIn("--expected-sha256 " + digest, logged)
             self.assertIn("-Djava.io.tmpdir=/work", logged)
@@ -1067,12 +1081,9 @@ else: sys.exit(7)
             "health", env={"JAVA_EXIT": "7", "JAVA_TOOL_OPTIONS": "-Dsurprise=1"}
         )
         self.assertEqual(proc.returncode, 7)
-        self.assertIn(
-            "-Dloader.main=io.lexiflow.api.release.RuntimeHealthCommand", logged
-        )
-        self.assertIn(
-            "org.springframework.boot.loader.launch.PropertiesLauncher", logged
-        )
+        self.assertIn("--kill-after=1s 2s /bin/bash --noprofile --norc -s", logged)
+        self.assertNotIn("java", logged)
+        self.assertNotIn("PropertiesLauncher", logged)
         self.assertIn("JVM_ENV=||", logged)
         proc, _ = self._run("health", ("http://evil",))
         self.assertNotEqual(proc.returncode, 0)
@@ -1120,6 +1131,140 @@ else: sys.exit(7)
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertNotIn("extra", result.stderr)
+
+
+class ContainerHealthTransportTest(unittest.TestCase):
+    SUMMARY = (
+        b'{"softwareVersion":"1.2.3","apiContract":"caption-hints.v2",'
+        b'"mode":"formal","ready":true,"reason":"OK","datasetVersion":42}'
+    )
+
+    @classmethod
+    def response(cls, body=None, status=b"200 OK", extra=b"", length=None):
+        body = cls.SUMMARY if body is None else body
+        size = len(body) if length is None else length
+        return (
+            b"HTTP/1.1 " + status + b"\r\nContent-Type: application/json\r\n"
+            + b"Content-Length: " + str(size).encode() + b"\r\n" + extra
+            + b"Connection: close\r\n\r\n" + body
+        )
+
+    def probe(self, response):
+        with HealthProbeFixture(DOCKER / "run-container-command.sh", [(0, response)]) as fixture:
+            return fixture.run()
+
+    def assertRejected(self, response):
+        result = self.probe(response)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
+    def test_fixed_request_safe_summary_and_degraded_state(self):
+        for body in (self.SUMMARY, self.SUMMARY.replace(b'"OK"', b'"PREWARM_DEGRADED"')):
+            with self.subTest(body=body), HealthProbeFixture(
+                DOCKER / "run-container-command.sh", [(0, self.response(body))]
+            ) as fixture:
+                result = fixture.run()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.encode(), body + b"\n")
+                self.assertEqual(fixture.requests, [
+                    b"GET /internal/container-health HTTP/1.1\r\nHost: 127.0.0.1:8080\r\nConnection: close\r\n\r\n"
+                ])
+
+    def test_non_success_redirect_unknown_framing_and_duplicate_headers_rejected(self):
+        for response in (
+            self.response(status=b"503 Unavailable"),
+            self.response(status=b"302 Found", extra=b"Location: http://example.invalid/\r\n"),
+            self.response(extra=b"Transfer-Encoding: chunked\r\n"),
+            self.response(extra=b"Content-Length: 137\r\n"),
+            self.response(extra=b"Content-Type: application/json\r\n"),
+            self.response().replace(b"application/json", b"text/html"),
+            self.response().replace(b"Content-Length:", b"Content-Length: +"),
+            self.response().replace(b"Connection: close", b" malformed header"),
+            self.response().replace(b"HTTP/1.1 200 OK", b"HTTP/1.1 2000 OK"),
+        ):
+            with self.subTest(response=response[:100]):
+                self.assertRejected(response)
+
+    def test_bounds_wire_body_and_rejects_truncated_extra_and_nul_content(self):
+        for response in (
+            b"x" * 8193,
+            self.response(b"x" * 4097),
+            self.response(extra=b"X-Large: " + b"x" * 4096 + b"\r\n"),
+            self.response(length=len(self.SUMMARY) + 1),
+            self.response(length=len(self.SUMMARY) - 1),
+            self.response() + b"extra",
+            self.response() + b"\0",
+            self.response().replace(b"formal", b"for\0mal"),
+        ):
+            with self.subTest(size=len(response)):
+                self.assertRejected(response)
+
+    def test_only_fixed_validated_summary_shape_can_reach_stdout(self):
+        for body in (
+            self.SUMMARY.replace(b'"ready":true', b'"ready":false'),
+            self.SUMMARY.replace(b'"formal"', b'"demo"'),
+            self.SUMMARY.replace(b'"OK"', b'"DEPENDENCY_UNAVAILABLE"'),
+            self.SUMMARY.replace(b'caption-hints.v2', b'other'),
+            self.SUMMARY.replace(b'"datasetVersion":42', b'"datasetVersion":0'),
+            self.SUMMARY.replace(b'"datasetVersion":42', b'"datasetVersion":-1'),
+            self.SUMMARY.replace(b'"datasetVersion":42', b'"datasetVersion":9223372036854775808'),
+            self.SUMMARY.replace(b'"datasetVersion":42', b'"datasetVersion":42.0'),
+            self.SUMMARY.replace(b'"datasetVersion":42', b'"datasetVersion":"42"'),
+            self.SUMMARY.replace(b'"ready":true', b'"ready":true,"ready":true'),
+            self.SUMMARY[:-1] + b',"secret":"never-print"}',
+            self.SUMMARY + b" {}",
+        ):
+            with self.subTest(body=body):
+                self.assertRejected(self.response(body))
+
+    def test_shared_deadline_covers_headers_body_and_missing_close(self):
+        for chunks in (
+            [(3, self.response())],
+            [(0, self.response()[:40]), (3, self.response()[40:])],
+            [(1.2, self.response()[:40]), (1.2, self.response()[40:])],
+            [(0, self.response()), (3, b"")],
+        ):
+            with self.subTest(chunks=len(chunks)), HealthProbeFixture(
+                DOCKER / "run-container-command.sh", chunks
+            ) as fixture:
+                started = time.monotonic()
+                result = fixture.run()
+                self.assertEqual(result.returncode, 124)
+                self.assertLess(time.monotonic() - started, 2.8)
+                self.assertEqual(result.stdout, "")
+
+    def test_unreachable_loopback_fails_without_summary(self):
+        with HealthProbeFixture(
+            DOCKER / "run-container-command.sh", [(0, self.response())]
+        ) as fixture:
+            fixture.server.shutdown()
+            fixture.server.server_close()
+            result = fixture.run()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(result.stderr, "")
+
+    def test_environment_injection_and_arguments_cannot_change_health_transport(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sentinel = pathlib.Path(directory) / "executed"
+            poison = pathlib.Path(directory) / "poison"
+            poison.write_text("touch " + shlex.quote(str(sentinel)))
+            env = {
+                "BASH_ENV": str(poison), "ENV": str(poison),
+                "JAVA_TOOL_OPTIONS": "-Dsecret=never-print",
+                "HTTP_PROXY": "http://127.0.0.1:1", "ALL_PROXY": "http://127.0.0.1:1",
+            }
+            with HealthProbeFixture(
+                DOCKER / "run-container-command.sh", [(0, self.response())], env
+            ) as fixture:
+                result = fixture.run()
+                self.assertEqual(result.returncode, 0)
+                self.assertFalse(sentinel.exists())
+                rejected = fixture.run(("http://example.invalid/",))
+                self.assertEqual(rejected.returncode, 64)
+                self.assertEqual(len(fixture.requests), 1)
+                self.assertNotIn("never-print", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":
