@@ -1,4 +1,5 @@
 """验证本机部署入口的编排和失败边界；替身不能证明真实容器成功。"""
+import errno
 import hashlib
 import http.server
 import json
@@ -850,7 +851,9 @@ console.log(JSON.stringify({identity,generation,upstream,
                         chunk=os.read(master,4096)
                         if not chunk: break
                         output.extend(chunk)
-                    except OSError: break
+                    except OSError as error:
+                        if error.errno != errno.EIO: raise
+                        break
                 if process.poll() is not None: break
             if answer is not None and b'[y/N]' in output:
                 if answer == 'SIGINT':
@@ -860,17 +863,28 @@ console.log(JSON.stringify({identity,generation,upstream,
             deadline=time.monotonic()+60
             while process.poll() is None and time.monotonic()<deadline:
                 if select.select([master],[],[],.2)[0]:
-                    try: output.extend(os.read(master,4096))
-                    except OSError: break
-            if process.poll() is None:
-                raise AssertionError(f'tty install timed out: {output.decode(errors="replace")}')
+                    try:
+                        chunk=os.read(master,4096)
+                        if not chunk: break
+                        output.extend(chunk)
+                    except OSError as error:
+                        if error.errno != errno.EIO: raise
+                        break
+            # Linux PTY 的 EOF/EIO 可先于 waitpid 就绪；在原截止时间内回收，
+            # 不能把最后一次 poll 的瞬时 None 当作真实超时。
+            try:
+                process.wait(timeout=max(0,deadline-time.monotonic()))
+            except subprocess.TimeoutExpired as error:
+                raise AssertionError(f'tty install timed out: {output.decode(errors="replace")}') from error
             code=process.returncode
             while select.select([master],[],[],.1)[0]:
                 try:
                     chunk=os.read(master,4096)
                     if not chunk: break
                     output.extend(chunk)
-                except OSError: break
+                except OSError as error:
+                    if error.errno != errno.EIO: raise
+                    break
             return code,output.decode(errors='replace')
         finally:
             if process.poll() is None:
@@ -1030,6 +1044,51 @@ console.log(JSON.stringify({identity,generation,upstream,
         self.assertIn('使用本机 LexiFlow 数据库',output)
         self.assertNotIn('确认完成，开始连接目标与准备阶段',output)
         self.assertFalse(self.kit.exists())
+
+    def test_tty_closed_before_child_reap_uses_remaining_deadline(self):
+        # PTY EIO 先于 waitpid 就绪；不能把已结束的输出误判成真实超时。
+        with patch('subprocess.Popen') as popen, patch('pty.openpty', return_value=(200, 201)), \
+                patch('os.close'), patch('select.select', return_value=([200], [], [])), \
+                patch('os.read', side_effect=[b'[y/N] ', OSError(errno.EIO, 'closed'), OSError(errno.EIO, 'closed')]), \
+                patch('os.write') as write:
+            process = popen.return_value
+            process.returncode = None
+            process.poll.side_effect = lambda: process.returncode
+
+            def reap(timeout):
+                self.assertGreater(timeout, 0)
+                self.assertLessEqual(timeout, 60)
+                process.returncode = 0
+                return 0
+
+            process.wait.side_effect = reap
+            code, output = self.invoke_tty_confirmation(b'n\n')
+            self.assertEqual((code, output), (0, '[y/N] '))
+            process.wait.assert_called_once()
+            process.kill.assert_not_called()
+            write.assert_called_once_with(200, b'n\n')
+
+    def test_tty_closed_with_live_child_still_fails_on_deadline(self):
+        with patch('subprocess.Popen') as popen, patch('pty.openpty', return_value=(200, 201)), \
+                patch('os.close'), patch('select.select', return_value=([200], [], [])), \
+                patch('os.read', side_effect=[b'[y/N] ', OSError(errno.EIO, 'closed')]), \
+                patch('os.write'):
+            process = popen.return_value
+            process.returncode = None
+            process.poll.side_effect = lambda: process.returncode
+
+            def wait(timeout):
+                if process.kill.call_count == 0:
+                    raise subprocess.TimeoutExpired('synthetic child', timeout)
+                self.assertEqual(timeout, 5)
+                process.returncode = -signal.SIGKILL
+                return process.returncode
+
+            process.wait.side_effect = wait
+            with self.assertRaisesRegex(AssertionError, 'tty install timed out'):
+                self.invoke_tty_confirmation(b'n\n')
+            self.assertEqual(process.wait.call_count, 2)
+            process.kill.assert_called_once()
 
     def test_tty_eof_and_cancellation_exit_without_preparation(self):
         code,output=self.invoke_tty_confirmation(b'\x04')
