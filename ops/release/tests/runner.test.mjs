@@ -68,7 +68,7 @@ test('install/register/start/stop use owned files, token env only, and verified 
   await mkdir(path.join(source, 'externals/node24/lib'), { recursive: true });
   await writeFile(path.join(source, 'externals/node24/lib/npm-cli.js'), 'fixture npm');
   await symlink('../lib/npm-cli.js', path.join(source, 'externals/node24/bin/npm'));
-  const archive = path.join(source, 'bundle.tar.gz');
+  const archive = path.join(home, 'bundle.tar.gz');
   const tar = spawnSync('tar', ['-czf', archive, '-C', source, '.']); assert.equal(tar.status, 0);
   const archiveBytes = await readFile(archive); const checksum = createHash('sha256').update(archiveBytes).digest('hex');
   let online = false; let busy = false; let busyKnown = true; let remoteUnknown = false; let ghAuth = true;
@@ -252,7 +252,7 @@ test('config failure stdout is suppressed and persisted registration state requi
   await mkdir(path.join(source, 'bin'), { recursive: true }); await writeFile(path.join(source, 'config.sh'), '#!/bin/bash\n');
   await writeFile(path.join(source, 'bin/Runner.Listener'), 'fixture runner listener');
   await chmod(path.join(source, 'config.sh'), 0o755); await chmod(path.join(source, 'bin/Runner.Listener'), 0o755);
-  const archive = path.join(source, 'bundle.tar.gz'); assert.equal(spawnSync('tar', ['-czf', archive, '-C', source, '.']).status, 0);
+  const archive = path.join(home, 'bundle.tar.gz'); assert.equal(spawnSync('tar', ['-czf', archive, '-C', source, '.']).status, 0);
   const archiveBytes = await readFile(archive); const checksum = createHash('sha256').update(archiveBytes).digest('hex');
   const execute = async (command, args) => {
     if (command === 'gh' && args[0] === 'auth') return '';
