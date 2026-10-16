@@ -6,7 +6,7 @@ import path from 'node:path';
 // 仅选择固定检查范围与原有子进程预算；CLI 不接收命令或预算覆盖。
 const suites = {
   version: { timeoutMs: 30_000, files: ['version'] },
-  build: { timeoutMs: 170_000, files: ['archive-identity', 'embedded-identity', 'build', 'build-execution', 'candidate', 'verified-candidate', 'candidate-proof', 'pipeline', 'workflow', 'synthetic-candidates'] },
+  build: { timeoutMs: 170_000, files: ['archive-identity', 'embedded-identity', 'build', 'build-execution', 'candidate', 'verified-candidate', 'candidate-proof', 'pipeline', 'workflow', 'synthetic-candidates', 'runner'] },
   manifest: { timeoutMs: 80_000, files: ['manifest'] },
   'runtime-entry': { timeoutMs: 80_000, files: ['runtime-entry'] },
   lifecycle: { timeoutMs: 120_000, files: ['lifecycle'] },

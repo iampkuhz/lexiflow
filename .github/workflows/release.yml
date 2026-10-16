@@ -98,12 +98,16 @@ jobs:
           REQUEST_FILE: ${{ vars.LEXIFLOW_RELEASE_REQUEST_FILE }}
         run: |
           test -n "$REQUEST_FILE"
+          test -x "$WORKSPACE/.local/lexiflow-python/bin/python3"
+          export PATH="$WORKSPACE/.local/lexiflow-python/bin:$PATH"
           cd "$WORKSPACE"
           node ops/release/workflow/run-release-workflow.mjs prepare "$REQUEST_FILE"
       - name: Full Repository Verify on the same candidate and checkout
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
         run: |
+          test -x "$WORKSPACE/.local/lexiflow-python/bin/python3"
+          export PATH="$WORKSPACE/.local/lexiflow-python/bin:$PATH"
           cd "$WORKSPACE"
           python3 scripts/verification/commands/run_repository_checks.py
       # Success here leaves a private native handoff; only distinct local
@@ -125,6 +129,8 @@ jobs:
         run: |
           test -n "$WORKSPACE"
           test -d "$WORKSPACE/.git"
+          test -x "$WORKSPACE/.local/lexiflow-python/bin/python3"
+          export PATH="$WORKSPACE/.local/lexiflow-python/bin:$PATH"
           cd "$WORKSPACE"
           node ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG"
 
@@ -148,5 +154,7 @@ jobs:
         run: |
           test -n "$WORKSPACE"
           test -d "$WORKSPACE/.git"
+          test -x "$WORKSPACE/.local/lexiflow-python/bin/python3"
+          export PATH="$WORKSPACE/.local/lexiflow-python/bin:$PATH"
           cd "$WORKSPACE"
           node ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish
