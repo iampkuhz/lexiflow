@@ -24,6 +24,13 @@ class DoctorTest(unittest.TestCase):
         self.preload = self.root/'platform.mjs'
         self.preload.write_text("import os from 'node:os';os.platform=()=> 'darwin';os.arch=()=> 'arm64';")
         self.write_program('java', '#!/bin/sh\necho \'openjdk version "25.0.4"\' >&2\necho PRIVATE-FIXTURE >&2\n')
+        self.java_home = self.root/'jdk-25'
+        (self.java_home/'bin').mkdir(parents=True)
+        (self.java_home/'release').write_text(
+            'JAVA_VERSION="25.0.4"\nIMPLEMENTOR="Eclipse Adoptium"\n'
+            'IMPLEMENTOR_VERSION="Temurin-25.0.4+1"\n'
+        )
+        shutil.copy2(self.bin/'java', self.java_home/'bin/java')
         fake='''#!PYTHON
 import json,sys
 from pathlib import Path
@@ -77,7 +84,7 @@ else: sys.exit(88)
 
     def invoke(self, directory=None):
         before=self.snapshot()
-        result=subprocess.run([shutil.which('node'),'--import',str(self.preload),str(ROOT/'ops/podman/commands/manage-podman-installation.mjs'),'doctor','--json','--dir',directory or str(self.install)],env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH']},capture_output=True,text=True,timeout=15)
+        result=subprocess.run([shutil.which('node'),'--import',str(self.preload),str(ROOT/'ops/podman/commands/manage-podman-installation.mjs'),'doctor','--json','--dir',directory or str(self.install)],env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH'],'LEXIFLOW_JAVA_HOME':str(self.java_home)},capture_output=True,text=True,timeout=15)
         self.assertEqual(before,self.snapshot())
         self.assertNotIn('PRIVATE-FIXTURE',result.stdout+result.stderr)
         self.assertNotIn(str(self.root),result.stdout+result.stderr)
@@ -96,6 +103,15 @@ else: sys.exit(88)
         self.setup_install();result,report=self.invoke()
         self.assertEqual(result.returncode,0,result.stderr);self.assertEqual(report['status'],'PASS')
         self.assertEqual(report['checks'][-1]['reason'],'RUNTIME_READY')
+
+    def test_wrong_fixture_java_is_blocked_without_host_fallback(self):
+        self.setup_install()
+        release = self.java_home/'release'
+        release.write_text(release.read_text().replace('25.0.4', '24.0.4'))
+        result, report = self.invoke()
+        self.assertEqual(result.returncode, 3)
+        java = next(check for check in report['checks'] if check['id'] == 'java')
+        self.assertEqual((java['status'], java['reason']), ('BLOCKED', 'UNSUPPORTED_VERSION'))
 
     def test_missing_data_success_identity_is_not_ready(self):
         self.setup_install()
