@@ -1,7 +1,7 @@
 """验证 CI 的触发、信任与最小权限边界，不伪装 GitHub 上的真实运行。"""
 
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 import yaml
 
@@ -26,7 +26,9 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(job["runs-on"], "ubuntu-24.04")
         self.assertNotIn("environment", job)
         run = "\n".join(step.get("run", "") for step in job["steps"])
-        self.assertIn('scripts.triggers.run_ci_quick_checks quick --base "$BASE_SHA"', run)
+        self.assertIn(
+            'scripts.triggers.run_ci_quick_checks quick --base "$BASE_SHA"', run
+        )
         self.assertIn("scripts.triggers.run_ci_quick_checks quick --all", run)
         for banned in [
             "gh release",
@@ -40,8 +42,14 @@ class WorkflowContractTest(unittest.TestCase):
     def test_archive_is_checked_and_loaded_before_upload(self):
         steps = workflow("ci.yml")["jobs"]["quick"]["steps"]
         package = next(step for step in steps if step.get("id") == "package")
-        self.assertIn("node extension/scripts/packaging/package-extension-release.mjs", package["run"])
-        self.assertIn('extension/scripts/checks/check-extension-archive.mjs "$ZIP" "$GITHUB_SHA"', package["run"])
+        self.assertIn(
+            "node extension/scripts/packaging/package-extension-release.mjs",
+            package["run"],
+        )
+        self.assertIn(
+            'extension/scripts/checks/check-extension-archive.mjs "$ZIP" "$GITHUB_SHA"',
+            package["run"],
+        )
         self.assertIn('archive-smoke.mjs "$ZIP" "$GITHUB_SHA"', package["run"])
         upload = next(
             step for step in steps if "upload-artifact@" in step.get("uses", "")
@@ -76,11 +84,17 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(value["concurrency"]["group"], "lexiflow-release-host")
         run = "\n".join(step.get("run", "") for step in full["steps"])
         self.assertIn('git -C "$WORKSPACE" rev-parse HEAD', run)
-        self.assertIn('node ops/release/workflow/run-release-workflow.mjs prepare "$REQUEST_FILE"', run)
+        self.assertIn(
+            'node ops/release/workflow/run-release-workflow.mjs prepare "$REQUEST_FILE"',
+            run,
+        )
         self.assertNotIn("scripts/check_changes.py", run)
-        self.assertIn("python3 scripts/verification/commands/run_repository_checks.py", run)
+        self.assertIn(
+            "python3 scripts/verification/commands/run_repository_checks.py", run
+        )
         self.assertLess(
-            run.index("ops/release/workflow/run-release-workflow.mjs prepare"), run.index("run_repository_checks.py")
+            run.index("ops/release/workflow/run-release-workflow.mjs prepare"),
+            run.index("run_repository_checks.py"),
         )
         self.assertNotIn("actions/checkout", str(full))
         self.assertNotIn("contents: write", str(full))
@@ -148,6 +162,29 @@ class WorkflowContractTest(unittest.TestCase):
                     self.assertNotRegex(
                         step.get("run", ""), r"\$\{\{\s*github\.event\."
                     )
+
+    def test_native_release_commands_require_the_dedicated_python_environment(self):
+        jobs = workflow("release.yml")["jobs"]
+        selected = []
+        for name in ["prepare", "promotion-precheck", "promotion"]:
+            for step in jobs[name]["steps"]:
+                run = step.get("run", "")
+                if (
+                    "run-release-workflow.mjs" in run
+                    or "run_repository_checks.py" in run
+                ):
+                    selected.append(run)
+        self.assertEqual(len(selected), 4)
+        prerequisite = 'test -x "$WORKSPACE/.local/lexiflow-python/bin/python3"'
+        activate = 'export PATH="$WORKSPACE/.local/lexiflow-python/bin:$PATH"'
+        for run in selected:
+            with self.subTest(run=run):
+                self.assertIn(prerequisite, run)
+                self.assertIn(activate, run)
+                self.assertLess(run.index(prerequisite), run.index(activate))
+                self.assertLess(run.index(activate), run.index('cd "$WORKSPACE"'))
+                self.assertNotIn("pip install", run)
+                self.assertNotIn("python3 -m venv", run)
 
 
 if __name__ == "__main__":

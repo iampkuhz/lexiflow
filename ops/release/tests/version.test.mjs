@@ -682,7 +682,7 @@ test('fixed CLI suites preserve exact files and budgets and reject free-form ove
   const entry = path.resolve('ops/release/test_tools/run-release-tool-tests.mjs');
   const expected = {
     version: [30_000, ['version']],
-    build: [170_000, ['archive-identity', 'embedded-identity', 'build', 'build-execution', 'candidate', 'verified-candidate', 'candidate-proof', 'pipeline', 'workflow', 'synthetic-candidates']],
+    build: [170_000, ['archive-identity', 'embedded-identity', 'build', 'build-execution', 'candidate', 'verified-candidate', 'candidate-proof', 'pipeline', 'workflow', 'synthetic-candidates', 'runner']],
     manifest: [80_000, ['manifest']],
     'runtime-entry': [80_000, ['runtime-entry']],
     lifecycle: [120_000, ['lifecycle']],

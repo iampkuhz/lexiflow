@@ -1,0 +1,7 @@
+brew "gh"
+brew "node"
+brew "python@3.14"
+brew "podman"
+brew "podman-compose"
+brew "docker"
+brew "docker-compose"

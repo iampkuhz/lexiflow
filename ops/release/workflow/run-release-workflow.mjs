@@ -14,6 +14,7 @@ import { verifyReleaseCandidate } from '../integrity/release-candidate-verifier.
 import { checkReleaseTag, resolveBuildIdentity, assertBuildIdentityMatches } from '../integrity/source-build-identity.mjs';
 import { loadBaseImageLock } from '../build/release-image-build-plan.mjs';
 import { validateRelativePath } from '../integrity/release-artifact-manifest.mjs';
+import { runRunnerCommand } from '../runner/runner.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const HEX = /^[a-f0-9]{64}$/;
@@ -509,7 +510,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     ? await prepareWorkflow(args[0])
     : mode === 'resume' && (args.length === 2 || (args.length === 3 && args[2] === '--publish'))
       ? await resumePromotion({ submissionId: args[0], releaseTag: args[1], publish: args[2] === '--publish' })
-      : { status: 'FAIL', reason: 'ARGUMENTS_INVALID' };
+      : mode === 'runner' && args.length === 1
+        ? args[0] === '--help' ? { status: 'PASS', commands: ['doctor', 'deps', 'install', 'register', 'start', 'stop', 'status', 'setup'] }
+          : await runRunnerCommand(args[0])
+        : { status: 'FAIL', reason: 'ARGUMENTS_INVALID' };
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status !== 'PASS') process.exitCode = 1;
 }
