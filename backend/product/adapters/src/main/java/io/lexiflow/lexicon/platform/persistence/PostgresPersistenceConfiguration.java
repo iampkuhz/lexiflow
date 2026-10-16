@@ -20,6 +20,8 @@ public class PostgresPersistenceConfiguration {
       @Value("${spring.datasource.username:}") String username,
       @Value("${spring.datasource.password:}") String password) {
     var dataSource = new HikariDataSource();
+    dataSource.setMinimumIdle(1);
+    dataSource.setMaximumPoolSize(4);
     dataSource.setJdbcUrl(url);
     if (!username.isBlank()) {
       dataSource.setUsername(username);
