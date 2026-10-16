@@ -130,11 +130,15 @@ class CiQuickTests(unittest.TestCase):
         source = self.root / "ops/docker/tests/test_operation_ownership.py"
         source.parent.mkdir(parents=True)
         source.write_text("synthetic source")
+        private_source = self.root / "private/sensitive.py"
+        private_source.parent.mkdir()
+        private_source.write_text("synthetic private data")
         log = self.root / "tmp/quality/synthetic-stderr.log"
         log.parent.mkdir(parents=True)
         raw = (
             '  File "/private/checkout/ops/docker/tests/test_operation_ownership.py", line 492, in test_example\n'
             '  File "/private/user-data/sensitive.py", line 12, in private_function\n'
+            '  File "/private/checkout/ops/../private/sensitive.py", line 13, in private_function\n'
             "AssertionError: private-caption-and-token-value\n"
         ).encode()
         log.write_bytes(raw)

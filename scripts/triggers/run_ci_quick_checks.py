@@ -322,7 +322,9 @@ def public_summary(result: dict[str, Any], root: Path) -> dict[str, Any]:
                         r'[A-Za-z0-9_./-]+\.py)", line ([0-9]+)',
                         text,
                     )
-                    if (root / filename).is_file()
+                    if ".." not in Path(filename).parts
+                    and (root / filename).resolve().is_relative_to(root.resolve())
+                    and (root / filename).is_file()
                 )
                 categories.update(
                     name
