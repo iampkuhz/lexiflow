@@ -43,6 +43,10 @@ class LexiconReadinessHttpTest {
       assertTrue(readiness.body().contains("formal"));
       assertFalse(readiness.body().contains("\"version\""));
       assertFalse(readiness.body().contains("jdbc"));
+      var containerHealth = get(client, "/internal/container-health");
+      assertEquals(503, containerHealth.statusCode());
+      assertEquals("", containerHealth.body());
+      assertEquals("no-store", containerHealth.headers().firstValue("Cache-Control").orElse(""));
       var response =
           client.send(
               HttpRequest.newBuilder(url("/api/v1/caption-hints"))

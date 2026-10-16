@@ -34,7 +34,7 @@ export LEXIFLOW_JAVA_HOME=/绝对路径/到/Temurin25/Home
 Java 检查失败会区分找不到程序、权限、超时、退出失败、版本无法识别和版本不符；请按中文原因处理，不要因此重建数据库。
 Podman machine 未创建时运行 `podman machine init`，已有但未运行时使用 `podman machine start`，不要重新初始化已有 machine。Compose provider 不可用时先安装 `podman-compose` 并确认版本命令成功。脚本不会自动修改系统工具或启动未知虚拟机。
 
-建议 Podman VM 至少 4 CPU、8 GiB 内存、20 GiB 可用磁盘；这只是试验准备建议，不代表资源验收通过。首次上游词库下载大于最终约 6.44 MiB 精简压缩包。
+建议 Podman VM 至少 4 CPU、8 GiB 内存、20 GiB 可用磁盘；这是构建、导入及共享容器环境的准备建议，不是 API 常驻内存需求，也不代表资源验收通过。首次上游词库下载大于最终约 6.44 MiB 精简压缩包。
 
 ## 1.2. 首次部署：一条命令
 
