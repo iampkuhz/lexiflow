@@ -1,3 +1,4 @@
+import { packageGeneration } from '../installation/installation-upgrade-workflow.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
@@ -13,6 +14,7 @@ import { resolveBuildIdentity } from '../../release/integrity/source-build-ident
 import { extensionBytes, makeZip } from '../../release/tests/zip-fixture.mjs';
 import { dataGeneration } from '../../dataset/dataset-generation-identity.mjs';
 import { readCandidate, installCandidateArtifacts } from '../candidates/candidate-artifact-installer.mjs';
+import { dockerSaveFixture, dockerSaveIdentity } from './docker-save-fixture.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -41,11 +43,12 @@ async function assembled(baseVersion = '2.0.0-SNAPSHOT', sqlText = 'synthetic sc
   const shardInputs = [];
   for (const platform of ['linux/amd64', 'linux/arm64']) {
     const shard = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'lexiflow-candidate-shard-'))), shardRecords = [];
-    for (const [role, filename, imageDigest, licenseIds] of [
-      ['api-image', 'api-image.tar', `sha256:${hash(identity.buildId + ':api').slice(0, 64)}`, ['lexiflow', 'api']],
-      ['postgres-image', 'postgres-image.tar', `sha256:${hash(identity.buildId + ':postgres').slice(0, 64)}`, ['postgres']],
+    for (const [role, filename, licenseIds] of [
+      ['api-image', 'api-image.tar', ['lexiflow', 'api']],
+      ['postgres-image', 'postgres-image.tar', ['postgres']],
     ]) {
-      const relative = `images/${platform.replace('/', '-')}/${filename}`, bytes = Buffer.from(`${platform}:${role}`);
+      const { bytes, imageDigest } = dockerSaveFixture({ role: role === 'api-image' ? 'api' : 'postgres', identity, platform });
+      const relative = `images/${platform.replace('/', '-')}/${filename}`;
       await fs.mkdir(path.dirname(path.join(artifactRoot, relative)), { recursive: true }); await fs.writeFile(path.join(artifactRoot, relative), bytes);
       const record = { role, platform, path: relative, bytes: bytes.length, sha256: hash(bytes), imageDigest, licenseIds };
       records.push({ role, platform, licenseIds }); shardRecords.push(record);
@@ -65,10 +68,10 @@ async function assembled(baseVersion = '2.0.0-SNAPSHOT', sqlText = 'synthetic sc
   await add('compose', 'compose.yaml', compose, ['lexiflow']); await add('sql', 'database/schema.sql', Buffer.from(sqlText), ['lexiflow']);
   const dataset = { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rules-test' };
   const generation = dataGeneration({ codeVersion: 'f'.repeat(64), inputSha256: hash('fixture csv'), upstream: {} });
-  const packageManifest = { generationVersion: generation.generationVersion,
+  const packageManifest = { schemaVersion: 2, generationVersion: generation.generationVersion,
     generationCodeVersion: generation.codeVersion, generationSourceDigest: generation.sourceDigest,
-    generationInputsJson: JSON.stringify({ inputSha256: generation.inputSha256, upstream: generation.upstream }),
-    generationConfigJson: JSON.stringify(generation.config) };
+    generationInputs: { inputSha256: generation.inputSha256, upstream: generation.upstream },
+    generationConfig: generation.config };
   await add('dataset', 'data/dataset.zip', makeZip([['manifest.json', JSON.stringify(packageManifest)]]), ['dataset'], { ...dataset, sqlVersion: 'sql-test' });
   await add('extension', 'extension.zip', extensionBytes(identity), ['lexiflow', 'extension'], { softwareVersion: identity.softwareVersion, sourceCommit: identity.sourceCommit });
   const descriptor = { schemaVersion: 1, buildIdentity: identity, softwareVersion: identity.softwareVersion, sourceCommit: commit, apiContract: 'api-test', sqlVersion: 'sql-test', dataset, platforms: ['linux/amd64', 'linux/arm64'], artifacts: records, licenses };
@@ -83,12 +86,14 @@ test('candidate adapter consumes a clean assembled archive and loads only inspec
   const candidate = await readCandidate(f.input);
   assert.equal(candidate.candidateSha256, f.input.candidateSha256);
   const ids = { api: candidate.artifacts['api-image:linux/arm64'].imageDigest, postgres: candidate.artifacts['postgres-image:linux/arm64'].imageDigest }, calls = [];
+  const aliases = new Map();
   const run = async (_cmd, argv, options = {}) => {
     calls.push(argv);
+    if (argv[0] === 'load') { const loaded = dockerSaveIdentity(await fs.readFile(argv.at(-1))); aliases.set(loaded.alias, loaded.imageDigest); return ''; }
     if (argv[0] === 'image' && argv[1] === 'exists') return { commandExitCode: 1, stdout: '' };
     if (argv[0] === 'images') return JSON.stringify([{ Id: ids.api }, { Id: ids.postgres }]);
     if (argv[0] === 'image' && argv[1] === 'inspect') {
-      const id = argv.at(-1);
+      const id = aliases.get(argv.at(-1)) ?? argv.at(-1);
       return JSON.stringify([{ Id: id, Os: 'linux', Architecture: 'arm64', Config: { Labels: {
         'org.opencontainers.image.version': f.identity.softwareVersion, 'org.opencontainers.image.revision': f.identity.sourceCommit,
         'io.lexiflow.build-id': f.identity.buildId, 'io.lexiflow.source-sha256': f.identity.sourceSha256,
@@ -164,9 +169,13 @@ elif a[:2]==['image','exists']:
     sys.exit(0 if a[2] in s['tags'] else 1)
 elif a[:1]==['load']:
     if CANCEL.exists(): CANCEL.unlink(); os.kill(os.getppid(),signal.SIGINT)
-    ident=archives.get(a[-1]);
-    if ident is None: sys.exit(7)
+    import tarfile
+    with tarfile.open(a[-1]) as t:
+        manifest=json.load(t.extractfile('manifest.json'))
+    ident='sha256:'+manifest[0]['Config'].removesuffix('.json')
+    if ident not in initial: sys.exit(7)
     s['loaded'][ident]=initial[ident]
+    for tag in manifest[0]['RepoTags']: s['tags'][tag]=ident
     save(); print('UNTRUSTED load output ignored')
 elif a[:1]==['tag']:
     if image(a[1]) is None: sys.exit(7)
@@ -204,6 +213,11 @@ elif a[:1]==['stop']:
 elif a[:1]==['rm']:
     if a[-1] not in s['containers']: sys.exit(1)
     del s['containers'][a[-1]]; save()
+elif a[:2]==['volume','inspect']:
+    state=json.loads((kit/'state.json').read_text())
+    name=state['project']+'_pgdata'
+    if a[2]!=name: sys.exit(1)
+    print(json.dumps([{'Name':name,'Labels':labels('postgres')}]))
 elif a[:1] in (['volume'],['network']): print('[]')
 elif a[:1]==['run'] and '--deployment-data' in a:
     if 'apply' in a:
@@ -230,7 +244,13 @@ elif a[:1]==['compose'] and 'up' in a:
     for row in existing: del s['containers'][row['Id']]
     s['sequence']+=1
     ident=hashlib.sha256((role+item['Id']+str(s['sequence'])).encode()).hexdigest()
-    s['containers'][ident]={'Id':ident,'Image':item['Id'],'Config':{'Labels':labels(role)},'State':{'Running':True}}
+    row={'Id':ident,'Image':item['Id'],'Config':{'Labels':labels(role)},'State':{'Running':True}}
+    if role=='postgres':
+        state=json.loads((kit/'state.json').read_text())
+        row['HostConfig']={'PortBindings':{'5432/tcp':[{'HostIp':'127.0.0.1','HostPort':str(state['dbPort'])}]}}
+        row['Mounts']=[{'Type':'volume','Name':state['project']+'_pgdata','Destination':'/var/lib/postgresql/data','RW':True}]
+        row['State']['Health']={'Status':'healthy'}
+    s['containers'][ident]=row
     save()
 elif a[:1]==['compose'] and 'stop' in a:
     for role in a[a.index('stop')+1:]:
@@ -279,4 +299,27 @@ http.get=(options,callback)=>{const req=new EventEmitter(); req.destroy=(err)=>{
   assert.ok(calls.filter(row => row[0] === 'load').length >= 4, 'candidate image loads are bounded to inspection/preparation');
   assert.equal(calls.filter(row => row.includes('initialize')).length, 0);
   assert.equal(calls.some(row => row[0] === 'images'), false);
+});
+
+test('candidate generation consumes the real latest export object contract and rejects legacy or corrupt records', async () => {
+  const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'lexiflow-generation-contract-')));
+  try {
+    const generation = dataGeneration({ codeVersion: 'a'.repeat(64), inputSha256: 'b'.repeat(64), upstream: {} });
+    const manifest = { schemaVersion: 2, generationVersion: generation.generationVersion,
+      generationCodeVersion: generation.codeVersion, generationSourceDigest: generation.sourceDigest,
+      generationInputs: { inputSha256: generation.inputSha256, upstream: generation.upstream }, generationConfig: generation.config };
+    const archive = path.join(directory, 'dataset.zip');
+    await fs.writeFile(archive, makeZip([['manifest.json', JSON.stringify(manifest)]]));
+    assert.deepEqual(await packageGeneration(archive), generation);
+    for (const invalid of [
+      { ...manifest, generationInputs: undefined, generationInputsJson: JSON.stringify(manifest.generationInputs) },
+      { ...manifest, generationConfig: JSON.stringify(manifest.generationConfig) },
+      { ...manifest, generationVersion: 'c'.repeat(64) },
+      { ...manifest, generationSourceDigest: 'c'.repeat(64) },
+      { ...manifest, schemaVersion: 1 },
+    ]) {
+      await fs.writeFile(archive, makeZip([['manifest.json', JSON.stringify(invalid)]]));
+      await assert.rejects(packageGeneration(archive), { message: 'DEPLOYMENT_PACKAGE_GENERATION_INVALID' });
+    }
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });

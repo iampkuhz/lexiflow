@@ -1,6 +1,7 @@
 services:
   postgres:
     labels:
+      lexiflow.slot: source
       lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
       lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}
     image: ${LEXIFLOW_POSTGRES_IMAGE:?LEXIFLOW_POSTGRES_IMAGE is required}
@@ -25,6 +26,7 @@ services:
 
   api:
     labels:
+      lexiflow.slot: source
       lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
       lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}
     image: ${LEXIFLOW_API_IMAGE:?LEXIFLOW_API_IMAGE is required}
@@ -35,7 +37,7 @@ services:
       driver: k8s-file
       options:
         max-size: 10mb
-    ports: ["127.0.0.1:18080:8080"]
+    ports: ["127.0.0.1:18081:8080"]
     secrets: [app-password]
     networks: [private, published]
     depends_on:
@@ -63,16 +65,19 @@ secrets:
 volumes:
   pgdata:
     labels:
+      lexiflow.slot: source
       lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
       lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}
 networks:
   private:
     internal: true
     labels:
+      lexiflow.slot: source
       lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
       lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}
   published:
     driver: bridge
     labels:
+      lexiflow.slot: source
       lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
       lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}

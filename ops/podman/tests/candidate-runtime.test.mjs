@@ -4,8 +4,9 @@ import { spawnSync } from 'node:child_process';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runCandidateRuntime, REQUIRED_PHASE_IDS, eligibleForPass, assertResourceOwnership, assertTargetApiContainer, stopVerifiedTargetApi } from '../candidates/check-podman-candidate-lifecycle.mjs';
+import { runCandidateRuntime, REQUIRED_PHASE_IDS, eligibleForPass, assertResourceOwnership, assertTargetApiContainer, stopVerifiedTargetApi, assertManagedStorageTopology } from '../candidates/check-podman-candidate-lifecycle.mjs';
 import { startCandidateSession } from '../candidates/candidate-process-session.mjs';
+import { deploymentSlot } from '../deployment-slots.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const cli = path.join(repo, 'ops/podman/candidates/check-podman-candidate-lifecycle.mjs');
@@ -14,6 +15,24 @@ const request = { previous: candidate('a'), target: candidate('b') };
 const owned = { id: 'a'.repeat(32), project: `lexiflow-local-${'a'.repeat(32)}` };
 const labels = { 'com.docker.compose.project': owned.project, 'io.podman.compose.project': owned.project,
   'lexiflow.installation': owned.id, 'com.docker.compose.service': 'api', 'io.podman.compose.service': 'api' };
+
+test('current storage topology accepts two exact networks and one volume without accepting extra resources', () => {
+  const networks = ['private', 'published'].map(name => ({ id: `${owned.project}_${name}` }));
+  const volumes = [{ id: `${owned.project}_pgdata` }];
+  assertManagedStorageTopology(owned, 'network', networks, { complete: true });
+  assertManagedStorageTopology(owned, 'volume', volumes, { complete: true });
+  assertManagedStorageTopology(owned, 'network', []);
+  assertManagedStorageTopology(owned, 'volume', []);
+  for (const [kind, rows, options] of [
+    ['network', [...networks, { id: `${owned.project}_extra` }]],
+    ['network', [networks[0], networks[0]]],
+    ['network', [{ id: `${owned.project}_default` }]],
+    ['network', [networks[0]], { complete: true }],
+    ['volume', [...volumes, { id: `${owned.project}_initialization-work` }]],
+    ['volume', [{ id: 'other_pgdata' }]],
+    ['volume', [], { complete: true }],
+  ]) assert.throws(() => assertManagedStorageTopology(owned, kind, rows, options), /RESOURCE_SET_UNEXPECTED/);
+});
 
 test('exact request rejects caller command, alternate directory and claimed PASS before side effects', async () => {
   for (const extra of [{ action: 'install' }, { root: '/tmp/other' }, { status: 'PASS' }, { hooks: {} }]) {
@@ -101,10 +120,10 @@ test('observer requires two matching live inspections and observed stop, never s
 });
 
 test('fixed child session rejects alternate operations and missing bounded DB port', () => {
-  const base = { action: 'install', directory: '/tmp/lexiflow-test', candidate: request.target,
-    dbPort: 15432, logFile: '/tmp/lexiflow-test.log' };
-  for (const change of [{ action: 'stop' }, { dbPort: 18080 }, { dbPort: 0 },
-    { candidate: { ...request.target, command: 'exit 0' } }, { directory: 'relative' }, { logFile: 'relative' }]) {
+  const base = { action: 'install', directory: deploymentSlot('release-validation', repo).directory, candidate: request.target,
+    dbPort: 15433, logFile: '/tmp/lexiflow-test.log' };
+  for (const change of [{ action: 'stop' }, { dbPort: 15432 }, { dbPort: 0 },
+    { candidate: { ...request.target, command: 'exit 0' } }, { directory: 'relative' }, { directory: '/tmp/uuid-install' }, { logFile: 'relative' }]) {
     assert.throws(() => startCandidateSession({ ...base, ...change }), /SESSION_REQUEST_INVALID/);
   }
 });
@@ -170,7 +189,10 @@ async function withRuntimeFlowFixture(scenario, check) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiflow-flow-'));
   const runtimeFile = path.join(root, 'ops/podman/candidates/check-podman-candidate-lifecycle.mjs');
   flowStub(runtimeFile, fs.readFileSync(path.join(repo, 'ops/podman/candidates/check-podman-candidate-lifecycle.mjs')));
-  flowStub(path.join(root, 'ops/release/integrity/source-build-identity.mjs'), `export const resolveBuildIdentity=()=>globalThis.__lexiflowFlow.source; export { assertBuildIdentityMatches } from ${JSON.stringify(new URL('../../release/integrity/source-build-identity.mjs', import.meta.url).href)};`);
+  flowStub(path.join(root, 'ops/podman/deployment-slots.mjs'), fs.readFileSync(path.join(repo, 'ops/podman/deployment-slots.mjs')));
+  flowStub(path.join(root, 'ops/podman/images/candidate-image-alias.mjs'), fs.readFileSync(path.join(repo, 'ops/podman/images/candidate-image-alias.mjs')));
+  flowStub(path.join(root, 'ops/podman/images/versioned-images.mjs'), fs.readFileSync(path.join(repo, 'ops/podman/images/versioned-images.mjs')));
+  flowStub(path.join(root, 'ops/release/integrity/source-build-identity.mjs'), `export const resolveBuildIdentity=()=>globalThis.__lexiflowFlow.source; export { assertBuildIdentityMatches, parseVersion } from ${JSON.stringify(new URL('../../release/integrity/source-build-identity.mjs', import.meta.url).href)};`);
   flowStub(path.join(root, 'ops/release/integrity/release-candidate-verifier.mjs'), `export const verifyReleaseCandidate=async c=>globalThis.__lexiflowFlow.verify(c);`);
   flowStub(path.join(root, 'ops/podman/installation/installation-update-transaction.mjs'), `export const verifyExtension=(d,i,p)=>globalThis.__lexiflowFlow.extension(d,i,p); export const treeDigest=d=>globalThis.__lexiflowFlow.tree(d);`);
   flowStub(path.join(root, 'ops/podman/execution/installation-operation-lock.mjs'), `export const acquireProcessLock=d=>globalThis.__lexiflowFlow.lock(d);`);
@@ -190,7 +212,7 @@ async function withRuntimeFlowFixture(scenario, check) {
   mock.method(net, 'createServer', () => ({
     once() { return this; },
     listen(...args) { queueMicrotask(args.at(-1)); return this; },
-    address() { return { port: 15432 }; },
+    address() { return { port: 15433 }; },
     close(callback) { if (callback) queueMicrotask(callback); return this; },
   }));
   mock.method(childProcess, 'spawnSync', (...args) => flow.command(...args));
@@ -213,7 +235,7 @@ class FlowEngine {
   verify(c) { const v = flowCandidates[c.candidateSha256]; if (!v) throw Error('UNKNOWN_CANDIDATE'); return v; }
   extension(dir, identity, port) { assert.equal(port, 18080); assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'build-identity.json'))), identity); return this.tree(dir); }
   tree(dir) { return flowSha(fs.readFileSync(path.join(dir, 'build-identity.json'))); }
-  lock(dir) { assert.ok(fs.existsSync(path.join(dir, 'state.json'))); return () => {}; }
+  lock(dir) { if (dir.includes('podman-release-validation') && !dir.includes('slot-')) assert.ok(fs.existsSync(path.join(dir, 'state.json'))); return () => {}; }
   identify(input) { return this.verify(input.candidate).buildIdentity; }
   record(install, kind, status, identity) {
     const operation = (++this.next).toString(16).padStart(32, '0');
@@ -226,9 +248,9 @@ class FlowEngine {
   ext(install, identity) { const dir = path.join(install.dir, 'extension'); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'build-identity.json'), JSON.stringify(identity)); }
   make(input) {
     const v = this.verify(input.candidate), dir = input.directory, id = (++this.next).toString(16).padStart(32, '0');
-    const project = `lexiflow-local-${id}`, dataset = path.join(dir, 'dataset');
-    fs.mkdirSync(path.join(dir, 'installation-records'), { recursive: true });
-    fs.mkdirSync(path.join(dir, 'secrets')); fs.mkdirSync(dataset);
+    const project = `lexiflow-local-${id}`, dataset = path.join(dir, 'data', 'dataset');
+    fs.mkdirSync(path.join(dir, 'installation-records'), { recursive: true, mode: 0o700 }); fs.chmodSync(dir, 0o700);
+    fs.mkdirSync(path.join(dir, 'secrets')); fs.mkdirSync(dataset, { recursive: true });
     fs.writeFileSync(path.join(dir, 'secrets/app-password'), 'synthetic-app');
     fs.writeFileSync(path.join(dir, 'secrets/postgres-password'), 'synthetic-pg');
     fs.writeFileSync(path.join(dataset, 'dataset.zip'), 'synthetic-dataset');
@@ -236,11 +258,11 @@ class FlowEngine {
     const generationVersion = flowSha('generation');
     const state = { schema: 1, id, project, root: dir, apiPort: 18080, dbPort: input.dbPort, phase: 'ready', version: v.buildIdentity.softwareVersion, buildIdentity: v.buildIdentity, packageType: 'release-package', databaseTarget: { kind: 'managed', authMode: 'managed', user: 'postgres', host: '127.0.0.1', port: input.dbPort }, apiImage: api, postgresImage: pg, candidateSha256: input.candidate.candidateSha256, manifestSha256: v.manifestSha256, dataset, datasetPackageSha256: flowSha('synthetic-dataset'), generationVersion, datasetIdentity: { version: 7, generationVersion, sourceSha256: flowSha('synthetic-dataset'), releasePackageSha256: flowSha('synthetic-dataset') }, artifacts: { apiImage: api, postgresImage: pg, image: api, candidateSha256: input.candidate.candidateSha256, manifestSha256: v.manifestSha256 } };
     const labels = service => ({ 'com.docker.compose.project': project, 'io.podman.compose.project': project, 'lexiflow.installation': id, ...(service ? { 'com.docker.compose.service': service, 'io.podman.compose.service': service } : {}) });
-    const volumeA = `${project}_pgdata`, volumeB = `${project}_initialization-work`;
+    const volumeA = `${project}_pgdata`;
     const install = { dir, state, labels, containers: [
       { Id: flowHex('1'), Image: api, State: { Running: true }, Config: { Labels: labels('api') } },
       { Id: flowHex('2'), Image: pg, State: { Running: true }, Config: { Labels: labels('postgres') }, Mounts: [{ Type: 'volume', Destination: '/var/lib/postgresql/data', Name: volumeA }] },
-    ], volumes: [volumeA, volumeB].map(Name => ({ Name, CreatedAt: '2026-01-01T00:00:00Z', Labels: labels() })), networks: [{ Name: `${project}_default`, Labels: labels() }] };
+    ], volumes: [volumeA].map(Name => ({ Name, CreatedAt: '2026-01-01T00:00:00Z', Labels: labels() })), networks: ['private', 'published'].map(name => ({ Name: `${project}_${name}`, Labels: labels() })) };
     if (this.scenario === 'lock-claim') fs.mkdirSync(path.join(dir, '.lock-claim'));
     this.installs.set(dir, install); this.ext(install, v.buildIdentity); this.record(install, 'install', 'PASS', v.buildIdentity); this.save(install); return install;
   }
@@ -252,14 +274,37 @@ class FlowEngine {
     this.ext(install, v.buildIdentity); this.save(install);
   }
   async run(input) {
-    const existing = this.installs.get(input.directory);
+    const addOperationLog = install => {
+      const name = `operation-${Date.now()}-${String(++this.next).padStart(8, '0')}.log`;
+      const file = path.join(install.dir, name);
+      fs.writeFileSync(file, 'synthetic-private-secret\nraw diagnostic detail\n', { mode: 0o600 });
+      if (this.scenario === 'unsafe-operation-log') fs.chmodSync(file, 0o644);
+      if (this.scenario === 'symlink-operation-log') { fs.unlinkSync(file); fs.symlinkSync('/etc/passwd', file); }
+      if (this.scenario === 'extra-operation-log') fs.writeFileSync(path.join(install.dir, 'unexpected-operation.log'), 'synthetic', { mode: 0o600 });
+      const evidence = path.join(path.dirname(input.logFile), 'private-operation-logs');
+      if (this.scenario === 'symlink-log-destination-parent' && !fs.existsSync(evidence)) fs.symlinkSync('/tmp', evidence);
+      if (this.scenario === 'symlink-log-destination-candidate') {
+        fs.mkdirSync(evidence, { recursive: true, mode: 0o700 });
+        const candidatePath = path.join(evidence, `${flowTarget.candidateSha256}-${install.state.id}`);
+        if (!fs.existsSync(candidatePath)) fs.symlinkSync('/tmp', candidatePath);
+      }
+      if (this.scenario === 'extra-log-destination') {
+        fs.mkdirSync(evidence, { recursive: true, mode: 0o700 });
+        const candidatePath = path.join(evidence, `${flowTarget.candidateSha256}-${install.state.id}`);
+        if (!fs.existsSync(candidatePath)) {
+          fs.mkdirSync(candidatePath, { mode: 0o700 });
+          fs.writeFileSync(path.join(candidatePath, 'unknown.log'), 'synthetic', { mode: 0o600 });
+        }
+      }
+    };
+    const existing = fs.existsSync(path.join(input.directory, 'state.json')) ? this.installs.get(input.directory) : null;
     if (!existing) {
-      this.make(input);
+      addOperationLog(this.make(input));
       return { code: 0, signal: null, settled: this.scenario !== 'unsettled' };
     }
-    if (this.scenario === 'no-op-repeat-install' && input.action === 'install' && input.directory.endsWith('/target-install')) return { code: 0, signal: null, settled: true };
-    if (this.scenario === 'no-op-repeat-upgrade' && input.action === 'upgrade' && input.directory.endsWith('/target-install')) return { code: 0, signal: null, settled: true };
-    this.change(existing, input); this.record(existing, input.action, 'PASS', this.identify(input)); this.save(existing);
+    if (this.scenario === 'no-op-repeat-install' && input.action === 'install') return { code: 0, signal: null, settled: true };
+    if (this.scenario === 'no-op-repeat-upgrade' && input.action === 'upgrade') return { code: 0, signal: null, settled: true };
+    this.change(existing, input); this.record(existing, input.action, 'PASS', this.identify(input)); this.save(existing); addOperationLog(existing);
     return { code: 0, signal: null, settled: true };
   }
   start(input) {
@@ -280,6 +325,7 @@ class FlowEngine {
     assert.equal(binary, 'podman', 'no real Podman command is allowed');
     const json = value => ({ status: 0, stdout: `${JSON.stringify(value)}\n`, stderr: '', signal: null });
     if (argv[0] === 'machine') return json([{ State: 'running', ConnectionInfo: { PodmanSocket: { Path: this.socketPath } } }]);
+    if (argv[0] === 'image' && argv[1] === 'exists') return { status: this.scenario === 'alias-residue' ? 0 : 1, stdout: '', stderr: '', signal: null };
     const installs = [...this.installs.values()];
     const ownerOf = id => installs.find(x => [...x.containers, ...x.volumes, ...x.networks].some(r => r.Id === id || r.Name === id));
     const collection = kind => installs.flatMap(x => kind === 'container' ? x.containers : kind === 'volume' ? x.volumes : x.networks);
@@ -314,14 +360,41 @@ test('copied runtime re-installs repeated candidates, proves exact fault, forwar
     assert.deepEqual(result.phases.map(p => [p.id, p.status]), runtime.REQUIRED_PHASE_IDS.map(id => [id, 'PASS']));
     assert.equal(flow.stops, 1);
     assert.equal(result.cleanup.settled, true);
-    assert.equal(flow.mutations.filter(x => x[0] === 'remove').length, 10); // two installs, 2 containers + 1 network + 2 volumes each
-    const previous = [...flow.installs.values()].find(x => x.dir.endsWith('/previous-install'));
+    assert.equal(result.cleanup.privateLogsRetained, true);
+    assert.doesNotMatch(JSON.stringify(result), /synthetic-private-secret|raw diagnostic detail/);
+    const retainedParent = path.join(path.dirname(flow.socketPath), 'tmp/quality/candidate-runtime');
+    const retainedRoot = fs.readdirSync(retainedParent).map(name => path.join(retainedParent, name))
+      .find(name => fs.existsSync(path.join(name, 'private-operation-logs')));
+    assert.ok(retainedRoot);
+    const privateLogFiles = fs.readdirSync(path.join(retainedRoot, 'private-operation-logs'), { recursive: true });
+    assert.ok(privateLogFiles.some(name => String(name).endsWith('.log')));
+    const evidenceDirectory = fs.readdirSync(path.join(retainedRoot, 'private-operation-logs'))
+      .map(name => path.join(retainedRoot, 'private-operation-logs', name))
+      .find(name => path.basename(name).startsWith(`${flowTarget.candidateSha256}-`));
+    const privateLog = path.join(evidenceDirectory, fs.readdirSync(evidenceDirectory)[0]);
+    assert.match(fs.readFileSync(privateLog, 'utf8'), /synthetic-private-secret/);
+    assert.equal(fs.statSync(privateLog).mode & 0o777, 0o600);
+    assert.equal(flow.mutations.filter(x => x[0] === 'remove').length, 10); // two installs, 2 containers + 2 networks + 1 volume each
+    const previous = [...flow.installs.values()].at(-1);
     assert.equal(previous.state.postgresImage, flowCandidates[flowTarget.candidateSha256].manifest.artifacts[1].imageDigest, 'upgrade uses target PostgreSQL image');
     assert.equal(previous.state.artifacts.candidateSha256, flowTarget.candidateSha256);
     assert.equal(previous.state.lastOperation.kind, 'upgrade');
     assert.equal(result.phases.find(p => p.id === 'preservation').facts.volumesSame, true);
     assert.equal(result.phases.find(p => p.id === 'preservation').facts.pgContainerOwned, true);
   });
+});
+
+test('unsafe source or destination logs block candidate cleanup without false retention claims', async () => {
+  for (const scenario of ['unsafe-operation-log', 'symlink-operation-log', 'extra-operation-log',
+    'symlink-log-destination-parent', 'symlink-log-destination-candidate', 'extra-log-destination']) {
+    await withRuntimeFlowFixture(scenario, async (runtime, flow) => {
+      const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
+      assert.equal(result.status, 'BLOCKED', `${scenario}: ${JSON.stringify(result)}`);
+      assert.equal(result.failure.code, 'PRIVATE_LOG_RETENTION_BLOCKED', scenario);
+      assert.equal(result.cleanup.privateLogsRetained, false, scenario);
+      assert.equal(flow.mutations.length, 0, 'unsafe evidence must not authorize resource cleanup');
+    });
+  }
 });
 
 test('missing fault can never claim PASS even when upgrade child exits nonzero', async () => {
@@ -371,5 +444,37 @@ test('unknown handoff lock blocks every cleanup mutation and preserves resources
     const install = [...flow.installs.values()][0];
     assert.equal(install.containers.length, 2);
     assert.equal(fs.statSync(path.join(install.dir, '.lock-claim')).isDirectory(), true);
+  });
+});
+
+test('fixed release slot is reusable after owned cleanup and never derives a second installation path', async () => {
+  await withRuntimeFlowFixture('success', async (runtime, flow) => {
+    const first = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
+    const second = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
+    assert.equal(first.status, 'PASS', JSON.stringify(first));
+    assert.equal(second.status, 'PASS', JSON.stringify(second));
+    assert.equal(new Set([...flow.installs.values()].map(x => x.dir)).size, 1);
+    assert.equal(flow.mutations.filter(x => x[0] === 'remove').length, 20);
+  });
+});
+
+test('unknown fixed-slot residue blocks before Podman mutation rather than selecting a UUID installation', async () => {
+  await withRuntimeFlowFixture('success', async (runtime, flow) => {
+    const slot = path.join(path.dirname(flow.socketPath), '.local/podman-release-validation');
+    fs.mkdirSync(slot, { recursive: true }); fs.writeFileSync(path.join(slot, 'unknown'), 'keep');
+    const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
+    assert.equal(result.status, 'BLOCKED');
+    assert.equal(result.failure.code, 'RUNTIME_SLOT_OCCUPIED');
+    assert.deepEqual(flow.mutations, []);
+    assert.equal(fs.readFileSync(path.join(slot, 'unknown'), 'utf8'), 'keep');
+  });
+});
+test('preexisting candidate alias blocks before loading or replacing an image in the fixed slot', async () => {
+  await withRuntimeFlowFixture('alias-residue', async (runtime, flow) => {
+    const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
+    assert.equal(result.status, 'BLOCKED');
+    assert.equal(result.failure.code, 'RUNTIME_SLOT_OCCUPIED');
+    assert.equal(flow.mutations.length, 0);
+    assert.equal(flow.installs.size, 0);
   });
 });

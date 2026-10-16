@@ -413,16 +413,22 @@ checks:
   - scripts/agents/work_packages/work_package_contract_checks.py
   - ops/dataset/tests/dataset-generation-identity.test.mjs
   - ops/podman/tests/candidate-runtime.test.mjs
+  - ops/podman/tests/candidate-image-alias.test.mjs
   - ops/podman/tests/candidate.test.mjs
   - ops/podman/tests/command-barrier.test.mjs
   - ops/podman/tests/command-follow.test.mjs
   - ops/podman/tests/database-target.test.mjs
   - ops/podman/tests/deployment.test.mjs
+  - ops/podman/tests/deployment-slots.test.mjs
   - ops/podman/tests/image-slot-lock.test.mjs
+  - ops/podman/tests/isolated-candidate-archive.test.mjs
   - ops/podman/tests/java-runtime.test.mjs
   - ops/podman/tests/local-session.test.mjs
+  - ops/podman/tests/managed-postgres-readiness.test.mjs
   - ops/podman/tests/prepare-workspace.test.mjs
   - ops/podman/tests/process-lock.test.mjs
+  - ops/podman/tests/source-base-image.test.mjs
+  - ops/podman/tests/source-network-environment.test.mjs
   - ops/podman/tests/unified-flow.test.mjs
   - ops/podman/tests/unified-local.test.mjs
   - ops/podman/tests/upgrade.test.mjs

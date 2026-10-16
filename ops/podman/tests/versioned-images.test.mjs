@@ -4,7 +4,7 @@ import { deploymentImageTag, versionedImageReference, versionedImageLabels, remo
 
 const id = `sha256:${'a'.repeat(64)}`, cid = 'b'.repeat(64), otherCid = 'c'.repeat(64);
 const ok = stdout => ({ commandExitCode: 0, stdout });
-const imageData = (imageId = id, role = 'api', labels = {}) => [{ Id: imageId, Labels: { 'io.lexiflow.image-role': role, 'io.lexiflow.deployment-version': '1.2.3', ...labels } }];
+const imageData = (imageId = id, role = 'api', labels = {}) => [{ Id: imageId, RepoTags: [`localhost/lexiflow-${role}:1.2.3`, `localhost/lexiflow-release-validation-${role}:1.2.3`], Labels: { 'io.lexiflow.image-role': role, 'io.lexiflow.deployment-version': '1.2.3', ...labels } }];
 const containerData = (containerId = cid, labels = {}) => [{ Id: `/${containerId}`, Image: id, State: { Running: true }, Config: { Labels: {
   'lexiflow.installation': '1'.repeat(32), 'com.docker.compose.project': `lexiflow-local-${'1'.repeat(32)}`,
   'io.podman.compose.project': `lexiflow-local-${'1'.repeat(32)}`, 'com.docker.compose.service': 'api', 'io.podman.compose.service': 'api', ...labels,
@@ -160,4 +160,29 @@ test('role/version mismatch and command failures do not authorize fallback delet
 test('malformed captured output fails closed before resource deletion', async () => {
   const run = async () => ({ commandExitCode: 0, stdout: {} });
   await assert.rejects(removeVersionedImage({ run, role: 'api', baseVersion: '1.2.3' }), /VERSIONED_IMAGE_CHECK_FAILED/);
+});
+
+test('shared full image ID preserves release-validation container and only untags the source alias', async () => {
+  const other = containerData(otherCid, {
+    'lexiflow.installation': '2'.repeat(32),
+    'com.docker.compose.project': `lexiflow-local-${'2'.repeat(32)}`,
+    'io.podman.compose.project': `lexiflow-local-${'2'.repeat(32)}`,
+    'lexiflow.slot': 'release-validation',
+  });
+  const f = fake({ refs: [cid, otherCid], containers: { [otherCid]: other } });
+  const result = await removeVersionedImage({ run: f.run, role: 'api', baseVersion: '1.2.3',
+    installationId: '1'.repeat(32), allowReleaseValidation: true });
+  assert.deepEqual(result.removedContainerIds, [cid]);
+  assert.equal(f.calls.some(args => args[0] === 'stop' && args.at(-1) === otherCid), false);
+  assert.equal(f.calls.some(args => args[0] === 'rm' && args.at(-1) === otherCid), false);
+  assert.ok(f.calls.some(args => args.join(' ') === 'image untag localhost/lexiflow-api:1.2.3'));
+  assert.equal(f.calls.some(args => args[0] === 'rmi'), false);
+  const unknown = fake({ refs: [cid, otherCid], containers: { [otherCid]: containerData(otherCid, {
+    'lexiflow.installation': '2'.repeat(32),
+    'com.docker.compose.project': `lexiflow-local-${'2'.repeat(32)}`,
+    'io.podman.compose.project': `lexiflow-local-${'2'.repeat(32)}`,
+  }) } });
+  await assert.rejects(removeVersionedImage({ run: unknown.run, role: 'api', baseVersion: '1.2.3',
+    installationId: '1'.repeat(32), allowReleaseValidation: true }), /VERSIONED_IMAGE_CONTAINER_MISMATCH/);
+  assert.equal(unknown.calls.some(args => ['stop', 'rm', 'rmi'].includes(args[0])), false);
 });

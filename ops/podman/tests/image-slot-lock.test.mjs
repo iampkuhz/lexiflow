@@ -13,3 +13,12 @@ test('image slot lock is non-waiting, shared per host user and isolated by base 
   next();
   assert.throws(() => acquireImageSlotLock('7.0.0-snapshot'), /IMAGE_SLOT_VERSION_INVALID/);
 });
+
+test('source and release-validation image aliases do not serialize each other', () => {
+  const source = acquireImageSlotLock('7.0.0-SNAPSHOT', 'source');
+  const release = acquireImageSlotLock('7.0.0-SNAPSHOT', 'release-validation');
+  try {
+    assert.throws(() => acquireImageSlotLock('7.0.0-SNAPSHOT', 'source'), /IMAGE_SLOT_BUSY/);
+    assert.throws(() => acquireImageSlotLock('7.0.0-SNAPSHOT', 'release-validation'), /IMAGE_SLOT_BUSY/);
+  } finally { release(); source(); }
+});

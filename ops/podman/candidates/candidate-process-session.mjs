@@ -4,10 +4,12 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import net from 'node:net';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { deploymentSlot } from '../deployment-slots.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const localUrl = pathToFileURL(path.join(repo, 'ops/podman/commands/manage-podman-installation.mjs')).href;
 const sessionUrl = pathToFileURL(fileURLToPath(import.meta.url)).href;
+const releaseSlot = deploymentSlot('release-validation', repo);
 const source = `import {runLocal} from ${JSON.stringify(localUrl)}; import {watchCancel} from ${JSON.stringify(sessionUrl)};\n` +
   `let raw=''; for await (const chunk of process.stdin) { raw += chunk; if (raw.length > 4096) throw Error('SESSION_INPUT_TOO_LARGE'); }\n` +
   `const input=JSON.parse(raw); const cancel=watchCancel(()=>process.emit('SIGTERM')); let planHash; const log=console.log;\n` +
@@ -30,10 +32,10 @@ function groupGone(pid) {
   catch (error) { return error.code === 'ESRCH'; }
 }
 export function startCandidateSession({ action, directory, candidate, dbPort, logFile, timeoutMs = 900_000 }) {
-  if (!['install', 'upgrade'].includes(action) || !path.isAbsolute(directory) || !path.isAbsolute(logFile)
+  if (!['install', 'upgrade'].includes(action) || directory !== releaseSlot.directory || !path.isAbsolute(logFile)
     || !candidate || Object.keys(candidate).sort().join(',') !== 'candidateDirectory,candidateSha256'
     || !path.isAbsolute(candidate.candidateDirectory) || !/^[a-f0-9]{64}$/.test(candidate.candidateSha256)
-    || !Number.isInteger(dbPort) || dbPort < 1024 || dbPort > 65535 || dbPort === 18080
+    || dbPort !== releaseSlot.dbPort
     || !Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 900_000) throw new Error('SESSION_REQUEST_INVALID');
   // 文件由本入口独占创建，不允许预创建再以 wx 打开。
   const fd = fs.openSync(logFile, 'wx', 0o600);
@@ -50,7 +52,7 @@ export function startCandidateSession({ action, directory, candidate, dbPort, lo
   });
   child.stdin.on('error', () => {});
   child.stdio[3].on('error', () => {});
-  child.stdin.end(JSON.stringify({ argv: [action, '--dir', directory, ...(action === 'install' ? ['--db-port', String(dbPort)] : [])], candidate }) + '\n');
+  child.stdin.end(JSON.stringify({ argv: [action, '--dir', directory], candidate }) + '\n');
   const wait = async () => {
     let timer;
     const outcome = await Promise.race([exit, new Promise(resolve => { timer = setTimeout(() => resolve(null), timeoutMs); })]);

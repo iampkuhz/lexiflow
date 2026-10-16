@@ -1,5 +1,4 @@
 """验证本机部署入口的编排和失败边界；替身不能证明真实容器成功。"""
-import contextlib
 import hashlib
 import http.server
 import json
@@ -8,7 +7,6 @@ import re
 import pty
 from pathlib import Path
 import shutil
-import socket
 import signal
 import select
 import time
@@ -50,6 +48,13 @@ class LocalEntryTest(unittest.TestCase):
 
     @staticmethod
     def _prepare_source(repo):
+        # 公共部署入口使用真实固定槽位合同；复制其生产模块图，不给产品增加测试开关。
+        for source in (ROOT / 'ops/podman').rglob('*.mjs'):
+            relative = source.relative_to(ROOT)
+            if 'tests' not in relative.parts:
+                target = repo / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, target)
         for relative in ["ops/podman/commands/manage-podman-installation.mjs", "ops/podman/installation/installation-upgrade-workflow.mjs", "ops/podman/installation/installation-plan-records.mjs", "ops/podman/environment/local-database-target.mjs", "ops/podman/candidates/candidate-artifact-installer.mjs", "ops/podman/images/versioned-images.mjs", "ops/podman/images/image-slot-lock.mjs", "ops/podman/environment/java-build-environment.mjs", "ops/podman/execution/installation-operation-lock.mjs", "ops/podman/execution/deployment-process-control.mjs", "ops/podman/commands/diagnose-podman-installation.mjs", "ops/podman/installation/installation-update-transaction.mjs", "ops/podman/installation/installation-workspace-journal.mjs", "ops/podman/installation/installation-version-summary.mjs", "ops/podman/compose.validation.yaml",
                          "ops/dataset/prepare_ecdict_bundle.py", "ops/podman/source-tools.Containerfile",
                          "ops/docker/Dockerfile", "ops/docker/Dockerfile.postgres",
@@ -135,11 +140,18 @@ mode=Path(MODE).read_text()
 if args[:1]==['pull'] and mode=='slow-pull':
     import time
     print('private-download-output',flush=True);time.sleep(30)
+elif args[:1]==['pull'] and args[-1] in ['docker.io/library/eclipse-temurin:25-jre','docker.io/library/postgres:17-bookworm']:
+    ref=args[-1]; image_id='sha256:'+hashlib.sha256(ref.encode()).hexdigest()
+    env=['JAVA_VERSION=jdk-25.0.1+8'] if ref.endswith(':25-jre') else ['PG_MAJOR=17','PG_VERSION=17.6-1.pgdg12+1']
+    entry={'id':image_id,'labels':{},'config':{'Env':env}}
+    images[ref]=entry;images[image_id]=entry;images_file.write_text(json.dumps(images))
 elif args[:1]==['info']: print('{}')
 elif args[:2]==['image','exists']: sys.exit(0 if args[2] in images else 1)
 elif args[:1]==['tag']:
     images[args[2]]=images[args[1]]; images_file.write_text(json.dumps(images))
 elif args[:1]==['rmi']:
+    images.pop(args[-1],None); images_file.write_text(json.dumps(images))
+elif args[:2]==['image','untag']:
     images.pop(args[-1],None); images_file.write_text(json.dumps(images))
 elif args[:2]==['image','inspect']:
     image_key=args[2] if args[2]!='--format' else args[-1]
@@ -147,7 +159,8 @@ elif args[:2]==['image','inspect']:
     if '--format' in args and args[args.index('--format')+1]=='{{json .Labels}}':
         print(json.dumps(entry['labels'] if entry else {}))
     elif '--format' in args and args[args.index('--format')+1]=='json':
-        print(json.dumps([{'Id':entry['id'],'Labels':entry['labels']}]) if entry else '[]')
+        refs=sorted(key for key,value in images.items() if entry and value['id']==entry['id'] and key.startswith('localhost/'))
+        print(json.dumps([{'Id':entry['id'],'Labels':entry['labels'],'RepoTags':refs,'Os':'linux','Architecture':'arm64','Config':entry.get('config',{})}]) if entry else '[]')
     elif '--format' in args and args[args.index('--format')+1]=='{{json .Os}} {{json .Architecture}}':
         print('\"linux\" \"arm64\"')
     else: print(entry['id'] if entry else 'sha256:'+hashlib.sha256(args[-1].encode()).hexdigest())
@@ -169,16 +182,37 @@ elif args[:1]==['inspect']:
     rows=[json.loads(file.read_text()) for file in [runtime_file,pg_runtime_file] if file.exists()]
     item=next((row for row in rows if row['containerId']==args[-1]),None)
     if item is None: sys.exit(1)
-    print(item['id'])
+    if item['containerId']:
+        state=json.loads(Path(KIT,'state.json').read_text())
+        role='postgres' if item['id'].removeprefix('sha256:')==state.get('postgresImage','').removeprefix('sha256:') else 'api'
+        if role!='postgres':
+            print(item['id'])
+            raise SystemExit(0)
+        labels={'com.docker.compose.project':state['project'],'io.podman.compose.project':state['project'],
+                'com.docker.compose.service':role,'io.podman.compose.service':role,'lexiflow.installation':state['id']}
+        print(json.dumps([{'Id':item['containerId'],'Image':item['id'],'State':{'Running':True,'Health':{'Status':'healthy'}},
+          'Config':{'Labels':labels},'HostConfig':{'PortBindings':{'5432/tcp':[{'HostIp':'127.0.0.1','HostPort':str(state['dbPort'])}]}},
+          'Mounts':[{'Type':'volume','Name':state['project']+'_pgdata','Destination':'/var/lib/postgresql/data','RW':True}]}]))
 elif args[:2]==['container','inspect']:
     state=json.loads(Path(KIT,'state.json').read_text())
     for role,file in [('api',runtime_file),('postgres',pg_runtime_file)]:
         if file.exists():
             item=json.loads(file.read_text())
             if item['containerId']==args[2]:
-                print(json.dumps([{'Id':item['containerId'],'Image':item['id'],'State':{'Running':True},'Config':{'Labels':{'com.docker.compose.project':state['project'],'com.docker.compose.service':role,'lexiflow.installation':state['id']}}}]))
+                labels={'com.docker.compose.project':state['project'],'io.podman.compose.project':state['project'],
+                        'com.docker.compose.service':role,'io.podman.compose.service':role,'lexiflow.installation':state['id']}
+                details={'Id':item['containerId'],'Image':item['id'],'State':{'Running':True},'Config':{'Labels':labels}}
+                if role=='postgres':
+                    details['State']['Health']={'Status':'healthy'}
+                    details['HostConfig']={'PortBindings':{'5432/tcp':[{'HostIp':'127.0.0.1','HostPort':str(state['dbPort'])}]}}
+                    details['Mounts']=[{'Type':'volume','Name':state['project']+'_pgdata','Destination':'/var/lib/postgresql/data','RW':True}]
+                print(json.dumps([details]))
                 sys.exit(0)
     sys.exit(1)
+elif args[:2]==['volume','inspect']:
+    state=json.loads(Path(KIT,'state.json').read_text())
+    print(json.dumps([{'Name':args[-1],'Labels':{'com.docker.compose.project':state['project'],
+      'io.podman.compose.project':state['project'],'lexiflow.installation':state['id']}}]))
 elif args[:1] in (['stop'],['rm']):
     for file in [runtime_file,pg_runtime_file]:
         if file.exists() and json.loads(file.read_text())['containerId']==args[-1]:
@@ -277,25 +311,51 @@ elif args[:1]==['compose'] and 'initialize' in args and mode=='init-fail': sys.e
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.repo = self.repo
         self.server.kit = self.kit
-        self.api_port = self.server.server_port
-        with socket.socket() as reserve:
-            reserve.bind(("127.0.0.1", 0))
-            self.db_port = reserve.getsockname()[1]
-        # 替身 HTTP 仍占宿主端口；当 fake Podman 已精确移除 API 容器时，
-        # portTaken 应观察容器真实释放后的语义，而非夹具 socket 的假占用。
+        self.http_port = self.server.server_port
+        self.api_port, self.db_port = 18081, 15432
+        # 元数据/CLI 沿用产品固定端口；仅 HTTP 替身使用隔离的瞬时 socket。
+        # 不监听或影响机器上真实 source/release 的固定端口。
         with preload.open('a') as output:
             output.write(f'''
-import fs from 'node:fs'; import net from 'node:net';
+import fs from 'node:fs'; import net from 'node:net'; import http from 'node:http';
+const originalHttpGet=http.get;
+http.get=(options,...rest)=>{{
+  if(options && typeof options==='object' && options.hostname==='127.0.0.1'
+      && [18080,18081].includes(Number(options.port))){{
+    return originalHttpGet({{...options,port:{self.http_port}}},...rest);
+  }}
+  return originalHttpGet(options,...rest);
+}};
+const originalFetch=globalThis.fetch;
+globalThis.fetch=(input,options)=>{{
+  const target=new URL(input instanceof Request ? input.url : input);
+  if(target.hostname==='127.0.0.1' && ['18080','18081'].includes(target.port)){{
+    target.port='{self.http_port}'; return originalFetch(target,options);
+  }}
+  return originalFetch(input,options);
+}};
 const originalCreateServer=net.createServer;
 net.createServer=(...args)=>{{
   const server=originalCreateServer(...args), originalListen=server.listen.bind(server), originalClose=server.close.bind(server);
   let syntheticFree=false;
   server.listen=(port,host,callback)=>{{
-    if(port==={self.db_port} && fs.existsSync({json.dumps(str(self.root / 'pg-runtime.json'))})){{
-      setImmediate(()=>server.emit('error',Object.assign(new Error('synthetic managed PG listener'),{{code:'EADDRINUSE'}})));
+    const requestedPort=port && typeof port==='object' ? port.port : port;
+    const onListening=typeof host==='function' ? host : callback;
+    // Fixed source ports are contract values only. Reflect the current synthetic
+    // PG listener, including this invocation's newly started container. Ownership
+    // is checked separately by the product. Never bind/probe the machine's 15432 socket.
+    if(Number(requestedPort)==={self.db_port} && fs.existsSync({json.dumps(str(self.root / 'pg-runtime.json'))})){{
+      setImmediate(()=>server.emit('error',Object.assign(new Error('synthetic owned PG listener'),{{code:'EADDRINUSE'}})));
       return server;
     }}
-    if(port==={self.api_port} && !fs.existsSync({json.dumps(str(self.root / 'runtime.json'))})){{syntheticFree=true;setImmediate(callback);return server;}}
+    if([18080,18081,{self.db_port}].includes(Number(requestedPort))){{
+      const stateFile={json.dumps(str(self.kit / 'state.json'))};
+      const activePort=fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile,'utf8')).apiPort : null;
+      if(Number(requestedPort)===activePort && fs.existsSync({json.dumps(str(self.root / 'runtime.json'))})){{
+        setImmediate(()=>server.emit('error',Object.assign(new Error('synthetic API listener'),{{code:'EADDRINUSE'}})));return server;
+      }}
+      syntheticFree=true;setImmediate(onListening);return server;
+    }}
     return originalListen(port,host,callback);
   }};
   server.close=callback=>syntheticFree ? setImmediate(callback) : originalClose(callback);
@@ -360,7 +420,8 @@ net.createServer=(...args)=>{{
     @staticmethod
     def assert_extension_archive_fixture_contract(state, kit):
         archive = state['artifacts']['extensionArchive']
-        expected_relative = f"extension-artifacts/{state['buildIdentity']['buildId']}/lexiflow-extension-{state['version']}.zip"
+        port_directory = 'api-18081/' if state['apiPort'] == 18081 else ''
+        expected_relative = f"extension-artifacts/{state['buildIdentity']['buildId']}/{port_directory}lexiflow-extension-{state['version']}.zip"
         if archive['path'] != expected_relative or archive['buildIdentity'] != state['buildIdentity']:
             raise AssertionError('ready fixture archive identity mismatch')
         zip_path = kit / archive['path']
@@ -497,7 +558,7 @@ import {createExtensionZip,publishExtensionArchive} from './extension/scripts/pa
 import {readExtensionFiles} from './ops/release/integrity/extension-archive-integrity.mjs';
 const [directory,identityJson,port]=process.argv.slice(1), identity=JSON.parse(identityJson);
 const packaged=await createExtensionZip({root:path.resolve('extension'),buildIdentity:identity,apiPort:Number(port)});
-const relative=`extension-artifacts/${identity.buildId}/${packaged.descriptor.filename}`, zip=path.join(directory,relative);
+const relative=`extension-artifacts/${identity.buildId}/${Number(port)===18081?'api-18081/':''}${packaged.descriptor.filename}`, zip=path.join(directory,relative);
 await publishExtensionArchive(packaged.archive,`${packaged.descriptor.sha256}  ${packaged.descriptor.filename}\n`,path.dirname(zip),packaged.descriptor.filename);
 for(const [name,bytes] of await readExtensionFiles(zip,packaged.descriptor.sha256)){const target=path.join(directory,'extension',name);fs.mkdirSync(path.dirname(target),{recursive:true,mode:0o700});fs.writeFileSync(target,bytes,{flag:'wx',mode:0o600});}
 console.log(JSON.stringify({path:relative,bytes:packaged.descriptor.bytes,sha256:packaged.descriptor.sha256,buildIdentity:identity}));"""
@@ -752,7 +813,7 @@ console.log(JSON.stringify({identity,generation,upstream,
                         if state['phase'] in ['initializing','initialized','ready']: break
                     except (FileNotFoundError, json.JSONDecodeError): pass
                     time.sleep(.02)
-                self.server = http.server.ThreadingHTTPServer(("127.0.0.1", self.api_port), self.server.RequestHandlerClass)
+                self.server = http.server.ThreadingHTTPServer(("127.0.0.1", self.http_port), self.server.RequestHandlerClass)
                 self.server.repo = self.repo
                 self.server.kit = self.kit
                 self.server.timeout = .1
@@ -1044,7 +1105,6 @@ console.log(JSON.stringify({identity,generation,upstream,
     def test_upgrade_rejects_successful_compose_that_reuses_old_api_container(self):
         self.prepare_ready_fixture()
         before=json.loads((self.kit/'state.json').read_text())
-        extension=(self.kit/'extension/build-identity.json').read_bytes()
         (self.repo/'ops/release/version.txt').write_text('2.0.1-SNAPSHOT\n')
         self.mode.write_text('reuse-container-once')
         offset=len(self.calls.read_text().splitlines())
@@ -1131,7 +1191,20 @@ console.log(JSON.stringify({identity,generation,upstream,
         self.assertTrue((self.root/'pg-runtime.json').exists())
         self.assertTrue((self.kit/'image-replacement.json').exists())
         calls=[json.loads(line) for line in self.calls.read_text().splitlines()[offset:]]
-        api_remove=next(i for i,row in enumerate(calls) if row[:1]==['rmi'] and 'lexiflow-api:' in row[-1])
+        api_ref='localhost/lexiflow-api:2.0.0'
+        api_remove=next(i for i,row in enumerate(calls)
+                        if row[:2]==['image','untag'] and row[-1]==api_ref)
+        api_inspects=[(i,row) for i,row in enumerate(calls[:api_remove])
+                      if row[:3]==['image','inspect',api_ref] and row[-1]=='json']
+        self.assertGreaterEqual(len(api_inspects),2,
+                                'exact alias and full image identity must be rechecked before untag')
+        ancestor_queries=[row for row in calls[:api_remove]
+                          if row[:3]==['ps','-a','--no-trunc'] and '--filter' in row
+                          and row[row.index('--filter')+1].startswith('ancestor=')]
+        self.assertTrue(ancestor_queries,
+                        'full image ID users must be inspected before removing the exact shared alias')
+        self.assertTrue(all(row[-1]=='{{.ID}}' and re.fullmatch(
+            r'ancestor=[a-f0-9]{64}',row[row.index('--filter')+1]) for row in ancestor_queries))
         api_build=next(i for i,row in enumerate(calls) if row[:1]==['build'] and any('localhost/lexiflow-api:' in arg for arg in row))
         self.assertLess(api_remove,api_build)
         self.mode.write_text('')
@@ -1235,16 +1308,14 @@ console.log(JSON.stringify({identity,generation,upstream,
         first_state=self.prepare_logs_fixture()
         first_snapshot=(self.kit/'state.json').read_bytes()
         second=LocalEntryTest(methodName='runTest')
-        # 数据库是合成 provider，并未真正监听；临时保留端口避免 OS 合法复用
-        # 未绑定端口导致“两个独立实例”回归偶发失败。
-        with socket.socket() as reserved:
-            reserved.bind(('127.0.0.1', self.db_port))
-            second.setUp()
+        # 两个离线替身各自持有状态/transport；产品端口合同相同，不绑定真实端口。
+        second.setUp()
         try:
             second_state=second.prepare_logs_fixture()
             self.assertNotEqual(self.kit,second.kit)
-            self.assertNotEqual(self.api_port,second.api_port)
-            self.assertNotEqual(self.db_port,second.db_port)
+            self.assertEqual(self.api_port,second.api_port)
+            self.assertEqual(self.db_port,second.db_port)
+            self.assertNotEqual(self.http_port,second.http_port)
             self.assertNotEqual(first_state['id'],second_state['id'])
             self.assertNotEqual(first_state['digests'],second_state['digests'])
             self.assertEqual((self.kit/'state.json').read_bytes(),first_snapshot)
@@ -1264,9 +1335,7 @@ console.log(JSON.stringify({identity,generation,upstream,
         self.assertEqual(candidate['buildIdentity'], candidate_identity)
         candidate_images = self.inspect_ready_images(candidate)
         reference = LocalEntryTest(methodName='runTest')
-        with socket.socket() as reserved:
-            reserved.bind(('127.0.0.1', self.db_port))
-            reference.setUp()
+        reference.setUp()
         try:
             installed = reference.invoke('install', serve=True)
             self.assertEqual(installed.returncode, 0, installed.stderr)
@@ -1288,8 +1357,9 @@ console.log(JSON.stringify({identity,generation,upstream,
                 self.assertEqual(images[state['apiImage']]['labels']['org.opencontainers.image.version'], resolved['softwareVersion'])
             self.assertNotEqual(candidate['id'], actual['id'])
             self.assertNotEqual(candidate['root'], actual['root'])
-            self.assertNotEqual(candidate['apiPort'], actual['apiPort'])
-            self.assertNotEqual(candidate['dbPort'], actual['dbPort'])
+            self.assertEqual(candidate['apiPort'], actual['apiPort'])
+            self.assertEqual(candidate['dbPort'], actual['dbPort'])
+            self.assertNotEqual(self.http_port, reference.http_port)
             self.assertEqual(candidate['databaseTarget']['port'], candidate['dbPort'])
             self.assertEqual(actual['databaseTarget']['port'], actual['dbPort'])
             self.assertNotIn('lastOperation', candidate)
@@ -1435,16 +1505,15 @@ const [api,db]=process.argv.slice(1); console.log(renderCompose(process.cwd(),
     def test_ready_precondition_instances_are_isolated(self):
         first = self.prepare_ready_fixture()
         second = LocalEntryTest(methodName='runTest')
-        with socket.socket() as reserved:
-            reserved.bind(('127.0.0.1', self.db_port))
-            second.setUp()
+        second.setUp()
         try:
             other = second.prepare_ready_fixture()
             self.assertNotEqual(self.kit, second.kit)
             self.assertNotEqual(first['id'], other['id'])
             self.assertNotEqual(first['root'], other['root'])
-            self.assertNotEqual(first['apiPort'], other['apiPort'])
-            self.assertNotEqual(first['dbPort'], other['dbPort'])
+            self.assertEqual(first['apiPort'], other['apiPort'])
+            self.assertEqual(first['dbPort'], other['dbPort'])
+            self.assertNotEqual(self.http_port, second.http_port)
             self.assertNotEqual(self.calls, second.calls)
             def snapshot(case):
                 return case.ready_files_snapshot(case.root)
@@ -1557,10 +1626,9 @@ Object.defineProperty(globalThis, 'performance', {
         self.prepare_ready_fixture()
         state=json.loads((self.kit/'state.json').read_text())
         self.mode.write_text('owned-pg')
-        with socket.socket() as listener:
-            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            listener.bind(('127.0.0.1',state['dbPort']));listener.listen()
-            result=self.invoke('up')
+        # preload 根据这个受管 PG 记录报告固定端口占用，不触碰真实数据库 socket。
+        self.assertTrue((self.root/'pg-runtime.json').is_file())
+        result=self.invoke('up')
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(json.loads((self.kit/'state.json').read_text())['datasetIdentity'],state['datasetIdentity'])
     def test_schema_and_csv_tampering_block_initialization(self):
