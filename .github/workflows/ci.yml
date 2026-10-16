@@ -22,7 +22,7 @@ jobs:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_DB: lexiflow_test
+          POSTGRES_DB: lexiflow_hook_test
           POSTGRES_HOST_AUTH_METHOD: trust
         ports: ['127.0.0.1:5432:5432']
         options: >-
@@ -35,7 +35,7 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      LEXIFLOW_POSTGRES_TEST_JDBC_URL: jdbc:postgresql://127.0.0.1:5432/lexiflow_test?user=postgres
+      LEXIFLOW_POSTGRES_TEST_JDBC_URL: jdbc:postgresql://127.0.0.1:5432/lexiflow_hook_test?user=postgres
       LEXIFLOW_REDIS_TEST_ENDPOINT: 127.0.0.1:6379
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import subprocess
+import hashlib
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -113,6 +114,59 @@ class CiQuickTests(unittest.TestCase):
                 with patch.object(ci, "changed_paths", return_value=[path]):
                     selected = set(ci.make_plan(self.root)["selected_check_ids"])
                 self.assertIn(expected, selected)
+
+    def test_workflow_database_matches_isolated_jar_test_contract(self) -> None:
+        workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_bytes())
+        job = workflow["jobs"]["quick"]
+        self.assertEqual(
+            job["services"]["postgres"]["env"]["POSTGRES_DB"], "lexiflow_hook_test"
+        )
+        self.assertEqual(
+            job["env"]["LEXIFLOW_POSTGRES_TEST_JDBC_URL"],
+            "jdbc:postgresql://127.0.0.1:5432/lexiflow_hook_test?user=postgres",
+        )
+
+    def test_public_summary_projects_only_python_traceback_code_location(self) -> None:
+        source = self.root / "ops/docker/tests/test_operation_ownership.py"
+        source.parent.mkdir(parents=True)
+        source.write_text("synthetic source")
+        log = self.root / "tmp/quality/synthetic-stderr.log"
+        log.parent.mkdir(parents=True)
+        raw = (
+            '  File "/private/checkout/ops/docker/tests/test_operation_ownership.py", line 492, in test_example\n'
+            '  File "/private/user-data/sensitive.py", line 12, in private_function\n'
+            "AssertionError: private-caption-and-token-value\n"
+        ).encode()
+        log.write_bytes(raw)
+        result = {
+            "kind": "ci-quick",
+            "status": "FAIL",
+            "selected_diagnostic": {
+                "selected_report": {
+                    "checks": [
+                        {
+                            "check_id": "eng.fixture",
+                            "status": "FAIL",
+                            "process": {
+                                "output_artifacts": {
+                                    "stderr": {
+                                        "locator": log.relative_to(self.root).as_posix(),
+                                        "sha256": hashlib.sha256(raw).hexdigest(),
+                                    }
+                                }
+                            },
+                        }
+                    ]
+                }
+            },
+        }
+        summary = ci.public_summary(result, self.root)
+        self.assertEqual(
+            summary["checks"][0]["source_locations"],
+            ["ops/docker/tests/test_operation_ownership.py:492"],
+        )
+        self.assertNotIn("private-caption-and-token-value", json.dumps(summary))
+        self.assertNotIn("/private/", json.dumps(summary))
 
     def test_clean_runtime_is_deferred_and_plan_says_zero_executed(self) -> None:
         plan = ci.make_plan(self.root)
