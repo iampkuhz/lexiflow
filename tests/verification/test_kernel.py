@@ -177,6 +177,29 @@ class TestBuildChildEnvironment(unittest.TestCase):
         with self.assertRaises(TypeError):
             build_child_environment(override={"USER": "forged"})
 
+    def test_preserves_only_required_xvfb_environment(self):
+        with patch.dict(
+            os.environ,
+            {
+                "DISPLAY": ":99",
+                "XAUTHORITY": "/tmp/synthetic-xvfb-auth",
+                "CHROME_USER_DATA_DIR": "/tmp/private-browser-profile",
+                "OPENAI_API_KEY": "synthetic-secret",
+            },
+            clear=True,
+        ):
+            env = build_child_environment()
+        self.assertEqual(env.get("DISPLAY"), ":99")
+        self.assertEqual(env.get("XAUTHORITY"), "/tmp/synthetic-xvfb-auth")
+        self.assertNotIn("CHROME_USER_DATA_DIR", env)
+        self.assertNotIn("OPENAI_API_KEY", env)
+
+    def test_does_not_invent_xvfb_environment(self):
+        with patch.dict(os.environ, {}, clear=True):
+            env = build_child_environment()
+        self.assertNotIn("DISPLAY", env)
+        self.assertNotIn("XAUTHORITY", env)
+
 
 class TestRunCheckProcess(unittest.TestCase):
     def test_passing_check(self):
