@@ -62,8 +62,7 @@ lf_docker_run() (
     sleep "$budget" >/dev/null 2>&1 & sleeper=$!
     critical=0
     if [ -n "$cancelled" ]; then exit 0; fi
-    wait "$sleeper" 2>/dev/null
-    timer_status=$?
+    if wait "$sleeper" 2>/dev/null; then timer_status=0; else timer_status=$?; fi
     sleeper=
     # timer 工具或磁盘失败也须终止本次 CLI，不能撤掉保护后继续等待。
     if ! (: > "$dir/timedout") 2>/dev/null || [ "$timer_status" -ne 0 ]; then
@@ -82,11 +81,9 @@ lf_docker_run() (
     exit 1
   ) &
   timer=$!
-  wait "$child" 2>/dev/null
-  status=$?
+  if wait "$child" 2>/dev/null; then status=0; else status=$?; fi
   kill -TERM "$timer" 2>/dev/null || :
-  wait "$timer" 2>/dev/null
-  timer_status=$?
+  if wait "$timer" 2>/dev/null; then timer_status=0; else timer_status=$?; fi
   timer= child=
   # 极快 CLI 可在 timer 安装 trap 前完成；本次 TERM 的默认退出也属正常回收。
   case "$timer_status" in 0|143) ;; *) exit 1;; esac
