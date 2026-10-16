@@ -58,10 +58,13 @@ export async function runExperienceAcceptance({page,context,serviceWorker,apiBas
   await popup.waitFor(()=>document.getElementById('enhance-toggle').disabled===false&&!document.getElementById('enhance-toggle').checked);
   await waitForState(page,'idle');assert.equal(await overlayText(page),'');
   await popup.click('#preferences summary');
+  await popup.waitFor(()=>document.querySelector('#preferences').open);
   assert.equal(await popup.evaluate(()=>!document.querySelector('#restore-start').hidden),true);
   await popup.click('#restore-start');
+  await popup.waitFor(()=>!document.querySelector('#restore-confirmation').hidden);
   assert.equal(await popup.evaluate(()=>!document.querySelector('#restore-confirmation').hidden),true);
   await popup.click('#restore-cancel');
+  await popup.waitFor(()=>document.querySelector('#restore-confirmation').hidden);
   assert.equal(await popup.evaluate(()=>!document.querySelector('#restore-confirmation').hidden),false);
   assert.equal(await popup.evaluate(()=>!document.querySelector('#restore-status').hidden),false);
   await page.bringToFront();
