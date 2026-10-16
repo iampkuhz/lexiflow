@@ -7572,6 +7572,560 @@ workstreams:
         - eng.release.lifecycle-runtime
         depends_on: []
         deliverable: 合成发行实际生命周期的有界证据或具体阻塞层；不等同真实资料候选。
+      - id: LF-TSK-OPS-2032
+        title: 修复完整发行阻断的部署模板和测试清单合同
+        priority: P0
+        task_version: 1
+        change_version: 1.3.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/tests/test_module_check_adapter.py
+        - ops/docker/tests/test_podman_compose_contract.py
+        - ops/podman/compose.validation.yaml
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 两个有真实失败证据的 surface 合同与最新固定槽位、测试 inventory 一致。
+        acceptance_criteria:
+        - 验证模板与 source 槽位和 renderCompose 精确一致，不修改产品端口或部署行为。
+        - 固定清单继续核对完整集合、重复项及未知项，不删断言或排除新增测试。
+        acceptance_evidence:
+        - 原始失败、精确差异及直接测试的实际结果。
+        validation_command: python3 -m scripts.checks.deployment.run_deployment_contract_tests --group surface
+        required_check_ids: [eng.release.docker-contract]
+        depends_on: []
+        deliverable: 最新部署验证合同与直接回归证据。
+      - id: LF-TSK-OPS-2033
+        title: 核对真实首次发行材料和人类审批前置
+        priority: P0
+        task_version: 1
+        change_version: 1.3.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 45
+        kind: design
+        lifecycle_state: READY
+        allowed_files: [tmp/phase-tools/first-release-v2/goal-continuation/material-audit/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 当前真实资料、许可、previous 和人类前置的来源证据及最小缺项。
+        acceptance_criteria:
+        - 只读来源和公开许可，核对当前文件摘要，不复制私有内容或 token。
+        - 不自动批准许可、不制作合成审批、不把测试候选当正式材料。
+        acceptance_evidence:
+        - 可核验的只读审计与实际来源定位。
+        validation_command: python3 -m json.tool tmp/phase-tools/first-release-v2/goal-continuation/material-audit/report.json
+        required_check_ids: [eng.repository.planning, eng.repository.docs]
+        depends_on: []
+        deliverable: 当前首发材料与人类审批准备的有界事实。
+      - id: LF-TSK-OPS-2034
+        title: 独立验证完整发行修复的开发闭环
+        priority: P0
+        task_version: 14
+        change_version: 2.9.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 90
+        kind: design
+        lifecycle_state: READY
+        allowed_files: [tmp/quality/first-release-v2/goal-development-validation-v14/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 全部真实 diff 最终冻结下的一次完整开发 Hook 及清理事实。
+        acceptance_criteria:
+        - 必需项全部真实执行且无跳过，漂移或缺环境不得 PASS。
+        - 独立于 producer，不签 Formal、不复用历史开发报告。
+        acceptance_evidence:
+        - 原生完成回调、当次 typed report、输入冻结与资源清理。
+        validation_command: python3 scripts/triggers/run_stop_checks.py
+        required_check_ids: [eng.repository.planning, eng.repository.docs]
+        depends_on:
+        - task_id: LF-TSK-OPS-2032
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.3.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2036
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.4.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2038
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.6.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2040
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.7.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2041
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.8.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2043
+          type: hard
+          required_task_version: 1
+          required_change_version: 2.0.1
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2044
+          type: hard
+          required_task_version: 1
+          required_change_version: 2.0.1
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2045
+          type: hard
+          required_task_version: 3
+          required_change_version: 2.4.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2046
+          type: hard
+          required_task_version: 2
+          required_change_version: 2.5.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2047
+          type: hard
+          required_task_version: 1
+          required_change_version: 2.6.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2048
+          type: hard
+          required_task_version: 1
+          required_change_version: 2.7.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2049
+          type: hard
+          required_task_version: 1
+          required_change_version: 2.9.0
+          required_result: PASS
+        deliverable: 完整开发检查结果，不等同正式发行验收。
+      - id: LF-TSK-OPS-2035
+        title: 独立审查完整发行修复和跨 Mac 制品边界
+        priority: P0
+        task_version: 14
+        change_version: 2.9.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 45
+        kind: design
+        lifecycle_state: READY
+        allowed_files: [tmp/quality/first-release-v2/goal-independent-review-v14/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 新冻结和真实检查证据的独立只读审查。
+        acceptance_criteria:
+        - 审查者不同于 producer 和 validator，不运行检查，不自报正式通过。
+        - 审计 ARM64 制品身份、私有路径和数据边界、正式发布前置，不代替人类审批。
+        acceptance_evidence:
+        - 当次独立意见、冻结哈希与验证证据定位。
+        validation_command: python3 -m json.tool tmp/quality/first-release-v2/goal-independent-review-v14/report.json
+        required_check_ids: [eng.repository.planning, eng.repository.docs]
+        depends_on:
+        - task_id: LF-TSK-OPS-2034
+          type: hard
+          required_task_version: 14
+          required_change_version: 2.9.0
+          required_result: PASS
+        deliverable: 最新证据的独立审查与缺项，不替代公开发行。
+      - id: LF-TSK-OPS-2036
+        title: 修复候选生命周期的受管 PostgreSQL 检查替身
+        priority: P0
+        task_version: 1
+        change_version: 1.4.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2034
+        allowed_files: [ops/podman/tests/candidate.test.mjs]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: Podman 替身真实模拟 loopback 端口、可写受管数据卷归属和健康状态，不放宽生产校验。
+        acceptance_criteria:
+        - 保留候选首装、重装、升级、故障与向前重试的全部断言。
+        - 只修改测试替身，不跳过检查或改变产品行为。
+        acceptance_evidence:
+        - 独立 Hook 原始失败、根因对应差异与完整 candidate 直接回归。
+        validation_command: node --test ops/podman/tests/candidate.test.mjs ops/podman/tests/managed-postgres-readiness.test.mjs
+        required_check_ids: [eng.release.docker-contract]
+        depends_on: []
+        deliverable: 最新受管数据库就绪合同的候选生命周期直接回归。
+      - id: LF-TSK-OPS-2037
+        title: 定位真实发行 runtime 的固定镜像与错误映射失败
+        priority: P0
+        task_version: 1
+        change_version: 1.5.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 30
+        kind: design
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2030
+        allowed_files: [tmp/phase-tools/first-release-v2/goal-continuation/runtime-triage/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 根据原始 scratch、真实基础镜像与官方 OCI 来源，定位 runtime 首错并提出最小修复。
+        acceptance_criteria:
+        - 只读源码、原始构件和本机官方基础镜像；不重复完整 Verify、不构建候选或公开写入。
+        - 镜像摘要与平台、版本取自真实本机和官方 manifest/config，不猜测或补齐错误摘要。
+        - 区分消费者错误映射、缓存和产品失败；不把合成资料当正式发行。
+        acceptance_evidence:
+        - 原始失败绑定、可核验 OCI 摘要和明确的最小消费者修复范围。
+        validation_command: python3 -m json.tool tmp/phase-tools/first-release-v2/goal-continuation/runtime-triage/diagnostic-report.json
+        required_check_ids: [eng.repository.planning, eng.repository.docs]
+        depends_on: []
+        deliverable: 真实运行首错及基础镜像来源事实；不自动授予发行许可。
+      - id: LF-TSK-OPS-2038
+        title: 修复发行 runtime 模块身份和固定基础镜像摘要
+        priority: P0
+        task_version: 1
+        change_version: 1.6.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2037
+        allowed_files:
+        - scripts/checks/release/source/check_synthetic_release_lifecycle.py
+        - tests/verification/test_release_runtime_check.py
+        - ops/docker/base-images.json
+        - ops/release/tests/build.test.mjs
+        - docs/scenarios/verification-environment.md
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: CLI 与 helpers 共用真实异常和进度合同；锁定 manifest 不变、错误 config ID 按官方字节摘要修正；测试环境说明与实际契约一致。
+        acceptance_criteria:
+        - 不改结果协议、冻结来源、发行校验或许可要求，不猜测或升级基础镜像。
+        - mock-only 子进程回归覆盖异常状态、reason 和共享计数；实际仓库锁经过真实 parser 校验。
+        - 固定 DB 与临时动态角色的 test-only 认证边界明确，不触碰开发库或公开服务。
+        acceptance_evidence:
+        - 原始故障、官方 manifest/config 字节摘要与精准测试实际结果。
+        validation_command: python3 -m unittest tests.verification.test_release_runtime_check
+        required_check_ids: [eng.verification.module-tests, eng.release.build, eng.repository.docs]
+        depends_on: []
+        deliverable: 固定来源与可观察真实错误的 runtime 工程修复，不等同正式候选 PASS。
+      - id: LF-TSK-OPS-2039
+        title: 精准验证真实合成发行 runtime 修复
+        priority: P0
+        task_version: 8
+        change_version: 2.9.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 60
+        kind: design
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2038
+        allowed_files: [tmp/quality/first-release-v2/runtime-fix-diagnostic-v8/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 固定镜像和模块身份修复后的单次 lifecycle-runtime 精确诊断及真实资源边界。
+        acceptance_criteria:
+        - 仅使用本机已核对精确配置 ID 的固定基础镜像，不改代理或准备工具，不以合成资料冒正式候选。
+        - 失败保持实际 typed 原因与进度，不重复执行或修改源码；清理与来源漂移结果可核验。
+        acceptance_evidence:
+        - 当次诊断结果、运行摘要、输入冻结和精确 owned 清理收据。
+        validation_command: python3 -m scripts.verification.commands.diagnose_repository_check --check-id eng.release.lifecycle-runtime
+        required_check_ids: [eng.release.lifecycle-runtime]
+        depends_on:
+        - task_id: LF-TSK-OPS-2038
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.6.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2040
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.7.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2041
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.8.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2043
+          type: hard
+          required_task_version: 1
+          required_change_version: 2.0.1
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2044
+          type: hard
+          required_task_version: 1
+          required_change_version: 2.0.1
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2046
+          type: hard
+          required_task_version: 2
+          required_change_version: 2.5.0
+          required_result: PASS
+        - task_id: LF-TSK-OPS-2049
+          type: hard
+          required_task_version: 1
+          required_change_version: 2.9.0
+          required_result: PASS
+        deliverable: 真实合成发行生命周期的精准验证，非正式资料验收。
+      - id: LF-TSK-OPS-2040
+        title: 在隔离 runtime 客户端保留实际 Compose 插件能力
+        priority: P0
+        task_version: 1
+        change_version: 1.7.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2039
+        allowed_files:
+        - scripts/checks/release/source/release_installation_checks.py
+        - tests/verification/test_release_runtime_lifecycle.py
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 从实际 Docker 客户端元数据窄派生已安装 Compose 插件，使隔离配置可用，不复制调用者凭据。
+        acceptance_criteria:
+        - 不硬编码 Homebrew 或本机私有路径，不复制原配置、auth、context 或 proxy，不写全局配置。
+        - 缺失、歧义、无效或漂移的实际插件能力失败关闭；只在临时客户端配置保留所需工具能力。
+        - mock 直接回归覆盖派生和失败边界，实际只读 private-config compose version 可核验。
+        acceptance_evidence:
+        - 原始精准失败、实际 client plugin 与 private-config 对比、直接测试和源差异。
+        validation_command: python3 -m unittest tests.verification.test_release_runtime_lifecycle
+        required_check_ids: [eng.verification.module-tests, eng.release.lifecycle-runtime]
+        depends_on: []
+        deliverable: 隔离 Docker 客户端的实际 Compose 能力，不绕过安装状态与资源归属护栏。
+      - id: LF-TSK-OPS-2041
+        title: 修复 POSIX 生命周期的实际 Podman 引擎身份绑定
+        priority: P0
+        task_version: 1
+        change_version: 1.8.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2039
+        allowed_files:
+        - ops/release/runtime/release-installation-docker.sh
+        - ops/release/tests/fake-docker-daemon.mjs
+        - ops/release/tests/lifecycle-fixture.mjs
+        - ops/release/tests/lifecycle.test.mjs
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 以实际 server 分类和显式 native endpoint 绑定稳定 Podman host/store 元组；同步直接替身，不改变产品业务或安装状态语义。
+        acceptance_criteria:
+        - Podman 随机兼容 ID 不参与身份；Docker 继续严格绑定真实 ID；无缓存或 unknown fallback。
+        - 缺失、歧义、无效、变化和 native 查询失败均失败关闭；副作用/状态边界及真实 owned 规则不变。
+        - shell 不引入 Python/Node/JSON 工具依赖，不修改全局环境、机器或现存安装。
+        acceptance_evidence:
+        - 原始精准失败及实际随机 ID/稳定 native 元组、官方源代码依据、直接 lifecycle 回归和只读实机身份复核。
+        validation_command: node --test ops/release/tests/lifecycle.test.mjs
+        required_check_ids: [eng.release.version, eng.release.lifecycle-runtime]
+        depends_on: []
+        deliverable: 新安装的稳定引擎绑定与直接验证，不自动迁移现有身份记录或签发行验收。
+      - id: LF-TSK-OPS-2042
+        title: 设计 Release 的可跨 Podman Mac 使用的私有文件输送
+        priority: P0
+        task_version: 1
+        change_version: 1.9.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 30
+        kind: design
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2039
+        allowed_files: [tmp/phase-tools/first-release-v2/goal-continuation/secret-transport-design/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 据实际 Compose/Podman 与只读服务证据，确定唯一私有秘密/资料输送方案、完整消费者和不重叠实施范围。
+        acceptance_criteria:
+        - 不依赖 Docker Compose environment secret 向只读容器注入，不把 host VM 路径共享假设当能力。
+        - 不通过 argv、日志、共享源码或容器 Config.Env 传秘密；保留 API 非 root/read-only 和逐安装逐发行 owned 边界。
+        - 只读设计，不运行候选、服务、检查或实际写引擎；不降低验收或审批要求。
+        acceptance_evidence:
+        - 当次原生 actor 报告、实际首错/官方源码绑定、唯一方案及直接和实机验收映射。
+        validation_command: python3 -m json.tool tmp/phase-tools/first-release-v2/goal-continuation/secret-transport-design/design-report.json
+        required_check_ids: [eng.release.docker-contract, eng.release.lifecycle-runtime]
+        depends_on: []
+        deliverable: 最新私有文件输送合同与完整实施闭包，不代替实际实现或发行许可。
+      - id: LF-TSK-OPS-2043
+        title: 实现 Release 私有文件卷和 stdin 输送生产者
+        priority: P0
+        task_version: 1
+        change_version: 2.0.1
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2042
+        allowed_files:
+        - ops/docker/compose.yaml
+        - ops/release/runtime/release-installation-docker.sh
+        - ops/release/runtime/release-installation-lifecycle.sh
+        - ops/release/runtime/release-artifact-verification.sh
+        - ops/release/build/release-runtime-entry-generator.mjs
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 固定三模式 stdin 接收器、五种 owned 卷、受限 recipient、journal 中断恢复和完整资源护栏串行同步。
+        acceptance_criteria:
+        - 私有秘密不进入 argv/env/Config.Env/log，资料无需 host VM 共享；API 非 root/read-only 不变。
+        - 确切长度/摘要与同内容幂等、未知内容/标签冲突、pending 与清理失败关闭；不弱化 engine/lock/ownership。
+        - 只实现冻结生产者，与 2044 直接消费者同工作包完成；无实际候选/引擎/Git/公开写入。
+        acceptance_evidence:
+        - 认证设计及当前生产者差异、静态编译与同包直接合同回归。
+        validation_command: sh -n ops/release/runtime/release-installation-docker.sh
+        required_check_ids: [eng.release.docker-contract, eng.release.lifecycle-runtime, eng.release.build]
+        depends_on:
+        - task_id: LF-TSK-OPS-2042
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.9.0
+          required_result: PASS
+        deliverable: 唯一最新私有文件卷与固定接收协议，非运行或发行验收。
+      - id: LF-TSK-OPS-2044
+        title: 同步 Release 私有文件输送的直接消费者
+        priority: P0
+        task_version: 1
+        change_version: 2.0.1
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2042
+        allowed_files:
+        - ops/docker/tests/test_contract.py
+        - ops/docker/tests/test_docker_environment.py
+        - ops/docker/tests/test_docker_bounds.py
+        - ops/docker/tests/test_operation_ownership.py
+        - ops/docker/tests/test_lifecycle_flow.py
+        - ops/docker/tests/test_secret_publication.py
+        - ops/release/tests/fake-docker-daemon.mjs
+        - ops/release/tests/lifecycle-fixture.mjs
+        - ops/release/tests/lifecycle.test.mjs
+        - ops/release/tests/runtime-entry.test.mjs
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确接收器/Compose/argv-env/ownership/pending/generator/fake 消费合同与直接正反回归，无跳过。
+        acceptance_criteria:
+        - 真实固定接收器直接测试与有状态 CLI 替身同时覆盖三模式、冲突/中断/幂等与完整 owned 清理。
+        - 保留原生命周期、秘密隐私、API 权限和资源归属断言，不以只改 fake 代替实现。
+        - 所有同包改动进入现有验证输入闭包；新实际消费者先报告范围，不静默扩写。
+        acceptance_evidence:
+        - 实际源码引用闭包、逐测试 count/exit/log、生产者最终 hashes 与未执行实机/正式边界。
+        validation_command: node --test ops/release/tests/lifecycle.test.mjs ops/release/tests/runtime-entry.test.mjs
+        required_check_ids: [eng.release.docker-contract, eng.release.version, eng.release.lifecycle-runtime]
+        depends_on:
+        - task_id: LF-TSK-OPS-2043
+          type: hard
+          required_task_version: 1
+          required_change_version: 2.0.1
+          required_result: PASS
+        deliverable: 私有文件协议完整直接消费者闭环，不签独立验收。
+      - id: LF-TSK-OPS-2045
+        title: 同步完整私有文件生命周期的固定检查执行预算
+        priority: P0
+        task_version: 3
+        change_version: 2.4.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2044
+        allowed_files:
+        - ops/release/test_tools/run-release-tool-tests.mjs
+        - ops/release/tests/version.test.mjs
+        - config/engineering/module-checks.yaml
+        - tests/verification/test_release_checks.py
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 固定version/lifecycle 检查预算与真实规模一致，Registry 外层覆盖内部预算及清理，不提供自由覆盖。
+        acceptance_criteria:
+        - 保留完整测试集合、零跳过及失败关闭，生产 30/600 秒单命令与安全断言不变。
+        - version 固定内层 60 秒、Registry 外层 180 秒；lifecycle 内层 600 秒、外层 660 秒，直接预算合同回归；独立 Hook 核实实际运行。
+        - 不修改产品、候选或实际引擎，不把直接回归升级为 Formal。
+        acceptance_evidence:
+        - 原始完整 suite 约 488 秒与固定 120/180 秒预算冲突的可核查定位，固定预算直接检查及当次 hashes。
+        validation_command: node --test ops/release/tests/version.test.mjs
+        required_check_ids: [eng.release.version, eng.release.lifecycle, eng.verification.module-tests]
+        depends_on: []
+        deliverable: 唯一固定完整检查预算及直接消费者证据。
+      - id: LF-TSK-OPS-2046
+        title: 对齐实机验收健康探测与容器唯一入口
+        priority: P0
+        task_version: 2
+        change_version: 2.5.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2039
+        allowed_files:
+        - scripts/checks/release/source/release_installation_checks.py
+        - tests/verification/test_release_runtime_lifecycle.py
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 实机验收只调用镜像唯一正式 health 入口并精确回归，不改变健康判据。
+        acceptance_criteria:
+        - 保留两容器完整 image/labels/state/health 与 software/API/dataset 检查，禁止 fallback 或缺项通过。
+        - 当前实际镜像正式命令只读 PASS，原错误命令 exit127 证据保留；mock 精确验证 argv。
+        - 合成完整状态/删除 fixture 固定 240 秒，保留全部生命周期和清理断言；生产预算不变。
+        - 只做直接回归，实机完整生命周期和独立开发检查另取新冻结证据。
+        acceptance_evidence:
+        - exact-health-probe.json、限定差异及直接 unittest/Ruff/format 结果。
+        validation_command: python3 -m unittest tests.verification.test_release_runtime_lifecycle
+        required_check_ids: [eng.release.lifecycle-runtime, eng.verification.module-tests]
+        depends_on: []
+        deliverable: 最新唯一容器健康命令消费合同，不替代完整实机或 Formal。
+      - id: LF-TSK-OPS-2047
+        title: 修正完整精确删除合同的测试调度边界
+        priority: P0
+        task_version: 1
+        change_version: 2.6.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2034
+        allowed_files: [ops/docker/tests/test_contract.py]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确删除完整 fixture 固定 30 秒调度余量，保留所有归属拒绝和删除集合断言。
+        acceptance_criteria:
+        - 六种错误/未知归属零删除及完整正向删除均执行，不跳过、不放宽断言。
+        - 仅测试子进程 10 秒改为 30 秒，生产代码、timer、身份和资源护栏不变。
+        - 精准直接回归与静态检查，完整 Hook/Verify 另取独立新输入证据。
+        acceptance_evidence:
+        - v11 原始 TimeoutExpired、完整该测试计数/耗时及最终 hash。
+        validation_command: python3 -m unittest ops.docker.tests.test_contract.DockerContractTest.test_removal_preflights_every_owner_and_deletes_exact_resources
+        required_check_ids: [eng.release.docker-contract]
+        depends_on: []
+        deliverable: 当前精确删除 fixture 的真实正反直接证据。
+      - id: LF-TSK-OPS-2048
+        title: 为完整 Delivery Gate 模块回归配置固定执行余量
+        priority: P0
+        task_version: 1
+        change_version: 2.7.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2030
+        allowed_files:
+        - config/engineering/module-checks.yaml
+        - tests/verification/test_module_declarations.py
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 完整验收工具测试固定外层 300 秒，零跳过/失败/独立身份判据不变。
+        acceptance_criteria:
+        - 保留完整命令、输入/依赖、全部 test 及结果判据，仅调整该 Check 显式固定执行预算。
+        - 已见同集合约 174.66 秒 PASS 与 180.01 秒 timeout；新固定 300 秒完成精准完整模块回归。
+        - 只做配置消费者和直接模块回归，不签 Formal，不重置开发或 Repository 累计预算。
+        acceptance_evidence:
+        - 原生前后报告、实际完整直接计数/耗时、声明精准测试及最终 hashes。
+        validation_command: python3 -m scripts.checks.tool_tests.run_acceptance_tool_tests
+        required_check_ids: [eng.delivery-gate.module-tests, eng.verification.module-tests]
+        depends_on: []
+        deliverable: 当前完整验收工具测试的固定调度能力及直接证据。
+      - id: LF-TSK-OPS-2049
+        title: 统一 Python 预检与 POSIX 产品的 Podman 身份编码
+        priority: P0
+        task_version: 1
+        change_version: 2.9.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2039
+        allowed_files:
+        - ops/release/host_resources/release_docker_preflight.py
+        - tests/verification/test_release_docker_preflight.py
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: Python 原生 API 事实使用既有 POSIX 固定元组字节编码，严格 engine 比对与清理护栏不变。
+        acceptance_criteria:
+        - 保留全部 host/store/version 事实、显式 endpoint 与逐边界重验；Docker 实际 ID 行为不变。
+        - 固定 pipe 字段与尾部 LF、布尔值和 mapping 顺序一致；分隔符/控制字符/缺字段失败关闭，不兼容旧 JSON 摘要。
+        - 同一合成 API 事实与真实 POSIX 函数摘要严格相等，真实当前引擎只读核对相等；不通过跳过或放宽 cleanup 谓词消除失败。
+        acceptance_evidence:
+        - 2039 v7 原始 typed FAIL、精确清理谓词定位、固定编码交叉回归与只读实机摘要相等证据。
+        validation_command: python3 -m unittest tests.verification.test_release_docker_preflight
+        required_check_ids: [eng.verification.module-tests, eng.release.lifecycle-runtime]
+        depends_on: []
+        deliverable: 最新唯一引擎身份编码的直接证据，非完整生命周期或 Formal PASS。
 - id: LF-WS-ADP
   code: ADP
   name: 后续 Content Adapter
