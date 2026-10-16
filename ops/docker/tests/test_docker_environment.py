@@ -139,8 +139,9 @@ class DockerEnvironmentTest(unittest.TestCase):
             "JAVA_TOOL_OPTIONS": "poison-java",
             "PYTHONPATH": "poison-python",
             "NODE_OPTIONS": "poison-node",
-            "LD_PRELOAD": "poison-loader",
-            "DYLD_INSERT_LIBRARIES": "poison-dyld",
+            # 空值仍检测键泄漏；无效库会在进入被测 shell 前由加载器报错。
+            "LD_PRELOAD": "",
+            "DYLD_INSERT_LIBRARIES": "",
             "UNRELATED_POISON": "keep-out",
             "LF_PRIVATE_POISON": "keep-out",
             "LF_DOCKER_ENDPOINT": "tcp://inherited.invalid:2375",
@@ -202,13 +203,32 @@ class DockerEnvironmentTest(unittest.TestCase):
         # /bin/sh 的 CLI 替身自身生成这些 bookkeeping 项；其余键必须精确白名单。
         shell_generated = {"PWD", "SHLVL", "_"}
         self.assertEqual(set(env) - shell_generated, allowed)
-        self.assertEqual(set(env) & shell_generated, shell_generated)
+        # bash 与 dash 自动生成的项不同，不要求每种 shell 都生成全部项。
         self.assertEqual(env["PATH"], self.env["PATH"])
         if "HOME" in env:
             self.assertEqual(env["HOME"], self.env["HOME"])
         if "DOCKER_CONFIG" in env:
             self.assertEqual(env["DOCKER_CONFIG"], self.env["DOCKER_CONFIG"])
         self.assertEqual(env["LC_ALL"], "C")
+
+    def test_shell_bookkeeping_does_not_relax_environment_allowlist(self):
+        clean = {key: self.env[key] for key in BASE - {"LC_ALL"}}
+        clean["LC_ALL"] = "C"
+        for generated in (
+            {},
+            {"PWD": "/synthetic"},
+            {"PWD": "/synthetic", "SHLVL": "1", "_": "env"},
+        ):
+            with self.subTest(generated=generated):
+                self.assert_clean({**clean, **generated}, BASE)
+        for unexpected in (
+            "LD_PRELOAD",
+            "DYLD_INSERT_LIBRARIES",
+            "UNRELATED_POISON",
+            "LEXIFLOW_COMPOSE_APP_PASSWORD",
+        ):
+            with self.subTest(unexpected=unexpected), self.assertRaises(AssertionError):
+                self.assert_clean({**clean, unexpected: ""}, BASE)
 
     def assert_compose(self, endpoint):
         self.assert_clean(nul_map(self.identity_env), {"PATH", "LC_ALL"})
