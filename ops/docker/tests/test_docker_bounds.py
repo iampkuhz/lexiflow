@@ -140,6 +140,23 @@ class DockerBoundsTest(unittest.TestCase):
         self.assertEqual(result.stdout + result.stderr, b"")
         self.assert_helpers_reaped(directories, sleepers)
 
+    def test_errexit_accepts_reaped_timer_term_status_after_successful_child(self):
+        self.stub("docker", 'printf "safe\\n"\n')
+        result = self.run_shell(
+            "set -eu\n"
+            "wait_calls=0\n"
+            "wait() {\n"
+            "  wait_calls=$((wait_calls + 1))\n"
+            '  if command wait "$@"; then waited=0; else waited=$?; fi\n'
+            '  if [ "$wait_calls" -eq 2 ]; then return 143; fi\n'
+            '  return "$waited"\n'
+            "}\n"
+            "lf_docker_run 30 docker info\n"
+        )
+        self.assertEqual(
+            (result.returncode, result.stdout, result.stderr), (0, b"safe\n", b"")
+        )
+
     def test_timer_registration_cancellation_reaps_owned_sleep_helper(self):
         # 从实际源码抽取 timer，在 & 与 $! 登记之间加入同步门；不靠调度概率。
         source = SOURCE.read_text()
