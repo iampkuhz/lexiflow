@@ -15,22 +15,31 @@ lf_docker_run() (
   umask 077
   dir=$(mktemp -d /tmp/lexiflow-docker.XXXXXXXX 2>/dev/null) || exit 1
   child= timer=
+  cancel_owned_timer() {
+    # 未就绪 timer 可能仍处于继承父 EXIT handler 的启动窗口，不能发送 TERM。
+    # 内建截断预建标记，不为每次 CLI 再启动 rm；两侧观察间不会丢失取消。
+    : > "$dir/running" 2>/dev/null || return 1
+    if [ -n "$timer" ] && [ -e "$dir/timer-ready" ]; then
+      kill -TERM "$timer" 2>/dev/null || :
+    fi
+  }
   cleanup() {
     trap - EXIT HUP INT TERM
-    if [ -n "$timer" ]; then kill -TERM "$timer" 2>/dev/null || :; wait "$timer" 2>/dev/null || :; fi
+    cancel_owned_timer || :
+    if [ -n "$timer" ]; then wait "$timer" 2>/dev/null || :; fi
     if [ -n "$child" ]; then
       kill -TERM "$child" 2>/dev/null || :
       kill -KILL "$child" 2>/dev/null || :
       wait "$child" 2>/dev/null || :
     fi
-    rm -f -- "$dir/stdout" "$dir/stderr" "$dir/timedout" >/dev/null 2>&1
+    rm -f -- "$dir/stdout" "$dir/stderr" "$dir/timedout" "$dir/timer-ready" "$dir/running" >/dev/null 2>&1
     rmdir -- "$dir" 2>/dev/null || :
   }
   trap cleanup EXIT
   trap 'exit 129' HUP
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  (: > "$dir/stdout" && : > "$dir/stderr") 2>/dev/null || exit 1
+  (: > "$dir/stdout" && : > "$dir/stderr" && printf 1 > "$dir/running") 2>/dev/null || exit 1
   # Keep stdin on fd 3 because POSIX shells may replace asynchronous children'
   # stdin with /dev/null. Only explicitly designated private-file calls inherit it.
   exec 3<&0 2>/dev/null || :
@@ -49,8 +58,18 @@ lf_docker_run() (
     sleeper= grace= critical=0 cancelled=
     timer_cleanup() {
       trap - EXIT HUP INT TERM
-      if [ -n "$sleeper" ]; then kill -TERM "$sleeper" 2>/dev/null || :; wait "$sleeper" 2>/dev/null || :; fi
-      if [ -n "$grace" ]; then kill -TERM "$grace" 2>/dev/null || :; wait "$grace" 2>/dev/null || :; fi
+      # 只处理本 timer 直接创建且尚未 wait 的 sleep；fork/exec 窗口的 TERM
+      # 可能被继承 handler 暂存，KILL 后再 wait，不能等待完整预算才回收。
+      if [ -n "$sleeper" ]; then
+        kill -TERM "$sleeper" 2>/dev/null || :
+        kill -KILL "$sleeper" 2>/dev/null || :
+        wait "$sleeper" 2>/dev/null || :
+      fi
+      if [ -n "$grace" ]; then
+        kill -TERM "$grace" 2>/dev/null || :
+        kill -KILL "$grace" 2>/dev/null || :
+        wait "$grace" 2>/dev/null || :
+      fi
     }
     trap timer_cleanup EXIT
     # 后台启动与 $! 登记之间只暂存取消；登记后立即清理，避免遗弃 helper。
@@ -58,6 +77,12 @@ lf_docker_run() (
       if [ "$critical" -eq 1 ]; then cancelled=1; else exit 0; fi
     }
     trap cancel_timer HUP INT TERM
+    if ! (: > "$dir/timer-ready") 2>/dev/null; then
+      kill -TERM "$child" 2>/dev/null || :
+      kill -KILL "$child" 2>/dev/null || :
+      exit 1
+    fi
+    [ -s "$dir/running" ] || exit 0
     critical=1
     sleep "$budget" >/dev/null 2>&1 & sleeper=$!
     critical=0
@@ -82,10 +107,10 @@ lf_docker_run() (
   ) &
   timer=$!
   if wait "$child" 2>/dev/null; then status=0; else status=$?; fi
-  kill -TERM "$timer" 2>/dev/null || :
+  cancel_owned_timer || exit 1
   if wait "$timer" 2>/dev/null; then timer_status=0; else timer_status=$?; fi
   timer= child=
-  # 极快 CLI 可在 timer 安装 trap 前完成；本次 TERM 的默认退出也属正常回收。
+  # 就绪交接后仍接受正常 TERM 回收状态；CLI、截止和输出判据保持不变。
   case "$timer_status" in 0|143) ;; *) exit 1;; esac
   [ "$status" -eq 0 ] && [ ! -e "$dir/timedout" ] || exit 1
   out_bytes=$(wc -c 2>/dev/null < "$dir/stdout") || exit 1

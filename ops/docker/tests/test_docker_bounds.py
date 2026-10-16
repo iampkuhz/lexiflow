@@ -157,6 +157,48 @@ class DockerBoundsTest(unittest.TestCase):
             (result.returncode, result.stdout, result.stderr), (0, b"safe\n", b"")
         )
 
+    def test_fast_child_cancellation_waits_for_timer_owned_traps(self):
+        # 同步停在 timer 安装自身 handler 前，保留 Linux 已观察到的父清理状态。
+        # 只在测试副本加屏障；父 wait(timer) 释放它，不依赖调度或固定睡眠。
+        gated, release, early = (self.root / name for name in ('gated', 'release', 'early'))
+        q = lambda path: shlex.quote(str(path))
+        source = SOURCE.read_text()
+        marker = '    sleeper= grace= critical=0 cancelled=\n'
+        self.assertEqual(source.count(marker), 1)
+        gate = (
+            "    trap cleanup EXIT\n    trap 'exit 143' TERM\n"
+            f'    : > {q(gated)}\n'
+            f'    while [ ! -e {q(release)} ]; do :; done\n'
+        )
+        probe = self.root / 'docker-probe.sh'
+        probe.write_text(source.replace(marker, gate + marker))
+        self.stub('docker', f'while [ ! -e {q(gated)} ]; do :; done\nprintf "safe\\n"\n')
+        self.write_shell(
+            "set -eu\n"
+            "kill() {\n"
+            '  if [ "$#" -eq 2 ] && [ "$1" = -TERM ] && [ -n "${timer:-}" ] '
+            '&& [ "$2" = "$timer" ] && [ ! -e "$dir/timer-ready" ]; then\n'
+            f'    : > {q(early)}\n'
+            "  fi\n  command kill \"$@\"\n}\n"
+            "wait() {\n"
+            '  if [ -n "${timer:-}" ] && [ "${1:-}" = "$timer" ]; then\n'
+            f'    : > {q(release)}\n'
+            '  fi\n  command wait "$@"\n}\n'
+            "lf_docker_run 30 docker info\n"
+        )
+        process = subprocess.Popen(
+            ['/bin/sh', str(self.script), str(probe)], env=self.env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+        )
+        try:
+            stdout, stderr = process.communicate(timeout=5)
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+            process.communicate(timeout=2)
+        self.assertFalse(early.exists(), 'parent signalled timer before its own traps')
+        self.assertEqual((process.returncode, stdout, stderr), (0, b'safe\n', b''))
+
     def test_timer_registration_cancellation_reaps_owned_sleep_helper(self):
         # 从实际源码抽取 timer，在 & 与 $! 登记之间加入同步门；不靠调度概率。
         source = SOURCE.read_text()
@@ -198,6 +240,7 @@ class DockerBoundsTest(unittest.TestCase):
                     # 外层保持存活，确保 finally 回收的是仍由本 Popen 持有的组。
                     script.write_text(
                         f"dir={shlex.quote(str(work))}\nbudget=0\n"
+                        'printf 1 > "$dir/running"\n'
                         "/bin/sleep 30 & child=$!\n(\n" + body + "\n) & timer=$!\n"
                         f"printf '%s\\n' \"$timer\" > {q('timer')}\n"
                         'wait "$timer" 2>/dev/null; status=$?\n'
@@ -244,6 +287,48 @@ class DockerBoundsTest(unittest.TestCase):
                             # 未 wait/reap 组长前一次回收本探针组，不信号未知 PID。
                             os.killpg(process.pid, signal.SIGKILL)
                         process.wait(timeout=3)
+
+    def test_timer_readiness_failure_terminates_child_and_rejects_output(self):
+        directories, sleepers = self.trace_helpers()
+        pidfile = self.root / 'child-pid'
+        quoted = shlex.quote(str(pidfile))
+        self.stub('docker', f'printf "%s\\n" "$$" > {quoted}\nwhile :; do :; done\n')
+        source = SOURCE.read_text()
+        marker = ': > "$dir/timer-ready"'
+        self.assertEqual(source.count(marker), 1)
+        probe = self.root / 'docker-unready.sh'
+        probe.write_text(source.replace(marker, f'while [ ! -s {quoted} ]; do :; done; false'))
+        self.write_shell('lf_docker_run 30 docker info')
+        result = subprocess.run(
+            ['/bin/sh', str(self.script), str(probe)], env=self.env,
+            capture_output=True, timeout=3,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout + result.stderr, b'')
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(pidfile.read_text()), 0)
+        self.assert_helpers_reaped(directories, sleepers)
+
+    def test_timer_cleanup_reaps_owned_sleep_even_when_term_is_ignored(self):
+        directories, sleepers = self.trace_helpers()
+        quoted = shlex.quote(str(sleepers))
+        # fork/exec 窗口可能继承取消 handler；直接模拟 sleep 忽略 TERM 的状态。
+        self.stub('sleep', 'trap "" TERM\n'
+                  f'printf "%s:%s\\n" "$$" "$1" >> {quoted}\nexec /bin/sleep "$1"\n')
+        self.stub('docker', f'while [ ! -s {quoted} ]; do :; done\nprintf "safe\\n"\n')
+        self.write_shell('lf_docker_run 30 docker info')
+        process = subprocess.Popen(
+            ['/bin/sh', str(self.script), str(SOURCE)], env=self.env,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
+        )
+        try:
+            stdout, stderr = process.communicate(timeout=3)
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+            process.communicate(timeout=2)
+        self.assertEqual((process.returncode, stdout, stderr), (0, b'safe\n', b''))
+        self.assert_helpers_reaped(directories, sleepers)
 
     def test_each_stream_bounded_during_capture(self):
         directories, sleepers = self.trace_helpers()
