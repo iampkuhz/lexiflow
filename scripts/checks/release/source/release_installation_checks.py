@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
-import hashlib
+import stat
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -44,6 +45,150 @@ def _docker(
         90,
         limit=65_536,
     )[0]
+
+
+def _compose_plugin(
+    binding: Any, environ: Mapping[str, str]
+) -> tuple[Path, str, tuple[int, int, int, int, str]]:
+    """从当前 Docker CLI 的只读客户端元数据绑定唯一已安装 Compose 插件。"""
+    metadata_env = {
+        "PATH": environ.get("PATH", os.defpath),
+        "HOME": environ.get("HOME", str(Path.home())),
+        "LC_ALL": "C",
+        "LANG": "C",
+    }
+    try:
+        raw = _run(
+            [
+                "docker",
+                "--host",
+                binding.endpoint,
+                "info",
+                "--format",
+                "{{json .ClientInfo.Plugins}}",
+            ],
+            Path.cwd(),
+            metadata_env,
+            timeout=30,
+        )
+    except ConsumerError:
+        raise
+    except Exception:
+        raise ConsumerError("FAIL", "release-compose-metadata-failed") from None
+
+    def unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate-key")
+            result[key] = value
+        return result
+
+    try:
+        plugins = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_pairs)
+        if not isinstance(plugins, list):
+            raise ValueError
+        matches = [
+            item
+            for item in plugins
+            if isinstance(item, dict) and item.get("Name") == "compose"
+        ]
+        if len(matches) != 1:
+            raise ValueError
+        item = matches[0]
+        if (
+            set(item)
+            != {
+                "SchemaVersion",
+                "Vendor",
+                "Version",
+                "ShortDescription",
+                "Name",
+                "Path",
+            }
+            or item["SchemaVersion"] != "0.1.0"
+            or not all(
+                isinstance(item[key], str) and item[key]
+                for key in ("Vendor", "Version", "ShortDescription")
+            )
+            or not isinstance(item["Path"], str)
+            or not item["Path"]
+            or not Path(item["Path"]).is_absolute()
+            or any(ord(char) < 32 or ord(char) == 127 for char in item["Path"])
+        ):
+            raise ValueError
+        path = Path(item["Path"]).resolve(strict=True)
+        if path.name != "docker-compose":
+            raise ValueError
+        info = path.stat()
+        if not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o111:
+            raise ValueError
+        fingerprint = _compose_plugin_fingerprint(path)
+        return path, item["Version"], fingerprint
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        KeyError,
+        OSError,
+        TypeError,
+        ValueError,
+    ):
+        raise ConsumerError("FAIL", "release-compose-plugin-invalid") from None
+
+
+def _assert_compose_plugin_unchanged(
+    path: Path, fingerprint: tuple[int, int, int, int, str]
+) -> None:
+    try:
+        info = path.stat()
+        if not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o111:
+            raise ValueError
+        if _compose_plugin_fingerprint(path) != fingerprint:
+            raise ValueError
+    except (OSError, ValueError):
+        raise ConsumerError("FAIL", "release-compose-plugin-changed") from None
+
+
+def _compose_version_matches(output: bytes, expected: str) -> bool:
+    match = re.search(rb"Docker Compose version v?([0-9]+\.[0-9]+\.[0-9]+)", output)
+    return bool(match and match.group(1).decode("ascii") == expected)
+
+
+def _compose_plugin_fingerprint(path: Path) -> tuple[int, int, int, int, str]:
+    """无跟随、有界读取插件，并确认读取期间文件身份与元数据稳定。"""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > 128 * 1024 * 1024:
+            raise ValueError
+        digest = hashlib.sha256()
+        total = 0
+        while chunk := os.read(descriptor, 1024 * 1024):
+            total += len(chunk)
+            if total > 128 * 1024 * 1024:
+                raise ValueError
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        current = path.stat()
+
+        def identity(value: os.stat_result) -> tuple[int, int, int, int]:
+            return (
+                value.st_dev,
+                value.st_ino,
+                value.st_size,
+                value.st_mtime_ns,
+            )
+
+        if (
+            identity(before) != identity(after)
+            or identity(after) != identity(current)
+            or total != after.st_size
+        ):
+            raise ValueError
+        return (*identity(after), digest.hexdigest())
+    finally:
+        os.close(descriptor)
 
 
 def _release_key(entry: Path) -> str:
@@ -218,7 +363,7 @@ def _assert_runtime(
     probe = _docker(
         binding,
         docker_config,
-        ["exec", api[0]["id"], "/app/entrypoint.sh", "health"],
+        ["exec", api[0]["id"], "/app/run-container-command.sh", "health"],
         env,
     )
     try:
@@ -277,7 +422,21 @@ def execute_lifecycle(
     install_root = Path(temp) / "installation"
     docker_config = Path(temp) / "docker"
     docker_config.mkdir(mode=0o700)
-    (docker_config / "config.json").write_text('{"auths":{}}\n', encoding="ascii")
+    plugin_path, plugin_version, plugin_fingerprint = _compose_plugin(binding, environ)
+    plugin_dir = Path(temp) / "compose-plugin"
+    plugin_dir.mkdir(mode=0o700)
+    (plugin_dir / "docker-compose").symlink_to(plugin_path)
+    (docker_config / "config.json").write_text(
+        json.dumps(
+            {
+                "auths": {},
+                "cliPluginsExtraDirs": [str(plugin_dir)],
+            },
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="ascii",
+    )
     env = {
         "PATH": environ.get("PATH", os.defpath),
         "HOME": str(home),
@@ -286,6 +445,18 @@ def execute_lifecycle(
         "DOCKER_HOST": binding.endpoint,
         "DOCKER_CONFIG": str(docker_config),
     }
+    _assert_compose_plugin_unchanged(plugin_path, plugin_fingerprint)
+    try:
+        version = _docker(binding, docker_config, ["compose", "version"], env)
+        if not _compose_version_matches(version, plugin_version):
+            raise ValueError
+    except ConsumerError:
+        raise
+    except Exception:
+        raise ConsumerError(
+            "FAIL", "release-compose-private-config-unavailable"
+        ) from None
+    _assert_compose_plugin_unchanged(plugin_path, plugin_fingerprint)
     lifecycle = []
     entries = []
     keys = []

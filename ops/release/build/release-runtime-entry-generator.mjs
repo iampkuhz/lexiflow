@@ -48,11 +48,12 @@ function manifestPieces(manifest) {
 function staticValues(manifest) {
   const dataset = manifest.artifacts.find((item) => item.role === 'dataset');
   const compose = manifest.artifacts.find((item) => item.role === 'compose');
+  if (!Number.isSafeInteger(dataset?.bytes) || dataset.bytes <= 0 || dataset.bytes > 3 * 1024 * 1024 * 1024) fail('DATASET_PACKAGE_SIZE_INVALID');
   const withoutEntry = { ...manifest, artifacts: manifest.artifacts.filter((item) => item.role !== 'runtime-entry') };
   return {
     RELEASE_KEY: digest(serializeManifest(withoutEntry)), SOFTWARE_VERSION: manifest.softwareVersion,
     API_CONTRACT: manifest.apiContract, SQL_VERSION: manifest.sqlVersion,
-    DATASET_SHA256: dataset.sha256, DATASET_PATH: dataset.path, COMPOSE_PATH: compose.path,
+    DATASET_SHA256: dataset.sha256, DATASET_PATH: dataset.path, DATASET_BYTES: String(dataset.bytes), COMPOSE_PATH: compose.path,
   };
 }
 

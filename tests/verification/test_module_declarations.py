@@ -38,6 +38,21 @@ class ModuleChecksDeclarationTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.document = load_declarations(ROOT)
 
+    def test_acceptance_module_fixed_budget_preserves_full_contract(self) -> None:
+        """完整验收工具回归只增加固定调度余量，不改变集合与依赖。"""
+        checks = {check["check_id"]: check for check in self.document["checks"]}
+        check = checks["eng.delivery-gate.module-tests"]
+        self.assertEqual(check["timeout_seconds"], 300)
+        self.assertEqual(
+            check["command"],
+            ["python3", "-m", "scripts.checks.tool_tests.run_acceptance_tool_tests"],
+        )
+        self.assertEqual(
+            check["module_dependencies"],
+            ["eng.verification.module-tests", "eng.agents.module-tests"],
+        )
+        self.assertEqual(check["scenarios"], ["repository-baseline", "change-targeted"])
+
     def test_protocol_is_not_repeated_as_configuration(self) -> None:
         self.assertEqual({"checks", "scenario_policy"}, set(self.document))
 
@@ -65,7 +80,8 @@ class ModuleChecksDeclarationTest(unittest.TestCase):
         self.assertEqual(1, len(ext_checks), "extension quality check must exist")
         check = ext_checks[0]
         self.assertEqual(
-            ["node", "extension/scripts/checks/run-extension-checks.mjs"], check["command"]
+            ["node", "extension/scripts/checks/run-extension-checks.mjs"],
+            check["command"],
         )
         self.assertEqual("json-stdout", check["result_contract"]["type"])
 
@@ -133,7 +149,8 @@ class ModuleChecksDeclarationTest(unittest.TestCase):
         self.assertEqual(1, len(repo_checks), "repository unit test check must exist")
         check = repo_checks[0]
         self.assertIn(
-            "scripts.checks.repository.run_repository_check_group", " ".join(str(a) for a in check["command"])
+            "scripts.checks.repository.run_repository_check_group",
+            " ".join(str(a) for a in check["command"]),
         )
 
     def test_structured_python_module_contract_rejects_empty_or_skipped(self) -> None:
@@ -210,7 +227,9 @@ class ExtensionQualityEntryTest(unittest.TestCase):
         )
         scripts = package_json.get("scripts", {})
         self.assertIn("quality:check", scripts)
-        self.assertIn("scripts/checks/run-extension-checks.mjs", scripts["quality:check"])
+        self.assertIn(
+            "scripts/checks/run-extension-checks.mjs", scripts["quality:check"]
+        )
 
     def test_product_checks_have_strict_public_contracts_and_source_inputs(
         self,

@@ -5,7 +5,7 @@
       "platform": "linux/amd64",
       "javaRuntime": {
         "reference": "docker.io/library/eclipse-temurin@sha256:d83c24be1a395b4982f39e9de5712f48a2cc90452d39d2d9cd33663ed54db1b0",
-        "imageId": "sha256:642eb283d527841f7f1a4ccadaa9ca72ef14cddc04cacb6e070e48eb44731a3"
+        "imageId": "sha256:642eb283d527841d53fef69c094ef1f6ea2073e203efc683a07235b675b8b2b8"
       },
       "postgresRuntime": {
         "reference": "docker.io/library/postgres@sha256:91eb910c44c7ed13f7f1a4ccadaa9ca72ef14cddc04cacb6e070e48eb44731a3",

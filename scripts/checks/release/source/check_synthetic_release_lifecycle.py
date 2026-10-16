@@ -16,15 +16,15 @@ from ops.release.host_resources import (
     release_docker_preflight as release_docker_preflight,
 )
 from ops.release.host_resources import release_process_control as release_process
-from scripts.verification.execution.check_runner import (
-    decode_child_request,
-    snapshot_check_inputs,
-    RELEASE_RUNTIME_CHECK_IDS,
-    VERIFY_CHILD_INPUT_SCHEMA,
-)
 from scripts.checks.release.source.frozen_source_fixture import (
     BridgeError,
     consume_verify_snapshot,
+)
+from scripts.verification.execution.check_runner import (
+    RELEASE_RUNTIME_CHECK_IDS,
+    VERIFY_CHILD_INPUT_SCHEMA,
+    decode_child_request,
+    snapshot_check_inputs,
 )
 
 MAX_ENVELOPE = 1_048_576
@@ -169,11 +169,11 @@ def run_consumer(
 ) -> dict[str, Any]:
     """消费原始Verify快照并串联构件、候选与安装生命周期。"""
     release_process._install_termination_handler()
-    from scripts.checks.release.source.release_test_artifact_builder import (
-        produce_candidates,
-    )
     from scripts.checks.release.source.release_installation_checks import (
         execute_lifecycle,
+    )
+    from scripts.checks.release.source.release_test_artifact_builder import (
+        produce_candidates,
     )
 
     repo, env = Path(repo_root).resolve(), (os.environ if environ is None else environ)
@@ -325,4 +325,9 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # helpers 由规范模块导入异常与进度；CLI 同样使用该实例，避免 -m 的双实例。
+    from scripts.checks.release.source.check_synthetic_release_lifecycle import (
+        main as canonical_main,
+    )
+
+    raise SystemExit(canonical_main())

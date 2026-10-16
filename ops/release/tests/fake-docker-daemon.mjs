@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { format } from 'node:util';
 class ModelExit extends Error { constructor(status){super('model exit');this.status=status;} }
-export async function execute(statePath, ledgerPath, controlPath, argvInput, env={}) {
+export async function execute(statePath, ledgerPath, controlPath, argvInput, env={}, stdinData=Buffer.alloc(0)) {
  const argv=[...argvInput]; let stdout=''; const stderr=''; const log=(...args)=>{stdout+=format(...args)+'\n';};
 const fail = () => { throw new ModelExit(64); };
 const sha = (text) => createHash('sha256').update(text).digest('hex');
@@ -35,12 +35,14 @@ function makeResource(data, kind, name, project, installation, release, running 
       existing.running = running;
       existing.health = running ? 'healthy' : 'none';
     }
-    return;
+    return existing;
   }
   const id = kind === 'volume' ? name : sha(`${kind}:${project}:${name}`);
-  data.resources.push({ kind, id, name, project, installation, release, running,
+  const resource={ kind, id, name, project, installation, release, running,
     health: kind === 'container' && running ? 'healthy' : 'none',
-    labels: { project, installation, release } });
+    labels: { project, installation, release } };
+  data.resources.push(resource);
+  return resource;
 }
 
 try {
@@ -55,6 +57,17 @@ try {
   const data = all.daemons[daemonName];
   if (!data || !argv.length) fail();
   const [command, subcommand] = argv;
+  if (command === 'version' && argv.includes('--format')) {
+    const format = valueAfter(argv, '--format');
+    if (format === '{{range .Server.Components}}{{.Name}}{{"\\n"}}{{end}}') {
+      const components = control.serverComponents ?? ['Engine'];
+      if (!Array.isArray(components) || components.some((name) => typeof name !== 'string')) fail();
+      log(components.join('\n'));
+      await record('server-components', { count: components.length }, daemonName);
+      throw new ModelExit(0);
+    }
+    fail();
+  }
   if (command === 'compose') {
     const project = valueAfter(argv, '--project-name');
     const installation = env.LEXIFLOW_INSTALLATION_ID;
@@ -77,8 +90,40 @@ try {
     }
     if (operation === 'run') {
       const name = valueAfter(argv, '--name');
-      const role = argv.at(-1);
+      const serviceAt = argv.indexOf(name) + 1;
+      const role = argv[serviceAt];
+      if (role === 'private-file-importer') {
+        const mode=argv[serviceAt+1], transfer=argv[serviceAt+2];
+        if (!name || name !== `${project}-private-file-importer` || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(transfer)) fail();
+        const volumeSuffix={pg64hex:'postgres-secret',app64hex:'app-secret',zip:'dataset'}[mode];
+        if(!volumeSuffix)fail();
+        const volumeName=`${project}_${volumeSuffix}`;
+        const volume=data.resources.find(item=>item.kind==='volume'&&item.name===volumeName);
+        if(!volume)fail();
+        if(!volume.files)volume.files={};
+        let payload=stdinData, expectedSize, expectedHash;
+        if(mode==='zip'){
+          expectedSize=Number(argv[serviceAt+3]); expectedHash=argv[serviceAt+4];
+          if(!Number.isSafeInteger(expectedSize)||expectedSize<=0||expectedSize>3*1024*1024*1024||! /^[a-f0-9]{64}$/.test(expectedHash))fail();
+        }else{
+          const newline=stdinData.indexOf(0x0a);
+          if(newline<0)fail();
+          expectedHash=stdinData.subarray(0,newline).toString('ascii'); payload=stdinData.subarray(newline+1); expectedSize=64;
+          if(!/^[a-f0-9]{64}$/.test(expectedHash))fail();
+        }
+        if(payload.length!==expectedSize)fail();
+        const actualHash=createHash('sha256').update(payload).digest('hex');
+        if(actualHash!==expectedHash||(mode!=='zip'&&!/^[a-f0-9]{64}$/.test(payload.toString('ascii'))))fail();
+        const path=mode==='pg64hex'?'postgres-password':mode==='app64hex'?'app-password':'dataset.zip';
+        const existing=volume.files[path];
+        if(existing&&(existing.bytes!==expectedSize||existing.sha256!==expectedHash))fail();
+        volume.files[path] ||= {bytes:expectedSize,sha256:expectedHash,mode:mode==='zip'?0o444:0o444,links:1};
+        const importer=makeResource(data,'container',name,project,installation,release,false);
+        data.resources=data.resources.filter(item=>item!==importer);
+        await save(all); await record('private-file-import',{project,mode,volume:volumeName,bytes:expectedSize,existing:Boolean(existing)},daemonName); throw new ModelExit(0);
+      }
       if (!name || role !== 'initialize' && role !== 'api') fail();
+      if (role === 'initialize') makeResource(data,'volume',`${project}_initialization-work`,project,installation,release,false);
       if (role === 'api') makeResource(data, 'container', name, project, installation, release);
       await save(all); await record('compose-run', { project, installation, release, role, name },daemonName); throw new ModelExit(0);
     }
@@ -121,6 +166,19 @@ try {
   }
   if (['container', 'network', 'volume'].includes(command)) {
     const kind = command;
+    if (kind === 'volume' && subcommand === 'create') {
+      const name=argv.at(-1);
+      const labels=argv.flatMap((item,index)=>item==='--label'&&argv[index+1]?[argv[index+1]]:[]);
+      const required=['com.docker.compose.project=','lexiflow.installation=','lexiflow.release='];
+      if(!name||labels.length!==3||required.some((prefix)=>labels.filter((value)=>value.startsWith(prefix)).length!==1))fail();
+      const project=labels.find((value)=>value.startsWith(required[0]))?.slice(required[0].length);
+      const installation=labels.find((value)=>value.startsWith(required[1]))?.slice(required[1].length);
+      const release=labels.find((value)=>value.startsWith(required[2]))?.slice(required[2].length);
+      if(!/^[a-f0-9]{32}$/.test(installation)||!/^[a-f0-9]{64}$/.test(release)||!['postgres-secret','app-secret','dataset'].some((suffix)=>name===`${project}_${suffix}`))fail();
+      if(data.resources.some((item)=>item.kind==='volume'&&item.name===name))throw new ModelExit(2);
+      makeResource(data,'volume',name,project,installation,release,false);
+      await save(all); log(name); await record('volume-create',{name,project},daemonName); throw new ModelExit(0);
+    }
     if (subcommand === 'ls') {
       const format = valueAfter(argv, '--format');
       if (!format) fail();
@@ -197,6 +255,11 @@ mkdir -m 700 "$req" || fail 'request directory'
 trap 'printf "%s\\n" "transport signal" > "$box/failed"; exit 97' HUP INT TERM
 printf '%s\\n' "$#" > "$req/count" || fail 'argument count'
 { printf '%s\\000' "\${LEXIFLOW_INSTALLATION_ID-}" "\${LEXIFLOW_RELEASE_KEY-}"; for arg do printf '%s\\000' "$arg"; done; } > "$req/args" || fail 'arguments'
+private_input=0
+for arg do [ "$arg" = private-file-importer ] && private_input=1; done
+if [ "$private_input" -eq 1 ]; then (umask 077; cat > "$req/stdin") || fail 'private stdin'; else : > "$req/stdin" || fail 'stdin marker'; fi
+input_bytes=$(wc -c < "$req/stdin") || fail 'stdin size'
+[ "$input_bytes" -le 16777216 ] || fail 'stdin bound'
 # Empty marker creation publishes only fully closed args/count files.
 : > "$req/ready" || fail 'ready publish'
 n=0
@@ -224,7 +287,7 @@ case "$status" in ''|*[!0-9]*) fail 'invalid status';; esac
 [ ! -s "$req/err" ] || cat "$req/err" >&2 || fail 'stderr'
 # rm -d is non-recursive: the explicit known file list is removed and the
 # request directory must then be empty, so unknown residue fails closed.
-rm -d -- "$req/args" "$req/count" "$req/out" "$req/err" "$req/status" "$req/lengths" "$req/done" "$req" || fail 'response cleanup'
+rm -d -- "$req/args" "$req/count" "$req/stdin" "$req/out" "$req/err" "$req/status" "$req/lengths" "$req/done" "$req" || fail 'response cleanup'
 trap - HUP INT TERM
 exit "$status"
 `;},
@@ -272,7 +335,8 @@ if(!isMainThread && workerData?.directory){
         if(fields.length!==count+2)throw new Error('malformed request fields');
         await rm(`${prefix}/ready`);
         const [installation,release,...argv]=fields;
-        const result=await execute(state,ledger,control,argv,{LEXIFLOW_INSTALLATION_ID:installation,LEXIFLOW_RELEASE_KEY:release});
+        const stdinData=await readFile(`${prefix}/stdin`);
+        const result=await execute(state,ledger,control,argv,{LEXIFLOW_INSTALLATION_ID:installation,LEXIFLOW_RELEASE_KEY:release},stdinData);
         await publish(`${prefix}/out`,result.stdout);
         await publish(`${prefix}/err`,result.stderr);
         await publish(`${prefix}/status`,`${result.status}\n`);

@@ -67,7 +67,7 @@ export async function lifecycleFixture(t, full = true, variant = '') {
   if (!daemon) {
     daemon={state:path.join(tmp,'docker-daemon.json'),ledger:path.join(tmp,'docker-actions.jsonl'),control:path.join(tmp,'docker-control.json'),tmp,fixtures:[],fatal:null};
     await writeFile(daemon.state,JSON.stringify({daemons:{primary:{id:'synthetic-daemon-id',resources:[]},empty:{id:'empty-daemon-id',resources:[]},clone:{id:'clone-daemon-id',resources:[]}}}));
-    await writeFile(daemon.control,JSON.stringify({contextEndpoint:'unix:///lexiflow-synthetic-docker.sock',endpoints:{'unix:///lexiflow-synthetic-docker.sock':'primary','unix:///other-empty.sock':'empty','unix:///other-clone.sock':'clone'}}));
+    await writeFile(daemon.control,JSON.stringify({contextEndpoint:'unix:///lexiflow-synthetic-docker.sock',serverComponents:['Engine','containerd','runc'],endpoints:{'unix:///lexiflow-synthetic-docker.sock':'primary','unix:///other-empty.sock':'empty','unix:///other-clone.sock':'clone'}}));
     daemonByTest.set(t,daemon);
     daemon.mailbox=path.join(tmp,'mailbox');
     daemon.transport=await createTransport({...daemon,directory:daemon.mailbox});
@@ -83,18 +83,25 @@ export async function lifecycleFixture(t, full = true, variant = '') {
   daemonOwnsTmp=true;
   const fake=daemon.transport.clientSource();
   await writeFile(path.join(bin,'docker'),fake,{mode:0o755});
+  const podmanInfo=path.join(tmp,'podman-info.txt');
+  await writeFile(podmanInfo,'linux|x86_64|synthetic-host|false|-|-|overlay|/var/lib/containers/storage|/run/containers/storage|/var/lib/containers/storage/volumes|false|5.6.2\n');
+  const podman=`#!/bin/sh\n[ "$#" -eq 5 ] && [ "$1" = --url ] && [ "$2" = unix:///lexiflow-synthetic-docker.sock ] && [ "$3" = info ] && [ "$4" = --format ] || exit 64\nIFS= read -r value < '${podmanInfo}' || exit 64\n[ "$value" != __FAIL__ ] || exit 71\nprintf '%s\\n' "$value"\n`;
+  await writeFile(path.join(bin,'podman'),podman,{mode:0o755});
   const healthy=()=>daemon.transport.assertHealthy();
-  const runWith=(environment,...args)=>{try{return execFileSync('sh',[path.join(pkg,'lexiflow.sh'),...args],{encoding:'utf8',timeout:60000,env:{...process.env,PATH:`${bin}:${process.env.PATH}`,DOCKER_HOST:'',DOCKER_CONTEXT:'',DOCKER_CONFIG:'',...environment},stdio:['ignore','pipe','pipe']});}finally{healthy();}};
+  // A full lifecycle command is many individually bounded identity/ownership
+  // RPCs; keep the test harness timeout above their legitimate serial sum.
+  const runWith=(environment,...args)=>{try{return execFileSync('sh',[path.join(pkg,'lexiflow.sh'),...args],{encoding:'utf8',timeout:180000,env:{...process.env,PATH:`${bin}:${process.env.PATH}`,DOCKER_HOST:'',DOCKER_CONTEXT:'',DOCKER_CONFIG:'',...environment},stdio:['ignore','pipe','pipe']});}finally{healthy();}};
   const run=(...args)=>runWith({},...args);
   t.after(()=>healthy());
   const daemonState=async(name='primary')=>JSON.parse(await readFile(daemon.state,'utf8')).daemons[name];
   const daemonControl=async()=>JSON.parse(await readFile(daemon.control,'utf8'));
   const setDaemonControl=async(patch)=>writeFile(daemon.control,JSON.stringify({...await daemonControl(),...patch}));
+  const setPodmanInfo=async(value)=>writeFile(podmanInfo,value);
   const cloneResources=async(source='primary',target='clone')=>{
     const data=JSON.parse(await readFile(daemon.state,'utf8'));
     data.daemons[target].resources=structuredClone(data.daemons[source].resources);
     await writeFile(daemon.state,JSON.stringify(data));
   };
   const daemonActions=async()=>{try{return (await readFile(daemon.ledger,'utf8')).trim().split('\n').filter(Boolean).map((line)=>JSON.parse(line));}catch(error){if(error.code==='ENOENT')return [];throw error;}};
-  return {tmp,repo,root,pkg,descriptor,generated,run,runWith,state:daemon.state,daemonState,daemonActions,daemonControl,setDaemonControl,cloneResources,bin,daemon,healthy};
+  return {tmp,repo,root,pkg,descriptor,generated,run,runWith,state:daemon.state,daemonState,daemonActions,daemonControl,setDaemonControl,setPodmanInfo,cloneResources,bin,daemon,healthy};
 }

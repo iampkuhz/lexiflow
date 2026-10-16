@@ -167,13 +167,13 @@ lf_run_prepare() {
   case "$LF_PHASE" in
     idle|stopped)
       if [ "$LF_ACTIVE" = "$LF_RELEASE_KEY" ]; then
-        lf_delegate "$LF_RELEASE_KEY" verify-record && lf_secrets_verify "$LF_RELEASE_KEY"
+        lf_delegate "$LF_RELEASE_KEY" verify-record && lf_secrets_verify "$LF_RELEASE_KEY" && lf_private_files_verify
         return $?
       fi;;
     preparing|prepared)
       [ "$LF_CANDIDATE" = "$LF_RELEASE_KEY" ] || return 1
       if [ "$LF_PHASE" = prepared ]; then
-        lf_delegate "$LF_RELEASE_KEY" verify-record && lf_secrets_verify "$LF_RELEASE_KEY"
+        lf_delegate "$LF_RELEASE_KEY" verify-record && lf_secrets_verify "$LF_RELEASE_KEY" && lf_private_files_verify
         return $?
       fi;;
     *) return 1;;
@@ -188,6 +188,7 @@ lf_run_prepare() {
   done
   next_active=$LF_ACTIVE
   lf_make_record || return 1
+  lf_private_sources_check || return 1
   lf_bound_state_write preparing "$next_active" "$LF_PREVIOUS" "$LF_RELEASE_KEY" none none || return 1
   lf_docker_prepare || return 1
   lf_bound_state_write prepared "$next_active" "$LF_PREVIOUS" "$LF_RELEASE_KEY" none none
@@ -262,6 +263,11 @@ lf_release_dir_check() {
       record) [ -f "$item" ] && [ ! -L "$item" ] || return 1;;
       postgres-password|app-password) [ -f "$item" ] && [ ! -L "$item" ] || return 1;;
       .postgres-password.pending|.app-password.pending) lf_secret_mode_600 "$item" || return 1;;
+      .private-file-transfer)
+        [ -f "$item" ] && [ ! -L "$item" ] || return 1
+        [ "$(stat -c '%a' "$item" 2>/dev/null || stat -f '%Lp' "$item" 2>/dev/null)" = 600 ] || return 1
+        [ "$(stat -c '%h' "$item" 2>/dev/null || stat -f '%l' "$item" 2>/dev/null)" = 1 ] || return 1
+        [ "$(wc -c < "$item" | tr -d ' ')" -le 1024 ] || return 1;;
       *) return 1;;
     esac
   done
@@ -278,6 +284,7 @@ lf_delete_commit() {
 }
 lf_tombstone_clean() {
   local key="$1" dir="$LF_ROOT/releases/.deleted-$1" item
+  local LF_CURRENT_KEY="$1" LF_PROJECT="lf_${LF_INSTALL_ID}_$(printf '%s' "$1" | cut -c1-16)"
   lf_lock_check && lf_release_dir_check "$dir" cleanup || return 1
   # A nonempty tombstone without its record has no provable owner.
   if [ ! -e "$dir/record" ]; then
@@ -285,11 +292,16 @@ lf_tombstone_clean() {
     lf_lock_check && rmdir "$dir" 2>/dev/null; return $?
   fi
   lf_record_verify "$key" tombstone || return 1
-  for item in .postgres-password.pending .app-password.pending postgres-password app-password record; do
+  if [ -e "$dir/.private-file-transfer" ] || [ -L "$dir/.private-file-transfer" ]; then
+    lf_transfer_journal_check "$dir/.private-file-transfer" || return 1
+  fi
+  for item in .postgres-password.pending .app-password.pending postgres-password app-password .private-file-transfer record; do
     [ -e "$dir/$item" ] || [ -L "$dir/$item" ] || continue
     lf_lock_check && lf_record_verify "$key" tombstone && lf_release_dir_check "$dir" cleanup || return 1
     if [ "$item" = .postgres-password.pending ] || [ "$item" = .app-password.pending ]; then
       lf_secret_mode_600 "$dir/$item" || return 1
+    elif [ "$item" = .private-file-transfer ]; then
+      lf_transfer_journal_check "$dir/$item" || return 1
     else
       [ -f "$dir/$item" ] && [ ! -L "$dir/$item" ] || return 1
     fi

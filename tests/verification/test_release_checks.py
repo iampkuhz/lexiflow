@@ -305,7 +305,7 @@ class ReleaseCheckDeclarationTest(unittest.TestCase):
             ("build", "build", 180),
             ("manifest", "manifest", 90),
             ("runtime-entry", "runtime-entry", 90),
-            ("lifecycle", "lifecycle", 180),
+            ("lifecycle", "lifecycle", 660),
             ("lifecycle-install", "lifecycle-install", 180),
         ):
             with self.subTest(suite=suite):

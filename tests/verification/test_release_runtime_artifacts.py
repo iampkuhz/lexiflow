@@ -22,7 +22,7 @@ class TestReleaseRuntimeArtifacts(unittest.TestCase):
             root = Path(directory)
             repo = root / "repo"
             for path in (
-                "backend/product/api/build/libs",
+                "backend/product/api/build/internal/boot",
                 "extension/dist",
                 "ops/release",
                 "ops/docker",
@@ -42,6 +42,11 @@ class TestReleaseRuntimeArtifacts(unittest.TestCase):
 
             def fake_run(argv, *, cwd, env, timeout=1800):
                 self.assertNotEqual(argv[:3], ["npm", "run", "build"])
+                if argv[0] == "node":
+                    self.assertEqual(
+                        argv,
+                        ["node", "scripts/packaging/package-extension-release.mjs"],
+                    )
                 if argv[0] == "npm":
                     self.assertEqual(os.devnull, env["npm_config_globalconfig"])
                     self.assertEqual(
@@ -184,7 +189,7 @@ class TestFixedSyntheticBridge(unittest.TestCase):
             repo, scratch = root / "repo", root / "scratch"
             scratch.mkdir()
             for name, data in (
-                ("backend/product/api/build/libs/api-2.0.0.jar", b"jar"),
+                ("backend/product/api/build/internal/boot/api-internal.jar", b"jar"),
                 (
                     "tmp/releases/2.0.0/" + "a" * 40 + "/lexiflow-extension-2.0.0.zip",
                     b"zip",

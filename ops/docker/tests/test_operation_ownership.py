@@ -1,4 +1,5 @@
 """生命周期资源归属操作的真实 Shell/有状态 Docker CLI 替身测试。"""
+
 import json
 import os
 import pathlib
@@ -10,7 +11,10 @@ import tempfile
 import time
 import unittest
 
-SOURCE = pathlib.Path(__file__).resolve().parents[2] / "release/runtime/release-installation-docker.sh"
+SOURCE = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "release/runtime/release-installation-docker.sh"
+)
 PROJECT = "lf_" + "a" * 32 + "_" + "b" * 16
 INSTALL = "a" * 32
 RELEASE = "b" * 64
@@ -28,57 +32,105 @@ class OperationOwnershipTest(unittest.TestCase):
         self.installation = self.root / "installation"
         secret_dir = self.installation / "releases" / RELEASE
         secret_dir.mkdir(parents=True)
-        for filename, value in (("postgres-password", "a" * 64), ("app-password", "b" * 64)):
+        for filename, value in (
+            ("postgres-password", "a" * 64),
+            ("app-password", "b" * 64),
+        ):
             secret = secret_dir / filename
             secret.write_text(value)
             secret.chmod(0o600)
         binding = self.installation / "engine"
-        binding.write_text("schema=lexiflow-engine-v1\nendpoint=unix:///fake.sock\ndaemon_id=synthetic-daemon-id\n")
+        binding.write_text(
+            "schema=lexiflow-engine-v1\nendpoint=unix:///fake.sock\ndaemon_id=synthetic-daemon-id\n"
+        )
         binding.chmod(0o600)
         self.release_root = self.root / "release"
         self.release_root.mkdir()
-        self.env = {**os.environ, "PATH": str(self.bin) + ":" + os.environ["PATH"],
-                    "LF_TEST_STATE": str(self.state), "LF_TEST_LOG": str(self.log),
-                    "LF_PROJECT": PROJECT, "LF_INSTALL_ID": INSTALL,
-                    "LF_CURRENT_KEY": RELEASE, "DOCKER_HOST": "unix:///fake.sock",
-                    "DOCKER_CONTEXT": ""}
+        self.env = {
+            **os.environ,
+            "PATH": str(self.bin) + ":" + os.environ["PATH"],
+            "LF_TEST_STATE": str(self.state),
+            "LF_TEST_LOG": str(self.log),
+            "LF_PROJECT": PROJECT,
+            "LF_INSTALL_ID": INSTALL,
+            "LF_CURRENT_KEY": RELEASE,
+            "DOCKER_HOST": "unix:///fake.sock",
+            "DOCKER_CONTEXT": "",
+        }
         self.write_state()
         self.mailbox = self.root / "mailbox"
         self.mailbox.mkdir(mode=0o700)
         self.server_log = self.root / "server.log"
         self.server_pid = None
         stub = self.bin / "docker"
-        cli = (self.cli().replace("__STATE__", repr(str(self.state))).replace("__LOG__", repr(str(self.log)))
-               .replace("__PROJECT__", repr(PROJECT)).replace("__INSTALL__", repr(INSTALL))
-               .replace("__RELEASE__", repr(RELEASE)).replace("__LOCK__", repr(str(self.root / "lock-owned"))))
+        cli = (
+            self.cli()
+            .replace("__STATE__", repr(str(self.state)))
+            .replace("__LOG__", repr(str(self.log)))
+            .replace("__PROJECT__", repr(PROJECT))
+            .replace("__INSTALL__", repr(INSTALL))
+            .replace("__RELEASE__", repr(RELEASE))
+            .replace("__LOCK__", repr(str(self.root / "lock-owned")))
+        )
         self.model_source = self.root / "docker-model.py"
         self.model_source.write_text(cli)
-        (self.mailbox / "server-config.json").write_text(json.dumps({"model": str(self.model_source)}))
+        (self.mailbox / "server-config.json").write_text(
+            json.dumps({"model": str(self.model_source)})
+        )
         # CLI 业务模型仍只由 cli() 提供；server 启动时编译一次，逐请求执行。
         with self.server_log.open("wb") as server_log:
             self.server_process = subprocess.Popen(
-                [sys.executable, "-u", str(pathlib.Path(__file__).resolve()), "--fake-server", str(self.root)],
-                start_new_session=True, close_fds=True, stdin=subprocess.DEVNULL,
-                stdout=server_log, stderr=subprocess.STDOUT)
+                [
+                    sys.executable,
+                    "-u",
+                    str(pathlib.Path(__file__).resolve()),
+                    "--fake-server",
+                    str(self.root),
+                ],
+                start_new_session=True,
+                close_fds=True,
+                stdin=subprocess.DEVNULL,
+                stdout=server_log,
+                stderr=subprocess.STDOUT,
+            )
         self.addCleanup(self._cleanup_server)
         self.server_pid = self.server_process.pid
         self._wait_for_server_ready()
         stub.write_text(self._shell_client())
         stub.chmod(0o755)
         self.script = self.root / "run.sh"
-        self.script.write_text(SOURCE.with_name("release-installation-state.sh").read_text() + '\nset -eu\n. "$1"\nlf_lock_check() { test -f "$LF_TEST_LOCK_FILE"; }\n'
-                              'lf_docker_endpoint() { LF_DOCKER_ENDPOINT=unix:///fake.sock; }\n'
-                              +
-                              'LF_ROOT=/tmp/fake LF_PLATFORM=linux/amd64 LF_API_IMAGE=sha256:' + 'e'*64 +
-                              ' LF_POSTGRES_IMAGE=sha256:' + 'f'*64 + ' LF_DATASET_SHA256=' + '1'*64 + '\n'
-                              'LF_ROOT="$LF_TEST_ROOT" LF_RELEASE_ROOT="$LF_TEST_RELEASE" LF_COMPOSE_PATH=compose.yaml '
-                              'LF_DATASET_PATH=dataset.zip\n'
-                              'LF_API_ARCHIVE=api.tar LF_POSTGRES_ARCHIVE=postgres.tar\n'
-                              'case "$2" in stop) lf_docker_stop;; cleanup) lf_operation_temp_cleanup;; '
-                              'health) lf_wait_healthy "$3";; prep) lf_docker_prepare;; start) lf_docker_start;; '
-                              'rmtemp) lf_operation_remove_temp "$3";; esac\n')
-        self.env.update({"LF_TEST_ROOT": str(self.installation), "LF_TEST_RELEASE": str(self.release_root),
-                         "LF_TEST_LOCK_FILE": str(self.root / "lock-owned")})
+        self.script.write_text(
+            SOURCE.with_name("release-installation-state.sh").read_text()
+            + '\nset -eu\n. "$1"\nlf_lock_check() { test -f "$LF_TEST_LOCK_FILE"; }\n'
+            "lf_docker_endpoint() { LF_DOCKER_ENDPOINT=unix:///fake.sock; }\n"
+            + "LF_ROOT=/tmp/fake LF_PLATFORM=linux/amd64 LF_API_IMAGE=sha256:"
+            + "e" * 64
+            + " LF_POSTGRES_IMAGE=sha256:"
+            + "f" * 64
+            + " LF_DATASET_SHA256="
+            + "1" * 64
+            + "\n"
+            'LF_ROOT="$LF_TEST_ROOT" LF_RELEASE_ROOT="$LF_TEST_RELEASE" LF_COMPOSE_PATH=compose.yaml '
+            "LF_DATASET_PATH=dataset.zip LF_DATASET_BYTES=12\n"
+            "lf_private_sources_check() { :; }\n"
+            "lf_private_files_import() { for role in postgres-secret app-secret dataset; do "
+            'lf_docker volume create --label "com.docker.compose.project=$LF_PROJECT" '
+            '--label "lexiflow.installation=$LF_INSTALL_ID" --label "lexiflow.release=$LF_CURRENT_KEY" '
+            '"${LF_PROJECT}_$role" >/dev/null || return 1; '
+            "lf_operation_preflight || return 1; done; "
+            "lf_operation_volume_labels; }\n"
+            "LF_API_ARCHIVE=api.tar LF_POSTGRES_ARCHIVE=postgres.tar\n"
+            'case "$2" in stop) lf_docker_stop;; cleanup) lf_operation_temp_cleanup;; '
+            'health) lf_wait_healthy "$3";; prep) lf_docker_prepare;; start) lf_docker_start;; '
+            'rmtemp) lf_operation_remove_temp "$3";; esac\n'
+        )
+        self.env.update(
+            {
+                "LF_TEST_ROOT": str(self.installation),
+                "LF_TEST_RELEASE": str(self.release_root),
+                "LF_TEST_LOCK_FILE": str(self.root / "lock-owned"),
+            }
+        )
         (self.root / "lock-owned").touch()
 
     def _wait_for_server_ready(self):
@@ -95,7 +147,7 @@ class OperationOwnershipTest(unittest.TestCase):
     def _shell_client(self):
         mailbox = shlex.quote(str(self.mailbox))
         pid = shlex.quote(str(self.server_pid))
-        return f'''#!/bin/sh
+        return f"""#!/bin/sh
 mailbox={mailbox}
 server_pid={pid}
 # This exact product identity query is intentionally outside the business transport.
@@ -154,7 +206,7 @@ rm -f "$req/argv.claimed" "$req/stdout" "$req/stderr" "$req/status" "$req/done" 
 rmdir "$req" || transport_error
 trap - HUP INT TERM
 exit "$status"
-'''
+"""
 
     def _cleanup_server(self):
         process = getattr(self, "server_process", None)
@@ -164,12 +216,49 @@ exit "$status"
 
     def write_state(self, mode="ok"):
         records = [
-            {"kind": "container", "id": "c" * 64, "name": PROJECT + "-postgres-1", "running": True, "health": "healthy"},
-            {"kind": "container", "id": "d" * 64, "name": PROJECT + "-api-1", "running": True, "health": "healthy"},
-            {"kind": "container", "id": "e" * 64, "name": PROJECT + "-candidate", "running": True, "health": "healthy"},
-            {"kind": "container", "id": "f" * 64, "name": PROJECT + "-initialize-1", "running": False, "health": "none"},
+            {
+                "kind": "container",
+                "id": "c" * 64,
+                "name": PROJECT + "-postgres-1",
+                "running": True,
+                "health": "healthy",
+            },
+            {
+                "kind": "container",
+                "id": "d" * 64,
+                "name": PROJECT + "-api-1",
+                "running": True,
+                "health": "healthy",
+            },
+            {
+                "kind": "container",
+                "id": "e" * 64,
+                "name": PROJECT + "-candidate",
+                "running": True,
+                "health": "healthy",
+            },
+            {
+                "kind": "container",
+                "id": "f" * 64,
+                "name": PROJECT + "-initialize-1",
+                "running": False,
+                "health": "none",
+            },
             {"kind": "network", "id": "1" * 64, "name": PROJECT + "_private"},
             {"kind": "volume", "id": PROJECT + "_pgdata", "name": PROJECT + "_pgdata"},
+            {
+                "kind": "volume",
+                "id": PROJECT + "_initialization-work",
+                "name": PROJECT + "_initialization-work",
+            },
+            *[
+                {
+                    "kind": "volume",
+                    "id": PROJECT + "_" + suffix,
+                    "name": PROJECT + "_" + suffix,
+                }
+                for suffix in ("postgres-secret", "app-secret", "dataset")
+            ],
         ]
         if mode in ("fresh", "post-create-owner"):
             records = []
@@ -179,7 +268,7 @@ exit "$status"
 
     @staticmethod
     def cli():
-        return r'''import json, os, sys
+        return r"""import json, os, sys
 from pathlib import Path
 s=Path(__STATE__); log=Path(__LOG__)
 PROJECT=__PROJECT__; INSTALL=__INSTALL__; RELEASE=__RELEASE__; LOCK=__LOCK__
@@ -191,6 +280,8 @@ a=a[2:]
 with log.open('a') as f: f.write(json.dumps(a)+'\n')
 if a[0]=='info':
  print('linux' if a[-1]=='{{.OSType}}' else 'amd64'); sys.exit(0)
+if a[:2]==['version','--format']:
+ print('Engine'); sys.exit(0)
 if a[0]=='load': sys.exit(0)
 if a[:2]==['image','inspect']:
  print(a[-1]+'|linux|amd64'); sys.exit(0)
@@ -212,8 +303,22 @@ if a[0]=='compose':
   elif service=='api': add('container','4'*64,PROJECT+'-api-1')
  elif tail and tail[0]=='run' and tail[-1]=='api':
   add('container','7'*64,PROJECT+'-candidate')
+ elif tail and tail[0]=='run' and tail[-1]=='initialize':
+  add('volume',PROJECT+'_initialization-work',PROJECT+'_initialization-work')
  s.write_text(json.dumps(data)); sys.exit(0)
 kind=a[0]
+if kind=='volume' and a[1]=='create':
+ labels={}
+ for i,item in enumerate(a):
+  if item=='--label' and i+1<len(a):
+   key,_,value=a[i+1].partition('='); labels[key]=value
+ name=a[-1]
+ if labels!={'com.docker.compose.project':PROJECT,'lexiflow.installation':INSTALL,'lexiflow.release':RELEASE}: sys.exit(86)
+ if not any(name==PROJECT+'_'+role for role in ('postgres-secret','app-secret','dataset')): sys.exit(86)
+ if not any(r['kind']=='volume' and r['name']==name for r in data['records']):
+  data['records'].append({'kind':'volume','id':name,'name':name})
+ if mode=='post-create-owner': data['poisoned']=True
+ s.write_text(json.dumps(data)); print(name); sys.exit(0)
 if kind=='inspect' or (kind in ('container','network','volume') and a[1]=='inspect'):
  ident=a[-1]; rec=next((x for x in data['records'] if x['id']==ident),None)
  if not rec: sys.exit(2)
@@ -253,106 +358,192 @@ if kind in ('container','network','volume'):
   if mode=='replace' and a[-1]=='e'*64: data['records'].append({'kind':'container','id':'1'*64,'name':PROJECT+'-candidate','running':False,'health':'healthy'})
   s.write_text(json.dumps(data)); sys.exit(0)
 sys.exit(9)
-'''
+"""
 
     def run_case(self, mode, op, name=None, timeout=12):
         self.write_state(mode)
         engine = self.installation / "engine"
-        engine.write_text("schema=lexiflow-engine-v1\nendpoint=unix:///fake.sock\ndaemon_id=synthetic-daemon-id\n")
+        engine.write_text(
+            "schema=lexiflow-engine-v1\nendpoint=unix:///fake.sock\ndaemon_id=synthetic-daemon-id\n"
+        )
         engine.chmod(0o600)
-        process = subprocess.Popen(["/bin/sh", str(self.script), str(SOURCE), op, name or ""],
-                                   env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                   start_new_session=True)
+        process = subprocess.Popen(
+            ["/bin/sh", str(self.script), str(SOURCE), op, name or ""],
+            env=self.env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
         try:
             stdout, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             self._terminate_owned(process)
             stdout, stderr = process.communicate(timeout=2)
-            raise subprocess.TimeoutExpired(process.args, timeout, output=stdout, stderr=stderr)
+            raise subprocess.TimeoutExpired(
+                process.args, timeout, output=stdout, stderr=stderr
+            )
         except BaseException:
             if process.returncode is None:
                 self._terminate_owned(process)
             raise
-        residue = [p.name for p in self.mailbox.iterdir()
-                   if p.name == "transport-failed" or p.name.startswith(("active.", "req."))]
+        residue = [
+            p.name
+            for p in self.mailbox.iterdir()
+            if p.name == "transport-failed" or p.name.startswith(("active.", "req."))
+        ]
         if residue or not self.mailbox.is_dir():
-            self.fail(f"fake Docker transport left inconsistent mailbox state: {residue!r}")
+            self.fail(
+                f"fake Docker transport left inconsistent mailbox state: {residue!r}"
+            )
         if self.server_process.poll() is not None:
             self.fail("fake Docker server exited during run_case")
-        return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+        return subprocess.CompletedProcess(
+            process.args, process.returncode, stdout, stderr
+        )
 
     @staticmethod
     def _terminate_owned(process):
         _terminate_owned_group(process)
 
     def commands(self):
-        return [json.loads(x) for x in self.log.read_text().splitlines()] if self.log.exists() else []
+        return (
+            [json.loads(x) for x in self.log.read_text().splitlines()]
+            if self.log.exists()
+            else []
+        )
 
     def test_stop_uses_full_ids_and_never_deletes_resources(self):
         result = self.run_case("ok", "stop", timeout=15)
         self.assertEqual(result.returncode, 0, result.stderr)
         cmds = self.commands()
         stops = [c for c in cmds if len(c) > 1 and c[0:2] == ["container", "stop"]]
-        self.assertEqual({c[-1] for c in stops}, {"c"*64, "d"*64, "e"*64, "f"*64})
+        self.assertEqual(
+            {c[-1] for c in stops}, {"c" * 64, "d" * 64, "e" * 64, "f" * 64}
+        )
         self.assertTrue(all(c[2:4] == ["--time", "10"] for c in stops))
-        self.assertFalse(any(c[0:2] in (["container", "rm"], ["volume", "rm"], ["network", "rm"])
-                             for c in cmds))
-        self.assertTrue(all(not r.get("running") for r in json.loads(self.state.read_text())["records"] if r["kind"] == "container"))
+        self.assertFalse(
+            any(
+                c[0:2] in (["container", "rm"], ["volume", "rm"], ["network", "rm"])
+                for c in cmds
+            )
+        )
+        self.assertTrue(
+            all(
+                not r.get("running")
+                for r in json.loads(self.state.read_text())["records"]
+                if r["kind"] == "container"
+            )
+        )
 
     def test_invalid_installation_and_release_ids_are_rejected_before_docker(self):
-        for installation, release in (("a" * 31 + ":", RELEASE),
-                                       (INSTALL, "b" * 63 + ":"), ("A" * 32, RELEASE),
-                                       (INSTALL, "B" * 64), ("é" * 32, RELEASE)):
+        for installation, release in (
+            ("a" * 31 + ":", RELEASE),
+            (INSTALL, "b" * 63 + ":"),
+            ("A" * 32, RELEASE),
+            (INSTALL, "B" * 64),
+            ("é" * 32, RELEASE),
+        ):
             self.write_state()
-            env = {**self.env, "LF_INSTALL_ID": installation, "LF_CURRENT_KEY": release,
-                   "LF_PROJECT": f"lf_{installation}_{release[:16]}"}
-            result = subprocess.run(["/bin/sh", str(self.script), str(SOURCE), "stop", ""],
-                                    env=env, capture_output=True, timeout=3)
+            env = {
+                **self.env,
+                "LF_INSTALL_ID": installation,
+                "LF_CURRENT_KEY": release,
+                "LF_PROJECT": f"lf_{installation}_{release[:16]}",
+            }
+            result = subprocess.run(
+                ["/bin/sh", str(self.script), str(SOURCE), "stop", ""],
+                env=env,
+                capture_output=True,
+                timeout=3,
+            )
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(result.stdout + result.stderr, b"")
-            self.assertEqual(self.commands(), [])
+            self.assertEqual(
+                self.commands(),
+                [
+                    [
+                        "version",
+                        "--format",
+                        '{{range .Server.Components}}{{.Name}}{{"\\n"}}{{end}}',
+                    ]
+                ]
+                * 2,
+            )
 
     def test_prepare_and_start_use_compose_only_after_owned_preflight(self):
-        result = self.run_case("ok", "prep", timeout=35)
-        self.assertEqual(result.returncode, 0, (result.stderr, self.commands()[-8:]))
+        # 固定完整预检已含五类卷；当前 fixture 正常完成需约 35 秒、497 请求。
+        # 仅给测试传输调度留余量，生产每命令 30/600 秒及所有断言不变。
+        result = self.run_case("ok", "prep", timeout=60)
+        self.assertEqual(result.returncode, 0, (result.stderr, self.commands()))
         logged = self.commands()
         compose = [c for c in logged if c and c[0] == "compose"]
         initialize = [c for c in compose if c[-1:] == ["initialize"]]
         self.assertEqual(len(initialize), 1)
-        self.assertEqual(initialize[0][initialize[0].index("--name") + 1], PROJECT + "-initialize-1")
-        self.assertFalse(any(r["name"] == PROJECT + "-candidate" for r in json.loads(self.state.read_text())["records"]))
-        result = self.run_case("ok", "start", timeout=35)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            initialize[0][initialize[0].index("--name") + 1], PROJECT + "-initialize-1"
+        )
+        self.assertFalse(
+            any(
+                r["name"] == PROJECT + "-candidate"
+                for r in json.loads(self.state.read_text())["records"]
+            )
+        )
+        result = self.run_case("ok", "start", timeout=60)
+        self.assertEqual(result.returncode, 0, (result.stderr, self.commands()[-12:]))
         compose = [c for c in self.commands() if c and c[0] == "compose"]
-        self.assertEqual([c[c.index("-f") + 2:] for c in compose if "up" in c],
-                         [["up", "-d", "--no-deps", "postgres"], ["up", "-d", "--no-deps", "api"]])
+        self.assertEqual(
+            [c[c.index("-f") + 2 :] for c in compose if "up" in c],
+            [["up", "-d", "--no-deps", "postgres"], ["up", "-d", "--no-deps", "api"]],
+        )
         self.assertFalse(any(c[-1:] == ["initialize"] for c in compose))
-        self.assertFalse(any(r["name"] in (PROJECT + "-candidate", PROJECT + "-initialize-1")
-                             for r in json.loads(self.state.read_text())["records"]))
+        self.assertFalse(
+            any(
+                r["name"] in (PROJECT + "-candidate", PROJECT + "-initialize-1")
+                for r in json.loads(self.state.read_text())["records"]
+            )
+        )
 
     def test_wrong_owner_and_discovery_failure_have_zero_mutations(self):
-        for mode in ("wrong-owner", "late-owner", "list-fail", "inspect-fail", "unknown"):
+        for mode in (
+            "wrong-owner",
+            "late-owner",
+            "list-fail",
+            "inspect-fail",
+            "unknown",
+        ):
             with self.subTest(mode=mode):
                 result = self.run_case(mode, "stop")
                 self.assertNotEqual(result.returncode, 0)
-                self.assertFalse(any(c[0:2] == ["container", "stop"] for c in self.commands()))
+                self.assertFalse(
+                    any(c[0:2] == ["container", "stop"] for c in self.commands())
+                )
 
     def test_replaced_candidate_after_remove_is_not_reported_clean(self):
         result = self.run_case("replace", "cleanup")
         self.assertNotEqual(result.returncode, 0)
         state = json.loads(self.state.read_text())
-        self.assertTrue(any(r["name"] == PROJECT + "-candidate" and r["id"] == "1"*64
-                            for r in state["records"]))
+        self.assertTrue(
+            any(
+                r["name"] == PROJECT + "-candidate" and r["id"] == "1" * 64
+                for r in state["records"]
+            )
+        )
 
-    def test_prepare_start_and_stop_refuse_collisions_and_lost_lock_before_mutation(self):
+    def test_prepare_start_and_stop_refuse_collisions_and_lost_lock_before_mutation(
+        self,
+    ):
         for operation in ("prep", "start", "stop"):
             for mode in ("wrong-owner", "list-fail", "lock-lost"):
                 with self.subTest(operation=operation, mode=mode):
                     result = self.run_case(mode, operation)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertEqual(result.stdout + result.stderr, b"")
-                    mutations = [c for c in self.commands() if c[0] in ("compose", "load")
-                                 or c[:2] in (["container", "stop"], ["container", "rm"])]
+                    mutations = [
+                        c
+                        for c in self.commands()
+                        if c[0] in ("compose", "load")
+                        or c[:2] in (["container", "stop"], ["container", "rm"])
+                    ]
                     self.assertEqual(mutations, [])
 
     def test_candidate_cleanup_revalidates_and_removes_only_exact_candidate(self):
@@ -361,15 +552,19 @@ sys.exit(9)
         cmds = self.commands()
         stops = [c for c in cmds if c[0:2] == ["container", "stop"]]
         rms = [c for c in cmds if c[0:2] == ["container", "rm"]]
-        self.assertEqual([c[-1] for c in stops], ["e"*64, "f"*64])
-        self.assertEqual([c[-1] for c in rms], ["e"*64, "f"*64])
+        self.assertEqual([c[-1] for c in stops], ["e" * 64, "f" * 64])
+        self.assertEqual([c[-1] for c in rms], ["e" * 64, "f" * 64])
 
     def test_health_queries_full_id_and_rejects_unknown_or_bad_owner(self):
         result = self.run_case("ok", "health", PROJECT + "-api-1")
         self.assertEqual(result.returncode, 0, result.stderr)
-        health = [c for c in self.commands() if c[0] == "inspect" and c[-2].startswith("{{.State.Health")]
+        health = [
+            c
+            for c in self.commands()
+            if c[0] == "inspect" and c[-2].startswith("{{.State.Health")
+        ]
         self.assertTrue(health)
-        self.assertTrue(all(c[-1] == "d"*64 for c in health))
+        self.assertTrue(all(c[-1] == "d" * 64 for c in health))
         result = self.run_case("wrong-owner", "health", PROJECT + "-api-1")
         self.assertNotEqual(result.returncode, 0)
 
@@ -390,8 +585,10 @@ sys.exit(9)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(any(c[0:2] == ["container", "rm"] for c in self.commands()))
 
-    def test_empty_installation_prepares_and_post_create_owner_failure_stops_sequence(self):
-        result = self.run_case("fresh", "prep", timeout=25)
+    def test_empty_installation_prepares_and_post_create_owner_failure_stops_sequence(
+        self,
+    ):
+        result = self.run_case("fresh", "prep", timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout + result.stderr, b"")
         names = {r["name"] for r in json.loads(self.state.read_text())["records"]}
@@ -401,8 +598,16 @@ sys.exit(9)
         result = self.run_case("post-create-owner", "prep")
         self.assertNotEqual(result.returncode, 0)
         compose = [c for c in self.commands() if c[0] == "compose" and "-f" in c]
-        self.assertEqual(len(compose), 1)
-        self.assertEqual(compose[0][-3:], ["up", "-d", "postgres"])
+        self.assertEqual(
+            compose,
+            [],
+            "private-volume owner must be inspected before first Compose writer",
+        )
+        self.assertEqual(
+            len([c for c in self.commands() if c[:2] == ["volume", "create"]]),
+            1,
+            "wrong owner after first volume create stops before another volume or product resource",
+        )
 
     def test_stop_does_not_accept_replaced_container_identity(self):
         result = self.run_case("stop-replaced", "stop")
@@ -414,7 +619,9 @@ class OperationOwnershipCleanupTest(unittest.TestCase):
     """直接测试清理传输；业务语义仍由原测试类覆盖。"""
 
     def setUp(self):
-        self.fixture = OperationOwnershipTest("test_stop_uses_full_ids_and_never_deletes_resources")
+        self.fixture = OperationOwnershipTest(
+            "test_stop_uses_full_ids_and_never_deletes_resources"
+        )
         self.addCleanup(self._cleanup_fixture)
         # 服务启动时编译一次：在启动前提供仅用于传输回归的模型。
         self.fixture.cli = lambda: (
@@ -430,9 +637,13 @@ class OperationOwnershipCleanupTest(unittest.TestCase):
             self.assertIs(_owned_group_exists(process.pid), False)
 
     def _start_client(self, status=0):
-        return subprocess.Popen([str(self.fixture.bin / "docker"), "cleanup-test", str(status)],
-                                env=self.fixture.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                start_new_session=True)
+        return subprocess.Popen(
+            [str(self.fixture.bin / "docker"), "cleanup-test", str(status)],
+            env=self.fixture.env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
 
     def _run_client(self, status=0):
         process = self._start_client(status)
@@ -450,8 +661,14 @@ class OperationOwnershipCleanupTest(unittest.TestCase):
         wrapper.chmod(0o755)
 
     def _assert_no_requests(self):
-        self.assertEqual([p.name for p in self.fixture.mailbox.iterdir()
-                          if p.name.startswith(("active.", "req."))], [])
+        self.assertEqual(
+            [
+                p.name
+                for p in self.fixture.mailbox.iterdir()
+                if p.name.startswith(("active.", "req."))
+            ],
+            [],
+        )
 
     def test_success_preserves_output_cleans_mailbox_and_runs_one_batch_rm(self):
         rm_log = self.fixture.root / "rm.log"
@@ -463,17 +680,25 @@ class OperationOwnershipCleanupTest(unittest.TestCase):
         self.assertFalse((self.fixture.mailbox / "transport-failed").exists())
 
     def test_delayed_business_response_preserves_outputs_and_cleans(self):
-        fixture = OperationOwnershipTest("test_stop_uses_full_ids_and_never_deletes_resources")
+        fixture = OperationOwnershipTest(
+            "test_stop_uses_full_ids_and_never_deletes_resources"
+        )
         fixture.cli = lambda: (
             "import time,sys\ntime.sleep(.02)\nprint('business-out')\n"
             "print('business-err',file=sys.stderr)\nsys.exit(int(sys.argv[-1]))\n"
         )
         fixture.setUp()
         try:
-            result = subprocess.run([str(fixture.bin / "docker"), "cleanup-test", "23"],
-                                    env=fixture.env, capture_output=True, timeout=3)
-            self.assertEqual((result.returncode, result.stdout, result.stderr),
-                             (23, b"business-out\n", b"business-err\n"))
+            result = subprocess.run(
+                [str(fixture.bin / "docker"), "cleanup-test", "23"],
+                env=fixture.env,
+                capture_output=True,
+                timeout=3,
+            )
+            self.assertEqual(
+                (result.returncode, result.stdout, result.stderr),
+                (23, b"business-out\n", b"business-err\n"),
+            )
             self.assertEqual(list(fixture.mailbox.glob("req.*")), [])
             self.assertEqual(list(fixture.mailbox.glob("active.*")), [])
             self.assertFalse((fixture.mailbox / "transport-failed").exists())
@@ -482,26 +707,36 @@ class OperationOwnershipCleanupTest(unittest.TestCase):
             self.assertIs(_owned_group_exists(fixture.server_pid), False)
 
     def test_nonzero_business_exit_preserves_outputs_and_cleans(self):
-        self.assertEqual(self._run_client(23), (23, b"business-out\n", b"business-err\n"))
+        self.assertEqual(
+            self._run_client(23), (23, b"business-out\n", b"business-err\n")
+        )
         self._assert_no_requests()
         self.assertFalse((self.fixture.mailbox / "transport-failed").exists())
 
     def test_partial_rm_failure_is_sticky_after_deleting_existing_response_file(self):
         deleted = self.fixture.root / "partial-deleted"
-        self._write_rm('for p do case "$p" in */stdout)\n'
-                       '  if [ -f "$p" ]; then /bin/rm "$p" || exit 42;\n'
-                       '    [ ! -e "$p" ] || exit 43; : > ' + shlex.quote(str(deleted)) + '; exit 41; fi;;\n'
-                       'esac; done')
+        self._write_rm(
+            'for p do case "$p" in */stdout)\n'
+            '  if [ -f "$p" ]; then /bin/rm "$p" || exit 42;\n'
+            '    [ ! -e "$p" ] || exit 43; : > '
+            + shlex.quote(str(deleted))
+            + "; exit 41; fi;;\n"
+            "esac; done"
+        )
         self.assertEqual(self._run_client()[0], 97)
-        self.assertTrue(deleted.is_file(), "existing response file was not deleted before failure")
+        self.assertTrue(
+            deleted.is_file(), "existing response file was not deleted before failure"
+        )
         self.assertTrue((self.fixture.mailbox / "transport-failed").is_file())
         self._assert_no_requests()
 
     def test_unknown_request_file_is_preserved_and_rmdir_failure_is_sticky(self):
-        self._write_rm('for p do case "$p" in */argv.claimed)\n'
-                       '  if [ -f "$p" ]; then req=${p%/argv.claimed}; /bin/rm "$@" || exit $?;\n'
-                       '    printf "%s" keep > "$req/unknown"; exit 0; fi;;\n'
-                       'esac; done')
+        self._write_rm(
+            'for p do case "$p" in */argv.claimed)\n'
+            '  if [ -f "$p" ]; then req=${p%/argv.claimed}; /bin/rm "$@" || exit $?;\n'
+            '    printf "%s" keep > "$req/unknown"; exit 0; fi;;\n'
+            "esac; done"
+        )
         self.assertEqual(self._run_client()[0], 97)
         self.assertTrue((self.fixture.mailbox / "transport-failed").is_file())
         unknown = list(self.fixture.mailbox.glob("req.*/unknown"))
@@ -511,14 +746,23 @@ class OperationOwnershipCleanupTest(unittest.TestCase):
     def test_term_between_batch_rm_and_rmdir_fails_closed(self):
         gate = self.fixture.root / "rm-finished"
         release = self.fixture.root / "release-rmdir"
-        self._write_rm('active=; for p do case "$p" in */active.*) active=1;; esac; done\n'
-                       '/bin/rm "$@" || exit $?\n'
-                       'if [ -n "$active" ]; then : > ' + shlex.quote(str(gate)) +
-                       '; while [ ! -f ' + shlex.quote(str(release)) + ' ]; do /bin/sleep 0.01; done; fi\nexit 0')
+        self._write_rm(
+            'active=; for p do case "$p" in */active.*) active=1;; esac; done\n'
+            '/bin/rm "$@" || exit $?\n'
+            'if [ -n "$active" ]; then : > '
+            + shlex.quote(str(gate))
+            + "; while [ ! -f "
+            + shlex.quote(str(release))
+            + " ]; do /bin/sleep 0.01; done; fi\nexit 0"
+        )
         process = self._start_client()
         try:
             deadline = time.monotonic() + 2
-            while time.monotonic() < deadline and not gate.exists() and process.poll() is None:
+            while (
+                time.monotonic() < deadline
+                and not gate.exists()
+                and process.poll() is None
+            ):
                 time.sleep(0.005)
             self.assertTrue(gate.exists(), "batch rm handshake was not reached")
             self.assertEqual(len(list(self.fixture.mailbox.glob("req.*"))), 1)
@@ -571,11 +815,17 @@ def _serve_fake_cli(root):
                     argv = [os.fsdecode(value) for value in fields[:-1]]
                     stdout, stderr, status = _execute_fake_cli(compiled, argv)
                 except BaseException as exc:
-                    (mailbox / "transport-failed").write_text(f"server request error: {type(exc).__name__}: {exc}\n")
+                    (mailbox / "transport-failed").write_text(
+                        f"server request error: {type(exc).__name__}: {exc}\n"
+                    )
                     stdout, stderr, status = b"", b"", 97
                 if len(stdout) > 256 * 1024 or len(stderr) > 256 * 1024:
                     raise ValueError("response exceeds 256 KiB")
-                for name, content in (("stdout", stdout), ("stderr", stderr), ("status", f"{status}\n".encode())):
+                for name, content in (
+                    ("stdout", stdout),
+                    ("stderr", stderr),
+                    ("status", f"{status}\n".encode()),
+                ):
                     temp = request / (name + ".tmp")
                     with temp.open("wb") as stream:
                         stream.write(content)
@@ -662,13 +912,23 @@ def _terminate_owned_group(process):
             try:
                 process.wait(timeout=2)
                 reaped = True
-            except (PermissionError, OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+            except (
+                PermissionError,
+                OSError,
+                subprocess.SubprocessError,
+                subprocess.TimeoutExpired,
+            ):
                 pass
         if not reaped:
             try:
                 process.wait(timeout=2)
                 reaped = True
-            except (PermissionError, OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+            except (
+                PermissionError,
+                OSError,
+                subprocess.SubprocessError,
+                subprocess.TimeoutExpired,
+            ):
                 pass
         if not reaped:
             raise subprocess.SubprocessError("failed to reap owned subprocess")

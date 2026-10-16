@@ -172,6 +172,7 @@ checks:
   - path: config/engineering/risk.yaml
   - path: tests/__init__.py
 - check_id: eng.delivery-gate.module-tests
+  timeout_seconds: 300
   command: ["python3", "-m", "scripts.checks.tool_tests.run_acceptance_tool_tests"]
   required_environment:
   - node
@@ -461,6 +462,7 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
 - check_id: eng.release.lifecycle
+  timeout_seconds: 660
   command: ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "lifecycle"]
   required_environment:
   - git
