@@ -9,10 +9,11 @@ services:
     environment:
       POSTGRES_DB: lexiflow
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
-    secrets: [postgres-password, app-password]
+      POSTGRES_PASSWORD_FILE: /run/postgres-secret/postgres-password
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - postgres-secret:/run/postgres-secret:ro
+      - app-secret:/run/secrets:ro
     networks: [private]
     mem_limit: 768m
     healthcheck:
@@ -32,9 +33,9 @@ services:
     command: [initialize]
     environment:
       LEXIFLOW_DATASET_SHA256: ${LEXIFLOW_DATASET_SHA256:?LEXIFLOW_DATASET_SHA256 is required}
-    secrets: [app-password]
     volumes:
-      - ${LEXIFLOW_DATASET_FILE:?LEXIFLOW_DATASET_FILE is required}:/dataset/dataset.zip:ro
+      - app-secret:/run/secrets:ro
+      - dataset:/dataset:ro
       - initialization-work:/work
     networks: [private]
     depends_on:
@@ -55,7 +56,8 @@ services:
     platform: ${LEXIFLOW_PLATFORM:?LEXIFLOW_PLATFORM is required}
     command: [api]
     ports: ["127.0.0.1:18080:8080"]
-    secrets: [app-password]
+    volumes:
+      - app-secret:/run/secrets:ro
     networks: [private]
     depends_on:
       postgres:
@@ -75,11 +77,106 @@ services:
       retries: 3
       start_period: 30s
 
-secrets:
-  postgres-password:
-    environment: LEXIFLOW_COMPOSE_POSTGRES_PASSWORD
-  app-password:
-    environment: LEXIFLOW_COMPOSE_APP_PASSWORD
+  private-file-importer:
+    labels:
+      lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
+      lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}
+    image: ${LEXIFLOW_POSTGRES_IMAGE:?LEXIFLOW_POSTGRES_IMAGE is required}
+    pull_policy: never
+    platform: ${LEXIFLOW_PLATFORM:?LEXIFLOW_PLATFORM is required}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        fail() { printf '%s\n' PRIVATE_FILE_IMPORT_FAILED >&2; exit 1; }
+        file_hash() {
+          line=$$(sha256sum < "$$1") || fail
+          [ "$$(printf '%s\n' "$$line" | awk 'END { print NR }')" = 1 ] || fail
+          IFS=' ' read -r digest marker extra <<EOF
+        $$line
+        EOF
+          [ "$$marker" = '-' ] && [ -z "$$extra" ] || fail
+          case "$$digest" in *[!0123456789abcdef]*|'') fail;; esac
+          [ "$${#digest}" -eq 64 ] || fail
+          printf '%s\n' "$$digest"
+        }
+        [ "$$#" -eq 2 ] || [ "$$#" -eq 4 ] || fail
+        mode=$$1
+        transfer=$$2
+        case "$$transfer" in ????????-????-????-????-????????????) ;; *) fail;; esac
+        case "$$mode" in pg64hex) directory=/private-files/postgres-secret; target=postgres-password; limit=64;; app64hex) directory=/private-files/app-secret; target=app-password; limit=64;; zip) directory=/private-files/dataset; target=dataset.zip; limit=3221225472;; *) fail;; esac
+        old_ifs=$$IFS; IFS=-
+        read -r segment1 segment2 segment3 segment4 segment5 segment6 <<EOF_UUID
+        $$transfer
+        EOF_UUID
+        IFS=$$old_ifs
+        [ -z "$$segment6" ] || fail
+        for segment in "$$segment1" "$$segment2" "$$segment3" "$$segment4" "$$segment5"; do
+          case "$$segment" in *[!0123456789abcdef]*|'') fail;; esac
+        done
+
+        if [ "$$mode" = zip ]; then
+          [ "$$#" -eq 4 ] || fail
+          expected_size=$$3; expected_hash=$$4
+          case "$$expected_size" in ''|*[!0-9]*|0|0*) fail;; esac
+          [ "$${#expected_size}" -le 10 ] && [ "$$expected_size" -le "$$limit" ] || fail
+        else [ "$$#" -eq 2 ] || fail; expected_hash=$$(dd bs=1 count=65 2>/dev/null) || fail; expected_size=64; fi
+        case "$$expected_hash" in *[!0123456789abcdef]*|'') fail;; esac
+        [ "$${#expected_hash}" -eq 64 ] || fail
+        mkdir -p "$$directory" || fail
+        [ -d "$$directory" ] && [ ! -L "$$directory" ] || fail
+        destination=$$directory/$$target
+        pending=$$directory/.pending-$$transfer
+        for entry in "$$directory"/* "$$directory"/.[!.]* "$$directory"/..?*; do
+          [ -e "$$entry" ] || [ -L "$$entry" ] || continue
+          name=$${entry##*/}
+          case "$$name" in "$$target"|".pending-$$transfer") [ -f "$$entry" ] && [ ! -L "$$entry" ] || fail;; *) fail;; esac
+          links=$$(stat -c '%h' "$$entry" 2>/dev/null) || fail
+          [ "$$links" = 1 ] || fail
+        done
+        already=0
+        if [ -e "$$destination" ] || [ -L "$$destination" ]; then
+          [ -f "$$destination" ] && [ ! -L "$$destination" ] || fail
+          links=$$(stat -c '%h' "$$destination" 2>/dev/null) || fail
+          [ "$$links" = 1 ] || fail
+          actual_size=$$(wc -c < "$$destination" | tr -d ' ') || fail
+          actual_hash=$$(file_hash "$$destination") || fail
+          [ "$$actual_size" = "$$expected_size" ] && [ "$$actual_hash" = "$$expected_hash" ] || fail
+          [ "$$(stat -c '%a' "$$destination" 2>/dev/null)" = 444 ] || fail
+          already=1
+        fi
+        [ ! -e "$$pending" ] && [ ! -L "$$pending" ] || { [ -f "$$pending" ] && [ ! -L "$$pending" ] && [ "$$(stat -c '%h' "$$pending" 2>/dev/null)" = 1 ] || fail; rm "$$pending" || fail; }
+        cleanup_pending=1
+        cancelled=0
+        trap 'cancelled=1; exit 1' 1 2 3 15
+        trap 'if [ "$$cleanup_pending" = 1 ] && [ "$$cancelled" = 0 ] && [ -f "$$pending" ] && [ ! -L "$$pending" ] && [ "$$(stat -c "%h" "$$pending" 2>/dev/null)" = 1 ]; then rm -- "$$pending"; fi' 0
+        read_size=$$((expected_size + 1))
+        head -c "$$read_size" > "$$pending" || fail
+        actual_size=$$(wc -c < "$$pending" | tr -d ' ') || fail
+        [ "$$actual_size" = "$$expected_size" ] || fail
+        actual_hash=$$(file_hash "$$pending") || fail
+        [ "$$actual_hash" = "$$expected_hash" ] || fail
+        if [ "$$mode" != zip ]; then LC_ALL=C grep -Eq '^[0-9a-f]{64}$$' "$$pending" || fail; fi
+        if [ "$$already" = 1 ]; then rm "$$pending" || fail; exit 0; fi
+        chmod 0444 "$$pending" || fail
+        mv "$$pending" "$$destination" || fail
+        cleanup_pending=0
+        [ "$$(stat -c '%h' "$$destination" 2>/dev/null)" = 1 ] || fail
+        actual_hash=$$(file_hash "$$destination") || fail
+        [ "$$actual_hash" = "$$expected_hash" ] || fail
+        printf '%s\n' PRIVATE_FILE_IMPORTED
+      - private-file-importer
+    network_mode: none
+    command: []
+    volumes:
+      - postgres-secret:/private-files/postgres-secret
+      - app-secret:/private-files/app-secret
+      - dataset:/private-files/dataset
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
 
 volumes:
   pgdata:
@@ -87,6 +184,18 @@ volumes:
       lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
       lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}
   initialization-work:
+    labels:
+      lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
+      lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}
+  postgres-secret:
+    labels:
+      lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
+      lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}
+  app-secret:
+    labels:
+      lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
+      lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}
+  dataset:
     labels:
       lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
       lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}

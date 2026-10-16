@@ -2,19 +2,29 @@
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import os
 import shutil
 import signal
 import socket
+import socketserver
+import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from unittest.mock import patch
 
 from ops.release.host_resources import release_docker_preflight as preflight_module
+
+
+class _UnixHttpServer(socketserver.UnixStreamServer):
+    daemon_threads = True
 
 
 class ReleaseDockerPreflightTest(unittest.TestCase):
@@ -38,6 +48,13 @@ class ReleaseDockerPreflightTest(unittest.TestCase):
         }
         self.mode = "ok"
         self._write_cli()
+        # The legacy fake CLI fixture is an explicitly classified synthetic Docker
+        # daemon; real Unix HTTP API classification is covered by focused tests.
+        self._engine_classification = patch.object(
+            preflight_module, "_engine_identity", return_value=("docker", None)
+        )
+        self._engine_classification.start()
+        self.addCleanup(self._engine_classification.stop)
         self.environment = {
             "PATH": os.pathsep.join(
                 (str(self.bin), str(Path(sys.executable).parent), "/usr/bin", "/bin")
@@ -425,6 +442,302 @@ elif "compose" in args:
             "daemon-identity-changed",
             preflight_module.recheck(binding).reason,
         )
+
+    def _podman_http_server(self):
+        self._engine_classification.stop()
+        version = {
+            "Components": [
+                {"Name": "Podman Engine", "Details": {"APIVersion": "5.0.0"}}
+            ],
+            "ID": "random-compat-id-one",
+        }
+        info = {
+            "host": {
+                "os": "linux",
+                "arch": "arm64",
+                "hostname": "local",
+                "security": {"rootless": True},
+                "idMappings": {
+                    "uidmap": [{"container_id": 0, "host_id": 1000, "size": 1}],
+                    "gidmap": [{"container_id": 0, "host_id": 1000, "size": 1}],
+                },
+            },
+            "store": {
+                "graphDriverName": "overlay",
+                "graphRoot": "/var/lib/containers/storage",
+                "runRoot": "/run/user/1/containers",
+                "volumePath": "/var/lib/containers/storage/volumes",
+                "transientStore": False,
+            },
+            "version": {"Version": "5.6.2"},
+        }
+        responses = {"/version": version, "/v5.0.0/libpod/info": info}
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                payload = json.dumps(responses[self.path]).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *_args):
+                pass
+
+        api_path = self.root / "podman-api.sock"
+        server = _UnixHttpServer(str(api_path), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"unix://{api_path}", version, info
+
+    def test_podman_identity_ignores_compat_id_but_binds_stable_store_facts(
+        self,
+    ) -> None:
+        endpoint, version, info = self._podman_http_server()
+        first, error = preflight_module._engine_identity(endpoint)
+        version["ID"] = "random-compat-id-two"
+        second, second_error = preflight_module._engine_identity(endpoint)
+        self.assertIsNone(error)
+        self.assertIsNone(second_error)
+        self.assertEqual(first, second)
+        self.assertTrue(first.startswith("podman:"))
+        info["host"]["security"]["rootless"] = False
+        changed, changed_error = preflight_module._engine_identity(endpoint)
+        self.assertIsNone(changed_error)
+        self.assertNotEqual(first, changed)
+
+    def test_podman_api_identity_matches_real_posix_product_encoding(self) -> None:
+        """同一原生事实与真实产品函数严格绑定同一固定字节摘要。"""
+        endpoint, _version, info = self._podman_http_server()
+        source_root = Path(__file__).resolve().parents[2]
+        for rootless, map_field in ((True, "0,1000,1;"), (False, "-")):
+            with self.subTest(rootless=rootless):
+                info["host"]["security"]["rootless"] = rootless
+                if not rootless:
+                    info["host"]["idMappings"] = {"uidmap": [], "gidmap": []}
+                record = (
+                    f"linux|arm64|local|{str(rootless).lower()}|present|"
+                    f"{map_field}|{map_field}|overlay|/var/lib/containers/storage|"
+                    "/run/user/1/containers|/var/lib/containers/storage/volumes|"
+                    "false|5.6.2\n"
+                )
+                (self.bin / "podman").write_text(
+                    '#!/bin/sh\n[ "$1" = --url ] && [ "$3" = info ] && '
+                    '[ "$4" = --format ] && [ "$#" = 5 ] || exit 1\n'
+                    f"printf '%s\\n' '{record.rstrip()}'\n",
+                    encoding="ascii",
+                )
+                (self.bin / "podman").chmod(0o700)
+                expected = (
+                    "podman:" + hashlib.sha256(record.encode("ascii")).hexdigest()
+                )
+                identity, error = preflight_module._engine_identity(endpoint)
+                self.assertIsNone(error)
+                self.assertEqual(expected, identity)
+                actual = subprocess.run(
+                    [
+                        "sh",
+                        "-c",
+                        '. "$1"; . "$2"; lf_podman_identity_query "$3"',
+                        "product-identity",
+                        str(
+                            source_root
+                            / "ops/release/runtime/release-installation-state.sh"
+                        ),
+                        str(
+                            source_root
+                            / "ops/release/runtime/release-installation-docker.sh"
+                        ),
+                        endpoint,
+                    ],
+                    env={"PATH": self.environment["PATH"], "LC_ALL": "C"},
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    timeout=10,
+                    check=True,
+                )
+                self.assertEqual((expected + "\n").encode("ascii"), actual.stdout)
+
+    def test_real_unix_http_fixture_preflight_and_recheck_bind_stable_facts(
+        self,
+    ) -> None:
+        endpoint, version, info = self._podman_http_server()
+        environment = dict(self.environment, DOCKER_HOST=endpoint)
+        info_output = b'"cli-compat-random-id"|"linux"|"arm64"|"5.6.2"\n'
+
+        def docker_result(_docker, _endpoint, args, _env):
+            if args[0] == "info":
+                return preflight_module._CommandResult("exited", 0, info_output)
+            return preflight_module._CommandResult(
+                "exited", 0, b"Docker Compose version\n"
+            )
+
+        with patch.object(preflight_module, "_run_docker", side_effect=docker_result):
+            result = preflight_module.preflight(environment)
+            self.assertEqual(
+                ("PASS", "docker-readonly-preflight-succeeded"),
+                (result.status, result.reason),
+            )
+            version["ID"] = "a-different-random-compat-id"
+            self.assertEqual("PASS", preflight_module.recheck(result.binding).status)
+            info["store"]["graphRoot"] = "/different/store"
+            self.assertEqual(
+                "daemon-identity-changed",
+                preflight_module.recheck(result.binding).reason,
+            )
+
+    def test_real_unix_http_docker_classification_keeps_strict_cli_id(self) -> None:
+        endpoint, version, _info = self._podman_http_server()
+        version["Components"] = [{"Name": "Engine", "Version": "27.0"}]
+        environment = dict(self.environment, DOCKER_HOST=endpoint)
+        daemon_id = ["docker-id-one"]
+
+        def docker_result(_docker, _endpoint, args, _env):
+            if args[0] == "info":
+                payload = "|".join(
+                    json.dumps(value)
+                    for value in (daemon_id[0], "linux", "arm64", "27.0")
+                )
+                return preflight_module._CommandResult(
+                    "exited", 0, payload.encode() + b"\n"
+                )
+            return preflight_module._CommandResult(
+                "exited", 0, b"Docker Compose version\n"
+            )
+
+        with patch.object(preflight_module, "_run_docker", side_effect=docker_result):
+            result = preflight_module.preflight(environment)
+            self.assertEqual("PASS", result.status)
+            self.assertEqual("docker-id-one", result.binding.daemon_id)
+            daemon_id[0] = "docker-id-two"
+            self.assertEqual(
+                "daemon-identity-changed",
+                preflight_module.recheck(result.binding).reason,
+            )
+
+    def test_engine_component_classification_fails_closed(self) -> None:
+        self._engine_classification.stop()
+        cases = (
+            ([], "engine-unrecognized"),
+            (
+                [{"Name": "Podman Engine"}, {"Name": "Podman Engine"}],
+                "engine-component-invalid",
+            ),
+            ([{"Name": "Mystery Engine"}], "engine-unrecognized"),
+            (
+                [{"Name": "Podman Engine", "Details": {"APIVersion": "v5"}}],
+                "podman-api-invalid",
+            ),
+        )
+        for components, expected in cases:
+            with self.subTest(components=components):
+                with patch.object(
+                    preflight_module,
+                    "_unix_api_json",
+                    side_effect=({"Components": components}, None),
+                ):
+                    _identity, error = preflight_module._engine_identity(
+                        "unix:///unused"
+                    )
+                self.assertEqual(expected, error)
+        with patch.object(
+            preflight_module,
+            "_unix_api_json",
+            side_effect=({"Components": [{"Name": "Engine"}]},),
+        ):
+            self.assertEqual(
+                ("docker", None), preflight_module._engine_identity("unix:///unused")
+            )
+        with patch.object(
+            preflight_module,
+            "_unix_api_json",
+            side_effect=(
+                {
+                    "Components": [
+                        {"Name": "Podman Engine", "Details": {"APIVersion": "5.0.0"}}
+                    ]
+                },
+                None,
+            ),
+        ):
+            self.assertEqual(
+                "podman-info-unavailable",
+                preflight_module._engine_identity("unix:///unused")[1],
+            )
+
+    def test_podman_fact_validation_rejects_bad_platform_maps_and_store_facts(
+        self,
+    ) -> None:
+        self._engine_classification.stop()
+        endpoint, _version, valid_info = self._podman_http_server()
+        api_version = {
+            "Components": [
+                {"Name": "Podman Engine", "Details": {"APIVersion": "5.0.0"}}
+            ]
+        }
+        cases = (
+            ("host.os", lambda data: data["host"].update(os="darwin")),
+            ("host.arch", lambda data: data["host"].update(arch=7)),
+            ("hostname", lambda data: data["host"].update(hostname=4)),
+            (
+                "hostname delimiter",
+                lambda data: data["host"].update(hostname="bad|host"),
+            ),
+            (
+                "hostname newline",
+                lambda data: data["host"].update(hostname="bad\nhost"),
+            ),
+            ("hostname unicode", lambda data: data["host"].update(hostname="本机")),
+            ("rootless", lambda data: data["host"]["security"].update(rootless="true")),
+            (
+                "idMappings key",
+                lambda data: data["host"].update(idMappings={"uids": [], "gids": []}),
+            ),
+            (
+                "mapping size",
+                lambda data: data["host"]["idMappings"]["uidmap"][0].update(size=True),
+            ),
+            ("store path missing", lambda data: data["store"].update(runRoot="")),
+            (
+                "store path relative",
+                lambda data: data["store"].update(graphRoot="relative"),
+            ),
+            ("store path type", lambda data: data["store"].update(volumePath=[])),
+            ("driver type", lambda data: data["store"].update(graphDriverName=1)),
+            (
+                "driver delimiter",
+                lambda data: data["store"].update(graphDriverName="a|b"),
+            ),
+            ("store delimiter", lambda data: data["store"].update(graphRoot="/a|b")),
+            (
+                "empty rootless mappings",
+                lambda data: data["host"].update(
+                    idMappings={"uidmap": [], "gidmap": []}
+                ),
+            ),
+            ("transient type", lambda data: data["store"].update(transientStore=1)),
+            ("version type", lambda data: data["version"].update(Version=5)),
+        )
+        for name, mutate in cases:
+            with self.subTest(fact=name):
+                info = copy.deepcopy(valid_info)
+                mutate(info)
+                with patch.object(
+                    preflight_module,
+                    "_unix_api_json",
+                    side_effect=(api_version, info),
+                ):
+                    _identity, error = preflight_module._engine_identity(endpoint)
+                self.assertIn(
+                    error, {"podman-info-invalid", "podman-platform-mismatch"}
+                )
+
+    def test_unix_api_response_overflow_is_rejected(self) -> None:
+        endpoint, _version, _info = self._podman_http_server()
+        with patch.object(preflight_module, "_MAX_API_RESPONSE", 16):
+            self.assertIsNone(preflight_module._unix_api_json(endpoint, "/version"))
 
     def test_common_supervision_cleanup_failure_maps_to_fail(self):
         from ops.release.host_resources.release_process_control import ProcessError

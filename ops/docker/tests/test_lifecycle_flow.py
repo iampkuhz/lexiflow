@@ -1,4 +1,5 @@
 """仅用有状态本机端口替身验证两份真实 Shell 入口的生命周期。"""
+
 from __future__ import annotations
 
 import os
@@ -9,12 +10,16 @@ from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parents[3]
-VERIFIER_HASH = (REPO / "ops/release/runtime/release-artifact-verification.sh").read_text().split("# 在 cd -P", 1)[0]
+VERIFIER_HASH = (
+    (REPO / "ops/release/runtime/release-artifact-verification.sh")
+    .read_text()
+    .split("# 在 cd -P", 1)[0]
+)
 STATE = (REPO / "ops/release/runtime/release-installation-state.sh").read_text()
 DOCKER = (REPO / "ops/release/runtime/release-installation-docker.sh").read_text()
 FLOW = (REPO / "ops/release/runtime/release-installation-lifecycle.sh").read_text()
 A, B, C = ("a" * 64, "b" * 64, "c" * 64)
-PORTS = r'''
+PORTS = r"""
 LF_PLATFORM=linux/amd64
 LF_COMPOSE_PATH=compose.yaml
 lf_verify_release() { [ "$LF_RELEASE_KEY" = "$EXPECTED_KEY" ]; }
@@ -31,7 +36,10 @@ lf_docker_prepare() { lf_port prepare; }
 lf_docker_start() { lf_port start; }
 lf_docker_stop() { lf_port stop; }
 lf_docker_remove() { lf_port remove; }
-'''
+lf_private_sources_check() { :; }
+lf_private_files_import() { :; }
+lf_private_files_verify() { :; }
+"""
 
 
 class FlowTests(unittest.TestCase):
@@ -56,11 +64,23 @@ class FlowTests(unittest.TestCase):
             entry.write_text(
                 "#!/bin/sh\n"
                 f"EXPECTED_KEY={key}\nLF_RELEASE_KEY={key}\n"
-                + VERIFIER_HASH + "\n" + STATE + "\n" + DOCKER + "\n" + PORTS + "\n" + FLOW
+                + VERIFIER_HASH
+                + "\n"
+                + STATE
+                + "\n"
+                + DOCKER
+                + "\n"
+                + PORTS
+                + "\n"
+                + FLOW
             )
             entry.chmod(0o700)
             self.entries[key] = entry
-        self.env = {**os.environ, "TEST_EVENTS": str(self.events), "TEST_FAULT": str(self.faults)}
+        self.env = {
+            **os.environ,
+            "TEST_EVENTS": str(self.events),
+            "TEST_FAULT": str(self.faults),
+        }
         tools = self.base / "tools"
         tools.mkdir()
         for command in ("mv", "rm"):
@@ -75,10 +95,15 @@ class FlowTests(unittest.TestCase):
             utility.chmod(0o700)
         self.env["PATH"] = str(tools) + os.pathsep + os.environ["PATH"]
 
-    def call(self, key: str, *args: str, ok: bool | None = True) -> subprocess.CompletedProcess[str]:
+    def call(
+        self, key: str, *args: str, ok: bool | None = True
+    ) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
             ["/bin/sh", str(self.entries[key]), *args],
-            text=True, capture_output=True, timeout=12, env=self.env,
+            text=True,
+            capture_output=True,
+            timeout=12,
+            env=self.env,
         )
         if ok is True:
             self.assertEqual(result.returncode, 0, (args, result.stderr))
@@ -88,12 +113,17 @@ class FlowTests(unittest.TestCase):
         return result
 
     def state(self) -> dict[str, str]:
-        return dict(line.split("=", 1) for line in (self.root / "state").read_text().splitlines())
+        return dict(
+            line.split("=", 1)
+            for line in (self.root / "state").read_text().splitlines()
+        )
 
     def put_state(self, **values: str) -> None:
         old = self.state()
         old.update(values)
-        (self.root / "state").write_text("".join(f"{key}={value}\n" for key, value in old.items()))
+        (self.root / "state").write_text(
+            "".join(f"{key}={value}\n" for key, value in old.items())
+        )
 
     def fault(self, action: str, key: str) -> None:
         (self.faults / f"{action}-{key}").touch()
@@ -101,14 +131,16 @@ class FlowTests(unittest.TestCase):
     def op_fault(self, command: str, match: str) -> None:
         marker = self.base / "one-shot-utility-fault"
         marker.touch()
-        self.env.update(TEST_FAIL_CMD=command, TEST_FAIL_MATCH=match, TEST_FAIL_MARKER=str(marker))
+        self.env.update(
+            TEST_FAIL_CMD=command, TEST_FAIL_MATCH=match, TEST_FAIL_MARKER=str(marker)
+        )
 
     def clear_op_fault(self) -> None:
         for name in ("TEST_FAIL_CMD", "TEST_FAIL_MATCH", "TEST_FAIL_MARKER"):
             self.env.pop(name, None)
 
     def events_since(self, before: str) -> list[str]:
-        return self.events.read_text()[len(before):].splitlines()
+        return self.events.read_text()[len(before) :].splitlines()
 
     def install_two(self) -> None:
         self.call(A, "prepare", str(self.root))
@@ -208,7 +240,10 @@ class FlowTests(unittest.TestCase):
         record.write_bytes(original)
         b_entry = self.entries[B]
         import hashlib
-        wrong_entry = original.replace(str(self.entries[A]).encode(), str(b_entry).encode())
+
+        wrong_entry = original.replace(
+            str(self.entries[A]).encode(), str(b_entry).encode()
+        )
         wrong_entry = wrong_entry.replace(
             hashlib.sha256(self.entries[A].read_bytes()).hexdigest().encode(),
             hashlib.sha256(b_entry.read_bytes()).hexdigest().encode(),
@@ -314,7 +349,9 @@ class FlowTests(unittest.TestCase):
         self.call(A, "stop", str(self.root))
         self.call(A, "delete", str(self.root), A, "--confirm-delete-data")
         self.assertEqual(self.state()["active"], "none")
-        result = self.call(A, "delete", str(self.root), A, "--confirm-delete-data", ok=False)
+        result = self.call(
+            A, "delete", str(self.root), A, "--confirm-delete-data", ok=False
+        )
         self.assertIn("LF_NOT_FOUND", result.stderr)
         self.assert_sentinel()
 
@@ -362,13 +399,17 @@ class FlowTests(unittest.TestCase):
         (outside / "token").write_text(token + "\n")
         lock = self.root / ".lock"
         lock.symlink_to(outside, target_is_directory=True)
-        self.call(A, "unlock", str(self.root), token, "--confirm-abandoned-lock", ok=False)
+        self.call(
+            A, "unlock", str(self.root), token, "--confirm-abandoned-lock", ok=False
+        )
         self.assertEqual((outside / "token").read_text(), token + "\n")
         lock.unlink()
         lock.mkdir()
         (lock / "token").write_text(token + "\n")
         (lock / "..foreign").touch()
-        self.call(A, "unlock", str(self.root), token, "--confirm-abandoned-lock", ok=False)
+        self.call(
+            A, "unlock", str(self.root), token, "--confirm-abandoned-lock", ok=False
+        )
         self.assertTrue((lock / "token").exists())
         (lock / "..foreign").unlink()
         self.call(A, "unlock", str(self.root), token, "--confirm-abandoned-lock")

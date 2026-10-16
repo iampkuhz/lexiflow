@@ -13,7 +13,11 @@ import unittest
 ROOT = Path(__file__).resolve().parents[3]
 STATE = ROOT / "ops/release/runtime/release-installation-state.sh"
 LIFECYCLE = ROOT / "ops/release/runtime/release-installation-lifecycle.sh"
-VERIFIER_HASH = (ROOT / "ops/release/runtime/release-artifact-verification.sh").read_text().split("# 在 cd -P", 1)[0]
+VERIFIER_HASH = (
+    (ROOT / "ops/release/runtime/release-artifact-verification.sh")
+    .read_text()
+    .split("# 在 cd -P", 1)[0]
+)
 KEY = "a" * 64
 INSTALL = "b" * 32
 TOKEN = "c" * 32
@@ -40,7 +44,13 @@ class SecretPublicationTest(unittest.TestCase):
         self.entry = self.base / "entry.sh"
         library = LIFECYCLE.read_text().split('lf_user_main "$@" ||', 1)[0]
         self.entry.write_text(
-            "#!/bin/sh\n" + VERIFIER_HASH + "\n" + STATE.read_text() + "\n" + library + "\n"
+            "#!/bin/sh\n"
+            + VERIFIER_HASH
+            + "\n"
+            + STATE.read_text()
+            + "\n"
+            + library
+            + "\n"
             f"LF_ROOT='{self.root}'\nLF_INSTALL_ID={INSTALL}\nLF_LOCK_TOKEN={TOKEN}\n"
             f"LF_RELEASE_KEY={KEY}\nLF_PLATFORM=linux/amd64\n"
             f"LF_PROJECT=lf_{INSTALL}_{KEY[:16]}\n"
@@ -48,22 +58,22 @@ class SecretPublicationTest(unittest.TestCase):
             "  case ${LF_TEST_WRITE:-normal} in\n"
             "    partial) printf partial; return 9;;\n"
             "    short) printf partial; return 0;;\n"
-            "    lose_lock) printf '%s' \"$1\"; command rm \"$LF_ROOT/.lock/token\"; return 0;;\n"
+            '    lose_lock) printf \'%s\' "$1"; command rm "$LF_ROOT/.lock/token"; return 0;;\n'
             "    *) printf '%s' \"$1\";;\n"
             "  esac\n}\n"
-            "if [ \"${LF_TEST_RANDOM:-}\" = fail ]; then lf_random_hex() { return 9; }; fi\n"
-            "if [ \"${LF_TEST_LINK:-}\" = fail ]; then ln() { return 9; }; fi\n"
-            "if [ \"${LF_TEST_CLEAN:-}\" = fail ]; then\n"
-            "  rm() { case \"$1\" in *.pending) return 9;; esac; command rm \"$@\"; };\n"
+            'if [ "${LF_TEST_RANDOM:-}" = fail ]; then lf_random_hex() { return 9; }; fi\n'
+            'if [ "${LF_TEST_LINK:-}" = fail ]; then ln() { return 9; }; fi\n'
+            'if [ "${LF_TEST_CLEAN:-}" = fail ]; then\n'
+            '  rm() { case "$1" in *.pending) return 9;; esac; command rm "$@"; };\n'
             "fi\n"
             "case $1 in\n"
             "  sizefail) wc() { printf '64'; return 9; }; lf_secret_file_verify \"$LF_ROOT/releases/$LF_RELEASE_KEY/postgres-password\";;\n"
             "  make) lf_make_record;;\n"
-            "  publish) lf_secret_publish \"$LF_ROOT/releases/$LF_RELEASE_KEY\";;\n"
-            "  wrongdir) lf_secret_publish \"$LF_ROOT/releases/other\";;\n"
-            "  verify) lf_secrets_verify \"$LF_RELEASE_KEY\";;\n"
-            "  dircheck) lf_release_dir_check \"$LF_ROOT/releases/$LF_RELEASE_KEY\" record;;\n"
-            "  tombclean) lf_tombstone_clean \"$LF_RELEASE_KEY\";;\n"
+            '  publish) lf_secret_publish "$LF_ROOT/releases/$LF_RELEASE_KEY";;\n'
+            '  wrongdir) lf_secret_publish "$LF_ROOT/releases/other";;\n'
+            '  verify) lf_secrets_verify "$LF_RELEASE_KEY";;\n'
+            '  dircheck) lf_release_dir_check "$LF_ROOT/releases/$LF_RELEASE_KEY" record;;\n'
+            '  tombclean) lf_tombstone_clean "$LF_RELEASE_KEY";;\n'
             "esac\nexit $?\n"
         )
         self.entry.chmod(0o700)
@@ -73,12 +83,21 @@ class SecretPublicationTest(unittest.TestCase):
             "platform=linux/amd64\n"
         )
 
-    def run_shell(self, action: str = "make", **flags: str) -> subprocess.CompletedProcess[bytes]:
+    def run_shell(
+        self, action: str = "make", **flags: str
+    ) -> subprocess.CompletedProcess[bytes]:
         result = subprocess.run(
-            ["/bin/sh", str(self.entry), action], capture_output=True, timeout=8,
-            env={**os.environ, **{f"LF_TEST_{key.upper()}": value for key, value in flags.items()}},
+            ["/bin/sh", str(self.entry), action],
+            capture_output=True,
+            timeout=8,
+            env={
+                **os.environ,
+                **{f"LF_TEST_{key.upper()}": value for key, value in flags.items()},
+            },
         )
-        self.assertEqual(result.stdout + result.stderr, b"", "private tool output escaped")
+        self.assertEqual(
+            result.stdout + result.stderr, b"", "private tool output escaped"
+        )
         return result
 
     def secret(self, name: str) -> Path:
@@ -92,10 +111,23 @@ class SecretPublicationTest(unittest.TestCase):
 
     def test_first_repeat_verify_and_missing_second_recovery(self) -> None:
         self.assertEqual(self.run_shell().returncode, 0)
-        before = [self.secret(name).read_bytes() for name in ("postgres-password", "app-password")]
+        before = [
+            self.secret(name).read_bytes()
+            for name in ("postgres-password", "app-password")
+        ]
         self.assertEqual(len(before), 2)
-        self.assertTrue(all(len(value) == 64 and set(value) <= set(b"0123456789abcdef") for value in before))
-        self.assertTrue(all(self.secret(name).stat().st_mode & 0o777 == 0o600 for name in ("postgres-password", "app-password")))
+        self.assertTrue(
+            all(
+                len(value) == 64 and set(value) <= set(b"0123456789abcdef")
+                for value in before
+            )
+        )
+        self.assertTrue(
+            all(
+                self.secret(name).stat().st_mode & 0o777 == 0o600
+                for name in ("postgres-password", "app-password")
+            )
+        )
         self.secret("app-password").unlink()
         self.assertEqual(self.run_shell().returncode, 0)
         self.assertEqual(self.run_shell().returncode, 0)

@@ -129,7 +129,11 @@ def build_local_inputs(
         cwd=repo / "extension",
         env=base,
     )
-    _run(["node", "scripts/release.mjs"], cwd=repo / "extension", env=base)
+    _run(
+        ["node", "scripts/packaging/package-extension-release.mjs"],
+        cwd=repo / "extension",
+        env=base,
+    )
     jdbc = environ.get("LEXIFLOW_POSTGRES_TEST_JDBC_URL", "").strip()
     if not jdbc:
         raise ConsumerError("BLOCKED", "missing-isolated-postgres-test-jdbc-url")
@@ -253,7 +257,7 @@ def produce_candidates(
     sources = (
         (
             "api.jar",
-            repo / "backend/product/api/build/libs" / f"api-{version}.jar",
+            repo / "backend/product/api/build/internal/boot/api-internal.jar",
             1024**3,
         ),
         (

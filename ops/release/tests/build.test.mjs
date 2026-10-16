@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { prepareImageBuild } from '../build/release-image-build-plan.mjs';
+import { loadBaseImageLock, prepareImageBuild } from '../build/release-image-build-plan.mjs';
 import { jarBytes, makeZip } from './zip-fixture.mjs';
 import { resolveBuildIdentity } from '../integrity/source-build-identity.mjs';
 
@@ -21,6 +21,13 @@ const lockImages = [
 ];
 const runtime = (name, id) => ({ reference: `registry.example.invalid/${name}@sha256:${id.repeat(64)}`, imageId: `sha256:${id.repeat(64)}` });
 const git = (root, args, options = {}) => execFileSync('git', ['-C', root, ...args], { timeout: 10_000, ...options });
+
+test('实际仓库基础镜像锁由正式 parser 校验，而非仅验证合成 fixture', async () => {
+  const lock = await loadBaseImageLock(repo);
+  assert.deepEqual(lock.map(item => item.platform), ['linux/amd64', 'linux/arm64']);
+  for (const item of lock) for (const role of ['javaRuntime', 'postgresRuntime'])
+    assert.match(item[role].imageId, /^sha256:[a-f0-9]{64}$/);
+});
 
 async function fixture() {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-build-')));

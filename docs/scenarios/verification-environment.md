@@ -63,10 +63,12 @@ macOS 系统 Git 的真实 payload 路径和字节仍由 [toolchain_identity.py]
 单独运行 development CLI、`run_repository_checks.py` 或原生 Gradle 时，调用者仍自行提供已确认隔离的资源与下列变量；这些公开 API 不隐式创建服务：
 
 ```bash
-export LEXIFLOW_POSTGRES_TEST_JDBC_URL='jdbc:postgresql://127.0.0.1:<test-port>/<isolated-db>?user=postgres'
+export LEXIFLOW_POSTGRES_TEST_JDBC_URL='jdbc:postgresql://127.0.0.1:<test-port>/lexiflow_hook_test?user=postgres'
 export LEXIFLOW_REDIS_TEST_ENDPOINT='127.0.0.1:<test-port>'
 ```
 
 这是形状示例，不是可直接粘贴的资源地址。日常交付建议直接使用 Hook 入口统一完成准备、串行 Verify 与清理。
+
+完整后端验收要求独占 PostgreSQL 17 测试实例，初始库名固定为 `lexiflow_hook_test`；真实 JAR 测试会临时创建 `lexiflow` 数据库与随机角色，再按归属清理。测试实例使用与 Hook 相同的 test-only `trust` 认证以支持无密码的动态角色，仅发布随机 loopback 端口、使用限额 tmpfs，不挂开发数据或持久卷；不得把此认证方式用于产品数据库或公开端口。只更换 JDBC 库名不能把已有开发实例变成安全测试实例。
 
 `deliveryFull` 包含静态检查、JUnit、PostgreSQL 集成、runtime smoke 和 API boot JAR；普通 `check` 不代替它。runtime smoke 使用合成输入短暂启动 API 后停止，不证明真实页面、生产部署或容量。更多原生任务见 [Java Reference](../reference/java-checks.md)。

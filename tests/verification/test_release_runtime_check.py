@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-import io
 import ctypes
+import io
+import json
 import os
+import struct
 import subprocess
 import sys
 import tempfile
-import struct
 import time
-from pathlib import Path
-import json
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from scripts.checks.release.source.check_synthetic_release_lifecycle import (
-    ConsumerError,
     ENVELOPE_FIELDS,
     MAX_ENVELOPE,
+    ConsumerError,
     _read_envelope,
 )
 
@@ -38,8 +38,53 @@ class BufferedInput:
 
 
 class TestReleaseRuntimeEnvelope(unittest.TestCase):
+    def test_module_cli_preserves_canonical_helper_error_and_progress(self):
+        """子进程复核 -m 同等入口与 helper 共用异常和计数，绝不运行引擎。"""
+        for status in ("FAIL", "BLOCKED"):
+            with self.subTest(status=status):
+                source = f"""
+import json
+import runpy
+from pathlib import Path
+from unittest.mock import patch
+from scripts.checks.release.source import check_synthetic_release_lifecycle as runtime
+from scripts.checks.release.source.release_test_artifact_builder import _run
+
+def consumer(*args, **kwargs):
+    token = runtime._PROGRESS.set([0])
+    try:
+        with patch.object(runtime.release_process, 'run_bounded', return_value=(b'', b'')):
+            _run(['mock-only-no-executable'], cwd=Path.cwd(), env={{}})
+        raise runtime.ConsumerError({status!r}, 'mock-runtime-owner-error')
+    finally:
+        runtime._PROGRESS.reset(token)
+
+with patch.object(runtime, '_read_envelope', return_value={envelope()!r}), \\
+     patch.object(runtime, 'run_consumer', side_effect=consumer):
+    runpy.run_module(runtime.__name__, run_name='__main__')
+"""
+                result = subprocess.run(
+                    [sys.executable, "-c", source],
+                    cwd=Path(__file__).resolve().parents[2],
+                    input=json.dumps(envelope()),
+                    text=True,
+                    capture_output=True,
+                    timeout=20,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual(report["status"], status)
+                self.assertEqual(report["reason"], "mock-runtime-owner-error")
+                self.assertEqual(report["checks_run"], 1)
+                self.assertEqual(report["failures"], int(status == "FAIL"))
+                self.assertEqual(report["errors"], 0)
+                self.assertEqual(report["skipped"], 0)
+                self.assertEqual(report["run_id"], envelope()["run_id"])
+
     def test_supported_host_is_measured_not_environment_override(self):
         from types import SimpleNamespace
+
         from scripts.checks.release.source import (
             check_synthetic_release_lifecycle as runtime,
         )
@@ -70,6 +115,7 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
 
     def test_release_bindings_require_only_arm64_and_block_when_missing(self):
         from types import SimpleNamespace
+
         from scripts.checks.release.source import (
             check_synthetic_release_lifecycle as runtime,
         )
@@ -135,10 +181,10 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
             _read_envelope(BufferedInput(json.dumps(bad).encode()))
 
     def test_bridge_cleanup_failure_is_fail_and_retains_scratch(self):
-        from scripts.checks.release.source.frozen_source_fixture import BridgeError
         from scripts.checks.release.source.check_synthetic_release_lifecycle import (
             run_consumer,
         )
+        from scripts.checks.release.source.frozen_source_fixture import BridgeError
 
         with tempfile.TemporaryDirectory(prefix="runtime-cleanup-failure-") as parent:
             scratch = Path(parent) / "scratch"
@@ -173,10 +219,10 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
             self.assertTrue((scratch / "source-parent").is_dir())
 
     def test_fixed_bridge_consumes_complete_verify_context_and_cleans_failure(self):
-        from scripts.checks.release.source.frozen_source_fixture import BridgeError
         from scripts.checks.release.source import (
             check_synthetic_release_lifecycle as runtime,
         )
+        from scripts.checks.release.source.frozen_source_fixture import BridgeError
 
         with tempfile.TemporaryDirectory() as directory:
             scratch = Path(directory).resolve() / "scratch"
@@ -714,12 +760,12 @@ class TestReleaseRuntimeEnvelope(unittest.TestCase):
         self.fail(f"owned process {pid} survived process-group cleanup")
 
     def test_real_stdin_envelope_is_consumed_by_source_bridge(self):
+        from scripts.checks.release.source.frozen_source_fixture import (
+            consume_verify_snapshot,
+        )
         from scripts.verification.execution.check_runner import (
             resolve_child_check,
             snapshot_check_inputs,
-        )
-        from scripts.checks.release.source.frozen_source_fixture import (
-            consume_verify_snapshot,
         )
 
         root = Path(__file__).resolve().parents[2]
