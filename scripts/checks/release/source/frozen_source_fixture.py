@@ -182,10 +182,26 @@ def _rename_noreplace_syscall(
     source: Path, destination: Path
 ) -> tuple[int, int] | None:
     """Invoke a verified platform no-replace rename primitive; None means unsupported."""
-    if sys.platform != "darwin":
+    if sys.platform not in {"darwin", "linux"}:
         return None
     try:
         libc = ctypes.CDLL(None, use_errno=True)
+        if sys.platform == "linux":
+            # Linux CI 的合成夹具使用 renameat2 的原子不覆盖语义。
+            renameat2 = libc.renameat2
+            renameat2.argtypes = (
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_uint,
+            )
+            renameat2.restype = ctypes.c_int
+            ctypes.set_errno(0)
+            result = renameat2(
+                -100, os.fsencode(source), -100, os.fsencode(destination), 1
+            )
+            return result, ctypes.get_errno() if result != 0 else 0
         renamex_np = libc.renamex_np
         # macOS SDK sys/stdio.h: int renamex_np(const char *, const char *, unsigned int);
         # RENAME_EXCL is 0x00000004; SDK rename(2) documents EEXIST on any existing target.

@@ -745,6 +745,38 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
                     bridge._publish_noreplace(source, destination)
             self.assertEqual((caught.exception.status, caught.exception.code), expected)
 
+    def test_linux_atomic_publish_uses_renameat2_noreplace(self) -> None:
+        source, destination = self.base / "stage", self.base / "target"
+        for result, expected_errno in ((0, 0), (-1, errno.EEXIST)):
+            with self.subTest(result=result):
+                libc = mock.Mock()
+                libc.renameat2.return_value = result
+                with (
+                    mock.patch.object(bridge.sys, "platform", "linux"),
+                    mock.patch.object(bridge.ctypes, "CDLL", return_value=libc),
+                    mock.patch.object(
+                        bridge.ctypes, "get_errno", return_value=expected_errno
+                    ),
+                ):
+                    outcome = bridge._rename_noreplace_syscall(source, destination)
+                self.assertEqual(outcome, (result, expected_errno))
+                libc.renameat2.assert_called_once_with(
+                    -100, os.fsencode(source), -100, os.fsencode(destination), 1
+                )
+                libc.renamex_np.assert_not_called()
+
+    def test_linux_without_renameat2_is_blocked_without_fallback(self) -> None:
+        with (
+            mock.patch.object(bridge.sys, "platform", "linux"),
+            mock.patch.object(bridge.ctypes, "CDLL", return_value=object()),
+        ):
+            with self.assertRaises(bridge.BridgeError) as caught:
+                bridge._publish_noreplace(self.base / "stage", self.base / "target")
+        self.assertEqual(
+            (caught.exception.status, caught.exception.code),
+            ("BLOCKED", "atomic-no-replace-unavailable"),
+        )
+
     def test_unsupported_platform_is_blocked_without_rename_fallback(self) -> None:
         stage, destination = self.base / "stage", self.base / "target"
         with mock.patch.object(bridge.sys, "platform", "unsupported-test-platform"):
