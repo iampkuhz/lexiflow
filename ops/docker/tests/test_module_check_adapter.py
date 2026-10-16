@@ -297,9 +297,9 @@ class DockerGroupContractTest(unittest.TestCase):
             self.assertFalse(
                 any("SyntheticCase" in identity for identity in identities), name
             )
-        # 包含独立准备的真实安装对照、损坏拒绝、双实例隔离和来源模板写入隔离用例。
+        # 包含真实安装对照、来源模板隔离及终端关闭/真实超时的回归用例。
         self.assertEqual(
-            45,
+            47,
             adapter._load_python(
                 self.root, ["ops/docker/tests/test_podman_local.py"]
             ).countTestCases(),
