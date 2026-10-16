@@ -150,6 +150,8 @@ test('rendered receiver closes fragmented pipe length, digest, mode and permissi
 
 async function installReceiverTestTools(root) {
   const bin=path.join(root,'bin'); await mkdir(bin);
+  // Linux 使用实际 GNU 工具；这里只为 macOS 的 BSD stat 提供测试适配。
+  if (process.platform !== 'darwin') return;
   await writeFile(path.join(bin,'sha256sum'),'#!/bin/sh\nexec shasum -a 256 "$@"\n',{mode:0o755});
   await writeFile(path.join(bin,'stat'),'#!/bin/sh\n[ "$1" = -c ] || exit 2\nformat=$2; shift 2\ncase "$format" in %h) exec /usr/bin/stat -f %l "$@";; %a) exec /usr/bin/stat -f %Lp "$@";; *) exit 2;; esac\n',{mode:0o755});
   await chmod(path.join(bin,'sha256sum'),0o755); await chmod(path.join(bin,'stat'),0o755);
