@@ -78,7 +78,7 @@ endlegend
 | 阶段 | 作用／产物 | 入口／说明 |
 | --- | --- | --- |
 | S1 定位 | 慢节点与需要保留的证明范围 | 阅读既有报告；[检查声明](../../config/engineering/module-checks.yaml) |
-| S2 定界 | 修改文件列表、非目标与验收要求 | 人工／Agent 定义任务；[现行合同](../../harness/agent-policy.md)、[OpenSpec](../../openspec/changes) |
+| S2 定界 | 修改文件列表、非目标与验收要求 | 人工／Agent 定义任务；[现行合同](../../harness/agent-policy.md)，当前 OpenSpec 变更位于 `openspec/changes/` |
 | S3 实现 | 代码、测试和说明的最小 diff | [Scripts 文件职责](../reference/scripts.md) |
 | S4 直接自检 | 静态质量与相关回归结果 | [check_python_quality.py](../../scripts/checks/repository/python/check_python_quality.py)、[编排直接测试](../../tests/verification/test_lightweight_orchestration.py) |
 | S5 [B] 开发检查 | 实际变化与消费依赖所需开发报告 | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py)；[执行页 1.3 B](run-repository-gates.md) |
