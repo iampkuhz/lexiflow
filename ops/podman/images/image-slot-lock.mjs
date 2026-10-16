@@ -13,12 +13,15 @@ function privateDirectory(directory) {
 }
 
 /** Acquire the same-version host-user image slot immediately; callers must release in finally. */
-export function acquireImageSlotLock(baseVersion) {
+export function acquireImageSlotLock(baseVersion, kind = 'source') {
+  if (!['source', 'release-validation'].includes(kind)) fail('IMAGE_SLOT_KIND_INVALID');
   let tag;
   try { tag = deploymentImageTag(baseVersion); } catch { fail('IMAGE_SLOT_VERSION_INVALID'); }
   const root = path.join(os.tmpdir(), `lexiflow-image-slots-${process.getuid()}`);
   privateDirectory(root);
-  const slot = path.join(root, tag);
+  const namespace = path.join(root, kind);
+  privateDirectory(namespace);
+  const slot = path.join(namespace, tag);
   privateDirectory(slot);
   try { return acquireProcessLock(slot); }
   catch (error) {

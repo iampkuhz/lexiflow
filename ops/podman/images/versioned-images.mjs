@@ -1,4 +1,5 @@
 import { parseVersion } from '../../release/integrity/source-build-identity.mjs';
+import { slotImageNamespace } from '../deployment-slots.mjs';
 
 const roles = new Set(['api', 'postgres', 'source-tools']);
 const fail = code => { throw new Error(code); };
@@ -13,7 +14,7 @@ export function deploymentImageTag(baseVersion) {
 
 export function versionedImageReference(role, baseVersion) {
   validRole(role);
-  return `localhost/lexiflow-${role}:${deploymentImageTag(baseVersion)}`;
+  return `localhost/${slotImageNamespace('source')}-${role}:${deploymentImageTag(baseVersion)}`;
 }
 
 export function versionedImageLabels(role, baseVersion) {
@@ -71,10 +72,10 @@ function serviceLabels(labels, role) {
 }
 
 /** 先完整核验引用者，再移除本安装容器和精确 tag；不删除卷或其他版本槽位。 */
-export async function removeVersionedImage({ run, role, baseVersion, installationId = null } = {}) {
+export async function removeVersionedImage({ run, role, baseVersion, installationId = null, allowReleaseValidation = false } = {}) {
   validRole(role);
   const tag = deploymentImageTag(baseVersion);
-  const exactRef = `localhost/lexiflow-${role}:${tag}`;
+  const exactRef = `localhost/${slotImageNamespace('source')}-${role}:${tag}`;
   if (typeof run !== 'function') fail('VERSIONED_IMAGE_RUNNER_INVALID');
 
   let exists;
@@ -92,7 +93,12 @@ export async function removeVersionedImage({ run, role, baseVersion, installatio
   const ps = checked(await call(run, ['ps', '-a', '--no-trunc', '--filter', `ancestor=${imageId.slice(7)}`, '--format', '{{.ID}}'], 'VERSIONED_IMAGE_CONTAINER_QUERY_FAILED'), 'VERSIONED_IMAGE_CONTAINER_QUERY_FAILED');
   const ids = [...new Set(ps.split(/\r?\n/).map(value => value.trim()).filter(Boolean))];
   const project = `lexiflow-local-${installationId}`;
-  const inspected = [];
+  const inspected = [], foreign = [];
+  const releaseRef = `localhost/${slotImageNamespace('release-validation')}-${role}:${tag}`;
+  const allowedTags = new Set([exactRef, releaseRef]);
+  const safeTags = value => Array.isArray(value?.RepoTags) && value.RepoTags.includes(exactRef)
+    && value.RepoTags.every(ref => allowedTags.has(ref));
+  if (allowReleaseValidation && !safeTags(image)) fail('VERSIONED_IMAGE_REFERENCE_MISMATCH');
 
   // 完整预检所有引用者；不能先删除部分自有容器，再发现其他安装也在使用。
   for (const listedId of ids) {
@@ -104,7 +110,14 @@ export async function removeVersionedImage({ run, role, baseVersion, installatio
     if (!labels || typeof labels !== 'object') fail('VERSIONED_IMAGE_CONTAINER_MISMATCH');
     if (role === 'source-tools') fail('VERSIONED_IMAGE_SOURCE_TOOLS_IN_USE');
     if (typeof installationId !== 'string' || !/^[a-f0-9]{32}$/.test(installationId)) fail('VERSIONED_IMAGE_INSTALLATION_REQUIRED');
-    if (labels['lexiflow.installation'] !== installationId) fail('VERSIONED_IMAGE_CONTAINER_MISMATCH');
+    if (labels['lexiflow.installation'] !== installationId) {
+      if (!allowReleaseValidation || labels['lexiflow.slot'] !== 'release-validation'
+          || !/^[a-f0-9]{32}$/.test(labels['lexiflow.installation'] ?? '')) fail('VERSIONED_IMAGE_CONTAINER_MISMATCH');
+      projectLabels(labels, `lexiflow-local-${labels['lexiflow.installation']}`);
+      serviceLabels(labels, role);
+      foreign.push(actualId);
+      continue;
+    }
     projectLabels(labels, project);
     serviceLabels(labels, role);
     inspected.push({ id: actualId, running: container.State?.Running === true });
@@ -119,9 +132,18 @@ export async function removeVersionedImage({ run, role, baseVersion, installatio
 
   // 清理前再次核对精确 tag 与完整引用集合；rmi 不使用 force。
   const currentImage = oneObject(checked(await call(run, ['image', 'inspect', exactRef, '--format', 'json'], 'VERSIONED_IMAGE_RECHECK_FAILED'), 'VERSIONED_IMAGE_RECHECK_FAILED'), 'VERSIONED_IMAGE_RECHECK_FAILED');
-  if (imageIdentity(currentImage, role, tag) !== imageId) fail('VERSIONED_IMAGE_DRIFT');
+  if (imageIdentity(currentImage, role, tag) !== imageId
+      || allowReleaseValidation && !safeTags(currentImage)) fail('VERSIONED_IMAGE_DRIFT');
   const currentPs = checked(await call(run, ['ps', '-a', '--no-trunc', '--filter', `ancestor=${imageId.slice(7)}`, '--format', '{{.ID}}'], 'VERSIONED_IMAGE_CONTAINER_QUERY_FAILED'), 'VERSIONED_IMAGE_CONTAINER_QUERY_FAILED');
-  if (currentPs.split(/\r?\n/).map(value => value.trim()).filter(Boolean).length) fail('VERSIONED_IMAGE_DRIFT');
-  checked(await call(run, ['rmi', exactRef], 'VERSIONED_IMAGE_REMOVE_FAILED'), 'VERSIONED_IMAGE_REMOVE_FAILED');
+  const remaining = currentPs.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  if (remaining.length !== foreign.length || remaining.some(id => !foreign.includes(id))) fail('VERSIONED_IMAGE_DRIFT');
+  for (const id of foreign) {
+    const container = oneObject(checked(await call(run, ['container', 'inspect', id, '--format', 'json'], 'VERSIONED_IMAGE_CONTAINER_INSPECT_FAILED'), 'VERSIONED_IMAGE_CONTAINER_INSPECT_FAILED'), 'VERSIONED_IMAGE_CONTAINER_INSPECT_FAILED');
+    const labels = container.Config?.Labels || {};
+    if (container.Id?.replace(/^\//, '') !== id || canonicalImageId(container.Image) !== imageId
+        || labels['lexiflow.slot'] !== 'release-validation' || !/^[a-f0-9]{32}$/.test(labels['lexiflow.installation'] ?? '')) fail('VERSIONED_IMAGE_DRIFT');
+    projectLabels(labels, `lexiflow-local-${labels['lexiflow.installation']}`); serviceLabels(labels, role);
+  }
+  checked(await call(run, allowReleaseValidation ? ['image', 'untag', exactRef] : ['rmi', exactRef], 'VERSIONED_IMAGE_REMOVE_FAILED'), 'VERSIONED_IMAGE_REMOVE_FAILED');
   return { removed: true, imageId, removedContainerIds: stopCalls };
 }

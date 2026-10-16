@@ -1,11 +1,12 @@
 // 固定发行候选到本机 Podman 安装目录的受限适配；不执行候选内脚本。
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { verifyReleaseCandidate } from '../../release/integrity/release-candidate-verifier.mjs';
 import { readExtensionFiles } from '../../release/integrity/extension-archive-integrity.mjs';
-import { versionedImageReference, deploymentImageTag } from '../images/versioned-images.mjs';
-import { removeVersionedImage } from '../images/versioned-images.mjs';
+import { deploymentImageTag } from '../images/versioned-images.mjs';
+import { isolateCandidateArchive } from '../images/isolated-candidate-archive.mjs';
 import { publishExtensionArchive, materializeExtensionTree } from '../../../extension/scripts/packaging/extension-archive-contract.mjs';
 
 const fail = code => { throw new Error(code); };
@@ -56,8 +57,15 @@ export async function installCandidateArtifacts(candidate, { run, installDir, ar
     sha256: extensionItem.sha256, buildIdentity: candidate.buildIdentity };
   for (const item of [includeApi ? api : null, includePostgres ? pg : null].filter(Boolean)) {
     const archive = bytesPath(item);
-    if (item === pg) await removeVersionedImage({ run, role: 'postgres', baseVersion, installationId });
-    await run('podman', ['load', '-i', archive]);
+    const role = item.role === 'api-image' ? 'api' : 'postgres';
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiflow-candidate-image-'));
+    fs.chmodSync(scratch, 0o700);
+    let isolated;
+    try {
+      isolated = isolateCandidateArchive({ archive, output: path.join(scratch, 'load.tar'), expectedSha256: item.sha256,
+        expectedBytes: item.bytes, imageDigest: item.imageDigest, role, baseVersion });
+      await run('podman', ['load', '-i', isolated.path]);
+    } finally { fs.rmSync(scratch, { recursive: true }); }
     // Inspect only the digest bound by the verified manifest; never enumerate user images.
     const inspected = JSON.parse(await run('podman', ['image', 'inspect', item.imageDigest], { capture: true }));
     if (!Array.isArray(inspected) || inspected.length !== 1) fail('CANDIDATE_IMAGE_IDENTITY_MISMATCH');
@@ -75,9 +83,9 @@ export async function installCandidateArtifacts(candidate, { run, installDir, ar
         || labels['io.lexiflow.source-sha256'] !== identity.sourceSha256
         || labels['io.lexiflow.deployment-version'] !== deploymentVersion
         || labels['io.lexiflow.image-role'] !== (item.role === 'api-image' ? 'api' : 'postgres')) fail('CANDIDATE_IMAGE_IDENTITY_MISMATCH');
-    const role = item.role === 'api-image' ? 'api' : 'postgres';
-    const reference = versionedImageReference(role, baseVersion);
-    await run('podman', ['tag', item.imageDigest, reference]);
+    const alias = JSON.parse(await run('podman', ['image', 'inspect', isolated.alias], { capture: true }));
+    if (!Array.isArray(alias) || alias.length !== 1 || String(alias[0]?.Id || '').replace(/^sha256:/, '') !== actualId)
+      fail('CANDIDATE_IMAGE_IDENTITY_MISMATCH');
     loadedImages.set(item.role, data.Id);
   }
   materializeExtensionTree(path.join(installDir, 'extension'), files);

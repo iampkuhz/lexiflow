@@ -72,12 +72,12 @@ function developmentFixture() {
   fs.copyFileSync(path.resolve(import.meta.dirname, '../../../infra/local/compose.yaml'), compose);
   const id = 'a'.repeat(64);
   const row = { Id: id, Image: `sha256:${'b'.repeat(64)}`, ImageName: 'docker.io/library/postgres:17-alpine',
-    Config: { Image: 'docker.io/library/postgres:17-alpine', Env: ['POSTGRES_DB=lexiflow', 'POSTGRES_HOST_AUTH_METHOD=trust'],
+    Config: { Image: 'docker.io/library/postgres:17-alpine', Entrypoint: ['docker-entrypoint.sh'], Cmd: ['postgres'], Env: ['POSTGRES_DB=lexiflow', 'POSTGRES_HOST_AUTH_METHOD=trust', 'PGDATA=/var/lib/postgresql/data'],
       Labels: { 'com.docker.compose.project': 'lexiflow-local', 'com.docker.compose.service': 'postgres',
         'com.docker.compose.project.config_files': compose, 'com.docker.compose.project.working_dir': path.dirname(compose),
         'io.podman.compose.project': 'lexiflow-local', 'io.podman.compose.service': 'postgres' } },
     State: { Running: true }, HostConfig: { PortBindings: { '5432/tcp': [{ HostIp: '127.0.0.1', HostPort: '15432' }] } },
-    Mounts: [{ Type: 'volume', Name: 'lexiflow-local_lexiflow-postgres-data', Destination: '/var/lib/postgresql/data' }] };
+    Mounts: [{ Type: 'volume', Name: 'lexiflow-local_lexiflow-postgres-data', Destination: '/var/lib/postgresql/data', RW: true }] };
   const calls = [];
   const run = async (_command, args) => { calls.push(args);
     if (args[0] === 'ps') return id;
@@ -107,7 +107,7 @@ test('development trust is recognized only by exact current Compose, running ima
       Object.assign(f.row, before);
     }
     fs.writeFileSync(f.compose, fs.readFileSync(f.compose, 'utf8').replace('POSTGRES_HOST_AUTH_METHOD: trust', 'POSTGRES_HOST_AUTH_METHOD: md5'));
-    await assert.rejects(inspectDevelopmentTrust({ repo: f.repo, run: f.run }), /DEVELOPMENT_DATABASE_SOURCE_INVALID/);
+    assert.equal((await inspectDevelopmentTrust({ repo: f.repo, run: f.run })).fingerprint, result.fingerprint);
   } finally { f.cleanup(); }
 });
 
@@ -175,24 +175,33 @@ test('development trust has no password mount or inherited password environment 
   } finally { f.cleanup(); }
 });
 
-test('database-affecting Compose fields and data-volume options are rejected', async () => {
+test('declaration text does not replace actual running target facts', async () => {
   const f = developmentFixture();
   try {
-    for (const replacement of [
-      ['    healthcheck:', '    command: ["sh", "-c", "echo unsafe"]\n    healthcheck:'],
-      ['      POSTGRES_HOST_AUTH_METHOD: trust', '      POSTGRES_HOST_AUTH_METHOD: password'],
-      ['  lexiflow-postgres-data:\n', '  lexiflow-postgres-data:\n    external: true\n'],
-      ['  lexiflow-postgres-data:\n', '  lexiflow-postgres-data:\n    driver: other\n'],
-    ]) {
-      const original = fs.readFileSync(f.compose, 'utf8');
-      fs.writeFileSync(f.compose, original.replace(...replacement));
-      await assert.rejects(inspectDevelopmentTrust({ repo: f.repo, run: f.run }), /DEVELOPMENT_DATABASE_SOURCE_INVALID/);
-      fs.writeFileSync(f.compose, original);
+    const first = await inspectDevelopmentTrust({ repo: f.repo, run: f.run });
+    fs.writeFileSync(f.compose, `name: lexiflow-local\nx-env: &db-env [POSTGRES_DB=lexiflow, POSTGRES_HOST_AUTH_METHOD=trust]\nservices:\n  postgres:\n    image: docker.io/library/postgres:17-alpine\n    environment: *db-env\n    ports: ["127.0.0.1:15432:5432"]\n    volumes: [lexiflow-postgres-data:/var/lib/postgresql/data]\nvolumes:\n  lexiflow-postgres-data: {}\n`);
+    assert.equal((await inspectDevelopmentTrust({ repo: f.repo, run: f.run })).fingerprint, first.fingerprint);
+  } finally { f.cleanup(); }
+});
+
+test('runtime command, PGDATA and mount facts fail closed', async () => {
+  const f = developmentFixture();
+  try {
+    const mutations = [row => { row.Config.Cmd = ['postgres', '-c', 'data_directory=/tmp']; },
+      row => { row.Config.Entrypoint = ['sh', '-c']; },
+      row => { row.Config.Env = row.Config.Env.filter(value => !value.startsWith('PGDATA=')); },
+      row => { row.Config.Env.push('PGDATA=/tmp'); },
+      row => { row.Mounts[0].RW = false; },
+      row => { row.Mounts.push({ Type: 'bind', Name: '', Destination: '/var/lib/postgresql', RW: true }); }];
+    for (const mutate of mutations) {
+      const before = structuredClone(f.row); mutate(f.row);
+      await assert.rejects(inspectDevelopmentTrust({ repo: f.repo, run: f.run }), /DEVELOPMENT_DATABASE_/);
+      Object.assign(f.row, before);
     }
   } finally { f.cleanup(); }
 });
 
-test('indentless PostgreSQL lists preserve the same database facts', async () => {
+test('Compose declaration structures do not participate in running target identity', async () => {
   const f = developmentFixture();
   try {
     const first = await inspectDevelopmentTrust({ repo: f.repo, run: f.run });
@@ -203,14 +212,29 @@ test('indentless PostgreSQL lists preserve the same database facts', async () =>
   } finally { f.cleanup(); }
 });
 
-test('database declarations cannot inherit trust through a prototype key', async () => {
+test('Compose YAML extensions are not interpreted as database facts', async () => {
   const f = developmentFixture();
   try {
+    const first = await inspectDevelopmentTrust({ repo: f.repo, run: f.run });
     fs.writeFileSync(f.compose, fs.readFileSync(f.compose, 'utf8').replace(
       '      POSTGRES_DB: lexiflow\n      POSTGRES_HOST_AUTH_METHOD: trust',
       '      __proto__: {"POSTGRES_DB":"lexiflow","POSTGRES_HOST_AUTH_METHOD":"trust"}'));
+    assert.equal((await inspectDevelopmentTrust({ repo: f.repo, run: f.run })).fingerprint, first.fingerprint);
+  } finally { f.cleanup(); }
+});
+
+test('Compose provenance path must remain a regular repository file', async () => {
+  const f = developmentFixture();
+  try {
+    const outside = path.join(os.tmpdir(), `lexiflow-compose-${crypto.randomUUID()}`);
+    fs.renameSync(f.compose, `${f.compose}.saved`);
+    fs.writeFileSync(outside, 'source');
+    fs.symlinkSync(outside, f.compose);
     await assert.rejects(inspectDevelopmentTrust({ repo: f.repo, run: f.run }), /DEVELOPMENT_DATABASE_SOURCE_INVALID/);
-    assert.equal(f.calls.length, 0);
+    fs.unlinkSync(f.compose);
+    fs.mkdirSync(f.compose);
+    await assert.rejects(inspectDevelopmentTrust({ repo: f.repo, run: f.run }), /DEVELOPMENT_DATABASE_SOURCE_INVALID/);
+    fs.rmSync(outside, { force: true });
   } finally { f.cleanup(); }
 });
 

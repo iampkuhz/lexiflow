@@ -25,10 +25,12 @@ export function createDeploymentPlan(input) {
       || (target.kind === 'external') !== (target.authMode !== 'managed')
       || (target.authMode === 'development-trust' && (target.user !== 'postgres'
         || !/^[a-f0-9]{64}$/.test(target.developmentIdentityFingerprint ?? '')))) fail('DEPLOYMENT_DATABASE_TARGET_INVALID');
+  if (input.apiPortMigration !== undefined && (input.apiPortMigration?.from !== 18080 || input.apiPortMigration?.to !== 18081)) fail('DEPLOYMENT_PLAN_INVALID');
   if (!['DATABASE_ABSENT', 'OK', 'SCHEMA_MISSING', 'SCHEMA_INVALID', 'RECORD_MISSING', 'RECORD_INVALID', 'GENERATION_CHANGED'].includes(input.dataReason)) fail('DEPLOYMENT_DATA_REASON_INVALID');
   if (!['NEW_INSTALL', 'INSTALL_REFRESH', 'BUILD_CHANGED', 'START_REQUIRED', 'CURRENT'].includes(input.applicationReason)) fail('DEPLOYMENT_APPLICATION_REASON_INVALID');
   return sortValue({ schema: 1, operation: input.operation, installation: input.installation,
-    target: { buildId: input.targetBuildId, generationVersion: input.generationVersion },
+    target: { buildId: input.targetBuildId, generationVersion: input.generationVersion,
+      ...(input.apiPortMigration ? { apiPortMigration: input.apiPortMigration } : {}) },
     database: { target, fingerprint: input.databaseFingerprint, takeover: Boolean(input.takeover), create: Boolean(input.createDatabase) },
     actions: { applicationUpdate: Boolean(input.applicationUpdate), applicationStart: Boolean(input.applicationStart),
       applicationReason: input.applicationReason, dataRebuild: Boolean(input.dataRebuild), dataReason: input.dataReason } });
@@ -45,17 +47,21 @@ export async function confirmDeploymentPlan(hash, { suppliedHash, signal } = {})
 }
 
 /** 普通交互只在任何数据库连接或重型准备前询问一次；拒绝不生成计划。 */
-export async function confirmDeploymentIntent({ port, user, schema = 'lexiflow_release', authMode = 'managed', input = process.stdin, output = process.stdout, signal } = {}) {
+export async function confirmDeploymentIntent({ port, user, apiPort, previousApiPort, schema = 'lexiflow_release', authMode = 'managed', input = process.stdin, output = process.stdout, signal } = {}) {
   if (!Number.isInteger(port) || port < 1 || port > 65535 || typeof user !== 'string' || !user
       || Buffer.byteLength(user) > 63 || /[\x00-\x1f\x7f-\x9f]/.test(user)
       || schema !== 'lexiflow_release' || !['managed', 'password', 'development-trust'].includes(authMode)
       || authMode === 'development-trust' && user !== 'postgres') fail('DEPLOYMENT_DATABASE_TARGET_INVALID');
+  if (apiPort !== undefined && (!Number.isInteger(apiPort) || apiPort < 1 || apiPort > 65535)
+      || previousApiPort !== undefined && (previousApiPort !== 18080 || apiPort !== 18081)) fail('DEPLOYMENT_DATABASE_TARGET_INVALID');
   if (signal?.aborted) fail('DEPLOYMENT_CONFIRMATION_CANCELLED');
   if (!input.isTTY || !output.isTTY) fail('DEPLOYMENT_CONFIRMATION_REQUIRED');
   const authority = authMode === 'development-trust' ? '已识别本仓库 PostgreSQL 17 开发容器，postgres 无密码 trust；仅管理 lexiflow_release，不接管容器、卷或 public。'
     : authMode === 'password' ? '沿用本安装记录的外部目标与受限凭据；仅管理 lexiflow_release，不接管数据库服务。'
       : '使用本安装专用 PostgreSQL；仅管理 lexiflow_release。';
-  output.write(`目标：127.0.0.1:${port}/lexiflow；用户 ${user}；schema ${schema}。${authority} 本次 install/upgrade 将替换同软件版本的本安装 API/托管 PostgreSQL 容器与镜像，保留数据库卷；失败后可能需要重试，不能回退已删除的同版本二进制。数据导入版本变化或完整性异常时替换资料；确认仅授权本次调用。\n继续安装并使用本机 LexiFlow 数据库？[y/N] `);
+  const apiTarget = apiPort === undefined ? '' : previousApiPort === undefined
+    ? `API 127.0.0.1:${apiPort}；` : `API 127.0.0.1:${previousApiPort} → 127.0.0.1:${apiPort}；`;
+  output.write(`目标：${apiTarget}PostgreSQL 127.0.0.1:${port}/lexiflow；用户 ${user}；schema ${schema}。${authority} 本次 install/upgrade 将替换同软件版本的本安装 API/托管 PostgreSQL 容器与镜像，保留数据库卷；失败后可能需要重试，不能回退已删除的同版本二进制。数据导入版本变化或完整性异常时替换资料；确认仅授权本次调用。\n继续安装并使用本机 LexiFlow 数据库？[y/N] `);
   const line = await new Promise((resolve, reject) => {
     let value = '';
     let settled = false;

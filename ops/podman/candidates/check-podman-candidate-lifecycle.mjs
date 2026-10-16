@@ -11,10 +11,14 @@ import { verifyReleaseCandidate } from '../../release/integrity/release-candidat
 import { verifyExtension, treeDigest } from '../installation/installation-update-transaction.mjs';
 import { acquireProcessLock } from '../execution/installation-operation-lock.mjs';
 import { runCandidateSession, startCandidateSession } from './candidate-process-session.mjs';
+import { deploymentSlot, acquireDeploymentSlotLock } from '../deployment-slots.mjs';
+import { candidateImageAlias, removeCandidateImageAlias } from '../images/candidate-image-alias.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 let socketFence = null;
 let runtimeBusy = false;
+let releaseSlotUnlock = null;
+const releaseSlot = deploymentSlot('release-validation', repo);
 export const REQUIRED_PHASE_IDS = Object.freeze([
   'preflight', 'target-install', 'target-repeat-install', 'target-repeat-upgrade', 'target-cleanup',
   'previous-install', 'previous-baseline', 'upgrade-failure', 'upgrade-forward-retry',
@@ -39,13 +43,6 @@ async function free(port) {
     server.once('error', () => reject(Object.assign(new Error(port === 18080 ? 'API_PORT_BLOCKED' : 'DB_PORT_BLOCKED'), { blocked: true })));
     server.listen(port, '127.0.0.1', () => server.close(resolve));
   });
-}
-async function dbPort() {
-  const server = net.createServer();
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-  const port = server.address().port;
-  await new Promise(resolve => server.close(resolve));
-  return port;
 }
 function privateRoot() {
   const parent = path.join(repo, 'tmp/quality/candidate-runtime');
@@ -180,6 +177,14 @@ function listed(root, s, kind) {
   }
   return output;
 }
+export function assertManagedStorageTopology(s, kind, rows, { complete = false } = {}) {
+  const expected = kind === 'network' ? [`${s.project}_private`, `${s.project}_published`]
+    : kind === 'volume' ? [`${s.project}_pgdata`] : null;
+  if (!expected || !Array.isArray(rows) || rows.length > expected.length
+    || new Set(rows.map(row => row.id)).size !== rows.length
+    || rows.some(row => !expected.includes(row.id))
+    || complete && rows.length !== expected.length) fail('RESOURCE_SET_UNEXPECTED');
+}
 function inspect(root, s, kind, item, service) {
   const values = jsonCommand(root, `inspect-${kind}`, kind === 'container' ? ['inspect', item.id] : [kind, 'inspect', item.id]);
   if (Array.isArray(values) && values.length !== 1) fail('RESOURCE_INSPECT_INVALID');
@@ -254,7 +259,8 @@ function snapshot(root, dir, verified, { requireReady = true } = {}) {
   const s = current.s;
   const pg = listed(root, s, 'container').filter(x => x.service === 'postgres');
   const volumes = listed(root, s, 'volume');
-  if (pg.length !== 1 || volumes.length !== 2) fail('PG_RESOURCE_MISSING');
+  if (pg.length !== 1) fail('PG_RESOURCE_MISSING');
+  assertManagedStorageTopology(s, 'volume', volumes, { complete: true });
   const pgInfo = inspect(root, s, 'container', pg[0], 'postgres');
   if (pgInfo.State?.Running !== true || (pgInfo.Image || '').replace(/^sha256:/, '') !== s.postgresImage?.replace(/^sha256:/, '')) fail('PG_IMAGE_MISMATCH');
   const volumeFacts = volumes.map(volume => { const v = inspect(root, s, 'volume', volume); return [volume.id, v.CreatedAt || v.createdAt]; }).sort((a, b) => a[0].localeCompare(b[0]));
@@ -295,7 +301,7 @@ function samePreserved(before, after) {
     .every(key => JSON.stringify(before[key]) === JSON.stringify(after[key]));
 }
 function clean(root, dir) {
-  if (path.dirname(dir) !== root || fs.lstatSync(root).isSymbolicLink() || fs.lstatSync(dir).isSymbolicLink()) fail('CLEANUP_ROOT_INVALID');
+  if (dir !== releaseSlot.directory || fs.lstatSync(root).isSymbolicLink() || fs.lstatSync(dir).isSymbolicLink()) fail('CLEANUP_ROOT_INVALID');
   // runLocal和清理互斥；有owner目录、未知lock或活跃子进程时保留现场。
   const unlock = acquireProcessLock(dir);
   try {
@@ -305,7 +311,9 @@ function clean(root, dir) {
   // 不运行 compose down/prune；每项 mutation 前均重新 inspect ID、两种 provider 标签和 owner。
   for (const kind of ['container', 'network', 'volume']) {
     const rows = listed(root, s, kind);
-    if (rows.length > (kind === 'container' ? 4 : kind === 'network' ? 1 : 2)) fail('RESOURCE_SET_UNEXPECTED');
+    if (kind === 'container') {
+      if (rows.length > 4) fail('RESOURCE_SET_UNEXPECTED');
+    } else assertManagedStorageTopology(s, kind, rows);
     for (const item of rows) {
       if (kind === 'container' && !['api', 'postgres', 'initialize'].includes(item.service)) fail('RESOURCE_SERVICE_UNEXPECTED');
       inspect(root, s, kind, item, kind === 'container' ? item.service : undefined);
@@ -316,6 +324,119 @@ function clean(root, dir) {
   if (['container', 'network', 'volume'].some(k => listed(root, s, k).length)) fail('RESOURCE_CLEANUP_INCOMPLETE');
   return removed;
   } finally { unlock(); }
+}
+function clearCleanInstallation(dir) {
+  if (dir !== releaseSlot.directory || !fs.existsSync(dir)) fail('CLEANUP_ROOT_INVALID');
+  const stateFile = path.join(dir, 'state.json');
+  if (!fs.existsSync(stateFile)) fail('CLEANUP_ROOT_INVALID');
+  state(dir);
+  const allowed = /^(?:state\.json|compose\.yaml|release\.env|deployment(?:-[a-f0-9]{32}-previous)?\.json|prepared-target\.json|image-replacement\.json|\.lock-guard|data|secrets|extension|extension-artifacts|installation-records|infra|operation-[0-9]+-[a-f0-9]{8}\.log|\.prepared-[a-f0-9]{32}|\.previous-extension-[a-f0-9]{32})$/;
+  for (const name of fs.readdirSync(dir)) if (!allowed.test(name)) fail('CLEANUP_UNKNOWN_FILE');
+  const inspectTree = target => {
+    const info = fs.lstatSync(target);
+    if (info.isSymbolicLink() || info.uid !== process.getuid() || !(info.isDirectory() || info.isFile())) fail('CLEANUP_UNKNOWN_FILE');
+    if (info.isDirectory()) for (const name of fs.readdirSync(target)) inspectTree(path.join(target, name));
+  };
+  inspectTree(dir);
+  fs.rmSync(dir, { recursive: true });
+}
+/** Copy only private, regular operation logs from the verified current candidate installation. */
+export function retainPrivateOperationLogs({ root, dir, candidateSha256, expectedCandidate, runStartedAt,
+  maxFileBytes = 2 * 1024 * 1024, maxTotalBytes = 8 * 1024 * 1024 }) {
+  const blocked = () => fail('PRIVATE_LOG_RETENTION_BLOCKED', true);
+  try {
+    if (dir !== releaseSlot.directory || !hex.test(candidateSha256 ?? '') || !Number.isFinite(runStartedAt)
+        || !expectedCandidate || expectedCandidate.candidateSha256 !== candidateSha256
+        || !hex.test(expectedCandidate.manifestSha256 ?? '') || !expectedCandidate.buildIdentity?.buildId) blocked();
+    const rootStat = fs.lstatSync(root), dirStat = fs.lstatSync(dir);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || rootStat.uid !== process.getuid() || (rootStat.mode & 0o077)
+        || !dirStat.isDirectory() || dirStat.isSymbolicLink() || dirStat.uid !== process.getuid() || (dirStat.mode & 0o077)) blocked();
+    const s = state(dir);
+    if (s.packageType !== 'release-package' || s.apiPort !== 18080 || s.dbPort !== releaseSlot.dbPort
+        || s.artifacts?.candidateSha256 !== candidateSha256 || s.artifacts?.manifestSha256 !== expectedCandidate.manifestSha256
+        || s.buildIdentity?.buildId !== expectedCandidate.buildIdentity.buildId) blocked();
+    const entries = fs.readdirSync(dir);
+    if (entries.some(name => (name.includes('operation') || name.endsWith('.log'))
+        && !/^operation-[0-9]+-[a-f0-9]{8}\.log$/.test(name))) blocked();
+    const names = entries.filter(name => /^operation-[0-9]+-[a-f0-9]{8}\.log$/.test(name));
+    if (!names.length || names.length > 20) blocked();
+    const ensurePrivateDirectory = (target, create) => {
+      try {
+        const stat = fs.lstatSync(target);
+        if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== process.getuid() || (stat.mode & 0o077)) blocked();
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+        if (!create) blocked();
+        fs.mkdirSync(target, { mode: 0o700 });
+        const stat = fs.lstatSync(target);
+        if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== process.getuid() || (stat.mode & 0o077)) blocked();
+      }
+    };
+    const evidenceDirectory = path.join(root, 'private-operation-logs');
+    const destination = path.join(evidenceDirectory, `${candidateSha256}-${s.id}`);
+    ensurePrivateDirectory(evidenceDirectory, true);
+    ensurePrivateDirectory(destination, true);
+    if (fs.readdirSync(destination).some(name => !names.includes(name))) blocked();
+    let total = 0;
+    const copied = [];
+    for (const name of names) {
+      const source = path.join(dir, name), before = fs.lstatSync(source);
+      if (!before.isFile() || before.isSymbolicLink() || before.uid !== process.getuid() || (before.mode & 0o077)
+          || before.size > maxFileBytes || before.mtimeMs < runStartedAt - 5000) blocked();
+      total += before.size; if (total > maxTotalBytes) blocked();
+      const fd = fs.openSync(source, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+      let bytes;
+      try {
+        const afterOpen = fs.fstatSync(fd);
+        if (!afterOpen.isFile() || afterOpen.dev !== before.dev || afterOpen.ino !== before.ino
+            || afterOpen.size !== before.size || afterOpen.uid !== before.uid || (afterOpen.mode & 0o077)) blocked();
+        bytes = fs.readFileSync(fd);
+        const afterRead = fs.fstatSync(fd);
+        if (afterRead.dev !== before.dev || afterRead.ino !== before.ino || afterRead.size !== before.size
+            || afterRead.mtimeMs !== before.mtimeMs || bytes.length !== before.size) blocked();
+      } finally { fs.closeSync(fd); }
+      const target = path.join(destination, name);
+      if (fs.existsSync(target)) {
+        const retained = fs.lstatSync(target);
+        if (!retained.isFile() || retained.isSymbolicLink() || retained.uid !== process.getuid() || (retained.mode & 0o077)
+            || retained.size !== bytes.length || !fs.readFileSync(target).equals(bytes)) blocked();
+        copied.push(name); continue;
+      }
+      const out = fs.openSync(target, 'wx', 0o600);
+      try { fs.writeFileSync(out, bytes); fs.fsyncSync(out); } finally { fs.closeSync(out); }
+      copied.push(name);
+    }
+    return { fileCount: copied.length, bytes: total };
+  } catch (error) {
+    if (error?.message === 'PRIVATE_LOG_RETENTION_BLOCKED') throw error;
+    blocked();
+  }
+}
+async function clearCandidateAliases(root, candidates) {
+  const run = async (_tool, argv) => {
+    const result = command(root, 'candidate-alias', argv, { allowFailure: true });
+    if (result.status !== 0) throw Object.assign(new Error('PODMAN_COMMAND_FAILED'), { commandExitCode: result.status });
+    return result.stdout;
+  };
+  for (const baseVersion of new Set(candidates.map(candidate => candidate.buildIdentity.baseVersion))) {
+    for (const role of ['api', 'postgres']) {
+      const allowedImages = candidates.filter(candidate => candidate.buildIdentity.baseVersion === baseVersion).map(candidate => ({
+        imageDigest: role === 'api' ? apiImage(candidate) : postgresImage(candidate),
+        buildIdentity: candidate.buildIdentity,
+      }));
+      await removeCandidateImageAlias({ run, role, baseVersion, allowedImages });
+    }
+  }
+}
+function assertCandidateAliasesFree(root, candidates) {
+  for (const baseVersion of new Set(candidates.map(candidate => candidate.buildIdentity.baseVersion))) {
+    for (const role of ['api', 'postgres']) {
+      const alias = candidateImageAlias(role, baseVersion);
+      const result = command(root, 'candidate-alias-preflight', ['image', 'exists', alias], { allowFailure: true });
+      if (result.status === 0) fail('RUNTIME_SLOT_OCCUPIED', true);
+      if (result.status !== 1) fail('CANDIDATE_ALIAS_CHECK_FAILED');
+    }
+  }
 }
 async function inject(root, dir, verified, session) {
   // 仅观察本project/id/service 的 target image；再inspect、再stop一次。错归属绝不stop。
@@ -338,7 +459,8 @@ async function inject(root, dir, verified, session) {
   return false;
 }
 async function runCandidateRuntimeInner(request) {
-  const out = report(); let root, activeDir, settled = true;
+  const out = report(); let root, activeDir, activeCandidateSha256, previous, target, settled = true;
+  const runStartedAt = Date.now();
   const deadline = Date.now() + 1_800_000;
   const execute = async input => {
     settled = false;
@@ -354,28 +476,32 @@ async function runCandidateRuntimeInner(request) {
     let source;
     try { source = resolveBuildIdentity(repo); } catch { fail('SOURCE_UNAVAILABLE', true); }
     if (source.dirty) fail('SOURCE_DIRTY', true);
-    const previous = await verifyReleaseCandidate(request.previous);
-    const target = await verifyReleaseCandidate(request.target);
+    previous = await verifyReleaseCandidate(request.previous);
+    target = await verifyReleaseCandidate(request.target);
     try { assertBuildIdentityMatches(target.buildIdentity, source); } catch { fail('TARGET_SOURCE_IDENTITY_MISMATCH'); }
     if (previous.buildIdentity.sourceCommit === target.buildIdentity.sourceCommit) fail('CANDIDATES_NOT_DISTINCT');
     if (previous.manifest.artifacts.find(a => a.role === 'sql')?.sha256
       !== target.manifest.artifacts.find(a => a.role === 'sql')?.sha256) fail('SQL_INCOMPATIBLE');
-    await free(18080);
-    const port = await dbPort(); await free(port);
+    try { releaseSlotUnlock = acquireDeploymentSlotLock('release-validation'); }
+    catch (error) { fail(error.message === 'DEPLOYMENT_SLOT_BUSY' ? 'RUNTIME_BUSY' : 'RUNTIME_SLOT_LOCK_INVALID', true); }
+    if (fs.existsSync(releaseSlot.directory)) fail('RUNTIME_SLOT_OCCUPIED', true);
+    await free(releaseSlot.apiPort);
+    const port = releaseSlot.dbPort; await free(port);
     out.candidates.previous = { candidateSha256: previous.candidateSha256, manifestSha256: previous.manifestSha256, buildIdentity: previous.buildIdentity };
     out.candidates.target = { candidateSha256: target.candidateSha256, manifestSha256: target.manifestSha256, buildIdentity: target.buildIdentity };
     out.identity.source = source;
     root = privateRoot();
     pinMachine(root);
+    assertCandidateAliasesFree(root, [previous, target]);
     phase(out, 'preflight', 'PASS', { sourceClean: true, hostDarwinArm64: true, candidateBytesVerified: true, sqlCompatible: true, apiPortFree: true });
-    const targetDir = path.join(root, 'target-install'), previousDir = path.join(root, 'previous-install');
+    const targetDir = releaseSlot.directory, previousDir = releaseSlot.directory;
     const session = (name, action, directory, candidate) => {
       const timeoutMs = Math.min(900_000, deadline - Date.now() - 180_000);
       if (timeoutMs < 1000) fail('RUNTIME_DEADLINE_EXCEEDED');
       return { action, directory, candidate, dbPort: port, logFile: path.join(root, `${name}.log`), timeoutMs };
     };
     let r;
-    activeDir = targetDir; phase(out, 'target-install', 'RUNNING');
+    activeDir = targetDir; activeCandidateSha256 = request.target.candidateSha256; phase(out, 'target-install', 'RUNNING');
     r = await execute(session('01-target-install', 'install', targetDir, request.target));
     if (r.code !== 0 || r.signal) fail('TARGET_INSTALL_FAILED');
     const targetFirst = verifyReady(root, targetDir, target, { count: 1, kind: 'install' });
@@ -393,9 +519,10 @@ async function runCandidateRuntimeInner(request) {
     if (targetNoop.records.length !== targetRepeat.records.length + 1 || targetRepeat.extension !== targetNoop.extension) fail('TARGET_REPEAT_UPGRADE_NOT_RECORDED');
     phase(out, 'target-repeat-upgrade', 'PASS', { ready: true, apiIdentity: true, extensionIdentity: true, successRecord: true });
     phase(out, 'target-cleanup', 'RUNNING');
-    clean(root, targetDir); phase(out, 'target-cleanup', 'PASS', { ownedResourcesRemoved: true }); activeDir = null;
+    retainPrivateOperationLogs({ root, dir: targetDir, candidateSha256: request.target.candidateSha256, expectedCandidate: target, runStartedAt });
+    clean(root, targetDir); await clearCandidateAliases(root, [target]); clearCleanInstallation(targetDir); phase(out, 'target-cleanup', 'PASS', { ownedResourcesRemoved: true }); activeDir = null;
     await free(18080); await free(port);
-    activeDir = previousDir; phase(out, 'previous-install', 'RUNNING');
+    activeDir = previousDir; activeCandidateSha256 = request.previous.candidateSha256; phase(out, 'previous-install', 'RUNNING');
     r = await execute(session('04-previous-install', 'install', previousDir, request.previous));
     if (r.code !== 0 || r.signal) fail('PREVIOUS_INSTALL_FAILED');
     verifyReady(root, previousDir, previous, { count: 1, kind: 'install' });
@@ -449,7 +576,8 @@ async function runCandidateRuntimeInner(request) {
     inspect(root, state(previousDir), 'container', currentPg[0], 'postgres');
     phase(out, 'preservation', 'PASS', { pgContainerOwned: true, volumesSame: true, markerSame: true, secretsSame: true, datasetSame: true, portsSame: true });
     phase(out, 'final-cleanup', 'RUNNING');
-    clean(root, previousDir); activeDir = null;
+    retainPrivateOperationLogs({ root, dir: previousDir, candidateSha256: request.target.candidateSha256, expectedCandidate: target, runStartedAt });
+    clean(root, previousDir); await clearCandidateAliases(root, [previous, target]); clearCleanInstallation(previousDir); activeDir = null;
     phase(out, 'final-cleanup', 'PASS', { ownedResourcesRemoved: true });
     const [finalPrevious, finalTarget] = await Promise.all([
       verifyReleaseCandidate(request.previous), verifyReleaseCandidate(request.target),
@@ -478,9 +606,23 @@ async function runCandidateRuntimeInner(request) {
     out.failure = { code };
     const current = out.phases.find(p => p.status === 'RUNNING');
     if (current) phase(out, current.id, out.status);
+    let logsRetained = false;
     if (root && activeDir && settled) {
-      try { clean(root, activeDir); out.cleanup = { status: 'PASS', settled: true, ownedResourcesRemoved: true, privateLogsRetained: true }; }
-      catch { out.cleanup = { status: 'FAIL', settled: true, ownedResourcesRemoved: false, privateLogsRetained: true }; }
+      try {
+        const currentCandidateSha256 = state(activeDir).artifacts?.candidateSha256;
+        if (currentCandidateSha256 !== activeCandidateSha256 && currentCandidateSha256 !== request.previous.candidateSha256
+            && currentCandidateSha256 !== request.target.candidateSha256) fail('PRIVATE_LOG_RETENTION_BLOCKED', true);
+        const expectedCandidate = [previous, target].find(item => item?.candidateSha256 === currentCandidateSha256);
+        retainPrivateOperationLogs({ root, dir: activeDir, candidateSha256: currentCandidateSha256, expectedCandidate, runStartedAt });
+        logsRetained = true;
+        clean(root, activeDir); if (previous && target) await clearCandidateAliases(root, [previous, target]); clearCleanInstallation(activeDir);
+        out.cleanup = { status: 'PASS', settled: true, ownedResourcesRemoved: true, privateLogsRetained: true };
+      } catch (cleanupError) {
+        if (cleanupError?.message === 'PRIVATE_LOG_RETENTION_BLOCKED') {
+          out.status = 'BLOCKED'; out.failure = { code: 'PRIVATE_LOG_RETENTION_BLOCKED' };
+          out.cleanup = { status: 'BLOCKED', settled: true, ownedResourcesRemoved: false, privateLogsRetained: false };
+        } else out.cleanup = { status: 'FAIL', settled: true, ownedResourcesRemoved: false, privateLogsRetained: logsRetained };
+      }
     } else out.cleanup = { status: root && activeDir ? 'FAIL' : 'NOT_REQUIRED', settled,
       ownedResourcesRemoved: !activeDir, privateLogsRetained: !!root };
     return out;
@@ -495,6 +637,7 @@ export async function runCandidateRuntime(request) {
   finally {
     for (const [key, value] of Object.entries(prior)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
     socketFence = null;
+    releaseSlotUnlock?.(); releaseSlotUnlock = null;
     runtimeBusy = false;
   }
 }
