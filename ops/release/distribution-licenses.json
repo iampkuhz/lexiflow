@@ -2,6 +2,86 @@
   "schema_version": "lexiflow.distribution-licenses.v1",
   "licenses": [
     {
+      "id": "api-base-notices",
+      "component": "API-runtime",
+      "licenseId": "LicenseRef-API-Base-Component-Licenses",
+      "licenseName": "Per-component Ubuntu and Temurin original copyright and license collection",
+      "sourceUrl": "https://github.com/adoptium/containers/tree/31f6abccc683a0a47c5c49ad6bb95a2531bc1168",
+      "noticePath": "licenses/api-base-license-notices.tar.gz",
+      "noticeBytes": 543274,
+      "noticeSha256": "a2cf3d0527540077456de6f66cb1fd49907a1b35f3019229707c17d21b9f3d1f"
+    },
+    {
+      "id": "api-base-sources",
+      "component": "API-runtime",
+      "licenseId": "LicenseRef-API-Base-Component-Licenses",
+      "licenseName": "Exact Ubuntu package corresponding source descriptors and complete source components",
+      "sourceUrl": "https://ports.ubuntu.com/ubuntu-ports/",
+      "noticePath": "licenses/api-base-corresponding-sources.tar.gz",
+      "noticeBytes": 320274567,
+      "noticeSha256": "97b7d8e02eb7a2cece86addc6d43af5036d2ae0a0f6c72c042c5df012f3edda1"
+    },
+    {
+      "id": "api-container-extras",
+      "component": "API-runtime",
+      "licenseId": "Apache-2.0",
+      "licenseName": "Temurin container entrypoint: original Apache license and fixed full source tree",
+      "sourceUrl": "https://github.com/adoptium/containers/tree/31f6abccc683a0a47c5c49ad6bb95a2531bc1168",
+      "noticePath": "licenses/api-base-extra-licenses-and-sources.tar.gz",
+      "noticeBytes": 143860,
+      "noticeSha256": "08f0e9800f7ada73a34d47001f07fdfb13290ab73574ade83b19bbbeb7146ab8"
+    },
+    {
+      "id": "api-java-dependencies",
+      "component": "API-runtime",
+      "licenseId": "Apache-2.0 AND MIT AND BSD-2-Clause AND CC0-1.0 AND EPL-2.0",
+      "licenseName": "Exact API Java dependencies: original notices and offered license branches",
+      "sourceUrl": "https://repo.maven.apache.org/maven2/",
+      "noticePath": "licenses/api-java-notices-and-sources.tar.gz",
+      "noticeBytes": 1856961,
+      "noticeSha256": "bed81063eb8504cefd54e4e99208b74b922aaf471ffc8446b649e2ce52db1a15"
+    },
+    {
+      "id": "api-jre-sources",
+      "component": "API-runtime",
+      "licenseId": "LicenseRef-API-Base-Component-Licenses",
+      "licenseName": "Exact Temurin 25.0.4.1+1 original JDK source tree and upstream licenses",
+      "sourceUrl": "https://github.com/adoptium/temurin25-binaries/releases/tag/jdk-25.0.4.1%2B1",
+      "noticePath": "licenses/OpenJDK25U-jdk-sources_25.0.4.1_1.tar.gz",
+      "noticeBytes": 120577922,
+      "noticeSha256": "cb9e50d2eb3de72ffd28466d7c511b4039b4bc4bd8f0d276d1e4cf81e30fdf09"
+    },
+    {
+      "id": "dataset-ecdict-mit",
+      "component": "dataset",
+      "licenseId": "MIT",
+      "licenseName": "ECDICT original MIT notice and fixed-source redistribution evidence",
+      "sourceUrl": "https://github.com/skywind3000/ECDICT/tree/bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b",
+      "noticePath": "licenses/dataset-notice.txt",
+      "noticeBytes": 1488,
+      "noticeSha256": "69be602df310849f7d9ea8e506e74c21eaff94172ef49108623ecf1023c72c91"
+    },
+    {
+      "id": "extension-runtime-notice",
+      "component": "extension-third-party",
+      "licenseId": "MIT",
+      "licenseName": "LexiFlow extension runtime notice; no separately bundled third-party runtime dependency",
+      "sourceUrl": "https://github.com/iampkuhz/lexiflow/tree/main/extension",
+      "noticePath": "licenses/extension-notice.txt",
+      "noticeBytes": 1622,
+      "noticeSha256": "4d68aa3eadda794fba587a6435a3fe3dce33769db8fb2ff17fbbbfabd2bc0caa"
+    },
+    {
+      "id": "lexiflow-license-collections",
+      "component": "LexiFlow",
+      "licenseId": "MIT",
+      "licenseName": "LexiFlow-authored explanatory index for retained original per-component licenses",
+      "sourceUrl": "https://github.com/iampkuhz/lexiflow/blob/main/ops/release/third-party-notices.md",
+      "noticePath": "licenses/LICENSE-COLLECTIONS.txt",
+      "noticeBytes": 4735,
+      "noticeSha256": "18ac684d4775e8a8471a5b8bcfdbffbd4d2a055692a3abca833a5a98f1c846c7"
+    },
+    {
       "id": "lexiflow-mit",
       "component": "LexiFlow",
       "licenseId": "MIT",
@@ -10,6 +90,36 @@
       "noticePath": "LICENSE",
       "noticeBytes": 1078,
       "noticeSha256": "cf0fc402033e206378705c0230acf8e0e33ee966adac28139014861bb801fb5f"
+    },
+    {
+      "id": "postgres-base-notices",
+      "component": "PostgreSQL",
+      "licenseId": "LicenseRef-PostgreSQL-Base-Component-Licenses",
+      "licenseName": "Per-component PostgreSQL and Debian original copyright and license collection",
+      "sourceUrl": "https://github.com/docker-library/postgres/tree/dfc76bb299b057785026eb2eea39556b6fe52983",
+      "noticePath": "licenses/postgres-base-license-notices.tar.gz",
+      "noticeBytes": 526728,
+      "noticeSha256": "5005c3b514a18804320d794f5d82bf56048eada580ae54b1046bd725f8c0ba6f"
+    },
+    {
+      "id": "postgres-base-sources",
+      "component": "PostgreSQL",
+      "licenseId": "LicenseRef-PostgreSQL-Base-Component-Licenses",
+      "licenseName": "Exact Debian and PostgreSQL package corresponding source descriptors and components",
+      "sourceUrl": "https://apt.postgresql.org/",
+      "noticePath": "licenses/postgres-base-corresponding-sources.tar.gz",
+      "noticeBytes": 557086537,
+      "noticeSha256": "c86c241a353ca2be05def7653a4fc140278bf053e3efcf836ae59d47dea49231"
+    },
+    {
+      "id": "postgres-container-extras",
+      "component": "PostgreSQL",
+      "licenseId": "LicenseRef-PostgreSQL-Container-Extra-Licenses",
+      "licenseName": "gosu, Go and module sources and Docker entrypoints: per-component original licenses",
+      "sourceUrl": "https://github.com/docker-library/postgres/tree/dfc76bb299b057785026eb2eea39556b6fe52983",
+      "noticePath": "licenses/postgres-base-extra-licenses-and-sources.tar.gz",
+      "noticeBytes": 32277235,
+      "noticeSha256": "9a629ec687f15ea9c742f08d5867bcf93ee1bd58be7ef4fb07c6e6398f875484"
     }
   ]
 }
