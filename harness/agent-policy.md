@@ -52,6 +52,8 @@ spawn 与 followup 都由父代理在当前聊天正文说明；工具输出、�
 
 ## 冻结、验证与独立性
 
+GitHub 发行采用单维护者授权：owner 可批准自己触发的受保护 Environment；保留 required reviewer、正式 tag 限制、管理员禁绕过与显式 `PUBLISH`。此人类授权不替代下述原生 actor 独立性、完整检查或资料许可核准。
+
 同 checkout 集成验证串行、非等待；窗口不锁编辑，输入漂移失败关闭。不自动终止未知进程、删除未知锁，也不覆盖其他写入者修改。
 
 最终 checkout/input 冻结后先做直接小回归，再由不同真实 actor 的 validator 执行一次完整 Hook。实现者只做静态、编译与精准测试，不例行先跑全套，更不得签发 TASK_VALIDATION 或 INDEPENDENT_REVIEW。所有风险层的 validator 均不同于全部 producer/submitter；高风险工程与正式发行还需 reviewer，reviewer 不同于 validator 与实现者。

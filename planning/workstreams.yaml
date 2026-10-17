@@ -8126,6 +8126,89 @@ workstreams:
         required_check_ids: [eng.verification.module-tests, eng.release.lifecycle-runtime]
         depends_on: []
         deliverable: 最新唯一引擎身份编码的直接证据，非完整生命周期或 Formal PASS。
+      - id: LF-TSK-OPS-2050
+        title: 对齐单维护者发行授权与 GitHub 环境配置
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-maintainer-release-approval/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2033
+        allowed_files:
+        - harness/agent-policy.md
+        - docs/scenarios/github-actions.md
+        - docs/scenarios/github-actions/first-release.md
+        - docs/scenarios/github-actions/first-release/preparation.md
+        - openspec/changes/single-maintainer-release-approval/**
+        - openspec/changes/first-release-v2/status.md
+        - planning/workstreams.yaml
+        - tmp/phase-tools/single-maintainer-release-approval/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 两环境允许 owner 本人批准，保留 required reviewer、正式 tag、禁 bypass 与原生独立验收边界。
+        acceptance_criteria:
+        - 只修改本人审批开关，环境身份、reviewer、tag policy、Variables 和 Secrets 保持不变并读回。
+        - 保留显式 PUBLISH、只读预检、不可变发行、完整许可与同候选 Formal；不提前设置 READY 或创建 tag/Release。
+        - 决策、Harness 与操作入口一致，Secret 存在不冒称实际权限或有效期已验证。
+        acceptance_evidence:
+        - 配置前后有界摘要与字段等价校验、最终 diff、文档和规划直接检查。
+        validation_command: python3 -m scripts.checks.repository.run_repository_check_group --mode planning && python3 -m scripts.checks.repository.run_repository_check_group --mode docs
+        required_check_ids: [eng.repository.planning, eng.repository.docs]
+        depends_on: []
+        deliverable: 单维护者发行审批配置与唯一最新操作入口，不授予正式发行资格。
+      - id: LF-TSK-OPS-2051
+        title: 独立验证单维护者发行审批变更
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-maintainer-release-approval/tasks.md
+        estimated_minutes: 30
+        kind: design
+        lifecycle_state: READY
+        allowed_files: [tmp/phase-tools/single-maintainer-release-approval/validation/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 最终冻结下独立完整开发 Hook 的当次结果和自有资源清理。
+        acceptance_criteria:
+        - validator 不同于 Main，核对冻结无漂移，所选必需检查全部真实执行且无跳过。
+        - 不修改源码、远端或预算，不把本次开发验证当正式发行基线或 Formal。
+        acceptance_evidence:
+        - 真实原生 actor、冻结摘要、完整 Hook 输出及验证报告定位。
+        validation_command: python3 scripts/triggers/run_stop_checks.py
+        required_check_ids: [eng.repository.planning, eng.repository.docs]
+        depends_on:
+        - task_id: LF-TSK-OPS-2050
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 单维护者授权变更的独立开发验证证据，不重置已有首发验证预算。
+      - id: LF-TSK-OPS-2052
+        title: 独立审查单维护者发行授权边界
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-maintainer-release-approval/tasks.md
+        estimated_minutes: 20
+        kind: design
+        lifecycle_state: READY
+        allowed_files: [tmp/phase-tools/single-maintainer-release-approval/review/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 只读核对新冻结、配置证据及本次独立验证，不替代真实人类发布授权。
+        acceptance_criteria:
+        - reviewer 不同于 Main 和 validator，只读全部实际差异与原始证据。
+        - required reviewer、tag 限制、禁 bypass、显式晋升与许可和原生 actor 独立性均保留。
+        acceptance_evidence:
+        - 真实 reviewer 来源、冻结和证据摘要、最多三项阻塞发现。
+        validation_command: python3 -m json.tool tmp/phase-tools/single-maintainer-release-approval/review/report.json
+        required_check_ids: [eng.repository.planning, eng.repository.docs]
+        depends_on:
+        - task_id: LF-TSK-OPS-2051
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 单维护者发行授权变更的独立只读审查。
 - id: LF-WS-ADP
   code: ADP
   name: 后续 Content Adapter

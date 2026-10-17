@@ -4,7 +4,7 @@
 
 ## 1.1. GitHub 配置字段
 
-管理员按[仓库管理员准备](../../github-actions.md#13-仓库管理员准备)配置两个受保护 Environment、唯一 runner、隔离服务、不可变发行与权限。当前电脑可以承载 runner，但使用专用源码与隔离数据，不能让其他 workflow 或不可信 PR 在此执行。所需变量如下：
+管理员按[仓库管理员准备](../../github-actions.md#13-仓库管理员准备)配置两个受保护 Environment、唯一 runner、隔离服务、不可变发行与权限。两个环境均保留 owner required reviewer，单维护者设置 `prevent_self_review=false`、`can_admins_bypass=false`，仅允许正式 `v*` tag。当前电脑可以承载 runner，但使用专用源码与隔离数据，不能让其他 workflow 或不可信 PR 在此执行。所需变量如下：
 
 | 配置位置 | 名称 | 要填什么 |
 | --- | --- | --- |
