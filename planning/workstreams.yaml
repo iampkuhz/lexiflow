@@ -499,6 +499,32 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-QLT-2408
+        title: 修正真实弹窗测试的点击准备竞态
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 25
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - extension/tests/action-popup.mjs
+        - extension/tests/action-popup.test.mjs
+        - planning/workstreams.yaml
+        - openspec/changes/first-release-v2/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 用实际布局和命中事实准备真实 CDP 点击，消除弹窗展开布局竞态而不放宽浏览器验收。
+        acceptance_criteria:
+        - 不增加 Check、Gate 或审批，不改产品、权限、现有等待上限或原浏览器断言，不重试点击或以 DOM click 替代真实输入。
+        - 具体失败层、布局与命中边界的直接回归可核验，唯一正常窗口和 API 错误拒绝边界不变。
+        - 只对自有合成浏览器与隔离服务做一次现有扩展精准检查；最终输入另由不同 actor 进行开发验证和只读审查，不签 Formal。
+        acceptance_evidence:
+        - 原始 GitHub FAIL、当次诊断与直接测试、精确资源清理及最终冻结独立证据。
+        validation_command: node extension/scripts/checks/run-extension-checks.mjs
+        required_check_ids: [eng.extension.quality]
+        depends_on: []
+        deliverable: 真实弹窗点击准备修复及直接证据，不授予发行资格。
       - id: LF-TSK-QLT-2407
         title: 修复浏览器弹窗测试的窗口归属
         priority: P0

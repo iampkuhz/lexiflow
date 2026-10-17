@@ -16,6 +16,37 @@ export async function openChromeActionPopup({windows,serviceWorker}) {
     serviceWorker.evaluate(id=>chrome.action.openPopup({windowId:id}),windowId)});
 }
 
+/** Fixed popup-only geometry check, serialized into the real popup Runtime. */
+export function measurePopupClickTarget(selector) {
+  const element=document.querySelector(selector);
+  if(!element) throw new Error(`missing popup element ${selector}`);
+  const rect=element.getBoundingClientRect();
+  const style=getComputedStyle(element);
+  const x=rect.left+rect.width/2,y=rect.top+rect.height/2;
+  const hit=document.elementFromPoint(x,y);
+  const visible=element.getClientRects().length>0&&style.display!=='none'&&style.visibility!=='hidden'&&style.visibility!=='collapse'&&style.opacity!=='0';
+  const enabled=!element.disabled&&element.getAttribute('aria-disabled')!=='true';
+  const inViewport=rect.width>0&&rect.height>0&&rect.left>=0&&rect.top>=0&&rect.right<=innerWidth&&rect.bottom<=innerHeight;
+  const hitTarget=!!hit&&(hit===element||element.contains(hit));
+  if(!visible||!enabled||!inViewport||!hitTarget) return null;
+  return {x,y,left:rect.left,top:rect.top,width:rect.width,height:rect.height,viewportWidth:innerWidth,viewportHeight:innerHeight,scrollX,scrollY};
+}
+
+/** Popup-only bounded wait; requires three consecutive identical actionable measurements. */
+export async function waitForPopupClickTarget(selector,evaluate) {
+  const end=Date.now()+10000;
+  let previous=null,stable=0;
+  while(Date.now()<end) {
+    const point=await evaluate(measurePopupClickTarget,selector);
+    if(point&&previous&&Object.keys(point).every(key=>point[key]===previous[key])) stable++;
+    else stable=point?1:0;
+    if(stable>=3) return {x:point.x,y:point.y};
+    previous=point;
+    await new Promise(resolve=>setTimeout(resolve,50));
+  }
+  throw new Error(`popup click target not actionable and stable: ${selector}`);
+}
+
 /** CDP attaches to Chrome's real action popup, which Playwright does not list as a Page. */
 export async function openActionPopup({context,page,serviceWorker}) {
   await page.bringToFront();
@@ -64,11 +95,7 @@ export async function openActionPopup({context,page,serviceWorker}) {
       throw new Error('popup condition timed out');
     };
     const click=async(selector)=>{
-      const point=await evaluate(selector=>{
-        const element=document.querySelector(selector);
-        if(!element) throw new Error(`missing popup element ${selector}`);
-        const rect=element.getBoundingClientRect();return {x:rect.left+rect.width/2,y:rect.top+rect.height/2};
-      },selector);
+      const point=await waitForPopupClickTarget(selector,evaluate);
       await command('Input.dispatchMouseEvent',{type:'mousePressed',x:point.x,y:point.y,button:'left',clickCount:1});
       await command('Input.dispatchMouseEvent',{type:'mouseReleased',x:point.x,y:point.y,button:'left',clickCount:1});
     };
