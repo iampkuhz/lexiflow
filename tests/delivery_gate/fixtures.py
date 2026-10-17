@@ -1,30 +1,40 @@
 """Real daily-verification fixture; only agents runtime is mocked by callers."""
 
 from __future__ import annotations
-import subprocess, tempfile, uuid
-from functools import cache
+
+import subprocess
+import tempfile
+import uuid
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
+
+import yaml
+
 from scripts.acceptance.evidence.acceptance_record_store import (
-    delivery_gate_locator,
     canonical_bytes,
+    delivery_gate_locator,
     publish_bytes,
     publish_json,
 )
-from scripts.acceptance.task_definition.task_acceptance_plan import acceptance_plan
-from scripts.verification.planning.change_risk_assessment import assess
-from scripts.acceptance.task_definition.task_acceptance_requirements import load_task_requirements
 from scripts.acceptance.evidence.task_review_diff import review_patch
-from scripts.acceptance.task_definition.task_acceptance_scope import derive_task_subject, subject_paths
+from scripts.acceptance.task_definition.task_acceptance_plan import acceptance_plan
+from scripts.acceptance.task_definition.task_acceptance_requirements import (
+    load_task_requirements,
+)
+from scripts.acceptance.task_definition.task_acceptance_scope import (
+    derive_task_subject,
+    subject_paths,
+)
 from scripts.verification import (
     freeze_inputs,
     persist_report,
     read_report,
     verify_profile,
 )
-import yaml
+from scripts.verification.planning.change_risk_assessment import assess
 
 
 def write_declarations(path, checks):
@@ -108,7 +118,8 @@ def mock_authority(session_id: str):
 class DeliveryGateFixture:
     def __init__(self):
         self.proof_patch = patch(
-            "scripts.agents.identity.codex_actor_identity.verify_proof", return_value=None
+            "scripts.agents.identity.codex_actor_identity.verify_proof",
+            return_value=None,
         )
         self.proof_patch.start()
         self.temp = tempfile.TemporaryDirectory()
@@ -156,8 +167,7 @@ class DeliveryGateFixture:
             ["git", *args],
             cwd=self.root,
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
 
     def write(self, relative, content):
@@ -200,7 +210,9 @@ class DeliveryGateFixture:
         )
         self.write(
             "scripts/verification/planning/change_risk_assessment.py",
-            (project_root / "scripts/verification/planning/change_risk_assessment.py").read_bytes(),
+            (
+                project_root / "scripts/verification/planning/change_risk_assessment.py"
+            ).read_bytes(),
         )
         self.write(
             "fixture_check.py",
@@ -301,7 +313,7 @@ class DeliveryGateFixture:
         runtime = make_mock_runtime(PRODUCER_SESSION)
         authority = mock_authority(PRODUCER_SESSION)
         record = {
-            "schema_version": "lexiflow.delivery-gate-submission.v6",
+            "schema_version": "lexiflow.delivery-gate-submission.v7",
             "submission_id": sid,
             "task_requirements": requirements,
             "risk_assessment": risk,
@@ -314,6 +326,7 @@ class DeliveryGateFixture:
             "producer": {"kind": "current-codex-task"},
             "verification_freeze": freeze,
             "task_subject": subject,
+            "release_subject": None,
             "created_at": "2026-09-21T00:00:00Z",
         }
         publish_json(self.root, delivery_gate_locator("submissions", sid), record)
@@ -358,7 +371,10 @@ class DeliveryGateFixture:
         return rec
 
     def create_review(self, submission_id=None, validation_id=None, decision="PASS"):
-        from scripts.acceptance.evidence.acceptance_record_store import load_layer, load_submission
+        from scripts.acceptance.evidence.acceptance_record_store import (
+            load_layer,
+            load_submission,
+        )
 
         sid, vid = (
             submission_id or self.submission_id,

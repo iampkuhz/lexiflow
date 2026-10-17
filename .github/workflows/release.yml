@@ -102,16 +102,9 @@ jobs:
           export PATH="$WORKSPACE/.local/lexiflow-python/bin:$PATH"
           cd "$WORKSPACE"
           node ops/release/workflow/run-release-workflow.mjs prepare "$REQUEST_FILE"
-      - name: Full Repository Verify on the same candidate and checkout
-        env:
-          WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
-        run: |
-          test -x "$WORKSPACE/.local/lexiflow-python/bin/python3"
-          export PATH="$WORKSPACE/.local/lexiflow-python/bin:$PATH"
-          cd "$WORKSPACE"
-          python3 scripts/verification/commands/run_repository_checks.py
-      # Success here leaves a private native handoff; only distinct local
-      # Codex actors can submit, validate, review and check Formal Gate.
+      # Preparation leaves a private handoff, not validation evidence. The
+      # independent native validator owns the complete repository baseline;
+      # Actions must not run the same candidate's complete suite beforehand.
 
   promotion-precheck:
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && inputs.publish_confirmation == 'PUBLISH' && inputs.release_tag == github.ref_name

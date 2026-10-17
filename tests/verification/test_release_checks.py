@@ -12,7 +12,6 @@ from unittest.mock import patch
 from scripts.verification import freeze_inputs
 from tests.verification.test_scenarios import verify_repository
 from tests.verification.declaration_fixtures import (
-    input_member,
     input_closure,
     trigger_covers,
 )
@@ -55,8 +54,13 @@ class ReleaseCheckDeclarationTest(unittest.TestCase):
 
     def test_version_sources_select_release_and_backend_consumers(self):
         """解析器、单测、入口都触发检查，版本文件同时触发后端。"""
-        for path in self.by_id[BASE]["input_paths"]:
-            self.assertIn(BASE, self.selected(input_member(ROOT, path)), path)
+        for path in (
+            "ops/release/version.txt",
+            "ops/release/integrity/source-build-identity.mjs",
+            "ops/release/tests/version.test.mjs",
+            "backend/build.gradle.kts",
+        ):
+            self.assertIn(BASE, self.selected(path), path)
         self.assertIn("eng.backend.delivery", self.selected("ops/release/version.txt"))
         self.assertNotIn(BASE, self.selected("docs/README.md"))
         for scope in ("repository-baseline", "change-targeted"):
@@ -91,10 +95,7 @@ class ReleaseCheckDeclarationTest(unittest.TestCase):
         base = self.by_scope["repository-baseline"]["eng.extension.quality"]
         change = self.by_scope["change-targeted"]["eng.extension.quality"]
         self.assertEqual(base["input_paths"], change["input_paths"])
-        for path in (
-            "ops/release/version.txt",
-            "ops/release/integrity/source-build-identity.mjs",
-        ):
+        for path in ("ops/release/version.txt",):
             self.assertIn("eng.extension.quality", self.selected(path))
             for check in (base, change):
                 self.assertIn(path, input_closure(ROOT, check))
@@ -182,6 +183,9 @@ class ReleaseCheckDeclarationTest(unittest.TestCase):
         for name in sorted(required):
             with self.subTest(path=name):
                 self.assertIn(name, runtime_closure)
+                if name == "ops/release":
+                    # 整个目录仍冻结；触发只枚举实际源码，不覆盖未知材料。
+                    continue
                 for check in (runtime, changed):
                     self.assertTrue(trigger_covers(self.by_id[check["check_id"]], name))
                 # Git reports files, not directory roots; exercise a real member path.
@@ -189,6 +193,17 @@ class ReleaseCheckDeclarationTest(unittest.TestCase):
                     f"{name}/synthetic-source.txt" if (ROOT / name).is_dir() else name
                 )
                 self.assertIn(changed["check_id"], self.selected(path))
+        # formal-only 由开发场景冻结时排除，不能靠抹掉真实触发关系实现。
+        development = freeze_inputs(
+            ROOT,
+            verification_scope="development-change",
+            base="HEAD",
+            _subject_changed_files=["backend/gradle.lockfile"],
+        )
+        self.assertEqual("PASS", development["result"], development)
+        self.assertNotIn(
+            runtime["check_id"], {item["check_id"] for item in development["checks"]}
+        )
 
     def test_runtime_artifact_bytes_and_directory_membership_change_snapshot(self):
         """合成源文件变化及目录成员增删均改变 runtime 指纹，不执行发行命令。"""
@@ -221,7 +236,7 @@ class ReleaseCheckDeclarationTest(unittest.TestCase):
                     current = snapshot_check_inputs(root, check)
                     self.assertNotEqual(previous["fingerprint"], current["fingerprint"])
                     previous = current
-                    if (ROOT / name).is_dir():
+                    if (ROOT / name).is_dir() and name != "ops/release":
                         added = root / name / "nested/added-source.txt"
                         added.write_bytes(b"new synthetic source\n")
                         expanded = snapshot_check_inputs(root, check)

@@ -15,8 +15,8 @@ Harness 是**人类工程规则**的唯一共享正文；机器可调配置在 `
 
 ## 执行边界
 
-- **开发自检**按完整真实 diff、场景 triggers 与 Check 依赖闭包冻结 profile/report；未知覆盖失败关闭。实现者可做静态、编译与精准测试，开发 PASS 不是完整 Verify 或 Formal PASS。见[执行场景](../docs/scenarios/run-repository-gates.md)。
-- **完整 Verify**按本次要求显式运行；诊断不签发验收。见[Verify](../docs/reference/verification.md)。
+- **开发自检**按完整真实 diff、场景 triggers 与 Check 依赖闭包冻结 profile/report；未知覆盖失败关闭。实现者可做静态、编译与精准测试，开发 PASS 不是完整 Verify 或 Formal PASS。开发 CLI 与 Stop 的择一执行及独立性见[协作规则](agent-policy.md)，操作见[执行场景](../docs/scenarios/run-repository-gates.md)。
+- **完整 Verify**按本次证明目标显式运行，不与开发检查、精确诊断惯例性叠跑；同候选的正式完整基线由独立 validator 负责。见[Verify](../docs/reference/verification.md)。
 - **正式验收**由不同真实 actor 执行冻结 TASK_VALIDATION，高风险另需 INDEPENDENT_REVIEW；review 只读冻结证据，CATALOG_DECISION 只核 receipt/hash DAG。见[协作规则](agent-policy.md)。
 - **Stop 与 CI**正常 Stop 运行开发检查；中间汇报、提问、等待及只读 review/catalog 以独立行 `<!-- lexiflow:intermediate -->` 结尾，普通交付不使用该标记。Hook 不锁编辑/commit、不替代 Formal，不安装或维护 Git 提醒 Hook；跳过、终态、零退出及失败重试不是 PASS。见[Hook](../docs/reference/hooks.md)与[CI](../docs/scenarios/github-actions.md)。
 

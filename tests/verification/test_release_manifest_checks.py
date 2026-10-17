@@ -94,7 +94,7 @@ class ReleaseManifestCheckTest(unittest.TestCase):
             self.assertIn("ops/release/" + name, base_closure)
         for name in base["input_paths"]:
             selected = select_checks_for_changes(
-                self.checks, [input_member(ROOT, name)]
+                self.checks, [input_member(ROOT, name, check=self.by_id[BASE])]
             )
             self.assertIn(BASE, {c["check_id"] for c in selected}, name)
 

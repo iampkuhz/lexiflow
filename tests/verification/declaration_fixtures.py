@@ -60,7 +60,9 @@ def declaration_document(checks: list[dict[str, Any]]) -> dict[str, Any]:
         result.append(
             {
                 "check_id": check.get("check_id", f"fixture.check-{index}"),
-                "scenarios": check.get("scenarios", [check.get("scope", "repository-baseline")]),
+                "scenarios": check.get(
+                    "scenarios", [check.get("scope", "repository-baseline")]
+                ),
                 **execution,
                 "module_dependencies": check.get("module_dependencies", []),
             }
@@ -104,11 +106,13 @@ def trigger_covers(check: dict[str, Any], path: str) -> bool:
     )
 
 
-def input_member(root: Path, path: str) -> str:
-    """目录选择断言使用实际源码成员，不把目录名冒充 Git 变动文件。"""
+def input_member(root: Path, path: str, *, check: dict[str, Any] | None = None) -> str:
+    """选择实际输入成员；有显式触发声明时仅选真正触发该检查的源码。"""
     from scripts.verification.planning.source_file_snapshot import snapshot_inputs
 
     files, missing = snapshot_inputs(root, {"input_paths": [path]})
+    if check is not None:
+        files = [item for item in files if trigger_covers(check, item["locator"])]
     if missing or not files:
         raise AssertionError(f"unavailable input member: {path}")
     return files[0]["locator"]

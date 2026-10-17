@@ -10,9 +10,9 @@
 
 | 能力 | 消费什么／交出什么 | 与检查体系的关系 |
 | --- | --- | --- |
-| 送验 `submit` | 开发来源报告、Task 与真实变化 → 冻结 submission | 绑定已有报告和输入，不执行第二轮测试 |
+| 送验 `submit` | 代码 Task 的开发报告／真实变化，或发行 Task 的固定 handoff／候选 → 冻结 submission | 两种输入各自重核来源，不为干净候选制造开发 diff，不执行测试 |
 | 独立验证 `validate` | 冻结计划与真实 validator → validation 证据 | 在独立身份下调用共用检查能力，范围来自验收计划 |
-| 适用审查 `review` | 冻结 diff、validation 与审查意见 → review 证据 | 只读复核，不重跑命令；并非每个风险等级都要求 |
+| 适用审查 `review` | 冻结的代码或发行主体、validation 与审查意见 → review 证据 | 只读复核，不重跑命令；并非每个风险等级都要求 |
 | 条件核对 `check` | validation、适用 review、依赖与批准 → receipt | 核对证据链，不把退出零或作者自检改称验收 |
 
 开发报告证明某个输入上的检查事实；独立验证另外提供来源与身份隔离证明。即使两次命中同一个 Check，也不能从集合相同推导可以共享验收结论。验收 receipt 又不等于 Git 集成或公开发行许可。具体身份、不变量和风险计划只在 [Harness](../../harness/README.md) 维护；各命令的核对字段见下方 Reference。

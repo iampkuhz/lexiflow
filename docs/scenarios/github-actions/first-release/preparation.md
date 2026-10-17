@@ -20,7 +20,7 @@
 
 `GITHUB_TOKEN` 由 GitHub 自动提供，不另造同名 secret；只有 promotion job 声明 Contents write / Packages write。确认仓库/组织策略允许这些权限。准备和预检阶段不得注入发布凭据。两个 Environment 的 workspace 必须完全相同；validation 在手动晋升时也会再次要求批准。
 
-在专用 checkout 按[隔离验证环境](../../verification-environment.md#11-一次性准备运行时与镜像)创建 `.local/lexiflow-python` 并安装 `requirements-dev.txt`。发行 workflow 在构建、完整 Verify 和两步晋升中显式把该 venv 的 `bin` 放到 `PATH` 首位，缺解释器立即停止；Node 启动的 Python 子进程沿用同一 `PATH`。不依赖 launchd 服务的全局 Python 恰好安装 PyYAML，也不在取得发布凭据后临时安装依赖。
+在专用 checkout 按[隔离验证环境](../../verification-environment.md#11-一次性准备运行时与镜像)创建 `.local/lexiflow-python` 并安装 `requirements-dev.txt`。发行 workflow 在构建和两步晋升中显式把该 venv 的 `bin` 放到 `PATH` 首位；原生 validator 执行完整基线时也使用该工程环境，缺解释器立即停止。Node 启动的 Python 子进程沿用同一 `PATH`。不依赖 launchd 服务的全局 Python 恰好安装 PyYAML，也不在取得发布凭据后临时安装依赖。
 
 ## 1.2. 首次发行材料：没有旧公开 Release 也不能省 previous
 
@@ -87,16 +87,16 @@ python3 -m scripts.local.run_with_java_toolchain java \
 
 ## 1.3. 在原 checkout 完成真实独立 Formal
 
-在同一 Mac、同一 OS 用户、同一稳定 checkout 的真实 Codex 任务里执行。原生任务不是 Actions job，不会自动继承 Environment secret：在验收宿主私有环境中安全配置同一隔离资源对应的 `LEXIFLOW_POSTGRES_TEST_JDBC_URL`、`LEXIFLOW_REDIS_TEST_ENDPOINT`、`LEXIFLOW_RELEASE_ARM64_DOCKER_HOST`、`LEXIFLOW_JAVA_HOME` 及受要求的构建缓存，不在提示词或日志中粘贴 secret。不同角色不能在一个实现者会话里依次自签。先按[任务送验步骤](../../run-repository-gates.md)确认正式发行 Task、开发报告和依赖要求，再通过唯一 CLI 交接：
+在同一 Mac、同一 OS 用户、同一稳定 checkout 的真实 Codex 任务里执行。原生任务不是 Actions job，不会自动继承 Environment secret：在验收宿主私有环境中安全配置同一隔离资源对应的 `LEXIFLOW_POSTGRES_TEST_JDBC_URL`、`LEXIFLOW_REDIS_TEST_ENDPOINT`、`LEXIFLOW_RELEASE_ARM64_DOCKER_HOST`、`LEXIFLOW_JAVA_HOME` 及受要求的构建缓存，并把 `LEXIFLOW_CANDIDATE_RUNTIME_REQUEST` 指向固定本机 handoff 旁的 `candidate-runtime-request.json`，不在提示词或日志中粘贴 secret。不同角色不能在一个实现者会话里依次自签。先确认 Catalog 中正式发行 Task 的必需检查与依赖已齐；干净提交通过固定 handoff 送验，不要求 PASS 开发报告，也不为此添加开发差异：
 
 ```sh
-# 生产者/送验者：TASK_ID 与 CHANGE_REPORT_ID 来自本次实际 Task 和 PASS 开发报告。
-python3 -m scripts.acceptance submit --task-id '<TASK_ID>' --change-report-id '<CHANGE_REPORT_ID>'
+# 生产者/送验者：从本 checkout 的固定 handoff 派生真实发行主体。
+python3 -m scripts.acceptance submit --task-id '<TASK_ID>' --release-handoff
 
-# 不同真实 validator，在自己的原生任务里：
+# 不同真实 validator，在自己的原生任务里执行唯一完整发行基线：
 python3 -m scripts.acceptance validate --submission-id '<返回的SUBMISSION_UUID>'
 
-# 不同于生产者与 validator 的 reviewer，只读冻结 diff/evidence 后，在自己的任务里：
+# 不同于生产者与 validator 的 reviewer，只读冻结发行主体/evidence 后，在自己的任务里：
 python3 -m scripts.acceptance review --validation-id '<返回的VALIDATION_UUID>'
 
 # 按计划核对 receipt/hash DAG；缺依赖或人类批准不补签、不绕过。

@@ -127,133 +127,48 @@ shasum -a 256 -c lexiflow-extension-<softwareVersion>.zip.sha256
 
 ## 1.2. 正式标签：完整验证与独立验收
 
-`.github/workflows/release.yml` 将 `v*` 标签准备与显式手动晋升分开。标签阶段首先由共享版本入口验证标签指向的 commit、干净源码与三段正式版本完全一致。`2.0.0-SNAPSHOT`、dirty 输入或标签漂移均拒绝；手动续办只能消费原标签、原 checkout 已有的候选和原生验收证据，不能另传源码或候选目录。
+`.github/workflows/release.yml` 将 `v*` 标签准备与显式手动晋升分开。标签阶段首先验证标签、commit、干净源码与三段正式版本完全一致；SNAPSHOT、dirty 输入或标签漂移均拒绝。随后唯一专用 Apple Silicon macOS/Podman runner 构建 JAR、扩展和 ARM64 镜像，组装真实候选并留下固定本机 handoff。
 
-标签来源检查之后进入唯一专用 Apple Silicon macOS/Podman runner，在同一稳定 checkout 构建 JAR、扩展和单 ARM64 镜像，组装真实候选，随后串行执行 Change Verify 和 Repository Verify。构建与验证不启用发布权限，不自动签发 validation/review/check，也不将 Actions 绿灯等同于正式发行。
+Actions 的职责止于构建和交接，不先跑开发差异报告或完整 Repository Verify。负责人在原 checkout 用正式发行 Task 的 `submit --release-handoff` 送验干净提交和精确候选；独立原生 validator 负责完整 `repository-baseline`，reviewer 只读复核，`check` 只核 receipt/hash DAG。普通代码 Task 仍使用开发报告送验，两种输入不混用。
 
-候选准备、完整 Verify 与原生验收之间保留原路径和字节。负责人在该 checkout 的真实 Codex 任务中按 [Delivery Gate](../reference/delivery-gate.md) 送验，交给不同原生 actor 验证和审查，最后核对 receipt/hash DAG。原生验证执行自身冻结检查，审查与条件核对不重跑；不要为节省时间复用普通 Actions 的退出码作为原生 receipt。手动晋升不再 checkout 或清理工作树，缺链、输入漂移或原生来源不可读时阻断。
-
+下图只表示成功路径；任何来源、候选、验证、证据或保护前置失败均以 `FAIL` / `BLOCKED` 停止，不进入后续发布。
 
 ```plantuml
 @startuml
-skinparam BackgroundColor #FFFFFF
-skinparam DefaultFontName SansSerif
-skinparam DefaultFontSize 14
-skinparam ActivityFontName SansSerif
-skinparam ActivityFontSize 14
-skinparam ActivityBackgroundColor #EAF2F8
-skinparam ActivityBorderColor #4F78A5
-skinparam ActivityFontColor #17324D
-skinparam ArrowColor #4F78A5
-skinparam NoteBackgroundColor #F4F7FA
-skinparam NoteBorderColor #9AAFC3
-skinparam Shadowing false
-skinparam nodesep 30
-skinparam ranksep 40
+skinparam backgroundColor white
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 14
+skinparam shadowing false
+skinparam nodesep 40
+skinparam ranksep 35
+skinparam activityBackgroundColor #EAF2FF
+skinparam activityBorderColor #46699A
+title 正式发行的构建与独立验收
 start
 :S1 核对标签源;
-note right
-入口：release.yml source job → ops/release/integrity/source-build-identity.mjs
-作用：核对标签到 commit、干净输入、正式版本与 runner readiness
-<color:#995A00><b>预期：5 分钟 job timeout 上限；非实测/SLA</b></color>
-end note
-if (source 成功且 validation Environment 已批准？) then (是)
-else (否：停止)
+:S2 构建并交接候选;
+:S3 独立验收候选;
+:S4 只读晋升预检;
+:S5 人工批准发布;
+:S6 发布原候选;
 stop
-endif
-:S2 准备候选;
-note right
-入口<U+FF1A>release<U+002E>yml prepare job <U+2192> run<U+002D>release<U+002D>workflow<U+002E>mjs prepare
-作用：专用 Apple Silicon Mac/Podman 构建并验证候选
-<color:#995A00><b>预期：60 分钟规划预算（与 S3/S4 共用 180 分钟 job 上限；非实测/SLA）</b></color>
-end note
-if (候选准备成功？) then (是)
-else (否：FAIL / BLOCKED)
-stop
-endif
-:S3 取得开发报告;
-note right
-入口：python3 -m scripts.verification.commands.run_development_checks
-作用：对同 checkout 与候选执行唯一 development-change diff 证明
-<color:#995A00><b>预期：60 分钟规划预算（与 S2/S4 共用 180 分钟 job 上限；非实测/SLA）</b></color>
-end note
-if (开发报告 PASS？) then (是)
-else (否：FAIL / BLOCKED)
-stop
-endif
-:S4 仓库Verify;
-note right
-入口：python3 scripts/verification/commands/run_repository_checks.py
-作用：对同 checkout 执行完整 Repository Verify 并保留交接
-<color:#995A00><b>预期：60 分钟规划预算（与 S2/S3 共用 180 分钟 job 上限；非实测/SLA）</b></color>
-end note
-if (Repository Verify PASS？) then (是)
-else (否：FAIL / BLOCKED)
-stop
-endif
-:S5 原生验收;
-note right
-入口：scripts/acceptance/~_~_main~_~_.py（四项子命令）
-作用：不同原生 actor 完成冻结输入验证、独立只读审查和 DAG 核对
-<color:#995A00><b>预期：60 分钟规划预算；无单次样本，人工排期另计，非 SLA</b></color>
-end note
-if (完整原生链 PASS 且手动 dispatch 前置满足？) then (是)
-else (否：停止)
-stop
-endif
-:S6 只读预检;
-note right
-入口<U+FF1A>release<U+002E>yml dry<U+002D>check job <U+2192> run<U+002D>release<U+002D>workflow<U+002E>mjs resume
-作用：原标签只读重核既有候选和 Formal 证据；不构造归档、不发布
-<color:#995A00><b>预期：30 分钟 job timeout 上限；非实测/SLA</b></color>
-end note
-if (dry-check 成功？) then (是)
-else (否：FAIL / BLOCKED)
-stop
-endif
-:S7 人工批准;
-note right
-入口：无脚本（lexiflow-release-promotion 人工批准）
-作用：按保护规则独立人工批准发布
-<color:#995A00><b>预期：30 分钟人工计划预算；实际等待另计，非 SLA</b></color>
-end note
-if (promotion Environment 已批准？) then (是)
-else (否：不发布)
-stop
-endif
-:S8 publish;
-note right
-入口<U+FF1A>release<U+002E>yml promotion job <U+2192> run<U+002D>release<U+002D>workflow<U+002E>mjs resume <U+002D><U+002D>publish
-作用：fresh evidence check 后发布固定资产，只有此步注入发布凭据
-<color:#995A00><b>预期：45 分钟 job timeout 上限；非实测/SLA</b></color>
-end note
-stop
-note left
-FAIL / BLOCKED：任何准备、Verify、原生证据、标签/候选一致性检查失败即停止；缺证据不发布。
-S1→S4 为 workflow job/runner 流转；S4→S5 是本机原生人工交接；S5→S6 是负责人手动 dispatch；S6→S7→S8 含人工环境批准与 workflow job 交接。
-手动 dispatch 还须 validation Environment 批准；PUBLISH 不是测试或验收结果。
-end note
 @enduml
 ```
 
-S1→S4 表示 release workflow 的 source job、专用 runner prepare job 及同 checkout 的 development 与 Repository Verify 命令依次交接；S4→S5 是负责人在原 checkout 发起的本机原生验收，不是 Actions 自动签证。S5→S6 由负责人从原正式标签手动 dispatch，并通过 `lexiflow-release-validation` 批准；S6→S7→S8 含 workflow job 转移和受保护 Environment 人工批准。手动填写 `PUBLISH` 只满足输入门槛；无论 workflow 绿灯或人工验签，都不能代替相应自动检查/独立 Gate receipt。失败或证据缺失以 `FAIL` / `BLOCKED` 终止，不进入发布。
+S1→S2 是 GitHub 托管 source job 到专用 runner prepare job；S2→S3 是原 checkout 的原生交接，不是 Actions 自动签证。S3→S4 由负责人从原标签手动 dispatch，填写原 submission 和 `PUBLISH` 并通过 validation Environment；S4→S5→S6 包含只读预检、promotion Environment 人工批准和发布。单维护者可按既定保护批准本人触发的发行，但不能代替独立自动验证或原生角色。
 
 | 节点 | 命令或操作 | 成功判据 |
 | --- | --- | --- |
-| S1 核对标签源 | `node ops/release/integrity/source-build-identity.mjs --tag <tag>` | 精确 tag、commit、干净输入与正式版本匹配；runner readiness 已配置 |
-| S2 准备候选 | `node ops/release/workflow/run-release-workflow.mjs prepare <request>` | 专用 Apple Silicon Mac/Podman 上的候选身份和制品完整；validation Environment 已批准 |
-| S3 开发报告 | `python3 -m scripts.verification.commands.run_development_checks` | 同候选 checkout 的唯一 development-change diff 证明 PASS |
-| S4 Repository Verify | `python3 scripts/verification/commands/run_repository_checks.py` | 同 checkout 的完整 Repository Verify PASS 并保留本机交接 |
-| S5 原生 Formal | `python3 -m scripts.acceptance <subcommand>`（`submit`、`validate`、`review` 或 `check`） | 真实独立 actor 与冻结输入形成完整 Gate receipt/hash DAG |
-| S6 dry-check | `node ops/release/workflow/run-release-workflow.mjs resume <submission> <tag>` | 从原标签复核既有候选和 Formal 证据，不发布 |
-| S7 晋升批准 | GitHub Environment `lexiflow-release-promotion` | 符合保护规则的独立人工批准；不是测试结果 |
-| S8 发布 | `node ops/release/workflow/run-release-workflow.mjs resume <submission> <tag> --publish` | 新鲜证据复核成功，固定资产摘要核对通过，远端状态确认 |
+| S1 核对标签源 | `node ops/release/integrity/source-build-identity.mjs --tag <tag>` | 精确 tag、commit、干净输入、正式版本与 runner readiness 匹配 |
+| S2 构建并交接候选 | `node ops/release/workflow/run-release-workflow.mjs prepare <request>` | validation Environment 已批准；候选身份、制品及固定 handoff 完整，不签验收 |
+| S3 独立验收候选 | `python3 -m scripts.acceptance <subcommand>` | 以固定 handoff 送验；不同真实 actor 完成完整基线、只读审查及 DAG 核对，无需开发 diff |
+| S4 只读晋升预检 | `node ops/release/workflow/run-release-workflow.mjs resume <submission> <tag>` | 从原标签重核既有候选和 Formal，不构建、不测试、不发布 |
+| S5 人工批准发布 | GitHub Environment `lexiflow-release-promotion` | owner 按保护规则批准；不是测试或独立验收结果 |
+| S6 发布原候选 | `node ops/release/workflow/run-release-workflow.mjs resume <submission> <tag> --publish` | 新鲜证据和固定资产摘要复核成功，只有此步取得发布凭据，远端状态确认 |
 
-S1 规划预算 5 分钟（见 [`release.yml`](../../.github/workflows/release.yml) source job timeout）；S2–S4 共用一个 180 分钟 prepare job 上限；图中各 60 分钟仅是人工规划分配，不是三个独立 timeout；S5 取决于独立验证与审查排期；S6 dry-check 有 30 分钟 workflow 上限；S7 人工等待不计机器时间；S8 publish 有 45 分钟 workflow 上限。以上是工作流 timeout 上限/规划预算而非实测时长或 SLA，依赖拉取、人工等待和远端服务另计。步骤入口与源码位置见 [`release.yml`](../../.github/workflows/release.yml)、[`run-release-workflow.mjs`](../../ops/release/workflow/run-release-workflow.mjs)、[`run-release-build-pipeline.mjs`](../../ops/release/workflow/run-release-build-pipeline.mjs)、[Delivery Gate](../reference/delivery-gate.md)。
+job timeout 是单次执行上限，不是任务估时或逐次累积的发布审批预算：source 5 分钟，prepare 180 分钟，promotion-precheck 30 分钟，promotion 45 分钟。完整原生验收的执行与审阅另按本次冻结计划安排，不重复计入 Actions prepare。命令与精确参数见 [Delivery Gate](../reference/delivery-gate.md) 和[首次发行准备](github-actions/first-release/preparation.md)。
 
-正式晋升还必须核对同候选制品摘要、来源与许可、干净安装、同卷保留资料升级/失败恢复，以及真实独立 Formal 链。缺少任一项不得创建公开 Release 或更新正式版指针。已有发行生命周期的合成两代资料测试不能替代 local `upgrade` 的同卷验收。
-
-候选构建在镜像标签之外核对 JAR 内嵌身份；组装时核对扩展 ZIP 内嵌身份及 `manifest.json` 的完整 `buildIdentity`。源码摘要、build ID、展示版本、Chrome 数字版本和 commit 必须一致。ZIP/JAR 仅接受有界 ZIP32 stored/deflate，不接受 ZIP64、加密或歧义条目；错误不能通过重写 checksum 消除。干净 SNAPSHOT 可形成私有候选，但不满足正式标签晋升条件。
+正式晋升仍须同候选制品摘要、来源与许可、干净安装、同卷资料保留与升级失败恢复、真实独立 Formal 链。合成两代资料测试不替代真实候选；镜像标签、JAR/扩展内嵌身份、manifest 的 `buildIdentity`、源码摘要和 commit 必须一致。晋升只消费原候选，不重新构建或覆盖已有正式身份。
 
 ## 1.3. 仓库管理员准备
 

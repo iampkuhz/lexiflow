@@ -23,7 +23,9 @@ from scripts.verification.planning.check_definitions import (
     filter_checks_by_scope,
     load_declarations_snapshot,
 )
-from scripts.verification.planning.check_scope_selection import select_checks_for_changes
+from scripts.verification.planning.check_scope_selection import (
+    select_checks_for_changes,
+)
 from tests.verification.declaration_fixtures import write_declarations
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -111,7 +113,13 @@ class LifecycleCheckTest(unittest.TestCase):
         ):
             self.assertEqual(base[key], change[key], key)
         self.assertEqual(
-            ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "lifecycle"], base["command"]
+            [
+                "node",
+                "ops/release/test_tools/run-release-tool-tests.mjs",
+                "--suite",
+                "lifecycle",
+            ],
+            base["command"],
         )
         self.assertEqual(
             ["node", "git", "sh", "mktemp", "sha256-tool"], base["required_environment"]
@@ -135,7 +143,7 @@ class LifecycleCheckTest(unittest.TestCase):
             self.assertIn("ops/release/" + name, base_closure)
         for name in base["input_paths"]:
             selected = select_checks_for_changes(
-                self.checks, [input_member(ROOT, name)]
+                self.checks, [input_member(ROOT, name, check=self.by_id[self.base])]
             )
             self.assertIn(self.base, {c["check_id"] for c in selected}, name)
 
@@ -146,7 +154,9 @@ class LifecycleCheckTest(unittest.TestCase):
             check = self.by_scope[scope][self.base]
             self.assertIn(name, input_closure(ROOT, check))
             self.assertTrue(trigger_covers(self.by_id[check["check_id"]], name))
-        selected = select_checks_for_changes(self.checks, [input_member(ROOT, name)])
+        selected = select_checks_for_changes(
+            self.checks, [input_member(ROOT, name, check=self.by_id[self.base])]
+        )
         self.assertIn(self.base, {c["check_id"] for c in selected})
 
     def test_runtime_consumer_support_is_frozen_for_both_scopes(self):
@@ -314,7 +324,12 @@ class LifecycleInstallCheckTest(LifecycleCheckTest):
         second = self.by_scope["change-targeted"][self.base]
         self.assertEqual(
             first["command"],
-            ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "lifecycle-install"],
+            [
+                "node",
+                "ops/release/test_tools/run-release-tool-tests.mjs",
+                "--suite",
+                "lifecycle-install",
+            ],
         )
         self.assertEqual(first["input_paths"], second["input_paths"])
         self.assertEqual(
@@ -323,8 +338,12 @@ class LifecycleInstallCheckTest(LifecycleCheckTest):
         )
         self.assertEqual(first["required_environment"], second["required_environment"])
         first_closure = input_closure(ROOT, first)
-        self.assertIn("ops/release/build/release-runtime-entry-generator.mjs", first_closure)
-        self.assertIn("ops/release/runtime/release-installation-lifecycle.sh", first_closure)
+        self.assertIn(
+            "ops/release/build/release-runtime-entry-generator.mjs", first_closure
+        )
+        self.assertIn(
+            "ops/release/runtime/release-installation-lifecycle.sh", first_closure
+        )
         for name in (
             "ops/release/runtime/release-installation-state.sh",
             "ops/release/runtime/release-installation-docker.sh",
@@ -333,7 +352,7 @@ class LifecycleInstallCheckTest(LifecycleCheckTest):
         ):
             self.assertIn(name, first_closure)
             selected = select_checks_for_changes(
-                self.checks, [input_member(ROOT, name)]
+                self.checks, [input_member(ROOT, name, check=self.by_id[self.base])]
             )
             self.assertIn(self.base, {item["check_id"] for item in selected})
 
@@ -432,26 +451,32 @@ class LifecycleRuntimeCheckTest(LifecycleCheckTest):
     base = "eng.release.lifecycle-runtime"
 
     def test_release_source_policy_files_are_selected_and_frozen(self):
-        """真实构建的忽略规则与许可模板必须由两种范围选择并冻结。"""
+        """忽略规则与许可材料始终冻结，但各自只选择真实语义消费者。"""
         closures = {
             scope: input_closure(ROOT, self.by_scope[scope][self.base])
             for scope in ("repository-baseline", "change-targeted")
         }
         for name in (".gitignore", "ops/release/third-party-notices.md"):
             for scope in ("repository-baseline", "change-targeted"):
-                check = self.by_scope[scope][self.base]
                 self.assertIn(name, closures[scope])
-                self.assertTrue(trigger_covers(self.by_id[check["check_id"]], name))
+            consumer = self.base if name == ".gitignore" else "eng.release.manifest"
+            self.assertTrue(trigger_covers(self.by_id[consumer], name))
             selected = select_checks_for_changes(
-                self.checks, [input_member(ROOT, name)]
+                self.checks, [input_member(ROOT, name, check=self.by_id[consumer])]
             )
-            self.assertIn(self.base, {item["check_id"] for item in selected})
+            self.assertIn(consumer, {item["check_id"] for item in selected})
+            if name != ".gitignore":
+                self.assertNotIn(self.base, {item["check_id"] for item in selected})
 
     def test_actual_entry_reports_structured_blocked_without_docker(self):
         """实际消费者拒绝缺失 Verify 管道输入，不接触 Docker 或构建。"""
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run(
-                [sys.executable, "-m", "scripts.checks.release.source.check_synthetic_release_lifecycle"],
+                [
+                    sys.executable,
+                    "-m",
+                    "scripts.checks.release.source.check_synthetic_release_lifecycle",
+                ],
                 cwd=ROOT,
                 env={"PATH": directory},
                 input="",
@@ -481,7 +506,11 @@ class LifecycleRuntimeCheckTest(LifecycleCheckTest):
         second = self.by_scope["change-targeted"][self.base]
         self.assertEqual(
             first["command"],
-            ["python3", "-m", "scripts.checks.release.source.check_synthetic_release_lifecycle"],
+            [
+                "python3",
+                "-m",
+                "scripts.checks.release.source.check_synthetic_release_lifecycle",
+            ],
         )
         self.assertEqual(
             first["required_environment"],
@@ -503,7 +532,10 @@ class LifecycleRuntimeCheckTest(LifecycleCheckTest):
         self.assertEqual(first["command"], second["command"])
         self.assertEqual(first["required_environment"], second["required_environment"])
         self.assertEqual(first["input_paths"], second["input_paths"])
-        self.assertIn("scripts/environment/services/isolated_postgres_redis.py", input_closure(ROOT, first))
+        self.assertIn(
+            "scripts/environment/services/isolated_postgres_redis.py",
+            input_closure(ROOT, first),
+        )
         self.assertIn("ops/docker/tests/update-recovery.sh", input_closure(ROOT, first))
 
     def test_missing_tool_blocks_execution(self):

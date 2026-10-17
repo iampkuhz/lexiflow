@@ -1,5 +1,21 @@
 import {writeFile} from 'node:fs/promises';
 
+/** Fail closed unless this isolated context owns exactly one normal Chrome window. */
+export async function openInUniqueNormalWindow({windows,openPopup}) {
+  if (!Array.isArray(windows)) throw new Error('Chrome normal windows unavailable');
+  const normal=windows.filter(window=>window?.type==='normal');
+  if (normal.length!==1 || !Number.isInteger(normal[0]?.id)) {
+    throw new Error(`Expected exactly one normal Chrome window; found ${normal.length}`);
+  }
+  return openPopup(normal[0].id);
+}
+
+/** Invoke the real Chrome API through Playwright's extension service-worker context. */
+export async function openChromeActionPopup({windows,serviceWorker}) {
+  return openInUniqueNormalWindow({windows,openPopup:windowId=>
+    serviceWorker.evaluate(id=>chrome.action.openPopup({windowId:id}),windowId)});
+}
+
 /** CDP attaches to Chrome's real action popup, which Playwright does not list as a Page. */
 export async function openActionPopup({context,page,serviceWorker}) {
   await page.bringToFront();
@@ -8,7 +24,8 @@ export async function openActionPopup({context,page,serviceWorker}) {
   let target;
   try {
     const previous=new Set((await browserSession.send('Target.getTargets')).targetInfos.map(info=>info.targetId));
-    await serviceWorker.evaluate(()=>chrome.action.openPopup());
+    const windows=await serviceWorker.evaluate(()=>chrome.windows.getAll({windowTypes:['normal']}));
+    await openChromeActionPopup({windows,serviceWorker});
     for(let attempt=0;attempt<40;attempt++) {
       target=(await browserSession.send('Target.getTargets')).targetInfos.find(info=>info.url===url&&info.type==='page'&&!previous.has(info.targetId));
       if(target) break;

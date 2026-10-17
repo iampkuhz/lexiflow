@@ -156,23 +156,35 @@ if [ "$#" -eq 5 ] && [ "$1" = --host ] && [ "$2" = unix:///fake.sock ] &&
   printf "%s\\n" synthetic-daemon-id
   exit $?
 fi
-req=
+req="$mailbox/req.$$"
 active="$mailbox/active.$$"
 transport_error() {{
   : > "$mailbox/transport-failed" 2>/dev/null || :
-  if [ -n "$req" ]; then
-    rm -f "$req/argv.tmp" "$req/argv.ready" "$req/argv.claimed" "$req/stdout.tmp" "$req/stderr.tmp" "$req/status.tmp" "$req/done.tmp" "$req/stdout" "$req/stderr" "$req/status" "$req/done" 2>/dev/null || :
-    rmdir "$req" 2>/dev/null || :
-  fi
   rm -f "$active" 2>/dev/null || :
+  rm -f "$req/argv.tmp" "$req/argv.ready" "$req/argv.claimed" "$req/stdout.tmp" "$req/stderr.tmp" "$req/status.tmp" "$req/done.tmp" "$req/stdout" "$req/stderr" "$req/status" "$req/done" 2>/dev/null || :
+  rmdir "$req" 2>/dev/null || :
   exit 97
 }}
 trap 'transport_error' HUP INT TERM
 : > "$active" || transport_error
 umask 077
-req=$(mktemp -d "$mailbox/req.XXXXXXXX") || transport_error
+count=0
+while [ "$count" -lt 1000 ]; do
+  [ ! -d "$req" ] || break
+  count=$((count + 1))
+done
+if [ ! -d "$req" ]; then
+  count=0
+  while [ "$count" -lt 500 ]; do
+    [ ! -d "$req" ] || break
+    kill -0 "$server_pid" 2>/dev/null || transport_error
+    sleep 0.01 || transport_error
+    count=$((count + 1))
+  done
+fi
+[ -d "$req" ] || transport_error
 {{ printf '%s\\n' "$#" || transport_error; for arg do printf '%s\\000' "$arg" || transport_error; done; }} > "$req/argv.tmp" || transport_error
-mv "$req/argv.tmp" "$req/argv.ready" || transport_error
+: > "$req/argv.ready" || transport_error
 count=0
 while [ "$count" -lt 1000 ]; do
   [ ! -f "$req/done" ] || break
@@ -191,18 +203,28 @@ fi
 [ -f "$req/done" ] || transport_error
 [ -f "$req/stdout" ] && [ -r "$req/stdout" ] || transport_error
 [ -f "$req/stderr" ] && [ -r "$req/stderr" ] || transport_error
-if [ -s "$req/stdout" ]; then cat "$req/stdout" || transport_error; fi
-if [ -s "$req/stderr" ]; then cat "$req/stderr" >&2 || transport_error; fi
 exec 3< "$req/status" || transport_error
-IFS= read -r status <&3 || transport_error
+IFS= read -r status_record <&3 || transport_error
 extra=
 if IFS= read -r extra <&3 || [ -n "$extra" ]; then exec 3<&-; transport_error; fi
 exec 3<&- || transport_error
+case "$status_record" in
+  *:line) status=${{status_record%:line}}; stdout_mode=line;;
+  *:raw) status=${{status_record%:raw}}; stdout_mode=raw;;
+  *) transport_error;;
+esac
 case "$status" in
   0|[1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5]) ;;
   *) transport_error;;
 esac
-rm -f "$req/argv.claimed" "$req/stdout" "$req/stderr" "$req/status" "$req/done" "$active" || transport_error
+if [ -s "$req/stdout" ]; then
+  if [ "$stdout_mode" = line ]; then
+    IFS= read -r line < "$req/stdout" || transport_error
+    printf '%s\n' "$line" || transport_error
+  else cat "$req/stdout" || transport_error; fi
+fi
+if [ -s "$req/stderr" ]; then cat "$req/stderr" >&2 || transport_error; fi
+rm -f "$req/argv.tmp" "$req/argv.claimed" "$req/stdout" "$req/stderr" "$req/status" "$req/done" "$active" || transport_error
 rmdir "$req" || transport_error
 trap - HUP INT TERM
 exit "$status"
@@ -713,6 +735,82 @@ class OperationOwnershipCleanupTest(unittest.TestCase):
         self._assert_no_requests()
         self.assertFalse((self.fixture.mailbox / "transport-failed").exists())
 
+    def test_line_and_raw_outputs_preserve_exact_bytes(self):
+        for stdout, stderr in (
+            ("one line\\backslash\n", "error\n"),
+            ("nul\x00and no newline", "non-ASCII é\n"),
+        ):
+            with self.subTest(stdout=stdout):
+                fixture = OperationOwnershipTest(
+                    "test_stop_uses_full_ids_and_never_deletes_resources"
+                )
+                fixture.cli = lambda: (
+                    "import sys\n"
+                    f"sys.stdout.write({stdout!r})\n"
+                    f"sys.stderr.write({stderr!r})\n"
+                    "sys.exit(23)\n"
+                )
+                fixture.setUp()
+                try:
+                    result = subprocess.run(
+                        [str(fixture.bin / "docker"), "cleanup-test", "23"],
+                        env=fixture.env,
+                        capture_output=True,
+                        timeout=3,
+                    )
+                    self.assertEqual(result.returncode, 23)
+                    self.assertEqual(result.stdout, stdout.encode())
+                    self.assertEqual(result.stderr, stderr.encode())
+                    self.assertEqual(list(fixture.mailbox.glob("req.*")), [])
+                    self.assertEqual(list(fixture.mailbox.glob("active.*")), [])
+                    self.assertFalse((fixture.mailbox / "transport-failed").exists())
+                finally:
+                    self.assertTrue(fixture.doCleanups())
+                    self.assertIs(_owned_group_exists(fixture.server_pid), False)
+
+    def test_term_after_allocation_before_publish_cleans_request(self):
+        gate = self.fixture.root / "before-publish"
+        release = self.fixture.root / "publish-release"
+        stub = self.fixture.bin / "docker"
+        source = stub.read_text()
+        needle = '[ -d "$req" ] || transport_error\n'
+        self.assertEqual(source.count(needle), 1)
+        stub.write_text(
+            source.replace(
+                needle,
+                needle
+                + ": > "
+                + shlex.quote(str(gate))
+                + "\nwhile [ ! -f "
+                + shlex.quote(str(release))
+                + " ]; do sleep 0.01; done\n",
+                1,
+            )
+        )
+        process = self._start_client()
+        try:
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and not gate.exists():
+                if process.poll() is not None:
+                    break
+                time.sleep(0.005)
+            self.assertTrue(
+                gate.exists(), "request allocation handshake was not reached"
+            )
+            self.assertEqual(len(list(self.fixture.mailbox.glob("req.*"))), 1)
+            os.kill(process.pid, signal.SIGTERM)
+            release.touch()
+            process.communicate(timeout=3)
+            self.assertEqual(process.returncode, 97)
+            self.assertTrue((self.fixture.mailbox / "transport-failed").is_file())
+            self._assert_no_requests()
+            self.assertIsNone(self.fixture.server_process.poll())
+        finally:
+            release.touch()
+            if process.returncode is None:
+                self.fixture._terminate_owned(process)
+            self.assertIs(_owned_group_exists(process.pid), False)
+
     def test_partial_rm_failure_is_sticky_after_deleting_existing_response_file(self):
         deleted = self.fixture.root / "partial-deleted"
         self._write_rm(
@@ -788,7 +886,28 @@ def _serve_fake_cli(root):
         compiled = compile(source, "<fake-docker-model>", "exec")
         (mailbox / "server-ready.tmp").write_text("ready\n")
         os.replace(mailbox / "server-ready.tmp", mailbox / "server-ready")
+        # 由常驻 server 创建本次私有目录，避免每个 Shell 客户端另起 mktemp。
+        allocated = set()
         while True:
+            for active in mailbox.glob("active.*"):
+                suffix = active.name.removeprefix("active.")
+                if not suffix.isascii() or not suffix.isdecimal():
+                    raise ValueError("invalid active request identifier")
+                try:
+                    stat = active.stat()
+                except FileNotFoundError:
+                    continue
+                identity = (active.name, stat.st_ino, stat.st_mtime_ns)
+                if identity in allocated:
+                    continue
+                allocated.add(identity)
+                request = mailbox / f"req.{suffix}"
+                request.mkdir(mode=0o700)
+                if not active.exists():
+                    try:
+                        request.rmdir()
+                    except OSError:
+                        pass
             found = False
             for request in mailbox.glob("req.*"):
                 ready = request / "argv.ready"
@@ -798,7 +917,7 @@ def _serve_fake_cli(root):
                 claimed = request / "argv.claimed"
                 try:
                     os.replace(ready, claimed)
-                    with claimed.open("rb") as stream:
+                    with (request / "argv.tmp").open("rb") as stream:
                         raw = stream.read(256 * 1024 + 1)
                 except FileNotFoundError:
                     continue
@@ -821,10 +940,19 @@ def _serve_fake_cli(root):
                     stdout, stderr, status = b"", b"", 97
                 if len(stdout) > 256 * 1024 or len(stderr) > 256 * 1024:
                     raise ValueError("response exceeds 256 KiB")
+                line_output = (
+                    0 < len(stdout) <= 8192
+                    and stdout.endswith(b"\n")
+                    and b"\n" not in stdout[:-1]
+                    and all(32 <= byte <= 126 for byte in stdout[:-1])
+                )
                 for name, content in (
                     ("stdout", stdout),
                     ("stderr", stderr),
-                    ("status", f"{status}\n".encode()),
+                    (
+                        "status",
+                        f"{status}:{'line' if line_output else 'raw'}\n".encode(),
+                    ),
                 ):
                     temp = request / (name + ".tmp")
                     with temp.open("wb") as stream:

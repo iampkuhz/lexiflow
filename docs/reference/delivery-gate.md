@@ -8,7 +8,8 @@
 
 | 操作 | 命令 | 主要输入 |
 | --- | --- | --- |
-| 送验并冻结范围 | `python3 -m scripts.acceptance submit --task-id <id> --change-report-id <uuid> [--producer-run-id <id>]` | 当前 Task、PASS 开发报告；producer run 仅用于核对真实来源 |
+| 代码变更送验 | `python3 -m scripts.acceptance submit --task-id <id> --change-report-id <uuid> [--producer-run-id <id>]` | 当前 Task、PASS 开发报告；producer run 仅用于核对真实来源 |
+| 发行候选送验 | `python3 -m scripts.acceptance submit --task-id <id> --release-handoff [--producer-run-id <id>]` | 同一干净 checkout 的固定本机 handoff；仅正式发行 Task 可用，不接收开发报告或自选候选路径 |
 | 独立验证 | `python3 -m scripts.acceptance validate --submission-id <uuid>` | 冻结 submission；需验证的 actor 与 producer/submitter 不同 |
 | 有界批量验证 | 重复 `--submission-id <uuid>` 参数，最多 16 个唯一 submission | 各 Task 分别保留计划、报告和 validation record |
 | 独立审查 | `python3 -m scripts.acceptance review --validation-id <uuid> [--findings-json <path>]` | 仅验收计划要求时使用；由 findings 派生状态，不接受自报 decision；审查者与实现者及 validator 不同 |
@@ -23,14 +24,16 @@
 
 | 阶段 | 核对要点 |
 | --- | --- |
-| `submit` | Task 主体由完整真实 diff 与 Catalog scope 派生，绑定风险计划、检查要求、冻结输入、文件快照和 producer；不得由调用者自选风险或过滤路径。 |
+| `submit` | 代码主体由真实 diff 与 Catalog scope 派生；发行主体由固定 handoff、干净提交和 previous/target 候选派生。两种模式互斥，均保留 Task/version、依赖和真实 producer；不得由调用者自选风险、检查范围或过滤路径。 |
 | `validate` | 只由独立 actor 对冻结计划调用 Verification；正式验收复用[质量检查能力](../system/quality-checks.md)，不是第二套检查实现。输入漂移、缺项或未执行不能 PASS。 |
 | `review` | 仅高风险工程与正式发行计划要求独立 review；只读 frozen diff/evidence 并形成真实意见，不运行检查。机械或局部风险不造伪 review。 |
 | `check` | 只核对计划要求的 validation/review、receipt/hash DAG、当前依赖和精确批准；不重跑命令。缺少前置条件返回 `BLOCKED`。 |
 
 风险计划由当前 policy 和 Task 必需检查派生：机械／局部功能使用 `development-change`，高风险工程使用 `development-baseline` 并要求 review；正式发行使用 `repository-baseline` 并要求 review。日常开发报告不等于 Formal validation，局部验收链也不代表完整工作区验收。
 
-唯一活动 schema 为 submission.v6、validation/review/check.v5；不接受 legacy flags、scope confirmation 或自报决策。原 ignored 旧记录保留原始字节，不自动消费。
+发行入口只读 `tmp/quality/release-workflow/handoff.json` 及其绑定的请求、runtime request 和候选；不补造无差异开发报告。正式发行资格仍由 Task 必需 Check 命中现有 formal-only 集合派生，独立 validator 执行完整基线，review/check 不重跑。固定输入变化后旧 submission 不能继续使用。
+
+唯一活动 schema 为 submission.v7、validation/review/check.v5；普通 Task 的 `release_subject` 为 `null`，发行 Task 不伪造开发报告或 diff 附件。不接受 legacy flags、scope confirmation 或自报决策。原 ignored 旧记录保留原始字节，不自动消费。
 
 每层记录位于 ignored `tmp/quality/delivery-gate/current/`，并绑定 Task/version、输入、身份与内容哈希。只删除同一冻结父中可完整派生的镜像/子 hash；外部 runtime metadata 与附件 raw hashes 仍独立核对。后续读取会重新核对来源和当前输入；历史 PASS 不覆盖漂移、损坏、歧义依赖或缺失批准。实现细节见 [submit](../../scripts/acceptance/task_operations/submit_task_for_acceptance.py)、[validate](../../scripts/acceptance/task_operations/run_independent_task_validation.py)、[review](../../scripts/acceptance/task_operations/record_independent_task_review.py)、[check](../../scripts/acceptance/task_operations/evaluate_task_acceptance.py)；执行步骤见[编码后执行门禁](../scenarios/run-repository-gates.md)。
 

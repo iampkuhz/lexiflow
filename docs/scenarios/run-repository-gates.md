@@ -17,7 +17,7 @@
 | 使用时机 | 入口与前置 | 产物与失败去向 |
 | --- | --- | --- |
 | 快速反馈本次实现 | 所改模块原生静态／编译／直接回归；改动范围明确且依赖已就绪 | 命令输出与实际范围；失败先修实现或环境，再按需取得开发报告 |
-| 日常开发报告（CLI） | `python3 -m scripts.verification.commands.run_development_checks`；先按[验证环境](verification-environment.md)准备，CLI 不自动启动隔离服务 | 按变化与消费依赖选择的 `development-change` 报告；FAIL／BLOCKED 返回对应实现或环境，修复后重新检查 |
+| 日常开发报告（CLI） | `python3 -m scripts.verification.commands.run_development_checks`；先按[验证环境](verification-environment.md)准备，CLI 不自动启动隔离服务；广泛闭包超过 Stop 总期限时使用此入口 | 与 Stop 相同，按变化与消费依赖选择的 `development-change` 报告；FAIL／BLOCKED 返回对应实现或环境，修复后重新检查 |
 | 日常开发报告（Stop） | 正常 Stop → `run_stop_checks.py`；同样按完整 diff 选择 `development-change`，Stop 自动准备并清理本次隔离服务 | 开发 verification report，不是 Formal receipt；首次 FAIL／BLOCKED 请求修复，续轮失败停止自动重试 |
 | 显式完整 Repository Verify | `python3 scripts/verification/commands/run_repository_checks.py`；需先准备完整基线环境，执行 `repository-baseline` | Repository baseline report；根据失败 Check 或阻断原因修复／准备，不以局部开发 PASS 替代 |
 | 任务独立验收 | F08：`python3 -m scripts.acceptance <subcommand>`；Task／计划冻结且身份分离；高风险仍用 `development-baseline`＋独立 review | validation、适用 review 与验收链；失败回修，证据缺项补齐后重核，相关输入变化须重新送验 |
@@ -315,7 +315,7 @@ endlegend
 .local/lexiflow-python/bin/python -m scripts.verification.commands.run_development_checks
 ```
 
-显式 CLI 与正常 Stop 不会自动跨调用去重，普通交付不能绕过 Stop。完整 Verify／diagnose／quick CI 按目的另选，入口见[Verify](../reference/verification.md)与[CI](github-actions.md)。
+显式 CLI 与 Stop 的择一安排及交接见[协作规则](../../harness/agent-policy.md#冻结验证与独立性)。两次调用不会自动跨调用去重，应避免对同一冻结输入重复触发。完整 Verify／diagnose／quick CI 按目的另选，入口见[Verify](../reference/verification.md)与[CI](github-actions.md)。
 
 <a id="14-展开-c-正式验证审查与条件核对"></a>
 
@@ -323,7 +323,7 @@ endlegend
 
 **对应总图 S5 [C]。** F08 分派 F09 `submit.py`、F10 `validate.py`、F11 `review.py`、F12 `check.py`。 CLI 入口：[delivery_gate/__main__.py](../../scripts/acceptance/__main__.py)::`main()`；命令为 `python3 -m scripts.acceptance <子命令> ...`，参数见 [Delivery Gate](../reference/delivery-gate.md)。
 
-`submit.py`、`validate.py`、`review.py`、`check.py` 是独立职责的实现文件，不是各自可直接运行的 CLI。各阶段由不同职责的执行者交接，不是一个 actor 连续自签。
+`submit.py`、`validate.py`、`review.py`、`check.py` 是独立职责的实现文件，不是各自可直接运行的 CLI。各阶段由不同职责的执行者交接，不是一个 actor 连续自签。下图展开代码 Task 的开发报告送验；正式发行通过同一 CLI 的 `--release-handoff` 送验固定候选，不先制造开发差异，步骤见[发行准备](github-actions/first-release/preparation.md#13-在原-checkout-完成真实独立-formal)。
 
 ```plantuml
 @startuml
@@ -440,4 +440,4 @@ S2 环境确认、S6 读结果、S7–S10 交接或分析均没有统一自动�
 | C：高风险非发行 35–50 分钟 | 相近计划的 validation 推估 25–30 分钟，另含主动准备、审阅与交接；不是 Formal 实测，发行另估 |
 | 秒级处理与 Agent 工作 | 均为规划预算；父阶段包含子图，不重复相加；两次独立执行分别计时 |
 
-预期不是 SLA、timeout 或 PASS 条件，也不证明优化收益。日常高风险若仅命中局部 checks，耗时按其实际闭包重新估计；独立 Formal 高风险另行计入 development-baseline 与 review。执行步骤只在本页完整维护；改进任务见[优化场景](optimize-repository-gates.md)，字段与参数见各能力页，未决设计见[问题台账](../roadmap/master-plan/phase2/status.md)。返回[总入口](../README.md)。
+预期不是 SLA、timeout 或 PASS 条件，也不证明优化收益。任务估时、单次执行时限和失败成本的责任边界见[协作规则](../../harness/agent-policy.md#失败预算与接手)。日常高风险若仅命中局部 checks，耗时按其实际闭包重新估计；独立 Formal 高风险另行计入 development-baseline 与 review。执行步骤只在本页完整维护；改进任务见[优化场景](optimize-repository-gates.md)，字段与参数见各能力页，未决设计见[问题台账](../roadmap/master-plan/phase2/status.md)。返回[总入口](../README.md)。

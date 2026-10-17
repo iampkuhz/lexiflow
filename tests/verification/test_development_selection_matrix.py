@@ -12,11 +12,16 @@ from scripts.verification.planning.check_definitions import (
     filter_checks_by_scope,
     load_declarations_snapshot,
 )
-from scripts.verification.execution.check_plan_runner import freeze_inputs
 from scripts.verification.execution.check_runner import snapshot_check_inputs
 from scripts.verification.planning.change_risk_assessment import formal_only_ids
-from scripts.verification.planning.check_scope_selection import select_checks_for_changes
-from scripts.verification.planning.check_scope_selection import ScopeError, resolve_module_dependencies
+from scripts.verification.planning.check_scope_selection import (
+    select_checks_for_changes,
+)
+from scripts.verification.planning.check_scope_selection import (
+    ScopeError,
+    resolve_module_dependencies,
+)
+from scripts.verification import freeze_inputs
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -45,6 +50,17 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
             for check in select_checks_for_changes(self.checks, [path])
         }
 
+    def frozen_ids(self, path):
+        """冻结真实输入闭包并返回含模块依赖的最终 Check 集合。"""
+        report = freeze_inputs(
+            ROOT,
+            verification_scope="development-change",
+            base="HEAD",
+            _subject_changed_files=[path],
+        )
+        self.assertEqual("PASS", report["result"], report)
+        return {item["check_id"] for item in report["checks"]}
+
     def test_canonical_checks_and_scene_views_preserve_execution_and_input_contract(
         self,
     ):
@@ -65,7 +81,7 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
                     self.assertEqual(scope, view["scope"])
                     self.assertEqual(
                         canonical["triggers"] if scope == "change-targeted" else [],
-                        view["triggers"]
+                        view["triggers"],
                     )
                     for key in (
                         "command",
@@ -84,26 +100,97 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
         self.assertTrue(
             all(
                 item["command"][:3]
-                == ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py", "--group"]
+                == [
+                    "python3",
+                    "scripts/checks/deployment/run_deployment_contract_tests.py",
+                    "--group",
+                ]
                 for item in docker_groups
             )
         )
 
-    def test_every_declared_input_is_covered_by_its_targeted_triggers(self):
-        """每项实际输入都能触发对应日常检查，缺口失败关闭。"""
-        for check in self.targeted:
-            triggers = [trigger["path"].rstrip("/") for trigger in check["triggers"]]
-            for input_path in check["input_paths"]:
-                with self.subTest(check=check["check_id"], input=input_path):
-                    normalized = input_path.rstrip("/")
-                    self.assertTrue(
-                        any(
-                            normalized == trigger
-                            or normalized.startswith(trigger + "/")
-                            for trigger in triggers
-                        ),
-                        f"uncovered declared input: {input_path}",
-                    )
+    def test_trigger_matrix_tracks_real_consumers_and_fails_closed_for_unknown_paths(
+        self,
+    ):
+        """触发按真实消费者收窄；冻结输入闭包仍保留，未知源不猜测覆盖。"""
+        docs = "ops/release/third-party-notices.md"
+        licenses = "ops/release/distribution-licenses.json"
+        cases = {
+            docs: {"eng.release.manifest"},
+            licenses: {"eng.release.manifest"},
+            "LICENSE": {"eng.release.version"},
+            "ops/release/version.txt": {
+                "eng.release.version",
+                "eng.backend.build-contract",
+                "eng.backend.delivery",
+                "eng.extension.quality",
+                "eng.release.docker-local-on-change",
+                "eng.release.docker-node-on-change",
+            },
+            "ops/release/integrity/source-build-identity.mjs": {
+                "eng.release.version",
+                "eng.backend.delivery",
+                "eng.backend.build-contract",
+                "eng.extension.quality",
+                "eng.release.manifest",
+                "eng.release.build",
+                "eng.release.runtime-entry",
+                "eng.release.lifecycle",
+                "eng.release.lifecycle-install",
+                "eng.release.docker-surface-on-change",
+                "eng.release.docker-shell-on-change",
+                "eng.release.docker-local-on-change",
+                "eng.release.docker-node-on-change",
+                "eng.delivery-gate.module-tests",
+                "eng.agents.module-tests",
+                "eng.repository.python-quality",
+                "eng.verification.module-tests",
+            },
+            "ops/release/build/package-release-artifacts.mjs": {
+                "eng.release.version",
+                "eng.backend.build-contract",
+                "eng.backend.delivery",
+                "eng.extension.quality",
+                "eng.release.build",
+                "eng.release.manifest",
+                "eng.release.lifecycle",
+                "eng.release.lifecycle-install",
+                "eng.release.runtime-entry",
+                "eng.release.docker-surface-on-change",
+                "eng.release.docker-shell-on-change",
+                "eng.release.docker-local-on-change",
+                "eng.release.docker-node-on-change",
+                "eng.delivery-gate.module-tests",
+                "eng.agents.module-tests",
+                "eng.repository.python-quality",
+                "eng.verification.module-tests",
+            },
+            "backend/product/api/src/main/java/io/lexiflow/api/example/Example.java": {
+                "eng.backend.build-contract",
+                "eng.backend.delivery",
+                "eng.extension.quality",
+                "eng.release.docker-surface-on-change",
+            },
+        }
+        for path, expected in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(expected, self.frozen_ids(path))
+        for path in (docs, licenses, "LICENSE"):
+            selected = self.selected(path)
+            self.assertNotIn("eng.backend.delivery", selected)
+            self.assertNotIn("eng.backend.build-contract", selected)
+            self.assertNotIn("eng.extension.quality", selected)
+        unknown = freeze_inputs(
+            ROOT,
+            verification_scope="development-change",
+            base="HEAD",
+            _subject_changed_files=["ops/release/new-unclassified-source.bin"],
+        )
+        self.assertEqual("FAIL", unknown["result"])
+        self.assertEqual("coverage-gap", unknown["reason"])
+        # Trigger contraction must not weaken frozen consumer input closure.
+        for check in self.checks:
+            self.assertTrue(check["input_paths"], check["check_id"])
 
     def test_docker_consumption_edges_are_frozen_by_consumers_not_only_surface(self):
         """共享源必须进入实际消费者输入与触发，不可由 surface 库存守门代替。"""
@@ -121,7 +208,8 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
             self.assertIn("infra/local/compose.yaml", check["input_paths"])
             self.assertIn("infra/postgres/schema.sql", check["input_paths"])
         self.assertIn(
-            "ops/release/runtime/release-installation-docker.sh", input_closure(ROOT, groups["shell"])
+            "ops/release/runtime/release-installation-docker.sh",
+            input_closure(ROOT, groups["shell"]),
         )
         self.assertTrue(
             any(
@@ -256,16 +344,7 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
         }
         for path, expected in expectations.items():
             with self.subTest(path=path):
-                frozen = freeze_inputs(
-                    ROOT,
-                    verification_scope="development-change",
-                    base="HEAD",
-                    _subject_changed_files=[path],
-                )
-                self.assertEqual("PASS", frozen["result"], frozen)
-                self.assertEqual(
-                    expected, {check["check_id"] for check in frozen["checks"]}
-                )
+                self.assertEqual(expected, self.frozen_ids(path))
 
     def test_deleted_files_and_new_descendants_still_match_directory_triggers(self):
         # Selection receives normalized changed paths for additions, edits, and deletions.
@@ -329,8 +408,8 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
                 "eng.release.docker-shell-on-change",
                 "eng.release.docker-local-on-change",
                 "eng.release.docker-node-on-change",
-                "eng.agents.module-tests",
                 "eng.delivery-gate.module-tests",
+                "eng.agents.module-tests",
                 "eng.repository.module-tests",
                 "eng.repository.python-quality",
                 "eng.verification.module-tests",
@@ -343,24 +422,15 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
                 "eng.verification.module-tests",
             },
             "tests/delivery_gate/fixtures.py": {
-                "eng.agents.module-tests",
                 "eng.delivery-gate.module-tests",
+                "eng.agents.module-tests",
                 "eng.repository.module-tests",
                 "eng.verification.module-tests",
             },
         }
         for path, expected in cases.items():
             with self.subTest(path=path):
-                frozen = freeze_inputs(
-                    ROOT,
-                    verification_scope="development-change",
-                    base="HEAD",
-                    _subject_changed_files=[path],
-                )
-                self.assertEqual("PASS", frozen["result"], frozen)
-                self.assertEqual(
-                    expected, {item["check_id"] for item in frozen["checks"]}
-                )
+                self.assertEqual(expected, self.frozen_ids(path))
 
         # Static consumer map is deliberately bounded to observed imports/copies.
         consumer_sources = {
@@ -405,7 +475,13 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
             }
             pending = {
                 str(path.relative_to(ROOT))
-                for folder in ({"delivery_gate": "scripts/acceptance", "repository": "scripts/checks/repository"}.get(module, f"scripts/{module}"), f"tests/{module}")
+                for folder in (
+                    {
+                        "delivery_gate": "scripts/acceptance",
+                        "repository": "scripts/checks/repository",
+                    }.get(module, f"scripts/{module}"),
+                    f"tests/{module}",
+                )
                 for path in (ROOT / folder).rglob("*.py")
             }
             visited = set()
