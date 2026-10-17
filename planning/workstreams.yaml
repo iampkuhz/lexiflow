@@ -499,6 +499,228 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-QLT-2407
+        title: 修复浏览器弹窗测试的窗口归属
+        priority: P0
+        task_version: 1
+        change_version: 1.2.0
+        task_source: openspec/changes/gate-trigger-allocation/tasks.md
+        estimated_minutes: 25
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - extension/tests/action-popup.mjs
+        - extension/tests/action-popup.test.mjs
+        - planning/workstreams.yaml
+        - openspec/changes/gate-trigger-allocation/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 为测试自有真实action popup选择明确窗口，保留全部浏览器验收和失败关闭。
+        acceptance_criteria:
+        - 不增加Gate或Check，不改产品、manifest、权限、超时或生产逻辑。
+        - 明确窗口和歧义拒绝单元回归、真实弹窗及现有extension quality精准回归通过。
+        acceptance_evidence:
+        - 实际原生来源、直接命令和原始结果，不代表Formal。
+        validation_command: node extension/scripts/checks/run-extension-checks.mjs
+        required_check_ids: [eng.extension.quality]
+        depends_on: []
+        deliverable: 测试窗口选择修复及直接证据，不授予发行资格。
+      - id: LF-TSK-QLT-2406
+        title: 修复停机所有权测试私有替身传输
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/gate-trigger-allocation/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/tests/test_operation_ownership.py
+        - planning/workstreams.yaml
+        - openspec/changes/gate-trigger-allocation/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 消除私有传输开销导致的15秒停机测试超时，保留真实生产语义和所有断言。
+        acceptance_criteria:
+        - 不增加 Gate 或 Check，不放宽超时、不缓存或跳过业务请求，不修改生产 Shell。
+        - 原失败用例、私有传输及清理反例和现有 shell 组回归通过；最终冻结后独立验证和审查。
+        acceptance_evidence:
+        - 当前真实原生来源、定点量测及原始日志；执行状态仅状态页。
+        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_operation_ownership.py -v
+        required_check_ids: [eng.release.docker-contract]
+        depends_on: []
+        deliverable: 私有测试替身的修复与直接回归，不代表真实容器或发行验收。
+      - id: LF-TSK-QLT-2401
+        title: 调整日常检查的触发范围
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/gate-trigger-allocation/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - config/engineering/module-checks.yaml
+        - tests/verification/test_development_selection_matrix.py
+        - tests/verification/test_release_checks.py
+        - tests/verification/test_declarations.py
+        - tests/verification/test_scope.py
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 调整日常检查的触发范围，准确区分直接反馈、开发验证与正式发行资格。
+        acceptance_criteria:
+        - 不增加 Check、Gate 或审批层，所有现有完整基线成员与判据保留。
+        - 按真实语义输入触发，保留完整冻结闭包及未知覆盖失败关闭；材料与许可说明不触发无关全集。
+        acceptance_evidence:
+        - 当前原生执行事实、直接检查原始记录或独立冻结审查；执行状态仅在本次 status.md。
+        validation_command: python3 -m unittest tests.verification.test_development_selection_matrix tests.verification.test_release_checks tests.verification.test_declarations tests.verification.test_scope
+        required_check_ids: [eng.repository.planning, eng.repository.docs]
+        depends_on: []
+        deliverable: 调整日常检查的触发范围的本次实现或独立证据，不授予 Git 集成或公开发行许可。
+      - id: LF-TSK-QLT-2402
+        title: 以固定发行候选送验现有独立验收链
+        priority: P0
+        task_version: 2
+        change_version: 1.3.0
+        task_source: openspec/changes/gate-trigger-allocation/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/acceptance/**
+        - tests/delivery_gate/**
+        - tests/verification/test_release_promotion.py
+        - tests/verification/test_candidate_runtime_check.py
+        - tests/verification/test_release_registry.py
+        - ops/release/workflow/run-release-workflow.mjs
+        - ops/release/workflow/promote_verified_release.py
+        - ops/release/tests/workflow.test.mjs
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 以固定发行候选送验现有独立验收链，准确区分直接反馈、开发验证与正式发行资格。
+        acceptance_criteria:
+        - 普通 Task 的真实差异和开发报告要求不变；发行仅由固定 handoff 与 Task 必需检查内部派生。
+        - 干净提交、候选和原始附件精确绑定，schema/所有消费者同步最新逻辑；角色独立、完整基线与漂移拒绝不减。
+        acceptance_evidence:
+        - 当前原生执行事实、直接检查原始记录或独立冻结审查；执行状态仅在本次 status.md。
+        validation_command: python3 -m unittest discover -s tests/delivery_gate
+        required_check_ids: [eng.repository.planning, eng.repository.docs]
+        depends_on: []
+        deliverable: 以固定发行候选送验现有独立验收链的本次实现或独立证据，不授予 Git 集成或公开发行许可。
+      - id: LF-TSK-QLT-2403
+        title: 集成门禁执行归属和唯一操作说明
+        priority: P0
+        task_version: 4
+        change_version: 1.3.0
+        task_source: openspec/changes/gate-trigger-allocation/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - .github/workflows/release.yml
+        - tests/verification/test_ci_workflows.py
+        - tests/verification/declaration_fixtures.py
+        - tests/verification/test_build_checks.py
+        - tests/verification/test_docker_contract_checks.py
+        - tests/verification/test_lifecycle_checks.py
+        - tests/verification/test_release_manifest_checks.py
+        - tests/verification/test_runtime_entry_checks.py
+        - harness/README.md
+        - harness/agent-policy.md
+        - planning/workstreams.yaml
+        - docs/**
+        - openspec/changes/gate-trigger-allocation/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 集成门禁执行归属和唯一操作说明，准确区分直接反馈、开发验证与正式发行资格。
+        acceptance_criteria:
+        - Actions 只构建交接，原生独立 validator 执行同候选完整基线，review/check/晋升只读消费。
+        - 估时、执行时限和运行成本分别说明；不恢复发布或新增门禁，不覆盖他人工作。
+        acceptance_evidence:
+        - 当前原生执行事实、直接检查原始记录或独立冻结审查；执行状态仅在本次 status.md。
+        validation_command: python3 -m unittest tests.verification.test_ci_workflows
+        required_check_ids: [eng.repository.planning, eng.repository.docs]
+        depends_on:
+        - task_id: LF-TSK-QLT-2401
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-QLT-2402
+          type: hard
+          required_task_version: 2
+          required_change_version: 1.3.0
+          required_result: PASS
+        deliverable: 集成门禁执行归属和唯一操作说明的本次实现或独立证据，不授予 Git 集成或公开发行许可。
+      - id: LF-TSK-QLT-2404
+        title: 独立验证门禁触发和分配修正
+        priority: P0
+        task_version: 5
+        change_version: 1.3.0
+        task_source: openspec/changes/gate-trigger-allocation/tasks.md
+        estimated_minutes: 45
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/gate-trigger-allocation/validation/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 独立验证门禁触发和分配修正，准确区分直接反馈、开发验证与正式发行资格。
+        acceptance_criteria:
+        - 最终真实输入冻结后由不同于所有 producer 的原生 actor 择一执行现有开发 CLI 或 Stop 的完整受选检查；本次广域输入使用 CLI。
+        - 必需项未运行或失败不称 PASS；不叠跑完整 Repository 或真实发行，不签 Formal。
+        acceptance_evidence:
+        - 当前原生执行事实、直接检查原始记录或独立冻结审查；执行状态仅在本次 status.md。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids: [eng.repository.planning, eng.repository.docs]
+        depends_on:
+        - task_id: LF-TSK-QLT-2407
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.2.0
+          required_result: PASS
+        - task_id: LF-TSK-QLT-2406
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-QLT-2401
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-QLT-2402
+          type: hard
+          required_task_version: 2
+          required_change_version: 1.3.0
+          required_result: PASS
+        - task_id: LF-TSK-QLT-2403
+          type: hard
+          required_task_version: 4
+          required_change_version: 1.3.0
+          required_result: PASS
+        deliverable: 独立验证门禁触发和分配修正的本次实现或独立证据，不授予 Git 集成或公开发行许可。
+      - id: LF-TSK-QLT-2405
+        title: 独立审查门禁调整的冻结证据
+        priority: P0
+        task_version: 4
+        change_version: 1.3.0
+        task_source: openspec/changes/gate-trigger-allocation/tasks.md
+        estimated_minutes: 30
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/gate-trigger-allocation/review/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 独立审查门禁调整的冻结证据，准确区分直接反馈、开发验证与正式发行资格。
+        acceptance_criteria:
+        - 不同于 producer 和 validator 的真实 actor 只读冻结 diff 与当次检查证据，不运行检查。
+        - 核对没有新增门禁、没有降低完整发行证明、没有伪造来源或扩大执行范围。
+        acceptance_evidence:
+        - 当前原生执行事实、直接检查原始记录或独立冻结审查；执行状态仅在本次 status.md。
+        validation_command: python3 -m json.tool tmp/phase-tools/gate-trigger-allocation/review/report.json
+        required_check_ids: [eng.repository.planning, eng.repository.docs]
+        depends_on:
+        - task_id: LF-TSK-QLT-2404
+          type: hard
+          required_task_version: 5
+          required_change_version: 1.3.0
+          required_result: PASS
+        deliverable: 独立审查门禁调整的冻结证据的本次实现或独立证据，不授予 Git 集成或公开发行许可。
       - id: LF-TSK-QLT-2301
         title: Verification 与仓库检查目录消费者
         priority: P1

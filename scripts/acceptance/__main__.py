@@ -19,8 +19,8 @@ def _output(result: dict) -> int:
 
 def _cmd_submit(args: argparse.Namespace) -> int:
     from scripts.acceptance.task_operations.submit_task_for_acceptance import (
-        submit,
         SubmissionError,
+        submit,
     )
 
     try:
@@ -28,6 +28,7 @@ def _cmd_submit(args: argparse.Namespace) -> int:
             args.repo_root,
             task_id=args.task_id,
             change_report_id=args.change_report_id,
+            release_handoff=args.release_handoff,
             producer_run_id=args.producer_run_id,
         )
     except SubmissionError as exc:
@@ -37,8 +38,8 @@ def _cmd_submit(args: argparse.Namespace) -> int:
 
 def _cmd_validate(args: argparse.Namespace) -> int:
     from scripts.acceptance.task_operations.run_independent_task_validation import (
-        validate_batch,
         ValidationError,
+        validate_batch,
     )
 
     try:
@@ -61,8 +62,8 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 
 def _cmd_review(args: argparse.Namespace) -> int:
     from scripts.acceptance.task_operations.record_independent_task_review import (
-        review,
         ReviewError,
+        review,
     )
 
     try:
@@ -86,8 +87,8 @@ def _cmd_review(args: argparse.Namespace) -> int:
 
 def _cmd_check(args: argparse.Namespace) -> int:
     from scripts.acceptance.task_operations.evaluate_task_acceptance import (
-        check_conditions,
         CheckError,
+        check_conditions,
     )
 
     try:
@@ -140,7 +141,13 @@ def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
 
     submit_parser = subparsers.add_parser("submit", help="Create formal submission")
     submit_parser.add_argument("--task-id", required=True)
-    submit_parser.add_argument("--change-report-id", required=True)
+    modes = submit_parser.add_mutually_exclusive_group(required=True)
+    modes.add_argument("--change-report-id")
+    modes.add_argument(
+        "--release-handoff",
+        action="store_true",
+        help="Use the fixed local release workflow handoff",
+    )
     submit_parser.add_argument(
         "--producer-run-id",
         default=None,

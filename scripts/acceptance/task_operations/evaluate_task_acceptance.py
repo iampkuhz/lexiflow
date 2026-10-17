@@ -9,10 +9,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from scripts.acceptance.task_definition.task_acceptance_plan import (
-    review_required,
-    verify_validation_evidence,
-)
 from scripts.acceptance.evidence.acceptance_actor_identity import verify_authority
 from scripts.acceptance.evidence.acceptance_record_store import (
     RecordError,
@@ -22,9 +18,13 @@ from scripts.acceptance.evidence.acceptance_record_store import (
     list_submissions,
     load_submission,
     publish_json,
-    read_json,
     read_bound_bytes,
+    read_json,
     sha256_bytes,
+)
+from scripts.acceptance.task_definition.task_acceptance_plan import (
+    review_required,
+    verify_validation_evidence,
 )
 from scripts.acceptance.task_definition.task_acceptance_requirements import (
     load_task_requirements,
@@ -68,10 +68,14 @@ def _inspect_evidence(
 ) -> _EvidenceInspection:
     from scripts.acceptance.task_operations.record_independent_task_review import (
         ReviewError,
+    )
+    from scripts.acceptance.task_operations.record_independent_task_review import (
         _verify_independence as reviewer_independence,
     )
     from scripts.acceptance.task_operations.run_independent_task_validation import (
         ValidationError,
+    )
+    from scripts.acceptance.task_operations.run_independent_task_validation import (
         _verify_independence as validator_independence,
     )
 
@@ -114,8 +118,8 @@ def _inspect_evidence(
             errors.append("validation-evidence-drift")
     if review is not None:
         from scripts.acceptance.task_operations.record_independent_task_review import (
-            _findings,
             _finding_result,
+            _findings,
         )
 
         try:
@@ -183,9 +187,10 @@ def _inspect_dependency(
         errors.append(authority)
     try:
         _verify_producer(repo, submission)
-        for label in ("change_report", "diff"):
-            descriptor = submission[label]
-            read_bound_bytes(repo, descriptor["locator"], descriptor["sha256"])
+        if submission.get("release_subject") is None:
+            for label in ("change_report", "diff"):
+                descriptor = submission[label]
+                read_bound_bytes(repo, descriptor["locator"], descriptor["sha256"])
     except (ValidationError, KeyError, RecordError) as exc:
         errors.append(getattr(exc, "code", "dependency-source-invalid"))
     return _EvidenceInspection(tuple(errors), inspection.complete)
@@ -600,7 +605,7 @@ def _evaluate_conditions(
             "detail": exc.detail,
             "delivery_rerun": False,
         }, None
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - convert unexpected evidence failures to BLOCKED
         return {
             "submission_id": submission_id,
             "result": "BLOCKED",

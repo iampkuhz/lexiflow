@@ -1,6 +1,7 @@
 """正式 Delivery Gate 记录的 fail-closed 存储原语。只信任受约束的本地根目录、不可变记录与哈希绑定。"""
 
 from __future__ import annotations
+
 import hashlib
 import json
 import os
@@ -330,10 +331,11 @@ _RECORD_FIELDS = {
             "producer",
             "verification_freeze",
             "task_subject",
+            "release_subject",
             "created_at",
             "content_hash",
         },
-        "lexiflow.delivery-gate-submission.v6",
+        "lexiflow.delivery-gate-submission.v7",
         "submission_id",
     ),
     "validation": (

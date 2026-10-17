@@ -84,7 +84,7 @@ endlegend
 
 检查选择来自每个变化消费输入的 canonical triggers 与模块依赖闭包。高风险不单独追加全仓 `development-baseline`；风险分类、未知覆盖、依赖环与漂移失败关闭仍保留。无开发 diff 不产生开发 PASS。需要完整仓库证明时显式使用 Repository 入口，不再提供另一种 Change diff 报告入口。
 
-独立 Formal 高风险计划使用 `development-baseline` 并要求 review；正式发行计划使用完整 `repository-baseline` 并要求 review。发行资格由 Task 必需 Check 命中 Registry `scenario_policy.ci_quick.formal_only_check_ids` 派生，不从 Task 名称或普通 CI 绿灯推断。详见 [Delivery Gate](delivery-gate.md)。
+独立 Formal 高风险计划使用 `development-baseline` 并要求 review；正式发行计划使用完整 `repository-baseline` 并要求 review。发行资格由 Task 必需 Check 命中 Registry `scenario_policy.ci_quick.formal_only_check_ids` 派生，不从 Task 名称或普通 CI 绿灯推断。发行以固定 handoff 送验干净提交和候选，不要求开发 diff；完整发行基线由独立 validator 执行，Actions 不提前重复运行。详见 [Delivery Gate](delivery-gate.md)。
 
 ### 1.1.1. 实现者直接自检与精确诊断
 
@@ -107,7 +107,7 @@ endlegend
 
 Registry 为 `lexiflow.module-checks.v5`。每个稳定 `check_id` 直接拥有命令 argv、输入、环境与超时，不另设执行 ID、`module` 展示名称或关联层。纯输入目录递归冻结实际源码集合，排除构建产物但拒绝显式声明产物路径；四组 Docker 测试仍保存精确且不重叠的执行成员。`scenarios` 仅声明非空资格列表，例如 `[repository-baseline, change-targeted]`，不提供场景内 trigger override 或 fallback。唯一 `triggers` 用于开发与 CI 的变更路径选择；完整基线按资格执行所有项目。仅基线具备资格的 Docker contract 仍由 CI 读取其唯一 triggers，不因资格不同再维护场景覆盖。依赖使用稳定 Check ID，无依赖时不填写 `module_dependencies`；非空依赖仍核对身份、重复、循环和前置结果。不保留旧格式或别名。
 
-目前 24 个 canonical 能力在 Repository baseline 有 20 个成员、change-targeted 有 23 个成员；能力身份和场景成员数不是同一数量，不能合并不同 scene 的选择差异。quick 常驻与 formal-only 集合也只来自同一 Registry 的 `scenario_policy.ci_quick`。
+能力身份和场景成员不是同一集合，不能合并不同 scene 的选择差异；实际成员与数量由 Registry 派生，不在说明页维护另一份计数。quick 常驻与 formal-only 集合也只来自同一 Registry 的 `scenario_policy.ci_quick`。
 
 选择后按依赖优先执行；交付首个 FAIL/BLOCKED 早停，其余记 BLOCKED，不用其他 PASS 抵消。诊断可继续独立检查，但缺前置仍不执行。精确入口、职责及预算参考见[共用 Check 清单](verification/check-catalog.md)，该清单不是全部必跑计划。
 

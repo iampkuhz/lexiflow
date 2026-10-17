@@ -1,32 +1,33 @@
 """使用 Verification 公开 API 对不可变 submission 执行独立 validation。"""
 
 from __future__ import annotations
+
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-import uuid
+
 from scripts.acceptance.evidence.acceptance_actor_identity import (
     discover_authority,
     verify_authority,
 )
-from scripts.acceptance.evidence.implementation_run_evidence import (
-    ProducerError,
-    producer_identity,
-)
 from scripts.acceptance.evidence.acceptance_record_store import (
     RecordError,
-    delivery_gate_locator,
     canonical_bytes,
     content_hash,
+    delivery_gate_locator,
     list_layer,
     load_submission,
     publish_bytes,
     publish_json,
     read_bound_bytes,
 )
-from scripts.verification import verify_frozen_inputs, verify_profiles
+from scripts.acceptance.evidence.implementation_run_evidence import (
+    ProducerError,
+    producer_identity,
+)
 from scripts.acceptance.task_definition.task_acceptance_plan import verify_plan
-
+from scripts.verification import verify_frozen_inputs, verify_profiles
 
 _MAXIMUM_SUBMISSIONS = 16
 
@@ -124,12 +125,13 @@ def _verify_frozen(repo: Path, submission: dict[str, Any]) -> dict[str, Any]:
             "frozen-input-drift",
             "input closure changed",
         )
-    for label in ("change_report", "diff"):
-        desc = submission.get(label)
-        try:
-            read_bound_bytes(repo, desc["locator"], desc["sha256"])
-        except (KeyError, TypeError, RecordError):
-            raise ValidationError("frozen-artifact-drift", label) from None
+    if submission.get("release_subject") is None:
+        for label in ("change_report", "diff"):
+            desc = submission.get(label)
+            try:
+                read_bound_bytes(repo, desc["locator"], desc["sha256"])
+            except (KeyError, TypeError, RecordError):
+                raise ValidationError("frozen-artifact-drift", label) from None
     return freeze
 
 

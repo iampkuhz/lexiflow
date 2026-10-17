@@ -18,12 +18,14 @@ from unittest.mock import patch
 from scripts.verification import freeze_inputs
 from tests.verification.test_scenarios import verify_repository
 from scripts.triggers import run_ci_quick_checks as ci
-from tests.verification.declaration_fixtures import input_closure
+from tests.verification.declaration_fixtures import input_closure, input_member
 from scripts.verification.planning.check_definitions import (
     filter_checks_by_scope,
     load_declarations_snapshot,
 )
-from scripts.verification.planning.check_scope_selection import select_checks_for_changes
+from scripts.verification.planning.check_scope_selection import (
+    select_checks_for_changes,
+)
 from tests.verification.declaration_fixtures import write_declarations
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -69,10 +71,12 @@ class DockerContractCheckTest(unittest.TestCase):
         base = self.by_id[BASE]
         self.assertEqual(base["timeout_seconds"], 600)
         self.assertEqual(
-            base["command"], ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py"]
+            base["command"],
+            ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py"],
         )
         self.assertEqual(
-            ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py"], base["command"]
+            ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py"],
+            base["command"],
         )
         self.assertEqual(
             [
@@ -132,7 +136,19 @@ class DockerContractCheckTest(unittest.TestCase):
         for name in base["input_paths"]:
             selected = select_checks_for_changes(
                 self.checks,
-                [name + "/entrypoint.sh" if (ROOT / name).is_dir() else name],
+                [
+                    input_member(
+                        ROOT,
+                        name,
+                        check={
+                            "triggers": [
+                                trigger
+                                for group in GROUPS
+                                for trigger in self.by_id[group]["triggers"]
+                            ]
+                        },
+                    )
+                ],
             )
             self.assertTrue({c["check_id"] for c in selected} & set(GROUPS), name)
 

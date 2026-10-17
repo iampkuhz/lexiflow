@@ -48,6 +48,8 @@
 
 入口优先使用已准备的 `.local/lexiflow-python/bin/python`，没有则使用当前解释器。临时测试服务由环境模块按 `scripts/environment/services/isolated_postgres_redis.py` 管理，所选 checks 共用一个 lease。
 
+广泛变更可使用既有开发 CLI 取得同一 `development-change` 的完整报告，环境准备见[验证环境](../scenarios/verification-environment.md)。它仍冻结完整真实 diff、执行全部受选 checks，并核对漂移与结果；不是只重跑此前未完成项。此前 Hook 的超时记录保留为 BLOCKED，CLI 报告不称为 Hook PASS；不再叠跑 Stop 来取得第二份相同范围的报告。执行归属见[协作规则](../../harness/agent-policy.md#冻结验证与独立性)。
+
 Stop 总期限与进度间隔由 `run_stop_checks.py` 的 `DELIVERY_TIMEOUT_SECONDS`、`HEARTBEAT_SECONDS` 固定，不提供配置或覆盖入口。紧急退出在宿主启动环境设置 `LEXIFLOW_DELIVERY_HOOK_DISABLE=1`。关闭不需要先通过门禁，输出明确为未验证，不豁免交付检查。也可以仅移除本项目客户端 Stop 入口，不改其他项目或全局配置。Qoder 手工客户端 Stop 仍保留，与原生子代理派发是不同能力。
 
 ## 1.4. 双客户端配置与手工执行

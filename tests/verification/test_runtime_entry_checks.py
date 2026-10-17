@@ -16,7 +16,9 @@ from scripts.verification.planning.check_definitions import (
     filter_checks_by_scope,
     load_declarations_snapshot,
 )
-from scripts.verification.planning.check_scope_selection import select_checks_for_changes
+from scripts.verification.planning.check_scope_selection import (
+    select_checks_for_changes,
+)
 from tests.verification.declaration_fixtures import write_declarations
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -65,7 +67,12 @@ class RuntimeEntryCheckTest(unittest.TestCase):
         ):
             self.assertEqual(base[key], change[key], key)
         self.assertEqual(
-            ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "runtime-entry"],
+            [
+                "node",
+                "ops/release/test_tools/run-release-tool-tests.mjs",
+                "--suite",
+                "runtime-entry",
+            ],
             base["command"],
         )
         self.assertEqual(
@@ -86,7 +93,7 @@ class RuntimeEntryCheckTest(unittest.TestCase):
             self.assertIn("ops/release/" + name, base_closure)
         for name in base["input_paths"]:
             selected = select_checks_for_changes(
-                self.checks, [input_member(ROOT, name)]
+                self.checks, [input_member(ROOT, name, check=self.by_id[BASE])]
             )
             self.assertIn(BASE, {c["check_id"] for c in selected}, name)
 

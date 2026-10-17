@@ -89,13 +89,8 @@ class WorkflowContractTest(unittest.TestCase):
             run,
         )
         self.assertNotIn("scripts/check_changes.py", run)
-        self.assertIn(
-            "python3 scripts/verification/commands/run_repository_checks.py", run
-        )
-        self.assertLess(
-            run.index("ops/release/workflow/run-release-workflow.mjs prepare"),
-            run.index("run_repository_checks.py"),
-        )
+        self.assertNotIn("run_repository_checks.py", run)
+        self.assertNotIn("scripts.acceptance validate", run)
         self.assertNotIn("actions/checkout", str(full))
         self.assertNotIn("contents: write", str(full))
         for banned in [
@@ -165,7 +160,7 @@ class WorkflowContractTest(unittest.TestCase):
 
     def test_native_release_commands_require_the_dedicated_python_environment(self):
         jobs = workflow("release.yml")["jobs"]
-        selected = []
+        selected = {}
         for name in ["prepare", "promotion-precheck", "promotion"]:
             for step in jobs[name]["steps"]:
                 run = step.get("run", "")
@@ -173,11 +168,20 @@ class WorkflowContractTest(unittest.TestCase):
                     "run-release-workflow.mjs" in run
                     or "run_repository_checks.py" in run
                 ):
-                    selected.append(run)
-        self.assertEqual(len(selected), 4)
+                    self.assertNotIn(name, selected)
+                    selected[name] = run
+        self.assertEqual(set(selected), {"prepare", "promotion-precheck", "promotion"})
+        self.assertIn(' prepare "$REQUEST_FILE"', selected["prepare"])
+        self.assertIn(
+            ' resume "$SUBMISSION_ID" "$RELEASE_TAG"', selected["promotion-precheck"]
+        )
+        self.assertNotIn("--publish", selected["promotion-precheck"])
+        self.assertIn(
+            ' resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish', selected["promotion"]
+        )
         prerequisite = 'test -x "$WORKSPACE/.local/lexiflow-python/bin/python3"'
         activate = 'export PATH="$WORKSPACE/.local/lexiflow-python/bin:$PATH"'
-        for run in selected:
+        for run in selected.values():
             with self.subTest(run=run):
                 self.assertIn(prerequisite, run)
                 self.assertIn(activate, run)

@@ -10,6 +10,21 @@ checks:
   - backend/gradle
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
+  triggers:
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: backend/build.gradle.kts
+  - path: backend/gradle
+  - path: ops/release/tests/version.test.mjs
+  - path: LICENSE
+  - path: ops/release/version.txt
+  - path: ops/release/integrity/source-build-identity.mjs
 - check_id: eng.repository.docs
   command: ["python3", "-m", "scripts.checks.repository.run_repository_check_group", "--mode", "docs"]
   required_environment:
@@ -46,6 +61,19 @@ checks:
   - ops/release
   - ops/dataset
   scenarios: [repository-baseline, change-targeted]
+  triggers:
+  - path: scripts
+  - path: config/engineering/python-quality.toml
+  - path: requirements-dev.txt
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: ops/dataset
 - check_id: eng.backend.delivery
   command: ["python3", "-m", "scripts.local.run_with_java_toolchain", "backend/gradlew", "-p", "backend", "deliveryFull", "--console=colored", "--rerun-tasks", "--no-build-cache"]
   timeout_seconds: 600
@@ -79,14 +107,22 @@ checks:
   result_contract: gradle-exit-code
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: ops/release/integrity/source-build-identity.mjs
   - path: backend
-  - path: ops/release
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/build
+  - path: ops/release/host_resources
   - path: infra/postgres
   - path: infra/local
   - path: scripts/environment
   - path: ops/dataset
   - path: ops/podman
   - path: scripts/local/run_with_java_toolchain.py
+  - path: ops/release/version.txt
 - check_id: eng.backend.build-contract
   command: ["python3", "-m", "tests.verification.gradle_build_contract"]
   timeout_seconds: 600
@@ -104,6 +140,22 @@ checks:
   - ops/dataset
   - ops/podman
   scenarios: [repository-baseline, change-targeted]
+  triggers:
+  - path: ops/release/integrity/source-build-identity.mjs
+  - path: backend
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: scripts/environment
+  - path: tests/verification/gradle_build_contract.py
+  - path: scripts/local/run_with_java_toolchain.py
+  - path: ops/dataset
+  - path: ops/podman
+  - path: ops/release/version.txt
 - check_id: eng.verification.module-tests
   command: ["python3", "scripts/checks/tool_tests/run_verification_tool_tests.py"]
   timeout_seconds: 600
@@ -138,10 +190,16 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
-  - path: LICENSE
   - path: tests/delivery_gate/fixtures.py
   - path: config/engineering/risk.yaml
-  - path: ops/release
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
   - path: .github/workflows
   - path: ops/dataset
   - path: tests/verification
@@ -195,6 +253,25 @@ checks:
   module_dependencies:
   - eng.verification.module-tests
   - eng.agents.module-tests
+  triggers:
+  - path: scripts/acceptance
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: tests/delivery_gate
+  - path: scripts/checks/repository
+  - path: scripts/agents
+  - path: scripts/environment
+  - path: scripts/verification
+  - path: tests/__init__.py
+  - path: config/engineering/risk.yaml
+  - path: scripts/checks/tool_tests/run_acceptance_tool_tests.py
+  - path: scripts/checks/release
 - check_id: eng.repository.module-tests
   command: ["python3", "-m", "scripts.checks.repository.run_repository_check_group", "--mode", "tests"]
   required_environment:
@@ -235,11 +312,19 @@ checks:
   module_dependencies:
   - eng.backend.delivery
   triggers:
+  - path: ops/release/integrity/source-build-identity.mjs
   - path: backend
   - path: infra/postgres
   - path: extension
-  - path: ops/release
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/build
+  - path: ops/release/host_resources
   - path: scripts/environment
+  - path: ops/release/version.txt
 - check_id: eng.release.manifest
   command: ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "manifest"]
   timeout_seconds: 90
@@ -249,6 +334,20 @@ checks:
   - ops/release
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
+  triggers:
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: ops/release/tests/manifest.test.mjs
+  - path: ops/release/integrity/release-artifact-manifest.mjs
+  - path: ops/release/distribution-licenses.json
+  - path: ops/release/third-party-notices.md
+  - path: ops/release/integrity/source-build-identity.mjs
 - check_id: eng.release.docker-contract
   command: ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py"]
   timeout_seconds: 600
@@ -281,6 +380,30 @@ checks:
   - scripts/checks/deployment/run_deployment_contract_tests.py
   transaction_reuse: true
   scenarios: [repository-baseline]
+  triggers:
+  - path: extension/scripts/packaging
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: ops/docker
+  - path: ops/podman
+  - path: scripts/environment
+  - path: ops/dataset
+  - path: infra/postgres/schema.sql
+  - path: backend/product/api
+  - path: requirements-dev.txt
+  - path: infra/local/compose.yaml
+  - path: scripts/verification
+  - path: scripts/checks/repository/__init__.py
+  - path: scripts/checks/repository/catalog/task_catalog_rules.py
+  - path: scripts/agents/__init__.py
+  - path: scripts/agents/work_packages/work_package_contract_checks.py
+  - path: scripts/checks/deployment/run_deployment_contract_tests.py
 - check_id: eng.release.docker-surface-on-change
   command: ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py", "--group", "surface"]
   timeout_seconds: 600
@@ -314,6 +437,31 @@ checks:
   - ops/docker/tests/test_podman_compose_contract.py
   transaction_reuse: true
   scenarios: [change-targeted]
+  triggers:
+  - path: extension/scripts/packaging
+  - path: scripts/checks/deployment/run_deployment_contract_tests.py
+  - path: backend/product/api
+  - path: ops/dataset
+  - path: ops/docker
+  - path: ops/podman
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: requirements-dev.txt
+  - path: scripts/verification
+  - path: scripts/environment
+  - path: scripts/checks/repository/__init__.py
+  - path: scripts/checks/repository/catalog/task_catalog_rules.py
+  - path: scripts/agents/__init__.py
+  - path: scripts/agents/work_packages/work_package_contract_checks.py
+  - path: ops/docker/tests/test_contract.py
+  - path: ops/docker/tests/test_module_check_adapter.py
+  - path: ops/docker/tests/test_podman_compose_contract.py
 - check_id: eng.release.docker-shell-on-change
   command: ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py", "--group", "shell"]
   timeout_seconds: 600
@@ -346,6 +494,30 @@ checks:
   - ops/docker/tests/test_state_records.py
   transaction_reuse: true
   scenarios: [change-targeted]
+  triggers:
+  - path: scripts/checks/deployment/run_deployment_contract_tests.py
+  - path: ops/docker
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: requirements-dev.txt
+  - path: scripts/verification
+  - path: scripts/environment
+  - path: scripts/checks/repository/__init__.py
+  - path: scripts/checks/repository/catalog/task_catalog_rules.py
+  - path: scripts/agents/__init__.py
+  - path: scripts/agents/work_packages/work_package_contract_checks.py
+  - path: ops/docker/tests/test_docker_bounds.py
+  - path: ops/docker/tests/test_docker_environment.py
+  - path: ops/docker/tests/test_lifecycle_flow.py
+  - path: ops/docker/tests/test_operation_ownership.py
+  - path: ops/docker/tests/test_secret_publication.py
+  - path: ops/docker/tests/test_state_records.py
 - check_id: eng.release.docker-local-on-change
   command: ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py", "--group", "local"]
   timeout_seconds: 600
@@ -383,6 +555,36 @@ checks:
   - ops/docker/tests/test_podman_progress.py
   transaction_reuse: true
   scenarios: [change-targeted]
+  triggers:
+  - path: extension/scripts/packaging
+  - path: scripts/checks/deployment/run_deployment_contract_tests.py
+  - path: infra/local/compose.yaml
+  - path: infra/postgres/schema.sql
+  - path: ops/dataset
+  - path: ops/docker
+  - path: ops/podman
+  - path: ops/release/version.txt
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: requirements-dev.txt
+  - path: scripts/environment
+  - path: scripts/verification
+  - path: scripts/checks/repository/__init__.py
+  - path: scripts/checks/repository/catalog/task_catalog_rules.py
+  - path: scripts/agents/__init__.py
+  - path: scripts/agents/work_packages/work_package_contract_checks.py
+  - path: ops/docker/tests/test_ecdict_fetch.py
+  - path: ops/docker/tests/test_podman_doctor.py
+  - path: ops/docker/tests/test_podman_fake_transport.py
+  - path: ops/docker/tests/test_podman_local.py
+  - path: ops/docker/tests/test_podman_network.py
+  - path: ops/docker/tests/test_podman_progress.py
 - check_id: eng.release.docker-node-on-change
   command: ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py", "--group", "node"]
   timeout_seconds: 600
@@ -436,6 +638,52 @@ checks:
   - ops/podman/tests/versioned-images.test.mjs
   transaction_reuse: true
   scenarios: [change-targeted]
+  triggers:
+  - path: extension/scripts/packaging
+  - path: scripts/checks/deployment/run_deployment_contract_tests.py
+  - path: infra/local/compose.yaml
+  - path: infra/postgres/schema.sql
+  - path: ops/dataset
+  - path: ops/docker
+  - path: ops/podman
+  - path: ops/release/version.txt
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: requirements-dev.txt
+  - path: scripts/environment
+  - path: scripts/verification
+  - path: scripts/checks/repository/__init__.py
+  - path: scripts/checks/repository/catalog/task_catalog_rules.py
+  - path: scripts/agents/__init__.py
+  - path: scripts/agents/work_packages/work_package_contract_checks.py
+  - path: ops/dataset/tests/dataset-generation-identity.test.mjs
+  - path: ops/podman/tests/candidate-runtime.test.mjs
+  - path: ops/podman/tests/candidate-image-alias.test.mjs
+  - path: ops/podman/tests/candidate.test.mjs
+  - path: ops/podman/tests/command-barrier.test.mjs
+  - path: ops/podman/tests/command-follow.test.mjs
+  - path: ops/podman/tests/database-target.test.mjs
+  - path: ops/podman/tests/deployment.test.mjs
+  - path: ops/podman/tests/deployment-slots.test.mjs
+  - path: ops/podman/tests/image-slot-lock.test.mjs
+  - path: ops/podman/tests/isolated-candidate-archive.test.mjs
+  - path: ops/podman/tests/java-runtime.test.mjs
+  - path: ops/podman/tests/local-session.test.mjs
+  - path: ops/podman/tests/managed-postgres-readiness.test.mjs
+  - path: ops/podman/tests/prepare-workspace.test.mjs
+  - path: ops/podman/tests/process-lock.test.mjs
+  - path: ops/podman/tests/source-base-image.test.mjs
+  - path: ops/podman/tests/source-network-environment.test.mjs
+  - path: ops/podman/tests/unified-flow.test.mjs
+  - path: ops/podman/tests/unified-local.test.mjs
+  - path: ops/podman/tests/upgrade.test.mjs
+  - path: ops/podman/tests/versioned-images.test.mjs
 - check_id: eng.release.runtime-entry
   command: ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "runtime-entry"]
   timeout_seconds: 90
@@ -448,6 +696,16 @@ checks:
   - ops/release
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
+  triggers:
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: ops/release/integrity/source-build-identity.mjs
 - check_id: eng.release.lifecycle-install
   command: ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "lifecycle-install"]
   required_environment:
@@ -461,6 +719,16 @@ checks:
   - ops/docker
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
+  triggers:
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: ops/docker
 - check_id: eng.release.lifecycle
   timeout_seconds: 660
   command: ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "lifecycle"]
@@ -474,6 +742,16 @@ checks:
   - ops/docker/compose.yaml
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
+  triggers:
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: ops/docker/compose.yaml
 - check_id: eng.release.build
   command: ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "build"]
   required_environment:
@@ -486,6 +764,17 @@ checks:
   - ops/docker
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
+  triggers:
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: ops/docker
+  - path: ops/release/integrity/source-build-identity.mjs
 - check_id: eng.release.lifecycle-runtime
   command: ["python3", "-m", "scripts.checks.release.source.check_synthetic_release_lifecycle"]
   timeout_seconds: 1200
@@ -534,6 +823,46 @@ checks:
   - ops/dataset
   - ops/podman
   scenarios: [repository-baseline, change-targeted]
+  triggers:
+  - path: scripts/local/run_with_java_toolchain.py
+  - path: scripts/checks/release/source
+  - path: AGENTS.md
+  - path: .gitignore
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: ops/release/version.txt
+  - path: ops/docker
+  - path: backend/build.gradle.kts
+  - path: backend/gradle.lockfile
+  - path: backend/gradle.properties
+  - path: backend/gradle
+  - path: backend/gradlew
+  - path: backend/product/adapters
+  - path: backend/product/api
+  - path: backend/product/enrichment
+  - path: backend/product/lexicon
+  - path: backend/settings-gradle.lockfile
+  - path: backend/settings.gradle.kts
+  - path: backend/verification/architecture
+  - path: backend/verification/integration
+  - path: backend/verification/quality-gates
+  - path: extension
+  - path: infra/postgres/schema.sql
+  - path: scripts/environment
+  - path: tests/verification
+  - path: scripts/verification
+  - path: scripts/agents/__init__.py
+  - path: scripts/agents/work_packages/work_package_contract_checks.py
+  - path: scripts/checks/repository/__init__.py
+  - path: scripts/checks/repository/catalog/task_catalog_rules.py
+  - path: ops/dataset
+  - path: ops/podman
 - check_id: eng.release.candidate-runtime
   command: ["python3", "-m", "scripts.checks.release.candidate.check_candidate_installation_lifecycle"]
   timeout_seconds: 2400
@@ -574,6 +903,45 @@ checks:
   - scripts/checks/repository/__init__.py
   - scripts/checks/repository/catalog/task_catalog_rules.py
   scenarios: [repository-baseline, change-targeted]
+  triggers:
+  - path: AGENTS.md
+  - path: .gitignore
+  - path: ops/release/test_tools
+  - path: ops/release/runner
+  - path: ops/release/runtime
+  - path: ops/release/tests
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/host_resources
+  - path: ops/release/version.txt
+  - path: ops/docker
+  - path: backend/build.gradle.kts
+  - path: backend/gradle.lockfile
+  - path: backend/gradle.properties
+  - path: backend/gradle
+  - path: backend/gradlew
+  - path: backend/product/adapters
+  - path: backend/product/api
+  - path: backend/product/enrichment
+  - path: backend/product/lexicon
+  - path: backend/settings-gradle.lockfile
+  - path: backend/settings.gradle.kts
+  - path: backend/verification/architecture
+  - path: backend/verification/integration
+  - path: backend/verification/quality-gates
+  - path: extension
+  - path: infra/postgres/schema.sql
+  - path: scripts/environment
+  - path: scripts/checks/release/source
+  - path: scripts/checks/release/candidate
+  - path: tests/verification
+  - path: ops/podman
+  - path: scripts/verification
+  - path: scripts/agents/__init__.py
+  - path: scripts/agents/work_packages/work_package_contract_checks.py
+  - path: scripts/checks/repository/__init__.py
+  - path: scripts/checks/repository/catalog/task_catalog_rules.py
 scenario_policy:
   ci_quick:
     always_required_check_ids:

@@ -4,8 +4,8 @@
 
 ## 工作范围与分解
 
-- Task ID 已分配即稳定，不复用或重定义；移除任务保留来源。执行 run 使用真实 UUID，显示别名不是证据身份。Task 计划预算 20–90 分钟，工作包通常 10–360 分钟；预算约束 Task/工作包，不要求 Agent Session 保持相同时长。
-- 跨领域、多个主要文件归属、公共 contract 与多个消费者同步变化、独立验证环境，或超过原 Task 预算且可独立验收时拆 Task。实现与直接测试、同归属且连续的小工作同包。
+- Task ID 已分配即稳定，不复用或重定义；移除任务保留来源。执行 run 使用真实 UUID，显示别名不是证据身份。Task 计划估时 20–90 分钟，工作包通常 10–360 分钟，用于工作分解和成本计划，不是 Check 超时或发行使用者的追加审批项；执行时限须在本次工作包明确，不要求 Agent Session 保持相同时长。
+- 跨领域、多个主要文件归属、公共 contract 与多个消费者同步变化、独立验证环境，或预计超过原 Task 估时且可独立验收时拆 Task。实现与直接测试、同归属且连续的小工作同包。
 - 包含稳定 work_package_id、精确有序 Task IDs、目标、允许/禁止范围、上下文、逐 Task 产物及验收。共享 primary owner 与 contract，并行 ownership 不重叠。已派发 scope 不静默扩大；新独立结果分配新 ID 并记录 discovered_from，范围或验收变化递增 task_version。
 - DAG 使用真实 hard、soft、contract、discovered_from、supersedes 关系；soft 不阻 READY，hard 要求 PASS，contract 精确绑定唯一生产者的名称与版本及 PASS。阶段号不隐含依赖，集成依赖全部贡献者。
 - change_version 的 patch 只澄清，minor 增加范围、证据或验收，major 改变目标、归属边界或 contract；版本不授予历史兼容。公共 contract 变更串行，先完整列出消费者并同步最新逻辑，涉及结构时重建重导并说明恢复边界。
@@ -46,7 +46,7 @@ spawn 与 followup 都由父代理在当前聊天正文说明；工具输出、�
 
 ## 失败预算与接手
 
-断言失败先保持 check-needs-triage，由源码和日志证据区分产品与 fixture 问题；没有具体根因不更换工作包或归属。一个共享 deadline 包含内部进程 timeout 与取消，不机械重复派发或重置身份绕过预算。同一实现者最多返工 1 轮；耗尽后拆 Task、转交、Main 接手或 BLOCKED。
+断言失败先保持 check-needs-triage，由源码和日志证据区分产品、fixture、环境和材料缺项；没有具体根因不更换工作包或归属。修复期间只做责任节点的直接回归，不用反复完整检查逐项探错。明确的工作包 deadline 包含内部进程 timeout 与取消；单次 Check 上限归 Registry，历史运行成本如实保留，不通过机械重派或重置身份规避执行时限，也不把旧任务的累计估时转为当前材料核对或发布的新门禁。同一实现者最多返工 1 轮；耗尽后拆 Task、转交、Main 接手或 BLOCKED。
 
 报告实际失败层、阻塞证据和可执行接手路径；可自行完成的准备或合规接手继续执行。仅在缺用户信息、真实取舍、必需授权、外部恢复或执行能力时交还控制权。
 
@@ -56,8 +56,10 @@ GitHub 发行采用单维护者授权：owner 可批准自己触发的受保护 
 
 同 checkout 集成验证串行、非等待；窗口不锁编辑，输入漂移失败关闭。不自动终止未知进程、删除未知锁，也不覆盖其他写入者修改。
 
-最终 checkout/input 冻结后先做直接小回归，再由不同真实 actor 的 validator 执行一次完整 Hook。实现者只做静态、编译与精准测试，不例行先跑全套，更不得签发 TASK_VALIDATION 或 INDEPENDENT_REVIEW。所有风险层的 validator 均不同于全部 producer/submitter；高风险工程与正式发行还需 reviewer，reviewer 不同于 validator 与实现者。
+代码变更在最终 checkout/input 冻结后先做直接小回归，再由不同真实 actor 的 validator 执行一次按真实 diff 选择的开发检查。现有开发 CLI 与 Stop 使用相同的冻结、检查选择和结果判据，择一执行，不要求两种入口叠跑；预计广泛检查闭包超过 Stop 总期限时使用现有 CLI，在明确的工作包 deadline 内完成，不放宽任一 Check 或 Stop 的超时。Stop 的客户端总期限不是新增的验收资格：其超时仍如实记 BLOCKED，不能改写或拼接旧结果，CLI 也必须当次完整执行全部受选 checks。不是每次小修都跑完整仓库或发行流程。正式发行在真实材料齐全、候选冻结后送验干净提交与精确候选，由独立 validator 负责现有完整 repository-baseline；Actions 只构建和交接，不提前重复执行同候选的完整基线。实现者只做静态、编译与精准测试，不例行先跑全套，更不得签发 TASK_VALIDATION 或 INDEPENDENT_REVIEW。所有风险层的 validator 均不同于全部 producer/submitter；高风险工程与正式发行还需 reviewer，reviewer 不同于 validator 与实现者。
 
 review 只读冻结 diff/evidence，CATALOG_DECISION 只核 receipt/hash DAG，两层不重跑命令。仅必需检查失败或相关输入/环境变化才重跑；复用仅限同次事务且合同证明输入、配置、环境、窗口与 runner 完整等价，开发自检不得复用为 Formal，禁止跨交付复用。不另造 host session 或独立性 attestation 代替真实 actor。
+
+来源、版本和摘要未变的许可、对应源码及其他静态准备材料可以复用，已知授权或内容变化时重核；复用的是有依据的材料，不是历史验证 PASS 或新候选的发行资格。只读核对、准备 ignored 材料和等待人类决定不启动开发 Hook 或完整发行验收，不补造无差异开发报告。
 
 结果仅 PASS、BLOCKED、FAIL。skipped、not-run、unavailable、excluded、queued、acknowledged 和 exit-zero 均不等于 PASS；必需检查未运行不能通过。风险可调路径位于 [risk.yaml](../config/engineering/risk.yaml)，敏感内容识别与固定验收判据归对应实现，不放宽上述人类责任。

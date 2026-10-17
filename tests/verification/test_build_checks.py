@@ -22,7 +22,9 @@ from scripts.verification.planning.check_definitions import (
     load_declarations_snapshot,
 )
 from scripts.verification.execution.check_runner import snapshot_check_inputs
-from scripts.verification.planning.check_scope_selection import select_checks_for_changes
+from scripts.verification.planning.check_scope_selection import (
+    select_checks_for_changes,
+)
 from tests.verification.declaration_fixtures import write_declarations
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -72,7 +74,13 @@ class BuildCheckTest(unittest.TestCase):
         ):
             self.assertEqual(base[key], change[key], key)
         self.assertEqual(
-            ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "build"], base["command"]
+            [
+                "node",
+                "ops/release/test_tools/run-release-tool-tests.mjs",
+                "--suite",
+                "build",
+            ],
+            base["command"],
         )
         self.assertEqual(
             ["node", "git", "sh", "/bin/sh", "mkfifo"], base["required_environment"]
@@ -113,7 +121,7 @@ class BuildCheckTest(unittest.TestCase):
         self.assertEqual(base["command"][-1], "build")
         for name in base["input_paths"]:
             selected = select_checks_for_changes(
-                self.checks, [input_member(ROOT, name)]
+                self.checks, [input_member(ROOT, name, check=self.by_id[BASE])]
             )
             self.assertIn(BASE, {c["check_id"] for c in selected}, name)
 
@@ -148,7 +156,11 @@ class BuildCheckTest(unittest.TestCase):
         ):
             self.assertEqual(runtime[key], changed[key], key)
         self.assertEqual(
-            ["python3", "-m", "scripts.checks.release.source.check_synthetic_release_lifecycle"],
+            [
+                "python3",
+                "-m",
+                "scripts.checks.release.source.check_synthetic_release_lifecycle",
+            ],
             runtime["command"],
         )
         self.assertEqual(
@@ -173,10 +185,11 @@ class BuildCheckTest(unittest.TestCase):
         for name in self.by_id[BASE]["input_paths"]:
             with self.subTest(path=name):
                 self.assertIn(name, runtime_closure)
-                self.assertTrue(trigger_covers(self.by_id[RUNTIME], name))
-                self.assertTrue(trigger_covers(changed, name))
+                probe = input_member(ROOT, name, check=self.by_id[RUNTIME])
+                self.assertTrue(trigger_covers(self.by_id[RUNTIME], probe))
+                self.assertTrue(trigger_covers(changed, probe))
                 selected = select_checks_for_changes(
-                    self.checks, [input_member(ROOT, name)]
+                    self.checks, [input_member(ROOT, name, check=self.by_id[BASE])]
                 )
                 self.assertIn(RUNTIME, {c["check_id"] for c in selected})
         with tempfile.TemporaryDirectory() as directory:
@@ -219,7 +232,9 @@ class BuildCheckTest(unittest.TestCase):
                         target = target / "synthetic.txt"
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text("synthetic input\n")
-                write_declarations(root / "config/engineering/module-checks.yaml", checks)
+                write_declarations(
+                    root / "config/engineering/module-checks.yaml", checks
+                )
                 executed = []
 
                 def runner(argv, *_, stdin_payload=None):

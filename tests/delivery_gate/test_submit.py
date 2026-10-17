@@ -1,10 +1,19 @@
+"""验证代码变更送验及固定发行模式的互斥边界。"""
+
 from __future__ import annotations
-import json, unittest, uuid
+
+import json
+import unittest
+import uuid
 from unittest.mock import patch
-from scripts.acceptance.task_operations.submit_task_for_acceptance import SubmissionError, submit
+
+from scripts.acceptance.task_operations.submit_task_for_acceptance import (
+    SubmissionError,
+    submit,
+)
 from tests.delivery_gate.fixtures import (
-    DeliveryGateFixture,
     PRODUCER_SESSION,
+    DeliveryGateFixture,
     make_mock_runtime,
 )
 
@@ -49,6 +58,23 @@ class TestSubmit(unittest.TestCase):
                 change_report_id=self.f.report_id,
             )
         self.assertEqual(c.exception.code, "task-not-found")
+
+    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    def test_non_formal_task_cannot_borrow_release_mode(self, m):
+        m.return_value = make_mock_runtime(PRODUCER_SESSION)
+        with self.assertRaises(SubmissionError) as c:
+            submit(self.f.root, task_id="LF-TSK-TEST-0001", release_handoff=True)
+        self.assertEqual(c.exception.code, "release-task-not-formal")
+
+    def test_submission_modes_are_mutually_exclusive(self):
+        with self.assertRaises(SubmissionError) as c:
+            submit(
+                self.f.root,
+                task_id="LF-TSK-TEST-0001",
+                change_report_id=self.f.report_id,
+                release_handoff=True,
+            )
+        self.assertEqual(c.exception.code, "submit-mode-conflict")
 
     @patch("scripts.agents.identity.codex_actor_identity.discover")
     def test_manually_written_minimal_pass_report_is_not_a_submission_source(self, m):
