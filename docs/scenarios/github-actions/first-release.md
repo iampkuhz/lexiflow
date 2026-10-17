@@ -21,7 +21,7 @@
 1. **自动配置 runner。** 在源码根执行下方 `runner deps` 和 `runner setup`；工具通过已登录的 `gh` 获取短期 token，校验并安装官方 macOS ARM64 包、注册 `lexiflow-release` 标签并启动服务，无需网页复制命令。缺登录或权限时按[Runner 管理](first-release/preparation.md#16-runner-安装与日常管理)操作。以完成原生验收的同一 OS 用户运行，只用于受保护发行，不接不可信 PR。
 2. **留专用源码与资料目录。** 同一电脑可以有独立发行 clone；不要把 `LEXIFLOW_RELEASE_WORKSPACE` 指向日常开发 checkout 或现有 `.local/podman` 安装。验证期间不编辑/移动该源码；输入、候选和证据保持原路径。首次正式 tag 已推送后，在 validation 人审前让这个 clone 的 HEAD 对齐该 tag。
 3. **核对工具和测试环境。** 运行 `runner doctor`；Homebrew 管理公共 CLI，既有工具链提供 Temurin Java 25。工程 Python 依赖、Playwright、隔离 PostgreSQL/Redis 与实际 Docker/Podman endpoint 仍按[验证环境](../verification-environment.md)准备。完整候选验收需要本机 18080 空闲；若日常 API 占用，先安排暂停与恢复窗口，不杀未知进程、不清库、不让验收接到日常数据。
-4. **配置 GitHub。** 建立 `lexiflow-release-validation`、`lexiflow-release-promotion` 两个有独立人审的 Environment，只允许正式 `v*` tag，禁止自批/bypass；开启 immutable releases。按[配置表](first-release/preparation.md#11-github-配置字段)填写本机路径、测试资源与 secret；确认全部准备后才设 `LEXIFLOW_RELEASE_RUNNER_READY=true`。
+4. **配置 GitHub。** 建立 `lexiflow-release-validation`、`lexiflow-release-promotion` 两个要求 owner 人工批准的 Environment，只允许正式 `v*` tag；单维护者允许本人审批，管理员 bypass 保持关闭；开启 immutable releases。按[配置表](first-release/preparation.md#11-github-配置字段)填写本机路径、测试资源与 secret；确认全部准备后才设 `LEXIFLOW_RELEASE_RUNNER_READY=true`。
 5. **完成首发材料和验收准备。** 核准五类组件的许可与 notice、导出真实已发布资料、准备不同源码提交的私有 `previous` 候选和构建请求，并安排独立 Formal 验证/审查。首发没有旧公开 Release 也需要 previous，用于真实升级/失败恢复测试；详细工作交给[准备页](first-release/preparation.md#12-首次发行材料没有旧公开-release-也不能省-previous)，不要伪造材料或跳 Gate。
 
 ```sh
@@ -32,7 +32,7 @@ node ops/release/workflow/run-release-workflow.mjs runner doctor
 
 Runner Online 只说明机器已接入，不代表五步准备或 Formal 已完成；工具不会自动设 `LEXIFLOW_RELEASE_RUNNER_READY=true`。
 
-这五步是首次配置，不是每次重做。GitHub 默认分支必须已有审核通过的 workflow；只存在本机的 commit 不能触发远端流程。独立 reviewer 是当前机制的必需条件，一个账号不能靠反复点击代替。
+这五步是首次配置，不是每次重做。GitHub 默认分支必须已有审核通过的 workflow；只存在本机的 commit 不能触发远端流程。GitHub owner 可批准自己的发行，但原生 Formal 的 producer、validator、reviewer 仍须是不同真实 actor；本人审批不能代替独立验证或审查。
 
 ## 1.3. 每次发布：只走这个顺序
 
@@ -40,7 +40,7 @@ Runner Online 只说明机器已接入，不代表五步准备或 Formal 已完�
 | --- | --- | --- |
 | 1. 固定版本 | 审核并提交源码/许可，推到默认分支；`ops/release/version.txt` 为正式 `x.y.z`，同版本 tag/Release/GHCR 未使用 | 分支 Quick checks |
 | 2. 推 tag | 在干净目标 commit 创建并推 `v<版本>` | `Release validation` 的 source 检查，随后等待 validation 人审 |
-| 3. 准备并批准 | 专用 clone 对齐同 tag；更新私有请求、确认输出目录空和输入齐全，再由独立人审批准 | 本机 runner 自动构建候选、跑开发检查和 Repository Verify |
+| 3. 准备并批准 | 专用 clone 对齐同 tag；更新私有请求、确认输出目录空和输入齐全，再由 owner 人工批准 | 本机 runner 自动构建候选、跑开发检查和 Repository Verify |
 | 4. 独立验收 | 在原 checkout 由不同原生 actor 完成 Formal，取得 `submission_id` | 运行冻结验收并形成可核验链；不是 Actions 自动签证 |
 | 5. 晋升 | 原 tag 手动运行 workflow，填写 submission 和 `PUBLISH`，依次通过两道 Environment 批准 | 只读预检 → 推 GHCR → 上传并核对 Release 资产 → 公开发布 |
 
