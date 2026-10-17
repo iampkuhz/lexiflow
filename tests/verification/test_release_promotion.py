@@ -46,14 +46,14 @@ class Fixture:
             "licenseId": "MIT",
             "licenseName": "MIT",
             "sourceUrl": "https://example.test/license",
-            "noticePath": "licenses/MIT.txt",
+            "noticePath": "LICENSE",
             "noticeBytes": 4,
             "noticeSha256": sha(b"MIT\n"),
         }
         self.artifacts = []
         for role, name, data in (
             ("runtime-entry", "lexiflow.sh", b"#!/bin/sh\n"),
-            ("license", "licenses/MIT.txt", b"MIT\n"),
+            ("license", "LICENSE", b"MIT\n"),
             ("extension", "extension/package.zip", b"accepted extension zip bytes"),
             ("api-image", "images/api.tar", b"image bytes"),
             ("postgres-image", "images/postgres.tar", b"postgres image bytes"),
@@ -327,7 +327,7 @@ class PromotionTests(unittest.TestCase):
                 set(tar.getnames()),
                 {
                     "lexiflow.sh",
-                    "licenses/MIT.txt",
+                    "LICENSE",
                     "images/api.tar",
                     "images/postgres.tar",
                     "extension/package.zip",
@@ -465,7 +465,7 @@ class PromotionTests(unittest.TestCase):
         ):
             self.promote()
         own.unlink()
-        own.symlink_to(self.fixture.payload / "licenses/MIT.txt")
+        own.symlink_to(self.fixture.payload / "LICENSE")
         with self.assertRaisesRegex(p.PromotionError, "project-license-invalid"):
             self.promote()
 
@@ -473,7 +473,11 @@ class PromotionTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         table = root / "ops/release/distribution-licenses.json"
         licenses = json.loads(table.read_bytes())["licenses"]
-        approved = [item for item in licenses if item["component"] == "LexiFlow"]
+        approved = [
+            item
+            for item in licenses
+            if item["component"] == "LexiFlow" and item["noticePath"] == "LICENSE"
+        ]
         self.assertEqual(len(approved), 1)
         self.assertEqual(approved[0]["licenseId"], "MIT")
         own = (root / "LICENSE").read_bytes()
@@ -482,6 +486,63 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(approved[0]["noticeSha256"], sha(own))
         with patch.object(p, "ROOT", root), patch.object(p, "LICENSE_TABLE", table):
             p._license_check({"licenses": licenses})
+
+    def test_additional_project_notice_preserves_root_license_binding(self):
+        own = self.fixture.license
+        index = {
+            **own,
+            "id": "lexiflow-index",
+            "noticePath": "licenses/index.txt",
+            "noticeBytes": 6,
+            "noticeSha256": sha(b"index\n"),
+        }
+        licenses = [index, own]
+        self.fixture.table.write_text(
+            json.dumps(
+                {
+                    "schema_version": "lexiflow.distribution-licenses.v1",
+                    "licenses": licenses,
+                }
+            )
+        )
+        with (
+            patch.object(p, "ROOT", self.fixture.root),
+            patch.object(p, "LICENSE_TABLE", self.fixture.table),
+        ):
+            p._license_check({"licenses": licenses})
+            changed = [{**index, "noticeSha256": "0" * 64}, own]
+            with self.assertRaisesRegex(
+                p.PromotionError, "distribution-licenses-unapproved"
+            ):
+                p._license_check({"licenses": changed})
+            (self.fixture.root / "LICENSE").write_bytes(b"different license")
+            with self.assertRaisesRegex(
+                p.PromotionError, "project-license-notice-mismatch"
+            ):
+                p._license_check({"licenses": licenses})
+
+    def test_project_root_license_cannot_be_replaced_or_duplicated(self):
+        own = self.fixture.license
+        for licenses in (
+            [{**own, "noticePath": "licenses/index.txt"}],
+            [{**own, "licenseId": "Apache-2.0"}],
+            [own, {**own, "id": "another-root-license"}],
+        ):
+            with self.subTest(licenses=licenses):
+                self.fixture.table.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "lexiflow.distribution-licenses.v1",
+                            "licenses": licenses,
+                        }
+                    )
+                )
+                with (
+                    patch.object(p, "ROOT", self.fixture.root),
+                    patch.object(p, "LICENSE_TABLE", self.fixture.table),
+                    self.assertRaisesRegex(p.PromotionError, "project-license-invalid"),
+                ):
+                    p._license_check({"licenses": licenses})
 
     def test_platform_license_and_payload_rejections(self):
         self.fixture.manifest["platforms"] = ["linux/amd64"]

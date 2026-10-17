@@ -120,22 +120,29 @@ def _license_check(manifest: dict[str, Any]) -> None:
         ):
             _fail("distribution-license-table-invalid")
         ids.add(item["id"])
-        if item["component"] == "LexiFlow":
-            try:
-                own_license = _read_bounded(ROOT, "LICENSE", MAX_LICENSE_TABLE)
-            except Exception:
-                _fail("project-license-invalid")
-            if (
-                len(own_license) != item["noticeBytes"]
-                or hashlib.sha256(own_license).hexdigest() != item["noticeSha256"]
-            ):
-                _fail("project-license-notice-mismatch")
     if (
         len(required) != len(table["licenses"])
         or any(not isinstance(item, dict) or set(item) != fields for item in required)
         or required != table["licenses"]
     ):
         _fail("distribution-licenses-unapproved")
+    project_licenses = [
+        item
+        for item in table["licenses"]
+        if item["component"] == "LexiFlow" and item["noticePath"] == "LICENSE"
+    ]
+    if len(project_licenses) != 1 or project_licenses[0]["licenseId"] != "MIT":
+        _fail("project-license-invalid")
+    try:
+        own_license = _read_bounded(ROOT, "LICENSE", MAX_LICENSE_TABLE)
+    except Exception:
+        _fail("project-license-invalid")
+    project_license = project_licenses[0]
+    if (
+        len(own_license) != project_license["noticeBytes"]
+        or hashlib.sha256(own_license).hexdigest() != project_license["noticeSha256"]
+    ):
+        _fail("project-license-notice-mismatch")
 
 
 def _stamp(info: os.stat_result) -> tuple[int, ...]:
