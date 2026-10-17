@@ -62,6 +62,7 @@ checks:
   - ops/dataset
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: ops/release/__init__.py
   - path: scripts
   - path: config/engineering/python-quality.toml
   - path: requirements-dev.txt
@@ -190,6 +191,7 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: ops/release/__init__.py
   - path: tests/delivery_gate/fixtures.py
   - path: config/engineering/risk.yaml
   - path: ops/release/test_tools
@@ -254,6 +256,7 @@ checks:
   - eng.verification.module-tests
   - eng.agents.module-tests
   triggers:
+  - path: ops/release/__init__.py
   - path: scripts/acceptance
   - path: ops/release/test_tools
   - path: ops/release/runner
@@ -824,6 +827,7 @@ checks:
   - ops/podman
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: ops/release/__init__.py
   - path: scripts/local/run_with_java_toolchain.py
   - path: scripts/checks/release/source
   - path: AGENTS.md
@@ -904,6 +908,7 @@ checks:
   - scripts/checks/repository/catalog/task_catalog_rules.py
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: ops/release/__init__.py
   - path: AGENTS.md
   - path: .gitignore
   - path: ops/release/test_tools

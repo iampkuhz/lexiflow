@@ -22,6 +22,7 @@ from scripts.verification.planning.check_scope_selection import (
     resolve_module_dependencies,
 )
 from scripts.verification import freeze_inputs
+from scripts.triggers.run_ci_quick_checks import make_plan
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -191,6 +192,33 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
         # Trigger contraction must not weaken frozen consumer input closure.
         for check in self.checks:
             self.assertTrue(check["input_paths"], check["check_id"])
+
+    def test_release_python_package_initializer_triggers_its_consumers(self):
+        """Python 包初始化执行实际消费检查，不因身份变化扩大 Java／扩展检查。"""
+        self.assertEqual(
+            {
+                "eng.repository.python-quality",
+                "eng.verification.module-tests",
+                "eng.agents.module-tests",
+                "eng.delivery-gate.module-tests",
+            },
+            self.frozen_ids("ops/release/__init__.py"),
+        )
+        selected = self.selected("ops/release/__init__.py")
+        self.assertIn("eng.release.lifecycle-runtime", selected)
+        self.assertIn("eng.release.candidate-runtime", selected)
+        self.assertNotIn("eng.backend.delivery", selected)
+        self.assertNotIn("eng.extension.quality", selected)
+
+    def test_ci_all_source_inventory_has_complete_trigger_coverage(self):
+        """首推分支的 --all 真实清单可规划，不执行检查或获得正式资格。"""
+        plan = make_plan(ROOT, all_paths=True)
+        self.assertEqual("PASS", plan["status"])
+        self.assertEqual("all", plan["base"])
+        self.assertEqual(0, plan["checks_executed"])
+        self.assertFalse(plan["formal_eligible"])
+        self.assertTrue(plan["selected_check_ids"])
+        self.assertIn("ops/release/__init__.py", plan["changed_paths"])
 
     def test_docker_consumption_edges_are_frozen_by_consumers_not_only_surface(self):
         """共享源必须进入实际消费者输入与触发，不可由 surface 库存守门代替。"""
