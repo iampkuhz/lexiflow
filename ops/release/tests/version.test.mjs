@@ -8,6 +8,7 @@ import childProcess from 'node:child_process';
 import * as fs from 'node:fs';
 import fsDefault from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
+import { runInNewContext } from 'node:vm';
 import { parseVersion, resolveCleanBuildIdentity, checkReleaseSource } from '../integrity/source-build-identity.mjs';
 import { evaluateTapSummary, runTests } from '../test_tools/run-release-tool-tests.mjs';
 
@@ -518,9 +519,42 @@ test('SHA-256 Git object identity uses an actual 64-digit commit', async () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+function publishRunnerHandshake(readyFile, record) {
+  const pendingFile = `${readyFile}.pending`;
+  fs.writeFileSync(pendingFile, JSON.stringify(record), { flag: 'wx' });
+  fs.renameSync(pendingFile, readyFile);
+}
+
+test('runner handshake publication hides empty and partial JSON from readers', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-runner-publication-'));
+  const readyFile = path.join(root, 'ready');
+  const record = { supervisor: 123, worker: 456 };
+  const visibleDuringWrite = [];
+  try {
+    // 在真实私有文件上固定 create、部分写入、完整写入三个时刻，不依赖调度碰运气。
+    const publish = runInNewContext(`(${publishRunnerHandshake.toString()})`, {
+      fs: {
+        writeFileSync(file, contents, options) {
+          fs.writeFileSync(file, '', options);
+          visibleDuringWrite.push(fs.existsSync(readyFile));
+          fs.writeFileSync(file, contents.slice(0, Math.floor(contents.length / 2)));
+          visibleDuringWrite.push(fs.existsSync(readyFile));
+          fs.writeFileSync(file, contents);
+        },
+        renameSync: fs.renameSync,
+      },
+    });
+    publish(readyFile, record);
+    assert.deepEqual(visibleDuringWrite, [false, false], 'reader must not see the final name before complete JSON is published');
+    assert.deepEqual(JSON.parse(fs.readFileSync(readyFile, 'utf8')), record);
+    assert.deepEqual(fs.readdirSync(root), ['ready'], 'publication leaves no staging file');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 function runnerChildScript(readyFile, heartbeatFile, workerReadyFile, overflow = false) {
-  const workerCode = `const fs=require('node:fs');process.on('SIGTERM',()=>{});fs.writeFileSync(${JSON.stringify(heartbeatFile)},'x');fs.writeFileSync(${JSON.stringify(workerReadyFile)},JSON.stringify({worker:process.pid}));setInterval(()=>fs.appendFileSync(${JSON.stringify(heartbeatFile)},'x'),20);`;
-  return `const fs=require('node:fs');const cp=require('node:child_process');const worker=cp.spawn(process.execPath,['-e',${JSON.stringify(workerCode)}],{stdio:'ignore'});const until=Date.now()+2500;const poll=()=>{if(fs.existsSync(${JSON.stringify(workerReadyFile)})){fs.writeFileSync(${JSON.stringify(readyFile)},JSON.stringify({supervisor:process.pid,worker:JSON.parse(fs.readFileSync(${JSON.stringify(workerReadyFile)},'utf8')).worker}));${overflow ? "process.stdout.write('x'.repeat(1000));" : ''}setInterval(()=>{},1000);return;}if(Date.now()>until)process.exit(3);setTimeout(poll,5)};poll();`;
+  const publish = publishRunnerHandshake.toString();
+  const workerCode = `const fs=require('node:fs');${publish};process.on('SIGTERM',()=>{});fs.writeFileSync(${JSON.stringify(heartbeatFile)},'x');publishRunnerHandshake(${JSON.stringify(workerReadyFile)},{worker:process.pid});setInterval(()=>fs.appendFileSync(${JSON.stringify(heartbeatFile)},'x'),20);`;
+  return `const fs=require('node:fs');const cp=require('node:child_process');${publish};const worker=cp.spawn(process.execPath,['-e',${JSON.stringify(workerCode)}],{stdio:'ignore'});const until=Date.now()+2500;const poll=()=>{if(fs.existsSync(${JSON.stringify(workerReadyFile)})){publishRunnerHandshake(${JSON.stringify(readyFile)},{supervisor:process.pid,worker:JSON.parse(fs.readFileSync(${JSON.stringify(workerReadyFile)},'utf8')).worker});${overflow ? "process.stdout.write('x'.repeat(1000));" : ''}setInterval(()=>{},1000);return;}if(Date.now()>until)process.exit(3);setTimeout(poll,5)};poll();`;
 }
 
 async function waitForRunnerHandshake(readyFile) {
@@ -574,6 +608,7 @@ test('runner timeout and overflow kill their owned groups without touching a det
     const sentinelReady = path.join(root, 'sentinel-ready');
     let supervisor;
     let sentinel;
+    let bodyError;
     try {
       sentinel = spawnTracked(process.execPath, ['-e', `require('node:fs').writeFileSync(${JSON.stringify(sentinelReady)},'ready');setInterval(()=>{},1000)`], { detached: true });
       sentinel.unref();
@@ -591,10 +626,17 @@ test('runner timeout and overflow kill their owned groups without touching a det
       assert.equal(result.reason, mode === 'timeout' ? 'test process timed out' : 'test process output exceeded limit');
       await assertRunnerPidsReaped([ready.supervisor, ready.worker]);
       await assertSentinelAlive(sentinelPid);
+    } catch (error) {
+      bodyError = error;
+      throw error;
     } finally {
       if (supervisor) { try { process.kill(-supervisor, 'SIGKILL'); } catch {} }
       if (sentinel?.pid) { try { process.kill(-sentinel.pid, 'SIGKILL'); } catch {} }
-      rmSync(root, { recursive: true, force: true });
+      try { rmSync(root, { recursive: true, force: true }); }
+      catch (cleanupError) {
+        if (bodyError) throw new AggregateError([bodyError, cleanupError], 'runner fixture failed and cleanup also failed');
+        throw cleanupError;
+      }
     }
   }
 });
@@ -632,7 +674,7 @@ test('runner private child group does not escape real wrapper-group TERM and INT
     const readyFile = path.join(root, 'ready'); const childReady = path.join(root, 'child-ready');
     const heartbeatFile = path.join(root, 'heartbeat'); const workerReadyFile = path.join(root, 'worker-ready');
     const sentinelReady = path.join(root, 'sentinel-ready');
-    const wrapperCode = `import fs from 'node:fs';import {runTests} from ${JSON.stringify(wrapperModule)};const args=['-e',${JSON.stringify(runnerChildScript(childReady, heartbeatFile, workerReadyFile))}];const pending=runTests({command:process.execPath,args,timeoutMs:15000});const end=Date.now()+4000;while(!fs.existsSync(${JSON.stringify(childReady)})&&Date.now()<end)await new Promise(r=>setTimeout(r,10));if(!fs.existsSync(${JSON.stringify(childReady)}))process.exit(4);fs.writeFileSync(${JSON.stringify(readyFile)},JSON.stringify({wrapper:process.pid,...JSON.parse(fs.readFileSync(${JSON.stringify(childReady)},'utf8'))}));const result=await pending;process.exitCode=result.status==='PASS'?0:1;`;
+    const wrapperCode = `import fs from 'node:fs';import {runTests} from ${JSON.stringify(wrapperModule)};${publishRunnerHandshake.toString()};const args=['-e',${JSON.stringify(runnerChildScript(childReady, heartbeatFile, workerReadyFile))}];const pending=runTests({command:process.execPath,args,timeoutMs:15000});const end=Date.now()+4000;while(!fs.existsSync(${JSON.stringify(childReady)})&&Date.now()<end)await new Promise(r=>setTimeout(r,10));if(!fs.existsSync(${JSON.stringify(childReady)}))process.exit(4);publishRunnerHandshake(${JSON.stringify(readyFile)},{wrapper:process.pid,...JSON.parse(fs.readFileSync(${JSON.stringify(childReady)},'utf8'))});const result=await pending;process.exitCode=result.status==='PASS'?0:1;`;
     let wrapper; let sentinel;
     let owned = []; let ownedGroupLeaders = [];
     try {

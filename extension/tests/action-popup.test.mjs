@@ -20,21 +20,44 @@ test('rejects missing, invalid, or ambiguous normal windows without opening',asy
 test('propagates the real action.openPopup error unchanged',async()=>{
   const failure=new Error('Could not find an active browser window');
   const previous=globalThis.chrome;
-  globalThis.chrome={action:{openPopup:async()=>{throw failure;}}};
+  globalThis.chrome={windows:{update:async()=>{}},action:{openPopup:async()=>{throw failure;}}};
   try {
     const serviceWorker={evaluate:(fn,arg)=>fn(arg)};
     await assert.rejects(openChromeActionPopup({windows:[{id:17,type:'normal'}],serviceWorker}),error=>error===failure);
   } finally { if(previous===undefined) delete globalThis.chrome; else globalThis.chrome=previous; }
 });
 
-test('passes the selected actual window ID to the Chrome action API',async()=>{
-  const previous=globalThis.chrome;let received;
-  globalThis.chrome={action:{openPopup:async options=>{received=options;}}};
+test('focuses the selected actual window before passing its ID to the Chrome action API',async()=>{
+  const previous=globalThis.chrome;const calls=[];
+  globalThis.chrome={windows:{update:async(id,options)=>{calls.push(['focus',id,options]);}},action:{openPopup:async options=>{calls.push(['open',options]);}}};
   try {
     const serviceWorker={evaluate:(fn,arg)=>fn(arg)};
     await openChromeActionPopup({windows:[{id:41,type:'normal'}],serviceWorker});
-    assert.deepEqual(received,{windowId:41});
+    assert.deepEqual(calls,[['focus',41,{focused:true}],['open',{windowId:41}]]);
   } finally { if(previous===undefined) delete globalThis.chrome; else globalThis.chrome=previous; }
+});
+
+test('waits for the focus operation to settle before opening the popup',async()=>{
+  const previous=globalThis.chrome;const calls=[];let finishFocus;
+  const focusPending=new Promise(resolve=>{finishFocus=resolve;});
+  globalThis.chrome={windows:{update:async()=>{calls.push('focus-start');await focusPending;calls.push('focus-finished');}},action:{openPopup:async()=>{calls.push('open');}}};
+  let pending;
+  try {
+    pending=openChromeActionPopup({windows:[{id:41,type:'normal'}],serviceWorker:{evaluate:(fn,arg)=>fn(arg)}});
+    await Promise.resolve();
+    assert.deepEqual(calls,['focus-start']);
+    finishFocus();await pending;
+    assert.deepEqual(calls,['focus-start','focus-finished','open']);
+  } finally { finishFocus();await pending;if(previous===undefined) delete globalThis.chrome;else globalThis.chrome=previous; }
+});
+
+test('propagates a focus failure without attempting to open the popup',async()=>{
+  const previous=globalThis.chrome;const failure=new Error('window focus refused');let opened=false;
+  globalThis.chrome={windows:{update:async()=>{throw failure;}},action:{openPopup:async()=>{opened=true;}}};
+  try {
+    await assert.rejects(openChromeActionPopup({windows:[{id:41,type:'normal'}],serviceWorker:{evaluate:(fn,arg)=>fn(arg)}}),error=>error===failure);
+    assert.equal(opened,false);
+  } finally { if(previous===undefined) delete globalThis.chrome;else globalThis.chrome=previous; }
 });
 
 test('popup click measurement rejects hidden, disabled, clipped, zero-size and obstructed targets',()=>{
