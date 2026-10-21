@@ -499,6 +499,135 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-QLT-2413
+        title: 从安装身份派生镜像精确移除测试版本
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-fixture-version/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/tests/test_podman_local.py
+        - planning/workstreams.yaml
+        - openspec/changes/release-fixture-version/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 镜像精确移除测试的alias由实际安装版本派生，不与某次release版本耦合。
+        acceptance_criteria:
+        - 保持完整镜像身份、共享alias检查、先移除后重建以及数据保留和失败恢复断言。
+        - 当前非2.0.0版本的失败case直接通过，不改产品、超时、Check或Gate。
+        - 最终集成差异取得真实独立开发检查与只读审查；不拼接前次通过项。
+        acceptance_evidence:
+        - 原始StopIteration报告和当前同case直接回归原始结果。
+        validation_command: python3 -m unittest test_podman_local.LocalEntryTest.test_same_version_api_build_failure_retries_after_precise_removal
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-QLT-2410
+        depends_on: []
+        deliverable: 不随发行版本变化失效的精确alias安全回归。
+      - id: LF-TSK-QLT-2412
+        title: 聚焦唯一测试窗口后打开真实弹窗
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-popup-focus/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - extension/tests/action-popup.mjs
+        - extension/tests/action-popup.test.mjs
+        - planning/workstreams.yaml
+        - openspec/changes/release-popup-focus/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 唯一正常测试窗口完成显式聚焦后再打开真实action popup，保持原拒绝和点击合同。
+        acceptance_criteria:
+        - 同一windowId先等待windows.update聚焦再openPopup；歧义窗口、聚焦失败及打开失败原样拒绝。
+        - 不改产品权限、原断言或超时，不增加sleep、重试、Check或Gate，不操作个人浏览器。
+        - 确定性红绿回归与现有扩展quality精准检查有真实证据，最终独立开发验证另行执行。
+        acceptance_evidence:
+        - 原始非活动窗口错误、聚焦顺序与拒绝直接测试、真实浏览器精准检查。
+        validation_command: node extension/scripts/checks/run-extension-checks.mjs
+        required_check_ids: [eng.extension.quality]
+        discovered_from: LF-TSK-QLT-2410
+        depends_on: []
+        deliverable: 无额外权限的真实弹窗窗口聚焦及直接证据。
+      - id: LF-TSK-QLT-2410
+        title: 独立验证首发修复的冻结开发差异
+        priority: P0
+        task_version: 3
+        change_version: 1.2.0
+        task_source: openspec/changes/release-runner-handshake/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/quality/**
+        - tmp/phase-tools/first-release-v2/current-session/**
+        forbidden_files: [secrets/**, .env, planning/**, ops/**, backend/product/**, extension/src/**]
+        expected_output: 对当前研发checkout的握手、弹窗聚焦与安装测试版本修复、版本源与Catalog完整真实diff执行一次现有开发检查。
+        acceptance_criteria:
+        - 使用不同于全部实现者的真实原生actor，在输入冻结后执行现有development-change完整受选检查。
+        - 使用已确认的隔离服务、工程解释器和受锁定依赖，不修改源码或检查判据，不重跑Formal。
+        - 保留原始报告与失败层、真实运行和终态；不得把局部或历史PASS当本次完整结果。
+        acceptance_evidence:
+        - 当前原生绑定、CLI原始stdout与stderr、退出状态、冻结开发报告及摘要。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids: [eng.release.version, eng.repository.planning]
+        discovered_from: LF-TSK-QLT-2409
+        depends_on: []
+        deliverable: 当前冻结修复的独立开发检查报告，不是发行Formal。
+      - id: LF-TSK-QLT-2411
+        title: 独立审查首发修复与开发证据
+        priority: P0
+        task_version: 3
+        change_version: 1.2.0
+        task_source: openspec/changes/release-runner-handshake/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/quality/**
+        - tmp/phase-tools/first-release-v2/current-session/**
+        forbidden_files: [secrets/**, .env, planning/**, ops/**, backend/product/**, extension/src/**]
+        expected_output: 只读复核冻结修复差异与当前独立开发报告，输出有证据的审查意见。
+        acceptance_criteria:
+        - 审查者不同于实现者和开发validator；核对完整差异、版本源、窗口聚焦与精确镜像移除安全边界、测试原断言和证据覆盖。
+        - 不重跑检查、不修改源文件、不签发行Formal或替代人类Environment审批。
+        - 明确有无blocking findings及未证明范围，审查意见绑定真实输入和原报告。
+        acceptance_evidence:
+        - 原生绑定、冻结diff与报告摘要、带定位的只读审查结论。
+        validation_command: read-only frozen diff and development report review
+        required_check_ids: [eng.release.version, eng.repository.planning]
+        discovered_from: LF-TSK-QLT-2409
+        depends_on: []
+        deliverable: 可核查的独立只读审查意见。
+      - id: LF-TSK-QLT-2409
+        title: 原子发布发行测试进程的就绪记录
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-runner-handshake/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/tests/version.test.mjs
+        - planning/workstreams.yaml
+        - openspec/changes/release-runner-handshake/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 在测试私有目录完整写入并原子发布JSON就绪记录，避免读者观察到半写入内容；保留真实进程回收与无关进程保护。
+        acceptance_criteria:
+        - worker、supervisor及wrapper使用同一测试内完整发布能力；确定性回归覆盖最终路径发布前不可见与发布后JSON完整。
+        - 保持全部timeout、overflow、TERM/INT、sentinel及进程回收断言与原执行上限，不改产品或固定发行候选。
+        - 仅做故障节点直接回归；最终输入由不同actor独立验收，不用直接PASS冒充发行Formal。
+        acceptance_evidence:
+        - 原Formal首错与受控时序诊断、红绿回归、原有runner及version检查的真实输出。
+        validation_command: node ops/release/test_tools/run-release-tool-tests.mjs
+        required_check_ids: [eng.release.version, eng.repository.planning, eng.repository.docs]
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 不改变执行器安全合同的测试握手完整发布及直接证据。
       - id: LF-TSK-QLT-2408
         title: 修正真实弹窗测试的点击准备竞态
         priority: P0
@@ -8431,6 +8560,32 @@ workstreams:
           required_change_version: 1.0.0
           required_result: PASS
         deliverable: 单维护者授权变更的独立开发验证证据，不重置已有首发验证预算。
+      - id: LF-TSK-OPS-2053
+        title: 固定首发修复后的新发行身份
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/first-release-v2/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/version.txt
+        - planning/workstreams.yaml
+        - openspec/changes/first-release-v2/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 将已修复源码绑定新的正式软件版本，由现有唯一生产者派生匹配扩展与构建身份。
+        acceptance_criteria:
+        - 软件版本为2.0.1；不移动或覆盖既有v2.0.0和原失败候选，远端身份写入前核实冲突。
+        - 保持唯一版本源与原许可、资料、previous及验收合同，不重复登记扩展版本。
+        - 当前冻结差异由不同actor执行现有开发检查和只读审查；公开发行另消费新候选的真实Formal链。
+        acceptance_evidence:
+        - 版本解析、冻结差异、当次独立开发报告和只读审查意见。
+        validation_command: node ops/release/test_tools/run-release-tool-tests.mjs
+        required_check_ids: [eng.release.version, eng.repository.planning]
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 不覆盖既有标签的新发行源码身份。
       - id: LF-TSK-OPS-2052
         title: 独立审查单维护者发行授权边界
         priority: P0

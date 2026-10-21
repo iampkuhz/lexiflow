@@ -1250,7 +1250,7 @@ console.log(JSON.stringify({identity,generation,upstream,
         self.assertTrue((self.root/'pg-runtime.json').exists())
         self.assertTrue((self.kit/'image-replacement.json').exists())
         calls=[json.loads(line) for line in self.calls.read_text().splitlines()[offset:]]
-        api_ref='localhost/lexiflow-api:2.0.0'
+        api_ref=f"localhost/lexiflow-api:{before['buildIdentity']['baseVersion']}"
         api_remove=next(i for i,row in enumerate(calls)
                         if row[:2]==['image','untag'] and row[-1]==api_ref)
         api_inspects=[(i,row) for i,row in enumerate(calls[:api_remove])

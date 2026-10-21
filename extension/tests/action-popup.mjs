@@ -10,10 +10,13 @@ export async function openInUniqueNormalWindow({windows,openPopup}) {
   return openPopup(normal[0].id);
 }
 
-/** Invoke the real Chrome API through Playwright's extension service-worker context. */
+/** Focus the owned window before invoking Chrome's real action popup API. */
 export async function openChromeActionPopup({windows,serviceWorker}) {
   return openInUniqueNormalWindow({windows,openPopup:windowId=>
-    serviceWorker.evaluate(id=>chrome.action.openPopup({windowId:id}),windowId)});
+    serviceWorker.evaluate(async id=>{
+      await chrome.windows.update(id,{focused:true});
+      return chrome.action.openPopup({windowId:id});
+    },windowId)});
 }
 
 /** Fixed popup-only geometry check, serialized into the real popup Runtime. */
