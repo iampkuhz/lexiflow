@@ -499,6 +499,84 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-QLT-2425
+        title: 修复发行环境测试的托管CI解释器定位
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-promotion-environment/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [ops/release/tests/workflow.test.mjs, planning/workstreams.yaml, openspec/changes/release-promotion-environment/**, tmp/phase-tools/release-promotion-environment/ci-portability/**]
+        forbidden_files: [backend/product/**, extension/src/**, config/engineering/**, scripts/verification/**, scripts/acceptance/**]
+        expected_output: 测试从调用者已准备的Python选择真实解释器，不假定源码有本机专用venv。
+        acceptance_criteria:
+        - 无.local/lexiflow-python的隔离源码副本也执行实际Python fingerprint断言，缺解释器仍失败。
+        - 只改测试工具定位，正式resolver仍要求原有专用venv和Node22，不修改产品或CI权限。
+        acceptance_evidence: [隔离副本失败复现、修复后完整workflow回归、最终冻结摘要。]
+        validation_command: node --test ops/release/tests/workflow.test.mjs
+        required_check_ids: [eng.release.build, eng.repository.planning]
+        discovered_from: LF-TSK-QLT-2424
+        depends_on: []
+        deliverable: 跨宿主测试解释器定位与不放宽正式能力要求的直接证据。
+      - id: LF-TSK-QLT-2426
+        title: 独立验证CI解释器定位修复后的最终输入
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-promotion-environment/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [tmp/quality/**, tmp/phase-tools/release-promotion-environment/ci-portability/**]
+        forbidden_files: [planning/**, ops/**, backend/product/**, extension/src/**]
+        expected_output: CI前置新缺陷修复后最终完整diff的一次独立development-change报告。
+        acceptance_criteria:
+        - 新真实冻结与原生actor，当前完整受选checks全部当次执行，不复用2423历史PASS。
+        - 不重跑责任诊断或完整Formal，不改输入/timeout，原始结果与清理可核验。
+        acceptance_evidence: [原生绑定、最终冻结hash、完整开发报告与清理证据。]
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids: [eng.release.build, eng.release.version, eng.repository.planning]
+        discovered_from: LF-TSK-QLT-2424
+        depends_on:
+        - task_id: LF-TSK-QLT-2425
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        - task_id: LF-TSK-QLT-2423
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 新修复输入的当次独立开发结果，不是Formal。
+      - id: LF-TSK-QLT-2427
+        title: 独立审查CI解释器定位与当前证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-promotion-environment/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [tmp/quality/**, tmp/phase-tools/release-promotion-environment/ci-portability/**]
+        forbidden_files: [planning/**, ops/**, backend/product/**, extension/src/**]
+        expected_output: 只读核对最终差异、2425发现项修复与2426当次完整开发证据。
+        acceptance_criteria:
+        - reviewer不同于实现者和validator，确认测试不依赖本机venv且实际fingerprint比较仍执行，保留正式环境/凭据/清理边界。
+        - 不重跑检查、不修改输入，不用先前审查或开发结果代替当前输入审查。
+        acceptance_evidence: [真实原生来源、当前冻结diff与报告摘要、明确发现项。]
+        validation_command: read-only frozen diff and current evidence review
+        required_check_ids: [eng.release.build, eng.release.version, eng.repository.planning]
+        discovered_from: LF-TSK-QLT-2424
+        depends_on:
+        - task_id: LF-TSK-QLT-2426
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 最终集成源码只读独立审查结果。
       - id: LF-TSK-QLT-2422
         title: 修复有限Compose路由的选项值碰撞
         priority: P0
