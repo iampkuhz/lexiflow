@@ -1,8 +1,6 @@
 """Podman fake transport 的字节语义、隔离和失败关闭回归。"""
-import json
 import os
 from pathlib import Path
-import signal
 import subprocess
 import sys
 import tempfile
@@ -11,7 +9,10 @@ import unittest
 from unittest.mock import patch
 
 from podman_fake_transport import (
+    _CANDIDATE_ROUTE,
+    _COMMANDS,
     FINITE_TEST_CASES,
+    FINITE_ROUTES,
     MAX_REQUEST_BYTES,
     PodmanFakeTransport,
     TransportError,
@@ -100,6 +101,57 @@ class PodmanFakeTransportTest(unittest.TestCase):
         self._await_drained(self.transport)
         self.assertNotIn('test_cancel_during_image_pull_releases_lock_and_retries', FINITE_TEST_CASES)
         self.assertNotIn('test_cancel_during_source_run_removes_only_owned_untagged_tool_image', FINITE_TEST_CASES)
+
+    def test_candidate_route_isolated_and_native_fallback_is_byte_equivalent(self):
+        self.assertIn(_CANDIDATE_ROUTE, FINITE_TEST_CASES)
+        self.assertIs(FINITE_ROUTES['test_install_stop_up_does_not_reimport'], _COMMANDS)
+        self.assertIsNot(FINITE_ROUTES[_CANDIDATE_ROUTE], _COMMANDS)
+        with tempfile.TemporaryDirectory(prefix='lf candidate transport ') as directory:
+            root = Path(directory).resolve()
+            bin_dir = root / 'bin'
+            bin_dir.mkdir()
+            model = bin_dir / 'podman'
+            model.write_text('#!/usr/bin/env python3\n' + MODEL)
+            model.chmod(0o700)
+            mode, baseline_state, transported_state = root / 'mode', root / 'base', root / 'transported'
+            mode.write_text('candidate')
+            baseline_state.write_text('')
+            transported_state.write_text('')
+            transport = PodmanFakeTransport(model, bin_dir, root, _CANDIDATE_ROUTE)
+            transport.start()
+            env_base = {**os.environ, 'MODE_FILE': str(mode), 'STATE_FILE': str(baseline_state), 'CTX': 'candidate'}
+            env_transport = {**os.environ, 'MODE_FILE': str(mode), 'STATE_FILE': str(transported_state), 'CTX': 'candidate'}
+            routed = (['info'], ['image', 'exists', 'candidate'], ['image', 'inspect', 'candidate'], ['tag', 'one', 'two'],
+                      ['compose', '--project-name', 'logs', 'up', '-d', 'api'],
+                      ['compose', '--env-file', 'up', '-p', 'config', '-f', 'stop', 'config'],
+                      ['compose', '--project-directory', 'up', '--file', 'config', 'stop', 'api'])
+            native = (['load', 'archive.tar'], ['run', '--deployment-data', 'probe'], ['pull', 'image'],
+                      ['compose', '--project-name', 'candidate', 'logs', '--follow'], ['compose', 'ps'],
+                      ['compose', '--project-name', 'up', 'ps'],
+                      ['compose', '-p', 'stop', 'ps'], ['compose', '-f', 'config', 'ps'],
+                      ['compose', '--env-file', 'up', 'run', 'api'],
+                      ['compose', '--unknown', 'up'], ['compose', '--file'],
+                      ['compose', '--file', '--unknown', 'up'], ['compose', '-p', '', 'up'],
+                      ['compose', 'ps', 'up'], ['compose', '--project-name=up', 'ps'])
+            try:
+                count_file = transport.mailbox / 'server.count'
+                for should_route, args in [*((True, args) for args in routed), *((False, args) for args in native)]:
+                    with self.subTest(args=args):
+                        before_count = int(count_file.read_text()) if count_file.exists() else 0
+                        actual = subprocess.run([str(bin_dir / 'podman'), *args], cwd=root, env=env_transport,
+                                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+                        expected = subprocess.run([sys.executable, str(transport.model), *args], cwd=root, env=env_base,
+                                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+                        self.assertEqual((actual.stdout, actual.stderr, actual.returncode),
+                                         (expected.stdout, expected.stderr, expected.returncode))
+                        self._await_drained(transport)
+                        after_count = int(count_file.read_text()) if count_file.exists() else 0
+                        self.assertEqual(after_count - before_count, int(should_route))
+                self.assertEqual(baseline_state.read_bytes(), transported_state.read_bytes())
+                self._await_drained(transport)
+                self.assertEqual((transport.mailbox / 'server.count').read_text(), str(len(routed)))
+            finally:
+                transport.close()
 
     def test_empty_argv_and_exit_semantics(self):
         env = {**self._context(), 'EXIT_STATUS': '7'}

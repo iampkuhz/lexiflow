@@ -161,10 +161,10 @@ S1→S2 是 GitHub 托管 source job 到专用 runner prepare job；S2→S3 是�
 | --- | --- | --- |
 | S1 核对标签源 | `node ops/release/integrity/source-build-identity.mjs --tag <tag>` | 精确 tag、commit、干净输入、正式版本与 runner readiness 匹配 |
 | S2 构建并交接候选 | `node ops/release/workflow/run-release-workflow.mjs prepare <request>` | validation Environment 已批准；候选身份、制品及固定 handoff 完整，不签验收 |
-| S3 独立验收候选 | `python3 -m scripts.acceptance <subcommand>` | 以固定 handoff 送验；不同真实 actor 完成完整基线、只读审查及 DAG 核对，无需开发 diff |
-| S4 只读晋升预检 | `node ops/release/workflow/run-release-workflow.mjs resume <submission> <tag>` | 从原标签重核既有候选和 Formal，不构建、不测试、不发布 |
+| S3 独立验收候选 | `"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs formal <action> <id>` | 以固定 handoff 送验；不同真实 actor 完成完整基线、只读审查及 DAG 核对，无需开发 diff |
+| S4 只读晋升预检 | `"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume <submission> <tag>` | 从原标签重核既有候选和 Formal，不构建、不测试、不发布 |
 | S5 人工批准发布 | GitHub Environment `lexiflow-release-promotion` | owner 按保护规则批准；不是测试或独立验收结果 |
-| S6 发布原候选 | `node ops/release/workflow/run-release-workflow.mjs resume <submission> <tag> --publish` | 新鲜证据和固定资产摘要复核成功，只有此步取得发布凭据，远端状态确认 |
+| S6 发布原候选 | `"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume <submission> <tag> --publish` | 新鲜证据和固定资产摘要复核成功，只有此步取得发布凭据，远端状态确认 |
 
 job timeout 是单次执行上限，不是任务估时或逐次累积的发布审批预算：source 5 分钟，prepare 180 分钟，promotion-precheck 30 分钟，promotion 45 分钟。完整原生验收的执行与审阅另按本次冻结计划安排，不重复计入 Actions prepare。命令与精确参数见 [Delivery Gate](../reference/delivery-gate.md) 和[首次发行准备](github-actions/first-release/preparation.md)。
 
@@ -173,13 +173,13 @@ job timeout 是单次执行上限，不是任务估时或逐次累积的发布�
 ## 1.3. 仓库管理员准备
 
 1. 按[Runner 安装与管理](github-actions/first-release/preparation.md#16-runner-安装与日常管理)通过共享 Release 工具自动配置；使用唯一、独立、受控的 Mac runner，标签为 `self-hosted`、`macOS`、`ARM64`、`lexiflow-release`；该标签不能匹配多台机器。专用工作目录不得被其他 workflow 使用、清理或切换源码。不要使用日常开发目录或实际用户安装；禁止不可信 PR 和普通分支进入该宿主。公共仓库更需严格限制专用 runner 的执行来源。
-2. 预装 Node.js 22+、Python 与 `requirements-dev.txt`、Temurin 25、Podman Compose、Docker 兼容客户端及扩展依赖/Playwright。只使用已确认的 Podman Unix endpoint；流程不创建或更改 machine。
+2. 预装 Node.js 22、Python 与 `requirements-dev.txt`、Temurin 25、Podman Compose、Docker 兼容客户端及扩展依赖/Playwright。只使用已确认的 Podman Unix endpoint；流程不创建或更改 machine。
 3. 创建 `lexiflow-release-validation` 和 `lexiflow-release-promotion` 两个 Environment，均要求 owner 人工批准，并只允许受保护正式标签。单维护者允许本人审批，管理员 bypass 保持关闭；原生验证与审查仍按 [Harness](../../harness/agent-policy.md#冻结验证与独立性) 保持不同真实 actor。限制标签创建/移动与 workflow 修改权限；Environment 本身不是 Formal 验收。参考 [GitHub Environment 配置](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)。
-4. 配置同一固定 checkout 的绝对路径 `LEXIFLOW_RELEASE_WORKSPACE` 和私有构建请求文件绝对路径 `LEXIFLOW_RELEASE_REQUEST_FILE`；工作流不在该路径执行 checkout，负责人须先在已授权的干净源码目录准备精确标签和 commit。两处 Environment 的 workspace 必须一致。设置 Environment 变量 `LEXIFLOW_RELEASE_JAVA_HOME`、`LEXIFLOW_RELEASE_TEST_REDIS_ENDPOINT`、`LEXIFLOW_RELEASE_ARM64_DOCKER_HOST`、`LEXIFLOW_RELEASE_GRADLE_CACHE`、`LEXIFLOW_RELEASE_NPM_CACHE`；将隔离 PostgreSQL 测试 JDBC 放入 `LEXIFLOW_RELEASE_TEST_JDBC_URL` secret，不能指向实际安装。缓存仅为构建依赖，不包含用户脚本或私有数据。
+4. 配置同一固定 checkout 的绝对路径 `LEXIFLOW_RELEASE_WORKSPACE` 和私有构建请求文件绝对路径 `LEXIFLOW_RELEASE_REQUEST_FILE`；工作流不在该路径执行 checkout，负责人须先在已授权的干净源码目录准备精确标签和 commit。两处 Environment 的 workspace 必须一致。在两个 Environment 配置相同的 `LEXIFLOW_RELEASE_NODE_BIN` 和验证能力变量 `LEXIFLOW_RELEASE_JAVA_HOME`、`LEXIFLOW_RELEASE_TEST_REDIS_ENDPOINT`、`LEXIFLOW_RELEASE_ARM64_DOCKER_HOST`、`LEXIFLOW_RELEASE_GRADLE_CACHE`、`LEXIFLOW_RELEASE_NPM_CACHE`；在两个 Environment 将同一隔离 PostgreSQL 测试 JDBC 放入 `LEXIFLOW_RELEASE_TEST_JDBC_URL` secret，不能指向实际安装。缓存仅为构建依赖，不包含用户脚本或私有数据。
 5. 在同一 OS 用户与稳定 checkout 配置真实 Codex 运行环境，确保历史 actor 元数据、Gate records 与 Verify 附件可重读。仅复制 JSON、UUID 或将原始记录上传为 Actions artifact 不满足此条件。
 6. 确认上述隔离和保护后，再将 repository variable `LEXIFLOW_RELEASE_RUNNER_READY` 设为 `true`。它仅是管理员配置确认，不是测试、机器身份或独立验收证据。
 
-读取既有链使用 `python3 -m scripts.acceptance consume-existing --submission-id <uuid>`；缺 check 不会补签，且通过只说明该链可核验，仍须核对同候选 runtime 输出。Formal receipt 依赖真实原生 actor/session 元数据和固定输入附件，不能跨机器仅复制 UUID 或填写一个 PASS JSON。执行状态及缺失资源见变更状态页；实际 GitHub 配置、发布和标签操作需要单独授权。
+发行原生角色通过[首次发行准备](github-actions/first-release/preparation.md#13-在原-checkout-完成真实独立-formal)的 `formal` 入口共用受控执行环境；既有链与同候选 runtime 输出由同环境的 `resume` 只读消费，缺 check 不会补签。Formal receipt 依赖真实原生 actor/session 元数据和固定输入附件，不能跨机器仅复制 UUID 或填写一个 PASS JSON。执行状态及缺失资源见变更状态页；实际 GitHub 配置、发布和标签操作需要单独授权。
 
 
 ## 1.4. 候选完整性消费
@@ -244,7 +244,7 @@ node ops/release/workflow/run-release-workflow.mjs prepare /absolute/private-req
 原生链完成后可只读核对：
 
 ```sh
-node ops/release/workflow/run-release-workflow.mjs resume <submission-uuid> <release-tag>
+"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume <submission-uuid> <release-tag>
 ```
 
 发布时从原正式标签手动运行工作流，填写同一标签、submission UUID 和 `PUBLISH`。先 dry-check 再由 `lexiflow-release-promotion` 人工审批；只有发布步骤注入 Contents/Packages write 与 `LEXIFLOW_RELEASE_CONFIG_TOKEN`。管理员须先启用仓库 immutable releases。

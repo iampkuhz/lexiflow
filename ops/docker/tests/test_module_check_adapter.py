@@ -305,7 +305,7 @@ class DockerGroupContractTest(unittest.TestCase):
             ).countTestCases(),
         )
         self.assertEqual(
-            12,
+            13,
             adapter._load_python(
                 self.root, ["ops/docker/tests/test_podman_fake_transport.py"]
             ).countTestCases(),

@@ -41,7 +41,7 @@ Runner Online 只说明机器已接入，不代表五步准备或 Formal 已完�
 | 1. 固定版本 | 审核并提交源码/许可，推到默认分支；`ops/release/version.txt` 为正式 `x.y.z`，同版本 tag/Release/GHCR 未使用 | 分支 Quick checks |
 | 2. 推 tag | 在干净目标 commit 创建并推 `v<版本>` | `Release validation` 的 source 检查，随后等待 validation 人审 |
 | 3. 准备并批准 | 专用 clone 对齐同 tag；更新私有请求、确认输出目录空和输入齐全，再由 owner 人工批准 | 本机 runner 自动构建候选并留下固定 handoff，不重复跑完整基线 |
-| 4. 独立验收 | 在原 checkout 送验 handoff，由不同原生 actor 完成 Formal，取得 `submission_id` | 独立 validator 执行完整发行基线，再只读审查和核链；无需制造开发 diff |
+| 4. 独立验收 | 在原 checkout 通过 `formal` 入口送验 handoff，由不同原生 actor 使用同一受控环境完成 Formal，取得 `submission_id` | 独立 validator 执行完整发行基线，再只读审查和核链；无需制造开发 diff |
 | 5. 晋升 | 原 tag 手动运行 workflow，填写 submission 和 `PUBLISH`，依次通过两道 Environment 批准 | 只读预检 → 推 GHCR → 上传并核对 Release 资产 → 公开发布 |
 
 下列只在上述前置已满足、由负责人决定发布后运行；占位值必须替换。不创建同名 draft，不 force/move tag。

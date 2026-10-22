@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { constants, createReadStream, createWriteStream } from 'node:fs';
 import { lstat, mkdir, open, readdir } from 'node:fs/promises';
 import { spawn, execFileSync } from 'node:child_process';
@@ -15,6 +15,7 @@ import { checkReleaseTag, resolveBuildIdentity, assertBuildIdentityMatches } fro
 import { loadBaseImageLock } from '../build/release-image-build-plan.mjs';
 import { validateRelativePath } from '../integrity/release-artifact-manifest.mjs';
 import { runRunnerCommand } from '../runner/runner.mjs';
+import { resolveFormalInvocation, resolveReleaseExecutionEnvironment } from './release-execution-environment.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const HEX = /^[a-f0-9]{64}$/;
@@ -177,7 +178,7 @@ function groupAlive(child) {
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function runCommand(command, args, { cwd, env, timeout = 1_200_000, logFile, abortSignal } = {}) {
-  if (!logFile || !Number.isSafeInteger(timeout) || timeout < 1 || timeout > 3_600_000) fail('COMMAND_INPUT_INVALID');
+  if (!logFile || !Number.isSafeInteger(timeout) || timeout < 1 || timeout > 5_400_000) fail('COMMAND_INPUT_INVALID');
   await safePath(path.dirname(logFile), 'directory');
   const log = await open(logFile, 'wx', 0o600);
   try {
@@ -434,7 +435,8 @@ export async function prepareWorkflow(requestFile, options = {}) {
 
 export async function resumePromotion({ submissionId, releaseTag, publish = false, root = ROOT,
   run = runCommand, identityReader = resolveBuildIdentity, tagChecker = checkReleaseTag,
-  verifier = verifyReleaseCandidate, host = hostname() } = {}) {
+  verifier = verifyReleaseCandidate, host = hostname(),
+  environmentResolver = resolveReleaseExecutionEnvironment } = {}) {
   if (!UUID.test(submissionId || '') || !/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(releaseTag || '')
     || typeof publish !== 'boolean') return { status: 'FAIL', reason: 'RESUME_INPUT_INVALID' };
   try {
@@ -460,7 +462,7 @@ export async function resumePromotion({ submissionId, releaseTag, publish = fals
     const args = ['-m', 'ops.release.workflow.promote_verified_release', '--submission-id', submissionId,
       '--candidate-directory', handoff.target.candidateDirectory];
     if (publish) args.push('--publish');
-    const env = safeEnv();
+    const env = environmentResolver({ root, purpose: 'promotion' });
     if (publish) {
       if (!process.env.GITHUB_TOKEN || !process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN) fail('PUBLISH_TOKEN_MISSING');
       env.GITHUB_TOKEN = process.env.GITHUB_TOKEN;
@@ -504,16 +506,67 @@ export async function resumePromotion({ submissionId, releaseTag, publish = fals
   } catch (error) { return { status: 'BLOCKED', reason: fixedReason(error) }; }
 }
 
+export async function executeFormal(args, { root = ROOT, run = runCommand,
+  environmentResolver = resolveReleaseExecutionEnvironment } = {}) {
+  const invocation = resolveFormalInvocation(args, root);
+  const env = environmentResolver({ root, purpose: 'formal' });
+  const timeout = args[0] === 'validate' ? 5_400_000 : 1_800_000;
+  const quality = path.join(root, 'tmp/quality/release-workflow');
+  await safePath(quality, 'directory', true);
+  await mkdir(quality, { recursive: true, mode: 0o700 });
+  const action = args[0];
+  return run(invocation.command, invocation.args, {
+    cwd: invocation.cwd,
+    env,
+    timeout,
+    logFile: path.join(quality, `formal-${action}-${randomUUID()}.log`),
+  });
+}
+
+function formalResult(output) {
+  try {
+    const result = parseStrictJson(Buffer.from(output.trim(), 'utf8'));
+    return ['PASS', 'BLOCKED', 'FAIL'].includes(result?.result) ? result : null;
+  } catch { return null; }
+}
+function formalResultCode(status) {
+  return status === 'PASS' ? 0 : status === 'BLOCKED' ? 2 : 1;
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [mode, ...args] = process.argv.slice(2);
-  const result = mode === 'prepare' && args.length === 1
-    ? await prepareWorkflow(args[0])
-    : mode === 'resume' && (args.length === 2 || (args.length === 3 && args[2] === '--publish'))
-      ? await resumePromotion({ submissionId: args[0], releaseTag: args[1], publish: args[2] === '--publish' })
-      : mode === 'runner' && args.length === 1
-        ? args[0] === '--help' ? { status: 'PASS', commands: ['doctor', 'deps', 'install', 'register', 'start', 'stop', 'status', 'setup'] }
-          : await runRunnerCommand(args[0])
-        : { status: 'FAIL', reason: 'ARGUMENTS_INVALID' };
-  process.stdout.write(`${JSON.stringify(result)}\n`);
-  if (result.status !== 'PASS') process.exitCode = 1;
+  if (mode === 'formal') {
+    try {
+      const output = await executeFormal(args);
+      const result = formalResult(output);
+      if (result) {
+        process.stdout.write(`${output.trim()}\n`);
+        process.exitCode = formalResultCode(result.result);
+      } else {
+        process.stdout.write(`${JSON.stringify({ result: 'FAIL', reason: 'FORMAL_RESULT_INVALID' })}\n`);
+        process.exitCode = 1;
+      }
+    } catch (error) {
+      const output = typeof error?.publicOutput === 'string' ? error.publicOutput.trim() : '';
+      const result = output ? formalResult(output) : null;
+      if (result && result.result !== 'PASS') {
+        process.stdout.write(`${output}\n`);
+        process.exitCode = formalResultCode(result.result);
+      } else {
+        process.stdout.write(`${JSON.stringify({ result: 'BLOCKED', reason: fixedReason(error) })}\n`);
+        process.exitCode = 1;
+      }
+    }
+  } else {
+    const result = mode === 'prepare' && args.length === 1
+      ? await prepareWorkflow(args[0])
+      : mode === 'resume' && (args.length === 2 || (args.length === 3 && args[2] === '--publish'))
+        ? await resumePromotion({ submissionId: args[0], releaseTag: args[1], publish: args[2] === '--publish' })
+        : mode === 'runner' && args.length === 1
+          ? args[0] === '--help' ? { status: 'PASS', commands: ['doctor', 'deps', 'install', 'register', 'start', 'stop', 'status', 'setup'] }
+            : await runRunnerCommand(args[0])
+          : { status: 'FAIL', reason: 'ARGUMENTS_INVALID' };
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+    if (result.status !== 'PASS') process.exitCode = 1;
+  }
 }

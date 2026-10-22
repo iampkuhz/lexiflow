@@ -19,7 +19,60 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 DOCKER = ROOT / "ops/docker"
 
 
+def _fast_fixture_identity(stub):
+    """仅短路本例固定daemon身份；业务模型和其他参数保持原生执行。"""
+    model = stub.with_name("docker-model.py")
+    stub.rename(model)
+    stub.write_text(
+        "#!/bin/sh\n"
+        'if [ "$#" -eq 5 ] && [ "$1" = --host ] && '
+        '[ "$2" = unix:///synthetic.sock ] && [ "$3" = info ] && '
+        '[ "$4" = --format ] && [ "$5" = \'{{.ID}}\' ]; then\n'
+        "  printf '%s\\n' synthetic-daemon-id; exit $?\n"
+        "fi\n" + "exec " + shlex.quote(str(model)) + ' "$@"\n'
+    )
+    stub.chmod(0o755)
+
+
 class DockerContractTest(unittest.TestCase):
+    def test_fixture_identity_route_is_exact_and_other_commands_remain_native(self):
+        with tempfile.TemporaryDirectory(prefix="lf identity '雪 ") as td:
+            root = pathlib.Path(td).resolve()
+            stub, log = root / "docker", root / "calls.json"
+            stub.write_text(
+                f"#!{sys.executable}\nimport json,sys\nfrom pathlib import Path\n"
+                f"Path({str(log)!r}).write_text(json.dumps(sys.argv[1:]))\n"
+                "sys.stdout.buffer.write(b'native\\x00out\\n')\n"
+                "sys.stderr.buffer.write(b'native-err\\n')\nsys.exit(7)\n"
+            )
+            stub.chmod(0o755)
+            _fast_fixture_identity(stub)
+            exact = ["--host", "unix:///synthetic.sock", "info", "--format", "{{.ID}}"]
+            direct = subprocess.run([str(stub), *exact], capture_output=True, timeout=5)
+            self.assertEqual(
+                (direct.returncode, direct.stdout, direct.stderr),
+                (0, b"synthetic-daemon-id\n", b""),
+            )
+            self.assertFalse(log.exists())
+            for argv in (
+                [],
+                exact[:-1],
+                [*exact, "extra"],
+                ["--host", "unix:///other.sock", *exact[2:]],
+                [*exact[:2], "version", *exact[3:]],
+                [*exact[:-1], "{{.Other}}"],
+                ["inspect", "space value", "", "line\nquote'雪"],
+            ):
+                with self.subTest(argv=argv):
+                    result = subprocess.run(
+                        [str(stub), *argv], capture_output=True, timeout=5
+                    )
+                    self.assertEqual(
+                        (result.returncode, result.stdout, result.stderr),
+                        (7, b"native\x00out\n", b"native-err\n"),
+                    )
+                    self.assertEqual(json.loads(log.read_text()), argv)
+
     def test_private_transfer_replays_authenticated_journal_before_fixed_order(self):
         source = ROOT / "ops/release/runtime/release-installation-docker.sh"
         with tempfile.TemporaryDirectory() as td:
@@ -703,6 +756,7 @@ else: sys.exit(86)
 """
             )
             stub.chmod(0o755)
+            _fast_fixture_identity(stub)
             source = ROOT / "ops/release/runtime/release-installation-docker.sh"
             script = root / "remove.sh"
             script.write_text(

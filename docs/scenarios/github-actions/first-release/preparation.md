@@ -9,18 +9,19 @@
 | 配置位置 | 名称 | 要填什么 |
 | --- | --- | --- |
 | 两个 Environment 的 Variables | `LEXIFLOW_RELEASE_WORKSPACE` | 同一专用稳定 checkout 的规范绝对路径；普通 `.git` 目录，不是临时 Actions checkout |
+| 两个 Environment 的 Variables | `LEXIFLOW_RELEASE_NODE_BIN` | 同一已安装 Node 22 的 `bin` 规范绝对路径；不是会话临时 PATH，也不自动下载 |
 | validation Variables | `LEXIFLOW_RELEASE_REQUEST_FILE` | 下一节私有构建请求的绝对路径，放在源码外 |
-| validation Variables | `LEXIFLOW_RELEASE_JAVA_HOME` | Temurin 25 的 `Home` 绝对路径 |
-| validation Variables | `LEXIFLOW_RELEASE_TEST_REDIS_ENDPOINT` | 本次隔离测试 Redis 的 `host:port` |
-| validation Variables | `LEXIFLOW_RELEASE_ARM64_DOCKER_HOST` | 已确认的本机 Podman Unix endpoint，例如 `unix:///absolute/path/to/podman.sock` |
-| validation Variables | `LEXIFLOW_RELEASE_GRADLE_CACHE`、`LEXIFLOW_RELEASE_NPM_CACHE` | 仅含依赖的可用私有缓存绝对路径 |
-| validation Secrets | `LEXIFLOW_RELEASE_TEST_JDBC_URL` | 隔离 PostgreSQL 测试 JDBC，含测试账号认证 |
+| 两个 Environment 的 Variables | `LEXIFLOW_RELEASE_JAVA_HOME` | Temurin 25 的 `Home` 绝对路径 |
+| 两个 Environment 的 Variables | `LEXIFLOW_RELEASE_TEST_REDIS_ENDPOINT` | 本次隔离测试 Redis 的 `host:port` |
+| 两个 Environment 的 Variables | `LEXIFLOW_RELEASE_ARM64_DOCKER_HOST` | 已确认的本机 Podman Unix endpoint，例如 `unix:///absolute/path/to/podman.sock` |
+| 两个 Environment 的 Variables | `LEXIFLOW_RELEASE_GRADLE_CACHE`、`LEXIFLOW_RELEASE_NPM_CACHE` | 仅含依赖的可用私有缓存绝对路径 |
+| 两个 Environment 的 Secrets | `LEXIFLOW_RELEASE_TEST_JDBC_URL` | 隔离 PostgreSQL 测试 JDBC，含测试账号认证 |
 | promotion Secrets | `LEXIFLOW_RELEASE_CONFIG_TOKEN` | 仅对目标仓库具 Administration read 的配置查询凭据，用于查询 immutable releases；不要替代为源码构建 token |
 | repository Variables | `LEXIFLOW_RELEASE_RUNNER_READY` | 全部隔离、工具、保护和路径确认后设字面量 `true` |
 
-`GITHUB_TOKEN` 由 GitHub 自动提供，不另造同名 secret；只有 promotion job 声明 Contents write / Packages write。确认仓库/组织策略允许这些权限。准备和预检阶段不得注入发布凭据。两个 Environment 的 workspace 必须完全相同；validation 在手动晋升时也会再次要求批准。
+`GITHUB_TOKEN` 由 GitHub 自动提供，不另造同名 secret；只有 promotion job 声明 Contents write / Packages write。确认仓库/组织策略允许这些权限。准备和预检阶段不得注入发布凭据。两个 Environment 的 workspace、Node 工具路径与验证能力必须完全相同；validation 在手动晋升时也会再次要求批准。验证 JDBC 仅用于隔离测试，不是产品数据库凭据；晋升仍须当前环境重核，不能省略或伪造这些值。
 
-在专用 checkout 按[隔离验证环境](../../verification-environment.md#11-一次性准备运行时与镜像)创建 `.local/lexiflow-python` 并安装 `requirements-dev.txt`。发行 workflow 在构建和两步晋升中显式把该 venv 的 `bin` 放到 `PATH` 首位；原生 validator 执行完整基线时也使用该工程环境，缺解释器立即停止。Node 启动的 Python 子进程沿用同一 `PATH`。不依赖 launchd 服务的全局 Python 恰好安装 PyYAML，也不在取得发布凭据后临时安装依赖。
+在专用 checkout 按[隔离验证环境](../../verification-environment.md#11-一次性准备运行时与镜像)创建 `.local/lexiflow-python` 并安装 `requirements-dev.txt`。发行 workflow 在构建和两步晋升中显式使用同一 Node 22 与该 venv。原生 Formal 和晋升通过同一[受控执行环境](../../../../ops/release/workflow/release-execution-environment.mjs)固定工具 PATH、用户、locale、时区与临时根，过滤偶然的会话环境，再传入显式私有验证能力；缺工具或能力立即停止。Node 启动的 Python 子进程沿用该环境。不依赖 launchd 服务的全局 Python 恰好安装 PyYAML，也不在取得发布凭据后临时安装依赖。
 
 ## 1.2. 首次发行材料：没有旧公开 Release 也不能省 previous
 
@@ -87,26 +88,26 @@ python3 -m scripts.local.run_with_java_toolchain java \
 
 ## 1.3. 在原 checkout 完成真实独立 Formal
 
-在同一 Mac、同一 OS 用户、同一稳定 checkout 的真实 Codex 任务里执行。原生任务不是 Actions job，不会自动继承 Environment secret：在验收宿主私有环境中安全配置同一隔离资源对应的 `LEXIFLOW_POSTGRES_TEST_JDBC_URL`、`LEXIFLOW_REDIS_TEST_ENDPOINT`、`LEXIFLOW_RELEASE_ARM64_DOCKER_HOST`、`LEXIFLOW_JAVA_HOME` 及受要求的构建缓存，并把 `LEXIFLOW_CANDIDATE_RUNTIME_REQUEST` 指向固定本机 handoff 旁的 `candidate-runtime-request.json`，不在提示词或日志中粘贴 secret。不同角色不能在一个实现者会话里依次自签。先确认 Catalog 中正式发行 Task 的必需检查与依赖已齐；干净提交通过固定 handoff 送验，不要求 PASS 开发报告，也不为此添加开发差异：
+在同一 Mac、同一 OS 用户、同一稳定 checkout 的真实 Codex 任务里执行。原生任务不是 Actions job，不会自动继承 Environment secret：在验收宿主私有环境中安全配置同一隔离资源对应的 `LEXIFLOW_POSTGRES_TEST_JDBC_URL`、`LEXIFLOW_REDIS_TEST_ENDPOINT`、`LEXIFLOW_RELEASE_ARM64_DOCKER_HOST`、`LEXIFLOW_JAVA_HOME`、`LEXIFLOW_RELEASE_NODE_BIN` 及受要求的构建缓存，不在提示词或日志中粘贴 secret。下列 `formal` 入口从固定本机 handoff 旁派生 `candidate-runtime-request.json`，并与晋升共用受控环境；不要用临时 shell PATH 或不一致的私有配置执行这条发行链。不同角色不能在一个实现者会话里依次自签。先确认 Catalog 中正式发行 Task 的必需检查与依赖已齐；干净提交通过固定 handoff 送验，不要求 PASS 开发报告，也不为此添加开发差异：
 
 ```sh
 # 生产者/送验者：从本 checkout 的固定 handoff 派生真实发行主体。
-python3 -m scripts.acceptance submit --task-id '<TASK_ID>' --release-handoff
+"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs formal submit '<TASK_ID>'
 
 # 不同真实 validator，在自己的原生任务里执行唯一完整发行基线：
-python3 -m scripts.acceptance validate --submission-id '<返回的SUBMISSION_UUID>'
+"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs formal validate '<返回的SUBMISSION_UUID>'
 
 # 不同于生产者与 validator 的 reviewer，只读冻结发行主体/evidence 后，在自己的任务里：
-python3 -m scripts.acceptance review --validation-id '<返回的VALIDATION_UUID>'
+"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs formal review '<返回的VALIDATION_UUID>'
 
 # 按计划核对 receipt/hash DAG；缺依赖或人类批准不补签、不绕过。
-python3 -m scripts.acceptance check --submission-id '<同一SUBMISSION_UUID>'
+"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs formal check '<同一SUBMISSION_UUID>'
 
 # 负责人只读晋升预检，不发布、不需要发布 token。
-node ops/release/workflow/run-release-workflow.mjs resume '<同一SUBMISSION_UUID>' "$TAG"
+"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume '<同一SUBMISSION_UUID>' "$TAG"
 ```
 
-必须是完整正式发行链、`repository-baseline` 与同一候选的实际运行 stdout 绑定；只读审查无意见时才可形成无 findings 的 review，不把默认空列表当作已经审过。命令返回 `BLOCKED/FAIL` 时保留记录，按具体缺项处理。正式链 PASS 且 `resume` 返回 `status=PASS` 后才进入手动晋升。不要编辑/格式化/切换源码、移动候选/请求、重新构建 JAR/ZIP 或另换验收机；任何输入变化都使后续复核失效。
+`formal` 只把固定角色命令交给既有 Delivery Gate，保留实际 Codex 身份来源；它不代替审阅或授予独立身份。审查发现问题时可在 `formal review` 的 validation ID 后传入既有 findings JSON 文件的绝对路径，不能发布无发现意见冒充已审查。必须是完整正式发行链、`repository-baseline` 与同一候选的实际运行 stdout 绑定；只读审查无意见时才可形成无 findings 的 review，不把默认空列表当作已经审过。命令返回 `BLOCKED/FAIL` 时保留记录，按具体缺项处理。正式链 PASS 且 `resume` 返回 `status=PASS` 后才进入手动晋升。不要编辑/格式化/切换源码、移动候选/请求、重新构建 JAR/ZIP 或另换验收机；任何输入变化都使后续复核失效。
 
 ## 1.4. 首次 GHCR 可见性
 

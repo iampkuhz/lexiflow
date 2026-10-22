@@ -85,7 +85,7 @@ class WorkflowContractTest(unittest.TestCase):
         run = "\n".join(step.get("run", "") for step in full["steps"])
         self.assertIn('git -C "$WORKSPACE" rev-parse HEAD', run)
         self.assertIn(
-            'node ops/release/workflow/run-release-workflow.mjs prepare "$REQUEST_FILE"',
+            '"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs prepare "$REQUEST_FILE"',
             run,
         )
         self.assertNotIn("scripts/check_changes.py", run)
@@ -173,14 +173,18 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(set(selected), {"prepare", "promotion-precheck", "promotion"})
         self.assertIn(' prepare "$REQUEST_FILE"', selected["prepare"])
         self.assertIn(
-            ' resume "$SUBMISSION_ID" "$RELEASE_TAG"', selected["promotion-precheck"]
+            '"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG"',
+            selected["promotion-precheck"],
         )
         self.assertNotIn("--publish", selected["promotion-precheck"])
         self.assertIn(
-            ' resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish', selected["promotion"]
+            '"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish',
+            selected["promotion"],
         )
         prerequisite = 'test -x "$WORKSPACE/.local/lexiflow-python/bin/python3"'
-        activate = 'export PATH="$WORKSPACE/.local/lexiflow-python/bin:$PATH"'
+        activate = 'export PATH="$WORKSPACE/.local/lexiflow-python/bin:$LEXIFLOW_RELEASE_NODE_BIN:$PATH"'
+        for run in selected.values():
+            self.assertIn('test -x "$LEXIFLOW_RELEASE_NODE_BIN/node"', run)
         for run in selected.values():
             with self.subTest(run=run):
                 self.assertIn(prerequisite, run)
@@ -189,6 +193,26 @@ class WorkflowContractTest(unittest.TestCase):
                 self.assertLess(run.index(activate), run.index('cd "$WORKSPACE"'))
                 self.assertNotIn("pip install", run)
                 self.assertNotIn("python3 -m venv", run)
+
+        jobs = workflow("release.yml")["jobs"]
+        private_names = {
+            "LEXIFLOW_RELEASE_NODE_BIN",
+            "LEXIFLOW_JAVA_HOME",
+            "LEXIFLOW_POSTGRES_TEST_JDBC_URL",
+            "LEXIFLOW_REDIS_TEST_ENDPOINT",
+            "LEXIFLOW_RELEASE_ARM64_DOCKER_HOST",
+            "LEXIFLOW_RELEASE_GRADLE_CACHE",
+            "LEXIFLOW_RELEASE_NPM_CACHE",
+        }
+        for name in ["prepare", "promotion-precheck", "promotion"]:
+            self.assertTrue(private_names.issubset(jobs[name]["env"]))
+        for name in private_names:
+            self.assertEqual(
+                jobs["prepare"]["env"][name], jobs["promotion-precheck"]["env"][name]
+            )
+            self.assertEqual(
+                jobs["prepare"]["env"][name], jobs["promotion"]["env"][name]
+            )
 
 
 if __name__ == "__main__":
