@@ -184,11 +184,14 @@ test('release environment canonicalizes ambient values and fails closed on missi
 });
 
 test('private environment capability still changes Python child environment fingerprint', async t => {
+  const python = execFileSync('python3', ['-c', 'import sys; print(sys.executable)'], {
+    cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
   const f = await releaseEnvironmentFixture(t);
   const fingerprint = source => {
     const env = resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'promotion', source });
     const code = `from pathlib import Path\nfrom scripts.environment import resolve_check_environment\nfrom scripts.verification.execution.check_runner import build_child_environment, fingerprint_json\nr=resolve_check_environment(Path.cwd(), {'required_environment':['postgres-test-jdbc-url']})\nassert r.diagnostic['status']=='PASS'\ne=build_child_environment(runtime_environment=r.values)\nprint(fingerprint_json({k:e[k] for k in sorted(e)}))`;
-    return execFileSync(path.join(repo, '.local/lexiflow-python/bin/python3'), ['-c', code], {
+    return execFileSync(python, ['-c', code], {
       cwd: repo, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
     }).trim();
   };
