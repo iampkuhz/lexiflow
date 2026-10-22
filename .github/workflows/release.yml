@@ -64,6 +64,7 @@ jobs:
     permissions:
       contents: read
     env:
+      LEXIFLOW_RELEASE_NODE_BIN: ${{ vars.LEXIFLOW_RELEASE_NODE_BIN }}
       LEXIFLOW_JAVA_HOME: ${{ vars.LEXIFLOW_RELEASE_JAVA_HOME }}
       LEXIFLOW_POSTGRES_TEST_JDBC_URL: ${{ secrets.LEXIFLOW_RELEASE_TEST_JDBC_URL }}
       LEXIFLOW_REDIS_TEST_ENDPOINT: ${{ vars.LEXIFLOW_RELEASE_TEST_REDIS_ENDPOINT }}
@@ -76,6 +77,7 @@ jobs:
       - name: Refuse unsafe or changed stable checkout
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
+          LEXIFLOW_RELEASE_NODE_BIN: ${{ vars.LEXIFLOW_RELEASE_NODE_BIN }}
           EXPECTED_COMMIT: ${{ needs.source.outputs.commit }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
@@ -89,19 +91,22 @@ jobs:
           test ! -e "$WORKSPACE/tmp/quality/release-workflow/handoff.json"
           test ! -d "$WORKSPACE/tmp/quality/release-workflow"
           cd "$WORKSPACE"
-          node ops/release/integrity/source-build-identity.mjs --tag "$RELEASE_TAG"
+          test -x "$LEXIFLOW_RELEASE_NODE_BIN/node"
+          "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/integrity/source-build-identity.mjs --tag "$RELEASE_TAG"
           podman info >/dev/null
           podman compose version
       - name: Build and verify one complete ARM64 release candidate
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
           REQUEST_FILE: ${{ vars.LEXIFLOW_RELEASE_REQUEST_FILE }}
+          LEXIFLOW_RELEASE_NODE_BIN: ${{ vars.LEXIFLOW_RELEASE_NODE_BIN }}
         run: |
           test -n "$REQUEST_FILE"
           test -x "$WORKSPACE/.local/lexiflow-python/bin/python3"
-          export PATH="$WORKSPACE/.local/lexiflow-python/bin:$PATH"
+          export PATH="$WORKSPACE/.local/lexiflow-python/bin:$LEXIFLOW_RELEASE_NODE_BIN:$PATH"
           cd "$WORKSPACE"
-          node ops/release/workflow/run-release-workflow.mjs prepare "$REQUEST_FILE"
+          test -x "$LEXIFLOW_RELEASE_NODE_BIN/node"
+          "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs prepare "$REQUEST_FILE"
       # Preparation leaves a private handoff, not validation evidence. The
       # independent native validator owns the complete repository baseline;
       # Actions must not run the same candidate's complete suite beforehand.
@@ -113,19 +118,29 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    env:
+      LEXIFLOW_RELEASE_NODE_BIN: ${{ vars.LEXIFLOW_RELEASE_NODE_BIN }}
+      LEXIFLOW_JAVA_HOME: ${{ vars.LEXIFLOW_RELEASE_JAVA_HOME }}
+      LEXIFLOW_POSTGRES_TEST_JDBC_URL: ${{ secrets.LEXIFLOW_RELEASE_TEST_JDBC_URL }}
+      LEXIFLOW_REDIS_TEST_ENDPOINT: ${{ vars.LEXIFLOW_RELEASE_TEST_REDIS_ENDPOINT }}
+      LEXIFLOW_RELEASE_ARM64_DOCKER_HOST: ${{ vars.LEXIFLOW_RELEASE_ARM64_DOCKER_HOST }}
+      LEXIFLOW_RELEASE_GRADLE_CACHE: ${{ vars.LEXIFLOW_RELEASE_GRADLE_CACHE }}
+      LEXIFLOW_RELEASE_NPM_CACHE: ${{ vars.LEXIFLOW_RELEASE_NPM_CACHE }}
     steps:
       - name: Reconsume immutable native evidence in its original checkout
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
+          LEXIFLOW_RELEASE_NODE_BIN: ${{ vars.LEXIFLOW_RELEASE_NODE_BIN }}
           SUBMISSION_ID: ${{ inputs.submission_id }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           test -n "$WORKSPACE"
           test -d "$WORKSPACE/.git"
           test -x "$WORKSPACE/.local/lexiflow-python/bin/python3"
-          export PATH="$WORKSPACE/.local/lexiflow-python/bin:$PATH"
+          export PATH="$WORKSPACE/.local/lexiflow-python/bin:$LEXIFLOW_RELEASE_NODE_BIN:$PATH"
           cd "$WORKSPACE"
-          node ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG"
+          test -x "$LEXIFLOW_RELEASE_NODE_BIN/node"
+          "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG"
 
   promotion:
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && inputs.publish_confirmation == 'PUBLISH' && inputs.release_tag == github.ref_name
@@ -136,10 +151,19 @@ jobs:
     permissions:
       contents: write
       packages: write
+    env:
+      LEXIFLOW_RELEASE_NODE_BIN: ${{ vars.LEXIFLOW_RELEASE_NODE_BIN }}
+      LEXIFLOW_JAVA_HOME: ${{ vars.LEXIFLOW_RELEASE_JAVA_HOME }}
+      LEXIFLOW_POSTGRES_TEST_JDBC_URL: ${{ secrets.LEXIFLOW_RELEASE_TEST_JDBC_URL }}
+      LEXIFLOW_REDIS_TEST_ENDPOINT: ${{ vars.LEXIFLOW_RELEASE_TEST_REDIS_ENDPOINT }}
+      LEXIFLOW_RELEASE_ARM64_DOCKER_HOST: ${{ vars.LEXIFLOW_RELEASE_ARM64_DOCKER_HOST }}
+      LEXIFLOW_RELEASE_GRADLE_CACHE: ${{ vars.LEXIFLOW_RELEASE_GRADLE_CACHE }}
+      LEXIFLOW_RELEASE_NPM_CACHE: ${{ vars.LEXIFLOW_RELEASE_NPM_CACHE }}
     steps:
       - name: Publish only after protected approval and fresh native evidence check
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
+          LEXIFLOW_RELEASE_NODE_BIN: ${{ vars.LEXIFLOW_RELEASE_NODE_BIN }}
           SUBMISSION_ID: ${{ inputs.submission_id }}
           RELEASE_TAG: ${{ inputs.release_tag }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -148,6 +172,7 @@ jobs:
           test -n "$WORKSPACE"
           test -d "$WORKSPACE/.git"
           test -x "$WORKSPACE/.local/lexiflow-python/bin/python3"
-          export PATH="$WORKSPACE/.local/lexiflow-python/bin:$PATH"
+          export PATH="$WORKSPACE/.local/lexiflow-python/bin:$LEXIFLOW_RELEASE_NODE_BIN:$PATH"
           cd "$WORKSPACE"
-          node ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish
+          test -x "$LEXIFLOW_RELEASE_NODE_BIN/node"
+          "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish

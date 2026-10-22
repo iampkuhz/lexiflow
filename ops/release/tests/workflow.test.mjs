@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, lstat, rm, symlink, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, lstat, rm, symlink, realpath, chmod } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { prepareWorkflow, resumePromotion, runCommand } from '../workflow/run-release-workflow.mjs';
+import { execFileSync } from 'node:child_process';
+import { executeFormal, prepareWorkflow, resumePromotion, runCommand } from '../workflow/run-release-workflow.mjs';
+import { resolveFormalInvocation, resolveReleaseExecutionEnvironment } from '../workflow/release-execution-environment.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+const repo = process.cwd();
 const ident = (commit, version = '1.2.3') => {
   const sourceSha256 = sha(commit);
   const base = { baseVersion: version, sourceCommit: commit, sourceSha256, dirty: false };
@@ -98,13 +101,138 @@ function boundaries(f, overrides = {}) {
       ? { candidateSha256: f.body.previous.candidateSha256, buildIdentity: previousIdentity }
       : { candidateSha256: sha('target candidate'), buildIdentity: targetIdentity };
   };
+  const environmentResolver = ({ root }) => ({
+    PATH: '/controlled/bin', HOME: '/controlled/home', USER: 'release-user', LOGNAME: 'release-user',
+    TMPDIR: '/tmp', TEMP: '/tmp', TMP: '/tmp', LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8', TZ: 'UTC',
+    PYTHONDONTWRITEBYTECODE: '1', PYTHONHASHSEED: '0', JAVA_HOME: '/controlled/jdk-25',
+    LEXIFLOW_JAVA_HOME: '/controlled/jdk-25',
+    LEXIFLOW_POSTGRES_TEST_JDBC_URL: 'jdbc:postgresql://127.0.0.1:5432/test',
+    LEXIFLOW_REDIS_TEST_ENDPOINT: 'redis://127.0.0.1:6379/0',
+    LEXIFLOW_RELEASE_ARM64_DOCKER_HOST: 'unix:///tmp/podman.sock',
+    LEXIFLOW_RELEASE_GRADLE_CACHE: '/controlled/gradle-cache',
+    LEXIFLOW_RELEASE_NPM_CACHE: '/controlled/npm-cache',
+    LEXIFLOW_CANDIDATE_RUNTIME_REQUEST: path.join(root, 'tmp/quality/release-workflow/candidate-runtime-request.json'),
+  });
   return { calls, candidateDirectory, options: { root: f.root, platform: 'darwin', arch: 'arm64',
     tagChecker: () => targetIdentity, identityReader: () => targetIdentity, ledgerTrackedCheck: () => {},
     endpointChecker: async () => {},
     baseImageLoader: async () => [{ platform: 'linux/amd64' }, { platform: 'linux/arm64' }],
-    runCommand, buildCandidateImages,
+    runCommand, buildCandidateImages, environmentResolver,
     assembleReleaseCandidate, verifyReleaseCandidate, ...overrides } };
 }
+
+async function releaseEnvironmentFixture(t) {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-release-env-')));
+  t.after(async () => rm(root, { recursive: true, force: true }));
+  const pythonBin = path.join(root, '.local/lexiflow-python/bin');
+  const javaHome = path.join(root, 'private-jdk');
+  const cacheGradle = path.join(root, 'gradle-cache'), cacheNpm = path.join(root, 'npm-cache');
+  const quality = path.join(root, 'tmp/quality/release-workflow');
+  await Promise.all([mkdir(pythonBin, { recursive: true }), mkdir(path.join(javaHome, 'bin'), { recursive: true }),
+    mkdir(cacheGradle), mkdir(cacheNpm), mkdir(quality, { recursive: true })]);
+  await writeFile(path.join(pythonBin, 'python3'), '#!/bin/sh\nexit 0\n');
+  await chmod(path.join(pythonBin, 'python3'), 0o700);
+  await writeFile(path.join(javaHome, 'bin/java'), '#!/bin/sh\nexit 0\n');
+  await chmod(path.join(javaHome, 'bin/java'), 0o700);
+  await writeFile(path.join(quality, 'candidate-runtime-request.json'), '{}\n');
+  const source = {
+    LEXIFLOW_RELEASE_NODE_BIN: path.dirname(process.execPath),
+    LEXIFLOW_JAVA_HOME: javaHome,
+    LEXIFLOW_POSTGRES_TEST_JDBC_URL: 'jdbc:postgresql://127.0.0.1:5432/one',
+    LEXIFLOW_REDIS_TEST_ENDPOINT: 'redis://127.0.0.1:6379/0',
+    LEXIFLOW_RELEASE_ARM64_DOCKER_HOST: 'unix:///tmp/podman.sock',
+    LEXIFLOW_RELEASE_GRADLE_CACHE: cacheGradle,
+    LEXIFLOW_RELEASE_NPM_CACHE: cacheNpm,
+    PATH: '/ambient/path', HOME: '/ambient/home', USER: 'ambient-user', LOGNAME: 'ambient-logname',
+    TERM: 'ambient-term', TMPDIR: '/ambient/temp', TEMP: '/ambient/temp2', TMP: '/ambient/temp3',
+    LANG: 'ambient-locale', LC_ALL: 'ambient-locale', TZ: 'ambient-zone',
+    GITHUB_TOKEN: 'synthetic-token', CODEX_HOME: '/trusted/codex-home',
+    CODEX_THREAD_ID: 'thread-native', CODEX_SESSION_ID: 'session-native', CODEX_TMPDIR: '/ambient/codex-temp',
+    LEXIFLOW_CANDIDATE_RUNTIME_REQUEST: '/attacker/request.json',
+  };
+  return { root, javaHome, source };
+}
+
+test('release environment canonicalizes ambient values and fails closed on missing capability', async t => {
+  const f = await releaseEnvironmentFixture(t);
+  const first = resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'formal', source: f.source });
+  const ambientChanged = { ...f.source, PATH: '/other/path', HOME: '/other/home', USER: 'other', LOGNAME: 'other',
+    TERM: 'other-term', TMPDIR: '/other/tmp', TEMP: '/other/temp', TMP: '/other/tmp2',
+    LANG: 'C', LC_ALL: 'C', TZ: 'Pacific/Honolulu' };
+  const second = resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'formal', source: ambientChanged });
+  for (const name of ['PATH', 'HOME', 'USER', 'LOGNAME', 'TMPDIR', 'TEMP', 'TMP', 'LANG', 'LC_ALL', 'TZ'])
+    assert.equal(first[name], second[name], `${name} must be normalized`);
+  assert.equal(first.PATH.split(path.delimiter)[0], path.join(f.root, '.local/lexiflow-python/bin'));
+  assert.equal(first.PATH.split(path.delimiter)[1], path.dirname(process.execPath));
+  assert.equal(first.TMPDIR, await realpath('/tmp'));
+  assert.equal(first.LEXIFLOW_CANDIDATE_RUNTIME_REQUEST, path.join(f.root, 'tmp/quality/release-workflow/candidate-runtime-request.json'));
+  assert.equal(first.CODEX_HOME, '/trusted/codex-home');
+  assert.equal(first.CODEX_THREAD_ID, 'thread-native');
+  assert.equal(first.CODEX_SESSION_ID, 'session-native');
+  for (const forbidden of ['TERM', 'LANGUAGE', 'GITHUB_TOKEN', 'CODEX_TMPDIR', 'LEXIFLOW_RELEASE_NODE_BIN'])
+    assert.equal(first[forbidden], undefined, `${forbidden} must not be forwarded`);
+
+  const required = ['LEXIFLOW_RELEASE_NODE_BIN', 'LEXIFLOW_JAVA_HOME', 'LEXIFLOW_POSTGRES_TEST_JDBC_URL', 'LEXIFLOW_REDIS_TEST_ENDPOINT',
+    'LEXIFLOW_RELEASE_ARM64_DOCKER_HOST', 'LEXIFLOW_RELEASE_GRADLE_CACHE', 'LEXIFLOW_RELEASE_NPM_CACHE'];
+  for (const name of required) {
+    const missing = { ...f.source }; delete missing[name];
+    assert.throws(() => resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'formal', source: missing }));
+  }
+  assert.equal(first.GITHUB_TOKEN, undefined);
+  await rm(path.join(f.root, 'tmp/quality/release-workflow/candidate-runtime-request.json'));
+  assert.throws(() => resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'promotion', source: f.source }), /CANDIDATE_RUNTIME_REQUEST_MISSING/);
+});
+
+test('private environment capability still changes Python child environment fingerprint', async t => {
+  const f = await releaseEnvironmentFixture(t);
+  const fingerprint = source => {
+    const env = resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'promotion', source });
+    const code = `from pathlib import Path\nfrom scripts.environment import resolve_check_environment\nfrom scripts.verification.execution.check_runner import build_child_environment, fingerprint_json\nr=resolve_check_environment(Path.cwd(), {'required_environment':['postgres-test-jdbc-url']})\nassert r.diagnostic['status']=='PASS'\ne=build_child_environment(runtime_environment=r.values)\nprint(fingerprint_json({k:e[k] for k in sorted(e)}))`;
+    return execFileSync(path.join(repo, '.local/lexiflow-python/bin/python3'), ['-c', code], {
+      cwd: repo, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+  };
+  const changed = { ...f.source, LEXIFLOW_POSTGRES_TEST_JDBC_URL: 'jdbc:postgresql://127.0.0.1:5432/two' };
+  assert.notEqual(fingerprint(f.source), fingerprint(changed));
+});
+
+test('formal CLI admits only the four fixed acceptance mappings and propagates command failures', async t => {
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-formal-cli-')));
+  t.after(async () => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, 'tmp/quality/release-workflow'), { recursive: true });
+  const submission = '12345678-1234-4234-8234-123456789abc';
+  const validation = '22345678-1234-4234-8234-123456789abc';
+  assert.deepEqual(resolveFormalInvocation(['submit', 'LF-TSK-QLT-2420'], root), {
+    command: 'python3', args: ['-m', 'scripts.acceptance', 'submit', '--task-id', 'LF-TSK-QLT-2420', '--release-handoff'], cwd: root,
+  });
+  assert.deepEqual(resolveFormalInvocation(['validate', submission], root).args,
+    ['-m', 'scripts.acceptance', 'validate', '--submission-id', submission]);
+  assert.deepEqual(resolveFormalInvocation(['review', validation, '/tmp/findings.json'], root).args,
+    ['-m', 'scripts.acceptance', 'review', '--validation-id', validation, '--findings-json', '/tmp/findings.json']);
+  assert.deepEqual(resolveFormalInvocation(['check', submission], root).args,
+    ['-m', 'scripts.acceptance', 'check', '--submission-id', submission]);
+  for (const invalid of [[], ['submit', 'bad'], ['submit', 'LF-TSK-QLT-2420', '--repo-root', root],
+    ['validate', submission, root], ['review', validation, 'relative.json'], ['check', submission, '--actor', 'fake']])
+    assert.throws(() => resolveFormalInvocation(invalid, root), /FORMAL_ARGUMENTS_INVALID/);
+  const calls = [];
+  const output = await executeFormal(['validate', submission], {
+    root,
+    environmentResolver: input => ({ CODEX_HOME: '/trusted/home', CODEX_THREAD_ID: 'native-thread', CODEX_SESSION_ID: 'native-session' }),
+    run: async (command, args, settings) => { calls.push({ command, args, settings }); return '{"result":"PASS"}'; },
+  });
+  assert.equal(output, '{"result":"PASS"}');
+  assert.equal(calls[0].command, 'python3');
+  assert.equal(calls[0].settings.timeout, 5_400_000);
+  assert.deepEqual(calls[0].settings.env, { CODEX_HOME: '/trusted/home', CODEX_THREAD_ID: 'native-thread', CODEX_SESSION_ID: 'native-session' });
+  const reviewCall = await executeFormal(['review', validation], {
+    root, environmentResolver: () => ({}),
+    run: async (_command, _args, settings) => { assert.equal(settings.timeout, 1_800_000); return '{"result":"BLOCKED"}'; },
+  });
+  assert.equal(reviewCall, '{"result":"BLOCKED"}');
+  await assert.rejects(executeFormal(['check', submission], {
+    root, environmentResolver: () => ({}), run: async () => { const error = new Error('CHILD_FAILED'); error.publicOutput = '{"result":"FAIL"}'; throw error; },
+  }), /CHILD_FAILED/);
+});
 
 test('real staging bytes and exact builder/assembler contracts precede private handoff', async t => {
   const f = await fixture(t); const b = boundaries(f);
@@ -258,7 +386,7 @@ test('resume binds UUID, host, source, original request and candidate; only publ
   };
   const common = { root: f.root, submissionId, releaseTag: 'v1.2.3',
     run, identityReader: () => targetIdentity, tagChecker: () => targetIdentity,
-    verifier: b.options.verifyReleaseCandidate };
+    verifier: b.options.verifyReleaseCandidate, environmentResolver: b.options.environmentResolver };
   assert.equal((await resumePromotion(common)).status, 'PASS');
   assert.equal(outputs[0].settings.env.GITHUB_TOKEN, undefined);
   assert.equal(outputs[0].settings.env.LEXIFLOW_RELEASE_PODMAN_ENDPOINT, undefined);

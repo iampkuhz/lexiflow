@@ -7,7 +7,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { assembleReleaseCandidate } from '../../release/build/release-candidate-assembler.mjs';
 import { resolveBuildIdentity } from '../../release/integrity/source-build-identity.mjs';
@@ -18,6 +18,131 @@ import { dockerSaveFixture, dockerSaveIdentity } from './docker-save-fixture.mjs
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
+// CI provisions Python on PATH; do not pin a developer-only ignored venv.
+const python = 'python3';
+
+const transportOwnerDriver = String.raw`
+import json, os, pathlib, sys, traceback
+repo, bin_dir, owner_dir = map(pathlib.Path, sys.argv[1:4])
+sys.path.insert(0, str(repo / 'ops/docker/tests'))
+from podman_fake_transport import PodmanFakeTransport, _CANDIDATE_ROUTE
+transport = None
+status = 0
+try:
+    transport = PodmanFakeTransport(bin_dir / 'podman', bin_dir, owner_dir, _CANDIDATE_ROUTE)
+    transport.start()
+    print(f'READY {transport.server.pid}', flush=True)
+    if sys.stdin.buffer.readline() != b'LEASE\n':
+        raise RuntimeError('owner lease missing')
+    if sys.stdin.buffer.read(1):
+        raise RuntimeError('unexpected owner lease data')
+except BaseException:
+    traceback.print_exc(file=sys.stderr)
+    status = 1
+finally:
+    if transport is not None:
+        server = transport.server
+        try:
+            transport.close()
+        except BaseException:
+            traceback.print_exc(file=sys.stderr)
+            status = 1
+        pid = server.pid if server is not None else 0
+        code = server.returncode if server is not None else -1
+        try:
+            (owner_dir / 'candidate-transport-owner.closed').write_text(
+                json.dumps({'pid': pid, 'exit_code': code, 'owner_status': status}) + '\n'
+            )
+        except BaseException:
+            traceback.print_exc(file=sys.stderr)
+            status = 1
+        try:
+            print(f'CLOSED {pid} {code}', flush=True)
+        except BrokenPipeError:
+            sys.stdout = open(os.devnull, 'w')
+raise SystemExit(status)
+`;
+
+async function startCandidateTransportOwner(root, bin) {
+  const child = spawn(python, ['-u', '-c', transportOwnerDriver, repo, bin, root], {
+    cwd: repo, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stdout = '', stderr = '', buffered = '';
+  let stdinError = null;
+  const lines = [];
+  const waiters = [];
+  child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
+  child.stdin.on('error', error => { stdinError = error; });
+  child.stdout.on('data', chunk => {
+    stdout += chunk; buffered += chunk;
+    for (;;) {
+      const newline = buffered.indexOf('\n');
+      if (newline < 0) break;
+      const line = buffered.slice(0, newline); buffered = buffered.slice(newline + 1);
+      const waiter = waiters.shift(); if (waiter) waiter.resolve(line); else lines.push(line);
+    }
+  });
+  child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-65536); });
+  const exited = new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('close', (code, signal) => resolve({ code, signal }));
+  });
+  const nextLine = () => lines.length ? Promise.resolve(lines.shift()) : new Promise((resolve, reject) => waiters.push({ resolve, reject }));
+  const withTimeout = (promise, milliseconds, label) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out`)), milliseconds);
+    promise.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+  });
+  const killOwnedGroupAndWait = async () => {
+    if (process.platform === 'win32') child.kill('SIGKILL');
+    else {
+      try { process.kill(-child.pid, 'SIGKILL'); }
+      catch (error) { if (error.code !== 'ESRCH') throw error; }
+    }
+    return withTimeout(exited, 5000, 'owned candidate owner group reap');
+  };
+  let serverPid = null;
+  try {
+    const ready = await withTimeout(Promise.race([
+      nextLine(), exited.then(result => { throw new Error(`owner exited before READY: ${JSON.stringify(result)} ${stderr}`); }),
+    ]), 5000, 'candidate transport owner startup');
+    const match = /^READY ([1-9][0-9]*)$/.exec(ready);
+    if (!match) throw new Error(`invalid candidate transport owner readiness: ${ready}`);
+    serverPid = Number(match[1]);
+    if (!child.stdin.write('LEASE\n')) throw new Error('candidate transport owner lease write failed');
+    await new Promise(resolve => setImmediate(resolve));
+    if (stdinError) throw new Error(`candidate transport owner lease failed: ${stdinError.message}`);
+  } catch (error) {
+    if (!child.stdin.destroyed && !child.stdin.writableEnded) child.stdin.end();
+    try { await withTimeout(exited, 7000, 'candidate owner startup cleanup'); }
+    catch (cleanupError) {
+      try { await killOwnedGroupAndWait(); }
+      catch (reapError) { throw new AggregateError([error, cleanupError, reapError], 'candidate owner startup cleanup failed'); }
+    }
+    throw new Error(`${error.message}; owner stdout=${stdout}; stderr=${stderr}`);
+  }
+  let closed = false;
+  return {
+    serverPid,
+    async close() {
+      if (closed) return; closed = true;
+      if (!child.stdin.destroyed && !child.stdin.writableEnded) child.stdin.end();
+      let result;
+      try { result = await withTimeout(exited, 8000, 'candidate transport owner EOF cleanup'); }
+      catch (error) {
+        let reaped;
+        try { reaped = await killOwnedGroupAndWait(); }
+        catch (reapError) { throw new AggregateError([error, reapError], 'candidate transport owner cleanup/reap failed'); }
+        throw new Error(`${error.message}; owned group reaped ${JSON.stringify(reaped)}; owner stdout=${stdout}; stderr=${stderr}`);
+      }
+      if (stdinError) throw new Error(`candidate transport owner lease pipe failed: ${stdinError.message}; ${stderr}`);
+      const closeLine = lines.shift() ?? buffered.trim();
+      assert.deepEqual(result, { code: 0, signal: null }, `transport owner exit; ${stderr}`);
+      assert.equal(closeLine, `CLOSED ${serverPid} 0`, `transport server close record; ${stdout} ${stderr}`);
+      const marker = JSON.parse(await fs.readFile(path.join(root, 'candidate-transport-owner.closed'), 'utf8'));
+      assert.deepEqual(marker, { pid: serverPid, exit_code: 0, owner_status: 0 });
+    },
+  };
+}
 
 async function assembled(baseVersion = '2.0.0-SNAPSHOT', sqlText = 'synthetic schema\n') {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'lexiflow-candidate-install-')));
@@ -123,10 +248,129 @@ test('candidate request rejects caller-injected fields', async () => {
   await assert.rejects(readCandidate({ candidateDirectory: '/tmp/candidate', candidateSha256: 'a'.repeat(64), pass: true }), /ARGUMENTS_INVALID/);
 });
 
+test('candidate transport owner closes its private server after parent cancellation', async () => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'lexiflow-candidate-owner-cancel-')));
+  const bin = path.join(root, 'bin');
+  let parent = null;
+  let parentExit = null;
+  let parentClosed = false;
+  let failure = null;
+  const cleanupErrors = [];
+  const wait = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+  const withTimeout = (promise, milliseconds, label) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out`)), milliseconds);
+    promise.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+  });
+  const waitForJson = async (file, milliseconds) => {
+    const deadline = Date.now() + milliseconds;
+    while (Date.now() < deadline) {
+      try { return JSON.parse(await fs.readFile(file, 'utf8')); }
+      catch { await wait(20); }
+    }
+    return null;
+  };
+  const waitGone = async pid => {
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline) {
+      try { process.kill(pid, 0); }
+      catch (error) { if (error.code === 'ESRCH') return true; throw error; }
+      await wait(20);
+    }
+    return false;
+  };
+  try {
+    await fs.mkdir(bin);
+    const model = path.join(bin, 'podman');
+    await fs.writeFile(model, '#!/usr/bin/env python3\nprint("synthetic")\n'); await fs.chmod(model, 0o700);
+    const parentSource = `import fs from 'node:fs'; import {spawn} from 'node:child_process';
+const ownerDir=${JSON.stringify(root)}, bin=${JSON.stringify(bin)};
+let owner=null, serverPid=null, cancelling=false;
+const writeResult=(code,signal)=>{fs.writeFileSync(ownerDir+'/candidate-owner-parent.closed',JSON.stringify({ownerPid:owner?.pid??null,serverPid,code,signal})+'\\n');};
+function cancel(){if(cancelling)return;cancelling=true;if(!owner){process.exitCode=143;return;}owner.stdin.end();const timer=setTimeout(()=>{try{process.kill(-owner.pid,'SIGKILL');}catch{}},7000);owner.once('close',(code,signal)=>{clearTimeout(timer);writeResult(code,signal);process.exitCode=143;});}
+process.once('SIGTERM',cancel);
+owner=spawn(${JSON.stringify(python)},['-u','-c',${JSON.stringify(transportOwnerDriver)},${JSON.stringify(repo)},bin,ownerDir],{detached:${process.platform !== 'win32'},stdio:['pipe','pipe','ignore']});
+let pending='';owner.stdout.setEncoding('utf8');
+owner.stdout.on('data',chunk=>{pending+=chunk;for(;;){const i=pending.indexOf('\\n');if(i<0)break;const line=pending.slice(0,i);pending=pending.slice(i+1);const match=/^READY ([1-9][0-9]*)$/.exec(line);if(match){serverPid=Number(match[1]);process.stdout.write('READY '+owner.pid+' '+serverPid+'\\n');if(!owner.stdin.write('LEASE\\n'))throw new Error('lease write failed');}}});
+owner.once('close',(code,signal)=>{if(!cancelling){writeResult(code,signal);process.exitCode=code===0?0:1;}});
+owner.once('error',error=>{console.error(error);process.exitCode=1;});`;
+    parent = spawn(process.execPath, ['--input-type=module', '-e', parentSource], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let errors = '', output = '', buffered = '', readyResolve;
+    const ready = new Promise(resolve => { readyResolve = resolve; });
+    parent.stdout.setEncoding('utf8'); parent.stderr.setEncoding('utf8');
+    parent.stdout.on('data', chunk => {
+      output += chunk; buffered += chunk;
+      const newline = buffered.indexOf('\n');
+      if (newline >= 0) readyResolve(buffered.slice(0, newline));
+    });
+    parent.stderr.on('data', chunk => { errors = (errors + chunk).slice(-65536); });
+    parentExit = new Promise((resolve, reject) => {
+      parent.once('error', reject);
+      parent.once('close', (code, signal) => { parentClosed = true; resolve({ code, signal }); });
+    });
+    const readyLine = await withTimeout(Promise.race([
+      ready, parentExit.then(result => { throw new Error(`cancel-test parent exited before readiness: ${JSON.stringify(result)} ${errors}`); }),
+    ]), 6000, 'cancel-test parent startup');
+    const match = /^READY ([1-9][0-9]*) ([1-9][0-9]*)$/.exec(readyLine);
+    assert.ok(match, `invalid parent readiness: ${readyLine}; ${errors}`);
+    const [ownerPid, serverPid] = match.slice(1).map(Number);
+    assert.equal(parent.kill('SIGTERM'), true, 'parent cancellation signal was not delivered');
+    assert.deepEqual(await withTimeout(parentExit, 9000, 'cancel-test parent cleanup'), { code: 143, signal: null }, errors);
+    const closed = await waitForJson(path.join(root, 'candidate-transport-owner.closed'), 1000);
+    const parentRecord = await waitForJson(path.join(root, 'candidate-owner-parent.closed'), 1000);
+    assert.deepEqual(closed, { pid: serverPid, exit_code: 0, owner_status: 0 });
+    assert.deepEqual(parentRecord, { ownerPid, serverPid, code: 0, signal: null });
+    assert.equal(await waitGone(ownerPid), true, `owned transport owner ${ownerPid} survived parent cancellation`);
+    assert.equal(await waitGone(serverPid), true, `owned transport server ${serverPid} survived parent cancellation`);
+  } catch (error) {
+    failure = error;
+  } finally {
+    if (parent && !parentClosed) {
+      try { if (parent.exitCode === null && parent.signalCode === null) parent.kill('SIGTERM'); }
+      catch (error) { cleanupErrors.push(error); }
+      if (parentExit) {
+        try { await withTimeout(parentExit, 9000, 'cancel-test cleanup after assertion failure'); }
+        catch (error) {
+          cleanupErrors.push(error);
+          try {
+            if (parent.exitCode === null && parent.signalCode === null) parent.kill('SIGKILL');
+            await withTimeout(parentExit, 5000, 'cancel-test parent reap after SIGKILL');
+            parentClosed = true;
+          } catch (killError) { cleanupErrors.push(killError); }
+        }
+      }
+    }
+    const ownerProof = await waitForJson(path.join(root, 'candidate-transport-owner.closed'), 9000);
+    const parentProof = await waitForJson(path.join(root, 'candidate-owner-parent.closed'), 1000);
+    let ownedProcessesGone = true;
+    for (const pid of [parentProof?.ownerPid, parentProof?.serverPid].filter(Number.isInteger)) {
+      try {
+        if (!await waitGone(pid)) {
+          try { if (process.platform === 'win32') process.kill(pid, 'SIGKILL'); else process.kill(-pid, 'SIGKILL'); }
+          catch (error) { if (error.code !== 'ESRCH') cleanupErrors.push(error); }
+          if (!await waitGone(pid)) { ownedProcessesGone = false; cleanupErrors.push(new Error(`owned pid ${pid} survived cancellation cleanup`)); }
+        }
+      } catch (error) { ownedProcessesGone = false; cleanupErrors.push(error); }
+    }
+    if (ownedProcessesGone && parentClosed && ownerProof && parentProof) {
+      try { await fs.rm(root, { recursive: true, force: true }); }
+      catch (error) { cleanupErrors.push(error); }
+    } else {
+      cleanupErrors.push(new Error(`owned transport cleanup unproven; preserved ignored root ${root}`));
+    }
+  }
+  if (failure && cleanupErrors.length) throw new AggregateError([failure, ...cleanupErrors], 'cancellation assertion and cleanup failed');
+  if (failure) throw failure;
+  if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'cancellation cleanup failed');
+});
+
 test('runLocal installs, refreshes, upgrades and retries candidates through shared lifecycle with isolated Podman/network substitutes', async t => {
   const first = await assembled('8.0.0-SNAPSHOT'), second = await assembled('8.0.1-SNAPSHOT');
   const incompatible = await assembled('8.0.2-SNAPSHOT', 'incompatible schema\n');
-  t.after(async () => { await first.cleanup(); await second.cleanup(); await incompatible.cleanup(); });
+  let transportOwner = null;
+  t.after(async () => {
+    try { if (transportOwner) await transportOwner.close(); }
+    finally { await first.cleanup(); await second.cleanup(); await incompatible.cleanup(); }
+  });
   const root = path.join(first.root, 'local-run'), dir = path.join(root, 'private-install'), bin = path.join(root, 'bin');
   await fs.mkdir(bin, { recursive: true }); const callsFile = path.join(root, 'podman-calls.jsonl');
   const badLabelMarker = path.join(root, 'bad-label-once'), failMarker = path.join(root, 'api-start-failure');
@@ -261,6 +505,9 @@ else: print('unexpected command '+json.dumps(a), file=sys.stderr); sys.exit(7)
 `;
   const script = podman + podmanBody;
   const podmanFile = path.join(bin, 'podman'); await fs.writeFile(podmanFile, script); await fs.chmod(podmanFile, 0o755);
+  // Keep the per-case model owner alive across CLI calls. Only its finite
+  // non-signalling routes use the server; load/run/pull/logs remain native exec.
+  transportOwner = await startCandidateTransportOwner(root, bin);
   const preload = path.join(root, 'preload.mjs');
   await fs.writeFile(preload, `import fs from 'node:fs'; import os from 'node:os'; import net from 'node:net'; import http from 'node:http'; import { EventEmitter } from 'node:events'; import { Readable } from 'node:stream';
 os.platform=()=> 'darwin'; os.arch=()=> 'arm64';

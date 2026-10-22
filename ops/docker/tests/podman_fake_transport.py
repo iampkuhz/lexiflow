@@ -32,6 +32,23 @@ _COMMANDS = {
     "rm": None, "rmi": None, "stop": None, "tag": None,
     "volume": {"ls"},
 }
+# The long Node candidate fixture has its own fixed, non-signalling route set.
+# Keep this separate from _COMMANDS so existing Python cases cannot inherit it.
+_CANDIDATE_COMMANDS = {
+    "info": None,
+    "image": {"exists", "inspect"},
+    "tag": None,
+    "rmi": None,
+    "ps": None,
+    "container": {"inspect"},
+    "inspect": None,
+    "stop": None,
+    "rm": None,
+    "network": {"ls"},
+    "volume": {"ls"},
+    "compose": {"config", "up", "stop"},
+}
+_CANDIDATE_ROUTE = "test_candidate_local_lifecycle"
 FINITE_ROUTES = {name: _COMMANDS for name in (
     "test_first_install_plan_uses_current_checkout_and_not_foreign_private_state",
     "test_install_stop_up_does_not_reimport",
@@ -54,6 +71,9 @@ FINITE_ROUTES = {name: _COMMANDS for name in (
     "test_owned_postgres_port_does_not_block_preinit_retry",
     "test_schema_and_csv_tampering_block_initialization",
 )}
+# `load`, `run`, `pull`, `images`, `volume inspect`, compose `ps`/`run`/`logs`,
+# and every unlisted command intentionally fall through to the original model.
+FINITE_ROUTES[_CANDIDATE_ROUTE] = _CANDIDATE_COMMANDS
 # 专属小测试用路由，用以验证 argv/cwd/env/退出与故障通道。
 FINITE_ROUTES["test_transport_equivalence_and_context"] = {"": None, "probe": None}
 FINITE_TEST_CASES = frozenset(FINITE_ROUTES)
@@ -126,10 +146,24 @@ class PodmanFakeTransport:
             if subcommands is None:
                 cases.append(f"  {shlex.quote(command)}) ;;" if command else "  '') ;;")
             elif command == "compose":
-                # Flags may precede the compose verb; logs/unknown are always native.
+                # Only known value-taking options may precede the actual verb.
+                # Shift function-local positional args, preserving the original argv.
                 cases.extend(("  compose)", "    route_subcommand=",
-                              "    for arg do case \"$arg\" in logs) native \"$@\";; esac; done",
-                              "    for arg do case \"$arg\" in config|up|stop) route_subcommand=$arg; break;; esac; done",
+                              "    compose_verb() {",
+                              "      shift",
+                              "      while [ \"$#\" -gt 0 ]; do",
+                              "        case \"$1\" in",
+                              "          --env-file|--project-name|--project-directory|--file|-p|-f)",
+                              "            [ \"$#\" -ge 2 ] || return 1;",
+                              "            case \"$2\" in ''|-*) return 1;; esac; shift 2;;",
+                              "          -*) return 1;;",
+                              "          *) route_subcommand=$1; return 0;;",
+                              "        esac",
+                              "      done",
+                              "      return 1",
+                              "    }",
+                              "    compose_verb \"$@\" || native \"$@\"",
+                              "    [ -n \"$route_subcommand\" ] || native \"$@\"",
                               "    case \" $allowed_compose \" in *\" $route_subcommand \"*) ;; *) native \"$@\";; esac",
                               "    ;;"))
             else:
