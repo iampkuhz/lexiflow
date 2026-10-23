@@ -640,13 +640,16 @@ export async function runUnifiedDeployment(ctx) {
     const logFile = path.join(dir, `operation-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.log`);
     fs.writeFileSync(logFile, '', { mode: 0o600, flag: 'wx' }); ctx.setLogFile(logFile);
     const opId = crypto.randomBytes(16).toString('hex');
+    let operationArtifacts = null;
     const journalFile = path.join(dir, 'deployment.json');
     if (fs.existsSync(journalFile) && readOperationJournal(journalFile).stage !== 'complete') {
       // 重计划来自实时数据库事实；不以旧本机阶段批准复用。保留上一 journal 快照。
       fs.renameSync(journalFile, path.join(dir, `deployment-${opId}-previous.json`));
     }
     let prepared;
-    await executeDeployment({ plan, confirmedHash: planHash, journalFile, operation: opId, callbacks: {
+    const startedAt = new Date().toISOString();
+    let readinessVerified = false;
+    const executeOperation = () => executeDeployment({ plan, confirmedHash: planHash, journalFile, operation: opId, callbacks: {
       prepare: async () => {
         ctx.progress('准备应用与资料制品');
         if (installed && !fresh && !replacement) {
@@ -742,6 +745,7 @@ export async function runUnifiedDeployment(ctx) {
           version: identity.softwareVersion, buildIdentity: identity, generationVersion: generation.generationVersion,
           artifacts: { ...(candidate ? { candidateSha256: candidate.candidateSha256, manifestSha256: candidate.manifestSha256 } : { jar: fileHash(jar) }), apiImage, extensionArchive },
           digests: null };
+        operationArtifacts = current.artifacts;
         ctx.setState(current);
         if (fresh) ctx.saveState(current);
         return { dataFile, apiImage, postgresImage, composeText, envText, extensionArchive, nextSql: fs.existsSync(nextSql) ? nextSql : null,
@@ -843,12 +847,28 @@ export async function runUnifiedDeployment(ctx) {
         await ctx.ready(current);
         await verifyExtensionArchive(dir, current.artifacts.extensionArchive, identity, apiPort, path.join(dir, 'extension'));
         if (authMode === 'development-trust') developmentIdentity = await assertDevelopmentIdentity(developmentIdentity);
+        readinessVerified = true;
         current.phase = 'ready';
         current.lastOperation = installationRecord({ operation: opId, kind: action, previous: installed, target: identity,
-          startedAt: new Date().toISOString(), status: 'PASS', artifacts: current.artifacts, dataset: current.datasetIdentity });
+          startedAt, status: 'PASS', artifacts: current.artifacts, dataset: current.datasetIdentity });
         current.digests = ctx.digestFiles(current); ctx.saveState(current); publishRecord(dir, current.lastOperation);
       },
     } });
+    try {
+      await executeOperation();
+    } catch (operationError) {
+      // Ready verification is the success boundary; a later PASS-record persistence error must not
+      // manufacture a conflicting FAIL record for the same operation.
+      if (readinessVerified) throw operationError;
+      try {
+        const failureRecord = installationRecord({ operation: opId, kind: action, previous: installed, target: identity,
+          startedAt, status: 'FAIL', artifacts: operationArtifacts, dataset: current?.datasetIdentity ?? null });
+        publishRecord(dir, failureRecord);
+      } catch (recordError) {
+        throw new AggregateError([operationError, recordError], 'DEPLOYMENT_FAILURE_RECORD_WRITE_FAILED', { cause: operationError });
+      }
+      throw operationError;
+    }
     console.log(`[LexiFlow] 部署完成：应用版本 softwareVersion=${identity.softwareVersion}；数据导入版本 generationVersion=${generation.generationVersion}`);
     ctx.reportReady?.();
     return 0;
