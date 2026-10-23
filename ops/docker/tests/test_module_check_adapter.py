@@ -6,9 +6,11 @@ import contextlib
 import hashlib
 import io
 import json
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -305,7 +307,7 @@ class DockerGroupContractTest(unittest.TestCase):
             ).countTestCases(),
         )
         self.assertEqual(
-            13,
+            14,
             adapter._load_python(
                 self.root, ["ops/docker/tests/test_podman_fake_transport.py"]
             ).countTestCases(),
@@ -412,6 +414,10 @@ class ModuleCheckAdapterTimingTest(unittest.TestCase):
             ["node"], node_returncode, json.dumps(node_report), ""
         )
         stderr, stdout = _FlushStream(), io.StringIO()
+        fake_groups = {name: [] for name in ("surface", "shell", "local", "node")}
+        fake_groups["surface"] = [
+            "ops/docker/tests/test_module_check_adapter.py", "ops/podman/tests/synthetic.test.mjs"
+        ]
 
         def run_node(*args, **kwargs):
             self.assertEqual(stderr.flushed[-1], stderr.getvalue())
@@ -428,6 +434,7 @@ class ModuleCheckAdapterTimingTest(unittest.TestCase):
 
         with (
             patch.object(adapter, "_preflight"),
+            patch.object(adapter, "_members", return_value=fake_groups),
             patch.object(adapter, "_load_python", return_value=suite),
             patch.object(adapter, "_node_run", side_effect=run_node),
             patch.object(
@@ -439,12 +446,15 @@ class ModuleCheckAdapterTimingTest(unittest.TestCase):
             contextlib.redirect_stdout(stdout),
         ):
             if main:
-                with patch("sys.argv", ["run_deployment_contract_tests.py"]):
+                with (
+                    patch("sys.argv", ["run_deployment_contract_tests.py"]),
+                    patch.object(adapter, "run_tests", side_effect=lambda: adapter._run("surface")),
+                ):
                     self.assertEqual(adapter.main(), 0)
                 self.assertEqual(stdout.getvalue().count("\n"), 1)
                 report = json.loads(stdout.getvalue())
             else:
-                report = adapter.run_tests()
+                report = adapter._run("surface")
                 self.assertEqual(stdout.getvalue(), "")
         self.assertEqual(
             report["tool_output_sha256"],
@@ -466,7 +476,7 @@ class ModuleCheckAdapterTimingTest(unittest.TestCase):
         events = self._events(stderr)
         case_event = next(item for item in events if item["event"] == "test_completed")
         self.assertEqual(
-            case_event["test"], "test_module_check_adapter.SyntheticCase.runTest"
+        case_event["test"], f"{__name__}.SyntheticCase.runTest"
         )
         self.assertEqual(case_event["seconds"], 1.234568)
         self.assertEqual(
@@ -493,6 +503,7 @@ class ModuleCheckAdapterTimingTest(unittest.TestCase):
         stderr = io.StringIO()
         with (
             patch.object(adapter, "_preflight"),
+            patch.object(adapter, "_members", return_value={"surface":["ops/docker/tests/test_module_check_adapter.py","ops/podman/tests/synthetic.test.mjs"],"shell":[],"local":[],"node":[]}),
             patch.object(adapter, "_load_python", return_value=suite),
             patch.object(
                 adapter, "_node_run", side_effect=subprocess.TimeoutExpired("node", 180)
@@ -500,7 +511,7 @@ class ModuleCheckAdapterTimingTest(unittest.TestCase):
             contextlib.redirect_stderr(stderr),
             self.assertRaises(subprocess.TimeoutExpired),
         ):
-            adapter.run_tests()
+            adapter._run("surface")
         events = self._events(stderr.getvalue())
         self.assertTrue(any(item["event"] == "test_completed" for item in events))
         self.assertTrue(any(item["event"] == "node_started" for item in events))
@@ -524,9 +535,202 @@ class ModuleCheckAdapterTimingTest(unittest.TestCase):
 
     def test_main_stdout_remains_only_final_json(self):
         report, stderr = self._run(main=True)
-        self.assertEqual(report["status"], "PASS")
+        self.assertEqual(report["status"], "PASS", report)
         self.assertEqual(report["checks_run"], 3)
         self.assertEqual(len(self._events(stderr)), 5)
+
+
+class IsolatedClassLaneTest(unittest.TestCase):
+    def test_fixed_class_call_surface_excludes_health_transport(self):
+        adapter._class_lane_audit(adapter._repo_root())
+        full = adapter._load_python(adapter._repo_root(), ["ops/docker/tests/test_contract.py", "ops/docker/tests/test_lifecycle_flow.py"])
+        lane, remaining = adapter._lane_partition(full)
+        ids = [case.id() for case in lane]
+        self.assertEqual(len(ids), 30)
+        self.assertEqual(len(set(ids)), 30)
+        self.assertTrue(all("DockerContractTest." in item or "FlowTests." in item for item in ids))
+        self.assertEqual(len(list(adapter._iter_cases(remaining))), 7)
+        self.assertTrue(all("ContainerHealthTransportTest." in item for item in [case.id() for case in adapter._iter_cases(remaining)]))
+
+    def test_complete_entry_runs_fixed_classes_once_before_node(self):
+        captured = {"retained_runs": [], "events": []}
+
+        def synthetic_cases(module, class_name, count, *, retained=False):
+            def run_case(case):
+                if not retained:
+                    self.fail("lane case executed in Main instead of the worker")
+                captured["retained_runs"].append(case.id())
+
+            methods = {f"test_synthetic_{i}": run_case for i in range(count)}
+            case_type = type(class_name, (unittest.TestCase,), {
+                "__module__": module, **methods,
+            })
+            return list(unittest.defaultTestLoader.loadTestsFromTestCase(case_type))
+
+        def load(root, paths):
+            if paths == ["ops/docker/tests/test_contract.py", "ops/docker/tests/test_lifecycle_flow.py"]:
+                suite = unittest.TestSuite([
+                    *synthetic_cases("test_contract", "DockerContractTest", 18),
+                    *synthetic_cases("test_contract", "ContainerHealthTransportTest", 7, retained=True),
+                    *synthetic_cases("test_lifecycle_flow", "FlowTests", 12),
+                ])
+                captured["ids"] = adapter._lane_class_ids(suite)
+                _, remainder = adapter._lane_partition(suite)
+                captured["retained"] = [case.id() for case in remainder]
+                return suite
+            return unittest.TestSuite([_synthetic_case()])
+        class Process:
+            pid = 44551
+        def spawn(_root, directory):
+            (directory / "stdout").write_bytes(b"")
+            (directory / "stderr").write_bytes(b"")
+            return {"process":Process(),"write_fd":10,"result_path":directory/"result.json","directory":directory,"mode":"suite"}
+        def report(_worker):
+            return {"schema_version":adapter._LANE_SCHEMA,"worker_pid":44551,"worker_pgid":44551,"case_ids":captured["ids"],"checks_run":30,"failures":0,"errors":0,"skipped":0,"per_test_timing":{key:.1 for key in captured["ids"]},"stderr_sha256":hashlib.sha256(b"").hexdigest(),"status":"PASS","probe_child_pid":None}
+        class Node:
+            returncode, stdout, stderr = 0, "", ""
+
+        def finish(_worker):
+            captured["events"].append("worker_finished")
+            return -signal.SIGKILL, []
+
+        def run_node(*_args):
+            self.assertEqual(captured["events"], ["worker_finished"])
+            captured["events"].append("node_started")
+            return Node(), .01, {"status":"PASS", "checks_run":1, "failures":0, "errors":0, "skipped":0}
+
+        fake_groups = {name: [] for name in ("surface", "shell", "local", "node")}
+        fake_groups["surface"] = ["ops/docker/tests/test_contract.py", "ops/docker/tests/test_module_check_adapter.py"]
+        fake_groups["shell"] = ["ops/docker/tests/test_lifecycle_flow.py"]
+        fake_groups["node"] = ["ops/podman/tests/synthetic.test.mjs"]
+        with (
+            patch.object(adapter, "_preflight"),
+            patch.object(adapter, "_members", return_value=fake_groups),
+            patch.object(adapter, "_load_python", side_effect=load),
+            patch.object(adapter, "_node_run", side_effect=run_node),
+            patch.object(adapter, "_spawn_class_lane", side_effect=spawn),
+            patch.object(adapter, "_await_class_lane", side_effect=report),
+            patch.object(adapter, "_finish_class_lane", side_effect=finish),
+        ):
+            report = adapter._run(None)
+        self.assertEqual(len(captured["ids"]), 30)
+        self.assertEqual(len(set(captured["ids"])), 30)
+        self.assertEqual(report["status"], "PASS", report)
+        self.assertEqual(report["checks_run"], 39)
+        self.assertEqual(report["skipped"], 0)
+        self.assertEqual(set(report["per_test_timing"]), set(captured["ids"]) | set(captured["retained"]) | {f"{__name__}.SyntheticCase.runTest"})
+        self.assertEqual(captured["retained_runs"], captured["retained"])
+        self.assertEqual(captured["events"], ["worker_finished", "node_started"])
+
+    def test_worker_sigterm_kills_real_owned_descendant_and_reaps(self):
+        with tempfile.TemporaryDirectory(prefix="class-lane-term-") as tmp:
+            worker = adapter._spawn_class_lane(adapter._repo_root(), Path(tmp), "probe-child")
+            report = adapter._await_class_lane(worker)
+            process = worker["process"]
+            self.assertEqual(report["worker_pid"], process.pid)
+            self.assertEqual(report["worker_pgid"], process.pid)
+            self.assertTrue(any(pid == report["probe_child_pid"] for pid, _ in adapter._lane_group_members(process.pid)))
+            self.assertFalse(adapter._validate_class_lane(report, worker, [])[0])
+            process.send_signal(signal.SIGTERM)
+            code, remaining = adapter._finish_class_lane(worker)
+            self.assertEqual(code, -signal.SIGKILL)
+            self.assertEqual(remaining, [])
+
+    def test_worker_startup_signal_has_no_untracked_children(self):
+        with tempfile.TemporaryDirectory(prefix="class-lane-startup-") as tmp:
+            worker = adapter._spawn_class_lane(adapter._repo_root(), Path(tmp), "suite")
+            process = worker["process"]
+            process.send_signal(signal.SIGTERM)
+            code, remaining = adapter._finish_class_lane(worker)
+            self.assertIn(code, (-signal.SIGTERM, -signal.SIGKILL))
+            self.assertEqual(remaining, [])
+
+    def test_worker_error_report_is_not_success_and_eof_reaps(self):
+        with tempfile.TemporaryDirectory(prefix="class-lane-error-") as tmp:
+            worker = adapter._spawn_class_lane(adapter._repo_root(), Path(tmp), "worker-error")
+            report = adapter._await_class_lane(worker)
+            ok, _ = adapter._validate_class_lane(report, worker, [])
+            self.assertFalse(ok)
+            code, remaining = adapter._finish_class_lane(worker)
+            self.assertEqual(code, -signal.SIGKILL)
+            self.assertEqual(remaining, [])
+
+    def test_parent_monkeypatches_do_not_cross_exec_into_worker(self):
+        with tempfile.TemporaryDirectory(prefix="class-lane-monkeypatch-") as tmp:
+            with (
+                patch.object(adapter.subprocess, "run", side_effect=AssertionError("parent patch")),
+                patch.object(adapter.os, "close", side_effect=AssertionError("parent patch")),
+            ):
+                worker = adapter._spawn_class_lane(adapter._repo_root(), Path(tmp), "probe-child")
+                report = adapter._await_class_lane(worker)
+                code, remaining = adapter._finish_class_lane(worker)
+            self.assertEqual(report["worker_pid"], report["worker_pgid"])
+            self.assertEqual(code, -signal.SIGKILL)
+            self.assertEqual(remaining, [])
+
+    def test_owner_sigkill_triggers_eof_reaper_for_worker_group(self):
+        with tempfile.TemporaryDirectory(prefix="class-lane-owner-death-") as tmp:
+            marker = Path(tmp) / "owner.json"
+            driver = (
+                "import json,sys,time; from pathlib import Path; "
+                "from scripts.checks.deployment.run_deployment_contract_tests import _spawn_class_lane,_await_class_lane; "
+                "w=_spawn_class_lane(Path.cwd(),Path(sys.argv[1]),'probe-child'); "
+                "Path(sys.argv[2]).write_text(json.dumps({'pid':w['process'].pid})); time.sleep(60)"
+            )
+            owner = subprocess.Popen([sys.executable, "-c", driver, tmp, str(marker)], cwd=adapter._repo_root(), start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            deadline = time.monotonic() + 8
+            while not marker.exists() and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertTrue(marker.exists())
+            data = json.loads(marker.read_text())
+            owner.kill()
+            owner.wait(timeout=5)
+            deadline = time.monotonic() + 5
+            remaining = adapter._lane_group_members(data["pid"])
+            while remaining and time.monotonic() < deadline:
+                time.sleep(.02)
+                remaining = adapter._lane_group_members(data["pid"])
+            self.assertEqual(remaining, [])
+
+    def test_check_runner_term_grace_keeps_worker_cleanup_bounded(self):
+        from scripts.verification.execution import check_runner
+        with tempfile.TemporaryDirectory(prefix="class-lane-runner-cancel-") as tmp:
+            marker = Path(tmp) / "owner.json"
+            driver = (
+                "import json,sys,time; from pathlib import Path; "
+                "from scripts.checks.deployment.run_deployment_contract_tests import _spawn_class_lane,_await_class_lane; "
+                "w=_spawn_class_lane(Path.cwd(),Path(sys.argv[1]),'probe-child'); "
+                "r=_await_class_lane(w); Path(sys.argv[2]).write_text(json.dumps({'pid':r['worker_pid'],'child':r['probe_child_pid']})); time.sleep(60)"
+            )
+            owner = subprocess.Popen([sys.executable, "-c", driver, tmp, str(marker)], cwd=adapter._repo_root(), start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            deadline = time.monotonic() + 8
+            while not marker.exists() and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertTrue(marker.exists())
+            data = json.loads(marker.read_text())
+            started = time.monotonic()
+            check_runner._terminate_group(owner.pid)
+            elapsed = time.monotonic() - started
+            owner.wait(timeout=3)
+            self.assertLessEqual(elapsed, check_runner._TERM_GRACE + .15)
+            deadline = time.monotonic() + 3
+            remaining = adapter._lane_group_members(data["pid"])
+            while remaining and time.monotonic() < deadline:
+                time.sleep(.02)
+                remaining = adapter._lane_group_members(data["pid"])
+            self.assertEqual(remaining, [])
+
+    def test_result_rejects_skip_duplicate_missing_and_bad_worker(self):
+        class Process:
+            pid = 123
+        worker = {"process":Process(), "mode":"suite"}
+        ids = ["test_contract.DockerContractTest.one"]
+        report = {"schema_version":adapter._LANE_SCHEMA,"worker_pid":123,"worker_pgid":123,"case_ids":ids,"checks_run":1,"failures":0,"errors":0,"skipped":0,"per_test_timing":{ids[0]:.1},"stderr_sha256":"0"*64,"status":"PASS","probe_child_pid":None}
+        self.assertTrue(adapter._validate_class_lane(report,worker,ids)[0])
+        for key, value in (("skipped",1),("case_ids",ids*2),("case_ids",[]),("worker_pgid",124),("per_test_timing",{}),("status","FAIL")):
+            broken = dict(report)
+            broken[key] = value
+            self.assertFalse(adapter._validate_class_lane(broken,worker,ids)[0],key)
 
 
 if __name__ == "__main__":

@@ -106,6 +106,124 @@ class DockerBoundsTest(unittest.TestCase):
         self.assertEqual(result.stdout + result.stderr, b"")
         self.assert_helpers_reaped(directories, sleepers)
 
+    def test_empty_streams_skip_readers_but_nonempty_binary_is_exact(self):
+        calls = self.root / "readers"
+        for name, real in (("wc", "/usr/bin/wc"), ("cat", "/bin/cat")):
+            self.stub(name, f'printf "{name}\\n" >> {shlex.quote(str(calls))}\nexec {real} "$@"\n')
+        self.stub("docker", "exit 0\n")
+        result = self.run_shell("lf_docker_run 30 docker info")
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"", b""))
+        self.assertFalse(calls.exists())
+        payload = b"\x00binary\xff\n\n"
+        code = f"import os; os.write(1, {payload!r})"
+        self.stub("docker", f"exec {shlex.quote(sys.executable)} -c {shlex.quote(code)}\n")
+        result = self.run_shell("lf_docker_run 30 docker info")
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, payload, b""))
+        self.assertEqual(calls.read_text().splitlines(), ["wc", "cat"])
+
+    def test_complete_single_line_uses_builtin_without_changing_bytes(self):
+        calls = self.root / "line-readers"
+        for name, real in (("wc", "/usr/bin/wc"), ("cat", "/bin/cat")):
+            self.stub(name, f'printf "{name}\\n" >> {shlex.quote(str(calls))}\nexec {real} "$@"\n')
+        payloads = (
+            (b"\n", False), (b"identity|0123\n", False),
+            (b" space\tback\\slash  \n", False),
+            (b"first\nsecond\n", True), (b"no-final-lf", True),
+            (b"\x00binary\n", True), (b"prefix\x00suffix\n", True),
+            (b"\xffbinary\n", None), ("雪é\n".encode(), None),
+        )
+        for payload, needs_cat in payloads:
+            with self.subTest(payload=payload):
+                calls.unlink(missing_ok=True)
+                code = f"import os; os.write(1, {payload!r})"
+                self.stub("docker", f"exec {shlex.quote(sys.executable)} -c {shlex.quote(code)}\n")
+                result = self.run_shell("lf_docker_run 30 docker info")
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, payload, b""))
+                readers = calls.read_text().splitlines()
+                self.assertEqual(readers[0], "wc")
+                self.assertIn(readers, (["wc"], ["wc", "cat"]))
+                if needs_cat is not None:
+                    self.assertEqual(readers, ["wc", "cat"] if needs_cat else ["wc"])
+
+    def test_success_threshold_is_strict_for_each_stream(self):
+        directories, sleepers = self.trace_helpers()
+        for fd in (1, 2):
+            for size in (1, 262143, 262144):
+                with self.subTest(fd=fd, size=size):
+                    code = f"import os; os.write({fd}, b'x' * {size})"
+                    self.stub("docker", f"exec {shlex.quote(sys.executable)} -c {shlex.quote(code)}\n")
+                    result = self.run_shell("lf_docker_run 30 docker info")
+                    if size < 262144:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertEqual(result.stdout, b"x" * size if fd == 1 else b"")
+                    else:
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertEqual(result.stdout, b"")
+                    self.assertEqual(result.stderr, b"")
+        self.assert_helpers_reaped(directories, sleepers)
+
+    def test_missing_unreadable_or_symlink_capture_is_not_empty_success(self):
+        directories, sleepers = self.trace_helpers()
+        target = self.root / "foreign-empty"
+        target.write_bytes(b"")
+        for stream in ("stdout", "stderr"):
+            for fault in ("missing", "unreadable", "symlink"):
+                with self.subTest(stream=stream, fault=fault):
+                    body = f'dir=$(/usr/bin/tail -n 1 {shlex.quote(str(directories))})\n'
+                    if fault == "unreadable":
+                        body += f'/bin/chmod 000 "$dir/{stream}"\n'
+                    else:
+                        body += f'/bin/rm "$dir/{stream}"\n'
+                        if fault == "symlink":
+                            body += f'/bin/ln -s {shlex.quote(str(target))} "$dir/{stream}"\n'
+                    self.stub("docker", body)
+                    result = self.run_shell("lf_docker_run 30 docker info")
+                    self.assertNotEqual(result.returncode, 0, fault)
+                    self.assertEqual(result.stdout + result.stderr, b"")
+                    self.assertTrue(target.is_file())
+                    self.assertEqual(target.read_bytes(), b"")
+        self.assert_helpers_reaped(directories, sleepers)
+
+    def test_component_classification_preserves_exact_counts_and_rejections(self):
+        accepted = {
+            "Engine": b"docker\n",
+            "Docker Engine": b"docker\n",
+            "Podman Engine": b"podman\n",
+            "Podman Engine\nEngine": b"podman\n",
+            "Engine\nPodman Engine\nConmon\nOCI Runtime": b"podman\n",
+            "Engine\ncontainerd\nrunc": b"docker\n",
+            "Engine\ncomposant-é": b"docker\n",
+        }
+        rejected = [
+            "", "Conmon", "Engine\nEngine", "Docker Engine\nDocker Engine",
+            "Podman Engine\nPodman Engine", "Engine\nDocker Engine",
+            "Podman Engine\nDocker Engine", "Podman Engine\nEngine\nEngine",
+            "Engine\nFuture Engine", "Podman Engine\nFuture Engine", "Engine\n\nrunc",
+            "\nEngine", " Engine", "Engine ",
+        ]
+        rejected.extend("Engine\ncomponent" + chr(code) for code in (*range(1, 10), *range(11, 32), 127))
+        for components, expected in [(key, value) for key, value in accepted.items()] + [(value, None) for value in rejected]:
+            with self.subTest(components=components):
+                result = self.run_shell(
+                    "lf_docker_run() { printf '%s' \"$LF_COMPONENTS\"; }\n"
+                    "lf_docker_server_kind unix:///synthetic.sock",
+                    env={"LF_COMPONENTS": components},
+                )
+                if expected is None:
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, b"")
+                else:
+                    self.assertEqual((result.returncode, result.stdout), (0, expected))
+                self.assertEqual(result.stderr, b"")
+        # Query failure and parser failure cannot authorize an engine kind.
+        for tail in (
+            "lf_docker_run() { printf 'Engine\\n'; return 7; }\n",
+            "lf_docker_run() { printf 'Engine\\n'; }\nawk() { return 7; }\n",
+        ):
+            result = self.run_shell(tail + "lf_docker_server_kind unix:///synthetic.sock")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stdout + result.stderr, b"")
+
     def test_internal_tool_errors_are_not_exposed(self):
         directories, sleepers = self.trace_helpers()
         self.stub("docker", 'printf "safe\\n"\n')

@@ -253,8 +253,24 @@ def _load_ops_adapter():
     return mod
 
 
+def _synthetic_ops_groups():
+    """为通用聚合诊断提供小型合成分组，不伪造完整隔离库存。"""
+    return {"surface": [
+        "ops/docker/tests/test_synthetic.py",
+        "ops/podman/tests/synthetic.test.mjs",
+    ]}
+
+
 class TestOpsAdapterTiming(unittest.TestCase):
     """scripts/checks/deployment/run_deployment_contract_tests.py 的阶段和逐用例计时。"""
+
+    def test_public_full_entry_selects_complete_inventory(self):
+        """公开完整入口必须保持选择全部库存，不转为定向分组。"""
+        mod = _load_ops_adapter()
+        expected = {"status": "synthetic-result"}
+        with patch.object(mod, "_run", return_value=expected) as run:
+            self.assertIs(mod.run_tests(), expected)
+        run.assert_called_once_with(None)
 
     def test_timing_fields_with_synthetic_suite(self):
         """用合成 suite 验证阶段计时和逐用例计时字段。"""
@@ -289,6 +305,7 @@ class TestOpsAdapterTiming(unittest.TestCase):
         # 只替换被测阶段的输入；不能用 Node 文本响应覆盖真实 Git 库存查询。
         with (
             patch.object(mod, "_preflight"),
+            patch.object(mod, "_members", return_value=_synthetic_ops_groups()),
             patch.object(mod, "_load_python", return_value=suite),
             patch.object(
                 mod,
@@ -296,7 +313,7 @@ class TestOpsAdapterTiming(unittest.TestCase):
                 return_value=(fake_node, 0.01, json.loads(fake_node.stdout)),
             ),
         ):
-            report = mod.run_tests()
+            report = mod._run("surface")
 
         self.assertEqual(report["status"], "PASS")
         self.assertIn("python_unittest_duration_seconds", report)
@@ -336,6 +353,7 @@ class TestOpsAdapterTiming(unittest.TestCase):
         with (
             contextlib.redirect_stderr(io.StringIO()),
             patch.object(mod, "_preflight"),
+            patch.object(mod, "_members", return_value=_synthetic_ops_groups()),
             patch.object(mod, "_load_python", return_value=suite),
             patch.object(
                 mod,
@@ -343,7 +361,7 @@ class TestOpsAdapterTiming(unittest.TestCase):
                 return_value=(fake_node, 0.01, json.loads(fake_node.stdout)),
             ),
         ):
-            report = mod.run_tests()
+            report = mod._run("surface")
 
         self.assertEqual(report["status"], "FAIL")
         self.assertIn("python_unittest_duration_seconds", report)
@@ -449,6 +467,9 @@ class TestAdapterCompleteness(unittest.TestCase):
                         else:
                             stack.enter_context(patch.object(ops, "_preflight"))
                             stack.enter_context(
+                                patch.object(ops, "_members", return_value=_synthetic_ops_groups())
+                            )
+                            stack.enter_context(
                                 patch.object(ops, "_load_python", return_value=suite)
                             )
                             stack.enter_context(
@@ -458,7 +479,7 @@ class TestAdapterCompleteness(unittest.TestCase):
                                     return_value=(node, 0.01, json.loads(node.stdout)),
                                 )
                             )
-                            report = ops.run_tests()
+                            report = ops._run("surface")
                     self.assertEqual(report["status"], expected)
                     self.assertGreaterEqual(
                         report["python_unittest_duration_seconds"], 0

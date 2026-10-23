@@ -342,30 +342,43 @@ if kind=='volume' and a[1]=='create':
  if mode=='post-create-owner': data['poisoned']=True
  s.write_text(json.dumps(data)); print(name); sys.exit(0)
 if kind=='inspect' or (kind in ('container','network','volume') and a[1]=='inspect'):
- ident=a[-1]; rec=next((x for x in data['records'] if x['id']==ident),None)
- if not rec: sys.exit(2)
- if mode=='inspect-fail': sys.exit(3)
- if mode=='lock-lost' and rec['kind']=='volume': Path(LOCK).unlink(missing_ok=True)
- seen=sum(1 for line in log.read_text().splitlines()
-          if json.loads(line)[:2]==['container','inspect'] and json.loads(line)[-1]==rec['id'])
- owner='wrong' if (mode=='wrong-owner' and rec['kind']=='volume') or (mode=='late-owner' and seen>=2 and rec['name'].endswith('-candidate')) else INSTALL
- if data.get('poisoned'): owner='wrong'
- fmt=a[a.index('--format')+1]
- if fmt.startswith('{{.State.Health'):
-  print(rec.get('health','none'))
- elif fmt.startswith('{{.State.Running'):
-  print(str(rec.get('running',False)).lower())
-  if mode=='stop-replaced' and rec['id']=='f'*64:
-   rec['id']='9'*64; s.write_text(json.dumps(data))
- elif rec['kind']=='container': print('|'.join([rec['id'],'/'+rec['name'],PROJECT,owner,RELEASE]))
- else: print('|'.join([rec['id'],rec['name'],PROJECT,owner,RELEASE]))
+ targets=a[a.index('--format')+2:]
+ if not targets: sys.exit(2)
+ batched=len(targets)>1
+ if batched and mode=='batch-missing': targets=targets[:-1]
+ if batched and mode=='batch-duplicate': targets=[targets[0]]*len(targets)
+ if batched and mode=='batch-reversed': targets=list(reversed(targets))
+ if batched and mode=='batch-extra': targets=[*targets,targets[-1]]
+ for ident in targets:
+  rec=next((x for x in data['records'] if x['id']==ident),None)
+  if not rec: sys.exit(2)
+  if mode=='inspect-fail': sys.exit(3)
+  if mode=='lock-lost' and rec['kind']=='volume': Path(LOCK).unlink(missing_ok=True)
+  seen=sum(1 for line in log.read_text().splitlines()
+           if json.loads(line)[:2]==['container','inspect'] and rec['id'] in json.loads(line)[4:])
+  owner='wrong' if (mode=='wrong-owner' and rec['kind']=='volume') or (mode=='late-owner' and seen>=2 and rec['name'].endswith('-candidate')) else INSTALL
+  if data.get('poisoned'): owner='wrong'
+  if batched and mode=='batch-wrong-middle-owner' and ident==targets[1]: owner='wrong'
+  fmt=a[a.index('--format')+1]
+  if fmt.startswith('{{.State.Health'):
+   print(rec.get('health','none'))
+  elif fmt.startswith('{{.State.Running'):
+   print(str(rec.get('running',False)).lower())
+   if mode=='stop-replaced' and rec['id']=='f'*64:
+    rec['id']='9'*64; s.write_text(json.dumps(data))
+  elif rec['kind']=='container': print('|'.join([rec['id'],'/'+rec['name'],PROJECT,owner,RELEASE]))
+  else: print('|'.join([rec['id'],rec['name'],PROJECT,owner,RELEASE]))
+ if batched and mode=='batch-partial-failure': sys.exit(3)
  sys.exit(0)
 if kind in ('container','network','volume'):
  action=a[1]
  if action=='ls':
   if mode=='list-fail' and kind=='volume': sys.exit(4)
   for r in data['records']:
-   if r['kind']==kind: print(r['id']+'|'+r['name'])
+   if r['kind']==kind:
+    ident='c'*64 if mode=='duplicate-id' and kind=='container' else r['id']
+    name=PROJECT+'-api-1' if mode=='duplicate-name' and kind=='container' else r['name']
+    print(ident+'|'+name)
   if mode=='unknown' and kind=='container': print('1'*64+'|'+PROJECT+'-foreign')
   sys.exit(0)
  if action=='stop':
@@ -443,6 +456,12 @@ sys.exit(9)
             {c[-1] for c in stops}, {"c" * 64, "d" * 64, "e" * 64, "f" * 64}
         )
         self.assertTrue(all(c[2:4] == ["--time", "10"] for c in stops))
+        self.assertTrue(any(c[:2] == ["container", "inspect"] and len(c) > 5 for c in cmds))
+        for index, command in enumerate(cmds):
+            if command[:2] == ["container", "stop"]:
+                observations = [c for c in cmds[:index] if c[:2] == ["container", "inspect"]]
+                self.assertEqual(len(observations[-1]), 5)
+                self.assertEqual(observations[-1][-1], command[-1])
         self.assertFalse(
             any(
                 c[0:2] in (["container", "rm"], ["volume", "rm"], ["network", "rm"])
@@ -493,8 +512,8 @@ sys.exit(9)
             )
 
     def test_prepare_and_start_use_compose_only_after_owned_preflight(self):
-        # 固定完整预检已含五类卷；当前 fixture 正常完成需约 35 秒、497 请求。
-        # 仅给测试传输调度留余量，生产每命令 30/600 秒及所有断言不变。
+        # 完整预检包含五类卷；只读批量观察不减少任何对象或写前复核。
+        # 原测试及生产每命令预算保持不变。
         result = self.run_case("ok", "prep", timeout=60)
         self.assertEqual(result.returncode, 0, (result.stderr, self.commands()))
         logged = self.commands()
@@ -539,6 +558,28 @@ sys.exit(9)
                 self.assertFalse(
                     any(c[0:2] == ["container", "stop"] for c in self.commands())
                 )
+
+    def test_batched_observation_rejects_missing_duplicate_reordered_extra_and_failed_rows(self):
+        for mode in ("batch-missing", "batch-duplicate", "batch-reversed", "batch-extra", "batch-partial-failure", "batch-wrong-middle-owner"):
+            with self.subTest(mode=mode):
+                result = self.run_case(mode, "stop")
+                self.assertNotEqual(result.returncode, 0)
+                commands = self.commands()
+                batches = [c for c in commands if c[:2] == ["container", "inspect"] and len(c) > 5]
+                self.assertTrue(batches, "fault must reach the actual multi-ID request")
+                self.assertEqual(batches[0][4:], ["c" * 64, "d" * 64, "e" * 64, "f" * 64])
+                self.assertFalse(any(c[:2] in (["container", "stop"], ["container", "rm"]) for c in commands))
+                self.assertEqual(result.stdout + result.stderr, b"")
+
+    def test_batched_discovery_rejects_duplicate_identity_or_name_before_inspect(self):
+        for mode in ("duplicate-id", "duplicate-name"):
+            with self.subTest(mode=mode):
+                result = self.run_case(mode, "stop")
+                self.assertNotEqual(result.returncode, 0)
+                commands = self.commands()
+                self.assertFalse(any(c[:2] == ["container", "inspect"] for c in commands))
+                self.assertFalse(any(c[:2] in (["container", "stop"], ["container", "rm"]) for c in commands))
+                self.assertEqual(result.stdout + result.stderr, b"")
 
     def test_replaced_candidate_after_remove_is_not_reported_clean(self):
         result = self.run_case("replace", "cleanup")

@@ -547,6 +547,428 @@ workstreams:
           required_change_version: 1.0.0
           required_result: PASS
         deliverable: 本次当前源的独立开发结果，不是Formal。
+      - id: LF-TSK-QLT-2431
+        title: 定位正式受控环境的Docker合同耗时差异
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 20
+        kind: design
+        lifecycle_state: READY
+        allowed_files: [tmp/phase-tools/release-contract-runtime/formal-budget/**, tmp/quality/**]
+        forbidden_files: [planning/**, ops/**, tests/**, scripts/**, config/**, backend/**, extension/**]
+        expected_output: 对比当前Formal超时与历史精确诊断，定位阶段差异和可证明的最小修复边界。
+        acceptance_criteria:
+        - 原始当前FAIL与历史PASS仅作为定位证据，不复用、重写或拼接验收结果。
+        - 不执行测试或完整检查，不修改代码、预算、检查库存、全局环境或已有候选。
+        - 结论区分已证事实与待测假设，提出能保留断言和独立性的责任节点动作。
+        acceptance_evidence: [当前原始日志和历史耗时的逐阶段对照、源码定位与风险。]
+        validation_command: read-only current failure and timing source analysis
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 当前正式失败的定位与有界修复建议，不是验证PASS。
+      - id: LF-TSK-QLT-2432
+        title: 复核纯Shell合同分组的有界隔离调度可行性
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 20
+        kind: design
+        lifecycle_state: READY
+        allowed_files: [tmp/phase-tools/release-contract-runtime/formal-budget/scheduler-design/**, tmp/quality/**]
+        forbidden_files: [planning/**, ops/**, tests/**, scripts/**, config/**, backend/**, extension/**]
+        expected_output: 只读审计有限分组是否能在600秒原始总预算内并发且保留全库存、宿主槽位和强杀回收边界。
+        acceptance_criteria:
+        - 不实施、不执行测试、不提高任何预算；默认维持串行，只有明确关闭旧取消风险才可建议重新决策。
+        - LocalEntry和Node绝不并发；逐项审计其他组共享资源、子进程组、取消和报告完整性，不以经验假定隔离。
+        - 给出最小可证实现和直接故障验证清单，或明确不可行阻断；原始FAIL保持。
+        acceptance_evidence: [源码消费和资源边界定位、取消时序及完整库存判据。]
+        validation_command: read-only bounded scheduling feasibility audit
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-QLT-2431
+        depends_on: []
+        deliverable: 有证据的调度设计决策输入，不是实现或验证PASS。
+      - id: LF-TSK-QLT-2433
+        title: 合并只读资源归属观察且保留逐对象安全判据
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: ["ops/release/runtime/release-installation-docker.sh", "ops/docker/tests/test_operation_ownership.py", "ops/docker/tests/test_contract.py", "ops/docker/tests/test_module_check_adapter.py", "ops/release/tests/fake-docker-daemon.mjs", "ops/release/tests/lifecycle.test.mjs", "tmp/phase-tools/release-contract-runtime/batched-observation/**"]
+        forbidden_files: [config/**, scripts/verification/**, scripts/acceptance/**, backend/product/**, extension/**, planning/**]
+        expected_output: 保持实际产品安全边界的串行执行成本修复及直接测试证据。
+        acceptance_criteria:
+        - 仅同一只读观察边界内按kind一次inspect多个已验证完整ID；所有原有资源/名称/标签校验不变。
+        - 批次缺行、重复、多行、错序、错误标签、命令非零均失败关闭；每次变更前独立单对象复核和锁/daemon边界不变。
+        - 保留全部原用例和断言意图，模型精确支持批量argv且故障按逐对象发生次数生效；不改预算/串行入口。
+        acceptance_evidence: [实际逐命令成本、原有及新增拒绝回归、原始结果与清理证明。]
+        validation_command: direct bounded responsibility tests
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-QLT-2431
+        depends_on: []
+        deliverable: 可独立验证的串行成本修复，不是Formal资格。
+      - id: LF-TSK-QLT-2434
+        title: 减少私有状态路径验证的无效外部进程
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: ["ops/release/runtime/release-installation-state.sh", "ops/docker/tests/test_state_records.py", "tmp/phase-tools/release-contract-runtime/state-primitives/**"]
+        forbidden_files: [config/**, scripts/verification/**, scripts/acceptance/**, backend/product/**, extension/**, planning/**]
+        expected_output: 保持实际产品安全边界的串行执行成本修复及直接测试证据。
+        acceptance_criteria:
+        - 只替换已测量热路径中纯判据的等价实现；不缓存状态、摘要、权限或身份。
+        - 路径控制字符与Unicode、状态长度和损坏输入保持拒绝边界，跨POSIX Shell直接等价证明。
+        - 不改Docker模型、生命周期状态机、锁语义、预算或完整调度。
+        acceptance_evidence: [实际逐命令成本、原有及新增拒绝回归、原始结果与清理证明。]
+        validation_command: direct bounded responsibility tests
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-QLT-2431
+        depends_on: []
+        deliverable: 可独立验证的串行成本修复，不是Formal资格。
+      - id: LF-TSK-QLT-2435
+        title: 独立测量串行优化后的完整 Docker 合同预算
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 20
+        kind: design
+        lifecycle_state: READY
+        allowed_files: [tmp/quality/**, tmp/phase-tools/release-contract-runtime/budget-validation/**]
+        forbidden_files: [planning/**, ops/**, scripts/**, tests/**, config/**, backend/**, extension/**]
+        expected_output: 当前修复输入的一次完整责任 Check 原始结果，不签开发或 Formal。
+        acceptance_criteria:
+        - 使用当前 Registry 原命令与600秒上限，串行完整 Python 和 Node 集合，不筛选、不跳过、不拼接。
+        - 检查前后输入一致；真实独立 actor；只运行一次责任 Check，不执行全仓或开发闭包。
+        - 原始日志、结构化计数、各阶段时间与自有清理结果可核查；失败即停止回报。
+        acceptance_evidence: [当次冻结、单 Check runner 报告、原始输出与真实 package 绑定。]
+        validation_command: existing execute_single_check for eng.release.docker-contract
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-QLT-2431
+        depends_on: []
+        deliverable: 新输入的实际预算证据，不能作为正式发行资格。
+      - id: LF-TSK-QLT-2436
+        title: 减少执行器输出和引擎分类的冗余进程
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 40
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [ops/release/runtime/release-installation-docker.sh, ops/docker/tests/test_docker_bounds.py, tmp/phase-tools/release-contract-runtime/executor-hotpath/**]
+        forbidden_files: [config/**, scripts/verification/**, scripts/acceptance/**, backend/**, extension/**]
+        expected_output: 执行器热路径的等价串行优化和完整安全断言。
+        acceptance_criteria:
+        - 每次仍真实观察引擎组件，单遍分类保留原精确名称、重复、冲突、未知Engine与控制字符拒绝。
+        - 空捕获流可避免读取子进程；先检查实际普通可读文件，非空仍测量原262144字节阈值，二进制原样输出。
+        - CLI预算、RLIMIT、timer、信号、资源清理、逐变更身份检查及全部原测试不变。
+        - 新增边界精确回归，只做责任直接检查；独立完整开发及正式验收另冻结。
+        acceptance_evidence: [已测量的重复外部命令次数、原始直接回归、源码差异和所有权清理断言。]
+        validation_command: python3 -m unittest ops.docker.tests.test_docker_bounds
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-QLT-2431
+        depends_on: []
+        deliverable: 完整相同观察及安全边界下减少进程成本的可审查实现。
+      - id: LF-TSK-QLT-2437
+        title: 独立验证执行器热路径修复后的真实预算
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 20
+        kind: design
+        lifecycle_state: READY
+        allowed_files: [tmp/quality/**, tmp/phase-tools/release-contract-runtime/budget-validation-r2/**]
+        forbidden_files: [planning/**, ops/**, scripts/**, tests/**, config/**, backend/**, extension/**]
+        expected_output: 新执行器与全部模型消费者的完整责任Check证据，采用现有环境解析器。
+        acceptance_criteria:
+        - 使用仓库venv显式绝对解释器、现有resolve_check_environment及build_child_environment，不直接注入私有配置。
+        - Registry原完整Docker命令与600秒预算一次运行，无筛选/跳过/结果拼接。
+        - 当前冻结无漂移，计数/阶段时间/原始日志和真实actor齐备；失败停止不重跑。
+        acceptance_evidence: [新冻结、新launch诊断、单Check结果及原生不可变completion。]
+        validation_command: existing single check environment and execution pipeline
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-QLT-2436
+        depends_on: []
+        deliverable: 新源实际600秒预算结果，不是完整开发或Formal。
+      - id: LF-TSK-QLT-2438
+        title: 定位本地部署夹具的串行成本责任点
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 20
+        kind: design
+        lifecycle_state: READY
+        allowed_files: [tmp/phase-tools/release-contract-runtime/local-cost/**, tmp/quality/**]
+        forbidden_files: [planning/**, ops/**, scripts/**, tests/**, config/**, backend/**, extension/**]
+        expected_output: 根据实际254秒本地模块成本，区分夹具和被测产品并给出有量化证据的责任修复。
+        acceptance_criteria:
+        - 只允许一次原有完整单例的ignored探针，保存阶段/子进程原始时间；不改测试断言或产品。
+        - 明确哪些成本可减少、哪些属于真实安全/信号断言；无证据不作确定结论。
+        - 不完整检查、不改变串行/预算/源槽位，不提出取消测试或缓存检查结果。
+        acceptance_evidence: [同一次完整原断言结果、原始分项计时、可审查的最小边界建议。]
+        validation_command: one unchanged LocalEntry test with ignored instrumentation
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-QLT-2437
+        depends_on: []
+        deliverable: 有界责任分析，不是实现或验收PASS。
+      - id: LF-TSK-QLT-2439
+        title: 减少有限测试传输的输出拷贝进程
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [ops/docker/tests/podman_fake_transport.py, ops/docker/tests/test_podman_fake_transport.py, ops/docker/tests/test_module_check_adapter.py, tmp/phase-tools/release-contract-runtime/transport-output/**]
+        forbidden_files: [config/**, scripts/verification/**, scripts/acceptance/**, backend/**, extension/**]
+        expected_output: 在既有逐请求字节长度校验后，空流和精确单行使用内建输出，其余保留cat。
+        acceptance_criteria:
+        - 只优化输出发送，不改有限路由、模型执行、协议长度/status、失败关闭、取消和归属清理。
+        - stdout与stderr的空、单行、二进制、UTF8、多行、无尾LF逐字节及退出等价；保留全部原用例和断言。
+        - 精确单行必须实际长度等于读取内容字节数加一；读失败或不符回落原cat，不缓存结果。
+        acceptance_evidence: [字节等价直接测试、读取进程调用证明、单例成本与源码摘要。]
+        validation_command: python3 -m unittest test_podman_fake_transport test_module_check_adapter
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-QLT-2438
+        depends_on: []
+        deliverable: 不放宽边界的输出传送成本修复。
+      - id: LF-TSK-QLT-2440
+        title: 减少已校验执行器输出的单行拷贝进程
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [ops/release/runtime/release-installation-docker.sh, ops/docker/tests/test_docker_bounds.py, tmp/phase-tools/release-contract-runtime/executor-output/**]
+        forbidden_files: [config/**, scripts/verification/**, scripts/acceptance/**, backend/**, extension/**]
+        expected_output: 在既有普通可读文件与严格字节上限验证后，仅完整单行stdout使用内建输出。
+        acceptance_criteria:
+        - 原CLI/timer/信号/RLIMIT/清理/文件类型及262144严格阈值不变。
+        - 真实wc字节数与read内容长度加一精确一致才printf；二进制、多行或无尾LF回落原cat并逐字节验证。
+        - 保留所有原断言，只做责任直接回归，不以优化放宽正式门禁。
+        acceptance_evidence: [字节等价直接测试、读取进程调用证明、单例成本与源码摘要。]
+        validation_command: python3 -m unittest ops.docker.tests.test_docker_bounds
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-QLT-2438
+        depends_on: []
+        deliverable: 不放宽边界的输出传送成本修复。
+      - id: LF-TSK-QLT-2441
+        title: 独立验证输出传送优化的完整责任预算
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 20
+        kind: design
+        lifecycle_state: READY
+        allowed_files: [tmp/quality/**, tmp/phase-tools/release-contract-runtime/budget-validation-r3/**]
+        forbidden_files: [planning/**, ops/**, scripts/**, tests/**, config/**, backend/**, extension/**]
+        expected_output: 原完整Docker Check在当前字节等价优化源码下的真实600秒结果。
+        acceptance_criteria:
+        - 使用显式仓库venv、现有环境resolver与白名单，原完整命令及600秒预算一次执行。
+        - 无源码漂移、跳过、筛选或结果拼接；失败停止不再运行。
+        - 保存真实actor、两侧输入、原始日志和阶段计时；本次不是完整开发或Formal。
+        acceptance_evidence: [冻结摘要、环境launch记录、完整责任Check原始结果及原生completion。]
+        validation_command: existing single check environment and execution pipeline
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-QLT-2439
+        depends_on: []
+        deliverable: 当前输入下真实完整预算证据。
+      - id: LF-TSK-QLT-2442
+        title: 实现固定纯Shell类的有界隔离调度
+        priority: P0
+        task_version: 3
+        change_version: 1.1.1
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [scripts/checks/deployment/run_deployment_contract_tests.py, ops/docker/tests/test_module_check_adapter.py, tmp/phase-tools/release-contract-runtime/isolated-shell-lane/**]
+        forbidden_files: [config/**, scripts/verification/**, scripts/acceptance/**, backend/**, extension/**, harness/**]
+        expected_output: 完整检查固定两路执行且原生父死亡/取消能回收新增worker及所有同组后代，保留完整集合与600秒。
+        acceptance_criteria:
+        - 仅完整入口将test_contract.DockerContractTest与test_lifecycle_flow.FlowTests两个固定类放一个私有worker；ContainerHealthTransportTest及其他Python仍原Main串行，两路结束后再Node，targeted groups不变。
+        - 两个实际类及其调用闭包无真实引擎/host slot和新session；HealthProbeFixture仅由另一个原串行类调用，必须精确证明分割，不按整模块import推断调用。
+        - worker真实start_new_session且启动时检查PID等于PGID；父独占写端pipe EOF监控以及SIGTERM/INT/HUP均立即kill自身组；不按猜测PID杀进程。
+        - 父强杀、正常取消、worker异常、成功留下子进程等路径直接证明新增资源回收；500ms外层强杀窗口不增加。
+        - 完整测试identity集合精确一次、fail/error/skip/缺项/损坏结果失败关闭；无历史PASS缓存或跨事务合并；保留原报告键与全部原断言。
+        - 不跑全套Check；只做adapter直接回归及固定两个原类一次，证据不足即BLOCKED不接入。
+        acceptance_evidence: [真实隔离/取消进程证据、原inventory身份集合和报告负例、两类原断言、最终hash及native completion。]
+        validation_command: python3 -m unittest ops.docker.tests.test_module_check_adapter
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-QLT-2441
+        depends_on: []
+        deliverable: 不改变门禁集合、预算或产品的新固定内部调度及直接证明。
+      - id: LF-TSK-QLT-2443
+        title: 独立验证固定隔离执行与最终发行源码
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 90
+        kind: design
+        lifecycle_state: READY
+        allowed_files: [tmp/quality/**, tmp/phase-tools/release-contract-runtime/final-runtime-validation/**]
+        forbidden_files: [planning/**, ops/**, scripts/**, tests/**, config/**, backend/**, extension/**]
+        expected_output: 新执行结构的原600秒完整Docker责任Check及最终完整diff的当次独立开发报告。
+        acceptance_criteria:
+        - 源码固定且使用明确仓库venv、Node22及既有resolver白名单，先单次原完整Docker Check600秒；FAIL即停止不重试。
+        - 责任Check通过后执行一次现有development-change全部受选检查；该入口不包含repository-only完整Docker，因此不拼接或替代任何当次受选结果。
+        - 不跑完整repository-baseline或Formal，不修改源码、Registry、预算、Git或远端；所有必需项实际执行且无跳过。
+        - 保留原生actor、两侧冻结、全部原始日志与环境诊断；私有能力不进入输出。
+        acceptance_evidence: [完整责任Check结果、当次完整开发报告、冻结与原生completion。]
+        validation_command: existing single check pipeline then python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids: [eng.release.docker-contract, eng.release.version, eng.repository.planning]
+        discovered_from: LF-TSK-QLT-2442
+        depends_on: []
+        deliverable: 新最终源码的当次独立责任预算与开发证据，不授予Formal发行资格。
+      - id: LF-TSK-QLT-2444
+        title: 独立审查执行隔离与最终发行来源
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 30
+        kind: design
+        lifecycle_state: READY
+        allowed_files: [tmp/phase-tools/release-contract-runtime/final-runtime-review/**]
+        forbidden_files: [planning/**, ops/**, scripts/**, tests/**, config/**, backend/**, extension/**]
+        expected_output: 只读核对固定冻结差异、逐对象安全边界、取消清理、原集合及当次独立验证。
+        acceptance_criteria:
+        - reviewer不同于全部实现者和validator，精确消费当前冻结diff、直接证据与2443当次完整结果。
+        - 核对600秒不变、全部原case精确一次、完整回收、字节等价、写入前身份复核及新的未占用版本，不复用旧PASS或修改原失败记录。
+        - 只读审查不重跑检查、不改源或Git；明确最多三项阻塞发现。
+        acceptance_evidence: [原生来源、冻结与本次报告摘要、只读审查意见。]
+        validation_command: read-only frozen diff and current evidence review
+        required_check_ids: [eng.release.docker-contract, eng.release.version, eng.repository.planning]
+        discovered_from: LF-TSK-QLT-2442
+        depends_on: []
+        deliverable: 当前完整变更的独立只读审查，不是正式发行收据。
+      - id: LF-TSK-QLT-2445
+        title: 修复检查适配器测试的加载身份与合成边界
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [ops/docker/tests/test_module_check_adapter.py, planning/workstreams.yaml, openspec/changes/release-contract-runtime/**, tmp/phase-tools/release-contract-runtime/adapter-identity/**]
+        forbidden_files: [scripts/**, config/**, backend/**, extension/**, harness/**]
+        expected_output: 两种原生unittest加载方式使用真实当前模块身份；调度单元测试不重复执行真实健康合同用例。
+        acceptance_criteria:
+        - 精确SyntheticCase身份由当前模块名组成，不以endswith或删除身份断言绕过差异。
+        - 调度用例完整合成30lane和7retained身份，验证lane不在Main执行、retained恰好一次、join完成后Node，保留原集合与计数断言。
+        - 真实固定两类及健康用例不变；标准包入口和既有adapter loader入口的完整adapter suite分别直接验证。
+        acceptance_evidence: [原两条断言FAIL、重复执行证据、修复后两加载入口直接结果。]
+        validation_command: python3 -m unittest ops.docker.tests.test_module_check_adapter
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-QLT-2443
+        depends_on: []
+        deliverable: 无产品/执行器/预算变化的测试身份与合成边界修复。
+      - id: LF-TSK-QLT-2446
+        title: 规范化检查适配器的Python格式
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [scripts/checks/deployment/run_deployment_contract_tests.py, planning/workstreams.yaml, openspec/changes/release-contract-runtime/**, tmp/phase-tools/release-contract-runtime/final-format/**]
+        forbidden_files: [config/**, scripts/verification/**, scripts/acceptance/**, backend/**, extension/**]
+        expected_output: 现有固定Ruff格式化输出且前后AST精确相等，完整Python质量责任检查通过。
+        acceptance_criteria:
+        - 只应用仓库既有固定formatter到适配器，不改变AST、检查集合、配置或预算。
+        - 直接运行既有Python质量完整入口，包括lint、format和docstring；不以只lint替代。
+        acceptance_evidence: [格式前后AST与hash、完整Python质量结果、原2443v2失败报告。]
+        validation_command: python3 -m scripts.checks.repository.run_repository_check_group --mode python
+        required_check_ids: [eng.repository.python-quality]
+        discovered_from: LF-TSK-QLT-2443
+        depends_on: []
+        deliverable: 不改执行行为的规范格式修复。
+      - id: LF-TSK-QLT-2447
+        title: 独立验证规范化后的最终完整开发输入
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 60
+        kind: design
+        lifecycle_state: READY
+        allowed_files: [tmp/quality/**, tmp/phase-tools/release-contract-runtime/delivery-final/validation/**]
+        forbidden_files: [planning/**, ops/**, scripts/**, tests/**, config/**, backend/**, extension/**]
+        expected_output: 格式责任修复后新完整冻结diff的当次development-change报告，所有受选项当次执行。
+        acceptance_criteria:
+        - 独立真实actor使用现有完整开发CLI，不缩范围、不拼接2443局部PASS、不叠Stop或完整baseline。
+        - 既有600秒完整Docker责任诊断已完成且本修复AST相等，不惯例重跑；正式候选仍须全新完整baseline。
+        - 同checkout串行、前后输入一致、原配置和预算不变；首错保留停止。
+        acceptance_evidence: [新冻结、完整development-change报告、原生completion与清理记录。]
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids: [eng.repository.python-quality, eng.release.version, eng.repository.planning]
+        discovered_from: LF-TSK-QLT-2446
+        depends_on: []
+        deliverable: 最终源码的独立完整开发证据，非正式发行资格。
+      - id: LF-TSK-QLT-2448
+        title: 独立审查规范化后的最终交付证据
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 30
+        kind: design
+        lifecycle_state: READY
+        allowed_files: [tmp/phase-tools/release-contract-runtime/delivery-final/review/**]
+        forbidden_files: [planning/**, ops/**, scripts/**, tests/**, config/**, backend/**, extension/**]
+        expected_output: 当前完整冻结及2447当次完整开发报告的独立只读审查。
+        acceptance_criteria:
+        - 不同于全部producer与validator，确认格式AST等价、R1/R2关闭以及全部既有安全和取消边界。
+        - 核对2447当前全部受选结果，不将2443历史预算PASS或已修复的旧review当最终资格。
+        - 只读不运行检查，不改源、原始失败或Git；最多三项阻塞发现。
+        acceptance_evidence: [原生review来源、当前冻结及报告摘要、明确意见。]
+        validation_command: read-only frozen diff and current evidence review
+        required_check_ids: [eng.repository.python-quality, eng.release.version, eng.repository.planning]
+        discovered_from: LF-TSK-QLT-2446
+        depends_on: []
+        deliverable: 当前完整源码与当次证据的独立只读审查。
+      - id: LF-TSK-QLT-2449
+        title: 补齐固定完整检查入口的验证消费者
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [tests/verification/test_development_efficiency.py, tests/verification/test_docker_contract_checks.py, planning/workstreams.yaml, openspec/changes/release-contract-runtime/**, tmp/phase-tools/release-contract-runtime/verification-consumers/**]
+        forbidden_files: [ops/**, scripts/**, config/**, backend/**, extension/**, harness/**]
+        expected_output: 合成小suite消费者定位共同聚合路径，完整入口映射单独断言，所有原计时/失败关闭断言保留。
+        acceptance_criteria:
+        - 只将小型聚合/计时/空集/skip/Node失败的合成输入送入固定surface分组，不修改任何完整真实检查的选择。
+        - 新增run_tests严格调用_run(None)且原样返回结果的公共完整入口断言；原完整固定lane库存/清理/失败直接测试保持。
+        - 保留所有旧结果、哈希、计时、空集、skip和Node畸形判据；所有adapter消费调用点完整审计并精准回归。
+        acceptance_evidence: [原verification 11error日志、全消费者清单、三类合成消费者及完整入口映射直接结果。]
+        validation_command: python3 -m unittest tests.verification.test_development_efficiency.TestOpsAdapterTiming tests.verification.test_development_efficiency.TestAdapterCompleteness tests.verification.test_docker_contract_checks.DockerAdapterDiagnosticTest
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-QLT-2447
+        depends_on: []
+        deliverable: 不改变产品或门禁的最新验证消费者。
       - id: LF-TSK-QLT-2430
         title: 独立审查权限夹具修复及新发行来源
         priority: P0
@@ -8991,6 +9413,32 @@ workstreams:
           required_change_version: 1.0.0
           required_result: PASS
         deliverable: 单维护者授权变更的独立开发验证证据，不重置已有首发验证预算。
+      - id: LF-TSK-OPS-2055
+        title: 固定合同执行成本修复后的新发行身份
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-contract-runtime/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/version.txt
+        - planning/workstreams.yaml
+        - openspec/changes/release-contract-runtime/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 将已修复源码绑定新的正式软件版本，由现有唯一生产者派生匹配扩展与构建身份。
+        acceptance_criteria:
+        - 软件版本为2.0.4；不移动或覆盖既有v2.0.0至v2.0.3和原失败候选，远端身份写入前核实冲突。
+        - 保持唯一版本源与原许可、资料、previous及验收合同，不重复登记扩展版本。
+        - 当前冻结差异由不同actor执行现有开发检查和只读审查；公开发行另消费新候选的真实Formal链。
+        acceptance_evidence:
+        - 版本解析、冻结差异、当次独立开发报告和只读审查意见。
+        validation_command: node ops/release/test_tools/run-release-tool-tests.mjs
+        required_check_ids: [eng.release.version, eng.repository.planning]
+        discovered_from: LF-TSK-QLT-2441
+        depends_on: []
+        deliverable: 不覆盖既有标签的新发行源码身份。
       - id: LF-TSK-OPS-2054
         title: 固定串行合同修复后的新发行身份
         priority: P0

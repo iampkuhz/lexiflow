@@ -62,6 +62,24 @@ class StateRecordTests(unittest.TestCase):
         prefix = VERIFIER_HASH + "\n" + STATE.read_text() + "\n" + f"LF_ROOT={shlex.quote(str(self.root))}\nLF_INSTALL_ID={INSTALL}\nLF_LOCK_TOKEN={TOKEN}\n"
         return subprocess.run(["/bin/sh", "-c", prefix + body], text=True, capture_output=True, timeout=10)
 
+    def path_shell(
+        self, function: str, value: str, shell: str = "/bin/sh"
+    ) -> subprocess.CompletedProcess[str]:
+        prefix = STATE.read_text() + "\nLC_ALL=POSIX; before=$LC_ALL; "
+        call = (
+            'if lf_safe_absolute_file "$1"; then status=0; else status=$?; fi; '
+            '[ "$LC_ALL" = "$before" ] || exit 90; exit "$status"'
+            if function == "lf_safe_absolute_file"
+            else 'LF_ROOT=$1; if lf_safe_private_tree; then status=0; else status=$?; fi; '
+            '[ "$LC_ALL" = "$before" ] || exit 90; exit "$status"'
+        )
+        return subprocess.run(
+            [shell, "-c", prefix + call, "sh", value],
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
+
     def state_bytes(self, phase: str = "idle", active: str = "none", previous: str = "none", candidate: str = "none", deleting: str = "none", resume: str = "none") -> bytes:
         return (f"schema=lexiflow-installation-v1\ninstallation_id={INSTALL}\nphase={phase}\nactive={active}\nprevious={previous}\ncandidate={candidate}\ndeleting={deleting}\nresume={resume}\n").encode()
 
@@ -392,6 +410,79 @@ class StateRecordTests(unittest.TestCase):
             p = subprocess.run(["/bin/sh", "-c", STATE.read_text() + "\n" + LIFECYCLE.read_text().split('if [ "${1:-}" = _project ]; then', 1)[0] + "\nlf_abs_root \"$1\"", "sh", value], capture_output=True, timeout=10)
             self.assertNotEqual(p.returncode, 0, value)
         self.assertEqual(self.run_script().returncode, 0)
+
+    def test_safe_paths_reject_every_ascii_control_byte_without_locale_leak(self) -> None:
+        # NUL cannot be represented in a shell variable or filesystem path; test every
+        # other ASCII control byte, including newline and DEL, on real filesystem paths.
+        for code in (*range(1, 32), 127):
+            with self.subTest(shell="/bin/sh", code=code):
+                control = chr(code)
+                control_file = self.base / ("file" + control)
+                control_file.write_text("readable\n")
+                control_tree = self.base / ("tree" + control)
+                control_tree.mkdir()
+                for function, value in (
+                    ("lf_safe_absolute_file", str(control_file)),
+                    ("lf_safe_private_tree", str(control_tree)),
+                ):
+                    result = self.path_shell(function, value)
+                    self.assertEqual(
+                        result.returncode, 1, (function, code, result.returncode)
+                    )
+                    self.assertEqual(result.stdout + result.stderr, "")
+
+        valid_file = self.base / " spaced !@#$%^&()[]{}=+;,:- café 路径.txt"
+        valid_file.write_text("valid\n")
+        valid_tree = self.base / " private ![]{} café 路径 "
+        valid_tree.mkdir()
+        for function, value in (
+            ("lf_safe_absolute_file", str(valid_file)),
+            ("lf_safe_private_tree", str(valid_tree)),
+        ):
+            with self.subTest(function=function):
+                result = self.path_shell(function, value)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_size_guards_reject_wc_failure_and_malformed_output(self) -> None:
+        state_path = self.root / "state"
+        state_path.write_bytes(self.state_bytes())
+        self.seed_record()
+        tools = self.base / "wc-tools"
+        tools.mkdir()
+        wc = tools / "wc"
+        for output, exit_code in (("0 1\n", 0), ("1\n", 1)):
+            with self.subTest(output=output, exit_code=exit_code):
+                wc.write_text(
+                    "#!/bin/sh\nprintf "
+                    + shlex.quote(output)
+                    + "\nexit "
+                    + str(exit_code)
+                    + "\n"
+                )
+                wc.chmod(0o700)
+                env = {"PATH": str(tools) + os.pathsep + os.environ["PATH"]}
+                for body in (
+                    f"lf_state_parse {shlex.quote(str(state_path))} {INSTALL}",
+                    f"lf_record_verify {KEY}",
+                ):
+                    with self.subTest(body=body):
+                        result = subprocess.run(
+                            [
+                                "/bin/sh",
+                                "-c",
+                                VERIFIER_HASH
+                                + "\n"
+                                + STATE.read_text()
+                                + "\n"
+                                + f"LF_ROOT={shlex.quote(str(self.root))}\nLF_INSTALL_ID={INSTALL}\n"
+                                + body,
+                            ],
+                            text=True,
+                            capture_output=True,
+                            timeout=10,
+                            env={**os.environ, **env},
+                        )
+                        self.assertNotEqual(result.returncode, 0, body)
 
     def test_existing_record_is_not_overwritten_and_lock_token_replacement_fails(self) -> None:
         record = self.seed_record()

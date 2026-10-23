@@ -1,6 +1,8 @@
 """Podman fake transport 的字节语义、隔离和失败关闭回归。"""
 import os
 from pathlib import Path
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,8 +31,10 @@ mode = Path(os.environ['MODE_FILE']).read_text()
 state = Path(os.environ['STATE_FILE'])
 with state.open('a', encoding='utf-8') as output:
     output.write(json.dumps({'args': args, 'mode': mode, 'cwd': os.getcwd(), 'ctx': os.environ.get('CTX'), 'counter': counter}, ensure_ascii=False) + '\\n')
-sys.stdout.buffer.write(json.dumps({'args': args, 'mode': mode, 'cwd': os.getcwd(), 'ctx': os.environ.get('CTX'), 'counter': counter}, ensure_ascii=False).encode('utf-8'))
-sys.stderr.buffer.write(('err:' + mode).encode('utf-8'))
+stdout = bytes.fromhex(os.environ['RAW_STDOUT_HEX']) if 'RAW_STDOUT_HEX' in os.environ else json.dumps({'args': args, 'mode': mode, 'cwd': os.getcwd(), 'ctx': os.environ.get('CTX'), 'counter': counter}, ensure_ascii=False).encode('utf-8')
+stderr = bytes.fromhex(os.environ['RAW_STDERR_HEX']) if 'RAW_STDERR_HEX' in os.environ else ('err:' + mode).encode('utf-8')
+sys.stdout.buffer.write(stdout)
+sys.stderr.buffer.write(stderr)
 kind = os.environ.get('EXIT_KIND', 'int')
 if kind == 'large': sys.stdout.buffer.write(b'x' * 300000)
 if kind == 'none': sys.exit()
@@ -76,6 +80,22 @@ class PodmanFakeTransportTest(unittest.TestCase):
         return subprocess.run([sys.executable, str(model), *argv], cwd=self.root, env=env,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
 
+    def _install_cat_spy(self):
+        actual_cat = shutil.which('cat', path=os.defpath)
+        self.assertIsNotNone(actual_cat)
+        spy = self.root / 'cat-spy'
+        calls = self.root / 'cat-calls'
+        spy.write_text('#!/bin/sh\nprintf \'cat\\n\' >> ' + shlex.quote(str(calls)) + '\nexec '
+                       + shlex.quote(actual_cat) + ' "$@"\n')
+        spy.chmod(0o700)
+        wrapper = self.bin / 'podman'
+        content = wrapper.read_text()
+        old = 'catb=' + shlex.quote(actual_cat)
+        self.assertIn(old, content)
+        wrapper.write_text(content.replace(old, 'catb=' + shlex.quote(str(spy))))
+        wrapper.chmod(0o700)
+        return calls
+
     def _await_drained(self, transport):
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline and list(transport.mailbox.glob('q.*')):
@@ -101,6 +121,33 @@ class PodmanFakeTransportTest(unittest.TestCase):
         self._await_drained(self.transport)
         self.assertNotIn('test_cancel_during_image_pull_releases_lock_and_retries', FINITE_TEST_CASES)
         self.assertNotIn('test_cancel_during_source_run_removes_only_owned_untagged_tool_image', FINITE_TEST_CASES)
+
+    def test_output_fast_path_is_byte_equivalent_and_skips_cat_only_for_one_lf_line(self):
+        calls = self._install_cat_spy()
+        original = self.transport.model
+        cases = (
+            (b'', b'', 0),
+            (b'one\tline \\\n', b'err\\tail with spaces\n', 0),
+            ('雪\n'.encode(), '錯\n'.encode(), 0),
+            (b'\n', b'', 0),
+            (b'first\nsecond\n', b'', 1),
+            (b'no-final-lf', b'error-no-lf', 2),
+            (b'left\x00right\n', b'bad-\xff\n', 1),
+            (b'', b'first\nsecond\n', 1),
+            (b'', b'left\x00right\n', 1),
+        )
+        for stdout, stderr, cat_count in cases:
+            with self.subTest(stdout=stdout, stderr=stderr):
+                calls.write_bytes(b'')
+                env = {**self._context(), 'EXIT_STATUS': '7',
+                       'RAW_STDOUT_HEX': stdout.hex(), 'RAW_STDERR_HEX': stderr.hex()}
+                expected = self._standalone(original, ['probe'], env)
+                actual = self._call(['probe'], env)
+                self.assertEqual((actual.stdout, actual.stderr, actual.returncode),
+                                 (expected.stdout, expected.stderr, expected.returncode))
+                observed = calls.read_text().splitlines() if calls.exists() else []
+                self.assertEqual(len(observed), cat_count, observed)
+                self._await_drained(self.transport)
 
     def test_candidate_route_isolated_and_native_fallback_is_byte_equivalent(self):
         self.assertIn(_CANDIDATE_ROUTE, FINITE_TEST_CASES)

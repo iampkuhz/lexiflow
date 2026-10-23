@@ -736,14 +736,17 @@ if action == "ls":
     for identity, name in records: print(identity + "|" + name)
 elif action == "inspect":
     if mode == "inspect-fail" and kind == "volume": sys.exit(83)
-    record = next((item for item in values[kind] if item[0] == args[-1]), None)
-    if not record: sys.exit(84)
-    identity, name = record
-    owner = "wrong" if mode == "wrong-owner" and kind == "volume" else INSTALL_ID
-    seen = [json.loads(line) for line in log.read_text().splitlines()]
-    if mode == "late-owner" and kind == "container" and sum(item[0:2] == [kind, "inspect"] and item[-1] == identity for item in seen) > 1: owner = "wrong"
-    prefix = "/" if kind == "container" else ""
-    print("|".join([identity, prefix + name, PROJECT, owner, CURRENT_KEY]))
+    identities = args[args.index('--format') + 2:]
+    if not identities: sys.exit(84)
+    for identity in identities:
+        record = next((item for item in values[kind] if item[0] == identity), None)
+        if not record: sys.exit(84)
+        identity, name = record
+        owner = "wrong" if mode == "wrong-owner" and kind == "volume" else INSTALL_ID
+        seen = [json.loads(line) for line in log.read_text().splitlines()]
+        if mode == "late-owner" and kind == "container" and sum(item[0:2] == [kind, "inspect"] and identity in item[4:] for item in seen) > 1: owner = "wrong"
+        prefix = "/" if kind == "container" else ""
+        print("|".join([identity, prefix + name, PROJECT, owner, CURRENT_KEY]))
 elif action == "rm":
     identity = args[-1]
     if identity not in [item[0] for item in values[kind]]: sys.exit(85)
@@ -806,9 +809,10 @@ else: sys.exit(86)
                 i for i, command in enumerate(commands) if command[1] == "rm"
             )
             inspected = {
-                (command[0], command[-1])
+                (command[0], identity)
                 for command in commands[:first_delete]
                 if command[1] == "inspect"
+                for identity in command[4:]
             }
             self.assertEqual(
                 inspected,

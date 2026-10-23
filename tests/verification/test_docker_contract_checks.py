@@ -300,6 +300,13 @@ class DockerContractCheckTest(unittest.TestCase):
 class DockerAdapterDiagnosticTest(unittest.TestCase):
     """分组运行保持即时 stderr 与最终摘要哈希一致。"""
 
+    def synthetic_groups(self):
+        """只给聚合诊断提供合成分组，不替代完整固定库存测试。"""
+        return {"surface": [
+            "ops/docker/tests/test_synthetic.py",
+            "ops/podman/tests/synthetic.test.mjs",
+        ]}
+
     def adapter(self):
         """隔离加载 Docker 适配器，仅供合成执行器测试使用。"""
         spec = importlib.util.spec_from_file_location(
@@ -340,6 +347,7 @@ class DockerAdapterDiagnosticTest(unittest.TestCase):
         with (
             redirect_stderr(stream),
             patch.object(module, "_preflight"),
+            patch.object(module, "_members", return_value=self.synthetic_groups()),
             patch.object(module, "_load_python", return_value=suite),
             patch.object(
                 module.subprocess,
@@ -347,7 +355,7 @@ class DockerAdapterDiagnosticTest(unittest.TestCase):
                 return_value=subprocess.CompletedProcess([], 0, node_output, ""),
             ),
         ):
-            report = module.run_tests()
+            report = module._run("surface")
         self.assertEqual("PASS", report["status"])
         self.assertTrue(report["node_transaction_no_skips"])
         self.assertEqual(3, report["checks_run"])
@@ -389,6 +397,7 @@ class DockerAdapterDiagnosticTest(unittest.TestCase):
                 self.subTest(),
                 redirect_stderr(io.StringIO()),
                 patch.object(module, "_preflight"),
+                patch.object(module, "_members", return_value=self.synthetic_groups()),
                 patch.object(module, "_load_python", return_value=suite),
                 patch.object(
                     module.subprocess,
@@ -398,7 +407,7 @@ class DockerAdapterDiagnosticTest(unittest.TestCase):
                     ),
                 ),
             ):
-                report = module.run_tests()
+                report = module._run("surface")
             self.assertEqual("FAIL", report["status"])
 
     def test_node_failure_or_malformed_result_cannot_pass_python_success(self):
@@ -418,6 +427,7 @@ class DockerAdapterDiagnosticTest(unittest.TestCase):
                 self.subTest(output=output),
                 redirect_stderr(io.StringIO()),
                 patch.object(module, "_preflight"),
+                patch.object(module, "_members", return_value=self.synthetic_groups()),
                 patch.object(module, "_load_python", return_value=suite),
                 patch.object(
                     module.subprocess,
@@ -425,6 +435,6 @@ class DockerAdapterDiagnosticTest(unittest.TestCase):
                     return_value=subprocess.CompletedProcess([], code, output, ""),
                 ),
             ):
-                report = module.run_tests()
+                report = module._run("surface")
             self.assertEqual("FAIL", report["status"])
             self.assertFalse(report["node_transaction_no_skips"])
