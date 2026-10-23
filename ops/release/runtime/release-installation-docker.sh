@@ -113,12 +113,25 @@ lf_docker_run() (
   # 就绪交接后仍接受正常 TERM 回收状态；CLI、截止和输出判据保持不变。
   case "$timer_status" in 0|143) ;; *) exit 1;; esac
   [ "$status" -eq 0 ] && [ ! -e "$dir/timedout" ] || exit 1
-  out_bytes=$(wc -c 2>/dev/null < "$dir/stdout") || exit 1
-  err_bytes=$(wc -c 2>/dev/null < "$dir/stderr") || exit 1
+  # 空流由文件谓词确认；文件消失或不可读仍失败，不能误当零字节。
+  [ -f "$dir/stdout" ] && [ -r "$dir/stdout" ] && [ ! -L "$dir/stdout" ] || exit 1
+  [ -f "$dir/stderr" ] && [ -r "$dir/stderr" ] && [ ! -L "$dir/stderr" ] || exit 1
+  out_bytes=0 err_bytes=0
+  if [ -s "$dir/stdout" ]; then out_bytes=$(wc -c 2>/dev/null < "$dir/stdout") || exit 1; fi
+  if [ -s "$dir/stderr" ]; then err_bytes=$(wc -c 2>/dev/null < "$dir/stderr") || exit 1; fi
   # Linux 的 512 block 可能是 256 KiB，macOS 则可能是 512 KiB；
   # 统一以更保守的 256 KiB 作为成功阈值，达到阈值亦视作超限。
   [ "$out_bytes" -lt 262144 ] && [ "$err_bytes" -lt 262144 ] || exit 1
-  cat -- "$dir/stdout" 2>/dev/null
+  if [ "$out_bytes" -gt 0 ]; then
+    # 只有完整单行与已测字节数精确一致才使用内建输出；NUL、多行、
+    # 无尾 LF 或字符/字节长度不同的内容仍由 cat 原样复制。
+    if IFS= read -r first_line < "$dir/stdout" &&
+       [ "$out_bytes" -eq "$(( ${#first_line} + 1 ))" ]; then
+      printf '%s\n' "$first_line"
+    else
+      cat -- "$dir/stdout" 2>/dev/null
+    fi
+  fi
 )
 lf_docker_endpoint() {
   [ -z "${LF_DOCKER_ENDPOINT:-}" ] || return 0
@@ -137,21 +150,23 @@ lf_docker_endpoint() {
   LF_DOCKER_ENDPOINT=$endpoint
 }
 lf_docker_server_kind() {
-  local endpoint="$1" components podman_count engine_count docker_name_count unknown_engine_count invalid_count
+  local endpoint="$1" components
   components=$(lf_docker_run 30 env -i "PATH=${PATH:-/usr/bin:/bin}" LC_ALL=C \
     docker --host "$endpoint" version --format '{{range .Server.Components}}{{.Name}}{{"\n"}}{{end}}' 2>/dev/null) || return 1
   [ -n "$components" ] || return 1
-  if podman_count=$(printf '%s\n' "$components" | grep -cx 'Podman Engine'); then :; else [ "$?" -eq 1 ] || return 1; podman_count=0; fi
-  if engine_count=$(printf '%s\n' "$components" | grep -cx 'Engine'); then :; else [ "$?" -eq 1 ] || return 1; engine_count=0; fi
-  if docker_name_count=$(printf '%s\n' "$components" | grep -cx 'Docker Engine'); then :; else [ "$?" -eq 1 ] || return 1; docker_name_count=0; fi
-  unknown_engine_count=$(printf '%s\n' "$components" | awk '$0 ~ /Engine$/ && $0 !~ /^(Engine|Podman Engine|Docker Engine)$/ { count++ } END { print count + 0 }') || return 1
-  invalid_count=$(printf '%s\n' "$components" | awk '$0 == "" || $0 ~ /[[:cntrl:]]/ { count++ } END { print count + 0 }') || return 1
-  [ "$unknown_engine_count" -eq 0 ] && [ "$invalid_count" -eq 0 ] || return 1
-  case "$podman_count:$engine_count:$docker_name_count" in
-    1:0:0|1:1:0) printf '%s\n' podman;;
-    0:1:0|0:0:1) printf '%s\n' docker;;
-    *) return 1;;
-  esac
+  # 同一次组件观察仅解析一遍，计数与冲突判据不变；不缓存身份。
+  printf '%s\n' "$components" | awk '
+    $0 == "Podman Engine" { podman++ }
+    $0 == "Engine" { engine++ }
+    $0 == "Docker Engine" { docker++ }
+    $0 ~ /Engine$/ && $0 !~ /^(Engine|Podman Engine|Docker Engine)$/ { invalid++ }
+    $0 == "" || $0 ~ /[[:cntrl:]]/ { invalid++ }
+    END {
+      if (invalid) exit 1
+      if (podman == 1 && (engine == 0 || engine == 1) && docker == 0) print "podman"
+      else if (podman == 0 && ((engine == 1 && docker == 0) || (engine == 0 && docker == 1))) print "docker"
+      else exit 1
+    }'
 }
 lf_podman_map_valid() {
   local value="$1" rootless="$2" rest entry container host size old_ifs
@@ -715,18 +730,33 @@ lf_removal_discover_observe() {
   ) || return 1
   [ "${#rows}" -le 8192 ] || return 1
   LF_REMOVE_ROWS=$(printf '%s\n' "$rows" | LC_ALL=C sort -u) || return 1
-  local id name extra count=0
+  local id name extra count=0 expected= actual seen_ids= seen_names=
+  set --
   while IFS='|' read -r id name extra; do
     [ -n "$id$name$extra" ] || continue
     [ -z "$extra" ] || return 1
     count=$((count + 1)); [ "$count" -le "$limit" ] || return 1
-    lf_removal_owned "$kind" "$id" "$name" || return 1
+    lf_removal_fields "$kind" "$id" "$name" || return 1
+    case "$seen_ids" in *"|$id|"*) return 1;; esac
+    case "$seen_names" in *"|$name|"*) return 1;; esac
+    seen_ids="$seen_ids|$id|"; seen_names="$seen_names|$name|"
+    if [ -n "$expected" ]; then expected="$expected
+$LF_OWNER_RECORD"; else expected=$LF_OWNER_RECORD; fi
+    set -- "$@" "$id"
   done <<EOF_ROWS
 $LF_REMOVE_ROWS
 EOF_ROWS
+  # 一次只读观察中按完整 ID 批量读取；每个结果仍须同序精确匹配。
+  # 不缓存观察，且写操作前的单对象复核仍由 lf_removal_owned 执行。
+  if [ "$#" -gt 0 ]; then
+    actual=$(lf_docker "$kind" inspect --format "$LF_OWNER_FORMAT" "$@" 2>/dev/null) || return 1
+    [ "$actual" = "$expected" ] || return 1
+  fi
 }
-lf_removal_owned() {
-  local kind="$1" id="$2" name="$3" expected actual format
+lf_removal_fields() {
+  local kind="$1" id="$2" name="$3"
+  # 仅为当前已验证对象生成字段；调用者环境或上一次结果不能授予资格。
+  LF_OWNER_FORMAT= LF_OWNER_RECORD=
   case "$kind:$name" in
     "container:${LF_PROJECT}-api-1"|"container:${LF_PROJECT}-postgres-1"|"container:${LF_PROJECT}-initialize-1"|"container:${LF_PROJECT}-candidate"|"container:${LF_PROJECT}-private-file-importer") ;;
     "network:${LF_PROJECT}_private") ;;
@@ -739,10 +769,15 @@ lf_removal_owned() {
     [ "${#id}" -eq 64 ] || return 1
   fi
   case "$kind" in
-    container) format='{{.Id}}|{{.Name}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "lexiflow.installation"}}|{{index .Config.Labels "lexiflow.release"}}'; expected="$id|/$name|$LF_PROJECT|$LF_INSTALL_ID|$LF_CURRENT_KEY";;
-    network) format='{{.Id}}|{{.Name}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "lexiflow.installation"}}|{{index .Labels "lexiflow.release"}}'; expected="$id|$name|$LF_PROJECT|$LF_INSTALL_ID|$LF_CURRENT_KEY";;
-    volume) format='{{.Name}}|{{.Name}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "lexiflow.installation"}}|{{index .Labels "lexiflow.release"}}'; expected="$id|$name|$LF_PROJECT|$LF_INSTALL_ID|$LF_CURRENT_KEY";;
+    container) LF_OWNER_FORMAT='{{.Id}}|{{.Name}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "lexiflow.installation"}}|{{index .Config.Labels "lexiflow.release"}}'; LF_OWNER_RECORD="$id|/$name|$LF_PROJECT|$LF_INSTALL_ID|$LF_CURRENT_KEY";;
+    network) LF_OWNER_FORMAT='{{.Id}}|{{.Name}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "lexiflow.installation"}}|{{index .Labels "lexiflow.release"}}'; LF_OWNER_RECORD="$id|$name|$LF_PROJECT|$LF_INSTALL_ID|$LF_CURRENT_KEY";;
+    volume) LF_OWNER_FORMAT='{{.Name}}|{{.Name}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "lexiflow.installation"}}|{{index .Labels "lexiflow.release"}}'; LF_OWNER_RECORD="$id|$name|$LF_PROJECT|$LF_INSTALL_ID|$LF_CURRENT_KEY";;
   esac
+}
+lf_removal_owned() {
+  local kind="$1" id="$2" name="$3" expected actual format
+  lf_removal_fields "$kind" "$id" "$name" || return 1
+  expected=$LF_OWNER_RECORD; format=$LF_OWNER_FORMAT
   actual=$(lf_docker "$kind" inspect --format "$format" "$id" 2>/dev/null) || return 1
   [ "$actual" = "$expected" ]
 }

@@ -223,8 +223,24 @@ extra=
 if IFS= read -r extra <&3 || [ -n "$extra" ]; then fail; fi
 exec 3<&-
 case "$status" in 0|[1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5]) ;; *) fail;; esac
-"$catb" "$req.out" || fail
-"$catb" "$req.err" >&2 || fail
+LC_ALL=C
+export LC_ALL
+for stream in out err; do
+  stream_file="$req.$stream"
+  stream_len=$outlen
+  [ "$stream" = out ] || stream_len=$errlen
+  if [ "$stream_len" -eq 0 ]; then
+    :
+  elif IFS= read -r line < "$stream_file" && [ "$(( ${#line} + 1 ))" -eq "$stream_len" ]; then
+    if [ "$stream" = out ]; then printf '%s\n' "$line" || fail
+    else printf '%s\n' "$line" >&2 || fail
+    fi
+  else
+    if [ "$stream" = out ]; then "$catb" "$stream_file" || fail
+    else "$catb" "$stream_file" >&2 || fail
+    fi
+  fi
+done
 : > "$req.ack" || fail
 trap - HUP INT TERM
 exit "$status"

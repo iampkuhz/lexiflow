@@ -194,9 +194,14 @@ try {
       await record('list', { kind, filters },daemonName); throw new ModelExit(0);
     }
     if (subcommand === 'inspect' && argv.includes('--format')) {
-      const id = argv.at(-1); const resource = data.resources.find((item) => item.kind === kind && item.id === id);
-      if (!resource) throw new ModelExit(2);
-      log(renderResource(resource, kind)); await record('inspect', { kind, id, name: resource.name },daemonName); throw new ModelExit(0);
+      if (argv[2] !== '--format' || !argv[3] || argv.length < 5) fail();
+      // Docker inspect 按给定 ID 顺序逐项输出；中途缺项保留前面的输出并非零退出。
+      for (const id of argv.slice(4)) {
+        const resource = data.resources.find((item) => item.kind === kind && item.id === id);
+        if (!resource) throw new ModelExit(2);
+        log(renderResource(resource, kind)); await record('inspect', { kind, id, name: resource.name },daemonName);
+      }
+      throw new ModelExit(0);
     }
     if (subcommand === 'stop' && kind === 'container') {
       const id = argv.at(-1); const resource = data.resources.find((item) => item.kind === kind && item.id === id);

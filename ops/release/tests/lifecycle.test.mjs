@@ -435,6 +435,31 @@ test('transport 真实 shell CLI 与 direct 模型逐请求结果和 ledger 一�
   assert.deepEqual(actions.map(x=>x.action),['info','info','info','list','list','list']);
 });
 
+test('transport 多ID观察按原顺序返回全部归属且部分失败保持非零',async(t)=>{
+  const f=await transportFixture(t);
+  const state=JSON.parse(await readTransport(f.state));
+  for(const kind of ['container','network','volume']){
+    const rows=[0,1].map(index=>({kind,id:kind==='volume'?`volume-${index}`:String(index+1).repeat(64),name:`${kind}-${index}`,labels:{project:'project',installation:'a'.repeat(32),release:'b'.repeat(64)}}));
+    state.daemons.primary.resources=rows;
+    await writeTransport(f.state,JSON.stringify(state));
+    const render=row=>`${row.id}|${kind==='container'?'/':''}${row.name}|${row.labels.project}|${row.labels.installation}|${row.labels.release}\n`;
+    for(const ids of [[rows[1].id,rows[0].id],[rows[0].id,rows[0].id],[rows[0].id,'missing'],['missing',rows[1].id]]){
+      const argv=['--host','unix:///synthetic.sock',kind,'inspect','--format','fixed',...ids];
+      const before=await readTransport(f.state,'utf8');
+      const expectedRows=[];
+      for(const id of ids){const row=rows.find(item=>item.id===id);if(!row)break;expectedRows.push(row);}
+      const expected={status:ids.includes('missing')?2:0,stdout:expectedRows.map(render).join(''),stderr:''};
+      const direct=await executeDockerModel(f.state,f.ledger,f.control,argv,{});
+      const actual=f.cli(argv);
+      assert.deepEqual(direct,expected); assert.deepEqual(actual,expected);
+      assert.equal(await readTransport(f.state,'utf8'),before,'只读观察不能修改资源');
+    }
+  }
+  const actions=(await readTransport(f.ledger,'utf8')).trim().split('\n').map(JSON.parse);
+  assert.equal(actions.length,30);
+  assert.ok(actions.every(item=>item.action==='inspect'));
+});
+
 test('transport 动态 control、真实 ID 切换与重复请求不缓存',async(t)=>{
   const f=await transportFixture(t);
   assert.equal(f.cli(transportArgs).stdout,'id-one\n');

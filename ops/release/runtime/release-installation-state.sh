@@ -50,7 +50,7 @@ lf_state_valid() {
 lf_state_parse() {
   local file="$1" install="$2" s1 s2 s3 s4 s5 s6 s7 s8 phase active previous candidate deleting resume
   [ -f "$file" ] && [ ! -L "$file" ] || return 1
-  [ "$(wc -c < "$file" | tr -d ' ')" -le 1024 ] || return 1
+  lf_file_size_at_most "$file" 1024 || return 1
   { IFS= read -r s1 && IFS= read -r s2 && IFS= read -r s3 && IFS= read -r s4 && IFS= read -r s5 && IFS= read -r s6 && IFS= read -r s7 && IFS= read -r s8; } < "$file" || return 1
   [ "$s1" = schema=lexiflow-installation-v1 ] && [ "$s2" = "installation_id=$install" ] || return 1
   case "$s3" in phase=*) phase=${s3#phase=};; *) return 1;; esac
@@ -65,15 +65,21 @@ lf_state_parse() {
     LF_PHASE=$phase LF_ACTIVE=$active LF_PREVIOUS=$previous LF_CANDIDATE=$candidate LF_DELETING=$deleting LF_RESUME=$resume
   fi
 }
+lf_file_size_at_most() {
+  local size
+  size=$(wc -c < "$1") || return 1
+  case "$size" in ''|*[!0123456789' ']* ) return 1;; esac
+  while [ "${size# }" != "$size" ]; do size=${size# }; done
+  case "$size" in ''|*[!0123456789]*) return 1;; esac
+  [ "$size" -le "$2" ]
+}
 lf_safe_absolute_file() {
-  local path rest part current
+  local path rest part current LC_ALL=C
   path=$1
   case "$path" in /*) ;; *) return 1;; esac
   [ "$path" != / ] || return 1
   case "$path" in *//*|*/./*|*/../*|*/.|*/..) return 1;; esac
-  case "$path" in *'
-'*) return 1;; esac
-  printf '%s' "$path" | LC_ALL=C grep '[[:cntrl:]]' >/dev/null 2>&1 && return 1
+  case "$path" in *[[:cntrl:]]*) return 1;; esac
   rest=${path#/}; current=
   while :; do
     case "$rest" in */*) part=${rest%%/*}; rest=${rest#*/}; more=yes;; *) part=$rest; rest=; more=no;; esac
@@ -85,14 +91,12 @@ lf_safe_absolute_file() {
   [ -f "$path" ] && [ ! -L "$path" ]
 }
 lf_safe_private_tree() {
-  local path rest part current
+  local path rest part current LC_ALL=C
   path=$LF_ROOT
   case "$path" in /*) ;; *) return 1;; esac
   [ "$path" != / ] || return 1
   case "$path" in *//*|*/./*|*/../*|*/.|*/..) return 1;; esac
-  case "$path" in *'
-'*) return 1;; esac
-  printf '%s' "$path" | LC_ALL=C grep '[[:cntrl:]]' >/dev/null 2>&1 && return 1
+  case "$path" in *[[:cntrl:]]*) return 1;; esac
   rest=${path#/}; current=
   while [ -n "$rest" ]; do
     case "$rest" in */*) part=${rest%%/*}; rest=${rest#*/};; *) part=$rest; rest=;; esac
@@ -218,7 +222,7 @@ lf_record_verify() {
   esac
   rec="$dir/record"
   [ -d "$dir" ] && [ ! -L "$dir" ] && [ -f "$rec" ] && [ ! -L "$rec" ] || return 1
-  [ "$(wc -c < "$rec" | tr -d ' ')" -le 8192 ] || return 1
+  lf_file_size_at_most "$rec" 8192 || return 1
   { IFS= read -r r1 && IFS= read -r r2 && IFS= read -r r3 && IFS= read -r r4; } < "$rec" || return 1
   [ "$r1" = "key=$key" ] || return 1
   case "$r2" in entry=/*) entrance=${r2#entry=};; *) return 1;; esac
