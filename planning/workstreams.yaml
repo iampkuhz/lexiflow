@@ -499,6 +499,80 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-QLT-2428
+        title: 修正工具链权限测试的临时文件属组前提
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-promotion-environment/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [tests/verification/test_toolchain.py, ops/release/version.txt, planning/workstreams.yaml, openspec/changes/release-promotion-environment/**, tmp/phase-tools/release-promotion-environment/sgid-fixture/**]
+        forbidden_files: [scripts/environment/**, scripts/verification/**, scripts/acceptance/**, config/engineering/**, backend/product/**, extension/src/**]
+        expected_output: 临时夹具使用进程有效组，保持真实750/4755/2755身份断言；新未占用2.0.3来源。
+        acceptance_criteria:
+        - 复现系统临时根继承非成员组后SGID被内核清除的失败，修复仅作用于测试自有文件。
+        - 原摘要不变、精确mode和身份变化断言不删不降级，不mock权限或改全局目录与用户组。
+        - 相同测试在用户临时目录与正式受控临时根通过，不移动已有发行tag或复用旧Formal结果。
+        acceptance_evidence: [原始Formal失败、属组探针、修复前后精确测试与最终冻结摘要。]
+        validation_command: python3 -m unittest tests.verification.test_toolchain
+        required_check_ids: [eng.verification.module-tests, eng.release.version, eng.repository.planning]
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 保持权限身份校验强度的环境确定性测试修复。
+      - id: LF-TSK-QLT-2429
+        title: 独立验证系统临时根下的权限夹具修复
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-promotion-environment/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [tmp/quality/**, tmp/phase-tools/release-promotion-environment/sgid-fixture/**]
+        forbidden_files: [planning/**, ops/**, tests/**, scripts/**, backend/product/**, extension/src/**]
+        expected_output: 当前真实完整diff当次全部受选development-change检查，使用正式受控临时根。
+        acceptance_criteria:
+        - 使用Node22及repo venv，TMPDIR/TEMP/TMP=/private/tmp；按真实冻结profile全部当次执行。
+        - 不复用旧PASS、不叠跑Full/Stop/Formal，不改源码、环境规则或任何timeout。
+        acceptance_evidence: [真实原生来源、完整开发报告、冻结hash及清理证明。]
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids: [eng.verification.module-tests, eng.release.version, eng.repository.planning]
+        discovered_from: LF-TSK-QLT-2428
+        depends_on:
+        - task_id: LF-TSK-QLT-2428
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 本次当前源的独立开发结果，不是Formal。
+      - id: LF-TSK-QLT-2430
+        title: 独立审查权限夹具修复及新发行来源
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-promotion-environment/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [tmp/quality/**, tmp/phase-tools/release-promotion-environment/sgid-fixture/**]
+        forbidden_files: [planning/**, ops/**, tests/**, scripts/**, backend/product/**, extension/src/**]
+        expected_output: 只读核对受限夹具属组变化、全部权限断言及当次独立开发证据。
+        acceptance_criteria:
+        - reviewer不同于实现者与validator；确认无权限校验降级、全局副作用、旧tag移动或候选篡改。
+        - 核对当前受控临时根开发报告全部受选项实际执行，不用历史PASS代替。
+        acceptance_evidence: [真实原生来源、当前冻结diff与当次报告摘要、明确发现项。]
+        validation_command: read-only frozen diff and current evidence review
+        required_check_ids: [eng.verification.module-tests, eng.release.version, eng.repository.planning]
+        discovered_from: LF-TSK-QLT-2428
+        depends_on:
+        - task_id: LF-TSK-QLT-2429
+          type: hard
+          required_task_version: 1
+          required_change_version: 1.0.0
+          required_result: PASS
+        deliverable: 当前修复及发行来源的独立只读审查结果。
       - id: LF-TSK-QLT-2425
         title: 修复发行环境测试的托管CI解释器定位
         priority: P0

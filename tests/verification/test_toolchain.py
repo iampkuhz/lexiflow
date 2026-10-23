@@ -48,6 +48,9 @@ class ToolchainTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             program = Path(directory) / "node"
             _script(program, "exit 0")
+            # macOS /tmp can inherit a non-member group; chmod then clears SGID.
+            # Set this owned fixture's group before capturing the original identity.
+            os.chown(program, -1, os.getegid())
             check = {"command": ["node"], "required_environment": ["node"]}
             env = {"PATH": directory}
             original = resolve_toolchain(check, env)
