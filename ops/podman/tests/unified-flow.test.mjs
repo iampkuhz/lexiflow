@@ -52,7 +52,7 @@ function fixture({ apiPort = 18080, fixedDbPort = false, candidateMode = false, 
   execFileSync('git', ['init', '-q', repo]); execFileSync('git', ['-C', repo, 'config', 'user.email', 'fixture@example.invalid']);
   execFileSync('git', ['-C', repo, 'config', 'user.name', 'Fixture']); execFileSync('git', ['-C', repo, 'add', '-A']);
   execFileSync('git', ['-C', repo, 'commit', '-qm', 'fixture']);
-  let identity = resolveBuildIdentity(repo), committedGeneration, rejectJavaBasePull = false;
+  let identity = resolveBuildIdentity(repo), committedGeneration, rejectJavaBasePull = false, failReadyNow = failReady;
   const calls = [], saved = [];
   const csv = Buffer.from('word,translation,oxford,tag,bnc,frq,exchange\nfixed,固定,1,,1,1,\n');
   const locked = JSON.parse(fs.readFileSync(path.join(repo, 'ops/dataset/ecdict-source.lock.json'), 'utf8'));
@@ -195,7 +195,7 @@ function fixture({ apiPort = 18080, fixedDbPort = false, candidateMode = false, 
         server.listen(port, '127.0.0.1', () => server.close(() => resolve(false)));
       }),
       environment: { PATH: process.env.PATH }, javaEnvironment: env => env, run,
-      ready: async () => { calls.push('ready'); if (failReady) throw new Error('SYNTHETIC_API_FAILURE'); return 7; },
+      ready: async () => { calls.push('ready'); if (failReadyNow) throw new Error('SYNTHETIC_API_FAILURE'); return 7; },
       compose: async (...args) => { calls.push(`compose:${args.join(' ')}`); return ''; },
       ownedResources: async () => fs.existsSync(path.join(dir, 'state.json')) ? new Set(['postgres']) : new Set(), verifyConfig: () => {}, verifyApiPort: async () => {},
       verifyStoppedManagedPostgres: async () => { calls.push('verify-stopped-pg'); },
@@ -208,15 +208,20 @@ function fixture({ apiPort = 18080, fixedDbPort = false, candidateMode = false, 
   }
   async function plan(action = 'install') {
     const original = console.log; let planned; const existed = fs.existsSync(dir);
+    const recordRoot = path.join(dir, 'installation-records');
+    const recordsBefore = fs.existsSync(recordRoot) ? fs.readdirSync(recordRoot).sort() : [];
     console.log = value => { try { const parsed = JSON.parse(value); if (parsed.planHash) planned = parsed; } catch {} };
     try { assert.equal(await runUnifiedDeployment({ ...ctx({ planOnly: true }), action }), 0); }
     finally { console.log = original; }
     assert.ok(planned?.planHash); if (!existed) assert.equal(fs.existsSync(dir), false);
+    assert.deepEqual(fs.existsSync(recordRoot) ? fs.readdirSync(recordRoot).sort() : [], recordsBefore,
+      'plan-only must not publish an installation record');
     return planned;
   }
   return { base, repo, dir, calls, saved, developmentRow, get identity() { return identity; }, setup, ctx, plan,
     changeSource: () => write(path.join(repo, 'fixture.txt'), 'changed generation input\n'),
     changeApplication: () => write(path.join(repo, 'application.txt'), 'changed application\n'),
+    setFailReady: value => { failReadyNow = value; },
     rejectJavaBasePull: () => { rejectJavaBasePull = true; },
     get candidate() { return candidate; },
     cleanup: () => fs.rmSync(base, { recursive: true }) };
@@ -248,6 +253,10 @@ test('source actual planner uses Java inspect, then applies through built API im
     assert.ok(f.calls.indexOf('compose:up -d --no-deps --force-recreate api') > f.calls.findIndex(call => call.startsWith('podman:run') && call.includes('--deployment-data apply')));
     const state = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json')));
     assert.equal(state.phase, 'ready'); assert.equal(state.generationVersion.length, 64);
+    const records = fs.readdirSync(path.join(f.dir, 'installation-records')).map(file => JSON.parse(fs.readFileSync(path.join(f.dir, 'installation-records', file))));
+    assert.equal(records.length, 1); assert.equal(records[0].status, 'PASS');
+    assert.deepEqual(records[0], state.lastOperation);
+    assert.ok(Date.parse(records[0].startedAt) <= Date.parse(records[0].completedAt));
     assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'deployment.json'))).stage, 'complete');
   } finally { f.cleanup(); }
 });
@@ -280,13 +289,27 @@ test('package planner distinguishes original CSV hash from ZIP hash and mounts c
   } finally { f.cleanup(); }
 });
 
-test('API failure after DB commit leaves forward-only journal and initialized target state', async () => {
-  const f = fixture({ failReady: true });
+test('API failure after committed upgrade leaves forward-only journal and records exact target with preserved dataset', async () => {
+  const f = fixture();
   try {
-    await f.setup(); const { planHash } = await f.plan();
-    await assert.rejects(runUnifiedDeployment(f.ctx({ confirmPlan: planHash })), /SYNTHETIC_API_FAILURE/);
+    await f.setup(); const initial = await f.plan();
+    await runUnifiedDeployment(f.ctx({ confirmPlan: initial.planHash }));
+    const baseline = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json')));
+    f.changeApplication(); f.changeSource(); f.setFailReady(true);
+    const { planHash } = await f.plan('upgrade');
+    await assert.rejects(runUnifiedDeployment({ ...f.ctx({ confirmPlan: planHash }), action: 'upgrade' }), /SYNTHETIC_API_FAILURE/);
     const state = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json')));
     assert.equal(state.phase, 'initialized');
+    const records = fs.readdirSync(path.join(f.dir, 'installation-records')).map(file => JSON.parse(fs.readFileSync(path.join(f.dir, 'installation-records', file))));
+    assert.equal(records.length, 2);
+    const failed = records.find(record => record.status === 'FAIL');
+    assert.ok(failed); assert.equal(failed.kind, 'upgrade');
+    assert.equal(failed.buildId, f.identity.buildId); assert.equal(failed.sourceCommit, f.identity.sourceCommit);
+    assert.equal(failed.previousVersion, baseline.version); assert.equal(failed.targetVersion, f.identity.softwareVersion);
+    assert.deepEqual(failed.dataset, state.datasetIdentity, 'failure record preserves the confirmed data commit fact');
+    assert.notDeepEqual(failed.dataset, baseline.datasetIdentity, 'committed target dataset replaces the previous fact');
+    assert.ok(Date.parse(failed.startedAt) <= Date.parse(failed.completedAt));
+    assert.equal(state.lastOperation.operation, baseline.lastOperation.operation, 'failed operation must not overwrite the prior PASS operation');
     assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'deployment.json'))).stage, 'application-activated');
     assert.equal(f.calls.filter(call => call.startsWith('progress:')).at(-1), 'progress:验证应用就绪');
     assert.equal(f.calls.some(call => call.includes('old-api') || call.includes('rollback')), false);
@@ -301,6 +324,30 @@ test('failed DB apply reports the data phase and never activates the API', async
     assert.equal(f.calls.filter(call => call.startsWith('progress:')).at(-1), 'progress:核对或提交资料');
     assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'deployment.json'))).stage, 'application-stopped');
     assert.equal(f.calls.some(call => call.includes('force-recreate api')), false);
+    const records = fs.readdirSync(path.join(f.dir, 'installation-records')).map(file => JSON.parse(fs.readFileSync(path.join(f.dir, 'installation-records', file))));
+    assert.equal(records.length, 1); assert.equal(records[0].status, 'FAIL');
+    assert.equal(records[0].dataset, null, 'failed apply cannot invent a committed dataset');
+  } finally { f.cleanup(); }
+});
+
+test('failure record write failure remains a failure and retains the operation cause', async () => {
+  const f = fixture();
+  try {
+    await f.setup(); const { planHash } = await f.plan();
+    const ctx = f.ctx({ confirmPlan: planHash });
+    const original = new Error('SYNTHETIC_API_FAILURE');
+    ctx.ready = async () => {
+      fs.writeFileSync(path.join(f.dir, 'installation-records'), 'record destination is not a directory');
+      throw original;
+    };
+    await assert.rejects(runUnifiedDeployment(ctx), error => {
+      assert.equal(error.name, 'AggregateError');
+      assert.equal(error.message, 'DEPLOYMENT_FAILURE_RECORD_WRITE_FAILED');
+      assert.equal(error.cause, original);
+      assert.equal(error.errors[0], original);
+      assert.equal(error.errors[1].message, 'INSTALL_DIRECTORY_INVALID');
+      return true;
+    });
   } finally { f.cleanup(); }
 });
 
@@ -393,6 +440,7 @@ test('non-TTY, EOF and cancellation block before build, connection or state writ
     const controller = new AbortController(); controller.abort();
     await assert.rejects(runUnifiedDeployment({ ...f.ctx({ confirmInput: ended, confirmOutput: output }), signal: controller.signal }), /DEPLOYMENT_CONFIRMATION_CANCELLED/);
     assert.equal(f.calls.filter(call => !String(call).startsWith('progress:')).length, 0); assert.equal(fs.existsSync(f.dir), false);
+    assert.equal(fs.existsSync(path.join(f.dir, 'installation-records')), false);
   } finally { f.cleanup(); }
 });
 
@@ -598,7 +646,9 @@ for (const target of ['zip', 'sidecar', 'tree']) test(`tampering ${target} durin
     const state = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json')));
     assert.equal(state.phase, 'initialized');
     assert.equal(state.lastOperation, undefined);
-    assert.equal(fs.existsSync(path.join(f.dir, 'installation-records')), false);
+    const records = fs.readdirSync(path.join(f.dir, 'installation-records')).map(file => JSON.parse(fs.readFileSync(path.join(f.dir, 'installation-records', file))));
+    assert.equal(records.length, 1); assert.equal(records[0].status, 'FAIL');
+    assert.equal(records[0].operation, JSON.parse(fs.readFileSync(path.join(f.dir, 'deployment.json'))).operation);
     assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'deployment.json'))).stage, 'application-activated');
   } finally { f.cleanup(); }
 });

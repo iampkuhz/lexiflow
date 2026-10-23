@@ -947,6 +947,75 @@ workstreams:
         discovered_from: LF-TSK-QLT-2446
         depends_on: []
         deliverable: 当前完整源码与当次证据的独立只读审查。
+      - id: LF-TSK-QLT-2453
+        title: 补齐统一部署失败操作记录
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-failure-record/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/podman/installation/installation-upgrade-workflow.mjs
+        - ops/podman/tests/unified-flow.test.mjs
+        - tmp/phase-tools/release-failure-record/implementation/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 失败终态不可变安装记录及精准回归，不改变数据/就绪/重试合同。
+        acceptance_criteria:
+        - 只在已确认且开始的本次部署操作失败时记录精确目标身份和真实已知资料事实，保留原异常与journal。
+        - 成功仍仅就绪后PASS，计划/拒绝无执行记录，记录失败不能吞异常或伪造成功。
+        - 不改candidate故障注入和断言、不清资源、不加预算；覆盖真实编排的ready失败及资料提交前后/前置拒绝。
+        acceptance_evidence: [真实原生来源、冻结摘要、当前证据定位及明确结果。]
+        validation_command: node --test ops/podman/tests/unified-flow.test.mjs
+        required_check_ids: [eng.release.docker-contract, eng.repository.planning]
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 失败终态不可变安装记录及精准回归，不改变数据/就绪/重试合同。
+      - id: LF-TSK-QLT-2454
+        title: 独立验证部署失败记录修复
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-failure-record/tasks.md
+        estimated_minutes: 60
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/release-failure-record/validation/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 冻结完整真实diff当次开发检查，失败原件保留。
+        acceptance_criteria:
+        - validator不同于全部producer，完整受选checks当次执行，0跳过/复用。
+        - 不改源码/配置/预算/Git，不重复Full/Stop/Formal，首次失败紧凑定位。
+        acceptance_evidence: [真实原生来源、冻结摘要、当前证据定位及明确结果。]
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids: [eng.release.docker-contract, eng.repository.planning]
+        discovered_from: LF-TSK-QLT-2453
+        depends_on: []
+        deliverable: 冻结完整真实diff当次开发检查，失败原件保留。
+      - id: LF-TSK-QLT-2455
+        title: 独立审查部署失败记录修复
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-failure-record/tasks.md
+        estimated_minutes: 30
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/release-failure-record/review/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 最终源码与完整当次开发证据的独立只读意见。
+        acceptance_criteria:
+        - reviewer不同于producer/validator；只读冻结diff、直接/完整开发结果和原生身份，不重跑checks。
+        - 确认失败记录只引用真实提交事实，原异常/数据/重试边界保留，不弱化故障验证。
+        acceptance_evidence: [真实原生来源、冻结摘要、当前证据定位及明确结果。]
+        validation_command: read-only frozen diff and current evidence review
+        required_check_ids: [eng.release.docker-contract, eng.repository.planning]
+        discovered_from: LF-TSK-QLT-2453
+        depends_on: []
+        deliverable: 最终源码与完整当次开发证据的独立只读意见。
       - id: LF-TSK-QLT-2450
         title: 修复发行原生用户临时目录解析
         priority: P0
@@ -9503,6 +9572,30 @@ workstreams:
           required_change_version: 1.0.0
           required_result: PASS
         deliverable: 单维护者授权变更的独立开发验证证据，不重置已有首发验证预算。
+      - id: LF-TSK-OPS-2057
+        title: 固定失败记录修复后的发行身份
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-failure-record/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/version.txt
+        - planning/workstreams.yaml
+        - openspec/changes/release-failure-record/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 新未占用2.0.6版本和原标签/失败证据保留。
+        acceptance_criteria:
+        - 唯一版本2.0.6，不移动旧tag，最终完整diff独立开发和审查后集成。
+        - 新候选另行完整Formal，不沿用v2.0.5失败报告的局部PASS。
+        acceptance_evidence: [真实原生来源、冻结摘要、当前证据定位及明确结果。]
+        validation_command: node ops/release/test_tools/run-release-tool-tests.mjs
+        required_check_ids: [eng.release.version, eng.repository.planning]
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 新未占用2.0.6版本和原标签/失败证据保留。
       - id: LF-TSK-OPS-2056
         title: 固定原生临时目录修复后的发行身份
         priority: P0
