@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { accessSync, constants, lstatSync, realpathSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -25,6 +26,33 @@ function requiredValue(source, name, code) {
   const value = text(source[name]);
   if (!value) fail(code);
   return value;
+}
+
+/** Validate the bounded fixed getconf result before using the OS-owned temp root. */
+export function normalizeDarwinTempDirectory(result) {
+  if (!result || result.error || result.status !== 0 || result.signal || typeof result.stdout !== 'string')
+    fail('RELEASE_STANDARD_PATH_INVALID');
+  const output = result.stdout;
+  if (!output.endsWith('\n') || output.slice(0, -1).includes('\n')) fail('RELEASE_STANDARD_PATH_INVALID');
+  const reported = output.slice(0, -1);
+  if (!absolute(reported)) fail('RELEASE_STANDARD_PATH_INVALID');
+  let canonical, info;
+  try { canonical = realpathSync(reported); info = lstatSync(canonical); }
+  catch { fail('RELEASE_STANDARD_PATH_INVALID'); }
+  if (path.resolve(reported) !== path.normalize(reported).replace(/\/$/, '') || !info.isDirectory() || info.isSymbolicLink()
+    || info.uid !== process.getuid() || (info.mode & 0o777) !== 0o700) fail('RELEASE_STANDARD_PATH_INVALID');
+  return canonical;
+}
+
+function standardTempDirectory(user) {
+  if (process.platform !== 'darwin') {
+    try { return realpathSync('/tmp'); } catch { fail('RELEASE_STANDARD_PATH_INVALID'); }
+  }
+  const result = spawnSync('/usr/bin/getconf', ['DARWIN_USER_TEMP_DIR'], {
+    encoding: 'utf8', timeout: 1500, maxBuffer: 4096, windowsHide: true,
+    env: { PATH: '/usr/bin:/bin', HOME: user.homedir, USER: user.username, LOGNAME: user.username },
+  });
+  return normalizeDarwinTempDirectory(result);
 }
 
 function privateCapabilities(root, source) {
@@ -90,8 +118,9 @@ export function resolveReleaseExecutionEnvironment({ root, purpose, source = pro
   try { user = os.userInfo(); } catch { fail('RELEASE_USER_INVALID'); }
   if (!user.username || !user.homedir || /[\u0000-\u001f\u007f]/.test(user.username)) fail('RELEASE_USER_INVALID');
   let home, temp;
-  try { home = realpathSync(user.homedir); temp = realpathSync('/tmp'); }
+  try { home = realpathSync(user.homedir); }
   catch { fail('RELEASE_STANDARD_PATH_INVALID'); }
+  temp = standardTempDirectory(user);
   const env = {
     PATH: [pythonBin, nodeBin, '/opt/homebrew/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(path.delimiter),
     HOME: home,

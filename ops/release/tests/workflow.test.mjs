@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { executeFormal, prepareWorkflow, resumePromotion, runCommand } from '../workflow/run-release-workflow.mjs';
-import { resolveFormalInvocation, resolveReleaseExecutionEnvironment } from '../workflow/release-execution-environment.mjs';
+import { normalizeDarwinTempDirectory, resolveFormalInvocation, resolveReleaseExecutionEnvironment } from '../workflow/release-execution-environment.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const repo = process.cwd();
@@ -164,7 +164,25 @@ test('release environment canonicalizes ambient values and fails closed on missi
     assert.equal(first[name], second[name], `${name} must be normalized`);
   assert.equal(first.PATH.split(path.delimiter)[0], path.join(f.root, '.local/lexiflow-python/bin'));
   assert.equal(first.PATH.split(path.delimiter)[1], path.dirname(process.execPath));
-  assert.equal(first.TMPDIR, await realpath('/tmp'));
+  assert.equal(first.TMPDIR, process.platform === 'darwin'
+    ? normalizeDarwinTempDirectory({ status: 0, signal: null, stdout: execFileSync('/usr/bin/getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8' }) })
+    : await realpath('/tmp'));
+  assert.equal(normalizeDarwinTempDirectory({ status: 0, signal: null, stdout: `${f.root}\n` }), f.root,
+    'a real current-user-owned 0700 directory is accepted');
+  const promotion = resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'promotion', source: ambientChanged });
+  assert.equal(first.TMPDIR, promotion.TMPDIR, 'formal and promotion share the same OS temp root');
+  assert.throws(() => normalizeDarwinTempDirectory({ status: 1, signal: null, stdout: '' }), /RELEASE_STANDARD_PATH_INVALID/);
+  assert.throws(() => normalizeDarwinTempDirectory({ error: new Error('spawn failed'), status: null, stdout: '' }), /RELEASE_STANDARD_PATH_INVALID/);
+  assert.throws(() => normalizeDarwinTempDirectory({ status: 0, signal: 'SIGTERM', stdout: `${f.root}\n` }), /RELEASE_STANDARD_PATH_INVALID/);
+  for (const output of ['relative\n', `${f.root}\n${f.root}\n`, `${f.root}\0\n`])
+    assert.throws(() => normalizeDarwinTempDirectory({ status: 0, signal: null, stdout: output }), /RELEASE_STANDARD_PATH_INVALID/);
+  assert.throws(() => normalizeDarwinTempDirectory({ status: 0, signal: null, stdout: `${path.join(f.root, 'missing')}\n` }), /RELEASE_STANDARD_PATH_INVALID/);
+  const ordinaryFile = path.join(f.root, 'ordinary-file');
+  await writeFile(ordinaryFile, 'not a directory');
+  assert.throws(() => normalizeDarwinTempDirectory({ status: 0, signal: null, stdout: `${ordinaryFile}\n` }), /RELEASE_STANDARD_PATH_INVALID/);
+  await chmod(f.root, 0o755);
+  assert.throws(() => normalizeDarwinTempDirectory({ status: 0, signal: null, stdout: `${f.root}\n` }), /RELEASE_STANDARD_PATH_INVALID/);
+  await chmod(f.root, 0o700);
   assert.equal(first.LEXIFLOW_CANDIDATE_RUNTIME_REQUEST, path.join(f.root, 'tmp/quality/release-workflow/candidate-runtime-request.json'));
   assert.equal(first.CODEX_HOME, '/trusted/codex-home');
   assert.equal(first.CODEX_THREAD_ID, 'thread-native');

@@ -947,6 +947,96 @@ workstreams:
         discovered_from: LF-TSK-QLT-2446
         depends_on: []
         deliverable: 当前完整源码与当次证据的独立只读审查。
+      - id: LF-TSK-QLT-2450
+        title: 修复发行原生用户临时目录解析
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-promotion-environment/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/workflow/release-execution-environment.mjs
+        - ops/release/tests/workflow.test.mjs
+        - tmp/phase-tools/release-native-temp/implementation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 可信OS用户临时根的最小发行resolver修复及直接测试，不授予Formal资格。
+        acceptance_criteria:
+        - macOS由固定系统命令取得原生用户临时目录并规范化校验；不继承ambient TMP变量，其他环境能力边界不变。
+        - Formal和promotion完全相同，固定命令/目录无效时失败关闭；不修改Podman或建立socket别名，不放宽任何Check。
+        - 直接测试覆盖ambient独立和两用途等价、失败路径；只读真实machine-inspect socket与既有受控endpoint同inode。
+        acceptance_evidence:
+        - 当前冻结摘要、直接或独立证据定位与真实结果，历史失败原件保留。
+        validation_command: node --test ops/release/tests/workflow.test.mjs
+        required_check_ids:
+        - eng.release.build
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 可信OS用户临时根的最小发行resolver修复及直接测试，不授予Formal资格。
+      - id: LF-TSK-QLT-2451
+        title: 独立验证原生临时目录修复
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-promotion-environment/tasks.md
+        estimated_minutes: 45
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/release-native-temp/validation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 最终完整真实diff当次开发检查及冻结稳定证据，不复用旧结果。
+        acceptance_criteria:
+        - 独立validator不同于全部实现者；当前完整受选检查当次执行，无跳过或拼接PASS。
+        - 不修改源码/预算/环境配置，不重复Full/Stop/Formal；首次失败保留并定位。
+        acceptance_evidence:
+        - 当前冻结摘要、直接或独立证据定位与真实结果，历史失败原件保留。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.release.build
+        - eng.repository.planning
+        discovered_from: LF-TSK-QLT-2450
+        depends_on: []
+        deliverable: 最终完整真实diff当次开发检查及冻结稳定证据，不复用旧结果。
+      - id: LF-TSK-QLT-2452
+        title: 独立审查原生临时目录修复
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-promotion-environment/tasks.md
+        estimated_minutes: 45
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/release-native-temp/review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 当前冻结源码与本次完整开发证据的独立只读意见。
+        acceptance_criteria:
+        - reviewer不同于实现者和validator，不重跑检查，只读核最终diff/hash/直接和开发证据。
+        - 确认环境和原生独立性、失败关闭、实际socket对应及历史失败保留；不自签Formal。
+        acceptance_evidence:
+        - 当前冻结摘要、直接或独立证据定位与真实结果，历史失败原件保留。
+        validation_command: python3 -m json.tool tmp/phase-tools/release-native-temp/review/opinion.json
+        required_check_ids:
+        - eng.release.build
+        - eng.repository.planning
+        discovered_from: LF-TSK-QLT-2450
+        depends_on: []
+        deliverable: 当前冻结源码与本次完整开发证据的独立只读意见。
       - id: LF-TSK-QLT-2449
         title: 补齐固定完整检查入口的验证消费者
         priority: P0
@@ -9413,6 +9503,37 @@ workstreams:
           required_change_version: 1.0.0
           required_result: PASS
         deliverable: 单维护者授权变更的独立开发验证证据，不重置已有首发验证预算。
+      - id: LF-TSK-OPS-2056
+        title: 固定原生临时目录修复后的发行身份
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-promotion-environment/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/version.txt
+        - planning/workstreams.yaml
+        - openspec/changes/release-promotion-environment/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 新未占用2.0.5版本源码身份；原v2.0.4候选与BLOCKED证据保留。
+        acceptance_criteria:
+        - 唯一版本源2.0.5，不移动或覆盖旧tag，不复用旧Formal资格。
+        - 最终diff经独立完整开发和只读审查；新正式候选另需完整Formal。
+        acceptance_evidence:
+        - 当前冻结摘要、直接或独立证据定位与真实结果，历史失败原件保留。
+        validation_command: node ops/release/test_tools/run-release-tool-tests.mjs
+        required_check_ids:
+        - eng.release.version
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 新未占用2.0.5版本源码身份；原v2.0.4候选与BLOCKED证据保留。
       - id: LF-TSK-OPS-2055
         title: 固定合同执行成本修复后的新发行身份
         priority: P0
