@@ -549,7 +549,7 @@ class IsolatedClassLaneTest(unittest.TestCase):
         self.assertEqual(len(ids), 30)
         self.assertEqual(len(set(ids)), 30)
         self.assertTrue(all("DockerContractTest." in item or "FlowTests." in item for item in ids))
-        self.assertEqual(len(list(adapter._iter_cases(remaining))), 7)
+        self.assertEqual(len(list(adapter._iter_cases(remaining))), 8)
         self.assertTrue(all("ContainerHealthTransportTest." in item for item in [case.id() for case in adapter._iter_cases(remaining)]))
 
     def test_complete_entry_runs_fixed_classes_once_before_node(self):

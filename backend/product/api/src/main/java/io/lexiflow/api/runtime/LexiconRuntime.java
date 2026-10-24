@@ -24,6 +24,8 @@ public final class LexiconRuntime implements LexiconCatalog {
     NO_PUBLISHED_DATA,
     DEPENDENCY_UNAVAILABLE,
     SCHEMA_MISMATCH,
+    IDENTITY_MISMATCH,
+    INITIALIZING,
     PREWARM_DEGRADED
   }
 

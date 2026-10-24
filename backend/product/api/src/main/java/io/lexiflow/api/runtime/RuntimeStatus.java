@@ -9,6 +9,7 @@ package io.lexiflow.api.runtime;
  * @param ready 含义：正式资料是否可用于提示。取值范围：true 或 false。
  * @param reason 含义：本次运行探测的固定原因。取值范围：LexiconRuntime.Reason 名称。
  * @param datasetVersion 含义：已发布资料版本。取值范围：非负版本或未知时 null。
+ * @param publishedDataset 含义：本次容器启动已核验的资料绑定。取值范围：仅 ready 时非 null。
  */
 public record RuntimeStatus(
     String softwareVersion,
@@ -16,4 +17,5 @@ public record RuntimeStatus(
     String mode,
     boolean ready,
     String reason,
-    Long datasetVersion) {}
+    Long datasetVersion,
+    RuntimeInitialization.PublishedDataset publishedDataset) {}

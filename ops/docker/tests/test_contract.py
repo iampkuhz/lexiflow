@@ -1194,7 +1194,8 @@ else: sys.exit(7)
 class ContainerHealthTransportTest(unittest.TestCase):
     SUMMARY = (
         b'{"softwareVersion":"1.2.3","apiContract":"caption-hints.v2",'
-        b'"mode":"formal","ready":true,"reason":"OK","datasetVersion":42}'
+        b'"mode":"formal","ready":true,"reason":"OK","datasetVersion":42,'
+        b'"publishedDataset":null}'
     )
 
     @classmethod
@@ -1228,6 +1229,16 @@ class ContainerHealthTransportTest(unittest.TestCase):
                 self.assertEqual(fixture.requests, [
                     b"GET /internal/container-health HTTP/1.1\r\nHost: 127.0.0.1:8080\r\nConnection: close\r\n\r\n"
                 ])
+
+    def test_published_dataset_seven_field_summary_is_accepted(self):
+        body = self.SUMMARY.replace(
+            b'"publishedDataset":null',
+            b'"publishedDataset":{"releaseId":"rel","preparationId":"prep",'
+            b'"ruleId":"rule","sqlVersion":"sql","sha256":"' + b'a' * 64 + b'"}',
+        )
+        result = self.probe(self.response(body))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.encode(), body + b"\n")
 
     def test_non_success_redirect_unknown_framing_and_duplicate_headers_rejected(self):
         for response in (

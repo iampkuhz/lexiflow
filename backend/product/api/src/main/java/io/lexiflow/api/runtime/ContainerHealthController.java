@@ -20,6 +20,7 @@ public final class ContainerHealthController {
   private final ApplicationAvailability availability;
   private final LexiconRuntime runtime;
   private final SoftwareIdentity softwareIdentity;
+  private final RuntimeInitialization initialization;
 
   /**
    * 装配容器探针所需的进程状态、词库状态与软件身份。
@@ -27,14 +28,17 @@ public final class ContainerHealthController {
    * @param availability 含义：进程接收流量状态。取值范围：非 null。
    * @param runtime 含义：唯一词库状态 owner。取值范围：非 null。
    * @param softwareIdentity 含义：已校验的构建身份。取值范围：非 null。
+   * @param initialization 含义：当次启动与资料身份证明核验器。取值范围：非 null。
    */
   public ContainerHealthController(
       ApplicationAvailability availability,
       LexiconRuntime runtime,
-      SoftwareIdentity softwareIdentity) {
+      SoftwareIdentity softwareIdentity,
+      RuntimeInitialization initialization) {
     this.availability = Objects.requireNonNull(availability);
     this.runtime = Objects.requireNonNull(runtime);
     this.softwareIdentity = Objects.requireNonNull(softwareIdentity);
+    this.initialization = Objects.requireNonNull(initialization);
   }
 
   /**
@@ -47,15 +51,16 @@ public final class ContainerHealthController {
   public ResponseEntity<byte[]> health(HttpServletRequest request) {
     if (!isLoopback(request.getRemoteAddr())) return response(HttpStatus.NOT_FOUND, EMPTY, false);
     try {
-      var state = runtime.probe();
-      var version = state.version();
+      var status = initialization.evaluate(runtime.probe(), softwareIdentity.version());
+      var version = status.datasetVersion();
       var identity = SoftwareIdentity.parseVersion(softwareIdentity.version());
       boolean ready =
           availability.getReadinessState() == ReadinessState.ACCEPTING_TRAFFIC
-              && "formal".equals(state.mode())
-              && state.ready()
-              && (state.reason() == LexiconRuntime.Reason.OK
-                  || state.reason() == LexiconRuntime.Reason.PREWARM_DEGRADED)
+              && "formal".equals(status.mode())
+              && status.ready()
+              && (!status.releaseImage() || status.publishedDataset() != null)
+              && (status.reason() == LexiconRuntime.Reason.OK
+                  || status.reason() == LexiconRuntime.Reason.PREWARM_DEGRADED)
               && version != null
               && version > 0;
       if (!ready) return response(HttpStatus.SERVICE_UNAVAILABLE, EMPTY, false);
@@ -65,9 +70,23 @@ public final class ContainerHealthController {
               + "\",\"apiContract\":\""
               + RuntimeStatusController.API_CONTRACT
               + "\",\"mode\":\"formal\",\"ready\":true,\"reason\":\""
-              + state.reason().name()
+              + status.reason().name()
               + "\",\"datasetVersion\":"
               + version
+              + ",\"publishedDataset\":"
+              + (status.publishedDataset() == null
+                  ? "null"
+                  : "{\"releaseId\":\""
+                      + status.publishedDataset().releaseId()
+                      + "\",\"preparationId\":\""
+                      + status.publishedDataset().preparationId()
+                      + "\",\"ruleId\":\""
+                      + status.publishedDataset().ruleId()
+                      + "\",\"sqlVersion\":\""
+                      + status.publishedDataset().sqlVersion()
+                      + "\",\"sha256\":\""
+                      + status.publishedDataset().sha256()
+                      + "\"}")
               + "}";
       return response(HttpStatus.OK, body.getBytes(StandardCharsets.UTF_8), true);
     } catch (RuntimeException ignored) {

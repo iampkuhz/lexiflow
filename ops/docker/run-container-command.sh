@@ -119,7 +119,7 @@ done <<< "$headers"
 shopt -u nocasematch
 [[ "$content_type" -eq 1 && -n "$length" && "$length" -eq "${#body}" ]] || exit 1
 # 只接受服务端已校验的固定序列化摘要；不实现第二份通用 JSON/版本解析器。
-summary='^\{"softwareVersion":"[0-9A-Za-z.+-]{1,200}","apiContract":"caption-hints\.v2","mode":"formal","ready":true,"reason":"(OK|PREWARM_DEGRADED)","datasetVersion":([1-9][0-9]{0,18})\}$'
+summary='^\{"softwareVersion":"[0-9A-Za-z.+-]{1,200}","apiContract":"caption-hints\.v2","mode":"formal","ready":true,"reason":"(OK|PREWARM_DEGRADED)","datasetVersion":([1-9][0-9]{0,18}),"publishedDataset":(null|\{"releaseId":"[A-Za-z0-9._+-]{1,128}","preparationId":"[A-Za-z0-9._+-]{1,128}","ruleId":"[A-Za-z0-9._+-]{1,128}","sqlVersion":"[A-Za-z0-9._+-]{1,128}","sha256":"[a-f0-9]{64}"\})\}$'
 [[ "$body" =~ $summary ]] || exit 1
 dataset=${BASH_REMATCH[2]}
 [[ ${#dataset} -lt 19 || "$dataset" < 9223372036854775808 ]] || exit 1
