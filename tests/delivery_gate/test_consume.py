@@ -295,6 +295,7 @@ class TestConsumeExisting(unittest.TestCase):
         task["depends_on"] = [
             {
                 "task_id": "LF-TSK-TEST-0099",
+                "type": "hard",
                 "required_task_version": 1,
                 "required_change_version": "1.0.0",
                 "required_result": "PASS",

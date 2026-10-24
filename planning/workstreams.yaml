@@ -947,6 +947,126 @@ workstreams:
         discovered_from: LF-TSK-QLT-2446
         depends_on: []
         deliverable: 当前完整源码与当次证据的独立只读审查。
+      - id: LF-TSK-QLT-2459
+        title: 同步Catalog消费者的精确类型投影断言
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-dependency-types/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tests/repository/test_catalog.py
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 仓库Catalog消费者断言保留type与required_result，不改变生产逻辑。
+        acceptance_criteria:
+        - 精确比较仍保留Task/change版本和来源范围；hard非PASS继续拒绝。
+        - 仅纠正遗漏消费者测试预期，不删除断言或跳过检查。
+        acceptance_evidence:
+        - 直接Catalog测试与最终独立开发报告。
+        validation_command: python3 -m unittest tests.repository.test_catalog
+        required_check_ids:
+        - eng.repository.module-tests
+        - eng.repository.planning
+        discovered_from: LF-TSK-QLT-2456
+        depends_on: []
+        deliverable: 当前精确类型合同的Catalog消费者测试。
+      - id: LF-TSK-QLT-2456
+        title: 保持验收依赖的既定类型语义
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-dependency-types/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/acceptance/task_definition/task_acceptance_requirements.py
+        - scripts/acceptance/task_operations/evaluate_task_acceptance.py
+        - tests/delivery_gate/**
+        - tmp/phase-tools/release-dependency-types/implementation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 精确类型投影与只读依赖求值，不把建议顺序提升为强制PASS。
+        acceptance_criteria:
+        - soft保留来源绑定且不要求receipt；hard和contract仍要求唯一真实PASS及版本和哈希DAG。
+        - 缺失/未知type、非法版本、重复边和contract缺项失败关闭；不引入默认兼容。
+        - 直接测试覆盖soft、hard、contract及历史损坏/重复/环/漂移拒绝；不减少Formal检查或修改证据。
+        acceptance_evidence:
+        - 真实原生actor、冻结摘要、直接或独立证据定位与明确结果。
+        validation_command: python3 -m unittest discover -s tests/delivery_gate -t .
+        required_check_ids:
+        - eng.delivery-gate.module-tests
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 精确类型投影与只读依赖求值，不把建议顺序提升为强制PASS。
+      - id: LF-TSK-QLT-2457
+        title: 独立验证验收依赖类型修复
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-dependency-types/tasks.md
+        estimated_minutes: 60
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/release-dependency-types/validation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 冻结完整真实diff的独立development报告。
+        acceptance_criteria:
+        - 执行者不同于全部实现者；全部受选checks当次执行无遗漏。
+        - 不修改源码或预算，不把development视为Formal。
+        acceptance_evidence:
+        - 真实原生actor、冻结摘要、直接或独立证据定位与明确结果。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.delivery-gate.module-tests
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 冻结完整真实diff的独立development报告。
+      - id: LF-TSK-QLT-2458
+        title: 独立审查验收依赖类型边界
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-dependency-types/tasks.md
+        estimated_minutes: 30
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/release-dependency-types/review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 冻结实现与独立报告的只读审查。
+        acceptance_criteria:
+        - 不同于Main、实现者和validator；只读核验边类型及强依赖未放宽。
+        - 不重跑测试，不把旧Formal用于新来源。
+        acceptance_evidence:
+        - 真实原生actor、冻结摘要、直接或独立证据定位与明确结果。
+        validation_command: python3 -m json.tool tmp/phase-tools/release-dependency-types/review/opinion.json
+        required_check_ids:
+        - eng.delivery-gate.module-tests
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 冻结实现与独立报告的只读审查。
       - id: LF-TSK-QLT-2453
         title: 补齐统一部署失败操作记录
         priority: P0
@@ -9572,6 +9692,38 @@ workstreams:
           required_change_version: 1.0.0
           required_result: PASS
         deliverable: 单维护者授权变更的独立开发验证证据，不重置已有首发验证预算。
+      - id: LF-TSK-OPS-2058
+        title: 固定依赖类型修复后的发行身份
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-dependency-types/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/version.txt
+        - planning/workstreams.yaml
+        - openspec/changes/release-dependency-types/**
+        - openspec/specs/agent-execution/spec.md
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 未占用2.0.7版本及原始证据保留。
+        acceptance_criteria:
+        - 不移动旧tag；完整diff经独立开发与审查后正常集成。
+        - 新候选另行完整Formal，不复用v2.0.6验证为新来源资格。
+        acceptance_evidence:
+        - 真实原生actor、冻结摘要、直接或独立证据定位与明确结果。
+        validation_command: node ops/release/test_tools/run-release-tool-tests.mjs
+        required_check_ids:
+        - eng.release.version
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 未占用2.0.7版本及原始证据保留。
       - id: LF-TSK-OPS-2057
         title: 固定失败记录修复后的发行身份
         priority: P0

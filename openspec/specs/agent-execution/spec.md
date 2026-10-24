@@ -76,7 +76,7 @@ Codex 原生子代理同时最多 MUST 遵守 `harness/agent-policy.md` 的并�
 
 ### Requirement: 真实验收
 
-只有当前完整 Delivery Gate 链中 plan 所需 validation、可选 review、dependencies 与 approvals 全部核验为 PASS 时 MAY 报告 Task PASS。`queued`、终态通知、退出 0、跳过、未运行和未触发 SHALL NOT 作为 PASS 证据；实现者自检不是 Formal validation。
+只有当前完整 Delivery Gate 链中 plan 所需 validation、可选 review、hard/contract dependencies 与 approvals 全部核验为 PASS 时 MAY 报告 Task PASS。`queued`、终态通知、退出 0、跳过、未运行和未触发 SHALL NOT 作为 PASS 证据；实现者自检不是 Formal validation。
 
 #### Scenario: 原生终态不是验收
 
@@ -115,7 +115,7 @@ Delivery Gate 的公开交付入口 MUST 是 `python3 -m scripts.acceptance subm
 
 每份记录和外部附件 MUST 绑定规范 locator、内容 hash 与所需 identity/version/scope；读取 MUST 拒绝重复 JSON key、路径穿越、symlink、非普通文件、重复或损坏 receipt、subject bytes 漂移及不可信 authority 来源。Review patch 和 changed-file snapshot MUST 覆盖冻结主体。Runtime-bound actor MUST 来自实际本机原生 metadata，不得由 caller、actor 字符串或 role 文本伪造。原生子代理可共享父 Session，但身份独立以真实 actor 为准；同 actor 不得通过更换 run、名称或 Session route 获得自验、自审许可。本机默认 Codex authority MUST 核对 owned、非共享可写、非 symlink 的 native metadata 及 workspace/thread/parent 关系；缺失来源 BLOCKED，矛盾来源 FAIL。保持既有本机信任边界：这是本地来源证明而非平台密码学认证，不声称已解决同 OS 恶意冒用。
 
-依赖闭包 MUST 校验 Task/change 版本、唯一完整 PASS 链、嵌套 receipt hash 与环路；missing、ambiguous、重复、损坏、循环或 stale 链 MUST 阻断。用户批准 MUST 由精确绑定 Gate、Task/version 与对应依赖 check hash 的批准记录证明，系统不得自行生成。`consume-existing` MUST 只读重验唯一完整 PASS 链；`consume-candidate` 还 MUST 要求完整 repository-baseline 报告、真实候选 bytes 与候选运行证据。Review/check/两种 consume MUST NOT 执行交付测试；调用退出 0、终态通知、跳过或缺失都不是 PASS。
+验收依赖 MUST 保留 Catalog 的精确类型与来源绑定；soft 只表达建议顺序，不要求完成 receipt。hard 与 contract 的阻塞依赖闭包 MUST 校验 Task/change 版本、唯一完整 PASS 链、嵌套 receipt hash 与环路；missing、ambiguous、重复、损坏、循环或 stale 链 MUST 阻断。缺失或未知边类型、非法版本、重复边及 contract 缺项 MUST 拒绝，不得默认降级或兼容。用户批准 MUST 由精确绑定 Gate、Task/version 与对应依赖 check hash 的批准记录证明，系统不得自行生成。`consume-existing` MUST 只读重验唯一完整 PASS 链；`consume-candidate` 还 MUST 要求完整 repository-baseline 报告、真实候选 bytes 与候选运行证据。Review/check/两种 consume MUST NOT 执行交付测试；调用退出 0、终态通知、跳过或缺失都不是 PASS。
 
 Receipt 按不可覆盖记录发布；`status` MUST 只依据调用者指定的 submission UUID 返回该链状态，不推断 latest 或发布新结论。Java 产品检查由 Gradle/Java 工具执行：JUnit 执行测试，JaCoCo 产出覆盖率报告；Python Gate MUST NOT 重复扫描 Java 源码实现同义断言。
 
@@ -142,7 +142,7 @@ Receipt 按不可覆盖记录发布；`status` MUST 只依据调用者指定的 
 
 #### Scenario: 哈希或依赖链不完整
 
-- **Given** submission 附件或任一依赖 receipt 缺失、重复、哈希漂移、版本不匹配、存在循环或有多个完整 PASS 候选
+- **Given** submission 附件或任一 hard/contract 依赖 receipt 缺失、重复、哈希漂移、版本不匹配、存在循环或有多个完整 PASS 候选
 - **When** Gate 执行 `validate`、`review`、`check` 或只读消费
 - **Then** 该阶段 MUST 返回 BLOCKED/FAIL，且不得从 stdout、exit code 或 latest 记录补造 PASS
 - **And** 缺少 Task 要求的精确用户批准也 MUST 阻止 check PASS

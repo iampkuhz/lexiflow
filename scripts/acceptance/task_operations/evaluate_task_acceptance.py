@@ -283,6 +283,9 @@ def _dependency_status(
     details = []
     for edge in requirements.get("dependencies", []):
         dep_id = edge["task_id"]
+        if edge["type"] == "soft":
+            details.append({"task_id": dep_id, "type": "soft", "status": "SOFT"})
+            continue
         version = edge["required_task_version"]
         change = edge["required_change_version"]
         try:
@@ -359,7 +362,7 @@ def _dependency_status(
                     "nested": child_details,
                 }
             )
-    result = (all(x["status"] == "PASS" for x in details), details)
+    result = (all(x["status"] in {"PASS", "SOFT"} for x in details), details)
     context.completed[sid] = result
     return result
 

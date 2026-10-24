@@ -197,6 +197,7 @@ class TestDependencyDagAndApproval(unittest.TestCase):
                 "depends_on": [
                     {
                         "task_id": dep,
+                        "type": "hard",
                         "required_task_version": 1,
                         "required_change_version": "1.0.0",
                         "required_result": "PASS",
