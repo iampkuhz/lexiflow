@@ -493,7 +493,8 @@ class GitHub:
     ) -> tuple[int, Any]:
         """执行固定路由的有界请求，不重定向或重试。"""
         self._allowed(method, path, stream)
-        deadline = time.monotonic() + 60
+        request_budget = 900 if self.host == "uploads.github.com" and stream else 60
+        deadline = time.monotonic() + request_budget
         conn = http.client.HTTPSConnection(
             self.host, timeout=20, context=ssl.create_default_context()
         )
@@ -507,7 +508,7 @@ class GitHub:
                     pass
             conn.close()
 
-        timer = threading.Timer(60, expire)
+        timer = threading.Timer(request_budget, expire)
         timer.daemon = True
         headers = {
             "Accept": "application/vnd.github+json",

@@ -1027,6 +1027,7 @@ class PromotionTests(unittest.TestCase):
                 )
             finally:
                 os.close(fd)
+
             self.assertEqual(Connection.seen[-1].headers["Content-Length"], "13")
             self.assertEqual(Connection.seen[-1].body, b"one two three")
             self.assertEqual(
@@ -1067,6 +1068,125 @@ class PromotionTests(unittest.TestCase):
                         content_type="application/octet-stream",
                         stream=(fd, 10, sha(b"one two three")),
                     )
+            finally:
+                os.close(fd)
+
+    def test_upload_has_fixed_absolute_transfer_budget(self):
+        clock = [0]
+        step = 30
+
+        class Response:
+            status = 201
+
+            def read1(self, _amount):
+                return b""
+
+        class Connection:
+            instances: list[object] = []
+
+            def __init__(self, host, **kwargs):
+                self.host = host
+                self.kwargs = kwargs
+                self.sock = None
+                self.sent = 0
+                self.closed = False
+                self.clock = clock
+                self.step = step
+                Connection.instances.append(self)
+
+            def connect(self):
+                pass
+
+            def putrequest(self, *_args, **_kwargs):
+                pass
+
+            def putheader(self, *_args):
+                pass
+
+            def endheaders(self, *_args):
+                pass
+
+            def send(self, _data):
+                self.sent += 1
+                self.clock[0] += self.step
+
+            def getresponse(self):
+                return Response()
+
+            def close(self):
+                self.closed = True
+
+        class Timer:
+            instances: list[object] = []
+
+            def __init__(self, interval, callback):
+                self.interval, self.callback, self.cancelled = interval, callback, False
+                self.joined = False
+                Timer.instances.append(self)
+
+            def start(self):
+                pass
+
+            def cancel(self):
+                self.cancelled = True
+
+            def join(self):
+                self.joined = True
+
+        with (
+            patch.object(p.http.client, "HTTPSConnection", Connection),
+            patch.object(p.threading, "Timer", Timer),
+        ):
+            asset = self.fixture.root / "budget.bin"
+            asset.write_bytes(b"x" * (3 * 1024 * 1024))
+            fd = os.open(asset, os.O_RDONLY)
+            try:
+                client = p.GitHub("write", "o", "r", "uploads.github.com")
+                # A steady stream taking 90 seconds succeeds; elapsed time is not
+                # allowed to refresh the 900-second absolute deadline.
+                with patch.object(p.time, "monotonic", side_effect=lambda: clock[0]):
+                    client.request(
+                        "POST",
+                        "/repos/o/r/releases/51/assets?name=a.bin",
+                        stream=(fd, 3 * 1024 * 1024, sha(b"x" * (3 * 1024 * 1024))),
+                    )
+                self.assertEqual(Connection.instances[-1].kwargs["timeout"], 20)
+                self.assertEqual(Connection.instances[-1].sent, 3)
+                self.assertTrue(Connection.instances[-1].closed)
+                self.assertEqual(Timer.instances[-1].interval, 900)
+                self.assertTrue(Timer.instances[-1].cancelled)
+                self.assertTrue(Timer.instances[-1].joined)
+                self.assertEqual(clock[0], 90)
+                # Expiration after 900 seconds fails, even though an upload made
+                # progress; ordinary JSON continues to enforce its 60s budget.
+                clock[0] = 0
+                step = 301
+                with (
+                    patch.object(p.time, "monotonic", side_effect=lambda: clock[0]),
+                    self.assertRaisesRegex(p.PromotionError, "github-request-deadline"),
+                ):
+                    client.request(
+                        "POST",
+                        "/repos/o/r/releases/51/assets?name=a.bin",
+                        stream=(fd, 3 * 1024 * 1024, sha(b"x" * (3 * 1024 * 1024))),
+                    )
+                self.assertEqual(Timer.instances[-1].interval, 900)
+                self.assertEqual(Connection.instances[-1].sent, 3)
+                self.assertTrue(Connection.instances[-1].closed)
+                self.assertTrue(Timer.instances[-1].cancelled)
+                self.assertTrue(Timer.instances[-1].joined)
+                self.assertEqual(clock[0], 903)
+                api = p.GitHub("config", "o", "r", config=True)
+                clock[0] = 0
+                with (
+                    patch.object(p.time, "monotonic", side_effect=[0, 61]),
+                    self.assertRaisesRegex(p.PromotionError, "github-request-deadline"),
+                ):
+                    api.api("GET", "/repos/o/r/immutable-releases")
+                self.assertEqual(Timer.instances[-1].interval, 60)
+                self.assertTrue(Timer.instances[-1].cancelled)
+                self.assertTrue(Timer.instances[-1].joined)
+                self.assertTrue(Connection.instances[-1].closed)
             finally:
                 os.close(fd)
 
