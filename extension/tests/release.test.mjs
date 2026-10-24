@@ -5,25 +5,29 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createHash } from "node:crypto";
-import { PACKAGE_FILES, createExtensionZip, publishExtensionArchive, packageRelease } from "../scripts/packaging/package-extension-release.mjs";
+import { fileURLToPath } from "node:url";
+import { PACKAGE_FILES, createExtensionZip, publishExtensionArchive, packageRelease, packageDevelopment } from "../scripts/packaging/package-extension-release.mjs";
 import { checkExtensionArchive } from "../scripts/checks/check-extension-archive.mjs";
 import { zipSync } from "fflate";
 import { resolveBuildIdentity, chromeVersion } from "../../ops/release/integrity/source-build-identity.mjs";
 
 const buildIdentity = resolveBuildIdentity();
 const version = buildIdentity.softwareVersion;
+const expectedDataset = { releaseId: "release-1", preparationId: "prep-1", ruleId: "rules-1", sqlVersion: "4", sha256: "a".repeat(64) };
+const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 async function fixture() {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "lexiflow-package-test-")));
   const dist = path.join(root, "dist");
   await mkdir(path.join(dist, "assets"), { recursive: true });
   for (const file of PACKAGE_FILES) {
-    const data = file === "manifest.json" ? Buffer.from(JSON.stringify({ manifest_version: 3, version: chromeVersion(version), version_name: version, permissions: ["storage"], host_permissions: ["http://127.0.0.1:18080/*"], background: { service_worker: "background.js" }, action: { default_popup: "popup.html" } })) : file === "build-identity.json" ? Buffer.from(JSON.stringify(buildIdentity)) : file === "popup.html" ? Buffer.from('<link href="popup.css"><script src="popup.js"></script>') : Buffer.from(`fixture:${file}`);
+    const data = file === "manifest.json" ? Buffer.from(JSON.stringify({ manifest_version: 3, version: chromeVersion(version), version_name: version, permissions: ["storage"], host_permissions: ["http://127.0.0.1:18080/*"], background: { service_worker: "background.js" }, action: { default_popup: "popup.html" } })) : file === "build-identity.json" ? Buffer.from(JSON.stringify(buildIdentity)) : file === "expected-dataset.json" ? Buffer.from(JSON.stringify(expectedDataset) + "\n") : file === "popup.html" ? Buffer.from('<link href="popup.css"><script src="popup.js"></script>') : Buffer.from(`fixture:${file}`);
     await writeFile(path.join(dist, file), data);
   }
   return { root, dist, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
 
 test("build uses the single software version source and emits fixed production permissions", async () => {
+  execFileSync("npm", ["run", "build"], { cwd: extensionRoot, stdio: "ignore" });
   const template = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url)));
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url)));
   const lock = JSON.parse(await readFile(new URL("../package-lock.json", import.meta.url)));
@@ -42,15 +46,16 @@ test("ZIP has exact allowlist, stable bytes and matching SHA-256 across timezone
   try {
     await writeFile(path.join(root, "dist/private.env"), "synthetic excluded data");
     await writeFile(path.join(root, "dist/content.js.map"), "synthetic source map");
-    const first = await createExtensionZip({ root, buildIdentity });
-    const second = await createExtensionZip({ root, buildIdentity });
+    const first = await createExtensionZip({ root, buildIdentity, expectedDataset });
+    const second = await createExtensionZip({ root, buildIdentity, expectedDataset });
     assert.deepEqual(first.files, PACKAGE_FILES);
     assert.deepEqual(Object.keys(first.unzip()).sort(), [...PACKAGE_FILES].sort());
+    assert.deepEqual(JSON.parse(Buffer.from(first.unzip()["expected-dataset.json"]).toString()), expectedDataset);
     assert.deepEqual(first.archive, second.archive);
     assert.equal(first.descriptor.sha256, createHash("sha256").update(first.archive).digest("hex"));
     for (const file of PACKAGE_FILES) assert.deepEqual(Buffer.from(first.unzip()[file]), await readFile(path.join(root, "dist", file)));
     const modulePath = new URL("../scripts/packaging/package-extension-release.mjs", import.meta.url).pathname;
-    const script = `import {createExtensionZip} from ${JSON.stringify(new URL(`file://${modulePath}`).href)}; const r=await createExtensionZip({root:${JSON.stringify(root)},buildIdentity:${JSON.stringify(buildIdentity)}}); process.stdout.write(Buffer.from(r.archive).toString('base64'))`;
+    const script = `import {createExtensionZip} from ${JSON.stringify(new URL(`file://${modulePath}`).href)}; const r=await createExtensionZip({root:${JSON.stringify(root)},buildIdentity:${JSON.stringify(buildIdentity)},expectedDataset:${JSON.stringify(expectedDataset)}}); process.stdout.write(Buffer.from(r.archive).toString('base64'))`;
     for (const TZ of ["Pacific/Honolulu", "Pacific/Kiritimati"]) {
       const other = execFileSync(process.execPath, ["--input-type=module", "-e", script], { env: { ...process.env, TZ }, encoding: "utf8" });
       assert.deepEqual(Buffer.from(other, "base64"), Buffer.from(first.archive));
@@ -58,20 +63,15 @@ test("ZIP has exact allowlist, stable bytes and matching SHA-256 across timezone
   } finally { await cleanup(); }
 });
 
-test("shared ZIP packager supports bounded local API ports while production stays fixed", async () => {
+test("ZIP packager rejects ports outside the two fixed local slots", async () => {
   const { root, cleanup } = await fixture();
   try {
-    const distManifest = path.join(root, "dist/manifest.json");
-    const manifest = JSON.parse(await readFile(distManifest, "utf8"));
-    manifest.host_permissions = ["http://127.0.0.1:19123/*"];
-    await writeFile(distManifest, JSON.stringify(manifest));
-    const result = await createExtensionZip({ root, buildIdentity, apiPort: 19123 });
-    assert.deepEqual(JSON.parse(Buffer.from(result.unzip()["manifest.json"]).toString()).host_permissions,
-      ["http://127.0.0.1:19123/*"]);
-    for (const apiPort of [0, -1, 65536, 1.5, "19123"]) {
-      await assert.rejects(createExtensionZip({ root, buildIdentity, apiPort }), { message: "EXTENSION_API_PORT_INVALID" });
+    for (const apiPort of [0, -1, 18082, 65536, 1.5, "18080"]) {
+      await assert.rejects(createExtensionZip({ root, buildIdentity, expectedDataset, apiPort }), { message: "EXTENSION_API_PORT_INVALID" });
     }
-    await assert.rejects(createExtensionZip({ root, buildIdentity }), /manifest host permissions mismatch/u);
+    const result = await createExtensionZip({ root, buildIdentity, expectedDataset });
+    assert.deepEqual(JSON.parse(Buffer.from(result.unzip()["manifest.json"]).toString()).host_permissions,
+      ["http://127.0.0.1:18080/*"]);
   } finally { await cleanup(); }
 });
 
@@ -86,7 +86,7 @@ test("rejects missing files, root/path symlinks, bad manifest version and permis
     async ({ dist }) => writeFile(path.join(dist, "manifest.json"), JSON.stringify({ version: chromeVersion(version), version_name: version, permissions: ["tabs"], host_permissions: ["http://127.0.0.1:18080/*"] }))
   ]) {
     const { root, dist, cleanup } = await fixture();
-    try { await mutate({ root, dist }); await assert.rejects(createExtensionZip({ root, buildIdentity })); }
+    try { await mutate({ root, dist }); await assert.rejects(createExtensionZip({ root, buildIdentity, expectedDataset })); }
     finally { await cleanup(); }
   }
 });
@@ -95,14 +95,33 @@ test("requires and verifies the complete embedded extension identity", async () 
   const { root, dist, cleanup } = await fixture();
   try {
     await assert.rejects(createExtensionZip({ root }), /identity required/u);
+    await assert.rejects(createExtensionZip({ root, buildIdentity }), /expected published dataset binding required/u);
     const sourceSha256 = `${buildIdentity.sourceSha256.slice(0, 12)}${buildIdentity.sourceSha256.slice(12) === "0".repeat(52) ? "1".repeat(52) : "0".repeat(52)}`;
     const altered = { ...buildIdentity, sourceSha256 };
     altered.buildId = createHash("sha256").update(JSON.stringify({ baseVersion: altered.baseVersion, sourceCommit: altered.sourceCommit, sourceSha256, dirty: altered.dirty, ...(altered.channel === "snapshot" ? { sourceDate: altered.softwareVersion.split("-SNAPSHOT.")[1].split(".")[0] } : {}) })).digest("hex");
     assert.equal(altered.softwareVersion, buildIdentity.softwareVersion);
     assert.equal(altered.sourceCommit, buildIdentity.sourceCommit);
     await writeFile(path.join(dist, "build-identity.json"), JSON.stringify(altered));
-    await assert.rejects(createExtensionZip({ root, buildIdentity }), { message: "EXTENSION_IDENTITY_MISMATCH" });
+    await assert.rejects(createExtensionZip({ root, buildIdentity, expectedDataset }), { message: "EXTENSION_IDENTITY_MISMATCH" });
   } finally { await cleanup(); }
+});
+
+test("formal and development package APIs reject mixed mode options", async () => {
+  const { root, cleanup } = await fixture();
+  try {
+    await assert.rejects(packageRelease({ repoRoot: root, apiPort: 18081 }), { message: "EXTENSION_PACKAGE_MODE_INVALID" });
+    await assert.rejects(packageDevelopment({ repoRoot: root, expectedDataset }), { message: "EXTENSION_PACKAGE_MODE_INVALID" });
+    await assert.rejects(createExtensionZip({ root, buildIdentity, apiPort: 18080 }), { message: "expected published dataset binding required" });
+  } finally { await cleanup(); }
+});
+
+test("CI calls only the explicit development preview package, checker and isolated CFT smoke modes", async () => {
+  const workflow = await readFile(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8");
+  assert.match(workflow, /package-extension-release\.mjs --development/u);
+  assert.match(workflow, /tmp\/ci-preview\/\$\{d\.softwareVersion\}\/\$\{d\.sourceCommit\}/u);
+  assert.match(workflow, /check-extension-archive\.mjs --development/u);
+  assert.match(workflow, /archive-smoke\.mjs --development/u);
+  assert.match(workflow, /actions\/upload-artifact/u);
 });
 
 test("rejects dirty Git input and safely reuses only byte-identical output", async () => {
@@ -124,7 +143,7 @@ test("rejects dirty Git input and safely reuses only byte-identical output", asy
   const { root, cleanup } = await fixture();
   const output = path.join(root, "out");
   try {
-    const a = await createExtensionZip({ root, buildIdentity });
+    const a = await createExtensionZip({ root, buildIdentity, expectedDataset });
     const checksum = `${a.descriptor.sha256}  ${a.descriptor.filename}\n`;
     await publishExtensionArchive(a.archive, checksum, output, a.descriptor.filename);
     const zip = path.join(output, a.descriptor.filename);
@@ -136,7 +155,7 @@ test("rejects dirty Git input and safely reuses only byte-identical output", asy
     await assert.rejects(publishExtensionArchive(a.archive, corruptedChecksum, output, a.descriptor.filename), /ARCHIVE_PUBLICATION_INVALID/u);
     await assert.rejects(publishExtensionArchive(a.archive, checksum, output, '../escape.zip'), /ARCHIVE_PUBLICATION_INVALID/u);
     await writeFile(path.join(root, "dist/popup.html"), '<link href="popup.css"><script src="popup.js"></script><!-- different -->');
-    const changed = await createExtensionZip({ root, buildIdentity });
+    const changed = await createExtensionZip({ root, buildIdentity, expectedDataset });
     await assert.rejects(publishExtensionArchive(changed.archive, `${changed.descriptor.sha256}  ${changed.descriptor.filename}\n`, output, changed.descriptor.filename), /different release artifact/u);
     assert.deepEqual(await readFile(zip), original);
     const sum = await readFile(`${zip}.sha256`, "utf8");
@@ -151,7 +170,7 @@ test("refuses a symlinked release output directory", async () => {
     const output = path.join(root, "releases");
     await mkdir(outside);
     await symlink(outside, output);
-    const artifact = await createExtensionZip({ root, buildIdentity });
+    const artifact = await createExtensionZip({ root, buildIdentity, expectedDataset });
     await assert.rejects(publishExtensionArchive(artifact.archive, `${artifact.descriptor.sha256}  ${artifact.descriptor.filename}\n`, output, artifact.descriptor.filename), /symlink/u);
   } finally { await cleanup(); }
 });
@@ -161,7 +180,7 @@ test("archive checker binds sidecar, full current identity, exact entries and lo
   const current = resolveBuildIdentity();
   const output = path.join(root, `lexiflow-extension-${current.softwareVersion}.zip`);
   try {
-    const built = await createExtensionZip({ root, buildIdentity: current });
+    const built = await createExtensionZip({ root, buildIdentity: current, expectedDataset });
     await writeFile(output, built.archive);
     await writeFile(`${output}.sha256`, `${built.descriptor.sha256}  ${path.basename(output)}\n`);
     const accepted = await checkExtensionArchive(output, current.sourceCommit);
@@ -179,7 +198,7 @@ test("archive checker rejects extra entries, missing resources and traversal nam
   const current = resolveBuildIdentity();
   const output = path.join(root, `lexiflow-extension-${current.softwareVersion}.zip`);
   try {
-    const built = await createExtensionZip({ root, buildIdentity: current });
+    const built = await createExtensionZip({ root, buildIdentity: current, expectedDataset });
     const original = built.unzip();
     for (const entries of [
       { ...original, "private.env": Buffer.from("synthetic secret") },
@@ -195,14 +214,50 @@ test("archive checker rejects extra entries, missing resources and traversal nam
   } finally { await cleanup(); }
 });
 
+test("archive checker requires an explicit preview mode and rejects formal-preview mixing", async () => {
+  const { root, dist, cleanup } = await fixture();
+  const current = resolveBuildIdentity();
+  const output = path.join(root, `lexiflow-extension-${current.softwareVersion}.zip`);
+  try {
+    const manifestPath = path.join(dist, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.host_permissions = ["http://127.0.0.1:18081/*"];
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    await rm(path.join(dist, "expected-dataset.json"));
+    const preview = await createExtensionZip({ root, buildIdentity: current, apiPort: 18081 });
+    await writeFile(output, preview.archive);
+    await writeFile(`${output}.sha256`, `${preview.descriptor.sha256}  ${path.basename(output)}\n`);
+    const checkedPreview = await checkExtensionArchive(output, current.sourceCommit, root,
+      { mode: "development", verifyCurrentIdentity: false });
+    assert.equal(checkedPreview.dataset, null);
+    assert.equal(checkedPreview.mode, "development");
+    await assert.rejects(checkExtensionArchive(output, current.sourceCommit, root,
+      { verifyCurrentIdentity: false }), { message: "ARCHIVE_FILE_SET_MISMATCH" });
+
+    manifest.host_permissions = ["http://127.0.0.1:18080/*"];
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    await writeFile(path.join(dist, "expected-dataset.json"), `${JSON.stringify(expectedDataset)}\n`);
+    const formal = await createExtensionZip({ root, buildIdentity: current, expectedDataset });
+    const formalPath = path.join(root, "formal", formal.descriptor.filename);
+    await mkdir(path.dirname(formalPath));
+    await writeFile(formalPath, formal.archive);
+    await writeFile(`${formalPath}.sha256`, `${formal.descriptor.sha256}  ${path.basename(formalPath)}\n`);
+    const checkedFormal = await checkExtensionArchive(formalPath, current.sourceCommit, root,
+      { verifyCurrentIdentity: false });
+    assert.deepEqual(checkedFormal.dataset, expectedDataset);
+    await assert.rejects(checkExtensionArchive(formalPath, current.sourceCommit, root,
+      { mode: "development", verifyCurrentIdentity: false }), { message: "ARCHIVE_MODE_MISMATCH" });
+  } finally { await cleanup(); }
+});
+
 test("rejects symlinked source ancestors, non-regular artifact targets, and unknown CLI args", async () => {
   const { root, cleanup } = await fixture();
   try {
     const alias = `${root}-alias`;
     await symlink(root, alias);
-    await assert.rejects(createExtensionZip({ root: alias, buildIdentity }), /symlink/u);
+    await assert.rejects(createExtensionZip({ root: alias, buildIdentity, expectedDataset }), /symlink/u);
     await rm(alias);
-    const artifact = await createExtensionZip({ root, buildIdentity });
+    const artifact = await createExtensionZip({ root, buildIdentity, expectedDataset });
     const output = path.join(root, "out");
     await mkdir(output);
     const outside = path.join(root, "external.zip");
@@ -218,7 +273,7 @@ test("rejects symlinked source ancestors, non-regular artifact targets, and unkn
     assert.equal(imported.status, 0, imported.stderr);
     const args = spawnSync(process.execPath, [new URL("../scripts/packaging/package-extension-release.mjs", import.meta.url).pathname, "--version"], { encoding: "utf8" });
     assert.notEqual(args.status, 0);
-    assert.match(args.stderr, /unexpected arguments/u);
+    assert.match(args.stderr, /expected --expected-dataset/u);
   } finally { await cleanup(); }
 });
 
@@ -241,7 +296,11 @@ test("clean release CLI rebuilds stale dist at port 18080 and emits only its JSO
     execFileSync("git", ["-C", repo, "add", "."]);
     execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "clean release fixture"]);
     const cli = path.join(extension, "scripts/packaging/package-extension-release.mjs");
-    const result = spawnSync(process.execPath, [cli], { cwd: repo, encoding: "utf8", env: { ...process.env, LEXIFLOW_API_PORT: "19876" } });
+    await assert.rejects(packageRelease({ repoRoot: repo }), /expected published dataset binding required/u);
+    const bindingFile = path.join(repo, "tmp/expected-dataset.json");
+    await mkdir(path.dirname(bindingFile), { recursive: true });
+    await writeFile(bindingFile, JSON.stringify(expectedDataset));
+    const result = spawnSync(process.execPath, [cli, "--expected-dataset", bindingFile], { cwd: repo, encoding: "utf8", env: { ...process.env, LEXIFLOW_API_PORT: "19876" } });
     assert.equal(result.status, 0, result.stderr);
     const descriptor = JSON.parse(result.stdout);
     assert.equal(descriptor.softwareVersion, "2.0.0");
@@ -253,5 +312,38 @@ test("clean release CLI rebuilds stale dist at port 18080 and emits only its JSO
     assert.equal((await readFile(path.join(output, `${descriptor.filename}.sha256`), "utf8")).trim(), `${descriptor.sha256}  ${descriptor.filename}`);
     assert.equal(await readFile(path.join(extension, "dist/stale.map")).then(() => true, () => false), false);
     assert.deepEqual(JSON.parse(await readFile(path.join(extension, "dist/manifest.json"), "utf8")).host_permissions, ["http://127.0.0.1:18080/*"]);
+
+    const preview = spawnSync(process.execPath, [cli, "--development"], { cwd: repo, encoding: "utf8",
+      env: { ...process.env, LEXIFLOW_API_PORT: "18080", LEXIFLOW_EXPECTED_DATASET: JSON.stringify(expectedDataset) } });
+    assert.equal(preview.status, 0, preview.stderr);
+    const previewDescriptor = JSON.parse(preview.stdout);
+    const previewZip = path.join(repo, "tmp/ci-preview", previewDescriptor.softwareVersion, previewDescriptor.sourceCommit, previewDescriptor.filename);
+    const previewArchive = await checkExtensionArchive(previewZip, previewDescriptor.sourceCommit, repo, { mode: "development" });
+    assert.equal(previewArchive.dataset, null);
+    assert.equal(previewArchive.buildIdentity.sourceCommit, previewDescriptor.sourceCommit);
+    assert.deepEqual(JSON.parse(await readFile(path.join(extension, "dist/manifest.json"), "utf8")).host_permissions, ["http://127.0.0.1:18081/*"]);
+    const formalZip = path.join(output, descriptor.filename);
+    await assert.rejects(checkExtensionArchive(previewZip, previewDescriptor.sourceCommit, repo), /ARCHIVE_FILE_SET_MISMATCH/u);
+    await assert.rejects(checkExtensionArchive(formalZip, descriptor.sourceCommit, repo, { mode: "development" }), /ARCHIVE_MODE_MISMATCH/u);
   } finally { await rm(repo, { recursive: true, force: true }); }
+});
+
+
+test("explicit development packaging uses 18081 without claiming a published dataset", async () => {
+  const { root, dist, cleanup } = await fixture();
+  try {
+    const manifestPath = path.join(dist, "manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.host_permissions = ["http://127.0.0.1:18081/*"];
+    await writeFile(manifestPath, JSON.stringify(manifest));
+    await rm(path.join(dist, "expected-dataset.json"));
+    const result = await createExtensionZip({ root, buildIdentity, apiPort: 18081 });
+    assert.equal(Object.hasOwn(result.unzip(), "expected-dataset.json"), false);
+    const { validateExtensionArchiveEntries } = await import("../scripts/packaging/extension-archive-contract.mjs");
+    const entries = new Map(Object.entries(result.unzip()).map(([name, bytes]) => [name, Buffer.from(bytes)]));
+    assert.equal(validateExtensionArchiveEntries(entries, { buildIdentity, apiPort: 18081 }).dataset, null);
+    assert.throws(() => validateExtensionArchiveEntries(entries, { buildIdentity, apiPort: 18080 }), /ARCHIVE_FILE_SET_MISMATCH/);
+    assert.throws(() => validateExtensionArchiveEntries(entries, { buildIdentity, apiPort: 18081, expectedDataset }), /ARCHIVE_FILE_SET_MISMATCH/);
+    await assert.rejects(createExtensionZip({ root, buildIdentity }), /expected published dataset binding required/);
+  } finally { await cleanup(); }
 });

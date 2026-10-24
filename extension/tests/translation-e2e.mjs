@@ -106,6 +106,9 @@ async function overlayState(page) {
 async function overlayText(page) {
   return page.locator("#lexiflow-caption-overlay").evaluate((host) => host.shadowRoot?.querySelector("span")?.textContent?.trim() ?? "");
 }
+async function overlayServiceStatus(page) {
+  return page.locator("#lexiflow-caption-overlay").evaluate((host) => host.shadowRoot?.querySelector(".service-status")?.textContent?.trim() ?? "");
+}
 
 async function waitForState(page, state) {
   await page.waitForFunction(
@@ -123,6 +126,16 @@ try {
   if (process.env.LEXIFLOW_LIVE_YOUTUBE_URL) throw new ApiResourceUnavailable("synthetic-e2e-refuses-live-url");
   await mkdir(resolve(repositoryRoot, "tmp/quality/e2e-runs"), { recursive: true });
   evidenceRoot = await mkdtemp(resolve(repositoryRoot, "tmp/quality/e2e-runs/run-"));
+  // Build a fresh, explicit development package after unit fixtures have finished.
+  // Never attach a synthetic published-dataset identity to the demo backend.
+  const developmentEnvironment = { ...process.env, LEXIFLOW_API_PORT: "18081" };
+  delete developmentEnvironment.LEXIFLOW_EXPECTED_DATASET;
+  const developmentBuild = spawnSync("npm", ["run", "build"], {
+    cwd: extensionRoot, env: developmentEnvironment, encoding: "utf8"
+  });
+  if (developmentBuild.error || developmentBuild.status !== 0) {
+    throw new Error(`Development extension build failed:\n${developmentBuild.stderr ?? ""}`);
+  }
   const javaHome = assertApiResources();
   apiPort = await freePort();
   apiBase = `http://127.0.0.1:${apiPort}`;
@@ -130,7 +143,7 @@ try {
   await waitForApi(api);
   userDataDir = await mkdtemp(resolve(tmpdir(), "lexiflow-extension-e2e-"));
   const testExtensionPath = resolve(userDataDir, "extension");
-  const packaged = await createExtensionZip({ root: extensionRoot, buildIdentity: resolveBuildIdentity(repositoryRoot) });
+  const packaged = await createExtensionZip({ root: extensionRoot, buildIdentity: resolveBuildIdentity(repositoryRoot), apiPort: 18081 });
   await mkdir(testExtensionPath, { recursive: true });
   for (const [name, bytes] of Object.entries(packaged.unzip())) {
     const target = resolve(testExtensionPath, name);
@@ -143,6 +156,7 @@ try {
   await writeFile(resolve(testExtensionPath, "manifest.json"), JSON.stringify(manifest));
   context = await chromium.launchPersistentContext(resolve(userDataDir, "profile"), {
     headless: false,
+    channel: "chromium",
     args: [`--disable-extensions-except=${testExtensionPath}`, `--load-extension=${testExtensionPath}`]
   });
   const serviceWorker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
@@ -163,6 +177,7 @@ try {
 
   await setCaption(page, "zxqv zxqv", 1);
   await waitForState(page, "no-pending");
+  assert.match(await overlayServiceStatus(page), /演示模式/u, "content must report the actual non-formal runtime mode");
   const initialCounts = JSON.parse(await page.locator("#lexiflow-caption-overlay").getAttribute("data-lexiflow-diagnostics"));
   assert.equal(initialCounts.counts.no_hint, 1);
   assert.equal(initialCounts.timings.endToEnd.count, 1);

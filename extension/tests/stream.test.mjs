@@ -160,6 +160,17 @@ test('synchronous transport failure waits for a caption change and timing has no
  assert.equal(scheduler.jobs.size,0);assert.equal(JSON.stringify(observations).includes('reliable'),false);assert.equal(COALESCE_MS,16);
 });
 
+test('content views distinguish service initialization and compatibility failures from generic outages',async()=>{
+ for (const [reason,expected] of [["runtime-initializing","initializing"],["runtime-incompatible","incompatible"],["network","unavailable"]]) {
+  const t=setup();t.coordinator.submit(event(1,segment('s1','English remains visible')));t.scheduler.run();
+  t.calls[0].resolve({ok:false,reason});await flush();
+  assert.equal(t.views.at(-1).state,'fallback');assert.equal(t.views.at(-1).runtimeFailure,expected);
+ }
+ const t=setup();t.coordinator.submit(event(1,segment('s1','ordinary English')));t.scheduler.run();
+ t.calls[0].resolve({ok:true,body:response(t.calls[0].event.request,[]),runtimeMode:'formal'});await flush();
+ assert.equal(t.views.at(-1).runtimeMode,'formal');
+});
+
 test('same entry at a new non-overlapping range is preserved across incremental replies',async()=>{
  const t=setup();t.coordinator.submit(event(1,segment('s1','reliable')));t.scheduler.run();await finish(t.calls[0],[keyedHint()]);
  t.coordinator.submit(event(2,segment('s1','reliable'),segment('s2',' reliable')));t.scheduler.run();await finish(t.calls[1],[keyedHint('s2',1,9)]);

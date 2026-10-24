@@ -3,10 +3,16 @@ import { resolveBuildIdentity } from "../../../ops/release/integrity/source-buil
 import { readFile, writeFile, mkdir, rm, cp } from "node:fs/promises";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
+import { validateExpectedDataset } from "./expected-dataset.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const dist = resolve(root, "dist");
 const apiPort = localApiPort(process.env.LEXIFLOW_API_PORT);
+let expectedDataset = null;
+if (process.env.LEXIFLOW_EXPECTED_DATASET !== undefined) {
+  try { expectedDataset = validateExpectedDataset(JSON.parse(process.env.LEXIFLOW_EXPECTED_DATASET)); }
+  catch (error) { throw new Error(`LEXIFLOW_EXPECTED_DATASET invalid: ${error.message}`); }
+}
 const identity = resolveBuildIdentity();
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
@@ -32,7 +38,7 @@ for (const [entry, format] of [
   const outfile = resolve(dist, entry.replace("src/", "").replace(".ts", ".js"));
   execFileSync(
     "npx",
-    ["esbuild", entry, "--bundle", `--format=${format}`, "--target=es2022", `--define:__LEXIFLOW_API_PORT__=${apiPort}`, `--outfile=${outfile}`],
+    ["esbuild", entry, "--bundle", `--format=${format}`, "--target=es2022", `--define:__LEXIFLOW_API_PORT__=${apiPort}`, `--define:__LEXIFLOW_EXPECTED_DATASET__=${JSON.stringify(JSON.stringify(expectedDataset))}`, `--outfile=${outfile}`],
     { cwd: root, stdio: "inherit" }
   );
 }
@@ -43,5 +49,6 @@ const manifest = JSON.parse(await readFile(resolve(root, "manifest.json"), "utf8
 manifest.version = identity.chromeVersion;
 manifest.version_name = identity.softwareVersion;
 await writeFile(resolve(dist, "build-identity.json"), JSON.stringify(identity, null, 2) + "\n");
+if (expectedDataset) await writeFile(resolve(dist, "expected-dataset.json"), JSON.stringify(expectedDataset) + "\n");
 manifest.host_permissions = [`http://127.0.0.1:${apiPort}/*`];
 await writeFile(resolve(dist, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");

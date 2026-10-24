@@ -24,7 +24,12 @@ async function stableRead(target, limit) {
 }
 
 /** Verify downloaded ZIP, adjacent checksum and current complete source identity. */
-export async function checkExtensionArchive(zipPath, expectedCommit, repoRoot = ROOT, { verifyCurrentIdentity = true } = {}) {
+export async function checkExtensionArchive(zipPath, expectedCommit, repoRoot = ROOT, options = {}) {
+  if (!options || typeof options !== 'object' || Array.isArray(options)
+      || Object.keys(options).some(key => !['mode', 'verifyCurrentIdentity'].includes(key))) fail('ARCHIVE_ARGUMENTS_INVALID');
+  const { mode = 'formal', verifyCurrentIdentity = true } = options;
+  if (!['formal', 'development'].includes(mode) || typeof verifyCurrentIdentity !== 'boolean') fail('ARCHIVE_ARGUMENTS_INVALID');
+  const apiPort = mode === 'development' ? 18081 : 18080;
   if (typeof zipPath !== 'string' || !zipPath || typeof expectedCommit !== 'string' || !/^[a-f0-9]{40,64}$/.test(expectedCommit)) fail('ARCHIVE_ARGUMENTS_INVALID');
   const target = path.resolve(zipPath);
   const bytes = await stableRead(target, 256 * 1024 * 1024);
@@ -41,16 +46,21 @@ export async function checkExtensionArchive(zipPath, expectedCommit, repoRoot = 
     if (expected.sourceCommit !== expectedCommit) fail('ARCHIVE_SOURCE_IDENTITY_MISMATCH');
   }
   const entries = await readExtensionFiles(target, sha256);
+  if (mode === 'development' && entries.has('expected-dataset.json')) fail('ARCHIVE_MODE_MISMATCH');
   const names = [...entries.keys()].sort();
-  const { manifest, identity } = validateExtensionArchiveEntries(entries, { buildIdentity: expected, apiPort: 18080, filename });
+  const expectedNames = mode === 'development'
+    ? EXTENSION_PACKAGE_FILES.filter(name => name !== 'expected-dataset.json') : EXTENSION_PACKAGE_FILES;
+  if (JSON.stringify(names) !== JSON.stringify([...expectedNames].sort())) fail('ARCHIVE_FILE_SET_MISMATCH');
+  const { manifest, identity, dataset } = validateExtensionArchiveEntries(entries, { buildIdentity: expected, apiPort, filename });
   if (identity.sourceCommit !== expectedCommit) fail('ARCHIVE_SOURCE_IDENTITY_MISMATCH');
-  if (JSON.stringify(names) !== JSON.stringify([...EXTENSION_PACKAGE_FILES].sort())) fail('ARCHIVE_FILE_SET_MISMATCH');
-  return { filename, sha256, bytes: bytes.length, buildIdentity: identity, entries };
+  return { filename, sha256, bytes: bytes.length, buildIdentity: identity, dataset, mode, entries };
 }
 
 function invokedDirectly() { try { return process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url); } catch { return false; } }
 if (invokedDirectly()) {
   const args = process.argv.slice(2);
-  if (args.length !== 2) { process.stderr.write('usage: node extension/scripts/checks/check-extension-archive.mjs <zip-path> <expected-commit>\n'); process.exitCode = 2; }
-  else checkExtensionArchive(args[0], args[1]).then(result => process.stdout.write(`${JSON.stringify({ filename: result.filename, sha256: result.sha256, bytes: result.bytes, buildIdentity: result.buildIdentity })}\n`)).catch(error => { process.stderr.write(`extension archive rejected: ${error.message}\n`); process.exitCode = 1; });
+  const development = args[0] === '--development';
+  const values = development ? args.slice(1) : args;
+  if (values.length !== 2) { process.stderr.write('usage: node extension/scripts/checks/check-extension-archive.mjs [--development] <zip-path> <expected-commit>\n'); process.exitCode = 2; }
+  else checkExtensionArchive(values[0], values[1], ROOT, { mode: development ? 'development' : 'formal' }).then(result => process.stdout.write(`${JSON.stringify({ filename: result.filename, sha256: result.sha256, bytes: result.bytes, buildIdentity: result.buildIdentity, mode: result.mode })}\n`)).catch(error => { process.stderr.write(`extension archive rejected: ${error.message}\n`); process.exitCode = 1; });
 }
