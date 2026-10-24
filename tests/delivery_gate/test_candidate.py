@@ -143,28 +143,22 @@ class CandidateChainTests(unittest.TestCase):
         }
         self.f.create_submission()
         submission = load_submission(self.f.root, self.f.submission_id)
+        dataset = {"releaseId": "release", "preparationId": "preparation", "ruleId": "rule", "sqlVersion": "v1", "sha256": "9" * 64}
+        api_identity = {"softwareVersion": self.identity["softwareVersion"], "apiContract": "caption-hints.v2", "mode": "formal", "datasetVersion": 1, "publishedDataset": dataset}
         self.runtime = {
-            "schemaVersion": "lexiflow.candidate-runtime.v1",
+            "schemaVersion": "lexiflow.candidate-runtime.v2",
             "status": "PASS",
-            "candidates": {
-                "previous": {
-                    **self.candidate,
-                    "candidateSha256": "1" * 64,
-                    "buildIdentity": {
-                        **self.identity,
-                        "buildId": "2" * 64,
-                        "sourceCommit": "3" * 40,
-                    },
-                },
-                "target": self.candidate,
-            },
+            "target": self.candidate,
             "identity": {"source": self.identity},
             "failure": None,
             "phases": [
                 {
                     "id": name,
                     "status": "PASS",
-                    "facts": {key: True for key in REQUIRED_FACTS[name]},
+                    "facts": {
+                        **{key: True for key in REQUIRED_FACTS[name]},
+                        **({"apiIdentity": api_identity, "extensionIdentity": dataset, "publishedDatasetIdentity": dataset} if name in {"target-clean-init", "target-repeat-run", "target-restart", "interrupted-init-retry"} else {}),
+                    },
                 }
                 for name in PHASE_IDS
             ],
@@ -174,10 +168,11 @@ class CandidateChainTests(unittest.TestCase):
                 "ownedResourcesRemoved": True,
             },
             "assertions": {
-                "sourceAndCandidatesUnchanged": True,
-                "realFaultProven": True,
-                "forwardRetrySucceeded": True,
-                "postgresVolumePreserved": True,
+                "targetOnly": True,
+                "realInitializationInterruption": True,
+                "sameVolumeRestart": True,
+                "realFailureObserved": True,
+                "unknownResourcesUntouched": True,
             },
         }
 
@@ -424,18 +419,12 @@ class CandidateChainTests(unittest.TestCase):
             lambda o: o.update(verify_input_fingerprint="0" * 64),
             lambda o: o.update(skipped=1),
             lambda o: o["runtime"]["phases"].pop(),
-            lambda o: o["runtime"]["phases"][7]["facts"].update(
-                targetApiStoppedOnce=False
-            ),
-            lambda o: o["runtime"]["phases"][7]["facts"].update(
-                databaseCommitFactRetained=False
-            ),
-            lambda o: o["runtime"]["phases"][10]["facts"].update(datasetSame=False),
-            lambda o: o["runtime"]["assertions"].update(realFaultProven=False),
+            lambda o: o["runtime"]["phases"][4]["facts"].update(initInterrupted=False),
+            lambda o: o["runtime"]["phases"][6]["facts"].update(postgresExitObserved=False),
+            lambda o: o["runtime"]["phases"][2]["facts"]["publishedDatasetIdentity"].update(sha256="8" * 64),
+            lambda o: o["runtime"]["assertions"].update(realFailureObserved=False),
             lambda o: o["runtime"]["cleanup"].update(settled=False),
-            lambda o: o["runtime"]["candidates"].update(
-                previous=o["runtime"]["candidates"]["target"]
-            ),
+            lambda o: o["runtime"]["target"].update(candidateSha256="bad"),
         ]
         for mutate in mutations:
             with self.subTest(mutation=mutate):

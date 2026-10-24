@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import socket
@@ -14,8 +13,7 @@ from typing import Any
 
 from scripts.acceptance.evidence.acceptance_record_store import RecordError, parse_json
 
-HANDOFF = "tmp/quality/release-workflow/handoff.json"
-RUNTIME = "tmp/quality/release-workflow/candidate-runtime-request.json"
+WORKFLOW_ROOT = "tmp/quality/release-workflow"
 MAX_JSON = 2_000_000
 MAX_LICENSE_TABLE = 256 * 1024
 MAX_ARTIFACT = 2**40
@@ -325,39 +323,23 @@ def _producer_build_identity(repo: Path, tag: str) -> dict[str, Any]:
     return identity
 
 
-def _validate_previous_identity(repo: Path, identity: dict[str, Any]) -> None:
-    """用现有身份协议验证 previous marker 的自洽身份，不扫描其历史源码或制品。"""
-    script = repo / "ops/release/integrity/source-build-identity.mjs"
-    program = (
-        'import { readFileSync } from "node:fs"; '
-        'import { pathToFileURL } from "node:url"; '
-        "const module = await import(pathToFileURL(process.argv[1])); "
-        'module.validateBuildIdentity(JSON.parse(readFileSync(0, "utf8")));'
-    )
-    try:
-        result = subprocess.run(
-            ["node", "--input-type=module", "-e", program, str(script)],
-            cwd=repo,
-            input=json.dumps(identity, separators=(",", ":")),
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        raise RecordError(
-            "release-candidate-identity-unavailable", "identity validator unavailable"
-        ) from None
-    if result.returncode:
-        raise RecordError(
-            "release-candidate-identity-invalid", "previous build identity is invalid"
-        )
-
-
 def read_release_subject(repo: Path, *, verify_identity: bool = True) -> dict[str, Any]:
     """读取固定 handoff，派生发行主体并核验源码、请求与候选绑定。"""
     repo = repo.resolve()
-    raw, handoff_sha = _read_relative(repo, HANDOFF)
+    version_path, _ = _read_relative(repo, "ops/release/version.txt", limit=64)
+    version = version_path.decode("utf-8").strip()
+    if (
+        not re.fullmatch(
+            r"(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})",
+            version,
+        )
+        or version == "0.0.0"
+    ):
+        raise RecordError("release-version-invalid", "version file invalid")
+    workflow = f"{WORKFLOW_ROOT}/{version}"
+    handoff_locator = f"{workflow}/handoff.json"
+    runtime_locator = f"{workflow}/candidate-runtime-request.json"
+    raw, handoff_sha = _read_relative(repo, handoff_locator)
     try:
         handoff = parse_json(raw, "release handoff")
     except RecordError:
@@ -371,7 +353,6 @@ def read_release_subject(repo: Path, *, verify_identity: bool = True) -> dict[st
         "requestSha256",
         "runtimeRequestSha256",
         "requestFile",
-        "previous",
         "target",
     }
     if (
@@ -411,7 +392,7 @@ def read_release_subject(repo: Path, *, verify_identity: bool = True) -> dict[st
             "release-build-identity-drift", "identity differs from current source proof"
         )
 
-    runtime_bytes, runtime_sha = _read_relative(repo, RUNTIME)
+    runtime_bytes, runtime_sha = _read_relative(repo, runtime_locator)
     if runtime_sha != handoff["runtimeRequestSha256"]:
         raise RecordError("release-runtime-drift", "runtime request digest mismatch")
     try:
@@ -420,8 +401,8 @@ def read_release_subject(repo: Path, *, verify_identity: bool = True) -> dict[st
         raise RecordError(
             "release-runtime-invalid", "invalid runtime request"
         ) from None
-    if runtime != {"previous": handoff["previous"], "target": handoff["target"]}:
-        raise RecordError("release-runtime-drift", "candidate pair mismatch")
+    if runtime != {"target": handoff["target"]}:
+        raise RecordError("release-runtime-drift", "candidate target mismatch")
 
     request_path = handoff["requestFile"]
     if not isinstance(request_path, str):
@@ -438,7 +419,6 @@ def read_release_subject(repo: Path, *, verify_identity: bool = True) -> dict[st
         "dataset",
         "noticesRoot",
         "outputParent",
-        "previous",
         "endpoint",
     }
     dataset_keys = {
@@ -451,16 +431,12 @@ def read_release_subject(repo: Path, *, verify_identity: bool = True) -> dict[st
     }
     candidate_keys = {"candidateDirectory", "candidateSha256"}
     dataset = request.get("dataset") if isinstance(request, dict) else None
-    previous = handoff["previous"]
     if (
         not isinstance(request, dict)
         or set(request) != request_keys
         or not isinstance(dataset, dict)
         or set(dataset) != dataset_keys
-        or not isinstance(previous, dict)
-        or set(previous) != candidate_keys
         or request.get("releaseTag") != tag
-        or request.get("previous") != previous
         or not all(
             isinstance(request.get(field), str)
             for field in ("noticesRoot", "outputParent", "endpoint")
@@ -471,7 +447,7 @@ def read_release_subject(repo: Path, *, verify_identity: bool = True) -> dict[st
     source_bindings = _validate_source_bindings(repo, request)
 
     candidates: dict[str, dict[str, Any]] = {}
-    for label in ("previous", "target"):
+    for label in ("target",):
         candidate = handoff[label]
         if (
             not isinstance(candidate, dict)
@@ -511,23 +487,15 @@ def read_release_subject(repo: Path, *, verify_identity: bool = True) -> dict[st
             "candidate_sha256": marker_sha,
             "build_identity": build,
         }
-    previous_build = candidates["previous"]["build_identity"]
     target_build = candidates["target"]["build_identity"]
-    _validate_previous_identity(repo, previous_build)
-    if (
-        candidates["previous"]["candidate_sha256"]
-        == candidates["target"]["candidate_sha256"]
-        or previous_build["sourceCommit"] == commit
-        or previous_build["buildId"] == target_build["buildId"]
-        or target_build != identity
-    ):
+    if target_build != identity:
         raise RecordError(
             "release-candidate-mismatch",
-            "candidate identities are not the expected pair",
+            "candidate identity is not the expected target",
         )
     return {
         "schema_version": "lexiflow.release-subject.v2",
-        "handoff": {"locator": HANDOFF, "sha256": handoff_sha},
+        "handoff": {"locator": handoff_locator, "sha256": handoff_sha},
         "release_tag": tag,
         "commit_sha": commit,
         "build_identity": identity,

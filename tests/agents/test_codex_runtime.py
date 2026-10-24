@@ -20,6 +20,8 @@ class NativeCodexRuntimeTest(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve() / "repo"
         self.root.mkdir()
+        import subprocess
+        subprocess.run(["git", "init", str(self.root)], check=True, capture_output=True)
         self.home = self.root.parent / "codex"
         self.sessions = self.home / "sessions"
         self.sessions.mkdir(parents=True)
@@ -114,7 +116,7 @@ class NativeCodexRuntimeTest(unittest.TestCase):
         with patch.dict(os.environ, {"CODEX_THREAD_ID": other["id"]}):
             self.assertNotEqual(discover(self.root).context["actor_id"], child_actor)
 
-    def test_unrelated_session_parent_and_workspace_fail(self):
+    def test_unrelated_session_parent_fails_but_native_cwd_is_not_target(self):
         with (
             patch.dict(os.environ, {"CODEX_SESSION_ID": str(uuid.uuid4())}),
             self.assertRaisesRegex(CodexRuntimeError, "runtime-route-conflict"),
@@ -124,8 +126,22 @@ class NativeCodexRuntimeTest(unittest.TestCase):
         with self.assertRaisesRegex(CodexRuntimeError, "runtime-identity-drift"):
             discover(self.root)
         self.write({**self.child_meta, "cwd": str(self.root.parent)})
-        with self.assertRaisesRegex(CodexRuntimeError, "runtime-workspace-mismatch"):
-            discover(self.root)
+        runtime = discover(self.root)
+        verify_proof(self.root, runtime.proof, runtime.context)
+
+    def test_execution_target_must_be_canonical_git_root_and_proof_is_target_bound(self):
+        other = self.root.parent / "other"
+        other.mkdir()
+        import subprocess
+        subprocess.run(["git", "init", str(other)], check=True, capture_output=True)
+        runtime = discover(self.root)
+        self.assertEqual(discover(other).context, runtime.context)
+        with self.assertRaisesRegex(CodexRuntimeError, "runtime-proof-drift"):
+            verify_proof(other, runtime.proof, runtime.context)
+        nested = self.root / "nested"
+        nested.mkdir()
+        with self.assertRaisesRegex(CodexRuntimeError, "runtime-target-mismatch"):
+            discover(nested)
 
     def test_missing_parent_blocks_and_changed_parent_invalidates_proof(self):
         runtime = discover(self.root)

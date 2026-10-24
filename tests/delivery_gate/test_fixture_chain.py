@@ -83,7 +83,7 @@ class TestActualFourScenarioChain(unittest.TestCase):
                 "PASS",
             )
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_daily_report_submit_validate_review_check(self, m):
         m.return_value = make_mock_runtime(PRODUCER_SESSION)
         sub = submit(
@@ -109,7 +109,7 @@ class TestActualFourScenarioChain(unittest.TestCase):
             "PASS",
         )
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_public_cli(self, m):
         from scripts.acceptance.__main__ import main
 

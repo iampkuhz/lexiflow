@@ -110,7 +110,7 @@ def make_mock_runtime(session_id: str) -> MockRuntime:
 def mock_authority(session_id: str):
     return {
         "trust_boundary": "trusted-local-user-not-platform-cryptographic-attestation",
-        "verifier": "scripts.agents.identity.codex_actor_identity.discover",
+        "verifier": "scripts.agents.identity.execution_identity.discover",
         "verified_at": "2026-09-21T00:00:00Z",
     }
 

@@ -81,7 +81,7 @@ class RetiredProducerTests(unittest.TestCase):
         before = path.read_bytes()
         with (
             patch(
-                "scripts.agents.identity.codex_actor_identity.discover",
+                "scripts.agents.identity.execution_identity.discover",
                 return_value=make_mock_runtime(PRODUCER_SESSION),
             ),
             self.assertRaisesRegex(SubmissionError, "producer-run-unavailable"),
@@ -103,7 +103,7 @@ class RetiredProducerTests(unittest.TestCase):
         self._retire_submission(sub)
         with (
             patch(
-                "scripts.agents.identity.codex_actor_identity.discover",
+                "scripts.agents.identity.execution_identity.discover",
                 return_value=make_mock_runtime(VALIDATOR_SESSION),
             ),
             patch("scripts.acceptance.task_operations.run_independent_task_validation.verify_profiles") as execution,

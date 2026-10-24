@@ -74,9 +74,6 @@ class TestReleaseSubject(unittest.TestCase):
             "ops/release/distribution-licenses.json",
         )
         self._git("commit", "-qm", "fixture")
-        self.previous_commit = self._git("rev-parse", "HEAD")
-        self._git("tag", "v1.2.2")
-        previous_identity = self._identity("v1.2.2")
         (self.root / "ops/release/version.txt").write_text("1.2.3\n")
         (self.root / "source.txt").write_text("fixture target\n")
         self._git("add", "ops/release/version.txt", "source.txt")
@@ -86,9 +83,6 @@ class TestReleaseSubject(unittest.TestCase):
         identity = self._identity("v1.2.3")
         self.candidates = (Path(self.temp.name) / "candidates").resolve()
         self.candidates.mkdir()
-        self.previous = self._candidate(
-            "previous", previous_identity, self.previous_commit
-        )
         self.target = self._candidate("target", identity, self.commit)
         self.request_file = (Path(self.temp.name) / "request.json").resolve()
         self.request = {
@@ -103,14 +97,13 @@ class TestReleaseSubject(unittest.TestCase):
             },
             "noticesRoot": str(self.notices_root.resolve()),
             "outputParent": "/fixture/output",
-            "previous": self.previous,
             "endpoint": "unix:///tmp/podman.sock",
         }
         self._write_json(self.request_file, self.request)
         self.runtime_file = (
-            self.root / "tmp/quality/release-workflow/candidate-runtime-request.json"
+            self.root / "tmp/quality/release-workflow/1.2.3/candidate-runtime-request.json"
         )
-        self.runtime = {"previous": self.previous, "target": self.target}
+        self.runtime = {"target": self.target}
         self._write_json(self.runtime_file, self.runtime)
         self.handoff = {
             "schemaVersion": 1,
@@ -121,10 +114,9 @@ class TestReleaseSubject(unittest.TestCase):
             "requestSha256": self._sha(self.request_file.read_bytes()),
             "runtimeRequestSha256": self._sha(self.runtime_file.read_bytes()),
             "requestFile": str(self.request_file),
-            "previous": self.previous,
             "target": self.target,
         }
-        self.handoff_file = self.root / "tmp/quality/release-workflow/handoff.json"
+        self.handoff_file = self.root / "tmp/quality/release-workflow/1.2.3/handoff.json"
         self._write_json(self.handoff_file, self.handoff)
 
     def tearDown(self):
@@ -180,7 +172,7 @@ class TestReleaseSubject(unittest.TestCase):
         marker_path = self.candidates / "target/candidate.json"
         self._write_json(marker_path, {"buildIdentity": identity})
         self.target["candidateSha256"] = self._sha(marker_path.read_bytes())
-        self.runtime = {"previous": self.previous, "target": self.target}
+        self.runtime = {"target": self.target}
         self._write_json(self.runtime_file, self.runtime)
         self.handoff.update(
             {
@@ -198,6 +190,16 @@ class TestReleaseSubject(unittest.TestCase):
         self.assertEqual(
             subject["target"]["candidate_sha256"], self.target["candidateSha256"]
         )
+
+    def test_historical_version_workflow_residue_is_preserved_and_ignored(self):
+        residue = self.root / "tmp/quality/release-workflow/1.2.2/old.json"
+        residue.parent.mkdir(parents=True)
+        residue.write_text("keep")
+        subject = read_release_subject(self.root)
+        self.assertEqual(subject["target"]["candidate_sha256"], self.target["candidateSha256"])
+        residue.write_text("historical change")
+        self.assertEqual(read_release_subject(self.root), subject)
+        self.assertEqual(residue.read_text(), "historical change")
 
     def test_request_runtime_or_target_marker_drift_is_rejected(self):
         self.request_file.write_text("{}")
@@ -360,7 +362,7 @@ class TestReleaseSubject(unittest.TestCase):
         with self.assertRaises(RecordError):
             read_release_subject(self.root)
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_real_catalog_formal_task_can_submit_without_diff(self, discover):
         discover.return_value = make_mock_runtime(PRODUCER_SESSION)
         task = {
@@ -423,9 +425,8 @@ class TestReleaseSubject(unittest.TestCase):
         target_marker = self.candidates / "target/candidate.json"
         self._write_json(target_marker, {"buildIdentity": identity})
         self.target["candidateSha256"] = self._sha(target_marker.read_bytes())
-        self.request["previous"] = self.previous
         self._write_json(self.request_file, self.request)
-        self.runtime = {"previous": self.previous, "target": self.target}
+        self.runtime = {"target": self.target}
         self._write_json(self.runtime_file, self.runtime)
         self.handoff.update(
             {
@@ -433,7 +434,6 @@ class TestReleaseSubject(unittest.TestCase):
                 "buildIdentity": identity,
                 "requestSha256": self._sha(self.request_file.read_bytes()),
                 "runtimeRequestSha256": self._sha(self.runtime_file.read_bytes()),
-                "previous": self.previous,
                 "target": self.target,
             }
         )

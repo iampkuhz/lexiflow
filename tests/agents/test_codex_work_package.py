@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 import uuid
@@ -25,6 +26,7 @@ class CodexWorkPackagePublisherTest(unittest.TestCase):
         runtime_root = Path.cwd() / "tmp/quality/codex-work-packages"
         runtime_root.mkdir(parents=True, exist_ok=True)
         self.repo = Path(tempfile.mkdtemp(prefix="codex-publisher-", dir=runtime_root))
+        subprocess.run(["git", "init", str(self.repo)], check=True, capture_output=True)
         (self.repo / "tmp/quality/codex-work-packages").mkdir(parents=True)
         self.run_id = str(uuid.uuid4())
         self.parent_id, self.child_id = str(uuid.uuid4()), str(uuid.uuid4())

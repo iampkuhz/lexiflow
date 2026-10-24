@@ -42,7 +42,7 @@ class TestReview(unittest.TestCase):
     def tearDown(self):
         self.f.cleanup()
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_producer_and_validator_cannot_review(self, m):
         for session, expected in (
             (PRODUCER_SESSION, "self-review-forbidden"),
@@ -64,7 +64,7 @@ class TestReview(unittest.TestCase):
                 )
             self.assertEqual(c.exception.code, expected)
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_missing_opinion_rejected_and_fail_derived_from_findings(self, m):
         m.return_value = make_mock_runtime(REVIEWER_SESSION)
         with self.assertRaises(ReviewError):
@@ -83,7 +83,7 @@ class TestReview(unittest.TestCase):
         )
         self.assertEqual(result["result"], "FAIL")
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_unmodified_baseline_input_drift_after_validation_blocks_review_without_rerun(
         self, m
     ):
@@ -115,7 +115,7 @@ class TestAuthorityFreshness(unittest.TestCase):
     def tearDown(self):
         self.f.cleanup()
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_caller_fabricated_expiry_is_not_a_valid_authority_contract(self, m):
         import json
 

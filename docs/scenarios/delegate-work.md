@@ -2,7 +2,7 @@
 
 > 上级：[仓库生命周期](../README.md)。Agent 协作是实现或独立验证的组织方式，不是额外交付阶段；先明确工作包，再决定是否需要委派。
 
-**新派发使用原生 Codex 协作。** 策略真源为 [agent-policy](../../harness/agent-policy.md) 的相关协作规则与 `codex_model_policy`；本页只解释实际交接。
+**新派发使用当前运行时支持的原生 Agent 协作。** 当前已实现的原生适配器为 Codex；共享身份与目标合同不依赖客户端名称。策略真源为 [agent-policy](../../harness/agent-policy.md) 的相关协作规则与 `codex_model_policy`；本页只解释实际交接。
 
 ## 1.1. 先看派发到集成
 
@@ -97,5 +97,7 @@ endlegend
 ## 1.4. 原生独立验收
 
 验证／审查使用当前父任务下不同的真实原生子代理，不伪造 actor；共享宿主 Session 不等于同一执行者。内部协作不使用 `create_thread`，不保留新聊天兜底例外。
+
+多 checkout 的执行以实际目标仓库为准，不以聊天所属项目或启动目录代替。先核对入口所属代码和 `repository_root`，再在该目标创建或消费记录；身份、目标与精确提交／候选的责任见 [真实身份与回调](../../harness/agent-policy.md#真实身份与回调)。执行目标变化不是 actor 变化，不能用于绕过独立性检查。
 
 失败定位回到[排障](../reference/troubleshooting.md)；文件维护查 [Scripts](../reference/scripts.md)。

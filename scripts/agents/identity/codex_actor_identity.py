@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import stat
+import subprocess
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -68,7 +69,7 @@ def _owned_path(path: Path, source_root: Path) -> None:
         )
 
 
-def _metadata(repo_root: Path, session_id: str) -> tuple[dict[str, Any], str]:
+def _metadata(session_id: str) -> tuple[dict[str, Any], str]:
     candidates = []
     home = _home()
     for name in ("sessions", "archived_sessions"):
@@ -118,11 +119,11 @@ def _metadata(repo_root: Path, session_id: str) -> tuple[dict[str, Any], str]:
         raise CodexRuntimeError(
             "runtime-identity-drift", "metadata does not match session route"
         )
+    # cwd is a native provenance fact, not the execution target. A session may
+    # legitimately operate on another checkout; retain it in the metadata hash.
     cwd = meta.get("cwd")
-    if not isinstance(cwd, str) or Path(cwd).resolve() != repo_root:
-        raise CodexRuntimeError(
-            "runtime-workspace-mismatch", "session belongs to another workspace"
-        )
+    if not isinstance(cwd, str) or not cwd:
+        raise CodexRuntimeError("runtime-source-invalid", "session cwd is missing")
     if not isinstance(meta.get("originator"), str) or not meta["originator"]:
         raise CodexRuntimeError(
             "runtime-source-invalid", "session originator is missing"
@@ -139,7 +140,7 @@ def _native_runtime(
         raise CodexRuntimeError(
             "runtime-source-invalid", "cyclic or excessive ancestry"
         )
-    meta, digest = _metadata(root, thread_id)
+    meta, digest = _metadata(thread_id)
     session_id = _session_id(meta.get("session_id", thread_id))
     source = meta.get("source")
     kind = meta.get("thread_source", "user")
@@ -204,9 +205,32 @@ class LocalCodexRuntime:
     proof: dict[str, Any]
 
 
-def discover(repo_root: str | Path) -> LocalCodexRuntime:
+def _canonical_repository_root(execution_target: str | Path) -> Path:
+    root = Path(execution_target).resolve()
+    try:
+        actual = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        raise CodexRuntimeError(
+            "runtime-target-invalid",
+            "execution target is not a readable git repository",
+        ) from None
+    canonical = Path(actual).resolve()
+    if canonical != root:
+        raise CodexRuntimeError(
+            "runtime-target-mismatch", "execution target must be the canonical git root"
+        )
+    return canonical
+
+
+def discover(execution_target: str | Path) -> LocalCodexRuntime:
     """从当前原生 thread 推导 actor；环境变量只定位来源，不要求独立 Session。"""
-    root = Path(repo_root).resolve()
+    root = _canonical_repository_root(execution_target)
     thread = os.environ.get("CODEX_THREAD_ID")
     session = os.environ.get("CODEX_SESSION_ID")
     if not thread:
@@ -232,7 +256,9 @@ def discover(repo_root: str | Path) -> LocalCodexRuntime:
     )
 
 
-def verify_proof(repo_root: str | Path, proof: Any, context: dict[str, Any]) -> None:
+def verify_proof(
+    execution_target: str | Path, proof: Any, context: dict[str, Any]
+) -> None:
     """消费历史证明时重读原 session 来源，不要求它仍是当前 session。"""
     fields = {"schema_version", "thread_id", "workspace", "sources"}
     if (
@@ -243,7 +269,7 @@ def verify_proof(repo_root: str | Path, proof: Any, context: dict[str, Any]) -> 
         raise CodexRuntimeError(
             "runtime-proof-invalid", "local proof fields are invalid"
         )
-    root = Path(repo_root).resolve()
+    root = _canonical_repository_root(execution_target)
     expected, sources = _native_runtime(root, _session_id(proof["thread_id"]))
     if proof["workspace"] != str(root) or proof["sources"] != sources:
         raise CodexRuntimeError("runtime-proof-drift", "local metadata source changed")

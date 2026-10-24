@@ -55,7 +55,7 @@ class SourceSnapshotTest(unittest.TestCase):
     ):
         self.f.create_verification_report()
         with patch(
-            "scripts.agents.identity.codex_actor_identity.discover",
+            "scripts.agents.identity.execution_identity.discover",
             return_value=make_mock_runtime(PRODUCER_SESSION),
         ):
             created = submit(
