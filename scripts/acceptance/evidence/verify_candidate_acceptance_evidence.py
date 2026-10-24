@@ -325,8 +325,11 @@ def _prove_candidate(
 ) -> tuple[dict[str, Any], bytes, dict[str, Any]]:
     """同一 Gate 读取窗口内验证一次带完整前后稳定性证明的候选。"""
     value, stdout, descriptor = _extract(repo, proof)
-    target = value["candidates"]["target"]
-    expected = {"candidateDirectory": str(candidate), **target}
+    target = value["target"]
+    expected = {
+        "candidateDirectory": str(candidate),
+        "candidateSha256": target["candidateSha256"],
+    }
     node = _node_proof(repo, expected)
     if node != target:
         raise CandidateProofError("candidate-integrity-binding-invalid")
@@ -345,7 +348,7 @@ def _recheck_candidate(
     value, _stdout, descriptor = final
     return {
         "candidate_runtime_stdout": descriptor,
-        "candidate": value["candidates"]["target"],
+        "candidate": value["target"],
     }
 
 

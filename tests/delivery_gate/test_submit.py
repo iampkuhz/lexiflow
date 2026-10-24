@@ -26,7 +26,7 @@ class TestSubmit(unittest.TestCase):
     def tearDown(self):
         self.f.cleanup()
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_binds_report_scope_catalog_and_full_freeze(self, m):
         m.return_value = make_mock_runtime(PRODUCER_SESSION)
         r = submit(
@@ -41,7 +41,7 @@ class TestSubmit(unittest.TestCase):
         self.assertIn("fixture.baseline", v["verification_freeze"]["input_snapshots"])
         self.assertIn("fixture.change", v["verification_freeze"]["input_snapshots"])
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_scope_confirmation_is_not_an_input_and_unknown_task_fails(self, m):
         m.return_value = make_mock_runtime(PRODUCER_SESSION)
         with self.assertRaises(TypeError):
@@ -59,7 +59,7 @@ class TestSubmit(unittest.TestCase):
             )
         self.assertEqual(c.exception.code, "task-not-found")
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_non_formal_task_cannot_borrow_release_mode(self, m):
         m.return_value = make_mock_runtime(PRODUCER_SESSION)
         with self.assertRaises(SubmissionError) as c:
@@ -76,7 +76,7 @@ class TestSubmit(unittest.TestCase):
             )
         self.assertEqual(c.exception.code, "submit-mode-conflict")
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_manually_written_minimal_pass_report_is_not_a_submission_source(self, m):
         m.return_value = make_mock_runtime(PRODUCER_SESSION)
         rid = str(uuid.uuid4())
@@ -100,7 +100,7 @@ class TestSubmit(unittest.TestCase):
             submit(self.f.root, task_id="LF-TSK-TEST-0001", change_report_id=rid)
         self.assertEqual(c.exception.code, "submission-invalid")
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_daily_report_must_cover_entire_real_diff_including_untracked(self, m):
         m.return_value = make_mock_runtime(PRODUCER_SESSION)
         self.f.write("other-task/untracked.py", "different task")

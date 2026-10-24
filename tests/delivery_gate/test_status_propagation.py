@@ -70,7 +70,7 @@ class StatusPropagationTest(unittest.TestCase):
             change_report_id=fixture.report_id,
         )
         with patch(
-            "scripts.agents.identity.codex_actor_identity.discover",
+            "scripts.agents.identity.execution_identity.discover",
             return_value=make_mock_runtime(PRODUCER_SESSION),
         ):
             for status, exit_code in (("BLOCKED", 2), ("FAIL", 1)):

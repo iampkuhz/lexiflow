@@ -292,7 +292,7 @@ class TestDerivedReviewBinding(unittest.TestCase):
         self.fixture.create_submission()
         self.fixture.create_validation()
         self.runtime = patch(
-            "scripts.agents.identity.codex_actor_identity.discover",
+            "scripts.agents.identity.execution_identity.discover",
             return_value=make_mock_runtime(REVIEWER_SESSION),
         )
         self.runtime.start()

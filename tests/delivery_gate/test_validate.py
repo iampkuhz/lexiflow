@@ -39,14 +39,14 @@ class TestValidate(unittest.TestCase):
     def tearDown(self):
         self.f.cleanup()
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_self_validation_rejected(self, m):
         m.return_value = make_mock_runtime(PRODUCER_SESSION)
         with self.assertRaises(ValidationError) as c:
             validate_batch(self.f.root, submission_ids=[self.f.submission_id])[0]
         self.assertEqual(c.exception.code, "self-validation-forbidden")
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_unmodified_full_input_drift_rejected(self, m):
         self.f.write("protected.py", "after\n")
         m.return_value = make_mock_runtime(VALIDATOR_SESSION)

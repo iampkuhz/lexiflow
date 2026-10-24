@@ -82,7 +82,7 @@ class ValidateBatchTests(unittest.TestCase):
                 with self.subTest(ids=ids), self.assertRaisesRegex(ValidationError, "submission-batch-invalid"):
                     validate_batch(self.fixture.root, submission_ids=ids)
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_one_non_independent_submission_blocks_entire_batch_before_checks(
         self, discover
     ):
@@ -138,7 +138,7 @@ class ValidateBatchTests(unittest.TestCase):
             {"verification_report": descriptor, "result": "BLOCKED", "gaps": []},
         )
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_first_failed_profile_stops_remaining_task_without_pass(self, discover):
         first, second = self._submissions(2)
         discover.return_value = make_mock_runtime(VALIDATOR_SESSION)
@@ -186,7 +186,7 @@ class ValidateBatchTests(unittest.TestCase):
             )
         )
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_subject_drift_between_tasks_blocks_later_execution_and_pass(
         self, discover
     ):
@@ -260,7 +260,7 @@ class ValidateBatchTests(unittest.TestCase):
             )
         )
 
-    @patch("scripts.agents.identity.codex_actor_identity.discover")
+    @patch("scripts.agents.identity.execution_identity.discover")
     def test_two_submissions_get_distinct_records_and_repeat_is_rejected(
         self, discover
     ):

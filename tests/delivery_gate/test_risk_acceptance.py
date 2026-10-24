@@ -83,7 +83,7 @@ class RiskAcceptanceTest(unittest.TestCase):
         self.assertEqual("PASS", report["result"], report)
         persist_report(self.f.root, report)
         with patch(
-            "scripts.agents.identity.codex_actor_identity.discover",
+            "scripts.agents.identity.execution_identity.discover",
             return_value=make_mock_runtime(PRODUCER_SESSION),
         ):
             result = submit(
@@ -102,13 +102,13 @@ class RiskAcceptanceTest(unittest.TestCase):
             ["TASK_VALIDATION"], submission["acceptance_plan"]["required_layers"]
         )
         with patch(
-            "scripts.agents.identity.codex_actor_identity.discover",
+            "scripts.agents.identity.execution_identity.discover",
             return_value=make_mock_runtime(PRODUCER_SESSION),
         ):
             with self.assertRaisesRegex(ValidationError, "self-validation-forbidden"):
                 validate_batch(self.f.root, submission_ids=[sid])[0]
         with patch(
-            "scripts.agents.identity.codex_actor_identity.discover",
+            "scripts.agents.identity.execution_identity.discover",
             return_value=make_mock_runtime(VALIDATOR_SESSION),
         ):
             validation = validate_batch(self.f.root, submission_ids=[sid])[0]
@@ -135,7 +135,7 @@ class RiskAcceptanceTest(unittest.TestCase):
         sid = self._submit()
         self.f.write("unrelated.txt", "not part of frozen dependency closure\n")
         with patch(
-            "scripts.agents.identity.codex_actor_identity.discover",
+            "scripts.agents.identity.execution_identity.discover",
             return_value=make_mock_runtime(VALIDATOR_SESSION),
         ):
             validation = validate_batch(self.f.root, submission_ids=[sid])[0]
@@ -170,7 +170,7 @@ class RiskAcceptanceTest(unittest.TestCase):
             {item["check_id"] for item in submission["verification_freeze"]["checks"]},
         )
         with patch(
-            "scripts.agents.identity.codex_actor_identity.discover",
+            "scripts.agents.identity.execution_identity.discover",
             return_value=make_mock_runtime(VALIDATOR_SESSION),
         ):
             validation = validate_batch(self.f.root, submission_ids=[sid])[0]

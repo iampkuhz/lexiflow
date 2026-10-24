@@ -1,6 +1,6 @@
 # Agent 协作规则
 
-本页面向父代理、实现者、验证者与审查者；开始任务先遵守 [AGENTS.md](../AGENTS.md)，按 [Harness 导航](README.md) 只加载本任务相关规则。Session 生命周期与 checkout 由客户端管理，读写不要求统一仓库状态。隐私与 Git 授权边界不因委派、失败恢复或验收而放宽。
+本页面向父代理、实现者、验证者与审查者；开始任务先遵守 [AGENTS.md](../AGENTS.md)，按 [Harness 导航](README.md) 只加载本任务相关规则。Session 生命周期由客户端管理，执行目标由实际入口和明确仓库根定位；读写不要求统一仓库状态。隐私与 Git 授权边界不因委派、失败恢复或验收而放宽。
 
 ## 工作范围与分解
 
@@ -39,6 +39,12 @@ spawn 与 followup 都由父代理在当前聊天正文说明；工具输出、�
 ## 真实身份与回调
 
 身份由现有原生 metadata 和 route 认证，调用者不得注入 runner 身份，也不能按日志或 PID 猜测身份。actor 跨 run 稳定，共享 host session 的不同原生 thread 可独立；本机信任不等于平台密码学证明。来源缺失 BLOCKED，伪造或冲突 FAIL；消费历史证据须重读真实来源。
+
+执行身份与执行目标是两个独立维度。`repository_root` 表示本次操作的实际仓库根，须核验 canonical 路径与 Git 根；不从项目显示名、文件夹名字、UI 选中状态或 Session 启动目录推断。一个 Session 可在已授权的多个 checkout 上执行；启动目录只是原生来源事实，不要求等于目标。目标绑定不授予文件访问、Git 或发布权限，权限仍由宿主和用户授权约束。
+
+工作包、验收及消费必须绑定目标，记录不跨 checkout 混用；同 origin、同提交的不同 checkout 仍是不同目标。同一 actor 切换目标不成为独立执行者。正式发行另须绑定干净精确提交、候选及全部制品摘要；目标绑定不能代替这些主体身份。发布仓库只能取得已提交源码，不复制开发中的未提交文件来运行正式验收。
+
+共享合同与参数使用 agent-neutral 术语；客户端原生 metadata、route 和环境变量解析仅留在相应适配器。当前可用的适配器和入口见 [Agent 实现](../scripts/agents/README.md)，未实现或缺少真实来源的适配器返回 BLOCKED，不接受任意身份文件兜底，也不要求用户新建聊天来弥补目标识别缺陷。
 
 派发时冻结工作包合同与有序 Task 版本；runtime binding、逐 Task 结果与单次 package completion 不可变并哈希绑定。先发布真实产物，再发原生完成通知；父代理核验原始产物，latest 指针不是证据。字段、schema 与存储布局由 [Agent 实现](../scripts/agents/README.md) 定义，不以本页另造协议。
 
