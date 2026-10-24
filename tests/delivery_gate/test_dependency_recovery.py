@@ -37,6 +37,7 @@ class TestDependencyRecovery(unittest.TestCase):
                 "depends_on": [
                     {
                         "task_id": TASK_ID,
+                        "type": "hard",
                         "required_task_version": 1,
                         "required_change_version": "1.0.0",
                         "required_result": "PASS",
@@ -130,6 +131,43 @@ class TestDependencyRecovery(unittest.TestCase):
             ambiguous["conditions"]["dependency_details"][0]["status"], "ambiguous"
         )
         self.assertIsNotNone(two)
+
+    def test_soft_edge_without_any_receipt_does_not_block(self):
+        path = self.f.root / "planning/workstreams.yaml"
+        catalog = yaml.safe_load(path.read_text())
+        tasks = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"]
+        tasks[1]["depends_on"][0]["type"] = "soft"
+        tasks[1]["depends_on"][0].pop("required_result")
+        path.write_text(yaml.safe_dump(catalog, sort_keys=False))
+        self.f._git("add", "planning/workstreams.yaml")
+        self.f._git("commit", "-m", "soft dependency without receipt")
+        dependent = self._dependent_with_receipts()
+        result = check_conditions(self.f.root, submission_id=dependent["submission_id"])
+        self.assertEqual(result["result"], "PASS", result)
+        self.assertEqual(result["conditions"]["dependency_receipts"], [])
+        self.assertEqual(
+            result["conditions"]["dependency_details"],
+            [{"task_id": TASK_ID, "type": "soft", "status": "SOFT"}],
+        )
+
+    def test_contract_edge_without_receipt_remains_blocked(self):
+        path = self.f.root / "planning/workstreams.yaml"
+        catalog = yaml.safe_load(path.read_text())
+        tasks = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"]
+        edge = tasks[1]["depends_on"][0]
+        edge.update(
+            type="contract",
+            contract_name="fixture-contract",
+            required_contract_version="1.0.0",
+        )
+        path.write_text(yaml.safe_dump(catalog, sort_keys=False))
+        self.f._git("add", "planning/workstreams.yaml")
+        self.f._git("commit", "-m", "contract dependency without receipt")
+        result = self._check_dependent()
+        self.assertEqual(result["result"], "BLOCKED", result)
+        self.assertEqual(
+            result["conditions"]["dependency_details"][0]["status"], "missing"
+        )
 
     def test_corrupt_submission_blocks_before_candidate_filtering(self) -> None:
         self._complete()
@@ -347,6 +385,7 @@ class TestDependencyRecovery(unittest.TestCase):
         task2["depends_on"] = [
             {
                 "task_id": TASK_ID,
+                "type": "hard",
                 "required_task_version": 9,
                 "required_change_version": "1.0.0",
                 "required_result": "PASS",
@@ -376,6 +415,7 @@ class TestDependencyRecovery(unittest.TestCase):
         task1["depends_on"] = [
             {
                 "task_id": "LF-TSK-TEST-9999",
+                "type": "hard",
                 "required_task_version": 1,
                 "required_change_version": "1.0.0",
                 "required_result": "PASS",

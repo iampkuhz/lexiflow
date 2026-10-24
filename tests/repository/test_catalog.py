@@ -86,8 +86,10 @@ class CatalogRequirementsTest(unittest.TestCase):
             [
                 {
                     "task_id": "LF-TSK-TEST-0002",
+                    "type": "hard",
                     "required_task_version": 2,
                     "required_change_version": "2.0.0",
+                    "required_result": "PASS",
                 }
             ],
             value["dependencies"],
@@ -99,7 +101,7 @@ class CatalogRequirementsTest(unittest.TestCase):
         self.assertEqual(64, len(value["source"]["sha256"]))
 
     def test_non_pass_dependency_source_is_rejected(self):
-        """投影省略固定 PASS 字段不意味着来源可以要求非 PASS。"""
+        """硬依赖的精确投影与来源均只接受 PASS 要求。"""
         task = self.catalog["workstreams"][0]["epics"][0]["capabilities"][0][
             "seed_tasks"
         ][0]

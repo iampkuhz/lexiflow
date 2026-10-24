@@ -1,16 +1,20 @@
 """提供 Delivery Gate 消费的 Task 要求；日常 Verify 不拥有或推断这些要求。"""
 
 from __future__ import annotations
+
+import re
 from pathlib import Path
 from typing import Any
+
 import yaml
-from scripts.verification.planning.bounded_yaml_parser import parse_yaml_input
+
 from scripts.acceptance.evidence.acceptance_record_store import (
     RecordError,
     canonical_bytes,
     read_regular_bytes,
     sha256_bytes,
 )
+from scripts.verification.planning.bounded_yaml_parser import parse_yaml_input
 
 
 def _catalog_tasks(catalog: Any) -> dict[str, dict[str, Any]]:
@@ -54,13 +58,25 @@ def _dependencies(task: dict[str, Any], task_id: str) -> list[dict[str, Any]]:
             raise RecordError("task-dependencies-invalid", task_id)
         dep = {
             "task_id": item.get("task_id"),
+            "type": item.get("type"),
             "required_task_version": item.get("required_task_version"),
             "required_change_version": item.get("required_change_version"),
         }
+        if "required_result" in item:
+            dep["required_result"] = item["required_result"]
+        if not isinstance(dep["type"], str) or dep["type"] not in {
+            "hard",
+            "soft",
+            "contract",
+        }:
+            raise RecordError("task-dependencies-invalid", task_id)
         if (
             not isinstance(dep["task_id"], str)
             or not dep["task_id"]
-            or item.get("required_result", "PASS") != "PASS"
+            or (
+                dep["type"] in {"hard", "contract"}
+                and dep.get("required_result") != "PASS"
+            )
         ):
             raise RecordError("task-dependencies-invalid", task_id)
         if (
@@ -69,9 +85,22 @@ def _dependencies(task: dict[str, Any], task_id: str) -> list[dict[str, Any]]:
             or dep["required_task_version"] < 1
         ):
             raise RecordError("task-dependencies-invalid", task_id)
+        if dep["type"] == "contract" or any(
+            field in item for field in ("contract_name", "required_contract_version")
+        ):
+            dep["contract_name"] = item.get("contract_name")
+            dep["required_contract_version"] = item.get("required_contract_version")
+            if dep["type"] == "contract" and (
+                not isinstance(dep["contract_name"], str)
+                or not dep["contract_name"]
+                or isinstance(dep["required_contract_version"], bool)
+                or not isinstance(dep["required_contract_version"], (str, int))
+                or str(dep["required_contract_version"]) == ""
+            ):
+                raise RecordError("task-dependencies-invalid", task_id)
         if (
             not isinstance(dep["required_change_version"], str)
-            or not dep["required_change_version"]
+            or re.fullmatch(r"\d+\.\d+\.\d+", dep["required_change_version"]) is None
         ):
             raise RecordError("task-dependencies-invalid", task_id)
         result.append(dep)

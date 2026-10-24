@@ -21,9 +21,16 @@ from scripts.acceptance.evidence.acceptance_record_store import (
     read_json,
     sha256_bytes,
 )
-from scripts.acceptance.task_definition.task_acceptance_requirements import load_task_requirements
-from scripts.acceptance.task_operations.record_independent_task_review import ReviewError, review
-from scripts.acceptance.task_operations.run_independent_task_validation import _verify_frozen
+from scripts.acceptance.task_definition.task_acceptance_requirements import (
+    load_task_requirements,
+)
+from scripts.acceptance.task_operations.record_independent_task_review import (
+    ReviewError,
+    review,
+)
+from scripts.acceptance.task_operations.run_independent_task_validation import (
+    _verify_frozen,
+)
 from tests.delivery_gate.fixtures import (
     TASK_ID,
     DeliveryGateFixture,
@@ -64,6 +71,7 @@ class TestCanonicalRequirements(unittest.TestCase):
     def test_each_dependency_requires_typed_version_bound_edge(self):
         valid = {
             "task_id": "LF-TSK-TEST-0002",
+            "type": "hard",
             "required_task_version": 1,
             "required_change_version": "1.0.0",
             "required_result": "PASS",
@@ -81,6 +89,8 @@ class TestCanonicalRequirements(unittest.TestCase):
                 ("required_task_version", 0),
                 ("required_task_version", "1"),
                 ("required_change_version", ""),
+                ("required_change_version", "v1.0.0"),
+                ("required_change_version", "1.0"),
                 ("required_result", "BLOCKED"),
             )
         )
@@ -92,11 +102,52 @@ class TestCanonicalRequirements(unittest.TestCase):
         self.task["depends_on"] = [valid]
         self.assertEqual(
             self._load()["dependencies"],
-            [{key: value for key, value in valid.items() if key != "required_result"}],
+            [valid],
         )
         self.task["depends_on"] = [valid, valid]
         with self.assertRaisesRegex(RecordError, "task-dependencies-invalid"):
             self._load()
+
+    def test_dependency_type_and_contract_fields_are_strictly_projected(self):
+        base = {
+            "task_id": "LF-TSK-TEST-0002",
+            "required_task_version": 1,
+            "required_change_version": "1.0.0",
+        }
+        soft = {**base, "type": "soft"}
+        self.task["depends_on"] = [soft]
+        self.assertEqual(self._load()["dependencies"], [soft])
+        for edge in (
+            {key: value for key, value in soft.items() if key != "type"},
+            {**soft, "type": None},
+            {**soft, "type": "unknown"},
+            {**soft, "type": []},
+            {**soft, "type": {"invalid": "type"}},
+            {**base, "type": "hard"},
+            {**base, "type": "contract", "required_result": "PASS"},
+            {
+                **base,
+                "type": "contract",
+                "required_result": "PASS",
+                "contract_name": "some-contract",
+            },
+        ):
+            with self.subTest(edge=edge):
+                self.task["depends_on"] = [edge]
+                with self.assertRaisesRegex(RecordError, "task-dependencies-invalid"):
+                    self._load()
+        contract = {
+            **base,
+            "type": "contract",
+            "required_result": "PASS",
+            "contract_name": "some-contract",
+            "required_contract_version": "1.0.0",
+        }
+        self.task["depends_on"] = [contract]
+        self.assertEqual(self._load()["dependencies"], [contract])
+        numeric_contract_version = {**contract, "required_contract_version": 1}
+        self.task["depends_on"] = [numeric_contract_version]
+        self.assertEqual(self._load()["dependencies"], [numeric_contract_version])
 
     def test_owner_inheritance_does_not_mutate_raw_task_or_snapshot(self):
         self.catalog["workstreams"][0]["phase"] = "P2"
@@ -156,6 +207,30 @@ class TestFrozenRequirementEquivalence(unittest.TestCase):
                 with self.assertRaisesRegex(RecordError, "task-requirements-drift"):
                     verify_plan(self.fixture.root, changed)
 
+    def test_soft_type_and_contract_metadata_drift_fail_closed(self):
+        path = self.fixture.root / "planning/workstreams.yaml"
+        catalog = yaml.safe_load(path.read_text())
+        task = catalog["workstreams"][0]["epics"][0]["capabilities"][0]["seed_tasks"][0]
+        task["depends_on"] = [
+            {
+                "task_id": "LF-TSK-TEST-0002",
+                "type": "soft",
+                "required_task_version": 1,
+                "required_change_version": "1.0.0",
+            }
+        ]
+        path.write_text(yaml.safe_dump(catalog, sort_keys=False))
+        frozen = self.fixture.create_submission()
+        task["depends_on"][0].update(
+            type="contract",
+            required_result="PASS",
+            contract_name="fixture-contract",
+            required_contract_version="1.0.0",
+        )
+        path.write_text(yaml.safe_dump(catalog, sort_keys=False))
+        with self.assertRaisesRegex(RecordError, "task-requirements-drift"):
+            verify_plan(self.fixture.root, frozen)
+
     def test_invalid_or_missing_catalog_remains_requirement_drift(self):
         path = self.fixture.root / "planning/workstreams.yaml"
         for content in ("workstreams: []\n", "workstreams: [broken\n"):
@@ -180,7 +255,8 @@ class TestSimplifiedEntryPoints(unittest.TestCase):
         result = {"submission_id": "one", "validation_id": "v", "result": "PASS"}
         with (
             patch(
-                "scripts.acceptance.task_operations.run_independent_task_validation.validate_batch", return_value=[result]
+                "scripts.acceptance.task_operations.run_independent_task_validation.validate_batch",
+                return_value=[result],
             ) as validate,
             patch("scripts.acceptance.__main__._output") as output,
         ):
@@ -191,7 +267,8 @@ class TestSimplifiedEntryPoints(unittest.TestCase):
     def test_review_cli_only_requires_validation_and_explicit_opinion(self):
         with (
             patch(
-                "scripts.acceptance.task_operations.record_independent_task_review.review", return_value={"result": "PASS"}
+                "scripts.acceptance.task_operations.record_independent_task_review.review",
+                return_value={"result": "PASS"},
             ) as reviewer,
             patch("scripts.acceptance.__main__._output", return_value=0),
         ):
