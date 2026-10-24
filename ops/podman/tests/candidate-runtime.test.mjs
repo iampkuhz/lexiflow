@@ -128,6 +128,29 @@ test('fixed child session rejects alternate operations and missing bounded DB po
   }
 });
 
+test('session wait is memoized and delayed wait uses the original spawn deadline', async () => {
+  const originalSpawn = childProcess.spawn;
+  const helper = `import net from 'node:net'; const fd3=new net.Socket({fd:3,readable:true,writable:false}); fd3.on('data',()=>{fd3.destroy();process.exit(0)}); setInterval(()=>{},1000);`;
+  mock.method(childProcess, 'spawn', (_command, _args, options) => originalSpawn(process.execPath,
+    ['--input-type=module', '-e', helper], options));
+  syncBuiltinESMExports();
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiflow-session-deadline-'));
+  try {
+    const started = Date.now();
+    const session = startCandidateSession({ action: 'upgrade', directory: deploymentSlot('release-validation', repo).directory,
+      candidate: request.target, dbPort: 15433, logFile: path.join(temp, 'session.log'), timeoutMs: 1000 });
+    await new Promise(resolve => setTimeout(resolve, 650));
+    const waiter = session.wait();
+    assert.equal(session.wait(), waiter, 'all callers observe the one original wait result');
+    await assert.rejects(waiter, /SESSION_TIMEOUT/);
+    assert.ok(Date.now() - started < 1550, `wait must not add a fresh timeout: ${Date.now() - started}ms`);
+    assert.equal(session.isClosed(), true);
+  } finally {
+    mock.restoreAll(); syncBuiltinESMExports();
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
 test('fixed fd3 control pipe closes an idle child normally and cancels on explicit marker or parent EOF', async () => {
   const source = `import {watchCancel} from ${JSON.stringify(new URL('../candidates/candidate-process-session.mjs', import.meta.url).href)};
     let cancelled = false; const control = watchCancel(() => { cancelled = true; process.stdout.write('CANCEL\\n'); control.destroy(); });
@@ -231,7 +254,7 @@ async function withRuntimeFlowFixture(scenario, check) {
 }
 
 class FlowEngine {
-  constructor(scenario, socketPath) { this.scenario = scenario; this.socketPath = socketPath; this.installs = new Map(); this.mutations = []; this.stops = 0; this.next = 0; this.source = flowCandidates[flowTarget.candidateSha256].buildIdentity; }
+  constructor(scenario, socketPath) { this.scenario = scenario; this.socketPath = socketPath; this.installs = new Map(); this.mutations = []; this.stops = 0; this.next = 0; this.source = flowCandidates[flowTarget.candidateSha256].buildIdentity; this.faultPolls = 0; this.observingFault = false; }
   verify(c) { const v = flowCandidates[c.candidateSha256]; if (!v) throw Error('UNKNOWN_CANDIDATE'); return v; }
   extension(dir, identity, port) { assert.equal(port, 18080); assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'build-identity.json'))), identity); return this.tree(dir); }
   tree(dir) { return flowSha(fs.readFileSync(path.join(dir, 'build-identity.json'))); }
@@ -312,9 +335,22 @@ class FlowEngine {
     // 真正事务在readiness成功前仍保留旧state和extension，只切换运行中的API。
     existing.containers[0] = { ...existing.containers[0], Id: flowSha(`api-${++this.next}`),
       Image: this.verify(input.candidate).manifest.artifacts[0].imageDigest, State: { Running: true } };
-    return { isClosed: () => this.scenario === 'missing-fault', wait: async () => {
-      if (this.scenario === 'unsettled-fault') return { code: 1, signal: null, settled: false };
-      if (this.scenario === 'missing-fault') return { code: 1, signal: null, settled: true };
+    this.observingFault = true;
+    let closed = false, release;
+    const stopped = new Promise(resolve => { release = resolve; });
+    this.releaseFaultWait = release;
+    return { isClosed: () => closed, wait: async () => {
+      if (this.scenario === 'missing-fault' || this.scenario === 'missing-fault-success') {
+        await new Promise(resolve => setTimeout(resolve, 25)); closed = true;
+        return { code: this.scenario === 'missing-fault-success' ? 0 : 1, signal: null, settled: true };
+      }
+      if (this.scenario === 'unsettled-fault' || this.scenario === 'signal-unsettled-fault') {
+        await stopped; closed = true;
+        return { code: this.scenario === 'signal-unsettled-fault' ? null : 1,
+          signal: this.scenario === 'signal-unsettled-fault' ? 'SIGTERM' : null, settled: false };
+      }
+      await stopped;
+      closed = true;
       assert.equal(existing.containers[0].State.Running, false, 'failure must follow an observed stop');
       existing.state = { ...old, phase: 'initialized' };
       this.record(existing, 'upgrade', 'FAIL', this.identify(input)); this.save(existing);
@@ -329,7 +365,11 @@ class FlowEngine {
     const installs = [...this.installs.values()];
     const ownerOf = id => installs.find(x => [...x.containers, ...x.volumes, ...x.networks].some(r => r.Id === id || r.Name === id));
     const collection = kind => installs.flatMap(x => kind === 'container' ? x.containers : kind === 'volume' ? x.volumes : x.networks);
-    if (argv[0] === 'ps') return json(collection('container').map(x => ({ Id: x.Id, Labels: x.Config.Labels })));
+    if (argv[0] === 'ps') {
+      if (this.observingFault && ['missing-fault', 'missing-fault-success'].includes(this.scenario)) return json([]);
+      if (this.observingFault && this.scenario === 'delayed-observer-target' && this.faultPolls++ < 241) return json([]);
+      return json(collection('container').map(x => ({ Id: x.Id, Labels: x.Config.Labels })));
+    }
     if (argv[1] === 'ls') return json(collection(argv[0]).map(x => ({ Name: x.Name, Labels: x.Labels })));
     if (argv[0] === 'image' && argv[1] === 'inspect') {
       const candidate = Object.values(flowCandidates).find(v => v.manifest.artifacts[0].imageDigest === argv[2]);
@@ -343,7 +383,7 @@ class FlowEngine {
       return json([value]);
     }
     if (argv[0] === 'exec') return { status: 0, stdout: argv.at(-1).includes('lexicon_dataset') ? `${flowSha('generation')}:7\n` : 'lexiflow-candidate-runtime-v1\n', stderr: '', signal: null };
-    if (argv[0] === 'stop') { const id = argv.at(-1), install = ownerOf(id); assert.ok(install); assert.equal(install.containers[0].Id, id); install.containers[0].State.Running = false; this.stops++; this.mutations.push(['stop', id]); return json({}); }
+    if (argv[0] === 'stop') { const id = argv.at(-1), install = ownerOf(id); assert.ok(install); assert.equal(install.containers[0].Id, id); install.containers[0].State.Running = false; this.stops++; this.mutations.push(['stop', id]); this.releaseFaultWait?.(); return json({}); }
     if (argv[0] === 'rm' || argv[1] === 'rm') {
       const kind = argv[0] === 'rm' ? 'container' : argv[0], id = argv.at(-1), install = ownerOf(id); assert.ok(install);
       const key = kind === 'container' ? 'containers' : kind === 'volume' ? 'volumes' : 'networks';
@@ -405,6 +445,24 @@ test('missing fault can never claim PASS even when upgrade child exits nonzero',
   });
 });
 
+test('observer follows the same session beyond the legacy 240 polls and stops only the exact target once', async () => {
+  await withRuntimeFlowFixture('delayed-observer-target', async (runtime, flow) => {
+    const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
+    assert.equal(result.status, 'PASS', JSON.stringify(result));
+    assert.ok(flow.faultPolls > 240);
+    assert.equal(flow.stops, 1);
+  });
+});
+
+test('normally completed child without fault observation cannot PASS', async () => {
+  await withRuntimeFlowFixture('missing-fault-success', async (runtime, flow) => {
+    const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
+    assert.equal(result.status, 'FAIL', JSON.stringify(result));
+    assert.equal(result.failure.code, 'FAULT_NOT_PROVEN');
+    assert.equal(flow.stops, 0);
+  });
+});
+
 test('repeat-install and repeat-upgrade no-op fixtures cannot satisfy the success-record contract', async () => {
   for (const scenario of ['no-op-repeat-install', 'no-op-repeat-upgrade']) {
     await withRuntimeFlowFixture(scenario, async (runtime, flow) => {
@@ -423,6 +481,19 @@ test('unsettled child retains every unknown resource, without remove mutation', 
     assert.equal(result.cleanup.settled, false); assert.equal(flow.mutations.length, 0);
     assert.equal([...flow.installs.values()][0].containers.length, 2);
   });
+});
+
+test('signal or timeout-like unsettled session never passes and retains resources after observation', async () => {
+  for (const scenario of ['unsettled-fault', 'signal-unsettled-fault']) {
+    await withRuntimeFlowFixture(scenario, async (runtime, flow) => {
+      const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
+      assert.equal(result.status, 'FAIL', scenario);
+      assert.equal(result.failure.code, 'SESSION_NOT_SETTLED', scenario);
+      assert.equal(result.cleanup.settled, false, scenario);
+      assert.equal(flow.stops, 1, scenario);
+      assert.ok([...flow.installs.values()].some(install => install.containers.length === 2), scenario);
+    });
+  }
 });
 
 test('foreign owner is never removed, including catch-path cleanup retry', async () => {

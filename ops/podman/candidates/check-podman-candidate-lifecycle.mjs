@@ -440,7 +440,7 @@ function assertCandidateAliasesFree(root, candidates) {
 }
 async function inject(root, dir, verified, session) {
   // 仅观察本project/id/service 的 target image；再inspect、再stop一次。错归属绝不stop。
-  for (let i = 0; i < 240 && !session.isClosed(); i++) {
+  while (!session.isClosed()) {
     const s = state(dir);
     const rows = listed(root, s, 'container').filter(x => x.service === 'api');
     if (rows.length > 1) fail('API_CONTAINER_NOT_UNIQUE');
@@ -536,12 +536,15 @@ async function runCandidateRuntimeInner(request) {
     phase(out, 'upgrade-failure', 'RUNNING');
     settled = false;
     const running = startCandidateSession(session('05-upgrade-failure', 'upgrade', previousDir, request.target));
-    let observed = false, observerError;
-    try { observed = await inject(root, previousDir, target, running); } catch (error) { observerError = error; }
-    try { r = await running.wait(); } catch (error) { settled = false; throw error; }
+    const observation = Promise.resolve().then(() => inject(root, previousDir, target, running));
+    const sessionResult = Promise.resolve().then(() => running.wait());
+    const [observationResult, waitResult] = await Promise.allSettled([observation, sessionResult]);
+    if (waitResult.status === 'rejected') { settled = false; throw waitResult.reason; }
+    r = waitResult.value;
     if (!r.settled) fail('SESSION_NOT_SETTLED');
     settled = true;
-    if (observerError) throw observerError;
+    if (observationResult.status === 'rejected') throw observationResult.reason;
+    const observed = observationResult.value;
     if (!observed || r.code === 0 || r.signal) fail('FAULT_NOT_PROVEN');
     const failedRecords = recordFiles(previousDir).filter(v => v.kind === 'upgrade' && v.status === 'FAIL' && v.buildId === target.buildIdentity.buildId);
     if (failedRecords.length !== 1) fail('FAILED_UPGRADE_RECORD_MISSING');
