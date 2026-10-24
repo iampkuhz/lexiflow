@@ -11,16 +11,22 @@ public final class RuntimeStatusController {
   static final String API_CONTRACT = "caption-hints.v2";
   private final LexiconRuntime runtime;
   private final SoftwareIdentity softwareIdentity;
+  private final RuntimeInitialization initialization;
 
   /**
    * 建立运行状态 HTTP 入口。
    *
    * @param runtime 含义：唯一词库运行状态 owner。取值范围：非 null。
    * @param softwareIdentity 含义：构建时软件身份读取器。取值范围：非 null。
+   * @param initialization 含义：当次启动与资料身份证明核验器。取值范围：非 null。
    */
-  public RuntimeStatusController(LexiconRuntime runtime, SoftwareIdentity softwareIdentity) {
+  public RuntimeStatusController(
+      LexiconRuntime runtime,
+      SoftwareIdentity softwareIdentity,
+      RuntimeInitialization initialization) {
     this.runtime = runtime;
     this.softwareIdentity = softwareIdentity;
+    this.initialization = initialization;
   }
 
   /**
@@ -30,16 +36,17 @@ public final class RuntimeStatusController {
    */
   @GetMapping("/api/v1/runtime-status")
   public ResponseEntity<RuntimeStatus> status() {
-    var state = runtime.probe();
+    var status = initialization.evaluate(runtime.probe(), softwareIdentity.version());
     return ResponseEntity.ok()
         .cacheControl(CacheControl.noStore())
         .body(
             new RuntimeStatus(
                 softwareIdentity.version(),
                 API_CONTRACT,
-                state.mode(),
-                state.ready(),
-                state.reason().name(),
-                state.version()));
+                status.mode(),
+                status.ready(),
+                status.reason().name(),
+                status.datasetVersion(),
+                status.publishedDataset()));
   }
 }

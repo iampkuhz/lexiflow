@@ -56,12 +56,12 @@ class LocalEntryTest(unittest.TestCase):
                 target = repo / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source, target)
-        for relative in ["ops/podman/commands/manage-podman-installation.mjs", "ops/podman/installation/installation-upgrade-workflow.mjs", "ops/podman/installation/installation-plan-records.mjs", "ops/podman/environment/local-database-target.mjs", "ops/podman/candidates/candidate-artifact-installer.mjs", "ops/podman/images/versioned-images.mjs", "ops/podman/images/image-slot-lock.mjs", "ops/podman/environment/java-build-environment.mjs", "ops/podman/execution/installation-operation-lock.mjs", "ops/podman/execution/deployment-process-control.mjs", "ops/podman/commands/diagnose-podman-installation.mjs", "ops/podman/installation/installation-update-transaction.mjs", "ops/podman/installation/installation-workspace-journal.mjs", "ops/podman/installation/installation-version-summary.mjs", "ops/podman/compose.validation.yaml",
+        for relative in ["ops/podman/commands/manage-podman-installation.mjs", "ops/podman/installation/installation-upgrade-workflow.mjs", "ops/podman/installation/installation-plan-records.mjs", "ops/podman/environment/local-database-target.mjs", "ops/podman/images/versioned-images.mjs", "ops/podman/images/image-slot-lock.mjs", "ops/podman/environment/java-build-environment.mjs", "ops/podman/execution/installation-operation-lock.mjs", "ops/podman/execution/deployment-process-control.mjs", "ops/podman/commands/diagnose-podman-installation.mjs", "ops/podman/installation/installation-update-transaction.mjs", "ops/podman/installation/installation-workspace-journal.mjs", "ops/podman/installation/installation-version-summary.mjs", "ops/podman/compose.validation.yaml",
                          "ops/dataset/prepare_ecdict_bundle.py", "ops/podman/source-tools.Containerfile",
                          "ops/docker/Dockerfile", "ops/docker/Dockerfile.postgres",
                          "ops/docker/run-container-command.sh", "ops/docker/initialize-postgres-app-role.sh",
                          "ops/dataset/ecdict-source.lock.json", "ops/dataset/generation-inputs.json", "ops/dataset/dataset-generation-identity.mjs",
-                         "extension/scripts/packaging/package-extension-release.mjs", "extension/scripts/packaging/extension-archive-contract.mjs",
+                         "extension/scripts/packaging/package-extension-release.mjs", "extension/scripts/packaging/extension-archive-contract.mjs", "extension/scripts/build/expected-dataset.mjs",
                          "infra/postgres/schema.sql", "ops/release/version.txt", "ops/release/integrity/source-build-identity.mjs", "ops/release/integrity/extension-archive-integrity.mjs"]:
             dst = repo / relative
             dst.parent.mkdir(parents=True, exist_ok=True)
@@ -105,7 +105,7 @@ const repo=path.resolve('..');
 const {resolveBuildIdentity}=await import(path.join(repo,'ops/release/integrity/source-build-identity.mjs'));
 const {PACKAGE_FILES}=await import(path.join(repo,'extension/scripts/packaging/package-extension-release.mjs'));
 const id=resolveBuildIdentity(repo), port=process.env.LEXIFLOW_API_PORT;
-for(const name of PACKAGE_FILES){const target=path.join('dist',name);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,'synthetic resource\n');}
+for(const name of PACKAGE_FILES.filter(name=>name!=='expected-dataset.json')){const target=path.join('dist',name);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,'synthetic resource\n');}
 fs.writeFileSync('dist/build-identity.json',JSON.stringify(id));
 fs.writeFileSync('dist/manifest.json',JSON.stringify({manifest_version:3,version:id.chromeVersion,version_name:id.softwareVersion,permissions:['storage'],host_permissions:['http://127.0.0.1:'+port+'/*'],background:{service_worker:'background.js'},action:{default_popup:'popup.html'}}));
 fs.writeFileSync('dist/popup.html','<script src="popup.js"></script><link href="popup.css" rel="stylesheet">');

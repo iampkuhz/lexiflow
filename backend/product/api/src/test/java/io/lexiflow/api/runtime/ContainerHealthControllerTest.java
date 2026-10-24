@@ -19,6 +19,7 @@ class ContainerHealthControllerTest {
   private ApplicationAvailability availability;
   private LexiconRuntime runtime;
   private SoftwareIdentity identity;
+  private RuntimeInitialization initialization;
   private ContainerHealthController controller;
 
   @BeforeEach
@@ -26,9 +27,25 @@ class ContainerHealthControllerTest {
     availability = mock(ApplicationAvailability.class);
     runtime = mock(LexiconRuntime.class);
     identity = mock(SoftwareIdentity.class);
-    controller = new ContainerHealthController(availability, runtime, identity);
+    initialization = mock(RuntimeInitialization.class);
+    controller = new ContainerHealthController(availability, runtime, identity, initialization);
     when(identity.version()).thenReturn("1.2.3");
     when(availability.getReadinessState()).thenReturn(ReadinessState.ACCEPTING_TRAFFIC);
+    var dataset =
+        new RuntimeInitialization.PublishedDataset("rel", "prep", "rule", "sql", "a".repeat(64));
+    when(initialization.evaluate(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("1.2.3")))
+        .thenAnswer(
+            invocation -> {
+              var state = invocation.<LexiconRuntime.State>getArgument(0);
+              return new RuntimeInitialization.Evaluation(
+                  true,
+                  state.mode(),
+                  state.reason(),
+                  state.version(),
+                  state.ready(),
+                  state.ready() ? dataset : null);
+            });
   }
 
   @Test
@@ -42,7 +59,9 @@ class ContainerHealthControllerTest {
       var body =
           "{\"softwareVersion\":\"1.2.3\",\"apiContract\":\"caption-hints.v2\",\"mode\":\"formal\",\"ready\":true,\"reason\":\""
               + reason.name()
-              + "\",\"datasetVersion\":42}";
+              + "\",\"datasetVersion\":42,\"publishedDataset\":{\"releaseId\":\"rel\",\"preparationId\":\"prep\",\"ruleId\":\"rule\",\"sqlVersion\":\"sql\",\"sha256\":\""
+              + "a".repeat(64)
+              + "\"}}";
       assertEquals(HttpStatus.OK, response.getStatusCode());
       assertEquals(body, new String(response.getBody(), java.nio.charset.StandardCharsets.UTF_8));
       assertEquals("application/json", response.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE));
@@ -52,6 +71,24 @@ class ContainerHealthControllerTest {
       assertEquals("no-store", response.getHeaders().getFirst(HttpHeaders.CACHE_CONTROL));
     }
     verify(runtime, org.mockito.Mockito.times(2)).probe();
+  }
+
+  @Test
+  void sourceRuntimeIsReadyWithoutClaimingPublishedDatasetBinding() {
+    when(runtime.probe())
+        .thenReturn(new LexiconRuntime.State("formal", LexiconRuntime.Reason.OK, 42L, true));
+    when(initialization.evaluate(
+            org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("1.2.3")))
+        .thenReturn(
+            new RuntimeInitialization.Evaluation(
+                false, "formal", LexiconRuntime.Reason.OK, 42L, true, null));
+
+    var response = controller.health(request("127.0.0.1"));
+
+    assertEquals(HttpStatus.OK, response.getStatusCode());
+    assertEquals(
+        "{\"softwareVersion\":\"1.2.3\",\"apiContract\":\"caption-hints.v2\",\"mode\":\"formal\",\"ready\":true,\"reason\":\"OK\",\"datasetVersion\":42,\"publishedDataset\":null}",
+        new String(response.getBody(), java.nio.charset.StandardCharsets.UTF_8));
   }
 
   @Test

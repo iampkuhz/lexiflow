@@ -30,13 +30,14 @@ class LexiconReadinessHttpTest {
       assertEquals(200, status.statusCode());
       assertEquals("no-store", status.headers().firstValue("Cache-Control").orElse(""));
       var json = new tools.jackson.databind.ObjectMapper().readTree(status.body());
-      assertEquals(6, json.size());
+      assertEquals(7, json.size());
       assertEquals("caption-hints.v2", json.get("apiContract").asString());
       assertEquals("formal", json.get("mode").asString());
       assertFalse(json.get("ready").asBoolean());
       assertEquals("DEPENDENCY_UNAVAILABLE", json.get("reason").asString());
       assertNotNull(json.get("softwareVersion"));
       assertEquals("null", json.get("datasetVersion").toString());
+      assertEquals("null", json.get("publishedDataset").toString());
       var readiness = get(client, "/actuator/health/readiness");
       assertEquals(503, readiness.statusCode());
       assertTrue(readiness.body().contains("DEPENDENCY_UNAVAILABLE"));
