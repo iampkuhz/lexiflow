@@ -4,7 +4,7 @@ import { remapHints, retainedOverlap } from "./caption-snapshot";
 export const COALESCE_MS = 16;
 export type CaptionEvent = { key: string; sequence: number; videoTimeMs: number; request: CaptionHintRequest };
 export type StreamState = "idle" | "waiting" | "ready" | "no-pending" | "fallback";
-export type StreamView = { state: StreamState; event?: CaptionEvent; hints?: Hint[]; frozenKeys?: string[]; finalizedKeys?: string[]; debugRequestId?: string; debugRequestEvent?: CaptionEvent };
+export type StreamView = { state: StreamState; event?: CaptionEvent; hints?: Hint[]; frozenKeys?: string[]; finalizedKeys?: string[]; debugRequestId?: string; debugRequestEvent?: CaptionEvent; runtimeFailure?: "initializing" | "unavailable" | "incompatible"; runtimeMode?: "formal" | "demo" };
 type Operation = { promise: Promise<ApiResult>; cancel: () => void };
 export type RequestTransport = (event: CaptionEvent, requestId: string) => Operation;
 export type Scheduler = { setTimeout: (callback: () => void, timeoutMs: number) => ReturnType<typeof setTimeout>;
@@ -25,6 +25,7 @@ export class CaptionStreamCoordinator {
   private activeRowKeys = new Set<string>();
   private submittedAt = 0;
   private requestNumber = 0;
+  private runtimeMode?: "formal" | "demo";
   constructor(private readonly transport: RequestTransport, private readonly render: (view: StreamView) => void,
     private readonly scheduler: Scheduler = globalThis, private readonly observe: (value: Observation) => void = () => undefined,
     private readonly now: () => number = () => performance.now()) {}
@@ -88,8 +89,8 @@ export class CaptionStreamCoordinator {
   private pending(): boolean {
     return !!this.current && snapshotSegments(this.current.request.currentSnapshot).some(segment => !this.completed.has(segment.key));
   }
-  private publish(state: StreamState, debugRequestId?: string, debugRequestEvent?: CaptionEvent): void { this.render({ state, event: this.current,
-    hints: this.hints.map(hint => ({ ...hint })), frozenKeys: [...this.frozenKeys], finalizedKeys: [...this.finalizedKeys], ...(debugRequestId ? { debugRequestId } : {}), ...(debugRequestEvent ? { debugRequestEvent } : {}) }); }
+  private publish(state: StreamState, debugRequestId?: string, debugRequestEvent?: CaptionEvent, runtimeFailure?: StreamView["runtimeFailure"]): void { this.render({ state, event: this.current,
+    hints: this.hints.map(hint => ({ ...hint })), frozenKeys: [...this.frozenKeys], finalizedKeys: [...this.finalizedKeys], ...(debugRequestId ? { debugRequestId } : {}), ...(debugRequestEvent ? { debugRequestEvent } : {}), ...(runtimeFailure ? { runtimeFailure } : {}), ...(this.runtimeMode ? { runtimeMode: this.runtimeMode } : {}) }); }
   private schedule(delay: number): void {
     if (this.active || this.timer !== undefined || !this.pending()) return;
     this.timer = this.scheduler.setTimeout(() => { this.timer = undefined; this.dispatch(); }, delay);
@@ -117,9 +118,14 @@ export class CaptionStreamCoordinator {
     }
     if (result.ok && !parseHintResponse(result.body, event.request)) result = { ok: false, reason: "invalid-response" };
     if (!result.ok) {
-      this.record({ outcome: result.reason === "invalid-response" ? "protocol_mismatch" : result.reason }); this.publish("fallback");
+      const outcome = result.reason === "invalid-response" || result.reason === "runtime-incompatible" ? "protocol_mismatch"
+        : result.reason === "runtime-initializing" || result.reason === "backend_unavailable" ? "backend_unavailable" : result.reason;
+      this.record({ outcome });
+      const runtimeFailure = result.reason === "runtime-initializing" ? "initializing" : ["runtime-incompatible", "invalid-response"].includes(result.reason) ? "incompatible" : "unavailable";
+      this.publish("fallback", undefined, undefined, runtimeFailure);
       return;
     }
+    this.runtimeMode = result.runtimeMode ?? "formal";
     if (["query", "rules", "api"].some(stage => result.timings?.[stage as keyof typeof result.timings] === undefined))
       this.record({ outcome: "missing-server-timing" });
     // 只确认已校验响应对应的发送快照，不把在途新增内容误标为成功。

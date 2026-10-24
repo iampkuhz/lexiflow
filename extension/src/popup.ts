@@ -1,7 +1,9 @@
+import type { RuntimeStatus } from "./runtime-status";
+
 interface PageReply { ok: true; enabled: boolean; pageKey: string }
 type PageResponse = PageReply | { ok: false; reason?: string };
 type PreferenceResponse = { ok: true; entryKeys: string[] } | { ok: false; reason?: string };
-type RuntimeReply = { ok: true; status: { softwareVersion: string; apiContract: string; mode: string; ready: boolean; reason: string; datasetVersion: number | null } } | { ok: false; reason: string };
+type RuntimeReply = { ok: true; status: RuntimeStatus } | { ok: false; reason: string };
 
 // 消息通道异常时也必须结束等待；迟到结果不再改变弹窗状态。
 function bounded<T>(operation: Promise<T>): Promise<T> {
@@ -34,13 +36,29 @@ async function readServiceStatus(): Promise<void> {
       if (reply?.reason === "protocol-mismatch") {
         status.textContent = "协议不匹配，请使用匹配的扩展与服务版本。"; status.dataset.kind = "error"; identity.hidden = true; return;
       }
+      if (reply?.reason === "software-version") {
+        status.textContent = "软件版本不匹配，请安装与服务对应的扩展。"; status.dataset.kind = "error"; identity.hidden = true; return;
+      }
+      if (reply?.reason === "binding-missing") {
+        status.textContent = "扩展缺少发行资料绑定，请使用正式发行包。"; status.dataset.kind = "error"; identity.hidden = true; return;
+      }
+      if (reply?.reason === "dataset-identity") {
+        status.textContent = "已发布资料身份不匹配，请安装与服务对应的发行包。"; status.dataset.kind = "error"; identity.hidden = true; return;
+      }
+      if (reply?.reason === "invalid-response") {
+        status.textContent = "运行状态响应无效，服务/API合同不兼容。"; status.dataset.kind = "error"; identity.hidden = true; return;
+      }
       throw new Error("status unavailable");
     }
     const value = reply.status;
-    identity.textContent = `软件 ${value.softwareVersion} · 协议 ${value.apiContract} · 已发布资料版本 ${value.datasetVersion === null ? "未知" : value.datasetVersion}`;
+    const published = value.publishedDataset;
+    const binding = published ? ` · 资料 ${published.releaseId}/${published.preparationId}/${published.ruleId} · SQL ${published.sqlVersion} · SHA-256 ${published.sha256}` : " · 资料身份尚未验证";
+    identity.textContent = `软件 ${value.softwareVersion} · 协议 ${value.apiContract} · 已发布资料版本 ${value.datasetVersion === null ? "未知" : value.datasetVersion}${binding}`;
     identity.hidden = false;
-    if (value.mode === "demo") { status.textContent = "演示模式 · 非正式就绪"; status.dataset.kind = "error"; }
+    if (value.reason === "INITIALIZING") { status.textContent = "服务正在初始化发布资料…"; status.dataset.kind = "pending"; }
+    else if (value.mode === "demo") { status.textContent = "演示模式 · 非正式就绪"; status.dataset.kind = "error"; }
     else if (value.mode === "invalid" || value.reason === "SCHEMA_MISMATCH") { status.textContent = "资料结构不匹配，请使用匹配的服务与资料。"; status.dataset.kind = "error"; }
+    else if (value.reason === "IDENTITY_MISMATCH") { status.textContent = "服务发行资料身份校验失败，请检查匹配的发行包。"; status.dataset.kind = "error"; }
     else if (value.reason === "NO_PUBLISHED_DATA") { status.textContent = "尚无已发布资料，请检查资料初始化与发布状态。"; status.dataset.kind = "error"; }
     else if (value.reason === "DEPENDENCY_UNAVAILABLE") { status.textContent = "服务依赖不可用，请检查后端依赖服务。"; status.dataset.kind = "error"; }
     else if (value.ready) { status.textContent = value.reason === "PREWARM_DEGRADED" ? "正式就绪 · 预热降级，服务可用。" : "正式就绪。"; status.dataset.kind = "success"; }

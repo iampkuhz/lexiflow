@@ -3,8 +3,9 @@ import fs from 'node:fs';
 import { lstat, mkdir, readFile, writeFile, rm, link } from 'node:fs/promises';
 import path from 'node:path';
 import { chromeVersion, validateBuildIdentity, assertBuildIdentityMatches } from '../../../ops/release/integrity/source-build-identity.mjs';
+import { validateExpectedDataset } from '../build/expected-dataset.mjs';
 
-export const EXTENSION_PACKAGE_FILES = ['manifest.json', 'build-identity.json', 'background.js', 'content.js', 'youtube-bridge.js', 'popup.js', 'popup.html', 'popup.css', 'assets/icon-16.png', 'assets/icon-32.png', 'assets/icon-48.png', 'assets/icon-128.png', 'assets/logo.svg'];
+export const EXTENSION_PACKAGE_FILES = ['manifest.json', 'build-identity.json', 'expected-dataset.json', 'background.js', 'content.js', 'youtube-bridge.js', 'popup.js', 'popup.html', 'popup.css', 'assets/icon-16.png', 'assets/icon-32.png', 'assets/icon-48.png', 'assets/icon-128.png', 'assets/logo.svg'];
 const fail = code => { throw new Error(code); };
 const sha = value => createHash('sha256').update(value).digest('hex');
 function stableFileBytes(file, expectedLength, named = fs.lstatSync(file)) {
@@ -33,14 +34,22 @@ export function readStableRegularFile(file, maxBytes) {
   } finally { fs.closeSync(fd); }
 }
 
-export function validateExtensionArchiveEntries(entries, { buildIdentity, apiPort = 18080, filename } = {}) {
-  if (!Number.isInteger(apiPort) || apiPort < 1 || apiPort > 65535) fail('EXTENSION_API_PORT_INVALID');
+export function validateExtensionArchiveEntries(entries, { buildIdentity, expectedDataset, apiPort = 18080, filename } = {}) {
+  if (![18080, 18081].includes(apiPort)) fail('EXTENSION_API_PORT_INVALID');
   const names = [...entries.keys()].sort();
-  if (JSON.stringify(names) !== JSON.stringify([...EXTENSION_PACKAGE_FILES].sort())) fail('ARCHIVE_FILE_SET_MISMATCH');
+  const filesForPort = apiPort === 18081 && !expectedDataset && !entries.has('expected-dataset.json')
+    ? EXTENSION_PACKAGE_FILES.filter(name => name !== 'expected-dataset.json') : EXTENSION_PACKAGE_FILES;
+  if (JSON.stringify(names) !== JSON.stringify([...filesForPort].sort())) fail('ARCHIVE_FILE_SET_MISMATCH');
   let identity, manifest;
   try { identity = JSON.parse(entries.get('build-identity.json').toString('utf8')); manifest = JSON.parse(entries.get('manifest.json').toString('utf8')); validateBuildIdentity(identity); }
   catch { fail('ARCHIVE_IDENTITY_MISMATCH'); }
   if (buildIdentity) { try { assertBuildIdentityMatches(identity, buildIdentity); } catch { fail('EXTENSION_IDENTITY_MISMATCH'); } }
+  let dataset = null;
+  if (entries.has('expected-dataset.json')) {
+    try { dataset = validateExpectedDataset(JSON.parse(entries.get('expected-dataset.json').toString('utf8'))); }
+    catch { fail('EXPECTED_DATASET_INVALID'); }
+  }
+  if (expectedDataset && JSON.stringify(dataset) !== JSON.stringify(validateExpectedDataset(expectedDataset))) fail('EXPECTED_DATASET_INVALID');
   if (filename && filename !== `lexiflow-extension-${identity.softwareVersion}.zip`) fail('ARCHIVE_FILENAME_MISMATCH');
   if (manifest.manifest_version !== 3 || manifest.version !== chromeVersion(identity.softwareVersion) || manifest.version_name !== identity.softwareVersion
       || JSON.stringify(manifest.permissions) !== '["storage"]'
@@ -56,7 +65,7 @@ export function validateExtensionArchiveEntries(entries, { buildIdentity, apiPor
   for (const ref of htmlRefs) if (!/^(?:https?:|data:|#)/iu.test(ref) && !files.has(ref)) fail('ARCHIVE_RESOURCE_MISSING');
   const cssRefs = [...entries.get('popup.css').toString('utf8').matchAll(/url\(["']?([^"')]+)["']?\)|@import\s+["']([^"']+)["']/giu)];
   for (const match of cssRefs) { const ref = match[1] ?? match[2]; if (!/^(?:https?:|data:|#)/iu.test(ref) && !files.has(ref)) fail('ARCHIVE_RESOURCE_MISSING'); }
-  return { identity, manifest };
+  return { identity, manifest, dataset };
 }
 
 export function assertExtensionTreeMatches(directory, entries) {

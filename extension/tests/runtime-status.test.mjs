@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseRuntimeStatus, readRuntimeStatus, RUNTIME_STATUS_URL } from "../dist/runtime-status.js";
+import { parseRuntimeStatus, readRuntimeStatus, RUNTIME_STATUS_URL, runtimeCompatibility } from "../dist/runtime-status.js";
 
-const valid = { softwareVersion:"1.2.3", apiContract:"caption-hints.v2", mode:"formal", ready:true, reason:"OK", datasetVersion:4 };
+const publishedDataset={releaseId:"release-1",preparationId:"prep-1",ruleId:"rules-1",sqlVersion:"4",sha256:"a".repeat(64)};
+const valid = { softwareVersion:"1.2.3", apiContract:"caption-hints.v2", mode:"formal", ready:true, reason:"OK", datasetVersion:4, publishedDataset };
 test("accepts exact ready and degraded formal runtime shapes", () => {
   assert.deepEqual(parseRuntimeStatus(valid), valid);
   assert.equal(parseRuntimeStatus({...valid, ready:true, reason:"PREWARM_DEGRADED"}).ready, true);
@@ -35,8 +36,25 @@ test("runtime read is bodyless no-store GET and an already cancelled request nev
   } finally { globalThis.fetch = original; }
 });
 test("accepts explicit demo and unknown dataset identity without formal readiness", () => {
-  assert.deepEqual(parseRuntimeStatus({...valid,mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null}),
-    {...valid,mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null});
+  assert.deepEqual(parseRuntimeStatus({...valid,mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null,publishedDataset:null}),
+    {...valid,mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null,publishedDataset:null});
+});
+
+test("initializing status is explicit and cannot claim a published identity", () => {
+  assert.equal(parseRuntimeStatus({...valid,ready:false,reason:"INITIALIZING",datasetVersion:null,publishedDataset:null}).reason,"INITIALIZING");
+  assert.equal(parseRuntimeStatus({...valid,ready:false,reason:"INITIALIZING",datasetVersion:3,publishedDataset:null}).reason,"INITIALIZING");
+  assert.equal(parseRuntimeStatus({...valid,ready:false,reason:"INITIALIZING",datasetVersion:3}),undefined);
+  assert.equal(parseRuntimeStatus({...valid,ready:false,reason:"INITIALIZING",datasetVersion:null,publishedDataset}),undefined);
+});
+
+test("runtime readiness is compatible only with the extension's build-bound published dataset", () => {
+  assert.equal(runtimeCompatibility(valid, "1.2.3", publishedDataset), undefined);
+  assert.equal(runtimeCompatibility(valid, "1.2.4", publishedDataset), "software-version");
+  assert.equal(runtimeCompatibility({...valid,publishedDataset:{...publishedDataset,releaseId:"other"}}, "1.2.3", publishedDataset), "dataset-identity");
+  const missing = {...valid,publishedDataset:null};
+  assert.equal(parseRuntimeStatus(missing)?.ready, true);
+  assert.equal(runtimeCompatibility(missing, "1.2.3", publishedDataset), "dataset-identity");
+  assert.equal(runtimeCompatibility(valid, "1.2.3", null), "binding-missing");
 });
 
 test("accepts full snapshot build identities but rejects unresolved or malformed versions", () => {

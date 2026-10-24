@@ -3,9 +3,9 @@ import test from 'node:test';
 import { createServer } from 'node:http';
 const nativeFetch = globalThis.fetch;
 let listener;
-globalThis.chrome = { runtime: { id: 'extension-id', getURL: path => `chrome-extension://extension-id/${path}`, onMessage: { addListener(value) { listener = value; } } } };
+globalThis.chrome = { runtime: { id: 'extension-id', getURL: path => `chrome-extension://extension-id/${path}`, getManifest: () => ({ version_name: '1.2.3' }), onMessage: { addListener(value) { listener = value; } } } };
 await import('../dist/background.js');
-let statusBody = { softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null };
+let statusBody = { softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null,publishedDataset:null };
 let postFetch, holdStatus = false, rejectStatus = false;
 const statusCalls = [];
 Object.defineProperty(globalThis, 'fetch', { configurable:true, get: () => (url, options) => {
@@ -66,7 +66,28 @@ test('status gate is bodyless no-store GET; incompatible or invalid status preve
   assert.equal(call.options.redirect,'error'); assert.equal(call.options.credentials,'omit');
   assert.equal(call.options.referrerPolicy,'no-referrer');
   assert.equal(Object.hasOwn(call.options,'body'),false);
-  statusBody = {softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null};
+  statusBody = {softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null,publishedDataset:null};
+});
+
+test('status gate rejects a runtime software version that differs from the extension build', async () => {
+  let posts = 0;
+  globalThis.fetch = async () => { posts += 1; return {ok:true,json:async()=>({processedKeys:['key1'],hints:[]})}; };
+  statusBody = {...statusBody,softwareVersion:'1.2.4',apiContract:'caption-hints.v2'};
+  assert.deepEqual(await send({type:'caption-hints',requestId:'software-version-mismatch',payload},sender(8)),{ok:false,reason:'runtime-incompatible'});
+  assert.equal(posts,0);
+  statusBody = {...statusBody,softwareVersion:'1.2.3'};
+});
+
+test('initialization and a different published dataset fail closed before caption upload', async () => {
+  let posts = 0;
+  globalThis.fetch = async () => { posts += 1; return {ok:true,json:async()=>({processedKeys:['key1'],hints:[]})}; };
+  statusBody = {softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'formal',ready:false,reason:'INITIALIZING',datasetVersion:4,publishedDataset:null};
+  assert.deepEqual(await send({type:'caption-hints',requestId:'initializing',payload},sender(8)),{ok:false,reason:'runtime-initializing'});
+  statusBody = {softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'formal',ready:true,reason:'OK',datasetVersion:4,
+    publishedDataset:{releaseId:'other-release',preparationId:'prep-1',ruleId:'rules-1',sqlVersion:'4',sha256:'a'.repeat(64)}};
+  assert.deepEqual(await send({type:'caption-hints',requestId:'dataset-mismatch',payload},sender(8)),{ok:false,reason:'runtime-incompatible'});
+  assert.equal(posts,0);
+  statusBody = {softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null,publishedDataset:null};
 });
 
 test('runtime status proxy is restricted to the exact extension popup sender', async () => {
@@ -193,7 +214,7 @@ test('diagnostic console failure cannot change response or request cleanup', asy
   try {
     const body={processedKeys:['key1'],hints:[]};
     globalThis.fetch=async()=>({ok:true,json:async()=>body});
-    assert.deepEqual(await send({type:'caption-hints',requestId:'console-fault',payload},sender(1)),{ok:true,body});
+    assert.deepEqual(await send({type:'caption-hints',requestId:'console-fault',payload},sender(1)),{ok:true,body,runtimeMode:'demo'});
     await send({type:'cancel-caption-hint',requestId:'console-fault'},sender(1));
   } finally { console.info=info; }
 });

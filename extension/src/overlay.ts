@@ -28,6 +28,7 @@ export type OverlayPresentation = { shown: number; lines: RenderedLine[] };
 export class BilingualOverlay {
   private host?: HTMLElement;
   private line?: HTMLSpanElement;
+  private status?: HTMLSpanElement;
   private viewport?: HTMLElement;
   private outgoing?: HTMLElement;
   private rollFrame?: number;
@@ -45,6 +46,7 @@ export class BilingualOverlay {
     if (!host || !this.line) { this.lastPresentation = { shown: 0, lines: [] }; return 0; }
     if (!source) {
       host.dataset.lexiflowState = "idle";
+      if (this.status) this.status.textContent = "";
       this.finishRoll(false);
       if (this.line.childNodes.length) this.line.replaceChildren();
       if (this.player?.classList.contains("lexiflow-inline-active")) this.player.classList.remove("lexiflow-inline-active");
@@ -79,6 +81,14 @@ export class BilingualOverlay {
       ? view.hints?.filter(hint => !preferences.entryKeys.has(suppressionKey(hint.lexiconEntryId, hint.lexiconVersion)) &&
         (!touchesFrozen(hint) || this.shownHintKeys.has(hintKey(hint)))) ?? [] : [];
     host.dataset.lexiflowState = view.state === "ready" && !hints.length ? "no-pending" : view.state;
+    if (this.status) {
+      this.status.textContent = view.runtimeFailure === "initializing" ? "服务正在初始化，英文字幕保持显示。"
+        : view.runtimeFailure === "incompatible" ? "服务/API/资料身份不兼容，英文字幕保持显示。"
+        : view.runtimeFailure === "unavailable" ? "服务不可用，英文字幕保持显示。"
+        : view.state === "waiting" ? "正在检查服务状态，英文字幕保持显示。"
+        : view.runtimeMode === "demo" ? "演示模式 · 非正式就绪。"
+        : view.runtimeMode === "formal" && ["ready", "no-pending"].includes(view.state) ? "正式就绪。" : "";
+    }
     const span = (start: number, end: number, className = ""): void => {
       if (start === end) return;
       const breakAt = boundaries.find(value => value > start && value < end);
@@ -248,7 +258,7 @@ export class BilingualOverlay {
     this.finishRoll(false); this.shownHintKeys.clear(); this.presented.clear();
     if (this.player?.classList.contains("lexiflow-inline-active")) this.player.classList.remove("lexiflow-inline-active");
     this.host?.remove();
-    this.line = undefined; this.viewport = undefined;
+    this.line = undefined; this.viewport = undefined; this.status = undefined;
     if (!player?.querySelector("#ytp-caption-window-container")) return undefined;
     this.player = player;
     const host = document.createElement("div");
@@ -257,12 +267,13 @@ export class BilingualOverlay {
     host.style.cssText = "position:absolute;left:5%;right:5%;bottom:12%;z-index:2147483646;pointer-events:none;text-align:center";
     const root = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
-    style.textContent = ":host{font-family:Arial,sans-serif;white-space:normal}.viewport{position:relative;overflow:hidden}.line{display:block;white-space:normal;color:white;font-weight:500;line-height:1.55;text-shadow:0 1px 2px #000;overflow-wrap:anywhere}.line:empty{display:none}.caption-row{display:block;text-align:center}.row-content{padding:.12em .25em;background:rgba(0,0,0,.8);box-decoration-break:clone;-webkit-box-decoration-break:clone}.row-break{display:none}.outgoing{position:absolute;top:0;left:0;right:0;color:white;font:inherit;line-height:1.55;text-shadow:0 1px 2px #000}.rolling{transition:transform .42s ease-out}.hint-phrase{text-decoration-line:underline;text-decoration-color:#ffe58f;text-decoration-thickness:.08em;text-underline-offset:.14em;text-decoration-skip-ink:none}.gloss{display:inline;white-space:normal;color:#ffe58f;background:none;border:0;padding:0;font:inherit;text-shadow:inherit;cursor:pointer;pointer-events:auto;max-width:100%;overflow-wrap:anywhere}.gloss:focus-visible{outline:2px solid #ffe58f}@media(prefers-reduced-motion:reduce){.rolling{transition:none!important}}";
+    style.textContent = ":host{font-family:Arial,sans-serif;white-space:normal}.viewport{position:relative;overflow:hidden}.line{display:block;white-space:normal;color:white;font-weight:500;line-height:1.55;text-shadow:0 1px 2px #000;overflow-wrap:anywhere}.line:empty{display:none}.service-status:empty{display:none}.service-status{display:block;margin-top:.25em;padding:.1em .3em;border-radius:.2em;background:rgba(0,0,0,.72);color:#eee;font-size:.42em;line-height:1.35;text-shadow:none}.caption-row{display:block;text-align:center}.row-content{padding:.12em .25em;background:rgba(0,0,0,.8);box-decoration-break:clone;-webkit-box-decoration-break:clone}.row-break{display:none}.outgoing{position:absolute;top:0;left:0;right:0;color:white;font:inherit;line-height:1.55;text-shadow:0 1px 2px #000}.rolling{transition:transform .42s ease-out}.hint-phrase{text-decoration-line:underline;text-decoration-color:#ffe58f;text-decoration-thickness:.08em;text-underline-offset:.14em;text-decoration-skip-ink:none}.gloss{display:inline;white-space:normal;color:#ffe58f;background:none;border:0;padding:0;font:inherit;text-shadow:inherit;cursor:pointer;pointer-events:auto;max-width:100%;overflow-wrap:anywhere}.gloss:focus-visible{outline:2px solid #ffe58f}@media(prefers-reduced-motion:reduce){.rolling{transition:none!important}}";
     this.line = document.createElement("span");
     this.line.className = "line";
     this.viewport = document.createElement("div"); this.viewport.className = "viewport";
     this.viewport.append(this.line);
-    root.append(style, this.viewport);
+    this.status = document.createElement("span"); this.status.className = "service-status"; this.status.setAttribute("role", "status"); this.status.setAttribute("aria-live", "polite");
+    root.append(style, this.viewport, this.status);
     player.append(host);
     this.host = host;
     return host;

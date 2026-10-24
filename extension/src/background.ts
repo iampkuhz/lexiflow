@@ -9,7 +9,7 @@ import {
   type ApiTimings,
   type CaptionHintRequest
 } from "./protocol";
-import { readRuntimeStatus } from "./runtime-status";
+import { readRuntimeStatus, runtimeCompatibility } from "./runtime-status";
 
 type HintMessage = { type: "caption-hints"; requestId: string; payload: CaptionHintRequest };
 type CancelMessage = { type: "cancel-caption-hint"; requestId: string };
@@ -154,9 +154,23 @@ async function requestHints(key: string, payload: CaptionHintRequest): Promise<A
   try {
     const gate = await readRuntimeStatus(controller.signal);
     if (controller.signal.aborted) throw new Error("aborted");
-    if (!gate.ok || (gate.status.mode !== "demo" && !gate.status.ready)) {
-      outcome = gate.ok ? "backend_unavailable" : gate.reason;
-      return { ok: false, reason: gate.ok ? "backend_unavailable" : gate.reason === "timeout" ? "timeout" : gate.reason === "network" ? "network" : "invalid-response" };
+    const expectedVersion = chrome.runtime.getManifest().version_name;
+    if (!gate.ok) {
+      outcome = gate.reason;
+      return { ok: false, reason: gate.reason === "timeout" ? "timeout" : gate.reason === "network" ? "network" : "invalid-response" };
+    }
+    const compatibility = runtimeCompatibility(gate.status, expectedVersion);
+    if (gate.status.reason === "INITIALIZING") {
+      outcome = "runtime-initializing";
+      return { ok: false, reason: "runtime-initializing" };
+    }
+    if (compatibility || gate.status.reason === "SCHEMA_MISMATCH" || gate.status.reason === "IDENTITY_MISMATCH") {
+      outcome = "runtime-incompatible";
+      return { ok: false, reason: "runtime-incompatible" };
+    }
+    if (gate.status.mode !== "demo" && !gate.status.ready) {
+      outcome = "backend_unavailable";
+      return { ok: false, reason: "backend_unavailable" };
     }
     const response = await fetch(API_URL, {
       method: "POST",
@@ -184,7 +198,7 @@ async function requestHints(key: string, payload: CaptionHintRequest): Promise<A
     const timings = parseServerTiming(response.headers?.get("Server-Timing") ?? null);
     const rawRequestId = response.headers?.get("X-Request-ID");
     const requestId = isStableId(rawRequestId) ? rawRequestId : undefined;
-    return body === undefined ? { ok: false, reason: "invalid-response" } : { ok: true, body, ...(requestId ? { requestId } : {}), ...timings };
+    return body === undefined ? { ok: false, reason: "invalid-response" } : { ok: true, body, runtimeMode: gate.status.mode === "demo" ? "demo" : "formal", ...(requestId ? { requestId } : {}), ...timings };
   } catch {
     const reason = timedOut ? "timeout" : controller.signal.aborted ? "aborted" : "network";
     outcome = reason;
@@ -209,7 +223,11 @@ chrome.runtime.onMessage.addListener(
     if (request?.type === "runtime-status") {
       const popup = sender.id === chrome.runtime.id && sender.url === chrome.runtime.getURL("popup.html") && sender.tab === undefined;
       if (!popup) { sendResponse({ ok: false, reason: "invalid-request" }); return undefined; }
-      void readRuntimeStatus().then(sendResponse);
+      void readRuntimeStatus().then(result => {
+        if (!result.ok) { sendResponse(result); return; }
+        const compatibility = runtimeCompatibility(result.status, chrome.runtime.getManifest().version_name);
+        sendResponse(compatibility ? { ok: false, reason: compatibility } : result);
+      });
       return true;
     }
     if (request?.type === "local-preferences") {

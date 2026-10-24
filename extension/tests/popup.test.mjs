@@ -87,11 +87,11 @@ function createChrome(behaviour = {}) {
         return Promise.resolve(resp);
       },
     },
-    runtime: { lastError: null, sendMessage(message) {
+    runtime: { lastError: null, getManifest() { return { version_name: "1.2.3" }; }, sendMessage(message) {
       chromeObj._calls.push({ method: "runtime.sendMessage", message: { ...message } });
       if (message.type === "runtime-status") {
         if (behaviour.statusReject) return Promise.reject(new Error("status unavailable"));
-        return Promise.resolve(behaviour.statusResponse ?? {ok:true,status:{softwareVersion:"1.2.3",apiContract:"caption-hints.v2",mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null}});
+        return Promise.resolve(behaviour.statusResponse ?? {ok:true,status:{softwareVersion:"1.2.3",apiContract:"caption-hints.v2",mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null,publishedDataset:null}});
       }
       return behaviour.preferenceResponse !== undefined ? Promise.resolve(behaviour.preferenceResponse) : Promise.resolve({ ok: true, entryKeys: [] });
     } },
@@ -396,13 +396,16 @@ test('restore failure is independent from later successful page toggle',async()=
 });
 
 test('service status renders formal readiness, degraded warmup, demo, missing data, dependency and schema states',async()=>{
+ const dataset={releaseId:'release-1',preparationId:'prep-1',ruleId:'rules-1',sqlVersion:'4',sha256:'a'.repeat(64)};
  const cases=[
-  [{mode:'formal',ready:true,reason:'OK',datasetVersion:7},'正式就绪。',false],
-  [{mode:'formal',ready:true,reason:'PREWARM_DEGRADED',datasetVersion:7},'正式就绪 · 预热降级，服务可用。',false],
-  [{mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null},'演示模式 · 非正式就绪',false],
-  [{mode:'formal',ready:false,reason:'NO_PUBLISHED_DATA',datasetVersion:0},'尚无已发布资料，请检查资料初始化与发布状态。',false],
-  [{mode:'formal',ready:false,reason:'DEPENDENCY_UNAVAILABLE',datasetVersion:null},'服务依赖不可用，请检查后端依赖服务。',false],
-  [{mode:'formal',ready:false,reason:'SCHEMA_MISMATCH',datasetVersion:null},'资料结构不匹配，请使用匹配的服务与资料。',false]
+  [{mode:'formal',ready:true,reason:'OK',datasetVersion:7,publishedDataset:dataset},'正式就绪。',false],
+  [{mode:'formal',ready:true,reason:'PREWARM_DEGRADED',datasetVersion:7,publishedDataset:dataset},'正式就绪 · 预热降级，服务可用。',false],
+  [{mode:'formal',ready:false,reason:'INITIALIZING',datasetVersion:null,publishedDataset:null},'服务正在初始化发布资料…',false],
+  [{mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null,publishedDataset:null},'演示模式 · 非正式就绪',false],
+  [{mode:'formal',ready:false,reason:'NO_PUBLISHED_DATA',datasetVersion:0,publishedDataset:null},'尚无已发布资料，请检查资料初始化与发布状态。',false],
+  [{mode:'formal',ready:false,reason:'DEPENDENCY_UNAVAILABLE',datasetVersion:null,publishedDataset:null},'服务依赖不可用，请检查后端依赖服务。',false],
+  [{mode:'formal',ready:false,reason:'IDENTITY_MISMATCH',datasetVersion:7,publishedDataset:null},'服务发行资料身份校验失败，请检查匹配的发行包。',false],
+  [{mode:'formal',ready:false,reason:'SCHEMA_MISMATCH',datasetVersion:null,publishedDataset:null},'资料结构不匹配，请使用匹配的服务与资料。',false]
  ];
  for(const [state,expected] of cases){
   const value={softwareVersion:'1.2.3',apiContract:'caption-hints.v2',...state};
@@ -423,6 +426,20 @@ test('protocol mismatch and unreachable states are fixed safe messages and hide 
  assert.equal(unreachable.doc.getElementById('service-identity').hidden,true);
  assert.equal(unreachable.doc.getElementById('enhance-toggle').disabled,false,'status failure does not disable page controls');
  assert.equal(unreachable.doc.getElementById('enhance-toggle').checked,false);
+});
+
+test('a runtime software version different from the extension build is rejected visibly',async()=>{
+ const {doc}=freshSetup({statusResponse:{ok:false,reason:'software-version'}});await flush();
+ assert.equal(doc.getElementById('service-status').textContent,'软件版本不匹配，请安装与服务对应的扩展。');
+});
+
+test('an unverified or incompatible dataset binding is clearly rejected',async()=>{
+ const missing=freshSetup({statusResponse:{ok:false,reason:'binding-missing'}});await flush();
+ assert.match(missing.doc.getElementById('service-status').textContent,/缺少发行资料绑定/u);
+ const mismatch=freshSetup({statusResponse:{ok:false,reason:'dataset-identity'}});await flush();
+ assert.match(mismatch.doc.getElementById('service-status').textContent,/资料身份不匹配/u);
+ const invalid=freshSetup({statusResponse:{ok:false,reason:'invalid-response'}});await flush();
+ assert.match(invalid.doc.getElementById('service-status').textContent,/服务\/API合同不兼容/u);
 });
 
 test('status lookup failure leaves page enhancement and local preference controls usable',async()=>{

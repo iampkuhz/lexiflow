@@ -7,8 +7,9 @@ import { chromium } from 'playwright';
 import { checkExtensionArchive } from '../scripts/checks/check-extension-archive.mjs';
 
 /** Load the verified archive in an isolated Playwright Chromium profile (not a manual Chrome install). */
-export async function smokeExtensionArchive(zipPath, expectedCommit) {
-  const checked = await checkExtensionArchive(zipPath, expectedCommit, undefined, { verifyCurrentIdentity: false });
+export async function smokeExtensionArchive(zipPath, expectedCommit, { mode = 'formal' } = {}) {
+  if (!['formal', 'development'].includes(mode)) throw new Error('ARCHIVE_SMOKE_MODE_INVALID');
+  const checked = await checkExtensionArchive(zipPath, expectedCommit, undefined, { mode, verifyCurrentIdentity: false });
   const temp = await mkdtemp(path.join(tmpdir(), 'lexiflow-extension-archive-smoke-'));
   const extensionDir = path.join(temp, 'extension');
   const profileDir = path.join(temp, 'profile');
@@ -57,6 +58,8 @@ export async function smokeExtensionArchive(zipPath, expectedCommit) {
 function invokedDirectly() { try { return process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url); } catch { return false; } }
 if (invokedDirectly()) {
   const args = process.argv.slice(2);
-  if (args.length !== 2) { process.stderr.write('usage: node extension/tests/archive-smoke.mjs <zip-path> <expected-commit>\n'); process.exitCode = 2; }
-  else smokeExtensionArchive(args[0], args[1]).then(result => process.stdout.write(`${JSON.stringify(result)}\n`)).catch(error => { process.stderr.write(`extension archive smoke failed: ${error.message}\n`); process.exitCode = 1; });
+  const development = args[0] === '--development';
+  const values = development ? args.slice(1) : args;
+  if (values.length !== 2) { process.stderr.write('usage: node extension/tests/archive-smoke.mjs [--development] <zip-path> <expected-commit>\n'); process.exitCode = 2; }
+  else smokeExtensionArchive(values[0], values[1], { mode: development ? 'development' : 'formal' }).then(result => process.stdout.write(`${JSON.stringify(result)}\n`)).catch(error => { process.stderr.write(`extension archive smoke failed: ${error.message}\n`); process.exitCode = 1; });
 }
