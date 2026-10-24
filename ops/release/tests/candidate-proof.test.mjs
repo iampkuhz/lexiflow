@@ -36,7 +36,7 @@ test('dirty source, different source input and tampered artifact are rejected', 
 
   const tampered = await assembled();
   try {
-    await writeFile(`${tampered.candidateDirectory}/payload/compose.yaml`, 'tampered');
+    await writeFile(`${tampered.candidateDirectory}/payload/database/schema.sql`, 'tampered');
     await assert.rejects(verifyCandidateProof(tampered.root, request(tampered)));
   } finally { await tampered.cleanup(); }
 });

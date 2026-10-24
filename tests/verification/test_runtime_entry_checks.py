@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from scripts.verification import freeze_inputs
 from tests.verification.test_scenarios import verify_repository
-from tests.verification.declaration_fixtures import input_member, input_closure
+from tests.verification.declaration_fixtures import input_member, input_closure, trigger_covers
 from scripts.verification.planning.check_definitions import (
     filter_checks_by_scope,
     load_declarations_snapshot,
@@ -76,21 +76,19 @@ class RuntimeEntryCheckTest(unittest.TestCase):
             base["command"],
         )
         self.assertEqual(
-            ["node", "git", "sh", "mktemp", "sha256-tool"], base["required_environment"]
+            ["node", "git", "sh", "bash", "mktemp", "sha256-tool"], base["required_environment"]
         )
         self.assertEqual([], base["module_dependencies"])
         base_closure = input_closure(ROOT, base)
         for name in (
-            "integrity/release-artifact-manifest.mjs",
-            "build/package-release-artifacts.mjs",
-            "runtime/release-artifact-verification.sh",
             "tests/runtime-entry.test.mjs",
-            "build/release-runtime-entry-generator.mjs",
-            "integrity/source-build-identity.mjs",
-            "version.txt",
+            "tests/lifecycle-fixture.mjs",
             "test_tools/run-release-tool-tests.mjs",
         ):
             self.assertIn("ops/release/" + name, base_closure)
+        for name in ("ops/docker/Dockerfile.runtime", "ops/docker/runtime-entrypoint.sh"):
+            self.assertIn(name, base_closure)
+            self.assertTrue(trigger_covers(self.by_id[BASE], name))
         for name in base["input_paths"]:
             selected = select_checks_for_changes(
                 self.checks, [input_member(ROOT, name, check=self.by_id[BASE])]

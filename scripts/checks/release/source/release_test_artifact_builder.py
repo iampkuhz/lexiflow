@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import os
+import re
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 from scripts.checks.release.source.check_synthetic_release_lifecycle import (
     ConsumerError,
@@ -129,11 +129,6 @@ def build_local_inputs(
         cwd=repo / "extension",
         env=base,
     )
-    _run(
-        ["node", "scripts/packaging/package-extension-release.mjs"],
-        cwd=repo / "extension",
-        env=base,
-    )
     jdbc = environ.get("LEXIFLOW_POSTGRES_TEST_JDBC_URL", "").strip()
     if not jdbc:
         raise ConsumerError("BLOCKED", "missing-isolated-postgres-test-jdbc-url")
@@ -195,6 +190,24 @@ def build_local_inputs(
         or report["datasets"][0]["sha256"] == report["datasets"][1]["sha256"]
     ):
         raise ConsumerError("FAIL", "synthetic-generations-not-distinct")
+    # Build the real extension bundle once with the first generation as the baseline;
+    # the candidate builder clones dist and repackages each exact generation separately.
+    policy_sha = hashlib.sha256(b"lexiflow.deterministic-preparation.v1").hexdigest()
+    sql_path = repo / "infra/postgres/schema.sql"
+    sql_version = hashlib.sha256(_read_regular(sql_path, 16 * 1024 * 1024)).hexdigest()
+    first = report["datasets"][0]
+    expected_dataset = {
+        "releaseId": "synthetic-" + first["sha256"],
+        "preparationId": "synthetic-" + policy_sha,
+        "ruleId": "synthetic-no-model",
+        "sqlVersion": sql_version,
+        "sha256": first["sha256"],
+    }
+    extension_env = dict(base)
+    extension_env["LEXIFLOW_EXPECTED_DATASET"] = json.dumps(
+        expected_dataset, separators=(",", ":")
+    )
+    _run(["npm", "run", "build"], cwd=repo / "extension", env=extension_env)
     return {
         "home": home,
         "fixtures": fixtures,
@@ -232,15 +245,14 @@ def produce_candidates(
     repo: Path, scratch: Path, env: Mapping[str, str], binding: object
 ) -> dict[str, object]:
     """单次匿名 stdin 桥事务产生真实镜像与两代候选。"""
+    import tempfile
+
+    from ops.release.host_resources import release_docker_preflight
     from scripts.checks.release.source.check_synthetic_release_lifecycle import (
-        _run_bounded,
         _pairs,
         _reject_constant,
+        _run_bounded,
     )
-    from ops.release.host_resources import (
-        release_docker_preflight as release_docker_preflight,
-    )
-    import tempfile
 
     inputs = build_local_inputs(repo, scratch, env)
     pipeline_env = {
@@ -259,15 +271,6 @@ def produce_candidates(
             "api.jar",
             repo / "backend/product/api/build/internal/boot/api-internal.jar",
             1024**3,
-        ),
-        (
-            "extension.zip",
-            repo
-            / "tmp/releases"
-            / version
-            / commit
-            / f"lexiflow-extension-{version}.zip",
-            256 * 1024**2,
         ),
     )
     for name, source, maximum in sources:
@@ -368,5 +371,9 @@ def produce_candidates(
         "formalReleaseEligible": False,
         "datasetRecords": result["datasets"],
         "softwareVersion": version,
+        "sourceCommit": commit,
         "apiContract": result["apiContract"],
+        "sqlVersion": hashlib.sha256(
+            _read_regular(repo / "infra/postgres/schema.sql", 16 * 1024 * 1024)
+        ).hexdigest(),
     }

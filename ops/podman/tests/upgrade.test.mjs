@@ -7,10 +7,12 @@ import crypto from 'node:crypto';
 import { activatePreparedTarget } from '../installation/installation-upgrade-workflow.mjs';
 import { treeDigest, verifyExtension, installationRecord, publishRecord } from '../installation/installation-update-transaction.mjs';
 import { versionSummary } from '../installation/installation-version-summary.mjs';
-import { EXTENSION_PACKAGE_FILES as PACKAGE_FILES } from '../../../extension/scripts/packaging/extension-archive-contract.mjs';
+import { EXTENSION_PACKAGE_FILES as ALL_PACKAGE_FILES } from '../../../extension/scripts/packaging/extension-archive-contract.mjs';
 import { makeZip } from '../../release/tests/zip-fixture.mjs';
 import { assertExtensionTreeMatches, materializeExtensionTree } from '../../../extension/scripts/packaging/extension-archive-contract.mjs';
 
+// Source-development fixtures bind only the 18081 client, without published data.
+const PACKAGE_FILES = ALL_PACKAGE_FILES.filter(name => name !== 'expected-dataset.json');
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const identity = n => {
   const baseVersion = '2.0.0-SNAPSHOT', sourceCommit = n.repeat(40), sourceSha256 = 'a'.repeat(64), sourceDate = '20261006';
@@ -22,7 +24,7 @@ function extension(dir, id) {
   fs.mkdirSync(dir, { recursive: true });
   for (const name of PACKAGE_FILES) {
     const bytes = Buffer.from(name === 'manifest.json'
-      ? JSON.stringify({ manifest_version: 3, version: id.chromeVersion, version_name: id.softwareVersion, permissions: ['storage'], host_permissions: ['http://127.0.0.1:18080/*'], background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' } })
+      ? JSON.stringify({ manifest_version: 3, version: id.chromeVersion, version_name: id.softwareVersion, permissions: ['storage'], host_permissions: ['http://127.0.0.1:18081/*'], background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' } })
       : name === 'build-identity.json' ? JSON.stringify(id) : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>' : `fixture:${name}`);
     const target = path.join(dir, ...name.split('/')); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, bytes);
   }
@@ -30,10 +32,10 @@ function extension(dir, id) {
 function archive(dir, id) {
   const filename = `lexiflow-extension-${id.softwareVersion}.zip`;
   const entries = Object.fromEntries(PACKAGE_FILES.map(name => [name, Buffer.from(name === 'manifest.json'
-    ? JSON.stringify({ manifest_version: 3, version: id.chromeVersion, version_name: id.softwareVersion, permissions: ['storage'], host_permissions: ['http://127.0.0.1:18080/*'], background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' } })
+    ? JSON.stringify({ manifest_version: 3, version: id.chromeVersion, version_name: id.softwareVersion, permissions: ['storage'], host_permissions: ['http://127.0.0.1:18081/*'], background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' } })
     : name === 'build-identity.json' ? JSON.stringify(id) : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>' : `fixture:${name}`)]));
   const bytes = makeZip(Object.entries(entries)), digest = sha(bytes);
-  const relative = `extension-artifacts/${id.buildId}/${filename}`, target = path.join(dir, relative);
+  const relative = `extension-artifacts/${id.buildId}/api-18081/${filename}`, target = path.join(dir, relative);
   fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, bytes);
   fs.writeFileSync(`${target}.sha256`, `${digest}  ${filename}\n`);
   return { path: relative, bytes: bytes.length, sha256: digest, buildIdentity: id };
@@ -53,7 +55,7 @@ function fixture() {
   fs.writeFileSync(path.join(dir, 'synthetic-marker.json'), '{"preserve":true}\n');
   const oldDigests = Object.fromEntries(['compose.yaml', 'release.env', 'infra/postgres/schema.sql']
     .map(name => [name, sha(fs.readFileSync(path.join(dir, name)))]));
-  const previous = { id: 'a'.repeat(32), root: dir, apiPort: 18080, buildIdentity: old, digests: oldDigests };
+  const previous = { id: 'a'.repeat(32), root: dir, apiPort: 18081, buildIdentity: old, digests: oldDigests };
   const generationVersion = 'c'.repeat(64);
   const targetState = { ...previous, buildIdentity: next, version: next.softwareVersion,
     apiImage: 'sha256:' + 'd'.repeat(64), dataset: path.dirname(dataFile), inputSha256: sha(fs.readFileSync(dataFile)),
@@ -83,7 +85,7 @@ test('database-fact recovery activates target only, retaining marker, installati
     assert.equal(result.phase, 'ready'); assert.equal(result.id, f.previous.id);
     assert.equal(result.apiPort, f.previous.apiPort); assert.deepEqual(fs.readFileSync(path.join(f.dir, 'secrets/app-password')), secret);
     assert.deepEqual(fs.readFileSync(path.join(f.dir, 'synthetic-marker.json')), marker);
-    assert.equal(verifyExtension(path.join(f.dir, 'extension'), f.next, 18080), f.prepared.extensionSha256);
+    assert.equal(verifyExtension(path.join(f.dir, 'extension'), f.next, 18081), f.prepared.extensionSha256);
     assert.equal(fs.readFileSync(path.join(f.dir, 'infra/postgres/schema.sql'), 'utf8'), 'target sql');
     assert.deepEqual(f.calls.slice(-3), ['compose:up -d --no-deps --force-recreate api', 'ready', 'save']);
   } finally { f.cleanup(); }
@@ -132,7 +134,7 @@ test('state-save failure after DB fact retains target files and retry advances, 
     assert.equal(fs.readFileSync(path.join(f.dir, 'compose.yaml'), 'utf8'), 'target compose');
     assert.equal(fs.readFileSync(path.join(f.dir, 'infra/postgres/schema.sql'), 'utf8'), 'target sql');
     assert.equal(fs.readFileSync(path.join(f.dir, 'release.env'), 'utf8'), 'target env');
-    assert.equal(verifyExtension(path.join(f.dir, 'extension'), f.next, 18080), f.prepared.extensionSha256);
+    assert.equal(verifyExtension(path.join(f.dir, 'extension'), f.next, 18081), f.prepared.extensionSha256);
     const recovered = await activatePreparedTarget(f.callbacks);
     assert.equal(recovered.phase, 'ready'); assert.equal(f.calls.filter(call => call === 'ready').length, 1);
   } finally { f.cleanup(); }
@@ -141,7 +143,7 @@ test('state-save failure after DB fact retains target files and retry advances, 
 test('extension mismatch and immutable installation record publication remain guarded', () => {
   const f = fixture();
   try {
-    assert.throws(() => verifyExtension(path.join(f.dir, 'extension'), f.next, 18080), /EXTENSION_IDENTITY_MISMATCH/);
+    assert.throws(() => verifyExtension(path.join(f.dir, 'extension'), f.next, 18081), /EXTENSION_IDENTITY_MISMATCH/);
     assert.throws(() => verifyExtension(f.prepared.extensionStage, f.next, 19000), /EXTENSION_IDENTITY_MISMATCH/);
     const record = installationRecord({ operation: f.operation, kind: 'upgrade', previous: { version: f.old.softwareVersion },
       target: f.next, startedAt: new Date().toISOString(), status: 'PASS' });

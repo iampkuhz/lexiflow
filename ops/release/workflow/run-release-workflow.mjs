@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, createReadStream, createWriteStream } from 'node:fs';
-import { lstat, mkdir, open, readdir } from 'node:fs/promises';
+import { lstat, mkdir, open, readdir, writeFile } from 'node:fs/promises';
 import { spawn, execFileSync } from 'node:child_process';
 import { hostname } from 'node:os';
 import { Transform } from 'node:stream';
@@ -15,7 +15,7 @@ import { checkReleaseTag, resolveBuildIdentity, assertBuildIdentityMatches } fro
 import { loadBaseImageLock } from '../build/release-image-build-plan.mjs';
 import { validateRelativePath } from '../integrity/release-artifact-manifest.mjs';
 import { runRunnerCommand } from '../runner/runner.mjs';
-import { resolveFormalInvocation, resolveReleaseExecutionEnvironment } from './release-execution-environment.mjs';
+import { resolveFormalInvocation, resolveReleaseExecutionEnvironment, releaseWorkflowDirectory } from './release-execution-environment.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const HEX = /^[a-f0-9]{64}$/;
@@ -122,11 +122,10 @@ async function readBoundedJson(file, maximum = MAX_JSON) {
 }
 
 function requestShape(value) {
-  if (!exact(value, ['releaseTag', 'dataset', 'noticesRoot', 'outputParent', 'previous', 'endpoint'])
+  if (!exact(value, ['releaseTag', 'dataset', 'noticesRoot', 'outputParent', 'endpoint'])
     || !exact(value.dataset, ['path', 'sha256', 'releaseId', 'preparationId', 'ruleId', 'sqlVersion'])
-    || !exact(value.previous, ['candidateDirectory', 'candidateSha256'])
     || !/^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/.test(value.releaseTag)
-    || !HEX.test(value.dataset.sha256) || !HEX.test(value.previous.candidateSha256)
+    || !HEX.test(value.dataset.sha256)
     || ![value.dataset.releaseId, value.dataset.preparationId, value.dataset.ruleId, value.dataset.sqlVersion].every(x => typeof x === 'string' && ID.test(x))
     || !/^unix:\/\/\/[A-Za-z0-9_./-]+$/.test(value.endpoint)) fail('REQUEST_INVALID');
   return value;
@@ -310,14 +309,14 @@ export async function prepareWorkflow(requestFile, options = {}) {
     const request = requestShape(raw);
     await endpointCheck(request.endpoint);
     await safePath(root, 'directory');
-    for (const file of [request.dataset.path, request.previous.candidateDirectory, request.noticesRoot])
+    for (const file of [request.dataset.path, request.noticesRoot])
       await safePath(file, file === request.dataset.path ? 'file' : 'directory');
     await safePath(request.outputParent, 'directory');
     if (within(root, request.outputParent) || within(request.outputParent, root)
-      || within(request.previous.candidateDirectory, request.outputParent)
-      || within(request.outputParent, request.previous.candidateDirectory)
       || (await readdir(request.outputParent)).length !== 0) fail('OUTPUT_PARENT_INVALID');
-    const quality = path.join(root, 'tmp/quality/release-workflow');
+    const identity = tagCheck(request.releaseTag, root);
+    assertBuildIdentityMatches(identityRead(root), identity);
+    const quality = releaseWorkflowDirectory(root);
     await safePath(quality, 'directory', true);
     await mkdir(quality, { recursive: true, mode: 0o700 });
     guard = await open(path.join(quality, 'prepare.lock'), 'wx', 0o600);
@@ -325,13 +324,12 @@ export async function prepareWorkflow(requestFile, options = {}) {
     const runtimeConfig = path.join(root, '.local/lexiflow/runtime.json');
     try { await lstat(runtimeConfig); fail('PERSONAL_CONFIG_PRESENT'); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
-    const identity = tagCheck(request.releaseTag, root);
-    assertBuildIdentityMatches(identityRead(root), identity);
-    const previous = await verify(request.previous);
-    if (previous.candidateSha256 !== request.previous.candidateSha256 || previous.buildIdentity.buildId === identity.buildId
-      || previous.buildIdentity.sourceCommit === identity.sourceCommit) fail('PREVIOUS_NOT_DISTINCT');
     const dataset = await fileDigest(request.dataset.path);
     if (dataset.sha256 !== request.dataset.sha256) fail('DATASET_DIGEST_MISMATCH');
+    const expectedDatasetPath = path.join(quality, 'expected-dataset.json');
+    const expectedDataset = { releaseId: request.dataset.releaseId, preparationId: request.dataset.preparationId,
+      ruleId: request.dataset.ruleId, sqlVersion: request.dataset.sqlVersion, sha256: dataset.sha256 };
+    await writeFile(expectedDatasetPath, `${JSON.stringify(expectedDataset)}\n`, { flag: 'wx', mode: 0o600 });
     const { licenses, notices } = await loadLicenses(root, request.noticesRoot, trackedCheck);
     const baseImages = (await baseLoad(root)).filter(item => item.platform === 'linux/arm64');
     if (baseImages.length !== 1) fail('ARM64_BASE_IMAGE_MISSING');
@@ -344,7 +342,7 @@ export async function prepareWorkflow(requestFile, options = {}) {
       { cwd: root, env, timeout: 2_400_000, logFile: path.join(quality, 'gradle.log') });
     await command('npm', ['ci'], { cwd: path.join(root, 'extension'), env, timeout: 900_000,
       logFile: path.join(quality, 'npm-ci.log') });
-    const extensionOutput = await command('node', ['extension/scripts/packaging/package-extension-release.mjs'], { cwd: root, env, timeout: 900_000,
+    const extensionOutput = await command('node', ['extension/scripts/packaging/package-extension-release.mjs', '--expected-dataset', expectedDatasetPath], { cwd: root, env, timeout: 900_000,
       logFile: path.join(quality, 'extension-release.log') });
     let extension; try { extension = parseStrictJson(Buffer.from(extensionOutput.trim(), 'utf8')); }
     catch { fail('EXTENSION_OUTPUT_INVALID'); }
@@ -362,31 +360,11 @@ export async function prepareWorkflow(requestFile, options = {}) {
     { cwd: root, env, timeout: 900_000, logFile: path.join(quality, 'dataset-verify.log') });
     const stagedJar = path.join(artifactRoot, 'api.jar');
     await copyArtifact(jarSource, stagedJar, jar);
-    const imageDescriptor = { schemaVersion: 1, softwareVersion: identity.softwareVersion,
-      sourceCommit: identity.sourceCommit, jar: { path: 'api.jar', ...jar } };
-    const imageResult = await buildImages({ repoRoot: root, artifactRoot, descriptor: imageDescriptor,
-      outputParent: imageParent, endpoint: request.endpoint, platform: 'linux/arm64' });
-    const imageDirectory = imageResult.candidateDirectory;
-    await safePath(imageDirectory, 'directory');
-    const imageMarker = (await readBoundedJson(path.join(imageDirectory, 'candidate.json'))).value;
-    const imageSha256 = (await fileDigest(path.join(imageDirectory, 'candidate.json'))).sha256;
-    if (imageMarker.platform !== 'linux/arm64' || !Array.isArray(imageMarker.artifacts)
-      || imageMarker.artifacts.length !== 2) fail('IMAGE_RESULT_INVALID');
     const records = [];
-    await copyArtifact(zipSource, path.join(artifactRoot, 'extension.zip'), zip);
-    await addArtifact(records, 'extension', path.join(artifactRoot, 'extension.zip'), 'extension.zip', licenses,
-      ['LexiFlow', 'extension-third-party'], { softwareVersion: identity.softwareVersion, sourceCommit: identity.sourceCommit });
     await copyArtifact(request.dataset.path, path.join(artifactRoot, 'dataset.zip'), dataset);
     await addArtifact(records, 'dataset', path.join(artifactRoot, 'dataset.zip'), 'dataset.zip', licenses,
       ['dataset'], { releaseId: request.dataset.releaseId, preparationId: request.dataset.preparationId,
         ruleId: request.dataset.ruleId, sqlVersion: request.dataset.sqlVersion });
-    for (const [role, relative, target] of [
-      ['compose', 'ops/docker/compose.yaml', 'compose.yaml'],
-      ['sql', 'infra/postgres/schema.sql', 'schema.sql']]) {
-      const source = path.join(root, relative); const summary = await fileDigest(source);
-      await copyArtifact(source, path.join(artifactRoot, target), summary);
-      await addArtifact(records, role, path.join(artifactRoot, target), target, licenses, ['LexiFlow']);
-    }
     for (const [relative, summary] of notices) {
       const target = relative;
       await mkdir(path.dirname(path.join(artifactRoot, target)), { recursive: true, mode: 0o700 });
@@ -394,11 +372,35 @@ export async function prepareWorkflow(requestFile, options = {}) {
       const associated = licenses.filter(item => item.noticePath === relative).map(item => item.id);
       records.push({ role: 'license', path: target, ...summary, licenseIds: associated });
     }
+    const imageDescriptor = { schemaVersion: 1, softwareVersion: identity.softwareVersion,
+      sourceCommit: identity.sourceCommit, jar: { path: 'api.jar', ...jar }, apiContract: 'caption-hints.v2',
+      sqlVersion: request.dataset.sqlVersion,
+      dataset: { path: 'dataset.zip', ...dataset, releaseId: request.dataset.releaseId,
+        preparationId: request.dataset.preparationId, ruleId: request.dataset.ruleId },
+      notices: [...notices.entries()].map(([noticePath, summary]) => ({ path: noticePath, ...summary })) };
+    const imageResult = await buildImages({ repoRoot: root, artifactRoot, descriptor: imageDescriptor,
+      outputParent: imageParent, endpoint: request.endpoint, platform: 'linux/arm64' });
+    const imageDirectory = imageResult.candidateDirectory;
+    await safePath(imageDirectory, 'directory');
+    const imageMarker = (await readBoundedJson(path.join(imageDirectory, 'candidate.json'))).value;
+    const imageSha256 = (await fileDigest(path.join(imageDirectory, 'candidate.json'))).sha256;
+    if (imageMarker.platform !== 'linux/arm64' || !Array.isArray(imageMarker.artifacts)
+      || imageMarker.artifacts.length !== 1) fail('IMAGE_RESULT_INVALID');
+    await copyArtifact(zipSource, path.join(artifactRoot, 'extension.zip'), zip);
+    await addArtifact(records, 'extension', path.join(artifactRoot, 'extension.zip'), 'extension.zip', licenses,
+      ['LexiFlow', 'extension-third-party'], { softwareVersion: identity.softwareVersion, sourceCommit: identity.sourceCommit,
+        expectedDataset });
+    for (const [role, relative, target] of [
+      ['sql', 'infra/postgres/schema.sql', 'schema.sql']]) {
+      const source = path.join(root, relative); const summary = await fileDigest(source);
+      await copyArtifact(source, path.join(artifactRoot, target), summary);
+      await addArtifact(records, role, path.join(artifactRoot, target), target, licenses, ['LexiFlow']);
+    }
     const manifestLicenses = licenses.map(item => ({ ...item }));
     for (const item of imageMarker.artifacts) {
-      if (!['api-image', 'postgres-image'].includes(item.role) || item.platform !== 'linux/arm64') fail('IMAGE_RESULT_INVALID');
+      if (item.role !== 'runtime-image' || item.platform !== 'linux/arm64') fail('IMAGE_RESULT_INVALID');
       records.push({ role: item.role, platform: item.platform,
-        licenseIds: licenseIds(licenses, ...(item.role === 'api-image' ? ['LexiFlow', 'API-runtime'] : ['PostgreSQL'])) });
+        licenseIds: licenseIds(licenses, 'LexiFlow', 'API-runtime', 'PostgreSQL') });
     }
     const descriptor = { schemaVersion: 1, buildIdentity: identity, softwareVersion: identity.softwareVersion,
       sourceCommit: identity.sourceCommit, apiContract: 'caption-hints.v2', sqlVersion: request.dataset.sqlVersion,
@@ -409,18 +411,17 @@ export async function prepareWorkflow(requestFile, options = {}) {
     const candidateSha256 = (await fileDigest(path.join(candidate.candidateDirectory, 'candidate.json'))).sha256;
     const target = { candidateDirectory: candidate.candidateDirectory, candidateSha256 };
     const proof = await verify(target);
-    if (proof.candidateSha256 !== candidateSha256 || proof.buildIdentity.buildId !== identity.buildId
-      || candidateSha256 === request.previous.candidateSha256) fail('CANDIDATE_VERIFY_FAILED');
+    if (proof.candidateSha256 !== candidateSha256 || proof.buildIdentity.buildId !== identity.buildId) fail('CANDIDATE_VERIFY_FAILED');
     assertBuildIdentityMatches(identityRead(root), identity);
     tagCheck(request.releaseTag, root);
     if ((await readBoundedJson(requestFile)).sha256 !== requestSha256) fail('REQUEST_CHANGED');
-    const runtimeRequest = { previous: request.previous, target };
+    const runtimeRequest = { target };
     const runtimeFile = path.join(quality, 'candidate-runtime-request.json');
     await writePrivate(runtimeFile, runtimeRequest);
     const runtimeSha256 = (await fileDigest(runtimeFile)).sha256;
     const handoff = { schemaVersion: 1, host: hostname(), root,
       releaseTag: request.releaseTag, buildIdentity: identity, requestSha256, runtimeRequestSha256: runtimeSha256,
-      requestFile, previous: request.previous, target };
+      requestFile, target };
     await writePrivate(path.join(quality, 'handoff.json'), handoff);
     if (process.env.GITHUB_ENV) {
       await safePath(process.env.GITHUB_ENV);
@@ -440,25 +441,22 @@ export async function resumePromotion({ submissionId, releaseTag, publish = fals
   if (!UUID.test(submissionId || '') || !/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(releaseTag || '')
     || typeof publish !== 'boolean') return { status: 'FAIL', reason: 'RESUME_INPUT_INVALID' };
   try {
-    const quality = path.join(root, 'tmp/quality/release-workflow');
+    const quality = releaseWorkflowDirectory(root);
     const handoff = (await readBoundedJson(path.join(quality, 'handoff.json'))).value;
     const runtimeFile = path.join(quality, 'candidate-runtime-request.json');
     const runtime = await readBoundedJson(runtimeFile);
     if (!exact(handoff, ['schemaVersion', 'host', 'root', 'releaseTag', 'buildIdentity', 'requestSha256',
-      'runtimeRequestSha256', 'requestFile', 'previous', 'target']) || handoff.schemaVersion !== 1 || handoff.host !== host
+      'runtimeRequestSha256', 'requestFile', 'target']) || handoff.schemaVersion !== 1 || handoff.host !== host
       || handoff.root !== root || handoff.releaseTag !== releaseTag || handoff.runtimeRequestSha256 !== runtime.sha256
-      || JSON.stringify(runtime.value) !== JSON.stringify({ previous: handoff.previous, target: handoff.target }))
+      || JSON.stringify(runtime.value) !== JSON.stringify({ target: handoff.target }))
       fail('HANDOFF_DRIFT');
     const original = await readBoundedJson(handoff.requestFile);
-    if (original.sha256 !== handoff.requestSha256 || JSON.stringify(original.value.previous) !== JSON.stringify(handoff.previous)
-      || original.value.releaseTag !== releaseTag) fail('HANDOFF_DRIFT');
+    if (original.sha256 !== handoff.requestSha256 || original.value.releaseTag !== releaseTag) fail('HANDOFF_DRIFT');
     const originalRequest = requestShape(original.value);
     assertBuildIdentityMatches(identityReader(root), handoff.buildIdentity);
     tagChecker(releaseTag, root);
-    const previous = await verifier(handoff.previous); const target = await verifier(handoff.target);
-    if (previous.candidateSha256 === target.candidateSha256
-      || previous.buildIdentity.buildId === target.buildIdentity.buildId
-      || target.buildIdentity.buildId !== handoff.buildIdentity.buildId) fail('HANDOFF_DRIFT');
+    const target = await verifier(handoff.target);
+    if (target.buildIdentity.buildId !== handoff.buildIdentity.buildId) fail('HANDOFF_DRIFT');
     const args = ['-m', 'ops.release.workflow.promote_verified_release', '--submission-id', submissionId,
       '--candidate-directory', handoff.target.candidateDirectory];
     if (publish) args.push('--publish');
@@ -484,7 +482,7 @@ export async function resumePromotion({ submissionId, releaseTag, publish = fals
       if (publish && state?.published === 'unknown')
         return { status: 'BLOCKED', reason: 'PUBLISH_STATE_UNKNOWN', published: 'unknown',
           writeStage: state.write_stage ?? null, releaseId: state.release_id ?? null,
-          ...(['api-image', 'postgres-image'].includes(state.registry_role) ? { registryRole: state.registry_role } : {}) };
+          ...(state.registry_role === 'runtime-image' ? { registryRole: state.registry_role } : {}) };
       if (publish && state?.published !== false)
         return { status: 'BLOCKED', reason: 'PUBLISH_STATE_UNKNOWN', published: 'unknown',
           writeStage: null, releaseId: null };
@@ -511,7 +509,7 @@ export async function executeFormal(args, { root = ROOT, run = runCommand,
   const invocation = resolveFormalInvocation(args, root);
   const env = environmentResolver({ root, purpose: 'formal' });
   const timeout = args[0] === 'validate' ? 5_400_000 : 1_800_000;
-  const quality = path.join(root, 'tmp/quality/release-workflow');
+  const quality = releaseWorkflowDirectory(root);
   await safePath(quality, 'directory', true);
   await mkdir(quality, { recursive: true, mode: 0o700 });
   const action = args[0];

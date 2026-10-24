@@ -40,6 +40,7 @@ MAX_UNCOMPRESSED = 8 * 1024**3
 MAX_JSON = 4 * 1024**2
 MAX_LICENSE_TABLE = 256 * 1024
 MAX_LICENSES = 64
+NOTES_ROOT = ROOT / "ops/release/notes"
 API_VERSION = "2026-03-10"
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -63,6 +64,46 @@ class PromotionError(ValueError):
 
 def _fail(reason: str) -> None:
     raise PromotionError(reason)
+
+
+def _release_notes(version: str, source_commit: str) -> str:
+    """读取精确版本正文；校验必须早于所有远端写入。"""
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        _fail("release-notes-version-invalid")
+    try:
+        note_bytes = (NOTES_ROOT / f"{version}.md").read_bytes()
+        text = note_bytes.decode("utf-8")
+    except (OSError, UnicodeError):
+        _fail("release-notes-missing")
+    if (ROOT / ".git").exists():
+        try:
+            checked = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(ROOT),
+                    "show",
+                    f"{source_commit}:ops/release/notes/{version}.md",
+                ],
+                check=True,
+                capture_output=True,
+                timeout=5,
+                env={
+                    key: os.environ[key]
+                    for key in ("PATH", "HOME", "LANG", "LC_ALL", "TZ")
+                    if key in os.environ
+                },
+            ).stdout
+        except Exception:
+            _fail("release-notes-commit-unavailable")
+        if checked != note_bytes:
+            _fail("release-notes-not-in-release-commit")
+    lines = text.splitlines()
+    if not text.strip() or not lines or lines[0].strip() != f"# 1. {version}":
+        _fail("release-notes-version-mismatch")
+    if not all(term in text.lower() for term in ("前置", "两步", "限制")):
+        _fail("release-notes-incomplete")
+    return text.rstrip()
 
 
 def _read(root: Path, relative: str, limit: int) -> bytes:
@@ -673,10 +714,188 @@ def _asset_digest_matches(
     )
 
 
+def _assets_are_exact_subset(
+    assets: list[dict[str, Any]], expected: dict[str, tuple[int, str]]
+) -> bool:
+    """恢复 draft 时仅允许期望附件的已验证子集；冲突或额外内容失败关闭。"""
+    names = [x.get("name") for x in assets]
+    ids = [x.get("id") for x in assets]
+    if len(names) != len(set(names)) or len(ids) != len(set(ids)):
+        return False
+    for item in assets:
+        name = item.get("name")
+        if (
+            name not in expected
+            or item.get("state") != "uploaded"
+            or type(item.get("id")) is not int
+            or item["id"] <= 0
+            or type(item.get("size")) is not int
+            or item["size"] != expected[name][0]
+            or item.get("digest") != "sha256:" + expected[name][1]
+        ):
+            return False
+    return True
+
+
 def _unknown(stage: str, release_id: int | None = None) -> None:
     raise PromotionError(
         "release-write-state-unknown", stage=stage, release_id=release_id
     )
+
+
+def _event_directory(version: str, candidate_sha256: str) -> Path:
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version) or not SHA.fullmatch(
+        candidate_sha256
+    ):
+        _fail("promotion-event-identity-invalid")
+    base = (
+        ROOT / "tmp/quality/release-workflow" / version / "promotion" / candidate_sha256
+    )
+    current = ROOT
+    for part in (
+        "tmp",
+        "quality",
+        "release-workflow",
+        version,
+        "promotion",
+        candidate_sha256,
+        "events",
+    ):
+        current = current / part
+        try:
+            current.mkdir(mode=0o700)
+        except FileExistsError:
+            pass
+        except OSError:
+            _fail("promotion-event-storage-unavailable")
+        try:
+            info = current.lstat()
+        except OSError:
+            _fail("promotion-event-storage-unavailable")
+        if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            _fail("promotion-event-storage-unavailable")
+    return base / "events"
+
+
+def _record_event(
+    version: str,
+    candidate_sha256: str,
+    stage: str,
+    state: str,
+    *,
+    role: str | None = None,
+    release_id: int | None = None,
+    image_digest: str | None = None,
+    asset: str | None = None,
+    asset_sha256: str | None = None,
+    asset_bytes: int | None = None,
+    config_id: str | None = None,
+) -> str:
+    """以 exclusive append-only 事件保留远端写尝试及结果，不含凭据/响应体。"""
+    if state not in ("attempt", "confirmed", "unknown", "blocked"):
+        _fail("promotion-event-state-invalid")
+    value = {
+        "schemaVersion": "lexiflow.release-promotion-event.v1",
+        "eventId": str(uuid.uuid4()),
+        "createdAtEpochNs": time.time_ns(),
+        "softwareVersion": version,
+        "candidateSha256": candidate_sha256,
+        "stage": stage,
+        "state": state,
+    }
+    if role is not None and role in ("runtime-image",):
+        value["role"] = role
+    if release_id is not None and type(release_id) is int and release_id > 0:
+        value["releaseId"] = release_id
+    if image_digest is not None and re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest):
+        value["imageDigest"] = image_digest
+    if config_id is not None and re.fullmatch(r"sha256:[0-9a-f]{64}", config_id):
+        value["configId"] = config_id
+    if asset is not None and re.fullmatch(r"[A-Za-z0-9._-]{1,255}", asset):
+        value["asset"] = asset
+    if asset_sha256 is not None and SHA.fullmatch(asset_sha256):
+        value["assetSha256"] = asset_sha256
+    if type(asset_bytes) is int and asset_bytes > 0:
+        value["assetBytes"] = asset_bytes
+    directory = _event_directory(version, candidate_sha256)
+    path = directory / f"{value['createdAtEpochNs']}-{value['eventId']}.json"
+    data = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    try:
+        fd = os.open(
+            path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        with os.fdopen(fd, "wb") as out:
+            out.write(data)
+            out.flush()
+            os.fsync(out.fileno())
+    except OSError:
+        _fail("promotion-event-write-failed")
+    return path.relative_to(ROOT).as_posix()
+
+
+def _has_unknown_write(version: str, candidate_sha256: str) -> bool:
+    directory = _event_directory(version, candidate_sha256)
+    latest: dict[tuple[Any, ...], tuple[int, str]] = {}
+    for path in directory.iterdir():
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 4096:
+            _fail("promotion-event-log-invalid")
+        try:
+            event = _json(path.read_bytes())
+        except Exception:
+            _fail("promotion-event-log-invalid")
+        if (
+            not isinstance(event, dict)
+            or event.get("schemaVersion") != "lexiflow.release-promotion-event.v1"
+            or event.get("softwareVersion") != version
+            or event.get("candidateSha256") != candidate_sha256
+            or event.get("state") not in ("attempt", "confirmed", "unknown", "blocked")
+            or not isinstance(event.get("stage"), str)
+            or type(event.get("createdAtEpochNs")) is not int
+        ):
+            _fail("promotion-event-log-invalid")
+        key = (
+            (event["stage"],)
+            if event["stage"] == "github-release-create"
+            else (
+                event["stage"],
+                event.get("role"),
+                event.get("releaseId"),
+                event.get("asset"),
+            )
+        )
+        previous = latest.get(key)
+        if previous is None or event["createdAtEpochNs"] >= previous[0]:
+            latest[key] = (event["createdAtEpochNs"], event["state"])
+    # A crash after a write attempt is itself an unresolved outcome even when no
+    # response handler got to append an explicit unknown event.
+    return any(state in ("attempt", "unknown") for _, state in latest.values())
+
+
+def _confirmed_registry_digest(version: str, candidate_sha256: str) -> str | None:
+    directory = _event_directory(version, candidate_sha256)
+    confirmed = []
+    for path in directory.iterdir():
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 4096:
+            _fail("promotion-event-log-invalid")
+        event = _json(path.read_bytes())
+        if (
+            isinstance(event, dict)
+            and event.get("schemaVersion") == "lexiflow.release-promotion-event.v1"
+            and event.get("softwareVersion") == version
+            and event.get("candidateSha256") == candidate_sha256
+            and event.get("stage") == "ghcr-image"
+            and event.get("state") == "confirmed"
+            and event.get("role") == "runtime-image"
+        ):
+            digest = event.get("imageDigest")
+            if not isinstance(digest, str) or not re.fullmatch(
+                r"sha256:[0-9a-f]{64}", digest
+            ):
+                _fail("promotion-event-log-invalid")
+            confirmed.append((event.get("createdAtEpochNs", 0), digest))
+    return max(confirmed)[1] if confirmed else None
 
 
 def _publish(
@@ -688,6 +907,7 @@ def _publish(
     meta: dict[str, tuple[int, str]],
     revalidate: Callable[[], None],
     registry_context: dict[str, Any],
+    release_notes: str,
 ) -> dict[str, Any]:
     token = os.environ.get("GITHUB_TOKEN", "")
     config_token = os.environ.get("LEXIFLOW_RELEASE_CONFIG_TOKEN", "")
@@ -706,13 +926,46 @@ def _publish(
             _fail("remote-tag-mismatch")
 
     gate()
-    releases = _pages(api, prefix + "/releases")
-    if any(x.get("tag_name") == tag for x in releases):
-        _fail("release-tag-already-exists")
-    gate()
     try:
-        registry = release_registry.publish_images(
-            owner=owner, repo=repo, revalidate=gate, **registry_context
+        event_args = (identity["softwareVersion"], registry_context["candidate_sha256"])
+        _record_event(*event_args, "ghcr-image", "attempt", role="runtime-image")
+        try:
+            registry = release_registry.publish_images(
+                owner=owner, repo=repo, revalidate=gate, **registry_context
+            )
+        except release_registry.RegistryError as exc:
+            _record_event(
+                *event_args,
+                "ghcr-image",
+                "unknown" if exc.write_unknown else "blocked",
+                role="runtime-image",
+            )
+            raise
+        image_digest = (
+            registry["images"][0].get("manifestDigest")
+            if isinstance(registry, dict) and registry.get("images")
+            else None
+        )
+        previous_digest = _confirmed_registry_digest(*event_args)
+        if previous_digest is not None and image_digest != previous_digest:
+            _record_event(
+                *event_args,
+                "ghcr-image",
+                "blocked",
+                role="runtime-image",
+                image_digest=image_digest,
+                config_id=registry["images"][0].get("imageId"),
+            )
+            raise PromotionError(
+                "registry-manifest-digest-conflict", stage="registry-verify"
+            )
+        _record_event(
+            *event_args,
+            "ghcr-image",
+            "confirmed",
+            role="runtime-image",
+            image_digest=image_digest,
+            config_id=registry["images"][0].get("imageId"),
         )
         _registry_assets(registry, owner, repo, registry_context, assets, meta)
     except release_registry.RegistryError as exc:
@@ -722,31 +975,142 @@ def _publish(
             registry_role=exc.role,
         ) from None
     gate()
-    try:
-        status, created = api.api(
-            "POST",
-            prefix + "/releases",
-            {
-                "tag_name": tag,
-                "draft": True,
-                "prerelease": False,
-                "target_commitish": identity["sourceCommit"],
-                "name": tag,
-            },
+    image = registry["images"][0]
+    image_ref = f"ghcr.io/{owner.lower()}/{repo.lower()}@{image['manifestDigest']}"
+    run_command = (
+        "podman run --image-volume=ignore --pull=always -d --name lexiflow-release --publish 127.0.0.1:18080:8080 "
+        "--volume lexiflow-release-data:/var/lib/lexiflow --memory=2g --cpus=2 "
+        f"--stop-timeout=45 {image_ref}"
+    )
+    automatic = ["", "## 下载与校验", ""]
+    for name in sorted(assets):
+        url = f"https://github.com/{owner}/{repo}/releases/download/{tag}/{name}"
+        automatic.append(
+            f"- [{name}]({url}) — SHA-256 `{meta[name][1]}`，{meta[name][0]} bytes"
         )
-    except Exception:
-        _unknown("create")
-    release_id = created.get("id") if isinstance(created, dict) else None
-    if type(release_id) is not int or release_id <= 0:
-        release_id = None
-    if (
-        status not in (200, 201)
-        or release_id is None
-        or created.get("tag_name") != tag
-        or created.get("draft") is not True
-        or created.get("prerelease") is not False
-    ):
-        _unknown("create", release_id)
+    automatic.extend(
+        ("", "## 固定 digest 安装命令", "", "```sh", run_command, "```", "")
+    )
+    final_notes = release_notes.rstrip() + "\n" + "\n".join(automatic)
+    releases = _pages(api, prefix + "/releases")
+    existing = [x for x in releases if x.get("tag_name") == tag]
+    if len(existing) > 1:
+        raise PromotionError("release-tag-conflict", stage="draft")
+    release_id = None
+    resumed = False
+    if existing:
+        release_id = existing[0].get("id")
+        if type(release_id) is not int or release_id <= 0:
+            raise PromotionError("release-tag-conflict", stage="draft")
+        try:
+            status, found = api.api("GET", f"{prefix}/releases/{release_id}")
+            found_assets = _release_assets(api, owner, repo, release_id)
+        except PromotionError:
+            _unknown("resume-inspect", release_id)
+        if (
+            status != 200
+            or not isinstance(found, dict)
+            or found.get("tag_name") != tag
+            or found.get("target_commitish") != identity["sourceCommit"]
+            or found.get("name") != tag
+            or found.get("body") != final_notes
+            or found.get("prerelease") is not False
+            or not _assets_are_exact_subset(found_assets, meta)
+        ):
+            raise PromotionError(
+                "release-existing-content-conflict",
+                stage="draft",
+                release_id=release_id,
+            )
+        if found.get("draft") is False:
+            if found.get("immutable") is not True or not _asset_digest_matches(
+                found_assets, meta
+            ):
+                raise PromotionError(
+                    "release-existing-content-conflict",
+                    stage="confirm",
+                    release_id=release_id,
+                )
+            try:
+                release_registry.verify_images(
+                    registry,
+                    owner=owner,
+                    repo=repo,
+                    expected={
+                        "softwareVersion": identity["softwareVersion"],
+                        "sourceCommit": identity["sourceCommit"],
+                        "candidateSha256": registry_context["candidate_sha256"],
+                        "manifestSha256": registry_context["manifest_sha256"],
+                    },
+                )
+                latest_status, latest = api.api("GET", prefix + "/releases/latest")
+            except Exception:
+                _unknown("resume-confirm", release_id)
+            if (
+                latest_status != 200
+                or not isinstance(latest, dict)
+                or latest.get("id") != release_id
+            ):
+                raise PromotionError(
+                    "release-existing-content-conflict",
+                    stage="confirm",
+                    release_id=release_id,
+                )
+            _record_event(
+                *event_args,
+                "github-release-publish",
+                "confirmed",
+                release_id=release_id,
+            )
+            return {
+                "published": True,
+                "release_id": release_id,
+                "tag": tag,
+                "registry_images": registry,
+                "recovered": True,
+            }
+        if found.get("draft") is not True:
+            raise PromotionError(
+                "release-existing-content-conflict",
+                stage="draft",
+                release_id=release_id,
+            )
+        resumed = True
+    else:
+        _record_event(*event_args, "github-release-create", "attempt")
+        try:
+            status, created = api.api(
+                "POST",
+                prefix + "/releases",
+                {
+                    "tag_name": tag,
+                    "draft": True,
+                    "prerelease": False,
+                    "target_commitish": identity["sourceCommit"],
+                    "name": tag,
+                    "body": final_notes,
+                },
+            )
+        except Exception:
+            _record_event(*event_args, "github-release-create", "unknown")
+            _unknown("create")
+        release_id = created.get("id") if isinstance(created, dict) else None
+        if type(release_id) is not int or release_id <= 0:
+            release_id = None
+        if (
+            status not in (200, 201)
+            or release_id is None
+            or created.get("tag_name") != tag
+            or created.get("draft") is not True
+            or created.get("prerelease") is not False
+        ):
+            _record_event(
+                *event_args, "github-release-create", "unknown", release_id=release_id
+            )
+            _unknown("create", release_id)
+        _record_event(
+            *event_args, "github-release-create", "confirmed", release_id=release_id
+        )
 
     def draft_gate() -> None:
         try:
@@ -756,8 +1120,55 @@ def _publish(
                 str(exc), stage="draft", release_id=release_id
             ) from None
 
+    # Inspect the newly-created draft before the first attachment write. A concurrent
+    # writer or malformed POST result must never receive files from this candidate.
+    try:
+        draft_status, draft_before = api.api("GET", f"{prefix}/releases/{release_id}")
+        assets_before = _release_assets(api, owner, repo, release_id)
+    except PromotionError:
+        _unknown("draft-preflight", release_id)
+    if (
+        draft_status != 200
+        or not isinstance(draft_before, dict)
+        or draft_before.get("tag_name") != tag
+        or draft_before.get("name") != tag
+        or draft_before.get("draft") is not True
+        or draft_before.get("prerelease") is not False
+        or draft_before.get("target_commitish") != identity["sourceCommit"]
+        or draft_before.get("body") != final_notes
+        or (resumed and not _assets_are_exact_subset(assets_before, meta))
+        or (not resumed and assets_before)
+    ):
+        raise PromotionError(
+            "release-draft-preflight-conflict", stage="draft", release_id=release_id
+        )
+
+    already_uploaded: set[str] = set()
+    if resumed:
+        try:
+            existing_assets = _release_assets(api, owner, repo, release_id)
+        except PromotionError:
+            _unknown("resume-assets", release_id)
+        if not _assets_are_exact_subset(existing_assets, meta):
+            raise PromotionError(
+                "release-existing-content-conflict",
+                stage="draft",
+                release_id=release_id,
+            )
+        already_uploaded = {x["name"] for x in existing_assets}
     for name, path in assets.items():
+        if name in already_uploaded:
+            continue
         draft_gate()
+        _record_event(
+            *event_args,
+            "github-asset-upload",
+            "attempt",
+            release_id=release_id,
+            asset=name,
+            asset_sha256=meta[name][1],
+            asset_bytes=meta[name][0],
+        )
         try:
             fd, before = _stable_fd(path.parent, path.name)
         except PromotionError as exc:
@@ -775,6 +1186,15 @@ def _publish(
                     stream=(fd, meta[name][0], meta[name][1]),
                 )
             except Exception:
+                _record_event(
+                    *event_args,
+                    "github-asset-upload",
+                    "unknown",
+                    release_id=release_id,
+                    asset=name,
+                    asset_sha256=meta[name][1],
+                    asset_bytes=meta[name][0],
+                )
                 _unknown("upload", release_id)
         finally:
             os.close(fd)
@@ -789,7 +1209,25 @@ def _publish(
             or item["size"] != meta[name][0]
             or item.get("digest") != "sha256:" + meta[name][1]
         ):
+            _record_event(
+                *event_args,
+                "github-asset-upload",
+                "unknown",
+                release_id=release_id,
+                asset=name,
+                asset_sha256=meta[name][1],
+                asset_bytes=meta[name][0],
+            )
             _unknown("upload", release_id)
+        _record_event(
+            *event_args,
+            "github-asset-upload",
+            "confirmed",
+            release_id=release_id,
+            asset=name,
+            asset_sha256=meta[name][1],
+            asset_bytes=meta[name][0],
+        )
     draft_gate()
     try:
         releases = _pages(api, prefix + "/releases")
@@ -810,8 +1248,11 @@ def _publish(
         or not isinstance(draft, dict)
         or draft.get("id") != release_id
         or draft.get("tag_name") != tag
+        or draft.get("name") != tag
         or draft.get("draft") is not True
         or draft.get("prerelease") is not False
+        or draft.get("target_commitish") != identity["sourceCommit"]
+        or draft.get("body") != final_notes
         or not _asset_digest_matches(listed, meta)
     ):
         raise PromotionError(
@@ -837,6 +1278,9 @@ def _publish(
             registry_role=exc.role,
         ) from None
     draft_gate()
+    _record_event(
+        *event_args, "github-release-publish", "attempt", release_id=release_id
+    )
     try:
         status, published = api.api(
             "PATCH",
@@ -844,6 +1288,9 @@ def _publish(
             {"draft": False, "make_latest": "true"},
         )
     except Exception:
+        _record_event(
+            *event_args, "github-release-publish", "unknown", release_id=release_id
+        )
         _unknown("publish", release_id)
     if (
         status != 200
@@ -852,7 +1299,13 @@ def _publish(
         or published.get("tag_name") != tag
         or published.get("draft") is not False
     ):
+        _record_event(
+            *event_args, "github-release-publish", "unknown", release_id=release_id
+        )
         _unknown("publish", release_id)
+    _record_event(
+        *event_args, "github-release-publish", "confirmed", release_id=release_id
+    )
     try:
         status, final = api.api("GET", f"{prefix}/releases/{release_id}")
         final_assets = _release_assets(api, owner, repo, release_id)
@@ -864,8 +1317,11 @@ def _publish(
         or not isinstance(final, dict)
         or final.get("id") != release_id
         or final.get("tag_name") != tag
+        or final.get("name") != tag
         or final.get("draft") is not False
         or final.get("prerelease") is not False
+        or final.get("target_commitish") != identity["sourceCommit"]
+        or final.get("body") != final_notes
         or final.get("immutable") is not True
         or not _asset_digest_matches(final_assets, meta)
         or not immutable
@@ -885,6 +1341,45 @@ def _publish(
     }
 
 
+def _stage_release_assets(
+    candidate: Path, manifest: dict[str, Any], version: str, workspace: Path
+) -> tuple[dict[str, Path], dict[str, tuple[int, str]]]:
+    """在首个远端写入前验证并固定公开 ZIP 与对应源码原始字节。"""
+    extensions = [x for x in manifest["artifacts"] if x["role"] == "extension"]
+    sources = [x for x in manifest["artifacts"] if x["role"] == "corresponding-sources"]
+    if len(extensions) != 1 or len(sources) != 1:
+        raise PromotionError("release-artifacts-invalid", stage="assets")
+    assets: dict[str, Path] = {}
+    meta: dict[str, tuple[int, str]] = {}
+    for item, name in (
+        (extensions[0], f"lexiflow-extension-{version}.zip"),
+        (sources[0], sources[0]["path"].rsplit("/", 1)[-1]),
+    ):
+        if name.endswith(".zip") and item["bytes"] > MAX_EXTENSION:
+            _fail("candidate-extension-invalid")
+        if item["bytes"] > MAX_ASSET:
+            _fail("asset-size-limit")
+        fd, before = _stable_fd(candidate, "payload/" + item["path"])
+        target = workspace / name
+        try:
+            if before.st_size != item["bytes"]:
+                _fail("candidate-artifact-hash-mismatch")
+            digest = hashlib.sha256()
+            with target.open("xb") as out:
+                _read_exact(fd, item["bytes"], digest, out.write)
+                out.flush()
+                os.fsync(out.fileno())
+            if digest.hexdigest() != item["sha256"] or _stamp(before) != _stamp(
+                os.fstat(fd)
+            ):
+                _fail("candidate-artifact-hash-mismatch")
+        finally:
+            os.close(fd)
+        assets[name] = target
+        meta[name] = (item["bytes"], item["sha256"])
+    return assets, meta
+
+
 def _registry_assets(
     registry: Any,
     owner: str,
@@ -893,79 +1388,199 @@ def _registry_assets(
     assets: dict[str, Path],
     meta: dict[str, tuple[int, str]],
 ) -> None:
-    """映射是单独发行资产，不能修改已验收 candidate/manifest。"""
-    identity = context["identity"]
-    fields = {
-        "schemaVersion",
-        "softwareVersion",
-        "sourceCommit",
-        "candidateSha256",
-        "manifestSha256",
-        "images",
-    }
-    expected = {
-        item["role"]: item
-        for item in context["manifest"]["artifacts"]
-        if item["role"] in ("api-image", "postgres-image")
-    }
+    """生成唯一公开 release.json；不公开候选归档或 sidecar。"""
+    identity, manifest = context["identity"], context["manifest"]
+    image_candidates = [
+        x for x in manifest["artifacts"] if x["role"] == "runtime-image"
+    ]
     if (
         not isinstance(registry, dict)
-        or set(registry) != fields
-        or registry["schemaVersion"] != "lexiflow.registry-images.v1"
-        or registry["softwareVersion"] != identity["softwareVersion"]
-        or registry["sourceCommit"] != identity["sourceCommit"]
-        or registry["candidateSha256"] != context["candidate_sha256"]
-        or registry["manifestSha256"] != context["manifest_sha256"]
-        or not isinstance(registry["images"], list)
-        or len(registry["images"]) != 2
-        or set(expected) != {"api-image", "postgres-image"}
+        or len(registry.get("images", [])) != 1
+        or len(image_candidates) != 1
+        or registry.get("softwareVersion") != identity["softwareVersion"]
+        or registry.get("sourceCommit") != identity["sourceCommit"]
+        or registry.get("candidateSha256") != context["candidate_sha256"]
+        or registry.get("manifestSha256") != context["manifest_sha256"]
     ):
         raise PromotionError("registry-mapping-invalid", stage="registry-mapping")
-    seen = set()
-    for item in registry["images"]:
-        role = item.get("role") if isinstance(item, dict) else None
-        if (
-            not isinstance(item, dict)
-            or set(item)
-            != {
-                "role",
-                "platform",
-                "reference",
-                "manifestDigest",
-                "imageId",
-                "archiveSha256",
-            }
-            or role not in expected
-            or role in seen
-        ):
-            raise PromotionError("registry-mapping-invalid", stage="registry-mapping")
-        suffix = "api" if role == "api-image" else "postgres"
-        if (
-            item["platform"] != "linux/arm64"
-            or item["reference"]
-            != f"ghcr.io/{owner.lower()}/{repo.lower()}-{suffix}:{identity['softwareVersion']}"
-            or item["imageId"] != expected[role]["imageDigest"]
-            or item["archiveSha256"] != expected[role]["sha256"]
-            or not isinstance(item["manifestDigest"], str)
-            or not re.fullmatch(r"sha256:[0-9a-f]{64}", item["manifestDigest"])
-        ):
-            raise PromotionError("registry-mapping-invalid", stage="registry-mapping")
-        seen.add(role)
-    data = (json.dumps(registry, sort_keys=True, indent=2) + "\n").encode()
-    digest = hashlib.sha256(data).hexdigest()
-    workspace = next(iter(assets.values())).parent
-    for name, content in (
-        ("registry-images.json", data),
-        ("registry-images.json.sha256", f"{digest}  registry-images.json\n".encode()),
+    remote = registry["images"][0]
+    item = image_candidates[0]
+    if (
+        remote.get("role") != "runtime-image"
+        or remote.get("platform") != "linux/arm64"
+        or remote.get("imageId") != item.get("imageDigest")
+        or remote.get("archiveSha256") != item.get("sha256")
+        or not isinstance(remote.get("manifestDigest"), str)
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", remote["manifestDigest"])
+        or remote.get("reference")
+        != f"ghcr.io/{owner.lower()}/{repo.lower()}:{identity['softwareVersion']}"
     ):
-        target = workspace / name
-        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        assets[name] = target
-        meta[name] = (len(content), hashlib.sha256(content).hexdigest())
+        raise PromotionError("registry-mapping-invalid", stage="registry-mapping")
+    ext = next((x for x in manifest["artifacts"] if x["role"] == "extension"), None)
+    sources = [x for x in manifest["artifacts"] if x["role"] == "corresponding-sources"]
+    datasets = [x for x in manifest["artifacts"] if x["role"] == "dataset"]
+    if ext is None or len(sources) != 1 or len(datasets) != 1:
+        raise PromotionError("release-artifacts-invalid", stage="assets")
+    version = identity["softwareVersion"]
+    extension_name = f"lexiflow-extension-{version}.zip"
+    source_name = sources[0]["path"].rsplit("/", 1)[-1]
+    release_name = "release.json"
+    workspace = Path(context["workspace"])
+    source_path = workspace / source_name
+    src = sources[0]
+    source_meta = src.get("metadata")
+    source_items = source_meta.get("items") if isinstance(source_meta, dict) else None
+    if (
+        not isinstance(source_meta, dict)
+        or not isinstance(source_meta.get("indexSha256"), str)
+        or not SHA.fullmatch(source_meta["indexSha256"])
+        or not isinstance(source_items, list)
+        or not source_items
+        or len(source_items) > MAX_LICENSES
+    ):
+        raise PromotionError("corresponding-sources-index-invalid", stage="assets")
+    source_ids = set()
+    licenses_by_id = {
+        x.get("id"): x for x in manifest.get("licenses", []) if isinstance(x, dict)
+    }
+    for source in source_items:
+        expected_source_fields = {
+            "id",
+            "component",
+            "licenseId",
+            "licenseName",
+            "sourceUrl",
+            "noticePath",
+            "archivePath",
+            "bytes",
+            "sha256",
+        }
+        if (
+            not isinstance(source, dict)
+            or set(source) != expected_source_fields
+            or not isinstance(source.get("id"), str)
+            or source["id"] in source_ids
+            or not isinstance(source.get("component"), str)
+            or not isinstance(source.get("sourceUrl"), str)
+            or not source["sourceUrl"].startswith("https://")
+            or not isinstance(source.get("noticePath"), str)
+            or not isinstance(source.get("archivePath"), str)
+            or type(source.get("bytes")) is not int
+            or source["bytes"] < 1
+            or not isinstance(source.get("sha256"), str)
+            or not SHA.fullmatch(source["sha256"])
+        ):
+            raise PromotionError("corresponding-sources-index-invalid", stage="assets")
+        license = licenses_by_id.get(source["id"])
+        source_artifact = next(
+            (
+                x
+                for x in manifest["artifacts"]
+                if x.get("role") == "license"
+                and x.get("path") == source["noticePath"]
+                and source["id"] in x.get("licenseIds", [])
+            ),
+            None,
+        )
+        if (
+            license is None
+            or source_artifact is None
+            or source["component"] != license.get("component")
+            or source["licenseId"] != license.get("licenseId")
+            or source["licenseName"] != license.get("licenseName")
+            or source["sourceUrl"] != license.get("sourceUrl")
+            or source["noticePath"] != license.get("noticePath")
+            or source["archivePath"] != "materials/" + license.get("noticePath", "")
+            or source["bytes"] != source_artifact.get("bytes")
+            or source["sha256"] != source_artifact.get("sha256")
+        ):
+            raise PromotionError(
+                "corresponding-sources-license-binding-invalid", stage="assets"
+            )
+        source_ids.add(source["id"])
+    if source_ids != set(src.get("licenseIds", [])):
+        raise PromotionError(
+            "corresponding-sources-license-binding-invalid", stage="assets"
+        )
+    dataset = manifest["dataset"]
+    data_item = datasets[0]
+    if (
+        data_item.get("metadata", {}).get("releaseId") != dataset.get("releaseId")
+        or data_item.get("metadata", {}).get("preparationId")
+        != dataset.get("preparationId")
+        or data_item.get("metadata", {}).get("ruleId") != dataset.get("ruleId")
+        or data_item.get("metadata", {}).get("sqlVersion") != manifest.get("sqlVersion")
+    ):
+        raise PromotionError("published-dataset-binding-invalid", stage="assets")
+    expected_dataset = {
+        "releaseId": dataset["releaseId"],
+        "preparationId": dataset["preparationId"],
+        "ruleId": dataset["ruleId"],
+        "sqlVersion": manifest["sqlVersion"],
+        "sha256": data_item["sha256"],
+    }
+    if ext.get("metadata", {}).get("expectedDataset") != expected_dataset:
+        raise PromotionError(
+            "extension-published-dataset-binding-invalid", stage="assets"
+        )
+    if source_path.name != src["path"].rsplit("/", 1)[-1]:
+        raise PromotionError("corresponding-sources-name-invalid", stage="assets")
+    if source_name not in assets or meta.get(source_name) != (
+        src["bytes"],
+        src["sha256"],
+    ):
+        raise PromotionError("release-source-not-prepared", stage="assets")
+    # Extension is copied from a stable candidate FD; candidate tar remains private.
+    if extension_name not in assets or meta.get(extension_name) != (
+        ext["bytes"],
+        ext["sha256"],
+    ):
+        raise PromotionError("release-extension-not-prepared", stage="assets")
+    source_size, source_sha = src["bytes"], src["sha256"]
+
+    def asset(name: str, size: int, sha: str) -> dict[str, Any]:
+        return {
+            "name": name,
+            "bytes": size,
+            "sha256": sha,
+            "url": f"https://github.com/{owner}/{repo}/releases/download/v{version}/{name}",
+        }
+
+    ext_record = asset(extension_name, ext["bytes"], ext["sha256"])
+    src_record = asset(source_name, source_size, source_sha)
+    release = {
+        "schemaVersion": "lexiflow.release.v1",
+        "softwareVersion": version,
+        "sourceCommit": identity["sourceCommit"],
+        "buildIdentity": identity,
+        "apiContract": manifest["apiContract"],
+        "sqlVersion": manifest["sqlVersion"],
+        "dataset": manifest["dataset"],
+        "publishedDataset": expected_dataset,
+        "image": {
+            "reference": f"ghcr.io/{owner.lower()}/{repo.lower()}@{remote['manifestDigest']}",
+            "digest": remote["manifestDigest"],
+            "configId": remote["imageId"],
+            "platform": remote["platform"],
+            "bytes": item["bytes"],
+        },
+        "assets": {
+            "extension": ext_record,
+            "thirdPartySources": {
+                **src_record,
+                "inventory": src.get("metadata", {}).get("items"),
+                "indexSha256": src.get("metadata", {}).get("indexSha256"),
+            },
+        },
+    }
+    release_path = workspace / release_name
+    release_path.write_text(
+        json.dumps(release, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
+    for name, path in ((release_name, release_path),):
+        data = path.read_bytes()
+        assets[name] = path
+        meta[name] = (len(data), hashlib.sha256(data).hexdigest())
 
 
 def _bound_candidate(
@@ -1032,6 +1647,7 @@ def _bound_candidate(
     paths = set()
     extensions = []
     images = []
+    source_archives = []
     total = len(manifest_bytes) + len(sidecar_bytes)
     for item in artifacts:
         _bounded_item(item)
@@ -1040,16 +1656,18 @@ def _bound_candidate(
         paths.add(item["path"])
         if item["role"] == "extension":
             extensions.append(item)
-        if item["role"] in ("api-image", "postgres-image"):
+        if item["role"] == "runtime-image":
             images.append(item)
+        if item["role"] == "corresponding-sources":
+            source_archives.append(item)
         total += item["bytes"]
         if total > MAX_UNCOMPRESSED:
             _fail("asset-size-limit")
     if len(extensions) != 1 or extensions[0]["bytes"] > MAX_EXTENSION:
         _fail("candidate-extension-invalid")
     if (
-        len(images) != 2
-        or {item["role"] for item in images} != {"api-image", "postgres-image"}
+        len(images) != 1
+        or {item["role"] for item in images} != {"runtime-image"}
         or any(
             item.get("platform") != "linux/arm64"
             or not isinstance(item.get("imageDigest"), str)
@@ -1058,11 +1676,17 @@ def _bound_candidate(
         )
     ):
         _fail("candidate-image-set-invalid")
+    if len(source_archives) != 1 or not source_archives[0]["path"].endswith(".tar.gz"):
+        _fail("candidate-corresponding-sources-invalid")
     return proof, identity, manifest_bytes, candidate_bytes, sidecar_bytes
 
 
 def promote(
-    *, submission_id: str, candidate_directory: str | Path, publish: bool = False
+    *,
+    submission_id: str,
+    candidate_directory: str | Path,
+    publish: bool = False,
+    confirmed_recovery: bool = False,
 ) -> dict[str, Any]:
     """核验既有候选并按显式选择执行不可替换发布。"""
     try:
@@ -1096,6 +1720,9 @@ def promote(
         _verify_local_tag(tag, identity)
         _license_check(manifest)
 
+    release_notes = _release_notes(
+        identity["softwareVersion"], identity["sourceCommit"]
+    )
     if not publish:
         revalidate()
         return {
@@ -1106,89 +1733,31 @@ def promote(
             "tag": tag,
         }
 
+    candidate_sha256 = proof["candidate"]["candidateSha256"]
+    has_unknown = _has_unknown_write(identity["softwareVersion"], candidate_sha256)
+    if confirmed_recovery and not has_unknown:
+        _fail("promotion-recovery-not-required")
+    if has_unknown and not confirmed_recovery:
+        raise PromotionError(
+            "promotion-recovery-confirmation-required", stage="recovery"
+        )
+
     workspace = Path(tempfile.mkdtemp(prefix="lexiflow-release-promotion-"))
     try:
         version = identity["softwareVersion"]
-        archive = workspace / f"lexiflow-{version}-macos-arm64.tar.gz"
-        sha, size = _archive(
-            candidate, manifest, manifest_bytes, sidecar_bytes, archive
+        assets, expected = _stage_release_assets(
+            candidate, manifest, version, workspace
         )
-
-        def write(name: str, data: bytes) -> Path:
-            path = workspace / name
-            with path.open("xb") as file:
-                file.write(data)
-                file.flush()
-                os.fsync(file.fileno())
-            return path
-
-        archive_sidecar = write(
-            archive.name + ".sha256", f"{sha}  {archive.name}\n".encode()
-        )
-        extension_item = next(
-            item for item in manifest["artifacts"] if item["role"] == "extension"
-        )
-        extension_name = f"lexiflow-extension-{version}.zip"
-        extension_path = workspace / extension_name
-        extension_fd, extension_info = _stable_fd(
-            candidate, "payload/" + extension_item["path"]
-        )
-        try:
-            if extension_info.st_size != extension_item["bytes"]:
-                _fail("candidate-artifact-hash-mismatch")
-            with extension_path.open("xb") as output:
-                extension_digest = hashlib.sha256()
-                _read_exact(
-                    extension_fd,
-                    extension_item["bytes"],
-                    extension_digest,
-                    output.write,
-                )
-                output.flush()
-                os.fsync(output.fileno())
-            if extension_digest.hexdigest() != extension_item["sha256"] or _stamp(
-                extension_info
-            ) != _stamp(os.fstat(extension_fd)):
-                _fail("candidate-artifact-hash-mismatch")
-        finally:
-            os.close(extension_fd)
-        extension_digest_hex = extension_item["sha256"]
-        extension_sidecar = write(
-            extension_name + ".sha256",
-            f"{extension_digest_hex}  {extension_name}\n".encode(),
-        )
-        manifest_path = write("manifest.json", manifest_bytes)
-        manifest_sidecar = write("manifest.json.sha256", sidecar_bytes)
-        candidate_path = write("candidate.json", candidate_bytes)
-        assets = {
-            archive.name: archive,
-            archive_sidecar.name: archive_sidecar,
-            extension_name: extension_path,
-            extension_sidecar.name: extension_sidecar,
-            candidate_path.name: candidate_path,
-            manifest_path.name: manifest_path,
-            manifest_sidecar.name: manifest_sidecar,
+        context = {
+            "candidate": candidate,
+            "manifest": manifest,
+            "identity": identity,
+            "endpoint": os.environ.get("LEXIFLOW_RELEASE_PODMAN_ENDPOINT", ""),
+            "candidate_sha256": proof["candidate"]["candidateSha256"],
+            "manifest_sha256": proof["candidate"]["manifestSha256"],
+            "workspace": str(workspace),
+            "existing_only": bool(has_unknown and confirmed_recovery),
         }
-        expected = {}
-        for name, path in assets.items():
-            fd, before = _stable_fd(workspace, name)
-            try:
-                if before.st_size > MAX_ASSET:
-                    _fail("asset-size-limit")
-                digest = hashlib.sha256()
-                _read_exact(fd, before.st_size, digest)
-                if _stamp(before) != _stamp(os.fstat(fd)):
-                    _fail("asset-changed-during-prepare")
-                expected[name] = (before.st_size, digest.hexdigest())
-            finally:
-                os.close(fd)
-        if expected[archive.name] != (size, sha):
-            _fail("archive-changed-during-prepare")
-        if expected[extension_name] != (
-            extension_item["bytes"],
-            extension_item["sha256"],
-        ):
-            _fail("extension-changed-during-prepare")
         revalidate()
         owner, repo = _repository(ROOT)
         declared = os.environ.get("GITHUB_REPOSITORY")
@@ -1206,10 +1775,9 @@ def promote(
                 "candidate": candidate,
                 "manifest": manifest,
                 "identity": identity,
-                "endpoint": os.environ.get("LEXIFLOW_RELEASE_PODMAN_ENDPOINT", ""),
-                "candidate_sha256": proof["candidate"]["candidateSha256"],
-                "manifest_sha256": proof["candidate"]["manifestSha256"],
+                **context,
             },
+            release_notes,
         )
         result["scope"] = "promotion-publish"
         result["assets"] = [
@@ -1234,12 +1802,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--submission-id", required=True)
     parser.add_argument("--candidate-directory", required=True)
     parser.add_argument("--publish", action="store_true")
+    parser.add_argument("--confirmed-recovery", action="store_true")
     args = parser.parse_args(argv)
     try:
         result = promote(
             submission_id=args.submission_id,
             candidate_directory=args.candidate_directory,
             publish=args.publish,
+            confirmed_recovery=args.confirmed_recovery,
         )
         print(json.dumps(result, sort_keys=True))
         return 0 if result["result"] == "PASS" else 2
@@ -1249,7 +1819,7 @@ def main(argv: list[str] | None = None) -> int:
             result.update(
                 published="unknown", write_stage=exc.stage, release_id=exc.release_id
             )
-        if exc.registry_role in ("api-image", "postgres-image"):
+        if exc.registry_role == "runtime-image":
             result["registry_role"] = exc.registry_role
         print(json.dumps(result, sort_keys=True))
         return 2

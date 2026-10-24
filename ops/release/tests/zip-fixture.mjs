@@ -33,19 +33,20 @@ export function makeZip(entries, { deflate = false, dataDescriptor = false } = {
   return Buffer.concat([...locals, cd, end]);
 }
 
-export function jarBytes(identity) {
+export function jarBytes(identity, schema = Buffer.from('')) {
   return makeZip([
     ['META-INF/lexiflow-build.json', `${JSON.stringify(identity)}\n`],
     ['META-INF/lexiflow-version.txt', `${identity.softwareVersion}\n`],
+    ['META-INF/lexiflow-schema.sql', schema],
   ]);
 }
 
-export function extensionBytes(identity) {
+export function extensionBytes(identity, expectedDataset = { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rules-test', sqlVersion: 'sql-test', sha256: '0'.repeat(64) }) {
   const build = `${JSON.stringify(identity)}\n`;
   const manifest = `${JSON.stringify({ manifest_version: 3, version: identity.chromeVersion, version_name: identity.softwareVersion,
     permissions: ['storage'], host_permissions: ['http://127.0.0.1:18080/*'], background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' } })}\n`;
-  const names = ['manifest.json', 'build-identity.json', 'background.js', 'content.js', 'youtube-bridge.js', 'popup.js', 'popup.html', 'popup.css',
+  const names = ['manifest.json', 'build-identity.json', 'expected-dataset.json', 'background.js', 'content.js', 'youtube-bridge.js', 'popup.js', 'popup.html', 'popup.css',
     'assets/icon-16.png', 'assets/icon-32.png', 'assets/icon-48.png', 'assets/icon-128.png', 'assets/logo.svg'];
   return makeZip(names.map(name => [name, name === 'manifest.json' ? manifest : name === 'build-identity.json' ? build
-    : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>' : `synthetic:${name}`]));
+    : name === 'expected-dataset.json' ? `${JSON.stringify(expectedDataset)}\n` : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>' : `synthetic:${name}`]));
 }

@@ -5,6 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import { extensionBytes } from './zip-fixture.mjs';
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const sha = data => createHash('sha256').update(data).digest('hex');
 const dataset = (i) => ({ file: ['dataset-a.zip', 'dataset-b.zip'][i], bytes: 5,
   sha256: sha(`zip-${i}`), datasetVersion: i + 1, preparationPolicy: 'lexiflow.deterministic-preparation.v1' });
@@ -42,10 +45,15 @@ test('single Node transaction really calls one image build, two assembly and ver
   // Native test loader replaces imported dependencies; production has no injectable executor seam.
   const calls = []; const identity = { softwareVersion: '1.2.3', sourceCommit: 'a'.repeat(40), buildId: 'c'.repeat(64), dirty: false };
   t.mock.module('../integrity/source-build-identity.mjs', { namedExports: { resolveCleanBuildIdentity: () => identity } });
+  const extensionBindings = []; const imageBindings = [];
+  t.mock.module(pathToFileURL(path.join(repo, 'extension/scripts/packaging/package-extension-release.mjs')).href, { namedExports: { createExtensionZip: async ({ buildIdentity, expectedDataset }) => {
+    extensionBindings.push(expectedDataset); assert.deepEqual(buildIdentity, identity);
+    return { archive: extensionBytes(identity, expectedDataset) };
+  } } });
   t.mock.module('../build/release-image-builder.mjs', { namedExports: { buildCandidateImages: async request => {
-    calls.push('images'); assert.equal(request.platform, 'linux/arm64');
+    calls.push('images'); assert.equal(request.platform, 'linux/arm64'); imageBindings.push(request.descriptor.dataset);
     assert.equal(request.endpoint, input.endpoint);
-    const directory = path.join(request.outputParent, 'candidate'); await mkdir(directory);
+    const directory = path.join(request.outputParent, `candidate-${calls.filter(item => item === 'images').length}`); await mkdir(directory);
     await writeFile(path.join(directory, 'candidate.json'), '{}'); return { candidateDirectory: directory };
   } } });
   t.mock.module('../build/release-candidate-assembler.mjs', { namedExports: { assembleReleaseCandidate: async request => {
@@ -64,12 +72,15 @@ test('single Node transaction really calls one image build, two assembly and ver
   try {
     await mkdir(path.join(scratch, 'artifacts'));
     await writeFile(path.join(scratch, 'artifacts/api.jar'), 'jar');
-    await writeFile(path.join(scratch, 'artifacts/extension.zip'), 'extension');
     await mkdir(path.join(scratch, 'producer-output/synthetic-datasets'), { recursive: true });
     for (let i = 0; i < 2; i++) await writeFile(path.join(scratch, 'producer-output/synthetic-datasets', dataset(i).file), `zip-${i}`);
     const result = await assembleSyntheticCandidates({ ...input, scratchDirectory: scratch });
-    assert.deepEqual(calls, ['images', 'assemble', 'verify', 'assemble', 'verify']);
+    assert.deepEqual(calls, ['images', 'assemble', 'verify', 'images', 'assemble', 'verify']);
     assert.equal(result.candidates.length, 2); assert.equal(result.apiContract, 'caption-hints.v2');
+    assert.equal(extensionBindings.length, 2);
+    assert.notEqual(extensionBindings[0].sha256, extensionBindings[1].sha256);
+    assert.deepEqual(extensionBindings.map(binding => binding.releaseId), input.datasets.map(row => `synthetic-${row.sha256}`));
+    assert.deepEqual(imageBindings.map(binding => binding.sha256), input.datasets.map(row => row.sha256));
     assert.deepEqual(result.datasets, input.datasets.map(row => ({ version: row.datasetVersion, sha256: row.sha256 })));
   } finally { await rm(scratch, { recursive: true }); }
 });

@@ -102,6 +102,7 @@ function identityLabels(identity) {
     'org.opencontainers.image.revision': identity.sourceCommit,
     'io.lexiflow.build-id': identity.buildId,
     'io.lexiflow.source-sha256': identity.sourceSha256,
+    'io.lexiflow.image-role': 'runtime',
   };
 }
 
@@ -119,11 +120,12 @@ async function prepareContext(plan, repoRoot, artifactRoot, candidateDirectory) 
     await mkdir(contextRoot, { recursive: false, mode: 0o700 });
     for (const file of item.contextFiles) {
       const target = path.join(contextRoot, file.target);
-      const sourceRoot = file.target === 'lexiflow-api.jar' ? artifactRoot : repoRoot;
-      const record = file.target === 'lexiflow-api.jar' ? plan.jar : plan.templates.find((template) => template.path === file.path);
-      if (!record) reject('BUILD_CONTEXT_INVALID');
-      await copyVerified(sourceRoot, file.path, target, record.bytes, record.sha256);
+      const sourceRoot = file.root === 'artifact' ? artifactRoot : repoRoot;
+      await mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
+      await copyVerified(sourceRoot, file.path, target, file.bytes, file.sha256);
     }
+    await writeFile(path.join(contextRoot, 'release-identity.json'), `${JSON.stringify(plan.runtimeIdentity, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+    await writeFile(path.join(contextRoot, 'release-identity.env'), plan.runtimeIdentityEnv, { flag: 'wx', mode: 0o600 });
     contexts.set(item.platform, contextRoot);
   }
   return contexts;
@@ -141,7 +143,7 @@ async function readImageId(iidFile) {
 
 async function buildOnePlatform(planItem, contextRoot, candidateDirectory, dockerContext) {
   const resultIds = [];
-  for (const buildArgv of [planItem.commands[2], planItem.commands[3]]) {
+  for (const buildArgv of planItem.commands) {
     const iidFlag = buildArgv.indexOf('--iidfile');
     if (buildArgv[0] !== 'docker' || buildArgv[1] !== 'build' || iidFlag < 0 || !buildArgv[iidFlag + 1]
       || path.basename(buildArgv[iidFlag + 1]) !== buildArgv[iidFlag + 1]) reject('BUILD_PLAN_INVALID');
@@ -154,9 +156,9 @@ async function buildOnePlatform(planItem, contextRoot, candidateDirectory, docke
     resultIds.push(imageId);
   }
   const records = [];
-  for (const [index, role] of ['api-image', 'postgres-image'].entries()) {
+  for (const [index, role] of ['runtime-image'].entries()) {
     const imageId = resultIds[index];
-    const relative = `images/${planItem.platform.replace('/', '-')}/${index === 0 ? 'api-image' : 'postgres-image'}.tar`;
+    const relative = 'images/linux-arm64/runtime-image.tar';
     const destination = path.join(candidateDirectory, ...relative.split('/'));
     await mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
     await runDocker(['image', 'save', '--output', destination, imageId], { ...dockerContext, cwd: candidateDirectory, timeoutMs: 300_000 });
@@ -169,7 +171,7 @@ async function buildOnePlatform(planItem, contextRoot, candidateDirectory, docke
 export async function buildCandidateImages(input) {
   if (!exactKeys(input, ['repoRoot', 'artifactRoot', 'descriptor', 'outputParent', 'endpoint', 'platform'])) reject('BUILD_INPUT_INVALID');
   const { repoRoot, artifactRoot, descriptor, outputParent, platform: selectedPlatform } = input;
-  if (!['linux/amd64', 'linux/arm64'].includes(selectedPlatform)) reject('BUILD_INPUT_INVALID');
+  if (selectedPlatform !== 'linux/arm64') reject('BUILD_INPUT_INVALID');
   if (typeof outputParent !== 'string' || !path.isAbsolute(outputParent) || /[\u0000-\u001f\u007f]/.test(outputParent)) reject('OUTPUT_PARENT_INVALID');
   const endpoint = parseEndpoint(input.endpoint);
   let plan;
@@ -178,7 +180,7 @@ export async function buildCandidateImages(input) {
   const buildInputSha256 = hash().update(JSON.stringify(plan), 'utf8').digest('hex');
   const selectedPlan = plan.platforms.find((item) => item.platform === selectedPlatform);
   if (!selectedPlan) reject('BUILD_INPUT_REJECTED');
-  const selectedBase = { platform: selectedPlan.platform, javaRuntime: { ...selectedPlan.javaRuntime }, postgresRuntime: { ...selectedPlan.postgresRuntime } };
+  const selectedBase = { platform: selectedPlan.platform, ...selectedPlan.bases };
   const repo = path.resolve(repoRoot); const artifacts = path.resolve(artifactRoot); const parent = path.resolve(outputParent);
   await assertSafePath(outputParent, true, true);
   if (within(repo, parent) || within(parent, repo) || within(artifacts, parent) || within(parent, artifacts)) reject('OUTPUT_PARENT_INVALID');
@@ -194,11 +196,11 @@ export async function buildCandidateImages(input) {
     const version = parseJson(await runDocker(['version', '--format', '{{json .}}'], dockerContext), 'DOCKER_METADATA_INVALID');
     if (!version || typeof version !== 'object' || Array.isArray(version) || !version.Server) reject('DOCKER_UNAVAILABLE');
     const info = parseJson(await runDocker(['info', '--format', '{{json .}}'], dockerContext), 'DOCKER_METADATA_INVALID');
-    const expectedArch = selectedPlatform === 'linux/amd64' ? ['amd64', 'x86_64'] : ['arm64', 'aarch64'];
+    const expectedArch = ['arm64', 'aarch64'];
     if (!info || typeof info !== 'object' || Array.isArray(info) || info.OSType !== 'linux'
       || !expectedArch.includes(info.Architecture)) reject('DOCKER_PLATFORM_MISMATCH');
-    await inspectJson(['image', 'inspect', selectedPlan.javaRuntime.reference], dockerContext, selectedPlatform, selectedPlan.javaRuntime.imageId);
-    await inspectJson(['image', 'inspect', selectedPlan.postgresRuntime.reference], dockerContext, selectedPlatform, selectedPlan.postgresRuntime.imageId);
+    await inspectJson(['image', 'inspect', selectedPlan.bases.javaRuntime.reference], dockerContext, selectedPlatform, selectedPlan.bases.javaRuntime.imageId);
+    await inspectJson(['image', 'inspect', selectedPlan.bases.postgresRuntime.reference], dockerContext, selectedPlatform, selectedPlan.bases.postgresRuntime.imageId);
     const contexts = await prepareContext({ ...plan, platforms: [selectedPlan] }, repo, artifacts, candidateDirectory);
     const records = await buildOnePlatform(selectedPlan, contexts.get(selectedPlatform), candidateDirectory, dockerContext);
     let currentPlan;

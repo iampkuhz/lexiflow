@@ -122,25 +122,20 @@ class LifecycleCheckTest(unittest.TestCase):
             base["command"],
         )
         self.assertEqual(
-            ["node", "git", "sh", "mktemp", "sha256-tool"], base["required_environment"]
+            ["node", "git", "sh", "bash", "mktemp", "sha256-tool"], base["required_environment"]
         )
         self.assertEqual([], base["module_dependencies"])
         base_closure = input_closure(ROOT, base)
         for name in (
-            "integrity/release-artifact-manifest.mjs",
-            "build/package-release-artifacts.mjs",
-            "runtime/release-artifact-verification.sh",
             "tests/lifecycle.test.mjs",
-            "build/release-runtime-entry-generator.mjs",
-            "runtime/release-installation-lifecycle.sh",
-            "runtime/release-installation-state.sh",
             "runtime/release-installation-docker.sh",
             "tests/lifecycle-fixture.mjs",
-            "integrity/source-build-identity.mjs",
-            "version.txt",
             "test_tools/run-release-tool-tests.mjs",
+            "tests/fake-docker-daemon.mjs",
         ):
             self.assertIn("ops/release/" + name, base_closure)
+        for name in ("ops/docker/compose.yaml", "ops/docker/Dockerfile.runtime", "ops/docker/runtime-entrypoint.sh"):
+            self.assertIn(name, base_closure)
         for name in base["input_paths"]:
             selected = select_checks_for_changes(
                 self.checks, [input_member(ROOT, name, check=self.by_id[self.base])]
@@ -318,6 +313,15 @@ class LifecycleInstallCheckTest(LifecycleCheckTest):
 
     base = "eng.release.lifecycle-install"
 
+    def test_daemon_fixture_is_selected_and_frozen(self):
+        """单容器 lifecycle fixture 不消费旧 fake Docker daemon。"""
+        for scope in ("repository-baseline", "change-targeted"):
+            check = self.by_scope[scope][self.base]
+            closure = input_closure(ROOT, check)
+            self.assertIn("ops/release/tests/lifecycle-fixture.mjs", closure)
+            self.assertIn("ops/docker/runtime-entrypoint.sh", closure)
+            self.assertNotIn("ops/release/tests/fake-docker-daemon.mjs", closure)
+
     def test_scopes_and_required_inputs_match(self):
         """安装测试命令与冻结的实际适配文件被独立选择。"""
         first = self.by_scope["repository-baseline"][self.base]
@@ -338,23 +342,19 @@ class LifecycleInstallCheckTest(LifecycleCheckTest):
         )
         self.assertEqual(first["required_environment"], second["required_environment"])
         first_closure = input_closure(ROOT, first)
-        self.assertIn(
-            "ops/release/build/release-runtime-entry-generator.mjs", first_closure
-        )
-        self.assertIn(
-            "ops/release/runtime/release-installation-lifecycle.sh", first_closure
-        )
         for name in (
-            "ops/release/runtime/release-installation-state.sh",
-            "ops/release/runtime/release-installation-docker.sh",
             "ops/release/tests/lifecycle-install.test.mjs",
-            "ops/docker/tests/update-recovery.sh",
+            "ops/release/tests/lifecycle-fixture.mjs",
+            "ops/docker/Dockerfile.runtime",
+            "ops/docker/runtime-entrypoint.sh",
         ):
             self.assertIn(name, first_closure)
             selected = select_checks_for_changes(
                 self.checks, [input_member(ROOT, name, check=self.by_id[self.base])]
             )
             self.assertIn(self.base, {item["check_id"] for item in selected})
+        self.assertNotIn("ops/release/build/release-runtime-entry-generator.mjs", first_closure)
+        self.assertNotIn("ops/release/runtime/release-installation-lifecycle.sh", first_closure)
 
 
 class LifecycleRuntimeCheckTest(LifecycleCheckTest):

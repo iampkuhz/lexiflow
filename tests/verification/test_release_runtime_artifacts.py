@@ -29,6 +29,7 @@ class TestReleaseRuntimeArtifacts(unittest.TestCase):
                 "infra/postgres",
             ):
                 (repo / path).mkdir(parents=True, exist_ok=True)
+            (repo / "infra/postgres/schema.sql").write_bytes(b"synthetic-schema")
             scratch = root / "scratch"
             scratch.mkdir()
             cache = root / "cache"
@@ -41,11 +42,11 @@ class TestReleaseRuntimeArtifacts(unittest.TestCase):
             (java / "java").write_text("", encoding="utf-8")
 
             def fake_run(argv, *, cwd, env, timeout=1800):
-                self.assertNotEqual(argv[:3], ["npm", "run", "build"])
-                if argv[0] == "node":
+                if argv[:3] == ["npm", "run", "build"]:
+                    identity = json.loads(env["LEXIFLOW_EXPECTED_DATASET"])
                     self.assertEqual(
-                        argv,
-                        ["node", "scripts/packaging/package-extension-release.mjs"],
+                        identity["releaseId"],
+                        "synthetic-" + hashlib.sha256(b"zip-a").hexdigest(),
                     )
                 if argv[0] == "npm":
                     self.assertEqual(os.devnull, env["npm_config_globalconfig"])
@@ -116,6 +117,44 @@ class TestReleaseRuntimeArtifacts(unittest.TestCase):
             self._build_synthetic_result(formal=True)
 
 
+class TestSyntheticBuilderContract(unittest.TestCase):
+    def test_single_runtime_descriptor_binds_each_distinct_dataset(self):
+        import subprocess
+
+        root = Path(__file__).resolve().parents[2]
+        script = r"""
+import { validateSyntheticInput, syntheticDescriptor } from './ops/release/test_tools/build-synthetic-release-candidates.mjs';
+const rows = ['a','b'].map((letter,index) => ({file:`dataset-${letter}.zip`,bytes:3,sha256:String(index+1).repeat(64),datasetVersion:index+1,preparationPolicy:'lexiflow.deterministic-preparation.v1'}));
+const request = {scratchDirectory:'/tmp/synthetic',endpoint:'unix:///tmp/private.sock',datasets:rows};
+validateSyntheticInput(request);
+let duplicateRejected=false; try { validateSyntheticInput({...request,datasets:[rows[0],{...rows[1],datasetVersion:rows[0].datasetVersion}]}); } catch { duplicateRejected=true; }
+const descriptor=syntheticDescriptor({softwareVersion:'1.2.3',sourceCommit:'f'.repeat(40)},[],[],rows[0],'e'.repeat(64));
+process.stdout.write(JSON.stringify({duplicateRejected,descriptor}));
+"""
+        completed = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            cwd=root,
+            env={
+                "PATH": os.environ.get("PATH", os.defpath),
+                "HOME": os.environ.get("HOME", ""),
+            },
+            check=True,
+            capture_output=True,
+            timeout=15,
+        )
+        result = json.loads(completed.stdout)
+        self.assertTrue(result["duplicateRejected"])
+        descriptor = result["descriptor"]
+        self.assertEqual(descriptor["platforms"], ["linux/arm64"])
+        self.assertEqual(descriptor["dataset"]["releaseId"], "synthetic-" + "1" * 64)
+        self.assertEqual(descriptor["dataset"]["ruleId"], "synthetic-no-model")
+        self.assertEqual(descriptor["apiContract"], "caption-hints.v2")
+        self.assertEqual(descriptor["sqlVersion"], "e" * 64)
+        self.assertEqual(
+            [item["role"] for item in descriptor["artifacts"]], ["dataset"]
+        )
+
+
 class TestBuildSourceIdentity(unittest.TestCase):
     def test_shared_identity_selects_resolved_snapshot_paths(self):
         import subprocess
@@ -138,6 +177,7 @@ class TestBuildSourceIdentity(unittest.TestCase):
 
     def test_source_identity_rejects_unsafe_output_paths(self):
         import subprocess
+
         from scripts.checks.release.source.check_synthetic_release_lifecycle import (
             ConsumerError,
         )
@@ -150,13 +190,15 @@ class TestBuildSourceIdentity(unittest.TestCase):
                 {"softwareVersion": "../../private", "sourceCommit": "a" * 40}
             ).encode(),
         ]:
-            with patch.object(
-                artifacts,
-                "_run",
-                return_value=subprocess.CompletedProcess([], 0, payload, b""),
+            with (
+                patch.object(
+                    artifacts,
+                    "_run",
+                    return_value=subprocess.CompletedProcess([], 0, payload, b""),
+                ),
+                self.assertRaises(ConsumerError),
             ):
-                with self.assertRaises(ConsumerError):
-                    artifacts._source_identity(Path("/synthetic"), {})
+                artifacts._source_identity(Path("/synthetic"), {})
 
 
 class TestFixedSyntheticBridge(unittest.TestCase):
@@ -198,6 +240,9 @@ class TestFixedSyntheticBridge(unittest.TestCase):
                 file = repo / name
                 file.parent.mkdir(parents=True, exist_ok=True)
                 file.write_bytes(data)
+            sql = repo / "infra/postgres/schema.sql"
+            sql.parent.mkdir(parents=True, exist_ok=True)
+            sql.write_bytes(b"schema")
             for name in ("artifacts", "home"):
                 (scratch / name).mkdir()
             rows = [

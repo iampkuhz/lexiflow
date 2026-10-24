@@ -14,7 +14,6 @@ import { resolveBuildIdentity, assertBuildIdentityMatches } from '../../release/
 import { probeExternal, inspectDevelopmentTrust } from '../environment/local-database-target.mjs';
 import { versionedImageReference, versionedImageLabels, removeVersionedImage } from '../images/versioned-images.mjs';
 import { acquireImageSlotLock } from '../images/image-slot-lock.mjs';
-import { isolateCandidateArchive } from '../images/isolated-candidate-archive.mjs';
 import { resolveSourceBaseImage } from '../images/source-base-image.mjs';
 
 const hex = /^[a-f0-9]{64}$/;
@@ -121,7 +120,7 @@ export function renderCompose(repo, { apiPort, dbPort, external, dbUser, slot = 
   void repo;
   if (!Number.isInteger(apiPort) || !Number.isInteger(dbPort) || apiPort < 1 || apiPort > 65535 || dbPort < 1 || dbPort > 65535
       || typeof dbUser !== 'string' || !dbUser || Buffer.byteLength(dbUser) > 63 || /[\r\n\0]/.test(dbUser)
-      || !['source', 'release-validation'].includes(slot) || !['managed', 'password', 'development-trust'].includes(authMode)
+      || slot !== 'source' || !['managed', 'password', 'development-trust'].includes(authMode)
       || external !== (authMode !== 'managed') || authMode === 'development-trust' && dbUser !== 'postgres') fail('DEPLOYMENT_COMPOSE_INPUT_INVALID');
   const labels = { 'lexiflow.slot': slot, 'lexiflow.installation': '${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}',
     'lexiflow.release': '${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}' };
@@ -180,9 +179,8 @@ export async function packageGeneration(file) {
 
 /** 只允许 probe 目录在确认前写入；安装状态、秘密和数据库均在确认后创建。 */
 export async function runUnifiedDeployment(ctx) {
-  const { repo, dir, action, candidateRequest, run } = ctx;
+  const { repo, dir, action, run } = ctx;
   const isPortTaken = ctx.portTaken ?? portTaken;
-  let candidate = ctx.candidate;
   if (ctx.planOnly && ctx.confirmPlan) fail('DEPLOYMENT_PLAN_MODE_CONFLICT');
   ctx.progress?.('读取安装记录');
   const existed = fs.existsSync(dir);
@@ -196,13 +194,11 @@ export async function runUnifiedDeployment(ctx) {
     installed = privateJson(path.join(dir, 'state.json'));
     if (installed.root !== dir || installed.schema !== 1 || !/^[a-f0-9]{32}$/.test(installed.id)
         || installed.project !== `lexiflow-local-${installed.id}` || !['new', 'initialized', 'ready'].includes(installed.phase)) fail('DEPLOYMENT_INSTALL_STATE_INVALID');
-    if (ctx.enforceFixedSlots && !candidate && candidateRequest === undefined && (installed.packageType !== 'source'
+    if (ctx.enforceFixedSlots && (installed.packageType !== 'source'
         || installed.dbPort !== 15432 || ![18080, 18081].includes(installed.apiPort))) fail('DEPLOYMENT_SOURCE_SLOT_STATE_INVALID');
-    if (ctx.enforceFixedSlots && candidateRequest !== undefined && (installed.packageType !== 'release-package'
-        || installed.apiPort !== 18080 || installed.dbPort !== 15433)) fail('CANDIDATE_SLOT_STATE_INVALID');
-    sourceManagedState = !candidate && candidateRequest === undefined && installed.packageType === 'source'
+    sourceManagedState = installed.packageType === 'source'
       && installed.databaseTarget?.kind === 'managed' && installed.dbPort === 15432 && [18080, 18081].includes(installed.apiPort);
-    const sourceMigration = !candidate && candidateRequest === undefined && installed.packageType === 'source'
+    const sourceMigration = installed.packageType === 'source'
       && installed.apiPort === 18080 && installed.dbPort === 15432 && ctx.apiPort === 18081;
     if (ctx.seen.has('--api-port') && ctx.apiPort !== installed.apiPort && !sourceMigration
         || ctx.seen.has('--db-port') && ctx.dbPort !== installed.dbPort) fail('DEPLOYMENT_TARGET_CHANGED');
@@ -222,7 +218,7 @@ export async function runUnifiedDeployment(ctx) {
           || replacement.stateSha256 !== fileHash(path.join(dir, 'state.json')))
         fail('DEPLOYMENT_REPLACEMENT_RECORD_INVALID');
     }
-    if (sourceManagedState && replacement && !ctx.planOnly && !ctx.confirmPlan && !candidate && candidateRequest === undefined
+    if (sourceManagedState && replacement && !ctx.planOnly && !ctx.confirmPlan
         && replacement.targetBuildId !== resolveBuildIdentity(repo).buildId) {
       const journalFile = path.join(dir, 'deployment.json');
       let journal, targetRecord;
@@ -238,7 +234,7 @@ export async function runUnifiedDeployment(ctx) {
     await ctx.ownedResources();
   }
   const fresh = !installed || installed.phase === 'new';
-  const sourceMigration = Boolean(installed && !candidate && candidateRequest === undefined && installed.packageType === 'source'
+  const sourceMigration = Boolean(installed && installed.packageType === 'source'
     && installed.apiPort === 18080 && installed.dbPort === 15432 && ctx.apiPort === 18081);
   const apiPort = sourceMigration ? ctx.apiPort : installed?.apiPort ?? ctx.apiPort, dbPort = installed?.dbPort ?? ctx.dbPort;
   if (apiPort === dbPort) fail('DEPLOYMENT_PORT_COLLISION');
@@ -249,7 +245,7 @@ export async function runUnifiedDeployment(ctx) {
   ctx.progress?.('核验数据库目标');
   const dbListenerBeforeConsent = await isPortTaken(dbPort);
   let developmentIdentity = null;
-  if (!installed && dbListenerBeforeConsent && !candidate && candidateRequest === undefined)
+  if (!installed && dbListenerBeforeConsent)
     developmentIdentity = await inspectDevelopmentTrust({ run, repo, port: dbPort });
   else if (recordedAuthMode === 'development-trust') {
     developmentIdentity = await inspectDevelopmentTrust({ run, repo, port: dbPort });
@@ -272,9 +268,9 @@ export async function runUnifiedDeployment(ctx) {
   const ordinaryConsent = !ctx.planOnly && !ctx.confirmPlan;
   if (ordinaryConsent) ctx.progress?.('核验部署输入');
   // 确认前只做只读快照，不连接数据库或准备制品；答是后的首次读取也不得换成新的基准。
-  const consentBuildId = ordinaryConsent && !candidate && candidateRequest === undefined
+  const consentBuildId = ordinaryConsent
     ? resolveBuildIdentity(repo).buildId : null;
-  const consentNetwork = ordinaryConsent && !candidate && candidateRequest === undefined
+  const consentNetwork = ordinaryConsent
     ? sourceNetworkFingerprint(ctx.environment ?? process.env) : null;
   const consentSecret = path.join(dir, 'secrets/app-password');
   const consentSecretDigest = ordinaryConsent && installed && recordedAuthMode !== 'development-trust'
@@ -297,123 +293,91 @@ export async function runUnifiedDeployment(ctx) {
   const preparationLog = path.join(tempRoot(repo), 'preparation.log');
   fs.writeFileSync(preparationLog, '', { mode: 0o600, flag: 'wx' });
   ctx.setLogFile?.(preparationLog);
-  if (!candidate && candidateRequest !== undefined) candidate = await ctx.candidateAdapter.readCandidate(candidateRequest);
-  if (candidate && installed && installed.packageType !== 'release-package') fail('DEPLOYMENT_TARGET_CHANGED');
   let installedServices = installed ? await ctx.ownedResources() : new Set();
   const apiListener = await isPortTaken(apiPort);
   if (apiListener) {
     if (!installedServices.has('api')) fail('DEPLOYMENT_API_PORT_OCCUPIED');
     await ctx.verifyApiPort(installed);
   }
-  if (candidate && (apiPort !== 18080 || installed?.databaseTarget?.kind === 'external')) fail('CANDIDATE_MANAGED_DATABASE_ONLY');
   let dbListener = await isPortTaken(dbPort);
   const external = installed?.databaseTarget?.kind === 'external' || !installed && Boolean(developmentIdentity);
   if (!installed && dbListener && !developmentIdentity) fail('DEPLOYMENT_DATABASE_CREDENTIAL_REQUIRED');
   if (!installed && developmentIdentity && !dbListener) fail('DEVELOPMENT_DATABASE_TARGET_UNAVAILABLE');
   const authMode = installed ? recordedAuthMode : external ? 'development-trust' : 'managed';
-  if (candidate && external) fail('CANDIDATE_MANAGED_DATABASE_ONLY');
   if (installed?.databaseTarget?.kind === 'managed' && dbListener && !installedServices.has('postgres')) fail('DEPLOYMENT_DATABASE_PORT_OCCUPIED');
   const managedSecret = path.join(dir, 'secrets/app-password');
   if (authMode === 'development-trust' && fs.existsSync(managedSecret)) fail('DEPLOYMENT_INSTALL_STATE_INVALID');
   if (authMode === 'password' && (!installed?.databaseTarget?.user || !fs.existsSync(managedSecret))) fail('DEPLOYMENT_DATABASE_CREDENTIAL_REQUIRED');
   const probe = tempRoot(repo);
-  let releaseImageSlot = null;
+  let imageSlotLock = null;
   let deploymentLocked = false;
   let dataset, generation, identity, jar;
   try {
     const passwordFile = authMode === 'development-trust' ? undefined
       : external || !fresh || fs.existsSync(managedSecret) ? secret(managedSecret) : null;
     const passwordDigest = passwordFile ? fileHash(passwordFile) : null;
-    identity = candidate?.buildIdentity ?? resolveBuildIdentity(repo);
-    if (candidate) {
-      dataset = path.join(candidate.root, 'payload', ...candidate.artifacts.dataset.path.split('/'));
-      if (fileHash(dataset) !== candidate.artifacts.dataset.sha256) fail('CANDIDATE_CHANGED');
-      ctx.progress?.('核验候选资料生成记录');
-      generation = await packageGeneration(dataset);
-      // Planning needs the candidate API for read-only DB inspection. Load by the verified digest only;
-      // do not retag or remove a stable deployment slot before confirmation.
-      const api = candidate.artifacts['api-image:linux/arm64'];
-      const archive = path.join(candidate.root, 'payload', ...api.path.split('/'));
-      const isolated = isolateCandidateArchive({ archive, output: path.join(probe, 'candidate-api.tar'),
-        expectedSha256: api.sha256, expectedBytes: api.bytes, imageDigest: api.imageDigest,
-        role: 'api', baseVersion: identity.baseVersion });
-      try { await run('podman', ['load', '-i', isolated.path], { cwd: repo }); }
-      finally { fs.unlinkSync(isolated.path); }
-      const inspected = JSON.parse(await run('podman', ['image', 'inspect', '--format', 'json', api.imageDigest], { capture: true }));
-      if (!Array.isArray(inspected) || inspected.length !== 1) fail('CANDIDATE_IMAGE_IDENTITY_MISMATCH');
-      const data = inspected[0], labels = data.Labels ?? data.Config?.Labels ?? {};
-      if (String(data.Id ?? '').replace(/^sha256:/, '') !== api.imageDigest.slice(7)
-          || data.Os !== 'linux' || data.Architecture !== 'arm64'
-          || labels['org.opencontainers.image.version'] !== identity.softwareVersion
-          || labels['org.opencontainers.image.revision'] !== identity.sourceCommit
-          || labels['io.lexiflow.build-id'] !== identity.buildId
-          || labels['io.lexiflow.source-sha256'] !== identity.sourceSha256
-          || labels['io.lexiflow.image-role'] !== 'api'
-          || labels['io.lexiflow.deployment-version'] !== identity.baseVersion.toLowerCase()) fail('CANDIDATE_IMAGE_IDENTITY_MISMATCH');
-      jar = null;
+    identity = resolveBuildIdentity(repo);
+    const codeVersion = await generationCodeVersion(repo);
+    ctx.progress?.('检查 Eclipse Temurin 25 并编译 Java 应用');
+    const buildEnv = (ctx.javaEnvironment ?? javaBuildEnvironment)(ctx.environment, { repo });
+    await run('./gradlew', ['--no-daemon', ':api:bootJar'], { cwd: path.join(repo, 'backend'), env: buildEnv });
+    jar = path.join(repo, 'backend/product/api/build/internal/boot/api-internal.jar');
+    regular(jar);
+    const reusable = installed?.dataset && fs.existsSync(path.join(installed.dataset, 'stardict.csv'))
+      && fs.existsSync(path.join(installed.dataset, 'source-summary.json'))
+      && privateJson(path.join(installed.dataset, 'source-summary.json')).generation?.codeVersion === codeVersion;
+    if (reusable) {
+      dataset = path.join(installed.dataset, 'stardict.csv');
+      const summary = privateJson(path.join(installed.dataset, 'source-summary.json'));
+      const locked = privateJson(path.join(repo, 'ops/dataset/ecdict-source.lock.json'));
+      if (fileHash(dataset) !== summary.csv_sha256 || summary.generation?.inputSha256 !== summary.csv_sha256
+          || summary.generation.upstream?.commit !== locked.commit
+          || summary.generation.upstream?.repository_url !== locked.repository_url
+          || canonicalJson(summary.generation.upstream?.files) !== canonicalJson(locked.files)
+          || summary.generation.upstream?.archive_member?.sha256 !== locked.archive_member.sha256
+          || summary.generation.upstream?.archive_member?.bytes !== locked.archive_member.bytes) fail('DEPLOYMENT_SOURCE_DRIFT');
+      generation = dataGeneration({ codeVersion, inputSha256: summary.csv_sha256, upstream: summary.generation.upstream });
+      if (generation.generationVersion !== summary.generation.generationVersion) fail('DEPLOYMENT_SOURCE_DRIFT');
     } else {
-      const codeVersion = await generationCodeVersion(repo);
-      ctx.progress?.('检查 Eclipse Temurin 25 并编译 Java 应用');
-      const buildEnv = (ctx.javaEnvironment ?? javaBuildEnvironment)(ctx.environment, { repo });
-      await run('./gradlew', ['--no-daemon', ':api:bootJar'], { cwd: path.join(repo, 'backend'), env: buildEnv });
-      jar = path.join(repo, 'backend/product/api/build/internal/boot/api-internal.jar');
-      regular(jar);
-      const reusable = installed?.dataset && fs.existsSync(path.join(installed.dataset, 'stardict.csv'))
-        && fs.existsSync(path.join(installed.dataset, 'source-summary.json'))
-        && privateJson(path.join(installed.dataset, 'source-summary.json')).generation?.codeVersion === codeVersion;
-      if (reusable) {
-        dataset = path.join(installed.dataset, 'stardict.csv');
-        const summary = privateJson(path.join(installed.dataset, 'source-summary.json'));
-        const locked = privateJson(path.join(repo, 'ops/dataset/ecdict-source.lock.json'));
-        if (fileHash(dataset) !== summary.csv_sha256 || summary.generation?.inputSha256 !== summary.csv_sha256
-            || summary.generation.upstream?.commit !== locked.commit
-            || summary.generation.upstream?.repository_url !== locked.repository_url
-            || canonicalJson(summary.generation.upstream?.files) !== canonicalJson(locked.files)
-            || summary.generation.upstream?.archive_member?.sha256 !== locked.archive_member.sha256
-            || summary.generation.upstream?.archive_member?.bytes !== locked.archive_member.bytes) fail('DEPLOYMENT_SOURCE_DRIFT');
-        generation = dataGeneration({ codeVersion, inputSha256: summary.csv_sha256, upstream: summary.generation.upstream });
-        if (generation.generationVersion !== summary.generation.generationVersion) fail('DEPLOYMENT_SOURCE_DRIFT');
-      } else {
-        const toolsImage = `lexiflow-source-tools-${crypto.randomBytes(16).toString('hex')}`;
-        const iidFile = path.join(probe, 'source-tools.iid');
-        let toolsId;
-        try {
-          await run('podman', ['build', '--platform', 'linux/arm64', '--iidfile', iidFile,
-            '--label', `io.lexiflow.source-tools-owner=${toolsImage}`, '-f', 'ops/podman/source-tools.Containerfile', 'ops/podman'], { cwd: repo });
-          toolsId = fs.readFileSync(iidFile, 'utf8').trim();
+      const toolsImage = `lexiflow-source-tools-${crypto.randomBytes(16).toString('hex')}`;
+      const iidFile = path.join(probe, 'source-tools.iid');
+      let toolsId;
+      try {
+        await run('podman', ['build', '--platform', 'linux/arm64', '--iidfile', iidFile,
+          '--label', `io.lexiflow.source-tools-owner=${toolsImage}`, '-f', 'ops/podman/source-tools.Containerfile', 'ops/podman'], { cwd: repo });
+        toolsId = fs.readFileSync(iidFile, 'utf8').trim();
+        if (!/^sha256:[a-f0-9]{64}$/.test(toolsId)) fail('DEPLOYMENT_SOURCE_TOOLS_IMAGE_INVALID');
+        const inspected = JSON.parse(await run('podman', ['image', 'inspect', '--format', '{{json .Labels}}', toolsId], { capture: true }));
+        if (inspected?.['io.lexiflow.source-tools-owner'] !== toolsImage) fail('DEPLOYMENT_SOURCE_TOOLS_IMAGE_INVALID');
+        const network = sourceToolsNetwork(ctx.environment ?? process.env);
+        const output = await run('podman', ['run', '--rm', '--platform', 'linux/arm64', '--memory', '2g',
+          ...network.args,
+          '-e', `LEXIFLOW_GENERATION_CODE_VERSION=${codeVersion}`, '-v', `${repo}/ops:/kit/ops:ro`,
+          '-v', `${repo}/scripts:/kit/scripts:ro`, '-v', `${probe}:/data`, toolsId,
+          '/kit/ops/dataset/prepare_ecdict_bundle.py', '/kit', '/data'], { cwd: repo, env: network.environment, capture: true, timeout: 1800000 });
+        const match = [...output.matchAll(/^dataset_dir=\/data\/(ecdict-source\.[A-Za-z0-9]+)$/gm)];
+        if (match.length !== 1) fail('DEPLOYMENT_SOURCE_UNAVAILABLE');
+        dataset = path.join(probe, match[0][1], 'stardict.csv');
+        const summary = privateJson(path.join(path.dirname(dataset), 'source-summary.json'));
+        if (fileHash(dataset) !== summary.csv_sha256 || summary.generation?.codeVersion !== codeVersion) fail('DEPLOYMENT_SOURCE_DRIFT');
+        generation = summary.generation;
+      } finally {
+        if (!toolsId && fs.existsSync(iidFile)) toolsId = fs.readFileSync(iidFile, 'utf8').trim();
+        if (toolsId) {
           if (!/^sha256:[a-f0-9]{64}$/.test(toolsId)) fail('DEPLOYMENT_SOURCE_TOOLS_IMAGE_INVALID');
-          const inspected = JSON.parse(await run('podman', ['image', 'inspect', '--format', '{{json .Labels}}', toolsId], { capture: true }));
-          if (inspected?.['io.lexiflow.source-tools-owner'] !== toolsImage) fail('DEPLOYMENT_SOURCE_TOOLS_IMAGE_INVALID');
-          const network = sourceToolsNetwork(ctx.environment ?? process.env);
-          const output = await run('podman', ['run', '--rm', '--platform', 'linux/arm64', '--memory', '2g',
-            ...network.args,
-            '-e', `LEXIFLOW_GENERATION_CODE_VERSION=${codeVersion}`, '-v', `${repo}/ops:/kit/ops:ro`,
-            '-v', `${repo}/scripts:/kit/scripts:ro`, '-v', `${probe}:/data`, toolsId,
-            '/kit/ops/dataset/prepare_ecdict_bundle.py', '/kit', '/data'], { cwd: repo, env: network.environment, capture: true, timeout: 1800000 });
-          const match = [...output.matchAll(/^dataset_dir=\/data\/(ecdict-source\.[A-Za-z0-9]+)$/gm)];
-          if (match.length !== 1) fail('DEPLOYMENT_SOURCE_UNAVAILABLE');
-          dataset = path.join(probe, match[0][1], 'stardict.csv');
-          const summary = privateJson(path.join(path.dirname(dataset), 'source-summary.json'));
-          if (fileHash(dataset) !== summary.csv_sha256 || summary.generation?.codeVersion !== codeVersion) fail('DEPLOYMENT_SOURCE_DRIFT');
-          generation = summary.generation;
-        } finally {
-          if (!toolsId && fs.existsSync(iidFile)) toolsId = fs.readFileSync(iidFile, 'utf8').trim();
-          if (toolsId) {
-            if (!/^sha256:[a-f0-9]{64}$/.test(toolsId)) fail('DEPLOYMENT_SOURCE_TOOLS_IMAGE_INVALID');
-            if (ctx.cleanupOwnSourceTools) await ctx.cleanupOwnSourceTools(toolsId, toolsImage);
-            else {
-              const labels = JSON.parse(await run('podman', ['image', 'inspect', '--format', '{{json .Labels}}', toolsId], { capture: true }));
-              if (labels?.['io.lexiflow.source-tools-owner'] !== toolsImage) fail('DEPLOYMENT_SOURCE_TOOLS_IMAGE_INVALID');
-              await run('podman', ['rmi', toolsId]);
-            }
+          if (ctx.cleanupOwnSourceTools) await ctx.cleanupOwnSourceTools(toolsId, toolsImage);
+          else {
+            const labels = JSON.parse(await run('podman', ['image', 'inspect', '--format', '{{json .Labels}}', toolsId], { capture: true }));
+            if (labels?.['io.lexiflow.source-tools-owner'] !== toolsImage) fail('DEPLOYMENT_SOURCE_TOOLS_IMAGE_INVALID');
+            await run('podman', ['rmi', toolsId]);
           }
-          try { fs.unlinkSync(iidFile); } catch (error) { if (error.code !== 'ENOENT') throw error; }
         }
+        try { fs.unlinkSync(iidFile); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       }
     }
     const inputSha256 = fileHash(dataset);
     if (!hex.test(generation.generationVersion) || !hex.test(generation.inputSha256)
-        || !candidate && generation.inputSha256 !== inputSha256) fail('DEPLOYMENT_GENERATION_INVALID');
+        || generation.inputSha256 !== inputSha256) fail('DEPLOYMENT_GENERATION_INVALID');
     if (replacement && (replacement.inputSha256 !== inputSha256
         || replacement.generationVersion !== generation.generationVersion || replacement.baseVersion !== identity.baseVersion))
       fail('DEPLOYMENT_REPLACEMENT_TARGET_CHANGED');
@@ -427,7 +391,7 @@ export async function runUnifiedDeployment(ctx) {
         try { targetRecord = JSON.parse(fs.readFileSync(path.join(dir, 'prepared-target.json'), 'utf8')); } catch { fail('DEPLOYMENT_REPLACEMENT_TARGET_CHANGED'); }
         if (targetRecord.operation === journal.operation) prepared = readPreparedTarget(path.join(dir, 'prepared-target.json'), journal, dir);
       }
-      failedPreparationReplan = ordinaryConsent && !candidate && candidateRequest === undefined
+      failedPreparationReplan = ordinaryConsent
         && sourceManagedState && potentialFailedPreparationReplan
         && installed?.phase === 'ready' && installed.packageType === 'source'
         && installed.databaseTarget?.kind === 'managed'
@@ -445,7 +409,7 @@ export async function runUnifiedDeployment(ctx) {
       : { kind: external ? 'external' : 'managed', authMode,
         ...(developmentIdentity ? { developmentIdentity, developmentIdentityFingerprint: developmentIdentity.fingerprint } : {}),
         host: '127.0.0.1', port: dbPort, user: dbUser };
-    const requestBase = { inputType: candidate ? 'package' : 'csv', inputPath: dataset, inputSha256, generation };
+    const requestBase = { inputType: 'csv', inputPath: dataset, inputSha256, generation };
     async function dataCommand(mode, { password = passwordFile, image, input = dataset, expectedFingerprint } = {}) {
       if (authMode === 'development-trust') developmentIdentity = await assertDevelopmentIdentity(developmentIdentity);
       const request = writeRequest(probe, { ...requestBase, inputPath: image ? '/input' : input,
@@ -489,8 +453,7 @@ export async function runUnifiedDeployment(ctx) {
         throw error;
       } finally { fs.unlinkSync(request); }
     }
-    const inspect = async (password = passwordFile, image = candidate?.artifacts['api-image:linux/arm64'].imageDigest,
-      input = dataset) => databaseResponse(await dataCommand('inspect', { password, image, input }));
+    const inspect = async (password = passwordFile, image, input = dataset) => databaseResponse(await dataCommand('inspect', { password, image, input }));
     const missing = sha('lexiflow:managed:database-absent:v1');
     if (replacement && !external && !(await isPortTaken(dbPort))) {
       // 已确认的前次替换可能在移除 PG 镜像后中断。plan 不改变已有资源；
@@ -499,22 +462,16 @@ export async function runUnifiedDeployment(ctx) {
       if (replacement.databaseFingerprint === missing || replacement.databaseTarget !== 'managed')
         fail('DEPLOYMENT_REPLACEMENT_RECORD_INVALID');
       ctx.acquireLock(); deploymentLocked = true;
-      releaseImageSlot = acquireImageSlotLock(identity.baseVersion, candidate ? 'release-validation' : 'source');
+      imageSlotLock = acquireImageSlotLock(identity.baseVersion, 'source');
       let pgImage;
-      if (candidate) {
-        const loaded = await ctx.candidateAdapter.installCandidateArtifacts(candidate, { run, installDir: path.join(probe, 'replacement'), apiPort,
-          includeApi: false, includePostgres: true, baseVersion: identity.baseVersion, installationId: installed.id });
-        pgImage = loaded.postgresImage;
-      } else {
-        const pgId = await resolveSourceBaseImage({ run, reference: 'docker.io/library/postgres:17-bookworm' });
-        await removeVersionedImage({ run, role: 'postgres', baseVersion: identity.baseVersion, installationId: installed.id, allowReleaseValidation: true });
-        const stage = path.join(probe, 'postgres'); fs.mkdirSync(stage, { recursive: true });
-        for (const name of ['Dockerfile.postgres', 'initialize-postgres-app-role.sh']) fs.copyFileSync(path.join(repo, 'ops/docker', name), path.join(stage, name));
-        const pgTag = versionedImageReference('postgres', identity.baseVersion);
-        await run('podman', ['build', '--platform', 'linux/arm64', '--pull=never', '--build-arg', `POSTGRES_RUNTIME_IMAGE=${pgId}`,
-          ...versionedImageLabels('postgres', identity.baseVersion), '-f', path.join(stage, 'Dockerfile.postgres'), '-t', pgTag, stage]);
-        pgImage = await run('podman', ['image', 'inspect', '--format', '{{.Id}}', pgTag], { capture: true });
-      }
+      const pgId = await resolveSourceBaseImage({ run, reference: 'docker.io/library/postgres:17-bookworm' });
+      await removeVersionedImage({ run, role: 'postgres', baseVersion: identity.baseVersion, installationId: installed.id, allowReleaseValidation: true });
+      const stage = path.join(probe, 'postgres'); fs.mkdirSync(stage, { recursive: true });
+      for (const name of ['Dockerfile.postgres', 'initialize-postgres-app-role.sh']) fs.copyFileSync(path.join(repo, 'ops/docker', name), path.join(stage, name));
+      const pgTag = versionedImageReference('postgres', identity.baseVersion);
+      await run('podman', ['build', '--platform', 'linux/arm64', '--pull=never', '--build-arg', `POSTGRES_RUNTIME_IMAGE=${pgId}`,
+        ...versionedImageLabels('postgres', identity.baseVersion), '-f', path.join(stage, 'Dockerfile.postgres'), '-t', pgTag, stage]);
+      pgImage = await run('podman', ['image', 'inspect', '--format', '{{.Id}}', pgTag], { capture: true });
       if (!/^(sha256:)?[a-f0-9]{64}$/.test(pgImage)) fail('DEPLOYMENT_IMAGE_INVALID');
       const envFile = path.join(dir, 'release.env');
       const oldEnv = fs.readFileSync(envFile, 'utf8');
@@ -557,7 +514,7 @@ export async function runUnifiedDeployment(ctx) {
         observation = { status: 'PASS', fingerprint: missing, needsRebuild: true, reason: 'DATABASE_ABSENT', generationVersion: null, datasetVersion: null };
       }
     } else {
-      if (!dbListener && !candidate && candidateRequest === undefined && installed?.packageType === 'source'
+      if (!dbListener && installed?.packageType === 'source'
           && installed.databaseTarget?.kind === 'managed') {
         if (ctx.planOnly || ctx.confirmPlan) fail('DEPLOYMENT_MANAGED_DATABASE_STOPPED');
         if (!installedServices.has('postgres')) fail('DEPLOYMENT_DATABASE_PORT_OCCUPIED');
@@ -601,8 +558,7 @@ export async function runUnifiedDeployment(ctx) {
       if (!installedServices.has('api')) fail('DEPLOYMENT_API_PORT_OCCUPIED');
       await ctx.verifyApiPort(installed);
     }
-    if ((candidate && (await ctx.candidateAdapter.readCandidate(candidateRequest)).candidateSha256 !== candidate.candidateSha256)
-      || (!candidate && (resolveBuildIdentity(repo).buildId !== identity.buildId || await generationCodeVersion(repo) !== generation.codeVersion))
+    if (resolveBuildIdentity(repo).buildId !== identity.buildId || await generationCodeVersion(repo) !== generation.codeVersion
       || fileHash(dataset) !== inputSha256) fail('DEPLOYMENT_INPUT_DRIFT');
     if (external) {
       if (authMode === 'development-trust') developmentIdentity = await assertDevelopmentIdentity(developmentIdentity);
@@ -631,11 +587,11 @@ export async function runUnifiedDeployment(ctx) {
       const id = crypto.randomBytes(16).toString('hex');
       current = { schema: 1, id, project: `lexiflow-local-${id}`, root: dir, apiPort, dbPort,
         captionDebug: false, phase: 'new', version: identity.softwareVersion, buildIdentity: identity,
-        databaseTarget: target, packageType: candidate ? 'release-package' : 'source' };
+        databaseTarget: target, packageType: 'source' };
       ctx.setState(current);
     }
     if (!deploymentLocked) { ctx.acquireLock(); deploymentLocked = true; }
-    if (!releaseImageSlot) releaseImageSlot = acquireImageSlotLock(identity.baseVersion, candidate ? 'release-validation' : 'source');
+    if (!imageSlotLock) imageSlotLock = acquireImageSlotLock(identity.baseVersion, 'source');
     if (!installed) ctx.saveState(current);
     const logFile = path.join(dir, `operation-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.log`);
     fs.writeFileSync(logFile, '', { mode: 0o600, flag: 'wx' }); ctx.setLogFile(logFile);
@@ -667,70 +623,60 @@ export async function runUnifiedDeployment(ctx) {
           if (!fs.existsSync(file)) fs.writeFileSync(file, crypto.randomBytes(32).toString('hex') + '\n', { mode: 0o600, flag: 'wx' });
           secret(file);
         }
-        const dataDir = path.join(dir, 'data', candidate ? `release-package.${inputSha256.slice(0, 16)}` : `ecdict-source.${inputSha256.slice(0, 16)}`);
+        const dataDir = path.join(dir, 'data', `ecdict-source.${inputSha256.slice(0, 16)}`);
         fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-        const dataFile = path.join(dataDir, candidate ? 'dataset.zip' : 'stardict.csv');
+        const dataFile = path.join(dataDir, 'stardict.csv');
         if (!fs.existsSync(dataFile)) fs.copyFileSync(dataset, dataFile);
         if (fileHash(dataFile) !== inputSha256) fail('DEPLOYMENT_DATA_COPY_DRIFT');
-        if (!candidate) fs.writeFileSync(path.join(dataDir, 'source-summary.json'), JSON.stringify({ upstream: generation.upstream, csv_sha256: inputSha256, generation }), { mode: 0o600 });
+        fs.writeFileSync(path.join(dataDir, 'source-summary.json'), JSON.stringify({ upstream: generation.upstream, csv_sha256: inputSha256, generation }), { mode: 0o600 });
         const sqlDir = path.join(dir, 'infra/postgres'); fs.mkdirSync(sqlDir, { recursive: true, mode: 0o700 });
-        const sqlSource = candidate ? path.join(candidate.root, 'payload', ...candidate.artifacts.sql.path.split('/'))
-          : path.join(repo, 'infra/postgres/schema.sql');
+        const sqlSource = path.join(repo, 'infra/postgres/schema.sql');
         const sqlTarget = path.join(sqlDir, 'schema.sql');
         const nextSql = path.join(dir, `.schema-${opId}.sql`);
         if (!fs.existsSync(sqlTarget)) fs.copyFileSync(sqlSource, sqlTarget);
         if (fileHash(sqlTarget) !== fileHash(sqlSource)) fs.copyFileSync(sqlSource, nextSql);
         let apiImage, postgresImage = installed?.postgresImage, apiJar = installed?.apiJar, extensionArchive;
-        const candidateStage = !fresh ? path.join(dir, `.prepared-${opId}`) : dir;
-        if (candidate) {
-          if (!fresh) fs.mkdirSync(candidateStage, { recursive: true, mode: 0o700 });
-          const loaded = await ctx.candidateAdapter.installCandidateArtifacts(candidate, { run, installDir: candidateStage, archiveRoot: dir, apiPort,
-            includePostgres: !external, baseVersion: identity.baseVersion, installationId: current.id });
-          apiImage = loaded.apiImage; postgresImage = external ? installed?.postgresImage : loaded.postgresImage;
-          extensionArchive = loaded.extensionArchive;
-        } else {
-          const buildEnv = (ctx.javaEnvironment ?? javaBuildEnvironment)(ctx.environment, { repo });
-          await run('npm', ['ci'], { cwd: path.join(repo, 'extension'), env: buildEnv });
-          await run('npm', ['run', 'build'], { cwd: path.join(repo, 'extension'), env: { ...buildEnv, LEXIFLOW_API_PORT: String(apiPort) } });
-          if (resolveBuildIdentity(repo).buildId !== identity.buildId) fail('DEPLOYMENT_INPUT_DRIFT');
-          const { createExtensionZip, publishExtensionArchive } = await import('../../../extension/scripts/packaging/package-extension-release.mjs');
-          const packaged = await createExtensionZip({ root: path.join(repo, 'extension'), buildIdentity: identity, apiPort });
-          const archiveDirectory = path.join(dir, path.dirname(extensionArchiveRelative(identity, apiPort)));
-          await publishExtensionArchive(packaged.archive, `${packaged.descriptor.sha256}  ${packaged.descriptor.filename}\n`, archiveDirectory, packaged.descriptor.filename);
-          extensionArchive = { path: extensionArchiveRelative(identity, apiPort), bytes: packaged.descriptor.bytes,
-            sha256: packaged.descriptor.sha256, buildIdentity: identity };
-          const zipPath = path.join(dir, extensionArchive.path);
-          const extensionFiles = await readExtensionFiles(zipPath, extensionArchive.sha256);
-          validateExtensionArchiveEntries(extensionFiles, { buildIdentity: identity, apiPort, filename: packaged.descriptor.filename });
-          const fixedExtension = fresh ? path.join(dir, 'extension') : path.join(dir, `.prepared-${opId}`, 'extension');
-          materializeExtensionTree(fixedExtension, extensionFiles);
-          await verifyExtensionArchive(dir, extensionArchive, identity, apiPort, fixedExtension);
-          const stage = path.join(dir, `.prepared-${opId}`); fs.mkdirSync(path.join(stage, 'api'), { recursive: true, mode: 0o700 });
-          for (const [from, to] of [[jar, 'lexiflow-api.jar'], [path.join(repo, 'ops/docker/Dockerfile'), 'Dockerfile'],
-            [path.join(repo, 'ops/docker/run-container-command.sh'), 'run-container-command.sh']]) fs.copyFileSync(from, path.join(stage, 'api', to));
-          apiJar = path.join(stage, 'api/lexiflow-api.jar');
-          // Resolve every source base before removing/replacing either versioned image.
-          const baseId = await resolveSourceBaseImage({ run, reference: 'docker.io/library/eclipse-temurin:25-jre' });
-          const postgresBaseId = external ? null : await resolveSourceBaseImage({ run, reference: 'docker.io/library/postgres:17-bookworm' });
-          const tag = versionedImageReference('api', identity.baseVersion);
-          await removeVersionedImage({ run, role: 'api', baseVersion: identity.baseVersion, installationId: current.id, allowReleaseValidation: true });
-          await run('podman', ['build', '--platform', 'linux/arm64', '--pull=never', '--build-arg', `JAVA_RUNTIME_IMAGE=${baseId}`,
-            ...ctx.imageLabels(identity), ...versionedImageLabels('api', identity.baseVersion), '-t', tag, path.join(stage, 'api')]);
-          apiImage = await run('podman', ['image', 'inspect', '--format', '{{.Id}}', tag], { capture: true });
-          if (!external) {
-            const pgId = postgresBaseId;
-            await removeVersionedImage({ run, role: 'postgres', baseVersion: identity.baseVersion, installationId: current.id, allowReleaseValidation: true });
-            fs.mkdirSync(path.join(stage, 'postgres'), { recursive: true });
-            for (const name of ['Dockerfile.postgres', 'initialize-postgres-app-role.sh']) fs.copyFileSync(path.join(repo, 'ops/docker', name), path.join(stage, 'postgres', name));
-            const pgTag = versionedImageReference('postgres', identity.baseVersion);
-            await run('podman', ['build', '--platform', 'linux/arm64', '--pull=never', '--build-arg', `POSTGRES_RUNTIME_IMAGE=${pgId}`,
-              ...versionedImageLabels('postgres', identity.baseVersion), '-f', path.join(stage, 'postgres/Dockerfile.postgres'), '-t', pgTag, path.join(stage, 'postgres')]);
-            postgresImage = await run('podman', ['image', 'inspect', '--format', '{{.Id}}', pgTag], { capture: true });
-          }
+        const buildEnv = (ctx.javaEnvironment ?? javaBuildEnvironment)(ctx.environment, { repo });
+        await run('npm', ['ci'], { cwd: path.join(repo, 'extension'), env: buildEnv });
+        await run('npm', ['run', 'build'], { cwd: path.join(repo, 'extension'), env: { ...buildEnv, LEXIFLOW_API_PORT: String(apiPort) } });
+        if (resolveBuildIdentity(repo).buildId !== identity.buildId) fail('DEPLOYMENT_INPUT_DRIFT');
+        const { createExtensionZip, publishExtensionArchive } = await import('../../../extension/scripts/packaging/package-extension-release.mjs');
+        const packaged = await createExtensionZip({ root: path.join(repo, 'extension'), buildIdentity: identity, apiPort });
+        const archiveDirectory = path.join(dir, path.dirname(extensionArchiveRelative(identity, apiPort)));
+        await publishExtensionArchive(packaged.archive, `${packaged.descriptor.sha256}  ${packaged.descriptor.filename}\n`, archiveDirectory, packaged.descriptor.filename);
+        extensionArchive = { path: extensionArchiveRelative(identity, apiPort), bytes: packaged.descriptor.bytes,
+          sha256: packaged.descriptor.sha256, buildIdentity: identity };
+        const zipPath = path.join(dir, extensionArchive.path);
+        const extensionFiles = await readExtensionFiles(zipPath, extensionArchive.sha256);
+        validateExtensionArchiveEntries(extensionFiles, { buildIdentity: identity, apiPort, filename: packaged.descriptor.filename });
+        const fixedExtension = fresh ? path.join(dir, 'extension') : path.join(dir, `.prepared-${opId}`, 'extension');
+        materializeExtensionTree(fixedExtension, extensionFiles);
+        await verifyExtensionArchive(dir, extensionArchive, identity, apiPort, fixedExtension);
+        const stage = path.join(dir, `.prepared-${opId}`); fs.mkdirSync(path.join(stage, 'api'), { recursive: true, mode: 0o700 });
+        for (const [from, to] of [[jar, 'lexiflow-api.jar'], [path.join(repo, 'ops/docker/Dockerfile'), 'Dockerfile'],
+          [path.join(repo, 'ops/docker/run-container-command.sh'), 'run-container-command.sh']]) fs.copyFileSync(from, path.join(stage, 'api', to));
+        apiJar = path.join(stage, 'api/lexiflow-api.jar');
+        // Resolve every source base before removing/replacing either versioned image.
+        const baseId = await resolveSourceBaseImage({ run, reference: 'docker.io/library/eclipse-temurin:25-jre' });
+        const postgresBaseId = external ? null : await resolveSourceBaseImage({ run, reference: 'docker.io/library/postgres:17-bookworm' });
+        const tag = versionedImageReference('api', identity.baseVersion);
+        await removeVersionedImage({ run, role: 'api', baseVersion: identity.baseVersion, installationId: current.id, allowReleaseValidation: true });
+        await run('podman', ['build', '--platform', 'linux/arm64', '--pull=never', '--build-arg', `JAVA_RUNTIME_IMAGE=${baseId}`,
+          ...ctx.imageLabels(identity), ...versionedImageLabels('api', identity.baseVersion), '-t', tag, path.join(stage, 'api')]);
+        apiImage = await run('podman', ['image', 'inspect', '--format', '{{.Id}}', tag], { capture: true });
+        if (!external) {
+          const pgId = postgresBaseId;
+          await removeVersionedImage({ run, role: 'postgres', baseVersion: identity.baseVersion, installationId: current.id, allowReleaseValidation: true });
+          fs.mkdirSync(path.join(stage, 'postgres'), { recursive: true });
+          for (const name of ['Dockerfile.postgres', 'initialize-postgres-app-role.sh']) fs.copyFileSync(path.join(repo, 'ops/docker', name), path.join(stage, 'postgres', name));
+          const pgTag = versionedImageReference('postgres', identity.baseVersion);
+          await run('podman', ['build', '--platform', 'linux/arm64', '--pull=never', '--build-arg', `POSTGRES_RUNTIME_IMAGE=${pgId}`,
+            ...versionedImageLabels('postgres', identity.baseVersion), '-f', path.join(stage, 'postgres/Dockerfile.postgres'), '-t', pgTag, path.join(stage, 'postgres')]);
+          postgresImage = await run('podman', ['image', 'inspect', '--format', '{{.Id}}', pgTag], { capture: true });
         }
-        if (!/^(sha256:)?[a-f0-9]{64}$/.test(apiImage) || !external && !/^(sha256:)?[a-f0-9]{64}$/.test(postgresImage)) fail('DEPLOYMENT_IMAGE_INVALID');
-        verifyExtension(fresh ? path.join(dir, 'extension') : path.join(candidateStage, 'extension'), identity, apiPort);
-        const composeText = renderCompose(repo, { apiPort, dbPort, external, dbUser, authMode, slot: candidate ? 'release-validation' : 'source' });
+          if (!/^(sha256:)?[a-f0-9]{64}$/.test(apiImage) || !external && !/^(sha256:)?[a-f0-9]{64}$/.test(postgresImage)) fail('DEPLOYMENT_IMAGE_INVALID');
+        verifyExtension(fresh ? path.join(dir, 'extension') : path.join(dir, `.prepared-${opId}`, 'extension'), identity, apiPort);
+        const composeText = renderCompose(repo, { apiPort, dbPort, external, dbUser, authMode, slot: 'source' });
         const envText = `LEXIFLOW_PLATFORM=linux/arm64\nLEXIFLOW_API_IMAGE=${apiImage}\nLEXIFLOW_POSTGRES_IMAGE=${postgresImage ?? 'external'}\nLEXIFLOW_INSTALLATION_ID=${current.id}\nLEXIFLOW_RELEASE_KEY=local-${current.id}\n`;
         if (fresh) fs.writeFileSync(path.join(dir, 'compose.yaml'), composeText, { mode: 0o600 });
         // 引用本轮准备的新镜像；managed PG 随即用原卷重建，不能继续引用刚删除的旧 digest。
@@ -739,25 +685,24 @@ export async function runUnifiedDeployment(ctx) {
           atomicJson(path.join(dir, 'image-replacement.json'), replacement);
         }
         atomicText(path.join(dir, 'release.env'), envText);
-        current = { ...current, apiPort, apiImage, postgresImage, apiJar: candidate ? null : apiJar,
-          inputType: candidate ? 'package' : 'csv', inputSha256, generation,
-          dataset: dataDir, datasetPackageSha256: candidate ? inputSha256 : undefined,
+        current = { ...current, apiPort, apiImage, postgresImage, apiJar,
+          inputType: 'csv', inputSha256, generation,
+          dataset: dataDir,
           version: identity.softwareVersion, buildIdentity: identity, generationVersion: generation.generationVersion,
-          artifacts: { ...(candidate ? { candidateSha256: candidate.candidateSha256, manifestSha256: candidate.manifestSha256 } : { jar: fileHash(jar) }), apiImage, extensionArchive },
+          artifacts: { jar: fileHash(jar), apiImage, extensionArchive },
           digests: null };
         operationArtifacts = current.artifacts;
         ctx.setState(current);
         if (fresh) ctx.saveState(current);
         return { dataFile, apiImage, postgresImage, composeText, envText, extensionArchive, nextSql: fs.existsSync(nextSql) ? nextSql : null,
-          extensionStage: !fresh ? path.join(candidateStage, 'extension') : null };
+          extensionStage: !fresh ? path.join(dir, `.prepared-${opId}`, 'extension') : null };
       },
       verifyPlan: async (_plan, preparedData) => {
         ctx.progress('复核计划、目标连接与制品');
         if (ctx.interrupted() || fileHash(dataset) !== inputSha256) fail('DEPLOYMENT_INPUT_DRIFT');
         if (passwordDigest && fileHash(passwordFile) !== passwordDigest) fail('DEPLOYMENT_SECRET_DRIFT');
-        if ((candidate && (await ctx.candidateAdapter.readCandidate(candidateRequest)).candidateSha256 !== candidate.candidateSha256)
-          || (!candidate && (resolveBuildIdentity(repo).buildId !== identity.buildId
-            || await generationCodeVersion(repo) !== generation.codeVersion || fileHash(jar) !== current.artifacts.jar)))
+        if (resolveBuildIdentity(repo).buildId !== identity.buildId
+          || await generationCodeVersion(repo) !== generation.codeVersion || fileHash(jar) !== current.artifacts.jar)
           fail('DEPLOYMENT_INPUT_DRIFT');
         if (await isPortTaken(apiPort)) {
           if (!installedServices.has('api')) fail('DEPLOYMENT_API_PORT_OCCUPIED');
@@ -767,8 +712,7 @@ export async function runUnifiedDeployment(ctx) {
         if (preparedData.extensionStage) verifyExtension(preparedData.extensionStage, identity, apiPort);
         await verifyExtensionArchive(dir, preparedData.extensionArchive, identity, apiPort,
           preparedData.extensionStage ?? path.join(dir, 'extension'));
-        if (preparedData.nextSql && fileHash(preparedData.nextSql) !== fileHash(candidate
-          ? path.join(candidate.root, 'payload', ...candidate.artifacts.sql.path.split('/')) : path.join(repo, 'infra/postgres/schema.sql'))) fail('DEPLOYMENT_SQL_DRIFT');
+        if (preparedData.nextSql && fileHash(preparedData.nextSql) !== fileHash(path.join(repo, 'infra/postgres/schema.sql'))) fail('DEPLOYMENT_SQL_DRIFT');
         if (!external) {
           await ctx.compose('config');
           await ctx.compose('up', '-d', '--force-recreate', 'postgres');
@@ -873,7 +817,7 @@ export async function runUnifiedDeployment(ctx) {
     ctx.reportReady?.();
     return 0;
   } finally {
-    releaseImageSlot?.();
+    imageSlotLock?.();
     // 原始输入和请求仅在 ignored probe 中；不删除无法辨认的目录内容。
     if (fs.existsSync(probe) && fs.readdirSync(probe).every(name => /^(?:request-[a-f0-9]{16}\.json|ecdict-source\.[A-Za-z0-9]+|password)$/.test(name))) {
       fs.rmSync(probe, { recursive: true });

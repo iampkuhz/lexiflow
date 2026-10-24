@@ -35,9 +35,28 @@ test('full identity validates derivation and compares field order independently'
 });
 
 test('JAR and ZIP metadata bind full release or clean SNAPSHOT identity', async () => {
+  const dataset = { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rules-test', sqlVersion: 'sql-test', sha256: '1'.repeat(64) };
   for (const expected of [identity(), identity({ snapshot: true })]) {
     await archive(jarBytes(expected), file => verifyJarIdentity(file, expected));
-    await archive(extensionBytes(expected), file => verifyExtensionIdentity(file, expected));
+    await archive(extensionBytes(expected, dataset), file => verifyExtensionIdentity(file, expected, dataset));
+  }
+});
+
+test('extension ZIP binds exact published dataset identity and digest', async () => {
+  const expected = identity();
+  const dataset = { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rules-test', sqlVersion: 'sql-test', sha256: '1'.repeat(64) };
+  await archive(extensionBytes(expected, dataset), file => verifyExtensionIdentity(file, expected, dataset));
+  for (const wrong of [
+    { ...dataset, releaseId: 'other-release' },
+    { ...dataset, preparationId: 'other-prep' },
+    { ...dataset, ruleId: 'other-rules' },
+    { ...dataset, sqlVersion: 'other-sql' },
+    { ...dataset, sha256: '2'.repeat(64) },
+  ]) {
+    await archive(extensionBytes(expected, dataset), file => assert.rejects(verifyExtensionIdentity(file, expected, wrong), /EXTENSION_IDENTITY_MISMATCH/));
+  }
+  for (const malformed of [{ ...dataset, extra: true }, { ...dataset, sha256: 'not-a-digest' }, null]) {
+    await archive(extensionBytes(expected, malformed), file => assert.rejects(verifyExtensionIdentity(file, expected, dataset), /EXTENSION_IDENTITY_MISMATCH/));
   }
 });
 
@@ -52,9 +71,10 @@ test('same version and commit cannot substitute another source hash or buildId',
 test('JAR version and extension manifest are independently checked', async () => {
   const expected = identity();
   const build = JSON.stringify(expected);
+  const dataset = { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rules-test', sqlVersion: 'sql-test', sha256: '1'.repeat(64) };
   await archive(makeZip([['META-INF/lexiflow-build.json', build], ['META-INF/lexiflow-version.txt', '9.9.9\n']]), file => assert.rejects(verifyJarIdentity(file, expected), /JAR_IDENTITY_MISMATCH/));
   for (const mutation of [{ version: '9.9.9.1' }, { version_name: '9.9.9' }, { permissions: ['tabs'] }, { host_permissions: ['http://127.0.0.1:9999/*'] }]) {
     const manifest = { version: expected.chromeVersion, version_name: expected.softwareVersion, permissions: ['storage'], host_permissions: ['http://127.0.0.1:18080/*'], ...mutation };
-    await archive(makeZip([['build-identity.json', build], ['manifest.json', JSON.stringify(manifest)]]), file => assert.rejects(verifyExtensionIdentity(file, expected), /EXTENSION_IDENTITY_MISMATCH/));
+    await archive(makeZip([['build-identity.json', build], ['manifest.json', JSON.stringify(manifest)], ['expected-dataset.json', JSON.stringify(dataset)]]), file => assert.rejects(verifyExtensionIdentity(file, expected, dataset), /EXTENSION_IDENTITY_MISMATCH/));
   }
 });

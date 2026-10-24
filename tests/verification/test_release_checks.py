@@ -343,14 +343,19 @@ class ReleaseCheckDeclarationTest(unittest.TestCase):
                     "ops/release/test_tools/run-release-tool-tests.mjs", base_closure
                 )
                 if suite == "runtime-entry":
-                    for name in (
-                        "runtime/release-installation-state.sh",
-                        "runtime/release-installation-docker.sh",
-                        "runtime/release-installation-lifecycle.sh",
-                    ):
-                        source = f"ops/release/{name}"
+                    runtime_sources = (
+                        "ops/release/tests/runtime-entry.test.mjs",
+                        "ops/release/tests/lifecycle-fixture.mjs",
+                        "ops/docker/Dockerfile.runtime",
+                        "ops/docker/runtime-entrypoint.sh",
+                    )
+                    for source in runtime_sources:
                         self.assertIn(source, base_closure)
                         self.assertIn(changed["check_id"], self.selected(source))
+                    # Keep the locked single-image PID1 and release-identity assertions
+                    # reachable through the actual suite, rather than stale installers.
+                    self.assertIn("ops/docker/Dockerfile.runtime", base_closure)
+                    self.assertIn("ops/docker/runtime-entrypoint.sh", base_closure)
                 for closure in (base_closure, changed_closure):
                     self.assertNotIn(f"ops/release/{suite}-check.mjs", closure)
                     self.assertNotIn("ops/release/lifecycle.mjs", closure)

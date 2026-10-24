@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { accessSync, constants, lstatSync, realpathSync, statSync } from 'node:fs';
+import { accessSync, constants, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -55,6 +55,20 @@ function standardTempDirectory(user) {
   return normalizeDarwinTempDirectory(result);
 }
 
+/** Derive the immutable per-version handoff location without replacing older evidence. */
+export function releaseWorkflowDirectory(root) {
+  const file = path.join(root, 'ops/release/version.txt');
+  let version;
+  try {
+    const info = lstatSync(file);
+    if (!info.isFile() || info.isSymbolicLink() || info.size < 1 || info.size > 64) fail('RELEASE_VERSION_INVALID');
+    version = readFileSync(file, 'utf8').trim();
+  } catch { fail('RELEASE_VERSION_INVALID'); }
+  if (!/^(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})\.(?:0|[1-9][0-9]{0,4})$/.test(version)
+    || version === '0.0.0' || version.split('.').some(part => Number(part) > 65535)) fail('RELEASE_VERSION_INVALID');
+  return path.join(root, 'tmp/quality/release-workflow', version);
+}
+
 function privateCapabilities(root, source) {
   const java = javaHome(source);
   const env = { LEXIFLOW_JAVA_HOME: java, JAVA_HOME: java };
@@ -70,7 +84,7 @@ function privateCapabilities(root, source) {
     try { if (!statSync(value).isDirectory()) fail('RELEASE_CACHE_INVALID'); }
     catch (error) { if (/^RELEASE_CACHE_/.test(error?.message || '')) throw error; fail('RELEASE_CACHE_INVALID'); }
   }
-  const candidate = path.join(root, 'tmp/quality/release-workflow/candidate-runtime-request.json');
+  const candidate = path.join(releaseWorkflowDirectory(root), 'candidate-runtime-request.json');
   try {
     const info = lstatSync(candidate);
     if (!info.isFile() || info.isSymbolicLink() || !absolute(candidate)) fail('CANDIDATE_RUNTIME_REQUEST_INVALID');

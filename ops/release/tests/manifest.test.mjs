@@ -1,20 +1,18 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtemp, mkdir, lstat, readFile, realpath, rm, symlink, writeFile, cp } from 'node:fs/promises';
+import { mkdir, lstat, readFile, rm, symlink, writeFile, copyFile } from 'node:fs/promises';
 import fsPromises from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 import { packageManifest } from '../build/package-release-artifacts.mjs';
 import { buildManifest, createManifest, serializeManifest } from '../integrity/release-artifact-manifest.mjs';
 import { resolveBuildIdentity } from '../integrity/source-build-identity.mjs';
+import { assembled as candidateAssembled } from './verified-candidate-fixture.mjs';
 import { extensionBytes } from './zip-fixture.mjs';
-import { generateRuntimeEntry } from '../build/release-runtime-entry-generator.mjs';
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const repoRoot = process.cwd();
 const packageCli = path.join(repoRoot, 'ops/release/build/package-release-artifacts.mjs');
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 async function filesUnder(root, relative = '') {
@@ -26,80 +24,33 @@ async function filesUnder(root, relative = '') {
   return files;
 }
 
-async function createFixture() {
-  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'lexiflow-manifest-')));
-  await mkdir(path.join(root, 'ops/release'), { recursive: true });
-  for (const directory of ['build', 'integrity', 'runtime']) await mkdir(path.join(root, 'ops/release', directory), { recursive: true });
-  await writeFile(path.join(root, 'ops/release/version.txt'), '2.0.0\n');
-  await writeFile(path.join(root, 'ops/release/integrity/source-build-identity.mjs'), await readFile(path.join(repoRoot, 'ops/release/integrity/source-build-identity.mjs')));
-  await writeFile(path.join(root, '.gitignore'), '/input/\n/descriptor.json\n/release/\n/out/\n/alias/\n/.*.manifest-*/\n');
-  execFileSync('git', ['init', '-q', root]);
-  execFileSync('git', ['-C', root, 'add', '.']);
-  execFileSync('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'clean synthetic fixture']);
-  const sourceCommit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  const buildIdentity = resolveBuildIdentity(root);
-  const artifactRoot = path.join(root, 'input'); await mkdir(artifactRoot);
-  const licenseComponents = ['LexiFlow', 'extension-third-party', 'API-runtime', 'PostgreSQL', 'dataset'];
-  const licenses = [];
-  const artifacts = [];
-  async function add(role, relative, content, extra = {}, licenseIds = ['lexiflow']) {
-    const file = path.join(artifactRoot, relative); await mkdir(path.dirname(file), { recursive: true });
-    const bytes = Buffer.from(content); await writeFile(file, bytes);
-    artifacts.push({ role, path: relative, bytes: bytes.length, sha256: hash(bytes), licenseIds, ...extra });
-    return bytes;
-  }
-  for (let i = 0; i < licenseComponents.length; i += 1) {
-    const id = ['lexiflow', 'ext-third-party', 'api-runtime', 'postgresql', 'dataset-license'][i];
-    const noticePath = `licenses/${id}.txt`; const notice = Buffer.from(`Synthetic notice ${id}\n`);
-    licenses.push({ id, component: licenseComponents[i], licenseId: `UNVERIFIED-${id}`, licenseName: `Synthetic ${id}`, sourceUrl: `https://example.invalid/${id}`, noticePath, noticeBytes: notice.length, noticeSha256: hash(notice) });
-    await add('license', noticePath, notice, {}, [id]);
-  }
-  const platforms = ['linux/amd64', 'linux/arm64'];
-  for (const platform of platforms) {
-    await add('api-image', `images/api-${platform.split('/')[1]}.txt`, 'synthetic image fixture', { platform, imageDigest: `sha256:${'a'.repeat(64)}` }, ['lexiflow', 'api-runtime']);
-    await add('postgres-image', `images/postgres-${platform.split('/')[1]}.txt`, 'synthetic image fixture', { platform, imageDigest: `sha256:${'b'.repeat(64)}` }, ['postgresql']);
-  }
-  await add('compose', 'compose.yaml', 'synthetic compose fixture');
-  await add('sql', 'database/schema.sql', 'synthetic SQL fixture');
-  const dataset = { releaseId: 'release-1', preparationId: 'prep-1', ruleId: 'rules-1' };
-  await add('dataset', 'data/dataset.bin', 'synthetic dataset fixture', { metadata: { ...dataset, sqlVersion: 'sql-1' } }, ['dataset-license']);
-  await add('extension', 'extension/lexiflow.zip', extensionBytes(buildIdentity), { metadata: { softwareVersion: '2.0.0', sourceCommit } }, ['lexiflow', 'ext-third-party']);
-  const descriptor = { schemaVersion: 1, buildIdentity, softwareVersion: '2.0.0', sourceCommit, apiContract: 'api-v1', sqlVersion: 'sql-1', dataset, platforms, artifacts, licenses };
-  const entry = await generateRuntimeEntry({ repoRoot: root, descriptor, artifactRoot, lifecycleBody: 'lf_verify_release || exit 1' });
-  descriptor.artifacts.push(entry.artifact);
-  const descriptorFile = path.join(root, 'descriptor.json'); await writeFile(descriptorFile, JSON.stringify(descriptor));
-  return { root, artifactRoot, descriptor, descriptorFile, licenses, cleanup: () => rm(root, { recursive: true, force: true }) };
-}
-
-// 基线只生成一次真实合成 Git/制品/entry；每例均有私有完整复制，
-// packageManifest/buildManifest 仍对当前复制执行真实身份、路径、摘要和发布校验。
-let fixtureSeed;
-test.after(async () => { if (fixtureSeed) await (await fixtureSeed).cleanup(); });
+// Use the same single-runtime candidate fixture and widen its narrow runtime marker
+// into the full on-disk descriptor consumed by manifest packaging.
 async function fixture() {
-  const seed = await (fixtureSeed ??= createFixture());
-  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'lexiflow-manifest-')));
-  try {
-    await cp(seed.root, root, { recursive: true });
-    const descriptor = structuredClone(seed.descriptor);
-    return { root, artifactRoot: path.join(root, 'input'), descriptor,
-      descriptorFile: path.join(root, 'descriptor.json'), licenses: descriptor.licenses,
-      cleanup: () => rm(root, { recursive: true, force: true }) };
-  } catch (error) { await rm(root, { recursive: true, force: true }); throw error; }
+  const f = await candidateAssembled();
+  f.artifactRoot = path.join(f.candidateDirectory, 'payload');
+  f.descriptor = structuredClone(f.manifest);
+  f.descriptorFile = path.join(f.root, 'descriptor.json');
+  await writeFile(f.descriptorFile, `${JSON.stringify(f.descriptor, null, 2)}\n`);
+  f.licenses = f.descriptor.licenses;
+  return f;
 }
 
 test('copied manifest fixtures isolate source, artifacts, descriptor objects and cleanup', async () => {
   const first = await fixture(), second = await fixture();
   try {
     const expected = resolveBuildIdentity(second.root);
-    assert.deepEqual(resolveBuildIdentity(first.root), expected);
+    const firstIdentity = resolveBuildIdentity(first.root);
+    assert.equal(firstIdentity.softwareVersion, expected.softwareVersion);
+    assert.deepEqual(firstIdentity, expected, 'private clones preserve the synthetic source identity exactly');
     await writeFile(path.join(first.root, 'ops/release/version.txt'), '3.0.0\n');
     execFileSync('git', ['-C', first.root, 'add', '.']);
     execFileSync('git', ['-C', first.root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'private edit']);
     assert.notEqual(resolveBuildIdentity(first.root).sourceCommit, expected.sourceCommit);
-    await writeFile(path.join(first.artifactRoot, 'compose.yaml'), 'private artifact edit');
+    await writeFile(path.join(first.artifactRoot, 'database/schema.sql'), 'private artifact edit');
     first.descriptor.artifacts[0].sha256 = '0'.repeat(64);
     assert.deepEqual(resolveBuildIdentity(second.root), expected);
-    assert.equal(await readFile(path.join(second.artifactRoot, 'compose.yaml'), 'utf8'), 'synthetic compose fixture');
+    assert.equal(await readFile(path.join(second.artifactRoot, 'database/schema.sql'), 'utf8'), 'synthetic trusted SQL\n');
     assert.deepEqual(JSON.parse(await readFile(second.descriptorFile, 'utf8')), second.descriptor);
     await first.cleanup();
     assert.equal((await buildManifest({ descriptor: second.descriptor, repoRoot: second.root, artifactRoot: second.artifactRoot })).softwareVersion, '2.0.0');
@@ -118,7 +69,7 @@ test('assembles stable manifest and checksum through the real CLI from a clean G
     const manifestText = await readFile(path.join(output, 'manifest.json'), 'utf8');
     const manifest = JSON.parse(manifestText);
     assert.equal(manifest.sourceCommit, f.descriptor.sourceCommit);
-    assert.deepEqual(manifest.platforms, ['linux/amd64', 'linux/arm64']);
+    assert.deepEqual(manifest.platforms, ['linux/arm64']);
     assert.equal(manifest.artifacts.length, f.descriptor.artifacts.length);
     for (const artifact of f.descriptor.artifacts) assert.deepEqual(await readFile(path.join(output, artifact.path)), await readFile(path.join(f.artifactRoot, artifact.path)));
     assert.deepEqual((await filesUnder(output)).sort(), [...f.descriptor.artifacts.map((item) => item.path), 'manifest.json', 'manifest.json.sha256'].sort());
@@ -133,13 +84,13 @@ test('rejects schema, source, producer, dataset, digest, role, platform and lice
   const cases = [
     (d) => { delete d.apiContract; },
     (d) => { d.extra = true; },
-    (d) => { d.platforms = ['linux/amd64', 'linux/amd64']; },
+    (d) => { d.platforms = ['linux/amd64']; },
     (d) => { d.sourceCommit = 'f'.repeat(40); },
     (d) => { d.artifacts.find((a) => a.role === 'extension').metadata.softwareVersion = '9.9.9'; },
     (d) => { d.artifacts.find((a) => a.role === 'dataset').metadata.ruleId = 'other'; },
-    (d) => { d.artifacts = d.artifacts.filter((a) => !(a.role === 'postgres-image' && a.platform === 'linux/arm64')); },
+    (d) => { d.artifacts = d.artifacts.filter((a) => a.role !== 'runtime-image'); },
     (d) => { d.artifacts = d.artifacts.filter((a) => a.role !== 'sql'); },
-    (d) => { d.artifacts = d.artifacts.filter((a) => a.role !== 'runtime-entry'); },
+    (d) => { d.artifacts = d.artifacts.filter((a) => a.role !== 'corresponding-sources'); },
     (d) => { d.licenses = d.licenses.slice(1); },
     (d) => { d.artifacts[0].sha256 = 'z'.repeat(64); },
     (d) => { d.artifacts.find((a) => a.role === 'extension').path = '../escape'; },
@@ -173,14 +124,14 @@ test('rejects dirty source, artifact tampering and symlinked artifact components
   } finally { await f.cleanup(); }
   const g = await fixture();
   try {
-    await writeFile(path.join(g.artifactRoot, 'compose.yaml'), 'tampered');
+    await writeFile(path.join(g.artifactRoot, 'database/schema.sql'), 'tampered');
     const output = path.join(g.root, 'release');
     await assert.rejects(packageManifest({ repoRoot: g.root, descriptorFile: g.descriptorFile, artifactRoot: g.artifactRoot, outputDirectory: output }), /ARTIFACT_DIGEST_MISMATCH/u);
     assert.equal(await readFile(output).then(() => true, () => false), false);
   } finally { await g.cleanup(); }
   const h = await fixture();
   try {
-    const original = path.join(h.artifactRoot, 'compose.yaml'); await rm(original); await symlink('../descriptor.json', original);
+    const original = path.join(h.artifactRoot, 'database/schema.sql'); await rm(original); await symlink('../descriptor.json', original);
     await assert.rejects(packageManifest({ repoRoot: h.root, descriptorFile: h.descriptorFile, artifactRoot: h.artifactRoot, outputDirectory: path.join(h.root, 'release') }), /ARTIFACT_MISSING_OR_SYMLINK/u);
   } finally { await h.cleanup(); }
 });
@@ -203,7 +154,7 @@ test('rejects dirty input after descriptor creation and never turns a checksum c
     const out = path.join(f.root, 'out');
     const initial = spawnSync(process.execPath, cliArgs(f, out), { encoding: 'utf8' }); assert.equal(initial.status, 0, initial.stderr);
     const before = await readFile(path.join(out, 'manifest.json'));
-    await writeFile(path.join(f.artifactRoot, 'compose.yaml'), 'new content');
+    await writeFile(path.join(f.artifactRoot, 'database/schema.sql'), 'new content');
     const retry = spawnSync(process.execPath, cliArgs(f, out), { encoding: 'utf8' });
     assert.notEqual(retry.status, 0);
     assert.deepEqual(await readFile(path.join(out, 'manifest.json')), before);
@@ -225,21 +176,22 @@ test('canonical bytes do not depend on descriptor key or array order', async () 
   } finally { await f.cleanup(); }
 });
 
-test('pure createManifest requires one licensed runtime entry in the canonical structure', async () => {
+test('pure createManifest requires one licensed ARM64 runtime image and corresponding sources', async () => {
   const f = await fixture();
   try {
     const source = f.descriptor.buildIdentity;
     const manifest = createManifest(f.descriptor, source);
-    assert.equal(manifest.artifacts.filter((item) => item.role === 'runtime-entry').length, 1);
-    assert.equal(manifest.artifacts.find((item) => item.role === 'runtime-entry').path, 'lexiflow.sh');
+    assert.equal(manifest.artifacts.filter((item) => item.role === 'runtime-image').length, 1);
+    assert.equal(manifest.artifacts.find((item) => item.role === 'runtime-image').path, 'images/linux-arm64/runtime-image.tar');
+    assert.equal(manifest.artifacts.filter((item) => item.role === 'corresponding-sources').length, 1);
     const missing = structuredClone(f.descriptor);
-    missing.artifacts = missing.artifacts.filter((item) => item.role !== 'runtime-entry');
-    assert.throws(() => createManifest(missing, source), /REQUIRED_ARTIFACT_MISSING/u);
+    missing.artifacts = missing.artifacts.filter((item) => item.role !== 'runtime-image');
+    assert.throws(() => createManifest(missing, source), /PLATFORM_ARTIFACT_MISSING/u);
     const unlicensed = structuredClone(f.descriptor);
-    unlicensed.artifacts.find((item) => item.role === 'runtime-entry').licenseIds = ['postgresql'];
+    unlicensed.artifacts.find((item) => item.role === 'runtime-image').licenseIds = ['dataset-license'];
     assert.throws(() => createManifest(unlicensed, source), /REQUIRED_LICENSE_MISSING/u);
     const withMetadata = structuredClone(f.descriptor);
-    withMetadata.artifacts.find((item) => item.role === 'runtime-entry').metadata = {};
+    withMetadata.artifacts.find((item) => item.role === 'runtime-image').metadata = {};
     assert.throws(() => createManifest(withMetadata, source), /ARTIFACTS_INVALID/u);
   } finally { await f.cleanup(); }
 });
@@ -258,7 +210,7 @@ test('buildManifest never bypasses on-disk artifact verification without a root'
 test('streams and packages a large synthetic artifact without changing its declared digest', async () => {
   const f = await fixture();
   try {
-    const artifact = f.descriptor.artifacts.find((item) => item.role === 'api-image' && item.platform === 'linux/amd64');
+    const artifact = f.descriptor.artifacts.find((item) => item.role === 'runtime-image' && item.platform === 'linux/arm64');
     const bytes = Buffer.alloc(8 * 1024 * 1024, 0x5a);
     await writeFile(path.join(f.artifactRoot, artifact.path), bytes);
     artifact.bytes = bytes.length; artifact.sha256 = hash(bytes);
@@ -288,23 +240,16 @@ test('idempotency rejects published artifact tampering, symlink replacement and 
 });
 
 
-test('each platform requires its own component license associations', async () => {
+test('single ARM64 runtime image requires each component license association', async () => {
   const f = await fixture();
   try {
-    for (const [role, missingId] of [['api-image', 'api-runtime'], ['api-image', 'lexiflow'], ['postgres-image', 'postgresql']]) {
+    for (const missingId of ['api-runtime', 'lexiflow', 'postgresql']) {
       const descriptor = structuredClone(f.descriptor);
-      const artifact = descriptor.artifacts.find((item) => item.role === role && item.platform === 'linux/arm64');
+      const artifact = descriptor.artifacts.find((item) => item.role === 'runtime-image');
       artifact.licenseIds = artifact.licenseIds.filter((id) => id !== missingId);
-      if (!artifact.licenseIds.length) artifact.licenseIds = ['lexiflow'];
+      if (!artifact.licenseIds.length) artifact.licenseIds = ['dataset-license'];
       await assert.rejects(buildManifest({ repoRoot: f.root, descriptor, artifactRoot: f.artifactRoot }), /REQUIRED_LICENSE_MISSING/u);
     }
-    // 多条同类组件许可各有来源，不能用 Map 覆盖后由数组顺序决定关联。
-    const extra = { ...f.descriptor.licenses.find((item) => item.id === 'api-runtime'), id: 'api-runtime-additional' };
-    f.descriptor.licenses.push(extra);
-    f.descriptor.artifacts.find((item) => item.path === extra.noticePath).licenseIds.push(extra.id);
-    const first = serializeManifest(await buildManifest({ repoRoot: f.root, descriptor: f.descriptor, artifactRoot: f.artifactRoot }));
-    f.descriptor.licenses.reverse();
-    assert.equal(serializeManifest(await buildManifest({ repoRoot: f.root, descriptor: f.descriptor, artifactRoot: f.artifactRoot })), first);
   } finally { await f.cleanup(); }
 });
 

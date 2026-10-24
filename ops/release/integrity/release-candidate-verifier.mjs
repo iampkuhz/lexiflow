@@ -168,14 +168,14 @@ async function treeSnapshot(root, expected) {
 }
 
 function imagePlatforms(candidate, manifest) {
-  if (!Array.isArray(candidate.imageCandidates) || candidate.imageCandidates.length < 1 || candidate.imageCandidates.length > 2) fail('CANDIDATE_SCHEMA_INVALID');
+  if (!Array.isArray(candidate.imageCandidates) || candidate.imageCandidates.length !== 1) fail('CANDIDATE_SCHEMA_INVALID');
   const declared = new Set();
   for (const record of candidate.imageCandidates) {
-    if (!keys(record, ['platform', 'sha256']) || !['linux/amd64', 'linux/arm64'].includes(record.platform)
+    if (!keys(record, ['platform', 'sha256']) || record.platform !== 'linux/arm64'
       || typeof record.sha256 !== 'string' || !hex.test(record.sha256) || declared.has(record.platform)) fail('CANDIDATE_SCHEMA_INVALID');
     declared.add(record.platform);
   }
-  if (declared.size !== manifest.platforms.length || manifest.platforms.some((platform) => !declared.has(platform))) fail('IMAGE_CANDIDATE_MISMATCH');
+  if (declared.size !== 1 || !declared.has('linux/arm64') || manifest.platforms.length !== 1 || manifest.platforms[0] !== 'linux/arm64') fail('IMAGE_CANDIDATE_MISMATCH');
   // Candidate marker digests name the prior image-candidate markers, not the
   // archive bytes. The archive digest is independently checked from manifest.
 }
@@ -213,7 +213,7 @@ export async function verifyReleaseCandidate(input) {
     const extension = manifest.artifacts.find((item) => item.role === 'extension');
     const extensionPath = `payload/${extension.path}`;
     const extensionBefore = await regular(root, extensionPath);
-    await verifyExtensionIdentity(pathname(root, extensionPath), identity);
+    await verifyExtensionIdentity(pathname(root, extensionPath), identity, extension.metadata.expectedDataset);
     await unchanged(extensionBefore.chain);
     // Re-read every artifact after ZIP parsing, not merely its metadata. This
     // binds the returned proof to the complete end-state of the candidate.

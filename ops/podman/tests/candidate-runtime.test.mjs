@@ -1,551 +1,187 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runCandidateRuntime, REQUIRED_PHASE_IDS, eligibleForPass, assertResourceOwnership, assertTargetApiContainer, stopVerifiedTargetApi, assertManagedStorageTopology } from '../candidates/check-podman-candidate-lifecycle.mjs';
-import { startCandidateSession } from '../candidates/candidate-process-session.mjs';
-import { deploymentSlot } from '../deployment-slots.mjs';
+import { runCandidateRuntime, REQUIRED_PHASE_IDS, validateCandidateRequest, eligibleForPass } from '../candidates/check-podman-candidate-lifecycle.mjs';
 
-const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const cli = path.join(repo, 'ops/podman/candidates/check-podman-candidate-lifecycle.mjs');
-const candidate = n => ({ candidateDirectory: `/tmp/lexiflow-synthetic-${n}`, candidateSha256: n.repeat(64) });
-const request = { previous: candidate('a'), target: candidate('b') };
-const owned = { id: 'a'.repeat(32), project: `lexiflow-local-${'a'.repeat(32)}` };
-const labels = { 'com.docker.compose.project': owned.project, 'io.podman.compose.project': owned.project,
-  'lexiflow.installation': owned.id, 'com.docker.compose.service': 'api', 'io.podman.compose.service': 'api' };
+const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
+const cli=path.join(repo,'ops/podman/candidates/check-podman-candidate-lifecycle.mjs');
+const candidate={candidateDirectory:'/tmp/synthetic-release-candidate',candidateSha256:'a'.repeat(64)};
+const request={target:candidate};
 
-test('current storage topology accepts two exact networks and one volume without accepting extra resources', () => {
-  const networks = ['private', 'published'].map(name => ({ id: `${owned.project}_${name}` }));
-  const volumes = [{ id: `${owned.project}_pgdata` }];
-  assertManagedStorageTopology(owned, 'network', networks, { complete: true });
-  assertManagedStorageTopology(owned, 'volume', volumes, { complete: true });
-  assertManagedStorageTopology(owned, 'network', []);
-  assertManagedStorageTopology(owned, 'volume', []);
-  for (const [kind, rows, options] of [
-    ['network', [...networks, { id: `${owned.project}_extra` }]],
-    ['network', [networks[0], networks[0]]],
-    ['network', [{ id: `${owned.project}_default` }]],
-    ['network', [networks[0]], { complete: true }],
-    ['volume', [...volumes, { id: `${owned.project}_initialization-work` }]],
-    ['volume', [{ id: 'other_pgdata' }]],
-    ['volume', [], { complete: true }],
-  ]) assert.throws(() => assertManagedStorageTopology(owned, kind, rows, options), /RESOURCE_SET_UNEXPECTED/);
+test('request contract is exact target-only and validates bounded absolute candidate identity',()=>{
+  assert.equal(validateCandidateRequest(request),true);
+  for(const bad of [null,{}, {previous:candidate,target:candidate}, {...request,command:['podman','rm']},
+    {target:{...candidate,candidateDirectory:'relative'}},{target:{...candidate,candidateSha256:'bad'}},
+    {target:candidate,status:'PASS'}]) assert.throws(()=>validateCandidateRequest(bad),/REQUEST_INVALID/);
 });
 
-test('exact request rejects caller command, alternate directory and claimed PASS before side effects', async () => {
-  for (const extra of [{ action: 'install' }, { root: '/tmp/other' }, { status: 'PASS' }, { hooks: {} }]) {
-    const result = await runCandidateRuntime({ ...request, ...extra });
-    assert.equal(result.status, 'FAIL');
-    assert.equal(result.failure.code, 'REQUEST_INVALID');
-    assert.equal(result.phases.every(p => p.status === 'NOT_RUN'), true);
-    assert.equal(result.cleanup.settled, true);
+test('only a complete ordered real-stage report with settled cleanup is eligible for PASS',()=>{
+  const value={status:'PASS',failure:null,phases:REQUIRED_PHASE_IDS.map(id=>({id,status:'PASS'})),
+    cleanup:{status:'PASS',settled:true,ownedResourcesRemoved:true}};
+  assert.equal(eligibleForPass(value),true);
+  for(const id of REQUIRED_PHASE_IDS){const bad=structuredClone(value);bad.phases.find(x=>x.id===id).status='NOT_RUN';assert.equal(eligibleForPass(bad),false,id);}
+  for(const mutate of [x=>x.phases.reverse(),x=>x.cleanup.settled=false,x=>x.cleanup.ownedResourcesRemoved=false,x=>x.failure={code:'ERROR'}]){
+    const bad=structuredClone(value);mutate(bad);assert.equal(eligibleForPass(bad),false);
   }
-  const bad = await runCandidateRuntime({ ...request, previous: { ...request.previous, candidateSha256: 'not-hex' } });
-  assert.equal(bad.failure.code, 'REQUEST_INVALID');
 });
 
-test('host refusal is a bounded BLOCKED report and never claims a phase', async () => {
-  const original = Object.getOwnPropertyDescriptor(process, 'platform');
-  Object.defineProperty(process, 'platform', { ...original, value: 'linux' });
+test('unsupported host is BLOCKED without claiming candidate execution or cleanup',async()=>{
+  const original=Object.getOwnPropertyDescriptor(process,'platform');
+  Object.defineProperty(process,'platform',{...original,value:'linux'});
   try {
-    const result = await runCandidateRuntime(request);
-    assert.equal(result.status, 'BLOCKED');
-    assert.equal(result.failure.code, 'HOST_UNSUPPORTED');
-    assert.equal(result.candidates.previous, null);
-    assert.equal(result.phases.every(p => p.status === 'NOT_RUN'), true);
-  } finally { Object.defineProperty(process, 'platform', original); }
+    const result=await runCandidateRuntime(request);
+    assert.equal(result.status,'BLOCKED');assert.equal(result.failure.code,'HOST_UNSUPPORTED');
+    assert.equal(result.target,null);assert.equal(result.phases.slice(0,-1).every(p=>p.status==='NOT_RUN'),true);
+    assert.equal(result.cleanup.ownedResourcesRemoved,false);
+  } finally { Object.defineProperty(process,'platform',original); }
 });
 
-test('CLI uses one JSON stdout report and invalid JSON exits nonzero', () => {
-  const valid = spawnSync(process.execPath, [cli], { input: JSON.stringify({ ...request, command: 'podman rm -f anything' }), encoding: 'utf8' });
-  assert.equal(valid.status, 0);
-  assert.equal(valid.stdout.trim().split('\n').length, 1);
-  const report = JSON.parse(valid.stdout);
-  assert.equal(report.failure.code, 'REQUEST_INVALID');
-  assert.equal(valid.stderr, '');
-  const malformed = spawnSync(process.execPath, [cli], { input: '{', encoding: 'utf8' });
-  assert.notEqual(malformed.status, 0);
-  assert.equal(malformed.stdout, '');
+test('fixed CLI emits one bounded JSON result and never interprets malformed input as PASS',()=>{
+  const invalid=spawnSync(process.execPath,[cli],{input:JSON.stringify({...request,extra:'forbidden'}),encoding:'utf8'});
+  assert.equal(invalid.status,0);assert.equal(invalid.stderr,'');assert.equal(invalid.stdout.trim().split('\n').length,1);
+  assert.equal(JSON.parse(invalid.stdout).failure.code,'REQUEST_INVALID');
+  const malformed=spawnSync(process.execPath,[cli],{input:'{',encoding:'utf8'});
+  assert.equal(malformed.status,0);assert.equal(JSON.parse(malformed.stdout).status,'FAIL');
 });
 
-test('PASS requires every fixed real phase and settled successful cleanup', () => {
-  const output = { phases: REQUIRED_PHASE_IDS.map(id => ({ id, status: 'PASS' })), cleanup: { status: 'PASS', settled: true } };
-  assert.equal(eligibleForPass(output), true);
-  for (const id of REQUIRED_PHASE_IDS) {
-    const changed = structuredClone(output);
-    changed.phases.find(p => p.id === id).status = 'NOT_RUN';
-    assert.equal(eligibleForPass(changed), false, id);
-  }
-  output.cleanup.settled = false;
-  assert.equal(eligibleForPass(output), false, 'unknown descendants must retain resources');
-  output.cleanup.settled = true; output.cleanup.status = 'FAIL';
-  assert.equal(eligibleForPass(output), false, 'unknown ownership must retain resources');
-});
-
-test('wrong project, owner, service or image is rejected before any stop decision', () => {
-  const info = { Id: 'c'.repeat(64), Image: 'sha256:' + 'd'.repeat(64), State: { Running: true }, Config: { Labels: labels } };
-  assert.equal(assertTargetApiContainer(info, owned, 'sha256:' + 'd'.repeat(64)), true);
-  for (const change of [
-    { 'com.docker.compose.project': 'foreign' },
-    { 'io.podman.compose.project': 'foreign' },
-    { 'lexiflow.installation': 'foreign' },
-    { 'com.docker.compose.service': 'postgres' },
-    { 'io.podman.compose.service': 'postgres' },
-  ]) {
-    const changed = { ...info, Config: { Labels: { ...labels, ...change } } };
-    assert.throws(() => assertResourceOwnership(changed, owned, 'container', 'api'), /RESOURCE_OWNER_MISMATCH/);
-    assert.throws(() => assertTargetApiContainer(changed, owned, 'sha256:' + 'd'.repeat(64)));
-  }
-  assert.throws(() => assertTargetApiContainer(info, owned, 'sha256:' + 'e'.repeat(64)), /API_IMAGE_MISMATCH/);
-});
-
-test('observer requires two matching live inspections and observed stop, never stopping an unknown target', () => {
-  const image = 'sha256:' + 'd'.repeat(64);
-  const first = { Id: 'c'.repeat(64), Image: image, State: { Running: true }, Config: { Labels: labels } };
-  let stops = 0;
-  const gate = (changedFirst, changedSecond, stopped) => stopVerifiedTargetApi({ state: owned,
-    first: changedFirst, expectedImage: image, reinspect: () => changedSecond,
-    stop: () => { stops++; }, inspectStopped: () => stopped });
-  const foreign = { ...first, Config: { Labels: { ...labels, 'lexiflow.installation': 'foreign' } } };
-  assert.throws(() => gate(foreign, first, { ...first, State: { Running: false } }), /RESOURCE_OWNER_MISMATCH/);
-  assert.throws(() => gate(first, foreign, { ...first, State: { Running: false } }), /RESOURCE_OWNER_MISMATCH/);
-  assert.throws(() => gate(first, { ...first, Image: 'sha256:' + 'e'.repeat(64) }, { ...first, State: { Running: false } }), /API_IMAGE_MISMATCH/);
-  assert.equal(stops, 0);
-  assert.throws(() => gate(first, first, first), /TARGET_API_STOP_NOT_OBSERVED/);
-  assert.equal(stops, 1, 'the missing-fault case must not be reported as PASS');
-  assert.equal(gate(first, first, { ...first, State: { Running: false } }), true);
-  assert.equal(stops, 2);
-});
-
-test('fixed child session rejects alternate operations and missing bounded DB port', () => {
-  const base = { action: 'install', directory: deploymentSlot('release-validation', repo).directory, candidate: request.target,
-    dbPort: 15433, logFile: '/tmp/lexiflow-test.log' };
-  for (const change of [{ action: 'stop' }, { dbPort: 15432 }, { dbPort: 0 },
-    { candidate: { ...request.target, command: 'exit 0' } }, { directory: 'relative' }, { directory: '/tmp/uuid-install' }, { logFile: 'relative' }]) {
-    assert.throws(() => startCandidateSession({ ...base, ...change }), /SESSION_REQUEST_INVALID/);
-  }
-});
-
-test('session wait is memoized and delayed wait uses the original spawn deadline', async () => {
-  const originalSpawn = childProcess.spawn;
-  const helper = `import net from 'node:net'; const fd3=new net.Socket({fd:3,readable:true,writable:false}); fd3.on('data',()=>{fd3.destroy();process.exit(0)}); setInterval(()=>{},1000);`;
-  mock.method(childProcess, 'spawn', (_command, _args, options) => originalSpawn(process.execPath,
-    ['--input-type=module', '-e', helper], options));
-  syncBuiltinESMExports();
-  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiflow-session-deadline-'));
-  try {
-    const started = Date.now();
-    const session = startCandidateSession({ action: 'upgrade', directory: deploymentSlot('release-validation', repo).directory,
-      candidate: request.target, dbPort: 15433, logFile: path.join(temp, 'session.log'), timeoutMs: 1000 });
-    await new Promise(resolve => setTimeout(resolve, 650));
-    const waiter = session.wait();
-    assert.equal(session.wait(), waiter, 'all callers observe the one original wait result');
-    await assert.rejects(waiter, /SESSION_TIMEOUT/);
-    assert.ok(Date.now() - started < 1550, `wait must not add a fresh timeout: ${Date.now() - started}ms`);
-    assert.equal(session.isClosed(), true);
-  } finally {
-    mock.restoreAll(); syncBuiltinESMExports();
-    fs.rmSync(temp, { recursive: true, force: true });
-  }
-});
-
-test('fixed fd3 control pipe closes an idle child normally and cancels on explicit marker or parent EOF', async () => {
-  const source = `import {watchCancel} from ${JSON.stringify(new URL('../candidates/candidate-process-session.mjs', import.meta.url).href)};
-    let cancelled = false; const control = watchCancel(() => { cancelled = true; process.stdout.write('CANCEL\\n'); control.destroy(); });
-    process.stdout.write('READY\\n');
-    setTimeout(() => { if (!cancelled) { control.destroy(); process.stdout.write('DONE\\n'); } }, 30);`;
-  const run = (signal) => new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['--input-type=module', '-e', source], { stdio: ['ignore', 'pipe', 'pipe', 'pipe'] });
-    let output = '', stderr = '', sent = false;
-    const timer = setTimeout(() => { child.stdio[3].destroy(); reject(new Error('CONTROL_PIPE_HUNG')); }, 2000);
-    child.stdout.on('data', chunk => {
-      output += chunk;
-      if (!sent && output.includes('READY') && signal !== 'none') {
-        sent = true; child.stdio[3].end(signal === 'marker' ? 'cancel\n' : undefined);
-      }
-    });
-    child.stderr.on('data', chunk => { stderr += chunk; });
-    child.once('close', code => { clearTimeout(timer); resolve({ code, output, stderr }); });
-  });
-  const normal = await run('none');
-  assert.equal(normal.code, 0, normal.stderr);
-  assert.match(normal.output, /DONE/);
-  assert.doesNotMatch(normal.output, /CANCEL/);
-  const marked = await run('marker');
-  assert.equal(marked.code, 0, marked.stderr);
-  assert.match(marked.output, /CANCEL/);
-  const eof = await run('eof');
-  assert.equal(eof.code, 0, eof.stderr);
-  assert.match(eof.output, /CANCEL/);
-});
-
-// Append to ops/podman/tests/candidate-runtime.test.mjs. The copied orchestrator is byte-identical.
-import fs from 'node:fs';
-import os from 'node:os';
-import net from 'node:net';
-import crypto from 'node:crypto';
-import childProcess from 'node:child_process';
-import { syncBuiltinESMExports } from 'node:module';
-import { mock } from 'node:test';
-
-const flowHex = c => c.repeat(64);
-const flowSha = value => crypto.createHash('sha256').update(value).digest('hex');
-const flowCandidate = (name, letter) => ({ candidateDirectory: `/synthetic/${name}`, candidateSha256: flowHex(letter) });
-const flowPrevious = flowCandidate('previous', 'a');
-const flowTarget = flowCandidate('target', 'b');
-const flowIdentity = (_name, letter) => {
-  const source = { baseVersion: '2.0.0-SNAPSHOT', sourceCommit: letter.repeat(40), sourceSha256: flowHex(letter), dirty: false };
-  return { schemaVersion: 1, ...source, softwareVersion: `2.0.0-SNAPSHOT.20261006.g${letter.repeat(7)}`,
-    chromeVersion: '2.0.0.0', buildId: flowSha(JSON.stringify({ ...source, sourceDate: '20261006' })), channel: 'snapshot' };
-};
-const flowVerified = (name, letter) => ({ candidateSha256: flowHex(letter), manifestSha256: flowHex(letter === 'a' ? 'c' : 'd'), buildIdentity: flowIdentity(name, letter), manifest: { artifacts: [
-  { role: 'api-image', platform: 'linux/arm64', imageDigest: `sha256:${flowHex(letter)}` },
-  { role: 'postgres-image', platform: 'linux/arm64', imageDigest: `sha256:${flowHex(letter === 'a' ? 'e' : 'f')}` },
-  { role: 'sql', sha256: flowHex('9') },
-] } });
-const flowCandidates = { [flowPrevious.candidateSha256]: flowVerified('previous', 'a'), [flowTarget.candidateSha256]: flowVerified('target', 'b') };
-const flowStub = (file, body) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, body); };
-
-async function withRuntimeFlowFixture(scenario, check) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiflow-flow-'));
-  const runtimeFile = path.join(root, 'ops/podman/candidates/check-podman-candidate-lifecycle.mjs');
-  flowStub(runtimeFile, fs.readFileSync(path.join(repo, 'ops/podman/candidates/check-podman-candidate-lifecycle.mjs')));
-  flowStub(path.join(root, 'ops/podman/deployment-slots.mjs'), fs.readFileSync(path.join(repo, 'ops/podman/deployment-slots.mjs')));
-  flowStub(path.join(root, 'ops/podman/images/candidate-image-alias.mjs'), fs.readFileSync(path.join(repo, 'ops/podman/images/candidate-image-alias.mjs')));
-  flowStub(path.join(root, 'ops/podman/images/versioned-images.mjs'), fs.readFileSync(path.join(repo, 'ops/podman/images/versioned-images.mjs')));
-  flowStub(path.join(root, 'ops/release/integrity/source-build-identity.mjs'), `export const resolveBuildIdentity=()=>globalThis.__lexiflowFlow.source; export { assertBuildIdentityMatches, parseVersion } from ${JSON.stringify(new URL('../../release/integrity/source-build-identity.mjs', import.meta.url).href)};`);
-  flowStub(path.join(root, 'ops/release/integrity/release-candidate-verifier.mjs'), `export const verifyReleaseCandidate=async c=>globalThis.__lexiflowFlow.verify(c);`);
-  flowStub(path.join(root, 'ops/podman/installation/installation-update-transaction.mjs'), `export const verifyExtension=(d,i,p)=>globalThis.__lexiflowFlow.extension(d,i,p); export const treeDigest=d=>globalThis.__lexiflowFlow.tree(d);`);
-  flowStub(path.join(root, 'ops/podman/execution/installation-operation-lock.mjs'), `export const acquireProcessLock=d=>globalThis.__lexiflowFlow.lock(d);`);
-  flowStub(path.join(root, 'ops/podman/candidates/candidate-process-session.mjs'), `export const runCandidateSession=i=>globalThis.__lexiflowFlow.run(i); export const startCandidateSession=i=>globalThis.__lexiflowFlow.start(i);`);
-  const socketPath = path.join(root, 'podman.sock');
-  const socket = net.createServer();
-  await new Promise((resolve, reject) => { socket.once('error', reject); socket.listen(socketPath, resolve); });
-  const original = ['platform', 'arch'].map(key => [key, Object.getOwnPropertyDescriptor(process, key)]);
-  const osPlatform = Object.getOwnPropertyDescriptor(os, 'platform'), osArch = Object.getOwnPropertyDescriptor(os, 'arch');
-  const flow = new FlowEngine(scenario, socketPath);
-  globalThis.__lexiflowFlow = flow;
-  Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' });
-  Object.defineProperty(process, 'arch', { configurable: true, value: 'arm64' });
-  Object.defineProperty(os, 'platform', { configurable: true, value: () => 'darwin' });
-  Object.defineProperty(os, 'arch', { configurable: true, value: () => 'arm64' });
-  // The real Unix socket above exercises the inode fence; port probes are synthetic.
-  mock.method(net, 'createServer', () => ({
-    once() { return this; },
-    listen(...args) { queueMicrotask(args.at(-1)); return this; },
-    address() { return { port: 15433 }; },
-    close(callback) { if (callback) queueMicrotask(callback); return this; },
-  }));
-  mock.method(childProcess, 'spawnSync', (...args) => flow.command(...args));
-  syncBuiltinESMExports();
-  try {
-    const runtime = await import(`file://${runtimeFile}`);
-    await check(runtime, flow);
-  } finally {
-    mock.restoreAll(); syncBuiltinESMExports();
-    for (const [key, descriptor] of original) Object.defineProperty(process, key, descriptor);
-    Object.defineProperty(os, 'platform', osPlatform); Object.defineProperty(os, 'arch', osArch);
-    delete globalThis.__lexiflowFlow;
-    await new Promise(resolve => socket.close(resolve));
-    fs.rmSync(root, { recursive: true, force: true });
-  }
+// Exercise the real bounded lifecycle functions with fake Podman observations;
+// this is a precise orchestration regression, not a real-container PASS.
+async function lifecycleFunction(name, nextName, bindings) {
+  const { readFile } = await import('node:fs/promises');
+  const { Script, createContext } = await import('node:vm');
+  const source = await readFile(path.join(repo, 'ops/podman/candidates/single-runtime-candidate.mjs'), 'utf8');
+  const start = source.search(new RegExp(`(?:async )?function ${name}\\(`));
+  const end = source.search(new RegExp(`(?:async )?function ${nextName}\\(`));
+  assert.ok(start >= 0 && end > start);
+  const context = createContext({ ownerLabel: 'io.lexiflow.candidate-acceptance', ...bindings, fail: code => { throw new Error(code); } });
+  return { execute: new Script(`${source.slice(start, end)}; ${name}`).runInContext(context), source };
 }
 
-class FlowEngine {
-  constructor(scenario, socketPath) { this.scenario = scenario; this.socketPath = socketPath; this.installs = new Map(); this.mutations = []; this.stops = 0; this.next = 0; this.source = flowCandidates[flowTarget.candidateSha256].buildIdentity; this.faultPolls = 0; this.observingFault = false; }
-  verify(c) { const v = flowCandidates[c.candidateSha256]; if (!v) throw Error('UNKNOWN_CANDIDATE'); return v; }
-  extension(dir, identity, port) { assert.equal(port, 18080); assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'build-identity.json'))), identity); return this.tree(dir); }
-  tree(dir) { return flowSha(fs.readFileSync(path.join(dir, 'build-identity.json'))); }
-  lock(dir) { if (dir.includes('podman-release-validation') && !dir.includes('slot-')) assert.ok(fs.existsSync(path.join(dir, 'state.json'))); return () => {}; }
-  identify(input) { return this.verify(input.candidate).buildIdentity; }
-  record(install, kind, status, identity) {
-    const operation = (++this.next).toString(16).padStart(32, '0');
-    const record = { schema: 1, operation, kind, status, buildId: identity.buildId, targetVersion: identity.softwareVersion, sourceCommit: identity.sourceCommit, startedAt: '2026-01-01T00:00:00Z', completedAt: '2026-01-01T00:00:01Z', artifacts: install.state.artifacts, dataset: install.state.datasetIdentity };
-    fs.writeFileSync(path.join(install.dir, 'installation-records', `${operation}.json`), JSON.stringify(record));
-    if (status === 'PASS') install.state.lastOperation = record;
-    return record;
-  }
-  save(install) { fs.writeFileSync(path.join(install.dir, 'state.json'), JSON.stringify(install.state)); }
-  ext(install, identity) { const dir = path.join(install.dir, 'extension'); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'build-identity.json'), JSON.stringify(identity)); }
-  make(input) {
-    const v = this.verify(input.candidate), dir = input.directory, id = (++this.next).toString(16).padStart(32, '0');
-    const project = `lexiflow-local-${id}`, dataset = path.join(dir, 'data', 'dataset');
-    fs.mkdirSync(path.join(dir, 'installation-records'), { recursive: true, mode: 0o700 }); fs.chmodSync(dir, 0o700);
-    fs.mkdirSync(path.join(dir, 'secrets')); fs.mkdirSync(dataset, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'secrets/app-password'), 'synthetic-app');
-    fs.writeFileSync(path.join(dir, 'secrets/postgres-password'), 'synthetic-pg');
-    fs.writeFileSync(path.join(dataset, 'dataset.zip'), 'synthetic-dataset');
-    const api = v.manifest.artifacts[0].imageDigest, pg = v.manifest.artifacts[1].imageDigest;
-    const generationVersion = flowSha('generation');
-    const state = { schema: 1, id, project, root: dir, apiPort: 18080, dbPort: input.dbPort, phase: 'ready', version: v.buildIdentity.softwareVersion, buildIdentity: v.buildIdentity, packageType: 'release-package', databaseTarget: { kind: 'managed', authMode: 'managed', user: 'postgres', host: '127.0.0.1', port: input.dbPort }, apiImage: api, postgresImage: pg, candidateSha256: input.candidate.candidateSha256, manifestSha256: v.manifestSha256, dataset, datasetPackageSha256: flowSha('synthetic-dataset'), generationVersion, datasetIdentity: { version: 7, generationVersion, sourceSha256: flowSha('synthetic-dataset'), releasePackageSha256: flowSha('synthetic-dataset') }, artifacts: { apiImage: api, postgresImage: pg, image: api, candidateSha256: input.candidate.candidateSha256, manifestSha256: v.manifestSha256 } };
-    const labels = service => ({ 'com.docker.compose.project': project, 'io.podman.compose.project': project, 'lexiflow.installation': id, ...(service ? { 'com.docker.compose.service': service, 'io.podman.compose.service': service } : {}) });
-    const volumeA = `${project}_pgdata`;
-    const install = { dir, state, labels, containers: [
-      { Id: flowHex('1'), Image: api, State: { Running: true }, Config: { Labels: labels('api') } },
-      { Id: flowHex('2'), Image: pg, State: { Running: true }, Config: { Labels: labels('postgres') }, Mounts: [{ Type: 'volume', Destination: '/var/lib/postgresql/data', Name: volumeA }] },
-    ], volumes: [volumeA].map(Name => ({ Name, CreatedAt: '2026-01-01T00:00:00Z', Labels: labels() })), networks: ['private', 'published'].map(name => ({ Name: `${project}_${name}`, Labels: labels() })) };
-    if (this.scenario === 'lock-claim') fs.mkdirSync(path.join(dir, '.lock-claim'));
-    this.installs.set(dir, install); this.ext(install, v.buildIdentity); this.record(install, 'install', 'PASS', v.buildIdentity); this.save(install); return install;
-  }
-  change(install, input) {
-    const v = this.verify(input.candidate), image = v.manifest.artifacts[0].imageDigest, pg = v.manifest.artifacts[1].imageDigest;
-    install.state = { ...install.state, phase: 'ready', version: v.buildIdentity.softwareVersion, buildIdentity: v.buildIdentity, apiImage: image, postgresImage: pg, artifacts: { ...install.state.artifacts, apiImage: image, postgresImage: pg, image, candidateSha256: input.candidate.candidateSha256, manifestSha256: v.manifestSha256 } };
-    install.containers[0] = { ...install.containers[0], Id: flowSha(`api-${++this.next}`), Image: image, State: { Running: true } };
-    install.containers[1] = { ...install.containers[1], Id: flowSha(`pg-${++this.next}`), Image: pg };
-    this.ext(install, v.buildIdentity); this.save(install);
-  }
-  async run(input) {
-    const addOperationLog = install => {
-      const name = `operation-${Date.now()}-${String(++this.next).padStart(8, '0')}.log`;
-      const file = path.join(install.dir, name);
-      fs.writeFileSync(file, 'synthetic-private-secret\nraw diagnostic detail\n', { mode: 0o600 });
-      if (this.scenario === 'unsafe-operation-log') fs.chmodSync(file, 0o644);
-      if (this.scenario === 'symlink-operation-log') { fs.unlinkSync(file); fs.symlinkSync('/etc/passwd', file); }
-      if (this.scenario === 'extra-operation-log') fs.writeFileSync(path.join(install.dir, 'unexpected-operation.log'), 'synthetic', { mode: 0o600 });
-      const evidence = path.join(path.dirname(input.logFile), 'private-operation-logs');
-      if (this.scenario === 'symlink-log-destination-parent' && !fs.existsSync(evidence)) fs.symlinkSync('/tmp', evidence);
-      if (this.scenario === 'symlink-log-destination-candidate') {
-        fs.mkdirSync(evidence, { recursive: true, mode: 0o700 });
-        const candidatePath = path.join(evidence, `${flowTarget.candidateSha256}-${install.state.id}`);
-        if (!fs.existsSync(candidatePath)) fs.symlinkSync('/tmp', candidatePath);
-      }
-      if (this.scenario === 'extra-log-destination') {
-        fs.mkdirSync(evidence, { recursive: true, mode: 0o700 });
-        const candidatePath = path.join(evidence, `${flowTarget.candidateSha256}-${install.state.id}`);
-        if (!fs.existsSync(candidatePath)) {
-          fs.mkdirSync(candidatePath, { mode: 0o700 });
-          fs.writeFileSync(path.join(candidatePath, 'unknown.log'), 'synthetic', { mode: 0o600 });
-        }
-      }
-    };
-    const existing = fs.existsSync(path.join(input.directory, 'state.json')) ? this.installs.get(input.directory) : null;
-    if (!existing) {
-      addOperationLog(this.make(input));
-      return { code: 0, signal: null, settled: this.scenario !== 'unsettled' };
-    }
-    if (this.scenario === 'no-op-repeat-install' && input.action === 'install') return { code: 0, signal: null, settled: true };
-    if (this.scenario === 'no-op-repeat-upgrade' && input.action === 'upgrade') return { code: 0, signal: null, settled: true };
-    this.change(existing, input); this.record(existing, input.action, 'PASS', this.identify(input)); this.save(existing); addOperationLog(existing);
-    return { code: 0, signal: null, settled: true };
-  }
-  start(input) {
-    const existing = this.installs.get(input.directory), old = structuredClone(existing.state);
-    // 真正事务在readiness成功前仍保留旧state和extension，只切换运行中的API。
-    existing.containers[0] = { ...existing.containers[0], Id: flowSha(`api-${++this.next}`),
-      Image: this.verify(input.candidate).manifest.artifacts[0].imageDigest, State: { Running: true } };
-    this.observingFault = true;
-    let closed = false, release;
-    const stopped = new Promise(resolve => { release = resolve; });
-    this.releaseFaultWait = release;
-    return { isClosed: () => closed, wait: async () => {
-      if (this.scenario === 'missing-fault' || this.scenario === 'missing-fault-success') {
-        await new Promise(resolve => setTimeout(resolve, 25)); closed = true;
-        return { code: this.scenario === 'missing-fault-success' ? 0 : 1, signal: null, settled: true };
-      }
-      if (this.scenario === 'unsettled-fault' || this.scenario === 'signal-unsettled-fault') {
-        await stopped; closed = true;
-        return { code: this.scenario === 'signal-unsettled-fault' ? null : 1,
-          signal: this.scenario === 'signal-unsettled-fault' ? 'SIGTERM' : null, settled: false };
-      }
-      await stopped;
-      closed = true;
-      assert.equal(existing.containers[0].State.Running, false, 'failure must follow an observed stop');
-      existing.state = { ...old, phase: 'initialized' };
-      this.record(existing, 'upgrade', 'FAIL', this.identify(input)); this.save(existing);
-      return { code: 1, signal: null, settled: true };
-    } };
-  }
-  command(binary, argv) {
-    assert.equal(binary, 'podman', 'no real Podman command is allowed');
-    const json = value => ({ status: 0, stdout: `${JSON.stringify(value)}\n`, stderr: '', signal: null });
-    if (argv[0] === 'machine') return json([{ State: 'running', ConnectionInfo: { PodmanSocket: { Path: this.socketPath } } }]);
-    if (argv[0] === 'image' && argv[1] === 'exists') return { status: this.scenario === 'alias-residue' ? 0 : 1, stdout: '', stderr: '', signal: null };
-    const installs = [...this.installs.values()];
-    const ownerOf = id => installs.find(x => [...x.containers, ...x.volumes, ...x.networks].some(r => r.Id === id || r.Name === id));
-    const collection = kind => installs.flatMap(x => kind === 'container' ? x.containers : kind === 'volume' ? x.volumes : x.networks);
-    if (argv[0] === 'ps') {
-      if (this.observingFault && ['missing-fault', 'missing-fault-success'].includes(this.scenario)) return json([]);
-      if (this.observingFault && this.scenario === 'delayed-observer-target' && this.faultPolls++ < 241) return json([]);
-      return json(collection('container').map(x => ({ Id: x.Id, Labels: x.Config.Labels })));
-    }
-    if (argv[1] === 'ls') return json(collection(argv[0]).map(x => ({ Name: x.Name, Labels: x.Labels })));
-    if (argv[0] === 'image' && argv[1] === 'inspect') {
-      const candidate = Object.values(flowCandidates).find(v => v.manifest.artifacts[0].imageDigest === argv[2]);
-      assert.ok(candidate); const i = candidate.buildIdentity;
-      return json([{ Id: argv[2], Os: 'linux', Architecture: 'arm64', Config: { Labels: { 'org.opencontainers.image.version': i.softwareVersion, 'org.opencontainers.image.revision': i.sourceCommit, 'io.lexiflow.build-id': i.buildId, 'io.lexiflow.source-sha256': i.sourceSha256 } } }]);
-    }
-    if (argv[0] === 'inspect' || argv[1] === 'inspect') {
-      const id = argv.at(-1), kind = argv[0] === 'inspect' ? 'container' : argv[0];
-      const value = collection(kind).find(x => x.Id === id || x.Name === id); assert.ok(value, `unknown ${kind} ${id}`);
-      if (this.scenario === 'wrong-owner' && kind === 'container' && value.Config?.Labels?.['com.docker.compose.service'] === 'api' && this.mutations.length === 0) return json([{ ...value, Config: { Labels: { ...value.Config.Labels, 'lexiflow.installation': 'foreign' } } }]);
-      return json([value]);
-    }
-    if (argv[0] === 'exec') return { status: 0, stdout: argv.at(-1).includes('lexicon_dataset') ? `${flowSha('generation')}:7\n` : 'lexiflow-candidate-runtime-v1\n', stderr: '', signal: null };
-    if (argv[0] === 'stop') { const id = argv.at(-1), install = ownerOf(id); assert.ok(install); assert.equal(install.containers[0].Id, id); install.containers[0].State.Running = false; this.stops++; this.mutations.push(['stop', id]); this.releaseFaultWait?.(); return json({}); }
-    if (argv[0] === 'rm' || argv[1] === 'rm') {
-      const kind = argv[0] === 'rm' ? 'container' : argv[0], id = argv.at(-1), install = ownerOf(id); assert.ok(install);
-      const key = kind === 'container' ? 'containers' : kind === 'volume' ? 'volumes' : 'networks';
-      install[key] = install[key].filter(x => x.Id !== id && x.Name !== id); this.mutations.push(['remove', kind, id]); return json({});
-    }
-    throw Error(`UNEXPECTED_FAKE_COMMAND ${argv.join(' ')}`);
-  }
-}
-
-test('copied runtime re-installs repeated candidates, proves exact fault, forward-retries, and cleans only owned resources', async () => {
-  await withRuntimeFlowFixture('success', async (runtime, flow) => {
-    const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
-    assert.equal(result.status, 'PASS', JSON.stringify(result));
-    assert.deepEqual(result.phases.map(p => [p.id, p.status]), runtime.REQUIRED_PHASE_IDS.map(id => [id, 'PASS']));
-    assert.equal(flow.stops, 1);
-    assert.equal(result.cleanup.settled, true);
-    assert.equal(result.cleanup.privateLogsRetained, true);
-    assert.doesNotMatch(JSON.stringify(result), /synthetic-private-secret|raw diagnostic detail/);
-    const retainedParent = path.join(path.dirname(flow.socketPath), 'tmp/quality/candidate-runtime');
-    const retainedRoot = fs.readdirSync(retainedParent).map(name => path.join(retainedParent, name))
-      .find(name => fs.existsSync(path.join(name, 'private-operation-logs')));
-    assert.ok(retainedRoot);
-    const privateLogFiles = fs.readdirSync(path.join(retainedRoot, 'private-operation-logs'), { recursive: true });
-    assert.ok(privateLogFiles.some(name => String(name).endsWith('.log')));
-    const evidenceDirectory = fs.readdirSync(path.join(retainedRoot, 'private-operation-logs'))
-      .map(name => path.join(retainedRoot, 'private-operation-logs', name))
-      .find(name => path.basename(name).startsWith(`${flowTarget.candidateSha256}-`));
-    const privateLog = path.join(evidenceDirectory, fs.readdirSync(evidenceDirectory)[0]);
-    assert.match(fs.readFileSync(privateLog, 'utf8'), /synthetic-private-secret/);
-    assert.equal(fs.statSync(privateLog).mode & 0o777, 0o600);
-    assert.equal(flow.mutations.filter(x => x[0] === 'remove').length, 10); // two installs, 2 containers + 2 networks + 1 volume each
-    const previous = [...flow.installs.values()].at(-1);
-    assert.equal(previous.state.postgresImage, flowCandidates[flowTarget.candidateSha256].manifest.artifacts[1].imageDigest, 'upgrade uses target PostgreSQL image');
-    assert.equal(previous.state.artifacts.candidateSha256, flowTarget.candidateSha256);
-    assert.equal(previous.state.lastOperation.kind, 'upgrade');
-    assert.equal(result.phases.find(p => p.id === 'preservation').facts.volumesSame, true);
-    assert.equal(result.phases.find(p => p.id === 'preservation').facts.pgContainerOwned, true);
-  });
-});
-
-test('unsafe source or destination logs block candidate cleanup without false retention claims', async () => {
-  for (const scenario of ['unsafe-operation-log', 'symlink-operation-log', 'extra-operation-log',
-    'symlink-log-destination-parent', 'symlink-log-destination-candidate', 'extra-log-destination']) {
-    await withRuntimeFlowFixture(scenario, async (runtime, flow) => {
-      const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
-      assert.equal(result.status, 'BLOCKED', `${scenario}: ${JSON.stringify(result)}`);
-      assert.equal(result.failure.code, 'PRIVATE_LOG_RETENTION_BLOCKED', scenario);
-      assert.equal(result.cleanup.privateLogsRetained, false, scenario);
-      assert.equal(flow.mutations.length, 0, 'unsafe evidence must not authorize resource cleanup');
+test('unknown-volume probe waits for exit and rejects timeout or successful exit', async () => {
+  for (const exit of [{ State: { ExitCode: 1 } }, null, { State: { ExitCode: 0 } }]) {
+    let waited = false;
+    // The setup write precedes the wait, so distinguish it from retention probes.
+    const { execute: probe, source } = await lifecycleFunction('incompatibleVolume', 'faultExit', {
+      createVolume: () => {}, containerRun: () => ({ ok: true }),
+      cmd: (_, label) => { if (label !== 'incompatible-marker') assert.equal(waited, true); return { ok: true }; },
+      observeWait: async () => { await Promise.resolve(); waited = true; return exit; },
     });
+    if (exit?.State.ExitCode === 1) assert.equal(await probe('', 'container', 'image', 'volume', 'owner', {}, []), true);
+    else await assert.rejects(probe('', 'container', 'image', 'volume', 'owner', {}, []), /INCOMPATIBLE_VOLUME_NOT_REJECTED/);
+    assert.match(source, /await incompatibleVolume\(root,badName/u);
   }
 });
 
-test('missing fault can never claim PASS even when upgrade child exits nonzero', async () => {
-  await withRuntimeFlowFixture('missing-fault', async (runtime, flow) => {
-    const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
-    assert.equal(result.status, 'FAIL', JSON.stringify(result)); assert.equal(result.failure.code, 'FAULT_NOT_PROVEN');
-    assert.equal(flow.stops, 0); assert.equal(runtime.eligibleForPass(result), false);
-  });
-});
-
-test('observer follows the same session beyond the legacy 240 polls and stops only the exact target once', async () => {
-  await withRuntimeFlowFixture('delayed-observer-target', async (runtime, flow) => {
-    const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
-    assert.equal(result.status, 'PASS', JSON.stringify(result));
-    assert.ok(flow.faultPolls > 240);
-    assert.equal(flow.stops, 1);
-  });
-});
-
-test('normally completed child without fault observation cannot PASS', async () => {
-  await withRuntimeFlowFixture('missing-fault-success', async (runtime, flow) => {
-    const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
-    assert.equal(result.status, 'FAIL', JSON.stringify(result));
-    assert.equal(result.failure.code, 'FAULT_NOT_PROVEN');
-    assert.equal(flow.stops, 0);
-  });
-});
-
-test('repeat-install and repeat-upgrade no-op fixtures cannot satisfy the success-record contract', async () => {
-  for (const scenario of ['no-op-repeat-install', 'no-op-repeat-upgrade']) {
-    await withRuntimeFlowFixture(scenario, async (runtime, flow) => {
-      const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
-      assert.equal(result.status, 'FAIL', scenario);
-      assert.equal(runtime.eligibleForPass(result), false);
-      assert.equal(flow.stops, 0, 'execution must stop before failure-injection phase');
+test('owned running-container cleanup confirms graceful stop before removal', async () => {
+  for (const stopOk of [true, false]) {
+    const calls = [];
+    const id = 'a'.repeat(64);
+    let state = 'running';
+    const { execute } = await lifecycleFunction('removeContainer', 'removeVolume', {
+      inspectContainer: () => state === 'removed' ? null : { Id: id, State: { Status: state } },
+      assertOwned: () => {},
+      cmd: (_, label, args) => {
+        calls.push([label, Array.from(args)]);
+        if (label === 'container-stop') { if (stopOk) state = 'exited'; return { ok: stopOk }; }
+        assert.equal(state, 'exited'); state = 'removed'; return { ok: true };
+      },
     });
+    if (stopOk) { execute('', 'container', 'owner'); assert.deepEqual(calls.map(c => c[0]), ['container-stop', 'container-remove']); }
+    else { assert.throws(() => execute('', 'container', 'owner'), /CONTAINER_STOP_FAILED/); assert.deepEqual(calls.map(c => c[0]), ['container-stop']); }
   }
 });
 
-test('unsettled child retains every unknown resource, without remove mutation', async () => {
-  await withRuntimeFlowFixture('unsettled', async (runtime, flow) => {
-    const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
-    assert.equal(result.status, 'FAIL', JSON.stringify(result)); assert.equal(result.failure.code, 'SESSION_NOT_SETTLED');
-    assert.equal(result.cleanup.settled, false); assert.equal(flow.mutations.length, 0);
-    assert.equal([...flow.installs.values()][0].containers.length, 2);
+test('port-conflict probe waits for listener binding before running a container', async () => {
+  let bound = false, closed = false;
+  const server = {
+    once: () => {},
+    listen: (_, __, ready) => { queueMicrotask(() => { bound = true; ready(); }); },
+    close: done => { closed = true; done(); },
+  };
+  const { execute, source } = await lifecycleFunction('reservePortFailure', 'nameConflictFailure', {
+    net: { createServer: () => server },
+    containerRun: () => { assert.equal(bound, true); return { ok: false }; },
+    inspectContainer: () => null, removeContainer: () => {}, assertOwned: () => {},
   });
+  assert.equal(await execute('', 'image', 'owner', null, []), true);
+  assert.equal(closed, true);
+  assert.match(source, /await reservePortFailure\(root/u);
 });
 
-test('signal or timeout-like unsettled session never passes and retains resources after observation', async () => {
-  for (const scenario of ['unsettled-fault', 'signal-unsettled-fault']) {
-    await withRuntimeFlowFixture(scenario, async (runtime, flow) => {
-      const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
-      assert.equal(result.status, 'FAIL', scenario);
-      assert.equal(result.failure.code, 'SESSION_NOT_SETTLED', scenario);
-      assert.equal(result.cleanup.settled, false, scenario);
-      assert.equal(flow.stops, 1, scenario);
-      assert.ok([...flow.installs.values()].some(install => install.containers.length === 2), scenario);
+test('nonzero supervised exit is unavailable while successful exit cannot prove a component fault', async () => {
+  for (const exitCode of [0, 1, null]) {
+    const { execute } = await lifecycleFunction('observeUnhealthy', 'reservePortFailure', {
+      waitUntil: async fn => fn(),
+      inspectContainer: () => ({ State: { Status: 'exited', ExitCode: exitCode } }),
+      apiState: () => { throw new Error('exited container has no API'); },
     });
+    assert.equal(await execute('', 'container', {}), exitCode === 1 ? true : null);
   }
 });
 
-test('foreign owner is never removed, including catch-path cleanup retry', async () => {
-  await withRuntimeFlowFixture('wrong-owner', async (runtime, flow) => {
-    const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
-    assert.equal(result.status, 'FAIL', JSON.stringify(result)); assert.equal(result.failure.code, 'RESOURCE_OWNER_MISMATCH');
-    assert.equal(result.cleanup.status, 'FAIL'); assert.equal(flow.mutations.length, 0);
+test('real kill-probe shells select the intended process, never their own earlier-sorted bash cmdline', async t => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const root = await mkdtemp(path.join(tmpdir(), 'lexiflow-proc-fixture-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const scripts = [];
+  const { execute } = await lifecycleFunction('faultExit', 'runInner', {
+    volumeAbsent: () => {}, startAndReady: async () => {}, proveAutoVolume: () => {},
+    cmd: (_, label, args) => { scripts.push([label, args.at(-1)]); return { ok: true }; },
+    observeUnhealthy: async () => true, observeWait: async () => ({ State: { ExitCode: 1 } }), removeContainer: () => {},
   });
+  assert.equal(await execute('', 'image', 'owner', 'container', 'volume', [], [], {}, {}), true);
+  for (const [label, script] of scripts) {
+    const base = path.join(root, label, 'proc');
+    for (const pid of ['100', '9']) await mkdir(path.join(base, pid), { recursive: true });
+    const java = label === 'api-exit-injection';
+    await writeFile(path.join(base, '100', 'comm'), 'bash\n');
+    await writeFile(path.join(base, '100', 'cmdline'), `/bin/bash\0-c\0${script}\0`);
+    await writeFile(path.join(base, '9', 'comm'), java ? 'java\n' : 'postgres\n');
+    await writeFile(path.join(base, '9', 'cmdline'), java ? 'java\0-jar\0/app/lexiflow-api.jar\0' : 'postgres\0-D\0/var/lib/lexiflow/postgres\0');
+    const result = spawnSync('/bin/bash', ['-c', `kill() { printf '%s\\n' "$*"; }; ${script.replaceAll('/proc/', `${base}/`)}`], { encoding: 'utf8' });
+    assert.equal(result.status, 0, `${label}: ${result.stderr}`);
+    assert.equal(result.stdout, '-KILL 9\n', label);
+  }
 });
 
-
-test('unknown handoff lock blocks every cleanup mutation and preserves resources', async () => {
-  await withRuntimeFlowFixture('lock-claim', async (runtime, flow) => {
-    const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
-    assert.equal(result.status, 'FAIL', JSON.stringify(result));
-    assert.equal(result.failure.code, 'CLEANUP_LOCK_UNKNOWN');
-    assert.equal(result.cleanup.status, 'FAIL');
-    assert.equal(flow.mutations.length, 0);
-    const install = [...flow.installs.values()][0];
-    assert.equal(install.containers.length, 2);
-    assert.equal(fs.statSync(path.join(install.dir, '.lock-claim')).isDirectory(), true);
+test('every runtime create and run ignores inherited image volumes without disabling the owned named mount', async () => {
+  const calls = [];
+  const command = (_, label, args) => { calls.push([label, Array.from(args)]); return { ok: true }; };
+  const { execute: run } = await lifecycleFunction('containerRun', 'removeContainer', { cmd: command });
+  run('', { name: 'container', volume: 'data', image: 'image', token: 'owner' });
+  for (const argument of ['--image-volume=ignore', '--memory=2g', '--cpus=2', '--stop-timeout=45']) {
+    assert.equal(calls[0][1].includes(argument), true, argument);
+  }
+  assert.equal(calls[0][1].includes('data:/var/lib/lexiflow'), true);
+  const { execute: collision } = await lifecycleFunction('nameConflictFailure', 'invalidLoadFailure', {
+    json: command, cmd: (_, label, args) => { command('', label, args); return { ok: false }; },
+    inspectContainer: () => ({}), assertOwned: () => {},
   });
+  assert.equal(collision('', 'container', 'image', 'owner', []), true);
+  const { execute: incompatible } = await lifecycleFunction('incompatibleVolume', 'faultExit', {
+    createVolume: () => {}, containerRun: () => ({ ok: true }),
+    cmd: (_, label, args) => { command('', label, args); return { ok: label !== 'unknown-volume-retained' }; },
+    observeWait: async () => ({ State: { ExitCode: 1 } }),
+  });
+  assert.equal(await incompatible('', 'container', 'image', 'data', 'owner', {}, []), true);
+  const launches = calls.filter(([, args]) => ['create', 'run'].includes(args[0]));
+  assert.equal(launches.length, 5);
+  for (const [label, args] of launches) assert.equal(args.includes('--image-volume=ignore'), true, label);
 });
 
-test('fixed release slot is reusable after owned cleanup and never derives a second installation path', async () => {
-  await withRuntimeFlowFixture('success', async (runtime, flow) => {
-    const first = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
-    const second = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
-    assert.equal(first.status, 'PASS', JSON.stringify(first));
-    assert.equal(second.status, 'PASS', JSON.stringify(second));
-    assert.equal(new Set([...flow.installs.values()].map(x => x.dir)).size, 1);
-    assert.equal(flow.mutations.filter(x => x[0] === 'remove').length, 20);
-  });
-});
-
-test('unknown fixed-slot residue blocks before Podman mutation rather than selecting a UUID installation', async () => {
-  await withRuntimeFlowFixture('success', async (runtime, flow) => {
-    const slot = path.join(path.dirname(flow.socketPath), '.local/podman-release-validation');
-    fs.mkdirSync(slot, { recursive: true }); fs.writeFileSync(path.join(slot, 'unknown'), 'keep');
-    const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
-    assert.equal(result.status, 'BLOCKED');
-    assert.equal(result.failure.code, 'RUNTIME_SLOT_OCCUPIED');
-    assert.deepEqual(flow.mutations, []);
-    assert.equal(fs.readFileSync(path.join(slot, 'unknown'), 'utf8'), 'keep');
-  });
-});
-test('preexisting candidate alias blocks before loading or replacing an image in the fixed slot', async () => {
-  await withRuntimeFlowFixture('alias-residue', async (runtime, flow) => {
-    const result = await runtime.runCandidateRuntime({ previous: flowPrevious, target: flowTarget });
-    assert.equal(result.status, 'BLOCKED');
-    assert.equal(result.failure.code, 'RUNTIME_SLOT_OCCUPIED');
-    assert.equal(flow.mutations.length, 0);
-    assert.equal(flow.installs.size, 0);
-  });
+test('auto-created volume proof rejects any additional inherited or unknown mount', async () => {
+  const named = { Type: 'volume', Name: 'data', Destination: '/var/lib/lexiflow' };
+  for (const mounts of [[named], [named, { Type: 'volume', Name: 'anonymous', Destination: '/var/lib/postgresql/data' }], [{ ...named, Type: 'bind' }], []]) {
+    const proofs = new Map([['data', { previousAbsent: true }]]);
+    const { execute } = await lifecycleFunction('proveAutoVolume', 'containerRun', {
+      inspectContainer: () => ({ Id: 'a'.repeat(64), Mounts: mounts }), assertOwned: () => {},
+      inspectVolume: () => ({}), volumeIdentity: () => ({ name: 'data' }),
+      volumeProofs: proofs, markerHash: () => 'b'.repeat(64),
+    });
+    if (mounts.length === 1 && mounts[0].Type === 'volume') assert.equal(execute('', 'container', 'data', 'owner').containerId, 'a'.repeat(64));
+    else assert.throws(() => execute('', 'container', 'data', 'owner'), /VOLUME_MOUNT_UNPROVEN/);
+  }
 });

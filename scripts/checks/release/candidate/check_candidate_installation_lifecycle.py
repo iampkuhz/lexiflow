@@ -80,7 +80,7 @@ def _read_request(environ: Mapping[str, str]) -> tuple[dict[str, Any], str]:
     except (OSError, ValueError):
         raise ConsumerError("FAIL", "candidate-runtime-request-invalid") from None
     request = _json(raw)
-    if not isinstance(request, dict) or set(request) != {"previous", "target"}:
+    if not isinstance(request, dict) or set(request) != {"target"}:
         raise ConsumerError("FAIL", "candidate-runtime-request-invalid")
     for value in request.values():
         if (
@@ -92,8 +92,6 @@ def _read_request(environ: Mapping[str, str]) -> tuple[dict[str, Any], str]:
             or not _sha(value["candidateSha256"])
         ):
             raise ConsumerError("FAIL", "candidate-runtime-request-invalid")
-    if request["previous"]["candidateSha256"] == request["target"]["candidateSha256"]:
-        raise ConsumerError("FAIL", "candidate-runtime-candidates-not-distinct")
     return request, hashlib.sha256(raw).hexdigest()
 
 
@@ -118,9 +116,9 @@ def _validate_result(value: Any, request: Mapping[str, Any]) -> None:
         validate_runtime_result(value)
     except RuntimeContractError as exc:
         raise ConsumerError("FAIL", str(exc)) from None
-    if value["status"] == "PASS" and any(
-        candidate["candidateSha256"] != request[name]["candidateSha256"]
-        for name, candidate in value["candidates"].items()
+    if (
+        value["status"] == "PASS"
+        and value["target"]["candidateSha256"] != request["target"]["candidateSha256"]
     ):
         raise ConsumerError("FAIL", "candidate-runtime-binding-invalid")
 

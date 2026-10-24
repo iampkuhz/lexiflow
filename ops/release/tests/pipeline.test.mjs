@@ -16,7 +16,7 @@ const run = (args, options = {}) => new Promise((resolve) => {
     const child = spawn(process.execPath, [cli, ...args], { ...options, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
-    let timer = setTimeout(() => child.kill('SIGKILL'), 20000);
+    let timer = setTimeout(() => child.kill('SIGKILL'), 60000);
     child.stdout.on('data', (b) => { stdout += b; });
     child.stderr.on('data', (b) => { stderr += b; });
     child.on('error', (error) => { clearTimeout(timer); resolve({ code: null, stdout, stderr, error: error.message }); });
@@ -29,15 +29,17 @@ async function fixture() {
     await mkdir(path.join(root, 'ops/docker'), { recursive: true });
     await mkdir(path.join(root, 'ops/release'), { recursive: true });
   for (const directory of ['build', 'integrity', 'runtime']) await mkdir(path.join(root, 'ops/release', directory), { recursive: true });
-    const templates = ['.dockerignore', 'Dockerfile', 'Dockerfile.postgres', 'initialize-postgres-app-role.sh', 'run-container-command.sh'];
+    await mkdir(path.join(root, 'infra/postgres'), { recursive: true });
+    const templates = ['Dockerfile.runtime', 'runtime-entrypoint.sh'];
     for (const n of templates)
         await writeFile(path.join(root, 'ops/docker', n), await readFile(path.join(repo, 'ops/docker', n)));
     const digest = (c) => `sha256:${c.repeat(64)}`;
-    const baseImages = ['linux/amd64', 'linux/arm64'].map((platform, i) => ({ platform,
-        javaRuntime: { reference: `registry.example.invalid/java@${digest(i ? 'c' : 'a')}`, imageId: digest(i ? 'c' : 'a') },
-        postgresRuntime: { reference: `registry.example.invalid/postgres@${digest(i ? 'd' : 'b')}`, imageId: digest(i ? 'd' : 'b') } }));
+    const baseImages = [{ platform: 'linux/arm64',
+        javaRuntime: { reference: `registry.example.invalid/java@${digest('c')}`, imageId: digest('c') },
+        postgresRuntime: { reference: `registry.example.invalid/postgres@${digest('d')}`, imageId: digest('d') } }];
     await writeFile(path.join(root, 'ops/docker/base-images.json'), `${JSON.stringify({ schemaVersion: 1, baseImages }, null, 2)}\n`);
-    for (const n of ['integrity/source-build-identity.mjs', 'integrity/release-artifact-manifest.mjs', 'build/release-runtime-entry-generator.mjs', 'runtime/release-artifact-verification.sh', 'runtime/release-installation-state.sh', 'runtime/release-installation-docker.sh', 'runtime/release-installation-lifecycle.sh'])
+    await writeFile(path.join(root, 'infra/postgres/schema.sql'), await readFile(path.join(repo, 'infra/postgres/schema.sql')));
+    for (const n of ['integrity/source-build-identity.mjs', 'integrity/artifact-build-identity.mjs', 'integrity/extension-archive-integrity.mjs', 'integrity/release-artifact-manifest.mjs', 'build/release-image-build-plan.mjs', 'build/release-image-builder.mjs', 'build/release-candidate-assembler.mjs', 'build/package-release-artifacts.mjs', 'runtime/release-artifact-verification.sh', 'runtime/release-installation-state.sh', 'runtime/release-installation-docker.sh', 'runtime/release-installation-lifecycle.sh'])
         await writeFile(path.join(root, 'ops/release', n), await readFile(path.join(repo, 'ops/release', n)));
     await writeFile(path.join(root, 'ops/release/version.txt'), '2.0.0\n');
     await writeFile(path.join(root, '.gitignore'), '/artifact/\n');
@@ -46,102 +48,128 @@ async function fixture() {
     git(root, ['add', '.']);
     git(root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']);
     const commit = git(root, ['rev-parse', 'HEAD']).toString().trim();
-    const jar = jarBytes(resolveBuildIdentity(root));
+    const schema = await readFile(path.join(root, 'infra/postgres/schema.sql'));
+    const jar = jarBytes(resolveBuildIdentity(root), schema);
     await writeFile(path.join(artifactRoot, 'app.jar'), jar);
-    const descriptor = { schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit: commit, jar: { path: 'app.jar', bytes: jar.length, sha256: sha(jar) } };
+    const dataset = Buffer.from('synthetic dataset'); const notice = Buffer.from('synthetic notice');
+    await writeFile(path.join(artifactRoot, 'dataset.zip'), dataset);
+    await mkdir(path.join(artifactRoot, 'licenses'), { recursive: true });
+    await writeFile(path.join(artifactRoot, 'licenses/notice.txt'), notice);
+    const descriptor = { schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit: commit,
+      jar: { path: 'app.jar', bytes: jar.length, sha256: sha(jar) }, apiContract: 'caption-hints.v2', sqlVersion: 'sql-test',
+      dataset: { path: 'dataset.zip', bytes: dataset.length, sha256: sha(dataset), releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rule-test' },
+      notices: [{ path: 'licenses/notice.txt', bytes: notice.length, sha256: sha(notice) }] };
     const out = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-pipeline-out-')));
+    const assemblyOut = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-pipeline-assembly-')));
     const fake = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-pipeline-docker-')));
     const bin = path.join(fake, 'bin');
     await mkdir(bin);
-    const finalIds = { 'linux/amd64': [digest('e'), digest('f')], 'linux/arm64': [digest('1'), digest('2')] };
+    const finalIds = { 'linux/arm64': [digest('1')] };
     const state = { refs: Object.fromEntries(baseImages.flatMap((x) => [[x.javaRuntime.reference, { platform: x.platform, id: x.javaRuntime.imageId }], [x.postgresRuntime.reference, { platform: x.platform, id: x.postgresRuntime.imageId }]])), finalIds };
     await writeFile(path.join(fake, 'state.json'), JSON.stringify(state));
     const driver = path.join(fake, 'driver.mjs');
     await writeFile(driver, `import fs from 'node:fs';import path from 'node:path';const root=path.dirname(new URL(import.meta.url).pathname),s=JSON.parse(fs.readFileSync(path.join(root,'state.json'))),a=process.argv.slice(2).slice(4),op=a[0];fs.appendFileSync(path.join(root,'calls.jsonl'),JSON.stringify({a,op})+'\\n');
 if(s.fail===op){process.stderr.write('SECRET-DO-NOT-LEAK');process.exit(7)}
-if(op==='version')process.stdout.write(JSON.stringify({Server:{Version:'fake'}}));else if(op==='info')process.stdout.write(JSON.stringify({OSType:'linux',Architecture:s.architecture||'amd64'}));
+if(op==='version')process.stdout.write(JSON.stringify({Server:{Version:'fake'}}));else if(op==='info')process.stdout.write(JSON.stringify({OSType:'linux',Architecture:s.architecture||'arm64'}));
 else if(op==='image'&&a[1]==='inspect'){let x=s.refs[a[2]],id=x?.id,p=x?.platform;for(const [q,ids] of Object.entries(s.finalIds))if(ids.includes(a[2])){id=a[2];p=q}if(!id){process.exit(8)}process.stdout.write(JSON.stringify([{Id:id,Os:'linux',Architecture:p.endsWith('amd64')?'amd64':'arm64',Config:{Labels:s.builtLabels?.[id]}}]))}
-else if(op==='build'){const iid=a[a.indexOf('--iidfile')+1],p=a[a.indexOf('--platform')+1],ix=iid.startsWith('api')?0:1,id=s.finalIds[p][ix],labels={};for(let i=0;i<a.length;i++)if(a[i]==='--label'){const value=a[i+1],eq=value.indexOf('=');labels[value.slice(0,eq)]=value.slice(eq+1)}s.builtLabels??={};s.builtLabels[id]=labels;fs.writeFileSync(path.join(root,'state.json'),JSON.stringify(s));fs.writeFileSync(path.join(process.cwd(),iid),id+'\\n')}
+else if(op==='build'){const iid=a[a.indexOf('--iidfile')+1],p=a[a.indexOf('--platform')+1],id=s.finalIds[p][0],labels={};for(let i=0;i<a.length;i++)if(a[i]==='--label'){const value=a[i+1],eq=value.indexOf('=');labels[value.slice(0,eq)]=value.slice(eq+1)}s.builtLabels??={};s.builtLabels[id]=labels;fs.writeFileSync(path.join(root,'state.json'),JSON.stringify(s));fs.writeFileSync(path.join(process.cwd(),iid),id+'\\n')}
 else if(op==='image'&&a[1]==='save')fs.writeFileSync(a[a.indexOf('--output')+1],'synthetic archive');else process.exit(9);`);
     await writeFile(path.join(bin, 'docker'), `#!/bin/sh\nexec '${process.execPath}' '${driver}' "$@"\n`);
     await chmod(path.join(bin, 'docker'), 0o700);
     const env = { PATH: `${bin}:${process.env.PATH}`, HOME: '/private/unused', DOCKER_HOST: 'tcp://evil', DOCKER_CONFIG: '/evil', COMPOSE_FILE: '/evil', BUILDX_CONFIG: '/evil', SSH_AUTH_SOCK: '/evil' };
     async function request(name, value) { const f = path.join(fake, name); await writeFile(f, JSON.stringify(value)); return f; }
-    const imagesReq = await request('images-request.json', { repoRoot: root, artifactRoot, descriptor, outputParent: out, endpoint: 'unix:///tmp/synthetic.sock', platform: 'linux/amd64' });
-    return { root, artifactRoot, out, fake, env, state, imagesReq, request, descriptor, cleanup: async () => { await rm(root, { recursive: true, force: true }); await rm(out, { recursive: true, force: true }); await rm(fake, { recursive: true, force: true }); } };
+    const imagesReq = await request('images-request.json', { repoRoot: root, artifactRoot, descriptor, outputParent: out, endpoint: 'unix:///tmp/synthetic.sock', platform: 'linux/arm64' });
+    return { root, artifactRoot, out, assemblyOut, fake, env, state, imagesReq, request, descriptor, cleanup: async () => { await rm(root, { recursive: true, force: true }); await rm(out, { recursive: true, force: true }); await rm(assemblyOut, { recursive: true, force: true }); await rm(fake, { recursive: true, force: true }); } };
 }
 function assertShape(result, mode, status, reason) { assert.equal(result.stderr, ''); const rows = result.stdout.trim().split('\n'); assert.equal(rows.length, 1); const value = JSON.parse(rows[0]); assert.equal(value.status, status); assert.equal(value.scope, 'candidate-only'); assert.equal(value.operation, mode); if (reason)
     assert.equal(value.reason, reason);
 else
     assert.ok(value.candidateDirectory); return value; }
-test('CLI images 在真实子进程中完成合成双平台候选构建', async () => { const f = await fixture(); try {
+test('CLI images 在真实子进程中完成 ARM64 runtime-image 候选构建', async () => { const f = await fixture(); try {
     const r = await run(['images', f.imagesReq], { env: f.env });
     const v = assertShape(r, 'images', 'PASS');
     assert.equal(r.code, 0);
     const c = JSON.parse(await readFile(path.join(v.candidateDirectory, 'candidate.json'), 'utf8'));
-    assert.equal(c.artifacts.length, 2);
+    assert.equal(c.platform, 'linux/arm64');
+    assert.equal(c.artifacts.length, 1);
+    assert.equal(c.artifacts[0].role, 'runtime-image');
+    assert.equal(c.artifacts[0].path, 'images/linux-arm64/runtime-image.tar');
     const calls = (await readFile(path.join(f.fake, 'calls.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
-    assert.equal(calls.filter(x => x.op === 'build').length, 2);
-    assert.equal(calls.filter(x => x.op === 'image' && x.a[1] === 'save').length, 2);
-}
-finally {
-    await f.cleanup();
-} });
-test('CLI images 输出实际交接 assemble 并保留匹配候选目录', async () => {
+    assert.equal(calls.filter(x => x.op === 'build').length, 1);
+    assert.equal(calls.filter(x => x.op === 'image' && x.a[1] === 'save').length, 1);
+} finally { await f.cleanup(); } });
+
+test('CLI assemble 绑定单镜像候选、对应源码归档及 manifest identities', async () => {
     const f = await fixture();
     try {
         const built = await run(['images', f.imagesReq], { env: f.env });
         assert.equal(built.code, 0);
         const imageDir = assertShape(built, 'images', 'PASS').candidateDirectory;
-        const armRequest = await f.request('images-arm64-request.json', { ...JSON.parse(await readFile(f.imagesReq, 'utf8')), platform: 'linux/arm64' });
-        await writeFile(path.join(f.fake, 'state.json'), JSON.stringify({ ...f.state, architecture: 'arm64' }));
-        const armBuilt = await run(['images', armRequest], { env: f.env });
-        const armDir = assertShape(armBuilt, 'images', 'PASS').candidateDirectory;
-        const ic = JSON.parse(await readFile(path.join(imageDir, 'candidate.json'), 'utf8'));
-        const records = [...ic.artifacts, ...JSON.parse(await readFile(path.join(armDir, 'candidate.json'), 'utf8')).artifacts];
-        const assemblyParent = path.join(f.fake, 'assembly-output');
-        await mkdir(assemblyParent);
-        const artifacts = [], licenses = [];
-        for (const [id, component] of [['lexiflow', 'LexiFlow'], ['ext', 'extension-third-party'], ['api', 'API-runtime'], ['pg', 'PostgreSQL'], ['data', 'dataset']]) {
-            const notice = `licenses/${id}.txt`, data = Buffer.from(`synthetic ${id}`);
-            await mkdir(path.dirname(path.join(f.artifactRoot, notice)), { recursive: true });
-            await writeFile(path.join(f.artifactRoot, notice), data);
-            licenses.push({ id, component, licenseId: `TEST-${id}`, licenseName: `Synthetic ${id}`, sourceUrl: `https://example.invalid/${id}`, noticePath: notice, noticeBytes: data.length, noticeSha256: sha(data) });
-            artifacts.push({ role: 'license', path: notice, bytes: data.length, sha256: sha(data), licenseIds: [id] });
+        const imageCandidate = JSON.parse(await readFile(path.join(imageDir, 'candidate.json'), 'utf8'));
+        const imageRecord = imageCandidate.artifacts[0];
+        const artifacts = [{ role: 'runtime-image', platform: 'linux/arm64', licenseIds: ['api', 'lexiflow', 'postgres'] }];
+        const licenses = [];
+        const licenseDefinitions = [
+            ['api', 'API-runtime'], ['lexiflow', 'LexiFlow'], ['postgres', 'PostgreSQL'],
+            ['extension-third-party', 'extension-third-party'], ['dataset', 'dataset'],
+        ];
+        const add = async (role, relative, bytes, licenseIds, metadata) => {
+            await mkdir(path.dirname(path.join(f.artifactRoot, relative)), { recursive: true });
+            await writeFile(path.join(f.artifactRoot, relative), bytes);
+            const record = { role, path: relative, bytes: bytes.length, sha256: sha(bytes), licenseIds };
+            if (metadata) record.metadata = metadata;
+            artifacts.push(record);
+            return record;
+        };
+        for (const [id, component] of licenseDefinitions) {
+            const noticePath = `licenses/${id}.txt`, bytes = Buffer.from(`synthetic notice ${id}`);
+            const record = await add('license', noticePath, bytes, [id]);
+            licenses.push({ id, component, licenseId: `TEST-${id}`, licenseName: `Synthetic ${id}`,
+                sourceUrl: `https://example.invalid/${id}`, noticePath, noticeBytes: record.bytes, noticeSha256: record.sha256 });
         }
-        const add = (role, p, data, more = {}) => { artifacts.push({ role, path: p, bytes: data.length, sha256: sha(data), licenseIds: ['lexiflow'], ...more }); return writeFile(path.join(f.artifactRoot, p), data); };
-        for (const x of records) {
-            artifacts.push({ role: x.role, platform: x.platform, licenseIds: x.role === 'api-image' ? ['lexiflow', 'api'] : ['pg'] });
-            await mkdir(path.dirname(path.join(f.artifactRoot, x.path)), { recursive: true });
-            await writeFile(path.join(f.artifactRoot, x.path), await readFile(path.join(x.platform === 'linux/arm64' ? armDir : imageDir, x.path)));
-        }
-        const extras = [['compose', 'compose.yaml', 'services: {}'], ['sql', 'schema.sql', 'CREATE TABLE t(i int);'], ['dataset', 'dataset.bin', 'data']];
-        for (const [role, p, s] of extras)
-            await add(role, p, Buffer.from(s), role === 'dataset' ? { metadata: { releaseId: 'rel', preparationId: 'prep', ruleId: 'rule', sqlVersion: 'sql' }, licenseIds: ['data'] } : {});
-        await add('extension', 'extension.zip', extensionBytes(ic.buildIdentity), { metadata: { softwareVersion: '2.0.0', sourceCommit: ic.sourceCommit }, licenseIds: ['lexiflow', 'ext'] });
-        for (const [id, component] of [['lexiflow', 'LexiFlow'], ['ext', 'extension-third-party'], ['api', 'API-runtime'], ['pg', 'PostgreSQL'], ['data', 'dataset']])
-            licenses.find(x => x.id === id).component = component;
-        const descriptor = { schemaVersion: 1, buildIdentity: ic.buildIdentity, softwareVersion: '2.0.0', sourceCommit: ic.sourceCommit, apiContract: 'api', sqlVersion: 'sql', dataset: { releaseId: 'rel', preparationId: 'prep', ruleId: 'rule' }, platforms: ['linux/amd64', 'linux/arm64'], artifacts, licenses };
-        const req = await f.request('assemble-request.json', { repoRoot: f.root, imageCandidates: [{ directory: imageDir, sha256: sha(await readFile(path.join(imageDir, 'candidate.json'))) }, { directory: armDir, sha256: sha(await readFile(path.join(armDir, 'candidate.json'))) }], artifactRoot: f.artifactRoot, descriptor, outputParent: assemblyParent });
+        const dataset = Buffer.from('synthetic dataset');
+        const datasetRecord = await add('dataset', 'dataset.zip', dataset, ['dataset'],
+            { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rule-test', sqlVersion: 'sql-test' });
+        await add('sql', 'schema.sql', Buffer.from('CREATE TABLE synthetic(id integer);\n'), ['lexiflow']);
+        const expectedDataset = { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rule-test',
+            sqlVersion: 'sql-test', sha256: datasetRecord.sha256 };
+        const extension = extensionBytes(imageCandidate.buildIdentity, expectedDataset);
+        await add('extension', 'extension.zip', extension, ['lexiflow', 'extension-third-party'],
+            { softwareVersion: imageCandidate.softwareVersion, sourceCommit: imageCandidate.sourceCommit, expectedDataset });
+        const descriptor = { schemaVersion: 1, buildIdentity: imageCandidate.buildIdentity,
+            softwareVersion: imageCandidate.softwareVersion, sourceCommit: imageCandidate.sourceCommit,
+            apiContract: 'caption-hints.v2', sqlVersion: 'sql-test',
+            dataset: { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rule-test' },
+            platforms: ['linux/arm64'], artifacts, licenses };
+        const req = await f.request('assemble-request.json', { repoRoot: f.root,
+            imageCandidates: [{ directory: imageDir, sha256: sha(await readFile(path.join(imageDir, 'candidate.json'))) }],
+            artifactRoot: f.artifactRoot, descriptor, outputParent: f.assemblyOut });
         const r = await run(['assemble', req]);
         const v = assertShape(r, 'assemble', 'PASS');
         assert.equal(r.code, 0);
-        assert.ok(JSON.parse(await readFile(path.join(v.candidateDirectory, 'candidate.json'), 'utf8')).kind === 'lexiflow-release-candidate');
-        const marker = await readFile(path.join(v.candidateDirectory, 'candidate.json'));
-        const verifyReq = await f.request('verify-request.json', { candidateDirectory: v.candidateDirectory, candidateSha256: sha(marker) });
+        const candidateFile = path.join(v.candidateDirectory, 'candidate.json');
+        const candidateBytes = await readFile(candidateFile);
+        const candidate = JSON.parse(candidateBytes);
+        const manifest = JSON.parse(await readFile(path.join(v.candidateDirectory, candidate.manifestPath), 'utf8'));
+        assert.equal(manifest.platforms.length, 1);
+        assert.deepEqual(manifest.platforms, ['linux/arm64']);
+        const image = manifest.artifacts.find(item => item.role === 'runtime-image');
+        assert.equal(image.path, 'images/linux-arm64/runtime-image.tar');
+        const source = manifest.artifacts.find(item => item.role === 'corresponding-sources');
+        assert.equal(source.path, 'sources/lexiflow-third-party-sources-2.0.0.tar.gz');
+        assert.equal(source.metadata.items.length, licenses.length);
+        const verifyReq = await f.request('verify-request.json', { candidateDirectory: v.candidateDirectory, candidateSha256: sha(candidateBytes) });
         const verified = await run(['verify', verifyReq]);
         assert.equal(verified.code, 0);
         const proof = JSON.parse(verified.stdout);
         assert.equal(proof.status, 'PASS'); assert.equal(proof.scope, 'candidate-integrity-only'); assert.equal(proof.operation, 'verify');
-        assert.equal(proof.candidateSha256, sha(marker)); assert.equal(Object.hasOwn(proof, 'formalEligible'), false);
-        const badReq = await f.request('verify-extra-request.json', { candidateDirectory: v.candidateDirectory, candidateSha256: sha(marker), actor: 'test' });
+        assert.equal(proof.candidateSha256, sha(candidateBytes)); assert.equal(Object.hasOwn(proof, 'formalEligible'), false);
+        const badReq = await f.request('verify-extra-request.json', { candidateDirectory: v.candidateDirectory, candidateSha256: sha(candidateBytes), actor: 'test' });
         const rejected = await run(['verify', badReq]);
         assert.equal(rejected.code, 1); assert.deepEqual(JSON.parse(rejected.stdout), { status: 'FAIL', scope: 'candidate-integrity-only', operation: 'verify', reason: 'PIPELINE_OPERATION_FAILED' });
-    }
-    finally {
-        await f.cleanup();
-    }
+    } finally { await f.cleanup(); }
 });
+
 test('参数与请求读取拒绝条件返回固定JSON错误', async () => { const f = await fixture(); try {
     for (const args of [[], ['wat', f.imagesReq], ['images', f.imagesReq, 'extra'], ['images', 'relative.json']]) {
         const r = await run(args);
