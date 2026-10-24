@@ -163,7 +163,7 @@ class RegistryTests(unittest.TestCase):
                 Facts.stdout = json.dumps(
                     [
                         {
-                            "Id": argv[-1],
+                            "Id": argv[-1].removeprefix("sha256:"),
                             "Architecture": "arm64",
                             "Os": "linux",
                             "Config": {"Labels": labels},
@@ -219,6 +219,90 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(len(gate_calls), 6)
         self.assertTrue(all("test-secret" not in " ".join(c) for c in calls))
         self.assertEqual(sum("push" in c for c in calls), 2)
+
+    def test_inspect_accepts_only_exact_config_identity_and_platform(self):
+        _, _, _, _, _, fake_run = self._publish_mocks()
+        image_id = self.artifacts[0]["imageDigest"]
+        original = json.loads(fake_run(["inspect", image_id], endpoint="").stdout)[0]
+        for value in [image_id, image_id.removeprefix("sha256:")]:
+            with self.subTest(accepted=value), patch.object(registry, "_run") as run:
+                run.return_value.stdout = json.dumps(
+                    [{**original, "Id": value}]
+                ).encode()
+                registry._inspect_image(
+                    image_id, "api-image", self.identity, "unix:///unused"
+                )
+        for value in [
+            None,
+            1,
+            [],
+            "",
+            "d" * 12,
+            "d" * 63,
+            "D" * 64,
+            "f" * 64,
+            "sha256:" + "f" * 64,
+            "sha256:sha256:" + "d" * 64,
+            "sha512:" + "d" * 64,
+            " " + "d" * 64,
+            "d" * 64 + "\n",
+        ]:
+            with self.subTest(rejected=value), patch.object(registry, "_run") as run:
+                run.return_value.stdout = json.dumps(
+                    [{**original, "Id": value}]
+                ).encode()
+                with self.assertRaisesRegex(
+                    RegistryError, "registry-image-inspect-mismatch"
+                ):
+                    registry._inspect_image(
+                        image_id, "api-image", self.identity, "unix:///unused"
+                    )
+        for field, value in [("Architecture", "amd64"), ("Os", "windows")]:
+            with self.subTest(field=field), patch.object(registry, "_run") as run:
+                run.return_value.stdout = json.dumps(
+                    [{**original, field: value}]
+                ).encode()
+                with self.assertRaisesRegex(
+                    RegistryError, "registry-image-inspect-mismatch"
+                ):
+                    registry._inspect_image(
+                        image_id, "api-image", self.identity, "unix:///unused"
+                    )
+        for label in original["Config"]["Labels"]:
+            changed = {
+                **original,
+                "Config": {"Labels": {**original["Config"]["Labels"], label: "wrong"}},
+            }
+            with self.subTest(label=label), patch.object(registry, "_run") as run:
+                run.return_value.stdout = json.dumps([changed]).encode()
+                with self.assertRaisesRegex(
+                    RegistryError, "registry-image-label-mismatch"
+                ):
+                    registry._inspect_image(
+                        image_id, "api-image", self.identity, "unix:///unused"
+                    )
+
+    @patch.dict("os.environ", {"GITHUB_TOKEN": "test-secret"})
+    def test_inspect_mismatch_rejects_before_first_remote_push(self):
+        _, _, _, calls, fake_manifest, fake_run = self._publish_mocks()
+
+        def wrong_id(argv, **kwargs):
+            facts = fake_run(argv, **kwargs)
+            if "inspect" in argv:
+                rows = json.loads(facts.stdout)
+                rows[0]["Id"] = "f" * 64
+                facts.stdout = json.dumps(rows).encode()
+            return facts
+
+        with (
+            patch.object(registry, "_manifest", side_effect=fake_manifest),
+            patch.object(registry, "_run", side_effect=wrong_id),
+        ):
+            with self.assertRaisesRegex(
+                RegistryError, "registry-image-inspect-mismatch"
+            ):
+                publish_images(**self.kwargs())
+        self.assertFalse(any("push" in call for call in calls))
 
     @patch.dict("os.environ", {"GITHUB_TOKEN": "test-secret"})
     def test_unknown_push_is_flagged_and_not_retried(self):

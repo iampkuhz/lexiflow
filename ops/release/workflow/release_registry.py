@@ -395,8 +395,11 @@ def _inspect_image(image_id: str, role: str, identity: dict, endpoint: str) -> N
         image_info = json.loads(inspected.stdout)
         image_info = image_info[0] if isinstance(image_info, list) else image_info
         labels = image_info["Config"]["Labels"]
+        inspected_id = image_info["Id"]
+        if isinstance(inspected_id, str) and HEX.fullmatch(inspected_id):
+            inspected_id = "sha256:" + inspected_id
         if (
-            image_info["Id"] != image_id
+            inspected_id != image_id
             or image_info["Architecture"] != "arm64"
             or image_info["Os"] != "linux"
             or not isinstance(labels, dict)
