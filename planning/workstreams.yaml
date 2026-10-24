@@ -947,6 +947,94 @@ workstreams:
         discovered_from: LF-TSK-QLT-2446
         depends_on: []
         deliverable: 当前完整源码与当次证据的独立只读审查。
+      - id: LF-TSK-QLT-2460
+        title: 从已验收清单消费唯一扩展制品
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-extension-artifact/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/workflow/promote_verified_release.py
+        - tests/verification/test_release_promotion.py
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 清单驱动扩展复制与当前构建器布局回归。
+        acceptance_criteria:
+        - 不再使用冲突的私有硬编码路径；所有角色、路径、大小、摘要和正式proof护栏保留。
+        - 当前extension.zip布局的预检、9项公开资产、归档字节以及非法扩展拒绝测试通过。
+        acceptance_evidence:
+        - 真实来源、冻结摘要、直接或独立结果及证据定位。
+        validation_command: python3 -m unittest tests.verification.test_release_promotion
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2017
+        depends_on: []
+        deliverable: 清单驱动扩展复制与当前构建器布局回归。
+      - id: LF-TSK-QLT-2461
+        title: 独立验证扩展发行清单消费
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-extension-artifact/tasks.md
+        estimated_minutes: 30
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/release-extension-artifact/validation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 最终真实diff的完整独立development报告。
+        acceptance_criteria:
+        - 不同于Main，实现输入冻结后全部受选checks当次执行，无复用或跳过。
+        - 不修改源码、预算或远端，不将开发检查当Formal。
+        acceptance_evidence:
+        - 真实来源、冻结摘要、直接或独立结果及证据定位。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2017
+        depends_on: []
+        deliverable: 最终真实diff的完整独立development报告。
+      - id: LF-TSK-QLT-2462
+        title: 独立审查扩展制品发行边界
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-extension-artifact/tasks.md
+        estimated_minutes: 30
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/release-extension-artifact/review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 冻结差异和当前独立报告的只读意见。
+        acceptance_criteria:
+        - 不同于Main与validator，只读核验manifest为唯一路径来源及全部拒绝边界。
+        - 不重跑测试，不复用历史Formal为新来源资格。
+        acceptance_evidence:
+        - 真实来源、冻结摘要、直接或独立结果及证据定位。
+        validation_command: python3 -m json.tool tmp/phase-tools/release-extension-artifact/review/opinion.json
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2017
+        depends_on: []
+        deliverable: 冻结差异和当前独立报告的只读意见。
       - id: LF-TSK-QLT-2459
         title: 同步Catalog消费者的精确类型投影断言
         priority: P0
@@ -9692,6 +9780,37 @@ workstreams:
           required_change_version: 1.0.0
           required_result: PASS
         deliverable: 单维护者授权变更的独立开发验证证据，不重置已有首发验证预算。
+      - id: LF-TSK-OPS-2059
+        title: 固定扩展清单消费修复后的发行身份
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-extension-artifact/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/version.txt
+        - planning/workstreams.yaml
+        - openspec/changes/release-extension-artifact/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 未占用2.0.8版本与既有证据保留。
+        acceptance_criteria:
+        - 不移动原tag；最终diff独立开发和审查通过后集成。
+        - 新候选重新完整Formal，不复用v2.0.7资格。
+        acceptance_evidence:
+        - 真实来源、冻结摘要、直接或独立结果及证据定位。
+        validation_command: node ops/release/test_tools/run-release-tool-tests.mjs
+        required_check_ids:
+        - eng.release.version
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2017
+        depends_on: []
+        deliverable: 未占用2.0.8版本与既有证据保留。
       - id: LF-TSK-OPS-2058
         title: 固定依赖类型修复后的发行身份
         priority: P0
