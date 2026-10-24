@@ -947,6 +947,94 @@ workstreams:
         discovered_from: LF-TSK-QLT-2446
         depends_on: []
         deliverable: 当前完整源码与当次证据的独立只读审查。
+      - id: LF-TSK-QLT-2466
+        title: 精确核对已验收候选的本机镜像ID
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-registry-image-id/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/workflow/release_registry.py
+        - tests/verification/test_release_registry.py
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: Podman裸HEX镜像ID的精确规范化及拒绝边界回归。
+        acceptance_criteria:
+        - 仅规范化完整64位小写HEX为sha256摘要标识；其余identity、platform及远端前护栏全部保留。
+        - 真实裸HEX fixture完整push及规范前缀、非法ID、不同digest、平台/label漂移拒绝直接通过。
+        acceptance_evidence:
+        - 真实来源、冻结摘要、直接或独立结果及证据定位。
+        validation_command: python3 -m unittest tests.verification.test_release_registry
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2017
+        depends_on: []
+        deliverable: Podman裸HEX镜像ID的精确规范化及拒绝边界回归。
+      - id: LF-TSK-QLT-2467
+        title: 独立验证镜像ID发行精确比较
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-registry-image-id/tasks.md
+        estimated_minutes: 30
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/release-registry-image-id/validation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 最终真实diff的完整独立development报告。
+        acceptance_criteria:
+        - 不同于Main，实现输入冻结后全部受选checks当次执行，无复用或跳过。
+        - 不修改源码、预算或远端，不将开发检查当Formal。
+        acceptance_evidence:
+        - 真实来源、冻结摘要、直接或独立结果及证据定位。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2017
+        depends_on: []
+        deliverable: 最终真实diff的完整独立development报告。
+      - id: LF-TSK-QLT-2468
+        title: 独立审查镜像ID制品发行边界
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-registry-image-id/tasks.md
+        estimated_minutes: 30
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/release-registry-image-id/review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 冻结差异和当前独立报告的只读意见。
+        acceptance_criteria:
+        - 不同于Main与validator，只读核验ID精确规范化及全部拒绝边界。
+        - 不重跑测试，不复用历史Formal为新来源资格。
+        acceptance_evidence:
+        - 真实来源、冻结摘要、直接或独立结果及证据定位。
+        validation_command: python3 -m json.tool tmp/phase-tools/release-registry-image-id/review/opinion.json
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2017
+        depends_on: []
+        deliverable: 冻结差异和当前独立报告的只读意见。
       - id: LF-TSK-QLT-2463
         title: 将故障观察绑定原有候选会话生命周期
         priority: P0
@@ -9850,6 +9938,37 @@ workstreams:
           required_change_version: 1.0.0
           required_result: PASS
         deliverable: 单维护者授权变更的独立开发验证证据，不重置已有首发验证预算。
+      - id: LF-TSK-OPS-2061
+        title: 固定镜像ID精确比较修复后的发行身份
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-registry-image-id/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/version.txt
+        - planning/workstreams.yaml
+        - openspec/changes/release-registry-image-id/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 未占用2.0.10版本与既有证据保留。
+        acceptance_criteria:
+        - 不移动原tag；最终diff独立开发和审查通过后集成。
+        - 新候选重新完整Formal，不复用v2.0.9资格。
+        acceptance_evidence:
+        - 真实来源、冻结摘要、直接或独立结果及证据定位。
+        validation_command: node ops/release/test_tools/run-release-tool-tests.mjs
+        required_check_ids:
+        - eng.release.version
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2017
+        depends_on: []
+        deliverable: 未占用2.0.10版本与既有证据保留。
       - id: LF-TSK-OPS-2060
         title: 固定故障观察修复后的发行身份
         priority: P0
