@@ -9,11 +9,10 @@ import fsPromises from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { assembleReleaseCandidate } from '../build/release-candidate-assembler.mjs';
-import { extensionBytes } from './zip-fixture.mjs';
+import { assembled, fixture } from './verified-candidate-fixture.mjs';
 import { resolveBuildIdentity } from '../integrity/source-build-identity.mjs';
+const hash = value => createHash('sha256').update(value).digest('hex');
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const hash = (value) => createHash('sha256').update(value).digest('hex');
 async function tree(root, relative = '') {
   const result = [];
   for (const name of await (await import('node:fs/promises')).readdir(path.join(root, relative))) {
@@ -24,141 +23,80 @@ async function tree(root, relative = '') {
   return result.sort();
 }
 
-async function fixture(baseVersion = '2.0.0') {
-  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'lexiflow-candidate-fixture-')));
-  await mkdir(path.join(root, 'ops/release'), { recursive: true });
-  for (const directory of ['build', 'integrity', 'runtime']) await mkdir(path.join(root, 'ops/release', directory), { recursive: true });
-  await writeFile(path.join(root, 'ops/release/version.txt'), `${baseVersion}\n`);
-  await writeFile(path.join(root, 'ops/release/integrity/source-build-identity.mjs'), await readFile(path.join(repoRoot, 'ops/release/integrity/source-build-identity.mjs')));
-  await writeFile(path.join(root, 'ops/release/build/release-runtime-entry-generator.mjs'), await readFile(path.join(repoRoot, 'ops/release/build/release-runtime-entry-generator.mjs')));
-  await writeFile(path.join(root, 'ops/release/runtime/release-artifact-verification.sh'), await readFile(path.join(repoRoot, 'ops/release/runtime/release-artifact-verification.sh')));
-  for (const name of ['runtime/release-installation-state.sh', 'runtime/release-installation-docker.sh', 'runtime/release-installation-lifecycle.sh']) {
-    await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repoRoot, 'ops/release', name)));
-  }
-  await writeFile(path.join(root, '.gitignore'), '/input/\n/images/\n/output/\n/descriptor.json\n');
-  execFileSync('git', ['init', '-q', root]);
-  execFileSync('git', ['-C', root, 'add', '.']);
-  execFileSync('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'clean candidate fixture']);
-  const sourceCommit = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  const buildIdentity = resolveBuildIdentity(root);
-  const softwareVersion = buildIdentity.softwareVersion;
-  const artifactRoot = path.join(root, 'input');
-  const outputParent = await realpath(await mkdtemp(path.join(tmpdir(), 'lexiflow-candidate-output-')));
-  await mkdir(artifactRoot);
-  const licenses = []; const records = [];
-  const candidateBases = [];
-  async function add(role, relative, value, extra = {}, licenseIds = ['lexiflow']) {
-    const bytes = Buffer.from(value); const target = path.join(artifactRoot, relative);
-    await mkdir(path.dirname(target), { recursive: true }); await writeFile(target, bytes);
-    records.push({ role, path: relative, bytes: bytes.length, sha256: hash(bytes), licenseIds, ...extra });
-    return bytes;
-  }
-  const components = ['LexiFlow', 'extension-third-party', 'API-runtime', 'PostgreSQL', 'dataset'];
-  const ids = ['lexiflow', 'ext-third-party', 'api-runtime', 'postgresql', 'dataset-license'];
-  for (let i = 0; i < components.length; i += 1) {
-    const noticePath = `licenses/${ids[i]}.txt`; const notice = Buffer.from(`Synthetic notice ${ids[i]}\n`);
-    licenses.push({ id: ids[i], component: components[i], licenseId: `TEST-${ids[i]}`, licenseName: `Synthetic ${ids[i]}`,
-      sourceUrl: `https://example.invalid/${ids[i]}`, noticePath, noticeBytes: notice.length, noticeSha256: hash(notice) });
-    await add('license', noticePath, notice, {}, [ids[i]]);
-  }
-  const dataset = { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rules-test' };
-  for (const platform of ['linux/amd64', 'linux/arm64']) {
-    const javaRuntime = { reference: `registry.example.invalid/java/runtime@sha256:${'1'.repeat(64)}`, imageId: `sha256:${'a'.repeat(64)}` };
-    const postgresRuntime = { reference: `registry.example.invalid/postgres/runtime@sha256:${'2'.repeat(64)}`, imageId: `sha256:${'b'.repeat(64)}` };
-    const base = { platform, javaRuntime, postgresRuntime };
-    candidateBases.push(base);
-    for (const [role, filename, imageDigest, licenseIds] of [
-      ['api-image', 'api-image.tar', `sha256:${'c'.repeat(64)}`, ['lexiflow', 'api-runtime']],
-      ['postgres-image', 'postgres-image.tar', `sha256:${'d'.repeat(64)}`, ['postgresql']]
-    ]) {
-      const relative = `images/${platform.replace('/', '-')}/${filename}`;
-      const bytes = Buffer.from(`synthetic ${platform} ${role} archive`);
-      await mkdir(path.dirname(path.join(artifactRoot, relative)), { recursive: true });
-      await writeFile(path.join(artifactRoot, relative), bytes);
-      records.push({ role, path: relative, bytes: bytes.length, sha256: hash(bytes), licenseIds, platform, imageDigest });
-    }
-  }
-  const descriptor = { schemaVersion: 1, buildIdentity, softwareVersion, sourceCommit, apiContract: 'api-test', sqlVersion: 'sql-test', dataset,
-    platforms: ['linux/amd64', 'linux/arm64'], artifacts: records, licenses };
-  for (const image of records.filter((record) => record.role === 'api-image' || record.role === 'postgres-image')) {
-    const bytes = await readFile(path.join(artifactRoot, image.path));
 
-  }
-  await add('compose', 'compose.yaml', 'synthetic compose');
-  await add('sql', 'database/schema.sql', 'synthetic SQL');
-  await add('dataset', 'data/dataset.bin', 'synthetic dataset', { metadata: { ...dataset, sqlVersion: 'sql-test' } }, ['dataset-license']);
-  await add('extension', 'extension/package.zip', extensionBytes(buildIdentity), { metadata: { softwareVersion, sourceCommit } }, ['lexiflow', 'ext-third-party']);
-  const imageCandidateDirectories = [];
-  const buildInputSha256 = 'e'.repeat(64);
-  for (const platform of ['linux/amd64', 'linux/arm64']) {
-    const directory = await realpath(await mkdtemp(path.join(tmpdir(), `lexiflow-shard-${platform.split('/')[1]}-`)));
-    const candidateRecords = records.filter((record) => record.role === 'api-image' || record.role === 'postgres-image').filter((record) => record.platform === platform)
-      .map(({ role, platform: p, path: artifactPath, bytes, sha256, imageDigest }) => ({ role, platform: p, path: artifactPath, bytes, sha256, imageDigest }));
-    const imageCandidate = { schemaVersion: 1, kind: 'lexiflow-image-candidate', buildIdentity, softwareVersion, sourceCommit, platform, buildInputSha256,
-      baseImages: [candidateBases.find((base) => base.platform === platform)], artifacts: candidateRecords };
-    for (const record of candidateRecords) { const target = path.join(directory, record.path); await mkdir(path.dirname(target), { recursive: true }); await writeFile(target, await readFile(path.join(artifactRoot, record.path))); }
-    const marker = `${JSON.stringify(imageCandidate, null, 2)}\n`; await writeFile(path.join(directory, 'candidate.json'), marker);
-    imageCandidateDirectories.push({ directory, sha256: hash(Buffer.from(marker)) });
-  }
-  descriptor.artifacts = records.map(record => ['api-image', 'postgres-image'].includes(record.role)
-    ? { role: record.role, platform: record.platform, licenseIds: record.licenseIds } : record);
-  const descriptorFile = path.join(root, 'descriptor.json'); await writeFile(descriptorFile, JSON.stringify(descriptor));
-  return { root, artifactRoot, imageCandidateDirectories: imageCandidateDirectories.map(({ directory, sha256 }, index) => ({ directory, sha256, platform: index === 0 ? 'linux/amd64' : 'linux/arm64' })), outputParent, descriptor, descriptorFile,
-    cleanup: async () => { await rm(root, { recursive: true, force: true }); await rm(outputParent, { recursive: true, force: true }); for (const { directory } of imageCandidateDirectories) await rm(directory, { recursive: true, force: true }); } };
-}
-
-test('assembles a two-platform private candidate with exact payload and stable marker', async () => {
+test('assembles one ARM64 private candidate with exact payload and stable marker', async () => {
   const f = await fixture();
   try {
     const requestsBefore = structuredClone(f.descriptor.artifacts);
-    await rm(path.join(f.artifactRoot, 'images'), { recursive: true });
     const before = await Promise.all(f.imageCandidateDirectories.map(({ directory }) => readFile(path.join(directory, 'candidate.json'))));
     const result = await assembleReleaseCandidate({ repoRoot: f.root, imageCandidates: f.imageCandidateDirectories.map(({ directory, sha256 }) => ({ directory, sha256 })),
       artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent });
     assert.deepEqual(result.candidate, { schemaVersion: 1, kind: 'lexiflow-release-candidate', buildIdentity: resolveBuildIdentity(f.root), softwareVersion: '2.0.0',
       sourceCommit: f.descriptor.sourceCommit, manifestPath: 'payload/manifest.json',
-      manifestSha256: hash(await readFile(path.join(result.candidateDirectory, 'payload/manifest.json'))), buildInputSha256: 'e'.repeat(64), imageCandidates: f.imageCandidateDirectories.map(({ platform, sha256 }) => ({ platform, sha256 })) });
+      manifestSha256: hash(await readFile(path.join(result.candidateDirectory, 'payload/manifest.json'))), buildInputSha256: 'e'.repeat(64), imageCandidates: [{ platform: 'linux/arm64', sha256: f.imageCandidateDirectories[0].sha256 }] });
     assert.deepEqual(await tree(result.candidateDirectory), [...result.manifest.artifacts.map((item) => `payload/${item.path}`),
       'candidate.json', 'payload/manifest.json', 'payload/manifest.json.sha256'].sort());
     assert.deepEqual(await Promise.all(f.imageCandidateDirectories.map(({ directory }) => readFile(path.join(directory, 'candidate.json')))), before);
     assert.deepEqual(f.descriptor.artifacts, requestsBefore, 'caller remains a narrow immutable request');
-    for (const marker of before) {
-      for (const record of JSON.parse(marker).artifacts) {
-        const published = result.manifest.artifacts.find(a => a.role === record.role && a.platform === record.platform);
-        for (const key of ['path', 'bytes', 'sha256', 'imageDigest']) assert.equal(published[key], record[key]);
-        assert.equal(hash(await readFile(path.join(result.candidateDirectory, 'payload', record.path))), record.sha256);
-      }
+    for (const record of JSON.parse(before[0]).artifacts) {
+      const published = result.manifest.artifacts.find(a => a.role === record.role && a.platform === record.platform);
+      for (const key of ['path', 'bytes', 'sha256', 'imageDigest']) assert.equal(published[key], record[key]);
+      assert.equal(hash(await readFile(path.join(result.candidateDirectory, 'payload', record.path))), record.sha256);
     }
     assert.equal(result.candidate.supported, undefined); assert.equal(result.candidate.verified, undefined);
-    assert.equal(result.manifest.artifacts.find((item) => item.role === 'runtime-entry').path, 'lexiflow.sh');
+    assert.equal(result.manifest.artifacts.find((item) => item.role === 'runtime-image').path, 'images/linux-arm64/runtime-image.tar');
   } finally { await f.cleanup(); }
 });
 
-test('assembles exactly the descriptor platform subset and rejects omitted selected candidate', async () => {
+test('corresponding-sources archive index maps to the exact notice bytes and digests', async () => {
+  const f = await assembled();
+  try {
+    const record = f.manifest.artifacts.find(item => item.role === 'corresponding-sources');
+    const indexBytes = execFileSync('tar', ['-xOzf', f.sourceArchive.path, 'index.json']);
+    assert.equal(hash(indexBytes), record.metadata.indexSha256);
+    assert.deepEqual(JSON.parse(indexBytes.toString('utf8')), f.sourceArchive.index);
+    assert.deepEqual(record.metadata.items, f.sourceArchive.index.items);
+    assert.equal(hash(await readFile(f.sourceArchive.path)), record.sha256);
+    const archiveEntries = execFileSync('tar', ['-tzf', f.sourceArchive.path], { encoding: 'utf8' }).trim().split('\n').sort();
+    const expectedEntries = new Set(['index.json', 'materials/']);
+    for (const item of f.sourceArchive.index.items) {
+      expectedEntries.add(item.archivePath);
+      const parent = item.archivePath.slice(0, item.archivePath.lastIndexOf('/'));
+      if (parent) expectedEntries.add(`${parent}/`);
+    }
+    assert.deepEqual(archiveEntries, [...expectedEntries].sort());
+    for (const item of f.sourceArchive.index.items) {
+      const extracted = execFileSync('tar', ['-xOzf', f.sourceArchive.path, item.archivePath]);
+      assert.equal(extracted.length, item.bytes, item.id);
+      assert.equal(hash(extracted), item.sha256, item.id);
+      assert.deepEqual(extracted, await readFile(path.join(f.artifactRoot, item.noticePath)));
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('accepts the sole linux/arm64 candidate and rejects missing candidate', async () => {
   const f = await fixture();
   try {
     f.descriptor.platforms = ['linux/arm64'];
-    f.descriptor.artifacts = f.descriptor.artifacts.filter((item) =>
-      !['api-image', 'postgres-image'].includes(item.role) || item.platform === 'linux/arm64');
+    f.descriptor.artifacts = f.descriptor.artifacts.filter((item) => item.role !== 'runtime-image' || item.platform === 'linux/arm64');
     const selected = f.imageCandidateDirectories.filter((item) => item.platform === 'linux/arm64');
     const result = await assembleReleaseCandidate({ repoRoot: f.root,
       imageCandidates: selected.map(({ directory, sha256 }) => ({ directory, sha256 })),
       artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent });
     assert.deepEqual(result.candidate.imageCandidates.map((item) => item.platform), ['linux/arm64']);
-    const wrongPlatform = f.imageCandidateDirectories.filter((item) => item.platform === 'linux/amd64');
+    const wrongPlatform = [];
     await assert.rejects(assembleReleaseCandidate({ repoRoot: f.root,
       imageCandidates: wrongPlatform.map(({ directory, sha256 }) => ({ directory, sha256 })),
       artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent }),
-    { message: 'IMAGE_CANDIDATE_INVALID' });
+    { message: 'ARGUMENTS_INVALID' });
   } finally { await f.cleanup(); }
 });
 
 test('rejects identity, image binding, descriptor schema and runtime entry injection', async () => {
   for (const mutate of [
     (f) => { f.descriptor.sourceCommit = 'f'.repeat(40); },
-    ...['path', 'bytes', 'sha256', 'imageDigest'].map(key => f => { f.descriptor.artifacts.find(item => item.role === 'api-image')[key] = 'forged'; }),
-    (f) => { f.descriptor.artifacts.find(item => item.role === 'api-image').licenseIds = []; },
-    (f) => { f.descriptor.artifacts.find((item) => item.role === 'api-image').platform = 'linux/ppc64'; },
+    (f) => { f.descriptor.artifacts.find(item => item.role === 'runtime-image').licenseIds = []; },
+    (f) => { f.descriptor.platforms = ['linux/amd64']; },
     (f) => { f.descriptor.extra = true; },
     (f) => { f.descriptor.artifacts.push({ role: 'runtime-entry', path: 'lexiflow.sh' }); }
   ]) {
@@ -200,31 +138,28 @@ test('候选记录原始字节摘要篡改在摘要绑定层拒绝', async () =>
   } finally { await f.cleanup(); }
 });
 
-test('重复候选平台与不完整双平台输入在候选集合层拒绝', async () => {
+test('重复唯一平台候选在候选集合层拒绝', async () => {
   const f = await fixture();
   try {
-    const amd64 = f.imageCandidateDirectories.find(({ platform }) => platform === 'linux/amd64');
-    const inputs = [amd64, amd64].map(({ directory, sha256 }) => ({ directory, sha256 }));
+    const arm64 = f.imageCandidateDirectories.find(({ platform }) => platform === 'linux/arm64');
+    const inputs = [arm64, arm64].map(({ directory, sha256 }) => ({ directory, sha256 }));
     await assert.rejects(assembleReleaseCandidate({ repoRoot: f.root, imageCandidates: inputs,
-      artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent }), { message: 'IMAGE_CANDIDATE_INVALID' });
+      artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent }), { message: 'ARGUMENTS_INVALID' });
     assert.deepEqual(await fsPromises.readdir(f.outputParent), []);
   } finally { await f.cleanup(); }
 });
 
-test('两平台候选 buildInputSha256 不一致在来源一致性层拒绝', async () => {
+test('candidate buildInput digest is format-bound and marker identity remains source-bound', async () => {
   const f = await fixture();
   try {
-    const arm64 = f.imageCandidateDirectories.find(({ platform }) => platform === 'linux/arm64');
-    const file = path.join(arm64.directory, 'candidate.json');
+    const file = path.join(f.imageCandidateDirectories[0].directory, 'candidate.json');
     const value = JSON.parse(await readFile(file, 'utf8'));
-    value.buildInputSha256 = 'f'.repeat(64);
-    const bytes = Buffer.from(JSON.stringify(value, null, 2) + '\n');
-    await writeFile(file, bytes);
-    arm64.sha256 = hash(bytes);
-    const inputs = f.imageCandidateDirectories.map(({ directory, sha256 }) => ({ directory, sha256 }));
-    await assert.rejects(assembleReleaseCandidate({ repoRoot: f.root, imageCandidates: inputs,
-      artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent }), { message: 'SOURCE_IDENTITY_MISMATCH' });
-    assert.deepEqual(await fsPromises.readdir(f.outputParent), []);
+    value.buildInputSha256 = 'INVALID';
+    const bytes = Buffer.from(JSON.stringify(value)); await writeFile(file, bytes);
+    f.imageCandidateDirectories[0].sha256 = hash(bytes);
+    await assert.rejects(assembleReleaseCandidate({ repoRoot: f.root,
+      imageCandidates: f.imageCandidateDirectories.map(({ directory, sha256 }) => ({ directory, sha256 })),
+      artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent }), { message: 'IMAGE_CANDIDATE_INVALID' });
   } finally { await f.cleanup(); }
 });
 
@@ -248,18 +183,6 @@ test('拒绝缺失或伪造的候选构建身份并拒绝跨平台身份不一�
     } finally { await f.cleanup(); }
   }
 
-  const f = await fixture();
-  try {
-    const arm = f.imageCandidateDirectories.find(({ platform }) => platform === 'linux/arm64');
-    const file = path.join(arm.directory, 'candidate.json'); const value = JSON.parse(await readFile(file, 'utf8'));
-    value.buildIdentity.sourceSha256 = 'f'.repeat(64);
-    value.buildIdentity.buildId = hash(JSON.stringify({ baseVersion: value.buildIdentity.baseVersion,
-      sourceCommit: value.buildIdentity.sourceCommit, sourceSha256: value.buildIdentity.sourceSha256, dirty: false }));
-    const bytes = Buffer.from(JSON.stringify(value, null, 2) + '\n'); await writeFile(file, bytes); arm.sha256 = hash(bytes);
-    await assert.rejects(assembleReleaseCandidate({ repoRoot: f.root,
-      imageCandidates: f.imageCandidateDirectories.map(({ directory, sha256 }) => ({ directory, sha256 })),
-      artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent }), { message: 'SOURCE_IDENTITY_MISMATCH' });
-  } finally { await f.cleanup(); }
 });
 
 test('rejects artifact and parent symlinks and output containment without touching neighbors', async () => {
@@ -268,7 +191,7 @@ test('rejects artifact and parent symlinks and output containment without touchi
     const neighbor = path.join(f.outputParent, 'neighbor'); await writeFile(neighbor, 'keep');
     await assert.rejects(assembleReleaseCandidate({ repoRoot: f.root, imageCandidates: f.imageCandidateDirectories.map(({ directory, sha256 }) => ({ directory, sha256 })),
       artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.artifactRoot }));
-    const original = path.join(f.artifactRoot, 'compose.yaml'); await rm(original); await symlink('../descriptor.json', original);
+    const original = path.join(f.artifactRoot, 'database/schema.sql'); await rm(original); await symlink('../descriptor.json', original);
     await assert.rejects(assembleReleaseCandidate({ repoRoot: f.root, imageCandidates: f.imageCandidateDirectories.map(({ directory, sha256 }) => ({ directory, sha256 })),
       artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent }));
     assert.equal(await readFile(neighbor, 'utf8'), 'keep');
@@ -328,7 +251,7 @@ test('装配后原始制品或候选记录漂移时撤销整个输出', async ()
         const value = await originalRead(file, ...args);
         if (!changed && String(file).endsWith('/payload/manifest.json')) {
           changed = true;
-          const target = mode === 'artifact' ? path.join(f.artifactRoot, 'compose.yaml')
+          const target = mode === 'artifact' ? path.join(f.artifactRoot, 'database/schema.sql')
             : mode === 'marker' ? path.join(f.imageCandidateDirectories[0].directory, 'candidate.json') : path.join(f.root, 'changed.txt');
           await writeFile(target, mode === 'marker' ? `${await originalRead(target, 'utf8')} ` : 'changed');
         }

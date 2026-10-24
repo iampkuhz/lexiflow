@@ -2,9 +2,9 @@
 // 固定合成候选事务；不替代公开 pipeline 或正式发行许可证明。
 import { createHash } from 'node:crypto';
 import { constants, realpathSync } from 'node:fs';
-import { lstat, open, mkdir, writeFile } from 'node:fs/promises';
+import { cp, lstat, open, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { buildCandidateImages } from '../build/release-image-builder.mjs';
 import { assembleReleaseCandidate } from '../build/release-candidate-assembler.mjs';
 import { verifyReleaseCandidate } from '../integrity/release-candidate-verifier.mjs';
@@ -92,8 +92,6 @@ export async function assembleSyntheticCandidates(raw) {
   await safePath(artifactRoot, true);
   const identity = resolveCleanBuildIdentity(ROOT);
   const jar = await bytes(path.join(artifactRoot, 'api.jar'), 1024 ** 3);
-  const extension = await bytes(path.join(artifactRoot, 'extension.zip'), 256 * 1024 ** 2);
-  const compose = await bytes(path.join(ROOT, 'ops/docker/compose.yaml'), 1_000_000);
   const sql = await bytes(path.join(ROOT, 'infra/postgres/schema.sql'), 16 * 1024 ** 2);
   const datasetBytes = [];
   for (const row of input.datasets) {
@@ -103,39 +101,53 @@ export async function assembleSyntheticCandidates(raw) {
   }
   await mkdir(imageParent, { mode: 0o700 });
   await mkdir(releaseParent, { mode: 0o700 });
-  const image = await buildCandidateImages({ repoRoot: ROOT, artifactRoot, outputParent: imageParent,
-    endpoint: input.endpoint, platform: 'linux/arm64', descriptor: { schemaVersion: 1,
-      softwareVersion: identity.softwareVersion, sourceCommit: identity.sourceCommit, jar: { path: 'api.jar', ...fact(jar) } } });
-  const imageSha = sha(await bytes(path.join(image.candidateDirectory, 'candidate.json'), 2_000_000));
-  const records = []; const licenses = [];
+  await mkdir(path.join(artifactRoot, 'licenses'), { recursive: true, mode: 0o700 });
+  const licenses = []; const noticeRecords = [];
   for (const [id, component] of [['lexiflow', 'LexiFlow'], ['ext-third-party', 'extension-third-party'],
     ['api-runtime', 'API-runtime'], ['postgresql', 'PostgreSQL'], ['dataset-license', 'dataset']]) {
     const noticePath = `licenses/${id}.txt`;
     const notice = Buffer.from(`Internal synthetic runtime acceptance only; no redistribution authorization. Component: ${component}.\n`);
-    await mkdir(path.join(artifactRoot, 'licenses'), { recursive: true, mode: 0o700 });
     await writeFile(path.join(artifactRoot, noticePath), notice, { flag: 'wx', mode: 0o600 });
-    records.push({ role: 'license', path: noticePath, ...fact(notice), licenseIds: [id] });
+    noticeRecords.push({ role: 'license', path: noticePath, ...fact(notice), licenseIds: [id] });
     licenses.push({ id, component, licenseId: 'UNVERIFIED-SYNTHETIC-ONLY',
       licenseName: 'Internal synthetic test only; no redistribution authorization',
       sourceUrl: 'https://example.invalid/synthetic/runtime-check', noticePath,
       noticeBytes: notice.length, noticeSha256: sha(notice) });
   }
-  records.push({ role: 'api-image', platform: 'linux/arm64', licenseIds: ['lexiflow', 'api-runtime'] },
-    { role: 'postgres-image', platform: 'linux/arm64', licenseIds: ['postgresql'] });
-  for (const [role, relative, data, ids, metadata] of [
-    ['compose', 'compose.yaml', compose, ['lexiflow']], ['sql', 'schema.sql', sql, ['lexiflow']],
-    ['extension', 'extension.zip', extension, ['lexiflow', 'ext-third-party'],
-      { softwareVersion: identity.softwareVersion, sourceCommit: identity.sourceCommit }]]) {
-    if (role !== 'extension') await writeFile(path.join(artifactRoot, relative), data, { flag: 'wx', mode: 0o600 });
-    records.push({ role, path: relative, ...fact(data), licenseIds: ids, ...(metadata ? { metadata } : {}) });
-  }
-  await mkdir(path.join(artifactRoot, 'dataset'), { mode: 0o700 });
+  await writeFile(path.join(artifactRoot, 'schema.sql'), sql, { flag: 'wx', mode: 0o600 });
+  const sqlSha = sha(sql);
+  const baseRecords = [...noticeRecords,
+    { role: 'sql', path: 'schema.sql', ...fact(sql), licenseIds: ['lexiflow'] }];
+  const { createExtensionZip } = await import(pathToFileURL(path.join(ROOT, 'extension/scripts/packaging/package-extension-release.mjs')));
   const candidates = [];
   for (const [i, row] of input.datasets.entries()) {
-    await writeFile(path.join(artifactRoot, 'dataset', row.file), datasetBytes[i], { flag: 'wx', mode: 0o600 });
+    const selected = { releaseId: `synthetic-${row.sha256}`,
+      preparationId: `synthetic-${sha(row.preparationPolicy)}`, ruleId: 'synthetic-no-model' };
+    const expectedDataset = { ...selected, sqlVersion: sqlSha, sha256: row.sha256 };
+    const extensionRoot = path.join(scratch, `synthetic-extension-${i}`);
+    await mkdir(extensionRoot, { mode: 0o700 });
+    await cp(path.join(ROOT, 'extension/dist'), path.join(extensionRoot, 'dist'), { recursive: true, errorOnExist: true, force: false });
+    await writeFile(path.join(extensionRoot, 'dist/expected-dataset.json'), `${JSON.stringify(expectedDataset)}\n`, { flag: 'w', mode: 0o600 });
+    const extension = await createExtensionZip({ root: extensionRoot, buildIdentity: identity, expectedDataset });
+    await writeFile(path.join(artifactRoot, 'extension.zip'), extension.archive, { flag: i === 0 ? 'wx' : 'w', mode: 0o600 });
+    const extensionRecord = { role: 'extension', path: 'extension.zip', ...fact(extension.archive),
+      licenseIds: ['lexiflow', 'ext-third-party'], metadata: { softwareVersion: identity.softwareVersion,
+        sourceCommit: identity.sourceCommit, expectedDataset } };
+    const datasetPath = `dataset/${row.file}`;
+    await mkdir(path.dirname(path.join(artifactRoot, datasetPath)), { recursive: true, mode: 0o700 });
+    await writeFile(path.join(artifactRoot, datasetPath), datasetBytes[i], { flag: 'wx', mode: 0o600 });
+    const image = await buildCandidateImages({ repoRoot: ROOT, artifactRoot, outputParent: imageParent,
+      endpoint: input.endpoint, platform: 'linux/arm64', descriptor: { schemaVersion: 1,
+        softwareVersion: identity.softwareVersion, sourceCommit: identity.sourceCommit,
+        jar: { path: 'api.jar', ...fact(jar) }, apiContract: 'caption-hints.v2', sqlVersion: sqlSha,
+        dataset: { path: datasetPath, bytes: row.bytes, sha256: row.sha256, ...selected },
+        notices: noticeRecords.map(({ path: noticePath, bytes, sha256 }) => ({ path: noticePath, bytes, sha256 })) } });
+    const imageSha = sha(await bytes(path.join(image.candidateDirectory, 'candidate.json'), 2_000_000));
+    const records = [...baseRecords, extensionRecord, { role: 'runtime-image', platform: 'linux/arm64',
+      licenseIds: ['lexiflow', 'api-runtime', 'postgresql'] }];
     const assembled = await assembleReleaseCandidate({ repoRoot: ROOT, artifactRoot, outputParent: releaseParent,
       imageCandidates: [{ directory: image.candidateDirectory, sha256: imageSha }],
-      descriptor: syntheticDescriptor(identity, records, licenses, row, sha(sql)) });
+      descriptor: syntheticDescriptor(identity, records, licenses, { ...row, sha256: row.sha256 }, sqlSha) });
     const candidateSha256 = sha(await bytes(path.join(assembled.candidateDirectory, 'candidate.json'), 2_000_000));
     const verified = await verifyReleaseCandidate({ candidateDirectory: assembled.candidateDirectory, candidateSha256 });
     if (verified.candidateSha256 !== candidateSha256 || verified.buildIdentity.buildId !== identity.buildId

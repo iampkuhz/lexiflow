@@ -55,12 +55,59 @@ test('真实assemble的release与clean SNAPSHOT完整候选可只读验证', asy
     } finally { await f.cleanup(); }
   }
 });
+
+test('actual corresponding-sources archive is digest-bound and cannot be replaced after assembly', async () => {
+  const f = await assembled();
+  try {
+    const source = f.manifest.artifacts.find(item => item.role === 'corresponding-sources');
+    const archive = path.join(f.candidateDirectory, 'payload', source.path);
+    const original = await readFile(archive);
+    assert.equal(hash(original), source.sha256);
+    await writeFile(archive, Buffer.concat([original, Buffer.from('replacement') ]));
+    await rejectsReadOnly(f);
+  } finally { await f.cleanup(); }
+});
+
+test('cached synthetic template returns isolated cloned roots, metadata, archives and cleanup', async () => {
+  const first = await assembled();
+  const second = await assembled();
+  try {
+    assert.notEqual(first.root, second.root);
+    assert.notEqual(first.imageDirectory, second.imageDirectory);
+    assert.notEqual(first.outputParent, second.outputParent);
+    assert.notEqual(first.candidateDirectory, second.candidateDirectory);
+    assert.notEqual(first.sourceArchive.path, second.sourceArchive.path);
+    assert.equal(first.sourceArchive.path.startsWith(first.candidateDirectory), true);
+    assert.equal(second.sourceArchive.path.startsWith(second.candidateDirectory), true);
+    assert.deepEqual(first.candidate, second.candidate);
+    assert.deepEqual(first.manifest, second.manifest);
+    assert.notEqual(first.descriptor, second.descriptor);
+    assert.notEqual(first.descriptor.artifacts, second.descriptor.artifacts);
+
+    const secondArchiveBefore = await readFile(second.sourceArchive.path);
+    first.descriptor.dataset.releaseId = 'mutated-private-fixture';
+    await writeFile(first.sourceArchive.path, Buffer.from('private replacement'));
+    assert.equal(second.descriptor.dataset.releaseId, 'release-test');
+    assert.deepEqual(await readFile(second.sourceArchive.path), secondArchiveBefore);
+
+    await first.cleanup();
+    assert.deepEqual(await readFile(path.join(second.candidateDirectory, 'candidate.json')), second.marker);
+    const third = await assembled();
+    try {
+      assert.deepEqual(third.candidate, second.candidate, 'mutating and cleaning a clone cannot affect the read-only template');
+      assert.equal(hash(await readFile(third.sourceArchive.path)), third.sourceArchive.sha256);
+    } finally { await third.cleanup(); }
+  } finally {
+    await first.cleanup();
+    await second.cleanup();
+  }
+});
 test('marker、manifest、sidecar、artifact和extension内嵌身份篡改被拒', async () => {
   for (const mutation of [
     async f => writeFile(path.join(f.candidateDirectory, 'candidate.json'), '{'),
     async f => writeFile(path.join(f.candidateDirectory, 'payload/manifest.json'), '{}\n'),
     async f => writeFile(path.join(f.candidateDirectory, 'payload/manifest.json.sha256'), '0'.repeat(64) + '  manifest.json\n'),
-    async f => writeFile(path.join(f.candidateDirectory, 'payload/compose.yaml'), 'changed'),
+    async f => writeFile(path.join(f.candidateDirectory, 'payload/database/schema.sql'), 'changed'),
     async f => writeFile(path.join(f.candidateDirectory, 'payload/extension/package.zip'), extensionBytes(resolveBuildIdentity(f.root)).subarray(0, 16)),
   ]) {
     const f = await assembled();
@@ -71,7 +118,7 @@ test('候选marker身份、平台、schema和规范字节拒绝', async () => {
   for (const mutation of [
     x => { x.buildIdentity.buildId = 'f'.repeat(64); },
     x => { x.buildIdentity.dirty = true; },
-    x => { x.imageCandidates[1].platform = x.imageCandidates[0].platform; },
+    x => { x.imageCandidates[0].platform = 'linux/amd64'; },
     x => { x.imageCandidates.pop(); },
     x => { x.imageCandidates[0].sha256 = 'NOT_HEX'; },
     x => { x.manifestPath = '../manifest.json'; },
@@ -93,10 +140,10 @@ test('目录exact集合、大小写冲突、逃逸和非普通文件被拒', asy
   for (const mutation of [
     async f => writeFile(path.join(f.candidateDirectory, 'payload/extra'), 'x'),
     async f => mkdir(path.join(f.candidateDirectory, 'payload/empty')),
-    async f => rm(path.join(f.candidateDirectory, 'payload/compose.yaml')),
+    async f => rm(path.join(f.candidateDirectory, 'payload/database/schema.sql')),
     async f => writeFile(path.join(f.candidateDirectory, 'payload/Compose.yaml'), 'x'),
-    async f => { await rm(path.join(f.candidateDirectory, 'payload/compose.yaml')); await symlink('manifest.json', path.join(f.candidateDirectory, 'payload/compose.yaml')); },
-    async f => { await rm(path.join(f.candidateDirectory, 'payload/compose.yaml')); execFileSync('mkfifo', [path.join(f.candidateDirectory, 'payload/compose.yaml')]); },
+    async f => { await rm(path.join(f.candidateDirectory, 'payload/database/schema.sql')); await symlink('manifest.json', path.join(f.candidateDirectory, 'payload/database/schema.sql')); },
+    async f => { await rm(path.join(f.candidateDirectory, 'payload/database/schema.sql')); execFileSync('mkfifo', [path.join(f.candidateDirectory, 'payload/database/schema.sql')]); },
   ]) {
     const f = await assembled();
     try { await mutation(f); await rejectsReadOnly(f); } finally { await f.cleanup(); }
@@ -143,7 +190,7 @@ test('完整manifest重签仍拒绝内部extension身份及notice摘要错配', 
 test('读中替换或截断不能形成成功证明', async () => {
   for (const replacement of [Buffer.from('tampered content'), Buffer.alloc(0)]) {
     const f = await assembled();
-    const target = path.join(f.candidateDirectory, 'payload/compose.yaml');
+    const target = path.join(f.candidateDirectory, 'payload/database/schema.sql');
     const original = fsPromises.open;
     let injected = false;
     fsPromises.open = async (...args) => {
@@ -233,7 +280,7 @@ test('候选目录外同祖先的兄弟文件创建不改变候选证明', async
 
 test('读中更换文件inode即使字节相同仍拒绝', async () => {
   const f = await assembled();
-  const target = path.join(f.candidateDirectory, 'payload/compose.yaml');
+  const target = path.join(f.candidateDirectory, 'payload/database/schema.sql');
   const originalBytes = await readFile(target);
   const original = fsPromises.open;
   let injected = false;

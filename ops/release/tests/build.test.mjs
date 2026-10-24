@@ -13,7 +13,7 @@ import { resolveBuildIdentity } from '../integrity/source-build-identity.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const args = (f, descriptor = f.descriptor) => ({ repoRoot: f.root, artifactRoot: f.artifactRoot, descriptor });
 const hash = (value) => createHash('sha256').update(value).digest('hex');
-const templates = ['ops/docker/.dockerignore', 'ops/docker/Dockerfile', 'ops/docker/Dockerfile.postgres', 'ops/docker/initialize-postgres-app-role.sh', 'ops/docker/run-container-command.sh'];
+const templates = ['ops/docker/Dockerfile.runtime', 'ops/docker/runtime-entrypoint.sh'];
 const lockPath = 'ops/docker/base-images.json';
 const lockImages = [
   { platform: 'linux/amd64', javaRuntime: { reference: `registry.example.invalid/java@sha256:${'a'.repeat(64)}`, imageId: `sha256:${'a'.repeat(64)}` }, postgresRuntime: { reference: `registry.example.invalid/postgres@sha256:${'b'.repeat(64)}`, imageId: `sha256:${'b'.repeat(64)}` } },
@@ -24,7 +24,7 @@ const git = (root, args, options = {}) => execFileSync('git', ['-C', root, ...ar
 
 test('实际仓库基础镜像锁由正式 parser 校验，而非仅验证合成 fixture', async () => {
   const lock = await loadBaseImageLock(repo);
-  assert.deepEqual(lock.map(item => item.platform), ['linux/amd64', 'linux/arm64']);
+  assert.deepEqual(lock.map(item => item.platform), ['linux/arm64']);
   for (const item of lock) for (const role of ['javaRuntime', 'postgresRuntime'])
     assert.match(item[role].imageId, /^sha256:[a-f0-9]{64}$/);
 });
@@ -39,22 +39,31 @@ async function fixture() {
     await writeFile(target, await readFile(source));
   }
   await writeFile(path.join(root, lockPath), `${JSON.stringify({ schemaVersion: 1, baseImages: lockImages }, null, 2)}\n`);
-  for (const name of ['integrity/source-build-identity.mjs', 'integrity/release-artifact-manifest.mjs']) await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repo, 'ops/release', name)));
+  for (const name of ['integrity/source-build-identity.mjs', 'integrity/artifact-build-identity.mjs', 'integrity/extension-archive-integrity.mjs', 'integrity/release-artifact-manifest.mjs']) await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repo, 'ops/release', name)));
   await writeFile(path.join(root, 'ops/release/version.txt'), '2.0.0\n');
+  await mkdir(path.join(root, 'infra/postgres'), { recursive: true });
+  await writeFile(path.join(root, 'infra/postgres/schema.sql'), 'CREATE TABLE synthetic(id integer);\n');
   await writeFile(path.join(root, '.gitignore'), '/artifact/\n');
   execFileSync('git', ['init', '-q', root], { timeout: 10_000 });
   git(root, ['add', '.']);
   execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], { timeout: 10_000 });
   const sourceCommit = git(root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const artifactRoot = path.join(root, 'artifact'); await mkdir(artifactRoot);
-  const builtJar = jarBytes(resolveBuildIdentity(root)); await writeFile(path.join(artifactRoot, 'app.jar'), builtJar);
+  const schema = await readFile(path.join(root, 'infra/postgres/schema.sql'));
+  const builtJar = jarBytes(resolveBuildIdentity(root), schema); await writeFile(path.join(artifactRoot, 'app.jar'), builtJar);
+  const dataset = Buffer.from('synthetic dataset'); const notice = Buffer.from('synthetic notice');
+  await mkdir(path.join(artifactRoot, 'licenses'), { recursive: true });
+  await writeFile(path.join(artifactRoot, 'dataset.zip'), dataset); await writeFile(path.join(artifactRoot, 'licenses/notice.txt'), notice);
   const descriptor = {
     schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit,
     jar: { path: 'app.jar', bytes: builtJar.length, sha256: hash(builtJar) },
+    apiContract: 'caption-hints.v2', sqlVersion: 'sql-test',
+    dataset: { path: 'dataset.zip', bytes: dataset.length, sha256: hash(dataset), releaseId: 'release-1', preparationId: 'prep-1', ruleId: 'rule-1' },
+    notices: [{ path: 'licenses/notice.txt', bytes: notice.length, sha256: hash(notice) }],
   };
   const refreshJar = async () => {
     const identity = resolveBuildIdentity(root);
-    const bytes = jarBytes(identity);
+    const bytes = jarBytes(identity, schema);
     await writeFile(path.join(artifactRoot, 'app.jar'), bytes);
     descriptor.softwareVersion = identity.softwareVersion; descriptor.sourceCommit = identity.sourceCommit;
     descriptor.jar.bytes = bytes.length; descriptor.jar.sha256 = hash(bytes);
@@ -71,28 +80,20 @@ test('生成固定、双平台且无宿主路径的确定性 argv 计划', async
     reorderedInput.jar = { sha256: reorderedJar.sha256, bytes: reorderedJar.bytes, path: reorderedJar.path };
     const reordered = await prepareImageBuild(args(f, reorderedInput));
     assert.deepEqual(reordered, result);
-    assert.deepEqual(Object.keys(result), ['schemaVersion', 'softwareVersion', 'sourceCommit', 'buildIdentity', 'jar', 'templates', 'baseImageLock', 'platforms']);
-    const labels = ['org.opencontainers.image.version=' + result.softwareVersion, 'org.opencontainers.image.revision=' + result.sourceCommit,
-      'io.lexiflow.build-id=' + result.buildIdentity.buildId, 'io.lexiflow.source-sha256=' + result.buildIdentity.sourceSha256].flatMap((label) => ['--label', label]);
-    const apiLabels = [...labels, '--label', 'io.lexiflow.image-role=api', '--label', `io.lexiflow.deployment-version=${result.buildIdentity.baseVersion.toLowerCase()}`];
-    const postgresLabels = [...labels, '--label', 'io.lexiflow.image-role=postgres', '--label', `io.lexiflow.deployment-version=${result.buildIdentity.baseVersion.toLowerCase()}`];
-    assert.deepEqual(result.baseImageLock, { path: lockPath, bytes: Buffer.byteLength(`${JSON.stringify({ schemaVersion: 1, baseImages: lockImages }, null, 2)}\n`), sha256: hash(`${JSON.stringify({ schemaVersion: 1, baseImages: lockImages }, null, 2)}\n`) });
+    assert.deepEqual(Object.keys(result), ['schemaVersion', 'softwareVersion', 'sourceCommit', 'buildIdentity', 'platform', 'jar', 'dataset', 'apiContract', 'sqlVersion', 'sql', 'notices', 'templates', 'bases', 'runtimeIdentity', 'runtimeIdentityEnv', 'platforms']);
+    assert.equal(result.platform, 'linux/arm64');
     assert.deepEqual(result.templates.map((item) => item.path), templates);
-    assert.deepEqual(result.platforms.map((item) => item.platform), ['linux/amd64', 'linux/arm64']);
-    assert.deepEqual(result.platforms.map(({ commands }) => commands), [
-      [
-        ['docker', 'image', 'inspect', 'sha256:' + 'a'.repeat(64)],
-        ['docker', 'image', 'inspect', 'sha256:' + 'b'.repeat(64)],
-        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/amd64', ...apiLabels, '--build-arg', `JAVA_RUNTIME_IMAGE=${runtime('java', 'a').reference}`, '--file', 'Dockerfile', '--iidfile', 'api.iid', '.'],
-        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/amd64', ...postgresLabels, '--build-arg', `POSTGRES_RUNTIME_IMAGE=${runtime('postgres', 'b').reference}`, '--file', 'Dockerfile.postgres', '--iidfile', 'postgres.iid', '.'],
-      ],
-      [
-        ['docker', 'image', 'inspect', 'sha256:' + 'c'.repeat(64)],
-        ['docker', 'image', 'inspect', 'sha256:' + 'd'.repeat(64)],
-        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/arm64', ...apiLabels, '--build-arg', `JAVA_RUNTIME_IMAGE=${runtime('java', 'c').reference}`, '--file', 'Dockerfile', '--iidfile', 'api.iid', '.'],
-        ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/arm64', ...postgresLabels, '--build-arg', `POSTGRES_RUNTIME_IMAGE=${runtime('postgres', 'd').reference}`, '--file', 'Dockerfile.postgres', '--iidfile', 'postgres.iid', '.'],
-      ],
-    ]);
+    assert.equal(result.platforms.length, 1);
+    assert.equal(result.platforms[0].platform, 'linux/arm64');
+    const command = result.platforms[0].commands[0];
+    assert.deepEqual(command.slice(0, 8), ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/arm64', '--label', `org.opencontainers.image.version=${result.softwareVersion}`]);
+    assert.ok(command.includes('--file') && command.includes('Dockerfile.runtime') && command.includes('--iidfile') && command.includes('runtime.iid'));
+    assert.ok(command.includes('--label') && command.includes('io.lexiflow.image-role=runtime'));
+    assert.ok(command.includes(`JAVA_RUNTIME_IMAGE=${lockImages[1].javaRuntime.reference}`));
+    assert.ok(command.includes(`POSTGRES_RUNTIME_IMAGE=${lockImages[1].postgresRuntime.reference}`));
+    assert.equal(result.contextFiles, undefined);
+    assert.equal(result.platforms[0].contextFiles.length, 6);
+    assert.ok(result.runtimeIdentityEnv.includes(`datasetSha256=${f.descriptor.dataset.sha256}`));
     assert.ok(!JSON.stringify(result).includes(f.root));
     const before = structuredClone(result);
     const mutableInput = structuredClone(f.descriptor);
@@ -108,15 +109,15 @@ test('计划平台唯一取自 canonical lock，不接受 descriptor 锁副本',
   const f = await fixture();
   try {
     const plan = await prepareImageBuild(args(f));
-    assert.deepEqual(plan.platforms.map(item => item.platform), ['linux/amd64', 'linux/arm64']);
-    await assert.rejects(prepareImageBuild(args(f, { ...f.descriptor, baseImages: lockImages })), { message: 'SOURCE_IDENTITY_MISMATCH' });
+    assert.deepEqual(plan.platforms.map(item => item.platform), ['linux/arm64']);
+    await assert.rejects(prepareImageBuild(args(f, { ...f.descriptor, baseImages: lockImages })), { message: 'DESCRIPTOR_INVALID' });
     await writeFile(path.join(f.root, lockPath), JSON.stringify({ schemaVersion: 1, baseImages: [lockImages[1]] }));
     git(f.root, ['add', lockPath]);
     git(f.root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'single-platform lock']);
     await f.refreshJar();
     const subset = await prepareImageBuild(args(f));
     assert.deepEqual(subset.platforms.map(item => item.platform), ['linux/arm64']);
-    assert.deepEqual(subset.platforms[0].javaRuntime, lockImages[1].javaRuntime);
+    assert.deepEqual(subset.bases.javaRuntime, lockImages[1].javaRuntime);
   } finally { await f.cleanup(); }
 });
 
@@ -145,7 +146,7 @@ test('拒绝 schema、版本/commit 与坏 JAR', async () => {
   const f = await fixture();
   try {
     const cases = [
-      ['unknown descriptor field', (d) => { d.extra = true; }, 'SOURCE_IDENTITY_MISMATCH'],
+      ['unknown descriptor field', (d) => { d.extra = true; }, 'DESCRIPTOR_INVALID'],
       ['wrong version', (d) => { d.softwareVersion = '1.0.0'; }, 'SOURCE_IDENTITY_MISMATCH'],
       ['wrong source commit', (d) => { d.sourceCommit = '0'.repeat(40); }, 'SOURCE_IDENTITY_MISMATCH'],
       ['bad digest', (d) => { d.jar.sha256 = 'A'.repeat(64); }, 'JAR_INVALID'],
@@ -188,7 +189,7 @@ test('JAR 内嵌完整身份及必需资源必须匹配源码身份', async () =
 test('canonical lock 唯一决定镜像身份，并拒绝未知字段、注入与缺失锁', async () => {
   const f = await fixture();
   try {
-    assert.equal((await prepareImageBuild(args(f))).baseImageLock.path, lockPath);
+    assert.equal((await prepareImageBuild(args(f))).bases.platform, 'linux/arm64');
     for (const mutate of [
       (lock) => { lock.extra = true; },
       (lock) => { lock.schemaVersion = 2; },
@@ -265,13 +266,13 @@ test('拒绝参数字段、非法类型与 artifact 边界', async () => {
     for (const invalid of [null, {}, { ...args(f), repoRoot: 'relative' }, { ...args(f), artifactRoot: null }]) {
       await assert.rejects(prepareImageBuild(invalid), { message: 'INPUT_INVALID' });
     }
-    await assert.rejects(prepareImageBuild({ ...args(f), descriptor: null }), { message: 'SOURCE_IDENTITY_MISMATCH' });
+    await assert.rejects(prepareImageBuild({ ...args(f), descriptor: null }), { message: 'DESCRIPTOR_INVALID' });
     for (const bytes of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, 2 ** 40 + 1, '19']) {
       const descriptor = structuredClone(f.descriptor); descriptor.jar.bytes = bytes;
       await assert.rejects(prepareImageBuild(args(f, descriptor)), { message: 'JAR_INVALID' });
     }
     const rootFile = path.join(f.root, 'ops/release/version.txt');
-    await assert.rejects(prepareImageBuild({ ...args(f), repoRoot: rootFile }), { message: 'INPUT_INVALID' });
+    await assert.rejects(prepareImageBuild({ ...args(f), repoRoot: rootFile }), { message: 'RELEASE_SOURCE_REJECTED' });
     const outside = structuredClone(f.descriptor); outside.jar.path = '../secret';
     await assert.rejects(prepareImageBuild(args(f, outside)), { message: 'BUILD_INPUT_REJECTED' });
     const wrongBytes = structuredClone(f.descriptor); wrongBytes.jar.bytes += 1;
@@ -307,12 +308,13 @@ test('拒绝 artifact 根/父路径 symlink 与 clean 已提交模板 symlink', 
 test('拒绝clean tree中的ignored模板替身', async () => {
   const f = await fixture();
   try {
-    git(f.root, ['rm', '-q', 'ops/docker/initialize-postgres-app-role.sh']);
-    await writeFile(path.join(f.root, '.gitignore'), '/artifact/\n/ops/docker/initialize-postgres-app-role.sh\n');
+    git(f.root, ['rm', '-q', 'ops/docker/runtime-entrypoint.sh']);
+    await writeFile(path.join(f.root, '.gitignore'), '/artifact/\n/ops/docker/runtime-entrypoint.sh\n');
     git(f.root, ['add', '.gitignore']);
     git(f.root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'ignore removed template']);
     f.descriptor.sourceCommit = git(f.root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    await writeFile(path.join(f.root, 'ops/docker/initialize-postgres-app-role.sh'), 'ignored replacement\n');
+    await f.refreshJar();
+    await writeFile(path.join(f.root, 'ops/docker/runtime-entrypoint.sh'), 'ignored replacement\n');
     assert.equal(git(f.root, ['status', '--porcelain=v1', '--untracked-files=all'], { encoding: 'utf8' }).trim(), '');
     await assert.rejects(prepareImageBuild(args(f)), { message: 'TEMPLATE_INVALID' });
   } finally { await f.cleanup(); }

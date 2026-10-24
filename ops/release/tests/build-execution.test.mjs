@@ -9,10 +9,10 @@ import { fileURLToPath } from 'node:url';
 import { runDocker } from '../build/release-build-process.mjs';
 import { buildCandidateImages } from '../build/release-image-builder.mjs';
 import { resolveBuildIdentity } from '../integrity/source-build-identity.mjs';
-import { jarBytes, makeZip } from './zip-fixture.mjs';
+import { jarBytes } from './zip-fixture.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
-const templates = ['ops/docker/.dockerignore', 'ops/docker/Dockerfile', 'ops/docker/Dockerfile.postgres', 'ops/docker/initialize-postgres-app-role.sh', 'ops/docker/run-container-command.sh'];
+const templates = ['ops/docker/Dockerfile.runtime', 'ops/docker/runtime-entrypoint.sh'];
 const hash = (data) => createHash('sha256').update(data).digest('hex');
 const ids = { 'linux/amd64': ['sha256:' + 'a'.repeat(64), 'sha256:' + 'b'.repeat(64)], 'linux/arm64': ['sha256:' + 'c'.repeat(64), 'sha256:' + 'd'.repeat(64)] };
 const finalIds = { 'linux/amd64': ['sha256:' + 'e'.repeat(64), 'sha256:' + 'f'.repeat(64)], 'linux/arm64': ['sha256:' + '1'.repeat(64), 'sha256:' + '2'.repeat(64)] };
@@ -28,24 +28,34 @@ async function fixture() {
     javaRuntime: { reference: `registry.example.invalid/library/java@${ids[platform][0]}`, imageId: ids[platform][0] },
     postgresRuntime: { reference: `registry.example.invalid/library/postgres@${ids[platform][1]}`, imageId: ids[platform][1] } }));
   await writeFile(path.join(root, 'ops/docker/base-images.json'), `${JSON.stringify({ schemaVersion: 1, baseImages: syntheticLock }, null, 2)}\n`);
-  for (const name of ['integrity/source-build-identity.mjs', 'integrity/release-artifact-manifest.mjs']) await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repo, 'ops/release', name)));
+  for (const name of ['integrity/source-build-identity.mjs', 'integrity/artifact-build-identity.mjs', 'integrity/extension-archive-integrity.mjs', 'integrity/release-artifact-manifest.mjs']) await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repo, 'ops/release', name)));
   await writeFile(path.join(root, 'ops/release/version.txt'), '2.0.0\n');
+  await mkdir(path.join(root, 'infra/postgres'), { recursive: true });
+  await writeFile(path.join(root, 'infra/postgres/schema.sql'), await readFile(path.join(repo, 'infra/postgres/schema.sql')));
   await writeFile(path.join(root, '.gitignore'), '/artifact/\n');
   execFileSync('git', ['init', '-q', root], { timeout: 10_000 });
   git(root, ['add', '.']); git(root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']);
   const sourceCommit = git(root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const artifactRoot = path.join(root, 'artifact'); await mkdir(artifactRoot);
-  const jar = jarBytes(resolveBuildIdentity(root)); await writeFile(path.join(artifactRoot, 'app.jar'), jar);
+  const schema = await readFile(path.join(root, 'infra/postgres/schema.sql'));
+  const jar = jarBytes(resolveBuildIdentity(root), schema); await writeFile(path.join(artifactRoot, 'app.jar'), jar);
+  const dataset = Buffer.from('synthetic release dataset'); const notice = Buffer.from('synthetic notice');
+  await mkdir(path.join(artifactRoot, 'licenses'), { recursive: true });
+  await writeFile(path.join(artifactRoot, 'dataset.zip'), dataset);
+  await writeFile(path.join(artifactRoot, 'licenses/notice.txt'), notice);
   const ref = (name, letter) => `registry.example.invalid/library/${name}@sha256:${letter.repeat(64)}`;
   const descriptor = {
     schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit,
     jar: { path: 'app.jar', bytes: jar.length, sha256: hash(jar) },
+    apiContract: 'caption-hints.v2', sqlVersion: 'sql-test',
+    dataset: { path: 'dataset.zip', bytes: dataset.length, sha256: hash(dataset), releaseId: 'release-1', preparationId: 'prep-1', ruleId: 'rule-1' },
+    notices: [{ path: 'licenses/notice.txt', bytes: notice.length, sha256: hash(notice) }],
   };
   const refs = Object.fromEntries(syntheticLock.flatMap(({ platform, javaRuntime, postgresRuntime }) => [[javaRuntime.reference, { platform, imageId: javaRuntime.imageId }], [postgresRuntime.reference, { platform, imageId: postgresRuntime.imageId }]]));
   const outputParent = await realpath(await import('node:fs/promises').then(({ mkdtemp }) => mkdtemp(path.join(os.tmpdir(), 'lexiflow-output-'))));
   const fakeRoot = await import('node:fs/promises').then(({ mkdtemp }) => mkdtemp(path.join(os.tmpdir(), 'lexiflow-fake-docker-')));
   const bin = path.join(fakeRoot, 'bin'); await mkdir(bin);
-  await writeFile(path.join(fakeRoot, 'state.json'), JSON.stringify({ mode: 'ok', ids, finalIds, refs }));
+  await writeFile(path.join(fakeRoot, 'state.json'), JSON.stringify({ mode: 'ok', ids, finalIds, refs, daemonArchitecture: 'arm64' }));
   const driver = path.join(fakeRoot, 'fake-docker.mjs');
   await writeFile(driver, `
 import fs from 'node:fs'; import path from 'node:path'; import { spawn } from 'node:child_process';
@@ -57,14 +67,14 @@ else if (state.mode === 'overflow') { (async () => { for (let n = 0; n < 18; n +
 else {
 if (state.failOp === op && (!state.failSub || args[1] === state.failSub)) { process.stderr.write('private synthetic failure'); process.exit(29); }
 if (op === 'version') { if (state.preseedMarker) fs.writeFileSync(path.join(process.cwd(), 'candidate.json'), 'external marker'); process.stdout.write(JSON.stringify({ Client: { Version: 'synthetic' }, Server: { Version: 'synthetic' } })); process.exit(0); }
-if (op === 'info') { const infoCalls = fs.existsSync(path.join(root, 'calls.jsonl')) ? fs.readFileSync(path.join(root, 'calls.jsonl'), 'utf8').split('\\n').filter((line) => line && JSON.parse(line).op === 'info').length : 0; process.stdout.write(JSON.stringify({ OSType: 'linux', Architecture: infoCalls > 1 ? (state.finalInfoArchitecture ?? state.daemonArchitecture ?? 'amd64') : (state.daemonArchitecture ?? 'amd64') })); process.exit(0); }
+if (op === 'info') { const infoCalls = fs.existsSync(path.join(root, 'calls.jsonl')) ? fs.readFileSync(path.join(root, 'calls.jsonl'), 'utf8').split('\\n').filter((line) => line && JSON.parse(line).op === 'info').length : 0; if (infoCalls > 1 && state.archiveMode === 'drift') fs.appendFileSync(path.join(process.cwd(), 'images/linux-arm64/runtime-image.tar'), 'tampered'); process.stdout.write(JSON.stringify({ OSType: 'linux', Architecture: infoCalls > 1 ? (state.finalInfoArchitecture ?? state.daemonArchitecture ?? 'amd64') : (state.daemonArchitecture ?? 'amd64') })); process.exit(0); }
 if (op === 'image' && args[1] === 'inspect') {
   const target = args[2]; let platform; let imageId;
   if (state.refs[target]) { platform = state.refs[target].platform; imageId = state.refs[target].imageId; }
   for (const [p, bases] of Object.entries(state.ids)) { const finals = state.finalIds[p]; if (bases.includes(target)) { platform = p; imageId = target; } if (finals.includes(target)) { platform = p; imageId = target; } }
   if (!platform) { process.stderr.write('unknown synthetic image'); process.exit(30); }
   const architecture = platform.endsWith('amd64') ? 'amd64' : 'arm64';
-  const value = { Id: imageId, Os: 'linux', Architecture: state.badArchitecture && state.badArchitecture === target ? 'arm64' : architecture };
+  const value = { Id: imageId, Os: 'linux', Architecture: state.badArchitecture && state.badArchitecture === target ? state.badArchitectureValue : architecture };
   if (state.builtImages?.[target]) {
     value.Config = { Labels: { ...state.builtImages[target] } };
     if (state.labelMode === 'missing') delete value.Config.Labels['io.lexiflow.build-id'];
@@ -75,10 +85,10 @@ if (op === 'image' && args[1] === 'inspect') {
 }
 if (op === 'build') {
   const platform = args[args.indexOf('--platform') + 1]; const iid = args[args.indexOf('--iidfile') + 1];
-  const expected = ['.dockerignore','Dockerfile','Dockerfile.postgres','initialize-postgres-app-role.sh','lexiflow-api.jar','run-container-command.sh'];
+  const expected = ['Dockerfile.runtime','dataset.zip','lexiflow-api.jar','notices','release-identity.env','release-identity.json','runtime-entrypoint.sh','schema.sql'];
   const actual = fs.readdirSync(process.cwd()).sort(); fs.appendFileSync(path.join(root, 'contexts.jsonl'), JSON.stringify({ platform, files: actual }) + '\\n');
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) { process.stderr.write('wrong context'); process.exit(31); }
-  const imageIndex = iid.startsWith('api') ? 0 : 1;
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) { process.stderr.write('wrong context: ' + JSON.stringify(actual) + ' expected ' + JSON.stringify(expected)); process.exit(31); }
+  const imageIndex = 0;
   const labelArgs = [];
   for (let i = 0; i < args.length; i += 1) if (args[i] === '--label') labelArgs.push(args[i + 1]);
   state.builtImages ??= {};
@@ -87,7 +97,7 @@ if (op === 'build') {
   if (state.iidMode === 'symlink') fs.symlinkSync('/etc/hosts', path.join(process.cwd(), iid));
   else if (state.iidMode === 'bad') fs.writeFileSync(path.join(process.cwd(), iid), 'not-an-image-id');
   else if (state.iidMode === 'empty') fs.writeFileSync(path.join(process.cwd(), iid), '');
-  else { const index = iid.startsWith('api') ? 0 : 1; fs.writeFileSync(path.join(process.cwd(), iid), state.finalIds[platform][index] + '\\n'); }
+  else { fs.writeFileSync(path.join(process.cwd(), iid), state.finalIds[platform][imageIndex] + '\\n'); }
   process.exit(0);
 }
 if (op === 'image' && args[1] === 'save') {
@@ -112,37 +122,39 @@ function withFakePath(f, callback) {
 async function state(f) { return JSON.parse(await readFile(path.join(f.fakeRoot, 'state.json'), 'utf8')); }
 async function setState(f, patch) { await writeFile(path.join(f.fakeRoot, 'state.json'), JSON.stringify({ ...(await state(f)), ...patch })); }
 async function calls(f) { return (await readFile(path.join(f.fakeRoot, 'calls.jsonl'), 'utf8')).trim().split('\n').filter(Boolean).map((line) => JSON.parse(line)); }
-const buildInput = (f, extra = {}) => ({ repoRoot: f.root, artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent, endpoint: 'unix:///tmp/synthetic-docker.sock', platform: 'linux/amd64', ...extra });
+const buildInput = (f, extra = {}) => ({ repoRoot: f.root, artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent, endpoint: 'unix:///tmp/synthetic-docker.sock', platform: 'linux/arm64', ...extra });
 
-test('buildCandidateImages 执行固定预检/构建/导出并留下四镜像候选', async () => {
+test('buildCandidateImages 执行固定预检/单镜像构建/导出并留下唯一运行镜像候选', async () => {
   const f = await fixture();
   try {
     await withFakePath(f, async () => {
       process.env.DOCKER_HOST = 'tcp://attacker.invalid'; process.env.DOCKER_CONFIG = '/attacker'; process.env.COMPOSE_FILE = '/attacker'; process.env.BUILDX_CONFIG = '/attacker'; process.env.SSH_AUTH_SOCK = '/attacker'; process.env.BUILD_SECRET = 'must-not-pass';
-      const result = await buildCandidateImages(buildInput(f));
+      let result;
+      try { result = await buildCandidateImages(buildInput(f)); }
+      catch (error) { throw error; }
       const execution = await calls(f); const operations = execution.map((entry) => entry.op);
       assert.deepEqual(operations.slice(0, 2), ['version', 'info']);
       const baseChecks = execution.filter(({ args }) => args.includes('inspect') && args.some((arg) => arg.startsWith('registry.example.invalid/')));
       assert.equal(baseChecks.length, 2);
       const lastBaseInspection = Math.max(...execution.map((entry, index) => baseChecks.includes(entry) ? index : -1));
       assert.ok(lastBaseInspection < operations.indexOf('build'));
-      assert.equal(operations.filter((op) => op === 'build').length, 2);
-      assert.equal(execution.filter(({ args }) => args.includes('save')).length, 2);
+      assert.equal(operations.filter((op) => op === 'build').length, 1);
+      assert.equal(execution.filter(({ args }) => args.includes('save')).length, 1);
       assert.ok(baseChecks.every(({ args }) => args[0] === '--config' && args[2] === '--host' && args[3] === 'unix:///tmp/synthetic-docker.sock'));
       assert.ok(execution.every(({ env, args }) => env.HOME === args[1] && env.LANG === 'C' && env.LC_ALL === 'C'
         && env.DOCKER_HOST === undefined && env.DOCKER_CONFIG === undefined && env.COMPOSE_FILE === undefined && env.BUILDX_CONFIG === undefined && env.SSH_AUTH_SOCK === undefined && env.BUILD_SECRET === undefined));
       const contexts = (await readFile(path.join(f.fakeRoot, 'contexts.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
-      assert.equal(contexts.length, 2); assert.ok(contexts.every(({ files }) => files.length === 6));
+      assert.equal(contexts.length, 1); assert.deepEqual(contexts[0].files, ['Dockerfile.runtime','dataset.zip','lexiflow-api.jar','notices','release-identity.env','release-identity.json','runtime-entrypoint.sh','schema.sql']);
       const { candidate, candidateDirectory } = result;
       assert.deepEqual(Object.keys(candidate), ['schemaVersion', 'kind', 'buildIdentity', 'softwareVersion', 'sourceCommit', 'platform', 'buildInputSha256', 'baseImages', 'artifacts']);
       assert.deepEqual(candidate.buildIdentity, resolveBuildIdentity(f.root));
-      assert.equal(candidate.platform, 'linux/amd64');
+      assert.equal(candidate.platform, 'linux/arm64');
       assert.equal(candidate.baseImages.length, 1);
-      assert.equal(candidate.artifacts.length, 2);
+      assert.equal(candidate.artifacts.length, 1);
       assert.deepEqual(candidate.artifacts.map(({ path: itemPath }) => itemPath), [...candidate.artifacts.map(({ path: itemPath }) => itemPath)].sort());
       for (const item of candidate.artifacts) {
         const bytes = await readFile(path.join(candidateDirectory, item.path));
-        assert.equal(bytes.length, item.bytes); assert.equal(hash(bytes), item.sha256); assert.equal(item.imageDigest, item.role === 'api-image' ? finalIds[item.platform][0] : finalIds[item.platform][1]);
+        assert.equal(bytes.length, item.bytes); assert.equal(hash(bytes), item.sha256); assert.equal(item.role, 'runtime-image'); assert.equal(item.imageDigest, finalIds[item.platform][0]);
       }
       assert.equal((await readFile(path.join(candidateDirectory, 'candidate.json'), 'utf8')), `${JSON.stringify(candidate, null, 2)}\n`);
       assert.equal(await lstat(path.join(candidateDirectory, 'config')).then(() => false, () => true), true);
@@ -151,15 +163,16 @@ test('buildCandidateImages 执行固定预检/构建/导出并留下四镜像候
   } finally { delete process.env.DOCKER_HOST; delete process.env.DOCKER_CONFIG; delete process.env.COMPOSE_FILE; delete process.env.BUILDX_CONFIG; delete process.env.SSH_AUTH_SOCK; delete process.env.BUILD_SECRET; await f.cleanup(); }
 });
 
-test('固定全锁计划按执行平台生成原生 arm64 候选', async () => {
+test('单镜像合同固定为linux/arm64并拒绝旧amd64分支', async () => {
   const f = await fixture();
   try {
     await setState(f, { daemonArchitecture: 'arm64' });
     await withFakePath(f, async () => {
-      const result = await buildCandidateImages(buildInput(f, { platform: 'linux/arm64' }));
+      const result = await buildCandidateImages(buildInput(f));
       assert.equal(result.candidate.platform, 'linux/arm64');
       assert.equal(result.candidate.baseImages[0].platform, 'linux/arm64');
-      assert.equal((await calls(f)).filter(({ op }) => op === 'build').length, 2);
+      assert.equal((await calls(f)).filter(({ op }) => op === 'build').length, 1);
+      await assert.rejects(buildCandidateImages(buildInput(f, { platform: 'linux/amd64' })), { message: 'BUILD_INPUT_INVALID' });
     });
   } finally { await f.cleanup(); }
 });
@@ -190,7 +203,7 @@ test('拒绝参数、端点、输出目录边界及不支持daemon架构', async
     await assert.rejects(buildCandidateImages(buildInput(f, { outputParent: parentAlias })), { message: 'BUILD_INPUT_INVALID' });
     await rm(parentAlias);
     await withFakePath(f, async () => {
-      await setState(f, { daemonArchitecture: 'arm64' });
+      await setState(f, { daemonArchitecture: 'amd64' });
       const driverPath = path.join(f.fakeRoot, 'fake-docker.mjs');
       let driver = await readFile(driverPath, 'utf8');
       driver = driver.replace("Architecture: 'amd64'", "Architecture: state.daemonArchitecture ?? 'amd64'");
@@ -200,7 +213,7 @@ test('拒绝参数、端点、输出目录边界及不支持daemon架构', async
       assert.deepEqual(initialMismatchCalls.map(({ op }) => op), ['version', 'info']);
       assert.equal(initialMismatchCalls.some(({ args }) => args.includes('inspect') || args.includes('build') || args.includes('save')), false);
       assert.deepEqual(await import('node:fs/promises').then(({ readdir }) => readdir(f.outputParent)), []);
-      await setState(f, { daemonArchitecture: null, preseedMarker: true });
+      await setState(f, { daemonArchitecture: 'arm64', preseedMarker: true });
       await assert.rejects(buildCandidateImages(buildInput(f)), { message: 'BUILD_CANDIDATE_FAILED' });
       assert.deepEqual(await import('node:fs/promises').then(({ readdir }) => readdir(f.outputParent)), []);
     });
@@ -211,7 +224,7 @@ test('最终 Docker info 架构漂移时在发布候选标记前拒绝', async (
   const f = await fixture();
   try {
     await withFakePath(f, async () => {
-      await setState(f, { finalInfoArchitecture: 'arm64' });
+      await setState(f, { finalInfoArchitecture: 'amd64' });
       await assert.rejects(buildCandidateImages(buildInput(f)), { message: 'DOCKER_PLATFORM_MISMATCH' });
       const execution = await calls(f);
       assert.equal(execution.filter(({ op }) => op === 'info').length, 2);
@@ -221,27 +234,18 @@ test('最终 Docker info 架构漂移时在发布候选标记前拒绝', async (
   } finally { await f.cleanup(); }
 });
 
-test('完整计划摘要跨平台稳定且 JAR 字节及 descriptor 同步变化后改变', async () => {
+test('完整计划摘要绑定全部镜像输入且dataset字节漂移改变计划', async () => {
   const f = await fixture();
   try {
     await withFakePath(f, async () => {
-      const amd64 = await buildCandidateImages(buildInput(f, { platform: 'linux/amd64' }));
-      await setState(f, { daemonArchitecture: 'arm64' });
-      const arm64 = await buildCandidateImages(buildInput(f, { platform: 'linux/arm64' }));
-      assert.equal(amd64.candidate.buildInputSha256, arm64.candidate.buildInputSha256);
-      const jarPath = path.join(f.artifactRoot, f.descriptor.jar.path);
-      const identity = resolveBuildIdentity(f.root);
-      const changedJar = makeZip([
-        ['META-INF/lexiflow-build.json', `${JSON.stringify(identity)}\n`],
-        ['META-INF/lexiflow-version.txt', `${identity.softwareVersion}\n`],
-        ['BOOT-INF/classes/synthetic/extra.class', 'synthetic changed application jar'],
-      ]);
-      await writeFile(jarPath, changedJar);
-      f.descriptor.jar.bytes = changedJar.length;
-      f.descriptor.jar.sha256 = hash(changedJar);
-      await setState(f, { daemonArchitecture: 'amd64' });
-      const changed = await buildCandidateImages(buildInput(f, { platform: 'linux/amd64' }));
-      assert.notEqual(changed.candidate.buildInputSha256, amd64.candidate.buildInputSha256);
+      const original = await buildCandidateImages(buildInput(f));
+      const dataPath = path.join(f.artifactRoot, f.descriptor.dataset.path);
+      const changedData = Buffer.from('different synthetic published dataset');
+      await writeFile(dataPath, changedData);
+      f.descriptor.dataset.bytes = changedData.length;
+      f.descriptor.dataset.sha256 = hash(changedData);
+      const changed = await buildCandidateImages(buildInput(f));
+      assert.notEqual(changed.candidate.buildInputSha256, original.candidate.buildInputSha256);
     });
   } finally { await f.cleanup(); }
 });
@@ -251,7 +255,7 @@ test('拒绝基础镜像错配、构建失败及坏/符号链接 IID', async () 
   const neighbor = path.join(f.outputParent, 'neighbor'); await mkdir(neighbor); await writeFile(path.join(neighbor, 'keep.txt'), 'keep');
   try {
     await withFakePath(f, async () => {
-      await setState(f, { badArchitecture: `registry.example.invalid/library/java@${ids['linux/amd64'][0]}` });
+      await setState(f, { badArchitecture: `registry.example.invalid/library/java@${ids['linux/arm64'][0]}`, badArchitectureValue: 'amd64' });
       await assert.rejects(buildCandidateImages(buildInput(f)), { message: 'BASE_IMAGE_MISMATCH' });
       assert.deepEqual(await import('node:fs/promises').then(({ readdir }) => readdir(neighbor)), ['keep.txt']);
       await setState(f, { badArchitecture: null, failOp: 'build', failSub: null });
@@ -314,15 +318,10 @@ test('runDocker固定argv、屏蔽环境并有界处理缺工具、非零、输�
   } finally { delete process.env.DOCKER_HOST; delete process.env.SSH_AUTH_SOCK; await f.cleanup(); }
 });
 
-test('后续镜像导出篡改先前归档时拒绝发布候选记录', async () => {
+test('候选发布前的归档字节漂移时拒绝写入候选记录', async () => {
   const f = await fixture();
   try {
-    const driverPath = path.join(f.fakeRoot, 'fake-docker.mjs');
-    const driver = await readFile(driverPath, 'utf8');
-    await writeFile(driverPath, driver.replace(
-      "const output = args[args.indexOf('--output') + 1];",
-      "const output = args[args.indexOf('--output') + 1]; if (output.endsWith('linux-amd64/postgres-image.tar')) fs.appendFileSync(path.join(process.cwd(), 'images/linux-amd64/api-image.tar'), 'tampered');",
-    ));
+    await setState(f, { archiveMode: 'drift' });
     await withFakePath(f, async () => {
       await assert.rejects(buildCandidateImages(buildInput(f)), { message: 'IMAGE_ARCHIVE_CHANGED' });
     });

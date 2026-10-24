@@ -25,7 +25,7 @@ from ops.release.host_resources import release_process_control as release_proces
 MAX_ARCHIVE = 2 * 1024**3
 SHA = re.compile(r"sha256:[0-9a-f]{64}\Z")
 HEX = re.compile(r"[0-9a-f]{64}\Z")
-ROLES = ("api-image", "postgres-image")
+ROLES = ("runtime-image",)
 
 
 class RegistryError(RuntimeError):
@@ -410,7 +410,7 @@ def _inspect_image(image_id: str, role: str, identity: dict, endpoint: str) -> N
             "org.opencontainers.image.revision": identity["sourceCommit"],
             "io.lexiflow.build-id": identity["buildId"],
             "io.lexiflow.source-sha256": identity["sourceSha256"],
-            "io.lexiflow.image-role": "api" if role == "api-image" else "postgres",
+            "io.lexiflow.image-role": "runtime",
             "io.lexiflow.deployment-version": identity["baseVersion"].lower(),
         }
         if any(labels.get(key) != value for key, value in expected.items()):
@@ -432,6 +432,7 @@ def publish_images(
     candidate_sha256: str,
     manifest_sha256: str,
     revalidate: Callable[[], None],
+    existing_only: bool = False,
 ) -> dict:
     """发布已验证候选镜像并核对远端摘要，不授予发行批准。"""
     workspace_state = _PrivateDirectory()
@@ -447,6 +448,7 @@ def publish_images(
                 candidate_sha256=candidate_sha256,
                 manifest_sha256=manifest_sha256,
                 revalidate=revalidate,
+                existing_only=existing_only,
                 workspace=workspace,
                 workspace_state=workspace_state,
             )
@@ -472,6 +474,7 @@ def _publish_images(
     candidate_sha256: str,
     manifest_sha256: str,
     revalidate: Callable[[], None],
+    existing_only: bool,
     workspace: Path,
     workspace_state: _PrivateDirectory,
 ) -> dict:
@@ -545,11 +548,7 @@ def _publish_images(
     if not isinstance(assets, list):
         _fail("registry-candidate-invalid", "candidate")
     images = [x for x in assets if isinstance(x, dict) and x.get("role") in ROLES]
-    if len(images) != 2 or {x.get("role") for x in images} != set(ROLES):
-        _fail("registry-image-set-invalid", "candidate")
-    if len({x.get("imageDigest") for x in images}) != 2:
-        _fail("registry-image-identity-invalid", "candidate")
-    if len({x.get("path") for x in images}) != 2:
+    if len(images) != 1 or {x.get("role") for x in images} != set(ROLES):
         _fail("registry-image-set-invalid", "candidate")
     candidate_bytes = _read_regular(candidate, "candidate.json", 4 * 1024 * 1024)
     manifest_bytes = _read_regular(candidate, "payload/manifest.json", 4 * 1024 * 1024)
@@ -614,8 +613,7 @@ def _publish_images(
     tag_states: dict[str, int] = {}
     for item in images:
         role = item["role"]
-        suffix = "api" if role == "api-image" else "postgres"
-        registry_repo = f"{owner.lower()}/{repo.lower()}-{suffix}"
+        registry_repo = f"{owner.lower()}/{repo.lower()}"
         revalidate()
         state, _, _ = _manifest(
             registry_repo,
@@ -631,9 +629,10 @@ def _publish_images(
     # Verify every occupied tag before the first image can be pushed.
     for item in images:
         role = item["role"]
+        if existing_only and tag_states[role] == 404:
+            _fail("registry-recovery-target-not-confirmed", "preflight", role)
         if tag_states[role] == 200:
-            suffix = "api" if role == "api-image" else "postgres"
-            registry_repo = f"{owner.lower()}/{repo.lower()}-{suffix}"
+            registry_repo = f"{owner.lower()}/{repo.lower()}"
             digest, config_id = _image_manifest(
                 registry_repo,
                 identity["softwareVersion"],
@@ -665,7 +664,7 @@ def _publish_images(
             or item.get("platform") != "linux/arm64"
         ):
             _fail("registry-image-identity-invalid", "candidate", role)
-        target_repo = f"{owner.lower()}/{repo.lower()}-{'api' if role == 'api-image' else 'postgres'}"
+        target_repo = f"{owner.lower()}/{repo.lower()}"
         tag = identity["softwareVersion"]
         reference = f"ghcr.io/{target_repo}:{tag}"
         # The read-only preflight completed for both image tags before any writes.
@@ -842,14 +841,13 @@ def verify_images(mapping: dict, *, owner: str, repo: str, expected: dict) -> di
     images = mapping["images"]
     if (
         not isinstance(images, list)
-        or len(images) != 2
+        or len(images) != 1
         or {item.get("role") for item in images if isinstance(item, dict)} != set(ROLES)
     ):
         _fail("registry-mapping-invalid", "mapping")
     for item in images:
         role = item.get("role")
-        suffix = "api" if role == "api-image" else "postgres"
-        target_repo = f"{owner.lower()}/{repo.lower()}-{suffix}"
+        target_repo = f"{owner.lower()}/{repo.lower()}"
         if (
             item.get("platform") != "linux/arm64"
             or item.get("reference")

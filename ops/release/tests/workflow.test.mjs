@@ -17,7 +17,6 @@ const ident = (commit, version = '1.2.3') => {
     buildId: sha(JSON.stringify(base)), channel: 'release' };
 };
 const targetIdentity = ident('a'.repeat(40));
-const previousIdentity = ident('b'.repeat(40), '1.2.2');
 const notice = Buffer.from('Approved license notice');
 const components = ['LexiFlow', 'API-runtime', 'PostgreSQL', 'extension-third-party', 'dataset'];
 
@@ -27,9 +26,9 @@ async function fixture(t) {
   const outputParent = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-workflow-output-')));
   t.after(async () => rm(outputParent, { recursive: true, force: true }));
   const noticesRoot = path.join(root, 'notices');
-  const previousDirectory = path.join(root, 'previous');
-  await Promise.all([mkdir(noticesRoot), mkdir(previousDirectory)]);
+  await mkdir(noticesRoot);
   await mkdir(path.join(root, 'ops/release'), { recursive: true });
+  await writeFile(path.join(root, 'ops/release/version.txt'), '1.2.3\n');
   for (const directory of ['build', 'integrity', 'runtime']) await mkdir(path.join(root, 'ops/release', directory), { recursive: true });
   await mkdir(path.join(root, 'ops/docker'), { recursive: true });
   await mkdir(path.join(root, 'infra/postgres'), { recursive: true });
@@ -48,7 +47,7 @@ async function fixture(t) {
   const request = path.join(root, 'request.json');
   const body = { releaseTag: 'v1.2.3', dataset: { path: datasetFile, sha256: sha('approved dataset'),
     releaseId: 'r1', preparationId: 'p1', ruleId: 'rule1', sqlVersion: 'sql1' },
-  noticesRoot, outputParent, previous: { candidateDirectory: previousDirectory, candidateSha256: sha('previous') },
+  noticesRoot, outputParent,
   endpoint: 'unix:///tmp/podman.sock' };
   await writeFile(request, JSON.stringify(body));
   return { root, outputParent, request, body, licenses };
@@ -58,12 +57,8 @@ function boundaries(f, overrides = {}) {
   const calls = [];
   const imageDirectory = path.join(f.outputParent, 'images', 'image-candidate');
   const candidateDirectory = path.join(f.outputParent, 'releases', 'release-candidate');
-  const imageRecords = [
-    { role: 'api-image', platform: 'linux/arm64', path: 'images/linux-arm64/api-image.tar',
-      bytes: 3, sha256: sha('api'), imageDigest: `sha256:${sha('image-api')}` },
-    { role: 'postgres-image', platform: 'linux/arm64', path: 'images/linux-arm64/postgres-image.tar',
-      bytes: 2, sha256: sha('pg'), imageDigest: `sha256:${sha('image-pg')}` },
-  ];
+  const imageRecords = [{ role: 'runtime-image', platform: 'linux/arm64', path: 'images/linux-arm64/runtime-image.tar',
+    bytes: 3, sha256: sha('runtime'), imageDigest: `sha256:${sha('runtime-image')}` }];
   const runCommand = async (command, args, settings) => {
     calls.push(['command', command, args, settings]);
     if (args.includes(':api:bootJar')) {
@@ -97,9 +92,7 @@ function boundaries(f, overrides = {}) {
   };
   const verifyReleaseCandidate = async input => {
     calls.push(['verify', input]);
-    return input.candidateDirectory === f.body.previous.candidateDirectory
-      ? { candidateSha256: f.body.previous.candidateSha256, buildIdentity: previousIdentity }
-      : { candidateSha256: sha('target candidate'), buildIdentity: targetIdentity };
+    return { candidateSha256: sha('target candidate'), buildIdentity: targetIdentity };
   };
   const environmentResolver = ({ root }) => ({
     PATH: '/controlled/bin', HOME: '/controlled/home', USER: 'release-user', LOGNAME: 'release-user',
@@ -111,7 +104,7 @@ function boundaries(f, overrides = {}) {
     LEXIFLOW_RELEASE_ARM64_DOCKER_HOST: 'unix:///tmp/podman.sock',
     LEXIFLOW_RELEASE_GRADLE_CACHE: '/controlled/gradle-cache',
     LEXIFLOW_RELEASE_NPM_CACHE: '/controlled/npm-cache',
-    LEXIFLOW_CANDIDATE_RUNTIME_REQUEST: path.join(root, 'tmp/quality/release-workflow/candidate-runtime-request.json'),
+    LEXIFLOW_CANDIDATE_RUNTIME_REQUEST: path.join(root, 'tmp/quality/release-workflow/1.2.3/candidate-runtime-request.json'),
   });
   return { calls, candidateDirectory, options: { root: f.root, platform: 'darwin', arch: 'arm64',
     tagChecker: () => targetIdentity, identityReader: () => targetIdentity, ledgerTrackedCheck: () => {},
@@ -127,7 +120,9 @@ async function releaseEnvironmentFixture(t) {
   const pythonBin = path.join(root, '.local/lexiflow-python/bin');
   const javaHome = path.join(root, 'private-jdk');
   const cacheGradle = path.join(root, 'gradle-cache'), cacheNpm = path.join(root, 'npm-cache');
-  const quality = path.join(root, 'tmp/quality/release-workflow');
+  await mkdir(path.join(root, 'ops/release'), { recursive: true });
+  await writeFile(path.join(root, 'ops/release/version.txt'), '1.2.3\n');
+  const quality = path.join(root, 'tmp/quality/release-workflow/1.2.3');
   await Promise.all([mkdir(pythonBin, { recursive: true }), mkdir(path.join(javaHome, 'bin'), { recursive: true }),
     mkdir(cacheGradle), mkdir(cacheNpm), mkdir(quality, { recursive: true })]);
   await writeFile(path.join(pythonBin, 'python3'), '#!/bin/sh\nexit 0\n');
@@ -183,7 +178,7 @@ test('release environment canonicalizes ambient values and fails closed on missi
   await chmod(f.root, 0o755);
   assert.throws(() => normalizeDarwinTempDirectory({ status: 0, signal: null, stdout: `${f.root}\n` }), /RELEASE_STANDARD_PATH_INVALID/);
   await chmod(f.root, 0o700);
-  assert.equal(first.LEXIFLOW_CANDIDATE_RUNTIME_REQUEST, path.join(f.root, 'tmp/quality/release-workflow/candidate-runtime-request.json'));
+  assert.equal(first.LEXIFLOW_CANDIDATE_RUNTIME_REQUEST, path.join(f.root, 'tmp/quality/release-workflow/1.2.3/candidate-runtime-request.json'));
   assert.equal(first.CODEX_HOME, '/trusted/codex-home');
   assert.equal(first.CODEX_THREAD_ID, 'thread-native');
   assert.equal(first.CODEX_SESSION_ID, 'session-native');
@@ -197,7 +192,7 @@ test('release environment canonicalizes ambient values and fails closed on missi
     assert.throws(() => resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'formal', source: missing }));
   }
   assert.equal(first.GITHUB_TOKEN, undefined);
-  await rm(path.join(f.root, 'tmp/quality/release-workflow/candidate-runtime-request.json'));
+  await rm(path.join(f.root, 'tmp/quality/release-workflow/1.2.3/candidate-runtime-request.json'));
   assert.throws(() => resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'promotion', source: f.source }), /CANDIDATE_RUNTIME_REQUEST_MISSING/);
 });
 
@@ -220,7 +215,9 @@ test('private environment capability still changes Python child environment fing
 test('formal CLI admits only the four fixed acceptance mappings and propagates command failures', async t => {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-formal-cli-')));
   t.after(async () => rm(root, { recursive: true, force: true }));
-  await mkdir(path.join(root, 'tmp/quality/release-workflow'), { recursive: true });
+  await mkdir(path.join(root, 'tmp/quality/release-workflow/1.2.3'), { recursive: true });
+  await mkdir(path.join(root, 'ops/release'), { recursive: true });
+  await writeFile(path.join(root, 'ops/release/version.txt'), '1.2.3\n');
   const submission = '12345678-1234-4234-8234-123456789abc';
   const validation = '22345678-1234-4234-8234-123456789abc';
   assert.deepEqual(resolveFormalInvocation(['submit', 'LF-TSK-QLT-2420'], root), {
@@ -260,23 +257,20 @@ test('real staging bytes and exact builder/assembler contracts precede private h
   const result = await prepareWorkflow(f.request, b.options);
   assert.deepEqual(result, { status: 'PASS', stage: 'awaiting-native-formal' });
   const stages = b.calls.filter(call => ['images', 'assemble', 'verify'].includes(call[0]));
-  assert.deepEqual(stages.map(call => call[0]), ['verify', 'images', 'assemble', 'verify']);
-  const images = stages[1][1], assemble = stages[2][1];
+  assert.deepEqual(stages.map(call => call[0]), ['images', 'assemble', 'verify']);
+  const images = stages[0][1], assemble = stages[1][1];
   assert.deepEqual(Object.keys(images).sort(), ['artifactRoot', 'descriptor', 'endpoint', 'outputParent', 'platform', 'repoRoot']);
   assert.equal(images.platform, 'linux/arm64');
-  assert.deepEqual(Object.keys(images.descriptor).sort(), ['jar', 'schemaVersion', 'softwareVersion', 'sourceCommit']);
   assert.equal(images.endpoint, f.body.endpoint);
+  assert.deepEqual(Object.keys(images.descriptor).sort(), ['apiContract', 'dataset', 'jar', 'notices', 'schemaVersion', 'softwareVersion', 'sourceCommit', 'sqlVersion']);
   assert.deepEqual(images.descriptor.jar, { path: 'api.jar', bytes: 14, sha256: sha('real jar bytes') });
+  assert.equal(images.descriptor.dataset.path, 'dataset.zip');
+  assert.equal(images.descriptor.dataset.sha256, sha('approved dataset'));
+  assert.deepEqual(images.descriptor.notices, [{ path: 'notice.txt', bytes: notice.length, sha256: sha(notice) }]);
   assert.deepEqual(assemble.imageCandidates, [{ directory: path.join(f.outputParent, 'images', 'image-candidate'),
-    sha256: sha(JSON.stringify({ platform: 'linux/arm64', artifacts: [
-      { role: 'api-image', platform: 'linux/arm64', path: 'images/linux-arm64/api-image.tar', bytes: 3,
-        sha256: sha('api'), imageDigest: `sha256:${sha('image-api')}` },
-      { role: 'postgres-image', platform: 'linux/arm64', path: 'images/linux-arm64/postgres-image.tar', bytes: 2,
-        sha256: sha('pg'), imageDigest: `sha256:${sha('image-pg')}` },
-    ] })) }]);
-  assert.deepEqual(assemble.descriptor.artifacts.filter(a => ['api-image', 'postgres-image'].includes(a.role)), [
-    { role: 'api-image', platform: 'linux/arm64', licenseIds: ['license-0', 'license-1'] },
-    { role: 'postgres-image', platform: 'linux/arm64', licenseIds: ['license-2'] },
+    sha256: sha(JSON.stringify({ platform: 'linux/arm64', artifacts: [{ role: 'runtime-image', platform: 'linux/arm64', path: 'images/linux-arm64/runtime-image.tar', bytes: 3, sha256: sha('runtime'), imageDigest: `sha256:${sha('runtime-image')}` }] })) }]);
+  assert.deepEqual(assemble.descriptor.artifacts.filter(a => a.role === 'runtime-image'), [
+    { role: 'runtime-image', platform: 'linux/arm64', licenseIds: ['license-0', 'license-1', 'license-2'] },
   ]);
   assert.equal(assemble.descriptor.apiContract, 'caption-hints.v2');
   assert.deepEqual(assemble.descriptor.dataset, { releaseId: 'r1', preparationId: 'p1', ruleId: 'rule1' });
@@ -284,42 +278,41 @@ test('real staging bytes and exact builder/assembler contracts precede private h
   assert.equal(await readFile(path.join(images.artifactRoot, 'api.jar'), 'utf8'), 'real jar bytes');
   assert.equal(await readFile(path.join(images.artifactRoot, 'dataset.zip'), 'utf8'), 'approved dataset');
   assert.equal(await readFile(path.join(images.artifactRoot, 'extension.zip'), 'utf8'), 'real extension zip');
-  const quality = path.join(f.root, 'tmp/quality/release-workflow');
+  const quality = path.join(f.root, 'tmp/quality/release-workflow/1.2.3');
   const handoff = JSON.parse(await readFile(path.join(quality, 'handoff.json')));
   const runtime = JSON.parse(await readFile(path.join(quality, 'candidate-runtime-request.json')));
-  assert.deepEqual(runtime, { previous: f.body.previous, target: handoff.target });
+  assert.deepEqual(runtime, { target: handoff.target });
   assert.equal(handoff.requestSha256, sha(await readFile(f.request)));
   assert.equal((await lstat(path.join(quality, 'handoff.json'))).mode & 0o777, 0o600);
   const cmds = b.calls.filter(call => call[0] === 'command');
-  assert.deepEqual(cmds.map(call => [call[1], call[2].slice(0, 3)]),
+  assert.deepEqual(cmds.map(call => [call[1], call[2].slice(0, call[1] === 'node' ? 2 : 3)]),
     [['python3', ['-m', 'scripts.local.run_with_java_toolchain', 'backend/gradlew']],
-      ['npm', ['ci']], ['node', ['extension/scripts/packaging/package-extension-release.mjs']],
+      ['npm', ['ci']], ['node', ['extension/scripts/packaging/package-extension-release.mjs', '--expected-dataset']],
       ['python3', ['-m', 'scripts.local.run_with_java_toolchain', 'java']]]);
+  assert.ok(cmds[2][2].includes('--expected-dataset'));
   assert.ok(cmds[3][2].includes('--release-dataset'));
   assert.ok(cmds[3][2].includes('--expected-sha256'));
 });
 
-test('bad license, digest, tag, previous and command failure cannot hand off', async t => {
-  const reasons = ['LICENSE_LEDGER_INVALID', 'DATASET_DIGEST_MISMATCH', 'WORKFLOW_FAILED', 'PREVIOUS_NOT_DISTINCT', 'WORKFLOW_FAILED'];
+test('bad license, digest, tag and command failure cannot hand off', async t => {
+  const reasons = ['LICENSE_LEDGER_INVALID', 'DATASET_DIGEST_MISMATCH', 'WORKFLOW_FAILED', 'WORKFLOW_FAILED'];
   for (const [index, mutate] of [
     async f => { await writeFile(path.join(f.root, 'ops/release/distribution-licenses.json'),
       JSON.stringify({ schema_version: 'lexiflow.distribution-licenses.v1', licenses: [] })); },
     async f => { f.body.dataset.sha256 = sha('wrong'); await writeFile(f.request, JSON.stringify(f.body)); },
     async (_f, b) => { b.options.tagChecker = () => { throw Error('wrong tag'); }; },
-    async (_f, b) => { b.options.verifyReleaseCandidate = async () =>
-      ({ candidateSha256: sha('previous'), buildIdentity: targetIdentity }); },
     async (_f, b) => { b.options.runCommand = async () => { throw Error('child failed'); }; },
   ].entries()) {
     const f = await fixture(t), b = boundaries(f); await mutate(f, b);
     assert.deepEqual(await prepareWorkflow(f.request, b.options), { status: 'BLOCKED', reason: reasons[index] });
-    await assert.rejects(readFile(path.join(f.root, 'tmp/quality/release-workflow/handoff.json')));
+    await assert.rejects(readFile(path.join(f.root, 'tmp/quality/release-workflow/1.2.3/handoff.json')));
   }
 });
 
-test('existing handoff, duplicate JSON, symlink and oversize requests are refused', async t => {
+test('existing version-scoped handoff, duplicate JSON, symlink and oversize requests are refused', async t => {
   const f = await fixture(t); const b = boundaries(f);
-  await mkdir(path.join(f.root, 'tmp/quality/release-workflow'), { recursive: true });
-  const handoff = path.join(f.root, 'tmp/quality/release-workflow/handoff.json');
+  await mkdir(path.join(f.root, 'tmp/quality/release-workflow/1.2.3'), { recursive: true });
+  const handoff = path.join(f.root, 'tmp/quality/release-workflow/1.2.3/handoff.json');
   await writeFile(handoff, 'keep');
   assert.deepEqual(await prepareWorkflow(f.request, b.options), { status: 'BLOCKED', reason: 'WORKFLOW_RESIDUE' });
   assert.equal(await readFile(handoff, 'utf8'), 'keep');
@@ -356,8 +349,8 @@ test('source drift during preparation never writes a handoff', async t => {
   const f = await fixture(t); const b = boundaries(f);
   let reads = 0;
   b.options.identityReader = () => ++reads === 1 ? targetIdentity : previousIdentity;
-  assert.deepEqual(await prepareWorkflow(f.request, b.options), { status: 'BLOCKED', reason: 'BUILD_IDENTITY_MISMATCH' });
-  await assert.rejects(readFile(path.join(f.root, 'tmp/quality/release-workflow/handoff.json')));
+  assert.deepEqual(await prepareWorkflow(f.request, b.options), { status: 'BLOCKED', reason: 'WORKFLOW_FAILED' });
+  await assert.rejects(readFile(path.join(f.root, 'tmp/quality/release-workflow/1.2.3/handoff.json')));
 });
 
 test('request bytes changed during preparation never write a handoff', async t => {
@@ -369,7 +362,7 @@ test('request bytes changed during preparation never write a handoff', async t =
     return result;
   };
   assert.deepEqual(await prepareWorkflow(f.request, b.options), { status: 'BLOCKED', reason: 'REQUEST_CHANGED' });
-  await assert.rejects(readFile(path.join(f.root, 'tmp/quality/release-workflow/handoff.json')));
+  await assert.rejects(readFile(path.join(f.root, 'tmp/quality/release-workflow/1.2.3/handoff.json')));
 });
 
 test('real child runner bounds logs, timeout, cancellation and process groups', async t => {
@@ -438,11 +431,11 @@ test('resume binds UUID, host, source, original request and candidate; only publ
     const registryUnknown = await resumePromotion({ ...common, publish: true, run: async () => {
       const error = new Error('CHILD_FAILED');
       error.publicOutput = JSON.stringify({ result: 'BLOCKED', published: 'unknown',
-        write_stage: 'registry-push', registry_role: 'api-image', release_id: null });
+        write_stage: 'registry-push', registry_role: 'runtime-image', release_id: null });
       throw error;
     } });
     assert.deepEqual(registryUnknown, { status: 'BLOCKED', reason: 'PUBLISH_STATE_UNKNOWN',
-      published: 'unknown', writeStage: 'registry-push', registryRole: 'api-image', releaseId: null });
+      published: 'unknown', writeStage: 'registry-push', registryRole: 'runtime-image', releaseId: null });
     const cleanup = await resumePromotion({ ...common, publish: true, run: async () => {
       const error = new Error('CHILD_FAILED');
       error.publicOutput = JSON.stringify({ result: 'BLOCKED', published: true,

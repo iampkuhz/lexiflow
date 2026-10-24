@@ -1,21 +1,18 @@
-"""候选执行事实的纯合同；两端分别认证各自请求与外部来源。"""
+"""单 runtime-image 候选运行事实合同；不授予 Formal 验收资格。"""
 
 from __future__ import annotations
+
 import re
 from typing import Any
 
 PHASE_IDS = (
     "preflight",
-    "target-install",
-    "target-repeat-install",
-    "target-repeat-upgrade",
-    "target-cleanup",
-    "previous-install",
-    "previous-baseline",
-    "upgrade-failure",
-    "upgrade-forward-retry",
-    "retry-repeat-upgrade",
-    "preservation",
+    "target-clean-init",
+    "target-repeat-run",
+    "target-restart",
+    "interrupted-init-retry",
+    "incompatible-volume-refusal",
+    "failure-exit",
     "final-cleanup",
 )
 
@@ -30,61 +27,37 @@ IDENTITY_FIELDS = {
     "dirty",
     "channel",
 }
+
 REQUIRED_FACTS = {
     "preflight": (
         "sourceClean",
         "hostDarwinArm64",
         "candidateBytesVerified",
-        "sqlCompatible",
         "apiPortFree",
+        "containerNameFree",
+        "imageLoadVerified",
     ),
-    "target-install": ("ready", "apiIdentity", "extensionIdentity", "installRecord"),
-    "target-repeat-install": (
-        "ready",
-        "apiIdentity",
-        "extensionIdentity",
-        "successRecord",
+    "target-clean-init": ("ready", "runtimeImageIdentity", "cleanVolume"),
+    "target-repeat-run": ("ready", "publishedDataset", "sameVolume", "sameMarker"),
+    "target-restart": ("ready", "publishedDataset", "sameVolume", "markerPresent"),
+    "interrupted-init-retry": (
+        "initInterrupted",
+        "firstRunNonzero",
+        "volumeRetained",
+        "retryReady",
+        "retryDatasetIdentity",
     ),
-    "target-repeat-upgrade": (
-        "ready",
-        "apiIdentity",
-        "extensionIdentity",
-        "successRecord",
+    "incompatible-volume-refusal": (
+        "refused",
+        "nonzero",
+        "volumeRetained",
+        "noUnknownResourcesRemoved",
     ),
-    "target-cleanup": ("ownedResourcesRemoved",),
-    "previous-install": ("ready", "apiIdentity", "extensionIdentity", "installRecord"),
-    "previous-baseline": (
-        "pgOwned",
-        "volumeOwned",
-        "markerPresent",
-        "secretsAndDatasetHashed",
-    ),
-    "upgrade-failure": (
-        "targetApiStoppedOnce",
-        "upgradeNonzero",
-        "targetNotReady",
-        "failureRecord",
-        "databaseCommitFactRetained",
-    ),
-    "upgrade-forward-retry": (
-        "ready",
-        "targetApiIdentity",
-        "targetExtensionIdentity",
-        "successRecord",
-    ),
-    "retry-repeat-upgrade": (
-        "ready",
-        "targetApiIdentity",
-        "targetExtensionIdentity",
-        "successRecord",
-    ),
-    "preservation": (
-        "pgContainerOwned",
-        "volumesSame",
-        "markerSame",
-        "secretsSame",
-        "datasetSame",
-        "portsSame",
+    "failure-exit": (
+        "apiExitObserved",
+        "postgresExitObserved",
+        "unhealthyObserved",
+        "nonzero",
     ),
     "final-cleanup": ("ownedResourcesRemoved",),
 }
@@ -135,14 +108,14 @@ def _identity(value: Any) -> bool:
 
 
 def validate_runtime_result(value: Any) -> None:
-    """完整核验固定候选事实，不认证请求、磁盘附件或 Formal 来源。"""
+    """核验完整真实运行事实；请求和外部来源由各自消费者认证。"""
 
     def fail(reason: str) -> None:
         raise RuntimeContractError(reason)
 
     if (
         not isinstance(value, dict)
-        or value.get("schemaVersion") != "lexiflow.candidate-runtime.v1"
+        or value.get("schemaVersion") != "lexiflow.candidate-runtime.v2"
         or value.get("status") not in {"PASS", "FAIL", "BLOCKED"}
     ):
         fail("candidate-runtime-result-invalid")
@@ -164,6 +137,71 @@ def validate_runtime_result(value: Any) -> None:
             facts.get(key) is not True for key in REQUIRED_FACTS[phase["id"]]
         ):
             fail("candidate-runtime-facts-invalid")
+    target = value.get("target")
+    if (
+        not isinstance(target, dict)
+        or set(target) != {"candidateSha256", "manifestSha256", "buildIdentity"}
+        or not _sha(target.get("candidateSha256"))
+        or not _sha(target.get("manifestSha256"))
+        or not _identity(target.get("buildIdentity"))
+    ):
+        fail("candidate-runtime-binding-invalid")
+    if value.get("identity") != {"source": target["buildIdentity"]}:
+        fail("candidate-runtime-binding-invalid")
+    dataset_fields = {"releaseId", "preparationId", "ruleId", "sqlVersion", "sha256"}
+    api_fields = {
+        "softwareVersion",
+        "apiContract",
+        "mode",
+        "datasetVersion",
+        "publishedDataset",
+    }
+    for phase_id in (
+        "target-clean-init",
+        "target-repeat-run",
+        "target-restart",
+        "interrupted-init-retry",
+    ):
+        facts = next(item["facts"] for item in phases if item["id"] == phase_id)
+        identity = facts.get("publishedDatasetIdentity")
+        if (
+            not isinstance(identity, dict)
+            or set(identity) != dataset_fields
+            or any(
+                not isinstance(identity[key], str) or not identity[key]
+                for key in dataset_fields
+            )
+            or not _sha(identity["sha256"])
+        ):
+            fail("candidate-runtime-dataset-identity-invalid")
+    first = next(item["facts"] for item in phases if item["id"] == "target-clean-init")
+    for phase_id in (
+        "target-clean-init",
+        "target-repeat-run",
+        "target-restart",
+        "interrupted-init-retry",
+    ):
+        facts = next(item["facts"] for item in phases if item["id"] == phase_id)
+        api, extension = facts.get("apiIdentity"), facts.get("extensionIdentity")
+        if (
+            not isinstance(api, dict)
+            or set(api) != api_fields
+            or api.get("softwareVersion") != target["buildIdentity"]["softwareVersion"]
+            or api.get("apiContract") != "caption-hints.v2"
+            or api.get("mode") != "formal"
+            or type(api.get("datasetVersion")) is not int
+            or api["datasetVersion"] <= 0
+            or api.get("publishedDataset") != facts["publishedDatasetIdentity"]
+            or extension != facts["publishedDatasetIdentity"]
+        ):
+            fail("candidate-runtime-api-identity-invalid")
+    for phase_id in ("target-repeat-run", "target-restart", "interrupted-init-retry"):
+        facts = next(item["facts"] for item in phases if item["id"] == phase_id)
+        if (
+            facts["publishedDatasetIdentity"] != first["publishedDatasetIdentity"]
+            or facts["apiIdentity"] != first["apiIdentity"]
+        ):
+            fail("candidate-runtime-dataset-identity-drift")
     cleanup = value.get("cleanup")
     if (
         not isinstance(cleanup, dict)
@@ -172,35 +210,11 @@ def validate_runtime_result(value: Any) -> None:
         or cleanup.get("ownedResourcesRemoved") is not True
     ):
         fail("candidate-runtime-cleanup-invalid")
-    candidates = value.get("candidates")
-    if not isinstance(candidates, dict) or set(candidates) != {"previous", "target"}:
-        fail("candidate-runtime-binding-invalid")
-    for candidate in candidates.values():
-        if (
-            not isinstance(candidate, dict)
-            or set(candidate) != {"candidateSha256", "manifestSha256", "buildIdentity"}
-            or not _sha(candidate.get("candidateSha256"))
-            or not _sha(candidate.get("manifestSha256"))
-            or not _identity(candidate.get("buildIdentity"))
-        ):
-            fail("candidate-runtime-binding-invalid")
-    if (
-        candidates["previous"]["candidateSha256"]
-        == candidates["target"]["candidateSha256"]
-        or candidates["previous"]["buildIdentity"]["sourceCommit"]
-        == candidates["target"]["buildIdentity"]["sourceCommit"]
-    ):
-        fail("candidate-runtime-candidates-not-distinct")
-    identity = value.get("identity")
-    if (
-        not isinstance(identity, dict)
-        or identity.get("source") != candidates["target"]["buildIdentity"]
-    ):
-        fail("candidate-runtime-binding-invalid")
     if value.get("assertions") != {
-        "sourceAndCandidatesUnchanged": True,
-        "realFaultProven": True,
-        "forwardRetrySucceeded": True,
-        "postgresVolumePreserved": True,
+        "targetOnly": True,
+        "realInitializationInterruption": True,
+        "sameVolumeRestart": True,
+        "realFailureObserved": True,
+        "unknownResourcesUntouched": True,
     }:
         fail("candidate-runtime-assertions-invalid")

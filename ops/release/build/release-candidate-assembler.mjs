@@ -2,11 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants, createReadStream, createWriteStream } from 'node:fs';
 import { chmod, lstat, link, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
+import { execFileSync } from 'node:child_process';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { createManifest, verifyContainedFile, validateRelativePath } from '../integrity/release-artifact-manifest.mjs';
-import { generateRuntimeEntry } from './release-runtime-entry-generator.mjs';
 import { packageManifest } from './package-release-artifacts.mjs';
 import { parseSoftwareVersion, resolveCleanBuildIdentity, validateBuildIdentity } from '../integrity/source-build-identity.mjs';
 
@@ -69,14 +69,14 @@ async function readImageCandidate(directory) {
     || candidate.schemaVersion !== 1 || candidate.kind !== 'lexiflow-image-candidate'
     || typeof candidate.softwareVersion !== 'string'
     || typeof candidate.sourceCommit !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(candidate.sourceCommit)
-    || !['linux/amd64', 'linux/arm64'].includes(candidate.platform) || typeof candidate.buildInputSha256 !== 'string' || !hex.test(candidate.buildInputSha256)
+    || candidate.platform !== 'linux/arm64' || typeof candidate.buildInputSha256 !== 'string' || !hex.test(candidate.buildInputSha256)
     || !Array.isArray(candidate.baseImages) || candidate.baseImages.length !== 1
-    || !Array.isArray(candidate.artifacts) || candidate.artifacts.length !== 2) fail('IMAGE_CANDIDATE_INVALID');
+    || !Array.isArray(candidate.artifacts) || candidate.artifacts.length !== 1) fail('IMAGE_CANDIDATE_INVALID');
   try { parseSoftwareVersion(candidate.softwareVersion); } catch { fail('IMAGE_CANDIDATE_INVALID'); }
   const identity = candidate.buildIdentity;
   try { validateBuildIdentity(identity); } catch { fail('IMAGE_CANDIDATE_INVALID'); }
   if (identity.dirty || candidate.softwareVersion !== identity.softwareVersion || candidate.sourceCommit !== identity.sourceCommit) fail('IMAGE_CANDIDATE_INVALID');
-  const expectedPlatforms = ['linux/amd64', 'linux/arm64'];
+  const expectedPlatforms = ['linux/arm64'];
   const bases = new Map();
   for (const base of candidate.baseImages) {
     if (!exactKeys(base, ['platform', 'javaRuntime', 'postgresRuntime']) || !expectedPlatforms.includes(base.platform) || bases.has(base.platform)) fail('IMAGE_CANDIDATE_INVALID');
@@ -90,16 +90,15 @@ async function readImageCandidate(directory) {
   const seen = new Set();
   for (const record of candidate.artifacts) {
     if (!exactKeys(record, ['role', 'platform', 'path', 'bytes', 'sha256', 'imageDigest'])
-      || !['api-image', 'postgres-image'].includes(record.role) || record.platform !== candidate.platform
+      || record.role !== 'runtime-image' || record.platform !== 'linux/arm64'
       || !Number.isSafeInteger(record.bytes) || record.bytes < 1 || record.bytes > 2 ** 40
       || typeof record.sha256 !== 'string' || !hex.test(record.sha256)
       || typeof record.imageDigest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(record.imageDigest)) fail('IMAGE_CANDIDATE_INVALID');
-    const filename = record.role === 'api-image' ? 'api-image.tar' : 'postgres-image.tar';
-    const expectedPath = `images/${record.platform.replace('/', '-')}/${filename}`;
+    const expectedPath = 'images/linux-arm64/runtime-image.tar';
     if (record.path !== expectedPath || seen.has(`${record.role}:${record.platform}`)) fail('IMAGE_CANDIDATE_INVALID');
     seen.add(`${record.role}:${record.platform}`);
   }
-  for (const role of ['api-image', 'postgres-image']) if (!seen.has(`${role}:${candidate.platform}`)) fail('IMAGE_CANDIDATE_INVALID');
+  if (!seen.has('runtime-image:linux/arm64')) fail('IMAGE_CANDIDATE_INVALID');
   return { candidate, bytes, sha256: createHash('sha256').update(bytes).digest('hex') };
 }
 
@@ -129,21 +128,71 @@ async function copyStream(sourceRoot, relative, target, bytesExpected, shaExpect
   if (bytes !== bytesExpected || digest.digest('hex') !== shaExpected) fail('ARTIFACT_DIGEST_MISMATCH');
 }
 
-async function snapshot(candidate, imageDirectory, artifactRoot, descriptor) {
+async function fileSummary(file, maximum = 2 ** 40) {
+  const info = await lstat(file).catch(() => null);
+  if (!info?.isFile() || info.isSymbolicLink() || info.size < 1 || info.size > maximum) fail('SOURCE_PACKAGE_INVALID');
+  const checksum = hash(); let bytes = 0;
+  for await (const chunk of createReadStream(file, { flags: constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) })) {
+    bytes += chunk.length; if (bytes > maximum) fail('SOURCE_PACKAGE_INVALID'); checksum.update(chunk);
+  }
+  if (bytes !== info.size) fail('SOURCE_PACKAGE_INVALID');
+  return { bytes, sha256: checksum.digest('hex') };
+}
+
+async function createSourcePackage(parent, artifactRoot, descriptor) {
+  const directory = await mkdtemp(path.join(parent, '.lexiflow-source-package-')).catch(() => fail('SOURCE_PACKAGE_INVALID'));
+  try {
+    const root = path.join(directory, 'package'); const materials = path.join(root, 'materials');
+    await mkdir(materials, { recursive: true, mode: 0o700 });
+    const items = [];
+    const copied = new Set();
+    for (const license of descriptor.licenses) {
+      const record = descriptor.artifacts.find(item => item.role === 'license' && item.path === license.noticePath && item.licenseIds.includes(license.id));
+      if (!record) fail('SOURCE_PACKAGE_INVALID');
+      const archivePath = `materials/${record.path}`;
+      if (!copied.has(record.path)) {
+        await copyStream(artifactRoot, record.path, path.join(root, ...archivePath.split('/')), record.bytes, record.sha256);
+        copied.add(record.path);
+      }
+      items.push({ id: license.id, component: license.component, licenseId: license.licenseId,
+        licenseName: license.licenseName, sourceUrl: license.sourceUrl, noticePath: license.noticePath,
+        archivePath, bytes: record.bytes, sha256: record.sha256 });
+    }
+    items.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    const index = Buffer.from(`${JSON.stringify({ schemaVersion: 1, items }, null, 2)}\n`);
+    await writeFile(path.join(root, 'index.json'), index, { flag: 'wx', mode: 0o600 });
+    const archiveName = `lexiflow-third-party-sources-${descriptor.softwareVersion}.tar.gz`;
+    const archive = path.join(directory, 'sources', archiveName);
+    await mkdir(path.dirname(archive), { recursive: true, mode: 0o700 });
+    execFileSync('tar', ['-czf', archive, '-C', root, 'index.json', 'materials'],
+      { stdio: 'ignore', timeout: 3_600_000, env: { PATH: process.env.PATH, LANG: 'C', LC_ALL: 'C' } });
+    const summary = await fileSummary(archive);
+    return { directory, archive, record: { role: 'corresponding-sources', path: `sources/${archiveName}`,
+      ...summary, licenseIds: descriptor.licenses.map(item => item.id).sort(),
+      metadata: { indexSha256: createHash('sha256').update(index).digest('hex'), items } } };
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true }).catch(() => {});
+    if (error instanceof Error && /^[A-Z][A-Z0-9_]+$/.test(error.message)) throw error;
+    fail('SOURCE_PACKAGE_INVALID');
+  }
+}
+
+async function snapshot(candidate, imageDirectory, artifactRoot, descriptor, sourcePackageRoot) {
   const current = await readImageCandidate(imageDirectory);
   if (!current.bytes.equals(candidate.bytes)) fail('IMAGE_CANDIDATE_CHANGED');
   for (const artifact of descriptor.artifacts) {
-    if (artifact.role === 'api-image' || artifact.role === 'postgres-image') {
+    if (artifact.role === 'runtime-image') {
       if (artifact.platform !== candidate.candidate.platform) continue;
     }
-    const root = artifact.role === 'api-image' || artifact.role === 'postgres-image' ? imageDirectory : artifactRoot;
+    const root = artifact.role === 'runtime-image' ? imageDirectory
+      : artifact.role === 'corresponding-sources' ? sourcePackageRoot : artifactRoot;
     await verifyContainedFile(root, artifact.path, artifact.bytes, artifact.sha256);
   }
 }
 
 export async function assembleReleaseCandidate(input) {
   if (!exactKeys(input, ['repoRoot', 'imageCandidates', 'artifactRoot', 'descriptor', 'outputParent'])
-    || !Array.isArray(input.imageCandidates) || input.imageCandidates.length < 1 || input.imageCandidates.length > 2) fail('ARGUMENTS_INVALID');
+    || !Array.isArray(input.imageCandidates) || input.imageCandidates.length !== 1) fail('ARGUMENTS_INVALID');
   const { repoRoot, imageCandidates, artifactRoot, outputParent } = input;
   let descriptor;
   try { descriptor = structuredClone(input.descriptor); } catch { fail('DESCRIPTOR_INVALID'); }
@@ -176,7 +225,7 @@ export async function assembleReleaseCandidate(input) {
     if (byPlatform.has(platform)) fail('IMAGE_CANDIDATE_INVALID');
     byPlatform.set(platform, { directory, imageCandidate });
   }
-  const allPlatforms = ['linux/amd64', 'linux/arm64'];
+  const allPlatforms = ['linux/arm64'];
   if (!descriptor || !Array.isArray(descriptor.platforms) || descriptor.platforms.length < 1 || descriptor.platforms.length > 2
     || descriptor.platforms.some((platform) => !allPlatforms.includes(platform))
     || new Set(descriptor.platforms).size !== descriptor.platforms.length) fail('DESCRIPTOR_INVALID');
@@ -191,50 +240,43 @@ export async function assembleReleaseCandidate(input) {
     || imageCandidate.candidate.softwareVersion !== source.softwareVersion
     || imageCandidate.candidate.sourceCommit !== source.sourceCommit || imageCandidate.candidate.buildInputSha256 !== common.buildInputSha256)) fail('SOURCE_IDENTITY_MISMATCH');
   if (!Array.isArray(descriptor.artifacts) || !Array.isArray(descriptor.licenses)
-    || descriptor.artifacts.some((item) => !item || item?.role === 'runtime-entry' || item?.path === 'lexiflow.sh')) fail('DESCRIPTOR_INVALID');
+    || descriptor.artifacts.some((item) => !item)) fail('DESCRIPTOR_INVALID');
   if (descriptor.softwareVersion !== source.softwareVersion || descriptor.sourceCommit !== source.sourceCommit) fail('SOURCE_IDENTITY_MISMATCH');
   const imageRecords = new Map(imageCandidatesByPlatform.flatMap(({ imageCandidate }) => imageCandidate.candidate.artifacts.map((record) => [`${record.role}:${record.platform}`, record])));
   descriptor.artifacts = descriptor.artifacts.map(record => {
-    if (record.role !== 'api-image' && record.role !== 'postgres-image') return record;
+    if (record.role !== 'runtime-image') return record;
     const candidateRecord = imageRecords.get(`${record.role}:${record.platform}`);
     if (!candidateRecord || !exactKeys(record, ['role', 'platform', 'licenseIds'])) fail('IMAGE_DESCRIPTOR_MISMATCH');
     // 制品事实只来自已绑定预期 marker 摘要的记录，随后仍核实际归档字节。
     return { ...candidateRecord, licenseIds: record.licenseIds };
   });
-  if (descriptor.artifacts.filter((item) => item.role === 'api-image' || item.role === 'postgres-image').length !== 2 * expectedPlatforms.length) fail('IMAGE_DESCRIPTOR_MISMATCH');
-  const licenses = descriptor.licenses.find((item) => item?.component === 'LexiFlow');
-  if (!licenses) fail('RUNTIME_ENTRY_LICENSE_MISSING');
-  const provisional = { role: 'runtime-entry', path: 'lexiflow.sh', bytes: 1, sha256: '0'.repeat(64), licenseIds: [licenses.id] };
-  const provisionalDescriptor = { ...descriptor, artifacts: [...descriptor.artifacts, provisional] };
-  try { createManifest(provisionalDescriptor, buildIdentity); } catch { fail('DESCRIPTOR_INVALID'); }
-  for (const { directory, imageCandidate } of imageCandidatesByPlatform) await snapshot(imageCandidate, directory, artifacts, descriptor);
-
+  if (descriptor.artifacts.filter((item) => item.role === 'runtime-image').length !== 1) fail('IMAGE_DESCRIPTOR_MISMATCH');
   const candidateDirectory = await mkdtemp(path.join(parent, '.lexiflow-release-candidate-')).catch(() => fail('CANDIDATE_CREATE_FAILED'));
   let retained = false;
   try {
     await chmod(candidateDirectory, 0o700);
     const work = path.join(candidateDirectory, 'work'); const staging = path.join(work, 'artifacts');
     await mkdir(staging, { recursive: true, mode: 0o700 });
+    const sourcePackage = await createSourcePackage(work, artifacts, descriptor);
+    descriptor.artifacts.push(sourcePackage.record);
+    try { createManifest(descriptor, buildIdentity); } catch { fail('DESCRIPTOR_INVALID'); }
+    for (const { directory, imageCandidate } of imageCandidatesByPlatform)
+      await snapshot(imageCandidate, directory, artifacts, descriptor, sourcePackage.directory);
     for (const artifact of descriptor.artifacts) {
-      const root = artifact.role === 'api-image' || artifact.role === 'postgres-image'
-        ? byPlatform.get(artifact.platform)?.directory : artifacts;
+      const root = artifact.role === 'runtime-image'
+        ? byPlatform.get(artifact.platform)?.directory
+        : artifact.role === 'corresponding-sources' ? sourcePackage.directory : artifacts;
       if (!root) fail('IMAGE_DESCRIPTOR_MISMATCH');
       await copyStream(root, artifact.path, path.join(staging, ...artifact.path.split('/')), artifact.bytes, artifact.sha256);
     }
-    for (const template of ['runtime/release-installation-state.sh', 'runtime/release-installation-docker.sh', 'runtime/release-installation-lifecycle.sh']) {
-      const file = path.join(repo, 'ops/release', template);
-      await noSymlinkPath(file);
-      if (!(await lstat(file)).isFile()) fail('INPUT_PATH_INVALID');
-    }
-    const generated = await generateRuntimeEntry({ repoRoot: repo, descriptor, artifactRoot: staging });
-    const completeDescriptor = { ...descriptor, artifacts: [...descriptor.artifacts, generated.artifact] };
     const descriptorFile = path.join(work, 'descriptor.json');
-    await writeFile(descriptorFile, `${JSON.stringify(completeDescriptor, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+    await writeFile(descriptorFile, `${JSON.stringify(descriptor, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
     const payload = path.join(candidateDirectory, 'payload');
     const manifest = await packageManifest({ repoRoot: repo, descriptorFile, artifactRoot: staging, outputDirectory: payload });
     const manifestText = await readFile(path.join(payload, 'manifest.json'), 'utf8');
     const manifestSha256 = createHash('sha256').update(manifestText).digest('hex');
-    for (const { directory, imageCandidate } of imageCandidatesByPlatform) await snapshot(imageCandidate, directory, artifacts, descriptor);
+    for (const { directory, imageCandidate } of imageCandidatesByPlatform)
+      await snapshot(imageCandidate, directory, artifacts, descriptor, sourcePackage.directory);
     let currentBuildIdentity;
     try { currentBuildIdentity = resolveCleanBuildIdentity(repo); } catch { fail('RELEASE_SOURCE_CHANGED'); }
     if (!sameIdentity(currentBuildIdentity, buildIdentity)) fail('RELEASE_SOURCE_CHANGED');
@@ -242,7 +284,7 @@ export async function assembleReleaseCandidate(input) {
     const candidate = { schemaVersion: 1, kind: 'lexiflow-release-candidate', buildIdentity, softwareVersion: source.softwareVersion,
       sourceCommit: source.sourceCommit, manifestPath: 'payload/manifest.json', manifestSha256,
       buildInputSha256: common.buildInputSha256,
-      imageCandidates: expectedPlatforms.map((platform) => ({ platform, sha256: byPlatform.get(platform).imageCandidate.sha256 })) };
+      imageCandidates: [{ platform: 'linux/arm64', sha256: byPlatform.get('linux/arm64').imageCandidate.sha256 }] };
     const markerText = `${JSON.stringify(candidate, null, 2)}\n`;
     const pending = path.join(candidateDirectory, `.candidate-${randomUUID()}.tmp`);
     await writeFile(pending, markerText, { flag: 'wx', mode: 0o600 });

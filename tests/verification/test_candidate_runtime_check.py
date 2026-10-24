@@ -32,10 +32,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def request(root: Path) -> dict:
-    return {
-        name: {"candidateDirectory": str(root / name), "candidateSha256": letter * 64}
-        for name, letter in (("previous", "a"), ("target", "b"))
-    }
+    return {"target": {"candidateDirectory": str(root / "target"), "candidateSha256": "b" * 64}}
 
 
 def result(data: dict) -> dict:
@@ -50,40 +47,37 @@ def result(data: dict) -> dict:
         "buildId": "c" * 64,
         "channel": "snapshot",
     }
+    dataset = {"releaseId": "release", "preparationId": "preparation", "ruleId": "rule", "sqlVersion": "v1", "sha256": "9" * 64}
+    api = {"softwareVersion": identity["softwareVersion"], "apiContract": "caption-hints.v2", "mode": "formal", "datasetVersion": 1, "publishedDataset": dataset}
     return {
-        "schemaVersion": "lexiflow.candidate-runtime.v1",
+        "schemaVersion": "lexiflow.candidate-runtime.v2",
         "status": "PASS",
-        "candidates": {
-            name: {
-                "candidateSha256": value["candidateSha256"],
-                "manifestSha256": "d" * 64,
-                "buildIdentity": {
-                    **identity,
-                    "buildId": (
-                        "e" * 64 if name == "previous" else identity["buildId"]
-                    ),
-                    "sourceCommit": (
-                        "f" * 40 if name == "previous" else identity["sourceCommit"]
-                    ),
-                },
-            }
-            for name, value in data.items()
-        },
+        "target": {"candidateSha256": data["target"]["candidateSha256"], "manifestSha256": "d" * 64, "buildIdentity": identity},
         "identity": {"source": identity},
         "phases": [
             {
                 "id": name,
                 "status": "PASS",
-                "facts": {key: True for key in REQUIRED_FACTS[name]},
+                "facts": {
+                    **{key: True for key in REQUIRED_FACTS[name]},
+                    **({"runtimeImageIdentity": True} if name == "target-clean-init" else {}),
+                    **({"apiIdentity": api, "extensionIdentity": dataset,
+                        "publishedDatasetIdentity": dataset}
+                       if name in {"target-repeat-run", "target-restart", "interrupted-init-retry"} else {}),
+                    **({"apiIdentity": api, "extensionIdentity": dataset,
+                        "publishedDatasetIdentity": dataset}
+                       if name == "target-clean-init" else {}),
+                },
             }
             for name in check.PHASE_IDS
         ],
         "cleanup": {"status": "PASS", "settled": True, "ownedResourcesRemoved": True},
         "assertions": {
-            "sourceAndCandidatesUnchanged": True,
-            "realFaultProven": True,
-            "forwardRetrySucceeded": True,
-            "postgresVolumePreserved": True,
+            "targetOnly": True,
+            "realInitializationInterruption": True,
+            "sameVolumeRestart": True,
+            "realFailureObserved": True,
+            "unknownResourcesUntouched": True,
         },
         "failure": None,
     }
@@ -146,11 +140,11 @@ class CandidateRuntimeCheckTests(unittest.TestCase):
         with self.assertRaisesRegex(check.ConsumerError, "BLOCKED"):
             check._read_request({})
         for raw in [
-            b'{"previous":{},"previous":{}}',
+            b'{"target":{},"target":{}}',
             b"NaN",
             b" " * (check.MAX_REQUEST_BYTES + 1),
             json.dumps({**self.request, "status": "PASS"}).encode(),
-            json.dumps({**self.request, "previous": self.request["target"]}).encode(),
+            json.dumps({**self.request, "extra": self.request["target"]}).encode(),
         ]:
             self.file.write_bytes(raw)
             with self.subTest(raw=raw[:50]), self.assertRaises(check.ConsumerError):
@@ -208,7 +202,7 @@ class CandidateRuntimeCheckTests(unittest.TestCase):
             report["verify_input_fingerprint"], self.envelope["snapshot"]["fingerprint"]
         )
         self.assertEqual(report["runtime"], expected)
-        self.assertEqual(report["checks_run"], 12)
+        self.assertEqual(report["checks_run"], 8)
 
     def test_envelope_accepts_only_candidate_ids_for_candidate_check(self):
         stream = type(
@@ -276,8 +270,7 @@ class CandidateRuntimeCheckTests(unittest.TestCase):
             lambda v: v["phases"].reverse(),
             lambda v: v["cleanup"].update(settled=False),
             lambda v: v["cleanup"].update(status="FAIL"),
-            lambda v: v["candidates"]["target"].update(candidateSha256="e" * 64),
-            lambda v: v["candidates"]["previous"].update(manifestSha256="bad"),
+            lambda v: v["target"].update(candidateSha256="e" * 64),
             lambda v: v["identity"].update(source={"dirty": True}),
         ):
             bad = copy.deepcopy(good)
@@ -288,7 +281,7 @@ class CandidateRuntimeCheckTests(unittest.TestCase):
                 check._validate_result(bad, self.request)
         for status in ("BLOCKED", "FAIL"):
             check._validate_result(
-                {"schemaVersion": "lexiflow.candidate-runtime.v1", "status": status},
+                {"schemaVersion": "lexiflow.candidate-runtime.v2", "status": status},
                 self.request,
             )
 
@@ -306,17 +299,11 @@ class CandidateRuntimeCheckTests(unittest.TestCase):
                     validate_runtime_result(bad)
         for mutate in (
             lambda v: v["cleanup"].pop("ownedResourcesRemoved"),
-            lambda v: v["assertions"].pop("realFaultProven"),
-            lambda v: v["candidates"]["previous"].update(
-                candidateSha256=v["candidates"]["target"]["candidateSha256"]
-            ),
-            lambda v: v["candidates"]["previous"]["buildIdentity"].update(
-                sourceCommit=v["candidates"]["target"]["buildIdentity"]["sourceCommit"]
-            ),
-            lambda v: v["candidates"]["target"]["buildIdentity"].update(
+            lambda v: v["assertions"].pop("realFailureObserved"),
+            lambda v: v["target"]["buildIdentity"].update(
                 channel="unknown"
             ),
-            lambda v: v["candidates"]["target"]["buildIdentity"].update(
+            lambda v: v["target"]["buildIdentity"].update(
                 sourceCommit="invalid"
             ),
         ):

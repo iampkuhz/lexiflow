@@ -224,7 +224,9 @@ def run_consumer(
         evidence = produce_candidates(fixture_root, scratch_path, env, binding)
         if not isinstance(evidence, dict) or evidence.get("status", "PASS") != "PASS":
             raise ConsumerError("FAIL", "release-runtime-evidence-invalid")
-        lifecycle = execute_lifecycle(scratch_path, evidence, binding, env)
+        lifecycle = execute_lifecycle(
+            scratch_path, evidence, binding, env, fixture_root=fixture_root
+        )
         result = {
             "status": "PASS",
             "run_id": context["run_id"],

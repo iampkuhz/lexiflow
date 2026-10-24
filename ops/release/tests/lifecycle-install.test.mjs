@@ -1,121 +1,150 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, writeFile, mkdir, rm, unlink, lstat, readdir, readlink } from 'node:fs/promises';
+import { chmod, mkdir, readFile, readdir, lstat, rename, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { lifecycleFixture } from './lifecycle-fixture.mjs';
+import { lifecycleFixture, runRuntime } from './lifecycle-fixture.mjs';
 
-test('发行入口内嵌安装状态适配器并创建仅私有 owner/state', async (t) => {
-  const f=await lifecycleFixture(t,'adapter');
-  const root=path.join(f.tmp,'new installation');
-  const value=f.run('_fixture_init',root).trim();
-  assert.match(value,/^[0-9a-f]{32}\|idle\|none$/u);
-  const state=await readFile(path.join(root,'state'),'utf8');
-  assert.equal(state.split('\n').length,9);
-  assert.match(state,/schema=lexiflow-installation-v1\ninstallation_id=[0-9a-f]{32}\nphase=idle/u);
-  assert.equal((await (await import('node:fs/promises')).stat(path.join(root,'owner'))).mode & 0o777,0o600);
-  assert.equal((await (await import('node:fs/promises')).stat(path.join(root,'state'))).mode & 0o777,0o600);
-  assert.equal(await f.run('_fixture_load',root), 'idle|none|none\n');
-});
-
-async function rootSnapshot(root) {
-  const entries=[];
-  async function visit(relative) {
-    const file=relative ? path.join(root,relative) : root;
-    const info=await lstat(file);
-    const entry={path:relative || '.',mode:info.mode & 0o777,
-      type:info.isDirectory()?'directory':info.isFile()?'file':info.isSymbolicLink()?'symlink':'other'};
-    if (info.isFile()) entry.bytes=(await readFile(file)).toString('base64');
-    if (info.isSymbolicLink()) entry.target=await readlink(file);
-    entries.push(entry);
-    if (info.isDirectory()) for (const name of (await readdir(file)).sort()) {
-      await visit(relative ? path.join(relative,name) : name);
-    }
+async function snapshot(root) {
+  const result = [];
+  async function visit(relative = '') {
+    const file = relative ? path.join(root, relative) : root;
+    const info = await lstat(file);
+    const item = { path: relative || '.', mode: info.mode & 0o777, type: info.isDirectory() ? 'directory' : info.isFile() ? 'file' : info.isSymbolicLink() ? 'symlink' : 'other' };
+    if (info.isFile()) item.bytes = (await readFile(file)).toString('base64');
+    result.push(item);
+    if (info.isDirectory()) for (const name of (await readdir(file)).sort()) await visit(relative ? path.join(relative, name) : name);
   }
-  await visit('');
-  return entries;
+  await visit();
+  return result;
 }
 
-function failedRun(run,...args) {
-  try { run(...args); } catch (error) { return error; }
-  assert.fail('expected lifecycle command to fail');
-}
+test('nonempty unknown volume and ownerless pending marker reject without mutation', async (t) => {
+  const f = await lifecycleFixture(t);
+  await writeFile(path.join(f.root, 'unknown'), 'preserve these bytes\n');
+  const before = await snapshot(f.root);
+  const rejected = runRuntime(f, 'read_identity; validate_volume');
+  assert.equal(rejected.status, 1);
+  assert.equal(rejected.stderr.trim(), 'lexiflow-runtime: volume-unknown-content');
+  assert.deepEqual(await snapshot(f.root), before);
 
-test('prepare 对未确认的已有安装根失败关闭且不触碰 Docker 或根目录', async (t) => {
-  const generated=await lifecycleFixture(t,'owner-init-fault');
-  const adapter=await lifecycleFixture(t,'adapter');
-  const roots=[];
+  const drift = await lifecycleFixture(t);
+  const identityLine = runRuntime(drift, 'read_identity; volume_identity_line');
+  assert.equal(identityLine.status, 0, identityLine.stderr);
+  await writeFile(path.join(drift.root, '.lexiflow-owner'), 'lexiflow-runtime');
+  await writeFile(path.join(drift.root, '.lexiflow-format'), '1');
+  await writeFile(path.join(drift.root, '.lexiflow-initializing'), identityLine.stdout.replace('releaseId=1792210462122', 'releaseId=older-release'));
+  const driftBefore = await snapshot(drift.root);
+  const driftResult = runRuntime(drift, 'read_identity; validate_volume');
+  assert.equal(driftResult.status, 1);
+  assert.equal(driftResult.stderr.trim(), 'lexiflow-runtime: volume-identity-mismatch');
+  assert.deepEqual(await snapshot(drift.root), driftBefore);
 
-  // This fixture overrides only random generation in the generated entry;
-  // lf_owner_init itself creates the root before the deterministic failure.
-  const interrupted=path.join(generated.tmp,'interrupted root');
-  const interruptedError=failedRun(generated.run,'prepare',interrupted);
-  assert.equal(interruptedError.status,1);
-  assert.equal((await lstat(interrupted)).isDirectory(),true,'中断点应留下真实空目录');
-  assert.deepEqual(await readdir(interrupted),[]);
-  roots.push([generated,interrupted]);
+  const pendingFixture = await lifecycleFixture(t);
+  await writeFile(path.join(pendingFixture.root, '.lexiflow-owner.pending'), 'lexiflow-runtime');
+  const pendingBefore = await snapshot(pendingFixture.root);
+  const pendingResult = runRuntime(pendingFixture, 'read_identity; validate_volume');
+  assert.equal(pendingResult.status, 1, pendingResult.stderr);
+  assert.equal(pendingResult.stderr.trim(), 'lexiflow-runtime: volume-owner-missing');
+  assert.deepEqual(await snapshot(pendingFixture.root), pendingBefore);
+});
 
-  const partial=path.join(adapter.tmp,'partial owner');
-  await mkdir(partial,{mode:0o700});
-  await writeFile(path.join(partial,'owner'),'a'.repeat(32),{mode:0o600});
-  roots.push([generated,partial]);
+test('recognized interrupted initdb clears only partial PGDATA and resumes initialization', async (t) => {
+  const f = await lifecycleFixture(t);
+  const bin = f.bin;
+  await writeFile(path.join(bin, 'initdb'), '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do if [ "$1" = -D ]; then target=$2; shift 2; else shift; fi; done\nprintf "17\\n" > "$target/PG_VERSION"\n', { mode: 0o700 });
+  const identityLine = runRuntime(f, 'read_identity; volume_identity_line');
+  assert.equal(identityLine.status, 0, identityLine.stderr);
+  await writeFile(path.join(f.root, '.lexiflow-owner'), 'lexiflow-runtime');
+  await writeFile(path.join(f.root, '.lexiflow-format'), '1');
+  await writeFile(path.join(f.root, '.lexiflow-initializing'), identityLine.stdout);
+  await writeFile(path.join(f.root, '.postgres-password'), 'd'.repeat(64));
+  await writeFile(path.join(f.root, '.app-password'), 'e'.repeat(64));
+  await mkdir(f.pgdata, { mode: 0o700 });
+  await mkdir(path.join(f.pgdata, 'partial-wal'));
+  await writeFile(path.join(f.pgdata, 'partial-wal', 'chunk'), 'interrupted');
+  const resumed = runRuntime(f, 'read_identity; validate_volume; prepare_pgdata', { env: { PATH: `${bin}${path.delimiter}${process.env.PATH}` } });
+  assert.equal(resumed.status, 0, resumed.stderr);
+  assert.equal((await readFile(path.join(f.pgdata, 'PG_VERSION'), 'utf8')), '17\n');
+  assert.deepEqual(await readdir(f.pgdata), ['PG_VERSION']);
+});
 
-  const missingState=path.join(adapter.tmp,'missing state');
-  adapter.run('_fixture_init',missingState);
-  await unlink(path.join(missingState,'state'));
-  roots.push([generated,missingState]);
+test('restart discards only known volatile proof markers and refuses unknown RUN content unchanged', async (t) => {
+  const f = await lifecycleFixture(t);
+  await writeFile(path.join(f.run, 'initializing'), 'old boot');
+  await writeFile(path.join(f.run, 'verified.json'), '{"datasetVersion":123}');
+  await writeFile(path.join(f.run, 'verified.pending'), 'partial proof');
+  const prepared = runRuntime(f, 'prepare_runtime_state');
+  assert.equal(prepared.status, 0, prepared.stderr);
+  assert.deepEqual(await readdir(f.run), []);
 
-  const noEngine=path.join(adapter.tmp,'missing engine');
-  adapter.run('_fixture_init',noEngine);
-  roots.push([generated,noEngine]);
+  await writeFile(path.join(f.run, 'foreign-proof'), 'not runtime-owned');
+  const before = await snapshot(f.run);
+  const rejected = runRuntime(f, 'prepare_runtime_state');
+  assert.equal(rejected.status, 1);
+  assert.equal(rejected.stderr.trim(), 'lexiflow-runtime: run-private-state-unknown');
+  assert.deepEqual(await snapshot(f.run), before);
+});
 
-  const unknown=path.join(adapter.tmp,'unknown file');
-  await mkdir(unknown,{mode:0o700});
-  await writeFile(path.join(unknown,'notes'),'synthetic unknown bytes\n',{mode:0o600});
-  roots.push([generated,unknown]);
+test('initializer failure exits before verified proof or ready marker can be published', async (t) => {
+  const f = await lifecycleFixture(t);
+  const body = `
+id() { [ "$1" = -un ] && { printf 'postgres\\n'; return 0; }; return 1; }
+prepare_pgdata() { mkdir -p "$PGDATA"; printf '17\\n' > "$PGDATA/PG_VERSION"; }
+start_postgres() { sleep 60 & PG_PID=$!; }
+bootstrap_database() { :; }
+start_api() { sleep 60 & API_PID=$!; }
+http_status_body() { HTTP_BODY='{"ready":false,"reason":"INITIALIZING"}'; return 0; }
+runtime_start`;
+  const result = runRuntime(f, body, { timeout: 8000 });
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, /lexiflow-runtime: dataset-initialize-failed/u);
+  assert.equal(await readFile(path.join(f.root, '.lexiflow-ready')).then(() => true, () => false), false);
+  assert.equal(await readFile(path.join(f.run, 'verified.json')).then(() => true, () => false), false);
+  assert.equal(await readFile(path.join(f.run, 'initializing')).then(() => true, () => false), true);
+});
 
-  const beforeActions=await generated.daemonActions();
-  for (const [fixture,root] of roots) {
-    const before=await rootSnapshot(root);
-    const error=failedRun(fixture.run,'prepare',root);
-    assert.equal(error.status,1,`非零退出: ${root}`);
-    assert.equal(error.stderr,'LF_INSTALLATION_UNVERIFIED\n',`固定诊断: ${root}`);
-    assert.equal(error.stdout,'',`不得输出未过滤诊断: ${root}`);
-    assert.deepEqual(await rootSnapshot(root),before,`根目录条目、内容和权限不变: ${root}`);
+test('PostgreSQL or API exit is fatal and superviser stops the remaining child', async (t) => {
+  const f = await lifecycleFixture(t);
+  for (const failed of ['postgres', 'api']) {
+    const pg = failed === 'postgres' ? 'false' : 'sleep 60';
+    const api = failed === 'api' ? 'false' : 'sleep 60';
+    const failedPid = failed === 'postgres' ? 'PG_PID' : 'API_PID';
+    const survivorPid = failed === 'postgres' ? 'API_PID' : 'PG_PID';
+    const pidFile = path.join(f.tmp, `${failed}-survivor.pid`);
+    const command = `${pg} & PG_PID=$!; ${api} & API_PID=$!; printf '%s\\n' "$${survivorPid}" > '${pidFile}'; wait "$${failedPid}" || :; supervise`;
+    const result = runRuntime(f, command, { timeout: 8000 });
+    assert.equal(result.status, 1, `${failed}: ${result.stderr}`);
+    assert.match(result.stderr, new RegExp(`lexiflow-runtime: ${failed}-exited`));
+    const pid = Number((await readFile(pidFile, 'utf8')).trim());
+    assert.throws(() => process.kill(pid, 0), (error) => error.code === 'ESRCH');
   }
-  assert.deepEqual(await generated.daemonActions(),beforeActions,'失败诊断期间不得新增 Docker 调用');
-
-  const alias=path.join(adapter.tmp,'root alias');
-  const aliasTarget=path.join(adapter.tmp,'alias target');
-  await mkdir(aliasTarget,{mode:0o700});
-  await (await import('node:fs/promises')).symlink(aliasTarget,alias);
-  const invalid=failedRun(generated.run,'prepare',alias);
-  assert.equal(invalid.status,1);
-  assert.equal(invalid.stderr,'LF_ROOT_INVALID\n','路径非法优先于安装状态诊断');
-  assert.deepEqual(await generated.daemonActions(),beforeActions);
 });
 
-test('已有安装状态拒绝额外字段、损坏 owner 与符号链接接管', async (t) => {
-  const f=await lifecycleFixture(t,'adapter'); const root=path.join(f.tmp,'installation');
-  f.run('_fixture_init',root);
-  const stateFile=path.join(root,'state'); const original=await readFile(stateFile,'utf8');
-  await writeFile(stateFile,`${original}surprise=x\n`);
-  assert.throws(()=>f.run('_fixture_load',root));
-  await writeFile(stateFile,original);
-  await writeFile(path.join(root,'owner'),'f'.repeat(32));
-  assert.throws(()=>f.run('_fixture_load',root));
-  const alias=path.join(f.tmp,'alias'); await (await import('node:fs/promises')).symlink(root,alias);
-  assert.throws(()=>f.run('_fixture_load',alias));
-});
 
-test('真实 Docker 生命周期入口缺受控 lease 时显式 BLOCKED', async () => {
-  const script=path.resolve('ops/docker/tests/update-recovery.sh');
-  const { spawnSync }=await import('node:child_process');
-  const result=spawnSync('bash',[script],{encoding:'utf8',env:{...process.env,LEXIFLOW_LIFECYCLE_LEASE:''}});
-  assert.equal(result.status,3);
-  assert.equal(result.stderr,'');
-  assert.deepEqual(JSON.parse(result.stdout), {
-    status:'BLOCKED', checks_run:0, failures:0, errors:0, skipped:0,
-    reason:'LIFECYCLE_LEASE_UNAVAILABLE',
-  });
+test('compatible application update preserves data while SQL or dataset drift refuses unchanged', async (t) => {
+  const f = await lifecycleFixture(t);
+  const initialized = runRuntime(f, 'read_identity; validate_volume');
+  assert.equal(initialized.status, 0, initialized.stderr);
+  await writeFile(path.join(f.pgdata, 'PG_VERSION'), '17\n');
+  await writeFile(path.join(f.pgdata, 'preserved-fact'), 'user data\n');
+  await rename(path.join(f.root, '.lexiflow-initializing'), path.join(f.root, '.lexiflow-ready'));
+  const before = await snapshot(f.root);
+  const compatible = f.identity.replace('softwareVersion=2.1.0-test', 'softwareVersion=2.1.1-test');
+  await writeFile(f.identityPath, compatible);
+  const restarted = runRuntime(f, 'read_identity; validate_volume');
+  assert.equal(restarted.status, 0, restarted.stderr);
+  assert.deepEqual(await snapshot(f.root), before);
+
+  for (const incompatible of [
+    compatible.replace(`sqlVersion=${'b'.repeat(64)}`, `sqlVersion=${'d'.repeat(64)}`),
+    compatible.replace(`datasetSha256=${'a'.repeat(64)}`, `datasetSha256=${'e'.repeat(64)}`),
+  ]) {
+    await writeFile(f.identityPath, incompatible);
+    const rejected = runRuntime(f, 'read_identity; validate_volume');
+    assert.equal(rejected.status, 1, rejected.stderr);
+    assert.equal(rejected.stderr.trim(), 'lexiflow-runtime: volume-identity-mismatch');
+    assert.deepEqual(await snapshot(f.root), before);
+  }
 });

@@ -43,14 +43,14 @@ class WorkflowContractTest(unittest.TestCase):
         steps = workflow("ci.yml")["jobs"]["quick"]["steps"]
         package = next(step for step in steps if step.get("id") == "package")
         self.assertIn(
-            "node extension/scripts/packaging/package-extension-release.mjs",
+            "node extension/scripts/packaging/package-extension-release.mjs --development",
             package["run"],
         )
         self.assertIn(
-            'extension/scripts/checks/check-extension-archive.mjs "$ZIP" "$GITHUB_SHA"',
+            'extension/scripts/checks/check-extension-archive.mjs --development "$ZIP" "$GITHUB_SHA"',
             package["run"],
         )
-        self.assertIn('archive-smoke.mjs "$ZIP" "$GITHUB_SHA"', package["run"])
+        self.assertIn('archive-smoke.mjs --development "$ZIP" "$GITHUB_SHA"', package["run"])
         upload = next(
             step for step in steps if "upload-artifact@" in step.get("uses", "")
         )

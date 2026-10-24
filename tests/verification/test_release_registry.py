@@ -35,10 +35,7 @@ class RegistryTests(unittest.TestCase):
             "channel": "release",
         }
         self.artifacts = []
-        for role, path, iid in (
-            ("api-image", "images/api.tar", "d"),
-            ("postgres-image", "images/db.tar", "e"),
-        ):
+        for role, path, iid in (("runtime-image", "images/linux-arm64/runtime-image.tar", "d"),):
             data = (role + " bytes").encode()
             target = self.root / "payload" / path
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -123,7 +120,7 @@ class RegistryTests(unittest.TestCase):
         calls = []
 
         def fake_manifest(repo, reference, **kwargs):
-            role = "api-image" if repo.endswith("-api") else "postgres-image"
+            role = "runtime-image"
             if reference == "2.0.0" and role not in published:
                 return 404, {}, b""
             item = next(x for x in self.artifacts if x["role"] == role)
@@ -144,20 +141,14 @@ class RegistryTests(unittest.TestCase):
                 stdout = b""
 
             if "inspect" in argv:
-                role = (
-                    "api-image"
-                    if argv[-1] == self.artifacts[0]["imageDigest"]
-                    else "postgres-image"
-                )
+                role = "runtime-image"
                 ident = self.identity
                 labels = {
                     "org.opencontainers.image.version": ident["softwareVersion"],
                     "org.opencontainers.image.revision": ident["sourceCommit"],
                     "io.lexiflow.build-id": ident["buildId"],
                     "io.lexiflow.source-sha256": ident["sourceSha256"],
-                    "io.lexiflow.image-role": "api"
-                    if role == "api-image"
-                    else "postgres",
+                    "io.lexiflow.image-role": "runtime",
                     "io.lexiflow.deployment-version": ident["baseVersion"],
                 }
                 Facts.stdout = json.dumps(
@@ -183,11 +174,7 @@ class RegistryTests(unittest.TestCase):
                 )
                 if push_error:
                     raise RegistryError("registry-process-failed", "podman")
-                role = (
-                    "api-image"
-                    if argv[-2] == self.artifacts[0]["imageDigest"]
-                    else "postgres-image"
-                )
+                role = "runtime-image"
                 published.add(role)
                 item = next(x for x in self.artifacts if x["role"] == role)
                 body = json.dumps(
@@ -215,10 +202,10 @@ class RegistryTests(unittest.TestCase):
             patch.object(registry, "_run", side_effect=fake_run),
         ):
             result = publish_images(**self.kwargs(revalidate=gate))
-        self.assertEqual(len(result["images"]), 2)
-        self.assertEqual(len(gate_calls), 6)
+        self.assertEqual(len(result["images"]), 1)
+        self.assertEqual(len(gate_calls), 3)
         self.assertTrue(all("test-secret" not in " ".join(c) for c in calls))
-        self.assertEqual(sum("push" in c for c in calls), 2)
+        self.assertEqual(sum("push" in c for c in calls), 1)
 
     def test_inspect_accepts_only_exact_config_identity_and_platform(self):
         _, _, _, _, _, fake_run = self._publish_mocks()
@@ -230,7 +217,7 @@ class RegistryTests(unittest.TestCase):
                     [{**original, "Id": value}]
                 ).encode()
                 registry._inspect_image(
-                    image_id, "api-image", self.identity, "unix:///unused"
+                    image_id, "runtime-image", self.identity, "unix:///unused"
                 )
         for value in [
             None,
@@ -255,7 +242,7 @@ class RegistryTests(unittest.TestCase):
                     RegistryError, "registry-image-inspect-mismatch"
                 ):
                     registry._inspect_image(
-                        image_id, "api-image", self.identity, "unix:///unused"
+                        image_id, "runtime-image", self.identity, "unix:///unused"
                     )
         for field, value in [("Architecture", "amd64"), ("Os", "windows")]:
             with self.subTest(field=field), patch.object(registry, "_run") as run:
@@ -266,7 +253,7 @@ class RegistryTests(unittest.TestCase):
                     RegistryError, "registry-image-inspect-mismatch"
                 ):
                     registry._inspect_image(
-                        image_id, "api-image", self.identity, "unix:///unused"
+                        image_id, "runtime-image", self.identity, "unix:///unused"
                     )
         for label in original["Config"]["Labels"]:
             changed = {
@@ -279,7 +266,7 @@ class RegistryTests(unittest.TestCase):
                     RegistryError, "registry-image-label-mismatch"
                 ):
                     registry._inspect_image(
-                        image_id, "api-image", self.identity, "unix:///unused"
+                        image_id, "runtime-image", self.identity, "unix:///unused"
                     )
 
     @patch.dict("os.environ", {"GITHUB_TOKEN": "test-secret"})
@@ -318,7 +305,7 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(sum("push" in c for c in calls), 1)
 
     def test_private_temp_cleanup_failure_is_sanitized_and_unknown(self):
-        private = registry._PrivateDirectory("api-image")
+        private = registry._PrivateDirectory("runtime-image")
         private.path = str(self.root / "private")
         Path(private.path).mkdir(mode=0o700)
         private.write_started = True
@@ -328,14 +315,14 @@ class RegistryTests(unittest.TestCase):
         ):
             private.__exit__(None, None, None)
         self.assertEqual(exc.exception.reason, "registry-cleanup-failed")
-        self.assertEqual(exc.exception.role, "api-image")
+        self.assertEqual(exc.exception.role, "runtime-image")
         self.assertTrue(exc.exception.write_unknown)
         self.assertNotIn("token-value", str(exc.exception))
 
     @patch.dict("os.environ", {"GITHUB_TOKEN": "test-secret"})
     def test_matching_existing_tags_are_read_only_reused(self):
         def existing(repo, reference, **kwargs):
-            role = "api-image" if repo.endswith("-api") else "postgres-image"
+            role = "runtime-image"
             item = next(x for x in self.artifacts if x["role"] == role)
             body = json.dumps({"config": {"digest": item["imageDigest"]}}).encode()
             return (
@@ -345,8 +332,8 @@ class RegistryTests(unittest.TestCase):
             )
 
         verified = []
-        api, postgres = self.artifacts
-        for item in (api, postgres, api, postgres):
+        api = self.artifacts[0]
+        for item in (api, api):
             body = json.dumps({"config": {"digest": item["imageDigest"]}}).encode()
             verified.append(
                 ("sha256:" + hashlib.sha256(body).hexdigest(), item["imageDigest"])
@@ -357,7 +344,7 @@ class RegistryTests(unittest.TestCase):
             patch.object(registry, "_image_manifest", side_effect=verified),
         ):
             result = publish_images(**self.kwargs())
-        self.assertEqual(len(result["images"]), 2)
+        self.assertEqual(len(result["images"]), 1)
         runner.assert_not_called()
 
     @patch.dict("os.environ", {"GITHUB_TOKEN": "test-secret"})
@@ -377,6 +364,18 @@ class RegistryTests(unittest.TestCase):
         ):
             publish_images(**self.kwargs())
         self.assertEqual(exc.exception.reason, "registry-tag-mismatch")
+        runner.assert_not_called()
+
+    @patch.dict("os.environ", {"GITHUB_TOKEN": "test-secret"})
+    def test_confirmed_recovery_never_pushes_when_tag_is_absent(self):
+        with (
+            patch.object(registry, "_manifest", return_value=(404, {}, b"")),
+            patch.object(registry, "_run") as runner,
+            self.assertRaises(RegistryError) as exc,
+        ):
+            publish_images(**self.kwargs(existing_only=True))
+        self.assertEqual(exc.exception.reason, "registry-recovery-target-not-confirmed")
+        self.assertFalse(exc.exception.write_unknown)
         runner.assert_not_called()
 
     @patch.dict("os.environ", {"GITHUB_TOKEN": "test-secret"})
@@ -490,21 +489,7 @@ class RegistryTests(unittest.TestCase):
     def test_verify_images_reads_only_anonymous_digest(self):
         body = b'{"config":{"digest":"sha256:' + b"a" * 64 + b"}}"
         digest = "sha256:" + hashlib.sha256(body).hexdigest()
-        item_list = []
-        for role, suffix, iid in (
-            ("api-image", "api", "d"),
-            ("postgres-image", "postgres", "e"),
-        ):
-            item_list.append(
-                {
-                    "role": role,
-                    "platform": "linux/arm64",
-                    "reference": f"ghcr.io/example/lexiflow-{suffix}:2.0.0",
-                    "manifestDigest": digest,
-                    "imageId": "sha256:" + iid * 64,
-                    "archiveSha256": "f" * 64,
-                }
-            )
+        item_list = [{"role": "runtime-image", "platform": "linux/arm64", "reference": "ghcr.io/example/lexiflow:2.0.0", "manifestDigest": digest, "imageId": "sha256:" + "d" * 64, "archiveSha256": "f" * 64}]
         mapping = {
             "schemaVersion": "lexiflow.registry-images.v1",
             "softwareVersion": "2.0.0",
@@ -516,10 +501,7 @@ class RegistryTests(unittest.TestCase):
         with patch.object(
             registry,
             "_image_manifest",
-            side_effect=[
-                (digest, item_list[0]["imageId"]),
-                (digest, item_list[1]["imageId"]),
-            ],
+            side_effect=[(digest, item_list[0]["imageId"])],
         ) as reader:
             self.assertIs(
                 verify_images(
@@ -527,7 +509,7 @@ class RegistryTests(unittest.TestCase):
                 ),
                 mapping,
             )
-        self.assertEqual(reader.call_count, 2)
+        self.assertEqual(reader.call_count, 1)
 
 
 if __name__ == "__main__":

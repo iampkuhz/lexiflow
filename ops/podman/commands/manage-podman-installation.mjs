@@ -120,7 +120,7 @@ export function makeLegacyApiVerifier({ run, portTaken, runtime, verifyRunningIm
     if (await portTaken(targetSlotApi)) fail('DEPLOYMENT_API_PORT_OCCUPIED');
   };
 }
-export async function runLocal(argv, candidateRequest) {
+export async function runLocal(argv) {
   if (!Array.isArray(argv) || !argv.every(value => typeof value === 'string')) { console.error('[LexiFlow] argv 必须是字符串数组'); return 1; }
   if (sessionBusy) { console.error('[LexiFlow] 本模块已有本机安装会话正在运行，拒绝并发调用'); return 1; }
   sessionBusy = true;
@@ -398,15 +398,8 @@ export async function runLocal(argv, candidateRequest) {
     });
   }
   async function main() {
-    let candidateAdapter;
-    if (candidateRequest !== undefined) {
-      candidateAdapter = await import('../candidates/candidate-artifact-installer.mjs');
-      const slot = deploymentSlot('release-validation', repo);
-      dir = slot.directory; apiPort = slot.apiPort; dbPort = slot.dbPort;
-    }
     if (action === 'help' || action === '--help') { console.log(help); return 0; }
     if (!['install', 'upgrade', 'version', 'up', 'status', 'stop', 'logs', 'recover', 'doctor'].includes(action)) fail(help);
-    if (candidateRequest !== undefined && !['install', 'upgrade'].includes(action)) fail('CANDIDATE_ACTION_UNSUPPORTED');
     const seen = new Set(); let planOnly = false, confirmPlan, jsonReport = false, confirmStopped = false;
     while (args.length) {
       const key = args.shift();
@@ -422,11 +415,9 @@ export async function runLocal(argv, candidateRequest) {
       } else fail(help);
     }
     if (action === 'doctor') return doctor(dir, environment, jsonReport);
-    if (candidateRequest !== undefined && !seen.has('--dir')) fail('CANDIDATE_INSTALL_DIRECTORY_REQUIRED');
     safePath(dir); dir = path.resolve(dir);
     if ([repo, os.homedir(), '/'].includes(dir)) fail('不能使用源码根目录、HOME 或文件系统根作为安装目录');
-    if (candidateRequest !== undefined && (apiPort !== 18080 || dbPort !== 15433)) fail('CANDIDATE_PORTS_FIXED');
-    if (candidateRequest === undefined && ['install', 'upgrade'].includes(action)
+    if (['install', 'upgrade'].includes(action)
         && (seen.has('--api-port') && apiPort !== sourceSlot.apiPort || seen.has('--db-port') && dbPort !== sourceSlot.dbPort)) fail('SOURCE_PORTS_FIXED');
     if (apiPort === dbPort) fail('API 与数据库端口不能相同');
     if (Number(process.versions.node.split('.')[0]) < 22) fail('需要 Node.js 22 或以上');
@@ -438,7 +429,7 @@ export async function runLocal(argv, candidateRequest) {
     }
     if (os.platform() !== 'darwin' || os.arch() !== 'arm64') fail('本入口仅用于 M 芯片 macOS');
     if (['install', 'upgrade'].includes(action)) {
-      return runUnifiedDeployment({ repo, dir, action, apiPort, dbPort, seen, candidateRequest, candidateAdapter, enforceFixedSlots: true,
+      return runUnifiedDeployment({ repo, dir, action, apiPort, dbPort, seen, enforceFixedSlots: true,
         environment, run, ready, compose, ownedResources, verifyConfig, acquireLock,
         waitManagedPostgres: async installed => {
           const reject = code => { throw new Error(code); };
@@ -643,7 +634,7 @@ export async function runLocal(argv, candidateRequest) {
     return value;
   }
   try {
-    if (['install', 'upgrade'].includes(action) && candidateRequest === undefined) { step = '获取源码部署槽位'; unlockSlot = acquireDeploymentSlotLock('source'); }
+    if (['install', 'upgrade'].includes(action)) { step = '获取源码部署槽位'; unlockSlot = acquireDeploymentSlotLock('source'); }
     return (await main()) ?? 0;
   }
   catch (error) {

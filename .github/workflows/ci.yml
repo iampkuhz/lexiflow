@@ -70,10 +70,10 @@ jobs:
       - name: Build and smoke check extension archive
         id: package
         run: |
-          node extension/scripts/packaging/package-extension-release.mjs > "$RUNNER_TEMP/extension-package.json"
-          ZIP=$(node -e 'const d=require(process.argv[1]); console.log(`tmp/releases/${d.softwareVersion}/${d.sourceCommit}/${d.filename}`)' "$RUNNER_TEMP/extension-package.json")
-          node extension/scripts/checks/check-extension-archive.mjs "$ZIP" "$GITHUB_SHA"
-          xvfb-run -a node extension/tests/archive-smoke.mjs "$ZIP" "$GITHUB_SHA"
+          node extension/scripts/packaging/package-extension-release.mjs --development > "$RUNNER_TEMP/extension-package.json"
+          ZIP=$(node -e 'const d=require(process.argv[1]); console.log(`tmp/ci-preview/${d.softwareVersion}/${d.sourceCommit}/${d.filename}`)' "$RUNNER_TEMP/extension-package.json")
+          node extension/scripts/checks/check-extension-archive.mjs --development "$ZIP" "$GITHUB_SHA"
+          xvfb-run -a node extension/tests/archive-smoke.mjs --development "$ZIP" "$GITHUB_SHA"
           printf 'zip=%s\n' "$ZIP" >> "$GITHUB_OUTPUT"
       - name: Upload verified extension ZIP and checksum
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
