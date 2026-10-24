@@ -218,6 +218,7 @@ checks:
   input_paths:
   - scripts/agents
   - tests/agents
+  - scripts/acceptance/evidence/acceptance_actor_identity.py
   - config/engineering/risk.yaml
   - tests/__init__.py
   - scripts/checks/tool_tests/run_agent_tool_tests.py
@@ -226,6 +227,7 @@ checks:
   triggers:
   - path: scripts/checks/tool_tests/run_agent_tool_tests.py
   - path: scripts/agents
+  - path: scripts/acceptance/evidence/acceptance_actor_identity.py
   - path: tests/agents
   - path: .codex
   - path: .qoder
@@ -366,6 +368,7 @@ checks:
   - mkfifo
   input_paths:
   - extension/scripts/packaging
+  - extension/scripts/build/expected-dataset.mjs
   - ops/release
   - ops/docker
   - ops/podman
@@ -385,6 +388,7 @@ checks:
   scenarios: [repository-baseline]
   triggers:
   - path: extension/scripts/packaging
+  - path: extension/scripts/build/expected-dataset.mjs
   - path: ops/release/test_tools
   - path: ops/release/runner
   - path: ops/release/runtime
@@ -422,6 +426,7 @@ checks:
   - mkfifo
   input_paths:
   - extension/scripts/packaging
+  - extension/scripts/build/expected-dataset.mjs
   - scripts/checks/deployment/run_deployment_contract_tests.py
   - backend/product/api
   - ops/dataset
@@ -442,6 +447,7 @@ checks:
   scenarios: [change-targeted]
   triggers:
   - path: extension/scripts/packaging
+  - path: extension/scripts/build/expected-dataset.mjs
   - path: scripts/checks/deployment/run_deployment_contract_tests.py
   - path: backend/product/api
   - path: ops/dataset
@@ -536,6 +542,7 @@ checks:
   - mkfifo
   input_paths:
   - extension/scripts/packaging
+  - extension/scripts/build/expected-dataset.mjs
   - scripts/checks/deployment/run_deployment_contract_tests.py
   - infra/local/compose.yaml
   - infra/postgres/schema.sql
@@ -603,6 +610,7 @@ checks:
   - mkfifo
   input_paths:
   - extension/scripts/packaging
+  - extension/scripts/build/expected-dataset.mjs
   - scripts/checks/deployment/run_deployment_contract_tests.py
   - infra/local/compose.yaml
   - infra/postgres/schema.sql
@@ -643,6 +651,7 @@ checks:
   scenarios: [change-targeted]
   triggers:
   - path: extension/scripts/packaging
+  - path: extension/scripts/build/expected-dataset.mjs
   - path: scripts/checks/deployment/run_deployment_contract_tests.py
   - path: infra/local/compose.yaml
   - path: infra/postgres/schema.sql
@@ -693,10 +702,15 @@ checks:
   required_environment:
   - git
   - sh
+  - bash
   - mktemp
   - sha256-tool
   input_paths:
-  - ops/release
+  - ops/release/test_tools/run-release-tool-tests.mjs
+  - ops/release/tests/runtime-entry.test.mjs
+  - ops/release/tests/lifecycle-fixture.mjs
+  - ops/docker/Dockerfile.runtime
+  - ops/docker/runtime-entrypoint.sh
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
@@ -709,6 +723,7 @@ checks:
   - path: ops/release/build
   - path: ops/release/host_resources
   - path: ops/release/integrity/source-build-identity.mjs
+  - path: ops/docker
 - check_id: eng.release.lifecycle-install
   command: ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "lifecycle-install"]
   required_environment:
@@ -718,8 +733,11 @@ checks:
   - mktemp
   - sha256-tool
   input_paths:
-  - ops/release
-  - ops/docker
+  - ops/release/test_tools/run-release-tool-tests.mjs
+  - ops/release/tests/lifecycle-install.test.mjs
+  - ops/release/tests/lifecycle-fixture.mjs
+  - ops/docker/Dockerfile.runtime
+  - ops/docker/runtime-entrypoint.sh
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
@@ -738,11 +756,18 @@ checks:
   required_environment:
   - git
   - sh
+  - bash
   - mktemp
   - sha256-tool
   input_paths:
-  - ops/release
+  - ops/release/test_tools/run-release-tool-tests.mjs
+  - ops/release/tests/lifecycle.test.mjs
+  - ops/release/tests/lifecycle-fixture.mjs
+  - ops/release/tests/fake-docker-daemon.mjs
+  - ops/release/runtime/release-installation-docker.sh
   - ops/docker/compose.yaml
+  - ops/docker/Dockerfile.runtime
+  - ops/docker/runtime-entrypoint.sh
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
@@ -755,6 +780,8 @@ checks:
   - path: ops/release/build
   - path: ops/release/host_resources
   - path: ops/docker/compose.yaml
+  - path: ops/docker/Dockerfile.runtime
+  - path: ops/docker/runtime-entrypoint.sh
 - check_id: eng.release.build
   command: ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "build"]
   required_environment:
@@ -768,6 +795,7 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: ops/release/notes
   - path: ops/release/test_tools
   - path: ops/release/runner
   - path: ops/release/runtime

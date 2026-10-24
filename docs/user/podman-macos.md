@@ -1,202 +1,53 @@
-# 1. M 芯片 Mac：Podman Compose 部署和使用
+# 1. M 芯片 Mac：单容器部署和使用
 
-本指南用于本机源码构建与试用。目录创建、文件复制、镜像构建参数、词库准备和数据库初始化由脚本处理；无需手工组装验证包。它支持在原安装中手动升级；不自动下载新源码，也不代表正式发行已通过验收。
+> 入口：[LexiFlow](../../README.md)。正式使用不需要源码、脚本、Compose、Java、Node、Python 或单独数据库。
 
+<a id="13-加载-chrome-扩展"></a>
 
-## 1.1. 准备一次
+## 1.1. 两步使用
 
-| 任务 | 命令 | 成功判据 |
-| --- | --- | --- |
-| 首次源码部署 | `node ops/podman/commands/manage-podman-installation.mjs install` | 输出就绪，列出 API、扩展目录与数据库连接信息 |
-| 日常启动/停止 | `node ops/podman/commands/manage-podman-installation.mjs up` / `stop` | `up` 输出本机就绪（不代表正式发行验收）；`stop` 保留资料 |
-| 源码升级 | 拉取所需源码后运行 `node ops/podman/commands/manage-podman-installation.mjs upgrade` | 升级完成并就绪，Chrome 刷新原扩展 |
-| 故障自检 | `node ops/podman/commands/manage-podman-installation.mjs doctor` | 获得 `PASS` / `BLOCKED` / `FAIL` 固定检查摘要；不执行修复 |
+前提是 macOS Apple Silicon、已安装并运行的 Podman、已安装的 Chrome，以及能够匿名拉取 GHCR 和下载 GitHub Release 的网络。这不是全新机器从零安装只需两步的承诺。
 
-需要 M 芯片 Mac、Java 25 JDK、Node.js 22 或以上（含 npm）、Podman 和可用的 Compose provider，以及 Chrome。首次安装需要访问 Maven、npm、GitHub 和容器镜像源；无需安装本机 PostgreSQL、Python 或 Docker Desktop。
+1. 在[正式 Release](https://github.com/iampkuhz/lexiflow/releases)复制该版本正文提供的完整 `podman run` 命令。它固定已验收 `ghcr.io/iampkuhz/lexiflow@sha256:…`，自动拉取唯一镜像、建立命名卷和启动一个容器。不要把 digest 换成 `latest`。
+2. 下载同页 `lexiflow-extension-<softwareVersion>.zip`，按正文 SHA-256 校验，解压到稳定目录；在 `chrome://extensions` 开启开发者模式，点击“加载已解压的扩展程序”并选择含 `manifest.json` 的目录。启用后无需填写地址、密码或修改文件。
 
-在包含本指南和 `ops/podman/commands/manage-podman-installation.mjs` 的源码仓库根目录打开终端：
+正式容器为 `lexiflow-release`，资料卷为 `lexiflow-release-data`；API 仅映射 `127.0.0.1:18080:8080`。数据库不映射宿主端口，所有持久事实在该独立卷内。运行命令资源上限为 2 CPU/2 GiB，Podman machine 还需要容纳其他项目；实际镜像大小、初始化时间和验证环境以对应 Release 的测量为准。
 
-```sh
-java -version
-node --version
-podman info
-podman compose version
-```
+插件弹窗显示初始化中、正式就绪、服务不可用或版本不兼容。软件版本、`caption-hints.v2` 协议和发布资料身份都必须匹配同一发行；不能把容器存在或进程存活当作正式就绪。下载的 ZIP 不是 Chrome Web Store 安装，开发者模式和加载解压目录属于第二步；本阶段不提供商店上架或浏览器策略修改。
 
-部署构建需要正式 Temurin 25。脚本按共享 Harness 顺序自动选取：显式 `LEXIFLOW_JAVA_HOME`、仓库 `.local/toolchains/jdk-25/Contents/Home`（或 `.local/toolchains/jdk-25`）、继承的 `JAVA_HOME`。仓库已有 JDK 25 时无需更改终端的系统 Java。仅构建子进程使用选定 JDK，不修改终端、不下载工具；显式配置或已选工具不合格时直接停止，不静默切换。
-
-如果没有仓库本地 JDK，可在准备工具时指定已安装的 Temurin 25：
+## 1.2. 日常启停与隐私
 
 ```sh
-export LEXIFLOW_JAVA_HOME=/绝对路径/到/Temurin25/Home
+podman ps --filter name=lexiflow-release
+podman logs --tail 100 lexiflow-release
+podman stop --time 45 lexiflow-release
+podman start lexiflow-release
 ```
 
-Java 检查失败会区分找不到程序、权限、超时、退出失败、版本无法识别和版本不符；请按中文原因处理，不要因此重建数据库。
-Podman machine 未创建时运行 `podman machine init`，已有但未运行时使用 `podman machine start`，不要重新初始化已有 machine。Compose provider 不可用时先安装 `podman-compose` 并确认版本命令成功。脚本不会自动修改系统工具或启动未知虚拟机。
+停止、启动及系统重启不重新导入匹配的已发布资料。首次初始化中断不会被标为成功；再次启动只在已识别的本项目卷上恢复核验，不清空未知数据。关键组件失败会使容器退出或健康检查失败，不能继续宣称就绪。
 
-建议 Podman VM 至少 4 CPU、8 GiB 内存、20 GiB 可用磁盘；这是构建、导入及共享容器环境的准备建议，不是 API 常驻内存需求，也不代表资源验收通过。首次上游词库下载大于最终约 6.44 MiB 精简压缩包。
+英文先显示，后端不可用或不兼容时仍显示英文。观看只查询已发布资料，不触发模型。本机显式词段抑制偏好只留在扩展，不上传、不推断熟悉度、无账号同步。
 
-## 1.2. 首次部署：一条命令
+服务诊断日志可能包含字幕正文及视频定位，只可本机查看，不上传、不提交。不要上传数据库、卷、密码、观看记录、模型输入输出或私有运行材料。分析文件默认不开启。
 
-```sh
-node ops/podman/commands/manage-podman-installation.mjs install
-```
+## 1.3. 更新和数据保护
 
-脚本开头展示本次数据库目标、同版本容器和镜像替换范围、数据保留及失败重试边界，只询问一次“继续安装并使用本机 LexiFlow 数据库？[y/N]”。输入 `y`、`yes` 或“是”后自动连接、检测版本、准备并校验 Java、扩展、镜像与公开 ECDICT 输入，必要时重建专用 schema 并全量导入，最后启动应用并检查正式就绪。回车或选择否不部署；取消或输入结束也不会执行部署。无需填写用户名、密码或复制 hash，确认只对本次运行有效。
+新版本使用新版本 Release 中的精确命令及配套扩展。先停止当前正式容器、保留其卷和备份，再由维护者核对新镜像对该卷的兼容性；不要盲目重复 `podman run`、使用 `--replace`、删除卷或修改归属标记。项目不承诺任意历史数据库版本原地迁移，不通过自动清库完成更新。拒绝不兼容卷是数据保护，不是提示用户清库的授权。
 
-脚本不要求切换 Podman 的 rootful/rootless 模式，也不修改 machine、代理或系统防火墙。受管 API 和 PostgreSQL 连接私有网络及用于本机端口发布的普通 bridge；部署检查和导入容器验证实际可连接已确认的本机数据库目标。发布端口仍仅绑定 `127.0.0.1`。普通 bridge 允许容器出站，不是网络级断网隔离；产品不会因此增加数据外发。
+同名容器存在时 Podman 会清晰拒绝创建；重新启动已有容器用 `podman start`。已有端口被占用时先识别其归属，不停止未知服务。已有非空未知卷、资料或结构不兼容时入口失败关闭，保留现场。完全空的同名卷会被初始化；纯 `podman run` 无法区分它是本次自动新建还是预先存在，不保证拒绝所有未知空卷。
 
-默认文件放在本机实际源码仓库内 `.local/podman/`，已经被 Git 忽略。另一台机器取得源码后，在该机器实际仓库根目录运行同一条 `install`；不复制原机器的 `.local/`、凭据、安装记录、容器 ID 或绝对路径。无需创建 `Applications` 目录，无需执行 `cp` 或填写镜像 ID。未复用外部实例时，数据库是 Compose 中的独立 PostgreSQL 服务，数据在持久卷；CSV 和词库 ZIP 不进入 Git 或应用镜像。
+## 1.4. 失败定位
 
-执行过程中显示部署阶段及当前子步骤（例如“拉取 Java 25 基础镜像”“构建 API 镜像”），子步骤完成时显示耗时。长命令每 20 秒补一条经过时间及最近输出时间；这是等待状态，不是百分比，也不保证网络正在前进。原始下载/编译输出不刷屏，实时写入启动时给出的 `operation-*.log`。需要详细诊断时，可在另一个终端执行 `tail -f "输出的日志绝对路径"`，不要分享未经检查的原始日志。失败会非零退出并给出失败子步骤和日志路径。
-
-不要在运行中修改安装源码、同时启动第二次安装或删除锁。安装进程持有内核锁；`.lock-guard` 文件会保留，但文件存在不表示仍被锁定，勿手动删除。正常取消时会等待本次子进程退出并释放锁；中断后以数据库实际提交记录核对结果，需要重导时重新执行原命令并确认本次运行。
-
-**成功判据：脚本输出“就绪”，并列出 API、配套插件 ZIP 与校验和、Chrome 固定加载目录和数据库连接信息。** 仅容器 running 或生成 ZIP 不算成功。
-
-源码验证固定使用 API `18081`、数据库 `15432`，都只监听 `127.0.0.1`。未知 API 监听者不能接管。数据库端口空闲时自动安装本项目受管 PostgreSQL；占用时沿用本安装已保存的账号和密码；全新安装也会自动识别当前仓库 `infra/local/compose.yaml` 创建的 PostgreSQL 17 开发容器，核对实际运行容器、认证、端口和数据卷归属后按其 `postgres` 无密码配置连接已有 `lexiflow` 数据库。覆盖范围仅为 `lexiflow_release`。开发实例缺少 `lexiflow_release` 时仅创建并初始化该 schema，保留 `public` 中旧表。脚本不停止外部 PostgreSQL、不删除它的卷、不重置账号或修改其他 schema。
-
-发布候选验证与源码验证分别使用固定槽位：候选 API `18080`、数据库 `15433`，受管目录为 `.local/podman-release-validation/`。同类型忙时拒绝并发，不随机换端口或另起持久实例；不同类型可以同时运行。每次运行的证据目录可以不同，但不能因此创建新的数据库槽位。不要停止归属不明的服务来腾端口。
-
-源码 ZIP 与固定解压目录都会使用源码槽位的 API `18081`。候选扩展保留发行制品声明的 `18080`，不改写其 ZIP 来更换端口。已有源码安装的旧 API `18080` 只能通过普通 `install` / `upgrade` 的本次确认安全转到 `18081`，保留数据库、账号、凭据、卷和安装身份；不能手改状态或配置来迁移。
-
-密码由受管安装自动生成，仅保存在本机受限的 `secrets/app-password` 文件，不是固定默认密码。已识别的开发无密码模式不创建或挂载密码文件，导入容器与 API 均使用明确的空密码配置。开发数据库的跨次核验依据实际运行容器、镜像、仓库来源、认证、端口、启动配置和数据卷，不把 Compose 声明文本当作运行事实；修改注释、文档链接、等价格式或无关 Redis 配置不会改变数据库目标。未知实例占用端口但缺少已保存凭据、无法连接或认证、数据库对象归属或权限不匹配时，脚本指出实际失败阶段和可确定的中文原因，不再追问配置、不尝试其他账号或端口，也不创建外部缺失数据库。不要把密码放进命令行、Git 或分享的日志中。
-
-自动化验证需要先审阅、不执行部署时使用 `install --plan` 或 `upgrade --plan`。计划检查无问答，可准备临时输入和本机构建/镜像缓存，但不创建安装状态、启停应用或写数据库。非交互执行必须传入本次计划输出的 `--confirm-plan <sha256>`；普通交互不需要此参数。确认后的数据库关键事实、凭据、来源、构建输入或数据库观测变化立即停止，不再次询问或静默换目标；没有永久 `--yes`。
-
-需要指定另一处全新目录时可加 `--dir /绝对路径`，脚本会创建它；后续每个命令也须带同一个 `--dir`。不要指定旧手工安装、源码根目录或已有未知目录。路径可以包含空格，但不要包含换行、冒号、`$`、双引号或反斜杠。
-
-## 1.3. 加载 Chrome 扩展
-
-每次 `install` / `upgrade` 都交付与本轮 API 使用相同完整构建身份的 `lexiflow-extension-<softwareVersion>.zip` 和相邻 `.zip.sha256`。源码部署复用正式发行的确定性打包、文件白名单、构建身份及归档校验核心；区别只在源码准入、已确认的本机 API 端口和输出位置。候选部署直接保存已验证的发行 ZIP 原字节，不重新打包。正式发行的干净标签源码要求与固定端口限制不会被本机入口放宽。
-
-默认归档保存在 `.local/podman/extension-artifacts/<buildId>/`，成功输出给出完整 ZIP 与校验和路径。`state.json` 的 `artifacts.extensionArchive` 与成功安装记录绑定当前 ZIP 的相对路径、字节数、SHA256 和完整构建身份；已有归档不能覆盖为不同内容。保留的其他归档不表示它们是当前活动版本，以本轮成功输出为准。校验和用于检查字节完整性，不能独立证明来源可信。
-
-脚本从核验后的同一 ZIP 解压出 `.local/podman/extension`，而不是另复制一份任意构建目录。部署准备、激活与失败恢复均核对归档、校验和、构建身份、端口和对应目录；目录或 ZIP 被篡改时停止，不把不配套的扩展称为就绪。自定义 `--dir` 时两类路径均位于该受管目录内。
-
-1. 打开 `chrome://extensions`，启用“开发者模式”。
-2. 点击“加载已解压的扩展程序”，选择脚本成功输出的 Chrome 加载目录（默认 `.local/podman/extension`）。
-3. 打开扩展弹窗确认正式就绪；再打开 YouTube 视频并开启英文字幕。
-4. 英文应正常显示，符合提示规则的词段出现中文提示，并不是每个单词都翻译。
-
-Chrome 默认与 Podman 在同一台 Mac；不要为了远程浏览器直接将 API 暴露到公网。
-
-## 1.4. 日常使用：不用重新部署
-
-```sh
-# 查看容器及应用是否正式就绪
-node ops/podman/commands/manage-podman-installation.mjs status
-
-# 停止，保留数据库和词库
-node ops/podman/commands/manage-podman-installation.mjs stop
-
-# 再次启动，不重建镜像、不下载、不重新导入
-node ops/podman/commands/manage-podman-installation.mjs up
-
-# 持续查看新产生的服务日志（Ctrl+C 退出）
-node ops/podman/commands/manage-podman-installation.mjs logs
-```
-
-单独出现且少于三个字母的词（如 `UH`、`UM`、`AI`、`TV`）不显示提示；三字母词与完整短语按原有规则处理，短语不会因包含短词而被整体过滤。导入规则变化纳入数据生成版本，部署时据此决定重导；原始来源文件用于离线追溯，数据库不逐词复制来源字段；短词不作为有效提示发布。
-
-字幕增量、收尾与视频开始日志默认开启，无需开关；新安装直接生效，已有安装执行 `upgrade` 后生效。
-
-日志含字幕正文、中文提示、视频身份和播放位置，仅用于本机诊断；不要上传、放入 Git、CI 制品或未经清理的公开错误报告。默认不额外保存全量字幕 JSONL；`logs` 持续显示新产生的 PostgreSQL/API 日志，不回放历史日志；按 `Ctrl+C` 只退出查看，不停止服务。查看期间不占用安装锁、不触发升级恢复，也不将字幕正文复制到操作日志。API 容器可读日志使用 Podman `k8s-file`，单文件上限 10 MB；达到上限的保留行为由引擎负责，不把日志当作完整观看记录。[Podman 日志选项](https://docs.podman.io/en/latest/markdown/podman-run.1.html#log-opt-name-value)。显式分析 JSONL 与控制台不同，默认关闭；分析文件最多 16 MiB，达到上限停止追加，需用户自行审阅并删除后再采集。
-
-字幕日志固定为 `时间|级别|中文事件|video=真实视频ID|分:秒.毫秒|正文`，分隔符两侧不补空格；正文为英文夹注中文提示。日常不展示 UUID、subtitle/topic/segment 内部键，也不另造短编号；内部业务身份与去重不变。播放时间如 `09:03.129`，超过一小时显示累计分钟（如 `60:00.001`），不回绕。正常请求的计数、耗时、`NO_HINT` 和 `NO_NEW_SEGMENTS` 仅在 DEBUG 输出；WARN/ERROR 保留真实完整关联 ID 和错误原因，无关联 ID 时显示 `-`。增量显示本次返回的提示，收尾用于记录扩展已确认的行展示；中断或未完成不可当作完整翻译。字幕中的换行与竖杠转义，终端自动折行不改变日志文件的单行结构。容器工具可能添加自己的服务名前缀，该前缀不属于 API 日志正文。
-
-合成示例：
-
-```text
-10-03 22:55:33|INFO|字幕增量|video=abcdefghijk|09:03.129|a breakthrough（突破）
-10-03 22:55:35|INFO|字幕收尾|video=abcdefghijk|09:05.420|This is a breakthrough（突破）.
-```
-
-已有安装的 `install` 与 `upgrade` 使用同一部署流程，分别判断应用版本 `softwareVersion` 和数据导入版本 `generationVersion`。数据导入版本在导入前由导入及预处理代码、直接依赖、SQL、生成配置和校验后的来源摘要计算，不用应用版本或仓库 commit 替代。版本变化直接全量替换；版本一致且成功记录、结构、计数、关联和内容摘要完整时跳过重导，记录缺失或数据不完整则自动重建。不做增量迁移，同构建也必须检查数据。拉取源码不代表安装已经更新。`status` 返回非零时不要认作可用，正常停止后查询不就绪是预期现象。
-
-拉取所需源码后，在原仓库执行一条命令原地升级：
-
-```sh
-node ops/podman/commands/manage-podman-installation.mjs upgrade
-```
-
-它沿用安装身份、数据库目标、端口、凭据和 Chrome 固定扩展目录，并交付本轮配套 ZIP 与校验和；旧 API 停机不妨碍检测升级。开头确认一次后，脚本每次重新准备并替换应用镜像与容器，独立判断是否需要数据重导。准备和输入校验失败不修改数据库；需要重导时，专用 schema 重建、全量写入、发布校验和版本记录在同一事务提交，失败回滚原结构和数据。升级成功后，在 `chrome://extensions` **重新加载原插件**，再刷新视频页面，不删除重装或选择新目录。
-
-取消后等待原命令及子进程退出，再执行同一条命令，重新检测并确认。数据库提交后若 API 启动失败，保留成功的数据记录，但部署仍为 `FAIL`；不能恢复可能不兼容的旧应用。再次执行先查询数据库实际提交事实，完整一致则跳过重导，不因本机阶段记录滞后再次清库。未知文件或证据不完整时保留现场，不手工删除事务或工作目录。自定义安装继续使用原来的 `--dir /绝对路径`，不要静默换目标。
-
-查询已安装、本地源码和 GitHub 最新正式版：
-
-```sh
-node ops/podman/commands/manage-podman-installation.mjs version
-```
-
-网络失败或还没有正式发行时显示“未知”，不影响本机使用。开发版本如 `2.0.0-SNAPSHOT.20261006.gabc1234`，日期取 Git 提交者时间并固定为 Asia/Shanghai（UTC+08:00），不是本次构建日期；未提交改动附加 `dirty` 和输入摘要，同一输入不会因隔天构建而改变版本号。正式版仍使用纯数字版本。Chrome 展示完整 `version_name`，数字 `version` 单独映射。安装记录在受管目录 `installation-records/`，包含时间、原版本、结果、完整 commit、构建/制品摘要与独立的词库资料身份；该目录属于本机私有运行数据，不上传。
-
-Podman 部署 tag 与完整构建身份分开：`ops/release/version.txt` 的基础软件版本决定小写 tag，例如 `2.0.0-SNAPSHOT` 对应 `localhost/lexiflow-api:2.0.0-snapshot` 和 `localhost/lexiflow-postgres:2.0.0-snapshot`。commit、未提交代码摘要、构建日期和安装 ID 不成为部署 tag；完整 `softwareVersion`、`buildId` 与源码摘要仍用于 JAR、扩展、镜像 label 和运行身份校验，实际启动绑定 image ID，不根据可变 tag 猜测二进制身份。来源下载工具使用本次独立、无持久 tag 的一次性镜像，完成或失败后精确清理。
-
-即使基础软件版本和构建输入都没有变化，明确执行 `install` 或 `upgrade` 也会走重装流程：先核验同版本槽位及全部引用容器归属，删除本安装的旧容器与该精确 tag，再构建或加载新镜像。受管 PostgreSQL 只替换镜像和容器，保留原数据卷、账号及凭据；外部 PostgreSQL 不动。镜像被其他安装使用、归属未知或同版本操作并发时立即拒绝，不强删、不全局 prune，不自动清理其他版本或既有 hash tag。
-
-同版本重装会中断服务；旧镜像移除后若新构建失败，不能承诺旧二进制可恢复。脚本保留数据和私有镜像替换记录；保持本次源码/候选及输入不变，恢复环境后重试原交互命令并再次确认，才能恢复受管 PostgreSQL 的准备并核对真实数据事实。目标、配置或数据库事实变化时按提示停止，不手改状态或删除记录绕过核验。PostgreSQL 准备中断时 `--plan`/`--confirm-plan` 仅报告 BLOCKED，不自动恢复服务；外部 PostgreSQL 不走镜像恢复。日常只想启动已安装版本时使用 `up`，不要用 `install` 代替。
-
-本指南的统一流程用于 Node 本机入口；候选验证中的资料包使用相同的数据判断和执行器。普通发行目录的 `lexiflow.sh prepare` 仅提供受保护的资料包初始化，不提供 Node 入口的计划确认升级流程，不能把它当作同一升级入口。不与 `lexiflow.sh` 或手工 Compose 命令管理同一安装。不要移动受管目录或手改配置、密码、状态及操作记录；脚本会拒绝身份和配置漂移。ZIP 是扩展交付归档，不是通用的一键安装程序，也不能代替 Chrome 的“加载已解压的扩展程序”。本机脚本已维护固定解压目录，无须手工解压或改选 ZIP；脚本不会自动在 Chrome 中安装或重新加载插件。
-
-本仓库使用精简词库结构，词条 ID 为短数字字符串，运行合同标识为 `caption-hints.v2`；API 与扩展须一同更新。结构不匹配时，`install` / `upgrade` 展示待重建原因，只有本次确认后才事务化重建，不手工逐列删除。API 自身启动、`up` 与只读命令不会清库。新发布身份不能与不同内容的缓存或本机偏好混淆。
-
-## 1.5. 查看 PostgreSQL
-
-数据库客户端使用脚本输出的端口（默认如下）：
-
-| 项目 | 值 |
+| 现象 | 处理 |
 | --- | --- |
-| Host | `127.0.0.1` |
-| Port | `15432` |
-| Database | `lexiflow` |
-| User | `lexiflow` |
-| Password | `.local/podman/secrets/app-password` 文件内容 |
-| Schema | `lexiflow_release` |
+| 不能连接 Podman | 先完成基础环境安装并启动 Podman machine；应用命令不管理引擎。 |
+| 拉取失败 | 检查 GHCR 网络及该 Release 的匿名可读性；不以其他来源或漂移 tag 替代已验 digest。 |
+| 容器名或18080占用 | 核对实际资源所有者；不自动接管、替换或删除。 |
+| 初始化中 | 等待实际资料导入；日志与容器健康提供进度，未就绪不能算成功。 |
+| 容器退出或 unhealthy | 查看精确容器日志；不要删除卷重试。关键进程/资料核对失败必须修复原因。 |
+| 版本不兼容 | 使用同一不可变 Release 的扩展和镜像，核对 `release.json` 身份；英文仍可显示。 |
+| 英文有而提示无 | 查看弹窗状态、已发布资料身份、英文字幕源及显式本机抑制偏好；不能用模型补全绕过。 |
 
-复用外部实例时，用户名与密码文件使用安装输出的实际值；表中为受管实例默认值。该账号可以写应用数据；调试查看时设为只读会话，例如：
+## 1.5. 与开发环境分开
 
-```sql
-BEGIN READ ONLY;
-SELECT count(*) FROM lexiflow_release.lexicon_entry;
-SELECT count(*) FROM lexiflow_release.lexicon_form;
-SELECT * FROM lexiflow_release.lexicon_dataset;
-ROLLBACK;
-```
-
-从另一台电脑查看数据库，使用 SSH 隧道（Mac 需允许相应账号远程登录）：
-
-```sh
-ssh -N -L 25432:127.0.0.1:15432 用户名@部署Mac的地址
-```
-
-然后客户端连接本机 `127.0.0.1:25432`，其他参数不变；隧道不占用本机源码或候选验证的数据库端口。不要将 PostgreSQL 绑定到全部网卡。
-
-## 1.6. 失败时怎么处理
-
-先用一条命令自检，无需记住多条排查命令；尚未安装也可以执行：
-
-```sh
-node ops/podman/commands/manage-podman-installation.mjs doctor
-```
-
-需要把结果发给协助排查的人时，生成简短摘要：
-
-```sh
-node ops/podman/commands/manage-podman-installation.mjs doctor --json
-```
-
-自定义安装目录时加同一个 `--dir /绝对路径`。报告只含固定检查项、状态、工具版本和下一步，不含密码、完整配置、宿主路径、数据库内容或原始日志。自检不会创建安装目录、抢安装锁、下载或启动/停止容器。`PASS` 只是本机检查通过；`BLOCKED` 表示缺工具、未安装、服务未启动等前置问题；`FAIL` 表示状态损坏、归属或协议不符。未安装时返回非零是预期，不代表代码坏了。
-
-
-- **工具缺失或 Podman 未启动**：准备工具/启动 machine 后重新执行 `install`。
-- **编译、镜像下载或 ECDICT 下载失败**：查看输出指定的 `operation-*.log`，恢复网络后执行同一条 `install`；数据库初始化前允许重试，已有密码不重置。
-- **部署中断或提交状态不明**：保留现场，确认原命令及子进程退出后执行 `recover`，核对数据库提交事实；它不自动重导。未提交或数据不完整时重新执行原 `install` / `upgrade`，重新检测并确认。
-- **应用未就绪**：运行 `logs` 查服务错误。数据库成功导入不代表部署成功；提交后启动失败不能切回可能不兼容的旧应用。再次部署检测到完整成功记录时不会重复重导。
-- **端口占用**：API 未知监听者不能接管。数据库占用时自动使用已有安装凭据认证并校验数据库对象归属；缺凭据或连接失败直接停止，不会生成能连接已有库的新密码。首次安装可显式选空闲 `--api-port` / `--db-port`，已有安装不能静默改目标。不要杀死 `gvproxy` 或未知服务。
-- **安装锁仍活跃**：等待原安装和子进程退出，不并发重试或手工删除锁。陈旧锁只按已核验的本安装身份恢复；未知锁、文件或资源归属不推测清理。
-- **身份或配置异常**：保留现场，不绕过校验。
-- **扩展不可用**：先 `status`，再确认加载的是此次安装输出的目录，而不是旧源码 `extension/dist`。
-
-密码文件、完整数据库、观看记录和未经检查的日志不要分享。脚本不会自动 `prune` 或删除数据；运行空间和持久卷需要保留，不要用清理源码缓存的方式清理它们。
+正式使用是 `lexiflow-release`/`18080`/`lexiflow-release-data`；开发调试是 `lexiflow-dev`/`18081`/独立开发数据。测试另用唯一归属资源及固定验收端口 `18082`。三者不共享卷，不因名字相似清理彼此。源码调试和开发库重建仅按[本机开发](../scenarios/local-development.md)执行，不用于正式数据。

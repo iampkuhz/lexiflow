@@ -11,7 +11,7 @@
 | --- | --- | --- |
 | 检查 PR | `python3 -m scripts.triggers.run_ci_quick_checks quick --base <完整commit>`；新分支用 `--all` | 必需与受影响 Check 完成；不等于 full Verify/Formal |
 | 下载并测试扩展包 | 从同次 quick run 下载 ZIP，校验 `.zip.sha256` 后加载解压目录 | artifact 对应目标 commit；Smoke 不替代真实观看或发行验收 |
-| 准备正式候选 | 从受保护的 `v*` tag 触发 release workflow | 单一 Mac/Podman 候选与开发报告与完整 Repository Verify 完成 |
+| 准备正式候选 | 从受保护的 `v*` tag 触发 release workflow | 单一 Mac/Podman 私有候选与固定交接完成，后续独立执行完整 Repository Verify |
 | 晋升公开发行 | 原标签手动续办，已有独立 Formal 链、两道人审授权与 `PUBLISH` | release资产摘要复核并发布；缺证/漂移立即停止 |
 
 `.github/workflows/ci.yml` 在分支 push、`pull_request` 和手动运行时调用：
@@ -168,7 +168,7 @@ S1→S2 是 GitHub 托管 source job 到专用 runner prepare job；S2→S3 是�
 
 job timeout 是单次执行上限，不是任务估时或逐次累积的发布审批预算：source 5 分钟，prepare 180 分钟，promotion-precheck 30 分钟，promotion 45 分钟。完整原生验收的执行与审阅另按本次冻结计划安排，不重复计入 Actions prepare。命令与精确参数见 [Delivery Gate](../reference/delivery-gate.md) 和[首次发行准备](github-actions/first-release/preparation.md)。
 
-正式晋升仍须同候选制品摘要、来源与许可、干净安装、同卷资料保留与升级失败恢复、真实独立 Formal 链。合成两代资料测试不替代真实候选；镜像标签、JAR/扩展内嵌身份、manifest 的 `buildIdentity`、源码摘要和 commit 必须一致。晋升只消费原候选，不重新构建或覆盖已有正式身份。
+正式晋升仍须同候选制品摘要、来源与许可、干净初始化、同卷重启、初始化中断恢复和关键组件故障、真实独立 Formal 链。两代合成资料测试不替代真实候选；镜像标签、JAR/扩展内嵌身份、manifest 的 `buildIdentity`、源码摘要和 commit 必须一致。晋升只消费原候选，不重新构建或覆盖已有正式身份，不承诺任意历史数据库迁移。
 
 ## 1.3. 仓库管理员准备
 
@@ -187,75 +187,48 @@ job timeout 是单次执行上限，不是任务估时或逐次累积的发布�
 `node ops/release/workflow/run-release-build-pipeline.mjs verify /absolute/request.json` 接收 `candidateDirectory`（绝对路径）与 `candidateSha256`。入口只读核对 marker、规范 manifest、摘要 sidecar、全部制品和许可 notice，以及扩展 ZIP 内嵌身份；缺失、额外文件、非普通文件、symlink 或漂移均拒绝。返回 `scope=candidate-integrity-only`，不执行候选脚本或容器；结果不永久信任可变目录，消费前须重核实际字节。clean SNAPSHOT 可用于机制验证；正式发布还须匹配精确正式标签及独立验收报告中的同一候选摘要。
 
 
-## 1.5. 本机候选运行输入
+## 1.5. 真实单容器候选验收
 
-内部库 `runLocal(argv, { candidateDirectory, candidateSha256 })` 将固定候选接入原本机安装与升级事务，源码用户的 `install` / `upgrade` 命令不变。候选模式首装核验并加载 ARM64 镜像、解包固定扩展、用候选词库 ZIP 初始化。API 端口固定 18080，冲突时停止，不停止未知服务或改写扩展权限。显式 install/upgrade 均重新加载候选镜像并准备扩展；受管 PostgreSQL 容器可替换，同一数据卷、资料、账号、密码及端口保留。候选完整性、替身回归、真实同卷运行和独立 Formal 是不同证据，前两项不取代后两项。
+`eng.release.candidate-runtime` 消费 `LEXIFLOW_CANDIDATE_RUNTIME_REQUEST` 指向的严格请求：仅 `target`，含 `candidateDirectory` 与 `candidateSha256`。固定请求由本机工作流生成，路径按干净正式软件版本派生为 `tmp/quality/release-workflow/<softwareVersion>/candidate-runtime-request.json`，不接受任意 handoff。既有版本的原始交接文件不移动、不覆盖、不删除；同版本残留仍失败关闭。
 
+目标候选必须与干净源码完整身份一致。Check 在 Apple Silicon macOS + Podman 以唯一归属名字/卷和固定 loopback 18082运行单镜像；证明初始化、精确软件/协议/资料及扩展身份、单容器、同卷停止重启、初始化中断恢复、不兼容卷拒绝、关键组件异常与精确清理。没有真实故障观测、事实不完整或清理不确定不能 PASS。正式18080与开发18081不因此被停止；公开发行后另从真实渠道在正式端口安装及 Chrome for Testing 试跑，不把候选18082结果冒充该安装。
 
-## 1.6. 实际候选原生验收
+合成两代资料通过现有 `eng.release.lifecycle-runtime` 验证构建与运行机制，资料不具备正式再分发资格，不能替代真实资料候选。API端口冲突、名字冲突、镜像不可用或未知资源均清晰失败，不自动接管、删除或放宽超时。
 
-`eng.release.candidate-runtime` 消费 `LEXIFLOW_CANDIDATE_RUNTIME_REQUEST` 指定的绝对 JSON 路径。请求只含 `previous` 和 `target`（各为 `candidateDirectory` + `candidateSha256`），target 须与干净源码完整身份一致。
-
-Check 在 Apple Silicon macOS Podman 上调用共享安装入口，执行 target 首装、重复 install/upgrade、previous 首装与基线、真实 target API 启动失败、向前重试与重复 upgrade。previous 与 target 必须是不同提交。18080 被占用则停止。断言覆盖受管 PostgreSQL 归属、同卷、合成标记、资料、密码、端口、API/扩展身份及逐次操作记录；不以 no-op 或已经移除的同版本二进制自动回退通过。运行结果通过 Verify stdout 附件绑定候选、manifest、build identity 和阶段。缺候选、缺宿主、真实失败或向前重试未观察到、清理未完成均不得 PASS。故障注入和清理仅限逐项核实归属的本次资源；无法确认进程静止或归属时保留现场。quick CI 排除此 Check。
-
-
-## 1.7. 联合消费候选与既有验收
+## 1.6. 联合消费候选与既有验收
 
 ```sh
 python3 -m scripts.acceptance consume-candidate --submission-id <uuid> --candidate-directory /absolute/candidate
 ```
 
-从既有完整 Formal 链的 repository-baseline 报告取得候选 Check stdout，核对附件字节、摘要、冻结输入及运行阶段。候选摘要由证据派生，不由调用者另传。最终核验后重核链与 stdout 防止替换。源码身份采用两轮 Git 成员、字节与元数据核对，但这不是全局文件系统锁，也不保证返回后输入不再变化。消费过程执行一次固定 Node integrity proof，末尾重读 Gate/附件；不补签 receipt、不运行构建或容器；clean SNAPSHOT 不因此取得发布资格，公开晋升仍须精确标签、来源许可和发布授权。
+从本次完整 Formal 链的 repository-baseline 报告取得候选 Check stdout，核对附件字节、摘要、冻结输入、完整运行阶段和来源。候选摘要从证据派生，不由调用者另传。消费执行固定 Node integrity proof，末尾重读链与附件，不能补签、构建或启动容器。完整干净正式标签及来源许可仍是晋升前置；clean SNAPSHOT 不因此取得发行资格。
 
-
-## 1.8. 正式候选晋升入口
+## 1.7. 正式候选晋升
 
 ```sh
 python3 -m ops.release.workflow.promote_verified_release --submission-id <uuid> --candidate-directory /absolute/candidate
 ```
 
-默认仅只读 `promotion-precheck`，不构造归档、不计算归档 hash、不加载或推送镜像、不写 GitHub/GHCR，也不需要发布凭据。用户另行批准后才加 `--publish`；workflow 或 token 存在不代替授权。入口复用联合证据，只接受干净正式版本、精确 tag 和单一 ARM64 候选。`ops/release/distribution-licenses.json` 须由负责人依据真实许可核准，与候选许可条目、来源及 notice 摘要一致；空表或测试占位阻断。
+默认只读预检，不构建、归档、加载、推送或写 GitHub/GHCR，不需要发布凭据。只有显式 `--publish` 及受保护 Environment 人工批准才进入远端写入。每次写前重核固定候选、干净正式源码、tag、不可变配置、真实独立 Formal 链和许可核准；同版本不同内容拒绝。
 
-只有显式 `--publish` 授权后，才在首次远端写入前构造发行归档并校验实际 hash。预检不再发现归档构造类故障；该故障的发现时点后移，但仍发生于任何远端写入前。每个远端写入前保持最新证据复核。
+新正式发行只晋升一份候选 `runtime-image` 到 `ghcr.io/<owner>/<repo>`，仅 `linux/arm64`。推送后匿名按 registry manifest digest 读取并确认 config ID，不能拿候选 archive hash 或 image config ID 代替 registry digest。候选、离线 image archive 和内部 marker 不作为用户附件。
 
-发行归档只含已验收 payload，随包保留扩展 ZIP。独立公开资产为发行 tar.gz 及摘要、Chrome 扩展 ZIP 及摘要、候选 marker、manifest 及摘要、`registry-images.json` 及摘要；独立 ZIP 从候选原样复制，晋升时不重新构建。不上传 Formal receipt、运行日志、字幕或观看记录。
+Release 只上传三项自定义附件：扩展 ZIP、第三方对应源码包、`release.json`；逐项核对名称、大小与 SHA-256 后才发布。对应源码包在候选 assemble 时完成并参与验收，晋升原样复制，不在发布阶段重新构建。`release.json` 绑定软件/源码/API/SQL/资料身份、唯一镜像 digest/config/platform 和两个下载制品及全部来源对应关系。正文展示校验值但不作为机器输入。
 
-远端先验证 tag 对应同一 commit 且不可变发行已启用，同 tag 的 draft 或 published release 拒绝覆盖。在这些预检之后先提升两份候选镜像至固定 GHCR 路径并核对匿名 digest 读取，再创建 draft 并上传固定资产，逐项核对名称、字节数与 SHA-256，完整复核后才 publish。失败不删除草稿或移动 tag；写请求未知时保留状态由负责人查明。参见 [GitHub 不可变发行](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)及 [Release API](https://docs.github.com/en/rest/releases/releases)。
+正文来自精确发布提交的 `ops/release/notes/<version>.md`。缺失、空白或版本不匹配在任何远端写入前拒绝；维护者负责功能、修复、使用方式、前置及限制，发布器只自动补真实链接、摘要和固定 digest 的可复制命令。页面首先展示两步使用。
 
-发布凭据分离：`GITHUB_TOKEN` 需 Contents write 和 Packages write，仅在受保护 promotion job 授予；`LEXIFLOW_RELEASE_CONFIG_TOKEN` 仅作 Administration read 的不可变配置查询。配置查询凭据仅供固定 GitHub HTTPS 目的地；`GITHUB_TOKEN` 另供固定 `ghcr.io` 认证，不跟随重定向、不传入构建子进程或日志。参见 [不可变配置查询权限](https://docs.github.com/en/rest/repos/repos#check-if-immutable-releases-are-enabled-for-a-repository)。
+GHCR 与 Release 不具备原子事务。镜像已上传不等于发行成功；私有 package、draft、部分资产或写请求未知都保留现场，先只读查明，不盲目重复写入、删除或覆盖。同一原候选只有在远端状态确定且摘要完全一致时才可按恢复合同续办。首次 package public 设置由管理员完成，认证拉取不等于匿名拉取。[GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)、[不可变发行](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)。
 
+凭据隔离不变：`GITHUB_TOKEN` 的 Contents/Packages write 仅在 promotion job 注入；`LEXIFLOW_RELEASE_CONFIG_TOKEN` 仅用作 Administration read 配置查询，固定HTTPS目的地、无重定向、不传构建子进程或日志。不以本机 token 存在替代人类批准。
 
-## 1.9. 构建资料与本机交接
+## 1.8. 构建资料与本机交接
 
-负责人先通过 `ReleaseDatasetCommand export` 从已发布资料和真实 `approval-file` 导出发布 ZIP（含 `manifest.json`、`approvals.json`、`dataset.ndjson`、`entries.ndjson`、`forms.ndjson`），由实际 JAR 校验。`prepare_ecdict_bundle.py` 生成的是源码词库 ZIP，不是此发布格式。
+负责人先以实际 JAR 的 `ReleaseDatasetCommand export` 从已发布资料及真实 `approval-file` 导出发布 ZIP，并由实际 JAR 校验；来源词库 ZIP 不是发布格式。来源/版本/摘要未变的静态许可材料可按证据复用，旧 PASS 不能复用为新候选资格。
 
-构建请求提供发布标签、资料包路径与摘要、notice 根、输出父目录、previous 候选及 Podman endpoint。JAR、扩展、SQL、Compose、基础镜像锁和许可关联由固定源码入口派生，不接受任意 shell 或完整 descriptor。首次发布也须准备真实且不同的 previous API 候选。
+本机入口 `node ops/release/workflow/run-release-workflow.mjs prepare /absolute/private-request.json` 的请求含 `releaseTag`、`dataset`（`path`/`sha256`/`releaseId`/`preparationId`/`ruleId`/`sqlVersion`）、`noticesRoot`、已存在且为空的 `outputParent`、本机 Podman Unix `endpoint`。JAR、扩展、SQL、基础镜像锁和许可关联由固定源码派生，不接受任意shell或完整descriptor。新单容器验收不要求历史双镜像 previous 候选，失败恢复由目标本身真实中断与重试证明。
 
-本机编排入口：
+`prepare` 留下同版本目录的固定 `handoff.json` 与 runtime request；这些私有文件不上传。原 checkout 的真实不同原生 actor 完成 Formal 后，负责人从原正式tag手动dispatch填写submission与 `PUBLISH`，先只读预检，再经 promotion人工批准发布。运行环境和精确命令见[准备页](github-actions/first-release/preparation.md)。
 
-```sh
-node ops/release/workflow/run-release-workflow.mjs prepare /absolute/private-request.json
-```
+## 1.9. 安装与开发隔离
 
-请求字段：`releaseTag`、`dataset`（含 `path`/`sha256`/`releaseId`/`preparationId`/`ruleId`/`sqlVersion`）、`noticesRoot`、`outputParent`、`previous`（含 `candidateDirectory`/`candidateSha256`）、`endpoint`。`outputParent` 须已存在且为空，不在源码目录内。notice 路径与摘要来自受跟踪许可核准表，按 `id` 排序。
-
-准备完成后固定 `tmp/quality/release-workflow/candidate-runtime-request.json` 供 Verify 使用；`handoff.json` 绑定 checkout、宿主和候选定位，均为私有本机文件不上传。
-
-原生链完成后可只读核对：
-
-```sh
-"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume <submission-uuid> <release-tag>
-```
-
-发布时从原正式标签手动运行工作流，填写同一标签、submission UUID 和 `PUBLISH`。先 dry-check 再由 `lexiflow-release-promotion` 人工审批；只有发布步骤注入 Contents/Packages write 与 `LEXIFLOW_RELEASE_CONFIG_TOKEN`。管理员须先启用仓库 immutable releases。
-
-
-源码发行机制的固定 `synthetic-candidates.mjs` 桥只绑定 ARM64 daemon；一次真实 images、两代候选各一次 assemble 和 verify，不接受 target-platform 参数。Java／Extension 实际 build 与两代合成数据生命周期证明仍保留，不能以 synthetic fixture 替代真实候选验收。
-
-## 1.10. GHCR 镜像与公开消费
-
-镜像路径固定为 `ghcr.io/<owner>/<repo>-api:<softwareVersion>` 和 `ghcr.io/<owner>/<repo>-postgres:<softwareVersion>`，owner/repo 来自已核验 origin，平台只接受 `linux/arm64`。发布从原 handoff 请求取得本机 Podman Unix endpoint，仅加载已验候选 archive，不重新 build。每次写入前重新核对候选、Formal、源 tag 和不可变 Release 配置。
-
-`registry-images.json` 将候选和 manifest SHA、软件版本、commit 与每份镜像的 archive SHA、image/config ID、registry manifest digest 绑定。候选 `imageDigest` 不是 registry manifest digest；消费时使用 `ghcr.io/...@sha256:...`，不把可变版本 tag 当内容证明。清单及其 sidecar 只说明内容一致，仍须从可信的同一不可变 Release 取得。两个镜像都可匿名按 digest 读取且 config.digest 匹配候选后才允许公开 Release；公开前再复核一次。
-
-GHCR 首次 package 默认为 private，管理员须按 [GitHub Container registry 说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry) 手动设为 public，并核对仓库关联和 Actions 权限。私有或认证/网络状态不明时停止，不自动改可见性。已存在版本 tag 只可复用相同候选镜像，绝不覆盖；首次推送后暂停可在公开配置修复后重新消费原候选。GHCR 与 Release 不具备原子事务，写入未知或 draft 留存时保留远端状态，由负责人先查明，不自动删除或重试写请求。
+使用者只复制正式Release正文的固定digest单条run命令，再安装启用同页扩展；不下载主tar、镜像tar、源码或执行初始化脚本。Podman已安装并运行、Chrome已安装是前置，不宣称全新机器从零两步。正式容器/卷/18080、开发名字/卷/18081、唯一验收资源/18082彼此分开；数据库不映射宿主。实际使用见[用户指南](../user/podman-macos.md)。
