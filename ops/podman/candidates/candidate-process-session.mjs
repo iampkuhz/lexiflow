@@ -39,8 +39,9 @@ export function startCandidateSession({ action, directory, candidate, dbPort, lo
     || !Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 900_000) throw new Error('SESSION_REQUEST_INVALID');
   // 文件由本入口独占创建，不允许预创建再以 wx 打开。
   const fd = fs.openSync(logFile, 'wx', 0o600);
-  let child;
+  let child, deadlineAt;
   try {
+    deadlineAt = Date.now() + timeoutMs;
     child = spawn(process.execPath, ['--input-type=module', '-e', source], {
       cwd: repo, detached: true, stdio: ['pipe', fd, fd, 'pipe'], env: process.env,
     });
@@ -53,24 +54,32 @@ export function startCandidateSession({ action, directory, candidate, dbPort, lo
   child.stdin.on('error', () => {});
   child.stdio[3].on('error', () => {});
   child.stdin.end(JSON.stringify({ argv: [action, '--dir', directory], candidate }) + '\n');
-  const wait = async () => {
-    let timer;
-    const outcome = await Promise.race([exit, new Promise(resolve => { timer = setTimeout(() => resolve(null), timeoutMs); })]);
-    clearTimeout(timer);
-    if (outcome === null) {
-      // 只通过本child持有的专用pipe请求取消；从不向可能复用的PID/PGID发信号。
-      if (!closed) child.stdio[3].end('cancel\n');
-      await Promise.race([exit, sleep(10_000)]);
-      if (!closed || !groupGone(child.pid)) {
-        child.stdio[3].destroy(); child.unref();
-        throw new Error('SESSION_NOT_SETTLED');
+  let waitPromise;
+  const wait = () => {
+    if (waitPromise) return waitPromise;
+    waitPromise = (async () => {
+      let timer;
+      const remaining = Math.max(0, deadlineAt - Date.now());
+      const outcome = await Promise.race([exit, new Promise(resolve => { timer = setTimeout(() => resolve(null), remaining); })]);
+      clearTimeout(timer);
+      if (outcome === null) {
+        // 只通过本child持有的专用pipe请求取消；从不向可能复用的PID/PGID发信号。
+        if (!closed) child.stdio[3].end('cancel\n');
+        await Promise.race([exit, sleep(10_000)]);
+        if (!closed || !groupGone(child.pid)) {
+          child.stdio[3].destroy(); child.unref();
+          throw new Error('SESSION_NOT_SETTLED');
+        }
+        throw new Error('SESSION_TIMEOUT');
       }
-      throw new Error('SESSION_TIMEOUT');
-    }
-    child.stdio[3].destroy();
-    for (let i = 0; i < 40 && !groupGone(child.pid); i++) await sleep(50);
-    return { ...outcome, settled: groupGone(child.pid) };
+      child.stdio[3].destroy();
+      for (let i = 0; i < 40 && !groupGone(child.pid); i++) await sleep(50);
+      return { ...outcome, settled: groupGone(child.pid) };
+    })();
+    return waitPromise;
   };
-  return { wait, isClosed: () => closed };
+  // Observation may stop when the absolute deadline is reached, but that is
+  // not proof that the child/process group is closed or safe to clean up.
+  return { wait, isClosed: () => closed || Date.now() >= deadlineAt };
 }
 export async function runCandidateSession(input) { return startCandidateSession(input).wait(); }

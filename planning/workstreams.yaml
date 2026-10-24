@@ -947,6 +947,76 @@ workstreams:
         discovered_from: LF-TSK-QLT-2446
         depends_on: []
         deliverable: 当前完整源码与当次证据的独立只读审查。
+      - id: LF-TSK-QLT-2463
+        title: 将故障观察绑定原有候选会话生命周期
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-fault-observer/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/podman/candidates/check-podman-candidate-lifecycle.mjs
+        - ops/podman/candidates/candidate-process-session.mjs
+        - ops/podman/tests/candidate-runtime.test.mjs
+        - tmp/phase-tools/release-fault-observer/implementation/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 原会话时限内持续观察且不重置deadline的修复与直接回归。
+        acceptance_criteria:
+        - 目标出现前准备跨越原240轮不会提前结束观察；会话关闭与原deadline仍停止。
+        - 超时从启动计时，wait不重置；保留精确所有权双inspect、stop一次与settled清理护栏。
+        - 不提高Check或会话/总时限，不降低任何故障证明及完整Formal判据。
+        acceptance_evidence: [真实原生来源、冻结摘要、当次直接或独立结果定位。]
+        validation_command: node --test ops/podman/tests/candidate-runtime.test.mjs
+        required_check_ids: [eng.release.docker-contract, eng.repository.planning]
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 原会话时限内持续观察且不重置deadline的修复与直接回归。
+      - id: LF-TSK-QLT-2464
+        title: 独立验证候选故障观察生命周期
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-fault-observer/tasks.md
+        estimated_minutes: 45
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/release-fault-observer/validation/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 最终冻结差异的完整独立开发报告。
+        acceptance_criteria:
+        - 全部受选检查当次执行，无复用或跳过；真实validator不同于全部producer。
+        - 不改源码、预算、远端或候选；不把development当Formal。
+        acceptance_evidence: [真实原生来源、冻结摘要、当次直接或独立结果定位。]
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids: [eng.release.docker-contract, eng.repository.planning]
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 最终冻结差异的完整独立开发报告。
+      - id: LF-TSK-QLT-2465
+        title: 独立审查故障观察时限与所有权
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-fault-observer/tasks.md
+        estimated_minutes: 45
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/release-fault-observer/review/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 冻结差异及当次独立报告的只读意见。
+        acceptance_criteria:
+        - reviewer不同于全部producer与validator，确认deadline不重置及错归属不stop。
+        - 不跑测试，不复用旧Formal或源码资格。
+        acceptance_evidence: [真实原生来源、冻结摘要、当次直接或独立结果定位。]
+        validation_command: python3 -m json.tool tmp/phase-tools/release-fault-observer/review/opinion.json
+        required_check_ids: [eng.release.docker-contract, eng.repository.planning]
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 冻结差异及当次独立报告的只读意见。
       - id: LF-TSK-QLT-2460
         title: 从已验收清单消费唯一扩展制品
         priority: P0
@@ -9780,6 +9850,30 @@ workstreams:
           required_change_version: 1.0.0
           required_result: PASS
         deliverable: 单维护者授权变更的独立开发验证证据，不重置已有首发验证预算。
+      - id: LF-TSK-OPS-2060
+        title: 固定故障观察修复后的发行身份
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-fault-observer/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/version.txt
+        - planning/workstreams.yaml
+        - openspec/changes/release-fault-observer/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 未占用2.0.9源码身份与原证据保留。
+        acceptance_criteria:
+        - 不覆盖旧tag或证据；集成前完整独立开发和只读review。
+        - 新候选必须完整当次Formal；不复用v2.0.8结果。
+        acceptance_evidence: [真实原生来源、冻结摘要、当次直接或独立结果定位。]
+        validation_command: node ops/release/test_tools/run-release-tool-tests.mjs
+        required_check_ids: [eng.release.version, eng.repository.planning]
+        discovered_from: LF-TSK-OPS-2015
+        depends_on: []
+        deliverable: 未占用2.0.9源码身份与原证据保留。
       - id: LF-TSK-OPS-2059
         title: 固定扩展清单消费修复后的发行身份
         priority: P0
