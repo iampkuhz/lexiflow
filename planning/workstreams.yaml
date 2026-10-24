@@ -499,6 +499,400 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-QLT-2477
+        title: 分离原生执行身份与通用仓库目标
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/agent-execution-target/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/agents/identity/**
+        - scripts/acceptance/evidence/acceptance_actor_identity.py
+        - tests/agents/**
+        - tests/delivery_gate/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 通用目标选择与真实身份分离，同session双checkout不会串用记录。
+        deliverable: 对应实现或独立验证的真实证据，不能代替正式候选完整验收。
+        acceptance_criteria:
+        - 原生来源、独立actor、精确目标与提交候选摘要绑定不放宽。
+        - 公共参数不绑定Codex，未知客户端适配器失败关闭，不自报身份。
+        acceptance_evidence:
+        - 真实原生run、精确命令退出、双目标与交叉消费拒绝证据及限制。
+        validation_command: python3 -m unittest tests.agents.test_codex_runtime tests.agents.test_codex_work_package tests.delivery_gate.test_dependencies tests.delivery_gate.test_security_contract
+        required_check_ids:
+        - eng.agents.module-tests
+        - eng.delivery-gate.module-tests
+        depends_on: []
+      - id: LF-TSK-QLT-2479
+        title: 在原构建检查预算内隔离复用合成测试材料
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/tests/verified-candidate-fixture.mjs
+        - ops/release/tests/candidate.test.mjs
+        - ops/release/tests/candidate-proof.test.mjs
+        - ops/release/tests/verified-candidate.test.mjs
+        - ops/release/tests/embedded-identity.test.mjs
+        - ops/release/tests/manifest.test.mjs
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 合成字节可复用但每例独立副本，原安全断言与实际被测路径不变。
+        deliverable: 原预算内的构建检查证据、每例隔离断言与只读合成模板清理证明。
+        acceptance_criteria:
+        - 不修改生产安全判据、Check或内部runner超时，不跳过测试或复用任何正式PASS。
+        - 每例修改及cleanup只影响本例；模板只读且最终精确清理，必要生产流程仍真实执行。
+        acceptance_evidence:
+        - 真实原生绑定、原耗时定位、每例隔离回归、原build入口预算内的当次实跑日志。
+        validation_command: node ops/release/test_tools/run-release-tool-tests.mjs --suite build
+        required_check_ids:
+        - eng.release.build
+        depends_on: []
+        discovered_from: LF-TSK-OPS-2068
+      - id: LF-TSK-QLT-2478
+        title: 独立验证同会话双仓库目标隔离
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/agent-execution-target/tasks.md
+        estimated_minutes: 60
+        kind: validation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/agent-execution-target/verification/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 通用目标选择与真实身份分离，同session双checkout不会串用记录。
+        deliverable: 对应实现或独立验证的真实证据，不能代替正式候选完整验收。
+        acceptance_criteria:
+        - 原生来源、独立actor、精确目标与提交候选摘要绑定不放宽。
+        - 公共参数不绑定Codex，未知客户端适配器失败关闭，不自报身份。
+        acceptance_evidence:
+        - 真实原生run、精确命令退出、双目标与交叉消费拒绝证据及限制。
+        validation_command: python3 -m unittest tests.agents.test_codex_runtime tests.delivery_gate.test_dependencies tests.delivery_gate.test_security_contract
+        required_check_ids:
+        - eng.agents.module-tests
+        - eng.delivery-gate.module-tests
+        depends_on: []
+      - id: LF-TSK-QLT-2476
+        title: 将发行入口合同检查绑定单容器实际入口
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/tests/runtime-entry.test.mjs
+        - ops/release/tests/lifecycle-install.test.mjs
+        - ops/release/tests/lifecycle.test.mjs
+        - ops/release/tests/lifecycle-fixture.mjs
+        - tests/verification/test_runtime_entry_checks.py
+        - tests/verification/test_lifecycle_checks.py
+        - config/engineering/module-checks.yaml
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: runtime-entry与lifecycle原正式Check实际覆盖新容器入口，原安全目标逐项映射保留。
+        deliverable: 新入口及卷状态、信号与进程监督合同测试，仍执行通用transport安全测试。
+        acceptance_criteria:
+        - 保留Check IDs与超时，不复活废弃的正式安装包入口或放宽单镜像manifest。
+        - 未知卷只读拒绝、身份漂移、初始化中断、进程退出与取消清理实际覆盖，不能只读文件断言。
+        acceptance_evidence:
+        - 原测试意图到新实现证据映射、真实直接测试命令和退出、尚未实机边界。
+        validation_command: node ops/release/test_tools/run-release-tool-tests.mjs --suite runtime-entry
+        required_check_ids:
+        - eng.release.runtime-entry
+        - eng.release.lifecycle-install
+        - eng.release.lifecycle
+        depends_on: []
+        discovered_from: LF-TSK-OPS-2062
+      - id: LF-TSK-QLT-2475
+        title: 同步合成发行构建与单容器生命周期
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/checks/release/source/**
+        - tests/verification/test_release_runtime_artifacts.py
+        - tests/verification/test_release_runtime_lifecycle.py
+        - tests/verification/test_release_runtime_check.py
+        - tests/verification/test_release_source_bridge.py
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 现有合成生命周期保留两代资料真实构建和运行，使用单runtime-image而不引用旧Compose入口。
+        deliverable: 新合同合成构建桥及真实生命周期和对应直接测试。
+        acceptance_criteria:
+        - 不删除Check或放宽超时；合成资料保持非正式材料，不能替代目标真实候选或公开安装。
+        - 两代资料各自内嵌匹配镜像；完整执行原来数据保留、故障、恢复和归属清理意图。
+        acceptance_evidence:
+        - 真实原生来源、冻结、逐项测试命令退出与证据及明确限制。
+        validation_command: python3 -m unittest tests.verification.test_release_runtime_artifacts tests.verification.test_release_runtime_lifecycle
+          tests.verification.test_release_runtime_check tests.verification.test_release_source_bridge
+        required_check_ids:
+        - eng.release.lifecycle-runtime
+        depends_on: []
+        discovered_from: LF-TSK-OPS-2063
+      - id: LF-TSK-QLT-2472
+        title: 验收真实单容器候选运行合同
+        priority: P0
+        task_version: 2
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/checks/release/candidate/**
+        - ops/podman/candidates/**
+        - ops/podman/tests/candidate-runtime.test.mjs
+        - ops/release/integrity/candidate_runtime_result_contract.py
+        - tests/verification/test_candidate_runtime_check.py
+        - tests/delivery_gate/test_candidate.py
+        - tests/delivery_gate/test_release_subject.py
+        - tests/delivery_gate/fixtures.py
+        - scripts/acceptance/**
+        - config/engineering/module-checks.yaml
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 验收真实单容器候选运行合同；边界与验收见本阶段 OpenSpec。
+        deliverable: 验收真实单容器候选运行合同及当次可核验证据。
+        acceptance_criteria:
+        - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
+        acceptance_evidence:
+        - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
+        validation_command: python3 -m unittest tests.verification.test_candidate_runtime_check tests.delivery_gate.test_candidate tests.delivery_gate.test_release_subject
+        required_check_ids:
+        - eng.release.candidate-runtime
+        depends_on: []
+      - id: LF-TSK-QLT-2480
+        title: 独立执行高风险单容器工程集成验收
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-release/formal-integration/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立执行高风险单容器工程集成验收；边界与验收见本阶段 OpenSpec。
+        deliverable: 独立执行高风险单容器工程集成验收及当次可核验证据。
+        acceptance_criteria:
+        - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
+        acceptance_evidence:
+        - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.docs
+        discovered_from: LF-TSK-OPS-2065
+        depends_on: []
+      - id: LF-TSK-QLT-2481
+        title: 独立执行精确单容器发行完整基线
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-release/formal-release/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立执行精确单容器发行完整基线；边界与验收见本阶段 OpenSpec。
+        deliverable: 独立执行精确单容器发行完整基线及当次可核验证据。
+        acceptance_criteria:
+        - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
+        acceptance_evidence:
+        - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
+        validation_command: node ops/release/workflow/run-release-workflow.mjs formal validate <uuid>
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.docs
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+      - id: LF-TSK-QLT-2482
+        title: 独立审查精确单容器候选及验收证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-release/formal-release-review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立审查精确单容器候选及验收证据；边界与验收见本阶段 OpenSpec。
+        deliverable: 独立审查精确单容器候选及验收证据及当次可核验证据。
+        acceptance_criteria:
+        - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
+        acceptance_evidence:
+        - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
+        validation_command: node ops/release/workflow/run-release-workflow.mjs formal review <uuid>
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.docs
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+      - id: LF-TSK-QLT-2484
+        title: 独立审查单容器工程Formal冻结证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-release/formal-integration-review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立审查单容器工程Formal冻结证据；边界与验收见本阶段 OpenSpec。
+        deliverable: 独立审查单容器工程Formal冻结证据及当次可核验证据。
+        acceptance_criteria:
+        - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
+        acceptance_evidence:
+        - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.docs
+        discovered_from: LF-TSK-OPS-2065
+        depends_on: []
+      - id: LF-TSK-QLT-2483
+        title: 闭合真实检查导入与单容器断言
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - config/engineering/module-checks.yaml
+        - tests/verification/test_development_selection_matrix.py
+        - tests/verification/test_release_checks.py
+        - tmp/phase-tools/single-container-release/check-closure/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 闭合真实检查导入与单容器断言，不降低正式合同、安全断言或检查预算。
+        deliverable: 当前实现、责任节点精准测试和真实原生结果。
+        acceptance_criteria:
+        - 原独立失败有具体根因及直接回归；保持现有正式资格及真实身份边界。
+        acceptance_evidence:
+        - 实际diff、原生身份、直接检查及未运行限制。
+        validation_command: python3 -m unittest tests.verification.test_development_selection_matrix tests.verification.test_release_checks
+        required_check_ids:
+        - eng.repository.planning
+        depends_on: []
+        discovered_from: LF-TSK-QLT-2473
+      - id: LF-TSK-QLT-2473
+        title: 独立验证最终单容器发行差异
+        priority: P0
+        task_version: 4
+        change_version: 1.3.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-release/validation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立验证最终单容器发行差异；边界与验收见本阶段 OpenSpec。
+        deliverable: 独立验证最终单容器发行差异及当次可核验证据。
+        acceptance_criteria:
+        - 验证最终本地fixture及所有未执行消费者闭包；开发累计预算180分钟至19:30UTC，原始FAIL与成本全部保留。
+        - 验证闭合后的CFT开发包入口与正式候选资源参数；累计执行成本保留，不以换actor重置预算。
+        - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
+        acceptance_evidence:
+        - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.docs
+        depends_on: []
+      - id: LF-TSK-QLT-2474
+        title: 独立审查单容器发行冻结证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-release/review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立审查单容器发行冻结证据；边界与验收见本阶段 OpenSpec。
+        deliverable: 独立审查单容器发行冻结证据及当次可核验证据。
+        acceptance_criteria:
+        - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
+        acceptance_evidence:
+        - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
+        validation_command: python3 -m json.tool tmp/phase-tools/single-container-release/review/report.json
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.docs
+        depends_on: []
       - id: LF-TSK-QLT-2428
         title: 修正工具链权限测试的临时文件属组前提
         priority: P0
@@ -7540,6 +7934,66 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-EXT-2006
+        title: 分离CI插件开发预览与正式打包
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - .github/workflows/ci.yml
+        - extension/scripts/packaging/package-extension-release.mjs
+        - extension/scripts/checks/check-extension-archive.mjs
+        - extension/tests/archive-smoke.mjs
+        - extension/tests/release.test.mjs
+        - extension/tests/archive-check.test.mjs
+        - extension/tests/release-ci.test.mjs
+        - tmp/phase-tools/single-container-release/ci-preview/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 分离CI插件开发预览与正式打包，不降低正式合同、安全断言或检查预算。
+        deliverable: 当前实现、责任节点精准测试和真实原生结果。
+        acceptance_criteria:
+        - 原独立失败有具体根因及直接回归；保持现有正式资格及真实身份边界。
+        acceptance_evidence:
+        - 实际diff、原生身份、直接检查及未运行限制。
+        validation_command: node --test extension/tests/release.test.mjs
+        required_check_ids:
+        - eng.repository.planning
+        depends_on: []
+        discovered_from: LF-TSK-EXT-2005
+      - id: LF-TSK-EXT-2005
+        title: 落实自动连接及发行身份状态
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - extension/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 落实自动连接及发行身份状态；边界与验收见本阶段 OpenSpec。
+        deliverable: 落实自动连接及发行身份状态及当次可核验证据。
+        acceptance_criteria:
+        - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
+        acceptance_evidence:
+        - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
+        validation_command: npm --prefix extension test
+        required_check_ids:
+        - eng.extension.quality
+        depends_on: []
       - id: LF-TSK-EXT-2001
         title: 收拢页面生命周期与采集快照协调
         priority: P0
@@ -8027,6 +8481,257 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-OPS-2062
+        title: 实现单容器基础设施与可靠生命周期
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/**
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/**
+        - backend/product/api/src/test/java/io/lexiflow/api/runtime/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 实现单容器基础设施与可靠生命周期；边界与验收见本阶段 OpenSpec。
+        deliverable: 实现单容器基础设施与可靠生命周期及当次可核验证据。
+        acceptance_criteria:
+        - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
+        acceptance_evidence:
+        - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
+        validation_command: node --test ops/docker/tests/*.test.mjs
+        required_check_ids:
+        - eng.release.build
+        depends_on: []
+      - id: LF-TSK-OPS-2063
+        title: 构建唯一运行镜像与私有发行候选
+        priority: P0
+        task_version: 4
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/build/**
+        - ops/release/integrity/**
+        - ops/release/workflow/run-release-build-pipeline.mjs
+        - ops/release/workflow/run-release-workflow.mjs
+        - ops/release/tests/**
+        - ops/release/test_tools/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 构建唯一运行镜像与私有发行候选；边界与验收见本阶段 OpenSpec。
+        deliverable: 构建唯一运行镜像与私有发行候选及当次可核验证据。
+        acceptance_criteria:
+        - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
+        acceptance_evidence:
+        - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
+        validation_command: node --experimental-test-module-mocks --test ops/release/tests/build.test.mjs ops/release/tests/pipeline.test.mjs
+          ops/release/tests/build-execution.test.mjs ops/release/tests/single-image.test.mjs
+          ops/release/tests/synthetic-candidates.test.mjs ops/release/tests/workflow.test.mjs
+        required_check_ids:
+        - eng.release.build
+        - eng.release.manifest
+        depends_on: []
+      - id: LF-TSK-OPS-2064
+        title: 晋升唯一正式镜像和三附件发行
+        priority: P0
+        task_version: 2
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/workflow/promote_verified_release.py
+        - ops/release/workflow/release_registry.py
+        - ops/release/notes/**
+        - tests/verification/test_release_promotion.py
+        - tests/verification/test_release_registry.py
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 晋升唯一正式镜像和三附件发行；边界与验收见本阶段 OpenSpec。
+        deliverable: 晋升唯一正式镜像和三附件发行及当次可核验证据。
+        acceptance_criteria:
+        - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
+        acceptance_evidence:
+        - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
+        validation_command: python3 -m unittest tests.verification.test_release_promotion tests.verification.test_release_registry
+        required_check_ids:
+        - eng.release.build
+        depends_on: []
+      - id: LF-TSK-OPS-2067
+        title: 隔离源码开发安装与单容器候选验收
+        priority: P0
+        task_version: 3
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/podman/commands/manage-podman-installation.mjs
+        - ops/podman/installation/installation-upgrade-workflow.mjs
+        - ops/podman/tests/candidate.test.mjs
+        - ops/podman/tests/unified-flow.test.mjs
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 源码开发入口不再消费已移除的双镜像候选适配器，真实单容器候选仅由新Check消费。
+        deliverable: 删除过时注入及对应测试并保留现有开发安装、归属和确认护栏。
+        acceptance_criteria:
+        - 新候选不能经源码开发入口创建多容器，保留源码开发18081与数据库15432隔离。
+        - 不删弱未知资源归属、进程取消与源码输入漂移的有效测试；候选合同由新runner覆盖。
+        acceptance_evidence:
+        - 真实原生身份、逐项直接测试退出与日志、file claims及限制。
+        validation_command: node --test ops/podman/tests/candidate.test.mjs ops/podman/tests/unified-flow.test.mjs ops/podman/tests/deployment.test.mjs
+        required_check_ids:
+        - eng.release.docker-contract
+        depends_on: []
+        discovered_from: LF-TSK-QLT-2472
+      - id: LF-TSK-OPS-2068
+        title: 同步唯一镜像候选安全测试材料
+        priority: P0
+        task_version: 2
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/tests/candidate.test.mjs
+        - ops/release/tests/candidate-proof.test.mjs
+        - ops/release/tests/verified-candidate.test.mjs
+        - ops/release/tests/embedded-identity.test.mjs
+        - ops/release/tests/manifest.test.mjs
+        - ops/release/tests/verified-candidate-fixture.mjs
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 候选、清单、嵌入身份与验证测试使用最新单runtime-image合同。
+        deliverable: 最新材料及仍完整覆盖篡改、路径、身份和漂移拒绝的直接测试。
+        acceptance_criteria:
+        - 安全边界断言保留；失效多平台合同替换为严格只接受linux/arm64。
+        - 对应源码归档与索引的精确身份和不可替换要求有直接测试。
+        acceptance_evidence:
+        - 真实原生绑定、命令退出、日志及未运行边界。
+        validation_command: node --test ops/release/tests/candidate.test.mjs ops/release/tests/candidate-proof.test.mjs
+          ops/release/tests/verified-candidate.test.mjs ops/release/tests/embedded-identity.test.mjs ops/release/tests/manifest.test.mjs
+        required_check_ids:
+        - eng.release.build
+        - eng.release.manifest
+        depends_on: []
+        discovered_from: LF-TSK-OPS-2063
+      - id: LF-TSK-OPS-2065
+        title: 集成单容器设计与使用说明
+        priority: P0
+        task_version: 15
+        change_version: 1.12.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - openspec/**
+        - planning/workstreams.yaml
+        - docs/**
+        - README.md
+        - harness/**
+        - config/engineering/module-checks.yaml
+        - scripts/agents/README.md
+        - scripts/agents/identity/execution_identity.py
+        - scripts/agents/identity/codex_actor_identity.py
+        - scripts/acceptance/evidence/acceptance_actor_identity.py
+        - scripts/acceptance/evidence/verify_candidate_acceptance_evidence.py
+        - scripts/checks/release/candidate/check_candidate_installation_lifecycle.py
+        - scripts/acceptance/task_definition/release_subject.py
+        - ops/release/workflow/promote_verified_release.py
+        - ops/release/integrity/candidate_runtime_result_contract.py
+        - ops/docker/runtime-entrypoint.sh
+        - ops/docker/tests/test_module_check_adapter.py
+        - ops/docker/tests/test_podman_local.py
+        - ops/release/tests/lifecycle-install.test.mjs
+        - ops/release/tests/version.test.mjs
+        - tests/verification/test_release_promotion.py
+        - tests/verification/test_ci_workflows.py
+        - tests/delivery_gate/**
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/RuntimeInitialization.java
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/ContainerHealthController.java
+        - backend/product/api/src/main/java/io/lexiflow/api/runtime/RuntimeStatusController.java
+        - backend/product/api/src/test/java/io/lexiflow/api/runtime/RuntimeInitializationTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/runtime/ContainerHealthControllerTest.java
+        - ops/release/notes/2.0.10.md
+        - ops/release/notes/2.1.0.md
+        - extension/scripts/packaging/package-extension-release.mjs
+        - extension/scripts/packaging/extension-archive-contract.mjs
+        - extension/tests/release.test.mjs
+        - extension/tests/translation-e2e.mjs
+        - ops/release/workflow/release-execution-environment.mjs
+        - ops/release/version.txt
+        - ops/release/distribution-licenses.json
+        - .github/**
+        - ops/podman/**
+        - ops/release/runtime/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 集成单容器设计与使用说明；边界与验收见本阶段 OpenSpec。
+        deliverable: 集成单容器设计与使用说明及当次可核验证据。
+        acceptance_criteria:
+        - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
+        acceptance_evidence:
+        - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
+        validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.docs
+        - eng.release.version
+        depends_on: []
+      - id: LF-TSK-OPS-2066
+        title: 正式验收发布及公开安装单容器发行
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-release/release/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 正式验收发布及公开安装单容器发行；边界与验收见本阶段 OpenSpec。
+        deliverable: 正式验收发布及公开安装单容器发行及当次可核验证据。
+        acceptance_criteria:
+        - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
+        acceptance_evidence:
+        - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids:
+        - eng.release.candidate-runtime
+        depends_on: []
       - id: LF-TSK-OPS-2001
         title: 适配 PostgreSQL 读写边界与原子发布
         priority: P0

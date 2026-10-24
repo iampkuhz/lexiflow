@@ -3,7 +3,7 @@
 > 位置：[仓库生命周期](../README.md) → 本机开发。发行安装见[用户指南](../user/podman-macos.md)；本页输出可调试的 API 与扩展，不是正式验收证据。
 
 
-以下 macOS 源码开发命令在仓库根目录执行。需要 **Eclipse Temurin Java 25、Python 3、Node.js/npm 和 Chrome**，以及本机 `lsof`、`ps`；Gradle 使用仓库自带 Wrapper。正常视频体验需要可连接且已发布词库的 PostgreSQL 开发库；有限演示词库仅供隔离自动测试使用。这里的开发数据库初始化与重建不适用于 Docker 发行安装数据。
+以下 macOS 源码开发命令在仓库根目录执行。先在开发终端执行 `export LEXIFLOW_API_PORT=18081`；开发构建与 API 使用同一端口。开发容器命名 `lexiflow-dev`、数据卷独立，正式安装 `lexiflow-release`/18080 不受开发启停影响。需要 **Eclipse Temurin Java 25、Python 3、Node.js/npm 和 Chrome**，以及本机 `lsof`、`ps`；Gradle 使用仓库自带 Wrapper。正常视频体验需要可连接且已发布词库的 PostgreSQL 开发库；有限演示词库仅供隔离自动测试使用。这里的开发数据库初始化与重建不适用于 Docker 发行安装数据。
 
 
 ```plantuml
@@ -32,7 +32,7 @@ endlegend
 @enduml
 ```
 
-E1 的 API 端口由扩展构建参数与 host permission 共同绑定，默认 18080；E2 读取 PostgreSQL 已发布资料。Redis 与未来后台任务不属于观看最短请求链的必经节点。开发 compose 有持久数据卷，测试不能把它当临时资源使用。
+E1 的 API 端口由扩展构建参数与 host permission 共同绑定，开发使用 18081；E2 读取 PostgreSQL 已发布资料。Redis 与未来后台任务不属于观看最短请求链的必经节点。开发 compose 有持久数据卷，测试不能把它当临时资源使用。
 
 ## 1.1. 确认 Java
 
@@ -83,7 +83,7 @@ python3 -m scripts.local.start_local_api
 
 启动前先确认数据库运行且词库已发布。启动器从 `.local/lexiflow/runtime.json` 读取 `JDBC_URL`，显式环境变量优先；缺失或空白时返回 `BLOCKED`，不转入演示词库。它不会自动读取 `.env`，也不会继承被终止的旧 API 环境变量。配置文件格式错误或包含未知键时明确停止，不打印配置值。
 
-默认端口为 `18080`。如果已被占用，启动器会列出 PID、进程名称等身份信息，并询问：
+开发端口固定使用 `18081`，正式安装保留 `18080`。如果已被占用，启动器会列出 PID、进程名称等身份信息，并询问：
 
 ```text
 是否终止上述进程（SIGTERM）并启动 API？[y/N]
@@ -96,7 +96,7 @@ python3 -m scripts.local.start_local_api
 保持 API 终端运行，在另一个终端检查：
 
 ```bash
-curl --fail http://127.0.0.1:18080/actuator/health
+curl --fail http://127.0.0.1:18081/actuator/health
 ```
 
 健康响应只说明 API 已启动，不代表词库已发布。没有候选时返回 `NO_PENDING`，只保留英文；不会用词典内容以外的模型结果补充提示。

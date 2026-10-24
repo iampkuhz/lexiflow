@@ -23,16 +23,18 @@
 
 在专用 checkout 按[隔离验证环境](../../verification-environment.md#11-一次性准备运行时与镜像)创建 `.local/lexiflow-python` 并安装 `requirements-dev.txt`。发行 workflow 在构建和两步晋升中显式使用同一 Node 22 与该 venv。原生 Formal 和晋升通过同一[受控执行环境](../../../../ops/release/workflow/release-execution-environment.mjs)固定工具 PATH、用户、locale、时区与临时根，过滤偶然的会话环境，再传入显式私有验证能力；缺工具或能力立即停止。Node 启动的 Python 子进程沿用该环境。不依赖 launchd 服务的全局 Python 恰好安装 PyYAML，也不在取得发布凭据后临时安装依赖。
 
-## 1.2. 首次发行材料：没有旧公开 Release 也不能省 previous
+<a id="12-首次发行材料没有旧公开-release-也不能省-previous"></a>
+
+## 1.2. 首次发行材料
 
 推 tag 前由维护者交接以下材料，逐项核实；不是从 quick artifact 或本机 `.local/podman` 凑一个目录：
 
 - **完整许可核准表及 notice。** [`distribution-licenses.json`](../../../../ops/release/distribution-licenses.json) 必须受 Git 跟踪，按 `id` 排序，覆盖 `LexiFlow`、`API-runtime`、`PostgreSQL`、`extension-third-party`、`dataset` 五类实际组件；每项 notice 的路径、字节数、摘要须与真实文件一致。只有 LexiFlow/MIT 一个条目不足以发行。负责人先核实可再分发依据、补齐记录并提交，再选择最终发行 commit；不能把「工具要求五类」当作许可已经获批。
 - **真实资料快照。** 从已发布且经真实来源审批的 Lexicon 数据导出，包含 `manifest.json`、`approvals.json`、`dataset.ndjson`、`entries.ndjson`、`forms.ndjson`。本机 ECDICT 来源 ZIP/CSV 不是发布快照；测试 synthetic 包也不是正式资料。
-- **不同源码提交的 previous 完整 ARM64 候选。** 由维护者从独立、干净的前置源码使用现有 [images / assemble / verify pipeline](../../../../ops/release/workflow/run-release-build-pipeline.mjs) 准备，交接实际候选目录和 `candidate.json` 的摘要。它可保持私有，不要求先公开另一个 GitHub Release；但必须包含可真实运行的 API、PostgreSQL、配套扩展、资料、SQL 与许可材料。不能让 previous 和 target 指向同一 commit，也不能使用 `test_tools` 的合成候选冒充。首次公开发行同样需要真实升级/失败恢复验收。
+- **目标资料和版本说明。** 当前提交的 `ops/release/notes/<version>.md` 必须非空且版本匹配。单容器候选内嵌真实已发布资料，完整验收其初始化、同卷重启、故障和恢复；不要求历史双镜像 previous 候选，也不承诺任意历史数据库迁移。
 - **当前正式发行 Task 与真实 actor。** 按 [Delivery Gate](../../../reference/delivery-gate.md) 确认 Catalog 中目标 Task 及正式发行计划，送验、验证、审查角色已分开。普通开发 Hook PASS 不够。
 
-没有上述材料时停在此步，请维护者完成资料准备/许可核准/previous 构建；现有 `prepare` 命令要求 previous，不提供「首发跳过」开关。这是必须先完成的工程交接，不是后面的 GitHub 按钮可以补办的事情。
+没有上述材料时停在此步，请维护者完成资料准备/许可核准/版本说明和精确目标构建；不能提供「首发跳过」验收开关。这是必须先完成的工程交接，不是后面的 GitHub 按钮可以补办的事情。
 
 ### 1.2.1. 导出并核对发布资料
 
@@ -76,19 +78,15 @@ python3 -m scripts.local.run_with_java_toolchain java \
   },
   "noticesRoot": "/absolute/private-inputs/notices",
   "outputParent": "/absolute/private-output/target",
-  "previous": {
-    "candidateDirectory": "/absolute/private-output/previous/releases/<候选目录>",
-    "candidateSha256": "<previous candidate.json 的64位小写SHA-256>"
-  },
   "endpoint": "unix:///absolute/path/to/podman.sock"
 }
 ```
 
-四个资料身份由负责人按实际资料与策略登记，不能任填占位名称；格式为 1–128 位英文数字及 `._-`，首字符英文数字。`outputParent` 须已存在且为空，不能在源码中、与源码互为父子，或与 previous 目录互为父子；使用规范绝对路径，所有输入禁止 symlink。`endpoint` 只接受实际本机 Unix socket，须和测试 ARM64 endpoint 指向同一经确认的 daemon。notice 根必须含核准表中全部原样文件。
+四个资料身份由负责人按实际资料与策略登记，不能任填占位名称；格式为 1–128 位英文数字及 `._-`，首字符英文数字。`outputParent` 须已存在且为空，不能在源码中、与源码互为父子；使用规范绝对路径，所有输入禁止 symlink。`endpoint` 只接受实际本机 Unix socket，须和测试 ARM64 endpoint 指向同一经确认的 daemon。notice 根必须含核准表中全部原样文件。
 
 ## 1.3. 在原 checkout 完成真实独立 Formal
 
-在同一 Mac、同一 OS 用户、同一稳定 checkout 的真实 Codex 任务里执行。原生任务不是 Actions job，不会自动继承 Environment secret：在验收宿主私有环境中安全配置同一隔离资源对应的 `LEXIFLOW_POSTGRES_TEST_JDBC_URL`、`LEXIFLOW_REDIS_TEST_ENDPOINT`、`LEXIFLOW_RELEASE_ARM64_DOCKER_HOST`、`LEXIFLOW_JAVA_HOME`、`LEXIFLOW_RELEASE_NODE_BIN` 及受要求的构建缓存，不在提示词或日志中粘贴 secret。下列 `formal` 入口从固定本机 handoff 旁派生 `candidate-runtime-request.json`，并与晋升共用受控环境；不要用临时 shell PATH 或不一致的私有配置执行这条发行链。不同角色不能在一个实现者会话里依次自签。先确认 Catalog 中正式发行 Task 的必需检查与依赖已齐；干净提交通过固定 handoff 送验，不要求 PASS 开发报告，也不为此添加开发差异：
+在同一 Mac、同一 OS 用户、同一稳定 checkout 的真实 Codex 任务里执行。原生任务不是 Actions job，不会自动继承 Environment secret：在验收宿主私有环境中安全配置同一隔离资源对应的 `LEXIFLOW_POSTGRES_TEST_JDBC_URL`、`LEXIFLOW_REDIS_TEST_ENDPOINT`、`LEXIFLOW_RELEASE_ARM64_DOCKER_HOST`、`LEXIFLOW_JAVA_HOME`、`LEXIFLOW_RELEASE_NODE_BIN` 及受要求的构建缓存，不在提示词或日志中粘贴 secret。下列 `formal` 入口从固定版本目录 `tmp/quality/release-workflow/<softwareVersion>/` 中的 handoff 旁派生 `candidate-runtime-request.json`，并与晋升共用受控环境；不要用临时 shell PATH 或不一致的私有配置执行这条发行链。不同角色不能在一个实现者会话里依次自签。先确认 Catalog 中正式发行 Task 的必需检查与依赖已齐；干净提交通过固定 handoff 送验，不要求 PASS 开发报告，也不为此添加开发差异：
 
 ```sh
 # 生产者/送验者：从本 checkout 的固定 handoff 派生真实发行主体。
@@ -111,10 +109,10 @@ python3 -m scripts.local.run_with_java_toolchain java \
 
 ## 1.4. 首次 GHCR 可见性
 
-首次 GHCR package 通常为 private。发布从已验候选加载并推送 `ghcr.io/iampkuhz/lexiflow-api:<版本>` 与 `ghcr.io/iampkuhz/lexiflow-postgres:<版本>`，然后验证匿名 digest 读取；它**不会自动改 package 可见性**。如果此处因 private 失败：
+首次 GHCR package 通常为 private。发布从已验候选加载并推送唯一 `ghcr.io/iampkuhz/lexiflow:<版本>`，然后验证匿名 digest 读取；它**不会自动改 package 可见性**。如果此处因 private 失败：
 
-1. 先查明报告与远端实际状态。只有确认两份镜像均已完整推送、摘要与本候选一致，且没有已创建 draft/未知写请求，才继续；不能看到失败就盲目重跑。
-2. 管理员从个人/组织 **Packages → 对应 package → Package settings** 将两份都设为 public，并核对仓库关联、Actions package 访问权限。依据 [GitHub Container registry 配置](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)，不要把认证拉取成功当作匿名可读。
+1. 先查明报告与远端实际状态。只有确认唯一镜像已完整推送、摘要与本候选一致，且没有已创建 draft/未知写请求，才继续；不能看到失败就盲目重跑。
+2. 管理员从个人/组织 **Packages → 对应 package → Package settings** 将该唯一 package 设为 public，并核对仓库关联、Actions package 访问权限。依据 [GitHub Container registry 配置](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)，不要把认证拉取成功当作匿名可读。
 3. 修复可见性后，重新消费原候选/原 Formal，通过只读 `resume` 后再手动发起原 tag 的同参数 workflow，并重新取得两道 Environment 批准。同版本 tag 只允许复用相同镜像，禁止覆盖不同内容。若已有 draft/远端写入未知，按下一节停下，由负责人先查明，不自动删除/重新上传。
 
 ## 1.5. 失败去向
@@ -124,9 +122,9 @@ python3 -m scripts.local.run_with_java_toolchain java \
 | 没有 Run workflow / job 全部 skipped | 先确认 workflow 在默认分支、有写权限、ref 是原 tag，三个 inputs 完全匹配；skipped 不代表 PASS。 |
 | source 拒绝 / runner 排队 | 核对正式版本、精确 tag、repository readiness 和唯一 Mac labels/在线状态；不要创建第二台同标签宿主。 |
 | `LICENSE_LEDGER_INVALID` / `NOTICE_MISMATCH` | 回到许可核准，不能填占位 license 或重写 notice 摘要掩盖不符；源码改变后重选未使用发行身份。 |
-| `PREVIOUS_NOT_DISTINCT` / dataset 校验失败 | 回到材料准备；previous 必须不同提交，资料必须由实际 Java 导出并经真实审批。 |
+| dataset 校验失败 | 回到材料准备；资料必须由实际 Java 导出并经真实审批。 |
 | `WORKFLOW_RESIDUE` / 输入漂移 / Formal 缺链 | 保留原目录、日志和链，确定失败原因后由负责人按事务边界处理；不删 handoff、移动源码或复制 PASS receipt。 |
-| 18080 冲突 / Docker endpoint 不可用 | 核对隔离宿主和 Unix socket；不杀用户服务，不更改正式插件端口。 |
+| 18082 验收端口冲突 / Docker endpoint 不可用 | 核对隔离宿主和 Unix socket；不杀用户服务，不更改正式插件端口。 |
 | GHCR private / registry 验证失败 | 只有已核实的完整相同镜像与确定远端状态可按上节修可见性后续办；认证/网络未知时先停止。 |
 | 同 tag 已有 draft/published Release 或写请求结果未知 | 保留远端现场，负责人核对来源和资产；不自动删 draft、不重复写、不移动 tag、不 force。公开不可变资产不能补换。 |
 
