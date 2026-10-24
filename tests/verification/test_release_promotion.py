@@ -54,7 +54,7 @@ class Fixture:
         for role, name, data in (
             ("runtime-entry", "lexiflow.sh", b"#!/bin/sh\n"),
             ("license", "LICENSE", b"MIT\n"),
-            ("extension", "extension/package.zip", b"accepted extension zip bytes"),
+            ("extension", "extension.zip", b"accepted extension zip bytes"),
             ("api-image", "images/api.tar", b"image bytes"),
             ("postgres-image", "images/postgres.tar", b"postgres image bytes"),
         ):
@@ -313,7 +313,7 @@ class PromotionTests(unittest.TestCase):
                 "manifestSha256": self.fixture.proof["candidate"]["manifestSha256"],
             },
         )
-        extension_bytes = (self.fixture.payload / "extension/package.zip").read_bytes()
+        extension_bytes = (self.fixture.payload / "extension.zip").read_bytes()
         self.assertEqual(FakeGitHub.extension, extension_bytes)
         extension_asset = next(
             item
@@ -330,7 +330,7 @@ class PromotionTests(unittest.TestCase):
                     "LICENSE",
                     "images/api.tar",
                     "images/postgres.tar",
-                    "extension/package.zip",
+                    "extension.zip",
                     "manifest.json",
                     "manifest.json.sha256",
                 },
@@ -359,6 +359,70 @@ class PromotionTests(unittest.TestCase):
                 for call in FakeGitHub.calls
             )
         )
+
+    def test_extension_path_comes_only_from_bound_manifest(self):
+        extension = next(
+            item for item in self.fixture.artifacts if item["role"] == "extension"
+        )
+        original = self.fixture.payload / extension["path"]
+        target = self.fixture.payload / "artifacts/chrome.zip"
+        target.parent.mkdir()
+        original.rename(target)
+        extension["path"] = "artifacts/chrome.zip"
+        self.fixture.refresh()
+        # Exercise both precheck and actual asset copying against the declared path.
+        self._assert_declared_extension_assets(target)
+
+    def _assert_declared_extension_assets(self, target):
+        self.assertEqual(self.promote()["result"], "PASS")
+        with (
+            patch.object(p, "GitHub", FakeGitHub),
+            patch.object(p, "_repository", return_value=("o", "r")),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
+        ):
+            result = self.promote(publish=True)
+        self.assertTrue(result["published"])
+        self.assertEqual(len(result["assets"]), 9)
+        self.assertEqual(FakeGitHub.extension, target.read_bytes())
+        with tarfile.open(fileobj=io.BytesIO(FakeGitHub.archive), mode="r:gz") as tar:
+            self.assertEqual(
+                tar.extractfile(
+                    target.relative_to(self.fixture.payload).as_posix()
+                ).read(),
+                target.read_bytes(),
+            )
+
+    def test_extension_set_size_and_path_rejections(self):
+        import copy
+
+        original = copy.deepcopy(self.fixture.artifacts)
+        extension = next(item for item in original if item["role"] == "extension")
+        others = [item for item in original if item["role"] != "extension"]
+        cases = [
+            (others, "candidate-extension-invalid"),
+            (
+                [*original, {**extension, "path": "second.zip"}],
+                "candidate-extension-invalid",
+            ),
+            (
+                [*others, {**extension, "bytes": p.MAX_EXTENSION + 1}],
+                "candidate-extension-invalid",
+            ),
+            (
+                [*others, {**extension, "path": "../extension.zip"}],
+                "candidate-manifest-invalid",
+            ),
+        ]
+        for artifacts, reason in cases:
+            with self.subTest(reason=reason, count=len(artifacts)):
+                self.fixture.manifest["artifacts"] = artifacts
+                self.fixture.refresh()
+                with self.assertRaisesRegex(p.PromotionError, reason):
+                    self.promote()
+        self.assertFalse(any(call[2] == "POST" for call in FakeGitHub.calls))
 
     def test_missing_formal_proof_and_identity_rejections(self):
         with patch.object(

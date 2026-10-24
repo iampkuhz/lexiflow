@@ -1044,11 +1044,7 @@ def _bound_candidate(
         total += item["bytes"]
         if total > MAX_UNCOMPRESSED:
             _fail("asset-size-limit")
-    if (
-        len(extensions) != 1
-        or extensions[0]["path"] != "extension/package.zip"
-        or extensions[0]["bytes"] > MAX_EXTENSION
-    ):
+    if len(extensions) != 1 or extensions[0]["bytes"] > MAX_EXTENSION:
         _fail("candidate-extension-invalid")
     if (
         len(images) != 2
