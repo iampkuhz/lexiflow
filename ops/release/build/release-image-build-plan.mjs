@@ -101,14 +101,18 @@ export async function prepareImageBuild(input) {
     if (!Array.isArray(descriptor.notices) || descriptor.notices.length < 1 || descriptor.notices.length > 128) reject('NOTICES_INVALID');
     const notices = [];
     const seen = new Set();
+    const targets = new Set();
     for (const item of descriptor.notices) {
       if (!keys(item, ['path', 'bytes', 'sha256']) || !Number.isSafeInteger(item.bytes) || item.bytes < 1
         || item.bytes > 2 ** 40 || !HASH.test(item.sha256)) reject('NOTICES_INVALID');
       validateRelativePath(item.path);
-      if (!item.path.startsWith('licenses/') || seen.has(item.path)) reject('NOTICES_INVALID');
+      if ((item.path !== 'LICENSE' && !item.path.startsWith('licenses/')) || seen.has(item.path)) reject('NOTICES_INVALID');
+      const target = item.path === 'LICENSE' ? 'notices/LICENSE' : `notices/${item.path.slice('licenses/'.length)}`;
+      if (targets.has(target)) reject('NOTICES_INVALID');
       seen.add(item.path);
+      targets.add(target);
       await verifyContainedFile(artifactRoot, item.path, item.bytes, item.sha256);
-      notices.push({ ...item, target: `notices/${item.path.slice('licenses/'.length)}` });
+      notices.push({ ...item, target });
     }
     const templates = [];
     for (const relative of TEMPLATE_PATHS) templates.push(await trackedBytes(repoRoot, relative));
