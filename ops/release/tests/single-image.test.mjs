@@ -29,14 +29,17 @@ async function fixture() {
   const jar = makeZip([['META-INF/lexiflow-build.json', JSON.stringify(identity)],
     ['META-INF/lexiflow-version.txt', `${identity.softwareVersion}\n`], ['META-INF/lexiflow-schema.sql', schema]]);
   const data = Buffer.from('synthetic published data'); const notice = Buffer.from('synthetic notice');
+  const rootLicense = await readFile(path.join(repo, 'LICENSE'));
   const artifactRoot = path.join(root, 'artifacts'); await mkdir(path.join(artifactRoot, 'licenses'), { recursive: true });
   await writeFile(path.join(artifactRoot, 'api.jar'), jar);
   await writeFile(path.join(artifactRoot, 'dataset.zip'), data);
   await writeFile(path.join(artifactRoot, 'licenses/notice.txt'), notice);
+  await writeFile(path.join(artifactRoot, 'LICENSE'), rootLicense);
   const descriptor = { schemaVersion: 1, softwareVersion: identity.softwareVersion, sourceCommit: identity.sourceCommit,
     jar: { path: 'api.jar', bytes: jar.length, sha256: hash(jar) }, apiContract: 'caption-hints.v2', sqlVersion: 'sql-test',
     dataset: { path: 'dataset.zip', bytes: data.length, sha256: hash(data), releaseId: 'release-1', preparationId: 'prep-1', ruleId: 'rule-1' },
-    notices: [{ path: 'licenses/notice.txt', bytes: notice.length, sha256: hash(notice) }] };
+    notices: [{ path: 'LICENSE', bytes: rootLicense.length, sha256: hash(rootLicense) },
+      { path: 'licenses/notice.txt', bytes: notice.length, sha256: hash(notice) }] };
   return { root, artifactRoot, descriptor, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
 
@@ -53,8 +56,34 @@ test('image plan is target-only, allowlisted and binds embedded dataset, notices
     assert.ok(plan.platforms[0].commands[0].includes('--platform'));
     assert.ok(plan.platforms[0].commands[0].includes('linux/arm64'));
     assert.deepEqual(plan.platforms[0].contextFiles.map(item => item.target).sort(),
-      ['Dockerfile.runtime', 'dataset.zip', 'lexiflow-api.jar', 'notices/notice.txt', 'runtime-entrypoint.sh', 'schema.sql'].sort());
+      ['Dockerfile.runtime', 'dataset.zip', 'lexiflow-api.jar', 'notices/LICENSE', 'notices/notice.txt', 'runtime-entrypoint.sh', 'schema.sql'].sort());
+    const license = plan.platforms[0].contextFiles.find(item => item.target === 'notices/LICENSE');
+    assert.equal(license.path, 'LICENSE');
+    assert.equal(license.sha256, f.descriptor.notices[0].sha256);
     assert.ok(!JSON.stringify(plan).includes(f.root));
+  } finally { await f.cleanup(); }
+});
+
+test('root LICENSE stays byte-bound and other root files cannot become image notices', async () => {
+  const f = await fixture();
+  try {
+    for (const filename of ['NOTICE', 'README.md', 'license']) {
+      const invalid = structuredClone(f.descriptor);
+      invalid.notices[0].path = filename;
+      await assert.rejects(prepareImageBuild({ repoRoot: f.root, artifactRoot: f.artifactRoot, descriptor: invalid }), /NOTICES_INVALID/);
+    }
+    await writeFile(path.join(f.artifactRoot, 'LICENSE'), 'changed license');
+    await assert.rejects(prepareImageBuild({ repoRoot: f.root, artifactRoot: f.artifactRoot, descriptor: f.descriptor }), /BUILD_INPUT_REJECTED/);
+  } finally { await f.cleanup(); }
+});
+
+test('root LICENSE cannot collide with a licenses/LICENSE image target', async () => {
+  const f = await fixture();
+  try {
+    const license = await readFile(path.join(f.artifactRoot, 'LICENSE'));
+    await writeFile(path.join(f.artifactRoot, 'licenses/LICENSE'), license);
+    f.descriptor.notices.push({ path: 'licenses/LICENSE', bytes: license.length, sha256: hash(license) });
+    await assert.rejects(prepareImageBuild({ repoRoot: f.root, artifactRoot: f.artifactRoot, descriptor: f.descriptor }), /NOTICES_INVALID/);
   } finally { await f.cleanup(); }
 });
 
