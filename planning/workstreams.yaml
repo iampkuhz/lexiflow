@@ -695,6 +695,127 @@ workstreams:
         required_check_ids:
         - eng.release.candidate-runtime
         depends_on: []
+      - id: LF-TSK-QLT-2502
+        title: 修复有限测试传输的完成计数发布竞争
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-transport-counter/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/tests/podman_fake_transport.py
+        - ops/docker/tests/test_podman_fake_transport.py
+        - tmp/phase-tools/single-container-transport-counter/transport/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 请求完成及计数原子可见的测试设施与真实当次证据，不授予正式候选资格。
+        deliverable: 有界改动、确定性竞态回归或独立冻结验证与审查。
+        acceptance_criteria:
+        - 最后请求残留消失前原子发布完整计数，不放宽计数/字节/排空断言，不扩大路由或任何预算。
+        - 确定性直接RED与GREEN、原生身份及精确冻结保全；旧CI失败与所有原始证据保留。
+        - 实现者不自签独立验证，修改后重新开发检查与工程验收、不同actor审查；不复用旧PASS。
+        acceptance_evidence:
+        - 精确源与目标、真实actor、原始命令/退出/日志摘要、未运行和失败边界。
+        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_podman_fake_transport.py
+        required_check_ids:
+        - eng.release.docker-contract
+        discovered_from: LF-TSK-OPS-2076
+        depends_on: []
+      - id: LF-TSK-QLT-2503
+        title: 独立验证完成计数修复的开发冻结
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/single-container-transport-counter/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-transport-counter/development/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 请求完成及计数原子可见的测试设施与真实当次证据，不授予正式候选资格。
+        deliverable: 有界改动、确定性竞态回归或独立冻结验证与审查。
+        acceptance_criteria:
+        - 同步新增两项真实回归的精确计数消费者为16，保留唯一/完整/非synthetic身份约束，不弱化断言。
+        - 最后请求残留消失前原子发布完整计数，不放宽计数/字节/排空断言，不扩大路由或任何预算。
+        - 确定性直接RED与GREEN、原生身份及精确冻结保全；旧CI失败与所有原始证据保留。
+        - 实现者不自签独立验证，修改后重新开发检查与工程验收、不同actor审查；不复用旧PASS。
+        acceptance_evidence:
+        - 精确源与目标、真实actor、原始命令/退出/日志摘要、未运行和失败边界。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.release.docker-contract
+        discovered_from: LF-TSK-OPS-2076
+        depends_on: []
+      - id: LF-TSK-QLT-2504
+        title: 独立验收完成计数修复的工程证据
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/single-container-transport-counter/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-transport-counter/formal/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 请求完成及计数原子可见的测试设施与真实当次证据，不授予正式候选资格。
+        deliverable: 有界改动、确定性竞态回归或独立冻结验证与审查。
+        acceptance_criteria:
+        - 同步新增两项真实回归的精确计数消费者为16，保留唯一/完整/非synthetic身份约束，不弱化断言。
+        - 最后请求残留消失前原子发布完整计数，不放宽计数/字节/排空断言，不扩大路由或任何预算。
+        - 确定性直接RED与GREEN、原生身份及精确冻结保全；旧CI失败与所有原始证据保留。
+        - 实现者不自签独立验证，修改后重新开发检查与工程验收、不同actor审查；不复用旧PASS。
+        acceptance_evidence:
+        - 精确源与目标、真实actor、原始命令/退出/日志摘要、未运行和失败边界。
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids:
+        - eng.release.docker-contract
+        discovered_from: LF-TSK-OPS-2076
+        depends_on: []
+      - id: LF-TSK-QLT-2505
+        title: 独立审查测试传输竞态与证据边界
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/single-container-transport-counter/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-transport-counter/review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 请求完成及计数原子可见的测试设施与真实当次证据，不授予正式候选资格。
+        deliverable: 有界改动、确定性竞态回归或独立冻结验证与审查。
+        acceptance_criteria:
+        - 同步新增两项真实回归的精确计数消费者为16，保留唯一/完整/非synthetic身份约束，不弱化断言。
+        - 最后请求残留消失前原子发布完整计数，不放宽计数/字节/排空断言，不扩大路由或任何预算。
+        - 确定性直接RED与GREEN、原生身份及精确冻结保全；旧CI失败与所有原始证据保留。
+        - 实现者不自签独立验证，修改后重新开发检查与工程验收、不同actor审查；不复用旧PASS。
+        acceptance_evidence:
+        - 精确源与目标、真实actor、原始命令/退出/日志摘要、未运行和失败边界。
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids:
+        - eng.release.docker-contract
+        discovered_from: LF-TSK-OPS-2076
+        depends_on: []
       - id: LF-TSK-QLT-2494
         title: 独立验证宿主目录修复开发冻结
         priority: P0
@@ -9127,6 +9248,41 @@ workstreams:
         - eng.release.manifest
         depends_on: []
         discovered_from: LF-TSK-OPS-2063
+      - id: LF-TSK-OPS-2077
+        title: 集成测试传输完成发布修复及独立证据
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/single-container-transport-counter/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/tests/podman_fake_transport.py
+        - ops/docker/tests/test_podman_fake_transport.py
+        - ops/docker/tests/test_module_check_adapter.py
+        - planning/workstreams.yaml
+        - openspec/changes/single-container-transport-counter/**
+        - tmp/phase-tools/single-container-transport-counter/implementation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 请求完成及计数原子可见的测试设施与真实当次证据，不授予正式候选资格。
+        deliverable: 有界改动、确定性竞态回归或独立冻结验证与审查。
+        acceptance_criteria:
+        - 同步新增两项真实回归的精确计数消费者为16，保留唯一/完整/非synthetic身份约束，不弱化断言。
+        - 最后请求残留消失前原子发布完整计数，不放宽计数/字节/排空断言，不扩大路由或任何预算。
+        - 确定性直接RED与GREEN、原生身份及精确冻结保全；旧CI失败与所有原始证据保留。
+        - 实现者不自签独立验证，修改后重新开发检查与工程验收、不同actor审查；不复用旧PASS。
+        acceptance_evidence:
+        - 精确源与目标、真实actor、原始命令/退出/日志摘要、未运行和失败边界。
+        validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
+        required_check_ids:
+        - eng.release.docker-contract
+        discovered_from: LF-TSK-OPS-2076
+        depends_on: []
       - id: LF-TSK-OPS-2076
         title: 修复安全子环境中的宿主目录派生并固定发行身份
         priority: P0
