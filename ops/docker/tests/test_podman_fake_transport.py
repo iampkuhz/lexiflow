@@ -122,6 +122,64 @@ class PodmanFakeTransportTest(unittest.TestCase):
         self.assertNotIn('test_cancel_during_image_pull_releases_lock_and_retries', FINITE_TEST_CASES)
         self.assertNotIn('test_cancel_during_source_run_removes_only_owned_untagged_tool_image', FINITE_TEST_CASES)
 
+    def test_serve_publishes_counter_before_ack_disappears(self):
+        """Exercise serve directly and observe the exact q.* drain boundary."""
+        import podman_fake_transport as module
+
+        mailbox = self.root / 'counter-order'
+        mailbox.mkdir(mode=0o700)
+        base = mailbox / 'q.41'
+        Path(str(base) + '.args').write_bytes(b'0\n')
+        Path(str(base) + '.env').write_bytes(b'K=V\0')
+        Path(str(base) + '.cwd').write_bytes(os.fsencode(str(self.root)) + b'\n')
+        Path(str(base) + '.ready').touch()
+        (mailbox / 'server.stop').touch()
+        model = self.root / 'model.py'
+        model.write_text('')
+        ack = Path(str(base) + '.ack')
+        done = Path(str(base) + '.done')
+        original_touch = Path.touch
+        original_unlink = Path.unlink
+        observed_ack = []
+
+        def acknowledge_after_done(path, *args, **kwargs):
+            result = original_touch(path, *args, **kwargs)
+            if path == done:
+                with ack.open('xb'):
+                    pass
+            return result
+
+        def observe_unlink(path, *args, **kwargs):
+            if path == ack:
+                observed_ack.append((mailbox / 'server.count').read_text())
+                self.assertEqual((mailbox / 'server.count').read_text(), '1')
+            return original_unlink(path, *args, **kwargs)
+
+        with patch.object(module, '_execute', return_value=(b'out', b'err', 0)), \
+             patch.object(Path, 'touch', acknowledge_after_done), \
+             patch.object(Path, 'unlink', observe_unlink):
+            self.assertEqual(module.serve(mailbox, model), 0)
+        self.assertEqual(observed_ack, ['1'])
+        self.assertEqual(list(mailbox.glob('q.*')), [])
+        self.assertEqual((mailbox / 'server.count').read_text(), '1')
+
+    def test_preexisting_counter_temporary_is_rejected_without_removal(self):
+        import podman_fake_transport as module
+
+        mailbox = self.root / 'counter-temp-collision'
+        mailbox.mkdir()
+        base = mailbox / 'q.42'
+        suffixes = ('args', 'env', 'cwd', 'ready', 'out', 'err', 'status', 'lengths', 'done', 'ack')
+        for suffix in suffixes:
+            Path(str(base) + '.' + suffix).write_bytes(b'')
+        occupied = mailbox / 'server.count.tmp'
+        occupied.write_bytes(b'preexisting')
+        with self.assertRaises(FileExistsError):
+            module._complete_request(mailbox, base, suffixes, 1)
+        self.assertEqual(occupied.read_bytes(), b'preexisting')
+        self.assertEqual((mailbox / 'server.count').exists(), False)
+        self.assertEqual(len(list(mailbox.glob('q.*'))), len(suffixes))
+
     def test_output_fast_path_is_byte_equivalent_and_skips_cat_only_for_one_lf_line(self):
         calls = self._install_cat_spy()
         original = self.transport.model
