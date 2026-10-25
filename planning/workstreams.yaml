@@ -695,6 +695,224 @@ workstreams:
         required_check_ids:
         - eng.release.candidate-runtime
         depends_on: []
+      - id: LF-TSK-QLT-2494
+        title: 独立验证宿主目录修复开发冻结
+        priority: P0
+        task_version: 9
+        change_version: 1.8.0
+        task_source: openspec/changes/single-container-host-home/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-host-home/development/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 最终冻结的初始化恢复责任节点真实生命周期诊断及当次真实diff开发报告，不替代正式候选资格。
+        deliverable: 有界修复或独立检查与只读审查的真实产物。
+        acceptance_criteria:
+        - 不扩展安全环境白名单，不继承用户指定HOME/TMPDIR或客户端身份，宿主目录从真实OS用户身份派生并严格核验。
+        - 保留全部Check、预算、两代资料身份、完整运行phase及失败关闭，新增跨真实过滤边界、归档定位、命令退出事实、创建输出和异步观察的正反例。
+        - 纳入 QLT2499 格式2的 initdb 完成与部分初始化恢复协议，旧格式/已发布数据不得静默清除。
+        - 首轮诊断仅证明原冻结下的实机责任接缝，不授予新冻结或候选资格；纯测试消费者修复后只执行一次全新真实diff开发CLI，不重跑诊断或拼接首轮结果。
+        - 当次冻结由不同真实actor独立验证和审查；新版本不覆盖旧标签、候选、公开资产或失败记录。
+        acceptance_evidence:
+        - 精确目标、Task版本、真实身份、冻结摘要、直接或独立检查及未运行限制。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        discovered_from: LF-TSK-QLT-2481
+        depends_on: []
+      - id: LF-TSK-QLT-2495
+        title: 独立执行宿主目录修复工程验收
+        priority: P0
+        task_version: 8
+        change_version: 1.7.0
+        task_source: openspec/changes/single-container-host-home/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-host-home/formal/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 通过真实安全环境边界的宿主目录派生及当次真实证据，不替代正式候选资格。
+        deliverable: 有界修复或独立检查与只读审查的真实产物。
+        acceptance_criteria:
+        - 不扩展安全环境白名单，不继承用户指定HOME/TMPDIR或客户端身份，宿主目录从真实OS用户身份派生并严格核验。
+        - 保留全部Check、预算、两代资料身份、完整运行phase及失败关闭，新增跨真实过滤边界、归档定位、命令退出事实、创建输出和异步观察的正反例。
+        - 纳入 QLT2499 格式2的 initdb 完成与部分初始化恢复协议，旧格式/已发布数据不得静默清除。
+        - 纳入 QLT2500 最新卷协议的全部测试消费者同步，不弱化生产协议或旧拒绝负例。
+        - 纳入QLT2501挂起夹具真实启动与回收接缝，不扩展生产或Check超时。
+        - 当次冻结由不同真实actor独立验证和审查；新版本不覆盖旧标签、候选、公开资产或失败记录。
+        acceptance_evidence:
+        - 精确目标、Task版本、真实身份、冻结摘要、直接或独立检查及未运行限制。
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        discovered_from: LF-TSK-QLT-2481
+        depends_on: []
+      - id: LF-TSK-QLT-2496
+        title: 独立审查宿主目录派生与安全边界
+        priority: P0
+        task_version: 8
+        change_version: 1.7.0
+        task_source: openspec/changes/single-container-host-home/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-host-home/review/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 通过真实安全环境边界的宿主目录派生及当次真实证据，不替代正式候选资格。
+        deliverable: 有界修复或独立检查与只读审查的真实产物。
+        acceptance_criteria:
+        - 不扩展安全环境白名单，不继承用户指定HOME/TMPDIR或客户端身份，宿主目录从真实OS用户身份派生并严格核验。
+        - 保留全部Check、预算、两代资料身份、完整运行phase及失败关闭，新增跨真实过滤边界、归档定位、命令退出事实、创建输出和异步观察的正反例。
+        - 纳入 QLT2499 格式2的 initdb 完成与部分初始化恢复协议，旧格式/已发布数据不得静默清除。
+        - 纳入 QLT2500 最新卷协议的全部测试消费者同步，不弱化生产协议或旧拒绝负例。
+        - 纳入QLT2501挂起夹具真实启动与回收接缝，不扩展生产或Check超时。
+        - 当次冻结由不同真实actor独立验证和审查；新版本不覆盖旧标签、候选、公开资产或失败记录。
+        acceptance_evidence:
+        - 精确目标、Task版本、真实身份、冻结摘要、直接或独立检查及未运行限制。
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        discovered_from: LF-TSK-QLT-2481
+        depends_on: []
+      - id: LF-TSK-QLT-2497
+        title: 修复实际 Podman 命令的系统临时目录接缝
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-host-home/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/podman/candidates/single-runtime-candidate.mjs
+        - ops/podman/tests/candidate-runtime.test.mjs
+        - tmp/phase-tools/single-container-host-home/podman-context/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 实际 Podman 子命令使用 OS 派生的用户目录和临时目录，不受 ambient HOME/TMPDIR 欺骗。
+        deliverable: 精确宿主环境接缝及行为直接测试，不授予正式候选资格。
+        acceptance_criteria:
+        - 复用已有严格系统临时目录校验，不透传任意宿主配置或客户端身份，不引入用户自由参数。
+        - cmd 真实接缝保持 TMPDIR 与实际 OS 路径一致，系统查询或路径无效时失败关闭，源身份及 socket 绑定不放宽。
+        - 所有检查、预算、真实 phase、owned 清理与未知资源保护保留；不运行完整基线或真实候选。
+        acceptance_evidence:
+        - 原生包绑定、先失败后成功的实际命令环境回归、精准测试退出与摘要及限制。
+        validation_command: node --test ops/podman/tests/candidate-runtime.test.mjs
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-OPS-2076
+        depends_on: []
+      - id: LF-TSK-QLT-2498
+        title: 修复候选命令适配与归档定位
+        priority: P0
+        task_version: 3
+        change_version: 1.2.0
+        task_source: openspec/changes/single-container-host-home/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/podman/candidates/single-runtime-candidate.mjs
+        - ops/podman/tests/candidate-runtime.test.mjs
+        - tmp/phase-tools/single-container-host-home/candidate-seams/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 镜像归档从已冻结并核对请求目录定位；非零命令退出不能因允许观察失败而变成成功；补充既有异步观察的无回退证明。
+        deliverable: 真实 verifier 返回形状的归档定位修复和直接回归；保留原已正确 await 的轮询实现。
+        acceptance_criteria:
+        - 不给纯 proof 增加自报目录字段；归档路径绑定已冻结请求和摘要，不信任未校验来源。
+        - 异步观察新增直接回归；旧实现已 PASS，不声明为已复现缺陷或修改其预算、间隔、phase、退出和清理。
+        - 覆盖退出 1/125、信号和 timeout，无论是否允许失败均返回真实失败事实。
+        - create/volume create 接受真实纯文本 stdout；通过后续 inspect 核实身份，创建前登记自有名字以处理未知写入。
+        - 保留原有 host-context 完成证据、实际责任诊断与所有历史FAIL，不自签正式候选资格。
+        acceptance_evidence:
+        - 归档定位旧实现实际 RED、新实现 GREEN；异步回归原实现 PASS；精确命令/退出/原始日志及未运行边界明确。
+        validation_command: node --test ops/podman/tests/candidate-runtime.test.mjs
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-OPS-2076
+        depends_on: []
+      - id: LF-TSK-QLT-2499
+        title: 修复首次 initdb 中断后的安全重试
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-host-home/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/runtime-entrypoint.sh
+        - ops/podman/tests/candidate-runtime.test.mjs
+        - tmp/phase-tools/single-container-host-home/initdb-recovery/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 从未启动数据库的已归属部分 initdb 可安全重试，已完成 initdb 或已发布数据不得清空。
+        deliverable: 格式2卷的初始化完成协议、直接故障回归与当次证据。
+        acceptance_criteria:
+        - initdb 完成必须在首次启动 PostgreSQL 前持久原子记录；仅格式2、合法归属、未完成 initdb 且无 ready/pending-ready 的目录可重建。
+        - PG_VERSION 单独存在不能证明 initdb 完成；完成或 pending 完成标记严格校验，损坏、未知内容与旧格式不修改而失败关闭。
+        - 覆盖 PG_VERSION 已写但系统库未建的真实接缝、成功重试、完成后不重导、不清理已发布事实、旧格式和损坏状态拒绝。
+        - 不增加产品进程或自由路径参数，不变更 Check/预算/就绪门禁，保留先前21项 Node 回归与所有失败证据。
+        acceptance_evidence:
+        - 旧实现直接行为 RED、新实现 GREEN、真实原生绑定与原始日志，未运行正式候选的限制明确。
+        validation_command: node --test ops/podman/tests/candidate-runtime.test.mjs
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-OPS-2076
+        depends_on: []
+      - id: LF-TSK-QLT-2500
+        title: 同步卷完成协议的生命周期测试消费者
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-host-home/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/tests/lifecycle-install.test.mjs
+        - ops/release/tests/lifecycle.test.mjs
+        - tmp/phase-tools/single-container-host-home/volume-fixture/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 所有生命周期测试按最新卷格式与完成证明构造有效状态，原数据/故障/无修改断言保留。
+        deliverable: 两个夹具消费者同步、完整静态消费者清单及精准直接回归。
+        acceptance_criteria:
+        - 正例改用最新卷格式与真实完成标记；旧格式只保留拒绝负例，不开放兼容或弱化生产校验。
+        - 所有替身 prepare_pgdata 必须构造完成标记；构建身份 schemaVersion=1 与卷协议 schemaVersion=2 区分，不全局替换。
+        - 仅测试消费者变化，禁止改生产脚本、Check、断言目标或超时；旧失败及两代实机诊断原始结果保留。
+        acceptance_evidence:
+        - 精确旧失败来源、消费者审计、两项直接suite命令退出和原始日志、原生不可变完成回执。
+        validation_command: node ops/release/test_tools/run-release-tool-tests.mjs --suite lifecycle-install
+        required_check_ids: [eng.release.lifecycle-install, eng.release.lifecycle]
+        discovered_from: LF-TSK-QLT-2494
+        depends_on: []
+      - id: LF-TSK-QLT-2501
+        title: 隔离挂起夹具启动与有界运行的真实观察
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-host-home/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tests/verification/test_release_docker_preflight.py
+        - tmp/phase-tools/single-container-host-home/readiness/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 真实挂起夹具已启动再验证既有一秒运行预算和进程组回收，不以调度未启动误判产品。
+        deliverable: 有界测试准备握手、真实后代回收回归与精准证据。
+        acceptance_criteria:
+        - 不修改生产或Check，保留原一秒运行预算、生产30秒及真实后代/进程组回收断言。
+        - 夹具启动准备必须有界并真实可观察；不允许缺失PID记录时跳过或假定回收，不使用sleep猜测已就绪。
+        - 保留Python不可用的fixture独立性证明，并处理准备失败时自己创建的真实进程及证据。
+        acceptance_evidence:
+        - 已存在的单项精准失败、实际owned进程观测、全类直接测试和不可变原生回执。
+        validation_command: python3 -m unittest tests.verification.test_release_docker_preflight
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-QLT-2494
+        depends_on: []
       - id: LF-TSK-QLT-2491
         title: 独立验证工程中文文案开发冻结
         priority: P0
@@ -996,8 +1214,8 @@ workstreams:
       - id: LF-TSK-QLT-2481
         title: 独立执行精确单容器发行完整基线
         priority: P0
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: openspec/changes/single-container-release/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -1012,7 +1230,7 @@ workstreams:
         expected_output: 独立执行精确单容器发行完整基线；边界与验收见本阶段 OpenSpec。
         deliverable: 独立执行精确单容器发行完整基线及当次可核验证据。
         acceptance_criteria:
-        - 满足本阶段设计与对应工作包验收；对修复后全新精确源码与候选当次验证，不消费失败2.1.1资格，不清理未知资源、不自签验收。
+        - 满足本阶段设计与对应工作包验收；对修复后全新精确源码与候选当次验证，不消费任何失败候选资格，不清理未知资源、不自签验收。
         acceptance_evidence:
         - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
         validation_command: node ops/release/workflow/run-release-workflow.mjs formal validate <uuid>
@@ -1024,8 +1242,8 @@ workstreams:
       - id: LF-TSK-QLT-2482
         title: 独立审查精确单容器候选及验收证据
         priority: P0
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: openspec/changes/single-container-release/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -1040,7 +1258,7 @@ workstreams:
         expected_output: 独立审查精确单容器候选及验收证据；边界与验收见本阶段 OpenSpec。
         deliverable: 独立审查精确单容器候选及验收证据及当次可核验证据。
         acceptance_criteria:
-        - 满足本阶段设计与对应工作包验收；对修复后全新精确源码与候选当次验证，不消费失败2.1.1资格，不清理未知资源、不自签验收。
+        - 满足本阶段设计与对应工作包验收；对修复后全新精确源码与候选当次验证，不消费任何失败候选资格，不清理未知资源、不自签验收。
         acceptance_evidence:
         - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
         validation_command: node ops/release/workflow/run-release-workflow.mjs formal review <uuid>
@@ -8909,6 +9127,47 @@ workstreams:
         - eng.release.manifest
         depends_on: []
         discovered_from: LF-TSK-OPS-2063
+      - id: LF-TSK-OPS-2076
+        title: 修复安全子环境中的宿主目录派生并固定发行身份
+        priority: P0
+        task_version: 8
+        change_version: 1.7.0
+        task_source: openspec/changes/single-container-host-home/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/checks/release/source/release_installation_checks.py
+        - tests/verification/test_release_runtime_lifecycle.py
+        - ops/podman/candidates/single-runtime-candidate.mjs
+        - ops/podman/tests/candidate-runtime.test.mjs
+        - ops/docker/runtime-entrypoint.sh
+        - ops/release/tests/lifecycle-install.test.mjs
+        - ops/release/tests/lifecycle.test.mjs
+        - tests/verification/test_release_docker_preflight.py
+        - ops/release/version.txt
+        - ops/release/notes/2.1.3.md
+        - planning/workstreams.yaml
+        - openspec/changes/single-container-host-home/**
+        - tmp/phase-tools/single-container-host-home/implementation/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 通过真实安全环境边界的宿主目录派生及当次真实证据，不替代正式候选资格。
+        deliverable: 有界修复或独立检查与只读审查的真实产物。
+        acceptance_criteria:
+        - 不扩展安全环境白名单，不继承用户指定HOME/TMPDIR或客户端身份，宿主目录从真实OS用户身份派生并严格核验。
+        - 保留全部Check、预算、两代资料身份、完整运行phase及失败关闭，新增跨真实过滤边界、归档定位、命令退出事实、创建输出和异步观察的正反例。
+        - 纳入 QLT2499 格式2的 initdb 完成与部分初始化恢复协议，旧格式/已发布数据不得静默清除。
+        - 纳入 QLT2500 最新卷协议的全部测试消费者同步，不弱化生产协议或旧拒绝负例。
+        - 纳入QLT2501挂起夹具真实启动与回收接缝，不扩展生产或Check超时。
+        - 当次冻结由不同真实actor独立验证和审查；新版本不覆盖旧标签、候选、公开资产或失败记录。
+        acceptance_evidence:
+        - 精确目标、Task版本、真实身份、冻结摘要、直接或独立检查及未运行限制。
+        validation_command: python3 -m unittest tests.verification.test_release_runtime_lifecycle
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        discovered_from: LF-TSK-QLT-2481
+        depends_on: []
       - id: LF-TSK-OPS-2073
         title: 中文化工作流可见名称并保持运行合同
         priority: P0
