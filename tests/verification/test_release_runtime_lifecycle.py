@@ -142,18 +142,19 @@ class TestReleaseRuntimeLifecycle(unittest.TestCase):
                 )
             ]
             run.side_effect = [(payload, b"") for payload in outputs]
-            result = lifecycle.execute_lifecycle(
-                scratch,
-                evidence,
-                SimpleNamespace(endpoint="unix:///tmp/private.sock"),
-                {
-                    "PATH": "/usr/bin",
-                    "HOME": str(root),
-                    "XDG_CONFIG_HOME": "/private/secret",
-                    "PRIVATE_TOKEN": "never-forward",
-                },
-                fixture_root=fixture,
-            )
+            with patch("pwd.getpwuid", return_value=SimpleNamespace(pw_dir=str(root))):
+                result = lifecycle.execute_lifecycle(
+                    scratch,
+                    evidence,
+                    SimpleNamespace(endpoint="unix:///tmp/private.sock"),
+                    {
+                        "PATH": "/usr/bin",
+                        "HOME": str(root),
+                        "XDG_CONFIG_HOME": "/private/secret",
+                        "PRIVATE_TOKEN": "never-forward",
+                    },
+                    fixture_root=fixture,
+                )
             self.assertEqual(len(result["generations"]), 2)
             self.assertEqual(result["lifecycleChecks"], 16)
             for call in run.call_args_list:
@@ -171,6 +172,67 @@ class TestReleaseRuntimeLifecycle(unittest.TestCase):
                 )
                 self.assertLessEqual(call.args[3], 1100)
 
+    @patch(
+        "ops.release.host_resources.release_docker_preflight.recheck",
+        return_value=SimpleNamespace(status="PASS"),
+    )
+    @patch(
+        "scripts.checks.release.source.check_synthetic_release_lifecycle._run_bounded"
+    )
+    def test_safe_child_environment_uses_os_account_home(self, run, _preflight):
+        import os
+
+        from scripts.verification.execution.check_runner import build_child_environment
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            scratch, fixture, evidence = self._setup(root)
+            run.side_effect = [
+                (
+                    json.dumps(
+                        valid_result(c["candidateSha256"], d["sha256"], d["version"])
+                    ).encode(),
+                    b"",
+                )
+                for c, d in zip(
+                    evidence["releaseCandidates"],
+                    evidence["datasetRecords"],
+                    strict=True,
+                )
+            ]
+            with patch.dict(
+                os.environ,
+                {
+                    "PATH": "/usr/bin",
+                    "HOME": str(root / "untrusted-home"),
+                    "USER": "untrusted-user",
+                    "PRIVATE_TOKEN": "never-forward",
+                    "XDG_CONFIG_HOME": str(root / "untrusted-config"),
+                },
+                clear=True,
+            ):
+                child = build_child_environment()
+            self.assertNotIn("HOME", child)
+            self.assertNotIn("PRIVATE_TOKEN", child)
+            with patch(
+                "pwd.getpwuid", return_value=SimpleNamespace(pw_dir=str(root))
+            ) as account:
+                result = lifecycle.execute_lifecycle(
+                    scratch,
+                    evidence,
+                    SimpleNamespace(endpoint="unix:///tmp/private.sock"),
+                    child,
+                    fixture_root=fixture,
+                )
+            account.assert_called_once_with(os.getuid())
+            self.assertEqual(len(result["generations"]), 2)
+            for call in run.call_args_list:
+                self.assertEqual(call.args[2]["HOME"], str(root))
+                self.assertEqual(
+                    set(call.args[2]),
+                    {"PATH", "HOME", "LC_ALL", "LANG", "TZ", "DOCKER_HOST"},
+                )
+
     def test_invalid_host_home_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -182,6 +244,7 @@ class TestReleaseRuntimeLifecycle(unittest.TestCase):
                 local_scratch.mkdir()
                 with (
                     self.subTest(home=home),
+                    patch("pwd.getpwuid", return_value=SimpleNamespace(pw_dir=home)),
                     self.assertRaisesRegex(ConsumerError, "host-home-invalid"),
                 ):
                     lifecycle.execute_lifecycle(
@@ -189,6 +252,23 @@ class TestReleaseRuntimeLifecycle(unittest.TestCase):
                         evidence,
                         SimpleNamespace(endpoint="unix:///tmp/private.sock"),
                         {"PATH": "/usr/bin", "HOME": home},
+                        fixture_root=fixture,
+                    )
+
+    def test_os_account_lookup_failure_is_rejected(self):
+        for error in (KeyError("missing uid"), OSError("account service unavailable")):
+            with tempfile.TemporaryDirectory() as temp:
+                scratch, fixture, evidence = self._setup(Path(temp))
+                with (
+                    self.subTest(error=type(error).__name__),
+                    patch("pwd.getpwuid", side_effect=error),
+                    self.assertRaisesRegex(ConsumerError, "host-home-invalid"),
+                ):
+                    lifecycle.execute_lifecycle(
+                        scratch,
+                        evidence,
+                        SimpleNamespace(endpoint="unix:///tmp/private.sock"),
+                        {"HOME": temp},
                         fixture_root=fixture,
                     )
 
