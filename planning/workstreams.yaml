@@ -695,6 +695,37 @@ workstreams:
         required_check_ids:
         - eng.release.candidate-runtime
         depends_on: []
+      - id: LF-TSK-QLT-2491
+        title: 独立验证工程中文文案开发冻结
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/chinese-engineering-descriptions/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/chinese-engineering-descriptions/development/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立验证工程中文文案开发冻结的真实材料与可核验证据。
+        deliverable: 独立验证工程中文文案开发冻结及当次责任或独立验收记录。
+        acceptance_criteria:
+        - 挂起夹具不依赖Python启动；保留一秒夹具/三十秒生产及全部检查超时、真实进程组回收和输出限制断言。
+        - 对人标题、正文和说明中文表达，技术标识/命令/API/路径/状态/版本及摘要不翻译。
+        - 只改可编辑展示文案；工作流操作配置等价，不改变权限、门禁、超时、候选与保护或历史Git身份。
+        - 不编造/提升旧验证结果，绑定本次真实目标、独立actor与冻结输入。
+        acceptance_evidence:
+        - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2071
+        depends_on: []
       - id: LF-TSK-QLT-2488
         title: 独立验证生命周期修复开发冻结
         priority: P0
@@ -754,6 +785,37 @@ workstreams:
         - eng.repository.docs
         discovered_from: LF-TSK-OPS-2069
         depends_on: []
+      - id: LF-TSK-QLT-2492
+        title: 独立执行工程中文文案正式验收
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/chinese-engineering-descriptions/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/chinese-engineering-descriptions/formal/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立执行工程中文文案正式验收的真实材料与可核验证据。
+        deliverable: 独立执行工程中文文案正式验收及当次责任或独立验收记录。
+        acceptance_criteria:
+        - 挂起夹具不依赖Python启动；保留一秒夹具/三十秒生产及全部检查超时、真实进程组回收和输出限制断言。
+        - 对人标题、正文和说明中文表达，技术标识/命令/API/路径/状态/版本及摘要不翻译。
+        - 只改可编辑展示文案；工作流操作配置等价，不改变权限、门禁、超时、候选与保护或历史Git身份。
+        - 不编造/提升旧验证结果，绑定本次真实目标、独立actor与冻结输入。
+        acceptance_evidence:
+        - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2071
+        depends_on: []
       - id: LF-TSK-QLT-2489
         title: 独立执行生命周期修复工程Formal
         priority: P0
@@ -812,6 +874,37 @@ workstreams:
         - eng.repository.planning
         - eng.repository.docs
         discovered_from: LF-TSK-OPS-2069
+        depends_on: []
+      - id: LF-TSK-QLT-2493
+        title: 独立审查工程中文文案与等价性证据
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/chinese-engineering-descriptions/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/chinese-engineering-descriptions/review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立审查工程中文文案与等价性证据的真实材料与可核验证据。
+        deliverable: 独立审查工程中文文案与等价性证据及当次责任或独立验收记录。
+        acceptance_criteria:
+        - 挂起夹具不依赖Python启动；保留一秒夹具/三十秒生产及全部检查超时、真实进程组回收和输出限制断言。
+        - 对人标题、正文和说明中文表达，技术标识/命令/API/路径/状态/版本及摘要不翻译。
+        - 只改可编辑展示文案；工作流操作配置等价，不改变权限、门禁、超时、候选与保护或历史Git身份。
+        - 不编造/提升旧验证结果，绑定本次真实目标、独立actor与冻结输入。
+        acceptance_evidence:
+        - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2071
         depends_on: []
       - id: LF-TSK-QLT-2490
         title: 独立审查生命周期修复工程证据
@@ -8816,6 +8909,69 @@ workstreams:
         - eng.release.manifest
         depends_on: []
         discovered_from: LF-TSK-OPS-2063
+      - id: LF-TSK-OPS-2073
+        title: 中文化工作流可见名称并保持运行合同
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/chinese-engineering-descriptions/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - .github/workflows/ci.yml
+        - .github/workflows/release.yml
+        - tests/verification/test_ci_workflows.py
+        - tmp/phase-tools/chinese-engineering-descriptions/workflows/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 中文化工作流可见名称并保持运行合同的真实材料与可核验证据。
+        deliverable: 中文化工作流可见名称并保持运行合同及当次责任或独立验收记录。
+        acceptance_criteria:
+        - 对人标题、正文和说明中文表达，技术标识/命令/API/路径/状态/版本及摘要不翻译。
+        - 只改可编辑展示文案；工作流操作配置等价，不改变权限、门禁、超时、候选与保护或历史Git身份。
+        - 不编造/提升旧验证结果，绑定本次真实目标、独立actor与冻结输入。
+        acceptance_evidence:
+        - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
+        validation_command: python3 -m unittest tests.verification.test_ci_workflows -v
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2071
+        depends_on: []
+      - id: LF-TSK-OPS-2074
+        title: 忠实翻译已有PR标题与正文
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/chinese-engineering-descriptions/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/chinese-engineering-descriptions/pull-requests/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 忠实翻译已有PR标题与正文的真实材料与可核验证据。
+        deliverable: 忠实翻译已有PR标题与正文及当次责任或独立验收记录。
+        acceptance_criteria:
+        - 对人标题、正文和说明中文表达，技术标识/命令/API/路径/状态/版本及摘要不翻译。
+        - 只改可编辑展示文案；工作流操作配置等价，不改变权限、门禁、超时、候选与保护或历史Git身份。
+        - 不编造/提升旧验证结果，绑定本次真实目标、独立actor与冻结输入。
+        acceptance_evidence:
+        - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
+        validation_command: python3 -m json.tool tmp/phase-tools/chinese-engineering-descriptions/pull-requests/translations.json
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2071
+        depends_on: []
       - id: LF-TSK-OPS-2070
         title: 修复生命周期宿主上下文与真实完成状态
         priority: P0
@@ -8849,6 +9005,73 @@ workstreams:
         - eng.release.version
         - eng.repository.planning
         discovered_from: LF-TSK-QLT-2481
+        depends_on: []
+      - id: LF-TSK-OPS-2075
+        title: 消除挂起测试夹具的解释器启动依赖
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/chinese-engineering-descriptions/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tests/verification/test_release_docker_preflight.py
+        - tmp/phase-tools/chinese-engineering-descriptions/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 原生挂起夹具与真实进程回收、解释器不可用反例及责任测试证据。
+        deliverable: 有界测试夹具修复及当次直接回归，不替代独立开发或Formal。
+        acceptance_criteria:
+        - 仅合成挂起CLI使用POSIX shell直接创建真实后代，不依赖Python导入或启动时序。
+        - 一秒夹具、三十秒生产和所有Check超时不变，保留真实进程组回收、输出上限和秘密不泄漏断言。
+        - 新反例在原实现确定失败，修复后完整责任模块通过，旧FAIL与错误记录保留。
+        acceptance_evidence:
+        - 责任模块直接命令、原始退出码/日志、新旧反例和独立冻结输入来源。
+        validation_command: python3 -m unittest tests.verification.test_release_docker_preflight -v
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-QLT-2492
+        depends_on: []
+      - id: LF-TSK-OPS-2072
+        title: 统一工程中文说明并集成GitHub可见文案
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/chinese-engineering-descriptions/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - .github/workflows/ci.yml
+        - .github/workflows/release.yml
+        - tests/verification/test_ci_workflows.py
+        - tests/verification/test_release_docker_preflight.py
+        - harness/documentation-policy.md
+        - planning/workstreams.yaml
+        - tmp/phase-tools/chinese-engineering-descriptions/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 统一工程中文说明并集成GitHub可见文案的真实材料与可核验证据。
+        deliverable: 统一工程中文说明并集成GitHub可见文案及当次责任或独立验收记录。
+        acceptance_criteria:
+        - 挂起夹具不依赖Python启动；保留一秒夹具/三十秒生产及全部检查超时、真实进程组回收和输出限制断言。
+        - 对人标题、正文和说明中文表达，技术标识/命令/API/路径/状态/版本及摘要不翻译。
+        - 只改可编辑展示文案；工作流操作配置等价，不改变权限、门禁、超时、候选与保护或历史Git身份。
+        - 不编造/提升旧验证结果，绑定本次真实目标、独立actor与冻结输入。
+        acceptance_evidence:
+        - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
+        validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        discovered_from: LF-TSK-OPS-2071
         depends_on: []
       - id: LF-TSK-OPS-2071
         title: 集成生命周期修复与未占用发行版本
