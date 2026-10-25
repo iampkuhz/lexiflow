@@ -350,7 +350,7 @@ test('TERM during ready supervision shuts down API and PostgreSQL within stop bu
   const health = `{"softwareVersion":"2.1.0-test","apiContract":"caption-hints.v2","mode":"formal","ready":true,"reason":"OK","datasetVersion":123,"publishedDataset":{"releaseId":"1792210462122","preparationId":"lexiflow.deterministic-preparation.v1","ruleId":"${'c'.repeat(64)}","sqlVersion":"${'b'.repeat(64)}","sha256":"${'a'.repeat(64)}"}}`;
   const body = `
 id() { [ "$1" = -un ] && { printf 'postgres\\n'; return 0; }; return 1; }
-prepare_pgdata() { mkdir -p "$PGDATA"; printf '17\\n' > "$PGDATA/PG_VERSION"; }
+prepare_pgdata() { mkdir -p "$PGDATA"; printf '17\\n' > "$PGDATA/PG_VERSION"; printf '%s\\n' "$(volume_identity_line)" > "$ROOT/.lexiflow-initdb-complete"; }
 start_postgres() { sleep 60 & PG_PID=$!; printf '%s\\n' "$PG_PID" > '${pidFiles.pg}'; }
 bootstrap_database() { :; }
 start_api() { sleep 60 & API_PID=$!; printf '%s\\n' "$API_PID" > '${pidFiles.api}'; }

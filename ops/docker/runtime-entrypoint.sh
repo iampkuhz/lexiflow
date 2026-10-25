@@ -65,7 +65,7 @@ identity_line() {
 # Persistent data compatibility excludes the per-boot application version.
 # SQL/API/dataset drift still refuses the volume without modifying its data.
 volume_identity_line() {
-  printf 'schemaVersion=1\napiContract=%s\nsqlVersion=%s\nreleaseId=%s\npreparationId=%s\nruleId=%s\ndatasetSha256=%s\n' \
+  printf 'schemaVersion=2\napiContract=%s\nsqlVersion=%s\nreleaseId=%s\npreparationId=%s\nruleId=%s\ndatasetSha256=%s\n' \
     "$API_CONTRACT" "$SQL_VERSION" "$RELEASE_ID" \
     "$PREPARATION_ID" "$RULE_ID" "$DATASET_SHA256"
 }
@@ -133,7 +133,7 @@ validate_volume() {
   shopt -u nullglob dotglob
   if ((${#entries[@]} == 0)); then
     atomic_write "$ROOT/.lexiflow-owner" 'lexiflow-runtime'
-    atomic_write "$ROOT/.lexiflow-format" '1'
+    atomic_write "$ROOT/.lexiflow-format" '2'
     atomic_write "$ROOT/.lexiflow-initializing" "$(volume_identity_line)"
     make_secret "$ROOT/.postgres-password"
     make_secret "$ROOT/.app-password"
@@ -147,7 +147,7 @@ validate_volume() {
     for entry in "${entries[@]}"; do
       name=${entry##*/}
       case "$name" in
-        .lexiflow-owner|.lexiflow-owner.pending|.lexiflow-format|.lexiflow-format.pending|.lexiflow-initializing|.lexiflow-initializing.pending|.lexiflow-ready|.lexiflow-ready.pending|.postgres-password|.postgres-password.pending|.app-password|.app-password.pending|postgres) ;;
+        .lexiflow-owner|.lexiflow-owner.pending|.lexiflow-format|.lexiflow-format.pending|.lexiflow-initializing|.lexiflow-initializing.pending|.lexiflow-initdb-complete|.lexiflow-initdb-complete.pending|.lexiflow-ready|.lexiflow-ready.pending|.postgres-password|.postgres-password.pending|.app-password|.app-password.pending|postgres) ;;
         *) fail volume-unknown-content;;
       esac
       [[ ! -L "$entry" ]] || fail volume-path-invalid
@@ -158,11 +158,12 @@ validate_volume() {
   # repairing or completing any marker. Thus an unknown/corrupt volume is
   # rejected without mutating its contents.
   local marker target expected value
-  for marker in owner format initializing ready; do
+  for marker in owner format initializing initdb-complete ready; do
     case "$marker" in
       owner) target="$ROOT/.lexiflow-owner"; expected='lexiflow-runtime' ;;
-      format) target="$ROOT/.lexiflow-format"; expected='1' ;;
+      format) target="$ROOT/.lexiflow-format"; expected='2' ;;
       initializing) target="$ROOT/.lexiflow-initializing"; expected="$(volume_identity_line)" ;;
+      initdb-complete) target="$ROOT/.lexiflow-initdb-complete"; expected="$(volume_identity_line)" ;;
       ready) target="$ROOT/.lexiflow-ready"; expected="$(volume_identity_line)" ;;
     esac
     if [[ -e "$target" ]]; then assert_file_value "$target" "$expected"; fi
@@ -189,19 +190,26 @@ validate_volume() {
   if [[ -e "$PGDATA/PG_VERSION" ]]; then
     [[ -s "$PGDATA/PG_VERSION" && ! -L "$PGDATA/PG_VERSION" ]] || fail postgres-data-invalid
   fi
+  [[ -f "$ROOT/.lexiflow-format" && ! -L "$ROOT/.lexiflow-format" ]] || fail volume-format-missing
+  [[ "$(cat -- "$ROOT/.lexiflow-format")" == 2 ]] || fail volume-format-unsupported
+  local complete_present=0
+  [[ ! -e "$ROOT/.lexiflow-initdb-complete" && ! -e "$ROOT/.lexiflow-initdb-complete.pending" ]] || complete_present=1
+  if [[ -e "$ROOT/.lexiflow-ready" || -e "$ROOT/.lexiflow-ready.pending" ]]; then
+    ((complete_present == 1)) || fail ready-without-initdb-proof
+    [[ -d "$PGDATA" && ! -L "$PGDATA" && -s "$PGDATA/PG_VERSION" && ! -L "$PGDATA/PG_VERSION" ]] || fail ready-without-postgres-data
+  fi
+  if ((complete_present)); then
+    [[ -d "$PGDATA" && ! -L "$PGDATA" && -s "$PGDATA/PG_VERSION" && ! -L "$PGDATA/PG_VERSION" ]] || fail initdb-proof-without-postgres-data
+    [[ -e "$ROOT/.lexiflow-initializing" || -e "$ROOT/.lexiflow-ready" || -e "$ROOT/.lexiflow-ready.pending" ]] || fail initdb-proof-state-invalid
+  fi
 
   atomic_write "$ROOT/.lexiflow-owner" 'lexiflow-runtime'
-  if [[ -e "$ROOT/.lexiflow-format" ]]; then
-    atomic_write "$ROOT/.lexiflow-format" '1'
-  elif [[ ! -e "$ROOT/.lexiflow-ready" && ! -e "$PGDATA/PG_VERSION" ]]; then
-    atomic_write "$ROOT/.lexiflow-format" '1'
-  else
-    fail volume-format-missing
-  fi
-  if [[ ! -e "$ROOT/.lexiflow-initializing" && ! -e "$ROOT/.lexiflow-ready" ]]; then
+  [[ -e "$ROOT/.lexiflow-format" ]] || fail volume-format-missing
+  atomic_write "$ROOT/.lexiflow-format" '2'
+  if [[ -e "$ROOT/.lexiflow-initializing" ]]; then
     atomic_write "$ROOT/.lexiflow-initializing" "$(volume_identity_line)"
-  elif [[ -e "$ROOT/.lexiflow-initializing" ]]; then
-    atomic_write "$ROOT/.lexiflow-initializing" "$(volume_identity_line)"
+  elif [[ ! -e "$ROOT/.lexiflow-ready" && ! -e "$ROOT/.lexiflow-ready.pending" ]]; then
+    fail volume-initializing-missing
   fi
   if [[ ! -e "$PGDATA" ]]; then
     [[ -e "$ROOT/.lexiflow-initializing" && ! -e "$ROOT/.lexiflow-ready" && ! -e "$ROOT/.lexiflow-ready.pending" ]] || fail volume-path-invalid
@@ -239,17 +247,27 @@ is_empty_or_partial_pgdata() {
 
 prepare_pgdata() {
   [[ -d "$PGDATA" && ! -L "$PGDATA" ]] || fail volume-path-invalid
-  if is_empty_or_partial_pgdata; then
-    # A marked, not-yet-initialized PGDATA contains no database facts. Only this
-    # exact directory may be cleared to resume an interrupted initdb operation.
-    [[ -e "$ROOT/.lexiflow-initializing" && ! -e "$ROOT/.lexiflow-ready" ]] || fail volume-unrecognized-state
+  local init_marker="$ROOT/.lexiflow-initdb-complete"
+  if [[ -e "$init_marker" || -e "$init_marker.pending" ]]; then
+    [[ ! -e "$init_marker" || ! -L "$init_marker" ]] || fail marker-path-invalid
+    [[ ! -e "$init_marker.pending" || ! -L "$init_marker.pending" ]] || fail marker-path-invalid
+    [[ ! -e "$init_marker" ]] || assert_file_value "$init_marker" "$(volume_identity_line)"
+    [[ ! -e "$init_marker.pending" ]] || assert_file_value "$init_marker.pending" "$(volume_identity_line)"
+    atomic_write "$init_marker" "$(volume_identity_line)"
+  else
+    [[ -f "$ROOT/.lexiflow-format" && ! -L "$ROOT/.lexiflow-format" ]] || fail volume-format-unsupported
+    [[ "$(cat -- "$ROOT/.lexiflow-format")" == 2 ]] || fail volume-format-unsupported
+    [[ -f "$ROOT/.lexiflow-initializing" && ! -L "$ROOT/.lexiflow-initializing" ]] || fail volume-unrecognized-state
+    assert_file_value "$ROOT/.lexiflow-initializing" "$(volume_identity_line)"
+    [[ ! -e "$ROOT/.lexiflow-ready" && ! -e "$ROOT/.lexiflow-ready.pending" ]] || fail volume-unrecognized-state
+    # No completion marker means initdb never completed; PG_VERSION may already
+    # exist, so only this exact format-2 initializing state authorizes cleanup.
     find "$PGDATA" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + || fail partial-initdb-cleanup-failed
-    local pgpass
-    pgpass=$(cat "$ROOT/.postgres-password") || fail volume-secret-invalid
     timeout --kill-after=5s 120s initdb -D "$PGDATA" --username=postgres --pwfile="$ROOT/.postgres-password" \
       --auth-local=trust --auth-host=scram-sha-256 >/dev/null &
     INIT_PID=$!
     wait_active "$INIT_PID" || fail postgres-init-failed
+    atomic_write "$init_marker" "$(volume_identity_line)"
   fi
   [[ -s "$PGDATA/PG_VERSION" && ! -L "$PGDATA/PG_VERSION" ]] || fail postgres-data-invalid
 }

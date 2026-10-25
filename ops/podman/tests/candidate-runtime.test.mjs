@@ -332,3 +332,65 @@ test('creation with unknown write outcome registers the owned name before failin
   assert.throws(()=>execute('', 'container-name','image','token',containers),/COLLISION_CREATE_FAILED/);
   assert.deepEqual(containers,['container-name']);
 });
+
+test('format-2 initdb completion marker recovers partial PG_VERSION without deleting completed data', async t => {
+  const { mkdtemp, mkdir, writeFile, readFile, readdir, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const root = await mkdtemp(path.join(tmpdir(), 'lexiflow-initdb-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const runtime = await readFile(path.join(repo, 'ops/docker/runtime-entrypoint.sh'), 'utf8');
+  const rootDir = path.join(root, 'volume'), pgdata = path.join(rootDir, 'postgres'), bin = path.join(root, 'bin');
+  await mkdir(pgdata, { recursive: true }); await mkdir(bin);
+  const script = runtime.replace('readonly ROOT=/var/lib/lexiflow', `readonly ROOT=${rootDir}`)
+    .replace('readonly PGDATA=/var/lib/lexiflow/postgres', `readonly PGDATA=${pgdata}`);
+  const shell = path.join(root, 'runtime.sh'); await writeFile(shell, script);
+  const countFile = path.join(root, 'initdb.count');
+  await writeFile(path.join(bin, 'initdb'), `#!/bin/bash\nn=$(cat '${countFile}' 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > '${countFile}'; printf "15\\n" > "$2/PG_VERSION"; printf partial > "$2/incomplete"; [[ "$n" == 1 ]] && exit 143; exit 0\n`, { mode: 0o700 });
+  const identity = 'schemaVersion=2\napiContract=caption-hints.v2\nsqlVersion=sql1\nreleaseId=rel1\npreparationId=prep1\nruleId=rule1\ndatasetSha256=' + 'a'.repeat(64) + '\n';
+  const secret = 'b'.repeat(64);
+  const seed = async ({ format='2', complete=false, ready=false }={}) => {
+    await mkdir(rootDir, { recursive: true }); await mkdir(pgdata, { recursive: true });
+    await Promise.all([
+      writeFile(path.join(rootDir,'.lexiflow-owner'),'lexiflow-runtime\n'), writeFile(path.join(rootDir,'.lexiflow-format'),format+'\n'),
+      writeFile(path.join(rootDir,'.lexiflow-initializing'),identity), writeFile(path.join(rootDir,'.postgres-password'),secret+'\n'),
+      writeFile(path.join(rootDir,'.app-password'),secret+'\n')]);
+    if (complete) await writeFile(path.join(rootDir,'.lexiflow-initdb-complete'),identity);
+    if (ready) await writeFile(path.join(rootDir,'.lexiflow-ready'),identity);
+  };
+  const invoke = () => spawnSync('/bin/bash',['-c',`source "$1"; SOFTWARE_VERSION=v1; API_CONTRACT=caption-hints.v2; SQL_VERSION=sql1; RELEASE_ID=rel1; PREPARATION_ID=prep1; RULE_ID=rule1; DATASET_SHA256=${'a'.repeat(64)}; PATH="$2:$PATH"; timeout() { shift 2; "$@"; }; start_postgres() { test -f "$ROOT/.lexiflow-initdb-complete"; printf postgres-started; }; validate_volume; prepare_pgdata; start_postgres; test -f "$ROOT/.lexiflow-initdb-complete"; printf started`, 'test',shell,bin],{encoding:'utf8'});
+  await seed(); await writeFile(path.join(pgdata,'PG_VERSION'),'14\n'); await writeFile(path.join(pgdata,'incomplete'),'partial');
+  const interrupted = invoke(); assert.notEqual(interrupted.status,0); assert.equal(await readFile(path.join(pgdata,'PG_VERSION'),'utf8'),'15\n'); assert.equal(await readFile(path.join(rootDir,'.lexiflow-initdb-complete'),'utf8').catch(()=>''),'');
+  const recovered = invoke(); assert.equal(recovered.status,0,recovered.stderr); assert.match(recovered.stdout,/postgres-startedstarted/u);
+  assert.deepEqual((await readdir(pgdata)).sort(),['PG_VERSION','incomplete']);
+  const markerBefore = await readFile(path.join(rootDir,'.lexiflow-initdb-complete'),'utf8');
+  await writeFile(path.join(pgdata,'accepted-fact'),'preserve');
+  const already = invoke(); assert.equal(already.status,0,already.stderr); assert.equal(await readFile(path.join(pgdata,'accepted-fact'),'utf8'),'preserve');
+  assert.equal(await readFile(path.join(rootDir,'.lexiflow-initdb-complete'),'utf8'),markerBefore);
+});
+
+test('format-2 pending marker recovery and legacy/corrupt states fail without modifying PGDATA', async t => {
+  const { mkdtemp, mkdir, writeFile, readFile, readdir, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const root = await mkdtemp(path.join(tmpdir(), 'lexiflow-initdb-reject-')); t.after(() => rm(root,{recursive:true,force:true}));
+  const runtime = await readFile(path.join(repo,'ops/docker/runtime-entrypoint.sh'),'utf8');
+  const volume=path.join(root,'volume'), pgdata=path.join(volume,'postgres'); await mkdir(pgdata,{recursive:true});
+  const script=path.join(root,'runtime.sh'); await writeFile(script,runtime.replace('readonly ROOT=/var/lib/lexiflow',`readonly ROOT=${volume}`).replace('readonly PGDATA=/var/lib/lexiflow/postgres',`readonly PGDATA=${pgdata}`));
+  const identity='schemaVersion=2\napiContract=caption-hints.v2\nsqlVersion=sql1\nreleaseId=rel1\npreparationId=prep1\nruleId=rule1\ndatasetSha256='+ 'a'.repeat(64)+'\n';
+  const seed=async format=>{await mkdir(volume,{recursive:true}); await mkdir(pgdata,{recursive:true}); for(const [n,v] of [['.lexiflow-owner','lexiflow-runtime\n'],['.lexiflow-format',format+'\n'],['.lexiflow-initializing',identity],['.postgres-password','b'.repeat(64)+'\n'],['.app-password','b'.repeat(64)+'\n'],['postgres/PG_VERSION','15\n'],['postgres/interrupted','x']]) {const p=path.join(volume,n); await mkdir(path.dirname(p),{recursive:true}); await writeFile(p,v);}};
+  const run=()=>spawnSync('/bin/bash',['-c',`source "$1"; SOFTWARE_VERSION=v1; API_CONTRACT=caption-hints.v2; SQL_VERSION=sql1; RELEASE_ID=rel1; PREPARATION_ID=prep1; RULE_ID=rule1; DATASET_SHA256=${'a'.repeat(64)}; validate_volume; prepare_pgdata`, 'test',script],{encoding:'utf8'});
+  const snapshot = async dir => {
+    const out=[]; const visit=async current=>{for(const name of (await readdir(current)).sort()){const p=path.join(current,name);const st=await (await import('node:fs/promises')).lstat(p);if(st.isDirectory()){out.push([path.relative(dir,p),'dir']);await visit(p);}else out.push([path.relative(dir,p),'file',await readFile(p,'utf8')]);}}; await visit(dir);return out;
+  };
+  await seed(2); await writeFile(path.join(volume,'.lexiflow-initdb-complete.pending'),identity);
+  const pending=run(); assert.equal(pending.status,0,pending.stderr); assert.equal(await readFile(path.join(volume,'.lexiflow-initdb-complete'),'utf8'),identity); assert.equal(await readdir(volume).then(x=>x.includes('.lexiflow-initdb-complete.pending')),false);
+  await writeFile(path.join(volume,'.lexiflow-initdb-complete.pending'),identity);
+  const both=run(); assert.equal(both.status,0,both.stderr); assert.equal(await readdir(volume).then(x=>x.includes('.lexiflow-initdb-complete.pending')),false);
+  const unchangedReject = async mutate => { await rm(volume,{recursive:true,force:true}); await seed(2); await mutate(); const before=await snapshot(volume); const result=run(); assert.notEqual(result.status,0); assert.deepEqual(await snapshot(volume),before); };
+  await unchangedReject(async()=>{await writeFile(path.join(volume,'.lexiflow-initdb-complete.pending'),'bad\n');});
+  await unchangedReject(async()=>{await writeFile(path.join(volume,'.lexiflow-ready.pending'),identity);});
+  await unchangedReject(async()=>{await writeFile(path.join(volume,'.lexiflow-initdb-complete'),identity); await rm(path.join(pgdata,'PG_VERSION'));});
+  await unchangedReject(async()=>{await writeFile(path.join(volume,'.lexiflow-ready'),identity);});
+  await unchangedReject(async()=>{await writeFile(path.join(volume,'.lexiflow-initdb-complete'),identity); await rm(pgdata,{recursive:true,force:true});});
+  await unchangedReject(async()=>{await writeFile(path.join(volume,'.lexiflow-initdb-complete'),identity); await rm(path.join(pgdata,'PG_VERSION'));});
+  await unchangedReject(async()=>{await writeFile(path.join(volume,'.lexiflow-format'),'1\n');});
+});

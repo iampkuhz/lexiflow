@@ -33,13 +33,23 @@ test('nonempty unknown volume and ownerless pending marker reject without mutati
   const identityLine = runRuntime(drift, 'read_identity; volume_identity_line');
   assert.equal(identityLine.status, 0, identityLine.stderr);
   await writeFile(path.join(drift.root, '.lexiflow-owner'), 'lexiflow-runtime');
-  await writeFile(path.join(drift.root, '.lexiflow-format'), '1');
+  await writeFile(path.join(drift.root, '.lexiflow-format'), '2');
   await writeFile(path.join(drift.root, '.lexiflow-initializing'), identityLine.stdout.replace('releaseId=1792210462122', 'releaseId=older-release'));
   const driftBefore = await snapshot(drift.root);
   const driftResult = runRuntime(drift, 'read_identity; validate_volume');
   assert.equal(driftResult.status, 1);
   assert.equal(driftResult.stderr.trim(), 'lexiflow-runtime: volume-identity-mismatch');
   assert.deepEqual(await snapshot(drift.root), driftBefore);
+
+  const oldFormat = await lifecycleFixture(t);
+  await writeFile(path.join(oldFormat.root, '.lexiflow-owner'), 'lexiflow-runtime');
+  await writeFile(path.join(oldFormat.root, '.lexiflow-format'), '1');
+  await writeFile(path.join(oldFormat.root, '.lexiflow-initializing'), identityLine.stdout);
+  const oldFormatBefore = await snapshot(oldFormat.root);
+  const oldFormatResult = runRuntime(oldFormat, 'read_identity; validate_volume');
+  assert.equal(oldFormatResult.status, 1);
+  assert.match(oldFormatResult.stderr.trim(), /^lexiflow-runtime: volume-(?:format-unsupported|identity-mismatch)$/u);
+  assert.deepEqual(await snapshot(oldFormat.root), oldFormatBefore);
 
   const pendingFixture = await lifecycleFixture(t);
   await writeFile(path.join(pendingFixture.root, '.lexiflow-owner.pending'), 'lexiflow-runtime');
@@ -53,11 +63,13 @@ test('nonempty unknown volume and ownerless pending marker reject without mutati
 test('recognized interrupted initdb clears only partial PGDATA and resumes initialization', async (t) => {
   const f = await lifecycleFixture(t);
   const bin = f.bin;
-  await writeFile(path.join(bin, 'initdb'), '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do if [ "$1" = -D ]; then target=$2; shift 2; else shift; fi; done\nprintf "17\\n" > "$target/PG_VERSION"\n', { mode: 0o700 });
+  await writeFile(path.join(bin, 'initdb'), '#!/bin/sh\nwhile [ "$#" -gt 0 ]; do if [ "$1" = -D ]; then target=$2; shift 2; else shift; fi; done\nprintf "17\\n" > \"$target/PG_VERSION\"\n', { mode: 0o700 });
   const identityLine = runRuntime(f, 'read_identity; volume_identity_line');
   assert.equal(identityLine.status, 0, identityLine.stderr);
+  assert.match(f.identity, /^schemaVersion=1\n/u);
+  assert.match(identityLine.stdout, /^schemaVersion=2\n/u);
   await writeFile(path.join(f.root, '.lexiflow-owner'), 'lexiflow-runtime');
-  await writeFile(path.join(f.root, '.lexiflow-format'), '1');
+  await writeFile(path.join(f.root, '.lexiflow-format'), '2');
   await writeFile(path.join(f.root, '.lexiflow-initializing'), identityLine.stdout);
   await writeFile(path.join(f.root, '.postgres-password'), 'd'.repeat(64));
   await writeFile(path.join(f.root, '.app-password'), 'e'.repeat(64));
@@ -68,6 +80,7 @@ test('recognized interrupted initdb clears only partial PGDATA and resumes initi
   assert.equal(resumed.status, 0, resumed.stderr);
   assert.equal((await readFile(path.join(f.pgdata, 'PG_VERSION'), 'utf8')), '17\n');
   assert.deepEqual(await readdir(f.pgdata), ['PG_VERSION']);
+  assert.equal(await readFile(path.join(f.root, '.lexiflow-initdb-complete'), 'utf8'), identityLine.stdout);
 });
 
 test('restart discards only known volatile proof markers and refuses unknown RUN content unchanged', async (t) => {
@@ -91,7 +104,7 @@ test('initializer failure exits before verified proof or ready marker can be pub
   const f = await lifecycleFixture(t);
   const body = `
 id() { [ "$1" = -un ] && { printf 'postgres\\n'; return 0; }; return 1; }
-prepare_pgdata() { mkdir -p "$PGDATA"; printf '17\\n' > "$PGDATA/PG_VERSION"; }
+prepare_pgdata() { mkdir -p "$PGDATA"; printf '17\\n' > "$PGDATA/PG_VERSION"; printf '%s\\n' "$(volume_identity_line)" > "$ROOT/.lexiflow-initdb-complete"; }
 start_postgres() { sleep 60 & PG_PID=$!; }
 bootstrap_database() { :; }
 start_api() { sleep 60 & API_PID=$!; }
@@ -127,6 +140,7 @@ test('compatible application update preserves data while SQL or dataset drift re
   const f = await lifecycleFixture(t);
   const initialized = runRuntime(f, 'read_identity; validate_volume');
   assert.equal(initialized.status, 0, initialized.stderr);
+  await writeFile(path.join(f.root, '.lexiflow-initdb-complete'), `${runRuntime(f, 'read_identity; volume_identity_line').stdout}`);
   await writeFile(path.join(f.pgdata, 'PG_VERSION'), '17\n');
   await writeFile(path.join(f.pgdata, 'preserved-fact'), 'user data\n');
   await rename(path.join(f.root, '.lexiflow-initializing'), path.join(f.root, '.lexiflow-ready'));
