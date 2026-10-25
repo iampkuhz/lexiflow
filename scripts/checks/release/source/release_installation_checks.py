@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import pwd
 import tempfile
 import time
 from collections.abc import Mapping
@@ -59,7 +60,11 @@ def execute_lifecycle(
         raise ConsumerError("FAIL", "candidate-lifecycle-check-missing")
     work = scratch / "single-runtime-candidates"
     work.mkdir(mode=0o700)
-    host_home = environ.get("HOME")
+    # Check 内核不继承 HOME；从真实 OS uid 派生 Podman 宿主配置目录。
+    try:
+        host_home = pwd.getpwuid(os.getuid()).pw_dir
+    except (KeyError, OSError):
+        raise ConsumerError("FAIL", "host-home-invalid") from None
     if (
         not isinstance(host_home, str)
         or not host_home
