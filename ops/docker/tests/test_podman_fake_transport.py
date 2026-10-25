@@ -23,11 +23,12 @@ from podman_fake_transport import (
 )
 
 
-MODEL = '''import json, os, sys
+MODEL = '''import json, os, sys, time
 from pathlib import Path
 args = sys.argv[1:]
 counter = globals().get('counter', 0) + 1
 mode = Path(os.environ['MODE_FILE']).read_text()
+time.sleep(float(os.environ.get('DELAY', '0')))
 state = Path(os.environ['STATE_FILE'])
 with state.open('a', encoding='utf-8') as output:
     output.write(json.dumps({'args': args, 'mode': mode, 'cwd': os.getcwd(), 'ctx': os.environ.get('CTX'), 'counter': counter}, ensure_ascii=False) + '\\n')
@@ -121,6 +122,37 @@ class PodmanFakeTransportTest(unittest.TestCase):
         self._await_drained(self.transport)
         self.assertNotIn('test_cancel_during_image_pull_releases_lock_and_retries', FINITE_TEST_CASES)
         self.assertNotIn('test_cancel_during_source_run_removes_only_owned_untagged_tool_image', FINITE_TEST_CASES)
+
+    def test_real_deadline_allows_slow_response_within_budget(self):
+        started = time.monotonic()
+        result = subprocess.run(
+            [str(self.bin / 'podman'), 'probe'], cwd=self.root,
+            env={**self._context(), 'DELAY': '4'},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+        )
+        elapsed = time.monotonic() - started
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertGreaterEqual(elapsed, 3.5)
+        self.assertLess(elapsed, 10)
+        self._await_drained(self.transport)
+
+    def test_real_deadline_fails_unresponsive_server_at_original_limit(self):
+        started = time.monotonic()
+        result = subprocess.run(
+            [str(self.bin / 'podman'), 'probe'], cwd=self.root,
+            env={**self._context(), 'DELAY': '20'},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=14,
+        )
+        elapsed = time.monotonic() - started
+        self.assertEqual(result.returncode, 97, (elapsed, result.stderr))
+        self.assertGreaterEqual(elapsed, 11)
+        self.assertLess(elapsed, 14)
+        self.transport.server.kill()
+        self.transport.server.wait(timeout=2)
+        self.transport.server_log.close()
+        self.transport.server = None
+        self.transport.server_log = None
+        self.transport.started = False
 
     def test_serve_publishes_counter_before_ack_disappears(self):
         """Exercise serve directly and observe the exact q.* drain boundary."""
