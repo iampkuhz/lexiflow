@@ -59,8 +59,19 @@ def execute_lifecycle(
         raise ConsumerError("FAIL", "candidate-lifecycle-check-missing")
     work = scratch / "single-runtime-candidates"
     work.mkdir(mode=0o700)
-    home = work / "home"
-    home.mkdir(mode=0o700)
+    host_home = environ.get("HOME")
+    if (
+        not isinstance(host_home, str)
+        or not host_home
+        or not Path(host_home).is_absolute()
+    ):
+        raise ConsumerError("FAIL", "host-home-invalid")
+    try:
+        home = Path(host_home).resolve(strict=True)
+    except OSError:
+        raise ConsumerError("FAIL", "host-home-invalid") from None
+    if not home.is_dir():
+        raise ConsumerError("FAIL", "host-home-invalid")
     env = {
         "PATH": environ.get("PATH", os.defpath),
         "HOME": str(home),
