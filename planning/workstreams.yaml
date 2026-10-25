@@ -695,6 +695,36 @@ workstreams:
         required_check_ids:
         - eng.release.candidate-runtime
         depends_on: []
+      - id: LF-TSK-QLT-2488
+        title: 独立验证生命周期修复开发冻结
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-release/lifecycle-fix/development/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立验证生命周期修复开发冻结的冻结产物与当次真实证据。
+        deliverable: 独立验证生命周期修复开发冻结及可重核结果。
+        acceptance_criteria:
+        - 合成生命周期仅传递已受控宿主HOME以发现真实Podman，不继承任意私有环境或修改宿主配置。
+        - 仅全部必需真实phase及owned清理均PASS且无failure时可收敛PASS；缺项、失败与清理未知仍拒绝。
+        - 仅消费本次精确目标与冻结输入，不自签独立验收、不复用历史PASS。
+        acceptance_evidence:
+        - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.docs
+        discovered_from: LF-TSK-QLT-2481
+        depends_on: []
       - id: LF-TSK-QLT-2485
         title: 独立验证根许可证修复开发冻结
         priority: P0
@@ -724,6 +754,36 @@ workstreams:
         - eng.repository.docs
         discovered_from: LF-TSK-OPS-2069
         depends_on: []
+      - id: LF-TSK-QLT-2489
+        title: 独立执行生命周期修复工程Formal
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-release/lifecycle-fix/formal/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立执行生命周期修复工程Formal的冻结产物与当次真实证据。
+        deliverable: 独立执行生命周期修复工程Formal及可重核结果。
+        acceptance_criteria:
+        - 合成生命周期仅传递已受控宿主HOME以发现真实Podman，不继承任意私有环境或修改宿主配置。
+        - 仅全部必需真实phase及owned清理均PASS且无failure时可收敛PASS；缺项、失败与清理未知仍拒绝。
+        - 仅消费本次精确目标与冻结输入，不自签独立验收、不复用历史PASS。
+        acceptance_evidence:
+        - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.docs
+        discovered_from: LF-TSK-QLT-2481
+        depends_on: []
       - id: LF-TSK-QLT-2486
         title: 独立执行根许可证修复工程Formal
         priority: P0
@@ -752,6 +812,36 @@ workstreams:
         - eng.repository.planning
         - eng.repository.docs
         discovered_from: LF-TSK-OPS-2069
+        depends_on: []
+      - id: LF-TSK-QLT-2490
+        title: 独立审查生命周期修复工程证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-release/lifecycle-fix/review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立审查生命周期修复工程证据的冻结产物与当次真实证据。
+        deliverable: 独立审查生命周期修复工程证据及可重核结果。
+        acceptance_criteria:
+        - 合成生命周期仅传递已受控宿主HOME以发现真实Podman，不继承任意私有环境或修改宿主配置。
+        - 仅全部必需真实phase及owned清理均PASS且无failure时可收敛PASS；缺项、失败与清理未知仍拒绝。
+        - 仅消费本次精确目标与冻结输入，不自签独立验收、不复用历史PASS。
+        acceptance_evidence:
+        - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.docs
+        discovered_from: LF-TSK-QLT-2481
         depends_on: []
       - id: LF-TSK-QLT-2487
         title: 独立审查根许可证修复工程证据
@@ -813,8 +903,8 @@ workstreams:
       - id: LF-TSK-QLT-2481
         title: 独立执行精确单容器发行完整基线
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/single-container-release/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -829,7 +919,7 @@ workstreams:
         expected_output: 独立执行精确单容器发行完整基线；边界与验收见本阶段 OpenSpec。
         deliverable: 独立执行精确单容器发行完整基线及当次可核验证据。
         acceptance_criteria:
-        - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
+        - 满足本阶段设计与对应工作包验收；对修复后全新精确源码与候选当次验证，不消费失败2.1.1资格，不清理未知资源、不自签验收。
         acceptance_evidence:
         - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
         validation_command: node ops/release/workflow/run-release-workflow.mjs formal validate <uuid>
@@ -841,8 +931,8 @@ workstreams:
       - id: LF-TSK-QLT-2482
         title: 独立审查精确单容器候选及验收证据
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/single-container-release/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -857,7 +947,7 @@ workstreams:
         expected_output: 独立审查精确单容器候选及验收证据；边界与验收见本阶段 OpenSpec。
         deliverable: 独立审查精确单容器候选及验收证据及当次可核验证据。
         acceptance_criteria:
-        - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
+        - 满足本阶段设计与对应工作包验收；对修复后全新精确源码与候选当次验证，不消费失败2.1.1资格，不清理未知资源、不自签验收。
         acceptance_evidence:
         - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
         validation_command: node ops/release/workflow/run-release-workflow.mjs formal review <uuid>
@@ -8726,6 +8816,77 @@ workstreams:
         - eng.release.manifest
         depends_on: []
         discovered_from: LF-TSK-OPS-2063
+      - id: LF-TSK-OPS-2070
+        title: 修复生命周期宿主上下文与真实完成状态
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/checks/release/source/release_installation_checks.py
+        - tests/verification/test_release_runtime_lifecycle.py
+        - ops/podman/candidates/single-runtime-candidate.mjs
+        - ops/podman/tests/candidate-runtime.test.mjs
+        - tmp/phase-tools/single-container-release/lifecycle-fix/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 修复生命周期宿主上下文与真实完成状态的冻结产物与当次真实证据。
+        deliverable: 修复生命周期宿主上下文与真实完成状态及可重核结果。
+        acceptance_criteria:
+        - 合成生命周期仅传递已受控宿主HOME以发现真实Podman，不继承任意私有环境或修改宿主配置。
+        - 仅全部必需真实phase及owned清理均PASS且无failure时可收敛PASS；缺项、失败与清理未知仍拒绝。
+        - 仅消费本次精确目标与冻结输入，不自签独立验收、不复用历史PASS。
+        acceptance_evidence:
+        - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
+        validation_command: python3 -m unittest tests.verification.test_release_runtime_lifecycle -v && node --test ops/podman/tests/candidate-runtime.test.mjs
+        required_check_ids:
+        - eng.release.version
+        - eng.repository.planning
+        discovered_from: LF-TSK-QLT-2481
+        depends_on: []
+      - id: LF-TSK-OPS-2071
+        title: 集成生命周期修复与未占用发行版本
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/checks/release/source/release_installation_checks.py
+        - tests/verification/test_release_runtime_lifecycle.py
+        - ops/podman/candidates/single-runtime-candidate.mjs
+        - ops/podman/tests/candidate-runtime.test.mjs
+        - ops/release/version.txt
+        - ops/release/notes/2.1.2.md
+        - planning/workstreams.yaml
+        - tmp/phase-tools/single-container-release/lifecycle-fix/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 集成生命周期修复与未占用发行版本的冻结产物与当次真实证据。
+        deliverable: 集成生命周期修复与未占用发行版本及可重核结果。
+        acceptance_criteria:
+        - 合成生命周期仅传递已受控宿主HOME以发现真实Podman，不继承任意私有环境或修改宿主配置。
+        - 仅全部必需真实phase及owned清理均PASS且无failure时可收敛PASS；缺项、失败与清理未知仍拒绝。
+        - 仅消费本次精确目标与冻结输入，不自签独立验收、不复用历史PASS。
+        acceptance_evidence:
+        - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
+        validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
+        required_check_ids:
+        - eng.release.version
+        - eng.repository.planning
+        discovered_from: LF-TSK-QLT-2481
+        depends_on: []
       - id: LF-TSK-OPS-2069
         title: 修复镜像根许可证输入并准备精确候选版本
         priority: P0
