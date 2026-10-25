@@ -6,6 +6,7 @@ import copy
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import signal
 import socket
@@ -149,6 +150,18 @@ class ReleaseDockerPreflightTest(unittest.TestCase):
         self.fail(f"synthetic child cleanup unresolved; evidence retained: {self.root}")
 
     def _write_cli(self) -> None:
+        if self.mode == "hang":
+            # 挂起夹具只需真实后代，不让 Python 启动时间消耗固定的一秒预算。
+            source = f"""#!/bin/sh
+/bin/sleep 60 &
+child=$!
+printf '{{"child_pid":%s,"process_group":%s}}\\n' "$child" "$$" > {shlex.quote(str(self.root / "child.pid"))}
+wait "$child"
+"""
+            path = self.bin / "docker"
+            path.write_text(source, encoding="utf-8")
+            path.chmod(0o755)
+            return
         source = f"""#!{sys.executable}
 import json, os, sys, time, subprocess
 args = sys.argv[1:]
@@ -157,12 +170,7 @@ with open({str(self.log)!r}, "a", encoding="utf-8") as stream:
 mode = {self.mode!r}
 if "API_TOKEN" in os.environ:
     open({str(self.root / "token-leaked")!r}, "w").write("unexpected")
-if mode == "hang":
-    child = subprocess.Popen(["sleep", "60"])
-    with open({str(self.root / "child.pid")!r}, "w") as stream:
-        json.dump({{"child_pid": child.pid, "process_group": os.getpgrp()}}, stream)
-    time.sleep(60)
-elif mode == "orphan":
+if mode == "orphan":
     child = subprocess.Popen(
         ["sleep", "60"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
@@ -404,11 +412,20 @@ elif "compose" in args:
             ("FAIL", "socket-identity-changed"), (result.status, result.reason)
         )
 
+    def test_hang_fixture_does_not_depend_on_python_startup(self) -> None:
+        self.mode = "hang"
+        with patch.object(sys, "executable", str(self.root / "unavailable-python")):
+            self._write_cli()
+        with patch.object(preflight_module, "_TIMEOUT", 1.0):
+            result = self._preflight()
+        self.assertEqual("docker-info-unavailable", result.reason)
+        record = json.loads((self.root / "child.pid").read_text())
+        self._assert_process_gone(record["child_pid"])
+
     def test_bounded_runner_reaps_timed_out_group_and_hides_output(self) -> None:
         self.mode = "hang"
         self._write_cli()
-        # Allow the real Python fake CLI to start and record its descendant;
-        # this remains a test-only limit, below the production 30-second budget.
+        # 保留夹具一秒预算和真实进程组回收断言；生产预算仍为三十秒。
         with patch.object(preflight_module, "_TIMEOUT", 1.0):
             result = self._preflight()
         self.assertEqual("docker-info-unavailable", result.reason)
