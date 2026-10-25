@@ -195,6 +195,49 @@ elif "compose" in args:
         path.write_text(source, encoding="utf-8")
         path.chmod(0o755)
 
+    def _wait_for_hang_fixture(self, original_popen, *args, **kwargs):
+        """让真实 Popen 在运行预算开始前完成有界、可验证的夹具握手。"""
+        process = original_popen(*args, **kwargs)
+        record_path = self.root / "child.pid"
+        deadline = time.monotonic() + 3.0
+        try:
+            while time.monotonic() < deadline:
+                try:
+                    record = json.loads(record_path.read_text(encoding="utf-8"))
+                    child_pid = int(record["child_pid"])
+                    process_group = int(record["process_group"])
+                    if process_group != process.pid:
+                        raise AssertionError("hang fixture process group mismatch")
+                    if os.getpgid(child_pid) != process.pid:
+                        raise AssertionError("hang fixture child is not in owned group")
+                    os.kill(child_pid, 0)
+                    return process
+                except FileNotFoundError:
+                    pass
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                    raise AssertionError("hang fixture readiness record is invalid")
+                time.sleep(0.01)
+            raise AssertionError("hang fixture readiness handshake timed out")
+        except BaseException:
+            # This group is the actual Popen we created, not an inferred PID.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            process.wait(timeout=1)
+            raise
+
+    def _preflight_with_ready_hang_fixture(self):
+        original_popen = subprocess.Popen
+        with patch.object(
+            preflight_module.release_process.subprocess,
+            "Popen",
+            side_effect=lambda *args, **kwargs: self._wait_for_hang_fixture(
+                original_popen, *args, **kwargs
+            ),
+        ):
+            return self._preflight()
+
     def _preflight(self):
         return preflight_module.preflight(self.environment)
 
@@ -417,7 +460,7 @@ elif "compose" in args:
         with patch.object(sys, "executable", str(self.root / "unavailable-python")):
             self._write_cli()
         with patch.object(preflight_module, "_TIMEOUT", 1.0):
-            result = self._preflight()
+            result = self._preflight_with_ready_hang_fixture()
         self.assertEqual("docker-info-unavailable", result.reason)
         record = json.loads((self.root / "child.pid").read_text())
         self._assert_process_gone(record["child_pid"])
@@ -427,7 +470,7 @@ elif "compose" in args:
         self._write_cli()
         # 保留夹具一秒预算和真实进程组回收断言；生产预算仍为三十秒。
         with patch.object(preflight_module, "_TIMEOUT", 1.0):
-            result = self._preflight()
+            result = self._preflight_with_ready_hang_fixture()
         self.assertEqual("docker-info-unavailable", result.reason)
         child_pid = json.loads((self.root / "child.pid").read_text())["child_pid"]
         self._assert_process_gone(child_pid)
