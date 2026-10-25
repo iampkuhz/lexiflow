@@ -30,6 +30,11 @@ export function eligibleForPass(output) {
     &&output.cleanup?.status==='PASS'&&output.cleanup?.settled===true&&output.cleanup?.ownedResourcesRemoved===true
     &&output.failure===null;
 }
+export function markPassIfComplete(out) {
+  if (eligibleForPass({...out,status:'PASS'})) out.status='PASS';
+  else if (out.status === 'PASS') out.status='FAIL';
+  return out;
+}
 function privateRoot() {
   const parent=path.join(repo,'tmp/phase-tools/single-container-release/acceptance');
   fs.mkdirSync(parent,{recursive:true,mode:0o700});
@@ -329,7 +334,7 @@ async function runInner(request) {
       if(out.phases.at(-1).status==='NOT_RUN'||out.phases.at(-1).status==='RUNNING')setPhase(out,'final-cleanup',cleaned?'PASS':'BLOCKED',{ownedResourcesRemoved:cleaned});
       if(!cleaned&&out.status==='PASS'){out.status='BLOCKED';out.failure={code:'CLEANUP_NOT_OBSERVED'};}
       if(out.status!=='PASS') { for(const p of out.phases)if(p.status==='NOT_RUN')p.status='NOT_RUN'; }
-      else out.status='PASS';
+      markPassIfComplete(out);
     } catch(error) {
       out.cleanup={status:'BLOCKED',settled:false,ownedResourcesRemoved:false};out.status='BLOCKED';out.failure={code:/^[A-Z][A-Z0-9_]{2,80}$/.test(error?.message||'')?error.message:'CLEANUP_UNPROVEN'};
       const phase=out.phases.at(-1);phase.status='BLOCKED';phase.facts={ownedResourcesRemoved:false};

@@ -146,18 +146,51 @@ class TestReleaseRuntimeLifecycle(unittest.TestCase):
                 scratch,
                 evidence,
                 SimpleNamespace(endpoint="unix:///tmp/private.sock"),
-                {"PATH": "/usr/bin"},
+                {
+                    "PATH": "/usr/bin",
+                    "HOME": str(root),
+                    "XDG_CONFIG_HOME": "/private/secret",
+                    "PRIVATE_TOKEN": "never-forward",
+                },
                 fixture_root=fixture,
             )
             self.assertEqual(len(result["generations"]), 2)
             self.assertEqual(result["lifecycleChecks"], 16)
             for call in run.call_args_list:
+                self.assertEqual(call.args[2]["HOME"], str(root.resolve()))
+                self.assertEqual(
+                    set(call.args[2]),
+                    {"PATH", "HOME", "LC_ALL", "LANG", "TZ", "DOCKER_HOST"},
+                )
+                self.assertNotIn("PRIVATE_TOKEN", call.args[2])
+                self.assertNotIn("XDG_CONFIG_HOME", call.args[2])
                 self.assertEqual(
                     Path(call.args[0][1]),
                     fixture
                     / "ops/podman/candidates/check-podman-candidate-lifecycle.mjs",
                 )
                 self.assertLessEqual(call.args[3], 1100)
+
+    def test_invalid_host_home_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            _scratch, fixture, evidence = self._setup(root)
+            bad_homes = ["", "relative", str(root / "missing"), str(root / "file")]
+            (root / "file").write_text("not a directory", encoding="utf-8")
+            for index, home in enumerate(bad_homes):
+                local_scratch = root / f"scratch-{index}"
+                local_scratch.mkdir()
+                with (
+                    self.subTest(home=home),
+                    self.assertRaisesRegex(ConsumerError, "host-home-invalid"),
+                ):
+                    lifecycle.execute_lifecycle(
+                        local_scratch,
+                        evidence,
+                        SimpleNamespace(endpoint="unix:///tmp/private.sock"),
+                        {"PATH": "/usr/bin", "HOME": home},
+                        fixture_root=fixture,
+                    )
 
     @patch(
         "ops.release.host_resources.release_docker_preflight.recheck",
@@ -179,7 +212,7 @@ class TestReleaseRuntimeLifecycle(unittest.TestCase):
                     scratch,
                     evidence,
                     SimpleNamespace(endpoint="unix:///tmp/private.sock"),
-                    {"PATH": "/usr/bin"},
+                    {"PATH": "/usr/bin", "HOME": str(Path.home())},
                     fixture_root=fixture,
                 )
 
@@ -205,7 +238,7 @@ class TestReleaseRuntimeLifecycle(unittest.TestCase):
                     scratch,
                     evidence,
                     SimpleNamespace(endpoint="unix:///tmp/private.sock"),
-                    {"PATH": "/usr/bin"},
+                    {"PATH": "/usr/bin", "HOME": str(Path.home())},
                     fixture_root=fixture,
                 )
 
@@ -234,7 +267,7 @@ class TestReleaseRuntimeLifecycle(unittest.TestCase):
                     scratch,
                     evidence,
                     SimpleNamespace(endpoint="unix:///tmp/private.sock"),
-                    {"PATH": "/usr/bin"},
+                    {"PATH": "/usr/bin", "HOME": str(Path.home())},
                     fixture_root=fixture,
                 )
 
@@ -249,7 +282,7 @@ class TestReleaseRuntimeLifecycle(unittest.TestCase):
                     scratch,
                     evidence,
                     SimpleNamespace(endpoint="unix:///tmp/private.sock"),
-                    {"PATH": "/usr/bin"},
+                    {"PATH": "/usr/bin", "HOME": str(Path.home())},
                     fixture_root=fixture,
                 )
 

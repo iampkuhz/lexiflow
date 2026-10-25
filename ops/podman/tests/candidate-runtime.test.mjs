@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCandidateRuntime, REQUIRED_PHASE_IDS, validateCandidateRequest, eligibleForPass } from '../candidates/check-podman-candidate-lifecycle.mjs';
+import { markPassIfComplete } from '../candidates/single-runtime-candidate.mjs';
 
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const cli=path.join(repo,'ops/podman/candidates/check-podman-candidate-lifecycle.mjs');
@@ -24,6 +25,14 @@ test('only a complete ordered real-stage report with settled cleanup is eligible
   for(const id of REQUIRED_PHASE_IDS){const bad=structuredClone(value);bad.phases.find(x=>x.id===id).status='NOT_RUN';assert.equal(eligibleForPass(bad),false,id);}
   for(const mutate of [x=>x.phases.reverse(),x=>x.cleanup.settled=false,x=>x.cleanup.ownedResourcesRemoved=false,x=>x.failure={code:'ERROR'}]){
     const bad=structuredClone(value);mutate(bad);assert.equal(eligibleForPass(bad),false);
+  }
+});
+
+test('successful execution marks PASS only after all required phases and owned cleanup settle',()=>{
+  const out={status:'FAIL',failure:null,phases:REQUIRED_PHASE_IDS.map(id=>({id,status:'PASS'})),cleanup:{status:'PASS',settled:true,ownedResourcesRemoved:true}};
+  assert.equal(markPassIfComplete(out).status,'PASS');
+  for(const mutate of [x=>x.phases.pop(),x=>x.phases[0].status='UNKNOWN',x=>x.phases.reverse(),x=>x.cleanup.status='UNKNOWN',x=>x.cleanup.settled=false,x=>x.cleanup.ownedResourcesRemoved=false,x=>x.failure={code:'X'}]){
+    const bad=structuredClone(out);mutate(bad);assert.notEqual(markPassIfComplete(bad).status,'PASS');
   }
 });
 
