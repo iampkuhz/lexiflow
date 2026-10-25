@@ -726,6 +726,72 @@ workstreams:
         - eng.release.docker-contract
         discovered_from: LF-TSK-OPS-2076
         depends_on: []
+      - id: LF-TSK-QLT-2507
+        title: 独立验证合成夹具冷环境开发冻结
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-synthetic-fixture/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [tmp/phase-tools/single-container-synthetic-fixture/development/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 合成事务测试在无扩展构建缓存的精确源码中自包含，不改变生产或发行资格。
+        deliverable: 有界测试夹具与当前冻结的独立证据。
+        acceptance_criteria:
+        - 固定来源复制映射至本次拥有的夹具，仍真实复制并逐代核对资料绑定，不接触仓库dist。
+        - 真实旧源码冷环境ENOENT保留；新冷环境直接通过，不扩大检查选择或任何预算。
+        - 当次独立开发检查、工程验收及只读审查，不复用旧PASS；正式候选另行验收。
+        acceptance_evidence: [精确源与目标、真实actor、原始命令和退出、冻结摘要及失败边界。]
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids: [eng.release.build]
+        discovered_from: LF-TSK-OPS-2077
+        depends_on: []
+      - id: LF-TSK-QLT-2508
+        title: 独立验收合成夹具工程证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-synthetic-fixture/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [tmp/phase-tools/single-container-synthetic-fixture/formal/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 合成事务测试在无扩展构建缓存的精确源码中自包含，不改变生产或发行资格。
+        deliverable: 有界测试夹具与当前冻结的独立证据。
+        acceptance_criteria:
+        - 固定来源复制映射至本次拥有的夹具，仍真实复制并逐代核对资料绑定，不接触仓库dist。
+        - 真实旧源码冷环境ENOENT保留；新冷环境直接通过，不扩大检查选择或任何预算。
+        - 当次独立开发检查、工程验收及只读审查，不复用旧PASS；正式候选另行验收。
+        acceptance_evidence: [精确源与目标、真实actor、原始命令和退出、冻结摘要及失败边界。]
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids: [eng.release.build]
+        discovered_from: LF-TSK-OPS-2077
+        depends_on: []
+      - id: LF-TSK-QLT-2509
+        title: 独立审查合成夹具隔离边界
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-synthetic-fixture/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [tmp/phase-tools/single-container-synthetic-fixture/review/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 合成事务测试在无扩展构建缓存的精确源码中自包含，不改变生产或发行资格。
+        deliverable: 有界测试夹具与当前冻结的独立证据。
+        acceptance_criteria:
+        - 固定来源复制映射至本次拥有的夹具，仍真实复制并逐代核对资料绑定，不接触仓库dist。
+        - 真实旧源码冷环境ENOENT保留；新冷环境直接通过，不扩大检查选择或任何预算。
+        - 当次独立开发检查、工程验收及只读审查，不复用旧PASS；正式候选另行验收。
+        acceptance_evidence: [精确源与目标、真实actor、原始命令和退出、冻结摘要及失败边界。]
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids: [eng.release.build]
+        discovered_from: LF-TSK-OPS-2077
+        depends_on: []
       - id: LF-TSK-QLT-2503
         title: 独立验证完成计数修复的开发冻结
         priority: P0
@@ -9248,6 +9314,28 @@ workstreams:
         - eng.release.manifest
         depends_on: []
         discovered_from: LF-TSK-OPS-2063
+      - id: LF-TSK-OPS-2078
+        title: 修复合成候选测试的隐式构建缓存依赖
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-synthetic-fixture/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [ops/release/tests/synthetic-candidates.test.mjs, planning/workstreams.yaml, openspec/changes/single-container-synthetic-fixture/**, tmp/phase-tools/single-container-synthetic-fixture/implementation/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 合成事务测试在无扩展构建缓存的精确源码中自包含，不改变生产或发行资格。
+        deliverable: 有界测试夹具与当前冻结的独立证据。
+        acceptance_criteria:
+        - 固定来源复制映射至本次拥有的夹具，仍真实复制并逐代核对资料绑定，不接触仓库dist。
+        - 真实旧源码冷环境ENOENT保留；新冷环境直接通过，不扩大检查选择或任何预算。
+        - 当次独立开发检查、工程验收及只读审查，不复用旧PASS；正式候选另行验收。
+        acceptance_evidence: [精确源与目标、真实actor、原始命令和退出、冻结摘要及失败边界。]
+        validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
+        required_check_ids: [eng.release.build]
+        discovered_from: LF-TSK-OPS-2077
+        depends_on: []
       - id: LF-TSK-OPS-2077
         title: 集成测试传输完成发布修复及独立证据
         priority: P0
