@@ -726,6 +726,97 @@ workstreams:
         - eng.release.docker-contract
         discovered_from: LF-TSK-OPS-2076
         depends_on: []
+      - id: LF-TSK-QLT-2510
+        title: 修复测试传输忙轮询的真实期限语义
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-transport-deadline/tasks.md
+        estimated_minutes: 40
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [ops/docker/tests/podman_fake_transport.py, ops/docker/tests/test_podman_fake_transport.py, ops/docker/tests/test_module_check_adapter.py, openspec/changes/single-container-transport-deadline/design.md, tmp/phase-tools/single-container-transport-deadline/transport/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 保留原期限和安全边界的真实有界测试传输等待及独立当次证据。
+        deliverable: 精确延迟反例修复、真实直接回归及独立冻结证据。
+        acceptance_criteria:
+        - 声明12秒内的合法延迟请求成功；无响应/组件异常仍在原预算内失败，不增加任一超时或迭代/字节/路由预算。
+        - 原生身份、源码RED/GREEN及全部原始失败保留；新增真实用例清单消费者精确同步，不弱化完整和唯一约束。
+        - 最终冻结新独立开发、工程验收和不同actor只读审查；正式候选另行验收，不复用旧PASS。
+        acceptance_evidence: [真实actor与目标、精确冻结、实际命令和退出、原始证据及未运行边界。]
+        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_podman_fake_transport.py
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-OPS-2078
+        depends_on: []
+      - id: LF-TSK-QLT-2511
+        title: 独立验证传输真实期限开发冻结
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/single-container-transport-deadline/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [tmp/phase-tools/single-container-transport-deadline/development/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 保留原期限和安全边界的真实有界测试传输等待及独立当次证据。
+        deliverable: 精确延迟反例修复、真实直接回归及独立冻结证据。
+        acceptance_criteria:
+        - 联合核对用户已批的通用运行片段作用域规则、真实原生绑定和物理输入漂移保护，不启动其他平台任务。
+        - 声明12秒内的合法延迟请求成功；无响应/组件异常仍在原预算内失败，不增加任一超时或迭代/字节/路由预算。
+        - 原生身份、源码RED/GREEN及全部原始失败保留；新增真实用例清单消费者精确同步，不弱化完整和唯一约束。
+        - 最终冻结新独立开发、工程验收和不同actor只读审查；正式候选另行验收，不复用旧PASS。
+        acceptance_evidence: [真实actor与目标、精确冻结、实际命令和退出、原始证据及未运行边界。]
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-OPS-2078
+        depends_on: []
+      - id: LF-TSK-QLT-2512
+        title: 独立验收传输真实期限工程证据
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/single-container-transport-deadline/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [tmp/phase-tools/single-container-transport-deadline/formal/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 保留原期限和安全边界的真实有界测试传输等待及独立当次证据。
+        deliverable: 精确延迟反例修复、真实直接回归及独立冻结证据。
+        acceptance_criteria:
+        - 联合核对用户已批的通用运行片段作用域规则、真实原生绑定和物理输入漂移保护，不启动其他平台任务。
+        - 声明12秒内的合法延迟请求成功；无响应/组件异常仍在原预算内失败，不增加任一超时或迭代/字节/路由预算。
+        - 原生身份、源码RED/GREEN及全部原始失败保留；新增真实用例清单消费者精确同步，不弱化完整和唯一约束。
+        - 最终冻结新独立开发、工程验收和不同actor只读审查；正式候选另行验收，不复用旧PASS。
+        acceptance_evidence: [真实actor与目标、精确冻结、实际命令和退出、原始证据及未运行边界。]
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-OPS-2078
+        depends_on: []
+      - id: LF-TSK-QLT-2513
+        title: 独立审查传输等待与失败边界
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/single-container-transport-deadline/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [tmp/phase-tools/single-container-transport-deadline/review/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 保留原期限和安全边界的真实有界测试传输等待及独立当次证据。
+        deliverable: 精确延迟反例修复、真实直接回归及独立冻结证据。
+        acceptance_criteria:
+        - 联合核对用户已批的通用运行片段作用域规则、真实原生绑定和物理输入漂移保护，不启动其他平台任务。
+        - 声明12秒内的合法延迟请求成功；无响应/组件异常仍在原预算内失败，不增加任一超时或迭代/字节/路由预算。
+        - 原生身份、源码RED/GREEN及全部原始失败保留；新增真实用例清单消费者精确同步，不弱化完整和唯一约束。
+        - 最终冻结新独立开发、工程验收和不同actor只读审查；正式候选另行验收，不复用旧PASS。
+        acceptance_evidence: [真实actor与目标、精确冻结、实际命令和退出、原始证据及未运行边界。]
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-OPS-2078
+        depends_on: []
       - id: LF-TSK-QLT-2507
         title: 独立验证合成夹具冷环境开发冻结
         priority: P0
@@ -9314,6 +9405,50 @@ workstreams:
         - eng.release.manifest
         depends_on: []
         discovered_from: LF-TSK-OPS-2063
+      - id: LF-TSK-OPS-2080
+        title: 隔离自动运行指令的真实上下文作用域
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/runtime-instruction-scoping/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [AGENTS.md, harness/agent-policy.md, openspec/changes/runtime-instruction-scoping/**, tmp/phase-tools/runtime-instruction-scoping/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 不绑定客户端的运行指令作用域与真实身份边界，不删除平台配置。
+        deliverable: 入口索引和唯一共享正文，以及联合冻结的独立证据。
+        acceptance_criteria:
+        - 自动管理片段只适用真实来源与已认证上下文，不把文件角色或marker当actor认证。
+        - 保留当前任务、权限、未知来源失败关闭和物理输入漂移门禁，不启动v2.2。
+        acceptance_evidence: [当前差异、真实原生绑定、用户授权及独立验证和只读审查。]
+        validation_command: python3 -m scripts.checks.repository.run_repository_check_group --mode docs
+        required_check_ids: [eng.repository.docs]
+        discovered_from: LF-TSK-OPS-2079
+        depends_on: []
+      - id: LF-TSK-OPS-2079
+        title: 集成测试传输真实期限修复及独立证据
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/single-container-transport-deadline/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [AGENTS.md, harness/agent-policy.md, ops/docker/tests/podman_fake_transport.py, ops/docker/tests/test_podman_fake_transport.py, ops/docker/tests/test_module_check_adapter.py, planning/workstreams.yaml, openspec/changes/single-container-transport-deadline/**, tmp/phase-tools/single-container-transport-deadline/implementation/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 保留原期限和安全边界的真实有界测试传输等待及独立当次证据。
+        deliverable: 精确延迟反例修复、真实直接回归及独立冻结证据。
+        acceptance_criteria:
+        - 联合冻结用户已批的通用运行指令作用域规则；不借文件自报身份，不忽略真实输入漂移。
+        - 声明12秒内的合法延迟请求成功；无响应/组件异常仍在原预算内失败，不增加任一超时或迭代/字节/路由预算。
+        - 原生身份、源码RED/GREEN及全部原始失败保留；新增真实用例清单消费者精确同步，不弱化完整和唯一约束。
+        - 最终冻结新独立开发、工程验收和不同actor只读审查；正式候选另行验收，不复用旧PASS。
+        acceptance_evidence: [真实actor与目标、精确冻结、实际命令和退出、原始证据及未运行边界。]
+        validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-OPS-2078
+        depends_on: []
       - id: LF-TSK-OPS-2078
         title: 修复合成候选测试的隐式构建缓存依赖
         priority: P0
