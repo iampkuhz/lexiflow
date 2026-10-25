@@ -695,6 +695,93 @@ workstreams:
         required_check_ids:
         - eng.release.candidate-runtime
         depends_on: []
+      - id: LF-TSK-QLT-2485
+        title: 独立验证根许可证修复开发冻结
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-release/notice-fix/development/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立验证根许可证修复开发冻结的冻结产物与当次真实证据。
+        deliverable: 独立验证根许可证修复开发冻结及可重核结果。
+        acceptance_criteria:
+        - 根LICENSE精确映射且未知根文件、字节漂移、重复与目标冲突仍失败关闭。
+        - 仅消费本次精确目标与冻结输入，不自签独立验收、不复用历史PASS。
+        acceptance_evidence:
+        - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.docs
+        discovered_from: LF-TSK-OPS-2069
+        depends_on: []
+      - id: LF-TSK-QLT-2486
+        title: 独立执行根许可证修复工程Formal
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-release/notice-fix/formal/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立执行根许可证修复工程Formal的冻结产物与当次真实证据。
+        deliverable: 独立执行根许可证修复工程Formal及可重核结果。
+        acceptance_criteria:
+        - 根LICENSE精确映射且未知根文件、字节漂移、重复与目标冲突仍失败关闭。
+        - 仅消费本次精确目标与冻结输入，不自签独立验收、不复用历史PASS。
+        acceptance_evidence:
+        - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.docs
+        discovered_from: LF-TSK-OPS-2069
+        depends_on: []
+      - id: LF-TSK-QLT-2487
+        title: 独立审查根许可证修复工程证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-release/notice-fix/review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立审查根许可证修复工程证据的冻结产物与当次真实证据。
+        deliverable: 独立审查根许可证修复工程证据及可重核结果。
+        acceptance_criteria:
+        - 根LICENSE精确映射且未知根文件、字节漂移、重复与目标冲突仍失败关闭。
+        - 仅消费本次精确目标与冻结输入，不自签独立验收、不复用历史PASS。
+        acceptance_evidence:
+        - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.docs
+        discovered_from: LF-TSK-OPS-2069
+        depends_on: []
       - id: LF-TSK-QLT-2480
         title: 独立执行高风险单容器工程集成验收
         priority: P0
@@ -8639,6 +8726,40 @@ workstreams:
         - eng.release.manifest
         depends_on: []
         discovered_from: LF-TSK-OPS-2063
+      - id: LF-TSK-OPS-2069
+        title: 修复镜像根许可证输入并准备精确候选版本
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-release/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/build/release-image-build-plan.mjs
+        - ops/release/tests/single-image.test.mjs
+        - ops/release/version.txt
+        - ops/release/notes/2.1.1.md
+        - planning/workstreams.yaml
+        - tmp/phase-tools/single-container-release/notice-fix/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 修复镜像根许可证输入并准备精确候选版本的冻结产物与当次真实证据。
+        deliverable: 修复镜像根许可证输入并准备精确候选版本及可重核结果。
+        acceptance_criteria:
+        - 根LICENSE精确映射且未知根文件、字节漂移、重复与目标冲突仍失败关闭。
+        - 仅消费本次精确目标与冻结输入，不自签独立验收、不复用历史PASS。
+        acceptance_evidence:
+        - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
+        validation_command: node --test ops/release/tests/single-image.test.mjs
+        required_check_ids:
+        - eng.release.build
+        - eng.release.version
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
       - id: LF-TSK-OPS-2065
         title: 集成单容器设计与使用说明
         priority: P0
