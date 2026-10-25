@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, rm, realpath } from 'node:fs/promises';
+import * as filesystem from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -45,8 +46,21 @@ test('single Node transaction really calls one image build, two assembly and ver
   // Native test loader replaces imported dependencies; production has no injectable executor seam.
   const calls = []; const identity = { softwareVersion: '1.2.3', sourceCommit: 'a'.repeat(40), buildId: 'c'.repeat(64), dirty: false };
   t.mock.module('../integrity/source-build-identity.mjs', { namedExports: { resolveCleanBuildIdentity: () => identity } });
+  const scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-synthetic-test-')));
+  const fixtureDist = path.join(scratch, 'fixture-dist');
+  const copiedDistributions = [];
+  // 事务隔离测试只替换固定构建目录来源；复制、资料绑定及其他文件操作仍真实执行。
+  t.mock.module('node:fs/promises', { namedExports: { ...filesystem, cp: async (source, destination, options) => {
+    assert.equal(source, path.join(repo, 'extension/dist'));
+    assert.equal(destination, path.join(scratch, `synthetic-extension-${copiedDistributions.length}`, 'dist'));
+    assert.deepEqual(options, { recursive: true, errorOnExist: true, force: false });
+    copiedDistributions.push(destination);
+    return filesystem.cp(fixtureDist, destination, options);
+  } } });
   const extensionBindings = []; const imageBindings = [];
-  t.mock.module(pathToFileURL(path.join(repo, 'extension/scripts/packaging/package-extension-release.mjs')).href, { namedExports: { createExtensionZip: async ({ buildIdentity, expectedDataset }) => {
+  t.mock.module(pathToFileURL(path.join(repo, 'extension/scripts/packaging/package-extension-release.mjs')).href, { namedExports: { createExtensionZip: async ({ root, buildIdentity, expectedDataset }) => {
+    assert.equal(await readFile(path.join(root, 'dist/fixture.txt'), 'utf8'), 'owned-extension-fixture');
+    assert.deepEqual(JSON.parse(await readFile(path.join(root, 'dist/expected-dataset.json'), 'utf8')), expectedDataset);
     extensionBindings.push(expectedDataset); assert.deepEqual(buildIdentity, identity);
     return { archive: extensionBytes(identity, expectedDataset) };
   } } });
@@ -68,8 +82,9 @@ test('single Node transaction really calls one image build, two assembly and ver
     calls.push('verify'); return { candidateSha256: request.candidateSha256, buildIdentity: identity };
   } } });
   const { assembleSyntheticCandidates } = await import('../test_tools/build-synthetic-release-candidates.mjs?transaction-test');
-  const scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-synthetic-test-')));
   try {
+    await mkdir(fixtureDist);
+    await writeFile(path.join(fixtureDist, 'fixture.txt'), 'owned-extension-fixture');
     await mkdir(path.join(scratch, 'artifacts'));
     await writeFile(path.join(scratch, 'artifacts/api.jar'), 'jar');
     await mkdir(path.join(scratch, 'producer-output/synthetic-datasets'), { recursive: true });
@@ -77,6 +92,7 @@ test('single Node transaction really calls one image build, two assembly and ver
     const result = await assembleSyntheticCandidates({ ...input, scratchDirectory: scratch });
     assert.deepEqual(calls, ['images', 'assemble', 'verify', 'images', 'assemble', 'verify']);
     assert.equal(result.candidates.length, 2); assert.equal(result.apiContract, 'caption-hints.v2');
+    assert.equal(copiedDistributions.length, 2);
     assert.equal(extensionBindings.length, 2);
     assert.notEqual(extensionBindings[0].sha256, extensionBindings[1].sha256);
     assert.deepEqual(extensionBindings.map(binding => binding.releaseId), input.datasets.map(row => `synthetic-${row.sha256}`));
