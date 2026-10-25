@@ -1,4 +1,5 @@
-name: Release validation
+name: 发行候选与正式发布
+run-name: ${{ github.event_name == 'push' && '私有候选构建' || '正式发行晋升' }} · ${{ github.ref_name }}
 
 on:
   push:
@@ -6,56 +7,59 @@ on:
   workflow_dispatch:
     inputs:
       submission_id:
-        description: Native Formal submission UUID
+        description: 原生 Formal 提交 UUID
         required: true
         type: string
       release_tag:
-        description: Prepared release tag
+        description: 已准备的发行标签
         required: true
         type: string
       publish_confirmation:
-        description: Explicitly enter PUBLISH
+        description: 明确输入 PUBLISH
         required: true
         type: string
 
 permissions:
   contents: read
 
-# The dedicated Mac is unique; tag preparation and manually approved promotion
-# must never race, including for different tags.
+# 专用 Mac 仅有一台；标签准备和经人工批准的晋升不得并发运行，即使针对不同标签也不例外。
 concurrency:
   group: lexiflow-release-host
   cancel-in-progress: false
 
 jobs:
   source:
+    name: 验证正式发行标签来源
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       commit: ${{ steps.identity.outputs.commit }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: 检出仓库
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - name: 配置 Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
-      - name: Verify exact release tag source
+      - name: 验证精确的发行标签来源
         id: identity
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           node ops/release/integrity/source-build-identity.mjs --tag "$RELEASE_TAG"
           printf 'commit=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Require dedicated runner readiness
+      - name: 确认专用运行器已就绪
         env:
           RUNNER_READY: ${{ vars.LEXIFLOW_RELEASE_RUNNER_READY }}
         run: |
           test "$RUNNER_READY" = true
 
   prepare:
+    name: 构建私有 ARM64 候选
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: source
     runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
@@ -72,9 +76,8 @@ jobs:
       LEXIFLOW_RELEASE_GRADLE_CACHE: ${{ vars.LEXIFLOW_RELEASE_GRADLE_CACHE }}
       LEXIFLOW_RELEASE_NPM_CACHE: ${{ vars.LEXIFLOW_RELEASE_NPM_CACHE }}
     steps:
-      # A provisioned pinned checkout is the only source/evidence root. Never
-      # run actions/checkout or clean in a receipt-bearing workspace.
-      - name: Refuse unsafe or changed stable checkout
+      # 已配置的固定 checkout 是唯一来源与证据根；不得在含回执的工作区中执行 checkout 或清理。
+      - name: 拒绝不安全或已变更的固定源码目录
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
           LEXIFLOW_RELEASE_NODE_BIN: ${{ vars.LEXIFLOW_RELEASE_NODE_BIN }}
@@ -96,7 +99,7 @@ jobs:
           "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/integrity/source-build-identity.mjs --tag "$RELEASE_TAG"
           podman info >/dev/null
           podman compose version
-      - name: Build and verify one complete ARM64 release candidate
+      - name: 构建并验证完整的 ARM64 发行候选
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
           REQUEST_FILE: ${{ vars.LEXIFLOW_RELEASE_REQUEST_FILE }}
@@ -108,11 +111,10 @@ jobs:
           cd "$WORKSPACE"
           test -x "$LEXIFLOW_RELEASE_NODE_BIN/node"
           "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs prepare "$REQUEST_FILE"
-      # Preparation leaves a private handoff, not validation evidence. The
-      # independent native validator owns the complete repository baseline;
-      # Actions must not run the same candidate's complete suite beforehand.
+      # 准备阶段仅留下私有交接，不构成验证证据。完整仓库基线由独立原生验证器负责；Actions 不得预先对同一候选运行完整套件。
 
   promotion-precheck:
+    name: 复核独立验收证据
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && inputs.publish_confirmation == 'PUBLISH' && inputs.release_tag == github.ref_name
     runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
     environment: lexiflow-release-validation
@@ -128,7 +130,7 @@ jobs:
       LEXIFLOW_RELEASE_GRADLE_CACHE: ${{ vars.LEXIFLOW_RELEASE_GRADLE_CACHE }}
       LEXIFLOW_RELEASE_NPM_CACHE: ${{ vars.LEXIFLOW_RELEASE_NPM_CACHE }}
     steps:
-      - name: Reconsume immutable native evidence in its original checkout
+      - name: 在原始固定源码目录中重新消费不可变原生证据
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
           LEXIFLOW_RELEASE_NODE_BIN: ${{ vars.LEXIFLOW_RELEASE_NODE_BIN }}
@@ -144,6 +146,7 @@ jobs:
           "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG"
 
   promotion:
+    name: 发布已批准的正式发行
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && inputs.publish_confirmation == 'PUBLISH' && inputs.release_tag == github.ref_name
     needs: promotion-precheck
     runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
@@ -161,7 +164,7 @@ jobs:
       LEXIFLOW_RELEASE_GRADLE_CACHE: ${{ vars.LEXIFLOW_RELEASE_GRADLE_CACHE }}
       LEXIFLOW_RELEASE_NPM_CACHE: ${{ vars.LEXIFLOW_RELEASE_NPM_CACHE }}
     steps:
-      - name: Publish only after protected approval and fresh native evidence check
+      - name: 仅在受保护审批及最新原生证据检查后发布
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
           LEXIFLOW_RELEASE_NODE_BIN: ${{ vars.LEXIFLOW_RELEASE_NODE_BIN }}
