@@ -200,7 +200,8 @@ n=0
 while [ ! -f "$req.done" ]; do
   [ ! -e "$box/server.error" ] && [ ! -e "$box/server.failed" ] || exit 97
   kill -0 "$server" 2>/dev/null || fail
-  n=$((n+1)); [ "$n" -le 30000 ] && [ "$SECONDS" -le 12 ] || fail
+  [ "$SECONDS" -lt 12 ] || fail
+  sleep 0.01 || fail
 done
 for suffix in out err status lengths; do [ -f "$req.$suffix" ] && [ ! -L "$req.$suffix" ] || fail; done
 extra=
