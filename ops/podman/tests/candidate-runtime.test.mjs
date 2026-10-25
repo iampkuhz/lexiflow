@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runCandidateRuntime, REQUIRED_PHASE_IDS, validateCandidateRequest, eligibleForPass } from '../candidates/check-podman-candidate-lifecycle.mjs';
 import { markPassIfComplete } from '../candidates/single-runtime-candidate.mjs';
+import { normalizeDarwinTempDirectory } from '../../release/workflow/release-execution-environment.mjs';
 
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const cli=path.join(repo,'ops/podman/candidates/check-podman-candidate-lifecycle.mjs');
@@ -166,7 +167,7 @@ test('every runtime create and run ignores inherited image volumes without disab
   }
   assert.equal(calls[0][1].includes('data:/var/lib/lexiflow'), true);
   const { execute: collision } = await lifecycleFunction('nameConflictFailure', 'invalidLoadFailure', {
-    json: command, cmd: (_, label, args) => { command('', label, args); return { ok: false }; },
+    json: command, cmd: (_, label, args) => { command('', label, args); return { ok: label === 'collision-create' }; },
     inspectContainer: () => ({}), assertOwned: () => {},
   });
   assert.equal(collision('', 'container', 'image', 'owner', []), true);
@@ -193,4 +194,141 @@ test('auto-created volume proof rejects any additional inherited or unknown moun
     if (mounts.length === 1 && mounts[0].Type === 'volume') assert.equal(execute('', 'container', 'data', 'owner').containerId, 'a'.repeat(64));
     else assert.throws(() => execute('', 'container', 'data', 'owner'), /VOLUME_MOUNT_UNPROVEN/);
   }
+});
+
+test('actual Podman command environment receives only the validated OS temp directory', async () => {
+  const { execute, source } = await lifecycleFunction('cmd', 'json', {
+    repo,
+    podmanSocket: null,
+    podmanHome: '/Users/actual-user',
+    podmanTempDirectory: '/private/var/folders/user/T/',
+    process: { env: { PATH: '/usr/bin:/bin', HOME: '/private/attacker', TMPDIR: '/private/attacker', USER: 'attacker', XDG_CONFIG_HOME: '/private/config' } }, os: { homedir: () => { throw new Error('ambient HOME must not be consulted'); } },
+    spawnSync: (bin, args, options) => {
+      assert.equal(bin, 'podman');
+      assert.equal(options.env.HOME, '/Users/actual-user');
+      assert.equal(options.env.TMPDIR, '/private/var/folders/user/T/');
+      assert.deepEqual(Object.keys(options.env).sort(), ['HOME','LANG','LC_ALL','PATH','TMPDIR']);
+      return { status: 0, stdout: '', stderr: '' };
+    }, fs: { appendFileSync() {}, statSync() { return { isSocket: () => true, dev: 1, ino: 1 }; } },
+    path, fail: code => { throw new Error(code); },
+  });
+  assert.equal(execute('', 'machine-inspect', ['machine','inspect']).ok, true);
+  assert.match(source, /podmanTempDirectory=context\.temp/u);
+  assert.match(source, /podmanHome=context\.home/u);
+  assert.match(source, /TMPDIR:podmanTempDirectory/u);
+});
+
+test('OS user record derives canonical home and fixed Darwin temp without ambient identity fields', async () => {
+  const { execute, source } = await lifecycleFunction('derivePodmanContext', 'requestCheck', {
+    os: { userInfo: () => ({ homedir: '/Users/real', username: 'real' }), homedir: () => { throw new Error('untrusted'); } },
+    path, fs: { realpathSync: p => p, statSync: () => ({ isDirectory: () => true, uid: 501 }) },
+    process: { getuid: () => 501 },
+    spawnSync: (bin, args, options) => {
+      assert.equal(bin, '/usr/bin/getconf');
+      assert.equal(JSON.stringify(args), JSON.stringify(['DARWIN_USER_TEMP_DIR']));
+      assert.equal(JSON.stringify(options.env), JSON.stringify({ PATH: '/usr/bin:/bin', HOME: '/Users/real', USER: 'real', LOGNAME: 'real' }));
+      return { status: 0, stdout: '/private/var/folders/real/T/\n' };
+    }, normalizeDarwinTempDirectory: result => { assert.equal(result.status, 0); return '/private/var/folders/real/T/'; },
+    fail: code => { throw new Error(code); },
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(execute())), { home: '/Users/real', temp: '/private/var/folders/real/T/' });
+  assert.match(source, /os\.userInfo\(\)/u);
+  assert.doesNotMatch(source, /os\.homedir\(\)/u);
+});
+
+test('OS home and temp query failures fail closed', async () => {
+  for (const scenario of ['userinfo', 'home-path', 'temp-query']) {
+    const { execute } = await lifecycleFunction('derivePodmanContext', 'requestCheck', {
+      os: { userInfo: () => { if (scenario === 'userinfo') throw new Error('unavailable'); return { homedir: scenario === 'home-path' ? 'relative' : '/Users/real', username: 'real' }; } },
+      path, fs: { realpathSync: p => p, statSync: () => ({ isDirectory: () => true, uid: 501 }) }, process: { getuid: () => 501 },
+      spawnSync: () => ({ status: scenario === 'temp-query' ? 1 : 0, stdout: '/tmp\n' }),
+      normalizeDarwinTempDirectory: () => { throw new Error('RELEASE_STANDARD_PATH_INVALID'); },
+      fail: (code, blocked) => { const e = new Error(code); e.blocked = blocked; throw e; },
+    });
+    assert.throws(() => execute(), scenario === 'temp-query' ? /PODMAN_TEMP_DIRECTORY_INVALID/ : /PODMAN_USER_HOME_INVALID/);
+  }
+});
+
+test('invalid standard temp directory results fail closed before Podman can run', async () => {
+  for (const result of [{ status: 1, stdout: '' }, { status: 0, stdout: '/tmp\n' }, { status: 0, stdout: '/tmp\nextra\n' }]) {
+    assert.throws(() => normalizeDarwinTempDirectory(result), /RELEASE_STANDARD_PATH_INVALID/);
+  }
+  const { execute } = await lifecycleFunction('cmd', 'json', {
+    repo,
+    podmanSocket: null, podmanTempDirectory: null,
+    process: { env: {} }, os: { homedir: () => '/Users/test' }, spawnSync: () => { throw new Error('must not spawn'); },
+    fs: { appendFileSync() {} }, path, fail: code => { throw new Error(code); },
+  });
+  assert.throws(() => execute('', 'machine-inspect', ['machine','inspect']), /PODMAN_TEMP_DIRECTORY_INVALID/);
+});
+
+
+test('image loading uses the validated target directory, not a nonexistent verifier proof root', async () => {
+  const artifact={path:'images/linux-arm64/runtime-image.tar',imageDigest:`sha256:${'a'.repeat(64)}`};
+  const proof={candidateSha256:'b'.repeat(64),manifestSha256:'c'.repeat(64),buildIdentity:{},candidate:{},manifest:{artifacts:[artifact]}};
+  const seen=[];
+  const { execute }=await lifecycleFunction('loadImage','markerHash',{
+    imageArtifact:()=>artifact, path,
+    cmd:(_,label,args)=>{seen.push([label,Array.from(args)]);return {ok:true};},
+    json:()=>[{}], identityLabels:()=>true,
+  });
+  assert.equal(Object.hasOwn(proof,'root'),false);
+  assert.equal(execute('',proof,'/tmp/verified-candidate','owner',[]),artifact.imageDigest);
+  assert.deepEqual(seen.find(([label])=>label==='image-load')[1],['load','-i','/tmp/verified-candidate/payload/images/linux-arm64/runtime-image.tar']);
+});
+
+test('asynchronous observations are awaited until a real value arrives', async () => {
+  const { execute }=await lifecycleFunction('waitUntil','inspectContainer',{
+    setTimeout:done=>queueMicrotask(done),
+  });
+  let calls=0;
+  assert.equal(await execute(async()=>{calls++;await Promise.resolve();return calls===3?'ready':null;},3000),'ready');
+  assert.equal(calls,3);
+  await assert.rejects(execute(async()=>{throw new Error('observation-failed');},3000),/observation-failed/);
+});
+
+test('allowed failure never converts a failed Podman process into success', async () => {
+  for (const allowFailure of [false,true]) {
+    for (const processResult of [
+      {status:0,stdout:'ok',stderr:''}, {status:1,stdout:'',stderr:'absent'},
+      {status:125,stdout:'',stderr:'invalid archive'}, {status:null,signal:'SIGTERM'},
+      {status:null,error:{code:'ETIMEDOUT'}},
+    ]) {
+      const { execute }=await lifecycleFunction('cmd','json',{
+        repo, path, podmanSocket:null, podmanHome:'/Users/real', podmanTempDirectory:'/private/tmp/real/',
+        process:{env:{PATH:'/usr/bin:/bin'}}, spawnSync:()=>processResult,
+        fs:{appendFileSync(){}}, fail:code=>{throw new Error(code);},
+      });
+      const result=execute('', 'machine-inspect',['machine','inspect'],{allowFailure});
+      assert.equal(result.ok,processResult.status===0,JSON.stringify({allowFailure,...processResult}));
+      assert.equal(result.status,processResult.status);
+    }
+  }
+});
+
+test('create commands accept plain text and prove ownership through inspect instead of parsing stdout', async () => {
+  const calls=[];
+  const {execute:volume}=await lifecycleFunction('createVolume','volumeIdentity',{
+    ownerLabel:'owner', json:()=>JSON.parse('volume-name\n'), cmd:(_,label)=>{calls.push(label);return {ok:true,stdout:'volume-name\n'};},
+    inspectVolume:()=>({Labels:{owner:'token'}}), assertOwned:()=>{},
+    fail:code=>{throw new Error(code);},
+  });
+  volume('', 'volume-name','token');
+  assert.equal(calls[0],'volume-create');
+  const containers=[];
+  const {execute:create}=await lifecycleFunction('nameConflictFailure','invalidLoadFailure',{
+    ownerLabel:'owner', json:()=>JSON.parse('a'.repeat(64)+'\n'), cmd:(_,label)=>{calls.push(label);return {ok:label==='collision-create',stdout:'a'.repeat(64)+'\n'};},
+    inspectContainer:()=>({}), assertOwned:()=>{}, fail:code=>{throw new Error(code);},
+  });
+  assert.equal(create('', 'container-name','image','token',containers),true);
+  assert.deepEqual(containers,['container-name']);
+});
+
+test('creation with unknown write outcome registers the owned name before failing', async () => {
+  const containers=[];
+  const {execute}=await lifecycleFunction('nameConflictFailure','invalidLoadFailure',{
+    ownerLabel:'owner', json:()=>{throw new Error('COLLISION_CREATE_FAILED');}, cmd:()=>({ok:false,status:null}), fail:code=>{throw new Error(code);},
+  });
+  assert.throws(()=>execute('', 'container-name','image','token',containers),/COLLISION_CREATE_FAILED/);
+  assert.deepEqual(containers,['container-name']);
 });

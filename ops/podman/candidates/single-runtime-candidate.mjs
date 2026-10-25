@@ -8,16 +8,29 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolveBuildIdentity, assertBuildIdentityMatches } from '../../release/integrity/source-build-identity.mjs';
 import { verifyReleaseCandidate } from '../../release/integrity/release-candidate-verifier.mjs';
+import { normalizeDarwinTempDirectory } from '../../release/workflow/release-execution-environment.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const phaseIds = ['preflight','target-clean-init','target-repeat-run','target-restart','interrupted-init-retry','incompatible-volume-refusal','failure-exit','final-cleanup'];
 const ownerLabel = 'io.lexiflow.candidate-acceptance';
 const volumeProofs = new Map();
 let podmanSocket=null;
+let podmanTempDirectory=null;
+let podmanHome=null;
 const sha = value => crypto.createHash('sha256').update(value).digest('hex');
 const canonical = value => JSON.stringify(value && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.keys(value).sort().map(k=>[k,value[k]])) : value);
 const fail = (code, blocked = false) => { const e = new Error(code); e.blocked = blocked; throw e; };
 const exact = (o, keys) => !!o && typeof o === 'object' && !Array.isArray(o) && Object.keys(o).sort().join(',') === [...keys].sort().join(',');
+function derivePodmanContext() {
+  let account; try { account=os.userInfo(); } catch { fail('PODMAN_USER_HOME_INVALID',true); }
+  if(typeof account?.homedir!=='string'||!path.isAbsolute(account.homedir)||/[\u0000-\u001f\u007f]/.test(account.homedir)
+    ||typeof account.username!=='string'||!account.username) fail('PODMAN_USER_HOME_INVALID',true);
+  let home,homeInfo;
+  try { home=fs.realpathSync(account.homedir);homeInfo=fs.statSync(home); } catch { fail('PODMAN_USER_HOME_INVALID',true); }
+  if(!homeInfo.isDirectory()||homeInfo.uid!==process.getuid()) fail('PODMAN_USER_HOME_INVALID',true);
+  const tempResult=spawnSync('/usr/bin/getconf',['DARWIN_USER_TEMP_DIR'],{encoding:'utf8',timeout:1500,maxBuffer:4096,windowsHide:true,env:{PATH:'/usr/bin:/bin',HOME:home,USER:account.username,LOGNAME:account.username}});
+  try { return {home,temp:normalizeDarwinTempDirectory(tempResult)}; } catch { fail('PODMAN_TEMP_DIRECTORY_INVALID',true); }
+}
 function report() { return { schemaVersion:'lexiflow.candidate-runtime.v2', status:'FAIL', target:null, identity:{source:null}, phases:phaseIds.map(id=>({id,status:'NOT_RUN',facts:{}})), assertions:{}, cleanup:{status:'NOT_RUN',settled:false,ownedResourcesRemoved:false}, failure:null }; }
 function setPhase(out,id,status,facts={}) { const p=out.phases.find(x=>x.id===id); p.status=status; p.facts=facts; }
 function requestCheck(value) {
@@ -40,7 +53,7 @@ function privateRoot() {
   fs.mkdirSync(parent,{recursive:true,mode:0o700});
   const dir=fs.mkdtempSync(path.join(parent,`${crypto.randomBytes(16).toString('hex')}-`)); fs.chmodSync(dir,0o700); return dir;
 }
-function cmd(logDir,label,args,{allowFailure=false,timeout=60_000}={}) {
+function cmd(logDir,label,args,{timeout=60_000}={}) {
   const verifySocket=()=>{
     if(label==='machine-inspect')return;
     if(!podmanSocket)fail('PODMAN_ENDPOINT_UNPINNED',true);
@@ -48,13 +61,15 @@ function cmd(logDir,label,args,{allowFailure=false,timeout=60_000}={}) {
     if(!now.isSocket()||now.dev!==podmanSocket.dev||now.ino!==podmanSocket.ino)fail('PODMAN_ENDPOINT_CHANGED',true);
   };
   verifySocket();
-  const env={PATH:process.env.PATH||'',HOME:os.homedir(),LANG:'C',LC_ALL:'C'};
+  if (!podmanTempDirectory) fail('PODMAN_TEMP_DIRECTORY_INVALID',true);
+  if (!podmanHome) fail('PODMAN_USER_HOME_INVALID',true);
+  const env={PATH:process.env.PATH||'',HOME:podmanHome,TMPDIR:podmanTempDirectory,LANG:'C',LC_ALL:'C'};
   if(podmanSocket){env.CONTAINER_HOST=`unix://${podmanSocket.path}`;env.DOCKER_HOST=env.CONTAINER_HOST;}
   const r=spawnSync('podman',args,{cwd:repo,encoding:'utf8',timeout,maxBuffer:1024*1024,env,stdio:['ignore','pipe','pipe']});
   // 不保存任何命令输出，可能含本地路径或运行时秘密；只留退出事实。
   fs.appendFileSync(path.join(logDir,'commands.log'),`${label} ${r.status ?? 'null'} ${r.signal||''} ${r.error?.code||''}\n`,{mode:0o600});
   verifySocket();
-  if(r.error||r.signal||(!allowFailure&&r.status!==0)) return {ok:false,status:r.status,signal:r.signal,stdout:r.stdout||'',stderr:r.stderr||'',error:r.error};
+  if(r.error||r.signal||r.status!==0) return {ok:false,status:r.status,signal:r.signal,stdout:r.stdout||'',stderr:r.stderr||'',error:r.error};
   return {ok:true,status:r.status,stdout:r.stdout||'',stderr:r.stderr||''};
 }
 function json(logDir,label,args,opts) { const r=cmd(logDir,label,args,opts); if(!r.ok) fail(`${label.toUpperCase().replaceAll('-','_')}_FAILED`); try{return JSON.parse(r.stdout);}catch{fail('PODMAN_OUTPUT_INVALID');} }
@@ -65,7 +80,7 @@ function inspectVolume(logDir,name) { const rows=cmd(logDir,'volume-list-exact',
 function labelsOf(x) { return x?.Config?.Labels||x?.Labels||x?.labels||{}; }
 function owned(x,token) { return !!x && labelsOf(x)[ownerLabel]===token; }
 function assertOwned(x,token) { if(!owned(x,token)) fail('RESOURCE_OWNERSHIP_UNPROVEN'); }
-function createVolume(logDir,name,token) { json(logDir,'volume-create',['volume','create','--label',`${ownerLabel}=${token}`,name]); const v=inspectVolume(logDir,name);assertOwned(v,token); }
+function createVolume(logDir,name,token) { const created=cmd(logDir,'volume-create',['volume','create','--label',`${ownerLabel}=${token}`,name]);if(!created.ok)fail('VOLUME_CREATE_FAILED');const v=inspectVolume(logDir,name);assertOwned(v,token); }
 function volumeIdentity(v) { const value={name:v.Name||v.name,createdAt:v.CreatedAt||v.createdAt,mountpoint:v.Mountpoint||v.mountpoint,driver:v.Driver||v.driver};if(!value.name||!value.createdAt||!value.mountpoint||!value.driver)fail('VOLUME_IDENTITY_INCOMPLETE');return value; }
 function volumeAbsent(logDir,name) { if(inspectVolume(logDir,name))fail('VOLUME_NAME_COLLISION',true);if(!volumeProofs.has(name))volumeProofs.set(name,{previousAbsent:true,identity:null,containerId:null,markerHash:null}); }
 function containerAbsent(logDir,name) { if(inspectContainer(logDir,name))fail('CONTAINER_NAME_COLLISION',true); }
@@ -135,13 +150,13 @@ function identityLabels(info,identity,digest) {
     &&labels['io.lexiflow.source-sha256']===identity.sourceSha256
     &&labels['io.lexiflow.image-role']==='runtime';
 }
-function loadImage(logDir,proof,token,loaded) {
+function loadImage(logDir,proof,candidateDirectory,token,loaded) {
   const artifact=imageArtifact(proof);if(!artifact||artifact.path!=='images/linux-arm64/runtime-image.tar'||!/^sha256:[a-f0-9]{64}$/.test(artifact.imageDigest))fail('RUNTIME_IMAGE_MISSING');
   const image=artifact.imageDigest;
   const before=cmd(logDir,'image-exists-before',['image','exists',image],{allowFailure:true});
   const existed=before.ok;
   if(!existed&&before.status!==1)fail('IMAGE_INSPECT_FAILED');
-  const archive=path.join(proof.root,'payload',...artifact.path.split('/'));
+  const archive=path.join(candidateDirectory,'payload',...artifact.path.split('/'));
   const loadedResult=cmd(logDir,'image-load',['load','-i',archive],{allowFailure:true,timeout:300_000});
   if(!loadedResult.ok)fail('IMAGE_LOAD_FAILED');
   loaded.push({image,existed,identity:proof.buildIdentity});
@@ -196,7 +211,9 @@ async function reservePortFailure(logDir,image,token,volume,containers) {
   return true;
 }
 function nameConflictFailure(logDir,name,image,token,containerNames) {
-  json(logDir,'collision-create',['create','--image-volume=ignore','--name',name,'--label',`${ownerLabel}=${token}`,image]);containerNames.push(name);
+  containerNames.push(name);
+  const created=cmd(logDir,'collision-create',['create','--image-volume=ignore','--name',name,'--label',`${ownerLabel}=${token}`,image]);
+  if(!created.ok)fail('COLLISION_CREATE_FAILED');
   const result=cmd(logDir,'collision-run',['run','--image-volume=ignore','--name',name,'--label',`${ownerLabel}=${token}`,image],{allowFailure:true});
   if(result.ok)fail('CONTAINER_NAME_CONFLICT_NOT_REJECTED');
   const c=inspectContainer(logDir,name);assertOwned(c,token);return true;
@@ -241,12 +258,14 @@ async function faultExit(logDir,image,token,container,volume,containers,volumes,
 }
 async function runInner(request) {
   const out=report(), token=crypto.randomBytes(16).toString('hex'), containers=[], volumes=[], loaded=[];
-  volumeProofs.clear();podmanSocket=null;
+  volumeProofs.clear();podmanSocket=null;podmanTempDirectory=null;podmanHome=null;
   let root=null, image=null, dataset=null, source=null, cleaned=false;
   const volume=(name)=>{volumes.push(name);return name;};
   try {
     requestCheck(request);
+    const target=Object.freeze({candidateDirectory:path.resolve(request.target.candidateDirectory),candidateSha256:request.target.candidateSha256});
     if(process.platform!=='darwin'||process.arch!=='arm64')fail('HOST_UNSUPPORTED',true);
+    const context=derivePodmanContext();podmanHome=context.home;podmanTempDirectory=context.temp;
     root=privateRoot();
     const machines=json(root,'machine-inspect',['machine','inspect']);
     const machineRows=Array.isArray(machines)?machines:[machines];
@@ -259,7 +278,7 @@ async function runInner(request) {
     podmanSocket={path:socket,dev:socketStat.dev,ino:socketStat.ino};
     setPhase(out,'preflight','RUNNING');
     source=resolveBuildIdentity(repo);if(source.dirty)fail('SOURCE_DIRTY',true);
-    let proof;try{proof=await verifyReleaseCandidate(request.target);}catch{fail('CANDIDATE_VERIFY_FAILED');}
+    let proof;try{proof=await verifyReleaseCandidate(target);}catch{fail('CANDIDATE_VERIFY_FAILED');}
     try{assertBuildIdentityMatches(proof.buildIdentity,source);}catch{fail('TARGET_SOURCE_IDENTITY_MISMATCH');}
     const extension=proof.manifest.artifacts.find(x=>x.role==='extension');
     dataset=extension?.metadata?.expectedDataset;
@@ -267,7 +286,7 @@ async function runInner(request) {
     if(!exact(dataset,datasetKeys)||! /^[a-f0-9]{64}$/.test(dataset.sha256))fail('DATASET_IDENTITY_MISSING');
     if(proof.manifest.artifacts.find(x=>x.role==='dataset')?.sha256!==dataset.sha256)fail('DATASET_IDENTITY_MISMATCH');
     try{await freePort(18082);}catch{fail('API_PORT_BLOCKED',true);}
-    image=loadImage(root,proof,token,loaded);
+    image=loadImage(root,proof,target.candidateDirectory,token,loaded);
     const invalidLoad=invalidLoadFailure(root,root);
     const invalidPull=invalidPullFailure(root,token);
     const collisionName=`lf-${token}-collision`;
