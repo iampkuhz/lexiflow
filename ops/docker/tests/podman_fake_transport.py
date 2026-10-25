@@ -337,6 +337,53 @@ def _decode_env(raw: bytes) -> dict[str, str]:
     return result
 
 
+def _complete_request(mailbox: Path, base: Path, suffixes, completed: int) -> None:
+    """Publish the complete counter atomically before removing the drain marker."""
+    prefix = base.name
+    expected = {prefix + "." + suffix for suffix in suffixes}
+    paths = list(mailbox.glob(prefix + ".*"))
+    if {path.name for path in paths} != expected:
+        raise TransportError("unknown residue at ack")
+    for path in paths:
+        if path.is_symlink() or not path.is_file():
+            raise TransportError("request ownership/type changed")
+
+    counter = mailbox / "server.count"
+    temporary = mailbox / "server.count.tmp"
+    temporary_identity = None
+    try:
+        with temporary.open("xb") as stream:
+            identity = os.fstat(stream.fileno())
+            temporary_identity = (identity.st_dev, identity.st_ino)
+            stream.write(f"{completed}".encode("ascii"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, counter)
+        temporary_identity = None
+    finally:
+        if temporary_identity is not None:
+            try:
+                current = temporary.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                if (current.st_dev, current.st_ino) == temporary_identity:
+                    temporary.unlink()
+
+    # Keep ack last: clients use disappearance of all q.* files as the drain signal.
+    remaining = list(suffixes)
+    for suffix in suffixes:
+        expected_now = {prefix + "." + item for item in remaining}
+        paths_now = list(mailbox.glob(prefix + ".*"))
+        if {path.name for path in paths_now} != expected_now:
+            raise TransportError("unknown residue during request cleanup")
+        path = _side(base, "." + suffix)
+        if path.is_symlink() or not path.is_file():
+            raise TransportError("request ownership/type changed during cleanup")
+        path.unlink()
+        remaining.remove(suffix)
+
+
 def _execute(code, argv: Sequence[str], cwd: str, env: Mapping[str, str], argv0: Path):
     old_argv, old_cwd, old_env = sys.argv, os.getcwd(), dict(os.environ)
     old_stdout, old_stderr = sys.stdout, sys.stderr
@@ -439,16 +486,12 @@ def serve(mailbox: Path, model: Path):
             time.sleep(.001)
         if not ack.is_file() or ack.is_symlink():
             raise TransportError("ack timeout")
-        expected = {prefix + "." + x for x in ("args", "env", "cwd", "ready", "out", "err", "status", "lengths", "done", "ack")}
-        if {p.name for p in mailbox.glob(prefix + ".*")} != expected:
-            raise TransportError("unknown residue at ack")
-        for suffix in ("args", "env", "cwd", "ready", "out", "err", "status", "lengths", "done", "ack"):
-            path = _side(base, "." + suffix)
-            if path.is_symlink() or not path.is_file():
-                raise TransportError("request ownership/type changed")
-            path.unlink()
         completed += 1
-        (mailbox / "server.count").write_text(str(completed))
+        _complete_request(
+            mailbox, base,
+            ("args", "env", "cwd", "ready", "out", "err", "status", "lengths", "done", "ack"),
+            completed,
+        )
 
 
 def _main(argv):
