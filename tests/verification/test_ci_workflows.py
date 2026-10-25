@@ -1,5 +1,6 @@
 """验证 CI 的触发、信任与最小权限边界，不伪装 GitHub 上的真实运行。"""
 
+import re
 import unittest
 from pathlib import Path
 
@@ -15,6 +16,22 @@ def workflow(name):
 
 
 class WorkflowContractTest(unittest.TestCase):
+    def test_human_visible_workflow_labels_are_chinese(self):
+        chinese = re.compile(r"[\u3400-\u9fff]")
+        for filename in ["ci.yml", "release.yml"]:
+            value = workflow(filename)
+            self.assertRegex(value["name"], chinese)
+            self.assertRegex(value["run-name"], chinese)
+            for job in value["jobs"].values():
+                self.assertRegex(job.get("name", ""), chinese)
+                for step in job["steps"]:
+                    self.assertRegex(step.get("name", ""), chinese)
+                    if "uses" in step:
+                        self.assertRegex(step["name"], chinese)
+        release = workflow("release.yml")
+        for field in release["on"]["workflow_dispatch"]["inputs"].values():
+            self.assertRegex(field["description"], chinese)
+
     def test_quick_only_branches_pr_and_manual_on_hosted_runner(self):
         value = workflow("ci.yml")
         self.assertEqual(
@@ -50,7 +67,9 @@ class WorkflowContractTest(unittest.TestCase):
             'extension/scripts/checks/check-extension-archive.mjs --development "$ZIP" "$GITHUB_SHA"',
             package["run"],
         )
-        self.assertIn('archive-smoke.mjs --development "$ZIP" "$GITHUB_SHA"', package["run"])
+        self.assertIn(
+            'archive-smoke.mjs --development "$ZIP" "$GITHUB_SHA"', package["run"]
+        )
         upload = next(
             step for step in steps if "upload-artifact@" in step.get("uses", "")
         )
