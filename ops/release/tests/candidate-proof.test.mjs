@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { parseStrict, verifyCandidateProof } from '../integrity/candidate-source-proof.mjs';
-import { assembled } from './verified-candidate-fixture.mjs';
+import { assembled, assembledProofBridge } from './verified-candidate-fixture.mjs';
 
 function request(f) {
   return { candidateDirectory: f.candidateDirectory, candidateSha256: f.input.candidateSha256,
@@ -76,3 +77,45 @@ test('CLI bridge rejects caller-shaped requests without producing proof output',
     assert.equal(result.stdout.length, 0);
   }
 });
+
+test('real Python candidate consumer crosses bounded process boundary to real fixture Node CLI', async () => {
+  const f = await assembledProofBridge('2.0.0-SNAPSHOT');
+  try {
+    const python = String.raw`import json, sys
+from pathlib import Path
+from unittest.mock import patch
+import scripts.acceptance.evidence.verify_candidate_acceptance_evidence as consumer
+root, candidate, target_json = sys.argv[1:]
+target = json.loads(target_json)
+consumer.__file__ = str(Path(root) / 'ops/release/integrity/consumer-anchor.py')
+proof = {'target': target}
+with patch.object(consumer, '_extract', return_value=(proof, b'{}', {})):
+    try:
+        value, _, _ = consumer._prove_candidate(Path(root), {}, Path(candidate))
+        print(json.dumps({'result': 'PASS', 'node': value['target']}))
+    except consumer.CandidateProofError as error:
+        print(json.dumps({'result': 'REJECTED', 'reason': str(error)}))
+`;
+    const invoke = (target) => spawnSync('python3', ['-c', python,
+      f.root, f.candidateDirectory, JSON.stringify(target)], {
+      encoding: 'utf8', env: { ...process.env, PYTHONPATH: repoRootForTest() }, timeout: 65000
+    });
+    const correct = { candidateSha256: f.input.candidateSha256,
+      manifestSha256: f.candidate.manifestSha256, buildIdentity: f.candidate.buildIdentity };
+    const positive = invoke(correct);
+    assert.equal(positive.status, 0, `exit=${positive.status}\nstdout=${positive.stdout}\nstderr=${positive.stderr}`);
+    assert.equal(JSON.parse(positive.stdout).result, 'PASS', positive.stdout);
+    for (const mutated of [
+      { candidateSha256: '0'.repeat(64), manifestSha256: correct.manifestSha256,
+        buildIdentity: correct.buildIdentity },
+      { ...correct, manifestSha256: '0'.repeat(64) },
+      { ...correct, buildIdentity: { ...correct.buildIdentity, sourceSha256: '0'.repeat(64) } },
+    ]) {
+      const negative = invoke(mutated);
+      assert.equal(negative.status, 0, `exit=${negative.status}\nstdout=${negative.stdout}\nstderr=${negative.stderr}`);
+      assert.equal(JSON.parse(negative.stdout).result, 'REJECTED', negative.stdout);
+    }
+  } finally { await f.cleanup(); }
+});
+
+function repoRootForTest() { return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..'); }

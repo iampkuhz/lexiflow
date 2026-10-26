@@ -329,6 +329,8 @@ def _prove_candidate(
     expected = {
         "candidateDirectory": str(candidate),
         "candidateSha256": target["candidateSha256"],
+        "manifestSha256": target["manifestSha256"],
+        "buildIdentity": target["buildIdentity"],
     }
     node = _node_proof(repo, expected)
     if node != target:

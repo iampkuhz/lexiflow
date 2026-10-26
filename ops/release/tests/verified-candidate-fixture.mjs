@@ -13,7 +13,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const hash = value => createHash('sha256').update(value).digest('hex');
 
 /** Synthetic, single linux/arm64 source/candidate fixture. It never uses viewing data. */
-async function makeFixture(baseVersion = '2.0.0') {
+async function makeFixture(baseVersion = '2.0.0', proofBridge = false) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'lexiflow-candidate-fixture-')));
   const outputParent = await realpath(await mkdtemp(path.join(tmpdir(), 'lexiflow-candidate-output-')));
   const imageDirectory = await realpath(await mkdtemp(path.join(tmpdir(), 'lexiflow-image-candidate-')));
@@ -25,6 +25,13 @@ async function makeFixture(baseVersion = '2.0.0') {
     await writeFile(path.join(root, 'ops/release/build/release-runtime-entry-generator.mjs'), await readFile(path.join(repoRoot, 'ops/release/build/release-runtime-entry-generator.mjs')));
     for (const name of ['runtime/release-artifact-verification.sh', 'runtime/release-installation-state.sh', 'runtime/release-installation-docker.sh', 'runtime/release-installation-lifecycle.sh']) {
       await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repoRoot, 'ops/release', name)));
+    }
+    if (proofBridge) {
+      for (const entry of await (await import('node:fs/promises')).readdir(path.join(repoRoot, 'ops/release/integrity'), { withFileTypes: true })) {
+        if (entry.isFile() && entry.name.endsWith('.mjs')) {
+          await writeFile(path.join(root, 'ops/release/integrity', entry.name), await readFile(path.join(repoRoot, 'ops/release/integrity', entry.name)));
+        }
+      }
     }
     await writeFile(path.join(root, '.gitignore'), '/input/\n/descriptor.json\n/release/\n/out/\n/alias/\n/.*.manifest-*/\n');
     execFileSync('git', ['init', '-q', root]);
@@ -182,6 +189,20 @@ export async function fixture(baseVersion = '2.0.0') {
 
 export async function assembled(baseVersion = '2.0.0') {
   return cloneFixture(await getAssembledTemplate(baseVersion), true);
+}
+
+/** Isolated proof-bridge candidate with the real integrity CLI committed before identity freeze. */
+export async function assembledProofBridge(baseVersion = '2.0.0') {
+  const f = await makeFixture(baseVersion, true);
+  try {
+    const result = await assembleReleaseCandidate({ repoRoot: f.root,
+      imageCandidates: f.imageCandidateDirectories.map(({ directory, sha256 }) => ({ directory, sha256 })),
+      artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent });
+    const marker = await readFile(path.join(result.candidateDirectory, 'candidate.json'));
+    Object.assign(f, result, { marker,
+      input: { candidateDirectory: result.candidateDirectory, candidateSha256: hash(marker) } });
+    return f;
+  } catch (error) { await f.cleanup(); throw error; }
 }
 
 test.after(async () => {
