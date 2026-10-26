@@ -465,6 +465,63 @@ test('resume binds UUID, host, source, original request and candidate; only publ
 });
 
 
+for (const publish of [false, true]) {
+  for (const scenario of ['repeat', 'failure-recovery', 'legacy-log']) {
+    test(`晋升尝试保留独立不可覆盖日志：${publish ? 'publish' : 'precheck'}/${scenario}`, async t => {
+      const f = await fixture(t); const b = boundaries(f);
+      assert.equal((await prepareWorkflow(f.request, b.options)).status, 'PASS');
+      const stage = publish ? 'publish' : 'precheck';
+      const quality = path.join(f.root, 'tmp/quality/release-workflow/1.2.3');
+      const legacyLog = path.join(quality, `promotion-${stage}.log`);
+      const legacyBytes = Buffer.from('先前尝试的不可变原始日志\n');
+      if (scenario === 'legacy-log') await writeFile(legacyLog, legacyBytes, { flag: 'wx', mode: 0o600 });
+      const prior = [process.env.GITHUB_TOKEN, process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN];
+      if (publish) {
+        process.env.GITHUB_TOKEN = 'synthetic-publish-token';
+        process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN = 'synthetic-config-token';
+        t.after(() => ['GITHUB_TOKEN', 'LEXIFLOW_RELEASE_CONFIG_TOKEN'].forEach((key, index) => {
+          if (prior[index] === undefined) delete process.env[key]; else process.env[key] = prior[index];
+        }));
+      }
+      const attempts = [];
+      const common = { root: f.root, submissionId: '12345678-1234-4234-8234-123456789abc',
+        releaseTag: 'v1.2.3', publish, identityReader: () => targetIdentity, tagChecker: () => targetIdentity,
+        verifier: b.options.verifyReleaseCandidate, environmentResolver: b.options.environmentResolver,
+        run: async (command, args, settings) => {
+          assert.equal(command, 'python3');
+          assert.deepEqual(args.slice(0, 2), ['-m', 'ops.release.workflow.promote_verified_release']);
+          assert.equal(args.includes('--publish'), publish);
+          assert.equal(settings.timeout, 1_800_000);
+          const failed = scenario === 'failure-recovery' && attempts.length === 0;
+          const output = JSON.stringify({ result: failed ? 'BLOCKED' : 'PASS',
+            published: failed ? false : publish, scope: `promotion-${stage}` }) + '\n';
+          attempts.push({ logFile: settings.logFile, output });
+          // 只替换业务子进程为无网络的合成 Node；日志创建和写入走真实 runCommand。
+          return runCommand(process.execPath,
+            ['-e', `process.stdout.write(${JSON.stringify(output)}); process.exitCode=${failed ? 2 : 0};`], settings);
+        } };
+      const first = await resumePromotion(common);
+      assert.equal(first.status, scenario === 'failure-recovery' ? 'BLOCKED' : 'PASS');
+      if (scenario === 'failure-recovery') assert.equal(first.reason, 'CHILD_FAILED');
+      const firstBytes = await readFile(attempts[0].logFile);
+      assert.equal((await resumePromotion(common)).status, 'PASS');
+      assert.equal(attempts.length, 2);
+      assert.equal(new Set(attempts.map(item => item.logFile)).size, 2);
+      assert.deepEqual(await readFile(attempts[0].logFile), firstBytes);
+      for (const attempt of attempts) {
+        assert.equal(path.dirname(attempt.logFile), quality);
+        assert.match(path.basename(attempt.logFile), new RegExp(`^promotion-${stage}-[0-9a-f-]{36}\\.log$`));
+        assert.equal(await readFile(attempt.logFile, 'utf8'), attempt.output);
+        assert.equal((await lstat(attempt.logFile)).mode & 0o777, 0o600);
+        await assert.rejects(runCommand(process.execPath, ['-e', 'process.stdout.write("overwrite")'],
+          { cwd: f.root, env: {}, logFile: attempt.logFile }), error => error.code === 'EEXIST');
+        assert.equal(await readFile(attempt.logFile, 'utf8'), attempt.output);
+      }
+      if (scenario === 'legacy-log') assert.deepEqual(await readFile(legacyLog), legacyBytes);
+    });
+  }
+}
+
 test('private readers and unused release cache forwarding are not public interfaces', async t => {
   const workflow = await import('../workflow/run-release-workflow.mjs');
   const dockerCommand = await import('../build/release-build-process.mjs');
