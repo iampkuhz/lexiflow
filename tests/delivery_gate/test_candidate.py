@@ -302,8 +302,16 @@ class CandidateChainTests(unittest.TestCase):
                 candidate_directory=self.f.root / "candidate",
             )
         self.assertEqual(result["result"], "PASS", result)
+        node.assert_called_once_with(
+            self.f.root.resolve(),
+            {
+                "candidateDirectory": str(self.f.root / "candidate"),
+                "candidateSha256": self.candidate["candidateSha256"],
+                "manifestSha256": self.candidate["manifestSha256"],
+                "buildIdentity": self.candidate["buildIdentity"],
+            },
+        )
         self.assertEqual(dag.call_count, 1)
-        node.assert_called_once()
         self.assertEqual(_tree(self.f.root), before)
 
     def test_full_existing_chain_and_real_verify_report_pass_without_writing(self):
