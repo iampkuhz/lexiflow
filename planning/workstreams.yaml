@@ -726,6 +726,153 @@ workstreams:
         - eng.release.docker-contract
         discovered_from: LF-TSK-OPS-2076
         depends_on: []
+      - id: LF-TSK-QLT-2515
+        title: 修复候选完整性跨语言请求并证明真实接缝
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-candidate-proof/tasks.md
+        estimated_minutes: 40
+        kind: implementation
+        lifecycle_state: READY
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 完整候选身份的真实跨语言接缝及新当次独立证据。
+        deliverable: 精确冻结、真实actor、直接或独立证据与诚实结果。
+        acceptance_criteria:
+        - 只从已绑定target传递四字段，保留严格Node合同、单次证明及全部前后稳定性检查。
+        - 真实Python到Node成功接缝与缺项/摘要/身份或内容漂移拒绝直接受测；不扩大任一期限或放宽门禁。
+        - 当前完整差异重新独立开发验证、工程验收与只读审查；正式候选另行验收，不复用旧PASS。
+        acceptance_evidence:
+        - 真实身份和目标、精确源码/候选摘要、原始命令退出日志及未运行边界。
+        required_check_ids:
+        - eng.release.build
+        - eng.delivery-gate.module-tests
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+        allowed_files:
+        - scripts/acceptance/evidence/verify_candidate_acceptance_evidence.py
+        - tests/delivery_gate/test_candidate.py
+        - ops/release/tests/candidate-proof.test.mjs
+        - ops/release/tests/verified-candidate-fixture.mjs
+        - openspec/changes/single-container-candidate-proof/design.md
+        - tmp/phase-tools/single-container-candidate-proof/implementation/**
+        validation_command: node --test ops/release/tests/candidate-proof.test.mjs
+      - id: LF-TSK-QLT-2516
+        title: 独立验证候选证明修复的完整开发冻结
+        priority: P0
+        task_version: 3
+        change_version: 1.2.0
+        task_source: openspec/changes/single-container-candidate-proof/tasks.md
+        estimated_minutes: 40
+        kind: implementation
+        lifecycle_state: READY
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 完整候选身份的真实跨语言接缝及新当次独立证据。
+        deliverable: 精确冻结、真实actor、直接或独立证据与诚实结果。
+        acceptance_criteria:
+        - 只从已绑定target传递四字段，保留严格Node合同、单次证明及全部前后稳定性检查。
+        - 真实Python到Node成功接缝与缺项/摘要/身份或内容漂移拒绝直接受测；不扩大任一期限或放宽门禁。
+        - 当前完整差异重新独立开发验证、工程验收与只读审查；正式候选另行验收，不复用旧PASS。
+        acceptance_evidence:
+        - 真实身份和目标、精确源码/候选摘要、原始命令退出日志及未运行边界。
+        required_check_ids:
+        - eng.release.build
+        - eng.delivery-gate.module-tests
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+        allowed_files:
+        - tmp/phase-tools/single-container-candidate-proof/development/**
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+      - id: LF-TSK-QLT-2517
+        title: 独立验收候选证明修复工程证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-candidate-proof/tasks.md
+        estimated_minutes: 40
+        kind: implementation
+        lifecycle_state: READY
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 完整候选身份的真实跨语言接缝及新当次独立证据。
+        deliverable: 精确冻结、真实actor、直接或独立证据与诚实结果。
+        acceptance_criteria:
+        - 只从已绑定target传递四字段，保留严格Node合同、单次证明及全部前后稳定性检查。
+        - 真实Python到Node成功接缝与缺项/摘要/身份或内容漂移拒绝直接受测；不扩大任一期限或放宽门禁。
+        - 当前完整差异重新独立开发验证、工程验收与只读审查；正式候选另行验收，不复用旧PASS。
+        acceptance_evidence:
+        - 真实身份和目标、精确源码/候选摘要、原始命令退出日志及未运行边界。
+        required_check_ids:
+        - eng.release.build
+        - eng.delivery-gate.module-tests
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+        allowed_files:
+        - tmp/phase-tools/single-container-candidate-proof/formal/**
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+      - id: LF-TSK-QLT-2518
+        title: 独立审查候选证明接缝与发行边界
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-candidate-proof/tasks.md
+        estimated_minutes: 40
+        kind: implementation
+        lifecycle_state: READY
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 完整候选身份的真实跨语言接缝及新当次独立证据。
+        deliverable: 精确冻结、真实actor、直接或独立证据与诚实结果。
+        acceptance_criteria:
+        - 只从已绑定target传递四字段，保留严格Node合同、单次证明及全部前后稳定性检查。
+        - 真实Python到Node成功接缝与缺项/摘要/身份或内容漂移拒绝直接受测；不扩大任一期限或放宽门禁。
+        - 当前完整差异重新独立开发验证、工程验收与只读审查；正式候选另行验收，不复用旧PASS。
+        acceptance_evidence:
+        - 真实身份和目标、精确源码/候选摘要、原始命令退出日志及未运行边界。
+        required_check_ids:
+        - eng.release.build
+        - eng.delivery-gate.module-tests
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+        allowed_files:
+        - tmp/phase-tools/single-container-candidate-proof/review/**
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+      - id: LF-TSK-QLT-2514
+        title: 定位并修复计时器异常路径的真实阻塞
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-timer-failure/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [ops/release/runtime/release-installation-docker.sh, ops/docker/tests/test_docker_bounds.py, ops/docker/tests/test_module_check_adapter.py, openspec/changes/single-container-timer-failure/design.md, tmp/phase-tools/single-container-timer-failure/implementation/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 两项真实失败的因果诊断及有证据的最小责任修复，不预断失败层。
+        deliverable: 原始命令日志、确定性因果反例与责任节点直接回归；无根因时如实阻塞。
+        acceptance_criteria:
+        - 不扩大测试3秒、产品预算、Check/Stop期限，不跳过失败或降低进程回收、隐私与身份断言。
+        - 修改前须证明确切责任路径；未能复现不得凭孤立PASS认定环境根因或伪造RED。
+        - 仅自有进程和临时资源；保留全部原始失败，不改候选、发布权限或其他项目资源。
+        acceptance_evidence: [真实原生身份、精确源码、实际命令退出及日志、因果边界与未运行限制。]
+        validation_command: python3 -m unittest ops.docker.tests.test_docker_bounds -v
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-QLT-2481
+        depends_on: []
       - id: LF-TSK-QLT-2510
         title: 修复测试传输忙轮询的真实期限语义
         priority: P0
@@ -9405,6 +9552,68 @@ workstreams:
         - eng.release.manifest
         depends_on: []
         discovered_from: LF-TSK-OPS-2063
+      - id: LF-TSK-OPS-2082
+        title: 集成候选证明接缝修复及新发行身份
+        priority: P0
+        task_version: 4
+        change_version: 1.3.0
+        task_source: openspec/changes/single-container-candidate-proof/tasks.md
+        estimated_minutes: 40
+        kind: implementation
+        lifecycle_state: READY
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 完整候选身份的真实跨语言接缝及新当次独立证据。
+        deliverable: 精确冻结、真实actor、直接或独立证据与诚实结果。
+        acceptance_criteria:
+        - 只从已绑定target传递四字段，保留严格Node合同、单次证明及全部前后稳定性检查。
+        - 真实Python到Node成功接缝与缺项/摘要/身份或内容漂移拒绝直接受测；不扩大任一期限或放宽门禁。
+        - 当前完整差异重新独立开发验证、工程验收与只读审查；正式候选另行验收，不复用旧PASS。
+        acceptance_evidence:
+        - 真实身份和目标、精确源码/候选摘要、原始命令退出日志及未运行边界。
+        required_check_ids:
+        - eng.release.build
+        - eng.delivery-gate.module-tests
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+        allowed_files:
+        - tests/verification/test_development_selection_matrix.py
+        - tests/verification/test_build_checks.py
+        - config/engineering/module-checks.yaml
+        - planning/workstreams.yaml
+        - ops/release/version.txt
+        - ops/release/notes/2.1.4.md
+        - openspec/changes/single-container-candidate-proof/**
+        - tmp/phase-tools/single-container-candidate-proof/**
+        - scripts/acceptance/evidence/verify_candidate_acceptance_evidence.py
+        - tests/delivery_gate/test_candidate.py
+        - ops/release/tests/candidate-proof.test.mjs
+        - ops/release/tests/verified-candidate-fixture.mjs
+        validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
+      - id: LF-TSK-OPS-2081
+        title: 集成计时器异常诊断及有界责任修复
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-timer-failure/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [planning/workstreams.yaml, ops/release/runtime/release-installation-docker.sh, ops/docker/tests/test_docker_bounds.py, ops/docker/tests/test_module_check_adapter.py, openspec/changes/single-container-timer-failure/**, tmp/phase-tools/single-container-timer-failure/triage/**, tmp/phase-tools/single-container-timer-failure/implementation/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 在已证实根因上冻结并串行集成有界修复，不绕过任何正式发行门禁。
+        deliverable: 精确冻结、责任提交和新当次独立证据，正式发行另验候选。
+        acceptance_criteria:
+        - 保留 v2.1.3 标签、候选与正式失败原件，不以定向诊断替代完整验收。
+        - 不放宽任一期限或断言，未知原因不冒称已修复；有修改须新独立开发验证、工程验收及只读审查。
+        acceptance_evidence: [责任边界、真实身份、冻结与原始证据摘要。]
+        validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
+        required_check_ids: [eng.release.docker-contract]
+        discovered_from: LF-TSK-QLT-2481
+        depends_on: []
       - id: LF-TSK-OPS-2080
         title: 隔离自动运行指令的真实上下文作用域
         priority: P0
