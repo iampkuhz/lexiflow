@@ -726,6 +726,124 @@ workstreams:
         - eng.release.docker-contract
         discovered_from: LF-TSK-OPS-2076
         depends_on: []
+      - id: LF-TSK-QLT-2519
+        title: 修复晋升重复调用的不可覆盖日志身份
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-promotion-attempts/tasks.md
+        estimated_minutes: 40
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/workflow/run-release-workflow.mjs
+        - ops/release/tests/workflow.test.mjs
+        - tmp/phase-tools/single-container-promotion-attempts/implementation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 精确晋升尝试日志与当次可核验证据，不授予旧候选发行资格。
+        deliverable: 独立尝试日志、真实接缝回归及冻结输入和完整直接或独立结果。
+        acceptance_criteria:
+        - 每次precheck与publish使用内部唯一日志身份，保留wx独占、0600、原期限及所有候选和发布保护；不删除或覆盖旧证据。
+        - 真实runCommand连续执行和失败恢复RED/GREEN受测，不以mock绕过日志创建；当次完整差异重新独立验证与审查。
+        - 真实actor和目标绑定，旧失败原件保全，正式新候选另行完整验收，不复用历史PASS。
+        acceptance_evidence:
+        - 实际身份/目标、冻结摘要、原始命令退出日志、未运行与恢复边界。
+        validation_command: node --test ops/release/tests/workflow.test.mjs
+        required_check_ids:
+        - eng.release.build
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+      - id: LF-TSK-QLT-2520
+        title: 独立验证晋升尝试日志完整开发冻结
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-promotion-attempts/tasks.md
+        estimated_minutes: 40
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-promotion-attempts/development/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 精确晋升尝试日志与当次可核验证据，不授予旧候选发行资格。
+        deliverable: 独立尝试日志、真实接缝回归及冻结输入和完整直接或独立结果。
+        acceptance_criteria:
+        - 每次precheck与publish使用内部唯一日志身份，保留wx独占、0600、原期限及所有候选和发布保护；不删除或覆盖旧证据。
+        - 真实runCommand连续执行和失败恢复RED/GREEN受测，不以mock绕过日志创建；当次完整差异重新独立验证与审查。
+        - 真实actor和目标绑定，旧失败原件保全，正式新候选另行完整验收，不复用历史PASS。
+        acceptance_evidence:
+        - 实际身份/目标、冻结摘要、原始命令退出日志、未运行与恢复边界。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.release.build
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+      - id: LF-TSK-QLT-2521
+        title: 独立验收晋升尝试日志工程证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-promotion-attempts/tasks.md
+        estimated_minutes: 40
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-promotion-attempts/formal/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 精确晋升尝试日志与当次可核验证据，不授予旧候选发行资格。
+        deliverable: 独立尝试日志、真实接缝回归及冻结输入和完整直接或独立结果。
+        acceptance_criteria:
+        - 每次precheck与publish使用内部唯一日志身份，保留wx独占、0600、原期限及所有候选和发布保护；不删除或覆盖旧证据。
+        - 真实runCommand连续执行和失败恢复RED/GREEN受测，不以mock绕过日志创建；当次完整差异重新独立验证与审查。
+        - 真实actor和目标绑定，旧失败原件保全，正式新候选另行完整验收，不复用历史PASS。
+        acceptance_evidence:
+        - 实际身份/目标、冻结摘要、原始命令退出日志、未运行与恢复边界。
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids:
+        - eng.release.build
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+      - id: LF-TSK-QLT-2522
+        title: 独立审查晋升尝试日志与失败恢复边界
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-promotion-attempts/tasks.md
+        estimated_minutes: 40
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-promotion-attempts/review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 精确晋升尝试日志与当次可核验证据，不授予旧候选发行资格。
+        deliverable: 独立尝试日志、真实接缝回归及冻结输入和完整直接或独立结果。
+        acceptance_criteria:
+        - 每次precheck与publish使用内部唯一日志身份，保留wx独占、0600、原期限及所有候选和发布保护；不删除或覆盖旧证据。
+        - 真实runCommand连续执行和失败恢复RED/GREEN受测，不以mock绕过日志创建；当次完整差异重新独立验证与审查。
+        - 真实actor和目标绑定，旧失败原件保全，正式新候选另行完整验收，不复用历史PASS。
+        acceptance_evidence:
+        - 实际身份/目标、冻结摘要、原始命令退出日志、未运行与恢复边界。
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids:
+        - eng.release.build
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
       - id: LF-TSK-QLT-2515
         title: 修复候选完整性跨语言请求并证明真实接缝
         priority: P0
@@ -9552,6 +9670,41 @@ workstreams:
         - eng.release.manifest
         depends_on: []
         discovered_from: LF-TSK-OPS-2063
+      - id: LF-TSK-OPS-2083
+        title: 集成晋升尝试日志修复及新发行身份
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-promotion-attempts/tasks.md
+        estimated_minutes: 40
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - planning/workstreams.yaml
+        - ops/release/version.txt
+        - ops/release/notes/2.1.5.md
+        - ops/release/workflow/run-release-workflow.mjs
+        - ops/release/tests/workflow.test.mjs
+        - openspec/changes/single-container-promotion-attempts/**
+        - tmp/phase-tools/single-container-promotion-attempts/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 精确晋升尝试日志与当次可核验证据，不授予旧候选发行资格。
+        deliverable: 独立尝试日志、真实接缝回归及冻结输入和完整直接或独立结果。
+        acceptance_criteria:
+        - 每次precheck与publish使用内部唯一日志身份，保留wx独占、0600、原期限及所有候选和发布保护；不删除或覆盖旧证据。
+        - 真实runCommand连续执行和失败恢复RED/GREEN受测，不以mock绕过日志创建；当次完整差异重新独立验证与审查。
+        - 真实actor和目标绑定，旧失败原件保全，正式新候选另行完整验收，不复用历史PASS。
+        acceptance_evidence:
+        - 实际身份/目标、冻结摘要、原始命令退出日志、未运行与恢复边界。
+        validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
+        required_check_ids:
+        - eng.release.build
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
       - id: LF-TSK-OPS-2082
         title: 集成候选证明接缝修复及新发行身份
         priority: P0
