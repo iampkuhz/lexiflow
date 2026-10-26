@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
+
 from scripts.environment import CheckEnvironment
 from scripts.verification import freeze_inputs
 from tests.verification.test_scenarios import verify_repository
@@ -48,6 +50,19 @@ class BuildCheckTest(unittest.TestCase):
             for scope in ("repository-baseline", "change-targeted")
         }
 
+    @staticmethod
+    def yaml_probe_result(argv):
+        """结果聚合 fixture 区分前置包探测，不将探测冒充构建 Check。"""
+        return {
+            "status": "PASS",
+            "exit_code": 0,
+            "exit_reason": "exited",
+            "timed_out": False,
+            "stdout": yaml.__file__,
+            "stderr": "",
+            "executed_argv": argv,
+        }
+
     def fixture(self, root):
         """按真实声明复制最小检查配置和合成输入，不读取发行资料。"""
         checks = [copy.deepcopy(self.by_id[k]) for k in (BASE,)]
@@ -83,7 +98,8 @@ class BuildCheckTest(unittest.TestCase):
             base["command"],
         )
         self.assertEqual(
-            ["node", "git", "sh", "/bin/sh", "mkfifo"], base["required_environment"]
+            ["node", "python-package-yaml", "git", "sh", "/bin/sh", "mkfifo"],
+            base["required_environment"],
         )
         self.assertEqual([], base["module_dependencies"])
         base_closure = input_closure(ROOT, base)
@@ -238,6 +254,8 @@ class BuildCheckTest(unittest.TestCase):
                 executed = []
 
                 def runner(argv, *_, stdin_payload=None):
+                    if argv[1:] == ["-c", "import yaml; print(yaml.__file__)"]:
+                        return self.yaml_probe_result(argv)
                     executed.append(argv)
                     is_build = argv == self.by_id[BASE]["command"]
                     self.assertTrue(is_build or docker_available)
@@ -348,6 +366,8 @@ class BuildCheckTest(unittest.TestCase):
             calls = []
 
             def runner(argv, *_, calls=calls, payload=payload):
+                if argv[1:] == ["-c", "import yaml; print(yaml.__file__)"]:
+                    return self.yaml_probe_result(argv)
                 calls.append(argv)
                 return {
                     "exit_code": 0,

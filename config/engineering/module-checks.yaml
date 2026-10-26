@@ -785,16 +785,27 @@ checks:
 - check_id: eng.release.build
   command: ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "build"]
   required_environment:
+  - python-package-yaml
   - git
   - sh
   - /bin/sh
   - mkfifo
   input_paths:
+  - scripts/acceptance
+  - scripts/environment
+  - scripts/verification
+  - scripts/agents
+  - requirements-dev.txt
   - ops/release
   - ops/docker
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: scripts/acceptance
+  - path: scripts/environment
+  - path: scripts/verification
+  - path: scripts/agents
+  - path: requirements-dev.txt
   - path: ops/release/notes
   - path: ops/release/test_tools
   - path: ops/release/runner
@@ -822,6 +833,9 @@ checks:
   - release-gradle-cache
   - release-npm-cache
   input_paths:
+  - scripts/acceptance
+  - scripts/agents
+  - requirements-dev.txt
   - scripts/local/run_with_java_toolchain.py
   - scripts/checks/release/source
   - AGENTS.md
@@ -855,6 +869,9 @@ checks:
   - ops/podman
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: scripts/acceptance
+  - path: scripts/agents
+  - path: requirements-dev.txt
   - path: ops/release/__init__.py
   - path: scripts/local/run_with_java_toolchain.py
   - path: scripts/checks/release/source

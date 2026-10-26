@@ -283,6 +283,7 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
                 "eng.release.docker-surface-on-change",
             },
             "scripts/environment/configuration/verification_environment.py": {
+                "eng.release.build",
                 "eng.agents.module-tests",
                 "eng.backend.build-contract",
                 "eng.backend.delivery",
@@ -307,6 +308,7 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
                 "eng.verification.module-tests",
             },
             "scripts/verification/commands/run_development_checks.py": {
+                "eng.release.build",
                 "eng.agents.module-tests",
                 "eng.delivery-gate.module-tests",
                 "eng.release.docker-local-on-change",
@@ -365,7 +367,16 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
                 "eng.release.lifecycle-install",
                 "eng.release.runtime-entry",
             },
+            "scripts/acceptance/evidence/verify_candidate_acceptance_evidence.py": {
+                "eng.release.build",
+                "eng.agents.module-tests",
+                "eng.delivery-gate.module-tests",
+                "eng.repository.module-tests",
+                "eng.repository.python-quality",
+                "eng.verification.module-tests",
+            },
             "scripts/acceptance/evidence/acceptance_actor_identity.py": {
+                "eng.release.build",
                 "eng.agents.module-tests",
                 "eng.delivery-gate.module-tests",
                 "eng.repository.module-tests",
@@ -442,6 +453,7 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
         """实际跨模块来源既触发消费者，也进入冻结选择闭包。"""
         cases = {
             "scripts/verification/planning/change_risk_assessment.py": {
+                "eng.release.build",
                 "eng.release.docker-surface-on-change",
                 "eng.release.docker-shell-on-change",
                 "eng.release.docker-local-on-change",
@@ -453,6 +465,7 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
                 "eng.verification.module-tests",
             },
             "scripts/agents/identity/codex_actor_identity.py": {
+                "eng.release.build",
                 "eng.agents.module-tests",
                 "eng.delivery-gate.module-tests",
                 "eng.repository.module-tests",
