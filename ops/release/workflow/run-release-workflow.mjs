@@ -470,7 +470,7 @@ export async function resumePromotion({ submissionId, releaseTag, publish = fals
     }
     let output;
     try { output = await run('python3', args, { cwd: root, env, timeout: 1_800_000,
-      logFile: path.join(quality, publish ? 'promotion-publish.log' : 'promotion-precheck.log') }); }
+      logFile: path.join(quality, `promotion-${publish ? 'publish' : 'precheck'}-${randomUUID()}.log`) }); }
     catch (error) {
       let state;
       try {
