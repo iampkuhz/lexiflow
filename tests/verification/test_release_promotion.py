@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import socket
 import tarfile
 import tempfile
 import unittest
@@ -13,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ops.release.workflow import promote_verified_release as p
+from ops.release.workflow import release_registry as registry
 
 SUBMISSION = "00000000-0000-0000-0000-000000000001"
 COMMIT = "a" * 40
@@ -1220,6 +1222,184 @@ class PromotionTests(unittest.TestCase):
                 self.assertTrue(Connection.instances[-1].closed)
             finally:
                 os.close(fd)
+
+
+class RealRegistryPromotionBoundaryTests(unittest.TestCase):
+    """从真实 promote 入口贯穿公开镜像发布器；仅传输边界使用合成替身。"""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.fixture = Fixture(Path(self.temp.name))
+        self.notes = Path(self.temp.name) / "notes"
+        self.notes.mkdir()
+        (self.notes / "1.2.3.md").write_text(
+            "# 1. 1.2.3\n\n前置：Podman。\n\n两步：启动与安装。\n\n限制：合成测试。\n"
+        )
+        self.sock = socket.socket(socket.AF_UNIX)
+        self.sock_path = str(Path(self.temp.name) / "podman.sock")
+        self.sock.bind(self.sock_path)
+        self.remote_present = False
+        self.push_calls = 0
+        self.write_failure = None
+        self.image_body = json.dumps(
+            {
+                "schemaVersion": 2,
+                "config": {"digest": self.fixture.artifacts[4]["imageDigest"]},
+            }
+        ).encode()
+        self.image_manifest_digest = "sha256:" + sha(self.image_body)
+        self.patches = [
+            patch.object(p, "ROOT", self.fixture.root),
+            patch.object(p, "LICENSE_TABLE", self.fixture.table),
+            patch.object(p, "NOTES_ROOT", self.notes),
+            patch.object(
+                p, "consume_candidate_pass", side_effect=self.fixture.consumer
+            ),
+            patch.object(
+                p,
+                "_run_bounded",
+                return_value=(json.dumps(self.fixture.identity).encode(), b""),
+            ),
+            patch.object(p, "_repository", return_value=("o", "r")),
+            patch.object(p, "_verify_local_tag"),
+            patch.object(p, "GitHub", FakeGitHub),
+            patch.object(registry, "_manifest", side_effect=self.manifest),
+            patch.object(registry, "_run", side_effect=self.podman),
+            patch.dict(
+                os.environ,
+                {
+                    "GITHUB_TOKEN": "synthetic",
+                    "LEXIFLOW_RELEASE_CONFIG_TOKEN": "synthetic-config",
+                    "LEXIFLOW_RELEASE_PODMAN_ENDPOINT": "unix://" + self.sock_path,
+                },
+            ),
+        ]
+        for item in self.patches:
+            item.start()
+            self.addCleanup(item.stop)
+        self.addCleanup(self.sock.close)
+        FakeGitHub.reset()
+
+    def manifest(self, repo, reference, **kwargs):
+        if reference == "1.2.3":
+            if self.remote_present:
+                return (
+                    200,
+                    {"docker-content-digest": self.image_manifest_digest},
+                    self.image_body,
+                )
+            return 404, {}, b""
+        if reference == self.image_manifest_digest:
+            return (
+                200,
+                {"docker-content-digest": self.image_manifest_digest},
+                self.image_body,
+            )
+        raise AssertionError("unexpected synthetic manifest reference")
+
+    def podman(self, argv, *, endpoint, input_stream=None, timeout=300):
+        class Facts:
+            returncode = 0
+            cleanup_succeeded = True
+            stdout = b""
+
+        if "inspect" in argv:
+            image = self.fixture.artifacts[4]["imageDigest"]
+            ident = self.fixture.identity
+            labels = {
+                "org.opencontainers.image.version": ident["softwareVersion"],
+                "org.opencontainers.image.revision": ident["sourceCommit"],
+                "io.lexiflow.build-id": ident["buildId"],
+                "io.lexiflow.source-sha256": ident["sourceSha256"],
+                "io.lexiflow.image-role": "runtime",
+                "io.lexiflow.deployment-version": ident["baseVersion"],
+            }
+            Facts.stdout = json.dumps(
+                [
+                    {
+                        "Id": image,
+                        "Architecture": "arm64",
+                        "Os": "linux",
+                        "Config": {"Labels": labels},
+                    }
+                ]
+            ).encode()
+        if "load" in argv and self.write_failure == "before":
+            raise registry.RegistryError("synthetic-prewrite", "podman")
+        if "push" in argv:
+            self.push_calls += 1
+            if self.write_failure == "before":
+                raise registry.RegistryError("synthetic-prewrite", "podman")
+            self.remote_present = True
+            if self.write_failure == "after":
+                raise OSError("synthetic response loss")
+            digestfile = Path(
+                next(x.split("=", 1)[1] for x in argv if x.startswith("--digestfile="))
+            )
+            digestfile.write_text(self.image_manifest_digest)
+        return Facts()
+
+    def promote(self):
+        return p.promote(
+            submission_id=SUBMISSION,
+            candidate_directory=self.fixture.candidate,
+            publish=True,
+        )
+
+    def test_public_registry_chain_first_publish_emits_three_release_assets(self):
+        result = self.promote()
+        self.assertEqual(result["result"], "PASS")
+        self.assertTrue(result["published"])
+        self.assertEqual(self.push_calls, 1)
+        self.assertEqual(len(result["assets"]), 3)
+        self.assertTrue(self.remote_present)
+
+    def test_same_digest_recovery_does_not_push_again(self):
+        first = self.promote()
+        self.assertEqual(first["result"], "PASS")
+        self.assertEqual(self.push_calls, 1)
+        FakeGitHub.reset()
+        recovered = self.promote()
+        self.assertEqual(recovered["result"], "PASS")
+        self.assertEqual(self.push_calls, 1)
+
+    def test_prewrite_failure_is_blocked_without_push(self):
+        self.write_failure = "before"
+        with self.assertRaises(p.PromotionError) as raised:
+            self.promote()
+        self.assertEqual(raised.exception.stage, "registry-podman")
+        self.assertEqual(self.push_calls, 0)
+        self.assertFalse(self.remote_present)
+        event_dir = p._event_directory(
+            "1.2.3", self.fixture.proof["candidate"]["candidateSha256"]
+        )
+        events = [json.loads(item.read_text()) for item in event_dir.glob("*.json")]
+        image_events = [item for item in events if item.get("stage") == "ghcr-image"]
+        self.assertEqual(
+            max(image_events, key=lambda item: item["createdAtEpochNs"])["state"],
+            "blocked",
+        )
+        self.assertFalse(any(call[0] in ("POST", "PATCH") for call in FakeGitHub.calls))
+
+    def test_postwrite_failure_is_unknown(self):
+        self.write_failure = "after"
+        with self.assertRaises(p.PromotionError) as raised:
+            self.promote()
+        self.assertEqual(raised.exception.stage, "registry-publish")
+        self.assertEqual(raised.exception.registry_role, "runtime-image")
+        self.assertEqual(self.push_calls, 1)
+        self.assertTrue(self.remote_present)
+        event_dir = p._event_directory(
+            "1.2.3", self.fixture.proof["candidate"]["candidateSha256"]
+        )
+        events = [json.loads(item.read_text()) for item in event_dir.glob("*.json")]
+        image_events = [item for item in events if item.get("stage") == "ghcr-image"]
+        self.assertEqual(
+            max(image_events, key=lambda item: item["createdAtEpochNs"])["state"],
+            "unknown",
+        )
+        self.assertFalse(any(call[0] in ("POST", "PATCH") for call in FakeGitHub.calls))
 
 
 if __name__ == "__main__":
