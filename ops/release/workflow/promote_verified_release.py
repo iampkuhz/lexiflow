@@ -931,7 +931,16 @@ def _publish(
         _record_event(*event_args, "ghcr-image", "attempt", role="runtime-image")
         try:
             registry = release_registry.publish_images(
-                owner=owner, repo=repo, revalidate=gate, **registry_context
+                candidate=registry_context["candidate"],
+                manifest=registry_context["manifest"],
+                identity=registry_context["identity"],
+                owner=owner,
+                repo=repo,
+                endpoint=registry_context["endpoint"],
+                candidate_sha256=registry_context["candidate_sha256"],
+                manifest_sha256=registry_context["manifest_sha256"],
+                revalidate=gate,
+                existing_only=registry_context["existing_only"],
             )
         except release_registry.RegistryError as exc:
             _record_event(
