@@ -726,6 +726,101 @@ workstreams:
         - eng.release.docker-contract
         discovered_from: LF-TSK-OPS-2076
         depends_on: []
+      - id: LF-TSK-QLT-2523
+        title: 修复晋升器与镜像发布的真实参数边界
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-registry-boundary/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/workflow/promote_verified_release.py
+        - tests/verification/test_release_promotion.py
+        - tests/verification/test_release_registry.py
+        - tmp/phase-tools/single-container-registry-boundary/implementation/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确发布桥接合同及当次真实证据，不授予历史候选资格。
+        deliverable: 明确参数边界与真实接缝回归、独立冻结验收或只读审查结果。
+        acceptance_criteria:
+        - 显式既有公共参数、内部workspace不泄漏；不扩签名或吞错，不改变候选、身份、安全、超时和事务。
+        - 真实公开函数链RED/GREEN覆盖成功、相同镜像恢复及失败分类，不以mock整个publish_images绕过签名。
+        - 真实actor及目标绑定，原始失败保留，当次全差异独立验收，新正式候选另行19项完整验收，0历史PASS复用。
+        acceptance_evidence: [精确冻结、真实身份、实际命令退出和原始日志、未运行与恢复限制。]
+        validation_command: python3 -m unittest tests.verification.test_release_promotion tests.verification.test_release_registry -v
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+      - id: LF-TSK-QLT-2524
+        title: 独立验证镜像晋升参数完整开发冻结
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-registry-boundary/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-registry-boundary/development/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确发布桥接合同及当次真实证据，不授予历史候选资格。
+        deliverable: 明确参数边界与真实接缝回归、独立冻结验收或只读审查结果。
+        acceptance_criteria:
+        - 显式既有公共参数、内部workspace不泄漏；不扩签名或吞错，不改变候选、身份、安全、超时和事务。
+        - 真实公开函数链RED/GREEN覆盖成功、相同镜像恢复及失败分类，不以mock整个publish_images绕过签名。
+        - 真实actor及目标绑定，原始失败保留，当次全差异独立验收，新正式候选另行19项完整验收，0历史PASS复用。
+        acceptance_evidence: [精确冻结、真实身份、实际命令退出和原始日志、未运行与恢复限制。]
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+      - id: LF-TSK-QLT-2525
+        title: 独立验收镜像晋升参数工程证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-registry-boundary/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-registry-boundary/formal/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确发布桥接合同及当次真实证据，不授予历史候选资格。
+        deliverable: 明确参数边界与真实接缝回归、独立冻结验收或只读审查结果。
+        acceptance_criteria:
+        - 显式既有公共参数、内部workspace不泄漏；不扩签名或吞错，不改变候选、身份、安全、超时和事务。
+        - 真实公开函数链RED/GREEN覆盖成功、相同镜像恢复及失败分类，不以mock整个publish_images绕过签名。
+        - 真实actor及目标绑定，原始失败保留，当次全差异独立验收，新正式候选另行19项完整验收，0历史PASS复用。
+        acceptance_evidence: [精确冻结、真实身份、实际命令退出和原始日志、未运行与恢复限制。]
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+      - id: LF-TSK-QLT-2526
+        title: 独立审查镜像晋升调用与失败安全边界
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-registry-boundary/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-registry-boundary/review/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确发布桥接合同及当次真实证据，不授予历史候选资格。
+        deliverable: 明确参数边界与真实接缝回归、独立冻结验收或只读审查结果。
+        acceptance_criteria:
+        - 显式既有公共参数、内部workspace不泄漏；不扩签名或吞错，不改变候选、身份、安全、超时和事务。
+        - 真实公开函数链RED/GREEN覆盖成功、相同镜像恢复及失败分类，不以mock整个publish_images绕过签名。
+        - 真实actor及目标绑定，原始失败保留，当次全差异独立验收，新正式候选另行19项完整验收，0历史PASS复用。
+        acceptance_evidence: [精确冻结、真实身份、实际命令退出和原始日志、未运行与恢复限制。]
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
       - id: LF-TSK-QLT-2519
         title: 修复晋升重复调用的不可覆盖日志身份
         priority: P0
@@ -9670,6 +9765,36 @@ workstreams:
         - eng.release.manifest
         depends_on: []
         discovered_from: LF-TSK-OPS-2063
+      - id: LF-TSK-OPS-2084
+        title: 集成镜像晋升接缝修复及精确发行身份
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-registry-boundary/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - planning/workstreams.yaml
+        - ops/release/workflow/promote_verified_release.py
+        - tests/verification/test_release_promotion.py
+        - tests/verification/test_release_registry.py
+        - ops/release/version.txt
+        - ops/release/notes/2.1.6.md
+        - openspec/changes/single-container-registry-boundary/**
+        - tmp/phase-tools/single-container-registry-boundary/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确发布桥接合同及当次真实证据，不授予历史候选资格。
+        deliverable: 明确参数边界与真实接缝回归、独立冻结验收或只读审查结果。
+        acceptance_criteria:
+        - 显式既有公共参数、内部workspace不泄漏；不扩签名或吞错，不改变候选、身份、安全、超时和事务。
+        - 真实公开函数链RED/GREEN覆盖成功、相同镜像恢复及失败分类，不以mock整个publish_images绕过签名。
+        - 真实actor及目标绑定，原始失败保留，当次全差异独立验收，新正式候选另行19项完整验收，0历史PASS复用。
+        acceptance_evidence: [精确冻结、真实身份、实际命令退出和原始日志、未运行与恢复限制。]
+        validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
       - id: LF-TSK-OPS-2083
         title: 集成晋升尝试日志修复及新发行身份
         priority: P0
