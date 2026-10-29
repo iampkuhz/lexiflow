@@ -986,10 +986,9 @@ else: sys.exit(7)
             bindir.mkdir()
             log = pathlib.Path(td) / "log"
             stub = bindir / "java"
-            stub.write_text(
-                '#!/bin/sh\nprintf \'%s\\n\' "$*" > "$LOG"\nprintf \'JVM_ENV=%s|%s|%s\\n\' "${JAVA_TOOL_OPTIONS:-}" "${JDK_JAVA_OPTIONS:-}" "${_JAVA_OPTIONS:-}" >> "$LOG"\nprintf \'DB_ENV=%s|%s\\n\' "${SPRING_DATASOURCE_URL:-}" "${SPRING_DATASOURCE_USERNAME:-}" >> "$LOG"\nif [ -z "${SPRING_DATASOURCE_PASSWORD:-}" ]; then printf \'DB_PASSWORD_EMPTY=true\\n\' >> "$LOG"; else printf \'DB_PASSWORD_EMPTY=false\\n\' >> "$LOG"; fi\nexit "${JAVA_EXIT:-0}"\n'
-            )
-            stub.chmod(0o755)
+            # 固定原样替身，避免每例新建可执行文件的启动开销混入命令断言。
+            # 仍真实exec；LOG和退出状态由每例环境独立提供。
+            stub.symlink_to(DOCKER / "tests/fixtures/java-command-stub.sh")
             timer = bindir / "timeout"
             timer.write_text(
                 '#!/bin/sh\nprintf "%s\\n" "$*" > ' + shlex.quote(str(log))
