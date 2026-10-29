@@ -726,6 +726,283 @@ workstreams:
         - eng.release.docker-contract
         discovered_from: LF-TSK-OPS-2076
         depends_on: []
+      - id: LF-TSK-QLT-2532
+        title: 固定容器命令测试替身并验证真实执行合同
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-shell-test-determinism/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/tests/test_contract.py
+        - ops/docker/tests/fixtures/java-command-stub.sh
+        - tests/verification/test_docker_contract_checks.py
+        - tmp/phase-tools/single-container-shell-test-determinism/implementation/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确当前源码和真实结果，不改变产品行为、门禁、超时或独立身份。
+        deliverable: 固定测试替身及真实调用/隔离回归，或当前完整差异的独立结果与集成。
+        acceptance_criteria:
+        - Java替身内容与原生成字节相同，仍真实shell和exec、3秒上限、独立LOG、非零退出与安全拒绝；不短路被测代码。
+        - 保留原始失败和冷启动定位局限；固定夹具的真实直接回归及当前全差异独立开发、正式验收、审查，不用旧PASS拼接。
+        - 发布仍须精确新候选完整实机验收与显式人审，不把工程通过当发行完成。
+        acceptance_evidence: [真实身份、源码/证据摘要、原始命令退出、真实RED/GREEN及完整独立报告和限制。]
+        validation_command: python3 -m unittest tests.verification.test_docker_contract_checks -v
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-QLT-2529
+        depends_on: []
+      - id: LF-TSK-QLT-2533
+        title: 独立验证恢复入口与测试夹具完整开发差异
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-shell-test-determinism/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-shell-test-determinism/development/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确当前源码和真实结果，不改变产品行为、门禁、超时或独立身份。
+        deliverable: 固定测试替身及真实调用/隔离回归，或当前完整差异的独立结果与集成。
+        acceptance_criteria:
+        - Java替身内容与原生成字节相同，仍真实shell和exec、3秒上限、独立LOG、非零退出与安全拒绝；不短路被测代码。
+        - 保留原始失败和冷启动定位局限；固定夹具的真实直接回归及当前全差异独立开发、正式验收、审查，不用旧PASS拼接。
+        - 发布仍须精确新候选完整实机验收与显式人审，不把工程通过当发行完成。
+        acceptance_evidence: [真实身份、源码/证据摘要、原始命令退出、真实RED/GREEN及完整独立报告和限制。]
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-QLT-2529
+        depends_on: []
+      - id: LF-TSK-QLT-2534
+        title: 独立执行恢复入口与测试夹具正式验收
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-shell-test-determinism/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-shell-test-determinism/validation/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确当前源码和真实结果，不改变产品行为、门禁、超时或独立身份。
+        deliverable: 固定测试替身及真实调用/隔离回归，或当前完整差异的独立结果与集成。
+        acceptance_criteria:
+        - Java替身内容与原生成字节相同，仍真实shell和exec、3秒上限、独立LOG、非零退出与安全拒绝；不短路被测代码。
+        - 保留原始失败和冷启动定位局限；固定夹具的真实直接回归及当前全差异独立开发、正式验收、审查，不用旧PASS拼接。
+        - 发布仍须精确新候选完整实机验收与显式人审，不把工程通过当发行完成。
+        acceptance_evidence: [真实身份、源码/证据摘要、原始命令退出、真实RED/GREEN及完整独立报告和限制。]
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-QLT-2529
+        depends_on: []
+      - id: LF-TSK-QLT-2535
+        title: 独立审查恢复合同与夹具确定性证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-shell-test-determinism/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-shell-test-determinism/review/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确当前源码和真实结果，不改变产品行为、门禁、超时或独立身份。
+        deliverable: 固定测试替身及真实调用/隔离回归，或当前完整差异的独立结果与集成。
+        acceptance_criteria:
+        - Java替身内容与原生成字节相同，仍真实shell和exec、3秒上限、独立LOG、非零退出与安全拒绝；不短路被测代码。
+        - 保留原始失败和冷启动定位局限；固定夹具的真实直接回归及当前全差异独立开发、正式验收、审查，不用旧PASS拼接。
+        - 发布仍须精确新候选完整实机验收与显式人审，不把工程通过当发行完成。
+        acceptance_evidence: [真实身份、源码/证据摘要、原始命令退出、真实RED/GREEN及完整独立报告和限制。]
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-QLT-2529
+        depends_on: []
+      - id: LF-TSK-OPS-2086
+        title: 集成恢复合同与夹具修复并完成新正式版本
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-shell-test-determinism/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - planning/workstreams.yaml
+        - .github/workflows/release.yml
+        - docs/scenarios/github-actions/first-release/preparation.md
+        - harness/documentation-policy.md
+        - ops/release/tests/workflow.test.mjs
+        - ops/release/workflow/run-release-workflow.mjs
+        - ops/release/version.txt
+        - ops/release/notes/2.1.7.md
+        - tests/verification/test_ci_workflows.py
+        - tests/verification/test_release_promotion.py
+        - ops/docker/tests/test_contract.py
+        - ops/docker/tests/fixtures/java-command-stub.sh
+        - tests/verification/test_docker_contract_checks.py
+        - openspec/changes/single-container-shell-test-determinism/**
+        - tmp/phase-tools/single-container-shell-test-determinism/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确当前源码和真实结果，不改变产品行为、门禁、超时或独立身份。
+        deliverable: 固定测试替身及真实调用/隔离回归，或当前完整差异的独立结果与集成。
+        acceptance_criteria:
+        - Java替身内容与原生成字节相同，仍真实shell和exec、3秒上限、独立LOG、非零退出与安全拒绝；不短路被测代码。
+        - 保留原始失败和冷启动定位局限；固定夹具的真实直接回归及当前全差异独立开发、正式验收、审查，不用旧PASS拼接。
+        - 发布仍须精确新候选完整实机验收与显式人审，不把工程通过当发行完成。
+        acceptance_evidence: [真实身份、源码/证据摘要、原始命令退出、真实RED/GREEN及完整独立报告和限制。]
+        validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-QLT-2529
+        depends_on: []
+      - id: LF-TSK-QLT-2531
+        title: 定位容器命令合成测试的间歇超时
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-shell-test-determinism/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-shell-test-determinism/investigation/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 真实失败层、原始诊断和有证据的最小修复合同；不修改被测代码或放宽超时。
+        deliverable: 可复核的根因报告、证据链及精确修复建议。
+        acceptance_criteria:
+        - 区分超时现象与根因；以实际源码、进程阶段和直接诊断定位，不将负载观察或一次重试PASS视为修复。
+        - 保留真实shell/Java stub、安全拒绝、原始失败和时间成本，不增加超时或跳过任何检查。
+        - 仅调查责任节点，无重复全仓检查、发布写入或无关资源变更。
+        acceptance_evidence: [真实actor绑定、原始调用/日志/退出/摘要、根因或剩余不确定性及精确修复合同。]
+        validation_command: 针对唯一失败容器命令用例的原始调用与有界诊断
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-QLT-2529
+        depends_on: []
+      - id: LF-TSK-QLT-2527
+        title: 接通受保护晋升显式恢复合同与真实接缝测试
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-promotion-recovery/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/workflow/run-release-workflow.mjs
+        - .github/workflows/release.yml
+        - ops/release/tests/workflow.test.mjs
+        - tests/verification/test_release_promotion.py
+        - docs/scenarios/github-actions/first-release/preparation.md
+        - tmp/phase-tools/single-container-promotion-recovery/implementation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 接通受保护晋升显式恢复合同与真实接缝测试的真实记录与直接或独立结果。
+        deliverable: 接通受保护晋升显式恢复合同与真实接缝测试及可核验交接。
+        acceptance_criteria:
+        - 只接通已有显式确认合同，不自动恢复、不扩大权限、不更改镜像公开/身份/候选/不可变资产/未知写入保护或超时。
+        - 真实Node与Python公开函数接缝覆盖默认、显式恢复、缺失/冲突、未确认与失败关闭；旧事件保留，不以宽泛mock掩盖调用边界。
+        - 实际新冻结及独立结果，不消费旧PASS；不能把工程或实机局部基线当整体发行。
+        acceptance_evidence:
+        - 精确冻结、真实身份、实际命令退出和原始日志、未运行与恢复限制。
+        validation_command: node --test ops/release/tests/workflow.test.mjs && python3 -m unittest tests.verification.test_release_promotion
+          tests.verification.test_release_registry -v
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+      - id: LF-TSK-QLT-2528
+        title: 独立验证晋升恢复合同完整开发差异
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/single-container-promotion-recovery/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-promotion-recovery/development/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立验证晋升恢复合同完整开发差异的真实记录与直接或独立结果。
+        deliverable: 独立验证晋升恢复合同完整开发差异及可核验交接。
+        acceptance_criteria:
+        - 只接通已有显式确认合同，不自动恢复、不扩大权限、不更改镜像公开/身份/候选/不可变资产/未知写入保护或超时。
+        - 真实Node与Python公开函数接缝覆盖默认、显式恢复、缺失/冲突、未确认与失败关闭；旧事件保留，不以宽泛mock掩盖调用边界。
+        - 实际新冻结及独立结果，不消费旧PASS；不能把工程或实机局部基线当整体发行。
+        acceptance_evidence:
+        - 精确冻结、真实身份、实际命令退出和原始日志、未运行与恢复限制。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+      - id: LF-TSK-QLT-2529
+        title: 独立执行晋升恢复合同工程验收
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-promotion-recovery/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-promotion-recovery/formal/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立执行晋升恢复合同工程验收的真实记录与直接或独立结果。
+        deliverable: 独立执行晋升恢复合同工程验收及可核验交接。
+        acceptance_criteria:
+        - 只接通已有显式确认合同，不自动恢复、不扩大权限、不更改镜像公开/身份/候选/不可变资产/未知写入保护或超时。
+        - 真实Node与Python公开函数接缝覆盖默认、显式恢复、缺失/冲突、未确认与失败关闭；旧事件保留，不以宽泛mock掩盖调用边界。
+        - 实际新冻结及独立结果，不消费旧PASS；不能把工程或实机局部基线当整体发行。
+        acceptance_evidence:
+        - 精确冻结、真实身份、实际命令退出和原始日志、未运行与恢复限制。
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+      - id: LF-TSK-QLT-2530
+        title: 独立审查晋升恢复合同与完整证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-promotion-recovery/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-promotion-recovery/review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立审查晋升恢复合同与完整证据的真实记录与直接或独立结果。
+        deliverable: 独立审查晋升恢复合同与完整证据及可核验交接。
+        acceptance_criteria:
+        - 只接通已有显式确认合同，不自动恢复、不扩大权限、不更改镜像公开/身份/候选/不可变资产/未知写入保护或超时。
+        - 真实Node与Python公开函数接缝覆盖默认、显式恢复、缺失/冲突、未确认与失败关闭；旧事件保留，不以宽泛mock掩盖调用边界。
+        - 实际新冻结及独立结果，不消费旧PASS；不能把工程或实机局部基线当整体发行。
+        acceptance_evidence:
+        - 精确冻结、真实身份、实际命令退出和原始日志、未运行与恢复限制。
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
       - id: LF-TSK-QLT-2523
         title: 修复晋升器与镜像发布的真实参数边界
         priority: P0
@@ -9765,6 +10042,45 @@ workstreams:
         - eng.release.manifest
         depends_on: []
         discovered_from: LF-TSK-OPS-2063
+      - id: LF-TSK-OPS-2085
+        title: 集成受保护晋升恢复修复与新正式版本
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/single-container-promotion-recovery/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - planning/workstreams.yaml
+        - ops/release/workflow/run-release-workflow.mjs
+        - .github/workflows/release.yml
+        - ops/release/tests/workflow.test.mjs
+        - tests/verification/test_release_promotion.py
+        - tests/verification/test_ci_workflows.py
+        - docs/scenarios/github-actions/first-release/preparation.md
+        - ops/release/version.txt
+        - ops/release/notes/2.1.7.md
+        - openspec/changes/single-container-promotion-recovery/**
+        - tmp/phase-tools/single-container-promotion-recovery/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 精确新提交、中文职责提交/PR、CI及新版本说明；不自签正式资格。
+        deliverable: 合入main的新恢复合同及精确新版本源码。
+        acceptance_criteria:
+        - 只接通已有显式确认合同，不自动恢复、不扩大权限、不更改镜像公开/身份/候选/不可变资产/未知写入保护或超时。
+        - 真实Node与Python公开函数接缝覆盖默认、显式恢复、缺失/冲突、未确认与失败关闭；旧事件保留，不以宽泛mock掩盖调用边界。
+        - 实际新冻结及独立结果，不消费旧PASS；不能把工程或实机局部基线当整体发行。
+        acceptance_evidence:
+        - 精确冻结、真实身份、实际命令退出和原始日志、未运行与恢复限制。
+        validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
       - id: LF-TSK-OPS-2084
         title: 集成镜像晋升接缝修复及精确发行身份
         priority: P0
