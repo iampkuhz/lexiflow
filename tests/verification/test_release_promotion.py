@@ -1340,11 +1340,12 @@ class RealRegistryPromotionBoundaryTests(unittest.TestCase):
             digestfile.write_text(self.image_manifest_digest)
         return Facts()
 
-    def promote(self):
+    def promote(self, *, confirmed_recovery=False):
         return p.promote(
             submission_id=SUBMISSION,
             candidate_directory=self.fixture.candidate,
             publish=True,
+            confirmed_recovery=confirmed_recovery,
         )
 
     def test_public_registry_chain_first_publish_emits_three_release_assets(self):
@@ -1400,6 +1401,52 @@ class RealRegistryPromotionBoundaryTests(unittest.TestCase):
             "unknown",
         )
         self.assertFalse(any(call[0] in ("POST", "PATCH") for call in FakeGitHub.calls))
+
+    def test_public_registry_unknown_requires_confirmation_and_recovers_same_image(self):
+        self.write_failure = "after"
+        with self.assertRaises(p.PromotionError) as raised:
+            self.promote()
+        self.assertEqual(raised.exception.stage, "registry-publish")
+        event_dir = p._event_directory("1.2.3", self.fixture.proof["candidate"]["candidateSha256"])
+        unknown_files = [item for item in event_dir.glob("*.json")
+                         if json.loads(item.read_bytes()).get("stage") == "ghcr-image"
+                         and json.loads(item.read_bytes()).get("state") == "unknown"]
+        self.assertTrue(unknown_files)
+        old_unknown = {item.name: item.read_bytes() for item in unknown_files}
+        with self.assertRaisesRegex(p.PromotionError, "promotion-recovery-confirmation-required"):
+            self.promote()
+        self.assertEqual(self.push_calls, 1)
+        self.write_failure = None
+        FakeGitHub.reset()
+        with patch.object(registry, "publish_images", wraps=registry.publish_images) as publish_images:
+            recovered = self.promote(confirmed_recovery=True)
+        self.assertEqual(recovered["result"], "PASS")
+        self.assertEqual(self.push_calls, 1)
+        self.assertEqual(len(recovered["assets"]), 3)
+        self.assertTrue(publish_images.call_args.kwargs["existing_only"])
+        self.assertEqual({name: (event_dir / name).read_bytes() for name in old_unknown}, old_unknown)
+
+    def test_confirmed_recovery_rejects_missing_or_conflicting_remote_without_push(self):
+        self.write_failure = "after"
+        with self.assertRaises(p.PromotionError):
+            self.promote()
+        self.write_failure = None
+        self.remote_present = False
+        FakeGitHub.reset()
+        with self.assertRaises(p.PromotionError):
+            self.promote(confirmed_recovery=True)
+        self.assertEqual(self.push_calls, 1)
+        self.remote_present = True
+        FakeGitHub.reset()
+        original_manifest = registry._manifest
+        def conflicting_manifest(repo, reference, **kwargs):
+            if reference == "1.2.3":
+                return 200, {"docker-content-digest": "sha256:" + "0" * 64}, self.image_body
+            return original_manifest(repo, reference, **kwargs)
+        with patch.object(registry, "_manifest", side_effect=conflicting_manifest):
+            with self.assertRaises(p.PromotionError):
+                self.promote(confirmed_recovery=True)
+        self.assertEqual(self.push_calls, 1)
 
 
 if __name__ == "__main__":

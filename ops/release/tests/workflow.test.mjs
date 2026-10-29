@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, lstat, rm, symlink, realpath, chmo
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { executeFormal, prepareWorkflow, resumePromotion, runCommand } from '../workflow/run-release-workflow.mjs';
 import { normalizeDarwinTempDirectory, resolveFormalInvocation, resolveReleaseExecutionEnvironment } from '../workflow/release-execution-environment.mjs';
 
@@ -462,6 +462,32 @@ test('resume binds UUID, host, source, original request and candidate; only publ
   await writeFile(f.request, JSON.stringify({ ...f.body, endpoint: 'unix:///other.sock' }));
   assert.equal((await resumePromotion(common)).status, 'BLOCKED');
   assert.equal(outputs.length, 2);
+});
+
+test('confirmed recovery is a strict publish-only boolean and reaches the promotion CLI', async t => {
+  const f = await fixture(t); const b = boundaries(f);
+  assert.equal((await prepareWorkflow(f.request, b.options)).status, 'PASS');
+  const captured = [];
+  const common = { root: f.root, submissionId: '12345678-1234-4234-8234-123456789abc', releaseTag: 'v1.2.3',
+    run: async (_cmd, args) => { captured.push(args); return JSON.stringify({ result: 'PASS', scope: 'promotion-publish', published: true }); },
+    identityReader: () => targetIdentity, tagChecker: () => targetIdentity,
+    verifier: b.options.verifyReleaseCandidate, environmentResolver: b.options.environmentResolver };
+  assert.equal((await resumePromotion({ ...common, confirmedRecovery: 'true' })).status, 'FAIL');
+  assert.equal((await resumePromotion({ ...common, confirmedRecovery: true })).reason, 'RECOVERY_CONFIRMATION_REQUIRES_PUBLISH');
+  const oldToken = process.env.GITHUB_TOKEN, oldConfig = process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN;
+  try {
+    process.env.GITHUB_TOKEN = 'synthetic-test-token'; process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN = 'synthetic-config-token';
+    assert.equal((await resumePromotion({ ...common, publish: true, confirmedRecovery: true })).status, 'PASS');
+    assert.deepEqual(captured[0].slice(-2), ['--publish', '--confirmed-recovery']);
+  } finally {
+    if (oldToken === undefined) delete process.env.GITHUB_TOKEN; else process.env.GITHUB_TOKEN = oldToken;
+    if (oldConfig === undefined) delete process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN; else process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN = oldConfig;
+  }
+  const cliArgs = [path.join(repo, 'ops/release/workflow/run-release-workflow.mjs'), 'resume', common.submissionId, common.releaseTag];
+  const cli = spawnSync(process.execPath, [...cliArgs, '--publish', '--confirmed-recovery'], { cwd: repo, encoding: 'utf8' });
+  assert.notEqual(JSON.parse(cli.stdout).reason, 'ARGUMENTS_INVALID');
+  const badCli = spawnSync(process.execPath, [...cliArgs, '--confirmed-recovery'], { cwd: repo, encoding: 'utf8' });
+  assert.equal(JSON.parse(badCli.stdout).reason, 'ARGUMENTS_INVALID');
 });
 
 

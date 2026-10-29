@@ -83,8 +83,12 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(value["on"]["push"], {"tags": ["v*"]})
         self.assertEqual(
             set(value["on"]["workflow_dispatch"]["inputs"]),
-            {"submission_id", "release_tag", "publish_confirmation"},
+            {"submission_id", "release_tag", "publish_confirmation", "confirmed_recovery"},
         )
+        recovery = value["on"]["workflow_dispatch"]["inputs"]["confirmed_recovery"]
+        self.assertEqual(recovery["type"], "boolean")
+        self.assertEqual(recovery["default"], "false")
+        self.assertEqual(recovery["required"], "false")
         self.assertEqual(value["permissions"], {"contents": "read"})
         source = value["jobs"]["source"]
         self.assertEqual(source["runs-on"], "ubuntu-24.04")
@@ -138,6 +142,24 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn(
             'resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish', str(publish["steps"])
         )
+        self.assertNotIn("confirmed_recovery", str(dry))
+        self.assertNotIn("--confirmed-recovery", str(dry))
+        promotion_step = publish["steps"][-1]
+        self.assertEqual(
+            promotion_step["env"]["CONFIRMED_RECOVERY"],
+            "${{ inputs.confirmed_recovery }}",
+        )
+        promotion_run = promotion_step["run"]
+        self.assertIn('if [ "$CONFIRMED_RECOVERY" = "true" ]; then', promotion_run)
+        self.assertIn(
+            'resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish --confirmed-recovery',
+            promotion_run,
+        )
+        self.assertIn(
+            'else\n  "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish\nfi',
+            promotion_run,
+        )
+        self.assertNotIn("eval", promotion_run)
         self.assertNotIn("GITHUB_TOKEN", str(dry))
         self.assertNotIn("LEXIFLOW_RELEASE_CONFIG_TOKEN", str(dry))
         self.assertIn("GITHUB_TOKEN", str(publish["steps"][-1]))
