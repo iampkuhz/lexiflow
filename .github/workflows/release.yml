@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       submission_id:
-        description: 原生 Formal 提交 UUID
+        description: 原生正式验收提交 UUID
         required: true
         type: string
       release_tag:
@@ -18,6 +18,11 @@ on:
         description: 明确输入 PUBLISH
         required: true
         type: string
+      confirmed_recovery:
+        description: 仅在已核实远端精确镜像与事务现场后勾选；不跳过候选校验或审批
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -170,6 +175,7 @@ jobs:
           LEXIFLOW_RELEASE_NODE_BIN: ${{ vars.LEXIFLOW_RELEASE_NODE_BIN }}
           SUBMISSION_ID: ${{ inputs.submission_id }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+          CONFIRMED_RECOVERY: ${{ inputs.confirmed_recovery }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LEXIFLOW_RELEASE_CONFIG_TOKEN: ${{ secrets.LEXIFLOW_RELEASE_CONFIG_TOKEN }}
         run: |
@@ -179,4 +185,8 @@ jobs:
           export PATH="$WORKSPACE/.local/lexiflow-python/bin:$LEXIFLOW_RELEASE_NODE_BIN:$PATH"
           cd "$WORKSPACE"
           test -x "$LEXIFLOW_RELEASE_NODE_BIN/node"
-          "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish
+          if [ "$CONFIRMED_RECOVERY" = "true" ]; then
+            "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish --confirmed-recovery
+          else
+            "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish
+          fi

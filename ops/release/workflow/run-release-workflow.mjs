@@ -434,12 +434,13 @@ export async function prepareWorkflow(requestFile, options = {}) {
   finally { if (guard) await guard.close(); }
 }
 
-export async function resumePromotion({ submissionId, releaseTag, publish = false, root = ROOT,
+export async function resumePromotion({ submissionId, releaseTag, publish = false, confirmedRecovery = false, root = ROOT,
   run = runCommand, identityReader = resolveBuildIdentity, tagChecker = checkReleaseTag,
   verifier = verifyReleaseCandidate, host = hostname(),
   environmentResolver = resolveReleaseExecutionEnvironment } = {}) {
   if (!UUID.test(submissionId || '') || !/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(releaseTag || '')
-    || typeof publish !== 'boolean') return { status: 'FAIL', reason: 'RESUME_INPUT_INVALID' };
+    || typeof publish !== 'boolean' || typeof confirmedRecovery !== 'boolean') return { status: 'FAIL', reason: 'RESUME_INPUT_INVALID' };
+  if (confirmedRecovery && !publish) return { status: 'FAIL', reason: 'RECOVERY_CONFIRMATION_REQUIRES_PUBLISH' };
   try {
     const quality = releaseWorkflowDirectory(root);
     const handoff = (await readBoundedJson(path.join(quality, 'handoff.json'))).value;
@@ -460,6 +461,7 @@ export async function resumePromotion({ submissionId, releaseTag, publish = fals
     const args = ['-m', 'ops.release.workflow.promote_verified_release', '--submission-id', submissionId,
       '--candidate-directory', handoff.target.candidateDirectory];
     if (publish) args.push('--publish');
+    if (confirmedRecovery) args.push('--confirmed-recovery');
     const env = environmentResolver({ root, purpose: 'promotion' });
     if (publish) {
       if (!process.env.GITHUB_TOKEN || !process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN) fail('PUBLISH_TOKEN_MISSING');
@@ -556,10 +558,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       }
     }
   } else {
+    const recoveryArgsValid = args.length === 4 && args[2] === '--publish' && args[3] === '--confirmed-recovery';
     const result = mode === 'prepare' && args.length === 1
       ? await prepareWorkflow(args[0])
-      : mode === 'resume' && (args.length === 2 || (args.length === 3 && args[2] === '--publish'))
-        ? await resumePromotion({ submissionId: args[0], releaseTag: args[1], publish: args[2] === '--publish' })
+      : mode === 'resume' && (args.length === 2 || (args.length === 3 && args[2] === '--publish') || recoveryArgsValid)
+        ? await resumePromotion({ submissionId: args[0], releaseTag: args[1], publish: args.length >= 3, confirmedRecovery: recoveryArgsValid })
         : mode === 'runner' && args.length === 1
           ? args[0] === '--help' ? { status: 'PASS', commands: ['doctor', 'deps', 'install', 'register', 'start', 'stop', 'status', 'setup'] }
             : await runRunnerCommand(args[0])
