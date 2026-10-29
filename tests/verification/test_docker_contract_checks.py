@@ -7,6 +7,7 @@ import json
 import hashlib
 import importlib.util
 import io
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr
 import tempfile
 import subprocess
@@ -438,3 +439,86 @@ class DockerAdapterDiagnosticTest(unittest.TestCase):
                 report = module._run("surface")
             self.assertEqual("FAIL", report["status"])
             self.assertFalse(report["node_transaction_no_skips"])
+
+
+class ContainerCommandFixtureTest(unittest.TestCase):
+    """固定替身仍真实执行产品shell，保持超时与每例私有日志。"""
+
+    def fixture_case(self):
+        """取得真实容器命令合同用例，不替换被测脚本。"""
+        from ops.docker.tests.test_contract import DockerContractTest
+
+        return DockerContractTest(
+            "test_api_development_trust_requires_explicit_external_postgres_without_secret"
+        )
+
+    def target_environment(self, **overrides):
+        """只生成合成开发信任目标，不读取实际数据库凭据。"""
+        return {
+            "LEXIFLOW_DATABASE_HOST": "host.containers.internal",
+            "LEXIFLOW_DATABASE_PORT": "15432",
+            "LEXIFLOW_DATABASE_USER": "postgres",
+            "LEXIFLOW_DATABASE_AUTH_MODE": "development-trust",
+            **overrides,
+        }
+
+    def test_command_uses_fixed_executable_and_keeps_three_second_guard(self):
+        """各例链接同一固定替身，不重写它且仍原生调用三秒命令。"""
+        fixture = ROOT / "ops/docker/tests/fixtures/java-command-stub.sh"
+        before = (fixture.read_bytes(), fixture.stat().st_ino)
+        real_link = Path.symlink_to
+        real_run = subprocess.run
+        links = []
+
+        def link(path, target, *args, **kwargs):
+            links.append((path.name, Path(target)))
+            return real_link(path, target, *args, **kwargs)
+
+        with (
+            patch.object(Path, "symlink_to", new=link),
+            patch.object(subprocess, "run", wraps=real_run) as calls,
+        ):
+            process, log = self.fixture_case()._run(
+                "api", env=self.target_environment()
+            )
+        self.assertEqual(process.returncode, 0, process.stderr)
+        self.assertEqual(links, [("java", fixture)])
+        self.assertEqual(calls.call_count, 1)
+        self.assertEqual(calls.call_args.kwargs["timeout"], 3)
+        self.assertEqual(calls.call_args.args[0][0], "sh")
+        self.assertIn("-jar /app/lexiflow-api.jar", log)
+        self.assertIn("DB_PASSWORD_EMPTY=true", log)
+        self.assertEqual(before, (fixture.read_bytes(), fixture.stat().st_ino))
+
+    def test_fixed_executable_keeps_exit_code_and_unset_jvm_environment(self):
+        """真实exec仍透传非零退出且产品脚本清除可注入JVM选项。"""
+        process, log = self.fixture_case()._run(
+            "api",
+            env=self.target_environment(
+                JAVA_EXIT="7", JAVA_TOOL_OPTIONS="synthetic-injection"
+            ),
+        )
+        self.assertEqual(process.returncode, 7)
+        self.assertIn("JVM_ENV=||", log)
+        self.assertNotIn("synthetic-injection", log + process.stderr)
+
+    def test_fixed_executable_parallel_cases_keep_private_logs(self):
+        """共用只读替身不共享LOG、退出状态或应用参数。"""
+        def invoke(analysis):
+            return self.fixture_case()._run(
+                "api",
+                env=self.target_environment(
+                    LEXIFLOW_SEGMENT_ANALYSIS_ENABLED=analysis,
+                    JAVA_EXIT="7" if analysis == "true" else "0",
+                ),
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(invoke, ["true", "false"]))
+        for analysis, (process, log) in zip(["true", "false"], results, strict=True):
+            self.assertEqual(process.returncode, 7 if analysis == "true" else 0)
+            self.assertIn(f"segment-analysis.enabled={analysis}", log)
+            self.assertNotIn(
+                "segment-analysis.enabled=" + ("false" if analysis == "true" else "true"),
+                log,
+            )
