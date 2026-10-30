@@ -15,22 +15,23 @@ import stat
 import subprocess
 import tarfile
 import tempfile
-import time
 import threading
+import time
 import urllib.parse
 import uuid
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable
+from typing import Any
 
+from ops.release.host_resources.release_process_control import (
+    run_bounded as _run_bounded,
+)
+from ops.release.workflow import release_registry
 from scripts.acceptance.evidence.verify_candidate_acceptance_evidence import (
     _json,
     _read_bounded,
     consume_candidate_pass,
 )
-from ops.release.host_resources.release_process_control import (
-    run_bounded as _run_bounded,
-)
-from ops.release.workflow import release_registry as release_registry
 
 ROOT = Path(__file__).resolve().parents[3]
 LICENSE_TABLE = ROOT / "ops/release/distribution-licenses.json"
@@ -481,7 +482,13 @@ class GitHub:
             if (
                 self.host != "api.github.com"
                 or method != "GET"
-                or path != prefix + "/immutable-releases"
+                or path
+                not in {
+                    prefix + "/immutable-releases",
+                    prefix + "/environments/lexiflow-release-promotion",
+                    prefix
+                    + "/environments/lexiflow-release-promotion/deployment-branch-policies",
+                }
             ):
                 _fail("github-route-rejected")
         elif self.host == "uploads.github.com":
@@ -499,6 +506,15 @@ class GitHub:
             exact = (method, path) in {
                 ("GET", prefix + "/releases/latest"),
                 ("POST", prefix + "/releases"),
+                (
+                    "GET",
+                    prefix
+                    + f"/actions/runs/{os.environ.get('GITHUB_RUN_ID', '')}/approvals",
+                ),
+                (
+                    "GET",
+                    prefix + f"/actions/runs/{os.environ.get('GITHUB_RUN_ID', '')}",
+                ),
             }
             patterns = (
                 method == "GET"
@@ -662,6 +678,158 @@ def _pages(api: GitHub, path: str) -> list[dict[str, Any]]:
 def _immutable(config: GitHub, owner: str, repo: str) -> bool:
     status, data = config.api("GET", f"/repos/{owner}/{repo}/immutable-releases")
     return status == 200 and isinstance(data, dict) and data.get("enabled") is True
+
+
+def _assert_live_promotion_authorization(
+    api: GitHub, config: GitHub, owner: str, repo: str, identity: dict[str, Any]
+) -> None:
+    """重核真实单次 dispatch、审批历史及当前环境保护；任一未知均失败关闭。"""
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    expected = {
+        "GITHUB_EVENT_NAME": "workflow_dispatch",
+        "GITHUB_REF": "refs/tags/v" + identity["softwareVersion"],
+        "GITHUB_SHA": identity["sourceCommit"],
+        "GITHUB_REPOSITORY": f"{owner}/{repo}",
+        "GITHUB_RUN_ATTEMPT": "1",
+    }
+    if (
+        not re.fullmatch(r"[1-9][0-9]*", run_id)
+        or os.environ.get("GITHUB_RUN_ATTEMPT") != "1"
+        or any(os.environ.get(k) != v for k, v in expected.items())
+    ):
+        _fail("promotion-run-context-invalid")
+    status, run = api.api("GET", f"/repos/{owner}/{repo}/actions/runs/{run_id}")
+    if (
+        status != 200
+        or not isinstance(run, dict)
+        or not isinstance(run.get("repository"), dict)
+        or run.get("id") != int(run_id)
+        or run.get("run_attempt") != 1
+        or run.get("head_sha") != identity["sourceCommit"]
+        or run.get("event") != "workflow_dispatch"
+        or run.get("path") != ".github/workflows/release.yml"
+        or run.get("head_branch") != "v" + identity["softwareVersion"]
+        or run.get("status") != "in_progress"
+        or run.get("repository", {}).get("full_name") != f"{owner}/{repo}"
+    ):
+        _fail("promotion-run-platform-check-failed")
+    status, approvals = api.api(
+        "GET", f"/repos/{owner}/{repo}/actions/runs/{run_id}/approvals"
+    )
+    if (
+        status != 200
+        or not isinstance(approvals, list)
+        or any(not isinstance(a, dict) for a in approvals)
+    ):
+        _fail("promotion-approval-history-unavailable")
+    status, env = config.api(
+        "GET", f"/repos/{owner}/{repo}/environments/lexiflow-release-promotion"
+    )
+    if (
+        status != 200
+        or not isinstance(env, dict)
+        or not isinstance(env.get("protection_rules"), list)
+        or type(env.get("id")) is not int
+        or env["id"] <= 0
+    ):
+        _fail("promotion-environment-unavailable")
+    rules = env.get("protection_rules")
+    reviewers = (
+        [
+            r
+            for r in rules
+            if isinstance(r, dict) and r.get("type") == "required_reviewers"
+        ]
+        if isinstance(rules, list)
+        else []
+    )
+    configured = reviewers[0].get("reviewers") if len(reviewers) == 1 else None
+    if (
+        any(not isinstance(rule, dict) for rule in rules)
+        or not isinstance(configured, list)
+        or len(configured) != 1
+        or not isinstance(configured[0], dict)
+    ):
+        _fail("promotion-environment-reviewer-mismatch")
+    reviewer = configured[0].get("reviewer")
+    if (
+        configured[0].get("type") != "User"
+        or not isinstance(reviewer, dict)
+        or reviewer.get("login") != owner
+        or type(reviewer.get("id")) is not int
+        or reviewer["id"] <= 0
+    ):
+        _fail("promotion-environment-reviewer-mismatch")
+    decisions = []
+    for approval in approvals:
+        user = approval.get("user")
+        environments = approval.get("environments")
+        if (
+            not isinstance(user, dict)
+            or type(user.get("id")) is not int
+            or user["id"] <= 0
+            or not isinstance(user.get("login"), str)
+            or not isinstance(environments, list)
+            or approval.get("state") not in {"approved", "rejected"}
+        ):
+            _fail("promotion-approval-history-unavailable")
+        if any(
+            not isinstance(e, dict)
+            or type(e.get("id")) is not int
+            or e["id"] <= 0
+            or not isinstance(e.get("name"), str)
+            for e in environments
+        ):
+            _fail("promotion-approval-history-unavailable")
+        associated = [
+            e
+            for e in environments
+            if e["id"] == env["id"] or e["name"] == "lexiflow-release-promotion"
+        ]
+        if associated:
+            if (
+                len(associated) != 1
+                or associated[0]["id"] != env["id"]
+                or associated[0]["name"] != "lexiflow-release-promotion"
+            ):
+                _fail("promotion-environment-id-mismatch")
+            decisions.append(approval)
+    if len(decisions) > 1:
+        _fail("promotion-approval-history-ambiguous")
+    if not decisions:
+        _fail("promotion-human-approval-missing")
+    decision = decisions[0]
+    if decision.get("state") != "approved":
+        _fail("promotion-human-approval-missing")
+    if (
+        decision["user"].get("login") != owner
+        or decision["user"].get("id") != reviewer["id"]
+    ):
+        _fail("promotion-human-approval-reviewer-mismatch")
+    deployment_policy = env.get("deployment_branch_policy")
+    if (
+        len(reviewers) != 1
+        or env.get("can_admins_bypass") is not False
+        or not isinstance(deployment_policy, dict)
+        or deployment_policy.get("protected_branches") is not False
+        or deployment_policy.get("custom_branch_policies") is not True
+    ):
+        _fail("promotion-environment-protection-mismatch")
+    status, policies = config.api(
+        "GET",
+        f"/repos/{owner}/{repo}/environments/lexiflow-release-promotion/deployment-branch-policies",
+    )
+    if (
+        status != 200
+        or not isinstance(policies, dict)
+        or not isinstance(policies.get("branch_policies"), list)
+        or any(not isinstance(p, dict) for p in policies["branch_policies"])
+        or policies.get("total_count") != 1
+        or len(policies["branch_policies"]) != 1
+        or policies["branch_policies"][0].get("type") != "tag"
+        or policies["branch_policies"][0].get("name") != "v*"
+    ):
+        _fail("promotion-environment-tag-policy-mismatch")
 
 
 def _remote_tag(api: GitHub, owner: str, repo: str, tag: str, commit: str) -> bool:
@@ -920,6 +1088,7 @@ def _publish(
 
     def gate() -> None:
         revalidate()
+        _assert_live_promotion_authorization(api, config, owner, repo, identity)
         if not _immutable(config, owner, repo):
             _fail("immutable-release-required")
         if not _remote_tag(api, owner, repo, tag, identity["sourceCommit"]):

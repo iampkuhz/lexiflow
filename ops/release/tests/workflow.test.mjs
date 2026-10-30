@@ -424,7 +424,21 @@ test('resume binds UUID, host, source, original request and candidate; only publ
     run: async () => { driftRunCalls++; return ''; },
   })).status, 'BLOCKED');
   assert.equal(driftRunCalls, 0, 'host drift must be checked before invoking the publisher');
-  assert.equal((await resumePromotion(common)).status, 'PASS');
+  const contextKeys = ['GITHUB_REPOSITORY', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_REF', 'GITHUB_SHA', 'GITHUB_EVENT_NAME'];
+  const context = { GITHUB_REPOSITORY: 'owner/repo', GITHUB_RUN_ID: '41', GITHUB_RUN_ATTEMPT: '1',
+    GITHUB_REF: 'refs/tags/v1.2.3', GITHUB_SHA: targetIdentity.sourceCommit, GITHUB_EVENT_NAME: 'workflow_dispatch' };
+  const precheckKeys = [...contextKeys, 'GITHUB_TOKEN', 'LEXIFLOW_RELEASE_CONFIG_TOKEN'];
+  const precheckOriginal = Object.fromEntries(precheckKeys.map(key => [key, process.env[key]]));
+  Object.assign(process.env, context, { GITHUB_TOKEN: 'parent-token', LEXIFLOW_RELEASE_CONFIG_TOKEN: 'parent-config-token' });
+  try {
+    assert.equal((await resumePromotion(common)).status, 'PASS');
+    for (const key of precheckKeys) assert.equal(outputs[0].settings.env[key], undefined, `${key} must not reach precheck`);
+  } finally {
+    for (const key of precheckKeys) {
+      if (precheckOriginal[key] === undefined) delete process.env[key];
+      else process.env[key] = precheckOriginal[key];
+    }
+  }
   assert.equal(outputs[0].settings.env.GITHUB_TOKEN, undefined);
   assert.equal(outputs[0].settings.env.LEXIFLOW_RELEASE_PODMAN_ENDPOINT, undefined);
   assert.equal((await resumePromotion({ ...common, releaseTag: 'v1.2.4' })).status, 'BLOCKED');
@@ -437,8 +451,8 @@ test('resume binds UUID, host, source, original request and candidate; only publ
   await writeFile(handoffPath, JSON.stringify({ ...savedHandoff, extra: true }));
   assert.equal((await resumePromotion(common)).status, 'BLOCKED', 'extra fields must fail closed');
   await writeFile(handoffPath, JSON.stringify(savedHandoff));
-  const oldToken = process.env.GITHUB_TOKEN;
-  const oldConfig = process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN;
+  const publishKeys = [...contextKeys, 'GITHUB_TOKEN', 'LEXIFLOW_RELEASE_CONFIG_TOKEN'];
+  const publishOriginal = Object.fromEntries(publishKeys.map(key => [key, process.env[key]]));
   try {
     delete process.env.GITHUB_TOKEN;
     delete process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN;
@@ -446,11 +460,13 @@ test('resume binds UUID, host, source, original request and candidate; only publ
       { status: 'BLOCKED', reason: 'PUBLISH_TOKEN_MISSING' });
     process.env.GITHUB_TOKEN = 'synthetic-test-token';
     process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN = 'synthetic-config-token';
+    Object.assign(process.env, context);
     const published = await resumePromotion({ ...common, publish: true });
     assert.equal(published.status, 'PASS');
     assert.equal(outputs[1].settings.env.GITHUB_TOKEN, 'synthetic-test-token');
     assert.equal(outputs[1].settings.env.LEXIFLOW_RELEASE_PODMAN_ENDPOINT, f.body.endpoint);
     assert.equal(outputs[1].settings.env.LEXIFLOW_RELEASE_CONFIG_TOKEN, 'synthetic-config-token');
+    for (const key of contextKeys) assert.equal(outputs[1].settings.env[key], context[key], `${key} must reach publish`);
     const unknown = await resumePromotion({ ...common, publish: true, run: async () => {
       const error = new Error('CHILD_FAILED');
       error.publicOutput = JSON.stringify({ result: 'BLOCKED', published: 'unknown',
@@ -485,10 +501,10 @@ test('resume binds UUID, host, source, original request and candidate; only publ
     assert.deepEqual(malformedOutput, { status: 'BLOCKED', reason: 'PUBLISH_STATE_UNKNOWN',
       published: 'unknown', writeStage: null, releaseId: null });
   } finally {
-    if (oldToken === undefined) delete process.env.GITHUB_TOKEN;
-    else process.env.GITHUB_TOKEN = oldToken;
-    if (oldConfig === undefined) delete process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN;
-    else process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN = oldConfig;
+    for (const key of publishKeys) {
+      if (publishOriginal[key] === undefined) delete process.env[key];
+      else process.env[key] = publishOriginal[key];
+    }
   }
   await writeFile(f.request, JSON.stringify({ ...f.body, endpoint: 'unix:///other.sock' }));
   assert.equal((await resumePromotion(common)).status, 'BLOCKED');

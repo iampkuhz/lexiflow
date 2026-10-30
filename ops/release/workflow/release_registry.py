@@ -11,6 +11,7 @@ import re
 import shutil
 import ssl
 import stat
+import sys
 import tempfile
 import threading
 import time
@@ -358,6 +359,28 @@ def _image_manifest(
         raise
     except (ValueError, TypeError, KeyError):
         _fail("registry-manifest-invalid", "remote-read")
+
+
+def _first_public_image(
+    repo: str, digest: str, revalidate: Callable[[], None]
+) -> tuple[str, str]:
+    """已确认首次写入后，仅明确私有拒绝可等待一次包设置，不重试写入。"""
+    try:
+        return _image_manifest(repo, digest, anonymous=True)
+    except RegistryError as exc:
+        if exc.reason != "registry-not-public":
+            raise
+    # 这是首包配置窗口，不延长任何 HTTP、Check 或 Actions job 的执行上限。
+    # 当前已验收镜像保持私有；窗口结束后的完整门禁和匿名 digest 校验不可省略。
+    print(
+        "等待首次 GHCR 包公开配置（最多一次 120 秒）；不会重推镜像或跳过匿名校验。",
+        file=sys.stderr,
+        flush=True,
+    )
+    revalidate()
+    time.sleep(120)
+    revalidate()
+    return _image_manifest(repo, digest, anonymous=True)
 
 
 def _run(
@@ -765,8 +788,8 @@ def _publish_images(
                     if not digest_file_value or digest_file_value != digest:
                         _fail("registry-push-digest-mismatch", "verify", role, True)
                     try:
-                        anon_digest, anon_config = _image_manifest(
-                            target_repo, digest, anonymous=True
+                        anon_digest, anon_config = _first_public_image(
+                            target_repo, digest, revalidate
                         )
                     except RegistryError:
                         _fail(

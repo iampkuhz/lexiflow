@@ -35,7 +35,9 @@ class RegistryTests(unittest.TestCase):
             "channel": "release",
         }
         self.artifacts = []
-        for role, path, iid in (("runtime-image", "images/linux-arm64/runtime-image.tar", "d"),):
+        for role, path, iid in (
+            ("runtime-image", "images/linux-arm64/runtime-image.tar", "d"),
+        ):
             data = (role + " bytes").encode()
             target = self.root / "payload" / path
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -284,11 +286,9 @@ class RegistryTests(unittest.TestCase):
         with (
             patch.object(registry, "_manifest", side_effect=fake_manifest),
             patch.object(registry, "_run", side_effect=wrong_id),
+            self.assertRaisesRegex(RegistryError, "registry-image-inspect-mismatch"),
         ):
-            with self.assertRaisesRegex(
-                RegistryError, "registry-image-inspect-mismatch"
-            ):
-                publish_images(**self.kwargs())
+            publish_images(**self.kwargs())
         self.assertFalse(any("push" in call for call in calls))
 
     @patch.dict("os.environ", {"GITHUB_TOKEN": "test-secret"})
@@ -394,8 +394,9 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(exc.exception.reason, "registry-operation-failed")
         runner.assert_not_called()
 
+    @patch("ops.release.workflow.release_registry.time.sleep")
     @patch.dict("os.environ", {"GITHUB_TOKEN": "test-secret"})
-    def test_anonymous_denial_after_push_is_unknown_and_retained(self):
+    def test_anonymous_denial_after_push_is_unknown_and_retained(self, sleep):
         _, _, _, _, fake_manifest, fake_run = self._publish_mocks()
 
         def private_after_push(repo, reference, **kwargs):
@@ -411,6 +412,81 @@ class RegistryTests(unittest.TestCase):
             publish_images(**self.kwargs())
         self.assertEqual(exc.exception.reason, "registry-postwrite-verify-unknown")
         self.assertTrue(exc.exception.write_unknown)
+
+    def test_first_public_visibility_window_is_read_only_and_revalidates(self):
+        digest, image = "sha256:" + "a" * 64, "sha256:" + "b" * 64
+        events = []
+
+        def gate():
+            events.append("gate")
+
+        with (
+            patch.object(
+                registry,
+                "_image_manifest",
+                side_effect=[RegistryError("registry-not-public"), (digest, image)],
+            ) as read,
+            patch.object(
+                registry.time,
+                "sleep",
+                side_effect=lambda seconds: events.append(seconds),
+            ),
+            patch.object(registry, "_run") as write,
+        ):
+            self.assertEqual(
+                registry._first_public_image("owner/lexiflow", digest, gate),
+                (digest, image),
+            )
+        self.assertEqual(events, ["gate", 120, "gate"])
+        self.assertEqual(read.call_count, 2)
+        write.assert_not_called()
+
+    def test_public_image_does_not_wait(self):
+        with (
+            patch.object(
+                registry, "_image_manifest", return_value=("digest", "config")
+            ),
+            patch.object(registry.time, "sleep") as sleep,
+        ):
+            self.assertEqual(
+                registry._first_public_image("owner/lexiflow", "digest", lambda: None),
+                ("digest", "config"),
+            )
+        sleep.assert_not_called()
+
+    def test_first_public_window_refuses_unknown_network_and_gate_drift(self):
+        for reason in [
+            "registry-network-unknown",
+            "registry-manifest-digest-invalid",
+            "registry-tag-unavailable",
+        ]:
+            with (
+                self.subTest(reason=reason),
+                patch.object(
+                    registry, "_image_manifest", side_effect=RegistryError(reason)
+                ),
+                patch.object(registry.time, "sleep") as sleep,
+                self.assertRaises(RegistryError),
+            ):
+                registry._first_public_image("owner/lexiflow", "digest", lambda: None)
+            sleep.assert_not_called()
+
+        def drift():
+            raise RegistryError("candidate-drift")
+
+        with (
+            patch.object(
+                registry,
+                "_image_manifest",
+                side_effect=RegistryError("registry-not-public"),
+            ) as read,
+            patch.object(registry.time, "sleep") as sleep,
+            self.assertRaises(RegistryError) as exc,
+        ):
+            registry._first_public_image("owner/lexiflow", "digest", drift)
+        self.assertEqual(exc.exception.reason, "candidate-drift")
+        self.assertEqual(read.call_count, 1)
+        sleep.assert_not_called()
 
     @patch.dict("os.environ", {"GITHUB_TOKEN": "test-secret"})
     def test_missing_digestfile_is_unknown_after_push(self):
@@ -489,7 +565,16 @@ class RegistryTests(unittest.TestCase):
     def test_verify_images_reads_only_anonymous_digest(self):
         body = b'{"config":{"digest":"sha256:' + b"a" * 64 + b"}}"
         digest = "sha256:" + hashlib.sha256(body).hexdigest()
-        item_list = [{"role": "runtime-image", "platform": "linux/arm64", "reference": "ghcr.io/example/lexiflow:2.0.0", "manifestDigest": digest, "imageId": "sha256:" + "d" * 64, "archiveSha256": "f" * 64}]
+        item_list = [
+            {
+                "role": "runtime-image",
+                "platform": "linux/arm64",
+                "reference": "ghcr.io/example/lexiflow:2.0.0",
+                "manifestDigest": digest,
+                "imageId": "sha256:" + "d" * 64,
+                "archiveSha256": "f" * 64,
+            }
+        ]
         mapping = {
             "schemaVersion": "lexiflow.registry-images.v1",
             "softwareVersion": "2.0.0",

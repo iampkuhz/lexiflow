@@ -7,7 +7,6 @@ import io
 import json
 import os
 import socket
-import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,7 +58,11 @@ class Fixture:
             ("extension", "extension.zip", b"accepted extension zip bytes"),
             ("dataset", "data/dataset.bin", b"dataset bytes"),
             ("runtime-image", "images/linux-arm64/runtime-image.tar", b"image bytes"),
-            ("corresponding-sources", "sources/lexiflow-third-party-sources-1.2.3.tar.gz", b"source archive"),
+            (
+                "corresponding-sources",
+                "sources/lexiflow-third-party-sources-1.2.3.tar.gz",
+                b"source archive",
+            ),
         ):
             path = self.payload / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -76,12 +79,46 @@ class Fixture:
             if role == "corresponding-sources":
                 self.artifacts[-1].update(
                     licenseIds=["lexiflow"],
-                    metadata={"indexSha256": "e" * 64, "items": [{"id": "lexiflow", "component": "LexiFlow", "licenseId": "MIT", "licenseName": "MIT", "sourceUrl": self.license["sourceUrl"], "noticePath": "LICENSE", "archivePath": "materials/LICENSE", "bytes": 4, "sha256": sha(b"MIT\n")}]},
+                    metadata={
+                        "indexSha256": "e" * 64,
+                        "items": [
+                            {
+                                "id": "lexiflow",
+                                "component": "LexiFlow",
+                                "licenseId": "MIT",
+                                "licenseName": "MIT",
+                                "sourceUrl": self.license["sourceUrl"],
+                                "noticePath": "LICENSE",
+                                "archivePath": "materials/LICENSE",
+                                "bytes": 4,
+                                "sha256": sha(b"MIT\n"),
+                            }
+                        ],
+                    },
                 )
             if role == "dataset":
-                self.artifacts[-1].update(metadata={"releaseId": "rel", "preparationId": "prep", "ruleId": "rule", "sqlVersion": "sql-v1"})
+                self.artifacts[-1].update(
+                    metadata={
+                        "releaseId": "rel",
+                        "preparationId": "prep",
+                        "ruleId": "rule",
+                        "sqlVersion": "sql-v1",
+                    }
+                )
             if role == "extension":
-                self.artifacts[-1].update(metadata={"softwareVersion": "1.2.3", "sourceCommit": COMMIT, "expectedDataset": {"releaseId": "rel", "preparationId": "prep", "ruleId": "rule", "sqlVersion": "sql-v1", "sha256": sha(b"dataset bytes")}})
+                self.artifacts[-1].update(
+                    metadata={
+                        "softwareVersion": "1.2.3",
+                        "sourceCommit": COMMIT,
+                        "expectedDataset": {
+                            "releaseId": "rel",
+                            "preparationId": "prep",
+                            "ruleId": "rule",
+                            "sqlVersion": "sql-v1",
+                            "sha256": sha(b"dataset bytes"),
+                        },
+                    }
+                )
         self.manifest = {
             "buildIdentity": self.identity,
             "softwareVersion": "1.2.3",
@@ -172,7 +209,9 @@ class FakeGitHub:
         if "/git/ref/tags/" in path:
             return 200, {"object": {"type": "commit", "sha": self.tag_commit}}
         if path.startswith("/repos/o/r/releases?per_page"):
-            return 200, [{"id": self.release_id, "tag_name": "v1.2.3"}] if self.existing else []
+            return 200, [
+                {"id": self.release_id, "tag_name": "v1.2.3"}
+            ] if self.existing else []
         if path.endswith("/assets?per_page=100&page=1"):
             return (
                 200,
@@ -204,7 +243,12 @@ class FakeGitHub:
                 "name": "v1.2.3",
             }
         if method == "GET" and path.endswith("/releases/99"):
-            return 200, {"id": 99, "tag_name": "v1.2.3", "draft": True, "prerelease": False}
+            return 200, {
+                "id": 99,
+                "tag_name": "v1.2.3",
+                "draft": True,
+                "prerelease": False,
+            }
         raise AssertionError(path)
 
     def request(self, method, path, *, content_type, stream):
@@ -234,6 +278,223 @@ class FakeGitHub:
 
 
 class PromotionTests(unittest.TestCase):
+    def test_live_authorization_requires_single_platform_approved_attempt_and_protection(
+        self,
+    ):
+        self.patches[-1].stop()
+        identity = {"softwareVersion": "1.2.3", "sourceCommit": COMMIT}
+        run_id = "12345"
+        run = {
+            "id": 12345,
+            "run_attempt": 1,
+            "head_sha": COMMIT,
+            "head_branch": "v1.2.3",
+            "status": "in_progress",
+            "event": "workflow_dispatch",
+            "path": ".github/workflows/release.yml",
+            "repository": {"full_name": "o/r"},
+        }
+        approval = [
+            {
+                "state": "approved",
+                "user": {"id": 7, "login": "o"},
+                "environments": [
+                    {
+                        "id": 55,
+                        "name": "lexiflow-release-promotion",
+                        "updated_at": "2026-01-01T00:00:00Z",
+                    }
+                ],
+            }
+        ]
+        protection = {
+            "protection_rules": [
+                {
+                    "type": "required_reviewers",
+                    "reviewers": [
+                        {"type": "User", "reviewer": {"id": 7, "login": "o"}}
+                    ],
+                }
+            ],
+            "id": 55,
+            "can_admins_bypass": False,
+            "deployment_branch_policy": {
+                "protected_branches": False,
+                "custom_branch_policies": True,
+            },
+        }
+        policies = {
+            "total_count": 1,
+            "branch_policies": [{"type": "tag", "name": "v*"}],
+        }
+
+        class Api:
+            def api(self, method, path):
+                if path.endswith("/approvals"):
+                    return 200, approval
+                return 200, run
+
+        class Config:
+            def api(self, method, path):
+                if path.endswith("deployment-branch-policies"):
+                    return 200, policies
+                return 200, protection
+
+        env = {
+            "GITHUB_RUN_ID": run_id,
+            "GITHUB_EVENT_NAME": "workflow_dispatch",
+            "GITHUB_REF": "refs/tags/v1.2.3",
+            "GITHUB_SHA": COMMIT,
+            "GITHUB_REPOSITORY": "o/r",
+            "GITHUB_RUN_ATTEMPT": "1",
+        }
+        with patch.dict(os.environ, env):
+            p._assert_live_promotion_authorization(Api(), Config(), "o", "r", identity)
+            with patch.dict(os.environ, {"GITHUB_RUN_ATTEMPT": "2"}):
+                self.assertEqual(os.environ["GITHUB_RUN_ATTEMPT"], "2")
+                with self.assertRaisesRegex(
+                    p.PromotionError, "promotion-run-context-invalid"
+                ):
+                    p._assert_live_promotion_authorization(
+                        Api(), Config(), "o", "r", identity
+                    )
+            original_api = Api.api
+
+            def no_approval(self, method, path):
+                return (
+                    (200, [])
+                    if path.endswith("/approvals")
+                    else original_api(self, method, path)
+                )
+
+            with (
+                patch.object(Api, "api", no_approval),
+                self.assertRaisesRegex(
+                    p.PromotionError, "promotion-human-approval-missing"
+                ),
+            ):
+                p._assert_live_promotion_authorization(
+                    Api(), Config(), "o", "r", identity
+                )
+            approval[:] = [
+                dict(
+                    approval[0],
+                    state="rejected",
+                    environments=[
+                        {
+                            "id": 55,
+                            "name": "lexiflow-release-promotion",
+                            "updated_at": "2026-01-01T00:00:00Z",
+                        }
+                    ],
+                ),
+                dict(
+                    approval[0],
+                    state="approved",
+                    environments=[
+                        {
+                            "id": 55,
+                            "name": "lexiflow-release-promotion",
+                            "updated_at": "2099-01-01T00:00:00Z",
+                        }
+                    ],
+                ),
+            ]
+            with self.assertRaisesRegex(
+                p.PromotionError, "promotion-approval-history-ambiguous"
+            ):
+                p._assert_live_promotion_authorization(
+                    Api(), Config(), "o", "r", identity
+                )
+            approval[:] = [
+                dict(approval[0], state="approved", user={"id": 7, "login": "o"}),
+                dict(
+                    approval[0],
+                    state="rejected",
+                    user={"id": 8, "login": "intruder"},
+                    environments=[
+                        {
+                            "id": 55,
+                            "name": "lexiflow-release-promotion",
+                            "updated_at": "2026-01-02T00:00:00Z",
+                        }
+                    ],
+                ),
+            ]
+            with self.assertRaisesRegex(
+                p.PromotionError, "promotion-approval-history-ambiguous"
+            ):
+                p._assert_live_promotion_authorization(
+                    Api(), Config(), "o", "r", identity
+                )
+            approval[:] = [
+                dict(approval[0], state="approved", user={"id": 8, "login": "intruder"})
+            ]
+            with self.assertRaisesRegex(
+                p.PromotionError, "promotion-human-approval-reviewer-mismatch"
+            ):
+                p._assert_live_promotion_authorization(
+                    Api(), Config(), "o", "r", identity
+                )
+            approval[:] = [dict(approval[0], user={"id": 7, "login": "o"})]
+            approval[0]["environments"] = [
+                {
+                    "id": 56,
+                    "name": "lexiflow-release-promotion",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                }
+            ]
+            with self.assertRaisesRegex(
+                p.PromotionError, "promotion-environment-id-mismatch"
+            ):
+                p._assert_live_promotion_authorization(
+                    Api(), Config(), "o", "r", identity
+                )
+            approval[0]["environments"] = [
+                {
+                    "id": 55,
+                    "name": "lexiflow-release-promotion",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                }
+            ]
+            run["status"] = "completed"
+            with self.assertRaisesRegex(
+                p.PromotionError, "promotion-run-platform-check-failed"
+            ):
+                p._assert_live_promotion_authorization(
+                    Api(), Config(), "o", "r", identity
+                )
+            run["status"] = "in_progress"
+            protection["protection_rules"][0]["reviewers"][0]["reviewer"] = {
+                "id": 8,
+                "login": "wrong-owner",
+            }
+            with self.assertRaisesRegex(
+                p.PromotionError, "promotion-environment-reviewer-mismatch"
+            ):
+                p._assert_live_promotion_authorization(
+                    Api(), Config(), "o", "r", identity
+                )
+            protection["protection_rules"][0]["reviewers"][0]["reviewer"] = {
+                "id": 7,
+                "login": "o",
+            }
+            policies["branch_policies"][0]["type"] = "branch"
+            with self.assertRaisesRegex(
+                p.PromotionError, "promotion-environment-tag-policy-mismatch"
+            ):
+                p._assert_live_promotion_authorization(
+                    Api(), Config(), "o", "r", identity
+                )
+            policies["branch_policies"][0]["type"] = "tag"
+            run["repository"] = None
+            with self.assertRaisesRegex(
+                p.PromotionError, "promotion-run-platform-check-failed"
+            ):
+                p._assert_live_promotion_authorization(
+                    Api(), Config(), "o", "r", identity
+                )
+
     def registry(self, **kwargs):
         kwargs["revalidate"]()
         return {
@@ -262,7 +523,9 @@ class PromotionTests(unittest.TestCase):
         self.fixture = Fixture(Path(self.temp.name))
         self.notes = Path(self.temp.name) / "notes"
         self.notes.mkdir()
-        (self.notes / "1.2.3.md").write_text("# 1. 1.2.3\n\n前置：Podman。\n\n两步：启动并安装扩展。\n\n限制：ARM64。\n")
+        (self.notes / "1.2.3.md").write_text(
+            "# 1. 1.2.3\n\n前置：Podman。\n\n两步：启动并安装扩展。\n\n限制：ARM64。\n"
+        )
         self.patches = [
             patch.object(
                 p.release_registry, "publish_images", side_effect=self.registry
@@ -279,6 +542,7 @@ class PromotionTests(unittest.TestCase):
                 "_run_bounded",
                 return_value=(json.dumps(self.fixture.identity).encode(), b""),
             ),
+            patch.object(p, "_assert_live_promotion_authorization"),
         ]
         for item in self.patches:
             item.start()
@@ -318,15 +582,24 @@ class PromotionTests(unittest.TestCase):
         ):
             published = self.promote(publish=True)
         self.assertTrue(published["published"])
-        self.assertIn("podman run --image-volume=ignore --pull=always", FakeGitHub.created_body)
-        self.assertIn("--volume lexiflow-release-data:/var/lib/lexiflow", FakeGitHub.created_body)
+        self.assertIn(
+            "podman run --image-volume=ignore --pull=always", FakeGitHub.created_body
+        )
+        self.assertIn(
+            "--volume lexiflow-release-data:/var/lib/lexiflow", FakeGitHub.created_body
+        )
         self.assertIn("ghcr.io/o/r@sha256:" + "f" * 64, FakeGitHub.created_body)
         self.assertEqual(published["release_id"], 51)
         release_json = json.loads(FakeGitHub.registry)
         self.assertEqual(release_json["schemaVersion"], "lexiflow.release.v1")
         self.assertEqual(release_json["image"]["platform"], "linux/arm64")
-        self.assertEqual(release_json["image"]["configId"], "sha256:" + sha(b"image bytes"))
-        self.assertEqual(release_json["assets"]["thirdPartySources"]["sha256"], sha(FakeGitHub.archive))
+        self.assertEqual(
+            release_json["image"]["configId"], "sha256:" + sha(b"image bytes")
+        )
+        self.assertEqual(
+            release_json["assets"]["thirdPartySources"]["sha256"],
+            sha(FakeGitHub.archive),
+        )
         self.assertEqual(len(published["assets"]), 3)
         registry_mapping = p.release_registry.verify_images.call_args.args[0]
         p.release_registry.verify_images.assert_called_once_with(
@@ -349,11 +622,30 @@ class PromotionTests(unittest.TestCase):
         )
         self.assertEqual(extension_asset["bytes"], len(extension_bytes))
         self.assertEqual(extension_asset["sha256"], sha(extension_bytes))
-        source_item = next(item for item in self.fixture.artifacts if item["role"] == "corresponding-sources")
-        self.assertEqual(FakeGitHub.archive, (self.fixture.payload / source_item["path"]).read_bytes())
+        source_item = next(
+            item
+            for item in self.fixture.artifacts
+            if item["role"] == "corresponding-sources"
+        )
+        self.assertEqual(
+            FakeGitHub.archive,
+            (self.fixture.payload / source_item["path"]).read_bytes(),
+        )
         names = {item["name"] for item in published["assets"]}
-        self.assertEqual(names, {"lexiflow-extension-1.2.3.zip", "lexiflow-third-party-sources-1.2.3.tar.gz", "release.json"})
-        self.assertFalse(any(name.endswith(".sha256") or name in {"manifest.json", "candidate.json"} for name in names))
+        self.assertEqual(
+            names,
+            {
+                "lexiflow-extension-1.2.3.zip",
+                "lexiflow-third-party-sources-1.2.3.tar.gz",
+                "release.json",
+            },
+        )
+        self.assertFalse(
+            any(
+                name.endswith(".sha256") or name in {"manifest.json", "candidate.json"}
+                for name in names
+            )
+        )
         self.assertTrue(
             all(
                 call[1]
@@ -640,9 +932,20 @@ class PromotionTests(unittest.TestCase):
                 }
             )
         )
-        (self.fixture.payload / "sources/lexiflow-third-party-sources-1.2.3.tar.gz").write_bytes(b"changed")
-        with patch.object(p, "GitHub", FakeGitHub), patch.object(p, "_repository", return_value=("o", "r")), patch.dict(os.environ, {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"}), self.assertRaisesRegex(
-            p.PromotionError, "candidate-artifact-hash-mismatch"):
+        (
+            self.fixture.payload / "sources/lexiflow-third-party-sources-1.2.3.tar.gz"
+        ).write_bytes(b"changed")
+        with (
+            patch.object(p, "GitHub", FakeGitHub),
+            patch.object(p, "_repository", return_value=("o", "r")),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
+            self.assertRaisesRegex(
+                p.PromotionError, "candidate-artifact-hash-mismatch"
+            ),
+        ):
             self.promote(publish=True)
 
     def test_license_table_bounded_duplicate_nonfinite_symlink(self):
@@ -688,7 +991,10 @@ class PromotionTests(unittest.TestCase):
         with (
             patch.object(p, "GitHub", FakeGitHub),
             patch.object(p, "_repository", return_value=("o", "r")),
-            patch.dict(os.environ, {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"}),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
             self.assertRaisesRegex(p.PromotionError, "release-notes-version-mismatch"),
         ):
             self.promote(publish=True)
@@ -699,15 +1005,23 @@ class PromotionTests(unittest.TestCase):
         with (
             patch.object(p, "GitHub", FakeGitHub),
             patch.object(p, "_repository", return_value=("o", "r")),
-            patch.dict(os.environ, {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"}),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
         ):
-            FakeGitHub.fail = ("POST", "/repos/o/r/releases/51/assets?name=lexiflow-third-party-sources-1.2.3.tar.gz")
+            FakeGitHub.fail = (
+                "POST",
+                "/repos/o/r/releases/51/assets?name=lexiflow-third-party-sources-1.2.3.tar.gz",
+            )
             with self.assertRaises(p.PromotionError) as caught:
                 self.promote(publish=True)
             self.assertEqual(caught.exception.stage, "upload")
             self.assertEqual(len(FakeGitHub.assets), 1)
             calls_before = len(FakeGitHub.calls)
-            with self.assertRaisesRegex(p.PromotionError, "promotion-recovery-confirmation-required"):
+            with self.assertRaisesRegex(
+                p.PromotionError, "promotion-recovery-confirmation-required"
+            ):
                 self.promote(publish=True)
             self.assertEqual(len(FakeGitHub.calls), calls_before)
             FakeGitHub.fail = None
@@ -715,10 +1029,25 @@ class PromotionTests(unittest.TestCase):
             result = self.promote(publish=True, confirmed_recovery=True)
         self.assertTrue(result["published"])
         self.assertEqual(len(FakeGitHub.assets), 3)
-        self.assertEqual(sum(call[2] == "POST" and call[3].endswith("/releases") for call in FakeGitHub.calls), 1)
-        self.assertTrue(p.release_registry.publish_images.call_args.kwargs["existing_only"])
-        event_root = self.fixture.root / "tmp/quality/release-workflow/1.2.3/promotion" / self.fixture.proof["candidate"]["candidateSha256"] / "events"
-        states = [json.loads(item.read_bytes())["state"] for item in event_root.glob("*.json")]
+        self.assertEqual(
+            sum(
+                call[2] == "POST" and call[3].endswith("/releases")
+                for call in FakeGitHub.calls
+            ),
+            1,
+        )
+        self.assertTrue(
+            p.release_registry.publish_images.call_args.kwargs["existing_only"]
+        )
+        event_root = (
+            self.fixture.root
+            / "tmp/quality/release-workflow/1.2.3/promotion"
+            / self.fixture.proof["candidate"]["candidateSha256"]
+            / "events"
+        )
+        states = [
+            json.loads(item.read_bytes())["state"] for item in event_root.glob("*.json")
+        ]
         self.assertIn("unknown", states)
         self.assertIn("confirmed", states)
 
@@ -726,13 +1055,23 @@ class PromotionTests(unittest.TestCase):
         with (
             patch.object(p, "GitHub", FakeGitHub),
             patch.object(p, "_repository", return_value=("o", "r")),
-            patch.dict(os.environ, {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"}),
-            patch.object(p.release_registry, "publish_images",
-                         side_effect=p.release_registry.RegistryError("registry-push-unknown", "push", "runtime-image", True)) as publish,
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
+            patch.object(
+                p.release_registry,
+                "publish_images",
+                side_effect=p.release_registry.RegistryError(
+                    "registry-push-unknown", "push", "runtime-image", True
+                ),
+            ) as publish,
         ):
             with self.assertRaisesRegex(p.PromotionError, "registry-push-unknown"):
                 self.promote(publish=True)
-            with self.assertRaisesRegex(p.PromotionError, "promotion-recovery-confirmation-required"):
+            with self.assertRaisesRegex(
+                p.PromotionError, "promotion-recovery-confirmation-required"
+            ):
                 self.promote(publish=True)
         publish.assert_called_once()
 
@@ -777,8 +1116,29 @@ class PromotionTests(unittest.TestCase):
                     ):
                         self.promote(publish=True)
                 self.assertFalse(any(c[2] == "PATCH" for c in FakeGitHub.calls))
-                event_root = self.fixture.root / "tmp/quality/release-workflow/1.2.3/promotion" / self.fixture.proof["candidate"]["candidateSha256"] / "events"
-                self.assertFalse(p._has_unknown_write("1.2.3", self.fixture.proof["candidate"]["candidateSha256"]), [(e.get("stage"), e.get("state"), e.get("releaseId"), e.get("asset")) for e in map(json.loads, (f.read_bytes() for f in event_root.glob("*.json")))])
+                event_root = (
+                    self.fixture.root
+                    / "tmp/quality/release-workflow/1.2.3/promotion"
+                    / self.fixture.proof["candidate"]["candidateSha256"]
+                    / "events"
+                )
+                self.assertFalse(
+                    p._has_unknown_write(
+                        "1.2.3", self.fixture.proof["candidate"]["candidateSha256"]
+                    ),
+                    [
+                        (
+                            e.get("stage"),
+                            e.get("state"),
+                            e.get("releaseId"),
+                            e.get("asset"),
+                        )
+                        for e in map(
+                            json.loads,
+                            (f.read_bytes() for f in event_root.glob("*.json")),
+                        )
+                    ],
+                )
                 FakeGitHub.reset()
 
     def test_create_upload_publish_unknown_no_retry(self):
@@ -841,18 +1201,40 @@ class PromotionTests(unittest.TestCase):
         self.assertFalse(any(c[2] == "POST" for c in FakeGitHub.calls))
 
     def test_archive_drift_paths_and_size_fail_closed(self):
-        target = self.fixture.payload / "sources/lexiflow-third-party-sources-1.2.3.tar.gz"
+        target = (
+            self.fixture.payload / "sources/lexiflow-third-party-sources-1.2.3.tar.gz"
+        )
         target.write_bytes(b"tampered")
-        with patch.object(p, "GitHub", FakeGitHub), patch.object(p, "_repository", return_value=("o", "r")), patch.dict(os.environ, {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"}), self.assertRaisesRegex(p.PromotionError, "candidate-artifact-hash-mismatch"):
+        with (
+            patch.object(p, "GitHub", FakeGitHub),
+            patch.object(p, "_repository", return_value=("o", "r")),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
+            self.assertRaisesRegex(
+                p.PromotionError, "candidate-artifact-hash-mismatch"
+            ),
+        ):
             self.promote(publish=True)
         for unsafe in ["../outside", "images//x", "/outside", "x/../y", "x\\y"]:
             with self.assertRaises(p.PromotionError):
-                p._bounded_item({"path": unsafe, "role": "sql", "bytes": 1, "sha256": "a" * 64})
+                p._bounded_item(
+                    {"path": unsafe, "role": "sql", "bytes": 1, "sha256": "a" * 64}
+                )
         with patch.object(p, "MAX_ASSET", 1), self.assertRaises(p.PromotionError):
             self.promote(publish=True)
         target.unlink()
         target.symlink_to(self.fixture.payload / "lexiflow.sh")
-        with patch.object(p, "GitHub", FakeGitHub), patch.object(p, "_repository", return_value=("o", "r")), patch.dict(os.environ, {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"}), self.assertRaisesRegex(p.PromotionError, "candidate-path-unsafe"):
+        with (
+            patch.object(p, "GitHub", FakeGitHub),
+            patch.object(p, "_repository", return_value=("o", "r")),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
+            self.assertRaisesRegex(p.PromotionError, "candidate-path-unsafe"),
+        ):
             self.promote(publish=True)
 
     def test_proof_drift_after_uploads_prevents_publish(self):
@@ -1263,6 +1645,7 @@ class RealRegistryPromotionBoundaryTests(unittest.TestCase):
             ),
             patch.object(p, "_repository", return_value=("o", "r")),
             patch.object(p, "_verify_local_tag"),
+            patch.object(p, "_assert_live_promotion_authorization"),
             patch.object(p, "GitHub", FakeGitHub),
             patch.object(registry, "_manifest", side_effect=self.manifest),
             patch.object(registry, "_run", side_effect=self.podman),
@@ -1402,31 +1785,46 @@ class RealRegistryPromotionBoundaryTests(unittest.TestCase):
         )
         self.assertFalse(any(call[0] in ("POST", "PATCH") for call in FakeGitHub.calls))
 
-    def test_public_registry_unknown_requires_confirmation_and_recovers_same_image(self):
+    def test_public_registry_unknown_requires_confirmation_and_recovers_same_image(
+        self,
+    ):
         self.write_failure = "after"
         with self.assertRaises(p.PromotionError) as raised:
             self.promote()
         self.assertEqual(raised.exception.stage, "registry-publish")
-        event_dir = p._event_directory("1.2.3", self.fixture.proof["candidate"]["candidateSha256"])
-        unknown_files = [item for item in event_dir.glob("*.json")
-                         if json.loads(item.read_bytes()).get("stage") == "ghcr-image"
-                         and json.loads(item.read_bytes()).get("state") == "unknown"]
+        event_dir = p._event_directory(
+            "1.2.3", self.fixture.proof["candidate"]["candidateSha256"]
+        )
+        unknown_files = [
+            item
+            for item in event_dir.glob("*.json")
+            if json.loads(item.read_bytes()).get("stage") == "ghcr-image"
+            and json.loads(item.read_bytes()).get("state") == "unknown"
+        ]
         self.assertTrue(unknown_files)
         old_unknown = {item.name: item.read_bytes() for item in unknown_files}
-        with self.assertRaisesRegex(p.PromotionError, "promotion-recovery-confirmation-required"):
+        with self.assertRaisesRegex(
+            p.PromotionError, "promotion-recovery-confirmation-required"
+        ):
             self.promote()
         self.assertEqual(self.push_calls, 1)
         self.write_failure = None
         FakeGitHub.reset()
-        with patch.object(registry, "publish_images", wraps=registry.publish_images) as publish_images:
+        with patch.object(
+            registry, "publish_images", wraps=registry.publish_images
+        ) as publish_images:
             recovered = self.promote(confirmed_recovery=True)
         self.assertEqual(recovered["result"], "PASS")
         self.assertEqual(self.push_calls, 1)
         self.assertEqual(len(recovered["assets"]), 3)
         self.assertTrue(publish_images.call_args.kwargs["existing_only"])
-        self.assertEqual({name: (event_dir / name).read_bytes() for name in old_unknown}, old_unknown)
+        self.assertEqual(
+            {name: (event_dir / name).read_bytes() for name in old_unknown}, old_unknown
+        )
 
-    def test_confirmed_recovery_rejects_missing_or_conflicting_remote_without_push(self):
+    def test_confirmed_recovery_rejects_missing_or_conflicting_remote_without_push(
+        self,
+    ):
         self.write_failure = "after"
         with self.assertRaises(p.PromotionError):
             self.promote()
@@ -1439,10 +1837,16 @@ class RealRegistryPromotionBoundaryTests(unittest.TestCase):
         self.remote_present = True
         FakeGitHub.reset()
         original_manifest = registry._manifest
+
         def conflicting_manifest(repo, reference, **kwargs):
             if reference == "1.2.3":
-                return 200, {"docker-content-digest": "sha256:" + "0" * 64}, self.image_body
+                return (
+                    200,
+                    {"docker-content-digest": "sha256:" + "0" * 64},
+                    self.image_body,
+                )
             return original_manifest(repo, reference, **kwargs)
+
         with patch.object(registry, "_manifest", side_effect=conflicting_manifest):
             with self.assertRaises(p.PromotionError):
                 self.promote(confirmed_recovery=True)
