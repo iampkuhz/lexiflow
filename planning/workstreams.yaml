@@ -726,6 +726,138 @@ workstreams:
         - eng.release.docker-contract
         discovered_from: LF-TSK-OPS-2076
         depends_on: []
+      - id: LF-TSK-QLT-2536
+        title: 修复发行宿主绑定并验证名称漂移与真实身份拒绝
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-host-identity/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/host_resources/release_host_identity.py
+        - ops/release/host_resources/release-host-identity.mjs
+        - ops/release/workflow/run-release-workflow.mjs
+        - ops/release/tests/workflow.test.mjs
+        - scripts/acceptance/task_definition/release_subject.py
+        - tests/delivery_gate/test_release_subject.py
+        - tmp/phase-tools/single-container-host-identity/implementation/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确当前源码和真实结果，不改变产品行为、独立身份或发布门禁。
+        deliverable: 稳定宿主绑定、完整拒绝回归及真实独立检查证据，或正式集成与发行。
+        acceptance_criteria:
+        - 不以可变主机名作为身份；唯一系统来源实现且保护隐私，宿主、用户、根、源码和候选漂移失败关闭。
+        - 新最终差异经直接回归、独立开发检查、工程正式验收、审查及Gate；旧失败和未公开候选原件保留。
+        - 不放宽超时或跳过门禁；工程通过不等于正式发行，须新精确候选完整实机验收及真实渠道安装。
+        acceptance_evidence: [真实actor、源码及冻结摘要、原始命令退出、直接与独立报告、风险与限制定位。]
+        validation_command: python3 -m unittest tests.delivery_gate.test_release_subject -v
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-QLT-2481
+        depends_on: []
+      - id: LF-TSK-QLT-2537
+        title: 独立验证稳定宿主绑定的最终开发差异
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-host-identity/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-host-identity/development/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确当前源码和真实结果，不改变产品行为、独立身份或发布门禁。
+        deliverable: 稳定宿主绑定、完整拒绝回归及真实独立检查证据，或正式集成与发行。
+        acceptance_criteria:
+        - 不以可变主机名作为身份；唯一系统来源实现且保护隐私，宿主、用户、根、源码和候选漂移失败关闭。
+        - 新最终差异经直接回归、独立开发检查、工程正式验收、审查及Gate；旧失败和未公开候选原件保留。
+        - 不放宽超时或跳过门禁；工程通过不等于正式发行，须新精确候选完整实机验收及真实渠道安装。
+        acceptance_evidence: [真实actor、源码及冻结摘要、原始命令退出、直接与独立报告、风险与限制定位。]
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-QLT-2481
+        depends_on: []
+      - id: LF-TSK-QLT-2538
+        title: 独立执行稳定宿主绑定工程正式验收
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-host-identity/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-host-identity/validation/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确当前源码和真实结果，不改变产品行为、独立身份或发布门禁。
+        deliverable: 稳定宿主绑定、完整拒绝回归及真实独立检查证据，或正式集成与发行。
+        acceptance_criteria:
+        - 不以可变主机名作为身份；唯一系统来源实现且保护隐私，宿主、用户、根、源码和候选漂移失败关闭。
+        - 新最终差异经直接回归、独立开发检查、工程正式验收、审查及Gate；旧失败和未公开候选原件保留。
+        - 不放宽超时或跳过门禁；工程通过不等于正式发行，须新精确候选完整实机验收及真实渠道安装。
+        acceptance_evidence: [真实actor、源码及冻结摘要、原始命令退出、直接与独立报告、风险与限制定位。]
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-QLT-2481
+        depends_on: []
+      - id: LF-TSK-QLT-2539
+        title: 独立审查稳定宿主信任与冻结证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-host-identity/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-host-identity/review/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确当前源码和真实结果，不改变产品行为、独立身份或发布门禁。
+        deliverable: 稳定宿主绑定、完整拒绝回归及真实独立检查证据，或正式集成与发行。
+        acceptance_criteria:
+        - 不以可变主机名作为身份；唯一系统来源实现且保护隐私，宿主、用户、根、源码和候选漂移失败关闭。
+        - 新最终差异经直接回归、独立开发检查、工程正式验收、审查及Gate；旧失败和未公开候选原件保留。
+        - 不放宽超时或跳过门禁；工程通过不等于正式发行，须新精确候选完整实机验收及真实渠道安装。
+        acceptance_evidence: [真实actor、源码及冻结摘要、原始命令退出、直接与独立报告、风险与限制定位。]
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-QLT-2481
+        depends_on: []
+      - id: LF-TSK-OPS-2087
+        title: 集成稳定宿主修复并完成新单镜像正式发行
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-host-identity/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/host_resources/release_host_identity.py
+        - ops/release/host_resources/release-host-identity.mjs
+        - ops/release/workflow/run-release-workflow.mjs
+        - ops/release/tests/workflow.test.mjs
+        - scripts/acceptance/task_definition/release_subject.py
+        - tests/delivery_gate/test_release_subject.py
+        - planning/workstreams.yaml
+        - ops/release/version.txt
+        - ops/release/notes/2.1.8.md
+        - docs/scenarios/github-actions/first-release/preparation.md
+        - openspec/changes/single-container-host-identity/**
+        - tmp/phase-tools/single-container-host-identity/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 精确当前源码和真实结果，不改变产品行为、独立身份或发布门禁。
+        deliverable: 稳定宿主绑定、完整拒绝回归及真实独立检查证据，或正式集成与发行。
+        acceptance_criteria:
+        - 不以可变主机名作为身份；唯一系统来源实现且保护隐私，宿主、用户、根、源码和候选漂移失败关闭。
+        - 新最终差异经直接回归、独立开发检查、工程正式验收、审查及Gate；旧失败和未公开候选原件保留。
+        - 不放宽超时或跳过门禁；工程通过不等于正式发行，须新精确候选完整实机验收及真实渠道安装。
+        acceptance_evidence: [真实actor、源码及冻结摘要、原始命令退出、直接与独立报告、风险与限制定位。]
+        validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
+        required_check_ids: [eng.verification.module-tests]
+        discovered_from: LF-TSK-QLT-2481
+        depends_on: []
       - id: LF-TSK-QLT-2532
         title: 固定容器命令测试替身并验证真实执行合同
         priority: P0
