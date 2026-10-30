@@ -90,7 +90,7 @@ python3 -m scripts.local.run_with_java_toolchain java \
 
 ## 1.3. 在原 checkout 完成独立正式验收
 
-在同一 Mac、同一 OS 用户、同一稳定 checkout 的真实 Codex 任务里执行。原生任务不是 Actions job，不会自动继承 Environment secret：在验收宿主私有环境中安全配置同一隔离资源对应的 `LEXIFLOW_POSTGRES_TEST_JDBC_URL`、`LEXIFLOW_REDIS_TEST_ENDPOINT`、`LEXIFLOW_RELEASE_ARM64_DOCKER_HOST`、`LEXIFLOW_JAVA_HOME`、`LEXIFLOW_RELEASE_NODE_BIN` 及受要求的构建缓存，不在提示词或日志中粘贴 secret。下列 `formal` 入口从固定版本目录 `tmp/quality/release-workflow/<softwareVersion>/` 中的 handoff 旁派生 `candidate-runtime-request.json`，并与晋升共用受控环境；不要用临时 shell PATH 或不一致的私有配置执行这条发行链。不同角色不能在一个实现者会话里依次自签。先确认 Catalog 中正式发行 Task 的必需检查与依赖已齐；干净提交通过固定 handoff 送验，不要求 PASS 开发报告，也不为此添加开发差异：
+在同一 Mac、同一 OS 用户、同一稳定 checkout 中，由具有真实原生身份的独立 agent 执行；聊天启动目录不代替目标仓库根。原生任务不是 Actions job，不会自动继承 Environment secret：在验收宿主私有环境中安全配置同一隔离资源对应的 `LEXIFLOW_POSTGRES_TEST_JDBC_URL`、`LEXIFLOW_REDIS_TEST_ENDPOINT`、`LEXIFLOW_RELEASE_ARM64_DOCKER_HOST`、`LEXIFLOW_JAVA_HOME`、`LEXIFLOW_RELEASE_NODE_BIN` 及受要求的构建缓存，不在提示词或日志中粘贴 secret。下列 `formal` 入口从固定版本目录 `tmp/quality/release-workflow/<softwareVersion>/` 中的 handoff 旁派生 `candidate-runtime-request.json`，并与晋升共用受控环境；不要用临时 shell PATH 或不一致的私有配置执行这条发行链。执行身份与目标分开校验：同一聊天可明确访问多个 checkout，但切换路径不产生独立身份，不能由实现者依次自签。先确认 Catalog 中正式发行 Task 的必需检查与依赖已齐；干净提交通过固定 handoff 送验，不要求 PASS 开发报告，也不为此添加开发差异：
 
 ```sh
 # 生产者/送验者：从本 checkout 的固定 handoff 派生真实发行主体。
@@ -110,6 +110,8 @@ python3 -m scripts.local.run_with_java_toolchain java \
 ```
 
 `formal` 只把固定角色命令交给既有 Delivery Gate，保留实际 Codex 身份来源；它不代替审阅或授予独立身份。审查发现问题时可在 `formal review` 的 validation ID 后传入既有 findings JSON 文件的绝对路径，不能发布无发现意见冒充已审查。必须是完整正式发行链、`repository-baseline` 与同一候选的实际运行 stdout 绑定；只读审查无意见时才可形成无 findings 的 review，不把默认空列表当作已经审过。命令返回 `BLOCKED/FAIL` 时保留记录，按具体缺项处理。正式链 PASS 且 `resume` 返回 `status=PASS` 后才进入手动晋升。不要编辑/格式化/切换源码、移动候选/请求、重新构建 JAR/ZIP 或另换验收机；任何输入变化都使后续复核失效。
+
+发行交接使用操作系统稳定宿主标识与实际用户的摘要绑定，不使用可变化的主机名；原始系统标识不写入交接或日志。准备、正式验收和晋升仍分别重新核对同一宿主用户、规范仓库根、精确提交及候选摘要。来源不可用或宿主、用户、路径、候选变化时停止，不允许手填身份兜底；系统重装或主机克隆不承诺复用旧交接。当前实现见 [宿主绑定](../../../../ops/release/host_resources/release_host_identity.py)。
 
 ## 1.4. 首次 GHCR 可见性
 
