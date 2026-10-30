@@ -35,7 +35,7 @@ concurrency:
 jobs:
   source:
     name: 验证正式发行标签来源
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && inputs.publish_confirmation == 'PUBLISH' && inputs.release_tag == github.ref_name)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
@@ -55,7 +55,10 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
+          test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"
           node ops/release/integrity/source-build-identity.mjs --tag "$RELEASE_TAG"
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$(git rev-parse HEAD)" refs/remotes/origin/main
           printf 'commit=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: 确认专用运行器已就绪
         env:
@@ -68,7 +71,7 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: source
     runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
-    environment: lexiflow-release-validation
+    environment: lexiflow-release-private
     timeout-minutes: 180
     permissions:
       contents: read
@@ -121,8 +124,9 @@ jobs:
   promotion-precheck:
     name: 复核独立验收证据
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && inputs.publish_confirmation == 'PUBLISH' && inputs.release_tag == github.ref_name
+    needs: source
     runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
-    environment: lexiflow-release-validation
+    environment: lexiflow-release-private
     timeout-minutes: 30
     permissions:
       contents: read
@@ -139,12 +143,15 @@ jobs:
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
           LEXIFLOW_RELEASE_NODE_BIN: ${{ vars.LEXIFLOW_RELEASE_NODE_BIN }}
+          EXPECTED_COMMIT: ${{ needs.source.outputs.commit }}
           SUBMISSION_ID: ${{ inputs.submission_id }}
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           test -n "$WORKSPACE"
+          test -n "$EXPECTED_COMMIT"
           test -d "$WORKSPACE/.git"
           test -x "$WORKSPACE/.local/lexiflow-python/bin/python3"
+          test "$(git -C "$WORKSPACE" rev-parse HEAD)" = "$EXPECTED_COMMIT"
           export PATH="$WORKSPACE/.local/lexiflow-python/bin:$LEXIFLOW_RELEASE_NODE_BIN:$PATH"
           cd "$WORKSPACE"
           test -x "$LEXIFLOW_RELEASE_NODE_BIN/node"
@@ -153,11 +160,12 @@ jobs:
   promotion:
     name: 发布已批准的正式发行
     if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && inputs.publish_confirmation == 'PUBLISH' && inputs.release_tag == github.ref_name
-    needs: promotion-precheck
+    needs: [source, promotion-precheck]
     runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
     environment: lexiflow-release-promotion
     timeout-minutes: 45
     permissions:
+      actions: read
       contents: write
       packages: write
     env:

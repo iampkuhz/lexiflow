@@ -92,7 +92,11 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(value["permissions"], {"contents": "read"})
         source = value["jobs"]["source"]
         self.assertEqual(source["runs-on"], "ubuntu-24.04")
-        self.assertIn("github.event_name == 'push'", source["if"])
+        self.assertIn("github.event_name == 'workflow_dispatch'", source["if"])
+        source_run = "\n".join(step.get("run", "") for step in source["steps"])
+        self.assertIn('git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main', source_run)
+        self.assertNotIn('+refs/heads/main:refs/remotes/origin/main', source_run)
+        self.assertIn('git merge-base --is-ancestor "$(git rev-parse HEAD)" refs/remotes/origin/main', source_run)
         self.assertIn(
             'ops/release/integrity/source-build-identity.mjs --tag "$RELEASE_TAG"',
             "\n".join(step.get("run", "") for step in source["steps"]),
@@ -102,7 +106,7 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(
             full["runs-on"], ["self-hosted", "macOS", "ARM64", "lexiflow-release"]
         )
-        self.assertEqual(full["environment"], "lexiflow-release-validation")
+        self.assertEqual(full["environment"], "lexiflow-release-private")
         self.assertEqual(value["concurrency"]["cancel-in-progress"], "false")
         self.assertEqual(value["concurrency"]["group"], "lexiflow-release-host")
         run = "\n".join(step.get("run", "") for step in full["steps"])
@@ -128,11 +132,17 @@ class WorkflowContractTest(unittest.TestCase):
             self.assertNotIn(banned, run)
         dry = value["jobs"]["promotion-precheck"]
         publish = value["jobs"]["promotion"]
+        self.assertEqual(dry["environment"], "lexiflow-release-private")
+        self.assertEqual(dry["needs"], "source")
+        dry_run = "\n".join(step.get("run", "") for step in dry["steps"])
+        dry_step = next(step for step in dry["steps"] if "resume" in step.get("run", ""))
+        self.assertEqual(dry_step["env"]["EXPECTED_COMMIT"], "${{ needs.source.outputs.commit }}")
+        self.assertIn('test "$(git -C "$WORKSPACE" rev-parse HEAD)" = "$EXPECTED_COMMIT"', dry_run)
         self.assertEqual(dry["permissions"], {"contents": "read"})
         self.assertEqual(
-            publish["permissions"], {"contents": "write", "packages": "write"}
+            publish["permissions"], {"actions": "read", "contents": "write", "packages": "write"}
         )
-        self.assertEqual(publish["needs"], "promotion-precheck")
+        self.assertEqual(publish["needs"], ["source", "promotion-precheck"])
         self.assertEqual(publish["environment"], "lexiflow-release-promotion")
         self.assertIn("inputs.release_tag == github.ref_name", dry["if"])
         self.assertIn("inputs.release_tag == github.ref_name", publish["if"])

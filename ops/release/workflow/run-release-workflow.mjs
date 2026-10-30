@@ -477,7 +477,9 @@ export async function resumePromotion({ submissionId, releaseTag, publish = fals
       env.GITHUB_TOKEN = process.env.GITHUB_TOKEN;
       env.LEXIFLOW_RELEASE_CONFIG_TOKEN = process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN;
       env.LEXIFLOW_RELEASE_PODMAN_ENDPOINT = originalRequest.endpoint;
-      if (process.env.GITHUB_REPOSITORY) env.GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY;
+      for (const key of ['GITHUB_REPOSITORY', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_REF', 'GITHUB_SHA', 'GITHUB_EVENT_NAME']) {
+        if (process.env[key]) env[key] = process.env[key];
+      }
     }
     let output;
     try { output = await run('python3', args, { cwd: root, env, timeout: 1_800_000,
