@@ -726,6 +726,175 @@ workstreams:
         - eng.release.docker-contract
         discovered_from: LF-TSK-OPS-2076
         depends_on: []
+      - id: LF-TSK-QLT-2540
+        title: 实现自动私有准备与唯一公开审批保护
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-approval-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - .github/workflows/release.yml
+        - ops/release/workflow/run-release-workflow.mjs
+        - ops/release/workflow/promote_verified_release.py
+        - ops/release/tests/workflow.test.mjs
+        - tests/verification/test_ci_workflows.py
+        - tests/verification/test_release_promotion.py
+        - tmp/phase-tools/single-approval-release/implementation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 唯一公开前人审与最小权限边界的精确实现及真实独立证据。
+        deliverable: 自动私有构建与预检、唯一人审正式发布及真实渠道安装，或明确真实缺口。
+        acceptance_criteria:
+        - 私有构建及只读预检无需人审；正式公开保留required reviewer、正式tag、管理员禁绕过和PUBLISH。
+        - 完整原生actor独立性、检查、审查、Gate及精确源码/候选/制品绑定不变，批准后写前重核，拒绝旧批准重跑、失败与漂移。
+        - 保留部分成功、未知写入、显式恢复；不改旧tag或资产、不放宽超时、不跳过或借用PASS，真实安装才完成。
+        acceptance_evidence:
+        - 真实actor、源码及冻结摘要、原始命令退出、直接与独立报告、风险与限制定位。
+        validation_command: python3 -m unittest tests.verification.test_ci_workflows tests.verification.test_release_promotion
+          -v
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2087
+        depends_on: []
+      - id: LF-TSK-QLT-2541
+        title: 独立验证单次发行审批最终开发差异
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-approval-release/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-approval-release/development/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 唯一公开前人审与最小权限边界的精确实现及真实独立证据。
+        deliverable: 自动私有构建与预检、唯一人审正式发布及真实渠道安装，或明确真实缺口。
+        acceptance_criteria:
+        - 私有构建及只读预检无需人审；正式公开保留required reviewer、正式tag、管理员禁绕过和PUBLISH。
+        - 完整原生actor独立性、检查、审查、Gate及精确源码/候选/制品绑定不变，批准后写前重核，拒绝旧批准重跑、失败与漂移。
+        - 保留部分成功、未知写入、显式恢复；不改旧tag或资产、不放宽超时、不跳过或借用PASS，真实安装才完成。
+        acceptance_evidence:
+        - 真实actor、源码及冻结摘要、原始命令退出、直接与独立报告、风险与限制定位。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2087
+        depends_on: []
+      - id: LF-TSK-QLT-2542
+        title: 独立执行单次审批工程正式验收
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-approval-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-approval-release/validation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 唯一公开前人审与最小权限边界的精确实现及真实独立证据。
+        deliverable: 自动私有构建与预检、唯一人审正式发布及真实渠道安装，或明确真实缺口。
+        acceptance_criteria:
+        - 私有构建及只读预检无需人审；正式公开保留required reviewer、正式tag、管理员禁绕过和PUBLISH。
+        - 完整原生actor独立性、检查、审查、Gate及精确源码/候选/制品绑定不变，批准后写前重核，拒绝旧批准重跑、失败与漂移。
+        - 保留部分成功、未知写入、显式恢复；不改旧tag或资产、不放宽超时、不跳过或借用PASS，真实安装才完成。
+        acceptance_evidence:
+        - 真实actor、源码及冻结摘要、原始命令退出、直接与独立报告、风险与限制定位。
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2087
+        depends_on: []
+      - id: LF-TSK-QLT-2543
+        title: 独立审查单次发行审批权限与证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-approval-release/tasks.md
+        estimated_minutes: 45
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-approval-release/review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 唯一公开前人审与最小权限边界的精确实现及真实独立证据。
+        deliverable: 自动私有构建与预检、唯一人审正式发布及真实渠道安装，或明确真实缺口。
+        acceptance_criteria:
+        - 私有构建及只读预检无需人审；正式公开保留required reviewer、正式tag、管理员禁绕过和PUBLISH。
+        - 完整原生actor独立性、检查、审查、Gate及精确源码/候选/制品绑定不变，批准后写前重核，拒绝旧批准重跑、失败与漂移。
+        - 保留部分成功、未知写入、显式恢复；不改旧tag或资产、不放宽超时、不跳过或借用PASS，真实安装才完成。
+        acceptance_evidence:
+        - 真实actor、源码及冻结摘要、原始命令退出、直接与独立报告、风险与限制定位。
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2087
+        depends_on: []
+      - id: LF-TSK-OPS-2088
+        title: 集成单次审批并完成单镜像发行与真实安装
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-approval-release/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - .github/workflows/release.yml
+        - ops/release/workflow/run-release-workflow.mjs
+        - ops/release/workflow/promote_verified_release.py
+        - ops/release/tests/workflow.test.mjs
+        - tests/verification/test_ci_workflows.py
+        - tests/verification/test_release_promotion.py
+        - ops/release/workflow/release_registry.py
+        - tests/verification/test_release_registry.py
+        - planning/workstreams.yaml
+        - harness/agent-policy.md
+        - docs/scenarios/github-actions.md
+        - docs/scenarios/github-actions/first-release.md
+        - docs/scenarios/github-actions/first-release/preparation.md
+        - docs/scenarios/github-actions/release-flow.md
+        - ops/release/version.txt
+        - ops/release/notes/2.1.9.md
+        - openspec/changes/single-approval-release/**
+        - tmp/phase-tools/single-approval-release/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 唯一公开前人审与最小权限边界的精确实现及真实独立证据。
+        deliverable: 自动私有构建与预检、唯一人审正式发布及真实渠道安装，或明确真实缺口。
+        acceptance_criteria:
+        - 私有构建及只读预检无需人审；正式公开保留required reviewer、正式tag、管理员禁绕过和PUBLISH。
+        - 完整原生actor独立性、检查、审查、Gate及精确源码/候选/制品绑定不变，批准后写前重核，拒绝旧批准重跑、失败与漂移。
+        - 保留部分成功、未知写入、显式恢复；不改旧tag或资产、不放宽超时、不跳过或借用PASS，真实安装才完成。
+        acceptance_evidence:
+        - 真实actor、源码及冻结摘要、原始命令退出、直接与独立报告、风险与限制定位。
+        validation_command: python3 -m scripts.acceptance check --submission-id <uuid>
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2087
+        depends_on: []
       - id: LF-TSK-QLT-2536
         title: 修复发行宿主绑定并验证名称漂移与真实身份拒绝
         priority: P0
