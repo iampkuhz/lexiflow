@@ -3,7 +3,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants, createReadStream, createWriteStream } from 'node:fs';
 import { lstat, mkdir, open, readdir, writeFile } from 'node:fs/promises';
 import { spawn, execFileSync } from 'node:child_process';
-import { hostname } from 'node:os';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
@@ -15,6 +14,7 @@ import { checkReleaseTag, resolveBuildIdentity, assertBuildIdentityMatches } fro
 import { loadBaseImageLock } from '../build/release-image-build-plan.mjs';
 import { validateRelativePath } from '../integrity/release-artifact-manifest.mjs';
 import { runRunnerCommand } from '../runner/runner.mjs';
+import { resolveHostBinding } from '../host_resources/release-host-identity.mjs';
 import { resolveFormalInvocation, resolveReleaseExecutionEnvironment, releaseWorkflowDirectory } from './release-execution-environment.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -29,6 +29,8 @@ const SAFE_ENV = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'LEXIFLOW_JAVA_HOM
 const fail = code => { throw new Error(code); };
 const exact = (v, keys) => v !== null && typeof v === 'object' && !Array.isArray(v)
   && Object.keys(v).sort().join('\0') === [...keys].sort().join('\0');
+const validHostBinding = value => exact(value, ['scheme', 'sha256'])
+  && value.scheme === 'lexiflow.host-binding.v1' && HEX.test(value.sha256);
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const fixedReason = error => /^[A-Z][A-Z0-9_]+$/.test(error?.message || '') ? error.message : 'WORKFLOW_FAILED';
 const safeEnv = () => Object.fromEntries(SAFE_ENV.filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]));
@@ -302,8 +304,11 @@ export async function prepareWorkflow(requestFile, options = {}) {
       { stdio: 'ignore', timeout: 10_000 }); }
     catch { fail('LICENSE_LEDGER_UNTRACKED'); }
   });
+  // Private pure boundary seam for deterministic tests; the CLI has no host-source option.
+  const hostBindingResolver = options.testOnlyHostBindingResolver ?? resolveHostBinding;
   let guard;
   try {
+    const initialHostBinding = hostBindingResolver();
     if ((options.platform ?? process.platform) !== 'darwin' || (options.arch ?? process.arch) !== 'arm64') fail('HOST_UNSUPPORTED');
     const { value: raw, sha256: requestSha256 } = await readBoundedJson(requestFile);
     const request = requestShape(raw);
@@ -415,11 +420,13 @@ export async function prepareWorkflow(requestFile, options = {}) {
     assertBuildIdentityMatches(identityRead(root), identity);
     tagCheck(request.releaseTag, root);
     if ((await readBoundedJson(requestFile)).sha256 !== requestSha256) fail('REQUEST_CHANGED');
+    const finalHostBinding = hostBindingResolver();
+    if (JSON.stringify(finalHostBinding) !== JSON.stringify(initialHostBinding)) fail('HOST_BINDING_DRIFT');
     const runtimeRequest = { target };
     const runtimeFile = path.join(quality, 'candidate-runtime-request.json');
     await writePrivate(runtimeFile, runtimeRequest);
     const runtimeSha256 = (await fileDigest(runtimeFile)).sha256;
-    const handoff = { schemaVersion: 1, host: hostname(), root,
+    const handoff = { schemaVersion: 2, hostBinding: finalHostBinding, root,
       releaseTag: request.releaseTag, buildIdentity: identity, requestSha256, runtimeRequestSha256: runtimeSha256,
       requestFile, target };
     await writePrivate(path.join(quality, 'handoff.json'), handoff);
@@ -436,7 +443,7 @@ export async function prepareWorkflow(requestFile, options = {}) {
 
 export async function resumePromotion({ submissionId, releaseTag, publish = false, confirmedRecovery = false, root = ROOT,
   run = runCommand, identityReader = resolveBuildIdentity, tagChecker = checkReleaseTag,
-  verifier = verifyReleaseCandidate, host = hostname(),
+  verifier = verifyReleaseCandidate, testOnlyHostBindingResolver = resolveHostBinding,
   environmentResolver = resolveReleaseExecutionEnvironment } = {}) {
   if (!UUID.test(submissionId || '') || !/^v[0-9]+\.[0-9]+\.[0-9]+$/.test(releaseTag || '')
     || typeof publish !== 'boolean' || typeof confirmedRecovery !== 'boolean') return { status: 'FAIL', reason: 'RESUME_INPUT_INVALID' };
@@ -446,8 +453,10 @@ export async function resumePromotion({ submissionId, releaseTag, publish = fals
     const handoff = (await readBoundedJson(path.join(quality, 'handoff.json'))).value;
     const runtimeFile = path.join(quality, 'candidate-runtime-request.json');
     const runtime = await readBoundedJson(runtimeFile);
-    if (!exact(handoff, ['schemaVersion', 'host', 'root', 'releaseTag', 'buildIdentity', 'requestSha256',
-      'runtimeRequestSha256', 'requestFile', 'target']) || handoff.schemaVersion !== 1 || handoff.host !== host
+    const currentHostBinding = testOnlyHostBindingResolver();
+    if (!exact(handoff, ['schemaVersion', 'hostBinding', 'root', 'releaseTag', 'buildIdentity', 'requestSha256',
+      'runtimeRequestSha256', 'requestFile', 'target']) || handoff.schemaVersion !== 2 || !validHostBinding(handoff.hostBinding)
+      || JSON.stringify(handoff.hostBinding) !== JSON.stringify(currentHostBinding)
       || handoff.root !== root || handoff.releaseTag !== releaseTag || handoff.runtimeRequestSha256 !== runtime.sha256
       || JSON.stringify(runtime.value) !== JSON.stringify({ target: handoff.target }))
       fail('HANDOFF_DRIFT');

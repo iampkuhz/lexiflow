@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import socket
+import stat
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import yaml
@@ -21,6 +24,8 @@ from scripts.acceptance.task_definition.release_subject import (
     read_release_subject,
     verify_release_subject,
 )
+from ops.release.host_resources import release_host_identity
+from ops.release.host_resources.release_host_identity import resolve_host_binding
 from scripts.acceptance.task_operations.submit_task_for_acceptance import submit
 from tests.delivery_gate.fixtures import PRODUCER_SESSION, make_mock_runtime
 
@@ -101,13 +106,14 @@ class TestReleaseSubject(unittest.TestCase):
         }
         self._write_json(self.request_file, self.request)
         self.runtime_file = (
-            self.root / "tmp/quality/release-workflow/1.2.3/candidate-runtime-request.json"
+            self.root
+            / "tmp/quality/release-workflow/1.2.3/candidate-runtime-request.json"
         )
         self.runtime = {"target": self.target}
         self._write_json(self.runtime_file, self.runtime)
         self.handoff = {
-            "schemaVersion": 1,
-            "host": socket.gethostname(),
+            "schemaVersion": 2,
+            "hostBinding": resolve_host_binding(),
             "root": str(self.root.resolve()),
             "releaseTag": "v1.2.3",
             "buildIdentity": identity,
@@ -116,7 +122,9 @@ class TestReleaseSubject(unittest.TestCase):
             "requestFile": str(self.request_file),
             "target": self.target,
         }
-        self.handoff_file = self.root / "tmp/quality/release-workflow/1.2.3/handoff.json"
+        self.handoff_file = (
+            self.root / "tmp/quality/release-workflow/1.2.3/handoff.json"
+        )
         self._write_json(self.handoff_file, self.handoff)
 
     def tearDown(self):
@@ -191,12 +199,114 @@ class TestReleaseSubject(unittest.TestCase):
             subject["target"]["candidate_sha256"], self.target["candidateSha256"]
         )
 
+    def test_stable_host_binding_schema_and_exact_shape_are_required(self):
+        original = dict(self.handoff)
+        for mutation in (
+            {**original, "schemaVersion": 1},
+            {**original, "host": "legacy-host"},
+            {**original, "extra": True},
+            {**original, "root": str(self.root.parent)},
+            {
+                **original,
+                "hostBinding": {
+                    "scheme": "lexiflow.host-binding.v1",
+                    "sha256": "0" * 64,
+                },
+            },
+            {
+                **original,
+                "hostBinding": {"scheme": "lexiflow.host-binding.v1", "sha256": "bad"},
+            },
+        ):
+            self._write_json(self.handoff_file, mutation)
+            with self.assertRaises(RecordError):
+                read_release_subject(self.root)
+        self._write_json(self.handoff_file, original)
+
+    def test_host_binding_is_domain_separated_by_stable_source_and_uid(self):
+        with (
+            patch.object(
+                release_host_identity,
+                "_stable_system_id",
+                return_value=("test-source", "opaque-input"),
+            ),
+            patch.object(release_host_identity.os, "getuid", return_value=501),
+            patch.object(socket, "gethostname", return_value="name-one"),
+        ):
+            first = resolve_host_binding()
+        with (
+            patch.object(
+                release_host_identity,
+                "_stable_system_id",
+                return_value=("test-source", "opaque-input"),
+            ),
+            patch.object(release_host_identity.os, "getuid", return_value=501),
+            patch.object(socket, "gethostname", return_value="name-two"),
+        ):
+            self.assertEqual(first, resolve_host_binding())
+        with (
+            patch.object(
+                release_host_identity,
+                "_stable_system_id",
+                return_value=("test-source", "other-input"),
+            ),
+            patch.object(release_host_identity.os, "getuid", return_value=501),
+        ):
+            self.assertNotEqual(first, resolve_host_binding())
+        with (
+            patch.object(
+                release_host_identity,
+                "_stable_system_id",
+                return_value=("test-source", "opaque-input"),
+            ),
+            patch.object(release_host_identity.os, "getuid", return_value=502),
+        ):
+            self.assertNotEqual(first, resolve_host_binding())
+
+    def test_missing_stable_source_fails_closed(self):
+        with patch.object(
+            release_host_identity,
+            "_stable_system_id",
+            side_effect=release_host_identity.HostIdentityError(
+                "HOST_IDENTITY_SOURCE_UNAVAILABLE"
+            ),
+        ):
+            with self.assertRaises(release_host_identity.HostIdentityError):
+                resolve_host_binding()
+
+    def test_system_sources_reject_malformed_zero_and_untrusted_machine_ids(self):
+        good_uuid = '"IOPlatformUUID" = "12345678-1234-4234-8234-123456789abc"'
+        self.assertEqual(
+            release_host_identity._validated_darwin_id(good_uuid),
+            "12345678-1234-4234-8234-123456789abc",
+        )
+        for invalid in (
+            "",
+            '"IOPlatformUUID" = "00000000-0000-0000-0000-000000000000"',
+            '"IOPlatformUUID" = "not-a-uuid"',
+        ):
+            with self.assertRaises(release_host_identity.HostIdentityError):
+                release_host_identity._validated_darwin_id(invalid)
+        info = SimpleNamespace(st_mode=stat.S_IFREG | 0o644, st_uid=0, st_size=33)
+        self.assertEqual(
+            release_host_identity._validated_linux_id(b"a" * 32 + b"\n", info), "a" * 32
+        )
+        for raw in (b"0" * 32, b"invalid", b"a" * 129):
+            with self.assertRaises(release_host_identity.HostIdentityError):
+                release_host_identity._validated_linux_id(raw, info)
+        with tempfile.TemporaryDirectory() as directory:
+            info = os.stat(directory)
+            with self.assertRaises(release_host_identity.HostIdentityError):
+                release_host_identity._validated_linux_id(b"a" * 32, info)
+
     def test_historical_version_workflow_residue_is_preserved_and_ignored(self):
         residue = self.root / "tmp/quality/release-workflow/1.2.2/old.json"
         residue.parent.mkdir(parents=True)
         residue.write_text("keep")
         subject = read_release_subject(self.root)
-        self.assertEqual(subject["target"]["candidate_sha256"], self.target["candidateSha256"])
+        self.assertEqual(
+            subject["target"]["candidate_sha256"], self.target["candidateSha256"]
+        )
         residue.write_text("historical change")
         self.assertEqual(read_release_subject(self.root), subject)
         self.assertEqual(residue.read_text(), "historical change")

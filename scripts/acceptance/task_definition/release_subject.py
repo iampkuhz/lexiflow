@@ -5,13 +5,16 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import socket
 import stat
 import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from scripts.acceptance.evidence.acceptance_record_store import RecordError, parse_json
+from ops.release.host_resources.release_host_identity import (
+    HostIdentityError,
+    resolve_host_binding,
+)
 
 WORKFLOW_ROOT = "tmp/quality/release-workflow"
 MAX_JSON = 2_000_000
@@ -346,7 +349,7 @@ def read_release_subject(repo: Path, *, verify_identity: bool = True) -> dict[st
         raise RecordError("release-handoff-invalid", "invalid JSON") from None
     keys = {
         "schemaVersion",
-        "host",
+        "hostBinding",
         "root",
         "releaseTag",
         "buildIdentity",
@@ -358,10 +361,21 @@ def read_release_subject(repo: Path, *, verify_identity: bool = True) -> dict[st
     if (
         not isinstance(handoff, dict)
         or set(handoff) != keys
-        or handoff["schemaVersion"] != 1
+        or handoff["schemaVersion"] != 2
     ):
         raise RecordError("release-handoff-invalid", "handoff keys/schema differ")
-    if handoff["root"] != str(repo) or handoff["host"] != socket.gethostname():
+    try:
+        host_binding = resolve_host_binding()
+    except HostIdentityError:
+        raise RecordError(
+            "release-handoff-environment-drift", "host binding unavailable"
+        ) from None
+    if (
+        handoff["root"] != str(repo)
+        or not isinstance(handoff["hostBinding"], dict)
+        or set(handoff["hostBinding"]) != {"scheme", "sha256"}
+        or handoff["hostBinding"] != host_binding
+    ):
         raise RecordError("release-handoff-environment-drift", "host/root mismatch")
     commit = _git(repo, "rev-parse", "--verify", "HEAD^{commit}")
     if _git(repo, "status", "--porcelain", "--untracked-files=all"):
