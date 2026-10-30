@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { executeFormal, prepareWorkflow, resumePromotion, runCommand } from '../workflow/run-release-workflow.mjs';
 import { normalizeDarwinTempDirectory, resolveFormalInvocation, resolveReleaseExecutionEnvironment } from '../workflow/release-execution-environment.mjs';
+import { resolveHostBinding } from '../host_resources/release-host-identity.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const repo = process.cwd();
@@ -280,6 +281,13 @@ test('real staging bytes and exact builder/assembler contracts precede private h
   assert.equal(await readFile(path.join(images.artifactRoot, 'extension.zip'), 'utf8'), 'real extension zip');
   const quality = path.join(f.root, 'tmp/quality/release-workflow/1.2.3');
   const handoff = JSON.parse(await readFile(path.join(quality, 'handoff.json')));
+  assert.equal(handoff.schemaVersion, 2);
+  assert.deepEqual(Object.keys(handoff).sort(), ['buildIdentity', 'hostBinding', 'releaseTag', 'requestFile', 'requestSha256', 'root', 'runtimeRequestSha256', 'schemaVersion', 'target']);
+  assert.deepEqual(Object.keys(handoff.hostBinding).sort(), ['scheme', 'sha256']);
+  assert.match(handoff.hostBinding.sha256, /^[a-f0-9]{64}$/u);
+  const helperPath = path.join(repo, 'ops/release/host_resources/release_host_identity.py');
+  const pythonBinding = JSON.parse(execFileSync('python3', [helperPath, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+  assert.deepEqual(handoff.hostBinding, pythonBinding, 'Node must use the same Python identity implementation');
   const runtime = JSON.parse(await readFile(path.join(quality, 'candidate-runtime-request.json')));
   assert.deepEqual(runtime, { target: handoff.target });
   assert.equal(handoff.requestSha256, sha(await readFile(f.request)));
@@ -365,6 +373,14 @@ test('request bytes changed during preparation never write a handoff', async t =
   await assert.rejects(readFile(path.join(f.root, 'tmp/quality/release-workflow/1.2.3/handoff.json')));
 });
 
+test('host binding drift during preparation never writes handoff', async t => {
+  const f = await fixture(t); const b = boundaries(f); let reads = 0;
+  const binding = resolveHostBinding();
+  b.options.testOnlyHostBindingResolver = () => ++reads === 1 ? binding : { ...binding, sha256: '0'.repeat(64) };
+  assert.deepEqual(await prepareWorkflow(f.request, b.options), { status: 'BLOCKED', reason: 'HOST_BINDING_DRIFT' });
+  await assert.rejects(readFile(path.join(f.root, 'tmp/quality/release-workflow/1.2.3/handoff.json')));
+});
+
 test('real child runner bounds logs, timeout, cancellation and process groups', async t => {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-command-')));
   t.after(async () => rm(root, { recursive: true, force: true }));
@@ -401,11 +417,26 @@ test('resume binds UUID, host, source, original request and candidate; only publ
   const common = { root: f.root, submissionId, releaseTag: 'v1.2.3',
     run, identityReader: () => targetIdentity, tagChecker: () => targetIdentity,
     verifier: b.options.verifyReleaseCandidate, environmentResolver: b.options.environmentResolver };
+  let driftRunCalls = 0;
+  const currentBinding = JSON.parse(execFileSync('python3', [path.join(repo, 'ops/release/host_resources/release_host_identity.py'), '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+  assert.equal((await resumePromotion({ ...common,
+    testOnlyHostBindingResolver: () => ({ ...currentBinding, sha256: '0'.repeat(64) }),
+    run: async () => { driftRunCalls++; return ''; },
+  })).status, 'BLOCKED');
+  assert.equal(driftRunCalls, 0, 'host drift must be checked before invoking the publisher');
   assert.equal((await resumePromotion(common)).status, 'PASS');
   assert.equal(outputs[0].settings.env.GITHUB_TOKEN, undefined);
   assert.equal(outputs[0].settings.env.LEXIFLOW_RELEASE_PODMAN_ENDPOINT, undefined);
   assert.equal((await resumePromotion({ ...common, releaseTag: 'v1.2.4' })).status, 'BLOCKED');
-  assert.equal((await resumePromotion({ ...common, host: 'other-host' })).status, 'BLOCKED');
+  const handoffPath = path.join(f.root, 'tmp/quality/release-workflow/1.2.3/handoff.json');
+  const savedHandoff = JSON.parse(await readFile(handoffPath));
+  await writeFile(handoffPath, JSON.stringify({ ...savedHandoff, hostBinding: { scheme: 'lexiflow.host-binding.v1', sha256: '0'.repeat(64) } }));
+  assert.equal((await resumePromotion(common)).status, 'BLOCKED');
+  await writeFile(handoffPath, JSON.stringify({ ...savedHandoff, schemaVersion: 1, host: 'legacy-host' }));
+  assert.equal((await resumePromotion(common)).status, 'BLOCKED', 'old schema must fail closed');
+  await writeFile(handoffPath, JSON.stringify({ ...savedHandoff, extra: true }));
+  assert.equal((await resumePromotion(common)).status, 'BLOCKED', 'extra fields must fail closed');
+  await writeFile(handoffPath, JSON.stringify(savedHandoff));
   const oldToken = process.env.GITHUB_TOKEN;
   const oldConfig = process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN;
   try {
