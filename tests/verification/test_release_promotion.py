@@ -6,10 +6,12 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import socket
 import tempfile
 import tarfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -207,6 +209,14 @@ class FakeGitHub:
     release_id = 51
     assets = []
     created_body = None
+    lose_upload_response_after_write = False
+    upload_response_status = 201
+    incomplete_upload_response = False
+    wrong_upload_response_id = False
+    hidden_asset_reads = 0
+    failing_asset_reads = 0
+    remote_asset_mutation = None
+    remote_release_mutation = None
 
     def __init__(self, token, owner, repo, host="api.github.com", *, config=False):
         self.token, self.host, self.config = token, host, config
@@ -225,6 +235,14 @@ class FakeGitHub:
         cls.tag_commit = COMMIT
         cls.assets = []
         cls.created_body = None
+        cls.lose_upload_response_after_write = False
+        cls.upload_response_status = 201
+        cls.incomplete_upload_response = False
+        cls.wrong_upload_response_id = False
+        cls.hidden_asset_reads = 0
+        cls.failing_asset_reads = 0
+        cls.remote_asset_mutation = None
+        cls.remote_release_mutation = None
 
     def api(self, method, path, body=None):
         self.calls.append((self.host, self.token, method, path, body))
@@ -239,9 +257,21 @@ class FakeGitHub:
                 {"id": self.release_id, "tag_name": "v1.2.3"}
             ] if self.existing else []
         if path.endswith("/assets?per_page=100&page=1"):
+            has_uploaded = any(
+                call[2] == "POST" and "/assets?name=" in call[3] for call in self.calls
+            )
+            if has_uploaded and self.failing_asset_reads:
+                type(self).failing_asset_reads -= 1
+                raise OSError("temporary asset read failure")
+            if has_uploaded and self.hidden_asset_reads:
+                type(self).hidden_asset_reads -= 1
+                return 200, []
+            values = self.list_assets if self.list_assets is not None else self.assets
+            if has_uploaded and self.remote_asset_mutation:
+                values = type(self).remote_asset_mutation(values)
             return (
                 200,
-                self.list_assets if self.list_assets is not None else self.assets,
+                values,
             )
         if path.endswith("/releases/latest"):
             return 200, {"id": self.release_id}
@@ -258,7 +288,7 @@ class FakeGitHub:
             return 200, {"id": self.release_id, "tag_name": "v1.2.3", "draft": False}
         if method == "GET" and path.endswith("/releases/51"):
             published = any(call[2] == "PATCH" for call in self.calls)
-            return 200, {
+            value = {
                 "id": self.release_id,
                 "tag_name": "v1.2.3",
                 "draft": not published,
@@ -268,6 +298,11 @@ class FakeGitHub:
                 "target_commitish": COMMIT,
                 "name": "v1.2.3",
             }
+            if self.remote_release_mutation and any(
+                call[2] == "POST" and "/assets?name=" in call[3] for call in self.calls
+            ):
+                value = type(self).remote_release_mutation(value)
+            return 200, value
         if method == "GET" and path.endswith("/releases/99"):
             return 200, {
                 "id": 99,
@@ -300,7 +335,15 @@ class FakeGitHub:
             type(self).extension = payload
         if name == "release.json":
             type(self).registry = payload
-        return 201, item
+        if self.lose_upload_response_after_write:
+            type(self).lose_upload_response_after_write = False
+            raise OSError("lost upload response after write")
+        response = dict(item)
+        if self.incomplete_upload_response:
+            response.pop("digest")
+        if self.wrong_upload_response_id:
+            response["id"] += 100
+        return self.upload_response_status, response
 
 
 class PromotionTests(unittest.TestCase):
@@ -1054,6 +1097,29 @@ class PromotionTests(unittest.TestCase):
                 self.assertFalse(any(c[2] == "POST" for c in FakeGitHub.calls))
                 FakeGitHub.reset()
 
+    def test_wrong_draft_id_blocks_first_attachment_write(self):
+        class WrongDraftIdentity(FakeGitHub):
+            def api(self, method, path, body=None):
+                status, value = super().api(method, path, body)
+                if method == "GET" and path.endswith("/releases/51"):
+                    value = {**value, "id": 99}
+                return status, value
+
+        with (
+            patch.object(p, "GitHub", WrongDraftIdentity),
+            patch.object(p, "_repository", return_value=("o", "r")),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
+            self.assertRaisesRegex(
+                p.PromotionError, "release-draft-preflight-conflict"
+            ),
+        ):
+            self.promote(publish=True)
+        self.assertFalse(any("/assets?name=" in c[3] for c in FakeGitHub.calls))
+        self.assertFalse(any(c[2] == "PATCH" for c in FakeGitHub.calls))
+
     def test_release_notes_version_mismatch_prevents_remote_calls(self):
         (self.notes / "1.2.3.md").write_text("# 1. 9.9.9\n\n前置 两步 限制\n")
         with (
@@ -1069,7 +1135,45 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(FakeGitHub.calls, [])
         p.release_registry.publish_images.assert_not_called()
 
-    def test_unknown_upload_is_resolved_by_matching_draft_resume(self):
+    def test_unknown_upload_is_resolved_in_same_call_without_retry(self):
+        with (
+            patch.object(p, "GitHub", FakeGitHub),
+            patch.object(p, "_repository", return_value=("o", "r")),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
+        ):
+            FakeGitHub.lose_upload_response_after_write = True
+            result = self.promote(publish=True)
+        self.assertTrue(result["published"])
+        self.assertEqual(len(FakeGitHub.assets), 3)
+        self.assertEqual(
+            sum(c[2] == "POST" and "/assets?name=" in c[3] for c in FakeGitHub.calls), 3
+        )
+        self.assertEqual(
+            sum(
+                call[2] == "POST" and call[3].endswith("/releases")
+                for call in FakeGitHub.calls
+            ),
+            1,
+        )
+        self.assertFalse(
+            p.release_registry.publish_images.call_args.kwargs["existing_only"]
+        )
+        event_root = (
+            self.fixture.root
+            / "tmp/quality/release-workflow/1.2.3/promotion"
+            / self.fixture.proof["candidate"]["candidateSha256"]
+            / "events"
+        )
+        states = [
+            json.loads(item.read_bytes())["state"] for item in event_root.glob("*.json")
+        ]
+        self.assertIn("unknown", states)
+        self.assertIn("confirmed", states)
+
+    def test_unconfirmed_cross_run_resume_still_requires_confirmation(self):
         with (
             patch.object(p, "GitHub", FakeGitHub),
             patch.object(p, "_repository", return_value=("o", "r")),
@@ -1097,27 +1201,206 @@ class PromotionTests(unittest.TestCase):
             result = self.promote(publish=True, confirmed_recovery=True)
         self.assertTrue(result["published"])
         self.assertEqual(len(FakeGitHub.assets), 3)
-        self.assertEqual(
-            sum(
-                call[2] == "POST" and call[3].endswith("/releases")
-                for call in FakeGitHub.calls
-            ),
-            1,
-        )
         self.assertTrue(
             p.release_registry.publish_images.call_args.kwargs["existing_only"]
         )
-        event_root = (
-            self.fixture.root
-            / "tmp/quality/release-workflow/1.2.3/promotion"
-            / self.fixture.proof["candidate"]["candidateSha256"]
-            / "events"
+
+    def test_local_asset_size_drift_rejects_before_upload_post(self):
+        original = p._stable_fd
+        seen = []
+
+        def changed_size(root, relative):
+            fd, _ = original(root, relative)
+            seen.append(relative)
+            if relative == "lexiflow-extension-1.2.3.zip":
+                return fd, SimpleNamespace(st_size=0)
+            return fd, _
+
+        with (
+            patch.object(p, "GitHub", FakeGitHub),
+            patch.object(p, "_repository", return_value=("o", "r")),
+            patch.object(p, "_stable_fd", side_effect=changed_size),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
+            self.assertRaisesRegex(p.PromotionError, "release-write-state-unknown"),
+        ):
+            self.promote(publish=True)
+        self.assertFalse(
+            any(c[2] == "POST" and "/assets?name=" in c[3] for c in FakeGitHub.calls),
+            msg=repr([c[3] for c in FakeGitHub.calls if c[2] == "POST"]),
         )
-        states = [
-            json.loads(item.read_bytes())["state"] for item in event_root.glob("*.json")
-        ]
-        self.assertIn("unknown", states)
-        self.assertIn("confirmed", states)
+
+    def test_non_success_and_incomplete_upload_responses_reconcile_read_only(self):
+        FakeGitHub.upload_response_status = 503
+        with (
+            patch.object(p, "GitHub", FakeGitHub),
+            patch.object(p, "_repository", return_value=("o", "r")),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
+        ):
+            result = self.promote(publish=True)
+        self.assertTrue(result["published"])
+        self.assertEqual(
+            sum(c[2] == "POST" and "/assets?name=" in c[3] for c in FakeGitHub.calls), 3
+        )
+
+    def test_incomplete_upload_response_reconciles_read_only(self):
+        FakeGitHub.incomplete_upload_response = True
+        with (
+            patch.object(p, "GitHub", FakeGitHub),
+            patch.object(p, "_repository", return_value=("o", "r")),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
+        ):
+            result = self.promote(publish=True)
+        self.assertTrue(result["published"])
+        self.assertEqual(
+            sum(c[2] == "POST" and "/assets?name=" in c[3] for c in FakeGitHub.calls), 3
+        )
+
+    def test_upload_response_id_conflict_fails_closed_without_publish(self):
+        FakeGitHub.wrong_upload_response_id = True
+        FakeGitHub.upload_response_status = 503
+        with (
+            patch.object(p, "GitHub", FakeGitHub),
+            patch.object(p, "_repository", return_value=("o", "r")),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
+            self.assertRaisesRegex(p.PromotionError, "release-write-state-unknown"),
+        ):
+            self.promote(publish=True)
+        self.assertFalse(any(call[2] == "PATCH" for call in FakeGitHub.calls))
+        self.assertEqual(
+            sum(c[2] == "POST" and "/assets?name=" in c[3] for c in FakeGitHub.calls), 1
+        )
+
+    def test_asset_visibility_can_be_delayed_or_read_failure_recovered(self):
+        for mode in ("delayed", "read-error"):
+            with self.subTest(mode=mode):
+                if mode == "delayed":
+                    FakeGitHub.hidden_asset_reads = 1
+                else:
+                    FakeGitHub.failing_asset_reads = 1
+                FakeGitHub.upload_response_status = 503
+                with (
+                    patch.object(p, "GitHub", FakeGitHub),
+                    patch.object(p, "_repository", return_value=("o", "r")),
+                    patch.dict(
+                        os.environ,
+                        {
+                            "GITHUB_TOKEN": "write",
+                            "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config",
+                        },
+                    ),
+                    patch.object(p.time, "sleep"),
+                ):
+                    result = self.promote(publish=True)
+                self.assertTrue(result["published"])
+                self.assertEqual(
+                    sum(
+                        c[2] == "POST" and "/assets?name=" in c[3]
+                        for c in FakeGitHub.calls
+                    ),
+                    3,
+                )
+                # 清理本地临时 fixture 的 append-only 事件，供同一测试的下一种独立回放使用。
+                event_root = next(
+                    (self.fixture.root / "tmp/quality/release-workflow").rglob("events")
+                )
+                shutil.rmtree(event_root)
+                FakeGitHub.reset()
+
+    def test_unconfirmed_asset_fails_after_bounded_reads_without_more_writes(self):
+        FakeGitHub.hidden_asset_reads = 3
+        FakeGitHub.upload_response_status = 503
+        with (
+            patch.object(p, "GitHub", FakeGitHub),
+            patch.object(p, "_repository", return_value=("o", "r")),
+            patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
+            ),
+            patch.object(p.time, "sleep"),
+            self.assertRaisesRegex(p.PromotionError, "release-write-state-unknown"),
+        ):
+            self.promote(publish=True)
+        self.assertEqual(
+            sum(c[2] == "POST" and "/assets?name=" in c[3] for c in FakeGitHub.calls), 1
+        )
+        self.assertFalse(any(c[2] == "PATCH" for c in FakeGitHub.calls))
+
+    def test_reconciliation_rejects_release_and_asset_conflicts(self):
+        cases = (
+            ("release-id", lambda value: value.update(id=52)),
+            ("tag", lambda value: value.update(tag_name="v8.8.8")),
+            ("source", lambda value: value.update(target_commitish="d" * 40)),
+            ("body", lambda value: value.update(body="wrong")),
+            ("draft", lambda value: value.update(draft=False)),
+            ("prerelease", lambda value: value.update(prerelease=True)),
+            ("sha", lambda assets: [{**assets[0], "digest": "sha256:" + "0" * 64}]),
+            ("bytes", lambda assets: [{**assets[0], "size": assets[0]["size"] + 1}]),
+            ("state", lambda assets: [{**assets[0], "state": "new"}]),
+            ("duplicate-name", lambda assets: [*assets, dict(assets[0])]),
+            (
+                "duplicate-id",
+                lambda assets: [*assets, {**assets[0], "name": "other.bin"}],
+            ),
+            (
+                "extra-asset",
+                lambda assets: [*assets, {**assets[0], "id": 999, "name": "extra.bin"}],
+            ),
+        )
+        for mode, mutation in cases:
+            with self.subTest(mode=mode):
+                if mode in {
+                    "release-id",
+                    "tag",
+                    "source",
+                    "body",
+                    "draft",
+                    "prerelease",
+                }:
+                    FakeGitHub.remote_release_mutation = mutation
+                else:
+                    FakeGitHub.remote_asset_mutation = mutation
+                FakeGitHub.upload_response_status = 503
+                with (
+                    patch.object(p, "GitHub", FakeGitHub),
+                    patch.object(p, "_repository", return_value=("o", "r")),
+                    patch.dict(
+                        os.environ,
+                        {
+                            "GITHUB_TOKEN": "write",
+                            "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config",
+                        },
+                    ),
+                    patch.object(p.time, "sleep"),
+                    self.assertRaisesRegex(
+                        p.PromotionError, "release-write-state-unknown"
+                    ),
+                ):
+                    self.promote(publish=True)
+                self.assertEqual(
+                    sum(
+                        c[2] == "POST" and "/assets?name=" in c[3]
+                        for c in FakeGitHub.calls
+                    ),
+                    1,
+                )
+                self.assertFalse(any(c[2] == "PATCH" for c in FakeGitHub.calls))
+                event_root = next(
+                    (self.fixture.root / "tmp/quality/release-workflow").rglob("events")
+                )
+                shutil.rmtree(event_root)
+                FakeGitHub.reset()
 
     def test_unknown_registry_write_requires_explicit_recovery(self):
         with (

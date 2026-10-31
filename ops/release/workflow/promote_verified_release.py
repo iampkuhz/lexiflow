@@ -905,6 +905,49 @@ def _assets_are_exact_subset(
     return True
 
 
+def _reconcile_uploaded_asset(
+    api: GitHub,
+    prefix: str,
+    release_id: int,
+    tag: str,
+    source_commit: str,
+    notes: str,
+    name: str,
+    expected_assets: dict[str, tuple[int, str]],
+    response_id: int | None,
+) -> bool:
+    """有限次只读观察同一 draft；绝不重放附件 POST。"""
+    for attempt in range(3):
+        if attempt:
+            time.sleep(0.1 * attempt)
+        try:
+            status, release = api.api("GET", f"{prefix}/releases/{release_id}")
+            assets = _release_assets(api, *prefix.split("/")[2:4], release_id)
+        except (PromotionError, OSError, TimeoutError, http.client.HTTPException):
+            if attempt < 2:
+                continue
+            return False
+        if status != 200 or not isinstance(release, dict):
+            continue
+        if (
+            release.get("id") != release_id
+            or release.get("tag_name") != tag
+            or release.get("name") != tag
+            or release.get("draft") is not True
+            or release.get("prerelease") is not False
+            or release.get("target_commitish") != source_commit
+            or release.get("body") != notes
+        ):
+            return False
+        if not _assets_are_exact_subset(assets, expected_assets):
+            return False
+        matching = [asset for asset in assets if asset.get("name") == name]
+        if not matching:
+            continue
+        return response_id is None or matching[0].get("id") == response_id
+    return False
+
+
 def _unknown(stage: str, release_id: int | None = None) -> None:
     raise PromotionError(
         "release-write-state-unknown", stage=stage, release_id=release_id
@@ -1308,6 +1351,8 @@ def _publish(
     if (
         draft_status != 200
         or not isinstance(draft_before, dict)
+        or type(draft_before.get("id")) is not int
+        or draft_before.get("id") != release_id
         or draft_before.get("tag_name") != tag
         or draft_before.get("name") != tag
         or draft_before.get("draft") is not True
@@ -1364,19 +1409,10 @@ def _publish(
                     stream=(fd, meta[name][0], meta[name][1]),
                 )
             except Exception:
-                _record_event(
-                    *event_args,
-                    "github-asset-upload",
-                    "unknown",
-                    release_id=release_id,
-                    asset=name,
-                    asset_sha256=meta[name][1],
-                    asset_bytes=meta[name][0],
-                )
-                _unknown("upload", release_id)
+                status, item = None, None
         finally:
             os.close(fd)
-        if (
+        response_valid = not (
             status not in (200, 201)
             or not isinstance(item, dict)
             or type(item.get("id")) is not int
@@ -1386,7 +1422,8 @@ def _publish(
             or type(item.get("size")) is not int
             or item["size"] != meta[name][0]
             or item.get("digest") != "sha256:" + meta[name][1]
-        ):
+        )
+        if not response_valid:
             _record_event(
                 *event_args,
                 "github-asset-upload",
@@ -1396,7 +1433,25 @@ def _publish(
                 asset_sha256=meta[name][1],
                 asset_bytes=meta[name][0],
             )
-            _unknown("upload", release_id)
+            response_id = (
+                item.get("id")
+                if isinstance(item, dict)
+                and type(item.get("id")) is int
+                and item["id"] > 0
+                else None
+            )
+            if not _reconcile_uploaded_asset(
+                api,
+                prefix,
+                release_id,
+                tag,
+                identity["sourceCommit"],
+                final_notes,
+                name,
+                meta,
+                response_id,
+            ):
+                _unknown("upload", release_id)
         _record_event(
             *event_args,
             "github-asset-upload",
