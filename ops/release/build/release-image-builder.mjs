@@ -103,6 +103,7 @@ function identityLabels(identity) {
     'io.lexiflow.build-id': identity.buildId,
     'io.lexiflow.source-sha256': identity.sourceSha256,
     'io.lexiflow.image-role': 'runtime',
+    'io.lexiflow.deployment-version': identity.baseVersion.toLowerCase(),
   };
 }
 

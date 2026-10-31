@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
 import socket
 import tempfile
+import tarfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -38,7 +40,42 @@ class RegistryTests(unittest.TestCase):
         for role, path, iid in (
             ("runtime-image", "images/linux-arm64/runtime-image.tar", "d"),
         ):
-            data = (role + " bytes").encode()
+            config = json.dumps(
+                {
+                    "architecture": "arm64",
+                    "os": "linux",
+                    "config": {
+                        "Labels": {
+                            "org.opencontainers.image.version": self.identity[
+                                "softwareVersion"
+                            ],
+                            "org.opencontainers.image.revision": self.identity[
+                                "sourceCommit"
+                            ],
+                            "io.lexiflow.build-id": self.identity["buildId"],
+                            "io.lexiflow.source-sha256": self.identity["sourceSha256"],
+                            "io.lexiflow.image-role": "runtime",
+                            "io.lexiflow.deployment-version": self.identity[
+                                "baseVersion"
+                            ],
+                        }
+                    },
+                }
+            ).encode()
+            config_name = "config.json"
+            manifest = json.dumps(
+                [{"Config": config_name, "RepoTags": ["test:2.0.0"], "Layers": []}]
+            ).encode()
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w:") as bundle:
+                for name, content in (
+                    ("manifest.json", manifest),
+                    (config_name, config),
+                ):
+                    info = tarfile.TarInfo(name)
+                    info.size = len(content)
+                    bundle.addfile(info, io.BytesIO(content))
+            data = buffer.getvalue()
             target = self.root / "payload" / path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
@@ -49,7 +86,7 @@ class RegistryTests(unittest.TestCase):
                     "bytes": len(data),
                     "sha256": hashlib.sha256(data).hexdigest(),
                     "platform": "linux/arm64",
-                    "imageDigest": "sha256:" + iid * 64,
+                    "imageDigest": "sha256:" + hashlib.sha256(config).hexdigest(),
                 }
             )
         self.manifest = {
@@ -59,6 +96,7 @@ class RegistryTests(unittest.TestCase):
             "platforms": ["linux/arm64"],
             "artifacts": self.artifacts,
         }
+
         manifest_raw = json.dumps(self.manifest, separators=(",", ":")).encode()
         (self.root / "payload" / "manifest.json").write_bytes(manifest_raw)
         self.candidate_meta = {
@@ -74,6 +112,125 @@ class RegistryTests(unittest.TestCase):
         self.sock = socket.socket(socket.AF_UNIX)
         self.sock_path = str(self.root / "podman.sock")
         self.sock.bind(self.sock_path)
+
+    def test_archive_config_labels_fail_closed_before_auth_or_podman(self):
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch.object(registry, "_run") as podman,
+            patch.object(registry, "_manifest") as remote,
+        ):
+            registry.verify_candidate_images(self.root, self.manifest, self.identity)
+            for key in registry._image_labels(self.identity):
+                for value in (None, "wrong"):
+                    with self.subTest(key=key, value=value):
+                        labels = registry._image_labels(self.identity)
+                        if value is None:
+                            del labels[key]
+                        else:
+                            labels[key] = value
+                        self._replace_archive(labels)
+                        with self.assertRaisesRegex(
+                            RegistryError, "registry-image-label-mismatch"
+                        ):
+                            registry.verify_candidate_images(
+                                self.root, self.manifest, self.identity
+                            )
+            podman.assert_not_called()
+            remote.assert_not_called()
+
+    def _replace_archive(self, labels, *, config_id=None, members=()):
+        config = json.dumps(
+            {"architecture": "arm64", "os": "linux", "config": {"Labels": labels}}
+        ).encode()
+        packed = io.BytesIO()
+        with tarfile.open(fileobj=packed, mode="w:") as bundle:
+            for name, content in (
+                ("manifest.json", b'[{"Config":"config.json"}]'),
+                ("config.json", config),
+                *members,
+            ):
+                member = tarfile.TarInfo(name)
+                member.size = len(content)
+                bundle.addfile(member, io.BytesIO(content))
+        data = packed.getvalue()
+        item = self.artifacts[0]
+        (self.root / "payload" / item["path"]).write_bytes(data)
+        item.update(
+            bytes=len(data),
+            sha256=hashlib.sha256(data).hexdigest(),
+            imageDigest=config_id or "sha256:" + hashlib.sha256(config).hexdigest(),
+        )
+
+    def test_archive_config_id_and_digest_are_not_trusted_from_metadata(self):
+        self._replace_archive(
+            registry._image_labels(self.identity), config_id="sha256:" + "f" * 64
+        )
+        with self.assertRaisesRegex(RegistryError, "registry-image-config-mismatch"):
+            registry.verify_candidate_images(self.root, self.manifest, self.identity)
+        self.artifacts[0]["sha256"] = "0" * 64
+        with self.assertRaisesRegex(RegistryError, "registry-archive-invalid"):
+            registry.verify_candidate_images(self.root, self.manifest, self.identity)
+
+    def test_archive_unsafe_duplicate_or_extended_members_rejected(self):
+        for name in ("../escape", "/absolute", "manifest.json"):
+            with self.subTest(name=name):
+                self._replace_archive(
+                    registry._image_labels(self.identity), members=((name, b"x"),)
+                )
+                with self.assertRaisesRegex(
+                    RegistryError, "registry-image-archive-invalid"
+                ):
+                    registry.verify_candidate_images(
+                        self.root, self.manifest, self.identity
+                    )
+
+    def test_archive_legacy_layer_alias_is_internal_regular_and_never_followed(self):
+        target = self.root / "payload" / self.artifacts[0]["path"]
+        for linkname, accepted in (
+            ("../" + "a" * 64 + ".tar", True),
+            ("../../outside", False),
+            ("../" + "b" * 64 + ".tar", False),
+        ):
+            with self.subTest(linkname=linkname):
+                self._replace_archive(registry._image_labels(self.identity))
+                with tarfile.open(target, "a:") as bundle:
+                    layer = tarfile.TarInfo("a" * 64 + ".tar")
+                    layer.size = 1
+                    bundle.addfile(layer, io.BytesIO(b"x"))
+                    alias = tarfile.TarInfo("c" * 64 + "/layer.tar")
+                    alias.type = tarfile.SYMTYPE
+                    alias.linkname = linkname
+                    bundle.addfile(alias)
+                self.artifacts[0].update(
+                    bytes=target.stat().st_size,
+                    sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
+                )
+                if accepted:
+                    registry.verify_candidate_images(
+                        self.root, self.manifest, self.identity
+                    )
+                else:
+                    with self.assertRaisesRegex(
+                        RegistryError, "registry-image-archive-invalid"
+                    ):
+                        registry.verify_candidate_images(
+                            self.root, self.manifest, self.identity
+                        )
+
+    def test_archive_mutation_during_label_check_rejected(self):
+        target = self.root / "payload" / self.artifacts[0]["path"]
+        original = registry._image_labels
+
+        def mutate(identity):
+            with target.open("ab") as handle:
+                handle.write(b"changed")
+            return original(identity)
+
+        with patch.object(registry, "_image_labels", side_effect=mutate):
+            with self.assertRaisesRegex(RegistryError, "registry-candidate-mutated"):
+                registry.verify_candidate_images(
+                    self.root, self.manifest, self.identity
+                )
 
     def tearDown(self):
         self.sock.close()
