@@ -60,6 +60,29 @@ test('propagates a focus failure without attempting to open the popup',async()=>
   } finally { if(previous===undefined) delete globalThis.chrome;else globalThis.chrome=previous; }
 });
 
+test('reacquires focus only after Chrome explicitly rejects an inactive owned window',async()=>{
+  const previous=globalThis.chrome;const calls=[];let attempts=0;
+  const inactive=new Error('Cannot show popup for an inactive window. To show the popup for this window, first call `chrome.windows.update` with `focused` set to true.');
+  globalThis.chrome={windows:{update:async(id,options)=>{calls.push(['focus',id,options]);}},action:{openPopup:async options=>{
+    calls.push(['open',options]);if(++attempts<3) throw inactive;return 'opened';
+  }}};
+  try {
+    assert.equal(await openChromeActionPopup({windows:[{id:41,type:'normal'}],serviceWorker:{evaluate:(fn,arg)=>fn(arg)}}),'opened');
+    assert.equal(attempts,3);
+    assert.deepEqual(calls,Array.from({length:3},()=>[['focus',41,{focused:true}],['open',{windowId:41}]]).flat());
+  } finally {if(previous===undefined) delete globalThis.chrome;else globalThis.chrome=previous;}
+});
+
+test('persistent inactive-window rejection stops after three attempts and preserves the error',async()=>{
+  const previous=globalThis.chrome;let focus=0,open=0;
+  const inactive=new Error('Cannot show popup for an inactive window.');
+  globalThis.chrome={windows:{update:async()=>{focus++;}},action:{openPopup:async()=>{open++;throw inactive;}}};
+  try {
+    await assert.rejects(openChromeActionPopup({windows:[{id:41,type:'normal'}],serviceWorker:{evaluate:(fn,arg)=>fn(arg)}}),error=>error===inactive);
+    assert.equal(focus,3);assert.equal(open,3);
+  } finally {if(previous===undefined) delete globalThis.chrome;else globalThis.chrome=previous;}
+});
+
 test('popup click measurement rejects hidden, disabled, clipped, zero-size and obstructed targets',()=>{
   const previous={document:globalThis.document,getComputedStyle:globalThis.getComputedStyle,innerWidth:globalThis.innerWidth,innerHeight:globalThis.innerHeight,scrollX:globalThis.scrollX,scrollY:globalThis.scrollY};
   const element={disabled:false,rect:{left:10,top:20,right:110,bottom:50,width:100,height:30},style:{display:'block',visibility:'visible',opacity:'1'},aria:null,

@@ -14,8 +14,15 @@ export async function openInUniqueNormalWindow({windows,openPopup}) {
 export async function openChromeActionPopup({windows,serviceWorker}) {
   return openInUniqueNormalWindow({windows,openPopup:windowId=>
     serviceWorker.evaluate(async id=>{
-      await chrome.windows.update(id,{focused:true});
-      return chrome.action.openPopup({windowId:id});
+      // OS focus can lag behind windows.update; retry only an explicit no-popup rejection.
+      for(let attempt=0;attempt<3;attempt++) {
+        await chrome.windows.update(id,{focused:true});
+        try {return await chrome.action.openPopup({windowId:id});}
+        catch(error) {
+          if(attempt===2||!String(error?.message).startsWith('Cannot show popup for an inactive window.')) throw error;
+          await new Promise(resolve=>setTimeout(resolve,50));
+        }
+      }
     },windowId)});
 }
 
