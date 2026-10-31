@@ -820,6 +820,190 @@ workstreams:
         - eng.verification.module-tests
         discovered_from: LF-TSK-OPS-2087
         depends_on: []
+      - id: LF-TSK-OPS-2089
+        title: 修复单镜像构建与发布标签合同并前置私有校验
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/single-container-image-label-contract/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/build/release-image-build-plan.mjs
+        - ops/release/build/release-image-builder.mjs
+        - ops/release/integrity/release-candidate-verifier.mjs
+        - ops/release/integrity/runtime-image-labels.mjs
+        - ops/release/workflow/promote_verified_release.py
+        - ops/release/workflow/release_registry.py
+        - ops/release/tests/build.test.mjs
+        - ops/release/tests/build-execution.test.mjs
+        - ops/release/tests/candidate.test.mjs
+        - ops/release/tests/verified-candidate.test.mjs
+        - ops/release/tests/verified-candidate-fixture.mjs
+        - ops/release/tests/fake-docker-daemon.mjs
+        - tests/verification/test_release_promotion.py
+        - tests/verification/test_release_registry.py
+        - tmp/phase-tools/single-container-image-label-contract/implementation/**
+        - planning/workstreams.yaml
+        - ops/release/version.txt
+        - ops/release/notes/**
+        - openspec/changes/single-container-image-label-contract/**
+        - tmp/phase-tools/single-container-image-label-contract/main-takeover/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 真实源码与精确制品的标签一致性合同或独立验证/集成交付，不修改旧候选和门禁。
+        deliverable: 修复单镜像构建与发布标签合同并前置私有校验及可核验交接。
+        acceptance_criteria:
+        - 保留发布器全部身份标签约束，构建/归档/消费者合同一致；真实缺失/错误标签在私有构建或无发布权限的只读预检失败。
+        - 真实生产者/归档/消费者接缝回归，包含当前v2.1.9缺标签RED证明与修复GREEN，不以宽泛mock掩盖；不放宽超时、跳检查或复用旧PASS。
+        - 最终完整工程差异包含新版本说明，经当次独立开发、工程正式验收、审查与Gate；后续新候选完整发行资格由LF-TSK-OPS-2090承担，不将代码验收冒充已发布。
+        acceptance_evidence:
+        - 真实actor及target、精确冻结和摘要、实际命令退出与原始日志、未运行及恢复限制。
+        validation_command: python3 -m unittest tests.verification.test_release_promotion tests.verification.test_release_registry -v
+        required_check_ids:
+        - eng.release.version
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+      - id: LF-TSK-QLT-2544
+        title: 独立验证镜像标签合同最终开发差异
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/single-container-image-label-contract/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-image-label-contract/development/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 真实源码与精确制品的标签一致性合同或独立验证/集成交付，不修改旧候选和门禁。
+        deliverable: 独立验证镜像标签合同最终开发差异及可核验交接。
+        acceptance_criteria:
+        - 保留发布器全部身份标签约束，构建/归档/消费者合同一致；真实缺失/错误标签在私有构建或无发布权限的只读预检失败。
+        - 真实生产者/归档/消费者接缝回归，包含当前v2.1.9缺标签RED证明与修复GREEN，不以宽泛mock掩盖；不放宽超时、跳检查或复用旧PASS。
+        - 独立执行当次最终差异全部受选开发检查，逐项结果、原始报告与输入前后核对齐备；不是正式验收或公开资格。
+        acceptance_evidence:
+        - 真实actor及target、精确冻结和摘要、实际命令退出与原始日志、未运行及恢复限制；保留v1因OS重启后专用TMPDIR缺失的失败，核对只恢复同一原目录后按原deadline完整重验，不复用失败报告。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+      - id: LF-TSK-QLT-2545
+        title: 独立执行镜像标签合同工程正式验收
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-image-label-contract/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-image-label-contract/formal/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 真实源码与精确制品的标签一致性合同或独立验证/集成交付，不修改旧候选和门禁。
+        deliverable: 独立执行镜像标签合同工程正式验收及可核验交接。
+        acceptance_criteria:
+        - 保留发布器全部身份标签约束，构建/归档/消费者合同一致；真实缺失/错误标签在私有构建或无发布权限的只读预检失败。
+        - 真实生产者/归档/消费者接缝回归，包含当前v2.1.9缺标签RED证明与修复GREEN，不以宽泛mock掩盖；不放宽超时、跳检查或复用旧PASS。
+        - 以不同真实actor执行本次源码submission全部冻结工程正式验收，证据不复用、不跳检查；不是新候选发行验收。
+        acceptance_evidence:
+        - 真实actor及target、精确冻结和摘要、实际命令退出与原始日志、未运行及恢复限制。
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+      - id: LF-TSK-QLT-2546
+        title: 独立审查镜像标签身份与审批前证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-image-label-contract/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-container-image-label-contract/review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 真实源码与精确制品的标签一致性合同或独立验证/集成交付，不修改旧候选和门禁。
+        deliverable: 独立审查镜像标签身份与审批前证据及可核验交接。
+        acceptance_criteria:
+        - 保留发布器全部身份标签约束，构建/归档/消费者合同一致；真实缺失/错误标签在私有构建或无发布权限的只读预检失败。
+        - 真实生产者/归档/消费者接缝回归，包含当前v2.1.9缺标签RED证明与修复GREEN，不以宽泛mock掩盖；不放宽超时、跳检查或复用旧PASS。
+        - 不同真实actor只读冻结最终diff、直接回归与开发及正式验收报告，形成真实findings和审查记录，不重跑测试或签发行。
+        acceptance_evidence:
+        - 真实actor及target、精确冻结和摘要、实际命令退出与原始日志、未运行及恢复限制。
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
+      - id: LF-TSK-OPS-2090
+        title: 集成标签修复并完成新单镜像公开安装交付
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-container-image-label-contract/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/build/release-image-build-plan.mjs
+        - ops/release/build/release-image-builder.mjs
+        - ops/release/integrity/release-candidate-verifier.mjs
+        - ops/release/integrity/runtime-image-labels.mjs
+        - ops/release/workflow/promote_verified_release.py
+        - ops/release/workflow/release_registry.py
+        - ops/release/tests/build.test.mjs
+        - ops/release/tests/build-execution.test.mjs
+        - ops/release/tests/candidate.test.mjs
+        - ops/release/tests/verified-candidate.test.mjs
+        - ops/release/tests/verified-candidate-fixture.mjs
+        - ops/release/tests/fake-docker-daemon.mjs
+        - tests/verification/test_release_promotion.py
+        - tests/verification/test_release_registry.py
+        - tmp/phase-tools/single-container-image-label-contract/implementation/**
+        - planning/workstreams.yaml
+        - ops/release/version.txt
+        - ops/release/notes/**
+        - openspec/changes/single-container-image-label-contract/**
+        - tmp/phase-tools/single-container-image-label-contract/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 真实源码与精确制品的标签一致性合同或独立验证/集成交付，不修改旧候选和门禁。
+        deliverable: 集成标签修复并完成新单镜像公开安装交付及可核验交接。
+        acceptance_criteria:
+        - 保留发布器全部身份标签约束，构建/归档/消费者合同一致；真实缺失/错误标签在私有构建或无发布权限的只读预检失败。
+        - 真实生产者/归档/消费者接缝回归，包含当前v2.1.9缺标签RED证明与修复GREEN，不以宽泛mock掩盖；不放宽超时、跳检查或复用旧PASS。
+        - 当次独立开发/正式验收/审查及Gate，精确新候选完整19项与实机验证，正式公开唯一一次人审和真实渠道安装；旧标签/资产/证据保留。
+        acceptance_evidence:
+        - 真实actor及target、精确冻结和摘要、实际命令退出与原始日志、未运行及恢复限制。
+        validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2066
+        depends_on: []
       - id: LF-TSK-QLT-2543
         title: 独立审查单次发行审批权限与证据
         priority: P0
