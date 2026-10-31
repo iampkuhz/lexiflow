@@ -11,6 +11,7 @@ import re
 import shutil
 import ssl
 import stat
+import tarfile
 import sys
 import tempfile
 import threading
@@ -409,6 +410,17 @@ def _run(
     return facts
 
 
+def _image_labels(identity: dict) -> dict[str, str]:
+    return {
+        "org.opencontainers.image.version": identity["softwareVersion"],
+        "org.opencontainers.image.revision": identity["sourceCommit"],
+        "io.lexiflow.build-id": identity["buildId"],
+        "io.lexiflow.source-sha256": identity["sourceSha256"],
+        "io.lexiflow.image-role": "runtime",
+        "io.lexiflow.deployment-version": identity["baseVersion"].lower(),
+    }
+
+
 def _inspect_image(image_id: str, role: str, identity: dict, endpoint: str) -> None:
     inspected = _run(
         ["podman", "--url", endpoint, "image", "inspect", image_id],
@@ -428,20 +440,140 @@ def _inspect_image(image_id: str, role: str, identity: dict, endpoint: str) -> N
             or not isinstance(labels, dict)
         ):
             _fail("registry-image-inspect-mismatch", "inspect", role)
-        expected = {
-            "org.opencontainers.image.version": identity["softwareVersion"],
-            "org.opencontainers.image.revision": identity["sourceCommit"],
-            "io.lexiflow.build-id": identity["buildId"],
-            "io.lexiflow.source-sha256": identity["sourceSha256"],
-            "io.lexiflow.image-role": "runtime",
-            "io.lexiflow.deployment-version": identity["baseVersion"].lower(),
-        }
+        expected = _image_labels(identity)
         if any(labels.get(key) != value for key, value in expected.items()):
             _fail("registry-image-label-mismatch", "inspect", role)
     except RegistryError:
         raise
     except (ValueError, TypeError, KeyError, IndexError):
         _fail("registry-image-inspect-invalid", "inspect", role)
+
+
+def _verify_archive_labels(
+    root: Path, relative: str, identity: dict, item: dict
+) -> None:
+    """只读校验摘要绑定的 docker-save config；不解包、加载镜像或读取凭据。"""
+    role = item.get("role", "runtime-image")
+    fd, parent_fd, before, leaf = _open_candidate_file(root, relative, MAX_ARCHIVE)
+    try:
+        digest = hashlib.sha256()
+        while chunk := os.read(fd, 1024 * 1024):
+            digest.update(chunk)
+        if before.st_size != item.get("bytes") or digest.hexdigest() != item.get(
+            "sha256"
+        ):
+            _fail("registry-archive-invalid", "candidate", role)
+        # Read only bounded headers/JSON. Do not let tarfile pre-read extended
+        # headers or allocate a member list from attacker-controlled lengths.
+        entries = {}
+        layer_aliases = []
+        position = 0
+        terminated = False
+        while position + 512 <= before.st_size:
+            os.lseek(fd, position, os.SEEK_SET)
+            header = os.read(fd, 512)
+            if header == bytes(512):
+                terminated = True
+                while chunk := os.read(fd, 1024 * 1024):
+                    if any(chunk):
+                        _fail("registry-image-archive-invalid", "candidate", role)
+                break
+            member = tarfile.TarInfo.frombuf(header, "utf-8", "strict")
+            name = member.name
+            # Podman docker-save includes legacy layer aliases. Never follow or
+            # extract them; permit only this internal regular-layer reference.
+            layer_alias = (
+                member.issym()
+                and member.size == 0
+                and re.fullmatch(r"[0-9a-f]{64}/layer\.tar", name)
+                and re.fullmatch(r"\.\./[0-9a-f]{64}\.tar", member.linkname)
+            )
+            if (
+                len(entries) >= 4096
+                or not name
+                or len(name) > 256
+                or name.startswith("/")
+                or "\\" in name
+                or any(p in ("", ".", "..") for p in name.rstrip("/").split("/"))
+                or any(ord(c) < 32 or ord(c) == 127 for c in name)
+                or name in entries
+                or not (member.isfile() or member.isdir() or layer_alias)
+                or member.size < 0
+                or member.issparse()
+            ):
+                _fail("registry-image-archive-invalid", "candidate", role)
+            end = position + 512 + ((member.size + 511) // 512) * 512
+            if end > before.st_size:
+                _fail("registry-image-archive-invalid", "candidate", role)
+            entries[name] = (position + 512, member.size, member.isfile())
+            if layer_alias:
+                layer_aliases.append(member.linkname[3:])
+            position = end
+        if not terminated:
+            _fail("registry-image-archive-invalid", "candidate", role)
+        if any(
+            target not in entries or not entries[target][2] for target in layer_aliases
+        ):
+            _fail("registry-image-archive-invalid", "candidate", role)
+
+        def metadata(name: str, limit: int) -> bytes:
+            offset, size, regular = entries[name]
+            if not regular or not 0 < size <= limit:
+                _fail("registry-image-archive-invalid", "candidate", role)
+            os.lseek(fd, offset, os.SEEK_SET)
+            data = bytearray()
+            while len(data) < size:
+                part = os.read(fd, size - len(data))
+                if not part:
+                    _fail("registry-image-archive-invalid", "candidate", role)
+                data.extend(part)
+            return bytes(data)
+
+        manifest = json.loads(metadata("manifest.json", 2_000_000))
+        if (
+            not isinstance(manifest, list)
+            or len(manifest) != 1
+            or not isinstance(manifest[0], dict)
+        ):
+            _fail("registry-image-archive-invalid", "candidate", role)
+        config_bytes = metadata(manifest[0]["Config"], 4_000_000)
+        if "sha256:" + hashlib.sha256(config_bytes).hexdigest() != item.get(
+            "imageDigest"
+        ):
+            _fail("registry-image-config-mismatch", "candidate", role)
+        config = json.loads(config_bytes)
+        if config.get("architecture") != "arm64" or config.get("os") != "linux":
+            _fail("registry-image-platform-mismatch", "candidate", role)
+        labels = config["config"]["Labels"]
+        if not isinstance(labels, dict) or any(
+            labels.get(k) != v for k, v in _image_labels(identity).items()
+        ):
+            _fail("registry-image-label-mismatch", "candidate", role)
+        _check_stable_file(fd, parent_fd, leaf, before)
+    except RegistryError:
+        raise
+    except (
+        OSError,
+        tarfile.TarError,
+        ValueError,
+        TypeError,
+        KeyError,
+        AttributeError,
+        UnicodeError,
+    ):
+        _fail("registry-image-archive-invalid", "candidate", role)
+    finally:
+        os.close(fd)
+        os.close(parent_fd)
+
+
+def verify_candidate_images(candidate: Path, manifest: dict, identity: dict) -> None:
+    """供私有晋升预检与写前复核共享的纯本地检查。"""
+    images = [item for item in manifest["artifacts"] if item.get("role") in ROLES]
+    if len(images) != 1:
+        _fail("registry-image-set-invalid", "candidate")
+    for item in images:
+        _verify_archive_labels(candidate, "payload/" + item["path"], identity, item)
 
 
 def publish_images(
@@ -599,9 +731,6 @@ def _publish_images(
         or candidate_meta["imageCandidates"][0].get("platform") != "linux/arm64"
     ):
         _fail("registry-identity-invalid", "candidate")
-    token = os.environ.get("GITHUB_TOKEN")
-    if not isinstance(token, str) or not token:
-        _fail("registry-token-missing", "auth")
     # Validate all local bytes before the first Podman or registry write.
     staged_archives: dict[str, Path] = {}
     for item in images:
@@ -626,6 +755,7 @@ def _publish_images(
             item.get("bytes"),
             item.get("sha256"),
         )
+        _verify_archive_labels(workspace, staged_archive.name, identity, item)
         staged_archives[item["role"]] = staged_archive
         if (
             item.get("platform") != "linux/arm64"
@@ -633,6 +763,9 @@ def _publish_images(
             or not SHA.fullmatch(item["imageDigest"])
         ):
             _fail("registry-image-identity-invalid", "candidate", item.get("role"))
+    token = os.environ.get("GITHUB_TOKEN")
+    if not isinstance(token, str) or not token:
+        _fail("registry-token-missing", "auth")
     tag_states: dict[str, int] = {}
     for item in images:
         role = item["role"]

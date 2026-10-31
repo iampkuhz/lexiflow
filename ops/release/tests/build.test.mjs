@@ -89,6 +89,7 @@ test('生成固定、双平台且无宿主路径的确定性 argv 计划', async
     assert.deepEqual(command.slice(0, 8), ['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/arm64', '--label', `org.opencontainers.image.version=${result.softwareVersion}`]);
     assert.ok(command.includes('--file') && command.includes('Dockerfile.runtime') && command.includes('--iidfile') && command.includes('runtime.iid'));
     assert.ok(command.includes('--label') && command.includes('io.lexiflow.image-role=runtime'));
+    assert.ok(command.includes(`io.lexiflow.deployment-version=${result.buildIdentity.baseVersion.toLowerCase()}`));
     assert.ok(command.includes(`JAVA_RUNTIME_IMAGE=${lockImages[1].javaRuntime.reference}`));
     assert.ok(command.includes(`POSTGRES_RUNTIME_IMAGE=${lockImages[1].postgresRuntime.reference}`));
     assert.equal(result.contextFiles, undefined);
@@ -118,6 +119,48 @@ test('计划平台唯一取自 canonical lock，不接受 descriptor 锁副本',
     const subset = await prepareImageBuild(args(f));
     assert.deepEqual(subset.platforms.map(item => item.platform), ['linux/arm64']);
     assert.deepEqual(subset.bases.javaRuntime, lockImages[1].javaRuntime);
+  } finally { await f.cleanup(); }
+});
+
+test('生产构建参数经真实 tar 配置交给只读发布消费者，缺失标签必须拒绝', async () => {
+  const f = await fixture();
+  try {
+    const plan = await prepareImageBuild(args(f));
+    const command = plan.platforms[0].commands[0];
+    // No independent mock label table: config bytes derive from the producer's
+    // actual build command. Only Docker's packing boundary is synthetic.
+    const labels = Object.fromEntries(command.flatMap((arg, index) => arg === '--label'
+      ? [[command[index + 1].slice(0, command[index + 1].indexOf('=')), command[index + 1].slice(command[index + 1].indexOf('=') + 1)]] : []));
+    const result = execFileSync('python3', ['-c', `
+import hashlib, io, json, pathlib, tarfile, tempfile, sys
+from ops.release.workflow import release_registry as registry
+subject = json.load(sys.stdin)
+with tempfile.TemporaryDirectory() as temporary:
+    root = pathlib.Path(temporary).resolve()
+    target = root / 'payload' / 'runtime.tar'
+    target.parent.mkdir()
+    def check(labels):
+        config = json.dumps({'architecture':'arm64','os':'linux','config':{'Labels':labels}}).encode()
+        with tarfile.open(target, 'w:', format=tarfile.USTAR_FORMAT) as bundle:
+            for name, content in (('config.json',config), ('manifest.json', b'[{"Config":"config.json"}]')):
+                member = tarfile.TarInfo(name)
+                member.size = len(content)
+                bundle.addfile(member, io.BytesIO(content))
+        raw = target.read_bytes()
+        item = {'role':'runtime-image','path':'runtime.tar','bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest(),'imageDigest':'sha256:'+hashlib.sha256(config).hexdigest()}
+        registry.verify_candidate_images(root, {'artifacts':[item]}, subject['identity'])
+    check(subject['labels'])
+    missing = dict(subject['labels'])
+    del missing['io.lexiflow.deployment-version']
+    try:
+        check(missing)
+    except registry.RegistryError as exc:
+        assert exc.reason == 'registry-image-label-mismatch', exc.reason
+    else:
+        raise AssertionError('missing label accepted')
+print('PASS')
+`], { cwd: repo, input: JSON.stringify({ labels, identity: plan.buildIdentity }), encoding: 'utf8', timeout: 10_000 });
+    assert.equal(result.trim(), 'PASS');
   } finally { await f.cleanup(); }
 });
 

@@ -138,7 +138,7 @@ export async function prepareImageBuild(input) {
     const commands = [['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/arm64',
       '--label', `org.opencontainers.image.version=${identity.softwareVersion}`, '--label', `org.opencontainers.image.revision=${identity.sourceCommit}`,
       '--label', `io.lexiflow.build-id=${identity.buildId}`, '--label', `io.lexiflow.source-sha256=${identity.sourceSha256}`,
-      '--label', 'io.lexiflow.image-role=runtime', '--build-arg', `JAVA_RUNTIME_IMAGE=${bases.javaRuntime.reference}`,
+      '--label', 'io.lexiflow.image-role=runtime', '--label', `io.lexiflow.deployment-version=${identity.baseVersion.toLowerCase()}`, '--build-arg', `JAVA_RUNTIME_IMAGE=${bases.javaRuntime.reference}`,
       '--build-arg', `POSTGRES_RUNTIME_IMAGE=${bases.postgresRuntime.reference}`, '--file', 'Dockerfile.runtime', '--iidfile', 'runtime.iid', '.']];
     const finalIdentity = resolveCleanBuildIdentity(repoRoot);
     if (JSON.stringify(identity) !== JSON.stringify(finalIdentity)) reject('RELEASE_SOURCE_CHANGED');

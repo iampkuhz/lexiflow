@@ -8,6 +8,7 @@ import json
 import os
 import socket
 import tempfile
+import tarfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -25,6 +26,7 @@ def sha(data: bytes) -> str:
 
 class Fixture:
     def __init__(self, root: Path):
+        root = root.resolve()
         self.root = root
         (root / "LICENSE").write_bytes(b"MIT\n")
         self.candidate = root / "candidate"
@@ -52,12 +54,36 @@ class Fixture:
             "noticeSha256": sha(b"MIT\n"),
         }
         self.artifacts = []
+        image_labels = {
+            "org.opencontainers.image.version": self.identity["softwareVersion"],
+            "org.opencontainers.image.revision": self.identity["sourceCommit"],
+            "io.lexiflow.build-id": self.identity["buildId"],
+            "io.lexiflow.source-sha256": self.identity["sourceSha256"],
+            "io.lexiflow.image-role": "runtime",
+            "io.lexiflow.deployment-version": self.identity["baseVersion"],
+        }
+        config = json.dumps(
+            {"architecture": "arm64", "os": "linux", "config": {"Labels": image_labels}}
+        ).encode()
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w:") as bundle:
+            for member_name, content in (
+                ("manifest.json", b'[{"Config":"config.json"}]'),
+                ("config.json", config),
+            ):
+                info = tarfile.TarInfo(member_name)
+                info.size = len(content)
+                bundle.addfile(info, io.BytesIO(content))
         for role, name, data in (
             ("runtime-entry", "lexiflow.sh", b"#!/bin/sh\n"),
             ("license", "LICENSE", b"MIT\n"),
             ("extension", "extension.zip", b"accepted extension zip bytes"),
             ("dataset", "data/dataset.bin", b"dataset bytes"),
-            ("runtime-image", "images/linux-arm64/runtime-image.tar", b"image bytes"),
+            (
+                "runtime-image",
+                "images/linux-arm64/runtime-image.tar",
+                archive.getvalue(),
+            ),
             (
                 "corresponding-sources",
                 "sources/lexiflow-third-party-sources-1.2.3.tar.gz",
@@ -72,7 +98,7 @@ class Fixture:
             )
             if role == "runtime-image":
                 self.artifacts[-1].update(
-                    platform="linux/arm64", imageDigest="sha256:" + sha(data)
+                    platform="linux/arm64", imageDigest="sha256:" + sha(config)
                 )
             if role == "license":
                 self.artifacts[-1].update(licenseIds=["lexiflow"])
@@ -594,7 +620,7 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(release_json["schemaVersion"], "lexiflow.release.v1")
         self.assertEqual(release_json["image"]["platform"], "linux/arm64")
         self.assertEqual(
-            release_json["image"]["configId"], "sha256:" + sha(b"image bytes")
+            release_json["image"]["configId"], self.fixture.artifacts[4]["imageDigest"]
         )
         self.assertEqual(
             release_json["assets"]["thirdPartySources"]["sha256"],
@@ -653,6 +679,48 @@ class PromotionTests(unittest.TestCase):
                 for call in FakeGitHub.calls
             )
         )
+
+    def test_precheck_reads_actual_archive_labels_without_write_credentials(self):
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(registry, "_run") as podman,
+            patch.object(p, "GitHub") as remote,
+        ):
+            result = self.promote()
+        self.assertEqual(result["result"], "PASS")
+        self.assertFalse(result["published"])
+        podman.assert_not_called()
+        remote.assert_not_called()
+        item = self.fixture.artifacts[4]
+        labels = registry._image_labels(self.fixture.identity)
+        del labels["io.lexiflow.deployment-version"]
+        config = json.dumps(
+            {"architecture": "arm64", "os": "linux", "config": {"Labels": labels}}
+        ).encode()
+        target = self.fixture.payload / item["path"]
+        with tarfile.open(target, "w:") as bundle:
+            for name, content in (
+                ("config.json", config),
+                ("manifest.json", b'[{"Config":"config.json"}]'),
+            ):
+                member = tarfile.TarInfo(name)
+                member.size = len(content)
+                bundle.addfile(member, io.BytesIO(content))
+        raw = target.read_bytes()
+        item.update(
+            bytes=len(raw), sha256=sha(raw), imageDigest="sha256:" + sha(config)
+        )
+        self.fixture.refresh()
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(registry, "_run") as podman,
+            patch.object(p, "GitHub") as remote,
+            self.assertRaisesRegex(p.PromotionError, "registry-image-label-mismatch"),
+        ):
+            self.promote()
+        podman.assert_not_called()
+        remote.assert_not_called()
+        p.release_registry.publish_images.assert_not_called()
 
     def test_extension_path_comes_only_from_bound_manifest(self):
         extension = next(

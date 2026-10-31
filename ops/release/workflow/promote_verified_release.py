@@ -1856,6 +1856,10 @@ def _bound_candidate(
         _fail("candidate-image-set-invalid")
     if len(source_archives) != 1 or not source_archives[0]["path"].endswith(".tar.gz"):
         _fail("candidate-corresponding-sources-invalid")
+    try:
+        release_registry.verify_candidate_images(candidate, manifest, identity)
+    except release_registry.RegistryError as exc:
+        raise PromotionError(exc.reason, stage="candidate") from exc
     return proof, identity, manifest_bytes, candidate_bytes, sidecar_bytes
 
 

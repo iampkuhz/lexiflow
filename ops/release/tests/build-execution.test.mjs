@@ -80,6 +80,8 @@ if (op === 'image' && args[1] === 'inspect') {
     if (state.labelMode === 'missing') delete value.Config.Labels['io.lexiflow.build-id'];
     if (state.labelMode === 'bad') value.Config.Labels['io.lexiflow.source-sha256'] = '0'.repeat(64);
     if (state.labelMode === 'conflict') value.Config.Labels['org.opencontainers.image.version'] = 'conflicting';
+    if (state.labelMode === 'missing-deployment') delete value.Config.Labels['io.lexiflow.deployment-version'];
+    if (state.labelMode === 'bad-deployment') value.Config.Labels['io.lexiflow.deployment-version'] = 'wrong';
   }
   process.stdout.write(JSON.stringify([value])); process.exit(0);
 }
@@ -178,7 +180,7 @@ test('单镜像合同固定为linux/arm64并拒绝旧amd64分支', async () => {
 });
 
 test('inspect 实际镜像标签而非仅信任 build argv', async () => {
-  for (const labelMode of ['missing', 'bad', 'conflict']) {
+  for (const labelMode of ['missing', 'bad', 'conflict', 'missing-deployment', 'bad-deployment']) {
     const f = await fixture();
     try {
       await setState(f, { labelMode });
