@@ -21,7 +21,7 @@
 
 `GITHUB_TOKEN` 由 GitHub 自动提供，不另造同名 secret；只有 promotion job 声明 Contents write / Packages write，额外 Actions read 用于重核本次运行及批准历史。确认仓库/组织策略允许这些权限。准备和预检阶段不得注入发布凭据。两个 Environment 的 workspace、Node 工具路径与验证能力必须完全相同；private 在私有构建和手动晋升的只读预检中都不等待批准；正式公开仅 promotion 等待一次真实人审。验证 JDBC 仅用于隔离测试，不是产品数据库凭据；晋升仍须当前环境重核，不能省略或伪造这些值。
 
-手动运行工作流必须新建 dispatch，不重跑已批准 run；旧批准不无限复用。`confirmed_recovery` 默认不勾选。仅当此前发布状态未知、管理员已核实远端精确镜像与事务现场时才显式勾选；它不会跳过候选、tag、PUBLISH 或正式发布 Environment 的本次审批，也不会自动恢复或修改包可见性。远端镜像缺失、digest/config 不一致或现场仍不明确时停止，不要重试推送。
+正式晋升只向维护者交付一个需要审批的运行链接，当前运行最多一次人审。上传响应异常或字段不足以验证时，在同一运行内按固定次数只读核实同一草稿身份及附件 id、名称、uploaded 状态、大小和摘要；完整匹配后追加确认并继续既有写前复核，不重传、不重建、不延长超时。冲突立即拒绝，仍未确认则保留未知事件并停止，报告原链接和部分成功，不自动发起新的审批请求。已结束的运行不能借用原批准；确有必要的额外恢复必须先明确异常与新授权边界。手动恢复工作流须新建 dispatch，不重跑已批准 run；旧批准不无限复用。`confirmed_recovery` 默认不勾选。仅当此前发布状态未知、管理员已核实远端精确镜像与事务现场时才显式勾选；它不会跳过候选、tag、PUBLISH 或正式发布 Environment 的本次审批，也不会自动恢复或修改包可见性。远端镜像缺失、digest/config 不一致或现场仍不明确时停止，不要重试推送。
 
 在专用 checkout 按[隔离验证环境](../../verification-environment.md#11-一次性准备运行时与镜像)创建 `.local/lexiflow-python` 并安装 `requirements-dev.txt`。发行 workflow 在构建和两步晋升中显式使用同一 Node 22 与该 venv。原生 正式验收 和晋升通过同一[受控执行环境](../../../../ops/release/workflow/release-execution-environment.mjs)固定工具 PATH、用户、locale、时区与临时根，过滤偶然的会话环境，再传入显式私有验证能力；缺工具或能力立即停止。Node 启动的 Python 子进程沿用该环境。不依赖 launchd 服务的全局 Python 恰好安装 PyYAML，也不在取得发布凭据后临时安装依赖。
 
@@ -119,7 +119,7 @@ python3 -m scripts.local.run_with_java_toolchain java \
 
 首次新推送经认证读回 digest/config 且与原候选一致后，如果匿名读取明确返回 401/403，发布入口提供一次固定 120 秒的包可见性配置窗口。负责人可在已登录的独立浏览器 **Packages → 本次 package → Package settings** 将它设为 public；这是一项首包设置，不是第二道发行审批。入口不自动修改 GitHub 包设置、不重推镜像、不重试网络未知响应，也不增加已有 HTTP、Check 或 Actions job 的超时。窗口前后仍完整核对当次授权与证据，最终必须匿名读到相同 digest/config 才继续 Release 写入。已有相同镜像的只读恢复不进入该窗口。
 
-若配置能力不可用、窗口结束仍私有，或发生其他未知状态，事务仍失败关闭并保留写入记录；不能把镜像推送成功算整个发行成功。先核实远端已完整推送且精确摘要一致、此前请求及 draft 状态明确，再处理可见性。失败恢复必须新 dispatch，通过自动预检，并取得该次恢复唯一一次正式批准；不重跑旧已批准 run。原事务存在未知事件时，只有已核实现场才设置 `confirmed_recovery`；它不允许重新推送、删除或覆盖未知远端内容。远端缺失或 digest/config 不符继续拒绝。
+若配置能力不可用、窗口结束仍私有，或发生其他未知状态，事务仍失败关闭并保留写入记录；不能把镜像推送成功算整个发行成功。先核实远端已完整推送且精确摘要一致、此前请求及 draft 状态明确，再处理可见性。真正结束后另行恢复须先明确告知：它是额外异常操作，不属于正常一次审批流程。经明确决定后新 dispatch，通过自动预检并取得该次恢复批准；不自动要求追加审批、不重跑旧已批准 run。原事务存在未知事件时，只有已核实现场才设置 `confirmed_recovery`；它不允许重新推送、删除或覆盖未知远端内容。远端缺失或 digest/config 不符继续拒绝。
 
 参考 [GitHub 包可见性配置](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility)；认证拉取成功不能替代匿名可读证明。
 

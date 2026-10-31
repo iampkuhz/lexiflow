@@ -60,7 +60,7 @@ gh workflow run release.yml --repo iampkuhz/lexiflow --ref "$TAG" \
   -f publish_confirmation=PUBLISH
 ```
 
-在 **Actions → 发行候选与正式发布** 看进度；仅正式发布时在 **Review deployments** 审批。必须以 tag 作为 `--ref`，不能只填 release_tag 却在分支运行。首次 GHCR 镜像可能 private，需要管理员将唯一新 package 设为 public；只有远端状态确定且原候选匹配才能按[可见性处理](first-release/preparation.md#14-首次-ghcr-可见性)续办。失败/缺件停止，不删草稿、重传未知写请求或绕过验收。
+向维护者提供一个正式晋升 Action run 链接；自动预检通过后，仅在该运行的 **Review deployments** 审批一次。候选构建和预检不另发审批请求。上传响应不确定时，当前运行只读核实精确远端结果，确认完整后继续，不重复上传；无法确认则保留部分成功并报告同一链接，不自动新建恢复运行追加审批。在 **Actions → 发行候选与正式发布** 看进度。必须以 tag 作为 `--ref`，不能只填 release_tag 却在分支运行。首次 GHCR 镜像可能 private，需要管理员将唯一新 package 设为 public；只有远端状态确定且原候选匹配才能按[可见性处理](first-release/preparation.md#14-首次-ghcr-可见性)续办。失败/缺件停止，不删草稿、重传未知写请求或绕过验收。
 
 ## 1.4. 其他机器如何获取
 

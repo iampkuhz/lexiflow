@@ -1004,6 +1004,410 @@ workstreams:
         - eng.verification.module-tests
         discovered_from: LF-TSK-OPS-2066
         depends_on: []
+      - id: LF-TSK-OPS-2091
+        title: 实现同运行发行上传结果只读收敛
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/workflow/promote_verified_release.py
+        - tests/verification/test_release_promotion.py
+        - tmp/phase-tools/single-run-publication-reconciliation/implementation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 同运行内有界只读确认已发生的精确上传，不重写、不借用审批或验收。
+        deliverable: 实现同运行发行上传结果只读收敛及真实可核验记录。
+        acceptance_criteria:
+        - 上传响应未知时同run只读收敛，精确远端制品可确认后继续；每附件至多一次POST，不重建、不自动另起审批。
+        - 未确认、冲突或漂移失败关闭，保留unknown事件和每写前完整证据复核、actor独立性、受保护一次审批及最小权限。
+        - 真实故障回放、独立开发检查、工程正式验收、审查及Gate，不修改历史tag/制品/证据或放宽超时。
+        acceptance_evidence:
+        - 精确输入、真实actor/run、原始命令退出和报告摘要、未运行与适用范围。
+        validation_command: python3 -m unittest tests.verification.test_release_promotion -v
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2090
+        depends_on: []
+      - id: LF-TSK-QLT-2547
+        title: 独立验证单运行发行收敛最终开发差异
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-run-publication-reconciliation/development/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 同运行内有界只读确认已发生的精确上传，不重写、不借用审批或验收。
+        deliverable: 独立验证单运行发行收敛最终开发差异及真实可核验记录。
+        acceptance_criteria:
+        - 上传响应未知时同run只读收敛，精确远端制品可确认后继续；每附件至多一次POST，不重建、不自动另起审批。
+        - 未确认、冲突或漂移失败关闭，保留unknown事件和每写前完整证据复核、actor独立性、受保护一次审批及最小权限。
+        - 真实故障回放、独立开发检查、工程正式验收、审查及Gate，不修改历史tag/制品/证据或放宽超时。
+        acceptance_evidence:
+        - 保留首轮docs输入漂移FAIL，Main停止所有状态页写入并冻结其当前字节；使用原截止时间，同一独立actor按新版本完整执行或审查，不拼接旧结果。
+        - 精确输入、真实actor/run、原始命令退出和报告摘要、未运行与适用范围。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2090
+        depends_on: []
+      - id: LF-TSK-QLT-2548
+        title: 独立执行单运行发行收敛工程正式验收
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-run-publication-reconciliation/formal/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 同运行内有界只读确认已发生的精确上传，不重写、不借用审批或验收。
+        deliverable: 独立执行单运行发行收敛工程正式验收及真实可核验记录。
+        acceptance_criteria:
+        - 上传响应未知时同run只读收敛，精确远端制品可确认后继续；每附件至多一次POST，不重建、不自动另起审批。
+        - 未确认、冲突或漂移失败关闭，保留unknown事件和每写前完整证据复核、actor独立性、受保护一次审批及最小权限。
+        - 真实故障回放、独立开发检查、工程正式验收、审查及Gate，不修改历史tag/制品/证据或放宽超时。
+        acceptance_evidence:
+        - 精确输入、真实actor/run、原始命令退出和报告摘要、未运行与适用范围。
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2090
+        depends_on: []
+      - id: LF-TSK-QLT-2549
+        title: 独立审查单运行发行收敛安全与证据
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-run-publication-reconciliation/review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 同运行内有界只读确认已发生的精确上传，不重写、不借用审批或验收。
+        deliverable: 独立审查单运行发行收敛安全与证据及真实可核验记录。
+        acceptance_criteria:
+        - 上传响应未知时同run只读收敛，精确远端制品可确认后继续；每附件至多一次POST，不重建、不自动另起审批。
+        - 未确认、冲突或漂移失败关闭，保留unknown事件和每写前完整证据复核、actor独立性、受保护一次审批及最小权限。
+        - 真实故障回放、独立开发检查、工程正式验收、审查及Gate，不修改历史tag/制品/证据或放宽超时。
+        acceptance_evidence:
+        - 保留首轮docs输入漂移FAIL，Main停止所有状态页写入并冻结其当前字节；使用原截止时间，同一独立actor按新版本完整执行或审查，不拼接旧结果。
+        - 精确输入、真实actor/run、原始命令退出和报告摘要、未运行与适用范围。
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2090
+        depends_on: []
+      - id: LF-TSK-OPS-2092
+        title: 集成单运行发行收敛与中文操作规则
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - planning/workstreams.yaml
+        - harness/agent-policy.md
+        - docs/scenarios/github-actions/first-release.md
+        - docs/scenarios/github-actions/first-release/preparation.md
+        - ops/release/workflow/promote_verified_release.py
+        - tests/verification/test_release_promotion.py
+        - openspec/changes/single-run-publication-reconciliation/**
+        - tmp/phase-tools/single-run-publication-reconciliation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 同运行内有界只读确认已发生的精确上传，不重写、不借用审批或验收。
+        deliverable: 集成单运行发行收敛与中文操作规则及真实可核验记录。
+        acceptance_criteria:
+        - 上传响应未知时同run只读收敛，精确远端制品可确认后继续；每附件至多一次POST，不重建、不自动另起审批。
+        - 未确认、冲突或漂移失败关闭，保留unknown事件和每写前完整证据复核、actor独立性、受保护一次审批及最小权限。
+        - 真实故障回放、独立开发检查、工程正式验收、审查及Gate，不修改历史tag/制品/证据或放宽超时。
+        acceptance_evidence:
+        - 精确输入、真实actor/run、原始命令退出和报告摘要、未运行与适用范围。
+        validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-OPS-2090
+        depends_on: []
+      - id: LF-TSK-OPS-2093
+        title: 补齐草稿身份前置拒绝并集成单运行发行修复
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/workflow/promote_verified_release.py
+        - tests/verification/test_release_promotion.py
+        - harness/agent-policy.md
+        - docs/scenarios/github-actions/first-release.md
+        - docs/scenarios/github-actions/first-release/preparation.md
+        - planning/workstreams.yaml
+        - openspec/changes/single-run-publication-reconciliation/**
+        - tmp/phase-tools/single-run-publication-reconciliation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 审查F1的真实RED和最小身份保护修复，以及整个最终差异的独立证据，不借旧PASS。
+        deliverable: 补齐草稿身份前置拒绝并集成单运行发行修复及真实可核验交接。
+        acceptance_criteria:
+        - 错绑草稿GET回包id与目标不等时首次附件POST前立即拒绝，且无附件或公开写入，直接RED/GREEN可重现。
+        - 最终同运行上传核实逻辑和规则全部当次独立开发、工程正式验收、审查、Gate及CI通过；保留此前真实FAIL与原件，不拼接历史PASS。
+        - 一次审批和至多一次POST、未知事件、完整actor与精确绑定保持，不改旧tag/制品/证据，不放宽超时或代批。
+        acceptance_evidence:
+        - 精确输入与真实actor/run、F1审查记录及故障回放、原始命令退出、全部检查报告摘要与适用限制。
+        validation_command: python3 -m unittest tests.verification.test_release_promotion -v
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-QLT-2549
+        depends_on: []
+      - id: LF-TSK-QLT-2550
+        title: 独立验证草稿身份修复最终工程开发差异
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-run-publication-reconciliation/draft-id-development/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 审查F1的真实RED和最小身份保护修复，以及整个最终差异的独立证据，不借旧PASS。
+        deliverable: 独立验证草稿身份修复最终工程开发差异及真实可核验交接。
+        acceptance_criteria:
+        - 错绑草稿GET回包id与目标不等时首次附件POST前立即拒绝，且无附件或公开写入，直接RED/GREEN可重现。
+        - 最终同运行上传核实逻辑和规则全部当次独立开发、工程正式验收、审查、Gate及CI通过；保留此前真实FAIL与原件，不拼接历史PASS。
+        - 一次审批和至多一次POST、未知事件、完整actor与精确绑定保持，不改旧tag/制品/证据，不放宽超时或代批。
+        acceptance_evidence:
+        - 精确输入与真实actor/run、F1审查记录及故障回放、原始命令退出、全部检查报告摘要与适用限制。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-QLT-2549
+        depends_on: []
+      - id: LF-TSK-QLT-2551
+        title: 独立执行草稿身份修复工程正式验收
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-run-publication-reconciliation/draft-id-formal/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 审查F1的真实RED和最小身份保护修复，以及整个最终差异的独立证据，不借旧PASS。
+        deliverable: 独立执行草稿身份修复工程正式验收及真实可核验交接。
+        acceptance_criteria:
+        - 错绑草稿GET回包id与目标不等时首次附件POST前立即拒绝，且无附件或公开写入，直接RED/GREEN可重现。
+        - 最终同运行上传核实逻辑和规则全部当次独立开发、工程正式验收、审查、Gate及CI通过；保留此前真实FAIL与原件，不拼接历史PASS。
+        - 一次审批和至多一次POST、未知事件、完整actor与精确绑定保持，不改旧tag/制品/证据，不放宽超时或代批。
+        acceptance_evidence:
+        - 精确输入与真实actor/run、F1审查记录及故障回放、原始命令退出、全部检查报告摘要与适用限制。
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-QLT-2549
+        depends_on: []
+      - id: LF-TSK-QLT-2552
+        title: 独立审查草稿身份与同运行收敛最终证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-run-publication-reconciliation/draft-id-review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 审查F1的真实RED和最小身份保护修复，以及整个最终差异的独立证据，不借旧PASS。
+        deliverable: 独立审查草稿身份与同运行收敛最终证据及真实可核验交接。
+        acceptance_criteria:
+        - 错绑草稿GET回包id与目标不等时首次附件POST前立即拒绝，且无附件或公开写入，直接RED/GREEN可重现。
+        - 最终同运行上传核实逻辑和规则全部当次独立开发、工程正式验收、审查、Gate及CI通过；保留此前真实FAIL与原件，不拼接历史PASS。
+        - 一次审批和至多一次POST、未知事件、完整actor与精确绑定保持，不改旧tag/制品/证据，不放宽超时或代批。
+        acceptance_evidence:
+        - 精确输入与真实actor/run、F1审查记录及故障回放、原始命令退出、全部检查报告摘要与适用限制。
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-QLT-2549
+        depends_on: []
+      - id: LF-TSK-OPS-2094
+        title: 修复测试弹窗焦点竞态并集成单运行发行修复
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - extension/tests/action-popup.mjs
+        - extension/tests/action-popup.test.mjs
+        - ops/release/workflow/promote_verified_release.py
+        - tests/verification/test_release_promotion.py
+        - harness/agent-policy.md
+        - docs/scenarios/github-actions/first-release.md
+        - docs/scenarios/github-actions/first-release/preparation.md
+        - planning/workstreams.yaml
+        - openspec/changes/single-run-publication-reconciliation/**
+        - tmp/phase-tools/single-run-publication-reconciliation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 仅在专用CFT明确未激活窗口拒绝时有界重新聚焦，其他错误原样拒绝；整个最终工程差异取得全新独立证据。
+        deliverable: 修复测试弹窗焦点竞态并集成单运行发行修复及真实可核验交接。
+        acceptance_criteria:
+        - 专用CFT测试helper对明确inactive窗口拒绝至多三次重聚焦，所有其他错误立即原样失败；RED/GREEN和责任浏览器回归真实执行。
+        - 最终同运行上传核实逻辑和规则全部当次独立开发、工程正式验收、审查、Gate及CI通过；保留此前真实FAIL与原件，不拼接历史PASS。
+        - 一次审批和至多一次POST、未知事件、完整actor与精确绑定保持，不改旧tag/制品/证据，不放宽超时或代批。
+        acceptance_evidence:
+        - 精确输入与真实actor/run、F1审查记录及故障回放、原始命令退出、全部检查报告摘要与适用限制。
+        validation_command: node --test extension/tests/action-popup.test.mjs
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-QLT-2551
+        depends_on: []
+      - id: LF-TSK-QLT-2553
+        title: 独立验证弹窗焦点修复最终工程差异
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-run-publication-reconciliation/popup-focus-development/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 仅在专用CFT明确未激活窗口拒绝时有界重新聚焦，其他错误原样拒绝；整个最终工程差异取得全新独立证据。
+        deliverable: 独立验证弹窗焦点修复最终工程差异及真实可核验交接。
+        acceptance_criteria:
+        - 专用CFT测试helper对明确inactive窗口拒绝至多三次重聚焦，所有其他错误立即原样失败；RED/GREEN和责任浏览器回归真实执行。
+        - 最终同运行上传核实逻辑和规则全部当次独立开发、工程正式验收、审查、Gate及CI通过；保留此前真实FAIL与原件，不拼接历史PASS。
+        - 一次审批和至多一次POST、未知事件、完整actor与精确绑定保持，不改旧tag/制品/证据，不放宽超时或代批。
+        acceptance_evidence:
+        - 精确输入与真实actor/run、F1审查记录及故障回放、原始命令退出、全部检查报告摘要与适用限制。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-QLT-2551
+        depends_on: []
+      - id: LF-TSK-QLT-2554
+        title: 独立执行弹窗焦点修复工程正式验收
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-run-publication-reconciliation/popup-focus-formal/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 仅在专用CFT明确未激活窗口拒绝时有界重新聚焦，其他错误原样拒绝；整个最终工程差异取得全新独立证据。
+        deliverable: 独立执行弹窗焦点修复工程正式验收及真实可核验交接。
+        acceptance_criteria:
+        - 专用CFT测试helper对明确inactive窗口拒绝至多三次重聚焦，所有其他错误立即原样失败；RED/GREEN和责任浏览器回归真实执行。
+        - 最终同运行上传核实逻辑和规则全部当次独立开发、工程正式验收、审查、Gate及CI通过；保留此前真实FAIL与原件，不拼接历史PASS。
+        - 一次审批和至多一次POST、未知事件、完整actor与精确绑定保持，不改旧tag/制品/证据，不放宽超时或代批。
+        acceptance_evidence:
+        - 精确输入与真实actor/run、F1审查记录及故障回放、原始命令退出、全部检查报告摘要与适用限制。
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-QLT-2551
+        depends_on: []
+      - id: LF-TSK-QLT-2555
+        title: 独立审查弹窗焦点与单运行发行最终证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/single-run-publication-reconciliation/popup-focus-review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 仅在专用CFT明确未激活窗口拒绝时有界重新聚焦，其他错误原样拒绝；整个最终工程差异取得全新独立证据。
+        deliverable: 独立审查弹窗焦点与单运行发行最终证据及真实可核验交接。
+        acceptance_criteria:
+        - 专用CFT测试helper对明确inactive窗口拒绝至多三次重聚焦，所有其他错误立即原样失败；RED/GREEN和责任浏览器回归真实执行。
+        - 最终同运行上传核实逻辑和规则全部当次独立开发、工程正式验收、审查、Gate及CI通过；保留此前真实FAIL与原件，不拼接历史PASS。
+        - 一次审批和至多一次POST、未知事件、完整actor与精确绑定保持，不改旧tag/制品/证据，不放宽超时或代批。
+        acceptance_evidence:
+        - 精确输入与真实actor/run、F1审查记录及故障回放、原始命令退出、全部检查报告摘要与适用限制。
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids:
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-QLT-2551
+        depends_on: []
       - id: LF-TSK-QLT-2543
         title: 独立审查单次发行审批权限与证据
         priority: P0
