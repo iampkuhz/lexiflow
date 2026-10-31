@@ -463,6 +463,10 @@ test('resume binds UUID, host, source, original request and candidate; only publ
     Object.assign(process.env, context);
     const published = await resumePromotion({ ...common, publish: true });
     assert.equal(published.status, 'PASS');
+    assert.equal(b.calls.filter(call => call[0] === 'images').length, 1);
+    assert.equal(b.calls.filter(call => call[0] === 'assemble').length, 1);
+    assert.equal(outputs.filter(call => !call.args.includes('--publish')).length, 1);
+    assert.equal(outputs.filter(call => call.args.includes('--publish')).length, 1);
     assert.equal(outputs[1].settings.env.GITHUB_TOKEN, 'synthetic-test-token');
     assert.equal(outputs[1].settings.env.LEXIFLOW_RELEASE_PODMAN_ENDPOINT, f.body.endpoint);
     assert.equal(outputs[1].settings.env.LEXIFLOW_RELEASE_CONFIG_TOKEN, 'synthetic-config-token');
@@ -537,6 +541,40 @@ test('confirmed recovery is a strict publish-only boolean and reaches the promot
   assert.equal(JSON.parse(badCli.stdout).reason, 'ARGUMENTS_INVALID');
 });
 
+
+test('真实 Python CLI 的拒绝状态穿过 Node 子进程边界，未知写入不降级', async t => {
+  const f = await fixture(t); const b = boundaries(f);
+  assert.equal((await prepareWorkflow(f.request, b.options)).status, 'PASS');
+  const python = execFileSync('python3', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8', timeout: 10000 }).trim();
+  const oldToken = process.env.GITHUB_TOKEN, oldConfig = process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN;
+  try {
+    process.env.GITHUB_TOKEN = 'synthetic-test-token'; process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN = 'synthetic-config-token';
+    for (const [pythonFlag, expected] of [['False', false], ['True', 'unknown'], ['None', 'unknown']]) {
+      const common = { root: f.root, submissionId: '12345678-1234-4234-8234-123456789abc', releaseTag: 'v1.2.3', publish: true,
+        identityReader: () => targetIdentity, tagChecker: () => targetIdentity,
+        verifier: b.options.verifyReleaseCandidate, environmentResolver: b.options.environmentResolver,
+        run: async (_cmd, args, settings) => {
+          // 保留真实 argparse、main 输出和进程失败；只替换业务操作，绝不取得远端授权。
+          const script = `import sys\nfrom unittest.mock import patch\nfrom ops.release.workflow import promote_verified_release as p\nwith patch.object(p, 'promote', side_effect=p.PromotionError('registry-podman-failed', stage='registry-podman', write_unknown=${pythonFlag})):\n sys.exit(p.main(sys.argv[1:]))\n`;
+          return runCommand(python, ['-c', script, ...args.slice(2)], { ...settings, cwd: repo,
+            env: { ...settings.env, PYTHONPATH: repo } });
+        } };
+      const result = await resumePromotion(common);
+      assert.equal(result.status, 'BLOCKED');
+      assert.equal(result.published, expected);
+      assert.equal(result.reason, expected === false ? 'CHILD_FAILED' : 'PUBLISH_STATE_UNKNOWN');
+    }
+  } finally {
+    if (oldToken === undefined) delete process.env.GITHUB_TOKEN; else process.env.GITHUB_TOKEN = oldToken;
+    if (oldConfig === undefined) delete process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN; else process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN = oldConfig;
+  }
+  const cli = spawnSync('python3', ['-m', 'ops.release.workflow.promote_verified_release', '--submission-id',
+    '12345678-1234-4234-8234-123456789abc', '--candidate-directory', f.root, '--confirmed-recovery'],
+  { cwd: repo, encoding: 'utf8', timeout: 10000 });
+  assert.equal(cli.status, 2);
+  assert.match(cli.stderr, /--confirmed-recovery requires --publish/);
+  assert.equal(cli.stdout, '');
+});
 
 for (const publish of [false, true]) {
   for (const scenario of ['repeat', 'failure-recovery', 'legacy-log']) {

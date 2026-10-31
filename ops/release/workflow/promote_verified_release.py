@@ -56,11 +56,13 @@ class PromotionError(ValueError):
         stage: str | None = None,
         release_id: int | None = None,
         registry_role: str | None = None,
+        write_unknown: bool | None = None,
     ):
         super().__init__(reason)
         self.stage = stage
         self.release_id = release_id
         self.registry_role = registry_role
+        self.write_unknown = write_unknown
 
 
 def _fail(reason: str) -> None:
@@ -1194,6 +1196,7 @@ def _publish(
             exc.reason,
             stage="registry-" + (exc.stage or "unknown"),
             registry_role=exc.role,
+            write_unknown=exc.write_unknown,
         ) from None
     gate()
     image = registry["images"][0]
@@ -1574,92 +1577,15 @@ def _publish(
     }
 
 
-def _stage_release_assets(
-    candidate: Path, manifest: dict[str, Any], version: str, workspace: Path
-) -> tuple[dict[str, Path], dict[str, tuple[int, str]]]:
-    """在首个远端写入前验证并固定公开 ZIP 与对应源码原始字节。"""
-    extensions = [x for x in manifest["artifacts"] if x["role"] == "extension"]
-    sources = [x for x in manifest["artifacts"] if x["role"] == "corresponding-sources"]
-    if len(extensions) != 1 or len(sources) != 1:
-        raise PromotionError("release-artifacts-invalid", stage="assets")
-    assets: dict[str, Path] = {}
-    meta: dict[str, tuple[int, str]] = {}
-    for item, name in (
-        (extensions[0], f"lexiflow-extension-{version}.zip"),
-        (sources[0], sources[0]["path"].rsplit("/", 1)[-1]),
-    ):
-        if name.endswith(".zip") and item["bytes"] > MAX_EXTENSION:
-            _fail("candidate-extension-invalid")
-        if item["bytes"] > MAX_ASSET:
-            _fail("asset-size-limit")
-        fd, before = _stable_fd(candidate, "payload/" + item["path"])
-        target = workspace / name
-        try:
-            if before.st_size != item["bytes"]:
-                _fail("candidate-artifact-hash-mismatch")
-            digest = hashlib.sha256()
-            with target.open("xb") as out:
-                _read_exact(fd, item["bytes"], digest, out.write)
-                out.flush()
-                os.fsync(out.fileno())
-            if digest.hexdigest() != item["sha256"] or _stamp(before) != _stamp(
-                os.fstat(fd)
-            ):
-                _fail("candidate-artifact-hash-mismatch")
-        finally:
-            os.close(fd)
-        assets[name] = target
-        meta[name] = (item["bytes"], item["sha256"])
-    return assets, meta
-
-
-def _registry_assets(
-    registry: Any,
-    owner: str,
-    repo: str,
-    context: dict[str, Any],
-    assets: dict[str, Path],
-    meta: dict[str, tuple[int, str]],
-) -> None:
-    """生成唯一公开 release.json；不公开候选归档或 sidecar。"""
-    identity, manifest = context["identity"], context["manifest"]
-    image_candidates = [
-        x for x in manifest["artifacts"] if x["role"] == "runtime-image"
-    ]
-    if (
-        not isinstance(registry, dict)
-        or len(registry.get("images", [])) != 1
-        or len(image_candidates) != 1
-        or registry.get("softwareVersion") != identity["softwareVersion"]
-        or registry.get("sourceCommit") != identity["sourceCommit"]
-        or registry.get("candidateSha256") != context["candidate_sha256"]
-        or registry.get("manifestSha256") != context["manifest_sha256"]
-    ):
-        raise PromotionError("registry-mapping-invalid", stage="registry-mapping")
-    remote = registry["images"][0]
-    item = image_candidates[0]
-    if (
-        remote.get("role") != "runtime-image"
-        or remote.get("platform") != "linux/arm64"
-        or remote.get("imageId") != item.get("imageDigest")
-        or remote.get("archiveSha256") != item.get("sha256")
-        or not isinstance(remote.get("manifestDigest"), str)
-        or not re.fullmatch(r"sha256:[0-9a-f]{64}", remote["manifestDigest"])
-        or remote.get("reference")
-        != f"ghcr.io/{owner.lower()}/{repo.lower()}:{identity['softwareVersion']}"
-    ):
-        raise PromotionError("registry-mapping-invalid", stage="registry-mapping")
+def _release_asset_plan(
+    manifest: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """只读核对公开资产的静态绑定；不复制归档，也不构造远端摘要。"""
     ext = next((x for x in manifest["artifacts"] if x["role"] == "extension"), None)
     sources = [x for x in manifest["artifacts"] if x["role"] == "corresponding-sources"]
     datasets = [x for x in manifest["artifacts"] if x["role"] == "dataset"]
     if ext is None or len(sources) != 1 or len(datasets) != 1:
         raise PromotionError("release-artifacts-invalid", stage="assets")
-    version = identity["softwareVersion"]
-    extension_name = f"lexiflow-extension-{version}.zip"
-    source_name = sources[0]["path"].rsplit("/", 1)[-1]
-    release_name = "release.json"
-    workspace = Path(context["workspace"])
-    source_path = workspace / source_name
     src = sources[0]
     source_meta = src.get("metadata")
     source_items = source_meta.get("items") if isinstance(source_meta, dict) else None
@@ -1756,6 +1682,88 @@ def _registry_assets(
         raise PromotionError(
             "extension-published-dataset-binding-invalid", stage="assets"
         )
+    return ext, src, expected_dataset
+
+
+def _stage_release_assets(
+    candidate: Path, manifest: dict[str, Any], version: str, workspace: Path
+) -> tuple[dict[str, Path], dict[str, tuple[int, str]]]:
+    """在首个远端写入前验证并固定公开 ZIP 与对应源码原始字节。"""
+    extension, source, _ = _release_asset_plan(manifest)
+    assets: dict[str, Path] = {}
+    meta: dict[str, tuple[int, str]] = {}
+    for item, name in (
+        (extension, f"lexiflow-extension-{version}.zip"),
+        (source, source["path"].rsplit("/", 1)[-1]),
+    ):
+        if name.endswith(".zip") and item["bytes"] > MAX_EXTENSION:
+            _fail("candidate-extension-invalid")
+        if item["bytes"] > MAX_ASSET:
+            _fail("asset-size-limit")
+        fd, before = _stable_fd(candidate, "payload/" + item["path"])
+        target = workspace / name
+        try:
+            if before.st_size != item["bytes"]:
+                _fail("candidate-artifact-hash-mismatch")
+            digest = hashlib.sha256()
+            with target.open("xb") as out:
+                _read_exact(fd, item["bytes"], digest, out.write)
+                out.flush()
+                os.fsync(out.fileno())
+            if digest.hexdigest() != item["sha256"] or _stamp(before) != _stamp(
+                os.fstat(fd)
+            ):
+                _fail("candidate-artifact-hash-mismatch")
+        finally:
+            os.close(fd)
+        assets[name] = target
+        meta[name] = (item["bytes"], item["sha256"])
+    return assets, meta
+
+
+def _registry_assets(
+    registry: Any,
+    owner: str,
+    repo: str,
+    context: dict[str, Any],
+    assets: dict[str, Path],
+    meta: dict[str, tuple[int, str]],
+) -> None:
+    """生成唯一公开 release.json；不公开候选归档或 sidecar。"""
+    identity, manifest = context["identity"], context["manifest"]
+    image_candidates = [
+        x for x in manifest["artifacts"] if x["role"] == "runtime-image"
+    ]
+    if (
+        not isinstance(registry, dict)
+        or len(registry.get("images", [])) != 1
+        or len(image_candidates) != 1
+        or registry.get("softwareVersion") != identity["softwareVersion"]
+        or registry.get("sourceCommit") != identity["sourceCommit"]
+        or registry.get("candidateSha256") != context["candidate_sha256"]
+        or registry.get("manifestSha256") != context["manifest_sha256"]
+    ):
+        raise PromotionError("registry-mapping-invalid", stage="registry-mapping")
+    remote = registry["images"][0]
+    item = image_candidates[0]
+    if (
+        remote.get("role") != "runtime-image"
+        or remote.get("platform") != "linux/arm64"
+        or remote.get("imageId") != item.get("imageDigest")
+        or remote.get("archiveSha256") != item.get("sha256")
+        or not isinstance(remote.get("manifestDigest"), str)
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", remote["manifestDigest"])
+        or remote.get("reference")
+        != f"ghcr.io/{owner.lower()}/{repo.lower()}:{identity['softwareVersion']}"
+    ):
+        raise PromotionError("registry-mapping-invalid", stage="registry-mapping")
+    ext, src, expected_dataset = _release_asset_plan(manifest)
+    version = identity["softwareVersion"]
+    extension_name = f"lexiflow-extension-{version}.zip"
+    source_name = src["path"].rsplit("/", 1)[-1]
+    release_name = "release.json"
+    workspace = Path(context["workspace"])
+    source_path = workspace / source_name
     if source_path.name != src["path"].rsplit("/", 1)[-1]:
         raise PromotionError("corresponding-sources-name-invalid", stage="assets")
     if source_name not in assets or meta.get(source_name) != (
@@ -1911,6 +1919,7 @@ def _bound_candidate(
         _fail("candidate-image-set-invalid")
     if len(source_archives) != 1 or not source_archives[0]["path"].endswith(".tar.gz"):
         _fail("candidate-corresponding-sources-invalid")
+    _release_asset_plan(manifest)
     try:
         release_registry.verify_candidate_images(candidate, manifest, identity)
     except release_registry.RegistryError as exc:
@@ -1936,9 +1945,13 @@ def promote(
     first = consume_candidate_pass(
         ROOT, submission_id=submission_id, candidate_directory=candidate
     )
-    proof, identity, manifest_bytes, candidate_bytes, sidecar_bytes = _bound_candidate(
-        first, candidate
-    )
+    # 只有初次绑定能证明尚未进入任何远端写入；后续 gate 也调用同一绑定器。
+    try:
+        proof, identity, manifest_bytes, candidate_bytes, sidecar_bytes = (
+            _bound_candidate(first, candidate)
+        )
+    except PromotionError as exc:
+        raise PromotionError(str(exc), stage=exc.stage, write_unknown=False) from exc
     tag = "v" + identity["softwareVersion"]
     _verify_local_tag(tag, identity)
     manifest = _json_strict(manifest_bytes)
@@ -2041,6 +2054,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--publish", action="store_true")
     parser.add_argument("--confirmed-recovery", action="store_true")
     args = parser.parse_args(argv)
+    if args.confirmed_recovery and not args.publish:
+        parser.error("--confirmed-recovery requires --publish")
     try:
         result = promote(
             submission_id=args.submission_id,
@@ -2052,9 +2067,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if result["result"] == "PASS" else 2
     except PromotionError as exc:
         result = {"result": "BLOCKED", "reason": str(exc)}
-        if exc.stage:
+        if exc.stage or exc.write_unknown is not None:
             result.update(
-                published="unknown", write_stage=exc.stage, release_id=exc.release_id
+                published=False if exc.write_unknown is False else "unknown",
+                write_stage=exc.stage,
+                release_id=exc.release_id,
             )
         if exc.registry_role == "runtime-image":
             result["registry_role"] = exc.registry_role

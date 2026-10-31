@@ -1,8 +1,13 @@
 """验证 CI 的触发、信任与最小权限边界，不伪装 GitHub 上的真实运行。"""
 
 import re
+import json
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
@@ -16,6 +21,115 @@ def workflow(name):
 
 
 class WorkflowContractTest(unittest.TestCase):
+    def test_release_regressions_are_consumed_by_real_quick_plan(self):
+        """真实声明、依赖闭包及输入快照均参与；不运行第二套发布流水线。"""
+        from scripts.triggers import run_ci_quick_checks as ci
+
+        base = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+        ).strip()
+        for path, required in (
+            (
+                "ops/release/workflow/promote_verified_release.py",
+                {"eng.release.build", "eng.verification.module-tests"},
+            ),
+            (
+                "ops/release/tests/workflow.test.mjs",
+                {"eng.release.build", "eng.verification.module-tests"},
+            ),
+            (
+                "tests/verification/test_release_promotion.py",
+                {"eng.verification.module-tests"},
+            ),
+            (
+                "tests/verification/test_ci_workflows.py",
+                {"eng.verification.module-tests"},
+            ),
+        ):
+            with (
+                self.subTest(path=path),
+                patch.object(ci, "changed_paths", return_value=[path]),
+            ):
+                plan = ci.make_plan(ROOT, base)
+            self.assertEqual(plan["status"], "PASS")
+            self.assertTrue(required <= set(plan["selected_check_ids"]))
+            self.assertEqual(plan["checks_executed"], 0)
+            self.assertFalse(plan["full_repository_executed"])
+            self.assertFalse(plan["formal_eligible"])
+            self.assertNotIn(
+                "eng.release.lifecycle-runtime", plan["selected_check_ids"]
+            )
+            self.assertNotIn(
+                "eng.release.candidate-runtime", plan["selected_check_ids"]
+            )
+
+    def test_real_promotion_shell_forwards_exactly_one_command(self):
+        """执行 YAML 原始 shell；替换工具运输层，不访问发行宿主或 GitHub。"""
+        jobs = workflow("release.yml")["jobs"]
+        with tempfile.TemporaryDirectory(prefix="release-shell-") as directory:
+            root = Path(directory)
+            (root / ".git").mkdir()
+            python = root / ".local/lexiflow-python/bin/python3"
+            python.parent.mkdir(parents=True)
+            python.write_text("#!/bin/sh\nexit 0\n")
+            python.chmod(0o700)
+            tools = root / "tools"
+            tools.mkdir()
+            capture = root / "arguments.jsonl"
+            node = tools / "node"
+            # argv 原样落盘（含空格），而非用 shell 字符串模拟正确结果。
+            import sys
+
+            node.write_text(
+                f"#!{sys.executable}\nimport json, os, sys\nwith open(os.environ['CAPTURE'], 'a') as out:\n out.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+            )
+            node.chmod(0o700)
+            git = tools / "git"
+            git.write_text('#!/bin/sh\nprintf "%s\\n" "$EXPECTED_COMMIT"\n')
+            git.chmod(0o700)
+            cases = (
+                ("promotion-precheck", "false", []),
+                ("promotion", "false", ["--publish"]),
+                ("promotion", "true", ["--publish", "--confirmed-recovery"]),
+            )
+            for job, recovery, flags in cases:
+                with self.subTest(job=job, recovery=recovery):
+                    capture.unlink(missing_ok=True)
+                    step = next(
+                        x for x in jobs[job]["steps"] if "resume" in x.get("run", "")
+                    )
+                    env = {
+                        "PATH": str(tools) + os.pathsep + os.defpath,
+                        "WORKSPACE": str(root),
+                        "LEXIFLOW_RELEASE_NODE_BIN": str(tools),
+                        "SUBMISSION_ID": "synthetic submission",
+                        "RELEASE_TAG": "v1.2.3",
+                        "CONFIRMED_RECOVERY": recovery,
+                        "EXPECTED_COMMIT": "a" * 40,
+                        "CAPTURE": str(capture),
+                    }
+                    result = subprocess.run(
+                        ["/bin/sh", "-eu", "-c", step["run"]],
+                        cwd=root,
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(
+                        [json.loads(line) for line in capture.read_text().splitlines()],
+                        [
+                            [
+                                "ops/release/workflow/run-release-workflow.mjs",
+                                "resume",
+                                "synthetic submission",
+                                "v1.2.3",
+                                *flags,
+                            ]
+                        ],
+                    )
+
     def test_human_visible_workflow_labels_are_chinese(self):
         chinese = re.compile(r"[\u3400-\u9fff]")
         for filename in ["ci.yml", "release.yml"]:
@@ -83,7 +197,12 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(value["on"]["push"], {"tags": ["v*"]})
         self.assertEqual(
             set(value["on"]["workflow_dispatch"]["inputs"]),
-            {"submission_id", "release_tag", "publish_confirmation", "confirmed_recovery"},
+            {
+                "submission_id",
+                "release_tag",
+                "publish_confirmation",
+                "confirmed_recovery",
+            },
         )
         recovery = value["on"]["workflow_dispatch"]["inputs"]["confirmed_recovery"]
         self.assertEqual(recovery["type"], "boolean")
@@ -94,9 +213,15 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(source["runs-on"], "ubuntu-24.04")
         self.assertIn("github.event_name == 'workflow_dispatch'", source["if"])
         source_run = "\n".join(step.get("run", "") for step in source["steps"])
-        self.assertIn('git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main', source_run)
-        self.assertNotIn('+refs/heads/main:refs/remotes/origin/main', source_run)
-        self.assertIn('git merge-base --is-ancestor "$(git rev-parse HEAD)" refs/remotes/origin/main', source_run)
+        self.assertIn(
+            "git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main",
+            source_run,
+        )
+        self.assertNotIn("+refs/heads/main:refs/remotes/origin/main", source_run)
+        self.assertIn(
+            'git merge-base --is-ancestor "$(git rev-parse HEAD)" refs/remotes/origin/main',
+            source_run,
+        )
         self.assertIn(
             'ops/release/integrity/source-build-identity.mjs --tag "$RELEASE_TAG"',
             "\n".join(step.get("run", "") for step in source["steps"]),
@@ -135,12 +260,19 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(dry["environment"], "lexiflow-release-private")
         self.assertEqual(dry["needs"], "source")
         dry_run = "\n".join(step.get("run", "") for step in dry["steps"])
-        dry_step = next(step for step in dry["steps"] if "resume" in step.get("run", ""))
-        self.assertEqual(dry_step["env"]["EXPECTED_COMMIT"], "${{ needs.source.outputs.commit }}")
-        self.assertIn('test "$(git -C "$WORKSPACE" rev-parse HEAD)" = "$EXPECTED_COMMIT"', dry_run)
+        dry_step = next(
+            step for step in dry["steps"] if "resume" in step.get("run", "")
+        )
+        self.assertEqual(
+            dry_step["env"]["EXPECTED_COMMIT"], "${{ needs.source.outputs.commit }}"
+        )
+        self.assertIn(
+            'test "$(git -C "$WORKSPACE" rev-parse HEAD)" = "$EXPECTED_COMMIT"', dry_run
+        )
         self.assertEqual(dry["permissions"], {"contents": "read"})
         self.assertEqual(
-            publish["permissions"], {"actions": "read", "contents": "write", "packages": "write"}
+            publish["permissions"],
+            {"actions": "read", "contents": "write", "packages": "write"},
         )
         self.assertEqual(publish["needs"], ["source", "promotion-precheck"])
         self.assertEqual(publish["environment"], "lexiflow-release-promotion")

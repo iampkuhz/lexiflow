@@ -1007,6 +1007,48 @@ class PromotionTests(unittest.TestCase):
                 ):
                     p._license_check({"licenses": licenses})
 
+    def test_static_asset_bindings_fail_before_precheck_or_publish_writes(self):
+        original = json.dumps(self.fixture.manifest)
+        cases = (
+            (
+                "corresponding-sources",
+                "indexSha256",
+                "invalid",
+                "corresponding-sources-index-invalid",
+            ),
+            ("dataset", "releaseId", "wrong", "published-dataset-binding-invalid"),
+            (
+                "extension",
+                "expectedDataset",
+                {},
+                "extension-published-dataset-binding-invalid",
+            ),
+        )
+        for role, field, value, reason in cases:
+            for publish in (False, True):
+                with self.subTest(role=role, publish=publish):
+                    self.fixture.manifest = json.loads(original)
+                    item = next(
+                        x
+                        for x in self.fixture.manifest["artifacts"]
+                        if x["role"] == role
+                    )
+                    item["metadata"][field] = value
+                    self.fixture.refresh()
+                    with (
+                        patch.object(p.tempfile, "mkdtemp") as workspace,
+                        patch.object(p, "GitHub") as github,
+                        patch.object(p, "_stage_release_assets") as stage,
+                        self.assertRaisesRegex(p.PromotionError, reason) as rejected,
+                    ):
+                        self.promote(publish=publish)
+                    workspace.assert_not_called()
+                    github.assert_not_called()
+                    stage.assert_not_called()
+                    self.assertIs(rejected.exception.write_unknown, False)
+        self.fixture.manifest = json.loads(original)
+        self.fixture.refresh()
+
     def test_platform_license_and_payload_rejections(self):
         self.fixture.manifest["platforms"] = ["linux/amd64"]
         self.fixture.refresh()
@@ -1612,6 +1654,60 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(len(FakeGitHub.assets), 3)
         self.assertFalse(any(call[2] == "PATCH" for call in FakeGitHub.calls))
 
+    def test_initial_candidate_rejection_is_known_no_write_without_stage(self):
+        from contextlib import redirect_stdout
+
+        self.fixture.manifest["platforms"] = ["linux/amd64"]
+        self.fixture.refresh()
+        with redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(
+                p.main(
+                    [
+                        "--submission-id",
+                        SUBMISSION,
+                        "--candidate-directory",
+                        str(self.fixture.candidate),
+                        "--publish",
+                    ]
+                ),
+                2,
+            )
+        self.assertIs(json.loads(output.getvalue())["published"], False)
+
+    def test_cli_preserves_explicit_no_write_and_unknown_classification(self):
+        from contextlib import redirect_stdout
+
+        argv = [
+            "--submission-id",
+            SUBMISSION,
+            "--candidate-directory",
+            str(self.fixture.candidate),
+            "--publish",
+        ]
+        for write_unknown, published in (
+            (False, False),
+            (True, "unknown"),
+            (None, "unknown"),
+        ):
+            with (
+                self.subTest(write_unknown=write_unknown),
+                patch.object(
+                    p,
+                    "promote",
+                    side_effect=p.PromotionError(
+                        "registry-podman-failed",
+                        stage="registry-podman",
+                        write_unknown=write_unknown,
+                    ),
+                ),
+                redirect_stdout(io.StringIO()) as output,
+            ):
+                self.assertEqual(p.main(argv), 2)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["published"], published)
+            self.assertEqual(result["write_stage"], "registry-podman")
+            self.assertEqual(result["reason"], "registry-podman-failed")
+
     def test_cli_unknown_output_and_cleanup_preserve_remote_fact(self):
         from contextlib import redirect_stdout
 
@@ -2083,12 +2179,83 @@ class RealRegistryPromotionBoundaryTests(unittest.TestCase):
         )
 
     def test_public_registry_chain_first_publish_emits_three_release_assets(self):
+        before = {
+            item.relative_to(self.fixture.candidate).as_posix(): sha(item.read_bytes())
+            for item in self.fixture.candidate.rglob("*")
+            if item.is_file()
+        }
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(p.tempfile, "mkdtemp") as workspace,
+        ):
+            checked = p.promote(
+                submission_id=SUBMISSION, candidate_directory=self.fixture.candidate
+            )
+        self.assertEqual(checked["result"], "PASS")
+        workspace.assert_not_called()
+        self.assertFalse(FakeGitHub.calls)
+        self.assertEqual(self.push_calls, 0)
         result = self.promote()
         self.assertEqual(result["result"], "PASS")
         self.assertTrue(result["published"])
         self.assertEqual(self.push_calls, 1)
         self.assertEqual(len(result["assets"]), 3)
         self.assertTrue(self.remote_present)
+        self.assertEqual(
+            sum(
+                call[2] == "POST" and call[3].endswith("/releases")
+                for call in FakeGitHub.calls
+            ),
+            1,
+        )
+        self.assertEqual(
+            sum(
+                call[2] == "POST" and "/assets?" in call[3] for call in FakeGitHub.calls
+            ),
+            3,
+        )
+        self.assertEqual(sum(call[2] == "PATCH" for call in FakeGitHub.calls), 1)
+        self.assertEqual(
+            before,
+            {
+                item.relative_to(self.fixture.candidate).as_posix(): sha(
+                    item.read_bytes()
+                )
+                for item in self.fixture.candidate.rglob("*")
+                if item.is_file()
+            },
+        )
+
+    def test_candidate_revalidation_after_registry_write_is_not_reported_as_no_write(
+        self,
+    ):
+        from contextlib import redirect_stdout
+
+        verify = registry.verify_candidate_images
+
+        def drift(*args, **kwargs):
+            if self.remote_present:
+                raise registry.RegistryError("synthetic-archive-drift", "candidate")
+            return verify(*args, **kwargs)
+
+        with (
+            patch.object(registry, "verify_candidate_images", side_effect=drift),
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(
+                p.main(
+                    [
+                        "--submission-id",
+                        SUBMISSION,
+                        "--candidate-directory",
+                        str(self.fixture.candidate),
+                        "--publish",
+                    ]
+                ),
+                2,
+            )
+        self.assertEqual(self.push_calls, 1)
+        self.assertEqual(json.loads(output.getvalue())["published"], "unknown")
 
     def test_same_digest_recovery_does_not_push_again(self):
         first = self.promote()
@@ -2104,6 +2271,7 @@ class RealRegistryPromotionBoundaryTests(unittest.TestCase):
         with self.assertRaises(p.PromotionError) as raised:
             self.promote()
         self.assertEqual(raised.exception.stage, "registry-podman")
+        self.assertIs(raised.exception.write_unknown, False)
         self.assertEqual(self.push_calls, 0)
         self.assertFalse(self.remote_present)
         event_dir = p._event_directory(
@@ -2122,6 +2290,7 @@ class RealRegistryPromotionBoundaryTests(unittest.TestCase):
         with self.assertRaises(p.PromotionError) as raised:
             self.promote()
         self.assertEqual(raised.exception.stage, "registry-publish")
+        self.assertIs(raised.exception.write_unknown, True)
         self.assertEqual(raised.exception.registry_role, "runtime-image")
         self.assertEqual(self.push_calls, 1)
         self.assertTrue(self.remote_present)

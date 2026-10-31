@@ -86,6 +86,16 @@ python3 -m scripts.local.run_with_java_toolchain java \
 
 四个资料身份由负责人按实际资料与策略登记，不能任填占位名称；格式为 1–128 位英文数字及 `._-`，首字符英文数字。`outputParent` 须已存在且为空，不能在源码中、与源码互为父子；使用规范绝对路径，所有输入禁止 symlink。`endpoint` 只接受实际本机 Unix socket，须和测试 ARM64 endpoint 指向同一经确认的 daemon。notice 根必须含核准表中全部原样文件。
 
+### 1.2.3. 首次成功的反馈顺序
+
+正常目标是一次 private 候选、一次 promotion，而不是用正式 tag 或 dispatch 调试发布器。推 tag 前，最终源码先完成对应模块的开发检查与 PR quick CI；发布器、跨语言桥接和工作流的回归由现有检查声明选择，不能只检查 YAML 文本或用宽松 `**kwargs` 替身代替真实发布器签名。错误输入、缺证明、恢复参数等反例在隔离合成测试执行，不额外创建 GitHub 发布运行。
+
+按 1.1 先准备固定 Node、Java、Python、浏览器及基础镜像/隔离服务，再进入 private。候选生成后不升级 macOS、CLT 或其他已冻结工具，不切换用户、临时根、socket 或资料；系统与工具变更应先安排在下一候选之前。private 不重复完整发行基线；完整基线只由独立 validator 对该候选执行一次。promotion 消费同一候选和原生证明，不重新构建制品。
+
+正式链齐备后先执行 1.3 的本机只读 `resume`，通过才 dispatch。只读预检直接检查镜像归档真实标签、对应源码/许可绑定以及资料/扩展绑定，和 publish 共用静态资产判据；不复制大型附件、不生成假远端 digest，也不需要发布 token。通过预检不代表远端一定可用，正式写入前仍重核候选、审批和远端身份。
+
+已证未发生本次远端写入的候选或 registry 拒绝以 `published=false` 表达；不能仅因存在错误阶段就要求未知写入恢复。真正未知写入仍以 `published=unknown` 保守停止，并保留事件；响应异常按 1.1 只读确认，禁止以自动重传、自动 dispatch、删除现场或盲目抬高超时代替定位。一次 private 加一次 promotion 是正常预算，不是对网络、权限变化或偶发浏览器故障的成功率承诺。
+
 <a id="13-在原-checkout-完成真实独立-formal"></a>
 
 ## 1.3. 在原 checkout 完成独立正式验收

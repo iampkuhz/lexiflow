@@ -236,6 +236,63 @@ class DocumentationTests(unittest.TestCase):
                 )
             )
 
+    def _runtime_budget_result(self, content):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text("readme")
+            (root / "AGENTS.md").write_text(content, encoding="utf-8")
+            return docs_check.run(root)
+
+    def test_managed_runtime_budget_preserves_human_utf8_limit(self):
+        begin = "<!-- BEGIN MULTICA-RUNTIME (auto-managed; do not edit) -->\n"
+        end = "<!-- END MULTICA-RUNTIME -->\n"
+        managed = begin + "runtime " * 1000 + "\n" + end
+        for content in (
+            "中" * 1000 + "\n" + managed + "文" * 333,
+            managed + "a" * 4000,
+            "a" * 3999 + "\n" + managed,
+            "a" * 3998 + "\r\n" + managed.replace("\n", "\r\n"),
+        ):
+            with self.subTest(content=content[:20]):
+                self.assertEqual("PASS", self._runtime_budget_result(content)["status"])
+        for content in (
+            "中" * 1000 + "\n" + managed + "文" * 334,
+            managed + "a" * 4001,
+            "a" * 4000 + "\n" + managed,
+            "a" * 3999 + "\r\n" + managed.replace("\n", "\r\n"),
+            "<!-- BEGIN OTHER-RUNTIME -->\n" + "a" * 4001 + "\n<!-- END OTHER-RUNTIME -->",
+        ):
+            with self.subTest(content=content[:20]):
+                self.assertIn("AGENTS.md 超出读取预算", self._runtime_budget_result(content)["issues"])
+
+    def test_managed_runtime_markers_fail_closed(self):
+        begin = "<!-- BEGIN MULTICA-RUNTIME (auto-managed; do not edit) -->\n"
+        end = "<!-- END MULTICA-RUNTIME -->\n"
+        for content in (
+            begin, end, end + begin, begin + end + begin + end,
+            begin + begin + end, begin + end + end,
+            " " + begin + end, begin + " " + end,
+            begin.replace("auto-managed", "managed") + end,
+            "```text\n" + begin + end + "```\n",
+            begin + "```text\n" + end + "```\n",
+        ):
+            with self.subTest(content=content):
+                result = self._runtime_budget_result(content)
+                self.assertEqual("FAIL", result["status"])
+                self.assertTrue(any("托管标记" in issue for issue in result["issues"]))
+
+    def test_managed_runtime_contents_still_receive_full_document_checks(self):
+        begin = "<!-- BEGIN MULTICA-RUNTIME (auto-managed; do not edit) -->\n"
+        end = "<!-- END MULTICA-RUNTIME -->\n"
+        for body, expected in (
+            ("[missing](missing.md)\n", "missing.md"),
+            ("```text\nunclosed\n", "围栏未闭合"),
+        ):
+            with self.subTest(body=body):
+                result = self._runtime_budget_result(begin + body + end)
+                self.assertEqual("FAIL", result["status"])
+                self.assertTrue(any(expected in issue for issue in result["issues"]))
+
     def test_local_link_escape_and_private_runtime_links_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "repo"

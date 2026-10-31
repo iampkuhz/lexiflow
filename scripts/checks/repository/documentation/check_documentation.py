@@ -271,6 +271,29 @@ def check_version_comparisons(index):
     return issues
 
 
+def check_agents_budget(text):
+    """约束仓库维护正文的字节预算；托管区只作结构区分，不认证运行身份。"""
+    lines = text.splitlines(keepends=True)
+    markers = [i for i, line in enumerate(lines) if "MULTICA-RUNTIME" in line]
+    issues = []
+    human_text = text
+    if markers:
+        outside = {number - 1 for number, _ in parse(text)[0]}
+        if (
+            len(markers) != 2
+            or lines[markers[0]].rstrip("\r\n")
+            != "<!-- BEGIN MULTICA-RUNTIME (auto-managed; do not edit) -->"
+            or lines[markers[1]].rstrip("\r\n") != "<!-- END MULTICA-RUNTIME -->"
+            or not set(markers).issubset(outside)
+        ):
+            issues.append("AGENTS.md 托管标记不完整、重复或不在围栏外独占整行")
+        else:
+            human_text = "".join(lines[: markers[0]] + lines[markers[1] + 1 :])
+    if len(human_text.encode("utf-8")) > 4000:
+        issues.append("AGENTS.md 超出读取预算")
+    return issues
+
+
 def run(root):
     """遍历受治理文档并汇总可定位的静态问题；不评价语义和布局。"""
     root = Path(root).resolve()
@@ -293,8 +316,9 @@ def run(root):
                 f"{file.relative_to(root)}: {x}"
                 for x in check_heading_numbering(index, file)
             )
-    if (root / "AGENTS.md").stat().st_size > 4000:
-        issues.append("AGENTS.md 超出读取预算")
+    issues.extend(
+        check_agents_budget((root / "AGENTS.md").read_bytes().decode("utf-8"))
+    )
     if (root / ".git").exists():
         tracked = (
             subprocess.run(

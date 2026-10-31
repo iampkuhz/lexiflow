@@ -57,6 +57,34 @@ class SourceOwnershipTests(unittest.TestCase):
         self.assertEqual({".gitignore", "shared/.gitignore"}, set(inventory["shared_ignore_sha256"]))
         self.assertNotIn("shared/.gitignore", inventory["candidate_paths"])
 
+    def test_runtime_metadata_uses_shared_ignore_without_hiding_sources(self):
+        shared_ignore = Path(__file__).resolve().parents[2] / ".gitignore"
+        (self.root / ".gitignore").write_bytes(shared_ignore.read_bytes())
+        runtime = self.root / ".multica/project"
+        runtime.mkdir(parents=True)
+        (runtime / "resources.json").write_text("private fixture")
+        tracked = self.root / ".multica/tracked.py"
+        tracked.write_text("tracked fixture")
+        self.git("add", "--force", ".multica/tracked.py")
+        (self.root / "unknown.py").write_text("new source fixture")
+        nested = self.root / "shared/.multica"
+        nested.mkdir(parents=True)
+        (nested / "source.py").write_text("new source fixture")
+        original = Path.read_bytes
+
+        def guarded(path):
+            self.assertFalse(path.is_relative_to(self.root / ".multica"))
+            return original(path)
+
+        with patch.object(Path, "read_bytes", guarded):
+            inventory = repository_source_inventory(self.root)
+        self.assertNotIn(".multica/project/resources.json", inventory["candidate_paths"])
+        for name in (".multica/tracked.py", "unknown.py", "shared/.multica/source.py"):
+            self.assertIn(name, inventory["candidate_paths"])
+        self.validator.check_repo_path_ownership()
+        for name in (".multica/tracked.py", "unknown.py", "shared/.multica/source.py"):
+            self.assertTrue(any(f"repo-unowned-file: {name}" in issue for issue in self.validator.errors))
+
     def test_tracked_missing_source_stays_subject_and_private_root_does_not(self):
         (self.root / "missing.py").write_text("fixture")
         self.git("add", "missing.py")
