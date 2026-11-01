@@ -4,28 +4,40 @@
 
 ## 1.1. GitHub 配置字段
 
-管理员按[仓库管理员准备](../../github-actions.md#13-仓库管理员准备)配置私有与正式发布两个 Environment、唯一 runner、隔离服务、不可变发行与权限。`lexiflow-release-private` 无人工审批，仅给测试能力；`lexiflow-release-promotion` 保留 owner required reviewer，单维护者设置 `prevent_self_review=false`、`can_admins_bypass=false`。两者仅允许正式 `v*` tag。当前电脑可以承载 runner，但使用专用源码与隔离数据，不能让其他 workflow 或不可信 PR 在此执行。所需变量如下：
+管理员按[仓库管理员准备](../../github-actions.md#13-仓库管理员准备)配置私有与正式发布两个 Environment、唯一 runner、隔离服务、不可变发行与权限。`release-internal` 无人工审批，仅给测试能力；`release-public` 保留 owner required reviewer，单维护者设置 `prevent_self_review=false`、`can_admins_bypass=false`。两者仅允许正式 `v*` tag。当前电脑可以承载 runner，但使用专用源码与隔离数据，不能让其他 workflow 或不可信 PR 在此执行。所需变量如下：
 
 | 配置位置 | 名称 | 要填什么 |
 | --- | --- | --- |
-| private / promotion Variables | `LEXIFLOW_RELEASE_WORKSPACE` | 同一专用稳定 checkout 的规范绝对路径；普通 `.git` 目录，不是临时 Actions checkout |
-| private / promotion Variables | `LEXIFLOW_RELEASE_NODE_BIN` | 同一已安装 Node 22 的 `bin` 规范绝对路径；不是会话临时 PATH，也不自动下载 |
-| private Variables | `LEXIFLOW_RELEASE_REQUEST_FILE` | 下一节私有构建请求的绝对路径，放在源码外 |
-| private / promotion Variables | `LEXIFLOW_RELEASE_JAVA_HOME` | Temurin 25 的 `Home` 绝对路径 |
-| private / promotion Variables | `LEXIFLOW_RELEASE_TEST_REDIS_ENDPOINT` | 本次隔离测试 Redis 的 `host:port` |
-| private / promotion Variables | `LEXIFLOW_RELEASE_ARM64_DOCKER_HOST` | 已确认的本机 Podman Unix endpoint，例如 `unix:///absolute/path/to/podman.sock` |
-| private / promotion Variables | `LEXIFLOW_RELEASE_GRADLE_CACHE`、`LEXIFLOW_RELEASE_NPM_CACHE` | 仅含依赖的可用私有缓存绝对路径 |
-| private / promotion Secrets | `LEXIFLOW_RELEASE_TEST_JDBC_URL` | 隔离 PostgreSQL 测试 JDBC，含测试账号认证 |
-| promotion Secrets | `LEXIFLOW_RELEASE_CONFIG_TOKEN` | 仅对目标仓库具 Administration read 的配置查询凭据，用于只读查询 immutable releases 和正式 Environment 保护；不要替代为源码构建 token |
+| `release-internal` / `release-public` Variables | `LEXIFLOW_RELEASE_WORKSPACE` | 同一专用稳定 checkout 的规范绝对路径；普通 `.git` 目录，不是临时 Actions checkout |
+| `release-internal` / `release-public` Variables | `LEXIFLOW_RELEASE_NODE_BIN` | 同一已安装 Node 22 的 `bin` 规范绝对路径；不是会话临时 PATH，也不自动下载 |
+| `release-internal` Variables | `LEXIFLOW_RELEASE_REQUEST_FILE` | 下一节私有构建请求的绝对路径，放在源码外 |
+| `release-internal` / `release-public` Variables | `LEXIFLOW_RELEASE_JAVA_HOME` | Temurin 25 的 `Home` 绝对路径 |
+| `release-internal` / `release-public` Variables | `LEXIFLOW_RELEASE_TEST_REDIS_ENDPOINT` | 本次隔离测试 Redis 的 `host:port` |
+| `release-internal` / `release-public` Variables | `LEXIFLOW_RELEASE_ARM64_DOCKER_HOST` | 已确认的本机 Podman Unix endpoint，例如 `unix:///absolute/path/to/podman.sock` |
+| `release-internal` / `release-public` Variables | `LEXIFLOW_RELEASE_GRADLE_CACHE`、`LEXIFLOW_RELEASE_NPM_CACHE` | 仅含依赖的可用私有缓存绝对路径 |
+| `release-internal` / `release-public` Secrets | `LEXIFLOW_RELEASE_TEST_JDBC_URL` | 隔离 PostgreSQL 测试 JDBC，含测试账号认证 |
+| `release-public` Secrets | `LEXIFLOW_RELEASE_CONFIG_TOKEN` | 仅对目标仓库具 Administration read 的配置查询凭据，用于只读查询 immutable releases 和正式 Environment 保护；不要替代为源码构建 token |
 | repository Variables | `LEXIFLOW_RELEASE_RUNNER_READY` | 全部隔离、工具、保护和路径确认后设字面量 `true` |
 
-`GITHUB_TOKEN` 由 GitHub 自动提供，不另造同名 secret；只有 promotion job 声明 Contents write / Packages write，额外 Actions read 用于重核本次运行及批准历史。确认仓库/组织策略允许这些权限。准备和预检阶段不得注入发布凭据。两个 Environment 的 workspace、Node 工具路径与验证能力必须完全相同；private 在私有构建和手动晋升的只读预检中都不等待批准；正式公开仅 promotion 等待一次真实人审。验证 JDBC 仅用于隔离测试，不是产品数据库凭据；晋升仍须当前环境重核，不能省略或伪造这些值。
+`GITHUB_TOKEN` 由 GitHub 自动提供，不另造同名 secret；只有正式发布 job 声明 Contents write / Packages write，额外 Actions read 用于重核本次运行及批准历史。确认仓库/组织策略允许这些权限。准备和预检阶段不得注入发布凭据。两个 Environment 的 workspace、Node 工具路径与验证能力必须完全相同；`release-internal` 在私有构建和手动晋升的只读预检中都不等待批准；正式公开仅 `release-public` 等待一次真实人审。验证 JDBC 仅用于隔离测试，不是产品数据库凭据；晋升仍须当前环境重核，不能省略或伪造这些值。
 
 正式晋升只向维护者交付一个需要审批的运行链接，当前运行最多一次人审。上传响应异常或字段不足以验证时，在同一运行内按固定次数只读核实同一草稿身份及附件 id、名称、uploaded 状态、大小和摘要；完整匹配后追加确认并继续既有写前复核，不重传、不重建、不延长超时。冲突立即拒绝，仍未确认则保留未知事件并停止，报告原链接和部分成功，不自动发起新的审批请求。已结束的运行不能借用原批准；确有必要的额外恢复必须先明确异常与新授权边界。手动恢复工作流须新建 dispatch，不重跑已批准 run；旧批准不无限复用。`confirmed_recovery` 默认不勾选。仅当此前发布状态未知、管理员已核实远端精确镜像与事务现场时才显式勾选；它不会跳过候选、tag、PUBLISH 或正式发布 Environment 的本次审批，也不会自动恢复或修改包可见性。远端镜像缺失、digest/config 不一致或现场仍不明确时停止，不要重试推送。
 
 在专用 checkout 按[隔离验证环境](../../verification-environment.md#11-一次性准备运行时与镜像)创建 `.local/lexiflow-python` 并安装 `requirements-dev.txt`。发行 workflow 在构建和两步晋升中显式使用同一 Node 22 与该 venv。原生 正式验收 和晋升通过同一[受控执行环境](../../../../ops/release/workflow/release-execution-environment.mjs)固定工具 PATH、用户、locale、时区与临时根，过滤偶然的会话环境，再传入显式私有验证能力；缺工具或能力立即停止。Node 启动的 Python 子进程沿用该环境。不依赖 launchd 服务的全局 Python 恰好安装 PyYAML，也不在取得发布凭据后临时安装依赖。
 
 <a id="12-首次发行材料没有旧公开-release-也不能省-previous"></a>
+
+内部构建和只读预检两个 job 均使用以下 Environment 映射；它只停止创建 Deployment 对象，不跳过打包、检查、证据消费或失败阻断，也不控制制品上传：
+
+```yaml
+environment:
+  name: release-internal
+  deployment: false
+```
+
+正式发布引用 `release-public`，保留默认 Deployment 和唯一人审；仅正式发布阶段公开已验收的精确镜像与三个附件，内部产物仍留在本机隔离候选目录。所有 job 在 Actions 中仍有状态和日志。该设置不兼容 GitHub App 自定义 deployment protection rule；不要通过删除必要保护来规避。参见 [GitHub 无部署对象的环境](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments#using-environments-without-deployments)。
+
+Environment 标识切换须同步发布器的真实环境 id/名称核验、保护、变量和 Secret。新域配置并读回后才切换；Secret 无法从 GitHub 读回明文，须通过已授权来源安全注入。缺配置则停止，不回退宽权限或借用旧审批。既有标签的 workflow 不随 main 改变，不为展示调整移动正式标签或重建已发布制品；停用旧环境前确认无活动运行，禁止重跑已退役环境的旧流程以免自动生成无保护环境。`deployment: false` 不会删除既有历史记录。
 
 ## 1.2. 首次发行材料
 

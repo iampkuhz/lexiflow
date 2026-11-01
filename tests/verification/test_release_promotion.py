@@ -370,7 +370,7 @@ class PromotionTests(unittest.TestCase):
                 "environments": [
                     {
                         "id": 55,
-                        "name": "lexiflow-release-promotion",
+                        "name": "release-public",
                         "updated_at": "2026-01-01T00:00:00Z",
                     }
                 ],
@@ -452,7 +452,7 @@ class PromotionTests(unittest.TestCase):
                     environments=[
                         {
                             "id": 55,
-                            "name": "lexiflow-release-promotion",
+                            "name": "release-public",
                             "updated_at": "2026-01-01T00:00:00Z",
                         }
                     ],
@@ -463,7 +463,7 @@ class PromotionTests(unittest.TestCase):
                     environments=[
                         {
                             "id": 55,
-                            "name": "lexiflow-release-promotion",
+                            "name": "release-public",
                             "updated_at": "2099-01-01T00:00:00Z",
                         }
                     ],
@@ -484,7 +484,7 @@ class PromotionTests(unittest.TestCase):
                     environments=[
                         {
                             "id": 55,
-                            "name": "lexiflow-release-promotion",
+                            "name": "release-public",
                             "updated_at": "2026-01-02T00:00:00Z",
                         }
                     ],
@@ -509,7 +509,7 @@ class PromotionTests(unittest.TestCase):
             approval[0]["environments"] = [
                 {
                     "id": 56,
-                    "name": "lexiflow-release-promotion",
+                    "name": "release-public",
                     "updated_at": "2026-01-01T00:00:00Z",
                 }
             ]
@@ -522,10 +522,19 @@ class PromotionTests(unittest.TestCase):
             approval[0]["environments"] = [
                 {
                     "id": 55,
-                    "name": "lexiflow-release-promotion",
+                    "name": "release-public",
                     "updated_at": "2026-01-01T00:00:00Z",
                 }
             ]
+            # 旧环境的批准即使持有相同 id，也不能授权新的正式权限域。
+            approval[0]["environments"][0]["name"] = "lexiflow-release-promotion"
+            with self.assertRaisesRegex(
+                p.PromotionError, "promotion-environment-id-mismatch"
+            ):
+                p._assert_live_promotion_authorization(
+                    Api(), Config(), "o", "r", identity
+                )
+            approval[0]["environments"][0]["name"] = "release-public"
             run["status"] = "completed"
             with self.assertRaisesRegex(
                 p.PromotionError, "promotion-run-platform-check-failed"
@@ -2089,6 +2098,33 @@ class RealRegistryPromotionBoundaryTests(unittest.TestCase):
         self.assertEqual(self.push_calls, 1)
         self.assertEqual(len(result["assets"]), 3)
         self.assertTrue(self.remote_present)
+
+    def test_production_entry_blocks_failed_acceptance_before_any_remote_write(self):
+        with patch.object(p, "consume_candidate_pass", return_value={"result": "FAIL"}):
+            with self.assertRaises(p.PromotionError):
+                self.promote()
+        self.assertEqual(self.push_calls, 0)
+        self.assertEqual(FakeGitHub.calls, [])
+
+    def test_production_entry_blocks_environment_identity_failure_before_any_remote_write(self):
+        with patch.object(p, "_assert_live_promotion_authorization", side_effect=p.PromotionError("promotion-environment-id-mismatch")):
+            with self.assertRaisesRegex(p.PromotionError, "promotion-environment-id-mismatch"):
+                self.promote()
+        self.assertEqual(self.push_calls, 0)
+        self.assertEqual(FakeGitHub.calls, [])
+
+    def test_production_entry_blocks_candidate_artifact_drift_before_any_remote_write(self):
+        def drift(*args, **kwargs):
+            result = self.fixture.consumer()
+            if not hasattr(drift, "changed"):
+                drift.changed = True
+                (self.fixture.payload / "extension.zip").write_bytes(b"drift")
+            return result
+        with patch.object(p, "consume_candidate_pass", side_effect=drift):
+            with self.assertRaises(p.PromotionError):
+                self.promote()
+        self.assertEqual(self.push_calls, 0)
+        self.assertEqual(FakeGitHub.calls, [])
 
     def test_same_digest_recovery_does_not_push_again(self):
         first = self.promote()
