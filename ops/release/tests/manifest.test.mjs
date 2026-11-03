@@ -36,6 +36,27 @@ async function fixture() {
   return f;
 }
 
+test('four distinct license components pass and every required association remains enforced', async () => {
+  const f = await fixture();
+  try {
+    const d = structuredClone(f.descriptor);
+    const removed = 'sqlite-jdbc-license';
+    d.licenses = d.licenses.filter(row => row.id !== removed);
+    for (const record of d.artifacts) record.licenseIds = record.licenseIds.filter(id => id !== removed);
+    const source = d.artifacts.find(row => row.role === 'corresponding-sources');
+    source.metadata.items = source.metadata.items.filter(row => row.id !== removed);
+    assert.equal(d.licenses.length, 4);
+    assert.equal(createManifest(d, d.buildIdentity).licenses.length, 4);
+    for (const component of ['LexiFlow', 'API-runtime', 'extension-third-party', 'dataset']) {
+      const bad = structuredClone(d);
+      for (const row of bad.licenses) if (row.component === component) row.component = component === 'LexiFlow' ? 'API-runtime' : 'LexiFlow';
+      for (const row of bad.artifacts.find(row => row.role === 'corresponding-sources').metadata.items)
+        row.component = bad.licenses.find(license => license.id === row.id).component;
+      assert.throws(() => createManifest(bad, bad.buildIdentity), /REQUIRED_LICENSE_MISSING/);
+    }
+  } finally { await f.cleanup(); }
+});
+
 test('copied manifest fixtures isolate source, artifacts, descriptor objects and cleanup', async () => {
   const first = await fixture(), second = await fixture();
   try {

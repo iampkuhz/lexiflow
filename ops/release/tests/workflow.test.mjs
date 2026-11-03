@@ -451,6 +451,22 @@ test('Docker engine, platform, locked base images and endpoint reject before com
   }
 });
 
+test('four component classes suffice but padding cannot replace a missing component', async t => {
+  const f = await fixture(t);
+  const licenses = f.licenses.filter((_, i) => i !== 2);
+  await writeFile(path.join(f.root, 'ops/release/distribution-licenses.json'),
+    JSON.stringify({ schema_version: 'lexiflow.distribution-licenses.v1', licenses }));
+  const result = await prepareWorkflow(f.request, boundaries(f).options);
+  assert.equal(result.status, 'PASS');
+  for (const missing of ['LexiFlow', 'API-runtime', 'extension-third-party', 'dataset']) {
+    const g = await fixture(t);
+    const padded = g.licenses.map(row => row.component === missing ? { ...row, component: missing === 'LexiFlow' ? 'API-runtime' : 'LexiFlow' } : row);
+    await writeFile(path.join(g.root, 'ops/release/distribution-licenses.json'),
+      JSON.stringify({ schema_version: 'lexiflow.distribution-licenses.v1', licenses: padded }));
+    assert.deepEqual(await prepareWorkflow(g.request, boundaries(g).options), { status: 'BLOCKED', reason: 'LICENSE_LEDGER_INVALID' });
+  }
+});
+
 test('bad license, digest, tag and command failure cannot hand off', async t => {
   const reasons = ['LICENSE_LEDGER_INVALID', 'DATASET_DIGEST_MISMATCH', 'WORKFLOW_FAILED', 'WORKFLOW_FAILED'];
   for (const [index, mutate] of [

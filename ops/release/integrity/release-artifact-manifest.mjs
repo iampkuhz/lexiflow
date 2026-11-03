@@ -62,7 +62,7 @@ function validateDescriptor(descriptor, source) {
   const dataset = descriptor.dataset;
   if (!keys(dataset, ['releaseId', 'preparationId', 'ruleId']) || Object.values(dataset).some((v) => typeof v !== 'string' || !ids.test(v))) bad('DESCRIPTOR_SCHEMA');
   if (!Array.isArray(descriptor.platforms) || descriptor.platforms.length !== 1 || descriptor.platforms[0] !== 'linux/arm64') bad('PLATFORMS_INVALID');
-  if (!Array.isArray(descriptor.licenses) || descriptor.licenses.length < 5 || descriptor.licenses.length > 128) bad('LICENSES_INVALID');
+  if (!Array.isArray(descriptor.licenses) || descriptor.licenses.length < 4 || descriptor.licenses.length > 128) bad('LICENSES_INVALID');
   const licenseIds = new Set();
   for (const license of descriptor.licenses) {
     if (!keys(license, ['id', 'component', 'licenseId', 'licenseName', 'sourceUrl', 'noticePath', 'noticeBytes', 'noticeSha256']) || typeof license.id !== 'string' || !ids.test(license.id) || licenseIds.has(license.id) || !boundedText(license.component, 128) || !boundedText(license.licenseId, 128) || !boundedText(license.licenseName, 256) || !validUrl(license.sourceUrl) || !Number.isSafeInteger(license.noticeBytes) || license.noticeBytes < 1 || license.noticeBytes > 2 ** 40 || typeof license.noticeSha256 !== 'string' || !hex.test(license.noticeSha256)) bad('LICENSES_INVALID');

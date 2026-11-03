@@ -249,7 +249,7 @@ async function loadLicenses(root, noticesRoot, trackedCheck) {
   await trackedCheck(root);
   const ledger = (await readBoundedJson(path.join(root, 'ops/release/distribution-licenses.json'), MAX_LICENSE_TABLE)).value;
   if (!exact(ledger, ['schema_version', 'licenses']) || ledger.schema_version !== 'lexiflow.distribution-licenses.v1'
-    || !Array.isArray(ledger.licenses) || ledger.licenses.length < 5 || ledger.licenses.length > MAX_LICENSES) fail('LICENSE_LEDGER_INVALID');
+    || !Array.isArray(ledger.licenses) || ledger.licenses.length < 4 || ledger.licenses.length > MAX_LICENSES) fail('LICENSE_LEDGER_INVALID');
   const ids = new Set(); const notices = new Map();
   let lastId = '';
   for (const item of ledger.licenses) {
