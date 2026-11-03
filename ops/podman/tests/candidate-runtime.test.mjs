@@ -140,21 +140,47 @@ test('SQLite corruption probe snapshots, corrupts, rejects, verifies unchanged b
   assert.equal(snapshot('', 'image','owner','lexiflow-data','lexiflow-backup','snapshot'), 'a'.repeat(64));
   snapshot('', 'image','owner','lexiflow-data','lexiflow-backup','corrupt');
   snapshot('', 'image','owner','lexiflow-data','lexiflow-backup','restore');
-  assert.equal(calls.length,3);
+  snapshot('', 'image','owner','lexiflow-data',null,'marker');
+  assert.equal(calls.length,4);
+  assert.ok(calls[3][1].includes('--read-only'));
+  assert.ok(calls[3][1].includes('lexiflow-data:/var/lib/lexiflow:ro'));
+  assert.match(calls[3][1].at(-1),/sha256sum .*\.lexiflow-ready/u);
+  assert.throws(()=>snapshot('', 'image','owner','lexiflow-data',null,'unknown'),/SQLITE_OPERATION_INVALID/);
   assert.match(calls[0][1].at(-1),/cp .*lexicon\.db.*snapshot/u);
   assert.match(calls[1][1].at(-1),/LEXIFLOW-CORRUPT-DB/u);
   assert.match(calls[2][1].at(-1),/mv .*lexicon\.db/u);
   assert.match(source,/sha256sum/u);
 });
 
-test('candidate SQLite fault phase is isolated and verifies failure without mutating saved proof', async () => {
-  const { execute, source } = await lifecycleFunction('faultSqliteDatabase', 'runInner', {
-    volumeAbsent:()=>{}, startAndReady:async()=>{}, proveAutoVolume:()=>{}, sqliteSnapshot:()=> 'a'.repeat(64),
-    cmd:()=>({ok:true}), observeUnhealthy:async()=>true, removeContainer:()=>{},
-    fail:code=>{throw new Error(code);},
-  });
-  assert.match(source,/faultSqliteDatabase/u);
-  assert.match(source,/\/var\/lib\/lexiflow\/lexicon\.db/u);
+test('stopped corrupt-database evidence is read offline and still rejects identity, marker and exit drift', async () => {
+  for (const variant of ['valid','exit','volume','marker','bytes']) {
+    const operations=[];let waits=0,snapshots=0,proofs=0;
+    const original='a'.repeat(64),corrupt='b'.repeat(64),marker='c'.repeat(64);
+    const identity={name:'owned-data',createdAt:'frozen',mountpoint:'/owned',driver:'local'};
+    const {execute}=await lifecycleFunction('faultSqliteDatabase','runInner',{
+      volumeAbsent:()=>{},startAndReady:async()=>({ready:true}),
+      proveAutoVolume:()=>{proofs++;return {identity,markerHash:marker};},
+      cmd:()=>({ok:true}),observeUnhealthy:async()=>true,removeContainer:()=>{},
+      observeWait:async()=>({State:{ExitCode:++waits===2&&variant==='exit'?0:1}}),
+      createVolume:()=>{},containerRun:()=>({ok:true}),inspectContainer:()=>({State:{Status:'exited'}}),assertOwned:()=>{},
+      inspectVolume:()=>({...identity,...(variant==='volume'?{createdAt:'replaced'}:{})}),volumeIdentity:x=>x,
+      validRuntimeState:()=>true,
+      sqliteSnapshot:(_root,_image,_token,_volume,_snapshot,operation)=>{
+        operations.push(operation);
+        if(operation==='snapshot')return ++snapshots===1?original:variant==='bytes'?original:corrupt;
+        if(operation==='corrupt')return corrupt;
+        if(operation==='marker')return variant==='marker'?original:marker;
+        if(operation==='restore')return original;
+        throw Error('unexpected operation');
+      },
+    });
+    const run=()=>execute('','image','owner','container','volume',[],[],{},{});
+    if(variant==='valid'){
+      const result=await run();assert.equal(result.otherOwnedDataPreserved,true);
+      assert.deepEqual(operations,['snapshot','corrupt','snapshot','marker','restore']);
+      assert.equal(proofs,3,'no exec-based volume proof while corrupt container is stopped');
+    }else await assert.rejects(run(),new RegExp({exit:'SQLITE_CORRUPT_DB_EXIT_NOT_OBSERVED',volume:'VOLUME_IDENTITY_CHANGED',marker:'SQLITE_CORRUPT_DB_OTHER_DATA_CHANGED',bytes:'SQLITE_CORRUPT_DB_MUTATED'}[variant]));
+  }
 });
 
 test('runtime entrypoint fixes the SQLite file, verifies before API, and refuses unknown volume contents', async () => {
