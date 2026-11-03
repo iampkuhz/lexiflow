@@ -183,6 +183,7 @@ test('stopped corrupt-database evidence is read offline and still rejects identi
     const run=()=>execute('','image','owner','container','volume',[],[],{},{});
     if(variant==='valid'){
       const result=await run();assert.equal(result.otherOwnedDataPreserved,true);
+      assert.equal(result.databaseFaultObserved,true,'the shared typed consumer receives the actual completed database fault fact');
       assert.deepEqual(operations,['snapshot','corrupt','hash','marker','restore']);
       assert.equal(proofs,3,'no exec-based volume proof while corrupt container is stopped');
     }else await assert.rejects(run(),new RegExp({exit:'SQLITE_CORRUPT_DB_EXIT_NOT_OBSERVED',volume:'VOLUME_IDENTITY_CHANGED',marker:'SQLITE_CORRUPT_DB_OTHER_DATA_CHANGED',bytes:'SQLITE_CORRUPT_DB_MUTATED'}[variant]));

@@ -303,7 +303,7 @@ async function faultSqliteDatabase(logDir,image,token,container,volume,container
   if(!validRuntimeState(restored,identity,dataset))fail('SQLITE_RESTORED_DB_NOT_READY');
   const finalProof=proveAutoVolume(logDir,badName,badVolume,token);
   if(finalProof.markerHash!==readyProof.markerHash)fail('SQLITE_RESTORED_DB_OTHER_DATA_CHANGED');
-  removeContainer(logDir,badName,token);return {corruptDbRejected:true,dbBytesPreserved:true,backupRestored:true,otherOwnedDataPreserved:true};
+  removeContainer(logDir,badName,token);return {databaseFaultObserved:true,corruptDbRejected:true,dbBytesPreserved:true,backupRestored:true,otherOwnedDataPreserved:true};
 }
 async function runInner(request) {
   const out=report(), token=crypto.randomBytes(16).toString('hex'), containers=[], volumes=[], loaded=[];
