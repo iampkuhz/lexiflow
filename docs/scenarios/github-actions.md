@@ -155,7 +155,7 @@ stop
 @enduml
 ```
 
-S1→S2 是 GitHub 托管 source job 到专用 runner prepare job；S2→S3 是原 checkout 的原生交接，不是 Actions 自动签证。S3→S4 由负责人从原标签手动 dispatch，填写原 submission 和 `PUBLISH`；构建和只读预检使用无审批的 `lexiflow-release-private`，S4→S5→S6 仅在 promotion Environment 要求一次人工批准再发布。单维护者可按既定保护批准本人触发的发行，但不能代替独立自动验证或原生角色。
+S1→S2 是 GitHub 托管 source job 到专用 runner prepare job；S2→S3 是原 checkout 的原生交接，不是 Actions 自动签证。S3→S4 由负责人从原标签手动 dispatch，填写原 submission 和 `PUBLISH`；构建和只读预检使用无审批的 `release-internal`，S4→S5→S6 仅在 promotion Environment 要求一次人工批准再发布。单维护者可按既定保护批准本人触发的发行，但不能代替独立自动验证或原生角色。
 
 | 节点 | 命令或操作 | 成功判据 |
 | --- | --- | --- |
@@ -163,8 +163,10 @@ S1→S2 是 GitHub 托管 source job 到专用 runner prepare job；S2→S3 是�
 | S2 构建并交接候选 | `node ops/release/workflow/run-release-workflow.mjs prepare <request>` | 私有环境仅允许正式 tag、无需人工审批；候选身份、制品及固定 handoff 完整，不签验收 |
 | S3 独立验收候选 | `"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs formal <action> <id>` | 以固定 handoff 送验；不同真实 actor 完成完整基线、只读审查及 DAG 核对，无需开发 diff |
 | S4 只读晋升预检 | `"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume <submission> <tag>` | 从原标签重核既有候选和 Formal，不构建、不测试、不发布 |
-| S5 人工批准发布 | GitHub Environment `lexiflow-release-promotion` | 唯一一次人类审批，owner 按保护规则批准；不是测试或独立验收结果 |
+| S5 人工批准发布 | GitHub Environment `release-public` | 唯一一次人类审批，owner 按保护规则批准；不是测试或独立验收结果 |
 | S6 发布原候选 | `"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume <submission> <tag> --publish` | 实际写入前重核新鲜证据、固定资产、当前保护和本次运行批准；只有此步取得发布凭据，远端状态确认 |
+
+内部构建和只读预检均在 `release-internal` 下显式设置 `deployment: false`，保留实际打包、验证、隔离能力和失败阻断，不创建内部 Deployment；正式公开使用 `release-public` 并保留部署记录。Actions 日志、独立验收与审查及 Gate 不隐藏、不省略。此开关不决定是否上传制品；内部候选仅本机保存，正式阶段才公开原制品。具体配置见[发行准备](github-actions/first-release/preparation.md#11-github-配置字段)。
 
 job timeout 是单次执行上限，不是任务估时或逐次累积的发布审批预算：source 5 分钟，prepare 180 分钟，promotion-precheck 30 分钟，promotion 45 分钟。完整原生验收的执行与审阅另按本次冻结计划安排，不重复计入 Actions prepare。命令与精确参数见 [Delivery Gate](../reference/delivery-gate.md) 和[首次发行准备](github-actions/first-release/preparation.md)。
 
@@ -174,7 +176,7 @@ job timeout 是单次执行上限，不是任务估时或逐次累积的发布�
 
 1. 按[Runner 安装与管理](github-actions/first-release/preparation.md#16-runner-安装与日常管理)通过共享 Release 工具自动配置；使用唯一、独立、受控的 Mac runner，标签为 `self-hosted`、`macOS`、`ARM64`、`lexiflow-release`；该标签不能匹配多台机器。专用工作目录不得被其他 workflow 使用、清理或切换源码。不要使用日常开发目录或实际用户安装；禁止不可信 PR 和普通分支进入该宿主。公共仓库更需严格限制专用 runner 的执行来源。
 2. 预装 Node.js 22、Python 与 `requirements-dev.txt`、Temurin 25、Podman Compose、Docker 兼容客户端及扩展依赖/Playwright。只使用已确认的 Podman Unix endpoint；流程不创建或更改 machine。
-3. 创建 `lexiflow-release-private` 和 `lexiflow-release-promotion` 两个 Environment，只允许受保护正式标签。private 无 required reviewer，仅给隔离测试能力；promotion 要求 owner 人工批准，单维护者允许本人审批，管理员 bypass 保持关闭；原生验证与审查仍按 [Harness](../../harness/agent-policy.md#冻结验证与独立性) 保持不同真实 actor。限制标签创建/移动与 workflow 修改权限；Environment 本身不是 Formal 验收。参考 [GitHub Environment 配置](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)。
+3. 创建 `release-internal` 和 `release-public` 两个 Environment，只允许受保护正式标签。private 无 required reviewer，仅给隔离测试能力；promotion 要求 owner 人工批准，单维护者允许本人审批，管理员 bypass 保持关闭；原生验证与审查仍按 [Harness](../../harness/agent-policy.md#冻结验证与独立性) 保持不同真实 actor。限制标签创建/移动与 workflow 修改权限；Environment 本身不是 Formal 验收。参考 [GitHub Environment 配置](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)。
 4. 配置同一固定 checkout 的绝对路径 `LEXIFLOW_RELEASE_WORKSPACE` 和私有构建请求文件绝对路径 `LEXIFLOW_RELEASE_REQUEST_FILE`；工作流不在该路径执行 checkout，负责人须先在已授权的干净源码目录准备精确标签和 commit。两处 Environment 的 workspace 必须一致。在两个 Environment 配置相同的 `LEXIFLOW_RELEASE_NODE_BIN` 和验证能力变量 `LEXIFLOW_RELEASE_JAVA_HOME`、`LEXIFLOW_RELEASE_TEST_REDIS_ENDPOINT`、`LEXIFLOW_RELEASE_ARM64_DOCKER_HOST`、`LEXIFLOW_RELEASE_GRADLE_CACHE`、`LEXIFLOW_RELEASE_NPM_CACHE`；在两个 Environment 将仅供候选导出使用的隔离 SQLite JDBC URL 放入 `LEXIFLOW_RELEASE_JDBC_URL` secret，不能指向实际安装。缓存仅为构建依赖，不包含用户脚本或私有数据。
 5. 在同一 OS 用户与稳定 checkout 配置真实 Codex 运行环境，确保历史 actor 元数据、Gate records 与 Verify 附件可重读。仅复制 JSON、UUID 或将原始记录上传为 Actions artifact 不满足此条件。
 6. 确认上述隔离和保护后，再将 repository variable `LEXIFLOW_RELEASE_RUNNER_READY` 设为 `true`。它仅是管理员配置确认，不是测试、机器身份或独立验收证据。

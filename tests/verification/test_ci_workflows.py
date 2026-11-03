@@ -20,6 +20,10 @@ def workflow(name):
     )
 
 
+def safe_workflow(name):
+    return yaml.safe_load((ROOT / ".github/workflows" / name).read_text())
+
+
 class WorkflowContractTest(unittest.TestCase):
     def test_release_regressions_are_consumed_by_real_quick_plan(self):
         """真实声明、依赖闭包及输入快照均参与；不运行第二套发布流水线。"""
@@ -231,7 +235,8 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(
             full["runs-on"], ["self-hosted", "macOS", "ARM64", "lexiflow-release"]
         )
-        self.assertEqual(full["environment"], "lexiflow-release-private")
+        self.assertEqual(full["environment"], {"name": "release-internal", "deployment": "false"})
+        self.assertIs(safe_workflow("release.yml")["jobs"]["prepare"]["environment"]["deployment"], False)
         self.assertEqual(value["concurrency"]["cancel-in-progress"], "false")
         self.assertEqual(value["concurrency"]["group"], "lexiflow-release-host")
         run = "\n".join(step.get("run", "") for step in full["steps"])
@@ -257,8 +262,10 @@ class WorkflowContractTest(unittest.TestCase):
             self.assertNotIn(banned, run)
         dry = value["jobs"]["promotion-precheck"]
         publish = value["jobs"]["promotion"]
-        self.assertEqual(dry["environment"], "lexiflow-release-private")
+        self.assertEqual(dry["environment"], {"name": "release-internal", "deployment": "false"})
         self.assertEqual(dry["needs"], "source")
+        self.assertNotIn("continue-on-error", str(dry))
+        self.assertNotIn("GITHUB_TOKEN", str(dry))
         dry_run = "\n".join(step.get("run", "") for step in dry["steps"])
         dry_step = next(
             step for step in dry["steps"] if "resume" in step.get("run", "")
@@ -275,7 +282,13 @@ class WorkflowContractTest(unittest.TestCase):
             {"actions": "read", "contents": "write", "packages": "write"},
         )
         self.assertEqual(publish["needs"], ["source", "promotion-precheck"])
-        self.assertEqual(publish["environment"], "lexiflow-release-promotion")
+        self.assertEqual(publish["environment"], "release-public")
+        safe_jobs = safe_workflow("release.yml")["jobs"]
+        self.assertIs(safe_jobs["promotion-precheck"]["environment"]["deployment"], False)
+        self.assertEqual(safe_jobs["promotion"]["environment"], "release-public")
+        self.assertNotIn("deployment: false", str(safe_jobs["promotion"]["environment"]).lower())
+        self.assertNotIn("continue-on-error", str(publish))
+        self.assertNotIn("GITHUB_TOKEN", str(dry))
         self.assertIn("inputs.release_tag == github.ref_name", dry["if"])
         self.assertIn("inputs.release_tag == github.ref_name", publish["if"])
         self.assertIn("refs/tags/v", dry["if"])

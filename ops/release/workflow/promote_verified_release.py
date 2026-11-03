@@ -488,9 +488,8 @@ class GitHub:
                 or path
                 not in {
                     prefix + "/immutable-releases",
-                    prefix + "/environments/lexiflow-release-promotion",
-                    prefix
-                    + "/environments/lexiflow-release-promotion/deployment-branch-policies",
+                    prefix + "/environments/release-public",
+                    prefix + "/environments/release-public/deployment-branch-policies",
                 }
             ):
                 _fail("github-route-rejected")
@@ -726,7 +725,7 @@ def _assert_live_promotion_authorization(
     ):
         _fail("promotion-approval-history-unavailable")
     status, env = config.api(
-        "GET", f"/repos/{owner}/{repo}/environments/lexiflow-release-promotion"
+        "GET", f"/repos/{owner}/{repo}/environments/release-public"
     )
     if (
         status != 200
@@ -787,13 +786,13 @@ def _assert_live_promotion_authorization(
         associated = [
             e
             for e in environments
-            if e["id"] == env["id"] or e["name"] == "lexiflow-release-promotion"
+            if e["id"] == env["id"] or e["name"] == "release-public"
         ]
         if associated:
             if (
                 len(associated) != 1
                 or associated[0]["id"] != env["id"]
-                or associated[0]["name"] != "lexiflow-release-promotion"
+                or associated[0]["name"] != "release-public"
             ):
                 _fail("promotion-environment-id-mismatch")
             decisions.append(approval)
@@ -820,7 +819,7 @@ def _assert_live_promotion_authorization(
         _fail("promotion-environment-protection-mismatch")
     status, policies = config.api(
         "GET",
-        f"/repos/{owner}/{repo}/environments/lexiflow-release-promotion/deployment-branch-policies",
+        f"/repos/{owner}/{repo}/environments/release-public/deployment-branch-policies",
     )
     if (
         status != 200

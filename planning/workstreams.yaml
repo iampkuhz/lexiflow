@@ -1284,6 +1284,149 @@ workstreams:
         - eng.verification.module-tests
         discovered_from: LF-TSK-QLT-2549
         depends_on: []
+      - id: LF-TSK-OPS-2095
+        title: 统一发行环境命名并关闭内部部署记录
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-environment-visibility/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - .github/workflows/release.yml
+        - ops/release/workflow/promote_verified_release.py
+        - tests/verification/test_ci_workflows.py
+        - tests/verification/test_release_promotion.py
+        - harness/agent-policy.md
+        - docs/scenarios/github-actions.md
+        - docs/scenarios/github-actions/first-release.md
+        - docs/scenarios/github-actions/first-release/preparation.md
+        - planning/workstreams.yaml
+        - openspec/changes/release-environment-visibility/**
+        - tmp/phase-tools/release-environment-visibility/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 统一发行环境命名并关闭内部部署记录及完整真实证据。
+        deliverable: 统一发行环境命名并关闭内部部署记录及可核验交接。
+        acceptance_criteria: &id001
+        - 两个内部job使用release-internal且deployment为false，构建、隔离能力、检查、证据核验与失败阻断保持。
+        - 正式环境release-public保留唯一required reviewer、v*标签、管理员禁绕过、PUBLISH和写前复核，不代批、不重新构建。
+        - 故障注入实际执行生产入口验证失败、身份不符、制品变化均无发布写入；CI合同约束needs与最小权限。
+        - 仅修改新源码与新Environment配置，不改变现有v2.1.10标签、镜像、资产和历史证据；不混入开发main的未发布提交。
+        acceptance_evidence:
+        - 精确目标根、输入冻结、真实原生actor/run、当次检查与故障回放、远端保护读回、明确限制。
+        validation_command: python3 -m unittest tests.verification.test_ci_workflows tests.verification.test_release_promotion
+        required_check_ids:
+        - eng.verification.module-tests
+        depends_on: []
+      - id: LF-TSK-QLT-2556
+        title: 实现发行环境与失败阻断直接回归
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-environment-visibility/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - .github/workflows/release.yml
+        - ops/release/workflow/promote_verified_release.py
+        - tests/verification/test_ci_workflows.py
+        - tests/verification/test_release_promotion.py
+        - tmp/phase-tools/release-environment-visibility/implementation/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 实现发行环境与失败阻断直接回归及完整真实证据。
+        deliverable: 实现发行环境与失败阻断直接回归及可核验交接。
+        acceptance_criteria: *id001
+        acceptance_evidence:
+        - 精确目标根、输入冻结、真实原生actor/run、当次检查与故障回放、远端保护读回、明确限制。
+        validation_command: python3 -m unittest tests.verification.test_ci_workflows tests.verification.test_release_promotion
+        required_check_ids:
+        - eng.verification.module-tests
+        depends_on: []
+      - id: LF-TSK-QLT-2557
+        title: 独立执行发行环境展示变更开发检查
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-environment-visibility/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/release-environment-visibility/development/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立执行发行环境展示变更开发检查及完整真实证据。
+        deliverable: 独立执行发行环境展示变更开发检查及可核验交接。
+        acceptance_criteria: *id001
+        acceptance_evidence:
+        - 精确目标根、输入冻结、真实原生actor/run、当次检查与故障回放、远端保护读回、明确限制。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.verification.module-tests
+        depends_on: []
+      - id: LF-TSK-QLT-2558
+        title: 独立执行发行环境展示变更正式工程验收
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-environment-visibility/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/release-environment-visibility/formal/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立执行发行环境展示变更正式工程验收及完整真实证据。
+        deliverable: 独立执行发行环境展示变更正式工程验收及可核验交接。
+        acceptance_criteria: *id001
+        acceptance_evidence:
+        - 精确目标根、输入冻结、真实原生actor/run、当次检查与故障回放、远端保护读回、明确限制。
+        validation_command: python3 -m scripts.acceptance validate --submission-id <uuid>
+        required_check_ids:
+        - eng.verification.module-tests
+        depends_on: []
+      - id: LF-TSK-QLT-2559
+        title: 独立审查发行环境权限与完整证据
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-environment-visibility/tasks.md
+        estimated_minutes: 60
+        kind: design
+        lifecycle_state: READY
+        allowed_files:
+        - tmp/phase-tools/release-environment-visibility/review/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 独立审查发行环境权限与完整证据及完整真实证据。
+        deliverable: 独立审查发行环境权限与完整证据及可核验交接。
+        acceptance_criteria: *id001
+        acceptance_evidence:
+        - 精确目标根、输入冻结、真实原生actor/run、当次检查与故障回放、远端保护读回、明确限制。
+        validation_command: python3 -m scripts.acceptance review --validation-id <uuid>
+        required_check_ids:
+        - eng.verification.module-tests
+        depends_on: []
       - id: LF-TSK-OPS-2094
         title: 修复测试弹窗焦点竞态并集成单运行发行修复
         priority: P0

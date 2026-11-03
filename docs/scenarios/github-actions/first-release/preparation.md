@@ -6,7 +6,7 @@
 
 ## 1.1. GitHub 配置字段
 
-管理员按[仓库管理员准备](../../github-actions.md#13-仓库管理员准备)配置私有与正式发布两个 Environment、唯一 runner、隔离服务、不可变发行与权限。`lexiflow-release-private` 无人工审批，仅给测试能力；`lexiflow-release-promotion` 保留 owner required reviewer，单维护者设置 `prevent_self_review=false`、`can_admins_bypass=false`。两者仅允许正式 `v*` tag。当前电脑可以承载 runner，但使用专用源码与隔离数据，不能让其他 workflow 或不可信 PR 在此执行。所需变量如下：
+管理员按[仓库管理员准备](../../github-actions.md#13-仓库管理员准备)配置私有与正式发布两个 Environment、唯一 runner、隔离服务、不可变发行与权限。`release-internal` 无人工审批，仅给测试能力；`release-public` 保留 owner required reviewer，单维护者设置 `prevent_self_review=false`、`can_admins_bypass=false`。两者仅允许正式 `v*` tag。当前电脑可以承载 runner，但使用专用源码与隔离数据，不能让其他 workflow 或不可信 PR 在此执行。所需变量如下：
 
 | 配置位置 | 名称 | 要填什么 |
 | --- | --- | --- |
@@ -27,6 +27,18 @@
 在专用 checkout 按[隔离验证环境](../../verification-environment.md#11-一次性准备运行时与镜像)创建 `.local/lexiflow-python` 并安装 `requirements-dev.txt`。发行 workflow 在构建和两步晋升中显式使用同一 Node 22 与该 venv。原生 正式验收 和晋升通过同一[受控执行环境](../../../../ops/release/workflow/release-execution-environment.mjs)固定工具 PATH、用户、locale、时区与临时根，过滤偶然的会话环境，再传入显式私有验证能力；缺工具或能力立即停止。Node 启动的 Python 子进程沿用该环境。不依赖 launchd 服务的全局 Python 恰好安装 PyYAML，也不在取得发布凭据后临时安装依赖。
 
 <a id="12-首次发行材料没有旧公开-release-也不能省-previous"></a>
+
+内部构建和只读预检两个 job 均使用以下 Environment 映射；它只停止创建 Deployment 对象，不跳过打包、检查、证据消费或失败阻断，也不控制制品上传：
+
+```yaml
+environment:
+  name: release-internal
+  deployment: false
+```
+
+正式发布引用 `release-public`，保留默认 Deployment 和唯一人审；仅正式发布阶段公开已验收的精确镜像与三个附件，内部产物仍留在本机隔离候选目录。所有 job 在 Actions 中仍有状态和日志。该设置不兼容 GitHub App 自定义 deployment protection rule；不要通过删除必要保护来规避。参见 [GitHub 无部署对象的环境](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments#using-environments-without-deployments)。
+
+Environment 标识切换须同步发布器的真实环境 id/名称核验、保护、变量和 Secret。新域配置并读回后才切换；Secret 无法从 GitHub 读回明文，须通过已授权来源安全注入。缺配置则停止，不回退宽权限或借用旧审批。既有标签的 workflow 不随 main 改变，不为展示调整移动正式标签或重建已发布制品；停用旧环境前确认无活动运行，禁止重跑已退役环境的旧流程以免自动生成无保护环境。`deployment: false` 不会删除既有历史记录。
 
 ## 1.2. 首次发行材料
 

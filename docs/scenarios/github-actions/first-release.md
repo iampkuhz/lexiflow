@@ -21,7 +21,7 @@
 1. **自动配置 runner。** 在源码根执行下方 `runner deps` 和 `runner setup`；工具通过已登录的 `gh` 获取短期 token，校验并安装官方 macOS ARM64 包、注册 `lexiflow-release` 标签并启动服务，无需网页复制命令。缺登录或权限时按[Runner 管理](first-release/preparation.md#16-runner-安装与日常管理)操作。以完成原生验收的同一 OS 用户运行，只用于受保护发行，不接不可信 PR。
 2. **留专用源码与资料目录。** 同一电脑可以有独立发行 clone；不要把 `LEXIFLOW_RELEASE_WORKSPACE` 指向日常开发 checkout 或现有 `.local/podman` 安装。验证期间不编辑/移动该源码；输入、候选和证据保持原路径。在推正式 tag 前先让这个 clone 的 HEAD 对齐已提交的精确源码，并准备私有请求；自动构建不等待人审。
 3. **核对工具和测试环境。** 运行 `runner doctor`；Homebrew 管理公共 CLI，既有工具链提供 Temurin Java 25。工程 Python 依赖、Playwright、隔离 Redis 与实际 Docker/Podman endpoint 仍按[验证环境](../verification-environment.md)准备。内部候选验收使用18082且保持正式18080/开发18081不动；最终公开安装另核对正式18080的切换窗口，不杀未知进程、不清库、不接到日常数据。
-4. **配置 GitHub。** 建立无审批的 `lexiflow-release-private` 和要求 owner 人工批准的 `lexiflow-release-promotion`，两者只允许正式 `v*` tag；仅 promotion 允许发布写权限，单维护者允许本人审批，管理员 bypass 保持关闭；开启 immutable releases。按[配置表](first-release/preparation.md#11-github-配置字段)填写本机路径、测试资源与 secret；确认全部准备后才设 `LEXIFLOW_RELEASE_RUNNER_READY=true`。
+4. **配置 GitHub。** 建立无审批的 `release-internal` 和要求 owner 人工批准的 `release-public`，内部构建和预检均设 `deployment: false`，只在 Actions 展示执行与错误、不新增内部 Deployment；正式公开仍保留 Deployment。两者只允许正式 `v*` tag；仅正式发布 job 允许发布写权限，单维护者允许本人审批，管理员 bypass 保持关闭；开启 immutable releases。按[配置表](first-release/preparation.md#11-github-配置字段)填写本机路径、测试资源与 secret；确认全部准备后才设 `LEXIFLOW_RELEASE_RUNNER_READY=true`。
 5. **完成首发材料和验收准备。** 核准五类组件的许可与 notice、导出真实已发布资料、准备精确目标候选的构建请求，并安排独立 Formal 验证/审查。目标必须实际完成干净初始化、同卷重启、初始化中断恢复和故障验收；详细材料见[准备页](first-release/preparation.md#12-首次发行材料)，不能伪造或跳 Gate。
 
 ```sh
