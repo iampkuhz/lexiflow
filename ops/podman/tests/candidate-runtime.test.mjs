@@ -141,7 +141,12 @@ test('SQLite corruption probe snapshots, corrupts, rejects, verifies unchanged b
   snapshot('', 'image','owner','lexiflow-data','lexiflow-backup','corrupt');
   snapshot('', 'image','owner','lexiflow-data','lexiflow-backup','restore');
   snapshot('', 'image','owner','lexiflow-data',null,'marker');
-  assert.equal(calls.length,4);
+  snapshot('', 'image','owner','lexiflow-data',null,'hash');
+  assert.equal(calls.length,5);
+  assert.ok(calls[4][1].includes('--read-only'));
+  assert.ok(calls[4][1].includes('lexiflow-data:/var/lib/lexiflow:ro'));
+  assert.ok(!calls[4][1].some(x=>x.includes('/snapshot')));
+  assert.doesNotMatch(calls[4][1].at(-1),/cp |mv |printf/u);
   assert.ok(calls[3][1].includes('--read-only'));
   assert.ok(calls[3][1].includes('lexiflow-data:/var/lib/lexiflow:ro'));
   assert.match(calls[3][1].at(-1),/sha256sum .*\.lexiflow-ready/u);
@@ -169,6 +174,7 @@ test('stopped corrupt-database evidence is read offline and still rejects identi
         operations.push(operation);
         if(operation==='snapshot')return ++snapshots===1?original:variant==='bytes'?original:corrupt;
         if(operation==='corrupt')return corrupt;
+        if(operation==='hash')return variant==='bytes'?original:corrupt;
         if(operation==='marker')return variant==='marker'?original:marker;
         if(operation==='restore')return original;
         throw Error('unexpected operation');
@@ -177,7 +183,7 @@ test('stopped corrupt-database evidence is read offline and still rejects identi
     const run=()=>execute('','image','owner','container','volume',[],[],{},{});
     if(variant==='valid'){
       const result=await run();assert.equal(result.otherOwnedDataPreserved,true);
-      assert.deepEqual(operations,['snapshot','corrupt','snapshot','marker','restore']);
+      assert.deepEqual(operations,['snapshot','corrupt','hash','marker','restore']);
       assert.equal(proofs,3,'no exec-based volume proof while corrupt container is stopped');
     }else await assert.rejects(run(),new RegExp({exit:'SQLITE_CORRUPT_DB_EXIT_NOT_OBSERVED',volume:'VOLUME_IDENTITY_CHANGED',marker:'SQLITE_CORRUPT_DB_OTHER_DATA_CHANGED',bytes:'SQLITE_CORRUPT_DB_MUTATED'}[variant]));
   }

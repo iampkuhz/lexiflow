@@ -245,17 +245,19 @@ async function incompatibleVolume(logDir,container,image,volume,token,identity,c
   return true;
 }
 function sqliteSnapshot(logDir,image,token,sourceVolume,snapshotVolume,operation) {
-  if(!['snapshot','corrupt','restore','marker'].includes(operation))fail('SQLITE_OPERATION_INVALID');
+  if(!['snapshot','corrupt','restore','marker','hash'].includes(operation))fail('SQLITE_OPERATION_INVALID');
   const script = operation === 'marker'
     ? 'set -euo pipefail; test -s /var/lib/lexiflow/.lexiflow-ready; sha256sum /var/lib/lexiflow/.lexiflow-ready'
-    : operation === 'snapshot'
+    : operation === 'hash'
+      ? 'set -euo pipefail; test -s /var/lib/lexiflow/lexicon.db; sha256sum /var/lib/lexiflow/lexicon.db'
+      : operation === 'snapshot'
     ? 'set -euo pipefail; test -s /var/lib/lexiflow/lexicon.db; cp --reflink=never /var/lib/lexiflow/lexicon.db /snapshot/lexicon.db; sync; sha256sum /snapshot/lexicon.db'
     : operation === 'corrupt'
       ? 'set -euo pipefail; test -s /var/lib/lexiflow/lexicon.db; printf "LEXIFLOW-CORRUPT-DB\\n" > /var/lib/lexiflow/lexicon.db; sync; sha256sum /var/lib/lexiflow/lexicon.db'
       : 'set -euo pipefail; test -s /snapshot/lexicon.db; cp --reflink=never /snapshot/lexicon.db /var/lib/lexiflow/.lexicon.db.restore; sync; mv -f /var/lib/lexiflow/.lexicon.db.restore /var/lib/lexiflow/lexicon.db; sync; sha256sum /var/lib/lexiflow/lexicon.db';
   const args=['run','--rm','--image-volume=ignore','--label',`${ownerLabel}=${token}`,
-    ...(operation === 'marker' ? ['--read-only'] : []),
-    '--volume',`${sourceVolume}:/var/lib/lexiflow:${operation === 'marker' ? 'ro' : 'rw'}`,
+    ...(['marker','hash'].includes(operation) ? ['--read-only'] : []),
+    '--volume',`${sourceVolume}:/var/lib/lexiflow:${['marker','hash'].includes(operation) ? 'ro' : 'rw'}`,
     ...(snapshotVolume?['--volume',`${snapshotVolume}:/snapshot:rw`]:[]),
     '--entrypoint','/bin/bash',image,'-c',script];
   const result=cmd(logDir,`sqlite-${operation}`,args,{allowFailure:true,timeout:30_000});
@@ -286,7 +288,7 @@ async function faultSqliteDatabase(logDir,image,token,container,volume,container
   if(!unhealthy)fail('SQLITE_CORRUPT_DB_NOT_REJECTED');
   const rejected=await observeWait(logDir,badName,60_000);
   if(!rejected||rejected.State.ExitCode===0)fail('SQLITE_CORRUPT_DB_EXIT_NOT_OBSERVED');
-  const observedHash=sqliteSnapshot(logDir,image,token,badVolume,snapshotVolume,'snapshot');
+  const observedHash=sqliteSnapshot(logDir,image,token,badVolume,null,'hash');
   if(observedHash!==corruptHash)fail('SQLITE_CORRUPT_DB_MUTATED');
   // 被拒绝的损坏库容器已经退出，不能通过 exec 读取卷；先核对已证明的卷身份再只读取证。
   const checkVolume=()=>{const v=inspectVolume(logDir,badVolume);if(!v||JSON.stringify(volumeIdentity(v))!==JSON.stringify(readyProof.identity))fail('VOLUME_IDENTITY_CHANGED');};
