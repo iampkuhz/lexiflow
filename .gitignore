@@ -106,6 +106,10 @@ pnpm-debug.log*
 # ── 本地数据库与日志 ───────────────────────────────────────────────
 *.sqlite
 *.sqlite3
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 *.log
 
 # 仓库 skill 只链接本机安装；共享声明由 Harness 跟踪。

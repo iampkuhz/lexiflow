@@ -4,7 +4,6 @@ from __future__ import annotations
 import io
 import linecache
 import os
-from pathlib import Path
 import shlex
 import shutil
 import signal
@@ -13,7 +12,8 @@ import subprocess
 import sys
 import time
 import traceback
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 MAX_REQUEST_BYTES = 256 * 1024
 MAX_RESPONSE_BYTES = 256 * 1024
@@ -23,17 +23,7 @@ START_TIMEOUT = 3.0
 REQUEST_TIMEOUT = 12.0
 STOP_TIMEOUT = 2.0
 
-# 唯一有限路由声明：只选择不会观察命令 PID、信号、TTY 或流式输出的例。
-# 未列出的用例不启动 server；任何未列出的命令均执行原 Python 程序。
-_COMMANDS = {
-    "build": None, "compose": {"config", "up", "stop"},
-    "container": {"inspect"}, "image": {"exists", "inspect"},
-    "info": None, "inspect": None, "network": {"ls"}, "ps": None,
-    "rm": None, "rmi": None, "stop": None, "tag": None,
-    "volume": {"ls"},
-}
-# The long Node candidate fixture has its own fixed, non-signalling route set.
-# Keep this separate from _COMMANDS so existing Python cases cannot inherit it.
+# The Node candidate fixture has a fixed, non-signalling route set.
 _CANDIDATE_COMMANDS = {
     "info": None,
     "image": {"exists", "inspect"},
@@ -49,31 +39,7 @@ _CANDIDATE_COMMANDS = {
     "compose": {"config", "up", "stop"},
 }
 _CANDIDATE_ROUTE = "test_candidate_local_lifecycle"
-FINITE_ROUTES = {name: _COMMANDS for name in (
-    "test_first_install_plan_uses_current_checkout_and_not_foreign_private_state",
-    "test_install_stop_up_does_not_reimport",
-    "test_external_runlocal_uses_only_app_secret_and_recovers_read_only",
-    "test_repeat_install_uses_same_executor_and_preserves_data",
-    "test_upgrade_cli_uses_api_only_and_never_initializes_again",
-    "test_install_and_upgrade_share_explicit_java_home",
-    "test_upgrade_rejects_successful_compose_that_reuses_old_api_container",
-    "test_upgrade_build_and_start_failures_restore_then_retry",
-    "test_same_version_postgres_build_failure_requires_confirmed_forward_retry",
-    "test_same_version_api_build_failure_retries_after_precise_removal",
-    "test_verify_plan_failure_keeps_config_bound_for_retry",
-    "test_fetch_failure_can_retry_before_database",
-    "test_incomplete_install_rejects_changed_identity_resolver",
-    "test_up_does_not_repair_tampered_network_or_reimport",
-    "test_readiness_deadline_keeps_initialized_data",
-    "test_uncertain_initialization_never_retries",
-    "test_tampered_configuration_refuses_stop",
-    "test_foreign_project_label_refuses_stop",
-    "test_owned_postgres_port_does_not_block_preinit_retry",
-    "test_schema_and_csv_tampering_block_initialization",
-)}
-# `load`, `run`, `pull`, `images`, `volume inspect`, compose `ps`/`run`/`logs`,
-# and every unlisted command intentionally fall through to the original model.
-FINITE_ROUTES[_CANDIDATE_ROUTE] = _CANDIDATE_COMMANDS
+FINITE_ROUTES = {_CANDIDATE_ROUTE: _CANDIDATE_COMMANDS}
 # 专属小测试用路由，用以验证 argv/cwd/env/退出与故障通道。
 FINITE_ROUTES["test_transport_equivalence_and_context"] = {"": None, "probe": None}
 FINITE_TEST_CASES = frozenset(FINITE_ROUTES)

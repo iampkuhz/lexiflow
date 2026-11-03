@@ -99,8 +99,6 @@ class CachedLexiconQueryServiceTest {
             LexiconEntryKind.WORD,
             LexiconHintAction.BLOCK,
             null,
-            0,
-            false,
             0);
     repository.prewarm = List.of(hint, block);
     var changes = new java.util.ArrayList<List<Long>>();
@@ -301,8 +299,6 @@ class CachedLexiconQueryServiceTest {
             LexiconEntryKind.WORD,
             LexiconHintAction.BLOCK,
             null,
-            0,
-            false,
             0);
     repository.prewarm = List.of(hint, block);
     var service = new CachedLexiconQueryService(repository, 4, 1, 1);
@@ -348,8 +344,6 @@ class CachedLexiconQueryServiceTest {
                     LexiconEntryKind.WORD,
                     LexiconHintAction.BLOCK,
                     null,
-                    0,
-                    false,
                     0));
           }
         };
@@ -393,9 +387,7 @@ class CachedLexiconQueryServiceTest {
         lemma.contains(" ") ? LexiconEntryKind.PHRASE : LexiconEntryKind.WORD,
         LexiconHintAction.HINT,
         gloss,
-        100,
-        true,
-        1);
+        100);
   }
 
   private static final class MutableRepository implements LexiconReadRepository {

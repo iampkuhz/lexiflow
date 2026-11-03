@@ -381,7 +381,6 @@ class WorkflowContractTest(unittest.TestCase):
         private_names = {
             "LEXIFLOW_RELEASE_NODE_BIN",
             "LEXIFLOW_JAVA_HOME",
-            "LEXIFLOW_POSTGRES_TEST_JDBC_URL",
             "LEXIFLOW_REDIS_TEST_ENDPOINT",
             "LEXIFLOW_RELEASE_ARM64_DOCKER_HOST",
             "LEXIFLOW_RELEASE_GRADLE_CACHE",

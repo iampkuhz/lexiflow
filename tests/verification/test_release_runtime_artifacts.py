@@ -26,10 +26,10 @@ class TestReleaseRuntimeArtifacts(unittest.TestCase):
                 "extension/dist",
                 "ops/release",
                 "ops/docker",
-                "infra/postgres",
+                "infra/sqlite",
             ):
                 (repo / path).mkdir(parents=True, exist_ok=True)
-            (repo / "infra/postgres/schema.sql").write_bytes(b"synthetic-schema")
+            (repo / "infra/sqlite/schema.sql").write_bytes(b"synthetic-schema")
             scratch = root / "scratch"
             scratch.mkdir()
             cache = root / "cache"
@@ -73,7 +73,7 @@ class TestReleaseRuntimeArtifacts(unittest.TestCase):
                                 "bytes": len(payload),
                                 "sha256": hashlib.sha256(payload).hexdigest(),
                                 "datasetVersion": index,
-                                "preparationPolicy": "lexiflow.deterministic-preparation.v1",
+                                "preparationPolicy": "lexiflow.deterministic-preparation.priority-v2",
                             }
                         )
                     report = {
@@ -94,7 +94,7 @@ class TestReleaseRuntimeArtifacts(unittest.TestCase):
                 "JAVA_HOME": str(java.parent.parent),
                 "LEXIFLOW_RELEASE_GRADLE_CACHE": str(cache),
                 "LEXIFLOW_RELEASE_NPM_CACHE": str(npm),
-                "LEXIFLOW_POSTGRES_TEST_JDBC_URL": "jdbc:postgresql://isolated.invalid/test",
+                "LEXIFLOW_REDIS_TEST_ENDPOINT": "https://isolated.invalid/private-endpoint",
             }
             with patch.object(artifacts, "_run", side_effect=fake_run):
                 built = artifacts.build_local_inputs(repo, scratch, env)
@@ -124,7 +124,7 @@ class TestSyntheticBuilderContract(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         script = r"""
 import { validateSyntheticInput, syntheticDescriptor } from './ops/release/test_tools/build-synthetic-release-candidates.mjs';
-const rows = ['a','b'].map((letter,index) => ({file:`dataset-${letter}.zip`,bytes:3,sha256:String(index+1).repeat(64),datasetVersion:index+1,preparationPolicy:'lexiflow.deterministic-preparation.v1'}));
+const rows = ['a','b'].map((letter,index) => ({file:`dataset-${letter}.zip`,bytes:3,sha256:String(index+1).repeat(64),datasetVersion:index+1,preparationPolicy:'lexiflow.deterministic-preparation.priority-v2'}));
 const request = {scratchDirectory:'/tmp/synthetic',endpoint:'unix:///tmp/private.sock',datasets:rows};
 validateSyntheticInput(request);
 let duplicateRejected=false; try { validateSyntheticInput({...request,datasets:[rows[0],{...rows[1],datasetVersion:rows[0].datasetVersion}]}); } catch { duplicateRejected=true; }
@@ -240,7 +240,7 @@ class TestFixedSyntheticBridge(unittest.TestCase):
                 file = repo / name
                 file.parent.mkdir(parents=True, exist_ok=True)
                 file.write_bytes(data)
-            sql = repo / "infra/postgres/schema.sql"
+            sql = repo / "infra/sqlite/schema.sql"
             sql.parent.mkdir(parents=True, exist_ok=True)
             sql.write_bytes(b"schema")
             for name in ("artifacts", "home"):
@@ -251,7 +251,7 @@ class TestFixedSyntheticBridge(unittest.TestCase):
                     "bytes": 3,
                     "sha256": str(i) * 64,
                     "datasetVersion": i,
-                    "preparationPolicy": "lexiflow.deterministic-preparation.v1",
+                    "preparationPolicy": "lexiflow.deterministic-preparation.priority-v2",
                 }
                 for i, name in enumerate(("dataset-a.zip", "dataset-b.zip"), 1)
             ]

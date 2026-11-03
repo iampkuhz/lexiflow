@@ -11,7 +11,7 @@ import { extensionBytes } from './zip-fixture.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const sha = data => createHash('sha256').update(data).digest('hex');
 const dataset = (i) => ({ file: ['dataset-a.zip', 'dataset-b.zip'][i], bytes: 5,
-  sha256: sha(`zip-${i}`), datasetVersion: i + 1, preparationPolicy: 'lexiflow.deterministic-preparation.v1' });
+  sha256: sha(`zip-${i}`), datasetVersion: i + 1, preparationPolicy: 'lexiflow.deterministic-preparation.priority-v2' });
 const input = { scratchDirectory: '/private/synthetic-test', endpoint: 'unix:///private/docker.sock', datasets: [dataset(0), dataset(1)] };
 const { validateSyntheticInput, syntheticDescriptor, readSyntheticInput, syntheticLayout } = await import('../test_tools/build-synthetic-release-candidates.mjs');
 

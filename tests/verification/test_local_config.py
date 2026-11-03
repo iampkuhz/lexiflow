@@ -73,7 +73,7 @@ class LocalConfigTest(unittest.TestCase):
         execute.assert_called_once_with(argv[0], argv, {"PATH": "fixture"})
 
     def test_error_does_not_echo_configuration_contents(self):
-        secret = "jdbc:postgresql://private-host/secret"
+        secret = "jdbc:sqlite:/private/secret/lexicon.db"
         self.write('{"JDBC_URL":' + json.dumps(secret) + ',"OTHER":"secret-value"}')
         with self.assertRaises(JavaRuntimeError) as caught:
             command_local_config(self.root, {})

@@ -41,7 +41,7 @@ FIXED_FILES = frozenset(
     {
         ".gitignore",
         "AGENTS.md",
-        "infra/postgres/schema.sql",
+        "infra/sqlite/schema.sql",
         "ops/release/build/release-image-build-plan.mjs",
         "ops/release/integrity/extension-archive-integrity.mjs",
         "ops/release/integrity/artifact-build-identity.mjs",
@@ -63,9 +63,7 @@ FIXED_FILES = frozenset(
         "ops/release/third-party-notices.md",
         "ops/docker/base-images.json",
         "ops/docker/Dockerfile",
-        "ops/docker/Dockerfile.postgres",
         "ops/docker/.dockerignore",
-        "ops/docker/initialize-postgres-app-role.sh",
         "ops/docker/compose.yaml",
         "ops/docker/run-container-command.sh",
         "extension/manifest.json",

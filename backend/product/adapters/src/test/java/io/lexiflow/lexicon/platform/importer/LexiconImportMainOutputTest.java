@@ -6,8 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.lexiflow.lexicon.application.port.LexiconImportObserver;
-import io.lexiflow.lexicon.platform.persistence.PostgresPersistence;
-import io.lexiflow.lexicon.platform.persistence.PostgresSchemaInitializer;
+import io.lexiflow.lexicon.platform.persistence.SqlitePersistence;
+import io.lexiflow.lexicon.platform.persistence.SqliteSchemaInitializer;
 import io.lexiflow.observability.platform.LexiconEventObserver;
 import io.lexiflow.observability.platform.StructuredEventLogger;
 import java.io.ByteArrayOutputStream;
@@ -15,9 +15,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.DriverManager;
 import java.util.List;
-import java.util.UUID;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -187,20 +185,16 @@ class LexiconImportMainOutputTest {
   }
 
   @Test
-  @Tag("postgres")
-  void bothFileFormatsPublishThroughCliAndApplicationIntoIsolatedPostgres() throws Exception {
-    var admin = System.getProperty("lexiflow.postgres.test.jdbcUrl");
-    assertTrue(admin != null && !admin.isBlank(), "isolated PostgreSQL URL is required");
-    var schema = "lexiflow_cli_" + UUID.randomUUID().toString().replace("-", "");
-    try (var connection = DriverManager.getConnection(admin);
-        var statement = connection.createStatement()) {
-      statement.execute("CREATE SCHEMA \"" + schema + "\"");
-    }
+  @Tag("sqlite")
+  void bothFileFormatsPublishThroughCliAndApplicationIntoIsolatedSQLite() throws Exception {
+    var temporaryFile = Files.createTempFile("lexicon-file-publication", ".db");
+    Files.delete(temporaryFile);
+    var database = temporaryFile.getParent().toRealPath().resolve(temporaryFile.getFileName());
+    var jdbcUrl = "jdbc:sqlite:" + database;
+    SqliteSchemaInitializer.initialize(
+        jdbcUrl, Path.of(System.getProperty("lexiflow.sqlite.schema.file")));
     var input = Files.createTempFile("lexicon-file-publication", ".csv");
     try {
-      var jdbcUrl = admin + (admin.contains("?") ? "&" : "?") + "currentSchema=" + schema;
-      PostgresSchemaInitializer.initialize(
-          jdbcUrl, Path.of(System.getProperty("lexiflow.postgres.schema.file")));
       Files.writeString(
           input,
           "lemma,chinese_gloss,definition,aliases,inflections,frequency_zipf,frequency_source_id,frequency_license_id,frequency_ref,complex_evidence,dictionary_source_id,dictionary_license_id,dictionary_ref\n"
@@ -242,7 +236,7 @@ class LexiconImportMainOutputTest {
           1,
           canonicalJson.stream().filter(line -> line.contains("lexicon.import.completed")).count());
       assertTrue(canonicalJson.getLast().contains("\"existing_safe\""), canonicalJson.toString());
-      try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+      try (var persistence = SqlitePersistence.open(jdbcUrl)) {
         assertEquals(firstVersion, persistence.repository().publishedVersion());
         assertEquals(
             1, persistence.repository().findByForms(firstVersion, List.of("quasar")).size());
@@ -276,7 +270,7 @@ class LexiconImportMainOutputTest {
           1,
           stardictJson.stream().filter(line -> line.contains("lexicon.import.completed")).count());
       assertTrue(stardictJson.getLast().contains("\"existing_safe\""), stardictJson.toString());
-      try (var persistence = PostgresPersistence.open(jdbcUrl)) {
+      try (var persistence = SqlitePersistence.open(jdbcUrl)) {
         assertEquals(secondVersion, persistence.repository().publishedVersion());
         assertEquals(
             1, persistence.repository().findByForms(secondVersion, List.of("nebula")).size());
@@ -287,10 +281,7 @@ class LexiconImportMainOutputTest {
       }
     } finally {
       Files.deleteIfExists(input);
-      try (var connection = DriverManager.getConnection(admin);
-          var statement = connection.createStatement()) {
-        statement.execute("DROP SCHEMA IF EXISTS \"" + schema + "\" CASCADE");
-      }
+      Files.deleteIfExists(database);
     }
   }
 

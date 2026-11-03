@@ -38,7 +38,7 @@ class ClassificationPolicyTest {
     assertTrue(HintPreparation.prepare(rankKnown).classification().complexListed());
     assertEquals(
         0,
-        ClassificationPolicy.cachePriority(
+        ClassificationPolicy.publishedPriority(
             csvZero, HintPreparation.prepare(csvZero).classification(), LexiconHintAction.HINT));
   }
 
@@ -100,30 +100,33 @@ class ClassificationPolicyTest {
     var basicClassification = HintPreparation.prepare(basic).classification();
     assertEquals(
         1000,
-        ClassificationPolicy.cachePriority(basic, basicClassification, LexiconHintAction.BLOCK));
+        ClassificationPolicy.publishedPriority(
+            basic, basicClassification, LexiconHintAction.BLOCK));
     var blocked = row("opaque", "错误；多义", "fixture", "fixture", null, null, true, 0, 765);
     var blockedClassification = HintPreparation.prepare(blocked).classification();
     assertFalse(blockedClassification.hintEligible());
     assertTrue(blockedClassification.prewarmEligible());
     assertEquals(
         765,
-        ClassificationPolicy.cachePriority(
+        ClassificationPolicy.publishedPriority(
             blocked, blockedClassification, LexiconHintAction.BLOCK));
     var hinted = row("luminous", "发光的", "fixture", "fixture", null, null, true, 0, 765);
     var hintedClassification = HintPreparation.prepare(hinted).classification();
     assertTrue(hintedClassification.hintEligible());
     assertEquals(
         765,
-        ClassificationPolicy.cachePriority(hinted, hintedClassification, LexiconHintAction.HINT));
-    // 四词词形在发布消费者降为 BLOCK，但仍保留原 prewarm 分数。
+        ClassificationPolicy.publishedPriority(
+            hinted, hintedClassification, LexiconHintAction.HINT));
+    // 四词词形在发布消费者降为 BLOCK，但沿用同一个正优先级。
     assertEquals(
         765,
-        ClassificationPolicy.cachePriority(hinted, hintedClassification, LexiconHintAction.BLOCK));
+        ClassificationPolicy.publishedPriority(
+            hinted, hintedClassification, LexiconHintAction.BLOCK));
     var notPrewarmed = row("nebula", "星云", "fixture", "fixture", null, null, false, 0, 765);
     assertTrue(HintPreparation.prepare(notPrewarmed).classification().hintEligible());
     assertEquals(
         0,
-        ClassificationPolicy.cachePriority(
+        ClassificationPolicy.publishedPriority(
             notPrewarmed,
             HintPreparation.prepare(notPrewarmed).classification(),
             LexiconHintAction.HINT));

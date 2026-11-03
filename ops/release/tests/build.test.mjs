@@ -16,8 +16,8 @@ const hash = (value) => createHash('sha256').update(value).digest('hex');
 const templates = ['ops/docker/Dockerfile.runtime', 'ops/docker/runtime-entrypoint.sh'];
 const lockPath = 'ops/docker/base-images.json';
 const lockImages = [
-  { platform: 'linux/amd64', javaRuntime: { reference: `registry.example.invalid/java@sha256:${'a'.repeat(64)}`, imageId: `sha256:${'a'.repeat(64)}` }, postgresRuntime: { reference: `registry.example.invalid/postgres@sha256:${'b'.repeat(64)}`, imageId: `sha256:${'b'.repeat(64)}` } },
-  { platform: 'linux/arm64', javaRuntime: { reference: `registry.example.invalid/java@sha256:${'c'.repeat(64)}`, imageId: `sha256:${'c'.repeat(64)}` }, postgresRuntime: { reference: `registry.example.invalid/postgres@sha256:${'d'.repeat(64)}`, imageId: `sha256:${'d'.repeat(64)}` } },
+  { platform: 'linux/amd64', javaRuntime: { reference: `registry.example.invalid/java@sha256:${'a'.repeat(64)}`, imageId: `sha256:${'a'.repeat(64)}` } },
+  { platform: 'linux/arm64', javaRuntime: { reference: `registry.example.invalid/java@sha256:${'c'.repeat(64)}`, imageId: `sha256:${'c'.repeat(64)}` } },
 ];
 const runtime = (name, id) => ({ reference: `registry.example.invalid/${name}@sha256:${id.repeat(64)}`, imageId: `sha256:${id.repeat(64)}` });
 const git = (root, args, options = {}) => execFileSync('git', ['-C', root, ...args], { timeout: 10_000, ...options });
@@ -25,7 +25,7 @@ const git = (root, args, options = {}) => execFileSync('git', ['-C', root, ...ar
 test('实际仓库基础镜像锁由正式 parser 校验，而非仅验证合成 fixture', async () => {
   const lock = await loadBaseImageLock(repo);
   assert.deepEqual(lock.map(item => item.platform), ['linux/arm64']);
-  for (const item of lock) for (const role of ['javaRuntime', 'postgresRuntime'])
+  for (const item of lock) for (const role of ['javaRuntime'])
     assert.match(item[role].imageId, /^sha256:[a-f0-9]{64}$/);
 });
 
@@ -41,15 +41,15 @@ async function fixture() {
   await writeFile(path.join(root, lockPath), `${JSON.stringify({ schemaVersion: 1, baseImages: lockImages }, null, 2)}\n`);
   for (const name of ['integrity/source-build-identity.mjs', 'integrity/artifact-build-identity.mjs', 'integrity/extension-archive-integrity.mjs', 'integrity/release-artifact-manifest.mjs']) await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repo, 'ops/release', name)));
   await writeFile(path.join(root, 'ops/release/version.txt'), '2.0.0\n');
-  await mkdir(path.join(root, 'infra/postgres'), { recursive: true });
-  await writeFile(path.join(root, 'infra/postgres/schema.sql'), 'CREATE TABLE synthetic(id integer);\n');
+  await mkdir(path.join(root, 'infra/sqlite'), { recursive: true });
+  await writeFile(path.join(root, 'infra/sqlite/schema.sql'), 'CREATE TABLE synthetic(id integer);\n');
   await writeFile(path.join(root, '.gitignore'), '/artifact/\n');
   execFileSync('git', ['init', '-q', root], { timeout: 10_000 });
   git(root, ['add', '.']);
   execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture'], { timeout: 10_000 });
   const sourceCommit = git(root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const artifactRoot = path.join(root, 'artifact'); await mkdir(artifactRoot);
-  const schema = await readFile(path.join(root, 'infra/postgres/schema.sql'));
+  const schema = await readFile(path.join(root, 'infra/sqlite/schema.sql'));
   const builtJar = jarBytes(resolveBuildIdentity(root), schema); await writeFile(path.join(artifactRoot, 'app.jar'), builtJar);
   const dataset = Buffer.from('synthetic dataset'); const notice = Buffer.from('synthetic notice');
   await mkdir(path.join(artifactRoot, 'licenses'), { recursive: true });
@@ -91,7 +91,7 @@ test('生成固定、双平台且无宿主路径的确定性 argv 计划', async
     assert.ok(command.includes('--label') && command.includes('io.lexiflow.image-role=runtime'));
     assert.ok(command.includes(`io.lexiflow.deployment-version=${result.buildIdentity.baseVersion.toLowerCase()}`));
     assert.ok(command.includes(`JAVA_RUNTIME_IMAGE=${lockImages[1].javaRuntime.reference}`));
-    assert.ok(command.includes(`POSTGRES_RUNTIME_IMAGE=${lockImages[1].postgresRuntime.reference}`));
+    assert.equal(command.filter(arg => arg.startsWith('JAVA_RUNTIME_IMAGE=')).length, 1);
     assert.equal(result.contextFiles, undefined);
     assert.equal(result.platforms[0].contextFiles.length, 6);
     assert.ok(result.runtimeIdentityEnv.includes(`datasetSha256=${f.descriptor.dataset.sha256}`));
@@ -133,12 +133,42 @@ test('生产构建参数经真实 tar 配置交给只读发布消费者，缺失
       ? [[command[index + 1].slice(0, command[index + 1].indexOf('=')), command[index + 1].slice(command[index + 1].indexOf('=') + 1)]] : []));
     const result = execFileSync('python3', ['-c', `
 import hashlib, io, json, pathlib, tarfile, tempfile, sys
+import gzip
 from ops.release.workflow import release_registry as registry
 subject = json.load(sys.stdin)
 with tempfile.TemporaryDirectory() as temporary:
     root = pathlib.Path(temporary).resolve()
-    target = root / 'payload' / 'runtime.tar'
-    target.parent.mkdir()
+    target = root / 'payload' / 'images' / 'linux-arm64' / 'runtime-image.tar'
+    target.parent.mkdir(parents=True)
+    notice = b'synthetic notice'
+    license = {'id':'api-runtime','component':'API-runtime','licenseId':'TEST-1','licenseName':'Test License',
+        'sourceUrl':'https://example.invalid/test','noticePath':'licenses/test.txt','noticeBytes':len(notice),
+        'noticeSha256':hashlib.sha256(notice).hexdigest()}
+    index_item = {'id':license['id'],'component':license['component'],'licenseId':license['licenseId'],
+        'licenseName':license['licenseName'],'sourceUrl':license['sourceUrl'],'noticePath':license['noticePath'],
+        'archivePath':'materials/'+license['noticePath'],'bytes':len(notice),'sha256':license['noticeSha256']}
+    index = json.dumps({'schemaVersion':1,'items':[index_item]}, ensure_ascii=False, indent=2).encode()+bytes([10])
+    version = subject['identity']['softwareVersion']
+    source_name = 'lexiflow-third-party-sources-'+version+'.tar.gz'
+    source_path = root / 'payload' / 'sources' / source_name
+    source_path.parent.mkdir(parents=True)
+    with tarfile.open(source_path, 'w:gz', format=tarfile.USTAR_FORMAT) as bundle:
+        for name in ('materials', 'materials/licenses'):
+            member = tarfile.TarInfo(name+'/'); member.type = tarfile.DIRTYPE; bundle.addfile(member)
+        for name, content in (('index.json', index), ('materials/licenses/test.txt', notice)):
+            member = tarfile.TarInfo(name); member.size = len(content); bundle.addfile(member, io.BytesIO(content))
+    source_bytes = source_path.read_bytes()
+    source_artifact = {'role':'corresponding-sources','path':'sources/'+source_name,
+        'bytes':len(source_bytes),'sha256':hashlib.sha256(source_bytes).hexdigest(),
+        'licenseIds':['api-runtime'],'metadata':{'indexSha256':hashlib.sha256(index).hexdigest(),'items':[index_item]}}
+    other_artifacts = [
+        {'role':'dataset','path':'data/dataset.bin','bytes':1,'sha256':'a'*64,'licenseIds':['api-runtime'],
+         'metadata':{'releaseId':'r','preparationId':'p','ruleId':'q','sqlVersion':'s'}},
+        {'role':'extension','path':'extension/package.zip','bytes':1,'sha256':'b'*64,'licenseIds':['api-runtime'],
+         'metadata':{'softwareVersion':'2.0.0','sourceCommit':'0'*40,'expectedDataset':{}}},
+        {'role':'sql','path':'database/schema.sql','bytes':1,'sha256':'c'*64,'licenseIds':['api-runtime']},
+        source_artifact,
+    ]
     def check(labels):
         config = json.dumps({'architecture':'arm64','os':'linux','config':{'Labels':labels}}).encode()
         with tarfile.open(target, 'w:', format=tarfile.USTAR_FORMAT) as bundle:
@@ -147,8 +177,11 @@ with tempfile.TemporaryDirectory() as temporary:
                 member.size = len(content)
                 bundle.addfile(member, io.BytesIO(content))
         raw = target.read_bytes()
-        item = {'role':'runtime-image','path':'runtime.tar','bytes':len(raw),'sha256':hashlib.sha256(raw).hexdigest(),'imageDigest':'sha256:'+hashlib.sha256(config).hexdigest()}
-        registry.verify_candidate_images(root, {'artifacts':[item]}, subject['identity'])
+        item = {'role':'runtime-image','path':'images/linux-arm64/runtime-image.tar','bytes':len(raw),
+            'sha256':hashlib.sha256(raw).hexdigest(),'imageDigest':'sha256:'+hashlib.sha256(config).hexdigest()}
+        item['platform'] = 'linux/arm64'; item['licenseIds']=['api-runtime']
+        registry.verify_candidate_images(root, {'schemaVersion':2,'licenses':[license],
+            'artifacts':[item,*other_artifacts]}, subject['identity'])
     check(subject['labels'])
     missing = dict(subject['labels'])
     del missing['io.lexiflow.deployment-version']

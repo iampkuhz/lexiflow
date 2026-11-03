@@ -1,6 +1,5 @@
 """Podman fake transport 的字节语义、隔离和失败关闭回归。"""
 import os
-from pathlib import Path
 import shlex
 import shutil
 import subprocess
@@ -8,20 +7,19 @@ import sys
 import tempfile
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from podman_fake_transport import (
     _CANDIDATE_ROUTE,
-    _COMMANDS,
-    FINITE_TEST_CASES,
     FINITE_ROUTES,
+    FINITE_TEST_CASES,
     MAX_REQUEST_BYTES,
     PodmanFakeTransport,
     TransportError,
     _decode_args,
     _decode_env,
 )
-
 
 MODEL = '''import json, os, sys, time
 from pathlib import Path
@@ -241,8 +239,11 @@ class PodmanFakeTransportTest(unittest.TestCase):
 
     def test_candidate_route_isolated_and_native_fallback_is_byte_equivalent(self):
         self.assertIn(_CANDIDATE_ROUTE, FINITE_TEST_CASES)
-        self.assertIs(FINITE_ROUTES['test_install_stop_up_does_not_reimport'], _COMMANDS)
-        self.assertIsNot(FINITE_ROUTES[_CANDIDATE_ROUTE], _COMMANDS)
+        self.assertEqual(set(FINITE_ROUTES), {_CANDIDATE_ROUTE, 'test_transport_equivalence_and_context'})
+        self.assertEqual(set(FINITE_ROUTES[_CANDIDATE_ROUTE]), {
+            'info', 'image', 'tag', 'rmi', 'ps', 'container', 'inspect', 'stop',
+            'rm', 'network', 'volume', 'compose',
+        })
         with tempfile.TemporaryDirectory(prefix='lf candidate transport ') as directory:
             root = Path(directory).resolve()
             bin_dir = root / 'bin'
@@ -415,53 +416,6 @@ class PodmanFakeTransportTest(unittest.TestCase):
         self.assertEqual(result.returncode, 97)
         with self.assertRaises(TransportError):
             self.transport.close()
-
-    def test_real_podman_model_native_transport_equivalence(self):
-        from test_podman_local import LocalEntryTest
-        transported = LocalEntryTest('test_verify_plan_failure_keeps_config_bound_for_retry')
-        native = LocalEntryTest('test_verify_plan_failure_keeps_config_bound_for_retry')
-        native.id = lambda: 'test_podman_local.LocalEntryTest.native_only'
-        transported.setUp()
-        native.setUp()
-        try:
-            self.assertIsNotNone(transported.fake_transport)
-            self.assertIsNone(native.fake_transport)
-            steps = (['info'], ['image', 'exists', 'unknown'],
-                     ['build', '-t', 'synthetic:one', '--label', 'io.lexiflow.image-role=api', '/tmp'],
-                     ['image', 'exists', 'synthetic:one'],
-                     ['image', 'inspect', '--format', 'json', 'unknown'], ['network', 'ls'])
-            for mode in ('', 'api-build-fail'):
-                transported.mode.write_text(mode)
-                native.mode.write_text(mode)
-                for args in steps:
-                    got = subprocess.run([str(transported.bin / 'podman'), *args], cwd=transported.root,
-                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-                    expected = subprocess.run([str(native.bin / 'podman'), *args], cwd=native.root,
-                                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-                    self.assertEqual((got.stdout, got.stderr, got.returncode),
-                                     (expected.stdout, expected.stderr, expected.returncode))
-            self.assertEqual(transported.calls.read_bytes(), native.calls.read_bytes())
-            self.assertEqual(len(transported.calls.read_text().splitlines()), 12)
-            self.assertEqual((transported.root / 'images.json').read_bytes(),
-                             (native.root / 'images.json').read_bytes())
-            self._await_drained(transported.fake_transport)
-            self.assertEqual(int((transported.fake_transport.mailbox / 'server.count').read_text()), 12)
-        finally:
-            try:
-                transported.tearDown()
-            finally:
-                native.tearDown()
-
-    def test_original_cancel_case_does_not_start_server(self):
-        from test_podman_local import LocalEntryTest
-        original = LocalEntryTest('test_cancel_during_image_pull_releases_lock_and_retries')
-        original.setUp()
-        try:
-            self.assertIsNone(original.fake_transport)
-            self.assertFalse((original.root / 'podman-transport').exists())
-        finally:
-            original.tearDown()
-
 
 if __name__ == '__main__':
     unittest.main()

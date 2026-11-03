@@ -2,5 +2,3 @@
 !Dockerfile
 !run-container-command.sh
 !lexiflow-api.jar
-!Dockerfile.postgres
-!initialize-postgres-app-role.sh

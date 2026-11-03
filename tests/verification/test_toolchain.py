@@ -172,7 +172,7 @@ class ToolchainTests(unittest.TestCase):
                 resolve_toolchain(check, {"PATH": f"relative:{directory}"})
             check = {
                 "command": ["sh"],
-                "required_environment": ["postgres-test-jdbc-url"],
+                "required_environment": ["redis-test-endpoint"],
             }
             with self.assertRaises(ToolchainUnavailable):
                 resolve_toolchain(check, {"PATH": "/bin:/usr/bin"})

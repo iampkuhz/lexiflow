@@ -29,7 +29,7 @@ public interface LexiconReadRepository {
    * @param version 含义：已发布词库版本。取值范围：由方法调用前置条件限定。
    * @param action 含义：正向提示或负向阻断。取值范围：非空。
    * @param limit 含义：预热词形的上限。取值范围：非负整数。
-   * @return 按预热优先级排序且不丢失同形歧义的词形集合。
+   * @return 按统一正优先级排序且不丢失同形歧义的词形集合。
    */
   List<LexiconHintCandidate> findPrewarmForms(long version, LexiconHintAction action, int limit);
 }

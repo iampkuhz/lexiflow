@@ -13,10 +13,8 @@ import java.util.Set;
 /** 拥有确定性的歧义识别、优先排序、去重和重叠选择。 */
 final class HintSelection {
   private static final Comparator<CandidateMatch> PRIORITY =
-      Comparator.comparingInt(CandidateMatch::valueTier)
+      Comparator.comparingInt(CandidateMatch::priority)
           .reversed()
-          .thenComparing(Comparator.comparingInt(CandidateMatch::finalPriority).reversed())
-          .thenComparing(Comparator.comparingInt(CandidateMatch::complexListCount).reversed())
           .thenComparing(Comparator.comparingInt(CandidateMatch::length).reversed())
           .thenComparingInt(CandidateMatch::startOffset)
           .thenComparingInt(CandidateMatch::endOffset)
@@ -89,9 +87,7 @@ final class HintSelection {
    * @param senseId 通过资格检查后的义项身份；不可展示时为空。
    * @param lexiconVersion 候选所属词库版本。
    * @param chineseGloss 安全的中文短释；不可展示时为空。
-   * @param valueTier 冻结的候选优先级层级。
-   * @param finalPriority 发布资料中的最终优先级。
-   * @param complexListCount 独立复杂词表证据数量。
+   * @param priority 发布资料中的统一优先级。
    */
   static record CandidateMatch(
       int startOffset,
@@ -100,9 +96,7 @@ final class HintSelection {
       String senseId,
       long lexiconVersion,
       String chineseGloss,
-      int valueTier,
-      int finalPriority,
-      int complexListCount) {
+      int priority) {
     int length() {
       return endOffset - startOffset;
     }

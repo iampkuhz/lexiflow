@@ -35,7 +35,7 @@ INDEPENDENT_REVIEW_LEVELS = frozenset({"high-risk-engineering", "formal-release"
 _PRIVATE_PATHS = ("secrets/**", ".env", ".env.*", "data/**", ".local/**", "tmp/**")
 _SENSITIVE_CONTENT_PATTERNS = (
     re.compile(
-        r"(?i)\b(public|export|fetch|innerHTML|eval|exec|spawn|ProcessBuilder|subprocess|chmod|symlink|jdbc|sql|DataSource|Entity|token|auth\w*|permission\w*|lock\w*|cancel\w*|shutdown|cleanup|delete|remove|redis|postgres\w*|provider|model|inference)\b"
+        r"(?i)\b(public|export|fetch|innerHTML|eval|exec|spawn|ProcessBuilder|subprocess|chmod|symlink|jdbc|sql|DataSource|Entity|token|auth\w*|permission\w*|lock\w*|cancel\w*|shutdown|cleanup|delete|remove|redis|sqlite\w*|provider|model|inference)\b"
     ),
     re.compile(
         r"(?i)(https?://|localStorage|chrome\.storage|Files\.|fs\.|writeFile|readFile|dataset|schema|password|secret|credential|zipfile|archive|\.execute\(|\.start\()"

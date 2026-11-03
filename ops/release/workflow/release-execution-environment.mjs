@@ -69,36 +69,75 @@ export function releaseWorkflowDirectory(root) {
   return path.join(root, 'tmp/quality/release-workflow', version);
 }
 
-function privateCapabilities(root, source) {
+function ownedPrivateDirectory(value, code) {
+  if (!absolute(value)) fail(code);
+  try {
+    const entry = lstatSync(value);
+    if (!entry.isDirectory() || entry.isSymbolicLink() || realpathSync(value) !== value
+      || entry.uid !== process.getuid() || (entry.mode & 0o022) !== 0 || (entry.mode & 0o200) === 0) fail(code);
+  } catch (error) { if (error?.message === code) throw error; fail(code); }
+}
+
+/** Reuse only generated dependency/script caches, never user init/config or task-output caches. */
+export function releaseGradleCacheEntries(root, cache) {
+  ownedPrivateDirectory(cache, 'RELEASE_CACHE_INVALID');
+  let properties;
+  try { properties = readFileSync(path.join(root, 'backend/gradle/wrapper/gradle-wrapper.properties'), 'utf8'); }
+  catch { fail('RELEASE_GRADLE_WRAPPER_INVALID'); }
+  const versions = [...properties.matchAll(/^distributionUrl=.*\/gradle-([0-9]+\.[0-9]+\.[0-9]+)-bin\.zip\s*$/gm)];
+  if (versions.length !== 1) fail('RELEASE_GRADLE_WRAPPER_INVALID');
+  const entries = ['caches/modules-2', 'wrapper/dists'];
+  for (const relative of entries) ownedPrivateDirectory(path.join(cache, relative), 'RELEASE_GRADLE_CACHE_INCOMPLETE');
+  for (const relative of [`caches/${versions[0][1]}`, 'caches/jars-9']) {
+    try { lstatSync(path.join(cache, relative)); }
+    catch (error) { if (error.code === 'ENOENT') continue; fail('RELEASE_CACHE_INVALID'); }
+    ownedPrivateDirectory(path.join(cache, relative), 'RELEASE_CACHE_INVALID');
+    entries.push(relative);
+  }
+  return entries;
+}
+
+function privateCapabilities(root, source, purpose) {
   const java = javaHome(source);
   const env = { LEXIFLOW_JAVA_HOME: java, JAVA_HOME: java };
 
-  const jdbc = requiredValue(source, 'LEXIFLOW_POSTGRES_TEST_JDBC_URL', 'POSTGRES_TEST_JDBC_URL_MISSING');
+  const jdbc = requiredValue(source, 'LEXIFLOW_RELEASE_JDBC_URL', 'RELEASE_JDBC_URL_MISSING');
+  if (!jdbc.startsWith('jdbc:sqlite:/') || /[\u0000\r\n?#]/.test(jdbc)
+    || jdbc.slice('jdbc:sqlite:'.length).split('/').some(part => part === '.' || part === '..')
+    || !jdbc.endsWith('/lexicon.db')) fail('RELEASE_JDBC_URL_INVALID');
   const redis = requiredValue(source, 'LEXIFLOW_REDIS_TEST_ENDPOINT', 'REDIS_TEST_ENDPOINT_MISSING');
   const endpoint = requiredValue(source, 'LEXIFLOW_RELEASE_ARM64_DOCKER_HOST', 'RELEASE_ARM64_ENDPOINT_MISSING');
   const gradle = requiredValue(source, 'LEXIFLOW_RELEASE_GRADLE_CACHE', 'RELEASE_GRADLE_CACHE_MISSING');
   const npm = requiredValue(source, 'LEXIFLOW_RELEASE_NPM_CACHE', 'RELEASE_NPM_CACHE_MISSING');
   if (!endpoint.startsWith('unix://')) fail('RELEASE_ARM64_ENDPOINT_INVALID');
-  for (const [name, value] of [['gradle', gradle], ['npm', npm]]) {
-    if (!absolute(value)) fail('RELEASE_CACHE_INVALID');
-    try { if (!statSync(value).isDirectory()) fail('RELEASE_CACHE_INVALID'); }
-    catch (error) { if (/^RELEASE_CACHE_/.test(error?.message || '')) throw error; fail('RELEASE_CACHE_INVALID'); }
-  }
+  ownedPrivateDirectory(gradle, 'RELEASE_CACHE_INVALID');
+  ownedPrivateDirectory(npm, 'RELEASE_CACHE_INVALID');
+  for (const relative of ['caches/modules-2', 'wrapper/dists'])
+    ownedPrivateDirectory(path.join(gradle, relative), 'RELEASE_GRADLE_CACHE_INCOMPLETE');
+  if (purpose === 'prepare') releaseGradleCacheEntries(root, gradle);
   const candidate = path.join(releaseWorkflowDirectory(root), 'candidate-runtime-request.json');
-  try {
-    const info = lstatSync(candidate);
-    if (!info.isFile() || info.isSymbolicLink() || !absolute(candidate)) fail('CANDIDATE_RUNTIME_REQUEST_INVALID');
-  } catch (error) {
-    if (/^CANDIDATE_RUNTIME_/.test(error?.message || '')) throw error;
-    fail('CANDIDATE_RUNTIME_REQUEST_MISSING');
+  if (purpose !== 'prepare') {
+    try {
+      const info = lstatSync(candidate);
+      if (!info.isFile() || info.isSymbolicLink() || !absolute(candidate)) fail('CANDIDATE_RUNTIME_REQUEST_INVALID');
+    } catch (error) {
+      if (/^CANDIDATE_RUNTIME_/.test(error?.message || '')) throw error;
+      fail('CANDIDATE_RUNTIME_REQUEST_MISSING');
+    }
   }
   Object.assign(env, {
-    LEXIFLOW_POSTGRES_TEST_JDBC_URL: jdbc,
+    LEXIFLOW_RELEASE_JDBC_URL: jdbc,
     LEXIFLOW_REDIS_TEST_ENDPOINT: redis,
     LEXIFLOW_RELEASE_ARM64_DOCKER_HOST: endpoint,
     LEXIFLOW_RELEASE_GRADLE_CACHE: gradle,
     LEXIFLOW_RELEASE_NPM_CACHE: npm,
-    LEXIFLOW_CANDIDATE_RUNTIME_REQUEST: candidate,
+    ...(purpose === 'prepare' ? { GRADLE_USER_HOME: path.join(releaseWorkflowDirectory(root), 'gradle-home'),
+      GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0',
+      npm_config_globalconfig: '/dev/null', NPM_CONFIG_GLOBALCONFIG: '/dev/null',
+      npm_config_cache: npm, NPM_CONFIG_CACHE: npm,
+      npm_config_userconfig: path.join(releaseWorkflowDirectory(root), 'npmrc-empty'),
+      NPM_CONFIG_USERCONFIG: path.join(releaseWorkflowDirectory(root), 'npmrc-empty') }
+      : { LEXIFLOW_CANDIDATE_RUNTIME_REQUEST: candidate }),
   });
   return env;
 }
@@ -106,7 +145,7 @@ function privateCapabilities(root, source) {
 /** Construct the one normalized release process environment; never copy ambient env wholesale. */
 export function resolveReleaseExecutionEnvironment({ root, purpose, source = process.env } = {}) {
   const repository = path.resolve(root || process.cwd());
-  if (!['promotion', 'formal'].includes(purpose)) fail('RELEASE_ENVIRONMENT_PURPOSE_INVALID');
+  if (!['prepare', 'promotion', 'formal'].includes(purpose)) fail('RELEASE_ENVIRONMENT_PURPOSE_INVALID');
   const configuredNodeDirectory = text(source.LEXIFLOW_RELEASE_NODE_BIN);
   if (!absolute(configuredNodeDirectory) || !/^22\./.test(process.versions.node)) fail('RELEASE_NODE22_REQUIRED');
   let configuredReal, runningReal, nodeBin;
@@ -148,8 +187,24 @@ export function resolveReleaseExecutionEnvironment({ root, purpose, source = pro
     TZ: 'UTC',
     PYTHONDONTWRITEBYTECODE: '1',
     PYTHONHASHSEED: '0',
-    ...privateCapabilities(repository, source),
+    ...privateCapabilities(repository, source, purpose),
   };
+  if (purpose === 'prepare') {
+    const check = (file, args, pattern, code) => {
+      const result = spawnSync(file, args, { encoding: 'utf8', timeout: 5000, maxBuffer: 4096, windowsHide: true, env });
+      const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+      if (result.error || result.status !== 0 || result.signal || !pattern.test(output)) fail(code);
+    };
+    check(configuredReal, ['--version'], /^v22\./m, 'RELEASE_NODE22_REQUIRED');
+    check(path.join(pythonBin, 'python3'), ['-c',
+      "import os, yaml; assert all(hasattr(os, name) for name in ('waitid', 'P_PID', 'WEXITED', 'WNOHANG', 'WNOWAIT', 'CLD_EXITED')); print('yaml-ready')"],
+    /^yaml-ready$/m, 'RELEASE_PYTHON_ENVIRONMENT_INVALID');
+    check(path.join(nodeBin, 'npm'), ['--version'], /^[0-9]+\.[0-9]+\.[0-9]+/m, 'RELEASE_NPM_REQUIRED');
+    check(path.join(env.JAVA_HOME, 'bin/java'), ['-version'], /Temurin[^\n]*25\./i, 'JAVA_ENVIRONMENT_INVALID');
+    const userconfig = env.npm_config_userconfig;
+    try { if (lstatSync(userconfig).isSymbolicLink()) fail('RELEASE_NPM_CONFIG_INVALID'); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
   if (purpose === 'formal') {
     for (const key of ['CODEX_HOME', 'CODEX_THREAD_ID', 'CODEX_SESSION_ID'])
       if (typeof source[key] === 'string' && source[key]) env[key] = source[key];

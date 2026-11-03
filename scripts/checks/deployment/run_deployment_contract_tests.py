@@ -227,14 +227,14 @@ def _source_edges(root: Path, member: str, seen: set[str]) -> set[str]:
     # Full repository-relative literals used by copy/read/exec fixtures.  A new
     # literal is checked against the consuming group, not only the surface guard.
     for source in re.findall(
-        r"(?<![\w/])(?:ops/(?:docker|podman|dataset|release)|infra/(?:postgres|local)|scripts/(?:build|checks))/[\w./-]+",
+        r"(?<![\w/])(?:ops/(?:docker|podman|dataset|release)|infra/(?:sqlite|local)|scripts/(?:build|checks))/[\w./-]+",
         content,
     ):
         source = source.rstrip("./")
         if (root / source).is_file() and source != member:
             edges.add(source)
     for source in re.findall(
-        r"(?:\.\./)+((?:ops/(?:docker|podman|dataset|release)|infra/(?:postgres|local)|scripts/(?:build|checks))/[\w./-]+)",
+        r"(?:\.\./)+((?:ops/(?:docker|podman|dataset|release)|infra/(?:sqlite|local)|scripts/(?:build|checks))/[\w./-]+)",
         content,
     ):
         source = source.rstrip("./")
@@ -668,8 +668,8 @@ def _class_lane_worker(result_path: str, read_fd: int, mode: str) -> None:
         ]
         valid = (
             len(ids) == len(set(ids))
-            and len(ids) == 30
-            and runner_result.testsRun == 30
+            and len(ids) == 29
+            and runner_result.testsRun == 29
             and set(timings) == set(ids)
             and not runner_result.skipped
             and all_clean
@@ -945,7 +945,7 @@ def _run(group: str | None) -> dict[str, object]:
                 candidate = _load_python(root, lane_paths)
                 lane_cases, retained_cases = _lane_partition(candidate)
                 expected_lane_ids = [case.id() for case in lane_cases]
-                if len(expected_lane_ids) != 30 or len(set(expected_lane_ids)) != 30:
+                if len(expected_lane_ids) != 29 or len(set(expected_lane_ids)) != 29:
                     raise ValueError("fixed class lane identity inventory changed")
                 main_paths = [path for path in py_paths if path not in lane_paths]
                 lane_temp = tempfile.TemporaryDirectory(prefix="docker-class-lane-")

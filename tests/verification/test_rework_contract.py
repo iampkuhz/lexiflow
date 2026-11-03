@@ -348,24 +348,22 @@ class TestControlledRuntimeInjection(unittest.TestCase):
             command = [
                 sys.executable,
                 "-c",
-                "import json,os,sys; good=bool(os.environ.get('JAVA_HOME') and os.environ.get('LEXIFLOW_POSTGRES_TEST_JDBC_URL') and os.environ.get('LEXIFLOW_REDIS_TEST_ENDPOINT')); print(json.dumps({'status':'PASS','checks_run':1,'failures':0,'errors':0,'skipped':0,'reason':''})) if good else None; sys.exit(0 if good else 9)",
+                "import json,os,sys; good=bool(os.environ.get('JAVA_HOME') and os.environ.get('LEXIFLOW_REDIS_TEST_ENDPOINT')); print(json.dumps({'status':'PASS','checks_run':1,'failures':0,'errors':0,'skipped':0,'reason':''})) if good else None; sys.exit(0 if good else 9)",
             ]
             check = _check("controlled-runtime")
             check["command"] = command
             check["required_environment"] = [
                 "java-25-temurin",
-                "postgres-test-jdbc-url",
                 "redis-test-endpoint",
             ]
             _write(root, [check])
             secret_url = (
-                "jdbc:postgresql://127.0.0.1:55432/isolated?password=never-report"
+                "jdbc:sqlite:/private/lexicon.db?password=never-report"
             )
             with patch.dict(
                 os.environ,
                 {
                     "LEXIFLOW_JAVA_HOME": str(java_home),
-                    "LEXIFLOW_POSTGRES_TEST_JDBC_URL": secret_url,
                     "LEXIFLOW_REDIS_TEST_ENDPOINT": "127.0.0.1:46379",
                 },
             ):

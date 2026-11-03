@@ -449,18 +449,12 @@ class ContainerCommandFixtureTest(unittest.TestCase):
         from ops.docker.tests.test_contract import DockerContractTest
 
         return DockerContractTest(
-            "test_api_development_trust_requires_explicit_external_postgres_without_secret"
+            "test_api_requires_explicit_sqlite_file"
         )
 
     def target_environment(self, **overrides):
-        """只生成合成开发信任目标，不读取实际数据库凭据。"""
-        return {
-            "LEXIFLOW_DATABASE_HOST": "host.containers.internal",
-            "LEXIFLOW_DATABASE_PORT": "15432",
-            "LEXIFLOW_DATABASE_USER": "postgres",
-            "LEXIFLOW_DATABASE_AUTH_MODE": "development-trust",
-            **overrides,
-        }
+        """仅传递合成运行开关，不再注入数据库服务或凭据。"""
+        return overrides
 
     def test_command_uses_fixed_executable_and_keeps_three_second_guard(self):
         """各例链接同一固定替身，不重写它且仍原生调用三秒命令。"""
@@ -479,7 +473,7 @@ class ContainerCommandFixtureTest(unittest.TestCase):
             patch.object(subprocess, "run", wraps=real_run) as calls,
         ):
             process, log = self.fixture_case()._run(
-                "api", env=self.target_environment()
+                "api", files={"lexicon.db": "synthetic"}, env=self.target_environment()
             )
         self.assertEqual(process.returncode, 0, process.stderr)
         self.assertEqual(links, [("java", fixture)])
@@ -494,6 +488,7 @@ class ContainerCommandFixtureTest(unittest.TestCase):
         """真实exec仍透传非零退出且产品脚本清除可注入JVM选项。"""
         process, log = self.fixture_case()._run(
             "api",
+            files={"lexicon.db": "synthetic"},
             env=self.target_environment(
                 JAVA_EXIT="7", JAVA_TOOL_OPTIONS="synthetic-injection"
             ),
@@ -507,6 +502,7 @@ class ContainerCommandFixtureTest(unittest.TestCase):
         def invoke(analysis):
             return self.fixture_case()._run(
                 "api",
+                files={"lexicon.db": "synthetic"},
                 env=self.target_environment(
                     LEXIFLOW_SEGMENT_ANALYSIS_ENABLED=analysis,
                     JAVA_EXIT="7" if analysis == "true" else "0",

@@ -3,7 +3,8 @@ package io.lexiflow.integration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.lexiflow.lexicon.platform.persistence.PostgresSchemaInitializer;
+import io.lexiflow.lexicon.platform.persistence.SqlitePersistence;
+import io.lexiflow.lexicon.platform.persistence.SqliteSchemaInitializer;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.URI;
@@ -12,7 +13,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.DriverManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -28,26 +28,23 @@ final class PipelineRuntimeFixture implements AutoCloseable {
   private static final Duration PROCESS_TIMEOUT = Duration.ofSeconds(90);
   private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(8);
   private final ObjectMapper json = new ObjectMapper();
-  private final String adminJdbcUrl = required("lexiflow.postgres.test.jdbcUrl");
-  private final String schema = "lf_pipeline_" + UUID.randomUUID().toString().replace("-", "");
+
   private final String jdbcUrl;
   private final Path root = Path.of(required("lexiflow.repository.root"));
-  private final Path temp = Files.createTempDirectory("lexiflow-pipeline-");
-  private final Path analysis = temp.resolve("analysis.jsonl");
-  private final Path apiLog = temp.resolve("api.log");
+  private final Path temp;
+  private final Path analysis;
+  private final Path apiLog;
   private final HttpClient client = HttpClient.newBuilder().connectTimeout(HTTP_TIMEOUT).build();
   private Process api;
   private int port;
 
-  PipelineRuntimeFixture() throws Exception {
-    jdbcUrl = adminJdbcUrl + (adminJdbcUrl.contains("?") ? "&" : "?") + "currentSchema=" + schema;
+  PipelineRuntimeFixture(Path temp) throws Exception {
+    this.temp = temp.toRealPath();
+    this.analysis = this.temp.resolve("analysis.jsonl");
+    this.apiLog = this.temp.resolve("api.log");
+    jdbcUrl = "jdbc:sqlite:" + this.temp.resolve("lexicon.db");
     try {
-      try (var connection = DriverManager.getConnection(adminJdbcUrl);
-          var statement = connection.createStatement()) {
-        statement.execute("CREATE SCHEMA \"" + schema + "\"");
-      }
-      PostgresSchemaInitializer.initialize(
-          jdbcUrl, Path.of(required("lexiflow.postgres.schema.file")));
+      SqliteSchemaInitializer.initialize(jdbcUrl, Path.of(required("lexiflow.sqlite.schema.file")));
     } catch (Exception | Error failure) {
       cleanupAfterConstructionFailure(failure);
       throw failure;
@@ -71,8 +68,11 @@ final class PipelineRuntimeFixture implements AutoCloseable {
     assertTrue(result.exitCode() != 0, "constraint-violating publication unexpectedly succeeded");
     assertTrue(
         result.output().contains("synthetic_third_rejected")
-            && result.output().toLowerCase(java.util.Locale.ROOT).contains("check constraint"),
-        "failure was not the expected real PostgreSQL CHECK violation: " + result.output());
+            && result
+                .output()
+                .toLowerCase(java.util.Locale.ROOT)
+                .contains("synthetic_third_rejected"),
+        "failure was not the expected real SQLite constraint violation: " + result.output());
     var events = importEvents(result.output());
     assertTrue(
         events.stream()
@@ -136,7 +136,7 @@ final class PipelineRuntimeFixture implements AutoCloseable {
                 "--logging.level.io.lexiflow.observability.platform.StructuredEventLogger=DEBUG",
                 "--server.address=127.0.0.1",
                 "--server.port=" + port,
-                "--spring.datasource.url=" + jdbcUrl)
+                "--spring.datasource.url=" + jdbcUrl + "?mode=ro")
             .directory(root.toFile())
             .redirectErrorStream(true)
             .redirectOutput(apiLog.toFile())
@@ -200,7 +200,7 @@ final class PipelineRuntimeFixture implements AutoCloseable {
   }
 
   long publishedVersion() throws Exception {
-    try (var connection = DriverManager.getConnection(jdbcUrl);
+    try (var connection = SqlitePersistence.connect(jdbcUrl);
         var statement = connection.createStatement();
         var rs =
             statement.executeQuery(
@@ -213,12 +213,15 @@ final class PipelineRuntimeFixture implements AutoCloseable {
   List<String> databaseSnapshot() throws Exception {
     var snapshot = new java.util.ArrayList<String>();
     for (var table : List.of("lexicon_dataset", "lexicon_entry", "lexicon_form")) {
-      try (var connection = DriverManager.getConnection(jdbcUrl);
+      try (var connection = SqlitePersistence.connect(jdbcUrl);
           var statement = connection.createStatement();
-          var rs =
-              statement.executeQuery(
-                  "SELECT to_jsonb(t)::text FROM " + table + " t ORDER BY to_jsonb(t)::text")) {
-        while (rs.next()) snapshot.add(table + ":" + rs.getString(1));
+          var rs = statement.executeQuery("SELECT * FROM " + table + " ORDER BY 1")) {
+        while (rs.next()) {
+          var row = new StringBuilder(table).append(":");
+          for (int column = 1; column <= rs.getMetaData().getColumnCount(); column++)
+            row.append(rs.getString(column)).append("\u0001");
+          snapshot.add(row.toString());
+        }
       }
     }
     return List.copyOf(snapshot);
@@ -237,10 +240,11 @@ final class PipelineRuntimeFixture implements AutoCloseable {
   }
 
   void prohibitThirdLemma() throws Exception {
-    try (var connection = DriverManager.getConnection(jdbcUrl);
+    try (var connection = SqlitePersistence.connect(jdbcUrl);
         var statement = connection.createStatement()) {
       statement.execute(
-          "ALTER TABLE lexicon_entry ADD CONSTRAINT synthetic_third_rejected CHECK (lemma <> 'thirdversion')");
+          "CREATE TRIGGER synthetic_third_rejected BEFORE INSERT ON lexicon_entry WHEN NEW.lemma ="
+              + " 'thirdversion' BEGIN SELECT RAISE(ABORT, 'synthetic_third_rejected'); END");
     }
   }
 
@@ -254,11 +258,6 @@ final class PipelineRuntimeFixture implements AutoCloseable {
     }
     try {
       client.close();
-    } catch (Throwable problem) {
-      failure = combine(failure, problem);
-    }
-    try {
-      dropSchema();
     } catch (Throwable problem) {
       failure = combine(failure, problem);
     }
@@ -278,21 +277,9 @@ final class PipelineRuntimeFixture implements AutoCloseable {
       original.addSuppressed(cleanupFailure);
     }
     try {
-      dropSchema();
-    } catch (Throwable cleanupFailure) {
-      original.addSuppressed(cleanupFailure);
-    }
-    try {
       deleteTree(temp);
     } catch (Throwable cleanupFailure) {
       original.addSuppressed(cleanupFailure);
-    }
-  }
-
-  private void dropSchema() throws Exception {
-    try (var connection = DriverManager.getConnection(adminJdbcUrl);
-        var statement = connection.createStatement()) {
-      statement.execute("DROP SCHEMA IF EXISTS \"" + schema + "\" CASCADE");
     }
   }
 

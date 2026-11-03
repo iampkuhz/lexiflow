@@ -428,7 +428,7 @@ class CandidateChainTests(unittest.TestCase):
             lambda o: o.update(skipped=1),
             lambda o: o["runtime"]["phases"].pop(),
             lambda o: o["runtime"]["phases"][4]["facts"].update(initInterrupted=False),
-            lambda o: o["runtime"]["phases"][6]["facts"].update(postgresExitObserved=False),
+            lambda o: o["runtime"]["phases"][6]["facts"].update(databaseFaultObserved=False),
             lambda o: o["runtime"]["phases"][2]["facts"]["publishedDatasetIdentity"].update(sha256="8" * 64),
             lambda o: o["runtime"]["assertions"].update(realFailureObserved=False),
             lambda o: o["runtime"]["cleanup"].update(settled=False),

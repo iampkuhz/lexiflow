@@ -26,6 +26,7 @@ from typing import Any
 from ops.release.host_resources.release_process_control import (
     run_bounded as _run_bounded,
 )
+from ops.release.integrity.source_archive_integrity import verify_source_archive
 from ops.release.workflow import release_registry
 from scripts.acceptance.evidence.verify_candidate_acceptance_evidence import (
     _json,
@@ -1631,27 +1632,16 @@ def _release_asset_plan(
         ):
             raise PromotionError("corresponding-sources-index-invalid", stage="assets")
         license = licenses_by_id.get(source["id"])
-        source_artifact = next(
-            (
-                x
-                for x in manifest["artifacts"]
-                if x.get("role") == "license"
-                and x.get("path") == source["noticePath"]
-                and source["id"] in x.get("licenseIds", [])
-            ),
-            None,
-        )
         if (
             license is None
-            or source_artifact is None
             or source["component"] != license.get("component")
             or source["licenseId"] != license.get("licenseId")
             or source["licenseName"] != license.get("licenseName")
             or source["sourceUrl"] != license.get("sourceUrl")
             or source["noticePath"] != license.get("noticePath")
             or source["archivePath"] != "materials/" + license.get("noticePath", "")
-            or source["bytes"] != source_artifact.get("bytes")
-            or source["sha256"] != source_artifact.get("sha256")
+            or source["bytes"] != license.get("noticeBytes")
+            or source["sha256"] != license.get("noticeSha256")
         ):
             raise PromotionError(
                 "corresponding-sources-license-binding-invalid", stage="assets"
@@ -1874,7 +1864,8 @@ def _bound_candidate(
         _fail("formal-release-identity-required")
     image_candidates = marker.get("imageCandidates")
     if (
-        manifest.get("platforms") != ["linux/arm64"]
+        manifest.get("schemaVersion") != 2
+        or manifest.get("platforms") != ["linux/arm64"]
         or not isinstance(image_candidates, list)
         or len(image_candidates) != 1
         or not isinstance(image_candidates[0], dict)
@@ -1919,7 +1910,35 @@ def _bound_candidate(
         _fail("candidate-image-set-invalid")
     if len(source_archives) != 1 or not source_archives[0]["path"].endswith(".tar.gz"):
         _fail("candidate-corresponding-sources-invalid")
+    expected_roles = {
+        "runtime-image",
+        "dataset",
+        "extension",
+        "sql",
+        "corresponding-sources",
+    }
+    if (
+        len(artifacts) != len(expected_roles)
+        or {item.get("role") for item in artifacts if isinstance(item, dict)}
+        != expected_roles
+    ):
+        _fail("candidate-manifest-invalid")
     _release_asset_plan(manifest)
+    source_archive = next(x for x in artifacts if x["role"] == "corresponding-sources")
+    try:
+        verify_source_archive(
+            {
+                "archivePath": str(candidate / "payload" / source_archive["path"]),
+                "bytes": source_archive["bytes"],
+                "sha256": source_archive["sha256"],
+                "licenses": manifest["licenses"],
+                "metadata": source_archive["metadata"],
+            }
+        )
+    except Exception as exc:
+        raise PromotionError(
+            "candidate-corresponding-sources-invalid", stage="assets"
+        ) from exc
     try:
         release_registry.verify_candidate_images(candidate, manifest, identity)
     except release_registry.RegistryError as exc:

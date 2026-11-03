@@ -79,12 +79,10 @@ try {
     if (!project || !installation || !release || !/^[a-f0-9]{32}$/.test(installation) || !/^[a-f0-9]{64}$/.test(release)) fail();
     if (operation === 'up') {
       const service = argv.at(-1);
-      if (service === 'postgres') {
-        makeResource(data, 'container', `${project}-postgres-1`, project, installation, release);
-        makeResource(data, 'network', `${project}_private`, project, installation, release);
-        makeResource(data, 'volume', `${project}_pgdata`, project, installation, release);
-      } else if (service === 'api') {
+      if (service === 'api') {
         makeResource(data, 'container', `${project}-api-1`, project, installation, release);
+        makeResource(data, 'network', `${project}_private`, project, installation, release);
+        makeResource(data, 'volume', `${project}_lexiflow-data`, project, installation, release);
       } else fail();
       await save(all); await record('compose-up', { project, installation, release, service },daemonName); throw new ModelExit(0);
     }
@@ -92,39 +90,8 @@ try {
       const name = valueAfter(argv, '--name');
       const serviceAt = argv.indexOf(name) + 1;
       const role = argv[serviceAt];
-      if (role === 'private-file-importer') {
-        const mode=argv[serviceAt+1], transfer=argv[serviceAt+2];
-        if (!name || name !== `${project}-private-file-importer` || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(transfer)) fail();
-        const volumeSuffix={pg64hex:'postgres-secret',app64hex:'app-secret',zip:'dataset'}[mode];
-        if(!volumeSuffix)fail();
-        const volumeName=`${project}_${volumeSuffix}`;
-        const volume=data.resources.find(item=>item.kind==='volume'&&item.name===volumeName);
-        if(!volume)fail();
-        if(!volume.files)volume.files={};
-        let payload=stdinData, expectedSize, expectedHash;
-        if(mode==='zip'){
-          expectedSize=Number(argv[serviceAt+3]); expectedHash=argv[serviceAt+4];
-          if(!Number.isSafeInteger(expectedSize)||expectedSize<=0||expectedSize>3*1024*1024*1024||! /^[a-f0-9]{64}$/.test(expectedHash))fail();
-        }else{
-          const newline=stdinData.indexOf(0x0a);
-          if(newline<0)fail();
-          expectedHash=stdinData.subarray(0,newline).toString('ascii'); payload=stdinData.subarray(newline+1); expectedSize=64;
-          if(!/^[a-f0-9]{64}$/.test(expectedHash))fail();
-        }
-        if(payload.length!==expectedSize)fail();
-        const actualHash=createHash('sha256').update(payload).digest('hex');
-        if(actualHash!==expectedHash||(mode!=='zip'&&!/^[a-f0-9]{64}$/.test(payload.toString('ascii'))))fail();
-        const path=mode==='pg64hex'?'postgres-password':mode==='app64hex'?'app-password':'dataset.zip';
-        const existing=volume.files[path];
-        if(existing&&(existing.bytes!==expectedSize||existing.sha256!==expectedHash))fail();
-        volume.files[path] ||= {bytes:expectedSize,sha256:expectedHash,mode:mode==='zip'?0o444:0o444,links:1};
-        const importer=makeResource(data,'container',name,project,installation,release,false);
-        data.resources=data.resources.filter(item=>item!==importer);
-        await save(all); await record('private-file-import',{project,mode,volume:volumeName,bytes:expectedSize,existing:Boolean(existing)},daemonName); throw new ModelExit(0);
-      }
-      if (!name || role !== 'initialize' && role !== 'api') fail();
-      if (role === 'initialize') makeResource(data,'volume',`${project}_initialization-work`,project,installation,release,false);
-      if (role === 'api') makeResource(data, 'container', name, project, installation, release);
+      if (!name || role !== 'api') fail();
+      makeResource(data, 'container', name, project, installation, release);
       await save(all); await record('compose-run', { project, installation, release, role, name },daemonName); throw new ModelExit(0);
     }
     fail();
@@ -174,7 +141,7 @@ try {
       const project=labels.find((value)=>value.startsWith(required[0]))?.slice(required[0].length);
       const installation=labels.find((value)=>value.startsWith(required[1]))?.slice(required[1].length);
       const release=labels.find((value)=>value.startsWith(required[2]))?.slice(required[2].length);
-      if(!/^[a-f0-9]{32}$/.test(installation)||!/^[a-f0-9]{64}$/.test(release)||!['postgres-secret','app-secret','dataset'].some((suffix)=>name===`${project}_${suffix}`))fail();
+      if(!/^[a-f0-9]{32}$/.test(installation)||!/^[a-f0-9]{64}$/.test(release)||name!==`${project}_lexiflow-data`)fail();
       if(data.resources.some((item)=>item.kind==='volume'&&item.name===name))throw new ModelExit(2);
       makeResource(data,'volume',name,project,installation,release,false);
       await save(all); log(name); await record('volume-create',{name,project},daemonName); throw new ModelExit(0);
@@ -260,9 +227,7 @@ mkdir -m 700 "$req" || fail 'request directory'
 trap 'printf "%s\\n" "transport signal" > "$box/failed"; exit 97' HUP INT TERM
 printf '%s\\n' "$#" > "$req/count" || fail 'argument count'
 { printf '%s\\000' "\${LEXIFLOW_INSTALLATION_ID-}" "\${LEXIFLOW_RELEASE_KEY-}"; for arg do printf '%s\\000' "$arg"; done; } > "$req/args" || fail 'arguments'
-private_input=0
-for arg do [ "$arg" = private-file-importer ] && private_input=1; done
-if [ "$private_input" -eq 1 ]; then (umask 077; cat > "$req/stdin") || fail 'private stdin'; else : > "$req/stdin" || fail 'stdin marker'; fi
+: > "$req/stdin" || fail 'stdin marker'
 input_bytes=$(wc -c < "$req/stdin") || fail 'stdin size'
 [ "$input_bytes" -le 16777216 ] || fail 'stdin bound'
 # Empty marker creation publishes only fully closed args/count files.

@@ -55,7 +55,7 @@ REQUIRED_FACTS = {
     ),
     "failure-exit": (
         "apiExitObserved",
-        "postgresExitObserved",
+        "databaseFaultObserved",
         "unhealthyObserved",
         "nonzero",
     ),

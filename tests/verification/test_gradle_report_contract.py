@@ -63,7 +63,7 @@ class GradleReportContractTest(unittest.TestCase):
         delivery = source.split('tasks.register("deliveryFull")', 1)[1]
         delivery = delivery.split("\n}", 1)[0]
         self.assertIn('"check"', delivery)
-        self.assertIn('":adapters:postgresIntegrationTest"', delivery)
+        self.assertIn('":adapters:sqliteIntegrationTest"', delivery)
         self.assertIn('":integration-tests:runtimeSmokeTest"', delivery)
         self.assertIn('":api:bootJar"', delivery)
 

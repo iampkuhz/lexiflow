@@ -12,16 +12,15 @@ import unittest
 from pathlib import Path
 
 import yaml
-from tests.verification.declaration_fixtures import input_closure
-from scripts.verification.planning.check_definitions import load_declarations
 
+from scripts.verification.planning.check_definitions import load_declarations
+from tests.verification.declaration_fixtures import input_closure
 
 ROOT = Path(__file__).resolve().parents[2]
 MODULE_CHECKS_PATH = ROOT / "config" / "engineering" / "module-checks.yaml"
 
 RETIRED_MODULES = {
     "scripts/toolchain/lexicon_import.py",
-    "scripts/toolchain/postgres_test.py",
     "scripts/toolchain/local_stack.py",
 }
 
@@ -101,14 +100,12 @@ class ModuleChecksDeclarationTest(unittest.TestCase):
                 "test_docker_environment.py",
                 "test_lifecycle_flow.py",
                 "test_operation_ownership.py",
-                "test_secret_publication.py",
                 "test_state_records.py",
             },
             "local": {
                 "test_ecdict_fetch.py",
                 "test_podman_doctor.py",
                 "test_podman_fake_transport.py",
-                "test_podman_local.py",
                 "test_podman_network.py",
                 "test_podman_progress.py",
             },
@@ -197,8 +194,6 @@ class RetiredWrapperRemovalTest(unittest.TestCase):
     def test_retired_wrapper_tests_are_absent(self) -> None:
         retired_tests = {
             "tests/toolchain/test_lexicon_import.py",
-            "tests/toolchain/test_postgres_test.py",
-            "tests/toolchain/test_postgres_migrations.py",
         }
         for relative_path in retired_tests:
             full_path = ROOT / relative_path
@@ -263,7 +258,6 @@ class ExtensionQualityEntryTest(unittest.TestCase):
                 "java-25-temurin",
                 "node",
                 "git",
-                "postgres-test-jdbc-url",
                 "redis-test-endpoint",
             ],
             checks["eng.backend.delivery"]["required_environment"],

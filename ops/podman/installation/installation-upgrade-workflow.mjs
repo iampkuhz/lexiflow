@@ -11,10 +11,10 @@ import { canonicalJson, createDeploymentPlan, deploymentPlanHash, confirmDeploym
 import { javaBuildEnvironment } from '../environment/java-build-environment.mjs';
 import { installationRecord, publishRecord, verifyExtension, treeDigest } from './installation-update-transaction.mjs';
 import { resolveBuildIdentity, assertBuildIdentityMatches } from '../../release/integrity/source-build-identity.mjs';
-import { probeExternal, inspectDevelopmentTrust } from '../environment/local-database-target.mjs';
 import { versionedImageReference, versionedImageLabels, removeVersionedImage } from '../images/versioned-images.mjs';
 import { acquireImageSlotLock } from '../images/image-slot-lock.mjs';
 import { resolveSourceBaseImage } from '../images/source-base-image.mjs';
+import { sqliteJdbcUrl, validateSqliteDatabaseFile } from '../environment/local-sqlite-target.mjs';
 
 const hex = /^[a-f0-9]{64}$/;
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
@@ -37,30 +37,6 @@ async function verifyExtensionArchive(dir, descriptor, identity, apiPort, extens
   if (extensionDirectory) assertExtensionTreeMatches(extensionDirectory, files);
   return files;
 }
-const identityFacts = identity => {
-  if (!identity || typeof identity !== 'object' || Array.isArray(identity)) return null;
-  const { fingerprint, composeSha256, ...facts } = identity;
-  return facts;
-};
-function developmentIdentityFailure(recorded, current) {
-  const facts = identityFacts(recorded);
-  if (!facts || !hex.test(recorded.fingerprint ?? '')
-      || recorded.composeSha256 !== undefined && !hex.test(recorded.composeSha256))
-    return 'DEVELOPMENT_DATABASE_RECORD_INVALID';
-  // 旧记录先按其原始完整事实核验自洽；只有核验通过才能排除不属于目标的 Compose bytes。
-  const recordedFacts = recorded.composeSha256 === undefined ? facts : { ...facts, composeSha256: recorded.composeSha256 };
-  if (sha(canonicalJson(recordedFacts)) !== recorded.fingerprint) return 'DEVELOPMENT_DATABASE_RECORD_INVALID';
-  const actual = identityFacts(current);
-  if (!actual || facts.containerId !== actual.containerId) return 'DEVELOPMENT_DATABASE_CONTAINER_CHANGED';
-  if (facts.imageId !== actual.imageId || facts.imageName !== actual.imageName) return 'DEVELOPMENT_DATABASE_IMAGE_CHANGED';
-  if (facts.composePath !== actual.composePath || facts.workingDirectory !== actual.workingDirectory
-      || facts.composeProject !== actual.composeProject || facts.service !== actual.service) return 'DEVELOPMENT_DATABASE_REPOSITORY_CHANGED';
-  if (facts.database !== actual.database || facts.authMethod !== actual.authMethod || facts.user !== actual.user) return 'DEVELOPMENT_DATABASE_AUTH_CHANGED';
-  if (facts.hostIp !== actual.hostIp || facts.hostPort !== actual.hostPort || facts.containerPort !== actual.containerPort) return 'DEVELOPMENT_DATABASE_PORT_CHANGED';
-  if (facts.volumeName !== actual.volumeName || facts.volumeDestination !== actual.volumeDestination) return 'DEVELOPMENT_DATABASE_VOLUME_CHANGED';
-  if (canonicalJson(facts) !== canonicalJson(actual)) return 'DEVELOPMENT_DATABASE_RECORD_INVALID';
-  return null;
-}
 function regular(file) {
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink()) fail('DEPLOYMENT_INPUT_INVALID');
@@ -71,14 +47,6 @@ function privateJson(file) {
   const stat = regular(file);
   if (stat.size > 64 * 1024) fail('DEPLOYMENT_METADATA_TOO_LARGE');
   return JSON.parse(fs.readFileSync(file, 'utf8'));
-}
-function secret(file) {
-  if (!path.isAbsolute(file)) fail('DEPLOYMENT_SECRET_INVALID');
-  if (!fs.existsSync(file)) fail('DEPLOYMENT_SECRET_INVALID');
-  const stat = fs.lstatSync(file);
-  if (!stat.isFile() || stat.isSymbolicLink()) fail('DEPLOYMENT_SECRET_INVALID');
-  if (stat.uid !== process.getuid() || (stat.mode & 0o077) || stat.size > 4096 || stat.size < 1) fail('DEPLOYMENT_SECRET_INVALID');
-  return file;
 }
 function tempRoot(repo) {
   const root = path.join(repo, 'tmp/phase-tools/unified-deployment-data-version');
@@ -108,20 +76,18 @@ function databaseResponse(output) {
   try { value = JSON.parse(lines[0]); } catch { fail('DEPLOYMENT_DATABASE_OUTPUT_INVALID'); }
   if (!value || !['PASS', 'FAIL', 'BLOCKED'].includes(value.status)) fail('DEPLOYMENT_DATABASE_OUTPUT_INVALID');
   if (value.status !== 'PASS') {
-    const reasons = new Set(['POSTGRES_17_REQUIRED', 'SCHEMA_OWNER_MISMATCH', 'SCHEMA_CREATE_PERMISSION_REQUIRED',
-      'DATABASE_AUTH_OR_CONNECT_FAILED', 'DATABASE_UNAVAILABLE', 'AUTHORIZATION_FAILED', 'FINGERPRINT_DRIFT',
+    const reasons = new Set(['DATABASE_FILE_INVALID', 'DATABASE_CORRUPT', 'DATABASE_UNAVAILABLE', 'AUTHORIZATION_FAILED', 'FINGERPRINT_DRIFT',
       'CROSS_SCHEMA_DEPENDENCY', 'REQUEST_INVALID', 'REQUEST_OR_DATA_INVALID', 'TARGET_CHANGED', 'INPUT_CHANGED', 'SECRET_CHANGED']);
     fail(`DEPLOYMENT_DATABASE_${value.status}:${reasons.has(value.reason) ? value.reason : 'UNAVAILABLE'}`);
   }
-  if (value.database !== 'lexiflow' || value.schema !== 'lexiflow_release' || !hex.test(value.fingerprint)) fail('DEPLOYMENT_DATABASE_OUTPUT_INVALID');
+  if (typeof value.databaseFile !== 'string' || !path.isAbsolute(value.databaseFile) || !hex.test(value.fingerprint)) fail('DEPLOYMENT_DATABASE_OUTPUT_INVALID');
   return value;
 }
-export function renderCompose(repo, { apiPort, dbPort, external, dbUser, slot = 'source', authMode = external ? 'password' : 'managed' }) {
+export function renderCompose(repo, { apiPort, databaseFile, slot = 'source' }) {
   void repo;
-  if (!Number.isInteger(apiPort) || !Number.isInteger(dbPort) || apiPort < 1 || apiPort > 65535 || dbPort < 1 || dbPort > 65535
-      || typeof dbUser !== 'string' || !dbUser || Buffer.byteLength(dbUser) > 63 || /[\r\n\0]/.test(dbUser)
-      || slot !== 'source' || !['managed', 'password', 'development-trust'].includes(authMode)
-      || external !== (authMode !== 'managed') || authMode === 'development-trust' && dbUser !== 'postgres') fail('DEPLOYMENT_COMPOSE_INPUT_INVALID');
+  if (!Number.isInteger(apiPort) || apiPort < 1 || apiPort > 65535 || typeof databaseFile !== 'string'
+      || !path.isAbsolute(databaseFile) || path.basename(databaseFile) !== 'lexicon.db'
+      || /[\r\n\0:$"\\]/.test(databaseFile) || slot !== 'source') fail('DEPLOYMENT_COMPOSE_INPUT_INVALID');
   const labels = { 'lexiflow.slot': slot, 'lexiflow.installation': '${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}',
     'lexiflow.release': '${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}' };
   const policy = { pull_policy: 'never', platform: '${LEXIFLOW_PLATFORM:?LEXIFLOW_PLATFORM is required}' };
@@ -130,44 +96,20 @@ export function renderCompose(repo, { apiPort, dbPort, external, dbUser, slot = 
   const api = { labels, image: '${LEXIFLOW_API_IMAGE:?LEXIFLOW_API_IMAGE is required}', ...policy,
     command: ['api'], logging: { driver: 'k8s-file', options: { 'max-size': '10mb' } },
     ports: [`127.0.0.1:${apiPort}:8080`],
-    networks: external ? ['published'] : ['private', 'published'],
-    ...(!external ? { depends_on: { postgres: { condition: 'service_healthy' } } } : {
-      extra_hosts: ['host.containers.internal:host-gateway'], environment: {
-        LEXIFLOW_DATABASE_HOST: 'host.containers.internal', LEXIFLOW_DATABASE_PORT: String(dbPort),
-        LEXIFLOW_DATABASE_USER: dbUser, LEXIFLOW_DATABASE_AUTH_MODE: authMode } }),
-    ...(external && authMode === 'development-trust' ? {} : { secrets: ['app-password'] }),
+    networks: ['published'],
+    environment: { SPRING_DATASOURCE_URL: 'jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro' },
+    volumes: ['${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro'],
     ...hardened, stop_grace_period: '30s', healthcheck: {
       test: ['CMD', '/app/run-container-command.sh', 'health'], interval: '30s', timeout: '5s', retries: 3, start_period: '30s' } };
-  const config = { services: { ...(!external ? { postgres: { labels,
-    image: '${LEXIFLOW_POSTGRES_IMAGE:?LEXIFLOW_POSTGRES_IMAGE is required}', ...policy,
-    environment: { POSTGRES_DB: 'lexiflow', POSTGRES_USER: 'postgres', POSTGRES_PASSWORD_FILE: '/run/secrets/postgres-password' },
-    secrets: ['postgres-password', 'app-password'], ports: [`127.0.0.1:${dbPort}:5432`],
-    volumes: ['pgdata:/var/lib/postgresql/data'], networks: ['private', 'published'], mem_limit: '768m',
-    healthcheck: { test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U lexiflow -d lexiflow'], interval: '10s', timeout: '5s', retries: 5, start_period: '20s' } } } : {}), api },
-    secrets: { ...(!external ? { 'postgres-password': { file: './secrets/postgres-password' } } : {}),
-      ...(external && authMode === 'development-trust' ? {} : { 'app-password': { file: './secrets/app-password' } }) },
-    ...(!external ? { volumes: { pgdata: { labels } } } : {}),
-    networks: { ...(!external ? { private: { internal: true, labels } } : {}), published: { driver: 'bridge', labels } } };
+  const config = { services: { api }, networks: { published: { driver: 'bridge', labels } } };
   return `${JSON.stringify(config, null, 2)}\n`;
-}
-export async function assertDevelopmentTargetIdentity({ repo, state, run }) {
-  const target = state?.databaseTarget;
-  if (target?.kind !== 'external' || (target.authMode ?? 'password') !== 'development-trust') return null;
-  const found = await inspectDevelopmentTrust({ run, repo, port: target.port });
-  if (!found) fail('DEVELOPMENT_DATABASE_TARGET_UNAVAILABLE');
-  const identityFailure = developmentIdentityFailure(target.developmentIdentity, found);
-  if (identityFailure) fail(identityFailure);
-  if (target.developmentIdentityFingerprint !== target.developmentIdentity?.fingerprint
-      || target.user !== 'postgres' || target.port !== 15432 || target.host !== '127.0.0.1'
-      || target.database !== undefined && target.database !== 'lexiflow') fail('DEVELOPMENT_DATABASE_RECORD_INVALID');
-  return found;
 }
 export async function packageGeneration(file) {
   try {
     const entries = await readZipEntries(file, ['manifest.json']);
     const manifest = JSON.parse(entries.get('manifest.json').toString('utf8'));
     const inputs = manifest.generationInputs, config = manifest.generationConfig;
-    if (manifest.schemaVersion !== 2 || !inputs || typeof inputs !== 'object' || Array.isArray(inputs)
+    if (manifest.schemaVersion !== 4 || !inputs || typeof inputs !== 'object' || Array.isArray(inputs)
         || !config || typeof config !== 'object' || Array.isArray(config)) fail('DEPLOYMENT_PACKAGE_GENERATION_INVALID');
     const generation = dataGeneration({ codeVersion: manifest.generationCodeVersion, inputSha256: inputs.inputSha256,
       upstream: inputs.upstream, config });
@@ -192,20 +134,14 @@ export async function runUnifiedDeployment(ctx) {
   let sourceManagedState = false;
   if (existed) {
     installed = privateJson(path.join(dir, 'state.json'));
-    if (installed.root !== dir || installed.schema !== 1 || !/^[a-f0-9]{32}$/.test(installed.id)
+    if (installed.root !== dir || installed.schema !== 2 || !/^[a-f0-9]{32}$/.test(installed.id)
         || installed.project !== `lexiflow-local-${installed.id}` || !['new', 'initialized', 'ready'].includes(installed.phase)) fail('DEPLOYMENT_INSTALL_STATE_INVALID');
     if (ctx.enforceFixedSlots && (installed.packageType !== 'source'
-        || installed.dbPort !== 15432 || ![18080, 18081].includes(installed.apiPort))) fail('DEPLOYMENT_SOURCE_SLOT_STATE_INVALID');
+        || ![18080, 18081].includes(installed.apiPort))) fail('DEPLOYMENT_SOURCE_SLOT_STATE_INVALID');
     sourceManagedState = installed.packageType === 'source'
-      && installed.databaseTarget?.kind === 'managed' && installed.dbPort === 15432 && [18080, 18081].includes(installed.apiPort);
-    const sourceMigration = installed.packageType === 'source'
-      && installed.apiPort === 18080 && installed.dbPort === 15432 && ctx.apiPort === 18081;
-    if (ctx.seen.has('--api-port') && ctx.apiPort !== installed.apiPort && !sourceMigration
-        || ctx.seen.has('--db-port') && ctx.dbPort !== installed.dbPort) fail('DEPLOYMENT_TARGET_CHANGED');
-    if (installed.apiPort !== ctx.apiPort && !sourceMigration) fail('DEPLOYMENT_TARGET_CHANGED');
-    if (sourceMigration) {
-      if (await (ctx.portTaken ?? portTaken)(ctx.apiPort)) fail('DEPLOYMENT_API_PORT_OCCUPIED');
-    }
+      && installed.databaseTarget?.kind === 'file' && [18080, 18081].includes(installed.apiPort);
+    if (ctx.seen.has('--api-port') && ctx.apiPort !== installed.apiPort) fail('DEPLOYMENT_TARGET_CHANGED');
+    if (installed.apiPort !== ctx.apiPort) fail('DEPLOYMENT_TARGET_CHANGED');
     ctx.setState(installed);
     if (installed.digests) ctx.verifyConfig();
     const replacementFile = path.join(dir, 'image-replacement.json');
@@ -230,41 +166,12 @@ export async function runUnifiedDeployment(ctx) {
       potentialFailedPreparationReplan = journal?.stage === 'planned'
         && !targetRecord?.invalid && (!targetRecord || targetRecord.operation !== journal.operation);
     }
-    if (sourceMigration && !potentialFailedPreparationReplan) await ctx.verifyLegacyApi(installed);
     await ctx.ownedResources();
   }
   const fresh = !installed || installed.phase === 'new';
-  const sourceMigration = Boolean(installed && installed.packageType === 'source'
-    && installed.apiPort === 18080 && installed.dbPort === 15432 && ctx.apiPort === 18081);
-  const apiPort = sourceMigration ? ctx.apiPort : installed?.apiPort ?? ctx.apiPort, dbPort = installed?.dbPort ?? ctx.dbPort;
-  if (apiPort === dbPort) fail('DEPLOYMENT_PORT_COLLISION');
-  const recordedKind = installed?.databaseTarget?.kind;
-  const recordedAuthMode = installed?.databaseTarget?.authMode ?? (recordedKind === 'external' ? 'password' : 'managed');
-  if (!['managed', 'password', 'development-trust'].includes(recordedAuthMode)
-      || installed && (recordedKind === 'external') !== (recordedAuthMode !== 'managed')) fail('DEPLOYMENT_INSTALL_STATE_INVALID');
-  ctx.progress?.('核验数据库目标');
-  const dbListenerBeforeConsent = await isPortTaken(dbPort);
-  let developmentIdentity = null;
-  if (!installed && dbListenerBeforeConsent)
-    developmentIdentity = await inspectDevelopmentTrust({ run, repo, port: dbPort });
-  else if (recordedAuthMode === 'development-trust') {
-    developmentIdentity = await inspectDevelopmentTrust({ run, repo, port: dbPort });
-    if (!developmentIdentity) fail('DEVELOPMENT_DATABASE_TARGET_UNAVAILABLE');
-    const identityFailure = developmentIdentityFailure(installed.databaseTarget.developmentIdentity, developmentIdentity);
-    if (identityFailure) fail(identityFailure);
-    if (installed.databaseTarget.developmentIdentityFingerprint !== installed.databaseTarget.developmentIdentity?.fingerprint
-        || installed.databaseTarget.user !== 'postgres' || installed.databaseTarget.port !== dbPort
-        || installed.databaseTarget.host !== '127.0.0.1') fail('DEVELOPMENT_DATABASE_RECORD_INVALID');
-  }
-  const dbUser = installed?.databaseTarget?.user ?? (developmentIdentity ? 'postgres' : 'lexiflow');
-  if (!installed && dbListenerBeforeConsent && !developmentIdentity) fail('DEPLOYMENT_DATABASE_CREDENTIAL_REQUIRED');
-  const assertDevelopmentIdentity = async expected => {
-    const current = await inspectDevelopmentTrust({ run, repo, port: dbPort });
-    if (!current) fail('DEVELOPMENT_DATABASE_TARGET_UNAVAILABLE');
-    const failure = developmentIdentityFailure(expected, current);
-    if (failure) fail(failure);
-    return current;
-  };
+  const apiPort = installed?.apiPort ?? ctx.apiPort;
+  const databaseFile = validateSqliteDatabaseFile(path.join(dir, 'data', 'lexicon.db'), { installationRoot: dir });
+  const target = { kind: 'file', file: databaseFile };
   const ordinaryConsent = !ctx.planOnly && !ctx.confirmPlan;
   if (ordinaryConsent) ctx.progress?.('核验部署输入');
   // 确认前只做只读快照，不连接数据库或准备制品；答是后的首次读取也不得换成新的基准。
@@ -272,23 +179,16 @@ export async function runUnifiedDeployment(ctx) {
     ? resolveBuildIdentity(repo).buildId : null;
   const consentNetwork = ordinaryConsent
     ? sourceNetworkFingerprint(ctx.environment ?? process.env) : null;
-  const consentSecret = path.join(dir, 'secrets/app-password');
-  const consentSecretDigest = ordinaryConsent && installed && recordedAuthMode !== 'development-trust'
-    && (installed.phase !== 'new' || fs.existsSync(consentSecret)) ? fileHash(secret(consentSecret)) : null;
   if (ordinaryConsent) {
     ctx.progress?.('等待部署确认');
-    const accepted = await confirmDeploymentIntent({ port: dbPort, user: dbUser, apiPort, previousApiPort: sourceMigration ? 18080 : undefined, signal: ctx.signal,
-      authMode: installed ? recordedAuthMode : developmentIdentity ? 'development-trust' : 'managed',
+    const accepted = await confirmDeploymentIntent({ databaseFile, apiPort, signal: ctx.signal,
       input: ctx.confirmInput ?? process.stdin, output: ctx.confirmOutput ?? process.stdout });
-    if (!accepted) { console.log('[LexiFlow] 已拒绝本次部署，未连接数据库或准备制品。'); return 0; }
+    if (!accepted) { console.log('[LexiFlow] 已拒绝本次部署，未访问数据库文件或准备制品。'); return 0; }
   }
   ctx.progress?.('确认完成，开始连接目标与准备阶段');
   if (consentNetwork && sourceNetworkFingerprint(ctx.environment ?? process.env) !== consentNetwork) fail('SOURCE_NETWORK_ENVIRONMENT_CHANGED');
   if (consentBuildId && resolveBuildIdentity(repo).buildId !== consentBuildId) fail('DEPLOYMENT_INPUT_DRIFT');
-  if (consentSecretDigest && fileHash(consentSecret) !== consentSecretDigest) fail('DEPLOYMENT_SECRET_DRIFT');
   if (ordinaryConsent && installed?.digests) ctx.verifyConfig();
-  if (ordinaryConsent && developmentIdentity) developmentIdentity = await assertDevelopmentIdentity(developmentIdentity);
-  if (sourceMigration && !potentialFailedPreparationReplan) await ctx.verifyLegacyApi(installed);
   // 安装目录尚未建立时先用 ignored 私有日志接住准备命令；拒绝路径绝不创建。
   const preparationLog = path.join(tempRoot(repo), 'preparation.log');
   fs.writeFileSync(preparationLog, '', { mode: 0o600, flag: 'wx' });
@@ -299,23 +199,11 @@ export async function runUnifiedDeployment(ctx) {
     if (!installedServices.has('api')) fail('DEPLOYMENT_API_PORT_OCCUPIED');
     await ctx.verifyApiPort(installed);
   }
-  let dbListener = await isPortTaken(dbPort);
-  const external = installed?.databaseTarget?.kind === 'external' || !installed && Boolean(developmentIdentity);
-  if (!installed && dbListener && !developmentIdentity) fail('DEPLOYMENT_DATABASE_CREDENTIAL_REQUIRED');
-  if (!installed && developmentIdentity && !dbListener) fail('DEVELOPMENT_DATABASE_TARGET_UNAVAILABLE');
-  const authMode = installed ? recordedAuthMode : external ? 'development-trust' : 'managed';
-  if (installed?.databaseTarget?.kind === 'managed' && dbListener && !installedServices.has('postgres')) fail('DEPLOYMENT_DATABASE_PORT_OCCUPIED');
-  const managedSecret = path.join(dir, 'secrets/app-password');
-  if (authMode === 'development-trust' && fs.existsSync(managedSecret)) fail('DEPLOYMENT_INSTALL_STATE_INVALID');
-  if (authMode === 'password' && (!installed?.databaseTarget?.user || !fs.existsSync(managedSecret))) fail('DEPLOYMENT_DATABASE_CREDENTIAL_REQUIRED');
   const probe = tempRoot(repo);
   let imageSlotLock = null;
   let deploymentLocked = false;
   let dataset, generation, identity, jar;
   try {
-    const passwordFile = authMode === 'development-trust' ? undefined
-      : external || !fresh || fs.existsSync(managedSecret) ? secret(managedSecret) : null;
-    const passwordDigest = passwordFile ? fileHash(passwordFile) : null;
     identity = resolveBuildIdentity(repo);
     const codeVersion = await generationCodeVersion(repo);
     ctx.progress?.('检查 Eclipse Temurin 25 并编译 Java 应用');
@@ -394,52 +282,36 @@ export async function runUnifiedDeployment(ctx) {
       failedPreparationReplan = ordinaryConsent
         && sourceManagedState && potentialFailedPreparationReplan
         && installed?.phase === 'ready' && installed.packageType === 'source'
-        && installed.databaseTarget?.kind === 'managed'
+        && installed.databaseTarget?.kind === 'file'
         && replacement.stateSha256 === fileHash(path.join(dir, 'state.json'))
         && replacement.targetBuildId !== identity.buildId
         && journal?.stage === 'planned' && !prepared;
       if (!failedPreparationReplan) fail('DEPLOYMENT_REPLACEMENT_TARGET_CHANGED');
     }
     if (failedPreparationReplan) {
-      // Verify the owned, running PG and API migration absence before the first database connection.
-      await ctx.verifyLegacyApi(installed, { allowMissingApi: true, targetApiPort: ctx.apiPort });
+      // SQLite 文件将由只读 inspect 再次核验；未改变 SQLite 数据库文件或其他 owned data。
     }
-    const target = installed ? { ...installed.databaseTarget, authMode,
-      ...(developmentIdentity ? { developmentIdentity, developmentIdentityFingerprint: developmentIdentity.fingerprint } : {}) }
-      : { kind: external ? 'external' : 'managed', authMode,
-        ...(developmentIdentity ? { developmentIdentity, developmentIdentityFingerprint: developmentIdentity.fingerprint } : {}),
-        host: '127.0.0.1', port: dbPort, user: dbUser };
     const requestBase = { inputType: 'csv', inputPath: dataset, inputSha256, generation };
-    async function dataCommand(mode, { password = passwordFile, image, input = dataset, expectedFingerprint } = {}) {
-      if (authMode === 'development-trust') developmentIdentity = await assertDevelopmentIdentity(developmentIdentity);
+    async function dataCommand(mode, { image, input = dataset, expectedFingerprint } = {}) {
       const request = writeRequest(probe, { ...requestBase, inputPath: image ? '/input' : input,
         ...(expectedFingerprint ? { expectedFingerprint } : {}) });
-      const env = { ...ctx.environment, LEXIFLOW_DEPLOYMENT_JDBC_URL: `jdbc:postgresql://127.0.0.1:${dbPort}/lexiflow?currentSchema=lexiflow_release`,
-        LEXIFLOW_DEPLOYMENT_DB_USER: dbUser };
-      if (authMode === 'development-trust') {
-        delete env.LEXIFLOW_DEPLOYMENT_DB_PASSWORD_FILE; delete env.LEXIFLOW_DEPLOYMENT_DB_PASSWORD;
-        env.LEXIFLOW_DEPLOYMENT_DB_PASSWORD = '';
-      } else env.LEXIFLOW_DEPLOYMENT_DB_PASSWORD_FILE = password;
+      const env = { ...ctx.environment, LEXIFLOW_DEPLOYMENT_JDBC_URL: sqliteJdbcUrl(databaseFile) };
       try {
         if (image) {
-          // root 只在一次性 CLI 容器中读取 owner-only bind mounts；需 DAC_OVERRIDE，否则真实 Podman VM 中 0600 JAR/secret 无法读取。
+          // 仅映射本安装目录下的SQLite文件目录；不访问或挂载其他数据库。
           const output = await run('podman', ['run', '--rm', '--platform', 'linux/arm64', '--user', '0:0', '--read-only',
-            '--cap-drop=ALL', '--cap-add=DAC_OVERRIDE', '--security-opt=no-new-privileges', '--add-host', 'host.containers.internal:host-gateway',
+            '--cap-drop=ALL', '--cap-add=DAC_OVERRIDE', '--security-opt=no-new-privileges',
             '-v', `${request}:/request.json:ro`, '-v', `${input}:/input:ro`,
-            ...(authMode === 'development-trust' ? [] : ['-v', `${password}:/secret:ro`]),
-            '-e', `LEXIFLOW_DEPLOYMENT_JDBC_URL=jdbc:postgresql://host.containers.internal:${dbPort}/lexiflow?currentSchema=lexiflow_release`,
-            '-e', `LEXIFLOW_DEPLOYMENT_DB_USER=${dbUser}`,
-            ...(authMode === 'development-trust' ? ['-e', 'LEXIFLOW_DEPLOYMENT_DB_PASSWORD=', '-e', 'LEXIFLOW_DEPLOYMENT_DB_PASSWORD_FILE=']
-              : ['-e', 'LEXIFLOW_DEPLOYMENT_DB_PASSWORD_FILE=/secret']),
-            '--entrypoint', 'java', image, '-jar', '/app/lexiflow-api.jar', '--deployment-data', mode, '--request', '/request.json'],
+            '-v', `${path.dirname(databaseFile)}:/db:${mode === 'apply' ? 'rw' : 'ro'}`,
+            '-e', 'LEXIFLOW_DEPLOYMENT_JDBC_URL=jdbc:sqlite:/db/lexicon.db',
+            '--entrypoint', 'java', image, '-jar', '/app/lexiflow-api.jar', '--deployment-data', mode,
+            '--request', '/request.json', '--expected-file', '/db/lexicon.db'],
           { cwd: repo, capture: true, env, logOutput: false, timeout: mode === 'apply' ? 1800000 : 600000 });
-          if (authMode === 'development-trust') developmentIdentity = await assertDevelopmentIdentity(developmentIdentity);
           return output;
         }
-        const output = await run('java', ['-jar', jar, '--deployment-data', mode, '--request', request],
+        const output = await run('java', ['-jar', jar, '--deployment-data', mode, '--request', request, '--expected-file', databaseFile],
           { cwd: repo, capture: true, env: (ctx.javaEnvironment ?? javaBuildEnvironment)(env, { repo }), logOutput: false,
             timeout: mode === 'apply' ? 1800000 : 600000 });
-        if (authMode === 'development-trust') developmentIdentity = await assertDevelopmentIdentity(developmentIdentity);
         return output;
       } catch (error) {
         // Java CLI 以 1/3 返回固定 FAIL/BLOCKED JSON；保持非零语义并解码安全类别。
@@ -453,80 +325,16 @@ export async function runUnifiedDeployment(ctx) {
         throw error;
       } finally { fs.unlinkSync(request); }
     }
-    const inspect = async (password = passwordFile, image, input = dataset) => databaseResponse(await dataCommand('inspect', { password, image, input }));
-    const missing = sha('lexiflow:managed:database-absent:v1');
-    if (replacement && !external && !(await isPortTaken(dbPort))) {
-      // 已确认的前次替换可能在移除 PG 镜像后中断。plan 不改变已有资源；
-      // 交互确认后仅按冻结目标重建本安装 PG，随后必须重新读取真实数据库事实。
-      if (ctx.planOnly || ctx.confirmPlan) fail('DEPLOYMENT_REPLACEMENT_RECOVERY_REQUIRES_CONFIRMED_INSTALL');
-      if (replacement.databaseFingerprint === missing || replacement.databaseTarget !== 'managed')
-        fail('DEPLOYMENT_REPLACEMENT_RECORD_INVALID');
-      ctx.acquireLock(); deploymentLocked = true;
-      imageSlotLock = acquireImageSlotLock(identity.baseVersion, 'source');
-      let pgImage;
-      const pgId = await resolveSourceBaseImage({ run, reference: 'docker.io/library/postgres:17-bookworm' });
-      await removeVersionedImage({ run, role: 'postgres', baseVersion: identity.baseVersion, installationId: installed.id, allowReleaseValidation: true });
-      const stage = path.join(probe, 'postgres'); fs.mkdirSync(stage, { recursive: true });
-      for (const name of ['Dockerfile.postgres', 'initialize-postgres-app-role.sh']) fs.copyFileSync(path.join(repo, 'ops/docker', name), path.join(stage, name));
-      const pgTag = versionedImageReference('postgres', identity.baseVersion);
-      await run('podman', ['build', '--platform', 'linux/arm64', '--pull=never', '--build-arg', `POSTGRES_RUNTIME_IMAGE=${pgId}`,
-        ...versionedImageLabels('postgres', identity.baseVersion), '-f', path.join(stage, 'Dockerfile.postgres'), '-t', pgTag, stage]);
-      pgImage = await run('podman', ['image', 'inspect', '--format', '{{.Id}}', pgTag], { capture: true });
-      if (!/^(sha256:)?[a-f0-9]{64}$/.test(pgImage)) fail('DEPLOYMENT_IMAGE_INVALID');
-      const envFile = path.join(dir, 'release.env');
-      const oldEnv = fs.readFileSync(envFile, 'utf8');
-      if ([...oldEnv.matchAll(/^LEXIFLOW_POSTGRES_IMAGE=.*$/gm)].length !== 1) fail('DEPLOYMENT_REPLACEMENT_RECORD_INVALID');
-      const newEnv = oldEnv.replace(/^LEXIFLOW_POSTGRES_IMAGE=.*$/m, `LEXIFLOW_POSTGRES_IMAGE=${pgImage}`);
-      replacement.allowedEnvSha256 = [...new Set([...replacement.allowedEnvSha256, sha(newEnv)])].slice(-4);
-      atomicJson(path.join(dir, 'image-replacement.json'), replacement);
-      atomicText(envFile, newEnv);
-      await ctx.compose('config');
-      await ctx.compose('up', '-d', '--force-recreate', 'postgres');
-      await ctx.waitManagedPostgres({ ...installed, postgresImage: newEnv.match(/^LEXIFLOW_POSTGRES_IMAGE=(.+)$/m)?.[1] });
-      const recovered = await inspect(path.join(dir, 'secrets/app-password'), undefined, dataset);
-      // Recovery changed the live resource set; never authorize from its pre-recovery snapshot.
-      installedServices = await ctx.ownedResources();
-      dbListener = await isPortTaken(dbPort);
-      if (!dbListener || !installedServices.has('postgres')) fail('DEPLOYMENT_DATABASE_PORT_OCCUPIED');
-      if (recovered.fingerprint !== replacement.databaseFingerprint) fail('DEPLOYMENT_DATABASE_DRIFT');
-    }
-    let observation, externalProbe;
-    if (external) {
-      const postgresImage = installed?.postgresImage ?? 'docker.io/library/postgres:17-bookworm';
-      try {
-        const found = await run('podman', ['image', 'inspect', '--format', '{{.Id}}', postgresImage],
-          { cwd: repo, capture: true, logOutput: false });
-        if (!/^(sha256:)?[a-f0-9]{64}$/.test(found)) fail('DEPLOYMENT_POSTGRES_TOOL_IMAGE_INVALID');
-      } catch (error) {
-        if (postgresImage !== 'docker.io/library/postgres:17-bookworm') fail('DEPLOYMENT_POSTGRES_TOOL_IMAGE_MISSING');
-        await run('podman', ['pull', '--platform', 'linux/arm64', postgresImage], { cwd: repo });
-        const found = await run('podman', ['image', 'inspect', '--format', '{{.Id}}', postgresImage],
-          { cwd: repo, capture: true, logOutput: false });
-        if (!/^(sha256:)?[a-f0-9]{64}$/.test(found)) fail('DEPLOYMENT_POSTGRES_TOOL_IMAGE_INVALID');
-      }
-      externalProbe = await probeExternal({ run, port: dbPort, user: dbUser, passwordFile, authMode, developmentIdentity, postgresImage });
-      observation = await inspect();
-    } else if (fresh) {
-      const services = installed ? await ctx.ownedResources() : new Set();
-      if (services.has('postgres')) observation = await inspect();
-      else {
-        if (await isPortTaken(dbPort)) fail('DEPLOYMENT_DATABASE_PORT_OCCUPIED');
-        observation = { status: 'PASS', fingerprint: missing, needsRebuild: true, reason: 'DATABASE_ABSENT', generationVersion: null, datasetVersion: null };
-      }
+    const inspect = async (image, input = dataset) => databaseResponse(await dataCommand('inspect', { image, input }));
+    const missing = sha('lexiflow:sqlite:database-absent:v1');
+    let observation;
+    if (!fs.existsSync(databaseFile)) {
+      observation = { status: 'PASS', databaseFile, fingerprint: missing, needsRebuild: true,
+        reason: 'DATABASE_ABSENT', generationVersion: null, datasetVersion: null };
     } else {
-      if (!dbListener && installed?.packageType === 'source'
-          && installed.databaseTarget?.kind === 'managed') {
-        if (ctx.planOnly || ctx.confirmPlan) fail('DEPLOYMENT_MANAGED_DATABASE_STOPPED');
-        if (!installedServices.has('postgres')) fail('DEPLOYMENT_DATABASE_PORT_OCCUPIED');
-        await ctx.verifyStoppedManagedPostgres(installed);
-        if (!deploymentLocked) { ctx.acquireLock(); deploymentLocked = true; }
-        await ctx.verifyStoppedManagedPostgres(installed);
-        await ctx.compose('up', '-d', 'postgres');
-        await ctx.waitManagedPostgres(installed);
-      }
       observation = await inspect();
+      if (observation.databaseFile !== databaseFile) fail('DEPLOYMENT_DATABASE_FILE_MISMATCH');
     }
-    if (authMode === 'development-trust') developmentIdentity = await assertDevelopmentIdentity(developmentIdentity);
     if (failedPreparationReplan) {
       if (ctx.planOnly || ctx.confirmPlan || !observation || observation.fingerprint !== replacement.databaseFingerprint)
         fail('DEPLOYMENT_REPLACEMENT_TARGET_CHANGED');
@@ -535,21 +343,18 @@ export async function runUnifiedDeployment(ctx) {
     // 每次 install/upgrade 都刷新并启动目标应用；资料重建仍由数据库事实决定。
     const applicationReason = fresh ? 'NEW_INSTALL' : installed.buildIdentity?.buildId !== identity.buildId ? 'BUILD_CHANGED' : 'INSTALL_REFRESH';
     const plan = createDeploymentPlan({ operation: action, installation: installed?.id ?? `new:${dir}`,
-      apiPortMigration: sourceMigration ? { from: 18080, to: 18081 } : undefined, targetBuildId: identity.buildId,
+      targetBuildId: identity.buildId,
       generationVersion: generation.generationVersion, databaseFingerprint: observation.fingerprint,
-      databaseTarget: { kind: external ? 'external' : 'managed', authMode,
-        developmentIdentityFingerprint: developmentIdentity?.fingerprint ?? installed?.databaseTarget?.developmentIdentityFingerprint ?? null,
-        host: '127.0.0.1', port: dbPort, database: 'lexiflow', schema: 'lexiflow_release', user: dbUser, owner: dbUser, serverMajor: 17 },
-      takeover: external, databaseAuthority: external ? { verified: true } : undefined,
-      createDatabase: !external && observation.fingerprint === missing,
+      databaseTarget: target,
+      createDatabase: observation.fingerprint === missing,
       applicationUpdate: true, applicationStart: true,
       applicationReason, dataRebuild: observation.needsRebuild,
       dataReason: observation.reason ?? 'OK' });
     const planHash = deploymentPlanHash(plan);
     if (ctx.planOnly) {
       console.log(JSON.stringify({ plan, planHash }));
-      console.log(`[LexiFlow] ${external ? '接入经认证的外部' : '使用本安装专用'} PostgreSQL 17 目标 127.0.0.1:${dbPort}/lexiflow，schema=lexiflow_release，owner=${dbUser}。`);
-      console.log(`[LexiFlow] 应用动作=${plan.actions.applicationReason}，资料重建=${plan.actions.dataRebuild ? '是' : '否'}（${plan.actions.dataReason}）。外部数据库不由本安装管理。`);
+      console.log(`[LexiFlow] SQLite 文件目标 ${databaseFile}。`);
+      console.log(`[LexiFlow] 应用动作=${plan.actions.applicationReason}，资料重建=${plan.actions.dataRebuild ? '是' : '否'}（${plan.actions.dataReason}）。`);
     }
     if (ctx.planOnly) return 0;
     if (ctx.confirmPlan) await confirmDeploymentPlan(planHash, { suppliedHash: ctx.confirmPlan, signal: ctx.signal });
@@ -560,19 +365,11 @@ export async function runUnifiedDeployment(ctx) {
     }
     if (resolveBuildIdentity(repo).buildId !== identity.buildId || await generationCodeVersion(repo) !== generation.codeVersion
       || fileHash(dataset) !== inputSha256) fail('DEPLOYMENT_INPUT_DRIFT');
-    if (external) {
-      if (authMode === 'development-trust') developmentIdentity = await assertDevelopmentIdentity(developmentIdentity);
-      const updated = await probeExternal({ run, port: dbPort, user: dbUser, passwordFile, authMode, developmentIdentity,
-        postgresImage: installed?.postgresImage ?? 'docker.io/library/postgres:17-bookworm' });
-      if (updated.fingerprint !== externalProbe.fingerprint) fail('DEPLOYMENT_DATABASE_DRIFT');
-      if ((await inspect()).fingerprint !== observation.fingerprint) fail('DEPLOYMENT_DATABASE_DRIFT');
-    } else if (observation.fingerprint === missing) { if (await isPortTaken(dbPort)) fail('DEPLOYMENT_DATABASE_PORT_OCCUPIED'); }
-    else if ((await inspect()).fingerprint !== observation.fingerprint) fail('DEPLOYMENT_DATABASE_DRIFT');
+    if (observation.fingerprint !== missing
+        && (await inspect()).fingerprint !== observation.fingerprint) fail('DEPLOYMENT_DATABASE_DRIFT');
     if (failedPreparationReplan) {
-      // Recheck frozen files and the original managed resources after database observation, before archiving intent.
-      await ctx.verifyLegacyApi(installed, { allowMissingApi: true, targetApiPort: apiPort });
+      // Recheck frozen files and the original SQLite file after database observation, before archiving intent.
       if (ordinaryConsent && installed?.digests) ctx.verifyConfig();
-      if (consentSecretDigest && fileHash(consentSecret) !== consentSecretDigest) fail('DEPLOYMENT_SECRET_DRIFT');
       if (resolveBuildIdentity(repo).buildId !== identity.buildId || await generationCodeVersion(repo) !== generation.codeVersion
           || fileHash(dataset) !== inputSha256) fail('DEPLOYMENT_INPUT_DRIFT');
       if ((await inspect()).fingerprint !== observation.fingerprint) fail('DEPLOYMENT_DATABASE_DRIFT');
@@ -585,7 +382,7 @@ export async function runUnifiedDeployment(ctx) {
     let current = installed;
     if (!current) {
       const id = crypto.randomBytes(16).toString('hex');
-      current = { schema: 1, id, project: `lexiflow-local-${id}`, root: dir, apiPort, dbPort,
+      current = { schema: 2, id, project: `lexiflow-local-${id}`, root: dir, apiPort, databaseFile,
         captionDebug: false, phase: 'new', version: identity.softwareVersion, buildIdentity: identity,
         databaseTarget: target, packageType: 'source' };
       ctx.setState(current);
@@ -612,16 +409,9 @@ export async function runUnifiedDeployment(ctx) {
           replacement = { schema: 1, root: dir, installationId: installed.id,
             stateSha256: fileHash(path.join(dir, 'state.json')), targetBuildId: identity.buildId,
             inputSha256, generationVersion: generation.generationVersion, baseVersion: identity.baseVersion,
-            databaseFingerprint: observation.fingerprint, databaseTarget: external ? 'external' : 'managed',
+            databaseFingerprint: observation.fingerprint, databaseTarget: 'file',
             allowedEnvSha256: [fileHash(path.join(dir, 'release.env'))] };
           atomicJson(path.join(dir, 'image-replacement.json'), replacement);
-        }
-        // 删除仅限当前 software-version 槽位；helper 在任何变更前完成完整归属预检。
-        const secretDir = path.join(dir, 'secrets'); fs.mkdirSync(secretDir, { recursive: true, mode: 0o700 });
-        for (const name of authMode === 'development-trust' ? [] : external ? ['app-password'] : ['postgres-password', 'app-password']) {
-          const file = path.join(secretDir, name);
-          if (!fs.existsSync(file)) fs.writeFileSync(file, crypto.randomBytes(32).toString('hex') + '\n', { mode: 0o600, flag: 'wx' });
-          secret(file);
         }
         const dataDir = path.join(dir, 'data', `ecdict-source.${inputSha256.slice(0, 16)}`);
         fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -629,13 +419,7 @@ export async function runUnifiedDeployment(ctx) {
         if (!fs.existsSync(dataFile)) fs.copyFileSync(dataset, dataFile);
         if (fileHash(dataFile) !== inputSha256) fail('DEPLOYMENT_DATA_COPY_DRIFT');
         fs.writeFileSync(path.join(dataDir, 'source-summary.json'), JSON.stringify({ upstream: generation.upstream, csv_sha256: inputSha256, generation }), { mode: 0o600 });
-        const sqlDir = path.join(dir, 'infra/postgres'); fs.mkdirSync(sqlDir, { recursive: true, mode: 0o700 });
-        const sqlSource = path.join(repo, 'infra/postgres/schema.sql');
-        const sqlTarget = path.join(sqlDir, 'schema.sql');
-        const nextSql = path.join(dir, `.schema-${opId}.sql`);
-        if (!fs.existsSync(sqlTarget)) fs.copyFileSync(sqlSource, sqlTarget);
-        if (fileHash(sqlTarget) !== fileHash(sqlSource)) fs.copyFileSync(sqlSource, nextSql);
-        let apiImage, postgresImage = installed?.postgresImage, apiJar = installed?.apiJar, extensionArchive;
+        let apiImage, apiJar = installed?.apiJar, extensionArchive;
         const buildEnv = (ctx.javaEnvironment ?? javaBuildEnvironment)(ctx.environment, { repo });
         await run('npm', ['ci'], { cwd: path.join(repo, 'extension'), env: buildEnv });
         await run('npm', ['run', 'build'], { cwd: path.join(repo, 'extension'), env: { ...buildEnv, LEXIFLOW_API_PORT: String(apiPort) } });
@@ -658,34 +442,23 @@ export async function runUnifiedDeployment(ctx) {
         apiJar = path.join(stage, 'api/lexiflow-api.jar');
         // Resolve every source base before removing/replacing either versioned image.
         const baseId = await resolveSourceBaseImage({ run, reference: 'docker.io/library/eclipse-temurin:25-jre' });
-        const postgresBaseId = external ? null : await resolveSourceBaseImage({ run, reference: 'docker.io/library/postgres:17-bookworm' });
         const tag = versionedImageReference('api', identity.baseVersion);
         await removeVersionedImage({ run, role: 'api', baseVersion: identity.baseVersion, installationId: current.id, allowReleaseValidation: true });
         await run('podman', ['build', '--platform', 'linux/arm64', '--pull=never', '--build-arg', `JAVA_RUNTIME_IMAGE=${baseId}`,
           ...ctx.imageLabels(identity), ...versionedImageLabels('api', identity.baseVersion), '-t', tag, path.join(stage, 'api')]);
         apiImage = await run('podman', ['image', 'inspect', '--format', '{{.Id}}', tag], { capture: true });
-        if (!external) {
-          const pgId = postgresBaseId;
-          await removeVersionedImage({ run, role: 'postgres', baseVersion: identity.baseVersion, installationId: current.id, allowReleaseValidation: true });
-          fs.mkdirSync(path.join(stage, 'postgres'), { recursive: true });
-          for (const name of ['Dockerfile.postgres', 'initialize-postgres-app-role.sh']) fs.copyFileSync(path.join(repo, 'ops/docker', name), path.join(stage, 'postgres', name));
-          const pgTag = versionedImageReference('postgres', identity.baseVersion);
-          await run('podman', ['build', '--platform', 'linux/arm64', '--pull=never', '--build-arg', `POSTGRES_RUNTIME_IMAGE=${pgId}`,
-            ...versionedImageLabels('postgres', identity.baseVersion), '-f', path.join(stage, 'postgres/Dockerfile.postgres'), '-t', pgTag, path.join(stage, 'postgres')]);
-          postgresImage = await run('podman', ['image', 'inspect', '--format', '{{.Id}}', pgTag], { capture: true });
-        }
-          if (!/^(sha256:)?[a-f0-9]{64}$/.test(apiImage) || !external && !/^(sha256:)?[a-f0-9]{64}$/.test(postgresImage)) fail('DEPLOYMENT_IMAGE_INVALID');
+        if (!/^(sha256:)?[a-f0-9]{64}$/.test(apiImage)) fail('DEPLOYMENT_IMAGE_INVALID');
         verifyExtension(fresh ? path.join(dir, 'extension') : path.join(dir, `.prepared-${opId}`, 'extension'), identity, apiPort);
-        const composeText = renderCompose(repo, { apiPort, dbPort, external, dbUser, authMode, slot: 'source' });
-        const envText = `LEXIFLOW_PLATFORM=linux/arm64\nLEXIFLOW_API_IMAGE=${apiImage}\nLEXIFLOW_POSTGRES_IMAGE=${postgresImage ?? 'external'}\nLEXIFLOW_INSTALLATION_ID=${current.id}\nLEXIFLOW_RELEASE_KEY=local-${current.id}\n`;
+        const composeText = renderCompose(repo, { apiPort, databaseFile, slot: 'source' });
+        const envText = `LEXIFLOW_PLATFORM=linux/arm64\nLEXIFLOW_API_IMAGE=${apiImage}\nLEXIFLOW_DATABASE_FILE=${databaseFile}\nLEXIFLOW_INSTALLATION_ID=${current.id}\nLEXIFLOW_RELEASE_KEY=local-${current.id}\n`;
         if (fresh) fs.writeFileSync(path.join(dir, 'compose.yaml'), composeText, { mode: 0o600 });
-        // 引用本轮准备的新镜像；managed PG 随即用原卷重建，不能继续引用刚删除的旧 digest。
+        // 引用本轮准备的新 API 镜像；数据库为专属持久 SQLite 文件，不随镜像替换。
         if (replacement) {
           replacement.allowedEnvSha256 = [...new Set([...replacement.allowedEnvSha256, sha(envText)])].slice(-4);
           atomicJson(path.join(dir, 'image-replacement.json'), replacement);
         }
         atomicText(path.join(dir, 'release.env'), envText);
-        current = { ...current, apiPort, apiImage, postgresImage, apiJar,
+        current = { ...current, apiPort, databaseFile, apiImage, apiJar,
           inputType: 'csv', inputSha256, generation,
           dataset: dataDir,
           version: identity.softwareVersion, buildIdentity: identity, generationVersion: generation.generationVersion,
@@ -694,13 +467,12 @@ export async function runUnifiedDeployment(ctx) {
         operationArtifacts = current.artifacts;
         ctx.setState(current);
         if (fresh) ctx.saveState(current);
-        return { dataFile, apiImage, postgresImage, composeText, envText, extensionArchive, nextSql: fs.existsSync(nextSql) ? nextSql : null,
+        return { dataFile, apiImage, composeText, envText, extensionArchive,
           extensionStage: !fresh ? path.join(dir, `.prepared-${opId}`, 'extension') : null };
       },
       verifyPlan: async (_plan, preparedData) => {
         ctx.progress('复核计划、目标连接与制品');
         if (ctx.interrupted() || fileHash(dataset) !== inputSha256) fail('DEPLOYMENT_INPUT_DRIFT');
-        if (passwordDigest && fileHash(passwordFile) !== passwordDigest) fail('DEPLOYMENT_SECRET_DRIFT');
         if (resolveBuildIdentity(repo).buildId !== identity.buildId
           || await generationCodeVersion(repo) !== generation.codeVersion || fileHash(jar) !== current.artifacts.jar)
           fail('DEPLOYMENT_INPUT_DRIFT');
@@ -708,43 +480,22 @@ export async function runUnifiedDeployment(ctx) {
           if (!installedServices.has('api')) fail('DEPLOYMENT_API_PORT_OCCUPIED');
           await ctx.verifyApiPort(installed);
         }
-        if (authMode !== 'development-trust') secret(path.join(dir, 'secrets/app-password'));
         if (preparedData.extensionStage) verifyExtension(preparedData.extensionStage, identity, apiPort);
         await verifyExtensionArchive(dir, preparedData.extensionArchive, identity, apiPort,
           preparedData.extensionStage ?? path.join(dir, 'extension'));
-        if (preparedData.nextSql && fileHash(preparedData.nextSql) !== fileHash(path.join(repo, 'infra/postgres/schema.sql'))) fail('DEPLOYMENT_SQL_DRIFT');
-        if (!external) {
-          await ctx.compose('config');
-          await ctx.compose('up', '-d', '--force-recreate', 'postgres');
-          await ctx.waitManagedPostgres({ ...current, postgresImage: preparedData.postgresImage });
-        }
-        if (external) {
-          if (authMode === 'development-trust') developmentIdentity = await assertDevelopmentIdentity(developmentIdentity);
-          const again = await probeExternal({ run, port: dbPort, user: dbUser, passwordFile, authMode, developmentIdentity,
-            postgresImage: installed?.postgresImage ?? 'docker.io/library/postgres:17-bookworm' });
-          if (again.fingerprint !== externalProbe.fingerprint) fail('DEPLOYMENT_DATABASE_DRIFT');
-          if ((await inspect(passwordFile, preparedData.apiImage, preparedData.dataFile)).fingerprint !== observation.fingerprint) fail('DEPLOYMENT_DATABASE_DRIFT');
-        } else if (observation.fingerprint !== missing && (await inspect(path.join(dir, 'secrets/app-password'), preparedData.apiImage, preparedData.dataFile)).fingerprint !== observation.fingerprint) fail('DEPLOYMENT_DATABASE_DRIFT');
-        if (external && observation.fingerprint === missing) {
-          if (await isPortTaken(dbPort)) fail('DEPLOYMENT_DATABASE_PORT_OCCUPIED');
-          await ctx.compose('config');
-        }
-        // 必须在停止旧 API 前证明实际将运行的镜像能读入请求和私密凭据，并连接目标 PG。
-        const actual = await inspect(external ? passwordFile : path.join(dir, 'secrets/app-password'),
-          preparedData.apiImage, preparedData.dataFile);
-        if (observation.fingerprint !== missing && actual.fingerprint !== observation.fingerprint)
+        if (observation.fingerprint !== missing
+            && (await inspect(preparedData.apiImage, preparedData.dataFile)).fingerprint !== observation.fingerprint)
           fail('DEPLOYMENT_DATABASE_DRIFT');
-        const sqlTarget = preparedData.nextSql ?? path.join(dir, 'infra/postgres/schema.sql');
+        // 缺库时 inspect 必须保持只读且不创建；提交阶段才允许 API CLI 创建文件。
         atomicJson(path.join(dir, 'prepared-target.json'), { schema: 1, operation: opId, planHash,
           targetState: current, dataFile: preparedData.dataFile, apiImage: preparedData.apiImage,
           previousApiImage: installed?.apiImage ?? null,
-          actions: plan.actions, nextSql: preparedData.nextSql ?? null,
+          actions: plan.actions,
           extensionStage: preparedData.extensionStage ?? null,
           composeText: preparedData.composeText ?? null, envText: preparedData.envText ?? null,
-          sqlSha256: fileHash(sqlTarget), extensionSha256: preparedData.extensionStage
+          databaseFile, extensionSha256: preparedData.extensionStage
             ? treeDigest(preparedData.extensionStage) : treeDigest(path.join(dir, 'extension')),
-          previousExtensionSha256: fs.existsSync(path.join(dir, 'extension')) ? treeDigest(path.join(dir, 'extension')) : null,
-          secretSha256: authMode === 'development-trust' ? null : fileHash(path.join(dir, 'secrets/app-password')) });
+          previousExtensionSha256: fs.existsSync(path.join(dir, 'extension')) ? treeDigest(path.join(dir, 'extension')) : null });
       },
       stopApplication: async () => {
         ctx.progress('停止本安装应用');
@@ -758,11 +509,10 @@ export async function runUnifiedDeployment(ctx) {
           return { status: 'PASS', rebuilt: false, generationVersion: observation.generationVersion,
             datasetVersion: observation.datasetVersion };
         }
-        const now = await inspect(external ? passwordFile : path.join(dir, 'secrets/app-password'),
-          preparedData.apiImage, preparedData.dataFile);
-        if (observation.fingerprint !== missing && now.fingerprint !== observation.fingerprint) fail('DEPLOYMENT_DATABASE_DRIFT');
-        const password = external ? passwordFile : path.join(dir, 'secrets/app-password');
-        const response = JSON.parse((await dataCommand('apply', { password, image: preparedData.apiImage,
+        const now = observation.fingerprint === missing ? observation
+          : await inspect(preparedData.apiImage, preparedData.dataFile);
+        if (observation.fingerprint !== now.fingerprint) fail('DEPLOYMENT_DATABASE_DRIFT');
+        const response = JSON.parse((await dataCommand('apply', { image: preparedData.apiImage,
           input: preparedData.dataFile, expectedFingerprint: now.fingerprint })).trim());
         if (response.status !== 'PASS' || response.generationVersion !== generation.generationVersion || !Number.isSafeInteger(response.datasetVersion)) fail('DEPLOYMENT_DATA_COMMIT_UNCONFIRMED');
         return response;
@@ -771,7 +521,6 @@ export async function runUnifiedDeployment(ctx) {
         ctx.progress('激活目标应用');
         current = { ...current, phase: 'initialized', datasetIdentity: { version: committed.datasetVersion, generationVersion: generation.generationVersion, sourceSha256: inputSha256 } };
         ctx.setState(current);
-        if (preparedData.nextSql) fs.renameSync(preparedData.nextSql, path.join(dir, 'infra/postgres/schema.sql'));
         if (!fresh) {
           fs.writeFileSync(path.join(dir, 'compose.yaml'), preparedData.composeText, { mode: 0o600 });
           fs.writeFileSync(path.join(dir, 'release.env'), preparedData.envText, { mode: 0o600 });
@@ -790,7 +539,6 @@ export async function runUnifiedDeployment(ctx) {
         ctx.progress('验证应用就绪');
         await ctx.ready(current);
         await verifyExtensionArchive(dir, current.artifacts.extensionArchive, identity, apiPort, path.join(dir, 'extension'));
-        if (authMode === 'development-trust') developmentIdentity = await assertDevelopmentIdentity(developmentIdentity);
         readinessVerified = true;
         current.phase = 'ready';
         current.lastOperation = installationRecord({ operation: opId, kind: action, previous: installed, target: identity,
@@ -834,34 +582,28 @@ export function readPreparedTarget(file, journal, dir) {
       || !hex.test(value.targetState.inputSha256 ?? '') || value.targetState.generation?.generationVersion !== value.targetState.generationVersion
       || !value.dataFile?.startsWith(path.join(dir, 'data') + path.sep)
       || value.targetState.dataset !== path.dirname(value.dataFile)
-      || value.nextSql && value.nextSql !== path.join(dir, `.schema-${journal.operation}.sql`)
+      || value.databaseFile !== value.targetState.databaseFile
+      || value.databaseFile !== path.join(dir, 'data', 'lexicon.db')
       || value.extensionStage && value.extensionStage !== path.join(dir, `.prepared-${journal.operation}/extension`)
       || value.actions?.applicationUpdate && value.targetState.apiJar
         && !value.targetState.apiJar.startsWith(path.join(dir, `.prepared-${journal.operation}`) + path.sep)
-      || !hex.test(value.sqlSha256 ?? '') || !hex.test(value.extensionSha256 ?? '')
-      || (value.targetState.databaseTarget?.authMode === 'development-trust'
-        ? value.secretSha256 !== null || value.targetState.databaseTarget?.kind !== 'external'
-        : !hex.test(value.secretSha256 ?? ''))) fail('DEPLOYMENT_PREPARED_TARGET_INVALID');
+      || value.targetState.databaseTarget?.kind !== 'file' || !hex.test(value.extensionSha256 ?? '')) fail('DEPLOYMENT_PREPARED_TARGET_INVALID');
   return value;
 }
 
 /** 只在调用方独立核对数据库成功事实后，补齐本安装的目标制品/状态；不做导入。 */
-export async function activatePreparedTarget({ dir, prepared, previous, fact, digestFiles, saveState, setState, compose, ready, verifyDevelopmentIdentity }) {
+export async function activatePreparedTarget({ dir, prepared, previous, fact, digestFiles, saveState, setState, compose, ready }) {
   const target = { ...prepared.targetState, phase: 'initialized', datasetIdentity: {
     version: fact.datasetVersion, generationVersion: prepared.targetState.generationVersion,
     sourceSha256: prepared.targetState.inputSha256 } };
   if (fact.needsRebuild || fact.generationVersion !== target.generationVersion
       || !Number.isSafeInteger(fact.datasetVersion) || fileHash(prepared.dataFile) !== target.inputSha256
-      || (target.databaseTarget?.authMode === 'development-trust'
-        ? prepared.secretSha256 !== null || fs.existsSync(path.join(dir, 'secrets/app-password'))
-        : fileHash(path.join(dir, 'secrets/app-password')) !== prepared.secretSha256)) fail('DEPLOYMENT_RECOVERY_FACT_DRIFT');
+      || target.databaseTarget?.kind !== 'file' || prepared.databaseFile !== target.databaseFile) fail('DEPLOYMENT_RECOVERY_FACT_DRIFT');
   const allow = (file, expected) => {
     if (!fs.existsSync(file)) return;
     const found = fileHash(file);
     if (found !== expected && found !== previous.digests?.[path.relative(dir, file)]) fail('DEPLOYMENT_RECOVERY_CONFIG_DRIFT');
   };
-  const sqlFile = path.join(dir, 'infra/postgres/schema.sql');
-  allow(sqlFile, prepared.sqlSha256);
   for (const [name, content] of [['compose.yaml', prepared.composeText], ['release.env', prepared.envText]]) {
     if (content !== null) allow(path.join(dir, name), sha(content));
   }
@@ -875,12 +617,6 @@ export async function activatePreparedTarget({ dir, prepared, previous, fact, di
   } else verifyExtension(extension, target.buildIdentity, target.apiPort);
   await verifyExtensionArchive(dir, target.artifacts?.extensionArchive, target.buildIdentity, target.apiPort,
     activeExtension === prepared.extensionSha256 ? extension : prepared.extensionStage);
-  if (prepared.nextSql) {
-    if (fs.existsSync(prepared.nextSql)) {
-      if (fileHash(prepared.nextSql) !== prepared.sqlSha256) fail('DEPLOYMENT_RECOVERY_SQL_DRIFT');
-      fs.renameSync(prepared.nextSql, sqlFile);
-    } else if (fileHash(sqlFile) !== prepared.sqlSha256) fail('DEPLOYMENT_RECOVERY_SQL_MISSING');
-  } else if (fileHash(sqlFile) !== prepared.sqlSha256) fail('DEPLOYMENT_RECOVERY_SQL_DRIFT');
   for (const [name, content] of [['compose.yaml', prepared.composeText], ['release.env', prepared.envText]]) {
     if (content === null) continue;
     const file = path.join(dir, name), expected = sha(content);
@@ -895,15 +631,11 @@ export async function activatePreparedTarget({ dir, prepared, previous, fact, di
   }
   verifyExtension(extension, target.buildIdentity, target.apiPort);
   await verifyExtensionArchive(dir, target.artifacts?.extensionArchive, target.buildIdentity, target.apiPort, extension);
-  if (target.databaseTarget?.authMode === 'development-trust') {
-    if (typeof verifyDevelopmentIdentity !== 'function') fail('DEVELOPMENT_DATABASE_TARGET_UNAVAILABLE');
-    await verifyDevelopmentIdentity(target);
-  }
+  validateSqliteDatabaseFile(target.databaseFile, { installationRoot: dir, allowMissing: false });
   setState(target); target.digests = digestFiles(target); saveState(target);
   await compose('config'); await compose('up', '-d', '--no-deps', '--force-recreate', 'api');
   await ready(target);
   await verifyExtensionArchive(dir, target.artifacts?.extensionArchive, target.buildIdentity, target.apiPort, extension);
-  if (target.databaseTarget?.authMode === 'development-trust') await verifyDevelopmentIdentity(target);
   target.phase = 'ready'; target.digests = digestFiles(target); saveState(target);
   return target;
 }
@@ -922,23 +654,15 @@ function portTaken(port) {
   });
 }
 
-/** recover/status 使用已落盘的目标资料和目标制品只读核对 PostgreSQL 成功事实。 */
+/** recover/status 使用只读 SQLite 连接核对已落盘数据库事实；绝不创建缺失文件。 */
 export async function inspectInstalledDeployment({ repo, state, run, environment }) {
   if (!state || !['csv', 'package'].includes(state.inputType) || !hex.test(state.inputSha256)
       || !hex.test(state.generationVersion) || state.generation?.generationVersion !== state.generationVersion
-      || !Number.isInteger(state.dbPort) || state.dbPort < 1 || state.dbPort > 65535) fail('DEPLOYMENT_INSPECTION_STATE_INVALID');
+      || state.schema !== 2 || state.databaseTarget?.kind !== 'file'
+      || state.databaseFile !== path.join(state.root, 'data', 'lexicon.db')) fail('DEPLOYMENT_INSPECTION_STATE_INVALID');
   const input = path.join(state.dataset, state.inputType === 'package' ? 'dataset.zip' : 'stardict.csv');
   if (fileHash(input) !== state.inputSha256) fail('DEPLOYMENT_INPUT_DRIFT');
-  const authMode = state.databaseTarget?.authMode ?? (state.databaseTarget?.kind === 'external' ? 'password' : 'managed');
-  if (!['managed', 'password', 'development-trust'].includes(authMode)
-      || (state.databaseTarget?.kind === 'external') !== (authMode !== 'managed')) fail('DEPLOYMENT_INSPECTION_STATE_INVALID');
-  const passwordFile = authMode === 'development-trust' ? null : secret(path.join(state.root, 'secrets/app-password'));
-  if (authMode === 'development-trust') {
-    if (state.databaseTarget?.user !== 'postgres' || fs.existsSync(path.join(state.root, 'secrets/app-password')))
-      fail('DEPLOYMENT_INSPECTION_STATE_INVALID');
-    await assertDevelopmentTargetIdentity({ repo, state, run });
-  }
-  const user = state.databaseTarget?.user ?? 'lexiflow';
+  const databaseFile = validateSqliteDatabaseFile(state.databaseFile, { installationRoot: state.root, allowMissing: false });
   const root = tempRoot(repo);
   try {
     const request = writeRequest(root, { inputType: state.inputType,
@@ -946,19 +670,16 @@ export async function inspectInstalledDeployment({ repo, state, run, environment
       generation: state.generation });
     if (!/^(?:sha256:)?[a-f0-9]{64}$/.test(state.apiImage ?? '')) fail('DEPLOYMENT_INSPECTION_IMAGE_INVALID');
     const output = await run('podman', ['run', '--rm', '--platform', 'linux/arm64', '--user', '0:0', '--read-only',
-        '--cap-drop=ALL', '--cap-add=DAC_OVERRIDE', '--security-opt=no-new-privileges', '--add-host', 'host.containers.internal:host-gateway',
+        '--cap-drop=ALL', '--cap-add=DAC_OVERRIDE', '--security-opt=no-new-privileges',
         '-v', `${request}:/request.json:ro`, '-v', `${input}:/input:ro`,
-        ...(authMode === 'development-trust' ? [] : ['-v', `${passwordFile}:/secret:ro`]),
-        '-e', `LEXIFLOW_DEPLOYMENT_JDBC_URL=jdbc:postgresql://host.containers.internal:${state.dbPort}/lexiflow?currentSchema=lexiflow_release`,
-        '-e', `LEXIFLOW_DEPLOYMENT_DB_USER=${user}`,
-        ...(authMode === 'development-trust' ? ['-e', 'LEXIFLOW_DEPLOYMENT_DB_PASSWORD=', '-e', 'LEXIFLOW_DEPLOYMENT_DB_PASSWORD_FILE=']
-          : ['-e', 'LEXIFLOW_DEPLOYMENT_DB_PASSWORD_FILE=/secret']),
-        '--entrypoint', 'java', state.apiImage, '-jar', '/app/lexiflow-api.jar', '--deployment-data', 'inspect', '--request', '/request.json'],
-      { cwd: repo, capture: true, env: authMode === 'development-trust'
-        ? { ...environment, LEXIFLOW_DEPLOYMENT_DB_PASSWORD: '', LEXIFLOW_DEPLOYMENT_DB_PASSWORD_FILE: '' }
-        : environment, logOutput: false });
-    if (authMode === 'development-trust') await assertDevelopmentTargetIdentity({ repo, state, run });
-    return databaseResponse(output);
+        '-v', `${path.dirname(databaseFile)}:/db:ro`,
+        '-e', 'LEXIFLOW_DEPLOYMENT_JDBC_URL=jdbc:sqlite:/db/lexicon.db',
+        '--entrypoint', 'java', state.apiImage, '-jar', '/app/lexiflow-api.jar', '--deployment-data', 'inspect',
+        '--request', '/request.json', '--expected-file', '/db/lexicon.db'],
+      { cwd: repo, capture: true, env: environment, logOutput: false });
+    const fact = databaseResponse(output);
+    if (fact.databaseFile !== '/db/lexicon.db') fail('DEPLOYMENT_INSPECTION_TARGET_MISMATCH');
+    return fact;
   } finally {
     if (fs.existsSync(root) && fs.readdirSync(root).every(name => /^request-[a-f0-9]{16}\.json$/.test(name))) fs.rmSync(root, { recursive: true });
   }

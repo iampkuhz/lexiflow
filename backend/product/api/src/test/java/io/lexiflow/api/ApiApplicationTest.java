@@ -76,9 +76,7 @@ class ApiApplicationTest {
             LexiconEntryKind.WORD,
             LexiconHintAction.HINT,
             "合成词条",
-            100,
-            true,
-            1);
+            100);
     return new LexiconReadRepository() {
       @Override
       public long publishedVersion() {

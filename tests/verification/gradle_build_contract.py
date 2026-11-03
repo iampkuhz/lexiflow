@@ -52,7 +52,7 @@ def _fixture_gradle(backend: Path, *args: str, env: dict[str, str] | None = None
     jdk = resolve_java_home(ROOT, environment)
     environment["JAVA_HOME"] = str(jdk)
     environment["PATH"] = os.pathsep.join([str(jdk / "bin"), environment.get("PATH", "")])
-    environment["JDBC_URL"] = "jdbc:postgresql://127.0.0.1:1/lexiflow_fixture"
+    environment["JDBC_URL"] = "jdbc:sqlite:/tmp/lexiflow_fixture.db"
     environment["STARDICT_CSV"] = str(ROOT / "tmp/synthetic-stardict.csv")
     try:
         return subprocess.run([str(backend / "gradlew"), "-p", str(backend), *args],
@@ -96,7 +96,7 @@ def _gradle(init_script: str, *tasks: str) -> subprocess.CompletedProcess[str]:
         init.write_text(init_script, encoding="utf-8")
         environment = os.environ.copy()
         # Explicit synthetic values outrank the machine-private local runtime config.
-        environment["JDBC_URL"] = "jdbc:postgresql://127.0.0.1:1/lexiflow_test"
+        environment["JDBC_URL"] = "jdbc:sqlite:/tmp/lexiflow_test.db"
         environment["STARDICT_CSV"] = str(ROOT / "tmp" / "synthetic-stardict.csv")
         return subprocess.run(
             [sys.executable, "-m", "scripts.local.run_with_java_toolchain", "backend/gradlew",
@@ -123,7 +123,7 @@ gradle.projectsEvaluated {
       def payload = [
         deliveryFull: direct(task(":deliveryFull")), check: direct(task(":check")),
         orderAfter: [":api:test":orderAfter(":api:test"),
-          ":adapters:postgresIntegrationTest":orderAfter(":adapters:postgresIntegrationTest"),
+          ":adapters:sqliteIntegrationTest":orderAfter(":adapters:sqliteIntegrationTest"),
           ":integration-tests:runtimeSmokeTest":orderAfter(":integration-tests:runtimeSmokeTest"),
           ":api:bootJar":orderAfter(":api:bootJar")],
         apiTestDependencies: dependencyNames(":api:test"),
@@ -133,7 +133,7 @@ gradle.projectsEvaluated {
           ":adapters:lexiconBasicReport":exec(":adapters:lexiconBasicReport"),
           ":adapters:lexiconPrewarmReport":exec(":adapters:lexiconPrewarmReport"),
           ":adapters:lexiconRebuild":exec(":adapters:lexiconRebuild"),
-          ":adapters:postgresInit":exec(":adapters:postgresInit")],
+          ":adapters:sqliteInit":exec(":adapters:sqliteInit")],
         aliases: [qualityFull:rootProject.tasks.findByName("qualityFull") != null,
           productBootJar:rootProject.tasks.findByName("productBootJar") != null]
       ]
@@ -167,7 +167,7 @@ class GradleTaskGraphTest(unittest.TestCase):
         cls.model = json.loads(marker)
 
     def test_delivery_aggregator_has_exact_direct_dependencies(self):
-        self.assertEqual(self.model["deliveryFull"], [":adapters:postgresIntegrationTest",
+        self.assertEqual(self.model["deliveryFull"], [":adapters:sqliteIntegrationTest",
                          ":api:bootJar", ":integration-tests:runtimeSmokeTest", "check"])
         check = self.model["check"]
         self.assertEqual(len(check), 7)
@@ -188,7 +188,7 @@ class GradleTaskGraphTest(unittest.TestCase):
                     ("adapters", "api", "enrichment", "lexicon", "architecture-tests",
                      "quality-gates", "integration-tests") for task in
                     ("spotlessCheck", "checkstyleMain", "checkstyleTest", "pmdMain", "pmdTest", "javadoc")}
-        for path in (":api:test", ":adapters:postgresIntegrationTest",
+        for path in (":api:test", ":adapters:sqliteIntegrationTest",
                      ":integration-tests:runtimeSmokeTest", ":api:bootJar"):
             self.assertTrue(expected.issubset(set(self.model["orderAfter"][path])), path)
         # mustRunAfter is not a dependency edge: a targeted diagnostic stays targeted.
@@ -214,7 +214,7 @@ class GradleTaskGraphTest(unittest.TestCase):
     def test_javaexec_entrypoints_preserve_names_arguments_and_launch_contract(self):
         tasks = self.model["javaExec"]
         self.assertEqual(set(tasks), {":adapters:lexiconValidate", ":adapters:lexiconPublish",
-                                      ":adapters:lexiconRebuild", ":adapters:postgresInit",
+                                      ":adapters:lexiconRebuild", ":adapters:sqliteInit",
                                       ":adapters:lexiconBasicReport", ":adapters:lexiconPrewarmReport"})
         self.assertEqual(tasks[":adapters:lexiconValidate"]["args"][0], "validate")
         self.assertEqual(tasks[":adapters:lexiconPublish"]["args"][0], "publish")
@@ -222,8 +222,8 @@ class GradleTaskGraphTest(unittest.TestCase):
                          "io.lexiflow.lexicon.platform.importer.LexiconRebuildMain")
         self.assertTrue(tasks[":adapters:lexiconRebuild"]["usesTerminalStdin"])
         source = str(ROOT / "tmp" / "synthetic-stardict.csv")
-        jdbc = "jdbc:postgresql://127.0.0.1:1/lexiflow_test"
-        schema = str(ROOT / "infra/postgres/schema.sql")
+        jdbc = "jdbc:sqlite:/tmp/lexiflow_test.db"
+        schema = str(ROOT / "infra/sqlite/schema.sql")
         for name, action in (("lexiconValidate", "validate"),
                              ("lexiconBasicReport", "basic-report"),
                              ("lexiconPrewarmReport", "prewarm-report")):
@@ -231,7 +231,7 @@ class GradleTaskGraphTest(unittest.TestCase):
         self.assertEqual(tasks[":adapters:lexiconPublish"]["args"],
                          ["publish", "--input", source, "--database-url", jdbc,
                           "--batch-source-id", "ecdict-stardict", "--batch-license-id", "MIT"])
-        self.assertEqual(tasks[":adapters:postgresInit"]["args"], [jdbc, schema])
+        self.assertEqual(tasks[":adapters:sqliteInit"]["args"], [jdbc, schema])
         self.assertEqual(tasks[":adapters:lexiconRebuild"]["args"], [jdbc, schema, source])
         for task in tasks.values():
             self.assertTrue(task["classpath"], f"{task['name']} has no assembled classpath")
@@ -247,7 +247,7 @@ class GradleIdentityResourceTest(unittest.TestCase):
         if (ROOT / ".gitignore").exists():
             shutil.copy2(ROOT / ".gitignore", cls.root / ".gitignore")
         for relative in (
-            "ops/release", "ops/dataset", "infra/postgres/schema.sql",
+            "ops/release", "ops/dataset", "infra/sqlite/schema.sql",
             "ops/podman/source-tools.Containerfile",
         ):
             source, target = ROOT / relative, cls.root / relative
@@ -408,7 +408,7 @@ public class IdeaModelProbe {
                          "unrelated application code must not change data generation identity")
         self._assert_identity_in_artifact("changed-identity-artifact")
 
-        schema = self.root / "infra/postgres/schema.sql"
+        schema = self.root / "infra/sqlite/schema.sql"
         schema.write_text(schema.read_text(encoding="utf-8") + "\n-- generation fixture comment\n", encoding="utf-8")
         sql_changed = self._run("sql-change-bootjar", *command)
         self.assertEqual(sql_changed.returncode, 0, (sql_changed.stdout + sql_changed.stderr)[-5000:])
@@ -484,7 +484,7 @@ class GradleStaticBeforeDeliveryFailureTest(unittest.TestCase):
         backend = fixture_root / "backend"
         _copy_backend_fixture(ROOT / "backend", backend)
         # Build scripts resolve repository inputs relative to backend's parent directory.
-        for relative in ("ops/release", "ops/dataset", "infra/postgres/schema.sql",
+        for relative in ("ops/release", "ops/dataset", "infra/sqlite/schema.sql",
                          "ops/podman/source-tools.Containerfile"):
             source, target = ROOT / relative, fixture_root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -525,7 +525,7 @@ gradle.projectsEvaluated {
   }
 }
 ''', encoding="utf-8")
-        environment = {"JDBC_URL": "jdbc:postgresql://127.0.0.1:1/lexiflow_fixture",
+        environment = {"JDBC_URL": "jdbc:sqlite:/tmp/lexiflow_fixture.db",
                       "STARDICT_CSV": str(ROOT / "tmp/synthetic-stardict.csv"),
                       "JAVA_TOOL_OPTIONS": f"-Dlexiflow.marker={marker}"}
         started = time.perf_counter()

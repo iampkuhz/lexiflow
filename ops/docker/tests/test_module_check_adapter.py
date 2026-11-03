@@ -51,7 +51,7 @@ class DockerGroupContractTest(unittest.TestCase):
         self.assertEqual(set(flat), py | node)
         self.assertEqual(len(flat), len(set(flat)))
         self.assertEqual(
-            {"surface": 3, "shell": 6, "local": 6, "node": 22},
+            {"surface": 3, "shell": 5, "local": 5, "node": 22},
             {k: len(v) for k, v in groups.items()},
         )
         adapter._preflight(self.root, self.declarations, groups)
@@ -299,15 +299,10 @@ class DockerGroupContractTest(unittest.TestCase):
             self.assertFalse(
                 any("SyntheticCase" in identity for identity in identities), name
             )
-        # 包含真实安装对照、来源模板隔离及终端关闭/真实超时的回归用例。
+        # 旧 Python Podman install fixture 已由 Node 的 SQLite lifecycle 场景替代；
+        # 候选进程 transport 仍保留独立边界回归。
         self.assertEqual(
-            47,
-            adapter._load_python(
-                self.root, ["ops/docker/tests/test_podman_local.py"]
-            ).countTestCases(),
-        )
-        self.assertEqual(
-            18,
+            16,
             adapter._load_python(
                 self.root, ["ops/docker/tests/test_podman_fake_transport.py"]
             ).countTestCases(),
@@ -546,8 +541,8 @@ class IsolatedClassLaneTest(unittest.TestCase):
         full = adapter._load_python(adapter._repo_root(), ["ops/docker/tests/test_contract.py", "ops/docker/tests/test_lifecycle_flow.py"])
         lane, remaining = adapter._lane_partition(full)
         ids = [case.id() for case in lane]
-        self.assertEqual(len(ids), 30)
-        self.assertEqual(len(set(ids)), 30)
+        self.assertEqual(len(ids), 29)
+        self.assertEqual(len(set(ids)), 29)
         self.assertTrue(all("DockerContractTest." in item or "FlowTests." in item for item in ids))
         self.assertEqual(len(list(adapter._iter_cases(remaining))), 8)
         self.assertTrue(all("ContainerHealthTransportTest." in item for item in [case.id() for case in adapter._iter_cases(remaining)]))
@@ -570,8 +565,8 @@ class IsolatedClassLaneTest(unittest.TestCase):
         def load(root, paths):
             if paths == ["ops/docker/tests/test_contract.py", "ops/docker/tests/test_lifecycle_flow.py"]:
                 suite = unittest.TestSuite([
-                    *synthetic_cases("test_contract", "DockerContractTest", 18),
-                    *synthetic_cases("test_contract", "ContainerHealthTransportTest", 7, retained=True),
+                    *synthetic_cases("test_contract", "DockerContractTest", 17),
+                    *synthetic_cases("test_contract", "ContainerHealthTransportTest", 8, retained=True),
                     *synthetic_cases("test_lifecycle_flow", "FlowTests", 12),
                 ])
                 captured["ids"] = adapter._lane_class_ids(suite)
@@ -586,7 +581,7 @@ class IsolatedClassLaneTest(unittest.TestCase):
             (directory / "stderr").write_bytes(b"")
             return {"process":Process(),"write_fd":10,"result_path":directory/"result.json","directory":directory,"mode":"suite"}
         def report(_worker):
-            return {"schema_version":adapter._LANE_SCHEMA,"worker_pid":44551,"worker_pgid":44551,"case_ids":captured["ids"],"checks_run":30,"failures":0,"errors":0,"skipped":0,"per_test_timing":{key:.1 for key in captured["ids"]},"stderr_sha256":hashlib.sha256(b"").hexdigest(),"status":"PASS","probe_child_pid":None}
+            return {"schema_version":adapter._LANE_SCHEMA,"worker_pid":44551,"worker_pgid":44551,"case_ids":captured["ids"],"checks_run":29,"failures":0,"errors":0,"skipped":0,"per_test_timing":{key:.1 for key in captured["ids"]},"stderr_sha256":hashlib.sha256(b"").hexdigest(),"status":"PASS","probe_child_pid":None}
         class Node:
             returncode, stdout, stderr = 0, "", ""
 
@@ -613,8 +608,8 @@ class IsolatedClassLaneTest(unittest.TestCase):
             patch.object(adapter, "_finish_class_lane", side_effect=finish),
         ):
             report = adapter._run(None)
-        self.assertEqual(len(captured["ids"]), 30)
-        self.assertEqual(len(set(captured["ids"])), 30)
+        self.assertEqual(len(captured["ids"]), 29)
+        self.assertEqual(len(set(captured["ids"])), 29)
         self.assertEqual(report["status"], "PASS", report)
         self.assertEqual(report["checks_run"], 39)
         self.assertEqual(report["skipped"], 0)

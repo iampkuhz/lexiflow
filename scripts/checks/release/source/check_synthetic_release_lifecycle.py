@@ -139,8 +139,6 @@ def _check_environment(repo: Path, environ: Mapping[str, str]) -> list[str]:
         value = environ.get(name, "")
         if not value or not Path(value).is_absolute() or not Path(value).is_dir():
             missing.append(name.lower().replace("_", "-"))
-    if not environ.get("LEXIFLOW_POSTGRES_TEST_JDBC_URL", "").strip():
-        missing.append("isolated-postgres-test-jdbc-url")
     return missing
 
 

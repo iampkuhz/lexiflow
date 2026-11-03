@@ -1,12 +1,15 @@
 package io.lexiflow.api.release;
 
 import io.lexiflow.lexicon.platform.persistence.DatasetPackageCodec;
-import io.lexiflow.lexicon.platform.persistence.PostgresDatasetExport;
-import io.lexiflow.lexicon.platform.persistence.PostgresDatasetPackage;
+import io.lexiflow.lexicon.platform.persistence.SqliteDatasetExport;
+import io.lexiflow.lexicon.platform.persistence.SqliteDatasetPackage;
+import io.lexiflow.lexicon.platform.persistence.SqlitePersistence;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.sql.DriverManager;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -38,7 +41,7 @@ public final class ReleaseDatasetCommand {
           require(options, "--output", "--approval-file");
           try (var connection = databaseConnection()) {
             var result =
-                PostgresDatasetExport.export(
+                SqliteDatasetExport.export(
                     connection,
                     Path.of(options.get("--output")),
                     Path.of(options.get("--approval-file")),
@@ -52,22 +55,36 @@ public final class ReleaseDatasetCommand {
           }
         }
         case "initialize" -> {
-          require(
-              options,
-              "--package",
-              "--expected-sha256",
-              "--expected-database",
-              "--expected-schema");
-          try (var connection = databaseConnection()) {
-            PostgresDatasetPackage.initialize(
-                connection,
-                Path.of(options.get("--package")),
-                options.get("--expected-sha256"),
-                options.get("--expected-database"),
-                options.get("--expected-schema"),
-                trustedSql);
-            System.out.println("{\"result\":\"PASS\"}");
+          require(options, "--package", "--expected-sha256", "--expected-file");
+          Path databaseFile = Path.of(options.get("--expected-file")).toAbsolutePath().normalize();
+          String url = System.getenv("LEXIFLOW_RELEASE_JDBC_URL");
+          if (url == null || !url.equals("jdbc:sqlite:" + databaseFile))
+            throw new IllegalArgumentException();
+          if (!databaseFile.toString().equals(options.get("--expected-file")))
+            throw new IllegalArgumentException();
+          rejectSymlinkPath(databaseFile);
+          Path packagePath = Path.of(options.get("--package"));
+          DatasetPackageCodec.verify(packagePath, options.get("--expected-sha256"), trustedSql);
+          boolean existed = Files.exists(databaseFile, LinkOption.NOFOLLOW_LINKS);
+          Object identity = null;
+          try {
+            if (!existed) {
+              identity = createExpectedFile(databaseFile);
+            }
+            try (var connection = SqlitePersistence.connect(url)) {
+              SqliteDatasetPackage.initialize(
+                  connection,
+                  packagePath,
+                  options.get("--expected-sha256"),
+                  databaseFile.toString(),
+                  trustedSql);
+            }
+          } catch (Exception failure) {
+            if (!existed && identity != null && identity.equals(fileKey(databaseFile)))
+              Files.deleteIfExists(databaseFile);
+            throw failure;
           }
+          System.out.println("{\"result\":\"PASS\"}");
         }
         default -> throw new IllegalArgumentException();
       }
@@ -78,10 +95,32 @@ public final class ReleaseDatasetCommand {
     }
   }
 
+  /** 以 CREATE_NEW 原子占有预期文件；目标已被创建时绝不打开或覆盖。 */
+  static Object createExpectedFile(Path path) throws IOException {
+    Files.createFile(path);
+    return fileKey(path);
+  }
+
+  private static Object fileKey(Path path) throws IOException {
+    Object key =
+        Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).fileKey();
+    if (key == null) throw new IOException("database file identity unavailable");
+    return key;
+  }
+
+  private static void rejectSymlinkPath(Path path) throws IOException {
+    if (!path.isAbsolute()) throw new IOException();
+    Path current = path.getRoot();
+    for (Path part : path) {
+      current = current.resolve(part);
+      if (Files.isSymbolicLink(current)) throw new IOException();
+    }
+  }
+
   private static java.sql.Connection databaseConnection() throws Exception {
     String url = System.getenv("LEXIFLOW_RELEASE_JDBC_URL");
     if (url == null || url.isBlank()) throw new IllegalArgumentException();
-    return DriverManager.getConnection(url);
+    return SqlitePersistence.connect(url);
   }
 
   private static byte[] trustedSql() throws IOException {

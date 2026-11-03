@@ -175,7 +175,7 @@ test('source package generation consumes the current export object contract and 
   const directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'lexiflow-generation-contract-')));
   try {
     const generation = dataGeneration({ codeVersion: 'a'.repeat(64), inputSha256: 'b'.repeat(64), upstream: {} });
-    const manifest = { schemaVersion: 2, generationVersion: generation.generationVersion,
+    const manifest = { schemaVersion: 4, generationVersion: generation.generationVersion,
       generationCodeVersion: generation.codeVersion, generationSourceDigest: generation.sourceDigest,
       generationInputs: { inputSha256: generation.inputSha256, upstream: generation.upstream }, generationConfig: generation.config };
     const archive = path.join(directory, 'dataset.zip');
@@ -187,6 +187,8 @@ test('source package generation consumes the current export object contract and 
       { ...manifest, generationVersion: 'c'.repeat(64) },
       { ...manifest, generationSourceDigest: 'c'.repeat(64) },
       { ...manifest, schemaVersion: 1 },
+      { ...manifest, schemaVersion: 2 },
+      { ...manifest, schemaVersion: 3 },
     ]) {
       await fs.writeFile(archive, makeZip([['manifest.json', JSON.stringify(invalid)]]));
       await assert.rejects(packageGeneration(archive), { message: 'DEPLOYMENT_PACKAGE_GENERATION_INVALID' });

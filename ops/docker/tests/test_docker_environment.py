@@ -14,8 +14,6 @@ STATE = SOURCE.with_name("release-installation-state.sh")
 PRODUCT = {
     "LEXIFLOW_PLATFORM": "linux/amd64",
     "LEXIFLOW_API_IMAGE": "api@sha256:fixed",
-    "LEXIFLOW_POSTGRES_IMAGE": "pg@sha256:fixed",
-    "LEXIFLOW_DATASET_SHA256": "1" * 64,
     "LEXIFLOW_INSTALLATION_ID": "d" * 32,
 }
 BASE = {"PATH", "HOME", "DOCKER_CONFIG", "LC_ALL"}
@@ -40,15 +38,9 @@ class DockerEnvironmentTest(unittest.TestCase):
         self.bin.mkdir()
         self.install = self.root / "install"
         self.release_key = "b" * 64
-        self.secret_dir = self.install / "releases" / self.release_key
-        self.secret_dir.mkdir(parents=True)
         self.release_root = self.root / "release"
         self.release_root.mkdir()
         (self.release_root / "data.zip").write_bytes(b"dataset")
-        self.postgres = self.secret_dir / "postgres-password"
-        self.app = self.secret_dir / "app-password"
-        self.set_secret(self.postgres, "a" * 64)
-        self.set_secret(self.app, "c" * 64)
         self.identity_env = self.root / "identity.env"
         self.docker_env = self.root / "docker.env"
         self.docker_args = self.root / "docker.args"
@@ -96,7 +88,7 @@ class DockerEnvironmentTest(unittest.TestCase):
             * 32
             + "\n"
             'LF_PROJECT="lf_${LF_INSTALL_ID}_$(printf "%s" "$LF_CURRENT_KEY" | cut -c1-16)"\n'
-            "LF_PLATFORM=linux/amd64 LF_API_IMAGE=api@sha256:fixed LF_POSTGRES_IMAGE=pg@sha256:fixed\n"
+            "LF_PLATFORM=linux/amd64 LF_API_IMAGE=api@sha256:fixed\n"
             "LF_DATASET_SHA256="
             + "1" * 64
             + " LF_DATASET_PATH=data.zip LF_DATASET_BYTES=7 LF_INSTALL_ID="
@@ -104,18 +96,18 @@ class DockerEnvironmentTest(unittest.TestCase):
             + "\n"
             'LF_RELEASE_ROOT="$TEST_RELEASE" LF_COMPOSE_PATH=compose.yaml\n'
             "lf_check_file() { :; }\n"
-            'before="$LF_COMPOSE_SECRET|$postgres_secret|$app_secret"\n'
+            "lf_docker_endpoint || exit 1\n"
+            'before="$LF_COMPOSE_PRIVATE|$private_value"\n'
             'case "$2" in\n'
-            "  compose) lf_compose up -d postgres;;\n"
+            "  compose) lf_compose up -d api;;\n"
             '  initialize) lf_compose run --rm --no-deps --name "${LF_PROJECT}-initialize-1" initialize;;\n'
             '  private-stdin) printf "private-stdin-payload" | lf_docker_run 30 --stdin-fd3 env -i "PATH=${PATH}" "HOME=${HOME}" "DOCKER_CONFIG=${DOCKER_CONFIG}" LC_ALL=C docker --host "$LF_DOCKER_ENDPOINT" private-import;;\n'
-            "  private-check) lf_private_sources_check;;\n"
             "  noncompose) lf_docker info --format fixed;;\n"
             "  version) lf_docker compose version;;\n"
             "  *) exit 2;;\n"
             "esac\n"
             "result=$?\n"
-            'after="$LF_COMPOSE_SECRET|$postgres_secret|$app_secret"\n'
+            'after="$LF_COMPOSE_PRIVATE|$private_value"\n'
             '[ "$before" = "$after" ] || exit 88\n'
             'exit "$result"\n'
         )
@@ -145,12 +137,10 @@ class DockerEnvironmentTest(unittest.TestCase):
             "UNRELATED_POISON": "keep-out",
             "LF_PRIVATE_POISON": "keep-out",
             "LF_DOCKER_ENDPOINT": "tcp://inherited.invalid:2375",
-            "LF_COMPOSE_SECRET": "parent-lf",
-            "postgres_secret": "parent-postgres-private",
-            "app_secret": "parent-app-private",
+            "LF_COMPOSE_PRIVATE": "parent-lf",
+            "private_value": "parent-private-value",
             **{key: "poison-" + key for key in PRODUCT},
-            "LEXIFLOW_COMPOSE_POSTGRES_PASSWORD": "parent-postgres-secret",
-            "LEXIFLOW_COMPOSE_APP_PASSWORD": "parent-app-secret",
+            "LEXIFLOW_PRIVATE_VALUE": "parent-private-value",
             "LEXIFLOW_DATASET_FILE": "poison-file",
             "LEXIFLOW_RELEASE_KEY": "poison-key",
         }
@@ -165,28 +155,18 @@ class DockerEnvironmentTest(unittest.TestCase):
             "DOCKER_HOST": "unix:///host.sock",
         }
 
-    @staticmethod
-    def set_secret(path, value, mode=0o600):
-        path.unlink(missing_ok=True)
-        path.write_text(value)
-        path.chmod(mode)
-
     def invoke(self, action="compose", *, context=None, host="unix:///host.sock"):
         env = dict(self.env)
         env["DOCKER_HOST"] = host
         if context is not None:
             env["DOCKER_CONTEXT"] = context
-        endpoint = "unix:///context.sock" if context is not None else host
-        self.set_secret(
-            self.install / "engine",
-            f"schema=lexiflow-engine-v1\nendpoint={endpoint}\ndaemon_id=synthetic-daemon-id\n",
-        )
         result = subprocess.run(
             ["/bin/sh", str(self.entry), str(SOURCE), action],
             env=env,
             input=b"",
             capture_output=True,
             timeout=10,
+            check=False,
         )
         self.assertEqual(
             env,
@@ -225,13 +205,13 @@ class DockerEnvironmentTest(unittest.TestCase):
             "LD_PRELOAD",
             "DYLD_INSERT_LIBRARIES",
             "UNRELATED_POISON",
-            "LEXIFLOW_COMPOSE_APP_PASSWORD",
+            "LEXIFLOW_PRIVATE_VALUE",
         ):
             with self.subTest(unexpected=unexpected), self.assertRaises(AssertionError):
                 self.assert_clean({**clean, unexpected: ""}, BASE)
 
     def assert_compose(self, endpoint):
-        self.assert_clean(nul_map(self.identity_env), {"PATH", "LC_ALL"})
+        self.assertFalse(self.identity_env.exists())
         env = nul_map(self.docker_env)
         self.assert_clean(env, BASE | set(PRODUCT) | {"LEXIFLOW_RELEASE_KEY"})
         for key, value in {**PRODUCT, "LEXIFLOW_RELEASE_KEY": self.release_key}.items():
@@ -250,10 +230,7 @@ class DockerEnvironmentTest(unittest.TestCase):
             ],
         )
         self.assertEqual(args[9:11], ["-f", str(self.root / "release/compose.yaml")])
-        self.assertEqual(args[11:], ["up", "-d", "postgres"])
-        self.assertFalse(
-            any(value in arg for arg in args for value in ("a" * 64, "c" * 64))
-        )
+        self.assertEqual(args[11:], ["up", "-d", "api"])
         self.assertEqual(self.fd_state.read_text().strip(), "closed")
         self.assertEqual(self.stdin_state.read_text().strip(), "eof")
 
@@ -281,7 +258,7 @@ class DockerEnvironmentTest(unittest.TestCase):
         )
         self.assert_compose("unix:///context.sock")
 
-    def test_noncompose_and_version_exclude_product_and_secret(self):
+    def test_noncompose_and_version_exclude_product_and_private_values(self):
         for action, trailing in (
             ("noncompose", ["info", "--format", "fixed"]),
             ("version", ["compose", "version"]),
@@ -299,61 +276,6 @@ class DockerEnvironmentTest(unittest.TestCase):
                 self.assertEqual(self.stdin_state.read_text().strip(), "eof")
                 self.assertFalse(self.inspect_env.exists())
 
-    def test_secret_not_exported_to_later_file_tools(self):
-        self.env["TEST_SECRET"] = str(self.postgres)
-        result = self.invoke("private-check")
-        self.assertEqual(
-            (result.returncode, result.stdout, result.stderr), (0, b"", b"")
-        )
-        snapshots = self.tool_env.read_bytes().split(b"\n--END--\n")
-        self.assertGreaterEqual(len(snapshots), 2)
-        for snapshot in snapshots:
-            if snapshot:
-                self.assertNotIn(b"a" * 64, snapshot)
-                self.assertNotIn(b"c" * 64, snapshot)
-                self.assertNotIn(b"a" * 64, snapshot)
-                self.assertNotIn(b"c" * 64, snapshot)
-
-    def test_each_bad_secret_fails_closed_independently(self):
-        cases = (
-            "65-lf",
-            "65-no-lf",
-            "invalid-character",
-            "mode",
-            "file-link",
-            "ancestor-link",
-        )
-        for case in cases:
-            with self.subTest(case=case):
-                self.set_secret(self.postgres, "a" * 64)
-                self.set_secret(self.app, "c" * 64)
-                releases = self.install / "releases"
-                if releases.is_symlink():
-                    releases.unlink()
-                    (self.install / "real-releases").rename(releases)
-                if case == "65-lf":
-                    self.set_secret(self.postgres, "a" * 64 + "\n")
-                elif case == "65-no-lf":
-                    self.set_secret(self.postgres, "a" * 65)
-                elif case == "invalid-character":
-                    self.set_secret(self.postgres, "g" * 64)
-                elif case == "mode":
-                    self.set_secret(self.postgres, "a" * 64, 0o640)
-                elif case == "file-link":
-                    target = self.root / "target-secret"
-                    self.set_secret(target, "a" * 64)
-                    self.postgres.unlink()
-                    self.postgres.symlink_to(target)
-                elif case == "ancestor-link":
-                    releases.rename(self.install / "real-releases")
-                    releases.symlink_to(self.install / "real-releases")
-                self.docker_env.unlink(missing_ok=True)
-                self.env["TEST_SECRET"] = str(self.postgres)
-                result = self.invoke("private-check")
-                self.assertNotEqual(result.returncode, 0)
-                self.assertEqual(result.stdout + result.stderr, b"")
-                self.assertFalse(self.docker_env.exists())
-
     def test_private_input_uses_opt_in_stdin_without_argv_or_environment_copy(self):
         result = self.invoke("private-stdin")
         self.assertEqual(
@@ -367,9 +289,9 @@ class DockerEnvironmentTest(unittest.TestCase):
 
     def test_initialize_budget_remains_600_ordinary_30(self):
         source = SOURCE.read_text()
-        self.assertIn("budget=600", source)
-        self.assertIn("else budget=30; fi", source)
-        self.assertIn('lf_docker_run "$budget" env -i', source)
+        self.assertIn('case "$1" in 1|30|600)', source)
+        self.assertIn('lf_docker() { lf_docker_budget 30 "$@"; }', source)
+        self.assertIn('lf_docker_run 600 env -i', source)
         result = self.invoke("initialize")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(

@@ -1,4 +1,6 @@
-import test from 'node:test';
+import nodeTest from 'node:test';
+let testQueue=Promise.resolve();
+function test(name, run) { nodeTest(name, async context => { const prior=testQueue; let finish; testQueue=new Promise(resolve=>{finish=resolve;}); await prior; try { return await run(context); } finally { finish(); } }); }
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,7 +16,6 @@ import { makeZip } from '../../release/tests/zip-fixture.mjs';
 import { EXTENSION_PACKAGE_FILES as PACKAGE_FILES } from '../../../extension/scripts/packaging/extension-archive-contract.mjs';
 import { createExtensionZip } from '../../../extension/scripts/packaging/package-extension-release.mjs';
 import { readExtensionFiles } from '../../release/integrity/extension-archive-integrity.mjs';
-import { makeLegacyApiVerifier } from '../commands/manage-podman-installation.mjs';
 
 const root = path.resolve(import.meta.dirname, '../../..');
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
@@ -31,7 +32,7 @@ function extensionFiles(identity, apiPort) {
     : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>' : `synthetic:${name}`)]));
 }
 function writeExtension(directory, files) { for (const [name, bytes] of files) write(path.join(directory, name), bytes); }
-function fixture({ apiPort = 18081, fixedDbPort = false, failReady = false, failApply = false, structuredFailure = false, externalMissing = false, missingPgTool = false, developmentTrust = false, sourceDriftDuringBuild = false } = {}) {
+function fixture({ apiPort = 18081, failReady = false, failApply = false, structuredFailure = false, sourceDriftDuringBuild = false } = {}) {
   const base = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'lexiflow-flow-'));
   const repo = path.join(base, 'source'), dir = path.join(base, 'install'); fs.mkdirSync(repo);
   write(path.join(repo, '.gitignore'), 'tmp/\nbackend/product/api/build/\nextension/dist/\nextension/node_modules/\n');
@@ -42,13 +43,9 @@ function fixture({ apiPort = 18081, fixedDbPort = false, failReady = false, fail
   fs.copyFileSync(path.join(root, 'ops/dataset/dataset-generation-identity.mjs'), path.join(repo, 'ops/dataset/dataset-generation-identity.mjs'));
   fs.copyFileSync(path.join(root, 'ops/dataset/ecdict-source.lock.json'), path.join(repo, 'ops/dataset/ecdict-source.lock.json'));
   fs.mkdirSync(path.join(repo, 'ops/docker'), { recursive: true });
-  for (const name of ['Dockerfile', 'Dockerfile.postgres', 'run-container-command.sh', 'initialize-postgres-app-role.sh']) fs.copyFileSync(path.join(root, 'ops/docker', name), path.join(repo, 'ops/docker', name));
-  fs.mkdirSync(path.join(repo, 'infra/postgres'), { recursive: true });
-  fs.copyFileSync(path.join(root, 'infra/postgres/schema.sql'), path.join(repo, 'infra/postgres/schema.sql'));
-  if (developmentTrust) {
-    fs.mkdirSync(path.join(repo, 'infra/local'), { recursive: true });
-    fs.copyFileSync(path.join(root, 'infra/local/compose.yaml'), path.join(repo, 'infra/local/compose.yaml'));
-  }
+  for (const name of ['Dockerfile', 'run-container-command.sh']) fs.copyFileSync(path.join(root, 'ops/docker', name), path.join(repo, 'ops/docker', name));
+  fs.mkdirSync(path.join(repo, 'infra/sqlite'), { recursive: true });
+  fs.copyFileSync(path.join(root, 'infra/sqlite/schema.sql'), path.join(repo, 'infra/sqlite/schema.sql'));
   execFileSync('git', ['init', '-q', repo]); execFileSync('git', ['-C', repo, 'config', 'user.email', 'fixture@example.invalid']);
   execFileSync('git', ['-C', repo, 'config', 'user.name', 'Fixture']); execFileSync('git', ['-C', repo, 'add', '-A']);
   execFileSync('git', ['-C', repo, 'commit', '-qm', 'fixture']);
@@ -58,20 +55,9 @@ function fixture({ apiPort = 18081, fixedDbPort = false, failReady = false, fail
   const locked = JSON.parse(fs.readFileSync(path.join(repo, 'ops/dataset/ecdict-source.lock.json'), 'utf8'));
   const upstream = { repository_url: locked.repository_url, commit: locked.commit, files: locked.files,
     archive_member: { sha256: locked.archive_member.sha256, bytes: locked.archive_member.bytes } };
-  let generation, dbPort, created = false, credential, pgToolPresent = !missingPgTool, sourceToolsOwner = null;
-  const developmentId = 'd'.repeat(64);
-  const developmentRow = { Id: developmentId, Image: image('e'), ImageName: 'docker.io/library/postgres:17-alpine',
-    Config: { Image: 'docker.io/library/postgres:17-alpine', Entrypoint: ['docker-entrypoint.sh'], Cmd: ['postgres'],
-      Env: ['POSTGRES_DB=lexiflow', 'POSTGRES_HOST_AUTH_METHOD=trust', 'PGDATA=/var/lib/postgresql/data'],
-      Labels: { 'com.docker.compose.project': 'lexiflow-local', 'com.docker.compose.service': 'postgres',
-        'io.podman.compose.project': 'lexiflow-local', 'io.podman.compose.service': 'postgres',
-        'com.docker.compose.project.config_files': path.join(repo, 'infra/local/compose.yaml'),
-        'com.docker.compose.project.working_dir': path.join(repo, 'infra/local') } }, State: { Running: true },
-    HostConfig: { PortBindings: { '5432/tcp': [{ HostIp: '127.0.0.1', HostPort: '15432' }] } },
-    Mounts: [{ Type: 'volume', Name: 'lexiflow-local_lexiflow-postgres-data', Destination: '/var/lib/postgresql/data', RW: true }] };
+  let generation, created = false, sourceToolsOwner = null;
   async function setup() {
-    dbPort = developmentTrust || fixedDbPort ? 15432 : await unusedPort();
-    if (externalMissing) { credential = path.join(base, 'external-password'); write(credential, 'unused\n'); fs.chmodSync(credential, 0o600); }
+
     generation = dataGeneration({ codeVersion: await generationCodeVersion(repo), inputSha256: hash(csv), upstream });
 
   }
@@ -88,29 +74,17 @@ function fixture({ apiPort = 18081, fixedDbPort = false, failReady = false, fail
       }
       return '';
     }
-    if (command === 'java') return JSON.stringify({ status: 'PASS', database: 'lexiflow', schema: 'lexiflow_release', fingerprint: 'f'.repeat(64),
-      needsRebuild: committedGeneration !== generation.generationVersion,
-      reason: !committedGeneration ? 'SCHEMA_MISSING' : committedGeneration !== generation.generationVersion ? 'GENERATION_CHANGED' : 'OK',
-      generationVersion: committedGeneration ?? null, datasetVersion: committedGeneration ? 7 : null });
+    if (command === 'java') { const file=argv[argv.indexOf('--expected-file')+1]; return JSON.stringify({status:'PASS',databaseFile:file,fingerprint:'f'.repeat(64),needsRebuild:committedGeneration !== generation.generationVersion,reason:!committedGeneration?'DATABASE_ABSENT':committedGeneration!==generation.generationVersion?'GENERATION_CHANGED':'OK',generationVersion:committedGeneration??null,datasetVersion:committedGeneration?7:null}); }
     if (command !== 'podman') throw new Error('unexpected command');
     if (argv[0] === 'build' && argv.includes('--iidfile')) {
       write(argv[argv.indexOf('--iidfile') + 1], image('e'));
       sourceToolsOwner = argv.find(value => value.startsWith('io.lexiflow.source-tools-owner='))?.split('=')[1]; return '';
     }
     if (argv[0] === 'image' && argv[1] === 'exists') throw Object.assign(new Error('image absent'), { commandExitCode: 1 });
+    if (argv[0] === 'pull' && argv.at(-1) === 'docker.io/library/eclipse-temurin:25-jre') { if(rejectJavaBasePull) throw Object.assign(new Error('unavailable'),{commandExitCode:125}); return ''; }
     if (argv[0] === 'image' && argv[1] === 'inspect' && argv.includes('{{json .Labels}}') && sourceToolsOwner)
       return JSON.stringify({ 'io.lexiflow.source-tools-owner': sourceToolsOwner });
     if (argv[0] === 'rmi' || argv[0] === 'tag') return '';
-    if (developmentTrust && argv[0] === 'ps' && argv.includes('-q')) return developmentId;
-    if (developmentTrust && argv[0] === 'inspect' && argv[1] === developmentId) return JSON.stringify([developmentRow]);
-    if (argv[0] === 'run' && argv.includes('/bin/sh')) {
-      const query = argv.at(-1);
-      if (query.includes('pg_database')) return JSON.stringify({ serverVersion: 17, currentUser: 'lexiflow', userOid: 10,
-        databaseOid: 16385, databaseOwner: 'lexiflow', ...(developmentTrust ? { currentUser: 'postgres', databaseOwner: 'postgres' } : {}) });
-      if (query.includes('pg_namespace')) return JSON.stringify({ schemaExists: true, schemaOid: 16386,
-        owner: developmentTrust ? 'postgres' : 'lexiflow', canCreateSchema: true });
-      throw new Error('unexpected SQL');
-    }
     if (argv[0] === 'run' && argv.includes('/kit/ops/dataset/prepare_ecdict_bundle.py')) {
       const mount = argv.find(arg => arg.endsWith(':/data'));
       const dataRoot = path.join(mount.slice(0, -6), 'ecdict-source.ABC123');
@@ -119,40 +93,19 @@ function fixture({ apiPort = 18081, fixedDbPort = false, failReady = false, fail
       write(path.join(dataRoot, 'source-summary.json'), JSON.stringify({ csv_sha256: hash(csv), generation }));
       return 'dataset_dir=/data/ecdict-source.ABC123\n';
     }
-    if (argv[0] === 'image' && argv[1] === 'inspect' && argv.includes('--format') && argv[argv.indexOf('--format') + 1] === 'json'
-        && ['docker.io/library/postgres:17-bookworm', 'docker.io/library/eclipse-temurin:25-jre'].includes(argv[2])) {
-      const java = argv[2] === 'docker.io/library/eclipse-temurin:25-jre';
-      return JSON.stringify([{ Id: image(java ? 'a' : 'b'), Os: 'linux', Architecture: 'arm64', Config: { Env: java
-        ? ['JAVA_VERSION=jdk-25.0.1+1'] : ['PG_MAJOR=17', 'PG_VERSION=17.4'] } }]);
-    }
-    if (argv[0] === 'image' && argv[1] === 'inspect' && argv.includes('--format') && argv[argv.indexOf('--format') + 1] === 'json')
-      return JSON.stringify([{ Id: argv.at(-1), Os: 'linux', Architecture: 'arm64', Labels: {
-        'org.opencontainers.image.version': identity.softwareVersion, 'org.opencontainers.image.revision': identity.sourceCommit,
-        'io.lexiflow.build-id': identity.buildId, 'io.lexiflow.source-sha256': identity.sourceSha256,
-        'io.lexiflow.image-role': 'api', 'io.lexiflow.deployment-version': identity.baseVersion.toLowerCase() } }]);
     if (argv[0] === 'run' && argv.includes('--deployment-data')) {
-      if (argv.includes('apply')) { if (structuredFailure) throw Object.assign(new Error('safe command exit'), { commandExitCode: 1,
-          stdout: JSON.stringify({ status: 'FAIL', reason: 'REQUEST_OR_DATA_INVALID' }) });
-        if (failApply) throw new Error('SYNTHETIC_DB_APPLY_FAILURE');
-        committedGeneration = generation.generationVersion;
-        return JSON.stringify({ status: 'PASS', rebuilt: true, generationVersion: generation.generationVersion, datasetVersion: 7 }); }
-      return JSON.stringify({ status: 'PASS', database: 'lexiflow', schema: 'lexiflow_release', fingerprint: 'f'.repeat(64),
-        needsRebuild: committedGeneration !== generation.generationVersion,
-        reason: !committedGeneration ? 'SCHEMA_MISSING' : committedGeneration !== generation.generationVersion ? 'GENERATION_CHANGED' : 'OK',
-        generationVersion: committedGeneration ?? null, datasetVersion: committedGeneration ? 7 : null });
-    }
-    if (argv[0] === 'pull' && argv.at(-1) === 'docker.io/library/postgres:17-bookworm') pgToolPresent = true;
-    if (argv[0] === 'pull' && argv.at(-1) === 'docker.io/library/eclipse-temurin:25-jre') {
-      if (rejectJavaBasePull) throw Object.assign(new Error('synthetic unavailable'), { commandExitCode: 125 });
-      pgToolPresent = true;
+      const expected=argv[argv.indexOf('--expected-file')+1];
+      if (argv.includes('apply')) { if (structuredFailure) throw Object.assign(new Error('safe command exit'), { commandExitCode: 1, stdout: JSON.stringify({status:'FAIL',reason:'REQUEST_OR_DATA_INVALID'}) }); if(failApply)throw new Error('SYNTHETIC_DB_APPLY_FAILURE'); committedGeneration=generation.generationVersion;
+        const mount=argv.find(value=>value.includes(':/db:rw')); const host=mount.slice(0,mount.indexOf(':/db:')); const db=path.join(host,'lexicon.db'); write(db,Buffer.concat([Buffer.from('SQLite format 3\0'),Buffer.alloc(100)]));
+        return JSON.stringify({status:'PASS',databaseFile:expected,fingerprint:'f'.repeat(64),needsRebuild:false,generationVersion:generation.generationVersion,datasetVersion:7}); }
+      return JSON.stringify({status:'PASS',databaseFile:expected,fingerprint:'f'.repeat(64),needsRebuild:committedGeneration!==generation.generationVersion,reason:!committedGeneration?'DATABASE_ABSENT':'GENERATION_CHANGED',generationVersion:committedGeneration??null,datasetVersion:committedGeneration?7:null});
     }
     if (argv[0] === 'image' && argv[1] === 'inspect') {
       const ref = argv[2];
-      if (['docker.io/library/postgres:17-bookworm', 'docker.io/library/eclipse-temurin:25-jre'].includes(ref) && !pgToolPresent) throw new Error('image absent');
       if (argv.includes('--format') && argv[argv.indexOf('--format') + 1] === 'json' && ref.includes('/library/')) {
         const java = ref === 'docker.io/library/eclipse-temurin:25-jre';
         return JSON.stringify([{ Id: image(java ? 'a' : 'b'), Os: 'linux', Architecture: 'arm64', Config: { Env: java
-          ? ['JAVA_VERSION=jdk-25.0.1+1'] : ['PG_MAJOR=17', 'PG_VERSION=17.4'] } }]);
+          ? ['JAVA_VERSION=jdk-25.0.1+1'] : [] } }]);
       }
       return image('e');
     }
@@ -160,10 +113,9 @@ function fixture({ apiPort = 18081, fixedDbPort = false, failReady = false, fail
   }
   function ctx({ planOnly = false, confirmPlan, confirmInput, confirmOutput } = {}) {
     let current;
-    return { repo, dir, action: 'install', apiPort, dbPort, seen: new Set(),
+    return { repo, dir, action: 'install', apiPort, seen: new Set(),
       // 编排 fixture 不读取真实 API 监听者；数据库占用场景仍使用独立测试端口。
-      portTaken: port => !developmentTrust && port === dbPort && fs.existsSync(path.join(dir, 'state.json'))
-        ? Promise.resolve(true) : fixedDbPort || port === apiPort ? Promise.resolve(false) : new Promise(resolve => {
+      portTaken: port => port === apiPort ? Promise.resolve(false) : new Promise(resolve => {
         const server = net.createServer();
         server.once('error', error => resolve(error.code === 'EADDRINUSE'));
         server.listen(port, '127.0.0.1', () => server.close(() => resolve(false)));
@@ -171,9 +123,7 @@ function fixture({ apiPort = 18081, fixedDbPort = false, failReady = false, fail
       environment: { PATH: process.env.PATH }, javaEnvironment: env => env, run,
       ready: async () => { calls.push('ready'); if (failReadyNow) throw new Error('SYNTHETIC_API_FAILURE'); return 7; },
       compose: async (...args) => { calls.push(`compose:${args.join(' ')}`); return ''; },
-      ownedResources: async () => fs.existsSync(path.join(dir, 'state.json')) ? new Set(['postgres']) : new Set(), verifyConfig: () => {}, verifyApiPort: async () => {},
-      verifyStoppedManagedPostgres: async () => { calls.push('verify-stopped-pg'); },
-      waitManagedPostgres: async () => { calls.push('wait-managed-pg'); },
+      ownedResources: async () => new Set(), verifyConfig: () => {}, verifyApiPort: async () => {},
       acquireLock: () => calls.push('lock'), digestFiles: () => ({}), imageLabels: () => [],
       saveState: value => { current = value; saved.push(structuredClone(value)); write(path.join(dir, 'state.json'), JSON.stringify(value)); },
       setState: value => { current = value; }, getState: () => current, progress: text => calls.push(`progress:${text}`),
@@ -192,7 +142,7 @@ function fixture({ apiPort = 18081, fixedDbPort = false, failReady = false, fail
       'plan-only must not publish an installation record');
     return planned;
   }
-  return { base, repo, dir, calls, saved, developmentRow, get identity() { return identity; }, setup, ctx, plan,
+  return { base, repo, dir, calls, saved, get identity() { return identity; }, setup, ctx, plan,
     changeSource: () => write(path.join(repo, 'fixture.txt'), 'changed generation input\n'),
     changeApplication: () => write(path.join(repo, 'application.txt'), 'changed application\n'),
     setFailReady: value => { failReadyNow = value; },
@@ -206,7 +156,7 @@ test('source actual planner uses Java inspect, then applies through built API im
     await f.setup(); const { plan, planHash } = await f.plan();
     assert.equal(plan.actions.dataRebuild, true);
     assert.equal(await runUnifiedDeployment(f.ctx({ confirmPlan: planHash })), 0);
-    assert.ok(f.calls.some(call => call.startsWith('podman:run') && call.includes('--deployment-data inspect')));
+    assert.equal(f.calls.some(call => call.includes('--deployment-data inspect')), false, 'missing inspect target is handled without creating or opening a DB');
     assert.ok(f.calls.some(call => call.startsWith('podman:run') && call.includes('--deployment-data apply')));
     assert.ok(f.calls.filter(call => call.startsWith('podman:run') && call.includes('--deployment-data')).every(call =>
       call.includes('--cap-drop=ALL --cap-add=DAC_OVERRIDE') && call.includes('--read-only') && call.includes('--security-opt=no-new-privileges')));
@@ -214,15 +164,6 @@ test('source actual planner uses Java inspect, then applies through built API im
     assert.equal(sourceRuns.length, 2, 'plan and confirmed execution each prepare the frozen source');
     assert.ok(sourceRuns.every(call => call.endsWith('/kit/ops/dataset/prepare_ecdict_bundle.py /kit /data')
       && call.includes('LEXIFLOW_GENERATION_CODE_VERSION=') && !call.includes('DAC_OVERRIDE') && !call.includes('--entrypoint')));
-    const postgresBuild = f.calls.find(call => call.startsWith('podman:build') && call.endsWith('/postgres'));
-    const postgresContext = postgresBuild?.split(' ').at(-1);
-    assert.ok(postgresBuild?.includes(`-f ${path.join(postgresContext, 'Dockerfile.postgres')}`),
-      'fresh managed PostgreSQL build must select the non-default Dockerfile explicitly');
-    assert.ok(fs.existsSync(path.join(postgresContext, 'Dockerfile.postgres')));
-    const pgStart = f.calls.indexOf('compose:up -d --force-recreate postgres');
-    const pgWait = f.calls.indexOf('wait-managed-pg');
-    const dbProbe = f.calls.findIndex(call => call.startsWith('podman:run') && call.includes('--deployment-data inspect'));
-    assert.ok(pgStart >= 0 && pgWait > pgStart && dbProbe > pgWait, 'managed readiness barrier must precede database probe');
     assert.ok(f.calls.indexOf('compose:up -d --no-deps --force-recreate api') > f.calls.findIndex(call => call.startsWith('podman:run') && call.includes('--deployment-data apply')));
     const state = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json')));
     assert.equal(state.phase, 'ready'); assert.equal(state.generationVersion.length, 64);
@@ -312,65 +253,6 @@ test('failure record write failure remains a failure and retains the operation c
   } finally { f.cleanup(); }
 });
 
-test('occupied port without recorded installation credentials blocks before build or database probe', async () => {
-  const f = fixture(); let listener;
-  try {
-    await f.setup();
-    const port = (await f.ctx({ planOnly: true })).dbPort;
-    listener = net.createServer(); await new Promise(resolve => listener.listen(port, '127.0.0.1', resolve));
-    await assert.rejects(f.plan(), /DEPLOYMENT_DATABASE_CREDENTIAL_REQUIRED/);
-    assert.equal(f.calls.some(call => call.startsWith('./gradlew:') || call.includes('/bin/sh') || call.includes('CREATE DATABASE')), false);
-    assert.equal(fs.existsSync(f.dir), false);
-  } finally { await new Promise(resolve => listener?.close(resolve) ?? resolve()); f.cleanup(); }
-});
-
-test('recognized development trust uses no secret and freezes container identity in plan and state', async () => {
-  const f = fixture({ developmentTrust: true }); let listener;
-  try {
-    await f.setup();
-    listener = net.createServer();
-    try { await new Promise((resolve, reject) => listener.once('error', reject).listen(15432, '127.0.0.1', resolve)); }
-    catch (error) { if (error.code !== 'EADDRINUSE') throw error; listener = null; }
-    const { plan, planHash } = await f.plan();
-    assert.equal(plan.database.target.kind, 'external');
-    assert.equal(plan.database.target.authMode, 'development-trust');
-    assert.equal(plan.database.target.user, 'postgres');
-    assert.match(plan.database.target.developmentIdentityFingerprint, /^[a-f0-9]{64}$/);
-    assert.equal(await runUnifiedDeployment(f.ctx({ confirmPlan: planHash })), 0);
-    const state = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json')));
-    assert.equal(state.databaseTarget.authMode, 'development-trust');
-    assert.equal(state.databaseTarget.developmentIdentity.containerId, f.developmentRow.Id);
-    assert.equal(fs.existsSync(path.join(f.dir, 'secrets/app-password')), false);
-    assert.equal(state.digests['secrets/app-password'], undefined);
-    const compose = JSON.parse(fs.readFileSync(path.join(f.dir, 'compose.yaml')));
-    assert.equal(compose.services.postgres, undefined);
-    assert.equal(compose.services.api.secrets, undefined);
-    assert.ok(f.calls.filter(call => call.startsWith('podman:run') && call.includes('--deployment-data')).every(call =>
-      !call.includes(':/secret:ro') && call.includes('LEXIFLOW_DEPLOYMENT_DB_PASSWORD=')
-      && call.includes('LEXIFLOW_DEPLOYMENT_DB_PASSWORD_FILE')));
-    const before = f.calls.length;
-    f.developmentRow.Image = image('f');
-    await assert.rejects(f.plan(), /DEVELOPMENT_DATABASE_IMAGE_CHANGED/);
-    assert.equal(f.calls.slice(before).some(call => call.includes('--deployment-data') || call.startsWith('./gradlew:')), false);
-  } finally { if (listener) await new Promise(resolve => listener.close(resolve)); f.cleanup(); }
-});
-
-test('recorded external target reuses saved secret, never creates database or manages postgres service', async () => {
-  const f = fixture();
-  try {
-    await f.setup(); const first = await f.plan(); await runUnifiedDeployment(f.ctx({ confirmPlan: first.planHash }));
-    const stateFile = path.join(f.dir, 'state.json'); const state = JSON.parse(fs.readFileSync(stateFile));
-    state.databaseTarget = { kind: 'external', host: '127.0.0.1', port: state.dbPort, user: 'lexiflow' };
-    fs.writeFileSync(stateFile, JSON.stringify(state));
-    const before = f.calls.length, planned = await f.plan();
-    assert.equal(planned.plan.database.target.kind, 'external');
-    assert.equal(planned.plan.database.create, false);
-    assert.equal(planned.plan.actions.dataRebuild, false);
-    assert.ok(f.calls.slice(before).some(call => call.includes('/bin/sh')));
-    assert.equal(f.calls.slice(before).some(call => call.includes('CREATE DATABASE') || call.includes('compose:up -d postgres')), false);
-  } finally { f.cleanup(); }
-});
-
 test('ordinary interaction asks once before heavy work and emits no machine plan JSON', async () => {
   const f = fixture();
   try {
@@ -379,7 +261,7 @@ test('ordinary interaction asks once before heavy work and emits no machine plan
     input.write('n\n');
     assert.equal(await runUnifiedDeployment(f.ctx({ confirmInput: input, confirmOutput: output })), 0);
     assert.equal(f.calls.filter(call => !String(call).startsWith('progress:')).length, 0); assert.equal(fs.existsSync(f.dir), false);
-    assert.match(output.text, /127\.0\.0\.1:[\s\S]*lexiflow_release[\s\S]*\[y\/N\]/);
+    assert.match(output.text, /SQLite 文件[\s\S]*\[y\/N\]/);
     const yes = new PassThrough(); yes.isTTY = true; yes.write('yes\n');
     const lines = [], original = console.log; console.log = value => lines.push(String(value));
     try { assert.equal(await runUnifiedDeployment(f.ctx({ confirmInput: yes, confirmOutput: output })), 0); }
@@ -497,23 +379,6 @@ test('ordinary consent blocks source changes after yes before the first build id
   } finally { f.cleanup(); }
 });
 
-test('ordinary consent blocks recorded credential changes before its first connection read', async () => {
-  const f = fixture();
-  try {
-    await f.setup();
-    const plan = await f.plan(); await runUnifiedDeployment(f.ctx({ confirmPlan: plan.planHash }));
-    const input = new PassThrough(); input.isTTY = true; input.write('y\n');
-    const ctx = f.ctx({ confirmInput: input, confirmOutput: { isTTY: true, write() {} } });
-    const before = f.calls.length, progress = ctx.progress;
-    ctx.progress = text => {
-      progress(text);
-      if (text === '确认完成，开始连接目标与准备阶段') fs.writeFileSync(path.join(f.dir, 'secrets/app-password'), 'changed-private-fixture\n');
-    };
-    await assert.rejects(runUnifiedDeployment(ctx), /DEPLOYMENT_SECRET_DRIFT/);
-    assert.equal(f.calls.slice(before).some(call => call.startsWith('./gradlew:') || call.startsWith('podman:run')), false);
-  } finally { f.cleanup(); }
-});
-
 test('unchanged source refresh always prepares and restarts application without reimporting data', async () => {
   const f = fixture();
   try {
@@ -596,76 +461,16 @@ for (const target of ['zip', 'sidecar', 'tree']) test(`tampering ${target} durin
   } finally { f.cleanup(); }
 });
 
-test('approved source API migration binds 18080→18081 in plan and preserves DB identity on confirmed upgrade', async () => {
-  const f = fixture({ apiPort: 18081, fixedDbPort: true });
-  try {
-    await f.setup(); const baseline = await f.plan();
-    assert.equal(await runUnifiedDeployment(f.ctx({ confirmPlan: baseline.planHash })), 0);
-    const installedStatePath = path.join(f.dir, 'state.json');
-    const installedState = JSON.parse(fs.readFileSync(installedStatePath, 'utf8'));
-    fs.writeFileSync(installedStatePath, JSON.stringify({ ...installedState, apiPort: 18080 }));
-    const before = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json'), 'utf8'));
-    const secretBefore = fs.readFileSync(path.join(f.dir, 'secrets/app-password'));
-    const prepared = f.ctx({ planOnly: true }); let checks = 0, planned;
-    Object.assign(prepared, { action: 'upgrade', apiPort: 18081, portTaken: async port => port === 15432,
-      verifyLegacyApi: async () => { checks++; } });
-    const original = console.log;
-    console.log = value => { try { const parsed = JSON.parse(value); if (parsed.planHash) planned = parsed; } catch {} };
-    try { assert.equal(await runUnifiedDeployment(prepared), 0); } finally { console.log = original; }
-    assert.equal(checks >= 2, true);
-    assert.deepEqual(planned.plan.target.apiPortMigration, { from: 18080, to: 18081 });
-    const confirmed = f.ctx({ confirmPlan: planned.planHash });
-    Object.assign(confirmed, { action: 'upgrade', apiPort: 18081, portTaken: async port => port === 15432,
-      verifyLegacyApi: async () => { checks++; } });
-    assert.equal(await runUnifiedDeployment(confirmed), 0);
-    const after = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json'), 'utf8'));
-    assert.equal(after.apiPort, 18081); assert.equal(after.id, before.id); assert.equal(after.project, before.project);
-    assert.deepEqual(after.databaseTarget, before.databaseTarget); assert.equal(after.dbPort, before.dbPort);
-    assert.deepEqual(after.datasetIdentity, before.datasetIdentity);
-    assert.deepEqual(fs.readFileSync(path.join(f.dir, 'secrets/app-password')), secretBefore);
-    assert.equal(f.calls.filter(v => v.includes('--deployment-data apply')).length, 1, 'API migration does not reimport data');
-  } finally { f.cleanup(); }
-});
-
-test('source migration refuses legacy ownership drift before consent and immediately after yes', async () => {
-  for (const failureAt of [1, 2]) {
-    const f = fixture({ apiPort: 18081, fixedDbPort: true });
-    try {
-      await f.setup(); const baseline = await f.plan();
-      assert.equal(await runUnifiedDeployment(f.ctx({ confirmPlan: baseline.planHash })), 0);
-      const installedStatePath = path.join(f.dir, 'state.json');
-      const installedState = JSON.parse(fs.readFileSync(installedStatePath, 'utf8'));
-      fs.writeFileSync(installedStatePath, JSON.stringify({ ...installedState, apiPort: 18080 }));
-      const input = new PassThrough(), output = new PassThrough(); input.isTTY = true; output.isTTY = true;
-      let prompt = ''; output.on('data', chunk => { prompt += chunk.toString('utf8'); });
-      input.end('y\n'); let checks = 0;
-      const context = f.ctx({ confirmInput: input, confirmOutput: output });
-      Object.assign(context, { action: 'upgrade', apiPort: 18081, portTaken: async port => port === 15432,
-        verifyLegacyApi: async () => { if (++checks === failureAt) throw Error('LEGACY_API_CHANGED'); } });
-      const prior = f.calls.length;
-      await assert.rejects(runUnifiedDeployment(context), /LEGACY_API_CHANGED/);
-      assert.equal(checks, failureAt);
-      if (failureAt === 2) assert.match(prompt, /API 127\.0\.0\.1:18080 → 127\.0\.0\.1:18081/);
-      else assert.equal(prompt, '');
-      assert.equal(f.calls.slice(prior).some(v => v.startsWith('podman:run') || v.startsWith('podman:build') || v === 'lock'), false);
-      assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json'), 'utf8')).apiPort, 18080);
-    } finally { f.cleanup(); }
-  }
-});
-
 test('ordinary retry replans failed software preparation only with unchanged data and database facts', async () => {
   const f = fixture({ apiPort: 18081, fixedDbPort: true });
   try {
     await f.setup(); const baseline = await f.plan();
     assert.equal(await runUnifiedDeployment(f.ctx({ confirmPlan: baseline.planHash })), 0);
-    const installedStatePath = path.join(f.dir, 'state.json');
-    const installedState = JSON.parse(fs.readFileSync(installedStatePath, 'utf8'));
-    fs.writeFileSync(installedStatePath, JSON.stringify({ ...installedState, apiPort: 18080 }));
     const stateFile = path.join(f.dir, 'state.json'), state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
     const generation = state.generationVersion, inputSha256 = state.inputSha256;
     const marker = { schema: 1, root: f.dir, installationId: state.id, stateSha256: hash(fs.readFileSync(stateFile)),
       targetBuildId: state.buildIdentity.buildId, inputSha256, generationVersion: generation,
-      baseVersion: state.buildIdentity.baseVersion, databaseFingerprint: 'f'.repeat(64), databaseTarget: 'managed',
+      baseVersion: state.buildIdentity.baseVersion, databaseFingerprint: 'f'.repeat(64), databaseTarget: 'file',
       allowedEnvSha256: [hash(fs.readFileSync(path.join(f.dir, 'release.env')))] };
     write(path.join(f.dir, 'image-replacement.json'), JSON.stringify(marker));
     write(path.join(f.dir, 'deployment.json'), JSON.stringify({ schema: 1, operation: '1'.repeat(32),
@@ -674,9 +479,7 @@ test('ordinary retry replans failed software preparation only with unchanged dat
     f.changeApplication();
     const input = new PassThrough(), output = new PassThrough(); input.isTTY = true; output.isTTY = true; input.end('y\n');
     const retry = f.ctx({ confirmInput: input, confirmOutput: output });
-    Object.assign(retry, { action: 'install', apiPort: 18081, verifyLegacyApi: async (_installed, options) => {
-      assert.deepEqual(options, { allowMissingApi: true, targetApiPort: 18081 });
-    } });
+    Object.assign(retry, { action: 'install', apiPort: 18081 });
     assert.equal(await runUnifiedDeployment(retry), 0);
     const after = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
     assert.equal(after.apiPort, 18081); assert.equal(after.generationVersion, generation);
@@ -692,9 +495,6 @@ test('failed-preparation replan rejects changed input, generation, base version,
   try {
     await f.setup(); const baseline = await f.plan();
     assert.equal(await runUnifiedDeployment(f.ctx({ confirmPlan: baseline.planHash })), 0);
-    const installedStatePath = path.join(f.dir, 'state.json');
-    const installedState = JSON.parse(fs.readFileSync(installedStatePath, 'utf8'));
-    fs.writeFileSync(installedStatePath, JSON.stringify({ ...installedState, apiPort: 18080 }));
     const stateFile = path.join(f.dir, 'state.json'), state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
     f.changeApplication();
     const variants = [
@@ -705,7 +505,7 @@ test('failed-preparation replan rejects changed input, generation, base version,
       const marker = { schema: 1, root: f.dir, installationId: state.id, stateSha256: hash(fs.readFileSync(stateFile)),
         targetBuildId: state.buildIdentity.buildId, inputSha256: state.inputSha256,
         generationVersion: state.generationVersion, baseVersion: state.buildIdentity.baseVersion,
-        databaseFingerprint: 'f'.repeat(64), databaseTarget: 'managed',
+        databaseFingerprint: 'f'.repeat(64), databaseTarget: 'file',
         allowedEnvSha256: [hash(fs.readFileSync(path.join(f.dir, 'release.env')))] };
       marker[field] = changed;
       write(path.join(f.dir, 'image-replacement.json'), JSON.stringify(marker));
@@ -714,9 +514,9 @@ test('failed-preparation replan rejects changed input, generation, base version,
       try { fs.unlinkSync(path.join(f.dir, 'prepared-target.json')); } catch {}
       const input = new PassThrough(), output = new PassThrough(); input.isTTY = true; output.isTTY = true; input.end('y\n');
       const retry = f.ctx({ confirmInput: input, confirmOutput: output });
-      Object.assign(retry, { action: 'install', apiPort: 18081, verifyLegacyApi: async () => {} });
+      Object.assign(retry, { action: 'install', apiPort: 18081 });
       await assert.rejects(runUnifiedDeployment(retry), /DEPLOYMENT_REPLACEMENT_TARGET_CHANGED/);
-      assert.equal(JSON.parse(fs.readFileSync(stateFile, 'utf8')).apiPort, 18080);
+      assert.equal(JSON.parse(fs.readFileSync(stateFile, 'utf8')).apiPort, 18081);
     }
   } finally { f.cleanup(); }
 });
@@ -730,26 +530,21 @@ test('same-slot 18081 failed preparation accepts the same constrained ordinary i
     write(path.join(f.dir, 'image-replacement.json'), JSON.stringify({ schema: 1, root: f.dir, installationId: state.id,
       stateSha256: hash(fs.readFileSync(stateFile)), targetBuildId: state.buildIdentity.buildId,
       inputSha256: state.inputSha256, generationVersion: state.generationVersion,
-      baseVersion: state.buildIdentity.baseVersion, databaseFingerprint: 'f'.repeat(64), databaseTarget: 'managed',
+      baseVersion: state.buildIdentity.baseVersion, databaseFingerprint: 'f'.repeat(64), databaseTarget: 'file',
       allowedEnvSha256: [hash(fs.readFileSync(path.join(f.dir, 'release.env')))] }));
     write(path.join(f.dir, 'deployment.json'), JSON.stringify({ schema: 1, operation: '3'.repeat(32), planHash: '4'.repeat(64), stage: 'planned' }));
     try { fs.unlinkSync(path.join(f.dir, 'prepared-target.json')); } catch {}
     f.changeApplication();
     const input = new PassThrough(), output = new PassThrough(); input.isTTY = true; output.isTTY = true; input.end('y\n');
-    let verifications = 0;
     const retry = f.ctx({ confirmInput: input, confirmOutput: output });
-    Object.assign(retry, { action: 'install', apiPort: 18081, verifyLegacyApi: async (_installed, options) => {
-      verifications++;
-      assert.deepEqual(options, { allowMissingApi: true, targetApiPort: 18081 });
-    } });
+    Object.assign(retry, { action: 'install', apiPort: 18081 });
     assert.equal(await runUnifiedDeployment(retry), 0);
-    assert.equal(verifications, 2, 'verify ownership before DB connection and before intent update');
     assert.equal(JSON.parse(fs.readFileSync(stateFile, 'utf8')).apiPort, 18081);
   } finally { f.cleanup(); }
 });
 
-test('failed replan preserves old intent when input, secret, or config drifts after confirmation', async () => {
-  for (const drift of ['input', 'secret', 'config']) {
+test('failed replan preserves old intent when input or config drifts after confirmation', async () => {
+  for (const drift of ['input', 'config']) {
     const f = fixture({ apiPort: 18081, fixedDbPort: true });
     try {
       await f.setup(); const baseline = await f.plan();
@@ -757,166 +552,34 @@ test('failed replan preserves old intent when input, secret, or config drifts af
       const stateFile = path.join(f.dir, 'state.json'), state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
       const originalMarker = { schema: 1, root: f.dir, installationId: state.id, stateSha256: hash(fs.readFileSync(stateFile)),
         targetBuildId: state.buildIdentity.buildId, inputSha256: state.inputSha256, generationVersion: state.generationVersion,
-        baseVersion: state.buildIdentity.baseVersion, databaseFingerprint: 'f'.repeat(64), databaseTarget: 'managed',
+        baseVersion: state.buildIdentity.baseVersion, databaseFingerprint: 'f'.repeat(64), databaseTarget: 'file',
         allowedEnvSha256: [hash(fs.readFileSync(path.join(f.dir, 'release.env')))] };
       write(path.join(f.dir, 'image-replacement.json'), JSON.stringify(originalMarker));
       write(path.join(f.dir, 'deployment.json'), JSON.stringify({ schema: 1, operation: '5'.repeat(32), planHash: '6'.repeat(64), stage: 'planned' }));
       try { fs.unlinkSync(path.join(f.dir, 'prepared-target.json')); } catch {}
       f.changeApplication();
       const input = new PassThrough(), output = new PassThrough(); input.isTTY = true; output.isTTY = true; input.end('y\n');
-      let verification = 0;
       const retry = f.ctx({ confirmInput: input, confirmOutput: output });
       retry.apiPort = 18081;
-      retry.verifyLegacyApi = async () => {
-        if (++verification !== 2) return;
-        if (drift === 'input') write(path.join(f.repo, 'application.txt'), 'changed again after confirmation\n');
-        if (drift === 'secret') write(path.join(f.dir, 'secrets/app-password'), 'changed-secret\n');
-        if (drift === 'config') write(path.join(f.dir, 'release.env'), 'changed config\n');
-      };
+      const progress=retry.progress; retry.progress=text=>{progress(text); if(text==='确认完成，开始连接目标与准备阶段'){ if(drift==='input') write(path.join(f.repo,'application.txt'),'changed again after confirmation\n'); else write(path.join(f.dir,'release.env'),'changed config\n'); }};
       if (drift === 'config') retry.verifyConfig = () => {
         if (hash(fs.readFileSync(path.join(f.dir, 'release.env'))) !== state.digests['release.env']) throw Error('DEPLOYMENT_CONFIG_DRIFT');
       };
-      await assert.rejects(runUnifiedDeployment(retry), new RegExp(drift === 'input' ? 'DEPLOYMENT_INPUT_DRIFT'
-        : drift === 'secret' ? 'DEPLOYMENT_SECRET_DRIFT' : 'DEPLOYMENT_CONFIG_DRIFT'));
+      await assert.rejects(runUnifiedDeployment(retry), new RegExp(drift === 'input' ? 'DEPLOYMENT_INPUT_DRIFT' : 'DEPLOYMENT_CONFIG_DRIFT'));
       assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.dir, 'image-replacement.json'), 'utf8')), originalMarker);
       assert.equal(fs.readdirSync(f.dir).some(name => /^image-replacement-[a-f0-9-]+-previous\.json$/.test(name)), false);
     } finally { f.cleanup(); }
   }
 });
 
-test('manager legacy verifier accepts stopped normal migration and strictly verifies failed-preparation absence', async () => {
-  const id = 'a'.repeat(32), project = `lexiflow-local-${id}`;
-  const apiImage = image('a'), postgresImage = image('b'), apiId = 'c'.repeat(64), pgId = 'd'.repeat(64), volumeName = `${project}_pgdata`;
-  const apiLabels = { 'lexiflow.installation': id, 'com.docker.compose.project': project, 'io.podman.compose.project': project,
-    'com.docker.compose.service': 'api', 'io.podman.compose.service': 'api', 'io.lexiflow.build-id': 'e'.repeat(64),
-    'io.lexiflow.image-role': 'api', 'org.opencontainers.image.revision': 'f'.repeat(40),
-    'org.opencontainers.image.version': '1.0.0', 'io.lexiflow.source-sha256': '1'.repeat(64) };
-  const pgLabels = { 'lexiflow.installation': id, 'com.docker.compose.project': project, 'io.podman.compose.project': project,
-    'com.docker.compose.service': 'postgres', 'io.podman.compose.service': 'postgres' };
-  const installed = { id, project, packageType: 'source', apiPort: 18080, dbPort: 15432, databaseTarget: { kind: 'managed' },
-    apiImage, postgresImage, buildIdentity: { buildId: 'e'.repeat(64), sourceCommit: 'f'.repeat(40), sourceSha256: '1'.repeat(64) }, version: '1.0.0' };
-  const makeVerifier = ({ apiPresent = true, pgRunning = false, apiRole = 'api', apiBuildId = 'e'.repeat(64),
-    pgOwner = id, volumeOwner = id, occupied = new Set() } = {}) => {
-    const imageLabels = { ...apiLabels, 'io.lexiflow.image-role': apiRole, 'io.lexiflow.build-id': apiBuildId };
-    const actualPgLabels = { ...pgLabels, 'lexiflow.installation': pgOwner };
-    const apiRows = apiPresent ? [{ Id: apiId, Labels: apiLabels }] : [];
-    const rows = [...apiRows, { Id: pgId, Labels: actualPgLabels }];
-    const run = async (_cmd, args) => {
-      if (args[0] === 'ps') return JSON.stringify(rows);
-      if (args[0] === 'image' && args[1] === 'inspect') {
-        if (args[3] !== 'json') return JSON.stringify(imageLabels);
-        return JSON.stringify([{ Id: apiImage, Os: 'linux', Architecture: 'arm64', Labels: imageLabels }]);
-      }
-      if (args[0] === 'inspect' && args[1] === apiId) return JSON.stringify([{ Id: apiId, Image: apiImage, Config: { Labels: apiLabels },
-        HostConfig: { PortBindings: { '8080/tcp': [{ HostIp: '127.0.0.1', HostPort: '18080' }] } }, State: { Running: false } }]);
-      if (args[0] === 'inspect' && args[1] === pgId) return JSON.stringify([{ Id: pgId, Image: postgresImage, Config: { Labels: actualPgLabels },
-        HostConfig: { PortBindings: { '5432/tcp': [{ HostIp: '127.0.0.1', HostPort: '15432' }] } },
-        Mounts: [{ Type: 'volume', Name: volumeName, Destination: '/var/lib/postgresql/data' }], State: { Running: pgRunning } }]);
-      if (args[0] === 'volume') return JSON.stringify([{ Name: volumeName, Labels: { 'lexiflow.installation': volumeOwner,
-        'com.docker.compose.project': project, 'io.podman.compose.project': project } }]);
-      throw new Error('unexpected fake Podman command');
-    };
-    return makeLegacyApiVerifier({ run, portTaken: async port => occupied.has(port), runtime: async () => ['PASS'],
-      verifyRunningImage: async () => {}, apiPort: 18081, dbPort: 15432 });
-  };
-  await makeVerifier()(installed, { targetApiPort: 18081 }); // stopped old API and PG migration remains valid
-  const retry = makeVerifier({ apiPresent: false, pgRunning: true });
-  await retry({ ...installed, apiPort: 18081 }, { allowMissingApi: true, targetApiPort: 18081 });
-  await assert.rejects(makeVerifier({ apiPresent: false, pgRunning: false })({ ...installed, apiPort: 18081 },
-    { allowMissingApi: true, targetApiPort: 18081 }), /DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED/);
-  await assert.rejects(makeVerifier({ apiPresent: false, pgRunning: true, apiRole: 'postgres' })({ ...installed, apiPort: 18081 },
-    { allowMissingApi: true, targetApiPort: 18081 }), /DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED/);
-  await assert.rejects(makeVerifier({ apiPresent: false, pgRunning: true, apiBuildId: '9'.repeat(64) })({ ...installed, apiPort: 18081 },
-    { allowMissingApi: true, targetApiPort: 18081 }), /DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED/);
-  await assert.rejects(makeVerifier({ apiPresent: false, pgRunning: true, pgOwner: '8'.repeat(32) })({ ...installed, apiPort: 18081 },
-    { allowMissingApi: true, targetApiPort: 18081 }), /DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED/);
-  await assert.rejects(makeVerifier({ apiPresent: false, pgRunning: true, volumeOwner: '9'.repeat(32) })({ ...installed, apiPort: 18081 },
-    { allowMissingApi: true, targetApiPort: 18081 }), /DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED/);
-});
-
-test('confirmed migration of a normally stopped source restarts only its recorded managed PG before inspection', async () => {
-  const f = fixture({ apiPort: 18081, fixedDbPort: true });
+test('database selection and mount contracts are SQLite-only', async () => {
+  const { renderCompose } = await import('../installation/installation-upgrade-workflow.mjs');
+  const root=fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()),'lexiflow-compose-contract-'));
   try {
-    await f.setup(); const baseline = await f.plan();
-    assert.equal(await runUnifiedDeployment(f.ctx({ confirmPlan: baseline.planHash })), 0);
-    const installedStatePath = path.join(f.dir, 'state.json');
-    const installedState = JSON.parse(fs.readFileSync(installedStatePath, 'utf8'));
-    fs.writeFileSync(installedStatePath, JSON.stringify({ ...installedState, apiPort: 18080 }));
-    const input = new PassThrough(), output = new PassThrough(); input.isTTY = true; output.isTTY = true; input.end('y\n');
-    const ctx = f.ctx({ confirmInput: input, confirmOutput: output });
-    Object.assign(ctx, { action: 'upgrade', apiPort: 18081, portTaken: async () => false,
-      verifyLegacyApi: async () => {} });
-    const prior = f.calls.length;
-    assert.equal(await runUnifiedDeployment(ctx), 0);
-    const calls = f.calls.slice(prior);
-    assert.equal(calls.includes('compose:up -d postgres'), true);
-    assert.equal(calls.filter(v => v.includes('--deployment-data apply')).length, 0);
-    assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json'), 'utf8')).apiPort, 18081);
-  } finally { f.cleanup(); }
-});
-test('after migration, a stopped source repeats in the same 18081/15432 slot without replacing DB identity', async () => {
-  const f = fixture({ apiPort: 18081, fixedDbPort: true });
-  try {
-    await f.setup(); const baseline = await f.plan();
-    assert.equal(await runUnifiedDeployment(f.ctx({ confirmPlan: baseline.planHash })), 0);
-    const installedStatePath = path.join(f.dir, 'state.json');
-    const installedState = JSON.parse(fs.readFileSync(installedStatePath, 'utf8'));
-    fs.writeFileSync(installedStatePath, JSON.stringify({ ...installedState, apiPort: 18080 }));
-    const prompt = () => { const input = new PassThrough(), output = new PassThrough(); input.isTTY = true; output.isTTY = true; input.end('y\n'); return { input, output }; };
-    const first = prompt();
-    assert.equal(await runUnifiedDeployment({ ...f.ctx({ confirmInput: first.input, confirmOutput: first.output }),
-      action: 'upgrade', apiPort: 18081, portTaken: async () => false, verifyLegacyApi: async () => {} }), 0);
-    const before = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json'), 'utf8'));
-    const credential = hash(fs.readFileSync(path.join(f.dir, 'secrets/app-password')));
-    const start = f.calls.length;
-    const second = prompt();
-    assert.equal(await runUnifiedDeployment({ ...f.ctx({ confirmInput: second.input, confirmOutput: second.output }),
-      action: 'upgrade', apiPort: 18081, portTaken: async () => false }), 0);
-    const after = JSON.parse(fs.readFileSync(path.join(f.dir, 'state.json'), 'utf8'));
-    const calls = f.calls.slice(start);
-    assert.equal(calls.filter(x => x === 'verify-stopped-pg').length, 2);
-    assert.equal(calls.filter(x => x === 'compose:up -d postgres').length, 1);
-    assert.equal(calls.filter(x => x.includes('--deployment-data apply')).length, 0);
-    assert.equal(after.apiPort, 18081); assert.equal(after.dbPort, 15432);
-    assert.equal(after.id, before.id); assert.equal(after.project, before.project);
-    assert.equal(after.postgresImage, before.postgresImage);
-    assert.deepEqual(after.databaseTarget, before.databaseTarget);
-    assert.equal(hash(fs.readFileSync(path.join(f.dir, 'secrets/app-password'))), credential);
-    await assert.rejects(runUnifiedDeployment({ ...f.ctx({ planOnly: true }), action: 'upgrade', apiPort: 18081,
-      portTaken: async () => false }), /DEPLOYMENT_MANAGED_DATABASE_STOPPED/);
-  } finally { f.cleanup(); }
-});
-test('source install/upgrade refuses third-slot legacy state without connecting or building', async () => {
-  for (const change of [{ apiPort: 17999 }, { apiPort: 18080, dbPort: 15433 }]) {
-    const f = fixture({ apiPort: 18081, fixedDbPort: true });
-    try {
-      await f.setup(); const planned = await f.plan();
-      assert.equal(await runUnifiedDeployment(f.ctx({ confirmPlan: planned.planHash })), 0);
-      const file = path.join(f.dir, 'state.json');
-      const state = JSON.parse(fs.readFileSync(file, 'utf8'));
-      fs.writeFileSync(file, JSON.stringify({ ...state, ...change }));
-      const before = f.calls.length;
-      await assert.rejects(runUnifiedDeployment({ ...f.ctx(), action: 'upgrade', apiPort: 18081, enforceFixedSlots: true }), /DEPLOYMENT_SOURCE_SLOT_STATE_INVALID/);
-      assert.deepEqual(f.calls.slice(before), ['progress:读取安装记录']);
-      assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), { ...state, ...change });
-    } finally { f.cleanup(); }
-  }
-});
-
-test('ordinary consent freezes inherited source network route before any preparation', async () => {
-  const f = fixture();
-  try {
-    await f.setup();
-    const input = new PassThrough(); input.isTTY = true; input.write('y\n');
-    const ctx = f.ctx({ confirmInput: input, confirmOutput: { isTTY: true, write() {} },
-      environment: { https_proxy: 'http://127.0.0.1:7890' } });
-    const progress = ctx.progress;
-    ctx.progress = text => {
-      progress(text);
-      if (text === '确认完成，开始连接目标与准备阶段') ctx.environment.https_proxy = 'http://127.0.0.1:7891';
-    };
-    await assert.rejects(runUnifiedDeployment(ctx), /SOURCE_NETWORK_ENVIRONMENT_CHANGED/);
-    assert.equal(f.calls.some(call => call.startsWith('./gradlew:') || call.startsWith('podman:run')), false);
-    assert.equal(fs.existsSync(f.dir), false);
-  } finally { f.cleanup(); }
+    const databaseFile=path.join(root,'data','lexicon.db');
+    const compose=JSON.parse(renderCompose(root,{apiPort:18081,databaseFile}));
+    assert.deepEqual(Object.keys(compose.services),['api']);
+    assert.equal(compose.services.api.environment.SPRING_DATASOURCE_URL,'jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro');
+    assert.deepEqual(compose.services.api.volumes,['${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro']);
+  } finally { fs.rmSync(root,{recursive:true,force:true}); }
 });

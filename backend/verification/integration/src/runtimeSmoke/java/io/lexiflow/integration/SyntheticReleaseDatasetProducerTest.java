@@ -80,16 +80,16 @@ class SyntheticReleaseDatasetProducerTest {
   }
 
   @Test
-  void rejectsMissingIsolatedDatabaseBeforeOutputCreation() throws Exception {
-    String previous = System.getProperty("lexiflow.postgres.test.jdbcUrl");
-    System.clearProperty("lexiflow.postgres.test.jdbcUrl");
+  void requiresSqliteSchemaBeforeOutputCreation() throws Exception {
+    String previous = System.getProperty("lexiflow.sqlite.schema.file");
+    System.clearProperty("lexiflow.sqlite.schema.file");
     Path output = temp.resolve("not-created");
     try {
       assertThrows(
           IllegalStateException.class, () -> SyntheticReleaseDatasetProducer.produce(output));
       assertFalse(Files.exists(output));
     } finally {
-      if (previous != null) System.setProperty("lexiflow.postgres.test.jdbcUrl", previous);
+      if (previous != null) System.setProperty("lexiflow.sqlite.schema.file", previous);
     }
   }
 
@@ -104,9 +104,11 @@ class SyntheticReleaseDatasetProducerTest {
                 output,
                 jdbcUrl -> {
                   attemptedExport.set(true);
-                  try (var connection = java.sql.DriverManager.getConnection(jdbcUrl);
+                  try (var connection =
+                          io.lexiflow.lexicon.platform.persistence.SqlitePersistence.connect(
+                              jdbcUrl);
                       var statement = connection.createStatement()) {
-                    statement.execute("DROP TABLE lexicon_form CASCADE");
+                    statement.execute("DROP TABLE lexicon_form");
                   }
                 }));
     assertTrue(attemptedExport.get());

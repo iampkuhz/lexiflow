@@ -70,7 +70,7 @@ endlegend
 | `:api` | 唯一 Spring Boot 入口，负责 HTTP 映射及未来后台任务装配；请求／响应在 `hints.model` |
 | `:architecture-tests` | 编译类架构边界及隔离反例 |
 | `:quality-gates` | Java 源码工程规则及其直接测试 |
-| `:integration-tests` | PostgreSQL、Redis 与 API 的运行 smoke 测试 |
+| `:integration-tests` | SQLite、Redis 与 API 的运行 smoke 测试 |
 
 [`backend/gradle/build-logic`](../../backend/gradle/build-logic) 是 Gradle convention 与依赖护栏的独立构建，不是产品模块。测试项目仅在检查时依赖受测模块，不参与运行。扫描覆盖所有业务模块内部的领域与应用源码，不依赖已经不存在的独立 application 项目。
 

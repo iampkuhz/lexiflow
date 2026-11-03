@@ -1,6 +1,6 @@
 package io.lexiflow.lexicon.platform.importer;
 
-import io.lexiflow.lexicon.platform.persistence.PostgresSchemaInitializer;
+import io.lexiflow.lexicon.platform.persistence.SqliteSchemaInitializer;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -34,15 +34,15 @@ public final class LexiconRebuildMain {
       LexiconImportMain.execute(new String[] {"validate", "--input", input}, progress::detail);
       progress.complete();
 
-      progress.start(2, "目标检查与确认", "读取数据库及 schema 身份，尚未删除数据");
-      var target = PostgresSchemaInitializer.inspect(jdbcUrl);
+      progress.start(2, "目标检查与确认", "读取 SQLite 文件身份，尚未删除数据");
+      var target = SqliteSchemaInitializer.inspect(jdbcUrl);
       System.out.printf(
-          "目标数据库：%s；schema：%s；已有词库关系：%s%n",
-          target.database(), target.schema(), target.lexiconRelations());
-      if (!target.lexiconRelations().isEmpty()) {
-        var expected = confirmation(target.database(), target.schema());
+          "目标文件：%s；已有词库对象：%s；其他对象：%s%n",
+          target.database(), target.lexiconRelations(), target.otherObjects());
+      if (!target.lexiconRelations().isEmpty() || !target.otherObjects().isEmpty()) {
+        var expected = confirmation(target.database());
         progress.awaitInput(
-            "将删除并重建本项目三张词库表及其数据。请先停止 API、确认备份和目标。"
+            "将删除并重建本项目词库表及其数据。目标文件存在非本项目对象时拒绝重建。请先停止 API、确认备份和目标文件。"
                 + " 不会删除 CSV、其他文件或其他表。\n"
                 + "请在运行此命令的终端输入："
                 + expected
@@ -50,19 +50,17 @@ public final class LexiconRebuildMain {
                 + "不重建请按 Ctrl+C；输入其他文本或直接按 Enter 也会取消。\n"
                 + "> ");
         requireConfirmation(
-            target.database(),
-            target.schema(),
-            new InputStreamReader(System.in, StandardCharsets.UTF_8));
+            target.database(), new InputStreamReader(System.in, StandardCharsets.UTF_8));
         progress.resumeExecution("已收到精确确认；重新核对目标，尚未删除数据");
       }
-      if (!target.equals(PostgresSchemaInitializer.inspect(jdbcUrl))) {
+      if (!target.equals(SqliteSchemaInitializer.inspect(jdbcUrl))) {
         throw new IllegalStateException(
             "database target changed after confirmation; no database changes");
       }
       progress.complete();
 
-      progress.start(3, "结构重建", "单个事务内只处理本项目三张词库表");
-      PostgresSchemaInitializer.rebuild(jdbcUrl, schemaFile);
+      progress.start(3, "结构重建", "单个事务内只处理本项目词库表");
+      SqliteSchemaInitializer.rebuild(jdbcUrl, schemaFile);
       progress.complete();
 
       progress.start(4, "全量导入与发布", "发布前扫描、批量写入及提交属于同一发布操作");
@@ -83,16 +81,16 @@ public final class LexiconRebuildMain {
     }
   }
 
-  static String confirmation(String database, String schema) {
-    return "REBUILD " + database + "." + schema;
+  static String confirmation(String database) {
+    return "REBUILD " + database;
   }
 
-  static void requireConfirmation(String database, String schema, Reader input) throws IOException {
+  static void requireConfirmation(String database, Reader input) throws IOException {
     var answer = new BufferedReader(input).readLine();
     if (answer == null) {
       throw new IllegalStateException("未收到确认输入（stdin 已关闭）；未修改数据库。请在可输入的终端重新运行。");
     }
-    if (!confirmation(database, schema).equals(answer)) {
+    if (!confirmation(database).equals(answer)) {
       throw new IllegalStateException("确认文本不匹配，已取消重建；未修改数据库。");
     }
   }

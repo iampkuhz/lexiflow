@@ -16,44 +16,45 @@ class PodmanComposeContractTest(unittest.TestCase):
             (ROOT / "ops/podman/compose.validation.yaml").read_text()
         )
 
-    def test_local_only_ports_and_separate_database(self):
+    def test_local_only_api_and_read_only_database_file(self):
         services = self.config["services"]
-        self.assertEqual(set(services), {"postgres", "api"})
-        self.assertEqual(services["postgres"]["ports"], ["127.0.0.1:15432:5432"])
+        self.assertEqual(set(services), {"api"})
         self.assertEqual(services["api"]["ports"], ["127.0.0.1:18081:8080"])
-        self.assertIn(
-            "pgdata:/var/lib/postgresql/data", services["postgres"]["volumes"]
+        self.assertEqual(
+            services["api"]["volumes"],
+            [
+                "${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro"
+            ],
         )
+        self.assertTrue(services["api"]["read_only"])
+        self.assertEqual(services["api"]["cap_drop"], ["ALL"])
+        self.assertEqual(services["api"]["security_opt"], ["no-new-privileges:true"])
+        self.assertNotIn("volumes", self.config)
         for service in services.values():
             self.assertNotIn("build", service)
             self.assertEqual(service["pull_policy"], "never")
             self.assertIn("lexiflow.installation", service["labels"])
             self.assertEqual(service["labels"]["lexiflow.slot"], "source")
-        self.assertEqual(
-            self.config["volumes"]["pgdata"]["labels"]["lexiflow.slot"], "source"
-        )
         for network in self.config["networks"].values():
             self.assertEqual(network["labels"]["lexiflow.slot"], "source")
 
     def test_published_network_has_route_without_changing_loopback_ports(self):
-        self.assertTrue(self.config["networks"]["private"]["internal"])
+        self.assertEqual(set(self.config["networks"]), {"published"})
         self.assertFalse(self.config["networks"]["published"].get("internal", False))
-        for service in ["api", "postgres"]:
+        for service in ["api"]:
             self.assertEqual(
-                self.config["services"][service]["networks"], ["private", "published"]
+                self.config["services"][service]["networks"], ["published"]
             )
 
-    def test_file_secrets_not_plaintext_or_environment_sources(self):
+    def test_database_has_no_credentials_or_database_service(self):
+        self.assertNotIn("secrets", self.config)
         self.assertEqual(
-            self.config["secrets"],
+            self.config["services"]["api"]["environment"],
             {
-                "postgres-password": {"file": "./secrets/postgres-password"},
-                "app-password": {"file": "./secrets/app-password"},
+                "SPRING_DATASOURCE_URL": "jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro"
             },
         )
-        self.assertNotIn(
-            "POSTGRES_PASSWORD", self.config["services"]["postgres"]["environment"]
-        )
+        self.assertNotIn("depends_on", self.config["services"]["api"])
 
     def test_template_matches_shared_managed_deployment_compose(self):
         command = (
@@ -61,7 +62,7 @@ class PodmanComposeContractTest(unittest.TestCase):
             "import {deploymentSlot} from './ops/podman/deployment-slots.mjs';"
             "const source=deploymentSlot('source',process.cwd());"
             "console.log(renderCompose(process.cwd(),"
-            "{apiPort:source.apiPort,dbPort:source.dbPort,external:false,dbUser:'lexiflow',slot:'source'}));"
+            "{apiPort:source.apiPort,databaseFile:source.directory+'/data/lexicon.db',slot:'source'}));"
         )
         output = subprocess.run(
             ["node", "--input-type=module", "-e", command],
@@ -74,12 +75,7 @@ class PodmanComposeContractTest(unittest.TestCase):
         self.assertEqual(self.config, json.loads(output.stdout))
         self.assertNotIn("initialize", self.config["services"])
         self.assertEqual(self.config["services"]["api"]["command"], ["api"])
-        self.assertEqual(
-            self.config["services"]["api"]["depends_on"],
-            {
-                "postgres": {"condition": "service_healthy"},
-            },
-        )
+        self.assertNotIn("depends_on", self.config["services"]["api"])
 
 
 if __name__ == "__main__":

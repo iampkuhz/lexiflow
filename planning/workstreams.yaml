@@ -96,7 +96,8 @@ path_ownership:
     proposed_paths:
     - backend/product/adapters/src/main/java/io/lexiflow/persistence/**
     - db/**
-    - infra/postgres/**
+    - infra/sqlite/**
+    - infra/**
   - scope: client.chrome
     owner: LF-WS-EXT
     proposed_paths:
@@ -2516,7 +2517,7 @@ workstreams:
         acceptance_criteria:
         - 不扩展安全环境白名单，不继承用户指定HOME/TMPDIR或客户端身份，宿主目录从真实OS用户身份派生并严格核验。
         - 保留全部Check、预算、两代资料身份、完整运行phase及失败关闭，新增跨真实过滤边界、归档定位、命令退出事实、创建输出和异步观察的正反例。
-        - 纳入 QLT2499 格式2的 initdb 完成与部分初始化恢复协议，旧格式/已发布数据不得静默清除。
+        - 纳入 QLT2499 格式2的 初始化 完成与部分初始化恢复协议，旧格式/已发布数据不得静默清除。
         - 首轮诊断仅证明原冻结下的实机责任接缝，不授予新冻结或候选资格；纯测试消费者修复后只执行一次全新真实diff开发CLI，不重跑诊断或拼接首轮结果。
         - 当次冻结由不同真实actor独立验证和审查；新版本不覆盖旧标签、候选、公开资产或失败记录。
         acceptance_evidence:
@@ -2544,7 +2545,7 @@ workstreams:
         acceptance_criteria:
         - 不扩展安全环境白名单，不继承用户指定HOME/TMPDIR或客户端身份，宿主目录从真实OS用户身份派生并严格核验。
         - 保留全部Check、预算、两代资料身份、完整运行phase及失败关闭，新增跨真实过滤边界、归档定位、命令退出事实、创建输出和异步观察的正反例。
-        - 纳入 QLT2499 格式2的 initdb 完成与部分初始化恢复协议，旧格式/已发布数据不得静默清除。
+        - 纳入 QLT2499 格式2的 初始化 完成与部分初始化恢复协议，旧格式/已发布数据不得静默清除。
         - 纳入 QLT2500 最新卷协议的全部测试消费者同步，不弱化生产协议或旧拒绝负例。
         - 纳入QLT2501挂起夹具真实启动与回收接缝，不扩展生产或Check超时。
         - 当次冻结由不同真实actor独立验证和审查；新版本不覆盖旧标签、候选、公开资产或失败记录。
@@ -2573,7 +2574,7 @@ workstreams:
         acceptance_criteria:
         - 不扩展安全环境白名单，不继承用户指定HOME/TMPDIR或客户端身份，宿主目录从真实OS用户身份派生并严格核验。
         - 保留全部Check、预算、两代资料身份、完整运行phase及失败关闭，新增跨真实过滤边界、归档定位、命令退出事实、创建输出和异步观察的正反例。
-        - 纳入 QLT2499 格式2的 initdb 完成与部分初始化恢复协议，旧格式/已发布数据不得静默清除。
+        - 纳入 QLT2499 格式2的 初始化 完成与部分初始化恢复协议，旧格式/已发布数据不得静默清除。
         - 纳入 QLT2500 最新卷协议的全部测试消费者同步，不弱化生产协议或旧拒绝负例。
         - 纳入QLT2501挂起夹具真实启动与回收接缝，不扩展生产或Check超时。
         - 当次冻结由不同真实actor独立验证和审查；新版本不覆盖旧标签、候选、公开资产或失败记录。
@@ -2640,7 +2641,7 @@ workstreams:
         discovered_from: LF-TSK-OPS-2076
         depends_on: []
       - id: LF-TSK-QLT-2499
-        title: 修复首次 initdb 中断后的安全重试
+        title: 修复首次资料初始化 中断后的安全重试
         priority: P0
         task_version: 1
         change_version: 1.0.0
@@ -2651,14 +2652,14 @@ workstreams:
         allowed_files:
         - ops/docker/runtime-entrypoint.sh
         - ops/podman/tests/candidate-runtime.test.mjs
-        - tmp/phase-tools/single-container-host-home/initdb-recovery/**
+        - tmp/phase-tools/single-container-host-home/initialization-recovery/**
         forbidden_files: [secrets/**, .local/**, data/**, .env]
-        expected_output: 从未启动数据库的已归属部分 initdb 可安全重试，已完成 initdb 或已发布数据不得清空。
-        deliverable: 格式2卷的初始化完成协议、直接故障回归与当次证据。
+        expected_output: 从未启动数据库的已归属部分初始化可安全重试，已完成初始化或已发布数据不得清空。
+        deliverable: 专属 SQLite 文件的原子初始化完成协议、直接故障回归与当次证据。
         acceptance_criteria:
-        - initdb 完成必须在首次启动 PostgreSQL 前持久原子记录；仅格式2、合法归属、未完成 initdb 且无 ready/pending-ready 的目录可重建。
-        - PG_VERSION 单独存在不能证明 initdb 完成；完成或 pending 完成标记严格校验，损坏、未知内容与旧格式不修改而失败关闭。
-        - 覆盖 PG_VERSION 已写但系统库未建的真实接缝、成功重试、完成后不重导、不清理已发布事实、旧格式和损坏状态拒绝。
+        - 完整资料事务提交后才原子记录绑定资料和发布身份的就绪证明；受控初始化才可创建专属文件，不能隐式清理未知目录。
+        - 数据库文件存在不能证明资料发布完成；完成或 pending 证明严格校验，损坏、未知内容与错误结构不修改而失败关闭。
+        - 覆盖文件已创建但资料事务尚未提交的真实接缝、受控重试、资料复用、不清理已发布事实及损坏状态拒绝。
         - 不增加产品进程或自由路径参数，不变更 Check/预算/就绪门禁，保留先前21项 Node 回归与所有失败证据。
         acceptance_evidence:
         - 旧实现直接行为 RED、新实现 GREEN、真实原生绑定与原始日志，未运行正式候选的限制明确。
@@ -4641,7 +4642,7 @@ workstreams:
         kind: implementation
         lifecycle_state: READY
         allowed_files:
-        - ops/docker/tests/test_podman_local.py
+        - ops/podman/tests/unified-flow.test.mjs
         - planning/workstreams.yaml
         - openspec/changes/release-fixture-version/**
         forbidden_files: [secrets/**, .local/**, data/**, .env]
@@ -5325,7 +5326,7 @@ workstreams:
         - 测量与校验可追溯；最终停写后真实独立完整开发验证，不自动 Git 或 Formal。
         acceptance_evidence:
         - 本次前后原始耗时、逐项断言映射、直接测试与最终冻结独立验证证据。
-        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_podman_local.py -v
+        validation_command: node --test ops/podman/tests/unified-flow.test.mjs ops/podman/tests/upgrade.test.mjs
         required_check_ids:
         - eng.repository.planning
         - eng.repository.docs
@@ -5782,7 +5783,7 @@ workstreams:
         - harness/test-services.json
         - harness/module-boundaries.yaml
         - harness/module-boundaries.md
-        - scripts/environment/services/isolated_postgres_redis.py
+        - scripts/environment/services/isolated_redis.py
         - tests/verification/test_test_services.py
         - backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java
         - backend/product/api/src/test/**
@@ -6690,7 +6691,7 @@ workstreams:
         - scripts/environment/configuration/local_runtime_settings.py
         - scripts/environment/configuration/verification_environment.py
         - scripts/local/start_local_api.py
-        - scripts/environment/services/isolated_postgres_redis.py
+        - scripts/environment/services/isolated_redis.py
         - tests/verification/test_environment.py
         - tests/verification/test_local_config.py
         - tests/verification/test_start_api.py
@@ -7164,15 +7165,15 @@ workstreams:
         - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageCodec.java
         - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageTables.java
         - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DefaultLexiconRepository.java
-        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetExport.java
-        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetPackage.java
-        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/PostgresSchemaInitializer.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/SqliteDatasetExport.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/SqliteDatasetPackage.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/SqliteSchemaInitializer.java
         - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/importer/LexiconImportMainOutputTest.java
         - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageCodecTest.java
-        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetExportIntegrationTest.java
-        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetPackageIntegrationTest.java
-        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconRepositoryIntegrationTest.java
-        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresSchemaInitializerIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/SqliteDatasetExportIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/SqliteDatasetPackageIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/SqliteLexiconRepositoryIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/SqliteSchemaInitializerIntegrationTest.java
         - backend/product/adapters/src/main/java/io/lexiflow/observability/platform/FileSegmentAnalysisStore.java
         - backend/product/adapters/src/main/java/io/lexiflow/observability/platform/LexiconEventObserver.java
         - backend/product/adapters/src/main/java/io/lexiflow/observability/platform/ReadableLogLineConverter.java
@@ -7856,7 +7857,7 @@ workstreams:
         kind: implementation
         lifecycle_state: READY
         allowed_files:
-        - ops/docker/tests/test_podman_local.py
+        - ops/podman/tests/unified-flow.test.mjs
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/status.md
         - openspec/changes/gate-test-performance/**
@@ -7873,7 +7874,7 @@ workstreams:
         acceptance_evidence:
         - 隔离 setup 对照、精确差异与定点回归。
         - 冻结批次的独立完整检查及只读复核。
-        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_podman_local.py -v
+        validation_command: node --test ops/podman/tests/unified-flow.test.mjs ops/podman/tests/upgrade.test.mjs
         required_check_ids:
         - eng.release.docker-contract
         - eng.repository.planning
@@ -7961,7 +7962,7 @@ workstreams:
         kind: implementation
         lifecycle_state: READY
         allowed_files:
-        - ops/docker/tests/test_podman_local.py
+        - ops/podman/tests/unified-flow.test.mjs
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/status.md
         - openspec/changes/gate-test-performance/**
@@ -7979,7 +7980,7 @@ workstreams:
         acceptance_evidence:
         - 启动微基准和原有完整单例的 source-bound 对照。
         - 精确两行差异、定向回归和独立源码复核。
-        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_podman_local.py -v
+        validation_command: node --test ops/podman/tests/unified-flow.test.mjs ops/podman/tests/upgrade.test.mjs
         required_check_ids:
         - eng.release.docker-contract
         - eng.repository.planning
@@ -8027,7 +8028,7 @@ workstreams:
         kind: implementation
         lifecycle_state: READY
         allowed_files:
-        - ops/docker/tests/test_podman_local.py
+        - ops/podman/tests/unified-flow.test.mjs
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/status.md
         - openspec/changes/gate-test-performance/**
@@ -8046,7 +8047,7 @@ workstreams:
         acceptance_evidence:
         - 38例场景映射与原 logs_readonly 的安装前置耗时探针。
         - 夹具一致性/隔离回归、精确差异和原日志场景测试证据。
-        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_podman_local.py -k logs -v
+        validation_command: node --test ops/podman/tests/logs.test.mjs
         required_check_ids:
         - eng.release.docker-contract
         - eng.repository.planning
@@ -8245,7 +8246,7 @@ workstreams:
         kind: implementation
         lifecycle_state: READY
         allowed_files:
-        - ops/docker/tests/test_podman_local.py
+        - ops/podman/tests/unified-flow.test.mjs
         - ops/docker/tests/podman_fake_transport.py
         - ops/docker/tests/test_podman_fake_transport.py
         - planning/workstreams.yaml
@@ -8361,7 +8362,7 @@ workstreams:
         kind: implementation
         lifecycle_state: READY
         allowed_files:
-        - ops/docker/tests/test_podman_local.py
+        - ops/podman/tests/unified-flow.test.mjs
         - planning/workstreams.yaml
         - openspec/changes/gate-test-performance/**
         forbidden_files:
@@ -8380,7 +8381,7 @@ workstreams:
         acceptance_evidence:
         - 本次批准、17 个候选的覆盖映射、源码与原始断言绑定及准备对照回归。
         - 定向测试与独立冻结验证的执行数量、无跳过、输入漂移和资源清理记录。
-        validation_command: python3 -m unittest discover -s ops/docker/tests -p test_podman_local.py -v
+        validation_command: node --test ops/podman/tests/unified-flow.test.mjs ops/podman/tests/upgrade.test.mjs
         required_check_ids:
         - eng.release.docker-contract
         - eng.repository.planning
@@ -9270,7 +9271,7 @@ workstreams:
 - id: LF-WS-DAT
   code: DAT
   name: 数据与持久化
-  mission: 负责 PostgreSQL 事实模型、事件持久化、migration、索引及保留策略。
+  mission: 负责 SQLite 事实模型、事件持久化、索引及保留策略。
   epics:
   - id: LF-EP-DAT-200
     name: 第二阶段提示处理主线
@@ -9279,6 +9280,45 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-DAT-2301
+        title: 集成唯一 SQLite 事实存储、镜像与发行包量化瘦身交付
+        priority: P0
+        task_version: 4
+        change_version: 2.2.0
+        task_source: openspec/changes/sqlite-fact-store/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - AGENTS.md
+        - .gitignore
+        - backend/**
+        - infra/**
+        - ops/**
+        - scripts/**
+        - config/engineering/**
+        - tests/**
+        - .github/**
+        - docs/**
+        - openspec/changes/sqlite-fact-store/**
+        - openspec/specs/**
+        - planning/workstreams.yaml
+        forbidden_files: [secrets/**, .local/**, data/**, .env, extension/**]
+        expected_output: 集成用户已授权的完整 SQLite 数据和运行链路，保持 Java25、领域边界、来源和发布安全；不做 Git 集成或公开发布。
+        deliverable: 最新 SQLite SQL、后端与运行发行实现、逐字段索引决策和同输入量化证据。
+        acceptance_criteria:
+        - SQLite 是唯一产品事实库；运行、测试、CI、生成、导入、导出恢复及交付只使用该文件方案。
+        - 265371 个基线词条和 319272 条逻辑映射的稳定身份、短释、BLOCK/HINT 与歧义保持等价；排序和预热按已授权的单 priority 合同验证并量化变化，具体输入及阈值见 OpenSpec。
+        - 相对 SQLite 直接移植的结构空间至少减少百分之四十；不混用引擎替换和布局收益。
+        - 约束、原子发布、竞争超时、中断、只读、损坏与备份恢复经真实测试；独立验证者与审查者均未参与实现。
+        - 全部现行源码、配置、测试和文档无旧数据库引擎专用实现、兼容分支、关键词与失效引用。
+        - 同完整材料的镜像和发行包达到 release-packaging.md 预冻结目标，来源原件唯一物理存储且可独立离线获取；实际内层校验不弱化安全边界。
+        acceptance_evidence:
+        - openspec/changes/sqlite-fact-store/status.md
+        - 当前冻结输入的独立开发报告、TASK_VALIDATION、INDEPENDENT_REVIEW 和验收核对记录。
+        validation_command: python3 -m scripts.verification.commands.run_repository_checks
+        required_check_ids: [eng.backend.delivery, eng.repository.planning, eng.repository.docs]
+        depends_on: []
       - id: LF-TSK-DAT-2001
         title: 落实发布投影字段与数据库约束
         priority: P0
@@ -9289,9 +9329,9 @@ workstreams:
         kind: implementation
         lifecycle_state: READY
         allowed_files:
-        - infra/postgres/schema.sql
+        - infra/sqlite/schema.sql
         - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DefaultLexiconRepository.java
-        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconRepositoryIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/SqliteLexiconRepositoryIntegrationTest.java
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/design.md
         - docs/roadmap/master-plan/phase2/tasks.md
@@ -9309,7 +9349,7 @@ workstreams:
         - 空白决定、缺失规则、非法频率证据、空来源清单及不一致发布计数由数据库拒绝；失败事务保留旧发布。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
-        validation_command: python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend :adapters:postgresIntegrationTest
+        validation_command: python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend :adapters:sqliteIntegrationTest
         required_check_ids:
         - eng.backend.delivery
         - eng.repository.docs
@@ -9441,7 +9481,7 @@ workstreams:
         - backend/product/adapters/**
         - backend/product/enrichment/**
         - backend/verification/integration/**
-        - infra/postgres/schema.sql
+        - infra/sqlite/schema.sql
         - planning/workstreams.yaml
         forbidden_files:
         - secrets/**
@@ -9921,7 +9961,7 @@ workstreams:
         - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/query/CachedLexiconQueryServiceTest.java
         - backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/policy/HintPreparation.java
         - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DefaultLexiconRepository.java
-        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconRepositoryIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/SqliteLexiconRepositoryIntegrationTest.java
         - backend/verification/integration/src/runtimeSmoke/java/io/lexiflow/integration/SystemRuntimeSmokeTest.java
         - extension/tests/translation-e2e.mjs
         - planning/workstreams.yaml
@@ -9942,11 +9982,11 @@ workstreams:
         - LexiconRuntime唯一持有运行状态；实际只读探测和查询可恢复，启动事件一次，依赖故障/恢复只在状态转换输出固定事件，不输出原异常。
         - Actuator liveness与词库readiness分离；无发布资料进程仍可活，实际查询失败映射无敏感内容的503；不增加轮询任务或导入/模型调用。
         - publishedVersion在单次SQL检查观看投影必需列和非空发布元数据/准备策略；发布写入真实固定准备策略而非sourceId，错误策略拒绝观看，显式完整替换不因旧策略卡死。
-        - 合成API状态/HTTP测试、有界预热测试、隔离PostgreSQL缺列/错策略测试以及真实bootJar空库存活但不可就绪证据齐备。
+        - 合成API状态/HTTP测试、有界预热测试、隔离SQLite缺列/错策略测试以及真实bootJar空库存活但不可就绪证据齐备。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend :lexicon:test :api:test
-          :adapters:postgresIntegrationTest :integration-tests:runtimeSmoke
+          :adapters:sqliteIntegrationTest :integration-tests:runtimeSmoke
         required_check_ids:
         - eng.backend.delivery
         - eng.extension.quality
@@ -10643,7 +10683,7 @@ workstreams:
         - backend/product/adapters/src/test/java/io/lexiflow/observability/platform/LexiconEventObserverTest.java
         - backend/product/adapters/src/test/java/io/lexiflow/observability/platform/StructuredEventTest.java
         - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/importer/LexiconImportMainOutputTest.java
-        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconRepositoryIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/SqliteLexiconRepositoryIntegrationTest.java
         - backend/product/api/src/main/java/io/lexiflow/api/runtime/LexiconRuntime.java
         - backend/product/api/src/test/java/io/lexiflow/api/runtime/LexiconRuntimeTest.java
         - planning/workstreams.yaml
@@ -10667,11 +10707,11 @@ workstreams:
         - 行数区分原始输入、已准备词条、可提示/阻断词条和实际 lookup 行；规则计数来自完整准备而非有界预热样本，失败未取得的计数/版本省略，普通事件只传固定键与数字。
         - 缓存初次绑定不算版本切换，已绑定版本改变并清空后恰好一次事件；正负数是 pinned/dynamic 中实际键数，空候选和纯 BLOCK 均为负，混合 HINT/BLOCK 为正，同版本及版本读取失败不发事件。
         - 结构化观察器失败在应用边界隔离，不改变原异常、事务结果、发布版本或查询计数；心跳仅实际执行时按三分钟有界触发，等待确认或完成后不发，不新增后台调度器。
-        - 真实隔离 PostgreSQL 与 CLI 集成证明两种来源成功提交、来源变化和已确认回滚的事件顺序/唯一性及旧资料保留；直接测试证明缓存实际失效数、零版本、预热失败、观察器故障和 API 真实接线。
+        - 真实隔离 SQLite 与 CLI 集成证明两种来源成功提交、来源变化和已确认回滚的事件顺序/唯一性及旧资料保留；直接测试证明缓存实际失效数、零版本、预热失败、观察器故障和 API 真实接线。
         acceptance_evidence:
         - 冻结输入、真实节点调用次数与直接测试、同输入Verify及独立validation/review，执行状态仅记录phase2/status.md。
         validation_command: python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend :lexicon:test :adapters:test
-          :adapters:postgresIntegrationTest :api:test
+          :adapters:sqliteIntegrationTest :api:test
         required_check_ids:
         - eng.backend.delivery
         - eng.repository.docs
@@ -10773,6 +10813,190 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-OPS-2095
+        title: 去除扩展打包同点身份计算并实测发行关键路径
+        priority: P0
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/release-pipeline-efficiency/tasks.md
+        lifecycle_state: READY
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        acceptance_evidence:
+        - 真实原生来源、最终冻结摘要、当次直接与独立结果、测量条件和未运行边界。
+        depends_on: []
+        estimated_minutes: 90
+        kind: implementation
+        allowed_files:
+        - extension/scripts/packaging/package-extension-release.mjs
+        - extension/scripts/build/build-extension.mjs
+        - extension/tests/build-config.test.mjs
+        - extension/tests/release.test.mjs
+        - planning/workstreams.yaml
+        - openspec/changes/release-pipeline-efficiency/**
+        - docs/scenarios/github-actions/**
+        - tmp/phase-tools/release-pipeline-efficiency/measurement/**
+        expected_output: 去除扩展打包同点身份计算并实测发行关键路径；具体边界见本次 OpenSpec。
+        acceptance_criteria:
+        - 完整clean identity在首末和归档前均重验，内部双快照及所有安全语义不变。
+        - 等价样本保留完整成本和缓存边界，局部收益不冒充端到端30%，单次成功不冒充长期95%。
+        - 不修改发布checkout、旧证据或任何远端；完整diff独立开发与正式工程验收及审查。
+        validation_command: node --test extension/tests/release.test.mjs extension/tests/build-config.test.mjs
+        required_check_ids:
+        - eng.extension.quality
+        - eng.release.version
+        - eng.repository.planning
+        - eng.repository.docs
+        deliverable: 去除扩展打包同点身份计算并实测发行关键路径及可核验的当次证据。
+      - id: LF-TSK-OPS-2096
+        title: 前置候选构建环境并记录阶段耗时和失败层
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-pipeline-efficiency/tasks.md
+        lifecycle_state: READY
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        acceptance_evidence:
+        - 真实原生来源、最终冻结摘要、当次直接与独立结果、测量条件和未运行边界。
+        depends_on: []
+        estimated_minutes: 90
+        kind: implementation
+        allowed_files:
+        - ops/release/workflow/run-release-workflow.mjs
+        - ops/release/workflow/release-execution-environment.mjs
+        - ops/release/tests/workflow.test.mjs
+        - tmp/phase-tools/release-pipeline-efficiency/workflow/**
+        expected_output: 前置候选构建环境并记录阶段耗时和失败层；具体边界见本次 OpenSpec。
+        acceptance_criteria:
+        - 保留首末tag与完整identity校验，拷贝摘要仅本次已验证字节复用，漂移与坏输入失败关闭。
+        - 固定构建环境预检在昂贵构建之前；缓存不继承任意init脚本或用户配置，不削弱完整检查。
+        - 阶段计时和诊断不泄露私有值；未知远端结果不重传、不重新构建，保留既有有界确认及故障回归。
+        validation_command: node --test ops/release/tests/workflow.test.mjs
+        required_check_ids:
+        - eng.release.build
+        deliverable: 前置候选构建环境并记录阶段耗时和失败层及可核验的当次证据。
+      - id: LF-TSK-OPS-2097
+        title: 独立验证发行流程优化的最终完整冻结
+        priority: P0
+        task_version: 3
+        change_version: 1.2.0
+        task_source: openspec/changes/release-pipeline-efficiency/tasks.md
+        lifecycle_state: READY
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        acceptance_evidence:
+        - 真实原生来源、最终冻结摘要、当次直接与独立结果、测量条件和未运行边界。
+        depends_on: []
+        estimated_minutes: 90
+        kind: design
+        allowed_files:
+        - tmp/phase-tools/release-pipeline-efficiency/validation/**
+        expected_output: 独立验证发行流程优化的最终完整冻结；具体边界见本次 OpenSpec。
+        acceptance_criteria:
+        - validator不同于全部producer与submitter，执行完整diff所选开发检查并发布四实现Task的真实TASK_VALIDATION。
+        - 不修改源码、配置、超时、预算或Git；首次失败定位且保留，不拼接历史PASS。
+        validation_command: python3 -m scripts.verification.commands.run_development_checks
+        required_check_ids:
+        - eng.release.build
+        - eng.extension.quality
+        - eng.repository.planning
+        deliverable: 独立验证发行流程优化的最终完整冻结及可核验的当次证据。
+      - id: LF-TSK-OPS-2098
+        title: 独立审查发行效率与首轮成功证据
+        priority: P0
+        task_version: 3
+        change_version: 1.2.0
+        task_source: openspec/changes/release-pipeline-efficiency/tasks.md
+        lifecycle_state: READY
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        acceptance_evidence:
+        - 真实原生来源、最终冻结摘要、当次直接与独立结果、测量条件和未运行边界。
+        depends_on: []
+        estimated_minutes: 45
+        kind: design
+        allowed_files:
+        - tmp/phase-tools/release-pipeline-efficiency/review/**
+        expected_output: 独立审查发行效率与首轮成功证据；具体边界见本次 OpenSpec。
+        acceptance_criteria:
+        - reviewer不同于全部producer与validator，只读冻结diff、实测边界与当次全部检查及验收记录，不重跑检查。
+        - 审查身份、候选原制品与未知写入边界，关闭全部阻塞发现后签适用INDEPENDENT_REVIEW。
+        validation_command: read-only frozen diff and current evidence review
+        required_check_ids:
+        - eng.release.build
+        - eng.repository.planning
+        deliverable: 独立审查发行效率与首轮成功证据及可核验的当次证据。
+      - id: LF-TSK-OPS-2099
+        title: 隔离字幕调试合同测试的异步日志避免污染后续CLI断言
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-pipeline-efficiency/tasks.md
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2095
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        acceptance_evidence:
+        - 当次失败XML、异步生产者源码、同步自有sink精准回归与独立完整检查及审查。
+        depends_on: []
+        estimated_minutes: 20
+        kind: implementation
+        allowed_files:
+        - backend/product/api/src/test/java/io/lexiflow/api/captiondebug/CaptionDebugControllerTest.java
+        expected_output: 消除默认异步日志跨测试污染，保留CLI严格stdout与产品日志行为。
+        acceptance_criteria:
+        - 只在合同测试注入已有同步Executor和自有sink，不改产品行为、不过滤或放宽CLI严格输出断言。
+        - 增强重复及拒绝请求无额外日志的断言，由不同actor执行完整开发检查与正式工程验收及独立审查。
+        validation_command: backend/gradlew -p backend :api:test --tests io.lexiflow.api.captiondebug.CaptionDebugControllerTest --tests io.lexiflow.api.deployment.DeploymentDataCommandTest --rerun-tasks --no-build-cache
+        required_check_ids:
+        - eng.backend.delivery
+        - eng.repository.planning
+        deliverable: 确定性字幕调试合同测试及跨测试污染关闭证据。
+      - id: LF-TSK-OPS-2100
+        title: 消除生命周期fixture摘要生成的未声明GNU工具依赖
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/release-pipeline-efficiency/tasks.md
+        lifecycle_state: READY
+        discovered_from: LF-TSK-OPS-2095
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        acceptance_evidence:
+        - 实际缺少sha256sum的失败、Node摘要与真实shell接收器精准回归及独立完整验收。
+        depends_on: []
+        estimated_minutes: 20
+        kind: implementation
+        allowed_files:
+        - ops/release/tests/lifecycle.test.mjs
+        expected_output: fixture仅用现有Node crypto生成摘要，真实接收器断言不变。
+        acceptance_criteria:
+        - 移除三处未声明的宿主sha256sum进程依赖，不改生产接收器及长度、摘要、权限与收敛断言。
+        - 在支持shasum而没有sha256sum的PATH下精准检查通过，四实现Task独立开发、正式工程验收与审查完成。
+        validation_command: node ops/release/test_tools/run-release-tool-tests.mjs --suite lifecycle
+        required_check_ids:
+        - eng.release.lifecycle
+        - eng.repository.planning
+        deliverable: 可移植生命周期fixture与完整独立验收证据。
       - id: LF-TSK-OPS-2062
         title: 实现单容器基础设施与可靠生命周期
         priority: P0
@@ -10887,7 +11111,7 @@ workstreams:
         expected_output: 源码开发入口不再消费已移除的双镜像候选适配器，真实单容器候选仅由新Check消费。
         deliverable: 删除过时注入及对应测试并保留现有开发安装、归属和确认护栏。
         acceptance_criteria:
-        - 新候选不能经源码开发入口创建多容器，保留源码开发18081与数据库15432隔离。
+        - 新候选不能经源码开发入口创建多容器，保留源码开发18081与SQLite 文件与其他目录隔离。
         - 不删弱未知资源归属、进程取消与源码输入漂移的有效测试；候选合同由新runner覆盖。
         acceptance_evidence:
         - 真实原生身份、逐项直接测试退出与日志、file claims及限制。
@@ -11227,7 +11451,7 @@ workstreams:
         acceptance_criteria:
         - 不扩展安全环境白名单，不继承用户指定HOME/TMPDIR或客户端身份，宿主目录从真实OS用户身份派生并严格核验。
         - 保留全部Check、预算、两代资料身份、完整运行phase及失败关闭，新增跨真实过滤边界、归档定位、命令退出事实、创建输出和异步观察的正反例。
-        - 纳入 QLT2499 格式2的 initdb 完成与部分初始化恢复协议，旧格式/已发布数据不得静默清除。
+        - 纳入 QLT2499 格式2的 初始化 完成与部分初始化恢复协议，旧格式/已发布数据不得静默清除。
         - 纳入 QLT2500 最新卷协议的全部测试消费者同步，不弱化生产协议或旧拒绝负例。
         - 纳入QLT2501挂起夹具真实启动与回收接缝，不扩展生产或Check超时。
         - 当次冻结由不同真实actor独立验证和审查；新版本不覆盖旧标签、候选、公开资产或失败记录。
@@ -11501,7 +11725,7 @@ workstreams:
         - ops/release/integrity/candidate_runtime_result_contract.py
         - ops/docker/runtime-entrypoint.sh
         - ops/docker/tests/test_module_check_adapter.py
-        - ops/docker/tests/test_podman_local.py
+        - ops/podman/tests/unified-flow.test.mjs
         - ops/release/tests/lifecycle-install.test.mjs
         - ops/release/tests/version.test.mjs
         - tests/verification/test_release_promotion.py
@@ -11568,7 +11792,7 @@ workstreams:
         - eng.release.candidate-runtime
         depends_on: []
       - id: LF-TSK-OPS-2001
-        title: 适配 PostgreSQL 读写边界与原子发布
+        title: 适配 SQLite 读写边界与原子发布
         priority: P0
         task_version: 3
         change_version: 2.1.0
@@ -11584,7 +11808,7 @@ workstreams:
         - backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java
         - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/query/CachedLexiconQueryServiceTest.java
         - backend/product/api/src/test/java/io/lexiflow/api/ApiApplicationTest.java
-        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconRepositoryIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/SqliteLexiconRepositoryIntegrationTest.java
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/design.md
         - docs/roadmap/master-plan/phase2/tasks.md
@@ -11599,12 +11823,12 @@ workstreams:
         - 查询返回完整候选和统一发布身份；映射不遗漏分类或冲突证据。
         - 原子提交与失败回滚、旧版本可查及开发结构重建边界保持；无跨域表访问。
         - 提取 read role 后查询服务、版本缓存和 API 仅注入读接口，持久化工厂仍可组合读写角色；消费者和直接测试同一切片适配。
-        - Spring 仅提供只读实现时可装配真实 Enrichment 用例并返回该实现候选；真实 PostgreSQL bean 按读和发布角色解析为同一实例。
+        - Spring 仅提供只读实现时可装配真实 Enrichment 用例并返回该实现候选；真实 SQLite bean 按读和发布角色解析为同一实例。
         - 聚合接口不重复声明方法，查询测试替身不再实现无用写方法；不改查询排序、事务、demo/readiness 或来源处理。
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend :lexicon:test :api:test
-          :adapters:postgresIntegrationTest
+          :adapters:sqliteIntegrationTest
         required_check_ids:
         - eng.backend.delivery
         - eng.repository.docs
@@ -11638,7 +11862,7 @@ workstreams:
         - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/LexiconImportMain.java
         - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/importing/LexiconImportPreparationTest.java
         - backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/importing/LexiconImportServiceTest.java
-        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresLexiconRepositoryIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/SqliteLexiconRepositoryIntegrationTest.java
         - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/importer/LexiconImportMainOutputTest.java
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/design.md
@@ -11659,7 +11883,7 @@ workstreams:
         acceptance_evidence:
         - 逐条验收对应的冻结输入、直接检查与独立复核证据；执行状态仅记录 phase2/status.md，不以草案建立或旧 P1 receipt 代替 PASS
         validation_command: python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend :lexicon:test :adapters:test
-          :adapters:postgresIntegrationTest
+          :adapters:sqliteIntegrationTest
         required_check_ids:
         - eng.backend.delivery
         - eng.repository.docs
@@ -11784,9 +12008,9 @@ workstreams:
         - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageManifest.java
         - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageCodec.java
         - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageTables.java
-        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetExport.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/SqliteDatasetExport.java
         - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageCodecTest.java
-        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetExportIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/SqliteDatasetExportIntegrationTest.java
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/release.md
         - docs/roadmap/master-plan/phase2/status.md
@@ -11799,10 +12023,10 @@ workstreams:
         acceptance_criteria:
         - 仅导出经批准且有来源/许可的已发布资料，不打包开发者日志、观看记录和配置；身份、SQL 摘要与清单一致。
         - 流式规范编码、固定条目和时间戳，不整包缓冲；固定输入生成相同 ZIP，审批与全部数据受摘要绑定。
-        - 隔离 PostgreSQL 验证只读一致快照及并发源更新；离线校验拒绝行结构、许可、计数和摘要错误。
+        - 隔离 SQLite 验证只读一致快照及并发源更新；离线校验拒绝行结构、许可、计数和摘要错误。
         acceptance_evidence:
         - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
-        validation_command: python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend :adapters:test :adapters:postgresIntegrationTest
+        validation_command: python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend :adapters:test :adapters:sqliteIntegrationTest
         required_check_ids:
         - eng.backend.delivery
         - eng.repository.docs
@@ -11834,7 +12058,7 @@ workstreams:
         - ops/podman/source-tools.Containerfile
         - ops/docker/tests/test_ecdict_fetch.py
         - harness/test-services.json
-        - scripts/environment/services/isolated_postgres_redis.py
+        - scripts/environment/services/isolated_redis.py
         - tests/verification/test_test_services.py
         - harness/module-checks.yaml
         - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/StardictCsvReader.java
@@ -11842,11 +12066,11 @@ workstreams:
         - scripts/environment/ecdict_bundle.py
         - tests/verification/test_ecdict_bundle.py
         - ops/dataset/ecdict-source.lock.json
-        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetPackage.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/SqliteDatasetPackage.java
         - backend/product/api/src/main/java/io/lexiflow/api/release/ReleaseDatasetCommand.java
         - backend/product/api/src/main/java/io/lexiflow/api/ApiApplication.java
         - backend/build.gradle.kts
-        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/PostgresDatasetPackageIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/SqliteDatasetPackageIntegrationTest.java
         - backend/product/api/src/test/java/io/lexiflow/api/release/ReleaseDatasetCommandTest.java
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/release.md
@@ -11861,11 +12085,11 @@ workstreams:
         - 公开 ECDICT 来源按提交与文件摘要锁定，以基础版候选保守剔除约三分之一为目标、不设数量截断；保护有频率/词典标记的单词，未知保留，并精选少量有依据短语，保留完整Oxford基础集合、词形与来源映射；采用7字段及紧凑可逆来源映射；封版确认前压缩与展开数据均不跟踪，源码与锁文件保持可跟踪。来源包不冒充Java已发布安装包。
         - 管理入口使用同一 API JAR 与可信 SQL，严格解析参数、核对外层摘要，错误输出不泄漏输入；不启动 HTTP。
         - 使用者无需原始 CSV，资料包通过完整性校验后仅初始化明确归属的空数据空间；已有不同资料不覆盖。
-        - 在隔离 PostgreSQL 验证重复启动、损坏包、初始化中断及无资料行为，未发布状态不能就绪。
+        - 在隔离 SQLite 验证重复启动、损坏包、初始化中断及无资料行为，未发布状态不能就绪。
         acceptance_evidence:
         - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
         validation_command: python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend :adapters:test :api:test
-          :adapters:postgresIntegrationTest
+          :adapters:sqliteIntegrationTest
         required_check_ids:
         - eng.backend.delivery
         - eng.repository.docs
@@ -11878,7 +12102,7 @@ workstreams:
           required_result: PASS
         deliverable: 实现资料包安全初始化与管理入口及直接验收证据。
       - id: LF-TSK-OPS-2006
-        title: 封装 API 镜像和私网数据库 Compose
+        title: 封装 API 镜像和 SQLite 只读文件 Compose
         priority: P0
         task_version: 4
         change_version: 3.1.0
@@ -11894,14 +12118,14 @@ workstreams:
         - ops/docker/tests/test_podman_network.py
         - ops/docker/tests/test_podman_doctor.py
         - ops/docker/tests/test_podman_progress.py
-        - ops/docker/tests/test_podman_local.py
+        - ops/podman/tests/unified-flow.test.mjs
         - ops/docker/tests/test_podman_compose_contract.py
-        - ops/docker/Dockerfile.postgres
+        - ops/docker/Dockerfile.runtime
         - ops/docker/Dockerfile
         - ops/docker/compose.yaml
         - ops/docker/.dockerignore
         - ops/docker/run-container-command.sh
-        - ops/docker/initialize-postgres-app-role.sh
+        - ops/docker/runtime-entrypoint.sh
         - ops/docker/tests/test_contract.py
         - scripts/checks/deployment/run_deployment_contract_tests.py
         - harness/module-checks.yaml
@@ -11916,10 +12140,10 @@ workstreams:
         - .local/**
         - data/**
         - .env
-        expected_output: 封装 API 镜像和私网数据库 Compose及直接验收证据。
+        expected_output: 封装 API 镜像和 SQLite 只读文件 Compose及直接验收证据。
         acceptance_criteria:
         - 使用预构建产品与运行时镜像，不在最终镜像包含 Java 编译器、Python/Node 工程环境、源 CSV 或本机配置。
-        - API 宿主默认只绑定 127.0.0.1，PostgreSQL 不发布宿主端口；产品无实际依赖时不启 Redis。
+        - API 宿主默认只绑定 127.0.0.1，SQLite 无服务进程或宿主端口；产品无实际依赖时不启 Redis。
         - 以非 root API、独立持久卷和明确健康依赖启动；隔离测试覆盖端口冲突、缺资料、重启和停止。
         acceptance_evidence:
         - 冻结输入、直接测试与隔离运行证据；状态仅在 phase2/status.md，未运行的必需项为 BLOCKED，不以构建成功代替用户验收
@@ -11940,7 +12164,7 @@ workstreams:
           required_task_version: 4
           required_change_version: 3.1.0
           required_result: PASS
-        deliverable: 封装 API 镜像和私网数据库 Compose及直接验收证据。
+        deliverable: 封装 API 镜像和 SQLite 只读文件 Compose及直接验收证据。
       - id: LF-TSK-OPS-2010
         title: 生成无宿主语言依赖的发行校验入口
         priority: P0
@@ -12007,7 +12231,7 @@ workstreams:
         - ops/docker/tests/test_docker_bounds.py
         - ops/docker/tests/test_docker_environment.py
         - ops/docker/tests/test_operation_ownership.py
-        - ops/docker/tests/test_secret_publication.py
+        - ops/docker/tests/test_state_records.py
         - ops/docker/tests/test_state_records.py
         - ops/docker/tests/test_lifecycle_flow.py
         - ops/release/test_tools/run-release-tool-tests.mjs
@@ -12226,7 +12450,7 @@ workstreams:
         - ops/podman/commands/manage-podman-installation.mjs
         - ops/podman/commands/diagnose-podman-installation.mjs
         - ops/podman/tests/local-session.test.mjs
-        - ops/docker/tests/test_podman_local.py
+        - ops/podman/tests/unified-flow.test.mjs
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/tasks.md
         forbidden_files:
@@ -12271,7 +12495,7 @@ workstreams:
         - ops/podman/tests/local-session.test.mjs
         - ops/release/integrity/extension-archive-integrity.mjs
         - ops/release/tests/archive-identity.test.mjs
-        - ops/docker/tests/test_podman_local.py
+        - ops/podman/tests/unified-flow.test.mjs
         - harness/module-checks.yaml
         - tests/verification/test_docker_contract_checks.py
         - planning/workstreams.yaml
@@ -12382,7 +12606,7 @@ workstreams:
         - ops/podman/tests/upgrade.test.mjs
         - ops/podman/tests/prepare-workspace.test.mjs
         - ops/podman/tests/candidate.test.mjs
-        - ops/docker/tests/test_podman_local.py
+        - ops/podman/tests/unified-flow.test.mjs
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/tasks.md
         - docs/user/podman-macos.md
@@ -12395,7 +12619,7 @@ workstreams:
         acceptance_criteria:
         - 写入前持久化归属和预期内容证据，覆盖部分文件、空目录及强杀窗口；不以目录名或文件名代替字节归属。
         - 已知部分写入在失败或取消后安全清理并允许同目录重试；证据不完整或未知漂移保留单一journal并拒绝新事务。
-        - 未知文件、符号链接、错误内容及归属漂移不得删除；禁止全局目录匹配清理或影响用户数据、PG、密码与已安装扩展。
+        - 未知文件、符号链接、错误内容及归属漂移不得删除；禁止全局目录匹配清理或影响用户数据、私有配置与已安装扩展。
         - 源码与候选升级共用恢复能力，首次安装、完整升级、回滚及记录身份保持原合同。
         acceptance_evidence:
         - 独立TASK_VALIDATION的重复部分失败、写入中强杀、未知内容拒绝与成功重试证据；不把合成测试当Podman实机。
@@ -12570,7 +12794,7 @@ workstreams:
         - ops/podman/tests/candidate.test.mjs
         - ops/podman/tests/candidate-fixture.mjs
         - ops/podman/tests/deployment.test.mjs
-        - ops/docker/tests/test_podman_local.py
+        - ops/podman/tests/unified-flow.test.mjs
         - docs/user/podman-macos.md
         - docs/roadmap/master-plan/phase2/release.md
         - openspec/changes/versioned-podman-images/**
@@ -13088,7 +13312,7 @@ workstreams:
           required_result: PASS
         deliverable: 最新证据的独立审查与缺项，不替代公开发行。
       - id: LF-TSK-OPS-2036
-        title: 修复候选生命周期的受管 PostgreSQL 检查替身
+        title: 修复候选生命周期的受管 SQLite 检查替身
         priority: P0
         task_version: 1
         change_version: 1.4.0
@@ -13105,7 +13329,7 @@ workstreams:
         - 只修改测试替身，不跳过检查或改变产品行为。
         acceptance_evidence:
         - 独立 Hook 原始失败、根因对应差异与完整 candidate 直接回归。
-        validation_command: node --test ops/podman/tests/candidate.test.mjs ops/podman/tests/managed-postgres-readiness.test.mjs
+        validation_command: node --test ops/podman/tests/candidate.test.mjs ops/podman/tests/candidate-runtime.test.mjs
         required_check_ids: [eng.release.docker-contract]
         depends_on: []
         deliverable: 最新受管数据库就绪合同的候选生命周期直接回归。
@@ -13341,7 +13565,7 @@ workstreams:
         - ops/docker/tests/test_docker_bounds.py
         - ops/docker/tests/test_operation_ownership.py
         - ops/docker/tests/test_lifecycle_flow.py
-        - ops/docker/tests/test_secret_publication.py
+        - ops/docker/tests/test_state_records.py
         - ops/release/tests/fake-docker-daemon.mjs
         - ops/release/tests/lifecycle-fixture.mjs
         - ops/release/tests/lifecycle.test.mjs
@@ -13406,7 +13630,7 @@ workstreams:
         forbidden_files: [secrets/**, .local/**, data/**, .env]
         expected_output: 实机验收只调用镜像唯一正式 health 入口并精确回归，不改变健康判据。
         acceptance_criteria:
-        - 保留两容器完整 image/labels/state/health 与 software/API/dataset 检查，禁止 fallback 或缺项通过。
+        - 保留单 API 容器完整 image/labels/state/health 与 software/API/dataset 检查，禁止 fallback 或缺项通过。
         - 当前实际镜像正式命令只读 PASS，原错误命令 exit127 证据保留；mock 精确验证 argv。
         - 合成完整状态/删除 fixture 固定 240 秒，保留全部生命周期和清理断言；生产预算不变。
         - 只做直接回归，实机完整生命周期和独立开发检查另取新冻结证据。

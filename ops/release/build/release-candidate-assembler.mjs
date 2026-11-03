@@ -79,8 +79,8 @@ async function readImageCandidate(directory) {
   const expectedPlatforms = ['linux/arm64'];
   const bases = new Map();
   for (const base of candidate.baseImages) {
-    if (!exactKeys(base, ['platform', 'javaRuntime', 'postgresRuntime']) || !expectedPlatforms.includes(base.platform) || bases.has(base.platform)) fail('IMAGE_CANDIDATE_INVALID');
-    for (const runtime of [base.javaRuntime, base.postgresRuntime]) {
+    if (!exactKeys(base, ['platform', 'javaRuntime']) || !expectedPlatforms.includes(base.platform) || bases.has(base.platform)) fail('IMAGE_CANDIDATE_INVALID');
+    for (const runtime of [base.javaRuntime]) {
       if (!exactKeys(runtime, ['reference', 'imageId']) || !validBaseReference(runtime.reference)
         || !/^sha256:[a-f0-9]{64}$/.test(runtime.imageId)) fail('IMAGE_CANDIDATE_INVALID');
     }
@@ -139,7 +139,7 @@ async function fileSummary(file, maximum = 2 ** 40) {
   return { bytes, sha256: checksum.digest('hex') };
 }
 
-async function createSourcePackage(parent, artifactRoot, descriptor) {
+export async function createSourcePackage(parent, artifactRoot, descriptor) {
   const directory = await mkdtemp(path.join(parent, '.lexiflow-source-package-')).catch(() => fail('SOURCE_PACKAGE_INVALID'));
   try {
     const root = path.join(directory, 'package'); const materials = path.join(root, 'materials');
@@ -165,7 +165,7 @@ async function createSourcePackage(parent, artifactRoot, descriptor) {
     const archive = path.join(directory, 'sources', archiveName);
     await mkdir(path.dirname(archive), { recursive: true, mode: 0o700 });
     execFileSync('tar', ['-czf', archive, '-C', root, 'index.json', 'materials'],
-      { stdio: 'ignore', timeout: 3_600_000, env: { PATH: process.env.PATH, LANG: 'C', LC_ALL: 'C' } });
+      { stdio: 'ignore', timeout: 3_600_000, env: { PATH: process.env.PATH, LANG: 'C', LC_ALL: 'C', COPYFILE_DISABLE: '1' } });
     const summary = await fileSummary(archive);
     return { directory, archive, record: { role: 'corresponding-sources', path: `sources/${archiveName}`,
       ...summary, licenseIds: descriptor.licenses.map(item => item.id).sort(),
@@ -259,6 +259,7 @@ export async function assembleReleaseCandidate(input) {
     await mkdir(staging, { recursive: true, mode: 0o700 });
     const sourcePackage = await createSourcePackage(work, artifacts, descriptor);
     descriptor.artifacts.push(sourcePackage.record);
+    descriptor.artifacts = descriptor.artifacts.filter(item => item.role !== 'license');
     try { createManifest(descriptor, buildIdentity); } catch { fail('DESCRIPTOR_INVALID'); }
     for (const { directory, imageCandidate } of imageCandidatesByPlatform)
       await snapshot(imageCandidate, directory, artifacts, descriptor, sourcePackage.directory);

@@ -14,8 +14,8 @@ import { jarBytes } from './zip-fixture.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const templates = ['ops/docker/Dockerfile.runtime', 'ops/docker/runtime-entrypoint.sh'];
 const hash = (data) => createHash('sha256').update(data).digest('hex');
-const ids = { 'linux/amd64': ['sha256:' + 'a'.repeat(64), 'sha256:' + 'b'.repeat(64)], 'linux/arm64': ['sha256:' + 'c'.repeat(64), 'sha256:' + 'd'.repeat(64)] };
-const finalIds = { 'linux/amd64': ['sha256:' + 'e'.repeat(64), 'sha256:' + 'f'.repeat(64)], 'linux/arm64': ['sha256:' + '1'.repeat(64), 'sha256:' + '2'.repeat(64)] };
+const ids = { 'linux/amd64': ['sha256:' + 'a'.repeat(64)], 'linux/arm64': ['sha256:' + 'c'.repeat(64)] };
+const finalIds = { 'linux/amd64': ['sha256:' + 'e'.repeat(64)], 'linux/arm64': ['sha256:' + '1'.repeat(64)] };
 const git = (root, args, options = {}) => execFileSync('git', ['-C', root, ...args], { timeout: 10_000, ...options });
 
 async function fixture() {
@@ -25,19 +25,18 @@ async function fixture() {
   await mkdir(path.join(root, 'ops/docker'), { recursive: true });
   for (const relative of templates) await writeFile(path.join(root, relative), await readFile(path.join(repo, relative)));
   const syntheticLock = ['linux/amd64', 'linux/arm64'].map((platform) => ({ platform,
-    javaRuntime: { reference: `registry.example.invalid/library/java@${ids[platform][0]}`, imageId: ids[platform][0] },
-    postgresRuntime: { reference: `registry.example.invalid/library/postgres@${ids[platform][1]}`, imageId: ids[platform][1] } }));
+    javaRuntime: { reference: `registry.example.invalid/library/java@${ids[platform][0]}`, imageId: ids[platform][0] } }));
   await writeFile(path.join(root, 'ops/docker/base-images.json'), `${JSON.stringify({ schemaVersion: 1, baseImages: syntheticLock }, null, 2)}\n`);
   for (const name of ['integrity/source-build-identity.mjs', 'integrity/artifact-build-identity.mjs', 'integrity/extension-archive-integrity.mjs', 'integrity/release-artifact-manifest.mjs']) await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repo, 'ops/release', name)));
   await writeFile(path.join(root, 'ops/release/version.txt'), '2.0.0\n');
-  await mkdir(path.join(root, 'infra/postgres'), { recursive: true });
-  await writeFile(path.join(root, 'infra/postgres/schema.sql'), await readFile(path.join(repo, 'infra/postgres/schema.sql')));
+  await mkdir(path.join(root, 'infra/sqlite'), { recursive: true });
+  await writeFile(path.join(root, 'infra/sqlite/schema.sql'), await readFile(path.join(repo, 'infra/sqlite/schema.sql')));
   await writeFile(path.join(root, '.gitignore'), '/artifact/\n');
   execFileSync('git', ['init', '-q', root], { timeout: 10_000 });
   git(root, ['add', '.']); git(root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']);
   const sourceCommit = git(root, ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const artifactRoot = path.join(root, 'artifact'); await mkdir(artifactRoot);
-  const schema = await readFile(path.join(root, 'infra/postgres/schema.sql'));
+  const schema = await readFile(path.join(root, 'infra/sqlite/schema.sql'));
   const jar = jarBytes(resolveBuildIdentity(root), schema); await writeFile(path.join(artifactRoot, 'app.jar'), jar);
   const dataset = Buffer.from('synthetic release dataset'); const notice = Buffer.from('synthetic notice');
   await mkdir(path.join(artifactRoot, 'licenses'), { recursive: true });
@@ -51,7 +50,7 @@ async function fixture() {
     dataset: { path: 'dataset.zip', bytes: dataset.length, sha256: hash(dataset), releaseId: 'release-1', preparationId: 'prep-1', ruleId: 'rule-1' },
     notices: [{ path: 'licenses/notice.txt', bytes: notice.length, sha256: hash(notice) }],
   };
-  const refs = Object.fromEntries(syntheticLock.flatMap(({ platform, javaRuntime, postgresRuntime }) => [[javaRuntime.reference, { platform, imageId: javaRuntime.imageId }], [postgresRuntime.reference, { platform, imageId: postgresRuntime.imageId }]]));
+  const refs = Object.fromEntries(syntheticLock.map(({ platform, javaRuntime }) => [javaRuntime.reference, { platform, imageId: javaRuntime.imageId }]));
   const outputParent = await realpath(await import('node:fs/promises').then(({ mkdtemp }) => mkdtemp(path.join(os.tmpdir(), 'lexiflow-output-'))));
   const fakeRoot = await import('node:fs/promises').then(({ mkdtemp }) => mkdtemp(path.join(os.tmpdir(), 'lexiflow-fake-docker-')));
   const bin = path.join(fakeRoot, 'bin'); await mkdir(bin);
@@ -137,7 +136,7 @@ test('buildCandidateImages 执行固定预检/单镜像构建/导出并留下唯
       const execution = await calls(f); const operations = execution.map((entry) => entry.op);
       assert.deepEqual(operations.slice(0, 2), ['version', 'info']);
       const baseChecks = execution.filter(({ args }) => args.includes('inspect') && args.some((arg) => arg.startsWith('registry.example.invalid/')));
-      assert.equal(baseChecks.length, 2);
+      assert.equal(baseChecks.length, 1, 'only the Java runtime base image is inspected');
       const lastBaseInspection = Math.max(...execution.map((entry, index) => baseChecks.includes(entry) ? index : -1));
       assert.ok(lastBaseInspection < operations.indexOf('build'));
       assert.equal(operations.filter((op) => op === 'build').length, 1);

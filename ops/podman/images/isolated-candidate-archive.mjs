@@ -93,7 +93,7 @@ function entries(fd, size) {
 }
 /** Derived archive uses only a slot-owned stable alias; no original RepoTag survives. */
 export function isolateCandidateArchive({ archive, output, expectedSha256, expectedBytes, imageDigest, role, baseVersion }) {
-  if (!['api', 'postgres'].includes(role) || !/^sha256:[a-f0-9]{64}$/.test(imageDigest)
+  if (role !== 'api' || !/^sha256:[a-f0-9]{64}$/.test(imageDigest)
       || !/^[a-f0-9]{64}$/.test(expectedSha256) || !Number.isSafeInteger(expectedBytes)
       || expectedBytes < 1024 || expectedBytes > maxArchive || !path.isAbsolute(archive) || !path.isAbsolute(output)) fail();
   const alias = `localhost/${slotImageNamespace('release-validation')}-${role}:${deploymentImageTag(baseVersion)}`;

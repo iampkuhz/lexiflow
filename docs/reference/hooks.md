@@ -44,9 +44,9 @@
 - 每项检查保留 Registry 超时；运行最多 1800 秒，客户端上限 1860 秒预留清理余量。超时、Ctrl-C、SIGTERM 回收当前 Check 进程组及本次测试容器；不把 SIGKILL 当正常清理。
 - 同 checkout 的公开 Verify、Hook、精确诊断和 Formal validation 使用同一非等待窗口；已有检查时立即 BLOCKED，不重跑、不排无限队列。窗口不锁源码编辑，其他写入者仍可编辑；实际风险闭包漂移使本次失败，无关写入可继续。未知锁不删除、未知进程不终止。
 - 不跨交付缓存 PASS，不以旧报告代替真实执行。进程退出自动释放锁；不要删除锁文件“解锁”。
-- Hook 按需创建本次隔离 PostgreSQL/Redis 测试容器，检查结束自动清理；不再要求手工导出地址。运行时或本机镜像缺失则 BLOCKED，不自动安装、下载、启动容器引擎或使用开发库。准备方式见[验证环境](../scenarios/verification-environment.md)。
+- Hook 按需创建本次隔离 Redis 测试容器，检查结束自动清理；SQLite 测试使用每测试独立临时目录，不需要数据库服务或地址。运行时或本机镜像缺失则 BLOCKED，不自动安装、下载、启动容器引擎或使用开发库。准备方式见[验证环境](../scenarios/verification-environment.md)。
 
-入口优先使用已准备的 `.local/lexiflow-python/bin/python`，没有则使用当前解释器。临时测试服务由环境模块按 `scripts/environment/services/isolated_postgres_redis.py` 管理，所选 checks 共用一个 lease。
+入口优先使用已准备的 `.local/lexiflow-python/bin/python`，没有则使用当前解释器。临时测试服务由环境模块按 `scripts/environment/services/isolated_redis.py` 管理，所选 checks 共用一个 lease。
 
 广泛变更可使用既有开发 CLI 取得同一 `development-change` 的完整报告，环境准备见[验证环境](../scenarios/verification-environment.md)。它仍冻结完整真实 diff、执行全部受选 checks，并核对漂移与结果；不是只重跑此前未完成项。此前 Hook 的超时记录保留为 BLOCKED，CLI 报告不称为 Hook PASS；不再叠跑 Stop 来取得第二份相同范围的报告。执行归属见[协作规则](../../harness/agent-policy.md#冻结验证与独立性)。
 
@@ -74,7 +74,7 @@ printf '%s\n' '{"hook_event_name":"Stop","stop_hook_active":false}' | python3 sc
 | --- | --- | --- |
 | Hook 协议 | 解析 Stop、中间回合与停用开关 | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py) |
 | 风险准备／执行 | 冻结真实风险及唯一 development-change profile，调用公共 Verify API | [run_development_checks.py](../../scripts/verification/commands/run_development_checks.py) |
-| 环境生命周期 | 使用并清理本次隔离服务 lease | [isolated_postgres_redis.py](../../scripts/environment/services/isolated_postgres_redis.py) |
+| 环境生命周期 | 使用并清理本次隔离服务 lease | [isolated_redis.py](../../scripts/environment/services/isolated_redis.py) |
 | CI 边界 | quick 不等于发行完整 baseline | [CI 场景策略](../../config/engineering/module-checks.yaml) |
 
 上一层：[开发交付能力总览](checks.md)。

@@ -97,7 +97,7 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
                 )
             )
             self.assertIn("extension/package-lock.json", files)
-            self.assertIn("infra/postgres/schema.sql", files)
+            self.assertIn("infra/sqlite/schema.sql", files)
 
     def test_real_frozen_fixture_executes_gradle_generation_identity(self) -> None:
         """只从真实 lifecycle 冻结闭包建 fixture，执行 bootJar 固定资料生成器。"""

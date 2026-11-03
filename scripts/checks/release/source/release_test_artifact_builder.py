@@ -129,11 +129,7 @@ def build_local_inputs(
         cwd=repo / "extension",
         env=base,
     )
-    jdbc = environ.get("LEXIFLOW_POSTGRES_TEST_JDBC_URL", "").strip()
-    if not jdbc:
-        raise ConsumerError("BLOCKED", "missing-isolated-postgres-test-jdbc-url")
     producer_env = dict(base)
-    producer_env["LEXIFLOW_POSTGRES_TEST_JDBC_URL"] = jdbc
     _run(
         [
             str(repo / "backend/gradlew"),
@@ -181,7 +177,8 @@ def build_local_inputs(
         if (
             len(content) != row["bytes"]
             or hashlib.sha256(content).hexdigest() != row["sha256"]
-            or row["preparationPolicy"] != "lexiflow.deterministic-preparation.v1"
+            or row["preparationPolicy"]
+            != "lexiflow.deterministic-preparation.priority-v2"
         ):
             raise ConsumerError("FAIL", "synthetic-producer-content-invalid")
     if (
@@ -192,8 +189,10 @@ def build_local_inputs(
         raise ConsumerError("FAIL", "synthetic-generations-not-distinct")
     # Build the real extension bundle once with the first generation as the baseline;
     # the candidate builder clones dist and repackages each exact generation separately.
-    policy_sha = hashlib.sha256(b"lexiflow.deterministic-preparation.v1").hexdigest()
-    sql_path = repo / "infra/postgres/schema.sql"
+    policy_sha = hashlib.sha256(
+        b"lexiflow.deterministic-preparation.priority-v2"
+    ).hexdigest()
+    sql_path = repo / "infra/sqlite/schema.sql"
     sql_version = hashlib.sha256(_read_regular(sql_path, 16 * 1024 * 1024)).hexdigest()
     first = report["datasets"][0]
     expected_dataset = {
@@ -374,6 +373,6 @@ def produce_candidates(
         "sourceCommit": commit,
         "apiContract": result["apiContract"],
         "sqlVersion": hashlib.sha256(
-            _read_regular(repo / "infra/postgres/schema.sql", 16 * 1024 * 1024)
+            _read_regular(repo / "infra/sqlite/schema.sql", 16 * 1024 * 1024)
         ).hexdigest(),
     }

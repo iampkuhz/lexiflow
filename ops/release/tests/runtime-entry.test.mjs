@@ -42,12 +42,29 @@ test('runtime Dockerfile is the locked one-image PID1 contract', async (t) => {
   const f = await lifecycleFixture(t);
   const dockerfile = (await import('node:fs/promises')).readFile(f.dockerfile, 'utf8');
   const source = await dockerfile;
-  assert.match(source, /^FROM \$\{POSTGRES_RUNTIME_IMAGE\} AS runtime/mu);
-  assert.match(source, /COPY --from=java-runtime \/opt\/java\/openjdk \/opt\/java\/openjdk/u);
-  assert.match(source, /COPY .*runtime-entrypoint\.sh \/app\/runtime-entrypoint\.sh/u);
-  assert.match(source, /LABEL io\.lexiflow\.image-role="runtime"/u);
-  assert.match(source, /ENTRYPOINT \["\/app\/runtime-entrypoint\.sh"\]/u);
-  assert.match(source, /CMD \["run"\]/u);
+  assert.deepEqual(source.match(/^FROM .+$/gmu), [
+    'FROM ${JAVA_RUNTIME_IMAGE} AS notice-files',
+    'FROM ${JAVA_RUNTIME_IMAGE}',
+  ]);
+  // 准备阶段不交付；用户、身份与 PID1 必须由唯一最终运行阶段声明。
+  const runtime = source.slice(source.lastIndexOf('\nFROM ') + 1);
+  assert.equal((source.match(/^ENTRYPOINT /gmu) ?? []).length, 1);
+  assert.match(runtime, /USER 10001:10001/u);
+  assert.match(runtime, /\/var\/lib\/lexiflow/u);
+  assert.match(runtime, /COPY .*runtime-entrypoint\.sh \/app\/runtime-entrypoint\.sh/u);
+  assert.match(runtime, /LABEL io\.lexiflow\.image-role="runtime"/u);
+  assert.match(runtime, /ENTRYPOINT \["\/app\/runtime-entrypoint\.sh"\]/u);
+  assert.match(runtime, /CMD \["run"\]/u);
+});
+
+test('runtime refuses unknown directory contents without cleanup or adoption', async (t) => {
+  const f = await lifecycleFixture(t);
+  const foreignTree = path.join(f.root, 'foreign-tree');
+  await (await import('node:fs/promises')).mkdir(foreignTree);
+  const result = runRuntime(f, 'runtime_start');
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /volume-unknown-content/u);
+  assert.equal(await (await import('node:fs/promises')).readdir(foreignTree).then(x => x.length), 0);
 });
 
 test('runtime entry validates the complete eight-field release identity and rejects duplicates', async (t) => {

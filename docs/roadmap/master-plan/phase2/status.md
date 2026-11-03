@@ -67,16 +67,14 @@
 | 状态 | 已实现或待处理内容 | 核对与验收边界 |
 | --- | --- | --- |
 | 已完成开发验证 | 日常按变更与消费依赖选择；Docker 固定为 surface、shell、local、node，保留聚合基线 | [选择与检查声明](../../../../config/engineering/module-checks.yaml)；未知输入、删除、遗漏和重复失败关闭。单行 Java 不因“高风险”自动触发全部 Docker，实际范围仍取决于同工作区累计 diff |
-| 已完成开发验证 | 非安装场景改用每例独立准备，首次安装覆盖保留在专门测试；真实状态对照、损坏拒绝与隔离检查共 43 例 | [准备与恢复回归](../../../../ops/docker/tests/test_podman_local.py)；最新完成整轮中这 43 例合计 181.85 秒，包含新增对照成本，不缓存 PASS |
+| 实施待独立验收 | 本机 SQLite 生命周期由统一流程、单机流程、升级与进程锁 Node 场景覆盖；这些场景仅说明当前测试入口，不代表本轮正式验证 PASS | [统一流程](../../../../ops/podman/tests/unified-flow.test.mjs)、[单机流程](../../../../ops/podman/tests/unified-local.test.mjs)、[升级](../../../../ops/podman/tests/upgrade.test.mjs)、[进程锁](../../../../ops/podman/tests/process-lock.test.mjs) |
 | 已完成开发验证 | 批量写 Git 索引、合并 Git 元数据读取、按内容复用纯 YAML 解析、有限测试模型常驻及心跳虚拟时钟 | [检查与冻结实现](../../../../scripts/verification/execution/check_plan_runner.py)；保留源身份重读、可变状态隔离、原测试断言、失败与取消回收，不用微基准比例外推整轮 |
 | 已完成开发验证 | fake Docker 正常响应清理合并一次显式文件删除 | [归属清理回归](../../../../ops/docker/tests/test_operation_ownership.py)；正常 Stop 已覆盖 5 项新增回归；保留未知文件拒绝、部分失败、清理间隙取消与私有进程回收，不为小收益引入通用框架 |
 | 不采纳 | Gradle 并行实验、共享 Git fixture seed | 并行未证明整轮收益且有取消边界成本；单次 build fixture 的 Git 准备仅约 0.11 秒，没有引入跨例共享复杂度的收益证据 |
 | 实施待独立验收 | 仓库 Git 提醒 Hook 已删除；Stop 通过精确中间标记区分真正非交付回合 | 普通交付不使用中间标记，不据此声明 PASS；客户端真实触发仍须独立确认 |
 | 待决策 | 正式高风险验收范围、剩余配置职责分离、脚本目录命名与环境入口统一 | 见 1.4；先给具体调整及覆盖证明，再由用户确认。独立验证不消费实现者 PASS 代替执行 |
 
-最近完成的正常 Stop 为 `cd075d6d-026b-4307-95e8-a8b9c5015af9`：25 项逻辑 PASS、22 次物理执行、3 项合法同事务别名；Verification 571 例、Gate 122 例、Docker Python 197 例与 Node 130 例均无失败或跳过。757 项输入无漂移，隔离 PostgreSQL／Redis 已清理，窗口再次取得与释放通过；原始证据及独立审查在 ignored `tmp/quality/gate-test-performance/round24-cleanup-freeze/`。
-
-该次墙钟 1296.69 秒，物理检查合计 1282.60 秒，外层差额 14.09 秒；主要成本为 Docker local 258.20 秒、shell 176.12 秒、Verify 126.76 秒、Gate 120.78 秒、生命周期 96.68 秒。单次结果不能作为稳定时限或优化因果证据；本轮配置精简主要减少维护成本，不承诺整轮提速。
+当前状态页不复述过期的检查计数、运行耗时或旧环境收据。SQLite 生命周期以现存 Node 场景作为测试入口；本页不据此宣称新的正式验证通过。
 
 submit／冻结只绑定输入；正式 validate 执行检查；review 和 check 只核对证据。quick CI、开发检查、完整 Repository 与 Formal 的集合不同，不能互相替代。
 

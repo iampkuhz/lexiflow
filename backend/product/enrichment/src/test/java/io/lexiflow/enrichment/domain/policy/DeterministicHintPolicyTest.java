@@ -44,13 +44,14 @@ class DeterministicHintPolicyTest {
   }
 
   @Test
-  void blockDoesNotDisplayAndStillMakesSameFormAmbiguous() {
-    var hint = candidate("bank", "银行");
-    var block = block("bank");
-    assertEquals(HintState.NO_PENDING, evaluate("bank", List.of(hint, block)).state());
-    assertEquals(HintState.NO_PENDING, evaluate("bank", List.of(block)).state());
+  void blockDoesNotDisplayAndStillMakesAmericanizesAmbiguous() {
+    var hint = candidate("americanizes", "使美国化");
+    var block = block("americanizes");
+    assertEquals(HintState.NO_PENDING, evaluate("americanizes", List.of(hint, block)).state());
+    assertEquals(HintState.NO_PENDING, evaluate("americanizes", List.of(block)).state());
     var selection =
-        new DeterministicHintPolicy().evaluateSelection("bank", 0, 4, 0, List.of(hint, block));
+        new DeterministicHintPolicy()
+            .evaluateSelection("americanizes", 0, 12, 0, List.of(hint, block));
     assertEquals(1, selection.ambiguous());
     assertEquals(0, selection.overlapDropped());
   }
@@ -91,9 +92,9 @@ class DeterministicHintPolicyTest {
   }
 
   @Test
-  void usesFrozenFinalPriorityForEqualTierMatches() {
-    var low = candidate("context", "语境", 1, LexiconEntryKind.WORD, 4.2);
-    var highBase = candidate("literally", "按字面意思", 1, LexiconEntryKind.WORD, 4.2);
+  void usesUnifiedPriorityBeforeLengthForOverlappingMatches() {
+    var low = candidate("reliable", "可靠的", 1, LexiconEntryKind.WORD, 4.2);
+    var highBase = phrase("very reliable", "高优先级完整短语");
     var high =
         new LexiconHintCandidate(
             highBase.entryId(),
@@ -105,21 +106,10 @@ class DeterministicHintPolicyTest {
             highBase.entryKind(),
             highBase.finalAction(),
             highBase.finalGloss(),
-            900,
-            highBase.rankedWord(),
-            highBase.complexListCount());
-    var result =
-        evaluate(
-            "context metaphor algorithm literally",
-            List.of(
-                low,
-                candidate("metaphor", "隐喻", 1, LexiconEntryKind.WORD, 4.2),
-                candidate("algorithm", "算法", 1, LexiconEntryKind.WORD, 4.2),
-                high));
-    assertEquals(4, result.hints().size());
-    assertEquals(
-        List.of("语境", "隐喻", "算法", "按字面意思"),
-        result.hints().stream().map(hint -> hint.chineseGloss()).toList());
+            900);
+    var result = evaluate("very reliable", List.of(low, high));
+    assertEquals(1, result.hints().size());
+    assertEquals("高优先级完整短语", result.hints().getFirst().chineseGloss());
   }
 
   @Test
@@ -153,9 +143,7 @@ class DeterministicHintPolicyTest {
             LexiconEntryKind.WORD,
             LexiconHintAction.HINT,
             "银行（旧）",
-            500,
-            false,
-            1);
+            500);
     assertEquals(HintState.NO_PENDING, evaluate("bank", List.of(safe, unsafe)).state());
   }
 
@@ -206,35 +194,13 @@ class DeterministicHintPolicyTest {
     if (id == 0) id = 1;
     var senseId = UUID.nameUUIDFromBytes(gloss.getBytes(StandardCharsets.UTF_8));
     return new LexiconHintCandidate(
-        id,
-        senseId,
-        version,
-        "en",
-        form,
-        form,
-        kind,
-        LexiconHintAction.HINT,
-        gloss,
-        500,
-        zipf > 0,
-        1);
+        id, senseId, version, "en", form, form, kind, LexiconHintAction.HINT, gloss, 500);
   }
 
   private static LexiconHintCandidate block(String form) {
     var id = (long) form.hashCode() & Long.MAX_VALUE;
     if (id == 0) id = 1;
     return new LexiconHintCandidate(
-        id,
-        null,
-        1,
-        "en",
-        form,
-        form,
-        LexiconEntryKind.WORD,
-        LexiconHintAction.BLOCK,
-        null,
-        0,
-        false,
-        0);
+        id, null, 1, "en", form, form, LexiconEntryKind.WORD, LexiconHintAction.BLOCK, null, 0);
   }
 }

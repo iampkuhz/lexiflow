@@ -11,122 +11,22 @@ import { acquireProcessLock } from '../execution/installation-operation-lock.mjs
 import { doctor, runtime, runtimeDataset } from './diagnose-podman-installation.mjs';
 import { resolveBuildIdentity } from '../../release/integrity/source-build-identity.mjs';
 import { githubLatestRelease, versionSummary } from '../installation/installation-version-summary.mjs';
-import { runUnifiedDeployment, inspectInstalledDeployment, readPreparedTarget, activatePreparedTarget, assertDevelopmentTargetIdentity, verifyInstalledExtensionArchive } from '../installation/installation-upgrade-workflow.mjs';
+import { runUnifiedDeployment, inspectInstalledDeployment, readPreparedTarget, activatePreparedTarget, verifyInstalledExtensionArchive } from '../installation/installation-upgrade-workflow.mjs';
 import { readOperationJournal, writeOperationJournal } from '../installation/installation-plan-records.mjs';
 import { deploymentSlot, acquireDeploymentSlotLock } from '../deployment-slots.mjs';
-import { waitForManagedPostgresReady } from '../environment/managed-postgres-readiness.mjs';
+import { validateSqliteDatabaseFile } from '../environment/local-sqlite-target.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const help = '用法: node ops/podman/commands/manage-podman-installation.mjs install|upgrade|version|up|status|stop|logs|recover|doctor [--dir 绝对路径] [--plan | --confirm-plan <sha256>]';
 let sessionBusy = false;
 
-/** Strictly verify the legacy API/managed PG before the one authorized source retry. */
-export function makeLegacyApiVerifier({ run, portTaken, runtime, verifyRunningImage, apiPort: targetSlotApi = 18081, dbPort = 15432 }) {
-  const fail = code => { throw new Error(code); };
-  const labelMatches = (labels, docker, podman, expected) =>
-    (labels[docker] === expected || labels[podman] === expected)
-      && (labels[docker] === undefined || labels[docker] === expected)
-      && (labels[podman] === undefined || labels[podman] === expected);
-  return async (installed, { allowMissingApi = false, targetApiPort = allowMissingApi ? installed.apiPort : targetSlotApi } = {}) => {
-    if (installed.packageType !== 'source' || installed.dbPort !== dbPort
-        || allowMissingApi && installed.databaseTarget?.kind !== 'managed'
-        || ![18080, 18081].includes(installed.apiPort) || ![18080, 18081].includes(targetApiPort)
-        || !allowMissingApi && (installed.apiPort !== 18080 || targetApiPort !== targetSlotApi))
-      fail('DEPLOYMENT_SOURCE_MIGRATION_INVALID');
-    const rows = JSON.parse(await run('podman', ['ps', '-a', '--format', 'json'], { capture: true, timeout: 10000 }));
-    if (!Array.isArray(rows)) fail('DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED');
-    const owned = rows.filter(row => {
-      const labels = row.Labels || row.labels || {};
-      return labels['lexiflow.installation'] === installed.id
-        && [labels['com.docker.compose.project'], labels['io.podman.compose.project']].includes(installed.project)
-        && [labels['com.docker.compose.service'], labels['io.podman.compose.service']].includes('api');
-    });
-    if (owned.length > 1 || !allowMissingApi && owned.length !== 1)
-      fail('DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED');
-    const apiAbsent = owned.length === 0, oldPort = installed.apiPort;
-    if (allowMissingApi && apiAbsent && (await portTaken(oldPort) || await portTaken(targetApiPort)))
-      fail('DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED');
-    const inspectOldImage = async () => {
-      const output = JSON.parse(await run('podman', ['image', 'inspect', '--format', 'json', installed.apiImage], { capture: true, timeout: 10000 }));
-      const info = Array.isArray(output) && output.length === 1 ? output[0] : null;
-      const labels = info?.Labels || info?.Config?.Labels || {};
-      if (String(info?.Id || '').replace(/^sha256:/, '') !== String(installed.apiImage || '').replace(/^sha256:/, '')
-          || info?.Os !== 'linux' || info?.Architecture !== 'arm64'
-          || labels['io.lexiflow.build-id'] !== installed.buildIdentity?.buildId
-          || labels['io.lexiflow.image-role'] !== 'api'
-          || labels['org.opencontainers.image.revision'] !== installed.buildIdentity?.sourceCommit
-          || labels['org.opencontainers.image.version'] !== installed.version
-          || labels['io.lexiflow.source-sha256'] !== installed.buildIdentity?.sourceSha256)
-        fail('DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED');
-    };
-    await inspectOldImage();
-    if (!apiAbsent) {
-      const id = owned[0].Id || owned[0].ID;
-      if (!/^[a-f0-9]{64}$/.test(id)) fail('DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED');
-      const inspected = JSON.parse(await run('podman', ['inspect', id], { capture: true, timeout: 10000 }));
-      const info = Array.isArray(inspected) && inspected.length === 1 ? inspected[0] : null;
-      const labels = info?.Config?.Labels || {};
-      const bindings = info?.HostConfig?.PortBindings?.['8080/tcp'];
-      if (info?.Id !== id || labels['lexiflow.installation'] !== installed.id
-          || !labelMatches(labels, 'com.docker.compose.project', 'io.podman.compose.project', installed.project)
-          || !labelMatches(labels, 'com.docker.compose.service', 'io.podman.compose.service', 'api')
-          || String(info.Image || '').replace(/^sha256:/, '') !== String(installed.apiImage || '').replace(/^sha256:/, '')
-          || !Array.isArray(bindings) || bindings.length !== 1 || bindings[0].HostIp !== '127.0.0.1'
-          || String(bindings[0].HostPort) !== String(oldPort)) fail('DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED');
-      const occupied = await portTaken(oldPort);
-      if (info.State?.Running === true) {
-        if (!occupied) fail('DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED');
-        const [status] = await runtime(oldPort, installed.version, 5000);
-        if (status !== 'PASS') fail('DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED');
-        await verifyRunningImage(installed);
-      } else if (occupied) fail('DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED');
-      if (allowMissingApi && targetApiPort !== oldPort && await portTaken(targetApiPort))
-        fail('DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED');
-    }
-    const apiLabels = JSON.parse(await run('podman', ['image', 'inspect', '--format', '{{json .Labels}}', installed.apiImage], { capture: true, timeout: 10000 }));
-    if (apiLabels?.['io.lexiflow.build-id'] !== installed.buildIdentity?.buildId
-        || apiLabels?.['org.opencontainers.image.revision'] !== installed.buildIdentity?.sourceCommit
-        || apiLabels?.['org.opencontainers.image.version'] !== installed.version
-        || apiLabels?.['io.lexiflow.source-sha256'] !== installed.buildIdentity?.sourceSha256
-        || apiLabels?.['io.lexiflow.image-role'] !== 'api') fail('DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED');
-    if (installed.databaseTarget?.kind === 'managed') {
-    const pgRows = rows.filter(row => {
-      const labels = row.Labels || row.labels || {};
-      return labels['lexiflow.installation'] === installed.id
-        && [labels['com.docker.compose.project'], labels['io.podman.compose.project']].includes(installed.project)
-        && [labels['com.docker.compose.service'], labels['io.podman.compose.service']].includes('postgres');
-    });
-    if (pgRows.length !== 1) fail('DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED');
-    const pgId = pgRows[0].Id || pgRows[0].ID;
-    if (!/^[a-f0-9]{64}$/.test(pgId)) fail('DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED');
-    const inspectedPg = JSON.parse(await run('podman', ['inspect', pgId], { capture: true, timeout: 10000 }));
-    const pg = Array.isArray(inspectedPg) && inspectedPg.length === 1 ? inspectedPg[0] : null;
-    const pgLabels = pg?.Config?.Labels || {}, pgBindings = pg?.HostConfig?.PortBindings?.['5432/tcp'];
-    const mounts = (pg?.Mounts || []).filter(item => item.Type === 'volume' && item.Destination === '/var/lib/postgresql/data');
-    if (pg?.Id !== pgId || allowMissingApi && pg.State?.Running !== true
-        || String(pg.Image || '').replace(/^sha256:/, '') !== String(installed.postgresImage || '').replace(/^sha256:/, '')
-        || pgLabels['lexiflow.installation'] !== installed.id
-        || !labelMatches(pgLabels, 'com.docker.compose.project', 'io.podman.compose.project', installed.project)
-        || !labelMatches(pgLabels, 'com.docker.compose.service', 'io.podman.compose.service', 'postgres')
-        || !Array.isArray(pgBindings) || pgBindings.length !== 1 || pgBindings[0].HostIp !== '127.0.0.1'
-        || String(pgBindings[0].HostPort) !== String(dbPort) || mounts.length !== 1 || !mounts[0].Name)
-      fail('DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED');
-    const volumeRows = JSON.parse(await run('podman', ['volume', 'inspect', mounts[0].Name], { capture: true, timeout: 10000 }));
-    const volume = Array.isArray(volumeRows) && volumeRows.length === 1 ? volumeRows[0] : null;
-    if (volume?.Name !== mounts[0].Name || volume.Labels?.['lexiflow.installation'] !== installed.id
-        || !labelMatches(volume.Labels || {}, 'com.docker.compose.project', 'io.podman.compose.project', installed.project))
-      fail('DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED');
-    }
-    if (await portTaken(targetSlotApi)) fail('DEPLOYMENT_API_PORT_OCCUPIED');
-  };
-}
 export async function runLocal(argv) {
   if (!Array.isArray(argv) || !argv.every(value => typeof value === 'string')) { console.error('[LexiFlow] argv 必须是字符串数组'); return 1; }
   if (sessionBusy) { console.error('[LexiFlow] 本模块已有本机安装会话正在运行，拒绝并发调用'); return 1; }
   sessionBusy = true;
   const args = [...argv], action = args.shift();
   const sourceSlot = deploymentSlot('source', repo);
-  let dir = sourceSlot.directory, apiPort = sourceSlot.apiPort, dbPort = sourceSlot.dbPort;
+  let dir = sourceSlot.directory, apiPort = sourceSlot.apiPort;
   let state, logFile, lockRecord, lockOwned = false, unlockProcess, unlockSlot, interrupted = false, step = '检查参数';
   const abort = new AbortController();
   let environment = Object.fromEntries(['HOME', 'PATH', 'JAVA_HOME', 'LEXIFLOW_JAVA_HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'SSH_AUTH_SOCK', 'CONTAINER_HOST', 'CONTAINER_CONNECTION', 'DOCKER_HOST', 'PODMAN_COMPOSE_PROVIDER'].filter(k => process.env[k]).map(k => [k, process.env[k]]));
@@ -150,14 +50,14 @@ export async function runLocal(argv) {
     if (command === './gradlew') return '编译 Java 应用';
     if (command === 'npm') return argv[0] === 'ci' ? '安装扩展依赖' : '构建 Chrome 扩展';
     if (command !== 'podman') return undefined;
-    if (argv[0] === 'pull') return argv.at(-1).includes('temurin') ? '拉取 Java 25 基础镜像' : '拉取 PostgreSQL 17 基础镜像';
-    if (argv[0] === 'build') return path.basename(argv.at(-1)) === 'api' ? '构建 API 镜像' : path.basename(argv.at(-1)) === 'postgres' ? '构建 PostgreSQL 镜像' : '构建词库工具镜像';
+    if (argv[0] === 'pull') return '拉取 Java 25 基础镜像';
+    if (argv[0] === 'build') return path.basename(argv.at(-1)) === 'api' ? '构建 API 镜像' : '构建词库工具镜像';
     if (argv[0] === 'run') return argv.includes('--deployment-data')
-      ? (argv.includes('apply') ? '提交资料到 PostgreSQL' : '校验资料与 PostgreSQL')
-      : argv.includes('/kit/ops/dataset/prepare_ecdict_bundle.py') ? '下载、校验并精简 ECDICT' : '检查 PostgreSQL 目标';
+      ? (argv.includes('apply') ? '提交资料到 SQLite 文件' : '校验 SQLite 文件')
+      : argv.includes('/kit/ops/dataset/prepare_ecdict_bundle.py') ? '下载、校验并精简 ECDICT' : '检查 SQLite 数据库文件';
     if (argv[0] === 'compose') {
-      if (argv.includes('initialize')) return '导入词库到 PostgreSQL';
-      if (argv.includes('up')) return argv.at(-1) === 'postgres' ? '启动 PostgreSQL' : '启动 API';
+      if (argv.includes('initialize')) return '初始化 SQLite 资料文件';
+      if (argv.includes('up')) return '启动 API';
       if (argv.includes('stop')) return '停止服务';
     }
     return undefined;
@@ -185,9 +85,7 @@ export async function runLocal(argv) {
   }
   function digestFiles(installed = state) {
     if (installed.dataset && !installed.dataset.startsWith(path.join(dir, 'data') + path.sep)) fail('资料目录不属于此安装');
-    const names = ['compose.yaml', 'release.env',
-      ...(installed.databaseTarget?.kind === 'external' ? [] : ['secrets/postgres-password']),
-      ...(installed.databaseTarget?.authMode === 'development-trust' ? [] : ['secrets/app-password']), 'infra/postgres/schema.sql'];
+    const names = ['compose.yaml', 'release.env'];
     if (installed.captionDebug) names.push('caption-debug.yaml');
     if (installed.dataset) names.push(path.relative(dir, path.join(installed.dataset, installed.packageType === 'release-package' ? 'dataset.zip' : 'stardict.csv')));
     return Object.fromEntries(names.map(name => {
@@ -278,11 +176,9 @@ export async function runLocal(argv) {
   }
 
   function summary() {
-    const credential = state.databaseTarget?.authMode === 'development-trust'
-      ? '数据库认证: 已核对本仓库开发容器的显式 trust 配置；未生成密码文件。'
-      : `密码文件（勿分享）: ${path.join(dir, 'secrets/app-password')}`;
+    const database = path.join(dir, 'data', 'lexicon.db');
     const extensionZip = state.artifacts?.extensionArchive?.path ? path.join(dir, state.artifacts.extensionArchive.path) : '缺少已绑定 ZIP（请显式 upgrade）';
-    console.log(`就绪。API: http://127.0.0.1:${state.apiPort}\nChrome 加载目录: ${path.join(dir, 'extension')}\n插件 ZIP: ${extensionZip}\n插件 SHA256: ${extensionZip === '缺少已绑定 ZIP（请显式 upgrade）' ? extensionZip : `${extensionZip}.sha256`}\nPostgreSQL: 127.0.0.1:${state.dbPort} / lexiflow / 用户 ${state.databaseTarget?.user ?? 'lexiflow'}\n${credential}`);
+    console.log(`就绪。API: http://127.0.0.1:${state.apiPort}\nChrome 加载目录: ${path.join(dir, 'extension')}\n插件 ZIP: ${extensionZip}\n插件 SHA256: ${extensionZip === '缺少已绑定 ZIP（请显式 upgrade）' ? extensionZip : `${extensionZip}.sha256`}\nSQLite: ${database}`);
   }
   function writeLock(childPid) {
     if (!lockOwned) return;
@@ -410,16 +306,12 @@ export async function runLocal(argv) {
       if (!value || seen.has(key)) fail(help); seen.add(key);
       if (key === '--dir') dir = value;
       else if (['install', 'upgrade'].includes(action) && key === '--confirm-plan' && /^[a-f0-9]{64}$/.test(value)) confirmPlan = value;
-      else if (action === 'install' && ['--api-port', '--db-port'].includes(key) && /^[1-9][0-9]{0,4}$/.test(value) && +value <= 65535) {
-        if (key === '--api-port') apiPort = +value; else dbPort = +value;
-      } else fail(help);
+      else if (action === 'install' && key === '--api-port' && /^[1-9][0-9]{0,4}$/.test(value) && +value <= 65535) apiPort = +value; else fail(help);
     }
     if (action === 'doctor') return doctor(dir, environment, jsonReport);
     safePath(dir); dir = path.resolve(dir);
     if ([repo, os.homedir(), '/'].includes(dir)) fail('不能使用源码根目录、HOME 或文件系统根作为安装目录');
-    if (['install', 'upgrade'].includes(action)
-        && (seen.has('--api-port') && apiPort !== sourceSlot.apiPort || seen.has('--db-port') && dbPort !== sourceSlot.dbPort)) fail('SOURCE_PORTS_FIXED');
-    if (apiPort === dbPort) fail('API 与数据库端口不能相同');
+    if (['install', 'upgrade'].includes(action) && seen.has('--api-port') && apiPort !== sourceSlot.apiPort) fail('SOURCE_API_PORT_FIXED');
     if (Number(process.versions.node.split('.')[0]) < 22) fail('需要 Node.js 22 或以上');
     if (action === 'version') {
       const installed = fs.existsSync(dir) ? loadState() : null;
@@ -429,102 +321,8 @@ export async function runLocal(argv) {
     }
     if (os.platform() !== 'darwin' || os.arch() !== 'arm64') fail('本入口仅用于 M 芯片 macOS');
     if (['install', 'upgrade'].includes(action)) {
-      return runUnifiedDeployment({ repo, dir, action, apiPort, dbPort, seen, enforceFixedSlots: true,
+      return runUnifiedDeployment({ repo, dir, action, apiPort, seen, enforceFixedSlots: true,
         environment, run, ready, compose, ownedResources, verifyConfig, acquireLock,
-        waitManagedPostgres: async installed => {
-          const reject = code => { throw new Error(code); };
-          const labelsMatch = (labels, expected, docker, podman) =>
-            (labels[docker] === expected || labels[podman] === expected)
-              && (labels[docker] === undefined || labels[docker] === expected)
-              && (labels[podman] === undefined || labels[podman] === expected);
-          const listOwned = async () => {
-            const rows = JSON.parse(await run('podman', ['ps', '-a', '--format', 'json'], { capture: true, timeout: 10000 }));
-            if (!Array.isArray(rows)) reject('MANAGED_POSTGRES_IDENTITY_CHANGED');
-            const matches = rows.filter(row => {
-              const labels = row.Labels || row.labels || {};
-              return labels['lexiflow.installation'] === installed.id
-                && labelsMatch(labels, installed.project, 'com.docker.compose.project', 'io.podman.compose.project')
-                && labelsMatch(labels, 'postgres', 'com.docker.compose.service', 'io.podman.compose.service');
-            });
-            if (matches.length !== 1) reject('MANAGED_POSTGRES_IDENTITY_CHANGED');
-            const id = matches[0].Id || matches[0].ID;
-            if (!/^[a-f0-9]{64}$/.test(id)) reject('MANAGED_POSTGRES_IDENTITY_CHANGED');
-            return id;
-          };
-          if (installed.databaseTarget?.kind !== 'managed'
-              || !/^[a-f0-9]{32}$/.test(installed.id ?? '') || !installed.project
-              || ![15432, 15433].includes(installed.dbPort)) reject('MANAGED_POSTGRES_IDENTITY_INVALID');
-          const containerId = await listOwned();
-          const expected = { containerId, imageId: installed.postgresImage, installationId: installed.id,
-            project: installed.project, port: installed.dbPort, volumeName: `${installed.project}_pgdata` };
-          await waitForManagedPostgresReady({ expected, signal: abort.signal, inspect: async id => {
-            if (await listOwned() !== containerId || id !== containerId) reject('MANAGED_POSTGRES_IDENTITY_CHANGED');
-            const rows = JSON.parse(await run('podman', ['container', 'inspect', id], { capture: true, timeout: 10000 }));
-            const pg = Array.isArray(rows) && rows.length === 1 ? rows[0] : null;
-            const labels = pg?.Config?.Labels || {};
-            const bindings = pg?.HostConfig?.PortBindings?.['5432/tcp'];
-            const mounts = (pg?.Mounts || []).filter(value => value.Type === 'volume' && value.Destination === '/var/lib/postgresql/data');
-            if (pg?.Id !== id || labels['lexiflow.installation'] !== installed.id
-                || !labelsMatch(labels, installed.project, 'com.docker.compose.project', 'io.podman.compose.project')
-                || !labelsMatch(labels, 'postgres', 'com.docker.compose.service', 'io.podman.compose.service')
-                || !Array.isArray(bindings) || bindings.length !== 1 || bindings[0].HostIp !== '127.0.0.1'
-                || String(bindings[0].HostPort) !== String(installed.dbPort) || mounts.length !== 1
-                || mounts[0].Name !== expected.volumeName || mounts[0].RW !== true) reject('MANAGED_POSTGRES_IDENTITY_CHANGED');
-            const volumeRows = JSON.parse(await run('podman', ['volume', 'inspect', mounts[0].Name], { capture: true, timeout: 10000 }));
-            const volume = Array.isArray(volumeRows) && volumeRows.length === 1 ? volumeRows[0] : null;
-            const volumeLabels = volume?.Labels || {};
-            if (volume?.Name !== expected.volumeName || volumeLabels['lexiflow.installation'] !== installed.id
-                || !labelsMatch(volumeLabels, installed.project, 'com.docker.compose.project', 'io.podman.compose.project'))
-              reject('MANAGED_POSTGRES_IDENTITY_CHANGED');
-            return { containerId: pg.Id, imageId: String(pg.Image || '').replace(/^sha256:/, ''),
-              installationId: labels['lexiflow.installation'], project: labels['com.docker.compose.project'] || labels['io.podman.compose.project'],
-              service: labels['com.docker.compose.service'] || labels['io.podman.compose.service'],
-              port: Number(bindings[0].HostPort), volumeName: mounts[0].Name, volumeDestination: mounts[0].Destination,
-              volumeReadWrite: mounts[0].RW,
-              volumeInstallationId: volumeLabels['lexiflow.installation'], volumeProject: volumeLabels['com.docker.compose.project'] || volumeLabels['io.podman.compose.project'],
-              running: pg.State?.Running, health: pg.State?.Health?.Status };
-          } });
-        },
-        verifyLegacyApi: makeLegacyApiVerifier({ run, portTaken, runtime, verifyRunningImage, apiPort: sourceSlot.apiPort, dbPort: sourceSlot.dbPort }),
-        verifyStoppedManagedPostgres: async installed => {
-          const reject = () => fail('DEPLOYMENT_MANAGED_DATABASE_OWNERSHIP_UNVERIFIED');
-          if (installed.packageType !== 'source' || installed.databaseTarget?.kind !== 'managed'
-              || installed.dbPort !== sourceSlot.dbPort || !/^[a-f0-9]{32}$/.test(installed.id ?? '')) reject();
-          const labelsMatch = (labels, docker, podman, expected) =>
-            (labels[docker] === expected || labels[podman] === expected)
-            && (labels[docker] === undefined || labels[docker] === expected)
-            && (labels[podman] === undefined || labels[podman] === expected);
-          const rows = JSON.parse(await run('podman', ['ps', '-a', '--format', 'json'], { capture: true, timeout: 10000 }));
-          if (!Array.isArray(rows)) reject();
-          const owned = rows.filter(row => {
-            const labels = row.Labels || row.labels || {};
-            return labels['lexiflow.installation'] === installed.id
-              && labelsMatch(labels, 'com.docker.compose.project', 'io.podman.compose.project', installed.project)
-              && labelsMatch(labels, 'com.docker.compose.service', 'io.podman.compose.service', 'postgres');
-          });
-          if (owned.length !== 1) reject();
-          const id = owned[0].Id || owned[0].ID;
-          if (!/^[a-f0-9]{64}$/.test(id)) reject();
-          const inspected = JSON.parse(await run('podman', ['inspect', id], { capture: true, timeout: 10000 }));
-          const pg = Array.isArray(inspected) && inspected.length === 1 ? inspected[0] : null;
-          const labels = pg?.Config?.Labels || {};
-          const bindings = pg?.HostConfig?.PortBindings?.['5432/tcp'];
-          const mounts = (pg?.Mounts || []).filter(value => value.Type === 'volume' && value.Destination === '/var/lib/postgresql/data');
-          if (pg?.Id !== id || pg.State?.Running !== false
-              || String(pg.Image || '').replace(/^sha256:/, '') !== String(installed.postgresImage || '').replace(/^sha256:/, '')
-              || labels['lexiflow.installation'] !== installed.id
-              || !labelsMatch(labels, 'com.docker.compose.project', 'io.podman.compose.project', installed.project)
-              || !labelsMatch(labels, 'com.docker.compose.service', 'io.podman.compose.service', 'postgres')
-              || !Array.isArray(bindings) || bindings.length !== 1 || bindings[0].HostIp !== '127.0.0.1'
-              || String(bindings[0].HostPort) !== String(sourceSlot.dbPort)
-              || mounts.length !== 1 || !mounts[0].Name) reject();
-          const inspectedVolume = JSON.parse(await run('podman', ['volume', 'inspect', mounts[0].Name], { capture: true, timeout: 10000 }));
-          const volume = Array.isArray(inspectedVolume) && inspectedVolume.length === 1 ? inspectedVolume[0] : null;
-          const volumeLabels = volume?.Labels || {};
-          if (volume?.Name !== mounts[0].Name || volumeLabels['lexiflow.installation'] !== installed.id
-              || !labelsMatch(volumeLabels, 'com.docker.compose.project', 'io.podman.compose.project', installed.project)) reject();
-          if (await portTaken(sourceSlot.dbPort)) reject();
-        },
         verifyApiPort: async installed => {
           const [status] = await runtime(installed.apiPort, installed.version, 5000);
           if (status !== 'PASS') fail('DEPLOYMENT_API_PORT_OWNERSHIP_UNVERIFIED');
@@ -542,7 +340,6 @@ export async function runLocal(argv) {
     if (['status', 'up'].includes(action) && ['ready', 'initialized'].includes(state.phase)) await verifyInstalledExtensionArchive(dir, state);
     const replacementPending = fs.existsSync(path.join(dir, 'image-replacement.json'));
     if (replacementPending && action !== 'recover') fail('DEPLOYMENT_PENDING_REPLAN_REQUIRED');
-    await assertDevelopmentTargetIdentity({ repo, state, run });
     if (action === 'recover') {
       const journalFile = path.join(dir, 'deployment.json');
       const journal = fs.existsSync(journalFile) ? readOperationJournal(journalFile) : null;
@@ -570,7 +367,7 @@ export async function runLocal(argv) {
         }
         state = await activatePreparedTarget({ dir, prepared, previous: state, fact: repeated, digestFiles,
           setState: value => { state = value; }, saveState: value => { state = value; save(); }, compose, ready,
-          verifyDevelopmentIdentity: targetState => assertDevelopmentTargetIdentity({ repo, state: targetState, run }) });
+          });
         writeOperationJournal(journalFile, { ...journal, stage: 'complete' });
         if (replacementPending) {
           verifyConfig();
@@ -607,18 +404,17 @@ export async function runLocal(argv) {
     }
     if (action === 'status') { console.log(await compose('ps')); await ready(); await verifyInstalledExtensionArchive(dir, state); summary(); return 0; }
     if (action === 'logs') {
-      await runCommand('podman', composeArgs('logs', '--follow', '--tail=0', ...(state.databaseTarget?.kind === 'external' ? ['api'] : ['postgres', 'api'])),
+      await runCommand('podman', composeArgs('logs', '--follow', '--tail=0', 'api'),
         { cwd: dir, env: environment, follow: true, label: '查看服务日志' });
       return 0;
     }
     acquireLock();
     if (action === 'stop') {
-      await compose('stop', ...(state.databaseTarget?.kind === 'external' ? ['api'] : ['api', 'postgres']));
+      await compose('stop', 'api');
       return 0;
     }
     const journalFile = path.join(dir, 'deployment.json');
     if (fs.existsSync(path.join(dir, 'upgrade.json')) || fs.existsSync(journalFile) && readOperationJournal(journalFile).stage !== 'complete') fail('DEPLOYMENT_PENDING_REPLAN_REQUIRED');
-    if (state.databaseTarget?.kind !== 'external') await compose('up', '-d', 'postgres');
     const fact = await inspectInstalledDeployment({ repo, state, run, environment });
     if (fact.needsRebuild || fact.generationVersion !== state.generationVersion
         || fact.datasetVersion !== state.datasetIdentity.version) fail('DEPLOYMENT_STATE_PENDING');
@@ -628,9 +424,10 @@ export async function runLocal(argv) {
   function loadState() {
     const file = path.join(dir, 'state.json'); regular(file);
     const value = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (value.schema !== 1 || value.root !== dir || !/^[a-f0-9]{32}$/.test(value.id)
+    if (value.schema !== 2 || value.root !== dir || !/^[a-f0-9]{32}$/.test(value.id)
       || value.project !== `lexiflow-local-${value.id}` || !Number.isInteger(value.apiPort) || value.apiPort < 1 || value.apiPort > 65535
-      || !Number.isInteger(value.dbPort) || value.dbPort < 1 || value.dbPort > 65535) fail('DEPLOYMENT_INSTALL_STATE_INVALID');
+      || value.databaseTarget?.kind !== 'file' || value.databaseFile !== path.join(dir, 'data', 'lexicon.db')) fail('DEPLOYMENT_INSTALL_STATE_INVALID');
+    validateSqliteDatabaseFile(value.databaseFile, { installationRoot: dir, allowMissing: value.phase === 'new' });
     return value;
   }
   try {
@@ -641,20 +438,15 @@ export async function runLocal(argv) {
     const code = String(error?.message ?? '');
     const known = {
       DEPLOYMENT_INPUT_DRIFT: '确认后的源码、资料或制品输入与本次计划不符，拒绝继续部署。',
-      DEPLOYMENT_SECRET_DRIFT: '已记录的数据库凭据在确认后发生变化，拒绝继续连接或部署。',
       DEPLOYMENT_SOURCE_DRIFT: '已缓存来源、资料摘要或生成记录不符合本次公开固定来源，拒绝部署。',
       DEPLOYMENT_DATABASE_DRIFT: '确认后的数据库对象、权限或成功记录发生变化，拒绝写入。',
       DEPLOYMENT_TARGET_CHANGED: '指定目标与已有安装记录不同，拒绝更换目标。',
       DEPLOYMENT_SLOT_BUSY: '同类型源码部署槽位正在被另一个进程使用，拒绝并发操作。',
       DEPLOYMENT_SLOT_LOCK_INVALID: '无法取得受信的本机部署槽位锁，拒绝操作。',
-      DEPLOYMENT_SOURCE_MIGRATION_INVALID: '现有源码安装不符合已批准的固定槽位迁移条件。',
-      DEPLOYMENT_SOURCE_SLOT_STATE_INVALID: '现有安装的类型、API 或 PostgreSQL 端口不属于固定源码槽位，也不是允许的旧默认 API 迁移；拒绝形成第三槽位。',
       CANDIDATE_SLOT_STATE_INVALID: '现有安装的类型或端口不属于固定发行验证槽位，拒绝候选安装接管。',
       DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED: '现有源码 API 端口或容器归属无法核验，拒绝迁移。',
       DEPLOYMENT_REPLACEMENT_RECORD_INVALID: '镜像替换记录与本安装状态不符，保留现场；请核对原安装输入。',
       DEPLOYMENT_REPLACEMENT_TARGET_CHANGED: '未完成的镜像替换绑定原构建与资料输入；恢复后只能使用相同输入再次明确确认，拒绝改用其他目标。',
-      DEPLOYMENT_REPLACEMENT_RECOVERY_REQUIRES_CONFIRMED_INSTALL: '托管 PostgreSQL 镜像替换尚未完成；--plan 不改变部署资源，请在 TTY 中重新运行 install/upgrade 并明确确认原目标。',
-      DEPLOYMENT_SQL_DRIFT: '准备的数据库结构文件与本次输入不同，拒绝部署。',
       DEPLOYMENT_DATA_COPY_DRIFT: '复制的资料与已校验输入不同，拒绝部署。',
       CANDIDATE_CHANGED: '候选包内容与已校验输入不同，拒绝部署。',
       CANDIDATE_TARGET_DRIFT: '候选验证目标与本次计划不同，拒绝部署。',
@@ -671,51 +463,15 @@ export async function runLocal(argv) {
       DEPLOYMENT_RECOVERY_FACT_DRIFT: '数据库成功记录、资料或凭据与恢复目标不符，拒绝继续。',
       DEPLOYMENT_RECOVERY_CONFIG_DRIFT: '安装配置与原安装及准备的目标均不符，拒绝恢复。',
       DEPLOYMENT_RECOVERY_EXTENSION_DRIFT: '扩展制品与已核验恢复目标不符，拒绝恢复。',
-      DEPLOYMENT_RECOVERY_SQL_DRIFT: '数据库结构文件与已核验恢复目标不符，拒绝恢复。',
-      DEPLOYMENT_DATABASE_CREDENTIAL_REQUIRED: '本机数据库端口已占用，但没有本安装记录的受限数据库凭据；拒绝连接或创建新密码。',
-      DEVELOPMENT_DATABASE_SOURCE_INVALID: '开发数据库 Compose 来源文件无法确认为当前仓库内的安全普通文件，拒绝连接。',
-      DEVELOPMENT_DATABASE_IDENTITY_MISMATCH: '开发数据库容器的配置、标签、映射或卷不符合本仓库目标，拒绝连接。',
-      DEVELOPMENT_DATABASE_IDENTITY_DRIFT: '开发数据库当前容器或目标事实与已核验记录不符，拒绝继续部署或恢复。',
-      DEVELOPMENT_DATABASE_RECORD_INVALID: '安装记录中的开发数据库信息损坏或不完整，拒绝连接。',
-      DEVELOPMENT_DATABASE_TARGET_UNAVAILABLE: '未找到可核验的本仓库 PostgreSQL 开发目标，拒绝连接。',
-      DEVELOPMENT_DATABASE_CONTAINER_CHANGED: '开发数据库容器 ID 与安装记录不同，拒绝继续部署。',
-      DEVELOPMENT_DATABASE_IMAGE_CHANGED: '开发数据库镜像与安装记录不同，拒绝继续部署。',
-      DEVELOPMENT_DATABASE_REPOSITORY_CHANGED: '开发数据库 Compose 仓库路径或项目归属与安装记录不同，拒绝继续部署。',
-      DEVELOPMENT_DATABASE_AUTH_CHANGED: '开发数据库、用户或认证模式与安装记录不同，拒绝继续部署。',
-      DEVELOPMENT_DATABASE_RUNTIME_CHANGED: '开发数据库 PGDATA 或容器启动命令不符合已授权的 PostgreSQL 默认运行配置，拒绝连接。',
-      DEVELOPMENT_DATABASE_PORT_CHANGED: '开发数据库 loopback 端口映射与安装记录不同，拒绝继续部署。',
-      DEVELOPMENT_DATABASE_VOLUME_CHANGED: '开发数据库数据卷或挂载目标与安装记录不同，拒绝继续部署。',
-      DEVELOPMENT_DATABASE_AMBIGUOUS: '检测到多个开发数据库目标，拒绝猜测或连接。',
-      DEVELOPMENT_DATABASE_INSPECTION_INVALID: '开发数据库容器检查输入或结果无效，拒绝连接。',
-      DEVELOPMENT_DATABASE_INSPECTION_UNAVAILABLE: '无法只读核验开发数据库容器归属，拒绝连接。',
-      DEPLOYMENT_INSPECTION_STATE_INVALID: '安装记录中的数据库目标信息无效，拒绝只读检查。',
-      DEPLOYMENT_STATE_PENDING: '安装记录或数据库成功事实不完整、不一致；请先显式重新计划或恢复。',
-      DATABASE_AUTH_OR_CONNECT_FAILED: '无法连接或认证已有 lexiflow 数据库；不会猜测具体是网络还是密码错误。',
-      DATABASE_POSTGRES_17_REQUIRED: '数据库不是 PostgreSQL 17。',
-      DATABASE_SCHEMA_OWNER_MISMATCH: 'lexiflow_release schema 所有者与已记录用户不符。',
-      DATABASE_SCHEMA_CREATE_PERMISSION_REQUIRED: '已记录用户缺少目标数据库的 CREATE 权限。',
       DEPLOYMENT_CONFIRMATION_REQUIRED: '交互部署需要 TTY 中确认一次；非交互请先 --plan，再使用 --confirm-plan。',
       DEPLOYMENT_CONFIRMATION_EOF: '确认输入已结束，未执行部署。',
       DEPLOYMENT_CONFIRMATION_CANCELLED: '确认已取消，未执行部署。',
       DEPLOYMENT_PLAN_CHANGED: 'DEPLOYMENT_PLAN_CHANGED：计划输入已发生变化，请重新 --plan；未执行部署。',
       DEPLOYMENT_API_PORT_OCCUPIED: 'API 端口已被非本安装服务占用，拒绝接管。',
-      DEPLOYMENT_DATABASE_PORT_OCCUPIED: '数据库端口已被非本安装服务占用，拒绝接管。',
-      DEPLOYMENT_MANAGED_DATABASE_STOPPED: '已记录的受管 PostgreSQL 当前停止；只读计划不会启动它，请在终端一次确认后运行 install/upgrade。',
-      DEPLOYMENT_MANAGED_DATABASE_OWNERSHIP_UNVERIFIED: '已记录的 PostgreSQL 容器、镜像、端口或数据卷不能完整核验为已停止的本安装资源；拒绝启动或接管。',
-      MANAGED_POSTGRES_IDENTITY_INVALID: '刚启动的受管 PostgreSQL 缺少有效的固定目标身份，未连接数据库。',
-      MANAGED_POSTGRES_IDENTITY_CHANGED: '受管 PostgreSQL 的容器、镜像、归属、端口或读写数据卷发生变化；已停止等待，未重试认证。',
-      MANAGED_POSTGRES_STOPPED: '受管 PostgreSQL 在就绪前已停止；未重试数据库连接。',
-      MANAGED_POSTGRES_HEALTH_UNKNOWN: '无法读取受管 PostgreSQL 健康状态；未假定就绪或重试连接。',
-      MANAGED_POSTGRES_UNHEALTHY: '受管 PostgreSQL 健康检查报告失败；未重试数据库连接。',
-      MANAGED_POSTGRES_READINESS_TIMEOUT: '受管 PostgreSQL 在有界等待时间内未就绪；未重试数据库连接。',
-      MANAGED_POSTGRES_WAIT_CANCELLED: '等待受管 PostgreSQL 时收到中断请求；未重试数据库连接，已保留可核对状态。',
-      DEPLOYMENT_SECRET_INVALID: '本安装数据库密码文件不是受限普通文件，或权限、归属不符。',
-      DATABASE_PASSWORD_FILE_INVALID: '本安装数据库密码文件不是受限普通文件，或权限、归属不符。',
-      DATABASE_PROBE_INVALID: '已有数据库探测响应无效，无法确认目标。',
       DEPLOYMENT_DATABASE_OUTPUT_INVALID: '数据管理命令响应无效，无法确认数据库事实。',
       DEPLOYMENT_DATA_COMMIT_UNCONFIRMED: '数据库提交结果未获确认，应用不会激活。',
-      DEPLOYMENT_POSTGRES_TOOL_IMAGE_MISSING: '缺少已记录的 PostgreSQL 探测镜像，拒绝更换目标工具。',
-      DEPLOYMENT_POSTGRES_TOOL_IMAGE_INVALID: 'PostgreSQL 探测镜像身份无效。',
+      'DEPLOYMENT_DATABASE_FAIL:REQUEST_INVALID': 'SQLite 数据请求无效，未执行写入。',
+      'DEPLOYMENT_DATABASE_FAIL:REQUEST_OR_DATA_INVALID': '数据库资料处理失败，未确认写入；安全响应无法确定更具体原因。',
       DEPLOYMENT_PLAN_MODE_CONFLICT: '--plan 与 --confirm-plan 不能同时使用。',
       DEPLOYMENT_NOT_INSTALLED: '尚未安装，不能 upgrade。',
       DEPLOYMENT_INSTALL_STATE_INVALID: '安装状态记录无效，拒绝操作。',
@@ -726,7 +482,7 @@ export async function runLocal(argv) {
       DEPLOYMENT_OPERATION_CANCELLED: '收到中断请求；部署已取消，已保留可核对的状态。',
       SOURCE_NETWORK_ENVIRONMENT_INVALID: '本机继承的来源代理环境无法安全解析，未继续下载。',
       SOURCE_NETWORK_ENVIRONMENT_CHANGED: '确认后来源连接环境已变化，拒绝使用变更后的连接输入。',
-      SOURCE_BASE_IMAGE_UNAVAILABLE: '官方 Java 25 或 PostgreSQL 17 基础镜像不可用，拒绝继续构建。',
+      SOURCE_BASE_IMAGE_UNAVAILABLE: '官方 Java 25 基础镜像不可用，拒绝继续构建。',
       SOURCE_BASE_IMAGE_INVALID: '本机官方基础镜像无法核验为 linux/arm64 的目标主版本。',
       SOURCE_BASE_IMAGE_CHANGED: '基础镜像引用在核验期间发生变化，拒绝继续构建。',
       EXTENSION_IDENTITY_MISMATCH: 'EXTENSION_IDENTITY_MISMATCH：扩展构建身份或 API 端口与本次计划不符；停止后续部署，请保持源码稳定后重新运行。',
@@ -753,24 +509,17 @@ export async function runLocal(argv) {
       JAVA_PROBE_EXIT: 'Java 版本检查失败，未执行部署。',
       JAVA_PROBE_START_FAILED: '无法启动 Java 版本检查，未执行部署。',
       'DEPLOYMENT_DATABASE_BLOCKED:DATABASE_UNAVAILABLE': '无法连接或认证目标数据库；不能区分网络与账号原因。',
-      'DEPLOYMENT_DATABASE_BLOCKED:AUTHORIZATION_FAILED': '目标用户、schema 所有权或 CREATE 权限校验失败。',
-      'DEPLOYMENT_DATABASE_BLOCKED:POSTGRES_17_REQUIRED': '目标数据库不是 PostgreSQL 17。',
-      'DEPLOYMENT_DATABASE_BLOCKED:SCHEMA_OWNER_MISMATCH': '目标 schema 所有者与已记录用户不符。',
-      'DEPLOYMENT_DATABASE_BLOCKED:SCHEMA_CREATE_PERMISSION_REQUIRED': '目标用户缺少 schema CREATE 权限。',
       'DEPLOYMENT_DATABASE_BLOCKED:FINGERPRINT_DRIFT': '确认后的数据库观测发生变化，拒绝写入。',
-      'DEPLOYMENT_DATABASE_BLOCKED:CROSS_SCHEMA_DEPENDENCY': '目标 schema 存在跨 schema 依赖，拒绝重建。',
-      'DEPLOYMENT_DATABASE_FAIL:REQUEST_INVALID': '数据库请求内容无效，未执行写入。',
-      'DEPLOYMENT_DATABASE_FAIL:REQUEST_OR_DATA_INVALID': '数据库资料处理失败，未确认写入；安全响应无法确定更具体原因。',
     };
-    const commandStages = ['编译 Java 应用', '安装扩展依赖', '构建 Chrome 扩展', '构建 API 镜像', '构建 PostgreSQL 镜像', '构建词库工具镜像',
-      '拉取 Java 25 基础镜像', '拉取 PostgreSQL 17 基础镜像', '下载、校验并精简 ECDICT', '校验资料与 PostgreSQL', '提交资料到 PostgreSQL', '检查 PostgreSQL 目标'];
+    const commandStages = ['编译 Java 应用', '安装扩展依赖', '构建 Chrome 扩展', '构建 API 镜像', '构建词库工具镜像',
+      '拉取 Java 25 基础镜像', '下载、校验并精简 ECDICT', '校验 SQLite 资料文件', '提交资料到 SQLite 文件', '检查 SQLite 数据库文件'];
     const commandStage = commandStages.find(label => code.startsWith(`${label}失败`) || code.startsWith(`${label}无法启动`));
     const javaCode = code.split('：', 1)[0];
     const message = known[code] ?? (javaCode.startsWith('JAVA_') && known[javaCode] ? `${javaCode}：${known[javaCode]}` : undefined) ?? (code === help ? `参数不受支持；${help}`
       : code.includes('收到中断请求') || code.startsWith('安装已取消') ? '收到中断请求；部署已取消，已保留可核对的状态。'
       : code.startsWith('API 就绪等待超时') ? 'API 就绪等待超时；数据若已提交将保留，不能误报部署成功。'
         : code.startsWith('API 响应协议或软件版本不匹配') ? 'API 响应协议或软件版本不匹配；数据若已提交将保留。'
-      : code.startsWith('DEPLOYMENT_DATABASE_BLOCKED:') ? '数据库检查被阻断；请核对连接、PostgreSQL 17 和 schema 权限。'
+      : code.startsWith('DEPLOYMENT_DATABASE_BLOCKED:') ? 'SQLite 数据库文件检查被阻断；不会自动创建或清空文件。'
         : commandStage ? `${commandStage}失败；可检查本安装运行日志、工具与运行环境。`
           : ['install', 'upgrade'].includes(action) ? '部署检查或执行失败（UNEXPECTED）；未确认的阶段不视为成功。' : code);
     console.error(`[LexiFlow] ${commandStage ?? step}失败：${message}`); return 1;

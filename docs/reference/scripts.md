@@ -58,7 +58,7 @@
 | 仓库治理 CLI | [`check_documentation.py`](../../scripts/checks/repository/documentation/check_documentation.py)、[`check_task_catalog.py`](../../scripts/checks/repository/catalog/check_task_catalog.py)、[`check_python_quality.py`](../../scripts/checks/repository/python/check_python_quality.py) | 分别检查固定 mandatory 文档范围、Catalog 和工程 Python（scripts、ops/release、ops/dataset）的 Ruff check／Ruff format／Pylint 三项静态检查；静态结果不等于语义审阅或正式验收，详见[独立工具](standalone-tools.md) |
 | 仓库治理 CLI | [`manage_local_skill_links.py`](../../scripts/local/manage_local_skill_links.py) | `check` 只读；`link` 显式创建固定 `.agents/skills/` 本机链接，须明确需要时才运行，见[独立工具](standalone-tools.md) |
 | 机器 Check adapter | [`run_repository_check_group.py`](../../scripts/checks/repository/run_repository_check_group.py) · `python3 -m scripts.checks.repository.run_repository_check_group --mode <mode>` | 由模块检查器消费的结构化入口；`<mode>` 限于 `tests`、`docs`、`planning`、`python`，把仓库治理能力转换为 Check 结果，不是普通人工门禁，也不代表正式验收 |
-| 隔离资源与环境库 | [`isolated_postgres_redis.py`](../../scripts/environment/services/isolated_postgres_redis.py)、[`verification_environment.py`](../../scripts/environment/configuration/verification_environment.py)、[`toolchain_identity.py`](../../scripts/environment/toolchains/toolchain_identity.py) | 测试服务 lease／就绪／清理、私有执行环境解析与实际工具链身份识别；不自动安装或修改全局 PATH |
+| 隔离资源与环境库 | [`isolated_redis.py`](../../scripts/environment/services/isolated_redis.py)、[`verification_environment.py`](../../scripts/environment/configuration/verification_environment.py)、[`toolchain_identity.py`](../../scripts/environment/toolchains/toolchain_identity.py) | 测试服务 lease／就绪／清理、私有执行环境解析与实际工具链身份识别；不自动安装或修改全局 PATH |
 | 有副作用的本机入口 | [`start_local_api.py`](../../scripts/local/start_local_api.py)、[`run_with_java_toolchain.py`](../../scripts/local/run_with_java_toolchain.py) | 受控启动 API 或执行 Java 原生命令；启动/停止与精确参数见[本地体验](../scenarios/local-development.md)和[Java 检查](java-checks.md) |
 
 Agent 运行记录内部库包括 [`codex_actor_identity.py`](../../scripts/agents/identity/codex_actor_identity.py)、[`codex_identity_binding.py`](../../scripts/agents/identity/codex_identity_binding.py) 与 [`codex_work_package_publisher.py`](../../scripts/agents/work_packages/codex_work_package_publisher.py)。它们认证原生来源、冻结工作包并发布完成事实，不签发 validation/review；身份与交接见 [Agent workflow](../scenarios/delegate-work.md)。`scripts/checks/tool_tests/run_acceptance_tool_tests.py` 是模块测试 adapter，只运行 Delivery Gate 自身回归，不是产品 Task 验收。
@@ -84,7 +84,7 @@ Agent 运行记录内部库包括 [`codex_actor_identity.py`](../../scripts/agen
 | --- | --- | --- |
 | Check 触发、依赖与冻结输入 | [module-checks](../../config/engineering/module-checks.yaml) | declarations／scope／[Verification 测试](../../tests/verification) |
 | 风险、身份与复用 | [risk.yaml](../../config/engineering/risk.yaml)、[agent-policy](../../harness/agent-policy.md) | risk 的可调路径；独立协作规则；[Gate 测试](../../tests/delivery_gate) |
-| Stop 触发、预算与清理 | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py)、[isolated_postgres_redis.py](../../scripts/environment/services/isolated_postgres_redis.py) | [Hook 回归](../../tests/verification/test_delivery_hook.py) |
+| Stop 触发、预算与清理 | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py)、[isolated_redis.py](../../scripts/environment/services/isolated_redis.py) | [Hook 回归](../../tests/verification/test_delivery_hook.py) |
 | quick 与正式发行集合 | [module-checks 场景策略](../../config/engineering/module-checks.yaml)、[workflows](../../.github/workflows) | [CI 回归](../../tests/verification/test_ci.py) |
 | 图中时间预算 | [执行场景的预算口径](../scenarios/run-repository-gates.md) | 既有成功物理执行样本；估算和实测分开，不靠重跑补数字 |
 
@@ -112,7 +112,7 @@ Agent 运行记录内部库包括 [`codex_actor_identity.py`](../../scripts/agen
 | F15 | [`check_task_catalog.py`](../../scripts/checks/repository/catalog/check_task_catalog.py) | CLI；Catalog静态检查 |
 | F17 | [`run_with_java_toolchain.py`](../../scripts/local/run_with_java_toolchain.py) | CLI；Java工具链入口 |
 | F18 | [`start_local_api.py`](../../scripts/local/start_local_api.py) | CLI；本机API启动 |
-| F19 | [`isolated_postgres_redis.py`](../../scripts/environment/services/isolated_postgres_redis.py) | 内部库；测试资源准备与清理 |
+| F19 | [`isolated_redis.py`](../../scripts/environment/services/isolated_redis.py) | 内部库；测试资源准备与清理 |
 | F20 | [`config/engineering/module-checks.yaml`](../../config/engineering/module-checks.yaml) | 声明；Check触发与依赖 |
 | F22 | [`harness/agent-policy.md`](../../harness/agent-policy.md) | 人类规则；身份与协作边界 |
 | F23 | [`run-release-workflow.mjs`](../../ops/release/workflow/run-release-workflow.mjs) | CLI；发行候选、受控原生验收入口与晋升 |

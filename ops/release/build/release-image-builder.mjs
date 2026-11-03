@@ -201,7 +201,6 @@ export async function buildCandidateImages(input) {
     if (!info || typeof info !== 'object' || Array.isArray(info) || info.OSType !== 'linux'
       || !expectedArch.includes(info.Architecture)) reject('DOCKER_PLATFORM_MISMATCH');
     await inspectJson(['image', 'inspect', selectedPlan.bases.javaRuntime.reference], dockerContext, selectedPlatform, selectedPlan.bases.javaRuntime.imageId);
-    await inspectJson(['image', 'inspect', selectedPlan.bases.postgresRuntime.reference], dockerContext, selectedPlatform, selectedPlan.bases.postgresRuntime.imageId);
     const contexts = await prepareContext({ ...plan, platforms: [selectedPlan] }, repo, artifacts, candidateDirectory);
     const records = await buildOnePlatform(selectedPlan, contexts.get(selectedPlatform), candidateDirectory, dockerContext);
     let currentPlan;

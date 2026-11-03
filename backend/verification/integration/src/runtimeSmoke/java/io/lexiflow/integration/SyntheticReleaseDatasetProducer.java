@@ -1,5 +1,6 @@
 package io.lexiflow.integration;
 
+import io.lexiflow.lexicon.platform.persistence.SqlitePersistence;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -9,7 +10,6 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
-import java.sql.DriverManager;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -45,7 +45,9 @@ public final class SyntheticReleaseDatasetProducer {
     boolean success = false;
     try {
       Map<String, Object> result;
-      try (var fixture = new PipelineRuntimeFixture()) {
+      try (var fixture =
+          new PipelineRuntimeFixture(
+              Files.createTempDirectory("lexiflow-pipeline-").toRealPath())) {
         var approvals = fixture.temp().toRealPath().resolve("approvals.json");
         var firstCsv = PipelineSyntheticSources.canonical(fixture.temp(), "release-a");
         var secondCsv = PipelineSyntheticSources.canonical(fixture.temp(), "release-b");
@@ -123,7 +125,7 @@ public final class SyntheticReleaseDatasetProducer {
         Map.of(),
         Set.of("result"));
     String policy;
-    try (var connection = DriverManager.getConnection(fixture.jdbcUrl());
+    try (var connection = SqlitePersistence.connect(fixture.jdbcUrl());
         var statement = connection.createStatement();
         var rows =
             statement.executeQuery(
@@ -131,7 +133,7 @@ public final class SyntheticReleaseDatasetProducer {
       if (!rows.next()) throw new IOException("published dataset absent");
       policy = rows.getString(1);
     }
-    if (!"lexiflow.deterministic-preparation.v1".equals(policy))
+    if (!"lexiflow.deterministic-preparation.priority-v2".equals(policy))
       throw new IOException("unexpected policy");
     return new PackageResult(archive, hash, version, policy);
   }
@@ -171,7 +173,9 @@ public final class SyntheticReleaseDatasetProducer {
       Files.write(stderrLog, stderr.bytes());
       if (stdout.failed() || stderr.failed())
         throw new IOException("failed to collect command output");
-      if (process.exitValue() != 0) throw new IOException("release command failed");
+      if (process.exitValue() != 0)
+        throw new IOException(
+            "release command failed: " + new String(stdout.bytes(), StandardCharsets.UTF_8));
       if (stdout.truncated() || stderr.truncated())
         throw new IOException("release command output exceeded limit");
       String text = new String(stdout.bytes(), StandardCharsets.UTF_8).strip();
@@ -222,7 +226,7 @@ public final class SyntheticReleaseDatasetProducer {
   }
 
   private static List<Map<String, Object>> publicationSources(String jdbcUrl) throws Exception {
-    try (var connection = DriverManager.getConnection(jdbcUrl);
+    try (var connection = SqlitePersistence.connect(jdbcUrl);
         var statement = connection.createStatement();
         var rows =
             statement.executeQuery(
@@ -284,9 +288,8 @@ public final class SyntheticReleaseDatasetProducer {
   }
 
   private static Preflight preflight(Path output) throws IOException {
-    required("lexiflow.postgres.test.jdbcUrl");
     Path root = Path.of(required("lexiflow.repository.root")).toRealPath();
-    Path schema = Path.of(required("lexiflow.postgres.schema.file"));
+    Path schema = Path.of(required("lexiflow.sqlite.schema.file"));
     Path bootJar = Path.of(required("lexiflow.runtimeSmoke.bootJar"));
     required("lexiflow.runtimeSmoke.classpath");
     if (!Files.isRegularFile(schema, LinkOption.NOFOLLOW_LINKS)

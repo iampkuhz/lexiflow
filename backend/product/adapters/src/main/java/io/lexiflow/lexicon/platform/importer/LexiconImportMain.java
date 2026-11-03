@@ -6,10 +6,12 @@ import io.lexiflow.lexicon.application.importing.LexiconImportPreparation;
 import io.lexiflow.lexicon.application.importing.LexiconImportService;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
+import io.lexiflow.lexicon.application.importing.policy.ClassificationPolicy;
 import io.lexiflow.lexicon.application.port.LexiconImportObserver;
 import io.lexiflow.lexicon.application.port.LexiconRepository;
+import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.platform.persistence.GenerationIdentityReader;
-import io.lexiflow.lexicon.platform.persistence.PostgresPersistence;
+import io.lexiflow.lexicon.platform.persistence.SqlitePersistence;
 import io.lexiflow.observability.platform.LexiconEventObserver;
 import io.lexiflow.observability.platform.StructuredEventLogger;
 import java.io.IOException;
@@ -85,7 +87,7 @@ public final class LexiconImportMain {
               "--input",
               input.toString(),
               "--database-url",
-              "jdbc:postgresql://invalid/unused",
+              "jdbc:sqlite://invalid/unused",
               "--batch-source-id",
               sourceId,
               "--batch-license-id",
@@ -115,7 +117,7 @@ public final class LexiconImportMain {
               "--input",
               input.toString(),
               "--database-url",
-              "jdbc:postgresql://invalid/unused",
+              "jdbc:sqlite://invalid/unused",
               "--batch-source-id",
               "ecdict-stardict",
               "--batch-license-id",
@@ -330,7 +332,7 @@ public final class LexiconImportMain {
           "PASS format=lexiflow-lexicon-v1 published_version=%d entries=%d source_sha256=%s%n",
           version, inspection.counts().entries(), digest);
     } else
-      try (var persistence = PostgresPersistence.open(command.databaseUrl())) {
+      try (var persistence = SqlitePersistence.open(command.databaseUrl())) {
         var version =
             new LexiconImportService(persistence.repository())
                 .publishStreaming(
@@ -426,7 +428,7 @@ public final class LexiconImportMain {
           preflight.inspection().counts().entries(),
           digest);
     } else
-      try (var persistence = PostgresPersistence.open(command.databaseUrl())) {
+      try (var persistence = SqlitePersistence.open(command.databaseUrl())) {
         progress.accept("事务内第二遍读取、批量写入与发布");
         var version =
             new LexiconImportService(persistence.repository())
@@ -570,7 +572,12 @@ public final class LexiconImportMain {
         value ->
             System.out.printf(
                 "%d\t%.2f\t%d\t%s%n",
-                value.entry().priority().memoryPriority(),
+                ClassificationPolicy.publishedPriority(
+                    value.row(),
+                    value.prepared().classification(),
+                    value.prepared().gloss() == null
+                        ? LexiconHintAction.BLOCK
+                        : LexiconHintAction.HINT),
                 value.entry().priority().frequencyZipf(),
                 value.entry().priority().complexListCount(),
                 value.entry().lemma()));

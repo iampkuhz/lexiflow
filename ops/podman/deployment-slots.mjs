@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import { acquireProcessLock } from './execution/installation-operation-lock.mjs';
 
 const slots = Object.freeze({
-  source: Object.freeze({ apiPort: 18081, dbPort: 15432, directory: '.local/podman', imageNamespace: 'lexiflow' }),
-  releaseValidation: Object.freeze({ apiPort: 18080, dbPort: 15433,
+  source: Object.freeze({ apiPort: 18081, directory: '.local/podman', imageNamespace: 'lexiflow' }),
+  releaseValidation: Object.freeze({ apiPort: 18080,
     directory: '.local/podman-release-validation', imageNamespace: 'lexiflow-release-validation' }),
 });
 

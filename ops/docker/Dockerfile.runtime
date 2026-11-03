@@ -1,49 +1,38 @@
 ARG JAVA_RUNTIME_IMAGE
-ARG POSTGRES_RUNTIME_IMAGE
-FROM ${JAVA_RUNTIME_IMAGE} AS java-runtime
+FROM ${JAVA_RUNTIME_IMAGE} AS notice-files
+COPY notices/ /notices/
+RUN find /notices -type d -exec chmod 0555 {} + \
+    && find /notices -type f -exec chmod 0444 {} +
 
-FROM ${POSTGRES_RUNTIME_IMAGE} AS runtime
-
-COPY --from=java-runtime /opt/java/openjdk /opt/java/openjdk
-ENV PATH="/opt/java/openjdk/bin:${PATH}" \
-    PGDATA=/var/lib/lexiflow/postgres \
-    LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8
-
+FROM ${JAVA_RUNTIME_IMAGE}
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    SPRING_DATASOURCE_URL=jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro
 LABEL io.lexiflow.image-role="runtime" \
       org.opencontainers.image.title="LexiFlow" \
-      org.opencontainers.image.description="Single-container LexiFlow API and PostgreSQL runtime"
-
+      org.opencontainers.image.description="Single-container LexiFlow Java 25 API and SQLite runtime"
 WORKDIR /app
-RUN mkdir -p /var/lib/lexiflow /run/lexiflow /app/notices \
-    && chown postgres:postgres /var/lib/lexiflow /run/lexiflow \
-    && chmod 0700 /var/lib/lexiflow /run/lexiflow \
-    && test -x /usr/bin/timeout \
-    && test -x /usr/bin/sha256sum \
-    && command -v pg_isready >/dev/null \
-    && command -v initdb >/dev/null \
-    && command -v postgres >/dev/null \
-    && test -x /opt/java/openjdk/bin/java
-
-COPY --chown=postgres:postgres --chmod=0444 lexiflow-api.jar /app/lexiflow-api.jar
-COPY --chown=postgres:postgres --chmod=0444 dataset.zip /app/dataset.zip
-COPY --chown=postgres:postgres --chmod=0444 release-identity.json /app/release-identity.json
-COPY --chown=postgres:postgres --chmod=0444 release-identity.env /app/release-identity.env
-COPY --chown=postgres:postgres --chmod=0444 schema.sql /app/schema.sql
-COPY --chown=postgres:postgres --chmod=0555 runtime-entrypoint.sh /app/runtime-entrypoint.sh
-COPY --chown=postgres:postgres notices/ /app/notices/
-RUN chmod -R a-w /app/notices \
-    && test -s /app/lexiflow-api.jar \
+RUN test -x /bin/bash && test -x /usr/bin/timeout && test -x /usr/bin/env \
+    && test -x /opt/java/openjdk/bin/java \
+    && ! getent passwd 10001 >/dev/null \
+    && useradd --uid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin lexiflow \
+    && install -d -o 10001 -g 10001 -m 0700 /var/lib/lexiflow /run/lexiflow \
+    && install -d -o 10001 -g 10001 -m 0555 /app/notices
+COPY --chown=10001:10001 --chmod=0444 lexiflow-api.jar /app/lexiflow-api.jar
+COPY --chown=10001:10001 --chmod=0444 dataset.zip /app/dataset.zip
+COPY --chown=10001:10001 --chmod=0444 release-identity.json /app/release-identity.json
+COPY --chown=10001:10001 --chmod=0444 release-identity.env /app/release-identity.env
+COPY --chown=10001:10001 --chmod=0555 runtime-entrypoint.sh /app/runtime-entrypoint.sh
+COPY --from=notice-files --chown=10001:10001 /notices/ /app/notices/
+RUN test -s /app/lexiflow-api.jar \
     && test -s /app/dataset.zip \
-    && test -s /app/schema.sql \
     && test -s /app/release-identity.json \
     && test -s /app/release-identity.env \
-    && test -d /app/notices \
-    && chown -R postgres:postgres /app/notices
-
-USER postgres
+    && test -d /app/notices
+USER 10001:10001
 EXPOSE 8080
 VOLUME ["/var/lib/lexiflow"]
+VOLUME ["/run/lexiflow"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
   CMD ["/app/runtime-entrypoint.sh", "health"]
 STOPSIGNAL SIGTERM

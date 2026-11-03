@@ -2,10 +2,10 @@
 
 import os
 import pathlib
-import sys
-import subprocess
 import shlex
 import signal
+import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -99,7 +99,7 @@ class DockerBoundsTest(unittest.TestCase):
         )
         self.stub(
             "docker",
-            '/bin/sleep 0.1\nprintf "secret stdout\\n"; printf "secret stderr\\n" >&2; exit 17\n',
+            '/bin/sleep 0.1\nprintf "private stdout\\n"; printf "private stderr\\n" >&2; exit 17\n',
         )
         result = self.run_shell("lf_docker info --format fixed")
         self.assertNotEqual(result.returncode, 0)
@@ -527,7 +527,7 @@ class DockerBoundsTest(unittest.TestCase):
             (0, b"unix:///synthetic.sock\n", b""),
         )
         self.assertIn("context inspect", log.read_text())
-        self.stub("docker", 'printf "secret\\n"; exit 7\n')
+        self.stub("docker", 'printf "private\\n"; exit 7\n')
         result = self.run_shell(
             "unset LF_DOCKER_ENDPOINT\nlf_docker_endpoint",
             env={"DOCKER_CONTEXT": "safe"},
@@ -616,7 +616,7 @@ class DockerBoundsTest(unittest.TestCase):
                 "LF_INSTALL_ID": "d" * 32,
                 "LF_PLATFORM": "linux/amd64",
                 "LF_API_IMAGE": "sha256:" + "e" * 64,
-                "LF_POSTGRES_IMAGE": "sha256:" + "f" * 64,
+                "LF_SQLITE_FILE": "/var/lib/lexiflow/lexicon.db",
                 "LF_DATASET_SHA256": "1" * 64,
                 "LF_PROJECT": "lf_" + "d" * 32 + "_" + "b" * 16,
                 "BUDGET_LOG": str(budget_log),
@@ -625,7 +625,7 @@ class DockerBoundsTest(unittest.TestCase):
             },
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(budget_log.read_bytes().splitlines(), [b"30", b"600", b"30"])
+        self.assertEqual(budget_log.read_bytes().splitlines(), [b"30", b"600", b"600"])
         self.assertFalse(list(self.tmp.iterdir()))
 
 

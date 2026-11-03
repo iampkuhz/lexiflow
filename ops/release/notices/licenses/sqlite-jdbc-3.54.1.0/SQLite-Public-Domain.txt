@@ -1,0 +1,1 @@
+SQLite core is in the public domain. Source: https://www.sqlite.org/copyright.html

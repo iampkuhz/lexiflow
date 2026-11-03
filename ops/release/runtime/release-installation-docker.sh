@@ -40,8 +40,7 @@ lf_docker_run() (
   trap 'exit 130' INT
   trap 'exit 143' TERM
   (: > "$dir/stdout" && : > "$dir/stderr" && printf 1 > "$dir/running") 2>/dev/null || exit 1
-  # Keep stdin on fd 3 because POSIX shells may replace asynchronous children'
-  # stdin with /dev/null. Only explicitly designated private-file calls inherit it.
+  # Keep child stdin closed; release images and embedded dataset need no private transfer stream.
   exec 3<&0 2>/dev/null || :
   (
     # POSIX Shell 的 -f 单位在目标平台不同；512 在 macOS/Linux 都更保守。
@@ -327,227 +326,14 @@ lf_docker_preflight_observe() {
   case "$arch" in x86_64|amd64) LF_HOST_PLATFORM=linux/amd64;; aarch64|arm64) LF_HOST_PLATFORM=linux/arm64;; *) return 1;; esac
   return 0
 }
-# Validate secret inputs without ever loading their contents into shell state.
-lf_private_secret_check() {
-  local file="$1" mode bytes
-  [ -f "$file" ] && [ ! -L "$file" ] || return 1
-  mode=$(stat -c '%a' "$file" 2>/dev/null || stat -f '%Lp' "$file" 2>/dev/null) || return 1
-  [ "$mode" = 600 ] || return 1
-  bytes=$(wc -c < "$file" 2>/dev/null) || return 1
-  bytes=$(printf '%s' "$bytes" | tr -d ' ') || return 1
-  [ "$bytes" = 64 ] || return 1
-  LC_ALL=C grep -Eqx '[0-9a-f]{64}' "$file"
-}
-lf_private_sources_check() {
-  local dir="$LF_ROOT/releases/$LF_CURRENT_KEY" file
-  [ -d "$LF_ROOT" ] && [ ! -L "$LF_ROOT" ] || return 1
-  [ -d "$LF_ROOT/releases" ] && [ ! -L "$LF_ROOT/releases" ] || return 1
-  [ -d "$dir" ] && [ ! -L "$dir" ] || return 1
-  lf_private_secret_check "$dir/postgres-password" || return 1
-  lf_private_secret_check "$dir/app-password" || return 1
-  case "$LF_DATASET_BYTES" in ''|*[!0-9]*|0|0*) return 1;; esac
-  [ "${#LF_DATASET_BYTES}" -le 10 ] && [ "$LF_DATASET_BYTES" -le 3221225472 ] || return 1
-  file="$LF_RELEASE_ROOT/$LF_DATASET_PATH"
-  lf_check_file "$LF_DATASET_PATH" "$LF_DATASET_BYTES" "$LF_DATASET_SHA256" || return 1
-  [ -f "$file" ] && [ ! -L "$file" ] || return 1
-}
-lf_transfer_journal_check() {
-  local file="${1:-$LF_ROOT/releases/$LF_CURRENT_KEY/.private-file-transfer}" mode bytes digest volume uuid extra schema installation release uuid_value s1 s2 s3 s4 s5 s6
-  [ -f "$file" ] && [ ! -L "$file" ] || return 1
-  [ "$(stat -c '%a' "$file" 2>/dev/null || stat -f '%Lp' "$file" 2>/dev/null)" = 600 ] || return 1
-  [ "$(stat -c '%h' "$file" 2>/dev/null || stat -f '%l' "$file" 2>/dev/null)" = 1 ] || return 1
-  [ "$(wc -c < "$file" | tr -d ' ')" -le 1024 ] || return 1
-  {
-    IFS= read -r schema || return 1
-    IFS= read -r installation || return 1
-    IFS= read -r release || return 1
-    IFS= read -r volume || return 1
-    IFS= read -r mode || return 1
-    IFS= read -r uuid || return 1
-    IFS= read -r bytes || return 1
-    IFS= read -r digest || return 1
-    if IFS= read -r extra; then return 1; fi
-  } < "$file"
-  [ "$schema" = schema=lexiflow-private-transfer-v1 ] || return 1
-  [ "$installation" = "installation=$LF_INSTALL_ID" ] || return 1
-  [ "$release" = "release=$LF_CURRENT_KEY" ] || return 1
-  case "$mode:$volume" in
-    mode=pg64hex:volume="${LF_PROJECT}_postgres-secret"|mode=app64hex:volume="${LF_PROJECT}_app-secret"|mode=zip:volume="${LF_PROJECT}_dataset") ;;
-    *) return 1;;
-  esac
-  case "$uuid" in uuid=????????-????-????-????-????????????) ;; *) return 1;; esac
-  uuid_value=${uuid#uuid=}
-  IFS=- read -r s1 s2 s3 s4 s5 s6 <<EOF_TRANSFER_UUID
-$uuid_value
-EOF_TRANSFER_UUID
-  [ -z "$s6" ] || return 1
-  for extra in "$s1" "$s2" "$s3" "$s4" "$s5"; do
-    case "$extra" in *[!0123456789abcdef]*|'') return 1;; esac
-  done
-  case "$bytes" in bytes=*) bytes=${bytes#bytes=};; *) return 1;; esac
-  case "$bytes" in ''|*[!0-9]*|0|0*) return 1;; esac
-  case "$digest" in sha256=*) digest=${digest#sha256=};; *) return 1;; esac
-  case "$digest" in *[!0123456789abcdef]*|'') return 1;; esac
-  [ "${#digest}" -eq 64 ] || return 1
-  LF_TRANSFER_JOURNAL_VOLUME=${volume#volume=}
-  LF_TRANSFER_JOURNAL_MODE=${mode#mode=}
-  LF_TRANSFER_JOURNAL_UUID=${uuid#uuid=}
-  LF_TRANSFER_JOURNAL_BYTES=$bytes
-  LF_TRANSFER_JOURNAL_SHA256=$digest
-}
-lf_transfer_journal_begin() {
-  local mode="$1" volume="$2" bytes="$3" digest="$4" file="$LF_ROOT/releases/$LF_CURRENT_KEY/.private-file-transfer" existing_uuid raw tmp
-  if [ -e "$file" ] || [ -L "$file" ]; then
-    [ ! -L "$file" ] || return 1
-    lf_transfer_journal_check || return 1
-    [ "$LF_TRANSFER_JOURNAL_VOLUME" = "$volume" ] && [ "$LF_TRANSFER_JOURNAL_MODE" = "$mode" ] && \
-      [ "$LF_TRANSFER_JOURNAL_BYTES" = "$bytes" ] && [ "$LF_TRANSFER_JOURNAL_SHA256" = "$digest" ] || return 1
-    LF_TRANSFER_UUID=$LF_TRANSFER_JOURNAL_UUID
-    return 0
-  fi
-  raw=$(lf_random_hex 16) || return 1
-  case "$raw" in *[!0123456789abcdef]*|'') return 1;; esac
-  [ "${#raw}" -eq 32 ] || return 1
-  LF_TRANSFER_UUID=$(printf '%s-%s-%s-%s-%s' "$(printf '%s' "$raw" | cut -c1-8)" "$(printf '%s' "$raw" | cut -c9-12)" "$(printf '%s' "$raw" | cut -c13-16)" "$(printf '%s' "$raw" | cut -c17-20)" "$(printf '%s' "$raw" | cut -c21-32)")
-  tmp="$LF_ROOT/releases/$LF_CURRENT_KEY/.private-file-transfer-$LF_LOCK_TOKEN"
-  [ ! -e "$tmp" ] && [ ! -L "$tmp" ] || return 1
-  (umask 077; set -C; printf 'schema=lexiflow-private-transfer-v1\ninstallation=%s\nrelease=%s\nvolume=%s\nmode=%s\nuuid=%s\nbytes=%s\nsha256=%s\n' \
-    "$LF_INSTALL_ID" "$LF_CURRENT_KEY" "$volume" "$mode" "$LF_TRANSFER_UUID" "$bytes" "$digest" > "$tmp") 2>/dev/null || return 1
-  [ "$(stat -c '%a' "$tmp" 2>/dev/null || stat -f '%Lp' "$tmp" 2>/dev/null)" = 600 ] || { rm -f "$tmp"; return 1; }
-  lf_lock_check || { rm -f "$tmp"; return 1; }
-  mv "$tmp" "$file" || { rm -f "$tmp"; return 1; }
-  lf_transfer_journal_check
-}
-lf_transfer_journal_remove() {
-  local file="$LF_ROOT/releases/$LF_CURRENT_KEY/.private-file-transfer"
-  [ -f "$file" ] && [ ! -L "$file" ] || return 1
-  lf_transfer_journal_check || return 1
-  lf_lock_check && lf_transfer_journal_check || return 1
-  rm "$file" || return 1
-  [ ! -e "$file" ] && [ ! -L "$file" ]
-}
-lf_compose() (
-  set +x
-  lf_lock_check && lf_docker_endpoint || exit 1
-  case "$LF_ROOT:$LF_CURRENT_KEY" in /*:????????????????????????????????????????????????????????????????) ;; *) exit 1;; esac
-  lf_docker_identity_check || exit 1
-  if [ "$#" -eq 6 ] && [ "$1" = run ] && [ "$2" = --rm ] && [ "$3" = --no-deps ] && [ "$4" = --name ] && [ "$5" = "${LF_PROJECT}-initialize-1" ] && [ "$6" = initialize ]; then
-    budget=600
-  else budget=30; fi
-  if lf_docker_run "$budget" env -i "PATH=${PATH:-/usr/bin:/bin}" "HOME=${HOME:-}" "DOCKER_CONFIG=${DOCKER_CONFIG:-}" LC_ALL=C \
-    "LEXIFLOW_PLATFORM=$LF_PLATFORM" "LEXIFLOW_API_IMAGE=$LF_API_IMAGE" "LEXIFLOW_POSTGRES_IMAGE=$LF_POSTGRES_IMAGE" \
-    "LEXIFLOW_DATASET_SHA256=$LF_DATASET_SHA256" "LEXIFLOW_INSTALLATION_ID=$LF_INSTALL_ID" "LEXIFLOW_RELEASE_KEY=$LF_CURRENT_KEY" \
-    docker --host "$LF_DOCKER_ENDPOINT" compose --project-name "$LF_PROJECT" --project-directory "$LF_RELEASE_ROOT" \
-    --env-file /dev/null -f "$LF_RELEASE_ROOT/$LF_COMPOSE_PATH" "$@" >/dev/null 2>&1; then status=0; else status=$?; fi
-  lf_docker_identity_check || exit 1
-  [ "$status" -eq 0 ]
-)
-lf_private_volumes_ensure() (
-  set +x
-  local volume name listed output
-  for volume in postgres-secret app-secret dataset; do
-    name="${LF_PROJECT}_$volume"
-    lf_operation_preflight || exit 1
-    listed=no
-    while IFS='|' read -r _ entry extra; do
-      [ -n "$_$entry$extra" ] || continue
-      [ -z "$extra" ] || exit 1
-      if [ "$entry" = "$name" ]; then listed=yes; fi
-    done <<EOF_PRIVATE_VOLUME_LIST
-$LF_OP_VOLUMES
-EOF_PRIVATE_VOLUME_LIST
-    if [ "$listed" = no ]; then
-      # Only the internal fixed role/name/labels may be created; caller values
-      # never select the resource or labels. A subsequent preflight and inspect
-      # binds the created volume before any stdin payload is sent.
-      lf_operation_preflight || exit 1
-      output=$(lf_docker volume create \
-        --label "com.docker.compose.project=$LF_PROJECT" \
-        --label "lexiflow.installation=$LF_INSTALL_ID" \
-        --label "lexiflow.release=$LF_CURRENT_KEY" "$name" 2>/dev/null) || exit 1
-      [ "$output" = "$name" ] || exit 1
-      lf_operation_preflight || exit 1
-      lf_removal_owned volume "$name" "$name" || exit 1
-    else
-      lf_removal_owned volume "$name" "$name" || exit 1
-    fi
-  done
-  lf_operation_preflight || exit 1
-  lf_operation_volume_labels || exit 1
-)
-lf_private_import() (
-  set +x
-  local mode="$1" volume="$2" source="$3" bytes="$4" digest="$5" args
-  lf_operation_preflight || exit 1
-  lf_private_volumes_ensure || exit 1
-  lf_transfer_journal_begin "$mode" "$volume" "$bytes" "$digest" || exit 1
-  lf_operation_preflight && lf_transfer_journal_check || exit 1
-  [ "$LF_TRANSFER_JOURNAL_UUID" = "$LF_TRANSFER_UUID" ] || exit 1
-  if [ "$mode" = zip ]; then
-    { cat -- "$source"; } |
-      lf_docker_run 600 --stdin-fd3 env -i "PATH=${PATH:-/usr/bin:/bin}" "HOME=${HOME:-}" "DOCKER_CONFIG=${DOCKER_CONFIG:-}" LC_ALL=C \
-        "LEXIFLOW_PLATFORM=$LF_PLATFORM" "LEXIFLOW_API_IMAGE=$LF_API_IMAGE" "LEXIFLOW_POSTGRES_IMAGE=$LF_POSTGRES_IMAGE" \
-        "LEXIFLOW_DATASET_SHA256=$LF_DATASET_SHA256" "LEXIFLOW_INSTALLATION_ID=$LF_INSTALL_ID" "LEXIFLOW_RELEASE_KEY=$LF_CURRENT_KEY" \
-        docker --host "$LF_DOCKER_ENDPOINT" compose --project-name "$LF_PROJECT" --project-directory "$LF_RELEASE_ROOT" \
-        --env-file /dev/null -f "$LF_RELEASE_ROOT/$LF_COMPOSE_PATH" run --rm --no-deps -T \
-        --name "${LF_PROJECT}-private-file-importer" private-file-importer "$mode" "$LF_TRANSFER_UUID" "$bytes" "$digest" >/dev/null 2>&1 || exit 1
-  else
-    { printf '%s\n' "$digest"; cat -- "$source"; } |
-      lf_docker_run 600 --stdin-fd3 env -i "PATH=${PATH:-/usr/bin:/bin}" "HOME=${HOME:-}" "DOCKER_CONFIG=${DOCKER_CONFIG:-}" LC_ALL=C \
-        "LEXIFLOW_PLATFORM=$LF_PLATFORM" "LEXIFLOW_API_IMAGE=$LF_API_IMAGE" "LEXIFLOW_POSTGRES_IMAGE=$LF_POSTGRES_IMAGE" \
-        "LEXIFLOW_DATASET_SHA256=$LF_DATASET_SHA256" "LEXIFLOW_INSTALLATION_ID=$LF_INSTALL_ID" "LEXIFLOW_RELEASE_KEY=$LF_CURRENT_KEY" \
-        docker --host "$LF_DOCKER_ENDPOINT" compose --project-name "$LF_PROJECT" --project-directory "$LF_RELEASE_ROOT" \
-        --env-file /dev/null -f "$LF_RELEASE_ROOT/$LF_COMPOSE_PATH" run --rm --no-deps -T \
-        --name "${LF_PROJECT}-private-file-importer" private-file-importer "$mode" "$LF_TRANSFER_UUID" >/dev/null 2>&1 || exit 1
-  fi
-  lf_operation_preflight || exit 1
-  lf_operation_absent "${LF_PROJECT}-private-file-importer" || exit 1
-  lf_operation_volume_labels || exit 1
-  lf_transfer_journal_remove || exit 1
-)
-lf_private_files_import() {
-  local dir="$LF_ROOT/releases/$LF_CURRENT_KEY" dataset="$LF_RELEASE_ROOT/$LF_DATASET_PATH" pg_hash app_hash journal
-  lf_private_sources_check || return 1
-  pg_hash=$(lf_sha256 "$dir/postgres-password") || return 1
-  app_hash=$(lf_sha256 "$dir/app-password") || return 1
-  case "$pg_hash:$app_hash" in *[!0123456789abcdef:]*|:*|*:) return 1;; esac
-  [ "${#pg_hash}" -eq 64 ] && [ "${#app_hash}" -eq 64 ] || return 1
-  journal="$dir/.private-file-transfer"
-  if [ -e "$journal" ] || [ -L "$journal" ]; then
-    # Replay the authenticated interrupted mode before starting the fixed
-    # sequence. A different source, owner or unknown journal is never erased.
-    lf_transfer_journal_check "$journal" || return 1
-    case "$LF_TRANSFER_JOURNAL_MODE:$LF_TRANSFER_JOURNAL_VOLUME:$LF_TRANSFER_JOURNAL_BYTES:$LF_TRANSFER_JOURNAL_SHA256" in
-      "pg64hex:${LF_PROJECT}_postgres-secret:64:$pg_hash")
-        lf_private_import pg64hex "${LF_PROJECT}_postgres-secret" "$dir/postgres-password" 64 "$pg_hash" || return 1 ;;
-      "app64hex:${LF_PROJECT}_app-secret:64:$app_hash")
-        lf_private_import app64hex "${LF_PROJECT}_app-secret" "$dir/app-password" 64 "$app_hash" || return 1 ;;
-      "zip:${LF_PROJECT}_dataset:$LF_DATASET_BYTES:$LF_DATASET_SHA256")
-        lf_private_import zip "${LF_PROJECT}_dataset" "$dataset" "$LF_DATASET_BYTES" "$LF_DATASET_SHA256" || return 1 ;;
-      *) return 1 ;;
-    esac
-  fi
-  lf_private_import pg64hex "${LF_PROJECT}_postgres-secret" "$dir/postgres-password" 64 "$pg_hash" || return 1
-  lf_private_import app64hex "${LF_PROJECT}_app-secret" "$dir/app-password" 64 "$app_hash" || return 1
-  lf_private_import zip "${LF_PROJECT}_dataset" "$dataset" "$LF_DATASET_BYTES" "$LF_DATASET_SHA256" || return 1
-  lf_operation_preflight && lf_operation_volume_labels
-}
-lf_private_files_verify() {
-  lf_operation_temp_cleanup || return 1
-  lf_operation_preflight || return 1
-  lf_operation_volume_labels all || return 1
-  lf_private_files_import
-}
 lf_docker_import() {
-  local api_identity database_identity architecture
+  local api_identity architecture
   lf_docker_preflight || return 1
   [ "$LF_HOST_PLATFORM" = "$LF_PLATFORM" ] || return 1
   case "$LF_PLATFORM" in linux/amd64) architecture=amd64;; linux/arm64) architecture=arm64;; *) return 1;; esac
   lf_docker load -i "$LF_RELEASE_ROOT/$LF_API_ARCHIVE" >/dev/null 2>&1 || return 1
-  lf_docker load -i "$LF_RELEASE_ROOT/$LF_POSTGRES_ARCHIVE" >/dev/null 2>&1 || return 1
   api_identity=$(lf_docker image inspect --format '{{.Id}}|{{.Os}}|{{.Architecture}}' "$LF_API_IMAGE" 2>/dev/null) || return 1
-  database_identity=$(lf_docker image inspect --format '{{.Id}}|{{.Os}}|{{.Architecture}}' "$LF_POSTGRES_IMAGE" 2>/dev/null) || return 1
-  [ "$api_identity" = "$LF_API_IMAGE|linux|$architecture" ] && [ "$database_identity" = "$LF_POSTGRES_IMAGE|linux|$architecture" ] || return 1
+  [ "$api_identity" = "$LF_API_IMAGE|linux|$architecture" ]
 }
 lf_wait_healthy() {
   local name="$1" i=0 status= id= seen= running=
@@ -614,7 +400,7 @@ lf_operation_temp_cleanup() {
   lf_operation_preflight || return 1
   rows=$LF_OP_CONTAINERS
   while IFS='|' read -r id name extra; do
-    case "$name" in "${LF_PROJECT}-candidate"|"${LF_PROJECT}-initialize-1"|"${LF_PROJECT}-private-file-importer")
+    case "$name" in "${LF_PROJECT}-candidate")
       [ -z "$extra" ] || return 1
       lf_operation_preflight || return 1
       lf_removal_owned container "$id" "$name" && lf_lock_check || return 1
@@ -632,32 +418,33 @@ lf_operation_temp_cleanup() {
 $rows
 EOF_TEMP
 }
+lf_compose() (
+  set +x
+  lf_docker_run 600 env -i "PATH=${PATH:-/usr/bin:/bin}" "HOME=${HOME:-}" "DOCKER_CONFIG=${DOCKER_CONFIG:-}" LC_ALL=C \
+    "LEXIFLOW_PLATFORM=$LF_PLATFORM" "LEXIFLOW_API_IMAGE=$LF_API_IMAGE" \
+    "LEXIFLOW_INSTALLATION_ID=$LF_INSTALL_ID" "LEXIFLOW_RELEASE_KEY=$LF_CURRENT_KEY" \
+    docker --host "$LF_DOCKER_ENDPOINT" compose --project-name "$LF_PROJECT" --project-directory "$LF_RELEASE_ROOT" \
+    --env-file /dev/null -f "$LF_RELEASE_ROOT/$LF_COMPOSE_PATH" "$@" >/dev/null 2>&1
+)
 lf_operation_compose() {
   lf_operation_preflight || return 1
   lf_compose "$@" || return 1
   lf_operation_preflight
 }
 lf_docker_prepare() {
-  lf_private_sources_check || return 1
   lf_operation_temp_cleanup || return 1
   lf_operation_preflight || return 1
   lf_docker_import || return 1
-  lf_private_files_import || return 1
-  lf_operation_compose up -d postgres >/dev/null 2>&1 || return 1
-  lf_wait_healthy "${LF_PROJECT}-postgres-1" || return 1
-  lf_operation_preflight || return 1
-  lf_operation_absent "${LF_PROJECT}-initialize-1" || return 1
-  lf_operation_compose run --rm --no-deps --name "${LF_PROJECT}-initialize-1" initialize >/dev/null 2>&1 || return 1
-  lf_operation_preflight && lf_operation_volume_labels all || return 1
   lf_operation_preflight || return 1
   lf_operation_absent "${LF_PROJECT}-candidate" || return 1
   lf_operation_compose run --no-deps --detach --name "${LF_PROJECT}-candidate" api >/dev/null 2>&1 || return 1
   lf_wait_healthy "${LF_PROJECT}-candidate" || return 1
+  lf_operation_volume_labels all || return 1
   lf_operation_remove_temp "${LF_PROJECT}-candidate"
 }
 lf_operation_remove_temp() {
   local name="$1" id
-  case "$name" in "${LF_PROJECT}-candidate"|"${LF_PROJECT}-initialize-1") ;; *) return 1;; esac
+  case "$name" in "${LF_PROJECT}-candidate") ;; *) return 1;; esac
   lf_operation_preflight || return 1
   id=$(lf_operation_container_id "$name") || return 1
   lf_removal_owned container "$id" "$name" && lf_lock_check || return 1
@@ -666,15 +453,10 @@ lf_operation_remove_temp() {
   lf_operation_absent "$name"
 }
 lf_docker_start() {
-  lf_private_sources_check || return 1
   lf_operation_temp_cleanup || return 1
   lf_operation_preflight || return 1
   lf_docker_import || return 1
   lf_operation_volume_labels all || return 1
-  lf_private_files_import || return 1
-  # 资料在 prepare 中完成；重启不得沿 depends_on 再次运行 initialize。
-  lf_operation_compose up -d --no-deps postgres >/dev/null 2>&1 || return 1
-  lf_wait_healthy "${LF_PROJECT}-postgres-1" || return 1
   lf_operation_compose up -d --no-deps api >/dev/null 2>&1 || return 1
   lf_wait_healthy "${LF_PROJECT}-api-1"
 }
@@ -758,9 +540,9 @@ lf_removal_fields() {
   # 仅为当前已验证对象生成字段；调用者环境或上一次结果不能授予资格。
   LF_OWNER_FORMAT= LF_OWNER_RECORD=
   case "$kind:$name" in
-    "container:${LF_PROJECT}-api-1"|"container:${LF_PROJECT}-postgres-1"|"container:${LF_PROJECT}-initialize-1"|"container:${LF_PROJECT}-candidate"|"container:${LF_PROJECT}-private-file-importer") ;;
+    "container:${LF_PROJECT}-api-1"|"container:${LF_PROJECT}-candidate") ;;
     "network:${LF_PROJECT}_private") ;;
-    "volume:${LF_PROJECT}_pgdata"|"volume:${LF_PROJECT}_initialization-work"|"volume:${LF_PROJECT}_postgres-secret"|"volume:${LF_PROJECT}_app-secret"|"volume:${LF_PROJECT}_dataset") ;;
+    "volume:${LF_PROJECT}_lexiflow-data") ;;
     *) return 1;;
   esac
   if [ "$kind" = volume ]; then [ "$id" = "$name" ] || return 1
@@ -782,23 +564,17 @@ lf_removal_owned() {
   [ "$actual" = "$expected" ]
 }
 lf_operation_volume_labels() {
-  local volume name id entry extra found volumes
-  if [ "${1:-}" = all ]; then volumes='pgdata initialization-work postgres-secret app-secret dataset'
-  else volumes='postgres-secret app-secret dataset'; fi
-  for volume in $volumes; do
-    name="${LF_PROJECT}_$volume"; found=
-    while IFS='|' read -r id entry extra; do
-      [ -n "$id$entry$extra" ] || continue
-      [ -z "$extra" ] || return 1
-      [ "$entry" = "$name" ] || continue
-      [ -z "$found" ] || return 1
-      lf_removal_owned volume "$id" "$entry" || return 1
-      found=yes
-    done <<EOF_PRIVATE_VOLUMES
-$LF_OP_VOLUMES
-EOF_PRIVATE_VOLUMES
-    [ "$found" = yes ] || return 1
+  local name="${LF_PROJECT}_lexiflow-data" id entry extra found=
+  for volume in $LF_OP_VOLUMES; do
+    IFS='|' read -r id entry extra <<EOF_VOLUME
+$volume
+EOF_VOLUME
+    [ -z "$extra" ] || return 1
+    [ "$entry" = "$name" ] || continue
+    lf_removal_owned volume "$id" "$entry" || return 1
+    found=yes
   done
+  [ "$found" = yes ]
 }
 lf_removal_apply() {
   local kind="$1" rows="$2" id name extra

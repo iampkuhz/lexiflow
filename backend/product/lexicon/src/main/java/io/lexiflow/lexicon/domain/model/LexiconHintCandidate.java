@@ -15,9 +15,7 @@ import java.util.UUID;
  * @param entryKind 主词条的单词或短语类别。
  * @param finalAction 冻结的提示或阻断决定。
  * @param finalGloss 可展示时的安全短释；阻断时为空。
- * @param finalPriority 非个人化提示排序分数。
- * @param rankedWord 是否属于有排名词条；独立于精确 Zipf 数值。
- * @param complexListCount 复杂学习词表证据数量。
+ * @param priority 非个人化提示与预热共用优先级；零不等于阻断。
  */
 public record LexiconHintCandidate(
     long entryId,
@@ -29,9 +27,7 @@ public record LexiconHintCandidate(
     LexiconEntryKind entryKind,
     LexiconHintAction finalAction,
     String finalGloss,
-    int finalPriority,
-    boolean rankedWord,
-    int complexListCount) {
+    int priority) {
 
   /** 校验来源无关身份、准确词形和可靠提示与阻断互斥。 */
   public LexiconHintCandidate {
@@ -43,8 +39,8 @@ public record LexiconHintCandidate(
     canonicalLemma = LexiconEntry.normalizeEnglishForm(canonicalLemma, "canonicalLemma");
     Objects.requireNonNull(entryKind, "entryKind");
     Objects.requireNonNull(finalAction, "finalAction");
-    if (finalPriority < 0 || finalPriority > 1000 || complexListCount < 0) {
-      throw new IllegalArgumentException("candidate priority evidence is invalid");
+    if (priority < 0 || priority > 1000) {
+      throw new IllegalArgumentException("candidate priority is invalid");
     }
     if (finalAction == LexiconHintAction.HINT) {
       Objects.requireNonNull(senseId, "senseId");

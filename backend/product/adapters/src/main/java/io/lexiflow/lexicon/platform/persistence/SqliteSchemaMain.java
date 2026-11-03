@@ -3,13 +3,13 @@ package io.lexiflow.lexicon.platform.persistence;
 import java.nio.file.Path;
 
 /**
- * 后端原生 CLI：显式初始化 PostgreSQL schema。
+ * 后端原生 CLI：显式初始化 SQLite schema。
  *
  * <p>该入口不创建数据库；调用方须传入受隔离的目标及 SQL 文件。
  */
-public final class PostgresSchemaMain {
+public final class SqliteSchemaMain {
 
-  private PostgresSchemaMain() {}
+  private SqliteSchemaMain() {}
 
   /**
    * 执行调用方明确给出的初始化参数。
@@ -21,7 +21,7 @@ public final class PostgresSchemaMain {
     if (args.length != 2) {
       throw new IllegalArgumentException("usage: <jdbc-url> <schema-file>");
     }
-    PostgresSchemaInitializer.initialize(args[0], Path.of(args[1]));
-    System.out.println("PASS postgres schema initialized");
+    SqliteSchemaInitializer.initialize(args[0], Path.of(args[1]));
+    System.out.println("PASS sqlite schema initialized");
   }
 }

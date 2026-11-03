@@ -20,12 +20,12 @@ async function fixture() {
   for (const file of ['ops/release/version.txt', 'ops/release/integrity/source-build-identity.mjs',
     'ops/release/integrity/artifact-build-identity.mjs', 'ops/release/integrity/extension-archive-integrity.mjs',
     'ops/release/integrity/release-artifact-manifest.mjs', 'ops/docker/Dockerfile.runtime',
-    'ops/docker/runtime-entrypoint.sh', 'ops/docker/base-images.json', 'infra/postgres/schema.sql']) await copy(file, file);
+    'ops/docker/runtime-entrypoint.sh', 'ops/docker/base-images.json', 'infra/sqlite/schema.sql']) await copy(file, file);
   await writeFile(path.join(root, '.gitignore'), '/artifacts/\n');
   git(root, 'init', '-q'); git(root, 'add', '.');
   execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'single image fixture'], { stdio: 'ignore' });
   const identity = resolveBuildIdentity(root);
-  const schema = await readFile(path.join(root, 'infra/postgres/schema.sql'));
+  const schema = await readFile(path.join(root, 'infra/sqlite/schema.sql'));
   const jar = makeZip([['META-INF/lexiflow-build.json', JSON.stringify(identity)],
     ['META-INF/lexiflow-version.txt', `${identity.softwareVersion}\n`], ['META-INF/lexiflow-schema.sql', schema]]);
   const data = Buffer.from('synthetic published data'); const notice = Buffer.from('synthetic notice');

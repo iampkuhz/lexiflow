@@ -31,11 +31,10 @@ function groupGone(pid) {
   try { process.kill(-pid, 0); return false; }
   catch (error) { return error.code === 'ESRCH'; }
 }
-export function startCandidateSession({ action, directory, candidate, dbPort, logFile, timeoutMs = 900_000 }) {
+export function startCandidateSession({ action, directory, candidate, logFile, timeoutMs = 900_000 }) {
   if (!['install', 'upgrade'].includes(action) || directory !== releaseSlot.directory || !path.isAbsolute(logFile)
     || !candidate || Object.keys(candidate).sort().join(',') !== 'candidateDirectory,candidateSha256'
     || !path.isAbsolute(candidate.candidateDirectory) || !/^[a-f0-9]{64}$/.test(candidate.candidateSha256)
-    || dbPort !== releaseSlot.dbPort
     || !Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 900_000) throw new Error('SESSION_REQUEST_INVALID');
   // 文件由本入口独占创建，不允许预创建再以 wx 打开。
   const fd = fs.openSync(logFile, 'wx', 0o600);

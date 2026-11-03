@@ -43,7 +43,7 @@ test('deployment tag is stable, lowercases SNAPSHOT, and excludes detailed build
   assert.equal(deploymentImageTag('2.0.1-SNAPSHOT'), '2.0.1-snapshot');
   assert.equal(deploymentImageTag('2.0.1'), '2.0.1');
   assert.equal(versionedImageReference('api', '2.0.1-SNAPSHOT'), 'localhost/lexiflow-api:2.0.1-snapshot');
-  assert.deepEqual(versionedImageLabels('postgres', '2.0.1-SNAPSHOT'), ['--label', 'io.lexiflow.image-role=postgres', '--label', 'io.lexiflow.deployment-version=2.0.1-snapshot']);
+  assert.deepEqual(versionedImageLabels('api', '2.0.1-SNAPSHOT'), ['--label', 'io.lexiflow.image-role=api', '--label', 'io.lexiflow.deployment-version=2.0.1-snapshot']);
   for (const value of ['2.0', 'v2.0.1', '2.0.1+build', '2.0.1-SNAPSHOT.abc', '2.0.1-snapshot', '01.2.3', '0.0.0', '65536.1.1', '2.0.1\n']) assert.throws(() => deploymentImageTag(value), /VERSIONED_IMAGE_VERSION_INVALID/);
   // Source/build details are intentionally not inputs to this tag API.
   assert.equal(versionedImageReference('api', '2.0.1'), versionedImageReference('api', '2.0.1'));
@@ -71,7 +71,7 @@ test('rejects cross-install, unknown labels, malformed image identity and inspec
   for (const [container, opts, code] of [
     [containerData(cid, { 'lexiflow.installation': 'another' }), {}, 'VERSIONED_IMAGE_CONTAINER_MISMATCH'],
     [containerData(cid, { 'com.docker.compose.project': undefined, 'io.podman.compose.project': undefined }), {}, 'VERSIONED_IMAGE_CONTAINER_MISMATCH'],
-    [containerData(cid, { 'io.podman.compose.service': 'postgres' }), {}, 'VERSIONED_IMAGE_CONTAINER_MISMATCH'],
+    [containerData(cid, { 'io.podman.compose.service': 'foreign-service' }), {}, 'VERSIONED_IMAGE_CONTAINER_MISMATCH'],
   ]) {
     const f = fake({ containers: { [cid]: container }, ...opts });
     await assert.rejects(removeVersionedImage({ run: f.run, role: 'api', baseVersion: '1.2.3', installationId: '1'.repeat(32) }), new RegExp(code));

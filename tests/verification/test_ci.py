@@ -118,13 +118,8 @@ class CiQuickTests(unittest.TestCase):
     def test_workflow_database_matches_isolated_jar_test_contract(self) -> None:
         workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_bytes())
         job = workflow["jobs"]["quick"]
-        self.assertEqual(
-            job["services"]["postgres"]["env"]["POSTGRES_DB"], "lexiflow_hook_test"
-        )
-        self.assertEqual(
-            job["env"]["LEXIFLOW_POSTGRES_TEST_JDBC_URL"],
-            "jdbc:postgresql://127.0.0.1:5432/lexiflow_hook_test?user=postgres",
-        )
+        self.assertEqual(set(job["services"]), {"redis"})
+        self.assertEqual(job["env"]["LEXIFLOW_REDIS_TEST_ENDPOINT"], "127.0.0.1:6379")
 
     def test_public_summary_projects_only_python_traceback_code_location(self) -> None:
         source = self.root / "ops/docker/tests/test_operation_ownership.py"

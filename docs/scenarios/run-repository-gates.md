@@ -242,8 +242,8 @@ note right
 end note
 :S3 准备隔离服务;
 note right
-入口<U+FF1A>isolated<U+005F>postgres<U+005F>redis<U+002E>py<U+003A><U+003A>isolated<U+005F>test<U+005F>services
-作用：按风险闭包一次准备本次 PostgreSQL／Redis
+入口<U+FF1A>isolated<U+005F>redis<U+002E>py<U+003A><U+003A>isolated<U+005F>test<U+005F>services
+作用：按风险闭包一次准备本次 Redis；SQLite 测试文件由每个测试在临时目录创建
 <color:#995A00><b>预期：10–30 秒（引擎／镜像就绪规划）</b></color>
 end note
 :S4 执行风险检查;
@@ -254,7 +254,7 @@ note right
 end note
 :S5 清理自有资源;
 note right
-入口<U+FF1A>isolated<U+005F>postgres<U+005F>redis<U+002E>py<U+003A><U+003A>isolated<U+005F>test<U+005F>services
+入口<U+FF1A>isolated<U+005F>redis<U+002E>py<U+003A><U+003A>isolated<U+005F>test<U+005F>services
 作用：finally 清理本次 lease，不清理未知资源
 <color:#995A00><b>预期：10–30 秒（机器规划）</b></color>
 end note
@@ -303,7 +303,7 @@ endlegend
 | --- | --- | --- |
 | S1／S9 入口与未执行 | 区分真实交付、中间回合、无 diff、停用和异常输入；不签虚假 PASS | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py) |
 | S2 窗口与冻结 | 非等待窗口内固定真实风险及检查范围 | [checkout_verification_window.py](../../scripts/verification/execution/checkout_verification_window.py)、[run_development_checks.py](../../scripts/verification/commands/run_development_checks.py) |
-| S3／S5 准备与清理 | 一次准备并清理本次隔离资源 | [isolated_postgres_redis.py](../../scripts/environment/services/isolated_postgres_redis.py) |
+| S3／S5 准备与清理 | 一次准备并清理本次隔离资源 | [isolated_redis.py](../../scripts/environment/services/isolated_redis.py) |
 | S4 检查执行 | 执行所需 Check；首个失败早停 | [run_development_checks.py](../../scripts/verification/commands/run_development_checks.py)、[检查声明](../../config/engineering/module-checks.yaml) |
 | S6–S8 结果与协议 | 分析真实结果；输出开发报告或阻断，续轮失败终止重试 | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py) |
 

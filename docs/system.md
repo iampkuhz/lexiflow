@@ -4,49 +4,14 @@
 
 本文描述 LexiFlow 产品运行系统。质量检查、交付验收和工程协作属于工程治理视角，见[三体系工程总览](system/engineering.md)；两者不混为同一套运行流程。
 
-LexiFlow 是 Java 25 Modular Monolith：Chrome 扩展读取 YouTube 英文字幕，唯一 `:api` 装配 HTTP 与产品模块；PostgreSQL 保存发布事实。观看仅读取已发布资料并运行确定性规则，第三阶段规划的事后资料改进与观看隔离，审核发布后的新版本才供后续观看使用。
+LexiFlow 是 Java 25 Modular Monolith：Chrome 扩展读取 YouTube 英文字幕，唯一 `:api` 装配 HTTP 与产品模块；SQLite 保存发布事实。观看仅读取已发布资料并运行确定性规则，第三阶段规划的事后资料改进与观看隔离，审核发布后的新版本才供后续观看使用。
 
 <a id="11-系统边界英文在本机事实在服务端"></a>
 ## 1.1. 系统边界
 
-下图表示组件与资料流，不表示 Java 依赖。数据隐私、缓存复用和失效规则见[运行安全](system/runtime-safety.md)。
+以下描述组件与资料流，不表示 Java 依赖。数据隐私、缓存复用和失效规则见[运行安全](system/runtime-safety.md)。
 
-```plantuml
-@startuml
-title 观看系统的责任边界
-top to bottom direction
-skinparam shadowing false
-skinparam nodesep 30
-skinparam ranksep 60
-skinparam linetype ortho
-package "外部来源" as external {
-  component "YouTube 页面" as youtube
-}
-package "用户本机" as client {
-  component "Chrome 扩展" as extension
-}
-package "LexiFlow 服务端" as server {
-  node "api" as api
-}
-package "服务端存储" as storage {
-  database "PostgreSQL" as postgres
-  database "Redis" as redis
-}
-youtube --> extension : E1
-extension --> api : E2
-api --> postgres : E3
-api --> redis : E4
-legend right
-  E1...E4：结构关系；具体语义见图下正文
-  Redis 可重建，PostgreSQL 是事实存储
-endlegend
-@enduml
-```
-
-- **E1：** 扩展读取页面已渲染英文，不改写来源英文节点；平台 DOM 类型留在来源适配器。
-- **E2：** 扩展以有界字幕输入请求提示；英文不等待请求，响应可为空。
-- **E3：** PostgreSQL 保存词库事实与发布版本；各业务模块仅经公开合同访问所属数据。
-- **E4：** Redis 与浏览器缓存均可重建，不取代事实存储或发布校验。
+LexiFlow 的请求与持久化关系如下：**E1** YouTube 页面将已渲染英文提供给 Chrome 扩展，来源英文节点不被改写；**E2** 扩展以有界字幕输入调用唯一 API，英文不等待提示请求；**E3** API 装配业务模块，并经公开合同查询 SQLite 中已发布资料，事实文件固定为 `/var/lib/lexiflow/lexicon.db`，API 只读打开且缺库即拒绝；**E4** Redis 与浏览器缓存可重建，不是事实来源，数据库不映射到宿主。
 
 观看不保存历史、不上传本机抑制偏好。字幕原文、观看 URL、凭据与模型载荷不得借缓存、日志或指标越过信任边界；细则见[运行安全](system/runtime-safety.md)。
 

@@ -11,8 +11,7 @@ import { createDeploymentPlan, deploymentPlanHash, confirmDeploymentPlan, confir
 const hex = 'a'.repeat(64);
 const plan = extra => createDeploymentPlan({ operation: 'install', installation: 'local-x', targetBuildId: hex,
   generationVersion: 'b'.repeat(64), databaseFingerprint: 'c'.repeat(64),
-  databaseTarget: { kind: 'managed', authMode: 'managed', host: '127.0.0.1', port: 15432, database: 'lexiflow', schema: 'lexiflow_release',
-    user: 'lexiflow', owner: 'lexiflow', serverMajor: 17 },
+  databaseTarget: { kind: 'file', file: '/tmp/lexiflow/data/lexicon.db' },
   applicationUpdate: true, applicationStart: true, applicationReason: 'BUILD_CHANGED',
   dataRebuild: false, dataReason: 'OK', ...extra });
 
@@ -22,8 +21,8 @@ test('deployment plan hash is canonical and excludes credentials and volatile va
   assert.deepEqual(first, second);
   assert.equal(deploymentPlanHash(first), deploymentPlanHash(second));
   assert.notEqual(deploymentPlanHash(first), deploymentPlanHash(plan({ dataRebuild: true })));
-  assert.notEqual(deploymentPlanHash(first), deploymentPlanHash(plan({ databaseTarget: { ...first.database.target, port: 15433 } })));
-  assert.equal(plan({ dataRebuild: true, dataReason: 'GENERATION_CHANGED' }).actions.dataReason, 'GENERATION_CHANGED');
+  assert.notEqual(deploymentPlanHash(first), deploymentPlanHash(plan({ databaseTarget: { kind: 'file', file: '/tmp/other/data/lexicon.db' } })));
+  assert.equal(plan({ dataRebuild: true, dataReason: 'DATABASE_CORRUPT' }).actions.dataReason, 'DATABASE_CORRUPT');
 });
 
 test('confirmation rejects mismatch and non-interactive implicit consent', async () => {
@@ -37,10 +36,10 @@ test('interactive confirmation accepts only y/yes/是 and defaults to refusal', 
   for (const [answer, expected] of [['y', true], ['yes', true], ['是', true], ['', false], ['no', false], ['a'.repeat(64), false]]) {
     const input = new PassThrough(); input.isTTY = true;
     const output = { isTTY: true, text: '', write(value) { this.text += value; } };
-    const pending = confirmDeploymentIntent({ port: 15432, user: 'lexiflow', input, output });
+    const pending = confirmDeploymentIntent({ databaseFile: '/tmp/lexiflow/data/lexicon.db', input, output });
     input.write(`${answer}\n`);
     assert.equal(await pending, expected);
-    assert.match(output.text, /127\.0\.0\.1:15432\/lexiflow[\s\S]*lexiflow_release[\s\S]*\[y\/N\]/);
+    assert.match(output.text, /SQLite 文件 \/tmp\/lexiflow\/data\/lexicon\.db[\s\S]*\[y\/N\]/);
     assert.equal(output.text.split('继续安装并使用本机 LexiFlow 数据库？[y/N]').length - 1, 1);
     assert.equal(input.listenerCount('data'), 0);
   }
@@ -51,7 +50,7 @@ test('interactive confirmation EOF and cancellation terminate promptly without c
     const input = new PassThrough(); input.isTTY = true;
     const output = { isTTY: true, write: () => {} };
     const controller = new AbortController();
-    const pending = confirmDeploymentIntent({ port: 15432, user: 'lexiflow', input, output, signal: controller.signal });
+    const pending = confirmDeploymentIntent({ databaseFile: '/tmp/lexiflow/data/lexicon.db', input, output, signal: controller.signal });
     if (kind === 'eof') input.end(); else controller.abort();
     await assert.rejects(pending, kind === 'eof' ? /DEPLOYMENT_CONFIRMATION_EOF/ : /DEPLOYMENT_CONFIRMATION_CANCELLED/);
     assert.equal(input.listenerCount('data'), 0);
@@ -64,7 +63,7 @@ test('confirmation terminates a real child process with stdin still open', async
     const script = `import { confirmDeploymentIntent } from ${JSON.stringify(moduleUrl)};
       process.stdin.isTTY = true; process.stdout.isTTY = true;
       const abort = new AbortController();
-      const pending = confirmDeploymentIntent({ port: 15432, user: 'lexiflow', signal: abort.signal });
+      const pending = confirmDeploymentIntent({ databaseFile: '/tmp/lexiflow/data/lexicon.db', signal: abort.signal });
       if (${JSON.stringify(answer)} === 'abort') abort.abort();
       try { await pending; } catch { process.exitCode = 2; }`;
     const child = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -79,19 +78,18 @@ test('confirmation terminates a real child process with stdin still open', async
   }
 });
 
-test('development trust consent names real postgres target without asking for credentials', async () => {
+test('interactive confirmation names the SQLite file and rejects non-file targets', async () => {
   const input = new PassThrough(); input.isTTY = true;
   const output = { isTTY: true, text: '', write(value) { this.text += value; } };
-  const pending = confirmDeploymentIntent({ port: 15432, user: 'postgres', authMode: 'development-trust', input, output });
+  const pending = confirmDeploymentIntent({ databaseFile: '/tmp/lexiflow/data/lexicon.db', input, output });
   input.write('n\n');
   assert.equal(await pending, false);
-  assert.match(output.text, /postgres 无密码 trust/);
-  assert.match(output.text, /仅管理 lexiflow_release/);
-  assert.doesNotMatch(output.text, /password-file|--confirm-plan|planHash/);
+  assert.match(output.text, /拒绝非本安装目录的文件目标/);
+  assert.throws(() => plan({ databaseTarget: { kind: 'external', host: '127.0.0.1', port: 45678 } }), /DEPLOYMENT_DATABASE_TARGET_INVALID/);
 });
 
-test('database takeover requires authority and recovery journal is validated', () => {
-  assert.throws(() => plan({ takeover: true }), /DATABASE_TAKEOVER_AUTHORITY_REQUIRED/);
+test('database plan rejects non-file targets and recovery journal is validated', () => {
+  assert.throws(() => plan({ databaseTarget: { kind: 'managed', host: '127.0.0.1', port: 45678 } }), /DEPLOYMENT_DATABASE_TARGET_INVALID/);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiflow-deployment-'));
   try {
     const file = path.join(directory, 'operation.json');

@@ -26,7 +26,7 @@ def valid_result(
     identity = {
         "releaseId": "synthetic-" + dataset_sha,
         "preparationId": "synthetic-"
-        + hashlib.sha256(b"lexiflow.deterministic-preparation.v1").hexdigest(),
+        + hashlib.sha256(b"lexiflow.deterministic-preparation.priority-v2").hexdigest(),
         "ruleId": "synthetic-no-model",
         "sqlVersion": "e" * 64,
         "sha256": dataset_sha,

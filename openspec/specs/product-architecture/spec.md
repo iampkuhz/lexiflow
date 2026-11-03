@@ -32,7 +32,7 @@
 
 ### 场景：规则查询资料
 
-Enrichment 只从 Lexicon 的 `domain.port` 及 `domain.model` 公开合同读取已发布资料，不依赖 Lexicon 的应用层或内置词库实现，以确定性规则判断提示价值及适用性，不为决策调用模型。PostgreSQL 为事实存储，缓存与投影可重建。
+Enrichment 只从 Lexicon 的 `domain.port` 及 `domain.model` 公开合同读取已发布资料，不依赖 Lexicon 的应用层或内置词库实现，以确定性规则判断提示价值及适用性，不为决策调用模型。SQLite 为事实存储，缓存与投影可重建。
 
 ## 4. 本机显式偏好
 
@@ -71,9 +71,9 @@ Chrome / YouTube 为首个客户端和来源；来源私有类型留在适配器
 - WHEN 当前字幕命中该词条
 - THEN 保留英文，不临时截取来源首项或任取其他义项
 
-## 7. 开发期最新结构
+## 7. SQLite 持久化与开发期最新结构
 
-仓库 MUST 只维护最新逻辑与架构，废弃接口、配置和数据结构直接替换，不维护历史兼容分支。数据库 MUST 直接更新唯一最新结构 SQL；结构变化通过显式重建本项目开发库并完整重新导入生效，不维护递增迁移链或旧结构适配。应用启动 MUST NOT 隐式清库；重建不得影响其他项目数据。
+仓库 MUST 只维护最新逻辑与架构，废弃接口、配置和数据结构直接替换，不维护历史兼容分支。SQLite MUST 直接更新 `infra/sqlite/schema.sql` 唯一最新结构 SQL；结构变化通过离线事务重建本项目数据库文件并完整重新导入生效，不维护递增迁移链或旧结构适配。API MUST 以只读 `mode=ro` 打开 `/var/lib/lexiflow/lexicon.db`；缺库即拒绝，不隐式创建、初始化或清理数据库。重建不得影响其他项目数据。
 
 资料的来源绑定、发布标识、完整性验证及受控发布并非旧结构兼容，MUST 保留。重建后不得复用仍被缓存或本机偏好引用的资料身份而绑定不同内容。
 
@@ -95,17 +95,17 @@ CSS roll-up 动画改变可见行但不触发 DOM mutation 时，插件 MUST 在
 
 ## 9. 精简词库持久化与短词条身份
 
-PostgreSQL MUST 只保存七列词条结果、两列准确词形映射和一行数据集元信息；原始来源字段、逐词处理原因与规则轨迹 MUST NOT 复制入库或改存逐行 JSON。独立单词少于三个字母的形式 MUST 不持久化也不参与查询；完整短语独立判断。可查询 BLOCK MUST 保留用于同形歧义，不能删除后让有歧义的 HINT 冒出。
+SQLite STRICT MUST 保存五列词条结果、仅非 canonical 两列词形映射和 13 列单行数据集元信息；`imported_at` MUST NOT 保存。`lexicon_lookup` 逻辑视图 MUST 以 `UNION ALL` 重建 canonical lemma 和物理词形的完整查询映射。原始来源字段、逐词处理原因与规则轨迹 MUST NOT 复制入库或改存逐行 JSON。独立单词少于三个字母的形式 MUST 不进入查询窗口；完整短语独立判断。可查询 BLOCK MUST 保留用于同形歧义，不能删除后让有歧义的 HINT 冒出。
 
-词条身份 MUST 是规范语言与 lemma 派生的正 63 位稳定散列，数据库用 BIGINT，HTTP 和扩展用规范十进制字符串，MUST NOT 转为 JavaScript Number。碰撞 MUST 拒绝发布并回滚，不随机重分配或合并。义项身份可按发布版本与 lemma 确定性派生，无需重复持久化。重建 MUST 使用与不同内容不混淆的发布身份；精简结构不授权自动清库。
+词条身份 MUST 是规范语言与 lemma 派生的正 63 位稳定散列，SQLite STRICT 使用 INTEGER，HTTP 和扩展用规范十进制字符串，MUST NOT 转为 JavaScript Number。INTEGER PRIMARY KEY 是 rowid alias，不另有主键 B-tree。碰撞 MUST 拒绝发布并回滚，不随机重分配或合并。义项身份可按发布版本与 lemma 确定性派生，无需重复持久化。重建 MUST 使用与不同内容不混淆的发布身份；精简结构不授权自动清库。
 
-观看 MUST 一次批量关联词形与词条并保留全部同形候选；发布保存 ranked_word、hint_priority、complex_list_count 和独立 cache_priority，使现有分层、同分排序与正负预热不因删列改变。来源完整性、原子发布、受控导出恢复和失败拒绝继续适用。
+观看 MUST 一次批量关联词形与词条并保留全部同形候选。运行时词条仅保存 entry_id、lemma、gloss、canonical_form、priority；schemaVersion 为 4，内容摘要使用 entryId、lemma、gloss、priority 与完整逻辑映射。HINT 展示与预热共用 0..1000 的 priority，0 仅表示不预热而非 BLOCK。complex_list_count 可用于构建期打分但不持久化；ranked_word 不作为运行时字段。此排序策略简化不承诺旧排序全等价；稳定身份、有效词条、lookup、gloss 与 BLOCK 歧义仍须等价，并记录新旧排序差异及新策略回归。来源完整性、原子发布、受控导出恢复和失败拒绝继续适用。
 
 
 ### Requirement: 部署协调与数据生成身份
 
 本机 `install` 与 `upgrade` MUST 使用同一部署编排，将应用构建身份与数据生成身份分别判断。数据生成身份 MUST 覆盖导入、预处理、直接依赖、SQL、影响生成的配置和已校验实际来源摘要；MUST NOT 用应用版本或全仓 commit 替代。只有数据库中的成功记录一致且结构、计数、关联和内容摘要完整时才可复用，其他可读旧结构或不完整资料必须在本次确认后重建并全量导入，不做增量迁移。
 
-普通交互部署 MUST 在数据库连接和重型准备前展示本机目标及按数据导入版本自动替换规则，只进行一次默认拒绝的 `[y/N]` 确认，不询问账密或要求输入 hash。确认仅授权本次调用及展示的目标；内部 MUST 冻结检测后的计划，冻结后的目标或输入漂移 MUST 阻断。显式非交互计划消费 MUST 精确核对当前 hash。专用 schema 重建、写入、发布校验与成功记录 MUST 同连接同事务提交；失败回滚，跨 schema 依赖不得级联删除。占用端口的已有本机 PostgreSQL MUST 沿用安装已保存的凭据与目标；全新安装可自动识别当前仓库开发 Compose 的 PostgreSQL 17，只有配置、容器、端口和卷归属完整匹配才使用明确的 `postgres` 无密码模式。模式和归属 MUST 纳入冻结计划及后续检查，未知实例或校验失败即停止；开发实例的 `public` 旧表 MUST 保留，不生成假密码；MUST NOT 提供自定义外部账密问答、创建外部缺失数据库或接管其服务、卷、共享账号。
+普通交互部署 MUST 在数据库连接和重型准备前展示本机目标及按数据导入版本自动替换规则，只进行一次默认拒绝的 `[y/N]` 确认，不询问账密或要求输入 hash。确认仅授权本次调用及展示的目标；内部 MUST 冻结检测后的计划，冻结后的目标或输入漂移 MUST 阻断。显式非交互计划消费 MUST 精确核对当前 hash。SQLite 数据发布 MUST 由离线专用管理命令通过单文件事务完成；初始化、重建、内容校验和成功记录 MUST 原子提交，失败回滚。安装前 MUST 停止 API；目标文件必须是该安装专属路径。发行管理 CLI 使用 `LEXIFLOW_RELEASE_JDBC_URL`，部署数据 CLI 使用 `LEXIFLOW_DEPLOYMENT_JDBC_URL`；请求须绑定绝对目标文件、期望摘要与显式动作，拒绝未知目标、符号链接及漂移。API MUST 以只读方式打开专属数据库文件，不询问数据库账密，不连接外部数据库，不隐式建库、初始化或清库。
 
 数据提交后应用启动失败 MUST NOT 自动恢复可能不兼容的旧应用；恢复 MUST 查询数据库实际提交事实，而非凭本机阶段推测。`up` 不重导，`status`、`logs`、`doctor`、`version` 不恢复或写入安装状态。

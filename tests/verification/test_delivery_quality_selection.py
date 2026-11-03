@@ -114,7 +114,7 @@ class DeliverySelectionTest(unittest.TestCase):
                 snapshot = snapshot_check_inputs(ROOT, by_id[check_id])
                 self.assertEqual([], snapshot["missing"])
                 self.assertIn(
-                    "scripts/environment/services/isolated_postgres_redis.py",
+                    "scripts/environment/services/isolated_redis.py",
                     {item["locator"] for item in snapshot["files"]},
                 )
 

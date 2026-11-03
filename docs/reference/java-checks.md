@@ -28,7 +28,7 @@ python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend <gra
 
 定向到模块时使用真实 Gradle project path，例如 `:api:test`。除失败定位外，按交付目标选择完整聚合入口；不要再逐个运行已包含的任务。Repository Verify 的 backend Check 使用 deliveryFull，不能用普通 check 替代。
 
-完整交付中的业务测试、PostgreSQL 集成、runtime smoke 与 API bootJar 通过 `mustRunAfter` 等待已选的 Spotless、Checkstyle、PMD 和 Javadoc 任务，让静态违规先暴露；不改变 `check` / `deliveryFull` 的必需依赖，也不增加独立交付阶段。排序边不会为单独诊断任务额外选择全量质量检查。机械 Javadoc 要求保持：private 类型、public 方法/构造器及 record 紧凑构造器仍按现有 Checkstyle 配置检查，DocLint/Werror 和 suppressions 不变。
+完整交付中的业务测试、SQLite 集成、runtime smoke 与 API bootJar 通过 `mustRunAfter` 等待已选的 Spotless、Checkstyle、PMD 和 Javadoc 任务，让静态违规先暴露；不改变 `check` / `deliveryFull` 的必需依赖，也不增加独立交付阶段。排序边不会为单独诊断任务额外选择全量质量检查。机械 Javadoc 要求保持：private 类型、public 方法/构造器及 record 紧凑构造器仍按现有 Checkstyle 配置检查，DocLint/Werror 和 suppressions 不变。
 
 构建接线的真实行为回归由独立 `eng.backend.build-contract` Check 执行（直接诊断：`python3 -m tests.verification.gradle_build_contract`），覆盖实际任务依赖、模块边界拒绝、运行入口参数和配置缓存。Gradle 配置阶段只读取 `ops/release/version.txt` 的基础版本，不启动 Node 或 Git；完整身份由 `GenerateSoftwareIdentityTask` 类型化任务在执行阶段通过 `ExecOperations` 调用 Node 生成，身份生成禁用 up-to-date 与构建缓存复用，以保证每次执行都产生新鲜身份。API 归档使用稳定的内部路径供 Gradle/IDE 查询；原生 Manifest 合并消费任务生成的完整身份，`bootJar` 在同一任务内校验并复制为公开的 `build/libs/api-<softwareVersion>.jar`。内部归档不是发行入口，公开文件名、Manifest 和内嵌 JSON/txt 必须一致。该检查需要 Java/Node，不进入可复用的 Verification 自测；不代替 `check` 或 `deliveryFull`。
 
@@ -50,4 +50,4 @@ python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend -Pqu
 
 保留完整 Gradle 输出后，可用 `:api:checkstyleMain`、`:api:test`、`architectureTest` 等真实任务定向定位。启动器会强制执行并禁用构建缓存。直接定位可以对真实 Test 任务使用 `--tests <测试类>`；但不能拿定向结果替代完整交付，也不得用 `-x`、`--tests` 或 `--dry-run` 裁剪交付命令。修复后重新运行对应完整检查；单项成功不能覆盖原失败记录。
 
-`NO-SOURCE`、`UP-TO-DATE`、`FROM-CACHE` 不是本次对全部源码执行检查的证据。缺隔离 PG/Redis 环境时先去[环境准备](../scenarios/verification-environment.md)，不把开发库地址填作测试地址。
+`NO-SOURCE`、`UP-TO-DATE`、`FROM-CACHE` 不是本次对全部源码执行检查的证据。测试使用隔离的 SQLite 临时文件；需要 Redis 的检查按[环境准备](../scenarios/verification-environment.md)准备隔离服务，不把开发库地址填作测试地址。

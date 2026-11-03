@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile, cp } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile, cp, chmod, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -300,8 +300,32 @@ test("clean release CLI rebuilds stale dist at port 18080 and emits only its JSO
     const bindingFile = path.join(repo, "tmp/expected-dataset.json");
     await mkdir(path.dirname(bindingFile), { recursive: true });
     await writeFile(bindingFile, JSON.stringify(expectedDataset));
-    const result = spawnSync(process.execPath, [cli, "--expected-dataset", bindingFile], { cwd: repo, encoding: "utf8", env: { ...process.env, LEXIFLOW_API_PORT: "19876" } });
+    // 透传真实 Git，仅记录完整快照次数；故障仅写本用例自有的合成源码。
+    const toolBin = path.join(repo, "tmp/bin");
+    await mkdir(toolBin);
+    const trace = path.join(repo, "tmp/git-status-count");
+    const realGit = execFileSync("/usr/bin/which", ["git"], { encoding: "utf8" }).trim();
+    const gitShim = path.join(toolBin, "git");
+    await writeFile(trace, "0\n");
+    await writeFile(gitShim, `#!/bin/sh
+for arg do
+  if [ "$arg" = status ]; then
+    read -r count < ${JSON.stringify(trace)}
+    count=$((count + 1))
+    printf '%s\\n' "$count" > ${JSON.stringify(trace)}
+    if [ "$count" = "$LEXIFLOW_FIXTURE_MUTATE_STATUS" ]; then
+      printf '\\n// synthetic drift\\n' >> ${JSON.stringify(path.join(extension, "src/popup.ts"))}
+    fi
+  fi
+done
+exec ${JSON.stringify(realGit)} "$@"
+`);
+    await chmod(gitShim, 0o700);
+    const env = { ...process.env, PATH: `${toolBin}${path.delimiter}${process.env.PATH}`, LEXIFLOW_API_PORT: "19876" };
+    const result = spawnSync(process.execPath, [cli, "--expected-dataset", bindingFile], { cwd: repo, encoding: "utf8", env });
     assert.equal(result.status, 0, result.stderr);
+    // 打包首、构建中、构建后、归档前各一次身份，每次仍有双快照的四次 status。
+    assert.equal(Number(await readFile(trace, "utf8")), 16);
     const descriptor = JSON.parse(result.stdout);
     assert.equal(descriptor.softwareVersion, "2.0.0");
     assert.equal(descriptor.sourceCommit, execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim());
@@ -312,6 +336,20 @@ test("clean release CLI rebuilds stale dist at port 18080 and emits only its JSO
     assert.equal((await readFile(path.join(output, `${descriptor.filename}.sha256`), "utf8")).trim(), `${descriptor.sha256}  ${descriptor.filename}`);
     assert.equal(await readFile(path.join(extension, "dist/stale.map")).then(() => true, () => false), false);
     assert.deepEqual(JSON.parse(await readFile(path.join(extension, "dist/manifest.json"), "utf8")).host_permissions, ["http://127.0.0.1:18080/*"]);
+
+    const formats = { background: "esm", content: "iife", "youtube-bridge": "iife", "youtube-source": "esm",
+      "caption-snapshot": "esm", popup: "iife", "caption-source": "esm", stream: "esm", "page-lifecycle": "esm",
+      "caption-capture": "esm", protocol: "esm", "caption-debug": "esm", "runtime-status": "esm", diagnostics: "esm", preferences: "esm" };
+    const reference = path.join(repo, "tmp/cli-reference");
+    await mkdir(reference);
+    for (const [name, format] of Object.entries(formats)) {
+      const outfile = path.join(reference, `${name}.js`);
+      execFileSync(path.join(extension, "node_modules/esbuild/bin/esbuild"), [`src/${name}.ts`,
+        "--bundle", `--format=${format}`, "--target=es2022", "--define:__LEXIFLOW_API_PORT__=18080",
+        `--define:__LEXIFLOW_EXPECTED_DATASET__=${JSON.stringify(JSON.stringify(expectedDataset))}`, `--outfile=${outfile}`],
+      { cwd: extension, stdio: "pipe" });
+      assert.deepEqual(await readFile(path.join(extension, `dist/${name}.js`)), await readFile(outfile), `${name} CLI 字节等价`);
+    }
 
     const preview = spawnSync(process.execPath, [cli, "--development"], { cwd: repo, encoding: "utf8",
       env: { ...process.env, LEXIFLOW_API_PORT: "18080", LEXIFLOW_EXPECTED_DATASET: JSON.stringify(expectedDataset) } });
@@ -325,6 +363,26 @@ test("clean release CLI rebuilds stale dist at port 18080 and emits only its JSO
     const formalZip = path.join(output, descriptor.filename);
     await assert.rejects(checkExtensionArchive(previewZip, previewDescriptor.sourceCommit, repo), /ARCHIVE_FILE_SET_MISMATCH/u);
     await assert.rejects(checkExtensionArchive(formalZip, descriptor.sourceCommit, repo, { mode: "development" }), /ARCHIVE_MODE_MISMATCH/u);
+
+    await rename(output, `${output}-preserved`);
+    const sourceFile = path.join(extension, "src/popup.ts");
+    const original = await readFile(sourceFile);
+    for (const count of [9, 13]) {
+      await writeFile(trace, "0\n");
+      const drift = spawnSync(process.execPath, [cli, "--expected-dataset", bindingFile], { cwd: repo, encoding: "utf8",
+        env: { ...env, LEXIFLOW_FIXTURE_MUTATE_STATUS: String(count) } });
+      assert.notEqual(drift.status, 0);
+      assert.equal(drift.stdout, "");
+      assert.match(drift.stderr, /release input must be clean|source changed/u);
+      assert.equal(await readFile(formalZip).then(() => true, () => false), false);
+      await writeFile(sourceFile, original);
+    }
+    await writeFile(sourceFile, Buffer.concat([original, Buffer.from('\nconst syntheticTypeError: string = 123;\n')]));
+    const typeError = spawnSync(process.execPath, [path.join(extension, "scripts/build/build-extension.mjs")],
+      { cwd: extension, encoding: "utf8", env: { ...env, LEXIFLOW_API_PORT: "18080" } });
+    assert.notEqual(typeError.status, 0);
+    assert.match(typeError.stdout + typeError.stderr, /TS2322/u);
+    await writeFile(sourceFile, original);
   } finally { await rm(repo, { recursive: true, force: true }); }
 });
 

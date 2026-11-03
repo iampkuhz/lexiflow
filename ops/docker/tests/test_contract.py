@@ -1,6 +1,5 @@
 """Docker installation contract tests."""
 
-import hashlib
 import json
 import os
 import pathlib
@@ -35,6 +34,33 @@ def _fast_fixture_identity(stub):
 
 
 class DockerContractTest(unittest.TestCase):
+    def test_runtime_health_dispatch_uses_its_packaged_probe(self):
+        """发行镜像无需开发镜像专有脚本即可运行其真实 health 分派。"""
+        source = (DOCKER / "runtime-entrypoint.sh").read_text()
+        dispatch = source[source.rindex('if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then') :]
+        with tempfile.TemporaryDirectory(prefix="lf-runtime-health-dispatch-") as td:
+            script = pathlib.Path(td) / "probe.sh"
+            script.write_text(
+                "#!/bin/bash\nruntime_health() { printf 'packaged-probe'; }\n"
+                + dispatch
+            )
+            result = subprocess.run(
+                ["bash", str(script), "health"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "packaged-probe")
+            invalid = subprocess.run(
+                ["bash", str(script), "health", "unexpected"],
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+            self.assertEqual(invalid.returncode, 64)
+
     def test_fixture_identity_route_is_exact_and_other_commands_remain_native(self):
         with tempfile.TemporaryDirectory(prefix="lf identity '雪 ") as td:
             root = pathlib.Path(td).resolve()
@@ -48,7 +74,9 @@ class DockerContractTest(unittest.TestCase):
             stub.chmod(0o755)
             _fast_fixture_identity(stub)
             exact = ["--host", "unix:///synthetic.sock", "info", "--format", "{{.ID}}"]
-            direct = subprocess.run([str(stub), *exact], capture_output=True, timeout=5)
+            direct = subprocess.run(
+                [str(stub), *exact], capture_output=True, timeout=5, check=False
+            )
             self.assertEqual(
                 (direct.returncode, direct.stdout, direct.stderr),
                 (0, b"synthetic-daemon-id\n", b""),
@@ -65,157 +93,13 @@ class DockerContractTest(unittest.TestCase):
             ):
                 with self.subTest(argv=argv):
                     result = subprocess.run(
-                        [str(stub), *argv], capture_output=True, timeout=5
+                        [str(stub), *argv], capture_output=True, timeout=5, check=False
                     )
                     self.assertEqual(
                         (result.returncode, result.stdout, result.stderr),
                         (7, b"native\x00out\n", b"native-err\n"),
                     )
                     self.assertEqual(json.loads(log.read_text()), argv)
-
-    def test_private_transfer_replays_authenticated_journal_before_fixed_order(self):
-        source = ROOT / "ops/release/runtime/release-installation-docker.sh"
-        with tempfile.TemporaryDirectory() as td:
-            base = pathlib.Path(td)
-            key = "a" * 64
-            project = "lf-test"
-            install = "0123456789abcdef0123456789abcdef"
-            release = base / "releases" / key
-            release.mkdir(parents=True)
-            dataset = base / "dataset.zip"
-            dataset.write_bytes(b"synthetic dataset")
-            secrets = {
-                "pg64hex": release / "postgres-password",
-                "app64hex": release / "app-password",
-                "zip": dataset,
-            }
-            secrets["pg64hex"].write_bytes(b"a" * 64)
-            secrets["app64hex"].write_bytes(b"b" * 64)
-            for file in secrets.values():
-                file.chmod(0o600)
-            hashes = {
-                mode: hashlib.sha256(file.read_bytes()).hexdigest()
-                for mode, file in secrets.items()
-            }
-            volumes = {
-                "pg64hex": f"{project}_postgres-secret",
-                "app64hex": f"{project}_app-secret",
-                "zip": f"{project}_dataset",
-            }
-            script = base / "driver.sh"
-            script.write_text(
-                'set -eu\n. "$1"\n'
-                "lf_private_sources_check() { :; }\n"
-                "lf_sha256() { shasum -a 256 \"$1\" | cut -d ' ' -f1; }\n"
-                "lf_operation_preflight() { :; }\n"
-                "lf_operation_volume_labels() { :; }\n"
-                "lf_random_hex() { printf '%032d\\n' 0; }\n"
-                'lf_private_import() { lf_transfer_journal_begin "$1" "$2" "$4" "$5" || return 1; '
-                'printf "%s\\n" "$1" >> "$LF_TEST_LOG"; '
-                '[ "$LF_TEST_CANCEL" != "$1" ] || kill -TERM "$$"; lf_transfer_journal_remove; }\n'
-                "lf_lock_check() { :; }\n"
-                "lf_private_files_import\n"
-            )
-            journal = release / ".private-file-transfer"
-            log = base / "transfers.log"
-            env = {
-                **os.environ,
-                "LF_ROOT": str(base),
-                "LF_RELEASE_ROOT": str(base),
-                "LF_CURRENT_KEY": key,
-                "LF_PROJECT": project,
-                "LF_INSTALL_ID": install,
-                "LF_DATASET_PATH": "dataset.zip",
-                "LF_DATASET_BYTES": str(dataset.stat().st_size),
-                "LF_DATASET_SHA256": hashes["zip"],
-                "LF_TEST_LOG": str(log),
-                "LF_LOCK_TOKEN": "f" * 32,
-                "LF_TEST_CANCEL": "none",
-            }
-
-            def write_journal(
-                mode, digest=None, uuid="01234567-89ab-cdef-0123-456789abcdef"
-            ):
-                journal.write_text(
-                    "schema=lexiflow-private-transfer-v1\n"
-                    f"installation={install}\nrelease={key}\n"
-                    f"volume={volumes[mode]}\nmode={mode}\nuuid={uuid}\n"
-                    f"bytes={secrets[mode].stat().st_size}\nsha256={digest or hashes[mode]}\n"
-                )
-                journal.chmod(0o600)
-
-            for mode in ("app64hex", "zip"):
-                with self.subTest(mode=mode):
-                    log.unlink(missing_ok=True)
-                    write_journal(mode)
-                    result = subprocess.run(
-                        ["/bin/sh", str(script), str(source)],
-                        env=env,
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                    )
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(
-                        log.read_text().splitlines(),
-                        [mode, "pg64hex", "app64hex", "zip"],
-                    )
-                    self.assertFalse(journal.exists())
-            for mode in ("app64hex", "zip"):
-                with self.subTest(cancelled_mode=mode):
-                    log.unlink(missing_ok=True)
-                    result = subprocess.run(
-                        ["/bin/sh", str(script), str(source)],
-                        env={**env, "LF_TEST_CANCEL": mode},
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                    )
-                    self.assertEqual(
-                        result.returncode, -15, "real TERM interrupts journal removal"
-                    )
-                    self.assertTrue(
-                        journal.exists(), "cancel retains authenticated journal"
-                    )
-                    self.assertIn(f"mode={mode}\n", journal.read_text())
-                    self.assertEqual(
-                        log.read_text().splitlines(),
-                        ["pg64hex", "app64hex"]
-                        if mode == "app64hex"
-                        else ["pg64hex", "app64hex", "zip"],
-                    )
-                    log.unlink()
-                    result = subprocess.run(
-                        ["/bin/sh", str(script), str(source)],
-                        env=env,
-                        capture_output=True,
-                        text=True,
-                        timeout=5,
-                    )
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(
-                        log.read_text().splitlines(),
-                        [mode, "pg64hex", "app64hex", "zip"],
-                    )
-                    self.assertFalse(journal.exists())
-            for digest, uuid in (
-                ("0" * 64, "01234567-89ab-cdef-0123-456789abcdef"),
-                (None, "0123456--89ab-cdef-0123-456789abcdef"),
-            ):
-                log.unlink(missing_ok=True)
-                write_journal("app64hex", digest=digest, uuid=uuid)
-                result = subprocess.run(
-                    ["/bin/sh", str(script), str(source)],
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                self.assertNotEqual(result.returncode, 0)
-                self.assertTrue(journal.exists(), "unknown journal is preserved")
-                self.assertFalse(
-                    log.exists(), "unknown journal does not begin transfer"
-                )
 
     def test_image_import_checks_actual_image_os_and_architecture(self):
         with tempfile.TemporaryDirectory() as td:
@@ -230,10 +114,10 @@ class DockerContractTest(unittest.TestCase):
                 "for value do last=$value; done\n"
                 '[ "$TEST_MODE" != inspect-fail ] || return 1\n'
                 'if [ "$last" = "$LF_API_IMAGE" ]; then printf "%s\\n" "$TEST_API"; '
-                'else printf "%s\\n" "$TEST_DATABASE"; fi; }\n'
+                "else return 1; fi; }\n"
                 "lf_docker_import\n"
             )
-            api, database = "sha256:" + "a" * 64, "sha256:" + "b" * 64
+            api = "sha256:" + "a" * 64
             base = {
                 **os.environ,
                 "TEST_LOG": str(log),
@@ -242,18 +126,14 @@ class DockerContractTest(unittest.TestCase):
                 "LF_PLATFORM": "linux/amd64",
                 "LF_RELEASE_ROOT": str(root),
                 "LF_API_ARCHIVE": "api.tar",
-                "LF_POSTGRES_ARCHIVE": "postgres.tar",
                 "LF_API_IMAGE": api,
-                "LF_POSTGRES_IMAGE": database,
                 "TEST_API": api + "|linux|amd64",
-                "TEST_DATABASE": database + "|linux|amd64",
             }
             cases = [
                 ({}, True),
                 ({"TEST_HOST": "linux/arm64"}, False),
                 ({"TEST_API": api + "|linux|arm64"}, False),
-                ({"TEST_DATABASE": database + "|windows|amd64"}, False),
-                ({"TEST_API": database + "|linux|amd64"}, False),
+                ({"TEST_API": "sha256:" + "b" * 64 + "|linux|amd64"}, False),
                 ({"TEST_MODE": "load-fail"}, False),
                 ({"TEST_MODE": "inspect-fail"}, False),
                 (
@@ -261,7 +141,6 @@ class DockerContractTest(unittest.TestCase):
                         "TEST_HOST": "linux/arm64",
                         "LF_PLATFORM": "linux/arm64",
                         "TEST_API": api + "|linux|arm64",
-                        "TEST_DATABASE": database + "|linux|arm64",
                     },
                     True,
                 ),
@@ -280,6 +159,7 @@ class DockerContractTest(unittest.TestCase):
                     capture_output=True,
                     text=True,
                     timeout=3,
+                    check=False,
                 )
                 self.assertEqual(result.returncode == 0, passed, overrides)
                 self.assertEqual(result.stdout + result.stderr, "")
@@ -288,7 +168,7 @@ class DockerContractTest(unittest.TestCase):
                 if overrides == {"TEST_MODE": "load-fail"}:
                     self.assertEqual(len(log.read_text().splitlines()), 1)
 
-    def test_restart_waits_for_database_and_does_not_rerun_initialization(self):
+    def test_restart_reuses_initialized_sqlite_database_without_database_service(self):
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td).resolve()
             script = root / "restart.sh"
@@ -301,7 +181,6 @@ class DockerContractTest(unittest.TestCase):
                 'lf_operation_compose() { lf_compose "$@"; }\n'
                 "lf_docker_import() { step import; }\n"
                 "lf_private_sources_check() { :; }\n"
-                "lf_private_files_import() { step private-files; }\n"
                 "lf_operation_volume_labels() { :; }\n"
                 'lf_compose() { step compose "$@"; }\n'
                 'lf_wait_healthy() { step healthy "$@"; }\n'
@@ -309,9 +188,6 @@ class DockerContractTest(unittest.TestCase):
             )
             steps = [
                 "import",
-                "private-files",
-                "compose up -d --no-deps postgres",
-                "healthy synthetic-postgres-1",
                 "compose up -d --no-deps api",
                 "healthy synthetic-api-1",
             ]
@@ -329,6 +205,7 @@ class DockerContractTest(unittest.TestCase):
                     capture_output=True,
                     text=True,
                     timeout=3,
+                    check=False,
                 )
                 self.assertEqual(result.returncode == 0, failure == "none")
                 expected = (
@@ -375,6 +252,7 @@ class DockerContractTest(unittest.TestCase):
                             capture_output=True,
                             text=True,
                             timeout=3,
+                            check=False,
                         )
                         self.assertEqual(result.returncode, code, result.stderr)
                         self.assertFalse((installation / "continued").exists())
@@ -410,6 +288,7 @@ class DockerContractTest(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 timeout=3,
+                check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
@@ -422,6 +301,7 @@ class DockerContractTest(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 timeout=3,
+                check=False,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(result.stdout + result.stderr, "")
@@ -454,6 +334,7 @@ class DockerContractTest(unittest.TestCase):
                         capture_output=True,
                         text=True,
                         timeout=3,
+                        check=False,
                     )
                     self.assertEqual(result.returncode == 0, passed)
                     self.assertEqual(result.stdout, digest + "\n" if passed else "")
@@ -470,6 +351,7 @@ class DockerContractTest(unittest.TestCase):
                     capture_output=True,
                     text=True,
                     timeout=3,
+                    check=False,
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout + result.stderr, "")
@@ -478,27 +360,25 @@ class DockerContractTest(unittest.TestCase):
         ignore = (DOCKER / ".dockerignore").read_text()
         self.assertEqual(
             ignore.splitlines(),
-            [
-                "*",
-                "!Dockerfile",
-                "!run-container-command.sh",
-                "!lexiflow-api.jar",
-                "!Dockerfile.postgres",
-                "!initialize-postgres-app-role.sh",
-            ],
+            ["*", "!Dockerfile", "!run-container-command.sh", "!lexiflow-api.jar"],
         )
         dockerfile = (DOCKER / "Dockerfile").read_text()
         self.assertIn("ARG JAVA_RUNTIME_IMAGE", dockerfile)
         self.assertIn("COPY --chown=10001:10001 lexiflow-api.jar", dockerfile)
         self.assertIn("USER 10001:10001", dockerfile)
         self.assertIn("--chmod=0555 run-container-command.sh", dockerfile)
-        postgres = (DOCKER / "Dockerfile.postgres").read_text()
-        self.assertIn("ARG POSTGRES_RUNTIME_IMAGE", postgres)
-        self.assertIn(
-            "COPY --chmod=0555 initialize-postgres-app-role.sh /docker-entrypoint-initdb.d/10-lexiflow-initialize-postgres-app-role.sh",
-            postgres,
-        )
-        self.assertNotIn("RUN ", postgres)
+        runtime = (DOCKER / "Dockerfile.runtime").read_text()
+        self.assertIn("ARG JAVA_RUNTIME_IMAGE", runtime)
+        self.assertIn("jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro", runtime)
+        self.assertIn("USER 10001:10001", runtime)
+        self.assertEqual(runtime.count("FROM "), 2)
+        self.assertIn("FROM ${JAVA_RUNTIME_IMAGE} AS notice-files", runtime)
+        self.assertIn("install -d -o 10001 -g 10001 -m 0555 /app/notices", runtime)
+        self.assertIn("find /notices -type f -exec chmod 0444", runtime)
+        self.assertIn("find /notices -type d -exec chmod 0555", runtime)
+        self.assertIn("COPY --from=notice-files --chown=10001:10001 /notices/ /app/notices/", runtime)
+        final_stage = runtime.split("FROM ${JAVA_RUNTIME_IMAGE}\n", 1)[1]
+        self.assertNotIn("RUN chmod", final_stage)
         self.assertEqual(dockerfile.count("RUN "), 1)
         self.assertIn("mkdir /work && chown 10001:10001 /work", dockerfile)
         for tool in ("/bin/bash", "/usr/bin/timeout", "/usr/bin/env"):
@@ -507,62 +387,23 @@ class DockerContractTest(unittest.TestCase):
     def test_compose_is_private_bounded_and_health_ordered(self):
         cfg = yaml.safe_load((DOCKER / "compose.yaml").read_text())
         services = cfg["services"]
-        self.assertEqual(
-            set(services), {"postgres", "initialize", "api", "private-file-importer"}
-        )
+        self.assertEqual(set(services), {"api"})
         self.assertEqual(services["api"]["ports"], ["127.0.0.1:18080:8080"])
-        self.assertNotIn("ports", services["postgres"])
-        self.assertIn(
-            "pgdata:/var/lib/postgresql/data", services["postgres"]["volumes"]
-        )
-        self.assertIn(
-            "postgres-secret:/run/postgres-secret:ro", services["postgres"]["volumes"]
-        )
-        self.assertIn("app-secret:/run/secrets:ro", services["postgres"]["volumes"])
-        self.assertEqual(
-            services["postgres"]["environment"]["POSTGRES_PASSWORD_FILE"],
-            "/run/postgres-secret/postgres-password",
-        )
-        self.assertEqual(
-            services["api"]["depends_on"]["initialize"]["condition"],
-            "service_completed_successfully",
-        )
-        self.assertEqual(
-            services["initialize"]["depends_on"]["postgres"]["condition"],
-            "service_healthy",
-        )
         self.assertEqual(services["api"]["mem_limit"], "1280m")
-        self.assertEqual(services["postgres"]["mem_limit"], "768m")
         self.assertTrue(services["api"]["read_only"])
         self.assertEqual(set(services["api"]["cap_drop"]), {"ALL"})
         self.assertTrue(cfg["networks"]["private"]["internal"])
-        self.assertIn("initialization-work:/work", services["initialize"]["volumes"])
-        self.assertNotIn(
-            "initialization-work:/work", services["api"].get("volumes", [])
+        self.assertIn("lexiflow-data:/var/lib/lexiflow", services["api"]["volumes"])
+        self.assertTrue(
+            any(
+                str(item).startswith("/run/lexiflow:")
+                for item in services["api"]["tmpfs"]
+            )
         )
-        self.assertIn("app-secret:/run/secrets:ro", services["api"]["volumes"])
-        self.assertIn("dataset:/dataset:ro", services["initialize"]["volumes"])
-        self.assertIn("app-secret:/run/secrets:ro", services["initialize"]["volumes"])
-        importer = services["private-file-importer"]
-        self.assertTrue(importer["read_only"])
-        self.assertEqual(importer["network_mode"], "none")
-        self.assertEqual(set(importer["cap_drop"]), {"ALL"})
-        self.assertIn("no-new-privileges:true", importer["security_opt"])
-        self.assertEqual(
-            set(cfg["volumes"]),
-            {
-                "pgdata",
-                "initialization-work",
-                "postgres-secret",
-                "app-secret",
-                "dataset",
-            },
+        self.assertTrue(
+            any(str(item).startswith("/tmp:") for item in services["api"]["tmpfs"])
         )
-        self.assertIn(
-            "pg_isready -h 127.0.0.1",
-            " ".join(services["postgres"]["healthcheck"]["test"]),
-        )
-        self.assertNotIn("external", cfg["volumes"].get("pgdata", {}))
+        self.assertEqual(set(cfg["volumes"]), {"lexiflow-data"})
         for service in services.values():
             self.assertEqual(service["pull_policy"], "never")
             self.assertNotIn("build", service)
@@ -596,7 +437,7 @@ class DockerContractTest(unittest.TestCase):
             secret_dir = installation / "releases" / release_key
             secret_dir.mkdir(parents=True)
             for name, value in (
-                ("postgres-password", "a" * 64),
+                ("private-data", "a" * 64),
                 ("app-password", "b" * 64),
             ):
                 secret = secret_dir / name
@@ -624,12 +465,13 @@ class DockerContractTest(unittest.TestCase):
             script.write_text(
                 (ROOT / "ops/release/runtime/release-installation-state.sh").read_text()
                 + '\nset -eu\n. "$1"\n'
-                "lf_lock_check() { :; }\nlf_compose up -d api\n"
+                "LF_DOCKER_ENDPOINT=unix:///synthetic.sock\nlf_docker_identity_check() { LF_DOCKER_ENDPOINT=unix:///synthetic.sock; }\nlf_lock_check() { :; }\nlf_compose up -d api\n"
             )
             env = {
                 **os.environ,
                 "PATH": str(bindir) + ":" + os.environ["PATH"],
                 "DOCKER_HOST": "unix:///synthetic.sock",
+                "LF_DOCKER_ENDPOINT": "unix:///synthetic.sock",
                 "DOCKER_CONTEXT": "",
                 "LF_ROOT": str(installation),
                 "LF_RELEASE_ROOT": str(secret_dir),
@@ -637,7 +479,7 @@ class DockerContractTest(unittest.TestCase):
                 "LF_INSTALL_ID": "d" * 32,
                 "LF_PLATFORM": "linux/amd64",
                 "LF_API_IMAGE": "sha256:" + "e" * 64,
-                "LF_POSTGRES_IMAGE": "sha256:" + "f" * 64,
+                "LF_UNDECLARED_IMAGE": "sha256:" + "f" * 64,
                 "LF_DATASET_SHA256": "1" * 64,
                 "LF_DATASET_PATH": "dataset.zip",
                 "LF_COMPOSE_PATH": "compose.yaml",
@@ -645,7 +487,7 @@ class DockerContractTest(unittest.TestCase):
                 "COMPOSE_FILE": "poison",
                 "COMPOSE_PROJECT_NAME": "poison",
                 "HTTP_PROXY": "http://proxy.invalid",
-                "LEXIFLOW_COMPOSE_POSTGRES_PASSWORD": "poisoned",
+                "LEXIFLOW_UNDECLARED_SECRET": "poisoned",
                 "LEXIFLOW_COMPOSE_APP_PASSWORD": "poisoned",
             }
             result = subprocess.run(
@@ -654,6 +496,7 @@ class DockerContractTest(unittest.TestCase):
                 text=True,
                 capture_output=True,
                 timeout=10,
+                check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             child_env = env_log.read_bytes()
@@ -661,7 +504,7 @@ class DockerContractTest(unittest.TestCase):
             for value in (
                 "a" * 64,
                 "b" * 64,
-                "LEXIFLOW_COMPOSE_POSTGRES_PASSWORD",
+                "LEXIFLOW_UNDECLARED_SECRET",
                 "LEXIFLOW_COMPOSE_APP_PASSWORD",
                 "COMPOSE_FILE",
                 "COMPOSE_PROJECT_NAME",
@@ -679,20 +522,10 @@ class DockerContractTest(unittest.TestCase):
             resources = {
                 "container": [
                     ["c" * 64, project + "-api-1"],
-                    ["d" * 64, project + "-postgres-1"],
-                    ["1" * 64, project + "-private-file-importer"],
+                    ["d" * 64, project + "-candidate"],
                 ],
                 "network": [["e" * 64, project + "_private"]],
-                "volume": [
-                    [project + "_pgdata", project + "_pgdata"],
-                    [
-                        project + "_initialization-work",
-                        project + "_initialization-work",
-                    ],
-                    [project + "_postgres-secret", project + "_postgres-secret"],
-                    [project + "_app-secret", project + "_app-secret"],
-                    [project + "_dataset", project + "_dataset"],
-                ],
+                "volume": [[project + "_lexiflow-data", project + "_lexiflow-data"]],
             }
             binding = root / "engine"
             binding.write_text(
@@ -787,6 +620,7 @@ else: sys.exit(86)
                     text=True,
                     capture_output=True,
                     timeout=30,
+                    check=False,
                 )
 
             for mode in (
@@ -842,6 +676,7 @@ else: sys.exit(86)
                 text=True,
                 capture_output=True,
                 timeout=10,
+                check=False,
             )
             self.assertEqual(empty.returncode, 0, empty.stderr)
             self.assertNotEqual(run("appeared").returncode, 0)
@@ -957,6 +792,7 @@ else: sys.exit(7)
                     text=True,
                     capture_output=True,
                     timeout=3,
+                    check=False,
                 )
                 records = (
                     [json.loads(line) for line in log.read_text().splitlines()]
@@ -991,13 +827,19 @@ else: sys.exit(7)
             stub.symlink_to(DOCKER / "tests/fixtures/java-command-stub.sh")
             timer = bindir / "timeout"
             timer.write_text(
-                '#!/bin/sh\nprintf "%s\\n" "$*" > ' + shlex.quote(str(log))
+                '#!/bin/sh\nprintf "%s\\n" "$*" > '
+                + shlex.quote(str(log))
                 + '\nprintf "JVM_ENV=%s|%s|%s\\n" "${JAVA_TOOL_OPTIONS:-}" "${JDK_JAVA_OPTIONS:-}" "${_JAVA_OPTIONS:-}" >> '
-                + shlex.quote(str(log)) + '\nexit 7\n'
+                + shlex.quote(str(log))
+                + "\nexit 7\n"
             )
             timer.chmod(0o755)
             secrets = pathlib.Path(td) / "secrets"
             secrets.mkdir()
+            db_root = pathlib.Path(td) / "lexiflow"
+            db_root.mkdir()
+            if files and "lexicon.db" in files:
+                (db_root / "lexicon.db").write_text(files["lexicon.db"])
             if files:
                 for name, val in files.items():
                     (secrets / name).write_text(val)
@@ -1014,6 +856,7 @@ else: sys.exit(7)
             script_copy.write_text(
                 (DOCKER / "run-container-command.sh")
                 .read_text()
+                .replace("/var/lib/lexiflow", str(db_root))
                 .replace("/run/secrets/app-password", str(secrets / "app-password"))
                 .replace("/dataset/dataset.zip", str(pathlib.Path(td) / "dataset.zip"))
                 .replace("/usr/bin/timeout", str(timer))
@@ -1028,14 +871,14 @@ else: sys.exit(7)
                 capture_output=True,
                 cwd=DOCKER,
                 timeout=3,
+                check=False,
             )
             return proc, log.read_text() if log.exists() else ""
 
     def test_entrypoint_fixed_arguments_env_and_privacy(self):
-        password = "a" * 64
         proc, logged = self._run(
             "api",
-            files={"app-password": password},
+            files={"lexicon.db": "synthetic"},
             env={"JAVA_TOOL_OPTIONS": "-Dsecret=LEAK"},
         )
         self.assertEqual(proc.returncode, 0)
@@ -1043,72 +886,55 @@ else: sys.exit(7)
         self.assertIn("-Dlexiflow.runtime.mode=formal", logged)
         self.assertIn("JVM_ENV=||", logged)
         self.assertNotIn("LEAK", logged)
-        self.assertNotIn(password, logged)
+        self.assertIn("jdbc:sqlite:", logged)
         proc, logged = self._run(
             "initialize",
-            env={"LEXIFLOW_DATASET_SHA256": "x" * 64},
-            files={"app-password": password},
+            env={},
+            files={"lexicon.db": "synthetic"},
         )
         self.assertNotEqual(proc.returncode, 0)
-        self.assertNotIn(password, proc.stderr + logged)
-        proc, _ = self._run("api", files={"app-password": password + "x"})
+        proc, _ = self._run(
+            "api",
+            env={"LEXIFLOW_SEGMENT_ANALYSIS_ENABLED": "unknown"},
+            files={"lexicon.db": "synthetic"},
+        )
         self.assertNotEqual(proc.returncode, 0)
-        proc, _ = self._run("api", ("arbitrary",), files={"app-password": password})
+        proc, _ = self._run("api", ("arbitrary",), files={"lexicon.db": "synthetic"})
         self.assertNotEqual(proc.returncode, 0)
 
     def test_caption_logs_are_default_without_jsonl_and_removed_alias_is_rejected(self):
-        password = "a" * 64
-        normal, normal_log = self._run("api", files={"app-password": password})
+        normal, normal_log = self._run("api", files={"lexicon.db": "synthetic"})
         rejected, rejected_log = self._run(
-            "api-debug", files={"app-password": password}
+            "api-debug", files={"lexicon.db": "synthetic"}
         )
         self.assertEqual(normal.returncode, 0)
         self.assertEqual(rejected.returncode, 64)
         self.assertEqual(rejected_log, "")
         self.assertIn("-Dlexiflow.caption-debug.enabled=true", normal_log)
         self.assertIn("-Dlexiflow.segment-analysis.enabled=false", normal_log)
-        self.assertNotIn(password, normal_log + rejected.stderr)
         enabled, enabled_log = self._run(
             "api",
-            files={"app-password": password},
+            files={"lexicon.db": "synthetic"},
             env={"LEXIFLOW_SEGMENT_ANALYSIS_ENABLED": "true"},
         )
         self.assertEqual(enabled.returncode, 0)
         self.assertIn("-Dlexiflow.segment-analysis.enabled=true", enabled_log)
         invalid, invalid_log = self._run(
             "api",
-            files={"app-password": password},
+            files={"lexicon.db": "synthetic"},
             env={"LEXIFLOW_SEGMENT_ANALYSIS_ENABLED": "unknown"},
         )
         self.assertNotEqual(invalid.returncode, 0)
         self.assertEqual(invalid_log, "")
 
-    def test_api_development_trust_requires_explicit_external_postgres_without_secret(
-        self,
-    ):
-        target = {
-            "LEXIFLOW_DATABASE_HOST": "host.containers.internal",
-            "LEXIFLOW_DATABASE_PORT": "15432",
-            "LEXIFLOW_DATABASE_USER": "postgres",
-            "LEXIFLOW_DATABASE_AUTH_MODE": "development-trust",
-        }
-        proc, logged = self._run("api", env=target)
+    def test_api_requires_explicit_sqlite_file(self):
+        proc, logged = self._run("api")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertEqual(logged, "")
+        proc, logged = self._run("api", files={"lexicon.db": "synthetic"})
         self.assertEqual(proc.returncode, 0, proc.stderr)
-        self.assertIn(
-            "DB_ENV=jdbc:postgresql://host.containers.internal:15432/lexiflow?currentSchema=lexiflow_release|postgres",
-            logged,
-        )
-        self.assertIn("DB_PASSWORD_EMPTY=true", logged)
-        for broken_env, files in [
-            ({**target, "LEXIFLOW_DATABASE_USER": "lexiflow"}, None),
-            ({**target, "LEXIFLOW_DATABASE_HOST": "postgres"}, None),
-            ({**target, "LEXIFLOW_DATABASE_AUTH_MODE": "unknown"}, None),
-            ({**target, "SPRING_DATASOURCE_PASSWORD": "synthetic-secret"}, None),
-            (target, {"app-password": "a" * 64}),
-        ]:
-            rejected, leaked = self._run("api", env=broken_env, files=files)
-            self.assertNotEqual(rejected.returncode, 0)
-            self.assertNotIn("synthetic-secret", rejected.stderr + leaked)
+        self.assertIn("JVM_ENV=||", logged)
+        self.assertIn("jdbc:sqlite:", logged)
 
     def test_initialize_exact_cli_and_health_no_forwarding(self):
         password = "b" * 64
@@ -1123,11 +949,10 @@ else: sys.exit(7)
             self.assertIn("-Xms256m -Xmx768m", logged)
             self.assertIn("--release-dataset initialize --package", logged)
             self.assertIn("--expected-sha256 " + digest, logged)
-            self.assertIn("-Djava.io.tmpdir=/work", logged)
-            self.assertIn(
-                "--expected-database lexiflow --expected-schema lexiflow_release",
-                logged,
-            )
+            self.assertIn("-Djava.io.tmpdir=/tmp", logged)
+            self.assertIn("--expected-file ", logged)
+            self.assertNotIn("--expected-database", logged)
+            self.assertNotIn("--expected-schema", logged)
             self.assertNotIn(password, logged)
             proc, _ = self._run("wat", ("secret",))
             self.assertNotEqual(proc.returncode, 0)
@@ -1145,50 +970,6 @@ else: sys.exit(7)
         proc, _ = self._run("health", ("http://evil",))
         self.assertNotEqual(proc.returncode, 0)
 
-    def test_bootstrap_shell_stub_path_and_secret_validation(self):
-        with tempfile.TemporaryDirectory() as td:
-            path = pathlib.Path(td)
-            secret = path / "app-password"
-            secret.write_text("d" * 64 + "\n")
-            bindir = path / "bin"
-            bindir.mkdir()
-            capture = path / "captured"
-            stub = bindir / "psql"
-            stub.write_text(
-                '#!/bin/sh\nprintf \'%s\\n\' "$*" > "$CAPTURE"\ncat >> "$CAPTURE"\n'
-            )
-            stub.chmod(0o755)
-            script = path / "initialize-postgres-app-role.sh"
-            script.write_text(
-                (DOCKER / "initialize-postgres-app-role.sh")
-                .read_text()
-                .replace("/run/secrets/app-password", str(secret))
-            )
-            env = {
-                **os.environ,
-                "PATH": str(bindir) + ":" + os.environ["PATH"],
-                "CAPTURE": str(capture),
-                "POSTGRES_USER": "postgres",
-                "POSTGRES_DB": "lexiflow",
-            }
-            result = subprocess.run(
-                ["sh", str(script)], text=True, capture_output=True, env=env, timeout=3
-            )
-            self.assertEqual(result.returncode, 0)
-            self.assertIn("CREATE SCHEMA lexiflow_release", capture.read_text())
-            self.assertIn(
-                "GRANT CONNECT, CREATE ON DATABASE lexiflow TO lexiflow;",
-                capture.read_text(),
-            )
-            self.assertIn("NOSUPERUSER NOCREATEDB NOCREATEROLE", capture.read_text())
-            self.assertNotIn("d" * 64, result.stdout + result.stderr)
-            secret.write_text("d" * 64 + "extra")
-            result = subprocess.run(
-                ["sh", str(script)], text=True, capture_output=True, env=env, timeout=3
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertNotIn("extra", result.stderr)
-
 
 class ContainerHealthTransportTest(unittest.TestCase):
     SUMMARY = (
@@ -1202,13 +983,21 @@ class ContainerHealthTransportTest(unittest.TestCase):
         body = cls.SUMMARY if body is None else body
         size = len(body) if length is None else length
         return (
-            b"HTTP/1.1 " + status + b"\r\nContent-Type: application/json\r\n"
-            + b"Content-Length: " + str(size).encode() + b"\r\n" + extra
-            + b"Connection: close\r\n\r\n" + body
+            b"HTTP/1.1 "
+            + status
+            + b"\r\nContent-Type: application/json\r\n"
+            + b"Content-Length: "
+            + str(size).encode()
+            + b"\r\n"
+            + extra
+            + b"Connection: close\r\n\r\n"
+            + body
         )
 
     def probe(self, response):
-        with HealthProbeFixture(DOCKER / "run-container-command.sh", [(0, response)]) as fixture:
+        with HealthProbeFixture(
+            DOCKER / "run-container-command.sh", [(0, response)]
+        ) as fixture:
             return fixture.run()
 
     def assertRejected(self, response):
@@ -1218,22 +1007,31 @@ class ContainerHealthTransportTest(unittest.TestCase):
         self.assertEqual(result.stderr, "")
 
     def test_fixed_request_safe_summary_and_degraded_state(self):
-        for body in (self.SUMMARY, self.SUMMARY.replace(b'"OK"', b'"PREWARM_DEGRADED"')):
-            with self.subTest(body=body), HealthProbeFixture(
-                DOCKER / "run-container-command.sh", [(0, self.response(body))]
-            ) as fixture:
+        for body in (
+            self.SUMMARY,
+            self.SUMMARY.replace(b'"OK"', b'"PREWARM_DEGRADED"'),
+        ):
+            with (
+                self.subTest(body=body),
+                HealthProbeFixture(
+                    DOCKER / "run-container-command.sh", [(0, self.response(body))]
+                ) as fixture,
+            ):
                 result = fixture.run()
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout.encode(), body + b"\n")
-                self.assertEqual(fixture.requests, [
-                    b"GET /internal/container-health HTTP/1.1\r\nHost: 127.0.0.1:8080\r\nConnection: close\r\n\r\n"
-                ])
+                self.assertEqual(
+                    fixture.requests,
+                    [
+                        b"GET /internal/container-health HTTP/1.1\r\nHost: 127.0.0.1:8080\r\nConnection: close\r\n\r\n"
+                    ],
+                )
 
     def test_published_dataset_seven_field_summary_is_accepted(self):
         body = self.SUMMARY.replace(
             b'"publishedDataset":null',
             b'"publishedDataset":{"releaseId":"rel","preparationId":"prep",'
-            b'"ruleId":"rule","sqlVersion":"sql","sha256":"' + b'a' * 64 + b'"}',
+            b'"ruleId":"rule","sqlVersion":"sql","sha256":"' + b"a" * 64 + b'"}',
         )
         result = self.probe(self.response(body))
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1242,7 +1040,9 @@ class ContainerHealthTransportTest(unittest.TestCase):
     def test_non_success_redirect_unknown_framing_and_duplicate_headers_rejected(self):
         for response in (
             self.response(status=b"503 Unavailable"),
-            self.response(status=b"302 Found", extra=b"Location: http://example.invalid/\r\n"),
+            self.response(
+                status=b"302 Found", extra=b"Location: http://example.invalid/\r\n"
+            ),
             self.response(extra=b"Transfer-Encoding: chunked\r\n"),
             self.response(extra=b"Content-Length: 137\r\n"),
             self.response(extra=b"Content-Type: application/json\r\n"),
@@ -1273,10 +1073,12 @@ class ContainerHealthTransportTest(unittest.TestCase):
             self.SUMMARY.replace(b'"ready":true', b'"ready":false'),
             self.SUMMARY.replace(b'"formal"', b'"demo"'),
             self.SUMMARY.replace(b'"OK"', b'"DEPENDENCY_UNAVAILABLE"'),
-            self.SUMMARY.replace(b'caption-hints.v2', b'other'),
+            self.SUMMARY.replace(b"caption-hints.v2", b"other"),
             self.SUMMARY.replace(b'"datasetVersion":42', b'"datasetVersion":0'),
             self.SUMMARY.replace(b'"datasetVersion":42', b'"datasetVersion":-1'),
-            self.SUMMARY.replace(b'"datasetVersion":42', b'"datasetVersion":9223372036854775808'),
+            self.SUMMARY.replace(
+                b'"datasetVersion":42', b'"datasetVersion":9223372036854775808'
+            ),
             self.SUMMARY.replace(b'"datasetVersion":42', b'"datasetVersion":42.0'),
             self.SUMMARY.replace(b'"datasetVersion":42', b'"datasetVersion":"42"'),
             self.SUMMARY.replace(b'"ready":true', b'"ready":true,"ready":true'),
@@ -1293,9 +1095,12 @@ class ContainerHealthTransportTest(unittest.TestCase):
             [(1.2, self.response()[:40]), (1.2, self.response()[40:])],
             [(0, self.response()), (3, b"")],
         ):
-            with self.subTest(chunks=len(chunks)), HealthProbeFixture(
-                DOCKER / "run-container-command.sh", chunks
-            ) as fixture:
+            with (
+                self.subTest(chunks=len(chunks)),
+                HealthProbeFixture(
+                    DOCKER / "run-container-command.sh", chunks
+                ) as fixture,
+            ):
                 started = time.monotonic()
                 result = fixture.run()
                 self.assertEqual(result.returncode, 124)
@@ -1319,9 +1124,11 @@ class ContainerHealthTransportTest(unittest.TestCase):
             poison = pathlib.Path(directory) / "poison"
             poison.write_text("touch " + shlex.quote(str(sentinel)))
             env = {
-                "BASH_ENV": str(poison), "ENV": str(poison),
+                "BASH_ENV": str(poison),
+                "ENV": str(poison),
                 "JAVA_TOOL_OPTIONS": "-Dsecret=never-print",
-                "HTTP_PROXY": "http://127.0.0.1:1", "ALL_PROXY": "http://127.0.0.1:1",
+                "HTTP_PROXY": "http://127.0.0.1:1",
+                "ALL_PROXY": "http://127.0.0.1:1",
             }
             with HealthProbeFixture(
                 DOCKER / "run-container-command.sh", [(0, self.response())], env

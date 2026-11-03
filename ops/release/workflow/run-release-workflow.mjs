@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, createReadStream, createWriteStream } from 'node:fs';
-import { lstat, mkdir, open, readdir, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, open, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { spawn, execFileSync } from 'node:child_process';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -14,8 +14,9 @@ import { checkReleaseTag, resolveBuildIdentity, assertBuildIdentityMatches } fro
 import { loadBaseImageLock } from '../build/release-image-build-plan.mjs';
 import { validateRelativePath } from '../integrity/release-artifact-manifest.mjs';
 import { runRunnerCommand } from '../runner/runner.mjs';
+import { runDocker } from '../build/release-build-process.mjs';
 import { resolveHostBinding } from '../host_resources/release-host-identity.mjs';
-import { resolveFormalInvocation, resolveReleaseExecutionEnvironment, releaseWorkflowDirectory } from './release-execution-environment.mjs';
+import { resolveFormalInvocation, resolveReleaseExecutionEnvironment, releaseWorkflowDirectory, releaseGradleCacheEntries } from './release-execution-environment.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const HEX = /^[a-f0-9]{64}$/;
@@ -25,7 +26,6 @@ const MAX_JSON = 2_000_000;
 const MAX_ARTIFACT = 2 ** 40;
 const MAX_LICENSE_TABLE = 256 * 1024;
 const MAX_LICENSES = 64;
-const SAFE_ENV = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'LEXIFLOW_JAVA_HOME', 'JAVA_HOME'];
 const fail = code => { throw new Error(code); };
 const exact = (v, keys) => v !== null && typeof v === 'object' && !Array.isArray(v)
   && Object.keys(v).sort().join('\0') === [...keys].sort().join('\0');
@@ -33,7 +33,6 @@ const validHostBinding = value => exact(value, ['scheme', 'sha256'])
   && value.scheme === 'lexiflow.host-binding.v1' && HEX.test(value.sha256);
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const fixedReason = error => /^[A-Z][A-Z0-9_]+$/.test(error?.message || '') ? error.message : 'WORKFLOW_FAILED';
-const safeEnv = () => Object.fromEntries(SAFE_ENV.filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]));
 const stamp = value => [value.dev, value.ino, value.size, value.mode, value.mtimeMs, value.ctimeMs].join(':');
 const within = (parent, child) => {
   const relative = path.relative(parent, child);
@@ -162,9 +161,11 @@ async function copyArtifact(source, target, expected) {
       bytes += chunk.length; if (bytes > expected.bytes) return callback(new Error('ARTIFACT_CHANGED'));
       meter.update(chunk); callback(null, chunk);
     } }), createWriteStream(target, { flags: 'wx', mode: 0o600 }));
-  if (bytes !== expected.bytes || meter.digest('hex') !== expected.sha256) fail('ARTIFACT_CHANGED');
+  const streamed = { bytes, sha256: meter.digest('hex') };
+  if (streamed.bytes !== expected.bytes || streamed.sha256 !== expected.sha256) fail('ARTIFACT_CHANGED');
   const again = await fileDigest(source);
-  if (again.sha256 !== expected.sha256 || again.bytes !== expected.bytes) fail('ARTIFACT_CHANGED');
+  if (again.sha256 !== streamed.sha256 || again.bytes !== streamed.bytes) fail('ARTIFACT_CHANGED');
+  return streamed;
 }
 
 function killGroup(child, signal) {
@@ -253,20 +254,18 @@ async function loadLicenses(root, noticesRoot, trackedCheck) {
   let lastId = '';
   for (const item of ledger.licenses) {
     if (!exact(item, ledgerFields) || !ID.test(item.id) || ids.has(item.id) || item.id <= lastId
-      || !['LexiFlow', 'API-runtime', 'PostgreSQL', 'extension-third-party', 'dataset'].includes(item.component)
+      || !['LexiFlow', 'API-runtime', 'extension-third-party', 'dataset'].includes(item.component)
       || ![item.licenseId, item.licenseName].every(s => typeof s === 'string' && s.length > 0 && !/UNVERIFIED/i.test(s))
       || !/^https:\/\//.test(item.sourceUrl) || !Number.isSafeInteger(item.noticeBytes)
       || item.noticeBytes < 1 || item.noticeBytes > 2 ** 40 || !HEX.test(item.noticeSha256)) fail('LICENSE_LEDGER_INVALID');
     validateRelativePath(item.noticePath);
     ids.add(item.id);
     lastId = item.id;
-    const notice = await fileDigest(path.join(noticesRoot, item.noticePath));
+    const notice = notices.get(item.noticePath) ?? await fileDigest(path.join(noticesRoot, item.noticePath));
     if (notice.bytes !== item.noticeBytes || notice.sha256 !== item.noticeSha256) fail('NOTICE_MISMATCH');
-    const existing = notices.get(item.noticePath);
-    if (existing && existing.sha256 !== notice.sha256) fail('LICENSE_LEDGER_INVALID');
     notices.set(item.noticePath, notice);
   }
-  for (const component of ['LexiFlow', 'API-runtime', 'PostgreSQL', 'extension-third-party', 'dataset'])
+  for (const component of ['LexiFlow', 'API-runtime', 'extension-third-party', 'dataset'])
     if (!ledger.licenses.some(item => item.component === component)) fail('LICENSE_LEDGER_INVALID');
   return { licenses: ledger.licenses, notices };
 }
@@ -279,11 +278,37 @@ async function writePrivate(file, value) {
 function licenseIds(licenses, ...components) {
   return licenses.filter(item => components.includes(item.component)).map(item => item.id);
 }
-async function addArtifact(records, role, source, relative, licenses, components, metadata) {
-  const summary = await fileDigest(source);
+async function addArtifact(records, role, summary, relative, licenses, components, metadata) {
   records.push({ role, path: relative, ...summary, licenseIds: licenseIds(licenses, ...components),
     ...(metadata ? { metadata } : {}) });
   return summary;
+}
+
+async function preflightDockerEngine({ endpoint, baseImages, quality, dockerCommand = runDocker }) {
+  if (typeof endpoint !== 'string' || !endpoint.startsWith('unix://') || !Array.isArray(baseImages)
+    || baseImages.length !== 1 || baseImages[0]?.platform !== 'linux/arm64') fail('DOCKER_PREFLIGHT_INPUT_INVALID');
+  const bases = baseImages[0];
+  for (const image of [bases.javaRuntime]) {
+    if (!image || typeof image.reference !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(image.imageId)) fail('BASE_IMAGE_MISSING');
+  }
+  const parent = path.dirname(quality);
+  await safePath(parent, 'directory', true);
+  await mkdir(parent, { recursive: true, mode: 0o700 });
+  await safePath(parent, 'directory');
+  const configDirectory = await mkdtemp(path.join(parent, '.docker-preflight-'));
+  try {
+    await writePrivate(path.join(configDirectory, 'config.json'), { auths: {} });
+    const context = { cwd: configDirectory, configDirectory, endpoint, timeoutMs: 30_000 };
+    const version = parseStrictJson(Buffer.from((await dockerCommand(['version', '--format', '{{json .}}'], context)).trim()));
+    if (!version?.Server) fail('DOCKER_UNAVAILABLE');
+    const info = parseStrictJson(Buffer.from((await dockerCommand(['info', '--format', '{{json .}}'], context)).trim()));
+    if (info?.OSType !== 'linux' || !['arm64', 'aarch64'].includes(info.Architecture)) fail('DOCKER_PLATFORM_MISMATCH');
+    for (const image of [bases.javaRuntime]) {
+      const inspected = parseStrictJson(Buffer.from((await dockerCommand(['image', 'inspect', image.reference], context)).trim()));
+      if (!Array.isArray(inspected) || inspected.length !== 1 || inspected[0]?.Id !== image.imageId
+        || inspected[0]?.Os !== 'linux' || !['arm64', 'aarch64'].includes(inspected[0]?.Architecture)) fail('BASE_IMAGE_MISMATCH');
+    }
+  } finally { await rm(configDirectory, { recursive: true, force: false }); }
 }
 
 export async function prepareWorkflow(requestFile, options = {}) {
@@ -292,7 +317,6 @@ export async function prepareWorkflow(requestFile, options = {}) {
   const assemble = options.assembleReleaseCandidate ?? assembleReleaseCandidate;
   const verify = options.verifyReleaseCandidate ?? verifyReleaseCandidate;
   const command = options.runCommand ?? runCommand;
-  const identityRead = options.identityReader ?? resolveBuildIdentity;
   const tagCheck = options.tagChecker ?? checkReleaseTag;
   const baseLoad = options.baseImageLoader ?? loadBaseImageLock;
   const endpointCheck = options.endpointChecker ?? (async endpoint => {
@@ -307,6 +331,26 @@ export async function prepareWorkflow(requestFile, options = {}) {
   // Private pure boundary seam for deterministic tests; the CLI has no host-source option.
   const hostBindingResolver = options.testOnlyHostBindingResolver ?? resolveHostBinding;
   let guard;
+  const timings = []; const invocationStarted = performance.now();
+  let failurePhase = 'input-preflight', inputPreflightRecorded = false;
+  const timed = async (name, work) => {
+    if (!inputPreflightRecorded) {
+      timings.push({ phase: 'input-preflight', durationMs: Math.max(0, Math.round(performance.now() - invocationStarted)) });
+      inputPreflightRecorded = true;
+    }
+    failurePhase = name;
+    const started = performance.now();
+    try { return await work(); }
+    finally { timings.push({ phase: name, durationMs: Math.max(0, Math.round(performance.now() - started)) }); }
+  };
+  const result = (value, remoteWriteState = 'not-started') => {
+    if (options.diagnostics !== true) return value;
+    const elapsedMs = Math.max(0, Math.round(performance.now() - invocationStarted));
+    if (!inputPreflightRecorded) timings.push({ phase: 'input-preflight', durationMs: elapsedMs });
+    const measuredMs = timings.reduce((total, phase) => total + phase.durationMs, 0);
+    return { ...value, diagnostics: { phases: timings, elapsedMs, overheadMs: Math.max(0, elapsedMs - measuredMs),
+      failurePhase: value.status === 'PASS' ? null : failurePhase, remoteWriteState } };
+  };
   try {
     const initialHostBinding = hostBindingResolver();
     if ((options.platform ?? process.platform) !== 'darwin' || (options.arch ?? process.arch) !== 'arm64') fail('HOST_UNSUPPORTED');
@@ -320,35 +364,60 @@ export async function prepareWorkflow(requestFile, options = {}) {
     if (within(root, request.outputParent) || within(request.outputParent, root)
       || (await readdir(request.outputParent)).length !== 0) fail('OUTPUT_PARENT_INVALID');
     const identity = tagCheck(request.releaseTag, root);
-    assertBuildIdentityMatches(identityRead(root), identity);
     const quality = releaseWorkflowDirectory(root);
     await safePath(quality, 'directory', true);
-    await mkdir(quality, { recursive: true, mode: 0o700 });
-    guard = await open(path.join(quality, 'prepare.lock'), 'wx', 0o600);
-    if ((await readdir(quality)).some(name => name !== 'prepare.lock')) fail('WORKFLOW_RESIDUE');
+    try {
+      await lstat(quality);
+      const existing = await readdir(quality);
+      if (existing.length && (existing.length !== 1 || existing[0] !== 'prepare.lock')) fail('WORKFLOW_RESIDUE');
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
     const runtimeConfig = path.join(root, '.local/lexiflow/runtime.json');
     try { await lstat(runtimeConfig); fail('PERSONAL_CONFIG_PRESENT'); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
     const dataset = await fileDigest(request.dataset.path);
     if (dataset.sha256 !== request.dataset.sha256) fail('DATASET_DIGEST_MISMATCH');
-    const expectedDatasetPath = path.join(quality, 'expected-dataset.json');
     const expectedDataset = { releaseId: request.dataset.releaseId, preparationId: request.dataset.preparationId,
       ruleId: request.dataset.ruleId, sqlVersion: request.dataset.sqlVersion, sha256: dataset.sha256 };
-    await writeFile(expectedDatasetPath, `${JSON.stringify(expectedDataset)}\n`, { flag: 'wx', mode: 0o600 });
-    const { licenses, notices } = await loadLicenses(root, request.noticesRoot, trackedCheck);
-    const baseImages = (await baseLoad(root)).filter(item => item.platform === 'linux/arm64');
+    const { licenses, notices } = await timed('license-validation', () => loadLicenses(root, request.noticesRoot, trackedCheck));
+    const baseImages = (await timed('base-image-lock', () => baseLoad(root))).filter(item => item.platform === 'linux/arm64');
     if (baseImages.length !== 1) fail('ARM64_BASE_IMAGE_MISSING');
+    const environmentResolver = options.environmentResolver ?? resolveReleaseExecutionEnvironment;
+    const env = await timed('environment-preflight', () => {
+      const resolved = environmentResolver({ root, purpose: 'prepare' });
+      if (!resolved || resolved.npm_config_cache !== resolved.LEXIFLOW_RELEASE_NPM_CACHE
+        || resolved.LEXIFLOW_RELEASE_ARM64_DOCKER_HOST !== request.endpoint
+        || resolved.npm_config_userconfig !== path.join(quality, 'npmrc-empty')
+        || resolved.GRADLE_USER_HOME !== path.join(quality, 'gradle-home')) fail('RELEASE_ENVIRONMENT_INVALID');
+      return resolved;
+    });
+    const gradleCacheEntries = releaseGradleCacheEntries(root, env.LEXIFLOW_RELEASE_GRADLE_CACHE);
+    await timed('docker-engine-preflight', () => preflightDockerEngine({ endpoint: request.endpoint, baseImages, quality,
+      dockerCommand: options.dockerCommand ?? runDocker }));
+
+    // 所有未就绪输入和只读工具探测完成后才取得版本目录锁并创建构建现场。
+    failurePhase = 'prebuild-setup';
+    await mkdir(quality, { recursive: true, mode: 0o700 });
+    guard = await open(path.join(quality, 'prepare.lock'), 'wx', 0o600);
+    if ((await readdir(quality)).some(name => name !== 'prepare.lock')) fail('WORKFLOW_RESIDUE');
+    const expectedDatasetPath = path.join(quality, 'expected-dataset.json');
+    await writeFile(expectedDatasetPath, `${JSON.stringify(expectedDataset)}\n`, { flag: 'wx', mode: 0o600 });
+    const npmrc = await open(env.npm_config_userconfig, 'wx', 0o600);
+    try { await npmrc.writeFile(''); await npmrc.sync(); } finally { await npmrc.close(); }
+    await mkdir(path.join(env.GRADLE_USER_HOME, 'caches'), { recursive: true, mode: 0o700 });
+    await mkdir(path.join(env.GRADLE_USER_HOME, 'wrapper'), { recursive: true, mode: 0o700 });
+    for (const relative of gradleCacheEntries)
+      await symlink(path.join(env.LEXIFLOW_RELEASE_GRADLE_CACHE, relative), path.join(env.GRADLE_USER_HOME, relative));
+    await safePath(env.GRADLE_USER_HOME, 'directory');
     const artifactRoot = path.join(request.outputParent, 'artifacts');
     const imageParent = path.join(request.outputParent, 'images');
     const releaseParent = path.join(request.outputParent, 'releases');
     for (const folder of [artifactRoot, imageParent, releaseParent]) await mkdir(folder, { mode: 0o700 });
-    const env = safeEnv();
-    await command('python3', ['-m', 'scripts.local.run_with_java_toolchain', 'backend/gradlew', '-p', 'backend', '--no-daemon', ':api:bootJar'],
-      { cwd: root, env, timeout: 2_400_000, logFile: path.join(quality, 'gradle.log') });
-    await command('npm', ['ci'], { cwd: path.join(root, 'extension'), env, timeout: 900_000,
-      logFile: path.join(quality, 'npm-ci.log') });
-    const extensionOutput = await command('node', ['extension/scripts/packaging/package-extension-release.mjs', '--expected-dataset', expectedDatasetPath], { cwd: root, env, timeout: 900_000,
-      logFile: path.join(quality, 'extension-release.log') });
+    await timed('compile', () => command('python3', ['-m', 'scripts.local.run_with_java_toolchain', 'backend/gradlew', '-p', 'backend', '--no-daemon', ':api:bootJar'],
+      { cwd: root, env, timeout: 2_400_000, logFile: path.join(quality, 'gradle.log') }));
+    await timed('npm-prepare', () => command('npm', ['ci'], { cwd: path.join(root, 'extension'), env, timeout: 900_000,
+      logFile: path.join(quality, 'npm-ci.log') }));
+    const extensionOutput = await timed('extension-package', () => command('node', ['extension/scripts/packaging/package-extension-release.mjs', '--expected-dataset', expectedDatasetPath], { cwd: root, env, timeout: 900_000,
+      logFile: path.join(quality, 'extension-release.log') }));
     let extension; try { extension = parseStrictJson(Buffer.from(extensionOutput.trim(), 'utf8')); }
     catch { fail('EXTENSION_OUTPUT_INVALID'); }
     if (!exact(extension, ['buildIdentity', 'softwareVersion', 'sourceCommit', 'filename', 'bytes', 'sha256'])
@@ -360,22 +429,23 @@ export async function prepareWorkflow(requestFile, options = {}) {
     const jar = await fileDigest(jarSource);
     const zip = await fileDigest(zipSource);
     if (zip.bytes !== extension.bytes || zip.sha256 !== extension.sha256) fail('EXTENSION_DIGEST_MISMATCH');
-    await command('python3', ['-m', 'scripts.local.run_with_java_toolchain', 'java', '-jar', jarSource,
+    await timed('dataset-verify', () => command('python3', ['-m', 'scripts.local.run_with_java_toolchain', 'java', '-jar', jarSource,
       '--release-dataset', 'verify', '--package', request.dataset.path, '--expected-sha256', request.dataset.sha256],
-    { cwd: root, env, timeout: 900_000, logFile: path.join(quality, 'dataset-verify.log') });
+    { cwd: root, env, timeout: 900_000, logFile: path.join(quality, 'dataset-verify.log') }));
+    failurePhase = 'artifact-staging';
     const stagedJar = path.join(artifactRoot, 'api.jar');
     await copyArtifact(jarSource, stagedJar, jar);
     const records = [];
-    await copyArtifact(request.dataset.path, path.join(artifactRoot, 'dataset.zip'), dataset);
-    await addArtifact(records, 'dataset', path.join(artifactRoot, 'dataset.zip'), 'dataset.zip', licenses,
+    const datasetCopy = await copyArtifact(request.dataset.path, path.join(artifactRoot, 'dataset.zip'), dataset);
+    await addArtifact(records, 'dataset', datasetCopy, 'dataset.zip', licenses,
       ['dataset'], { releaseId: request.dataset.releaseId, preparationId: request.dataset.preparationId,
         ruleId: request.dataset.ruleId, sqlVersion: request.dataset.sqlVersion });
     for (const [relative, summary] of notices) {
       const target = relative;
       await mkdir(path.dirname(path.join(artifactRoot, target)), { recursive: true, mode: 0o700 });
-      await copyArtifact(path.join(request.noticesRoot, relative), path.join(artifactRoot, target), summary);
+      const copiedNotice = await copyArtifact(path.join(request.noticesRoot, relative), path.join(artifactRoot, target), summary);
       const associated = licenses.filter(item => item.noticePath === relative).map(item => item.id);
-      records.push({ role: 'license', path: target, ...summary, licenseIds: associated });
+      records.push({ role: 'license', path: target, ...copiedNotice, licenseIds: associated });
     }
     const imageDescriptor = { schemaVersion: 1, softwareVersion: identity.softwareVersion,
       sourceCommit: identity.sourceCommit, jar: { path: 'api.jar', ...jar }, apiContract: 'caption-hints.v2',
@@ -383,42 +453,44 @@ export async function prepareWorkflow(requestFile, options = {}) {
       dataset: { path: 'dataset.zip', ...dataset, releaseId: request.dataset.releaseId,
         preparationId: request.dataset.preparationId, ruleId: request.dataset.ruleId },
       notices: [...notices.entries()].map(([noticePath, summary]) => ({ path: noticePath, ...summary })) };
-    const imageResult = await buildImages({ repoRoot: root, artifactRoot, descriptor: imageDescriptor,
-      outputParent: imageParent, endpoint: request.endpoint, platform: 'linux/arm64' });
+    const imageResult = await timed('image-build', () => buildImages({ repoRoot: root, artifactRoot, descriptor: imageDescriptor,
+      outputParent: imageParent, endpoint: request.endpoint, platform: 'linux/arm64' }));
     const imageDirectory = imageResult.candidateDirectory;
     await safePath(imageDirectory, 'directory');
     const imageMarker = (await readBoundedJson(path.join(imageDirectory, 'candidate.json'))).value;
     const imageSha256 = (await fileDigest(path.join(imageDirectory, 'candidate.json'))).sha256;
     if (imageMarker.platform !== 'linux/arm64' || !Array.isArray(imageMarker.artifacts)
       || imageMarker.artifacts.length !== 1) fail('IMAGE_RESULT_INVALID');
-    await copyArtifact(zipSource, path.join(artifactRoot, 'extension.zip'), zip);
-    await addArtifact(records, 'extension', path.join(artifactRoot, 'extension.zip'), 'extension.zip', licenses,
+    failurePhase = 'artifact-staging';
+    const extensionCopy = await copyArtifact(zipSource, path.join(artifactRoot, 'extension.zip'), zip);
+    await addArtifact(records, 'extension', extensionCopy, 'extension.zip', licenses,
       ['LexiFlow', 'extension-third-party'], { softwareVersion: identity.softwareVersion, sourceCommit: identity.sourceCommit,
         expectedDataset });
     for (const [role, relative, target] of [
-      ['sql', 'infra/postgres/schema.sql', 'schema.sql']]) {
+      ['sql', 'infra/sqlite/schema.sql', 'schema.sql']]) {
       const source = path.join(root, relative); const summary = await fileDigest(source);
-      await copyArtifact(source, path.join(artifactRoot, target), summary);
-      await addArtifact(records, role, path.join(artifactRoot, target), target, licenses, ['LexiFlow']);
+      const copied = await copyArtifact(source, path.join(artifactRoot, target), summary);
+      await addArtifact(records, role, copied, target, licenses, ['LexiFlow']);
     }
     const manifestLicenses = licenses.map(item => ({ ...item }));
     for (const item of imageMarker.artifacts) {
       if (item.role !== 'runtime-image' || item.platform !== 'linux/arm64') fail('IMAGE_RESULT_INVALID');
       records.push({ role: item.role, platform: item.platform,
-        licenseIds: licenseIds(licenses, 'LexiFlow', 'API-runtime', 'PostgreSQL') });
+        licenseIds: licenseIds(licenses, 'LexiFlow', 'API-runtime') });
     }
-    const descriptor = { schemaVersion: 1, buildIdentity: identity, softwareVersion: identity.softwareVersion,
+    const descriptor = { schemaVersion: 2, buildIdentity: identity, softwareVersion: identity.softwareVersion,
       sourceCommit: identity.sourceCommit, apiContract: 'caption-hints.v2', sqlVersion: request.dataset.sqlVersion,
       dataset: { releaseId: request.dataset.releaseId, preparationId: request.dataset.preparationId, ruleId: request.dataset.ruleId },
       platforms: ['linux/arm64'], artifacts: records, licenses: manifestLicenses };
-    const candidate = await assemble({ repoRoot: root, imageCandidates: [{ directory: imageDirectory, sha256: imageSha256 }],
-      artifactRoot, descriptor, outputParent: releaseParent });
+    const candidate = await timed('assemble', () => assemble({ repoRoot: root, imageCandidates: [{ directory: imageDirectory, sha256: imageSha256 }],
+      artifactRoot, descriptor, outputParent: releaseParent }));
+    failurePhase = 'candidate-verify';
     const candidateSha256 = (await fileDigest(path.join(candidate.candidateDirectory, 'candidate.json'))).sha256;
     const target = { candidateDirectory: candidate.candidateDirectory, candidateSha256 };
-    const proof = await verify(target);
+    const proof = await timed('candidate-verify', () => verify(target));
     if (proof.candidateSha256 !== candidateSha256 || proof.buildIdentity.buildId !== identity.buildId) fail('CANDIDATE_VERIFY_FAILED');
-    assertBuildIdentityMatches(identityRead(root), identity);
-    tagCheck(request.releaseTag, root);
+    failurePhase = 'handoff-finalize';
+    assertBuildIdentityMatches(tagCheck(request.releaseTag, root), identity);
     if ((await readBoundedJson(requestFile)).sha256 !== requestSha256) fail('REQUEST_CHANGED');
     const finalHostBinding = hostBindingResolver();
     if (JSON.stringify(finalHostBinding) !== JSON.stringify(initialHostBinding)) fail('HOST_BINDING_DRIFT');
@@ -436,12 +508,12 @@ export async function prepareWorkflow(requestFile, options = {}) {
       try { await fd.writeFile(`LEXIFLOW_CANDIDATE_RUNTIME_REQUEST=${runtimeFile}\n`); }
       finally { await fd.close(); }
     }
-    return { status: 'PASS', stage: 'awaiting-native-formal' };
-  } catch (error) { return { status: 'BLOCKED', reason: fixedReason(error) }; }
+    return result({ status: 'PASS', stage: 'awaiting-native-formal' });
+  } catch (error) { return result({ status: 'BLOCKED', reason: fixedReason(error) }); }
   finally { if (guard) await guard.close(); }
 }
 
-export async function resumePromotion({ submissionId, releaseTag, publish = false, confirmedRecovery = false, root = ROOT,
+async function resumePromotionCore({ submissionId, releaseTag, publish = false, confirmedRecovery = false, root = ROOT,
   run = runCommand, identityReader = resolveBuildIdentity, tagChecker = checkReleaseTag,
   verifier = verifyReleaseCandidate, testOnlyHostBindingResolver = resolveHostBinding,
   environmentResolver = resolveReleaseExecutionEnvironment } = {}) {
@@ -517,6 +589,22 @@ export async function resumePromotion({ submissionId, releaseTag, publish = fals
   } catch (error) { return { status: 'BLOCKED', reason: fixedReason(error) }; }
 }
 
+
+export async function resumePromotion(options = {}) {
+  const started = performance.now();
+  const phase = options.publish === true ? 'publish' : 'promotion-precheck';
+  const value = await resumePromotionCore(options);
+  if (options.diagnostics !== true) return value;
+  const remoteWriteState = value.published === true ? 'published'
+    : value.published === 'unknown' ? 'unknown'
+      : value.published === false ? 'not-published'
+        : phase === 'publish' && value.status === 'PASS' ? 'published'
+          : phase === 'publish' ? 'not-started' : 'not-applicable';
+  return { ...value, diagnostics: { phases: [{ phase, durationMs: Math.max(0, Math.round(performance.now() - started)) }],
+    elapsedMs: Math.max(0, Math.round(performance.now() - started)), failurePhase: value.status === 'PASS' ? null : phase,
+    remoteWriteState } };
+}
+
 export async function executeFormal(args, { root = ROOT, run = runCommand,
   environmentResolver = resolveReleaseExecutionEnvironment } = {}) {
   const invocation = resolveFormalInvocation(args, root);
@@ -571,9 +659,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   } else {
     const recoveryArgsValid = args.length === 4 && args[2] === '--publish' && args[3] === '--confirmed-recovery';
     const result = mode === 'prepare' && args.length === 1
-      ? await prepareWorkflow(args[0])
+      ? await prepareWorkflow(args[0], { diagnostics: true })
       : mode === 'resume' && (args.length === 2 || (args.length === 3 && args[2] === '--publish') || recoveryArgsValid)
-        ? await resumePromotion({ submissionId: args[0], releaseTag: args[1], publish: args.length >= 3, confirmedRecovery: recoveryArgsValid })
+        ? await resumePromotion({ submissionId: args[0], releaseTag: args[1], publish: args.length >= 3, confirmedRecovery: recoveryArgsValid, diagnostics: true })
         : mode === 'runner' && args.length === 1
           ? args[0] === '--help' ? { status: 'PASS', commands: ['doctor', 'deps', 'install', 'register', 'start', 'stop', 'status', 'setup'] }
             : await runRunnerCommand(args[0])

@@ -1,4 +1,4 @@
-// 受管安装的准备/激活/恢复事务；不导入资料、不管理 PostgreSQL、不删除引擎资源。
+// 受管安装的准备/激活/恢复事务；不导入资料、不管理数据库服务、不删除引擎资源。
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';

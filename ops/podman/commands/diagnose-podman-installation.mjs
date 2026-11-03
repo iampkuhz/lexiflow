@@ -7,6 +7,7 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { javaBuildEnvironment } from '../environment/java-build-environment.mjs';
+import { validateSqliteDatabaseFile } from '../environment/local-sqlite-target.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
@@ -14,7 +15,7 @@ const PHASES = new Set(['new', 'initialized', 'ready']);
 const actions = {
   SUPPORTED: '环境满足此项要求', MISSING_TOOL: '安装所需工具后重试', UNSUPPORTED_VERSION: '选择 Java 25 和 Node.js 22 或以上',
   UNSUPPORTED_HOST: '在 M 芯片 macOS 上运行', ENGINE_UNAVAILABLE: '检查 Podman machine 是否已启动', COMPOSE_UNAVAILABLE: '安装或检查 Podman Compose provider',
-  NOT_INSTALLED: '运行 install 首次部署', INVALID_STATE: '保留安装现场，不手动修改状态文件', INSTALL_INCOMPLETE: '建库前失败可重试 install',
+  NOT_INSTALLED: '运行 install 首次部署', INVALID_STATE: '保留安装现场，不手动修改状态文件', INSTALL_INCOMPLETE: '数据库提交前失败可重试 install', DATABASE_MISSING: '保留安装现场，使用 install/upgrade --plan 明确重建', DATABASE_READY: 'SQLite 文件存在且属于本安装',
   INITIALIZATION_UNCERTAIN: '保留数据库与日志，不自动重导', NO_LOCK: '没有安装锁', ACTIVE_LOCK: '等待原安装结束，不同时重试',
   STALE_LOCK: '原进程已消失，可重试 install', LEGACY_LOCK: '确认原安装退出后 recover --confirm-stopped', INVALID_LOCK: '保留未知锁，勿手工删除',
   NO_CONTAINERS: '安装完成后可运行 up；首次安装运行 install', CONTAINERS_STOPPED: '运行 up 启动已有安装', CONTAINER_OWNERSHIP: '容器归属异常，保留现场',
@@ -113,8 +114,13 @@ export async function diagnose(dir, env) {
   if (!fs.existsSync(dir)) { add('installation', 'BLOCKED', 'NOT_INSTALLED'); return report(checks); }
   try {
     state = jsonFile(path.join(dir, 'state.json'));
-    if (state.schema !== 1 || state.root !== dir || !/^[a-f0-9]{32}$/.test(state.id) || state.project !== `lexiflow-local-${state.id}` || !PHASES.has(state.phase) || !Number.isInteger(state.apiPort) || state.apiPort < 1 || state.apiPort > 65535 || parseSoftwareVersion(state.version) !== state.version) throw new Error('invalid');
+    if (state.schema !== 2 || state.root !== dir || !/^[a-f0-9]{32}$/.test(state.id) || state.project !== `lexiflow-local-${state.id}` || !PHASES.has(state.phase) || !Number.isInteger(state.apiPort) || state.apiPort < 1 || state.apiPort > 65535 || state.databaseTarget?.kind !== 'file' || state.databaseFile !== path.join(dir, 'data', 'lexicon.db') || parseSoftwareVersion(state.version) !== state.version) throw new Error('invalid');
   } catch { add('installation', 'FAIL', 'INVALID_STATE'); return report(checks); }
+  try {
+    validateSqliteDatabaseFile(state.databaseFile, { installationRoot: dir, allowMissing: state.phase === 'new' });
+    const exists = fs.existsSync(state.databaseFile);
+    add('database-file', exists ? 'PASS' : 'BLOCKED', exists ? 'DATABASE_READY' : 'DATABASE_MISSING');
+  } catch { add('database-file', 'FAIL', 'INVALID_STATE'); }
   const installed = ['initialized', 'ready'].includes(state.phase);
   add('installation', installed && state.generationVersion && state.datasetIdentity ? 'PASS' : 'BLOCKED', installed && state.generationVersion && state.datasetIdentity ? 'SUPPORTED' : 'INSTALL_INCOMPLETE', { phase: state.phase });
   const lock = path.join(dir, '.lock');
@@ -139,11 +145,10 @@ export async function diagnose(dir, env) {
       if (!Array.isArray(rows)) throw new Error('invalid');
       if (rows.some(row => row.Labels?.['lexiflow.installation'] !== state.id || row.Labels?.['com.docker.compose.project'] !== state.project)) add('containers', 'FAIL', 'CONTAINER_OWNERSHIP');
       else {
-        const external = state.databaseTarget?.kind === 'external';
         const services = rows.map(row => row.Labels?.['com.docker.compose.service']);
-        if (external && services.some(service => service !== 'api')) add('containers', 'FAIL', 'CONTAINER_OWNERSHIP');
+        if (services.some(service => service !== 'api')) add('containers', 'FAIL', 'CONTAINER_OWNERSHIP');
         else {
-          containersOK = (external ? ['api'] : ['postgres', 'api']).every(service => rows.some(row => row.Labels?.['com.docker.compose.service'] === service && row.State === 'running'));
+          containersOK = rows.some(row => row.Labels?.['com.docker.compose.service'] === 'api' && row.State === 'running');
           add('containers', containersOK ? 'PASS' : 'BLOCKED', containersOK ? 'CONTAINERS_RUNNING' : rows.length ? 'CONTAINERS_STOPPED' : 'NO_CONTAINERS');
         }
       }

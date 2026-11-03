@@ -75,8 +75,6 @@ public final class BuiltinLexiconCatalog implements LexiconCatalog {
         lemma.contains(" ") ? LexiconEntryKind.PHRASE : LexiconEntryKind.WORD,
         LexiconHintAction.HINT,
         gloss,
-        100,
-        false,
-        0);
+        100);
   }
 }

@@ -4,13 +4,13 @@
 
 ## 1.1. 本地体验没有提示
 
-若 API 在启动时已报 `relation "lexicon_form" does not exist`，先处理[数据库结构与发布资料](../scenarios/lexicon-import.md)，不是 Chrome 或模型配置问题。首次安装按[根 README](../../README.md)完成数据库配置、初始化与词库发布，不能只运行最后的 API 命令。
+若 API 因 SQLite 文件缺失、只读打开失败、结构不匹配或没有发布资料而无法启动，先处理[离线数据库初始化与发布](../scenarios/lexicon-import.md)，不是 Chrome 或模型配置问题。API 不隐式创建数据库，也不执行初始化。
 
 API 能正常启动后，按浏览器 → 请求 → API → 资料 → 展示定位：
 
 1. 英文是否正常可见？无可靠来源、广告、导航或关闭增强时，扩展应退回英文，不伪造输入。
 2. 构建端口是否匹配 API？查看[本地体验](../scenarios/local-development.md)，不靠改远端地址解决。
-3. API 日志的 runtime lexicon 是否为 postgres，publishedVersion 是否有效？health 成功不证明资料已发布。
+3. API 日志的 runtime lexicon 是否为 sqlite，publishedVersion 是否有效？health 成功不证明资料已发布。
 4. `NO_PENDING` 表示没有可靠提示，不是模型没配置；观看链路不调用模型。
 5. 是否在返回前已经换句、seek 或关闭？过期结果必须被放弃，不能延续到下一句。
 

@@ -31,6 +31,10 @@ test('assembles one ARM64 private candidate with exact payload and stable marker
     const before = await Promise.all(f.imageCandidateDirectories.map(({ directory }) => readFile(path.join(directory, 'candidate.json'))));
     const result = await assembleReleaseCandidate({ repoRoot: f.root, imageCandidates: f.imageCandidateDirectories.map(({ directory, sha256 }) => ({ directory, sha256 })),
       artifactRoot: f.artifactRoot, descriptor: f.descriptor, outputParent: f.outputParent });
+    assert.equal(result.manifest.schemaVersion, 2);
+    assert.deepEqual([...new Set(result.manifest.artifacts.map(item => item.role))].sort(),
+      ['corresponding-sources', 'dataset', 'extension', 'runtime-image', 'sql']);
+    assert.equal(result.manifest.artifacts.some(item => item.role === 'license'), false);
     assert.deepEqual(result.candidate, { schemaVersion: 1, kind: 'lexiflow-release-candidate', buildIdentity: resolveBuildIdentity(f.root), softwareVersion: '2.0.0',
       sourceCommit: f.descriptor.sourceCommit, manifestPath: 'payload/manifest.json',
       manifestSha256: hash(await readFile(path.join(result.candidateDirectory, 'payload/manifest.json'))), buildInputSha256: 'e'.repeat(64), imageCandidates: [{ platform: 'linux/arm64', sha256: f.imageCandidateDirectories[0].sha256 }] });

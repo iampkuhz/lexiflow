@@ -14,7 +14,7 @@ import java.util.Objects;
  * @param definition 含义：来源定义。取值范围：由方法调用前置条件限定。
  * @param aliases 含义：同义或别名表面。取值范围：由方法调用前置条件限定。
  * @param inflections 含义：屈折表面。取值范围：由方法调用前置条件限定。
- * @param priority 含义：排序与预热优先级。取值范围：由方法调用前置条件限定。
+ * @param priority 含义：构建期词频与词表评分证据。取值范围：由方法调用前置条件限定。
  * @param dictionary 含义：词典字段来源。取值范围：由方法调用前置条件限定。
  * @param frequency 含义：词频字段来源。取值范围：由方法调用前置条件限定。
  * @param complexLists 含义：复杂词表字段来源。取值范围：由方法调用前置条件限定。

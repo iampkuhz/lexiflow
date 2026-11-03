@@ -64,8 +64,7 @@ async function makeScript(body, manifest) {
   const checks = manifest.artifacts.filter((item) => item.role !== 'runtime-entry').map((item) => `  lf_check_file ${quote(item.path)} ${item.bytes} ${quote(item.sha256)} || return 1`).join('\n');
   const cases = manifest.platforms.map((platform) => {
     const api = manifest.artifacts.find((item) => item.role === 'api-image' && item.platform === platform);
-    const db = manifest.artifacts.find((item) => item.role === 'postgres-image' && item.platform === platform);
-    return `    ${platform}) LF_PLATFORM=${quote(platform)}; LF_API_IMAGE=${quote(api.imageDigest)}; LF_POSTGRES_IMAGE=${quote(db.imageDigest)}; LF_API_ARCHIVE=${quote(api.path)}; LF_POSTGRES_ARCHIVE=${quote(db.path)};;`;
+    return `    ${platform}) LF_PLATFORM=${quote(platform)}; LF_API_IMAGE=${quote(api.imageDigest)}; LF_API_ARCHIVE=${quote(api.path)};;`;
   }).join('\n');
   const values = Object.fromEntries(Object.entries({ ...staticValues(manifest), MANIFEST_PREFIX: prefix, MANIFEST_MIDDLE: middle, MANIFEST_SUFFIX: suffix }).map(([key, value]) => [key, quote(value)]));
   values.ARTIFACT_CHECKS = checks;

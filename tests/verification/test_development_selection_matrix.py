@@ -3,26 +3,24 @@
 from __future__ import annotations
 
 import ast
-import unittest
 import tempfile
+import unittest
 from pathlib import Path
 
-from tests.verification.declaration_fixtures import input_closure
+from scripts.triggers.run_ci_quick_checks import make_plan
+from scripts.verification import freeze_inputs
+from scripts.verification.execution.check_runner import snapshot_check_inputs
+from scripts.verification.planning.change_risk_assessment import formal_only_ids
 from scripts.verification.planning.check_definitions import (
     filter_checks_by_scope,
     load_declarations_snapshot,
 )
-from scripts.verification.execution.check_runner import snapshot_check_inputs
-from scripts.verification.planning.change_risk_assessment import formal_only_ids
-from scripts.verification.planning.check_scope_selection import (
-    select_checks_for_changes,
-)
 from scripts.verification.planning.check_scope_selection import (
     ScopeError,
     resolve_module_dependencies,
+    select_checks_for_changes,
 )
-from scripts.verification import freeze_inputs
-from scripts.triggers.run_ci_quick_checks import make_plan
+from tests.verification.declaration_fixtures import input_closure
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -193,6 +191,15 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
         for check in self.checks:
             self.assertTrue(check["input_paths"], check["check_id"])
 
+    def test_runtime_license_materials_trigger_manifest_validation(self):
+        """原始许可正文变化也必须进入发行完整性验证闭包。"""
+        for name in ("LICENSE", "LICENSE.zentus", "SQLite-Public-Domain.txt"):
+            with self.subTest(name=name):
+                selected = self.selected(
+                    f"ops/release/notices/licenses/sqlite-jdbc-3.54.1.0/{name}"
+                )
+                self.assertIn("eng.release.manifest", selected)
+
     def test_release_python_package_initializer_triggers_its_consumers(self):
         """Python 包初始化执行实际消费检查，不因身份变化扩大 Java／扩展检查。"""
         self.assertEqual(
@@ -234,7 +241,7 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
         for group in ("local", "node"):
             check = groups[group]
             self.assertIn("infra/local/compose.yaml", check["input_paths"])
-            self.assertIn("infra/postgres/schema.sql", check["input_paths"])
+            self.assertIn("infra/sqlite/schema.sql", check["input_paths"])
         self.assertIn(
             "ops/release/runtime/release-installation-docker.sh",
             input_closure(ROOT, groups["shell"]),
@@ -270,7 +277,7 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
                 "eng.backend.delivery",
                 "eng.extension.quality",
             },
-            "infra/postgres/schema.sql": {
+            "infra/sqlite/schema.sql": {
                 "eng.backend.delivery",
                 "eng.extension.quality",
                 "eng.release.docker-local-on-change",
@@ -338,14 +345,19 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
                 "eng.release.lifecycle-install",
                 "eng.release.runtime-entry",
             },
-            "ops/docker/tests/test_podman_local.py": {
-                "eng.release.build",
+            "ops/podman/tests/unified-flow.test.mjs": {
+                "eng.backend.build-contract",
+                "eng.backend.delivery",
                 "eng.release.docker-local-on-change",
                 "eng.release.docker-node-on-change",
-                "eng.release.docker-shell-on-change",
                 "eng.release.docker-surface-on-change",
-                "eng.release.lifecycle-install",
-                "eng.release.runtime-entry",
+            },
+            "ops/podman/tests/logs.test.mjs": {
+                "eng.backend.build-contract",
+                "eng.backend.delivery",
+                "eng.release.docker-local-on-change",
+                "eng.release.docker-node-on-change",
+                "eng.release.docker-surface-on-change",
             },
             "ops/docker/Dockerfile.runtime": {
                 "eng.release.build",
@@ -391,6 +403,13 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
                 "eng.release.docker-surface-on-change",
             },
         }
+        # 正式运行检查仍是实际消费者，但不属于日常开发冻结资格。
+        for path in (
+            "ops/podman/tests/unified-flow.test.mjs",
+            "ops/podman/tests/logs.test.mjs",
+        ):
+            self.assertTrue(formal_only_ids(ROOT) <= self.selected(path))
+            self.assertTrue(formal_only_ids(ROOT).isdisjoint(self.frozen_ids(path)))
         for path, expected in expectations.items():
             with self.subTest(path=path):
                 self.assertEqual(expected, self.frozen_ids(path))
@@ -490,7 +509,7 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
                 "scripts/agents/",
                 "config/engineering/risk.yaml",
             ),
-            "eng.extension.quality": ("backend/", "infra/postgres/"),
+            "eng.extension.quality": ("backend/", "infra/sqlite/"),
         }
         for check_id, sources in consumer_sources.items():
             triggers = [

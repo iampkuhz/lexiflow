@@ -144,7 +144,11 @@ lf_engine_read() {
   lf_safe_private_tree || return 1
   [ -e "$file" ] && [ ! -L "$file" ] && [ -f "$file" ] || return 1
   # Read all fixed metadata together, without caching across identity checks.
-  metadata=$(stat -c '%h:%a:%s' "$file" 2>/dev/null || stat -f '%l:%Lp:%z' "$file" 2>/dev/null) || return 1
+  if metadata=$(stat -c '%h:%a:%s' "$file" 2>/dev/null); then
+    :
+  else
+    metadata=$(stat -f '%l:%Lp:%z' "$file" 2>/dev/null) || return 1
+  fi
   case "$metadata" in 1:600:*) size=${metadata#1:600:};; *) return 1;; esac
   case "$size" in ''|*[!0123456789]*) return 1;; esac
   [ "$size" -le 4096 ] 2>/dev/null || return 1

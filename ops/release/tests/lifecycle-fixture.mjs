@@ -2,20 +2,22 @@ import { mkdtemp, mkdir, readFile, rm, writeFile, chmod, realpath } from 'node:f
 import { spawn, spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const sourceEntrypoint = path.join(repoRoot, 'ops/docker/runtime-entrypoint.sh');
 const sourceDockerfile = path.join(repoRoot, 'ops/docker/Dockerfile.runtime');
+const datasetBytes = Buffer.from('synthetic-runtime-dataset');
 const identity = [
   'schemaVersion=1',
   'softwareVersion=2.1.0-test',
   'apiContract=caption-hints.v2',
   `sqlVersion=${'b'.repeat(64)}`,
   'releaseId=1792210462122',
-  'preparationId=lexiflow.deterministic-preparation.v1',
+  'preparationId=lexiflow.deterministic-preparation.priority-v2',
   `ruleId=${'c'.repeat(64)}`,
-  `datasetSha256=${'a'.repeat(64)}`,
+  `datasetSha256=${createHash('sha256').update(datasetBytes).digest('hex')}`,
 ].join('\n') + '\n';
 
 function quote(value) {
@@ -36,7 +38,7 @@ export async function lifecycleFixture(t) {
   const tmp = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-runtime-fixture-')));
   t.after(() => rm(tmp, { recursive: true, force: true }));
   const root = path.join(tmp, 'volume');
-  const pgdata = path.join(root, 'postgres');
+  const database = path.join(root, 'lexicon.db');
   const run = path.join(tmp, 'run');
   const identityPath = path.join(tmp, 'release-identity.env');
   const identityJson = path.join(tmp, 'release-identity.json');
@@ -51,15 +53,16 @@ export async function lifecycleFixture(t) {
   await chmod(run, 0o700);
   await writeFile(identityPath, identity, { mode: 0o600 });
   await writeFile(identityJson, '{}\n', { mode: 0o600 });
-  await writeFile(dataset, 'synthetic-runtime-dataset', { mode: 0o600 });
+  await writeFile(dataset, datasetBytes, { mode: 0o600 });
   await writeFile(jar, 'synthetic-runtime-jar', { mode: 0o600 });
   await writeFile(path.join(bin, 'stat'), '#!/bin/sh\n[ "$1" = -c ] && [ "$2" = %a ] || exit 2\n/usr/bin/stat -c %a "$3" 2>/dev/null && exit 0\nexec /usr/bin/stat -f %Lp "$3"\n', { mode: 0o700 });
   await writeFile(path.join(bin, 'timeout'), '#!/bin/sh\nshift 2\nexec "$@"\n', { mode: 0o700 });
+  await writeFile(path.join(bin, 'id'), '#!/bin/sh\n[ "$1" = -u ] && { printf 10001; exit 0; }\nexit 2\n', { mode: 0o700 });
   await writeFile(path.join(bin, 'java'), '#!/bin/sh\nexit 37\n', { mode: 0o700 });
   let script = await readFile(sourceEntrypoint, 'utf8');
   for (const [name, value] of Object.entries({
     ROOT: root,
-    PGDATA: pgdata,
+    DB: database,
     RUN: run,
     IDENTITY: identityPath,
     IDENTITY_JSON: identityJson,
@@ -68,7 +71,7 @@ export async function lifecycleFixture(t) {
   })) script = replaceFixedPath(script, name, value);
   await writeFile(entry, script, { mode: 0o700 });
   await writeFile(dockerfile, await readFile(sourceDockerfile));
-  return { tmp, root, pgdata, run, identityPath, identityJson, dataset, jar, bin, entry, dockerfile, identity };
+  return { tmp, root, database, run, identityPath, identityJson, dataset, jar, bin, entry, dockerfile, identity };
 }
 
 export function runRuntime(fixture, body, { env = {}, timeout = 10_000 } = {}) {

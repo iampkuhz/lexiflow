@@ -43,7 +43,7 @@ lf_set_release() {
   [ -n "${LF_COMPOSE_PATH:-}" ] || return 1
 }
 lf_make_record() {
-  local dir="$LF_ROOT/releases/$LF_RELEASE_KEY" entry hash tmp value secret result
+  local dir="$LF_ROOT/releases/$LF_RELEASE_KEY" entry hash tmp result
   lf_lock_check || return 1
   lf_safe_private_tree || return 1
   lf_valid_key "$LF_RELEASE_KEY" && lf_valid_token "$LF_INSTALL_ID" || return 1
@@ -72,73 +72,6 @@ lf_make_record() {
     lf_lock_check || { rm -f "$tmp"; return 1; }
     mv "$tmp" "$dir/record" || { rm -f "$tmp"; return 1; }
   fi
-  lf_secret_publish "$dir" || return 1
-}
-lf_secret_mode_600() {
-  local file="$1" mode
-  [ -f "$file" ] && [ ! -L "$file" ] || return 1
-  mode=$(stat -c %a "$file" 2>/dev/null) || mode=$(stat -f %Lp "$file" 2>/dev/null) || return 1
-  [ "$mode" = 600 ]
-}
-lf_secret_file_verify() {
-  local file="$1" value bytes
-  lf_secret_mode_600 "$file" || return 1
-  bytes=$(wc -c 2>/dev/null < "$file") || return 1
-  bytes=$(printf '%s' "$bytes" | tr -d ' ') || return 1
-  [ "$bytes" = 64 ] || return 1
-  value=$(cat "$file" 2>/dev/null) || return 1
-  case "$value" in *[!0123456789abcdef]*|'') return 1;; esac
-  [ "${#value}" -eq 64 ]
-}
-lf_secret_context_check() {
-  local key="$1" dir="$2"
-  lf_valid_key "$key" && [ "$dir" = "$LF_ROOT/releases/$key" ] || return 1
-  lf_lock_check && lf_record_verify "$key" 2>/dev/null || return 1
-  [ -d "$dir" ] && [ ! -L "$dir" ]
-}
-lf_secret_pending_clean() {
-  local key="$1" dir="$2" secret pending
-  lf_secret_context_check "$key" "$dir" || return 1
-  for secret in postgres-password app-password; do
-    pending="$dir/.$secret.pending"
-    if [ -e "$pending" ] || [ -L "$pending" ]; then
-      lf_secret_mode_600 "$pending" || return 1
-      lf_secret_context_check "$key" "$dir" && lf_secret_mode_600 "$pending" || return 1
-      rm "$pending" 2>/dev/null || return 1
-    fi
-  done
-}
-lf_secret_write_pending() { printf '%s' "$1"; }
-lf_secret_publish() {
-  local dir="$1" key="$LF_RELEASE_KEY" secret pending target value
-  lf_secret_context_check "$key" "$dir" || return 1
-  # 已有秘密不变；在清理暂存文件之前先核验。
-  for secret in postgres-password app-password; do
-    target="$dir/$secret"
-    if [ -e "$target" ] || [ -L "$target" ]; then lf_secret_file_verify "$target" || return 1; fi
-  done
-  lf_secret_pending_clean "$key" "$dir" || return 1
-  for secret in postgres-password app-password; do
-    target="$dir/$secret"; pending="$dir/.$secret.pending"
-    if [ -e "$target" ] || [ -L "$target" ]; then continue; fi
-    lf_secret_context_check "$key" "$dir" || return 1
-    value=$(lf_random_hex 32 2>/dev/null) || return 1
-    case "$value" in *[!0123456789abcdef]*|'') return 1;; esac
-    [ "${#value}" -eq 64 ] || return 1
-    [ ! -e "$pending" ] && [ ! -L "$pending" ] || return 1
-    (umask 077; set -C; lf_secret_write_pending "$value" > "$pending") 2>/dev/null || return 1
-    lf_secret_file_verify "$pending" || return 1
-    printf '%s' "$value" | cmp -s - "$pending" || return 1
-    lf_secret_context_check "$key" "$dir" && lf_secret_file_verify "$pending" || return 1
-    [ ! -e "$target" ] && [ ! -L "$target" ] || return 1
-    # 预检拒绝目录目标；原子硬链接不覆盖已有文件，不承诺抵御同用户恶意并发替换。
-    ln "$pending" "$target" 2>/dev/null || return 1
-    lf_secret_file_verify "$target" || return 1
-    printf '%s' "$value" | cmp -s - "$target" || return 1
-  done
-  lf_secret_context_check "$key" "$dir" || return 1
-  lf_secret_file_verify "$dir/postgres-password" && lf_secret_file_verify "$dir/app-password" || return 1
-  lf_secret_pending_clean "$key" "$dir"
 }
 lf_run_prepare() {
   local parent next_active item name daemon_id
@@ -167,13 +100,13 @@ lf_run_prepare() {
   case "$LF_PHASE" in
     idle|stopped)
       if [ "$LF_ACTIVE" = "$LF_RELEASE_KEY" ]; then
-        lf_delegate "$LF_RELEASE_KEY" verify-record && lf_secrets_verify "$LF_RELEASE_KEY" && lf_private_files_verify
+        lf_delegate "$LF_RELEASE_KEY" verify-record
         return $?
       fi;;
     preparing|prepared)
       [ "$LF_CANDIDATE" = "$LF_RELEASE_KEY" ] || return 1
       if [ "$LF_PHASE" = prepared ]; then
-        lf_delegate "$LF_RELEASE_KEY" verify-record && lf_secrets_verify "$LF_RELEASE_KEY" && lf_private_files_verify
+        lf_delegate "$LF_RELEASE_KEY" verify-record
         return $?
       fi;;
     *) return 1;;
@@ -188,20 +121,9 @@ lf_run_prepare() {
   done
   next_active=$LF_ACTIVE
   lf_make_record || return 1
-  lf_private_sources_check || return 1
   lf_bound_state_write preparing "$next_active" "$LF_PREVIOUS" "$LF_RELEASE_KEY" none none || return 1
   lf_docker_prepare || return 1
   lf_bound_state_write prepared "$next_active" "$LF_PREVIOUS" "$LF_RELEASE_KEY" none none
-}
-lf_secrets_verify() {
-  local key="$1" secret file
-  lf_lock_check || return 1
-  lf_record_verify "$key" || return 1
-  file="$LF_ROOT/releases/$key"
-  [ -d "$file" ] && [ ! -L "$file" ] || return 1
-  for secret in postgres-password app-password; do
-    lf_secret_file_verify "$file/$secret" || return 1
-  done
 }
 lf_delegate() {
   local key="$1" action="$2" rec entry
@@ -261,13 +183,6 @@ lf_release_dir_check() {
     name=${item##*/}
     case "$name" in
       record) [ -f "$item" ] && [ ! -L "$item" ] || return 1;;
-      postgres-password|app-password) [ -f "$item" ] && [ ! -L "$item" ] || return 1;;
-      .postgres-password.pending|.app-password.pending) lf_secret_mode_600 "$item" || return 1;;
-      .private-file-transfer)
-        [ -f "$item" ] && [ ! -L "$item" ] || return 1
-        [ "$(stat -c '%a' "$item" 2>/dev/null || stat -f '%Lp' "$item" 2>/dev/null)" = 600 ] || return 1
-        [ "$(stat -c '%h' "$item" 2>/dev/null || stat -f '%l' "$item" 2>/dev/null)" = 1 ] || return 1
-        [ "$(wc -c < "$item" | tr -d ' ')" -le 1024 ] || return 1;;
       *) return 1;;
     esac
   done
@@ -292,19 +207,10 @@ lf_tombstone_clean() {
     lf_lock_check && rmdir "$dir" 2>/dev/null; return $?
   fi
   lf_record_verify "$key" tombstone || return 1
-  if [ -e "$dir/.private-file-transfer" ] || [ -L "$dir/.private-file-transfer" ]; then
-    lf_transfer_journal_check "$dir/.private-file-transfer" || return 1
-  fi
-  for item in .postgres-password.pending .app-password.pending postgres-password app-password .private-file-transfer record; do
+  for item in record; do
     [ -e "$dir/$item" ] || [ -L "$dir/$item" ] || continue
     lf_lock_check && lf_record_verify "$key" tombstone && lf_release_dir_check "$dir" cleanup || return 1
-    if [ "$item" = .postgres-password.pending ] || [ "$item" = .app-password.pending ]; then
-      lf_secret_mode_600 "$dir/$item" || return 1
-    elif [ "$item" = .private-file-transfer ]; then
-      lf_transfer_journal_check "$dir/$item" || return 1
-    else
-      [ -f "$dir/$item" ] && [ ! -L "$dir/$item" ] || return 1
-    fi
+    [ -f "$dir/$item" ] && [ ! -L "$dir/$item" ] || return 1
     rm "$dir/$item" 2>/dev/null || return 1
   done
   lf_lock_check && rmdir "$dir" 2>/dev/null

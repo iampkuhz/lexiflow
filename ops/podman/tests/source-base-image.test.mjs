@@ -3,12 +3,9 @@ import assert from 'node:assert/strict';
 import { resolveSourceBaseImage } from '../images/source-base-image.mjs';
 
 const java = 'docker.io/library/eclipse-temurin:25-jre';
-const pg = 'docker.io/library/postgres:17-bookworm';
 const id = 'a'.repeat(64);
 function metadata(reference, overrides = {}) {
-  const env = reference === java
-    ? ['JAVA_VERSION=jdk-25.0.4.1+1']
-    : ['PG_MAJOR=17', 'PG_VERSION=17.6-1.pgdg13+1'];
+  const env = reference === java ? ['JAVA_VERSION=jdk-25.0.4.1+1'] : [];
   return { Id: id, Os: 'linux', Architecture: 'arm64', Config: { Env: env }, ...overrides };
 }
 function runner({ missing = false, images, failure = null } = {}) {
@@ -33,10 +30,10 @@ test('cached validated source image returns full immutable ID without pulling', 
   assert.equal(fake.calls.length, 3);
 });
 
-test('missing image pulls once for linux/arm64 then validates', async () => {
+test('missing Java image pulls once for linux/arm64 then validates', async () => {
   const fake = runner({ missing: true });
-  assert.equal(await resolveSourceBaseImage({ run: fake.run, reference: pg }), `sha256:${id}`);
-  assert.deepEqual(fake.calls.slice(0, 2), ['image exists docker.io/library/postgres:17-bookworm', 'pull --platform linux/arm64 docker.io/library/postgres:17-bookworm']);
+  assert.equal(await resolveSourceBaseImage({ run: fake.run, reference: java }), `sha256:${id}`);
+  assert.deepEqual(fake.calls.slice(0, 2), [`image exists ${java}`, `pull --platform linux/arm64 ${java}`]);
   assert.equal(fake.calls.filter(x => x.startsWith('pull ')).length, 1);
 });
 
@@ -49,10 +46,10 @@ test('initial Java 25 GA and patch releases are both legal cached majors', async
 });
 
 for (const [name, reference, overrides] of [
-  ['wrong major', pg, { Config: { Env: ['PG_MAJOR=16', 'PG_VERSION=16.9'] } }],
+  ['wrong major', java, { Config: { Env: ['JAVA_VERSION=jdk-24.0.1+8'] } }],
   ['wrong architecture', java, { Architecture: 'amd64' }],
   ['duplicate metadata', java, { Config: { Env: ['JAVA_VERSION=jdk-25.1', 'JAVA_VERSION=jdk-25.2'] } }],
-  ['missing metadata', pg, { Config: { Env: ['PG_MAJOR=17'] } }],
+  ['missing metadata', java, { Config: { Env: [] } }],
 ]) test(`rejects ${name}`, async () => {
   const fake = runner({ images: [metadata(reference, overrides)] });
   await assert.rejects(resolveSourceBaseImage({ run: fake.run, reference }), /SOURCE_BASE_IMAGE_INVALID/);

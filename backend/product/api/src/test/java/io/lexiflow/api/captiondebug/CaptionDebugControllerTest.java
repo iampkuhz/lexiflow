@@ -56,7 +56,10 @@ class CaptionDebugControllerTest {
 
   @Test
   void acceptsOnlyBoundedEnumeratedEventsAndNeverCachesResponses() {
-    var controller = new CaptionDebugController(true, new StructuredEventLogger());
+    // 本测试只验证请求合同；同步自有 sink 防止延迟日志污染后续 CLI 的严格 stdout 检查。
+    var lines = new java.util.ArrayList<String>();
+    var logger = new StructuredEventLogger(null, Runnable::run, lines::add);
+    var controller = new CaptionDebugController(true, logger);
     var request =
         new CaptionDebugRequest(
             UUID.randomUUID().toString(),
@@ -106,11 +109,13 @@ class CaptionDebugControllerTest {
             .value());
     assertEquals(
         404,
-        new CaptionDebugController(false, new StructuredEventLogger())
+        new CaptionDebugController(false, logger)
             .append(EXTENSION_ORIGIN, request)
             .getStatusCode()
             .value());
     assertEquals(403, controller.append("https://evil.invalid", request).getStatusCode().value());
     assertTrue(controller.capability(null).getBody().enabled());
+    assertEquals(1, lines.size(), "重复、禁用或被拒绝的请求不得追加日志");
+    assertTrue(lines.getFirst().contains("实际显示的字幕\\u007C中文"));
   }
 }

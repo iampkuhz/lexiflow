@@ -68,8 +68,6 @@ class PublishedCandidateEligibilityTest {
         LexiconEntryKind.PHRASE,
         action,
         gloss,
-        1,
-        false,
-        0);
+        1);
   }
 }

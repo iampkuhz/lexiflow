@@ -3,12 +3,12 @@ import hashlib
 import http.server
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 import threading
 import unittest
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -37,7 +37,7 @@ from pathlib import Path
 args=sys.argv[1:]
 with Path(CALLS).open('a') as f: f.write(json.dumps(args)+'\\n')
 mode=Path(MODE).read_text()
-print('PRIVATE-FIXTURE secret/path',file=sys.stderr)
+print('PRIVATE-FIXTURE private/path',file=sys.stderr)
 if args[:1]==['info']:
  if mode=='engine-down': sys.exit(9)
  print(json.dumps({'host':{'arch':'arm64','os':'linux'},'private':'PRIVATE-FIXTURE'}))
@@ -45,7 +45,7 @@ elif args[:1]==['compose']: print('podman-compose version 1.6.0')
 elif args[:1]==['ps']:
  state=json.loads(Path(INSTALL,'state.json').read_text())
  if mode=='stopped': print('[]')
- else: print(json.dumps([{'State':'running','Labels':{'com.docker.compose.project':state['project'],'com.docker.compose.service':service,'lexiflow.installation':'wrong' if mode=='foreign' else state['id']}} for service in ['postgres','api']]))
+ else: print(json.dumps([{'State':'running','Labels':{'com.docker.compose.project':state['project'],'com.docker.compose.service':'api','lexiflow.installation':'wrong' if mode=='foreign' else state['id']}}]))
 else: sys.exit(88)
 '''.replace('PYTHON',os.sys.executable).replace('CALLS',repr(str(self.calls))).replace('MODE',repr(str(self.mode))).replace('INSTALL',repr(str(self.install)))
         self.write_program('podman',fake)
@@ -74,9 +74,12 @@ else: sys.exit(88)
         self.server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
         self.install.mkdir()
-        self.state={'schema':1,'root':str(self.install),'id':'a'*32,'project':'lexiflow-local-'+'a'*32,'phase':phase,'apiPort':self.server.server_port,'version':'0.1.0','generationVersion':'b'*64,'datasetIdentity':{'version':1,'generationVersion':'b'*64},'private':'PRIVATE-FIXTURE'}
+        self.state={'schema':2,'root':str(self.install),'id':'a'*32,'project':'lexiflow-local-'+'a'*32,'phase':phase,'apiPort':self.server.server_port,'version':'0.1.0','databaseTarget':{'kind':'file'},'databaseFile':str(self.install/'data'/'lexicon.db'),'generationVersion':'b'*64,'datasetIdentity':{'version':1,'generationVersion':'b'*64},'private':'PRIVATE-FIXTURE'}
         (self.install/'state.json').write_text(json.dumps(self.state))
-        (self.install/'secret-marker').write_text('PRIVATE-FIXTURE')
+        if phase != 'new':
+            (self.install/'data').mkdir()
+            (self.install/'data'/'lexicon.db').write_bytes(b'synthetic-sqlite-file')
+        (self.install/'private-marker').write_text('PRIVATE-FIXTURE')
 
     def snapshot(self):
         if not self.install.exists(): return None
@@ -84,7 +87,7 @@ else: sys.exit(88)
 
     def invoke(self, directory=None):
         before=self.snapshot()
-        result=subprocess.run([shutil.which('node'),'--import',str(self.preload),str(ROOT/'ops/podman/commands/manage-podman-installation.mjs'),'doctor','--json','--dir',directory or str(self.install)],env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH'],'LEXIFLOW_JAVA_HOME':str(self.java_home)},capture_output=True,text=True,timeout=15)
+        result=subprocess.run([shutil.which('node'),'--import',str(self.preload),str(ROOT/'ops/podman/commands/manage-podman-installation.mjs'),'doctor','--json','--dir',directory or str(self.install)],env={**os.environ,'PATH':str(self.bin)+os.pathsep+os.environ['PATH'],'LEXIFLOW_JAVA_HOME':str(self.java_home)},capture_output=True,text=True,timeout=15,check=False)
         self.assertEqual(before,self.snapshot())
         self.assertNotIn('PRIVATE-FIXTURE',result.stdout+result.stderr)
         self.assertNotIn(str(self.root),result.stdout+result.stderr)

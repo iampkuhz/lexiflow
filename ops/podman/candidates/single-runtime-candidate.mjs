@@ -244,17 +244,54 @@ async function incompatibleVolume(logDir,container,image,volume,token,identity,c
   }
   return true;
 }
-async function faultExit(logDir,image,token,container,volume,containers,volumes,identity,dataset) {
+function sqliteSnapshot(logDir,image,token,sourceVolume,snapshotVolume,operation) {
+  const script = operation === 'snapshot'
+    ? 'set -euo pipefail; test -s /var/lib/lexiflow/lexicon.db; cp --reflink=never /var/lib/lexiflow/lexicon.db /snapshot/lexicon.db; sync; sha256sum /snapshot/lexicon.db'
+    : operation === 'corrupt'
+      ? 'set -euo pipefail; test -s /var/lib/lexiflow/lexicon.db; printf "LEXIFLOW-CORRUPT-DB\\n" > /var/lib/lexiflow/lexicon.db; sync; sha256sum /var/lib/lexiflow/lexicon.db'
+      : 'set -euo pipefail; test -s /snapshot/lexicon.db; cp --reflink=never /snapshot/lexicon.db /var/lib/lexiflow/.lexicon.db.restore; sync; mv -f /var/lib/lexiflow/.lexicon.db.restore /var/lib/lexiflow/lexicon.db; sync; sha256sum /var/lib/lexiflow/lexicon.db';
+  const args=['run','--rm','--image-volume=ignore','--label',`${ownerLabel}=${token}`,
+    '--volume',`${sourceVolume}:/var/lib/lexiflow:rw`,
+    ...(snapshotVolume?['--volume',`${snapshotVolume}:/snapshot:rw`]:[]),
+    '--entrypoint','/bin/bash',image,'-c',script];
+  const result=cmd(logDir,`sqlite-${operation}`,args,{allowFailure:true,timeout:30_000});
+  if(!result.ok)fail(`SQLITE_${operation.toUpperCase()}_FAILED`);
+  const match=/^([a-f0-9]{64})\s+.+$/m.exec(result.stdout.trim());
+  if(!match)fail('SQLITE_SNAPSHOT_HASH_INVALID');
+  return match[1];
+}
+async function faultSqliteDatabase(logDir,image,token,container,volume,containers,volumes,identity,dataset) {
   volumeAbsent(logDir,volume);containers.push(container);await startAndReady(logDir,container,volume,image,token,identity,dataset);proveAutoVolume(logDir,container,volume,token);
   const killed=cmd(logDir,'api-exit-injection',['exec',container,'/bin/bash','-c','for f in /proc/[0-9]*/comm; do IFS= read -r name < "$f" || continue; [ "$name" = java ] || continue; p=${f#/proc/}; p=${p%/comm}; c=$(tr "\\0" " " < "/proc/$p/cmdline" 2>/dev/null || true); case "$c" in *"/app/lexiflow-api.jar"*) kill -KILL "$p" || exit 1; exit 0;; esac; done; exit 1'],{allowFailure:true});
   if(!killed.ok)fail('API_EXIT_INJECTION_UNOBSERVED');
   const apiUnhealthy=await observeUnhealthy(logDir,container,identity);if(!apiUnhealthy)fail('API_UNHEALTHY_NOT_OBSERVED');
   const apiExited=await observeWait(logDir,container,60_000);if(!apiExited||apiExited.State.ExitCode===0)fail('API_EXIT_NOT_SUPERVISED');removeContainer(logDir,container,token);
-  const pgName=`${container}-pg`,pgVol=`${volume}-pg`;volumes.push(pgVol);volumeAbsent(logDir,pgVol);containers.push(pgName);await startAndReady(logDir,pgName,pgVol,image,token,identity,dataset);proveAutoVolume(logDir,pgName,pgVol,token);
-  const killedPg=cmd(logDir,'postgres-exit-injection',['exec',pgName,'/bin/bash','-c','for f in /proc/[0-9]*/comm; do IFS= read -r name < "$f" || continue; [ "$name" = postgres ] || continue; p=${f#/proc/}; p=${p%/comm}; c=$(tr "\\0" " " < "/proc/$p/cmdline" 2>/dev/null || true); case "$c" in *"postgres -D /var/lib/lexiflow/postgres"*) kill -KILL "$p" || exit 1; exit 0;; esac; done; exit 1'],{allowFailure:true});
-  if(!killedPg.ok)fail('POSTGRES_EXIT_INJECTION_UNOBSERVED');
-  const pgUnhealthy=await observeUnhealthy(logDir,pgName,identity);if(!pgUnhealthy)fail('POSTGRES_UNHEALTHY_NOT_OBSERVED');
-  const pgExited=await observeWait(logDir,pgName,60_000);if(!pgExited||pgExited.State.ExitCode===0)fail('POSTGRES_EXIT_NOT_SUPERVISED');return true;
+  const badName=`${container}-sqlite-fault`,badVolume=`${volume}-sqlite-fault`,snapshotVolume=`${volume}-sqlite-backup`;
+  volumes.push(badVolume,snapshotVolume);volumeAbsent(logDir,badVolume);volumeAbsent(logDir,snapshotVolume);
+  containers.push(badName);createVolume(logDir,snapshotVolume,token);
+  await startAndReady(logDir,badName,badVolume,image,token,identity,dataset);
+  const readyProof=proveAutoVolume(logDir,badName,badVolume,token);
+  removeContainer(logDir,badName,token);
+  const originalHash=sqliteSnapshot(logDir,image,token,badVolume,snapshotVolume,'snapshot');
+  const corruptHash=sqliteSnapshot(logDir,image,token,badVolume,null,'corrupt');
+  if(originalHash===corruptHash)fail('SQLITE_CORRUPTION_NOT_INJECTED');
+  const retry=containerRun(logDir,{name:badName,volume:badVolume,image,token});
+  if(!retry.ok)fail('SQLITE_CORRUPT_DB_RETRY_NOT_STARTED');
+  const info=inspectContainer(logDir,badName);assertOwned(info,token);
+  const unhealthy=await observeUnhealthy(logDir,badName,identity);
+  if(!unhealthy)fail('SQLITE_CORRUPT_DB_NOT_REJECTED');
+  const observedHash=sqliteSnapshot(logDir,image,token,badVolume,snapshotVolume,'snapshot');
+  if(observedHash!==corruptHash)fail('SQLITE_CORRUPT_DB_MUTATED');
+  const currentProof=proveAutoVolume(logDir,badName,badVolume,token);
+  if(currentProof.markerHash!==readyProof.markerHash)fail('SQLITE_CORRUPT_DB_OTHER_DATA_CHANGED');
+  removeContainer(logDir,badName,token);
+  const restoredHash=sqliteSnapshot(logDir,image,token,badVolume,snapshotVolume,'restore');
+  if(restoredHash!==originalHash)fail('SQLITE_BACKUP_RESTORE_MISMATCH');
+  const restored=await startAndReady(logDir,badName,badVolume,image,token,identity,dataset,{existingVolume:true});
+  if(!validRuntimeState(restored,identity,dataset))fail('SQLITE_RESTORED_DB_NOT_READY');
+  const finalProof=proveAutoVolume(logDir,badName,badVolume,token);
+  if(finalProof.markerHash!==readyProof.markerHash)fail('SQLITE_RESTORED_DB_OTHER_DATA_CHANGED');
+  removeContainer(logDir,badName,token);return {corruptDbRejected:true,dbBytesPreserved:true,backupRestored:true,otherOwnedDataPreserved:true};
 }
 async function runInner(request) {
   const out=report(), token=crypto.randomBytes(16).toString('hex'), containers=[], volumes=[], loaded=[];
@@ -329,8 +366,8 @@ async function runInner(request) {
     setPhase(out,'incompatible-volume-refusal','RUNNING');await incompatibleVolume(root,badName,image,badVol,token,proof.buildIdentity,containers);
     setPhase(out,'incompatible-volume-refusal','PASS',{refused:true,nonzero:true,volumeRetained:true,noUnknownResourcesRemoved:true});
     removeContainer(root,badName,token);containers.splice(containers.indexOf(badName),1);removeVolume(root,badVol,token);volumes.splice(volumes.indexOf(badVol),1);
-    setPhase(out,'failure-exit','RUNNING');const fc=names(),fv=volume(`${fc}-data`);await faultExit(root,image,token,fc,fv,containers,volumes,proof.buildIdentity,dataset);
-    setPhase(out,'failure-exit','PASS',{apiExitObserved:true,postgresExitObserved:true,unhealthyObserved:true,nonzero:true});
+    setPhase(out,'failure-exit','RUNNING');const fc=names(),fv=volume(`${fc}-data`);const faultFacts=await faultSqliteDatabase(root,image,token,fc,fv,containers,volumes,proof.buildIdentity,dataset);
+    setPhase(out,'failure-exit','PASS',{apiExitObserved:true,...faultFacts,unhealthyObserved:true,nonzero:true});
     out.assertions={targetOnly:true,realInitializationInterruption:true,sameVolumeRestart:true,realFailureObserved:true,unknownResourcesUntouched:true};
     out.failure=null;
   } catch(error) {

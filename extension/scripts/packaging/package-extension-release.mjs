@@ -5,7 +5,7 @@ import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { zipSync, unzipSync } from "fflate";
-import { resolveBuildIdentity, chromeVersion, checkReleaseSource, assertBuildIdentityMatches } from "../../../ops/release/integrity/source-build-identity.mjs";
+import { resolveCleanBuildIdentity, chromeVersion, assertBuildIdentityMatches } from "../../../ops/release/integrity/source-build-identity.mjs";
 import { EXTENSION_PACKAGE_FILES, validateExtensionArchiveEntries, publishExtensionArchive, readStableRegularFile } from './extension-archive-contract.mjs';
 import { validateExpectedDataset } from '../build/expected-dataset.mjs';
 
@@ -96,22 +96,19 @@ export async function packageRelease(options = {}) {
     fail("EXTENSION_PACKAGE_MODE_INVALID");
   }
   let { repoRoot = repositoryRoot, expectedDataset } = options;
-  const source = checkReleaseSource(repoRoot);
+  const buildIdentity = resolveCleanBuildIdentity(repoRoot);
+  const source = buildIdentity;
   if (!expectedDataset) fail("expected published dataset binding required");
   try { expectedDataset = validateExpectedDataset(expectedDataset); } catch { fail("EXPECTED_DATASET_INVALID"); }
-  const buildIdentity = resolveBuildIdentity(repoRoot);
   const extension = path.join(repoRoot, "extension");
   execFileSync("npm", ["--prefix", extension, "run", "build"], { cwd: repoRoot, stdio: ["ignore", "ignore", "inherit"], env: { ...process.env, LEXIFLOW_API_PORT: "18080", LEXIFLOW_EXPECTED_DATASET: JSON.stringify(expectedDataset) } });
-  const after = checkReleaseSource(repoRoot);
-  const afterIdentity = resolveBuildIdentity(repoRoot);
+  const afterIdentity = resolveCleanBuildIdentity(repoRoot);
   try { assertBuildIdentityMatches(buildIdentity, afterIdentity); }
   catch { fail("release source changed during build"); }
-  if (after.sourceCommit !== source.sourceCommit || after.softwareVersion !== source.softwareVersion) fail("release source changed during build");
   const result = await createExtensionZip({ root: extension, buildIdentity, expectedDataset, apiPort: 18080 });
   let packagingIdentity;
   try {
-    checkReleaseSource(repoRoot);
-    packagingIdentity = resolveBuildIdentity(repoRoot);
+    packagingIdentity = resolveCleanBuildIdentity(repoRoot);
     assertBuildIdentityMatches(buildIdentity, packagingIdentity);
   }
   catch { fail("release source changed during packaging"); }
@@ -127,8 +124,8 @@ export async function packageDevelopment(options = {}) {
     fail("EXTENSION_PACKAGE_MODE_INVALID");
   }
   const { repoRoot = repositoryRoot } = options;
-  const source = checkReleaseSource(repoRoot);
-  const buildIdentity = resolveBuildIdentity(repoRoot);
+  const buildIdentity = resolveCleanBuildIdentity(repoRoot);
+  const source = buildIdentity;
   const extension = path.join(repoRoot, "extension");
   const environment = { ...process.env, LEXIFLOW_API_PORT: "18081" };
   delete environment.LEXIFLOW_EXPECTED_DATASET;
@@ -137,16 +134,11 @@ export async function packageDevelopment(options = {}) {
     stdio: ["ignore", "ignore", "inherit"],
     env: environment,
   });
-  const after = checkReleaseSource(repoRoot);
-  try { assertBuildIdentityMatches(buildIdentity, resolveBuildIdentity(repoRoot)); }
+  try { assertBuildIdentityMatches(buildIdentity, resolveCleanBuildIdentity(repoRoot)); }
   catch { fail("release source changed during development build"); }
-  if (after.sourceCommit !== source.sourceCommit || after.softwareVersion !== source.softwareVersion) {
-    fail("release source changed during development build");
-  }
   const result = await createExtensionZip({ root: extension, buildIdentity, apiPort: 18081 });
   try {
-    checkReleaseSource(repoRoot);
-    assertBuildIdentityMatches(buildIdentity, resolveBuildIdentity(repoRoot));
+    assertBuildIdentityMatches(buildIdentity, resolveCleanBuildIdentity(repoRoot));
   } catch { fail("release source changed during development packaging"); }
   const outputDirectory = path.join(repoRoot, "tmp/ci-preview", source.softwareVersion, source.sourceCommit);
   await publishExtensionArchive(

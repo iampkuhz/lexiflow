@@ -2,7 +2,7 @@ import { constants, createReadStream } from 'node:fs';
 import { lstat, open, opendir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { createManifest, serializeManifest, validateRelativePath } from './release-artifact-manifest.mjs';
+import { createManifest, serializeManifest, validateRelativePath, verifySourceArchive } from './release-artifact-manifest.mjs';
 import { validateBuildIdentity, assertBuildIdentityMatches } from './source-build-identity.mjs';
 import { verifyExtensionIdentity } from './artifact-build-identity.mjs';
 
@@ -210,6 +210,8 @@ export async function verifyReleaseCandidate(input) {
     const sidecar = await readMetadata(root, 'payload/manifest.json.sha256');
     if (sidecar.toString('utf8') !== `${manifestSha256}  manifest.json\n`) fail('MANIFEST_SIDECAR_INVALID');
     for (const item of manifest.artifacts) await hashFile(root, `payload/${item.path}`, item.bytes, item.sha256);
+    const sourceArtifact = manifest.artifacts.find(item => item.role === 'corresponding-sources');
+    verifySourceArchive(pathname(root, `payload/${sourceArtifact.path}`), manifest);
     const extension = manifest.artifacts.find((item) => item.role === 'extension');
     const extensionPath = `payload/${extension.path}`;
     const extensionBefore = await regular(root, extensionPath);

@@ -32,8 +32,12 @@ async function makeFixture(baseVersion = '2.0.0', proofBridge = false) {
           await writeFile(path.join(root, 'ops/release/integrity', entry.name), await readFile(path.join(repoRoot, 'ops/release/integrity', entry.name)));
         }
       }
+      // The manifest verifier's bounded Python subprocess must have its real
+      // implementation inside this isolated source tree as well.
+      await writeFile(path.join(root, 'ops/release/integrity/source_archive_integrity.py'),
+        await readFile(path.join(repoRoot, 'ops/release/integrity/source_archive_integrity.py')));
     }
-    await writeFile(path.join(root, '.gitignore'), '/input/\n/descriptor.json\n/release/\n/out/\n/alias/\n/.*.manifest-*/\n');
+    await writeFile(path.join(root, '.gitignore'), '/input/\n/descriptor.json\n/release/\n/out/\n/alias/\n/.*.manifest-*/\n**/__pycache__/\n');
     execFileSync('git', ['init', '-q', root]);
     execFileSync('git', ['-C', root, 'add', '.']);
     execFileSync('git', ['-C', root, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'clean candidate fixture']);
@@ -50,7 +54,7 @@ async function makeFixture(baseVersion = '2.0.0', proofBridge = false) {
     };
     const licenseSeeds = [
       ['lexiflow', 'LexiFlow'], ['ext-third-party', 'extension-third-party'],
-      ['api-runtime', 'API-runtime'], ['postgresql', 'PostgreSQL'], ['dataset-license', 'dataset']
+      ['api-runtime', 'API-runtime'], ['sqlite-jdbc-license', 'API-runtime'], ['dataset-license', 'dataset']
     ];
     for (const [id, component] of licenseSeeds) {
       const noticePath = `licenses/${id}.txt`; const notice = Buffer.from(`Synthetic notice ${id}\n`);
@@ -82,13 +86,13 @@ async function makeFixture(baseVersion = '2.0.0', proofBridge = false) {
       platform: 'linux/arm64', buildInputSha256: 'e'.repeat(64),
       baseImages: [{ platform: 'linux/arm64',
         javaRuntime: { reference: `registry.example.invalid/java/runtime@sha256:${'1'.repeat(64)}`, imageId: `sha256:${'a'.repeat(64)}` },
-        postgresRuntime: { reference: `registry.example.invalid/postgres/runtime@sha256:${'2'.repeat(64)}`, imageId: `sha256:${'b'.repeat(64)}` } }],
+ }],
       artifacts: [{ ...imageRecord, platform: 'linux/arm64' }] };
     const marker = Buffer.from(`${JSON.stringify(imageCandidate, null, 2)}\n`);
     await writeFile(path.join(imageDirectory, 'candidate.json'), marker);
-    const descriptor = { schemaVersion: 1, buildIdentity, softwareVersion, sourceCommit, apiContract, sqlVersion, dataset,
+    const descriptor = { schemaVersion: 2, buildIdentity, softwareVersion, sourceCommit, apiContract, sqlVersion, dataset,
       platforms: ['linux/arm64'], artifacts: [
-        { role: 'runtime-image', platform: 'linux/arm64', licenseIds: ['lexiflow', 'api-runtime', 'postgresql'] },
+        { role: 'runtime-image', platform: 'linux/arm64', licenseIds: ['lexiflow', 'api-runtime', 'sqlite-jdbc-license'] },
         ...records
       ], licenses };
     const descriptorFile = path.join(root, 'descriptor.json'); await writeFile(descriptorFile, `${JSON.stringify(descriptor, null, 2)}\n`);

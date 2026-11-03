@@ -23,6 +23,7 @@ from typing import Any
 from urllib.parse import quote
 
 from ops.release.host_resources import release_process_control as release_process
+from ops.release.integrity.source_archive_integrity import verify_source_archive
 
 MAX_ARCHIVE = 2 * 1024**3
 SHA = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -569,11 +570,43 @@ def _verify_archive_labels(
 
 def verify_candidate_images(candidate: Path, manifest: dict, identity: dict) -> None:
     """供私有晋升预检与写前复核共享的纯本地检查。"""
+    if manifest.get("schemaVersion") != 2:
+        _fail("registry-candidate-manifest-invalid", "candidate")
+    artifacts = manifest.get("artifacts")
+    expected_roles = {
+        "runtime-image",
+        "dataset",
+        "extension",
+        "sql",
+        "corresponding-sources",
+    }
+    if (
+        not isinstance(artifacts, list)
+        or {item.get("role") for item in artifacts if isinstance(item, dict)}
+        != expected_roles
+        or len(artifacts) != len(expected_roles)
+    ):
+        _fail("registry-candidate-manifest-invalid", "candidate")
     images = [item for item in manifest["artifacts"] if item.get("role") in ROLES]
     if len(images) != 1:
         _fail("registry-image-set-invalid", "candidate")
     for item in images:
         _verify_archive_labels(candidate, "payload/" + item["path"], identity, item)
+    source = next(item for item in artifacts if item["role"] == "corresponding-sources")
+    try:
+        verify_source_archive(
+            {
+                "archivePath": str(candidate / "payload" / source["path"]),
+                "bytes": source["bytes"],
+                "sha256": source["sha256"],
+                "licenses": manifest["licenses"],
+                "metadata": source["metadata"],
+            }
+        )
+    except Exception as exc:
+        raise RegistryError(
+            "registry-corresponding-sources-invalid", "candidate"
+        ) from exc
 
 
 def publish_images(

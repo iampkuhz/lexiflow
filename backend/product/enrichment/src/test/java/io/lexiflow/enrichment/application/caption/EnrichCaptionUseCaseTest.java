@@ -31,9 +31,7 @@ class EnrichCaptionUseCaseTest {
             LexiconEntryKind.WORD,
             LexiconHintAction.HINT,
             "可靠的",
-            500,
-            true,
-            1);
+            500);
     return forms ->
         new LexiconLookupResult(
             forms.contains("reliable") ? List.of(candidate) : List.of(),

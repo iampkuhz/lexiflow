@@ -1,11 +1,11 @@
 package io.lexiflow.lexicon.domain.model;
 
 /**
- * 词库发布时计算的非个人化预热优先级。
+ * 导入构建期从公开词汇证据计算的非个人化评分输入；发布时转换为唯一查询优先级。
  *
  * @param frequencyZipf 语料频率的 Zipf 标度，取值范围为 0 至 8。
  * @param complexListCount 收录该词条的复杂学习词表数量。
- * @param memoryPriority 由频率与复杂词表证据确定的 0 至 1000 分数。
+ * @param memoryPriority 由频率与复杂词表证据确定的构建期 0 至 1000 分数。
  */
 public record LexiconPriority(double frequencyZipf, int complexListCount, int memoryPriority) {
   private static final double MIN_ZIPF = 0.0;
@@ -22,11 +22,11 @@ public record LexiconPriority(double frequencyZipf, int complexListCount, int me
   }
 
   /**
-   * 由语料频率和复杂词表覆盖计算预热分数，不接受个人观看或熟悉度输入。
+   * 由语料频率和复杂词表覆盖计算构建期分数，不接受个人观看或熟悉度输入。
    *
    * @param frequencyZipf 含义：语料频率的 Zipf 标度。取值范围：有限数字 0 至 8。
    * @param complexListCount 含义：收录该词条的复杂学习词表数量。取值范围：大于等于 0。
-   * @return 由公开词汇证据导出的预热优先级。
+   * @return 由公开词汇证据导出的构建期评分输入。
    */
   public static LexiconPriority fromEvidence(double frequencyZipf, int complexListCount) {
     if (!Double.isFinite(frequencyZipf) || frequencyZipf < MIN_ZIPF || frequencyZipf > MAX_ZIPF) {

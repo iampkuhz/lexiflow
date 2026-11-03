@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, lstat, rm, symlink, realpath, chmod } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, lstat, rm, symlink, realpath, chmod } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { executeFormal, prepareWorkflow, resumePromotion, runCommand } from '../workflow/run-release-workflow.mjs';
-import { normalizeDarwinTempDirectory, resolveFormalInvocation, resolveReleaseExecutionEnvironment } from '../workflow/release-execution-environment.mjs';
+import { normalizeDarwinTempDirectory, resolveFormalInvocation, resolveReleaseExecutionEnvironment, releaseGradleCacheEntries } from '../workflow/release-execution-environment.mjs';
 import { resolveHostBinding } from '../host_resources/release-host-identity.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -19,7 +19,8 @@ const ident = (commit, version = '1.2.3') => {
 };
 const targetIdentity = ident('a'.repeat(40));
 const notice = Buffer.from('Approved license notice');
-const components = ['LexiFlow', 'API-runtime', 'PostgreSQL', 'extension-third-party', 'dataset'];
+const components = ['LexiFlow', 'API-runtime', 'API-runtime', 'extension-third-party', 'dataset'];
+const armJavaId = `sha256:${'a'.repeat(64)}`;
 
 async function fixture(t) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-workflow-')));
@@ -28,13 +29,20 @@ async function fixture(t) {
   t.after(async () => rm(outputParent, { recursive: true, force: true }));
   const noticesRoot = path.join(root, 'notices');
   await mkdir(noticesRoot);
+  const gradleCache = path.join(root, 'declared-gradle-cache');
+  const npmCache = path.join(root, 'declared-npm-cache');
+  await Promise.all([mkdir(path.join(gradleCache, 'caches/modules-2'), { recursive: true }),
+    mkdir(path.join(gradleCache, 'wrapper/dists'), { recursive: true }), mkdir(npmCache)]);
   await mkdir(path.join(root, 'ops/release'), { recursive: true });
   await writeFile(path.join(root, 'ops/release/version.txt'), '1.2.3\n');
+  await mkdir(path.join(root, 'backend/gradle/wrapper'), { recursive: true });
+  await writeFile(path.join(root, 'backend/gradle/wrapper/gradle-wrapper.properties'),
+    'distributionUrl=https\\://services.gradle.org/distributions/gradle-9.7.1-bin.zip\n');
   for (const directory of ['build', 'integrity', 'runtime']) await mkdir(path.join(root, 'ops/release', directory), { recursive: true });
   await mkdir(path.join(root, 'ops/docker'), { recursive: true });
-  await mkdir(path.join(root, 'infra/postgres'), { recursive: true });
+  await mkdir(path.join(root, 'infra/sqlite'), { recursive: true });
   await writeFile(path.join(root, 'ops/docker/compose.yaml'), 'compose');
-  await writeFile(path.join(root, 'infra/postgres/schema.sql'), 'schema');
+  await writeFile(path.join(root, 'infra/sqlite/schema.sql'), 'schema');
   await writeFile(path.join(noticesRoot, 'notice.txt'), notice);
   const licenses = components.map((component, index) => ({
     id: `license-${index}`, component, licenseId: 'MIT', licenseName: 'MIT',
@@ -51,7 +59,7 @@ async function fixture(t) {
   noticesRoot, outputParent,
   endpoint: 'unix:///tmp/podman.sock' };
   await writeFile(request, JSON.stringify(body));
-  return { root, outputParent, request, body, licenses };
+  return { root, outputParent, request, body, licenses, gradleCache, npmCache };
 }
 
 function boundaries(f, overrides = {}) {
@@ -100,17 +108,29 @@ function boundaries(f, overrides = {}) {
     TMPDIR: '/tmp', TEMP: '/tmp', TMP: '/tmp', LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8', TZ: 'UTC',
     PYTHONDONTWRITEBYTECODE: '1', PYTHONHASHSEED: '0', JAVA_HOME: '/controlled/jdk-25',
     LEXIFLOW_JAVA_HOME: '/controlled/jdk-25',
-    LEXIFLOW_POSTGRES_TEST_JDBC_URL: 'jdbc:postgresql://127.0.0.1:5432/test',
+    LEXIFLOW_RELEASE_JDBC_URL: 'jdbc:sqlite:/tmp/lexiflow-test/lexicon.db',
     LEXIFLOW_REDIS_TEST_ENDPOINT: 'redis://127.0.0.1:6379/0',
     LEXIFLOW_RELEASE_ARM64_DOCKER_HOST: 'unix:///tmp/podman.sock',
-    LEXIFLOW_RELEASE_GRADLE_CACHE: '/controlled/gradle-cache',
-    LEXIFLOW_RELEASE_NPM_CACHE: '/controlled/npm-cache',
+    LEXIFLOW_RELEASE_GRADLE_CACHE: f.gradleCache,
+    LEXIFLOW_RELEASE_NPM_CACHE: f.npmCache,
+    npm_config_cache: f.npmCache,
+    GRADLE_USER_HOME: path.join(root, 'tmp/quality/release-workflow/1.2.3/gradle-home'),
+    npm_config_userconfig: path.join(root, 'tmp/quality/release-workflow/1.2.3/npmrc-empty'),
     LEXIFLOW_CANDIDATE_RUNTIME_REQUEST: path.join(root, 'tmp/quality/release-workflow/1.2.3/candidate-runtime-request.json'),
   });
   return { calls, candidateDirectory, options: { root: f.root, platform: 'darwin', arch: 'arm64',
     tagChecker: () => targetIdentity, identityReader: () => targetIdentity, ledgerTrackedCheck: () => {},
     endpointChecker: async () => {},
-    baseImageLoader: async () => [{ platform: 'linux/amd64' }, { platform: 'linux/arm64' }],
+    baseImageLoader: async () => [{ platform: 'linux/amd64' }, { platform: 'linux/arm64',
+      javaRuntime: { reference: `registry.example/java@${armJavaId}`, imageId: armJavaId },
+ }],
+    dockerCommand: async (args, context) => {
+      calls.push(['docker', args, { ...context, authConfig: await readFile(path.join(context.configDirectory, 'config.json'), 'utf8') }]);
+      if (args[0] === 'version') return JSON.stringify({ Server: { Version: '28.0' } });
+      if (args[0] === 'info') return JSON.stringify({ OSType: 'linux', Architecture: 'arm64' });
+      const id = armJavaId;
+      return JSON.stringify([{ Id: id, Os: 'linux', Architecture: 'arm64' }]);
+    },
     runCommand, buildCandidateImages, environmentResolver,
     assembleReleaseCandidate, verifyReleaseCandidate, ...overrides } };
 }
@@ -123,18 +143,23 @@ async function releaseEnvironmentFixture(t) {
   const cacheGradle = path.join(root, 'gradle-cache'), cacheNpm = path.join(root, 'npm-cache');
   await mkdir(path.join(root, 'ops/release'), { recursive: true });
   await writeFile(path.join(root, 'ops/release/version.txt'), '1.2.3\n');
+  await mkdir(path.join(root, 'backend/gradle/wrapper'), { recursive: true });
+  await writeFile(path.join(root, 'backend/gradle/wrapper/gradle-wrapper.properties'),
+    'distributionUrl=https\\://services.gradle.org/distributions/gradle-9.7.1-bin.zip\n');
   const quality = path.join(root, 'tmp/quality/release-workflow/1.2.3');
   await Promise.all([mkdir(pythonBin, { recursive: true }), mkdir(path.join(javaHome, 'bin'), { recursive: true }),
-    mkdir(cacheGradle), mkdir(cacheNpm), mkdir(quality, { recursive: true })]);
-  await writeFile(path.join(pythonBin, 'python3'), '#!/bin/sh\nexit 0\n');
+    mkdir(path.join(cacheGradle, 'caches/modules-2'), { recursive: true }),
+    mkdir(path.join(cacheGradle, 'wrapper/dists'), { recursive: true }),
+    mkdir(cacheNpm), mkdir(quality, { recursive: true })]);
+  await writeFile(path.join(pythonBin, 'python3'), '#!/bin/sh\nif [ \"$1\" = \"-c\" ]; then echo yaml-ready; else echo Python 3.14.8; fi\n');
   await chmod(path.join(pythonBin, 'python3'), 0o700);
-  await writeFile(path.join(javaHome, 'bin/java'), '#!/bin/sh\nexit 0\n');
+  await writeFile(path.join(javaHome, 'bin/java'), '#!/bin/sh\nprintf \"openjdk version \\\"25.0.1\\\"\\nOpenJDK Runtime Environment Temurin-25.0.1+8\\n\" >&2\n');
   await chmod(path.join(javaHome, 'bin/java'), 0o700);
   await writeFile(path.join(quality, 'candidate-runtime-request.json'), '{}\n');
   const source = {
     LEXIFLOW_RELEASE_NODE_BIN: path.dirname(process.execPath),
     LEXIFLOW_JAVA_HOME: javaHome,
-    LEXIFLOW_POSTGRES_TEST_JDBC_URL: 'jdbc:postgresql://127.0.0.1:5432/one',
+    LEXIFLOW_RELEASE_JDBC_URL: 'jdbc:sqlite:/tmp/lexiflow-test/lexicon.db',
     LEXIFLOW_REDIS_TEST_ENDPOINT: 'redis://127.0.0.1:6379/0',
     LEXIFLOW_RELEASE_ARM64_DOCKER_HOST: 'unix:///tmp/podman.sock',
     LEXIFLOW_RELEASE_GRADLE_CACHE: cacheGradle,
@@ -145,6 +170,8 @@ async function releaseEnvironmentFixture(t) {
     GITHUB_TOKEN: 'synthetic-token', CODEX_HOME: '/trusted/codex-home',
     CODEX_THREAD_ID: 'thread-native', CODEX_SESSION_ID: 'session-native', CODEX_TMPDIR: '/ambient/codex-temp',
     LEXIFLOW_CANDIDATE_RUNTIME_REQUEST: '/attacker/request.json',
+    npm_config_userconfig: '/ambient/npmrc', NPM_CONFIG_USERCONFIG: '/ambient/uppercase.npmrc',
+    npm_config_cache: '/ambient/cache', NPM_CONFIG_CACHE: '/ambient/uppercase-cache',
   };
   return { root, javaHome, source };
 }
@@ -182,11 +209,31 @@ test('release environment canonicalizes ambient values and fails closed on missi
   assert.equal(first.LEXIFLOW_CANDIDATE_RUNTIME_REQUEST, path.join(f.root, 'tmp/quality/release-workflow/1.2.3/candidate-runtime-request.json'));
   assert.equal(first.CODEX_HOME, '/trusted/codex-home');
   assert.equal(first.CODEX_THREAD_ID, 'thread-native');
+  const prepare = resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'prepare', source: ambientChanged });
+  assert.equal(prepare.npm_config_cache, f.source.LEXIFLOW_RELEASE_NPM_CACHE);
+  assert.equal(prepare.npm_config_userconfig, path.join(f.root, 'tmp/quality/release-workflow/1.2.3/npmrc-empty'));
+  assert.equal(prepare.GRADLE_USER_HOME, path.join(f.root, 'tmp/quality/release-workflow/1.2.3/gradle-home'));
+  assert.equal(prepare.GIT_CONFIG_GLOBAL, '/dev/null');
+  assert.equal(prepare.NPM_CONFIG_USERCONFIG, prepare.npm_config_userconfig);
+  const pythonFile = path.join(f.root, '.local/lexiflow-python/bin/python3');
+  const preparedPython = await readFile(pythonFile);
+  await writeFile(pythonFile, '#!/bin/sh\ncase "$2" in *waitid*) exit 1;; *) echo yaml-ready;; esac\n');
+  assert.throws(() => resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'prepare', source: ambientChanged }),
+    /RELEASE_PYTHON_ENVIRONMENT_INVALID/, 'yaml alone cannot prove owned-process lifetime support');
+  await writeFile(pythonFile, preparedPython);
+  const incompleteCache = path.join(f.root, 'incomplete-gradle-cache');
+  await mkdir(incompleteCache);
+  assert.throws(() => resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'prepare',
+    source: { ...ambientChanged, LEXIFLOW_RELEASE_GRADLE_CACHE: incompleteCache } }), /RELEASE_GRADLE_CACHE_INCOMPLETE/);
+  await chmod(f.source.LEXIFLOW_RELEASE_NPM_CACHE, 0o777);
+  assert.throws(() => resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'prepare', source: ambientChanged }), /RELEASE_CACHE_INVALID/);
+  await chmod(f.source.LEXIFLOW_RELEASE_NPM_CACHE, 0o755);
   assert.equal(first.CODEX_SESSION_ID, 'session-native');
-  for (const forbidden of ['TERM', 'LANGUAGE', 'GITHUB_TOKEN', 'CODEX_TMPDIR', 'LEXIFLOW_RELEASE_NODE_BIN'])
+  for (const forbidden of ['TERM', 'LANGUAGE', 'GITHUB_TOKEN', 'CODEX_TMPDIR', 'LEXIFLOW_RELEASE_NODE_BIN',
+    'npm_config_userconfig', 'NPM_CONFIG_USERCONFIG', 'npm_config_cache', 'NPM_CONFIG_CACHE'])
     assert.equal(first[forbidden], undefined, `${forbidden} must not be forwarded`);
 
-  const required = ['LEXIFLOW_RELEASE_NODE_BIN', 'LEXIFLOW_JAVA_HOME', 'LEXIFLOW_POSTGRES_TEST_JDBC_URL', 'LEXIFLOW_REDIS_TEST_ENDPOINT',
+  const required = ['LEXIFLOW_RELEASE_NODE_BIN', 'LEXIFLOW_JAVA_HOME', 'LEXIFLOW_RELEASE_JDBC_URL', 'LEXIFLOW_REDIS_TEST_ENDPOINT',
     'LEXIFLOW_RELEASE_ARM64_DOCKER_HOST', 'LEXIFLOW_RELEASE_GRADLE_CACHE', 'LEXIFLOW_RELEASE_NPM_CACHE'];
   for (const name of required) {
     const missing = { ...f.source }; delete missing[name];
@@ -197,20 +244,20 @@ test('release environment canonicalizes ambient values and fails closed on missi
   assert.throws(() => resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'promotion', source: f.source }), /CANDIDATE_RUNTIME_REQUEST_MISSING/);
 });
 
-test('private environment capability still changes Python child environment fingerprint', async t => {
+test('release SQLite JDBC URL is not forwarded to generic Python validation children', async t => {
   const python = execFileSync('python3', ['-c', 'import sys; print(sys.executable)'], {
     cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
   const f = await releaseEnvironmentFixture(t);
   const fingerprint = source => {
     const env = resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'promotion', source });
-    const code = `from pathlib import Path\nfrom scripts.environment import resolve_check_environment\nfrom scripts.verification.execution.check_runner import build_child_environment, fingerprint_json\nr=resolve_check_environment(Path.cwd(), {'required_environment':['postgres-test-jdbc-url']})\nassert r.diagnostic['status']=='PASS'\ne=build_child_environment(runtime_environment=r.values)\nprint(fingerprint_json({k:e[k] for k in sorted(e)}))`;
+    const code = `from pathlib import Path\nfrom scripts.environment import resolve_check_environment\nfrom scripts.verification.execution.check_runner import build_child_environment, fingerprint_json\nr=resolve_check_environment(Path.cwd(), {})\nassert r.diagnostic['status']=='PASS'\ne=build_child_environment(runtime_environment=r.values)\nassert 'LEXIFLOW_RELEASE_JDBC_URL' not in e\nprint(fingerprint_json({k:e[k] for k in sorted(e)}))`;
     return execFileSync(python, ['-c', code], {
       cwd: repo, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
     }).trim();
   };
-  const changed = { ...f.source, LEXIFLOW_POSTGRES_TEST_JDBC_URL: 'jdbc:postgresql://127.0.0.1:5432/two' };
-  assert.notEqual(fingerprint(f.source), fingerprint(changed));
+  const changed = { ...f.source, LEXIFLOW_RELEASE_JDBC_URL: 'jdbc:sqlite:/tmp/lexiflow-test-two/lexicon.db' };
+  assert.equal(fingerprint(f.source), fingerprint(changed));
 });
 
 test('formal CLI admits only the four fixed acceptance mappings and propagates command failures', async t => {
@@ -255,11 +302,29 @@ test('formal CLI admits only the four fixed acceptance mappings and propagates c
 
 test('real staging bytes and exact builder/assembler contracts precede private handoff', async t => {
   const f = await fixture(t); const b = boundaries(f);
+  let identityReads = 0; b.options.identityReader = () => { identityReads++; return targetIdentity; };
+  b.options.diagnostics = true;
   const result = await prepareWorkflow(f.request, b.options);
-  assert.deepEqual(result, { status: 'PASS', stage: 'awaiting-native-formal' });
+  assert.equal(result.status, 'PASS'); assert.equal(result.stage, 'awaiting-native-formal');
+  assert.equal(result.diagnostics.failurePhase, null);
+  assert.equal(result.diagnostics.remoteWriteState, 'not-started');
+  assert.ok(Number.isSafeInteger(result.diagnostics.elapsedMs));
+  assert.ok(Number.isSafeInteger(result.diagnostics.overheadMs));
+  assert.deepEqual(result.diagnostics.phases.map(item => item.phase), [
+    'input-preflight', 'license-validation', 'base-image-lock', 'environment-preflight', 'docker-engine-preflight',
+    'compile', 'npm-prepare', 'extension-package', 'dataset-verify', 'image-build', 'assemble', 'candidate-verify' ]);
+  assert.ok(result.diagnostics.phases.every(item => Number.isSafeInteger(item.durationMs) && item.durationMs >= 0));
+  assert.equal(identityReads, 0, 'tagCheck returns the complete first-point identity; no duplicate identity reader scan');
   const stages = b.calls.filter(call => ['images', 'assemble', 'verify'].includes(call[0]));
   assert.deepEqual(stages.map(call => call[0]), ['images', 'assemble', 'verify']);
   const images = stages[0][1], assemble = stages[1][1];
+  const dockerCalls = b.calls.filter(call => call[0] === 'docker');
+  assert.deepEqual(dockerCalls.map(call => call[1][0]), ['version', 'info', 'image']);
+  assert.ok(dockerCalls.every(call => call[2].endpoint === f.body.endpoint));
+  assert.ok(dockerCalls.every(call => call[1][0] !== 'pull' && call[1][0] !== 'build'));
+  assert.deepEqual(JSON.parse(dockerCalls[0][2].authConfig), { auths: {} });
+  await assert.rejects(lstat(dockerCalls[0][2].configDirectory), error => error.code === 'ENOENT',
+    'preflight config is removed after read-only engine inspection');
   assert.deepEqual(Object.keys(images).sort(), ['artifactRoot', 'descriptor', 'endpoint', 'outputParent', 'platform', 'repoRoot']);
   assert.equal(images.platform, 'linux/arm64');
   assert.equal(images.endpoint, f.body.endpoint);
@@ -300,6 +365,83 @@ test('real staging bytes and exact builder/assembler contracts precede private h
   assert.ok(cmds[2][2].includes('--expected-dataset'));
   assert.ok(cmds[3][2].includes('--release-dataset'));
   assert.ok(cmds[3][2].includes('--expected-sha256'));
+});
+
+test('prepare reuses only pinned generated Gradle caches, rejecting unsafe optional caches before build', async t => {
+  const f = await fixture(t);
+  assert.deepEqual(releaseGradleCacheEntries(f.root, f.gradleCache), ['caches/modules-2', 'wrapper/dists']);
+  for (const relative of ['caches/9.7.1', 'caches/jars-9', 'caches/build-cache-1', 'init.d', 'caches/other-version'])
+    await mkdir(path.join(f.gradleCache, relative), { recursive: true });
+  await writeFile(path.join(f.gradleCache, 'gradle.properties'), 'synthetic-private-config');
+  assert.deepEqual(releaseGradleCacheEntries(f.root, f.gradleCache),
+    ['caches/modules-2', 'wrapper/dists', 'caches/9.7.1', 'caches/jars-9']);
+  const b = boundaries(f);
+  assert.equal((await prepareWorkflow(f.request, b.options)).status, 'PASS');
+  const home = path.join(f.root, 'tmp/quality/release-workflow/1.2.3/gradle-home');
+  assert.deepEqual((await readdir(path.join(home, 'caches'))).sort(), ['9.7.1', 'jars-9', 'modules-2']);
+  assert.deepEqual((await readdir(home)).sort(), ['caches', 'wrapper']);
+  assert.equal(await realpath(path.join(home, 'caches/9.7.1')), path.join(f.gradleCache, 'caches/9.7.1'));
+  const g = await fixture(t);
+  await symlink(path.join(g.gradleCache, 'caches/modules-2'), path.join(g.gradleCache, 'caches/9.7.1'));
+  const unsafe = boundaries(g);
+  const result = await prepareWorkflow(g.request, { ...unsafe.options, diagnostics: true });
+  assert.equal(result.reason, 'RELEASE_CACHE_INVALID');
+  assert.equal(result.diagnostics.failurePhase, 'environment-preflight');
+  assert.equal(unsafe.calls.filter(call => call[0] === 'command').length, 0);
+  await assert.rejects(lstat(path.join(g.root, 'tmp/quality/release-workflow/1.2.3')), { code: 'ENOENT' });
+  await rm(path.join(g.gradleCache, 'caches/9.7.1'));
+  await mkdir(path.join(g.gradleCache, 'caches/9.7.1'));
+  await chmod(path.join(g.gradleCache, 'caches/9.7.1'), 0o777);
+  assert.throws(() => releaseGradleCacheEntries(g.root, g.gradleCache), /RELEASE_CACHE_INVALID/);
+  await chmod(path.join(g.gradleCache, 'caches/9.7.1'), 0o755);
+  await writeFile(path.join(g.root, 'backend/gradle/wrapper/gradle-wrapper.properties'), 'distributionUrl=invalid\n');
+  assert.throws(() => releaseGradleCacheEntries(g.root, g.gradleCache), /RELEASE_GRADLE_WRAPPER_INVALID/);
+});
+
+test('prepare environment preflight rejects before any build command and reports the failed phase', async t => {
+  const f = await fixture(t); const b = boundaries(f);
+  const result = await prepareWorkflow(f.request, { ...b.options, diagnostics: true,
+    environmentResolver: () => { throw new Error('RELEASE_NODE22_REQUIRED'); } });
+  assert.equal(result.status, 'BLOCKED');
+  assert.equal(result.reason, 'RELEASE_NODE22_REQUIRED');
+  assert.equal(result.diagnostics.failurePhase, 'environment-preflight');
+  assert.equal(result.diagnostics.remoteWriteState, 'not-started');
+  assert.ok(Number.isSafeInteger(result.diagnostics.elapsedMs));
+  assert.ok(Number.isSafeInteger(result.diagnostics.overheadMs));
+  assert.deepEqual(result.diagnostics.phases.map(item => item.phase), ['input-preflight', 'license-validation', 'base-image-lock', 'environment-preflight']);
+  assert.equal(b.calls.filter(call => call[0] === 'command').length, 0);
+  assert.equal(b.calls.filter(call => ['images', 'assemble', 'verify'].includes(call[0])).length, 0);
+  assert.deepEqual(Object.keys(result.diagnostics).sort(), ['elapsedMs', 'failurePhase', 'overheadMs', 'phases', 'remoteWriteState']);
+});
+
+test('Docker engine, platform, locked base images and endpoint reject before compile', async t => {
+  for (const [caseName, override, expected] of [
+    ['engine', { dockerCommand: async args => args[0] === 'version' ? JSON.stringify({}) : '' }, 'DOCKER_UNAVAILABLE'],
+    ['platform', { dockerCommand: async args => args[0] === 'version' ? JSON.stringify({ Server: {} })
+      : args[0] === 'info' ? JSON.stringify({ OSType: 'linux', Architecture: 'amd64' }) : '' }, 'DOCKER_PLATFORM_MISMATCH'],
+    ['base', { dockerCommand: async args => args[0] === 'version' ? JSON.stringify({ Server: {} })
+      : args[0] === 'info' ? JSON.stringify({ OSType: 'linux', Architecture: 'arm64' })
+        : JSON.stringify([{ Id: `sha256:${'0'.repeat(64)}`, Os: 'linux', Architecture: 'arm64' }]) }, 'BASE_IMAGE_MISMATCH'],
+    ['endpoint', { badEndpoint: true }, 'RELEASE_ENVIRONMENT_INVALID'],
+  ]) {
+    const f = await fixture(t); const b = boundaries(f);
+    const options = { ...b.options, diagnostics: true, ...override };
+    if (override.badEndpoint) {
+      delete options.badEndpoint;
+      options.environmentResolver = input => ({ ...b.options.environmentResolver(input),
+        LEXIFLOW_RELEASE_ARM64_DOCKER_HOST: 'unix:///different.sock' });
+    }
+    const result = await prepareWorkflow(f.request, options);
+    assert.equal(result.status, 'BLOCKED', caseName);
+    assert.equal(result.reason, expected, caseName);
+    assert.equal(b.calls.filter(call => call[0] === 'command').length, 0, caseName);
+    assert.equal(b.calls.filter(call => ['images', 'assemble', 'verify'].includes(call[0])).length, 0, caseName);
+    const quality = path.join(f.root, 'tmp/quality/release-workflow/1.2.3');
+    await assert.rejects(lstat(quality), error => error.code === 'ENOENT', `${caseName} must not leave version residue`);
+    assert.deepEqual(await readdir(f.outputParent), [], `${caseName} must not leave build output artifacts`);
+    const recovered = await prepareWorkflow(f.request, b.options);
+    assert.equal(recovered.status, 'PASS', `${caseName} retry with ready inputs must succeed`);
+  }
 });
 
 test('bad license, digest, tag and command failure cannot hand off', async t => {
@@ -356,7 +498,7 @@ test('existing version-scoped handoff, duplicate JSON, symlink and oversize requ
 test('source drift during preparation never writes a handoff', async t => {
   const f = await fixture(t); const b = boundaries(f);
   let reads = 0;
-  b.options.identityReader = () => ++reads === 1 ? targetIdentity : previousIdentity;
+  b.options.tagChecker = () => ++reads === 1 ? targetIdentity : previousIdentity;
   assert.deepEqual(await prepareWorkflow(f.request, b.options), { status: 'BLOCKED', reason: 'WORKFLOW_FAILED' });
   await assert.rejects(readFile(path.join(f.root, 'tmp/quality/release-workflow/1.2.3/handoff.json')));
 });
@@ -471,14 +613,18 @@ test('resume binds UUID, host, source, original request and candidate; only publ
     assert.equal(outputs[1].settings.env.LEXIFLOW_RELEASE_PODMAN_ENDPOINT, f.body.endpoint);
     assert.equal(outputs[1].settings.env.LEXIFLOW_RELEASE_CONFIG_TOKEN, 'synthetic-config-token');
     for (const key of contextKeys) assert.equal(outputs[1].settings.env[key], context[key], `${key} must reach publish`);
-    const unknown = await resumePromotion({ ...common, publish: true, run: async () => {
+    const unknown = await resumePromotion({ ...common, publish: true, diagnostics: true, run: async () => {
       const error = new Error('CHILD_FAILED');
       error.publicOutput = JSON.stringify({ result: 'BLOCKED', published: 'unknown',
         write_stage: 'upload', release_id: 42 });
       throw error;
     } });
-    assert.deepEqual(unknown, { status: 'BLOCKED', reason: 'PUBLISH_STATE_UNKNOWN',
+    assert.deepEqual({ status: unknown.status, reason: unknown.reason, published: unknown.published,
+      writeStage: unknown.writeStage, releaseId: unknown.releaseId }, { status: 'BLOCKED', reason: 'PUBLISH_STATE_UNKNOWN',
       published: 'unknown', writeStage: 'upload', releaseId: 42 });
+    assert.equal(unknown.diagnostics.failurePhase, 'publish');
+    assert.equal(unknown.diagnostics.remoteWriteState, 'unknown');
+    assert.equal(unknown.diagnostics.phases[0].phase, 'publish');
     const registryUnknown = await resumePromotion({ ...common, publish: true, run: async () => {
       const error = new Error('CHILD_FAILED');
       error.publicOutput = JSON.stringify({ result: 'BLOCKED', published: 'unknown',
@@ -487,14 +633,15 @@ test('resume binds UUID, host, source, original request and candidate; only publ
     } });
     assert.deepEqual(registryUnknown, { status: 'BLOCKED', reason: 'PUBLISH_STATE_UNKNOWN',
       published: 'unknown', writeStage: 'registry-push', registryRole: 'runtime-image', releaseId: null });
-    const cleanup = await resumePromotion({ ...common, publish: true, run: async () => {
+    const cleanup = await resumePromotion({ ...common, publish: true, diagnostics: true, run: async () => {
       const error = new Error('CHILD_FAILED');
       error.publicOutput = JSON.stringify({ result: 'BLOCKED', published: true,
         cleanup: 'BLOCKED', release_id: 42 });
       throw error;
     } });
-    assert.deepEqual(cleanup, { status: 'BLOCKED', reason: 'PUBLISHED_CLEANUP_BLOCKED',
-      published: true, releaseId: 42 });
+    assert.deepEqual({ status: cleanup.status, reason: cleanup.reason, published: cleanup.published, releaseId: cleanup.releaseId },
+      { status: 'BLOCKED', reason: 'PUBLISHED_CLEANUP_BLOCKED', published: true, releaseId: 42 });
+    assert.equal(cleanup.diagnostics.remoteWriteState, 'published');
     const crash = await resumePromotion({ ...common, publish: true, run: async () => {
       throw new Error('CHILD_TIMEOUT');
     } });
@@ -528,7 +675,9 @@ test('confirmed recovery is a strict publish-only boolean and reaches the promot
   const oldToken = process.env.GITHUB_TOKEN, oldConfig = process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN;
   try {
     process.env.GITHUB_TOKEN = 'synthetic-test-token'; process.env.LEXIFLOW_RELEASE_CONFIG_TOKEN = 'synthetic-config-token';
-    assert.equal((await resumePromotion({ ...common, publish: true, confirmedRecovery: true })).status, 'PASS');
+    const recovered = await resumePromotion({ ...common, publish: true, confirmedRecovery: true, diagnostics: true });
+    assert.equal(recovered.status, 'PASS');
+    assert.equal(recovered.diagnostics.remoteWriteState, 'published');
     assert.deepEqual(captured[0].slice(-2), ['--publish', '--confirmed-recovery']);
   } finally {
     if (oldToken === undefined) delete process.env.GITHUB_TOKEN; else process.env.GITHUB_TOKEN = oldToken;
@@ -559,9 +708,11 @@ test('真实 Python CLI 的拒绝状态穿过 Node 子进程边界，未知写�
           return runCommand(python, ['-c', script, ...args.slice(2)], { ...settings, cwd: repo,
             env: { ...settings.env, PYTHONPATH: repo } });
         } };
-      const result = await resumePromotion(common);
+      const result = await resumePromotion({ ...common, diagnostics: true });
       assert.equal(result.status, 'BLOCKED');
       assert.equal(result.published, expected);
+      assert.equal(result.diagnostics.remoteWriteState, expected === false ? 'not-published' : 'unknown');
+      assert.equal(result.diagnostics.failurePhase, 'publish');
       assert.equal(result.reason, expected === false ? 'CHILD_FAILED' : 'PUBLISH_STATE_UNKNOWN');
     }
   } finally {
@@ -633,7 +784,7 @@ for (const publish of [false, true]) {
   }
 }
 
-test('private readers and unused release cache forwarding are not public interfaces', async t => {
+test('private readers and controlled release caches are not ambient forwarding interfaces', async t => {
   const workflow = await import('../workflow/run-release-workflow.mjs');
   const dockerCommand = await import('../build/release-build-process.mjs');
   assert.equal(workflow.readBoundedJson, undefined);
@@ -645,6 +796,13 @@ test('private readers and unused release cache forwarding are not public interfa
   const f = await fixture(t); const b = boundaries(f);
   assert.equal((await prepareWorkflow(f.request, b.options)).status, 'PASS');
   for (const call of b.calls.filter(call => call[0] === 'command')) {
-    for (const name of names) assert.ok(!Object.hasOwn(call[3].env, name));
+    assert.equal(call[3].env.LEXIFLOW_RELEASE_GRADLE_CACHE, f.gradleCache);
+    assert.equal(call[3].env.LEXIFLOW_RELEASE_NPM_CACHE, f.npmCache);
+    assert.equal(call[3].env.npm_config_cache, f.npmCache);
+    assert.equal(call[3].env.npm_config_userconfig, path.join(f.root, 'tmp/quality/release-workflow/1.2.3/npmrc-empty'));
+    assert.equal(call[3].env.GRADLE_USER_HOME, path.join(f.root, 'tmp/quality/release-workflow/1.2.3/gradle-home'));
+    assert.notEqual(call[3].env.GRADLE_USER_HOME, call[3].env.LEXIFLOW_RELEASE_GRADLE_CACHE);
+    assert.ok((await lstat(path.join(call[3].env.GRADLE_USER_HOME, 'caches/modules-2'))).isSymbolicLink());
+    assert.ok((await lstat(path.join(call[3].env.GRADLE_USER_HOME, 'wrapper/dists'))).isSymbolicLink());
   }
 });

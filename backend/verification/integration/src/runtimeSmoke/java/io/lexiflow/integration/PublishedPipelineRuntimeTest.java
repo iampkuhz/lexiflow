@@ -3,20 +3,24 @@ package io.lexiflow.integration;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.sql.DriverManager;
+import io.lexiflow.lexicon.platform.persistence.SqlitePersistence;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.JsonNode;
 
 /**
  * Exercises publication, serving, cache, rollback, and incremental contracts over real processes.
  */
 class PublishedPipelineRuntimeTest {
+  @TempDir Path temp;
+
   @Test
   void publishesCanonicalAndStarDictAndExercisesServingReplacementRollbackAndIncrementalRanges()
       throws Exception {
-    try (var fixture = new PipelineRuntimeFixture()) {
+    try (var fixture = new PipelineRuntimeFixture(temp)) {
       fixture.publish(PipelineSyntheticSources.stardict(fixture.temp()));
       long firstVersion = fixture.publishedVersion();
       assertTrue(firstVersion > 9_000_000_000L);
@@ -32,15 +36,15 @@ class PublishedPipelineRuntimeTest {
           firstVersion);
       assertNoHints(fixture.postText("star-bad-first", "badstardict"));
       assertEquals(
-          "false",
+          "0",
           scalar(
               fixture.jdbcUrl(),
-              "SELECT ranked_word::text FROM lexicon_entry WHERE lemma='stardictword'"));
+              "SELECT CAST(priority AS TEXT) FROM lexicon_entry WHERE lemma='stardictword'"));
       assertEquals(
-          "true",
+          "1",
           scalar(
               fixture.jdbcUrl(),
-              "SELECT (gloss IS NULL)::text FROM lexicon_entry WHERE lemma='badstardict'"));
+              "SELECT CAST(gloss IS NULL AS TEXT) FROM lexicon_entry WHERE lemma='badstardict'"));
 
       fixture.publish(PipelineSyntheticSources.canonical(fixture.temp(), "v2"));
       long secondVersion = fixture.publishedVersion();
@@ -80,10 +84,10 @@ class PublishedPipelineRuntimeTest {
       assertNoHints(fixture.postText("noise", "the and"));
       assertNoHints(fixture.postText("bad-gloss", "badgloss"));
       assertEquals(
-          "true",
+          "1",
           scalar(
               fixture.jdbcUrl(),
-              "SELECT (gloss IS NULL)::text FROM lexicon_entry WHERE lemma='badgloss'"));
+              "SELECT CAST(gloss IS NULL AS TEXT) FROM lexicon_entry WHERE lemma='badgloss'"));
 
       var ambiguous =
           fixture.postTracked(PipelineSyntheticSources.caption("ambiguous", "abdus", true));
@@ -146,7 +150,7 @@ class PublishedPipelineRuntimeTest {
           "1",
           scalar(
               fixture.jdbcUrl(),
-              "SELECT count(*)::text FROM lexicon_entry WHERE lemma='lexiflow'"));
+              "SELECT CAST(count(*) AS TEXT) FROM lexicon_entry WHERE lemma='lexiflow'"));
       assertHint(
           fixture.postText("after-failure", "lexiflow"),
           "after-failure",
@@ -199,7 +203,7 @@ class PublishedPipelineRuntimeTest {
   }
 
   private static String scalar(String jdbcUrl, String sql) throws Exception {
-    try (var connection = DriverManager.getConnection(jdbcUrl);
+    try (var connection = SqlitePersistence.connect(jdbcUrl);
         var statement = connection.createStatement();
         var rs = statement.executeQuery(sql)) {
       assertTrue(rs.next());

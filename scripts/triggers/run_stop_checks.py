@@ -158,7 +158,7 @@ def report_progress(report: dict) -> None:
 
 def _execute_delivery(root: Path, window) -> tuple[str, str]:
     """按真实风险执行完整开发视图，准备所需隔离服务；不签发 Formal 或发行 PASS。"""
-    from scripts.environment.services.isolated_postgres_redis import (
+    from scripts.environment.services.isolated_redis import (
         isolated_test_services,
     )
     from scripts.verification.commands.run_development_checks import (

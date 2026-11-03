@@ -4,7 +4,7 @@
 
 ## 1.1. 实际产品链
 
-在既有 `:integration-tests:runtimeSmokeTest` 中用合成临时 canonical CSV 与 StarDict CSV，启动真实 `LexiconImportMain` 子进程执行 publish；只使用 Harness 提供的 PostgreSQL 测试连接，创建独立随机 schema，以最新 SQL 初始化。随后启动实际 `:api:bootJar` 的独立进程，调用正式 HTTP readiness 与 caption-hints，不注入 fake Repository、候选列表或用例。
+在既有 `:integration-tests:runtimeSmokeTest` 中用合成临时 canonical CSV 与 StarDict CSV，启动真实 `LexiconImportMain` 子进程执行 publish；只在测试专属临时目录创建 SQLite 文件，以最新 SQL 初始化。随后启动实际 `:api:bootJar` 的独立进程，调用正式 HTTP readiness 与 caption-hints，不注入 fake Repository、候选列表或用例。
 
 `PublishedPipelineRuntimeTest` 拥有断言，`PipelineRuntimeFixture` 只管理本次 schema/受控子进程/HTTP/临时文件，`PipelineSyntheticSources` 只生成可解释的合成 CSV 和请求。必要 JSON 解析依赖沿现有 Spring Boot BOM；只对本集成模块更新锁文件。CLI 子进程 classpath 由 Gradle 明确传入，不依赖 Gradle worker 的 java.class.path 或运行机器的目录猜测。
 
@@ -36,7 +36,7 @@
 | --- | --- | --- |
 | 分类、资格与预热分离 | lexicon `ClassificationPolicyTest.distinguishesActualStardictRankSourceFromExplicitCsvZipfIncludingZero`、`preservesBasicWordAndPhraseAliasBoundary`；`HintPreparationTest.keepsFrequencyEvidenceAndPrewarmSeparateFromHintEligibility` | 纯规则，不代表持久化/HTTP |
 | 导入冲突与坏资料拒绝 | lexicon `LexiconImportPlanTest.keepsNaturalInflectionToLemmaAmbiguityAcrossChunks`、`rejectsCanonicalAliasCollisionAcrossChunks`；`LexiconImportPreparationTest.rejectsDigestAndCanonicalCollisionAcrossStream` | 准备与批次不变量 |
-| 真实数据库回滚、候选身份 | adapters `PostgresLexiconRepositoryIntegrationTest.databaseConstraintRollbackHasConfirmedTerminalAndKeepsPublishedData`、`publishesCompleteDataAndQueriesOneServingTableIncludingAmbiguity` | 独立 PostgreSQL，非浏览器 |
+| 真实数据库回滚、候选身份 | adapters `SqliteLexiconRepositoryIntegrationTest.databaseConstraintRollbackHasConfirmedTerminalAndKeepsPublishedData`、`publishesCompleteDataAndQueriesOneServingTableIncludingAmbiguity` | 独立 SQLite 文件，非浏览器 |
 | 跨片段与版本混用防护 | enrichment `IncrementalCaptionUseCaseTest.queriesOnlyContiguousAppendIntervalsAndMapsCrossSegmentPhrase`、`suppressesHintsFromDifferentPublishedVersionsAcrossIntervals`、`hiddenAndUnmatchedCandidatesFromAnotherVersionSuppressRealHintAcrossIntervals` | 用例级映射与安全边界 |
 | 无资料、演示、依赖异常 | integration `SystemRuntimeSmokeTest.verifiesDependencyProtocolsSchemaInitializationAndApiHealth`；api `LexiconReadinessHttpTest.emptyFormalProcessIsLiveButNotReadyAndRejectsHintsWithoutLeaks`、`CaptionHintHttpTest.explicitDemoDoesNotAdvertiseFormalReadiness`、`CaptionRequestFailureHttpTest.dependencyFailureUses503AndInternalFailureUsesFixed500WithoutPayload` | 启动 smoke 为真实进程，后两类 HTTP 使用受控测试装配 |
 | 日志故障不改变响应 | api `CaptionRequestFailureHttpTest.sensitiveRecordFailureKeepsSuccessfulResponseAndSharesRequestId`、`CaptionRequestSinkFailureHttpTest.eventSinkFailureDoesNotChangeRealHttpResponse` | 故障注入的 HTTP 测试，不注入正常发布链 |

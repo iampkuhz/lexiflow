@@ -32,14 +32,14 @@ public final class ClassificationPolicy {
   }
 
   /**
-   * 按词形的实际发布动作保持原缓存优先级公式，不以词条级动作覆盖降级结果。
+   * 按词形实际发布动作统一展示与预热优先级；零表示两者均不优先，但不代表阻断。
    *
    * @param row 含义：已校验的来源行。取值范围：非 null。
    * @param classification 含义：与该行准备结果一致的分类。取值范围：非 null。
    * @param action 含义：已应用查询窗口降级的词形最终发布动作。取值范围：非 null。
    * @return 非负的原有缓存优先级；零表示不预热。
    */
-  public static int cachePriority(
+  public static int publishedPriority(
       LexiconImportRow row, ImportClassification classification, LexiconHintAction action) {
     Objects.requireNonNull(row, "row");
     Objects.requireNonNull(classification, "classification");

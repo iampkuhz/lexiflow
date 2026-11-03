@@ -6,41 +6,17 @@ import path from 'node:path';
 import { runLocal } from '../commands/manage-podman-installation.mjs';
 import { renderCompose, readPreparedTarget } from '../installation/installation-upgrade-workflow.mjs';
 
-test('source and candidate use the same structured managed Compose without initializer dependency', () => {
-  const managed = JSON.parse(renderCompose('/unused', { apiPort: 18080, dbPort: 15432, external: false, dbUser: 'lexiflow' }));
-  assert.deepEqual(Object.keys(managed.services), ['postgres', 'api']);
-  assert.equal(managed.services.api.depends_on.postgres.condition, 'service_healthy');
-  assert.equal(managed.services.api.ports[0], '127.0.0.1:18080:8080');
-  assert.equal(managed.services.postgres.ports[0], '127.0.0.1:15432:5432');
-  assert.deepEqual(Object.keys(managed.volumes), ['pgdata']);
-  assert.equal(managed.services.initialize, undefined);
-});
-
-test('external Compose has no owned PG resource or dependency and safely serializes arbitrary role', () => {
-  const role = 'role: with # punctuation';
-  const external = JSON.parse(renderCompose('/unused', { apiPort: 18081, dbPort: 15433, external: true, dbUser: role }));
-  assert.deepEqual(Object.keys(external.services), ['api']);
-  assert.equal(external.volumes, undefined);
-  assert.equal(external.services.api.depends_on, undefined);
-  assert.equal(external.services.api.environment.LEXIFLOW_DATABASE_USER, role);
-  assert.deepEqual(external.services.api.networks, ['published']);
-  assert.deepEqual(Object.keys(external.secrets), ['app-password']);
-});
-
-test('development trust Compose has no application secret or owned PostgreSQL service', () => {
-  const config = JSON.parse(renderCompose('/unused', { apiPort: 18081, dbPort: 15432, external: true,
-    dbUser: 'postgres', authMode: 'development-trust' }));
+test('runtime Compose mounts the sole SQLite file read-only and starts no database service', () => {
+  const config = JSON.parse(renderCompose('/unused', { apiPort: 18080, databaseFile: '/private/install/data/lexicon.db' }));
   assert.deepEqual(Object.keys(config.services), ['api']);
-  assert.deepEqual(config.secrets, {});
-  assert.equal(config.services.api.secrets, undefined);
-  assert.equal(config.services.api.environment.LEXIFLOW_DATABASE_AUTH_MODE, 'development-trust');
-  assert.equal(config.services.api.environment.LEXIFLOW_DATABASE_USER, 'postgres');
-  assert.equal(config.services.api.depends_on, undefined);
-  assert.throws(() => renderCompose('/unused', { apiPort: 18081, dbPort: 15432, external: false,
-    dbUser: 'postgres', authMode: 'development-trust' }), /DEPLOYMENT_COMPOSE_INPUT_INVALID/);
+  assert.deepEqual(config.services.api.ports, ['127.0.0.1:18080:8080']);
+  assert.deepEqual(config.services.api.networks, ['published']);
+  assert.equal(config.services.api.environment.SPRING_DATASOURCE_URL, 'jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro');
+  assert.equal(config.services.api.volumes[0], '${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro');
+  assert.deepEqual(Object.keys(config.services), ['api']);
 });
 
-test('prepared trust recovery target carries explicit null secret digest, never a fake credential', () => {
+test('prepared target recovery binds a SQLite file, not a server or secret', () => {
   const parent = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'lexiflow-trust-recovery-'));
   const dir = path.join(parent, 'install'); fs.mkdirSync(dir);
   const journal = { operation: 'a'.repeat(32), planHash: 'b'.repeat(64) };
@@ -48,13 +24,13 @@ test('prepared trust recovery target carries explicit null secret digest, never 
   const prepared = { schema: 1, operation: journal.operation, planHash: journal.planHash,
     targetState: { root: dir, apiImage: `sha256:${'c'.repeat(64)}`, generationVersion: 'd'.repeat(64),
       inputSha256: 'e'.repeat(64), generation: { generationVersion: 'd'.repeat(64) },
-      dataset: path.join(dir, 'data/source'), databaseTarget: { kind: 'external', authMode: 'development-trust' } },
+      databaseFile: path.join(dir, 'data/lexicon.db'), dataset: path.join(dir, 'data/source'), databaseTarget: { kind: 'file', file: path.join(dir, 'data/lexicon.db') } },
     apiImage: `sha256:${'c'.repeat(64)}`, previousApiImage: null, dataFile: path.join(dir, 'data/source/stardict.csv'),
-    nextSql: null, extensionStage: null, actions: {}, sqlSha256: 'f'.repeat(64), extensionSha256: '1'.repeat(64), secretSha256: null };
+    databaseFile: path.join(dir, 'data/lexicon.db'), extensionStage: null, actions: {}, extensionSha256: '1'.repeat(64) };
   try {
     fs.writeFileSync(file, JSON.stringify(prepared));
-    assert.equal(readPreparedTarget(file, journal, dir).secretSha256, null);
-    fs.writeFileSync(file, JSON.stringify({ ...prepared, secretSha256: '2'.repeat(64) }));
+    assert.equal(readPreparedTarget(file, journal, dir).databaseFile, path.join(dir, 'data/lexicon.db'));
+    fs.writeFileSync(file, JSON.stringify({ ...prepared, databaseFile: path.join(dir, 'data/other.db') }));
     assert.throws(() => readPreparedTarget(file, journal, dir), /DEPLOYMENT_PREPARED_TARGET_INVALID/);
   } finally { fs.rmSync(parent, { recursive: true }); }
 });
@@ -71,14 +47,14 @@ test('actual runLocal rejects conflicting plan/confirmation before creating inst
   } finally { os.platform = oldPlatform; os.arch = oldArch; fs.rmSync(parent, { recursive: true }); }
 });
 
-test('actual runLocal will not materialize a missing upgrade or accept implicit external credential', async () => {
+test('actual runLocal will not materialize a missing upgrade or accept obsolete database arguments', async () => {
   const oldPlatform = os.platform, oldArch = os.arch;
   os.platform = () => 'darwin'; os.arch = () => 'arm64';
   const parent = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'lexiflow-local-upgrade-'));
   const dir = path.join(parent, 'installation');
   try {
     assert.equal(await runLocal(['upgrade', '--dir', dir, '--plan']), 1);
-    assert.equal(await runLocal(['install', '--dir', dir, '--db-user', 'lexiflow', '--plan']), 1);
+    assert.equal(await runLocal(['install', '--dir', dir, '--db-port', '45678', '--plan']), 1);
     assert.equal(fs.existsSync(dir), false);
   } finally { os.platform = oldPlatform; os.arch = oldArch; fs.rmSync(parent, { recursive: true }); }
 });
@@ -126,13 +102,13 @@ test('trusted extension identity mismatch has a fixed Chinese diagnostic rather 
 
 test('known build failure reports its actual stage without copying the command exception', async () => {
   const originalPlatform = os.platform, originalError = console.error, messages = [];
-  os.platform = () => { throw new Error('构建 PostgreSQL 镜像失败（退出码 125）；synthetic-secret'); };
+  os.platform = () => { throw new Error('构建 API 镜像失败（退出码 125）；synthetic-secret'); };
   console.error = value => messages.push(String(value));
   const parent = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'lexiflow-local-build-error-'));
   try {
     assert.equal(await runLocal(['install', '--dir', path.join(parent, 'installation')]), 1);
     assert.equal(messages.length, 1);
-    assert.match(messages[0], /^\[LexiFlow\] 构建 PostgreSQL 镜像失败：/);
+    assert.match(messages[0], /^\[LexiFlow\] 构建 API 镜像失败：/);
     assert.doesNotMatch(messages[0], /检查参数|synthetic-secret|退出码 125/);
   } finally { os.platform = originalPlatform; console.error = originalError; fs.rmSync(parent, { recursive: true }); }
 });

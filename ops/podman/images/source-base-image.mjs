@@ -1,6 +1,5 @@
 const allowed = new Map([
   ['docker.io/library/eclipse-temurin:25-jre', 'java'],
-  ['docker.io/library/postgres:17-bookworm', 'postgres'],
 ]);
 const idPattern = /^(?:sha256:)?[a-f0-9]{64}$/;
 
@@ -34,8 +33,6 @@ function validate(image, kind) {
   const env = image.Config?.Env;
   if (kind === 'java') {
     if (!/^jdk-25(?:\.[0-9]+)*\+[0-9]+$/.test(envValue(env, 'JAVA_VERSION'))) fail('SOURCE_BASE_IMAGE_INVALID');
-  } else if (envValue(env, 'PG_MAJOR') !== '17' || !/^17\..+/.test(envValue(env, 'PG_VERSION'))) {
-    fail('SOURCE_BASE_IMAGE_INVALID');
   }
   return `sha256:${image.Id.replace(/^sha256:/, '')}`;
 }

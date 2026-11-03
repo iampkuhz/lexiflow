@@ -17,7 +17,7 @@
     "backend/product/lexicon/gradle.lockfile",
     "backend/product/adapters/gradle.lockfile",
     "backend/product/api/gradle.lockfile",
-    "infra/postgres/schema.sql",
+    "infra/sqlite/schema.sql",
     "ops/dataset/ecdict-source.lock.json",
     "ops/dataset/prepare_ecdict_bundle.py",
     "ops/podman/source-tools.Containerfile"

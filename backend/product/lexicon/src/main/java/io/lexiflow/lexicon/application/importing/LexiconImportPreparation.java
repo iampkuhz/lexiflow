@@ -3,6 +3,8 @@ package io.lexiflow.lexicon.application.importing;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
+import io.lexiflow.lexicon.application.importing.policy.ClassificationPolicy;
+import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
@@ -88,8 +90,7 @@ public final class LexiconImportPreparation {
     Objects.requireNonNull(rowSource, "rowSource");
     if (prewarmLimit < 0) throw new IllegalArgumentException("prewarmLimit must be non-negative");
     var comparator =
-        Comparator.comparingInt(
-                (LexiconImportPlan.PlannedEntry value) -> value.row().priority().memoryPriority())
+        Comparator.comparingInt(LexiconImportPreparation::priority)
             .thenComparing(value -> value.entry().lemma(), Comparator.reverseOrder());
     var top =
         new PriorityQueue<LexiconImportPlan.PlannedEntry>(Math.max(1, prewarmLimit), comparator);
@@ -112,14 +113,19 @@ public final class LexiconImportPreparation {
         new Counts(state.receiptRows, state.entries),
         state.top.stream()
             .sorted(
-                Comparator.comparingInt(
-                        (LexiconImportPlan.PlannedEntry value) ->
-                            value.row().priority().memoryPriority())
+                Comparator.comparingInt(LexiconImportPreparation::priority)
                     .reversed()
                     .thenComparing(value -> value.entry().lemma()))
             .toList(),
         new LexiconImportStatistics(
             state.receiptRows, state.entries, state.hintEntries, blocked, rules));
+  }
+
+  private static int priority(LexiconImportPlan.PlannedEntry value) {
+    var action =
+        value.prepared().gloss() == null ? LexiconHintAction.BLOCK : LexiconHintAction.HINT;
+    return ClassificationPolicy.publishedPriority(
+        value.row(), value.prepared().classification(), action);
   }
 
   /** 应用层单次扫描状态，保留全扫描 canonical 所有权及有界候选。 */
@@ -166,7 +172,7 @@ public final class LexiconImportPreparation {
       var matched = new java.util.LinkedHashSet<>(planned.prepared().matchedRules());
       matched.add(planned.prepared().decisiveRule());
       for (var rule : matched) rules.merge(rule, 1L, Long::sum);
-      if (limit == 0 || !row.prewarmEligible() || row.priority().memoryPriority() <= 0) return;
+      if (limit == 0 || priority(planned) <= 0) return;
       if (top.size() < limit) top.add(planned);
       else if (comparator.compare(planned, top.peek()) > 0) {
         top.remove();

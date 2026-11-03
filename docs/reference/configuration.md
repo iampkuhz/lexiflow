@@ -13,7 +13,7 @@
 | Check、场景资格、triggers、依赖、ownership 与输入 | [module-checks.yaml](../../config/engineering/module-checks.yaml) | [check_definitions.py](../../scripts/verification/planning/check_definitions.py)、[check_scope_selection.py](../../scripts/verification/planning/check_scope_selection.py)；schema、结果判据固定在加载器 |
 | 文档组织、图源与 skill 操作 | [documentation-policy.md](../../harness/documentation-policy.md) | 人与 Agent；固定静态检查与本机 skill 接入分别归 [check_documentation.py](../../scripts/checks/repository/documentation/check_documentation.py)、[manage_local_skill_links.py](../../scripts/local/manage_local_skill_links.py) |
 | 领域、依赖方向与跨模块边界 | [module-boundaries.md](../../harness/module-boundaries.md) | 人与 Agent；架构自动断言由对应代码/测试维护 |
-| 临时 PostgreSQL/Redis 生命周期 | [isolated_postgres_redis.py](../../scripts/environment/services/isolated_postgres_redis.py) | 固定镜像、容量、就绪、lease 与 owned 清理合同；[验证环境](../scenarios/verification-environment.md)说明操作 |
+| 临时 Redis 生命周期 | [isolated_redis.py](../../scripts/environment/services/isolated_redis.py) | Redis 固定镜像、就绪、lease 与 owned 清理合同；SQLite 测试文件在每个测试的临时目录内；[验证环境](../scenarios/verification-environment.md)说明操作 |
 | Ruff 风格与格式 | [python-quality.toml](../../config/engineering/python-quality.toml) | [check_python_quality.py](../../scripts/checks/repository/python/check_python_quality.py)传给 Ruff；中文公共接口 docstring 的固定 Pylint 规则由实现维护 |
 | 工程导航与公开命令 | [Harness README](../../harness/README.md)、[检查入口索引](checks.md) | 按任务定位；命令参数以真正 CLI 为准，不维护平行注册表 |
 
@@ -52,7 +52,7 @@ ownership 只扫描共享 Git 源码候选及冻结的共享 ignore，不进入�
 
 | 文件 | 已确认的消费者 | 性质与维护边界 |
 | --- | --- | --- |
-| [infra/local/compose.yaml](../../infra/local/compose.yaml) | [数据库目标](../../ops/podman/environment/local-database-target.mjs)、Compose 工具 | 本机服务声明，代码读取并核对内容 |
+| [infra/local/compose.yaml](../../infra/local/compose.yaml) | Compose 工具 | 本机 Redis 服务声明；SQLite 开发文件由本机开发配置指定 |
 | [ecdict-source.lock.json](../../ops/dataset/ecdict-source.lock.json) | [固定词库准备入口](../../ops/dataset/prepare_ecdict_bundle.py) | 来源锁；不是下载时生成的运行记录 |
 | [generation-inputs.json](../../ops/dataset/generation-inputs.json) | [生成身份](../../ops/dataset/dataset-generation-identity.mjs) | 数据生成版本的输入声明 |
 | [base-images.json](../../ops/docker/base-images.json) | [发行构建](../../ops/release/build/release-image-build-plan.mjs) | 基础镜像锁，随构建版本审查 |

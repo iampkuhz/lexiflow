@@ -10,7 +10,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[3]
 STATE = ROOT / "ops/release/runtime/release-installation-state.sh"
 LIFECYCLE = ROOT / "ops/release/runtime/release-installation-lifecycle.sh"
@@ -324,17 +323,23 @@ class StateRecordTests(unittest.TestCase):
                 token.unlink()
                 token.parent.rmdir()
 
-    def test_secret_permission_detection_discards_failed_platform_output(self) -> None:
-        self.assertEqual(self.run_script().returncode, 0)
+    def test_private_permission_detection_discards_failed_platform_output(self) -> None:
+        engine = self.root / "engine"
+        content = "schema=lexiflow-engine-v1\nendpoint=unix:///synthetic.sock\ndaemon_id=synthetic-id\n"
+        engine.write_text(content)
+        engine.chmod(0o600)
         tools = self.base / "stat-tools"
         tools.mkdir()
         stub = tools / "stat"
-        stub.write_text('#!/bin/sh\nif [ "$1" = -c ]; then printf "partial failed output\\n"; exit 1; fi\nprintf "600\\n"\n')
+        stub.write_text('#!/bin/sh\nif [ "$1" = -c ]; then printf "partial failed output\\n"; exit 1; fi\nprintf "1:600:%s\\n"\n' % len(content))
         stub.chmod(0o700)
-        env = {"PATH": str(tools) + os.pathsep + os.environ["PATH"]}
-        self.assertEqual(self.run_script(env=env).returncode, 0)
-        stub.write_text('#!/bin/sh\nprintf "644\\n"\n')
-        self.assertNotEqual(self.run_script(env=env).returncode, 0)
+        prefix = STATE.read_text() + "\n" + f"LF_ROOT={shlex.quote(str(self.root))}\nlf_engine_read\n"
+        env = {**os.environ, "PATH": str(tools) + os.pathsep + os.environ["PATH"]}
+        def read_engine():
+            return subprocess.run(["/bin/sh", "-c", prefix], capture_output=True, timeout=10, env=env)
+        self.assertEqual(read_engine().returncode, 0)
+        stub.write_text('#!/bin/sh\nprintf "1:644:%s\\n"\n' % len(content))
+        self.assertNotEqual(read_engine().returncode, 0)
 
     def test_symlink_ancestors_and_record_identity(self) -> None:
         self.assertEqual(self.run_script().returncode, 0)
@@ -355,7 +360,7 @@ class StateRecordTests(unittest.TestCase):
         ancestor.symlink_to(self.root, target_is_directory=True)
         self.assertNotEqual(self.run_script(str(ancestor)).returncode, 0)
 
-    def test_owner_state_symlink_and_short_random_retry(self) -> None:
+    def test_owner_state_symlink_and_record_preservation(self) -> None:
         self.assertEqual(self.run_script().returncode, 0)
         state = self.root / "state"
         state.write_bytes(self.state_bytes())
@@ -369,19 +374,9 @@ class StateRecordTests(unittest.TestCase):
         self.assertNotEqual(self.state_shell("lf_state_write stopped none none none none none").returncode, 0)
         state.unlink()
         (self.root / "state-real").rename(state)
-        d = self.root / "releases" / KEY
-        record = (d / "record").read_bytes()
-        (d / "app-password").unlink()
-        tools = self.base / "tools"
-        tools.mkdir()
-        fake_od = tools / "od"
-        fake_od.write_text("#!/bin/sh\nprintf 'ab\\n'\n")
-        fake_od.chmod(0o700)
-        self.assertNotEqual(self.run_script(env={"PATH": str(tools) + os.pathsep + os.environ["PATH"]}).returncode, 0)
-        self.assertEqual((d / "record").read_bytes(), record)
-        self.assertFalse((d / "app-password").exists())
+        self.assertEqual(self.run_script().returncode, 0)
 
-    def test_first_write_repeat_and_missing_secret_recovery(self) -> None:
+    def test_first_write_repeat_is_idempotent_and_preserves_record(self) -> None:
         result = self.run_script()
         self.assertEqual(result.returncode, 0, result.stderr)
         d = self.root / "releases" / KEY
@@ -389,12 +384,6 @@ class StateRecordTests(unittest.TestCase):
         self.assertEqual(len(rec.splitlines()), 4)
         self.assertNotIn(b"project=", rec)
         self.assertEqual(self.run_script().returncode, 0)
-        (d / "postgres-password").unlink()
-        self.assertEqual(self.run_script().returncode, 0)
-        self.assertEqual(len((d / "postgres-password").read_text()), 64)
-        (d / "app-password").write_text("malformed")
-        result = self.run_script()
-        self.assertNotEqual(result.returncode, 0)
         self.assertEqual((d / "record").read_bytes(), rec)
         self.assertFalse(list(d.glob(".record-*")))
 

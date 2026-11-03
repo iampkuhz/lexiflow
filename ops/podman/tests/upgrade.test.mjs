@@ -45,26 +45,24 @@ function fixture() {
   const old = identity('1'), next = identity('2'), operation = 'b'.repeat(32);
   const dataFile = path.join(dir, 'data/ecdict-source.test/stardict.csv');
   fs.mkdirSync(path.dirname(dataFile), { recursive: true }); fs.writeFileSync(dataFile, 'synthetic-csv');
-  const secret = path.join(dir, 'secrets/app-password'); fs.mkdirSync(path.dirname(secret)); fs.writeFileSync(secret, 'secret');
-  const sql = path.join(dir, 'infra/postgres/schema.sql'); fs.mkdirSync(path.dirname(sql), { recursive: true }); fs.writeFileSync(sql, 'old sql');
-  const stagedSql = path.join(dir, `.schema-${operation}.sql`); fs.writeFileSync(stagedSql, 'target sql');
+  const databaseFile = path.join(dir, 'data/lexicon.db'); fs.mkdirSync(path.dirname(databaseFile), { recursive: true }); fs.writeFileSync(databaseFile, Buffer.concat([Buffer.from('SQLite format 3\0'), Buffer.alloc(100)]));
+  const unrelated = path.join(dir, 'preserve/owned-data.bin'); fs.mkdirSync(path.dirname(unrelated)); fs.writeFileSync(unrelated, 'preserve-me');
   fs.writeFileSync(path.join(dir, 'compose.yaml'), 'old compose'); fs.writeFileSync(path.join(dir, 'release.env'), 'old env');
   extension(path.join(dir, 'extension'), old);
   const stage = path.join(dir, `.prepared-${operation}/extension`); extension(stage, next);
   const nextArchive = archive(dir, next);
   fs.writeFileSync(path.join(dir, 'synthetic-marker.json'), '{"preserve":true}\n');
-  const oldDigests = Object.fromEntries(['compose.yaml', 'release.env', 'infra/postgres/schema.sql']
+  const oldDigests = Object.fromEntries(['compose.yaml', 'release.env']
     .map(name => [name, sha(fs.readFileSync(path.join(dir, name)))]));
   const previous = { id: 'a'.repeat(32), root: dir, apiPort: 18081, buildIdentity: old, digests: oldDigests };
   const generationVersion = 'c'.repeat(64);
   const targetState = { ...previous, buildIdentity: next, version: next.softwareVersion,
-    apiImage: 'sha256:' + 'd'.repeat(64), dataset: path.dirname(dataFile), inputSha256: sha(fs.readFileSync(dataFile)),
+    apiImage: 'sha256:' + 'd'.repeat(64), dataset: path.dirname(dataFile), inputSha256: sha(fs.readFileSync(dataFile)), databaseFile, databaseTarget: { kind: 'file', file: databaseFile },
     generationVersion, generation: { generationVersion } };
   targetState.artifacts = { extensionArchive: nextArchive };
   const prepared = { operation, targetState, dataFile, apiImage: targetState.apiImage,
-    nextSql: stagedSql, extensionStage: stage, composeText: 'target compose', envText: 'target env',
-    sqlSha256: sha('target sql'), extensionSha256: treeDigest(stage),
-    previousExtensionSha256: treeDigest(path.join(dir, 'extension')), secretSha256: sha('secret') };
+    databaseFile, extensionStage: stage, composeText: 'target compose', envText: 'target env',
+    extensionSha256: treeDigest(stage), previousExtensionSha256: treeDigest(path.join(dir, 'extension')) };
   const fact = { needsRebuild: false, generationVersion, datasetVersion: 73 };
   const calls = [];
   let current;
@@ -76,17 +74,17 @@ function fixture() {
     get current() { return current; }, cleanup() { fs.rmSync(dir, { recursive: true }); } };
 }
 
-test('database-fact recovery activates target only, retaining marker, installation identity, DB port and secret', async () => {
+test('database-fact recovery activates target only, retaining marker, installation identity, SQLite bytes and unrelated owned data', async () => {
   const f = fixture();
   try {
     const marker = fs.readFileSync(path.join(f.dir, 'synthetic-marker.json'));
-    const secret = fs.readFileSync(path.join(f.dir, 'secrets/app-password'));
+    const database = fs.readFileSync(f.prepared.databaseFile); const unrelated = fs.readFileSync(path.join(f.dir, 'preserve/owned-data.bin'));
     const result = await activatePreparedTarget(f.callbacks);
     assert.equal(result.phase, 'ready'); assert.equal(result.id, f.previous.id);
-    assert.equal(result.apiPort, f.previous.apiPort); assert.deepEqual(fs.readFileSync(path.join(f.dir, 'secrets/app-password')), secret);
+    assert.equal(result.apiPort, f.previous.apiPort); assert.deepEqual(fs.readFileSync(f.prepared.databaseFile), database); assert.deepEqual(fs.readFileSync(path.join(f.dir, 'preserve/owned-data.bin')), unrelated);
     assert.deepEqual(fs.readFileSync(path.join(f.dir, 'synthetic-marker.json')), marker);
     assert.equal(verifyExtension(path.join(f.dir, 'extension'), f.next, 18081), f.prepared.extensionSha256);
-    assert.equal(fs.readFileSync(path.join(f.dir, 'infra/postgres/schema.sql'), 'utf8'), 'target sql');
+    assert.deepEqual(fs.readFileSync(f.prepared.databaseFile), database);
     assert.deepEqual(f.calls.slice(-3), ['compose:up -d --no-deps --force-recreate api', 'ready', 'save']);
   } finally { f.cleanup(); }
 });
@@ -102,16 +100,16 @@ test('uncommitted or unknown database fact never activates prepared target or al
       await assert.rejects(activatePreparedTarget({ ...f.callbacks, fact }), /DEPLOYMENT_RECOVERY_FACT_DRIFT/);
       assert.deepEqual(f.calls, []);
       assert.equal(fs.readFileSync(path.join(f.dir, 'compose.yaml'), 'utf8'), 'old compose');
-      assert.equal(fs.readFileSync(path.join(f.dir, 'infra/postgres/schema.sql'), 'utf8'), 'old sql');
+      assert.match(fs.readFileSync(f.prepared.databaseFile).toString(), /^SQLite format 3/u);
       assert.equal(fs.existsSync(f.prepared.extensionStage), true);
     } finally { f.cleanup(); }
   }
 });
 
-test('unknown config/secret/extension drift blocks before switching application', async () => {
+test('unknown config and extension drift blocks before switching application', async () => {
   for (const mutate of [
     f => fs.writeFileSync(path.join(f.dir, 'compose.yaml'), 'unknown compose'),
-    f => fs.writeFileSync(path.join(f.dir, 'secrets/app-password'), 'unknown secret'),
+    f => fs.writeFileSync(path.join(f.dir, 'release.env'), 'unknown env'),
     f => fs.writeFileSync(path.join(f.dir, 'extension/worker.js'), 'unknown worker'),
   ]) {
     const f = fixture();
@@ -119,8 +117,8 @@ test('unknown config/secret/extension drift blocks before switching application'
       mutate(f);
       await assert.rejects(activatePreparedTarget(f.callbacks), /DEPLOYMENT_RECOVERY_(CONFIG|FACT|EXTENSION)_DRIFT/);
       assert.equal(f.calls.some(call => call.startsWith('compose:')), false);
-      assert.equal(fs.readFileSync(path.join(f.dir, 'infra/postgres/schema.sql'), 'utf8'), 'old sql');
-      assert.equal(fs.readFileSync(path.join(f.dir, 'release.env'), 'utf8'), 'old env');
+      assert.match(fs.readFileSync(f.prepared.databaseFile).toString(), /^SQLite format 3/u);
+      assert.equal(fs.readFileSync(path.join(f.dir, 'release.env'), 'utf8'), fs.readFileSync(path.join(f.dir, 'release.env'), 'utf8') === 'unknown env' ? 'unknown env' : 'old env');
     } finally { f.cleanup(); }
   }
 });
@@ -128,11 +126,12 @@ test('unknown config/secret/extension drift blocks before switching application'
 test('state-save failure after DB fact retains target files and retry advances, never restores old app', async () => {
   const f = fixture();
   try {
+    const database = fs.readFileSync(f.prepared.databaseFile);
     const save = f.callbacks.saveState; let once = true;
     f.callbacks.saveState = value => { if (once) { once = false; throw new Error('DISK_SAVE_FAILED'); } save(value); };
     await assert.rejects(activatePreparedTarget(f.callbacks), /DISK_SAVE_FAILED/);
     assert.equal(fs.readFileSync(path.join(f.dir, 'compose.yaml'), 'utf8'), 'target compose');
-    assert.equal(fs.readFileSync(path.join(f.dir, 'infra/postgres/schema.sql'), 'utf8'), 'target sql');
+    assert.deepEqual(fs.readFileSync(f.prepared.databaseFile), database);
     assert.equal(fs.readFileSync(path.join(f.dir, 'release.env'), 'utf8'), 'target env');
     assert.equal(verifyExtension(path.join(f.dir, 'extension'), f.next, 18081), f.prepared.extensionSha256);
     const recovered = await activatePreparedTarget(f.callbacks);

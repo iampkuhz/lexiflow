@@ -51,7 +51,7 @@ class TestQualityGateLayering(unittest.TestCase):
         )[0]
         for task in (
             '"check"',
-            '":adapters:postgresIntegrationTest"',
+            '":adapters:sqliteIntegrationTest"',
             '":integration-tests:runtimeSmokeTest"',
             '":api:bootJar"',
         ):

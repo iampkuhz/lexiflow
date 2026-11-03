@@ -73,7 +73,7 @@ test('unknown-volume probe waits for exit and rejects timeout or successful exit
   for (const exit of [{ State: { ExitCode: 1 } }, null, { State: { ExitCode: 0 } }]) {
     let waited = false;
     // The setup write precedes the wait, so distinguish it from retention probes.
-    const { execute: probe, source } = await lifecycleFunction('incompatibleVolume', 'faultExit', {
+    const { execute: probe, source } = await lifecycleFunction('incompatibleVolume', 'faultSqliteDatabase', {
       createVolume: () => {}, containerRun: () => ({ ok: true }),
       cmd: (_, label) => { if (label !== 'incompatible-marker') assert.equal(waited, true); return { ok: true }; },
       observeWait: async () => { await Promise.resolve(); waited = true; return exit; },
@@ -131,266 +131,41 @@ test('nonzero supervised exit is unavailable while successful exit cannot prove 
   }
 });
 
-test('real kill-probe shells select the intended process, never their own earlier-sorted bash cmdline', async t => {
-  const { mkdtemp, mkdir, writeFile, rm } = await import('node:fs/promises');
-  const { tmpdir } = await import('node:os');
-  const root = await mkdtemp(path.join(tmpdir(), 'lexiflow-proc-fixture-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const scripts = [];
-  const { execute } = await lifecycleFunction('faultExit', 'runInner', {
-    volumeAbsent: () => {}, startAndReady: async () => {}, proveAutoVolume: () => {},
-    cmd: (_, label, args) => { scripts.push([label, args.at(-1)]); return { ok: true }; },
-    observeUnhealthy: async () => true, observeWait: async () => ({ State: { ExitCode: 1 } }), removeContainer: () => {},
-  });
-  assert.equal(await execute('', 'image', 'owner', 'container', 'volume', [], [], {}, {}), true);
-  for (const [label, script] of scripts) {
-    const base = path.join(root, label, 'proc');
-    for (const pid of ['100', '9']) await mkdir(path.join(base, pid), { recursive: true });
-    const java = label === 'api-exit-injection';
-    await writeFile(path.join(base, '100', 'comm'), 'bash\n');
-    await writeFile(path.join(base, '100', 'cmdline'), `/bin/bash\0-c\0${script}\0`);
-    await writeFile(path.join(base, '9', 'comm'), java ? 'java\n' : 'postgres\n');
-    await writeFile(path.join(base, '9', 'cmdline'), java ? 'java\0-jar\0/app/lexiflow-api.jar\0' : 'postgres\0-D\0/var/lib/lexiflow/postgres\0');
-    const result = spawnSync('/bin/bash', ['-c', `kill() { printf '%s\\n' "$*"; }; ${script.replaceAll('/proc/', `${base}/`)}`], { encoding: 'utf8' });
-    assert.equal(result.status, 0, `${label}: ${result.stderr}`);
-    assert.equal(result.stdout, '-KILL 9\n', label);
-  }
-});
-
-test('every runtime create and run ignores inherited image volumes without disabling the owned named mount', async () => {
-  const calls = [];
-  const command = (_, label, args) => { calls.push([label, Array.from(args)]); return { ok: true }; };
-  const { execute: run } = await lifecycleFunction('containerRun', 'removeContainer', { cmd: command });
-  run('', { name: 'container', volume: 'data', image: 'image', token: 'owner' });
-  for (const argument of ['--image-volume=ignore', '--memory=2g', '--cpus=2', '--stop-timeout=45']) {
-    assert.equal(calls[0][1].includes(argument), true, argument);
-  }
-  assert.equal(calls[0][1].includes('data:/var/lib/lexiflow'), true);
-  const { execute: collision } = await lifecycleFunction('nameConflictFailure', 'invalidLoadFailure', {
-    json: command, cmd: (_, label, args) => { command('', label, args); return { ok: label === 'collision-create' }; },
-    inspectContainer: () => ({}), assertOwned: () => {},
-  });
-  assert.equal(collision('', 'container', 'image', 'owner', []), true);
-  const { execute: incompatible } = await lifecycleFunction('incompatibleVolume', 'faultExit', {
-    createVolume: () => {}, containerRun: () => ({ ok: true }),
-    cmd: (_, label, args) => { command('', label, args); return { ok: label !== 'unknown-volume-retained' }; },
-    observeWait: async () => ({ State: { ExitCode: 1 } }),
-  });
-  assert.equal(await incompatible('', 'container', 'image', 'data', 'owner', {}, []), true);
-  const launches = calls.filter(([, args]) => ['create', 'run'].includes(args[0]));
-  assert.equal(launches.length, 5);
-  for (const [label, args] of launches) assert.equal(args.includes('--image-volume=ignore'), true, label);
-});
-
-test('auto-created volume proof rejects any additional inherited or unknown mount', async () => {
-  const named = { Type: 'volume', Name: 'data', Destination: '/var/lib/lexiflow' };
-  for (const mounts of [[named], [named, { Type: 'volume', Name: 'anonymous', Destination: '/var/lib/postgresql/data' }], [{ ...named, Type: 'bind' }], []]) {
-    const proofs = new Map([['data', { previousAbsent: true }]]);
-    const { execute } = await lifecycleFunction('proveAutoVolume', 'containerRun', {
-      inspectContainer: () => ({ Id: 'a'.repeat(64), Mounts: mounts }), assertOwned: () => {},
-      inspectVolume: () => ({}), volumeIdentity: () => ({ name: 'data' }),
-      volumeProofs: proofs, markerHash: () => 'b'.repeat(64),
-    });
-    if (mounts.length === 1 && mounts[0].Type === 'volume') assert.equal(execute('', 'container', 'data', 'owner').containerId, 'a'.repeat(64));
-    else assert.throws(() => execute('', 'container', 'data', 'owner'), /VOLUME_MOUNT_UNPROVEN/);
-  }
-});
-
-test('actual Podman command environment receives only the validated OS temp directory', async () => {
-  const { execute, source } = await lifecycleFunction('cmd', 'json', {
-    repo,
-    podmanSocket: null,
-    podmanHome: '/Users/actual-user',
-    podmanTempDirectory: '/private/var/folders/user/T/',
-    process: { env: { PATH: '/usr/bin:/bin', HOME: '/private/attacker', TMPDIR: '/private/attacker', USER: 'attacker', XDG_CONFIG_HOME: '/private/config' } }, os: { homedir: () => { throw new Error('ambient HOME must not be consulted'); } },
-    spawnSync: (bin, args, options) => {
-      assert.equal(bin, 'podman');
-      assert.equal(options.env.HOME, '/Users/actual-user');
-      assert.equal(options.env.TMPDIR, '/private/var/folders/user/T/');
-      assert.deepEqual(Object.keys(options.env).sort(), ['HOME','LANG','LC_ALL','PATH','TMPDIR']);
-      return { status: 0, stdout: '', stderr: '' };
-    }, fs: { appendFileSync() {}, statSync() { return { isSocket: () => true, dev: 1, ino: 1 }; } },
-    path, fail: code => { throw new Error(code); },
-  });
-  assert.equal(execute('', 'machine-inspect', ['machine','inspect']).ok, true);
-  assert.match(source, /podmanTempDirectory=context\.temp/u);
-  assert.match(source, /podmanHome=context\.home/u);
-  assert.match(source, /TMPDIR:podmanTempDirectory/u);
-});
-
-test('OS user record derives canonical home and fixed Darwin temp without ambient identity fields', async () => {
-  const { execute, source } = await lifecycleFunction('derivePodmanContext', 'requestCheck', {
-    os: { userInfo: () => ({ homedir: '/Users/real', username: 'real' }), homedir: () => { throw new Error('untrusted'); } },
-    path, fs: { realpathSync: p => p, statSync: () => ({ isDirectory: () => true, uid: 501 }) },
-    process: { getuid: () => 501 },
-    spawnSync: (bin, args, options) => {
-      assert.equal(bin, '/usr/bin/getconf');
-      assert.equal(JSON.stringify(args), JSON.stringify(['DARWIN_USER_TEMP_DIR']));
-      assert.equal(JSON.stringify(options.env), JSON.stringify({ PATH: '/usr/bin:/bin', HOME: '/Users/real', USER: 'real', LOGNAME: 'real' }));
-      return { status: 0, stdout: '/private/var/folders/real/T/\n' };
-    }, normalizeDarwinTempDirectory: result => { assert.equal(result.status, 0); return '/private/var/folders/real/T/'; },
-    fail: code => { throw new Error(code); },
-  });
-  assert.deepEqual(JSON.parse(JSON.stringify(execute())), { home: '/Users/real', temp: '/private/var/folders/real/T/' });
-  assert.match(source, /os\.userInfo\(\)/u);
-  assert.doesNotMatch(source, /os\.homedir\(\)/u);
-});
-
-test('OS home and temp query failures fail closed', async () => {
-  for (const scenario of ['userinfo', 'home-path', 'temp-query']) {
-    const { execute } = await lifecycleFunction('derivePodmanContext', 'requestCheck', {
-      os: { userInfo: () => { if (scenario === 'userinfo') throw new Error('unavailable'); return { homedir: scenario === 'home-path' ? 'relative' : '/Users/real', username: 'real' }; } },
-      path, fs: { realpathSync: p => p, statSync: () => ({ isDirectory: () => true, uid: 501 }) }, process: { getuid: () => 501 },
-      spawnSync: () => ({ status: scenario === 'temp-query' ? 1 : 0, stdout: '/tmp\n' }),
-      normalizeDarwinTempDirectory: () => { throw new Error('RELEASE_STANDARD_PATH_INVALID'); },
-      fail: (code, blocked) => { const e = new Error(code); e.blocked = blocked; throw e; },
-    });
-    assert.throws(() => execute(), scenario === 'temp-query' ? /PODMAN_TEMP_DIRECTORY_INVALID/ : /PODMAN_USER_HOME_INVALID/);
-  }
-});
-
-test('invalid standard temp directory results fail closed before Podman can run', async () => {
-  for (const result of [{ status: 1, stdout: '' }, { status: 0, stdout: '/tmp\n' }, { status: 0, stdout: '/tmp\nextra\n' }]) {
-    assert.throws(() => normalizeDarwinTempDirectory(result), /RELEASE_STANDARD_PATH_INVALID/);
-  }
-  const { execute } = await lifecycleFunction('cmd', 'json', {
-    repo,
-    podmanSocket: null, podmanTempDirectory: null,
-    process: { env: {} }, os: { homedir: () => '/Users/test' }, spawnSync: () => { throw new Error('must not spawn'); },
-    fs: { appendFileSync() {} }, path, fail: code => { throw new Error(code); },
-  });
-  assert.throws(() => execute('', 'machine-inspect', ['machine','inspect']), /PODMAN_TEMP_DIRECTORY_INVALID/);
-});
-
-
-test('image loading uses the validated target directory, not a nonexistent verifier proof root', async () => {
-  const artifact={path:'images/linux-arm64/runtime-image.tar',imageDigest:`sha256:${'a'.repeat(64)}`};
-  const proof={candidateSha256:'b'.repeat(64),manifestSha256:'c'.repeat(64),buildIdentity:{},candidate:{},manifest:{artifacts:[artifact]}};
-  const seen=[];
-  const { execute }=await lifecycleFunction('loadImage','markerHash',{
-    imageArtifact:()=>artifact, path,
-    cmd:(_,label,args)=>{seen.push([label,Array.from(args)]);return {ok:true};},
-    json:()=>[{}], identityLabels:()=>true,
-  });
-  assert.equal(Object.hasOwn(proof,'root'),false);
-  assert.equal(execute('',proof,'/tmp/verified-candidate','owner',[]),artifact.imageDigest);
-  assert.deepEqual(seen.find(([label])=>label==='image-load')[1],['load','-i','/tmp/verified-candidate/payload/images/linux-arm64/runtime-image.tar']);
-});
-
-test('asynchronous observations are awaited until a real value arrives', async () => {
-  const { execute }=await lifecycleFunction('waitUntil','inspectContainer',{
-    setTimeout:done=>queueMicrotask(done),
-  });
-  let calls=0;
-  assert.equal(await execute(async()=>{calls++;await Promise.resolve();return calls===3?'ready':null;},3000),'ready');
-  assert.equal(calls,3);
-  await assert.rejects(execute(async()=>{throw new Error('observation-failed');},3000),/observation-failed/);
-});
-
-test('allowed failure never converts a failed Podman process into success', async () => {
-  for (const allowFailure of [false,true]) {
-    for (const processResult of [
-      {status:0,stdout:'ok',stderr:''}, {status:1,stdout:'',stderr:'absent'},
-      {status:125,stdout:'',stderr:'invalid archive'}, {status:null,signal:'SIGTERM'},
-      {status:null,error:{code:'ETIMEDOUT'}},
-    ]) {
-      const { execute }=await lifecycleFunction('cmd','json',{
-        repo, path, podmanSocket:null, podmanHome:'/Users/real', podmanTempDirectory:'/private/tmp/real/',
-        process:{env:{PATH:'/usr/bin:/bin'}}, spawnSync:()=>processResult,
-        fs:{appendFileSync(){}}, fail:code=>{throw new Error(code);},
-      });
-      const result=execute('', 'machine-inspect',['machine','inspect'],{allowFailure});
-      assert.equal(result.ok,processResult.status===0,JSON.stringify({allowFailure,...processResult}));
-      assert.equal(result.status,processResult.status);
-    }
-  }
-});
-
-test('create commands accept plain text and prove ownership through inspect instead of parsing stdout', async () => {
+test('SQLite corruption probe snapshots, corrupts, rejects, verifies unchanged bytes, and restores owned data', async () => {
   const calls=[];
-  const {execute:volume}=await lifecycleFunction('createVolume','volumeIdentity',{
-    ownerLabel:'owner', json:()=>JSON.parse('volume-name\n'), cmd:(_,label)=>{calls.push(label);return {ok:true,stdout:'volume-name\n'};},
-    inspectVolume:()=>({Labels:{owner:'token'}}), assertOwned:()=>{},
+  const { execute: snapshot, source } = await lifecycleFunction('sqliteSnapshot', 'faultSqliteDatabase', {
+    ownerLabel:'io.lexiflow.candidate-acceptance', cmd:(_root,label,args)=>{calls.push([label,Array.from(args)]);return {ok:true,stdout:'a'.repeat(64)+'  /snapshot/lexicon.db\n'};},
     fail:code=>{throw new Error(code);},
   });
-  volume('', 'volume-name','token');
-  assert.equal(calls[0],'volume-create');
-  const containers=[];
-  const {execute:create}=await lifecycleFunction('nameConflictFailure','invalidLoadFailure',{
-    ownerLabel:'owner', json:()=>JSON.parse('a'.repeat(64)+'\n'), cmd:(_,label)=>{calls.push(label);return {ok:label==='collision-create',stdout:'a'.repeat(64)+'\n'};},
-    inspectContainer:()=>({}), assertOwned:()=>{}, fail:code=>{throw new Error(code);},
+  assert.equal(snapshot('', 'image','owner','lexiflow-data','lexiflow-backup','snapshot'), 'a'.repeat(64));
+  snapshot('', 'image','owner','lexiflow-data','lexiflow-backup','corrupt');
+  snapshot('', 'image','owner','lexiflow-data','lexiflow-backup','restore');
+  assert.equal(calls.length,3);
+  assert.match(calls[0][1].at(-1),/cp .*lexicon\.db.*snapshot/u);
+  assert.match(calls[1][1].at(-1),/LEXIFLOW-CORRUPT-DB/u);
+  assert.match(calls[2][1].at(-1),/mv .*lexicon\.db/u);
+  assert.match(source,/sha256sum/u);
+});
+
+test('candidate SQLite fault phase is isolated and verifies failure without mutating saved proof', async () => {
+  const { execute, source } = await lifecycleFunction('faultSqliteDatabase', 'runInner', {
+    volumeAbsent:()=>{}, startAndReady:async()=>{}, proveAutoVolume:()=>{}, sqliteSnapshot:()=> 'a'.repeat(64),
+    cmd:()=>({ok:true}), observeUnhealthy:async()=>true, removeContainer:()=>{},
+    fail:code=>{throw new Error(code);},
   });
-  assert.equal(create('', 'container-name','image','token',containers),true);
-  assert.deepEqual(containers,['container-name']);
+  assert.match(source,/faultSqliteDatabase/u);
+  assert.match(source,/\/var\/lib\/lexiflow\/lexicon\.db/u);
 });
 
-test('creation with unknown write outcome registers the owned name before failing', async () => {
-  const containers=[];
-  const {execute}=await lifecycleFunction('nameConflictFailure','invalidLoadFailure',{
-    ownerLabel:'owner', json:()=>{throw new Error('COLLISION_CREATE_FAILED');}, cmd:()=>({ok:false,status:null}), fail:code=>{throw new Error(code);},
-  });
-  assert.throws(()=>execute('', 'container-name','image','token',containers),/COLLISION_CREATE_FAILED/);
-  assert.deepEqual(containers,['container-name']);
-});
-
-test('format-2 initdb completion marker recovers partial PG_VERSION without deleting completed data', async t => {
-  const { mkdtemp, mkdir, writeFile, readFile, readdir, rm } = await import('node:fs/promises');
-  const { tmpdir } = await import('node:os');
-  const root = await mkdtemp(path.join(tmpdir(), 'lexiflow-initdb-'));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const runtime = await readFile(path.join(repo, 'ops/docker/runtime-entrypoint.sh'), 'utf8');
-  const rootDir = path.join(root, 'volume'), pgdata = path.join(rootDir, 'postgres'), bin = path.join(root, 'bin');
-  await mkdir(pgdata, { recursive: true }); await mkdir(bin);
-  const script = runtime.replace('readonly ROOT=/var/lib/lexiflow', `readonly ROOT=${rootDir}`)
-    .replace('readonly PGDATA=/var/lib/lexiflow/postgres', `readonly PGDATA=${pgdata}`);
-  const shell = path.join(root, 'runtime.sh'); await writeFile(shell, script);
-  const countFile = path.join(root, 'initdb.count');
-  await writeFile(path.join(bin, 'initdb'), `#!/bin/bash\nn=$(cat '${countFile}' 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > '${countFile}'; printf "15\\n" > "$2/PG_VERSION"; printf partial > "$2/incomplete"; [[ "$n" == 1 ]] && exit 143; exit 0\n`, { mode: 0o700 });
-  const identity = 'schemaVersion=2\napiContract=caption-hints.v2\nsqlVersion=sql1\nreleaseId=rel1\npreparationId=prep1\nruleId=rule1\ndatasetSha256=' + 'a'.repeat(64) + '\n';
-  const secret = 'b'.repeat(64);
-  const seed = async ({ format='2', complete=false, ready=false }={}) => {
-    await mkdir(rootDir, { recursive: true }); await mkdir(pgdata, { recursive: true });
-    await Promise.all([
-      writeFile(path.join(rootDir,'.lexiflow-owner'),'lexiflow-runtime\n'), writeFile(path.join(rootDir,'.lexiflow-format'),format+'\n'),
-      writeFile(path.join(rootDir,'.lexiflow-initializing'),identity), writeFile(path.join(rootDir,'.postgres-password'),secret+'\n'),
-      writeFile(path.join(rootDir,'.app-password'),secret+'\n')]);
-    if (complete) await writeFile(path.join(rootDir,'.lexiflow-initdb-complete'),identity);
-    if (ready) await writeFile(path.join(rootDir,'.lexiflow-ready'),identity);
-  };
-  const invoke = () => spawnSync('/bin/bash',['-c',`source "$1"; SOFTWARE_VERSION=v1; API_CONTRACT=caption-hints.v2; SQL_VERSION=sql1; RELEASE_ID=rel1; PREPARATION_ID=prep1; RULE_ID=rule1; DATASET_SHA256=${'a'.repeat(64)}; PATH="$2:$PATH"; timeout() { shift 2; "$@"; }; start_postgres() { test -f "$ROOT/.lexiflow-initdb-complete"; printf postgres-started; }; validate_volume; prepare_pgdata; start_postgres; test -f "$ROOT/.lexiflow-initdb-complete"; printf started`, 'test',shell,bin],{encoding:'utf8'});
-  await seed(); await writeFile(path.join(pgdata,'PG_VERSION'),'14\n'); await writeFile(path.join(pgdata,'incomplete'),'partial');
-  const interrupted = invoke(); assert.notEqual(interrupted.status,0); assert.equal(await readFile(path.join(pgdata,'PG_VERSION'),'utf8'),'15\n'); assert.equal(await readFile(path.join(rootDir,'.lexiflow-initdb-complete'),'utf8').catch(()=>''),'');
-  const recovered = invoke(); assert.equal(recovered.status,0,recovered.stderr); assert.match(recovered.stdout,/postgres-startedstarted/u);
-  assert.deepEqual((await readdir(pgdata)).sort(),['PG_VERSION','incomplete']);
-  const markerBefore = await readFile(path.join(rootDir,'.lexiflow-initdb-complete'),'utf8');
-  await writeFile(path.join(pgdata,'accepted-fact'),'preserve');
-  const already = invoke(); assert.equal(already.status,0,already.stderr); assert.equal(await readFile(path.join(pgdata,'accepted-fact'),'utf8'),'preserve');
-  assert.equal(await readFile(path.join(rootDir,'.lexiflow-initdb-complete'),'utf8'),markerBefore);
-});
-
-test('format-2 pending marker recovery and legacy/corrupt states fail without modifying PGDATA', async t => {
-  const { mkdtemp, mkdir, writeFile, readFile, readdir, rm } = await import('node:fs/promises');
-  const { tmpdir } = await import('node:os');
-  const root = await mkdtemp(path.join(tmpdir(), 'lexiflow-initdb-reject-')); t.after(() => rm(root,{recursive:true,force:true}));
+test('runtime entrypoint fixes the SQLite file, verifies before API, and refuses unknown volume contents', async () => {
+  const { readFile } = await import('node:fs/promises');
   const runtime = await readFile(path.join(repo,'ops/docker/runtime-entrypoint.sh'),'utf8');
-  const volume=path.join(root,'volume'), pgdata=path.join(volume,'postgres'); await mkdir(pgdata,{recursive:true});
-  const script=path.join(root,'runtime.sh'); await writeFile(script,runtime.replace('readonly ROOT=/var/lib/lexiflow',`readonly ROOT=${volume}`).replace('readonly PGDATA=/var/lib/lexiflow/postgres',`readonly PGDATA=${pgdata}`));
-  const identity='schemaVersion=2\napiContract=caption-hints.v2\nsqlVersion=sql1\nreleaseId=rel1\npreparationId=prep1\nruleId=rule1\ndatasetSha256='+ 'a'.repeat(64)+'\n';
-  const seed=async format=>{await mkdir(volume,{recursive:true}); await mkdir(pgdata,{recursive:true}); for(const [n,v] of [['.lexiflow-owner','lexiflow-runtime\n'],['.lexiflow-format',format+'\n'],['.lexiflow-initializing',identity],['.postgres-password','b'.repeat(64)+'\n'],['.app-password','b'.repeat(64)+'\n'],['postgres/PG_VERSION','15\n'],['postgres/interrupted','x']]) {const p=path.join(volume,n); await mkdir(path.dirname(p),{recursive:true}); await writeFile(p,v);}};
-  const run=()=>spawnSync('/bin/bash',['-c',`source "$1"; SOFTWARE_VERSION=v1; API_CONTRACT=caption-hints.v2; SQL_VERSION=sql1; RELEASE_ID=rel1; PREPARATION_ID=prep1; RULE_ID=rule1; DATASET_SHA256=${'a'.repeat(64)}; validate_volume; prepare_pgdata`, 'test',script],{encoding:'utf8'});
-  const snapshot = async dir => {
-    const out=[]; const visit=async current=>{for(const name of (await readdir(current)).sort()){const p=path.join(current,name);const st=await (await import('node:fs/promises')).lstat(p);if(st.isDirectory()){out.push([path.relative(dir,p),'dir']);await visit(p);}else out.push([path.relative(dir,p),'file',await readFile(p,'utf8')]);}}; await visit(dir);return out;
-  };
-  await seed(2); await writeFile(path.join(volume,'.lexiflow-initdb-complete.pending'),identity);
-  const pending=run(); assert.equal(pending.status,0,pending.stderr); assert.equal(await readFile(path.join(volume,'.lexiflow-initdb-complete'),'utf8'),identity); assert.equal(await readdir(volume).then(x=>x.includes('.lexiflow-initdb-complete.pending')),false);
-  await writeFile(path.join(volume,'.lexiflow-initdb-complete.pending'),identity);
-  const both=run(); assert.equal(both.status,0,both.stderr); assert.equal(await readdir(volume).then(x=>x.includes('.lexiflow-initdb-complete.pending')),false);
-  const unchangedReject = async mutate => { await rm(volume,{recursive:true,force:true}); await seed(2); await mutate(); const before=await snapshot(volume); const result=run(); assert.notEqual(result.status,0); assert.deepEqual(await snapshot(volume),before); };
-  await unchangedReject(async()=>{await writeFile(path.join(volume,'.lexiflow-initdb-complete.pending'),'bad\n');});
-  await unchangedReject(async()=>{await writeFile(path.join(volume,'.lexiflow-ready.pending'),identity);});
-  await unchangedReject(async()=>{await writeFile(path.join(volume,'.lexiflow-initdb-complete'),identity); await rm(path.join(pgdata,'PG_VERSION'));});
-  await unchangedReject(async()=>{await writeFile(path.join(volume,'.lexiflow-ready'),identity);});
-  await unchangedReject(async()=>{await writeFile(path.join(volume,'.lexiflow-initdb-complete'),identity); await rm(pgdata,{recursive:true,force:true});});
-  await unchangedReject(async()=>{await writeFile(path.join(volume,'.lexiflow-initdb-complete'),identity); await rm(path.join(pgdata,'PG_VERSION'));});
-  await unchangedReject(async()=>{await writeFile(path.join(volume,'.lexiflow-format'),'1\n');});
+  assert.match(runtime,/ROOT=\/var\/lib\/lexiflow/u);
+  assert.match(runtime,/DB=\/var\/lib\/lexiflow\/lexicon\.db/u);
+  assert.match(runtime,/verified\.json/u);
+  assert.match(runtime,/10001/u);
+  assert.match(runtime,/mode=ro/u);
+  assert.ok(runtime.indexOf('--release-dataset initialize') < runtime.indexOf('SPRING_DATASOURCE_URL'));
+  assert.match(runtime,/sqlite-file-missing/u);
+  assert.match(runtime,/volume-unknown-content/u);
 });

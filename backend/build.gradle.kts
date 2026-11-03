@@ -162,7 +162,7 @@ tasks.named("check") {
 tasks.register("deliveryFull") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
     description = "执行唯一完整 Java 交付聚合：质量检查、集成测试及 API boot JAR。"
-    dependsOn("check", ":adapters:postgresIntegrationTest", ":integration-tests:runtimeSmokeTest", ":api:bootJar")
+    dependsOn("check", ":adapters:sqliteIntegrationTest", ":integration-tests:runtimeSmokeTest", ":api:bootJar")
 }
 
 tasks.register("spotlessApply") {

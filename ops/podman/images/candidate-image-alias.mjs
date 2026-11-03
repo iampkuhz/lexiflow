@@ -4,7 +4,7 @@ import { slotImageNamespace } from '../deployment-slots.mjs';
 
 const fail = code => { throw new Error(code); };
 export function candidateImageAlias(role, baseVersion) {
-  if (!['api', 'postgres'].includes(role)) fail('CANDIDATE_ALIAS_ARGUMENTS_INVALID');
+  if (role !== 'api') fail('CANDIDATE_ALIAS_ARGUMENTS_INVALID');
   return `localhost/${slotImageNamespace('release-validation')}-${role}:${deploymentImageTag(baseVersion)}`;
 }
 const fullId = value => typeof value === 'string' && /^(?:sha256:)?[a-f0-9]{64}$/.test(value)
@@ -42,7 +42,7 @@ function owns(image, alias, role, tag, allowedImages) {
 
 /** Call after owned candidate containers/volumes are removed; absence is harmless before a load. */
 export async function removeCandidateImageAlias({ run, role, baseVersion, allowedImages }) {
-  if (typeof run !== 'function' || !['api', 'postgres'].includes(role)
+  if (typeof run !== 'function' || role !== 'api'
     || !Array.isArray(allowedImages) || !allowedImages.length
     || allowedImages.some(v => !fullId(v?.imageDigest) || !v?.buildIdentity)) fail('CANDIDATE_ALIAS_ARGUMENTS_INVALID');
   const tag = deploymentImageTag(baseVersion);

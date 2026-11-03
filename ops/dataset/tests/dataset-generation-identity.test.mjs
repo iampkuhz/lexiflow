@@ -48,7 +48,7 @@ test('production manifest excludes tests and unrelated API source, includes depe
       const file = path.join(root, relative); await mkdir(path.dirname(file), { recursive: true }); await writeFile(file, 'unrelated');
     }
     assert.equal(await generationCodeVersion(root), initial);
-    for (const relative of ['infra/postgres/schema.sql', 'backend/product/adapters/gradle.lockfile', 'ops/dataset/ecdict-source.lock.json',
+    for (const relative of ['infra/sqlite/schema.sql', 'backend/product/adapters/gradle.lockfile', 'ops/dataset/ecdict-source.lock.json',
       'backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/Fixture.java',
       'ops/dataset/prepare_ecdict_bundle.py', 'ops/podman/source-tools.Containerfile']) {
       const file = path.join(root, relative); await writeFile(file, 'changed'); assert.notEqual(await generationCodeVersion(root), initial); await writeFile(file, 'input\n');

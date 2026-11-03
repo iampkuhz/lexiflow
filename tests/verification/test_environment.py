@@ -99,13 +99,11 @@ class CheckEnvironmentTests(unittest.TestCase):
 
     def test_private_views_are_nonserializable_immutable_and_independent(self):
         env = {
-            "LEXIFLOW_POSTGRES_TEST_JDBC_URL": "jdbc:private-canary",
             "LEXIFLOW_REDIS_TEST_ENDPOINT": "redis-private-canary",
             "LEXIFLOW_CANDIDATE_RUNTIME_REQUEST": "/private-canary/request.json",
             "LEXIFLOW_RELEASE_ARM64_DOCKER_HOST": "unix:///private-canary/socket",
         }
         required = [
-            "postgres-test-jdbc-url",
             "redis-test-endpoint",
             "candidate-runtime-request",
             "release-arm64-docker-host",
@@ -130,7 +128,6 @@ class CheckEnvironmentTests(unittest.TestCase):
 
     def test_missing_or_invalid_private_capability_blocks_entire_injection(self):
         cases = {
-            "postgres-test-jdbc-url": ("LEXIFLOW_POSTGRES_TEST_JDBC_URL", " "),
             "redis-test-endpoint": ("LEXIFLOW_REDIS_TEST_ENDPOINT", " "),
             "candidate-runtime-request": (
                 "LEXIFLOW_CANDIDATE_RUNTIME_REQUEST",

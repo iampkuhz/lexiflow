@@ -364,9 +364,7 @@ class CaptionRequestFailureHttpTest {
           LexiconEntryKind.WORD,
           LexiconHintAction.HINT,
           "合成释义",
-          500,
-          false,
-          0);
+          500);
     }
   }
 

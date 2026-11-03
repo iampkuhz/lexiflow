@@ -2,7 +2,7 @@ package io.lexiflow.integration;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import io.lexiflow.lexicon.platform.persistence.PostgresSchemaInitializer;
+import io.lexiflow.lexicon.platform.persistence.SqliteSchemaInitializer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -14,49 +14,35 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.sql.DriverManager;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Exercises the built artifacts only after isolated PostgreSQL and Redis are explicitly supplied.
+ * Exercises built artifacts with a private SQLite file and the isolated Redis protocol endpoint.
  */
 class SystemRuntimeSmokeTest {
   private static final Duration START_TIMEOUT = Duration.ofSeconds(45);
   private Process api;
   private Path apiLog;
-  private String jdbcUrl;
-  private String schema;
+  @TempDir Path temp;
 
   @AfterEach
   void cleanUp() throws Exception {
     stop(api);
-    if (jdbcUrl != null && schema != null) {
-      try (var connection = DriverManager.getConnection(jdbcUrl);
-          var statement = connection.createStatement()) {
-        statement.execute("DROP SCHEMA IF EXISTS \"" + schema + "\" CASCADE");
-      }
-    }
     if (apiLog != null) Files.deleteIfExists(apiLog);
   }
 
   @Test
   void verifiesDependencyProtocolsSchemaInitializationAndApiHealth() throws Exception {
-    jdbcUrl = requiredProperty("lexiflow.postgres.test.jdbcUrl");
+    String jdbcUrl = "jdbc:sqlite:" + temp.toRealPath().resolve("runtime.db");
     var redis = endpoint(requiredProperty("lexiflow.redis.test.endpoint"));
     assertRedisPong(redis);
 
-    schema = "lf_runtime_" + UUID.randomUUID().toString().replace("-", "");
-    try (var connection = DriverManager.getConnection(jdbcUrl);
-        var statement = connection.createStatement()) {
-      statement.execute("CREATE SCHEMA \"" + schema + "\"");
-    }
-    var schemaJdbcUrl = jdbcUrl + (jdbcUrl.contains("?") ? "&" : "?") + "currentSchema=" + schema;
-    PostgresSchemaInitializer.initialize(
-        schemaJdbcUrl, Path.of(requiredProperty("lexiflow.postgres.schema.file")));
+    SqliteSchemaInitializer.initialize(
+        jdbcUrl, Path.of(requiredProperty("lexiflow.sqlite.schema.file")));
 
     var repository = Path.of(requiredProperty("lexiflow.repository.root"));
     var java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
@@ -69,7 +55,7 @@ class SystemRuntimeSmokeTest {
                 "-jar",
                 apiJar.toString(),
                 "--server.port=" + port,
-                "--spring.datasource.url=" + schemaJdbcUrl)
+                "--spring.datasource.url=" + jdbcUrl + "?mode=ro")
             .directory(repository.toFile())
             .redirectErrorStream(true)
             .redirectOutput(apiLog.toFile())

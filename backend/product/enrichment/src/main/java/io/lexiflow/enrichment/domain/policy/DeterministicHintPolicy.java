@@ -107,7 +107,6 @@ public final class DeterministicHintPolicy {
     var matches = new ArrayList<HintSelection.CandidateMatch>();
     var displayable = PublishedCandidateEligibility.isDisplayable(candidate);
     var qualified = displayable ? candidate.finalGloss() : null;
-    var valueTier = candidate.rankedWord() ? 1 : 0;
     for (var occurrence :
         CandidateMatcher.locate(caption, startOffset, endOffset, candidate.normalizedForm())) {
       matches.add(
@@ -118,9 +117,7 @@ public final class DeterministicHintPolicy {
               qualified == null ? null : candidate.senseId().toString(),
               candidate.lexiconVersion(),
               qualified,
-              valueTier,
-              candidate.finalPriority(),
-              candidate.complexListCount()));
+              candidate.priority()));
     }
     return matches;
   }

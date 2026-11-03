@@ -9,12 +9,14 @@ import io.lexiflow.api.runtime.SoftwareIdentity;
 import io.lexiflow.enrichment.application.caption.EnrichCaptionUseCase;
 import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
 import io.lexiflow.lexicon.application.port.LexiconReadRepository;
-import io.lexiflow.lexicon.platform.persistence.PostgresPersistenceConfiguration;
+import io.lexiflow.lexicon.platform.persistence.SqliteDatasetVerifier;
+import io.lexiflow.lexicon.platform.persistence.SqlitePersistenceConfiguration;
 import io.lexiflow.observability.platform.FileSegmentAnalysisStore;
 import io.lexiflow.observability.platform.SegmentAnalysisStore;
 import io.lexiflow.observability.platform.StructuredEventLogger;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import javax.sql.DataSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
@@ -25,7 +27,7 @@ import org.springframework.context.annotation.Import;
 
 /** LexiFlow 同步 API 的唯一组合根。 */
 @SpringBootApplication(exclude = DataSourceAutoConfiguration.class)
-@Import(PostgresPersistenceConfiguration.class)
+@Import(SqlitePersistenceConfiguration.class)
 public class ApiApplication {
 
   /**
@@ -58,8 +60,18 @@ public class ApiApplication {
   @Bean
   LexiconRuntime lexiconRuntime(
       ObjectProvider<LexiconReadRepository> repositories,
+      ObjectProvider<DataSource> dataSources,
       @Value("${lexiflow.runtime.mode:formal}") String mode,
-      StructuredEventLogger events) {
+      StructuredEventLogger events)
+      throws Exception {
+    var dataSource = dataSources.getIfAvailable();
+    if (dataSource != null) {
+      try (var schema = ApiApplication.class.getResourceAsStream("/META-INF/lexiflow-schema.sql");
+          var connection = dataSource.getConnection()) {
+        if (schema == null) throw new IllegalStateException("trusted schema is unavailable");
+        SqliteDatasetVerifier.verifyStructure(connection, schema.readAllBytes());
+      }
+    }
     return new LexiconRuntime(mode, repositories.getIfAvailable(), events);
   }
 

@@ -73,7 +73,6 @@ def resolve_check_environment(
                     [str(home / "bin"), source.get("PATH", "")]
                 ).rstrip(os.pathsep)
         elif name in {
-            "postgres-test-jdbc-url",
             "redis-test-endpoint",
             "candidate-runtime-request",
             "release-arm64-docker-host",
@@ -81,10 +80,6 @@ def resolve_check_environment(
             "release-npm-cache",
         }:
             variable, origin = {
-                "postgres-test-jdbc-url": (
-                    "LEXIFLOW_POSTGRES_TEST_JDBC_URL",
-                    "explicit-test-jdbc-url",
-                ),
                 "redis-test-endpoint": (
                     "LEXIFLOW_REDIS_TEST_ENDPOINT",
                     "explicit-test-endpoint",

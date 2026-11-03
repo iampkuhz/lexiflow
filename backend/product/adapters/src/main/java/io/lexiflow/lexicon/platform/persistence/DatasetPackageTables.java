@@ -36,51 +36,40 @@ public final class DatasetPackageTables {
               "generation_source_digest",
               "generation_config",
               "generation_inputs",
-              "content_sha256",
-              "imported_at"),
+              "content_sha256"),
           "dataset_id");
   public static final Table ENTRY =
       new Table(
           "lexicon_entry",
-          List.of(
-              "entry_id",
-              "lemma",
-              "gloss",
-              "ranked_word",
-              "hint_priority",
-              "complex_list_count",
-              "cache_priority"),
+          List.of("entry_id", "lemma", "gloss", "canonical_form", "priority"),
           "entry_id");
   public static final Table FORM =
       new Table(
           "lexicon_form",
           List.of("normalized_form", "entry_id"),
-          "normalized_form COLLATE \"C\", entry_id");
+          "normalized_form COLLATE BINARY, entry_id");
   public static final List<Table> TABLES = List.of(DATASET, ENTRY, FORM);
   public static final Map<String, String> TYPES =
       Map.ofEntries(
-          Map.entry("dataset_id", "smallint"),
-          Map.entry("lexicon_version", "bigint"),
-          Map.entry("source_manifest", "jsonb"),
-          Map.entry("source_row_count", "bigint"),
-          Map.entry("entry_count", "bigint"),
-          Map.entry("lookup_count", "bigint"),
-          Map.entry("preparation_policy", "text"),
-          Map.entry("imported_at", "timestamptz"),
-          Map.entry("generation_version", "character"),
-          Map.entry("generation_code_version", "character"),
-          Map.entry("generation_source_digest", "character"),
-          Map.entry("generation_config", "jsonb"),
-          Map.entry("generation_inputs", "jsonb"),
-          Map.entry("content_sha256", "character"),
-          Map.entry("entry_id", "bigint"),
-          Map.entry("lemma", "text"),
-          Map.entry("gloss", "text"),
-          Map.entry("ranked_word", "boolean"),
-          Map.entry("hint_priority", "smallint"),
-          Map.entry("complex_list_count", "smallint"),
-          Map.entry("cache_priority", "smallint"),
-          Map.entry("normalized_form", "text"));
+          Map.entry("dataset_id", "INTEGER"),
+          Map.entry("lexicon_version", "INTEGER"),
+          Map.entry("source_manifest", "TEXT"),
+          Map.entry("source_row_count", "INTEGER"),
+          Map.entry("entry_count", "INTEGER"),
+          Map.entry("lookup_count", "INTEGER"),
+          Map.entry("preparation_policy", "TEXT"),
+          Map.entry("generation_version", "TEXT"),
+          Map.entry("generation_code_version", "TEXT"),
+          Map.entry("generation_source_digest", "TEXT"),
+          Map.entry("generation_config", "TEXT"),
+          Map.entry("generation_inputs", "TEXT"),
+          Map.entry("content_sha256", "TEXT"),
+          Map.entry("entry_id", "INTEGER"),
+          Map.entry("lemma", "TEXT"),
+          Map.entry("gloss", "TEXT"),
+          Map.entry("canonical_form", "INTEGER"),
+          Map.entry("priority", "INTEGER"),
+          Map.entry("normalized_form", "TEXT"));
 
   private DatasetPackageTables() {}
 }

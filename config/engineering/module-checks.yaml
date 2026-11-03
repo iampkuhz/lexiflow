@@ -82,7 +82,6 @@ checks:
   - java-25-temurin
   - node
   - git
-  - postgres-test-jdbc-url
   - redis-test-endpoint
   input_paths:
   - backend/gradlew
@@ -100,7 +99,7 @@ checks:
   - backend/product/adapters
   - backend/verification/architecture
   - backend/verification/integration
-  - infra/postgres/schema.sql
+  - infra/sqlite/schema.sql
   - scripts/environment
   - ops/dataset
   - ops/podman
@@ -117,7 +116,7 @@ checks:
   - path: ops/release/workflow
   - path: ops/release/build
   - path: ops/release/host_resources
-  - path: infra/postgres
+  - path: infra/sqlite
   - path: infra/local
   - path: scripts/environment
   - path: ops/dataset
@@ -319,7 +318,7 @@ checks:
   triggers:
   - path: ops/release/integrity/source-build-identity.mjs
   - path: backend
-  - path: infra/postgres
+  - path: infra/sqlite
   - path: extension
   - path: ops/release/test_tools
   - path: ops/release/runner
@@ -352,6 +351,7 @@ checks:
   - path: ops/release/integrity/release-artifact-manifest.mjs
   - path: ops/release/distribution-licenses.json
   - path: ops/release/third-party-notices.md
+  - path: ops/release/notices
   - path: ops/release/integrity/source-build-identity.mjs
 - check_id: eng.release.docker-contract
   command: ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py"]
@@ -374,7 +374,7 @@ checks:
   - ops/podman
   - scripts/environment
   - ops/dataset
-  - infra/postgres/schema.sql
+  - infra/sqlite/schema.sql
   - backend/product/api
   - requirements-dev.txt
   - infra/local/compose.yaml
@@ -401,7 +401,9 @@ checks:
   - path: ops/podman
   - path: scripts/environment
   - path: ops/dataset
-  - path: infra/postgres/schema.sql
+  - path: infra/sqlite/schema.sql
+  - path: infra
+  - path: ops/release/notices/licenses
   - path: backend/product/api
   - path: requirements-dev.txt
   - path: infra/local/compose.yaml
@@ -499,7 +501,6 @@ checks:
   - ops/docker/tests/test_docker_environment.py
   - ops/docker/tests/test_lifecycle_flow.py
   - ops/docker/tests/test_operation_ownership.py
-  - ops/docker/tests/test_secret_publication.py
   - ops/docker/tests/test_state_records.py
   transaction_reuse: true
   scenarios: [change-targeted]
@@ -525,7 +526,6 @@ checks:
   - path: ops/docker/tests/test_docker_environment.py
   - path: ops/docker/tests/test_lifecycle_flow.py
   - path: ops/docker/tests/test_operation_ownership.py
-  - path: ops/docker/tests/test_secret_publication.py
   - path: ops/docker/tests/test_state_records.py
 - check_id: eng.release.docker-local-on-change
   command: ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py", "--group", "local"]
@@ -545,7 +545,7 @@ checks:
   - extension/scripts/build/expected-dataset.mjs
   - scripts/checks/deployment/run_deployment_contract_tests.py
   - infra/local/compose.yaml
-  - infra/postgres/schema.sql
+  - infra/sqlite/schema.sql
   - ops/dataset
   - ops/docker
   - ops/podman
@@ -560,7 +560,6 @@ checks:
   - ops/docker/tests/test_ecdict_fetch.py
   - ops/docker/tests/test_podman_doctor.py
   - ops/docker/tests/test_podman_fake_transport.py
-  - ops/docker/tests/test_podman_local.py
   - ops/docker/tests/test_podman_network.py
   - ops/docker/tests/test_podman_progress.py
   transaction_reuse: true
@@ -569,7 +568,7 @@ checks:
   - path: extension/scripts/packaging
   - path: scripts/checks/deployment/run_deployment_contract_tests.py
   - path: infra/local/compose.yaml
-  - path: infra/postgres/schema.sql
+  - path: infra/sqlite/schema.sql
   - path: ops/dataset
   - path: ops/docker
   - path: ops/podman
@@ -592,7 +591,6 @@ checks:
   - path: ops/docker/tests/test_ecdict_fetch.py
   - path: ops/docker/tests/test_podman_doctor.py
   - path: ops/docker/tests/test_podman_fake_transport.py
-  - path: ops/docker/tests/test_podman_local.py
   - path: ops/docker/tests/test_podman_network.py
   - path: ops/docker/tests/test_podman_progress.py
 - check_id: eng.release.docker-node-on-change
@@ -613,7 +611,7 @@ checks:
   - extension/scripts/build/expected-dataset.mjs
   - scripts/checks/deployment/run_deployment_contract_tests.py
   - infra/local/compose.yaml
-  - infra/postgres/schema.sql
+  - infra/sqlite/schema.sql
   - ops/dataset
   - ops/docker
   - ops/podman
@@ -638,7 +636,7 @@ checks:
   - ops/podman/tests/isolated-candidate-archive.test.mjs
   - ops/podman/tests/java-runtime.test.mjs
   - ops/podman/tests/local-session.test.mjs
-  - ops/podman/tests/managed-postgres-readiness.test.mjs
+  - ops/podman/tests/logs.test.mjs
   - ops/podman/tests/prepare-workspace.test.mjs
   - ops/podman/tests/process-lock.test.mjs
   - ops/podman/tests/source-base-image.test.mjs
@@ -654,7 +652,8 @@ checks:
   - path: extension/scripts/build/expected-dataset.mjs
   - path: scripts/checks/deployment/run_deployment_contract_tests.py
   - path: infra/local/compose.yaml
-  - path: infra/postgres/schema.sql
+  - path: infra/sqlite/schema.sql
+  - path: infra
   - path: ops/dataset
   - path: ops/docker
   - path: ops/podman
@@ -687,7 +686,7 @@ checks:
   - path: ops/podman/tests/isolated-candidate-archive.test.mjs
   - path: ops/podman/tests/java-runtime.test.mjs
   - path: ops/podman/tests/local-session.test.mjs
-  - path: ops/podman/tests/managed-postgres-readiness.test.mjs
+  - path: ops/podman/tests/database-target.test.mjs
   - path: ops/podman/tests/prepare-workspace.test.mjs
   - path: ops/podman/tests/process-lock.test.mjs
   - path: ops/podman/tests/source-base-image.test.mjs
@@ -828,7 +827,7 @@ checks:
   - npm
   - docker
   - java-25-temurin
-  - postgres-test-jdbc-url
+  - redis-test-endpoint
   - release-arm64-docker-host
   - release-gradle-cache
   - release-npm-cache
@@ -857,7 +856,7 @@ checks:
   - backend/verification/integration
   - backend/verification/quality-gates
   - extension
-  - infra/postgres/schema.sql
+  - infra/sqlite/schema.sql
   - scripts/environment
   - tests/verification
   - scripts/verification
@@ -902,7 +901,7 @@ checks:
   - path: backend/verification/integration
   - path: backend/verification/quality-gates
   - path: extension
-  - path: infra/postgres/schema.sql
+  - path: infra/sqlite/schema.sql
   - path: scripts/environment
   - path: tests/verification
   - path: scripts/verification
@@ -940,7 +939,7 @@ checks:
   - backend/verification/integration
   - backend/verification/quality-gates
   - extension
-  - infra/postgres/schema.sql
+  - infra/sqlite/schema.sql
   - scripts/environment
   - scripts/checks/release/source
   - scripts/checks/release/candidate
@@ -981,7 +980,7 @@ checks:
   - path: backend/verification/integration
   - path: backend/verification/quality-gates
   - path: extension
-  - path: infra/postgres/schema.sql
+  - path: infra/sqlite/schema.sql
   - path: scripts/environment
   - path: scripts/checks/release/source
   - path: scripts/checks/release/candidate

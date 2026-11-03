@@ -1,7 +1,7 @@
 import { parseVersion } from '../../release/integrity/source-build-identity.mjs';
 import { slotImageNamespace } from '../deployment-slots.mjs';
 
-const roles = new Set(['api', 'postgres', 'source-tools']);
+const roles = new Set(['api', 'source-tools']);
 const fail = code => { throw new Error(code); };
 const validRole = role => { if (!roles.has(role)) fail('VERSIONED_IMAGE_ROLE_INVALID'); };
 

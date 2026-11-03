@@ -82,6 +82,8 @@ test('assembles stable manifest and checksum through the real CLI from a clean G
 
 test('rejects schema, source, producer, dataset, digest, role, platform and license drift', async () => {
   const cases = [
+    (d) => { d.schemaVersion = 1; },
+    (d) => { d.artifacts.push({ role: 'license', path: 'licenses/raw.txt', bytes: 1, sha256: 'a'.repeat(64), licenseIds: [d.licenses[0].id] }); },
     (d) => { delete d.apiContract; },
     (d) => { d.extra = true; },
     (d) => { d.platforms = ['linux/amd64']; },
@@ -243,10 +245,11 @@ test('idempotency rejects published artifact tampering, symlink replacement and 
 test('single ARM64 runtime image requires each component license association', async () => {
   const f = await fixture();
   try {
-    for (const missingId of ['api-runtime', 'lexiflow', 'postgresql']) {
+    for (const missingId of ['api-runtime', 'lexiflow']) {
       const descriptor = structuredClone(f.descriptor);
       const artifact = descriptor.artifacts.find((item) => item.role === 'runtime-image');
-      artifact.licenseIds = artifact.licenseIds.filter((id) => id !== missingId);
+      const removed = descriptor.licenses.filter((item) => item.component === (missingId === 'api-runtime' ? 'API-runtime' : 'LexiFlow')).map(item => item.id);
+      artifact.licenseIds = artifact.licenseIds.filter((id) => !removed.includes(id));
       if (!artifact.licenseIds.length) artifact.licenseIds = ['dataset-license'];
       await assert.rejects(buildManifest({ repoRoot: f.root, descriptor, artifactRoot: f.artifactRoot }), /REQUIRED_LICENSE_MISSING/u);
     }

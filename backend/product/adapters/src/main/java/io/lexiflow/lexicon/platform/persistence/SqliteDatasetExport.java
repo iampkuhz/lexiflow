@@ -1,8 +1,8 @@
 package io.lexiflow.lexicon.platform.persistence;
 
 import io.lexiflow.lexicon.application.importing.policy.HintPreparation;
+import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
 import java.io.IOException;
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -10,15 +10,14 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** 单一只读 REPEATABLE READ 快照导出；不调用词库业务规则或旧导入链。 */
-public final class PostgresDatasetExport {
-  private PostgresDatasetExport() {}
+/** 单一 SQLite 一致性读事务快照导出；不调用词库业务规则或旧导入链。 */
+public final class SqliteDatasetExport {
+  private SqliteDatasetExport() {}
 
   /**
    * 导出结果仅暴露包摘要和原发布版本。
@@ -71,16 +70,12 @@ public final class PostgresDatasetExport {
     if (parent == null || !Files.isDirectory(parent)) throw invalid();
     Path dir = Files.createTempDirectory(parent, ".lexiflow-export-");
     boolean oldAuto = connection.getAutoCommit();
-    int oldIsolation = connection.getTransactionIsolation();
-    boolean oldReadOnly = connection.isReadOnly();
     try {
-      if (manageTransaction) {
-        connection.setAutoCommit(false);
-        connection.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
-        connection.setReadOnly(true);
-      }
+      if (manageTransaction) connection.setAutoCommit(false);
+      SqliteDatasetVerifier.verifyStructure(connection, schemaSql);
       var records = new ArrayList<DatasetPackageManifest.FileRecord>();
       Map<String, Object> dataset = null;
+      long canonicalEntries = 0;
       for (int i = 0; i < DatasetPackageTables.TABLES.size(); i++) {
         var table = DatasetPackageTables.TABLES.get(i);
         String name = DatasetPackageCodec.ENTRY_NAMES.get(i + 2);
@@ -107,11 +102,13 @@ public final class PostgresDatasetExport {
               outputStream.write(encoded);
               outputStream.write('\n');
               if (i == 0) dataset = row;
+              if (i == 1 && DatasetPackageCodec.integer(row.get("canonical_form"), 0) == 1)
+                canonicalEntries++;
               rows++;
             }
           }
         }
-        if (rows < 1 || (i == 0 && rows != 1)) throw invalid();
+        if ((rows < 1 && i != 2) || (i == 0 && rows != 1)) throw invalid();
         records.add(
             new DatasetPackageManifest.FileRecord(
                 name, Files.size(file), DatasetPackageCodec.sha256(file), rows));
@@ -121,7 +118,8 @@ public final class PostgresDatasetExport {
           || DatasetPackageCodec.integer(dataset.get("dataset_id"), 1) != 1
           || !HintPreparation.POLICY_ID.equals(dataset.get("preparation_policy"))
           || DatasetPackageCodec.integer(dataset.get("entry_count"), 1) != records.get(1).rows()
-          || DatasetPackageCodec.integer(dataset.get("lookup_count"), 1) != records.get(2).rows()
+          || DatasetPackageCodec.integer(dataset.get("lookup_count"), 1)
+              != canonicalEntries + records.get(2).rows()
           || DatasetPackageCodec.integer(dataset.get("source_row_count"), 1)
               < records.get(1).rows()) throw invalid();
       DatasetPackageCodec.validateSources(dataset.get("source_manifest"), approvals);
@@ -139,7 +137,7 @@ public final class PostgresDatasetExport {
         files.add(file);
       }
       var manifest = new LinkedHashMap<String, Object>();
-      manifest.put("schemaVersion", 2);
+      manifest.put("schemaVersion", 4);
       manifest.put("schemaSha256", DatasetPackageCodec.sha256(schemaSql));
       manifest.put("approvalSha256", DatasetPackageCodec.sha256(approvalBytes));
       manifest.put("datasetVersion", version);
@@ -172,8 +170,6 @@ public final class PostgresDatasetExport {
       throw exception;
     } finally {
       if (manageTransaction) {
-        connection.setReadOnly(oldReadOnly);
-        connection.setTransactionIsolation(oldIsolation);
         connection.setAutoCommit(oldAuto);
       }
       Files.deleteIfExists(dir.resolve("candidate.zip"));
@@ -191,19 +187,15 @@ public final class PostgresDatasetExport {
       if (raw == null) value = null;
       else
         switch (DatasetPackageTables.TYPES.get(column)) {
-          case "smallint", "integer", "bigint" -> value = raw;
-          case "numeric" -> value = ((BigDecimal) raw).stripTrailingZeros();
-          case "boolean" -> value = raw;
-          case "uuid" -> value = raw.toString();
-          case "timestamptz" ->
-              value = result.getObject(column, OffsetDateTime.class).toInstant().toString();
-          case "text[]" -> {
-            Object[] array = (Object[]) result.getArray(column).getArray();
-            value = java.util.Arrays.asList(array);
-          }
-          case "jsonb" ->
+          case "INTEGER" -> value = ((Number) raw).longValue();
+          case "TEXT" -> {
+            if (column.equals("source_manifest")
+                || column.equals("generation_config")
+                || column.equals("generation_inputs")) {
               value =
                   DatasetPackageCodec.parseJson(raw.toString().getBytes(StandardCharsets.UTF_8));
+            } else value = raw.toString();
+          }
           default -> value = result.getString(column);
         }
       row.put(column, value);
@@ -214,16 +206,25 @@ public final class PostgresDatasetExport {
   static void validateProjection(Connection connection) throws SQLException, IOException {
     String sql =
         "SELECT COUNT(*) FROM lexicon_form f LEFT JOIN lexicon_entry e USING (entry_id) "
-            + "WHERE e.entry_id IS NULL OR f.normalized_form IS NULL";
+            + "WHERE e.entry_id IS NULL OR f.normalized_form IS NULL "
+            + "OR f.normalized_form=e.lemma AND e.canonical_form=1";
     try (var statement = connection.createStatement();
         var result = statement.executeQuery(sql)) {
       if (!result.next() || result.getLong(1) != 0) throw invalid();
     }
     try (var statement = connection.createStatement();
+        var result = statement.executeQuery("SELECT lemma,canonical_form FROM lexicon_entry")) {
+      while (result.next()) {
+        if (result.getInt(2)
+            != (LexiconSurfacePolicy.withinQueryWindow(result.getString(1)) ? 1 : 0))
+          throw invalid();
+      }
+    }
+    try (var statement = connection.createStatement();
         var result =
             statement.executeQuery(
                 "SELECT COUNT(*) FROM lexicon_entry e WHERE NOT EXISTS "
-                    + "(SELECT 1 FROM lexicon_form f WHERE f.entry_id=e.entry_id)")) {
+                    + "(SELECT 1 FROM lexicon_lookup l WHERE l.entry_id=e.entry_id)")) {
       if (!result.next() || result.getLong(1) != 0) throw invalid();
     }
   }

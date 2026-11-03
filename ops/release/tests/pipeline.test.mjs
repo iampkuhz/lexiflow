@@ -29,16 +29,16 @@ async function fixture() {
     await mkdir(path.join(root, 'ops/docker'), { recursive: true });
     await mkdir(path.join(root, 'ops/release'), { recursive: true });
   for (const directory of ['build', 'integrity', 'runtime']) await mkdir(path.join(root, 'ops/release', directory), { recursive: true });
-    await mkdir(path.join(root, 'infra/postgres'), { recursive: true });
+    await mkdir(path.join(root, 'infra/sqlite'), { recursive: true });
     const templates = ['Dockerfile.runtime', 'runtime-entrypoint.sh'];
     for (const n of templates)
         await writeFile(path.join(root, 'ops/docker', n), await readFile(path.join(repo, 'ops/docker', n)));
     const digest = (c) => `sha256:${c.repeat(64)}`;
     const baseImages = [{ platform: 'linux/arm64',
         javaRuntime: { reference: `registry.example.invalid/java@${digest('c')}`, imageId: digest('c') },
-        postgresRuntime: { reference: `registry.example.invalid/postgres@${digest('d')}`, imageId: digest('d') } }];
+      }];
     await writeFile(path.join(root, 'ops/docker/base-images.json'), `${JSON.stringify({ schemaVersion: 1, baseImages }, null, 2)}\n`);
-    await writeFile(path.join(root, 'infra/postgres/schema.sql'), await readFile(path.join(repo, 'infra/postgres/schema.sql')));
+    await writeFile(path.join(root, 'infra/sqlite/schema.sql'), await readFile(path.join(repo, 'infra/sqlite/schema.sql')));
     for (const n of ['integrity/source-build-identity.mjs', 'integrity/artifact-build-identity.mjs', 'integrity/extension-archive-integrity.mjs', 'integrity/release-artifact-manifest.mjs', 'build/release-image-build-plan.mjs', 'build/release-image-builder.mjs', 'build/release-candidate-assembler.mjs', 'build/package-release-artifacts.mjs', 'runtime/release-artifact-verification.sh', 'runtime/release-installation-state.sh', 'runtime/release-installation-docker.sh', 'runtime/release-installation-lifecycle.sh'])
         await writeFile(path.join(root, 'ops/release', n), await readFile(path.join(repo, 'ops/release', n)));
     await writeFile(path.join(root, 'ops/release/version.txt'), '2.0.0\n');
@@ -48,7 +48,7 @@ async function fixture() {
     git(root, ['add', '.']);
     git(root, ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']);
     const commit = git(root, ['rev-parse', 'HEAD']).toString().trim();
-    const schema = await readFile(path.join(root, 'infra/postgres/schema.sql'));
+    const schema = await readFile(path.join(root, 'infra/sqlite/schema.sql'));
     const jar = jarBytes(resolveBuildIdentity(root), schema);
     await writeFile(path.join(artifactRoot, 'app.jar'), jar);
     const dataset = Buffer.from('synthetic dataset'); const notice = Buffer.from('synthetic notice');
@@ -65,7 +65,7 @@ async function fixture() {
     const bin = path.join(fake, 'bin');
     await mkdir(bin);
     const finalIds = { 'linux/arm64': [digest('1')] };
-    const state = { refs: Object.fromEntries(baseImages.flatMap((x) => [[x.javaRuntime.reference, { platform: x.platform, id: x.javaRuntime.imageId }], [x.postgresRuntime.reference, { platform: x.platform, id: x.postgresRuntime.imageId }]])), finalIds };
+    const state = { refs: Object.fromEntries(baseImages.map((x) => [x.javaRuntime.reference, { platform: x.platform, id: x.javaRuntime.imageId }])), finalIds };
     await writeFile(path.join(fake, 'state.json'), JSON.stringify(state));
     const driver = path.join(fake, 'driver.mjs');
     await writeFile(driver, `import fs from 'node:fs';import path from 'node:path';const root=path.dirname(new URL(import.meta.url).pathname),s=JSON.parse(fs.readFileSync(path.join(root,'state.json'))),a=process.argv.slice(2).slice(4),op=a[0];fs.appendFileSync(path.join(root,'calls.jsonl'),JSON.stringify({a,op})+'\\n');
@@ -81,7 +81,7 @@ else if(op==='image'&&a[1]==='save')fs.writeFileSync(a[a.indexOf('--output')+1],
     const imagesReq = await request('images-request.json', { repoRoot: root, artifactRoot, descriptor, outputParent: out, endpoint: 'unix:///tmp/synthetic.sock', platform: 'linux/arm64' });
     return { root, artifactRoot, out, assemblyOut, fake, env, state, imagesReq, request, descriptor, cleanup: async () => { await rm(root, { recursive: true, force: true }); await rm(out, { recursive: true, force: true }); await rm(assemblyOut, { recursive: true, force: true }); await rm(fake, { recursive: true, force: true }); } };
 }
-function assertShape(result, mode, status, reason) { assert.equal(result.stderr, ''); const rows = result.stdout.trim().split('\n'); assert.equal(rows.length, 1); const value = JSON.parse(rows[0]); assert.equal(value.status, status); assert.equal(value.scope, 'candidate-only'); assert.equal(value.operation, mode); if (reason)
+function assertShape(result, mode, status, reason) { assert.equal(result.stderr, ''); const rows = result.stdout.trim().split('\n'); assert.equal(rows.length, 1); const value = JSON.parse(rows[0]); assert.equal(value.status, status, result.stdout); assert.equal(value.scope, 'candidate-only'); assert.equal(value.operation, mode); if (reason)
     assert.equal(value.reason, reason);
 else
     assert.ok(value.candidateDirectory); return value; }
@@ -107,11 +107,11 @@ test('CLI assemble 绑定单镜像候选、对应源码归档及 manifest identi
         const imageDir = assertShape(built, 'images', 'PASS').candidateDirectory;
         const imageCandidate = JSON.parse(await readFile(path.join(imageDir, 'candidate.json'), 'utf8'));
         const imageRecord = imageCandidate.artifacts[0];
-        const artifacts = [{ role: 'runtime-image', platform: 'linux/arm64', licenseIds: ['api', 'lexiflow', 'postgres'] }];
+        const artifacts = [{ role: 'runtime-image', platform: 'linux/arm64', licenseIds: ['api', 'lexiflow', 'sqlite-jdbc'] }];
         const licenses = [];
         const licenseDefinitions = [
-            ['api', 'API-runtime'], ['lexiflow', 'LexiFlow'], ['postgres', 'PostgreSQL'],
-            ['extension-third-party', 'extension-third-party'], ['dataset', 'dataset'],
+            ['api', 'API-runtime'], ['lexiflow', 'LexiFlow'],
+            ['extension-third-party', 'extension-third-party'], ['dataset', 'dataset'], ['sqlite-jdbc', 'API-runtime'],
         ];
         const add = async (role, relative, bytes, licenseIds, metadata) => {
             await mkdir(path.dirname(path.join(f.artifactRoot, relative)), { recursive: true });
@@ -136,7 +136,7 @@ test('CLI assemble 绑定单镜像候选、对应源码归档及 manifest identi
         const extension = extensionBytes(imageCandidate.buildIdentity, expectedDataset);
         await add('extension', 'extension.zip', extension, ['lexiflow', 'extension-third-party'],
             { softwareVersion: imageCandidate.softwareVersion, sourceCommit: imageCandidate.sourceCommit, expectedDataset });
-        const descriptor = { schemaVersion: 1, buildIdentity: imageCandidate.buildIdentity,
+        const descriptor = { schemaVersion: 2, buildIdentity: imageCandidate.buildIdentity,
             softwareVersion: imageCandidate.softwareVersion, sourceCommit: imageCandidate.sourceCommit,
             apiContract: 'caption-hints.v2', sqlVersion: 'sql-test',
             dataset: { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rule-test' },

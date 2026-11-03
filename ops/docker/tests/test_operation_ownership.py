@@ -32,13 +32,6 @@ class OperationOwnershipTest(unittest.TestCase):
         self.installation = self.root / "installation"
         secret_dir = self.installation / "releases" / RELEASE
         secret_dir.mkdir(parents=True)
-        for filename, value in (
-            ("postgres-password", "a" * 64),
-            ("app-password", "b" * 64),
-        ):
-            secret = secret_dir / filename
-            secret.write_text(value)
-            secret.chmod(0o600)
         binding = self.installation / "engine"
         binding.write_text(
             "schema=lexiflow-engine-v1\nendpoint=unix:///fake.sock\ndaemon_id=synthetic-daemon-id\n"
@@ -105,21 +98,9 @@ class OperationOwnershipTest(unittest.TestCase):
             "lf_docker_endpoint() { LF_DOCKER_ENDPOINT=unix:///fake.sock; }\n"
             + "LF_ROOT=/tmp/fake LF_PLATFORM=linux/amd64 LF_API_IMAGE=sha256:"
             + "e" * 64
-            + " LF_POSTGRES_IMAGE=sha256:"
-            + "f" * 64
-            + " LF_DATASET_SHA256="
-            + "1" * 64
             + "\n"
             'LF_ROOT="$LF_TEST_ROOT" LF_RELEASE_ROOT="$LF_TEST_RELEASE" LF_COMPOSE_PATH=compose.yaml '
-            "LF_DATASET_PATH=dataset.zip LF_DATASET_BYTES=12\n"
-            "lf_private_sources_check() { :; }\n"
-            "lf_private_files_import() { for role in postgres-secret app-secret dataset; do "
-            'lf_docker volume create --label "com.docker.compose.project=$LF_PROJECT" '
-            '--label "lexiflow.installation=$LF_INSTALL_ID" --label "lexiflow.release=$LF_CURRENT_KEY" '
-            '"${LF_PROJECT}_$role" >/dev/null || return 1; '
-            "lf_operation_preflight || return 1; done; "
-            "lf_operation_volume_labels; }\n"
-            "LF_API_ARCHIVE=api.tar LF_POSTGRES_ARCHIVE=postgres.tar\n"
+            "LF_API_ARCHIVE=api.tar\n"
             'case "$2" in stop) lf_docker_stop;; cleanup) lf_operation_temp_cleanup;; '
             'health) lf_wait_healthy "$3";; prep) lf_docker_prepare;; start) lf_docker_start;; '
             'rmtemp) lf_operation_remove_temp "$3";; esac\n'
@@ -238,49 +219,10 @@ exit "$status"
 
     def write_state(self, mode="ok"):
         records = [
-            {
-                "kind": "container",
-                "id": "c" * 64,
-                "name": PROJECT + "-postgres-1",
-                "running": True,
-                "health": "healthy",
-            },
-            {
-                "kind": "container",
-                "id": "d" * 64,
-                "name": PROJECT + "-api-1",
-                "running": True,
-                "health": "healthy",
-            },
-            {
-                "kind": "container",
-                "id": "e" * 64,
-                "name": PROJECT + "-candidate",
-                "running": True,
-                "health": "healthy",
-            },
-            {
-                "kind": "container",
-                "id": "f" * 64,
-                "name": PROJECT + "-initialize-1",
-                "running": False,
-                "health": "none",
-            },
+            {"kind": "container", "id": "d" * 64, "name": PROJECT + "-api-1", "running": True, "health": "healthy"},
+            {"kind": "container", "id": "e" * 64, "name": PROJECT + "-candidate", "running": True, "health": "healthy"},
             {"kind": "network", "id": "1" * 64, "name": PROJECT + "_private"},
-            {"kind": "volume", "id": PROJECT + "_pgdata", "name": PROJECT + "_pgdata"},
-            {
-                "kind": "volume",
-                "id": PROJECT + "_initialization-work",
-                "name": PROJECT + "_initialization-work",
-            },
-            *[
-                {
-                    "kind": "volume",
-                    "id": PROJECT + "_" + suffix,
-                    "name": PROJECT + "_" + suffix,
-                }
-                for suffix in ("postgres-secret", "app-secret", "dataset")
-            ],
+            {"kind": "volume", "id": PROJECT + "_lexiflow-data", "name": PROJECT + "_lexiflow-data"},
         ]
         if mode in ("fresh", "post-create-owner"):
             records = []
@@ -316,17 +258,16 @@ if a[0]=='compose':
    if kind=='container': item.update(running=True,health='healthy')
    records.append(item)
  if tail and tail[0]=='up':
-  if mode=='post-create-owner': data['poisoned']=True
   service=tail[-1]
-  if service=='postgres':
-   add('container','2'*64,PROJECT+'-postgres-1')
+  if service=='api':
+   add('container','4'*64,PROJECT+'-api-1')
    add('network','3'*64,PROJECT+'_private')
-   add('volume',PROJECT+'_pgdata',PROJECT+'_pgdata')
-  elif service=='api': add('container','4'*64,PROJECT+'-api-1')
+   add('volume',PROJECT+'_lexiflow-data',PROJECT+'_lexiflow-data')
  elif tail and tail[0]=='run' and tail[-1]=='api':
   add('container','7'*64,PROJECT+'-candidate')
- elif tail and tail[0]=='run' and tail[-1]=='initialize':
-  add('volume',PROJECT+'_initialization-work',PROJECT+'_initialization-work')
+  add('network','3'*64,PROJECT+'_private')
+  add('volume',PROJECT+'_lexiflow-data',PROJECT+'_lexiflow-data')
+  if mode=='post-create-owner': data['poisoned']=True
  s.write_text(json.dumps(data)); sys.exit(0)
 kind=a[0]
 if kind=='volume' and a[1]=='create':
@@ -336,7 +277,7 @@ if kind=='volume' and a[1]=='create':
    key,_,value=a[i+1].partition('='); labels[key]=value
  name=a[-1]
  if labels!={'com.docker.compose.project':PROJECT,'lexiflow.installation':INSTALL,'lexiflow.release':RELEASE}: sys.exit(86)
- if not any(name==PROJECT+'_'+role for role in ('postgres-secret','app-secret','dataset')): sys.exit(86)
+ if name!=PROJECT+'_lexiflow-data': sys.exit(86)
  if not any(r['kind']=='volume' and r['name']==name for r in data['records']):
   data['records'].append({'kind':'volume','id':name,'name':name})
  if mode=='post-create-owner': data['poisoned']=True
@@ -364,7 +305,7 @@ if kind=='inspect' or (kind in ('container','network','volume') and a[1]=='inspe
    print(rec.get('health','none'))
   elif fmt.startswith('{{.State.Running'):
    print(str(rec.get('running',False)).lower())
-   if mode=='stop-replaced' and rec['id']=='f'*64:
+   if mode=='stop-replaced' and rec['id']=='e'*64:
     rec['id']='9'*64; s.write_text(json.dumps(data))
   elif rec['kind']=='container': print('|'.join([rec['id'],'/'+rec['name'],PROJECT,owner,RELEASE]))
   else: print('|'.join([rec['id'],rec['name'],PROJECT,owner,RELEASE]))
@@ -453,7 +394,7 @@ sys.exit(9)
         cmds = self.commands()
         stops = [c for c in cmds if len(c) > 1 and c[0:2] == ["container", "stop"]]
         self.assertEqual(
-            {c[-1] for c in stops}, {"c" * 64, "d" * 64, "e" * 64, "f" * 64}
+            {c[-1] for c in stops}, {"d" * 64, "e" * 64}
         )
         self.assertTrue(all(c[2:4] == ["--time", "10"] for c in stops))
         self.assertTrue(any(c[:2] == ["container", "inspect"] and len(c) > 5 for c in cmds))
@@ -512,17 +453,14 @@ sys.exit(9)
             )
 
     def test_prepare_and_start_use_compose_only_after_owned_preflight(self):
-        # 完整预检包含五类卷；只读批量观察不减少任何对象或写前复核。
-        # 原测试及生产每命令预算保持不变。
+        # SQLite candidate 初始化使用唯一专属数据卷；只有API候选短容器。
         result = self.run_case("ok", "prep", timeout=60)
         self.assertEqual(result.returncode, 0, (result.stderr, self.commands()))
         logged = self.commands()
         compose = [c for c in logged if c and c[0] == "compose"]
-        initialize = [c for c in compose if c[-1:] == ["initialize"]]
-        self.assertEqual(len(initialize), 1)
-        self.assertEqual(
-            initialize[0][initialize[0].index("--name") + 1], PROJECT + "-initialize-1"
-        )
+        candidate = [c for c in compose if "run" in c and c[-1:] == ["api"]]
+        self.assertEqual(len(candidate), 1)
+        self.assertEqual(candidate[0][candidate[0].index("--name") + 1], PROJECT + "-candidate")
         self.assertFalse(
             any(
                 r["name"] == PROJECT + "-candidate"
@@ -534,7 +472,7 @@ sys.exit(9)
         compose = [c for c in self.commands() if c and c[0] == "compose"]
         self.assertEqual(
             [c[c.index("-f") + 2 :] for c in compose if "up" in c],
-            [["up", "-d", "--no-deps", "postgres"], ["up", "-d", "--no-deps", "api"]],
+            [["up", "-d", "--no-deps", "api"]],
         )
         self.assertFalse(any(c[-1:] == ["initialize"] for c in compose))
         self.assertFalse(
@@ -567,7 +505,7 @@ sys.exit(9)
                 commands = self.commands()
                 batches = [c for c in commands if c[:2] == ["container", "inspect"] and len(c) > 5]
                 self.assertTrue(batches, "fault must reach the actual multi-ID request")
-                self.assertEqual(batches[0][4:], ["c" * 64, "d" * 64, "e" * 64, "f" * 64])
+                self.assertEqual(batches[0][4:], ["d" * 64, "e" * 64])
                 self.assertFalse(any(c[:2] in (["container", "stop"], ["container", "rm"]) for c in commands))
                 self.assertEqual(result.stdout + result.stderr, b"")
 
@@ -615,8 +553,8 @@ sys.exit(9)
         cmds = self.commands()
         stops = [c for c in cmds if c[0:2] == ["container", "stop"]]
         rms = [c for c in cmds if c[0:2] == ["container", "rm"]]
-        self.assertEqual([c[-1] for c in stops], ["e" * 64, "f" * 64])
-        self.assertEqual([c[-1] for c in rms], ["e" * 64, "f" * 64])
+        self.assertEqual([c[-1] for c in stops], ["e" * 64])
+        self.assertEqual([c[-1] for c in rms], ["e" * 64])
 
     def test_health_queries_full_id_and_rejects_unknown_or_bad_owner(self):
         result = self.run_case("ok", "health", PROJECT + "-api-1")
@@ -655,22 +593,14 @@ sys.exit(9)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout + result.stderr, b"")
         names = {r["name"] for r in json.loads(self.state.read_text())["records"]}
-        self.assertIn(PROJECT + "-postgres-1", names)
+        self.assertIn(PROJECT + "_lexiflow-data", names)
         self.assertNotIn(PROJECT + "-candidate", names)
         self.assertNotIn(PROJECT + "-api-1", names)
         result = self.run_case("post-create-owner", "prep")
         self.assertNotEqual(result.returncode, 0)
         compose = [c for c in self.commands() if c[0] == "compose" and "-f" in c]
-        self.assertEqual(
-            compose,
-            [],
-            "private-volume owner must be inspected before first Compose writer",
-        )
-        self.assertEqual(
-            len([c for c in self.commands() if c[:2] == ["volume", "create"]]),
-            1,
-            "wrong owner after first volume create stops before another volume or product resource",
-        )
+        self.assertEqual(len(compose), 1, "only the bounded candidate API may create its volume")
+        self.assertEqual(compose[0][-1], "api")
 
     def test_stop_does_not_accept_replaced_container_identity(self):
         result = self.run_case("stop-replaced", "stop")

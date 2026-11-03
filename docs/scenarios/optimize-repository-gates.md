@@ -112,7 +112,7 @@ S2 只确定任务，不运行 OpenSpec 或 Harness，也不执行代码扫描�
 | 修改主题 | 规则真源 | 实现／直接测试 |
 | --- | --- | --- |
 | 检查选择、输入与复用 | [module-checks](../../config/engineering/module-checks.yaml)、[agent-policy](../../harness/agent-policy.md) | [check_scope_selection.py](../../scripts/verification/planning/check_scope_selection.py)、[check_plan_runner.py](../../scripts/verification/execution/check_plan_runner.py)、[编排回归](../../tests/verification/test_lightweight_orchestration.py) |
-| Stop 与服务清理 | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py)、[isolated_postgres_redis.py](../../scripts/environment/services/isolated_postgres_redis.py) | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py)、[isolated_postgres_redis.py](../../scripts/environment/services/isolated_postgres_redis.py)、[Hook 回归](../../tests/verification/test_delivery_hook.py) |
+| Stop 与服务清理 | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py)、[isolated_redis.py](../../scripts/environment/services/isolated_redis.py) | [run_stop_checks.py](../../scripts/triggers/run_stop_checks.py)、[isolated_redis.py](../../scripts/environment/services/isolated_redis.py)、[Hook 回归](../../tests/verification/test_delivery_hook.py) |
 | 正式身份与证据链 | [agent-policy](../../harness/agent-policy.md) | [Delivery Gate 文件](../../scripts/acceptance)、[直接测试](../../tests/delivery_gate) |
 | CI 与发行集合 | [module-checks 场景策略](../../config/engineering/module-checks.yaml) | [run_ci_quick_checks.py](../../scripts/triggers/run_ci_quick_checks.py)、[CI 回归](../../tests/verification/test_ci.py) |
 

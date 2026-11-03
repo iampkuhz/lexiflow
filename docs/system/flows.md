@@ -12,40 +12,11 @@
 
 ### 1.1.1. 参与者与调用顺序
 
-这张时序图只画**一次当前字幕请求**。英文在 M1 后已经可见，M2—R4 都是可降级的附加工作，不构成字幕显示的前置条件。
+以下步骤只说明**一次当前字幕请求**。英文先行可见，后续请求是可降级的附加工作，不构成字幕显示的前置条件。
 
-```plantuml
-@startuml
-title 一段字幕的观看请求时序
-skinparam shadowing false
-skinparam sequenceStyle rectangle
-skinparam nodesep 30
-skinparam ranksep 50
-participant "YouTube 页面" as youtube
-participant "Chrome 扩展" as extension
-participant "api" as api
-participant "Enrichment" as enrichment
-participant "Lexicon" as lexicon
-database "PostgreSQL" as postgres
-youtube -> extension : M1 暴露当前英文字幕
-note over extension
-英文先行显示；提示不是字幕的前置条件
-end note
-extension -> api : M2 提交有界 CaptionContext
-api -> enrichment : M3 请求确定性提示决策
-enrichment -> lexicon : M4 查询已发布词汇候选
-lexicon -> postgres : M5 读取发布版本
-postgres --> lexicon : R1 返回已发布事实
-lexicon --> enrichment : R2 返回版本化候选
-enrichment --> api : R3 返回提示或空结果
-api --> extension : R4 返回绑定字幕身份的结果
-note over extension
-仅当前字幕仍匹配时展示；否则丢弃
-end note
-@enduml
-```
+观看调用顺序：YouTube 页面提供当前英文字幕 → Chrome 扩展提交有界 `CaptionContext` → `:api` 请求 Enrichment 作确定性提示决策 → Enrichment 经 Lexicon 公开合同读取 SQLite 中已发布资料 → API 返回提示或空结果 → 扩展仅在字幕身份仍匹配时展示。数据库访问只由适配器实现，观看不写资料、不调用模型；缓存可重建。
 
-M1—R4 描述一次观看请求：来源适配形成输入，唯一 API 装配业务用例，Enrichment 查询已发布资料并作提示决策，客户端关联当前字幕后展示。图省略可重建缓存；缓存只复用发布资料，不改变决策合同。具体字段与适用限制见图后引用的唯一合同。
+观看请求中，来源适配形成输入，唯一 API 装配业务用例，Enrichment 查询已发布资料并作提示决策，客户端关联当前字幕后展示。缓存只复用发布资料，不改变决策合同。具体字段与适用限制见本页引用的唯一合同。
 
 ### 1.1.2. 失败与降级
 

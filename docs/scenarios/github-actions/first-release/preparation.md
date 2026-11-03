@@ -2,6 +2,8 @@
 
 > 上级：[第一次 GitHub Release](../first-release.md)。仅在配置或工程准备时查阅；每次发布按上级简明步骤操作。
 
+耗时采集、可比较缓存条件、首轮与恢复统计见[运行计时与发行统计](../execution-metrics.md)。
+
 ## 1.1. GitHub 配置字段
 
 管理员按[仓库管理员准备](../../github-actions.md#13-仓库管理员准备)配置私有与正式发布两个 Environment、唯一 runner、隔离服务、不可变发行与权限。`lexiflow-release-private` 无人工审批，仅给测试能力；`lexiflow-release-promotion` 保留 owner required reviewer，单维护者设置 `prevent_self_review=false`、`can_admins_bypass=false`。两者仅允许正式 `v*` tag。当前电脑可以承载 runner，但使用专用源码与隔离数据，不能让其他 workflow 或不可信 PR 在此执行。所需变量如下：
@@ -15,11 +17,10 @@
 | private / promotion Variables | `LEXIFLOW_RELEASE_TEST_REDIS_ENDPOINT` | 本次隔离测试 Redis 的 `host:port` |
 | private / promotion Variables | `LEXIFLOW_RELEASE_ARM64_DOCKER_HOST` | 已确认的本机 Podman Unix endpoint，例如 `unix:///absolute/path/to/podman.sock` |
 | private / promotion Variables | `LEXIFLOW_RELEASE_GRADLE_CACHE`、`LEXIFLOW_RELEASE_NPM_CACHE` | 仅含依赖的可用私有缓存绝对路径 |
-| private / promotion Secrets | `LEXIFLOW_RELEASE_TEST_JDBC_URL` | 隔离 PostgreSQL 测试 JDBC，含测试账号认证 |
 | promotion Secrets | `LEXIFLOW_RELEASE_CONFIG_TOKEN` | 仅对目标仓库具 Administration read 的配置查询凭据，用于只读查询 immutable releases 和正式 Environment 保护；不要替代为源码构建 token |
 | repository Variables | `LEXIFLOW_RELEASE_RUNNER_READY` | 全部隔离、工具、保护和路径确认后设字面量 `true` |
 
-`GITHUB_TOKEN` 由 GitHub 自动提供，不另造同名 secret；只有 promotion job 声明 Contents write / Packages write，额外 Actions read 用于重核本次运行及批准历史。确认仓库/组织策略允许这些权限。准备和预检阶段不得注入发布凭据。两个 Environment 的 workspace、Node 工具路径与验证能力必须完全相同；private 在私有构建和手动晋升的只读预检中都不等待批准；正式公开仅 promotion 等待一次真实人审。验证 JDBC 仅用于隔离测试，不是产品数据库凭据；晋升仍须当前环境重核，不能省略或伪造这些值。
+`GITHUB_TOKEN` 由 GitHub 自动提供，不另造同名 secret；只有 promotion job 声明 Contents write / Packages write，额外 Actions read 用于重核本次运行及批准历史。确认仓库/组织策略允许这些权限。准备和预检阶段不得注入发布凭据。两个 Environment 的 workspace、Node 工具路径与验证能力必须完全相同；private 在私有构建和手动晋升的只读预检中都不等待批准；正式公开仅 promotion 等待一次真实人审。SQLite 集成测试数据库由每测试临时目录创建，不需要 JDBC secret；晋升所需的 `LEXIFLOW_RELEASE_JDBC_URL` 指向本次隔离的 SQLite 文件，不能指向真实安装。
 
 正式晋升只向维护者交付一个需要审批的运行链接，当前运行最多一次人审。上传响应异常或字段不足以验证时，在同一运行内按固定次数只读核实同一草稿身份及附件 id、名称、uploaded 状态、大小和摘要；完整匹配后追加确认并继续既有写前复核，不重传、不重建、不延长超时。冲突立即拒绝，仍未确认则保留未知事件并停止，报告原链接和部分成功，不自动发起新的审批请求。已结束的运行不能借用原批准；确有必要的额外恢复必须先明确异常与新授权边界。手动恢复工作流须新建 dispatch，不重跑已批准 run；旧批准不无限复用。`confirmed_recovery` 默认不勾选。仅当此前发布状态未知、管理员已核实远端精确镜像与事务现场时才显式勾选；它不会跳过候选、tag、PUBLISH 或正式发布 Environment 的本次审批，也不会自动恢复或修改包可见性。远端镜像缺失、digest/config 不一致或现场仍不明确时停止，不要重试推送。
 
@@ -31,7 +32,7 @@
 
 推 tag 前由维护者交接以下材料，逐项核实；不是从 quick artifact 或本机 `.local/podman` 凑一个目录：
 
-- **完整许可核准表及 notice。** [`distribution-licenses.json`](../../../../ops/release/distribution-licenses.json) 必须受 Git 跟踪，按 `id` 排序，覆盖 `LexiFlow`、`API-runtime`、`PostgreSQL`、`extension-third-party`、`dataset` 五类实际组件；每项 notice 的路径、字节数、摘要须与真实文件一致。只有 LexiFlow/MIT 一个条目不足以发行。负责人先核实可再分发依据、补齐记录并提交，再选择最终发行 commit；不能把「工具要求五类」当作许可已经获批。
+- **完整许可核准表及 notice。** [`distribution-licenses.json`](../../../../ops/release/distribution-licenses.json) 必须受 Git 跟踪，按 `id` 排序，覆盖 `LexiFlow`、`API-runtime`、`SQLite JDBC`、`SQLite`、`extension-third-party`、`dataset` 实际组件；SQLite JDBC 需保留嵌入 JAR 的 Apache-2.0 `LICENSE` 与 `LICENSE.zentus`（含 BSD 条款），SQLite 本体为 public domain。每项实际发行 notice 的路径、字节数、摘要须与真实文件一致；不得声称存在独立 SQLite 源码归档。负责人先核实可再分发依据、补齐记录并提交，再选择最终发行 commit；不能把「工具要求五类」当作许可已经获批。
 - **真实资料快照。** 从已发布且经真实来源审批的 Lexicon 数据导出，包含 `manifest.json`、`approvals.json`、`dataset.ndjson`、`entries.ndjson`、`forms.ndjson`。本机 ECDICT 来源 ZIP/CSV 不是发布快照；测试 synthetic 包也不是正式资料。
 - **目标资料和版本说明。** 当前提交的 `ops/release/notes/<version>.md` 必须非空且版本匹配。单容器候选内嵌真实已发布资料，完整验收其初始化、同卷重启、故障和恢复；不要求历史双镜像 previous 候选，也不承诺任意历史数据库迁移。
 - **当前正式发行 Task 与真实 actor。** 按 [Delivery Gate](../../../reference/delivery-gate.md) 确认 Catalog 中目标 Task 及正式发行计划，送验、验证、审查角色已分开。普通开发 Hook PASS 不够。
@@ -40,7 +41,7 @@
 
 ### 1.2.1. 导出并核对发布资料
 
-在已确认资料来源数据库与真实审批文件的受控环境，用实际 API JAR 操作。`LEXIFLOW_RELEASE_JDBC_URL` 只用于这次显式导出，应通过私有环境安全注入；它不同于 CI 的测试 JDBC。不要把密码写进 shell 示例、历史或共享文档。
+在已确认资料来源数据库与真实审批文件的受控环境，用实际 API JAR 操作。`LEXIFLOW_RELEASE_JDBC_URL` 只用于这次显式导出，应通过私有环境安全注入并指向获批来源对应的隔离 SQLite 文件。不要把本机绝对路径或业务资料写入共享文档。
 
 ```sh
 # 在干净源码根构建实际 JAR；通过既有 Java 工具链入口使用 Java 25。
@@ -84,7 +85,7 @@ python3 -m scripts.local.run_with_java_toolchain java \
 }
 ```
 
-四个资料身份由负责人按实际资料与策略登记，不能任填占位名称；格式为 1–128 位英文数字及 `._-`，首字符英文数字。`outputParent` 须已存在且为空，不能在源码中、与源码互为父子；使用规范绝对路径，所有输入禁止 symlink。`endpoint` 只接受实际本机 Unix socket，须和测试 ARM64 endpoint 指向同一经确认的 daemon。notice 根必须含核准表中全部原样文件。
+四个资料身份由负责人按实际资料与策略登记，不能任填占位名称；格式为 1–128 位英文数字及 `._-`，首字符英文数字。`outputParent` 须已存在且为空，不能在源码中、与源码互为父子；使用规范绝对路径，所有输入禁止 symlink。`endpoint` 只接受实际本机 Unix socket，须和测试 ARM64 endpoint 指向同一经确认的 daemon。notice 根必须含核准表中全部原样文件。先将仓库 `ops/release/notices/` 中受版本控制的小型材料复制到 notice 根，并提供根 `LICENSE` 的原样副本，再补齐核准表声明的大型外部源码/许可归档。`api-java-runtime-notices.tar.gz` 是运行许可和第三方 JAR 身份索引，不替代完整 Java 源材料；镜像只收录运行告知，所有完整原件由自包含公开源码包唯一持有。候选根不重复保留每份 notice 文件；正式校验实际读取归档内原件而非仅相信外层摘要。
 
 ### 1.2.3. 首次成功的反馈顺序
 
@@ -100,7 +101,7 @@ python3 -m scripts.local.run_with_java_toolchain java \
 
 ## 1.3. 在原 checkout 完成独立正式验收
 
-在同一 Mac、同一 OS 用户、同一稳定 checkout 中，由具有真实原生身份的独立 agent 执行；聊天启动目录不代替目标仓库根。原生任务不是 Actions job，不会自动继承 Environment secret：在验收宿主私有环境中安全配置同一隔离资源对应的 `LEXIFLOW_POSTGRES_TEST_JDBC_URL`、`LEXIFLOW_REDIS_TEST_ENDPOINT`、`LEXIFLOW_RELEASE_ARM64_DOCKER_HOST`、`LEXIFLOW_JAVA_HOME`、`LEXIFLOW_RELEASE_NODE_BIN` 及受要求的构建缓存，不在提示词或日志中粘贴 secret。下列 `formal` 入口从固定版本目录 `tmp/quality/release-workflow/<softwareVersion>/` 中的 handoff 旁派生 `candidate-runtime-request.json`，并与晋升共用受控环境；不要用临时 shell PATH 或不一致的私有配置执行这条发行链。执行身份与目标分开校验：同一聊天可明确访问多个 checkout，但切换路径不产生独立身份，不能由实现者依次自签。先确认 Catalog 中正式发行 Task 的必需检查与依赖已齐；干净提交通过固定 handoff 送验，不要求 PASS 开发报告，也不为此添加开发差异：
+在同一 Mac、同一 OS 用户、同一稳定 checkout 中，由具有真实原生身份的独立 agent 执行；聊天启动目录不代替目标仓库根。原生任务不是 Actions job，不会自动继承 Environment secret：在验收宿主私有环境中安全配置同一隔离资源对应的 `LEXIFLOW_REDIS_TEST_ENDPOINT`、`LEXIFLOW_RELEASE_ARM64_DOCKER_HOST`、`LEXIFLOW_JAVA_HOME`、`LEXIFLOW_RELEASE_NODE_BIN` 及受要求的构建缓存，不在提示词或日志中粘贴 secret。下列 `formal` 入口从固定版本目录 `tmp/quality/release-workflow/<softwareVersion>/` 中的 handoff 旁派生 `candidate-runtime-request.json`，并与晋升共用受控环境；不要用临时 shell PATH 或不一致的私有配置执行这条发行链。执行身份与目标分开校验：同一聊天可明确访问多个 checkout，但切换路径不产生独立身份，不能由实现者依次自签。先确认 Catalog 中正式发行 Task 的必需检查与依赖已齐；干净提交通过固定 handoff 送验，不要求 PASS 开发报告，也不为此添加开发差异：
 
 ```sh
 # 生产者/送验者：从本 checkout 的固定 handoff 派生真实发行主体。

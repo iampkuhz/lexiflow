@@ -10,8 +10,9 @@ import { validateRelativePath, verifyContainedFile } from '../integrity/release-
 
 const LOCK = 'ops/docker/base-images.json';
 const TEMPLATE_PATHS = ['ops/docker/Dockerfile.runtime', 'ops/docker/runtime-entrypoint.sh'];
-const IMAGE_NOTICE_EXCLUSIONS = new Set(['licenses/api-base-corresponding-sources.tar.gz',
-  'licenses/postgres-base-corresponding-sources.tar.gz', 'licenses/OpenJDK25U-jdk-sources_25.0.4.1_1.tar.gz']);
+const IMAGE_NOTICE_EXCLUSIONS = new Set(['licenses/api-java-notices-and-sources.tar.gz',
+  'licenses/api-base-corresponding-sources.tar.gz',
+  'licenses/OpenJDK25U-jdk-sources_25.0.4.1_1.tar.gz']);
 const HASH = /^[a-f0-9]{64}$/;
 const reject = (reason) => { throw new Error(reason); };
 const keys = (value, fields) => value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -53,9 +54,9 @@ async function baseImages(root) {
     || lock.baseImages.length < 1 || lock.baseImages.length > 2) reject('BASE_IMAGES_INVALID');
   const seen = new Set();
   for (const item of lock.baseImages) {
-    if (!keys(item, ['platform', 'javaRuntime', 'postgresRuntime']) || !['linux/amd64', 'linux/arm64'].includes(item.platform) || seen.has(item.platform)) reject('BASE_IMAGES_INVALID');
+    if (!keys(item, ['platform', 'javaRuntime']) || !['linux/amd64', 'linux/arm64'].includes(item.platform) || seen.has(item.platform)) reject('BASE_IMAGES_INVALID');
     seen.add(item.platform);
-    for (const runtime of [item.javaRuntime, item.postgresRuntime]) {
+    for (const runtime of [item.javaRuntime]) {
       const match = typeof runtime?.reference === 'string'
         ? /^([a-z0-9][a-z0-9.-]*(?::([0-9]{1,5}))?)\/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$/.exec(runtime.reference) : null;
       const hostname = match?.[1].replace(/:[0-9]+$/, '');
@@ -66,8 +67,8 @@ async function baseImages(root) {
     }
   }
   const rows = lock.baseImages.filter(item => item.platform === 'linux/arm64');
-  if (rows.length !== 1 || !keys(rows[0], ['platform', 'javaRuntime', 'postgresRuntime'])) reject('BASE_IMAGES_INVALID');
-  for (const runtime of [rows[0].javaRuntime, rows[0].postgresRuntime]) {
+  if (rows.length !== 1 || !keys(rows[0], ['platform', 'javaRuntime'])) reject('BASE_IMAGES_INVALID');
+  for (const runtime of [rows[0].javaRuntime]) {
     if (!keys(runtime, ['reference', 'imageId']) || typeof runtime.reference !== 'string'
       || !/^[a-z0-9][a-z0-9.-]*(?::[0-9]+)?\/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$/.test(runtime.reference)
       || !/^sha256:[a-f0-9]{64}$/.test(runtime.imageId)) reject('BASE_IMAGES_INVALID');
@@ -116,9 +117,9 @@ export async function prepareImageBuild(input) {
     }
     const templates = [];
     for (const relative of TEMPLATE_PATHS) templates.push(await trackedBytes(repoRoot, relative));
-    const sql = await trackedBytes(repoRoot, 'infra/postgres/schema.sql', 16 * 1024 * 1024);
+    const sql = await trackedBytes(repoRoot, 'infra/sqlite/schema.sql', 16 * 1024 * 1024);
     const jarEntries = await readZipEntries(path.join(artifactRoot, ...jar.path.split('/')), ['META-INF/lexiflow-schema.sql']);
-    if (!jarEntries.get('META-INF/lexiflow-schema.sql').equals(await readFile(path.join(repoRoot, 'infra/postgres/schema.sql')))) reject('SQL_IDENTITY_MISMATCH');
+    if (!jarEntries.get('META-INF/lexiflow-schema.sql').equals(await readFile(path.join(repoRoot, 'infra/sqlite/schema.sql')))) reject('SQL_IDENTITY_MISMATCH');
     const bases = await baseImages(repoRoot);
     const datasetIdentity = { releaseId: data.releaseId, preparationId: data.preparationId, ruleId: data.ruleId,
       bytes: data.bytes, sha256: data.sha256 };
@@ -138,8 +139,8 @@ export async function prepareImageBuild(input) {
     const commands = [['docker', 'build', '--pull=false', '--network=none', '--platform', 'linux/arm64',
       '--label', `org.opencontainers.image.version=${identity.softwareVersion}`, '--label', `org.opencontainers.image.revision=${identity.sourceCommit}`,
       '--label', `io.lexiflow.build-id=${identity.buildId}`, '--label', `io.lexiflow.source-sha256=${identity.sourceSha256}`,
-      '--label', 'io.lexiflow.image-role=runtime', '--label', `io.lexiflow.deployment-version=${identity.baseVersion.toLowerCase()}`, '--build-arg', `JAVA_RUNTIME_IMAGE=${bases.javaRuntime.reference}`,
-      '--build-arg', `POSTGRES_RUNTIME_IMAGE=${bases.postgresRuntime.reference}`, '--file', 'Dockerfile.runtime', '--iidfile', 'runtime.iid', '.']];
+      '--label', 'io.lexiflow.image-role=runtime', '--label', `io.lexiflow.deployment-version=${identity.baseVersion.toLowerCase()}`,
+      '--build-arg', `JAVA_RUNTIME_IMAGE=${bases.javaRuntime.reference}`, '--file', 'Dockerfile.runtime', '--iidfile', 'runtime.iid', '.']];
     const finalIdentity = resolveCleanBuildIdentity(repoRoot);
     if (JSON.stringify(identity) !== JSON.stringify(finalIdentity)) reject('RELEASE_SOURCE_CHANGED');
     const platform = { platform: 'linux/arm64', buildIdentity: identity, bases, contextFiles, commands };

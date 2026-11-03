@@ -25,7 +25,7 @@ from scripts.verification.planning.check_scope_selection import (
 
 def diagnose(root: Path, *, check_ids: tuple[str, ...]) -> dict[str, object]:
     """执行精确规范 ID 的完整依赖闭包；结果仅限诊断身份。"""
-    from scripts.environment.services.isolated_postgres_redis import (
+    from scripts.environment.services.isolated_redis import (
         isolated_test_services,
     )
 

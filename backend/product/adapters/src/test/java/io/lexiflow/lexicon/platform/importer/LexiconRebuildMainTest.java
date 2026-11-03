@@ -7,7 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.StringReader;
 import org.junit.jupiter.api.Test;
 
-/** 验证重建确认必须与实际数据库及 schema 精确一致。 */
+/** 验证重建确认必须与实际 SQLite 文件路径精确一致。 */
 class LexiconRebuildMainTest {
 
   @Test
@@ -15,19 +15,18 @@ class LexiconRebuildMainTest {
     assertDoesNotThrow(
         () ->
             LexiconRebuildMain.requireConfirmation(
-                "lexiflow", "public", new StringReader("REBUILD lexiflow.public\n")));
+                "/tmp/lexiflow.db", new StringReader("REBUILD /tmp/lexiflow.db\n")));
     assertThrows(
         IllegalStateException.class,
         () ->
             LexiconRebuildMain.requireConfirmation(
-                "lexiflow", "public", new StringReader("REBUILD other.public\n")));
+                "/tmp/lexiflow.db", new StringReader("REBUILD /tmp/other.db\n")));
     assertThrows(
         IllegalStateException.class,
-        () -> LexiconRebuildMain.requireConfirmation("lexiflow", "public", new StringReader("")));
+        () -> LexiconRebuildMain.requireConfirmation("/tmp/lexiflow.db", new StringReader("")));
     assertThrows(
         IllegalStateException.class,
-        () ->
-            LexiconRebuildMain.requireConfirmation("lexiflow", "public", new StringReader("y\n")));
+        () -> LexiconRebuildMain.requireConfirmation("/tmp/lexiflow.db", new StringReader("y\n")));
   }
 
   @Test
@@ -35,16 +34,14 @@ class LexiconRebuildMainTest {
     var eof =
         assertThrows(
             IllegalStateException.class,
-            () ->
-                LexiconRebuildMain.requireConfirmation("lexiflow", "public", new StringReader("")));
+            () -> LexiconRebuildMain.requireConfirmation("/tmp/lexiflow.db", new StringReader("")));
     assertTrue(eof.getMessage().contains("stdin 已关闭"));
     assertTrue(eof.getMessage().contains("未修改数据库"));
     var blank =
         assertThrows(
             IllegalStateException.class,
             () ->
-                LexiconRebuildMain.requireConfirmation(
-                    "lexiflow", "public", new StringReader("\n")));
+                LexiconRebuildMain.requireConfirmation("/tmp/lexiflow.db", new StringReader("\n")));
     assertTrue(blank.getMessage().contains("已取消重建"));
     assertTrue(blank.getMessage().contains("未修改数据库"));
   }

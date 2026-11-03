@@ -14,7 +14,7 @@ dependencies {
     "implementation"("org.springframework.boot:spring-boot-starter-actuator")
     "implementation"("org.springframework.boot:spring-boot-starter-webmvc")
     "implementation"("org.springframework.boot:spring-boot-starter-jdbc")
-    "runtimeOnly"("org.postgresql:postgresql")
+    "runtimeOnly"(libs.sqlite.jdbc)
     "implementation"(project(":lexicon"))
     "implementation"(project(":enrichment"))
     "implementation"(project(":adapters"))
@@ -41,7 +41,7 @@ val generateDataGeneration = tasks.register<GenerateDataGenerationTask>("generat
 tasks.named<ProcessResources>("processResources") {
     from(generateSoftwareIdentity.flatMap { it.outputDirectory })
     from(generateDataGeneration.flatMap { it.outputDirectory })
-    from(repositoryRoot.resolve("infra/postgres/schema.sql")) {
+    from(repositoryRoot.resolve("infra/sqlite/schema.sql")) {
         into("META-INF")
         rename { "lexiflow-schema.sql" }
     }

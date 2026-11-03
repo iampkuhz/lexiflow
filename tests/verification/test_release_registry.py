@@ -85,15 +85,90 @@ class RegistryTests(unittest.TestCase):
                     "path": path,
                     "bytes": len(data),
                     "sha256": hashlib.sha256(data).hexdigest(),
+                    "licenseIds": ["lexiflow"],
                     "platform": "linux/arm64",
                     "imageDigest": "sha256:" + hashlib.sha256(config).hexdigest(),
                 }
             )
+        notice = b"MIT notice\n"
+        self.license = {
+            "id": "lexiflow",
+            "component": "LexiFlow",
+            "licenseId": "MIT",
+            "licenseName": "MIT",
+            "sourceUrl": "https://example.invalid/license",
+            "noticePath": "LICENSE",
+            "noticeBytes": len(notice),
+            "noticeSha256": hashlib.sha256(notice).hexdigest(),
+        }
+        source_item = {
+            "id": "lexiflow",
+            "component": "LexiFlow",
+            "licenseId": "MIT",
+            "licenseName": "MIT",
+            "sourceUrl": self.license["sourceUrl"],
+            "noticePath": "LICENSE",
+            "archivePath": "materials/LICENSE",
+            "bytes": len(notice),
+            "sha256": hashlib.sha256(notice).hexdigest(),
+        }
+        source_index = (
+            json.dumps({"schemaVersion": 1, "items": [source_item]}, indent=2) + "\n"
+        ).encode()
+        source_archive = io.BytesIO()
+        with tarfile.open(fileobj=source_archive, mode="w:gz") as bundle:
+            for name, content, kind in (
+                ("index.json", source_index, "file"),
+                ("materials/", b"", "dir"),
+                ("materials/LICENSE", notice, "file"),
+            ):
+                info = tarfile.TarInfo(name)
+                if kind == "dir":
+                    info.type = tarfile.DIRTYPE
+                    bundle.addfile(info)
+                else:
+                    info.size = len(content)
+                    bundle.addfile(info, io.BytesIO(content))
+        for role, path in (
+            ("dataset", "dataset.zip"),
+            ("extension", "extension.zip"),
+            ("sql", "schema.sql"),
+        ):
+            data = b"synthetic " + role.encode()
+            (self.root / "payload" / path).write_bytes(data)
+            self.artifacts.append(
+                {
+                    "role": role,
+                    "path": path,
+                    "bytes": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "licenseIds": ["lexiflow"],
+                }
+            )
+        source_path = "sources/lexiflow-third-party-sources-2.0.0.tar.gz"
+        source_bytes = source_archive.getvalue()
+        (self.root / "payload" / source_path).parent.mkdir(parents=True, exist_ok=True)
+        (self.root / "payload" / source_path).write_bytes(source_bytes)
+        self.artifacts.append(
+            {
+                "role": "corresponding-sources",
+                "path": source_path,
+                "bytes": len(source_bytes),
+                "sha256": hashlib.sha256(source_bytes).hexdigest(),
+                "licenseIds": ["lexiflow"],
+                "metadata": {
+                    "indexSha256": hashlib.sha256(source_index).hexdigest(),
+                    "items": [source_item],
+                },
+            }
+        )
         self.manifest = {
+            "schemaVersion": 2,
             "buildIdentity": self.identity,
             "softwareVersion": "2.0.0",
             "sourceCommit": self.identity["sourceCommit"],
             "platforms": ["linux/arm64"],
+            "licenses": [self.license],
             "artifacts": self.artifacts,
         }
 

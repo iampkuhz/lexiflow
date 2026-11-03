@@ -171,7 +171,7 @@ Registry MUST 由 `config/engineering/module-checks.yaml` 提供，固定结构�
 
 唯一开发 diff 证明 MUST 是一个 frozen `development-change` profile 与一个 report。完整 Repository Verify 及 Formal `verify_profiles` MUST 保留，Formal 同次 1..16 submission 的完整等价复用 MUST 保留。诊断 MUST 只接受精确 `--check-id` 并派生完整依赖闭包与自动环境 lease，MUST NOT 签发正式资格。子进程 MUST 只消费固定 run/check/snapshot，重派生声明后精确比对；scope 资格 MUST 在父端证明，progress observer MUST NOT 读 env/stdin/raw stdout、返回进程结果或决定 PASS。
 
-`CheckEnvironment.values` MUST 仅供事务内私有执行，`.diagnostic` 才可公开；不得序列化七类私有能力值。报告消费 MUST 重新解析，不跨事务缓存资格。PostgreSQL 唯一容量 MUST 是 512 MiB memory 与 256 MiB data tmpfs。Apple 系统 Git MUST 认证实际 payload，不靠 prepared shim。Stop 超时与心跳 MUST 由实现固定，不维护配置副本或覆盖接口；紧急停用仍不产生 PASS，真正中间回合标记 MUST NOT 用于普通交付。
+`CheckEnvironment.values` MUST 仅供事务内私有执行，`.diagnostic` 才可公开；不得序列化七类私有能力值。报告消费 MUST 重新解析，不跨事务缓存资格。SQLite 数据测试 MUST 使用测试自身拥有的临时文件，MUST NOT 使用共享运行数据库；外部隔离服务仅按实际 Redis 检查准备。Apple 系统 Git MUST 认证实际 payload，不靠 prepared shim。Stop 超时与心跳 MUST 由实现固定，不维护配置副本或覆盖接口；紧急停用仍不产生 PASS，真正中间回合标记 MUST NOT 用于普通交付。
 
 ### Requirement: 有界仓库与发行支撑
 

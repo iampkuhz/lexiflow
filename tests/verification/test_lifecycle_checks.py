@@ -523,7 +523,7 @@ class LifecycleRuntimeCheckTest(LifecycleCheckTest):
                 "npm",
                 "docker",
                 "java-25-temurin",
-                "postgres-test-jdbc-url",
+                "redis-test-endpoint",
                 "release-arm64-docker-host",
                 "release-gradle-cache",
                 "release-npm-cache",
@@ -533,7 +533,7 @@ class LifecycleRuntimeCheckTest(LifecycleCheckTest):
         self.assertEqual(first["required_environment"], second["required_environment"])
         self.assertEqual(first["input_paths"], second["input_paths"])
         self.assertIn(
-            "scripts/environment/services/isolated_postgres_redis.py",
+            "scripts/environment/services/isolated_redis.py",
             input_closure(ROOT, first),
         )
         self.assertIn("ops/docker/tests/update-recovery.sh", input_closure(ROOT, first))

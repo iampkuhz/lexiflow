@@ -76,53 +76,34 @@ class Fixture:
                 info = tarfile.TarInfo(member_name)
                 info.size = len(content)
                 bundle.addfile(info, io.BytesIO(content))
+        dataset = b"dataset bytes"
+        extension = b"accepted extension zip bytes"
+        sql = b"CREATE TABLE synthetic(id integer);\n"
         for role, name, data in (
-            ("runtime-entry", "lexiflow.sh", b"#!/bin/sh\n"),
-            ("license", "LICENSE", b"MIT\n"),
-            ("extension", "extension.zip", b"accepted extension zip bytes"),
-            ("dataset", "data/dataset.bin", b"dataset bytes"),
+            ("extension", "extension.zip", extension),
+            ("dataset", "data/dataset.bin", dataset),
+            ("sql", "schema.sql", sql),
             (
                 "runtime-image",
                 "images/linux-arm64/runtime-image.tar",
                 archive.getvalue(),
-            ),
-            (
-                "corresponding-sources",
-                "sources/lexiflow-third-party-sources-1.2.3.tar.gz",
-                b"source archive",
             ),
         ):
             path = self.payload / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
             self.artifacts.append(
-                {"role": role, "path": name, "bytes": len(data), "sha256": sha(data)}
+                {
+                    "role": role,
+                    "path": name,
+                    "bytes": len(data),
+                    "sha256": sha(data),
+                    "licenseIds": ["lexiflow"],
+                }
             )
             if role == "runtime-image":
                 self.artifacts[-1].update(
                     platform="linux/arm64", imageDigest="sha256:" + sha(config)
-                )
-            if role == "license":
-                self.artifacts[-1].update(licenseIds=["lexiflow"])
-            if role == "corresponding-sources":
-                self.artifacts[-1].update(
-                    licenseIds=["lexiflow"],
-                    metadata={
-                        "indexSha256": "e" * 64,
-                        "items": [
-                            {
-                                "id": "lexiflow",
-                                "component": "LexiFlow",
-                                "licenseId": "MIT",
-                                "licenseName": "MIT",
-                                "sourceUrl": self.license["sourceUrl"],
-                                "noticePath": "LICENSE",
-                                "archivePath": "materials/LICENSE",
-                                "bytes": 4,
-                                "sha256": sha(b"MIT\n"),
-                            }
-                        ],
-                    },
                 )
             if role == "dataset":
                 self.artifacts[-1].update(
@@ -143,11 +124,55 @@ class Fixture:
                             "preparationId": "prep",
                             "ruleId": "rule",
                             "sqlVersion": "sql-v1",
-                            "sha256": sha(b"dataset bytes"),
+                            "sha256": sha(dataset),
                         },
                     }
                 )
+        source_item = {
+            "id": "lexiflow",
+            "component": "LexiFlow",
+            "licenseId": "MIT",
+            "licenseName": "MIT",
+            "sourceUrl": self.license["sourceUrl"],
+            "noticePath": "LICENSE",
+            "archivePath": "materials/LICENSE",
+            "bytes": 4,
+            "sha256": sha(b"MIT\n"),
+        }
+        source_index = (
+            json.dumps({"schemaVersion": 1, "items": [source_item]}, indent=2) + "\n"
+        ).encode()
+        source_tar = io.BytesIO()
+        with tarfile.open(fileobj=source_tar, mode="w:gz") as bundle:
+            for member_name, content, is_dir in (
+                ("index.json", source_index, False),
+                ("materials/", b"", True),
+                ("materials/LICENSE", b"MIT\n", False),
+            ):
+                info = tarfile.TarInfo(member_name)
+                if is_dir:
+                    info.type = tarfile.DIRTYPE
+                    bundle.addfile(info)
+                else:
+                    info.size = len(content)
+                    bundle.addfile(info, io.BytesIO(content))
+        source_data = source_tar.getvalue()
+        source_path = "sources/lexiflow-third-party-sources-1.2.3.tar.gz"
+        source_file = self.payload / source_path
+        source_file.parent.mkdir(parents=True, exist_ok=True)
+        source_file.write_bytes(source_data)
+        self.artifacts.append(
+            {
+                "role": "corresponding-sources",
+                "path": source_path,
+                "bytes": len(source_data),
+                "sha256": sha(source_data),
+                "licenseIds": ["lexiflow"],
+                "metadata": {"indexSha256": sha(source_index), "items": [source_item]},
+            }
+        )
         self.manifest = {
+            "schemaVersion": 2,
             "buildIdentity": self.identity,
             "softwareVersion": "1.2.3",
             "sourceCommit": COMMIT,
@@ -663,7 +688,7 @@ class PromotionTests(unittest.TestCase):
         self.assertEqual(release_json["schemaVersion"], "lexiflow.release.v1")
         self.assertEqual(release_json["image"]["platform"], "linux/arm64")
         self.assertEqual(
-            release_json["image"]["configId"], self.fixture.artifacts[4]["imageDigest"]
+            release_json["image"]["configId"], self.fixture.artifacts[3]["imageDigest"]
         )
         self.assertEqual(
             release_json["assets"]["thirdPartySources"]["sha256"],
@@ -734,7 +759,7 @@ class PromotionTests(unittest.TestCase):
         self.assertFalse(result["published"])
         podman.assert_not_called()
         remote.assert_not_called()
-        item = self.fixture.artifacts[4]
+        item = self.fixture.artifacts[3]
         labels = registry._image_labels(self.fixture.identity)
         del labels["io.lexiflow.deployment-version"]
         config = json.dumps(
@@ -1096,7 +1121,7 @@ class PromotionTests(unittest.TestCase):
                 {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
             ),
             self.assertRaisesRegex(
-                p.PromotionError, "candidate-artifact-hash-mismatch"
+                p.PromotionError, "candidate-corresponding-sources-invalid"
             ),
         ):
             self.promote(publish=True)
@@ -1606,7 +1631,7 @@ class PromotionTests(unittest.TestCase):
                 {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
             ),
             self.assertRaisesRegex(
-                p.PromotionError, "candidate-artifact-hash-mismatch"
+                p.PromotionError, "candidate-corresponding-sources-invalid"
             ),
         ):
             self.promote(publish=True)
@@ -1626,7 +1651,9 @@ class PromotionTests(unittest.TestCase):
                 os.environ,
                 {"GITHUB_TOKEN": "write", "LEXIFLOW_RELEASE_CONFIG_TOKEN": "config"},
             ),
-            self.assertRaisesRegex(p.PromotionError, "candidate-path-unsafe"),
+            self.assertRaisesRegex(
+                p.PromotionError, "candidate-corresponding-sources-invalid"
+            ),
         ):
             self.promote(publish=True)
 
@@ -2074,7 +2101,7 @@ class RealRegistryPromotionBoundaryTests(unittest.TestCase):
         self.image_body = json.dumps(
             {
                 "schemaVersion": 2,
-                "config": {"digest": self.fixture.artifacts[4]["imageDigest"]},
+                "config": {"digest": self.fixture.artifacts[3]["imageDigest"]},
             }
         ).encode()
         self.image_manifest_digest = "sha256:" + sha(self.image_body)
@@ -2135,7 +2162,7 @@ class RealRegistryPromotionBoundaryTests(unittest.TestCase):
             stdout = b""
 
         if "inspect" in argv:
-            image = self.fixture.artifacts[4]["imageDigest"]
+            image = self.fixture.artifacts[3]["imageDigest"]
             ident = self.fixture.identity
             labels = {
                 "org.opencontainers.image.version": ident["softwareVersion"],

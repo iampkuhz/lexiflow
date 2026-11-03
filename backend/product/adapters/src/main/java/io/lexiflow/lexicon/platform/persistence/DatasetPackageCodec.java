@@ -29,7 +29,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -234,7 +233,7 @@ public final class DatasetPackageCodec {
                 "generationConfig",
                 "contentSha256",
                 "files"));
-    if (integer(node.get("schemaVersion"), 2) != 2) throw new IOException(BAD);
+    if (integer(node.get("schemaVersion"), 0) != 4) throw new IOException(BAD);
     String schema = digestValue(node.get("schemaSha256"));
     String approval = digestValue(node.get("approvalSha256"));
     long version = integer(node.get("datasetVersion"), 1);
@@ -271,14 +270,14 @@ public final class DatasetPackageCodec {
       var record = object(files.get(i), Set.of("name", "bytes", "sha256", "rows"));
       String name = string(record.get("name"));
       if (!ENTRY_NAMES.get(i + 2).equals(name)) throw new IOException(BAD);
-      long size = integer(record.get("bytes"), 1);
+      long size = integer(record.get("bytes"), 0);
       String hash = digestValue(record.get("sha256"));
-      long rows = integer(record.get("rows"), 1);
+      long rows = integer(record.get("rows"), i == 2 ? 0 : 1);
       if (i == 0 && rows != 1) throw new IOException(BAD);
       records.add(new DatasetPackageManifest.FileRecord(name, size, hash, rows));
     }
     return new DatasetPackageManifest(
-        2,
+        3,
         schema,
         approval,
         version,
@@ -429,6 +428,7 @@ public final class DatasetPackageCodec {
       if (!sha256(approvalBytes).equals(manifest.approvalSha256())) throw new IOException(BAD);
       var approvals = parseApprovals(approvalBytes);
       Map<String, Object> dataset = null;
+      long canonicalEntries = 0;
       for (int i = 0; i < 3; i++) {
         var table = DatasetPackageTables.TABLES.get(i);
         var record = manifest.files().get(i);
@@ -441,6 +441,7 @@ public final class DatasetPackageCodec {
           while ((line = lines.next()) != null) {
             var row = validateRow(parseJson(line), table);
             if (i == 0) dataset = row;
+            if (i == 1 && integer(row.get("canonical_form"), 0) == 1) canonicalEntries++;
             rows++;
           }
         }
@@ -461,7 +462,8 @@ public final class DatasetPackageCodec {
               .equals(manifest.generationConfigJson())
           || !string(dataset.get("content_sha256")).equals(manifest.contentSha256())
           || integer(dataset.get("entry_count"), 1) != manifest.files().get(1).rows()
-          || integer(dataset.get("lookup_count"), 1) != manifest.files().get(2).rows()
+          || integer(dataset.get("lookup_count"), 1)
+              != canonicalEntries + manifest.files().get(2).rows()
           || integer(dataset.get("source_row_count"), 1) < manifest.files().get(1).rows())
         throw new IOException(BAD);
       validateSources(dataset.get("source_manifest"), approvals);
@@ -582,46 +584,31 @@ public final class DatasetPackageCodec {
         if (!Set.of("gloss").contains(column)) throw new IOException(BAD);
         continue;
       }
-      switch (DatasetPackageTables.TYPES.get(column)) {
-        case "smallint", "integer", "bigint" -> integer(value, 0);
-        case "numeric" -> {
-          if (!(value instanceof BigDecimal number) || number.scale() > 2 || number.signum() < 0)
-            throw new IOException(BAD);
-        }
-        case "boolean" -> {
-          if (!(value instanceof Boolean)) throw new IOException(BAD);
-        }
-        case "uuid" -> {
-          String text = string(value);
-          try {
-            if (!UUID.fromString(text).toString().equals(text)) throw new IOException(BAD);
-          } catch (IllegalArgumentException exception) {
-            throw new IOException(BAD, exception);
-          }
-        }
-        case "timestamptz" -> {
-          try {
-            Instant.parse(string(value));
-          } catch (RuntimeException exception) {
-            throw new IOException(BAD, exception);
-          }
-        }
-        case "text[]" -> {
-          for (Object element : array(value)) string(element);
-        }
-        case "jsonb" -> {
-          if (column.equals("source_manifest")) array(value);
-          else if (!(value instanceof Map<?, ?>)) throw new IOException(BAD);
-        }
-        default -> string(value);
-      }
+      String type = DatasetPackageTables.TYPES.get(column);
+      if ("INTEGER".equals(type)) integer(value, 0);
+      else if ("TEXT".equals(type)) {
+        if (column.equals("source_manifest")) {
+          Object json =
+              value instanceof String text
+                  ? parseJson(text.getBytes(StandardCharsets.UTF_8))
+                  : value;
+          if (!(json instanceof List<?>)) throw new IOException(BAD);
+        } else if (column.equals("generation_config") || column.equals("generation_inputs")) {
+          Object json =
+              value instanceof String text
+                  ? parseJson(text.getBytes(StandardCharsets.UTF_8))
+                  : value;
+          if (!(json instanceof Map<?, ?>)) throw new IOException(BAD);
+        } else string(value);
+      } else throw new IOException(BAD);
     }
     if (table == DatasetPackageTables.ENTRY) {
       if (integer(row.get("entry_id"), 1) < 1
           || string(row.get("lemma")).isBlank()
-          || integer(row.get("hint_priority"), 0) > 1000
-          || integer(row.get("complex_list_count"), 0) > Short.MAX_VALUE
-          || integer(row.get("cache_priority"), 0) > 1000) throw new IOException(BAD);
+          || integer(row.get("canonical_form"), 0) > 1
+          || integer(row.get("canonical_form"), 0)
+              != (LexiconSurfacePolicy.withinQueryWindow(string(row.get("lemma"))) ? 1 : 0)
+          || integer(row.get("priority"), 0) > 1000) throw new IOException(BAD);
     } else if (table == DatasetPackageTables.FORM
         && !LexiconSurfacePolicy.withinQueryWindow(string(row.get("normalized_form")))) {
       throw new IOException(BAD);

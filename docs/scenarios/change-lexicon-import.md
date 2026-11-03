@@ -90,7 +90,7 @@ endlegend
 | StarDict 行读取与转换 | [StardictCsvReader.java](../../backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/StardictCsvReader.java) | [StardictCsvReaderTest.java](../../backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/importer/StardictCsvReaderTest.java) |
 | 导入计划、预检与领域发布 | [application/importing](../../backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing) | [importing 测试](../../backend/product/lexicon/src/test/java/io/lexiflow/lexicon/application/importing) |
 | CLI 及人工确认／重建 | [LexiconImportMain.java](../../backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/LexiconImportMain.java)、[LexiconRebuildMain.java](../../backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/importer/LexiconRebuildMain.java) | [importer 测试](../../backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/importer) |
-| 数据库字段、约束与事务 | [persistence](../../backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence)、[schema.sql](../../infra/postgres/schema.sql) | [Adapters 测试](../../backend/product/adapters/src/test) |
+| 数据库字段、约束与事务 | [persistence](../../backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence)、[schema.sql](../../infra/sqlite/schema.sql) | [Adapters 测试](../../backend/product/adapters/src/test) |
 
 S2 的“范围与验收”是定义任务，不是运行 Harness/OpenSpec，不是冻结这两个目录。修改结构时，重建重导的安全边界引用[数据模型](../system/lexicon/data-model.md)和[导入操作](lexicon-import.md)，不能用修改文档代替实际资料更新。
 

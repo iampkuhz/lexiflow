@@ -10,7 +10,7 @@ dependencies {
     "implementation"("ch.qos.logback:logback-classic")
     "implementation"("tools.jackson.core:jackson-core")
     "implementation"("org.springframework.boot:spring-boot-starter-jdbc")
-    "runtimeOnly"("org.postgresql:postgresql")
+    "runtimeOnly"(libs.sqlite.jdbc)
     "implementation"(project(":lexicon"))
 }
 
@@ -27,13 +27,14 @@ tasks.named<ProcessResources>("processResources") {
 
 tasks.named<Test>("test") {
     useJUnitPlatform {
-        excludeTags("postgres")
+        excludeTags("sqlite")
     }
+    systemProperty("lexiflow.sqlite.schema.file", repoRoot.resolve("infra/sqlite/schema.sql").absolutePath)
 }
 
-tasks.register<Test>("postgresIntegrationTest") {
+tasks.register<Test>("sqliteIntegrationTest") {
     group = LifecycleBasePlugin.VERIFICATION_GROUP
-    description = "执行基于 PostgreSQL 的持久化集成测试。"
+    description = "执行基于 SQLite 的持久化集成测试。"
     dependsOn(":api:bootJar")
     systemProperty(
         "lexiflow.release.test.bootJar",
@@ -43,32 +44,28 @@ tasks.register<Test>("postgresIntegrationTest") {
     testClassesDirs = platformSourceSets["test"].output.classesDirs
     classpath = platformSourceSets["test"].runtimeClasspath
     useJUnitPlatform {
-        includeTags("postgres")
+        includeTags("sqlite")
     }
     systemProperty(
-        "lexiflow.postgres.test.jdbcUrl",
-        providers.environmentVariable("LEXIFLOW_POSTGRES_TEST_JDBC_URL").getOrElse(""),
-    )
-    systemProperty(
-        "lexiflow.postgres.schema.file",
-        repoRoot.resolve("infra/postgres/schema.sql").absolutePath,
+        "lexiflow.sqlite.schema.file",
+        repoRoot.resolve("infra/sqlite/schema.sql").absolutePath,
     )
 }
 
-tasks.register<JavaExec>("postgresInit") {
+tasks.register<JavaExec>("sqliteInit") {
     group = "application"
     description = "使用 JDBC_URL 初始化空 schema；不会清空已有数据。"
     classpath = platformSourceSets["main"].runtimeClasspath
-    mainClass.set("io.lexiflow.lexicon.platform.persistence.PostgresSchemaMain")
+    mainClass.set("io.lexiflow.lexicon.platform.persistence.SqliteSchemaMain")
     workingDir(repoRoot)
-    if (providers.gradleProperty("postgresInitArgs").isPresent) {
-        throw GradleException("postgresInit 只读取 JDBC_URL；请移除 -PpostgresInitArgs。")
+    if (providers.gradleProperty("sqliteInitArgs").isPresent) {
+        throw GradleException("sqliteInit 只读取 JDBC_URL；请移除 -PsqliteInitArgs。")
     }
     val jdbcUrl = providers.environmentVariable("JDBC_URL").getOrElse("")
     doFirst {
         if (jdbcUrl.isBlank()) throw GradleException("请先设置 JDBC_URL，指向本项目开发库。")
     }
-    args(jdbcUrl, repoRoot.resolve("infra/postgres/schema.sql").absolutePath)
+    args(jdbcUrl, repoRoot.resolve("infra/sqlite/schema.sql").absolutePath)
 }
 
 tasks.register<JavaExec>("lexiconRebuild") {
@@ -84,7 +81,7 @@ tasks.register<JavaExec>("lexiconRebuild") {
         if (jdbcUrl.isBlank()) throw GradleException("请先设置 JDBC_URL，指向本项目开发库。")
         if (input.isBlank()) throw GradleException("请先设置 STARDICT_CSV，指向本机 stardict.csv。")
     }
-    args(jdbcUrl, repoRoot.resolve("infra/postgres/schema.sql").absolutePath, input)
+    args(jdbcUrl, repoRoot.resolve("infra/sqlite/schema.sql").absolutePath, input)
 }
 
 // 一个任务只对应一个动作，避免把 validate 误认为已导入；来源路径不经过 shell 拆词。

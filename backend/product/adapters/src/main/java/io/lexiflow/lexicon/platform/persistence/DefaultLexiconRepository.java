@@ -15,7 +15,6 @@ import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
 import java.io.IOException;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.sql.Timestamp;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -32,35 +31,45 @@ final class DefaultLexiconRepository implements LexiconRepository {
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transaction;
   private final Clock clock;
+  private final long previousVersionFloor;
 
   DefaultLexiconRepository(JdbcTemplate jdbc, TransactionTemplate transaction) {
-    this(jdbc, transaction, Clock.systemUTC());
+    this(jdbc, transaction, Clock.systemUTC(), 0);
+  }
+
+  DefaultLexiconRepository(
+      JdbcTemplate jdbc, TransactionTemplate transaction, long previousVersionFloor) {
+    this(jdbc, transaction, Clock.systemUTC(), previousVersionFloor);
   }
 
   DefaultLexiconRepository(JdbcTemplate jdbc, TransactionTemplate transaction, Clock clock) {
+    this(jdbc, transaction, clock, 0);
+  }
+
+  DefaultLexiconRepository(
+      JdbcTemplate jdbc, TransactionTemplate transaction, Clock clock, long previousVersionFloor) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
     this.transaction = Objects.requireNonNull(transaction, "transaction");
     this.clock = Objects.requireNonNull(clock, "clock");
+    if (previousVersionFloor < 0)
+      throw new IllegalArgumentException("version floor must be non-negative");
+    this.previousVersionFloor = previousVersionFloor;
   }
 
   @Override
   public long publishedVersion() {
     return jdbc.query(
-        "WITH required_lookup AS (SELECT f.entry_id, f.normalized_form, e.lemma, e.gloss, "
-            + "e.ranked_word, e.hint_priority, e.complex_list_count FROM lexicon_form f "
-            + "JOIN lexicon_entry e USING (entry_id) WHERE FALSE) "
-            + "SELECT d.lexicon_version, CASE WHEN jsonb_typeof(d.source_manifest) = 'array' "
-            + "THEN jsonb_array_length(d.source_manifest) > 0 AND NOT EXISTS ("
-            + "SELECT 1 FROM jsonb_array_elements(d.source_manifest) item WHERE "
-            + "coalesce(length(trim(item->>'source_id')), 0) = 0 OR "
-            + "coalesce(length(trim(item->>'license_id')), 0) = 0 OR "
-            + "coalesce(length(trim(item->>'source_digest')), 0) = 0 OR "
-            + "coalesce(length(trim(item->>'acquired_at')), 0) = 0) "
-            + "ELSE FALSE END, d.source_row_count, d.entry_count, d.lookup_count, "
-            + "d.preparation_policy FROM (SELECT 1) anchor LEFT JOIN lexicon_dataset d "
-            + "ON d.dataset_id = 1 WHERE NOT EXISTS (SELECT 1 FROM required_lookup)",
+        "SELECT lexicon_version, CASE WHEN json_valid(source_manifest) "
+            + "AND json_type(source_manifest)='array' AND json_array_length(source_manifest)>0 "
+            + "AND NOT EXISTS (SELECT 1 FROM json_each(source_manifest) item WHERE "
+            + "coalesce(length(trim(json_extract(item.value,'$.source_id'))),0)=0 OR "
+            + "coalesce(length(trim(json_extract(item.value,'$.license_id'))),0)=0 OR "
+            + "coalesce(length(trim(json_extract(item.value,'$.source_digest'))),0)=0 OR "
+            + "coalesce(length(trim(json_extract(item.value,'$.acquired_at'))),0)=0) "
+            + "THEN 1 ELSE 0 END, source_row_count, entry_count, lookup_count, preparation_policy "
+            + "FROM lexicon_dataset WHERE dataset_id=1",
         result -> {
-          if (!result.next() || result.getObject(1) == null) return 0L;
+          if (!result.next()) return 0L;
           long version = result.getLong(1);
           boolean manifestValid = result.getBoolean(2);
           long sourceRows = result.getLong(3);
@@ -80,10 +89,11 @@ final class DefaultLexiconRepository implements LexiconRepository {
   }
 
   private long rawPublishedVersion() {
-    return jdbc.query(
-        "SELECT GREATEST(COALESCE((SELECT lexicon_version FROM lexicon_dataset WHERE dataset_id = 1),0),"
-            + "COALESCE(NULLIF(current_setting('lexiflow.previous_version',true),'')::bigint,0))",
-        result -> result.next() ? result.getLong(1) : 0L);
+    Long version =
+        jdbc.queryForObject(
+            "SELECT COALESCE(MAX(lexicon_version),0) FROM lexicon_dataset WHERE dataset_id=1",
+            Long.class);
+    return Math.max(previousVersionFloor, version == null ? 0 : version);
   }
 
   @Override
@@ -94,9 +104,8 @@ final class DefaultLexiconRepository implements LexiconRepository {
     var args = new ArrayList<Object>(unique);
     args.add(version);
     return jdbc.query(
-        "SELECT f.entry_id, f.normalized_form, e.lemma, e.gloss, e.ranked_word, "
-            + "e.hint_priority, e.complex_list_count FROM lexicon_form f "
-            + "JOIN lexicon_entry e USING (entry_id) WHERE f.normalized_form IN ("
+        "SELECT l.entry_id, l.normalized_form, e.lemma, e.gloss, e.priority FROM lexicon_lookup l "
+            + "JOIN lexicon_entry e USING (entry_id) WHERE l.normalized_form IN ("
             + placeholders
             + ") AND EXISTS (SELECT 1 FROM lexicon_dataset d "
             + "WHERE d.dataset_id = 1 AND d.lexicon_version = ?)",
@@ -112,18 +121,28 @@ final class DefaultLexiconRepository implements LexiconRepository {
     String glossCondition =
         action == LexiconHintAction.HINT ? "e.gloss IS NOT NULL" : "e.gloss IS NULL";
     return jdbc.query(
-        "WITH top_rows AS (SELECT f.normalized_form FROM lexicon_form f "
-            + "JOIN lexicon_entry e USING (entry_id) WHERE "
+        "WITH canonical_rows AS ("
+            + "SELECT e.lemma AS normalized_form,e.priority FROM lexicon_entry e WHERE "
             + glossCondition
-            + " AND e.cache_priority > 0 ORDER BY e.cache_priority DESC, f.normalized_form LIMIT ?), "
+            + " AND e.canonical_form=1 AND e.priority>0 "
+            + "ORDER BY e.priority DESC,e.lemma LIMIT ?), alias_rows AS ("
+            + "SELECT f.normalized_form,e.priority FROM lexicon_form f "
+            + "JOIN lexicon_entry e USING(entry_id) WHERE "
+            + glossCondition
+            + " AND e.priority>0 "
+            + "ORDER BY e.priority DESC,f.normalized_form LIMIT ?), "
+            + "top_rows AS (SELECT normalized_form FROM (SELECT normalized_form,priority FROM canonical_rows "
+            + "UNION ALL SELECT normalized_form,priority FROM alias_rows) candidates "
+            + "ORDER BY priority DESC,normalized_form LIMIT ?), "
             + "selected AS (SELECT DISTINCT normalized_form FROM top_rows) "
-            + "SELECT f.entry_id, f.normalized_form, e.lemma, e.gloss, e.ranked_word, "
-            + "e.hint_priority, e.complex_list_count FROM selected s JOIN lexicon_form f "
+            + "SELECT l.entry_id, l.normalized_form, e.lemma, e.gloss, e.priority FROM selected s JOIN lexicon_lookup l "
             + "USING (normalized_form) JOIN lexicon_entry e USING (entry_id) "
             + "WHERE EXISTS (SELECT 1 FROM lexicon_dataset d "
             + "WHERE d.dataset_id=1 AND d.lexicon_version=?) "
-            + "ORDER BY f.normalized_form, f.entry_id",
+            + "ORDER BY l.normalized_form, l.entry_id",
         (result, row) -> candidate(result, version),
+        limit,
+        limit,
         limit,
         version);
   }
@@ -143,9 +162,7 @@ final class DefaultLexiconRepository implements LexiconRepository {
         lemma.contains(" ") ? LexiconEntryKind.PHRASE : LexiconEntryKind.WORD,
         action,
         gloss,
-        result.getInt("hint_priority"),
-        result.getBoolean("ranked_word"),
-        result.getInt("complex_list_count"));
+        result.getInt("priority"));
   }
 
   @Override
@@ -174,7 +191,6 @@ final class DefaultLexiconRepository implements LexiconRepository {
                       }
                     });
           }
-          jdbc.execute("SELECT pg_advisory_xact_lock(643981781)");
           long previous = rawPublishedVersion();
           long version = Math.max(previous + 1, clock.millis());
           if (version < 1 || version > 9_007_199_254_740_991L) {
@@ -199,30 +215,32 @@ final class DefaultLexiconRepository implements LexiconRepository {
           long actualEntries =
               jdbc.queryForObject("SELECT COUNT(*) FROM lexicon_entry", Long.class);
           long actualForms = jdbc.queryForObject("SELECT COUNT(*) FROM lexicon_form", Long.class);
-          long orphanEntries =
-              jdbc.queryForObject(
-                  "SELECT COUNT(*) FROM lexicon_entry e WHERE NOT EXISTS "
-                      + "(SELECT 1 FROM lexicon_form f WHERE f.entry_id=e.entry_id)",
-                  Long.class);
+          long actualLookups =
+              jdbc.queryForObject("SELECT COUNT(*) FROM lexicon_lookup", Long.class);
           if (actualEntries != writer.entries
-              || actualForms != writer.lookups
-              || orphanEntries != 0) {
+              || actualForms != writer.forms
+              || actualLookups != writer.lookups) {
             throw new IllegalStateException("persisted lexicon row counts are inconsistent");
           }
           safe(() -> progress.persisted(writer.entries, writer.lookups));
           String contentSha256 = jdbc.execute(DatasetContentChecksum::calculate);
           var generation = metadata.generation();
+          String sourceManifest =
+              jdbc.queryForObject(
+                  "SELECT json_array(json_object('source_id', ?, 'license_id', ?, "
+                      + "'source_digest', ?, 'acquired_at', ?))",
+                  String.class,
+                  metadata.sourceId(),
+                  metadata.licenseId(),
+                  metadata.sourceDigest(),
+                  metadata.acquiredAt().toString());
           jdbc.update(
               "INSERT INTO lexicon_dataset (dataset_id, lexicon_version, source_manifest, "
                   + "source_row_count, entry_count, lookup_count, preparation_policy, "
                   + "generation_version,generation_code_version,generation_source_digest,generation_config,generation_inputs,content_sha256) "
-                  + "VALUES (1, ?, jsonb_build_array(jsonb_build_object('source_id', ?, "
-                  + "'license_id', ?, 'source_digest', ?, 'acquired_at', ?::timestamptz)), ?, ?, ?, ?,?,?,?,?::jsonb,?::jsonb,?)",
+                  + "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
               version,
-              metadata.sourceId(),
-              metadata.licenseId(),
-              metadata.sourceDigest(),
-              Timestamp.from(metadata.acquiredAt()),
+              sourceManifest,
               sourceRowsTotal,
               writer.entries,
               writer.lookups,
@@ -250,6 +268,7 @@ final class DefaultLexiconRepository implements LexiconRepository {
     private long scannedEntries;
     private long entries;
     private long lookups;
+    private long forms;
 
     void add(LexiconImportPlan.PlannedEntry planned) {
       scannedEntries++;
@@ -267,40 +286,34 @@ final class DefaultLexiconRepository implements LexiconRepository {
         String gloss = planned.prepared().gloss();
         var action = gloss == null ? LexiconHintAction.BLOCK : LexiconHintAction.HINT;
         var forms = new LinkedHashSet<String>();
-        if (LexiconSurfacePolicy.withinQueryWindow(entry.lemma())) forms.add(entry.lemma());
         entry.aliases().stream()
             .map(alias -> alias.normalizedForm())
             .filter(LexiconSurfacePolicy::withinQueryWindow)
+            .filter(form -> !form.equals(entry.lemma()))
             .forEach(forms::add);
         entry.inflections().stream()
             .map(form -> form.normalizedForm())
             .filter(LexiconSurfacePolicy::withinQueryWindow)
+            .filter(form -> !form.equals(entry.lemma()))
             .forEach(forms::add);
-        if (forms.isEmpty()) continue;
-        int cachePriority =
-            ClassificationPolicy.cachePriority(row, planned.prepared().classification(), action);
-        entryRows.add(
-            new Object[] {
-              entry.entryId(),
-              entry.lemma(),
-              gloss,
-              entry.entryKind() == LexiconEntryKind.WORD && row.priority().frequencyZipf() > 0,
-              row.priority().memoryPriority(),
-              row.priority().complexListCount(),
-              cachePriority
-            });
+        boolean canonical = LexiconSurfacePolicy.withinQueryWindow(entry.lemma());
+        if (!canonical && forms.isEmpty()) continue;
+        int priority =
+            ClassificationPolicy.publishedPriority(
+                row, planned.prepared().classification(), action);
+        entryRows.add(new Object[] {entry.entryId(), entry.lemma(), gloss, canonical, priority});
         for (String form : forms) formRows.add(new Object[] {form, entry.entryId()});
       }
       if (!entryRows.isEmpty()) {
         jdbc.batchUpdate(
-            "INSERT INTO lexicon_entry (entry_id, lemma, gloss, ranked_word, hint_priority, "
-                + "complex_list_count, cache_priority) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO lexicon_entry (entry_id, lemma, gloss, canonical_form, priority) VALUES (?, ?, ?, ?, ?)",
             batch(entryRows));
         jdbc.batchUpdate(
             "INSERT INTO lexicon_form (normalized_form, entry_id) VALUES (?, ?)", batch(formRows));
       }
       entries += entryRows.size();
-      lookups += formRows.size();
+      forms += formRows.size();
+      lookups += formRows.size() + entryRows.stream().filter(row -> (boolean) row[3]).count();
       rows.clear();
     }
   }

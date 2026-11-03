@@ -30,8 +30,6 @@ class PreparedHintEligibilityTest {
             LexiconEntryKind.WORD,
             LexiconHintAction.BLOCK,
             null,
-            0,
-            false,
             0);
     assertEquals(HintState.NO_PENDING, policy.evaluate(context, List.of(blocked)).state());
   }

@@ -2,9 +2,14 @@ package io.lexiflow.api.release;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 
@@ -30,14 +35,20 @@ class ReleaseDatasetCommandTest {
               "/private/sensitive-name.zip",
               "--expected-sha256",
               "a".repeat(64),
-              "--expected-database",
-              "secret-db",
-              "--expected-schema",
-              "lexiflow_secret",
-              "--expected-schema",
-              "lexiflow_secret"
+              "--expected-file",
+              "/tmp/secret.db"
             }));
     assertEquals("{\"result\":\"FAIL\"}\n{\"result\":\"FAIL\"}\n", captured.getOut());
+  }
+
+  @Test
+  void createOnlyDatabaseTargetPreservesAFileWonByAnotherWriter(@TempDir Path temp)
+      throws Exception {
+    Path target = temp.resolve("lexicon.db");
+    Files.writeString(target, "owned by another creator");
+    assertThrows(
+        FileAlreadyExistsException.class, () -> ReleaseDatasetCommand.createExpectedFile(target));
+    assertEquals("owned by another creator", Files.readString(target));
   }
 
   @Test

@@ -128,9 +128,7 @@ class IncrementalCaptionUseCaseTest {
                         original.entryKind(),
                         original.finalAction(),
                         original.finalGloss(),
-                        original.finalPriority(),
-                        original.rankedWord(),
-                        original.complexListCount())));
+                        original.priority())));
           }
           return lookup(forms, List.of());
         };
@@ -263,9 +261,7 @@ class IncrementalCaptionUseCaseTest {
                   LexiconEntryKind.WORD,
                   LexiconHintAction.HINT,
                   "释".repeat(25),
-                  500,
-                  false,
-                  0);
+                  500);
           var unmatched = candidate("never-present", "隐藏候选", 2);
           return new LexiconLookupResult(
               List.of(block, unsafe, unmatched),
@@ -362,9 +358,7 @@ class IncrementalCaptionUseCaseTest {
         form.contains(" ") ? LexiconEntryKind.PHRASE : LexiconEntryKind.WORD,
         LexiconHintAction.HINT,
         gloss,
-        500,
-        false,
-        0);
+        500);
   }
 
   private static LexiconHintCandidate blockCandidate(String form, long version) {
@@ -378,8 +372,6 @@ class IncrementalCaptionUseCaseTest {
         LexiconEntryKind.WORD,
         LexiconHintAction.BLOCK,
         null,
-        500,
-        false,
-        0);
+        500);
   }
 }

@@ -18,7 +18,7 @@ import java.util.Objects;
  * @param aliases 指向同一词条的别名集合。
  * @param inflections 指向同一 lemma 的屈折形集合。
  * @param provenance 发布版本的来源和许可声明。
- * @param priority 非个人化的预热优先级。
+ * @param priority 导入构建期评分输入；发布时折叠为统一查询优先级。
  */
 public record LexiconEntry(
     long entryId,

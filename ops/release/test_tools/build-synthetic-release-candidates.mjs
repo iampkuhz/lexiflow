@@ -32,7 +32,7 @@ export function validateSyntheticInput(input) {
       || !Number.isSafeInteger(row.bytes) || row.bytes < 1 || row.bytes > 64 * 1024 * 1024
       || typeof row.sha256 !== 'string' || !HEX.test(row.sha256)
       || !Number.isSafeInteger(row.datasetVersion) || row.datasetVersion < 1
-      || row.preparationPolicy !== 'lexiflow.deterministic-preparation.v1') fail();
+      || row.preparationPolicy !== 'lexiflow.deterministic-preparation.priority-v2') fail();
   }
   if (input.datasets[0].sha256 === input.datasets[1].sha256
     || input.datasets[0].datasetVersion === input.datasets[1].datasetVersion) fail();
@@ -66,7 +66,7 @@ const fact = data => ({ bytes: data.length, sha256: sha(data) });
 export function syntheticDescriptor(identity, records, licenses, dataset, sqlSha) {
   const selected = { releaseId: `synthetic-${dataset.sha256}`,
     preparationId: `synthetic-${sha(dataset.preparationPolicy)}`, ruleId: 'synthetic-no-model' };
-  return { schemaVersion: 1, buildIdentity: identity, softwareVersion: identity.softwareVersion,
+  return { schemaVersion: 2, buildIdentity: identity, softwareVersion: identity.softwareVersion,
     sourceCommit: identity.sourceCommit, apiContract: 'caption-hints.v2', sqlVersion: sqlSha,
     dataset: selected, platforms: ['linux/arm64'], licenses,
     artifacts: [...records, { role: 'dataset', path: `dataset/${dataset.file}`,
@@ -92,7 +92,7 @@ export async function assembleSyntheticCandidates(raw) {
   await safePath(artifactRoot, true);
   const identity = resolveCleanBuildIdentity(ROOT);
   const jar = await bytes(path.join(artifactRoot, 'api.jar'), 1024 ** 3);
-  const sql = await bytes(path.join(ROOT, 'infra/postgres/schema.sql'), 16 * 1024 ** 2);
+  const sql = await bytes(path.join(ROOT, 'infra/sqlite/schema.sql'), 16 * 1024 ** 2);
   const datasetBytes = [];
   for (const row of input.datasets) {
     const data = await bytes(path.join(scratch, 'producer-output/synthetic-datasets', row.file), 64 * 1024 ** 2);
@@ -104,7 +104,7 @@ export async function assembleSyntheticCandidates(raw) {
   await mkdir(path.join(artifactRoot, 'licenses'), { recursive: true, mode: 0o700 });
   const licenses = []; const noticeRecords = [];
   for (const [id, component] of [['lexiflow', 'LexiFlow'], ['ext-third-party', 'extension-third-party'],
-    ['api-runtime', 'API-runtime'], ['postgresql', 'PostgreSQL'], ['dataset-license', 'dataset']]) {
+    ['api-runtime', 'API-runtime'], ['dataset-license', 'dataset']]) {
     const noticePath = `licenses/${id}.txt`;
     const notice = Buffer.from(`Internal synthetic runtime acceptance only; no redistribution authorization. Component: ${component}.\n`);
     await writeFile(path.join(artifactRoot, noticePath), notice, { flag: 'wx', mode: 0o600 });
@@ -144,7 +144,7 @@ export async function assembleSyntheticCandidates(raw) {
         notices: noticeRecords.map(({ path: noticePath, bytes, sha256 }) => ({ path: noticePath, bytes, sha256 })) } });
     const imageSha = sha(await bytes(path.join(image.candidateDirectory, 'candidate.json'), 2_000_000));
     const records = [...baseRecords, extensionRecord, { role: 'runtime-image', platform: 'linux/arm64',
-      licenseIds: ['lexiflow', 'api-runtime', 'postgresql'] }];
+      licenseIds: ['lexiflow', 'api-runtime'] }];
     const assembled = await assembleReleaseCandidate({ repoRoot: ROOT, artifactRoot, outputParent: releaseParent,
       imageCandidates: [{ directory: image.candidateDirectory, sha256: imageSha }],
       descriptor: syntheticDescriptor(identity, records, licenses, { ...row, sha256: row.sha256 }, sqlSha) });

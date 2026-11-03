@@ -8,8 +8,8 @@
       "licenseName": "Per-component Ubuntu and Temurin original copyright and license collection",
       "sourceUrl": "https://github.com/adoptium/containers/tree/31f6abccc683a0a47c5c49ad6bb95a2531bc1168",
       "noticePath": "licenses/api-base-license-notices.tar.gz",
-      "noticeBytes": 543274,
-      "noticeSha256": "a2cf3d0527540077456de6f66cb1fd49907a1b35f3019229707c17d21b9f3d1f"
+      "noticeBytes": 442698,
+      "noticeSha256": "fe4d618e19ca0d51d20c4b2f24e42b3d17a99eee5f5b0e73195cc87c2917000c"
     },
     {
       "id": "api-base-sources",
@@ -18,8 +18,8 @@
       "licenseName": "Exact Ubuntu package corresponding source descriptors and complete source components",
       "sourceUrl": "https://ports.ubuntu.com/ubuntu-ports/",
       "noticePath": "licenses/api-base-corresponding-sources.tar.gz",
-      "noticeBytes": 320274567,
-      "noticeSha256": "97b7d8e02eb7a2cece86addc6d43af5036d2ae0a0f6c72c042c5df012f3edda1"
+      "noticeBytes": 320494478,
+      "noticeSha256": "ae153e8faf02579565b68da4baf08ef2aae3c1e0ee2b73ce33455841ebee1c6b"
     },
     {
       "id": "api-container-extras",
@@ -28,18 +28,28 @@
       "licenseName": "Temurin container entrypoint: original Apache license and fixed full source tree",
       "sourceUrl": "https://github.com/adoptium/containers/tree/31f6abccc683a0a47c5c49ad6bb95a2531bc1168",
       "noticePath": "licenses/api-base-extra-licenses-and-sources.tar.gz",
-      "noticeBytes": 143860,
-      "noticeSha256": "08f0e9800f7ada73a34d47001f07fdfb13290ab73574ade83b19bbbeb7146ab8"
+      "noticeBytes": 281459,
+      "noticeSha256": "034e2e09da2e7525d414deb1e382455154c1246064e78ad451aa70ec804ebf69"
     },
     {
       "id": "api-java-dependencies",
       "component": "API-runtime",
       "licenseId": "Apache-2.0 AND MIT AND BSD-2-Clause AND CC0-1.0 AND EPL-2.0",
-      "licenseName": "Exact API Java dependencies: original notices and offered license branches",
+      "licenseName": "Exact third-party Java runtime JARs from the API bootJar: original notices, offered license branches and source materials",
       "sourceUrl": "https://repo.maven.apache.org/maven2/",
       "noticePath": "licenses/api-java-notices-and-sources.tar.gz",
-      "noticeBytes": 1856961,
-      "noticeSha256": "bed81063eb8504cefd54e4e99208b74b922aaf471ffc8446b649e2ce52db1a15"
+      "noticeBytes": 33780003,
+      "noticeSha256": "1fd096de23b00cf621a5337e6e80bfaad4f53c123bda5bfa0328e20fe5a14c77"
+    },
+    {
+      "id": "api-java-runtime-notices",
+      "component": "API-runtime",
+      "licenseId": "Apache-2.0 AND MIT AND BSD-2-Clause AND CC0-1.0 AND EPL-2.0",
+      "licenseName": "Original notices and exact third-party runtime JAR identities; complete corresponding sources separately distributed",
+      "sourceUrl": "https://repo.maven.apache.org/maven2/",
+      "noticePath": "licenses/api-java-runtime-notices.tar.gz",
+      "noticeBytes": 163127,
+      "noticeSha256": "42de17005091f630132225782e790d82df02c22a378ddd88a9cb1d347adcb56f"
     },
     {
       "id": "api-jre-sources",
@@ -58,8 +68,8 @@
       "licenseName": "ECDICT original MIT notice and fixed-source redistribution evidence",
       "sourceUrl": "https://github.com/skywind3000/ECDICT/tree/bc015ed2e24a7abef49fc6dbbb7fe32c1dadaf8b",
       "noticePath": "licenses/dataset-notice.txt",
-      "noticeBytes": 1488,
-      "noticeSha256": "69be602df310849f7d9ea8e506e74c21eaff94172ef49108623ecf1023c72c91"
+      "noticeBytes": 1344,
+      "noticeSha256": "ae3cb7a67d9b32db32a4a7c07453a266ea21790927d76f9677bc69b4f47578de"
     },
     {
       "id": "extension-runtime-notice",
@@ -68,8 +78,8 @@
       "licenseName": "LexiFlow extension runtime notice; no separately bundled third-party runtime dependency",
       "sourceUrl": "https://github.com/iampkuhz/lexiflow/tree/main/extension",
       "noticePath": "licenses/extension-notice.txt",
-      "noticeBytes": 1622,
-      "noticeSha256": "4d68aa3eadda794fba587a6435a3fe3dce33769db8fb2ff17fbbbfabd2bc0caa"
+      "noticeBytes": 1467,
+      "noticeSha256": "34eb6e0285a3dd8c57cb9c557221afcf1e29780995f3761e58639b37dbc18dd8"
     },
     {
       "id": "lexiflow-license-collections",
@@ -78,8 +88,8 @@
       "licenseName": "LexiFlow-authored explanatory index for retained original per-component licenses",
       "sourceUrl": "https://github.com/iampkuhz/lexiflow/blob/main/ops/release/third-party-notices.md",
       "noticePath": "licenses/LICENSE-COLLECTIONS.txt",
-      "noticeBytes": 4735,
-      "noticeSha256": "18ac684d4775e8a8471a5b8bcfdbffbd4d2a055692a3abca833a5a98f1c846c7"
+      "noticeBytes": 2070,
+      "noticeSha256": "e59c5ae481fb412c53b70d1ea736c54ef953098f6e33f7bccebd09d96b4c76c2"
     },
     {
       "id": "lexiflow-mit",
@@ -92,34 +102,34 @@
       "noticeSha256": "cf0fc402033e206378705c0230acf8e0e33ee966adac28139014861bb801fb5f"
     },
     {
-      "id": "postgres-base-notices",
-      "component": "PostgreSQL",
-      "licenseId": "LicenseRef-PostgreSQL-Base-Component-Licenses",
-      "licenseName": "Per-component PostgreSQL and Debian original copyright and license collection",
-      "sourceUrl": "https://github.com/docker-library/postgres/tree/dfc76bb299b057785026eb2eea39556b6fe52983",
-      "noticePath": "licenses/postgres-base-license-notices.tar.gz",
-      "noticeBytes": 526728,
-      "noticeSha256": "5005c3b514a18804320d794f5d82bf56048eada580ae54b1046bd725f8c0ba6f"
+      "id": "sqlite-jdbc-apache-license",
+      "component": "API-runtime",
+      "licenseId": "Apache-2.0",
+      "licenseName": "Apache License 2.0 included in sqlite-jdbc 3.54.1.0",
+      "sourceUrl": "https://repo.maven.apache.org/maven2/org/xerial/sqlite-jdbc/3.54.1.0/sqlite-jdbc-3.54.1.0.jar",
+      "noticePath": "licenses/sqlite-jdbc-3.54.1.0/LICENSE",
+      "noticeBytes": 11560,
+      "noticeSha256": "3ddf9be5c28fe27dad143a5dc76eea25222ad1dd68934a047064e56ed2fa40c5"
     },
     {
-      "id": "postgres-base-sources",
-      "component": "PostgreSQL",
-      "licenseId": "LicenseRef-PostgreSQL-Base-Component-Licenses",
-      "licenseName": "Exact Debian and PostgreSQL package corresponding source descriptors and components",
-      "sourceUrl": "https://apt.postgresql.org/",
-      "noticePath": "licenses/postgres-base-corresponding-sources.tar.gz",
-      "noticeBytes": 557086537,
-      "noticeSha256": "c86c241a353ca2be05def7653a4fc140278bf053e3efcf836ae59d47dea49231"
+      "id": "sqlite-jdbc-legacy-bsd-license",
+      "component": "API-runtime",
+      "licenseId": "BSD-2-Clause",
+      "licenseName": "David Crawshaw BSD-style license included in sqlite-jdbc 3.54.1.0",
+      "sourceUrl": "https://repo.maven.apache.org/maven2/org/xerial/sqlite-jdbc/3.54.1.0/sqlite-jdbc-3.54.1.0.jar",
+      "noticePath": "licenses/sqlite-jdbc-3.54.1.0/LICENSE.zentus",
+      "noticeBytes": 1312,
+      "noticeSha256": "89167dab92289c7e5e2b65b044f0856b703d05e5d5e35c3548e73d9c7d2f5048"
     },
     {
-      "id": "postgres-container-extras",
-      "component": "PostgreSQL",
-      "licenseId": "LicenseRef-PostgreSQL-Container-Extra-Licenses",
-      "licenseName": "gosu, Go and module sources and Docker entrypoints: per-component original licenses",
-      "sourceUrl": "https://github.com/docker-library/postgres/tree/dfc76bb299b057785026eb2eea39556b6fe52983",
-      "noticePath": "licenses/postgres-base-extra-licenses-and-sources.tar.gz",
-      "noticeBytes": 32277235,
-      "noticeSha256": "9a629ec687f15ea9c742f08d5867bcf93ee1bd58be7ef4fb07c6e6398f875484"
+      "id": "sqlite-public-domain",
+      "component": "API-runtime",
+      "licenseId": "LicenseRef-Public-Domain",
+      "licenseName": "SQLite core public domain declaration",
+      "sourceUrl": "https://www.sqlite.org/copyright.html",
+      "noticePath": "licenses/sqlite-jdbc-3.54.1.0/SQLite-Public-Domain.txt",
+      "noticeBytes": 83,
+      "noticeSha256": "0173536a8aea8d3da6765cb5214ae7b716cd96be230716a8885993d12ec47356"
     }
   ]
 }

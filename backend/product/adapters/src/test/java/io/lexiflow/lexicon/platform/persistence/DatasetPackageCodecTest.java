@@ -19,7 +19,7 @@ class DatasetPackageCodecTest {
   @Test
   void rejectsDuplicateAndCoercedManifestFields() throws Exception {
     String base =
-        "{\"schemaVersion\":2,\"schemaSha256\":\""
+        "{\"schemaVersion\":4,\"schemaSha256\":\""
             + "a".repeat(64)
             + "\",\"approvalSha256\":\""
             + "b".repeat(64)
@@ -66,14 +66,25 @@ class DatasetPackageCodecTest {
         IOException.class,
         () ->
             DatasetPackageCodec.parseManifest(
-                base.replace("\"schemaVersion\":2", "\"schemaVersion\":2,\"extra\":true")
+                base.replace("\"schemaVersion\":4", "\"schemaVersion\":4,\"extra\":true")
                     .getBytes(StandardCharsets.UTF_8)));
     assertThrows(
         IOException.class,
         () ->
             DatasetPackageCodec.parseManifest(
-                base.replace("\"schemaVersion\":2", "\"schemaVersion\":1")
+                base.replace("\"schemaVersion\":4", "\"schemaVersion\":1")
                     .getBytes(StandardCharsets.UTF_8)));
+    assertThrows(
+        IOException.class,
+        () ->
+            DatasetPackageCodec.parseManifest(
+                base.replace("\"schemaVersion\":4", "\"schemaVersion\":3")
+                    .getBytes(StandardCharsets.UTF_8)));
+    assertThrows(
+        IOException.class,
+        () ->
+            DatasetPackageCodec.parseManifest(
+                base.replace("\"schemaVersion\":4,", "").getBytes(StandardCharsets.UTF_8)));
   }
 
   private static String fixtureHash(String content) throws Exception {

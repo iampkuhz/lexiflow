@@ -147,7 +147,9 @@ def execute_lifecycle(
         expected_dataset = {
             "releaseId": "synthetic-" + dataset["sha256"],
             "preparationId": "synthetic-"
-            + hashlib.sha256(b"lexiflow.deterministic-preparation.v1").hexdigest(),
+            + hashlib.sha256(
+                b"lexiflow.deterministic-preparation.priority-v2"
+            ).hexdigest(),
             "ruleId": "synthetic-no-model",
             "sqlVersion": evidence.get("sqlVersion"),
             "sha256": dataset["sha256"],

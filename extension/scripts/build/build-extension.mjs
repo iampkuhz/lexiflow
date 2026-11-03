@@ -3,6 +3,8 @@ import { resolveBuildIdentity } from "../../../ops/release/integrity/source-buil
 import { readFile, writeFile, mkdir, rm, cp } from "node:fs/promises";
 import { resolve } from "node:path";
 import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { build, stop } from "esbuild";
 import { validateExpectedDataset } from "./expected-dataset.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
@@ -17,8 +19,9 @@ const identity = resolveBuildIdentity();
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 await cp(resolve(root, "assets"), resolve(dist, "assets"), { recursive: true });
-execFileSync("npx", ["tsc", "--noEmit", "-p", "tsconfig.json"], { cwd: root, stdio: "inherit" });
-for (const [entry, format] of [
+const require = createRequire(import.meta.url);
+execFileSync(process.execPath, [require.resolve("typescript/bin/tsc"), "--noEmit", "-p", "tsconfig.json"], { cwd: root, stdio: "inherit" });
+const entries = [
   ["src/background.ts", "esm"],
   ["src/content.ts", "iife"],
   ["src/youtube-bridge.ts", "iife"],
@@ -34,14 +37,27 @@ for (const [entry, format] of [
   ["src/runtime-status.ts", "esm"],
   ["src/diagnostics.ts", "esm"],
   ["src/preferences.ts", "esm"]
-]) {
-  const outfile = resolve(dist, entry.replace("src/", "").replace(".ts", ".js"));
-  execFileSync(
-    "npx",
-    ["esbuild", entry, "--bundle", `--format=${format}`, "--target=es2022", `--define:__LEXIFLOW_API_PORT__=${apiPort}`, `--define:__LEXIFLOW_EXPECTED_DATASET__=${JSON.stringify(JSON.stringify(expectedDataset))}`, `--outfile=${outfile}`],
-    { cwd: root, stdio: "inherit" }
-  );
-}
+];
+// 保留每个独立 bundle；只合并 npm/Node 启动，不启用共享 chunk 或增量结果复用。
+try {
+  for (const format of ["esm", "iife"]) {
+    await build({
+      absWorkingDir: root,
+      entryPoints: entries.filter(([, entryFormat]) => entryFormat === format).map(([entry]) => entry),
+      outbase: "src",
+      outdir: dist,
+      bundle: true,
+      format,
+      target: "es2022",
+      define: {
+        __LEXIFLOW_API_PORT__: String(apiPort),
+        __LEXIFLOW_EXPECTED_DATASET__: JSON.stringify(JSON.stringify(expectedDataset)),
+      },
+      logLevel: "info",
+    });
+  }
+} finally { await stop(); }
+
 for (const name of ["popup.html", "popup.css"]) {
   await writeFile(resolve(dist, name), await readFile(resolve(root, "src", name)));
 }

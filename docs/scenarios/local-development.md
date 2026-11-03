@@ -3,36 +3,11 @@
 > 位置：[仓库生命周期](../README.md) → 本机开发。发行安装见[用户指南](../user/podman-macos.md)；本页输出可调试的 API 与扩展，不是正式验收证据。
 
 
-以下 macOS 源码开发命令在仓库根目录执行。先在开发终端执行 `export LEXIFLOW_API_PORT=18081`；开发构建与 API 使用同一端口。开发容器命名 `lexiflow-dev`、数据卷独立，正式安装 `lexiflow-release`/18080 不受开发启停影响。需要 **Eclipse Temurin Java 25、Python 3、Node.js/npm 和 Chrome**，以及本机 `lsof`、`ps`；Gradle 使用仓库自带 Wrapper。正常视频体验需要可连接且已发布词库的 PostgreSQL 开发库；有限演示词库仅供隔离自动测试使用。这里的开发数据库初始化与重建不适用于 Docker 发行安装数据。
+以下 macOS 源码开发命令在仓库根目录执行。先在开发终端执行 `export LEXIFLOW_API_PORT=18081`；开发构建与 API 使用同一端口。开发容器命名 `lexiflow-dev`、数据卷独立，正式安装 `lexiflow-release`/18080 不受开发启停影响。需要 **Eclipse Temurin Java 25、Python 3、Node.js/npm 和 Chrome**，以及本机 `lsof`、`ps`；Gradle 使用仓库自带 Wrapper。正常视频体验需要已发布词库的 SQLite 开发文件；API 只读打开专属文件，缺库即失败。离线初始化与重建不适用于 Docker 发行安装数据。
 
 
-```plantuml
-@startuml
-skinparam backgroundColor white
-skinparam defaultFontName SansSerif
-skinparam defaultFontSize 14
-skinparam shadowing false
-skinparam nodesep 40
-skinparam ranksep 45
-top to bottom direction
-title 本地体验：浏览器、API 与词库
-node "用户本机" as host {
-node "Chrome Extension" as browser
-node "API 进程" as api
-}
-node "本机容器网络" as containers {
-database "PostgreSQL 17" as pg
-}
-browser --> api: E1
-api --> pg: E2
-legend bottom
-E1：本机 API 端口；E2：开发库端口映射
-开发有持久卷，测试必须另用隔离临时资源
-endlegend
-@enduml
-```
+本地运行链路：Chrome Extension → `:api`（开发端口 18081）→ 专属 SQLite 数据库文件（API 只读打开）；Redis 与未来后台任务不属于观看请求的必经节点。测试使用独立临时数据库文件，不接触本机开发数据。
 
-E1 的 API 端口由扩展构建参数与 host permission 共同绑定，开发使用 18081；E2 读取 PostgreSQL 已发布资料。Redis 与未来后台任务不属于观看最短请求链的必经节点。开发 compose 有持久数据卷，测试不能把它当临时资源使用。
 
 ## 1.1. 确认 Java
 
@@ -57,11 +32,11 @@ python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend :api
 mkdir -p .local/lexiflow
 ```
 
-将以下配置写入 `.local/lexiflow/runtime.json`，把来源文件路径改为已合法取得的 ECDICT StarDict CSV 绝对路径，并按实际开发数据库填写连接：
+将以下配置写入 `.local/lexiflow/runtime.json`，把来源文件路径改为已合法取得的 ECDICT StarDict CSV 绝对路径，并使用项目专属 SQLite 文件路径：
 
 ```json
 {
-  "JDBC_URL": "jdbc:postgresql://127.0.0.1:15432/lexiflow?user=postgres",
+  "JDBC_URL": "jdbc:sqlite:/absolute/path/to/lexicon.db",
   "STARDICT_CSV": "/absolute/path/stardict.csv"
 }
 ```
@@ -70,9 +45,9 @@ mkdir -p .local/lexiflow
 chmod 600 .local/lexiflow/runtime.json
 ```
 
-已有匹配的已发布词库时直接启动，不重复导入。首次准备开发库可按[数据库准备和发布步骤](lexicon-import.md)执行；使用仓库容器配置时需先安装并启动 Podman，再启动 `infra/local/compose.yaml` 的 PostgreSQL。初始化或结构重建须先核对目标和备份，不能用于发行安装资料；API 启动本身不建表、不重建结构。随后按下节构建扩展，不提交本机配置或词库文件。
+已有匹配的已发布词库时直接启动，不重复导入。首次准备开发库可按[数据库准备和发布步骤](lexicon-import.md)执行；使用仓库容器配置时需先安装并启动 Podman，并设置指向开发数据库文件的 `JDBC_URL`。初始化或结构重建须先核对目标和备份，不能用于发行安装资料；API 只读打开数据库，不创建或清理文件。随后按下节构建扩展，不提交本机配置或词库文件。
 
-已有数据库结构不会随代码更新。遇到 `relation "lexicon_form" does not exist` 时，停止启动重试，进入[开发库检查与重建](lexicon-import.md)；不要只补一张表或一个字段。日常启动可以复用匹配的已发布数据库，不重复初始化。
+数据库结构不会随代码更新。schema 不匹配或文件损坏时停止启动，按[离线初始化与重建](lexicon-import.md)从完整来源重新构建；不要手工改库。日常启动可以复用匹配的已发布数据库，不重复初始化。
 
 
 当前 API 不读取、不需要、也不会调用模型服务。完成本机配置后，在任意新终端，完整词库启动方式：
@@ -81,7 +56,7 @@ chmod 600 .local/lexiflow/runtime.json
 python3 -m scripts.local.start_local_api
 ```
 
-启动前先确认数据库运行且词库已发布。启动器从 `.local/lexiflow/runtime.json` 读取 `JDBC_URL`，显式环境变量优先；缺失或空白时返回 `BLOCKED`，不转入演示词库。它不会自动读取 `.env`，也不会继承被终止的旧 API 环境变量。配置文件格式错误或包含未知键时明确停止，不打印配置值。
+启动前确认 SQLite 数据库文件存在且词库已发布。启动器从 `.local/lexiflow/runtime.json` 读取 `JDBC_URL`，显式环境变量优先；缺失或空白时返回 `BLOCKED`，不转入演示词库。它不会自动读取 `.env`，也不会继承被终止的旧 API 环境变量。配置文件格式错误或包含未知键时明确停止，不打印配置值。
 
 开发端口固定使用 `18081`，正式安装保留 `18080`。如果已被占用，启动器会列出 PID、进程名称等身份信息，并询问：
 
@@ -104,7 +79,7 @@ curl --fail http://127.0.0.1:18081/actuator/health
 启动日志应看到：
 
 ```text
-runtime lexicon=postgres publishedVersion=<非零版本号>
+runtime lexicon=sqlite publishedVersion=<非零版本号>
 ```
 
 若日志出现 `lexicon=builtin-demo`，说明进程没有通过正常本地启动器接上数据库；不要将它当作完整词库体验。`publishedVersion=0` 表示数据库没有已发布词库。

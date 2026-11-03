@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto';
 import { constants, createReadStream } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { lstat } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import path from 'node:path';
 import { resolveCleanBuildIdentity, validateBuildIdentity, assertBuildIdentityMatches } from './source-build-identity.mjs';
 import { verifyExtensionIdentity } from './artifact-build-identity.mjs';
 
-const roles = new Set(['runtime-image', 'dataset', 'extension', 'sql', 'license', 'corresponding-sources']);
+const roles = new Set(['runtime-image', 'dataset', 'extension', 'sql', 'corresponding-sources']);
 const platforms = new Set(['linux/amd64', 'linux/arm64']);
 const hex = /^[a-f0-9]{64}$/;
 const ids = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -54,7 +56,7 @@ function validUrl(value) {
 
 function validateDescriptor(descriptor, source) {
   if (!keys(descriptor, ['schemaVersion', 'buildIdentity', 'softwareVersion', 'sourceCommit', 'apiContract', 'sqlVersion', 'dataset', 'platforms', 'artifacts', 'licenses'])) bad('DESCRIPTOR_SCHEMA');
-  if (descriptor.schemaVersion !== 1 || descriptor.softwareVersion !== source.softwareVersion || descriptor.sourceCommit !== source.sourceCommit) bad('SOURCE_IDENTITY_MISMATCH');
+  if (descriptor.schemaVersion !== 2 || descriptor.softwareVersion !== source.softwareVersion || descriptor.sourceCommit !== source.sourceCommit) bad('SOURCE_IDENTITY_MISMATCH');
   try { validateBuildIdentity(source); assertBuildIdentityMatches(descriptor.buildIdentity, source); if (source.dirty) throw new Error(); } catch { bad('SOURCE_IDENTITY_MISMATCH'); }
   if (typeof descriptor.apiContract !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(descriptor.apiContract) || typeof descriptor.sqlVersion !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(descriptor.sqlVersion)) bad('DESCRIPTOR_SCHEMA');
   const dataset = descriptor.dataset;
@@ -75,7 +77,7 @@ function validateDescriptor(descriptor, source) {
     const relative = validateRelativePath(artifact.path); const foldedPath = relative.toLocaleLowerCase('en-US');
     if (paths.has(relative) || folded.has(foldedPath)) bad('ARTIFACT_PATH_CONFLICT'); paths.add(relative); folded.add(foldedPath);
     if (!Number.isSafeInteger(artifact.bytes) || artifact.bytes < 1 || artifact.bytes > 2 ** 40 || typeof artifact.sha256 !== 'string' || !hex.test(artifact.sha256) || !Array.isArray(artifact.licenseIds) || !artifact.licenseIds.length || artifact.licenseIds.some((id) => typeof id !== 'string' || !licenseIds.has(id)) || new Set(artifact.licenseIds).size !== artifact.licenseIds.length) bad('ARTIFACTS_INVALID');
-    const roleKey = artifact.role === 'license' ? `${artifact.role}:${artifact.path}` : artifact.role;
+    const roleKey = artifact.role;
     if (roleKeys.has(roleKey)) bad('ARTIFACT_ROLE_CONFLICT'); roleKeys.add(roleKey);
     if (image && (artifact.platform !== 'linux/arm64' || artifact.path !== 'images/linux-arm64/runtime-image.tar' || typeof artifact.imageDigest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(artifact.imageDigest))) bad('IMAGE_INVALID');
     if (artifact.role === 'extension') {
@@ -100,11 +102,10 @@ function validateDescriptor(descriptor, source) {
           || !boundedText(item.licenseId, 128) || !boundedText(item.licenseName, 256) || !validUrl(item.sourceUrl)
           || !Number.isSafeInteger(item.bytes) || item.bytes < 1 || !hex.test(item.sha256)) bad('SOURCE_PACKAGE_INVALID');
         const license = descriptor.licenses.find(value => value.id === item.id);
-        const sourceArtifact = descriptor.artifacts.find(value => value.role === 'license' && value.path === item.noticePath && value.licenseIds.includes(item.id));
-        if (!license || !sourceArtifact || item.component !== license.component || item.licenseId !== license.licenseId
+        if (!license || item.component !== license.component || item.licenseId !== license.licenseId
           || item.licenseName !== license.licenseName || item.sourceUrl !== license.sourceUrl
           || item.noticePath !== license.noticePath || item.archivePath !== `materials/${license.noticePath}`
-          || item.bytes !== sourceArtifact.bytes || item.sha256 !== sourceArtifact.sha256) bad('SOURCE_PACKAGE_INVALID');
+          || item.bytes !== license.noticeBytes || item.sha256 !== license.noticeSha256) bad('SOURCE_PACKAGE_INVALID');
         ids.add(item.id);
       }
       if (artifact.licenseIds.length !== licenseIds.size || [...licenseIds].some(id => !artifact.licenseIds.includes(id))) bad('SOURCE_PACKAGE_INVALID');
@@ -112,13 +113,10 @@ function validateDescriptor(descriptor, source) {
   }
   if (!roleKeys.has('runtime-image')) bad('PLATFORM_ARTIFACT_MISSING');
   for (const role of ['dataset', 'extension', 'sql', 'corresponding-sources']) if (!roleKeys.has(role)) bad('REQUIRED_ARTIFACT_MISSING');
-  for (const license of descriptor.licenses) {
-    const record = descriptor.artifacts.find((artifact) => artifact.role === 'license' && artifact.path === license.noticePath && artifact.licenseIds.includes(license.id));
-    if (!record) bad('LICENSE_FILE_MISSING');
-  }
+  if (roleKeys.size !== 5) bad('ARTIFACTS_INVALID');
   const licenseComponents = new Map(descriptor.licenses.map((license) => [license.id, license.component]));
   const requiredAssociation = [
-    ['API-runtime', 'runtime-image'], ['LexiFlow', 'runtime-image'], ['PostgreSQL', 'runtime-image'],
+    ['API-runtime', 'runtime-image'], ['LexiFlow', 'runtime-image'],
     ['LexiFlow', 'extension'], ['extension-third-party', 'extension'], ['dataset', 'dataset']
   ];
   for (const [component, role] of requiredAssociation) {
@@ -134,9 +132,6 @@ export function createManifest(descriptor, source) {
   validateDescriptor(descriptor, source);
   const licenses = [];
   for (const item of descriptor.licenses) {
-    const licenseArtifact = descriptor.artifacts.find((artifact) => artifact.role === 'license' && artifact.path === item.noticePath && artifact.licenseIds.includes(item.id));
-    if (!licenseArtifact) bad('LICENSE_FILE_MISSING');
-    if (licenseArtifact.bytes !== item.noticeBytes || licenseArtifact.sha256 !== item.noticeSha256) bad('LICENSE_NOTICE_MISMATCH');
     licenses.push({ ...item });
   }
   const canonicalDataset = { releaseId: descriptor.dataset.releaseId, preparationId: descriptor.dataset.preparationId, ruleId: descriptor.dataset.ruleId };
@@ -156,7 +151,19 @@ export function createManifest(descriptor, source) {
   }).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
   licenses.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   const canonicalLicenses = licenses.map((item) => ({ id: item.id, component: item.component, licenseId: item.licenseId, licenseName: item.licenseName, sourceUrl: item.sourceUrl, noticePath: item.noticePath, noticeBytes: item.noticeBytes, noticeSha256: item.noticeSha256 }));
-  return { schemaVersion: 1, buildIdentity: { ...source }, softwareVersion: source.softwareVersion, sourceCommit: source.sourceCommit, apiContract: descriptor.apiContract, sqlVersion: descriptor.sqlVersion, dataset: canonicalDataset, platforms: [...descriptor.platforms].sort(), artifacts, licenses: canonicalLicenses };
+  return { schemaVersion: 2, buildIdentity: { ...source }, softwareVersion: source.softwareVersion, sourceCommit: source.sourceCommit, apiContract: descriptor.apiContract, sqlVersion: descriptor.sqlVersion, dataset: canonicalDataset, platforms: [...descriptor.platforms].sort(), artifacts, licenses: canonicalLicenses };
+}
+
+export function verifySourceArchive(archivePath, manifest) {
+  const source = manifest.artifacts.find(item => item.role === 'corresponding-sources');
+  if (!source) bad('SOURCE_PACKAGE_INVALID');
+  try {
+    const output = execFileSync('python3', ['-m', 'ops.release.integrity.source_archive_integrity'], {
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)), input: JSON.stringify({ archivePath, bytes: source.bytes, sha256: source.sha256, licenses: manifest.licenses, metadata: source.metadata }),
+      encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'], timeout: 120_000, env: process.env,
+    });
+    if (output.trim() !== '{"valid":true}') bad('SOURCE_PACKAGE_INVALID');
+  } catch { bad('SOURCE_PACKAGE_INVALID'); }
 }
 
 export async function buildManifest({ repoRoot, descriptor, artifactRoot }) {
@@ -165,6 +172,8 @@ export async function buildManifest({ repoRoot, descriptor, artifactRoot }) {
   try { source = resolveCleanBuildIdentity(repoRoot); } catch { bad('RELEASE_SOURCE_REJECTED'); }
   const manifest = createManifest(descriptor, source);
   for (const item of manifest.artifacts) await verifyContainedFile(artifactRoot, item.path, item.bytes, item.sha256);
+  const sourceArtifact = manifest.artifacts.find(item => item.role === 'corresponding-sources');
+  verifySourceArchive(path.join(artifactRoot, sourceArtifact.path), manifest);
   const extension = manifest.artifacts.find(item => item.role === 'extension');
   await verifyExtensionIdentity(path.join(artifactRoot, extension.path), source, extension.metadata.expectedDataset);
   await verifyContainedFile(artifactRoot, extension.path, extension.bytes, extension.sha256);

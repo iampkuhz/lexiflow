@@ -104,9 +104,7 @@ class IncrementalResultAssemblerTest {
         LexiconEntryKind.WORD,
         action,
         gloss,
-        500,
-        false,
-        0);
+        500);
   }
 
   private static IncrementalHintResult.Hint hint(String entry, long version) {

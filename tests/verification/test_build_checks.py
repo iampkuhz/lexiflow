@@ -127,11 +127,9 @@ class BuildCheckTest(unittest.TestCase):
             self.assertIn("ops/release/" + name, base_closure)
         for name in (
             "base-images.json",
-            "Dockerfile",
-            "Dockerfile.postgres",
+            "Dockerfile.runtime",
             ".dockerignore",
             "run-container-command.sh",
-            "initialize-postgres-app-role.sh",
         ):
             self.assertIn("ops/docker/" + name, base_closure)
         self.assertEqual(base["command"][-1], "build")
@@ -189,7 +187,7 @@ class BuildCheckTest(unittest.TestCase):
                 "npm",
                 "docker",
                 "java-25-temurin",
-                "postgres-test-jdbc-url",
+                "redis-test-endpoint",
                 "release-arm64-docker-host",
                 "release-gradle-cache",
                 "release-npm-cache",
