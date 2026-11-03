@@ -1725,6 +1725,29 @@ workstreams:
         required_check_ids: [eng.verification.module-tests]
         discovered_from: LF-TSK-QLT-2481
         depends_on: []
+      - id: LF-TSK-OPS-2302
+        title: 验收并发布精确 SQLite 单镜像正式候选
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/sqlite-fact-store/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [ops/release/**, planning/workstreams.yaml, tmp/quality/**, tmp/phase-tools/github-sqlite-release/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 对已提交且干净的正式源码与 Actions 单次构建候选进行独立完整验收、只读审查及精确晋升。
+        deliverable: 同一候选的原生正式收据链、公开唯一运行镜像和三个精确附件以及真实下载安装验证。
+        acceptance_criteria:
+        - 从受审核主线正式 tag 构建一次，独立 validator 执行 repository-baseline，reviewer 与所有 producer 和 validator 不同。
+        - 资料、许可和对应源码字节真实且完整；候选、提交、宿主、受控环境与制品摘要在验收和晋升中保持一致。
+        - 正式公开仅一次真实人类审批，agent 不代批；只晋升既有精确制品，不重建、不覆盖未知写入。
+        - 公开 Release 只有插件、对应源码和 release.json 三个自定义附件；镜像可匿名按 digest 获取，真实渠道安装及 Chrome 试跑完成。
+        acceptance_evidence: [精确发行主体及原生 validation、review、DAG 收据，GitHub 运行链接、公开附件摘要和实际安装结果。]
+        validation_command: node ops/release/workflow/run-release-workflow.mjs formal validate <uuid>
+        required_check_ids: [eng.release.version, eng.release.lifecycle-runtime, eng.release.candidate-runtime]
+        discovered_from: LF-TSK-DAT-2301
+        depends_on: []
       - id: LF-TSK-OPS-2087
         title: 集成稳定宿主修复并完成新单镜像正式发行
         priority: P0
@@ -10956,11 +10979,11 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
-      - id: LF-TSK-OPS-2095
-        title: 去除扩展打包同点身份计算并实测发行关键路径
+      - id: LF-TSK-OPS-2303
+        title: 集成已有扩展打包优化并消除分支任务编号冲突
         priority: P0
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 1
+        change_version: 1.0.0
         task_source: openspec/changes/release-pipeline-efficiency/tasks.md
         lifecycle_state: READY
         forbidden_files:
@@ -11089,7 +11112,7 @@ workstreams:
         change_version: 1.0.0
         task_source: openspec/changes/release-pipeline-efficiency/tasks.md
         lifecycle_state: READY
-        discovered_from: LF-TSK-OPS-2095
+        discovered_from: LF-TSK-OPS-2303
         forbidden_files:
         - secrets/**
         - .local/**
@@ -11118,7 +11141,7 @@ workstreams:
         change_version: 1.0.0
         task_source: openspec/changes/release-pipeline-efficiency/tasks.md
         lifecycle_state: READY
-        discovered_from: LF-TSK-OPS-2095
+        discovered_from: LF-TSK-OPS-2303
         forbidden_files:
         - secrets/**
         - .local/**

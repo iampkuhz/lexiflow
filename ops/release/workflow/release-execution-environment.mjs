@@ -101,10 +101,6 @@ function privateCapabilities(root, source, purpose) {
   const java = javaHome(source);
   const env = { LEXIFLOW_JAVA_HOME: java, JAVA_HOME: java };
 
-  const jdbc = requiredValue(source, 'LEXIFLOW_RELEASE_JDBC_URL', 'RELEASE_JDBC_URL_MISSING');
-  if (!jdbc.startsWith('jdbc:sqlite:/') || /[\u0000\r\n?#]/.test(jdbc)
-    || jdbc.slice('jdbc:sqlite:'.length).split('/').some(part => part === '.' || part === '..')
-    || !jdbc.endsWith('/lexicon.db')) fail('RELEASE_JDBC_URL_INVALID');
   const redis = requiredValue(source, 'LEXIFLOW_REDIS_TEST_ENDPOINT', 'REDIS_TEST_ENDPOINT_MISSING');
   const endpoint = requiredValue(source, 'LEXIFLOW_RELEASE_ARM64_DOCKER_HOST', 'RELEASE_ARM64_ENDPOINT_MISSING');
   const gradle = requiredValue(source, 'LEXIFLOW_RELEASE_GRADLE_CACHE', 'RELEASE_GRADLE_CACHE_MISSING');
@@ -126,7 +122,6 @@ function privateCapabilities(root, source, purpose) {
     }
   }
   Object.assign(env, {
-    LEXIFLOW_RELEASE_JDBC_URL: jdbc,
     LEXIFLOW_REDIS_TEST_ENDPOINT: redis,
     LEXIFLOW_RELEASE_ARM64_DOCKER_HOST: endpoint,
     LEXIFLOW_RELEASE_GRADLE_CACHE: gradle,

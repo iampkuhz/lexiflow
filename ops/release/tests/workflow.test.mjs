@@ -233,7 +233,7 @@ test('release environment canonicalizes ambient values and fails closed on missi
     'npm_config_userconfig', 'NPM_CONFIG_USERCONFIG', 'npm_config_cache', 'NPM_CONFIG_CACHE'])
     assert.equal(first[forbidden], undefined, `${forbidden} must not be forwarded`);
 
-  const required = ['LEXIFLOW_RELEASE_NODE_BIN', 'LEXIFLOW_JAVA_HOME', 'LEXIFLOW_RELEASE_JDBC_URL', 'LEXIFLOW_REDIS_TEST_ENDPOINT',
+  const required = ['LEXIFLOW_RELEASE_NODE_BIN', 'LEXIFLOW_JAVA_HOME', 'LEXIFLOW_REDIS_TEST_ENDPOINT',
     'LEXIFLOW_RELEASE_ARM64_DOCKER_HOST', 'LEXIFLOW_RELEASE_GRADLE_CACHE', 'LEXIFLOW_RELEASE_NPM_CACHE'];
   for (const name of required) {
     const missing = { ...f.source }; delete missing[name];
@@ -244,7 +244,7 @@ test('release environment canonicalizes ambient values and fails closed on missi
   assert.throws(() => resolveReleaseExecutionEnvironment({ root: f.root, purpose: 'promotion', source: f.source }), /CANDIDATE_RUNTIME_REQUEST_MISSING/);
 });
 
-test('release SQLite JDBC URL is not forwarded to generic Python validation children', async t => {
+test('发行准备与验收不要求或转发离线导出专用数据库目标', async t => {
   const python = execFileSync('python3', ['-c', 'import sys; print(sys.executable)'], {
     cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
   }).trim();
@@ -257,7 +257,14 @@ test('release SQLite JDBC URL is not forwarded to generic Python validation chil
     }).trim();
   };
   const changed = { ...f.source, LEXIFLOW_RELEASE_JDBC_URL: 'jdbc:sqlite:/tmp/lexiflow-test-two/lexicon.db' };
+  const missing = { ...f.source }; delete missing.LEXIFLOW_RELEASE_JDBC_URL;
+  for (const purpose of ['prepare', 'formal', 'promotion']) {
+    const env = resolveReleaseExecutionEnvironment({ root: f.root, purpose, source: missing });
+    assert.equal(env.LEXIFLOW_RELEASE_JDBC_URL, undefined);
+    assert.equal(resolveReleaseExecutionEnvironment({ root: f.root, purpose, source: changed }).LEXIFLOW_RELEASE_JDBC_URL, undefined);
+  }
   assert.equal(fingerprint(f.source), fingerprint(changed));
+  assert.equal(fingerprint(f.source), fingerprint(missing));
 });
 
 test('formal CLI admits only the four fixed acceptance mappings and propagates command failures', async t => {

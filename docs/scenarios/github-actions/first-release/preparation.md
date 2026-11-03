@@ -10,17 +10,17 @@
 
 | 配置位置 | 名称 | 要填什么 |
 | --- | --- | --- |
-| private / promotion Variables | `LEXIFLOW_RELEASE_WORKSPACE` | 同一专用稳定 checkout 的规范绝对路径；普通 `.git` 目录，不是临时 Actions checkout |
-| private / promotion Variables | `LEXIFLOW_RELEASE_NODE_BIN` | 同一已安装 Node 22 的 `bin` 规范绝对路径；不是会话临时 PATH，也不自动下载 |
-| private Variables | `LEXIFLOW_RELEASE_REQUEST_FILE` | 下一节私有构建请求的绝对路径，放在源码外 |
-| private / promotion Variables | `LEXIFLOW_RELEASE_JAVA_HOME` | Temurin 25 的 `Home` 绝对路径 |
-| private / promotion Variables | `LEXIFLOW_RELEASE_TEST_REDIS_ENDPOINT` | 本次隔离测试 Redis 的 `host:port` |
-| private / promotion Variables | `LEXIFLOW_RELEASE_ARM64_DOCKER_HOST` | 已确认的本机 Podman Unix endpoint，例如 `unix:///absolute/path/to/podman.sock` |
-| private / promotion Variables | `LEXIFLOW_RELEASE_GRADLE_CACHE`、`LEXIFLOW_RELEASE_NPM_CACHE` | 仅含依赖的可用私有缓存绝对路径 |
-| promotion Secrets | `LEXIFLOW_RELEASE_CONFIG_TOKEN` | 仅对目标仓库具 Administration read 的配置查询凭据，用于只读查询 immutable releases 和正式 Environment 保护；不要替代为源码构建 token |
+| `release-internal` / `release-public` Variables | `LEXIFLOW_RELEASE_WORKSPACE` | 同一专用稳定 checkout 的规范绝对路径；普通 `.git` 目录，不是临时 Actions checkout |
+| `release-internal` / `release-public` Variables | `LEXIFLOW_RELEASE_NODE_BIN` | 同一已安装 Node 22 的 `bin` 规范绝对路径；不是会话临时 PATH，也不自动下载 |
+| `release-internal` Variables | `LEXIFLOW_RELEASE_REQUEST_FILE` | 下一节私有构建请求的绝对路径，放在源码外 |
+| `release-internal` / `release-public` Variables | `LEXIFLOW_RELEASE_JAVA_HOME` | Temurin 25 的 `Home` 绝对路径 |
+| `release-internal` / `release-public` Variables | `LEXIFLOW_RELEASE_TEST_REDIS_ENDPOINT` | 本次隔离测试 Redis 的 `host:port` |
+| `release-internal` / `release-public` Variables | `LEXIFLOW_RELEASE_ARM64_DOCKER_HOST` | 已确认的本机 Podman Unix endpoint，例如 `unix:///absolute/path/to/podman.sock` |
+| `release-internal` / `release-public` Variables | `LEXIFLOW_RELEASE_GRADLE_CACHE`、`LEXIFLOW_RELEASE_NPM_CACHE` | 仅含依赖的可用私有缓存绝对路径 |
+| `release-public` Secrets | `LEXIFLOW_RELEASE_CONFIG_TOKEN` | 仅对目标仓库具 Administration read 的配置查询凭据，用于只读查询 immutable releases 和正式 Environment 保护；不要替代为源码构建 token |
 | repository Variables | `LEXIFLOW_RELEASE_RUNNER_READY` | 全部隔离、工具、保护和路径确认后设字面量 `true` |
 
-`GITHUB_TOKEN` 由 GitHub 自动提供，不另造同名 secret；只有 promotion job 声明 Contents write / Packages write，额外 Actions read 用于重核本次运行及批准历史。确认仓库/组织策略允许这些权限。准备和预检阶段不得注入发布凭据。两个 Environment 的 workspace、Node 工具路径与验证能力必须完全相同；private 在私有构建和手动晋升的只读预检中都不等待批准；正式公开仅 promotion 等待一次真实人审。SQLite 集成测试数据库由每测试临时目录创建，不需要 JDBC secret；晋升所需的 `LEXIFLOW_RELEASE_JDBC_URL` 指向本次隔离的 SQLite 文件，不能指向真实安装。
+`GITHUB_TOKEN` 由 GitHub 自动提供，不另造同名 secret；只有 promotion job 声明 Contents write / Packages write，额外 Actions read 用于重核本次运行及批准历史。确认仓库/组织策略允许这些权限。准备和预检阶段不得注入发布凭据。两个 Environment 的 workspace、Node 工具路径与验证能力必须完全相同；`release-internal` 在私有构建和手动晋升的只读预检中都不等待批准；正式公开仅 `release-public` 等待一次真实人审。SQLite 集成测试数据库由每测试临时目录创建，候选构建、验收和晋升均不需要或传递 JDBC secret；`LEXIFLOW_RELEASE_JDBC_URL` 仅由负责人在显式离线导出时提供，不能指向真实安装。
 
 正式晋升只向维护者交付一个需要审批的运行链接，当前运行最多一次人审。上传响应异常或字段不足以验证时，在同一运行内按固定次数只读核实同一草稿身份及附件 id、名称、uploaded 状态、大小和摘要；完整匹配后追加确认并继续既有写前复核，不重传、不重建、不延长超时。冲突立即拒绝，仍未确认则保留未知事件并停止，报告原链接和部分成功，不自动发起新的审批请求。已结束的运行不能借用原批准；确有必要的额外恢复必须先明确异常与新授权边界。手动恢复工作流须新建 dispatch，不重跑已批准 run；旧批准不无限复用。`confirmed_recovery` 默认不勾选。仅当此前发布状态未知、管理员已核实远端精确镜像与事务现场时才显式勾选；它不会跳过候选、tag、PUBLISH 或正式发布 Environment 的本次审批，也不会自动恢复或修改包可见性。远端镜像缺失、digest/config 不一致或现场仍不明确时停止，不要重试推送。
 
