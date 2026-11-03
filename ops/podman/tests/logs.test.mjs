@@ -64,8 +64,10 @@ esac
   return { root, install, bin, calls, snapshot };
 }
 
-function startLogs(install, bin) {
-  const child = spawn(process.execPath, [cli, 'logs', '--dir', install], {
+function startLogs(install, bin, { platform = 'darwin', arch = 'arm64' } = {}) {
+  // 只替换宿主边界；Linux CI 仍执行真实 CLI、Podman 运输替身与进程取消链。
+  const host = `import os from 'node:os'; os.platform = () => ${JSON.stringify(platform)}; os.arch = () => ${JSON.stringify(arch)};`;
+  const child = spawn(process.execPath, ['--import', `data:text/javascript,${encodeURIComponent(host)}`, cli, 'logs', '--dir', install], {
     cwd: repo, env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH || ''}` },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -114,5 +116,17 @@ test('logs refuses foreign resources before opening a follow viewer and preserve
   const result = await viewer.closed;
   assert.notEqual(result.code, 0);
   assert.doesNotMatch(fs.readFileSync(value.calls, 'utf8'), /logs --follow/);
+  assert.deepEqual(value.snapshot(), before);
+});
+
+
+test('logs rejects an unsupported host before touching Podman or installation state', { timeout: 10000 }, async t => {
+  const value = fixture(t);
+  const before = value.snapshot();
+  const viewer = startLogs(value.install, value.bin, { platform: 'linux', arch: 'x64' });
+  const result = await viewer.closed;
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /本入口仅用于 M 芯片 macOS/);
+  assert.equal(fs.existsSync(value.calls), false);
   assert.deepEqual(value.snapshot(), before);
 });
