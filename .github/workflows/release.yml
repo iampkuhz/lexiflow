@@ -153,11 +153,22 @@ jobs:
           test -n "$EXPECTED_COMMIT"
           test -d "$WORKSPACE/.git"
           test -x "$WORKSPACE/.local/lexiflow-python/bin/python3"
+          test -n "$GITHUB_STEP_SUMMARY"
           test "$(git -C "$WORKSPACE" rev-parse HEAD)" = "$EXPECTED_COMMIT"
           export PATH="$WORKSPACE/.local/lexiflow-python/bin:$LEXIFLOW_RELEASE_NODE_BIN:$PATH"
           cd "$WORKSPACE"
           test -x "$LEXIFLOW_RELEASE_NODE_BIN/node"
-          "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG"
+          PROMOTION_STATUS=0
+          RESULT="$("$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG")" || PROMOTION_STATUS=$?
+          printf '%s\n' "$RESULT"
+          test "$PROMOTION_STATUS" -eq 0
+          printf '%s' "$RESULT" | "$LEXIFLOW_RELEASE_NODE_BIN/node" -e '
+            const fs = require("node:fs");
+            let value;
+            try { value = JSON.parse(fs.readFileSync(0, "utf8")); } catch { process.exit(2); }
+            if (value.status !== "PASS" || typeof value.releaseBody !== "string" || !value.releaseBody.trim()) process.exit(2);
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${value.releaseBody}\n`);
+          '
 
   promotion:
     name: 发布已批准的正式发行

@@ -398,6 +398,23 @@ class ReleaseBodyTests(unittest.TestCase):
         self.assertIn("第三方对应源码（可选）", body)
         self.assertIn("release.json（摘要与完整身份）", body)
 
+    def test_preview_attachment_names_follow_candidate_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Fixture(Path(directory))
+            manifest = json.loads(json.dumps(fixture.manifest))
+            source = next(
+                x for x in manifest["artifacts"] if x["role"] == "corresponding-sources"
+            )
+            source["path"] = "custom/approved-sources.tar.gz"
+            self.assertEqual(
+                p._release_asset_names(manifest, "1.2.3"),
+                [
+                    "lexiflow-extension-1.2.3.zip",
+                    "approved-sources.tar.gz",
+                    "release.json",
+                ],
+            )
+
 
 class PromotionTests(unittest.TestCase):
     def test_live_authorization_requires_single_platform_approved_attempt_and_protection(
@@ -655,7 +672,9 @@ class PromotionTests(unittest.TestCase):
         self.notes = Path(self.temp.name) / "notes"
         self.notes.mkdir()
         (self.notes / "1.2.3.md").write_text(
-            "# 1. 1.2.3\n\n前置：Podman。\n\n两步：启动并安装扩展。\n\n限制：ARM64。\n"
+            "# 1. 1.2.3\n\n## 1.1. 本版变化\n\n- 可在本机观看字幕。\n\n"
+            "## 1.2. 两步使用\n\n前置：macOS 与 Podman。\n\n1. 启动服务。\n2. 安装扩展。\n\n"
+            "## 1.3. 数据与限制\n\n数据保存在本机；仅支持 ARM64。\n"
         )
         self.patches = [
             patch.object(
@@ -681,23 +700,27 @@ class PromotionTests(unittest.TestCase):
         FakeGitHub.reset()
 
     def promote(self, *, publish=False, confirmed_recovery=False):
-        return p.promote(
-            submission_id=SUBMISSION,
-            candidate_directory=self.fixture.candidate,
-            publish=publish,
-            confirmed_recovery=confirmed_recovery,
-        )
+        with patch.object(p, "_repository", return_value=("o", "r")):
+            return p.promote(
+                submission_id=SUBMISSION,
+                candidate_directory=self.fixture.candidate,
+                publish=publish,
+                confirmed_recovery=confirmed_recovery,
+            )
 
     def test_prepare_full_asset_set_and_archive_bytes(self):
         with (
             patch.object(p, "_archive") as archive,
             patch.object(p.tempfile, "mkdtemp") as workspace,
+            patch.object(p, "_repository", return_value=("o", "r")),
         ):
             result = self.promote()
         self.assertEqual(result["result"], "PASS")
         self.assertEqual(result["scope"], "promotion-precheck")
         self.assertFalse(result["published"])
         self.assertEqual(result["tag"], "v1.2.3")
+        self.assertIn("# 1. 1.2.3", result["release_body"])
+        self.assertIn("ghcr.io/o/r:1.2.3", result["release_body"])
         self.assertNotIn("assets", result)
         archive.assert_not_called()
         workspace.assert_not_called()
@@ -720,6 +743,7 @@ class PromotionTests(unittest.TestCase):
             "--volume lexiflow-release-data:/var/lib/lexiflow", FakeGitHub.created_body
         )
         self.assertIn("ghcr.io/o/r:1.2.3", FakeGitHub.created_body)
+        self.assertEqual(FakeGitHub.created_body, result["release_body"])
         self.assertNotIn("@sha256:", FakeGitHub.created_body)
         self.assertEqual(published["release_id"], 51)
         release_json = json.loads(FakeGitHub.registry)
@@ -1239,6 +1263,82 @@ class PromotionTests(unittest.TestCase):
             self.promote(publish=True)
         self.assertEqual(FakeGitHub.calls, [])
         p.release_registry.publish_images.assert_not_called()
+
+    def test_release_notes_require_exact_three_nonempty_sections_and_no_placeholders(
+        self,
+    ):
+        valid = (
+            "# 1. 1.2.3\n\n## 1.1. 本版变化\n\n- 可用功能。\n\n"
+            "## 1.2. 两步使用\n\n前置：运行环境。\n\n1. 启动。\n2. 安装。\n\n"
+            "## 1.3. 数据与限制\n\n数据保存在本机。\n"
+        )
+        path = self.notes / "1.2.3.md"
+        for invalid in (
+            valid.replace("## 1.2. 两步使用", "## 1.3. 数据与限制"),
+            valid.replace("- 可用功能。", ""),
+            valid + "\n## 1.4. 安装\n\n自动内容\n",
+            valid.replace("可用功能", "TODO"),
+            valid.replace("本机。", "本机，LexiFlow 版本 9.9.9。"),
+            valid.replace("## 1.1. 本版变化", "### 1.1. 本版变化"),
+            valid.replace("## 1.2. 两步使用", "## 1.2. 两步使用\n\n## 1.2. 重复"),
+            valid.replace("数据保存在本机。", "   "),
+            valid.replace("运行环境。", "{{填写前置条件}}"),
+            valid.replace("可用功能。", "待填写"),
+            valid.replace("可用功能。", "{{}}"),
+            valid + "\n ## 1.1. 本版变化\n\n重复内容。\n",
+            valid + "\nlexiflow-extension-11.2.3.zip\n",
+            valid + "\nlexiflow-third-party-sources-11.2.3.tar.gz\n",
+            valid.replace("前置：运行环境。", "运行环境。"),
+            valid.replace("2. 安装。", "2. 安装。\n3. 另一操作。"),
+            valid.replace("1. 启动。\n2. 安装。", "2. 安装。\n1. 启动。"),
+            valid + "\npodman run ghcr.io/o/r:1.2.3\n",
+            valid + "\n~~~sh\npodman run ghcr.io/o/r:1.2.3\n~~~\n",
+        ):
+            path.write_text(invalid)
+            with self.subTest(invalid=invalid), self.assertRaises(p.PromotionError):
+                p._release_notes("1.2.3", COMMIT)
+
+    def test_published_note_and_filled_template_satisfy_the_contract(self):
+        actual_root = Path(__file__).resolve().parents[2]
+        temporary = Path(self.temp.name) / "non-git-root"
+        temporary.mkdir()
+        notes_dir = temporary / "notes"
+        notes_dir.mkdir()
+        version = (actual_root / "ops/release/version.txt").read_text().strip()
+        current_note = (actual_root / f"ops/release/notes/{version}.md").read_text()
+        note_path = notes_dir / f"{version}.md"
+        note_path.write_text(current_note)
+        with (
+            patch.object(p, "ROOT", temporary),
+            patch.object(p, "NOTES_ROOT", notes_dir),
+        ):
+            p._release_notes(version, COMMIT)
+            note_path.write_text(
+                current_note.replace(
+                    "macOS Apple Silicon",
+                    "Podman 5.6.1、Chrome 147.0.7727.15 与 macOS Apple Silicon",
+                )
+            )
+            p._release_notes(version, COMMIT)
+            template = (actual_root / "ops/release/notes/TEMPLATE.md").read_text()
+            filled = template.replace("{{版本号}}", version)
+            for placeholder, replacement in (
+                (
+                    "{{填写用户可感知的变化，不写产品介绍或内部验证过程}}",
+                    "字幕可显示已发布词库释义。",
+                ),
+                (
+                    "{{填写平台、必要软件与端口/容器名要求}}",
+                    "macOS、Podman 与 Chrome。",
+                ),
+                (
+                    "{{填写数据保存位置、重要限制及用户需要注意的事项}}",
+                    "数据保存在本机卷。",
+                ),
+            ):
+                filled = filled.replace(placeholder, replacement)
+            note_path.write_text(filled)
+            p._release_notes(version, COMMIT)
 
     def test_unknown_upload_is_resolved_in_same_call_without_retry(self):
         with (
@@ -2128,7 +2228,9 @@ class RealRegistryPromotionBoundaryTests(unittest.TestCase):
         self.notes = Path(self.temp.name) / "notes"
         self.notes.mkdir()
         (self.notes / "1.2.3.md").write_text(
-            "# 1. 1.2.3\n\n前置：Podman。\n\n两步：启动与安装。\n\n限制：合成测试。\n"
+            "# 1. 1.2.3\n\n## 1.1. 本版变化\n\n- 合成测试功能。\n\n"
+            "## 1.2. 两步使用\n\n前置：合成环境。\n\n1. 启动。\n2. 安装。\n\n"
+            "## 1.3. 数据与限制\n\n数据仅用于合成测试。\n"
         )
         self.sock = socket.socket(socket.AF_UNIX)
         self.sock_path = str(Path(self.temp.name) / "podman.sock")
@@ -2337,20 +2439,31 @@ class RealRegistryPromotionBoundaryTests(unittest.TestCase):
         self.assertEqual(self.push_calls, 0)
         self.assertEqual(FakeGitHub.calls, [])
 
-    def test_production_entry_blocks_environment_identity_failure_before_any_remote_write(self):
-        with patch.object(p, "_assert_live_promotion_authorization", side_effect=p.PromotionError("promotion-environment-id-mismatch")):
-            with self.assertRaisesRegex(p.PromotionError, "promotion-environment-id-mismatch"):
+    def test_production_entry_blocks_environment_identity_failure_before_any_remote_write(
+        self,
+    ):
+        with patch.object(
+            p,
+            "_assert_live_promotion_authorization",
+            side_effect=p.PromotionError("promotion-environment-id-mismatch"),
+        ):
+            with self.assertRaisesRegex(
+                p.PromotionError, "promotion-environment-id-mismatch"
+            ):
                 self.promote()
         self.assertEqual(self.push_calls, 0)
         self.assertEqual(FakeGitHub.calls, [])
 
-    def test_production_entry_blocks_candidate_artifact_drift_before_any_remote_write(self):
+    def test_production_entry_blocks_candidate_artifact_drift_before_any_remote_write(
+        self,
+    ):
         def drift(*args, **kwargs):
             result = self.fixture.consumer()
             if not hasattr(drift, "changed"):
                 drift.changed = True
                 (self.fixture.payload / "extension.zip").write_bytes(b"drift")
             return result
+
         with patch.object(p, "consume_candidate_pass", side_effect=drift):
             with self.assertRaises(p.PromotionError):
                 self.promote()

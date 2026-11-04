@@ -12,7 +12,7 @@
 
 前提：**macOS Apple Silicon、Podman 已安装并运行、Chrome 已安装**。Podman 的安装和启动不包含在以下两步中。
 
-1. 打开[正式 Release](https://github.com/iampkuhz/lexiflow/releases)，复制对应版本正文中的一条 `podman run` 命令。命令按已验收镜像 digest 固定，自动拉取镜像、创建命名卷、初始化资料并启动一个容器。
+1. 打开[正式 Release](https://github.com/iampkuhz/lexiflow/releases)，复制对应版本正文中的一条 `podman run` 命令。命令使用 GHCR 明确软件版本 tag，自动拉取镜像、创建命名卷、初始化资料并启动一个容器；镜像 digest 与完整身份保存在同页的 `release.json`，版本 tag 不替代内容身份。
 2. 下载同一 Release 的 Chrome 插件 ZIP，解压到稳定目录，在 `chrome://extensions` 开启开发者模式，点击“加载已解压的扩展程序”。启用后自动连接 `127.0.0.1:18080`；弹窗核对软件、协议和资料身份，显示“正式就绪”后即可使用。
 
 无需下载源码或主安装包，无需安装 Java、Node、Python、Compose 或独立数据库，也无需填写密码、导入词库、编辑配置或预先建卷。ZIP 是加载已解压扩展的交付格式，不是 Chrome Web Store 一键安装；不修改浏览器策略。

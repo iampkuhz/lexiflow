@@ -105,7 +105,50 @@ def _release_notes(version: str, source_commit: str) -> str:
     lines = text.splitlines()
     if not text.strip() or not lines or lines[0].strip() != f"# 1. {version}":
         _fail("release-notes-version-mismatch")
-    if not all(term in text.lower() for term in ("前置", "两步", "限制")):
+    expected = [
+        "## 1.1. 本版变化",
+        "## 1.2. 两步使用",
+        "## 1.3. 数据与限制",
+    ]
+    headings = [line.strip() for line in lines if line.startswith("## ")]
+    section_bodies = re.split(r"(?m)^## 1\.[1-3]\. [^\n]+\n", text)[1:]
+    all_headings = [
+        line.strip() for line in lines if re.match(r"^\s*#{1,6}(?:\s|$)", line)
+    ]
+    if (
+        headings != expected
+        or all_headings != [lines[0], *expected]
+        or len(section_bodies) != 3
+        or any(not body.strip() for body in section_bodies)
+    ):
+        _fail("release-notes-structure-invalid")
+    if re.search(r"(?im)^\s*(?:```|~~~|podman\s+run\b)", text):
+        _fail("release-notes-extra-section")
+    if re.search(
+        r"(?i)\{\{|\}\}|待填写|待补充|TODO|TBD|PLACEHOLDER|<(?:semver|version|版本号)>",
+        text,
+    ):
+        _fail("release-notes-placeholder")
+    version_pattern = r"v?\d+\.\d+\.\d+(?!\d|\.\d)"
+    identity_refs = re.findall(
+        rf"(?i)(?:^# 1\. |LexiFlow(?:\s+版本)?|本版|此版本|软件版本|"
+        rf"发行版本|发行标签|releaseTag)\s*[:：]?\s*({version_pattern})"
+        rf"|lexiflow-(?:extension|third-party-sources)-({version_pattern})"
+        rf"|ghcr\.io/[A-Za-z0-9._/-]+:({version_pattern})"
+        rf"|/releases/download/(v{version_pattern})/",
+        text,
+        flags=re.MULTILINE,
+    )
+    versions = {part for match in identity_refs for part in match if part}
+    if versions - {version, "v" + version}:
+        _fail("release-notes-version-mismatch")
+    usage = section_bodies[1]
+    first_step = re.search(r"(?m)^1\.\s+\S", usage)
+    if (
+        first_step is None
+        or not re.search(r"前置\s*[:：]\s*\S", usage[: first_step.start()])
+        or re.findall(r"(?m)^\s*(\d+)\.\s+\S", usage) != ["1", "2"]
+    ):
         _fail("release-notes-incomplete")
     return text.rstrip()
 
@@ -1709,10 +1752,8 @@ def _stage_release_assets(
     extension, source, _ = _release_asset_plan(manifest)
     assets: dict[str, Path] = {}
     meta: dict[str, tuple[int, str]] = {}
-    for item, name in (
-        (extension, f"lexiflow-extension-{version}.zip"),
-        (source, source["path"].rsplit("/", 1)[-1]),
-    ):
+    names = _release_asset_names(manifest, version)
+    for item, name in zip((extension, source), names[:2]):
         if name.endswith(".zip") and item["bytes"] > MAX_EXTENSION:
             _fail("candidate-extension-invalid")
         if item["bytes"] > MAX_ASSET:
@@ -1736,6 +1777,16 @@ def _stage_release_assets(
         assets[name] = target
         meta[name] = (item["bytes"], item["sha256"])
     return assets, meta
+
+
+def _release_asset_names(manifest: dict[str, Any], version: str) -> list[str]:
+    """预览与实际发行共用公开附件命名计划，不读取或复制附件字节。"""
+    _, source, _ = _release_asset_plan(manifest)
+    return [
+        f"lexiflow-extension-{version}.zip",
+        source["path"].rsplit("/", 1)[-1],
+        "release.json",
+    ]
 
 
 def _registry_assets(
@@ -2021,12 +2072,22 @@ def promote(
     )
     if not publish:
         revalidate()
+        owner, repo = _repository(ROOT)
+        preview = _release_body(
+            owner,
+            repo,
+            tag,
+            identity["softwareVersion"],
+            release_notes,
+            _release_asset_names(manifest, identity["softwareVersion"]),
+        )
         return {
             "result": "PASS",
             "scope": "promotion-precheck",
             "published": False,
             "release_id": None,
             "tag": tag,
+            "release_body": preview,
         }
 
     candidate_sha256 = proof["candidate"]["candidateSha256"]

@@ -94,7 +94,8 @@ with patch.object(consumer, '_extract', return_value=(proof, b'{}', {})):
         value, _, _ = consumer._prove_candidate(Path(root), {}, Path(candidate))
         print(json.dumps({'result': 'PASS', 'node': value['target']}))
     except consumer.CandidateProofError as error:
-        print(json.dumps({'result': 'REJECTED', 'reason': str(error)}))
+        print(json.dumps({'result': 'REJECTED', 'reason': str(error),
+                          'processReason': getattr(error.__context__, 'reason', None)}))
 `;
     const invoke = (target) => spawnSync('python3', ['-c', python,
       f.root, f.candidateDirectory, JSON.stringify(target)], {

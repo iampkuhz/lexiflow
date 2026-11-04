@@ -577,7 +577,8 @@ test('resume binds UUID, host, source, original request and candidate; only publ
   const outputs = [];
   const run = async (_cmd, args, settings) => {
     outputs.push({ args, settings });
-    return JSON.stringify({ result: 'PASS', scope: args.includes('--publish') ? 'promotion-publish' : 'promotion-precheck', published: args.includes('--publish') });
+    return JSON.stringify({ result: 'PASS', scope: args.includes('--publish') ? 'promotion-publish' : 'promotion-precheck',
+      published: args.includes('--publish'), ...(!args.includes('--publish') ? { release_body: '# 1. 1.2.3\n\npreview' } : {}) });
   };
   const common = { root: f.root, submissionId, releaseTag: 'v1.2.3',
     run, identityReader: () => targetIdentity, tagChecker: () => targetIdentity,
@@ -596,8 +597,15 @@ test('resume binds UUID, host, source, original request and candidate; only publ
   const precheckOriginal = Object.fromEntries(precheckKeys.map(key => [key, process.env[key]]));
   Object.assign(process.env, context, { GITHUB_TOKEN: 'parent-token', LEXIFLOW_RELEASE_CONFIG_TOKEN: 'parent-config-token' });
   try {
-    assert.equal((await resumePromotion(common)).status, 'PASS');
+    const preview = await resumePromotion(common);
+    assert.equal(preview.status, 'PASS');
+    assert.equal(preview.releaseBody, '# 1. 1.2.3\n\npreview');
     for (const key of precheckKeys) assert.equal(outputs[0].settings.env[key], undefined, `${key} must not reach precheck`);
+    for (const release_body of [undefined, '', '   ', 42]) {
+      assert.equal((await resumePromotion({ ...common, run: async () => JSON.stringify({
+        result: 'PASS', scope: 'promotion-precheck', published: false, release_body,
+      }) })).status, 'BLOCKED');
+    }
   } finally {
     for (const key of precheckKeys) {
       if (precheckOriginal[key] === undefined) delete process.env[key];
@@ -750,6 +758,47 @@ test('真实 Python CLI 的拒绝状态穿过 Node 子进程边界，未知写�
   assert.equal(cli.stdout, '');
 });
 
+test('只读预检的真实工作流片段原样展示 Markdown，拒绝缺失或失败正文', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'lexiflow-note-preview-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const summary = path.join(directory, 'summary.md');
+  await writeFile(summary, '');
+  const workflow = await readFile(path.join(repo, '.github/workflows/release.yml'), 'utf8');
+  const capture = workflow.match(/^ {10}PROMOTION_STATUS=0\n.*?^ {10}test "\$PROMOTION_STATUS" -eq 0$/ms)?.[0];
+  assert.ok(capture, 'test executes actual workflow output capture and failure handling');
+  const fakeNodeDirectory = path.join(directory, 'synthetic-node');
+  await mkdir(fakeNodeDirectory);
+  await writeFile(path.join(fakeNodeDirectory, 'node'),
+    '#!/bin/sh\nprintf \'%s\\n\' "$PRECHECK_SYNTHETIC_RESULT"\nexit "$PRECHECK_SYNTHETIC_EXIT"\n', { mode: 0o700 });
+  for (const status of [0, 1, 2]) {
+    const message = JSON.stringify(status === 0 ? { status: 'PASS', releaseBody: '# 1. 1.2.3' }
+      : { status: 'BLOCKED', reason: 'SYNTHETIC_PRECHECK_FAILURE' });
+    const captured = spawnSync('/bin/bash', ['-eu', '-c', capture], {
+      encoding: 'utf8', timeout: 10_000,
+      env: { ...process.env, LEXIFLOW_RELEASE_NODE_BIN: fakeNodeDirectory,
+        SUBMISSION_ID: 'synthetic', RELEASE_TAG: 'v1.2.3',
+        PRECHECK_SYNTHETIC_RESULT: message, PRECHECK_SYNTHETIC_EXIT: String(status) },
+    });
+    assert.equal(captured.status === 0, status === 0);
+    assert.equal(captured.stdout.trim(), message, 'nonzero prechecks retain their diagnostic JSON');
+  }
+  const consumer = workflow.match(/^ {10}printf '%s' "\$RESULT" \|.*?^ {10}'$/ms)?.[0];
+  assert.ok(consumer, 'test executes the actual workflow summary consumer, not a copy');
+  const releaseBody = '# 1. 1.2.3\n\n中文预览\n\n```sh\npodman run ghcr.io/owner/repo:1.2.3\n```\n';
+  const consume = value => spawnSync('/bin/bash', ['-eu', '-c', consumer], {
+    encoding: 'utf8', timeout: 10_000,
+    env: { ...process.env, LEXIFLOW_RELEASE_NODE_BIN: path.dirname(process.execPath),
+      GITHUB_STEP_SUMMARY: summary, RESULT: value },
+  });
+  assert.equal(consume(JSON.stringify({ status: 'PASS', releaseBody })).status, 0);
+  assert.equal(await readFile(summary, 'utf8'), `${releaseBody}\n`);
+  for (const invalid of ['not-json', JSON.stringify({ status: 'BLOCKED', releaseBody }),
+    JSON.stringify({ status: 'PASS' }), JSON.stringify({ status: 'PASS', releaseBody: '  ' })]) {
+    assert.notEqual(consume(invalid).status, 0);
+    assert.equal(await readFile(summary, 'utf8'), `${releaseBody}\n`);
+  }
+});
+
 for (const publish of [false, true]) {
   for (const scenario of ['repeat', 'failure-recovery', 'legacy-log']) {
     test(`晋升尝试保留独立不可覆盖日志：${publish ? 'publish' : 'precheck'}/${scenario}`, async t => {
@@ -779,7 +828,8 @@ for (const publish of [false, true]) {
           assert.equal(settings.timeout, 1_800_000);
           const failed = scenario === 'failure-recovery' && attempts.length === 0;
           const output = JSON.stringify({ result: failed ? 'BLOCKED' : 'PASS',
-            published: failed ? false : publish, scope: `promotion-${stage}` }) + '\n';
+            published: failed ? false : publish, scope: `promotion-${stage}`,
+            ...(!publish && !failed ? { release_body: '# 1. 1.2.3\npreview' } : {}) }) + '\n';
           attempts.push({ logFile: settings.logFile, output });
           // 只替换业务子进程为无网络的合成 Node；日志创建和写入走真实 runCommand。
           return runCommand(process.execPath,

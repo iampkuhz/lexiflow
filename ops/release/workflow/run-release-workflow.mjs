@@ -585,7 +585,10 @@ async function resumePromotionCore({ submissionId, releaseTag, publish = false, 
       || state.scope !== (publish ? 'promotion-publish' : 'promotion-precheck'))
       return { status: 'BLOCKED', reason: 'PROMOTION_RESULT_INVALID',
         ...(publish ? { published: state.published === true ? true : 'unknown' } : {}) };
-    return { status: 'PASS', stage: publish ? 'promotion-command-completed' : 'promotion-precheck-completed' };
+    if (!publish && (typeof state.release_body !== 'string' || !state.release_body.trim()))
+      return { status: 'BLOCKED', reason: 'PROMOTION_RESULT_INVALID' };
+    return { status: 'PASS', stage: publish ? 'promotion-command-completed' : 'promotion-precheck-completed',
+      ...(!publish && typeof state.release_body === 'string' ? { releaseBody: state.release_body } : {}) };
   } catch (error) { return { status: 'BLOCKED', reason: fixedReason(error) }; }
 }
 

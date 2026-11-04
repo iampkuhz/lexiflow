@@ -85,7 +85,17 @@ class WorkflowContractTest(unittest.TestCase):
             import sys
 
             node.write_text(
-                f"#!{sys.executable}\nimport json, os, sys\nwith open(os.environ['CAPTURE'], 'a') as out:\n out.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                f"#!{sys.executable}\n"
+                "import json, os, sys\n"
+                "if sys.argv[1:2] == ['-e']:\n"
+                " value = json.load(sys.stdin)\n"
+                " assert value['status'] == 'PASS' and value['releaseBody']\n"
+                " with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as out:\n"
+                "  out.write(value['releaseBody'] + '\\n')\n"
+                " sys.exit(0)\n"
+                "with open(os.environ['CAPTURE'], 'a') as out:\n"
+                " out.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                "print(json.dumps({'status': 'PASS', 'releaseBody': '# 1. 1.2.3\\n\\n合成预览'}))\n"
             )
             node.chmod(0o700)
             git = tools / "git"
@@ -99,6 +109,8 @@ class WorkflowContractTest(unittest.TestCase):
             for job, recovery, flags in cases:
                 with self.subTest(job=job, recovery=recovery):
                     capture.unlink(missing_ok=True)
+                    summary = root / "summary.md"
+                    summary.write_text("")
                     step = next(
                         x for x in jobs[job]["steps"] if "resume" in x.get("run", "")
                     )
@@ -111,6 +123,7 @@ class WorkflowContractTest(unittest.TestCase):
                         "CONFIRMED_RECOVERY": recovery,
                         "EXPECTED_COMMIT": "a" * 40,
                         "CAPTURE": str(capture),
+                        "GITHUB_STEP_SUMMARY": str(summary),
                     }
                     result = subprocess.run(
                         ["/bin/sh", "-eu", "-c", step["run"]],
@@ -121,6 +134,12 @@ class WorkflowContractTest(unittest.TestCase):
                         timeout=10,
                     )
                     self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(
+                        summary.read_text(),
+                        "# 1. 1.2.3\n\n合成预览\n"
+                        if job == "promotion-precheck"
+                        else "",
+                    )
                     self.assertEqual(
                         [json.loads(line) for line in capture.read_text().splitlines()],
                         [
@@ -235,8 +254,15 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(
             full["runs-on"], ["self-hosted", "macOS", "ARM64", "lexiflow-release"]
         )
-        self.assertEqual(full["environment"], {"name": "release-internal", "deployment": "false"})
-        self.assertIs(safe_workflow("release.yml")["jobs"]["prepare"]["environment"]["deployment"], False)
+        self.assertEqual(
+            full["environment"], {"name": "release-internal", "deployment": "false"}
+        )
+        self.assertIs(
+            safe_workflow("release.yml")["jobs"]["prepare"]["environment"][
+                "deployment"
+            ],
+            False,
+        )
         self.assertEqual(value["concurrency"]["cancel-in-progress"], "false")
         self.assertEqual(value["concurrency"]["group"], "lexiflow-release-host")
         run = "\n".join(step.get("run", "") for step in full["steps"])
@@ -262,7 +288,9 @@ class WorkflowContractTest(unittest.TestCase):
             self.assertNotIn(banned, run)
         dry = value["jobs"]["promotion-precheck"]
         publish = value["jobs"]["promotion"]
-        self.assertEqual(dry["environment"], {"name": "release-internal", "deployment": "false"})
+        self.assertEqual(
+            dry["environment"], {"name": "release-internal", "deployment": "false"}
+        )
         self.assertEqual(dry["needs"], "source")
         self.assertNotIn("continue-on-error", str(dry))
         self.assertNotIn("GITHUB_TOKEN", str(dry))
@@ -284,9 +312,13 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertEqual(publish["needs"], ["source", "promotion-precheck"])
         self.assertEqual(publish["environment"], "release-public")
         safe_jobs = safe_workflow("release.yml")["jobs"]
-        self.assertIs(safe_jobs["promotion-precheck"]["environment"]["deployment"], False)
+        self.assertIs(
+            safe_jobs["promotion-precheck"]["environment"]["deployment"], False
+        )
         self.assertEqual(safe_jobs["promotion"]["environment"], "release-public")
-        self.assertNotIn("deployment: false", str(safe_jobs["promotion"]["environment"]).lower())
+        self.assertNotIn(
+            "deployment: false", str(safe_jobs["promotion"]["environment"]).lower()
+        )
         self.assertNotIn("continue-on-error", str(publish))
         self.assertNotIn("GITHUB_TOKEN", str(dry))
         self.assertIn("inputs.release_tag == github.ref_name", dry["if"])

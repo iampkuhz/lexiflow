@@ -46,7 +46,7 @@ Environment 标识切换须同步发布器的真实环境 id/名称核验、保�
 
 - **完整许可核准表及 notice。** [`distribution-licenses.json`](../../../../ops/release/distribution-licenses.json) 必须受 Git 跟踪，按 `id` 排序，覆盖 `LexiFlow`、`API-runtime`、`SQLite JDBC`、`SQLite`、`extension-third-party`、`dataset` 实际组件；SQLite JDBC 需保留嵌入 JAR 的 Apache-2.0 `LICENSE` 与 `LICENSE.zentus`（含 BSD 条款），SQLite 本体为 public domain。每项实际发行 notice 的路径、字节数、摘要须与真实文件一致；不得声称存在独立 SQLite 源码归档。负责人先核实可再分发依据、补齐记录并提交，再选择最终发行 commit；不能把「工具要求五类」当作许可已经获批。
 - **真实资料快照。** 从已发布且经真实来源审批的 Lexicon 数据导出，包含 `manifest.json`、`approvals.json`、`dataset.ndjson`、`entries.ndjson`、`forms.ndjson`。本机 ECDICT 来源 ZIP/CSV 不是发布快照；测试 synthetic 包也不是正式资料。
-- **目标资料和版本说明。** 当前提交的 `ops/release/notes/<version>.md` 必须非空且版本匹配。单容器候选内嵌真实已发布资料，完整验收其初始化、同卷重启、故障和恢复；不要求历史双镜像 previous 候选，也不承诺任意历史数据库迁移。
+- **目标资料和版本说明。** 当前提交的 `ops/release/notes/<version>.md` 从[唯一模板](../../../../ops/release/notes/TEMPLATE.md)填写；结构校验与预览见[正式候选晋升](../../github-actions.md#17-正式候选晋升)。单容器候选内嵌真实已发布资料，完整验收其初始化、同卷重启、故障和恢复；不要求历史双镜像 previous 候选，也不承诺任意历史数据库迁移。
 - **当前正式发行 Task 与真实 actor。** 按 [Delivery Gate](../../../reference/delivery-gate.md) 确认 Catalog 中目标 Task 及正式发行计划，送验、验证、审查角色已分开。普通开发 Hook PASS 不够。
 
 没有上述材料时停在此步，请维护者完成资料准备/许可核准/版本说明和精确目标构建；不能提供「首发跳过」验收开关。这是必须先完成的工程交接，不是后面的 GitHub 按钮可以补办的事情。

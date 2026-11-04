@@ -12,7 +12,7 @@
 | 检查 PR | `python3 -m scripts.triggers.run_ci_quick_checks quick --base <完整commit>`；新分支用 `--all` | 必需与受影响 Check 完成；不等于 full Verify/Formal |
 | 下载并测试扩展包 | 从同次 quick run 下载 ZIP，校验 `.zip.sha256` 后加载解压目录 | artifact 对应目标 commit；Smoke 不替代真实观看或发行验收 |
 | 准备正式候选 | 从受保护的 `v*` tag 触发 release workflow | 单一 Mac/Podman 私有候选与固定交接完成，后续独立执行完整 Repository Verify |
-| 晋升公开发行 | 原标签手动续办，已有独立 Formal 链、两道人审授权与 `PUBLISH` | release资产摘要复核并发布；缺证/漂移立即停止 |
+| 晋升公开发行 | 原标签手动续办，已有独立 Formal 链、唯一人审授权与 `PUBLISH` | release资产摘要复核并发布；缺证/漂移立即停止 |
 
 `.github/workflows/ci.yml` 在分支 push、`pull_request` 和手动运行时调用：
 
@@ -211,13 +211,13 @@ python3 -m scripts.acceptance consume-candidate --submission-id <uuid> --candida
 python3 -m ops.release.workflow.promote_verified_release --submission-id <uuid> --candidate-directory /absolute/candidate
 ```
 
-默认只读预检，不构建、归档、加载、推送或写 GitHub/GHCR，不需要发布凭据。只有显式 `--publish` 及受保护 Environment 对本次 dispatch 的人工批准才进入远端写入；重跑旧 run 不继承批准，恢复须新 dispatch 和新批准。每次写前重核固定候选、干净正式源码、tag、不可变配置、真实独立 Formal 链和许可核准；同版本不同内容拒绝。
+默认只读预检，不构建、归档、加载、推送或写 GitHub/GHCR，不需要发布凭据；通过后返回最终 Release Markdown，现有 Node `resume` 入口同时传出预览。只有显式 `--publish` 及受保护 Environment 对本次 dispatch 的人工批准才进入远端写入；重跑旧 run 不继承批准，恢复须新 dispatch 和新批准。每次写前重核固定候选、干净正式源码、tag、不可变配置、真实独立 Formal 链和许可核准；同版本不同内容拒绝。
 
 新正式发行只晋升一份候选 `runtime-image` 到 `ghcr.io/<owner>/<repo>`，仅 `linux/arm64`。推送后匿名按 registry manifest digest 读取并确认 config ID，不能拿候选 archive hash 或 image config ID 代替 registry digest。候选、离线 image archive 和内部 marker 不作为用户附件。
 
 Release 只上传三项自定义附件：扩展 ZIP、第三方对应源码包、`release.json`；逐项核对名称、大小与 SHA-256 后才发布。对应源码包在候选 assemble 时完成并参与验收，晋升原样复制，不在发布阶段重新构建。`release.json` 绑定软件/源码/API/SQL/资料身份、唯一镜像 digest/config/platform 和两个下载制品及全部来源对应关系。正文保留简明说明与下载入口，详细摘要只在 `release.json`，正文不作为机器输入。
 
-正文来自精确发布提交的 `ops/release/notes/<version>.md`。缺失、空白或版本不匹配在任何远端写入前拒绝；维护者负责功能、修复、使用方式、前置及限制，发布器只自动补真实下载链接和明确软件版本 tag 的可复制命令；摘要与完整身份仍在不可变 `release.json`。页面首先展示两步使用。
+正文来自精确发布提交的 `ops/release/notes/<version>.md`，从[唯一模板](../../ops/release/notes/TEMPLATE.md)填写“本版变化、两步使用、数据与限制”三个章节。“本版变化”只写用户可感知的新增、修复和变化，不重复介绍产品或罗列内部验证；前置条件写在“两步使用”内。发布器拒绝缺失、重复、空章节、占位符残留和版本不一致，人工不另写安装命令或下载章节。安装命令和真实下载链接由同一正文函数自动生成，预览与实际发布使用相同正文；命令使用明确软件版本 tag，摘要与完整身份仍在不可变 `release.json`。预览是已核验候选的正文检查，不重新构建或发布，也不以旧候选的通过记录验证新源码。
 
 GHCR 与 Release 不具备原子事务。镜像已上传不等于发行成功；私有 package、draft、部分资产或写请求未知都保留现场，先只读查明，不盲目重复写入、删除或覆盖。同一原候选只有在远端状态确定且摘要完全一致时才可按恢复合同续办。首次 package public 设置由管理员完成，认证拉取不等于匿名拉取。[GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)、[不可变发行](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)。
 
