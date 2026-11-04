@@ -2,7 +2,7 @@
 
 ## 1.1. 两步使用与环境前提
 
-在 macOS Apple Silicon、Podman 已安装并运行、Chrome 已安装的前提下，只需执行该 Release 固定 digest 的一条 `podman run` 命令，以及下载解压并启用同版本扩展。用户不获取源码/主安装归档，不安装语言工具链、Compose 或外部数据库，不配置密码、地址、卷或词库。Podman安装启动不计入两步。
+在 macOS Apple Silicon、Podman 已安装并运行、Chrome 已安装的前提下，只需执行该 Release 明确软件版本 tag 的一条 `podman run` 命令，以及下载解压并启用同版本扩展。用户不获取源码/主安装归档，不安装语言工具链、Compose 或外部数据库，不配置密码、地址、卷或词库。Podman安装启动不计入两步。
 
 正式使用 `lexiflow-release`/18080/`lexiflow-release-data`，开发调试18081和独立数据，验收18082和唯一归属临时资源；不得接管、覆盖或删除未知资源。只暴露宿主loopback API，SQLite 数据库文件不映射宿主。
 
@@ -18,7 +18,7 @@ API的最新status包含真实初始化状态及 `publishedDataset` 五字段绑
 
 私有候选唯一 `runtime-image`，固定 archive 路径 `images/linux-arm64/runtime-image.tar`，完整绑定源身份、资料、SQL、扩展和许可。通过真实独立Formal前不推公开GHCR；晋升仅原制品，版本不同内容拒绝，不重构建覆盖。
 
-用户Release自定义附件恰好扩展ZIP、对应源码包、`release.json`，不上传内部candidate、主安装tar、镜像tar或独立checksum。原批准材料及来源/摘要/对应关系完整保留，运行镜像有必要告知，源码聚合包assemble时生成并受验。机器只读不可变release.json；正文从对应提交的版本说明生成，缺失/空白/版本错在写前拒绝。页面优先两步，自动补真实链接、digest和SHA-256。
+用户Release自定义附件恰好扩展ZIP、对应源码包、`release.json`，不上传内部candidate、主安装tar、镜像tar或独立checksum。原批准材料及来源/摘要/对应关系完整保留，运行镜像有必要告知，源码聚合包assemble时生成并受验。机器只读不可变release.json；正文从对应提交的版本说明生成，缺失/空白/版本错在写前拒绝。页面只保留用户可见变化、前置条件、两步使用和数据限制，自动补真实下载链接及明确软件版本 tag 命令，不使用 latest；摘要、digest 与完整身份仍由 release.json 承载，tag 不替代内容身份。
 
 ## 1.4. 发布事务和验收
 

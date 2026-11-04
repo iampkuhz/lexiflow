@@ -371,6 +371,34 @@ class FakeGitHub:
         return self.upload_response_status, response
 
 
+class ReleaseBodyTests(unittest.TestCase):
+    def test_concise_body_uses_exact_version_and_links_without_digest_dump(self):
+        names = [
+            "lexiflow-extension-2.3.1.zip",
+            "lexiflow-third-party-sources-2.3.1.tar.gz",
+            "release.json",
+        ]
+        notes = "# 1. 2.3.1\n\n前置、两步使用与限制。\n"
+        body = p._release_body("Owner", "Repo", "v2.3.1", "2.3.1", notes, names)
+        self.assertTrue(body.startswith(notes))
+        self.assertIn("ghcr.io/owner/repo:2.3.1", body)
+        self.assertNotIn("@sha256:", body)
+        self.assertNotIn(":latest", body)
+        self.assertNotIn("SHA-256", body)
+        self.assertEqual(body.count("```sh"), 1)
+        self.assertLess(body.index("安装命令"), body.index("## 1.5. 下载"))
+        self.assertIn("--publish 127.0.0.1:18080:8080", body)
+        self.assertIn("--volume lexiflow-release-data:/var/lib/lexiflow", body)
+        self.assertIn("--image-volume=ignore --pull=always", body)
+        self.assertIn("--memory=2g --cpus=2 --stop-timeout=45", body)
+        for name in names:
+            self.assertIn(
+                f"https://github.com/Owner/Repo/releases/download/v2.3.1/{name}", body
+            )
+        self.assertIn("第三方对应源码（可选）", body)
+        self.assertIn("release.json（摘要与完整身份）", body)
+
+
 class PromotionTests(unittest.TestCase):
     def test_live_authorization_requires_single_platform_approved_attempt_and_protection(
         self,
@@ -691,7 +719,8 @@ class PromotionTests(unittest.TestCase):
         self.assertIn(
             "--volume lexiflow-release-data:/var/lib/lexiflow", FakeGitHub.created_body
         )
-        self.assertIn("ghcr.io/o/r@sha256:" + "f" * 64, FakeGitHub.created_body)
+        self.assertIn("ghcr.io/o/r:1.2.3", FakeGitHub.created_body)
+        self.assertNotIn("@sha256:", FakeGitHub.created_body)
         self.assertEqual(published["release_id"], 51)
         release_json = json.loads(FakeGitHub.registry)
         self.assertEqual(release_json["schemaVersion"], "lexiflow.release.v1")
@@ -2236,6 +2265,14 @@ class RealRegistryPromotionBoundaryTests(unittest.TestCase):
         self.assertTrue(result["published"])
         self.assertEqual(self.push_calls, 1)
         self.assertEqual(len(result["assets"]), 3)
+        body = FakeGitHub.created_body
+        self.assertIn("ghcr.io/o/r:1.2.3", body)
+        self.assertNotIn("@sha256:", body)
+        machine = json.loads(FakeGitHub.registry)
+        self.assertEqual(
+            machine["image"]["reference"], f"ghcr.io/o/r@{self.image_manifest_digest}"
+        )
+        self.assertEqual(machine["image"]["digest"], self.image_manifest_digest)
         self.assertTrue(self.remote_present)
         self.assertEqual(
             sum(

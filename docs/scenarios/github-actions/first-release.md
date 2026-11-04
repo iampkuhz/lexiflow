@@ -64,7 +64,7 @@ gh workflow run release.yml --repo iampkuhz/lexiflow --ref "$TAG" \
 
 ## 1.4. 其他机器如何获取
 
-GitHub Release 自定义附件只有插件 ZIP、第三方对应源码包、`release.json`；自动源码 ZIP/TAR 不计入。正文优先两步使用，自动给出真实下载链接、SHA-256、唯一运行镜像 digest 和可复制 `podman run` 命令。机器只读取不可变 `release.json`，不解析可编辑正文。
+GitHub Release 自定义附件只有插件 ZIP、第三方对应源码包、`release.json`；自动源码 ZIP/TAR 不计入。正文保留主要变化、前置条件、两步使用与数据限制，自动给出真实下载链接和明确软件版本 tag 的可复制 `podman run` 命令。摘要与完整身份保存在 `release.json`，不在正文逐项展开。机器只读取不可变 `release.json`，不解析可编辑正文。
 
 GHCR 唯一新运行包为 `ghcr.io/iampkuhz/lexiflow`，公开后可匿名按已验收 digest拉取；一个容器包含 API、专属 SQLite 数据库文件和已发布资料，无需外部初始化。Podman已安装并运行、Chrome已安装是前置，仅支持macOS Apple Silicon + Podman。不能把「能拉镜像」说成其他平台已验收。
 

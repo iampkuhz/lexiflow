@@ -1111,6 +1111,48 @@ def _confirmed_registry_digest(version: str, candidate_sha256: str) -> str | Non
     return max(confirmed)[1] if confirmed else None
 
 
+def _release_body(
+    owner: str,
+    repo: str,
+    tag: str,
+    version: str,
+    release_notes: str,
+    asset_names: list[str],
+) -> str:
+    """人类正文用明确版本；内容寻址和摘要继续由 release.json 承载。"""
+    image_ref = f"ghcr.io/{owner.lower()}/{repo.lower()}:{version}"
+    run_command = (
+        "podman run --image-volume=ignore --pull=always -d \\\n"
+        "  --name lexiflow-release \\\n"
+        "  --publish 127.0.0.1:18080:8080 \\\n"
+        "  --volume lexiflow-release-data:/var/lib/lexiflow \\\n"
+        "  --memory=2g --cpus=2 --stop-timeout=45 \\\n"
+        f"  {image_ref}"
+    )
+    automatic = [
+        "",
+        "## 1.4. 安装命令",
+        "",
+        "```sh",
+        run_command,
+        "```",
+        "",
+        "## 1.5. 下载",
+        "",
+    ]
+    for name in sorted(asset_names):
+        label = (
+            "Chrome 扩展"
+            if name.endswith(".zip")
+            else "第三方对应源码（可选）"
+            if name.endswith(".tar.gz")
+            else "release.json（摘要与完整身份）"
+        )
+        url = f"https://github.com/{owner}/{repo}/releases/download/{tag}/{name}"
+        automatic.append(f"- [{label}]({url})")
+    return release_notes.rstrip() + "\n" + "\n".join(automatic) + "\n"
+
+
 def _publish(
     owner: str,
     repo: str,
@@ -1199,23 +1241,9 @@ def _publish(
             write_unknown=exc.write_unknown,
         ) from None
     gate()
-    image = registry["images"][0]
-    image_ref = f"ghcr.io/{owner.lower()}/{repo.lower()}@{image['manifestDigest']}"
-    run_command = (
-        "podman run --image-volume=ignore --pull=always -d --name lexiflow-release --publish 127.0.0.1:18080:8080 "
-        "--volume lexiflow-release-data:/var/lib/lexiflow --memory=2g --cpus=2 "
-        f"--stop-timeout=45 {image_ref}"
+    final_notes = _release_body(
+        owner, repo, tag, identity["softwareVersion"], release_notes, list(assets)
     )
-    automatic = ["", "## 下载与校验", ""]
-    for name in sorted(assets):
-        url = f"https://github.com/{owner}/{repo}/releases/download/{tag}/{name}"
-        automatic.append(
-            f"- [{name}]({url}) — SHA-256 `{meta[name][1]}`，{meta[name][0]} bytes"
-        )
-    automatic.extend(
-        ("", "## 固定 digest 安装命令", "", "```sh", run_command, "```", "")
-    )
-    final_notes = release_notes.rstrip() + "\n" + "\n".join(automatic)
     releases = _pages(api, prefix + "/releases")
     existing = [x for x in releases if x.get("tag_name") == tag]
     if len(existing) > 1:

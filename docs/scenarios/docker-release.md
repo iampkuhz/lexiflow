@@ -6,11 +6,11 @@
 
 每个新正式版本只有一个用户运行镜像 `ghcr.io/iampkuhz/lexiflow`，支持 `linux/arm64`，对应 macOS Apple Silicon + Podman。镜像包含 Java 25 API、SQLite JDBC 运行时、专属数据库文件、已发布词库和离线初始化能力，常驻一个容器，无 Redis、外置数据库、socket、特权或容器套容器。唯一 Java 产品应用不因基础设施进程管理新增 worker。
 
-正式 Release 自定义附件恰好三项：Chrome 插件 ZIP、第三方对应源码包、`release.json`。不提供用户主安装 tar、镜像 tar、独立 `.sha256` 或内部候选附件；GitHub 自动源码 ZIP/TAR 不计入三项。正文展示摘要和固定 digest 启动命令，机器只读同一不可变 Release 的 `release.json`，不解析可编辑正文。
+正式 Release 自定义附件恰好三项：Chrome 插件 ZIP、第三方对应源码包、`release.json`。不提供用户主安装 tar、镜像 tar、独立 `.sha256` 或内部候选附件；GitHub 自动源码 ZIP/TAR 不计入三项。正文只展示必要下载链接和明确软件版本 tag 的启动命令，机器只读同一不可变 Release 的 `release.json`，不解析可编辑正文。
 
 ## 1.2. 身份与源码对应
 
-`release.json` 绑定构建版本、commit/源码摘要、API/SQL/资料身份、唯一镜像 registry manifest digest 与 config ID、平台，以及扩展和对应源码包的字节数、SHA-256、下载地址和来源对应关系。镜像 config ID 不是 registry manifest digest；用户按后者拉取。
+`release.json` 绑定构建版本、commit/源码摘要、API/SQL/资料身份、唯一镜像 registry manifest digest 与 config ID、平台，以及扩展和对应源码包的字节数、SHA-256、下载地址和来源对应关系。镜像 config ID 不是 registry manifest digest；后者用于内容寻址及验收。用户默认按明确软件版本 tag 安装，不使用 `latest`，tag 不替代内容身份。
 
 大型第三方对应源码在候选组装时形成独立受验制品；原许可证、来源、摘要和完整对应关系保留。运行镜像保留原始运行许可和依赖身份索引，不重复嵌入完整 Java 源码。私有候选 manifest 使用 `schemaVersion=2`，完整 notice/对应源码的唯一物理载体是自包含源码归档；候选校验逐成员核对摘要、精确索引和安全路径，不在候选根再存一份原件。晋升不能删除材料、替换来源或在发布阶段重构建制品以规避合规义务。
 

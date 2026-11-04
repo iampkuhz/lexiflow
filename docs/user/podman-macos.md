@@ -8,8 +8,8 @@
 
 前提是 macOS Apple Silicon、已安装并运行的 Podman、已安装的 Chrome，以及能够匿名拉取 GHCR 和下载 GitHub Release 的网络。这不是全新机器从零安装只需两步的承诺。
 
-1. 在[正式 Release](https://github.com/iampkuhz/lexiflow/releases)复制该版本正文提供的完整 `podman run` 命令。它固定已验收 `ghcr.io/iampkuhz/lexiflow@sha256:…`，自动拉取唯一镜像、建立命名卷和启动一个容器。不要把 digest 换成 `latest`。
-2. 下载同页 `lexiflow-extension-<softwareVersion>.zip`，按正文 SHA-256 校验，解压到稳定目录；在 `chrome://extensions` 开启开发者模式，点击“加载已解压的扩展程序”并选择含 `manifest.json` 的目录。启用后无需填写地址、密码或修改文件。
+1. 在[正式 Release](https://github.com/iampkuhz/lexiflow/releases)复制该版本正文提供的完整 `podman run` 命令。它使用明确版本 `ghcr.io/iampkuhz/lexiflow:<softwareVersion>`，自动拉取唯一镜像、建立命名卷和启动一个容器。不要换成 `latest`；内容摘要与完整身份见同页 `release.json`。
+2. 下载同页 `lexiflow-extension-<softwareVersion>.zip`，按同页 `release.json` 的 SHA-256 校验，解压到稳定目录；在 `chrome://extensions` 开启开发者模式，点击“加载已解压的扩展程序”并选择含 `manifest.json` 的目录。启用后无需填写地址、密码或修改文件。
 
 正式容器为 `lexiflow-release`，资料卷为 `lexiflow-release-data`；API 仅映射 `127.0.0.1:18080:8080`。数据库不映射宿主端口，所有持久事实在该独立卷内。运行命令资源上限为 2 CPU/2 GiB，Podman machine 还需要容纳其他项目；实际镜像大小、初始化时间和验证环境以对应 Release 的测量为准。
 

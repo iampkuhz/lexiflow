@@ -215,9 +215,9 @@ python3 -m ops.release.workflow.promote_verified_release --submission-id <uuid> 
 
 新正式发行只晋升一份候选 `runtime-image` 到 `ghcr.io/<owner>/<repo>`，仅 `linux/arm64`。推送后匿名按 registry manifest digest 读取并确认 config ID，不能拿候选 archive hash 或 image config ID 代替 registry digest。候选、离线 image archive 和内部 marker 不作为用户附件。
 
-Release 只上传三项自定义附件：扩展 ZIP、第三方对应源码包、`release.json`；逐项核对名称、大小与 SHA-256 后才发布。对应源码包在候选 assemble 时完成并参与验收，晋升原样复制，不在发布阶段重新构建。`release.json` 绑定软件/源码/API/SQL/资料身份、唯一镜像 digest/config/platform 和两个下载制品及全部来源对应关系。正文展示校验值但不作为机器输入。
+Release 只上传三项自定义附件：扩展 ZIP、第三方对应源码包、`release.json`；逐项核对名称、大小与 SHA-256 后才发布。对应源码包在候选 assemble 时完成并参与验收，晋升原样复制，不在发布阶段重新构建。`release.json` 绑定软件/源码/API/SQL/资料身份、唯一镜像 digest/config/platform 和两个下载制品及全部来源对应关系。正文保留简明说明与下载入口，详细摘要只在 `release.json`，正文不作为机器输入。
 
-正文来自精确发布提交的 `ops/release/notes/<version>.md`。缺失、空白或版本不匹配在任何远端写入前拒绝；维护者负责功能、修复、使用方式、前置及限制，发布器只自动补真实链接、摘要和固定 digest 的可复制命令。页面首先展示两步使用。
+正文来自精确发布提交的 `ops/release/notes/<version>.md`。缺失、空白或版本不匹配在任何远端写入前拒绝；维护者负责功能、修复、使用方式、前置及限制，发布器只自动补真实下载链接和明确软件版本 tag 的可复制命令；摘要与完整身份仍在不可变 `release.json`。页面首先展示两步使用。
 
 GHCR 与 Release 不具备原子事务。镜像已上传不等于发行成功；私有 package、draft、部分资产或写请求未知都保留现场，先只读查明，不盲目重复写入、删除或覆盖。同一原候选只有在远端状态确定且摘要完全一致时才可按恢复合同续办。首次 package public 设置由管理员完成，认证拉取不等于匿名拉取。[GHCR](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)、[不可变发行](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases)。
 
@@ -233,4 +233,4 @@ GHCR 与 Release 不具备原子事务。镜像已上传不等于发行成功；
 
 ## 1.9. 安装与开发隔离
 
-使用者只复制正式Release正文的固定digest单条run命令，再安装启用同页扩展；不下载主tar、镜像tar、源码或执行初始化脚本。Podman已安装并运行、Chrome已安装是前置，不宣称全新机器从零两步。正式容器/卷/18080、开发名字/卷/18081、唯一验收资源/18082彼此分开；数据库不映射宿主。实际使用见[用户指南](../user/podman-macos.md)。
+使用者只复制正式Release正文的明确软件版本tag单条run命令，再安装启用同页扩展；不下载主tar、镜像tar、源码或执行初始化脚本。Podman已安装并运行、Chrome已安装是前置，不宣称全新机器从零两步。正式容器/卷/18080、开发名字/卷/18081、唯一验收资源/18082彼此分开；数据库不映射宿主。实际使用见[用户指南](../user/podman-macos.md)。
