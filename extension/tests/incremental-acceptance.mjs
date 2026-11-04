@@ -1,5 +1,32 @@
 import assert from 'node:assert/strict';
 import { createIncrementalFetch } from './e2e-runtime.mjs';
+
+export function formatIncrementalStateDiagnostic({ overlayState, sourceCaptionLength, diagnostics, requestCount }) {
+ return JSON.stringify({
+  overlayState,
+  sourceCaptionLength,
+  counts: diagnostics?.counts ?? null,
+  requestCount
+ });
+}
+
+async function waitForInitialReady({ page, serviceWorker, waitForState }) {
+ try {
+  await waitForState(page,'ready');
+ } catch (error) {
+  const pageState=await page.evaluate(()=>{
+   const host=document.querySelector('#lexiflow-caption-overlay');
+   const segment=document.querySelector('#ytp-caption-window-container .ytp-caption-segment');
+   let diagnostics=null;
+   try { diagnostics=JSON.parse(host?.getAttribute('data-lexiflow-diagnostics') ?? 'null'); } catch {}
+   return {overlayState:host?.getAttribute('data-lexiflow-state') ?? null,sourceCaptionLength:segment?.textContent?.length ?? 0,diagnostics};
+  });
+  const requestCount=await serviceWorker.evaluate(()=>globalThis.__incrementalRequests?.length ?? 0);
+  const summary=formatIncrementalStateDiagnostic({...pageState,requestCount});
+  if(error instanceof Error) error.message+=`\nsynthetic incremental state: ${summary}`;
+  throw error;
+ }
+}
 /** 使用真实扩展和 API；只延迟网络以确定性暴露刷新与丢片段问题。 */
 export async function runIncrementalAcceptance({page,serviceWorker,setCaption,waitForState,overlayText}) {
  await serviceWorker.evaluate((fetchFactorySource)=>{
@@ -8,7 +35,7 @@ export async function runIncrementalAcceptance({page,serviceWorker,setCaption,wa
   globalThis.fetch=factory(globalThis.__incrementalOriginalFetch,globalThis.__incrementalRequests,250);
  }, createIncrementalFetch.toString());
  try {
-  await setCaption(page,'A reliable',40);await waitForState(page,'ready');
+  await setCaption(page,'A reliable',40);await waitForInitialReady({page,serviceWorker,waitForState});
   const beforeGap=await serviceWorker.evaluate(()=>globalThis.__incrementalRequests.length);
   await setCaption(page,'',40.01);await waitForState(page,'idle');
   await setCaption(page,'A reliable',40.02);await waitForState(page,'ready');
