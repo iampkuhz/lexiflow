@@ -8,7 +8,7 @@
 - 最新词库存储采用精简 entry、form 与 dataset 模型；对外词条 ID 使用十进制字符串，协议为 `caption-hints.v2`。结构变化仍须显式重建重导，不能把源码更新当作运行资料已更新。
 - M 芯片 macOS 使用 Podman 本机安装与更新入口；操作保留引擎和资源归属、锁、资料身份及失败恢复检查。实际命令见[用户指南](../../../user/podman-macos.md)，不复述旧安装过程。
 - 工程工作流已实现风险驱动开发自检、独立验收分层、同事务检查复用和证据查询优化。开发 PASS 不代表正式发行或用户机器验收。
-- [`v2.3.1`](https://github.com/iampkuhz/lexiflow/releases/tag/v2.3.1) 已正式发布，完整独立验收与审查、公开三附件及匿名镜像核对、公开渠道安装和同卷重启、Chrome for Testing 合成字幕试跑均已完成；适用范围仍为 Apple Silicon macOS、Podman 与开发者模式扩展，不代表真实视频观看质量已通过，不因旧待办重复发布。
+- [`v2.3.2`](https://github.com/iampkuhz/lexiflow/releases/tag/v2.3.2) 已正式发布，完整独立验收与审查、公开三附件及匿名镜像核对、公开渠道安装和同卷重启、Chrome for Testing 合成字幕试跑均已完成；适用范围仍为 Apple Silicon macOS、Podman 与开发者模式扩展，不代表真实视频观看质量已通过，不因旧待办重复发布。
 
 ## 1.2. 当前未完成项
 
@@ -81,6 +81,6 @@ submit／冻结只绑定输入；正式 validate 执行检查；review 和 check
 
 ## 1.7. 文件地图与配置职责审查
 
-[工程目录与生命周期](../../../system/engineering.md)和[脚本索引](../../../reference/scripts.md#16-文件编号索引)只引用实际存在的文件；开发反馈、完整 Repository、正式 Task 与发行交接范围保持分离。当前深度精简实现及逐包直接证据留在 ignored `tmp/quality/deep-simplification/`；独立集成验证、Formal 与公开发布尚未完成，不继承旧输入 PASS。
+[工程目录与生命周期](../../../system/engineering.md)和[脚本索引](../../../reference/scripts.md#16-文件编号索引)只引用实际存在的文件；开发反馈、完整 Repository、正式 Task 与发行交接范围保持分离。深度精简的逐包直接证据留在 ignored `tmp/quality/deep-simplification/`；当前已发布范围与验收边界见 1.1，后续改动不继承已发布提交的 PASS。
 
 文档消费关系见[配置地图](../../../reference/configuration.md)，操作接口见[执行场景](../../../scenarios/run-repository-gates.md)。父任务冻结最终输入后交给真实独立执行者运行所需检查，review/catalog 只读核对证据，不重跑命令。已退役链的 ignored 原始记录保留字节，不再消费。
