@@ -11662,6 +11662,29 @@ workstreams:
         validation_command: python3 -m unittest ops.docker.tests.test_contract
         required_check_ids: [eng.release.docker-contract, eng.release.build, eng.repository.docs, eng.repository.planning]
         depends_on: []
+      - id: LF-TSK-OPS-2583
+        title: 独立验收并晋升 v2.4.1 正式发行候选
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: planning/workstreams.yaml
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [ops/release/version.txt, ops/release/notes/2.4.1.md, planning/workstreams.yaml, tmp/quality/**, tmp/phase-tools/v24-official-release/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 从已审核的干净主线为 v2.4.1 构建一次真实 ARM64 私有候选，完成独立验收和只读晋升预检，交付唯一人工审批入口。
+        deliverable: 精确正式候选、完整独立验收收据、发行预览和受保护运行；批准后核对公开镜像、三个自定义附件及实际安装。
+        acceptance_criteria:
+        - 源码、正式标签、真实词库来源及原审批、全部许可原件与本次候选逐项绑定；不沿用旧候选或旧验收。
+        - 不同真实 actor 送验、执行完整 repository-baseline 并只读独立审查；显式记录带证据的真实审查意见，以 Catalog 收据绑定同一候选的实际单容器运行。
+        - 正式发行说明三章节齐全，只读预检不重建、不上传；仅 release-public 需要一次维护者批准，agent 不代批。
+        - 批准后只晋升已验收的原制品，核对匿名精确镜像和三个附件，通过真实渠道安装及 Chrome 试跑才完成公开发布验收。
+        acceptance_evidence: [正式候选与资料摘要、原生独立验收和审查收据、只读晋升结果、GitHub 运行、获批后的公开制品与实装回执。]
+        validation_command: node ops/release/workflow/run-release-workflow.mjs formal validate <uuid>
+        required_check_ids: [eng.release.version, eng.release.lifecycle-runtime, eng.release.candidate-runtime]
+        discovered_from: LF-TSK-OPS-2582
+        depends_on: []
       - id: LF-TSK-OPS-2582
         title: 独立验收并晋升 v2.4.0 正式发行候选
         priority: P0
