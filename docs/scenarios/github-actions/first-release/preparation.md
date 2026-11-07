@@ -122,8 +122,8 @@ python3 -m scripts.local.run_with_java_toolchain java \
 # 不同真实 validator，在自己的原生任务里执行唯一完整发行基线：
 "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs formal validate '<返回的SUBMISSION_UUID>'
 
-# 不同于生产者与 validator 的 reviewer，只读冻结发行主体/evidence 后，在自己的任务里：
-"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs formal review '<返回的VALIDATION_UUID>'
+# 不同于生产者与 validator 的 reviewer，只读核对冻结发行主体及证据后，在自己的任务里：
+"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs formal review '<返回的VALIDATION_UUID>' '<审查证据 JSON 的绝对路径>'
 
 # 按计划核对 receipt/hash DAG；缺依赖或人类批准不补签、不绕过。
 "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs formal check '<同一SUBMISSION_UUID>'
@@ -132,7 +132,7 @@ python3 -m scripts.local.run_with_java_toolchain java \
 "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume '<同一SUBMISSION_UUID>' "$TAG"
 ```
 
-`formal` 只把固定角色命令交给既有 Delivery Gate，保留实际 Codex 身份来源；它不代替审阅或授予独立身份。审查发现问题时可在 `formal review` 的 validation ID 后传入既有 findings JSON 文件的绝对路径，不能发布无发现意见冒充已审查。必须是完整正式发行链、`repository-baseline` 与同一候选的实际运行 stdout 绑定；只读审查无意见时才可形成无 findings 的 review，不把默认空列表当作已经审过。命令返回 `BLOCKED/FAIL` 时保留记录，按具体缺项处理。正式链 PASS 且 `resume` 返回 `status=PASS` 后才进入手动晋升。不要编辑/格式化/切换源码、移动候选/请求、重新构建 JAR/ZIP 或另换验收机；任何输入变化都使后续复核失效。
+`formal` 只把固定角色命令交给既有 Delivery Gate，保留实际 Codex 身份来源；它不代替审阅或授予独立身份。`formal review` 必须传入审查者按 [Delivery Gate 的证据合同](../../../reference/delivery-gate.md#12-阶段核对要点)写成的实际意见文件。审查须核对完整发行链、`repository-baseline` 与同一候选的实际运行 stdout 绑定；没有阻断问题也须记录具体核对证据。命令返回 `BLOCKED/FAIL` 时保留记录，按具体缺项处理。正式链 PASS 且 `resume` 返回 `status=PASS` 后才进入手动晋升。不要编辑/格式化/切换源码、移动候选/请求、重新构建 JAR/ZIP 或另换验收机；任何输入变化都使后续复核失效。
 
 发行交接使用操作系统稳定宿主标识与实际用户的摘要绑定，不使用可变化的主机名；原始系统标识不写入交接或日志。准备、正式验收和晋升仍分别重新核对同一宿主用户、规范仓库根、精确提交及候选摘要。来源不可用或宿主、用户、路径、候选变化时停止，不允许手填身份兜底；系统重装或主机克隆不承诺复用旧交接。当前实现见 [宿主绑定](../../../../ops/release/host_resources/release_host_identity.py)。
 

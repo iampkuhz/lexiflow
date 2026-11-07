@@ -14,7 +14,7 @@
 | 发行候选送验 | `python3 -m scripts.acceptance submit --task-id <id> --release-handoff [--producer-run-id <id>]` | 同一干净 checkout 的固定本机 handoff；仅正式发行 Task 可用，不接收开发报告或自选候选路径 |
 | 独立验证 | `python3 -m scripts.acceptance validate --submission-id <uuid>` | 冻结 submission；需验证的 actor 与 producer/submitter 不同 |
 | 有界批量验证 | 重复 `--submission-id <uuid>` 参数，最多 16 个唯一 submission | 各 Task 分别保留计划、报告和 validation record |
-| 独立审查 | `python3 -m scripts.acceptance review --validation-id <uuid> [--findings-json <path>]` | 仅验收计划要求时使用；由 findings 派生状态，不接受自报 decision；审查者与实现者及 validator 不同 |
+| 独立审查 | `python3 -m scripts.acceptance review --validation-id <uuid> --findings-json <absolute-path>` | 仅验收计划要求时使用；必须提供真实审查意见，由 findings 派生状态，不接受自报 decision；审查者与实现者及 validator 不同 |
 | 核对验收条件 | `python3 -m scripts.acceptance check --submission-id <uuid>` | 已发布证据、当前依赖与精确绑定的批准（若要求） |
 | 只读观察 | `python3 -m scripts.acceptance status --submission-id <uuid>` | 指定 submission；不推断 latest，也不推进链路 |
 | 消费既有 PASS | `python3 -m scripts.acceptance consume-existing --submission-id <uuid>` | 只读重核唯一、完整且当前的 Gate 链 |
@@ -30,6 +30,8 @@
 | `validate` | 只由独立 actor 对冻结计划调用 Verification；正式验收复用[质量检查能力](../system/quality-checks.md)，不是第二套检查实现。输入漂移、缺项或未执行不能 PASS。 |
 | `review` | 仅高风险工程与正式发行计划要求独立 review；只读 frozen diff/evidence 并形成真实意见，不运行检查。机械或局部风险不造伪 review。 |
 | `check` | 只核对计划要求的 validation/review、receipt/hash DAG、当前依赖和精确批准；不重跑命令。缺少前置条件返回 `BLOCKED`。 |
+
+审查者把实际观察保存为非空 JSON 数组。每项包含唯一的 `finding_id`、`severity`（`PASS`、`BLOCKED` 或 `FAIL`）、`code` 和非空 `evidence`；每条证据应有非空 `detail`，说明核对了什么及其可回读位置。没有阻断问题时，仍须记录带证据的 `PASS` 意见，而不是省略文件或传入 `[]`。有问题则保留相应意见，不以其他通过项抵消。
 
 风险计划由当前 policy 和 Task 必需检查派生：机械／局部功能使用 `development-change`，高风险工程使用 `development-baseline` 并要求 review；正式发行使用 `repository-baseline` 并要求 review。日常开发报告不等于 Formal validation，局部验收链也不代表完整工作区验收。
 
