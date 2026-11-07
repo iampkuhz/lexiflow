@@ -2,8 +2,6 @@ package io.lexiflow.buildlogic
 
 import java.io.File
 import java.io.Serializable
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
 import java.util.jar.Manifest
 import java.util.zip.ZipFile
 import org.gradle.api.Action
@@ -11,21 +9,15 @@ import org.gradle.api.GradleException
 import org.gradle.api.Task
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
 
-/**
- * bootJar 的最后一个动作：从稳定的内部归档导出唯一对外版本名。
- * 输入与输出由调用处声明在 bootJar 上；这里只保存路径，不捕获 Project 或构建脚本。
- */
-class PublishVersionedBootJarAction(
+/** 只读校验 bootJar 的 Manifest 与内嵌构建身份，不创建第二份归档。 */
+class ValidateBootJarIdentityAction(
     private val identityDirectoryPath: String,
-    private val publicDirectoryPath: String,
 ) : Action<Task>, Serializable {
     override fun execute(task: Task) {
         val archive = task as? AbstractArchiveTask
-            ?: throw GradleException("版本化导出只适用于归档任务")
-        val source = archive.archiveFile.get().asFile
-        val identityDirectory = File(identityDirectoryPath)
-        val jsonFile = File(identityDirectory, "META-INF/lexiflow-build.json")
-        val versionFile = File(identityDirectory, "META-INF/lexiflow-version.txt")
+            ?: throw GradleException("归档身份校验只适用于归档任务")
+        val jsonFile = File(identityDirectoryPath, "META-INF/lexiflow-build.json")
+        val versionFile = File(identityDirectoryPath, "META-INF/lexiflow-version.txt")
         val json = jsonFile.readText(Charsets.UTF_8)
         val identity = BuildIdentity.validateFullIdentity(json.trimEnd('\n'))
         val softwareVersion = identity["softwareVersion"] as String
@@ -34,7 +26,7 @@ class PublishVersionedBootJarAction(
             throw GradleException("构建身份版本资源不一致")
         }
 
-        ZipFile(source).use { zip ->
+        ZipFile(archive.archiveFile.get().asFile).use { zip ->
             fun entry(name: String): String {
                 val item = zip.getEntry(name) ?: throw GradleException("归档身份资源缺失：$name")
                 return zip.getInputStream(item).use { it.readBytes().toString(Charsets.UTF_8) }
@@ -53,11 +45,5 @@ class PublishVersionedBootJarAction(
                 throw GradleException("归档 Manifest 与完整身份版本不一致")
             }
         }
-
-        val publicDirectory = File(publicDirectoryPath).toPath()
-        Files.createDirectories(publicDirectory)
-        Files.copy(source.toPath(), publicDirectory.resolve("api-$softwareVersion.jar"),
-            StandardCopyOption.REPLACE_EXISTING)
     }
-
 }

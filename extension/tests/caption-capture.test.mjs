@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
-import { CaptionCapture } from '../dist/caption-capture.js';
-import { createPageLifecycle } from '../dist/page-lifecycle.js';
+import { CaptionCapture } from '../build/test-modules/caption-capture.js';
+import { createPageLifecycle } from '../build/test-modules/page-lifecycle.js';
 
 const original={};for(const key of ['window','document','MutationObserver'])original[key]=globalThis[key];
 class Target extends EventTarget{hidden=false;documentElement={};}

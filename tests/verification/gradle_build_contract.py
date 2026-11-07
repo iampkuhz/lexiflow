@@ -393,7 +393,7 @@ public class IdeaModelProbe {
 
         output = self.backend / "product/api/build/generated/software-identity/META-INF/lexiflow-build.json"
         original = json.loads(output.read_text(encoding="utf-8"))
-        generation_file = self.backend / "product/api/build/generated/data-generation/META-INF/lexiflow-generation.json"
+        generation_file = self.backend / "build/generated/data-generation/META-INF/lexiflow-generation.json"
         original_generation = json.loads(generation_file.read_text(encoding="utf-8"))
         marker.write_text("package io.lexiflow.api; final class IdentityFixtureMarker { int changed() { return 1; } }\n",
                           encoding="utf-8")
@@ -424,8 +424,10 @@ public class IdeaModelProbe {
         version_text = (output / "lexiflow-version.txt").read_text(encoding="utf-8")
         self.assertEqual(len(identity), 9)
         self.assertEqual(identity["softwareVersion"] + "\n", version_text)
-        jar_path = self.backend / "product/api/build/libs" / f"api-{identity['softwareVersion']}.jar"
+        jar_path = self.backend / "product/api/build/internal/boot/api-internal.jar"
         self.assertTrue(jar_path.is_file(), f"missing versioned JAR {jar_path.name}")
+        self.assertFalse((self.backend / "product/api/build/libs" / f"api-{identity['softwareVersion']}.jar").exists(),
+                         "bootJar must not publish a versioned duplicate")
         with zipfile.ZipFile(jar_path) as jar:
             manifest = jar.read("META-INF/MANIFEST.MF").decode("utf-8")
             embedded_json = json.loads(jar.read("META-INF/lexiflow-build.json"))
@@ -434,8 +436,8 @@ public class IdeaModelProbe {
         self.assertEqual(_manifest_main_attribute(manifest, "Implementation-Version"), identity["softwareVersion"])
         self.assertEqual(embedded_json, identity)
         self.assertEqual(embedded_version, version_text)
-        api_generation = json.loads((self.backend / "product/api/build/generated/data-generation/META-INF/lexiflow-generation.json").read_text(encoding="utf-8"))
-        adapter_generation = json.loads((self.backend / "product/adapters/build/generated/data-generation/META-INF/lexiflow-generation.json").read_text(encoding="utf-8"))
+        api_generation = json.loads((self.backend / "build/generated/data-generation/META-INF/lexiflow-generation.json").read_text(encoding="utf-8"))
+        adapter_generation = api_generation
         self.assertEqual(embedded_generation, api_generation)
         self.assertEqual(embedded_generation, adapter_generation)
         self.assertEqual(set(embedded_generation), {"codeVersion"})

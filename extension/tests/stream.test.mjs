@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {CaptionStreamCoordinator,COALESCE_MS} from '../dist/stream.js';
+import {CaptionStreamCoordinator,COALESCE_MS} from '../build/test-modules/stream.js';
 import {request,snapshot,segment,response,keyedHint} from './caption-fixtures.mjs';
 const flush=async()=>{for(let i=0;i<5;i++)await Promise.resolve();};
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return{promise,resolve};};

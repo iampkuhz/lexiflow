@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {extractIncrementalText,rememberBounded} from '../dist/caption-debug.js';
+import {extractIncrementalText,rememberBounded} from '../build/test-modules/caption-debug.js';
 
 test('incremental debug text contains English even when no hint is presented',()=>{
   const line={start:0,end:18,caption:'the helpful method',hints:[]};

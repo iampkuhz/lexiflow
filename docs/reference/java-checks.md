@@ -30,7 +30,7 @@ python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend <gra
 
 完整交付中的业务测试、SQLite 集成、runtime smoke 与 API bootJar 通过 `mustRunAfter` 等待已选的 Spotless、Checkstyle、PMD 和 Javadoc 任务，让静态违规先暴露；不改变 `check` / `deliveryFull` 的必需依赖，也不增加独立交付阶段。排序边不会为单独诊断任务额外选择全量质量检查。机械 Javadoc 要求保持：private 类型、public 方法/构造器及 record 紧凑构造器仍按现有 Checkstyle 配置检查，DocLint/Werror 和 suppressions 不变。
 
-构建接线的真实行为回归由独立 `eng.backend.build-contract` Check 执行（直接诊断：`python3 -m tests.verification.gradle_build_contract`），覆盖实际任务依赖、模块边界拒绝、运行入口参数和配置缓存。Gradle 配置阶段只读取 `ops/release/version.txt` 的基础版本，不启动 Node 或 Git；完整身份由 `GenerateSoftwareIdentityTask` 类型化任务在执行阶段通过 `ExecOperations` 调用 Node 生成，身份生成禁用 up-to-date 与构建缓存复用，以保证每次执行都产生新鲜身份。API 归档使用稳定的内部路径供 Gradle/IDE 查询；原生 Manifest 合并消费任务生成的完整身份，`bootJar` 在同一任务内校验并复制为公开的 `build/libs/api-<softwareVersion>.jar`。内部归档不是发行入口，公开文件名、Manifest 和内嵌 JSON/txt 必须一致。该检查需要 Java/Node，不进入可复用的 Verification 自测；不代替 `check` 或 `deliveryFull`。
+构建接线的真实行为回归由独立 `eng.backend.build-contract` Check 执行（直接诊断：`python3 -m tests.verification.gradle_build_contract`），覆盖实际任务依赖、模块边界拒绝、运行入口参数和配置缓存。Gradle 配置阶段只读取 `ops/release/version.txt` 的基础版本，不启动 Node 或 Git；完整身份由 `GenerateSoftwareIdentityTask` 类型化任务在执行阶段通过 `ExecOperations` 调用 Node 生成，身份生成禁用 up-to-date 与构建缓存复用，以保证每次执行都产生新鲜身份。资料生成身份由根任务统一生成一次，API 与 adapters 的资源处理均消费同一输出；每次构建仍无条件刷新。API 保留稳定的 `bootJar.archiveFile`（`build/internal/boot/api-internal.jar`）作为唯一可运行归档，归档内 Manifest、JSON 与 txt 严格校验。`:api:jar` 的普通归档及 sources 变体仍保留供 Gradle 消费；Gradle 测试通过归档 Provider 读取，独立 CLI 与 Release 准备使用该稳定路径。Release 准备在执行资料校验前核对 JAR 内嵌的版本与来源身份，候选内仍按原合同记录制品摘要。该检查需要 Java/Node，不进入可复用的 Verification 自测；不代替 `check` 或 `deliveryFull`。
 
 ## 1.3. 报告与边界
 

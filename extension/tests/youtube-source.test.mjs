@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
 import {readFile} from 'node:fs/promises';
-import {YoutubeSourceMetadata} from '../dist/youtube-source.js';
+import {YoutubeSourceMetadata} from '../build/test-modules/youtube-source.js';
 const track={videoId:'synthetic',trackKey:'en:asr::',fragments:[
  {text:'A',startMs:10000,endMs:13000,offsetMs:0,windowId:'1',append:false},
  {text:' reliable',startMs:10000,endMs:13000,offsetMs:300,windowId:'1',append:true},

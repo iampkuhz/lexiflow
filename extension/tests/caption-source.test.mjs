@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {readCaptionSource} from '../dist/caption-source.js';
+import {readCaptionSource} from '../build/test-modules/caption-source.js';
 const segment=(text,row=null,top=0)=>({innerText:text,closest:selector=>selector === ".caption-visual-line" ? row : null,getBoundingClientRect:()=>({top})});
 test('keeps source visual rows without splitting inline segments or changing API offsets',()=>{
  const first={},second={};
@@ -12,7 +12,7 @@ test('handles explicit line breaks, Unicode and missing visual row wrappers',()=
  assert.equal(readCaptionSource([segment('  ')]),undefined);
 });
 
-const {CaptionRowViewport}=await import('../dist/caption-source.js');
+const {CaptionRowViewport}=await import('../build/test-modules/caption-source.js');
 const ids=[{},{},{}];
 const roll=(shift=0)=>ids.map((id,index)=>({id,text:`L${index+1}`,top:index*24+shift,bottom:(index+1)*24+shift}));
 test('roll-up selects the newest viewport-sized rows without a three-line intermediate frame',()=>{

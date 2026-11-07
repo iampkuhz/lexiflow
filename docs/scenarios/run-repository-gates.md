@@ -202,7 +202,7 @@ endlegend
 | --- | --- | --- |
 | Python 工具 | `python3 -m scripts.checks.repository.python.check_python_quality`；相关 `python3 -m unittest <测试模块>` | [check_python_quality.py](../../scripts/checks/repository/python/check_python_quality.py)、对应[直接测试](../../tests) |
 | Java 产品 | 经 `run_with_java_toolchain.py` 运行相关 Gradle 静态／编译／测试任务 | [run_with_java_toolchain.py](../../scripts/local/run_with_java_toolchain.py)、[原生任务](../reference/java-checks.md) |
-| 扩展 | `npm --prefix extension run build`；相关 `node --test` | [package.json](../../extension/package.json)、[直接测试](../../extension/tests) |
+| 扩展 | `npm --prefix extension run build`；单元回归用 `npm --prefix extension test`；Chromium/API 回归用 `npm --prefix extension run quality:check` | [package.json](../../extension/package.json)、[直接测试](../../extension/tests) |
 | 文档 | `python3 -m scripts.checks.repository.documentation.check_documentation` | [check_documentation.py](../../scripts/checks/repository/documentation/check_documentation.py) |
 
 按修改选择，不把所有语言检查都跑一遍。

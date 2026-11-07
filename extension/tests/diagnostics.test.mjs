@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Diagnostics } from "../dist/diagnostics.js";
+import { Diagnostics } from "../build/test-modules/diagnostics.js";
 
 test("bounded timing window reports lifetime count and window percentiles separately", () => {
   const stats = new Diagnostics();

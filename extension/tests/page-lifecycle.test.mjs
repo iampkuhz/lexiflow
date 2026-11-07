@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
-import { createPageLifecycle } from '../dist/page-lifecycle.js';
+import { createPageLifecycle } from '../build/test-modules/page-lifecycle.js';
 
 const original = {};
 for (const key of ['window','document','MutationObserver','requestAnimationFrame','cancelAnimationFrame','Element']) original[key] = globalThis[key];

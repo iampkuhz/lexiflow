@@ -23,7 +23,7 @@ function report(status, phase, unitTests, browserSmoke, reason = "") {
 }
 
 async function main() {
-  const build = await execute("npm", ["run", "build"]);
+  const build = await execute("npm", ["run", "build", "--", "test-modules"]);
   if (build.exitCode !== 0) {
     if (build.stdout || build.stderr) process.stderr.write(`${build.stdout}${build.stderr}`);
     report("FAIL", "build", 0, 0, "extension-build-failed");

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseRuntimeStatus, readRuntimeStatus, RUNTIME_STATUS_URL, runtimeCompatibility } from "../dist/runtime-status.js";
+import { parseRuntimeStatus, readRuntimeStatus, RUNTIME_STATUS_URL, runtimeCompatibility } from "../build/test-modules/runtime-status.js";
 
 const publishedDataset={releaseId:"release-1",preparationId:"prep-1",ruleId:"rules-1",sqlVersion:"4",sha256:"a".repeat(64)};
 const valid = { softwareVersion:"1.2.3", apiContract:"caption-hints.v2", mode:"formal", ready:true, reason:"OK", datasetVersion:4, publishedDataset };

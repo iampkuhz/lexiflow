@@ -8,6 +8,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { executeFormal, prepareWorkflow, resumePromotion, runCommand } from '../workflow/run-release-workflow.mjs';
 import { normalizeDarwinTempDirectory, resolveFormalInvocation, resolveReleaseExecutionEnvironment, releaseGradleCacheEntries } from '../workflow/release-execution-environment.mjs';
 import { resolveHostBinding } from '../host_resources/release-host-identity.mjs';
+import { jarBytes } from './zip-fixture.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const repo = process.cwd();
@@ -71,9 +72,9 @@ function boundaries(f, overrides = {}) {
   const runCommand = async (command, args, settings) => {
     calls.push(['command', command, args, settings]);
     if (args.includes(':api:bootJar')) {
-      const folder = path.join(f.root, 'backend/product/api/build/libs');
+      const folder = path.join(f.root, 'backend/product/api/build/internal/boot');
       await mkdir(folder, { recursive: true });
-      await writeFile(path.join(folder, 'api-1.2.3.jar'), 'real jar bytes');
+      await writeFile(path.join(folder, 'api-internal.jar'), jarBytes(overrides.jarIdentity ?? targetIdentity));
     }
     if (command === 'node' && args.includes('extension/scripts/packaging/package-extension-release.mjs')) {
       const zip = Buffer.from('real extension zip');
@@ -336,7 +337,8 @@ test('real staging bytes and exact builder/assembler contracts precede private h
   assert.equal(images.platform, 'linux/arm64');
   assert.equal(images.endpoint, f.body.endpoint);
   assert.deepEqual(Object.keys(images.descriptor).sort(), ['apiContract', 'dataset', 'jar', 'notices', 'schemaVersion', 'softwareVersion', 'sourceCommit', 'sqlVersion']);
-  assert.deepEqual(images.descriptor.jar, { path: 'api.jar', bytes: 14, sha256: sha('real jar bytes') });
+  const expectedJar = jarBytes(targetIdentity);
+  assert.deepEqual(images.descriptor.jar, { path: 'api.jar', bytes: expectedJar.length, sha256: sha(expectedJar) });
   assert.equal(images.descriptor.dataset.path, 'dataset.zip');
   assert.equal(images.descriptor.dataset.sha256, sha('approved dataset'));
   assert.deepEqual(images.descriptor.notices, [{ path: 'notice.txt', bytes: notice.length, sha256: sha(notice) }]);
@@ -348,7 +350,7 @@ test('real staging bytes and exact builder/assembler contracts precede private h
   assert.equal(assemble.descriptor.apiContract, 'caption-hints.v2');
   assert.deepEqual(assemble.descriptor.dataset, { releaseId: 'r1', preparationId: 'p1', ruleId: 'rule1' });
   assert.deepEqual(assemble.descriptor.artifacts.filter(a => a.role === 'license').map(a => a.path), ['notice.txt']);
-  assert.equal(await readFile(path.join(images.artifactRoot, 'api.jar'), 'utf8'), 'real jar bytes');
+  assert.deepEqual(await readFile(path.join(images.artifactRoot, 'api.jar')), expectedJar);
   assert.equal(await readFile(path.join(images.artifactRoot, 'dataset.zip'), 'utf8'), 'approved dataset');
   assert.equal(await readFile(path.join(images.artifactRoot, 'extension.zip'), 'utf8'), 'real extension zip');
   const quality = path.join(f.root, 'tmp/quality/release-workflow/1.2.3');
@@ -372,6 +374,15 @@ test('real staging bytes and exact builder/assembler contracts precede private h
   assert.ok(cmds[2][2].includes('--expected-dataset'));
   assert.ok(cmds[3][2].includes('--release-dataset'));
   assert.ok(cmds[3][2].includes('--expected-sha256'));
+});
+
+test('release compile rejects an embedded identity mismatch before dataset verification', async t => {
+  const f = await fixture(t);
+  const wrongIdentity = { ...targetIdentity, softwareVersion: '9.9.9' };
+  const b = boundaries(f, { jarIdentity: wrongIdentity });
+  const result = await prepareWorkflow(f.request, b.options);
+  assert.deepEqual(result, { status: 'BLOCKED', reason: 'JAR_IDENTITY_MISMATCH' });
+  assert.equal(b.calls.some(call => call[0] === 'command' && call[2].includes('--release-dataset')), false);
 });
 
 test('prepare reuses only pinned generated Gradle caches, rejecting unsafe optional caches before build', async t => {

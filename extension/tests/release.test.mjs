@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createHash } from "node:crypto";
-import { fileURLToPath } from "node:url";
 import { PACKAGE_FILES, createExtensionZip, publishExtensionArchive, packageRelease, packageDevelopment } from "../scripts/packaging/package-extension-release.mjs";
 import { checkExtensionArchive } from "../scripts/checks/check-extension-archive.mjs";
 import { zipSync } from "fflate";
@@ -14,7 +13,6 @@ import { resolveBuildIdentity, chromeVersion } from "../../ops/release/integrity
 const buildIdentity = resolveBuildIdentity();
 const version = buildIdentity.softwareVersion;
 const expectedDataset = { releaseId: "release-1", preparationId: "prep-1", ruleId: "rules-1", sqlVersion: "4", sha256: "a".repeat(64) };
-const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 async function fixture() {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), "lexiflow-package-test-")));
   const dist = path.join(root, "dist");
@@ -27,7 +25,6 @@ async function fixture() {
 }
 
 test("build uses the single software version source and emits fixed production permissions", async () => {
-  execFileSync("npm", ["run", "build"], { cwd: extensionRoot, stdio: "ignore" });
   const template = JSON.parse(await readFile(new URL("../manifest.json", import.meta.url)));
   const pkg = JSON.parse(await readFile(new URL("../package.json", import.meta.url)));
   const lock = JSON.parse(await readFile(new URL("../package-lock.json", import.meta.url)));
@@ -337,15 +334,13 @@ exec ${JSON.stringify(realGit)} "$@"
     assert.equal(await readFile(path.join(extension, "dist/stale.map")).then(() => true, () => false), false);
     assert.deepEqual(JSON.parse(await readFile(path.join(extension, "dist/manifest.json"), "utf8")).host_permissions, ["http://127.0.0.1:18080/*"]);
 
-    const formats = { background: "esm", content: "iife", "youtube-bridge": "iife", "youtube-source": "esm",
-      "caption-snapshot": "esm", popup: "iife", "caption-source": "esm", stream: "esm", "page-lifecycle": "esm",
-      "caption-capture": "esm", protocol: "esm", "caption-debug": "esm", "runtime-status": "esm", diagnostics: "esm", preferences: "esm" };
+    const formats = { background: "esm", content: "iife", "youtube-bridge": "iife", popup: "iife" };
     const reference = path.join(repo, "tmp/cli-reference");
     await mkdir(reference);
     for (const [name, format] of Object.entries(formats)) {
       const outfile = path.join(reference, `${name}.js`);
       execFileSync(path.join(extension, "node_modules/esbuild/bin/esbuild"), [`src/${name}.ts`,
-        "--bundle", `--format=${format}`, "--target=es2022", "--define:__LEXIFLOW_API_PORT__=18080",
+        "--bundle", `--format=${format}`, "--target=es2022", "--minify", "--legal-comments=eof", "--define:__LEXIFLOW_API_PORT__=18080",
         `--define:__LEXIFLOW_EXPECTED_DATASET__=${JSON.stringify(JSON.stringify(expectedDataset))}`, `--outfile=${outfile}`],
       { cwd: extension, stdio: "pipe" });
       assert.deepEqual(await readFile(path.join(extension, `dist/${name}.js`)), await readFile(outfile), `${name} CLI 字节等价`);

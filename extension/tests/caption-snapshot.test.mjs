@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {CaptionSnapshotTracker,retainedOverlap} from '../dist/caption-snapshot.js';
-import {snapshotSegments} from '../dist/protocol.js';
+import {CaptionSnapshotTracker,retainedOverlap} from '../build/test-modules/caption-snapshot.js';
+import {snapshotSegments} from '../build/test-modules/protocol.js';
 const capture=(tracker,caption,lineBreaks=[])=>snapshotSegments(tracker.capture({caption,lineBreaks}));
 test('stable keys survive append, rollup, repeated words and DOM-independent reflow',()=>{
  const tracker=new CaptionSnapshotTracker('page');const a=capture(tracker,'go go');const b=capture(tracker,'go go again',[3]);

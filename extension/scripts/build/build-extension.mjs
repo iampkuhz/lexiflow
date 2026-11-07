@@ -9,6 +9,12 @@ import { validateExpectedDataset } from "./expected-dataset.mjs";
 
 const root = resolve(import.meta.dirname, "../..");
 const dist = resolve(root, "dist");
+const testModules = resolve(root, "build/test-modules");
+const buildMode = process.argv[2] ?? "";
+if (process.argv.length > 3 || !["", "test-modules"].includes(buildMode)) {
+  throw new Error("usage: npm run build [-- test-modules]");
+}
+const includeTestModules = buildMode === "test-modules";
 const apiPort = localApiPort(process.env.LEXIFLOW_API_PORT);
 let expectedDataset = null;
 if (process.env.LEXIFLOW_EXPECTED_DATASET !== undefined) {
@@ -18,6 +24,7 @@ if (process.env.LEXIFLOW_EXPECTED_DATASET !== undefined) {
 const identity = resolveBuildIdentity();
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
+await rm(testModules, { recursive: true, force: true });
 await cp(resolve(root, "assets"), resolve(dist, "assets"), { recursive: true });
 const require = createRequire(import.meta.url);
 execFileSync(process.execPath, [require.resolve("typescript/bin/tsc"), "--noEmit", "-p", "tsconfig.json"], { cwd: root, stdio: "inherit" });
@@ -25,20 +32,10 @@ const entries = [
   ["src/background.ts", "esm"],
   ["src/content.ts", "iife"],
   ["src/youtube-bridge.ts", "iife"],
-  ["src/youtube-source.ts", "esm"],
-  ["src/caption-snapshot.ts", "esm"],
-  ["src/popup.ts", "iife"],
-  ["src/caption-source.ts", "esm"],
-  ["src/stream.ts", "esm"],
-  ["src/page-lifecycle.ts", "esm"],
-  ["src/caption-capture.ts", "esm"],
-  ["src/protocol.ts", "esm"],
-  ["src/caption-debug.ts", "esm"],
-  ["src/runtime-status.ts", "esm"],
-  ["src/diagnostics.ts", "esm"],
-  ["src/preferences.ts", "esm"]
+  ["src/popup.ts", "iife"]
 ];
-// 保留每个独立 bundle；只合并 npm/Node 启动，不启用共享 chunk 或增量结果复用。
+const testEntries = ["youtube-source", "caption-snapshot", "caption-source", "stream", "page-lifecycle", "caption-capture", "protocol", "caption-debug", "runtime-status", "diagnostics", "preferences"];
+// Runtime stays as independent bundles. Test-only modules share chunks only in the ignored test output.
 try {
   for (const format of ["esm", "iife"]) {
     await build({
@@ -48,7 +45,30 @@ try {
       outdir: dist,
       bundle: true,
       format,
+      minify: true,
+      legalComments: "eof",
       target: "es2022",
+      define: {
+        __LEXIFLOW_API_PORT__: String(apiPort),
+        __LEXIFLOW_EXPECTED_DATASET__: JSON.stringify(JSON.stringify(expectedDataset)),
+      },
+      logLevel: "info",
+    });
+  }
+  if (includeTestModules) {
+    await build({
+      absWorkingDir: root,
+      entryPoints: testEntries.map((name) => `src/${name}.ts`),
+      outbase: "src",
+      outdir: testModules,
+      entryNames: "[name]",
+      chunkNames: "chunks/[name]-[hash]",
+      bundle: true,
+      splitting: true,
+      format: "esm",
+      target: "es2022",
+      minify: true,
+      legalComments: "eof",
       define: {
         __LEXIFLOW_API_PORT__: String(apiPort),
         __LEXIFLOW_EXPECTED_DATASET__: JSON.stringify(JSON.stringify(expectedDataset)),

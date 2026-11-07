@@ -35,7 +35,7 @@ python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend lexi
 
 ```bash
 LEXIFLOW_RELEASE_JDBC_URL='jdbc:sqlite:/absolute/path/to/lexicon.db' \
-  java -jar backend/product/api/build/libs/api-<version>.jar \
+  java -jar backend/product/api/build/internal/boot/api-internal.jar \
   --release-dataset initialize --package /absolute/path/dataset.zip \
   --expected-sha256 <sha256> --expected-file /absolute/path/to/lexicon.db
 ```

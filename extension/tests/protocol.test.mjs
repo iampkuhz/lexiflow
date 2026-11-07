@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {isCaptionHintRequest,parseHintResponse,resolveHint,inlineParts} from '../dist/protocol.js';
+import {isCaptionHintRequest,parseHintResponse,resolveHint,inlineParts} from '../build/test-modules/protocol.js';
 import {request,snapshot,segment,response,keyedHint} from './caption-fixtures.mjs';
 test('accepts bounded dual snapshots and rejects old contract, duplicate identities and invalid time',()=>{
  assert.ok(isCaptionHintRequest(request()));

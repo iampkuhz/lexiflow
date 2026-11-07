@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { buildCandidateImages } from '../build/release-image-builder.mjs';
 import { assembleReleaseCandidate } from '../build/release-candidate-assembler.mjs';
 import { verifyReleaseCandidate } from '../integrity/release-candidate-verifier.mjs';
+import { verifyJarIdentity } from '../integrity/artifact-build-identity.mjs';
 import { checkReleaseTag, resolveBuildIdentity, assertBuildIdentityMatches } from '../integrity/source-build-identity.mjs';
 import { loadBaseImageLock } from '../build/release-image-build-plan.mjs';
 import { validateRelativePath } from '../integrity/release-artifact-manifest.mjs';
@@ -424,10 +425,11 @@ export async function prepareWorkflow(requestFile, options = {}) {
       || extension.softwareVersion !== identity.softwareVersion || extension.sourceCommit !== identity.sourceCommit
       || extension.filename !== `lexiflow-extension-${identity.softwareVersion}.zip`) fail('EXTENSION_OUTPUT_INVALID');
     assertBuildIdentityMatches(extension.buildIdentity, identity);
-    const jarSource = path.join(root, 'backend/product/api/build/libs', `api-${identity.softwareVersion}.jar`);
+    const jarSource = path.join(root, 'backend/product/api/build/internal/boot/api-internal.jar');
     const zipSource = path.join(root, 'tmp/releases', identity.softwareVersion, identity.sourceCommit, extension.filename);
     const jar = await fileDigest(jarSource);
     const zip = await fileDigest(zipSource);
+    await verifyJarIdentity(jarSource, identity);
     if (zip.bytes !== extension.bytes || zip.sha256 !== extension.sha256) fail('EXTENSION_DIGEST_MISMATCH');
     await timed('dataset-verify', () => command('python3', ['-m', 'scripts.local.run_with_java_toolchain', 'java', '-jar', jarSource,
       '--release-dataset', 'verify', '--package', request.dataset.path, '--expected-sha256', request.dataset.sha256],

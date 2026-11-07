@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LocalPreferences, MAX_SUPPRESSED_ENTRIES, suppressionKey } from "../dist/preferences.js";
+import { LocalPreferences, MAX_SUPPRESSED_ENTRIES, suppressionKey } from "../build/test-modules/preferences.js";
 const id = n => String(n + 1);
 
 test("explicit local suppression is serialized across tabs and can be fully restored", async () => {

@@ -1,12 +1,12 @@
 import io.lexiflow.buildlogic.GenerateSoftwareIdentityTask
-import io.lexiflow.buildlogic.GenerateDataGenerationTask
 import io.lexiflow.buildlogic.IdentityVersionArgumentProvider
-import io.lexiflow.buildlogic.PublishVersionedBootJarAction
+import io.lexiflow.buildlogic.ValidateBootJarIdentityAction
 import org.gradle.jvm.tasks.Jar
 import org.gradle.language.jvm.tasks.ProcessResources
 import org.springframework.boot.gradle.tasks.bundling.BootJar
 
 val repositoryRoot = rootProject.projectDir.parentFile
+val generateDataGeneration = rootProject.tasks.named<io.lexiflow.buildlogic.GenerateDataGenerationTask>("generateDataGeneration")
 val springBootBom = "org.springframework.boot:spring-boot-dependencies:${libs.versions.spring.boot.get()}"
 
 dependencies {
@@ -33,14 +33,9 @@ val generateSoftwareIdentity = tasks.register<GenerateSoftwareIdentityTask>("gen
     manifestFile.set(layout.buildDirectory.file("generated/software-identity-manifest/MANIFEST.MF"))
 }
 
-val generateDataGeneration = tasks.register<GenerateDataGenerationTask>("generateDataGeneration") {
-    repoRoot.set(repositoryRoot)
-    outputDirectory.set(layout.buildDirectory.dir("generated/data-generation"))
-}
-
 tasks.named<ProcessResources>("processResources") {
-    from(generateSoftwareIdentity.flatMap { it.outputDirectory })
     from(generateDataGeneration.flatMap { it.outputDirectory })
+    from(generateSoftwareIdentity.flatMap { it.outputDirectory })
     from(repositoryRoot.resolve("infra/sqlite/schema.sql")) {
         into("META-INF")
         rename { "lexiflow-schema.sql" }
@@ -65,11 +60,8 @@ tasks.named<BootJar>("bootJar") {
     manifest.from(generateSoftwareIdentity.flatMap { it.manifestFile })
     inputs.file(generatedVersionFile)
     inputs.file(identityJsonFile)
-    val publicDirectory = layout.buildDirectory.dir("libs")
-    outputs.dir(publicDirectory)
-    doLast(PublishVersionedBootJarAction(
+    doLast(ValidateBootJarIdentityAction(
         layout.buildDirectory.dir("generated/software-identity").get().asFile.absolutePath,
-        publicDirectory.get().asFile.absolutePath,
     ))
 }
 

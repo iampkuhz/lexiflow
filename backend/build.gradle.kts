@@ -6,6 +6,7 @@ import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.api.tasks.diagnostics.DependencyReportTask
 import org.gradle.jvm.tasks.Jar
 import org.gradle.testing.jacoco.tasks.JacocoReport
+import io.lexiflow.buildlogic.GenerateDataGenerationTask
 
 plugins {
     base
@@ -85,6 +86,12 @@ val verifyProductLanguage = tasks.register<VerifyProductLanguageTask>("verifyPro
     description = "检查后端产品源码只使用 Java。"
     productSources.from(productSourceFiles)
     resultFile.set(layout.buildDirectory.file("reports/product-language/result.txt"))
+}
+
+// API 与离线导入适配器共享同一次、每次构建均新鲜生成的资料代码身份。
+val generateDataGeneration = tasks.register<GenerateDataGenerationTask>("generateDataGeneration") {
+    repoRoot.set(rootDir.parentFile)
+    outputDirectory.set(layout.buildDirectory.dir("generated/data-generation"))
 }
 
 // 模块完成配置后再采集完整项目依赖图，禁止空图漏检。

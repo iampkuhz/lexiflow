@@ -16,6 +16,8 @@
 | 确认 Java | `python3 -m scripts.local.run_with_java_toolchain java -version` | 选择到 Temurin Java 25 |
 | 准备 API | 本机 runtime 配置后运行 `python3 -m scripts.local.start_local_api` | 健康检查成功且日志显示非零已发布资料版本 |
 | 加载扩展 | `npm ci`、`npm run build`，Chrome 加载 `extension/dist` | 扩展弹窗显示就绪，观看保持英文且仅对合格词段提示 |
+| 扩展单元测试 | `npm test` | 一次类型检查后编译测试专用模块并运行全部 Node 单元测试；测试模块留在 ignored `extension/build/test-modules` |
+| 扩展质量检查 | `npm run quality:check` | 运行单元测试及真实 Chromium/API smoke；需要可用 Java 25 与 Chromium |
 
 ```bash
 python3 -m scripts.local.run_with_java_toolchain java -version
