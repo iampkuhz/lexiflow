@@ -5,26 +5,14 @@ checks:
   - git
   input_paths:
   - LICENSE
-  - ops/release
+  - ops/release/test_tools
+  - ops/release/tests/version.test.mjs
+  - ops/release/integrity/source-build-identity.mjs
+  - ops/release/version.txt
   - backend/build.gradle.kts
   - backend/gradle
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
-  triggers:
-  - path: ops/release/test_tools
-  - path: ops/release/runner
-  - path: ops/release/runtime
-  - path: ops/release/tests
-  - path: ops/release/workflow
-  - path: ops/release/integrity
-  - path: ops/release/build
-  - path: ops/release/host_resources
-  - path: backend/build.gradle.kts
-  - path: backend/gradle
-  - path: ops/release/tests/version.test.mjs
-  - path: LICENSE
-  - path: ops/release/version.txt
-  - path: ops/release/integrity/source-build-identity.mjs
 - check_id: eng.repository.docs
   command: ["python3", "-m", "scripts.checks.repository.run_repository_check_group", "--mode", "docs"]
   required_environment:
@@ -87,7 +75,6 @@ checks:
   - backend/gradlew
   - backend/gradle
   - backend/build.gradle.kts
-  - ops/release
   - backend/settings.gradle.kts
   - backend/gradle.properties
   - backend/gradle.lockfile
@@ -102,27 +89,22 @@ checks:
   - infra/sqlite/schema.sql
   - scripts/environment
   - ops/dataset
-  - ops/podman
   - scripts/local/run_with_java_toolchain.py
+  - ops/release/version.txt
+  - ops/release/integrity/source-build-identity.mjs
+  - ops/podman/source-tools.Containerfile
   result_contract: gradle-exit-code
   scenarios: [repository-baseline, change-targeted]
   triggers:
-  - path: ops/release/integrity/source-build-identity.mjs
   - path: backend
-  - path: ops/release/test_tools
-  - path: ops/release/runner
-  - path: ops/release/runtime
-  - path: ops/release/tests
-  - path: ops/release/workflow
-  - path: ops/release/build
-  - path: ops/release/host_resources
   - path: infra/sqlite
   - path: infra/local
   - path: scripts/environment
-  - path: ops/dataset
-  - path: ops/podman
   - path: scripts/local/run_with_java_toolchain.py
+  - path: ops/dataset
   - path: ops/release/version.txt
+  - path: ops/release/integrity/source-build-identity.mjs
+  - path: ops/podman/source-tools.Containerfile
 - check_id: eng.backend.build-contract
   command: ["python3", "-m", "tests.verification.gradle_build_contract"]
   timeout_seconds: 600
@@ -133,31 +115,16 @@ checks:
   - python-package-yaml
   input_paths:
   - backend
-  - ops/release
   - scripts/environment
   - tests/verification/gradle_build_contract.py
   - scripts/local/run_with_java_toolchain.py
   - ops/dataset
-  - ops/podman
+  - ops/release/version.txt
+  - ops/release/integrity/source-build-identity.mjs
+  - ops/podman/source-tools.Containerfile
   scenarios: [repository-baseline, change-targeted]
-  triggers:
-  - path: ops/release/integrity/source-build-identity.mjs
-  - path: backend
-  - path: ops/release/test_tools
-  - path: ops/release/runner
-  - path: ops/release/runtime
-  - path: ops/release/tests
-  - path: ops/release/workflow
-  - path: ops/release/build
-  - path: ops/release/host_resources
-  - path: scripts/environment
-  - path: tests/verification/gradle_build_contract.py
-  - path: scripts/local/run_with_java_toolchain.py
-  - path: ops/dataset
-  - path: ops/podman
-  - path: ops/release/version.txt
 - check_id: eng.verification.module-tests
-  command: ["python3", "scripts/checks/tool_tests/run_verification_tool_tests.py"]
+  command: ["python3", "-m", "scripts.checks.tool_tests.run_python_tool_tests", "--suite", "verification"]
   timeout_seconds: 600
   required_environment:
   - node
@@ -166,10 +133,12 @@ checks:
   input_paths:
   - scripts/checks/deployment/run_deployment_contract_tests.py
   - LICENSE
+  - ops/docker/tests/test_contract.py
+  - ops/docker/tests/health_probe_fixture.py
+  - ops/docker/tests/fixtures
   - scripts/agents
   - tests/delivery_gate/fixtures.py
   - config/engineering/risk.yaml
-  - ops/release
   - scripts/acceptance
   - scripts/verification
   - .github/workflows
@@ -187,31 +156,110 @@ checks:
   - scripts/local
   - scripts/checks/tool_tests
   - scripts/checks/release
+  - ops/release/host_resources
+  - ops/release/integrity/candidate_runtime_result_contract.py
+  - ops/release/__init__.py
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
-  - path: ops/release/__init__.py
+  - path: scripts/checks/deployment/run_deployment_contract_tests.py
+  - path: scripts/agents
   - path: tests/delivery_gate/fixtures.py
   - path: config/engineering/risk.yaml
-  - path: ops/release/test_tools
-  - path: ops/release/runner
-  - path: ops/release/runtime
-  - path: ops/release/tests
-  - path: ops/release/workflow
-  - path: ops/release/integrity
-  - path: ops/release/build
-  - path: ops/release/host_resources
+  - path: scripts/acceptance
+  - path: scripts/verification
   - path: .github/workflows
+  - path: scripts/environment
   - path: ops/dataset
   - path: tests/verification
   - path: tests/__init__.py
   - path: requirements-dev.txt
   - path: .codex/hooks.json
   - path: .qoder/settings.json
-  - path: scripts
+  - path: scripts/checks/repository
   - path: tests/delivery_gate/__init__.py
+  - path: scripts/triggers
+  - path: scripts/local
+  - path: scripts/checks/tool_tests
+  - path: scripts/checks/release
+  - path: ops/release/host_resources
+  - path: ops/release/integrity/candidate_runtime_result_contract.py
+  - path: ops/release/__init__.py
+  - path: ops/docker/tests/test_contract.py
+  - path: ops/docker/tests/health_probe_fixture.py
+  - path: ops/docker/tests/fixtures
+- check_id: eng.release.python-tests
+  command: ["python3", "-m", "scripts.checks.tool_tests.run_python_tool_tests", "--suite", "release"]
+  timeout_seconds: 600
+  required_environment:
+  - node
+  - git
+  - python-package-yaml
+  input_paths:
+  - tests/release
+  - tests/__init__.py
+  - tests/verification/declaration_fixtures.py
+  - scripts/checks/tool_tests/run_python_tool_tests.py
+  - scripts/checks/release
+  - scripts/acceptance
+  - scripts/agents
+  - scripts/environment
+  - scripts/checks/repository/catalog/task_catalog_rules.py
+  - ops/release
+  - ops/docker
+  - ops/dataset
+  - ops/podman
+  - backend
+  - extension
+  - infra/sqlite/schema.sql
+  - AGENTS.md
+  - LICENSE
+  - .gitignore
+  - requirements-dev.txt
+  - scripts/verification/__init__.py
+  - scripts/verification/planning
+  - scripts/verification/execution
+  - scripts/verification/reports/verification_report_store.py
+  transaction_reuse: true
+  scenarios: [repository-baseline, change-targeted]
+  triggers:
+  - path: tests/release
+  - path: tests/__init__.py
+  - path: tests/verification/declaration_fixtures.py
+  - path: scripts/checks/tool_tests/run_python_tool_tests.py
+  - path: scripts/checks/release
+  - path: scripts/acceptance
+  - path: scripts/agents
+  - path: scripts/environment
+  - path: scripts/checks/repository/catalog/task_catalog_rules.py
+  - path: ops/docker
+  - path: ops/dataset
+  - path: AGENTS.md
+  - path: .gitignore
+  - path: requirements-dev.txt
+  - path: scripts/verification/__init__.py
+  - path: scripts/verification/planning
+  - path: scripts/verification/execution
+  - path: scripts/verification/reports/verification_report_store.py
+  - path: ops/release/__init__.py
+  - path: ops/release/host_resources
+  - path: ops/release/workflow
+  - path: ops/release/integrity
+  - path: ops/release/build
+  - path: ops/release/runtime
+  - path: ops/release/runner
+  - path: ops/release/test_tools
+  - path: ops/release/tests
+  - path: ops/release/version.txt
+  - path: LICENSE
+  - path: ops/release/distribution-licenses.json
+  - path: ops/release/notes
+  - path: backend/gradle/build-logic
+  - path: backend/product/api/build.gradle.kts
+  - path: extension/scripts/packaging
+  - path: extension/scripts/build/expected-dataset.mjs
 - check_id: eng.agents.module-tests
-  command: ["python3", "-m", "scripts.checks.tool_tests.run_agent_tool_tests"]
+  command: ["python3", "-m", "scripts.checks.tool_tests.run_python_tool_tests", "--suite", "agents"]
   required_environment:
   - python-package-yaml
   input_paths:
@@ -220,11 +268,10 @@ checks:
   - scripts/acceptance/evidence/acceptance_actor_identity.py
   - config/engineering/risk.yaml
   - tests/__init__.py
-  - scripts/checks/tool_tests/run_agent_tool_tests.py
+  - scripts/checks/tool_tests/run_python_tool_tests.py
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
-  - path: scripts/checks/tool_tests/run_agent_tool_tests.py
   - path: scripts/agents
   - path: scripts/acceptance/evidence/acceptance_actor_identity.py
   - path: tests/agents
@@ -232,52 +279,35 @@ checks:
   - path: .qoder
   - path: config/engineering/risk.yaml
   - path: tests/__init__.py
+  - path: scripts/checks/tool_tests/run_python_tool_tests.py
 - check_id: eng.delivery-gate.module-tests
   timeout_seconds: 300
-  command: ["python3", "-m", "scripts.checks.tool_tests.run_acceptance_tool_tests"]
+  command: ["python3", "-m", "scripts.checks.tool_tests.run_python_tool_tests", "--suite", "acceptance"]
   required_environment:
   - node
   - git
   - python-package-yaml
   input_paths:
   - scripts/acceptance
-  - ops/release
   - tests/delivery_gate
   - scripts/checks/repository
   - scripts/agents
   - scripts/environment
-  - scripts/verification
   - tests/__init__.py
   - config/engineering/risk.yaml
-  - scripts/checks/tool_tests/run_acceptance_tool_tests.py
   - scripts/checks/release
+  - scripts/checks/tool_tests/run_python_tool_tests.py
+  - ops/release/host_resources
+  - ops/release/integrity/candidate_runtime_result_contract.py
+  - scripts/verification/__init__.py
+  - scripts/verification/planning
+  - scripts/verification/execution
+  - scripts/verification/reports/verification_report_store.py
+  - ops/release/__init__.py
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
-  module_dependencies:
-  - eng.verification.module-tests
-  - eng.agents.module-tests
-  triggers:
-  - path: ops/release/__init__.py
-  - path: scripts/acceptance
-  - path: ops/release/test_tools
-  - path: ops/release/runner
-  - path: ops/release/runtime
-  - path: ops/release/tests
-  - path: ops/release/workflow
-  - path: ops/release/integrity
-  - path: ops/release/build
-  - path: ops/release/host_resources
-  - path: tests/delivery_gate
-  - path: scripts/checks/repository
-  - path: scripts/agents
-  - path: scripts/environment
-  - path: scripts/verification
-  - path: tests/__init__.py
-  - path: config/engineering/risk.yaml
-  - path: scripts/checks/tool_tests/run_acceptance_tool_tests.py
-  - path: scripts/checks/release
 - check_id: eng.repository.module-tests
-  command: ["python3", "-m", "scripts.checks.repository.run_repository_check_group", "--mode", "tests"]
+  command: ["python3", "-m", "scripts.checks.tool_tests.run_python_tool_tests", "--suite", "repository"]
   required_environment:
   - python-package-yaml
   input_paths:
@@ -285,74 +315,99 @@ checks:
   - scripts/checks/repository
   - tests/repository
   - scripts/agents
-  - scripts/environment
-  - scripts/verification
-  - scripts/acceptance
   - tests/__init__.py
   - config/engineering/risk.yaml
   - config/engineering/python-quality.toml
   - scripts/local
+  - scripts/checks/tool_tests/run_python_tool_tests.py
+  - scripts/environment
+  - scripts/acceptance/evidence/acceptance_record_store.py
+  - scripts/acceptance/task_definition/task_acceptance_requirements.py
+  - scripts/acceptance/task_definition/task_acceptance_scope.py
+  - scripts/verification/__init__.py
+  - scripts/verification/planning
+  - scripts/verification/execution
+  - scripts/verification/reports/verification_report_store.py
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
-  - path: .githooks
   - path: .gitignore
-  - path: scripts
-  - path: tests
+  - path: scripts/checks/repository
+  - path: tests/repository
+  - path: scripts/agents
+  - path: tests/__init__.py
   - path: config/engineering/risk.yaml
   - path: config/engineering/python-quality.toml
+  - path: scripts/local
+  - path: scripts/checks/tool_tests/run_python_tool_tests.py
+  - path: scripts/environment
+  - path: scripts/acceptance/evidence/acceptance_record_store.py
+  - path: scripts/acceptance/task_definition/task_acceptance_requirements.py
+  - path: scripts/acceptance/task_definition/task_acceptance_scope.py
+  - path: scripts/verification/__init__.py
+  - path: scripts/verification/planning
+  - path: scripts/verification/execution
+  - path: scripts/verification/reports/verification_report_store.py
+  - path: .githooks
 - check_id: eng.extension.quality
   command: ["node", "extension/scripts/checks/run-extension-checks.mjs"]
   timeout_seconds: 600
   required_environment:
   - npm
   - java-25-temurin
+  - python3
+  - git
+  - python-package-yaml
   input_paths:
   - extension
-  - ops/release
+  - infra/sqlite/schema.sql
+  - ops/dataset
+  - ops/podman/source-tools.Containerfile
+  - ops/release/integrity
+  - ops/release/version.txt
   - scripts/environment
+  - backend/gradlew
+  - backend/gradle
+  - backend/build.gradle.kts
+  - backend/settings.gradle.kts
+  - backend/gradle.properties
+  - backend/gradle.lockfile
+  - backend/settings-gradle.lockfile
+  - backend/verification/quality-gates
+  - backend/product/api
+  - backend/product/enrichment
+  - backend/product/lexicon
+  - backend/product/adapters
+  - backend/verification/architecture
+  - backend/verification/integration
   result_contract: runtime-phase-json
   scenarios: [repository-baseline, change-targeted]
-  module_dependencies:
-  - eng.backend.delivery
   triggers:
-  - path: ops/release/integrity/source-build-identity.mjs
-  - path: backend
-  - path: infra/sqlite
   - path: extension
-  - path: ops/release/test_tools
-  - path: ops/release/runner
-  - path: ops/release/runtime
-  - path: ops/release/tests
-  - path: ops/release/workflow
-  - path: ops/release/build
-  - path: ops/release/host_resources
-  - path: scripts/environment
+  - path: infra/sqlite
+  - path: ops/dataset
+  - path: ops/podman/source-tools.Containerfile
+  - path: ops/release/integrity
   - path: ops/release/version.txt
+  - path: scripts/environment
+  - path: backend
 - check_id: eng.release.manifest
   command: ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "manifest"]
   timeout_seconds: 90
   required_environment:
   - git
   input_paths:
-  - ops/release
+  - ops/release/test_tools
+  - ops/release/tests/manifest.test.mjs
+  - ops/release/integrity
+  - ops/release/build
+  - ops/release/runtime/release-artifact-verification.sh
+  - ops/release/version.txt
+  - ops/release/distribution-licenses.json
+  - ops/release/third-party-notices.md
+  - ops/release/notices
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
-  triggers:
-  - path: ops/release/test_tools
-  - path: ops/release/runner
-  - path: ops/release/runtime
-  - path: ops/release/tests
-  - path: ops/release/workflow
-  - path: ops/release/integrity
-  - path: ops/release/build
-  - path: ops/release/host_resources
-  - path: ops/release/tests/manifest.test.mjs
-  - path: ops/release/integrity/release-artifact-manifest.mjs
-  - path: ops/release/distribution-licenses.json
-  - path: ops/release/third-party-notices.md
-  - path: ops/release/notices
-  - path: ops/release/integrity/source-build-identity.mjs
 - check_id: eng.release.docker-contract
   command: ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py"]
   timeout_seconds: 600
@@ -378,12 +433,15 @@ checks:
   - backend/product/api
   - requirements-dev.txt
   - infra/local/compose.yaml
-  - scripts/verification
   - scripts/checks/repository/__init__.py
   - scripts/checks/repository/catalog/task_catalog_rules.py
   - scripts/agents/__init__.py
   - scripts/agents/work_packages/work_package_contract_checks.py
   - scripts/checks/deployment/run_deployment_contract_tests.py
+  - scripts/verification/__init__.py
+  - scripts/verification/planning
+  - scripts/verification/execution
+  - scripts/verification/reports/verification_report_store.py
   transaction_reuse: true
   scenarios: [repository-baseline]
   triggers:
@@ -393,7 +451,6 @@ checks:
   - path: ops/release/runner
   - path: ops/release/runtime
   - path: ops/release/tests
-  - path: ops/release/workflow
   - path: ops/release/integrity
   - path: ops/release/build
   - path: ops/release/host_resources
@@ -407,12 +464,15 @@ checks:
   - path: backend/product/api
   - path: requirements-dev.txt
   - path: infra/local/compose.yaml
-  - path: scripts/verification
   - path: scripts/checks/repository/__init__.py
   - path: scripts/checks/repository/catalog/task_catalog_rules.py
   - path: scripts/agents/__init__.py
   - path: scripts/agents/work_packages/work_package_contract_checks.py
   - path: scripts/checks/deployment/run_deployment_contract_tests.py
+  - path: scripts/verification/__init__.py
+  - path: scripts/verification/planning
+  - path: scripts/verification/execution
+  - path: scripts/verification/reports/verification_report_store.py
 - check_id: eng.release.docker-surface-on-change
   command: ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py", "--group", "surface"]
   timeout_seconds: 600
@@ -436,7 +496,6 @@ checks:
   - ops/podman
   - ops/release
   - requirements-dev.txt
-  - scripts/verification
   - scripts/environment
   - scripts/checks/repository/__init__.py
   - scripts/checks/repository/catalog/task_catalog_rules.py
@@ -445,6 +504,10 @@ checks:
   - ops/docker/tests/test_contract.py
   - ops/docker/tests/test_module_check_adapter.py
   - ops/docker/tests/test_podman_compose_contract.py
+  - scripts/verification/__init__.py
+  - scripts/verification/planning
+  - scripts/verification/execution
+  - scripts/verification/reports/verification_report_store.py
   transaction_reuse: true
   scenarios: [change-targeted]
   triggers:
@@ -454,17 +517,14 @@ checks:
   - path: backend/product/api
   - path: ops/dataset
   - path: ops/docker
-  - path: ops/podman
   - path: ops/release/test_tools
   - path: ops/release/runner
   - path: ops/release/runtime
   - path: ops/release/tests
-  - path: ops/release/workflow
   - path: ops/release/integrity
   - path: ops/release/build
   - path: ops/release/host_resources
   - path: requirements-dev.txt
-  - path: scripts/verification
   - path: scripts/environment
   - path: scripts/checks/repository/__init__.py
   - path: scripts/checks/repository/catalog/task_catalog_rules.py
@@ -473,6 +533,11 @@ checks:
   - path: ops/docker/tests/test_contract.py
   - path: ops/docker/tests/test_module_check_adapter.py
   - path: ops/docker/tests/test_podman_compose_contract.py
+  - path: scripts/verification/__init__.py
+  - path: scripts/verification/planning
+  - path: scripts/verification/execution
+  - path: scripts/verification/reports/verification_report_store.py
+  - path: ops/podman
 - check_id: eng.release.docker-shell-on-change
   command: ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py", "--group", "shell"]
   timeout_seconds: 600
@@ -491,7 +556,6 @@ checks:
   - ops/docker
   - ops/release
   - requirements-dev.txt
-  - scripts/verification
   - scripts/environment
   - scripts/checks/repository/__init__.py
   - scripts/checks/repository/catalog/task_catalog_rules.py
@@ -502,6 +566,10 @@ checks:
   - ops/docker/tests/test_lifecycle_flow.py
   - ops/docker/tests/test_operation_ownership.py
   - ops/docker/tests/test_state_records.py
+  - scripts/verification/__init__.py
+  - scripts/verification/planning
+  - scripts/verification/execution
+  - scripts/verification/reports/verification_report_store.py
   transaction_reuse: true
   scenarios: [change-targeted]
   triggers:
@@ -511,12 +579,10 @@ checks:
   - path: ops/release/runner
   - path: ops/release/runtime
   - path: ops/release/tests
-  - path: ops/release/workflow
   - path: ops/release/integrity
   - path: ops/release/build
   - path: ops/release/host_resources
   - path: requirements-dev.txt
-  - path: scripts/verification
   - path: scripts/environment
   - path: scripts/checks/repository/__init__.py
   - path: scripts/checks/repository/catalog/task_catalog_rules.py
@@ -527,6 +593,10 @@ checks:
   - path: ops/docker/tests/test_lifecycle_flow.py
   - path: ops/docker/tests/test_operation_ownership.py
   - path: ops/docker/tests/test_state_records.py
+  - path: scripts/verification/__init__.py
+  - path: scripts/verification/planning
+  - path: scripts/verification/execution
+  - path: scripts/verification/reports/verification_report_store.py
 - check_id: eng.release.docker-local-on-change
   command: ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py", "--group", "local"]
   timeout_seconds: 600
@@ -552,7 +622,6 @@ checks:
   - ops/release
   - requirements-dev.txt
   - scripts/environment
-  - scripts/verification
   - scripts/checks/repository/__init__.py
   - scripts/checks/repository/catalog/task_catalog_rules.py
   - scripts/agents/__init__.py
@@ -562,6 +631,10 @@ checks:
   - ops/docker/tests/test_podman_fake_transport.py
   - ops/docker/tests/test_podman_network.py
   - ops/docker/tests/test_podman_progress.py
+  - scripts/verification/__init__.py
+  - scripts/verification/planning
+  - scripts/verification/execution
+  - scripts/verification/reports/verification_report_store.py
   transaction_reuse: true
   scenarios: [change-targeted]
   triggers:
@@ -571,19 +644,16 @@ checks:
   - path: infra/sqlite/schema.sql
   - path: ops/dataset
   - path: ops/docker
-  - path: ops/podman
   - path: ops/release/version.txt
   - path: ops/release/test_tools
   - path: ops/release/runner
   - path: ops/release/runtime
   - path: ops/release/tests
-  - path: ops/release/workflow
   - path: ops/release/integrity
   - path: ops/release/build
   - path: ops/release/host_resources
   - path: requirements-dev.txt
   - path: scripts/environment
-  - path: scripts/verification
   - path: scripts/checks/repository/__init__.py
   - path: scripts/checks/repository/catalog/task_catalog_rules.py
   - path: scripts/agents/__init__.py
@@ -593,6 +663,18 @@ checks:
   - path: ops/docker/tests/test_podman_fake_transport.py
   - path: ops/docker/tests/test_podman_network.py
   - path: ops/docker/tests/test_podman_progress.py
+  - path: scripts/verification/__init__.py
+  - path: scripts/verification/planning
+  - path: scripts/verification/execution
+  - path: scripts/verification/reports/verification_report_store.py
+  - path: ops/podman/commands
+  - path: ops/podman/execution
+  - path: ops/podman/images
+  - path: ops/podman/source-tools.Containerfile
+  - path: ops/podman/compose.validation.yaml
+  - path: ops/podman/candidates
+  - path: ops/podman/installation
+  - path: ops/podman/environment
 - check_id: eng.release.docker-node-on-change
   command: ["python3", "scripts/checks/deployment/run_deployment_contract_tests.py", "--group", "node"]
   timeout_seconds: 600
@@ -618,7 +700,6 @@ checks:
   - ops/release
   - requirements-dev.txt
   - scripts/environment
-  - scripts/verification
   - scripts/checks/repository/__init__.py
   - scripts/checks/repository/catalog/task_catalog_rules.py
   - scripts/agents/__init__.py
@@ -645,6 +726,10 @@ checks:
   - ops/podman/tests/unified-local.test.mjs
   - ops/podman/tests/upgrade.test.mjs
   - ops/podman/tests/versioned-images.test.mjs
+  - scripts/verification/__init__.py
+  - scripts/verification/planning
+  - scripts/verification/execution
+  - scripts/verification/reports/verification_report_store.py
   transaction_reuse: true
   scenarios: [change-targeted]
   triggers:
@@ -662,13 +747,11 @@ checks:
   - path: ops/release/runner
   - path: ops/release/runtime
   - path: ops/release/tests
-  - path: ops/release/workflow
   - path: ops/release/integrity
   - path: ops/release/build
   - path: ops/release/host_resources
   - path: requirements-dev.txt
   - path: scripts/environment
-  - path: scripts/verification
   - path: scripts/checks/repository/__init__.py
   - path: scripts/checks/repository/catalog/task_catalog_rules.py
   - path: scripts/agents/__init__.py
@@ -686,7 +769,6 @@ checks:
   - path: ops/podman/tests/isolated-candidate-archive.test.mjs
   - path: ops/podman/tests/java-runtime.test.mjs
   - path: ops/podman/tests/local-session.test.mjs
-  - path: ops/podman/tests/database-target.test.mjs
   - path: ops/podman/tests/prepare-workspace.test.mjs
   - path: ops/podman/tests/process-lock.test.mjs
   - path: ops/podman/tests/source-base-image.test.mjs
@@ -695,6 +777,11 @@ checks:
   - path: ops/podman/tests/unified-local.test.mjs
   - path: ops/podman/tests/upgrade.test.mjs
   - path: ops/podman/tests/versioned-images.test.mjs
+  - path: scripts/verification/__init__.py
+  - path: scripts/verification/planning
+  - path: scripts/verification/execution
+  - path: scripts/verification/reports/verification_report_store.py
+  - path: ops/release/workflow/release-execution-environment.mjs
 - check_id: eng.release.runtime-entry
   command: ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "runtime-entry"]
   timeout_seconds: 90
@@ -713,16 +800,12 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: ops/release/test_tools/run-release-tool-tests.mjs
+  - path: ops/release/tests/runtime-entry.test.mjs
+  - path: ops/release/tests/lifecycle-fixture.mjs
+  - path: ops/docker/Dockerfile.runtime
+  - path: ops/docker/runtime-entrypoint.sh
   - path: ops/release/test_tools
-  - path: ops/release/runner
-  - path: ops/release/runtime
-  - path: ops/release/tests
-  - path: ops/release/workflow
-  - path: ops/release/integrity
-  - path: ops/release/build
-  - path: ops/release/host_resources
-  - path: ops/release/integrity/source-build-identity.mjs
-  - path: ops/docker
 - check_id: eng.release.lifecycle-install
   command: ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "lifecycle-install"]
   required_environment:
@@ -740,15 +823,12 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: ops/release/test_tools/run-release-tool-tests.mjs
+  - path: ops/release/tests/lifecycle-install.test.mjs
+  - path: ops/release/tests/lifecycle-fixture.mjs
+  - path: ops/docker/Dockerfile.runtime
+  - path: ops/docker/runtime-entrypoint.sh
   - path: ops/release/test_tools
-  - path: ops/release/runner
-  - path: ops/release/runtime
-  - path: ops/release/tests
-  - path: ops/release/workflow
-  - path: ops/release/integrity
-  - path: ops/release/build
-  - path: ops/release/host_resources
-  - path: ops/docker
 - check_id: eng.release.lifecycle
   timeout_seconds: 660
   command: ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "lifecycle"]
@@ -770,17 +850,15 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
-  - path: ops/release/test_tools
-  - path: ops/release/runner
-  - path: ops/release/runtime
-  - path: ops/release/tests
-  - path: ops/release/workflow
-  - path: ops/release/integrity
-  - path: ops/release/build
-  - path: ops/release/host_resources
+  - path: ops/release/test_tools/run-release-tool-tests.mjs
+  - path: ops/release/tests/lifecycle.test.mjs
+  - path: ops/release/tests/lifecycle-fixture.mjs
+  - path: ops/release/tests/fake-docker-daemon.mjs
+  - path: ops/release/runtime/release-installation-docker.sh
   - path: ops/docker/compose.yaml
   - path: ops/docker/Dockerfile.runtime
   - path: ops/docker/runtime-entrypoint.sh
+  - path: ops/release/test_tools
 - check_id: eng.release.build
   command: ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "build"]
   required_environment:
@@ -792,30 +870,37 @@ checks:
   input_paths:
   - scripts/acceptance
   - scripts/environment
-  - scripts/verification
   - scripts/agents
   - requirements-dev.txt
   - ops/release
   - ops/docker
+  - scripts/verification/__init__.py
+  - scripts/verification/planning
+  - scripts/verification/execution
+  - scripts/verification/reports/verification_report_store.py
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
   - path: scripts/acceptance
   - path: scripts/environment
-  - path: scripts/verification
   - path: scripts/agents
   - path: requirements-dev.txt
-  - path: ops/release/notes
+  - path: ops/docker
+  - path: scripts/verification/__init__.py
+  - path: scripts/verification/planning
+  - path: scripts/verification/execution
+  - path: scripts/verification/reports/verification_report_store.py
   - path: ops/release/test_tools
   - path: ops/release/runner
   - path: ops/release/runtime
   - path: ops/release/tests
-  - path: ops/release/workflow
   - path: ops/release/integrity
   - path: ops/release/build
   - path: ops/release/host_resources
-  - path: ops/docker
-  - path: ops/release/integrity/source-build-identity.mjs
+  - path: ops/release/workflow/run-release-workflow.mjs
+  - path: ops/release/workflow/run-release-build-pipeline.mjs
+  - path: ops/release/workflow/release-environment.mjs
+  - path: ops/release/notes
 - check_id: eng.release.lifecycle-runtime
   command: ["python3", "-m", "scripts.checks.release.source.check_synthetic_release_lifecycle"]
   timeout_seconds: 1200
@@ -859,6 +944,7 @@ checks:
   - infra/sqlite/schema.sql
   - scripts/environment
   - tests/verification
+  - tests/release
   - scripts/verification
   - scripts/agents/__init__.py
   - scripts/agents/work_packages/work_package_contract_checks.py
@@ -904,6 +990,7 @@ checks:
   - path: infra/sqlite/schema.sql
   - path: scripts/environment
   - path: tests/verification
+  - path: tests/release
   - path: scripts/verification
   - path: scripts/agents/__init__.py
   - path: scripts/agents/work_packages/work_package_contract_checks.py
@@ -944,6 +1031,7 @@ checks:
   - scripts/checks/release/source
   - scripts/checks/release/candidate
   - tests/verification
+  - tests/release
   - ops/podman
   - scripts/verification
   - scripts/agents/__init__.py
@@ -985,6 +1073,7 @@ checks:
   - path: scripts/checks/release/source
   - path: scripts/checks/release/candidate
   - path: tests/verification
+  - path: tests/release
   - path: ops/podman
   - path: scripts/verification
   - path: scripts/agents/__init__.py

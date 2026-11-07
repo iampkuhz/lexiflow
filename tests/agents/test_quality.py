@@ -8,7 +8,7 @@ from pathlib import Path
 import tomllib
 import yaml
 
-from scripts.checks.tool_tests.run_agent_tool_tests import evaluate_suite
+from scripts.checks.tool_tests.run_python_tool_tests import evaluate_suite
 
 
 class AgentRoleEntryTest(unittest.TestCase):

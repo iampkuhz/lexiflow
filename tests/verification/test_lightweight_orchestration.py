@@ -34,6 +34,7 @@ BASE_IDS = {
     "eng.release.lifecycle-runtime",
     "eng.release.build",
     "eng.release.candidate-runtime",
+    "eng.release.python-tests",
 }
 
 
@@ -52,9 +53,9 @@ class LightweightOrchestrationTest(unittest.TestCase):
             "eng.release.docker-local-on-change",
             "eng.release.docker-node-on-change",
         }
-        self.assertEqual(23, len(self.checks))
+        self.assertEqual(24, len(self.checks))
         self.assertEqual(
-            22, len(filter_checks_by_scope(self.checks, "change-targeted"))
+            23, len(filter_checks_by_scope(self.checks, "change-targeted"))
         )
         for check in self.checks:
             self.assertNotIn("scope", check)
@@ -158,7 +159,7 @@ class LightweightOrchestrationTest(unittest.TestCase):
         )
         self.assertIn("deliveryFull", baseline["command"])
         self.assertEqual(
-            ["eng.backend.delivery"],
+            [],
             self.by_id["eng.extension.quality"]["module_dependencies"],
         )
 

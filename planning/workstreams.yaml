@@ -40,6 +40,7 @@ path_ownership:
     - config/engineering/**
     - tests/repository/**
     - tests/verification/**
+    - tests/release/**
     - tests/delivery_gate/**
     - tests/agents/**
     - tests/__init__.py
@@ -367,8 +368,8 @@ workstreams:
       - id: LF-TSK-ARCH-2005
         title: 同步最终功能文档并核对阶段交付证据
         priority: P0
-        task_version: 3
-        change_version: 2.1.0
+        task_version: 4
+        change_version: 2.2.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
         kind: design
@@ -397,13 +398,13 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-QLT-2002
           type: hard
-          required_task_version: 3
-          required_change_version: 1.2.0
+          required_task_version: 4
+          required_change_version: 1.3.0
           required_result: PASS
         - task_id: LF-TSK-QLT-2001
           type: hard
-          required_task_version: 5
-          required_change_version: 3.2.0
+          required_task_version: 6
+          required_change_version: 3.3.0
           required_result: PASS
         - task_id: LF-TSK-ARCH-2004
           type: hard
@@ -449,8 +450,8 @@ workstreams:
       - id: LF-TSK-ARCH-2007
         title: 编写双运行入口和用户安装更新指南
         priority: P0
-        task_version: 3
-        change_version: 2.1.0
+        task_version: 4
+        change_version: 2.2.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 60
         kind: design
@@ -479,13 +480,13 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-QLT-2004
           type: hard
-          required_task_version: 4
-          required_change_version: 3.1.0
+          required_task_version: 5
+          required_change_version: 3.2.0
           required_result: PASS
         - task_id: LF-TSK-OPS-2008
           type: hard
-          required_task_version: 5
-          required_change_version: 3.2.0
+          required_task_version: 6
+          required_change_version: 3.3.0
           required_result: PASS
         deliverable: 编写双运行入口和用户安装更新指南及直接验收证据。
 - id: LF-WS-QLT
@@ -500,6 +501,441 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-QLT-2567
+        title: 消除证据遍历内重复冻结并有界复用精确解码
+        priority: P1
+        task_version: 2
+        change_version: 2.0.0
+        task_source: openspec/changes/test-proof-efficiency/tasks.md
+        kind: implementation
+        lifecycle_state: READY
+        estimated_minutes: 75
+        allowed_files:
+        - scripts/verification/reports/**
+        - tests/verification/**
+        - tests/delivery_gate/**
+        - docs/reference/verification.md
+        - docs/reference/verification/**
+        - planning/workstreams.yaml
+        - openspec/changes/test-proof-efficiency/**
+        - tmp/phase-tools/v24-test-proof/acceptance-efficiency/**
+        forbidden_files:
+        - AGENTS.md
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        - backend/product/**
+        - extension/**
+        - ops/release/**
+        expected_output: 消除同一引用内已认证来源的重复冻结及精确字节解码，保留逐引用完整核验与逐Task独立证据。
+        deliverable: 实现、直接正反例、精确输入与收益证据、新冻结独立开发及适用正式链、TASK-46附件下载回读。
+        acceptance_criteria:
+        - 每条引用保留来源完整验证及当前来源附件输入环境工具链核验；只删除该引用内随后为取同一声明操作定义而重复的完整冻结，精确字节纯解码按有界遍历去重。
+        - 不同Task required_check_ids保留独立视图，跨顶层调用物理执行actor目标和交付不得缓存当前有效资格；取消异常失效。
+        - 原始篡改漂移循环错误nonce顺序缺项失败及部分发布负例拒绝；第二引用短暂输入漂移后恢复仍拒绝，新冻结独立开发正式和review取得实际来源及ID。
+        acceptance_evidence:
+        - 真实actor目标、完整输入摘要、直接运行日志及类型化结果、真实正式ID或具体未满足条件；原失败成本保留。
+        validation_command: python3 -m unittest tests.verification.test_transaction tests.verification.test_evidence_traversal
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.delivery-gate.module-tests
+        discovered_from: LF-TSK-QLT-2560
+        depends_on: []
+      - id: LF-TSK-QLT-2568
+        title: 完善质量工具身份与有条件同事务复用
+        priority: P1
+        task_version: 2
+        change_version: 2.0.0
+        task_source: openspec/changes/test-proof-efficiency/tasks.md
+        kind: implementation
+        lifecycle_state: READY
+        estimated_minutes: 75
+        allowed_files:
+        - scripts/environment/toolchains/**
+        - scripts/verification/planning/**
+        - scripts/verification/execution/check_plan_runner.py
+        - scripts/verification/reports/verification_report_store.py
+        - config/engineering/module-checks.yaml
+        - tests/verification/**
+        - tests/repository/**
+        - docs/reference/verification.md
+        - docs/reference/java-checks.md
+        - planning/workstreams.yaml
+        - openspec/changes/test-proof-efficiency/**
+        - tmp/phase-tools/v24-test-proof/acceptance-efficiency/**
+        forbidden_files:
+        - AGENTS.md
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        - backend/product/**
+        - extension/**
+        - ops/release/**
+        expected_output: 真实工具与可复用资格一致，收益按实际执行次数及成本报告，不为指标降低证明。
+        deliverable: 实现、直接正反例、精确输入与收益证据、新冻结独立开发及适用正式链、TASK-46附件下载回读。
+        acceptance_criteria:
+        - Python质量及隔离build-contract只在实际工具payload选择依赖输入副作用资源和输出消费者可完整证明时显式复用，否则保留不复用并报告具体缺项。
+        - 实际运行及同事务复用的完整环境工具链输入配置窗口runner等价、源发布PASS与失败关闭保持，不跨交付复用开发结果。
+        - 真实deliveryFull和Chromium/API E2E仍逐视图执行；直接工具替换漂移缺失与副作用负例及新冻结独立闭环证明。
+        acceptance_evidence:
+        - 真实actor目标、完整输入摘要、直接运行日志及类型化结果、真实正式ID或具体未满足条件；原失败成本保留。
+        validation_command: python3 -m unittest tests.verification.test_toolchain tests.verification.test_transaction
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.python-quality
+        discovered_from: LF-TSK-QLT-2567
+        depends_on: []
+      - id: LF-TSK-QLT-2570
+        title: 落实用户指定三层模型与精简上下文
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/test-proof-efficiency/tasks.md
+        kind: implementation
+        lifecycle_state: READY
+        estimated_minutes: 20
+        allowed_files:
+        - harness/agent-policy.md
+        - tests/agents/**
+        - planning/workstreams.yaml
+        - openspec/changes/test-proof-efficiency/**
+        - tmp/phase-tools/v24-test-proof/acceptance-efficiency/**
+        forbidden_files:
+        - AGENTS.md
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        - backend/product/**
+        - extension/**
+        - ops/release/**
+        expected_output: 用户指定模型链作为唯一正文明确例外，不改变默认分类及预算身份独立验收。
+        deliverable: 唯一Harness正文、直接回归、新冻结独立开发与正式审查证据、持久附件回读。
+        acceptance_criteria:
+        - 当前用户三层模式为总控Astra、类别主agent gpt-6.1-sol、其subagent仅gpt-6-luna，按完整工作包选routine low或复杂medium；其他模型需新人类明示。
+        - 不机械改写全仓默认表、不因阻塞自动升级子代理，不重启在途工作或改历史模型来源；预算身份Goal与独立验收不变。
+        - 子包不继承无关完整历史，只传必要合同与证据索引，类别负责人吸收细节并紧凑回报；不复制规则到客户端。
+        acceptance_evidence:
+        - 已核验人类消息定位、实际模型来源、新输入摘要、直接及独立结果ID；原失败和执行成本保留。
+        validation_command: python3 -m unittest tests.agents.test_native_policy
+        required_check_ids:
+        - eng.agents.module-tests
+        - eng.repository.docs
+        - eng.repository.planning
+        discovered_from: LF-TSK-QLT-2569
+        depends_on: []
+      - id: LF-TSK-QLT-2569
+        title: 明确真实依赖阻塞与类别自行收敛交付责任
+        priority: P1
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/test-proof-efficiency/tasks.md
+        kind: implementation
+        lifecycle_state: READY
+        estimated_minutes: 20
+        allowed_files:
+        - harness/agent-policy.md
+        - tests/agents/**
+        - planning/workstreams.yaml
+        - openspec/changes/test-proof-efficiency/**
+        - tmp/phase-tools/v24-test-proof/acceptance-efficiency/**
+        forbidden_files:
+        - AGENTS.md
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        - backend/product/**
+        - extension/**
+        - ops/release/**
+        expected_output: 防止单点阻塞被误用为整类停工，保留原生Goal与正式质量底线。
+        deliverable: 实现、直接正反例、精确输入与收益证据、新冻结独立开发及适用正式链、TASK-46附件下载回读。
+        acceptance_criteria:
+        - Task BLOCKED仅沿真实hard与contract依赖传播，不按阶段号或单个Goal状态扩大停工。
+        - 类别负责人隔离受阻部分并先完成其余授权可推进工作，自行组织修复合规接手和复验直到真实独立验收成功；阶段FAIL或BLOCKED不是完成交付，真实外部阻塞由总控协调且其他工作继续。
+        - 不伪造PASS或Goal状态、不豁免必需检查，唯一Harness正文与真实独立验证消费一致。
+        acceptance_evidence:
+        - 真实actor目标、完整输入摘要、直接运行日志及类型化结果、真实正式ID或具体未满足条件；原失败成本保留。
+        validation_command: python3 -m unittest tests.agents.test_native_policy
+        required_check_ids:
+        - eng.agents.module-tests
+        - eng.repository.docs
+        - eng.repository.planning
+        discovered_from: LF-TSK-QLT-2565
+        depends_on: []
+      - id: LF-TSK-QLT-2566
+        title: 解耦报告证据消费与临时资源存活资格
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/test-proof-efficiency/tasks.md
+        estimated_minutes: 35
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/verification/**
+        - scripts/environment/services/**
+        - scripts/environment/configuration/verification_environment.py
+        - tests/verification/**
+        - tests/delivery_gate/**
+        - scripts/acceptance/evidence/**
+        - docs/reference/verification.md
+        - docs/reference/verification/**
+        - planning/workstreams.yaml
+        - openspec/changes/test-proof-efficiency/**
+        - tmp/phase-tools/v24-test-proof/closeout/**
+        forbidden_files:
+        - AGENTS.md
+        - harness/**
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        - backend/product/**
+        - extension/**
+        - ops/release/**
+        - config/engineering/**
+        expected_output: 正常清理本次owned临时资源后仍可核验完整执行证据，不改变实际执行及同事务复用的严格环境资格。
+        deliverable: 最小修复、来源和环境工具链摘要绑定、正反例及新冻结开发和适用正式证据；旧报告不回填。
+        acceptance_criteria:
+        - 仅解除报告消费要求已正确清理的本次owned临时资源仍存活；不保留或复活旧服务、不回填旧端点，不将任意环境变化当等价。
+        - 不可变来源、真实执行及actor、完整声明覆盖、可信绑定的原始环境和工具链、当前输入配置、日志产物及严格结果判据保留；旧报告缺事实则BLOCKED。
+        - 实际执行仍要求当前完整环境就绪，同事务复用仍精确绑定环境工具链输入配置窗口runner，跨事务或交付不得复用开发PASS为Formal。
+        - 清理后读取与送验正例、来源环境工具链输入日志产物篡改及缺项零执行负例、跨事务伪复用拒绝均有直接证明；新源码独立开发和正式层不拼旧PASS。
+        acceptance_evidence:
+        - 实际目标和原生actor、唯一决策、源文件摘要、原始c7d81679生命周期反例、直接回归及真实独立链或具体BLOCKED；TASK-46附件下载回读。
+        validation_command: python3 -m unittest tests.verification.test_acceptance_safety tests.verification.test_transaction tests.verification.test_environment
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.delivery-gate.module-tests
+        - eng.repository.docs
+        - eng.repository.planning
+        discovered_from: LF-TSK-QLT-2560
+        depends_on: []
+      - id: LF-TSK-QLT-2565
+        title: 明确三层职责与独立聊天Goal的有界交接
+        priority: P1
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/goal-handoff-control/tasks.md
+        estimated_minutes: 20
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - harness/agent-policy.md
+        - planning/workstreams.yaml
+        - openspec/changes/goal-handoff-control/**
+        - tmp/phase-tools/v24-goal-handoff/implementation/**
+        forbidden_files:
+        - AGENTS.md
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        - backend/product/**
+        - extension/**
+        - scripts/**
+        - config/**
+        expected_output: Harness唯一规则区分报告、Goal、轮次及所属资源，主控按真实静止与输入一致切换，保留原生能力边界。
+        deliverable: 有界规则修复、文档与规划直接证据及TASK-46持久报告和授权回调；不代表正式验收。
+        acceptance_criteria:
+        - 明确总控、类别主agent与子代理的职责，类别负责人端到端承担修复和交付，不回抛命令级调度或自签正式验收。
+        - Goal包含工作与报告回调的有限终点，交接判断覆盖自动续跑、回调早于退出及ACK再唤醒，状态权限不与原生工具冲突。
+        - 复用现有原生等待和验证窗口，不新增运行时锁或门禁；既有Multica段落、其他Task及范围外改动保持。
+        - 真实docs和planning入口、diff与语义核对有命令退出码和日志；持久附件下载回读后回调，不运行全套或自签正式验收。
+        acceptance_evidence:
+        - 精确目标、初末文件摘要、范围外保持证明、直接检查、原生能力限制、附件回读与实际Goal及资源释放说明。
+        validation_command: python3 -m scripts.checks.repository.documentation.check_documentation && python3 -m scripts.checks.repository.catalog.check_task_catalog
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        discovered_from: LF-TSK-QLT-2564
+        depends_on: []
+      - id: LF-TSK-QLT-2564
+        title: 定位真实浏览器等待超时并恢复锁定验证资源
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/test-proof-efficiency/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - extension/tests/**
+        - extension/scripts/checks/run-extension-checks.mjs
+        - scripts/environment/**
+        - tests/verification/test_environment.py
+        - planning/workstreams.yaml
+        - openspec/changes/test-proof-efficiency/**
+        - tmp/phase-tools/v24-test-proof/blocker-repair/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        - extension/src/**
+        - backend/product/**
+        expected_output: 取得责任层证据并仅做有因果依据的最小fixture或测试环境修复，正常入口可用锁定浏览器。
+        deliverable: 对应修复、精准检查、原始失败历史和有界交付报告；不自签正式验收。
+        acceptance_criteria:
+        - 原10000ms、predicate、断言、真实API与浏览器保留；不延长等待、不加重试、不放宽身份或环境护栏。
+        - 修复须有失败反例与对应回归；资源恢复、自然PASS与原超时修复分别报告，无法归因则BLOCKED。
+        - 只新增当前缺失的精确Chromium revision并记录来源/hash/前后清单；不改产品源码或用户配置。
+        acceptance_evidence:
+        - 精确目标、版本、文件归属、命令退出码、原始证据与未运行项；TASK-46附件上传并下载回读后回调主控。
+        validation_command: node extension/scripts/checks/run-extension-checks.mjs
+        required_check_ids:
+        - eng.extension.quality
+        - eng.verification.module-tests
+        discovered_from: LF-TSK-QLT-2562
+        depends_on: []
+      - id: LF-TSK-QLT-2563
+        title: 纠正测试归属优化的合同版本与精确消费者
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/test-proof-efficiency/tasks.md
+        estimated_minutes: 25
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - planning/workstreams.yaml
+        - tests/repository/test_catalog.py
+        - tests/delivery_gate/test_catalog_fail_closed.py
+        - openspec/changes/test-proof-efficiency/**
+        - tmp/phase-tools/v24-test-proof/blocker-repair/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        - extension/src/**
+        - backend/product/**
+        expected_output: 逐项评估既有合同变化，精确递增版本并同步真实版本消费者，不改历史证据。
+        deliverable: 对应修复、精准检查、原始失败历史和有界交付报告；不自签正式验收。
+        acceptance_criteria:
+        - 全部47项既有Task变化有版本判定与依据；36项增加必需检查保留，等价路径迁移与写域边界变化分别处理。
+        - 递归同步当前Catalog中精确版本绑定消费者；不批量改状态、不删除Task、不改历史冻结或receipt。
+        acceptance_evidence:
+        - 精确目标、版本、文件归属、命令退出码、原始证据与未运行项；TASK-46附件上传并下载回读后回调主控。
+        validation_command: python3 -m unittest tests.repository.test_catalog tests.delivery_gate.test_catalog_fail_closed
+        required_check_ids:
+        - eng.repository.planning
+        - eng.repository.module-tests
+        - eng.delivery-gate.module-tests
+        discovered_from: LF-TSK-QLT-2561
+        depends_on: []
+      - id: LF-TSK-QLT-2560
+        title: 统一工具测试结果与失败诊断
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/test-proof-efficiency/tasks.md
+        estimated_minutes: 35
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/checks/tool_tests/**
+        - scripts/checks/repository/run_repository_check_group.py
+        - tests/agents/test_quality.py
+        - tests/delivery_gate/test_quality.py
+        - tests/repository/test_quality.py
+        - tests/verification/test_development_efficiency.py
+        - tests/verification/test_python_tool_tests.py
+        - scripts/agents/README.md
+        - docs/reference/scripts.md
+        - openspec/changes/test-proof-efficiency/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 统一工具测试结果与失败诊断；保留有效质量保障，不自签独立验收。
+        deliverable: 统一工具测试结果与失败诊断实现、直接回归与冻结证据定位。
+        acceptance_criteria:
+        - 所有工具测试共享标准 unittest 完整性判据，零测试、失败、异常、skip、discovery 错误不得 PASS。
+        - 本机 stderr 保留断言与异常原文，JSON 不复制 traceback；不以 exit-zero 代替 PASS。
+        acceptance_evidence:
+        - 当前真实 diff、直接检查结果和原始日志定位；主控另行安排独立验收。
+        validation_command: python3 -m unittest tests.verification.test_python_tool_tests tests.repository.test_quality tests.agents.test_quality
+          tests.delivery_gate.test_quality
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.repository.module-tests
+        - eng.agents.module-tests
+        - eng.delivery-gate.module-tests
+        depends_on: []
+      - id: LF-TSK-QLT-2561
+        title: 隔离发行行为回归测试归属
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/test-proof-efficiency/tasks.md
+        estimated_minutes: 65
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - tests/verification/**
+        - tests/release/**
+        - config/engineering/module-checks.yaml
+        - planning/workstreams.yaml
+        - openspec/changes/test-proof-efficiency/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 隔离发行行为回归测试归属；保留有效质量保障，不自签独立验收。
+        deliverable: 隔离发行行为回归测试归属实现、直接回归与冻结证据定位。
+        acceptance_criteria:
+        - 迁移前后发行行为测试的断言不减少，全部 discovered tests 由唯一 suite 执行。
+        - 通用 verification 不执行发行行为回归；发行变化仍运行实际行为消费者。
+        acceptance_evidence:
+        - 当前真实 diff、直接检查结果和原始日志定位；主控另行安排独立验收。
+        validation_command: python3 -m scripts.checks.tool_tests.run_python_tool_tests --suite release
+        required_check_ids:
+        - eng.release.python-tests
+        - eng.verification.module-tests
+        depends_on: []
+      - id: LF-TSK-QLT-2562
+        title: 修正测试消费闭包与错误质量依赖
+        priority: P1
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/test-proof-efficiency/tasks.md
+        estimated_minutes: 80
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - config/engineering/module-checks.yaml
+        - tests/verification/**
+        - extension/tests/translation-e2e.mjs
+        - extension/tests/e2e-state.mjs
+        - extension/tests/e2e-state.test.mjs
+        - docs/reference/configuration.md
+        - docs/reference/verification/check-catalog.md
+        - openspec/changes/test-proof-efficiency/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        expected_output: 修正测试消费闭包与错误质量依赖；保留有效质量保障，不自签独立验收。
+        deliverable: 修正测试消费闭包与错误质量依赖实现、直接回归与冻结证据定位。
+        acceptance_criteria:
+        - 扩展仍编译和启动真实 API 并执行全部浏览器断言，不再前置无关后端完整质量套件。
+        - 新文件、删除、未知来源、依赖闭包与冻结漂移均有直接反例；收窄只针对没有实际消费的路径。
+        - 同条件代表路径报告静态选择、实际运行及可实测耗时，不把静态计数冒充耗时收益。
+        - 浏览器等待失败保留原错误与结构性诊断，有精准反例；场景交接根因须有证据，保持全部产品断言、真实 API 和原超时。
+        acceptance_evidence:
+        - 当前真实 diff、直接检查结果和原始日志定位；主控另行安排独立验收。
+        validation_command: python3 -m unittest tests.verification.test_development_selection_matrix tests.verification.test_test_proof_selection
+        required_check_ids:
+        - eng.verification.module-tests
+        - eng.extension.quality
+        depends_on: []
       - id: LF-TSK-QLT-2477
         title: 分离原生执行身份与通用仓库目标
         priority: P0
@@ -631,18 +1067,18 @@ workstreams:
       - id: LF-TSK-QLT-2475
         title: 同步合成发行构建与单容器生命周期
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/single-container-release/tasks.md
         estimated_minutes: 90
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - scripts/checks/release/source/**
-        - tests/verification/test_release_runtime_artifacts.py
-        - tests/verification/test_release_runtime_lifecycle.py
-        - tests/verification/test_release_runtime_check.py
-        - tests/verification/test_release_source_bridge.py
+        - tests/release/test_release_runtime_artifacts.py
+        - tests/release/test_release_runtime_lifecycle.py
+        - tests/release/test_release_runtime_check.py
+        - tests/release/test_release_source_bridge.py
         forbidden_files:
         - secrets/**
         - .local/**
@@ -655,17 +1091,18 @@ workstreams:
         - 两代资料各自内嵌匹配镜像；完整执行原来数据保留、故障、恢复和归属清理意图。
         acceptance_evidence:
         - 真实原生来源、冻结、逐项测试命令退出与证据及明确限制。
-        validation_command: python3 -m unittest tests.verification.test_release_runtime_artifacts tests.verification.test_release_runtime_lifecycle
-          tests.verification.test_release_runtime_check tests.verification.test_release_source_bridge
+        validation_command: python3 -m unittest tests.release.test_release_runtime_artifacts tests.release.test_release_runtime_lifecycle
+          tests.release.test_release_runtime_check tests.release.test_release_source_bridge
         required_check_ids:
         - eng.release.lifecycle-runtime
+        - eng.release.python-tests
         depends_on: []
         discovered_from: LF-TSK-OPS-2063
       - id: LF-TSK-QLT-2472
         title: 验收真实单容器候选运行合同
         priority: P0
-        task_version: 2
-        change_version: 1.0.0
+        task_version: 3
+        change_version: 1.1.0
         task_source: openspec/changes/single-container-release/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -675,7 +1112,7 @@ workstreams:
         - ops/podman/candidates/**
         - ops/podman/tests/candidate-runtime.test.mjs
         - ops/release/integrity/candidate_runtime_result_contract.py
-        - tests/verification/test_candidate_runtime_check.py
+        - tests/release/test_candidate_runtime_check.py
         - tests/delivery_gate/test_candidate.py
         - tests/delivery_gate/test_release_subject.py
         - tests/delivery_gate/fixtures.py
@@ -692,9 +1129,10 @@ workstreams:
         - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
         acceptance_evidence:
         - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
-        validation_command: python3 -m unittest tests.verification.test_candidate_runtime_check tests.delivery_gate.test_candidate tests.delivery_gate.test_release_subject
+        validation_command: python3 -m unittest tests.release.test_candidate_runtime_check tests.delivery_gate.test_candidate tests.delivery_gate.test_release_subject
         required_check_ids:
         - eng.release.candidate-runtime
+        - eng.release.python-tests
         depends_on: []
       - id: LF-TSK-QLT-2502
         title: 修复有限测试传输的完成计数发布竞争
@@ -730,8 +1168,8 @@ workstreams:
       - id: LF-TSK-QLT-2540
         title: 实现自动私有准备与唯一公开审批保护
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/single-approval-release/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -742,7 +1180,7 @@ workstreams:
         - ops/release/workflow/promote_verified_release.py
         - ops/release/tests/workflow.test.mjs
         - tests/verification/test_ci_workflows.py
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         - tmp/phase-tools/single-approval-release/implementation/**
         forbidden_files:
         - secrets/**
@@ -757,10 +1195,11 @@ workstreams:
         - 保留部分成功、未知写入、显式恢复；不改旧tag或资产、不放宽超时、不跳过或借用PASS，真实安装才完成。
         acceptance_evidence:
         - 真实actor、源码及冻结摘要、原始命令退出、直接与独立报告、风险与限制定位。
-        validation_command: python3 -m unittest tests.verification.test_ci_workflows tests.verification.test_release_promotion
+        validation_command: python3 -m unittest tests.verification.test_ci_workflows tests.release.test_release_promotion
           -v
         required_check_ids:
         - eng.verification.module-tests
+        - eng.release.python-tests
         discovered_from: LF-TSK-OPS-2087
         depends_on: []
       - id: LF-TSK-QLT-2541
@@ -824,8 +1263,8 @@ workstreams:
       - id: LF-TSK-OPS-2089
         title: 修复单镜像构建与发布标签合同并前置私有校验
         priority: P0
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: openspec/changes/single-container-image-label-contract/tasks.md
         estimated_minutes: 60
         kind: implementation
@@ -843,8 +1282,8 @@ workstreams:
         - ops/release/tests/verified-candidate.test.mjs
         - ops/release/tests/verified-candidate-fixture.mjs
         - ops/release/tests/fake-docker-daemon.mjs
-        - tests/verification/test_release_promotion.py
-        - tests/verification/test_release_registry.py
+        - tests/release/test_release_promotion.py
+        - tests/release/test_release_registry.py
         - tmp/phase-tools/single-container-image-label-contract/implementation/**
         - planning/workstreams.yaml
         - ops/release/version.txt
@@ -864,10 +1303,11 @@ workstreams:
         - 最终完整工程差异包含新版本说明，经当次独立开发、工程正式验收、审查与Gate；后续新候选完整发行资格由LF-TSK-OPS-2090承担，不将代码验收冒充已发布。
         acceptance_evidence:
         - 真实actor及target、精确冻结和摘要、实际命令退出与原始日志、未运行及恢复限制。
-        validation_command: python3 -m unittest tests.verification.test_release_promotion tests.verification.test_release_registry -v
+        validation_command: python3 -m unittest tests.release.test_release_promotion tests.release.test_release_registry -v
         required_check_ids:
         - eng.release.version
         - eng.verification.module-tests
+        - eng.release.python-tests
         discovered_from: LF-TSK-OPS-2066
         depends_on: []
       - id: LF-TSK-QLT-2544
@@ -960,8 +1400,8 @@ workstreams:
       - id: LF-TSK-OPS-2090
         title: 集成标签修复并完成新单镜像公开安装交付
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/single-container-image-label-contract/tasks.md
         estimated_minutes: 60
         kind: implementation
@@ -979,8 +1419,8 @@ workstreams:
         - ops/release/tests/verified-candidate.test.mjs
         - ops/release/tests/verified-candidate-fixture.mjs
         - ops/release/tests/fake-docker-daemon.mjs
-        - tests/verification/test_release_promotion.py
-        - tests/verification/test_release_registry.py
+        - tests/release/test_release_promotion.py
+        - tests/release/test_release_registry.py
         - tmp/phase-tools/single-container-image-label-contract/implementation/**
         - planning/workstreams.yaml
         - ops/release/version.txt
@@ -1003,20 +1443,21 @@ workstreams:
         validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
         required_check_ids:
         - eng.verification.module-tests
+        - eng.release.python-tests
         discovered_from: LF-TSK-OPS-2066
         depends_on: []
       - id: LF-TSK-OPS-2091
         title: 实现同运行发行上传结果只读收敛
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
         estimated_minutes: 60
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - ops/release/workflow/promote_verified_release.py
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         - tmp/phase-tools/single-run-publication-reconciliation/implementation/**
         forbidden_files:
         - secrets/**
@@ -1031,9 +1472,10 @@ workstreams:
         - 真实故障回放、独立开发检查、工程正式验收、审查及Gate，不修改历史tag/制品/证据或放宽超时。
         acceptance_evidence:
         - 精确输入、真实actor/run、原始命令退出和报告摘要、未运行与适用范围。
-        validation_command: python3 -m unittest tests.verification.test_release_promotion -v
+        validation_command: python3 -m unittest tests.release.test_release_promotion -v
         required_check_ids:
         - eng.verification.module-tests
+        - eng.release.python-tests
         discovered_from: LF-TSK-OPS-2090
         depends_on: []
       - id: LF-TSK-QLT-2547
@@ -1128,8 +1570,8 @@ workstreams:
       - id: LF-TSK-OPS-2092
         title: 集成单运行发行收敛与中文操作规则
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
         estimated_minutes: 60
         kind: implementation
@@ -1140,7 +1582,7 @@ workstreams:
         - docs/scenarios/github-actions/first-release.md
         - docs/scenarios/github-actions/first-release/preparation.md
         - ops/release/workflow/promote_verified_release.py
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         - openspec/changes/single-run-publication-reconciliation/**
         - tmp/phase-tools/single-run-publication-reconciliation/**
         forbidden_files:
@@ -1159,20 +1601,21 @@ workstreams:
         validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
         required_check_ids:
         - eng.verification.module-tests
+        - eng.release.python-tests
         discovered_from: LF-TSK-OPS-2090
         depends_on: []
       - id: LF-TSK-OPS-2093
         title: 补齐草稿身份前置拒绝并集成单运行发行修复
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
         estimated_minutes: 60
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - ops/release/workflow/promote_verified_release.py
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         - harness/agent-policy.md
         - docs/scenarios/github-actions/first-release.md
         - docs/scenarios/github-actions/first-release/preparation.md
@@ -1192,9 +1635,10 @@ workstreams:
         - 一次审批和至多一次POST、未知事件、完整actor与精确绑定保持，不改旧tag/制品/证据，不放宽超时或代批。
         acceptance_evidence:
         - 精确输入与真实actor/run、F1审查记录及故障回放、原始命令退出、全部检查报告摘要与适用限制。
-        validation_command: python3 -m unittest tests.verification.test_release_promotion -v
+        validation_command: python3 -m unittest tests.release.test_release_promotion -v
         required_check_ids:
         - eng.verification.module-tests
+        - eng.release.python-tests
         discovered_from: LF-TSK-QLT-2549
         depends_on: []
       - id: LF-TSK-QLT-2550
@@ -1287,8 +1731,8 @@ workstreams:
       - id: LF-TSK-OPS-2095
         title: 统一发行环境命名并关闭内部部署记录
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/release-environment-visibility/tasks.md
         estimated_minutes: 60
         kind: implementation
@@ -1297,7 +1741,7 @@ workstreams:
         - .github/workflows/release.yml
         - ops/release/workflow/promote_verified_release.py
         - tests/verification/test_ci_workflows.py
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         - harness/agent-policy.md
         - docs/scenarios/github-actions.md
         - docs/scenarios/github-actions/first-release.md
@@ -1319,15 +1763,16 @@ workstreams:
         - 仅修改新源码与新Environment配置，不改变现有v2.1.10标签、镜像、资产和历史证据；不混入开发main的未发布提交。
         acceptance_evidence:
         - 精确目标根、输入冻结、真实原生actor/run、当次检查与故障回放、远端保护读回、明确限制。
-        validation_command: python3 -m unittest tests.verification.test_ci_workflows tests.verification.test_release_promotion
+        validation_command: python3 -m unittest tests.verification.test_ci_workflows tests.release.test_release_promotion
         required_check_ids:
         - eng.verification.module-tests
+        - eng.release.python-tests
         depends_on: []
       - id: LF-TSK-QLT-2556
         title: 实现发行环境与失败阻断直接回归
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/release-environment-visibility/tasks.md
         estimated_minutes: 60
         kind: implementation
@@ -1336,7 +1781,7 @@ workstreams:
         - .github/workflows/release.yml
         - ops/release/workflow/promote_verified_release.py
         - tests/verification/test_ci_workflows.py
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         - tmp/phase-tools/release-environment-visibility/implementation/**
         forbidden_files:
         - secrets/**
@@ -1348,9 +1793,10 @@ workstreams:
         acceptance_criteria: *id001
         acceptance_evidence:
         - 精确目标根、输入冻结、真实原生actor/run、当次检查与故障回放、远端保护读回、明确限制。
-        validation_command: python3 -m unittest tests.verification.test_ci_workflows tests.verification.test_release_promotion
+        validation_command: python3 -m unittest tests.verification.test_ci_workflows tests.release.test_release_promotion
         required_check_ids:
         - eng.verification.module-tests
+        - eng.release.python-tests
         depends_on: []
       - id: LF-TSK-QLT-2557
         title: 独立执行发行环境展示变更开发检查
@@ -1430,8 +1876,8 @@ workstreams:
       - id: LF-TSK-OPS-2094
         title: 修复测试弹窗焦点竞态并集成单运行发行修复
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/single-run-publication-reconciliation/tasks.md
         estimated_minutes: 60
         kind: implementation
@@ -1440,7 +1886,7 @@ workstreams:
         - extension/tests/action-popup.mjs
         - extension/tests/action-popup.test.mjs
         - ops/release/workflow/promote_verified_release.py
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         - harness/agent-policy.md
         - docs/scenarios/github-actions/first-release.md
         - docs/scenarios/github-actions/first-release/preparation.md
@@ -1463,6 +1909,7 @@ workstreams:
         validation_command: node --test extension/tests/action-popup.test.mjs
         required_check_ids:
         - eng.verification.module-tests
+        - eng.release.python-tests
         discovered_from: LF-TSK-QLT-2551
         depends_on: []
       - id: LF-TSK-QLT-2553
@@ -1584,8 +2031,8 @@ workstreams:
       - id: LF-TSK-OPS-2088
         title: 集成单次审批并完成单镜像发行与真实安装
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/single-approval-release/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -1596,9 +2043,9 @@ workstreams:
         - ops/release/workflow/promote_verified_release.py
         - ops/release/tests/workflow.test.mjs
         - tests/verification/test_ci_workflows.py
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         - ops/release/workflow/release_registry.py
-        - tests/verification/test_release_registry.py
+        - tests/release/test_release_registry.py
         - planning/workstreams.yaml
         - harness/agent-policy.md
         - docs/scenarios/github-actions.md
@@ -1625,6 +2072,7 @@ workstreams:
         validation_command: python3 -m scripts.acceptance check --submission-id <uuid>
         required_check_ids:
         - eng.verification.module-tests
+        - eng.release.python-tests
         discovered_from: LF-TSK-OPS-2087
         depends_on: []
       - id: LF-TSK-QLT-2536
@@ -1903,8 +2351,8 @@ workstreams:
       - id: LF-TSK-OPS-2086
         title: 集成恢复合同与夹具修复并完成新正式版本
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.0.1
         task_source: openspec/changes/single-container-shell-test-determinism/tasks.md
         estimated_minutes: 60
         kind: implementation
@@ -1919,7 +2367,7 @@ workstreams:
         - ops/release/version.txt
         - ops/release/notes/2.1.7.md
         - tests/verification/test_ci_workflows.py
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         - ops/docker/tests/test_contract.py
         - ops/docker/tests/fixtures/java-command-stub.sh
         - tests/verification/test_docker_contract_checks.py
@@ -1963,8 +2411,8 @@ workstreams:
       - id: LF-TSK-QLT-2527
         title: 接通受保护晋升显式恢复合同与真实接缝测试
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/single-container-promotion-recovery/tasks.md
         estimated_minutes: 60
         kind: implementation
@@ -1973,7 +2421,7 @@ workstreams:
         - ops/release/workflow/run-release-workflow.mjs
         - .github/workflows/release.yml
         - ops/release/tests/workflow.test.mjs
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         - docs/scenarios/github-actions/first-release/preparation.md
         - tmp/phase-tools/single-container-promotion-recovery/implementation/**
         forbidden_files:
@@ -1989,10 +2437,11 @@ workstreams:
         - 实际新冻结及独立结果，不消费旧PASS；不能把工程或实机局部基线当整体发行。
         acceptance_evidence:
         - 精确冻结、真实身份、实际命令退出和原始日志、未运行与恢复限制。
-        validation_command: node --test ops/release/tests/workflow.test.mjs && python3 -m unittest tests.verification.test_release_promotion
-          tests.verification.test_release_registry -v
+        validation_command: node --test ops/release/tests/workflow.test.mjs && python3 -m unittest tests.release.test_release_promotion
+          tests.release.test_release_registry -v
         required_check_ids:
         - eng.verification.module-tests
+        - eng.release.python-tests
         discovered_from: LF-TSK-OPS-2066
         depends_on: []
       - id: LF-TSK-QLT-2528
@@ -2085,16 +2534,16 @@ workstreams:
       - id: LF-TSK-QLT-2523
         title: 修复晋升器与镜像发布的真实参数边界
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.0.1
         task_source: openspec/changes/single-container-registry-boundary/tasks.md
         estimated_minutes: 45
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - ops/release/workflow/promote_verified_release.py
-        - tests/verification/test_release_promotion.py
-        - tests/verification/test_release_registry.py
+        - tests/release/test_release_promotion.py
+        - tests/release/test_release_registry.py
         - tmp/phase-tools/single-container-registry-boundary/implementation/**
         forbidden_files: [secrets/**, .local/**, data/**, .env]
         expected_output: 精确发布桥接合同及当次真实证据，不授予历史候选资格。
@@ -2104,7 +2553,7 @@ workstreams:
         - 真实公开函数链RED/GREEN覆盖成功、相同镜像恢复及失败分类，不以mock整个publish_images绕过签名。
         - 真实actor及目标绑定，原始失败保留，当次全差异独立验收，新正式候选另行19项完整验收，0历史PASS复用。
         acceptance_evidence: [精确冻结、真实身份、实际命令退出和原始日志、未运行与恢复限制。]
-        validation_command: python3 -m unittest tests.verification.test_release_promotion tests.verification.test_release_registry -v
+        validation_command: python3 -m unittest tests.release.test_release_promotion tests.release.test_release_registry -v
         required_check_ids: [eng.verification.module-tests]
         discovered_from: LF-TSK-OPS-2066
         depends_on: []
@@ -2885,14 +3334,14 @@ workstreams:
       - id: LF-TSK-QLT-2501
         title: 隔离挂起夹具启动与有界运行的真实观察
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.0.1
         task_source: openspec/changes/single-container-host-home/tasks.md
         estimated_minutes: 20
         kind: implementation
         lifecycle_state: READY
         allowed_files:
-        - tests/verification/test_release_docker_preflight.py
+        - tests/release/test_release_docker_preflight.py
         - tmp/phase-tools/single-container-host-home/readiness/**
         forbidden_files: [secrets/**, .local/**, data/**, .env]
         expected_output: 真实挂起夹具已启动再验证既有一秒运行预算和进程组回收，不以调度未启动误判产品。
@@ -2903,7 +3352,7 @@ workstreams:
         - 保留Python不可用的fixture独立性证明，并处理准备失败时自己创建的真实进程及证据。
         acceptance_evidence:
         - 已存在的单项精准失败、实际owned进程观测、全类直接测试和不可变原生回执。
-        validation_command: python3 -m unittest tests.verification.test_release_docker_preflight
+        validation_command: python3 -m unittest tests.release.test_release_docker_preflight
         required_check_ids: [eng.verification.module-tests]
         discovered_from: LF-TSK-QLT-2494
         depends_on: []
@@ -3826,15 +4275,15 @@ workstreams:
       - id: LF-TSK-QLT-2469
         title: 修复发行资产流的有界传输预算
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.0.1
         task_source: openspec/changes/release-upload-transfer-budget/tasks.md
         estimated_minutes: 45
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - ops/release/workflow/promote_verified_release.py
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         - tmp/phase-tools/release-upload-transfer-budget/implementation/**
         forbidden_files: [secrets/**, .local/**, data/**, .env]
         expected_output: 元数据60秒与资产流900秒绝对期限分离，保留20秒socket、目标、摘要、无重试及未知写入失败关闭。
@@ -3842,7 +4291,7 @@ workstreams:
         - 元数据60秒与资产流900秒绝对期限分离，保留20秒socket、目标、摘要、无重试及未知写入失败关闭。
         - 不调整Check、Formal、Actions外层期限，不修改v2.0.10正式资产、标签、安装或验收记录。
         acceptance_evidence: [真实原生来源、最终冻结摘要、当次直接或独立结果及证据定位。]
-        validation_command: python3 -m unittest tests.verification.test_release_promotion
+        validation_command: python3 -m unittest tests.release.test_release_promotion
         required_check_ids: [eng.verification.module-tests, eng.repository.planning]
         discovered_from: LF-TSK-OPS-2017
         depends_on: []
@@ -3894,15 +4343,15 @@ workstreams:
       - id: LF-TSK-QLT-2466
         title: 精确核对已验收候选的本机镜像ID
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/release-registry-image-id/tasks.md
         estimated_minutes: 30
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - ops/release/workflow/release_registry.py
-        - tests/verification/test_release_registry.py
+        - tests/release/test_release_registry.py
         forbidden_files:
         - secrets/**
         - .local/**
@@ -3914,10 +4363,11 @@ workstreams:
         - 真实裸HEX fixture完整push及规范前缀、非法ID、不同digest、平台/label漂移拒绝直接通过。
         acceptance_evidence:
         - 真实来源、冻结摘要、直接或独立结果及证据定位。
-        validation_command: python3 -m unittest tests.verification.test_release_registry
+        validation_command: python3 -m unittest tests.release.test_release_registry
         required_check_ids:
         - eng.verification.module-tests
         - eng.repository.planning
+        - eng.release.python-tests
         discovered_from: LF-TSK-OPS-2017
         depends_on: []
         deliverable: Podman裸HEX镜像ID的精确规范化及拒绝边界回归。
@@ -4052,15 +4502,15 @@ workstreams:
       - id: LF-TSK-QLT-2460
         title: 从已验收清单消费唯一扩展制品
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/release-extension-artifact/tasks.md
         estimated_minutes: 30
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - ops/release/workflow/promote_verified_release.py
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         forbidden_files:
         - secrets/**
         - .local/**
@@ -4072,10 +4522,11 @@ workstreams:
         - 当前extension.zip布局的预检、9项公开资产、归档字节以及非法扩展拒绝测试通过。
         acceptance_evidence:
         - 真实来源、冻结摘要、直接或独立结果及证据定位。
-        validation_command: python3 -m unittest tests.verification.test_release_promotion
+        validation_command: python3 -m unittest tests.release.test_release_promotion
         required_check_ids:
         - eng.verification.module-tests
         - eng.repository.planning
+        - eng.release.python-tests
         discovered_from: LF-TSK-OPS-2017
         depends_on: []
         deliverable: 清单驱动扩展复制与当前构建器布局回归。
@@ -5054,8 +5505,8 @@ workstreams:
       - id: LF-TSK-QLT-2402
         title: 以固定发行候选送验现有独立验收链
         priority: P0
-        task_version: 2
-        change_version: 1.3.0
+        task_version: 3
+        change_version: 1.3.1
         task_source: openspec/changes/gate-trigger-allocation/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -5063,9 +5514,9 @@ workstreams:
         allowed_files:
         - scripts/acceptance/**
         - tests/delivery_gate/**
-        - tests/verification/test_release_promotion.py
-        - tests/verification/test_candidate_runtime_check.py
-        - tests/verification/test_release_registry.py
+        - tests/release/test_release_promotion.py
+        - tests/release/test_candidate_runtime_check.py
+        - tests/release/test_release_registry.py
         - ops/release/workflow/run-release-workflow.mjs
         - ops/release/workflow/promote_verified_release.py
         - ops/release/tests/workflow.test.mjs
@@ -5083,8 +5534,8 @@ workstreams:
       - id: LF-TSK-QLT-2403
         title: 集成门禁执行归属和唯一操作说明
         priority: P0
-        task_version: 4
-        change_version: 1.3.0
+        task_version: 5
+        change_version: 1.4.0
         task_source: openspec/changes/gate-trigger-allocation/tasks.md
         estimated_minutes: 60
         kind: implementation
@@ -5120,15 +5571,15 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-QLT-2402
           type: hard
-          required_task_version: 2
-          required_change_version: 1.3.0
+          required_task_version: 3
+          required_change_version: 1.3.1
           required_result: PASS
         deliverable: 集成门禁执行归属和唯一操作说明的本次实现或独立证据，不授予 Git 集成或公开发行许可。
       - id: LF-TSK-QLT-2404
         title: 独立验证门禁触发和分配修正
         priority: P0
-        task_version: 5
-        change_version: 1.3.0
+        task_version: 6
+        change_version: 1.4.0
         task_source: openspec/changes/gate-trigger-allocation/tasks.md
         estimated_minutes: 45
         kind: design
@@ -5162,20 +5613,20 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-QLT-2402
           type: hard
-          required_task_version: 2
-          required_change_version: 1.3.0
+          required_task_version: 3
+          required_change_version: 1.3.1
           required_result: PASS
         - task_id: LF-TSK-QLT-2403
           type: hard
-          required_task_version: 4
-          required_change_version: 1.3.0
+          required_task_version: 5
+          required_change_version: 1.4.0
           required_result: PASS
         deliverable: 独立验证门禁触发和分配修正的本次实现或独立证据，不授予 Git 集成或公开发行许可。
       - id: LF-TSK-QLT-2405
         title: 独立审查门禁调整的冻结证据
         priority: P0
-        task_version: 4
-        change_version: 1.3.0
+        task_version: 5
+        change_version: 1.4.0
         task_source: openspec/changes/gate-trigger-allocation/tasks.md
         estimated_minutes: 30
         kind: design
@@ -5194,15 +5645,15 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-QLT-2404
           type: hard
-          required_task_version: 5
-          required_change_version: 1.3.0
+          required_task_version: 6
+          required_change_version: 1.4.0
           required_result: PASS
         deliverable: 独立审查门禁调整的冻结证据的本次实现或独立证据，不授予 Git 集成或公开发行许可。
       - id: LF-TSK-QLT-2301
         title: Verification 与仓库检查目录消费者
         priority: P1
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/layer-script-directories/proposal.md
         estimated_minutes: 90
         kind: implementation
@@ -5222,17 +5673,17 @@ workstreams:
         - .local/**
         - data/**
         - .env
-        - tests/verification/test_candidate_runtime_check.py
+        - tests/release/test_candidate_runtime_check.py
         - tests/verification/test_ecdict_bundle.py
-        - tests/verification/test_release_docker_preflight.py
+        - tests/release/test_release_docker_preflight.py
         - tests/verification/test_release_manifest_checks.py
-        - tests/verification/test_release_runtime_lifecycle.py
-        - tests/verification/test_release_runtime_artifacts.py
-        - tests/verification/test_release_promotion.py
-        - tests/verification/test_release_runtime_check.py
+        - tests/release/test_release_runtime_lifecycle.py
+        - tests/release/test_release_runtime_artifacts.py
+        - tests/release/test_release_promotion.py
+        - tests/release/test_release_runtime_check.py
         - tests/verification/test_release_checks.py
-        - tests/verification/test_release_registry.py
-        - tests/verification/test_release_source_bridge.py
+        - tests/release/test_release_registry.py
+        - tests/release/test_release_source_bridge.py
         expected_output: Verification 与仓库检查目录消费者，删除旧路径与兼容，不削弱真实覆盖和身份资源边界。
         deliverable: 本次范围内增量、真实直接检查和不可变包完成事实；不签 Formal，不操作 Git。
         acceptance_criteria:
@@ -5246,6 +5697,7 @@ workstreams:
         required_check_ids:
         - eng.repository.planning
         - eng.repository.docs
+        - eng.release.python-tests
         depends_on: []
       - id: LF-TSK-QLT-2302
         title: Acceptance 与 Agent 新路径及单一入口
@@ -5283,8 +5735,8 @@ workstreams:
       - id: LF-TSK-QLT-2303
         title: 发行分层和来源检查消费者
         priority: P1
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/layer-script-directories/proposal.md
         estimated_minutes: 90
         kind: implementation
@@ -5292,17 +5744,17 @@ workstreams:
         allowed_files:
         - ops/release/**
         - scripts/checks/release/**
-        - tests/verification/test_candidate_runtime_check.py
+        - tests/release/test_candidate_runtime_check.py
         - tmp/phase-tools/layer-script-directories-20261010/C/**
-        - tests/verification/test_release_docker_preflight.py
+        - tests/release/test_release_docker_preflight.py
         - tests/verification/test_release_manifest_checks.py
-        - tests/verification/test_release_runtime_lifecycle.py
-        - tests/verification/test_release_runtime_artifacts.py
-        - tests/verification/test_release_promotion.py
-        - tests/verification/test_release_runtime_check.py
+        - tests/release/test_release_runtime_lifecycle.py
+        - tests/release/test_release_runtime_artifacts.py
+        - tests/release/test_release_promotion.py
+        - tests/release/test_release_runtime_check.py
         - tests/verification/test_release_checks.py
-        - tests/verification/test_release_registry.py
-        - tests/verification/test_release_source_bridge.py
+        - tests/release/test_release_registry.py
+        - tests/release/test_release_source_bridge.py
         forbidden_files:
         - secrets/**
         - .local/**
@@ -5316,11 +5768,12 @@ workstreams:
         - 保持普通测试归属、他人改动与原始证据；必需项未运行不得 PASS。
         acceptance_evidence:
         - 源码变更映射、精准直接检查原始记录与本次原生 completion。
-        validation_command: node --experimental-test-module-mocks --test ops/release/tests/*.test.mjs && python3 -m unittest tests.verification.test_release_promotion tests.verification.test_release_registry
-          tests.verification.test_release_runtime_check tests.verification.test_release_source_bridge tests.verification.test_candidate_runtime_check
+        validation_command: node --experimental-test-module-mocks --test ops/release/tests/*.test.mjs && python3 -m unittest tests.release.test_release_promotion tests.release.test_release_registry
+          tests.release.test_release_runtime_check tests.release.test_release_source_bridge tests.release.test_candidate_runtime_check
         required_check_ids:
         - eng.repository.planning
         - eng.repository.docs
+        - eng.release.python-tests
         depends_on: []
       - id: LF-TSK-QLT-2304
         title: Podman Docker 分层及部署检查适配器
@@ -6593,8 +7046,8 @@ workstreams:
       - id: LF-TSK-QLT-2179
         title: 统一候选运行证明纯校验合同
         priority: P1
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: openspec/changes/deep-simplify-harness-scripts/proposal.md
         estimated_minutes: 75
         kind: implementation
@@ -6602,7 +7055,7 @@ workstreams:
         allowed_files:
         - ops/release/integrity/candidate_runtime_result_contract.py
         - scripts/checks/release/candidate/check_candidate_installation_lifecycle.py
-        - tests/verification/test_candidate_runtime_check.py
+        - tests/release/test_candidate_runtime_check.py
         forbidden_files:
         - secrets/**
         - .local/**
@@ -6616,14 +7069,15 @@ workstreams:
         - 未执行/缺项不得称PASS；原始历史证据不改字节，不能自签正式验收。
         acceptance_evidence:
         - 本次冻结diff、风险选定直接负向回归及不同actor独立验证；执行状态仅本变更status页。
-        validation_command: python3 -m unittest tests.verification.test_candidate_runtime_check -v
+        validation_command: python3 -m unittest tests.release.test_candidate_runtime_check -v
         required_check_ids:
         - eng.repository.planning
+        - eng.release.python-tests
         depends_on:
         - task_id: LF-TSK-QLT-2169
           type: soft
-          required_task_version: 2
-          required_change_version: 1.1.0
+          required_task_version: 3
+          required_change_version: 1.2.0
         discovered_from: LF-TSK-QLT-2169
       - id: LF-TSK-QLT-2160
         title: 收敛 Codex 冻结身份与工作包证据
@@ -6938,8 +7392,8 @@ workstreams:
       - id: LF-TSK-QLT-2169
         title: 简化发行构建与晋升支持矩阵
         priority: P1
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: openspec/changes/deep-simplify-harness-scripts/proposal.md
         estimated_minutes: 75
         kind: implementation
@@ -6952,13 +7406,13 @@ workstreams:
         - scripts/checks/release/source/release_test_artifact_builder.py
         - scripts/checks/release/source/check_synthetic_release_lifecycle.py
         - scripts/checks/release/source/release_installation_checks.py
-        - tests/verification/test_candidate_runtime_check.py
+        - tests/release/test_candidate_runtime_check.py
         - tests/verification/test_ecdict_bundle.py
-        - tests/verification/test_release_docker_preflight.py
-        - tests/verification/test_release_promotion.py
-        - tests/verification/test_release_runtime_artifacts.py
-        - tests/verification/test_release_runtime_check.py
-        - tests/verification/test_release_runtime_lifecycle.py
+        - tests/release/test_release_docker_preflight.py
+        - tests/release/test_release_promotion.py
+        - tests/release/test_release_runtime_artifacts.py
+        - tests/release/test_release_runtime_check.py
+        - tests/release/test_release_runtime_lifecycle.py
         - ops/release/host_resources/release_process_control.py
         - ops/release/test_tools/build-synthetic-release-candidates.mjs
         - ops/release/tests/synthetic-candidates.test.mjs
@@ -6977,10 +7431,11 @@ workstreams:
         - 未执行/缺项不得称PASS；原始历史证据不改字节，不能自签正式验收。
         acceptance_evidence:
         - 本次冻结diff、风险选定直接负向回归及不同actor独立验证；执行状态仅本变更status页。
-        validation_command: python3 -m unittest tests.verification.test_release_runtime_artifacts tests.verification.test_release_promotion
+        validation_command: python3 -m unittest tests.release.test_release_runtime_artifacts tests.release.test_release_promotion
           tests.verification.test_ecdict_bundle
         required_check_ids:
         - eng.repository.planning
+        - eng.release.python-tests
         depends_on: []
       - id: LF-TSK-QLT-2170
         title: 收敛 Repository 检查与 Catalog 解析：合同切片1
@@ -7674,15 +8129,15 @@ workstreams:
       - id: LF-TSK-QLT-2110
         title: 批量构造来源身份临时索引以降低门禁测试开销
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 60
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - scripts/checks/release/source/frozen_source_fixture.py
-        - tests/verification/test_release_source_bridge.py
+        - tests/release/test_release_source_bridge.py
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/status.md
         - openspec/changes/gate-test-performance/**
@@ -7700,10 +8155,11 @@ workstreams:
         acceptance_evidence:
         - 实际 Git 子进程计数、同输入等价回归及源索引/对象字节不变证明。
         - 原用例保留清单、定点回归和当前冻结输入的独立开发检查报告及只读复核。
-        validation_command: python3 -m unittest tests.verification.test_release_source_bridge
+        validation_command: python3 -m unittest tests.release.test_release_source_bridge
         required_check_ids:
         - eng.verification.module-tests
         - eng.repository.planning
+        - eng.release.python-tests
         depends_on: []
         deliverable: 来源身份计算的常数次 Git 调用、等价与隔离回归，以及保持覆盖的开发检查性能证据。
       - id: LF-TSK-QLT-2111
@@ -8245,15 +8701,15 @@ workstreams:
       - id: LF-TSK-QLT-2125
         title: 在既有回收期限内确认短暂未知的进程组状态
         priority: P0
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 30
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - ops/release/host_resources/release_docker_preflight.py
-        - tests/verification/test_release_docker_preflight.py
+        - tests/release/test_release_docker_preflight.py
         - openspec/changes/gate-test-performance/**
         - planning/workstreams.yaml
         - docs/roadmap/master-plan/phase2/status.md
@@ -8270,10 +8726,11 @@ workstreams:
         - 固定时钟回归覆盖 None 转 False 成功、持续 None 失败、持续 True 失败与 direct-child reap 失败；保留已有真实 orphan 与 timeout 用例。
         acceptance_evidence:
         - 当前源码哈希、失败日志、单例观察和修复边界。
-        validation_command: python3 -m unittest tests.verification.test_release_docker_preflight -v
+        validation_command: python3 -m unittest tests.release.test_release_docker_preflight -v
         required_check_ids:
         - eng.verification.module-tests
         - eng.repository.planning
+        - eng.release.python-tests
         depends_on: []
         deliverable: 消除短暂未知状态的过早失败，保持清理判据和时限，不冒充整轮性能通过。
       - id: LF-TSK-QLT-2126
@@ -9054,8 +9511,8 @@ workstreams:
       - id: LF-TSK-QLT-2001
         title: 串行核验完整主线及跨模块验收矩阵
         priority: P0
-        task_version: 5
-        change_version: 3.2.0
+        task_version: 6
+        change_version: 3.3.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -9103,8 +9560,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-EXT-2002
           type: hard
-          required_task_version: 3
-          required_change_version: 2.1.0
+          required_task_version: 4
+          required_change_version: 3.0.0
           required_result: PASS
         - task_id: LF-TSK-OPS-2002
           type: hard
@@ -9115,8 +9572,8 @@ workstreams:
       - id: LF-TSK-QLT-2002
         title: 验证干净环境发布闭环和资源门槛
         priority: P0
-        task_version: 3
-        change_version: 1.2.0
+        task_version: 4
+        change_version: 1.3.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
         kind: implementation
@@ -9144,18 +9601,18 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2008
           type: hard
-          required_task_version: 5
-          required_change_version: 3.2.0
+          required_task_version: 6
+          required_change_version: 3.3.0
           required_result: PASS
         - task_id: LF-TSK-ARCH-2007
           type: hard
-          required_task_version: 3
-          required_change_version: 2.1.0
+          required_task_version: 4
+          required_change_version: 2.2.0
           required_result: PASS
         - task_id: LF-TSK-QLT-2001
           type: hard
-          required_task_version: 5
-          required_change_version: 3.2.0
+          required_task_version: 6
+          required_change_version: 3.3.0
           required_result: PASS
         deliverable: 验证干净环境发布闭环和资源门槛及直接验收证据。
       - id: LF-TSK-QLT-2003
@@ -9285,8 +9742,8 @@ workstreams:
       - id: LF-TSK-QLT-2004
         title: 将发布验收与使用入口接入共享工程合同
         priority: P0
-        task_version: 4
-        change_version: 3.1.0
+        task_version: 5
+        change_version: 3.2.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -9295,18 +9752,18 @@ workstreams:
         - scripts/checks/release/source/check_synthetic_release_lifecycle.py
         - scripts/checks/release/source/release_test_artifact_builder.py
         - scripts/checks/release/source/release_installation_checks.py
-        - tests/verification/test_release_runtime_check.py
-        - tests/verification/test_release_runtime_artifacts.py
-        - tests/verification/test_release_runtime_lifecycle.py
+        - tests/release/test_release_runtime_check.py
+        - tests/release/test_release_runtime_artifacts.py
+        - tests/release/test_release_runtime_lifecycle.py
         - scripts/environment/configuration/verification_environment.py
         - tests/verification/test_environment.py
         - backend/build.gradle.kts
         - backend/verification/integration/src/runtimeSmoke/java/io/lexiflow/integration/SyntheticReleaseDatasetProducer.java
         - backend/verification/integration/src/runtimeSmoke/java/io/lexiflow/integration/SyntheticReleaseDatasetProducerTest.java
         - scripts/checks/release/source/frozen_source_fixture.py
-        - tests/verification/test_release_source_bridge.py
+        - tests/release/test_release_source_bridge.py
         - ops/release/host_resources/release_docker_preflight.py
-        - tests/verification/test_release_docker_preflight.py
+        - tests/release/test_release_docker_preflight.py
         - tests/verification/test_kernel.py
         - tests/verification/test_scenarios.py
         - tests/verification/test_lifecycle_checks.py
@@ -9339,11 +9796,12 @@ workstreams:
         - eng.repository.docs
         - eng.repository.planning
         - eng.verification.module-tests
+        - eng.release.python-tests
         depends_on:
         - task_id: LF-TSK-OPS-2008
           type: hard
-          required_task_version: 5
-          required_change_version: 3.2.0
+          required_task_version: 6
+          required_change_version: 3.3.0
           required_result: PASS
         deliverable: 将发布验收与使用入口接入共享工程合同及可核对直接证据。
       - id: LF-TSK-QLT-2007
@@ -9397,8 +9855,8 @@ workstreams:
       - id: LF-TSK-QLT-2008
         title: 联合消费候选运行与已有 Formal 证据
         priority: P0
-        task_version: 3
-        change_version: 1.2.0
+        task_version: 4
+        change_version: 1.3.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -9449,8 +9907,8 @@ workstreams:
           required_change_version: 1.1.0
         - task_id: LF-TSK-OPS-2015
           type: soft
-          required_task_version: 2
-          required_change_version: 1.1.0
+          required_task_version: 3
+          required_change_version: 1.2.0
         deliverable: 不允许拼接无关PASS的候选与Formal联合绑定接口。
 - id: LF-WS-PRD
   code: PRD
@@ -10564,8 +11022,8 @@ workstreams:
       - id: LF-TSK-EXT-2002
         title: 对齐客户端观测和显示边界
         priority: P0
-        task_version: 3
-        change_version: 2.1.0
+        task_version: 4
+        change_version: 3.0.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -10584,7 +11042,6 @@ workstreams:
         - extension/tests/page-lifecycle.test.mjs
         - extension/tests/caption-capture.test.mjs
         - extension/tests/translation-e2e.mjs
-        - extension/tests/experience-acceptance.mjs
         - extension/tests/continuous-acceptance.mjs
         - docs/roadmap/master-plan/phase2/observability.md
         - docs/roadmap/master-plan/phase2/tasks.md
@@ -10665,8 +11122,8 @@ workstreams:
       - id: LF-TSK-EXT-2004
         title: 展示服务与资料状态并拒绝不匹配协议
         priority: P0
-        task_version: 3
-        change_version: 2.1.0
+        task_version: 4
+        change_version: 2.2.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
         kind: implementation
@@ -10716,8 +11173,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-EXT-2002
           type: hard
-          required_task_version: 3
-          required_change_version: 2.1.0
+          required_task_version: 4
+          required_change_version: 3.0.0
           required_result: PASS
         - task_id: LF-TSK-EXT-2003
           type: hard
@@ -11251,8 +11708,8 @@ workstreams:
       - id: LF-TSK-OPS-2064
         title: 晋升唯一正式镜像和三附件发行
         priority: P0
-        task_version: 2
-        change_version: 1.0.0
+        task_version: 3
+        change_version: 1.1.0
         task_source: openspec/changes/single-container-release/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -11261,8 +11718,8 @@ workstreams:
         - ops/release/workflow/promote_verified_release.py
         - ops/release/workflow/release_registry.py
         - ops/release/notes/**
-        - tests/verification/test_release_promotion.py
-        - tests/verification/test_release_registry.py
+        - tests/release/test_release_promotion.py
+        - tests/release/test_release_registry.py
         forbidden_files:
         - secrets/**
         - .local/**
@@ -11274,9 +11731,10 @@ workstreams:
         - 满足本阶段设计与对应工作包验收，不清理未知资源、不复用历史PASS、不自签验收。
         acceptance_evidence:
         - 真实原生身份、冻结摘要、逐项直接或独立结果、风险恢复与限制定位。
-        validation_command: python3 -m unittest tests.verification.test_release_promotion tests.verification.test_release_registry
+        validation_command: python3 -m unittest tests.release.test_release_promotion tests.release.test_release_registry
         required_check_ids:
         - eng.release.build
+        - eng.release.python-tests
         depends_on: []
       - id: LF-TSK-OPS-2067
         title: 隔离源码开发安装与单容器候选验收
@@ -11347,8 +11805,8 @@ workstreams:
       - id: LF-TSK-OPS-2085
         title: 集成受保护晋升恢复修复与新正式版本
         priority: P0
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: openspec/changes/single-container-promotion-recovery/tasks.md
         estimated_minutes: 45
         kind: implementation
@@ -11358,7 +11816,7 @@ workstreams:
         - ops/release/workflow/run-release-workflow.mjs
         - .github/workflows/release.yml
         - ops/release/tests/workflow.test.mjs
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         - tests/verification/test_ci_workflows.py
         - docs/scenarios/github-actions/first-release/preparation.md
         - ops/release/version.txt
@@ -11381,13 +11839,14 @@ workstreams:
         validation_command: python3 -m scripts.checks.repository.catalog.check_task_catalog
         required_check_ids:
         - eng.verification.module-tests
+        - eng.release.python-tests
         discovered_from: LF-TSK-OPS-2066
         depends_on: []
       - id: LF-TSK-OPS-2084
         title: 集成镜像晋升接缝修复及精确发行身份
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.0.1
         task_source: openspec/changes/single-container-registry-boundary/tasks.md
         estimated_minutes: 45
         kind: implementation
@@ -11395,8 +11854,8 @@ workstreams:
         allowed_files:
         - planning/workstreams.yaml
         - ops/release/workflow/promote_verified_release.py
-        - tests/verification/test_release_promotion.py
-        - tests/verification/test_release_registry.py
+        - tests/release/test_release_promotion.py
+        - tests/release/test_release_registry.py
         - ops/release/version.txt
         - ops/release/notes/2.1.6.md
         - openspec/changes/single-container-registry-boundary/**
@@ -11614,21 +12073,21 @@ workstreams:
       - id: LF-TSK-OPS-2076
         title: 修复安全子环境中的宿主目录派生并固定发行身份
         priority: P0
-        task_version: 8
-        change_version: 1.7.0
+        task_version: 9
+        change_version: 1.8.0
         task_source: openspec/changes/single-container-host-home/tasks.md
         estimated_minutes: 60
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - scripts/checks/release/source/release_installation_checks.py
-        - tests/verification/test_release_runtime_lifecycle.py
+        - tests/release/test_release_runtime_lifecycle.py
         - ops/podman/candidates/single-runtime-candidate.mjs
         - ops/podman/tests/candidate-runtime.test.mjs
         - ops/docker/runtime-entrypoint.sh
         - ops/release/tests/lifecycle-install.test.mjs
         - ops/release/tests/lifecycle.test.mjs
-        - tests/verification/test_release_docker_preflight.py
+        - tests/release/test_release_docker_preflight.py
         - ops/release/version.txt
         - ops/release/notes/2.1.3.md
         - planning/workstreams.yaml
@@ -11646,10 +12105,11 @@ workstreams:
         - 当次冻结由不同真实actor独立验证和审查；新版本不覆盖旧标签、候选、公开资产或失败记录。
         acceptance_evidence:
         - 精确目标、Task版本、真实身份、冻结摘要、直接或独立检查及未运行限制。
-        validation_command: python3 -m unittest tests.verification.test_release_runtime_lifecycle
+        validation_command: python3 -m unittest tests.release.test_release_runtime_lifecycle
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
+        - eng.release.python-tests
         discovered_from: LF-TSK-QLT-2481
         depends_on: []
       - id: LF-TSK-OPS-2073
@@ -11718,15 +12178,15 @@ workstreams:
       - id: LF-TSK-OPS-2070
         title: 修复生命周期宿主上下文与真实完成状态
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/single-container-release/tasks.md
         estimated_minutes: 45
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - scripts/checks/release/source/release_installation_checks.py
-        - tests/verification/test_release_runtime_lifecycle.py
+        - tests/release/test_release_runtime_lifecycle.py
         - ops/podman/candidates/single-runtime-candidate.mjs
         - ops/podman/tests/candidate-runtime.test.mjs
         - tmp/phase-tools/single-container-release/lifecycle-fix/**
@@ -11743,23 +12203,24 @@ workstreams:
         - 仅消费本次精确目标与冻结输入，不自签独立验收、不复用历史PASS。
         acceptance_evidence:
         - 精确Task/version、真实actor与运行记录、输入摘要、当次检查或只读审查结果及限制。
-        validation_command: python3 -m unittest tests.verification.test_release_runtime_lifecycle -v && node --test ops/podman/tests/candidate-runtime.test.mjs
+        validation_command: python3 -m unittest tests.release.test_release_runtime_lifecycle -v && node --test ops/podman/tests/candidate-runtime.test.mjs
         required_check_ids:
         - eng.release.version
         - eng.repository.planning
+        - eng.release.python-tests
         discovered_from: LF-TSK-QLT-2481
         depends_on: []
       - id: LF-TSK-OPS-2075
         title: 消除挂起测试夹具的解释器启动依赖
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/chinese-engineering-descriptions/tasks.md
         estimated_minutes: 20
         kind: implementation
         lifecycle_state: READY
         allowed_files:
-        - tests/verification/test_release_docker_preflight.py
+        - tests/release/test_release_docker_preflight.py
         - tmp/phase-tools/chinese-engineering-descriptions/**
         forbidden_files:
         - secrets/**
@@ -11774,16 +12235,17 @@ workstreams:
         - 新反例在原实现确定失败，修复后完整责任模块通过，旧FAIL与错误记录保留。
         acceptance_evidence:
         - 责任模块直接命令、原始退出码/日志、新旧反例和独立冻结输入来源。
-        validation_command: python3 -m unittest tests.verification.test_release_docker_preflight -v
+        validation_command: python3 -m unittest tests.release.test_release_docker_preflight -v
         required_check_ids:
         - eng.verification.module-tests
+        - eng.release.python-tests
         discovered_from: LF-TSK-QLT-2492
         depends_on: []
       - id: LF-TSK-OPS-2072
         title: 统一工程中文说明并集成GitHub可见文案
         priority: P0
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: openspec/changes/chinese-engineering-descriptions/tasks.md
         estimated_minutes: 30
         kind: implementation
@@ -11792,7 +12254,7 @@ workstreams:
         - .github/workflows/ci.yml
         - .github/workflows/release.yml
         - tests/verification/test_ci_workflows.py
-        - tests/verification/test_release_docker_preflight.py
+        - tests/release/test_release_docker_preflight.py
         - harness/documentation-policy.md
         - planning/workstreams.yaml
         - tmp/phase-tools/chinese-engineering-descriptions/**
@@ -11814,20 +12276,21 @@ workstreams:
         required_check_ids:
         - eng.repository.docs
         - eng.repository.planning
+        - eng.release.python-tests
         discovered_from: LF-TSK-OPS-2071
         depends_on: []
       - id: LF-TSK-OPS-2071
         title: 集成生命周期修复与未占用发行版本
         priority: P0
-        task_version: 1
-        change_version: 1.0.0
+        task_version: 2
+        change_version: 1.1.0
         task_source: openspec/changes/single-container-release/tasks.md
         estimated_minutes: 30
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - scripts/checks/release/source/release_installation_checks.py
-        - tests/verification/test_release_runtime_lifecycle.py
+        - tests/release/test_release_runtime_lifecycle.py
         - ops/podman/candidates/single-runtime-candidate.mjs
         - ops/podman/tests/candidate-runtime.test.mjs
         - ops/release/version.txt
@@ -11851,6 +12314,7 @@ workstreams:
         required_check_ids:
         - eng.release.version
         - eng.repository.planning
+        - eng.release.python-tests
         discovered_from: LF-TSK-QLT-2481
         depends_on: []
       - id: LF-TSK-OPS-2069
@@ -11890,8 +12354,8 @@ workstreams:
       - id: LF-TSK-OPS-2065
         title: 集成单容器设计与使用说明
         priority: P0
-        task_version: 15
-        change_version: 1.12.0
+        task_version: 16
+        change_version: 1.13.0
         task_source: openspec/changes/single-container-release/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -11917,7 +12381,7 @@ workstreams:
         - ops/podman/tests/unified-flow.test.mjs
         - ops/release/tests/lifecycle-install.test.mjs
         - ops/release/tests/version.test.mjs
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         - tests/verification/test_ci_workflows.py
         - tests/delivery_gate/**
         - backend/product/api/src/main/java/io/lexiflow/api/runtime/RuntimeInitialization.java
@@ -11953,6 +12417,7 @@ workstreams:
         - eng.repository.planning
         - eng.repository.docs
         - eng.release.version
+        - eng.release.python-tests
         depends_on: []
       - id: LF-TSK-OPS-2066
         title: 正式验收发布及公开安装单容器发行
@@ -12512,8 +12977,8 @@ workstreams:
       - id: LF-TSK-OPS-2008
         title: 串联 Apple Silicon 构建与受控发布流水线
         priority: P0
-        task_version: 5
-        change_version: 3.2.0
+        task_version: 6
+        change_version: 3.3.0
         task_source: docs/roadmap/master-plan/phase2/release.md
         estimated_minutes: 90
         kind: implementation
@@ -12574,15 +13039,15 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-EXT-2004
           type: hard
-          required_task_version: 3
-          required_change_version: 2.1.0
+          required_task_version: 4
+          required_change_version: 2.2.0
           required_result: PASS
         deliverable: 串联 Apple Silicon 构建与受控发布流水线及直接验收证据。
       - id: LF-TSK-OPS-2012
         title: 校验实际候选目录与运行消费身份
         priority: P0
-        task_version: 3
-        change_version: 1.2.0
+        task_version: 4
+        change_version: 1.3.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -12594,7 +13059,7 @@ workstreams:
         - ops/release/tests/pipeline.test.mjs
         - ops/release/test_tools/run-release-tool-tests.mjs
         - scripts/checks/release/source/frozen_source_fixture.py
-        - tests/verification/test_release_source_bridge.py
+        - tests/release/test_release_source_bridge.py
         - tests/verification/test_module_declarations.py
         - harness/module-checks.yaml
         - harness/manifest.yaml
@@ -12619,18 +13084,19 @@ workstreams:
         - eng.release.build
         - eng.repository.docs
         - eng.repository.planning
+        - eng.release.python-tests
         discovered_from: LF-TSK-OPS-2008
         depends_on:
         - task_id: LF-TSK-OPS-2008
           type: soft
-          required_task_version: 5
-          required_change_version: 3.2.0
+          required_task_version: 6
+          required_change_version: 3.3.0
         deliverable: 运行和晋升可复用的候选实际字节完整性核验及绑定身份。
       - id: LF-TSK-OPS-2013
         title: 共享本机安装执行会话
         priority: P0
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 45
         kind: implementation
@@ -12664,14 +13130,14 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2012
           type: soft
-          required_task_version: 3
-          required_change_version: 1.2.0
+          required_task_version: 4
+          required_change_version: 1.3.0
         deliverable: 可复用但不暴露任意注入点的本机执行会话与 CLI 回归证据。
       - id: LF-TSK-OPS-2014
         title: 将实际候选接入本机安装与升级事务
         priority: P0
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -12714,18 +13180,18 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2013
           type: soft
-          required_task_version: 2
-          required_change_version: 1.1.0
-        - task_id: LF-TSK-OPS-2012
-          type: soft
           required_task_version: 3
           required_change_version: 1.2.0
+        - task_id: LF-TSK-OPS-2012
+          type: soft
+          required_task_version: 4
+          required_change_version: 1.3.0
         deliverable: 与现有本机事务一体的实际候选消费路径及直接回归证据。
       - id: LF-TSK-OPS-2015
         title: 执行同候选 ARM64 原生安装升级验收
         priority: P0
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -12739,8 +13205,8 @@ workstreams:
         - scripts/environment/configuration/verification_environment.py
         - scripts/verification/execution/check_runner.py
         - tests/verification/test_kernel.py
-        - tests/verification/test_release_runtime_check.py
-        - tests/verification/test_candidate_runtime_check.py
+        - tests/release/test_release_runtime_check.py
+        - tests/release/test_candidate_runtime_check.py
         - tests/verification/test_ci.py
         - tests/verification/test_module_declarations.py
         - harness/module-checks.yaml
@@ -12771,18 +13237,19 @@ workstreams:
         - eng.release.candidate-runtime
         - eng.repository.docs
         - eng.repository.planning
+        - eng.release.python-tests
         discovered_from: LF-TSK-OPS-2014
         depends_on:
         - task_id: LF-TSK-OPS-2014
           type: soft
-          required_task_version: 2
-          required_change_version: 1.1.0
+          required_task_version: 3
+          required_change_version: 1.2.0
         deliverable: 同一实际候选的原生运行验收入口、Verify绑定与受限清理证据。
       - id: LF-TSK-OPS-2016
         title: 有界恢复升级准备失败的私有工作目录
         priority: P0
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -12822,21 +13289,21 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2014
           type: soft
-          required_task_version: 2
-          required_change_version: 1.1.0
+          required_task_version: 3
+          required_change_version: 1.2.0
         deliverable: 有界准备写入、可核验部分清理与恢复重试测试。
       - id: LF-TSK-OPS-2017
         title: 将已验收候选晋升为不可替换的 GitHub 发行
         priority: P0
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - ops/release/workflow/promote_verified_release.py
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         - ops/release/distribution-licenses.json
         - ops/release/third-party-notices.md
         - harness/module-checks.yaml
@@ -12859,27 +13326,28 @@ workstreams:
         - 固定GitHub API目的地，无token重定向，响应/时间有界；独立配置只读token与contents写token不传子进程或输出，默认模式无远端写。
         acceptance_evidence:
         - 独立TASK_VALIDATION的归档与传输替身全流程、拒绝/失败/未知结果测试及只读冻结review；不实际连接远端写API。
-        validation_command: python3 -m unittest -v tests.verification.test_release_promotion
+        validation_command: python3 -m unittest -v tests.release.test_release_promotion
         required_check_ids:
         - eng.verification.module-tests
         - eng.repository.docs
         - eng.repository.planning
+        - eng.release.python-tests
         discovered_from: LF-TSK-QLT-2008
         depends_on:
         - task_id: LF-TSK-QLT-2008
           type: soft
-          required_task_version: 3
-          required_change_version: 1.2.0
+          required_task_version: 4
+          required_change_version: 1.3.0
         - task_id: LF-TSK-OPS-2012
           type: soft
-          required_task_version: 3
-          required_change_version: 1.2.0
+          required_task_version: 4
+          required_change_version: 1.3.0
         deliverable: 不替换发行的晋升入口与有界公开资产及失败拒绝测试。
       - id: LF-TSK-OPS-2018
         title: 接通实际候选构建与同宿主独立验收发布工作流
         priority: P0
-        task_version: 3
-        change_version: 1.2.0
+        task_version: 4
+        change_version: 1.3.0
         task_source: docs/roadmap/master-plan/phase2/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -12921,12 +13389,12 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2017
           type: soft
-          required_task_version: 2
-          required_change_version: 1.1.0
+          required_task_version: 3
+          required_change_version: 1.2.0
         - task_id: LF-TSK-OPS-2015
           type: soft
-          required_task_version: 2
-          required_change_version: 1.1.0
+          required_task_version: 3
+          required_change_version: 1.2.0
         deliverable: 真实候选与原生Formal交接的最小工作流、权限边界及用户命令导航。
       - id: LF-TSK-OPS-2019
         title: 实现软件版本镜像槽位与归属保护
@@ -13091,15 +13559,15 @@ workstreams:
       - id: LF-TSK-OPS-2024
         title: 实现固定 GHCR 已验收镜像发布与摘要证明
         priority: P0
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: openspec/changes/first-release-v2/tasks.md
         estimated_minutes: 60
         kind: implementation
         lifecycle_state: READY
         allowed_files:
         - ops/release/workflow/release_registry.py
-        - tests/verification/test_release_registry.py
+        - tests/release/test_release_registry.py
         forbidden_files:
         - secrets/**
         - .local/**
@@ -13112,18 +13580,19 @@ workstreams:
         - 凭据隔离、输出时间有界、每远端写前fresh gate；不泄露authfile/token、不改候选，未知写结果和清理失败不得PASS。
         acceptance_evidence:
         - 冻结包事实、精准直接回归与源码审阅；实机和Formal另行验证。
-        validation_command: python3 -m unittest tests.verification.test_release_registry
+        validation_command: python3 -m unittest tests.release.test_release_registry
         required_check_ids:
         - eng.verification.module-tests
         - eng.release.docker-contract
         - eng.repository.planning
+        - eng.release.python-tests
         depends_on: []
         deliverable: 实现固定 GHCR 已验收镜像发布与摘要证明的实现与有界直接检查证据。
       - id: LF-TSK-OPS-2025
         title: 同步真实候选验收到统一重装与向前重试合同
         priority: P0
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: openspec/changes/first-release-v2/tasks.md
         estimated_minutes: 75
         kind: implementation
@@ -13132,7 +13601,7 @@ workstreams:
         - ops/podman/candidates/check-podman-candidate-lifecycle.mjs
         - ops/podman/tests/candidate-runtime.test.mjs
         - ops/release/integrity/candidate_runtime_result_contract.py
-        - tests/verification/test_candidate_runtime_check.py
+        - tests/release/test_candidate_runtime_check.py
         - tests/delivery_gate/test_candidate.py
         forbidden_files:
         - secrets/**
@@ -13146,18 +13615,19 @@ workstreams:
         - 不要求已删除的旧二进制自动回退、不取消故障注入与精确归属/静止/清理保护；共享phase/result合同与消费者同步。
         acceptance_evidence:
         - 冻结包事实、精准直接回归与源码审阅；实机和Formal另行验证。
-        validation_command: node --test ops/podman/tests/candidate-runtime.test.mjs && python3 -m unittest tests.verification.test_candidate_runtime_check
+        validation_command: node --test ops/podman/tests/candidate-runtime.test.mjs && python3 -m unittest tests.release.test_candidate_runtime_check
         required_check_ids:
         - eng.verification.module-tests
         - eng.release.docker-contract
         - eng.repository.planning
+        - eng.release.python-tests
         depends_on: []
         deliverable: 同步真实候选验收到统一重装与向前重试合同的实现与有界直接检查证据。
       - id: LF-TSK-OPS-2026
         title: 接通首发版本许可与 GHCR 晋升消费者
         priority: P0
-        task_version: 2
-        change_version: 1.1.0
+        task_version: 3
+        change_version: 1.2.0
         task_source: openspec/changes/first-release-v2/tasks.md
         estimated_minutes: 90
         kind: implementation
@@ -13167,7 +13637,7 @@ workstreams:
         - ops/release/version.txt
         - ops/release/distribution-licenses.json
         - ops/release/workflow/promote_verified_release.py
-        - tests/verification/test_release_promotion.py
+        - tests/release/test_release_promotion.py
         - ops/release/workflow/run-release-workflow.mjs
         - ops/release/tests/workflow.test.mjs
         - ops/release/tests/version.test.mjs
@@ -13192,11 +13662,12 @@ workstreams:
         - 缺必需检查或环境记录 BLOCKED，不自动 Git 集成或公开写入。
         acceptance_evidence:
         - 当前冻结差异与本次真实检查报告；原始失败记录保留。
-        validation_command: python3 -m unittest tests.verification.test_release_promotion tests.verification.test_ci_workflows
+        validation_command: python3 -m unittest tests.release.test_release_promotion tests.verification.test_ci_workflows
         required_check_ids:
         - eng.verification.module-tests
         - eng.repository.planning
         - eng.repository.docs
+        - eng.release.python-tests
         depends_on: []
         deliverable: 接通首发版本许可与 GHCR 晋升消费者的实现或只读检查产物及准确边界。
       - id: LF-TSK-OPS-2027
@@ -13396,8 +13867,8 @@ workstreams:
       - id: LF-TSK-OPS-2034
         title: 独立验证完整发行修复的开发闭环
         priority: P0
-        task_version: 14
-        change_version: 2.9.0
+        task_version: 15
+        change_version: 2.10.0
         task_source: openspec/changes/first-release-v2/tasks.md
         estimated_minutes: 90
         kind: design
@@ -13425,13 +13896,13 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-OPS-2038
           type: hard
-          required_task_version: 1
-          required_change_version: 1.6.0
+          required_task_version: 2
+          required_change_version: 1.6.1
           required_result: PASS
         - task_id: LF-TSK-OPS-2040
           type: hard
-          required_task_version: 1
-          required_change_version: 1.7.0
+          required_task_version: 2
+          required_change_version: 1.7.1
           required_result: PASS
         - task_id: LF-TSK-OPS-2041
           type: hard
@@ -13455,8 +13926,8 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-OPS-2046
           type: hard
-          required_task_version: 2
-          required_change_version: 2.5.0
+          required_task_version: 3
+          required_change_version: 2.5.1
           required_result: PASS
         - task_id: LF-TSK-OPS-2047
           type: hard
@@ -13470,15 +13941,15 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-OPS-2049
           type: hard
-          required_task_version: 1
-          required_change_version: 2.9.0
+          required_task_version: 2
+          required_change_version: 2.9.1
           required_result: PASS
         deliverable: 完整开发检查结果，不等同正式发行验收。
       - id: LF-TSK-OPS-2035
         title: 独立审查完整发行修复和跨 Mac 制品边界
         priority: P0
-        task_version: 14
-        change_version: 2.9.0
+        task_version: 15
+        change_version: 2.10.0
         task_source: openspec/changes/first-release-v2/tasks.md
         estimated_minutes: 45
         kind: design
@@ -13496,8 +13967,8 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2034
           type: hard
-          required_task_version: 14
-          required_change_version: 2.9.0
+          required_task_version: 15
+          required_change_version: 2.10.0
           required_result: PASS
         deliverable: 最新证据的独立审查与缺项，不替代公开发行。
       - id: LF-TSK-OPS-2036
@@ -13548,8 +14019,8 @@ workstreams:
       - id: LF-TSK-OPS-2038
         title: 修复发行 runtime 模块身份和固定基础镜像摘要
         priority: P0
-        task_version: 1
-        change_version: 1.6.0
+        task_version: 2
+        change_version: 1.6.1
         task_source: openspec/changes/first-release-v2/tasks.md
         estimated_minutes: 20
         kind: implementation
@@ -13557,7 +14028,7 @@ workstreams:
         discovered_from: LF-TSK-OPS-2037
         allowed_files:
         - scripts/checks/release/source/check_synthetic_release_lifecycle.py
-        - tests/verification/test_release_runtime_check.py
+        - tests/release/test_release_runtime_check.py
         - ops/docker/base-images.json
         - ops/release/tests/build.test.mjs
         - docs/scenarios/verification-environment.md
@@ -13569,15 +14040,15 @@ workstreams:
         - 固定 DB 与临时动态角色的 test-only 认证边界明确，不触碰开发库或公开服务。
         acceptance_evidence:
         - 原始故障、官方 manifest/config 字节摘要与精准测试实际结果。
-        validation_command: python3 -m unittest tests.verification.test_release_runtime_check
+        validation_command: python3 -m unittest tests.release.test_release_runtime_check
         required_check_ids: [eng.verification.module-tests, eng.release.build, eng.repository.docs]
         depends_on: []
         deliverable: 固定来源与可观察真实错误的 runtime 工程修复，不等同正式候选 PASS。
       - id: LF-TSK-OPS-2039
         title: 精准验证真实合成发行 runtime 修复
         priority: P0
-        task_version: 8
-        change_version: 2.9.0
+        task_version: 9
+        change_version: 2.10.0
         task_source: openspec/changes/first-release-v2/tasks.md
         estimated_minutes: 60
         kind: design
@@ -13596,13 +14067,13 @@ workstreams:
         depends_on:
         - task_id: LF-TSK-OPS-2038
           type: hard
-          required_task_version: 1
-          required_change_version: 1.6.0
+          required_task_version: 2
+          required_change_version: 1.6.1
           required_result: PASS
         - task_id: LF-TSK-OPS-2040
           type: hard
-          required_task_version: 1
-          required_change_version: 1.7.0
+          required_task_version: 2
+          required_change_version: 1.7.1
           required_result: PASS
         - task_id: LF-TSK-OPS-2041
           type: hard
@@ -13621,20 +14092,20 @@ workstreams:
           required_result: PASS
         - task_id: LF-TSK-OPS-2046
           type: hard
-          required_task_version: 2
-          required_change_version: 2.5.0
+          required_task_version: 3
+          required_change_version: 2.5.1
           required_result: PASS
         - task_id: LF-TSK-OPS-2049
           type: hard
-          required_task_version: 1
-          required_change_version: 2.9.0
+          required_task_version: 2
+          required_change_version: 2.9.1
           required_result: PASS
         deliverable: 真实合成发行生命周期的精准验证，非正式资料验收。
       - id: LF-TSK-OPS-2040
         title: 在隔离 runtime 客户端保留实际 Compose 插件能力
         priority: P0
-        task_version: 1
-        change_version: 1.7.0
+        task_version: 2
+        change_version: 1.7.1
         task_source: openspec/changes/first-release-v2/tasks.md
         estimated_minutes: 45
         kind: implementation
@@ -13642,7 +14113,7 @@ workstreams:
         discovered_from: LF-TSK-OPS-2039
         allowed_files:
         - scripts/checks/release/source/release_installation_checks.py
-        - tests/verification/test_release_runtime_lifecycle.py
+        - tests/release/test_release_runtime_lifecycle.py
         forbidden_files: [secrets/**, .local/**, data/**, .env]
         expected_output: 从实际 Docker 客户端元数据窄派生已安装 Compose 插件，使隔离配置可用，不复制调用者凭据。
         acceptance_criteria:
@@ -13651,7 +14122,7 @@ workstreams:
         - mock 直接回归覆盖派生和失败边界，实际只读 private-config compose version 可核验。
         acceptance_evidence:
         - 原始精准失败、实际 client plugin 与 private-config 对比、直接测试和源差异。
-        validation_command: python3 -m unittest tests.verification.test_release_runtime_lifecycle
+        validation_command: python3 -m unittest tests.release.test_release_runtime_lifecycle
         required_check_ids: [eng.verification.module-tests, eng.release.lifecycle-runtime]
         depends_on: []
         deliverable: 隔离 Docker 客户端的实际 Compose 能力，不绕过安装状态与资源归属护栏。
@@ -13806,8 +14277,8 @@ workstreams:
       - id: LF-TSK-OPS-2046
         title: 对齐实机验收健康探测与容器唯一入口
         priority: P0
-        task_version: 2
-        change_version: 2.5.0
+        task_version: 3
+        change_version: 2.5.1
         task_source: openspec/changes/first-release-v2/tasks.md
         estimated_minutes: 20
         kind: implementation
@@ -13815,7 +14286,7 @@ workstreams:
         discovered_from: LF-TSK-OPS-2039
         allowed_files:
         - scripts/checks/release/source/release_installation_checks.py
-        - tests/verification/test_release_runtime_lifecycle.py
+        - tests/release/test_release_runtime_lifecycle.py
         forbidden_files: [secrets/**, .local/**, data/**, .env]
         expected_output: 实机验收只调用镜像唯一正式 health 入口并精确回归，不改变健康判据。
         acceptance_criteria:
@@ -13825,7 +14296,7 @@ workstreams:
         - 只做直接回归，实机完整生命周期和独立开发检查另取新冻结证据。
         acceptance_evidence:
         - exact-health-probe.json、限定差异及直接 unittest/Ruff/format 结果。
-        validation_command: python3 -m unittest tests.verification.test_release_runtime_lifecycle
+        validation_command: python3 -m unittest tests.release.test_release_runtime_lifecycle
         required_check_ids: [eng.release.lifecycle-runtime, eng.verification.module-tests]
         depends_on: []
         deliverable: 最新唯一容器健康命令消费合同，不替代完整实机或 Formal。
@@ -13880,8 +14351,8 @@ workstreams:
       - id: LF-TSK-OPS-2049
         title: 统一 Python 预检与 POSIX 产品的 Podman 身份编码
         priority: P0
-        task_version: 1
-        change_version: 2.9.0
+        task_version: 2
+        change_version: 2.9.1
         task_source: openspec/changes/first-release-v2/tasks.md
         estimated_minutes: 20
         kind: implementation
@@ -13889,7 +14360,7 @@ workstreams:
         discovered_from: LF-TSK-OPS-2039
         allowed_files:
         - ops/release/host_resources/release_docker_preflight.py
-        - tests/verification/test_release_docker_preflight.py
+        - tests/release/test_release_docker_preflight.py
         forbidden_files: [secrets/**, .local/**, data/**, .env]
         expected_output: Python 原生 API 事实使用既有 POSIX 固定元组字节编码，严格 engine 比对与清理护栏不变。
         acceptance_criteria:
@@ -13898,7 +14369,7 @@ workstreams:
         - 同一合成 API 事实与真实 POSIX 函数摘要严格相等，真实当前引擎只读核对相等；不通过跳过或放宽 cleanup 谓词消除失败。
         acceptance_evidence:
         - 2039 v7 原始 typed FAIL、精确清理谓词定位、固定编码交叉回归与只读实机摘要相等证据。
-        validation_command: python3 -m unittest tests.verification.test_release_docker_preflight
+        validation_command: python3 -m unittest tests.release.test_release_docker_preflight
         required_check_ids: [eng.verification.module-tests, eng.release.lifecycle-runtime]
         depends_on: []
         deliverable: 最新唯一引擎身份编码的直接证据，非完整生命周期或 Formal PASS。

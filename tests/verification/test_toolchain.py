@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import os
+import importlib.metadata
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from scripts.environment.toolchains.toolchain_identity import ToolchainUnavailable, resolve_toolchain
+from scripts.environment.toolchains.toolchain_identity import (
+    ToolchainUnavailable,
+    resolve_toolchain,
+)
 
 
 def _script(path: Path, body: str) -> None:
@@ -19,6 +24,395 @@ def _script(path: Path, body: str) -> None:
 
 
 class ToolchainTests(unittest.TestCase):
+    def test_python_quality_distribution_payload_and_pin_are_bound(self):
+        from scripts.environment.toolchains import toolchain_identity as toolchain
+
+        with tempfile.TemporaryDirectory() as directory:
+            package = Path(directory) / "ruff"
+            package.mkdir()
+            origin = package / "__init__.py"
+            origin.write_text("before", encoding="utf-8")
+            binary = Path(directory) / "ruff-bin"
+            _script(binary, "exit 0")
+            spec = SimpleNamespace(
+                origin=str(origin), submodule_search_locations=[str(package)]
+            )
+            distribution = SimpleNamespace(version="0.16.8")
+            with (
+                patch.object(toolchain, "_exact_pin", return_value="0.16.8"),
+                patch.object(
+                    toolchain.importlib.metadata,
+                    "distribution",
+                    return_value=distribution,
+                ),
+                patch.object(toolchain.importlib.util, "find_spec", return_value=spec),
+                patch.object(
+                    toolchain,
+                    "_distribution_dependency_payload",
+                    return_value=[
+                        {
+                            "distribution": "ruff",
+                            "files": [
+                                {"realpath": str(origin.resolve()), "sha256": "first"}
+                            ],
+                        }
+                    ],
+                ) as dependencies,
+                patch("ruff.find_ruff_bin", return_value=str(binary)),
+            ):
+                root = Path(directory)
+                (root / "requirements-dev.txt").write_text("ruff==0.16.8\n")
+                first = toolchain._python_distribution(
+                    "ruff", "ruff", {"PATH": os.environ.get("PATH", "")}, root
+                )
+                dependencies.return_value = [
+                    {
+                        "distribution": "ruff",
+                        "files": [
+                            {"realpath": str(origin.resolve()), "sha256": "changed"}
+                        ],
+                    }
+                ]
+                self.assertNotEqual(
+                    first,
+                    toolchain._python_distribution(
+                        "ruff", "ruff", {"PATH": os.environ.get("PATH", "")}, root
+                    ),
+                )
+                dependencies.return_value = [
+                    {
+                        "distribution": "ruff",
+                        "files": [
+                            {"realpath": str(origin.resolve()), "sha256": "first"}
+                        ],
+                    }
+                ]
+                origin.write_text("changed", encoding="utf-8")
+                self.assertNotEqual(
+                    first,
+                    toolchain._python_distribution(
+                        "ruff", "ruff", {"PATH": os.environ.get("PATH", "")}, root
+                    ),
+                )
+                _script(binary, "exit 1")
+                self.assertNotEqual(
+                    first,
+                    toolchain._python_distribution(
+                        "ruff", "ruff", {"PATH": os.environ.get("PATH", "")}, root
+                    ),
+                )
+                with patch.object(toolchain, "_exact_pin", return_value="0.16.9"):
+                    with self.assertRaises(ToolchainUnavailable):
+                        toolchain._python_distribution(
+                            "ruff", "ruff", {"PATH": os.environ.get("PATH", "")}, root
+                        )
+                with patch.object(toolchain, "_exact_pin", return_value="0.16.8"):
+                    with patch.object(
+                        toolchain.importlib.metadata,
+                        "distribution",
+                        side_effect=importlib.metadata.PackageNotFoundError("ruff"),
+                    ):
+                        with self.assertRaises(ToolchainUnavailable):
+                            toolchain._python_distribution(
+                                "ruff",
+                                "ruff",
+                                {"PATH": os.environ.get("PATH", "")},
+                                root,
+                            )
+
+    def test_python_quality_distribution_symlink_escape_and_scan_limit_fail_closed(
+        self,
+    ):
+        from scripts.environment.toolchains import toolchain_identity as toolchain
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            package = Path(directory) / "pylint"
+            package.mkdir()
+            origin = package / "__init__.py"
+            origin.write_text("ok", encoding="utf-8")
+            escaped = Path(outside) / "module.py"
+            escaped.write_text("outside", encoding="utf-8")
+            (package / "external.py").symlink_to(escaped)
+            root = Path(directory)
+            (root / "requirements-dev.txt").write_text("pylint==4.0.9\n")
+            with (
+                patch.object(toolchain, "_exact_pin", return_value="4.0.9"),
+                patch.object(
+                    toolchain.importlib.metadata,
+                    "distribution",
+                    return_value=SimpleNamespace(version="4.0.9"),
+                ),
+                patch.object(
+                    toolchain.importlib.util,
+                    "find_spec",
+                    return_value=SimpleNamespace(
+                        origin=str(origin), submodule_search_locations=[str(package)]
+                    ),
+                ),
+            ):
+                with self.assertRaises(ToolchainUnavailable):
+                    toolchain._python_distribution(
+                        "pylint", "pylint", {"PATH": os.environ.get("PATH", "")}, root
+                    )
+                (package / "external.py").unlink()
+                with patch.object(toolchain, "_MAX_PACKAGE_FILES", 0):
+                    with self.assertRaises(ToolchainUnavailable):
+                        toolchain._python_distribution(
+                            "pylint",
+                            "pylint",
+                            {"PATH": os.environ.get("PATH", "")},
+                            root,
+                        )
+
+    def test_quality_entry_requires_exact_command_and_target_root(self):
+        quality = {
+            "command": [
+                "python3",
+                "-m",
+                "scripts.checks.repository.run_repository_check_group",
+                "--mode",
+                "python",
+            ],
+            "executable": "python3",
+            "required_environment": [],
+        }
+        env = {"PATH": os.environ.get("PATH", "/bin:/usr/bin")}
+        with self.assertRaisesRegex(ToolchainUnavailable, "repo_root"):
+            resolve_toolchain(quality, env)
+        unknown = {**quality, "command": [*quality["command"], "--unknown"]}
+        with patch(
+            "scripts.environment.toolchains.toolchain_identity._python_distribution"
+        ) as provider:
+            with self.assertRaisesRegex(ToolchainUnavailable, "unrecognized"):
+                resolve_toolchain(unknown, env)
+            provider.assert_not_called()
+
+    def test_other_repository_modes_keep_generic_identity_without_quality_tools(self):
+        """共享入口的 docs/planning 是已知独立模式，不要求质量工具身份。"""
+        from scripts.environment.toolchains import toolchain_identity as toolchain
+
+        env = {"PATH": os.environ.get("PATH", "/bin:/usr/bin")}
+        with patch.object(toolchain, "_python_distribution") as provider:
+            for mode in ("docs", "planning"):
+                with self.subTest(mode=mode):
+                    check = {
+                        "executable": "python3",
+                        "command": [*toolchain._PYTHON_QUALITY_COMMAND[:-1], mode],
+                        "required_environment": [],
+                    }
+                    result = resolve_toolchain(check, env)
+                    self.assertEqual(set(result["tools"]), {"python-package-yaml"})
+            provider.assert_not_called()
+
+    def test_exact_pin_comes_from_explicit_target_checkout(self):
+        from scripts.environment.toolchains import toolchain_identity as toolchain
+
+        with tempfile.TemporaryDirectory() as directory:
+            first, second = Path(directory) / "one", Path(directory) / "two"
+            first.mkdir()
+            second.mkdir()
+            (first / "requirements-dev.txt").write_text("ruff==0.16.8\n")
+            (second / "requirements-dev.txt").write_text("ruff==0.16.9\n")
+            self.assertEqual(toolchain._exact_pin("ruff", first), "0.16.8")
+            self.assertEqual(toolchain._exact_pin("ruff", second), "0.16.9")
+
+    def test_quality_command_derives_private_tool_identities_from_target_root(self):
+        quality = {
+            "command": [
+                "python3",
+                "-m",
+                "scripts.checks.repository.run_repository_check_group",
+                "--mode",
+                "python",
+            ],
+            "executable": "python3",
+            "required_environment": [],
+        }
+        env = {"PATH": os.environ.get("PATH", "/bin:/usr/bin")}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch(
+                "scripts.environment.toolchains.toolchain_identity._python_distribution",
+                side_effect=lambda name, module, actual_env, repo_root: {
+                    "name": name,
+                    "root": str(repo_root),
+                },
+            ) as provider:
+                result = resolve_toolchain(quality, env, repo_root=root)
+            self.assertEqual(
+                set(result["tools"]),
+                {
+                    "python-package-yaml",
+                    "python-package-ruff",
+                    "python-package-pylint",
+                    "python-package-astroid",
+                },
+            )
+            self.assertEqual(provider.call_count, 3)
+            self.assertTrue(
+                all(call.args[3] == root.resolve() for call in provider.call_args_list)
+            )
+
+    def test_dependency_closure_binds_files_markers_and_fails_closed(self):
+        from scripts.environment.toolchains import toolchain_identity as toolchain
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            tempfile.TemporaryDirectory() as escaped_dir,
+        ):
+            root = Path(directory)
+            (root / "tool.py").write_text("tool", encoding="utf-8")
+            (root / "dep.py").write_text("dep-v1", encoding="utf-8")
+            dep = SimpleNamespace(
+                metadata={"Name": "dep"},
+                files=[Path("dep.py")],
+                locate_file=lambda item: root / item,
+                version="1.0",
+                requires=[],
+            )
+            selected = SimpleNamespace(
+                metadata={"Name": "tool"},
+                files=[Path("tool.py")],
+                locate_file=lambda item: root / item,
+                version="1.0",
+                requires=[
+                    "dep>=1; python_version >= '3.0'",
+                    "unused==1; extra == 'optional'",
+                ],
+            )
+            pip_dist = importlib.metadata.distribution("pip")
+            with (
+                patch.object(
+                    toolchain,
+                    "_python_install_roots",
+                    return_value={
+                        root.resolve(),
+                        Path(sys.prefix).resolve(),
+                        Path(sys.base_prefix).resolve(),
+                    },
+                ),
+                patch.object(
+                    toolchain.importlib.metadata,
+                    "distribution",
+                    side_effect=lambda name: pip_dist if name == "pip" else dep,
+                ),
+            ):
+                before = toolchain._distribution_dependency_payload(selected)
+                self.assertEqual(
+                    {x["distribution"] for x in before}, {"tool", "dep", "pip"}
+                )
+                self.assertNotIn("unused", {x["distribution"] for x in before})
+                (root / "dep.py").chmod(0o600)
+                self.assertNotEqual(
+                    before, toolchain._distribution_dependency_payload(selected)
+                )
+                (root / "dep.py").chmod(0o644)
+                (root / "dep.py").write_text("dep-v2", encoding="utf-8")
+                after = toolchain._distribution_dependency_payload(selected)
+                self.assertNotEqual(before, after)
+                (root / "dep.py").unlink()
+                with self.assertRaisesRegex(ToolchainUnavailable, "missing"):
+                    toolchain._distribution_dependency_payload(selected)
+                outside = Path(escaped_dir) / "dep.py"
+                outside.write_text("escaped", encoding="utf-8")
+                (root / "dep.py").symlink_to(outside)
+                with self.assertRaisesRegex(ToolchainUnavailable, "escaped"):
+                    toolchain._distribution_dependency_payload(selected)
+                (root / "dep.py").unlink()
+                selected.files = [Path("tool.py"), Path("../outside.py")]
+                parent_escape = root.parent / "outside.py"
+                parent_escape.write_text("outside", encoding="utf-8")
+                try:
+                    with self.assertRaisesRegex(ToolchainUnavailable, "escaped"):
+                        toolchain._distribution_dependency_payload(selected)
+                finally:
+                    parent_escape.unlink(missing_ok=True)
+
+    def test_dependency_closure_limits_and_missing_pip_fail_closed(self):
+        from scripts.environment.toolchains import toolchain_identity as toolchain
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "a.py").write_text("a", encoding="utf-8")
+            fixture = SimpleNamespace(metadata={"Name": "tool"}, files=[Path("a.py")])
+            fixture.locate_file = lambda item: root / item
+            fixture.version = "1"
+            fixture.requires = []
+            pip_dist = importlib.metadata.distribution("pip")
+            with (
+                patch.object(
+                    toolchain,
+                    "_python_install_roots",
+                    return_value={
+                        root.resolve(),
+                        Path(sys.prefix).resolve(),
+                        Path(sys.base_prefix).resolve(),
+                    },
+                ),
+                patch.object(
+                    toolchain.importlib.metadata, "distribution", return_value=pip_dist
+                ),
+                patch.object(toolchain, "_MAX_PACKAGE_FILES", 0),
+            ):
+                with self.assertRaisesRegex(ToolchainUnavailable, "limit"):
+                    toolchain._distribution_dependency_payload(fixture)
+        with patch.object(
+            toolchain.importlib.metadata,
+            "distribution",
+            side_effect=importlib.metadata.PackageNotFoundError("pip"),
+        ):
+            with self.assertRaisesRegex(ToolchainUnavailable, "pip is required"):
+                toolchain._distribution_dependency_payload(fixture)
+
+    def test_dependency_distribution_count_limit_fails_closed(self):
+        from scripts.environment.toolchains import toolchain_identity as toolchain
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            entries = {}
+            for index in range(64):
+                name = f"dep{index}"
+                (root / f"{name}.py").write_text(name, encoding="utf-8")
+                entries[name] = SimpleNamespace(
+                    metadata={"Name": name},
+                    files=[Path(f"{name}.py")],
+                    locate_file=lambda item, root=root: root / item,
+                    version="1.0",
+                    requires=[f"dep{index + 1}>=1"] if index < 63 else [],
+                )
+            (root / "tool.py").write_text("tool", encoding="utf-8")
+            selected = SimpleNamespace(
+                metadata={"Name": "tool"},
+                files=[Path("tool.py")],
+                locate_file=lambda item: root / item,
+                version="1.0",
+                requires=["dep0>=1"],
+            )
+            pip_dist = importlib.metadata.distribution("pip")
+            with (
+                patch.object(
+                    toolchain,
+                    "_python_install_roots",
+                    return_value={
+                        root.resolve(),
+                        Path(sys.prefix).resolve(),
+                        Path(sys.base_prefix).resolve(),
+                    },
+                ),
+                patch.object(
+                    toolchain.importlib.metadata,
+                    "distribution",
+                    side_effect=lambda name: (
+                        pip_dist if name == "pip" else entries[name]
+                    ),
+                ),
+            ):
+                with self.assertRaisesRegex(ToolchainUnavailable, "closure limit"):
+                    toolchain._distribution_dependency_payload(selected)
+
     def test_path_order_same_path_bytes_and_symlink_target(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -300,11 +694,14 @@ class AppleGitPayloadTests(unittest.TestCase):
                 self.resolve()
 
     def test_non_apple_or_native_path_git_does_not_use_dispatch_probe(self):
-        with patch("scripts.environment.toolchains.toolchain_identity.sys.platform", "linux"):
+        with patch(
+            "scripts.environment.toolchains.toolchain_identity.sys.platform", "linux"
+        ):
             self.assertNotIn("apple_payload", self.resolve()["executor"])
         self.probe.assert_not_called()
         with patch(
-            "scripts.environment.toolchains.toolchain_identity.shutil.which", return_value=str(self.payload)
+            "scripts.environment.toolchains.toolchain_identity.shutil.which",
+            return_value=str(self.payload),
         ):
             self.assertNotIn("apple_payload", self.resolve()["executor"])
         self.probe.assert_not_called()

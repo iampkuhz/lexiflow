@@ -370,11 +370,11 @@ class TestOpsAdapterTiming(unittest.TestCase):
 
 
 class TestVerificationAdapterTiming(unittest.TestCase):
-    """scripts/checks/tool_tests/run_verification_tool_tests.py 的阶段和逐用例计时。"""
+    """scripts/checks/tool_tests/run_python_tool_tests.py 的阶段和逐用例计时。"""
 
     def test_timed_result_records_per_test(self):
         """_TimedResult 应记录每个用例的耗时。"""
-        from scripts.checks.tool_tests.run_verification_tool_tests import _TimedResult
+        from scripts.checks.tool_tests.run_python_tool_tests import _TimedResult
 
         class SlowCase(unittest.TestCase):
             def test_a(self):
@@ -397,7 +397,7 @@ class TestVerificationAdapterTiming(unittest.TestCase):
 
     def test_top_slow_ordering(self):
         """_top_slow 应按耗时降序排列。"""
-        from scripts.checks.tool_tests.run_verification_tool_tests import _top_slow
+        from scripts.checks.tool_tests.run_python_tool_tests import _top_slow
 
         per_test = {
             "fast": 0.001,
@@ -414,7 +414,7 @@ class TestAdapterCompleteness(unittest.TestCase):
     """计时不得改变真实 adapter 的完整性判定。"""
 
     def test_both_adapters_preserve_success_failure_skip_and_empty(self):
-        from scripts.checks.tool_tests import run_verification_tool_tests as verification
+        from scripts.checks.tool_tests import run_python_tool_tests as verification
 
         ops = _load_ops_adapter()
 
@@ -458,12 +458,12 @@ class TestAdapterCompleteness(unittest.TestCase):
                         if module is verification:
                             stack.enter_context(
                                 patch.object(
-                                    unittest.defaultTestLoader,
+                                    unittest.TestLoader,
                                     "discover",
                                     return_value=suite,
                                 )
                             )
-                            report = verification.verification_tests(ROOT)
+                            report = verification.run(ROOT, "verification")
                         else:
                             stack.enter_context(patch.object(ops, "_preflight"))
                             stack.enter_context(

@@ -158,10 +158,10 @@ class LifecycleCheckTest(unittest.TestCase):
         """真实消费者及来源支持的修改须进入两种运行检查快照。"""
         paths = (
             "scripts/checks/release/source/frozen_source_fixture.py",
-            "tests/verification/test_release_source_bridge.py",
-            "tests/verification/test_release_runtime_check.py",
-            "tests/verification/test_release_runtime_artifacts.py",
-            "tests/verification/test_release_runtime_lifecycle.py",
+            "tests/release/test_release_source_bridge.py",
+            "tests/release/test_release_runtime_check.py",
+            "tests/release/test_release_runtime_artifacts.py",
+            "tests/release/test_release_runtime_lifecycle.py",
             "tests/verification/test_environment.py",
         )
         for scope in ("repository-baseline", "change-targeted"):

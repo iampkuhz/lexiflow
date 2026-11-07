@@ -4,7 +4,7 @@ import unittest
 import contextlib
 import io
 
-from scripts.checks.tool_tests.run_acceptance_tool_tests import evaluate_suite
+from scripts.checks.tool_tests.run_python_tool_tests import evaluate_suite
 
 
 class DeliveryGateQualityResultTest(unittest.TestCase):
@@ -41,5 +41,5 @@ class DeliveryGateQualityResultTest(unittest.TestCase):
         self.assertEqual(1, len(report["detail"]["failed_tests"]))
         self.assertEqual(1, len(report["detail"]["error_tests"]))
         self.assertNotIn("private synthetic payload", str(report))
-        self.assertIn("FAILED TEST:", diagnostic.getvalue())
+        self.assertIn("FAIL: test_assertion", diagnostic.getvalue())
         self.assertIn("private synthetic payload", diagnostic.getvalue())

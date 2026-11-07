@@ -19,7 +19,7 @@ from typing import Any
 from scripts.verification.planning.check_definitions import REGISTRY_PATH
 from scripts.verification.planning.source_file_snapshot import snapshot_inputs
 
-REPORT_SCHEMA = "lexiflow.verification-report.v1"
+REPORT_SCHEMA = "lexiflow.verification-report.v2"
 VERIFY_CHILD_INPUT_SCHEMA = "lexiflow.verify-child-input.v2"
 VERIFY_CHILD_INPUT_MAX_BYTES = 1_048_576
 RELEASE_RUNTIME_CHECK_IDS = frozenset({"eng.release.lifecycle-runtime"})
@@ -86,6 +86,19 @@ def fingerprint_json(value: Any) -> str:
             value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
     )
+
+
+def environment_components(environment: Mapping[str, str]) -> dict[str, str]:
+    """返回环境逐键摘要；不将任一原始环境值写入 Verification 报告。"""
+    return {
+        key: sha256_bytes(value.encode("utf-8"))
+        for key, value in sorted(environment.items())
+    }
+
+
+def environment_fingerprint(environment: Mapping[str, str]) -> str:
+    """由逐键摘要统一计算完整环境指纹，支持可信的字段级差异核验。"""
+    return fingerprint_json(environment_components(environment))
 
 
 def is_release_runtime_child_check(check: dict[str, Any]) -> bool:

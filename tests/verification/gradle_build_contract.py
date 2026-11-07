@@ -247,7 +247,7 @@ class GradleIdentityResourceTest(unittest.TestCase):
         if (ROOT / ".gitignore").exists():
             shutil.copy2(ROOT / ".gitignore", cls.root / ".gitignore")
         for relative in (
-            "ops/release", "ops/dataset", "infra/sqlite/schema.sql",
+            "ops/release/version.txt", "ops/release/integrity/source-build-identity.mjs", "ops/dataset", "infra/sqlite/schema.sql",
             "ops/podman/source-tools.Containerfile",
         ):
             source, target = ROOT / relative, cls.root / relative
@@ -484,7 +484,7 @@ class GradleStaticBeforeDeliveryFailureTest(unittest.TestCase):
         backend = fixture_root / "backend"
         _copy_backend_fixture(ROOT / "backend", backend)
         # Build scripts resolve repository inputs relative to backend's parent directory.
-        for relative in ("ops/release", "ops/dataset", "infra/sqlite/schema.sql",
+        for relative in ("ops/release/version.txt", "ops/release/integrity/source-build-identity.mjs", "ops/dataset", "infra/sqlite/schema.sql",
                          "ops/podman/source-tools.Containerfile"):
             source, target = ROOT / relative, fixture_root / relative
             target.parent.mkdir(parents=True, exist_ok=True)

@@ -94,5 +94,5 @@ class RegistryResponsibilityTest(unittest.TestCase):
             {c["check_id"] for c in checks if "change-targeted" in c["scenarios"]},
             {c["check_id"] for c in selected},
         )
-        self.assertEqual(22, len(selected))
+        self.assertEqual(len(checks) - 1, len(selected))
 

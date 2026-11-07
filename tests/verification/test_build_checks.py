@@ -218,9 +218,10 @@ class BuildCheckTest(unittest.TestCase):
             self.assertEqual([], before["missing"])
             for name in self.by_id[BASE]["input_paths"]:
                 target = root / name
-                if target.is_dir():
+                if (ROOT / name).is_dir():
                     target = target / "synthetic.txt"
-                target.write_text(target.read_text() + "changed\n")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text((target.read_text() if target.is_file() else "") + "changed\n")
                 after = snapshot_check_inputs(root, runtime)
                 self.assertNotEqual(before["fingerprint"], after["fingerprint"], name)
                 before = after

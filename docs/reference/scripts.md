@@ -45,7 +45,7 @@
 | 人工／只读裁决 | [`record_independent_task_review.py`](../../scripts/acceptance/task_operations/record_independent_task_review.py)、[`evaluate_task_acceptance.py`](../../scripts/acceptance/task_operations/evaluate_task_acceptance.py) | reviewer 复核冻结 diff/evidence；check 核对 receipt、依赖、approval 与 hash DAG；两者都不重跑检查，check 不生成用户批准 |
 | 状态查询 | [`show_task_acceptance_status.py`](../../scripts/acceptance/task_operations/show_task_acceptance_status.py) | 查询具体 submission 的已有记录，不自动推进；状态属于该验收 workflow，不属于独立工具 |
 | 内部支撑 | [`acceptance_actor_identity.py`](../../scripts/acceptance/evidence/acceptance_actor_identity.py)、[`implementation_run_evidence.py`](../../scripts/acceptance/evidence/implementation_run_evidence.py)、[`task_acceptance_requirements.py`](../../scripts/acceptance/task_definition/task_acceptance_requirements.py)、[`acceptance_record_store.py`](../../scripts/acceptance/evidence/acceptance_record_store.py) | 分别支撑身份、来源事实、必需计划与记录；直接回归见 [`tests/delivery_gate`](../../tests/delivery_gate) |
-| 验收实现自检 | [`run_acceptance_tool_tests.py`](../../scripts/checks/tool_tests/run_acceptance_tool_tests.py) | 运行 Delivery Gate 模块自身测试；不是产品 Task 验收入口 |
+| 验收实现自检 | [`run_python_tool_tests.py`](../../scripts/checks/tool_tests/run_python_tool_tests.py) | 使用 `--suite acceptance` 运行 Delivery Gate 模块自身测试；不是产品 Task 验收入口 |
 
 ## 1.4. 工程协作与运行支撑：让能力有界运行
 
@@ -54,14 +54,14 @@
 | 类型 | 真实入口／职责 | 输入、输出与副作用 |
 | --- | --- | --- |
 | CLI | [`verify_codex_work_package.py`](../../scripts/agents/work_packages/verify_codex_work_package.py) · `python3 -m scripts.agents.work_packages.verify_codex_work_package verify --run-id <run_id>` | 核对精确 Codex 工作包 run，不派发执行 |
-| 内部库 | [`codex_identity_binding.py`](../../scripts/agents/identity/codex_identity_binding.py)、[`work_package_contract_checks.py`](../../scripts/agents/work_packages/work_package_contract_checks.py)、[`run_agent_tool_tests.py`](../../scripts/checks/tool_tests/run_agent_tool_tests.py) | 真实宿主绑定、工作包 contract 与直接测试；不是派发命令，见[Agent workflow](../scenarios/delegate-work.md) |
+| 内部库 | [`codex_identity_binding.py`](../../scripts/agents/identity/codex_identity_binding.py)、[`work_package_contract_checks.py`](../../scripts/agents/work_packages/work_package_contract_checks.py)、[`run_python_tool_tests.py`](../../scripts/checks/tool_tests/run_python_tool_tests.py) | 真实宿主绑定、工作包 contract 与直接测试；不是派发命令，见[Agent workflow](../scenarios/delegate-work.md) |
 | 仓库治理 CLI | [`check_documentation.py`](../../scripts/checks/repository/documentation/check_documentation.py)、[`check_task_catalog.py`](../../scripts/checks/repository/catalog/check_task_catalog.py)、[`check_python_quality.py`](../../scripts/checks/repository/python/check_python_quality.py) | 分别检查固定 mandatory 文档范围、Catalog 和工程 Python（scripts、ops/release、ops/dataset）的 Ruff check／Ruff format／Pylint 三项静态检查；静态结果不等于语义审阅或正式验收，详见[独立工具](standalone-tools.md) |
 | 仓库治理 CLI | [`manage_local_skill_links.py`](../../scripts/local/manage_local_skill_links.py) | `check` 只读；`link` 显式创建固定 `.agents/skills/` 本机链接，须明确需要时才运行，见[独立工具](standalone-tools.md) |
-| 机器 Check adapter | [`run_repository_check_group.py`](../../scripts/checks/repository/run_repository_check_group.py) · `python3 -m scripts.checks.repository.run_repository_check_group --mode <mode>` | 由模块检查器消费的结构化入口；`<mode>` 限于 `tests`、`docs`、`planning`、`python`，把仓库治理能力转换为 Check 结果，不是普通人工门禁，也不代表正式验收 |
+| 机器 Check adapter | [`run_repository_check_group.py`](../../scripts/checks/repository/run_repository_check_group.py) · `python3 -m scripts.checks.repository.run_repository_check_group --mode <mode>` | 由模块检查器消费的结构化入口；`<mode>` 限于 `docs`、`planning`、`python`，把仓库治理能力转换为 Check 结果，不是普通人工门禁，也不代表正式验收 |
 | 隔离资源与环境库 | [`isolated_redis.py`](../../scripts/environment/services/isolated_redis.py)、[`verification_environment.py`](../../scripts/environment/configuration/verification_environment.py)、[`toolchain_identity.py`](../../scripts/environment/toolchains/toolchain_identity.py) | 测试服务 lease／就绪／清理、私有执行环境解析与实际工具链身份识别；不自动安装或修改全局 PATH |
 | 有副作用的本机入口 | [`start_local_api.py`](../../scripts/local/start_local_api.py)、[`run_with_java_toolchain.py`](../../scripts/local/run_with_java_toolchain.py) | 受控启动 API 或执行 Java 原生命令；启动/停止与精确参数见[本地体验](../scenarios/local-development.md)和[Java 检查](java-checks.md) |
 
-Agent 运行记录内部库包括 [`codex_actor_identity.py`](../../scripts/agents/identity/codex_actor_identity.py)、[`codex_identity_binding.py`](../../scripts/agents/identity/codex_identity_binding.py) 与 [`codex_work_package_publisher.py`](../../scripts/agents/work_packages/codex_work_package_publisher.py)。它们认证原生来源、冻结工作包并发布完成事实，不签发 validation/review；身份与交接见 [Agent workflow](../scenarios/delegate-work.md)。`scripts/checks/tool_tests/run_acceptance_tool_tests.py` 是模块测试 adapter，只运行 Delivery Gate 自身回归，不是产品 Task 验收。
+Agent 运行记录内部库包括 [`codex_actor_identity.py`](../../scripts/agents/identity/codex_actor_identity.py)、[`codex_identity_binding.py`](../../scripts/agents/identity/codex_identity_binding.py) 与 [`codex_work_package_publisher.py`](../../scripts/agents/work_packages/codex_work_package_publisher.py)。它们认证原生来源、冻结工作包并发布完成事实，不签发 validation/review；身份与交接见 [Agent workflow](../scenarios/delegate-work.md)。`scripts/checks/tool_tests/run_python_tool_tests.py` 是模块测试 adapter，通过 `--suite acceptance` 只运行 Delivery Gate 自身回归，不是产品 Task 验收。
 
 ### 1.4.1. 部署与发行的配套实现
 

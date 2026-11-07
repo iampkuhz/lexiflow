@@ -4,7 +4,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from scripts.checks.repository.run_repository_check_group import evaluate_suite, run
+from scripts.checks.repository.run_repository_check_group import run
+from scripts.checks.tool_tests.run_python_tool_tests import evaluate_suite
 
 
 class RepositoryQualityResultTest(unittest.TestCase):

@@ -64,10 +64,10 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
         self,
     ):
         """场景视图只提供资格与触发，不复制或更改实际操作。"""
-        self.assertEqual(23, len(self.checks))
-        self.assertEqual(23, len(self.by_id))
-        self.assertEqual(19, len(self.by_scope["repository-baseline"]))
-        self.assertEqual(22, len(self.targeted))
+        self.assertEqual(24, len(self.checks))
+        self.assertEqual(24, len(self.by_id))
+        self.assertEqual(20, len(self.by_scope["repository-baseline"]))
+        self.assertEqual(23, len(self.targeted))
         for canonical in self.checks:
             self.assertNotIn("scope", canonical)
             self.assertNotIn("module", canonical)
@@ -115,60 +115,56 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
         docs = "ops/release/third-party-notices.md"
         licenses = "ops/release/distribution-licenses.json"
         cases = {
-            docs: {"eng.release.manifest"},
-            licenses: {"eng.release.manifest"},
-            "LICENSE": {"eng.release.version"},
-            "ops/release/version.txt": {
-                "eng.release.version",
-                "eng.backend.build-contract",
-                "eng.backend.delivery",
-                "eng.extension.quality",
-                "eng.release.docker-local-on-change",
-                "eng.release.docker-node-on-change",
+            'ops/release/third-party-notices.md': {
+                'eng.release.manifest',
             },
-            "ops/release/integrity/source-build-identity.mjs": {
-                "eng.release.version",
-                "eng.backend.delivery",
-                "eng.backend.build-contract",
-                "eng.extension.quality",
-                "eng.release.manifest",
-                "eng.release.build",
-                "eng.release.runtime-entry",
-                "eng.release.lifecycle",
-                "eng.release.lifecycle-install",
-                "eng.release.docker-surface-on-change",
-                "eng.release.docker-shell-on-change",
-                "eng.release.docker-local-on-change",
-                "eng.release.docker-node-on-change",
-                "eng.delivery-gate.module-tests",
-                "eng.agents.module-tests",
-                "eng.repository.python-quality",
-                "eng.verification.module-tests",
+            'ops/release/distribution-licenses.json': {
+                'eng.release.python-tests',
+                'eng.release.manifest',
             },
-            "ops/release/build/package-release-artifacts.mjs": {
-                "eng.release.version",
-                "eng.backend.build-contract",
-                "eng.backend.delivery",
-                "eng.extension.quality",
-                "eng.release.build",
-                "eng.release.manifest",
-                "eng.release.lifecycle",
-                "eng.release.lifecycle-install",
-                "eng.release.runtime-entry",
-                "eng.release.docker-surface-on-change",
-                "eng.release.docker-shell-on-change",
-                "eng.release.docker-local-on-change",
-                "eng.release.docker-node-on-change",
-                "eng.delivery-gate.module-tests",
-                "eng.agents.module-tests",
-                "eng.repository.python-quality",
-                "eng.verification.module-tests",
+            'LICENSE': {
+                'eng.release.python-tests',
+                'eng.release.version',
             },
-            "backend/product/api/src/main/java/io/lexiflow/api/example/Example.java": {
-                "eng.backend.build-contract",
-                "eng.backend.delivery",
-                "eng.extension.quality",
-                "eng.release.docker-surface-on-change",
+            'ops/release/version.txt': {
+                'eng.backend.build-contract',
+                'eng.backend.delivery',
+                'eng.extension.quality',
+                'eng.release.docker-local-on-change',
+                'eng.release.docker-node-on-change',
+                'eng.release.manifest',
+                'eng.release.python-tests',
+                'eng.release.version',
+            },
+            'ops/release/integrity/source-build-identity.mjs': {
+                'eng.backend.build-contract',
+                'eng.backend.delivery',
+                'eng.extension.quality',
+                'eng.release.build',
+                'eng.release.docker-local-on-change',
+                'eng.release.docker-node-on-change',
+                'eng.release.docker-shell-on-change',
+                'eng.release.docker-surface-on-change',
+                'eng.release.manifest',
+                'eng.release.python-tests',
+                'eng.release.version',
+                'eng.repository.python-quality',
+            },
+            'ops/release/build/package-release-artifacts.mjs': {
+                'eng.release.build',
+                'eng.release.docker-local-on-change',
+                'eng.release.docker-node-on-change',
+                'eng.release.docker-shell-on-change',
+                'eng.release.docker-surface-on-change',
+                'eng.release.python-tests',
+                'eng.repository.python-quality',
+                'eng.release.manifest',
+            },
+            'backend/product/api/src/main/java/io/lexiflow/api/example/Example.java': {
+                'eng.backend.build-contract',
+                'eng.backend.delivery',
+                'eng.extension.quality',
+                'eng.release.docker-surface-on-change',
             },
         }
         for path, expected in cases.items():
@@ -206,7 +202,7 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
             {
                 "eng.repository.python-quality",
                 "eng.verification.module-tests",
-                "eng.agents.module-tests",
+                "eng.release.python-tests",
                 "eng.delivery-gate.module-tests",
             },
             self.frozen_ids("ops/release/__init__.py"),
@@ -263,144 +259,128 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
     def test_real_daily_freeze_selects_exact_scenario_consumers(self):
         """真实日常冻结精确选择消费者和规范 Check 依赖闭包。"""
         expectations = {
-            "docs/reference/hooks.md": {
-                "eng.repository.docs",
+            'docs/reference/hooks.md': {
+                'eng.repository.docs',
             },
-            "backend/product/api/src/main/java/io/lexiflow/api/example/Example.java": {
-                "eng.backend.build-contract",
-                "eng.backend.delivery",
-                "eng.extension.quality",
-                "eng.release.docker-surface-on-change",
+            'backend/product/api/src/main/java/io/lexiflow/api/example/Example.java': {
+                'eng.backend.build-contract',
+                'eng.backend.delivery',
+                'eng.extension.quality',
+                'eng.release.docker-surface-on-change',
             },
-            "backend/product/lexicon/src/main/java/io/lexiflow/lexicon/example/Entry.java": {
-                "eng.backend.build-contract",
-                "eng.backend.delivery",
-                "eng.extension.quality",
+            'backend/product/lexicon/src/main/java/io/lexiflow/lexicon/example/Entry.java': {
+                'eng.backend.build-contract',
+                'eng.backend.delivery',
+                'eng.extension.quality',
             },
-            "infra/sqlite/schema.sql": {
-                "eng.backend.delivery",
-                "eng.extension.quality",
-                "eng.release.docker-local-on-change",
-                "eng.release.docker-node-on-change",
+            'infra/sqlite/schema.sql': {
+                'eng.backend.delivery',
+                'eng.extension.quality',
+                'eng.release.docker-local-on-change',
+                'eng.release.docker-node-on-change',
             },
-            "backend/product/api/src/main/java/io/lexiflow/api/runtime/ContainerHealthController.java": {
-                "eng.backend.build-contract",
-                "eng.backend.delivery",
-                "eng.extension.quality",
-                "eng.release.docker-surface-on-change",
+            'backend/product/api/src/main/java/io/lexiflow/api/runtime/ContainerHealthController.java': {
+                'eng.backend.build-contract',
+                'eng.backend.delivery',
+                'eng.extension.quality',
+                'eng.release.docker-surface-on-change',
             },
-            "scripts/environment/configuration/verification_environment.py": {
-                "eng.release.build",
-                "eng.agents.module-tests",
-                "eng.backend.build-contract",
-                "eng.backend.delivery",
-                "eng.delivery-gate.module-tests",
-                "eng.extension.quality",
-                "eng.release.docker-local-on-change",
-                "eng.release.docker-node-on-change",
-                "eng.release.docker-shell-on-change",
-                "eng.release.docker-surface-on-change",
-                "eng.repository.module-tests",
-                "eng.repository.python-quality",
-                "eng.verification.module-tests",
+            'scripts/environment/configuration/verification_environment.py': {
+                'eng.backend.build-contract',
+                'eng.backend.delivery',
+                'eng.delivery-gate.module-tests',
+                'eng.extension.quality',
+                'eng.release.build',
+                'eng.release.docker-local-on-change',
+                'eng.release.docker-node-on-change',
+                'eng.release.docker-shell-on-change',
+                'eng.release.docker-surface-on-change',
+                'eng.release.python-tests',
+                'eng.repository.module-tests',
+                'eng.repository.python-quality',
+                'eng.verification.module-tests',
             },
-            ".codex/hooks.json": {
-                "eng.agents.module-tests",
-                "eng.verification.module-tests",
+            '.codex/hooks.json': {
+                'eng.agents.module-tests',
+                'eng.verification.module-tests',
             },
-            "config/engineering/risk.yaml": {
-                "eng.agents.module-tests",
-                "eng.delivery-gate.module-tests",
-                "eng.repository.module-tests",
-                "eng.verification.module-tests",
+            'config/engineering/risk.yaml': {
+                'eng.agents.module-tests',
+                'eng.delivery-gate.module-tests',
+                'eng.repository.module-tests',
+                'eng.verification.module-tests',
             },
-            "scripts/verification/commands/run_development_checks.py": {
-                "eng.release.build",
-                "eng.agents.module-tests",
-                "eng.delivery-gate.module-tests",
-                "eng.release.docker-local-on-change",
-                "eng.release.docker-node-on-change",
-                "eng.release.docker-shell-on-change",
-                "eng.release.docker-surface-on-change",
-                "eng.repository.module-tests",
-                "eng.repository.python-quality",
-                "eng.verification.module-tests",
+            'scripts/verification/commands/run_development_checks.py': {
+                'eng.repository.python-quality',
+                'eng.verification.module-tests',
             },
-            "tests/verification/test_development.py": {
-                "eng.repository.module-tests",
-                "eng.verification.module-tests",
+            'tests/verification/test_development.py': {
+                'eng.verification.module-tests',
             },
-            "backend/build.gradle.kts": {
-                "eng.backend.build-contract",
-                "eng.backend.delivery",
-                "eng.extension.quality",
-                "eng.release.version",
+            'backend/build.gradle.kts': {
+                'eng.backend.build-contract',
+                'eng.backend.delivery',
+                'eng.extension.quality',
+                'eng.release.version',
             },
-            "ops/docker/tests/test_contract.py": {
-                "eng.release.build",
-                "eng.release.docker-local-on-change",
-                "eng.release.docker-node-on-change",
-                "eng.release.docker-shell-on-change",
-                "eng.release.docker-surface-on-change",
-                "eng.release.lifecycle-install",
-                "eng.release.runtime-entry",
+            'ops/docker/tests/test_contract.py': {
+                'eng.release.build',
+                'eng.release.docker-local-on-change',
+                'eng.release.docker-node-on-change',
+                'eng.release.docker-shell-on-change',
+                'eng.release.docker-surface-on-change',
+                'eng.release.python-tests',
+                'eng.verification.module-tests',
             },
-            "ops/podman/tests/unified-flow.test.mjs": {
-                "eng.backend.build-contract",
-                "eng.backend.delivery",
-                "eng.release.docker-local-on-change",
-                "eng.release.docker-node-on-change",
-                "eng.release.docker-surface-on-change",
+            'ops/podman/tests/unified-flow.test.mjs': {
+                'eng.release.docker-node-on-change',
+                'eng.release.docker-surface-on-change',
             },
-            "ops/podman/tests/logs.test.mjs": {
-                "eng.backend.build-contract",
-                "eng.backend.delivery",
-                "eng.release.docker-local-on-change",
-                "eng.release.docker-node-on-change",
-                "eng.release.docker-surface-on-change",
+            'ops/podman/tests/logs.test.mjs': {
+                'eng.release.docker-node-on-change',
+                'eng.release.docker-surface-on-change',
             },
-            "ops/docker/Dockerfile.runtime": {
-                "eng.release.build",
-                "eng.release.docker-local-on-change",
-                "eng.release.docker-node-on-change",
-                "eng.release.docker-shell-on-change",
-                "eng.release.docker-surface-on-change",
-                "eng.release.lifecycle",
-                "eng.release.lifecycle-install",
-                "eng.release.runtime-entry",
+            'ops/docker/Dockerfile.runtime': {
+                'eng.release.build',
+                'eng.release.docker-local-on-change',
+                'eng.release.docker-node-on-change',
+                'eng.release.docker-shell-on-change',
+                'eng.release.docker-surface-on-change',
+                'eng.release.lifecycle',
+                'eng.release.lifecycle-install',
+                'eng.release.python-tests',
+                'eng.release.runtime-entry',
             },
-            "ops/docker/runtime-entrypoint.sh": {
-                "eng.release.build",
-                "eng.release.docker-local-on-change",
-                "eng.release.docker-node-on-change",
-                "eng.release.docker-shell-on-change",
-                "eng.release.docker-surface-on-change",
-                "eng.release.lifecycle",
-                "eng.release.lifecycle-install",
-                "eng.release.runtime-entry",
+            'ops/docker/runtime-entrypoint.sh': {
+                'eng.release.build',
+                'eng.release.docker-local-on-change',
+                'eng.release.docker-node-on-change',
+                'eng.release.docker-shell-on-change',
+                'eng.release.docker-surface-on-change',
+                'eng.release.lifecycle',
+                'eng.release.lifecycle-install',
+                'eng.release.python-tests',
+                'eng.release.runtime-entry',
             },
-            "scripts/acceptance/evidence/verify_candidate_acceptance_evidence.py": {
-                "eng.release.build",
-                "eng.agents.module-tests",
-                "eng.delivery-gate.module-tests",
-                "eng.repository.module-tests",
-                "eng.repository.python-quality",
-                "eng.verification.module-tests",
+            'scripts/acceptance/evidence/verify_candidate_acceptance_evidence.py': {
+                'eng.delivery-gate.module-tests',
+                'eng.release.build',
+                'eng.release.python-tests',
+                'eng.repository.python-quality',
+                'eng.verification.module-tests',
             },
-            "scripts/acceptance/evidence/acceptance_actor_identity.py": {
-                "eng.release.build",
-                "eng.agents.module-tests",
-                "eng.delivery-gate.module-tests",
-                "eng.repository.module-tests",
-                "eng.repository.python-quality",
-                "eng.verification.module-tests",
+            'scripts/acceptance/evidence/acceptance_actor_identity.py': {
+                'eng.agents.module-tests',
+                'eng.delivery-gate.module-tests',
+                'eng.release.build',
+                'eng.release.python-tests',
+                'eng.repository.python-quality',
+                'eng.verification.module-tests',
             },
-            "ops/podman/execution/deployment-process-control.mjs": {
-                "eng.backend.build-contract",
-                "eng.backend.delivery",
-                "eng.release.docker-local-on-change",
-                "eng.release.docker-node-on-change",
-                "eng.release.docker-surface-on-change",
+            'ops/podman/execution/deployment-process-control.mjs': {
+                'eng.release.docker-local-on-change',
+                'eng.release.docker-node-on-change',
+                'eng.release.docker-surface-on-change',
             },
         }
         # 正式运行检查仍是实际消费者，但不属于日常开发冻结资格。
@@ -471,31 +451,30 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
         # These paths come from the actual E2E startup, Gate imports, and fixture copy.
         """实际跨模块来源既触发消费者，也进入冻结选择闭包。"""
         cases = {
-            "scripts/verification/planning/change_risk_assessment.py": {
-                "eng.release.build",
-                "eng.release.docker-surface-on-change",
-                "eng.release.docker-shell-on-change",
-                "eng.release.docker-local-on-change",
-                "eng.release.docker-node-on-change",
-                "eng.delivery-gate.module-tests",
-                "eng.agents.module-tests",
-                "eng.repository.module-tests",
-                "eng.repository.python-quality",
-                "eng.verification.module-tests",
+            'scripts/verification/planning/change_risk_assessment.py': {
+                'eng.delivery-gate.module-tests',
+                'eng.release.build',
+                'eng.release.docker-local-on-change',
+                'eng.release.docker-node-on-change',
+                'eng.release.docker-shell-on-change',
+                'eng.release.docker-surface-on-change',
+                'eng.release.python-tests',
+                'eng.repository.module-tests',
+                'eng.repository.python-quality',
+                'eng.verification.module-tests',
             },
-            "scripts/agents/identity/codex_actor_identity.py": {
-                "eng.release.build",
-                "eng.agents.module-tests",
-                "eng.delivery-gate.module-tests",
-                "eng.repository.module-tests",
-                "eng.repository.python-quality",
-                "eng.verification.module-tests",
+            'scripts/agents/identity/codex_actor_identity.py': {
+                'eng.agents.module-tests',
+                'eng.delivery-gate.module-tests',
+                'eng.release.build',
+                'eng.release.python-tests',
+                'eng.repository.module-tests',
+                'eng.repository.python-quality',
+                'eng.verification.module-tests',
             },
-            "tests/delivery_gate/fixtures.py": {
-                "eng.delivery-gate.module-tests",
-                "eng.agents.module-tests",
-                "eng.repository.module-tests",
-                "eng.verification.module-tests",
+            'tests/delivery_gate/fixtures.py': {
+                'eng.delivery-gate.module-tests',
+                'eng.verification.module-tests',
             },
         }
         for path, expected in cases.items():
@@ -505,7 +484,9 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
         # Static consumer map is deliberately bounded to observed imports/copies.
         consumer_sources = {
             "eng.delivery-gate.module-tests": (
-                "scripts/verification/",
+                "scripts/verification/planning/",
+                "scripts/verification/execution/",
+                "scripts/verification/reports/verification_report_store.py",
                 "scripts/agents/",
                 "config/engineering/risk.yaml",
             ),
@@ -533,8 +514,8 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
         formal = formal_only_ids(ROOT)
         imports = {}
         selections = {}
-        for module in ("verification", "agents", "delivery_gate", "repository"):
-            check_id = f"eng.{module.replace('_', '-')}.module-tests"
+        for module in ("verification", "agents", "delivery_gate", "repository", "release"):
+            check_id = "eng.release.python-tests" if module == "release" else f"eng.{module.replace('_', '-')}.module-tests"
             dependencies = resolve_module_dependencies(
                 [self.by_id[check_id]], self.checks
             )
@@ -549,6 +530,7 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
                     {
                         "delivery_gate": "scripts/acceptance",
                         "repository": "scripts/checks/repository",
+                        "release": "scripts/checks/release",
                     }.get(module, f"scripts/{module}"),
                     f"tests/{module}",
                 )
@@ -573,7 +555,7 @@ class DevelopmentSelectionMatrixTest(unittest.TestCase):
                                 if alias.name != "*"
                             ]
                         for name in names:
-                            if not name.startswith(("scripts.", "tests.")):
+                            if not name.startswith(("scripts.", "tests.", "ops.")):
                                 continue
                             path = name.replace(".", "/")
                             for candidate in (f"{path}.py", f"{path}/__init__.py"):

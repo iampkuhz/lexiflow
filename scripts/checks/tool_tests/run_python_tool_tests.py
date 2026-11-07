@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""将 verification 模块测试结果转换为门禁消费的结构化协议。
+"""使用标准 unittest 发现工程工具测试，并输出唯一的完整性与诊断协议。
 
 测试数量、失败和跳过判定归测试模块；内核只校验 JSON 协议，
 不依赖 unittest 的内部实现，也不把进程退出零当作测试通过。
@@ -49,36 +49,50 @@ def _top_slow(per_test: dict[str, float], limit: int = 10) -> list[dict[str, flo
     ]
 
 
-def verification_tests(root: Path) -> dict[str, object]:
-    """发现并执行本模块测试；空集合、失败、异常或跳过均不得返回 PASS。"""
+SUITES = {
+    "verification": "tests/verification",
+    "acceptance": "tests/delivery_gate",
+    "agents": "tests/agents",
+    "repository": "tests/repository",
+    "release": "tests/release",
+}
+
+
+class _DiagnosticStream(io.StringIO):
+    """即时保留本机诊断；stdout 只用于结构化结果，摘要不复制 traceback。"""
+
+    def write(self, text: str) -> int:
+        """透传标准 unittest 输出，异常与超时前的用例进度均可定位。"""
+        count = super().write(text)
+        sys.stderr.write(text)
+        sys.stderr.flush()
+        return count
+
+
+def evaluate_suite(suite: unittest.TestSuite) -> dict[str, object]:
+    """共享工具测试完整性判据；空、未完成、失败、异常和跳过均失败关闭。"""
     total_started = time.monotonic()
-    suite = unittest.defaultTestLoader.discover(
-        str(root / "tests" / "verification"),
-        pattern="test_*.py",
-        top_level_dir=str(root),
-    )
-    stream = io.StringIO()
+    expected = suite.countTestCases()
+    stream = _DiagnosticStream()
     timed_result = unittest.TextTestRunner(
         stream=stream, verbosity=2, resultclass=_TimedResult
     ).run(suite)
     python_duration = round(time.monotonic() - total_started, 6)
-    # Kernel 已为 stderr 提供受控日志 locator，失败时无需再跑测试来取得 traceback。
-    for test, trace in [*timed_result.failures, *timed_result.errors]:
-        print(f"FAILED TEST: {test.id()}\n{trace}", file=sys.stderr)
     per_test = timed_result.per_test
     passed = (
         timed_result.wasSuccessful()
-        and timed_result.testsRun > 0
+        and timed_result.testsRun == expected > 0
         and not timed_result.skipped
     )
     report: dict[str, object] = {
         "status": "PASS" if passed else "FAIL",
         "checks_run": timed_result.testsRun,
+        "expected_tests": expected,
         "failures": len(timed_result.failures),
         "errors": len(timed_result.errors),
         "skipped": len(timed_result.skipped),
         "python_unittest_duration_seconds": python_duration,
-        "reason": "" if passed else "verification-module-tests-incomplete",
+        "reason": "" if passed else "python-tool-tests-incomplete",
         "detail": {
             "failed_tests": [test.id() for test, _ in timed_result.failures],
             "error_tests": [test.id() for test, _ in timed_result.errors],
@@ -95,10 +109,23 @@ def verification_tests(root: Path) -> dict[str, object]:
     return report
 
 
-def main() -> int:
-    """以仓库根运行模块检查并输出 JSON，实际通过状态由协议字段表达。"""
-    argparse.ArgumentParser(description=__doc__).parse_args()
-    report = verification_tests(Path(__file__).resolve().parents[3])
+def run(root: Path, suite_name: str) -> dict[str, object]:
+    """由固定 suite 归属发现完整测试集合，不接受任意命令或排除列表。"""
+    started = time.monotonic()
+    suite = unittest.TestLoader().discover(
+        str(root / SUITES[suite_name]), pattern="test_*.py", top_level_dir=str(root)
+    )
+    report = evaluate_suite(suite)
+    report["python_unittest_duration_seconds"] = round(time.monotonic() - started, 6)
+    return report
+
+
+def main(argv: list[str] | None = None) -> int:
+    """以唯一标准入口运行工具测试，实际结论由 JSON 协议字段表达。"""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--suite", choices=tuple(SUITES), required=True)
+    args = parser.parse_args(argv)
+    report = run(Path(__file__).resolve().parents[3], args.suite)
     print(json.dumps(report, ensure_ascii=False, sort_keys=True))
     return 0
 

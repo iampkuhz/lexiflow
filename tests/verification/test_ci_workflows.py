@@ -35,15 +35,15 @@ class WorkflowContractTest(unittest.TestCase):
         for path, required in (
             (
                 "ops/release/workflow/promote_verified_release.py",
-                {"eng.release.build", "eng.verification.module-tests"},
+                {"eng.release.python-tests"},
             ),
             (
                 "ops/release/tests/workflow.test.mjs",
-                {"eng.release.build", "eng.verification.module-tests"},
+                {"eng.release.build"},
             ),
             (
-                "tests/verification/test_release_promotion.py",
-                {"eng.verification.module-tests"},
+                "tests/release/test_release_promotion.py",
+                {"eng.release.python-tests"},
             ),
             (
                 "tests/verification/test_ci_workflows.py",

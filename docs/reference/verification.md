@@ -117,7 +117,9 @@ Registry 为 `lexiflow.module-checks.v5`。每个稳定 `check_id` 直接拥有�
 
 执行固定使用 `kernel.run_check_process`，子进程只消费固定 run/check/snapshot 并从声明重派生后精确比对；scope 资格由父端证明。progress observer 只接收脱敏事件，不读 env/stdin/raw stdout、不返回 process result、不决定 PASS。取消、异常、预算耗尽仍回收当前自有进程与资源。
 
-环境唯一使用 `resolve_check_environment`：`.values` 私有执行，`.diagnostic` 可公开。实际解释器、PATH 解析工具、真实路径与内容摘要，以及 PyYAML/锁/摘要工具能力均认证；不只比较 PATH 字符串。Apple Git 绑定实际 payload，不用 prepared wrapper。报告消费时重新解析，不跨事务缓存资格，不序列化私有环境值。
+环境唯一使用 `resolve_check_environment`：`.values` 私有执行，`.diagnostic` 可公开。实际解释器、PATH 解析工具、真实路径与内容摘要，以及 PyYAML/锁/摘要工具能力均认证；不只比较 PATH 字符串。Apple Git 绑定实际 payload，不用 prepared wrapper。执行与同事务复用仍认证当前完整环境，不跨事务缓存资格。报告以可重算组成摘要绑定原执行环境与工具链，不序列化私有值；消费继续核对当前非临时环境、工具链及源输入。只有真实创建上下文绑定、精确资源正常清理的 owned 临时环境可按不可变来源链核验，不要求复活旧服务；未证明的外部端点或其他环境变化仍拒绝。报告可读不等于端点等价、重新执行或 Formal PASS。
+
+Python 质量的精确原生入口可由工具链解析器从目标仓库开发依赖 pin 派生 Ruff、Pylint、Astroid 及实际默认依赖 payload；调用者传递实际 `repo_root`，不新增环境 token。只有完整身份、输入与副作用可证明且有净收益时才声明复用；当前质量检查和 build-contract 继续实际执行，后者实际 JDK、Gradle 与外部依赖 payload 尚不足以证明完整等价。
 
 Formal `verify_profiles` 及同次 1..16 Task batch 保留。在输入、配置、环境、window、runner、context 和 result contract 完整等价且显式允许时可复用同次 Check；未知副作用、失败、runtime transport 和历史结果不可复用，开发自检不能投影成 Formal。台账仅在本次调用真实窗口内，结束即失效。
 
@@ -129,6 +131,8 @@ Formal `verify_profiles` 及同次 1..16 Task batch 保留。在输入、配置�
 | 声明、选择与冻结 | [check_definitions.py](../../scripts/verification/planning/check_definitions.py)、[check_scope_selection.py](../../scripts/verification/planning/check_scope_selection.py)、[source_file_snapshot.py](../../scripts/verification/planning/source_file_snapshot.py) |
 | 编排与执行 | [check_plan_runner.py](../../scripts/verification/execution/check_plan_runner.py)、[check_runner.py](../../scripts/verification/execution/check_runner.py)、[Environment API](../../scripts/environment/__init__.py) |
 | 报告与诊断 | [verification_report_store.py](../../scripts/verification/reports/verification_report_store.py)、[diagnose_repository_check.py](../../scripts/verification/commands/diagnose_repository_check.py)、[verification_report_summary.py](../../scripts/verification/reports/verification_report_summary.py) |
+
+一次公开读取／发布遍历可有界复用同一目标、locator 与精确字节 hash 的纯 JSON 解码，调用方取得隔离副本；退出或异常即清除，不缓存当前有效性或 PASS。每条来源引用仍完整重验当前选择、输入、环境、工具链和附件。来源读取已完成该引用的冻结后，操作定义直接取同一已认证声明，不为取定义再次冻结来源；这不取消任何逐引用的新鲜度采样。
 
 报告位于 ignored `tmp/quality/verification-reports/`；public API 读取会重核当前来源和附件，不信任手写 PASS JSON。`PASS` 只证明冻结范围，缺环境为 `BLOCKED`，断言或输入冲突为 `FAIL`。skip、未执行、零测试和缺结果均不能 PASS。详细失败层定位见[排障](troubleshooting.md)。
 

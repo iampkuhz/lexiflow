@@ -62,6 +62,24 @@ class NativeAgentPolicyTest(unittest.TestCase):
         self.assertFalse((root / "harness/agent-policy.manifest.yaml").exists())
         self.assertFalse((root / "harness/manifest.yaml").exists())
 
+    def test_blocked_task_does_not_end_category_delivery(self) -> None:
+        """共享规则隔离真实阻塞并保留类别自行收敛的交付责任。"""
+        policy = (
+            Path(__file__).resolve().parents[2] / "harness/agent-policy.md"
+        ).read_text()
+        for required in (
+            "只沿真实 hard／contract 依赖传播",
+            "不按阶段号或单个 Goal",
+            "可修复的实现、测试、验证、材料、环境与排程问题",
+            "真正独立验收成功",
+            "阶段 FAIL／BLOCKED 通报不是完成交付",
+            "不机械重置",
+            "同时继续其他可做工作",
+            "不无限无证据重试",
+        ):
+            with self.subTest(rule=required):
+                self.assertIn(required, policy)
+
     def test_client_defaults_do_not_override_per_package_choices(self) -> None:
         root = Path(__file__).resolve().parents[2]
         config = tomllib.loads((root / ".codex/config.toml").read_text())
@@ -104,3 +122,19 @@ class NativeAgentPolicyTest(unittest.TestCase):
         self.assertIn("集成验证 SHALL 串行", spec)
         self.assertIn("实现者 MAY 执行静态、编译和直接测试作为自检", spec)
         self.assertIn("MUST NOT 签发 Formal validation 或 independent review", spec)
+
+    def test_user_selected_three_tier_models_keep_default_and_evidence_boundaries(self):
+        """用户三层模型例外不覆盖默认分类、真实来源和在途执行。"""
+        root = Path(__file__).resolve().parents[2]
+        policy = (root / "harness/agent-policy.md").read_text(encoding="utf-8")
+        for text in (
+            "总控使用 `gpt-6-astra`",
+            "独立类别主 agent 使用 `gpt-6.1-sol`",
+            "其原生子代理只使用 `gpt-6-luna`",
+            "其他模型须新人类明示",
+            "不为换模型中断／重启在途工作",
+            "不改写历史实际模型来源",
+            "子包只传必要合同与证据索引",
+            "合同与验收冻结",
+        ):
+            self.assertIn(text, policy)

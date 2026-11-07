@@ -83,7 +83,7 @@ class TestSubmit(unittest.TestCase):
         path = self.f.root / f"tmp/quality/verification-reports/{rid}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         forged = {
-            "schema_version": "lexiflow.verification-report.v1",
+            "schema_version": "lexiflow.verification-report.v2",
             "run_id": rid,
             "result": "PASS",
             "reason": "",

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
+import { waitForE2EState } from "./e2e-state.mjs";
 import { openActionPopup } from "./action-popup.mjs";
 import { createApiLaunchSpec, stopApi } from "./e2e-runtime.mjs";
 import { resolveBuildIdentity } from "../../ops/release/integrity/source-build-identity.mjs";
@@ -110,13 +111,7 @@ async function overlayServiceStatus(page) {
   return page.locator("#lexiflow-caption-overlay").evaluate((host) => host.shadowRoot?.querySelector(".service-status")?.textContent?.trim() ?? "");
 }
 
-async function waitForState(page, state) {
-  await page.waitForFunction(
-    (expected) => document.querySelector("#lexiflow-caption-overlay")?.getAttribute("data-lexiflow-state") === expected,
-    state,
-    { timeout: 10_000 }
-  );
-}
+const waitForState = waitForE2EState;
 
 let api;
 let userDataDir;

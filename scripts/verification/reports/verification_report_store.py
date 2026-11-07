@@ -2,19 +2,62 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
 import stat
 import uuid
 from contextvars import ContextVar
+from functools import wraps
 from pathlib import Path, PurePosixPath
 from typing import Any
-
 
 _READ_STACK: ContextVar[tuple[str, ...]] = ContextVar(
     "verification-report-read-stack", default=()
 )
+_TRAVERSAL: ContextVar[dict[str, Any] | None] = ContextVar(
+    "verification-report-traversal", default=None
+)
+_MAX_DECODED_REPORTS = 16
+_MAX_DECODED_BYTES = 32 * 1024 * 1024
+
+
+def _traversal_scoped(function):
+    """将报告解码去重限制在一次公开遍历内。"""
+
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        if _TRAVERSAL.get() is not None:
+            return function(*args, **kwargs)
+        token = _TRAVERSAL.set({"decoded": {}, "bytes": 0})
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _TRAVERSAL.reset(token)
+
+    return wrapped
+
+
+def _decode_report(root: Path, relative: str, data: bytes) -> dict[str, Any]:
+    """复用精确字节解码，不复用当前有效性结论。"""
+    context = _TRAVERSAL.get()
+    digest = sha256_bytes(data)
+    key = (str(root.resolve()), relative, digest)
+    if context is not None and key in context["decoded"]:
+        return copy.deepcopy(context["decoded"][key])
+    try:
+        value = json.loads(data, object_pairs_hook=_unique)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(f"verification report invalid: {exc}") from None
+    if (
+        context is not None
+        and len(context["decoded"]) < _MAX_DECODED_REPORTS
+        and context["bytes"] + len(data) <= _MAX_DECODED_BYTES
+    ):
+        context["decoded"][key] = copy.deepcopy(value)
+        context["bytes"] += len(data)
+    return value
 
 
 def canonical_bytes(v: Any) -> bytes:
@@ -186,6 +229,7 @@ def _pass_check_current(
     *,
     cross_source_valid: bool = False,
     artifact_run_id: str | None = None,
+    publication: bool = False,
 ) -> bool:
     """复核已报告 PASS 的 Check 所绑定的声明和输入是否仍与当前快照一致；漂移不能沿用旧 PASS。"""
     cross_view = isinstance(result, dict) and "cross_view_source" in result
@@ -205,6 +249,7 @@ def _pass_check_current(
                 "result_contract",
                 "environment",
                 "environment_fingerprint",
+                "environment_components",
             },
             {
                 "check_id",
@@ -215,6 +260,32 @@ def _pass_check_current(
                 "result_contract",
                 "environment",
                 "environment_fingerprint",
+                "environment_components",
+                "environment_binding",
+            },
+            {
+                "check_id",
+                "status",
+                "reason",
+                "process",
+                "input_snapshot",
+                "result_contract",
+                "environment",
+                "environment_fingerprint",
+                "environment_components",
+                "cross_view_source",
+            },
+            {
+                "check_id",
+                "status",
+                "reason",
+                "process",
+                "input_snapshot",
+                "result_contract",
+                "environment",
+                "environment_fingerprint",
+                "environment_components",
+                "environment_binding",
                 "cross_view_source",
             },
         )
@@ -228,20 +299,116 @@ def _pass_check_current(
         from scripts.environment.toolchains.toolchain_identity import resolve_toolchain
         from scripts.verification.execution.check_runner import (
             build_child_environment,
+            environment_components,
+            environment_fingerprint,
             fingerprint_json,
         )
 
         resolved = resolve_check_environment(root, expected)
-        if resolved.diagnostic["status"] != "PASS":
-            return False
-        child_environment = build_child_environment(runtime_environment=resolved.values)
-        if result.get("environment_fingerprint") != fingerprint_json(
-            {key: child_environment[key] for key in sorted(child_environment)}
+        current_exact = resolved.diagnostic["status"] == "PASS"
+        child_environment = (
+            build_child_environment(runtime_environment=resolved.values)
+            if current_exact
+            else {}
+        )
+        components = result.get("environment_components")
+        if (
+            not isinstance(components, dict)
+            or any(
+                not isinstance(k, str)
+                or not isinstance(v, str)
+                or len(v) != 64
+                or any(ch not in "0123456789abcdef" for ch in v)
+                for k, v in components.items()
+            )
+            or fingerprint_json(components) != result.get("environment_fingerprint")
         ):
             return False
+        if current_exact and result.get(
+            "environment_fingerprint"
+        ) == environment_fingerprint(child_environment):
+            binding = result.get("environment_binding")
+            if binding is not None:
+                from scripts.environment.services.isolated_redis import (
+                    ENV_KEY,
+                    active_binding,
+                    verify_binding_record,
+                )
+
+                endpoint = child_environment.get(ENV_KEY, "")
+                active = active_binding(root, endpoint) if endpoint else None
+                if (
+                    active is None
+                    or any(active.get(key) != binding.get(key) for key in binding)
+                    or not verify_binding_record(root, binding)
+                ):
+                    return False
+        else:
+            if publication:
+                return False
+            # 历史读取可容忍的唯一差异：报告自身证明的已清理 owned Redis transient。
+            if "toolchain" in result and expected.get("transaction_reuse") is not True:
+                return False
+            from scripts.environment.services.isolated_redis import (
+                ENV_KEY,
+                SERVICE,
+                active_binding,
+                verify_binding_receipts,
+                verify_binding_record,
+            )
+
+            binding = result.get("environment_binding")
+            if (
+                SERVICE not in expected.get("required_environment", [])
+                or not isinstance(binding, dict)
+                or set(binding)
+                != {
+                    "schema",
+                    "lease",
+                    "resource_id",
+                    "image_id",
+                    "endpoint_sha256",
+                    "binding_sha256",
+                    "directory",
+                }
+                or binding.get("schema") != "lexiflow.redis-lease-binding.v1"
+                or not verify_binding_receipts(root, binding)
+            ):
+                return False
+            recorded = components.get(ENV_KEY)
+            if not isinstance(recorded, str) or recorded != binding.get(
+                "endpoint_sha256"
+            ):
+                return False
+            raw_current = os.environ.get(ENV_KEY)
+            if raw_current:
+                current_owner = active_binding(root, raw_current)
+                if (
+                    current_owner is None
+                    or current_owner.get("endpoint_sha256")
+                    != sha256_bytes(raw_current.encode())
+                    or not verify_binding_record(root, current_owner)
+                ):
+                    return False
+            other = dict(expected)
+            other["required_environment"] = [
+                x for x in expected.get("required_environment", []) if x != SERVICE
+            ]
+            non_transient = resolve_check_environment(root, other)
+            if non_transient.diagnostic["status"] != "PASS":
+                return False
+            current_other = build_child_environment(
+                runtime_environment=non_transient.values
+            )
+            current_components = environment_components(current_other)
+            if {k: v for k, v in components.items() if k != ENV_KEY} != {
+                k: v for k, v in current_components.items() if k != ENV_KEY
+            }:
+                return False
+            child_environment = current_other
         if expected.get("transaction_reuse") is True:
             if "toolchain" not in result or result["toolchain"] != resolve_toolchain(
-                expected, child_environment
+                expected, child_environment, repo_root=root
             ):
                 return False
         elif "toolchain" in result:
@@ -371,26 +538,12 @@ def _pass_check_current(
 
 def _operation_fingerprint(check: dict[str, Any]) -> str:
     """计算跨视图允许共享的完整操作配置，不抹除命令或输入声明。"""
-    from scripts.verification.execution.check_runner import fingerprint_json
-
-    from scripts.verification.execution.check_runner import operation_config
-
-    return fingerprint_json(operation_config(check))
-
-
-def _environment_fingerprint(root: Path, check: dict[str, Any]) -> str:
-    """对本次可执行的精确子进程环境求指纹，不将环境值写入报告。"""
-    from scripts.environment import resolve_check_environment
     from scripts.verification.execution.check_runner import (
-        build_child_environment,
         fingerprint_json,
+        operation_config,
     )
 
-    resolved = resolve_check_environment(root, check)
-    if resolved.diagnostic["status"] != "PASS":
-        raise ValueError("missing-environment")
-    environment = build_child_environment(runtime_environment=resolved.values)
-    return fingerprint_json({key: environment[key] for key in sorted(environment)})
+    return fingerprint_json(operation_config(check))
 
 
 def _cross_view_source_current(
@@ -401,10 +554,10 @@ def _cross_view_source_current(
     consumer_report: dict[str, Any],
 ) -> tuple[bool, str | None]:
     """消费不可变来源索引；重核完整来源报告、新鲜度及同事务严格有向顺序。"""
+    from scripts.verification.execution.check_plan_runner import _runtime_checks
     from scripts.verification.execution.check_runner import (
         is_release_runtime_child_check,
     )
-    from scripts.verification.execution.check_plan_runner import freeze_inputs
 
     witness = result.get("cross_view_source")
     if not isinstance(witness, dict) or set(witness) != {
@@ -441,25 +594,21 @@ def _cross_view_source_current(
             < target_transaction["profile_index"]
         ):
             return False, None
-        source_freeze = freeze_inputs(
-            root,
-            verification_scope=source_report["scope"],
-            base=source_report.get("base"),
-            required_check_ids=source_report["required_check_ids"],
-            _subject_changed_files=source_report["scope_review"].get("changed_files")
-            if source_report["scope"] == "development-change"
-            else None,
-        )
+        # read_report 已在本条边完整重验来源选择及当前闭包；此处只需同一
+        # 声明下的操作定义，不能为取定义再冻结一次完整来源。
+        if source_report["declaration_sha256"] != consumer_report["declaration_sha256"]:
+            return False, None
         check_id = witness["check_id"]
         source_check = next(
-            c for c in source_freeze["checks"] if c["check_id"] == check_id
+            c
+            for c in _runtime_checks(declarations["checks"])
+            if c["check_id"] == check_id
         )
         source_result = next(
             c for c in source_report["checks"] if c["check_id"] == check_id
         )
         if (
-            source_freeze["result"] != "PASS"
-            or source_check.get("transaction_reuse") is not True
+            source_check.get("transaction_reuse") is not True
             or expected.get("transaction_reuse") is not True
             or is_release_runtime_child_check(expected)
             or source_result["process"]["exit_reason"] != "exited"
@@ -468,10 +617,10 @@ def _cross_view_source_current(
             return False, None
         if (
             _operation_fingerprint(source_check) != _operation_fingerprint(expected)
-            or _environment_fingerprint(root, source_check)
-            != _environment_fingerprint(root, expected)
             or source_result["environment_fingerprint"]
             != result["environment_fingerprint"]
+            or source_result.get("environment_components")
+            != result.get("environment_components")
             or source_result.get("toolchain") != result.get("toolchain")
         ):
             return False, None
@@ -487,16 +636,18 @@ def _cross_view_source_current(
         return False, None
 
 
-def _validate_pass_report(root: Path, report: dict[str, Any]) -> None:
+def _validate_pass_report(
+    root: Path, report: dict[str, Any], *, publication: bool = False
+) -> None:
     """发布前核对 PASS 报告的范围、Check 完整性、输入指纹与证据；不为缺失检查补造成功结果。"""
-    from scripts.verification.planning.check_definitions import (
-        DeclarationError,
-        load_declarations_snapshot,
-    )
-    from scripts.verification.execution.check_runner import fingerprint_json
     from scripts.verification.execution.check_plan_runner import (
         _runtime_checks,
         _select_repository_checks,
+    )
+    from scripts.verification.execution.check_runner import fingerprint_json
+    from scripts.verification.planning.check_definitions import (
+        DeclarationError,
+        load_declarations_snapshot,
     )
 
     try:
@@ -590,6 +741,7 @@ def _validate_pass_report(root: Path, report: dict[str, Any]) -> None:
             report["run_id"],
             cross_source_valid=cross_source_valid,
             artifact_run_id=source_run_id,
+            publication=publication,
         ):
             raise ValueError(
                 f"verification report check invalid: {expected['check_id']}"
@@ -638,7 +790,10 @@ def _validate_pass_report(root: Path, report: dict[str, Any]) -> None:
             raise ValueError("verification report frozen fingerprint invalid")
 
 
-def validate_report(root: Path, report: Any) -> dict[str, Any]:
+@_traversal_scoped
+def validate_report(
+    root: Path, report: Any, *, publication: bool = False
+) -> dict[str, Any]:
     """验证报告结构、输入指纹与检查完整性，拒绝伪造或缺项。"""
     if not isinstance(report, dict):
         raise TypeError("verification report must be an object")
@@ -656,7 +811,7 @@ def validate_report(root: Path, report: Any) -> dict[str, Any]:
     }
     if (
         not required.issubset(report)
-        or report.get("schema_version") != "lexiflow.verification-report.v1"
+        or report.get("schema_version") != "lexiflow.verification-report.v2"
     ):
         raise ValueError("verification report schema invalid")
     _safe_uuid(report.get("run_id"))
@@ -674,7 +829,7 @@ def validate_report(root: Path, report: Any) -> dict[str, Any]:
     ):
         raise ValueError("verification report fields invalid")
     if report["result"] == "PASS":
-        _validate_pass_report(root, report)
+        _validate_pass_report(root, report, publication=publication)
     return report
 
 
@@ -703,10 +858,11 @@ def _rollback_owned(
     return "; ".join(errors)
 
 
+@_traversal_scoped
 def persist_report(root: str | Path, report: dict[str, Any]) -> dict[str, str]:
     """将 Task 中立报告持久化为不可变内容并返回描述符。先验证形状及 PASS 条件，再一次性发布；已存在的记录不能被覆盖。"""
     repo = Path(root).resolve()
-    validate_report(repo, report)
+    validate_report(repo, report, publication=True)
     run_id = _safe_uuid(report.get("run_id"))
     return _publish_document(repo, report, run_id, "verification-reports")
 
@@ -774,6 +930,7 @@ def _publish_document(repo, report, run_id, namespace):
     return {"locator": relative, "sha256": sha256_bytes(data)}
 
 
+@_traversal_scoped
 def read_report(
     root: str | Path, report_id: str
 ) -> tuple[dict[str, Any], dict[str, str]]:
@@ -782,10 +939,7 @@ def read_report(
     run_id = _safe_uuid(report_id)
     relative = f"tmp/quality/verification-reports/{run_id}.json"
     data = _read(repo, relative)
-    try:
-        value = json.loads(data, object_pairs_hook=_unique)
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
-        raise ValueError(f"verification report invalid: {exc}") from None
+    value = _decode_report(repo, relative, data)
     stack = _READ_STACK.get()
     if run_id in stack or len(stack) >= 16:
         raise ValueError("verification report reuse cycle or depth exceeded")

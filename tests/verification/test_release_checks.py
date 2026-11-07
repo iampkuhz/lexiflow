@@ -226,6 +226,13 @@ class ReleaseCheckDeclarationTest(unittest.TestCase):
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(b"synthetic artifact input\n")
                 samples[name] = target
+            for name in required:
+                target = root / name
+                if (ROOT / name).is_dir():
+                    target = target / "nested/synthetic-source.txt"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(b"synthetic artifact input\n")
+                samples[name] = target
             previous = snapshot_check_inputs(root, check)
             self.assertEqual([], previous["missing"])
             for name in required:

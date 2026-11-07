@@ -94,7 +94,17 @@ def input_closure(root: Path, check: dict[str, Any]) -> set[str]:
     files, missing = snapshot_inputs(root, check)
     if missing:
         raise AssertionError(f"missing declared input: {missing}")
-    return set(check["input_paths"]) | {item["locator"] for item in files}
+    members = set(check["input_paths"]) | {item["locator"] for item in files}
+    # A precise child directory and a containing directory freeze the same bytes.
+    # Include only ancestors beneath a declared input, not unrelated broad roots.
+    for item in files:
+        for declared in check["input_paths"]:
+            if item["locator"].startswith(declared.rstrip("/") + "/"):
+                parent = Path(item["locator"]).parent
+                while parent.as_posix() != declared.rstrip("/"):
+                    members.add(parent.as_posix())
+                    parent = parent.parent
+    return members
 
 
 def trigger_covers(check: dict[str, Any], path: str) -> bool:

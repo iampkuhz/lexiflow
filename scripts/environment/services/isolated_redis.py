@@ -3,17 +3,201 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Callable, Iterator
 from urllib.parse import urlsplit
+
+_ACTIVE_BINDINGS: dict[tuple[str, str], dict] = {}
+
+
+def _digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _open_lease_directory(root: Path, lease: str, *, create: bool = False) -> int:
+    if not re.fullmatch(r"[0-9a-f]{32}", lease):
+        raise TestServicesError("lease 格式无效")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(root, flags)
+    try:
+        for part in ("tmp", "quality", "test-services", lease):
+            if create:
+                try:
+                    os.mkdir(part, 0o700 if part == lease else 0o755, dir_fd=fd)
+                    os.fsync(fd)
+                except FileExistsError:
+                    if part == lease:
+                        raise TestServicesError(
+                            "lease receipt directory already exists"
+                        )
+            child = os.open(part, flags, dir_fd=fd)
+            info = os.fstat(child)
+            if not stat.S_ISDIR(info.st_mode):
+                os.close(child)
+                raise TestServicesError("lease receipt path is not a directory")
+            if part == lease and (
+                info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700
+            ):
+                os.close(child)
+                raise TestServicesError(
+                    "lease receipt directory ownership or mode invalid"
+                )
+            os.close(fd)
+            fd = child
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def _publish_receipt(root: Path, lease: str, name: str, value: dict) -> str:
+    """原子、不可覆盖地发布由内部生命周期产生的收据。"""
+    if name not in {"binding.json", "cleanup-receipt.json"}:
+        raise TestServicesError("receipt name is not registered")
+    data = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    dfd = _open_lease_directory(root, lease)
+    temp = f".{name}.{uuid.uuid4().hex}.tmp"
+    try:
+        fd = os.open(
+            temp,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+            0o400,
+            dir_fd=dfd,
+        )
+        try:
+            with os.fdopen(fd, "wb", closefd=False) as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.link(temp, name, src_dir_fd=dfd, dst_dir_fd=dfd, follow_symlinks=False)
+        os.fsync(dfd)
+        os.unlink(temp, dir_fd=dfd)
+        os.fsync(dfd)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temp, dir_fd=dfd)
+        os.close(dfd)
+    return hashlib.sha256(data).hexdigest()
+
+
+def _read_receipt(root: Path, lease: str, name: str) -> bytes:
+    if name not in {"binding.json", "cleanup-receipt.json"}:
+        raise TestServicesError("receipt name is not registered")
+    dfd = _open_lease_directory(root, lease)
+    try:
+        fd = os.open(
+            name,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+            dir_fd=dfd,
+        )
+        try:
+            info = os.fstat(fd)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) != 0o400
+                or info.st_nlink != 1
+                or info.st_size > 4096
+            ):
+                raise TestServicesError(
+                    "receipt file type, owner, mode, link count or size invalid"
+                )
+            chunks = bytearray()
+            while len(chunks) <= 4096:
+                block = os.read(fd, min(1024, 4097 - len(chunks)))
+                if not block:
+                    return bytes(chunks)
+                chunks.extend(block)
+            raise TestServicesError("receipt exceeds size limit")
+        finally:
+            os.close(fd)
+    finally:
+        os.close(dfd)
+
+
+def active_binding(root: Path, endpoint: str) -> dict | None:
+    """只返回本进程当前真实服务上下文注册的精确 endpoint 绑定。"""
+    value = _ACTIVE_BINDINGS.get((str(root.resolve()), _digest(endpoint)))
+    return dict(value) if value is not None else None
+
+
+def verify_binding_record(root: Path, binding: dict) -> bool:
+    """核对ready时产生的不可变绑定记录及精确资源身份。"""
+    try:
+        lease = binding.get("lease")
+        if (
+            not isinstance(lease, str)
+            or not re.fullmatch(r"[0-9a-f]{32}", lease)
+            or binding.get("directory") != f"tmp/quality/test-services/{lease}"
+        ):
+            return False
+        if (
+            not re.fullmatch(r"[0-9a-f]{64}", str(binding.get("resource_id", "")))
+            or not re.fullmatch(r"[0-9a-f]{64}", str(binding.get("image_id", "")))
+            or not re.fullmatch(
+                r"[0-9a-f]{64}", str(binding.get("endpoint_sha256", ""))
+            )
+            or not re.fullmatch(r"[0-9a-f]{64}", str(binding.get("binding_sha256", "")))
+        ):
+            return False
+        bind_bytes = _read_receipt(root, lease, "binding.json")
+        if hashlib.sha256(bind_bytes).hexdigest() != binding["binding_sha256"]:
+            return False
+        bind = json.loads(bind_bytes)
+        return (
+            set(bind)
+            == {"schema", "lease", "resource_id", "image_id", "endpoint_sha256"}
+            and set(binding)
+            == {
+                "schema",
+                "lease",
+                "resource_id",
+                "image_id",
+                "endpoint_sha256",
+                "binding_sha256",
+                "directory",
+            }
+            and bind.get("schema") == "lexiflow.redis-lease-binding.v1"
+            and bind.get("endpoint_sha256") == binding["endpoint_sha256"]
+            and bind.get("resource_id") == binding["resource_id"]
+            and bind.get("lease") == binding["lease"]
+            and bind.get("image_id") == binding["image_id"]
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def verify_binding_receipts(root: Path, binding: dict) -> bool:
+    """核对不可变绑定及成功清理收据的摘要和精确资源关联。"""
+    try:
+        if not verify_binding_record(root, binding):
+            return False
+        cleanup_bytes = _read_receipt(root, binding["lease"], "cleanup-receipt.json")
+        cleanup = json.loads(cleanup_bytes)
+        return (
+            set(cleanup)
+            == {"schema", "lease", "resource_id", "binding_sha256", "removed"}
+            and cleanup.get("schema") == "lexiflow.redis-lease-cleanup.v1"
+            and cleanup.get("binding_sha256") == binding["binding_sha256"]
+            and cleanup.get("resource_id") == binding["resource_id"]
+            and cleanup.get("lease") == binding["lease"]
+            and cleanup.get("removed") is True
+        )
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
 
 IMAGE = "docker.io/library/redis:7"
 OWNER_LABEL = "io.lexiflow.test-lease"
@@ -102,7 +286,7 @@ def _remove_owned(resource: dict, lease: str) -> dict:
     name = resource["name"]
     exists = _command(["container", "exists", name], 3, check=False)
     if exists.returncode == 1:
-        return {"name": name, "removed": True, "already_absent": True}
+        raise TestServicesError(f"临时容器 {name} 已在本次删除前消失，不能证明清理归属")
     if exists.returncode != 0:
         raise TestServicesError(
             f"无法确认临时容器 {name} 的状态：{exists.stderr[-800:]}"
@@ -113,6 +297,8 @@ def _remove_owned(resource: dict, lease: str) -> dict:
     ident = info.get("Id")
     if not isinstance(ident, str) or not re.fullmatch(r"[0-9a-f]{64}", ident):
         raise TestServicesError(f"容器 {name} 未返回有效的精确 ID，拒绝删除")
+    if ident != resource.get("id"):
+        raise TestServicesError(f"容器 {name} 的实际 ID 与本次绑定不匹配，拒绝删除")
     _command(["rm", "--force", "--time", "1", ident], 10)
     if _command(["container", "exists", ident], 3, check=False).returncode != 1:
         raise TestServicesError(f"无法确认临时容器 {name} 已删除")
@@ -182,6 +368,7 @@ def isolated_test_services(
     if SERVICE not in required:
         yield {}
         return
+    root = root.resolve()
     _local_engine()
     result = _command(
         ["image", "inspect", "--format", "{{.Id}}", IMAGE], 5, check=False
@@ -193,7 +380,8 @@ def isolated_test_services(
         )
     lease = uuid.uuid4().hex
     directory = root / "tmp/quality/test-services" / lease
-    directory.mkdir(parents=True)
+    lease_fd = _open_lease_directory(root, lease, create=True)
+    os.close(lease_fd)
     resource = {
         "service": "redis",
         "name": f"lexiflow-check-redis-{lease}",
@@ -206,8 +394,23 @@ def isolated_test_services(
     saved = os.environ.get(ENV_KEY)
     failed = False
     cleanup = []
+    binding_sha256: str | None = None
     try:
         value = _create(resource, lease, directory, progress)
+        binding_record = {
+            "schema": "lexiflow.redis-lease-binding.v1",
+            "lease": lease,
+            "resource_id": resource["id"],
+            "image_id": image_id,
+            "endpoint_sha256": _digest(value),
+        }
+        binding_sha256 = _publish_receipt(root, lease, "binding.json", binding_record)
+        binding = {
+            **binding_record,
+            "binding_sha256": binding_sha256,
+            "directory": str(directory.relative_to(root.resolve())),
+        }
+        _ACTIVE_BINDINGS[(str(root.resolve()), binding["endpoint_sha256"])] = binding
         os.environ[ENV_KEY] = value
         yield {ENV_KEY: value}
     except BaseException:
@@ -221,11 +424,31 @@ def isolated_test_services(
         error = None
         try:
             cleanup.append(_remove_owned(resource, lease))
+            if resource.get("ready") is not True or not resource.get("id"):
+                raise TestServicesError("资源未ready，不能签发成功清理收据")
+            if binding_sha256 is None:
+                raise TestServicesError(
+                    "binding receipt unavailable; cleanup cannot authorize evidence"
+                )
+            _publish_receipt(
+                root,
+                lease,
+                "cleanup-receipt.json",
+                {
+                    "schema": "lexiflow.redis-lease-cleanup.v1",
+                    "lease": lease,
+                    "resource_id": resource["id"],
+                    "binding_sha256": binding_sha256,
+                    "removed": True,
+                },
+            )
             progress("隔离 redis 清理 PASS")
         except (OSError, ValueError, KeyError, IndexError) as exc:
             error = str(exc)
             cleanup.append({"name": resource["name"], "removed": False, "error": error})
             progress(f"隔离 redis 清理 BLOCKED：{exc}")
+        if "value" in locals():
+            _ACTIVE_BINDINGS.pop((str(root.resolve()), _digest(value)), None)
         (directory / "cleanup.json").write_text(
             json.dumps(
                 {

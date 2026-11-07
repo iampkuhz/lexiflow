@@ -16,19 +16,37 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scripts.verification.execution.check_runner import (
+    RELEASE_RUNTIME_CHECK_IDS,
+    RELEASE_RUNTIME_CHILD_COMMAND,
+    VERIFY_CHILD_INPUT_MAX_BYTES,
     aggregate_results,
     build_child_environment,
     compute_coverage_gap,
-    execute_single_check as _execute_single_check,
+    environment_components,
+    environment_fingerprint,
+    is_release_runtime_child_check,
     run_check_process,
     snapshot_check_inputs,
 )
 from scripts.verification.execution.check_runner import (
-    RELEASE_RUNTIME_CHILD_COMMAND,
-    RELEASE_RUNTIME_CHECK_IDS,
-    VERIFY_CHILD_INPUT_MAX_BYTES,
-    is_release_runtime_child_check,
+    execute_single_check as _execute_single_check,
 )
+
+
+class TestEnvironmentFingerprints(unittest.TestCase):
+    def test_environment_fingerprint_reconstructs_from_value_digests(self):
+        environment = {
+            "PATH": "/private/toolchain",
+            "LEXIFLOW_REDIS_TEST_ENDPOINT": "127.0.0.1:56379",
+        }
+        components = environment_components(environment)
+        self.assertNotIn("/private/toolchain", json.dumps(components))
+        self.assertNotIn("127.0.0.1:56379", json.dumps(components))
+        from scripts.verification.execution.check_runner import fingerprint_json
+
+        self.assertEqual(
+            environment_fingerprint(environment), fingerprint_json(components)
+        )
 
 
 def execute_single_check(
@@ -49,7 +67,10 @@ def execute_single_check(
         kwargs.pop("progress_observer", None)
         return runner(*args, **kwargs)
 
-    with patch("scripts.verification.execution.check_runner.run_check_process", side_effect=process):
+    with patch(
+        "scripts.verification.execution.check_runner.run_check_process",
+        side_effect=process,
+    ):
         return _execute_single_check(check, root, env, run_id=run_id, frozen_pre=frozen)
 
 
@@ -290,7 +311,9 @@ class TestRunCheckProcess(unittest.TestCase):
         self.assertEqual((result["status"], result["exit_reason"]), ("FAIL", "timeout"))
 
     def test_oversized_direct_stdin_is_blocked_without_spawn(self):
-        with patch("scripts.verification.execution.check_runner.subprocess.Popen") as popen:
+        with patch(
+            "scripts.verification.execution.check_runner.subprocess.Popen"
+        ) as popen:
             result = run_check_process(
                 [sys.executable, "-c", "pass"],
                 cwd=".",
@@ -420,8 +443,8 @@ class TestExecuteSingleCheck(unittest.TestCase):
 
     def test_candidate_transport_requires_its_own_exact_command(self):
         from scripts.verification.execution.check_runner import (
-            CANDIDATE_RUNTIME_CHILD_COMMAND,
             CANDIDATE_RUNTIME_CHECK_IDS,
+            CANDIDATE_RUNTIME_CHILD_COMMAND,
             RELEASE_RUNTIME_CHILD_COMMAND,
         )
 
@@ -684,11 +707,11 @@ class TestChildDecoder(unittest.TestCase):
     """child 只消费唯一声明操作和精确快照，不信任 caller 配置。"""
 
     def _fixture(self, root):
-        from tests.verification.declaration_fixtures import write_declarations
         from scripts.verification.execution.check_runner import (
-            resolve_child_check,
             VERIFY_CHILD_INPUT_SCHEMA,
+            resolve_child_check,
         )
+        from tests.verification.declaration_fixtures import write_declarations
 
         (root / "source.txt").write_bytes(b"frozen")
         write_declarations(

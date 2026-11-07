@@ -1,6 +1,7 @@
 """不可变报告发布、伪造证据与规范 Check 去重的安全回归。"""
 
 from __future__ import annotations
+
 import json
 import os
 import tempfile
@@ -8,6 +9,7 @@ import unittest
 import uuid
 from pathlib import Path
 from unittest.mock import patch
+
 from scripts.verification import (
     freeze_inputs,
     persist_report,
@@ -42,7 +44,7 @@ def repo(root, checks):
 class TestReportPublicationSafety(unittest.TestCase):
     def report(self):
         return {
-            "schema_version": "lexiflow.verification-report.v1",
+            "schema_version": "lexiflow.verification-report.v2",
             "run_id": str(uuid.uuid4()),
             "result": "FAIL",
             "reason": "fixture-diagnostic",
@@ -80,7 +82,7 @@ class TestReportPublicationSafety(unittest.TestCase):
             root = Path(tmp)
             rid = str(uuid.uuid4())
             value = {
-                "schema_version": "lexiflow.verification-report.v1",
+                "schema_version": "lexiflow.verification-report.v2",
                 "run_id": rid,
                 "result": "PASS",
                 "reason": "",
@@ -141,7 +143,8 @@ class TestReportPublicationSafety(unittest.TestCase):
                 raise OSError("injected after link")
 
             with patch(
-                "scripts.verification.reports.verification_report_store.os.link", side_effect=link_then_error
+                "scripts.verification.reports.verification_report_store.os.link",
+                side_effect=link_then_error,
             ):
                 with self.assertRaisesRegex(ValueError, "publication failed"):
                     persist_report(root, value)
@@ -194,7 +197,8 @@ class TestFrozenAndDedupSafety(unittest.TestCase):
                 }
 
             with patch(
-                "scripts.verification.execution.check_runner.run_check_process", side_effect=runner
+                "scripts.verification.execution.check_runner.run_check_process",
+                side_effect=runner,
             ):
                 report = verify_repository(
                     root, required_check_ids=["base"], frozen_inputs=freeze

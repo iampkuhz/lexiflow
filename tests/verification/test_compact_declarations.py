@@ -38,7 +38,7 @@ class CompactDeclarationsTest(unittest.TestCase):
     def test_only_real_dependency_edges_are_declared_and_absence_defaults_empty(self):
         """无依赖声明可以省略，非空依赖仍有唯一稳定 Check 身份。"""
         declared = [c for c in self.raw["checks"] if "module_dependencies" in c]
-        self.assertEqual(2, len(declared))
+        self.assertEqual([], declared)
         self.assertTrue(all(c["module_dependencies"] for c in declared))
         self.assertTrue(all("module" not in c for c in self.raw["checks"]))
         self.assertTrue(all("module" not in c for c in self.parse()["checks"]))
@@ -114,8 +114,8 @@ class CompactDeclarationsTest(unittest.TestCase):
         checks = load_declarations(ROOT)["checks"]
         baseline = filter_checks_by_scope(checks, "repository-baseline")
         targeted = filter_checks_by_scope(checks, "change-targeted")
-        self.assertEqual(19, len(baseline))
-        self.assertEqual(22, len(targeted))
+        self.assertEqual(20, len(baseline))
+        self.assertEqual(23, len(targeted))
         self.assertTrue(all(c["triggers"] == [] for c in baseline))
         by_id = {c["check_id"]: c for c in checks}
         self.assertTrue(

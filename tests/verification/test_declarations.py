@@ -149,11 +149,11 @@ class TestLoadDeclarations(unittest.TestCase):
         self.assertEqual(
             set(raw), {"checks", "scenario_policy"}
         )
-        self.assertEqual(len(raw["checks"]), 23)
+        self.assertEqual(len(raw["checks"]), 24)
         command_lines = [
             line for line in source.splitlines() if line.startswith("  command:")
         ]
-        self.assertEqual(len(command_lines), 23)
+        self.assertEqual(len(command_lines), 24)
         self.assertTrue(
             all(
                 line.startswith("  command: [") and line.endswith("]")
@@ -426,9 +426,9 @@ class TestFilterChecksByScope(unittest.TestCase):
     def test_scene_views_preserve_membership_without_duplicate_ids(self):
         checks = load_declarations(Path(__file__).resolve().parents[2])["checks"]
         self.assertEqual(len(checks), len({c["check_id"] for c in checks}))
-        self.assertEqual(len(checks), 23)
-        self.assertEqual(len(filter_checks_by_scope(checks, "repository-baseline")), 19)
-        self.assertEqual(len(filter_checks_by_scope(checks, "change-targeted")), 22)
+        self.assertEqual(len(checks), 24)
+        self.assertEqual(len(filter_checks_by_scope(checks, "repository-baseline")), 20)
+        self.assertEqual(len(filter_checks_by_scope(checks, "change-targeted")), 23)
 
 
 class TestFilterChecksByIds(unittest.TestCase):

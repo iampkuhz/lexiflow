@@ -38,17 +38,17 @@ class ModuleChecksDeclarationTest(unittest.TestCase):
         cls.document = load_declarations(ROOT)
 
     def test_acceptance_module_fixed_budget_preserves_full_contract(self) -> None:
-        """完整验收工具回归只增加固定调度余量，不改变集合与依赖。"""
+        """验收工具完整发现原有测试，不把库的整套质量测试作为消费者运行前置。"""
         checks = {check["check_id"]: check for check in self.document["checks"]}
         check = checks["eng.delivery-gate.module-tests"]
         self.assertEqual(check["timeout_seconds"], 300)
         self.assertEqual(
             check["command"],
-            ["python3", "-m", "scripts.checks.tool_tests.run_acceptance_tool_tests"],
+            ["python3", "-m", "scripts.checks.tool_tests.run_python_tool_tests", "--suite", "acceptance"],
         )
         self.assertEqual(
             check["module_dependencies"],
-            ["eng.verification.module-tests", "eng.agents.module-tests"],
+            [],
         )
         self.assertEqual(check["scenarios"], ["repository-baseline", "change-targeted"])
 
@@ -146,7 +146,7 @@ class ModuleChecksDeclarationTest(unittest.TestCase):
         self.assertEqual(1, len(repo_checks), "repository unit test check must exist")
         check = repo_checks[0]
         self.assertIn(
-            "scripts.checks.repository.run_repository_check_group",
+            "scripts.checks.tool_tests.run_python_tool_tests --suite repository",
             " ".join(str(a) for a in check["command"]),
         )
 

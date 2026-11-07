@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
-import io
 import json
-import unittest
 from pathlib import Path
 
 from scripts.checks.repository.documentation import check_documentation as docs_check
@@ -35,43 +32,10 @@ def _report(
     }
 
 
-def evaluate_suite(suite: unittest.TestSuite) -> dict[str, object]:
-    """将仓库单元测试转成 Gate JSON，零测试或跳过不能 PASS。"""
-    stream = io.StringIO()
-    result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)
-    complete = result.testsRun > 0 and not result.skipped
-    passed = result.wasSuccessful() and complete
-    report = _report(
-        "PASS" if passed else "FAIL",
-        result.testsRun,
-        failures=len(result.failures),
-        errors=len(result.errors),
-        skipped=len(result.skipped),
-        reason="" if passed else "repository-module-tests-incomplete",
-    )
-    # 保留可定位的测试身份，不将可能带本机数据的 traceback 写入共享结果。
-    report["detail"] = {
-        "failed_tests": [test.id() for test, _ in result.failures],
-        "error_tests": [test.id() for test, _ in result.errors],
-        "skipped_tests": [test.id() for test, _ in result.skipped],
-    }
-    report["tool_output_sha256"] = hashlib.sha256(
-        stream.getvalue().encode()
-    ).hexdigest()
-    return report
-
-
 def run(root: Path, mode: str) -> dict[str, object]:
     """按 Harness 指定模式运行仓库模块检查，并保留各工具诊断。"""
     if mode == "python":
         return python_quality.run(root)
-    if mode == "tests":
-        suite = unittest.defaultTestLoader.discover(
-            str(root / "tests" / "repository"),
-            pattern="test_*.py",
-            top_level_dir=str(root),
-        )
-        return evaluate_suite(suite)
     if mode == "docs":
         result = docs_check.run(root)
         failures = len(result.get("issues", []))
@@ -109,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--mode",
-        choices=("tests", "docs", "planning", "python"),
+        choices=("docs", "planning", "python"),
         required=True,
     )
     args = parser.parse_args(argv)

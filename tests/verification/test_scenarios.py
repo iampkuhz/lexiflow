@@ -12,10 +12,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-
-
-from scripts.verification.execution.check_plan_runner import verify_repository as _verify_repository
 from unittest.mock import patch
+
+from scripts.verification.execution.check_plan_runner import (
+    verify_repository as _verify_repository,
+)
 from tests.verification.declaration_fixtures import write_declarations
 
 
@@ -30,7 +31,10 @@ def verify_repository(root, *, runner=None, **kwargs):
         result.setdefault("executed_argv", args[0])
         return result
 
-    with patch("scripts.verification.execution.check_runner.run_check_process", side_effect=process):
+    with patch(
+        "scripts.verification.execution.check_runner.run_check_process",
+        side_effect=process,
+    ):
         return _verify_repository(root, **kwargs)
 
 
@@ -280,7 +284,7 @@ class TestVerifyRepository(unittest.TestCase):
                 ],
             )
             report = verify_repository(tmpdir, runner=_pass_runner)
-        self.assertEqual(report["schema_version"], "lexiflow.verification-report.v1")
+        self.assertEqual(report["schema_version"], "lexiflow.verification-report.v2")
         self.assertIn("result", report)
         self.assertIn("checks", report)
         self.assertIn("input_fingerprint", report)

@@ -1,181 +1,36 @@
-# 1. 共用 Check 清单
+# 1. 共用 Check 责任索引
 
-> 位置：[Verify](../verification.md) → 共用 Check。此清单解释单项实现入口、作用与样本预算；实际触发、范围、依赖、输入、环境及结果合同以 [module-checks.yaml](../../../config/engineering/module-checks.yaml) 为准。它不是要求每次运行全部节点的顺序清单。
+> 位置：[Verify](../verification.md) → 共用 Check。实际命令、场景资格、触发、输入与超时均以 [module-checks.yaml](../../../config/engineering/module-checks.yaml) 为准；本页不维护第二套命令清单或固定执行顺序。
 
-## 1.1. 执行链与节点
+## 1.1. 哪些行为由谁证明
 
-日常开发、完整 Verify、Formal validation 和 CI 复用同一检查能力，但选择范围、冻结输入和身份结论不同。先由真实 `selection` 过滤节点，再按依赖闭包执行；子编号只分组显示，不代表父 Check 自动调用子 Check。
-
-时间来自本机 Apple Silicon、项目 Python／Java 25 环境中的一个完整成功开发批次（两个冻结开发检查范围；报告 ID `00fd7d32-8132-4bc1-adca-9a104e804f58`、`3ebc011b-a56b-4317-bf5e-97a2530d1c10`）。它们是单次参考，不是稳定区间、CI 预期或本次输入的验收；环境准备、下载、人工等待另计。淡橙只强调分钟级耗时，不表示 FAIL。
-
-```plantuml
-@startuml
-skinparam backgroundColor white
-skinparam defaultFontName SansSerif
-skinparam defaultFontSize 14
-skinparam shadowing false
-skinparam nodesep 40
-skinparam ranksep 45
-skinparam activityBackgroundColor #EAF2FF
-skinparam activityBorderColor #46699A
-skinparam noteBackgroundColor #F3F4F6
-skinparam noteBorderColor #94A3B8
-title 共用 Check：声明顺序与主要耗时
-start
-:S1 版本合同检查;
-note right
-入口：ops/release/test_tools/run-release-tool-tests.mjs
-作用：版本与构建身份
-<color:#995A00><b>预期：约 9 秒（单次样本参考）</b></color>
-end note
-:S2 文档规则检查;
-note right
-入口：scripts/checks/repository/run_repository_check_group.py
-作用：文档结构与引用
-<color:#995A00><b>预期：约 0.2 秒（单次样本参考）</b></color>
-end note
-:S2.1 Planning 合同检查;
-note right
-入口：scripts/checks/repository/catalog/check_task_catalog.py
-作用：Catalog 与任务合同
-<color:#995A00><b>预期：约 6 秒（单次样本参考）</b></color>
-end note
-:S2.2 Python 规则检查;
-note right
-入口：scripts/checks/repository/python/check_python_quality.py
-作用：Ruff / Pylint 静态质量
-<color:#995A00><b>预期：约 3 秒（单次样本参考）</b></color>
-end note
-:S3 Java 完整交付;
-note right
-入口：scripts/local/run_with_java_toolchain.py → backend/gradlew deliveryFull
-作用：静态质量、架构与业务测试
-<color:#995A00><b>预期：约 59 秒（单次样本参考）</b></color>
-end note
-:S4 Gradle 构建合同;
-note right
-入口：tests/verification/gradle_build_contract.py
-作用：真实构建模型与故障前置回归
-<color:#995A00><b>预期：约 14 秒（单次样本参考）</b></color>
-end note
-:S5 Verification 自检;
-note right #FFF0D6
-入口：scripts/checks/tool_tests/run_verification_tool_tests.py
-作用：验证框架直接回归
-<color:#995A00><b>预期：约 5 分 28 秒（单次样本参考）</b></color>
-end note
-:S5.1 Agent 工具自检;
-note right
-入口：scripts/checks/tool_tests/run_agent_tool_tests.py
-作用：派发、身份与事实记录
-<color:#995A00><b>预期：约 3 秒（单次样本参考）</b></color>
-end note
-:S5.2 Delivery Gate 自检;
-note right #FFF0D6
-入口：scripts/checks/tool_tests/run_acceptance_tool_tests.py
-作用：验收证据链回归
-<color:#995A00><b>预期：约 2 分 36 秒（单次样本参考）</b></color>
-end note
-:S5.3 Repository 工具自检;
-note right
-入口：scripts/checks/repository/run_repository_check_group.py
-作用：仓库工具直接回归
-<color:#995A00><b>预期：约 17 秒（单次样本参考）</b></color>
-end note
-:S6 扩展完整质量;
-note right
-入口：extension/scripts/checks/run-extension-checks.mjs
-作用：构建、单测与浏览器跨端检查
-<color:#995A00><b>预期：约 56 秒（单次样本参考）</b></color>
-end note
-:S7 制品清单合同;
-note right
-入口<U+FF1A>ops<U+002F>release<U+002F>test<U+005F>tools<U+002F>run<U+002D>release<U+002D>tool<U+002D>tests<U+002E>mjs <U+002D><U+002D>suite manifest
-作用：清单与制品身份
-<color:#995A00><b>预期：约 58 秒（单次样本参考）</b></color>
-end note
-:S8 部署合同检查;
-note right #FFF0D6
-入口：scripts/checks/deployment/run_deployment_contract_tests.py
-作用：部署、归属、取消与恢复
-<color:#995A00><b>预期：约 6 分 46 秒（单次样本参考）</b></color>
-end note
-:S9 运行入口合同;
-note right
-入口<U+FF1A>ops<U+002F>release<U+002F>test<U+005F>tools<U+002F>run<U+002D>release<U+002D>tool<U+002D>tests<U+002E>mjs <U+002D><U+002D>suite runtime<U+002D>entry
-作用：发行运行入口负例
-<color:#995A00><b>预期：约 26 秒（单次样本参考）</b></color>
-end note
-:S9.1 安装生命周期合同;
-note right
-入口<U+FF1A>ops<U+002F>release<U+002F>test<U+005F>tools<U+002F>run<U+002D>release<U+002D>tool<U+002D>tests<U+002E>mjs <U+002D><U+002D>suite lifecycle<U+002D>install
-作用：首装与安装恢复 fixture
-<color:#995A00><b>预期：约 14 秒（单次样本参考）</b></color>
-end note
-:S9.2 生命周期合同;
-note right #FFF0D6
-入口<U+FF1A>ops<U+002F>release<U+002F>test<U+005F>tools<U+002F>run<U+002D>release<U+002D>tool<U+002D>tests<U+002E>mjs <U+002D><U+002D>suite lifecycle
-作用：升级与资源生命周期 fixture
-<color:#995A00><b>预期：约 1 分 54 秒（单次样本参考）</b></color>
-end note
-:S10 发行构建合同;
-note right #FFF0D6
-入口<U+FF1A>ops<U+002F>release<U+002F>test<U+005F>tools<U+002F>run<U+002D>release<U+002D>tool<U+002D>tests<U+002E>mjs <U+002D><U+002D>suite build
-作用：构建、制品与候选合同
-<color:#995A00><b>预期：约 2 分 2 秒（单次样本参考）</b></color>
-end note
-:S10.1 源码发行真实运行;
-note right
-入口：scripts/checks/release/source/check_synthetic_release_lifecycle.py
-作用：真实源码发行生命周期
-<color:#995A00><b>预期：20 分钟（规划预留，未测）</b></color>
-end note
-:S10.2 候选制品真实运行;
-note right
-入口：scripts/checks/release/candidate/check_candidate_installation_lifecycle.py
-作用：真实候选首装、升级与恢复
-<color:#995A00><b>预期：40 分钟（规划预留，未测）</b></color>
-end note
-stop
-legend bottom
-先按真实 selection 过滤本图节点，再按依赖闭包执行。
-只有 PASS 才沿后续实线继续；交付失败时停止并记录 BLOCKED。
-子编号只分组显示，不表示父 Check 自动调用子 Check。
-除 S10.1／S10.2 的未测规划预留，其余是单次成功样本参考。
-规划预留参考 Registry 20／40 分钟上限；非实测或完成时间保证。
-endlegend
-@enduml
-```
-
-图与表列出实现文件、作用及预期参考；公开执行命令以表为准，内部实现文件不是要求额外运行的 CLI。S10.1／S10.2 尚无完整成功实测，各预留 20／40 分钟，参考 Registry 单项上限；这是规划预算，不保证实际可在预算内完成。其他节点使用单次样本参考；真正的触发路径、依赖、输入、环境和结果合同仍由 [module-checks.yaml](../../../config/engineering/module-checks.yaml) 维护，表格不定义第二套规则。
-
-| 节点 | 核心作用 | 入口链接／样本 |
+| 证明对象 | 保留的实际执行者 | 不能替代的保障 |
 | --- | --- | --- |
-| S1 | 版本与身份合同 | `node ops/release/test_tools/run-release-tool-tests.mjs`；[run-release-tool-tests.mjs](../../../ops/release/test_tools/run-release-tool-tests.mjs)；单次约 9 秒 |
-| S2 | 文档结构、链接与规则 | `python3 -m scripts.checks.repository.run_repository_check_group --mode docs`；入口 [quality.py](../../../scripts/checks/repository/run_repository_check_group.py)；样本约 0.2 秒 |
-| S2.1 | Catalog 合同 | `python3 -m scripts.checks.repository.run_repository_check_group --mode planning`；入口 [quality.py](../../../scripts/checks/repository/run_repository_check_group.py)；样本约 6 秒 |
-| S2.2 | scripts 静态质量 | `python3 -m scripts.checks.repository.run_repository_check_group --mode python`；入口 [quality.py](../../../scripts/checks/repository/run_repository_check_group.py)；样本约 3 秒 |
-| S3 | Java 完整模块检查 | [scripts/local/run_with_java_toolchain.py](../../../scripts/local/run_with_java_toolchain.py) → `backend/gradlew deliveryFull`；[Java 检查](../java-checks.md)；单次约 59 秒（含聚合子任务） |
-| S4 | 构建模型与前置故障回归 | [tests/verification/gradle_build_contract.py](../../../tests/verification/gradle_build_contract.py)；单次约 14 秒 |
-| S5 | 验证器自身回归 | [scripts/checks/tool_tests/run_verification_tool_tests.py](../../../scripts/checks/tool_tests/run_verification_tool_tests.py)；单次约 5 分 28 秒 |
-| S5.1 | 派发／身份／结果合同 | [scripts/checks/tool_tests/run_agent_tool_tests.py](../../../scripts/checks/tool_tests/run_agent_tool_tests.py)；单次约 3 秒 |
-| S5.2 | 验收证据链回归 | [scripts/checks/tool_tests/run_acceptance_tool_tests.py](../../../scripts/checks/tool_tests/run_acceptance_tool_tests.py)；单次约 2 分 36 秒 |
-| S5.3 | 仓库工具回归 | `python3 -m scripts.checks.repository.run_repository_check_group --mode tests`；入口 [quality.py](../../../scripts/checks/repository/run_repository_check_group.py)；样本约 17 秒 |
-| S6 | 构建、单测、真实跨端检查 | `node extension/scripts/checks/run-extension-checks.mjs`；单次约 56 秒（含子步骤） |
-| S7 | 清单与制品身份 | `node ops/release/test_tools/run-release-tool-tests.mjs --suite manifest`；单次约 58 秒 |
-| S8 | 部署、取消、归属与恢复回归 | [scripts/checks/deployment/run_deployment_contract_tests.py](../../../scripts/checks/deployment/run_deployment_contract_tests.py)；单次约 6 分 46 秒（含 Python／Node 套件） |
-| S9 | 运行入口负例 | `node ops/release/test_tools/run-release-tool-tests.mjs --suite runtime-entry`；单次约 26 秒 |
-| S9.1 | 首装 fixture | `node ops/release/test_tools/run-release-tool-tests.mjs --suite lifecycle-install`；单次约 14 秒 |
-| S9.2 | 升级／资源 fixture | `node ops/release/test_tools/run-release-tool-tests.mjs --suite lifecycle`；单次约 1 分 54 秒 |
-| S10 | 构建、制品与候选 fixture | `node ops/release/test_tools/run-release-tool-tests.mjs --suite build`；单次约 2 分 2 秒（非发行总时间） |
-| S10.1 | 真实源码发行生命周期 | [scripts/checks/release/source/check_synthetic_release_lifecycle.py](../../../scripts/checks/release/source/check_synthetic_release_lifecycle.py)；Formal only，预留 20 分钟（规划，未测） |
-| S10.2 | 真实候选首装、升级、恢复 | [scripts/checks/release/candidate/check_candidate_installation_lifecycle.py](../../../scripts/checks/release/candidate/check_candidate_installation_lifecycle.py)；Formal only，预留 40 分钟（规划，未测） |
+| Java 业务、架构、静态质量、SQLite 集成和 runtime smoke | `eng.backend.delivery` 的 Gradle `deliveryFull` | 不证明浏览器和正式发行候选 |
+| Gradle 任务、生成输入、配置缓存与前置故障 | `eng.backend.build-contract`，入口 [gradle_build_contract.py](../../../tests/verification/gradle_build_contract.py) | 独立入口，不在 `test_*.py` discovery 内，也不重复 Java 业务测试 |
+| 扩展构建、单元测试与真实 API／浏览器集成 | `eng.extension.quality`，入口 [run-extension-checks.mjs](../../../extension/scripts/checks/run-extension-checks.mjs) | E2E 的 `:api:bootRun` 自行编译与启动 API；后端完整质量测试不是扩展运行前置 |
+| 选择、冻结、执行、报告、Hook 与 CI | `eng.verification.module-tests` 的 `verification` suite | 不再混入发行晋升、进程监督和源码归档的行为回归 |
+| 原生身份、工作包与交接事实 | `eng.agents.module-tests` 的 `agents` suite | 不是被派发 Task 的验收 |
+| 正式验收工具的证据、独立性与消费合同 | `eng.delivery-gate.module-tests` 的 `acceptance` suite | 测试工具自身，不签发 Task 正式验收；库源码变化仍分别触发库和消费者测试 |
+| 文档、Catalog、源码归属和 Python 静态检查工具 | `eng.repository.module-tests` 的 `repository` suite；实际工具由对应 docs／planning／python-quality Check 执行 | 工具回归与对当前仓库的实际静态检查是不同证明，不能互删 |
+| 发行晋升、daemon 预检、进程监督、源码归档和运行适配器 | `eng.release.python-tests` 的 `release` suite，源码 [tests/release](../../../tests/release) | 保留完整行为断言；不代表真实发行候选已验收 |
+| 发行身份、清单、构建与安装 fixture | 对应 `eng.release.*` Node Check，入口 [run-release-tool-tests.mjs](../../../ops/release/test_tools/run-release-tool-tests.mjs) | fixture 不代替真实候选运行；不同对象的 smoke 不是重复测试 |
+| Docker／Podman／数据工具合同 | 完整基线的 `eng.release.docker-contract`；开发场景的四个不重叠分组 | 分组前审计完整测试库存与实际源码消费；新增、删除或消费缺口不得静默遗漏 |
+| 真实源码发行和精确候选安装、升级、恢复 | `eng.release.lifecycle-runtime`、`eng.release.candidate-runtime` | 正式专属，不能以工具单元测试、开发报告或历史 PASS 代替 |
 
+五个 Python suite 共用 [run_python_tool_tests.py](../../../scripts/checks/tool_tests/run_python_tool_tests.py) 和标准 `unittest` discovery。零测试、提前停止、失败、异常或 skip 均不能 PASS；原始断言、异常与跳过原因写到本机 stderr 日志，JSON 只保留结构化摘要和诊断摘要，不复制 traceback。
 
+## 1.2. 从直接反馈到正式验收
 
-## 1.2. 预算与边界
+| 使用层 | 证明与执行责任 | 不重复做什么 |
+| --- | --- | --- |
+| 实现者直接自检 | 必要静态、编译与精准回归，先定位实际失败层 | 不惯例性先跑全仓或签发独立验收 |
+| 独立开发检查 | 不同真实 actor 在最终输入上按完整 diff、显式触发及真实依赖闭包执行 CLI 或 Stop | 两入口择一；不惯例叠跑同一检查 |
+| 正式 `TASK_VALIDATION` | 独立 validator 执行风险所需冻结范围，并绑定真实证据 | 开发报告不是 Formal PASS，不能跨交付复用 |
+| `INDEPENDENT_REVIEW` 与 `CATALOG_DECISION` | 审查者只读冻结差异和证据；裁决者核 receipt/hash DAG | 不重新执行测试，不代替真实 actor 或人类授权 |
 
-计算一次交付等待时间，以实际物理执行及窗口为准；同事务复用不再次累加，父入口与子节点不相加，不跨交付复用旧 PASS。声明或实现变化后须重新判断样本适用性，节点样本总和不代表所有场景的预计完成时间。
+## 1.3. 成本与诊断
 
+计算等待时间应以当次实际物理执行和窗口为准：父入口与子任务不重复相加，同事务合法复用不再次累加。单次旧样本不是最新执行时间，也不是所有 diff 的预算；没有对本次输入执行就不能宣称通过或加速。
 
-能力身份由 Registry canonical ID 唯一维护，图只展示选后执行能力；24 个 canonical checks 在 repository-baseline／change-targeted 分别有 20／23 个成员。移除 Git 提醒检查不影响客户端 Stop；本页样本不能替代最新输入执行。
+静态选择可解释将执行哪些检查，但不等于这些检查已运行。耗时比较须统一解释器、输入范围、缓存与服务条件，并标明是否包含构建、下载和环境准备。失败先读当次 Check 的 stdout／stderr locator；不以摘要里的名称代替断言原因，也不为了取 traceback 再跑完整套件。

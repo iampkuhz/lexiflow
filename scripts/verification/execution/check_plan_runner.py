@@ -12,28 +12,36 @@ from scripts.environment.toolchains.toolchain_identity import (
     ToolchainUnavailable,
     resolve_toolchain,
 )
-from scripts.verification.execution.checkout_verification_window import (
-    VerificationWindow,
-    WindowError,
-    verification_window,
-)
-from scripts.verification.planning.check_definitions import (
-    DeclarationError,
-    REGISTRY_PATH,
-    filter_checks_by_scope,
-    load_declarations_snapshot,
-)
 from scripts.verification.execution.check_runner import (
     REPORT_SCHEMA,
     aggregate_results,
     build_child_environment,
     compute_coverage_gap,
+    environment_components,
     execute_single_check,
     fingerprint_json,
-    operation_config,
     is_release_runtime_child_check,
+    operation_config,
     sha256_bytes,
     snapshot_check_inputs,
+)
+from scripts.verification.execution.check_runner import (
+    environment_fingerprint as fingerprint_environment,
+)
+from scripts.verification.execution.checkout_verification_window import (
+    VerificationWindow,
+    WindowError,
+    verification_window,
+)
+from scripts.verification.execution.same_run_check_reuse import (
+    VerificationTransaction,
+    _begin,
+)
+from scripts.verification.planning.check_definitions import (
+    REGISTRY_PATH,
+    DeclarationError,
+    filter_checks_by_scope,
+    load_declarations_snapshot,
 )
 from scripts.verification.planning.check_scope_selection import (
     ScopeError,
@@ -43,10 +51,6 @@ from scripts.verification.planning.check_scope_selection import (
     resolve_module_dependencies,
     select_checks_for_changes,
     uncovered_changed_paths,
-)
-from scripts.verification.execution.same_run_check_reuse import (
-    VerificationTransaction,
-    _begin,
 )
 
 
@@ -219,14 +223,12 @@ def _execute(
         child_environment = build_child_environment(
             runtime_environment=resolved_environment.values
         )
-        environment_fingerprint = fingerprint_json(
-            {key: child_environment[key] for key in sorted(child_environment)}
-        )
+        environment_fingerprint = fingerprint_environment(child_environment)
         transaction_reuse = check.get("transaction_reuse") is True
         toolchain = None
         if transaction_reuse:
             try:
-                toolchain = resolve_toolchain(check, child_environment)
+                toolchain = resolve_toolchain(check, child_environment, repo_root=repo)
             except ToolchainUnavailable as exc:
                 blocked = _not_run_after_stop(
                     check, frozen[check["check_id"]], "toolchain-unavailable"
@@ -308,10 +310,33 @@ def _execute(
         )
         result["environment"] = environment
         result["environment_fingerprint"] = environment_fingerprint
+        result["environment_components"] = environment_components(child_environment)
+        if "LEXIFLOW_REDIS_TEST_ENDPOINT" in child_environment:
+            from scripts.environment.services.isolated_redis import active_binding
+
+            binding = active_binding(
+                repo, child_environment["LEXIFLOW_REDIS_TEST_ENDPOINT"]
+            )
+            if binding is not None:
+                result["environment_binding"] = {
+                    key: binding[key]
+                    for key in (
+                        "schema",
+                        "lease",
+                        "resource_id",
+                        "image_id",
+                        "endpoint_sha256",
+                        "binding_sha256",
+                        "directory",
+                    )
+                }
         if transaction_reuse:
             result["toolchain"] = toolchain
             try:
-                if resolve_toolchain(check, child_environment) != toolchain:
+                if (
+                    resolve_toolchain(check, child_environment, repo_root=repo)
+                    != toolchain
+                ):
                     result["status"] = "FAIL"
                     result["reason"] = "toolchain-drift"
             except ToolchainUnavailable:
@@ -364,14 +389,12 @@ def _verify_frozen_closure(
                 child_environment = build_child_environment(
                     runtime_environment=resolved.values
                 )
-                environment_fingerprint = fingerprint_json(
-                    {key: child_environment[key] for key in sorted(child_environment)}
-                )
+                environment_fingerprint = fingerprint_environment(child_environment)
                 if environment_fingerprint != result.get("environment_fingerprint"):
                     result["status"] = "FAIL"
                     result["reason"] = "environment-drift"
                 elif check.get("transaction_reuse") is True and resolve_toolchain(
-                    check, child_environment
+                    check, child_environment, repo_root=repo
                 ) != result.get("toolchain"):
                     result["status"] = "FAIL"
                     result["reason"] = "toolchain-drift"
