@@ -229,10 +229,13 @@ export async function runUnifiedDeployment(ctx) {
     } else {
       const toolsImage = `lexiflow-source-tools-${crypto.randomBytes(16).toString('hex')}`;
       const iidFile = path.join(probe, 'source-tools.iid');
+      const toolsContext = path.join(probe, 'source-tools-context');
+      // The recipe installs tools only. Source files are mounted read-only when the image runs.
+      fs.mkdirSync(toolsContext, { mode: 0o700 });
       let toolsId;
       try {
         await run('podman', ['build', '--platform', 'linux/arm64', '--iidfile', iidFile,
-          '--label', `io.lexiflow.source-tools-owner=${toolsImage}`, '-f', 'ops/podman/source-tools.Containerfile', 'ops/podman'], { cwd: repo });
+          '--label', `io.lexiflow.source-tools-owner=${toolsImage}`, '-f', 'ops/podman/source-tools.Containerfile', toolsContext], { cwd: repo });
         toolsId = fs.readFileSync(iidFile, 'utf8').trim();
         if (!/^sha256:[a-f0-9]{64}$/.test(toolsId)) fail('DEPLOYMENT_SOURCE_TOOLS_IMAGE_INVALID');
         const inspected = JSON.parse(await run('podman', ['image', 'inspect', '--format', '{{json .Labels}}', toolsId], { capture: true }));
@@ -261,6 +264,7 @@ export async function runUnifiedDeployment(ctx) {
           }
         }
         try { fs.unlinkSync(iidFile); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+        fs.rmdirSync(toolsContext);
       }
     }
     const inputSha256 = fileHash(dataset);

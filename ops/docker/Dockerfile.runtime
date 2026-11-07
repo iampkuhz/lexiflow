@@ -1,11 +1,22 @@
 ARG JAVA_RUNTIME_IMAGE
-FROM ${JAVA_RUNTIME_IMAGE} AS notice-files
+FROM ${JAVA_RUNTIME_IMAGE} AS java-runtime
+
+FROM java-runtime AS notice-files
 COPY notices/ /notices/
 RUN find /notices -type d -exec chmod 0555 {} + \
     && find /notices -type f -exec chmod 0444 {} +
 
-FROM ${JAVA_RUNTIME_IMAGE}
-ENV LANG=C.UTF-8 \
+# Copy from the locked rootfs: deleting archives in a later layer would still ship their bytes.
+# The fixed API and initializer heap sizes use the default HotSpot CDS archive.
+FROM scratch
+COPY --from=java-runtime \
+    --exclude=opt/java/openjdk/lib/server/classes_coh.jsa \
+    --exclude=opt/java/openjdk/lib/server/classes_nocoops_coh.jsa \
+    --exclude=opt/java/openjdk/lib/server/classes_nocoops.jsa / /
+ENV JAVA_HOME=/opt/java/openjdk \
+    PATH=/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    LANG=C.UTF-8 \
+    LANGUAGE=en_US:en \
     LC_ALL=C.UTF-8 \
     SPRING_DATASOURCE_URL=jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro
 LABEL io.lexiflow.image-role="runtime" \
@@ -14,6 +25,12 @@ LABEL io.lexiflow.image-role="runtime" \
 WORKDIR /app
 RUN test -x /bin/bash && test -x /usr/bin/timeout && test -x /usr/bin/env \
     && test -x /opt/java/openjdk/bin/java \
+    && test -s "$JAVA_HOME/lib/server/classes.jsa" \
+    && test ! -e "$JAVA_HOME/lib/server/classes_coh.jsa" \
+    && test ! -e "$JAVA_HOME/lib/server/classes_nocoops_coh.jsa" \
+    && test ! -e "$JAVA_HOME/lib/server/classes_nocoops.jsa" \
+    && java -Xms64m -Xmx768m -Xshare:on -version \
+    && java -Xms256m -Xmx768m -Xshare:on -version \
     && ! getent passwd 10001 >/dev/null \
     && useradd --uid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin lexiflow \
     && install -d -o 10001 -g 10001 -m 0700 /var/lib/lexiflow /run/lexiflow \

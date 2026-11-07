@@ -43,13 +43,16 @@ test('runtime Dockerfile is the locked one-image PID1 contract', async (t) => {
   const dockerfile = (await import('node:fs/promises')).readFile(f.dockerfile, 'utf8');
   const source = await dockerfile;
   assert.deepEqual(source.match(/^FROM .+$/gmu), [
-    'FROM ${JAVA_RUNTIME_IMAGE} AS notice-files',
-    'FROM ${JAVA_RUNTIME_IMAGE}',
+    'FROM ${JAVA_RUNTIME_IMAGE} AS java-runtime',
+    'FROM java-runtime AS notice-files',
+    'FROM scratch',
   ]);
   // 准备阶段不交付；用户、身份与 PID1 必须由唯一最终运行阶段声明。
   const runtime = source.slice(source.lastIndexOf('\nFROM ') + 1);
   assert.equal((source.match(/^ENTRYPOINT /gmu) ?? []).length, 1);
   assert.match(runtime, /USER 10001:10001/u);
+  assert.match(runtime, /java -Xms64m -Xmx768m -Xshare:on -version/u);
+  assert.match(runtime, /java -Xms256m -Xmx768m -Xshare:on -version/u);
   assert.match(runtime, /\/var\/lib\/lexiflow/u);
   assert.match(runtime, /COPY .*runtime-entrypoint\.sh \/app\/runtime-entrypoint\.sh/u);
   assert.match(runtime, /LABEL io\.lexiflow\.image-role="runtime"/u);

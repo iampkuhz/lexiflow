@@ -11635,6 +11635,33 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-OPS-2580
+        title: 减少 Podman 镜像和构建的实际载荷
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/v24-podman-image/tasks.md
+        estimated_minutes: 85
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/docker/Dockerfile.runtime
+        - ops/docker/tests/test_contract.py
+        - ops/release/tests/runtime-entry.test.mjs
+        - ops/podman/installation/installation-upgrade-workflow.mjs
+        - ops/podman/tests/unified-flow.test.mjs
+        - planning/workstreams.yaml
+        - openspec/changes/v24-podman-image/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env, infra/**, backend/**, ops/dataset/**, ops/release/workflow/**]
+        deliverable: 可复现的主要镜像或构建载荷改进、实测对照及下游绑定。
+        acceptance_criteria:
+        - 同平台、功能、JAR、资料与缓存口径真实构建并比较压缩层、展开层、上下文与运行。
+        - 非 root、Java 25、许可、离线初始化、版本身份、只读 SQLite、API 和部署保护保持不变。
+        - 当前冻结由不同 actor 正式验证与审查；真实发行另行验收，不以测试资料替代。
+        acceptance_evidence: [OCI manifest 和层摘要、运行与恢复证据、真实独立收据、报告下载回读。]
+        validation_command: python3 -m unittest ops.docker.tests.test_contract
+        required_check_ids: [eng.release.docker-contract, eng.release.build, eng.repository.docs, eng.repository.planning]
+        depends_on: []
       - id: LF-TSK-OPS-2578
         title: 流式校验固定公开词库来源并减少临时落盘
         priority: P1

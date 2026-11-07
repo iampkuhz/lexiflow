@@ -371,13 +371,20 @@ class DockerContractTest(unittest.TestCase):
         self.assertIn("ARG JAVA_RUNTIME_IMAGE", runtime)
         self.assertIn("jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro", runtime)
         self.assertIn("USER 10001:10001", runtime)
-        self.assertEqual(runtime.count("FROM "), 2)
-        self.assertIn("FROM ${JAVA_RUNTIME_IMAGE} AS notice-files", runtime)
+        self.assertEqual(runtime.count("FROM "), 3)
+        self.assertIn("FROM ${JAVA_RUNTIME_IMAGE} AS java-runtime", runtime)
+        self.assertIn("FROM java-runtime AS notice-files", runtime)
         self.assertIn("install -d -o 10001 -g 10001 -m 0555 /app/notices", runtime)
         self.assertIn("find /notices -type f -exec chmod 0444", runtime)
         self.assertIn("find /notices -type d -exec chmod 0555", runtime)
         self.assertIn("COPY --from=notice-files --chown=10001:10001 /notices/ /app/notices/", runtime)
-        final_stage = runtime.split("FROM ${JAVA_RUNTIME_IMAGE}\n", 1)[1]
+        final_stage = runtime.split("FROM scratch\n", 1)[1]
+        self.assertIn("COPY --from=java-runtime", final_stage)
+        self.assertIn("--exclude=opt/java/openjdk/lib/server/classes_nocoops.jsa / /", final_stage)
+        for archive in ("classes_coh.jsa", "classes_nocoops_coh.jsa", "classes_nocoops.jsa"):
+            self.assertIn("--exclude=opt/java/openjdk/lib/server/" + archive, final_stage)
+            self.assertIn('test ! -e "$JAVA_HOME/lib/server/' + archive + '"', final_stage)
+        self.assertIn('test -s "$JAVA_HOME/lib/server/classes.jsa"', final_stage)
         self.assertNotIn("RUN chmod", final_stage)
         self.assertEqual(dockerfile.count("RUN "), 1)
         self.assertIn("mkdir /work && chown 10001:10001 /work", dockerfile)

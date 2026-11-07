@@ -77,7 +77,11 @@ function fixture({ apiPort = 18081, failReady = false, failApply = false, struct
     if (command === 'java') { const file=argv[argv.indexOf('--expected-file')+1]; return JSON.stringify({status:'PASS',databaseFile:file,fingerprint:'f'.repeat(64),needsRebuild:committedGeneration !== generation.generationVersion,reason:!committedGeneration?'DATABASE_ABSENT':committedGeneration!==generation.generationVersion?'GENERATION_CHANGED':'OK',generationVersion:committedGeneration??null,datasetVersion:committedGeneration?7:null}); }
     if (command !== 'podman') throw new Error('unexpected command');
     if (argv[0] === 'build' && argv.includes('--iidfile')) {
-      write(argv[argv.indexOf('--iidfile') + 1], image('e'));
+      const iidFile = argv[argv.indexOf('--iidfile') + 1];
+      assert.equal(argv[argv.indexOf('-f') + 1], 'ops/podman/source-tools.Containerfile');
+      assert.equal(argv.at(-1), path.join(path.dirname(iidFile), 'source-tools-context'));
+      assert.deepEqual(fs.readdirSync(argv.at(-1)), [], 'tool image never receives repository source in its build context');
+      write(iidFile, image('e'));
       sourceToolsOwner = argv.find(value => value.startsWith('io.lexiflow.source-tools-owner='))?.split('=')[1]; return '';
     }
     if (argv[0] === 'image' && argv[1] === 'exists') throw Object.assign(new Error('image absent'), { commandExitCode: 1 });
