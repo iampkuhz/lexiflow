@@ -64,23 +64,18 @@ public final class ReleaseDatasetCommand {
             throw new IllegalArgumentException();
           rejectSymlinkPath(databaseFile);
           Path packagePath = Path.of(options.get("--package"));
-          DatasetPackageCodec.verify(packagePath, options.get("--expected-sha256"), trustedSql);
-          boolean existed = Files.exists(databaseFile, LinkOption.NOFOLLOW_LINKS);
           Object identity = null;
-          try {
-            if (!existed) {
+          try (var prepared =
+              SqliteDatasetPackage.prepare(
+                  packagePath, options.get("--expected-sha256"), trustedSql)) {
+            if (!Files.exists(databaseFile, LinkOption.NOFOLLOW_LINKS)) {
               identity = createExpectedFile(databaseFile);
             }
             try (var connection = SqlitePersistence.connect(url)) {
-              SqliteDatasetPackage.initialize(
-                  connection,
-                  packagePath,
-                  options.get("--expected-sha256"),
-                  databaseFile.toString(),
-                  trustedSql);
+              prepared.initialize(connection, databaseFile.toString());
             }
           } catch (Exception failure) {
-            if (!existed && identity != null && identity.equals(fileKey(databaseFile)))
+            if (identity != null && identity.equals(fileKey(databaseFile)))
               Files.deleteIfExists(databaseFile);
             throw failure;
           }

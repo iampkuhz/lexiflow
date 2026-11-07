@@ -2,15 +2,18 @@ package io.lexiflow.lexicon.platform.persistence;
 
 import io.lexiflow.lexicon.application.importing.policy.HintPreparation;
 import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
+import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.security.DigestOutputStream;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -81,6 +84,8 @@ public final class SqliteDatasetExport {
         String name = DatasetPackageCodec.ENTRY_NAMES.get(i + 2);
         Path file = dir.resolve(name);
         long rows = 0;
+        long bytes = 0;
+        var digest = DatasetPackageCodec.digest();
         try (var statement =
                 connection.prepareStatement(
                     "SELECT "
@@ -91,7 +96,9 @@ public final class SqliteDatasetExport {
                         + table.orderBy(),
                     ResultSet.TYPE_FORWARD_ONLY,
                     ResultSet.CONCUR_READ_ONLY);
-            var outputStream = Files.newOutputStream(file)) {
+            var outputStream =
+                new BufferedOutputStream(
+                    new DigestOutputStream(Files.newOutputStream(file), digest))) {
           statement.setFetchSize(500);
           try (var result = statement.executeQuery()) {
             while (result.next()) {
@@ -101,6 +108,7 @@ public final class SqliteDatasetExport {
               if (encoded.length > DatasetPackageCodec.MAX_LINE_BYTES) throw invalid();
               outputStream.write(encoded);
               outputStream.write('\n');
+              bytes += encoded.length + 1L;
               if (i == 0) dataset = row;
               if (i == 1 && DatasetPackageCodec.integer(row.get("canonical_form"), 0) == 1)
                 canonicalEntries++;
@@ -111,7 +119,7 @@ public final class SqliteDatasetExport {
         if ((rows < 1 && i != 2) || (i == 0 && rows != 1)) throw invalid();
         records.add(
             new DatasetPackageManifest.FileRecord(
-                name, Files.size(file), DatasetPackageCodec.sha256(file), rows));
+                name, bytes, HexFormat.of().formatHex(digest.digest()), rows));
         if (i == 0) afterDataset.run();
       }
       if (dataset == null

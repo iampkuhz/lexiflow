@@ -2,7 +2,7 @@
 
 > 位置：[仓库生命周期](../README.md) → 离线词库导入。本流程准备本机已发布资料，不是每次代码交付的必经步骤。
 
-首批完整来源为本机 `stardict.csv`，不叠加 `ecdict.csv`。来源文件不进入仓库，也不使用用户字幕、观看历史或熟悉度。API 只读消费已发布资料；来源校验、数据库初始化及重建均由离线命令完成。
+本机完整 CSV 导入以明确提供的 `stardict.csv` 为输入，不叠加 `ecdict.csv`。安装侧的[固定公开来源准备入口](../../ops/dataset/prepare_ecdict_bundle.py)则按来源锁组合 ECDICT CSV 与 StarDict 成员，输出精简 CSV 及含许可和行号映射的溯源 ZIP。溯源 ZIP 不是经批准的 SQLite 发行快照，两条路径的来源身份不可互换。来源文件不进入仓库，也不使用用户字幕、观看历史或熟悉度。API 只读消费已发布资料；来源校验、数据库初始化及重建均由离线命令完成。
 
 ## 1.1. 校验来源
 
@@ -39,6 +39,8 @@ LEXIFLOW_RELEASE_JDBC_URL='jdbc:sqlite:/absolute/path/to/lexicon.db' \
   --release-dataset initialize --package /absolute/path/dataset.zip \
   --expected-sha256 <sha256> --expected-file /absolute/path/to/lexicon.db
 ```
+
+发行初始化在打开数据库前验证完整包、来源审批、生成身份和内嵌 SQL，再由同一次命令使用已验证的私有快照。独立 `verify` 不连接数据库。导出与审批材料见[发行资料准备](github-actions/first-release/preparation.md#121-导出并核对发布资料)。
 
 部署数据使用 `--deployment-data inspect|apply --request <file> --expected-file <absolute DB>`，环境变量为 `LEXIFLOW_DEPLOYMENT_JDBC_URL`；响应以 `databaseFile` 标识目标。发行 CLI 使用 `LEXIFLOW_RELEASE_JDBC_URL`。两种管理命令都要求摘要/请求与绝对目标文件精确匹配，不能指向真实旧运行卷或未确认的文件。
 

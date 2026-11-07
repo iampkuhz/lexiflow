@@ -211,6 +211,7 @@ class EcdictFetchContractTest(unittest.TestCase):
         license_data = b"synthetic public license"
         lock = json.loads(LOCK.read_text())
         lock["files"]["LICENSE"] = hashlib.sha256(license_data).hexdigest()
+        lock["files"]["ecdict.csv"] = hashlib.sha256(source).hexdigest()
         lock["archive_member"]["bytes"] = len(source)
         lock["archive_member"]["sha256"] = hashlib.sha256(source).hexdigest()
         repo = root / "repo"
@@ -314,16 +315,17 @@ class EcdictFetchContractTest(unittest.TestCase):
                             with self.assertRaises(bundle.BundleError):
                                 bundle._verified_bundle(archive, lock, "a" * 64)
 
-    def test_extraction_is_bounded_and_checks_size_digest_and_exit(self):
-        for data, exit_code, message in (
-            (b"fixed", 0, None),
-            (b"fixedX", 0, "exceeds"),
-            (b"fix", 0, "verification"),
-            (b"wrong", 0, "verification"),
-            (b"fixed", 7, "verification"),
-        ):
+    def test_extraction_streams_without_materializing_and_checks_all_bytes(self):
+        valid = (",".join(bundle.HEADER) + "\n").encode()
+        cases = (
+            (valid, len(valid), hashlib.sha256(valid).hexdigest(), 0, None),
+            (valid + b"x", len(valid), hashlib.sha256(valid).hexdigest(), 0, "exceeds"),
+            (valid, len(valid), "0" * 64, 0, "verification"),
+            (valid, len(valid), hashlib.sha256(valid).hexdigest(), 7, "verification"),
+        )
+        for data, expected_size, expected_hash, exit_code, message in cases:
             with (
-                self.subTest(data=data, exit_code=exit_code),
+                self.subTest(exit_code=exit_code, message=message),
                 tempfile.TemporaryDirectory() as tmp,
             ):
                 root = pathlib.Path(tmp).resolve()
@@ -333,21 +335,71 @@ class EcdictFetchContractTest(unittest.TestCase):
                 )
                 tool.chmod(0o755)
                 lock = {
-                    "archive_member": {
-                        "bytes": 5,
-                        "sha256": hashlib.sha256(b"fixed").hexdigest(),
-                    }
+                    "archive_member": {"bytes": expected_size, "sha256": expected_hash}
                 }
                 with (
                     patch.object(bundle, "_source_lock"),
                     patch.object(bundle.shutil, "which", return_value=str(tool)),
                 ):
                     if message is None:
-                        bundle._extract_source(root, lock)
-                        self.assertEqual((root / "stardict.csv").read_bytes(), b"fixed")
+                        self.assertEqual(list(bundle._extract_source(root, lock)), [])
+                        self.assertFalse((root / "stardict.csv").exists())
                     else:
                         with self.assertRaisesRegex(bundle.BundleError, message):
-                            bundle._extract_source(root, lock)
+                            list(bundle._extract_source(root, lock))
+                        self.assertFalse((root / "stardict.csv").exists())
+
+    def test_extraction_rejects_malformed_csv(self):
+        data = (",".join(bundle.HEADER) + "\nshort\n").encode()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            tool = root / "7z"
+            tool.write_text(
+                f"#!{sys.executable}\nimport sys\nsys.stdout.buffer.write({data!r})\n"
+            )
+            tool.chmod(0o755)
+            lock = {
+                "archive_member": {
+                    "bytes": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                }
+            }
+            with (
+                patch.object(bundle, "_source_lock"),
+                patch.object(bundle.shutil, "which", return_value=str(tool)),
+                self.assertRaisesRegex(bundle.BundleError, "row shape"),
+            ):
+                list(bundle._extract_source(root, lock))
+            self.assertFalse((root / "stardict.csv").exists())
+
+    def test_extraction_preserves_later_bom_and_cr_only_records(self):
+        stream = io.StringIO(newline="")
+        writer = csv.writer(stream, lineterminator="\r")
+        writer.writerow(bundle.HEADER)
+        writer.writerow(
+            ["\ufefflater", "", "", "中文", "", "0", "", "", "0", "0", "", "", ""]
+        )
+        data = stream.getvalue().encode("utf-8")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp).resolve()
+            tool = root / "7z"
+            tool.write_text(
+                f"#!{sys.executable}\nimport sys\nsys.stdout.buffer.write({data!r})\n"
+            )
+            tool.chmod(0o755)
+            lock = {
+                "archive_member": {
+                    "bytes": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                }
+            }
+            with (
+                patch.object(bundle, "_source_lock"),
+                patch.object(bundle.shutil, "which", return_value=str(tool)),
+            ):
+                rows = list(bundle._extract_source(root, lock))
+            self.assertEqual(rows[0][1]["word"], "\ufefflater")
+            self.assertFalse((root / "stardict.csv").exists())
 
     def test_archive_lock_failure_prevents_extractor_invocation(self):
         with (
@@ -357,7 +409,7 @@ class EcdictFetchContractTest(unittest.TestCase):
             patch.object(bundle.subprocess, "Popen") as process,
         ):
             with self.assertRaises(bundle.BundleError):
-                bundle._extract_source(pathlib.Path("/private"), {})
+                list(bundle._extract_source(pathlib.Path("/private"), {}))
             process.assert_not_called()
 
     def test_prepare_atomically_publishes_only_verified_output_and_preserves_caller(
@@ -381,7 +433,6 @@ class EcdictFetchContractTest(unittest.TestCase):
                         _repo, output, parent=parent, sentinel=sentinel, **_kwargs
                     ):
                         output.write_bytes(fixture_zip.read_bytes())
-                        output.with_suffix(".report").mkdir()
                         self.assertEqual(
                             [p for p in parent.iterdir() if not p.name.startswith(".")],
                             [sentinel],
@@ -397,10 +448,7 @@ class EcdictFetchContractTest(unittest.TestCase):
                         stack.enter_context(
                             patch.object(bundle, "_validated_lock", return_value=lock)
                         )
-                        for name, target in (
-                            ("fetch", "_fetch_source"),
-                            ("extract", "_extract_source"),
-                        ):
+                        for name, target in (("fetch", "_fetch_source"),):
                             stack.enter_context(
                                 patch.object(
                                     bundle,
@@ -413,9 +461,11 @@ class EcdictFetchContractTest(unittest.TestCase):
                         stack.enter_context(
                             patch.object(
                                 bundle,
-                                "build",
-                                side_effect=bundle.BundleError("build")
-                                if failure == "build"
+                                "_build_bundle",
+                                side_effect=bundle.BundleError(
+                                    "extract" if failure == "extract" else "build"
+                                )
+                                if failure in ("extract", "build")
                                 else generate,
                             )
                         )

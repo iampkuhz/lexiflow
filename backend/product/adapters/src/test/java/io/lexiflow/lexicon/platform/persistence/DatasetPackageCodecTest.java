@@ -1,13 +1,18 @@
 package io.lexiflow.lexicon.platform.persistence;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.lexiflow.lexicon.application.importing.policy.HintPreparation;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.Arrays;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -128,6 +133,51 @@ class DatasetPackageCodecTest {
     Files.writeString(parts.get(3), "different");
     assertThrows(IOException.class, () -> DatasetPackageCodec.write(output, parts));
     assertEquals(digest, DatasetPackageCodec.sha256(output));
+  }
+
+  @Test
+  void checksAuthenticationBeforeReadAndRejectsMutatedBlocks() throws Exception {
+    var file = dir.toRealPath().resolve("blocks.zip");
+    byte[] bytes = new byte[64 * 1024 + 31];
+    new java.util.Random(2579).nextBytes(bytes);
+    Files.write(file, bytes);
+    String hash = DatasetPackageCodec.sha256(file);
+    try (var source = FileChannel.open(file, StandardOpenOption.READ);
+        var writer = FileChannel.open(file, StandardOpenOption.WRITE)) {
+      assertThrows(
+          IOException.class,
+          () -> new DatasetPackageCodec.AuthenticatedZip(source, "0".repeat(64)));
+      source.position(0);
+      try (var verified = new DatasetPackageCodec.AuthenticatedZip(source, hash)) {
+        byte[] first = verified.readNBytes(64 * 1024);
+        assertArrayEquals(Arrays.copyOf(bytes, first.length), first);
+        writer.write(
+            ByteBuffer.wrap(new byte[] {(byte) (bytes[bytes.length - 1] ^ 1)}), bytes.length - 1L);
+        assertThrows(IOException.class, verified::read);
+      }
+    }
+  }
+
+  @Test
+  void rejectsTrailingGrowthAndTruncationAfterAuthentication() throws Exception {
+    var file = dir.toRealPath().resolve("changed-length.zip");
+    byte[] bytes = {1, 2, 3};
+    Files.write(file, bytes);
+    String hash = DatasetPackageCodec.sha256(file);
+    try (var writer = FileChannel.open(file, StandardOpenOption.WRITE);
+        var source = FileChannel.open(file, StandardOpenOption.READ);
+        var grown = new DatasetPackageCodec.AuthenticatedZip(source, hash)) {
+      writer.write(ByteBuffer.wrap(new byte[] {4}), bytes.length);
+      assertArrayEquals(bytes, grown.readNBytes(bytes.length));
+      assertThrows(IOException.class, grown::read);
+      writer.truncate(bytes.length);
+    }
+    try (var writer = FileChannel.open(file, StandardOpenOption.WRITE);
+        var source = FileChannel.open(file, StandardOpenOption.READ);
+        var truncated = new DatasetPackageCodec.AuthenticatedZip(source, hash)) {
+      writer.truncate(2);
+      assertThrows(IOException.class, truncated::read);
+    }
   }
 
   @Test

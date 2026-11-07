@@ -17,6 +17,7 @@ import tempfile
 import uuid
 import zipfile
 from collections import Counter, defaultdict
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -204,11 +205,9 @@ def _read_full_csv(repo: Path) -> tuple[bytes, str]:
     return data, digest
 
 
-def _iter_rows(data: bytes):
+def _iter_text_rows(text: Iterable[str]) -> Iterator[tuple[int, dict[str, str]]]:
     try:
-        reader = csv.DictReader(
-            io.TextIOWrapper(io.BytesIO(data), encoding="utf-8-sig", newline="")
-        )
+        reader = csv.DictReader(text, strict=True)
         if tuple(reader.fieldnames or ()) != HEADER:
             raise BundleError("source CSV header mismatch")
         for row_number, row in enumerate(reader, 2):
@@ -217,6 +216,11 @@ def _iter_rows(data: bytes):
             yield row_number, dict(row)
     except (UnicodeDecodeError, csv.Error) as exc:
         raise BundleError("source CSV parsing failed") from exc
+
+
+def _iter_rows(data: bytes) -> Iterator[tuple[int, dict[str, str]]]:
+    text = io.TextIOWrapper(io.BytesIO(data), encoding="utf-8-sig", newline="")
+    yield from _iter_text_rows(text)
 
 
 def _valid_word(word: str) -> bool:
@@ -311,12 +315,17 @@ def _reason_candidates(
 
 
 def _build_rows(
-    base_data: bytes, full_data: bytes
+    base_data: bytes,
+    full_data: bytes | None,
+    *,
+    row_stream: Iterable[tuple[int, dict[str, str]]] | None = None,
+    include_audit: bool = True,
 ) -> tuple[list[tuple[str, int, dict[str, str]]], dict[str, Any], list[dict[str, Any]]]:
     base = list(_iter_rows(base_data))
     full_index: dict[str, tuple[int, dict[str, str]]] = {}
     coverage: dict[str, set[str]] = defaultdict(set)
-    for line_no, row in _iter_rows(full_data):
+    full_rows = row_stream if row_stream is not None else _iter_rows(full_data or b"")
+    for line_no, row in full_rows:
         word = row["word"].strip().lower()
         if word in CURATED:
             full_index.setdefault(word, (line_no, row))
@@ -380,15 +389,16 @@ def _build_rows(
         reason = reason_candidates[0] if reason_candidates else None
         if reason:
             counts[f"removed:{reason}"] += 1
-            audits.append(
-                {
-                    "source_file": "ecdict.csv",
-                    "source_row": line_no,
-                    "word": word,
-                    "reason": reason,
-                    "also_matched": reason_candidates[1:],
-                }
-            )
+            if include_audit:
+                audits.append(
+                    {
+                        "source_file": "ecdict.csv",
+                        "source_row": line_no,
+                        "word": word,
+                        "reason": reason,
+                        "also_matched": reason_candidates[1:],
+                    }
+                )
         else:
             counts["retained"] += 1
             if not protected:
@@ -435,7 +445,7 @@ def _build_rows(
         word = row["word"].strip().lower()
         covered = bool(prototypes & final_coverage.get(word, set()))
         counts["derived_covered" if covered else "derived_uncovered"] += 1
-        if not covered:
+        if not covered and include_audit:
             audits.append(
                 {
                     "source_file": "ecdict.csv",
@@ -487,22 +497,26 @@ def _zip_info(name: str) -> zipfile.ZipInfo:
 
 
 def _verify_sources(
-    repo: Path, initial: dict[str, Any], base_hash: str, full_hash: str
+    repo: Path, initial: dict[str, Any], base_hash: str, full_hash: str | None
 ) -> None:
     current = _source_lock(repo)
-    _, current_full_hash = _read_full_csv(repo)
     if (
         current != initial
         or _sha256_file(repo / "ecdict.csv") != base_hash
-        or current_full_hash != full_hash
+        or (full_hash is not None and _read_full_csv(repo)[1] != full_hash)
     ):
         raise BundleError("source inputs changed during build")
 
 
-def build(
-    source_repo: Path, output: Path, *, generation_code_version: str
+def _build_bundle(
+    source_repo: Path,
+    output: Path,
+    *,
+    generation_code_version: str,
+    stream_archive: bool,
+    write_audit: bool = True,
 ) -> dict[str, Any]:
-    """校验公开来源并生成不可覆盖、可复现的词库构建输入包。"""
+    """使用受控来源数据生成不可覆盖、可复现的词库构建输入包。"""
     repo = source_repo.expanduser().absolute()
     target = output.expanduser().absolute()
     _no_symlink_ancestors(target.parent)
@@ -514,13 +528,34 @@ def build(
     base_path = repo / "ecdict.csv"
     base_bytes = base_path.read_bytes()
     base_hash = _sha256(base_bytes)
-    full_bytes, full_hash = _read_full_csv(repo)
-    rows, counts, audit = _build_rows(base_bytes, full_bytes)
+    if base_hash != lock["files"]["ecdict.csv"]:
+        raise BundleError("source hash mismatch: ecdict.csv")
+    if stream_archive:
+        full_hash = ARCHIVE_MEMBER_SHA256
+        full_size = ARCHIVE_MEMBER_BYTES
+        full_rows = _extract_source(repo, lock)
+    else:
+        full_bytes, full_hash = _read_full_csv(repo)
+        full_rows = _iter_rows(full_bytes)
+        full_size = len(full_bytes)
+    license_bytes = (repo / "LICENSE").read_bytes()
+    if _sha256(license_bytes) != lock["files"]["LICENSE"]:
+        raise BundleError("source hash mismatch: LICENSE")
+    try:
+        rows, counts, audit = _build_rows(
+            base_bytes,
+            None if stream_archive else full_bytes,
+            row_stream=full_rows if stream_archive else None,
+            include_audit=write_audit,
+        )
+    finally:
+        close = getattr(full_rows, "close", None)
+        if close is not None:
+            close()
     data, row_map = _serialize(rows)
     code_version = generation_code_version
     if not re.fullmatch(r"[0-9a-f]{64}", code_version):
         raise BundleError("generation code identity invalid")
-    license_bytes = (repo / "LICENSE").read_bytes()
     members = {
         "stardict.csv": data,
         "source-rows.csv": row_map,
@@ -534,7 +569,7 @@ def build(
         "repository_url": REPOSITORY_URL,
         "commit": COMMIT,
         "files": lock["files"],
-        "archive_member": {"sha256": full_hash, "bytes": len(full_bytes)},
+        "archive_member": {"sha256": full_hash, "bytes": full_size},
     }
     generation_config = {"sourceId": "ecdict-stardict", "licenseId": "MIT"}
     generation_source_digest = _sha256(
@@ -565,7 +600,7 @@ def build(
             "files": lock["files"],
             "archive_member": {
                 "name": "stardict.csv",
-                "bytes": len(full_bytes),
+                "bytes": full_size,
                 "sha256": full_hash,
             },
         },
@@ -592,23 +627,25 @@ def build(
     )
     temp = temp_dir / target.name
     report_dir = temp_dir / "report"
-    report_dir.mkdir()
-    (report_dir / "excluded-rows.jsonl").write_text(
-        "".join(
-            json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in audit
-        ),
-        encoding="utf-8",
-    )
-    (report_dir / "summary.json").write_text(
-        json.dumps(counts, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    report_target = target.parent / f"{target.stem}.report"
     published_output = False
     published_report = False
-    report_target = target.parent / f"{target.stem}.report"
     try:
-        if report_target.exists() or report_target.is_symlink():
+        if write_audit and (report_target.exists() or report_target.is_symlink()):
             raise BundleError("report target already exists; refusing overwrite")
+        if write_audit:
+            report_dir.mkdir()
+            (report_dir / "excluded-rows.jsonl").write_text(
+                "".join(
+                    json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+                    for row in audit
+                ),
+                encoding="utf-8",
+            )
+            (report_dir / "summary.json").write_text(
+                json.dumps(counts, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+                encoding="utf-8",
+            )
         with zipfile.ZipFile(
             temp, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9
         ) as archive:
@@ -621,19 +658,20 @@ def build(
                 )
         if temp.stat().st_size > MAX_ZIP_BYTES:
             raise BundleError("compressed source ZIP exceeds 8 MiB limit")
-        _verify_sources(repo, lock, base_hash, full_hash)
+        _verify_sources(repo, lock, base_hash, None if stream_archive else full_hash)
         os.link(temp, target)
         published_output = True
         temp.unlink()
-        report_target.mkdir()
-        published_report = True
-        shutil.move(
-            str(report_dir / "summary.json"), str(report_target / "summary.json")
-        )
-        shutil.move(
-            str(report_dir / "excluded-rows.jsonl"),
-            str(report_target / "excluded-rows.jsonl"),
-        )
+        if write_audit:
+            report_target.mkdir()
+            published_report = True
+            shutil.move(
+                str(report_dir / "summary.json"), report_target / "summary.json"
+            )
+            shutil.move(
+                str(report_dir / "excluded-rows.jsonl"),
+                report_target / "excluded-rows.jsonl",
+            )
     except Exception:
         if published_output:
             target.unlink(missing_ok=True)
@@ -647,6 +685,21 @@ def build(
         "output_sha256": _sha256_file(target),
         "selection": counts,
     }
+
+
+def build(
+    source_repo: Path,
+    output: Path,
+    *,
+    generation_code_version: str,
+) -> dict[str, Any]:
+    """从已展开且锁定的 member 生成独立构建包。"""
+    return _build_bundle(
+        source_repo,
+        output,
+        generation_code_version=generation_code_version,
+        stream_archive=False,
+    )
 
 
 def _fetch_source(repo: Path) -> None:
@@ -665,44 +718,81 @@ def _fetch_source(repo: Path) -> None:
         raise BundleError("fetched source identity differs from lock")
 
 
-def _extract_source(repo: Path, lock: dict[str, Any]) -> None:
-    """校验 archive 后只流式提取固定、严格限长的 CSV member。"""
-    # All three locked files and origin/commit must be valid before extraction.
-    _source_lock(repo)
-    extractor = shutil.which("7z") or shutil.which("7zz")
-    if not extractor:
-        raise BundleError("7z/7zz is required")
-    member = lock["archive_member"]
-    proc = subprocess.Popen(
-        [extractor, "x", "-so", str(repo / "stardict.7z"), "stardict.csv"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    try:
-        assert proc.stdout is not None
-        digest = hashlib.sha256()
-        total = 0
-        with (repo / "stardict.csv").open("xb") as target:
-            while chunk := proc.stdout.read(
-                min(1024 * 1024, member["bytes"] - total + 1)
+class _ArchiveMemberStream(io.RawIOBase):
+    """有界读归档 member，并在 EOF 验证字节数、摘要与解压进程。"""
+
+    def __init__(self, proc: subprocess.Popen, member: dict[str, Any]) -> None:
+        self._proc = proc
+        self._member = member
+        self._digest = hashlib.sha256()
+        self._total = 0
+        self._verified = False
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: memoryview) -> int:
+        if self._verified:
+            return 0
+        assert self._proc.stdout is not None
+        limit = self._member["bytes"] - self._total + 1
+        chunk = self._proc.stdout.read(min(len(buffer), limit))
+        if not chunk:
+            if self._proc.wait(timeout=30) != 0:
+                raise BundleError("locked archive member verification failed")
+            if (
+                self._total != self._member["bytes"]
+                or self._digest.hexdigest() != self._member["sha256"]
             ):
-                total += len(chunk)
-                if total > member["bytes"]:
-                    raise BundleError("archive member exceeds locked size")
-                digest.update(chunk)
-                target.write(chunk)
-        if (
-            proc.wait(timeout=30) != 0
-            or total != member["bytes"]
-            or digest.hexdigest() != member["sha256"]
-        ):
-            raise BundleError("locked archive member verification failed")
-        (repo / "stardict.csv").chmod(0o644)
-    finally:
-        _stop_child(proc)
-        if proc.stdout is not None:
-            proc.stdout.close()
+                raise BundleError("locked archive member verification failed")
+            self._verified = True
+            return 0
+        self._total += len(chunk)
+        if self._total > self._member["bytes"]:
+            raise BundleError("archive member exceeds locked size")
+        self._digest.update(chunk)
+        buffer[: len(chunk)] = chunk
+        return len(chunk)
+
+    def close(self) -> None:
+        if not self.closed:
+            if not self._verified:
+                _stop_child(self._proc)
+            if self._proc.stdout is not None:
+                self._proc.stdout.close()
+            super().close()
+
+
+def _extract_source(repo: Path, lock: dict[str, Any]):
+    """从固定 7z/7zz stdout 解析固定 member，不写出完整展开文件。"""
+
+    def rows() -> Iterator[tuple[int, dict[str, str]]]:
+        _source_lock(repo)
+        extractor = shutil.which("7z") or shutil.which("7zz")
+        if not extractor:
+            raise BundleError("7z/7zz is required")
+        member = lock["archive_member"]
+        proc = subprocess.Popen(
+            [extractor, "x", "-so", str(repo / "stardict.7z"), "stardict.csv"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        raw = _ArchiveMemberStream(proc, member)
+        text = io.TextIOWrapper(
+            io.BufferedReader(raw), encoding="utf-8-sig", newline=""
+        )
+        try:
+            yield from _iter_text_rows(text)
+            # _iter_text_rows consumes all rows; force a final read if parser buffering stopped early.
+            while text.read(1024 * 1024):
+                pass
+        except (UnicodeDecodeError, csv.Error) as exc:
+            raise BundleError("source CSV parsing failed") from exc
+        finally:
+            text.close()
+
+    return rows()
 
 
 def _stop_child(proc: subprocess.Popen) -> None:
@@ -850,11 +940,12 @@ def prepare(kit_root: Path, output_parent: Path) -> Path:
         repo = scratch / ".source-repo"
         repo.mkdir()
         _fetch_source(repo)
-        _extract_source(repo, lock)
-        build(
+        _build_bundle(
             repo,
             scratch / "ecdict-core-source.zip",
             generation_code_version=code_version,
+            stream_archive=True,
+            write_audit=False,
         )
         raw, manifest = _verified_bundle(
             scratch / "ecdict-core-source.zip", lock, code_version
@@ -876,7 +967,6 @@ def prepare(kit_root: Path, output_parent: Path) -> Path:
             encoding="utf-8",
         )
         shutil.rmtree(repo)
-        shutil.rmtree(scratch / "ecdict-core-source.report")
         for path in scratch.iterdir():
             path.chmod(0o644)
         scratch.chmod(0o755)

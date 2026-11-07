@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -58,6 +59,72 @@ class SqliteDatasetPackageIntegrationTest {
           SqliteTestSupport.scalar(
               connection, "SELECT COUNT(*) FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'"));
     }
+  }
+
+  @Test
+  void preparedInitializationUsesOnlyTheVerifiedSnapshot() throws Exception {
+    var published = sourcePackage();
+    Path target = SqliteTestSupport.newDatabase(temporary);
+    SqliteTestSupport.createEmpty(target);
+    var prepared = SqliteDatasetPackage.prepare(published.zip, published.sha, published.schema);
+    try (prepared;
+        var connection = SqlitePersistence.connect(SqliteTestSupport.url(target))) {
+      Files.delete(published.zip);
+      Files.writeString(published.zip, "replacement not verified");
+      assertEquals(published.version, prepared.manifest().datasetVersion());
+      assertThrows(
+          IllegalStateException.class,
+          () -> prepared.initializeWithinTransaction(connection, target.toRealPath().toString()));
+      connection.setAutoCommit(false);
+      prepared.initializeWithinTransaction(connection, target.toRealPath().toString());
+      assertEquals(4, SqliteTestSupport.scalar(connection, "SELECT COUNT(*) FROM lexicon_lookup"));
+      connection.rollback();
+      assertTrue(SqliteDatasetPackage.relations(connection).isEmpty());
+      connection.setAutoCommit(true);
+      prepared.initialize(connection, target.toRealPath().toString());
+      assertEquals(
+          published.version,
+          SqliteDatasetVerifier.verify(connection, published.schema).datasetVersion());
+    }
+    assertThrows(IllegalStateException.class, prepared::manifest);
+  }
+
+  @Test
+  void failedPreparedCleanupCanBeRetriedAndCallerTransactionRollsBack() throws Exception {
+    var published = sourcePackage();
+    Path target = SqliteTestSupport.newDatabase(temporary);
+    SqliteTestSupport.createEmpty(target);
+    var prepared = SqliteDatasetPackage.prepare(published.zip, published.sha, published.schema);
+    Path snapshot = verifiedDirectory(prepared);
+    try (prepared;
+        var connection = SqlitePersistence.connect(SqliteTestSupport.url(target))) {
+      connection.setAutoCommit(false);
+      prepared.initializeWithinTransaction(connection, target.toRealPath().toString());
+
+      Path entries = snapshot.resolve("entries.ndjson");
+      Files.delete(entries);
+      Files.createDirectory(entries);
+      Files.writeString(entries.resolve("obstruction"), "non-empty");
+      assertThrows(java.io.IOException.class, prepared::close);
+      assertThrows(IllegalStateException.class, prepared::manifest);
+      connection.rollback();
+      assertTrue(SqliteDatasetPackage.relations(connection).isEmpty());
+      connection.setAutoCommit(true);
+
+      Files.delete(entries.resolve("obstruction"));
+      Files.delete(entries);
+      prepared.close();
+      prepared.close(); // 成功关闭后的资源清理为纯内存 no-op。
+    }
+  }
+
+  private static Path verifiedDirectory(SqliteDatasetPackage.Prepared prepared) throws Exception {
+    var field = prepared.getClass().getDeclaredField("verified");
+    field.setAccessible(true);
+    Object verified = field.get(prepared);
+    var accessor = verified.getClass().getDeclaredMethod("directory");
+    accessor.setAccessible(true);
+    return (Path) accessor.invoke(verified);
   }
 
   @Test

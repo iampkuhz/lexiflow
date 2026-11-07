@@ -66,45 +66,86 @@ public final class SqliteDatasetPackage {
       String expectedFile,
       byte[] trustedSql)
       throws SQLException, IOException {
-    initialize(connection, packagePath, expectedSha256, expectedFile, trustedSql, true, () -> {});
+    try (var prepared = prepare(packagePath, expectedSha256, trustedSql)) {
+      prepared.initialize(connection, expectedFile);
+    }
   }
 
   /**
-   * 在由部署执行器拥有的事务中恢复，不提交或回滚调用者事务。
+   * 在打开目标之前校验一次资料，供同一管理命令读取身份和初始化。
    *
-   * @param connection 含义：调用者管理的连接。取值范围：目标库与 schema 已核对。
-   * @param packagePath 含义：资料包路径。取值范围：无符号链接的普通文件。
-   * @param expectedSha256 含义：资料包字节摘要。取值范围：64 位小写十六进制。
-   * @param expectedFile 含义：目标数据库文件。取值范围：绝对规范化路径并与连接一致。
-   * @param trustedSql 含义：可信最新结构 SQL。取值范围：非空内嵌字节。
+   * @param packagePath 含义：待恢复资料 ZIP。取值范围：路径无符号链接的普通文件。
+   * @param expectedSha256 含义：外部可信发布摘要。取值范围：64 位小写十六进制。
+   * @param trustedSql 含义：组合根内嵌最新 SQL。取值范围：非空可信 SQL 字节。
    */
-  public static void initializeWithinTransaction(
-      Connection connection,
-      Path packagePath,
-      String expectedSha256,
-      String expectedFile,
-      byte[] trustedSql)
-      throws SQLException, IOException {
-    initialize(connection, packagePath, expectedSha256, expectedFile, trustedSql, false, () -> {});
+  public static Prepared prepare(Path packagePath, String expectedSha256, byte[] trustedSql)
+      throws IOException {
+    byte[] schema = trustedSql.clone();
+    return new Prepared(
+        DatasetPackageCodec.verifiedPackage(packagePath, expectedSha256, schema), schema);
   }
 
-  private static void initialize(
-      Connection connection,
-      Path packagePath,
-      String expectedSha256,
-      String expectedFile,
-      byte[] trustedSql,
-      boolean manageTransaction,
-      Runnable beforePublish)
-      throws SQLException, IOException {
-    initializeInternal(
-        connection,
-        packagePath,
-        expectedSha256,
-        expectedFile,
-        trustedSql,
-        manageTransaction,
-        beforePublish);
+  /** 本次管理操作的私有已验证资料；调用方不能提供解包路径或替换可信结构。 */
+  public static final class Prepared implements AutoCloseable {
+    private final DatasetPackageCodec.Verified verified;
+    private final byte[] trustedSql;
+    private boolean closed;
+    private boolean cleanupComplete;
+
+    private Prepared(DatasetPackageCodec.Verified verified, byte[] trustedSql) {
+      this.verified = verified;
+      this.trustedSql = trustedSql;
+    }
+
+    /**
+     * 返回本次验证的不可变资料清单；快照关闭后不能再读取。
+     *
+     * @return 与本次私有已验快照绑定的清单。
+     */
+    public DatasetPackageManifest manifest() {
+      return openSnapshot().manifest();
+    }
+
+    /**
+     * 在本方法管理的 SQLite 事务中初始化或核对幂等快照。
+     *
+     * @param connection 含义：管理连接。取值范围：连接到预期专属文件。
+     * @param expectedFile 含义：预期数据库文件。取值范围：绝对规范路径。
+     */
+    public void initialize(Connection connection, String expectedFile)
+        throws SQLException, IOException {
+      initializeInternal(connection, openSnapshot(), expectedFile, trustedSql, true, () -> {});
+    }
+
+    /**
+     * 在已有的事务中初始化；提交或回滚由调用者负责。
+     *
+     * @param connection 含义：管理连接。取值范围：已开启事务并连接到预期专属文件。
+     * @param expectedFile 含义：预期数据库文件。取值范围：绝对规范路径。
+     */
+    public void initializeWithinTransaction(Connection connection, String expectedFile)
+        throws SQLException, IOException {
+      initializeInternal(connection, openSnapshot(), expectedFile, trustedSql, false, () -> {});
+    }
+
+    private DatasetPackageCodec.Verified openSnapshot() {
+      if (closed) throw new IllegalStateException("verified package has been closed");
+      return verified;
+    }
+
+    /**
+     * 使快照失效并删除本次验证的私有解包文件。
+     *
+     * @throws IOException 无法删除私有文件。
+     */
+    @Override
+    public void close() throws IOException {
+      closed = true;
+      if (cleanupComplete) return;
+      verified.close();
+      // 清理失败时仍不可复用，但允许外层失败清理重试剩余删除。
+      cleanupComplete = true;
+    }
   }
 
   /** 测试故障注入仅运行于资料写完而发布记录插入前。 */
@@ -116,52 +157,55 @@ public final class SqliteDatasetPackage {
       byte[] trustedSql,
       Runnable beforePublish)
       throws SQLException, IOException {
-    initialize(
-        connection, packagePath, expectedSha256, expectedFile, trustedSql, true, beforePublish);
+    try (var prepared = prepare(packagePath, expectedSha256, trustedSql)) {
+      initializeInternal(
+          connection,
+          prepared.openSnapshot(),
+          expectedFile,
+          prepared.trustedSql,
+          true,
+          beforePublish);
+    }
   }
 
   private static void initializeInternal(
       Connection connection,
-      Path packagePath,
-      String expectedSha256,
+      DatasetPackageCodec.Verified verified,
       String expectedFile,
       byte[] trustedSql,
       boolean manageTransaction,
       Runnable beforePublish)
       throws SQLException, IOException {
-    try (var verified =
-        DatasetPackageCodec.verifiedPackage(packagePath, expectedSha256, trustedSql)) {
-      validateTarget(connection, expectedFile);
-      boolean auto = connection.getAutoCommit();
-      if (!manageTransaction && auto)
-        throw new IllegalStateException("caller-owned transaction is required");
-      Throwable failure = null;
-      try {
-        if (manageTransaction) connection.setAutoCommit(false);
-        var actual = relations(connection);
-        if (actual.isEmpty()) {
-          createSchema(connection, trustedSql);
-          SqliteDatasetVerifier.verifyStructure(connection, trustedSql);
-          load(connection, verified.file("entries.ndjson"), DatasetPackageTables.ENTRY);
-          load(connection, verified.file("forms.ndjson"), DatasetPackageTables.FORM);
-          beforePublish.run();
-          load(connection, verified.file("dataset.ndjson"), DatasetPackageTables.DATASET);
-          assertCounts(connection, verified.manifest());
-          SqliteDatasetExport.validateProjection(connection);
-        } else {
-          if (!actual.equals(RELATIONS)) throw invalid();
-          SqliteDatasetVerifier.verifyStructure(connection, trustedSql);
-          assertCounts(connection, verified.manifest());
-          compareExisting(connection, verified, trustedSql);
-        }
-        if (manageTransaction) connection.commit();
-      } catch (SQLException | IOException | RuntimeException exception) {
-        failure = exception;
-        if (manageTransaction) rollbackPreservingFailure(connection, exception);
-        throw exception;
-      } finally {
-        if (manageTransaction) restoreAutoCommit(connection, auto, failure);
+    validateTarget(connection, expectedFile);
+    boolean auto = connection.getAutoCommit();
+    if (!manageTransaction && auto)
+      throw new IllegalStateException("caller-owned transaction is required");
+    Throwable failure = null;
+    try {
+      if (manageTransaction) connection.setAutoCommit(false);
+      var actual = relations(connection);
+      if (actual.isEmpty()) {
+        createSchema(connection, trustedSql);
+        SqliteDatasetVerifier.verifyStructure(connection, trustedSql);
+        load(connection, verified.file("entries.ndjson"), DatasetPackageTables.ENTRY);
+        load(connection, verified.file("forms.ndjson"), DatasetPackageTables.FORM);
+        beforePublish.run();
+        load(connection, verified.file("dataset.ndjson"), DatasetPackageTables.DATASET);
+        assertCounts(connection, verified.manifest());
+        SqliteDatasetExport.validateProjection(connection);
+      } else {
+        if (!actual.equals(RELATIONS)) throw invalid();
+        SqliteDatasetVerifier.verifyStructure(connection, trustedSql);
+        assertCounts(connection, verified.manifest());
+        compareExisting(connection, verified, trustedSql);
       }
+      if (manageTransaction) connection.commit();
+    } catch (SQLException | IOException | RuntimeException exception) {
+      failure = exception;
+      if (manageTransaction) rollbackPreservingFailure(connection, exception);
+      throw exception;
+    } finally {
+      if (manageTransaction) restoreAutoCommit(connection, auto, failure);
     }
   }
 

@@ -5,10 +5,14 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.lexiflow.lexicon.platform.persistence.GenerationIdentityReader;
+import io.lexiflow.lexicon.platform.persistence.SqliteDatasetExport;
+import io.lexiflow.lexicon.platform.persistence.SqlitePersistence;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -103,6 +107,84 @@ class DeploymentDataCommandTest {
     assertTrue(rebuilt.path("datasetVersion").asLong() > firstVersion);
   }
 
+  @Test
+  void packageInspectAndApplyKeepPreflightAndRollbackContracts(
+      @TempDir Path temp, CapturedOutput captured) throws Exception {
+    Path root = temp.toRealPath();
+    Path source = root.resolve("source.db");
+    String sourceJdbc = "jdbc:sqlite:" + source;
+    Path input = writeCsv(root, "reliable", "可靠");
+    String inputSha = sha256(input);
+    var generation = GenerationIdentityReader.forInput(inputSha);
+    Path request = root.resolve("request.json");
+    writeRequest(request, input, inputSha, generation, null);
+    assertEquals(0, invoke("inspect", request, source, sourceJdbc));
+    writeRequest(
+        request, input, inputSha, generation, lastJson(captured).path("fingerprint").asString());
+    assertEquals(0, invoke("apply", request, source, sourceJdbc));
+
+    Path archive = root.resolve("dataset.zip");
+    Path approvalFile = root.resolve("synthetic-approvals.json");
+    var mapper = new ObjectMapper();
+    try (var schema = getClass().getResourceAsStream("/META-INF/lexiflow-schema.sql");
+        var connection = SqlitePersistence.connect(sourceJdbc)) {
+      var approvals = new ArrayList<Map<String, Object>>();
+      try (var statement = connection.createStatement();
+          var rows = statement.executeQuery("SELECT source_manifest FROM lexicon_dataset")) {
+        assertTrue(rows.next());
+        for (var item : mapper.readTree(rows.getString(1))) {
+          approvals.add(
+              Map.of(
+                  "sourceId", item.path("source_id").asString(),
+                  "sourceDigest", item.path("source_digest").asString(),
+                  "licenseId", item.path("license_id").asString(),
+                  "redistributionApproved", true,
+                  "evidenceUrl", "https://example.invalid/synthetic-only"));
+        }
+      }
+      Files.writeString(
+          approvalFile,
+          mapper.writeValueAsString(Map.of("schemaVersion", 1, "sources", approvals)));
+      SqliteDatasetExport.export(connection, archive, approvalFile, schema.readAllBytes());
+    }
+
+    Path target = root.resolve("target.db");
+    String targetJdbc = "jdbc:sqlite:" + target;
+    writePackageRequest(request, archive, sha256(archive), generation, null);
+    assertEquals(0, invoke("inspect", request, target, targetJdbc));
+    assertFalse(Files.exists(target));
+    String fingerprint = lastJson(captured).path("fingerprint").asString();
+    writePackageRequest(request, archive, sha256(archive), generation, "0".repeat(64));
+    assertEquals(3, invoke("apply", request, target, targetJdbc));
+    assertEquals("FINGERPRINT_DRIFT", lastJson(captured).path("reason").asString());
+    assertFalse(Files.exists(target));
+
+    writePackageRequest(request, archive, sha256(archive), generation, fingerprint);
+    assertEquals(1, invokeWithSchema("apply", request, target, targetJdbc, new byte[0]));
+    assertFalse(Files.exists(target));
+    assertEquals(0, invoke("apply", request, target, targetJdbc));
+    assertTrue(lastJson(captured).path("rebuilt").asBoolean());
+    assertEquals(
+        generation.generationVersion(), lastJson(captured).path("generationVersion").asString());
+    try (var connection = SqlitePersistence.connect(targetJdbc);
+        var statement = connection.createStatement();
+        var rows = statement.executeQuery("SELECT COUNT(*) FROM lexicon_lookup")) {
+      assertTrue(rows.next());
+      assertEquals(1, rows.getInt(1));
+    }
+  }
+
+  private static void writePackageRequest(
+      Path request,
+      Path packagePath,
+      String packageSha,
+      io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata.GenerationIdentity
+          generation,
+      String fingerprint)
+      throws Exception {
+    writeRequest(request, packagePath, packageSha, generation, fingerprint, "package");
+  }
+
   private static int invokeWithSchema(
       String action, Path request, Path database, String jdbc, byte[] sql) {
     return DeploymentDataCommand.run(
@@ -155,6 +237,18 @@ class DeploymentDataCommandTest {
           generation,
       String fingerprint)
       throws Exception {
+    writeRequest(request, input, inputSha, generation, fingerprint, "csv");
+  }
+
+  private static void writeRequest(
+      Path request,
+      Path input,
+      String inputSha,
+      io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata.GenerationIdentity
+          generation,
+      String fingerprint,
+      String inputType)
+      throws Exception {
     String generationJson =
         "{\"codeVersion\":\""
             + generation.codeVersion()
@@ -166,7 +260,9 @@ class DeploymentDataCommandTest {
             + generation.inputSha256()
             + "\",\"config\":{\"sourceId\":\"ecdict-stardict\",\"licenseId\":\"MIT\"},\"upstream\":{}}";
     String value =
-        "{\"inputType\":\"csv\",\"inputPath\":\""
+        "{\"inputType\":\""
+            + inputType
+            + "\",\"inputPath\":\""
             + input
             + "\",\"inputSha256\":\""
             + inputSha

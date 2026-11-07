@@ -10258,6 +10258,39 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-LEX-2579
+        title: 复用发行快照校验并减少初始化重复读写
+        priority: P1
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/v24-data-initialization/tasks.md
+        estimated_minutes: 85
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageCodec.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/SqliteDatasetExport.java
+        - backend/product/adapters/src/main/java/io/lexiflow/lexicon/platform/persistence/SqliteDatasetPackage.java
+        - backend/product/api/src/main/java/io/lexiflow/api/release/ReleaseDatasetCommand.java
+        - backend/product/api/src/main/java/io/lexiflow/api/deployment/DeploymentDataCommand.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/DatasetPackageCodecTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/SqliteDatasetPackageIntegrationTest.java
+        - backend/product/adapters/src/test/java/io/lexiflow/lexicon/platform/persistence/SqliteDatasetExportIntegrationTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/release/ReleaseDatasetCommandTest.java
+        - backend/product/api/src/test/java/io/lexiflow/api/deployment/DeploymentDataCommandTest.java
+        - docs/scenarios/lexicon-import.md
+        - planning/workstreams.yaml
+        - openspec/changes/v24-data-initialization/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env, infra/**, ops/**, extension/**]
+        deliverable: 保持资料与事务合同的认证后有界读入和已校验快照复用，附同源指标及最终只读加载证明。
+        acceptance_criteria:
+        - 先验整包摘要，再逐块认证读取，不写整包验证副本；单次进程 initialize/apply 不重复解包；包原有格式和完整验证、审批、可信结构和生成身份不变。
+        - Java 25 生产管理入口导出、校验、隔离初始化；实际 API 只读查询保留内容与歧义，拒绝无库，验证错误与事务回滚。
+        - 同口径报告资料包、SQLite、阶段耗时、临时占用；新冻结独立验证和审查。
+        acceptance_evidence: [最终 JAR 与资料身份、运行及反例、前后同口径指标、冻结和独立收据。]
+        validation_command: python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend :adapters:test :adapters:sqliteIntegrationTest :api:test
+        required_check_ids: [eng.backend.delivery, eng.repository.docs, eng.repository.planning]
+        depends_on: []
       - id: LF-TSK-LEX-2001
         title: 实现预处理分类与独立提示和缓存资格
         priority: P0
@@ -11602,6 +11635,31 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-OPS-2578
+        title: 流式校验固定公开词库来源并减少临时落盘
+        priority: P1
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/v24-data-initialization/tasks.md
+        estimated_minutes: 55
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/dataset/prepare_ecdict_bundle.py
+        - ops/docker/tests/test_ecdict_fetch.py
+        - tests/verification/test_ecdict_bundle.py
+        - planning/workstreams.yaml
+        - openspec/changes/v24-data-initialization/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env, infra/**]
+        deliverable: 保持锁定来源、资料及溯源合同的低峰值准备入口和同源实测。
+        acceptance_criteria:
+        - 不落盘全量解压 member 或安装准备不消费的逐行报告；有界完整校验来源与原子发布不变。
+        - 同源 CSV、映射、许可、筛选计数、来源身份等价，错误来源及中止拒绝发布并清理自有临时目录。
+        - 同条件记录大小、耗时与峰值临时占用；本次真实独立验证和审查。
+        acceptance_evidence: [输入摘要、前后脱敏指标、生产入口、失败回归、冻结及独立收据。]
+        validation_command: python3 -m unittest ops.docker.tests.test_ecdict_fetch tests.verification.test_ecdict_bundle
+        required_check_ids: [eng.release.docker-contract, eng.repository.python-quality, eng.repository.docs, eng.repository.planning]
+        depends_on: []
       - id: LF-TSK-OPS-2576
         title: 收敛 API 构建归档并共享资料身份生成
         priority: P1

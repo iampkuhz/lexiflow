@@ -2,7 +2,6 @@ package io.lexiflow.api.deployment;
 
 import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import io.lexiflow.lexicon.platform.importer.LexiconImportMain;
-import io.lexiflow.lexicon.platform.persistence.DatasetPackageCodec;
 import io.lexiflow.lexicon.platform.persistence.GenerationIdentityReader;
 import io.lexiflow.lexicon.platform.persistence.SqliteDatasetPackage;
 import io.lexiflow.lexicon.platform.persistence.SqliteDatasetVerifier;
@@ -17,6 +16,7 @@ import java.security.MessageDigest;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -84,70 +84,33 @@ public final class DeploymentDataCommand {
       verifyGeneration(root.get("generation"));
       Path input = Path.of(text(root, "inputPath"));
       String inputSha = text(root, "inputSha256");
-      if (!input.isAbsolute() || !sha256(input).equals(inputSha))
-        throw new IllegalArgumentException();
-      if ("csv".equals(text(root, "inputType"))) {
-        if (!inputSha.equals(text(root.get("generation"), "inputSha256")))
-          throw new IllegalArgumentException();
-        LexiconImportMain.validateDeploymentInput(
-            input, inputSha, generation(root.get("generation")));
-      } else {
-        var manifest = DatasetPackageCodec.verifiedManifest(input, inputSha, trustedSql);
-        var wanted = generation(root.get("generation"));
-        if (!manifest.generationVersion().equals(wanted.generationVersion())
-            || !manifest.generationCodeVersion().equals(wanted.codeVersion())
-            || !manifest.generationSourceDigest().equals(wanted.sourceDigest())
-            || !JSON.readTree(manifest.generationConfigJson())
-                .equals(JSON.readTree(wanted.configJson()))
-            || !JSON.readTree(manifest.generationInputsJson())
-                .equals(JSON.readTree(wanted.inputsJson()))) throw new IllegalArgumentException();
-      }
-      String jdbcUrl = deploymentUrl(configuredJdbcUrl, databaseFile);
-      Snapshot before = inspect(databaseFile, jdbcUrl, trustedSql);
-      before = requireGeneration(before, text(root.get("generation"), "generationVersion"));
-      if (!apply) {
-        System.out.println(inspectResult(before));
-        return 0;
-      }
-      if (!text(root, "expectedFingerprint").equals(before.fingerprint())) {
-        System.out.println(result("BLOCKED", "FINGERPRINT_DRIFT"));
-        return 3;
-      }
-      if (!before.needsRebuild()) {
-        System.out.println(
-            "{\"status\":\"PASS\",\"rebuilt\":false,\"generationVersion\":\""
-                + before.generationVersion()
-                + "\",\"datasetVersion\":"
-                + before.datasetVersion()
-                + "}");
-        return 0;
-      }
-      Object createdIdentity = null;
-      try {
-        if (!Files.exists(databaseFile, LinkOption.NOFOLLOW_LINKS))
-          createdIdentity = createEmptyDatabaseFile(databaseFile);
-        long version =
-            apply(
-                jdbcUrl,
-                databaseFile,
+      if (!input.isAbsolute()) throw new IllegalArgumentException();
+      boolean csv = "csv".equals(text(root, "inputType"));
+      CommandResult outcome;
+      try (var prepared = csv ? null : SqliteDatasetPackage.prepare(input, inputSha, trustedSql)) {
+        if (csv) {
+          if (!sha256(input).equals(inputSha)
+              || !inputSha.equals(text(root.get("generation"), "inputSha256")))
+            throw new IllegalArgumentException();
+          LexiconImportMain.validateDeploymentInput(
+              input, inputSha, generation(root.get("generation")));
+        } else {
+          verifyPackageGeneration(prepared, root);
+        }
+        outcome =
+            execute(
+                apply,
                 root,
+                databaseFile,
+                configuredJdbcUrl,
                 input,
                 inputSha,
-                before,
-                createdIdentity,
                 trustedSql,
-                testSchemaOverride);
-        System.out.println(
-            "{\"status\":\"PASS\",\"rebuilt\":true,\"generationVersion\":\""
-                + text(root.get("generation"), "generationVersion")
-                + "\",\"datasetVersion\":"
-                + version
-                + "}");
-        return 0;
-      } catch (Exception failure) {
-        if (createdIdentity != null) removeCreatedDatabaseFile(databaseFile, createdIdentity);
-        throw failure;
+                testSchemaOverride,
+                prepared);
       }
+      System.out.println(outcome.response());
+      return outcome.exitCode();
     } catch (Blocked e) {
       status = "BLOCKED";
       reason = e.reason;
@@ -162,6 +125,82 @@ public final class DeploymentDataCommand {
     return "BLOCKED".equals(status) ? 3 : 1;
   }
 
+  /**
+   * 已完成请求的退出状态和单行回执。
+   *
+   * @param exitCode 含义：CLI 退出码。取值范围：成功为 0，目标指纹漂移为 3。
+   * @param response 含义：输出回执。取值范围：单行部署状态 JSON。
+   */
+  private record CommandResult(int exitCode, String response) {}
+
+  private static void verifyPackageGeneration(SqliteDatasetPackage.Prepared prepared, JsonNode root)
+      throws Exception {
+    var manifest = prepared.manifest();
+    var wanted = generation(root.get("generation"));
+    if (!manifest.generationVersion().equals(wanted.generationVersion())
+        || !manifest.generationCodeVersion().equals(wanted.codeVersion())
+        || !manifest.generationSourceDigest().equals(wanted.sourceDigest())
+        || !JSON.readTree(manifest.generationConfigJson())
+            .equals(JSON.readTree(wanted.configJson()))
+        || !JSON.readTree(manifest.generationInputsJson())
+            .equals(JSON.readTree(wanted.inputsJson()))) throw new IllegalArgumentException();
+  }
+
+  private static CommandResult execute(
+      boolean apply,
+      JsonNode root,
+      Path databaseFile,
+      String configuredJdbcUrl,
+      Path input,
+      String inputSha,
+      byte[] trustedSql,
+      byte[] testSchemaOverride,
+      SqliteDatasetPackage.Prepared prepared)
+      throws Exception {
+    String jdbcUrl = deploymentUrl(configuredJdbcUrl, databaseFile);
+    Snapshot before = inspect(databaseFile, jdbcUrl, trustedSql);
+    before = requireGeneration(before, text(root.get("generation"), "generationVersion"));
+    if (!apply) return new CommandResult(0, inspectResult(before));
+    if (!text(root, "expectedFingerprint").equals(before.fingerprint()))
+      return new CommandResult(3, result("BLOCKED", "FINGERPRINT_DRIFT"));
+    if (!before.needsRebuild()) {
+      return new CommandResult(
+          0,
+          "{\"status\":\"PASS\",\"rebuilt\":false,\"generationVersion\":\""
+              + before.generationVersion()
+              + "\",\"datasetVersion\":"
+              + before.datasetVersion()
+              + "}");
+    }
+    Object createdIdentity = null;
+    try {
+      if (!Files.exists(databaseFile, LinkOption.NOFOLLOW_LINKS))
+        createdIdentity = createEmptyDatabaseFile(databaseFile);
+      long version =
+          apply(
+              jdbcUrl,
+              databaseFile,
+              root,
+              input,
+              inputSha,
+              before,
+              createdIdentity,
+              trustedSql,
+              testSchemaOverride,
+              prepared);
+      return new CommandResult(
+          0,
+          "{\"status\":\"PASS\",\"rebuilt\":true,\"generationVersion\":\""
+              + text(root.get("generation"), "generationVersion")
+              + "\",\"datasetVersion\":"
+              + version
+              + "}");
+    } catch (Exception failure) {
+      if (createdIdentity != null) removeCreatedDatabaseFile(databaseFile, createdIdentity);
+      throw failure;
+    }
+  }
+
   private static long apply(
       String url,
       Path file,
@@ -171,7 +210,8 @@ public final class DeploymentDataCommand {
       Snapshot before,
       Object createdIdentity,
       byte[] trustedSql,
-      byte[] schemaOverride)
+      byte[] schemaOverride,
+      SqliteDatasetPackage.Prepared prepared)
       throws Exception {
     // 只有显式授权应用后才打开目标；同一事务覆盖本项目对象删除、最新结构重建和资料发布。
     try (Connection connection = SqlitePersistence.connect(url);
@@ -206,9 +246,10 @@ public final class DeploymentDataCommand {
                     statement.execute("DROP TABLE IF EXISTS lexicon_dataset");
                   }
                   byte[] sql = schemaOverride == null ? trustedSql : schemaOverride;
-                  if ("package".equals(text(root, "inputType"))) {
-                    SqliteDatasetPackage.initializeWithinTransaction(
-                        connection, input, inputSha, file.toString(), sql);
+                  if (prepared != null) {
+                    if (schemaOverride != null && !Arrays.equals(sql, trustedSql))
+                      throw new IOException("unexpected package schema");
+                    prepared.initializeWithinTransaction(connection, file.toString());
                     long packageVersion =
                         scalar(
                             connection,
@@ -234,6 +275,9 @@ public final class DeploymentDataCommand {
                         repository);
                   }
                   var publication = SqliteDatasetVerifier.verify(connection, trustedSql);
+                  // 资料包私有快照必须在调用者事务提交前关闭；失败清理也因此触发回滚。
+                  // 外层 Prepared 的重复 close 在成功后是纯内存 no-op。
+                  if (prepared != null) prepared.close();
                   return publication.datasetVersion();
                 } catch (Blocked blocked) {
                   status.setRollbackOnly();

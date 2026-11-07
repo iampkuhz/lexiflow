@@ -56,6 +56,14 @@ def _full(rows: list[dict[str, str]]) -> bytes:
     )
 
 
+def _source_files(root: Path) -> dict[str, str]:
+    return {
+        "ecdict.csv": hashlib.sha256((root / "ecdict.csv").read_bytes()).hexdigest(),
+        "stardict.7z": "a" * 64,
+        "LICENSE": hashlib.sha256((root / "LICENSE").read_bytes()).hexdigest(),
+    }
+
+
 class EcdictBundleTests(unittest.TestCase):
     def test_evidence_rows_are_protected_and_no_cap_or_alphabetic_selection(
         self,
@@ -215,7 +223,9 @@ class EcdictBundleTests(unittest.TestCase):
             (root / "ecdict.csv").write_bytes(_csv([_row("word")]))
             (root / "LICENSE").write_bytes(b"public license")
             with (
-                patch.object(bundle, "_source_lock", return_value={"files": {}}),
+                patch.object(
+                    bundle, "_source_lock", return_value={"files": _source_files(root)}
+                ),
                 patch.object(
                     bundle, "_read_full_csv", return_value=(_full([]), "hash")
                 ),
@@ -261,6 +271,67 @@ class EcdictBundleTests(unittest.TestCase):
                             "sha256": hashlib.sha256(data).hexdigest(),
                         },
                     )
+
+    def test_streamed_build_uses_controlled_extractor_without_audit(self) -> None:
+        rows = [_row("ordinary"), *(_row(word) for word in sorted(bundle.CURATED))]
+        full_data = _csv(rows)
+        digest = hashlib.sha256(full_data).hexdigest()
+        license_data = b"public license"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "ecdict.csv").write_bytes(_csv([_row("base")]))
+            (root / "LICENSE").write_bytes(license_data)
+            files = {
+                "ecdict.csv": hashlib.sha256(
+                    (root / "ecdict.csv").read_bytes()
+                ).hexdigest(),
+                "stardict.7z": "a" * 64,
+                "LICENSE": hashlib.sha256(license_data).hexdigest(),
+            }
+            source_lock = {
+                "files": files,
+                "archive_member": {"sha256": digest, "bytes": len(full_data)},
+            }
+            with ExitStack() as stack:
+                stack.enter_context(
+                    patch.object(bundle, "ARCHIVE_MEMBER_BYTES", len(full_data))
+                )
+                stack.enter_context(
+                    patch.object(bundle, "ARCHIVE_MEMBER_SHA256", digest)
+                )
+                stack.enter_context(
+                    patch.object(bundle, "_source_lock", return_value=source_lock)
+                )
+                stack.enter_context(
+                    patch.object(
+                        bundle,
+                        "_extract_source",
+                        return_value=bundle._iter_rows(full_data),
+                    )
+                )
+                stack.enter_context(patch.object(bundle, "_verify_sources"))
+                bundle._build_bundle(
+                    root,
+                    root / "bundle.zip",
+                    generation_code_version="a" * 64,
+                    stream_archive=True,
+                    write_audit=False,
+                )
+            self.assertFalse((root / "stardict.csv").exists())
+            self.assertFalse((root / "bundle.report").exists())
+            with zipfile.ZipFile(root / "bundle.zip") as archive:
+                manifest = json.loads(archive.read("manifest.json"))
+                self.assertEqual(
+                    manifest["upstream"]["archive_member"],
+                    {"name": "stardict.csv", "bytes": len(full_data), "sha256": digest},
+                )
+            with self.assertRaises(TypeError):
+                bundle.build(
+                    root,
+                    root / "other.zip",
+                    generation_code_version="a" * 64,
+                    full_rows=bundle._iter_rows(full_data),
+                )
 
     def test_multiline_source_records_preserve_published_record_ordinals(self) -> None:
         base = [
@@ -366,7 +437,11 @@ class EcdictBundleTests(unittest.TestCase):
                 output = root / "result.zip"
                 with ExitStack() as stack:
                     stack.enter_context(
-                        patch.object(bundle, "_source_lock", return_value={"files": {}})
+                        patch.object(
+                            bundle,
+                            "_source_lock",
+                            return_value={"files": _source_files(root)},
+                        )
                     )
                     stack.enter_context(
                         patch.object(
@@ -421,7 +496,24 @@ class EcdictBundleTests(unittest.TestCase):
                 ),
                 self.assertRaisesRegex(bundle.BundleError, "changed"),
             ):
-                bundle._verify_sources(root, {"files": {}}, "initial-hash", "full-hash")
+                bundle._verify_sources(root, {"files": {}}, "initial-hash", None)
+
+    def test_final_source_check_rejects_changed_local_expansion(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            base = _csv([_row("word")])
+            (root / "ecdict.csv").write_bytes(base)
+            with (
+                patch.object(bundle, "_source_lock", return_value={"files": {}}),
+                patch.object(
+                    bundle, "_read_full_csv", return_value=(b"new", "new-hash")
+                ) as read_full,
+                self.assertRaisesRegex(bundle.BundleError, "changed"),
+            ):
+                bundle._verify_sources(
+                    root, {"files": {}}, hashlib.sha256(base).hexdigest(), "old-hash"
+                )
+            read_full.assert_called_once_with(root)
 
     def test_zip_member_order_timestamp_mode_and_hashes(self) -> None:
         members = {

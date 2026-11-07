@@ -10,24 +10,28 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
+import java.nio.channels.FileChannel;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.security.DigestInputStream;
+import java.nio.file.StandardOpenOption;
 import java.security.DigestOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -363,7 +367,90 @@ public final class DatasetPackageCodec {
     }
   }
 
-  /** 从同一文件句柄复制并核对外部摘要，解包至独有私有目录。 */
+  /**
+   * 解包时得到的成员身份。
+   *
+   * @param bytes 含义：解压后字节数。取值范围：零至归档展开上限。
+   * @param sha256 含义：解压后内容摘要。取值范围：64 位小写十六进制。
+   */
+  private record MemberDigest(long bytes, String sha256) {}
+
+  /** 先认证整包，再从同一文件句柄逐块认证；防止被原地修改的字节进入解压器，无需第二份压缩包。 */
+  static final class AuthenticatedZip extends InputStream {
+    private static final int BLOCK_BYTES = 64 * 1024;
+
+    private final InputStream input;
+    private final List<byte[]> blocks = new ArrayList<>();
+    private final MessageDigest blockDigest = digest();
+    private final byte[] block = new byte[BLOCK_BYTES];
+    private final long bytes;
+    private int nextBlock;
+    private int offset;
+    private int available;
+    private boolean end;
+
+    AuthenticatedZip(FileChannel source, String expectedSha256) throws IOException {
+      input = Channels.newInputStream(source);
+      var packageDigest = digest();
+      long size = 0;
+      int count;
+      while ((count = input.readNBytes(block, 0, block.length)) != 0) {
+        size += count;
+        if (size > MAX_PACKAGE_BYTES) throw new IOException(BAD);
+        packageDigest.update(block, 0, count);
+        blocks.add(hashBlock(count));
+      }
+      if (!expectedSha256.equals(HexFormat.of().formatHex(packageDigest.digest())))
+        throw new IOException(BAD);
+      bytes = size;
+      source.position(0);
+    }
+
+    private byte[] hashBlock(int count) {
+      blockDigest.update(block, 0, count);
+      return blockDigest.digest();
+    }
+
+    private boolean hasByte() throws IOException {
+      if (offset < available) return true;
+      if (end) return false;
+      if (nextBlock == blocks.size()) {
+        if (input.read() != -1) throw new IOException(BAD);
+        end = true;
+        return false;
+      }
+      int count = (int) Math.min(BLOCK_BYTES, bytes - (long) nextBlock * BLOCK_BYTES);
+      if (input.readNBytes(block, 0, count) != count
+          || !Arrays.equals(hashBlock(count), blocks.get(nextBlock))) throw new IOException(BAD);
+      nextBlock++;
+      offset = 0;
+      available = count;
+      return true;
+    }
+
+    @Override
+    public int read() throws IOException {
+      return hasByte() ? block[offset++] & 0xff : -1;
+    }
+
+    @Override
+    public int read(byte[] target, int off, int len) throws IOException {
+      Objects.checkFromIndexSize(off, len, target.length);
+      if (len == 0) return 0;
+      if (!hasByte()) return -1;
+      int count = Math.min(len, available - offset);
+      System.arraycopy(block, offset, target, off, count);
+      offset += count;
+      return count;
+    }
+
+    @Override
+    public void close() throws IOException {
+      input.close();
+    }
+  }
+
+  /** 在私有目录解包，保留归档规范字节检查并在解压时记录各成员摘要。 */
   static Verified verifiedPackage(Path packagePath, String expectedSha256, byte[] trustedSchema)
       throws IOException {
     if (expectedSha256 == null || !expectedSha256.matches("[0-9a-f]{64}"))
@@ -372,32 +459,21 @@ public final class DatasetPackageCodec {
     if (!Files.isRegularFile(packagePath, LinkOption.NOFOLLOW_LINKS)
         || Files.size(packagePath) > MAX_PACKAGE_BYTES) throw new IOException(BAD);
     Path dir = Files.createTempDirectory("lexiflow-dataset-").toRealPath();
-    Path copy = dir.resolve("source.zip");
     try {
-      var hash = digest();
-      try (var in = new DigestInputStream(Files.newInputStream(packagePath), hash);
-          var out = Files.newOutputStream(copy)) {
-        byte[] buffer = new byte[65536];
-        long copied = 0;
-        int n;
-        while ((n = in.read(buffer)) != -1) {
-          copied += n;
-          if (copied > MAX_PACKAGE_BYTES) throw new IOException(BAD);
-          out.write(buffer, 0, n);
-        }
-      }
-      String actual = HexFormat.of().formatHex(hash.digest());
-      if (!actual.equals(expectedSha256) || Files.size(copy) > MAX_PACKAGE_BYTES)
-        throw new IOException(BAD);
+      var members = new HashMap<String, MemberDigest>();
       long expanded = 0;
-      try (var zip = new ZipInputStream(new BufferedInputStream(Files.newInputStream(copy)))) {
+      try (var source =
+              FileChannel.open(packagePath, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS);
+          var input = new AuthenticatedZip(source, expectedSha256);
+          var zip = new ZipInputStream(input)) {
+        byte[] buffer = new byte[65536];
         for (String name : ENTRY_NAMES) {
           ZipEntry entry = zip.getNextEntry();
           if (entry == null || entry.isDirectory() || !name.equals(entry.getName()))
             throw new IOException(BAD);
           long size = 0;
+          var memberHash = digest();
           try (var out = new BufferedOutputStream(Files.newOutputStream(dir.resolve(name)))) {
-            byte[] buffer = new byte[65536];
             int n;
             while ((n = zip.read(buffer)) != -1) {
               size += n;
@@ -405,27 +481,25 @@ public final class DatasetPackageCodec {
               if (expanded > MAX_EXPANDED_BYTES
                   || (name.endsWith(".json") && size > MAX_METADATA_BYTES))
                 throw new IOException(BAD);
+              memberHash.update(buffer, 0, n);
               out.write(buffer, 0, n);
             }
           }
+          members.put(name, new MemberDigest(size, HexFormat.of().formatHex(memberHash.digest())));
           zip.closeEntry();
         }
         if (zip.getNextEntry() != null) throw new IOException(BAD);
+        // ZipInputStream 停在中央目录。读完剩余输入，认证尾部并拒绝长度漂移。
+        input.transferTo(OutputStream.nullOutputStream());
       }
-      if (!actual.equals(
-          canonicalSha256(
-              List.of(
-                  dir.resolve("manifest.json"),
-                  dir.resolve("approvals.json"),
-                  dir.resolve("dataset.ndjson"),
-                  dir.resolve("entries.ndjson"),
-                  dir.resolve("forms.ndjson"))))) throw new IOException(BAD);
-      Files.delete(copy);
+      if (!expectedSha256.equals(canonicalSha256(ENTRY_NAMES.stream().map(dir::resolve).toList())))
+        throw new IOException(BAD);
       var manifest = parseManifest(Files.readAllBytes(dir.resolve("manifest.json")));
       verifyGeneration(manifest);
       if (!sha256(trustedSchema).equals(manifest.schemaSha256())) throw new IOException(BAD);
       byte[] approvalBytes = Files.readAllBytes(dir.resolve("approvals.json"));
-      if (!sha256(approvalBytes).equals(manifest.approvalSha256())) throw new IOException(BAD);
+      if (!members.get("approvals.json").sha256().equals(manifest.approvalSha256()))
+        throw new IOException(BAD);
       var approvals = parseApprovals(approvalBytes);
       Map<String, Object> dataset = null;
       long canonicalEntries = 0;
@@ -433,7 +507,8 @@ public final class DatasetPackageCodec {
         var table = DatasetPackageTables.TABLES.get(i);
         var record = manifest.files().get(i);
         Path file = dir.resolve(record.name());
-        if (Files.size(file) != record.bytes() || !sha256(file).equals(record.sha256()))
+        var member = members.get(record.name());
+        if (member.bytes() != record.bytes() || !member.sha256().equals(record.sha256()))
           throw new IOException(BAD);
         long rows = 0;
         try (var lines = new BoundedLines(file)) {
@@ -467,10 +542,9 @@ public final class DatasetPackageCodec {
           || integer(dataset.get("source_row_count"), 1) < manifest.files().get(1).rows())
         throw new IOException(BAD);
       validateSources(dataset.get("source_manifest"), approvals);
-      return new Verified(dir, manifest, actual);
+      return new Verified(dir, manifest, expectedSha256);
     } catch (IOException | RuntimeException exception) {
       for (String name : ENTRY_NAMES) Files.deleteIfExists(dir.resolve(name));
-      Files.deleteIfExists(copy);
       Files.deleteIfExists(dir);
       throw new IOException(BAD, exception);
     }
@@ -556,20 +630,6 @@ public final class DatasetPackageCodec {
       throws IOException {
     try (var verified = verifiedPackage(path, expectedSha256, trustedSchema)) {
       verified.manifest();
-    }
-  }
-
-  /**
-   * 校验整个包后返回用于部署身份比较的内嵌生成元数据。
-   *
-   * @param path 含义：资料包路径。取值范围：无符号链接的普通 ZIP 文件。
-   * @param expectedSha256 含义：资料包字节摘要。取值范围：64 位小写十六进制。
-   * @param trustedSchema 含义：可信最新结构 SQL。取值范围：非空内嵌字节。
-   */
-  public static DatasetPackageManifest verifiedManifest(
-      Path path, String expectedSha256, byte[] trustedSchema) throws IOException {
-    try (var verified = verifiedPackage(path, expectedSha256, trustedSchema)) {
-      return verified.manifest();
     }
   }
 
@@ -722,8 +782,9 @@ public final class DatasetPackageCodec {
 
   /** 拒绝输入或输出路径任何级别的符号链接。 */
   static void rejectSymlinkPath(Path path) throws IOException {
-    Path current = path.toAbsolutePath().normalize().getRoot();
-    for (Path part : path.toAbsolutePath().normalize()) {
+    Path absolute = path.toAbsolutePath();
+    Path current = absolute.getRoot();
+    for (Path part : absolute) {
       current = current.resolve(part);
       if (Files.isSymbolicLink(current)) throw new IOException(BAD);
     }
