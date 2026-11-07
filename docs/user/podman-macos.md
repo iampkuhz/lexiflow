@@ -11,6 +11,8 @@
 1. 在[正式 Release](https://github.com/iampkuhz/lexiflow/releases)复制该版本正文提供的完整 `podman run` 命令。它使用明确版本 `ghcr.io/iampkuhz/lexiflow:<softwareVersion>`，自动拉取唯一镜像、建立命名卷和启动一个容器。不要换成 `latest`；内容摘要与完整身份见同页 `release.json`。
 2. 下载同页 `lexiflow-extension-<softwareVersion>.zip`，按同页 `release.json` 的 SHA-256 校验，解压到稳定目录；在 `chrome://extensions` 开启开发者模式，点击“加载已解压的扩展程序”并选择含 `manifest.json` 的目录。启用后无需填写地址、密码或修改文件。
 
+安装只需要运行镜像、扩展 ZIP 和用于核验的 `release.json`。第三方对应源码、GitHub 自动生成的项目源码归档和发行证明不是运行依赖，不必下载或解压。
+
 正式容器为 `lexiflow-release`，资料卷为 `lexiflow-release-data`；API 仅映射 `127.0.0.1:18080:8080`。数据库不映射宿主端口，所有持久事实在该独立卷内。运行命令资源上限为 2 CPU/2 GiB，Podman machine 还需要容纳其他项目；实际镜像大小、初始化时间和验证环境以对应 Release 的测量为准。
 
 插件弹窗显示初始化中、正式就绪、服务不可用或版本不兼容。软件版本、`caption-hints.v2` 协议和发布资料身份都必须匹配同一发行；不能把容器存在或进程存活当作正式就绪。下载的 ZIP 不是 Chrome Web Store 安装，开发者模式和加载解压目录属于第二步；本阶段不提供商店上架或浏览器策略修改。
@@ -32,7 +34,11 @@ podman start lexiflow-release
 
 ## 1.3. 更新和数据保护
 
-新版本使用新版本 Release 中的精确命令及配套扩展。先停止当前正式容器、保留其卷和备份，再由维护者核对新镜像对该卷的兼容性；不要盲目重复 `podman run`、使用 `--replace`、删除卷或修改归属标记。项目不承诺任意历史数据库版本原地迁移，不通过自动清库完成更新。拒绝不兼容卷是数据保护，不是提示用户清库的授权。
+更新先准备、再切换，不需要重新下载完整安装包或重新导入旧版资料。
+
+1. **旧服务继续运行时准备新制品。** 从新版本的 `release.json` 取得 `image.reference`、`image.configId` 和扩展摘要。先用 `podman image inspect --format '{{.Id}}|{{.Os}}|{{.Architecture}}' '<image.reference>'` 核对本机是否已有该摘要的镜像；仅在确认镜像缺失时执行 `podman pull '<image.reference>'`。确认镜像 ID 与 `image.configId` 相同（比较时可忽略 `sha256:` 前缀），且系统和架构是 `linux|arm64`。不匹配就停止。引擎可复用已缓存的相同层。校验新扩展 ZIP 后解压到另一目录，暂不启用。
+2. **保留回退组合再切换。** 确认旧容器和资料卷归属，先完成所需备份，保留旧镜像、容器、卷及扩展目录。停旧容器，使用新版本 Release 的启动命令，将 `--name` 和挂载的卷名替换为本次安装专属的新名称，将 `--pull=always` 改为 `--pull=never` 并使用已核验的 `image.reference`。保留 loopback 端口。新空卷从镜像内离线初始化；运行健康且身份匹配后，禁用旧扩展并加载新扩展。若保留原扩展实例的本机偏好有要求，不删除旧扩展或手工覆盖其目录。
+3. **失败时不清卷。** 停止本次新容器，再启动保留的旧容器，停用新扩展并重新启用旧扩展。保留新卷用于诊断。确认旧容器恢复就绪后才算回退完成。不要使用 `--replace`、改归属标记或让不同资料身份复用旧卷；任意历史数据库原地迁移不在支持范围内。
 
 同名容器存在时 Podman 会清晰拒绝创建；重新启动已有容器用 `podman start`。已有端口被占用时先识别其归属，不停止未知服务。已有非空未知卷、资料或结构不兼容时入口失败关闭，保留现场。完全空的同名卷会被初始化；纯 `podman run` 无法区分它是本次自动新建还是预先存在，不保证拒绝所有未知空卷。
 

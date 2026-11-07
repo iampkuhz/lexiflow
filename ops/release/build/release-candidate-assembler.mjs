@@ -1,13 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, createReadStream, createWriteStream } from 'node:fs';
-import { chmod, lstat, link, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, link, mkdir, mkdtemp, open, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import { execFileSync } from 'node:child_process';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
-import { createManifest, verifyContainedFile, validateRelativePath } from '../integrity/release-artifact-manifest.mjs';
-import { packageManifest } from './package-release-artifacts.mjs';
+import { fileURLToPath } from 'node:url';
+import { buildManifest, createManifest, manifestSha256, serializeManifest, verifyContainedFile, validateRelativePath } from '../integrity/release-artifact-manifest.mjs';
+import { verifyPayloadFiles } from './package-release-artifacts.mjs';
 import { parseSoftwareVersion, resolveCleanBuildIdentity, validateBuildIdentity } from '../integrity/source-build-identity.mjs';
 
 const fail = (code) => { throw new Error(code); };
@@ -120,7 +121,8 @@ async function copyStream(sourceRoot, relative, target, bytesExpected, shaExpect
     digest.update(chunk); callback(null, chunk);
   } });
   try {
-    await pipeline(createReadStream(source, { flags: constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) }), meter, createWriteStream(target, { flags: 'wx', mode: 0o600 }));
+    await pipeline(createReadStream(source, { flags: constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0) }),
+      meter, createWriteStream(target, { flags: 'wx', mode: 0o600 }));
   } catch (error) {
     if (error.message === 'ARTIFACT_DIGEST_MISMATCH') throw error;
     fail('ARTIFACT_COPY_FAILED');
@@ -128,45 +130,35 @@ async function copyStream(sourceRoot, relative, target, bytesExpected, shaExpect
   if (bytes !== bytesExpected || digest.digest('hex') !== shaExpected) fail('ARTIFACT_DIGEST_MISMATCH');
 }
 
-async function fileSummary(file, maximum = 2 ** 40) {
-  const info = await lstat(file).catch(() => null);
-  if (!info?.isFile() || info.isSymbolicLink() || info.size < 1 || info.size > maximum) fail('SOURCE_PACKAGE_INVALID');
-  const checksum = hash(); let bytes = 0;
-  for await (const chunk of createReadStream(file, { flags: constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) })) {
-    bytes += chunk.length; if (bytes > maximum) fail('SOURCE_PACKAGE_INVALID'); checksum.update(chunk);
-  }
-  if (bytes !== info.size) fail('SOURCE_PACKAGE_INVALID');
-  return { bytes, sha256: checksum.digest('hex') };
-}
-
 export async function createSourcePackage(parent, artifactRoot, descriptor) {
   const directory = await mkdtemp(path.join(parent, '.lexiflow-source-package-')).catch(() => fail('SOURCE_PACKAGE_INVALID'));
   try {
-    const root = path.join(directory, 'package'); const materials = path.join(root, 'materials');
-    await mkdir(materials, { recursive: true, mode: 0o700 });
+    parseSoftwareVersion(descriptor.softwareVersion);
+    await noSymlinkPath(artifactRoot);
+    if (!Array.isArray(descriptor.licenses) || descriptor.licenses.length < 1 || descriptor.licenses.length > 128) fail('SOURCE_PACKAGE_INVALID');
     const items = [];
-    const copied = new Set();
     for (const license of descriptor.licenses) {
       const record = descriptor.artifacts.find(item => item.role === 'license' && item.path === license.noticePath && item.licenseIds.includes(license.id));
       if (!record) fail('SOURCE_PACKAGE_INVALID');
+      validateRelativePath(record.path);
       const archivePath = `materials/${record.path}`;
-      if (!copied.has(record.path)) {
-        await copyStream(artifactRoot, record.path, path.join(root, ...archivePath.split('/')), record.bytes, record.sha256);
-        copied.add(record.path);
-      }
       items.push({ id: license.id, component: license.component, licenseId: license.licenseId,
         licenseName: license.licenseName, sourceUrl: license.sourceUrl, noticePath: license.noticePath,
         archivePath, bytes: record.bytes, sha256: record.sha256 });
     }
     items.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     const index = Buffer.from(`${JSON.stringify({ schemaVersion: 1, items }, null, 2)}\n`);
-    await writeFile(path.join(root, 'index.json'), index, { flag: 'wx', mode: 0o600 });
     const archiveName = `lexiflow-third-party-sources-${descriptor.softwareVersion}.tar.gz`;
     const archive = path.join(directory, 'sources', archiveName);
     await mkdir(path.dirname(archive), { recursive: true, mode: 0o700 });
-    execFileSync('tar', ['-czf', archive, '-C', root, 'index.json', 'materials'],
-      { stdio: 'ignore', timeout: 3_600_000, env: { PATH: process.env.PATH, LANG: 'C', LC_ALL: 'C', COPYFILE_DISABLE: '1' } });
-    const summary = await fileSummary(archive);
+    const request = { artifactRoot, archivePath: archive, index: index.toString('base64'),
+      files: [...new Map(items.map(item => [item.noticePath, { path: item.noticePath, bytes: item.bytes, sha256: item.sha256 }])).values()] };
+    const output = execFileSync('python3', ['-I', path.join(path.dirname(fileURLToPath(import.meta.url)), 'source_package_writer.py')],
+      { input: JSON.stringify(request), stdio: ['pipe', 'pipe', 'ignore'], timeout: 3_600_000, maxBuffer: 4096,
+        encoding: 'utf8', env: { PATH: process.env.PATH, LANG: 'C', LC_ALL: 'C' } });
+    const summary = JSON.parse(output);
+    if (!exactKeys(summary, ['bytes', 'sha256']) || !Number.isSafeInteger(summary.bytes) || summary.bytes < 1
+      || summary.bytes > 2 ** 40 || typeof summary.sha256 !== 'string' || !hex.test(summary.sha256)) fail('SOURCE_PACKAGE_INVALID');
     return { directory, archive, record: { role: 'corresponding-sources', path: `sources/${archiveName}`,
       ...summary, licenseIds: descriptor.licenses.map(item => item.id).sort(),
       metadata: { indexSha256: createHash('sha256').update(index).digest('hex'), items } } };
@@ -177,15 +169,15 @@ export async function createSourcePackage(parent, artifactRoot, descriptor) {
   }
 }
 
-async function snapshot(candidate, imageDirectory, artifactRoot, descriptor, sourcePackageRoot) {
+async function snapshot(candidate, imageDirectory, artifactRoot, descriptor) {
   const current = await readImageCandidate(imageDirectory);
   if (!current.bytes.equals(candidate.bytes)) fail('IMAGE_CANDIDATE_CHANGED');
   for (const artifact of descriptor.artifacts) {
+    if (artifact.role === 'corresponding-sources') continue; // generated output, verified in the payload
     if (artifact.role === 'runtime-image') {
       if (artifact.platform !== candidate.candidate.platform) continue;
     }
-    const root = artifact.role === 'runtime-image' ? imageDirectory
-      : artifact.role === 'corresponding-sources' ? sourcePackageRoot : artifactRoot;
+    const root = artifact.role === 'runtime-image' ? imageDirectory : artifactRoot;
     await verifyContainedFile(root, artifact.path, artifact.bytes, artifact.sha256);
   }
 }
@@ -255,35 +247,44 @@ export async function assembleReleaseCandidate(input) {
   let retained = false;
   try {
     await chmod(candidateDirectory, 0o700);
-    const work = path.join(candidateDirectory, 'work'); const staging = path.join(work, 'artifacts');
-    await mkdir(staging, { recursive: true, mode: 0o700 });
-    const sourcePackage = await createSourcePackage(work, artifacts, descriptor);
+    const payload = path.join(candidateDirectory, 'payload');
+    await mkdir(payload, { mode: 0o700 });
+    const sourcePackage = await createSourcePackage(candidateDirectory, artifacts, descriptor);
     descriptor.artifacts.push(sourcePackage.record);
     descriptor.artifacts = descriptor.artifacts.filter(item => item.role !== 'license');
-    try { createManifest(descriptor, buildIdentity); } catch { fail('DESCRIPTOR_INVALID'); }
-    for (const { directory, imageCandidate } of imageCandidatesByPlatform)
-      await snapshot(imageCandidate, directory, artifacts, descriptor, sourcePackage.directory);
-    for (const artifact of descriptor.artifacts) {
-      const root = artifact.role === 'runtime-image'
-        ? byPlatform.get(artifact.platform)?.directory
-        : artifact.role === 'corresponding-sources' ? sourcePackage.directory : artifacts;
-      if (!root) fail('IMAGE_DESCRIPTOR_MISMATCH');
-      await copyStream(root, artifact.path, path.join(staging, ...artifact.path.split('/')), artifact.bytes, artifact.sha256);
+    let plan;
+    try { plan = createManifest(descriptor, buildIdentity); } catch { fail('DESCRIPTOR_INVALID'); }
+    const expectedFiles = ['manifest.json', 'manifest.json.sha256', ...plan.artifacts.map(item => item.path)];
+    if (new Set(expectedFiles.map(item => item.toLocaleLowerCase('en-US'))).size !== expectedFiles.length) fail('ARTIFACT_PATH_CONFLICT');
+    const sourceTarget = path.join(payload, sourcePackage.record.path);
+    await mkdir(path.dirname(sourceTarget), { mode: 0o700 });
+    await rename(sourcePackage.archive, sourceTarget);
+    await rm(sourcePackage.directory, { recursive: true, force: false });
+    for (const artifact of plan.artifacts) {
+      if (artifact.role === 'corresponding-sources') continue;
+      const root = artifact.role === 'runtime-image' ? byPlatform.get(artifact.platform).directory : artifacts;
+      await copyStream(root, artifact.path, path.join(payload, ...artifact.path.split('/')), artifact.bytes, artifact.sha256);
     }
-    const descriptorFile = path.join(work, 'descriptor.json');
-    await writeFile(descriptorFile, `${JSON.stringify(descriptor, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
-    const payload = path.join(candidateDirectory, 'payload');
-    const manifest = await packageManifest({ repoRoot: repo, descriptorFile, artifactRoot: staging, outputDirectory: payload });
+    // The private tree is not a candidate until its marker is published. Verify the actual
+    // final bytes (including source members and extension identity), not a second staging copy.
+    const manifest = await buildManifest({ repoRoot: repo, descriptor, artifactRoot: payload });
+    const text = serializeManifest(manifest);
+    const checksum = manifestSha256(text);
+    await writeFile(path.join(payload, 'manifest.json'), text, { flag: 'wx', mode: 0o600 });
+    await writeFile(path.join(payload, 'manifest.json.sha256'), checksum, { flag: 'wx', mode: 0o600 });
     const manifestText = await readFile(path.join(payload, 'manifest.json'), 'utf8');
-    const manifestSha256 = createHash('sha256').update(manifestText).digest('hex');
+    if (manifestText !== text) fail('STAGED_OUTPUT_INVALID');
+    const manifestDigest = hash().update(manifestText).digest('hex');
+    await verifyContainedFile(payload, 'manifest.json', Buffer.byteLength(text), manifestDigest);
+    await verifyContainedFile(payload, 'manifest.json.sha256', Buffer.byteLength(checksum), hash().update(checksum).digest('hex'));
     for (const { directory, imageCandidate } of imageCandidatesByPlatform)
-      await snapshot(imageCandidate, directory, artifacts, descriptor, sourcePackage.directory);
+      await snapshot(imageCandidate, directory, artifacts, descriptor);
+    await verifyPayloadFiles(payload, expectedFiles);
     let currentBuildIdentity;
     try { currentBuildIdentity = resolveCleanBuildIdentity(repo); } catch { fail('RELEASE_SOURCE_CHANGED'); }
     if (!sameIdentity(currentBuildIdentity, buildIdentity)) fail('RELEASE_SOURCE_CHANGED');
-    await rm(work, { recursive: true, force: false });
     const candidate = { schemaVersion: 1, kind: 'lexiflow-release-candidate', buildIdentity, softwareVersion: source.softwareVersion,
-      sourceCommit: source.sourceCommit, manifestPath: 'payload/manifest.json', manifestSha256,
+      sourceCommit: source.sourceCommit, manifestPath: 'payload/manifest.json', manifestSha256: manifestDigest,
       buildInputSha256: common.buildInputSha256,
       imageCandidates: [{ platform: 'linux/arm64', sha256: byPlatform.get('linux/arm64').imageCandidate.sha256 }] };
     const markerText = `${JSON.stringify(candidate, null, 2)}\n`;

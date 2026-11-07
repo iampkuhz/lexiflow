@@ -57,6 +57,11 @@ async function listFiles(root, relative = '') {
   return output;
 }
 
+export async function verifyPayloadFiles(root, expectedFiles) {
+  const names = (await listFiles(root)).sort();
+  if (names.join('\0') !== [...expectedFiles].sort().join('\0')) reject('STAGED_OUTPUT_INVALID');
+}
+
 export async function packageManifest({ repoRoot, descriptorFile, artifactRoot, outputDirectory }) {
   if (![repoRoot, descriptorFile, artifactRoot, outputDirectory].every((value) => typeof value === 'string' && value.length > 0)) reject('ARGUMENTS_INVALID');
   const descriptorPath = path.resolve(descriptorFile); const root = path.resolve(artifactRoot); const output = path.resolve(outputDirectory);
@@ -103,8 +108,7 @@ export async function packageManifest({ repoRoot, descriptorFile, artifactRoot, 
     // Verify every copied byte and the exact staged tree before publishing in one rename.
     const staged = await readFile(path.join(temp, 'manifest.json'), 'utf8');
     if (JSON.stringify(JSON.parse(staged)) !== JSON.stringify(manifest) || manifestSha256(staged) !== checksum) reject('STAGED_OUTPUT_INVALID');
-    const stagedFiles = (await listFiles(temp)).sort();
-    if (stagedFiles.join('\0') !== [...expectedFiles].sort().join('\0')) reject('STAGED_OUTPUT_INVALID');
+    await verifyPayloadFiles(temp, expectedFiles);
     for (const item of manifest.artifacts) await verifyContainedFile(temp, item.path, item.bytes, item.sha256);
     await verifyContainedFile(temp, 'manifest.json', Buffer.byteLength(text), createHash('sha256').update(text).digest('hex'));
     await verifyContainedFile(temp, 'manifest.json.sha256', Buffer.byteLength(checksum), createHash('sha256').update(checksum).digest('hex'));

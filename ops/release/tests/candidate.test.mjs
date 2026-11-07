@@ -8,7 +8,7 @@ import test from 'node:test';
 import fsPromises from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { assembleReleaseCandidate } from '../build/release-candidate-assembler.mjs';
+import { assembleReleaseCandidate, createSourcePackage } from '../build/release-candidate-assembler.mjs';
 import { assembled, fixture } from './verified-candidate-fixture.mjs';
 import { resolveBuildIdentity } from '../integrity/source-build-identity.mjs';
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -46,6 +46,10 @@ test('assembles one ARM64 private candidate with exact payload and stable marker
       const published = result.manifest.artifacts.find(a => a.role === record.role && a.platform === record.platform);
       for (const key of ['path', 'bytes', 'sha256', 'imageDigest']) assert.equal(published[key], record[key]);
       assert.equal(hash(await readFile(path.join(result.candidateDirectory, 'payload', record.path))), record.sha256);
+      // A candidate never aliases its input archive, even on the same filesystem.
+      const input = await fsPromises.stat(path.join(f.imageDirectory, record.path));
+      const output = await fsPromises.stat(path.join(result.candidateDirectory, 'payload', record.path));
+      assert.notEqual(output.ino, input.ino);
     }
     assert.equal(result.candidate.supported, undefined); assert.equal(result.candidate.verified, undefined);
     assert.equal(result.manifest.artifacts.find((item) => item.role === 'runtime-image').path, 'images/linux-arm64/runtime-image.tar');
@@ -76,6 +80,32 @@ test('corresponding-sources archive index maps to the exact notice bytes and dig
       assert.deepEqual(extracted, await readFile(path.join(f.artifactRoot, item.noticePath)));
     }
   } finally { await f.cleanup(); }
+});
+
+test('source archive streams only verified notice inputs and removes partial package on invalid input', async () => {
+  for (const mutate of [
+    async (f) => {
+      const notice = path.join(f.artifactRoot, f.descriptor.licenses[0].noticePath);
+      const target = `${notice}.real`; await fsPromises.rename(notice, target); await symlink(target, notice);
+    },
+    async (f) => {
+      const license = f.descriptor.licenses[0];
+      f.descriptor.artifacts.find(item => item.role === 'license' && item.path === license.noticePath).bytes += 1;
+    },
+    async (f) => {
+      const license = f.descriptor.licenses[0];
+      const record = f.descriptor.artifacts.find(item => item.role === 'license' && item.path === license.noticePath);
+      await writeFile(path.join(f.artifactRoot, record.path), Buffer.alloc(record.bytes, 42));
+    }
+  ]) {
+    const f = await fixture();
+    try {
+      await mutate(f);
+      await assert.rejects(createSourcePackage(f.outputParent, f.artifactRoot, f.descriptor),
+        { message: 'SOURCE_PACKAGE_INVALID' });
+      assert.deepEqual(await fsPromises.readdir(f.outputParent), []);
+    } finally { await f.cleanup(); }
+  }
 });
 
 test('accepts the sole linux/arm64 candidate and rejects missing candidate', async () => {

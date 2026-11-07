@@ -11662,6 +11662,34 @@ workstreams:
         validation_command: python3 -m unittest ops.docker.tests.test_contract
         required_check_ids: [eng.release.docker-contract, eng.release.build, eng.repository.docs, eng.repository.planning]
         depends_on: []
+      - id: LF-TSK-OPS-2581
+        title: 减少 Release 候选中转并明确安装更新路径
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/v24-release-distribution/tasks.md
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - ops/release/build/release-candidate-assembler.mjs
+        - ops/release/build/package-release-artifacts.mjs
+        - ops/release/build/source_package_writer.py
+        - ops/release/tests/candidate.test.mjs
+        - docs/scenarios/docker-release.md
+        - docs/user/podman-macos.md
+        - planning/workstreams.yaml
+        - openspec/changes/v24-release-distribution/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env, infra/**, backend/**, ops/dataset/**, ops/release/workflow/**]
+        deliverable: 现有 Release 合同下的单次候选落盘与对应源码归档、安装更新指南、实测和可回读证据。
+        acceptance_criteria:
+        - 同输入量化候选峰值与归档耗时，区分实际附件、运行镜像下载和内部载荷。
+        - 保留全部原件、精确完整性、三附件和唯一运行镜像，隔离工程候选证明安装更新和失败保护。
+        - 最终冻结由不同真实 actor 执行开发检查、正式工程验收和独立审查，实际发行另验。
+        acceptance_evidence: [同输入测量、候选和 OCI 摘要、隔离安装与回退、独立收据、持久报告回读。]
+        validation_command: node ops/release/test_tools/run-release-tool-tests.mjs --suite build
+        required_check_ids: [eng.release.build, eng.release.manifest, eng.repository.docs, eng.repository.planning]
+        depends_on: []
       - id: LF-TSK-OPS-2578
         title: 流式校验固定公开词库来源并减少临时落盘
         priority: P1
