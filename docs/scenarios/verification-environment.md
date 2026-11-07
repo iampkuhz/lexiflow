@@ -17,7 +17,14 @@ python3 -m venv .local/lexiflow-python
 .local/lexiflow-python/bin/pip install -r requirements-dev.txt
 ```
 
-后续使用该解释器，不依赖系统环境恰好已有 PyYAML/Ruff。Hook 不自动安装。确认 Java 25：
+后续使用该解释器，不依赖系统环境恰好已有 PyYAML/Ruff。调用绝对解释器路径只固定主进程，不能固定 Node 等检查内部按 `PATH` 启动的 `python3`。运行检查前在当前会话激活该环境：
+
+```bash
+source .local/lexiflow-python/bin/activate
+python3 -c 'import sys; print(sys.executable)'
+```
+
+也可仅为本次命令前置 `PATH="$PWD/.local/lexiflow-python/bin:$PATH"`，让主进程及其子进程使用同一已准备的 Python 环境；不修改个人 shell 配置。`eng.release.build` 声明其真实 Python 子解释器依赖，工具链证据记录实际 `PATH` 解析的执行文件；声明就绪不替代真实用例的能力检查。Hook 不自动安装。确认 Java 25：
 
 ```bash
 python3 -m scripts.local.run_with_java_toolchain java -version

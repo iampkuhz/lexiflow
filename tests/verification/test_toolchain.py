@@ -457,6 +457,32 @@ class ToolchainTests(unittest.TestCase):
                 self.assertEqual(mode, changed["executor"]["mode"])
                 self.assertNotEqual(original, changed)
 
+    def test_node_python_child_binds_path_interpreter(self):
+        """Node 的 python3 子进程身份来自真实 PATH，不冒用验证器解释器。"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _script(root / "node", "exit 0")
+            _script(root / "python3", "exit 0")
+            check = {
+                "command": ["node", "fixture.mjs"],
+                "required_environment": ["node", "python3"],
+            }
+            env = {"PATH": str(root)}
+            original = resolve_toolchain(check, env)
+            self.assertEqual(
+                str((root / "python3").resolve()),
+                original["tools"]["python3"]["realpath"]
+            )
+            _script(root / "python3", "exit 1")
+            changed = resolve_toolchain(check, env)
+            self.assertEqual(original["executor"], changed["executor"])
+            self.assertNotEqual(
+                original["tools"]["python3"], changed["tools"]["python3"]
+            )
+            (root / "python3").unlink()
+            with self.assertRaises(ToolchainUnavailable):
+                resolve_toolchain(check, env)
+
     def test_python_executor_is_sys_executable_not_path_python3(self):
         with tempfile.TemporaryDirectory() as directory:
             bin_dir = Path(directory)

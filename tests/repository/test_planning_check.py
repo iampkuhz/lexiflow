@@ -5,6 +5,7 @@ the validator produces a precise diagnostic.
 """
 
 import copy
+import json
 import os
 import subprocess
 import tempfile
@@ -829,6 +830,224 @@ class TestCatalogInheritance(unittest.TestCase):
         task["phase"] = "P5"
         self.assertEqual(
             "P5", PlanningValidator.from_data(data).tasks[task["id"]]["phase"]
+        )
+
+
+class TestTaskCatalogQuery(unittest.TestCase):
+    def setUp(self):
+        self.data = _base_valid_catalog()
+        self.workstream = next(ws for ws in self.data["workstreams"] if ws["epics"])
+        self.task_a, self.task_b = self.workstream["epics"][0]["capabilities"][0][
+            "seed_tasks"
+        ][:2]
+        self.task_a["task_source"] = "openspec/changes/example/tasks.md"
+        self.task_b["task_source"] = "openspec/changes/example/tasks.md"
+        for workstream in self.data["workstreams"]:
+            for epic in workstream.get("epics", []):
+                for capability in epic.get("capabilities", []):
+                    for task in capability.get("seed_tasks", []):
+                        task["task_source"] = "openspec/changes/example/tasks.md"
+        self.task_a["required_check_ids"] = ["eng.repository.planning"]
+        self.task_b["required_check_ids"] = ["eng.repository.planning"]
+        self.task_a["deliverable"] = "producer material"
+        self.task_a["produced_contracts"] = [
+            {
+                "name": "example.contract",
+                "version": "1.0.0",
+                "material": "contracts/example.json",
+            }
+        ]
+        self.task_b["acceptance_criteria"] = ["consume producer contract"]
+        self.checks = {
+            "checks": [
+                {
+                    "check_id": "eng.repository.planning",
+                    "command": ["python3", "-m", "check"],
+                    "required_environment": ["python-package-yaml"],
+                    "scenarios": ["repository-baseline"],
+                }
+            ]
+        }
+        self.temp = tempfile.TemporaryDirectory(prefix="lexiflow-task-query-")
+        self.root = Path(self.temp.name)
+        (self.root / "openspec/changes/example").mkdir(parents=True)
+        (self.root / "openspec/changes/example/tasks.md").write_text(
+            "source", encoding="utf-8"
+        )
+        (self.root / "planning").mkdir()
+        (self.root / "planning/workstreams.yaml").write_text(
+            yaml.safe_dump(self.data), encoding="utf-8"
+        )
+        (self.root / "config/engineering").mkdir(parents=True)
+        (self.root / "config/engineering/module-checks.yaml").write_text(
+            yaml.safe_dump(self.checks), encoding="utf-8"
+        )
+        self.validator = PlanningValidator.from_data(self.data, self.checks)
+        self.validator.root = self.root
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_query_returns_inherited_location_dependencies_consumers_and_check_declaration(
+        self,
+    ):
+        result = self.validator.query_tasks(
+            [self.task_a["id"], self.task_b["id"], self.task_a["id"]]
+        )
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual("planning-inspection", result["mode"])
+        self.assertIn("不是开发检查", result["notice"])
+        self.assertEqual(
+            [self.task_a["id"], self.task_b["id"]],
+            [item["id"] for item in result["tasks"]],
+        )
+        producer = result["tasks"][0]
+        self.assertEqual(self.workstream["id"], producer["owner"])
+        self.assertEqual("P1", producer["phase"])
+        self.assertEqual("LF-CP-ARCH-001", producer["location"]["capability"])
+        self.assertEqual(self.task_b["id"], producer["direct_consumers"][0]["id"])
+        consumer = result["tasks"][1]
+        self.assertEqual(
+            self.task_a["id"], consumer["direct_dependencies"][0]["producer"]["id"]
+        )
+        self.assertEqual(
+            self.task_a["produced_contracts"],
+            consumer["direct_dependencies"][0]["producer"]["produced_contracts"],
+        )
+        self.assertEqual(
+            1, consumer["direct_dependencies"][0]["producer"]["task_version"]
+        )
+        self.assertEqual(
+            "1.0.0", consumer["direct_dependencies"][0]["producer"]["change_version"]
+        )
+        self.assertEqual(
+            "contracts/example.json",
+            consumer["direct_dependencies"][0]["producer"]["produced_contracts"][0][
+                "material"
+            ],
+        )
+        self.assertEqual(
+            ["python-package-yaml"],
+            consumer["required_checks"][0]["required_environment"],
+        )
+
+    def test_unknown_task_fails_closed(self):
+        self.assertEqual(
+            "FAIL", self.validator.query_tasks(["LF-TSK-ARCH-9999"])["status"]
+        )
+
+    def test_duplicate_task_id_fails_closed(self):
+        self.task_a["id"] = self.task_b["id"]
+        broken = PlanningValidator.from_data(self.data, self.checks)
+        self.assertEqual("FAIL", broken.query_tasks([self.task_b["id"]])["status"])
+
+    def test_malformed_structure_fails_closed(self):
+        self.task_a["depends_on"] = "not-a-list"
+        broken = PlanningValidator.from_data(self.data, self.checks)
+        self.assertEqual("FAIL", broken.query_tasks([self.task_a["id"]])["status"])
+
+    def test_missing_source_and_unknown_check_fail_closed(self):
+        del self.task_a["task_source"]
+        broken = PlanningValidator.from_data(self.data, self.checks)
+        broken.root = self.root
+        self.assertEqual("FAIL", broken.query_tasks([self.task_a["id"]])["status"])
+        self.task_a["task_source"] = "openspec/changes/example/missing.md"
+        broken = PlanningValidator.from_data(self.data, self.checks)
+        broken.root = self.root
+        self.assertEqual("FAIL", broken.query_tasks([self.task_a["id"]])["status"])
+        self.task_a["task_source"] = "openspec/changes/example/tasks.md"
+        self.task_a["required_check_ids"] = ["eng.missing"]
+        broken = PlanningValidator.from_data(self.data, self.checks)
+        broken.root = self.root
+        self.assertEqual("FAIL", broken.query_tasks([self.task_a["id"]])["status"])
+
+    def test_duplicate_registry_check_id_fails_closed(self):
+        duplicate = copy.deepcopy(self.checks)
+        duplicate["checks"].append(copy.deepcopy(duplicate["checks"][0]))
+        broken = PlanningValidator.from_data(self.data, duplicate)
+        broken.root = self.root
+        self.assertEqual("FAIL", broken.query_tasks([self.task_a["id"]])["status"])
+
+    def test_symlink_source_is_rejected_without_following_it(self):
+        with tempfile.TemporaryDirectory(prefix="lexiflow-query-outside-") as directory:
+            outside = Path(directory) / "private-marker"
+            outside.write_text("not read", encoding="utf-8")
+            link = self.root / "openspec/changes/example/linked.md"
+            link.symlink_to(outside)
+            self.task_a["task_source"] = "openspec/changes/example/linked.md"
+            broken = PlanningValidator.from_data(self.data, self.checks)
+            broken.root = self.root
+            result = broken.query_tasks([self.task_a["id"]])
+            self.assertEqual("FAIL", result["status"])
+            self.assertNotIn(str(outside), str(result))
+
+    def test_query_does_not_filter_declarations_by_execution_scenario(self):
+        self.checks["checks"][0]["scenarios"] = ["change-targeted"]
+        result = self.validator.query_tasks([self.task_a["id"]])
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual(
+            "eng.repository.planning",
+            result["tasks"][0]["required_checks"][0]["check_id"],
+        )
+
+    def test_malformed_check_id_fails_without_hashing_it(self):
+        self.checks["checks"][0]["check_id"] = ["unhashable"]
+        self.assertEqual(
+            "FAIL", self.validator.query_tasks([self.task_a["id"]])["status"]
+        )
+
+    def test_private_source_is_rejected_before_filesystem_probe(self):
+        self.validator.tasks[self.task_a["id"]]["task_source"] = ".local/private.md"
+        from unittest.mock import patch
+
+        original = Path.is_symlink
+
+        def reject_private(path):
+            if path.is_relative_to(self.root / ".local"):
+                raise AssertionError("private probe")
+            return original(path)
+
+        with patch.object(Path, "is_symlink", reject_private):
+            self.assertEqual(
+                "FAIL", self.validator.query_tasks([self.task_a["id"]])["status"]
+            )
+
+    def test_zero_argument_cli_still_runs_static_check(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+
+        from scripts.checks.repository.catalog.check_task_catalog import main
+
+        output = StringIO()
+        with redirect_stdout(output):
+            code = main([], root=ROOT)
+        expected = PlanningValidator(ROOT)
+        expected.load_sources()
+        self.assertEqual(0, code)
+        self.assertEqual(
+            json.dumps(expected.run_all(), ensure_ascii=False, indent=2),
+            output.getvalue().strip(),
+        )
+
+    def test_cli_query_and_repeated_ordered_deduplication(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+
+        from scripts.checks.repository.catalog.check_task_catalog import main
+
+        ids = [self.task_a["id"], self.task_b["id"], self.task_a["id"]]
+        output = StringIO()
+        with redirect_stdout(output):
+            code = main(
+                [arg for task_id in ids for arg in ("--task-id", task_id)],
+                root=self.root,
+            )
+        result = json.loads(output.getvalue())
+        self.assertEqual(0, code)
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual(
+            [self.task_a["id"], self.task_b["id"]],
+            [item["id"] for item in result["tasks"]],
         )
 
 

@@ -501,6 +501,107 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-QLT-2575
+        title: 补齐验证环境对子解释器的真实交接
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/workflow-information/tasks.md
+        estimated_minutes: 30
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - config/engineering/module-checks.yaml
+        - docs/scenarios/verification-environment.md
+        - tests/verification/test_build_checks.py
+        - tests/verification/test_toolchain.py
+        - planning/workstreams.yaml
+        - openspec/changes/workflow-information/**
+        forbidden_files: [secrets/**, .local/**, data/**, .env, backend/product/**, extension/**, ops/release/**]
+        deliverable: 真实 Python 子解释器依赖声明、会话级环境交接说明与身份回归证据。
+        acceptance_criteria:
+        - Node 检查的 Python 子解释器按真实 PATH 绑定，不冒用主验证器解释器身份。
+        - 保留原 Release 实现、测试判据、超时、失败关闭及历史失败记录，不修改个人环境配置。
+        - 新冻结由独立 actor 完整开发检查、正式验收与只读审查。
+        acceptance_evidence: [当前冻结、实际子解释器及原失败因果、直接正反例与独立收据。]
+        validation_command: python3 -m unittest tests.verification.test_build_checks tests.verification.test_toolchain
+        required_check_ids: [eng.release.build, eng.verification.module-tests, eng.repository.docs, eng.repository.planning]
+        discovered_from: LF-TSK-QLT-2574
+        depends_on: []
+      - id: LF-TSK-QLT-2573
+        title: 移除工程导航编号映射并直接定位真实入口
+        priority: P1
+        task_version: 1
+        change_version: 1.0.0
+        task_source: openspec/changes/workflow-information/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - docs/README.md
+        - docs/system/engineering.md
+        - docs/scenarios/run-repository-gates.md
+        - docs/reference/scripts.md
+        - planning/workstreams.yaml
+        - openspec/changes/workflow-information/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        - backend/product/**
+        - extension/**
+        - ops/release/**
+        deliverable: 移除工程导航编号映射并直接定位真实入口，以及直接检查、前后指标与新冻结独立验收证据。
+        acceptance_criteria:
+        - 使用实际入口与唯一事实，不维护规则、编号或任务事实镜像。
+        - 保留全部既有必要检查、隐私、身份独立性与失败关闭；直接正反例覆盖受影响行为。
+        - 新冻结取得独立开发检查、正式验收与适用审查，报告真实收益与限制。
+        acceptance_evidence:
+        - 源码和文档diff、直接检查日志、同口径前后指标、独立报告与正式receipt定位。
+        validation_command: python3 -m scripts.checks.repository.documentation.check_documentation
+        required_check_ids:
+        - eng.repository.docs
+        depends_on: []
+      - id: LF-TSK-QLT-2574
+        title: 在现有Catalog入口精确读取任务及其依赖上下文
+        priority: P1
+        task_version: 2
+        change_version: 1.1.0
+        task_source: openspec/changes/workflow-information/tasks.md
+        estimated_minutes: 60
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files:
+        - scripts/checks/repository/catalog/check_task_catalog.py
+        - scripts/checks/repository/catalog/task_catalog_rules.py
+        - tests/repository/test_planning_check.py
+        - docs/scenarios/delegate-work.md
+        - docs/reference/scripts.md
+        - docs/reference/standalone-tools.md
+        - planning/workstreams.yaml
+        - openspec/changes/workflow-information/**
+        forbidden_files:
+        - secrets/**
+        - .local/**
+        - data/**
+        - .env
+        - backend/product/**
+        - extension/**
+        - ops/release/**
+        deliverable: 在现有Catalog入口精确读取任务及其依赖上下文，以及直接检查、前后指标与新冻结独立验收证据。
+        acceptance_criteria:
+        - 使用实际入口与唯一事实，不维护规则、编号或任务事实镜像。
+        - 保留全部既有必要检查、隐私、身份独立性与失败关闭；直接正反例覆盖受影响行为。
+        - 新冻结取得独立开发检查、正式验收与适用审查，报告真实收益与限制。
+        acceptance_evidence:
+        - 源码和文档diff、直接检查日志、同口径前后指标、独立报告与正式receipt定位。
+        validation_command: python3 -m unittest tests.repository.test_planning_check
+        required_check_ids:
+        - eng.repository.docs
+        - eng.repository.planning
+        - eng.repository.module-tests
+        depends_on: []
       - id: LF-TSK-QLT-2567
         title: 消除证据遍历内重复冻结并有界复用精确解码
         priority: P1

@@ -8,7 +8,7 @@
 - **任务验收。** 用有效来源报告送验，由独立验证者执行冻结计划，再取得适用审查与条件核对。
 - **正式发行。** 对确定候选取得完整验证和独立验收，再按授权晋升；另走[发行流程](github-actions.md)。
 
-文件编号与[工程目录和生命周期](../system/engineering.md)一致，唯一映射在[脚本索引](../reference/scripts.md#16-文件编号索引)。完整 Verify 是检查范围入口，不是第四种结果目标。
+实际入口见[工程目录和生命周期](../system/engineering.md)及[脚本职责索引](../reference/scripts.md)；完整 Verify 是检查范围入口，不是第四种结果目标。
 
 ## 1.1. 目标、入口与交接
 
@@ -20,8 +20,8 @@
 | 日常开发报告（CLI） | `python3 -m scripts.verification.commands.run_development_checks`；先按[验证环境](verification-environment.md)准备，CLI 不自动启动隔离服务；广泛闭包超过 Stop 总期限时使用此入口 | 与 Stop 相同，按变化与消费依赖选择的 `development-change` 报告；FAIL／BLOCKED 返回对应实现或环境，修复后重新检查 |
 | 日常开发报告（Stop） | 正常 Stop → `run_stop_checks.py`；同样按完整 diff 选择 `development-change`，Stop 自动准备并清理本次隔离服务 | 开发 verification report，不是 Formal receipt；首次 FAIL／BLOCKED 请求修复，续轮失败停止自动重试 |
 | 显式完整 Repository Verify | `python3 scripts/verification/commands/run_repository_checks.py`；需先准备完整基线环境，执行 `repository-baseline` | Repository baseline report；根据失败 Check 或阻断原因修复／准备，不以局部开发 PASS 替代 |
-| 任务独立验收 | F08：`python3 -m scripts.acceptance <subcommand>`；Task／计划冻结且身份分离；高风险仍用 `development-baseline`＋独立 review | validation、适用 review 与验收链；失败回修，证据缺项补齐后重核，相关输入变化须重新送验 |
-| 正式发行 | F23：[run-release-workflow.mjs](../../ops/release/workflow/run-release-workflow.mjs) 准备候选，按发行计划取得完整 `repository-baseline` 与绑定候选的独立验收 | 证据齐备后显式授权晋升／发布；开发报告和 PR quick CI 均不能替代 |
+| 任务独立验收 | [`scripts.acceptance`](../../scripts/acceptance/__main__.py)：`python3 -m scripts.acceptance <subcommand>`；Task／计划冻结且身份分离；高风险仍用 `development-baseline`＋独立 review | validation、适用 review 与验收链；失败回修，证据缺项补齐后重核，相关输入变化须重新送验 |
+| 正式发行 | [run-release-workflow.mjs](../../ops/release/workflow/run-release-workflow.mjs) 准备候选，按发行计划取得完整 `repository-baseline` 与绑定候选的独立验收 | 证据齐备后显式授权晋升／发布；开发报告和 PR quick CI 均不能替代 |
 
 开发 Stop 的日常检查不是 Formal Gate；显式完整 Verify 也不读取 Task 身份或批准记录。三个体系的职责关系见[工程治理总览](../system/engineering.md)，检查机制见[Verify](../reference/verification.md)。
 
@@ -30,7 +30,7 @@
 下方 A／B／C 仅是本页直接自检、Stop 开发报告、Formal 验收的阅读代号，不是所有任务都要逐层通过的通用门禁模型。
 
 
-下图聚焦需要开发报告的交付过程；仅需局部反馈时，在 1.2 完成后交接，不继续运行 B 或 C。总图 S3 [B] 对应 F04，S5 [C] 对应 F08；下方 1.3、1.4 展开这些调用。
+下图聚焦需要开发报告的交付过程；仅需局部反馈时，在 1.2 完成后交接，不继续运行 B 或 C。总图 S3 [B] 对应 `run_stop_checks.py`，S5 [C] 对应 `scripts.acceptance`；下方 1.3、1.4 展开这些调用。
 
 执行注释分别给入口、作用与预期耗时。人工分析节点没有统一脚本，不把角色写成命令。
 
@@ -134,7 +134,7 @@ endlegend
 
 A／B／C 是阅读代号而非统一层级；可按目标直接选择适用路径。身份与分工以 [agent-policy](../../harness/agent-policy.md) 为准；开发报告不能直接升级为 Formal validation。
 
-**对应总图 S2 [A]。** 文件映射：`docs_check.py` 是 F13，`python_quality.py` 是 F14，`java_exec.py` 是 F17。 以下是实现者选择和交接过程，不是新增自动脚本；S2 的实际命令按图下语言表选择。
+**对应总图 S2 [A]。** 检查入口分别是 [`check_documentation.py`](../../scripts/checks/repository/documentation/check_documentation.py)、[`check_python_quality.py`](../../scripts/checks/repository/python/check_python_quality.py) 和 [`run_with_java_toolchain.py`](../../scripts/local/run_with_java_toolchain.py)。以下是实现者选择和交接过程，不是新增自动脚本；S2 的实际命令按图下语言表选择。
 
 ```plantuml
 @startuml
@@ -158,7 +158,7 @@ note right
 end note
 :S2 执行选定命令;
 note right
-入口：python_quality.py／docs_check.py／java_exec.py／npm 等（下表）
+入口：check_python_quality.py／check_documentation.py／run_with_java_toolchain.py／npm 等（下表）
 作用：只执行所选命令；不叠跑全仓聚合入口
 <color:#995A00><b>预期：1–5 分钟（轻量机器规划）</b></color>
 end note
@@ -201,7 +201,7 @@ endlegend
 | A：改动类型 | 直接检查 | 入口文件／说明 |
 | --- | --- | --- |
 | Python 工具 | `python3 -m scripts.checks.repository.python.check_python_quality`；相关 `python3 -m unittest <测试模块>` | [check_python_quality.py](../../scripts/checks/repository/python/check_python_quality.py)、对应[直接测试](../../tests) |
-| Java 产品 | 经 `java_exec` 运行相关 Gradle 静态／编译／测试任务 | [run_with_java_toolchain.py](../../scripts/local/run_with_java_toolchain.py)、[原生任务](../reference/java-checks.md) |
+| Java 产品 | 经 `run_with_java_toolchain.py` 运行相关 Gradle 静态／编译／测试任务 | [run_with_java_toolchain.py](../../scripts/local/run_with_java_toolchain.py)、[原生任务](../reference/java-checks.md) |
 | 扩展 | `npm --prefix extension run build`；相关 `node --test` | [package.json](../../extension/package.json)、[直接测试](../../extension/tests) |
 | 文档 | `python3 -m scripts.checks.repository.documentation.check_documentation` | [check_documentation.py](../../scripts/checks/repository/documentation/check_documentation.py) |
 
@@ -209,7 +209,7 @@ endlegend
 
 ## 1.3. 展开 B：Stop 交付检查怎样执行
 
-**对应总图 S3 [B]。** 文件映射：Stop 入口 F04 调用开发检查 F03 与测试资源 F19，声明 F20 作为输入，不是执行步骤。 公开入口：[run_stop_checks.py](../../scripts/triggers/run_stop_checks.py)::`main()`，接收客户端 Stop 输入；手工调用方式见 [Hook 说明](../reference/hooks.md)。
+**对应总图 S3 [B]。** 声明 [`module-checks.yaml`](../../config/engineering/module-checks.yaml) 是输入，不是执行步骤。公开入口：[run_stop_checks.py](../../scripts/triggers/run_stop_checks.py)::`main()`，接收客户端 Stop 输入；手工调用方式见 [Hook 说明](../reference/hooks.md)。
 
 图中其余文件是内部实现，不是需要依次手动运行的脚本。
 
@@ -321,9 +321,9 @@ endlegend
 
 ## 1.4. 展开 C：正式验证、审查与条件核对
 
-**对应总图 S5 [C]。** F08 分派 F09 `submit.py`、F10 `validate.py`、F11 `review.py`、F12 `check.py`。 CLI 入口：[delivery_gate/__main__.py](../../scripts/acceptance/__main__.py)::`main()`；命令为 `python3 -m scripts.acceptance <子命令> ...`，参数见 [Delivery Gate](../reference/delivery-gate.md)。
+**对应总图 S5 [C]。** [`scripts.acceptance`](../../scripts/acceptance/__main__.py) 分派 [`submit_task_for_acceptance.py`](../../scripts/acceptance/task_operations/submit_task_for_acceptance.py)、[`run_independent_task_validation.py`](../../scripts/acceptance/task_operations/run_independent_task_validation.py)、[`record_independent_task_review.py`](../../scripts/acceptance/task_operations/record_independent_task_review.py) 与 [`evaluate_task_acceptance.py`](../../scripts/acceptance/task_operations/evaluate_task_acceptance.py)。CLI 命令为 `python3 -m scripts.acceptance <子命令> ...`，参数见 [Delivery Gate](../reference/delivery-gate.md)。
 
-`submit.py`、`validate.py`、`review.py`、`check.py` 是独立职责的实现文件，不是各自可直接运行的 CLI。各阶段由不同职责的执行者交接，不是一个 actor 连续自签。下图展开代码 Task 的开发报告送验；正式发行通过同一 CLI 的 `--release-handoff` 送验固定候选，不先制造开发差异，步骤见[发行准备](github-actions/first-release/preparation.md#13-在原-checkout-完成真实独立-formal)。
+四个 [`task_operations`](../../scripts/acceptance/task_operations/) 文件分别实现送验、独立验证、审查记录和条件核对，不是各自可直接运行的 CLI。各阶段由不同职责的执行者交接，不是一个 actor 连续自签。下图展开代码 Task 的开发报告送验；正式发行通过同一 CLI 的 `--release-handoff` 送验固定候选，不先制造开发差异，步骤见[发行准备](github-actions/first-release/preparation.md#13-在原-checkout-完成真实独立-formal)。
 
 ```plantuml
 @startuml
@@ -337,11 +337,11 @@ skinparam activityBackgroundColor #EAF2FF
 skinparam activityBorderColor #46699A
 skinparam noteBackgroundColor #F5F6F8
 skinparam noteBorderColor #A0AAB8
-title C｜""delivery_gate/~_~_main~_~_.py""：正式验收
+title C｜""scripts/acceptance/~_~_main~_~_.py""：正式验收
 start
 :S1 提交冻结输入;
 note right
-入口：submit.py（CLI 子命令：submit）
+入口：submit_task_for_acceptance.py（CLI 子命令：submit）
 作用：绑定 Task、producer 与报告，冻结送验输入
 <color:#995A00><b>预期：1–10 秒（规划估算）</b></color>
 end note
@@ -353,21 +353,21 @@ note right
 end note
 :S3 独立执行验证;
 note right
-入口：validate.py（CLI 子命令：validate）
+入口：run_independent_task_validation.py（CLI 子命令：validate）
 作用：独立执行冻结计划，失败不进入审查
 <color:#995A00><b>预期：高风险 25–30 分钟（同能力推估）</b></color>
 end note
 if (独立 validation PASS？) then (PASS)
 :S4 落实计划审查要求;
 note right
-入口：review.py（发布意见；审阅无脚本）
+入口：record_independent_task_review.py（发布意见；审阅本身无脚本）
 作用：按计划安排独立审查；不适用时不发布意见
 <color:#995A00><b>预期：审阅 5–15 分钟＋发布 1–10 秒；不适用 1–10 秒</b></color>
 end note
 if (计划审查要求满足？) then (满足)
 :S5 核对条件与依赖;
 note right
-入口：check.py（CLI 子命令：check）
+入口：evaluate_task_acceptance.py（CLI 子命令：check）
 作用：只核对证据、依赖与批准，不重跑测试
 <color:#995A00><b>预期：1–10 秒（规划估算）</b></color>
 end note

@@ -13,7 +13,7 @@
 
 文档检查器固定 mandatory roots，并使用单个 DocIndex 复用本次文档上下文；本机 skill 来源仅为 `CODEX_HOME/skills`、目标仅为 `.agents/skills/`。日常检查器从仓库入口定位规则与文件，不接受 root 覆盖；隔离测试在函数层注入 root。它们可以被全局 Verify 编排；从总览下沉到此处不表示取消检查。
 
-`planning_check.py` 是零参数命令壳，负责输出与退出码；`planning_validator.py` 是加载和校验 Catalog 的可复用实现，供命令壳与 Repository 模块检查共同调用。两者不是两个不同的规划门禁，也不应各自维护一套规则。
+`check_task_catalog.py` 不带参数时执行 Catalog 静态检查；显式 `--task-id` 只读取指定 Task 及一跳上下文，不执行所列 Check 或判断派发资格，操作见[任务定界](../scenarios/delegate-work.md#12-派发前后交接什么)。两种用途复用 `task_catalog_rules.py` 的当前 Catalog 加载，不保存任务镜像。
 
 ## 1.2. 有副作用的操作不是 check
 

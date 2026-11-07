@@ -1,6 +1,6 @@
 # 1. 脚本职责索引：按读者任务定位入口
 
-> 上级：[Reference](../reference.md)。先按职责进入[工程治理三体系](../system/engineering.md)：[质量检查](../system/quality-checks.md)、[交付验收](../system/delivery-acceptance.md)、[工程协作与运行支撑](../system/engineering-support.md)。本页从职责回到真实文件，不表示执行顺序。目录图与生命周期图共用下方[文件编号索引](#16-文件编号索引)。
+> 上级：[Reference](../reference.md)。先按职责进入[工程治理三体系](../system/engineering.md)：[质量检查](../system/quality-checks.md)、[交付验收](../system/delivery-acceptance.md)、[工程协作与运行支撑](../system/engineering-support.md)。本页从职责回到真实文件，不表示执行顺序。目录图与生命周期图直接使用实际文件名，并由本页真实入口索引承接。
 
 ## 1.1. 先区分入口类型
 
@@ -55,7 +55,7 @@
 | --- | --- | --- |
 | CLI | [`verify_codex_work_package.py`](../../scripts/agents/work_packages/verify_codex_work_package.py) · `python3 -m scripts.agents.work_packages.verify_codex_work_package verify --run-id <run_id>` | 核对精确 Codex 工作包 run，不派发执行 |
 | 内部库 | [`codex_identity_binding.py`](../../scripts/agents/identity/codex_identity_binding.py)、[`work_package_contract_checks.py`](../../scripts/agents/work_packages/work_package_contract_checks.py)、[`run_python_tool_tests.py`](../../scripts/checks/tool_tests/run_python_tool_tests.py) | 真实宿主绑定、工作包 contract 与直接测试；不是派发命令，见[Agent workflow](../scenarios/delegate-work.md) |
-| 仓库治理 CLI | [`check_documentation.py`](../../scripts/checks/repository/documentation/check_documentation.py)、[`check_task_catalog.py`](../../scripts/checks/repository/catalog/check_task_catalog.py)、[`check_python_quality.py`](../../scripts/checks/repository/python/check_python_quality.py) | 分别检查固定 mandatory 文档范围、Catalog 和工程 Python（scripts、ops/release、ops/dataset）的 Ruff check／Ruff format／Pylint 三项静态检查；静态结果不等于语义审阅或正式验收，详见[独立工具](standalone-tools.md) |
+| 仓库治理 CLI | [`check_documentation.py`](../../scripts/checks/repository/documentation/check_documentation.py)、[`check_task_catalog.py`](../../scripts/checks/repository/catalog/check_task_catalog.py)、[`check_python_quality.py`](../../scripts/checks/repository/python/check_python_quality.py) | 分别检查固定 mandatory 文档范围、Catalog 和工程 Python（scripts、ops/release、ops/dataset）的 Ruff check／Ruff format／Pylint 三项静态检查；Catalog 的显式 Task 查询见[任务定界](../scenarios/delegate-work.md#12-派发前后交接什么)，不运行检查；静态结果不等于语义审阅或正式验收，详见[独立工具](standalone-tools.md) |
 | 仓库治理 CLI | [`manage_local_skill_links.py`](../../scripts/local/manage_local_skill_links.py) | `check` 只读；`link` 显式创建固定 `.agents/skills/` 本机链接，须明确需要时才运行，见[独立工具](standalone-tools.md) |
 | 机器 Check adapter | [`run_repository_check_group.py`](../../scripts/checks/repository/run_repository_check_group.py) · `python3 -m scripts.checks.repository.run_repository_check_group --mode <mode>` | 由模块检查器消费的结构化入口；`<mode>` 限于 `docs`、`planning`、`python`，把仓库治理能力转换为 Check 结果，不是普通人工门禁，也不代表正式验收 |
 | 隔离资源与环境库 | [`isolated_redis.py`](../../scripts/environment/services/isolated_redis.py)、[`verification_environment.py`](../../scripts/environment/configuration/verification_environment.py)、[`toolchain_identity.py`](../../scripts/environment/toolchains/toolchain_identity.py) | 测试服务 lease／就绪／清理、私有执行环境解析与实际工具链身份识别；不自动安装或修改全局 PATH |
@@ -90,31 +90,14 @@ Agent 运行记录内部库包括 [`codex_actor_identity.py`](../../scripts/agen
 
 改变规则或实现前走[优化任务](../scenarios/optimize-repository-gates.md)；仅运行既有流程走[执行任务](../scenarios/run-repository-gates.md)。
 
-## 1.6. 文件编号索引
+<a id="16-文件编号索引"></a>
 
-以下编号连接[工程目录图](../system/engineering.md)与[执行生命周期](../scenarios/run-repository-gates.md)。每个编号只对应一个真实文件；不是执行顺序、检查编号或可运行命令。总图选择核心入口，内部实现与配套测试按本页前述职责下钻。
+## 1.6. 真实入口索引
 
-| 编号 | 文件 | 类型与用途 |
-| --- | --- | --- |
-| F02 | [`run_repository_checks.py`](../../scripts/verification/commands/run_repository_checks.py) | CLI；完整仓库验证 |
-| F03 | [`run_development_checks.py`](../../scripts/verification/commands/run_development_checks.py) | CLI；开发报告 |
-| F04 | [`run_stop_checks.py`](../../scripts/triggers/run_stop_checks.py) | 适配器；Stop交付检查 |
-| F05 | [`diagnose_repository_check.py`](../../scripts/verification/commands/diagnose_repository_check.py) | CLI；失败定位 |
-| F06 | [`run_ci_quick_checks.py`](../../scripts/triggers/run_ci_quick_checks.py) | CLI；PR快速检查 |
-| F07 | [`check_plan_runner.py`](../../scripts/verification/execution/check_plan_runner.py) | 内部库；选择冻结与检查编排 |
-| F08 | [`__main__.py`](../../scripts/acceptance/__main__.py) | CLI；验收命令分派 |
-| F09 | [`submit_task_for_acceptance.py`](../../scripts/acceptance/task_operations/submit_task_for_acceptance.py) | 内部 API；送验与冻结 |
-| F10 | [`run_independent_task_validation.py`](../../scripts/acceptance/task_operations/run_independent_task_validation.py) | 内部 API；独立验证 |
-| F11 | [`record_independent_task_review.py`](../../scripts/acceptance/task_operations/record_independent_task_review.py) | 内部 API；只读审查 |
-| F12 | [`evaluate_task_acceptance.py`](../../scripts/acceptance/task_operations/evaluate_task_acceptance.py) | 内部 API；验收条件核对 |
-| F13 | [`check_documentation.py`](../../scripts/checks/repository/documentation/check_documentation.py) | CLI；文档静态检查 |
-| F14 | [`check_python_quality.py`](../../scripts/checks/repository/python/check_python_quality.py) | CLI；Python质量检查 |
-| F15 | [`check_task_catalog.py`](../../scripts/checks/repository/catalog/check_task_catalog.py) | CLI；Catalog静态检查 |
-| F17 | [`run_with_java_toolchain.py`](../../scripts/local/run_with_java_toolchain.py) | CLI；Java工具链入口 |
-| F18 | [`start_local_api.py`](../../scripts/local/start_local_api.py) | CLI；本机API启动 |
-| F19 | [`isolated_redis.py`](../../scripts/environment/services/isolated_redis.py) | 内部库；测试资源准备与清理 |
-| F20 | [`config/engineering/module-checks.yaml`](../../config/engineering/module-checks.yaml) | 声明；Check触发与依赖 |
-| F22 | [`harness/agent-policy.md`](../../harness/agent-policy.md) | 人类规则；身份与协作边界 |
-| F23 | [`run-release-workflow.mjs`](../../ops/release/workflow/run-release-workflow.mjs) | CLI；发行候选、受控原生验收入口与晋升 |
+旧编号索引锚点仅为保留既有链接；仓库不再维护 F 编号或编号到源码的映射。实际入口按职责直接查阅：
 
-命令与子命令由同一文件提供时共用该文件编号；例如 F08 是验收命令分派器，F09—F12 是它调用的实现，不是四个新增 CLI。
+- [质量检查入口](#12-质量检查选取并执行-checks)：开发反馈、完整 Verify、诊断和文档／Catalog 检查。
+- [交付验收与协作入口](#13-交付验收独立判断-task-证据)：Task 验收分派器、内部 API 与 agent 工作包工具。
+- [运行支撑与其他独立入口](#14-工程协作与运行支撑让能力有界运行)：环境、工具链、发行及其他真实实现。
+
+以上页面中的链接均指向源码；声明、适配器和内部库仍分别按其实际职责标识，不表示执行顺序。

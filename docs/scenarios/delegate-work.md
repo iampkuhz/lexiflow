@@ -78,6 +78,8 @@ endlegend
 
 ## 1.2. 派发前后交接什么
 
+定界前可用现有只读入口查看指定任务及一跳上下文：`python3 -m scripts.checks.repository.catalog.check_task_catalog --task-id LF-TSK-QLT-2574`。可重复传入 `--task-id`，结果按输入顺序去重；输出含当前 Catalog 事实、继承归属与阶段、直接生产者及消费者和声明材料定位。查询结果中的 `PASS` 仅表示读取成功，不是开发检查或正式检查结果；该查询不运行所列 Check、不探测环境、不代表 READY、派发资格或验收。不带参数仍执行原静态规划检查。
+
 原生工作包先定义有序 Task、版本、目标、范围与验收，再由包级入口 `scripts.agents.identity.codex_actor_identity.bind_work_package(repo_root, caller_contract)` 认证来源并冻结合同。字段与 Catalog 对账由 [工作包实现](../../scripts/agents/work_packages/codex_work_package_publisher.py)定义；[协作规则](../../harness/agent-policy.md)维护人工责任。交接保留精确 run ID、原生 agent 标识与真实产物，调用者不能注入身份，也不能扩大范围或覆盖他人修改。
 
 模型按工作包选择，角色名或提示词不能代替工具参数。升级条件、等待与接手预算只在 policy 维护，不在文档缓存一份阈值。planning-only 计划不是已具备派发资格的 Task。

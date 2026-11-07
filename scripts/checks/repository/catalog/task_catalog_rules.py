@@ -366,6 +366,15 @@ class PlanningValidator:
                             ),
                             "produced_contracts": produced_contracts or [],
                             "required_check_ids": task.get("required_check_ids"),
+                            # 查询保留原始事实；静态检查仍消费既有规范化字段。
+                            "source_entry": task,
+                            "task_source": task.get("task_source"),
+                            "owner": task.get("owner", ws_id),
+                        }
+                        self.tasks[task_id]["location"] = {
+                            "workstream": ws_id,
+                            "epic": eid,
+                            "capability": cid,
                         }
 
         seen_gate_ids = set()
@@ -988,6 +997,171 @@ class PlanningValidator:
                 )
         except (OSError, ValueError, subprocess.CalledProcessError) as exc:
             self.errors.append(f"repo-ownership-inventory-unavailable: {exc}")
+
+    def query_tasks(self, task_ids):
+        """只读选中 Task 的当前事实与一跳上下文，不判断执行资格。"""
+        if self._load_errors:
+            return {"status": "FAIL", "errors": list(self._load_errors)}
+        if self._structure_errors:
+            return {"status": "FAIL", "errors": list(self._structure_errors)}
+        duplicate_ids = [
+            error for error in self.errors if error.startswith("duplicate-task-id:")
+        ]
+        if duplicate_ids:
+            return {"status": "FAIL", "errors": duplicate_ids}
+
+        ordered_ids = list(dict.fromkeys(task_ids))
+        unknown = [task_id for task_id in ordered_ids if task_id not in self.tasks]
+        if unknown:
+            return {
+                "status": "FAIL",
+                "errors": [f"unknown-task-id: {task_id}" for task_id in unknown],
+            }
+
+        checks = (
+            self.module_checks.get("checks")
+            if isinstance(self.module_checks, dict)
+            else None
+        )
+        if not isinstance(checks, list):
+            return {
+                "status": "FAIL",
+                "errors": [
+                    "required-check-registry: config/engineering/module-checks.yaml checks missing"
+                ],
+            }
+        check_by_id = {}
+        for item in checks:
+            if not isinstance(item, dict):
+                return {
+                    "status": "FAIL",
+                    "errors": ["required-check-registry-invalid: entry is not a map"],
+                }
+            check_id = item.get("check_id")
+            if not isinstance(check_id, str) or not check_id:
+                return {
+                    "status": "FAIL",
+                    "errors": [
+                        "required-check-registry-invalid: check_id missing or invalid"
+                    ],
+                }
+            if check_id in check_by_id:
+                return {
+                    "status": "FAIL",
+                    "errors": [f"required-check-registry-duplicate: {check_id}"],
+                }
+            check_by_id[check_id] = item
+
+        def source_locator(task_id):
+            source = self.tasks[task_id].get("task_source")
+            if not isinstance(source, str) or not source.strip():
+                raise ValueError(f"task-source-missing: {task_id}")
+            path = Path(source)
+            if (
+                path.is_absolute()
+                or ".." in path.parts
+                or not path.parts
+                or path.parts[0] in PRIVATE_ROOTS | {".env"}
+            ):
+                raise ValueError(f"task-source-invalid: {task_id}")
+            candidate = self.root / path
+            current = self.root
+            for part in path.parts:
+                current = current / part
+                if current.is_symlink():
+                    raise ValueError(f"task-source-symlink: {task_id}")
+            if not candidate.is_file():
+                raise ValueError(f"task-source-not-found: {task_id}")
+            return {"path": source, "exists": True}
+
+        results = []
+        try:
+            for task_id in ordered_ids:
+                task = self.tasks[task_id]
+                dependencies = []
+                for edge in task["depends_on"]:
+                    if not isinstance(edge, dict):
+                        raise ValueError(f"dependency-invalid: {task_id}")
+                    producer_id = edge.get("task_id")
+                    producer = self.tasks.get(producer_id)
+                    if producer is None:
+                        raise ValueError(
+                            f"dependency-producer-missing: {task_id} -> {producer_id}"
+                        )
+                    dependencies.append(
+                        {
+                            "edge": edge,
+                            "producer": {
+                                "id": producer_id,
+                                "title": producer["title"],
+                                "task_version": producer["task_version"],
+                                "change_version": producer["change_version"],
+                                "produced_contracts": producer["produced_contracts"],
+                                "material": source_locator(producer_id),
+                            },
+                        }
+                    )
+                consumers = []
+                for consumer_id, consumer in self.tasks.items():
+                    for edge in consumer["depends_on"]:
+                        if not isinstance(edge, dict):
+                            raise ValueError(f"dependency-invalid: {consumer_id}")
+                        if edge.get("task_id") == task_id:
+                            consumers.append(
+                                {
+                                    "id": consumer_id,
+                                    "title": consumer["title"],
+                                    "task_version": consumer["task_version"],
+                                    "change_version": consumer["change_version"],
+                                    "edge": edge,
+                                    "material": source_locator(consumer_id),
+                                }
+                            )
+                required_ids = task.get("required_check_ids")
+                if not isinstance(required_ids, list) or not required_ids:
+                    raise ValueError(f"required-check-ids-missing: {task_id}")
+                if any(
+                    not isinstance(check_id, str) or not check_id
+                    for check_id in required_ids
+                ) or len(set(required_ids)) != len(required_ids):
+                    raise ValueError(f"required-check-ids-invalid: {task_id}")
+                missing_checks = [
+                    check_id for check_id in required_ids if check_id not in check_by_id
+                ]
+                if missing_checks:
+                    raise ValueError(
+                        f"required-check-ids-unknown: {task_id} -> {missing_checks}"
+                    )
+                results.append(
+                    {
+                        "id": task_id,
+                        "owner": task["owner"],
+                        "phase": task["phase"],
+                        "location": task["location"],
+                        "facts": task["source_entry"],
+                        "material": source_locator(task_id),
+                        "required_checks": [
+                            {
+                                "check_id": check_id,
+                                "command": check_by_id[check_id].get("command"),
+                                "required_environment": check_by_id[check_id].get(
+                                    "required_environment", []
+                                ),
+                            }
+                            for check_id in required_ids
+                        ],
+                        "direct_dependencies": dependencies,
+                        "direct_consumers": consumers,
+                    }
+                )
+        except (OSError, TypeError, ValueError) as exc:
+            return {"status": "FAIL", "errors": [str(exc)]}
+        return {
+            "status": "PASS",
+            "mode": "planning-inspection",
+            "notice": "只表示成功读取 planning 信息；不是开发检查或正式检查结果，不建立 READY、派发资格或验收。",
+            "tasks": results,
+        }
 
     def run_all(self):
         """先处理加载/结构错误，再运行确定性的静态检查；planning-only 也不能跳过基础约束。"""

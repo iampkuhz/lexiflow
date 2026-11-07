@@ -862,6 +862,7 @@ checks:
 - check_id: eng.release.build
   command: ["node", "ops/release/test_tools/run-release-tool-tests.mjs", "--suite", "build"]
   required_environment:
+  - python3
   - python-package-yaml
   - git
   - sh

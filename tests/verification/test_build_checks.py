@@ -98,7 +98,15 @@ class BuildCheckTest(unittest.TestCase):
             base["command"],
         )
         self.assertEqual(
-            ["node", "python-package-yaml", "git", "sh", "/bin/sh", "mkfifo"],
+            [
+                "node",
+                "python3",
+                "python-package-yaml",
+                "git",
+                "sh",
+                "/bin/sh",
+                "mkfifo",
+            ],
             base["required_environment"],
         )
         self.assertEqual([], base["module_dependencies"])
