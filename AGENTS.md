@@ -32,6 +32,9 @@
 - 平台自动注入片段仅在真实来源匹配的执行上下文生效，不以共享文件自报身份；作用域见 `harness/agent-policy.md`。
 - 修改文档先读 `harness/documentation-policy.md`，按其 skill 声明及图源流程执行；本机接入见 `harness/README.md`，缺工具不得假装完成。
 
+Multica 项目键：`lexiflow`
+Codex 按 [Multica 协作](harness/agent-policy.md#multica-项目协作) 加载 `feipi-multica-manage-tasks`。
+
 ## 验证与 Git
 
 - 语言检查和 Hook 见 `harness/README.md`；客户端只触发，不复制规则或代替验证。
