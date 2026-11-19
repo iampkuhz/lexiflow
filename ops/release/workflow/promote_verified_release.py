@@ -1169,6 +1169,7 @@ def _release_body(
         "  --name lexiflow-release \\\n"
         "  --publish 127.0.0.1:18080:8080 \\\n"
         "  --volume lexiflow-release-data:/var/lib/lexiflow \\\n"
+        "  --volume lexiflow-preferences:/var/lib/lexiflow/preferences \\\n"
         "  --memory=2g --cpus=2 --stop-timeout=45 \\\n"
         f"  {image_ref}"
     )

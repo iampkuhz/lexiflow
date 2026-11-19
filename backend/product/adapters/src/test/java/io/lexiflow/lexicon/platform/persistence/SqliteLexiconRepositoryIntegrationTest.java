@@ -2,6 +2,7 @@ package io.lexiflow.lexicon.platform.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -9,10 +10,12 @@ import io.lexiflow.lexicon.application.importing.LexiconImportPlan;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
 import io.lexiflow.lexicon.application.port.LexiconPublicationRepository;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
+import io.lexiflow.lexicon.domain.port.LexiconIdentity;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -26,6 +29,86 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 @Tag("sqlite")
 class SqliteLexiconRepositoryIntegrationTest {
   @TempDir Path temporary;
+
+  @Test
+  void browseUsesExactAliasesStableFrequencySortAndPagination() throws Exception {
+    Path file = SqliteTestSupport.newDatabase(temporary);
+    SqliteTestSupport.initialize(file);
+    var source =
+        new io.lexiflow.lexicon.application.importing.model.SourceReference(
+            "fixture", "MIT", "row");
+    var rankedOxford =
+        new io.lexiflow.lexicon.application.importing.model.LexiconImportRow(
+            "alpha",
+            "甲",
+            "definition",
+            List.of("first"),
+            List.of(),
+            new io.lexiflow.lexicon.domain.model.LexiconPriority(5.0, 1, 900),
+            source,
+            source,
+            List.of(source),
+            true,
+            false,
+            "fixture",
+            "甲",
+            20L,
+            900L,
+            List.of(),
+            true,
+            false,
+            false);
+    var frqOnly =
+        new io.lexiflow.lexicon.application.importing.model.LexiconImportRow(
+            "beta",
+            "乙",
+            "definition",
+            List.of("second"),
+            List.of(),
+            new io.lexiflow.lexicon.domain.model.LexiconPriority(5.0, 1, 900),
+            source,
+            source,
+            List.of(source),
+            true,
+            false,
+            "fixture",
+            "乙",
+            null,
+            1L,
+            List.of(),
+            false,
+            false,
+            false);
+    SqliteTestSupport.publish(
+        file,
+        rankedOxford,
+        frqOnly,
+        SqliteTestSupport.blockedRow("gamma", "伽马", List.of(), List.of()));
+    try (var persistence = SqlitePersistence.open(SqliteTestSupport.url(file))) {
+      var repository = persistence.repository();
+      var first = repository.browse("", true, 1, 2);
+      assertEquals(List.of("alpha", "beta"), first.items().stream().map(v -> v.lemma()).toList());
+      assertEquals(3, first.total());
+      assertEquals(1, repository.browse("", true, 2, 2).items().size());
+      assertEquals("beta", repository.browse("second", false, 1, 20).items().getFirst().lemma());
+      assertNull(repository.browse("beta", true, 1, 20).items().getFirst().frequencyRank());
+      assertEquals(0, repository.browse("not-present", true, 1, 20).total());
+      assertEquals(
+          "ELIGIBLE",
+          repository.browse("alpha", true, 1, 20).items().getFirst().hintState().name());
+
+      var ids = new ArrayList<Long>();
+      ids.add(LexiconIdentity.entryId("alpha"));
+      for (long missing = 1; missing <= 500; missing++) ids.add(missing);
+      ids.add(LexiconIdentity.entryId("beta"));
+      ids.add(LexiconIdentity.entryId("gamma"));
+      ids.add(LexiconIdentity.entryId("alpha"));
+      var displayable = repository.findDisplayableByIds(ids);
+      assertEquals(List.of("alpha", "beta"), displayable.stream().map(v -> v.lemma()).toList());
+      assertEquals(20L, displayable.getFirst().frequencyRank());
+      assertNull(displayable.getLast().frequencyRank());
+    }
+  }
 
   @Test
   void publishesExactCanonicalAndPhysicalFormsWithAmbiguityBlockAndStableIds() throws Exception {

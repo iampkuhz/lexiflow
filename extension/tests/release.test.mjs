@@ -18,7 +18,7 @@ async function fixture() {
   const dist = path.join(root, "dist");
   await mkdir(path.join(dist, "assets"), { recursive: true });
   for (const file of PACKAGE_FILES) {
-    const data = file === "manifest.json" ? Buffer.from(JSON.stringify({ manifest_version: 3, version: chromeVersion(version), version_name: version, permissions: ["storage"], host_permissions: ["http://127.0.0.1:18080/*"], background: { service_worker: "background.js" }, action: { default_popup: "popup.html" } })) : file === "build-identity.json" ? Buffer.from(JSON.stringify(buildIdentity)) : file === "expected-dataset.json" ? Buffer.from(JSON.stringify(expectedDataset) + "\n") : file === "popup.html" ? Buffer.from('<link href="popup.css"><script src="popup.js"></script>') : Buffer.from(`fixture:${file}`);
+    const data = file === "manifest.json" ? Buffer.from(JSON.stringify({ manifest_version: 3, version: chromeVersion(version), version_name: version, permissions: [], host_permissions: ["http://127.0.0.1:18080/*"], background: { service_worker: "background.js" }, action: { default_popup: "popup.html" }, options_page: "manage.html" })) : file === "build-identity.json" ? Buffer.from(JSON.stringify(buildIdentity)) : file === "expected-dataset.json" ? Buffer.from(JSON.stringify(expectedDataset) + "\n") : file === "popup.html" ? Buffer.from('<link href="popup.css"><script src="popup.js"></script>') : file === "manage.html" ? Buffer.from('<link href="manage.css"><script src="manage.js"></script>') : Buffer.from(`fixture:${file}`);
     await writeFile(path.join(dist, file), data);
   }
   return { root, dist, cleanup: () => rm(root, { recursive: true, force: true }) };
@@ -78,8 +78,8 @@ test("rejects missing files, root/path symlinks, bad manifest version and permis
     async ({ dist }) => { await rm(path.join(dist, "assets/icon-16.png")); await symlink("icon-32.png", path.join(dist, "assets/icon-16.png")); },
     async ({ root, dist }) => { await rm(path.join(dist, "assets"), { recursive: true }); await symlink(root, path.join(dist, "assets")); },
     async ({ root, dist }) => { await rm(dist, { recursive: true }); await symlink(root, dist); },
-    async ({ dist }) => writeFile(path.join(dist, "manifest.json"), JSON.stringify({ version: "9.9.9", permissions: ["storage"], host_permissions: ["http://127.0.0.1:18080/*"] })),
-    async ({ dist }) => writeFile(path.join(dist, "manifest.json"), JSON.stringify({ version: chromeVersion(version), version_name: version, permissions: ["storage"], host_permissions: ["http://127.0.0.1:9999/*"] })),
+    async ({ dist }) => writeFile(path.join(dist, "manifest.json"), JSON.stringify({ version: "9.9.9", permissions: [], host_permissions: ["http://127.0.0.1:18080/*"] })),
+    async ({ dist }) => writeFile(path.join(dist, "manifest.json"), JSON.stringify({ version: chromeVersion(version), version_name: version, permissions: [], host_permissions: ["http://127.0.0.1:9999/*"] })),
     async ({ dist }) => writeFile(path.join(dist, "manifest.json"), JSON.stringify({ version: chromeVersion(version), version_name: version, permissions: ["tabs"], host_permissions: ["http://127.0.0.1:18080/*"] }))
   ]) {
     const { root, dist, cleanup } = await fixture();

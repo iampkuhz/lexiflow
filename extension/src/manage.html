@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>管理提示 · LexiFlow</title>
+  <link rel="stylesheet" href="manage.css">
+</head>
+<body>
+  <header class="top"><img src="assets/logo.svg" alt=""><div><strong>LexiFlow</strong><span>提示管理 · 仅本机</span></div></header>
+  <main>
+    <h1>管理提示与词库</h1>
+    <p class="intro">隐藏偏好保存在本机；恢复后是否出现仍取决于当前筛选规则。</p>
+    <section id="preference-panel" aria-labelledby="cutoff-heading">
+      <div class="preference-copy"><h2 id="cutoff-heading">常见词提示阈值</h2><p>仅影响符合条件且有排名的普通词。固定规则和无排名回退不变；Top N 是排名阈值，不代表实际过滤条数。</p></div>
+      <div class="cutoff-field">
+        <label for="common-word-cutoff">不提示前 N 词</label>
+        <select id="common-word-cutoff" disabled aria-describedby="cutoff-status">
+          <option value="" selected disabled>正在读取…</option>
+          <option value="1000">前 1000 词 · 提示较多</option>
+          <option value="1500">前 1500 词 · 默认</option>
+          <option value="2000">前 2000 词 · 提示较少</option>
+        </select>
+      </div>
+      <div id="cutoff-status" role="status" aria-live="polite">正在读取本机设置…</div>
+    </section>
+    <nav class="tabs" aria-label="管理内容">
+      <button id="recent-tab" type="button" data-tab="recent" aria-selected="true">最近提示 <span id="recent-count"></span></button>
+      <button id="hidden-tab" type="button" data-tab="hidden" aria-selected="false">已隐藏 <span id="hidden-count">0</span></button>
+      <button id="lexicon-tab" type="button" data-tab="lexicon" aria-selected="false">词库查询</button>
+    </nav>
+    <section id="recent-panel" class="panel">
+      <div class="bar"><h2 id="recent-heading">近 7 天提示</h2><button id="hide-selected" type="button" disabled>隐藏所选</button></div>
+      <p class="note">汇总今天及此前 6 天实际显示的提示，按次数从高到低排列。</p>
+      <p id="recent-status" class="empty" role="status" hidden></p>
+      <div id="recent-list" class="list" role="table" aria-labelledby="recent-heading" hidden></div>
+      <p id="recent-empty" class="empty" role="status" hidden>近 7 天没有可管理的提示。</p>
+      <nav class="pager" id="recent-pager" aria-label="最近提示分页" hidden><span data-total></span><button data-step="-1" type="button">上一页</button><span data-page></span><button data-step="1" type="button">下一页</button></nav>
+    </section>
+    <section id="hidden-panel" class="panel" hidden>
+      <div class="bar"><h2>已隐藏的词条</h2><span class="muted">仅本机</span></div>
+      <div id="hidden-list" class="list" role="table" aria-label="本机隐藏词条"></div>
+      <p id="hidden-empty" class="empty" role="status" hidden></p>
+      <nav class="pager" id="hidden-pager" aria-label="已隐藏分页" hidden><span data-total></span><button data-step="-1" type="button">上一页</button><span data-page></span><button data-step="1" type="button">下一页</button></nav>
+    </section>
+    <section id="lexicon-panel" class="panel" hidden>
+      <div class="bar"><h2>词库查询</h2><span class="muted">只读 · 已发布词库</span></div>
+      <form id="lexicon-search" class="search"><label class="sr" for="query">英文词条、词形或短语</label><input id="query" type="search" placeholder="查英文词、词形或短语" autocomplete="off"><button type="submit">查询</button>
+        <label for="sort">排序</label><select id="sort"><option value="frequency">词频 · 常见优先</option><option value="alphabet">英文 A → Z</option></select></form>
+      <p class="note">词频排名越靠前越常见；暂无表示没有来源排名，不等于低频。</p>
+      <div id="lexicon-list" class="list" role="table" aria-label="已发布词库查询结果"></div>
+      <p id="lexicon-empty" class="empty" role="status" hidden></p>
+      <nav class="pager" id="lexicon-pager" aria-label="词库分页" hidden><span data-total></span><button data-step="-1" type="button">上一页</button><span data-page></span><button data-step="1" type="button">下一页</button></nav>
+    </section>
+    <p id="feedback" role="status" aria-live="polite" hidden></p>
+  </main>
+  <script src="manage.js"></script>
+</body>
+</html>

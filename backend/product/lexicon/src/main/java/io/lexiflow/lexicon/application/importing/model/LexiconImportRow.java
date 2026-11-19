@@ -65,8 +65,7 @@ public record LexiconImportRow(
     basicVocabulary =
         basicVocabulary
             || (!lemma.contains(" ")
-                && (sourceOxfordBasic
-                    || BasicVocabulary.contains(lemma)
+                && (BasicVocabulary.contains(lemma)
                     || aliases.stream().anyMatch(BasicVocabulary::contains)
                     || inflections.stream().anyMatch(BasicVocabulary::contains)));
     hintPolicyReference = required(hintPolicyReference, "hintPolicyReference");

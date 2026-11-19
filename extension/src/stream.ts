@@ -152,7 +152,15 @@ export class CaptionStreamCoordinator {
       });
       if (touchesFrozen || crossesRow) continue;
       if (version !== undefined && hint.lexiconVersion !== version) continue;
-      if (!this.hints.some(old => old.startOffset < hint.endOffset && hint.startOffset < old.endOffset)) this.hints.push(hint);
+      const overlaps = this.hints.filter(old => old.startOffset < hint.endOffset && hint.startOffset < old.endOffset);
+      // 同一仍可更新的视觉行中，完整已发布词段到达后才撤换它完全包含的单词。
+      // 已实际显示的旧单词计数不回滚；新词段按自己的已发布 identity 呈现。
+      const phrase = hint.lemma.trim().split(/\s+/u).length > 1;
+      const replacesWords = phrase && overlaps.length > 0 && overlaps.every(old =>
+        !old.lemma.trim().includes(" ") && hint.startOffset <= old.startOffset &&
+        hint.endOffset >= old.endOffset && (hint.startOffset < old.startOffset || hint.endOffset > old.endOffset));
+      if (replacesWords) this.hints = this.hints.filter(old => !overlaps.includes(old));
+      if (overlaps.length === 0 || replacesWords) this.hints.push(hint);
     }
     this.hints.sort((left, right) => left.startOffset - right.startOffset);
     this.record({ outcome: this.hints.length ? "ready" : "no-pending" });

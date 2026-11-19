@@ -39,6 +39,9 @@ export async function lifecycleFixture(t) {
   t.after(() => rm(tmp, { recursive: true, force: true }));
   const root = path.join(tmp, 'volume');
   const database = path.join(root, 'lexicon.db');
+  const preferences = path.join(root, 'preferences');
+  const preferencesDatabase = path.join(preferences, 'preferences.db');
+  const preferencesMountInfo = path.join(tmp, 'preferences-mountinfo');
   const run = path.join(tmp, 'run');
   const identityPath = path.join(tmp, 'release-identity.env');
   const identityJson = path.join(tmp, 'release-identity.json');
@@ -63,6 +66,9 @@ export async function lifecycleFixture(t) {
   for (const [name, value] of Object.entries({
     ROOT: root,
     DB: database,
+    PREFERENCES_DIR: preferences,
+    PREFERENCES_DB: preferencesDatabase,
+    PREFERENCES_MOUNT_INFO: preferencesMountInfo,
     RUN: run,
     IDENTITY: identityPath,
     IDENTITY_JSON: identityJson,
@@ -71,7 +77,7 @@ export async function lifecycleFixture(t) {
   })) script = replaceFixedPath(script, name, value);
   await writeFile(entry, script, { mode: 0o700 });
   await writeFile(dockerfile, await readFile(sourceDockerfile));
-  return { tmp, root, database, run, identityPath, identityJson, dataset, jar, bin, entry, dockerfile, identity };
+  return { tmp, root, database, preferences, preferencesDatabase, preferencesMountInfo, run, identityPath, identityJson, dataset, jar, bin, entry, dockerfile, identity };
 }
 
 export function runRuntime(fixture, body, { env = {}, timeout = 10_000 } = {}) {

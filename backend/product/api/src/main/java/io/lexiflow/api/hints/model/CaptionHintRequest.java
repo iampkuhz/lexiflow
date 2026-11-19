@@ -11,16 +11,23 @@ import java.util.Objects;
  * @param trackKey 来源轨道身份；无法可靠识别时为 null。
  * @param lastRequestedSnapshot 上次实际发出请求时冻结的可见快照；首次请求为 null。
  * @param currentSnapshot 本次可见快照，不能为空对象，允许无可见字幕。
+ * @param commonWordCutoff 可选的单词频率截止值；缺失时使用 1500。
  */
 public record CaptionHintRequest(
     String captionTopicKey,
     String trackKey,
     Snapshot lastRequestedSnapshot,
-    Snapshot currentSnapshot) {
+    Snapshot currentSnapshot,
+    Integer commonWordCutoff) {
   /** 在请求边界拒绝违反领域双快照合同的输入。 */
   public CaptionHintRequest {
     Objects.requireNonNull(currentSnapshot, "currentSnapshot");
-    toDomain(captionTopicKey, trackKey, lastRequestedSnapshot, currentSnapshot);
+    if (commonWordCutoff != null
+        && commonWordCutoff != 1000
+        && commonWordCutoff != 1500
+        && commonWordCutoff != 2000)
+      throw new IllegalArgumentException("commonWordCutoff is invalid");
+    toDomain(captionTopicKey, trackKey, lastRequestedSnapshot, currentSnapshot, commonWordCutoff);
   }
 
   /**
@@ -29,16 +36,23 @@ public record CaptionHintRequest(
    * @return 保留快照和来源元数据的已校验领域请求。
    */
   public CaptionIncrementalRequest toDomain() {
-    return toDomain(captionTopicKey, trackKey, lastRequestedSnapshot, currentSnapshot);
+    return toDomain(
+        captionTopicKey, trackKey, lastRequestedSnapshot, currentSnapshot, commonWordCutoff);
   }
 
   private static CaptionIncrementalRequest toDomain(
-      String topic, String track, Snapshot previous, Snapshot current) {
+      String topic, String track, Snapshot previous, Snapshot current, Integer cutoff) {
     return new CaptionIncrementalRequest(
         topic,
         track,
         previous == null ? null : previous.toDomain(),
-        Objects.requireNonNull(current, "currentSnapshot").toDomain());
+        Objects.requireNonNull(current, "currentSnapshot").toDomain(),
+        cutoff == null ? 1500 : cutoff);
+  }
+
+  /** 创建使用默认 1500 截止值的请求。 */
+  public CaptionHintRequest(String topic, String track, Snapshot previous, Snapshot current) {
+    this(topic, track, previous, current, null);
   }
 
   /**

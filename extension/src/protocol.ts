@@ -1,4 +1,5 @@
 declare const __LEXIFLOW_API_PORT__: number;
+export const MAX_PRESENTED_ENTRY_IDS = 128;
 export const API_URL = `http://127.0.0.1:${typeof __LEXIFLOW_API_PORT__ === "number" ? __LEXIFLOW_API_PORT__ : 18080}/api/v1/caption-hints`;
 export const MAX_CAPTION_LENGTH = 500;
 export const REQUEST_TIMEOUT_MS = 1_500;
@@ -6,9 +7,9 @@ export type CaptionSegment = { key: string; text: string; offsetMs: number | nul
 export type CaptionGroup = { windowId: string | null; startMs: number | null; segments: CaptionSegment[] };
 export type CaptionSnapshot = { captions: CaptionGroup[] };
 export type CaptionHintRequest = { captionTopicKey: string; trackKey: string | null;
-  lastRequestedSnapshot: CaptionSnapshot | null; currentSnapshot: CaptionSnapshot };
+  lastRequestedSnapshot: CaptionSnapshot | null; currentSnapshot: CaptionSnapshot; commonWordCutoff?: 1000 | 1500 | 2000 };
 export type Hint = { startOffset: number; endOffset: number; chineseGloss: string;
-  lexiconEntryId: string; lexiconVersion: number; senseId: string };
+  lexiconEntryId: string; lemma: string; lexiconVersion: number; senseId: string };
 export type KeyedHint = Hint & { startKey: string; endKey: string };
 export type HintResponse = { processedKeys: string[]; hints: KeyedHint[] };
 export type ApiTimings = { query?: number; rules?: number; api?: number };
@@ -49,6 +50,7 @@ export function isCaptionHintRequest(value: unknown): value is CaptionHintReques
   if (!value || typeof value !== "object") return false;
   const request = value as CaptionHintRequest;
   if (!boundedId(request.captionTopicKey) || (request.trackKey !== null && !boundedId(request.trackKey)) ||
+      (request.commonWordCutoff !== undefined && ![1000, 1500, 2000].includes(request.commonWordCutoff)) ||
       !isCaptionSnapshot(request.currentSnapshot) || (request.lastRequestedSnapshot !== null && !isCaptionSnapshot(request.lastRequestedSnapshot))) return false;
   const previous = new Map(request.lastRequestedSnapshot ? snapshotSegments(request.lastRequestedSnapshot).map(segment => [segment.key, segment.text]) : []);
   return snapshotSegments(request.currentSnapshot).every(segment => !previous.has(segment.key) || previous.get(segment.key)!.endsWith(segment.text));
@@ -75,7 +77,7 @@ export function resolveHint(hint: KeyedHint, snapshot: CaptionSnapshot): Hint | 
       const startOffset = position + group.segments.slice(0, start).reduce((sum, segment) => sum + segment.text.length, 0) + hint.startOffset;
       const endOffset = position + group.segments.slice(0, end).reduce((sum, segment) => sum + segment.text.length, 0) + hint.endOffset;
       if (endOffset <= startOffset) return;
-      return { startOffset, endOffset, chineseGloss: hint.chineseGloss, lexiconEntryId: hint.lexiconEntryId,
+      return { startOffset, endOffset, chineseGloss: hint.chineseGloss, lexiconEntryId: hint.lexiconEntryId, lemma: hint.lemma,
         lexiconVersion: hint.lexiconVersion, senseId: hint.senseId };
     }
     position += group.segments.reduce((sum, segment) => sum + segment.text.length, 0);
@@ -90,7 +92,8 @@ export function parseHintResponse(value: unknown, request: CaptionHintRequest): 
       !Array.isArray(body.hints) || body.hints.length > MAX_CAPTION_LENGTH) return;
   let end = 0; let version: number | undefined;
   for (const hint of body.hints) {
-    if (!hint || !isEntryId(hint.lexiconEntryId) || !isStableId(hint.senseId) || !Number.isSafeInteger(hint.lexiconVersion) || hint.lexiconVersion < 1 ||
+    if (!hint || !isEntryId(hint.lexiconEntryId) || typeof hint.lemma !== "string" || !hint.lemma.length || hint.lemma.length > 128 ||
+        !isStableId(hint.senseId) || !Number.isSafeInteger(hint.lexiconVersion) || hint.lexiconVersion < 1 ||
         (version !== undefined && version !== hint.lexiconVersion) || typeof hint.chineseGloss !== "string" ||
         !hint.chineseGloss.length || Array.from(hint.chineseGloss).length > 24 || !/\p{Script=Han}/u.test(hint.chineseGloss) || /[\s\p{P}\p{S}\p{C}]/u.test(hint.chineseGloss)) return;
     const resolved = resolveHint(hint, request.currentSnapshot);

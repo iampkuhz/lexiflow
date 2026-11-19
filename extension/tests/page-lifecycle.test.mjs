@@ -4,7 +4,7 @@ import { createPageLifecycle } from '../build/test-modules/page-lifecycle.js';
 
 const original = {};
 for (const key of ['window','document','MutationObserver','requestAnimationFrame','cancelAnimationFrame','Element']) original[key] = globalThis[key];
-class Target { hidden=false; documentElement={}; listeners=new Map(); closest(selector){return selector==='#ytp-caption-window-container'?this:null;} addEventListener(name,callback){const entries=this.listeners.get(name)??[];entries.push(callback);this.listeners.set(name,entries);} removeEventListener(name,callback){this.listeners.set(name,(this.listeners.get(name)??[]).filter(item=>item!==callback));} dispatch(name){for(const callback of [...(this.listeners.get(name)??[])])callback({target:this});} }
+class Target { hidden=false; documentElement={}; listeners=new Map(); closest(selector){return selector==='#ytp-caption-window-container'?this:null;} addEventListener(name,callback){const entries=this.listeners.get(name)??[];entries.push(callback);this.listeners.set(name,entries);} removeEventListener(name,callback){this.listeners.set(name,(this.listeners.get(name)??[]).filter(item=>item!==callback));} dispatch(name,fields={}){for(const callback of [...(this.listeners.get(name)??[])])callback({target:this,...fields});} }
 class Observer {
   static instances=[];
   disconnected=false;
@@ -89,4 +89,16 @@ test('navigation counts once per new page key, including popstate and refresh, a
  doc.hidden=false;doc.dispatch('visibilitychange');const current=lifecycle.pageKey;
  lifecycle.setEnabled(current,false);lifecycle.setEnabled(current,false);
  assert.equal(reasons.filter(r=>r==='disabled').length,1);lifecycle.dispose();
+});
+
+
+test('initial pageshow retains an already captured generation, while persisted restore invalidates it',()=>{
+ const {win}=environment();let invalidations=0,captures=0;
+ const lifecycle=createPageLifecycle({currentVideoId:()=> 'A',hasPlayer:()=>true,hasCaptionMotion:()=>false},
+  ()=>invalidations++,()=>captures++,()=>{},()=> 'page');
+ lifecycle.attach();const generation=lifecycle.generation,initial=captures;
+ win.dispatch('pageshow',{persisted:false});
+ assert.equal(lifecycle.generation,generation);assert.equal(invalidations,0);assert.equal(captures,initial+1);
+ win.dispatch('pageshow',{persisted:true});
+ assert.equal(lifecycle.generation,generation+1);assert.equal(invalidations,1);lifecycle.dispose();
 });

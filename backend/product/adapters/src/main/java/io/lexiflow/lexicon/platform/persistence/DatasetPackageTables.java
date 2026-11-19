@@ -41,7 +41,7 @@ public final class DatasetPackageTables {
   public static final Table ENTRY =
       new Table(
           "lexicon_entry",
-          List.of("entry_id", "lemma", "gloss", "canonical_form", "priority"),
+          List.of("entry_id", "lemma", "gloss", "canonical_form", "priority", "frequency_rank"),
           "entry_id");
   public static final Table FORM =
       new Table(
@@ -69,6 +69,7 @@ public final class DatasetPackageTables {
           Map.entry("gloss", "TEXT"),
           Map.entry("canonical_form", "INTEGER"),
           Map.entry("priority", "INTEGER"),
+          Map.entry("frequency_rank", "INTEGER"),
           Map.entry("normalized_form", "TEXT"));
 
   private DatasetPackageTables() {}

@@ -27,6 +27,7 @@ public record CaptionHintResponse(List<String> processedKeys, List<Hint> hints) 
    * @param lexiconEntryId 含义：已发布词条正 BIGINT 的精确十进制字符串。取值范围：1 至 9223372036854775807，不转为 JSON 数字。
    * @param lexiconVersion 本次响应使用的单一词库发布版本。
    * @param senseId 已发布词义的稳定身份。
+   * @param lemma 已发布词条的规范 lemma，不是字幕中观察到的表面。
    */
   public record Hint(
       String startKey,
@@ -36,5 +37,6 @@ public record CaptionHintResponse(List<String> processedKeys, List<Hint> hints) 
       String chineseGloss,
       String lexiconEntryId,
       long lexiconVersion,
-      String senseId) {}
+      String senseId,
+      String lemma) {}
 }

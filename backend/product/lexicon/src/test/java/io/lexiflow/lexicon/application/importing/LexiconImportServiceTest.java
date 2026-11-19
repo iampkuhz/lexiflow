@@ -28,6 +28,44 @@ class LexiconImportServiceTest {
           DIGEST, "source", "license", Instant.EPOCH, TestGenerationFixture.identity());
 
   @Test
+  void supplementalRowsUseTheirOwnDigestInPreparedProvenance() {
+    var row = row();
+    var supplementaryDigest = "b".repeat(64);
+    var metadata =
+        new LexiconImportMetadata(
+            DIGEST,
+            "main",
+            "license",
+            Instant.EPOCH,
+            TestGenerationFixture.identity(),
+            List.of(
+                new LexiconImportMetadata.Source(
+                    row.dictionary().sourceId(),
+                    row.dictionary().licenseId(),
+                    supplementaryDigest)));
+    var seen = new ArrayList<LexiconImportPlan.PlannedEntry>();
+    new LexiconImportService(
+            (input, raw, count, source, progress) -> {
+              try {
+                source.read(9, seen::add);
+              } catch (IOException failure) {
+                throw new IllegalStateException(failure);
+              }
+              return 9;
+            })
+        .publishStreaming(
+            metadata,
+            1,
+            1,
+            consumer -> {
+              consumer.accept(row);
+              return new LexiconImportRowSource.ReadReceipt(DIGEST, 1);
+            });
+    assertEquals(supplementaryDigest, seen.getFirst().entry().provenance().contentDigest());
+    assertEquals(DIGEST, metadata.digestFor("different-main-reference"));
+  }
+
+  @Test
   void rejectsInvalidCountsBeforeCallingPublicationPort() {
     var called = new AtomicBoolean();
     var service = new LexiconImportService(new FakePublicationRepository(called, null));

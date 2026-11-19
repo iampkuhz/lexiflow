@@ -33,7 +33,7 @@ RUN test -x /bin/bash && test -x /usr/bin/timeout && test -x /usr/bin/env \
     && java -Xms256m -Xmx768m -Xshare:on -version \
     && ! getent passwd 10001 >/dev/null \
     && useradd --uid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin lexiflow \
-    && install -d -o 10001 -g 10001 -m 0700 /var/lib/lexiflow /run/lexiflow \
+    && install -d -o 10001 -g 10001 -m 0700 /var/lib/lexiflow /var/lib/lexiflow/preferences /run/lexiflow \
     && install -d -o 10001 -g 10001 -m 0555 /app/notices
 COPY --chown=10001:10001 --chmod=0444 lexiflow-api.jar /app/lexiflow-api.jar
 COPY --chown=10001:10001 --chmod=0444 dataset.zip /app/dataset.zip
@@ -49,6 +49,7 @@ RUN test -s /app/lexiflow-api.jar \
 USER 10001:10001
 EXPOSE 8080
 VOLUME ["/var/lib/lexiflow"]
+VOLUME ["/var/lib/lexiflow/preferences"]
 VOLUME ["/run/lexiflow"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
   CMD ["/app/runtime-entrypoint.sh", "health"]

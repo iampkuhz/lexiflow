@@ -97,11 +97,15 @@ export function renderCompose(repo, { apiPort, databaseFile, slot = 'source' }) 
     command: ['api'], logging: { driver: 'k8s-file', options: { 'max-size': '10mb' } },
     ports: [`127.0.0.1:${apiPort}:8080`],
     networks: ['published'],
-    environment: { SPRING_DATASOURCE_URL: 'jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro' },
-    volumes: ['${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro'],
+    environment: { SPRING_DATASOURCE_URL: 'jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro',
+      LEXIFLOW_PREFERENCES_JDBC_URL: 'jdbc:sqlite:/var/lib/lexiflow/preferences/preferences.db' },
+    volumes: ['${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro', 'lexiflow-preferences:/var/lib/lexiflow/preferences'],
     ...hardened, stop_grace_period: '30s', healthcheck: {
       test: ['CMD', '/app/run-container-command.sh', 'health'], interval: '30s', timeout: '5s', retries: 3, start_period: '30s' } };
-  const config = { services: { api }, networks: { published: { driver: 'bridge', labels } } };
+  const config = { services: { api }, volumes: { 'lexiflow-preferences': {
+    name: 'lexiflow-${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}_preferences',
+    labels: { 'lexiflow.installation': '${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}' } } },
+    networks: { published: { driver: 'bridge', labels } } };
   return `${JSON.stringify(config, null, 2)}\n`;
 }
 export async function packageGeneration(file) {
@@ -109,7 +113,7 @@ export async function packageGeneration(file) {
     const entries = await readZipEntries(file, ['manifest.json']);
     const manifest = JSON.parse(entries.get('manifest.json').toString('utf8'));
     const inputs = manifest.generationInputs, config = manifest.generationConfig;
-    if (manifest.schemaVersion !== 4 || !inputs || typeof inputs !== 'object' || Array.isArray(inputs)
+    if (manifest.schemaVersion !== 5 || !inputs || typeof inputs !== 'object' || Array.isArray(inputs)
         || !config || typeof config !== 'object' || Array.isArray(config)) fail('DEPLOYMENT_PACKAGE_GENERATION_INVALID');
     const generation = dataGeneration({ codeVersion: manifest.generationCodeVersion, inputSha256: inputs.inputSha256,
       upstream: inputs.upstream, config });
@@ -531,7 +535,9 @@ export async function runUnifiedDeployment(ctx) {
         }
         current.digests = ctx.digestFiles(current); ctx.saveState(current);
         if (replacement) fs.unlinkSync(path.join(dir, 'image-replacement.json'));
-        await ctx.compose('config'); await ctx.compose('up', '-d', '--no-deps', '--force-recreate', 'api');
+        await ctx.compose('config');
+        await ctx.compose('run', '--rm', '--no-deps', 'api', 'init-preferences');
+        await ctx.compose('up', '-d', '--no-deps', '--force-recreate', 'api');
         if (preparedData.extensionStage) {
           verifyExtension(preparedData.extensionStage, identity, apiPort);
           fs.renameSync(path.join(dir, 'extension'), path.join(dir, `.previous-extension-${opId}`));
@@ -637,7 +643,8 @@ export async function activatePreparedTarget({ dir, prepared, previous, fact, di
   await verifyExtensionArchive(dir, target.artifacts?.extensionArchive, target.buildIdentity, target.apiPort, extension);
   validateSqliteDatabaseFile(target.databaseFile, { installationRoot: dir, allowMissing: false });
   setState(target); target.digests = digestFiles(target); saveState(target);
-  await compose('config'); await compose('up', '-d', '--no-deps', '--force-recreate', 'api');
+  await compose('config'); await compose('run', '--rm', '--no-deps', 'api', 'init-preferences');
+  await compose('up', '-d', '--no-deps', '--force-recreate', 'api');
   await ready(target);
   await verifyExtensionArchive(dir, target.artifacts?.extensionArchive, target.buildIdentity, target.apiPort, extension);
   target.phase = 'ready'; target.digests = digestFiles(target); saveState(target);

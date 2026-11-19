@@ -141,6 +141,7 @@ export class CaptionCapture {
       this.sourceRevision++; this.clearSource(); this.activeCaptionKey = undefined;
     }
     if (matched.trackKey !== null) this.lastKnownTrackKey = matched.trackKey;
+    if (!textUnchanged) this.nativeIdentity = "";
     if (nextIdentity) this.nativeIdentity = nextIdentity;
     this.trackKey = matched.trackKey;
     const key = `${videoId}\u0000${this.sourceRevision}\u0000${caption}`;

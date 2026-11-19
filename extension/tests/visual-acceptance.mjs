@@ -250,7 +250,7 @@ async function assertControlsUsable(page) {
 async function installHintRendererMock(serviceWorker, apiBase, caption, terms) {
   const hints = terms.map(([term, chineseGloss], index) => ({
     startOffset: caption.indexOf(term), endOffset: caption.indexOf(term) + term.length, chineseGloss,
-    lexiconEntryId: String(index + 1),
+    lexiconEntryId: String(index + 1), lemma: term.toLocaleLowerCase("en-US"),
     lexiconVersion: 1,
     senseId: `00000000-0000-0000-0000-00000000001${index + 1}`
   }));
@@ -259,9 +259,11 @@ async function installHintRendererMock(serviceWorker, apiBase, caption, terms) {
   await serviceWorker.evaluate(({ base, syntheticCaption, syntheticHints }) => {
     if (globalThis.__lexiflowVisualAcceptanceRestoreFetch) throw new Error("visual-fetch-mock-already-installed");
     const originalFetch = globalThis.fetch;
-    const target = `${base}/api/v1/caption-hints`;
+    const target = `${base}/api/v1/caption-hints`, preferenceTarget = `${base}/api/v1/preferences`;
     globalThis.fetch = async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input?.url;
+      if (url === preferenceTarget || String(url ?? "").includes("/api/v1/preferences"))
+        return new Response(JSON.stringify({ commonWordCutoff: 1500, hidden: [] }), { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
       if (url === target || String(url ?? "").includes("/api/v1/caption-hints")) {
         let request;
         try { request = JSON.parse(typeof init?.body === "string" ? init.body : "{}"); } catch { return originalFetch(input, init); }

@@ -44,6 +44,124 @@ class HintSelectionTest {
   }
 
   @Test
+  void preservesAmbiguityBeforeApplyingCommonWordCutoff() {
+    var overCutoff =
+        new HintSelection.CandidateMatch(
+            0, 4, id(9), "00000000-0000-0000-0000-000000000009", 1, "甲", 10, "alpha", 1200L, false);
+    var other = match(0, 4, id(10), "乙", 9, 1);
+    var result = HintSelection.select(List.of(overCutoff, other), 1500);
+    assertEquals(1, result.ambiguous());
+    assertEquals(List.of(), result.hints());
+  }
+
+  @Test
+  void refusesGroundHomographsEvenForActualGrindingContextsBeforeCutoffOrBlockFiltering() {
+    for (var text : List.of("They ground beans.", "freshly ground pepper", "on the ground")) {
+      int start = text.indexOf("ground");
+      var grind =
+          new HintSelection.CandidateMatch(
+              start,
+              start + 6,
+              "3742960728355627465",
+              "00000000-0000-0000-0000-000000000001",
+              1,
+              "磨",
+              988,
+              "grind",
+              5538L,
+              false);
+      for (var blocked : List.of(false, true)) {
+        var ground =
+            new HintSelection.CandidateMatch(
+                start,
+                start + 6,
+                "2532309678823797718",
+                blocked ? null : "00000000-0000-0000-0000-000000000002",
+                1,
+                blocked ? null : "土地",
+                498,
+                "ground",
+                455L,
+                false);
+        for (var cutoff : List.of(1000, 1500, 2000)) {
+          var result = HintSelection.select(List.of(ground, grind), cutoff);
+          assertEquals(1, result.ambiguous());
+          // 无提示只是歧义拒绝，不表示选对了研磨或地面语境义。
+          assertEquals(List.of(), result.hints());
+          assertEquals(result, HintSelection.select(List.of(grind, ground), cutoff));
+        }
+      }
+    }
+  }
+
+  @Test
+  void preservesUnambiguousBareGrindAndGrinding() {
+    for (var form : List.of("grind", "grinding")) {
+      var grind =
+          new HintSelection.CandidateMatch(
+              0,
+              form.length(),
+              "3742960728355627465",
+              "00000000-0000-0000-0000-000000000001",
+              1,
+              "磨",
+              988,
+              "grind",
+              5538L,
+              false);
+      var result = HintSelection.select(List.of(grind), 1500);
+      assertEquals(0, result.ambiguous());
+      assertEquals(
+          List.of("3742960728355627465"),
+          result.hints().stream().map(hint -> hint.lexiconEntryId()).toList());
+      assertEquals("磨", result.hints().getFirst().chineseGloss());
+    }
+  }
+
+  @Test
+  void cutoffUsesRawRankForEveryWordAndLeavesPhrasesIndependent() {
+    var rankedWord =
+        new HintSelection.CandidateMatch(
+            0,
+            5,
+            id(11),
+            "00000000-0000-0000-0000-000000000009",
+            1,
+            "释义",
+            10,
+            "alpha",
+            1200L,
+            false);
+    assertEquals(
+        List.of("11"),
+        HintSelection.select(List.of(rankedWord), 1000).hints().stream()
+            .map(hint -> hint.lexiconEntryId())
+            .toList());
+    assertEquals(List.of(), HintSelection.select(List.of(rankedWord), 1500).hints());
+    var commonWord =
+        new HintSelection.CandidateMatch(
+            0, 5, id(12), "00000000-0000-0000-0000-000000000009", 1, "释义", 10, "beta", 900L, false);
+    assertEquals(List.of(), HintSelection.select(List.of(commonWord), 1000).hints());
+    var phrase =
+        new HintSelection.CandidateMatch(
+            0,
+            5,
+            id(13),
+            "00000000-0000-0000-0000-000000000009",
+            1,
+            "释义",
+            10,
+            "alpha beta",
+            100L,
+            true);
+    assertEquals(
+        List.of("13"),
+        HintSelection.select(List.of(phrase), 1000).hints().stream()
+            .map(hint -> hint.lexiconEntryId())
+            .toList());
+  }
+
+  @Test
   void countsUniqueAmbiguityIncludingBlockedEvidenceAndOnlyFinalOverlapDrops() {
     var hiddenAmbiguity = new HintSelection.CandidateMatch(15, 18, id(3), null, 1, null, 10);
     var visibleAmbiguity = match(15, 18, id(4), "隐藏", 10, 1);

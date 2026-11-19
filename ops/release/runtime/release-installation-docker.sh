@@ -492,7 +492,7 @@ lf_removal_discover() {
   lf_docker_observe lf_removal_discover_observe "$@"
 }
 lf_removal_discover_observe() {
-  local kind="$1" rows format limit
+  local kind="$1" rows format limit preferences_rows preferences_name
   case "$kind" in
     container) format='{{.ID}}|{{.Names}}'; limit=5;;
     network) format='{{.ID}}|{{.Name}}'; limit=1;;
@@ -509,6 +509,19 @@ lf_removal_discover_observe() {
         lf_docker volume ls --filter "$filter" --format "$format" 2>/dev/null || exit 1
       fi
     done
+    if [ "$kind" = volume ]; then
+      preferences_name="lexiflow-${LF_INSTALL_ID}_preferences"
+      preferences_rows=$(lf_docker volume ls --filter "name=$preferences_name" --format "$format" 2>/dev/null) || exit 1
+      [ "${#preferences_rows}" -le 8192 ] || exit 1
+      while IFS='|' read -r id name extra; do
+        [ -n "$id$name$extra" ] || continue
+        [ -z "$extra" ] && [ -n "$id" ] && [ -n "$name" ] || exit 1
+        [ "$name" = "$preferences_name" ] || continue
+        printf '%s|%s\n' "$id" "$name"
+      done <<EOF_PREFERENCE_VOLUME_LIST
+$preferences_rows
+EOF_PREFERENCE_VOLUME_LIST
+    fi
   ) || return 1
   [ "${#rows}" -le 8192 ] || return 1
   LF_REMOVE_ROWS=$(printf '%s\n' "$rows" | LC_ALL=C sort -u) || return 1
@@ -528,6 +541,17 @@ $LF_OWNER_RECORD"; else expected=$LF_OWNER_RECORD; fi
   done <<EOF_ROWS
 $LF_REMOVE_ROWS
 EOF_ROWS
+  if [ "$kind" = volume ]; then
+    # Volume resources have two intentionally different owner label contracts.
+    # Inspect each exact name separately; never compare heterogeneous output formats.
+    while IFS='|' read -r id name extra; do
+      [ -n "$id$name$extra" ] || continue
+      [ -z "$extra" ] && lf_removal_owned volume "$id" "$name" || return 1
+    done <<EOF_VOLUME_OWNERS
+$LF_REMOVE_ROWS
+EOF_VOLUME_OWNERS
+    return 0
+  fi
   # 一次只读观察中按完整 ID 批量读取；每个结果仍须同序精确匹配。
   # 不缓存观察，且写操作前的单对象复核仍由 lf_removal_owned 执行。
   if [ "$#" -gt 0 ]; then
@@ -542,7 +566,7 @@ lf_removal_fields() {
   case "$kind:$name" in
     "container:${LF_PROJECT}-api-1"|"container:${LF_PROJECT}-candidate") ;;
     "network:${LF_PROJECT}_private") ;;
-    "volume:${LF_PROJECT}_lexiflow-data") ;;
+    "volume:${LF_PROJECT}_lexiflow-data"|"volume:lexiflow-${LF_INSTALL_ID}_preferences") ;;
     *) return 1;;
   esac
   if [ "$kind" = volume ]; then [ "$id" = "$name" ] || return 1
@@ -553,7 +577,12 @@ lf_removal_fields() {
   case "$kind" in
     container) LF_OWNER_FORMAT='{{.Id}}|{{.Name}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "lexiflow.installation"}}|{{index .Config.Labels "lexiflow.release"}}'; LF_OWNER_RECORD="$id|/$name|$LF_PROJECT|$LF_INSTALL_ID|$LF_CURRENT_KEY";;
     network) LF_OWNER_FORMAT='{{.Id}}|{{.Name}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "lexiflow.installation"}}|{{index .Labels "lexiflow.release"}}'; LF_OWNER_RECORD="$id|$name|$LF_PROJECT|$LF_INSTALL_ID|$LF_CURRENT_KEY";;
-    volume) LF_OWNER_FORMAT='{{.Name}}|{{.Name}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "lexiflow.installation"}}|{{index .Labels "lexiflow.release"}}'; LF_OWNER_RECORD="$id|$name|$LF_PROJECT|$LF_INSTALL_ID|$LF_CURRENT_KEY";;
+    volume)
+      if [ "$name" = "lexiflow-${LF_INSTALL_ID}_preferences" ]; then
+        LF_OWNER_FORMAT='{{.Name}}|{{index .Labels "lexiflow.installation"}}'; LF_OWNER_RECORD="$name|$LF_INSTALL_ID"
+      else
+        LF_OWNER_FORMAT='{{.Name}}|{{.Name}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "lexiflow.installation"}}|{{index .Labels "lexiflow.release"}}'; LF_OWNER_RECORD="$id|$name|$LF_PROJECT|$LF_INSTALL_ID|$LF_CURRENT_KEY"
+      fi;;
   esac
 }
 lf_removal_owned() {
@@ -564,17 +593,22 @@ lf_removal_owned() {
   [ "$actual" = "$expected" ]
 }
 lf_operation_volume_labels() {
-  local name="${LF_PROJECT}_lexiflow-data" id entry extra found=
+  local data_name="${LF_PROJECT}_lexiflow-data" id entry extra found_data=
   for volume in $LF_OP_VOLUMES; do
     IFS='|' read -r id entry extra <<EOF_VOLUME
 $volume
 EOF_VOLUME
     [ -z "$extra" ] || return 1
-    [ "$entry" = "$name" ] || continue
-    lf_removal_owned volume "$id" "$entry" || return 1
-    found=yes
+    [ "$entry" = "$data_name" ] || continue
+    [ -z "$found_data" ] || return 1
+    lf_removal_owned volume "$id" "$entry" || return 1; found_data=yes
   done
-  [ "$found" = yes ]
+  [ "$found_data" = yes ] && lf_preferences_volume_owned
+}
+lf_preferences_volume_owned() {
+  local name="lexiflow-${LF_INSTALL_ID}_preferences" actual
+  actual=$(lf_docker volume inspect --format '{{.Name}}|{{index .Labels "lexiflow.installation"}}' "$name" 2>/dev/null) || return 1
+  [ "$actual" = "$name|$LF_INSTALL_ID" ]
 }
 lf_removal_apply() {
   local kind="$1" rows="$2" id name extra
@@ -584,7 +618,7 @@ lf_removal_apply() {
     case "$kind" in
       container) lf_docker container rm --force "$id" >/dev/null 2>&1 || return 1;;
       network) lf_docker network rm "$id" >/dev/null 2>&1 || return 1;;
-      volume) lf_docker volume rm "$id" >/dev/null 2>&1 || return 1;;
+      volume) [ "$name" = "lexiflow-${LF_INSTALL_ID}_preferences" ] && continue; lf_docker volume rm "$id" >/dev/null 2>&1 || return 1;;
       *) return 1;;
     esac
   done <<EOF_ROWS
@@ -614,9 +648,19 @@ lf_docker_remove_initial() {
   lf_removal_discover volume || return 1; volumes=$LF_REMOVE_ROWS
 }
 lf_docker_remove_final() {
-  local kind
+  local kind row id name extra
   for kind in container network volume; do
     lf_removal_discover "$kind" || return 1
-    [ -z "$LF_REMOVE_ROWS" ] || return 1
+    if [ "$kind" = volume ] && [ -n "$LF_REMOVE_ROWS" ]; then
+      while IFS='|' read -r id name extra; do
+        [ -n "$id$name$extra" ] || continue
+        [ -z "$extra" ] && [ "$name" = "lexiflow-${LF_INSTALL_ID}_preferences" ] || return 1
+        lf_removal_owned volume "$id" "$name" || return 1
+      done <<EOF_PRESERVED_PREFERENCES
+$LF_REMOVE_ROWS
+EOF_PRESERVED_PREFERENCES
+    else
+      [ -z "$LF_REMOVE_ROWS" ] || return 1
+    fi
   done
 }

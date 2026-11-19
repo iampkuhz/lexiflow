@@ -63,7 +63,12 @@ export function createPageLifecycle(source: LifecycleSource, invalidate: () => v
     else capture();
   };
   const pagehide = () => { cancelMotion(); stopped = true; generation++; invalidate(); notify("interrupted"); };
-  const pageshow = () => { stopped = false; generation++; invalidate(); capture(); };
+  const pageshow = (event: Event) => {
+    if (stopped || (event as PageTransitionEvent).persisted) {
+      stopped = false; generation++; invalidate();
+    }
+    capture();
+  };
   const seekingStart = () => { cancelMotion(); seeking = true; generation++; invalidate(); notify("interrupted"); };
   const seekingEnd = () => { seeking = false; stopped = false; capture(); };
   const stopSource = () => { cancelMotion(); stopped = true; generation++; invalidate(); notify("interrupted"); };

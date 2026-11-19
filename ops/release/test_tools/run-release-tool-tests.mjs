@@ -1,7 +1,7 @@
-import { spawn } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { openOwnership, spawnOwned } from './runner-ownership-bootstrap.cjs';
 
 // 仅选择固定检查范围与原有子进程预算；CLI 不接收命令或预算覆盖。
 const suites = {
@@ -48,42 +48,90 @@ export function runTests(options = {}) {
   const timeoutMs = options.timeoutMs ?? 30_000;
   const maxOutputBytes = options.maxOutputBytes ?? 100_000;
   return new Promise((resolve) => {
-    let child;
-    // 私有组包含测试 worker；上级取消须立即转发，不能逃离 Verify 的强杀窗口。
-    const processGroupSupported = process.platform !== 'win32';
-    try { child = spawn(command, args, { detached: processGroupSupported, stdio: ['ignore', 'pipe', 'pipe'] }); }
-    catch { resolve(failed('test process could not start', 1)); return; }
+    let child; let ownership; let cleanup; let spawning; let released = false;
+    const acquisition = new AbortController();
     let stdout = ''; let stderr = ''; let bytes = 0; let overflow = false; let timedOut = false; let cancelled = false; let settled = false;
-    const killOwnedGroup = () => {
-      if (!processGroupSupported || !child.pid) { child.kill('SIGKILL'); return; }
-      try { process.kill(-child.pid, 'SIGKILL'); }
-      catch (error) { if (error.code !== 'ESRCH') child.kill('SIGKILL'); }
+    const stop = () => {
+      acquisition.abort();
+      if (!released && child?.stdio[3]?.writable) child.stdio[3].write('{"op":"stop"}\n');
+      if (!ownership) { acquisition.abort(); return; }
+      if (!cleanup) {
+        cleanup = ownership.cancel().catch(() => false);
+        void cleanup.then(clean => { if (!clean) { child?.stdio[3]?.destroy(); void finish(resultForExit(1)); } });
+      }
     };
-    const onCancel = () => { cancelled = true; killOwnedGroup(); };
+    const onCancel = () => { cancelled = true; stop(); };
     process.on('SIGTERM', onCancel);
     process.on('SIGINT', onCancel);
-    const collect = (stream, chunk) => {
-      const available = Math.max(0, maxOutputBytes - bytes);
-      const bounded = chunk.subarray(0, available);
-      bytes += bounded.length;
-      if (stream === 'out') stdout += bounded.toString('utf8'); else stderr += bounded.toString('utf8');
-      if (bounded.length < chunk.length) { overflow = true; killOwnedGroup(); }
-    };
-    child.stdout.on('data', (chunk) => collect('out', chunk));
-    child.stderr.on('data', (chunk) => collect('err', chunk));
-    const timer = setTimeout(() => { timedOut = true; killOwnedGroup(); }, timeoutMs);
-    const finish = (result) => {
+    // 包含 relay／guard 建立成本；固定 suite 预算不前移或重置。
+    const timer = setTimeout(() => { timedOut = true; stop(); }, timeoutMs);
+    const resultForExit = (code, signal) => timedOut ? failed('test process timed out', 1)
+      : overflow ? failed('test process output exceeded limit', 1)
+      : cancelled || signal ? failed('test process cancelled', 1) : evaluateTapSummary(stdout, code ?? 1);
+    const finish = async (result) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      let clean = false;
+      try { clean = ownership ? await (cleanup ??= ownership.finish()) : !child; } catch {}
+      if (!clean) {
+        if (result.status === 'PASS') result = failed('test process ownership cleanup failed', 1);
+        else result = { ...result, cleanup_succeeded: false };
+      }
+      // dispose 的 EOF 只是意外死亡兜底；不能倒填前述 clean 判据。
+      if (ownership) await ownership.dispose();
+      if (spawning) await spawning.catch(() => {});
+      if (child?.reaperDone) await child.reaperDone;
       process.removeListener('SIGTERM', onCancel);
       process.removeListener('SIGINT', onCancel);
       if (stderr) process.stderr.write(stderr);
       if (result.status !== 'PASS' && stdout) process.stderr.write(`TAP output (bounded):\n${stdout}`);
       resolve(result);
     };
-    child.on('error', () => finish(failed('test process could not start', 1)));
-    child.on('close', (code, signal) => finish(timedOut ? failed('test process timed out', 1) : overflow ? failed('test process output exceeded limit', 1) : cancelled || signal ? failed('test process cancelled', 1) : evaluateTapSummary(stdout, code ?? 1)));
+    const collect = (stream, chunk) => {
+      const available = Math.max(0, maxOutputBytes - bytes);
+      const bounded = chunk.subarray(0, available);
+      bytes += bounded.length;
+      if (stream === 'out') stdout += bounded.toString('utf8'); else stderr += bounded.toString('utf8');
+      if (bounded.length < chunk.length) { overflow = true; stop(); }
+    };
+    void (async () => {
+      // 该私有机制只执行当前 Node；不对任意命令假称 preload 已保护。
+      if (realpathSync(command) !== realpathSync(process.execPath)) throw new Error('unsupported test executable');
+      ownership = await openOwnership(onCancel, acquisition.signal);
+      if (timedOut || cancelled) { await ownership.noSpawn(); await finish(resultForExit(1)); return; }
+      child = await (spawning = spawnOwned(command, args, { detached: true, stdio: ['ignore', 'pipe', 'pipe', 'pipe'], env: ownership.env }, acquisition.signal, invokedDirectly()));
+      child.stdout.on('data', chunk => collect('out', chunk));
+      child.stderr.on('data', chunk => collect('err', chunk));
+      // exit 先启动屏障，不能等仍由后代持有的 stdout close 形成死锁。
+      child.on('exit', () => { if (!cleanup) cleanup = ownership.finish(); });
+      child.on('error', () => {
+        void ownership.noSpawn().then(() => finish(failed('test process could not start', 1)), () => finish(failed('test process could not start', 1)));
+      });
+      child.on('close', (code, signal) => { void finish(resultForExit(code, signal)); });
+      if (!child.pid) return;
+      const allowed = await ownership.attach(child.pid);
+      const guarded = await ownership.ready();
+      if (!guarded) { stop(); return; }
+      let gateInput = ''; let ready = false;
+      child.stdio[3].on('error', () => { stop(); });
+      child.stdio[3].on('data', chunk => {
+        gateInput += chunk;
+        if (gateInput.length > 4096) { stop(); return; }
+        while (gateInput.includes('\n')) {
+          const end = gateInput.indexOf('\n'); const line = gateInput.slice(0, end); gateInput = gateInput.slice(end + 1);
+          if (line !== '{"op":"ready"}' || ready) { stop(); return; }
+          ready = true;
+          if (allowed && !cancelled && !timedOut) { released = true; child.stdio[3].write('{"op":"go"}\n'); }
+          else stop();
+        }
+      });
+      if (allowed && !cancelled && !timedOut) child.stdio[3].write('{"op":"armed"}\n');
+      else stop();
+    })().catch(async () => {
+      if (ownership && !child) { try { await ownership.noSpawn(); } catch {} }
+      void finish(timedOut || cancelled ? resultForExit(1) : failed('test process could not start', 1));
+    });
   });
 }
 

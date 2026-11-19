@@ -76,8 +76,31 @@ public final class DeterministicHintPolicy {
       int endOffset,
       int requiredEndAfter,
       List<LexiconHintCandidate> candidates) {
+    return evaluateSelection(caption, startOffset, endOffset, requiredEndAfter, candidates, 1500);
+  }
+
+  /**
+   * 在给定截止值下完成歧义判定、过滤和重叠选择。
+   *
+   * @param caption 含义：完整字幕文本。取值范围：非空对象，可为空字符串。
+   * @param startOffset 含义：查询上下文起点。取值范围：0 至 endOffset 的 UTF-16 偏移。
+   * @param endOffset 含义：查询上下文终点。取值范围：startOffset 至字幕长度。
+   * @param requiredEndAfter 含义：新增区间起点。取值范围：startOffset 至 endOffset。
+   * @param candidates 含义：已发布词库候选。取值范围：非空列表，可为空集合。
+   * @param commonWordCutoff 含义：单词排名截止值。取值范围：1000、1500 或 2000。
+   * @return 选择结果及歧义、重叠计数。
+   */
+  public HintSelectionResult evaluateSelection(
+      String caption,
+      int startOffset,
+      int endOffset,
+      int requiredEndAfter,
+      List<LexiconHintCandidate> candidates,
+      int commonWordCutoff) {
     Objects.requireNonNull(caption, "caption");
     Objects.requireNonNull(candidates, "candidates");
+    if (commonWordCutoff != 1000 && commonWordCutoff != 1500 && commonWordCutoff != 2000)
+      throw new IllegalArgumentException("commonWordCutoff is invalid");
     if (startOffset < 0
         || endOffset < startOffset
         || endOffset > caption.length()
@@ -99,7 +122,7 @@ public final class DeterministicHintPolicy {
         if (match.endOffset() > requiredEndAfter) matches.add(match);
       }
     }
-    return HintSelection.select(matches);
+    return HintSelection.select(matches, commonWordCutoff);
   }
 
   private static List<HintSelection.CandidateMatch> locate(
@@ -117,7 +140,10 @@ public final class DeterministicHintPolicy {
               qualified == null ? null : candidate.senseId().toString(),
               candidate.lexiconVersion(),
               qualified,
-              candidate.priority()));
+              candidate.priority(),
+              candidate.canonicalLemma(),
+              candidate.frequencyRank(),
+              candidate.entryKind() == io.lexiflow.lexicon.domain.model.LexiconEntryKind.PHRASE));
     }
     return matches;
   }

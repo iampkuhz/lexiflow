@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -33,8 +34,8 @@ function assertApiResources() {
   return java.stdout.trim();
 }
 
-function startApi(javaHome) {
-  const spec = createApiLaunchSpec({ repositoryRoot, apiPort, javaHome });
+function startApi(javaHome, preferencesDatabase) {
+  const spec = createApiLaunchSpec({ repositoryRoot, apiPort, javaHome, preferencesDatabase });
   const child = spawn(spec.command, spec.args, {
     cwd: repositoryRoot,
     env: spec.env,
@@ -43,6 +44,57 @@ function startApi(javaHome) {
   });
   child.once("error", (error) => { child.launchError = error; });
   return child;
+}
+
+function runDailyCountFixture(database, operation, input) {
+  // Use the Python already required by this test, without depending on experimental Node SQLite.
+  const result = spawnSync("python3", ["-c", `
+from contextlib import closing
+from pathlib import Path
+import json
+import sqlite3
+import sys
+
+database, operation = sys.argv[1:]
+data = json.load(sys.stdin)
+identity = int(data["identity"])
+if operation == "seed":
+    with closing(sqlite3.connect(database)) as db, db:
+        db.executescript(data["schema"])
+        db.executemany("INSERT INTO recent_hint_daily_count(day, entry_id, count) VALUES (?, ?, ?)",
+                       [(day, identity, count) for day, count in data["rows"]])
+else:
+    with closing(sqlite3.connect(Path(database).as_uri() + "?mode=ro", uri=True)) as db:
+        columns = [row[1] for row in db.execute("PRAGMA table_info(recent_hint_daily_count)")]
+        rows = list(db.execute("SELECT day, count FROM recent_hint_daily_count WHERE entry_id = ? ORDER BY day",
+                               (identity,)))
+        print(json.dumps({"columns": columns, "rows": rows}))
+`, database, operation], {
+    input: JSON.stringify(input),
+    encoding: "utf8"
+  });
+  if (result.error) throw result.error;
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, "");
+  return result.stdout;
+}
+
+async function prepareDailyCountFixture(preferencesDatabase) {
+  const schema = await readFile(resolve(repositoryRoot, "infra/sqlite/preferences.sql"), "utf8");
+  // This fixture uses the built-in demo identity for "deliver", which no test caption displays.
+  const identity = (createHash("sha256").update("entry:en:deliver").digest().readBigUInt64BE() & ((1n << 63n) - 1n)).toString();
+  const now = Date.now();
+  const day = (daysAgo) => new Date(now - daysAgo * 86_400_000).toISOString().slice(0, 10);
+  runDailyCountFixture(preferencesDatabase, "seed", {
+    identity, schema, rows: [[day(0), 11], [day(6), 13], [day(7), 17], [day(8), 29]]
+  });
+  return () => {
+    const retained = JSON.parse(runDailyCountFixture(preferencesDatabase, "read", { identity }));
+    assert.deepEqual(retained, {
+      columns: ["day", "entry_id", "count"],
+      rows: [[day(7), 17], [day(6), 13], [day(0), 11]]
+    });
+  };
 }
 
 async function freePort() {
@@ -134,9 +186,12 @@ try {
   const javaHome = assertApiResources();
   apiPort = await freePort();
   apiBase = `http://127.0.0.1:${apiPort}`;
-  api = startApi(javaHome);
-  await waitForApi(api);
   userDataDir = await mkdtemp(resolve(tmpdir(), "lexiflow-extension-e2e-"));
+  const preferencesDatabase = resolve(userDataDir, "preferences.db");
+  const assertDailyRetention = await prepareDailyCountFixture(preferencesDatabase);
+  api = startApi(javaHome, preferencesDatabase);
+  await waitForApi(api);
+  assertDailyRetention();
   const testExtensionPath = resolve(userDataDir, "extension");
   const packaged = await createExtensionZip({ root: extensionRoot, buildIdentity: resolveBuildIdentity(repositoryRoot), apiPort: 18081 });
   await mkdir(testExtensionPath, { recursive: true });
@@ -157,8 +212,21 @@ try {
   const serviceWorker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
   await serviceWorker.evaluate((base) => {
     const originalFetch = globalThis.fetch;
+    // In-memory synthetic service contract for preferences: no durable profile fixture or private preference DB.
+    const localPreferences = { commonWordCutoff: 1500, hidden: [] };
     globalThis.fetch = (input, options) => {
       const pathname = new URL(typeof input === "string" ? input : input.url).pathname;
+      if (pathname === "/api/v1/preferences") {
+        let action;
+        try { action = JSON.parse(options?.body ?? "{}"); } catch { return Promise.resolve(new Response("{}", { status: 400 })); }
+        if (action.action === "setCutoff") localPreferences.commonWordCutoff = action.commonWordCutoff;
+        else if (action.action === "hide" && !localPreferences.hidden.some(item => item.entryId === action.entryId))
+          localPreferences.hidden.push({ entryId: action.entryId, lemma: action.lemma, gloss: action.gloss });
+        else if (action.action === "restore") localPreferences.hidden.splice(0, localPreferences.hidden.length,
+          ...localPreferences.hidden.filter(item => item.entryId !== action.entryId));
+        else if (action.action !== "read") return Promise.resolve(new Response("{}", { status: 400 }));
+        return Promise.resolve(new Response(JSON.stringify(localPreferences), { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } }));
+      }
       return originalFetch(`${base}${pathname}`, options);
     };
   }, apiBase);
@@ -168,7 +236,7 @@ try {
   await page.route("https://www.youtube.com/**", (route) =>
     route.fulfill({ contentType: "text/html", body: youtubeFixture() })
   );
-  await page.goto("https://www.youtube.com/watch?v=lexiflow-e2e", { waitUntil: "domcontentloaded" });
+  await page.goto("https://www.youtube.com/watch?v=LfxE2ETest1", { waitUntil: "domcontentloaded" });
 
   await setCaption(page, "zxqv zxqv", 1);
   await waitForState(page, "no-pending");
@@ -250,13 +318,46 @@ try {
   await waitForState(page, "no-pending");
   await page.bringToFront();
   const popup = await openActionPopup({context,page,serviceWorker});
+  let managePage;
   try {
-    await popup.click("#preferences summary");
-    await popup.click("#restore-start");
-    assert.equal(await popup.evaluate(() => !document.getElementById("restore-confirmation").hidden), true);
-    await popup.click("#restore-confirm");
-    await popup.waitFor(() => document.getElementById("restore-status").dataset.kind === "success");
+    const opened = context.waitForEvent("page");
+    await popup.click("#open-manage");
+    managePage = await opened;
+    await managePage.waitForLoadState("domcontentloaded");
+    await managePage.waitForFunction(() => document.querySelector("#hidden-count")?.textContent === "1");
+    // Read actual overlay receipts through the management page opened by the extension.
+    await managePage.setViewportSize({ width: 320, height: 640 });
+    const reliableRow = managePage.locator("#recent-list .row:not(.head)").filter({
+      has: managePage.getByText("reliable", { exact: true })
+    });
+    await reliableRow.waitFor({ timeout: 10_000 });
+    assert.ok(Number(await reliableRow.locator(".number").textContent()) > 0);
+    assert.equal(await managePage.locator("#recent-heading").textContent(), "近 7 天提示");
+    assert.equal(await managePage.locator("#recent-panel select").count(), 0);
+    const deliverRow = managePage.locator("#recent-list .row:not(.head)").filter({
+      has: managePage.getByText("deliver", { exact: true })
+    });
+    assert.equal(await deliverRow.locator(".number").textContent(), "24", "the browser shows only D through D-6");
+    const readCounts = (origin) => fetch(`${apiBase}/api/v1/recent-hints`, {
+      method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: '{"action":"read"}'
+    });
+    const extensionOrigin = `chrome-extension://${new URL(serviceWorker.url()).host}`;
+    const summary = await readCounts(extensionOrigin);
+    assert.equal(summary.status, 200);
+    assert.equal(summary.headers.get("cache-control"), "no-store");
+    const payload = await summary.json();
+    assert.deepEqual(Object.keys(payload), ["items"]);
+    const deliverSummary = payload.items.find(item => item.lemma === "deliver");
+    assert.deepEqual(Object.keys(deliverSummary).sort(), ["count", "entryId", "gloss", "lemma"]);
+    assert.equal(deliverSummary.count, 24);
+    assert.equal((await readCounts("https://untrusted.invalid")).status, 403);
+    assertDailyRetention();
+    assert.equal(await managePage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await managePage.click("#hidden-tab");
+    await managePage.getByRole("button", { name: "恢复提示" }).first().click();
+    await managePage.waitForFunction(() => /已恢复/.test(document.querySelector("#feedback")?.textContent ?? ""));
   } finally { await popup.close(); }
+  await managePage?.close();
   await page.bringToFront();
   await waitForState(page, "ready");
   assert.equal(await overlayText(page), "We need reliable(可靠的) captions.");
@@ -351,13 +452,14 @@ try {
       return digest(...args);
     };
     (window.chrome ??= {}).runtime = { sendMessage: message => {
-      if (message.type === "local-preferences") return Promise.resolve({ok:true,entryKeys:[]});
+      if (message.type === "local-preferences") return Promise.resolve({ok:true,commonWordCutoff:1500,hidden:[]});
+      if (message.type === "local-presented") return Promise.resolve({ok:true});
       if (message.type === "cancel-caption-hint") return Promise.resolve({ ok: true });
       const segments = message.payload.currentSnapshot.captions.flatMap(group => group.segments);
       const target = segments.find(segment => segment.append && segment.text.includes("reliable"));
       const startOffset = target?.text.indexOf("reliable") ?? -1;
       return Promise.resolve({ ok: true, body: { processedKeys: segments.filter(segment => segment.append).map(segment => segment.key),
-        hints: !target ? [] : [{ startKey:target.key,endKey:target.key,lexiconEntryId:"9007199254740993",lexiconVersion:1,senseId:"00000000-0000-0000-0000-000000000002",startOffset, endOffset: startOffset + 8, chineseGloss: "可靠的" }] } });
+        hints: !target ? [] : [{ startKey:target.key,endKey:target.key,lexiconEntryId:"9007199254740993",lemma:"reliable",lexiconVersion:1,senseId:"00000000-0000-0000-0000-000000000002",startOffset, endOffset: startOffset + 8, chineseGloss: "可靠的" }] } });
     } };
   });
   await hashPage.evaluate(await readFile(resolve(extensionPath, "content.js"), "utf8"));

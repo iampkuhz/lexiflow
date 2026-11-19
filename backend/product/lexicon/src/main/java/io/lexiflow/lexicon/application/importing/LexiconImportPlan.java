@@ -132,7 +132,8 @@ public final class LexiconImportPlan {
                 row.dictionary().licenseId(),
                 sourceDigest,
                 acquiredAt),
-            row.priority());
+            row.priority(),
+            row.sourceBncRank());
     return new PlannedEntry(entry, row, prepared);
   }
 

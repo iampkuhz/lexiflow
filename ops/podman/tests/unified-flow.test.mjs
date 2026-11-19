@@ -26,10 +26,11 @@ function extensionFiles(identity, apiPort) {
   const files = apiPort === 18081 ? PACKAGE_FILES.filter(name => name !== 'expected-dataset.json') : PACKAGE_FILES;
   return new Map(files.map(name => [name, Buffer.from(name === 'manifest.json'
     ? JSON.stringify({ manifest_version: 3, version: identity.chromeVersion, version_name: identity.softwareVersion,
-      permissions: ['storage'], host_permissions: [`http://127.0.0.1:${apiPort}/*`],
-      background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' } })
+      permissions: [], host_permissions: [`http://127.0.0.1:${apiPort}/*`],
+      background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' }, options_page: 'manage.html' })
     : name === 'build-identity.json' ? JSON.stringify(identity)
-    : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>' : `synthetic:${name}`)]));
+    : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>'
+    : name === 'manage.html' ? '<link href="manage.css"><script src="manage.js"></script>' : `synthetic:${name}`)]));
 }
 function writeExtension(directory, files) { for (const [name, bytes] of files) write(path.join(directory, name), bytes); }
 function fixture({ apiPort = 18081, failReady = false, failApply = false, structuredFailure = false, sourceDriftDuringBuild = false } = {}) {
@@ -584,6 +585,9 @@ test('database selection and mount contracts are SQLite-only', async () => {
     const compose=JSON.parse(renderCompose(root,{apiPort:18081,databaseFile}));
     assert.deepEqual(Object.keys(compose.services),['api']);
     assert.equal(compose.services.api.environment.SPRING_DATASOURCE_URL,'jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro');
-    assert.deepEqual(compose.services.api.volumes,['${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro']);
+    assert.deepEqual(compose.services.api.volumes,[
+      '${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro',
+      'lexiflow-preferences:/var/lib/lexiflow/preferences',
+    ]);
   } finally { fs.rmSync(root,{recursive:true,force:true}); }
 });

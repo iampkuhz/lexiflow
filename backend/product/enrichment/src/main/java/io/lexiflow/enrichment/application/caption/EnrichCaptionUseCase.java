@@ -115,7 +115,8 @@ public final class EnrichCaptionUseCase {
               interval.contextStart(),
               interval.appendEndOffset(),
               interval.appendStart(),
-              lookup.candidates());
+              lookup.candidates(),
+              request.commonWordCutoff());
       var mapped = mapper.map(request, interval, selection.hints());
       var finished = nanoTime.getAsLong();
       ranges.add(

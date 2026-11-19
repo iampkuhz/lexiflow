@@ -165,7 +165,11 @@ public final class LexiconImportPreparation {
       }
       var planned =
           LexiconImportPlan.prepareNext(
-              row, 1, metadata.sourceDigest(), metadata.acquiredAt(), surfaces);
+              row,
+              1,
+              metadata.digestFor(row.dictionary().sourceId()),
+              metadata.acquiredAt(),
+              surfaces);
       entries++;
       if (planned.prepared().gloss() == null) blockedEntries++;
       else hintEntries++;

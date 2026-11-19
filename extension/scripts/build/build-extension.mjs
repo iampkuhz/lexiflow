@@ -32,7 +32,8 @@ const entries = [
   ["src/background.ts", "esm"],
   ["src/content.ts", "iife"],
   ["src/youtube-bridge.ts", "iife"],
-  ["src/popup.ts", "iife"]
+  ["src/popup.ts", "iife"],
+  ["src/manage.ts", "iife"]
 ];
 const testEntries = ["youtube-source", "caption-snapshot", "caption-source", "stream", "page-lifecycle", "caption-capture", "protocol", "caption-debug", "runtime-status", "diagnostics", "preferences"];
 // Runtime stays as independent bundles. Test-only modules share chunks only in the ignored test output.
@@ -78,7 +79,7 @@ try {
   }
 } finally { await stop(); }
 
-for (const name of ["popup.html", "popup.css"]) {
+for (const name of ["popup.html", "popup.css", "manage.html", "manage.css"]) {
   await writeFile(resolve(dist, name), await readFile(resolve(root, "src", name)));
 }
 const manifest = JSON.parse(await readFile(resolve(root, "manifest.json"), "utf8"));

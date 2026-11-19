@@ -3,11 +3,13 @@ import test from 'node:test';
 import { createServer } from 'node:http';
 const nativeFetch = globalThis.fetch;
 let listener;
-globalThis.chrome = { runtime: { id: 'extension-id', getURL: path => `chrome-extension://extension-id/${path}`, getManifest: () => ({ version_name: '1.2.3' }), onMessage: { addListener(value) { listener = value; } } } };
+globalThis.chrome = { tabs:{query:async()=>[],sendMessage:async()=>{}}, runtime: { id: 'extension-id', getURL: path => `chrome-extension://extension-id/${path}`, getManifest: () => ({ version_name: '1.2.3' }), onMessage: { addListener(value) { listener = value; } } } };
 await import('../dist/background.js');
 let statusBody = { softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null,publishedDataset:null };
 let postFetch, holdStatus = false, rejectStatus = false;
+let prefState = { commonWordCutoff:1500, hidden:[] };
 const statusCalls = [];
+const preferenceCalls = [];
 Object.defineProperty(globalThis, 'fetch', { configurable:true, get: () => (url, options) => {
   if (String(url).endsWith('/runtime-status')) {
     statusCalls.push({url:String(url),options});
@@ -15,11 +17,19 @@ Object.defineProperty(globalThis, 'fetch', { configurable:true, get: () => (url,
     if (holdStatus) return new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('abort','AbortError'))));
     return Promise.resolve({ok:true,json:async()=>statusBody});
   }
+  if (String(url).endsWith('/preferences')) {
+    preferenceCalls.push({url:String(url),options});
+    try { const action=JSON.parse(options.body); if(action.action==='setCutoff') prefState={...prefState,commonWordCutoff:action.commonWordCutoff};
+      if(action.action==='hide'&&!prefState.hidden.some(item=>item.entryId===action.entryId)) prefState={...prefState,hidden:[...prefState.hidden,{entryId:action.entryId,lemma:action.lemma,gloss:action.gloss}]};
+      if(action.action==='restore') prefState={...prefState,hidden:prefState.hidden.filter(item=>item.entryId!==action.entryId)};
+    } catch { /* harmless read request */ }
+    return Promise.resolve({ok:true,json:async()=>prefState});
+  }
   return postFetch(url, options);
 }, set: value => { postFetch = value; } });
-const source = { lexiconEntryId: "9007199254740993", lexiconVersion: 1, senseId: "00000000-0000-0000-0000-000000000002" };
+const source = { lexiconEntryId: "9007199254740993", lemma:"reliable", lexiconVersion: 1, senseId: "00000000-0000-0000-0000-000000000002" };
 const payload = { captionTopicKey:'topic',trackKey:null,lastRequestedSnapshot:null,currentSnapshot:{captions:[{windowId:null,startMs:null,segments:[{key:'key1',text:'reliable',offsetMs:null,append:true,line:0}]}]}};
-const sender = (id, documentId='doc') => ({id:'extension-id',tab:{id},documentId});
+const sender = (id, documentId='doc') => ({id:'extension-id',tab:{id,url:'https://www.youtube.com/watch?v=abcdefghijk'},frameId:0,documentId});
 const send = (message, source) => new Promise(resolve => listener(message,source,resolve));
 
 test('isolates cancellation between tabs and documents with identical local sequence IDs', async () => {
@@ -32,7 +42,7 @@ test('isolates cancellation between tabs and documents with identical local sequ
   const first=send(message,sender(1));
   const second=send(message,sender(2));
   const nextDocument=send(message,sender(1,'next'));
-  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  for (let spin=0;spin<100 && requests.length<3;spin++) await new Promise(resolve=>setTimeout(resolve,1));
   await send({type:'cancel-caption-hint',requestId:message.requestId},sender(1));
   assert.equal(requests[0].aborted,true);
   assert.equal(requests[1].aborted,false);
@@ -145,6 +155,7 @@ test('native fetch refuses 307 and 308 caption redirects without reaching their 
       redirectCode = code;
       const before = received.length;
       globalThis.fetch = (url,options) => {
+        if (String(url).endsWith('/preferences')) return {ok:true,json:async()=>({commonWordCutoff:1500,hidden:[]})};
         assert.match(String(url),/^http:\/\/127\.0\.0\.1:\d+\/.*caption-hints$/);
         assert.equal(options.redirect,'error');
         assert.equal(options.credentials,'omit');
@@ -154,7 +165,7 @@ test('native fetch refuses 307 and 308 caption redirects without reaching their 
       };
       assert.deepEqual(await send({type:'caption-hints',requestId:`redirect-${code}`,payload},sender(13)),
         {ok:false,reason:'network'});
-      assert.deepEqual(received.slice(before),[{path:'/source',method:'POST',body:JSON.stringify(payload)}]);
+      assert.deepEqual(received.slice(before),[{path:'/source',method:'POST',body:JSON.stringify({...payload,commonWordCutoff:1500})}]);
     }
     assert.equal(received.some(item => item.path === '/target'),false);
   } finally {
@@ -240,31 +251,127 @@ test('malformed JSON is an invalid response rather than a network failure', asyn
   assert.deepEqual(await send({type:'caption-hints',requestId:'json',payload},sender(1)),{ok:false,reason:'invalid-response'});
 });
 
-test('preferences only write explicit entry IDs to local storage and never fetch', async () => {
-  let values={};
-  chrome.storage={local:{ get:async key => ({[key]:values[key]}),set:async next => {values={...values,...next};} }};
-  globalThis.fetch=()=>assert.fail('preference action must not reach the server');
+test('preferences use explicit localhost actions, no browser-local durable storage, and strict sender boundaries', async () => {
+  const before=preferenceCalls.length; globalThis.fetch=async(_url,_options)=>({ok:true,json:async()=>prefState});
   const entryId=source.lexiconEntryId;
-  assert.deepEqual(await send({type:'local-preferences',action:'suppress',entryId,lexiconVersion:1},sender(1)),{ok:true,entryKeys:[`${entryId}@1`]});
-  assert.deepEqual(values,{'lexiflow.suppressed-entries-v2':[`${entryId}@1`]});
-  assert.deepEqual(await send({type:'local-preferences',action:'read'},sender(2)),{ok:true,entryKeys:[`${entryId}@1`]});
-  assert.deepEqual(await send({type:'local-preferences',action:'restore-all'},sender(1)),{ok:true,entryKeys:[]});
-  assert.deepEqual(await send({type:'local-preferences',action:'suppress',entryId,lexiconVersion:1},{}),{ok:false,reason:'invalid-request'});
+  const expected={commonWordCutoff:1500,hidden:[{entryId,lemma:'reliable',gloss:'可靠的'}]};
+  prefState=expected;
+  assert.deepEqual(await send({type:'local-preferences',action:'hide',entryId,lemma:'reliable',gloss:'可靠的'},sender(1)),{ok:true,...expected});
+  assert.equal(preferenceCalls[before].url.endsWith('/preferences'),true); assert.equal(preferenceCalls[before].options.redirect,'error'); assert.equal(preferenceCalls[before].options.credentials,'omit');
+  assert.deepEqual(JSON.parse(preferenceCalls[before].options.body),{action:'hide',entryId,lemma:'reliable',gloss:'可靠的'});
+  assert.deepEqual(await send({type:'local-preferences',action:'read'},sender(2)),{ok:true,...expected});
+  assert.deepEqual(await send({type:'local-preferences',action:'hide',entryId,lemma:'reliable',gloss:'可靠的'},{}),{ok:false,reason:'invalid-request'});
+  assert.equal(chrome.storage,undefined);
 });
 
-test('popup identity can read and restore all but cannot suppress; sender identity is exact', async () => {
-  let values = { 'lexiflow.suppressed-entries-v2': [`${source.lexiconEntryId}@1`] };
-  chrome.storage={local:{ get:async key => ({[key]:values[key]}),set:async next => {values={...values,...next};} }};
+test('popup reads only cutoff and hidden count; management page alone may update cutoff', async () => {
+  prefState={commonWordCutoff:1500,hidden:[]}; globalThis.fetch=async url=>({ok:true,json:async()=>url.endsWith("/recent-hints")?{items:[]}:prefState});
   const popup = { id:'extension-id', url:'chrome-extension://extension-id/popup.html' };
-  assert.deepEqual(await send({type:'local-preferences',action:'read'},popup),{ok:true,entryKeys:[`${source.lexiconEntryId}@1`]});
-  assert.deepEqual(await send({type:'local-preferences',action:'restore-all'},popup),{ok:true,entryKeys:[]});
-  assert.deepEqual(await send({type:'local-preferences',action:'suppress',entryId:source.lexiconEntryId,lexiconVersion:1},popup),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-preferences',action:'read'},popup),{ok:true,commonWordCutoff:1500,hiddenCount:0});
+  assert.deepEqual(await send({type:'local-preferences',action:'setCutoff',commonWordCutoff:2000},popup),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-preferences',action:'hide',entryId:source.lexiconEntryId,lemma:'reliable',gloss:'可靠的'},popup),{ok:false,reason:'invalid-request'});
+  const manage={id:'extension-id',url:'chrome-extension://extension-id/manage.html',tab:{id:31},frameId:0};
+  assert.deepEqual(await send({type:'local-recent'},manage),{ok:true,items:[]});
+  assert.deepEqual(await send({type:'local-preferences',action:'read'},manage),{ok:true,...prefState});
+  assert.deepEqual(await send({type:'local-preferences',action:'setCutoff',commonWordCutoff:2000},manage),{ok:true,...prefState});
+  assert.deepEqual(await send({type:'local-lexicon',query:'',sort:'frequency',page:1,pageSize:20},manage),{ok:false,reason:'unavailable'});
+  assert.deepEqual(await send({type:'local-recent'},popup),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-recent'},{...manage,id:'other-extension'}),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-recent'},{...manage,url:'https://www.youtube.com/manage.html'}),{ok:false,reason:'invalid-request'});
   assert.deepEqual(await send({type:'local-preferences',action:'read'}, { ...popup, tab:{id:3} }),{ok:false,reason:'invalid-request'});
   assert.deepEqual(await send({type:'local-preferences',action:'read'}, { ...popup, url:'chrome-extension://extension-id/not-popup.html' }),{ok:false,reason:'invalid-request'});
   assert.deepEqual(await send({type:'local-preferences',action:'restore-all'}, { ...popup, id:'external-id' }),{ok:false,reason:'invalid-request'});
   assert.deepEqual(await send({type:'local-preferences',action:'read'}, { ...popup, tab:{id:3} }),{ok:false,reason:'invalid-request'});
   assert.deepEqual(await send({type:'local-preferences',action:'read'}, {}),{ok:false,reason:'invalid-request'});
   assert.deepEqual(await send({type:'local-preferences',action:'read'}, {id:'external-id',tab:{id:9}}),{ok:false,reason:'invalid-request'});
+});
+
+test('a confirmed preference change refreshes top-level content without reading tab URLs', async () => {
+  const {query,sendMessage}=chrome.tabs;
+  const sent=[];
+  chrome.tabs.query=async()=>[{id:71},{id:72},{}];
+  chrome.tabs.sendMessage=async(...args)=>{sent.push(args); if(args[0]===72) throw new Error('no content script');};
+  try {
+    const manage={id:'extension-id',url:'chrome-extension://extension-id/manage.html',tab:{id:73},frameId:0};
+    const reply=await send({type:'local-preferences',action:'setCutoff',commonWordCutoff:1500},manage);
+    assert.equal(reply.ok,true);
+    assert.deepEqual(sent,[71,72].map(id=>[id,{type:'preferences-changed'},{frameId:0}]));
+  } finally { chrome.tabs.query=query; chrome.tabs.sendMessage=sendMessage; }
+});
+
+test('recent hints send only actual entry IDs to loopback and return only the seven-day totals', async () => {
+  const entryId=source.lexiconEntryId;
+  const item={entryId,lemma:'reliable',gloss:'可靠的',count:5};
+  const manage={id:'extension-id',url:'chrome-extension://extension-id/manage.html'};
+  const requests=[];
+  globalThis.fetch=async(url,options)=>{
+    requests.push({url,options});
+    const body=JSON.parse(options.body);
+    return body.action==='record'?new Response(null,{status:204}):Response.json({items:[{...item,daily:[2,3]}],retentionDays:8});
+  };
+  const present={type:'local-presented',entryIds:[entryId,entryId]};
+  assert.deepEqual(await send(present,sender(31)),{ok:true});
+  assert.deepEqual(await send({type:'local-recent'},manage),{ok:true,items:[item]});
+  for (const request of [
+    {...present,caption:'synthetic text'},
+    {...present,entryIds:[]},
+    {...present,entryIds:['-1']},
+    {...present,entryIds:Array(129).fill(entryId)}
+  ]) assert.deepEqual(await send(request,sender(31)),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send(present,manage),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send(present,{...sender(31),frameId:1}),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-recent',days:8},manage),{ok:false,reason:'invalid-request'});
+  assert.equal(requests.length,2);
+  assert.deepEqual(requests.map(({options})=>JSON.parse(options.body)),[{action:'record',entryIds:[entryId,entryId]},{action:'read'}]);
+  for (const {url,options} of requests) {
+    assert.match(url,/^http:\/\/127\.0\.0\.1:[0-9]+\/api\/v1\/recent-hints$/);
+    assert.equal(options.method,'POST');
+    assert.equal(options.cache,'no-store');
+    assert.equal(options.redirect,'error');
+    assert.equal(options.credentials,'omit');
+    assert.equal(options.referrerPolicy,'no-referrer');
+  }
+});
+
+test('unavailable or malformed recent-hint responses cannot masquerade as an empty ranking', async () => {
+  const manage={id:'extension-id',url:'chrome-extension://extension-id/manage.html'};
+  let calls=0;
+  globalThis.fetch=async()=>{calls++;throw new Error('synthetic disconnect');};
+  assert.deepEqual(await send({type:'local-presented',entryIds:[source.lexiconEntryId]},sender(31)),{ok:false,reason:'network'});
+  assert.equal(calls,1,'a failed record is not replayed');
+  globalThis.fetch=async()=>new Response(null,{status:503});
+  assert.deepEqual(await send({type:'local-recent'},manage),{ok:false,reason:'backend_unavailable'});
+  globalThis.fetch=async()=>Response.json({items:[{entryId:source.lexiconEntryId,lemma:'reliable',gloss:'可靠的',count:0}]});
+  assert.deepEqual(await send({type:'local-recent'},manage),{ok:false,reason:'invalid-response'});
+});
+
+test('lexicon browsing is server-paged and exact management sender only', async () => {
+  let fetched;
+  globalThis.fetch=async(url,options)=>{fetched={url:String(url),options}; return {ok:true,json:async()=>({items:[{entryId:'7',lemma:'reliable',gloss:'可靠的',frequencyRank:321,hintState:'eligible'}],total:31,page:2,pageSize:20})};};
+  const manage={id:'extension-id',url:'chrome-extension://extension-id/manage.html'};
+  assert.deepEqual(await send({type:'local-lexicon',query:'reliable',sort:'alphabet',page:2,pageSize:20},manage),
+    {ok:true,items:[{entryId:'7',lemma:'reliable',gloss:'可靠的',frequencyRank:321,hintState:'eligible'}],total:31,page:2,pageSize:20});
+  assert.match(fetched.url,/\/api\/v1\/lexicon\?/); assert.match(fetched.url,/query=reliable/); assert.match(fetched.url,/sort=alphabet/); assert.match(fetched.url,/page=2/);
+  assert.equal(fetched.options.method,'GET'); assert.equal(fetched.options.cache,'no-store');
+  assert.deepEqual(await send({type:'local-lexicon',query:'x',sort:'frequency',page:0,pageSize:20},manage),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-lexicon',query:'',sort:'frequency',page:1,pageSize:20},sender(3)),{ok:false,reason:'invalid-request'});
+});
+
+test('caption requests coalesce preference reads and apply an explicitly updated cutoff', async () => {
+  prefState={commonWordCutoff:1500,hidden:[]}; const popup={id:'extension-id',url:'chrome-extension://extension-id/popup.html'};
+  await send({type:'local-preferences',action:'read'},popup);
+  const reads=preferenceCalls.filter(call=>JSON.parse(call.options.body).action==='read').length;
+  const posts=[];
+  globalThis.fetch=async(url,options)=>{ posts.push(JSON.parse(options.body)); return {ok:true,json:async()=>({processedKeys:['key1'],hints:[]})}; };
+  await send({type:'caption-hints',requestId:'cutoff-a',payload},sender(81));
+  await send({type:'caption-hints',requestId:'cutoff-b',payload},sender(82));
+  assert.equal(preferenceCalls.filter(call=>JSON.parse(call.options.body).action==='read').length,reads);
+  assert.deepEqual(posts.map(item=>item.commonWordCutoff),[1500,1500]);
+  const manage={id:'extension-id',url:'chrome-extension://extension-id/manage.html'};
+  assert.deepEqual(await send({type:'local-preferences',action:'setCutoff',commonWordCutoff:2000},manage),{ok:true,commonWordCutoff:2000,hidden:[]});
+  await send({type:'caption-hints',requestId:'cutoff-c',payload},sender(83));
+  assert.equal(posts[2].commonWordCutoff,2000);
+  assert.equal(preferenceCalls.filter(call=>JSON.parse(call.options.body).action==='read').length,reads);
 });
 
 

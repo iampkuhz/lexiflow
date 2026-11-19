@@ -1,4 +1,3 @@
-import { suppressionKey } from "./preferences";
 import { snapshotText, snapshotSegments, type Hint } from "./protocol";
 import type { StreamView } from "./stream";
 import type { Diagnostics } from "./diagnostics";
@@ -19,10 +18,10 @@ export function visibleSegments(player: HTMLElement): HTMLElement[] {
       return box.bottom > bounds.top + 1 && box.top < bounds.bottom - 1;
     });
 }
-export type PreferenceView = { ready: boolean; entryKeys: Set<string>; message: string };
+export type PreferenceView = { ready: boolean; hiddenIds: Set<string>; message: string };
 export type PresentedLine = { subtitleKey: string; segmentKeys: string[]; positionMs: number | null; text: string };
 export type RenderedLine = PresentedLine & { start: number; end: number; caption: string; hints: Array<{ startOffset: number; endOffset: number; chineseGloss: string }> };
-export type OverlayPresentation = { shown: number; lines: RenderedLine[] };
+export type OverlayPresentation = { shown: number; lines: RenderedLine[]; hintEntryIds: string[] };
 
 /** Rendering owns no network or storage; only explicit button activation changes preferences. */
 export class BilingualOverlay {
@@ -35,22 +34,24 @@ export class BilingualOverlay {
   private rollTimer?: ReturnType<typeof setTimeout>;
   private player?: HTMLElement;
   private shownHintKeys = new Set<string>();
+  private reportedPresentationHints = new Set<string>();
   private presented = new Map<string, PresentedLine>();
-  private lastPresentation: OverlayPresentation = { shown: 0, lines: [] };
+  private lastPresentation: OverlayPresentation = { shown: 0, lines: [], hintEntryIds: [] };
 
-  constructor(private readonly suppress: (entryId: string, lexiconVersion: number) => void,
+  constructor(private readonly suppress: (entryId: string, lemma: string, gloss: string) => void,
     private readonly onPresentationExit: (line: PresentedLine) => void = () => undefined) {}
 
   render(view: StreamView, preferences: PreferenceView, source?: CaptionSource): number {
     const host = this.ensure();
-    if (!host || !this.line) { this.lastPresentation = { shown: 0, lines: [] }; return 0; }
+    if (!host || !this.line) { this.lastPresentation = { shown: 0, lines: [], hintEntryIds: [] }; return 0; }
     if (!source) {
+      this.reportedPresentationHints.clear();
       host.dataset.lexiflowState = "idle";
       if (this.status) this.status.textContent = "";
       this.finishRoll(false);
       if (this.line.childNodes.length) this.line.replaceChildren();
       if (this.player?.classList.contains("lexiflow-inline-active")) this.player.classList.remove("lexiflow-inline-active");
-      this.lastPresentation = { shown: 0, lines: [] }; return 0;
+      this.lastPresentation = { shown: 0, lines: [], hintEntryIds: [] }; return 0;
     }
     const existing = new Map(Array.from(this.line.querySelectorAll<HTMLElement>("[data-node-key]"))
       .map(node => [node.dataset.nodeKey!, node]));
@@ -78,8 +79,12 @@ export class BilingualOverlay {
       return false;
     };
     const hints = preferences.ready && view.event && source.caption === snapshotText(view.event.request.currentSnapshot)
-      ? view.hints?.filter(hint => !preferences.entryKeys.has(suppressionKey(hint.lexiconEntryId, hint.lexiconVersion)) &&
+      ? view.hints?.filter(hint => !preferences.hiddenIds.has(hint.lexiconEntryId) &&
         (!touchesFrozen(hint) || this.shownHintKeys.has(hintKey(hint)))) ?? [] : [];
+    const actualHintKeys = new Set(hints.map(hintKey));
+    const newlyPresentedHints = hints.filter(hint => !this.reportedPresentationHints.has(hintKey(hint)));
+    for (const key of [...this.reportedPresentationHints]) if (!actualHintKeys.has(key)) this.reportedPresentationHints.delete(key);
+    for (const hint of newlyPresentedHints) this.reportedPresentationHints.add(hintKey(hint));
     host.dataset.lexiflowState = view.state === "ready" && !hints.length ? "no-pending" : view.state;
     if (this.status) {
       this.status.textContent = view.runtimeFailure === "initializing" ? "服务正在初始化，英文字幕保持显示。"
@@ -122,9 +127,9 @@ export class BilingualOverlay {
       if (!button) {
         button = document.createElement("button"); button.dataset.nodeKey = key; button.className = "gloss";
         button.textContent = `(${hint.chineseGloss})`;
-        button.title = `不再提示「${term}」及该词条词形，仅本机、当前词库版本`;
-        button.setAttribute("aria-label", `${term}：${hint.chineseGloss}。不再提示该词条，仅本机、当前词库版本`);
-        button.addEventListener("click", event => { event.stopPropagation(); this.suppress(hint.lexiconEntryId, hint.lexiconVersion); });
+        button.title = `不再提示「${hint.lemma}」及该词条词形，仅本机`;
+        button.setAttribute("aria-label", `${term}：${hint.chineseGloss}。不再提示词条 ${hint.lemma}，仅本机`);
+        button.addEventListener("click", event => { event.stopPropagation(); this.suppress(hint.lexiconEntryId, hint.lemma, hint.chineseGloss); });
       }
       const row = boundaries.findIndex((value, index) => index < desired.length && hint.startOffset >= value && hint.startOffset < boundaries[index + 1]);
       desired[Math.max(0, row)].push(button); offset = hint.endOffset;
@@ -165,11 +170,11 @@ export class BilingualOverlay {
     for (const row of Array.from(this.outgoing?.querySelectorAll<HTMLElement>(".caption-row") ?? [])) addRow(row);
     for (const line of lines) this.presented.set(line.subtitleKey, line);
     while (this.presented.size > 64) this.presented.delete(this.presented.keys().next().value!);
-    this.lastPresentation = { shown: hints.length, lines };
+    this.lastPresentation = { shown: hints.length, lines, hintEntryIds: newlyPresentedHints.map(hint => hint.lexiconEntryId) };
     return hints.length;
   }
 
-  takePresentation(): OverlayPresentation { const receipt = this.lastPresentation; this.lastPresentation = { shown: 0, lines: [] }; return receipt; }
+  takePresentation(): OverlayPresentation { const receipt = this.lastPresentation; this.lastPresentation = { shown: 0, lines: [], hintEntryIds: [] }; return receipt; }
 
   updateDiagnostics(value: ReturnType<Diagnostics["snapshot"]>): void {
     if (this.host) this.host.dataset.lexiflowDiagnostics = JSON.stringify(value);

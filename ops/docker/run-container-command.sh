@@ -13,6 +13,12 @@ case "$mode" in
     export SPRING_DATASOURCE_URL='jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro'
     exec java -Xms64m -Xmx768m -Dlexiflow.runtime.mode=formal -Dlexiflow.caption-debug.enabled=true -Dlexiflow.segment-analysis.enabled="$analysis" -Dlexiflow.segment-analysis.path=/tmp/lexiflow-private/caption-segments.jsonl -Dserver.address=0.0.0.0 -Dserver.port=8080 -jar /app/lexiflow-api.jar
     ;;
+  init-preferences)
+    [ "$#" -eq 0 ] || fail
+    [ -d /var/lib/lexiflow/preferences ] && [ -w /var/lib/lexiflow/preferences ] || fail
+    umask 077
+    exec java -Xms32m -Xmx128m -jar /app/lexiflow-api.jar --init-preferences jdbc:sqlite:/var/lib/lexiflow/preferences/preferences.db
+    ;;
   initialize)
     [ "$#" -eq 0 ] || fail
     [ -r /dataset/dataset.zip ] && [ -w /var/lib/lexiflow ] || fail

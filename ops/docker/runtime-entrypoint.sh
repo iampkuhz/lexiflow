@@ -2,6 +2,9 @@
 set -Eeuo pipefail
 readonly ROOT=/var/lib/lexiflow
 readonly DB=/var/lib/lexiflow/lexicon.db
+readonly PREFERENCES_DIR=/var/lib/lexiflow/preferences
+readonly PREFERENCES_DB=/var/lib/lexiflow/preferences/preferences.db
+readonly PREFERENCES_MOUNT_INFO=/proc/self/mountinfo
 readonly RUN=/run/lexiflow
 readonly IDENTITY=/app/release-identity.env
 readonly IDENTITY_JSON=/app/release-identity.json
@@ -174,6 +177,20 @@ stop_api() {
   API_PID=''; return "$rc"
 }
 runtime_start() {
+  [[ -d "$PREFERENCES_DIR" && ! -L "$PREFERENCES_DIR" && -O "$PREFERENCES_DIR" && -w "$PREFERENCES_DIR" ]] || fail preferences-volume-invalid
+  awk -v target="$PREFERENCES_DIR" '$5 == target { found=1 } END { exit !found }' "$PREFERENCES_MOUNT_INFO" 2>/dev/null || fail preferences-volume-not-mounted
+  local preference_item; local -a preference_entries=()
+  shopt -s nullglob dotglob; preference_entries=("$PREFERENCES_DIR"/*); shopt -u nullglob dotglob
+  for preference_item in ${preference_entries[@]+"${preference_entries[@]}"}; do
+    case "${preference_item##*/}" in preferences.db|preferences.db-journal) [[ -f "$preference_item" && ! -L "$preference_item" && -O "$preference_item" ]] || fail preferences-file-invalid;; *) fail preferences-volume-unknown-content;; esac
+  done
+  if [[ ! -e "$PREFERENCES_DB" ]]; then
+    umask 077
+    timeout --kill-after=1s 30s java -Xms32m -Xmx128m -Djava.io.tmpdir=/tmp -jar "$JAR" --init-preferences "jdbc:sqlite:$PREFERENCES_DB" >/dev/null 2>&1 || fail preferences-initialize-failed
+  fi
+  [[ -f "$PREFERENCES_DB" && ! -L "$PREFERENCES_DB" && -O "$PREFERENCES_DB" ]] || fail preferences-database-unavailable
+  chmod 0600 "$PREFERENCES_DB" || fail preferences-database-permissions
+  export LEXIFLOW_PREFERENCES_JDBC_URL="jdbc:sqlite:$PREFERENCES_DB"
   local dataset_hash item; local -a entries=()
   [[ "$(id -u)" == 10001 ]] || fail runtime-user-invalid
   [[ -f "$JAR" && ! -L "$JAR" && -f "$DATASET" && ! -L "$DATASET" ]] || fail runtime-input-invalid
@@ -187,12 +204,20 @@ runtime_start() {
   else
     # The named volume is expected to be empty. Never adopt existing unknown files.
     shopt -s nullglob dotglob; entries=("$ROOT"/*); shopt -u nullglob dotglob
-    ((${#entries[@]} == 0)) || fail volume-unknown-content
+    if ((${#entries[@]} != 0)); then
+      ((${#entries[@]} == 1)) && [[ "${entries[0]##*/}" == preferences && -d "$PREFERENCES_DIR" && ! -L "$PREFERENCES_DIR" ]] || fail volume-unknown-content
+    fi
     printf 'lexiflow-runtime\n' > "$ROOT/.lexiflow-owner"; chmod 0600 "$ROOT/.lexiflow-owner"
   fi
   shopt -s nullglob dotglob; entries=("$ROOT"/*); shopt -u nullglob dotglob
   for item in ${entries[@]+"${entries[@]}"}; do
     case "${item##*/}" in
+      preferences)
+        [[ -d "$PREFERENCES_DIR" && ! -L "$PREFERENCES_DIR" && -O "$PREFERENCES_DIR" ]] || fail preferences-volume-invalid
+        shopt -s nullglob dotglob; preference_entries=("$PREFERENCES_DIR"/*); shopt -u nullglob dotglob
+        for preference_item in ${preference_entries[@]+"${preference_entries[@]}"}; do
+          case "${preference_item##*/}" in preferences.db|preferences.db-journal) [[ -f "$preference_item" && ! -L "$preference_item" && -O "$preference_item" ]] || fail preferences-file-invalid;; *) fail preferences-volume-unknown-content;; esac
+        done;;
       .lexiflow-owner|.lexiflow-ready|.lexiflow-ready.pending|.lexiflow-initializing|.lexiflow-initializing.pending|lexicon.db|lexicon.db-journal) [[ ! -L "$item" ]] || fail volume-path-invalid;;
       *) fail volume-unknown-content;;
     esac
@@ -246,6 +271,11 @@ runtime_start() {
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   case "${1:-}" in
     health) [[ "$#" -eq 1 ]] || exit 64; runtime_health;;
+    init-preferences)
+      [[ "$#" -eq 1 && -d "$PREFERENCES_DIR" && ! -L "$PREFERENCES_DIR" && -w "$PREFERENCES_DIR" ]] || exit 64
+      awk -v target="$PREFERENCES_DIR" '$5 == target { found=1 } END { exit !found }' "$PREFERENCES_MOUNT_INFO" 2>/dev/null || exit 64
+      umask 077
+      exec java -Xms32m -Xmx128m -jar "$JAR" --init-preferences "jdbc:sqlite:$PREFERENCES_DB";;
     run|'') [[ "$#" -le 1 ]] || exit 64; runtime_start;;
     *) exit 64;;
   esac

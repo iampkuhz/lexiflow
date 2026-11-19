@@ -1,10 +1,9 @@
 {
   "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwmlAr43F5wKUCi4o/RTpOBmVVgRw5TAkkVkumyKJqmzYoofxrilHD6eryQddgcctJTaNW6U0OJ80Z+u+gJTs4PB4DgfAm38XhIXSnU+oz63nM6MaG0ksShj3DTmuIpYsT2r/OLmnjRrcIYAXYm+s12yLtSJSm4xctq2lGDIOZfUDtIPM4IWhRryVeEZ+CthSIl1fUlwzHFk4LpmpqX6976O95Dt/uM4kAwnbnUB8ByaEH+MS4ePYyLzoorrKD69vJU8yy1hL4zfcVNotNkinLZmxbtOH3ToqyBB11+kfFN/EmAhJefgwRGYERzoF4ve38Ukq0EqwuzAH9aEDcODjhwIDAQAB",
   "name": "LexiFlow Caption Hints",
   "description": "Keep YouTube English captions visible and add bounded Chinese hints.",
-  "permissions": [
-    "storage"
-  ],
+  "permissions": [],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -13,6 +12,7 @@
     },
     "default_title": "LexiFlow \u5b57\u5e55\u589e\u5f3a"
   },
+  "options_page": "manage.html",
   "icons": {
     "16": "assets/icon-16.png",
     "32": "assets/icon-32.png",

@@ -11,6 +11,9 @@ spring:
   threads:
     virtual:
       enabled: true
+lexiflow:
+  preferences:
+    jdbc-url: ${LEXIFLOW_PREFERENCES_JDBC_URL:}
 logging:
   level:
     com.zaxxer.hikari: OFF

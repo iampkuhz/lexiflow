@@ -105,7 +105,7 @@ public final class LexiconImportService {
                                 LexiconImportPlan.prepareNext(
                                     row,
                                     version,
-                                    metadata.sourceDigest(),
+                                    metadata.digestFor(row.dictionary().sourceId()),
                                     metadata.acquiredAt(),
                                     validator);
                             try {

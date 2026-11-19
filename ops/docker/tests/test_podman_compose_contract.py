@@ -20,16 +20,21 @@ class PodmanComposeContractTest(unittest.TestCase):
         services = self.config["services"]
         self.assertEqual(set(services), {"api"})
         self.assertEqual(services["api"]["ports"], ["127.0.0.1:18081:8080"])
-        self.assertEqual(
-            services["api"]["volumes"],
-            [
-                "${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro"
-            ],
-        )
+        self.assertEqual(services["api"]["volumes"], [
+            "${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro",
+            "lexiflow-preferences:/var/lib/lexiflow/preferences",
+        ])
+        self.assertEqual(services["api"]["environment"], {
+            "SPRING_DATASOURCE_URL": "jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro",
+            "LEXIFLOW_PREFERENCES_JDBC_URL": "jdbc:sqlite:/var/lib/lexiflow/preferences/preferences.db",
+        })
         self.assertTrue(services["api"]["read_only"])
         self.assertEqual(services["api"]["cap_drop"], ["ALL"])
         self.assertEqual(services["api"]["security_opt"], ["no-new-privileges:true"])
-        self.assertNotIn("volumes", self.config)
+        prefs = self.config["volumes"]["lexiflow-preferences"]
+        self.assertEqual(prefs["name"], "lexiflow-${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}_preferences")
+        self.assertEqual(set(prefs["labels"]), {"lexiflow.installation"})
+        self.assertEqual(set(self.config["volumes"]), {"lexiflow-preferences"})
         for service in services.values():
             self.assertNotIn("build", service)
             self.assertEqual(service["pull_policy"], "never")
@@ -51,7 +56,8 @@ class PodmanComposeContractTest(unittest.TestCase):
         self.assertEqual(
             self.config["services"]["api"]["environment"],
             {
-                "SPRING_DATASOURCE_URL": "jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro"
+                "SPRING_DATASOURCE_URL": "jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro",
+                "LEXIFLOW_PREFERENCES_JDBC_URL": "jdbc:sqlite:/var/lib/lexiflow/preferences/preferences.db",
             },
         )
         self.assertNotIn("depends_on", self.config["services"]["api"])

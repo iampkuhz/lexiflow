@@ -217,3 +217,38 @@ test('natural same-track line replacement exposes finalized keys but clear/reset
  assert.ok(t.views.at(-1).finalizedKeys.includes('old-line'));
  t.coordinator.clear(3);assert.deepEqual(t.views.at(-1).finalizedKeys ?? [],[]);
 });
+
+for (const [prefix,suffix,word,start,end,gloss] of [
+ ['knob of ','butter','knob',0,4,'一小块黄油'],
+ ['a splash ','of','splash',2,8,'少量'],
+ ['splash ','of','splash',0,6,'少量'],
+ ['awful ','lot','awful',0,5,'大量'],
+]) test(`complete ${prefix+suffix} replaces its displayed word only after completion`,async()=>{
+ const t=setup();
+ const old={...keyedHint('old',start,end),lexiconEntryId:'11',lemma:word,chineseGloss:'单词义'};
+ t.coordinator.submit(event(1,segment('old',prefix)));t.scheduler.run();await finish(t.calls[0],[old]);
+ assert.deepEqual(t.views.at(-1).hints.map(h=>h.lexiconEntryId),['11']);
+ t.coordinator.submit(event(2,segment('old',prefix,false),segment('new',suffix)));t.scheduler.run();
+ assert.deepEqual(t.calls[1].event.request.currentSnapshot.captions[0].segments.map(s=>s.append),[false,true]);
+ assert.deepEqual(t.views.at(-1).hints.map(h=>h.lexiconEntryId),['11'],'in-flight completion must not erase displayed prefix');
+ const phrase={...keyedHint('old',0,suffix.length,'new'),lexiconEntryId:'22',lemma:prefix+suffix,chineseGloss:gloss};
+ await finish(t.calls[1],[phrase]);
+ assert.deepEqual(t.views.at(-1).hints.map(h=>[h.lexiconEntryId,h.lemma,h.chineseGloss]),[['22',prefix+suffix,gloss]]);
+ assert.equal(t.views.at(-1).hints[0].startOffset,0);assert.equal(t.views.at(-1).hints[0].endOffset,prefix.length+suffix.length);
+ t.coordinator.submit(event(3,segment('old',prefix,false),segment('new',suffix,false)));t.scheduler.run();
+ assert.equal(t.calls.length,2,'repaint is not a new presentation request');
+ t.coordinator.clear(4);t.coordinator.submit(event(5,segment('again',word)));t.scheduler.run();
+ await finish(t.calls[2],[{...old,startKey:'again',endKey:'again',startOffset:0,endOffset:word.length}]);
+ assert.deepEqual(t.views.at(-1).hints.map(h=>h.lexiconEntryId),['11'],'ordinary standalone word survives replay/source boundary');
+});
+
+test('later phrases cannot replace a crossing word or an already displayed phrase',async()=>{
+ for (const [oldLemma,oldEnd] of [['a knob',6],['word',8]]) {
+  const t=setup();t.coordinator.submit(event(1,segment('old','a knob ')));t.scheduler.run();
+  // First case is a prior phrase; second crosses the later candidate start.
+  const old={...keyedHint('old',0,oldEnd===8?6:oldEnd),lexiconEntryId:'11',lemma:oldLemma};
+  await finish(t.calls[0],[old]);t.coordinator.submit(event(2,segment('old','a knob ',false),segment('new','of butter')));t.scheduler.run();
+  await finish(t.calls[1],[{...keyedHint('old',2,9,'new'),lexiconEntryId:'22',lemma:'knob of butter'}]);
+  assert.deepEqual(t.views.at(-1).hints.map(h=>h.lexiconEntryId),['11']);
+ }
+});

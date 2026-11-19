@@ -41,7 +41,7 @@ public final class LexiconRuntime implements LexiconCatalog {
 
   private final LexiconReadRepository repository;
   private CachedLexiconQueryService cached;
-  private final LexiconCatalog demo;
+  private final BuiltinLexiconCatalog demo;
   private final String mode;
   private final StructuredEventLogger events;
   private State state;
@@ -142,6 +142,21 @@ public final class LexiconRuntime implements LexiconCatalog {
    */
   public synchronized State state() {
     return state;
+  }
+
+  /**
+   * Resolves display metadata from published data, or synthetic demo data in explicit demo mode.
+   *
+   * @param ids 含义：待查的稳定词条身份。取值范围：非 null 正 long 集合。
+   * @return 可展示词条；词库不可用时抛出就绪异常。
+   */
+  public List<io.lexiflow.lexicon.domain.model.LexiconBrowseEntry> displayableByIds(
+      java.util.Collection<Long> ids) {
+    if (demo != null) return demo.displayableByIds(ids);
+    var current = state();
+    if (repository == null || !current.ready())
+      throw new LexiconNotReadyException(current.reason());
+    return repository.findDisplayableByIds(ids);
   }
 
   /**

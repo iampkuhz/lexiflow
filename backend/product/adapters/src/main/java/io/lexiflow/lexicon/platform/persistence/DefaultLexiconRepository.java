@@ -7,9 +7,12 @@ import io.lexiflow.lexicon.application.importing.policy.HintPreparation;
 import io.lexiflow.lexicon.application.port.InvalidPublishedLexiconException;
 import io.lexiflow.lexicon.application.port.LexiconPublicationRepository;
 import io.lexiflow.lexicon.application.port.LexiconRepository;
+import io.lexiflow.lexicon.domain.model.LexiconBrowseEntry;
+import io.lexiflow.lexicon.domain.model.LexiconBrowsePage;
 import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
+import io.lexiflow.lexicon.domain.model.PublishedHintState;
 import io.lexiflow.lexicon.domain.port.LexiconIdentity;
 import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
 import java.io.IOException;
@@ -104,13 +107,94 @@ final class DefaultLexiconRepository implements LexiconRepository {
     var args = new ArrayList<Object>(unique);
     args.add(version);
     return jdbc.query(
-        "SELECT l.entry_id, l.normalized_form, e.lemma, e.gloss, e.priority FROM lexicon_lookup l "
-            + "JOIN lexicon_entry e USING (entry_id) WHERE l.normalized_form IN ("
+        "SELECT l.entry_id, l.normalized_form, e.lemma, e.gloss, e.priority, e.frequency_rank FROM"
+            + " lexicon_lookup l JOIN lexicon_entry e USING (entry_id) WHERE l.normalized_form IN ("
             + placeholders
             + ") AND EXISTS (SELECT 1 FROM lexicon_dataset d "
             + "WHERE d.dataset_id = 1 AND d.lexicon_version = ?)",
         (result, row) -> candidate(result, version),
         args.toArray());
+  }
+
+  @Override
+  public LexiconBrowsePage browse(String query, boolean frequencySort, int page, int pageSize) {
+    if (page < 1 || pageSize < 1 || pageSize > 100)
+      throw new IllegalArgumentException("page is invalid");
+    int offset = Math.multiplyExact(page - 1, pageSize);
+    String filter =
+        query == null || query.isEmpty()
+            ? ""
+            : " WHERE e.entry_id IN (SELECT entry_id FROM lexicon_lookup WHERE normalized_form ="
+                + " ?)";
+    Long totalValue =
+        filter.isEmpty()
+            ? jdbc.queryForObject(
+                "SELECT COUNT(*) FROM lexicon_entry e WHERE EXISTS (SELECT 1 FROM lexicon_dataset d"
+                    + " WHERE d.dataset_id=1) ",
+                Long.class)
+            : jdbc.queryForObject(
+                "SELECT COUNT(*) FROM lexicon_entry e WHERE EXISTS (SELECT 1 FROM lexicon_dataset d"
+                    + " WHERE d.dataset_id=1) AND e.entry_id IN (SELECT entry_id FROM"
+                    + " lexicon_lookup WHERE normalized_form = ?)",
+                Long.class,
+                query);
+    String order =
+        frequencySort
+            ? "e.frequency_rank ASC NULLS LAST,e.lemma COLLATE BINARY,e.entry_id"
+            : "e.lemma COLLATE BINARY,e.entry_id";
+    String sql =
+        "SELECT e.entry_id,e.lemma,e.gloss,e.frequency_rank FROM lexicon_entry e WHERE EXISTS"
+            + " (SELECT 1 FROM lexicon_dataset d WHERE d.dataset_id=1)"
+            + (filter.isEmpty()
+                ? ""
+                : " AND e.entry_id IN (SELECT entry_id FROM lexicon_lookup WHERE normalized_form ="
+                    + " ?)")
+            + " ORDER BY "
+            + order
+            + " LIMIT ? OFFSET ?";
+    var args = new ArrayList<Object>();
+    if (!filter.isEmpty()) args.add(query);
+    args.add(pageSize);
+    args.add(offset);
+    var items =
+        jdbc.query(
+            sql,
+            (result, row) -> {
+              String gloss = result.getString("gloss");
+              return new LexiconBrowseEntry(
+                  result.getLong("entry_id"),
+                  result.getString("lemma"),
+                  gloss,
+                  nullableLong(result, "frequency_rank"),
+                  gloss == null ? PublishedHintState.BLOCKED : PublishedHintState.ELIGIBLE);
+            },
+            args.toArray());
+    return new LexiconBrowsePage(items, totalValue == null ? 0 : totalValue, page, pageSize);
+  }
+
+  @Override
+  public List<LexiconBrowseEntry> findDisplayableByIds(Collection<Long> ids) {
+    if (ids.isEmpty()) return List.of();
+    var unique = List.copyOf(new LinkedHashSet<>(ids));
+    var items = new ArrayList<LexiconBrowseEntry>();
+    for (int start = 0; start < unique.size(); start += BATCH_SIZE) {
+      var batch = unique.subList(start, Math.min(start + BATCH_SIZE, unique.size()));
+      var marks = String.join(",", java.util.Collections.nCopies(batch.size(), "?"));
+      items.addAll(
+          jdbc.query(
+              "SELECT e.entry_id,e.lemma,e.gloss,e.frequency_rank FROM lexicon_entry e WHERE e.gloss IS NOT NULL AND e.entry_id IN ("
+                  + marks
+                  + ") AND EXISTS (SELECT 1 FROM lexicon_dataset d WHERE d.dataset_id=1)",
+              (r, row) ->
+                  new LexiconBrowseEntry(
+                      r.getLong("entry_id"),
+                      r.getString("lemma"),
+                      r.getString("gloss"),
+                      nullableLong(r, "frequency_rank"),
+                      PublishedHintState.ELIGIBLE),
+              batch.toArray()));
+    }
+    return List.copyOf(items);
   }
 
   @Override
@@ -129,17 +213,15 @@ final class DefaultLexiconRepository implements LexiconRepository {
             + "SELECT f.normalized_form,e.priority FROM lexicon_form f "
             + "JOIN lexicon_entry e USING(entry_id) WHERE "
             + glossCondition
-            + " AND e.priority>0 "
-            + "ORDER BY e.priority DESC,f.normalized_form LIMIT ?), "
-            + "top_rows AS (SELECT normalized_form FROM (SELECT normalized_form,priority FROM canonical_rows "
-            + "UNION ALL SELECT normalized_form,priority FROM alias_rows) candidates "
-            + "ORDER BY priority DESC,normalized_form LIMIT ?), "
-            + "selected AS (SELECT DISTINCT normalized_form FROM top_rows) "
-            + "SELECT l.entry_id, l.normalized_form, e.lemma, e.gloss, e.priority FROM selected s JOIN lexicon_lookup l "
-            + "USING (normalized_form) JOIN lexicon_entry e USING (entry_id) "
-            + "WHERE EXISTS (SELECT 1 FROM lexicon_dataset d "
-            + "WHERE d.dataset_id=1 AND d.lexicon_version=?) "
-            + "ORDER BY l.normalized_form, l.entry_id",
+            + " AND e.priority>0 ORDER BY e.priority DESC,f.normalized_form LIMIT ?), top_rows AS"
+            + " (SELECT normalized_form FROM (SELECT normalized_form,priority FROM canonical_rows"
+            + " UNION ALL SELECT normalized_form,priority FROM alias_rows) candidates ORDER BY"
+            + " priority DESC,normalized_form LIMIT ?), selected AS (SELECT DISTINCT"
+            + " normalized_form FROM top_rows) SELECT l.entry_id, l.normalized_form, e.lemma,"
+            + " e.gloss, e.priority, e.frequency_rank FROM selected s JOIN lexicon_lookup l USING"
+            + " (normalized_form) JOIN lexicon_entry e USING (entry_id) WHERE EXISTS (SELECT 1 FROM"
+            + " lexicon_dataset d WHERE d.dataset_id=1 AND d.lexicon_version=?) ORDER BY"
+            + " l.normalized_form, l.entry_id",
         (result, row) -> candidate(result, version),
         limit,
         limit,
@@ -162,7 +244,13 @@ final class DefaultLexiconRepository implements LexiconRepository {
         lemma.contains(" ") ? LexiconEntryKind.PHRASE : LexiconEntryKind.WORD,
         action,
         gloss,
-        result.getInt("priority"));
+        result.getInt("priority"),
+        nullableLong(result, "frequency_rank"));
+  }
+
+  private static Long nullableLong(java.sql.ResultSet result, String column) throws SQLException {
+    long value = result.getLong(column);
+    return result.wasNull() ? null : value;
   }
 
   @Override
@@ -234,11 +322,23 @@ final class DefaultLexiconRepository implements LexiconRepository {
                   metadata.licenseId(),
                   metadata.sourceDigest(),
                   metadata.acquiredAt().toString());
+          for (var extra : metadata.supplementalSources()) {
+            sourceManifest =
+                jdbc.queryForObject(
+                    "SELECT json_insert(?, '$[#]', json_object('source_id', ?, 'license_id', ?, "
+                        + "'source_digest', ?, 'acquired_at', ?))",
+                    String.class,
+                    sourceManifest,
+                    extra.sourceId(),
+                    extra.licenseId(),
+                    extra.sourceDigest(),
+                    metadata.acquiredAt().toString());
+          }
           jdbc.update(
-              "INSERT INTO lexicon_dataset (dataset_id, lexicon_version, source_manifest, "
-                  + "source_row_count, entry_count, lookup_count, preparation_policy, "
-                  + "generation_version,generation_code_version,generation_source_digest,generation_config,generation_inputs,content_sha256) "
-                  + "VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              "INSERT INTO lexicon_dataset (dataset_id, lexicon_version, source_manifest,"
+                  + " source_row_count, entry_count, lookup_count, preparation_policy,"
+                  + " generation_version,generation_code_version,generation_source_digest,generation_config,generation_inputs,content_sha256)"
+                  + " VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
               version,
               sourceManifest,
               sourceRowsTotal,
@@ -301,12 +401,16 @@ final class DefaultLexiconRepository implements LexiconRepository {
         int priority =
             ClassificationPolicy.publishedPriority(
                 row, planned.prepared().classification(), action);
-        entryRows.add(new Object[] {entry.entryId(), entry.lemma(), gloss, canonical, priority});
+        entryRows.add(
+            new Object[] {
+              entry.entryId(), entry.lemma(), gloss, canonical, priority, entry.frequencyRank()
+            });
         for (String form : forms) formRows.add(new Object[] {form, entry.entryId()});
       }
       if (!entryRows.isEmpty()) {
         jdbc.batchUpdate(
-            "INSERT INTO lexicon_entry (entry_id, lemma, gloss, canonical_form, priority) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO lexicon_entry (entry_id, lemma, gloss, canonical_form, priority,"
+                + " frequency_rank) VALUES (?, ?, ?, ?, ?, ?)",
             batch(entryRows));
         jdbc.batchUpdate(
             "INSERT INTO lexicon_form (normalized_form, entry_id) VALUES (?, ?)", batch(formRows));

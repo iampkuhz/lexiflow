@@ -39,12 +39,14 @@ class HintPreparationTest {
   }
 
   @Test
-  void blocksEveryOxfordWordRegardlessOfRankButKeepsCompletePhrasesIndependent() {
-    for (Long rank : new Long[] {null, 2370L, 10000L}) {
-      var word = oxfordRow("false", "错误的", rank);
-      assertTrue(word.basicVocabulary());
-      assertFalse(word.prewarmEligible());
-      assertEquals("basic_vocabulary", HintPreparation.exclusionReason(word));
+  void bncRankReplacesOxfordSingleWordBlockButUnrankedAndPhrasesKeepRules() {
+    var unranked = oxfordRow("seldomword", "罕见词", null);
+    assertFalse(unranked.basicVocabulary());
+    assertEquals("basic_vocabulary", HintPreparation.exclusionReason(unranked));
+    for (Long rank : new Long[] {2370L, 10000L}) {
+      var ranked = oxfordRow("seldomword", "罕见词", rank);
+      assertFalse(ranked.basicVocabulary());
+      assertNull(HintPreparation.exclusionReason(ranked));
     }
     var phrase = oxfordRow("false alarm", "误报", null);
     assertFalse(phrase.basicVocabulary());

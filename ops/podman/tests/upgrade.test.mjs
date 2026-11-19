@@ -24,16 +24,18 @@ function extension(dir, id) {
   fs.mkdirSync(dir, { recursive: true });
   for (const name of PACKAGE_FILES) {
     const bytes = Buffer.from(name === 'manifest.json'
-      ? JSON.stringify({ manifest_version: 3, version: id.chromeVersion, version_name: id.softwareVersion, permissions: ['storage'], host_permissions: ['http://127.0.0.1:18081/*'], background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' } })
-      : name === 'build-identity.json' ? JSON.stringify(id) : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>' : `fixture:${name}`);
+      ? JSON.stringify({ manifest_version: 3, version: id.chromeVersion, version_name: id.softwareVersion, permissions: [], host_permissions: ['http://127.0.0.1:18081/*'], background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' }, options_page: 'manage.html' })
+      : name === 'build-identity.json' ? JSON.stringify(id) : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>'
+      : name === 'manage.html' ? '<link href="manage.css"><script src="manage.js"></script>' : `fixture:${name}`);
     const target = path.join(dir, ...name.split('/')); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, bytes);
   }
 }
 function archive(dir, id) {
   const filename = `lexiflow-extension-${id.softwareVersion}.zip`;
   const entries = Object.fromEntries(PACKAGE_FILES.map(name => [name, Buffer.from(name === 'manifest.json'
-    ? JSON.stringify({ manifest_version: 3, version: id.chromeVersion, version_name: id.softwareVersion, permissions: ['storage'], host_permissions: ['http://127.0.0.1:18081/*'], background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' } })
-    : name === 'build-identity.json' ? JSON.stringify(id) : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>' : `fixture:${name}`)]));
+    ? JSON.stringify({ manifest_version: 3, version: id.chromeVersion, version_name: id.softwareVersion, permissions: [], host_permissions: ['http://127.0.0.1:18081/*'], background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' }, options_page: 'manage.html' })
+    : name === 'build-identity.json' ? JSON.stringify(id) : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>'
+    : name === 'manage.html' ? '<link href="manage.css"><script src="manage.js"></script>' : `fixture:${name}`)]));
   const bytes = makeZip(Object.entries(entries)), digest = sha(bytes);
   const relative = `extension-artifacts/${id.buildId}/api-18081/${filename}`, target = path.join(dir, relative);
   fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, bytes);

@@ -40,6 +40,10 @@ tasks.named<ProcessResources>("processResources") {
         into("META-INF")
         rename { "lexiflow-schema.sql" }
     }
+    from(repositoryRoot.resolve("infra/sqlite/preferences.sql")) {
+        into("META-INF")
+        rename { "lexiflow-preferences-schema.sql" }
+    }
 }
 
 // IDE 模型只需稳定的内部归档路径；完整身份只在任务执行时读取。
@@ -69,6 +73,7 @@ tasks.named<BootJar>("bootJar") {
 tasks.withType<Test>().configureEach {
     dependsOn(generateSoftwareIdentity)
     systemProperty("lexiflow.repository.root", repositoryRoot.absolutePath)
+    systemProperty("lexiflow.preferences.schema.file", File(repositoryRoot, "infra/sqlite/preferences.sql").absolutePath)
     jvmArgumentProviders.add(objects.newInstance(IdentityVersionArgumentProvider::class.java).apply {
         identityVersionFile.set(generatedVersionFile)
     })

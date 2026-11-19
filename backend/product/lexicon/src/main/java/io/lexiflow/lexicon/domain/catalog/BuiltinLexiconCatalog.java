@@ -23,6 +23,27 @@ public final class BuiltinLexiconCatalog implements LexiconCatalog {
           entry("deliver", "交付；传达"));
 
   /**
+   * Returns synthetic display data only for the explicit demo runtime.
+   *
+   * @param ids 含义：请求的稳定词条身份。取值范围：非 null 的正 long 集合。
+   * @return 内置合成词库中存在且可展示的词条，不包含未知身份。
+   */
+  public List<io.lexiflow.lexicon.domain.model.LexiconBrowseEntry> displayableByIds(
+      java.util.Collection<Long> ids) {
+    return ENTRIES.stream()
+        .filter(e -> ids.contains(e.entryId()))
+        .map(
+            e ->
+                new io.lexiflow.lexicon.domain.model.LexiconBrowseEntry(
+                    e.entryId(),
+                    e.canonicalLemma(),
+                    e.finalGloss(),
+                    null,
+                    io.lexiflow.lexicon.domain.model.PublishedHintState.ELIGIBLE))
+        .toList();
+  }
+
+  /**
    * 返回字幕中的测试候选，优先更长的词段。
    *
    * @param normalizedForms 含义：已规范化的精确词形键。取值范围：非 null；每键非空白、规范且至多三个 token。

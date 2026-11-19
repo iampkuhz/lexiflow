@@ -5,7 +5,7 @@ import path from 'node:path';
 import { chromeVersion, validateBuildIdentity, assertBuildIdentityMatches } from '../../../ops/release/integrity/source-build-identity.mjs';
 import { validateExpectedDataset } from '../build/expected-dataset.mjs';
 
-export const EXTENSION_PACKAGE_FILES = ['manifest.json', 'build-identity.json', 'expected-dataset.json', 'background.js', 'content.js', 'youtube-bridge.js', 'popup.js', 'popup.html', 'popup.css', 'assets/icon-16.png', 'assets/icon-32.png', 'assets/icon-48.png', 'assets/icon-128.png', 'assets/logo.svg'];
+export const EXTENSION_PACKAGE_FILES = ['manifest.json', 'build-identity.json', 'expected-dataset.json', 'background.js', 'content.js', 'youtube-bridge.js', 'popup.js', 'popup.html', 'popup.css', 'manage.js', 'manage.html', 'manage.css', 'assets/icon-16.png', 'assets/icon-32.png', 'assets/icon-48.png', 'assets/icon-128.png', 'assets/logo.svg'];
 const fail = code => { throw new Error(code); };
 const sha = value => createHash('sha256').update(value).digest('hex');
 function stableFileBytes(file, expectedLength, named = fs.lstatSync(file)) {
@@ -52,19 +52,23 @@ export function validateExtensionArchiveEntries(entries, { buildIdentity, expect
   if (expectedDataset && JSON.stringify(dataset) !== JSON.stringify(validateExpectedDataset(expectedDataset))) fail('EXPECTED_DATASET_INVALID');
   if (filename && filename !== `lexiflow-extension-${identity.softwareVersion}.zip`) fail('ARCHIVE_FILENAME_MISMATCH');
   if (manifest.manifest_version !== 3 || manifest.version !== chromeVersion(identity.softwareVersion) || manifest.version_name !== identity.softwareVersion
-      || JSON.stringify(manifest.permissions) !== '["storage"]'
+      || JSON.stringify(manifest.permissions) !== '[]'
       || JSON.stringify(manifest.host_permissions) !== JSON.stringify([`http://127.0.0.1:${apiPort}/*`])
       || manifest.background?.service_worker !== 'background.js' || manifest.action?.default_popup !== 'popup.html') fail('ARCHIVE_MANIFEST_INVALID');
   const files = new Set(names);
-  const refs = [manifest.background.service_worker, manifest.action.default_popup,
+  const refs = [manifest.background.service_worker, manifest.action.default_popup, ...(manifest.options_page ? [manifest.options_page] : []),
     ...Object.values(manifest.action.default_icon ?? {}), ...Object.values(manifest.icons ?? {}),
     ...(manifest.content_scripts ?? []).flatMap(item => item.js ?? []), ...(manifest.content_scripts ?? []).flatMap(item => item.css ?? [])];
   for (const ref of refs) if (!files.has(ref)) fail('ARCHIVE_RESOURCE_MISSING');
-  const htmlRefs = [...entries.get('popup.html').toString('utf8').matchAll(/(?:src|href)=["']([^"']+)["']/gu)].map(([, ref]) => ref);
-  if (!htmlRefs.length) fail('ARCHIVE_MANIFEST_INVALID');
-  for (const ref of htmlRefs) if (!/^(?:https?:|data:|#)/iu.test(ref) && !files.has(ref)) fail('ARCHIVE_RESOURCE_MISSING');
-  const cssRefs = [...entries.get('popup.css').toString('utf8').matchAll(/url\(["']?([^"')]+)["']?\)|@import\s+["']([^"']+)["']/giu)];
-  for (const match of cssRefs) { const ref = match[1] ?? match[2]; if (!/^(?:https?:|data:|#)/iu.test(ref) && !files.has(ref)) fail('ARCHIVE_RESOURCE_MISSING'); }
+  for (const htmlName of ['popup.html', 'manage.html']) {
+    const htmlRefs = [...entries.get(htmlName).toString('utf8').matchAll(/(?:src|href)=["']([^"']+)["']/gu)].map(([, ref]) => ref);
+    if (!htmlRefs.length) fail('ARCHIVE_MANIFEST_INVALID');
+    for (const ref of htmlRefs) if (!/^(?:https?:|data:|#)/iu.test(ref) && !files.has(ref)) fail('ARCHIVE_RESOURCE_MISSING');
+  }
+  for (const cssName of ['popup.css', 'manage.css']) {
+    const cssRefs = [...entries.get(cssName).toString('utf8').matchAll(/url\(["']?([^"')]+)["']?\)|@import\s+["']([^"']+)["']/giu)];
+    for (const match of cssRefs) { const ref = match[1] ?? match[2]; if (!/^(?:https?:|data:|#)/iu.test(ref) && !files.has(ref)) fail('ARCHIVE_RESOURCE_MISSING'); }
+  }
   return { identity, manifest, dataset };
 }
 

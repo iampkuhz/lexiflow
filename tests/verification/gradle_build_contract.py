@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_GRAPH = {
-    ":adapters": [":lexicon"],
+    ":adapters": [":enrichment", ":lexicon"],
     ":api": [":adapters", ":enrichment", ":lexicon"],
     ":architecture-tests": [":adapters", ":api", ":enrichment", ":lexicon"],
     ":enrichment": [":lexicon"],

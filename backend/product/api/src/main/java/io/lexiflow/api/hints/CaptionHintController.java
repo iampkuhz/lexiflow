@@ -76,7 +76,8 @@ public final class CaptionHintController {
                             hint.chineseGloss(),
                             hint.lexiconEntryId(),
                             hint.lexiconVersion(),
-                            hint.senseId()))
+                            hint.senseId(),
+                            hint.lemma()))
                 .toList());
     if (!result.processedKeys().isEmpty()) {
       long analysisStarted = System.nanoTime();

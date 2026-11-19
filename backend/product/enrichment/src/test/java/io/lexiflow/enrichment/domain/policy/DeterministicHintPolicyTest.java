@@ -44,6 +44,24 @@ class DeterministicHintPolicyTest {
   }
 
   @Test
+  void carriesCanonicalLemmaInsteadOfMatchedAliasSurface() {
+    var alias =
+        new LexiconHintCandidate(
+            47,
+            UUID.nameUUIDFromBytes("sense".getBytes(StandardCharsets.UTF_8)),
+            1,
+            "en",
+            "reliables",
+            "reliable",
+            LexiconEntryKind.WORD,
+            LexiconHintAction.HINT,
+            "可靠的",
+            500);
+    var hint = evaluate("reliables", List.of(alias)).hints().getFirst();
+    assertEquals("reliable", hint.lemma());
+  }
+
+  @Test
   void blockDoesNotDisplayAndStillMakesAmericanizesAmbiguous() {
     var hint = candidate("americanizes", "使美国化");
     var block = block("americanizes");

@@ -119,12 +119,16 @@ export async function openActionPopup({context,page,serviceWorker}) {
       const result=await command('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});
       await writeFile(path,Buffer.from(result.data,'base64'));
     };
+    const emulateColorScheme=async colorScheme=>{
+      if(!['light','dark'].includes(colorScheme)) throw new Error(`unsupported color scheme ${colorScheme}`);
+      await command('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:colorScheme}]});
+    };
     const close=async()=>{
       await browserSession.send('Target.closeTarget',{targetId:target.targetId}).catch(()=>undefined);
       await browserSession.detach().catch(()=>undefined);
     };
     await waitFor(()=>document.readyState==='complete');
-    return {evaluate,waitFor,click,pressSpace,screenshot,close};
+    return {evaluate,waitFor,click,pressSpace,screenshot,emulateColorScheme,close};
   } catch(error) {
     await browserSession.detach().catch(()=>undefined);
     throw error;

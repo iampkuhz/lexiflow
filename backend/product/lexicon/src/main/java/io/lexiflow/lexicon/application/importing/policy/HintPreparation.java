@@ -45,8 +45,14 @@ public final class HintPreparation {
     if (stardict && row.lemma().codePoints().anyMatch(HintPreparation::nonAsciiLetter))
       return excluded(row, "non_ascii_lemma", List.of());
     if (!hasQueryableSurface(row)) return excluded(row, "outside_query_window", List.of());
-    if (row.basicVocabulary()) return excluded(row, "basic_vocabulary", List.of());
-    boolean trustedCurated = stardict && row.curatedGloss();
+    if (row.basicVocabulary()
+        || (!row.lemma().contains(" ") && row.sourceOxfordBasic() && row.sourceBncRank() == null))
+      return excluded(row, "basic_vocabulary", List.of());
+    // 来源标识限定适配器合同，不是身份认证；人工标记仍须由适配器核对精确来源。
+    boolean trustedCurated =
+        row.curatedGloss()
+            && (stardict
+                || row.dictionary().sourceId().equals("lexiflow-reviewed-source-defaults"));
     PreparedHint prepared;
     if (!stardict || trustedCurated) {
       if (!safeGloss(row.chineseGloss()))

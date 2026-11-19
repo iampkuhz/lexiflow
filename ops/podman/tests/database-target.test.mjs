@@ -35,8 +35,12 @@ test('runtime compose binds only the installation SQLite file read-only', () => 
   const databaseFile = '/private/lexiflow/data/lexicon.db';
   const config = JSON.parse(renderCompose('/unused', { apiPort: 18081, databaseFile }));
   assert.deepEqual(Object.keys(config.services), ['api']);
-  assert.deepEqual(config.services.api.volumes, ['${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro']);
+  assert.deepEqual(config.services.api.volumes, ['${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro', 'lexiflow-preferences:/var/lib/lexiflow/preferences']);
   assert.equal(config.services.api.environment.SPRING_DATASOURCE_URL, 'jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro');
+  assert.equal(config.services.api.environment.LEXIFLOW_PREFERENCES_JDBC_URL, 'jdbc:sqlite:/var/lib/lexiflow/preferences/preferences.db');
+  assert.ok(config.volumes['lexiflow-preferences']);
+  assert.equal(config.volumes['lexiflow-preferences'].name, 'lexiflow-${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}_preferences');
+  assert.deepEqual(config.volumes['lexiflow-preferences'].labels, { 'lexiflow.installation': '${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}' });
   assert.deepEqual(config.services.api.ports, ['127.0.0.1:18081:8080']);
   assert.deepEqual(Object.keys(config.services), ['api']);
   assert.throws(() => renderCompose('/unused', { apiPort: 18081, databaseFile: 'relative/lexicon.db' }), /DEPLOYMENT_COMPOSE_INPUT_INVALID/);

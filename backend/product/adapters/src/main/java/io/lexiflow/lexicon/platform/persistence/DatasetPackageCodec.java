@@ -237,7 +237,7 @@ public final class DatasetPackageCodec {
                 "generationConfig",
                 "contentSha256",
                 "files"));
-    if (integer(node.get("schemaVersion"), 0) != 4) throw new IOException(BAD);
+    if (integer(node.get("schemaVersion"), 0) != 5) throw new IOException(BAD);
     String schema = digestValue(node.get("schemaSha256"));
     String approval = digestValue(node.get("approvalSha256"));
     long version = integer(node.get("datasetVersion"), 1);
@@ -641,11 +641,11 @@ public final class DatasetPackageCodec {
     for (String column : table.columns()) {
       Object value = row.get(column);
       if (value == null) {
-        if (!Set.of("gloss").contains(column)) throw new IOException(BAD);
+        if (!Set.of("gloss", "frequency_rank").contains(column)) throw new IOException(BAD);
         continue;
       }
       String type = DatasetPackageTables.TYPES.get(column);
-      if ("INTEGER".equals(type)) integer(value, 0);
+      if ("INTEGER".equals(type)) integer(value, column.equals("frequency_rank") ? 1 : 0);
       else if ("TEXT".equals(type)) {
         if (column.equals("source_manifest")) {
           Object json =

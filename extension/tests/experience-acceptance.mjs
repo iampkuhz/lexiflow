@@ -47,26 +47,35 @@ export async function runExperienceAcceptance({page,context,serviceWorker,apiBas
   const before=await send({type:'page-enhancement',action:'read'});assert.equal(before.ok,true);assert.equal(before.enabled,true);
   // Open the actual action popup so Chrome supplies its real popup URL and sender identity.
   await openPopup();
+  await popup.waitFor(()=>document.querySelector('#cutoff-summary').textContent==='Top 1500'&&document.querySelector('#service-status').textContent==='演示模式 · 非正式就绪');
   const popupFacts=await popup.evaluate(()=>({width:document.documentElement.clientWidth,height:document.body.scrollHeight,
     logoLoaded:document.querySelector('header img').complete&&document.querySelector('header img').naturalWidth===128,
     logoWidth:document.querySelector('header img').getBoundingClientRect().width,logoHeight:document.querySelector('header img').getBoundingClientRect().height,
     switchWidth:Math.round(document.querySelector('#enhance-toggle').getBoundingClientRect().width),
-    status:document.querySelector('#page-status').textContent}));
-  assert.equal(popupFacts.width,280);assert.ok(popupFacts.height>=165);assert.equal(popupFacts.logoLoaded,true);assert.equal(popupFacts.logoWidth,24);assert.equal(popupFacts.logoHeight,24);assert.equal(popupFacts.switchWidth,40);
+    status:document.querySelector('#page-status').textContent,
+    viewportHeight:innerHeight,scrollWidth:document.documentElement.scrollWidth,
+    serviceWarningVisible:!document.querySelector('#service-status').hidden,
+    controls:['#diagnostics-toggle','#enhance-toggle','.preference-summary','#open-manage','#backend-target','#service-status'].map(selector=>{
+      const element=document.querySelector(selector),box=element.getBoundingClientRect(),style=getComputedStyle(element);
+      return {selector,visible:element.getClientRects().length>0&&style.visibility==='visible'&&style.opacity!=='0',
+        inside:box.width>0&&box.height>0&&box.left>=0&&box.top>=0&&box.right<=innerWidth&&box.bottom<=innerHeight,
+        unclipped:element.scrollWidth<=element.clientWidth&&element.scrollHeight<=element.clientHeight};
+    })}));
+  assert.equal(popupFacts.width,320);// body.scrollHeight includes the required demo warning; this is not the healthy 200px popup.
+  assert.equal(popupFacts.serviceWarningVisible,true);assert.ok(popupFacts.height>=220,'demo warning remains visible');
+  assert.ok(popupFacts.height<=260,'compact default popup including demo warning');
+  assert.ok(popupFacts.height<=popupFacts.viewportHeight+1,'Chrome popup rounds CSS height to whole pixels');
+  assert.equal(popupFacts.scrollWidth,320);
+  for(const control of popupFacts.controls){assert.equal(control.visible,true,control.selector);assert.equal(control.inside,true,control.selector);assert.equal(control.unclipped,true,control.selector);}
+  assert.equal(popupFacts.logoLoaded,true);assert.equal(popupFacts.logoWidth,24);assert.equal(popupFacts.logoHeight,24);assert.equal(popupFacts.switchWidth,40);
   assert.equal(popupFacts.status,'已开启 · 英文优先');
   await popup.pressSpace('#enhance-toggle');
   await popup.waitFor(()=>document.getElementById('enhance-toggle').disabled===false&&!document.getElementById('enhance-toggle').checked);
   await waitForState(page,'idle');assert.equal(await overlayText(page),'');
-  await popup.click('#preferences summary');
-  await popup.waitFor(()=>document.querySelector('#preferences').open);
-  assert.equal(await popup.evaluate(()=>!document.querySelector('#restore-start').hidden),true);
-  await popup.click('#restore-start');
-  await popup.waitFor(()=>!document.querySelector('#restore-confirmation').hidden);
-  assert.equal(await popup.evaluate(()=>!document.querySelector('#restore-confirmation').hidden),true);
-  await popup.click('#restore-cancel');
-  await popup.waitFor(()=>document.querySelector('#restore-confirmation').hidden);
-  assert.equal(await popup.evaluate(()=>!document.querySelector('#restore-confirmation').hidden),false);
-  assert.equal(await popup.evaluate(()=>!document.querySelector('#restore-status').hidden),false);
+  await popup.waitFor(()=>document.querySelector('#cutoff-summary').textContent==='Top 1500');
+  assert.equal(await popup.evaluate(()=>document.querySelector('#hidden-summary').textContent),'0 条');
+  assert.equal(await popup.evaluate(()=>document.querySelector('#open-manage').textContent),'管理提示与词库 →');
+  assert.equal(await popup.evaluate(()=>document.querySelector('#common-word-cutoff')===null),true,'cutoff controls are management-only');
   await page.bringToFront();
   assert.equal(await page.locator('#player').evaluate(e=>e.classList.contains('lexiflow-inline-active')),false);
   const countBefore=JSON.parse(await page.locator('#lexiflow-caption-overlay').getAttribute('data-lexiflow-diagnostics')).counts.requested;
@@ -84,15 +93,15 @@ export async function runExperienceAcceptance({page,context,serviceWorker,apiBas
   await popup.pressSpace('#enhance-toggle');await popup.waitFor(()=>!document.getElementById('enhance-toggle').disabled&&!document.getElementById('enhance-toggle').checked);
   await page.waitForTimeout(400);assert.equal(await overlayState(),'idle');assert.equal(await overlayText(page),'');
   // Navigation resets only this page's in-memory switch; stale popup cannot target a new page.
-  await page.evaluate(()=>{document.dispatchEvent(new Event('yt-navigate-start'));history.pushState({},'', '/watch?v=local-next');document.dispatchEvent(new Event('yt-navigate-finish'));});
+  await page.evaluate(()=>{document.dispatchEvent(new Event('yt-navigate-start'));history.pushState({},'', '/watch?v=LfxE2ENext1');document.dispatchEvent(new Event('yt-navigate-finish'));});
   const after=await send({type:'page-enhancement',action:'read'});assert.equal(after.enabled,true);assert.notEqual(after.pageKey,before.pageKey);
   assert.deepEqual(await send({type:'page-enhancement',action:'set',enabled:false,pageKey:before.pageKey}),{ok:false});
   await waitForState(page,'ready');
-  await page.evaluate(()=>{history.replaceState({},'', '/watch?v=lexiflow-e2e');window.dispatchEvent(new PopStateEvent('popstate'));});
+  await page.evaluate(()=>{history.replaceState({},'', '/watch?v=LfxE2ETest1');window.dispatchEvent(new PopStateEvent('popstate'));});
   await waitForState(page,'ready');
   const diagnostics=JSON.parse(await page.locator('#lexiflow-caption-overlay').getAttribute('data-lexiflow-diagnostics'));
   assert.ok(diagnostics.counts['cancelled_in_flight']>=1);
-  await writeFile(resolve(root,'report.json'),JSON.stringify({status:'PASS',scope:'local authored fixture; real action popup CDP target, native input and screenshot; active tab is synthetic',immediate,layout,diagnostics,checks:['source-multiline','english-before-paint','popup-toggle','disabled-no-requests','pending-cancellation','navigation-reset','stale-toggle-rejected']},null,2));
+  await writeFile(resolve(root,'report.json'),JSON.stringify({status:'PASS',scope:'local authored fixture; real action popup CDP target, native input and screenshot; active tab is synthetic',immediate,layout,popupFacts,diagnostics,checks:['source-multiline','english-before-paint','popup-toggle','disabled-no-requests','pending-cancellation','navigation-reset','stale-toggle-rejected']},null,2));
   await writeFile(resolve(repositoryRoot,'tmp/quality/experience/latest.json'),JSON.stringify({root,status:'PASS'}));
  } finally {
   await popup?.close().catch(()=>undefined);

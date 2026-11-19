@@ -389,6 +389,7 @@ class ReleaseBodyTests(unittest.TestCase):
         self.assertLess(body.index("安装命令"), body.index("## 1.5. 下载"))
         self.assertIn("--publish 127.0.0.1:18080:8080", body)
         self.assertIn("--volume lexiflow-release-data:/var/lib/lexiflow", body)
+        self.assertIn("--volume lexiflow-preferences:/var/lib/lexiflow/preferences", body)
         self.assertIn("--image-volume=ignore --pull=always", body)
         self.assertIn("--memory=2g --cpus=2 --stop-timeout=45", body)
         for name in names:
@@ -741,6 +742,9 @@ class PromotionTests(unittest.TestCase):
         )
         self.assertIn(
             "--volume lexiflow-release-data:/var/lib/lexiflow", FakeGitHub.created_body
+        )
+        self.assertIn(
+            "--volume lexiflow-preferences:/var/lib/lexiflow/preferences", FakeGitHub.created_body
         )
         self.assertIn("ghcr.io/o/r:1.2.3", FakeGitHub.created_body)
         self.assertEqual(FakeGitHub.created_body, result["release_body"])

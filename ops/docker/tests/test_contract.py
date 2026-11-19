@@ -375,6 +375,8 @@ class DockerContractTest(unittest.TestCase):
         self.assertIn("FROM ${JAVA_RUNTIME_IMAGE} AS java-runtime", runtime)
         self.assertIn("FROM java-runtime AS notice-files", runtime)
         self.assertIn("install -d -o 10001 -g 10001 -m 0555 /app/notices", runtime)
+        self.assertIn("install -d -o 10001 -g 10001 -m 0700 /var/lib/lexiflow /var/lib/lexiflow/preferences /run/lexiflow", runtime)
+        self.assertIn('VOLUME ["/var/lib/lexiflow/preferences"]', runtime)
         self.assertIn("find /notices -type f -exec chmod 0444", runtime)
         self.assertIn("find /notices -type d -exec chmod 0555", runtime)
         self.assertIn("COPY --from=notice-files --chown=10001:10001 /notices/ /app/notices/", runtime)
@@ -387,7 +389,8 @@ class DockerContractTest(unittest.TestCase):
         self.assertIn('test -s "$JAVA_HOME/lib/server/classes.jsa"', final_stage)
         self.assertNotIn("RUN chmod", final_stage)
         self.assertEqual(dockerfile.count("RUN "), 1)
-        self.assertIn("mkdir /work && chown 10001:10001 /work", dockerfile)
+        self.assertIn("mkdir -p /work /var/lib/lexiflow/preferences", dockerfile)
+        self.assertIn("chown -R 10001:10001 /work /var/lib/lexiflow", dockerfile)
         for tool in ("/bin/bash", "/usr/bin/timeout", "/usr/bin/env"):
             self.assertIn("test -x " + tool, dockerfile)
 
@@ -401,6 +404,11 @@ class DockerContractTest(unittest.TestCase):
         self.assertEqual(set(services["api"]["cap_drop"]), {"ALL"})
         self.assertTrue(cfg["networks"]["private"]["internal"])
         self.assertIn("lexiflow-data:/var/lib/lexiflow", services["api"]["volumes"])
+        self.assertIn("lexiflow-preferences:/var/lib/lexiflow/preferences", services["api"]["volumes"])
+        self.assertEqual(services["api"]["environment"]["LEXIFLOW_PREFERENCES_JDBC_URL"],
+                         "jdbc:sqlite:/var/lib/lexiflow/preferences/preferences.db")
+        self.assertEqual(services["api"]["environment"]["SPRING_DATASOURCE_URL"],
+                         "jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro")
         self.assertTrue(
             any(
                 str(item).startswith("/run/lexiflow:")
@@ -410,7 +418,10 @@ class DockerContractTest(unittest.TestCase):
         self.assertTrue(
             any(str(item).startswith("/tmp:") for item in services["api"]["tmpfs"])
         )
-        self.assertEqual(set(cfg["volumes"]), {"lexiflow-data"})
+        self.assertEqual(set(cfg["volumes"]), {"lexiflow-data", "lexiflow-preferences"})
+        prefs = cfg["volumes"]["lexiflow-preferences"]
+        self.assertEqual(prefs["name"], "lexiflow-${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}_preferences")
+        self.assertEqual(set(prefs["labels"]), {"lexiflow.installation"})
         for service in services.values():
             self.assertEqual(service["pull_policy"], "never")
             self.assertNotIn("build", service)
@@ -418,6 +429,11 @@ class DockerContractTest(unittest.TestCase):
     def test_compose_secret_sources_and_reserved_labels(self):
         cfg = yaml.safe_load((DOCKER / "compose.yaml").read_text())
         self.assertNotIn("secrets", cfg)
+        expected_labels = {
+            "services": {"lexiflow.installation", "lexiflow.release"},
+            "volumes": {"lexiflow.installation", "lexiflow.release"},
+            "networks": {"lexiflow.installation", "lexiflow.release"},
+        }
         for section in ("services", "volumes", "networks"):
             for resource in cfg[section].values():
                 self.assertFalse(
@@ -426,10 +442,10 @@ class DockerContractTest(unittest.TestCase):
                         for key in resource.get("labels", {})
                     )
                 )
-                self.assertEqual(
-                    set(resource["labels"]),
-                    {"lexiflow.installation", "lexiflow.release"},
-                )
+                if section == "volumes" and resource is cfg["volumes"]["lexiflow-preferences"]:
+                    self.assertEqual(set(resource["labels"]), {"lexiflow.installation"})
+                else:
+                    self.assertEqual(set(resource["labels"]), expected_labels[section])
         for service in cfg["services"].values():
             self.assertFalse(
                 any("COMPOSE_" in key for key in service.get("environment", {}))

@@ -10,11 +10,14 @@ test("API launch spec strips inherited application and Java injection configurat
     repositoryRoot: "/repo",
     apiPort: 32123,
     javaHome: "/jdk/25",
+    preferencesDatabase: "/fixture/preferences.db",
     sourceEnv: {
       PATH: "/usr/bin:/bin",
       HOME: "/home/test",
       SPRING_DATASOURCE_URL: "jdbc:must-not-leak",
       JDBC_URL: "jdbc:must-not-leak",
+      LEXIFLOW_PREFERENCES_JDBC_URL: "jdbc:sqlite:/private/real-preferences.db",
+      TZ: "America/Los_Angeles",
       LEXIFLOW_SEGMENT_LOG_PATH: "/private/real-captions.jsonl",
       JAVA_TOOL_OPTIONS: "-javaagent:/private/agent.jar",
       JDK_JAVA_OPTIONS: "-Dspring.datasource.url=jdbc:private",
@@ -29,7 +32,8 @@ test("API launch spec strips inherited application and Java injection configurat
     "-p", "backend", "--no-daemon", ":api:bootRun",
     "--args=--server.address=127.0.0.1 --server.port=32123 --lexiflow.runtime.mode=demo --lexiflow.segment-analysis.enabled=false --lexiflow.segment-analysis.console=false"
   ]);
-  assert.deepEqual(spec.env, { PATH: "/usr/bin:/bin", HOME: "/home/test", JAVA_HOME: "/jdk/25" });
+  assert.deepEqual(spec.env, { PATH: "/usr/bin:/bin", HOME: "/home/test", JAVA_HOME: "/jdk/25", TZ: "UTC",
+    LEXIFLOW_PREFERENCES_JDBC_URL: "jdbc:sqlite:/fixture/preferences.db" });
   assert.equal(spec.args.some((arg) => arg.includes("java_exec")), false);
 });
 

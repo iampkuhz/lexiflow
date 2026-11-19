@@ -147,6 +147,52 @@ class PreparationPipelineTest {
     assertEquals("unsafe_default_candidate", HintPreparation.exclusionReason(unsafeCurated));
   }
 
+  @Test
+  void confinesCuratedTrustToReviewedSourceContractsAndKeepsSafetyChecks() {
+    for (var source : List.of("ecdict-stardict", "lexiflow-reviewed-source-defaults")) {
+      var instrument =
+          rowWithSource(
+              "instrument", "n. 仪器", "乐器", false, false, true, 100L, 0, List.of(), source);
+      assertEquals("乐器", HintPreparation.prepare(instrument).gloss(), source);
+      assertEquals("curated", HintPreparation.prepare(instrument).decisiveRule(), source);
+      for (var lemma : List.of("the majority", "stream of data")) {
+        boolean allBasic = lemma.equals("stream of data");
+        var reviewed =
+            rowWithSource(lemma, "原始释义", "受核短释", false, allBasic, true, null, 0, List.of(), source);
+        assertNull(HintPreparation.exclusionReason(reviewed), source);
+        var unsafe =
+            rowWithSource(lemma, "原始释义", "不…安全", false, allBasic, true, null, 0, List.of(), source);
+        assertEquals("unsafe_default_candidate", HintPreparation.exclusionReason(unsafe), source);
+        var unmarked =
+            rowWithSource(
+                lemma, "原始释义", "受核短释", false, allBasic, false, null, 0, List.of(), source);
+        assertEquals(
+            allBasic ? "all_basic_phrase" : "low_information_phrase",
+            HintPreparation.exclusionReason(unmarked),
+            source);
+      }
+      var basic =
+          rowWithSource("instrument", "原始释义", "乐器", true, false, true, null, 0, List.of(), source);
+      assertEquals("basic_vocabulary", HintPreparation.exclusionReason(basic), source);
+    }
+    for (var source :
+        List.of(
+            "fixture",
+            "unknown",
+            "ecdict-stardict-copy",
+            "lexiflow-reviewed-source-defaults-copy")) {
+      var lowInformation =
+          rowWithSource(
+              "the majority", "原始释义", "指定短释", false, false, true, null, 0, List.of(), source);
+      assertEquals(
+          "low_information_phrase", HintPreparation.exclusionReason(lowInformation), source);
+      var allBasic =
+          rowWithSource(
+              "stream of data", "原始释义", "指定短释", false, true, true, null, 0, List.of(), source);
+      assertEquals("all_basic_phrase", HintPreparation.exclusionReason(allBasic), source);
+    }
+  }
+
   private static io.lexiflow.lexicon.application.importing.model.PreparedHint result(
       String lemma, String raw) {
     return HintPreparation.prepare(row(lemma, raw, raw, false, false, false, null, 0, List.of()));

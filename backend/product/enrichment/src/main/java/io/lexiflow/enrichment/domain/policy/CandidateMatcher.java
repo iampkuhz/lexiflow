@@ -1,5 +1,6 @@
 package io.lexiflow.enrichment.domain.policy;
 
+import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -28,8 +29,10 @@ final class CandidateMatcher {
   static List<Match> locate(String caption, int startOffset, int endOffset, String surface) {
     var found = new ArrayList<Match>();
     var matcher =
-        Pattern.compile(Pattern.quote(surface), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
-            .matcher(caption)
+        Pattern.compile(
+                Pattern.quote(LexiconSurfacePolicy.normalizeTypography(surface)),
+                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
+            .matcher(LexiconSurfacePolicy.normalizeTypography(caption))
             .region(startOffset, endOffset);
     while (matcher.find()) {
       if (isWordBoundary(caption, matcher.start(), matcher.end())) {
@@ -40,12 +43,31 @@ final class CandidateMatcher {
   }
 
   private static boolean isWordBoundary(String text, int startOffset, int endOffset) {
-    var before = startOffset == 0 || !isWordCodePoint(text.codePointBefore(startOffset));
-    var after = endOffset == text.length() || !isWordCodePoint(text.codePointAt(endOffset));
+    var before = startOffset == 0 || !isWordAt(text, text.offsetByCodePoints(startOffset, -1));
+    var after = endOffset == text.length() || !isWordAt(text, endOffset);
     return before
         && after
         && isCodePointBoundary(text, startOffset)
         && isCodePointBoundary(text, endOffset);
+  }
+
+  private static boolean isWordAt(String text, int offset) {
+    var point = text.codePointAt(offset);
+    if (isWordCodePoint(point)) {
+      return true;
+    }
+    var next = offset + Character.charCount(point);
+    return (point == '\''
+            || point == '\u2019'
+            || point == '\u2018'
+            || point == '-'
+            || point == '\u2010'
+            || point == '\u2011'
+            || point == '\uff0d')
+        && offset > 0
+        && next < text.length()
+        && isWordCodePoint(text.codePointBefore(offset))
+        && isWordCodePoint(text.codePointAt(next));
   }
 
   private static boolean isCodePointBoundary(String value, int offset) {

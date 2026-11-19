@@ -62,6 +62,10 @@ test('runtime Dockerfile is the locked one-image PID1 contract', async (t) => {
 
 test('runtime refuses unknown directory contents without cleanup or adoption', async (t) => {
   const f = await lifecycleFixture(t);
+  await (await import('node:fs/promises')).mkdir(f.preferences);
+  await (await import('node:fs/promises')).writeFile(f.preferencesDatabase, 'synthetic');
+  await (await import('node:fs/promises')).writeFile(f.preferencesMountInfo,
+    `12 1 0:99 / ${f.preferences} rw - tmpfs tmpfs rw\n`);
   const foreignTree = path.join(f.root, 'foreign-tree');
   await (await import('node:fs/promises')).mkdir(foreignTree);
   const result = runRuntime(f, 'runtime_start');

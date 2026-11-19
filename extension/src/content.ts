@@ -1,9 +1,8 @@
 import { BilingualOverlay, type PresentedLine, type RenderedLine } from "./overlay";
 import { extractIncrementalText, rememberBounded } from "./caption-debug";
-import { snapshotSegments, snapshotText } from "./protocol";
-import { PREFERENCE_KEY, type PreferenceAction, type PreferenceResult } from "./preferences";
+import { MAX_CAPTION_LENGTH, MAX_PRESENTED_ENTRY_IDS, snapshotSegments, snapshotText, type ApiResult } from "./protocol";
+import { parsePreferences, type PreferenceAction, type PreferenceResult } from "./preferences";
 import { Diagnostics } from "./diagnostics";
-import { MAX_CAPTION_LENGTH, type ApiResult } from "./protocol";
 import { CaptionStreamCoordinator, type CaptionEvent, type StreamView } from "./stream";
 import { createPageLifecycle, type PageLifecycle } from "./page-lifecycle";
 import { CaptionCapture } from "./caption-capture";
@@ -66,7 +65,7 @@ function interruptPresented(): void {
     sendDebug("interrupted", tracked.topicKey, tracked.videoId, tracked.line, undefined, tracked.line.text);
   debugPresented.clear();
 }
-const overlay = new BilingualOverlay((entryId, lexiconVersion) => { void updatePreferences("suppress", entryId, lexiconVersion); }, finalizePresented);
+const overlay = new BilingualOverlay((entryId, lemma, gloss) => { void updatePreferences("hide", { entryId, lemma, gloss }); }, finalizePresented);
 function captureLivePage(): void {
   if (lifecycle && lifecycle.videoId !== videoIdFromLocation()) lifecycle.refreshPage();
   overlay.position();
@@ -79,9 +78,13 @@ function renderCurrentView(): number {
     snapshotText(latestView.event.request.currentSnapshot) !== currentCapture?.currentCaption()
     ? { state: "idle" as const } : latestView;
   const source = currentCapture?.readSource();
-  const shown = overlay.render(view, { ready: preferenceReady, entryKeys: suppressed, message: preferenceMessage },
+  const shown = overlay.render(view, { ready: preferenceReady, hiddenIds: suppressed, message: preferenceMessage },
     source && source.caption.length <= MAX_CAPTION_LENGTH ? source : undefined);
   const rendered = overlay.takePresentation();
+  for (let start = 0; start < rendered.hintEntryIds.length; start += MAX_PRESENTED_ENTRY_IDS) {
+    const entryIds = rendered.hintEntryIds.slice(start, start + MAX_PRESENTED_ENTRY_IDS);
+    void chrome.runtime.sendMessage({ type: "local-presented", entryIds }).catch(() => undefined);
+  }
   if (source && view.event && preferenceReady) {
     const videoId = lifecycle?.videoId;
     const topic = view.event.request.captionTopicKey;
@@ -137,17 +140,17 @@ function renderCurrentView(): number {
   }
   if (view.state === "ready" && view.event && preferenceReady) {
     if (shown > 0 && lastShownSequence !== view.event.sequence) { lastShownSequence = view.event.sequence; record({ outcome: "shown" }); }
-    else if (shown === 0 && (view.hints?.length ?? 0) > 0 && view.hints!.every(hint => suppressed.has(`${hint.lexiconEntryId}@${hint.lexiconVersion}`)) && lastSuppressedSequence !== view.event.sequence) { lastSuppressedSequence = view.event.sequence; record({ outcome: "suppressed" }); }
+    else if (shown === 0 && (view.hints?.length ?? 0) > 0 && view.hints!.every(hint => suppressed.has(hint.lexiconEntryId)) && lastSuppressedSequence !== view.event.sequence) { lastSuppressedSequence = view.event.sequence; record({ outcome: "suppressed" }); }
   }
   return shown;
 }
-async function updatePreferences(action: PreferenceAction, entryId?: string, lexiconVersion?: number): Promise<void> {
+async function updatePreferences(action: PreferenceAction, data: { entryId?: string; lemma?: string; gloss?: string; commonWordCutoff?: number } = {}): Promise<void> {
   let result: PreferenceResult;
-  try { result = await chrome.runtime.sendMessage({ type: "local-preferences", action, entryId, lexiconVersion }); }
+  try { result = await chrome.runtime.sendMessage({ type: "local-preferences", action, ...data }); }
   catch { result = { ok: false, reason: "storage" }; }
-  if (result?.ok && Array.isArray(result.entryKeys)) { suppressed = new Set(result.entryKeys); preferenceReady = true; preferenceMessage = ""; }
-  else preferenceMessage = result && !result.ok && result.reason === "limit"
-    ? "本机抑制已达上限，请先恢复提示。" : "本机偏好读取或保存失败；未宣称已保存。";
+  const state = result?.ok ? parsePreferences(result) : undefined;
+  if (state) { suppressed = new Set(state.hidden.map(item => item.entryId)); preferenceReady = true; preferenceMessage = ""; }
+  else { preferenceReady = false; suppressed.clear(); preferenceMessage = "本机偏好读取或保存失败；未宣称已保存。"; }
   renderCurrentView(); updateDiagnostics();
 }
 
@@ -190,7 +193,7 @@ capture = new CaptionCapture(lifecycle, coordinator, {
   sha256, now: () => performance.now(),
   onWaiting: () => { latestView = { state: "waiting" }; renderCurrentView(); },
   onSource: source => { if (source) renderCurrentView(); else overlay.render({ state: "idle" },
-    { ready: preferenceReady, entryKeys: suppressed, message: preferenceMessage }); },
+    { ready: preferenceReady, hiddenIds: suppressed, message: preferenceMessage }); },
   onObserved: sequence => { observedAt = performance.now(); observedSequence = sequence; record({ outcome: "observed" }); },
   onOversized: () => record({ outcome: "oversized" }),
   onAcquisition: elapsedMs => record({ stage: "acquisition", elapsedMs }),
@@ -213,7 +216,9 @@ chrome.runtime.onMessage?.addListener((message, sender, respond) => {
   } else if (message.action !== "read") { respond({ ok: false }); return; }
   respond({ ok: true, enabled: lifecycle.enabled, pageKey: lifecycle.pageKey });
 });
-chrome.storage?.onChanged.addListener((changes, area) => { if (area === "local" && changes[PREFERENCE_KEY]) void updatePreferences("read"); });
+chrome.runtime.onMessage?.addListener((message, sender) => {
+  if (sender.id === chrome.runtime.id && message?.type === "preferences-changed") void updatePreferences("read");
+});
 window.addEventListener("message", event => {
   if (event.source === window && event.origin === location.origin && event.data?.type === "lexiflow-native-captions") {
     capture?.acceptNativeTrack(event.data.track, videoIdFromLocation()); captureLivePage();

@@ -12,14 +12,21 @@ import java.util.Objects;
  * @param trackKey 来源轨道身份；无法可靠识别时为 null。
  * @param previous 上次成功确认请求在发送时冻结的可见快照；尚无成功请求时为 null。
  * @param current 本次可见快照，不能为空对象，允许无可见字幕。
+ * @param commonWordCutoff 单词提示截止排名；仅允许 1000、1500、2000。
  */
 public record CaptionIncrementalRequest(
-    String captionTopicKey, String trackKey, Snapshot previous, Snapshot current) {
+    String captionTopicKey,
+    String trackKey,
+    Snapshot previous,
+    Snapshot current,
+    int commonWordCutoff) {
   /** 校验请求身份、快照内容和沿用 key 的前缀裁剪规则。 */
   public CaptionIncrementalRequest {
     captionTopicKey = required(captionTopicKey, "captionTopicKey", 128);
     trackKey = optional(trackKey, "trackKey");
     Objects.requireNonNull(current, "current");
+    if (commonWordCutoff != 1000 && commonWordCutoff != 1500 && commonWordCutoff != 2000)
+      throw new IllegalArgumentException("commonWordCutoff is invalid");
     if (previous != null) {
       var previousText = new HashMap<String, String>();
       for (var group : previous.captions()) {
@@ -36,6 +43,12 @@ public record CaptionIncrementalRequest(
         }
       }
     }
+  }
+
+  /** 创建使用默认 1500 截止值的请求。 */
+  public CaptionIncrementalRequest(
+      String topic, String track, Snapshot previous, Snapshot current) {
+    this(topic, track, previous, current, 1500);
   }
 
   /**

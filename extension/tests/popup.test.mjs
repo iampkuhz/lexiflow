@@ -40,6 +40,9 @@ function createDocument() {
           textContent: "",
           dataset: {},
           open: false,
+          attributes: {},
+          setAttribute(name, value) { this.attributes[name] = value; },
+          getAttribute(name) { return this.attributes[name] ?? null; },
           focus() { this.focused = true; },
           _listeners: new Map(),
           addEventListener(type, fn) {
@@ -86,14 +89,15 @@ function createChrome(behaviour = {}) {
         const resp = chromeObj._nextResponse;
         return Promise.resolve(resp);
       },
+      create(options) { chromeObj._calls.push({ method: "create", options: { ...options } }); return Promise.resolve({ id: 100 }); },
     },
-    runtime: { lastError: null, getManifest() { return { version_name: "1.2.3" }; }, sendMessage(message) {
+    runtime: { lastError: null, getURL(path) { return `chrome-extension://synthetic/${path}`; }, getManifest() { return { version_name: "1.2.3" }; }, sendMessage(message) {
       chromeObj._calls.push({ method: "runtime.sendMessage", message: { ...message } });
       if (message.type === "runtime-status") {
         if (behaviour.statusReject) return Promise.reject(new Error("status unavailable"));
         return Promise.resolve(behaviour.statusResponse ?? {ok:true,status:{softwareVersion:"1.2.3",apiContract:"caption-hints.v2",mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null,publishedDataset:null}});
       }
-      return behaviour.preferenceResponse !== undefined ? Promise.resolve(behaviour.preferenceResponse) : Promise.resolve({ ok: true, entryKeys: [] });
+      return behaviour.preferenceResponse !== undefined ? Promise.resolve(behaviour.preferenceResponse) : Promise.resolve({ ok: true, commonWordCutoff: 1500, hiddenCount: 2 });
     } },
   };
   return chromeObj;
@@ -105,6 +109,8 @@ function makeContext(doc, chrome) {
   const ctx = {
     document: doc,
     chrome,
+    navigator: { clipboard: { async writeText(text) { ctx.copiedText = text; } } },
+    URL,
     console: { log() {}, error() {}, warn() {} },
     Promise,
     Event,
@@ -153,8 +159,9 @@ test("popup dist exists", () => {
 test("checkbox starts disabled in HTML", () => {
   const html = readFileSync(resolve(import.meta.dirname, "../dist/popup.html"), "utf8");
   assert.match(html, /<input[^>]*id="enhance-toggle"[^>]*role="switch"[^>]*disabled/);
-  assert.match(html, /summary>提示偏好 · 仅本机</);
-  assert.match(html, /点击中文可不再提示；仅本机、对应词库版本有效/);
+  assert.match(html, /id="cutoff-summary"/);
+  assert.doesNotMatch(html, /id="common-word-cutoff"/);
+  assert.match(html, /id="open-manage"/);
   assert.match(readFileSync(resolve(import.meta.dirname, "../dist/popup.css"), "utf8"), /light-dark\(/);
 });
 
@@ -162,16 +169,17 @@ test("popup branding and manifest icon assets are packaged without added permiss
   const html = readFileSync(resolve(import.meta.dirname, "../dist/popup.html"), "utf8");
   const manifest = JSON.parse(readFileSync(resolve(import.meta.dirname, "../dist/manifest.json"), "utf8"));
   assert.match(html, /src="assets\/logo\.svg"/);
-  assert.match(html, /summary>提示偏好 · 仅本机</);
+  assert.match(html, /管理提示与词库/);
   for (const size of [16, 32, 48, 128]) {
     const icon = readFileSync(resolve(import.meta.dirname, `../dist/assets/icon-${size}.png`));
     assert.equal(icon.subarray(1, 4).toString(), "PNG");
     assert.equal(icon.readUInt32BE(16), size);
     assert.equal(icon.readUInt32BE(20), size);
   }
-  assert.deepEqual(manifest.permissions, ["storage"]);
+  assert.deepEqual(manifest.permissions, []);
   assert.deepEqual(Object.keys(manifest.icons).map(Number).sort((a, b) => a - b), [16, 32, 48, 128]);
   assert.deepEqual(manifest.action.default_icon, {"16":"assets/icon-16.png","32":"assets/icon-32.png"});
+  assert.equal(manifest.options_page, "manage.html");
 });
 
 test("read success enables checkbox with correct state", async () => {
@@ -325,6 +333,24 @@ test("read sends correct message shape", async () => {
   assert.equal(readCall.message.action, "read");
 });
 
+test("popup renders read-only preference summary without leaking hidden entries or writing cutoff",async()=>{
+ const {doc,chrome}=freshSetup({preferenceResponse:{ok:true,commonWordCutoff:1000,hiddenCount:3}});await flush();
+ assert.equal(doc.getElementById("cutoff-summary").textContent,"Top 1000");
+ assert.equal(doc.getElementById("hidden-summary").textContent,"3 条");
+ assert.equal(chrome._calls.some(x=>x.message?.action==="setCutoff"),false);
+ assert.equal(chrome._calls.some(x=>x.message?.type==="local-preferences"&&x.message.action==="read"),true);
+});
+test("unavailable preference summary does not masquerade as zero",async()=>{
+ const {doc}=freshSetup({preferenceResponse:{ok:false,reason:"network"}});await flush();
+ assert.equal(doc.getElementById("cutoff-summary").textContent,"不可用");
+ assert.equal(doc.getElementById("hidden-summary").textContent,"不可用");
+});
+
+test("management button opens only the packaged local management page",async()=>{
+ const {doc,chrome}=freshSetup();await flush();doc.getElementById("open-manage").dispatchEvent(new Event("click"));await flush();
+ const call=chrome._calls.find(x=>x.method==="create");assert.deepEqual(call.options,{url:"chrome-extension://synthetic/manage.html"});
+});
+
 test('malformed read success is not accepted as a valid page state',async()=>{
  for(const readResponse of [{ok:true},{ok:true,enabled:'true',pageKey:'p'},{ok:true,enabled:true,pageKey:''}]){
   const {doc}=freshSetup({readResponse});await flush();
@@ -354,47 +380,6 @@ test('set state follows a valid same-pageKey acknowledgement even if it differs 
  assert.equal(cb.checked,false);assert.equal(doc.getElementById('page-status').textContent,'已关闭 · 保留英文');
 });
 
-test('restore requires explicit confirmation and reports only empty success receipt',async()=>{
- const {doc,chrome}=freshSetup({readResponse:{ok:true,enabled:false,pageKey:'restore-page'}});await flush();
- const details=doc.getElementById('preferences');details.open=true;
- doc.getElementById('restore-start').dispatchEvent(new Event('click'));
- assert.equal(doc.getElementById('restore-confirmation').hidden,false);
- doc.getElementById('restore-cancel').dispatchEvent(new Event('click'));await flush();
- assert.equal(doc.getElementById('restore-confirmation').hidden,true);assert.equal(chrome._calls.some(call=>call.method==='runtime.sendMessage'&&call.message.type==='local-preferences'),false);
- doc.getElementById('restore-start').dispatchEvent(new Event('click'));
- doc.getElementById('restore-confirm').dispatchEvent(new Event('click'));
- assert.equal(doc.getElementById('restore-confirm').disabled,true);
- assert.equal(doc.getElementById('restore-cancel').disabled,true);
- assert.equal(doc.getElementById('restore-start').disabled,true);
- doc.getElementById('restore-confirm').dispatchEvent(new Event('click'));
- await flush();assert.equal(doc.getElementById('restore-status').dataset.kind,'success');
- assert.equal(doc.getElementById('restore-status').textContent,'已恢复全部提示偏好。');
- assert.equal(details.open,true,'success feedback remains visible inside the expanded details');
- assert.deepEqual(chrome._calls.find(call=>call.method==='runtime.sendMessage'&&call.message.type==='local-preferences').message,{type:'local-preferences',action:'restore-all'});
- assert.equal(chrome._calls.filter(call=>call.method==='runtime.sendMessage'&&call.message.type==='local-preferences').length,1,'duplicate confirm cannot dispatch twice');
-});
-
-test('restore malformed, non-empty, or failed receipt never claims success',async()=>{
- for(const preferenceResponse of [null,{ok:true},{ok:true,entryKeys:['x']},{ok:true,entryKeys:['x',3]},{ok:false,reason:'storage'}]){
-  const {doc}=freshSetup({readResponse:{ok:true,enabled:false,pageKey:'restore-fail'},preferenceResponse});await flush();
-  doc.getElementById('restore-start').dispatchEvent(new Event('click'));
-  doc.getElementById('restore-confirm').dispatchEvent(new Event('click'));await flush();
-  assert.equal(doc.getElementById('restore-status').dataset.kind,'error');
- }
-});
-
-test('restore failure is independent from later successful page toggle',async()=>{
- const {doc,chrome}=freshSetup({readResponse:{ok:true,enabled:false,pageKey:'independent'}});await flush();
- chrome.runtime.sendMessage=async()=>({ok:false,reason:'storage'});
- doc.getElementById('restore-start').dispatchEvent(new Event('click'));
- doc.getElementById('restore-confirm').dispatchEvent(new Event('click'));await flush();
- assert.equal(doc.getElementById('restore-status').dataset.kind,'error');
- chrome._nextResponse={ok:true,enabled:true,pageKey:'independent'};
- const toggle=doc.getElementById('enhance-toggle');toggle.checked=true;toggle.dispatchEvent(new Event('change'));await flush();
- assert.equal(doc.getElementById('restore-status').dataset.kind,'error');
- assert.equal(doc.getElementById('page-status').textContent,'已开启 · 英文优先');
-});
-
 test('service status renders formal readiness, degraded warmup, demo, missing data, dependency and schema states',async()=>{
  const dataset={releaseId:'release-1',preparationId:'prep-1',ruleId:'rules-1',sqlVersion:'4',sha256:'a'.repeat(64)};
  const cases=[
@@ -411,9 +396,11 @@ test('service status renders formal readiness, degraded warmup, demo, missing da
   const value={softwareVersion:'1.2.3',apiContract:'caption-hints.v2',...state};
   const {doc}=freshSetup({statusResponse:{ok:true,status:value}});await flush();
   assert.equal(doc.getElementById('service-status').textContent,expected);
-  assert.equal(doc.getElementById('service-identity').hidden,false);
-  assert.match(doc.getElementById('service-identity').textContent,/软件 1\.2\.3 · 协议 caption-hints\.v2/u);
-  assert.ok(doc.getElementById('service-identity').textContent.includes(state.datasetVersion===null?'未知':String(state.datasetVersion)));
+  const detailsVisible=state.mode==='formal'&&state.ready&&state.publishedDataset!==null;
+  assert.equal(doc.getElementById('service-identity').hidden,!detailsVisible);
+  assert.equal(doc.getElementById('service-diagnostics').hidden,true,'details stay closed for every runtime state');
+  assert.equal(doc.getElementById('service-status').hidden, state.mode==='formal'&&state.ready&&state.reason!=='PREWARM_DEGRADED');
+  assert.equal(doc.getElementById('service-identity').textContent,'软件 1.2.3');
  }
 });
 
@@ -442,23 +429,20 @@ test('an unverified or incompatible dataset binding is clearly rejected',async()
  assert.match(invalid.doc.getElementById('service-status').textContent,/服务\/API合同不兼容/u);
 });
 
-test('status lookup failure leaves page enhancement and local preference controls usable',async()=>{
+test('status lookup failure leaves page enhancement usable and displays configured target as disconnected',async()=>{
  const {doc,chrome}=freshSetup({statusReject:true,readResponse:{ok:true,enabled:false,pageKey:'independent-page'}});await flush();
  const toggle=doc.getElementById('enhance-toggle');assert.equal(toggle.disabled,false);
  chrome._nextResponse={ok:true,enabled:true,pageKey:'independent-page'};
  toggle.checked=true;toggle.dispatchEvent(new Event('change'));await flush();
  assert.equal(toggle.checked,true);
- const details=doc.getElementById('preferences');details.open=true;
- doc.getElementById('restore-start').dispatchEvent(new Event('click'));
- doc.getElementById('restore-confirm').dispatchEvent(new Event('click'));await flush();
- assert.equal(doc.getElementById('restore-status').dataset.kind,'success');
- assert.equal(chrome._calls.some(call=>call.message?.type==='local-preferences'&&call.message.action==='restore-all'),true);
+ assert.match(doc.getElementById('backend-target').textContent,/^○ 未连接 127\.0\.0\.1:\d+$/u);
+ assert.equal(chrome._calls.some(call=>call.message?.type==='local-preferences'&&call.message.action==='setCutoff'),false);
 });
 
  test("non-video page explains navigation instead of refresh", async () => {
   const {doc} = freshSetup({readResponse:{ok:false,reason:"not-video-page"}});
   await flush();
-  assert.match(doc.getElementById("page-status").textContent, /请打开 YouTube 视频播放页/);
+  assert.match(doc.getElementById("page-status").textContent, /打开 YouTube 视频即可使用/u);
   assert.equal(doc.getElementById("enhance-toggle").disabled, true);
  });
  test("disabled controls never use a perpetual waiting cursor", () => {
@@ -474,7 +458,117 @@ test('status lookup failure leaves page enhancement and local preference control
   ctx.clearTimeout=()=>{};
   loadPopup(ctx); fireReady(doc); await flush();
   timers.forEach(fn=>fn()); await flush();
-  assert.match(doc.getElementById("page-status").textContent,/当前页面不可用/);
+  assert.match(doc.getElementById("page-status").textContent,/打开 YouTube 视频即可使用/u);
   late({ok:true,enabled:true,pageKey:"late"}); await flush();
   assert.equal(doc.getElementById("enhance-toggle").disabled,true);
  });
+
+
+test('healthy popup puts primary action immediately after brand and only useful preferences in summary',()=>{
+ const html=readFileSync(resolve(import.meta.dirname,'../src/popup.html'),'utf8');
+ assert.match(html,/<main>\s*<section id="page-section"/u);
+ assert.ok(html.indexOf('id="enhance-toggle"')<html.indexOf('id="summary-section"'));
+ assert.ok(html.indexOf('id="summary-section"')<html.indexOf('id="service-section"'));
+ assert.doesNotMatch(html,/服务状态<|当前页<|手动添加|未开放|<select/u);
+ assert.match(html,/id="diagnostics-toggle"[^>]*aria-label="连接与版本详情"[^>]*aria-expanded="false"[^>]*aria-controls="service-diagnostics"/u);
+});
+test('healthy service connection is one line and normal page state is conveyed by the switch',async()=>{
+ const status={softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'formal',ready:true,reason:'OK',datasetVersion:7,publishedDataset:{releaseId:'r',preparationId:'p',ruleId:'rules',sqlVersion:'4',sha256:'a'.repeat(64)}};
+ for(const enabled of [true,false]){
+  const {doc}=freshSetup({statusResponse:{ok:true,status},readResponse:{ok:true,enabled,pageKey:'p'}});await flush();
+  assert.match(doc.getElementById('backend-target').textContent,/^● 已连接 127\.0\.0\.1:\d+$/u);
+  assert.equal(doc.getElementById('service-status').hidden,true);
+  assert.equal(doc.getElementById('page-status').hidden,true);
+  assert.equal(doc.getElementById('enhance-toggle').checked,enabled);
+  assert.equal(doc.getElementById('enhance-toggle').disabled,false);
+ }
+});
+test('details toggle and Escape synchronize expanded state and restore focus without new requests',async()=>{
+ const {doc,chrome}=freshSetup({statusResponse:{ok:false,reason:'dataset-identity'}});await flush();
+ const button=doc.getElementById('diagnostics-toggle'),panel=doc.getElementById('service-diagnostics'),calls=chrome._calls.length;
+ assert.equal(button.getAttribute('aria-expanded'),'false');assert.equal(panel.hidden,true);
+ button.dispatchEvent(new Event('click'));
+ assert.equal(button.getAttribute('aria-expanded'),'true');assert.equal(panel.hidden,false);
+ assert.match(doc.getElementById('diagnostic-target').textContent,/^127\.0\.0\.1:\d+$/u);
+ assert.equal(doc.getElementById('service-status').hidden,false,'errors remain visible without expanding');
+ let prevented=false;doc.dispatchEvent({type:'keydown',key:'Escape',preventDefault(){prevented=true;}});
+ assert.equal(panel.hidden,true);assert.equal(button.getAttribute('aria-expanded'),'false');assert.equal(button.focused,true);assert.equal(prevented,true);
+ button.dispatchEvent(new Event('click'));button.dispatchEvent(new Event('click'));assert.equal(panel.hidden,true);
+ assert.equal(chrome._calls.length,calls,'details do not fetch or poll');
+});
+test('preference failures explain recovery without inventing counts',async()=>{
+ const {doc}=freshSetup({preferenceResponse:{ok:false}});await flush();
+ assert.equal(doc.getElementById('preference-status').hidden,false);
+ assert.match(doc.getElementById('preference-status').textContent,/重新打开弹窗/u);
+ assert.equal(doc.getElementById('hidden-summary').textContent,'不可用');
+});
+
+test('popup explicitly inherits its readable font instead of native extension body scaling',()=>{
+ const css=readFileSync(resolve(import.meta.dirname,'../src/popup.css'),'utf8');
+ assert.match(css,/body\s*\{[^}]*font:inherit/u);
+ assert.match(css,/font:\s*13px\/1\.45/u);
+ assert.doesNotMatch(css,/body[^}]*overflow:\s*hidden/u);
+});
+
+const diagnosticRuntime = {
+ softwareVersion:'2.4.1-SNAPSHOT.20261108.gf3191b5.dirty.123456789abc',
+ apiContract:'caption-hints.v2',mode:'formal',ready:true,reason:'OK',datasetVersion:7,
+ publishedDataset:{releaseId:'r',preparationId:'p',ruleId:'rules',sqlVersion:'4',sha256:'a'.repeat(64)}
+};
+test('compact version labels a real snapshot without dumping technical identities into the UI',async()=>{
+ const {doc}=freshSetup({statusResponse:{ok:true,status:diagnosticRuntime}});await flush();
+ assert.equal(doc.getElementById('service-identity').textContent,'软件 2.4.1 · 开发版');
+ assert.equal(doc.getElementById('service-identity').hidden,false);
+ assert.doesNotMatch(doc.getElementById('service-identity').textContent,/SNAPSHOT|123456789abc|caption-hints|SHA-256/u);
+});
+test('copy preserves complete diagnostic identities but excludes unrelated private payloads',async()=>{
+ const status={...diagnosticRuntime,token:'fixture-secret',captions:'fixture-caption',
+  publishedDataset:{...diagnosticRuntime.publishedDataset,history:'fixture-history'}};
+ const {doc,ctx,chrome}=freshSetup({statusResponse:{ok:true,status}});await flush();
+ assert.equal(ctx.copiedText,undefined,'never copy without explicit action');
+ const calls=chrome._calls.length;
+ doc.getElementById('copy-diagnostics').dispatchEvent(new Event('click'));await flush();
+ const copied=JSON.parse(ctx.copiedText);
+ assert.equal(copied.runtime.softwareVersion,diagnosticRuntime.softwareVersion);
+ assert.equal(copied.extensionVersion,'1.2.3');
+ assert.deepEqual(copied.runtime.publishedDataset,diagnosticRuntime.publishedDataset);
+ assert.equal(copied.runtime.apiContract,'caption-hints.v2');
+ assert.equal(copied.runtime.datasetVersion,7);
+ assert.match(copied.backend,/^http:\/\/127\.0\.0\.1:\d+$/u);
+ assert.doesNotMatch(ctx.copiedText,/fixture-secret|fixture-caption|fixture-history|commonWordCutoff|pageKey/u);
+ assert.equal(doc.getElementById('copy-status').textContent,'诊断信息已复制');
+ assert.equal(doc.getElementById('copy-status').hidden,false);
+ assert.equal(doc.getElementById('copy-diagnostics').disabled,false);
+ assert.equal(chrome._calls.length,calls,'copy is local, with no new network/messages');
+});
+test('copy failure is visible and retry works without hiding the real connection error',async()=>{
+ const {doc,ctx}=freshSetup({statusReject:true});await flush();
+ ctx.navigator.clipboard.writeText=async()=>{throw Error('fixture denied')};
+ doc.getElementById('copy-diagnostics').dispatchEvent(new Event('click'));await flush();
+ assert.equal(doc.getElementById('copy-status').dataset.kind,'error');
+ assert.equal(doc.getElementById('copy-status').textContent,'复制失败，请重试。');
+ assert.equal(doc.getElementById('copy-diagnostics').disabled,false);
+ assert.equal(doc.getElementById('service-status').hidden,false);
+ assert.match(doc.getElementById('service-status').textContent,/无法连接服务/u);
+ ctx.navigator.clipboard.writeText=async text=>{ctx.copiedText=text};
+ doc.getElementById('copy-diagnostics').dispatchEvent(new Event('click'));await flush();
+ assert.equal(JSON.parse(ctx.copiedText).runtime,null);
+ assert.match(JSON.parse(ctx.copiedText).status,/无法连接服务/u);
+ assert.equal(doc.getElementById('copy-status').dataset.kind,'success');
+});
+test('missing clipboard API reports failure and a hung clipboard operation ends waiting',async()=>{
+ const missing=freshSetup();await flush();missing.ctx.navigator={};
+ missing.doc.getElementById('copy-diagnostics').dispatchEvent(new Event('click'));await flush();
+ assert.equal(missing.doc.getElementById('copy-status').dataset.kind,'error');
+ const {doc,ctx}=freshSetup();await flush();
+ const timers=[];let late;
+ ctx.setTimeout=fn=>{timers.push(fn);return timers.length};ctx.clearTimeout=()=>{};
+ ctx.navigator.clipboard.writeText=()=>new Promise(resolve=>{late=resolve});
+ doc.getElementById('copy-diagnostics').dispatchEvent(new Event('click'));await flush();
+ assert.equal(doc.getElementById('copy-diagnostics').disabled,true);
+ timers.forEach(fn=>fn());await flush();
+ assert.equal(doc.getElementById('copy-diagnostics').disabled,false);
+ assert.equal(doc.getElementById('copy-status').dataset.kind,'error');
+ late();await flush();
+ assert.equal(doc.getElementById('copy-status').dataset.kind,'error','late completion cannot claim success');
+});

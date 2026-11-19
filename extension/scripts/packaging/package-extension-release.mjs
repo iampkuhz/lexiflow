@@ -57,7 +57,7 @@ export async function createExtensionZip(options = {}) {
     if (name === "manifest.json") {
       const manifest = JSON.parse(bytes.toString("utf8"));
       if (manifest.version !== chromeVersion(softwareVersion) || manifest.version_name !== softwareVersion) fail("manifest software version mismatch");
-      if (JSON.stringify(manifest.permissions) !== JSON.stringify(["storage"])) fail("manifest permissions mismatch");
+      if (JSON.stringify(manifest.permissions) !== JSON.stringify([])) fail("manifest permissions mismatch");
       if (JSON.stringify(manifest.host_permissions) !== JSON.stringify([`http://127.0.0.1:${apiPort}/*`])) fail("manifest host permissions mismatch");
     }
     if (name === "build-identity.json") {

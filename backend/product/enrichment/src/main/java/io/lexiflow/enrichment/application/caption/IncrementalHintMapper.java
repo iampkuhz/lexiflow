@@ -65,7 +65,8 @@ final class IncrementalHintMapper {
                   hint.chineseGloss(),
                   hint.lexiconEntryId(),
                   hint.lexiconVersion(),
-                  hint.senseId());
+                  hint.senseId(),
+                  hint.lemma());
             })
         .toList();
   }

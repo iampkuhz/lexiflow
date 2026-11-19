@@ -206,6 +206,8 @@ test('Podman mappings accept exact 2^32 boundary and reject malformed mappings o
 
 test('TERM during ready supervision shuts down API within stop budget', async (t) => {
   const f = await lifecycleFixture(t);
+  await mkdir(f.preferences); await writeFile(f.preferencesDatabase,'synthetic');
+  await writeFile(f.preferencesMountInfo,`12 1 0:99 / ${f.preferences} rw - tmpfs tmpfs rw\n`);
   const pidFile = path.join(f.tmp, 'api.pid');
   await writeFile(path.join(f.bin, 'java'), `#!/bin/sh
 db=''; previous=''; for arg do [ "$previous" = --expected-file ] && db=$arg; previous=$arg; done

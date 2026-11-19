@@ -17,46 +17,16 @@ LexiFlow 后端是共享两个业务领域的 Modular Monolith，只有 `:api` �
 <a id="3-java-module-的完整划分"></a>
 ## 1.2. 依赖从组合根走向公开 contract
 
-下图是**四个产品 Gradle 项目的直接依赖方向**，不是运行时调用顺序。每个业务项目包含领域与应用层；未来后台用例仍由所属业务模块实现，经唯一应用组合根装配。具体的客户端、服务端和存储系统关系见[系统边界图](../system.md)。
+以下是四个产品 Gradle 项目的直接依赖，不是运行时调用顺序。客户端、服务端和存储关系见[系统总览](../system.md)。
 
-```plantuml
-@startuml
-skinparam backgroundColor #FFFFFF
-skinparam shadowing false
-skinparam defaultFontName "Noto Sans CJK SC"
-skinparam defaultFontSize 14
-skinparam componentStyle rectangle
-skinparam packageStyle rectangle
-skinparam nodesep 45
-skinparam ranksep 70
-skinparam ArrowColor #475569
-title 四个产品项目与直接依赖
-top to bottom direction
-package "运行入口" #DBEAFE {
-  component "api" as api
-}
-package "业务模块" #DCFCE7 {
-  component "enrichment" as enrichment
-  component "lexicon" as lexicon
-}
-package "技术适配" #FEF3C7 {
-  component "platform adapters" as adapters
-}
-enrichment -[hidden]right- lexicon
-api --> enrichment : S1 字幕用例
-api --> lexicon : S2 查询服务
-api --> adapters : S3 装配实现
-enrichment --> lexicon : S4 公开领域合同
-adapters --> lexicon : S5 实现词库端口
-legend bottom
-  实线表示 Gradle 直接依赖，不表示运行调用顺序
-  domain 与 application 同属业务项目，包边界由 ArchUnit 检查
-  测试与构建工具不计入产品项目
-endlegend
-@enduml
-```
+| 项目 | 直接依赖的产品项目 |
+| --- | --- |
+| `:api` | `:enrichment`、`:lexicon`、`:adapters` |
+| `:adapters` | `:lexicon` 与 `:enrichment`，用于实现各自公开的持久化端口 |
+| `:enrichment` | `:lexicon` 的公开领域合同 |
+| `:lexicon` | 无 |
 
-`api` 装配 Enrichment 字幕用例、Lexicon 查询服务和持久化实现；未来后台用例也经这一组合根装配与调度，但不进入观看等待链路。Enrichment 只从 Lexicon 的 `domain.port` 与 `domain.model` **公开合同**读取已发布知识；Lexicon 不反向依赖 Enrichment。`:adapters` 仅依赖实际使用的 Lexicon，不发起提示决策。
+`api` 装配 Enrichment 字幕用例、Lexicon 查询服务和持久化实现；未来后台用例也经这一组合根装配与调度，但不进入观看等待链路。Enrichment 只从 Lexicon 的 `domain.port` 与 `domain.model` **公开合同**读取已发布知识；Lexicon 不反向依赖 Enrichment。`:adapters` 依赖实际使用的 Lexicon，并可直接依赖 Enrichment 仅实现其公开本机偏好与提示计数存储 contract；不发起提示决策、不直接读写其他领域数据。
 
 ### 1.2.1. 四个产品项目与三个测试项目
 
@@ -66,7 +36,7 @@ endlegend
 | --- | --- |
 | `:lexicon` | 词库知识、导入与查询；`domain.model/port/catalog`、`application.importing/query/port` |
 | `:enrichment` | 字幕提示领域规则与用例；`domain.model/policy`、`application.caption` |
-| `:adapters` | 来源文件、持久化等具体技术实现；仅依赖 Lexicon |
+| `:adapters` | 来源文件及持久化等技术实现；实现 Lexicon 与 Enrichment 公开端口 |
 | `:api` | 唯一 Spring Boot 入口，负责 HTTP 映射及未来后台任务装配；请求／响应在 `hints.model` |
 | `:architecture-tests` | 编译类架构边界及隔离反例 |
 | `:quality-gates` | Java 源码工程规则及其直接测试 |
@@ -86,7 +56,7 @@ endlegend
 
 来源适配器在本机产生不含平台私有类型的有界输入，`api` 交给 Enrichment 的字幕应用用例；用例经 Lexicon 公开合同查询候选和发布版本，再调用本领域规则，再按价值、密度和适用性决定返回可靠提示或空结果。没有当前字幕模型调用、后台补全或 `pending` 承诺；扩展只显示匹配当前字幕的结果。第三阶段规划的事后分析即使由同一应用调度，产物仍须经公开发布合同后才可供后续观看读取。[观看时序](flows.md)标出每次调用和迟到丢弃。
 
-Chrome 扩展仅可拥有用户明确触发的本机 `SuppressedTermPreference`：以词段和词库版本写入，不上传、不推断熟悉度、不生成账号身份或跨设备合并。本机偏好不是服务端事实。[产品说明](experience.md)解释这种低打扰取舍。
+Chrome 扩展提交显式偏好与实际提示的词条身份，Enrichment 拥有公开存储 contract，`:adapters` 将偏好和每日计数持久化到独立可写 SQLite。已发布词库 SQLite 始终只读，不与本机数据共库。偏好和计数不上传、不用于推断熟悉度、建立账号身份或跨设备合并。[产品说明](experience.md)解释这种低打扰取舍。
 
 ## 1.4. 静态边界与变更入口
 

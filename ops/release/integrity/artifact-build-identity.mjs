@@ -20,7 +20,7 @@ export async function verifyExtensionIdentity(filePath, identity, expectedDatase
     const manifest = JSON.parse(entries.get('manifest.json').toString('utf8'));
     const dataset = JSON.parse(entries.get('expected-dataset.json').toString('utf8'));
     if (manifest.version !== identity.chromeVersion || manifest.version_name !== identity.softwareVersion
-      || JSON.stringify(manifest.permissions) !== JSON.stringify(['storage'])
+      || JSON.stringify(manifest.permissions) !== JSON.stringify([])
       || JSON.stringify(manifest.host_permissions) !== JSON.stringify(['http://127.0.0.1:18080/*'])
       || !dataset || typeof dataset !== 'object' || Array.isArray(dataset)
       || Object.keys(dataset).sort().join('\0') !== ['releaseId', 'preparationId', 'ruleId', 'sqlVersion', 'sha256'].sort().join('\0')
