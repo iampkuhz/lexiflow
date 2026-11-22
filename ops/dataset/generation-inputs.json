@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "include": [
+    "backend/product/adapters/src/main/resources/lexicon/**",
     "backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/importing/**",
     "backend/product/lexicon/src/main/java/io/lexiflow/lexicon/domain/**",
     "backend/product/lexicon/src/main/java/io/lexiflow/lexicon/application/port/**",

@@ -107,23 +107,6 @@ def _read_regular(root: Path, relative: str, limit: int) -> bytes:
         os.close(parent_fd)
 
 
-def _hash_regular(root: Path, relative: str, limit: int) -> tuple[int, str]:
-    """Hash a bounded regular file without loading an image archive into memory."""
-    fd, parent_fd, before, leaf = _open_candidate_file(root, relative, limit)
-    try:
-        digest, size = hashlib.sha256(), 0
-        while chunk := os.read(fd, 1024 * 1024):
-            size += len(chunk)
-            digest.update(chunk)
-        _check_stable_file(fd, parent_fd, leaf, before)
-        return size, digest.hexdigest()
-    except OSError:
-        _fail("registry-candidate-invalid", "candidate")
-    finally:
-        os.close(fd)
-        os.close(parent_fd)
-
-
 def _file_stamp(info: os.stat_result) -> tuple[int, ...]:
     return (
         info.st_dev,

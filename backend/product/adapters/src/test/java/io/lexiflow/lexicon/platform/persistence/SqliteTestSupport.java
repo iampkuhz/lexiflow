@@ -1,10 +1,12 @@
 package io.lexiflow.lexicon.platform.persistence;
 
+import io.lexiflow.lexicon.application.importing.LexiconImportObservation;
 import io.lexiflow.lexicon.application.importing.LexiconImportService;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportMetadata;
-import io.lexiflow.lexicon.application.importing.model.LexiconImportRequest;
 import io.lexiflow.lexicon.application.importing.model.LexiconImportRow;
+import io.lexiflow.lexicon.application.importing.model.LexiconImportRowSource;
 import io.lexiflow.lexicon.application.importing.model.SourceReference;
+import io.lexiflow.lexicon.application.port.LexiconImportObserver;
 import io.lexiflow.lexicon.domain.model.LexiconPriority;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -42,14 +44,63 @@ final class SqliteTestSupport {
 
   static long publish(Path file, LexiconImportRow... rows) throws Exception {
     try (var persistence = SqlitePersistence.open(url(file))) {
-      var request = new LexiconImportRequest(List.of(rows), metadata("fixture-seed"));
-      return new LexiconImportService(persistence.repository()).publish(request);
+      var metadata = metadata("fixture-seed");
+      return new LexiconImportService(persistence.repository())
+          .publishStreaming(
+              metadata,
+              rows.length,
+              rows.length,
+              consumer -> {
+                for (var row : rows) consumer.accept(row);
+                return new LexiconImportRowSource.ReadReceipt(metadata.sourceDigest(), rows.length);
+              },
+              new LexiconImportObservation(LexiconImportObserver.NONE));
     }
+  }
+
+  static io.lexiflow.lexicon.application.port.LexiconPublicationRepository.PublicationProgress
+      quietProgress() {
+    return new io.lexiflow.lexicon.application.port.LexiconPublicationRepository
+        .PublicationProgress() {
+      @Override
+      public void persistStarted() {}
+
+      @Override
+      public void persisted(long entries, long lookups) {}
+
+      @Override
+      public void rolledBack() {}
+    };
   }
 
   static LexiconImportRow row(
       String lemma, String gloss, List<String> aliases, List<String> inflections) {
     return row(lemma, gloss, aliases, inflections, true);
+  }
+
+  static LexiconImportRow rankedRow(
+      String lemma, List<String> aliases, List<String> inflections, Long bnc, Long frq) {
+    var row = row(lemma, "释义", aliases, inflections);
+    return new LexiconImportRow(
+        row.lemma(),
+        row.chineseGloss(),
+        row.definition(),
+        row.aliases(),
+        row.inflections(),
+        row.priority(),
+        row.dictionary(),
+        row.frequency(),
+        row.complexLists(),
+        true,
+        false,
+        row.hintPolicyReference(),
+        row.sourceGloss(),
+        bnc,
+        frq,
+        List.of(),
+        false,
+        false,
+        false);
   }
 
   static LexiconImportRow row(

@@ -1,8 +1,9 @@
-# 本机开发资源：会保留开发数据，不可直接当作破坏性测试数据库。
-# 隔离测试资源的显式准备见 docs/scenarios/verification-environment.md。
+# 仅用于独立验证引擎，不在日常 Podman 引擎启用。
+# 隔离资源入口见 docs/scenarios/verification-environment.md。
 name: lexiflow-local
 services:
   redis:
+    profiles: [isolated-verification]
     image: docker.io/library/redis:7
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:

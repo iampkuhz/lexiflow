@@ -1,5 +1,6 @@
 services:
   api:
+    container_name: lexiflow-release
     labels:
       lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
       lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}
@@ -9,6 +10,10 @@ services:
     ports: ["127.0.0.1:18080:8080"]
     volumes:
       - lexiflow-data:/var/lib/lexiflow
+      - lexiflow-preferences:/var/lib/lexiflow/preferences
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro
+      LEXIFLOW_PREFERENCES_JDBC_URL: jdbc:sqlite:/var/lib/lexiflow/preferences/preferences.db
     networks: [private]
     tmpfs:
       - /run/lexiflow:mode=0700,uid=10001,gid=10001
@@ -31,6 +36,10 @@ volumes:
     labels:
       lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
       lexiflow.release: ${LEXIFLOW_RELEASE_KEY:?LEXIFLOW_RELEASE_KEY is required}
+  lexiflow-preferences:
+    name: lexiflow-${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}_preferences
+    labels:
+      lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
 
 networks:
   private:

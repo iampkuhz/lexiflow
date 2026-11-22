@@ -49,7 +49,7 @@ abstract class VerifyProjectDependenciesTask : DefaultTask() {
         internal val allowedDependencies = mapOf(
             ":lexicon" to emptySet(),
             ":enrichment" to setOf(":lexicon"),
-            ":adapters" to setOf(":lexicon"),
+            ":adapters" to setOf(":lexicon", ":enrichment"),
             ":api" to (modules + ":adapters"),
             ":architecture-tests" to products,
             ":quality-gates" to emptySet(),

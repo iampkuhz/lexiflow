@@ -207,14 +207,12 @@ class CaptionHintLogTest {
 
   private static CaptionHintRequest request(CaptionHintRequest.Segment... segments) {
     return new CaptionHintRequest(
-        "secret-topic",
-        null,
-        null,
+        List.of(),
         new CaptionHintRequest.Snapshot(
-            List.of(new CaptionHintRequest.CaptionGroup(null, null, List.of(segments)))));
+            List.of(new CaptionHintRequest.CaptionGroup(List.of(segments)))));
   }
 
   private static CaptionHintRequest.Segment segment(String key, String text, boolean append) {
-    return new CaptionHintRequest.Segment(key, text, null, append, 0L);
+    return new CaptionHintRequest.Segment(key, text, append, 0L);
   }
 }

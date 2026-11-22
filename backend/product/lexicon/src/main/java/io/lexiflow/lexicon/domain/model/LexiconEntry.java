@@ -9,16 +9,17 @@ import java.util.Objects;
 /**
  * 可复用词汇事实的一个不可变发布版本。
  *
- * @param entryId 词条稳定正 long 身份；由语言和规范 lemma 确定。
- * @param lexiconVersion 词条所属的单调词库版本。
- * @param languageTag 词条语言；首版固定为英语。
- * @param entryKind 单词或固定短语。
- * @param lemma 已规范化的 lemma 或短语表面。
- * @param senses 不可为空且具有唯一 identity 的义项集合。
- * @param aliases 指向同一词条的别名集合。
- * @param inflections 指向同一 lemma 的屈折形集合。
- * @param provenance 发布版本的来源和许可声明。
- * @param priority 导入构建期评分输入；发布时折叠为统一查询优先级。
+ * @param entryId 含义：词条稳定身份。取值范围：正 long，由语言和规范 lemma 确定。
+ * @param lexiconVersion 含义：词条所属词库版本。取值范围：正 long，随发布单调递增。
+ * @param languageTag 含义：词条语言标记。取值范围：当前仅为 en。
+ * @param entryKind 含义：词条类别。取值范围：单词或固定短语。
+ * @param lemma 含义：规范主词形或短语表面。取值范围：非空且符合词条类别。
+ * @param senses 含义：词条的义项集合。取值范围：非空且义项身份唯一。
+ * @param aliases 含义：指向同一词条的别名集合。取值范围：表面唯一，可为空。
+ * @param inflections 含义：指向同一主词形的屈折形集合。取值范围：表面唯一，可为空。
+ * @param provenance 含义：发布版本的来源与许可声明。取值范围：非空。
+ * @param priority 含义：发布查询优先级输入。取值范围：非空，优先级语义由领域类型限定。
+ * @param frequencyRank 含义：已发布原始 BNC 排名。取值范围：可空；存在时为正数，不使用 FRQ 回退。
  */
 public record LexiconEntry(
     long entryId,
@@ -30,7 +31,8 @@ public record LexiconEntry(
     List<LexiconAlias> aliases,
     List<LexiconInflection> inflections,
     LexiconProvenance provenance,
-    LexiconPriority priority) {
+    LexiconPriority priority,
+    Long frequencyRank) {
 
   /** 校验版本化词条、表面唯一性和从属实体的不可变边界。 */
   public LexiconEntry {
@@ -51,6 +53,35 @@ public record LexiconEntry(
     rejectSurfaceReuse(lemma, aliases, inflections);
     Objects.requireNonNull(provenance, "provenance");
     Objects.requireNonNull(priority, "priority");
+    if (frequencyRank != null && frequencyRank < 1) {
+      throw new IllegalArgumentException("frequencyRank must be positive when present");
+    }
+  }
+
+  /** 创建不含来源词频排名的词条。 */
+  public LexiconEntry(
+      long entryId,
+      long lexiconVersion,
+      String languageTag,
+      LexiconEntryKind entryKind,
+      String lemma,
+      List<LexiconSense> senses,
+      List<LexiconAlias> aliases,
+      List<LexiconInflection> inflections,
+      LexiconProvenance provenance,
+      LexiconPriority priority) {
+    this(
+        entryId,
+        lexiconVersion,
+        languageTag,
+        entryKind,
+        lemma,
+        senses,
+        aliases,
+        inflections,
+        provenance,
+        priority,
+        null);
   }
 
   /**

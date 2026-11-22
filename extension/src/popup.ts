@@ -1,72 +1,77 @@
+import { mismatchText } from "./runtime-status";
+import { bounded } from "./message-deadline";
+import { CAPTION_LINE_LIMIT_KEY, DEFAULT_CAPTION_LINE_LIMIT, captionLineLimit } from "./caption-display";
 import type { RuntimeStatus } from "./runtime-status";
+import { DEFAULT_ORIGIN, loopbackOrigin, TEST_CHANNEL } from "./backend-target";
+import { managementUrl } from "./manage-context";
 
-interface PageReply { ok: true; enabled: boolean; pageKey: string }
+interface PageReply { ok: true; enabled: boolean; pageKey: string; captionStatus?: string }
 type PageResponse = PageReply | { ok: false; reason?: string };
-type PreferenceResponse = { ok: true; entryKeys: string[] } | { ok: false; reason?: string };
-type RuntimeReply = { ok: true; status: RuntimeStatus } | { ok: false; reason: string };
+type RuntimeReply = ({ ok: true; status: RuntimeStatus } | { ok: false; reason: string; expected?: string; actual?: string }) & { origin?: string };
 
-// 消息通道异常时也必须结束等待；迟到结果不再改变弹窗状态。
-function bounded<T>(operation: Promise<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("message timeout")), 5000);
-    operation.then(resolve, reject).finally(() => clearTimeout(timer));
-  });
-}
 let pageKey: string | null = null;
 let tabId: number | undefined;
-let restoreBusy = false;
 function el<T extends HTMLElement>(id: string): T { return document.getElementById(id) as T; }
 function pageMessage(text: string, kind: "error" | "success" | "pending" = "error"): void {
   const status = el<HTMLDivElement>("page-status"); status.textContent = text; status.dataset.kind = kind;
 }
-function restoreMessage(text: string, kind: "error" | "success"): void {
-  const status = el<HTMLDivElement>("restore-status"); status.textContent = text; status.dataset.kind = kind; status.hidden = false;
+let backendOrigin = DEFAULT_ORIGIN;
+let statusGeneration = 0;
+const backendHost = () => backendOrigin.slice("http://".length);
+function backendState(connected = false, ready = false): void {
+  const node = el<HTMLElement>("backend-target");
+  node.textContent = `${connected ? "● 已连接" : "○ 未连接"} ${backendHost()}${connected && !ready ? " · 未就绪" : ""}`;
+  node.dataset.kind = connected ? (ready ? "success" : "pending") : "error";
 }
-function renderPageState(enabled: boolean): void {
+function renderPageState(enabled: boolean, captionStatus?: string): void {
   const status = el<HTMLDivElement>("page-status");
-  status.textContent = enabled ? "已开启 · 英文优先" : "已关闭 · 保留英文";
+  const messages: Record<string, string> = {
+    "no-hint": "已识别英文字幕 · 当前没有可显示的词汇提示",
+    "no-caption": "等待播放器显示英文字幕",
+    "waiting": "已识别字幕 · 正在查词",
+    "shown": "正在显示中文词汇提示",
+    "unavailable": "本句查词失败 · 保留英文",
+    "preferences-unavailable": "本机偏好不可用 · 保留英文"
+  };
+  status.textContent = enabled ? messages[captionStatus ?? ""] ?? "" : "已关闭 · 保留英文";
   status.dataset.kind = "success";
 }
+function renderServiceStatus(reply?: RuntimeReply): void {
+  const status = el<HTMLDivElement>("service-status");
+  const origin = loopbackOrigin(reply?.origin);
+  if (origin) backendOrigin = origin;
+  if (!reply?.ok) {
+    backendState();
+    status.dataset.kind = "error";
+    switch (reply?.reason) {
+      case "protocol-mismatch": status.textContent = mismatchText(reply); break;
+      case "invalid-response": status.textContent = "运行状态响应无效，服务/API合同不兼容。"; break;
+      default: status.textContent = "无法连接服务，请检查后端是否启动。";
+    }
+    return;
+  }
+  const value = reply.status;
+  backendState(true, value.ready);
+  if (value.reason === "INITIALIZING") { status.textContent = "服务正在初始化发布资料…"; status.dataset.kind = "pending"; }
+  else if (value.mode === "demo") { status.textContent = "演示模式 · 非正式就绪"; status.dataset.kind = "error"; }
+  else if (value.mode === "invalid" || value.reason === "SCHEMA_MISMATCH") { status.textContent = "资料结构不匹配，请使用匹配的服务与资料。"; status.dataset.kind = "error"; }
+  else if (value.reason === "IDENTITY_MISMATCH") { status.textContent = "服务发行资料身份校验失败，请检查匹配的发行包。"; status.dataset.kind = "error"; }
+  else if (value.reason === "NO_PUBLISHED_DATA") { status.textContent = "尚无已发布资料，请检查资料初始化与发布状态。"; status.dataset.kind = "error"; }
+  else if (value.reason === "DEPENDENCY_UNAVAILABLE") { status.textContent = "服务依赖不可用，请检查后端依赖服务。"; status.dataset.kind = "error"; }
+  else if (value.ready) { status.textContent = value.reason === "PREWARM_DEGRADED" ? "正式就绪 · 预热降级，服务可用。" : "正式就绪。"; status.dataset.kind = "success"; }
+  else { status.textContent = "资料初始化未完成。"; status.dataset.kind = "error"; }
+  if (value.mode === "formal" && value.ready && value.reason !== "PREWARM_DEGRADED") status.textContent = "";
+}
 async function readServiceStatus(): Promise<void> {
-  const status = el<HTMLDivElement>("service-status"), identity = el<HTMLDivElement>("service-identity");
-  status.textContent = "正在查询服务状态…";
+  const generation = ++statusGeneration;
+  const status = el<HTMLDivElement>("service-status");
+  el<HTMLElement>("backend-target").textContent = `○ 正在连接 ${backendHost()}`;
+  status.textContent = "";
   try {
     const reply = await bounded(chrome.runtime.sendMessage({ type: "runtime-status" })) as RuntimeReply | undefined;
-    if (!reply || reply.ok !== true) {
-      if (reply?.reason === "protocol-mismatch") {
-        status.textContent = "协议不匹配，请使用匹配的扩展与服务版本。"; status.dataset.kind = "error"; identity.hidden = true; return;
-      }
-      if (reply?.reason === "software-version") {
-        status.textContent = "软件版本不匹配，请安装与服务对应的扩展。"; status.dataset.kind = "error"; identity.hidden = true; return;
-      }
-      if (reply?.reason === "binding-missing") {
-        status.textContent = "扩展缺少发行资料绑定，请使用正式发行包。"; status.dataset.kind = "error"; identity.hidden = true; return;
-      }
-      if (reply?.reason === "dataset-identity") {
-        status.textContent = "已发布资料身份不匹配，请安装与服务对应的发行包。"; status.dataset.kind = "error"; identity.hidden = true; return;
-      }
-      if (reply?.reason === "invalid-response") {
-        status.textContent = "运行状态响应无效，服务/API合同不兼容。"; status.dataset.kind = "error"; identity.hidden = true; return;
-      }
-      throw new Error("status unavailable");
-    }
-    const value = reply.status;
-    const published = value.publishedDataset;
-    const binding = published ? ` · 资料 ${published.releaseId}/${published.preparationId}/${published.ruleId} · SQL ${published.sqlVersion} · SHA-256 ${published.sha256}` : " · 资料身份尚未验证";
-    identity.textContent = `软件 ${value.softwareVersion} · 协议 ${value.apiContract} · 已发布资料版本 ${value.datasetVersion === null ? "未知" : value.datasetVersion}${binding}`;
-    identity.hidden = false;
-    if (value.reason === "INITIALIZING") { status.textContent = "服务正在初始化发布资料…"; status.dataset.kind = "pending"; }
-    else if (value.mode === "demo") { status.textContent = "演示模式 · 非正式就绪"; status.dataset.kind = "error"; }
-    else if (value.mode === "invalid" || value.reason === "SCHEMA_MISMATCH") { status.textContent = "资料结构不匹配，请使用匹配的服务与资料。"; status.dataset.kind = "error"; }
-    else if (value.reason === "IDENTITY_MISMATCH") { status.textContent = "服务发行资料身份校验失败，请检查匹配的发行包。"; status.dataset.kind = "error"; }
-    else if (value.reason === "NO_PUBLISHED_DATA") { status.textContent = "尚无已发布资料，请检查资料初始化与发布状态。"; status.dataset.kind = "error"; }
-    else if (value.reason === "DEPENDENCY_UNAVAILABLE") { status.textContent = "服务依赖不可用，请检查后端依赖服务。"; status.dataset.kind = "error"; }
-    else if (value.ready) { status.textContent = value.reason === "PREWARM_DEGRADED" ? "正式就绪 · 预热降级，服务可用。" : "正式就绪。"; status.dataset.kind = "success"; }
-    else { status.textContent = "资料初始化未完成。"; status.dataset.kind = "error"; }
+    if (generation === statusGeneration) renderServiceStatus(reply);
   } catch {
-    identity.hidden = true;
-    status.textContent = "无法连接服务，请检查后端是否启动。";
-    status.dataset.kind = "error";
+    if (generation === statusGeneration) renderServiceStatus();
   }
 }
 function validPageReply(value: unknown): value is PageReply {
@@ -79,11 +84,15 @@ async function readPage(): Promise<void> {
     const [tab] = await bounded(chrome.tabs.query({ active: true, currentWindow: true }));
     if (typeof tab?.id !== "number") { pageMessage("没有可用标签页，请打开 YouTube 视频页面。"); return; }
     const response = await bounded(chrome.tabs.sendMessage(tab.id, { type: "page-enhancement", action: "read" })) as PageResponse | undefined;
-    if (response?.ok === false && response.reason === "not-video-page") { pageMessage("请打开 YouTube 视频播放页后使用字幕增强。"); return; }
+    if (response?.ok === false && response.reason === "not-video-page") { pageMessage("打开 YouTube 视频即可使用字幕增强。", "pending"); return; }
+    if (response === undefined || response === null) { pageMessage("打开 YouTube 视频即可使用字幕增强。", "pending"); return; }
+    if (response?.ok === false && response.reason === "other-channel") {
+      pageMessage("另一套 LexiFlow 正在此页运行。请在 chrome://extensions 关闭另一套，再刷新视频。"); return;
+    }
     if (!validPageReply(response)) { pageMessage("当前页面不可用，请刷新 YouTube 视频页面后重试。"); return; }
     tabId = tab.id; pageKey = response.pageKey; toggle.checked = response.enabled; toggle.disabled = false;
-    renderPageState(response.enabled);
-  } catch { pageMessage("当前页面不可用，请刷新 YouTube 视频页面后重试。"); }
+    renderPageState(response.enabled, response.captionStatus);
+  } catch { pageMessage("打开 YouTube 视频即可使用字幕增强。", "pending"); }
 }
 async function setPage(): Promise<void> {
   const toggle = el<HTMLInputElement>("enhance-toggle"), desired = toggle.checked;
@@ -93,40 +102,38 @@ async function setPage(): Promise<void> {
   try {
     const response = await bounded(chrome.tabs.sendMessage(tabId, { type: "page-enhancement", action: "set", enabled: desired, pageKey })) as PageResponse | undefined;
     if (!validPageReply(response) || response.pageKey !== pageKey) throw new Error("invalid receipt");
-    toggle.checked = response.enabled; toggle.disabled = false; renderPageState(response.enabled);
+    toggle.checked = response.enabled; toggle.disabled = false; renderPageState(response.enabled, response.captionStatus);
   } catch { toggle.checked = !desired; pageMessage("设置未成功，请重新打开弹窗后重试。"); }
 }
-async function restoreAll(): Promise<void> {
-  if (restoreBusy) return;
-  restoreBusy = true;
-  const start = el<HTMLButtonElement>("restore-start"), confirm = el<HTMLButtonElement>("restore-confirm"), cancel = el<HTMLButtonElement>("restore-cancel");
-  start.disabled = true; confirm.disabled = true; cancel.disabled = true;
-  try {
-    const response = await bounded(chrome.runtime.sendMessage({ type: "local-preferences", action: "restore-all" })) as PreferenceResponse | undefined;
-    if (!response || response.ok !== true || !Array.isArray(response.entryKeys) || response.entryKeys.length !== 0) throw new Error("invalid receipt");
-    restoreMessage("已恢复全部提示偏好。", "success");
-    el<HTMLDivElement>("restore-confirmation").hidden = true;
-    start.hidden = false;
-    start.focus();
-  } catch { restoreMessage("恢复失败；本机偏好未确认更改，请重试。", "error"); }
-  finally { restoreBusy = false; start.disabled = false; confirm.disabled = false; cancel.disabled = false; }
+function attachCaptionLineLimit(): void {
+  const select = el<HTMLSelectElement>("caption-line-limit"), status = el<HTMLElement>("caption-line-status");
+  let saved = DEFAULT_CAPTION_LINE_LIMIT;
+  select.disabled = true;
+  void (async () => {
+    try { saved = captionLineLimit((await bounded(chrome.storage.local.get(CAPTION_LINE_LIMIT_KEY)))[CAPTION_LINE_LIMIT_KEY]); }
+    catch { status.textContent = "无法读取字幕行数设置。"; return; }
+    select.value = String(saved); select.disabled = false;
+  })();
+  select.addEventListener("change", async () => {
+    const requested = captionLineLimit(Number(select.value));
+    select.disabled = true; status.textContent = "";
+    try {
+      await bounded(chrome.storage.local.set({ [CAPTION_LINE_LIMIT_KEY]: requested }));
+      saved = requested;
+    } catch { status.textContent = "字幕行数保存失败，已恢复原设置。"; }
+    finally { select.value = String(saved); select.disabled = false; }
+  });
 }
+
 document.addEventListener("DOMContentLoaded", () => {
-  void readServiceStatus();
+  if (TEST_CHANNEL) el<HTMLElement>("extension-name").textContent = "LexiFlow 测试版";
+  attachCaptionLineLimit();
   el<HTMLInputElement>("enhance-toggle").addEventListener("change", () => { void setPage(); });
-  el<HTMLButtonElement>("restore-start").addEventListener("click", () => {
-    if (restoreBusy) return;
-    el<HTMLDivElement>("restore-confirmation").hidden = false;
-    el<HTMLButtonElement>("restore-start").hidden = true;
-    el<HTMLDivElement>("restore-status").hidden = true;
-    el<HTMLButtonElement>("restore-confirm").focus();
+  el<HTMLButtonElement>("open-manage").addEventListener("click", () => {
+    const context = tabId !== undefined && pageKey !== null ? { tabId, pageKey } : undefined;
+    void chrome.tabs.create({ url: managementUrl(chrome.runtime.getURL("manage.html"), context) })
+      .catch(() => pageMessage("无法打开管理页，请重试。"));
   });
-  el<HTMLButtonElement>("restore-confirm").addEventListener("click", () => { void restoreAll(); });
-  el<HTMLButtonElement>("restore-cancel").addEventListener("click", () => {
-    if (restoreBusy) return;
-    el<HTMLDivElement>("restore-confirmation").hidden = true;
-    el<HTMLButtonElement>("restore-start").hidden = false;
-    el<HTMLButtonElement>("restore-start").focus();
-  });
+  void readServiceStatus();
   void readPage();
 });

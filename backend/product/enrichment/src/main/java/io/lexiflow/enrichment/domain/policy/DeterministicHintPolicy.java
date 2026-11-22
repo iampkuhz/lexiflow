@@ -1,10 +1,7 @@
 package io.lexiflow.enrichment.domain.policy;
 
 import io.lexiflow.enrichment.domain.model.AnnotationHint;
-import io.lexiflow.enrichment.domain.model.CaptionContext;
-import io.lexiflow.enrichment.domain.model.CaptionHintResult;
 import io.lexiflow.enrichment.domain.model.HintSelectionResult;
-import io.lexiflow.enrichment.domain.model.HintState;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.util.ArrayList;
 import java.util.List;
@@ -12,21 +9,6 @@ import java.util.Objects;
 
 /** 根据公开词汇材料生成确定性提示，绝不调用模型或建立伪造的 pending 工作。 */
 public final class DeterministicHintPolicy {
-  /**
-   * 在字幕目标范围内定位词汇候选，并返回可直接显示的中文提示。
-   *
-   * @param context 含义：已验证的字幕上下文。取值范围：非空，区间必须在字幕文本内。
-   * @param candidates 含义：Lexicon 提供的版本化候选。取值范围：非空，可为空集合。
-   * @return 有提示时为 READY，否则为 NO_PENDING。
-   */
-  public CaptionHintResult evaluate(CaptionContext context, List<LexiconHintCandidate> candidates) {
-    Objects.requireNonNull(context, "context");
-    var selected =
-        evaluate(context.caption(), context.startOffset(), context.endOffset(), candidates);
-    return new CaptionHintResult(
-        context.caption(), selected.isEmpty() ? HintState.NO_PENDING : HintState.READY, selected);
-  }
-
   /**
    * 在完整 caption 组的指定新增区间定位，词边界仍取完整组文字。
    *
@@ -76,8 +58,31 @@ public final class DeterministicHintPolicy {
       int endOffset,
       int requiredEndAfter,
       List<LexiconHintCandidate> candidates) {
+    return evaluateSelection(caption, startOffset, endOffset, requiredEndAfter, candidates, 1500);
+  }
+
+  /**
+   * 在给定截止值下完成歧义判定、过滤和重叠选择。
+   *
+   * @param caption 含义：完整字幕文本。取值范围：非空对象，可为空字符串。
+   * @param startOffset 含义：查询上下文起点。取值范围：0 至 endOffset 的 UTF-16 偏移。
+   * @param endOffset 含义：查询上下文终点。取值范围：startOffset 至字幕长度。
+   * @param requiredEndAfter 含义：新增区间起点。取值范围：startOffset 至 endOffset。
+   * @param candidates 含义：已发布词库候选。取值范围：非空列表，可为空集合。
+   * @param commonWordCutoff 含义：单词排名截止值。取值范围：1000、1500 或 2000。
+   * @return 选择结果及歧义、重叠计数。
+   */
+  public HintSelectionResult evaluateSelection(
+      String caption,
+      int startOffset,
+      int endOffset,
+      int requiredEndAfter,
+      List<LexiconHintCandidate> candidates,
+      int commonWordCutoff) {
     Objects.requireNonNull(caption, "caption");
     Objects.requireNonNull(candidates, "candidates");
+    if (commonWordCutoff != 1000 && commonWordCutoff != 1500 && commonWordCutoff != 2000)
+      throw new IllegalArgumentException("commonWordCutoff is invalid");
     if (startOffset < 0
         || endOffset < startOffset
         || endOffset > caption.length()
@@ -99,7 +104,7 @@ public final class DeterministicHintPolicy {
         if (match.endOffset() > requiredEndAfter) matches.add(match);
       }
     }
-    return HintSelection.select(matches);
+    return HintSelection.select(matches, commonWordCutoff);
   }
 
   private static List<HintSelection.CandidateMatch> locate(
@@ -117,7 +122,11 @@ public final class DeterministicHintPolicy {
               qualified == null ? null : candidate.senseId().toString(),
               candidate.lexiconVersion(),
               qualified,
-              candidate.priority()));
+              candidate.priority(),
+              candidate.normalizedForm(),
+              candidate.bncRank(),
+              candidate.normalizedForm().indexOf(' ') >= 0,
+              candidate.frequencyRank()));
     }
     return matches;
   }

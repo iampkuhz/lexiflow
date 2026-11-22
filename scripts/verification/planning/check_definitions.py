@@ -308,13 +308,3 @@ def filter_checks_by_scope(
         for check in checks
         if scope in check["scenarios"]
     ]
-
-
-def filter_checks_by_ids(
-    checks: list[dict[str, Any]], check_ids: list[str] | None
-) -> list[dict[str, Any]]:
-    """仅供内部定向诊断选择精确 Check ID，不扩大正式证据。"""
-    if not check_ids:
-        return list(checks)
-    wanted = set(check_ids)
-    return [check for check in checks if check["check_id"] in wanted]

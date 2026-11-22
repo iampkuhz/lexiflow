@@ -57,15 +57,6 @@ public record LexiconPriority(double frequencyZipf, int complexListCount, int me
     return fromEvidence(frequencyZipf, complexListCount);
   }
 
-  /**
-   * 为尚未导入语料频率的内置演示词条提供最低优先级。
-   *
-   * @return 频率、复杂词表数量和预热分数均为零的优先级。
-   */
-  public static LexiconPriority unranked() {
-    return new LexiconPriority(0.0, 0, 0);
-  }
-
   private static double triangularFrequencyFit(double zipf) {
     if (zipf <= 2.5 || zipf >= 6.0) {
       return 0.0;

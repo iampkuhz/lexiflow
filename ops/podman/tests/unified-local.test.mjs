@@ -4,16 +4,31 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runLocal } from '../commands/manage-podman-installation.mjs';
-import { renderCompose, readPreparedTarget } from '../installation/installation-upgrade-workflow.mjs';
+import { assertSourceComposeSlot, renderCompose, readPreparedTarget } from '../installation/installation-upgrade-workflow.mjs';
 
 test('runtime Compose mounts the sole SQLite file read-only and starts no database service', () => {
   const config = JSON.parse(renderCompose('/unused', { apiPort: 18080, databaseFile: '/private/install/data/lexicon.db' }));
   assert.deepEqual(Object.keys(config.services), ['api']);
+  assert.equal(config.services.api.container_name, 'lexiflow-test');
   assert.deepEqual(config.services.api.ports, ['127.0.0.1:18080:8080']);
   assert.deepEqual(config.services.api.networks, ['published']);
   assert.equal(config.services.api.environment.SPRING_DATASOURCE_URL, 'jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro');
   assert.equal(config.services.api.volumes[0], '${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro');
   assert.deepEqual(Object.keys(config.services), ['api']);
+});
+
+test('startup rejects stored Compose without a fixed slot or with additional services', () => {
+  const repo = '/unused', inputs = { apiPort: 18081, databaseFile: '/install/data/lexicon.db' };
+  assert.doesNotThrow(() => assertSourceComposeSlot(renderCompose(repo, inputs), repo));
+  for (const change of [
+    services => { delete services.api.container_name; },
+    services => { services.api.container_name = 'lexiflow-preview'; },
+    services => { services.preview = { image: 'synthetic' }; },
+  ]) {
+    const config = JSON.parse(renderCompose(repo, inputs));
+    change(config.services);
+    assert.throws(() => assertSourceComposeSlot(JSON.stringify(config), repo), /DEPLOYMENT_TEST_SLOT_CONFIG_INVALID/);
+  }
 });
 
 test('prepared target recovery binds a SQLite file, not a server or secret', () => {

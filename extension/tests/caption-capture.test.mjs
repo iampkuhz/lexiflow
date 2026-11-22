@@ -97,3 +97,20 @@ test('pending hash cancellation is counted once on clear; a settled hash is not 
  current.resolve('current-topic');await active;assert.equal(f.submissions.length,1);
  f.capture.invalidate();assert.deepEqual(f.observations,['cancelled-acquisition']);
 });
+
+
+test('late metadata for a new visible sentence must not inherit the previous sentence identity',async()=>{
+ const f=fixture(),hash=f.nextHash();f.setCaption('First sentence');const first=f.capture.capture();await flush();hash.resolve('topic');await first;
+ f.capture.acceptNativeTrack({videoId:'A',trackKey:'en',fragments:[{text:'First sentence',startMs:0,endMs:2000,offsetMs:0,windowId:'1',append:false}]},'A');
+ await f.capture.capture();
+ f.video.currentTime=2.5;f.setCaption('Next molecules');await f.capture.capture();
+ const count=f.submissions.length,keys=f.submissions.at(-1).request.currentSnapshot.captions.flatMap(g=>g.segments).map(s=>s.key);
+ f.capture.acceptNativeTrack({videoId:'A',trackKey:'en',fragments:[{text:'Next molecules',startMs:2000,endMs:4000,offsetMs:0,windowId:'2',append:false}]},'A');
+ await f.capture.capture();assert.equal(f.submissions.length,count,'metadata enrichment is not another visible occurrence');
+ assert.deepEqual(f.submissions.at(-1).request.currentSnapshot.captions.flatMap(g=>g.segments).map(s=>s.key),keys);
+ f.video.currentTime=5.5;
+ f.capture.acceptNativeTrack({videoId:'A',trackKey:'en',fragments:[{text:'Next molecules',startMs:5000,endMs:7000,offsetMs:0,windowId:'3',append:false}]},'A');
+ await f.capture.capture();assert.equal(f.submissions.length,count+1,'a genuinely later same-text native cue remains a new occurrence');
+ assert.notDeepEqual(f.submissions.at(-1).request.currentSnapshot.captions.flatMap(g=>g.segments).map(s=>s.key),keys);
+ f.lifecycle.dispose();
+});

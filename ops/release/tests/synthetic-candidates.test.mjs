@@ -91,7 +91,7 @@ test('single Node transaction really calls one image build, two assembly and ver
     for (let i = 0; i < 2; i++) await writeFile(path.join(scratch, 'producer-output/synthetic-datasets', dataset(i).file), `zip-${i}`);
     const result = await assembleSyntheticCandidates({ ...input, scratchDirectory: scratch });
     assert.deepEqual(calls, ['images', 'assemble', 'verify', 'images', 'assemble', 'verify']);
-    assert.equal(result.candidates.length, 2); assert.equal(result.apiContract, 'caption-hints.v2');
+    assert.equal(result.candidates.length, 2); assert.equal(result.apiContract, 'caption-hints.v4');
     assert.equal(copiedDistributions.length, 2);
     assert.equal(extensionBindings.length, 2);
     assert.notEqual(extensionBindings[0].sha256, extensionBindings[1].sha256);

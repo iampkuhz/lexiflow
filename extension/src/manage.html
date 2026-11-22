@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>管理提示 · LexiFlow</title>
+  <link rel="stylesheet" href="manage.css">
+</head>
+<body>
+  <header class="top"><img src="assets/logo.svg" alt=""><div><strong>LexiFlow</strong></div></header>
+  <main>
+    <h1>词汇提示管理</h1>
+    <p class="intro">查看最近提示，或停止提示你不想再看到的词。</p>
+    <section id="preference-panel" aria-labelledby="cutoff-heading">
+      <div class="preference-copy"><h2 id="cutoff-heading">常见词过滤</h2><p>档位越高，过滤掉的常见词越多。</p><p class="note" id="cutoff-source-note">BNC 是英国国家语料库，不按列表里的 # 名次过滤。</p></div>
+      <div class="cutoff-field">
+        <label for="common-word-cutoff">不提示 BNC 高频前 N 词</label>
+        <select id="common-word-cutoff" disabled aria-describedby="cutoff-source-note cutoff-status">
+          <option value="" selected disabled>正在读取…</option>
+          <option value="1000">前 1000 词 · 提示较多</option>
+          <option value="1500">前 1500 词 · 默认</option>
+          <option value="2000">前 2000 词 · 提示较少</option>
+        </select>
+      </div>
+      <div id="cutoff-status" role="status" aria-live="polite">正在读取本机设置…</div>
+    </section>
+    <nav class="tabs" aria-label="管理内容">
+      <button id="current-video-tab" type="button" data-tab="current-video" aria-selected="false">当前视频</button>
+      <button id="recent-tab" type="button" data-tab="recent" aria-selected="true">最近提示 <span id="recent-count"></span></button>
+      <button id="hidden-tab" type="button" data-tab="hidden" aria-selected="false">已停止提示 <span id="hidden-count">0</span></button>
+      <button id="lexicon-tab" type="button" data-tab="lexicon" aria-selected="false">词库查询</button>
+      <button id="connection-tab" type="button" data-tab="connection" aria-selected="false">服务连接</button>
+    </nav>
+    <section id="current-video-panel" class="panel" aria-labelledby="current-video-heading" hidden>
+      <div class="bar"><h2 id="current-video-heading">当前视频的词汇提示</h2><button id="refresh-current-video" type="button" disabled>刷新</button></div>
+      <p class="note"># 是词库名次。这里显示本视频的实际提示次数，不与近 7 天次数相加。</p>
+      <ul id="current-video-list" class="current-words" aria-labelledby="current-video-heading"></ul>
+      <p id="current-video-status" class="note" role="status">正在读取当前视频…</p>
+    </section>
+    <section id="recent-panel" class="panel">
+      <div class="bar"><h2 id="recent-heading">近 7 天提示</h2></div>
+      <p class="panel-intro">按实际提示次数从多到少排列。</p>
+      <p class="note">含今天。# 是词库名次，不是列表序号。</p>
+      <div class="recent-filters">
+        <label class="sr" for="recent-query">搜索最近提示</label>
+        <input id="recent-query" type="search" placeholder="搜索英文词条或中文提示" autocomplete="off" aria-controls="recent-list">
+        <div class="recent-page-control">
+          <label for="recent-page-size">每页</label>
+          <select id="recent-page-size" aria-label="每页显示条数" aria-controls="recent-list">
+            <option value="20">20 条</option>
+            <option value="40" selected>40 条</option>
+            <option value="80">80 条</option>
+          </select>
+        </div>
+      </div>
+      <p id="recent-search-status" class="sr" role="status"></p>
+      <p id="recent-status" class="empty" role="status" hidden></p>
+      <ul id="recent-list" class="recent-list" role="list" aria-labelledby="recent-heading" hidden></ul>
+      <p id="recent-empty" class="empty" role="status" hidden>近 7 天没有可管理的提示。</p>
+      <nav class="pager" id="recent-pager" aria-label="最近提示分页" hidden><span data-total></span><button data-step="-1" type="button">上一页</button><span data-page></span><button data-step="1" type="button">下一页</button></nav>
+    </section>
+    <section id="hidden-panel" class="panel" hidden>
+      <div class="bar"><h2>已停止提示的词条</h2><span class="muted">仅本机</span></div>
+      <p class="note">恢复后，词条仍按当前筛选规则决定是否提示。</p>
+      <div id="hidden-list" class="list" role="table" aria-label="本机已停止提示词条"></div>
+      <p id="hidden-empty" class="empty" role="status" hidden></p>
+      <nav class="pager" id="hidden-pager" aria-label="已停止提示分页" hidden><span data-total></span><button data-step="-1" type="button">上一页</button><span data-page></span><button data-step="1" type="button">下一页</button></nav>
+    </section>
+    <section id="lexicon-panel" class="panel" hidden>
+      <div class="bar"><h2>词库查询</h2><span class="muted">只读 · 已发布词库</span></div>
+      <form id="lexicon-search" class="search"><label class="sr" for="query">英文词条、词形或短语</label><input id="query" type="search" placeholder="查英文词、词形或短语" autocomplete="off"><button type="submit">查询</button>
+        <label for="sort">排序</label><select id="sort"><option value="frequency">词频 · 常见优先</option><option value="alphabet">英文 A → Z</option></select></form>
+      <p class="note">词频排名越靠前越常见；暂无表示没有来源排名，不等于低频。</p>
+      <div id="lexicon-list" class="list" role="table" aria-label="已发布词库查询结果"></div>
+      <p id="lexicon-empty" class="empty" role="status" hidden></p>
+      <nav class="pager" id="lexicon-pager" aria-label="词库分页" hidden><span data-total></span><button data-step="-1" type="button">上一页</button><span data-page></span><button data-step="1" type="button">下一页</button></nav>
+    </section>
+    <section id="connection-panel" class="panel" aria-labelledby="connection-heading" hidden>
+      <div class="bar"><h2 id="connection-heading">服务连接</h2></div>
+      <p id="connection-target" class="panel-intro">正在读取当前连接…</p>
+      <form id="connection-form">
+        <label for="connection-url">后端地址</label>
+        <input id="connection-url" type="text" inputmode="url" autocomplete="off" spellcheck="false"
+          maxlength="64" aria-describedby="connection-note connection-status">
+        <button id="save-connection" type="submit">完成</button>
+        <p id="connection-note" class="note">只接受本机 HTTP 地址。检查通过后才会切换。</p>
+        <p id="connection-status" role="status">正在检查服务…</p>
+      </form>
+      <div class="connection-diagnostics">
+        <h3>版本与诊断</h3>
+        <p id="connection-identity"></p>
+        <button id="copy-diagnostics" type="button">复制诊断信息</button>
+        <span id="copy-status" role="status"></span>
+      </div>
+    </section>
+    <div id="recent-announcement" class="sr" role="status"></div>
+    <p id="feedback" role="status" aria-live="polite" hidden></p>
+  </main>
+  <script src="manage.js"></script>
+</body>
+</html>

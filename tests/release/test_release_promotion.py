@@ -389,6 +389,7 @@ class ReleaseBodyTests(unittest.TestCase):
         self.assertLess(body.index("安装命令"), body.index("## 1.5. 下载"))
         self.assertIn("--publish 127.0.0.1:18080:8080", body)
         self.assertIn("--volume lexiflow-release-data:/var/lib/lexiflow", body)
+        self.assertIn("--volume lexiflow-preferences:/var/lib/lexiflow/preferences", body)
         self.assertIn("--image-volume=ignore --pull=always", body)
         self.assertIn("--memory=2g --cpus=2 --stop-timeout=45", body)
         for name in names:
@@ -710,7 +711,6 @@ class PromotionTests(unittest.TestCase):
 
     def test_prepare_full_asset_set_and_archive_bytes(self):
         with (
-            patch.object(p, "_archive") as archive,
             patch.object(p.tempfile, "mkdtemp") as workspace,
             patch.object(p, "_repository", return_value=("o", "r")),
         ):
@@ -722,7 +722,6 @@ class PromotionTests(unittest.TestCase):
         self.assertIn("# 1. 1.2.3", result["release_body"])
         self.assertIn("ghcr.io/o/r:1.2.3", result["release_body"])
         self.assertNotIn("assets", result)
-        archive.assert_not_called()
         workspace.assert_not_called()
         p.release_registry.publish_images.assert_not_called()
         p.release_registry.verify_images.assert_not_called()
@@ -741,6 +740,9 @@ class PromotionTests(unittest.TestCase):
         )
         self.assertIn(
             "--volume lexiflow-release-data:/var/lib/lexiflow", FakeGitHub.created_body
+        )
+        self.assertIn(
+            "--volume lexiflow-preferences:/var/lib/lexiflow/preferences", FakeGitHub.created_body
         )
         self.assertIn("ghcr.io/o/r:1.2.3", FakeGitHub.created_body)
         self.assertEqual(FakeGitHub.created_body, result["release_body"])

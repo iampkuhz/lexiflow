@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import gzip
 import hashlib
 import http.client
 import json
@@ -13,7 +12,6 @@ import shutil
 import ssl
 import stat
 import subprocess
-import tarfile
 import tempfile
 import threading
 import time
@@ -300,7 +298,7 @@ def _bounded_item(item: Any) -> None:
     path = item["path"]
     if path in ("manifest.json", "manifest.json.sha256") or len(path) > 4096:
         _fail("candidate-manifest-invalid")
-    # Validate path before tarfile interprets it.
+    # Validate the relative artifact path before opening the candidate payload.
     pure = PurePosixPath(path)
     if (
         pure.is_absolute()
@@ -331,119 +329,6 @@ def _read_exact(
         left -= len(chunk)
     if os.read(fd, 1):
         _fail("candidate-artifact-hash-mismatch")
-
-
-class _VerifiedReader:
-    """tarfile 逐块读取同一已打开 FD，并核对实际被归档的字节。"""
-
-    def __init__(self, fd: int, item: dict[str, Any], deadline: float):
-        self.fd, self.item = fd, item
-        self.deadline = deadline
-        self.before = os.fstat(fd)
-        if self.before.st_size != item["bytes"]:
-            _fail("candidate-artifact-hash-mismatch")
-        self.remaining = item["bytes"]
-        self.hash = hashlib.sha256()
-
-    def read(self, size: int = -1) -> bytes:
-        """返回下一段已计入摘要的归档字节。"""
-        if time.monotonic() > self.deadline:
-            _fail("archive-deadline")
-        if self.remaining == 0 or size == 0:
-            return b""
-        block = os.read(
-            self.fd, min(self.remaining, size if size >= 0 else 1024 * 1024)
-        )
-        if not block:
-            _fail("candidate-artifact-hash-mismatch")
-        self.hash.update(block)
-        self.remaining -= len(block)
-        return block
-
-    def finish(self) -> None:
-        """确认归档已完整消费同一稳定文件。"""
-        if (
-            self.remaining
-            or os.read(self.fd, 1)
-            or self.hash.hexdigest() != self.item["sha256"]
-            or _stamp(self.before) != _stamp(os.fstat(self.fd))
-        ):
-            _fail("candidate-artifact-hash-mismatch")
-
-
-def _archive(
-    candidate: Path,
-    manifest: dict[str, Any],
-    manifest_bytes: bytes,
-    sidecar_bytes: bytes,
-    out: Path,
-) -> tuple[str, int]:
-    total = 0
-    digest = hashlib.sha256()
-    deadline = time.monotonic() + 900
-    total_uncompressed = (
-        sum(item["bytes"] for item in manifest["artifacts"])
-        + len(manifest_bytes)
-        + len(sidecar_bytes)
-    )
-    if total_uncompressed > MAX_UNCOMPRESSED:
-        _fail("asset-size-limit")
-    with out.open("xb") as raw:
-
-        class Bounded:
-            def write(self, data: bytes) -> int:
-                """限制并记录实际压缩输出。"""
-                nonlocal total
-                if time.monotonic() > deadline:
-                    _fail("archive-deadline")
-                total += len(data)
-                if total > MAX_ASSET:
-                    _fail("asset-size-limit")
-                written = raw.write(data)
-                if written != len(data):
-                    _fail("archive-write-failed")
-                digest.update(data)
-                return written
-
-            def flush(self):
-                """将压缩输出刷入私有文件。"""
-                return raw.flush()
-
-        with gzip.GzipFile(fileobj=Bounded(), mode="wb", filename="", mtime=0) as gz:
-            with tarfile.open(fileobj=gz, mode="w|", format=tarfile.PAX_FORMAT) as tar:
-                entries = [(x["path"], x) for x in manifest["artifacts"]]
-                entries += [
-                    ("manifest.json", manifest_bytes),
-                    ("manifest.json.sha256", sidecar_bytes),
-                ]
-                for name, value in sorted(entries, key=lambda entry: entry[0]):
-                    info = tarfile.TarInfo(name)
-                    info.size = (
-                        value["bytes"] if isinstance(value, dict) else len(value)
-                    )
-                    info.mode = (
-                        0o755
-                        if isinstance(value, dict) and value["role"] == "runtime-entry"
-                        else 0o644
-                    )
-                    info.uid = info.gid = 0
-                    info.uname = info.gname = ""
-                    info.mtime = 0
-                    if isinstance(value, dict):
-                        fd, _ = _stable_fd(candidate, "payload/" + name)
-                        try:
-                            reader = _VerifiedReader(fd, value, deadline)
-                            tar.addfile(info, reader)
-                            reader.finish()
-                        finally:
-                            os.close(fd)
-                    else:
-                        import io
-
-                        tar.addfile(info, io.BytesIO(value))
-        raw.flush()
-        os.fsync(raw.fileno())
-    return digest.hexdigest(), total
 
 
 def _repository(root: Path) -> tuple[str, str]:
@@ -1169,6 +1054,7 @@ def _release_body(
         "  --name lexiflow-release \\\n"
         "  --publish 127.0.0.1:18080:8080 \\\n"
         "  --volume lexiflow-release-data:/var/lib/lexiflow \\\n"
+        "  --volume lexiflow-preferences:/var/lib/lexiflow/preferences \\\n"
         "  --memory=2g --cpus=2 --stop-timeout=45 \\\n"
         f"  {image_ref}"
     )

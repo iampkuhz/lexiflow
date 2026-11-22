@@ -35,9 +35,10 @@ class SqliteSchemaInitializerIntegrationTest {
           3,
           SqliteTestSupport.scalar(
               connection,
-              "SELECT count(*) FROM sqlite_schema WHERE type='trigger' AND name LIKE 'lexicon_%_guard'"));
+              "SELECT count(*) FROM sqlite_schema WHERE type='trigger' AND name LIKE"
+                  + " 'lexicon_%_guard'"));
       SqliteSchemaInitializer.rebuild(url, SqliteTestSupport.schemaFile());
-      assertEquals(10, SqliteSchemaInitializer.inspect(url).lexiconRelations().size());
+      assertEquals(12, SqliteSchemaInitializer.inspect(url).lexiconRelations().size());
       try (var statement = connection.createStatement()) {
         statement.execute("CREATE TABLE unrelated(value TEXT) STRICT");
       }

@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.lexiflow.lexicon.application.port.LexiconCacheObserver;
 import io.lexiflow.lexicon.application.port.LexiconReadRepository;
-import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.util.Collection;
@@ -89,17 +88,7 @@ class CachedLexiconQueryServiceTest {
     var repository = new CountingRepository();
     var hint = entry(1, "bank", "银行");
     var block =
-        new LexiconHintCandidate(
-            2L,
-            null,
-            1,
-            "en",
-            "bank",
-            "bank",
-            LexiconEntryKind.WORD,
-            LexiconHintAction.BLOCK,
-            null,
-            0);
+        new LexiconHintCandidate(2L, null, 1, "bank", LexiconHintAction.BLOCK, null, 0, null);
     repository.prewarm = List.of(hint, block);
     var changes = new java.util.ArrayList<List<Long>>();
     var prewarmCallsAtInvalidation = new int[1];
@@ -289,17 +278,7 @@ class CachedLexiconQueryServiceTest {
     var repository = new CountingRepository();
     var hint = entry(1, "bank", "银行");
     var block =
-        new LexiconHintCandidate(
-            3L,
-            null,
-            1,
-            "en",
-            "bank",
-            "bank",
-            LexiconEntryKind.WORD,
-            LexiconHintAction.BLOCK,
-            null,
-            0);
+        new LexiconHintCandidate(3L, null, 1, "bank", LexiconHintAction.BLOCK, null, 0, null);
     repository.prewarm = List.of(hint, block);
     var service = new CachedLexiconQueryService(repository, 4, 1, 1);
 
@@ -335,16 +314,7 @@ class CachedLexiconQueryServiceTest {
             calls[1]++;
             return List.of(
                 new LexiconHintCandidate(
-                    4L,
-                    null,
-                    v,
-                    "en",
-                    "blocked",
-                    "blocked",
-                    LexiconEntryKind.WORD,
-                    LexiconHintAction.BLOCK,
-                    null,
-                    0));
+                    4L, null, v, "blocked", LexiconHintAction.BLOCK, null, 0, null));
           }
         };
     var service =
@@ -381,13 +351,11 @@ class CachedLexiconQueryServiceTest {
         io.lexiflow.lexicon.domain.port.LexiconIdentity.entryId(lemma),
         io.lexiflow.lexicon.domain.port.LexiconIdentity.senseId(version, lemma),
         version,
-        "en",
         lemma,
-        lemma,
-        lemma.contains(" ") ? LexiconEntryKind.PHRASE : LexiconEntryKind.WORD,
         LexiconHintAction.HINT,
         gloss,
-        100);
+        100,
+        null);
   }
 
   private static final class MutableRepository implements LexiconReadRepository {

@@ -22,6 +22,8 @@ public final class SqliteDatasetPackage {
           "lexicon_form_entry_idx",
           "lexicon_entry_prewarm_hint_idx",
           "lexicon_entry_prewarm_block_idx",
+          "lexicon_entry_frequency_rank_idx",
+          "lexicon_entry_bnc_rank_idx",
           "lexicon_form_canonical_guard",
           "lexicon_form_canonical_update_guard",
           "lexicon_entry_canonical_update_guard");
@@ -252,7 +254,7 @@ public final class SqliteDatasetPackage {
           if (!column.equals(rows.getString("name"))
               || !DatasetPackageTables.TYPES.get(column).equalsIgnoreCase(rows.getString("type")))
             throw invalid();
-          boolean nullable = table == DatasetPackageTables.ENTRY && column.equals("gloss");
+          boolean nullable = DatasetPackageTables.nullable(column);
           boolean integerPrimaryKey =
               (table == DatasetPackageTables.DATASET && column.equals("dataset_id"))
                   || (table == DatasetPackageTables.ENTRY && column.equals("entry_id"));
@@ -287,21 +289,7 @@ public final class SqliteDatasetPackage {
 
   /** 对 SQLite catalog 中的全部受控结构定义求确定性摘要。 */
   static String shapeFingerprint(Connection connection) throws SQLException {
-    var text = new StringBuilder();
-    try (var statement = connection.createStatement();
-        var result =
-            statement.executeQuery(
-                "SELECT type,name,coalesce(sql,'') FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name")) {
-      while (result.next()) {
-        text.append(result.getString(1))
-            .append('\u001f')
-            .append(result.getString(2))
-            .append('\u001f')
-            .append(result.getString(3))
-            .append('\n');
-      }
-    }
-    return DatasetPackageCodec.sha256(text.toString().getBytes(StandardCharsets.UTF_8));
+    return io.lexiflow.sqlite.platform.SqliteSchemaShape.fingerprint(connection);
   }
 
   private static void createSchema(Connection connection, byte[] sqlBytes)
@@ -380,8 +368,10 @@ public final class SqliteDatasetPackage {
     try (var statement = connection.createStatement();
         var result =
             statement.executeQuery(
-                "SELECT lexicon_version, preparation_policy, entry_count, lookup_count, generation_version, generation_code_version, generation_source_digest, content_sha256, generation_inputs, generation_config "
-                    + "FROM lexicon_dataset WHERE dataset_id=1")) {
+                "SELECT lexicon_version, preparation_policy, entry_count, lookup_count,"
+                    + " generation_version, generation_code_version, generation_source_digest,"
+                    + " content_sha256, generation_inputs, generation_config FROM lexicon_dataset"
+                    + " WHERE dataset_id=1")) {
       if (!result.next()
           || result.getLong(1) != manifest.datasetVersion()
           || !result.getString(2).equals(manifest.preparationPolicy())

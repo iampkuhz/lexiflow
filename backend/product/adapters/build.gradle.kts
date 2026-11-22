@@ -12,6 +12,7 @@ dependencies {
     "implementation"("org.springframework.boot:spring-boot-starter-jdbc")
     "runtimeOnly"(libs.sqlite.jdbc)
     "implementation"(project(":lexicon"))
+    "implementation"(project(":enrichment"))
 }
 
 val platformSourceSets = extensions.getByType<SourceSetContainer>()
@@ -106,4 +107,22 @@ mapOf(
             args("--database-url", jdbcUrl, "--batch-source-id", "ecdict-stardict", "--batch-license-id", "MIT")
         }
     }
+}
+
+// 来源准备与持久化分开；两个原件只读，修复产物必须是新文件。
+tasks.register<JavaExec>("lexiconPrepare") {
+    group = "application"
+    description = "用固定 ECDICT 原件补齐独立词义，创建新的准备 CSV。"
+    classpath = platformSourceSets["main"].runtimeClasspath
+    mainClass.set("io.lexiflow.lexicon.platform.importer.StardictSourcePreparationMain")
+    workingDir(repoRoot)
+    val prepared = providers.environmentVariable("STARDICT_CSV").getOrElse("")
+    val full = providers.environmentVariable("ECDICT_BASE_CSV").getOrElse("")
+    val output = providers.environmentVariable("LEXICON_PREPARED_OUTPUT").getOrElse("")
+    doFirst {
+        if (listOf(prepared, full, output).any { it.isBlank() }) {
+            throw GradleException("请设置 STARDICT_CSV、ECDICT_BASE_CSV 与 LEXICON_PREPARED_OUTPUT。")
+        }
+    }
+    args(prepared, full, output)
 }

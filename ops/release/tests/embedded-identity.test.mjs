@@ -1,3 +1,4 @@
+import { channelManifest } from '../../../extension/scripts/build/extension-build-settings.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -74,7 +75,7 @@ test('JAR version and extension manifest are independently checked', async () =>
   const dataset = { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rules-test', sqlVersion: 'sql-test', sha256: '1'.repeat(64) };
   await archive(makeZip([['META-INF/lexiflow-build.json', build], ['META-INF/lexiflow-version.txt', '9.9.9\n']]), file => assert.rejects(verifyJarIdentity(file, expected), /JAR_IDENTITY_MISMATCH/));
   for (const mutation of [{ version: '9.9.9.1' }, { version_name: '9.9.9' }, { permissions: ['tabs'] }, { host_permissions: ['http://127.0.0.1:9999/*'] }]) {
-    const manifest = { version: expected.chromeVersion, version_name: expected.softwareVersion, permissions: ['storage'], host_permissions: ['http://127.0.0.1:18080/*'], ...mutation };
+    const manifest = { version: expected.chromeVersion, version_name: expected.softwareVersion, ...channelManifest(18080), ...mutation };
     await archive(makeZip([['build-identity.json', build], ['manifest.json', JSON.stringify(manifest)], ['expected-dataset.json', JSON.stringify(dataset)]]), file => assert.rejects(verifyExtensionIdentity(file, expected, dataset), /EXTENSION_IDENTITY_MISMATCH/));
   }
 });

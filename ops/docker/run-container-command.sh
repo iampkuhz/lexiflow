@@ -11,7 +11,13 @@ case "$mode" in
     case "$analysis" in true|false) ;; *) fail ;; esac
     [ -f /var/lib/lexiflow/lexicon.db ] && [ ! -L /var/lib/lexiflow/lexicon.db ] || fail
     export SPRING_DATASOURCE_URL='jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro'
-    exec java -Xms64m -Xmx768m -Dlexiflow.runtime.mode=formal -Dlexiflow.caption-debug.enabled=true -Dlexiflow.segment-analysis.enabled="$analysis" -Dlexiflow.segment-analysis.path=/tmp/lexiflow-private/caption-segments.jsonl -Dserver.address=0.0.0.0 -Dserver.port=8080 -jar /app/lexiflow-api.jar
+    exec java -Xms64m -Xmx768m -Dlexiflow.runtime.mode=formal -Dlexiflow.caption-debug.enabled=false -Dlexiflow.segment-analysis.enabled="$analysis" -Dlexiflow.segment-analysis.path=/tmp/lexiflow-private/caption-segments.jsonl -Dserver.address=0.0.0.0 -Dserver.port=8080 -jar /app/lexiflow-api.jar
+    ;;
+  init-preferences)
+    [ "$#" -eq 0 ] || fail
+    [ -d /var/lib/lexiflow/preferences ] && [ -w /var/lib/lexiflow/preferences ] || fail
+    umask 077
+    exec java -Xms32m -Xmx128m -jar /app/lexiflow-api.jar --init-preferences jdbc:sqlite:/var/lib/lexiflow/preferences/preferences.db
     ;;
   initialize)
     [ "$#" -eq 0 ] || fail
@@ -48,7 +54,7 @@ while IFS= read -r line; do
 done <<< "$headers"
 shopt -u nocasematch
 [[ "$content_type" -eq 1 && -n "$length" && "$length" -eq "${#body}" ]] || exit 1
-summary='^\{"softwareVersion":"[0-9A-Za-z.+-]{1,200}","apiContract":"caption-hints\.v2","mode":"formal","ready":true,"reason":"(OK|PREWARM_DEGRADED)","datasetVersion":([1-9][0-9]{0,18}),"publishedDataset":(null|\{"releaseId":"[A-Za-z0-9._+-]{1,128}","preparationId":"[A-Za-z0-9._+-]{1,128}","ruleId":"[A-Za-z0-9._+-]{1,128}","sqlVersion":"[A-Za-z0-9._+-]{1,128}","sha256":"[a-f0-9]{64}"\})\}$'
+summary='^\{"softwareVersion":"[0-9A-Za-z.+-]{1,200}","apiContract":"caption-hints\.v[1-9][0-9]{0,8}","mode":"formal","ready":true,"reason":"(OK|PREWARM_DEGRADED)","datasetVersion":([1-9][0-9]{0,18}),"publishedDataset":(null|\{"releaseId":"[A-Za-z0-9._+-]{1,128}","preparationId":"[A-Za-z0-9._+-]{1,128}","ruleId":"[A-Za-z0-9._+-]{1,128}","sqlVersion":"[A-Za-z0-9._+-]{1,128}","sha256":"[a-f0-9]{64}"\})\}$'
 [[ "$body" =~ $summary ]] || exit 1
 dataset=${BASH_REMATCH[2]}; [[ ${#dataset} -lt 19 || "$dataset" < 9223372036854775808 ]] || exit 1
 printf '%s\n' "$body"

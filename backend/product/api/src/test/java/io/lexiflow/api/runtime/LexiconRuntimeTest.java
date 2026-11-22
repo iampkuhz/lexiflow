@@ -20,9 +20,12 @@ class LexiconRuntimeTest {
     for (boolean degraded : List.of(false, true)) {
       var repo = new MutableRepository();
       repo.failPrewarm = degraded;
+      var events = new ArrayList<String>();
       var runtime =
-          new LexiconRuntime("formal", repo, new StructuredEventLogger((level, json) -> {}));
-      var confirmed = runtime.state();
+          new LexiconRuntime(
+              "formal", repo, new StructuredEventLogger((level, json) -> events.add(json)));
+      var confirmed = runtime.probe();
+      int beforeEvents = events.size();
       int beforeVersions = repo.versionReads;
       int beforeWarmups = repo.prewarmReads;
       for (var word : List.of("ai", "uh", "um", "i", "to", "it")) {
@@ -31,12 +34,13 @@ class LexiconRuntimeTest {
         assertTrue(result.publishedVersion().isEmpty());
         assertEquals(
             io.lexiflow.lexicon.domain.model.LexiconLookupResult.Counts.zero(), result.counts());
-        assertEquals(confirmed, runtime.state());
       }
       assertEquals(beforeVersions, repo.versionReads);
       assertEquals(beforeWarmups, repo.prewarmReads);
+      assertEquals(beforeEvents, events.size());
+      assertEquals(confirmed, runtime.probe());
       assertEquals(7, runtime.lookupForms(List.of("quasar")).publishedVersion().orElseThrow());
-      assertTrue(runtime.state().ready());
+      assertTrue(runtime.probe().ready());
     }
   }
 
@@ -59,7 +63,7 @@ class LexiconRuntimeTest {
     assertEquals(0, result.counts().queryKeys());
     assertEquals(0, result.counts().dbBatches());
     assertEquals(
-        new LexiconRuntime.State("formal", LexiconRuntime.Reason.OK, 7L, true), runtime.state());
+        new LexiconRuntime.State("formal", LexiconRuntime.Reason.OK, 7L, true), runtime.probe());
   }
 
   @Test
@@ -71,8 +75,8 @@ class LexiconRuntimeTest {
     var failure =
         assertThrows(LexiconNotReadyException.class, () -> runtime.lookupForms(List.of("ai")));
     assertEquals(LexiconRuntime.Reason.NO_PUBLISHED_DATA, failure.reason());
-    assertFalse(runtime.state().ready());
-    assertEquals(0L, runtime.state().version());
+    assertFalse(runtime.probe().ready());
+    assertEquals(0L, runtime.probe().version());
   }
 
   @Test
@@ -97,16 +101,16 @@ class LexiconRuntimeTest {
   void defaultMissingRepositoryIsNotReadyAndDemoIsExplicit() {
     var runtime =
         new LexiconRuntime("formal", null, new StructuredEventLogger((level, json) -> {}));
-    assertEquals(LexiconRuntime.Reason.DEPENDENCY_UNAVAILABLE, runtime.state().reason());
+    assertEquals(LexiconRuntime.Reason.DEPENDENCY_UNAVAILABLE, runtime.probe().reason());
     assertThrows(LexiconNotReadyException.class, () -> runtime.lookupForms(List.of("reliable")));
     var demo = new LexiconRuntime("demo", null, new StructuredEventLogger((level, json) -> {}));
-    assertEquals(LexiconRuntime.Reason.DEMO_MODE, demo.state().reason());
-    assertFalse(demo.state().ready());
+    assertEquals(LexiconRuntime.Reason.DEMO_MODE, demo.probe().reason());
+    assertFalse(demo.probe().ready());
     assertFalse(demo.lookupForms(List.of("reliable")).candidates().isEmpty());
     assertEquals(
         "invalid",
         new LexiconRuntime("secret-mode", null, new StructuredEventLogger((level, json) -> {}))
-            .state()
+            .probe()
             .mode());
   }
 
@@ -132,7 +136,7 @@ class LexiconRuntimeTest {
         new LexiconRuntime(
             "formal", repo, new StructuredEventLogger((level, json) -> events.add(json)));
     assertEquals(1, events.stream().filter(s -> s.contains("runtime.start.completed")).count());
-    assertTrue(runtime.state().ready());
+    assertTrue(runtime.probe().ready());
     repo.fail = true;
     assertFalse(runtime.probe().ready());
     assertFalse(runtime.probe().ready());
@@ -152,7 +156,7 @@ class LexiconRuntimeTest {
                 (level, json) -> {
                   throw new IllegalStateException("secret");
                 }));
-    assertTrue(runtime.state().ready());
+    assertTrue(runtime.probe().ready());
   }
 
   @Test
@@ -163,8 +167,8 @@ class LexiconRuntimeTest {
     var runtime =
         new LexiconRuntime(
             "formal", repo, new StructuredEventLogger((level, json) -> events.add(json)));
-    assertEquals(LexiconRuntime.Reason.NO_PUBLISHED_DATA, runtime.state().reason());
-    assertEquals(0L, runtime.state().version());
+    assertEquals(LexiconRuntime.Reason.NO_PUBLISHED_DATA, runtime.probe().reason());
+    assertEquals(0L, runtime.probe().version());
     assertTrue(events.getFirst().contains("\"lexicon_version\":0"));
     repo.version = 7;
     assertTrue(runtime.probe().ready());
@@ -178,7 +182,11 @@ class LexiconRuntimeTest {
         new LexiconRuntime("formal", repo, new StructuredEventLogger((level, json) -> {}));
     repo.programFault = true;
     assertThrows(IllegalArgumentException.class, runtime::probe);
-    assertEquals(LexiconRuntime.Reason.OK, runtime.state().reason());
+    repo.programFault = false;
+    // 若错误改写了就绪状态，这次查询会额外发起恢复探测。
+    var result = runtime.lookupForms(List.of("quasar"));
+    assertEquals(1, result.counts().versionReads());
+    assertTrue(runtime.probe().ready());
   }
 
   @Test
@@ -190,7 +198,7 @@ class LexiconRuntimeTest {
             "formal", repo, new StructuredEventLogger((level, json) -> events.add(json)));
     repo.metadataFault = true;
     assertEquals(LexiconRuntime.Reason.SCHEMA_MISMATCH, runtime.probe().reason());
-    assertEquals(null, runtime.state().version());
+    assertEquals(null, runtime.probe().version());
     assertEquals(0, events.stream().filter(s -> s.contains("runtime.dependency.changed")).count());
   }
 
@@ -200,14 +208,14 @@ class LexiconRuntimeTest {
     repo.failPrewarm = true;
     var runtime =
         new LexiconRuntime("formal", repo, new StructuredEventLogger((level, json) -> {}));
-    assertTrue(runtime.state().ready());
-    assertEquals(LexiconRuntime.Reason.PREWARM_DEGRADED, runtime.state().reason());
+    assertTrue(runtime.probe().ready());
+    assertEquals(LexiconRuntime.Reason.PREWARM_DEGRADED, runtime.probe().reason());
     repo.fail = true;
     assertFalse(runtime.probe().ready());
-    assertEquals(null, runtime.state().version());
+    assertEquals(null, runtime.probe().version());
     repo.fail = false;
     assertTrue(runtime.probe().ready());
-    assertEquals(LexiconRuntime.Reason.PREWARM_DEGRADED, runtime.state().reason());
+    assertEquals(LexiconRuntime.Reason.PREWARM_DEGRADED, runtime.probe().reason());
   }
 
   @Test
@@ -224,7 +232,6 @@ class LexiconRuntimeTest {
       int beforeVersions = repo.versionReads;
       int beforeWarmups = repo.prewarmReads;
       var recovered = runtime.lookupForms(List.of("quasar"));
-      assertTrue(runtime.state().ready());
       assertEquals(repo.versionReads - beforeVersions, recovered.counts().versionReads());
       assertEquals(repo.prewarmReads - beforeWarmups, recovered.counts().prewarmReads());
       assertEquals(3, recovered.counts().versionReads());
@@ -234,6 +241,7 @@ class LexiconRuntimeTest {
       assertEquals(repo.versionReads - beforeVersions, cached.counts().versionReads());
       assertEquals(1, cached.counts().versionReads());
       assertEquals(0, cached.counts().prewarmReads());
+      assertTrue(runtime.probe().ready());
     }
   }
 
@@ -245,8 +253,8 @@ class LexiconRuntimeTest {
     var runtime =
         new LexiconRuntime(
             "formal", repo, new StructuredEventLogger((level, json) -> events.add(json)));
-    assertFalse(runtime.state().ready());
     assertEquals(1, events.size());
+    assertTrue(events.getFirst().contains("DEPENDENCY_UNAVAILABLE"));
     assertFalse(events.getFirst().contains("\"lexicon_version\""));
     assertFalse(events.getFirst().contains("\"counts\""));
     var demo = new LexiconRuntime("demo", repo, new StructuredEventLogger((level, json) -> {}));
@@ -269,9 +277,9 @@ class LexiconRuntimeTest {
     repo.clearPublicationDuringPrewarm = true;
     var runtime =
         new LexiconRuntime("formal", repo, new StructuredEventLogger((level, json) -> {}));
-    assertFalse(runtime.state().ready());
-    assertEquals(LexiconRuntime.Reason.NO_PUBLISHED_DATA, runtime.state().reason());
-    assertEquals(0L, runtime.state().version());
+    assertFalse(runtime.probe().ready());
+    assertEquals(LexiconRuntime.Reason.NO_PUBLISHED_DATA, runtime.probe().reason());
+    assertEquals(0L, runtime.probe().version());
     assertThrows(LexiconNotReadyException.class, () -> runtime.lookupForms(List.of("quasar")));
   }
 

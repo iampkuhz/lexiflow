@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseRuntimeStatus, readRuntimeStatus, RUNTIME_STATUS_URL, runtimeCompatibility } from "../build/test-modules/runtime-status.js";
+import { parseRuntimeStatus, readRuntimeStatus, RUNTIME_STATUS_URL } from "../build/test-modules/runtime-status.js";
 
 const publishedDataset={releaseId:"release-1",preparationId:"prep-1",ruleId:"rules-1",sqlVersion:"4",sha256:"a".repeat(64)};
-const valid = { softwareVersion:"1.2.3", apiContract:"caption-hints.v2", mode:"formal", ready:true, reason:"OK", datasetVersion:4, publishedDataset };
+const valid = { softwareVersion:"1.2.3", apiContract:"caption-hints.v4", mode:"formal", ready:true, reason:"OK", datasetVersion:4, publishedDataset };
 test("accepts exact ready and degraded formal runtime shapes", () => {
   assert.deepEqual(parseRuntimeStatus(valid), valid);
   assert.equal(parseRuntimeStatus({...valid, ready:true, reason:"PREWARM_DEGRADED"}).ready, true);
@@ -47,14 +47,23 @@ test("initializing status is explicit and cannot claim a published identity", ()
   assert.equal(parseRuntimeStatus({...valid,ready:false,reason:"INITIALIZING",datasetVersion:null,publishedDataset}),undefined);
 });
 
-test("runtime readiness is compatible only with the extension's build-bound published dataset", () => {
-  assert.equal(runtimeCompatibility(valid, "1.2.3", publishedDataset), undefined);
-  assert.equal(runtimeCompatibility(valid, "1.2.4", publishedDataset), "software-version");
-  assert.equal(runtimeCompatibility({...valid,publishedDataset:{...publishedDataset,releaseId:"other"}}, "1.2.3", publishedDataset), "dataset-identity");
-  const missing = {...valid,publishedDataset:null};
-  assert.equal(parseRuntimeStatus(missing)?.ready, true);
-  assert.equal(runtimeCompatibility(missing, "1.2.3", publishedDataset), "dataset-identity");
-  assert.equal(runtimeCompatibility(valid, "1.2.3", null), "binding-missing");
+test("wire version is exact; software and publication identities are diagnostics", async () => {
+  const differentBuild = "3.0.0-SNAPSHOT.20261121.gaabbccd.dirty.001122334455";
+  const otherDataset = {...publishedDataset, releaseId:"another-publication", sha256:"b".repeat(64)};
+  const changed = {...valid, softwareVersion:differentBuild, publishedDataset:otherDataset};
+  assert.deepEqual(parseRuntimeStatus(changed), changed);
+  // A standalone development backend has no container publication proof.
+  assert.equal(parseRuntimeStatus({...changed, publishedDataset:null}).ready, true);
+  const original = globalThis.fetch;
+  try {
+    for (const apiContract of ["caption-hints.v3", "caption-hints.v5"]) {
+      globalThis.fetch = async () => ({ok:true,json:async()=>({...changed,apiContract})});
+      assert.deepEqual(await readRuntimeStatus(),{ok:false,reason:"protocol-mismatch",expected:"caption-hints.v4",actual:apiContract});
+    }
+    const {apiContract: _absent, ...withoutContract} = changed;
+    globalThis.fetch = async () => ({ok:true,json:async()=>withoutContract});
+    assert.deepEqual(await readRuntimeStatus(),{ok:false,reason:"invalid-response"});
+  } finally { globalThis.fetch = original; }
 });
 
 test("accepts full snapshot build identities but rejects unresolved or malformed versions", () => {

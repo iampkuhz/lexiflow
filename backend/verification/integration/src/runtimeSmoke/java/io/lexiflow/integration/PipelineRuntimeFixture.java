@@ -189,12 +189,10 @@ final class PipelineRuntimeFixture implements AutoCloseable {
   JsonNode postIncremental() throws Exception {
     var body =
         """
-        {"captionTopicKey":"synthetic-incremental","trackKey":null,
-         "lastRequestedSnapshot":{"captions":[{"windowId":null,"startMs":null,"segments":[
-           {"key":"old","text":"unchanged","offsetMs":null,"append":false,"line":0}]}]},
-         "currentSnapshot":{"captions":[{"windowId":null,"startMs":null,"segments":[
-           {"key":"old","text":"unchanged","offsetMs":null,"append":false,"line":0},
-           {"key":"new","text":"😀 dependable","offsetMs":null,"append":true,"line":1}]}]}}
+        {"previousSegments":[{"key":"old","text":"unchanged"}],
+         "currentSnapshot":{"captions":[{"segments":[
+           {"key":"old","text":"unchanged","append":false,"line":0},
+           {"key":"new","text":"😀 dependable","append":true,"line":1}]}]}}
         """;
     return post(body);
   }

@@ -12,14 +12,21 @@ import java.util.Objects;
  * @param trackKey 来源轨道身份；无法可靠识别时为 null。
  * @param previous 上次成功确认请求在发送时冻结的可见快照；尚无成功请求时为 null。
  * @param current 本次可见快照，不能为空对象，允许无可见字幕。
+ * @param commonWordCutoff 单词提示截止排名；仅允许 1000、1500、2000。
  */
 public record CaptionIncrementalRequest(
-    String captionTopicKey, String trackKey, Snapshot previous, Snapshot current) {
+    String captionTopicKey,
+    String trackKey,
+    Snapshot previous,
+    Snapshot current,
+    int commonWordCutoff) {
   /** 校验请求身份、快照内容和沿用 key 的前缀裁剪规则。 */
   public CaptionIncrementalRequest {
     captionTopicKey = required(captionTopicKey, "captionTopicKey", 128);
     trackKey = optional(trackKey, "trackKey");
     Objects.requireNonNull(current, "current");
+    if (commonWordCutoff != 1000 && commonWordCutoff != 1500 && commonWordCutoff != 2000)
+      throw new IllegalArgumentException("commonWordCutoff is invalid");
     if (previous != null) {
       var previousText = new HashMap<String, String>();
       for (var group : previous.captions()) {
@@ -37,6 +44,50 @@ public record CaptionIncrementalRequest(
       }
     }
   }
+
+  /** 创建使用默认 1500 截止值的请求。 */
+  public CaptionIncrementalRequest(
+      String topic, String track, Snapshot previous, Snapshot current) {
+    this(topic, track, previous, current, 1500);
+  }
+
+  /** 由客户端仅提交仍可见旧片段时构造比较快照。 */
+  public CaptionIncrementalRequest(List<PreviousSegment> previousSegments, Snapshot current) {
+    this(previousSegments, current, 1500);
+  }
+
+  public CaptionIncrementalRequest(List<PreviousSegment> previousSegments, Snapshot current, int cutoff) {
+    this("caption", null, visiblePrevious(previousSegments, current), current, cutoff);
+  }
+
+  private static Snapshot visiblePrevious(List<PreviousSegment> previous, Snapshot current) {
+    Objects.requireNonNull(previous, "previousSegments");
+    Objects.requireNonNull(current, "current");
+    var values = new HashMap<String, String>();
+    int chars = 0;
+    for (var segment : previous) {
+      Objects.requireNonNull(segment, "previousSegment");
+      String key = required(segment.key(), "previous key", 128);
+      String text = required(segment.text(), "previous text", 500);
+      if (!wellFormedUtf16(text)) throw new IllegalArgumentException("previous text is invalid");
+      chars = Math.addExact(chars, text.length());
+      if (chars > 500) throw new IllegalArgumentException("previous snapshot exceeds limits");
+      if (values.put(key, text) != null)
+        throw new IllegalArgumentException("duplicate previous segment key");
+    }
+    var currentKeys = current.captions().stream().flatMap(g -> g.segments().stream())
+        .map(Segment::key).collect(java.util.stream.Collectors.toSet());
+    if (!currentKeys.containsAll(values.keySet()))
+      throw new IllegalArgumentException("previous segment is not visible in current snapshot");
+    var groups = current.captions().stream().map(group -> {
+      var segments = group.segments().stream().filter(s -> values.containsKey(s.key()))
+          .map(s -> new Segment(s.key(), values.get(s.key()), s.offsetMs(), false, s.line())).toList();
+      return segments.isEmpty() ? null : new Group(group.windowId(), group.startMs(), segments);
+    }).filter(Objects::nonNull).toList();
+    return groups.isEmpty() ? null : new Snapshot(groups);
+  }
+
+  public record PreviousSegment(String key, String text) {}
 
   /**
    * 一份按显示顺序排列的字幕快照。
@@ -81,6 +132,7 @@ public record CaptionIncrementalRequest(
       segments = List.copyOf(Objects.requireNonNull(segments, "segments"));
       if (segments.isEmpty()) throw new IllegalArgumentException("caption group must not be empty");
     }
+    public Group(List<Segment> segments) { this(null, null, segments); }
   }
 
   /**
@@ -101,6 +153,9 @@ public record CaptionIncrementalRequest(
       if (line < 0 || line > 9_007_199_254_740_991L || !wellFormedUtf16(text)) {
         throw new IllegalArgumentException("segment line or text is invalid");
       }
+    }
+    public Segment(String key, String text, boolean append, long line) {
+      this(key, text, null, append, line);
     }
   }
 

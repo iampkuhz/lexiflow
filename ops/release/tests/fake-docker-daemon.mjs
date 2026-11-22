@@ -28,9 +28,10 @@ function renderResource(resource, kind) {
   return `${resource.id}|${resource.name}|${labels.project}|${labels.installation}|${labels.release}`;
 }
 function makeResource(data, kind, name, project, installation, release, running = true) {
-  const existing = data.resources.find((item) => item.kind === kind && item.name === name && item.labels.project === project);
+  const existing = data.resources.find((item) => item.kind === kind && item.name === name
+    && (kind === 'volume' && name.endsWith('_preferences') || item.labels.project === project));
   if (existing) {
-    if (existing.labels.installation !== installation || existing.labels.release !== release) fail();
+    if (existing.labels.installation !== installation || (kind !== 'volume' || !name.endsWith('_preferences')) && existing.labels.release !== release) fail();
     if (kind === 'container') {
       existing.running = running;
       existing.health = running ? 'healthy' : 'none';
@@ -83,11 +84,13 @@ try {
         makeResource(data, 'container', `${project}-api-1`, project, installation, release);
         makeResource(data, 'network', `${project}_private`, project, installation, release);
         makeResource(data, 'volume', `${project}_lexiflow-data`, project, installation, release);
+        makeResource(data, 'volume', `lexiflow-${installation}_preferences`, project, installation, release);
       } else fail();
       await save(all); await record('compose-up', { project, installation, release, service },daemonName); throw new ModelExit(0);
     }
     if (operation === 'run') {
       const name = valueAfter(argv, '--name');
+      makeResource(data, 'volume', `lexiflow-${installation}_preferences`, project, installation, release);
       const serviceAt = argv.indexOf(name) + 1;
       const role = argv[serviceAt];
       if (!name || role !== 'api') fail();
@@ -141,7 +144,7 @@ try {
       const project=labels.find((value)=>value.startsWith(required[0]))?.slice(required[0].length);
       const installation=labels.find((value)=>value.startsWith(required[1]))?.slice(required[1].length);
       const release=labels.find((value)=>value.startsWith(required[2]))?.slice(required[2].length);
-      if(!/^[a-f0-9]{32}$/.test(installation)||!/^[a-f0-9]{64}$/.test(release)||name!==`${project}_lexiflow-data`)fail();
+      if(!/^[a-f0-9]{32}$/.test(installation)||!/^[a-f0-9]{64}$/.test(release)||![`${project}_lexiflow-data`,`lexiflow-${installation}_preferences`].includes(name))fail();
       if(data.resources.some((item)=>item.kind==='volume'&&item.name===name))throw new ModelExit(2);
       makeResource(data,'volume',name,project,installation,release,false);
       await save(all); log(name); await record('volume-create',{name,project},daemonName); throw new ModelExit(0);

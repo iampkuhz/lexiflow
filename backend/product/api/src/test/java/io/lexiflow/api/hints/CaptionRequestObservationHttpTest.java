@@ -42,12 +42,12 @@ class CaptionRequestObservationHttpTest {
     appender.start();
     logger.addAppender(appender);
     try {
-      var ok = post(payload(segment("a", "reliable", true), null));
-      var noHint = post(payload(segment("b", "zxqv", true), null));
-      var noNew = post(payload(segment("c", "reliable", false), null));
+      var ok = post(payload(segment("a", "reliable", true)));
+      var noHint = post(payload(segment("b", "zxqv", true)));
+      var noNew = post(payload(segment("c", "reliable", false)));
       var badJson = post("{");
       var invalidDomain =
-          post(payload(segment("d", "valid", true).replace("\"line\":0", "\"line\":-1"), null));
+          post(payload(segment("d", "valid", true).replace("\"line\":0", "\"line\":-1")));
       assertEquals(200, ok.statusCode());
       assertEquals(200, noHint.statusCode());
       assertEquals(200, noNew.statusCode());
@@ -111,8 +111,7 @@ class CaptionRequestObservationHttpTest {
                                         segment(
                                             "parallel-" + index,
                                             index % 3 == 0 ? "reliable" : "zxqv",
-                                            index % 3 != 2),
-                                        null))))
+                                            index % 3 != 2)))))
                 .toList();
         for (var future : futures) {
           var response = future.get();
@@ -171,10 +170,8 @@ class CaptionRequestObservationHttpTest {
     return events.stream().filter(line -> line.contains(requestId)).findFirst().orElseThrow();
   }
 
-  private static String payload(String segment, String prior) {
-    return "{\"captionTopicKey\":\"topic\",\"trackKey\":null,\"lastRequestedSnapshot\":"
-        + prior
-        + ",\"currentSnapshot\":{\"captions\":[{\"windowId\":null,\"startMs\":null,\"segments\":["
+  private static String payload(String segment) {
+    return "{\"previousSegments\":[],\"currentSnapshot\":{\"captions\":[{\"segments\":["
         + segment
         + "]}]}}";
   }
@@ -184,7 +181,7 @@ class CaptionRequestObservationHttpTest {
         + key
         + "\",\"text\":\""
         + text
-        + "\",\"offsetMs\":null,\"append\":"
+        + "\",\"append\":"
         + append
         + ",\"line\":0}";
   }

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { apiContract } from "../../../scripts/contracts/contract-lock.mjs";
 // 单一部署入口；install/upgrade 只调用 shared planner/executor，其他动作不隐式导入。
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,9 +12,9 @@ import { acquireProcessLock } from '../execution/installation-operation-lock.mjs
 import { doctor, runtime, runtimeDataset } from './diagnose-podman-installation.mjs';
 import { resolveBuildIdentity } from '../../release/integrity/source-build-identity.mjs';
 import { githubLatestRelease, versionSummary } from '../installation/installation-version-summary.mjs';
-import { runUnifiedDeployment, inspectInstalledDeployment, readPreparedTarget, activatePreparedTarget, verifyInstalledExtensionArchive } from '../installation/installation-upgrade-workflow.mjs';
+import { runUnifiedDeployment, inspectInstalledDeployment, readPreparedTarget, activatePreparedTarget, verifyInstalledExtensionArchive, assertSourceComposeSlot } from '../installation/installation-upgrade-workflow.mjs';
 import { readOperationJournal, writeOperationJournal } from '../installation/installation-plan-records.mjs';
-import { deploymentSlot, acquireDeploymentSlotLock } from '../deployment-slots.mjs';
+import { deploymentSlot, acquireDeploymentSlotLock, assertSourceContainerSlot } from '../deployment-slots.mjs';
 import { validateSqliteDatabaseFile } from '../environment/local-sqlite-target.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -113,7 +114,14 @@ export async function runLocal(argv) {
   function composeArgs(...argv) {
     return ['compose', '--env-file', 'release.env', '-p', state.project, '-f', 'compose.yaml', ...(state.captionDebug ? ['-f', 'caption-debug.yaml'] : []), ...argv];
   }
-  function compose(...argv) {
+  async function compose(...argv) {
+    if (argv[0] === 'up') {
+      if (state.captionDebug) fail('DEPLOYMENT_TEST_SLOT_CONFIG_INVALID');
+      const file = path.join(dir, 'compose.yaml');
+      regular(file);
+      assertSourceComposeSlot(fs.readFileSync(file, 'utf8'), repo);
+      await ownedResources();
+    }
     return run('podman', composeArgs(...argv), { capture: true });
   }
   async function ownedResources() {
@@ -122,6 +130,10 @@ export async function runLocal(argv) {
     for (const kind of ['container', 'volume', 'network']) {
       const listArgs = kind === 'container' ? ['ps', '-a', '--format', 'json'] : [kind, 'ls', '--format', 'json'];
       const rows = JSON.parse(await run('podman', listArgs, { capture: true, timeout: 30000 }));
+      if (kind === 'container' && ['install', 'upgrade', 'up', 'recover'].includes(action)) {
+        assertSourceContainerSlot(rows, state);
+      }
+      if (!state) break;
       for (const row of rows) {
         const labels = row.Labels || row.labels || {};
         if ([labels['com.docker.compose.project'], labels['io.podman.compose.project']].includes(state.project) && labels['lexiflow.installation'] !== state.id) fail(`发现归属不匹配的 ${kind}，拒绝操作`);
@@ -169,7 +181,7 @@ export async function runLocal(argv) {
       const id = owned.length === 1 ? (owned[0].Id || owned[0].ID) : '';
       if (/^[a-f0-9]{64}$/.test(id)) {
         const body = JSON.parse(await run('podman', ['exec', id, '/app/run-container-command.sh', 'health'], { capture: true, timeout: 5000 }));
-        internalReady = body.ready === true && body.mode === 'formal' && body.reason === 'OK' && body.softwareVersion === installed.version && body.apiContract === 'caption-hints.v2';
+        internalReady = body.ready === true && body.mode === 'formal' && body.reason === 'OK' && body.softwareVersion === installed.version && body.apiContract === apiContract();
       }
     } catch { /* 不输出工具原文，无法确认时不声称应用健康。 */ }
     fail(internalReady ? '容器内部已就绪，但宿主端口不可达（HOST_PORT_UNREACHABLE）；数据已保留。请运行 doctor；不要重新导入词库' : `API 就绪等待超时（${reason}）；内部健康未确认，请查看 logs；不要重新初始化数据库`);
@@ -194,36 +206,32 @@ export async function runLocal(argv) {
     try { process.kill(pid, 0); return true; }
     catch (error) { if (error.code === 'ESRCH') return false; throw error; }
   }
-  function retireLock(confirmLegacy = false) {
+  function retireLock() {
     const root = path.join(dir, '.lock');
     if (!fs.existsSync(root)) return;
     safePath(root);
     const entries = fs.readdirSync(root);
-    if (entries.length === 0) {
-      if (!confirmLegacy) fail('发现旧安装遗留的空锁；确认旧安装已退出后运行 recover --confirm-stopped，再重试 install');
-    } else {
-      if (entries.length !== 1 || entries[0] !== 'owner.json') fail('安装锁内容未知，拒绝删除');
-      regular(path.join(root, 'owner.json'));
-      let owner;
-      try { owner = JSON.parse(fs.readFileSync(path.join(root, 'owner.json'), 'utf8')); }
-      catch { fail('安装锁元数据不完整，拒绝自动删除'); }
-      if (owner.schema !== 1 || owner.root !== dir || owner.installation !== state.id || !Number.isSafeInteger(owner.pid) || owner.pid <= 1 || !/^[a-f0-9]{32}$/.test(owner.token) || (owner.childPid !== null && (!Number.isSafeInteger(owner.childPid) || owner.childPid <= 1))) fail('安装锁归属无效');
-      if (alive(owner.pid) || (owner.childPid && alive(-owner.childPid))) fail('安装或其子进程仍在运行，不能重试或恢复；请先结束原命令');
-      // 删除前再校验原记录，拒绝已发生的身份漂移。
-      if (fs.readFileSync(path.join(root, 'owner.json'), 'utf8') !== JSON.stringify(owner)) fail('安装锁已改变，请稍后重试');
-    }
+    if (entries.length !== 1 || entries[0] !== 'owner.json') fail('安装锁内容未知，拒绝删除');
+    regular(path.join(root, 'owner.json'));
+    let owner;
+    try { owner = JSON.parse(fs.readFileSync(path.join(root, 'owner.json'), 'utf8')); }
+    catch { fail('安装锁元数据不完整，拒绝自动删除'); }
+    if (owner.schema !== 1 || owner.root !== dir || owner.installation !== state.id || !Number.isSafeInteger(owner.pid) || owner.pid <= 1 || !/^[a-f0-9]{32}$/.test(owner.token) || (owner.childPid !== null && (!Number.isSafeInteger(owner.childPid) || owner.childPid <= 1))) fail('安装锁归属无效');
+    if (alive(owner.pid) || (owner.childPid && alive(-owner.childPid))) fail('安装或其子进程仍在运行，不能重试或恢复；请先结束原命令');
+    // 删除前再校验原记录，拒绝已发生的身份漂移。
+    if (fs.readFileSync(path.join(root, 'owner.json'), 'utf8') !== JSON.stringify(owner)) fail('安装锁已改变，请稍后重试');
     // 先退出活动锁命名空间；清理中被强杀也不留下无法辨识的空活动锁。
     const retired = path.join(dir, `.lock-retired-${crypto.randomBytes(16).toString('hex')}`);
     fs.renameSync(root, retired);
-    if (entries.length) fs.unlinkSync(path.join(retired, 'owner.json'));
+    fs.unlinkSync(path.join(retired, 'owner.json'));
     fs.rmdirSync(retired);
   }
-  function acquireLock(confirmLegacy = false) {
+  function acquireLock() {
     unlockProcess = acquireProcessLock(dir);
     try {
       // 旧协议无 owner 的交接目录不能当作新内核锁回收，不删除未知遗留物。
       if (fs.existsSync(path.join(dir, '.lock-claim'))) fail('发现未知交接锁；保留现场，拒绝自动删除');
-      retireLock(confirmLegacy);
+      retireLock();
       lockRecord = { schema: 1, root: dir, installation: state.id, pid: process.pid, token: crypto.randomBytes(16).toString('hex'), childPid: null };
       const prepared = path.join(dir, `.lock-prepared-${lockRecord.token}`);
       fs.mkdirSync(prepared, { mode: 0o700 });
@@ -349,13 +357,15 @@ export async function runLocal(argv) {
         const preparedFile = path.join(dir, 'prepared-target.json');
         if (!fs.existsSync(preparedFile)) fail('DEPLOYMENT_RECOVERY_PREPARED_TARGET_MISSING');
         const prepared = readPreparedTarget(preparedFile, journal, dir);
+        if (prepared.targetState.apiPort !== state.apiPort || prepared.targetState.packageType !== 'source')
+          fail('DEPLOYMENT_SOURCE_SLOT_STATE_INVALID');
         await ownedResources();
         const fact = await inspectInstalledDeployment({ repo, state: prepared.targetState, run, environment });
         if (fact.needsRebuild || fact.generationVersion !== prepared.targetState.generationVersion) {
           console.log('[LexiFlow] BLOCKED：数据库目标代际尚未完整提交；仅可重新计划，不会自动重导。');
           return 1;
         }
-        acquireLock(confirmStopped);
+        acquireLock();
         const repeated = await inspectInstalledDeployment({ repo, state: prepared.targetState, run, environment });
         if (repeated.needsRebuild || repeated.fingerprint !== fact.fingerprint) fail('DEPLOYMENT_RECOVERY_DATABASE_DRIFT');
         if (await portTaken(state.apiPort)) {
@@ -377,7 +387,7 @@ export async function runLocal(argv) {
       }
       if (!state.generation || !state.inputSha256) {
         if (!confirmStopped || state.phase !== 'new') fail('DEPLOYMENT_RECOVERY_STATE_INCOMPLETE');
-        acquireLock(true);
+        acquireLock();
         console.log('[LexiFlow] 建库前锁已核对；没有数据库成功事实可恢复。请重新运行 install --plan。');
         return 0;
       }
@@ -390,7 +400,7 @@ export async function runLocal(argv) {
         return 1;
       }
       if (confirmStopped || fs.existsSync(path.join(dir, '.lock')) || fs.existsSync(path.join(dir, '.lock-claim')))
-        acquireLock(confirmStopped);
+        acquireLock();
       console.log('[LexiFlow] 数据库记录与安装状态一致，无待恢复操作。'); return 0;
     }
     step = '核验安装状态';
@@ -425,13 +435,15 @@ export async function runLocal(argv) {
     const file = path.join(dir, 'state.json'); regular(file);
     const value = JSON.parse(fs.readFileSync(file, 'utf8'));
     if (value.schema !== 2 || value.root !== dir || !/^[a-f0-9]{32}$/.test(value.id)
-      || value.project !== `lexiflow-local-${value.id}` || !Number.isInteger(value.apiPort) || value.apiPort < 1 || value.apiPort > 65535
+      || value.project !== `lexiflow-local-${value.id}` || value.apiPort !== sourceSlot.apiPort
       || value.databaseTarget?.kind !== 'file' || value.databaseFile !== path.join(dir, 'data', 'lexicon.db')) fail('DEPLOYMENT_INSTALL_STATE_INVALID');
     validateSqliteDatabaseFile(value.databaseFile, { installationRoot: dir, allowMissing: value.phase === 'new' });
     return value;
   }
   try {
-    if (['install', 'upgrade'].includes(action)) { step = '获取源码部署槽位'; unlockSlot = acquireDeploymentSlotLock('source'); }
+    if (['install', 'upgrade', 'up', 'recover'].includes(action)) {
+      step = '获取源码部署槽位'; unlockSlot = acquireDeploymentSlotLock('source');
+    }
     return (await main()) ?? 0;
   }
   catch (error) {
@@ -443,8 +455,10 @@ export async function runLocal(argv) {
       DEPLOYMENT_TARGET_CHANGED: '指定目标与已有安装记录不同，拒绝更换目标。',
       DEPLOYMENT_SLOT_BUSY: '同类型源码部署槽位正在被另一个进程使用，拒绝并发操作。',
       DEPLOYMENT_SLOT_LOCK_INVALID: '无法取得受信的本机部署槽位锁，拒绝操作。',
+      DEPLOYMENT_TEST_SLOT_OCCUPIED: 'lexiflow-test 已由其他安装占用（包括已停止容器）；不会停止、接管或另建容器。',
+      DEPLOYMENT_TEST_SLOT_INVENTORY_INVALID: '无法核对 lexiflow-test 槽位占用，拒绝操作。',
+      DEPLOYMENT_TEST_SLOT_CONFIG_INVALID: '安装配置不符合固定测试容器槽位；不会启动。请重新核对安装并显式执行 upgrade。',
       CANDIDATE_SLOT_STATE_INVALID: '现有安装的类型或端口不属于固定发行验证槽位，拒绝候选安装接管。',
-      DEPLOYMENT_SOURCE_MIGRATION_OWNERSHIP_UNVERIFIED: '现有源码 API 端口或容器归属无法核验，拒绝迁移。',
       DEPLOYMENT_REPLACEMENT_RECORD_INVALID: '镜像替换记录与本安装状态不符，保留现场；请核对原安装输入。',
       DEPLOYMENT_REPLACEMENT_TARGET_CHANGED: '未完成的镜像替换绑定原构建与资料输入；恢复后只能使用相同输入再次明确确认，拒绝改用其他目标。',
       DEPLOYMENT_DATA_COPY_DRIFT: '复制的资料与已校验输入不同，拒绝部署。',

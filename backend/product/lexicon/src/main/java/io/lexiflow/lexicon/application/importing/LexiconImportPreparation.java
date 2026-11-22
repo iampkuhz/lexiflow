@@ -60,19 +60,6 @@ public final class LexiconImportPreparation {
   private LexiconImportPreparation() {}
 
   /**
-   * 流式准备并核对来源身份、原始计数、可导入计数及跨行 canonical 冲突。
-   *
-   * @param metadata 含义：预检来源身份和策略元数据。取值范围：非 null。
-   * @param rowSource 含义：可重读解析行来源。取值范围：非 null。
-   * @param prewarmLimit 含义：预览上限。取值范围：非负整数，0 表示只校验。
-   * @return 只含计数和有界预热预览的不可变结果
-   */
-  public static Inspection inspect(
-      LexiconImportMetadata metadata, LexiconImportRowSource rowSource, int prewarmLimit) {
-    return inspect(metadata, rowSource, prewarmLimit, () -> {});
-  }
-
-  /**
    * 执行完整扫描并在真实解析行通知可限速进度回调。 回调仅用于实际执行期间的限速心跳。
    *
    * @param metadata 含义：来源身份与策略元数据。取值范围：非 null。
@@ -165,7 +152,11 @@ public final class LexiconImportPreparation {
       }
       var planned =
           LexiconImportPlan.prepareNext(
-              row, 1, metadata.sourceDigest(), metadata.acquiredAt(), surfaces);
+              row,
+              1,
+              metadata.digestFor(row.dictionary().sourceId()),
+              metadata.acquiredAt(),
+              surfaces);
       entries++;
       if (planned.prepared().gloss() == null) blockedEntries++;
       else hintEntries++;

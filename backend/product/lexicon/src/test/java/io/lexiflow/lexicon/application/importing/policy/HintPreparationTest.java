@@ -18,39 +18,41 @@ class HintPreparationTest {
   void excludesShortWordsFromPublishedHintsWithoutDiscardingSourceRows() {
     for (var word : List.of("a", "uh", "um", "ai", "tv")) {
       var source = row(word, "合成释义");
-      assertEquals("outside_query_window", HintPreparation.exclusionReason(source));
+      assertEquals("outside_query_window", HintPreparation.prepare(source).exclusionReason());
       assertFalse(HintPreparation.prepare(source).classification().hintEligible());
       assertEquals(word, source.lemma());
     }
-    assertNull(HintPreparation.exclusionReason(row("yak", "牦牛")));
-    assertNull(HintPreparation.exclusionReason(row("of course", "当然")));
+    assertNull(HintPreparation.prepare(row("yak", "牦牛")).exclusionReason());
+    assertNull(HintPreparation.prepare(row("of course", "当然")).exclusionReason());
   }
 
   @Test
   void blocksBasicLowInformationAndAmbiguousGlossButNotRankedWord() {
-    assertEquals("basic_vocabulary", HintPreparation.exclusionReason(row("the", "这个")));
+    assertEquals("basic_vocabulary", HintPreparation.prepare(row("the", "这个")).exclusionReason());
     for (var phrase : List.of("the first", "not in", "on yesterday", "to be")) {
-      assertEquals("low_information_phrase", HintPreparation.exclusionReason(row(phrase, "错误短释")));
+      assertEquals("low_information_phrase", HintPreparation.prepare(row(phrase, "错误短释")).exclusionReason());
     }
     assertEquals(
         "unsafe_default_candidate",
-        HintPreparation.exclusionReason(row("sustainability", "持续性；可持续性")));
-    assertNull(HintPreparation.exclusionReason(row("literally", "按字面意思")));
+        HintPreparation.prepare(row("sustainability", "持续性；可持续性")).exclusionReason());
+    assertNull(HintPreparation.prepare(row("literally", "按字面意思")).exclusionReason());
   }
 
   @Test
-  void blocksEveryOxfordWordRegardlessOfRankButKeepsCompletePhrasesIndependent() {
-    for (Long rank : new Long[] {null, 2370L, 10000L}) {
-      var word = oxfordRow("false", "错误的", rank);
-      assertTrue(word.basicVocabulary());
-      assertFalse(word.prewarmEligible());
-      assertEquals("basic_vocabulary", HintPreparation.exclusionReason(word));
+  void bncRankReplacesOxfordSingleWordBlockButUnrankedAndPhrasesKeepRules() {
+    var unranked = oxfordRow("seldomword", "罕见词", null);
+    assertFalse(unranked.basicVocabulary());
+    assertEquals("basic_vocabulary", HintPreparation.prepare(unranked).exclusionReason());
+    for (Long rank : new Long[] {2370L, 10000L}) {
+      var ranked = oxfordRow("seldomword", "罕见词", rank);
+      assertFalse(ranked.basicVocabulary());
+      assertNull(HintPreparation.prepare(ranked).exclusionReason());
     }
     var phrase = oxfordRow("false alarm", "误报", null);
     assertFalse(phrase.basicVocabulary());
-    assertNull(HintPreparation.exclusionReason(phrase));
+    assertNull(HintPreparation.prepare(phrase).exclusionReason());
     assertFalse(row("specialist", "专家").basicVocabulary());
-    assertNull(HintPreparation.exclusionReason(row("specialist", "专家")));
+    assertNull(HintPreparation.prepare(row("specialist", "专家")).exclusionReason());
   }
 
   @Test

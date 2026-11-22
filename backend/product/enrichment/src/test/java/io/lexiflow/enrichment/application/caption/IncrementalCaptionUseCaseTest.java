@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import io.lexiflow.enrichment.domain.model.CaptionIncrementalRequest;
 import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
 import io.lexiflow.lexicon.domain.catalog.BuiltinLexiconCatalog;
-import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import io.lexiflow.lexicon.domain.model.LexiconLookupResult;
@@ -86,8 +85,8 @@ class IncrementalCaptionUseCaseTest {
             .enrichIncrementalMeasured(
                 request(
                     group(
-                        new CaptionIncrementalRequest.Segment("old", "figure ", null, false, 0),
-                        new CaptionIncrementalRequest.Segment("new", "out", null, true, 1))));
+                        new CaptionIncrementalRequest.Segment("old", "figure ", false, 0),
+                        new CaptionIncrementalRequest.Segment("new", "out", true, 1))));
     assertEquals(List.of("out"), queries);
     assertEquals(List.of("new"), measured.result().processedKeys());
     assertTrue(measured.result().hints().isEmpty());
@@ -122,13 +121,11 @@ class IncrementalCaptionUseCaseTest {
                         original.entryId(),
                         original.senseId(),
                         2,
-                        original.languageTag(),
                         original.normalizedForm(),
-                        original.canonicalLemma(),
-                        original.entryKind(),
                         original.finalAction(),
                         original.finalGloss(),
-                        original.priority())));
+                        original.priority(),
+                        null)));
           }
           return lookup(forms, List.of());
         };
@@ -255,13 +252,11 @@ class IncrementalCaptionUseCaseTest {
                   UUID.nameUUIDFromBytes(
                       "unsafe-sense".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
                   2,
-                  "en",
                   "ordinary",
-                  "ordinary",
-                  LexiconEntryKind.WORD,
                   LexiconHintAction.HINT,
                   "释".repeat(25),
-                  500);
+                  500,
+                  null);
           var unmatched = candidate("never-present", "隐藏候选", 2);
           return new LexiconLookupResult(
               List.of(block, unsafe, unmatched),
@@ -305,17 +300,17 @@ class IncrementalCaptionUseCaseTest {
 
   private static CaptionIncrementalRequest request(CaptionIncrementalRequest.Group... groups) {
     return new CaptionIncrementalRequest(
-        "topic", null, null, new CaptionIncrementalRequest.Snapshot(List.of(groups)));
+        List.of(), new CaptionIncrementalRequest.Snapshot(List.of(groups)));
   }
 
   private static CaptionIncrementalRequest.Group group(
       CaptionIncrementalRequest.Segment... segments) {
-    return new CaptionIncrementalRequest.Group(null, null, List.of(segments));
+    return new CaptionIncrementalRequest.Group(List.of(segments));
   }
 
   private static CaptionIncrementalRequest.Segment segment(
       String key, String text, boolean append) {
-    return new CaptionIncrementalRequest.Segment(key, text, null, append, 0);
+    return new CaptionIncrementalRequest.Segment(key, text, append, 0);
   }
 
   private static LexiconLookupResult lookup(
@@ -352,13 +347,11 @@ class IncrementalCaptionUseCaseTest {
         (long) (form.hashCode() & 0x7fffffff) + 1,
         UUID.nameUUIDFromBytes(gloss.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
         version,
-        "en",
         form,
-        form,
-        form.contains(" ") ? LexiconEntryKind.PHRASE : LexiconEntryKind.WORD,
         LexiconHintAction.HINT,
         gloss,
-        500);
+        500,
+        null);
   }
 
   private static LexiconHintCandidate blockCandidate(String form, long version) {
@@ -366,12 +359,10 @@ class IncrementalCaptionUseCaseTest {
         (long) (form.hashCode() & 0x7fffffff) + 1,
         null,
         version,
-        "en",
         form,
-        form,
-        LexiconEntryKind.WORD,
         LexiconHintAction.BLOCK,
         null,
-        500);
+        500,
+        null);
   }
 }

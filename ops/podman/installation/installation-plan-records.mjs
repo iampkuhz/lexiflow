@@ -17,12 +17,10 @@ export function createDeploymentPlan(input) {
   const target = input.databaseTarget;
   if (!target || target.kind !== 'file' || typeof target.file !== 'string' || !path.isAbsolute(target.file)
       || path.basename(target.file) !== 'lexicon.db' || /[\r\n\0]/.test(target.file)) fail('DEPLOYMENT_DATABASE_TARGET_INVALID');
-  if (input.apiPortMigration !== undefined && (input.apiPortMigration?.from !== 18080 || input.apiPortMigration?.to !== 18081)) fail('DEPLOYMENT_PLAN_INVALID');
   if (!['DATABASE_ABSENT', 'DATABASE_CORRUPT', 'OK', 'RECORD_MISSING', 'RECORD_INVALID', 'GENERATION_CHANGED'].includes(input.dataReason)) fail('DEPLOYMENT_DATA_REASON_INVALID');
   if (!['NEW_INSTALL', 'INSTALL_REFRESH', 'BUILD_CHANGED', 'START_REQUIRED', 'CURRENT'].includes(input.applicationReason)) fail('DEPLOYMENT_APPLICATION_REASON_INVALID');
   return sortValue({ schema: 1, operation: input.operation, installation: input.installation,
-    target: { buildId: input.targetBuildId, generationVersion: input.generationVersion,
-      ...(input.apiPortMigration ? { apiPortMigration: input.apiPortMigration } : {}) },
+    target: { buildId: input.targetBuildId, generationVersion: input.generationVersion },
     database: { target, fingerprint: input.databaseFingerprint, create: Boolean(input.createDatabase) },
     actions: { applicationUpdate: Boolean(input.applicationUpdate), applicationStart: Boolean(input.applicationStart),
       applicationReason: input.applicationReason, dataRebuild: Boolean(input.dataRebuild), dataReason: input.dataReason } });
@@ -39,14 +37,12 @@ export async function confirmDeploymentPlan(hash, { suppliedHash, signal } = {})
 }
 
 /** 普通交互只在任何数据库连接或重型准备前询问一次；拒绝不生成计划。 */
-export async function confirmDeploymentIntent({ databaseFile, apiPort, previousApiPort, input = process.stdin, output = process.stdout, signal } = {}) {
+export async function confirmDeploymentIntent({ databaseFile, apiPort, input = process.stdin, output = process.stdout, signal } = {}) {
   if (typeof databaseFile !== 'string' || !path.isAbsolute(databaseFile) || path.basename(databaseFile) !== 'lexicon.db') fail('DEPLOYMENT_DATABASE_TARGET_INVALID');
-  if (apiPort !== undefined && (!Number.isInteger(apiPort) || apiPort < 1 || apiPort > 65535)
-      || previousApiPort !== undefined && (previousApiPort !== 18080 || apiPort !== 18081)) fail('DEPLOYMENT_DATABASE_TARGET_INVALID');
+  if (apiPort !== undefined && (!Number.isInteger(apiPort) || apiPort < 1 || apiPort > 65535)) fail('DEPLOYMENT_DATABASE_TARGET_INVALID');
   if (signal?.aborted) fail('DEPLOYMENT_CONFIRMATION_CANCELLED');
   if (!input.isTTY || !output.isTTY) fail('DEPLOYMENT_CONFIRMATION_REQUIRED');
-  const apiTarget = apiPort === undefined ? '' : previousApiPort === undefined
-    ? `API 127.0.0.1:${apiPort}；` : `API 127.0.0.1:${previousApiPort} → 127.0.0.1:${apiPort}；`;
+  const apiTarget = apiPort === undefined ? '' : `API 127.0.0.1:${apiPort}；`;
   output.write(`目标：${apiTarget}SQLite 文件 ${databaseFile}。本次 install/upgrade 仅管理本安装目录中的数据库文件与 API；缺失或损坏的资料文件仅按明确重建计划处理，拒绝非本安装目录的文件目标，不触及其他服务或目录。确认仅授权本次调用。\n继续安装并使用本机 LexiFlow 数据库？[y/N] `);
   const line = await new Promise((resolve, reject) => {
     let value = '';

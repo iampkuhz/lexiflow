@@ -121,7 +121,7 @@ persist 从进入发布资源/写入步骤开始；发布端口增加事务进�
 - 内存 `Diagnostics` 只接受固定 stage/outcome 和有限非负时长，保留每节点最多 256 个样本；缺失值为 null，固定字段之外不接受字幕、ID、URL 或偏好。现有 observed/requested/ready/no-pending/shown 统计继续描述各自节点，不将它们相加当作请求总数。新原因使用本节唯一命名；删除未被消费的旧取消/迟到别名，不维护双套键。
 - 生命周期在实际状态变化时记录 disabled、source_hidden、navigation，重复关闭/隐藏或 DOM mutation 不重复记录状态变化；navigation 以新 pageKey 为界，navigate-finish 不再计一次。原因只通过回调交给组合根，不让生命周期依赖日志或接管请求状态。
 - stream 在丢弃未发定时任务时记录 cancelled_before_send；取消唯一在途请求时记录 cancelled_in_flight；旧世代 Promise 返回时记录 late_response。取消动作与后来返回是两个事实，不把它们重复计为 timeout 或 network。hash 待决因失效放弃时单独计 cancelled-acquisition；已结束的 Promise 不冒充在途取消，计数不增加资料采集。
-- 实际被接受的失败响应按 timeout、aborted、network、invalid-request、rejected 分类；HTTP 503 单独映射 backend_unavailable，不读取或转印错误正文；成功 HTTP 的 JSON/结构绑定校验失败在诊断中归 protocol_mismatch，不等同于实际软件版本不匹配。后者的版本协商属于发布任务。成功响应 hints 为空时恰好记录一次 no_hint，即使视图仍保留已有提示，也不计为超时或本机抑制。
+- 实际被接受的失败响应按 timeout、aborted、network、invalid-request、rejected 分类；HTTP 503 单独映射 backend_unavailable，不读取或转印错误正文；成功 HTTP 的 JSON/结构绑定校验失败在诊断中归 protocol_mismatch，并不表示扩展与服务的接口版本不同；接口版本由运行状态接口判定。成功响应 hints 为空时恰好记录一次 no_hint，即使视图仍保留已有提示，也不计为超时或本机抑制。
 - background 仅解析 Server-Timing 的 query/rules/api，合法范围 0–60000ms，未知字段和 desc 不进入诊断。缺失、无效、重复的维度均省略；同一维度重复时不任选一个值。stream 对每个接受的成功响应，只要任一必需维度缺失就记录一次 missing-server-timing；合法的其他维度仍记录，未测量绝不补零，transport 与 query 保持不同节点。
 - render 记录实际绘制耗时；endToEnd 从当前字幕被观察到该序号首次 ready/no-pending/fallback 计一次，旧行封版二次发布和偏好/布局重绘不再计数。shown 与 suppressed 按该字幕序号去重；只有确实存在提示且全部被本机偏好抑制，才记录 suppressed，无提示不冒充抑制。HUD 的固定聚合字段保持可消费，不附带正文或 request_id。
 - background 普通输出只含固定 stage/outcome/耗时；清除超时和在途引用不依赖 console 成功，console 异常不得改变已确定响应。诊断回调本身故障也不得改变调度、取消、英文或提示结果，不自动重试请求。

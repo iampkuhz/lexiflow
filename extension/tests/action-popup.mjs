@@ -10,11 +10,11 @@ export async function openInUniqueNormalWindow({windows,openPopup}) {
   return openPopup(normal[0].id);
 }
 
-/** Focus the owned window before invoking Chrome's real action popup API. */
+/** Activate the test-owned window (virtual in the headless E2E) for the real action popup. */
 export async function openChromeActionPopup({windows,serviceWorker}) {
   return openInUniqueNormalWindow({windows,openPopup:windowId=>
     serviceWorker.evaluate(async id=>{
-      // OS focus can lag behind windows.update; retry only an explicit no-popup rejection.
+      // Chrome can report the test window inactive briefly; retry only that explicit rejection.
       for(let attempt=0;attempt<3;attempt++) {
         await chrome.windows.update(id,{focused:true});
         try {return await chrome.action.openPopup({windowId:id});}
@@ -119,12 +119,16 @@ export async function openActionPopup({context,page,serviceWorker}) {
       const result=await command('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});
       await writeFile(path,Buffer.from(result.data,'base64'));
     };
+    const emulateColorScheme=async colorScheme=>{
+      if(!['light','dark'].includes(colorScheme)) throw new Error(`unsupported color scheme ${colorScheme}`);
+      await command('Emulation.setEmulatedMedia',{features:[{name:'prefers-color-scheme',value:colorScheme}]});
+    };
     const close=async()=>{
       await browserSession.send('Target.closeTarget',{targetId:target.targetId}).catch(()=>undefined);
       await browserSession.detach().catch(()=>undefined);
     };
     await waitFor(()=>document.readyState==='complete');
-    return {evaluate,waitFor,click,pressSpace,screenshot,close};
+    return {evaluate,waitFor,click,pressSpace,screenshot,emulateColorScheme,close};
   } catch(error) {
     await browserSession.detach().catch(()=>undefined);
     throw error;

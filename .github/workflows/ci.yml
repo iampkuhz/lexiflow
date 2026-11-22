@@ -58,6 +58,14 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
+          if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA:contracts/versions.lock.json" 2>/dev/null; then
+            for scope in extension-api sqlite-storage; do
+              node scripts/contracts/version-contract.mjs check --scope "$scope" --base "$BASE_SHA"
+            done
+          elif [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA:scripts/contracts/version-contract.mjs" 2>/dev/null; then
+            echo '已有接口工具的基线不允许缺少版本锁' >&2
+            exit 1
+          fi
           if [ -z "$BASE_SHA" ] || printf '%s' "$BASE_SHA" | grep -Eq '^0+$'; then
             xvfb-run -a python -m scripts.triggers.run_ci_quick_checks quick --all
           else

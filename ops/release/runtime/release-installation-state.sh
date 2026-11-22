@@ -1,5 +1,4 @@
 # 安装私有状态、锁与发行记录；仅由内嵌入口的固定生命周期正文调用。
-lf_state_error() { printf '%s\n' "$1" >&2; return 1; }
 lf_valid_key() { case "$1" in *[!0123456789abcdef]*|'') return 1;; esac; [ "${#1}" -eq 64 ]; }
 lf_valid_token() { case "$1" in *[!0123456789abcdef]*|'') return 1;; esac; [ "${#1}" -eq 32 ]; }
 lf_valid_engine_id() {

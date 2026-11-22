@@ -1,14 +1,15 @@
-import { API_URL, REQUEST_TIMEOUT_MS } from "./protocol";
+import { REQUEST_TIMEOUT_MS } from "./protocol";
+import { DEFAULT_ORIGIN, endpoint } from "./backend-target";
 
-declare const __LEXIFLOW_EXPECTED_DATASET__: string;
-
-export const API_CONTRACT = "caption-hints.v2";
-export const RUNTIME_STATUS_URL = API_URL.replace(/\/caption-hints$/, "/runtime-status");
+// One current wire contract for all extension endpoints, independent of builds and publications.
+declare const __LEXIFLOW_API_CONTRACT__: string;
+export const API_CONTRACT = __LEXIFLOW_API_CONTRACT__;
+export const RUNTIME_STATUS_URL = endpoint(DEFAULT_ORIGIN, "runtime-status");
 export type PublishedDataset = { releaseId: string; preparationId: string; ruleId: string; sqlVersion: string; sha256: string };
 export type RuntimeStatus = { softwareVersion: string; apiContract: string; mode: "formal" | "demo" | "invalid";
   ready: boolean; reason: "OK" | "DEMO_MODE" | "NO_PUBLISHED_DATA" | "DEPENDENCY_UNAVAILABLE" | "SCHEMA_MISMATCH" | "IDENTITY_MISMATCH" | "PREWARM_DEGRADED" | "INITIALIZING";
   datasetVersion: number | null; publishedDataset: PublishedDataset | null };
-export type StatusRead = { ok: true; status: RuntimeStatus } | { ok: false; reason: "network" | "timeout" | "invalid-response" | "protocol-mismatch" };
+export type StatusRead = { ok: true; status: RuntimeStatus } | { ok: false; reason: "network" | "timeout" | "invalid-response" } | { ok: false; reason: "protocol-mismatch"; expected: string; actual: string };
 const reasons = new Set(["OK", "DEMO_MODE", "NO_PUBLISHED_DATA", "DEPENDENCY_UNAVAILABLE", "SCHEMA_MISMATCH", "IDENTITY_MISMATCH", "PREWARM_DEGRADED", "INITIALIZING"]);
 const datasetKeys = ["releaseId", "preparationId", "ruleId", "sqlVersion", "sha256"] as const;
 function validDataset(value: unknown): value is PublishedDataset {
@@ -17,21 +18,6 @@ function validDataset(value: unknown): value is PublishedDataset {
   return Object.keys(item).length === datasetKeys.length && datasetKeys.every(key => Object.hasOwn(item, key)) &&
     datasetKeys.slice(0, 4).every(key => typeof item[key] === "string" && (item[key] as string).length > 0 && (item[key] as string).length <= 128) &&
     typeof item.sha256 === "string" && /^[0-9a-f]{64}$/.test(item.sha256);
-}
-export function matchesPublishedDataset(actual: PublishedDataset | null, expected: PublishedDataset | null): boolean {
-  return !!actual && !!expected && datasetKeys.every(key => actual[key] === expected[key]);
-}
-export const EXPECTED_DATASET: PublishedDataset | null = (() => {
-  try { const value: unknown = JSON.parse(typeof __LEXIFLOW_EXPECTED_DATASET__ === "string" ? __LEXIFLOW_EXPECTED_DATASET__ : "null");
-    return validDataset(value) ? value : null; } catch { return null; }
-})();
-export function runtimeCompatibility(status: RuntimeStatus, expectedSoftwareVersion: string | undefined,
-  expectedDataset: PublishedDataset | null = EXPECTED_DATASET): "software-version" | "binding-missing" | "dataset-identity" | undefined {
-  if (!expectedSoftwareVersion || status.softwareVersion !== expectedSoftwareVersion) return "software-version";
-  if (status.mode !== "formal") return undefined;
-  if (!expectedDataset) return "binding-missing";
-  if (status.ready && !matchesPublishedDataset(status.publishedDataset, expectedDataset)) return "dataset-identity";
-  return undefined;
 }
 function validVersion(value: unknown): value is string {
   if (typeof value !== "string") return false;
@@ -70,7 +56,7 @@ export function parseRuntimeStatus(value: unknown): RuntimeStatus | undefined {
   return { softwareVersion: item.softwareVersion, apiContract: item.apiContract, mode, ready: item.ready, reason,
     datasetVersion: item.datasetVersion as number | null, publishedDataset: item.publishedDataset as PublishedDataset | null };
 }
-export async function readRuntimeStatus(signal?: AbortSignal): Promise<StatusRead> {
+export async function readRuntimeStatus(signal?: AbortSignal, origin = DEFAULT_ORIGIN): Promise<StatusRead> {
   if (signal?.aborted) return { ok: false, reason: "network" };
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -78,17 +64,26 @@ export async function readRuntimeStatus(signal?: AbortSignal): Promise<StatusRea
   let timedOut = false;
   const timeout = signal ? undefined : setTimeout(() => { timedOut = true; controller.abort(); }, REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(RUNTIME_STATUS_URL, { method: "GET", cache: "no-store",
+    const response = await fetch(endpoint(origin, "runtime-status"), { method: "GET", cache: "no-store",
       redirect: "error", credentials: "omit", referrerPolicy: "no-referrer", signal: controller.signal });
     if (controller.signal.aborted) return { ok: false, reason: "network" };
     if (!response.ok) return { ok: false, reason: "network" };
     let data: unknown;
     try { data = await response.json(); } catch { return { ok: false, reason: "invalid-response" }; }
     if (controller.signal.aborted) return { ok: false, reason: "network" };
-    if (data && typeof data === "object" && "apiContract" in data && (data as { apiContract?: unknown }).apiContract !== API_CONTRACT)
-      return { ok: false, reason: "protocol-mismatch" };
+    const actual = data && typeof data === "object" && "apiContract" in data ? data.apiContract : undefined;
+    if (typeof actual === "string" && /^caption-hints\.v[1-9][0-9]{0,8}$/u.test(actual) && actual !== API_CONTRACT)
+      return { ok: false, reason: "protocol-mismatch", expected: API_CONTRACT, actual };
     const status = parseRuntimeStatus(data);
     return status ? { ok: true, status } : { ok: false, reason: "invalid-response" };
   } catch { return { ok: false, reason: timedOut ? "timeout" : "network" }; }
   finally { if (timeout !== undefined) clearTimeout(timeout); signal?.removeEventListener("abort", abort); }
+}
+
+export function mismatchText(reply: { expected?: string; actual?: string }): string {
+  const number = (value?: string) => /^caption-hints\.v[1-9][0-9]{0,8}$/u.test(value ?? "") ? value!.slice("caption-hints.v".length) : "";
+  const expected = number(reply.expected), actual = number(reply.actual);
+  return expected && actual
+    ? `接口版本不匹配：扩展 ${expected}，服务 ${actual}。请更新到同一接口版本。`
+    : "接口版本不匹配，请更新扩展或后端。";
 }

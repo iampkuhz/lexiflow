@@ -27,6 +27,8 @@ import io.lexiflow.architecture.fixtures.enrichment.application.AllowedLexiconCo
 import io.lexiflow.architecture.fixtures.enrichment.application.ForbiddenLexiconApplication;
 import io.lexiflow.architecture.fixtures.enrichment.application.ForbiddenLexiconImplementation;
 import io.lexiflow.architecture.fixtures.lexicon.domain.ForbiddenEnrichmentDependency;
+import io.lexiflow.architecture.fixtures.platform.ForbiddenAdapterEnrichmentPolicy;
+import io.lexiflow.architecture.fixtures.platform.ForbiddenAdapterHintFrequencyService;
 import io.lexiflow.architecture.fixtures.platform.PlatformAdapter;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -232,6 +234,7 @@ class LayerArchitectureTest {
   void businessDomainsUseOnlyDeclaredPublicContracts() {
     enrichmentContractRule().check(PRODUCT_CLASSES);
     lexiconOwnershipRule().check(PRODUCT_CLASSES);
+    adapterEnrichmentContractRule().check(PRODUCT_CLASSES);
   }
 
   @Test
@@ -251,6 +254,12 @@ class LayerArchitectureTest {
         .check(new ClassFileImporter().importClasses(AllowedLexiconContract.class));
     var reversed = new ClassFileImporter().importClasses(ForbiddenEnrichmentDependency.class);
     assertThrows(AssertionError.class, () -> lexiconOwnershipRule().check(reversed));
+    for (var type :
+        List.of(
+            ForbiddenAdapterEnrichmentPolicy.class, ForbiddenAdapterHintFrequencyService.class)) {
+      var adapter = new ClassFileImporter().importClasses(type);
+      assertThrows(AssertionError.class, () -> adapterEnrichmentContractRule().check(adapter));
+    }
   }
 
   @Test
@@ -290,6 +299,28 @@ class LayerArchitectureTest {
         .should()
         .dependOnClassesThat()
         .resideInAPackage("..enrichment..");
+  }
+
+  private static ArchRule adapterEnrichmentContractRule() {
+    return noClasses()
+        .that()
+        .resideInAPackage("..platform..")
+        .should()
+        .dependOnClassesThat(
+            new DescribedPredicate<>("本机数据存储公开合同以外的字幕增强类型") {
+              @Override
+              public boolean test(JavaClass type) {
+                String contract = "io.lexiflow.enrichment.application.preferences.LocalPreferences";
+                String frequencyStore =
+                    "io.lexiflow.enrichment.application.preferences.RecentHintFrequency$Store";
+                String pkg = type.getPackageName();
+                return (pkg.startsWith("io.lexiflow.enrichment.application.")
+                        || pkg.startsWith("io.lexiflow.enrichment.domain."))
+                    && !type.getName().equals(contract)
+                    && !type.getName().startsWith(contract + "$")
+                    && !type.getName().equals(frequencyStore);
+              }
+            });
   }
 
   private static ArchRule importValidationRule() {

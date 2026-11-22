@@ -145,7 +145,7 @@ public final class SqliteDatasetExport {
         files.add(file);
       }
       var manifest = new LinkedHashMap<String, Object>();
-      manifest.put("schemaVersion", 4);
+      manifest.put("schemaVersion", 5);
       manifest.put("schemaSha256", DatasetPackageCodec.sha256(schemaSql));
       manifest.put("approvalSha256", DatasetPackageCodec.sha256(approvalBytes));
       manifest.put("datasetVersion", version);
@@ -206,7 +206,7 @@ public final class SqliteDatasetExport {
           }
           default -> value = result.getString(column);
         }
-      row.put(column, value);
+      row.put(DatasetPackageTables.packageName(table.name(), column), value);
     }
     return row;
   }

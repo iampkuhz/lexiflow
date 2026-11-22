@@ -111,7 +111,7 @@ Delivery Gate 的公开交付入口 MUST 是 `python3 -m scripts.acceptance subm
 
 一次 validate 调用 MAY 处理最多 16 个唯一 submission。它 MUST 在任何检查前验证全部身份和冻结，且执行者 MUST 与每一个 producer/submitter 不同；每 Task MUST 保留独立计划、报告和 validation record。等价 Check MAY 复用同次真实窗口与 transaction 的显式允许执行；不得复用历史自检或整份其他 Task 报告。运行中各任务仍须执行前后及发布前新鲜度检查；首次 FAIL/BLOCKED MUST 停止后续昂贵视图，不将未执行项标 PASS。
 
-当前活动记录 MUST 统一保存在 `tmp/quality/delivery-gate/current/`，schema 为 submission.v6 与 validation/review/check.v5；原 ignored 旧记录 MUST 保留原始字节，但不得自动消费或通过 flags 开启兼容。Review 状态 MUST 由 findings 派生，不接受 caller decision；review 与 check MUST 只读核对而不重跑命令。同一冻结父内完整可派生子 hash 与镜像不重复存储，外部 runtime metadata 和附件 raw hashes 仍 MUST 独立核验。
+当前活动记录 MUST 统一保存在 `tmp/quality/delivery-gate/current/`，schema 为 submission.v7 与 validation/review/check.v5；原 ignored 旧记录 MUST 保留原始字节，但不得自动消费或通过 flags 开启兼容。Review 状态 MUST 由 findings 派生，不接受 caller decision；review 与 check MUST 只读核对而不重跑命令。同一冻结父内完整可派生子 hash 与镜像不重复存储，外部 runtime metadata 和附件 raw hashes 仍 MUST 独立核验。
 
 每份记录和外部附件 MUST 绑定规范 locator、内容 hash 与所需 identity/version/scope；读取 MUST 拒绝重复 JSON key、路径穿越、symlink、非普通文件、重复或损坏 receipt、subject bytes 漂移及不可信 authority 来源。Review patch 和 changed-file snapshot MUST 覆盖冻结主体。Runtime-bound actor MUST 来自实际本机原生 metadata，不得由 caller、actor 字符串或 role 文本伪造。原生子代理可共享父 Session，但身份独立以真实 actor 为准；同 actor 不得通过更换 run、名称或 Session route 获得自验、自审许可。本机默认 Codex authority MUST 核对 owned、非共享可写、非 symlink 的 native metadata 及 workspace/thread/parent 关系；缺失来源 BLOCKED，矛盾来源 FAIL。保持既有本机信任边界：这是本地来源证明而非平台密码学认证，不声称已解决同 OS 恶意冒用。
 

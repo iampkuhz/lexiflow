@@ -1,3 +1,4 @@
+import { apiContract } from "../../../scripts/contracts/contract-lock.mjs";
 // 可分享的只读诊断：只输出固定原因与受限版本字段，不转发工具/API原文。
 import fs from 'node:fs';
 import { parseSoftwareVersion } from '../../release/integrity/source-build-identity.mjs';
@@ -17,7 +18,7 @@ const actions = {
   UNSUPPORTED_HOST: '在 M 芯片 macOS 上运行', ENGINE_UNAVAILABLE: '检查 Podman machine 是否已启动', COMPOSE_UNAVAILABLE: '安装或检查 Podman Compose provider',
   NOT_INSTALLED: '运行 install 首次部署', INVALID_STATE: '保留安装现场，不手动修改状态文件', INSTALL_INCOMPLETE: '数据库提交前失败可重试 install', DATABASE_MISSING: '保留安装现场，使用 install/upgrade --plan 明确重建', DATABASE_READY: 'SQLite 文件存在且属于本安装',
   INITIALIZATION_UNCERTAIN: '保留数据库与日志，不自动重导', NO_LOCK: '没有安装锁', ACTIVE_LOCK: '等待原安装结束，不同时重试',
-  STALE_LOCK: '原进程已消失，可重试 install', LEGACY_LOCK: '确认原安装退出后 recover --confirm-stopped', INVALID_LOCK: '保留未知锁，勿手工删除',
+  STALE_LOCK: '原进程已消失，可重试 install', INVALID_LOCK: '保留未知锁，勿手工删除',
   NO_CONTAINERS: '安装完成后可运行 up；首次安装运行 install', CONTAINERS_STOPPED: '运行 up 启动已有安装', CONTAINER_OWNERSHIP: '容器归属异常，保留现场',
   CONTAINERS_RUNNING: '本安装所需容器均在运行', RUNTIME_UNAVAILABLE: '检查服务日志和安装阶段', RUNTIME_NOT_READY: '查看安装阶段及服务日志',
   RUNTIME_INVALID: '运行状态不符合协议，检查镜像与扩展版本', RUNTIME_READY: '服务正式就绪；仍需人工验证 Chrome 和视频体验',
@@ -81,7 +82,7 @@ export async function runtime(port, expectedVersion, timeoutMs = 6000) {
   if (status.invalid) return ['FAIL', 'RUNTIME_INVALID'];
   if (!status.available) return ['BLOCKED', 'RUNTIME_UNAVAILABLE'];
   const body = status.body;
-  if (typeof body !== 'object' || body === null || body.softwareVersion !== expectedVersion || body.apiContract !== 'caption-hints.v2') return ['FAIL', 'RUNTIME_INVALID'];
+  if (typeof body !== 'object' || body === null || body.softwareVersion !== expectedVersion || body.apiContract !== apiContract()) return ['FAIL', 'RUNTIME_INVALID'];
   if (body.mode !== 'formal' || body.ready !== true || body.reason !== 'OK') return ['BLOCKED', 'RUNTIME_NOT_READY'];
   return ['PASS', 'RUNTIME_READY'];
 }
@@ -130,12 +131,10 @@ export async function diagnose(dir, env) {
     else if (!noSymlink(lock)) add('lock', 'FAIL', 'INVALID_LOCK');
     else {
       const files = fs.readdirSync(lock);
-      if (files.length === 0) add('lock', 'BLOCKED', 'LEGACY_LOCK');
-      else {
-        const owner = jsonFile(path.join(lock, 'owner.json'));
-        if (files.length !== 1 || owner.schema !== 1 || !/^[a-f0-9]{32}$/.test(owner.token) || owner.root !== dir || owner.installation !== state.id || !Number.isSafeInteger(owner.pid) || owner.pid <= 1 || (owner.childPid !== null && (!Number.isSafeInteger(owner.childPid) || owner.childPid <= 1))) throw new Error('invalid');
-        add('lock', 'BLOCKED', live(owner.pid) || (owner.childPid && live(-owner.childPid)) ? 'ACTIVE_LOCK' : 'STALE_LOCK');
-      }
+      if (files.length !== 1 || files[0] !== 'owner.json') throw new Error('invalid');
+      const owner = jsonFile(path.join(lock, 'owner.json'));
+      if (owner.schema !== 1 || !/^[a-f0-9]{32}$/.test(owner.token) || owner.root !== dir || owner.installation !== state.id || !Number.isSafeInteger(owner.pid) || owner.pid <= 1 || (owner.childPid !== null && (!Number.isSafeInteger(owner.childPid) || owner.childPid <= 1))) throw new Error('invalid');
+      add('lock', 'BLOCKED', live(owner.pid) || (owner.childPid && live(-owner.childPid)) ? 'ACTIVE_LOCK' : 'STALE_LOCK');
     }
   } catch { add('lock', 'FAIL', 'INVALID_LOCK'); }
   let containersOK = false;

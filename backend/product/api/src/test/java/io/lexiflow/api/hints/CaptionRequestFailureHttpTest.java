@@ -10,7 +10,6 @@ import ch.qos.logback.core.read.ListAppender;
 import io.lexiflow.api.runtime.LexiconRuntime;
 import io.lexiflow.lexicon.application.port.InvalidPublishedLexiconException;
 import io.lexiflow.lexicon.application.port.LexiconReadRepository;
-import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import io.lexiflow.observability.platform.SegmentAnalysisStore;
@@ -137,7 +136,7 @@ class CaptionRequestFailureHttpTest {
       assertEquals(
           "no-store", captured.response.headers().firstValue("Cache-Control").orElseThrow());
       assertEquals(
-          new LexiconRuntime.State("formal", LexiconRuntime.Reason.OK, 7L, true), runtime.state());
+          new LexiconRuntime.State("formal", LexiconRuntime.Reason.OK, 7L, true), runtime.probe());
     }
     assertEquals(0, SyntheticRepository.lookups.get());
     assertEquals(200, post(payload(segment("phrase", "AI TV", true))).statusCode());
@@ -159,7 +158,7 @@ class CaptionRequestFailureHttpTest {
     var captured = requestWithEvents(payload(segment("short", "AI", true)));
     assertEquals(503, captured.response.statusCode());
     assertEquals("NO_PUBLISHED_DATA", captured.terminal);
-    assertFalse(runtime.state().ready());
+    assertFalse(runtime.probe().ready());
   }
 
   @Test
@@ -287,7 +286,7 @@ class CaptionRequestFailureHttpTest {
   }
 
   private static String payload(String segments) {
-    return "{\"captionTopicKey\":\"topic\",\"trackKey\":null,\"lastRequestedSnapshot\":null,\"currentSnapshot\":{\"captions\":[{\"windowId\":null,\"startMs\":null,\"segments\":["
+    return "{\"previousSegments\":[],\"currentSnapshot\":{\"captions\":[{\"segments\":["
         + segments
         + "]}]}}";
   }
@@ -301,7 +300,7 @@ class CaptionRequestFailureHttpTest {
         + key
         + "\",\"text\":\""
         + text
-        + "\",\"offsetMs\":null,\"append\":"
+        + "\",\"append\":"
         + append
         + ",\"line\":"
         + line
@@ -358,13 +357,11 @@ class CaptionRequestFailureHttpTest {
           UUID.nameUUIDFromBytes(
               (entry + "-sense").getBytes(java.nio.charset.StandardCharsets.UTF_8)),
           version,
-          "en",
           form,
-          form,
-          LexiconEntryKind.WORD,
           LexiconHintAction.HINT,
           "合成释义",
-          500);
+          500,
+          null);
     }
   }
 

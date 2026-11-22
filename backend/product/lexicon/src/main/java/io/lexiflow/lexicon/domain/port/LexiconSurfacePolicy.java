@@ -12,7 +12,8 @@ public final class LexiconSurfacePolicy {
   /** 当前观看查询最多枚举的连续词元数。 */
   public static final int MAX_PHRASE_TOKENS = 3;
 
-  private static final Pattern QUERY_SEPARATORS = Pattern.compile("[^\\p{IsAlphabetic}']+");
+  private static final Pattern QUERY_WORD =
+      Pattern.compile("[\\p{IsAlphabetic}]+(?:['-][\\p{IsAlphabetic}]+)*");
   private static final Set<String> STARTS = Set.of("a", "an", "the", "not");
   private static final Set<String> ENDS =
       Set.of("to", "of", "for", "by", "with", "in", "on", "at", "from");
@@ -56,9 +57,25 @@ public final class LexiconSurfacePolicy {
    * @return 规范化词元；无可查询字符时为空。
    */
   public static List<String> queryTokens(String value) {
-    var normalized =
-        QUERY_SEPARATORS.matcher(value.toLowerCase(Locale.ROOT)).replaceAll(" ").trim();
-    return normalized.isEmpty() ? List.of() : List.of(normalized.split(" +"));
+    var matcher = QUERY_WORD.matcher(normalizeTypography(value.toLowerCase(Locale.ROOT)));
+    var tokens = new java.util.ArrayList<String>();
+    while (matcher.find()) tokens.add(matcher.group());
+    return List.copyOf(tokens);
+  }
+
+  /**
+   * 仅将等长英文排印连接符规范为查表字符，保留原文 UTF-16 偏移。
+   *
+   * @param value 含义：原始英文表面。取值范围：非 null。
+   * @return 等长规范化表面；不改变空格、破折号或词条身份。
+   */
+  public static String normalizeTypography(String value) {
+    return value
+        .replace('\u2019', '\'')
+        .replace('\u2018', '\'')
+        .replace('\u2010', '-')
+        .replace('\u2011', '-')
+        .replace('\uff0d', '-');
   }
 
   /**
@@ -68,7 +85,10 @@ public final class LexiconSurfacePolicy {
    * @return 是否包含一至三个查询词元且单词达到最小字母数。
    */
   public static boolean withinQueryWindow(String value) {
-    var tokens = queryTokens(value);
+    // 导入资格与完整词查询分开：排印修复不扩大旧资料准入，也不丢失已发布短复合词。
+    var normalized =
+        value.toLowerCase(Locale.ROOT).replaceAll("[^\\p{IsAlphabetic}']+", " ").trim();
+    var tokens = normalized.isEmpty() ? List.<String>of() : List.of(normalized.split(" +"));
     int count = tokens.size();
     if (count == 1 && tokens.getFirst().codePoints().filter(Character::isAlphabetic).count() < 3)
       return false;

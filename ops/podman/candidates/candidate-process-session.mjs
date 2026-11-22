@@ -81,4 +81,3 @@ export function startCandidateSession({ action, directory, candidate, logFile, t
   // not proof that the child/process group is closed or safe to clean up.
   return { wait, isClosed: () => closed || Date.now() >= deadlineAt };
 }
-export async function runCandidateSession(input) { return startCandidateSession(input).wait(); }

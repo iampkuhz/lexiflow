@@ -17,7 +17,7 @@ class LexiconImportPlanTest {
   void keepsNaturalInflectionToLemmaAmbiguityWithinOneChunk() {
     assertDoesNotThrow(
         () ->
-            LexiconImportPlan.prepare(
+            prepare(
                 List.of(
                     row("abdu", List.of(), List.of("abdus")), row("abdus", List.of(), List.of())),
                 1,
@@ -86,5 +86,16 @@ class LexiconImportPlanTest {
         source,
         List.of(source),
         true);
+  }
+
+  private static List<LexiconImportPlan.PlannedEntry> prepare(
+      List<io.lexiflow.lexicon.application.importing.model.LexiconImportRow> rows,
+      long version,
+      String digest,
+      Instant at) {
+    var surfaces = LexiconImportPlan.canonicalSurfaceValidator();
+    return rows.stream()
+        .map(row -> LexiconImportPlan.prepareNext(row, version, digest, at, surfaces))
+        .toList();
   }
 }

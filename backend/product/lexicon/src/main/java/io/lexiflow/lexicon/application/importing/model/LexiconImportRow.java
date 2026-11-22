@@ -65,8 +65,7 @@ public record LexiconImportRow(
     basicVocabulary =
         basicVocabulary
             || (!lemma.contains(" ")
-                && (sourceOxfordBasic
-                    || BasicVocabulary.contains(lemma)
+                && (BasicVocabulary.contains(lemma)
                     || aliases.stream().anyMatch(BasicVocabulary::contains)
                     || inflections.stream().anyMatch(BasicVocabulary::contains)));
     hintPolicyReference = required(hintPolicyReference, "hintPolicyReference");
@@ -151,6 +150,13 @@ public record LexiconImportRow(
         false,
         false,
         false);
+  }
+
+  /** 取来源中较靠前的有效语料名次；没有来源名次时返回空，不以提示优先级代替。 */
+  public Long effectiveSourceRank() {
+    if (sourceBncRank == null) return sourceFrqRank;
+    if (sourceFrqRank == null) return sourceBncRank;
+    return Math.min(sourceBncRank, sourceFrqRank);
   }
 
   private static String required(String value, String field) {

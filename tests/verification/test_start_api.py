@@ -136,7 +136,7 @@ class DiscoveryAndLaunchTest(unittest.TestCase):
             self.assertEqual(api.main([]), 0)
         prepare.assert_called_once_with(18081)
         _, command, environment = execute.call_args.args
-        self.assertIn("--args=--server.address=127.0.0.1 --server.port=18081", command)
+        self.assertIn("--args=--server.address=127.0.0.1 --server.port=18081 --lexiflow.caption-debug.enabled=false", command)
         self.assertEqual(environment["SPRING_DATASOURCE_URL"], "jdbc:test")
         self.assertEqual(environment["MODEL_SETTING"], "retained")
         self.assertNotIn("jdbc:test", " ".join(command))
@@ -177,6 +177,19 @@ class DiscoveryAndLaunchTest(unittest.TestCase):
         for argument in ("--port", "--database-url"):
             with self.subTest(argument=argument), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 api.main([argument, "18081"])
+
+    def test_caption_display_diagnostics_require_explicit_boolean_opt_in(self):
+        for value, code in (("true", 0), ("false", 0), ("unexpected", 2)):
+            with self.subTest(value=value):
+                env = {"JDBC_URL": "jdbc:test", "LEXIFLOW_CAPTION_DEBUG_ENABLED": value}
+                with patch.object(api, "command_environment", return_value=env), patch.object(api, "prepare_port") as prepare, patch.object(api.os, "execvpe") as execute, contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(api.main([]), code)
+                if code:
+                    prepare.assert_not_called()
+                    execute.assert_not_called()
+                else:
+                    self.assertIn(f"--lexiflow.caption-debug.enabled={value}", " ".join(execute.call_args.args[1]))
+                    self.assertEqual("字幕可读日志已开启" in out.getvalue(), value == "true")
 
     def test_caption_debug_flag_is_rejected_before_environment_or_port_access(self):
         with patch.object(api, "command_environment") as environment, patch.object(api, "prepare_port") as prepare, patch.object(api.os, "execvpe") as execute, contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:

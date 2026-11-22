@@ -28,10 +28,10 @@ class CaptionHintControllerTest {
             controller
                 .hint(
                     request(
-                        new CaptionHintRequest.Segment("old", "We need ", null, false, 0L),
-                        new CaptionHintRequest.Segment("a", "reli", null, true, 0L),
-                        new CaptionHintRequest.Segment("b", "able", null, true, 0L),
-                        new CaptionHintRequest.Segment("c", " zxqv", null, true, 0L)),
+                        new CaptionHintRequest.Segment("old", "We need ", false, 0L),
+                        new CaptionHintRequest.Segment("a", "reli", true, 0L),
+                        new CaptionHintRequest.Segment("b", "able", true, 0L),
+                        new CaptionHintRequest.Segment("c", " zxqv", true, 0L)),
                     servletRequest())
                 .getBody();
     assertEquals(List.of("a", "b", "c"), response.processedKeys());
@@ -42,7 +42,7 @@ class CaptionHintControllerTest {
     assertEquals("b", hint.endKey());
     assertEquals(4, hint.endOffset());
     assertEquals("可靠的", hint.chineseGloss());
-    assertTrue(hint.lexiconVersion() > 0);
+    assertTrue(response.lexiconVersion() > 0);
   }
 
   @Test
@@ -51,7 +51,7 @@ class CaptionHintControllerTest {
         (CaptionHintResponse)
             controller
                 .hint(
-                    request(new CaptionHintRequest.Segment("old", "reliable", null, false, 0L)),
+                    request(new CaptionHintRequest.Segment("old", "reliable", false, 0L)),
                     servletRequest())
                 .getBody();
     assertTrue(response.processedKeys().isEmpty());
@@ -68,10 +68,8 @@ class CaptionHintControllerTest {
 
   private static CaptionHintRequest request(CaptionHintRequest.Segment... segments) {
     return new CaptionHintRequest(
-        "topic",
-        null,
-        null,
+        List.of(),
         new CaptionHintRequest.Snapshot(
-            List.of(new CaptionHintRequest.CaptionGroup(null, null, List.of(segments)))));
+            List.of(new CaptionHintRequest.CaptionGroup(List.of(segments)))));
   }
 }

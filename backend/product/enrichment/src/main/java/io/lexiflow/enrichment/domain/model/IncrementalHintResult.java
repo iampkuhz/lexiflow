@@ -19,14 +19,15 @@ public record IncrementalHintResult(List<String> processedKeys, List<Hint> hints
   /**
    * 跨连续新增片段的半开范围和已发布词库身份。
    *
-   * @param startKey 提示起点所在的片段 key。
-   * @param startOffset 起点在 startKey 片段内的 UTF-16 偏移，包含该位置。
-   * @param endKey 提示终点所在的片段 key，必须落在本次新增片段内。
-   * @param endOffset 终点在 endKey 片段内的 UTF-16 偏移，不包含该位置。
-   * @param chineseGloss 已发布词义的中文短释义。
-   * @param lexiconEntryId 已发布词条的稳定身份。
-   * @param lexiconVersion 本次响应使用的单一词库发布版本。
-   * @param senseId 已发布词义的稳定身份。
+   * @param startKey 含义：提示起点所在片段的键。取值范围：非空字符串。
+   * @param startOffset 含义：起点在 startKey 片段内的 UTF-16 偏移。取值范围：非负，包含该位置。
+   * @param endKey 含义：提示终点所在片段的键。取值范围：非空字符串，且属于本次新增片段。
+   * @param endOffset 含义：终点在 endKey 片段内的 UTF-16 偏移。取值范围：非负，不包含该位置。
+   * @param chineseGloss 含义：已发布词义的中文短释。取值范围：非空字符串。
+   * @param lexiconEntryId 含义：已发布词条稳定身份。取值范围：正 long 的规范十进制字符串。
+   * @param lexiconVersion 含义：本次响应使用的词库发布版本。取值范围：正 long。
+   * @param senseId 含义：已发布词义的稳定身份。取值范围：非空字符串。
+   * @param lemma 含义：匹配词条的真实规范主词形。取值范围：非空字符串。
    */
   public record Hint(
       String startKey,
@@ -36,7 +37,9 @@ public record IncrementalHintResult(List<String> processedKeys, List<Hint> hints
       String chineseGloss,
       String lexiconEntryId,
       long lexiconVersion,
-      String senseId) {
+      String senseId,
+      String lemma,
+      Long frequencyRank) {
     /** 校验每条提示具有非空来源身份。 */
     public Hint {
       Objects.requireNonNull(startKey, "startKey");
@@ -44,6 +47,7 @@ public record IncrementalHintResult(List<String> processedKeys, List<Hint> hints
       Objects.requireNonNull(chineseGloss, "chineseGloss");
       Objects.requireNonNull(lexiconEntryId, "lexiconEntryId");
       Objects.requireNonNull(senseId, "senseId");
+      Objects.requireNonNull(lemma, "lemma");
     }
   }
 }

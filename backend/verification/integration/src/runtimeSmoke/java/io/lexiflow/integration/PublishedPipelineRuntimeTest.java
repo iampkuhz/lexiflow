@@ -28,12 +28,9 @@ class PublishedPipelineRuntimeTest {
 
       assertHint(
           fixture.postText("star", "stardictword"), "star", "stardictword", "合成词", firstVersion);
-      assertHint(
-          fixture.postText("star-version-one", "lexiflow"),
-          "star-version-one",
-          "lexiflow",
-          "词库v1",
-          firstVersion);
+      var ranked = fixture.postText("star-version-one", "lexiflow");
+      assertHint(ranked, "star-version-one", "lexiflow", "词库v1", firstVersion);
+      assertEquals(1, ranked.path("hints").get(0).path("frequencyRank").asLong());
       assertNoHints(fixture.postText("star-bad-first", "badstardict"));
       assertEquals(
           "0",
@@ -167,7 +164,7 @@ class PublishedPipelineRuntimeTest {
       assertEquals("new", hint.path("endKey").stringValue());
       assertEquals(3, hint.path("startOffset").asInt());
       assertEquals(13, hint.path("endOffset").asInt());
-      assertEquals(secondVersion, hint.path("lexiconVersion").asLong());
+      assertEquals(secondVersion, incremental.path("lexiconVersion").asLong());
     }
   }
 
@@ -178,7 +175,7 @@ class PublishedPipelineRuntimeTest {
     assertEquals(1, hints.size(), "expected exactly one hint: " + response);
     var hint = hints.get(0);
     assertEquals(gloss, hint.path("chineseGloss").stringValue());
-    assertEquals(version, hint.path("lexiconVersion").asLong());
+    assertEquals(version, response.path("lexiconVersion").asLong());
     assertEquals(key, hint.path("startKey").stringValue());
     assertEquals(key, hint.path("endKey").stringValue());
     assertEquals(0, hint.path("startOffset").asInt());

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -9,6 +10,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import { waitForE2EState } from "./e2e-state.mjs";
 import { openActionPopup } from "./action-popup.mjs";
+import { runContentContextAcceptance } from "./content-context-acceptance.mjs";
 import { createApiLaunchSpec, stopApi } from "./e2e-runtime.mjs";
 import { resolveBuildIdentity } from "../../ops/release/integrity/source-build-identity.mjs";
 import { createExtensionZip } from "../scripts/packaging/package-extension-release.mjs";
@@ -33,8 +35,8 @@ function assertApiResources() {
   return java.stdout.trim();
 }
 
-function startApi(javaHome) {
-  const spec = createApiLaunchSpec({ repositoryRoot, apiPort, javaHome });
+function startApi(javaHome, preferencesDatabase) {
+  const spec = createApiLaunchSpec({ repositoryRoot, apiPort, javaHome, preferencesDatabase });
   const child = spawn(spec.command, spec.args, {
     cwd: repositoryRoot,
     env: spec.env,
@@ -43,6 +45,57 @@ function startApi(javaHome) {
   });
   child.once("error", (error) => { child.launchError = error; });
   return child;
+}
+
+function runDailyCountFixture(database, operation, input) {
+  // Use the Python already required by this test, without depending on experimental Node SQLite.
+  const result = spawnSync("python3", ["-c", `
+from contextlib import closing
+from pathlib import Path
+import json
+import sqlite3
+import sys
+
+database, operation = sys.argv[1:]
+data = json.load(sys.stdin)
+identity = int(data["identity"])
+if operation == "seed":
+    with closing(sqlite3.connect(database)) as db, db:
+        db.executescript(data["schema"])
+        db.executemany("INSERT INTO recent_hint_daily_count(day, entry_id, count) VALUES (?, ?, ?)",
+                       [(day, identity, count) for day, count in data["rows"]])
+else:
+    with closing(sqlite3.connect(Path(database).as_uri() + "?mode=ro", uri=True)) as db:
+        columns = [row[1] for row in db.execute("PRAGMA table_info(recent_hint_daily_count)")]
+        rows = list(db.execute("SELECT day, count FROM recent_hint_daily_count WHERE entry_id = ? ORDER BY day",
+                               (identity,)))
+        print(json.dumps({"columns": columns, "rows": rows}))
+`, database, operation], {
+    input: JSON.stringify(input),
+    encoding: "utf8"
+  });
+  if (result.error) throw result.error;
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, "");
+  return result.stdout;
+}
+
+async function prepareDailyCountFixture(preferencesDatabase) {
+  const schema = await readFile(resolve(repositoryRoot, "infra/sqlite/preferences.sql"), "utf8");
+  // This fixture uses the built-in demo identity for "deliver", which no test caption displays.
+  const identity = (createHash("sha256").update("entry:deliver").digest().readBigUInt64BE() & ((1n << 63n) - 1n)).toString();
+  const now = Date.now();
+  const day = (daysAgo) => new Date(now - daysAgo * 86_400_000).toISOString().slice(0, 10);
+  runDailyCountFixture(preferencesDatabase, "seed", {
+    identity, schema, rows: [[day(0), 11], [day(6), 13], [day(7), 17], [day(8), 29]]
+  });
+  return () => {
+    const retained = JSON.parse(runDailyCountFixture(preferencesDatabase, "read", { identity }));
+    assert.deepEqual(retained, {
+      columns: ["day", "entry_id", "count"],
+      rows: [[day(7), 17], [day(6), 13], [day(0), 11]]
+    });
+  };
 }
 
 async function freePort() {
@@ -134,9 +187,12 @@ try {
   const javaHome = assertApiResources();
   apiPort = await freePort();
   apiBase = `http://127.0.0.1:${apiPort}`;
-  api = startApi(javaHome);
-  await waitForApi(api);
   userDataDir = await mkdtemp(resolve(tmpdir(), "lexiflow-extension-e2e-"));
+  const preferencesDatabase = resolve(userDataDir, "preferences.db");
+  const assertDailyRetention = await prepareDailyCountFixture(preferencesDatabase);
+  api = startApi(javaHome, preferencesDatabase);
+  await waitForApi(api);
+  assertDailyRetention();
   const testExtensionPath = resolve(userDataDir, "extension");
   const packaged = await createExtensionZip({ root: extensionRoot, buildIdentity: resolveBuildIdentity(repositoryRoot), apiPort: 18081 });
   await mkdir(testExtensionPath, { recursive: true });
@@ -146,29 +202,58 @@ try {
     await writeFile(target, bytes);
   }
   extensionPath = testExtensionPath;
-  const manifest = JSON.parse(await readFile(resolve(testExtensionPath, "manifest.json"), "utf8"));
-  manifest.host_permissions = ["http://127.0.0.1/*"];
-  await writeFile(resolve(testExtensionPath, "manifest.json"), JSON.stringify(manifest));
   context = await chromium.launchPersistentContext(resolve(userDataDir, "profile"), {
-    headless: false,
+    // Unified headless Chromium supports the native action popup in an isolated virtual window.
+    headless: true,
     channel: "chromium",
     args: [`--disable-extensions-except=${testExtensionPath}`, `--load-extension=${testExtensionPath}`]
   });
-  const serviceWorker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
-  await serviceWorker.evaluate((base) => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (input, options) => {
-      const pathname = new URL(typeof input === "string" ? input : input.url).pathname;
-      return originalFetch(`${base}${pathname}`, options);
-    };
-  }, apiBase);
+  context.setDefaultTimeout(12_000);
+
+  const serviceWorker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker", { timeout: 15_000 }));
+  // Existing playback and two-row transition assertions use an explicit user selection.
+  await serviceWorker.evaluate(() => chrome.storage.local.set({ captionLineLimit: 2 }));
+  const extensionOrigin = `chrome-extension://${new URL(serviceWorker.url()).host}`;
+  const postLocalRead = (endpoint, origin = extensionOrigin) => fetch(`${apiBase}${endpoint}`, {
+    method: "POST", headers: { Origin: origin, "Content-Type": "application/json" }, body: '{"action":"read"}'
+  });
+  const readStoredPreferences = async () => {
+    const response = await postLocalRead("/api/v1/preferences");
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    return response.json();
+  };
   const page = await context.newPage();
   const logs = [];
   page.on("console", message => logs.push(message.text()));
   await page.route("https://www.youtube.com/**", (route) =>
     route.fulfill({ contentType: "text/html", body: youtubeFixture() })
   );
-  await page.goto("https://www.youtube.com/watch?v=lexiflow-e2e", { waitUntil: "domcontentloaded" });
+  await page.goto("https://www.youtube.com/watch?v=LfxE2ETest1", { waitUntil: "domcontentloaded" });
+
+  await page.bringToFront();
+  await page.waitForFunction(() => document.documentElement.hasAttribute("data-lexiflow-caption-owner"));
+  const setupPopup = await openActionPopup({ context, page, serviceWorker });
+  try {
+    await setupPopup.waitFor(() => !document.querySelector("#enhance-toggle").disabled);
+    assert.equal(await setupPopup.evaluate(() => document.querySelector("details, [aria-expanded], form, #vocabulary")), null);
+    const opened = context.waitForEvent("page");
+    await setupPopup.click("#open-manage");
+    const setupManage = await opened;
+    try {
+      await setupManage.locator("#connection-tab").click();
+      const input = setupManage.locator("#connection-url");
+      await input.fill("http://192.168.0.1:1234");
+      await setupManage.locator("#save-connection").click();
+      await setupManage.waitForFunction(() => document.querySelector("#connection-status")?.textContent?.includes("请输入本机"));
+      await input.fill(apiBase);
+      await setupManage.locator("#save-connection").click();
+      await setupManage.waitForFunction(base => document.querySelector("#connection-target")?.textContent?.includes(new URL(base).host) &&
+        document.querySelector("#connection-status")?.textContent === "已保存连接。", apiBase);
+      assert.equal(await setupManage.locator("#connection-form input, #connection-form select").count(), 1);
+      await setupManage.screenshot({ path: resolve(evidenceRoot, "manage-connection.png") });
+    } finally { await setupManage.close(); }
+  } finally { await setupPopup.close(); await page.bringToFront(); }
 
   await setCaption(page, "zxqv zxqv", 1);
   await waitForState(page, "no-pending");
@@ -211,6 +296,53 @@ try {
   });
   assert.ok(Math.abs(inlineLayout.lineBottom - inlineLayout.glossBottom) < 15);
   await page.locator("#player").screenshot({ path: resolve(evidenceRoot, "inline-caption-preview.png") });
+  // The actual toolbar action only launches management. The real source tab supplies the vocabulary snapshot.
+  const vocabularyPopup = await openActionPopup({ context,page,serviceWorker });
+  let vocabularyPage;
+  try {
+    await vocabularyPopup.waitFor(() => !document.querySelector("#enhance-toggle").disabled);
+    const opened = context.waitForEvent("page");
+    await vocabularyPopup.click("#open-manage");
+    vocabularyPage = await opened;
+    await vocabularyPage.locator("#current-video-tab").click();
+    const row = vocabularyPage.locator("#current-video-list .current-word").filter({hasText:"reliable"});
+    await row.waitFor();
+    const countBeforeRedraw = await row.locator(".current-count").textContent();
+    assert.match(countBeforeRedraw, /^提示 [1-9]\d* 次$/u);
+    await page.evaluate(() => dispatchEvent(new Event("resize")));
+    await vocabularyPage.locator("#refresh-current-video").click();
+    assert.equal(await row.locator(".current-count").textContent(), countBeforeRedraw);
+    await vocabularyPage.screenshot({path:resolve(evidenceRoot,"manage-current-video.png")});
+  } finally { await vocabularyPage?.close(); await vocabularyPopup.close(); await page.bringToFront(); }
+  // When YouTube opens before localhost preferences are reachable, English renders first.
+  // Restore preferences without reloading this tab and require a later cue to display an actual gloss.
+  await serviceWorker.evaluate(() => {
+    const original = globalThis.fetch;
+    globalThis.restoreE2EPreferences = () => { globalThis.fetch = original; delete globalThis.restoreE2EPreferences; };
+    globalThis.fetch = (input, init) => new URL(typeof input === "string" ? input : input.url).pathname.endsWith("/preferences")
+      ? Promise.resolve(new Response(null, { status: 503 })) : original(input, init);
+  });
+  const recoveryPage = await context.newPage();
+  try {
+    await recoveryPage.route("https://www.youtube.com/**", route => route.fulfill({ contentType: "text/html", body: youtubeFixture() }));
+    await recoveryPage.goto("https://www.youtube.com/watch?v=LfxE2ETest2");
+    await recoveryPage.bringToFront();
+    await setCaption(recoveryPage, "We need reliable results.", 1);
+    await recoveryPage.waitForFunction(() => {
+      const value = document.querySelector("#lexiflow-caption-overlay")?.dataset.lexiflowDiagnostics;
+      return value && JSON.parse(value).counts.ready > 0;
+    });
+    assert.equal(await overlayText(recoveryPage), "We need reliable results.");
+    await serviceWorker.evaluate(() => globalThis.restoreE2EPreferences());
+    await recoveryPage.waitForTimeout(1100); // bounded recovery rate in the real content script
+    await setCaption(recoveryPage, "A reliable result remains.", 2);
+    await waitForState(recoveryPage, "ready");
+    assert.equal(await overlayText(recoveryPage), "A reliable(可靠的) result remains.");
+  } finally {
+    await recoveryPage.close();
+    await serviceWorker.evaluate(() => globalThis.restoreE2EPreferences?.());
+    await page.bringToFront();
+  }
   const { runUnderlineAcceptance } = await import("./visual-acceptance.mjs");
   await runUnderlineAcceptance({page,serviceWorker,apiBase,repositoryRoot: evidenceRoot,setCaption,waitForState});
   // Optional extended acceptance remains entirely on the local synthetic fixture.
@@ -230,6 +362,18 @@ try {
   }
   const { runIncrementalAcceptance } = await import("./incremental-acceptance.mjs");
   await runIncrementalAcceptance({page,serviceWorker,setCaption,waitForState,overlayText});
+  const { runRollupAcceptance, runReplacedRowsAcceptance } = await import("./rollup-acceptance.mjs");
+  const rollup = await runRollupAcceptance({ page, serviceWorker, waitForState });
+  await runReplacedRowsAcceptance({ page, serviceWorker, waitForState });
+  const { runCaptionHistoryAcceptance } = await import("./caption-history-acceptance.mjs");
+  await runCaptionHistoryAcceptance({ page, serviceWorker, waitForState });
+  const { runAdaptiveRollAcceptance } = await import("./adaptive-roll-acceptance.mjs");
+  await runAdaptiveRollAcceptance({ page, serviceWorker, waitForState });
+  await writeFile(resolve(evidenceRoot, "caption-roll-report.json"), JSON.stringify(rollup, null, 2));
+  const { runPlaybackRateAcceptance } = await import("./playback-rate-acceptance.mjs");
+  await runPlaybackRateAcceptance({ context, fixture: youtubeFixture(), serviceWorker, waitForState,
+    reportPath: resolve(evidenceRoot, "playback-rate-report.json") });
+  await page.bringToFront();
   const { runMultilineAcceptance } = await import("./multiline-acceptance.mjs");
   await runMultilineAcceptance({page,serviceWorker,repositoryRoot: evidenceRoot,setCaption,waitForState});
   const { runExperienceAcceptance } = await import("./experience-acceptance.mjs");
@@ -250,13 +394,71 @@ try {
   await waitForState(page, "no-pending");
   await page.bringToFront();
   const popup = await openActionPopup({context,page,serviceWorker});
+  let managePage;
   try {
-    await popup.click("#preferences summary");
-    await popup.click("#restore-start");
-    assert.equal(await popup.evaluate(() => !document.getElementById("restore-confirmation").hidden), true);
-    await popup.click("#restore-confirm");
-    await popup.waitFor(() => document.getElementById("restore-status").dataset.kind === "success");
+    const opened = context.waitForEvent("page");
+    await popup.click("#open-manage");
+    managePage = await opened;
+    await managePage.waitForLoadState("domcontentloaded");
+    await managePage.waitForFunction(() => document.querySelector("#hidden-count")?.textContent === "1");
+    const hiddenPreferences = await readStoredPreferences();
+    assert.equal(hiddenPreferences.commonWordCutoff, 1500);
+    assert.deepEqual(hiddenPreferences.hidden.map(item => [item.lemma, item.gloss]), [["reliable", "可靠的"]]);
+    const cutoff = managePage.locator("#common-word-cutoff");
+    const saveCutoff = async (value) => {
+      await cutoff.selectOption(String(value));
+      await managePage.waitForFunction(expected =>
+        document.querySelector("#cutoff-status")?.textContent?.startsWith(`已保存：Top ${expected}。`), value);
+      assert.deepEqual(await readStoredPreferences(), { ...hiddenPreferences, commonWordCutoff: value });
+    };
+    await saveCutoff(1000);
+    await saveCutoff(1500);
+    // Read actual overlay receipts through the management page opened by the extension.
+    await managePage.setViewportSize({ width: 320, height: 640 });
+    const reliableRow = managePage.locator("#recent-list .recent-card").filter({
+      has: managePage.getByText("reliable", { exact: true })
+    });
+    assert.equal(await reliableRow.count(), 0, "hidden entries do not occupy recent list slots");
+    assert.equal(await managePage.locator("#recent-heading").textContent(), "近 7 天提示");
+    assert.equal(await managePage.locator("#recent-page-size").inputValue(), "40");
+    const deliverRow = managePage.locator("#recent-list .recent-card").filter({
+      has: managePage.getByText("deliver", { exact: true })
+    });
+    assert.equal(await deliverRow.locator(".recent-count").textContent(), "24 次", "the browser shows only D through D-6");
+    const summary = await postLocalRead("/api/v1/recent-hints");
+    assert.equal(summary.status, 200);
+    assert.equal(summary.headers.get("cache-control"), "no-store");
+    const payload = await summary.json();
+    assert.deepEqual(Object.keys(payload), ["items"]);
+    const deliverSummary = payload.items.find(item => item.lemma === "deliver");
+    assert.deepEqual(Object.keys(deliverSummary).sort(), ["count", "entryId", "frequencyRank", "gloss", "lemma"]);
+    assert.equal(deliverSummary.count, 24);
+    assert.equal((await postLocalRead("/api/v1/recent-hints", "https://untrusted.invalid")).status, 403);
+    assertDailyRetention();
+    assert.equal(await managePage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await managePage.click("#hidden-tab");
+    await managePage.getByRole("button", { name: "恢复提示" }).first().click();
+    await managePage.waitForFunction(() => /已恢复/.test(document.querySelector("#feedback")?.textContent ?? ""));
+    assert.deepEqual(await readStoredPreferences(), { commonWordCutoff: 1500, hidden: [] });
+    await managePage.click("#recent-tab");
+    await reliableRow.waitFor({ timeout: 10_000 });
+    assert.ok(Number.parseInt(await reliableRow.locator(".recent-count").textContent(), 10) > 0);
+    await deliverRow.hover();
+    const stage = () => deliverRow.getByRole("button", { name: "不再提示「deliver」" }).click();
+    await stage();
+    assert.deepEqual((await readStoredPreferences()).hidden, []);
+    await deliverRow.getByRole("button", { name: "撤销「deliver」" }).click();
+    assert.deepEqual((await readStoredPreferences()).hidden, []);
+    await stage();
+    await deliverRow.getByRole("button", { name: "确认「deliver」" }).click();
+    await managePage.waitForFunction(() => document.querySelector("#hidden-count")?.textContent === "1");
+    assert.equal(await deliverRow.count(), 0);
+    assert.deepEqual((await readStoredPreferences()).hidden.map(item => item.lemma), ["deliver"]);
+    await managePage.click("#hidden-tab");
+    await managePage.getByRole("button", { name: "恢复提示" }).click();
+    await managePage.waitForFunction(() => document.querySelector("#hidden-count")?.textContent === "0");
   } finally { await popup.close(); }
+  await managePage?.close();
   await page.bringToFront();
   await waitForState(page, "ready");
   assert.equal(await overlayText(page), "We need reliable(可靠的) captions.");
@@ -350,14 +552,15 @@ try {
       if (window.__holdDigest) await new Promise(resolve => { window.__releaseDigest = resolve; });
       return digest(...args);
     };
-    (window.chrome ??= {}).runtime = { sendMessage: message => {
-      if (message.type === "local-preferences") return Promise.resolve({ok:true,entryKeys:[]});
+    (window.chrome ??= {}).runtime = { id: "fixture-extension", sendMessage: message => {
+      if (message.type === "local-preferences") return Promise.resolve({ok:true,commonWordCutoff:1500,hidden:[]});
+      if (message.type === "local-presented") return Promise.resolve({ok:true});
       if (message.type === "cancel-caption-hint") return Promise.resolve({ ok: true });
       const segments = message.payload.currentSnapshot.captions.flatMap(group => group.segments);
       const target = segments.find(segment => segment.append && segment.text.includes("reliable"));
       const startOffset = target?.text.indexOf("reliable") ?? -1;
-      return Promise.resolve({ ok: true, body: { processedKeys: segments.filter(segment => segment.append).map(segment => segment.key),
-        hints: !target ? [] : [{ startKey:target.key,endKey:target.key,lexiconEntryId:"9007199254740993",lexiconVersion:1,senseId:"00000000-0000-0000-0000-000000000002",startOffset, endOffset: startOffset + 8, chineseGloss: "可靠的" }] } });
+      return Promise.resolve({ ok: true, body: { processedKeys: segments.filter(segment => segment.append).map(segment => segment.key), lexiconVersion: 1,
+        hints: !target ? [] : [{ startKey:target.key,endKey:target.key,lexiconEntryId:"9007199254740993",frequencyRank:null,startOffset, endOffset: startOffset + 8, chineseGloss: "可靠的" }] } });
     } };
   });
   await hashPage.evaluate(await readFile(resolve(extensionPath, "content.js"), "utf8"));
@@ -397,6 +600,7 @@ try {
   await waitForState(hashPage, "ready");
   assert.equal(await overlayText(hashPage), "A reliable(可靠的) result.");
   await hashPage.close();
+  await runContentContextAcceptance(context, extensionPath);
 
   assert.equal(logs.some(line => line.includes("We need reliable") || line.includes("可靠的")), false);
   // Aggregate DOM diagnostics replace per-caption content-script logs.

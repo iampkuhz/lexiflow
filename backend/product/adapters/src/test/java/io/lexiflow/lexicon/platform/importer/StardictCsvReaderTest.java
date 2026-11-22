@@ -2,6 +2,7 @@ package io.lexiflow.lexicon.platform.importer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -36,8 +37,8 @@ class StardictCsvReaderTest {
     var scan = new StardictCsvReader().read(file, rows::add);
 
     assertEquals(3, scan.sourceRows());
-    assertEquals(2, scan.importableRows());
-    assertEquals(1, scan.derivedRows());
+    assertEquals(3, scan.importableRows());
+    assertEquals(0, scan.derivedRows());
     assertEquals(0, scan.deduplicatedRows());
     var reliable = rows.getFirst().row();
     assertEquals("可靠的", reliable.chineseGloss());
@@ -102,8 +103,8 @@ class StardictCsvReaderTest {
     assertEquals(first.digest(), reversed.digest());
     var records = new ArrayList<StardictCsvReader.SourceRecord>();
     var scan = reader.read(file, records::add, reversed);
-    assertEquals(2012, scan.basicRows());
-    assertEquals(2012, records.stream().filter(r -> r.row().basicVocabulary()).count());
+    assertEquals(1, scan.basicRows());
+    assertEquals(1, records.stream().filter(r -> r.row().basicVocabulary()).count());
     var falseWord =
         records.stream()
             .filter(r -> r.row().lemma().equals("false"))
@@ -111,12 +112,78 @@ class StardictCsvReaderTest {
             .orElseThrow()
             .row();
     assertTrue(falseWord.sourceOxfordBasic());
-    assertEquals(
-        "basic_vocabulary",
-        io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(
-            falseWord));
+    assertFalse(falseWord.basicVocabulary());
+    assertNull(
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(
+            falseWord).exclusionReason());
     assertTrue(
         records.stream().allMatch(r -> r.row().hintPolicyReference().contains(reversed.digest())));
+    var unknownOxford =
+        records.stream()
+            .filter(r -> r.row().lemma().equals("unknown"))
+            .findFirst()
+            .orElseThrow()
+            .row();
+    assertTrue(unknownOxford.basicVocabulary());
+    assertNull(unknownOxford.sourceBncRank());
+    assertEquals(
+        "basic_vocabulary",
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(
+            unknownOxford).exclusionReason());
+  }
+
+  @Test
+  void bncRankOverridesOxfordSelectionButFrqAndFunctionWordsDoNot() throws Exception {
+    var file = Files.createTempFile("bnc-oxford-eligibility", ".csv");
+    Files.writeString(
+        file,
+        header()
+            + "\n"
+            + row("ranktwelve", "十二", "", "", "1200", "1500", "", "1")
+            + "\n"
+            + row("unknownoxford", "未知词", "", "", "0", "0", "", "1")
+            + "\n"
+            + row("frqonlyoxford", "仅有FRQ", "", "", "0", "500", "", "1")
+            + "\n"
+            + row("that", "那个", "", "", "1200", "1500", "", "")
+            + "\n"
+            + row("rankedroot", "根词", "", "", "1200", "1500", "s:rankedform", "")
+            + "\n"
+            + row("rankedform", "词形", "", "", "0", "0", "0:rankedroot/1:s", "1"));
+    var records = new ArrayList<StardictCsvReader.SourceRecord>();
+    new StardictCsvReader().read(file, records::add);
+
+    var rankedOxford = row(records, "ranktwelve");
+    assertTrue(rankedOxford.sourceOxfordBasic());
+    assertFalse(rankedOxford.basicVocabulary());
+    assertEquals(1200L, rankedOxford.sourceBncRank());
+    assertNull(
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(
+            rankedOxford).exclusionReason());
+
+    var frqOnly = row(records, "frqonlyoxford");
+    assertNull(frqOnly.sourceBncRank());
+    assertEquals(500L, frqOnly.sourceFrqRank());
+    assertTrue(frqOnly.basicVocabulary());
+    assertEquals(
+        "basic_vocabulary",
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(frqOnly).exclusionReason());
+
+    var rankedFunctionWord = row(records, "that");
+    assertEquals(1200L, rankedFunctionWord.sourceBncRank());
+    assertTrue(rankedFunctionWord.basicVocabulary());
+    assertEquals(
+        "basic_vocabulary",
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(
+            rankedFunctionWord).exclusionReason());
+
+    var rootHitOnlyByOxfordInflection = row(records, "rankedroot");
+    assertFalse(rootHitOnlyByOxfordInflection.sourceOxfordBasic());
+    assertEquals(1200L, rootHitOnlyByOxfordInflection.sourceBncRank());
+    assertFalse(rootHitOnlyByOxfordInflection.basicVocabulary());
+    assertNull(
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(
+            rootHitOnlyByOxfordInflection).exclusionReason());
   }
 
   @Test
@@ -151,7 +218,7 @@ class StardictCsvReaderTest {
       assertFalse(root.prewarmEligible());
       assertEquals(
           "basic_vocabulary",
-          io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(root));
+          io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(root).exclusionReason());
       assertFalse(
           rows.stream()
               .map(StardictCsvReader.SourceRecord::row)
@@ -176,9 +243,9 @@ class StardictCsvReaderTest {
     var rows = new ArrayList<StardictCsvReader.SourceRecord>();
     var scan = new StardictCsvReader().read(file, rows::add);
     assertEquals(1, scan.selectedBasicLemmas());
-    assertEquals(1, scan.basicRows());
+    assertEquals(0, scan.basicRows());
     assertEquals(1, scan.deduplicatedRows());
-    assertTrue(rows.getFirst().row().basicVocabulary());
+    assertFalse(rows.getFirst().row().basicVocabulary());
     assertEquals(List.of("abilities"), rows.getFirst().row().inflections());
     assertFalse(rows.getLast().row().basicVocabulary());
     assertEquals("平行四边形", rows.getLast().row().chineseGloss());
@@ -247,8 +314,8 @@ class StardictCsvReaderTest {
     assertEquals("数据流", prepared.gloss());
     assertEquals("curated", prepared.decisiveRule());
     assertEquals(
-        "6b5efcba7b09e2e81366c25812f5a2e05f8b0bc1fad220022183ddb7b8fb8a2d",
-        StardictCsvReader.PREPARATION_POLICY.split("curated_sha256=", 2)[1]);
+        "37c7973d0361096fc5d6c22c08d836168793d3acfd3fc7404db384232edf1563",
+        StardictCsvReader.PREPARATION_POLICY.split("curated_sha256=", 2)[1].split(";", 2)[0]);
 
     Files.writeString(
         file, header() + "\n" + row("stream of data", "un. 数据之流", "", "", "", "", "", ""));
@@ -336,8 +403,8 @@ class StardictCsvReaderTest {
     assertEquals(malformed, rows.getFirst().row().sourceGloss());
     assertEquals(
         "empty_first_candidate",
-        io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(
-            rows.getFirst().row()));
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(
+            rows.getFirst().row()).exclusionReason());
     assertEquals("可靠的", rows.getLast().row().chineseGloss());
   }
 
@@ -397,8 +464,8 @@ class StardictCsvReaderTest {
     assertEquals("", record.row().chineseGloss());
     assertEquals("；银行", record.row().sourceGloss());
     var exclusion =
-        io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(
-            record.row());
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(
+            record.row()).exclusionReason();
     assertEquals("empty_first_candidate", exclusion);
   }
 
@@ -428,7 +495,7 @@ class StardictCsvReaderTest {
     assertFalse(phrase.basicVocabulary());
     assertEquals(
         "all_basic_phrase",
-        io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(phrase));
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(phrase).exclusionReason());
     var mixed =
         rows.stream()
             .map(StardictCsvReader.SourceRecord::row)
@@ -456,6 +523,159 @@ class StardictCsvReaderTest {
         "exchange",
         "detail",
         "audio");
+  }
+
+  @Test
+  void restoresOnlySourceBoundIndependentGroundWithoutMixingPrototypeForms() throws Exception {
+    var file = Files.createTempFile("independent-ground", ".csv");
+    // 自编释义，不复制原始 CSV；只保留本修正必需核对的来源表达和关系。
+    var ground = groundSourceRow("n. 土地, 合成释义\\nv. 合成动作", groundExchange());
+    var grind =
+        row(
+            "grind",
+            "n. 磨, 合成研磨义",
+            "",
+            "cet6 ky toefl ielts gre",
+            "5538",
+            "5372",
+            "d:ground/p:ground/i:grinding/3:grinds/s:grinds",
+            "");
+    Files.writeString(file, header() + "\n" + grind + "\n" + ground);
+    var records = new ArrayList<StardictCsvReader.SourceRecord>();
+    var reader = new StardictCsvReader();
+    var scan = reader.read(file, records::add);
+    assertEquals(2, scan.importableRows());
+    assertEquals(0, scan.derivedRows());
+    var independent = row(records, "ground");
+    var prototype = row(records, "grind");
+    assertEquals("土地", independent.chineseGloss());
+    assertEquals("磨", prototype.chineseGloss());
+    assertEquals(455L, independent.sourceBncRank());
+    assertEquals(5538L, prototype.sourceBncRank());
+    assertEquals(List.of("grounded", "grounds"), independent.inflections());
+    assertEquals(List.of("grinding", "grinds", "ground"), prototype.inflections());
+    assertFalse(independent.inflections().contains("grounding"));
+    assertTrue(independent.sourceOxfordBasic());
+    assertFalse(independent.basicVocabulary());
+    assertEquals(498, independent.priority().memoryPriority());
+    assertEquals(988, prototype.priority().memoryPriority());
+    assertEquals(
+        3282121050795924845L,
+        io.lexiflow.lexicon.domain.port.LexiconIdentity.entryId(independent.lemma()));
+    assertEquals(
+        7211612317377414155L,
+        io.lexiflow.lexicon.domain.port.LexiconIdentity.entryId(prototype.lemma()));
+    assertEquals(
+        "土地",
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(independent)
+            .gloss());
+    assertEquals(
+        "磨",
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(prototype)
+            .gloss());
+    var selection = reader.selectBasicVocabulary(file);
+    var digest = selection.digest();
+    Files.writeString(file, header() + "\n" + ground + "\n" + grind);
+    var reversed = new ArrayList<StardictCsvReader.SourceRecord>();
+    reader.read(file, reversed::add);
+    assertEquals(digest, reader.selectBasicVocabulary(file).digest());
+    for (var lemma : List.of("ground", "grind")) {
+      var first = row(records, lemma);
+      var second = row(reversed, lemma);
+      assertEquals(first.lemma(), second.lemma());
+      assertEquals(first.chineseGloss(), second.chineseGloss());
+      assertEquals(first.sourceGloss(), second.sourceGloss());
+      assertEquals(first.inflections(), second.inflections());
+      assertEquals(first.sourceBncRank(), second.sourceBncRank());
+      assertEquals(first.priority(), second.priority());
+    }
+    Files.delete(file);
+  }
+
+  @Test
+  void rejectsIndependentGroundSourceAndPrototypeDriftInsteadOfFallingBackToDerived()
+      throws Exception {
+    var file = Files.createTempFile("ground-source-drift", ".csv");
+    var reader = new StardictCsvReader();
+    for (var exchange :
+        List.of(
+            groundExchange().replace("0:grind", "0:other"),
+            groundExchange().replace("1:dp", "1:i"),
+            groundExchange().replace("s:grounds", "s:grounding"),
+            groundExchange().replace("/0:grind", ""),
+            groundExchange() + "/0:other",
+            groundExchange() + "/s:grounds")) {
+      Files.writeString(file, header() + "\n" + groundSourceRow("n. 土地, 合成义", exchange));
+      assertThrows(IllegalArgumentException.class, () -> reader.read(file, ignored -> {}));
+    }
+    for (var translation : List.of("n. 合成义", "n. 磨, 土地", "")) {
+      Files.writeString(file, header() + "\n" + groundSourceRow(translation, groundExchange()));
+      assertThrows(IllegalArgumentException.class, () -> reader.read(file, ignored -> {}));
+    }
+    Files.delete(file);
+  }
+
+  @Test
+  void distinguishesIndependentNounSensesFromSharedSynsetPluralsWithOxfordEvidence()
+      throws Exception {
+    var file = Files.createTempFile("pure-derived-oxford", ".csv");
+    Files.writeString(
+        file,
+        header()
+            + "\n"
+            + row("run", "奔跑", "", "", "", "", "i:running", "")
+            + "\n"
+            + row("running", "n. 跑步, 连续运行", "", "", "", "", "0:run/1:i", "1")
+            + "\n"
+            + row("bacterium", "细菌", "", "", "", "", "s:bacteria", "")
+            + "\n"
+            + row("bacteria", "n. 合成细菌义", "", "", "", "", "0:bacterium/1:s", "1"));
+    var records = new ArrayList<StardictCsvReader.SourceRecord>();
+    var scan = new StardictCsvReader().read(file, records::add);
+    assertEquals(1, scan.derivedRows());
+    assertEquals(
+        List.of("run", "running", "bacterium"),
+        records.stream().map(r -> r.row().lemma()).toList());
+    assertEquals("跑步", row(records, "running").chineseGloss());
+    assertTrue(row(records, "running").inflections().isEmpty());
+    assertTrue(row(records, "run").basicVocabulary());
+    assertTrue(row(records, "bacterium").basicVocabulary());
+    assertEquals(List.of("running"), row(records, "run").inflections());
+    assertEquals(List.of("bacteria"), row(records, "bacterium").inflections());
+    Files.delete(file);
+  }
+
+  @Test
+  void bindsIndependentGroundAndReviewedDefaultsToPreparationIdentity() {
+    assertEquals(
+        "deterministic-preparation-bnc-ranked-oxford-and-bounded-cleaning-v10"
+            + ";independent_ground_sha256="
+            + "337151d8aa58dc9df174c54ee1ca42347e0f9041c0a78740383f23ded451b903"
+            + ";curated_sha256="
+            + "37c7973d0361096fc5d6c22c08d836168793d3acfd3fc7404db384232edf1563"
+            + ";lexical_evidence_sha256="
+            + StardictLexicalEvidence.digest()
+            + ";reviewed_defaults_sha256="
+            + ReviewedSourceDefaults.digest()
+            + ";reviewed_pos_sha256="
+            + StardictLexicalEvidence.reviewDigest(),
+        StardictCsvReader.PREPARATION_POLICY);
+  }
+
+  private static String groundExchange() {
+    return "s:grounds/d:grounded/p:grounded/0:grind/1:dp/i:grinding/3:grinds";
+  }
+
+  private static String groundSourceRow(String translation, String exchange) {
+    return row(
+        "ground",
+        translation,
+        "synthetic independent meaning",
+        "ielts",
+        "455",
+        "522",
+        exchange,
+        "1");
   }
 
   @Test
@@ -526,6 +746,15 @@ class StardictCsvReaderTest {
         quote(exchange),
         "",
         "");
+  }
+
+  private static io.lexiflow.lexicon.application.importing.model.LexiconImportRow row(
+      List<StardictCsvReader.SourceRecord> records, String lemma) {
+    return records.stream()
+        .map(StardictCsvReader.SourceRecord::row)
+        .filter(candidate -> candidate.lemma().equals(lemma))
+        .findFirst()
+        .orElseThrow();
   }
 
   private static String quote(String value) {

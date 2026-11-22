@@ -1,14 +1,10 @@
 package io.lexiflow.enrichment.domain.policy;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.lexiflow.enrichment.domain.model.CaptionContext;
-import io.lexiflow.enrichment.domain.model.HintState;
-import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.util.List;
-import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 /** 验证已冻结的阻断决定不能被观看阶段重新解释为提示。 */
@@ -17,20 +13,12 @@ class PreparedHintEligibilityTest {
   void doesNotDisplayBlockedVocabulary() {
     var policy = new DeterministicHintPolicy();
     var caption = "hexagon";
-    var context =
-        new CaptionContext(UUID.randomUUID(), 1, "a".repeat(64), caption, 0, caption.length());
     var blocked =
-        new LexiconHintCandidate(
-            1L,
-            null,
-            1,
-            "en",
-            caption,
-            caption,
-            LexiconEntryKind.WORD,
-            LexiconHintAction.BLOCK,
-            null,
-            0);
-    assertEquals(HintState.NO_PENDING, policy.evaluate(context, List.of(blocked)).state());
+        new LexiconHintCandidate(1L, null, 1, caption, LexiconHintAction.BLOCK, null, 0, null);
+    assertTrue(
+        policy
+            .evaluateSelection(caption, 0, caption.length(), 0, List.of(blocked))
+            .hints()
+            .isEmpty());
   }
 }

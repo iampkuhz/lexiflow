@@ -58,7 +58,7 @@ else: sys.exit(88)
         if self.server: self.server.shutdown();self.server.server_close();self.thread.join()
         self.tmp.cleanup()
 
-    def setup_install(self,api_contract='caption-hints.v2',phase='ready',health_code=200,health_status=None,oversized=False,redirect=False):
+    def setup_install(self,api_contract='caption-hints.v4',phase='ready',health_code=200,health_status=None,oversized=False,redirect=False):
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(inner):
                 body={'mode':'formal','ready':True,'reason':'OK','softwareVersion':'0.1.0','apiContract':api_contract,'datasetVersion':1,'private':'PRIVATE-FIXTURE'}
@@ -143,10 +143,10 @@ else: sys.exit(88)
         result,report=self.invoke();self.assertEqual(result.returncode,1)
         self.assertEqual(report['checks'][-1]['reason'],'RUNTIME_INVALID')
 
-    def test_legacy_lock_is_reported_but_not_removed(self):
+    def test_ownerless_lock_is_invalid_and_not_removed(self):
         self.setup_install(phase='new');(self.install/'.lock').mkdir()
-        result,report=self.invoke();self.assertEqual(result.returncode,3)
-        self.assertIn('LEGACY_LOCK',[c['reason'] for c in report['checks']]);self.assertTrue((self.install/'.lock').is_dir())
+        result,report=self.invoke();self.assertEqual(result.returncode,1)
+        self.assertIn('INVALID_LOCK',[c['reason'] for c in report['checks']]);self.assertTrue((self.install/'.lock').is_dir())
 
     def test_corrupt_state_is_fail_and_not_echoed(self):
         self.setup_install();(self.install/'state.json').write_text('PRIVATE-FIXTURE')

@@ -36,36 +36,6 @@ public interface LexiconPublicationRepository {
 
     /** 通知事务管理器确认发生回滚。 */
     void rolledBack();
-
-    /** 不观察事务进度的显式空消费者。 */
-    PublicationProgress NONE =
-        new PublicationProgress() {
-          @Override
-          public void persistStarted() {}
-
-          @Override
-          public void persisted(long entries, long lookups) {}
-
-          @Override
-          public void rolledBack() {}
-        };
-  }
-
-  /**
-   * 按实际事务版本原子发布预检来源。
-   *
-   * @param metadata 含义：来源及策略元数据。取值范围：非 null。
-   * @param sourceRowsTotal 含义：原始来源行数。取值范围：正整数。
-   * @param expectedEntries 含义：预检条目数。取值范围：正整数且不大于来源行数。
-   * @param source 含义：应用层准备结果生产者。取值范围：非 null。
-   * @return 已提交的新版本
-   */
-  default long publish(
-      LexiconImportMetadata metadata,
-      long sourceRowsTotal,
-      long expectedEntries,
-      PreparedEntrySource source) {
-    return publish(metadata, sourceRowsTotal, expectedEntries, source, PublicationProgress.NONE);
   }
 
   /**

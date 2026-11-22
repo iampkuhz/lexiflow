@@ -58,10 +58,10 @@ class PreparationPipelineTest {
   void keepsAllBasicPhraseIndependentFromSingleWordBasic() {
     var phrase = row("bright light", "明亮的光", "明亮的光", false, true, false, null, 0, List.of());
     assertFalse(phrase.basicVocabulary());
-    assertEquals("all_basic_phrase", HintPreparation.exclusionReason(phrase));
+    assertEquals("all_basic_phrase", HintPreparation.prepare(phrase).exclusionReason());
     assertNull(result("bright quasar", "明亮类星体").exclusionReason());
     var basic = row("direct", "直接的", "直接的", true, false, false, null, 0, List.of());
-    assertEquals("basic_vocabulary", HintPreparation.exclusionReason(basic));
+    assertEquals("basic_vocabulary", HintPreparation.prepare(basic).exclusionReason());
   }
 
   @Test
@@ -81,7 +81,8 @@ class PreparationPipelineTest {
     String raw = "[=gamma-glutamyltranspeptidase]γ-谷氨酸转肽酶";
     assertEquals("english_heavy_expansion", result("ggpt", raw).exclusionReason());
     var protectedRow = row("ggpt", raw, "", false, false, false, 100L, 0, List.of());
-    assertNotEquals("english_heavy_expansion", HintPreparation.exclusionReason(protectedRow));
+    assertNotEquals(
+        "english_heavy_expansion", HintPreparation.prepare(protectedRow).exclusionReason());
     assertNotEquals("english_heavy_expansion", result("mri", "[=magnetic]磁性").exclusionReason());
   }
 
@@ -91,9 +92,9 @@ class PreparationPipelineTest {
     assertNotEquals("specialist_notation", result("enzyme-x", "β糖甙酶").exclusionReason());
     assertNotEquals("specialist_notation", result("enzyme-x", "A-图像").exclusionReason());
     var ranked = row("enzyme-x", "β-糖甙酶", "", false, false, false, 200L, 0, List.of());
-    assertNotEquals("specialist_notation", HintPreparation.exclusionReason(ranked));
+    assertNotEquals("specialist_notation", HintPreparation.prepare(ranked).exclusionReason());
     var frequent = row("enzyme-x", "β-糖甙酶", "", false, false, false, null, 3, List.of());
-    assertNotEquals("specialist_notation", HintPreparation.exclusionReason(frequent));
+    assertNotEquals("specialist_notation", HintPreparation.prepare(frequent).exclusionReason());
   }
 
   @Test
@@ -120,16 +121,16 @@ class PreparationPipelineTest {
     var curated = row("synthetic", "原始释义(说明)", "指定短释", false, false, true, null, 0, List.of());
     assertEquals("指定短释", HintPreparation.prepare(curated).gloss());
     var blocked = row("synthetic", "原始释义(说明)", "指定短释", true, false, true, null, 0, List.of());
-    assertEquals("basic_vocabulary", HintPreparation.exclusionReason(blocked));
+    assertEquals("basic_vocabulary", HintPreparation.prepare(blocked).exclusionReason());
     var unsafe = row("synthetic", "原始释义", "不…安全", false, false, true, null, 0, List.of());
-    assertEquals("unsafe_default_candidate", HintPreparation.exclusionReason(unsafe));
+    assertEquals("unsafe_default_candidate", HintPreparation.prepare(unsafe).exclusionReason());
   }
 
   @Test
   void validatesDefaultMeaningBeforeApplyingPhraseHeuristicsAndRestrictsCuratedTrust() {
     var ordinaryAllBasic =
         row("stream of data", "数据流", "数据流", false, true, false, null, 0, List.of());
-    assertEquals("all_basic_phrase", HintPreparation.exclusionReason(ordinaryAllBasic));
+    assertEquals("all_basic_phrase", HintPreparation.prepare(ordinaryAllBasic).exclusionReason());
     var cleanedAllBasic =
         row("stream of data", "【医】数据流", "数据流", false, true, false, null, 0, List.of());
     var rejectedAfterCleaning = HintPreparation.prepare(cleanedAllBasic);
@@ -137,14 +138,62 @@ class PreparationPipelineTest {
     assertEquals(List.of("source_label"), rejectedAfterCleaning.matchedRules());
     var invalidFirst =
         row("stream of data", ";数据流", ";数据流", false, true, false, null, 0, List.of());
-    assertEquals("empty_first_candidate", HintPreparation.exclusionReason(invalidFirst));
+    assertEquals("empty_first_candidate", HintPreparation.prepare(invalidFirst).exclusionReason());
     var falselyCurated =
         rowWithSource(
             "the majority", "错误释义", "错误释义", false, false, true, null, 0, List.of(), "fixture");
-    assertEquals("low_information_phrase", HintPreparation.exclusionReason(falselyCurated));
+    assertEquals(
+        "low_information_phrase", HintPreparation.prepare(falselyCurated).exclusionReason());
     var unsafeCurated =
         row("stream of data", "不…安全", "不…安全", false, true, true, null, 0, List.of());
-    assertEquals("unsafe_default_candidate", HintPreparation.exclusionReason(unsafeCurated));
+    assertEquals(
+        "unsafe_default_candidate", HintPreparation.prepare(unsafeCurated).exclusionReason());
+  }
+
+  @Test
+  void confinesCuratedTrustToReviewedSourceContractsAndKeepsSafetyChecks() {
+    for (var source : List.of("ecdict-stardict", "lexiflow-reviewed-source-defaults")) {
+      var instrument =
+          rowWithSource(
+              "instrument", "n. 仪器", "乐器", false, false, true, 100L, 0, List.of(), source);
+      assertEquals("乐器", HintPreparation.prepare(instrument).gloss(), source);
+      assertEquals("curated", HintPreparation.prepare(instrument).decisiveRule(), source);
+      for (var lemma : List.of("the majority", "stream of data")) {
+        boolean allBasic = lemma.equals("stream of data");
+        var reviewed =
+            rowWithSource(lemma, "原始释义", "受核短释", false, allBasic, true, null, 0, List.of(), source);
+        assertNull(HintPreparation.prepare(reviewed).exclusionReason(), source);
+        var unsafe =
+            rowWithSource(lemma, "原始释义", "不…安全", false, allBasic, true, null, 0, List.of(), source);
+        assertEquals("unsafe_default_candidate", HintPreparation.prepare(unsafe).exclusionReason(), source);
+        var unmarked =
+            rowWithSource(
+                lemma, "原始释义", "受核短释", false, allBasic, false, null, 0, List.of(), source);
+        assertEquals(
+            allBasic ? "all_basic_phrase" : "low_information_phrase",
+            HintPreparation.prepare(unmarked).exclusionReason(),
+            source);
+      }
+      var basic =
+          rowWithSource("instrument", "原始释义", "乐器", true, false, true, null, 0, List.of(), source);
+      assertEquals("basic_vocabulary", HintPreparation.prepare(basic).exclusionReason(), source);
+    }
+    for (var source :
+        List.of(
+            "fixture",
+            "unknown",
+            "ecdict-stardict-copy",
+            "lexiflow-reviewed-source-defaults-copy")) {
+      var lowInformation =
+          rowWithSource(
+              "the majority", "原始释义", "指定短释", false, false, true, null, 0, List.of(), source);
+      assertEquals(
+          "low_information_phrase", HintPreparation.prepare(lowInformation).exclusionReason(), source);
+      var allBasic =
+          rowWithSource(
+              "stream of data", "原始释义", "指定短释", false, true, true, null, 0, List.of(), source);
+      assertEquals("all_basic_phrase", HintPreparation.prepare(allBasic).exclusionReason(), source);
+    }
   }
 
   private static io.lexiflow.lexicon.application.importing.model.PreparedHint result(

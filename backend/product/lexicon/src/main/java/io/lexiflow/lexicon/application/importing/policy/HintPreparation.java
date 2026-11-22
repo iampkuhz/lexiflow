@@ -24,16 +24,6 @@ public final class HintPreparation {
   private HintPreparation() {}
 
   /**
-   * 返回准备结果的稳定阻断原因。
-   *
-   * @param row 含义：已校验的导入行。取值范围：非 null。
-   * @return 不能提示时的原因，通过时为 null。
-   */
-  public static String exclusionReason(LexiconImportRow row) {
-    return prepare(row).exclusionReason();
-  }
-
-  /**
    * 在构造词义之前执行一次准备，结果由词义和查询投影共同使用。
    *
    * @param row 含义：含完整来源与资格证据的导入行。取值范围：非 null。
@@ -45,8 +35,14 @@ public final class HintPreparation {
     if (stardict && row.lemma().codePoints().anyMatch(HintPreparation::nonAsciiLetter))
       return excluded(row, "non_ascii_lemma", List.of());
     if (!hasQueryableSurface(row)) return excluded(row, "outside_query_window", List.of());
-    if (row.basicVocabulary()) return excluded(row, "basic_vocabulary", List.of());
-    boolean trustedCurated = stardict && row.curatedGloss();
+    if (row.basicVocabulary()
+        || (!row.lemma().contains(" ") && row.sourceOxfordBasic() && row.sourceBncRank() == null))
+      return excluded(row, "basic_vocabulary", List.of());
+    // 来源标识限定适配器合同，不是身份认证；人工标记仍须由适配器核对精确来源。
+    boolean trustedCurated =
+        row.curatedGloss()
+            && (stardict
+                || row.dictionary().sourceId().equals("lexiflow-reviewed-source-defaults"));
     PreparedHint prepared;
     if (!stardict || trustedCurated) {
       if (!safeGloss(row.chineseGloss()))

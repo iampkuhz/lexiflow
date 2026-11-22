@@ -42,7 +42,12 @@ class CaptionHintHttpTest {
     assertTrue(known.body().contains("\"processedKeys\":[\"a\"]"));
     assertTrue(known.body().contains("\"startKey\":\"a\""));
     assertTrue(known.body().contains("可靠的"));
-    assertFalse(known.body().contains("\"caption\""));
+    var result = new tools.jackson.databind.ObjectMapper().readTree(known.body());
+    assertEquals(1, result.path("lexiconVersion").asLong());
+    assertEquals(3, result.size());
+    assertEquals(7, result.path("hints").get(0).size());
+    assertTrue(result.path("hints").get(0).get("frequencyRank").isNull());
+    assertFalse(known.body().contains("\"senseId\""));
     var analysisPath = Path.of(environment.getRequiredProperty("lexiflow.segment-analysis.path"));
     assertTrue(Files.isRegularFile(analysisPath));
     assertTrue(Files.size(analysisPath) > 0);
@@ -50,6 +55,17 @@ class CaptionHintHttpTest {
     assertEquals(200, unknown.statusCode());
     assertTrue(unknown.body().contains("\"processedKeys\":[\"a\"]"));
     assertTrue(unknown.body().contains("\"hints\":[]"));
+    assertTrue(unknown.body().contains("\"lexiconVersion\":1"));
+    var noQuery = post(payload(segment("c", "reliable", false)));
+    assertEquals(200, noQuery.statusCode());
+    assertTrue(noQuery.body().contains("\"lexiconVersion\":null"));
+    var retained =
+        post(
+            payload(segment("a", "reliable", true))
+                .replace(
+                    "\"previousSegments\":[]",
+                    "\"previousSegments\":[{\"key\":\"a\",\"text\":\"old reliable\"}]"));
+    assertEquals(200, retained.statusCode());
     Files.deleteIfExists(analysisPath);
   }
 
@@ -64,6 +80,15 @@ class CaptionHintHttpTest {
           "{}",
           legacy,
           duplicate,
+          payload(segment("a", "valid", true))
+              .replace(
+                  "\"previousSegments\":[]",
+                  "\"previousSegments\":[{\"key\":\"a\",\"text\":\"other\"}]"),
+          payload(segment("a", "\\ud800", true)),
+          payload(segment("a", "valid", true))
+              .replace(
+                  "\"previousSegments\":[]",
+                  "\"previousSegments\":[{\"key\":\"a\",\"text\":\"first valid\"},{\"key\":\"a\",\"text\":\"last valid\"}]"),
           payload(segment("a", "x".repeat(501), true)),
           payload(segment("a", "x".repeat(300), true) + "," + segment("b", "y".repeat(201), true)),
           payload(segment("a", "", true)),
@@ -71,15 +96,35 @@ class CaptionHintHttpTest {
           payload(segment("a", "valid", true)).replace("\"line\":0", "\"line\":-1"),
           payload(segment("a", "valid", true)).replace("\"line\":0", "\"line\":9007199254740992"),
           payload(segment("a", "valid", true))
-              .replace("\"captionTopicKey\":\"topic\"", "\"captionTopicKey\":\"\""),
+              .replace("{\"previousSegments\"", "{\"trackKey\":null,\"previousSegments\""),
           payload(segment("a", "valid", true))
-              .replace("\"windowId\":null", "\"windowId\":\"" + "x".repeat(129) + "\""),
+              .replace("{\"segments\"", "{\"startMs\":null,\"segments\""),
           payload(segment("a", "valid", true))
               .replace("\"key\":\"a\"", "\"key\":\"" + "x".repeat(129) + "\""),
           payload(segment("a", "valid", true))
               .replace("\"append\":true", "\"append\":true,\"contentId\":\"old\"")
         }) {
       assertEquals(400, post(body).statusCode(), body);
+    }
+  }
+
+  @Test
+  void defaultHttpSurfaceDoesNotExposeSensitiveDiagnosticsOrActuatorInfo() throws Exception {
+    try (var client = HttpClient.newHttpClient()) {
+      for (var path : new String[] {"/api/v1/caption-debug", "/actuator/info"}) {
+        var request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path));
+        assertEquals(
+            404,
+            client
+                .send(request.GET().build(), HttpResponse.BodyHandlers.discarding())
+                .statusCode());
+      }
+      var post =
+          HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/v1/caption-debug"))
+              .header("Content-Type", "application/json")
+              .POST(HttpRequest.BodyPublishers.ofString("{}"))
+              .build();
+      assertEquals(404, client.send(post, HttpResponse.BodyHandlers.discarding()).statusCode());
     }
   }
 
@@ -122,7 +167,7 @@ class CaptionHintHttpTest {
   }
 
   private static String payload(String segments) {
-    return "{\"captionTopicKey\":\"topic\",\"trackKey\":null,\"lastRequestedSnapshot\":null,\"currentSnapshot\":{\"captions\":[{\"windowId\":null,\"startMs\":null,\"segments\":["
+    return "{\"previousSegments\":[],\"currentSnapshot\":{\"captions\":[{\"segments\":["
         + segments
         + "]}]}}";
   }
@@ -132,7 +177,7 @@ class CaptionHintHttpTest {
         + key
         + "\",\"text\":\""
         + text
-        + "\",\"offsetMs\":null,\"append\":"
+        + "\",\"append\":"
         + append
         + ",\"line\":0}";
   }

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { apiContract } from "../../../scripts/contracts/contract-lock.mjs";
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, createReadStream, createWriteStream } from 'node:fs';
 import { lstat, mkdir, mkdtemp, open, readdir, rm, symlink, writeFile } from 'node:fs/promises';
@@ -450,7 +451,7 @@ export async function prepareWorkflow(requestFile, options = {}) {
       records.push({ role: 'license', path: target, ...copiedNotice, licenseIds: associated });
     }
     const imageDescriptor = { schemaVersion: 1, softwareVersion: identity.softwareVersion,
-      sourceCommit: identity.sourceCommit, jar: { path: 'api.jar', ...jar }, apiContract: 'caption-hints.v2',
+      sourceCommit: identity.sourceCommit, jar: { path: 'api.jar', ...jar }, apiContract: apiContract(),
       sqlVersion: request.dataset.sqlVersion,
       dataset: { path: 'dataset.zip', ...dataset, releaseId: request.dataset.releaseId,
         preparationId: request.dataset.preparationId, ruleId: request.dataset.ruleId },
@@ -481,7 +482,7 @@ export async function prepareWorkflow(requestFile, options = {}) {
         licenseIds: licenseIds(licenses, 'LexiFlow', 'API-runtime') });
     }
     const descriptor = { schemaVersion: 2, buildIdentity: identity, softwareVersion: identity.softwareVersion,
-      sourceCommit: identity.sourceCommit, apiContract: 'caption-hints.v2', sqlVersion: request.dataset.sqlVersion,
+      sourceCommit: identity.sourceCommit, apiContract: apiContract(), sqlVersion: request.dataset.sqlVersion,
       dataset: { releaseId: request.dataset.releaseId, preparationId: request.dataset.preparationId, ruleId: request.dataset.ruleId },
       platforms: ['linux/arm64'], artifacts: records, licenses: manifestLicenses };
     const candidate = await timed('assemble', () => assemble({ repoRoot: root, imageCandidates: [{ directory: imageDirectory, sha256: imageSha256 }],

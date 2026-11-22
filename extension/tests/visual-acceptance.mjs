@@ -77,7 +77,8 @@ export async function runVisualAcceptance({ page, serviceWorker, apiBase, artifa
     await page.evaluate(() => document.documentElement.dataset.lexiflowVisualTextScale = "150");
     await runCase({
       id: "text-zoom", page, artifactRoot, setCaption, waitForState, overlayText, cases,
-      viewport: { width: 960, height: 760 }, caption: zoomCaption, time: 23, expectedHints: 1, inputMode: "actual-local-api", minimumFontSize: 30
+      viewport: { width: 960, height: 760 }, caption: zoomCaption, time: 23, expectedHints: 1,
+      inputMode: "actual-local-api", expectedTerms: ["Reliable"], minimumFontSize: 30
     });
     await page.evaluate(() => { delete document.documentElement.dataset.lexiflowVisualTextScale; });
 
@@ -210,7 +211,8 @@ async function collectGeometry(page, caption, expectedHints, expectedTerms, mini
     const adjacentGlosses = glosses.every((gloss, index) => {
       const previous = gloss.previousElementSibling;
       const term = terms?.[index] ?? termsFromTitle[index];
-      return previous?.tagName === "SPAN" && Boolean(term) && (previous.textContent ?? "").endsWith(term);
+      return previous?.tagName === "SPAN" && previous.classList.contains("hint-term") &&
+        Boolean(term) && previous.textContent === term;
     });
     const playerRect = asRect(player.getBoundingClientRect());
     const lineRect = asRect(line.getBoundingClientRect());
@@ -250,18 +252,18 @@ async function assertControlsUsable(page) {
 async function installHintRendererMock(serviceWorker, apiBase, caption, terms) {
   const hints = terms.map(([term, chineseGloss], index) => ({
     startOffset: caption.indexOf(term), endOffset: caption.indexOf(term) + term.length, chineseGloss,
-    lexiconEntryId: String(index + 1),
-    lexiconVersion: 1,
-    senseId: `00000000-0000-0000-0000-00000000001${index + 1}`
+    lexiconEntryId: String(index + 1), frequencyRank: null
   }));
   assert.ok(hints.length > 0);
   assert.ok(hints.every(hint => hint.startOffset >= 0), "mock terms must occur in the synthetic caption");
   await serviceWorker.evaluate(({ base, syntheticCaption, syntheticHints }) => {
     if (globalThis.__lexiflowVisualAcceptanceRestoreFetch) throw new Error("visual-fetch-mock-already-installed");
     const originalFetch = globalThis.fetch;
-    const target = `${base}/api/v1/caption-hints`;
+    const target = `${base}/api/v1/caption-hints`, preferenceTarget = `${base}/api/v1/preferences`;
     globalThis.fetch = async (input, init) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input?.url;
+      if (url === preferenceTarget || String(url ?? "").includes("/api/v1/preferences"))
+        return new Response(JSON.stringify({ commonWordCutoff: 1500, hidden: [] }), { status: 200, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
       if (url === target || String(url ?? "").includes("/api/v1/caption-hints")) {
         let request;
         try { request = JSON.parse(typeof init?.body === "string" ? init.body : "{}"); } catch { return originalFetch(input, init); }
@@ -276,7 +278,7 @@ async function installHintRendererMock(serviceWorker, apiBase, caption, terms) {
           }
           return {...hint,startKey,endKey,startOffset,endOffset};
         }) : [];
-        const body = { processedKeys: segments.filter(segment => segment.append).map(segment => segment.key), hints };
+        const body = { processedKeys: segments.filter(segment => segment.append).map(segment => segment.key), lexiconVersion: 1, hints };
         return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
       }
       return originalFetch(input, init);

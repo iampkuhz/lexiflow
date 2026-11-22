@@ -40,22 +40,23 @@ final class PipelineSyntheticSources {
 
   static Path stardict(Path dir) throws Exception {
     var file = dir.resolve("synthetic-stardict.csv");
-    // No rankings and no Oxford mark: unknown frequency is distinct from low-frequency evidence.
+    // Keep both ranked and unranked words to check the published HTTP projection.
     Files.writeString(
         file,
         STARDICT_HEADER
             + String.join(
                 "\n",
-                stardictRow("stardictword", "合成词", "synthetic definition"),
-                stardictRow("lexiflow", "词库v1", "synthetic shared-surface definition"),
-                stardictRow("badstardict", "；后项释义", "bad first candidate"))
+                stardictRow("stardictword", "合成词", "synthetic definition", ""),
+                stardictRow("lexiflow", "词库v1", "synthetic shared-surface definition", "28000"),
+                stardictRow("badstardict", "；后项释义", "bad first candidate", "45000"))
             + "\n");
     return file;
   }
 
-  private static String stardictRow(String word, String translation, String definition) {
+  private static String stardictRow(
+      String word, String translation, String definition, String rank) {
     return String.join(
-        ",", word, "", definition, translation, "n", "0", "0", "", "", "", "", "", "");
+        ",", word, "", definition, translation, "n", "0", "0", "", rank, "", "", "", "");
   }
 
   private static String row(
@@ -88,13 +89,12 @@ final class PipelineSyntheticSources {
   }
 
   static String caption(String key, String text, boolean append) {
-    return "{\"captionTopicKey\":\"synthetic-topic\",\"trackKey\":null,"
-        + "\"lastRequestedSnapshot\":null,\"currentSnapshot\":{\"captions\":[{"
-        + "\"windowId\":null,\"startMs\":null,\"segments\":[{\"key\":\""
+    return "{\"previousSegments\":[],\"currentSnapshot\":{\"captions\":[{"
+        + "\"segments\":[{\"key\":\""
         + key
         + "\",\"text\":\""
         + text
-        + "\",\"offsetMs\":null,\"append\":"
+        + "\",\"append\":"
         + append
         + ",\"line\":0}]}]}}";
   }

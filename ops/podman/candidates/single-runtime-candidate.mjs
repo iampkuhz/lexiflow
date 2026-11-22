@@ -1,3 +1,4 @@
+import { apiContract } from "../../../scripts/contracts/contract-lock.mjs";
 // 真实单镜像候选验收。只触及本次随机 token 标记的容器和卷。
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,6 +15,7 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../.
 const phaseIds = ['preflight','target-clean-init','target-repeat-run','target-restart','interrupted-init-retry','incompatible-volume-refusal','failure-exit','final-cleanup'];
 const ownerLabel = 'io.lexiflow.candidate-acceptance';
 const volumeProofs = new Map();
+const preferenceVolumes = new Map();
 let podmanSocket=null;
 let podmanTempDirectory=null;
 let podmanHome=null;
@@ -84,10 +86,31 @@ function createVolume(logDir,name,token) { const created=cmd(logDir,'volume-crea
 function volumeIdentity(v) { const value={name:v.Name||v.name,createdAt:v.CreatedAt||v.createdAt,mountpoint:v.Mountpoint||v.mountpoint,driver:v.Driver||v.driver};if(!value.name||!value.createdAt||!value.mountpoint||!value.driver)fail('VOLUME_IDENTITY_INCOMPLETE');return value; }
 function volumeAbsent(logDir,name) { if(inspectVolume(logDir,name))fail('VOLUME_NAME_COLLISION',true);if(!volumeProofs.has(name))volumeProofs.set(name,{previousAbsent:true,identity:null,containerId:null,markerHash:null}); }
 function containerAbsent(logDir,name) { if(inspectContainer(logDir,name))fail('CONTAINER_NAME_COLLISION',true); }
+function ensurePreferenceVolume(logDir,volume,token) {
+  const name=`${volume}-preferences`;
+  const prior=preferenceVolumes.get(name);
+  if(!prior) {
+    if(preferenceVolumes.has(name)||inspectVolume(logDir,name))fail('PREFERENCE_VOLUME_NAME_COLLISION',true);
+    // 先登记拟创建名称；清理仍须证明真实 owner，不会因名称吻合而删卷。
+    preferenceVolumes.set(name,null);
+    createVolume(logDir,name,token);
+    const created=inspectVolume(logDir,name);assertOwned(created,token);
+    preferenceVolumes.set(name,volumeIdentity(created));
+  } else {
+    const current=inspectVolume(logDir,name);assertOwned(current,token);
+    if(JSON.stringify(volumeIdentity(current))!==JSON.stringify(prior))fail('PREFERENCE_VOLUME_IDENTITY_CHANGED');
+  }
+  return name;
+}
 function proveAutoVolume(logDir,container,volume,token) {
   const c=inspectContainer(logDir,container);assertOwned(c,token);
   const containerId=c.Id||c.ID;if(typeof containerId!=='string'||!/^[a-f0-9]{64}$/.test(containerId))fail('CONTAINER_ID_UNPROVEN');
-  const mounts=c.Mounts||[];if(mounts.length!==1||mounts[0].Type!=='volume'||mounts[0].Name!==volume||mounts[0].Destination!=='/var/lib/lexiflow')fail('VOLUME_MOUNT_UNPROVEN');
+  const prefName=`${volume}-preferences`;
+  const mounts=c.Mounts||[];
+  const mounted=(name,destination)=>mounts.some(item=>item.Type==='volume'&&item.Name===name&&item.Destination===destination&&item.RW===true);
+  if(mounts.length!==2||!mounted(volume,'/var/lib/lexiflow')||!mounted(prefName,'/var/lib/lexiflow/preferences'))fail('VOLUME_MOUNT_UNPROVEN');
+  const preferences=inspectVolume(logDir,prefName);assertOwned(preferences,token);
+  if(JSON.stringify(volumeIdentity(preferences))!==JSON.stringify(preferenceVolumes.get(prefName)))fail('PREFERENCE_VOLUME_IDENTITY_CHANGED');
   const v=inspectVolume(logDir,volume);if(!v)fail('VOLUME_MISSING');
   const id=volumeIdentity(v),prior=volumeProofs.get(volume);
   if(!prior?.previousAbsent||(prior.identity&&JSON.stringify(id)!==JSON.stringify(prior.identity)))fail('VOLUME_IDENTITY_CHANGED');
@@ -99,7 +122,10 @@ function proveAutoVolume(logDir,container,volume,token) {
 function containerRun(logDir,{name,volume,image,token,port=true}) {
   const args=['run','--image-volume=ignore','--memory=2g','--cpus=2','--stop-timeout=45','-d','--name',name,'--label',`${ownerLabel}=${token}`,'--label',`io.lexiflow.acceptance-token=${token}`];
   if(port)args.push('--publish','127.0.0.1:18082:8080');
-  if(volume)args.push('--volume',`${volume}:/var/lib/lexiflow`);
+  if(volume) {
+    const preferences=ensurePreferenceVolume(logDir,volume,token);
+    args.push('--volume',`${volume}:/var/lib/lexiflow`,'--volume',`${preferences}:/var/lib/lexiflow/preferences`);
+  }
   args.push(image);
   return cmd(logDir,'container-run',args,{allowFailure:true,timeout:180_000});
 }
@@ -128,7 +154,7 @@ async function apiState() {
 }
 function validRuntimeState(value,identity,dataset,{ready=true}={}) {
   const fields=['softwareVersion','apiContract','mode','ready','reason','datasetVersion','publishedDataset'];
-  if(!exact(value,fields)||value.softwareVersion!==identity.softwareVersion||value.apiContract!=='caption-hints.v2'||value.mode!=='formal'||value.ready!==ready)return false;
+  if(!exact(value,fields)||value.softwareVersion!==identity.softwareVersion||value.apiContract!==apiContract()||value.mode!=='formal'||value.ready!==ready)return false;
   if(!ready)return value.reason==='INITIALIZING'&&value.publishedDataset===null;
   return ['OK','PREWARM_DEGRADED'].includes(value.reason)&&Number.isSafeInteger(value.datasetVersion)&&value.datasetVersion>0&&canonical(value.publishedDataset)===canonical(dataset);
 }
@@ -236,6 +262,9 @@ async function incompatibleVolume(logDir,container,image,volume,token,identity,c
   const run=containerRun(logDir,{name:container,volume,image,token});
   if(!run.ok)fail('INCOMPATIBLE_RUN_NOT_STARTED');
   const exited=await observeWait(logDir,container,90_000);if(!exited||exited.State.ExitCode===0)fail('INCOMPATIBLE_VOLUME_NOT_REJECTED');
+  const diagnosis=cmd(logDir,'incompatible-refusal-reason',['logs','--tail','24',container],{allowFailure:true});
+  if(!diagnosis.ok||!/^lexiflow-runtime: volume-unknown-content$/m.test(`${diagnosis.stdout}\n${diagnosis.stderr}`))
+    fail('INCOMPATIBLE_VOLUME_REFUSAL_UNPROVEN');
   const check=cmd(logDir,'unknown-volume-retained',['exec',container,'/bin/bash','-c','test -f /var/lib/lexiflow/unknown-state'],{allowFailure:true});
   if(!check.ok) {
     // The refused container may have exited before exec is available; mount with the same image to prove retention.
@@ -307,7 +336,7 @@ async function faultSqliteDatabase(logDir,image,token,container,volume,container
 }
 async function runInner(request) {
   const out=report(), token=crypto.randomBytes(16).toString('hex'), containers=[], volumes=[], loaded=[];
-  volumeProofs.clear();podmanSocket=null;podmanTempDirectory=null;podmanHome=null;
+  volumeProofs.clear();preferenceVolumes.clear();podmanSocket=null;podmanTempDirectory=null;podmanHome=null;
   let root=null, image=null, dataset=null, source=null, cleaned=false;
   const volume=(name)=>{volumes.push(name);return name;};
   try {
@@ -390,6 +419,7 @@ async function runInner(request) {
       if(root) {
         // Cleanup is strictly constrained to this invocation's names and verified owner labels.
         for(const name of [...new Set(containers)])removeContainer(root,name,token);
+        for(const name of preferenceVolumes.keys())removeVolume(root,name,token);
         for(const name of [...new Set(volumes)])removeVolume(root,name,token);
         for(const item of loaded) if(!item.existed) {
           const rows=json(root,'cleanup-image-inspect',['image','inspect',item.image]);

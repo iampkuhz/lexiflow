@@ -20,9 +20,9 @@
 - Modular Monolith；唯一 `:api` 与 `@SpringBootApplication`，统一装配 HTTP 和未来后台任务；不建产品 worker 进程，不按运行方式划分业务。
 - 依赖由组合根指向 application，再指向 domain/ports；domain 不依赖 HTTP、数据库、缓存或具体模型 Provider。
 - 模块不得直接读写其他 Domain 拥有的数据；跨模块只通过公开 contract。
-- Chrome Extension 保持薄；仅允许用户显式、本机私有的词段抑制偏好，不上传、不推断熟悉度、无账号或同步。
+- Chrome Extension 保持薄；词库只读，用户显式偏好独立保存在本机可写 SQLite，不上传、不推断熟悉度、无账号或同步；领域归属及适配器边界见 `harness/module-boundaries.md`。
 - 英文不等后端；观看仅用已发布资料，禁用模型（含补全/预取）；模型仅第三阶段事后分析，校验发布供后续观看。
-- SQLite 是唯一事实存储；Redis、浏览器缓存和投影均可重建。API 只读打开专属数据库文件，缺库即拒绝，不隐式建库或清库。
+- SQLite 是唯一事实存储；已发布词库 SQLite 只读，显式本机偏好使用独立可写 SQLite；Redis、浏览器缓存和投影均可重建。API 缺库即拒绝，不隐式建库或清库。
 
 ## 按需加载共享规则
 

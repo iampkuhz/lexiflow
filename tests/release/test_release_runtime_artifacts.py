@@ -148,7 +148,7 @@ process.stdout.write(JSON.stringify({duplicateRejected,descriptor}));
         self.assertEqual(descriptor["platforms"], ["linux/arm64"])
         self.assertEqual(descriptor["dataset"]["releaseId"], "synthetic-" + "1" * 64)
         self.assertEqual(descriptor["dataset"]["ruleId"], "synthetic-no-model")
-        self.assertEqual(descriptor["apiContract"], "caption-hints.v2")
+        self.assertEqual(descriptor["apiContract"], "caption-hints.v4")
         self.assertEqual(descriptor["sqlVersion"], "e" * 64)
         self.assertEqual(
             [item["role"] for item in descriptor["artifacts"]], ["dataset"]
@@ -316,7 +316,7 @@ class TestFixedSyntheticBridge(unittest.TestCase):
                             for row in rows
                         ],
                         "softwareVersion": "2.0.0",
-                        "apiContract": "caption-hints.v2",
+                        "apiContract": "caption-hints.v4",
                     }
                 ).encode(), b""
 
