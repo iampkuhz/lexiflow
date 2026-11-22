@@ -10,7 +10,6 @@ from pathlib import Path
 from scripts.triggers.run_ci_quick_checks import make_plan
 from scripts.verification import freeze_inputs
 from scripts.verification.execution.check_runner import snapshot_check_inputs
-from scripts.verification.planning.change_risk_assessment import formal_only_ids
 from scripts.verification.planning.check_definitions import (
     filter_checks_by_scope,
     load_declarations_snapshot,
@@ -20,7 +19,7 @@ from scripts.verification.planning.check_scope_selection import (
     resolve_module_dependencies,
     select_checks_for_changes,
 )
-from tests.verification.declaration_fixtures import input_closure
+from tests.verification.declaration_fixtures import formal_only_ids, input_closure
 
 ROOT = Path(__file__).resolve().parents[2]
 

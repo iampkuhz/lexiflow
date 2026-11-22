@@ -3,7 +3,6 @@ package io.lexiflow.enrichment.domain.policy;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.util.UUID;
@@ -62,12 +61,10 @@ class PublishedCandidateEligibilityTest {
         1L,
         action == LexiconHintAction.HINT ? UUID.randomUUID() : null,
         1,
-        "en",
         form,
-        form,
-        LexiconEntryKind.PHRASE,
         action,
         gloss,
-        1);
+        1,
+        null);
   }
 }

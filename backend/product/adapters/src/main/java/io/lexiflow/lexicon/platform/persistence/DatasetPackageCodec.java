@@ -237,7 +237,7 @@ public final class DatasetPackageCodec {
                 "generationConfig",
                 "contentSha256",
                 "files"));
-    if (integer(node.get("schemaVersion"), 0) != 4) throw new IOException(BAD);
+    if (integer(node.get("schemaVersion"), 0) != 5) throw new IOException(BAD);
     String schema = digestValue(node.get("schemaSha256"));
     String approval = digestValue(node.get("approvalSha256"));
     long version = integer(node.get("datasetVersion"), 1);
@@ -636,16 +636,18 @@ public final class DatasetPackageCodec {
   /** 核对固定表行的全列和强类型。 */
   static Map<String, Object> validateRow(Object rowValue, DatasetPackageTables.Table table)
       throws IOException {
-    var row = object(rowValue, table.columnSet());
-    if (!List.copyOf(row.keySet()).equals(table.columns())) throw new IOException(BAD);
+    var packed = object(rowValue, Set.copyOf(table.packageColumns()));
+    if (!List.copyOf(packed.keySet()).equals(table.packageColumns())) throw new IOException(BAD);
+    var row = new java.util.LinkedHashMap<String, Object>();
+    for (String column : table.columns()) row.put(column, packed.get(DatasetPackageTables.packageName(table.name(), column)));
     for (String column : table.columns()) {
       Object value = row.get(column);
       if (value == null) {
-        if (!Set.of("gloss").contains(column)) throw new IOException(BAD);
+        if (!Set.of("gloss", "frequency_rank", "bnc_rank").contains(column)) throw new IOException(BAD);
         continue;
       }
       String type = DatasetPackageTables.TYPES.get(column);
-      if ("INTEGER".equals(type)) integer(value, 0);
+      if ("INTEGER".equals(type)) integer(value, column.endsWith("_rank") ? 1 : 0);
       else if ("TEXT".equals(type)) {
         if (column.equals("source_manifest")) {
           Object json =

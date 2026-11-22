@@ -13,6 +13,8 @@ import { installationRecord, publishRecord, verifyExtension, treeDigest } from '
 import { resolveBuildIdentity, assertBuildIdentityMatches } from '../../release/integrity/source-build-identity.mjs';
 import { versionedImageReference, versionedImageLabels, removeVersionedImage } from '../images/versioned-images.mjs';
 import { acquireImageSlotLock } from '../images/image-slot-lock.mjs';
+import { DEVELOPMENT_PORT } from '../loopback-ports.mjs';
+import { deploymentSlot } from '../deployment-slots.mjs';
 import { resolveSourceBaseImage } from '../images/source-base-image.mjs';
 import { sqliteJdbcUrl, validateSqliteDatabaseFile } from '../environment/local-sqlite-target.mjs';
 
@@ -94,14 +96,19 @@ export function renderCompose(repo, { apiPort, databaseFile, slot = 'source' }) 
   const hardened = { read_only: true, cap_drop: ['ALL'], security_opt: ['no-new-privileges:true'],
     tmpfs: ['/tmp:size=128m'], mem_limit: '1280m' };
   const api = { labels, image: '${LEXIFLOW_API_IMAGE:?LEXIFLOW_API_IMAGE is required}', ...policy,
+    container_name: deploymentSlot(slot, repo).containerName,
     command: ['api'], logging: { driver: 'k8s-file', options: { 'max-size': '10mb' } },
     ports: [`127.0.0.1:${apiPort}:8080`],
     networks: ['published'],
-    environment: { SPRING_DATASOURCE_URL: 'jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro' },
-    volumes: ['${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro'],
+    environment: { SPRING_DATASOURCE_URL: 'jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro',
+      LEXIFLOW_PREFERENCES_JDBC_URL: 'jdbc:sqlite:/var/lib/lexiflow/preferences/preferences.db' },
+    volumes: ['${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro', 'lexiflow-preferences:/var/lib/lexiflow/preferences'],
     ...hardened, stop_grace_period: '30s', healthcheck: {
       test: ['CMD', '/app/run-container-command.sh', 'health'], interval: '30s', timeout: '5s', retries: 3, start_period: '30s' } };
-  const config = { services: { api }, networks: { published: { driver: 'bridge', labels } } };
+  const config = { services: { api }, volumes: { 'lexiflow-preferences': {
+    name: 'lexiflow-${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}_preferences',
+    labels: { 'lexiflow.installation': '${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}' } } },
+    networks: { published: { driver: 'bridge', labels } } };
   return `${JSON.stringify(config, null, 2)}\n`;
 }
 export async function packageGeneration(file) {
@@ -109,7 +116,7 @@ export async function packageGeneration(file) {
     const entries = await readZipEntries(file, ['manifest.json']);
     const manifest = JSON.parse(entries.get('manifest.json').toString('utf8'));
     const inputs = manifest.generationInputs, config = manifest.generationConfig;
-    if (manifest.schemaVersion !== 4 || !inputs || typeof inputs !== 'object' || Array.isArray(inputs)
+    if (manifest.schemaVersion !== 5 || !inputs || typeof inputs !== 'object' || Array.isArray(inputs)
         || !config || typeof config !== 'object' || Array.isArray(config)) fail('DEPLOYMENT_PACKAGE_GENERATION_INVALID');
     const generation = dataGeneration({ codeVersion: manifest.generationCodeVersion, inputSha256: inputs.inputSha256,
       upstream: inputs.upstream, config });
@@ -119,12 +126,23 @@ export async function packageGeneration(file) {
   } catch { fail('DEPLOYMENT_PACKAGE_GENERATION_INVALID'); }
 }
 
+export function assertSourceComposeSlot(text, repo) {
+  let services;
+  try { services = JSON.parse(text)?.services; } catch { /* 未识别的配置不得启动。 */ }
+  if (!services || Object.keys(services).length !== 1
+      || services.api?.container_name !== deploymentSlot('source', repo).containerName) {
+    fail('DEPLOYMENT_TEST_SLOT_CONFIG_INVALID');
+  }
+}
+
 /** 只允许 probe 目录在确认前写入；安装状态、秘密和数据库均在确认后创建。 */
 export async function runUnifiedDeployment(ctx) {
   const { repo, dir, action, run } = ctx;
   const isPortTaken = ctx.portTaken ?? portTaken;
   if (ctx.planOnly && ctx.confirmPlan) fail('DEPLOYMENT_PLAN_MODE_CONFLICT');
   ctx.progress?.('读取安装记录');
+  ctx.progress?.('核对测试容器槽位');
+  await ctx.ownedResources();
   const existed = fs.existsSync(dir);
   if (action === 'upgrade' && !existed) fail('DEPLOYMENT_NOT_INSTALLED');
   let installed = null;
@@ -137,9 +155,9 @@ export async function runUnifiedDeployment(ctx) {
     if (installed.root !== dir || installed.schema !== 2 || !/^[a-f0-9]{32}$/.test(installed.id)
         || installed.project !== `lexiflow-local-${installed.id}` || !['new', 'initialized', 'ready'].includes(installed.phase)) fail('DEPLOYMENT_INSTALL_STATE_INVALID');
     if (ctx.enforceFixedSlots && (installed.packageType !== 'source'
-        || ![18080, 18081].includes(installed.apiPort))) fail('DEPLOYMENT_SOURCE_SLOT_STATE_INVALID');
+        || installed.apiPort !== DEVELOPMENT_PORT)) fail('DEPLOYMENT_SOURCE_SLOT_STATE_INVALID');
     sourceManagedState = installed.packageType === 'source'
-      && installed.databaseTarget?.kind === 'file' && [18080, 18081].includes(installed.apiPort);
+      && installed.databaseTarget?.kind === 'file' && installed.apiPort === DEVELOPMENT_PORT;
     if (ctx.seen.has('--api-port') && ctx.apiPort !== installed.apiPort) fail('DEPLOYMENT_TARGET_CHANGED');
     if (installed.apiPort !== ctx.apiPort) fail('DEPLOYMENT_TARGET_CHANGED');
     ctx.setState(installed);
@@ -166,7 +184,6 @@ export async function runUnifiedDeployment(ctx) {
       potentialFailedPreparationReplan = journal?.stage === 'planned'
         && !targetRecord?.invalid && (!targetRecord || targetRecord.operation !== journal.operation);
     }
-    await ctx.ownedResources();
   }
   const fresh = !installed || installed.phase === 'new';
   const apiPort = installed?.apiPort ?? ctx.apiPort;
@@ -531,7 +548,9 @@ export async function runUnifiedDeployment(ctx) {
         }
         current.digests = ctx.digestFiles(current); ctx.saveState(current);
         if (replacement) fs.unlinkSync(path.join(dir, 'image-replacement.json'));
-        await ctx.compose('config'); await ctx.compose('up', '-d', '--no-deps', '--force-recreate', 'api');
+        await ctx.compose('config');
+        await ctx.compose('run', '--rm', '--no-deps', 'api', 'init-preferences');
+        await ctx.compose('up', '-d', '--no-deps', '--force-recreate', 'api');
         if (preparedData.extensionStage) {
           verifyExtension(preparedData.extensionStage, identity, apiPort);
           fs.renameSync(path.join(dir, 'extension'), path.join(dir, `.previous-extension-${opId}`));
@@ -637,7 +656,8 @@ export async function activatePreparedTarget({ dir, prepared, previous, fact, di
   await verifyExtensionArchive(dir, target.artifacts?.extensionArchive, target.buildIdentity, target.apiPort, extension);
   validateSqliteDatabaseFile(target.databaseFile, { installationRoot: dir, allowMissing: false });
   setState(target); target.digests = digestFiles(target); saveState(target);
-  await compose('config'); await compose('up', '-d', '--no-deps', '--force-recreate', 'api');
+  await compose('config'); await compose('run', '--rm', '--no-deps', 'api', 'init-preferences');
+  await compose('up', '-d', '--no-deps', '--force-recreate', 'api');
   await ready(target);
   await verifyExtensionArchive(dir, target.artifacts?.extensionArchive, target.buildIdentity, target.apiPort, extension);
   target.phase = 'ready'; target.digests = digestFiles(target); saveState(target);

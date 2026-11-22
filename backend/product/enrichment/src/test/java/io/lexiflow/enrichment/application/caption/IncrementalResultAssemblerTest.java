@@ -3,7 +3,6 @@ package io.lexiflow.enrichment.application.caption;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import io.lexiflow.enrichment.domain.model.IncrementalHintResult;
-import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import io.lexiflow.lexicon.domain.model.LexiconLookupResult;
@@ -98,18 +97,25 @@ class IncrementalResultAssemblerTest {
         (long) (entry.hashCode() & 0x7fffffff) + 1,
         sense == null ? null : uuid(sense),
         version,
-        "en",
         form,
-        form,
-        LexiconEntryKind.WORD,
         action,
         gloss,
-        500);
+        500,
+        null);
   }
 
   private static IncrementalHintResult.Hint hint(String entry, long version) {
     return new IncrementalHintResult.Hint(
-        "k", 0, "k", 1, "释义", uuid(entry).toString(), version, uuid("sense-" + entry).toString());
+        "k",
+        0,
+        "k",
+        1,
+        "释义",
+        Long.toString((long) (entry.hashCode() & 0x7fffffff) + 1),
+        version,
+        uuid("sense-" + entry).toString(),
+        "fixture",
+        null);
   }
 
   private static UUID uuid(String value) {

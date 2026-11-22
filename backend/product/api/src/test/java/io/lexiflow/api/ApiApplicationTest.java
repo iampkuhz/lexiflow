@@ -3,13 +3,13 @@ package io.lexiflow.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import io.lexiflow.api.captiondebug.CaptionDebugController;
 import io.lexiflow.api.runtime.SoftwareIdentity;
 import io.lexiflow.enrichment.application.caption.EnrichCaptionUseCase;
-import io.lexiflow.enrichment.domain.model.CaptionContext;
+import io.lexiflow.enrichment.domain.model.CaptionIncrementalRequest;
 import io.lexiflow.lexicon.application.port.LexiconPublicationRepository;
 import io.lexiflow.lexicon.application.port.LexiconReadRepository;
 import io.lexiflow.lexicon.application.port.LexiconRepository;
-import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.util.Collection;
@@ -28,6 +28,17 @@ class ApiApplicationTest {
 
   @Test
   void contextLoads() {}
+
+  @Test
+  void captionDisplayDiagnosticsRequireExplicitLocalOptIn() {
+    readOnlyContext.run(
+        context -> assertEquals(0, context.getBeansOfType(CaptionDebugController.class).size()));
+    readOnlyContext
+        .withPropertyValues("lexiflow.caption-debug.enabled=true")
+        .run(
+            context ->
+                assertEquals(1, context.getBeansOfType(CaptionDebugController.class).size()));
+  }
 
   @Test
   void softwareIdentityComesFromEmbeddedBuildResource() throws Exception {
@@ -55,9 +66,17 @@ class ApiApplicationTest {
           assertEquals(0, context.getBeansOfType(LexiconRepository.class).size());
           assertEquals(0, context.getBeansOfType(LexiconPublicationRepository.class).size());
           var result =
-              useCase.enrich(
-                  new CaptionContext(
-                      UUID.randomUUID(), 1, "0".repeat(64), "quasar", 0, "quasar".length()));
+              useCase
+                  .enrichIncrementalMeasured(
+                      new CaptionIncrementalRequest(
+                          List.of(),
+                          new CaptionIncrementalRequest.Snapshot(
+                              List.of(
+                                  new CaptionIncrementalRequest.Group(
+                                      List.of(
+                                          new CaptionIncrementalRequest.Segment(
+                                              "a", "quasar", true, 0)))))))
+                  .result();
 
           assertEquals("合成词条", result.hints().getFirst().chineseGloss());
           assertEquals("9007199254740993", result.hints().getFirst().lexiconEntryId());
@@ -70,13 +89,11 @@ class ApiApplicationTest {
             9007199254740993L,
             UUID.fromString("00000000-0000-0000-0000-000000000002"),
             7,
-            "en",
             "quasar",
-            "quasar",
-            LexiconEntryKind.WORD,
             LexiconHintAction.HINT,
             "合成词条",
-            100);
+            100,
+            null);
     return new LexiconReadRepository() {
       @Override
       public long publishedVersion() {

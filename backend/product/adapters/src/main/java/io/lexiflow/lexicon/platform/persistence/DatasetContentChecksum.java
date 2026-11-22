@@ -6,7 +6,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.HexFormat;
 
-/** 对四个业务词条字段和完整逻辑词形映射计算确定性摘要。 */
+/** 对业务词条字段和完整逻辑词形映射计算确定性摘要。 */
 public final class DatasetContentChecksum {
   private DatasetContentChecksum() {}
 
@@ -21,7 +21,8 @@ public final class DatasetContentChecksum {
     try (var statement = connection.createStatement();
         var rows =
             statement.executeQuery(
-                "SELECT entry_id,lemma,gloss,priority FROM lexicon_entry ORDER BY entry_id")) {
+                "SELECT entry_id,lemma,gloss,priority,bnc_rank,frequency_rank FROM lexicon_entry ORDER BY"
+                    + " entry_id")) {
       while (rows.next()) {
         if (!first[0]) json.append(',');
         first[0] = false;
@@ -29,7 +30,11 @@ public final class DatasetContentChecksum {
         string(json, rows.getString(2));
         json.append(',');
         string(json, rows.getString(3));
-        json.append(',').append(rows.getInt(4)).append(']');
+        json.append(',').append(rows.getInt(4)).append(',');
+        long bnc = rows.getLong(5);
+        json.append(rows.wasNull() ? "null" : Long.toString(bnc)).append(',');
+        long rank = rows.getLong(6);
+        json.append(rows.wasNull() ? "null" : Long.toString(rank)).append(']');
       }
     }
     json.append("],\"forms\":[");
@@ -37,7 +42,8 @@ public final class DatasetContentChecksum {
     try (var statement = connection.createStatement();
         var rows =
             statement.executeQuery(
-                "SELECT normalized_form,entry_id FROM lexicon_lookup ORDER BY normalized_form COLLATE BINARY,entry_id")) {
+                "SELECT normalized_form,entry_id FROM lexicon_lookup ORDER BY normalized_form"
+                    + " COLLATE BINARY,entry_id")) {
       while (rows.next()) {
         if (!first[0]) json.append(',');
         first[0] = false;

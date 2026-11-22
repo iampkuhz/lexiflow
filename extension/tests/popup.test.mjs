@@ -36,10 +36,16 @@ function createDocument() {
           id,
           disabled: id === "enhance-toggle",
           checked: false,
-          hidden: id === "restore-status" || id === "restore-confirmation",
+          hidden: ["restore-status", "restore-confirmation", "connection-form", "connection-status"].includes(id),
           textContent: "",
           dataset: {},
           open: false,
+          attributes: {},
+          children: [],
+          replaceChildren(...children) { this.children = children; },
+          append(...children) { this.children.push(...children); },
+          setAttribute(name, value) { this.attributes[name] = value; },
+          getAttribute(name) { return this.attributes[name] ?? null; },
           focus() { this.focused = true; },
           _listeners: new Map(),
           addEventListener(type, fn) {
@@ -62,6 +68,8 @@ function createDocument() {
       }
       return elements.get(id);
     },
+    createElement(tag) { return { tagName:tag.toUpperCase(), children:[], attributes:{}, dataset:{}, className:"", textContent:"", append(...children){this.children.push(...children);}, setAttribute(name,value){this.attributes[name]=value;} }; },
+    createDocumentFragment() { return { children:[], append(...children){this.children.push(...children);} }; },
   };
 }
 
@@ -70,6 +78,14 @@ function createDocument() {
 function createChrome(behaviour = {}) {
   const chromeObj = {
     _calls: [],
+    _captionStorage: { ...(behaviour.captionStorage ?? {}) },
+    storage: { local: {
+      async get(key) { return { [key]: chromeObj._captionStorage[key] }; },
+      async set(values) {
+        if (behaviour.rejectCaptionSave) throw new Error("storage failure");
+        Object.assign(chromeObj._captionStorage, values);
+      }
+    } },
     _nextResponse: behaviour.readResponse ?? null,
     _reject: !!behaviour.reject,
     _activeTab: Object.hasOwn(behaviour, "activeTab") ? behaviour.activeTab : { id: 42 },
@@ -86,14 +102,16 @@ function createChrome(behaviour = {}) {
         const resp = chromeObj._nextResponse;
         return Promise.resolve(resp);
       },
+      create(options) { chromeObj._calls.push({ method: "create", options: { ...options } }); return Promise.resolve({ id: 100 }); },
     },
-    runtime: { lastError: null, getManifest() { return { version_name: "1.2.3" }; }, sendMessage(message) {
+    runtime: { lastError: null, getURL(path) { return `chrome-extension://synthetic/${path}`; }, getManifest() { return { version_name: "1.2.3" }; }, sendMessage(message) {
       chromeObj._calls.push({ method: "runtime.sendMessage", message: { ...message } });
+      if (message.type === "backend-connection") return behaviour.apply?.(message);
       if (message.type === "runtime-status") {
         if (behaviour.statusReject) return Promise.reject(new Error("status unavailable"));
-        return Promise.resolve(behaviour.statusResponse ?? {ok:true,status:{softwareVersion:"1.2.3",apiContract:"caption-hints.v2",mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null,publishedDataset:null}});
+        return Promise.resolve(behaviour.statusResponse ?? {ok:true,status:{softwareVersion:"1.2.3",apiContract:"caption-hints.v4",mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null,publishedDataset:null}});
       }
-      return behaviour.preferenceResponse !== undefined ? Promise.resolve(behaviour.preferenceResponse) : Promise.resolve({ ok: true, entryKeys: [] });
+      return behaviour.preferenceResponse !== undefined ? Promise.resolve(behaviour.preferenceResponse) : Promise.resolve({ ok: true, commonWordCutoff: 1500, hiddenCount: 2 });
     } },
   };
   return chromeObj;
@@ -105,6 +123,8 @@ function makeContext(doc, chrome) {
   const ctx = {
     document: doc,
     chrome,
+    navigator: { clipboard: { async writeText(text) { ctx.copiedText = text; } } },
+    URL, URLSearchParams,
     console: { log() {}, error() {}, warn() {} },
     Promise,
     Event,
@@ -153,16 +173,17 @@ test("popup dist exists", () => {
 test("checkbox starts disabled in HTML", () => {
   const html = readFileSync(resolve(import.meta.dirname, "../dist/popup.html"), "utf8");
   assert.match(html, /<input[^>]*id="enhance-toggle"[^>]*role="switch"[^>]*disabled/);
-  assert.match(html, /summary>提示偏好 · 仅本机</);
-  assert.match(html, /点击中文可不再提示；仅本机、对应词库版本有效/);
+  assert.doesNotMatch(html, /id="cutoff-summary"/);
+  assert.doesNotMatch(html, /id="common-word-cutoff"/);
+  assert.match(html, /id="open-manage"/);
   assert.match(readFileSync(resolve(import.meta.dirname, "../dist/popup.css"), "utf8"), /light-dark\(/);
 });
 
-test("popup branding and manifest icon assets are packaged without added permissions", () => {
+test("popup branding and manifest icon assets are packaged with local settings storage only", () => {
   const html = readFileSync(resolve(import.meta.dirname, "../dist/popup.html"), "utf8");
   const manifest = JSON.parse(readFileSync(resolve(import.meta.dirname, "../dist/manifest.json"), "utf8"));
   assert.match(html, /src="assets\/logo\.svg"/);
-  assert.match(html, /summary>提示偏好 · 仅本机</);
+  assert.match(html, /打开管理页/);
   for (const size of [16, 32, 48, 128]) {
     const icon = readFileSync(resolve(import.meta.dirname, `../dist/assets/icon-${size}.png`));
     assert.equal(icon.subarray(1, 4).toString(), "PNG");
@@ -172,6 +193,7 @@ test("popup branding and manifest icon assets are packaged without added permiss
   assert.deepEqual(manifest.permissions, ["storage"]);
   assert.deepEqual(Object.keys(manifest.icons).map(Number).sort((a, b) => a - b), [16, 32, 48, 128]);
   assert.deepEqual(manifest.action.default_icon, {"16":"assets/icon-16.png","32":"assets/icon-32.png"});
+  assert.equal(manifest.options_page, "manage.html");
 });
 
 test("read success enables checkbox with correct state", async () => {
@@ -325,6 +347,18 @@ test("read sends correct message shape", async () => {
   assert.equal(readCall.message.action, "read");
 });
 
+test("popup only reads runtime status and launches management with the acknowledged tab and page key", async () => {
+  for (const readResponse of [null, {ok:true,enabled:true,pageKey:"video-page-1"}]) {
+    const {doc,chrome}=freshSetup({readResponse}); await flush();
+    doc.getElementById("open-manage").dispatchEvent(new Event("click")); await flush();
+    const calls=chrome._calls;
+    assert.deepEqual(calls.filter(x=>x.method==="runtime.sendMessage").map(x=>x.message.type),["runtime-status"]);
+    assert.deepEqual(calls.filter(x=>x.method==="sendMessage").map(x=>x.message.type),["page-enhancement"]);
+    assert.equal(calls.find(x=>x.method==="create").options.url,
+      "chrome-extension://synthetic/manage.html"+(readResponse ? "#tab=42&page=video-page-1" : ""));
+  }
+});
+
 test('malformed read success is not accepted as a valid page state',async()=>{
  for(const readResponse of [{ok:true},{ok:true,enabled:'true',pageKey:'p'},{ok:true,enabled:true,pageKey:''}]){
   const {doc}=freshSetup({readResponse});await flush();
@@ -354,51 +388,10 @@ test('set state follows a valid same-pageKey acknowledgement even if it differs 
  assert.equal(cb.checked,false);assert.equal(doc.getElementById('page-status').textContent,'已关闭 · 保留英文');
 });
 
-test('restore requires explicit confirmation and reports only empty success receipt',async()=>{
- const {doc,chrome}=freshSetup({readResponse:{ok:true,enabled:false,pageKey:'restore-page'}});await flush();
- const details=doc.getElementById('preferences');details.open=true;
- doc.getElementById('restore-start').dispatchEvent(new Event('click'));
- assert.equal(doc.getElementById('restore-confirmation').hidden,false);
- doc.getElementById('restore-cancel').dispatchEvent(new Event('click'));await flush();
- assert.equal(doc.getElementById('restore-confirmation').hidden,true);assert.equal(chrome._calls.some(call=>call.method==='runtime.sendMessage'&&call.message.type==='local-preferences'),false);
- doc.getElementById('restore-start').dispatchEvent(new Event('click'));
- doc.getElementById('restore-confirm').dispatchEvent(new Event('click'));
- assert.equal(doc.getElementById('restore-confirm').disabled,true);
- assert.equal(doc.getElementById('restore-cancel').disabled,true);
- assert.equal(doc.getElementById('restore-start').disabled,true);
- doc.getElementById('restore-confirm').dispatchEvent(new Event('click'));
- await flush();assert.equal(doc.getElementById('restore-status').dataset.kind,'success');
- assert.equal(doc.getElementById('restore-status').textContent,'已恢复全部提示偏好。');
- assert.equal(details.open,true,'success feedback remains visible inside the expanded details');
- assert.deepEqual(chrome._calls.find(call=>call.method==='runtime.sendMessage'&&call.message.type==='local-preferences').message,{type:'local-preferences',action:'restore-all'});
- assert.equal(chrome._calls.filter(call=>call.method==='runtime.sendMessage'&&call.message.type==='local-preferences').length,1,'duplicate confirm cannot dispatch twice');
-});
-
-test('restore malformed, non-empty, or failed receipt never claims success',async()=>{
- for(const preferenceResponse of [null,{ok:true},{ok:true,entryKeys:['x']},{ok:true,entryKeys:['x',3]},{ok:false,reason:'storage'}]){
-  const {doc}=freshSetup({readResponse:{ok:true,enabled:false,pageKey:'restore-fail'},preferenceResponse});await flush();
-  doc.getElementById('restore-start').dispatchEvent(new Event('click'));
-  doc.getElementById('restore-confirm').dispatchEvent(new Event('click'));await flush();
-  assert.equal(doc.getElementById('restore-status').dataset.kind,'error');
- }
-});
-
-test('restore failure is independent from later successful page toggle',async()=>{
- const {doc,chrome}=freshSetup({readResponse:{ok:true,enabled:false,pageKey:'independent'}});await flush();
- chrome.runtime.sendMessage=async()=>({ok:false,reason:'storage'});
- doc.getElementById('restore-start').dispatchEvent(new Event('click'));
- doc.getElementById('restore-confirm').dispatchEvent(new Event('click'));await flush();
- assert.equal(doc.getElementById('restore-status').dataset.kind,'error');
- chrome._nextResponse={ok:true,enabled:true,pageKey:'independent'};
- const toggle=doc.getElementById('enhance-toggle');toggle.checked=true;toggle.dispatchEvent(new Event('change'));await flush();
- assert.equal(doc.getElementById('restore-status').dataset.kind,'error');
- assert.equal(doc.getElementById('page-status').textContent,'已开启 · 英文优先');
-});
-
 test('service status renders formal readiness, degraded warmup, demo, missing data, dependency and schema states',async()=>{
  const dataset={releaseId:'release-1',preparationId:'prep-1',ruleId:'rules-1',sqlVersion:'4',sha256:'a'.repeat(64)};
  const cases=[
-  [{mode:'formal',ready:true,reason:'OK',datasetVersion:7,publishedDataset:dataset},'正式就绪。',false],
+  [{mode:'formal',ready:true,reason:'OK',datasetVersion:7,publishedDataset:dataset},'',false],
   [{mode:'formal',ready:true,reason:'PREWARM_DEGRADED',datasetVersion:7,publishedDataset:dataset},'正式就绪 · 预热降级，服务可用。',false],
   [{mode:'formal',ready:false,reason:'INITIALIZING',datasetVersion:null,publishedDataset:null},'服务正在初始化发布资料…',false],
   [{mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null,publishedDataset:null},'演示模式 · 非正式就绪',false],
@@ -408,57 +401,44 @@ test('service status renders formal readiness, degraded warmup, demo, missing da
   [{mode:'formal',ready:false,reason:'SCHEMA_MISMATCH',datasetVersion:null,publishedDataset:null},'资料结构不匹配，请使用匹配的服务与资料。',false]
  ];
  for(const [state,expected] of cases){
-  const value={softwareVersion:'1.2.3',apiContract:'caption-hints.v2',...state};
+  const value={softwareVersion:'1.2.3',apiContract:'caption-hints.v4',...state};
   const {doc}=freshSetup({statusResponse:{ok:true,status:value}});await flush();
   assert.equal(doc.getElementById('service-status').textContent,expected);
-  assert.equal(doc.getElementById('service-identity').hidden,false);
-  assert.match(doc.getElementById('service-identity').textContent,/软件 1\.2\.3 · 协议 caption-hints\.v2/u);
-  assert.ok(doc.getElementById('service-identity').textContent.includes(state.datasetVersion===null?'未知':String(state.datasetVersion)));
+
  }
 });
 
 test('protocol mismatch and unreachable states are fixed safe messages and hide untrusted identity',async()=>{
  const mismatch=freshSetup({statusResponse:{ok:false,reason:'protocol-mismatch'}});await flush();
- assert.equal(mismatch.doc.getElementById('service-status').textContent,'协议不匹配，请使用匹配的扩展与服务版本。');
- assert.equal(mismatch.doc.getElementById('service-identity').hidden,true);
+ assert.equal(mismatch.doc.getElementById('service-status').textContent,'接口版本不匹配，请更新扩展或后端。');
  const unreachable=freshSetup({statusReject:true,readResponse:{ok:true,enabled:false,pageKey:'page'}});await flush();
  assert.equal(unreachable.doc.getElementById('service-status').textContent,'无法连接服务，请检查后端是否启动。');
- assert.equal(unreachable.doc.getElementById('service-identity').hidden,true);
  assert.equal(unreachable.doc.getElementById('enhance-toggle').disabled,false,'status failure does not disable page controls');
  assert.equal(unreachable.doc.getElementById('enhance-toggle').checked,false);
 });
 
-test('a runtime software version different from the extension build is rejected visibly',async()=>{
- const {doc}=freshSetup({statusResponse:{ok:false,reason:'software-version'}});await flush();
- assert.equal(doc.getElementById('service-status').textContent,'软件版本不匹配，请安装与服务对应的扩展。');
-});
-
-test('an unverified or incompatible dataset binding is clearly rejected',async()=>{
- const missing=freshSetup({statusResponse:{ok:false,reason:'binding-missing'}});await flush();
- assert.match(missing.doc.getElementById('service-status').textContent,/缺少发行资料绑定/u);
- const mismatch=freshSetup({statusResponse:{ok:false,reason:'dataset-identity'}});await flush();
- assert.match(mismatch.doc.getElementById('service-status').textContent,/资料身份不匹配/u);
+test('server-reported publication and schema failures remain visible',async()=>{
+ const base={softwareVersion:'1.2.4',apiContract:'caption-hints.v4',mode:'formal',ready:false,datasetVersion:null,publishedDataset:null};
+ const identity=freshSetup({statusResponse:{ok:true,status:{...base,reason:'IDENTITY_MISMATCH'}}});await flush();
+ assert.match(identity.doc.getElementById('service-status').textContent,/服务发行资料身份校验失败/u);
  const invalid=freshSetup({statusResponse:{ok:false,reason:'invalid-response'}});await flush();
  assert.match(invalid.doc.getElementById('service-status').textContent,/服务\/API合同不兼容/u);
 });
 
-test('status lookup failure leaves page enhancement and local preference controls usable',async()=>{
+test('status lookup failure leaves page enhancement usable and displays configured target as disconnected',async()=>{
  const {doc,chrome}=freshSetup({statusReject:true,readResponse:{ok:true,enabled:false,pageKey:'independent-page'}});await flush();
  const toggle=doc.getElementById('enhance-toggle');assert.equal(toggle.disabled,false);
  chrome._nextResponse={ok:true,enabled:true,pageKey:'independent-page'};
  toggle.checked=true;toggle.dispatchEvent(new Event('change'));await flush();
  assert.equal(toggle.checked,true);
- const details=doc.getElementById('preferences');details.open=true;
- doc.getElementById('restore-start').dispatchEvent(new Event('click'));
- doc.getElementById('restore-confirm').dispatchEvent(new Event('click'));await flush();
- assert.equal(doc.getElementById('restore-status').dataset.kind,'success');
- assert.equal(chrome._calls.some(call=>call.message?.type==='local-preferences'&&call.message.action==='restore-all'),true);
+ assert.match(doc.getElementById('backend-target').textContent,/^○ 未连接 127\.0\.0\.1:\d+$/u);
+ assert.equal(chrome._calls.some(call=>call.message?.type==='local-preferences'&&call.message.action==='setCutoff'),false);
 });
 
  test("non-video page explains navigation instead of refresh", async () => {
   const {doc} = freshSetup({readResponse:{ok:false,reason:"not-video-page"}});
   await flush();
-  assert.match(doc.getElementById("page-status").textContent, /请打开 YouTube 视频播放页/);
+  assert.match(doc.getElementById("page-status").textContent, /打开 YouTube 视频即可使用/u);
   assert.equal(doc.getElementById("enhance-toggle").disabled, true);
  });
  test("disabled controls never use a perpetual waiting cursor", () => {
@@ -474,7 +454,59 @@ test('status lookup failure leaves page enhancement and local preference control
   ctx.clearTimeout=()=>{};
   loadPopup(ctx); fireReady(doc); await flush();
   timers.forEach(fn=>fn()); await flush();
-  assert.match(doc.getElementById("page-status").textContent,/当前页面不可用/);
+  assert.match(doc.getElementById("page-status").textContent,/打开 YouTube 视频即可使用/u);
   late({ok:true,enabled:true,pageKey:"late"}); await flush();
   assert.equal(doc.getElementById("enhance-toggle").disabled,true);
  });
+
+
+test('packaged popup includes no default hidden features or disclosure controls',()=>{
+ const html=readFileSync(resolve(import.meta.dirname,'../dist/popup.html'),'utf8');
+ assert.match(html,/<main>\s*<section id="page-section"/u);
+ assert.doesNotMatch(html,/<details\b|aria-expanded=|\s+hidden(?:\s|>)|<dialog\b|<form\b|id="(?:vocabulary|copy-diagnostics|cutoff-summary|connection-url)"/u);
+ assert.deepEqual([...html.matchAll(/<button\b[^>]*id="([^"]+)"/gu)].map(match=>match[1]),["open-manage"]);
+ assert.deepEqual([...html.matchAll(/<input\b[^>]*id="([^"]+)"|<select\b[^>]*id="([^"]+)"/gu)].map(match=>match[1]??match[2]),
+   ["enhance-toggle","caption-line-limit"]);
+});
+test('healthy service connection is one line and normal page state is conveyed by the switch',async()=>{
+ const status={softwareVersion:'1.2.3',apiContract:'caption-hints.v4',mode:'formal',ready:true,reason:'OK',datasetVersion:7,publishedDataset:{releaseId:'r',preparationId:'p',ruleId:'rules',sqlVersion:'4',sha256:'a'.repeat(64)}};
+ for(const enabled of [true,false]){
+  const {doc}=freshSetup({statusResponse:{ok:true,status},readResponse:{ok:true,enabled,pageKey:'p'}});await flush();
+  assert.match(doc.getElementById('backend-target').textContent,/^● 已连接 127\.0\.0\.1:\d+$/u);
+  assert.equal(doc.getElementById('service-status').textContent,'');
+  assert.equal(doc.getElementById('page-status').textContent,enabled?'':'已关闭 · 保留英文');
+  assert.equal(doc.getElementById('enhance-toggle').checked,enabled);
+  assert.equal(doc.getElementById('enhance-toggle').disabled,false);
+ }
+});
+test('popup explicitly inherits its readable font instead of native extension body scaling',()=>{
+ const css=readFileSync(resolve(import.meta.dirname,'../src/popup.css'),'utf8');
+ assert.match(css,/body\s*\{[^}]*font:inherit/u);
+ assert.match(css,/font:\s*13px\/1\.45/u);
+ assert.doesNotMatch(css,/body[^}]*overflow:\s*hidden/u);
+});
+
+test("caption line limit defaults to three; saves only the local numeric choice", async () => {
+ const { doc, chrome } = freshSetup();
+ await flush();
+ const select = doc.getElementById("caption-line-limit");
+ assert.equal(select.value, "3");
+ assert.equal(select.disabled, false);
+ const calls = chrome._calls.length;
+ select.value = "4"; select.dispatchEvent(new Event("change"));
+ await flush();
+ assert.equal(select.value, "4");
+ assert.deepEqual(chrome._captionStorage, { captionLineLimit: 4 });
+ assert.equal(chrome._calls.length, calls);
+});
+test("caption line limit loads saved value and restores it after a failed save", async () => {
+ const { doc, chrome } = freshSetup({ captionStorage: { captionLineLimit: 2 }, rejectCaptionSave: true });
+ await flush();
+ const select = doc.getElementById("caption-line-limit");
+ assert.equal(select.value, "2");
+ select.value = "4"; select.dispatchEvent(new Event("change"));
+ await flush();
+ assert.equal(select.value, "2");
+ assert.deepEqual(chrome._captionStorage, { captionLineLimit: 2 });
+ assert.match(doc.getElementById("caption-line-status").textContent, /保存失败/u);
+});

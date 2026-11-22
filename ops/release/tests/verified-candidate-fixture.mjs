@@ -27,6 +27,11 @@ async function makeFixture(baseVersion = '2.0.0', proofBridge = false) {
       await writeFile(path.join(root, 'ops/release', name), await readFile(path.join(repoRoot, 'ops/release', name)));
     }
     if (proofBridge) {
+      for (const name of ['extension/scripts/build/extension-build-settings.mjs', 'extension/manifest.json', 'ops/podman/loopback-ports.mjs']) {
+        const target = path.join(root, name);
+        await mkdir(path.dirname(target), { recursive: true });
+        await cp(path.join(repoRoot, name), target);
+      }
       for (const entry of await (await import('node:fs/promises')).readdir(path.join(repoRoot, 'ops/release/integrity'), { withFileTypes: true })) {
         if (entry.isFile() && entry.name.endsWith('.mjs')) {
           await writeFile(path.join(root, 'ops/release/integrity', entry.name), await readFile(path.join(repoRoot, 'ops/release/integrity', entry.name)));
@@ -64,7 +69,7 @@ async function makeFixture(baseVersion = '2.0.0', proofBridge = false) {
       await hashFile(noticePath, notice, [id]);
     }
     const dataset = { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rules-test' };
-    const sqlVersion = 'sql-test'; const apiContract = 'caption-hints.v2';
+    const sqlVersion = 'sql-test'; const apiContract = 'caption-hints.v4';
     const dataBytes = Buffer.from('synthetic published dataset'); const dataSha = hash(dataBytes);
     const dataPath = 'data/dataset.bin'; await mkdir(path.dirname(path.join(artifactRoot, dataPath)), { recursive: true });
     await writeFile(path.join(artifactRoot, dataPath), dataBytes);

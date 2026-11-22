@@ -56,11 +56,6 @@ def parse(text):
     return outside, diagrams, errors
 
 
-def anchors(text):
-    """收集文档内可引用锚点并识别重复或失效定义。"""
-    return anchors_from_parsed(parse(text))
-
-
 class DocIndex:
     """仅本轮存活的文档解析与锚点索引，目标文档按需读取一次。"""
 

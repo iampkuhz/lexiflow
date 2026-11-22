@@ -33,12 +33,27 @@ val generateSoftwareIdentity = tasks.register<GenerateSoftwareIdentityTask>("gen
     manifestFile.set(layout.buildDirectory.file("generated/software-identity-manifest/MANIFEST.MF"))
 }
 
+tasks.register<JavaExec>("storageContract") {
+    dependsOn(tasks.named("compileJava"))
+    mainClass.set("io.lexiflow.api.deployment.StorageContract")
+    classpath = sourceSets["main"].output.classesDirs + configurations["runtimeClasspath"]
+    args(repositoryRoot.resolve("infra/sqlite/schema.sql"), repositoryRoot.resolve("infra/sqlite/preferences.sql"))
+}
+
 tasks.named<ProcessResources>("processResources") {
+    from(repositoryRoot.resolve("contracts/versions.lock.json")) {
+        into("META-INF")
+        rename { "lexiflow-contracts.json" }
+    }
     from(generateDataGeneration.flatMap { it.outputDirectory })
     from(generateSoftwareIdentity.flatMap { it.outputDirectory })
     from(repositoryRoot.resolve("infra/sqlite/schema.sql")) {
         into("META-INF")
         rename { "lexiflow-schema.sql" }
+    }
+    from(repositoryRoot.resolve("infra/sqlite/preferences.sql")) {
+        into("META-INF")
+        rename { "lexiflow-preferences-schema.sql" }
     }
 }
 
@@ -69,6 +84,7 @@ tasks.named<BootJar>("bootJar") {
 tasks.withType<Test>().configureEach {
     dependsOn(generateSoftwareIdentity)
     systemProperty("lexiflow.repository.root", repositoryRoot.absolutePath)
+    systemProperty("lexiflow.preferences.schema.file", File(repositoryRoot, "infra/sqlite/preferences.sql").absolutePath)
     jvmArgumentProviders.add(objects.newInstance(IdentityVersionArgumentProvider::class.java).apply {
         identityVersionFile.set(generatedVersionFile)
     })

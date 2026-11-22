@@ -1,5 +1,6 @@
 services:
   api:
+    container_name: lexiflow-test
     labels:
       lexiflow.slot: source
       lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
@@ -15,8 +16,10 @@ services:
     ports: ["127.0.0.1:18081:8080"]
     environment:
       SPRING_DATASOURCE_URL: jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro
+      LEXIFLOW_PREFERENCES_JDBC_URL: jdbc:sqlite:/var/lib/lexiflow/preferences/preferences.db
     volumes:
       - ${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro
+      - lexiflow-preferences:/var/lib/lexiflow/preferences
     networks: [published]
     read_only: true
     cap_drop: [ALL]
@@ -30,6 +33,12 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+
+volumes:
+  lexiflow-preferences:
+    name: lexiflow-${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}_preferences
+    labels:
+      lexiflow.installation: ${LEXIFLOW_INSTALLATION_ID:?LEXIFLOW_INSTALLATION_ID is required}
 
 networks:
   published:

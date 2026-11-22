@@ -110,7 +110,7 @@ class GradleReportContractTest(unittest.TestCase):
             / "backend/product/api/src/main/java/io/lexiflow/api/captiondebug/CaptionDebugController.java"
         ).read_text(encoding="utf-8")
         self.assertIn("${lexiflow.segment-analysis.enabled:false}", api)
-        self.assertIn("${lexiflow.caption-debug.enabled:true}", debug)
+        self.assertIn('@ConditionalOnProperty(name = "lexiflow.caption-debug.enabled", havingValue = "true")', debug)
 
     def test_configuration_phase_does_not_call_node(self):
         source = ROOT_BUILD.read_text(encoding="utf-8")

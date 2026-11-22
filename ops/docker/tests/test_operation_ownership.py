@@ -101,7 +101,7 @@ class OperationOwnershipTest(unittest.TestCase):
             + "\n"
             'LF_ROOT="$LF_TEST_ROOT" LF_RELEASE_ROOT="$LF_TEST_RELEASE" LF_COMPOSE_PATH=compose.yaml '
             "LF_API_ARCHIVE=api.tar\n"
-            'case "$2" in stop) lf_docker_stop;; cleanup) lf_operation_temp_cleanup;; '
+            'case "$2" in stop) lf_docker_stop;; cleanup) lf_operation_temp_cleanup;; remove) lf_docker_remove;; '
             'health) lf_wait_healthy "$3";; prep) lf_docker_prepare;; start) lf_docker_start;; '
             'rmtemp) lf_operation_remove_temp "$3";; esac\n'
         )
@@ -217,7 +217,7 @@ exit "$status"
             return
         _terminate_owned_group(process)
 
-    def write_state(self, mode="ok"):
+    def write_state(self, mode="ok", preferences=False):
         records = [
             {"kind": "container", "id": "d" * 64, "name": PROJECT + "-api-1", "running": True, "health": "healthy"},
             {"kind": "container", "id": "e" * 64, "name": PROJECT + "-candidate", "running": True, "health": "healthy"},
@@ -226,6 +226,9 @@ exit "$status"
         ]
         if mode in ("fresh", "post-create-owner"):
             records = []
+        if preferences:
+            records.append({"kind": "volume", "id": "lexiflow-" + INSTALL + "_preferences",
+                            "name": "lexiflow-" + INSTALL + "_preferences", "installation": INSTALL})
         self.state.write_text(json.dumps({"records": records, "mode": mode}))
         self.log.unlink(missing_ok=True)
         (self.root / "lock-owned").touch()
@@ -263,10 +266,14 @@ if a[0]=='compose':
    add('container','4'*64,PROJECT+'-api-1')
    add('network','3'*64,PROJECT+'_private')
    add('volume',PROJECT+'_lexiflow-data',PROJECT+'_lexiflow-data')
+   add('volume','lexiflow-'+INSTALL+'_preferences','lexiflow-'+INSTALL+'_preferences')
+   next(x for x in records if x['kind']=='volume' and x['name']=='lexiflow-'+INSTALL+'_preferences')['installation']=INSTALL
  elif tail and tail[0]=='run' and tail[-1]=='api':
   add('container','7'*64,PROJECT+'-candidate')
   add('network','3'*64,PROJECT+'_private')
   add('volume',PROJECT+'_lexiflow-data',PROJECT+'_lexiflow-data')
+  add('volume','lexiflow-'+INSTALL+'_preferences','lexiflow-'+INSTALL+'_preferences')
+  next(x for x in records if x['kind']=='volume' and x['name']=='lexiflow-'+INSTALL+'_preferences')['installation']=INSTALL
   if mode=='post-create-owner': data['poisoned']=True
  s.write_text(json.dumps(data)); sys.exit(0)
 kind=a[0]
@@ -297,7 +304,9 @@ if kind=='inspect' or (kind in ('container','network','volume') and a[1]=='inspe
   if mode=='lock-lost' and rec['kind']=='volume': Path(LOCK).unlink(missing_ok=True)
   seen=sum(1 for line in log.read_text().splitlines()
            if json.loads(line)[:2]==['container','inspect'] and rec['id'] in json.loads(line)[4:])
-  owner='wrong' if (mode=='wrong-owner' and rec['kind']=='volume') or (mode=='late-owner' and seen>=2 and rec['name'].endswith('-candidate')) else INSTALL
+  owner='wrong' if ((mode=='wrong-owner' and rec['kind']=='volume') or
+                    (mode=='preferences-wrong-owner' and rec['name'].endswith('_preferences')) or
+                    (mode=='late-owner' and seen>=2 and rec['name'].endswith('-candidate'))) else rec.get('installation', INSTALL)
   if data.get('poisoned'): owner='wrong'
   if batched and mode=='batch-wrong-middle-owner' and ident==targets[1]: owner='wrong'
   fmt=a[a.index('--format')+1]
@@ -308,6 +317,7 @@ if kind=='inspect' or (kind in ('container','network','volume') and a[1]=='inspe
    if mode=='stop-replaced' and rec['id']=='e'*64:
     rec['id']='9'*64; s.write_text(json.dumps(data))
   elif rec['kind']=='container': print('|'.join([rec['id'],'/'+rec['name'],PROJECT,owner,RELEASE]))
+  elif rec['kind']=='volume' and rec['name'].endswith('_preferences'): print('|'.join([rec['name'],owner]))
   else: print('|'.join([rec['id'],rec['name'],PROJECT,owner,RELEASE]))
  if batched and mode=='batch-partial-failure': sys.exit(3)
  sys.exit(0)
@@ -333,11 +343,17 @@ if kind in ('container','network','volume'):
   data['records']=[r for r in data['records'] if r['id']!=a[-1]]
   if mode=='replace' and a[-1]=='e'*64: data['records'].append({'kind':'container','id':'1'*64,'name':PROJECT+'-candidate','running':False,'health':'healthy'})
   s.write_text(json.dumps(data)); sys.exit(0)
+ if action=='rm' and kind=='volume':
+  data['records']=[r for r in data['records'] if r['id']!=a[-1]]
+  s.write_text(json.dumps(data)); sys.exit(0)
 sys.exit(9)
 """
 
     def run_case(self, mode, op, name=None, timeout=12):
         self.write_state(mode)
+        return self.run_current_case(op, name, timeout)
+
+    def run_current_case(self, op, name=None, timeout=12):
         engine = self.installation / "engine"
         engine.write_text(
             "schema=lexiflow-engine-v1\nendpoint=unix:///fake.sock\ndaemon_id=synthetic-daemon-id\n"
@@ -467,7 +483,7 @@ sys.exit(9)
                 for r in json.loads(self.state.read_text())["records"]
             )
         )
-        result = self.run_case("ok", "start", timeout=60)
+        result = self.run_current_case("start", timeout=60)
         self.assertEqual(result.returncode, 0, (result.stderr, self.commands()[-12:]))
         compose = [c for c in self.commands() if c and c[0] == "compose"]
         self.assertEqual(
@@ -481,6 +497,36 @@ sys.exit(9)
                 for r in json.loads(self.state.read_text())["records"]
             )
         )
+
+    def test_first_prepare_and_start_keep_the_same_installation_preferences_volume(self):
+        result = self.run_case("fresh", "prep", timeout=60)
+        self.assertEqual(result.returncode, 0, (result.stderr, self.commands()))
+        preference_name = "lexiflow-" + INSTALL + "_preferences"
+        records = json.loads(self.state.read_text())["records"]
+        self.assertIn(preference_name, {r["name"] for r in records})
+        self.assertEqual(next(r for r in records if r["name"] == preference_name)["installation"], INSTALL)
+        result = self.run_current_case("start", timeout=60)
+        self.assertEqual(result.returncode, 0, (result.stderr, self.commands()[-12:]))
+        records = json.loads(self.state.read_text())["records"]
+        self.assertEqual(sum(r["name"] == preference_name for r in records), 1)
+        self.assertIn(PROJECT + "_lexiflow-data", {r["name"] for r in records})
+
+    def test_wrong_installation_preferences_volume_refuses_before_compose(self):
+        self.write_state("preferences-wrong-owner", preferences=True)
+        result = self.run_current_case("prep")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any(c and c[0] == "compose" for c in self.commands()))
+        self.assertIn("lexiflow-" + INSTALL + "_preferences",
+                      {r["name"] for r in json.loads(self.state.read_text())["records"]})
+
+    def test_removal_preserves_owned_preferences_volume_but_removes_release_volume(self):
+        self.write_state("ok", preferences=True)
+        result = self.run_current_case("remove", timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        names = {r["name"] for r in json.loads(self.state.read_text())["records"]}
+        self.assertEqual(names, {"lexiflow-" + INSTALL + "_preferences"})
+        self.assertFalse(any(c[:2] == ["volume", "rm"] and c[-1].endswith("_preferences")
+                             for c in self.commands()))
 
     def test_wrong_owner_and_discovery_failure_have_zero_mutations(self):
         for mode in (

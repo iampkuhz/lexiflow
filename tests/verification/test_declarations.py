@@ -1,7 +1,7 @@
 """Tests for scripts.verification.planning.check_definitions.
 
 Covers: YAML loading, schema validation, required fields, duplicate
-check IDs, invalid commands, scope filtering, check ID filtering.
+check IDs, invalid commands, scope filtering.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ import yaml
 
 from scripts.verification.planning.check_definitions import (
     DeclarationError,
-    filter_checks_by_ids,
     filter_checks_by_scope,
     load_declarations,
 )
@@ -429,20 +428,6 @@ class TestFilterChecksByScope(unittest.TestCase):
         self.assertEqual(len(checks), 24)
         self.assertEqual(len(filter_checks_by_scope(checks, "repository-baseline")), 20)
         self.assertEqual(len(filter_checks_by_scope(checks, "change-targeted")), 23)
-
-
-class TestFilterChecksByIds(unittest.TestCase):
-    def test_no_filter_returns_all(self):
-        checks = [{"check_id": "a"}, {"check_id": "b"}]
-        result = filter_checks_by_ids(checks, None)
-        self.assertEqual(len(result), 2)
-
-    def test_filter_by_ids(self):
-        checks = [{"check_id": "a"}, {"check_id": "b"}, {"check_id": "c"}]
-        result = filter_checks_by_ids(checks, ["a", "c"])
-        self.assertEqual(len(result), 2)
-        ids = {c["check_id"] for c in result}
-        self.assertEqual(ids, {"a", "c"})
 
 
 if __name__ == "__main__":

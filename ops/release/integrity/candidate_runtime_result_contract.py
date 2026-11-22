@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 from typing import Any
 
 PHASE_IDS = (
@@ -187,7 +189,7 @@ def validate_runtime_result(value: Any) -> None:
             not isinstance(api, dict)
             or set(api) != api_fields
             or api.get("softwareVersion") != target["buildIdentity"]["softwareVersion"]
-            or api.get("apiContract") != "caption-hints.v2"
+            or api.get("apiContract") != _current_api_contract()
             or api.get("mode") != "formal"
             or type(api.get("datasetVersion")) is not int
             or api["datasetVersion"] <= 0
@@ -218,3 +220,14 @@ def validate_runtime_result(value: Any) -> None:
         "unknownResourcesUntouched": True,
     }:
         fail("candidate-runtime-assertions-invalid")
+
+
+def _current_api_contract() -> str:
+    root = Path(__file__).resolve().parents[3]
+    raw = (root / "contracts/versions.lock.json").read_bytes()
+    if len(raw) > 2048:
+        raise ValueError("contract lock exceeds budget")
+    number = json.loads(raw)["extension-api"]["version"]
+    if type(number) is not int or not 1 <= number <= 999_999_999:
+        raise ValueError("invalid API contract")
+    return f"caption-hints.v{number}"

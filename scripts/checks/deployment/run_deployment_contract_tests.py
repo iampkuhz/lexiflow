@@ -468,15 +468,6 @@ def _top_slow(per_test: dict[str, float], limit: int = 10) -> list[dict[str, flo
     ]
 
 
-def _lane_class_ids(suite: unittest.TestSuite) -> list[str]:
-    wanted = {"test_contract.DockerContractTest", "test_lifecycle_flow.FlowTests"}
-    return [
-        case.id()
-        for case in _iter_cases(suite)
-        if case.id().rsplit(".", 1)[0] in wanted
-    ]
-
-
 def _lane_partition(
     suite: unittest.TestSuite,
 ) -> tuple[list[unittest.TestCase], list[unittest.TestCase]]:

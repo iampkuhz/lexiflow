@@ -312,7 +312,7 @@ def produce_candidates(
             or set(result)
             != {"candidates", "datasets", "softwareVersion", "apiContract"}
             or result["softwareVersion"] != version
-            or result["apiContract"] != "caption-hints.v2"
+            or result["apiContract"] != "caption-hints.v4"
             or result["datasets"]
             != [
                 {"version": row["datasetVersion"], "sha256": row["sha256"]}

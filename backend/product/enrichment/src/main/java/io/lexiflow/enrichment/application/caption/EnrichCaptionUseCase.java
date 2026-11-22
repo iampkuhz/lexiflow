@@ -1,9 +1,6 @@
 package io.lexiflow.enrichment.application.caption;
 
-import io.lexiflow.enrichment.application.caption.model.MeasuredCaptionResult;
 import io.lexiflow.enrichment.application.caption.model.MeasuredIncrementalCaptionResult;
-import io.lexiflow.enrichment.domain.model.CaptionContext;
-import io.lexiflow.enrichment.domain.model.CaptionHintResult;
 import io.lexiflow.enrichment.domain.model.CaptionIncrementalRequest;
 import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
 import io.lexiflow.lexicon.domain.model.LexiconLookupResult;
@@ -41,39 +38,6 @@ public final class EnrichCaptionUseCase {
     this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
     this.lexiconCatalog = Objects.requireNonNull(lexiconCatalog, "lexiconCatalog");
     this.hintPolicy = Objects.requireNonNull(hintPolicy, "hintPolicy");
-  }
-
-  /**
-   * 对一段已定位英文字幕形成不阻塞的快速提示结果。
-   *
-   * @param context 含义：内容修订绑定的字幕上下文。取值范围：非空，且必须通过其值对象校验。
-   * @return READY 或 NO_PENDING 的确定性结果。
-   */
-  public CaptionHintResult enrich(CaptionContext context) {
-    return enrichMeasured(context).result();
-  }
-
-  /**
-   * 查询和规则分别计时，返回给组合根观测；领域不依赖指标框架。
-   *
-   * @param context 含义：已定位字幕上下文。取值范围：非空且范围有效。
-   * @return 确定性结果、候选数量与同一单调时钟下的查询和规则耗时。
-   */
-  public MeasuredCaptionResult enrichMeasured(CaptionContext context) {
-    Objects.requireNonNull(context, "context");
-    var started = nanoTime.getAsLong();
-    var keys = CandidateForms.fromCaption(context.caption());
-    var lookup =
-        keys.isEmpty()
-            ? new LexiconLookupResult(
-                List.of(), java.util.OptionalLong.empty(), LexiconLookupResult.Counts.zero())
-            : lexiconCatalog.lookupForms(keys);
-    var candidates = lookup.candidates();
-    var queried = nanoTime.getAsLong();
-    var result = hintPolicy.evaluate(context, candidates);
-    var finished = nanoTime.getAsLong();
-    return new MeasuredCaptionResult(
-        result, queried - started, finished - queried, candidates.size(), lookup.counts());
   }
 
   /**
@@ -115,7 +79,8 @@ public final class EnrichCaptionUseCase {
               interval.contextStart(),
               interval.appendEndOffset(),
               interval.appendStart(),
-              lookup.candidates());
+              lookup.candidates(),
+              request.commonWordCutoff());
       var mapped = mapper.map(request, interval, selection.hints());
       var finished = nanoTime.getAsLong();
       ranges.add(

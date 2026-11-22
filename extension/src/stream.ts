@@ -1,12 +1,12 @@
 import type { Observation } from "./diagnostics";
-import { parseHintResponse, resolveHint, snapshotSegments, snapshotText, type ApiResult, type CaptionHintRequest, type CaptionSnapshot, type Hint } from "./protocol";
-import { remapHints, retainedOverlap } from "./caption-snapshot";
+import { parseHintResponse, resolveHint, snapshotSegments, snapshotText, type ApiResult, type CaptionHintRequest, type PreviousSegment, type Hint } from "./protocol";
+import { remapHints, retainedOverlap, type ObservedCaptionSnapshot } from "./caption-snapshot";
 export const COALESCE_MS = 16;
-export type CaptionEvent = { key: string; sequence: number; videoTimeMs: number; request: CaptionHintRequest };
+export type CaptionEvent = { key: string; sequence: number; videoTimeMs: number; request: { captionTopicKey: string; trackKey: string | null; currentSnapshot: ObservedCaptionSnapshot } };
 export type StreamState = "idle" | "waiting" | "ready" | "no-pending" | "fallback";
 export type StreamView = { state: StreamState; event?: CaptionEvent; hints?: Hint[]; frozenKeys?: string[]; finalizedKeys?: string[]; debugRequestId?: string; debugRequestEvent?: CaptionEvent; runtimeFailure?: "initializing" | "unavailable" | "incompatible"; runtimeMode?: "formal" | "demo" };
 type Operation = { promise: Promise<ApiResult>; cancel: () => void };
-export type RequestTransport = (event: CaptionEvent, requestId: string) => Operation;
+export type RequestTransport = (payload: CaptionHintRequest, requestId: string) => Operation;
 export type Scheduler = { setTimeout: (callback: () => void, timeoutMs: number) => ReturnType<typeof setTimeout>;
   clearTimeout: (timer: ReturnType<typeof setTimeout>) => void };
 /** 单请求串行；观察快照与已处理覆盖分离，新增不会清除已有提示。 */
@@ -17,7 +17,7 @@ export class CaptionStreamCoordinator {
   private lastKnownTrackKey: string | null = null;
   private timer?: ReturnType<typeof setTimeout>;
   private active?: { generation: number; event: CaptionEvent; cancel: () => void; started: number };
-  private lastAcknowledged: CaptionSnapshot | null = null;
+  private lastAcknowledged: PreviousSegment[] = [];
   private completed = new Set<string>();
   private hints: Hint[] = [];
   private frozenKeys = new Set<string>();
@@ -83,7 +83,7 @@ export class CaptionStreamCoordinator {
     this.generation++;
     if (this.timer !== undefined) { this.scheduler.clearTimeout(this.timer); this.timer = undefined; this.record({ outcome: "cancelled_before_send" }); }
     if (this.active) { try { this.active.cancel(); } catch { /* cancellation is best effort */ } this.active = undefined; this.record({ outcome: "cancelled_in_flight" }); }
-    if (reset) { this.completed.clear(); this.hints = []; this.lastAcknowledged = null;
+    if (reset) { this.completed.clear(); this.hints = []; this.lastAcknowledged = [];
       this.frozenKeys.clear(); this.activeRowKeys.clear(); this.finalizedKeys.clear(); }
   }
   private pending(): boolean {
@@ -98,25 +98,34 @@ export class CaptionStreamCoordinator {
   private dispatch(): void {
     if (!this.current || !this.pending()) return;
     const event = structuredClone(this.current);
-    for (const segment of snapshotSegments(event.request.currentSnapshot)) segment.append = !this.completed.has(segment.key);
-    event.request.lastRequestedSnapshot = structuredClone(this.lastAcknowledged);
+    const currentKeys = new Set<string>();
+    for (const segment of snapshotSegments(event.request.currentSnapshot)) {
+      currentKeys.add(segment.key);
+      segment.append = !this.completed.has(segment.key);
+    }
+    const request: CaptionHintRequest = {
+      previousSegments: this.lastAcknowledged.filter(segment => currentKeys.has(segment.key)),
+      currentSnapshot: { captions: event.request.currentSnapshot.captions.map(group => ({
+        segments: group.segments.map(({ key, text, append, line }) => ({ key, text, append, line }))
+      })) }
+    };
     const generation = this.generation, started = this.now();
     this.record({ stage: "coalesce", elapsedMs: started - this.submittedAt, outcome: "requested" });
     // 同步抛错与异步通信失败一致：保留确认快照，等待下一次字幕变化。
     let operation: Operation;
-    try { operation = this.transport(event, `caption-${++this.requestNumber}`); }
+    try { operation = this.transport(request, `caption-${++this.requestNumber}`); }
     catch { operation = { promise: Promise.resolve({ ok: false, reason: "network" }), cancel: () => undefined }; }
     this.active = { generation, event, started, cancel: operation.cancel };
-    void operation.promise.then(result => this.accept(generation, event, result)).catch(() => this.accept(generation, event, { ok: false, reason: "network" }));
+    void operation.promise.then(result => this.accept(generation, event, request, result)).catch(() => this.accept(generation, event, request, { ok: false, reason: "network" }));
   }
-  private accept(generation: number, event: CaptionEvent, result: ApiResult): void {
+  private accept(generation: number, event: CaptionEvent, request: CaptionHintRequest, result: ApiResult): void {
     if (generation !== this.generation || !this.current || this.active?.event !== event) { this.record({ outcome: "late_response" }); return; }
     this.record({ stage: "transport", elapsedMs: this.now() - this.active.started });
     this.active = undefined;
     for (const stage of ["query", "rules", "api"] as const) {
       if (result.timings?.[stage] !== undefined) this.record({ stage, elapsedMs: result.timings[stage] });
     }
-    if (result.ok && !parseHintResponse(result.body, event.request)) result = { ok: false, reason: "invalid-response" };
+    if (result.ok && !parseHintResponse(result.body, request)) result = { ok: false, reason: "invalid-response" };
     if (!result.ok) {
       const outcome = result.reason === "invalid-response" || result.reason === "runtime-incompatible" ? "protocol_mismatch"
         : result.reason === "runtime-initializing" || result.reason === "backend_unavailable" ? "backend_unavailable" : result.reason;
@@ -129,10 +138,11 @@ export class CaptionStreamCoordinator {
     if (["query", "rules", "api"].some(stage => result.timings?.[stage as keyof typeof result.timings] === undefined))
       this.record({ outcome: "missing-server-timing" });
     // 只确认已校验响应对应的发送快照，不把在途新增内容误标为成功。
-    this.lastAcknowledged = structuredClone(event.request.currentSnapshot);
+    this.lastAcknowledged = snapshotSegments(request.currentSnapshot).map(({ key, text }) => ({ key, text }));
     const visible = new Set(snapshotSegments(this.current.request.currentSnapshot).map(segment => segment.key));
     for (const key of result.body.processedKeys) if (visible.has(key)) this.completed.add(key);
-    const resolved = result.body.hints.map(hint => resolveHint(hint, event.request.currentSnapshot)).filter((hint): hint is Hint => !!hint);
+    const responseVersion = result.body.lexiconVersion;
+    const resolved = responseVersion === null ? [] : result.body.hints.map(hint => resolveHint(hint, request.currentSnapshot, responseVersion)).filter((hint): hint is Hint => !!hint);
     const mapped = remapHints(snapshotText(event.request.currentSnapshot), snapshotText(this.current.request.currentSnapshot), resolved);
     // 版本不能在同一视图混合；已展示资料保持不动，后到的异版本提示不混入。
     const version = this.hints[0]?.lexiconVersion;
@@ -152,7 +162,13 @@ export class CaptionStreamCoordinator {
       });
       if (touchesFrozen || crossesRow) continue;
       if (version !== undefined && hint.lexiconVersion !== version) continue;
-      if (!this.hints.some(old => old.startOffset < hint.endOffset && hint.startOffset < old.endOffset)) this.hints.push(hint);
+      const overlaps = this.hints.filter(old => old.startOffset < hint.endOffset && hint.startOffset < old.endOffset);
+      // 不依赖 wire 中不存在的 lemma；只有严格扩大的新范围完整覆盖重叠项时才替换。
+      const expandsOverlaps = overlaps.length > 0 && overlaps.every(old =>
+        hint.startOffset <= old.startOffset && hint.endOffset >= old.endOffset &&
+        (hint.startOffset < old.startOffset || hint.endOffset > old.endOffset));
+      if (expandsOverlaps) this.hints = this.hints.filter(old => !overlaps.includes(old));
+      if (overlaps.length === 0 || expandsOverlaps) this.hints.push(hint);
     }
     this.hints.sort((left, right) => left.startOffset - right.startOffset);
     this.record({ outcome: this.hints.length ? "ready" : "no-pending" });

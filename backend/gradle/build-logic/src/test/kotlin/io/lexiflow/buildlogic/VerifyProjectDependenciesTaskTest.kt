@@ -17,7 +17,7 @@ class VerifyProjectDependenciesTaskTest {
     private fun graph(): MutableMap<String, List<String>> = linkedMapOf(
         ":lexicon" to emptyList(),
         ":enrichment" to listOf(":lexicon"),
-        ":adapters" to listOf(":lexicon"),
+        ":adapters" to listOf(":lexicon", ":enrichment"),
         ":api" to listOf(":lexicon", ":enrichment", ":adapters"),
         ":architecture-tests" to listOf(":lexicon", ":enrichment", ":adapters", ":api"),
         ":quality-gates" to emptyList(),
@@ -72,9 +72,9 @@ class VerifyProjectDependenciesTaskTest {
     }
 
     @Test
-    fun rejectsAdapterDependencyOnEnrichment() {
+    fun rejectsAdapterDependencyOnApi() {
         val graph = graph()
-        graph[":adapters"] = listOf(":enrichment")
+        graph[":adapters"] = listOf(":api")
         assertThrows(GradleException::class.java) { verify(graph) }
     }
 

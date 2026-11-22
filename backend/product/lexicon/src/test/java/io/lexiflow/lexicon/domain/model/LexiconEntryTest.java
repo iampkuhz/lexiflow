@@ -55,7 +55,7 @@ class LexiconEntryTest {
                 List.of(new LexiconAlias("reliable")),
                 List.of(new LexiconInflection("reliably")),
                 provenance,
-                LexiconPriority.unranked()));
+                LexiconPriority.fromRankedEvidence(0, 0, false)));
   }
 
   private static LexiconEntry entry(String lemma, LexiconEntryKind kind) {
@@ -69,6 +69,6 @@ class LexiconEntryTest {
         List.of(),
         List.of(),
         new LexiconProvenance("source", "license", "digest", Instant.EPOCH),
-        LexiconPriority.unranked());
+        LexiconPriority.fromRankedEvidence(0, 0, false));
   }
 }

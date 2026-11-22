@@ -1,3 +1,4 @@
+import { channelManifest } from "../scripts/build/extension-build-settings.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile, cp, chmod, rename } from "node:fs/promises";
@@ -7,7 +8,8 @@ import test from "node:test";
 import { createHash } from "node:crypto";
 import { PACKAGE_FILES, createExtensionZip, publishExtensionArchive, packageRelease, packageDevelopment } from "../scripts/packaging/package-extension-release.mjs";
 import { checkExtensionArchive } from "../scripts/checks/check-extension-archive.mjs";
-import { zipSync } from "fflate";
+import { zipSync, unzipSync } from "fflate";
+import { validateExtensionArchiveEntries } from "../scripts/packaging/extension-archive-contract.mjs";
 import { resolveBuildIdentity, chromeVersion } from "../../ops/release/integrity/source-build-identity.mjs";
 
 const buildIdentity = resolveBuildIdentity();
@@ -18,7 +20,7 @@ async function fixture() {
   const dist = path.join(root, "dist");
   await mkdir(path.join(dist, "assets"), { recursive: true });
   for (const file of PACKAGE_FILES) {
-    const data = file === "manifest.json" ? Buffer.from(JSON.stringify({ manifest_version: 3, version: chromeVersion(version), version_name: version, permissions: ["storage"], host_permissions: ["http://127.0.0.1:18080/*"], background: { service_worker: "background.js" }, action: { default_popup: "popup.html" } })) : file === "build-identity.json" ? Buffer.from(JSON.stringify(buildIdentity)) : file === "expected-dataset.json" ? Buffer.from(JSON.stringify(expectedDataset) + "\n") : file === "popup.html" ? Buffer.from('<link href="popup.css"><script src="popup.js"></script>') : Buffer.from(`fixture:${file}`);
+    const data = file === "manifest.json" ? Buffer.from(JSON.stringify({ manifest_version: 3, version: chromeVersion(version), version_name: version, ...channelManifest(18080), background: { service_worker: "background.js" }, action: { default_popup: "popup.html" }, options_page: "manage.html" })) : file === "build-identity.json" ? Buffer.from(JSON.stringify(buildIdentity)) : file === "expected-dataset.json" ? Buffer.from(JSON.stringify(expectedDataset) + "\n") : file === "popup.html" ? Buffer.from('<link href="popup.css"><script src="popup.js"></script>') : file === "manage.html" ? Buffer.from('<link href="manage.css"><script src="manage.js"></script>') : Buffer.from(`fixture:${file}`);
     await writeFile(path.join(dist, file), data);
   }
   return { root, dist, cleanup: () => rm(root, { recursive: true, force: true }) };
@@ -35,7 +37,7 @@ test("build uses the single software version source and emits fixed production p
   const generated = JSON.parse(await readFile(new URL("../dist/manifest.json", import.meta.url)));
   assert.equal(generated.version, chromeVersion(version));
   assert.equal(generated.version_name, version);
-  assert.deepEqual(generated.host_permissions, ["http://127.0.0.1:18080/*"]);
+  assert.deepEqual(generated.host_permissions, channelManifest(18080).host_permissions);
 });
 
 test("ZIP has exact allowlist, stable bytes and matching SHA-256 across timezones", async () => {
@@ -60,7 +62,7 @@ test("ZIP has exact allowlist, stable bytes and matching SHA-256 across timezone
   } finally { await cleanup(); }
 });
 
-test("ZIP packager rejects ports outside the two fixed local slots", async () => {
+test("ZIP packager rejects unassigned ports", async () => {
   const { root, cleanup } = await fixture();
   try {
     for (const apiPort of [0, -1, 18082, 65536, 1.5, "18080"]) {
@@ -68,7 +70,7 @@ test("ZIP packager rejects ports outside the two fixed local slots", async () =>
     }
     const result = await createExtensionZip({ root, buildIdentity, expectedDataset });
     assert.deepEqual(JSON.parse(Buffer.from(result.unzip()["manifest.json"]).toString()).host_permissions,
-      ["http://127.0.0.1:18080/*"]);
+      channelManifest(18080).host_permissions);
   } finally { await cleanup(); }
 });
 
@@ -78,8 +80,8 @@ test("rejects missing files, root/path symlinks, bad manifest version and permis
     async ({ dist }) => { await rm(path.join(dist, "assets/icon-16.png")); await symlink("icon-32.png", path.join(dist, "assets/icon-16.png")); },
     async ({ root, dist }) => { await rm(path.join(dist, "assets"), { recursive: true }); await symlink(root, path.join(dist, "assets")); },
     async ({ root, dist }) => { await rm(dist, { recursive: true }); await symlink(root, dist); },
-    async ({ dist }) => writeFile(path.join(dist, "manifest.json"), JSON.stringify({ version: "9.9.9", permissions: ["storage"], host_permissions: ["http://127.0.0.1:18080/*"] })),
-    async ({ dist }) => writeFile(path.join(dist, "manifest.json"), JSON.stringify({ version: chromeVersion(version), version_name: version, permissions: ["storage"], host_permissions: ["http://127.0.0.1:9999/*"] })),
+    async ({ dist }) => writeFile(path.join(dist, "manifest.json"), JSON.stringify({ version: "9.9.9", permissions: [], host_permissions: ["http://127.0.0.1:18080/*"] })),
+    async ({ dist }) => writeFile(path.join(dist, "manifest.json"), JSON.stringify({ version: chromeVersion(version), version_name: version, permissions: [], host_permissions: ["http://127.0.0.1:9999/*"] })),
     async ({ dist }) => writeFile(path.join(dist, "manifest.json"), JSON.stringify({ version: chromeVersion(version), version_name: version, permissions: ["tabs"], host_permissions: ["http://127.0.0.1:18080/*"] }))
   ]) {
     const { root, dist, cleanup } = await fixture();
@@ -124,6 +126,8 @@ test("CI calls only the explicit development preview package, checker and isolat
 test("rejects dirty Git input and safely reuses only byte-identical output", async () => {
   const repo = await realpath(await mkdtemp(path.join(tmpdir(), "lexiflow-dirty-git-")));
   try {
+    await mkdir(path.join(repo, "ops/podman"), { recursive: true });
+    await cp(new URL("../../ops/podman/loopback-ports.mjs", import.meta.url), path.join(repo, "ops/podman/loopback-ports.mjs"));
     await mkdir(path.join(repo, "ops/release/integrity"), { recursive: true });
     await writeFile(path.join(repo, "ops/release/version.txt"), `2.0.0\n`);
     execFileSync("git", ["init", "-q", repo]);
@@ -218,7 +222,7 @@ test("archive checker requires an explicit preview mode and rejects formal-previ
   try {
     const manifestPath = path.join(dist, "manifest.json");
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    manifest.host_permissions = ["http://127.0.0.1:18081/*"];
+    Object.assign(manifest, channelManifest(18081));
     await writeFile(manifestPath, JSON.stringify(manifest));
     await rm(path.join(dist, "expected-dataset.json"));
     const preview = await createExtensionZip({ root, buildIdentity: current, apiPort: 18081 });
@@ -231,7 +235,7 @@ test("archive checker requires an explicit preview mode and rejects formal-previ
     await assert.rejects(checkExtensionArchive(output, current.sourceCommit, root,
       { verifyCurrentIdentity: false }), { message: "ARCHIVE_FILE_SET_MISMATCH" });
 
-    manifest.host_permissions = ["http://127.0.0.1:18080/*"];
+    Object.assign(manifest, channelManifest(18080));
     await writeFile(manifestPath, JSON.stringify(manifest));
     await writeFile(path.join(dist, "expected-dataset.json"), `${JSON.stringify(expectedDataset)}\n`);
     const formal = await createExtensionZip({ root, buildIdentity: current, expectedDataset });
@@ -270,7 +274,7 @@ test("rejects symlinked source ancestors, non-regular artifact targets, and unkn
     assert.equal(imported.status, 0, imported.stderr);
     const args = spawnSync(process.execPath, [new URL("../scripts/packaging/package-extension-release.mjs", import.meta.url).pathname, "--version"], { encoding: "utf8" });
     assert.notEqual(args.status, 0);
-    assert.match(args.stderr, /expected --expected-dataset/u);
+    assert.match(args.stderr, /expected .*--expected-dataset/u);
   } finally { await cleanup(); }
 });
 
@@ -282,8 +286,14 @@ test("clean release CLI rebuilds stale dist at port 18080 and emits only its JSO
     for (const name of ["scripts", "src", "assets", "manifest.json", "package.json", "package-lock.json", "tsconfig.json"]) {
       await cp(new URL(`../${name}`, import.meta.url), path.join(extension, name), { recursive: true });
     }
+    await mkdir(path.join(repo, "ops/podman"), { recursive: true });
+    await cp(new URL("../../ops/podman/loopback-ports.mjs", import.meta.url), path.join(repo, "ops/podman/loopback-ports.mjs"));
     await mkdir(path.join(repo, "ops/release/integrity"), { recursive: true });
     await cp(new URL("../../ops/release/integrity/source-build-identity.mjs", import.meta.url), path.join(repo, "ops/release/integrity/source-build-identity.mjs"));
+    await mkdir(path.join(repo, "scripts/contracts"), { recursive: true });
+    await mkdir(path.join(repo, "contracts"), { recursive: true });
+    await cp(new URL("../../scripts/contracts/contract-lock.mjs", import.meta.url), path.join(repo, "scripts/contracts/contract-lock.mjs"));
+    await cp(new URL("../../contracts/versions.lock.json", import.meta.url), path.join(repo, "contracts/versions.lock.json"));
     await writeFile(path.join(repo, "ops/release/version.txt"), "2.0.0\n");
     await symlink(path.resolve(path.dirname(new URL("../package.json", import.meta.url).pathname), "node_modules"), path.join(extension, "node_modules"));
     await writeFile(path.join(repo, ".gitignore"), "/tmp/\n/extension/dist/\n/extension/node_modules\n");
@@ -332,7 +342,7 @@ exec ${JSON.stringify(realGit)} "$@"
     assert.equal(createHash("sha256").update(archive).digest("hex"), descriptor.sha256);
     assert.equal((await readFile(path.join(output, `${descriptor.filename}.sha256`), "utf8")).trim(), `${descriptor.sha256}  ${descriptor.filename}`);
     assert.equal(await readFile(path.join(extension, "dist/stale.map")).then(() => true, () => false), false);
-    assert.deepEqual(JSON.parse(await readFile(path.join(extension, "dist/manifest.json"), "utf8")).host_permissions, ["http://127.0.0.1:18080/*"]);
+    assert.deepEqual(JSON.parse(await readFile(path.join(extension, "dist/manifest.json"), "utf8")).host_permissions, channelManifest(18080).host_permissions);
 
     const formats = { background: "esm", content: "iife", "youtube-bridge": "iife", popup: "iife" };
     const reference = path.join(repo, "tmp/cli-reference");
@@ -340,8 +350,8 @@ exec ${JSON.stringify(realGit)} "$@"
     for (const [name, format] of Object.entries(formats)) {
       const outfile = path.join(reference, `${name}.js`);
       execFileSync(path.join(extension, "node_modules/esbuild/bin/esbuild"), [`src/${name}.ts`,
-        "--bundle", `--format=${format}`, "--target=es2022", "--minify", "--legal-comments=eof", "--define:__LEXIFLOW_API_PORT__=18080",
-        `--define:__LEXIFLOW_EXPECTED_DATASET__=${JSON.stringify(JSON.stringify(expectedDataset))}`, `--outfile=${outfile}`],
+        "--bundle", `--format=${format}`, "--target=es2022", "--minify", "--legal-comments=eof", "--define:__LEXIFLOW_API_PORT__=18080", '--define:__LEXIFLOW_API_CONTRACT__="caption-hints.v4"',
+        `--outfile=${outfile}`],
       { cwd: extension, stdio: "pipe" });
       assert.deepEqual(await readFile(path.join(extension, `dist/${name}.js`)), await readFile(outfile), `${name} CLI 字节等价`);
     }
@@ -354,7 +364,24 @@ exec ${JSON.stringify(realGit)} "$@"
     const previewArchive = await checkExtensionArchive(previewZip, previewDescriptor.sourceCommit, repo, { mode: "development" });
     assert.equal(previewArchive.dataset, null);
     assert.equal(previewArchive.buildIdentity.sourceCommit, previewDescriptor.sourceCommit);
-    assert.deepEqual(JSON.parse(await readFile(path.join(extension, "dist/manifest.json"), "utf8")).host_permissions, ["http://127.0.0.1:18081/*"]);
+    assert.deepEqual(JSON.parse(await readFile(path.join(extension, "dist/manifest.json"), "utf8")).host_permissions, channelManifest(18081).host_permissions);
+    await assert.rejects(createExtensionZip({ root: extension, buildIdentity: previewArchive.buildIdentity, apiPort: 19081 }),
+      /expected published dataset binding required/u);
+    await writeFile(path.join(extension, "dist/expected-dataset.json"), JSON.stringify(expectedDataset));
+    await assert.rejects(createExtensionZip({ root: extension, buildIdentity: previewArchive.buildIdentity, apiPort: 19081, expectedDataset }),
+      /LOCAL_TEST_ENDPOINT_MISMATCH/u);
+    const manual = spawnSync(process.execPath, [cli, "--local-test", "--expected-dataset", bindingFile], { cwd: repo, encoding: "utf8", env });
+    assert.equal(manual.status, 0, manual.stderr);
+    const manualDescriptor = JSON.parse(manual.stdout);
+    assert.ok(manualDescriptor.archive.startsWith(path.join(repo, "tmp/local-test") + path.sep));
+    const manualEntries = new Map(Object.entries(unzipSync(await readFile(manualDescriptor.archive))).map(([name, content]) => [name, Buffer.from(content)]));
+    const manualProof = validateExtensionArchiveEntries(manualEntries, { apiPort: 19081, expectedDataset });
+    assert.equal(manualProof.manifest.key, channelManifest(18081).key);
+    assert.deepEqual(manualProof.dataset, expectedDataset, "ZIP still binds its expected dataset statically");
+    const worker = manualEntries.get("background.js").toString("utf8");
+    assert.ok(!worker.includes(expectedDataset.sha256), "worker must not embed the publication digest");
+    assert.ok(!worker.includes(manualDescriptor.softwareVersion), "worker must not pin a runtime to the build version");
+    assert.match(manualEntries.get("background.js").toString("utf8"), /"http:\/\/127\.0\.0\.1:19081"/u);
     const formalZip = path.join(output, descriptor.filename);
     await assert.rejects(checkExtensionArchive(previewZip, previewDescriptor.sourceCommit, repo), /ARCHIVE_FILE_SET_MISMATCH/u);
     await assert.rejects(checkExtensionArchive(formalZip, descriptor.sourceCommit, repo, { mode: "development" }), /ARCHIVE_MODE_MISMATCH/u);
@@ -387,12 +414,11 @@ test("explicit development packaging uses 18081 without claiming a published dat
   try {
     const manifestPath = path.join(dist, "manifest.json");
     const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-    manifest.host_permissions = ["http://127.0.0.1:18081/*"];
+    Object.assign(manifest, channelManifest(18081));
     await writeFile(manifestPath, JSON.stringify(manifest));
     await rm(path.join(dist, "expected-dataset.json"));
     const result = await createExtensionZip({ root, buildIdentity, apiPort: 18081 });
     assert.equal(Object.hasOwn(result.unzip(), "expected-dataset.json"), false);
-    const { validateExtensionArchiveEntries } = await import("../scripts/packaging/extension-archive-contract.mjs");
     const entries = new Map(Object.entries(result.unzip()).map(([name, bytes]) => [name, Buffer.from(bytes)]));
     assert.equal(validateExtensionArchiveEntries(entries, { buildIdentity, apiPort: 18081 }).dataset, null);
     assert.throws(() => validateExtensionArchiveEntries(entries, { buildIdentity, apiPort: 18080 }), /ARCHIVE_FILE_SET_MISMATCH/);

@@ -1,3 +1,4 @@
+import { matchesChannelManifest } from '../../../extension/scripts/build/extension-build-settings.mjs';
 // 受管安装的准备/激活/恢复事务；不导入资料、不管理数据库服务、不删除引擎资源。
 import fs from 'node:fs';
 import path from 'node:path';
@@ -47,7 +48,7 @@ export function verifyExtension(directory, identity, port) {
   const manifest = readJson(directory, 'manifest.json');
   const embedded = readJson(directory, 'build-identity.json');
   if (!same(embedded, identity) || manifest.version_name !== identity.softwareVersion || manifest.version !== identity.chromeVersion
-      || !same(manifest.host_permissions, [`http://127.0.0.1:${port}/*`])) fail('EXTENSION_IDENTITY_MISMATCH');
+      || !matchesChannelManifest(manifest, port)) fail('EXTENSION_IDENTITY_MISMATCH');
   return treeDigest(directory);
 }
 export function installationRecord({ operation, kind, previous, target, startedAt, status, artifacts = null, dataset = null }) {

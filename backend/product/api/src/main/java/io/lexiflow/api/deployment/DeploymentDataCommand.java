@@ -43,6 +43,8 @@ public final class DeploymentDataCommand {
           "lexicon_form",
           "lexicon_lookup",
           "lexicon_form_entry_idx",
+          "lexicon_entry_frequency_rank_idx",
+          "lexicon_entry_bnc_rank_idx",
           "lexicon_entry_prewarm_hint_idx",
           "lexicon_entry_prewarm_block_idx",
           "lexicon_form_canonical_guard",

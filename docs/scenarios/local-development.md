@@ -3,7 +3,7 @@
 > 位置：[仓库生命周期](../README.md) → 本机开发。发行安装见[用户指南](../user/podman-macos.md)；本页输出可调试的 API 与扩展，不是正式验收证据。
 
 
-以下 macOS 源码开发命令在仓库根目录执行。先在开发终端执行 `export LEXIFLOW_API_PORT=18081`；开发构建与 API 使用同一端口。开发容器命名 `lexiflow-dev`、数据卷独立，正式安装 `lexiflow-release`/18080 不受开发启停影响。需要 **Eclipse Temurin Java 25、Python 3、Node.js/npm 和 Chrome**，以及本机 `lsof`、`ps`；Gradle 使用仓库自带 Wrapper。正常视频体验需要已发布词库的 SQLite 开发文件；API 只读打开专属文件，缺库即失败。离线初始化与重建不适用于 Docker 发行安装数据。
+以下 macOS 源码开发命令在仓库根目录执行。先在开发终端执行 `export LEXIFLOW_API_PORT=18081`；开发构建与 API 使用同一端口。本页默认直接运行 JVM，不启动 API 容器；若通过 Podman 部署源码，使用唯一测试槽 `lexiflow-test` 和独立开发数据。槽位被其他试用安装占用时，走本页的 JVM 调试，不另开容器。正式安装 `lexiflow-release`/18080 不受开发启停影响。需要 **Eclipse Temurin Java 25、Python 3、Node.js/npm 和 Chrome**，以及本机 `lsof`、`ps`；Gradle 使用仓库自带 Wrapper。正常视频体验需要已发布词库的 SQLite 开发文件；API 只读打开专属文件，缺库即失败。离线初始化与重建不适用于 Docker 发行安装数据。
 
 
 本地运行链路：Chrome Extension → `:api`（开发端口 18081）→ 专属 SQLite 数据库文件（API 只读打开）；Redis 与未来后台任务不属于观看请求的必经节点。测试使用独立临时数据库文件，不接触本机开发数据。
@@ -91,19 +91,35 @@ runtime lexicon=sqlite publishedVersion=<非零版本号>
 ```bash
 cd extension
 npm ci
-npm run build
+LEXIFLOW_API_PORT=18081 npm run build
 ```
 
 1. 在 Chrome 地址栏打开 `chrome://extensions`，开启“开发者模式”。
 2. 点击“加载已解压的扩展程序”，选择本仓库的 `extension/dist` 文件夹，而不是 `extension`。
 3. 打开 YouTube 视频，选择英文字幕并开启 CC。英文先显示；命中合格词段后看到同一行中的 `word(中文)`。仅作为一个整体提示的多词词组带黄色底线，包含词间空格；单词提示不画线，相邻的独立单词提示不合并画线。跨源字幕分行时仍保留分行；行内下划线与行距确保不被下一行背景遮挡。
-4. 更新代码后重新运行 `npm run build`，在扩展管理页刷新扩展，再刷新 YouTube 页面。
+4. 更新代码后重新运行 `LEXIFLOW_API_PORT=18081 npm run build`，在扩展管理页刷新扩展，再刷新 YouTube 页面。
 
 停止时，在 API 终端按 `Ctrl+C`；扩展可在管理页禁用。扩展不保存字幕，也不会补发旧字幕。
 
+### 1.3.1. 固定试用槽位
+
+所有 Worktree 共用同一个本机测试目录。测试服务固定在 `127.0.0.1:19081`，容器为 `lexiflow-test`。在仓库根使用同一入口，端口、镜像、摘要、产物路径均无需手填：
+
+```sh
+node ops/podman/commands/manage-local-test-slot.mjs build
+node ops/podman/commands/manage-local-test-slot.mjs plan
+node ops/podman/commands/manage-local-test-slot.mjs start
+```
+
+- **构建**：从当前源码重建 JAR、镜像及 Chrome ZIP。固定读取 `~/Library/Application Support/LexiFlow/Testing/dataset/dataset.zip` 和 `expected-dataset.json`；只使用经过核验的发布资料包，不读取正在运行的数据库。首次准备资料和 Temurin 25 工具链后无需重复配置。构建不启停服务；失败保留上次完整产物。
+- **预检**：从 `~/Library/Application Support/LexiFlow/Testing/current` 读取本次制品，核验并导入测试镜像，检查旧容器、保留卷与计划变化。`plan` 不停止服务。只有预检 PASS 且确认替换后才执行 `start`；它会重核计划、按原名替换，只保留一个测试容器。不删任何数据卷。报 `BLOCKED` 时处理具体原因，不绕过验证或另开端口。
+- **Chrome**：第一次选择加载 `~/Library/Application Support/LexiFlow/Testing/current/chrome`，以后在原「LexiFlow 测试版」点重新加载，再刷新视频。测试 ZIP 固定是 `~/Library/Application Support/LexiFlow/Testing/current/extension.zip`。仅调整扩展界面且接口仍匹配，可只执行构建并重载扩展，不执行 `plan` 或 `start`。
+
+`18081` 只用于源码开发，`18082` 只用于隔离验收；正式发行不走这个入口。
+
 ## 1.4. 没有效果时看哪里
 
-- **API 终端**：先查看 `runtime lexicon`。字幕增量、`final`、`interrupted` 与视频开始事件默认输出为 `MM-dd HH:mm:ss|LEVEL|中文事件|video=真实视频ID|分:秒.毫秒|正文` 单行日志，日常不展示内部长 ID，正常请求统计仅输出 DEBUG；WARN/ERROR 保留完整关联 ID。增量正文将英文与实际显示的中文提示放在同一行。控制台不依赖分析文件开关，也不会默认创建或写入字幕 JSONL。`start_api` 默认仅绑定 `127.0.0.1`；日志包含字幕正文及视频定位，只可本机查看，不得外发或放入 CI artifact。失败、队列溢出或日志 I/O 均不阻塞英文和提示。此路径只查询已发布资料，不会调用模型。
+- **API 终端**：先查看 `runtime lexicon`。默认不记录实际显示的字幕；需要排查展示时，用 `LEXIFLOW_CAPTION_DEBUG_ENABLED=true python3 -m scripts.local.start_local_api` 显式启用。视频开始、字幕增量、`final` 与 `interrupted` 以单行输出，包含视频定位和实际显示的字幕，限本机查看，不得共享终端输出或放入 CI artifact。此诊断与片段分析 JSONL 独立，不影响英文或提示。
 - **片段分析 JSONL**：仅在显式启用 `lexiflow.segment-analysis.enabled=true` 时写入，默认路径为 ignored 的 `tmp/analysis/caption-segments.jsonl`，可用 `LEXIFLOW_SEGMENT_LOG_PATH` 指定私有路径。单文件上限为 16 MiB，达到上限后停止追加，不会无界增长；它含英文及提示分析结果，须按敏感本机数据处理，不得外发或进入 CI artifact。`NO_HINT` 表示没有可展示提示，不等于词库没有候选。
 - **YouTube 页面开发者工具 → Console**：筛选 `[LexiFlow]`，查看 `caption` 阶段的 `state`、`sequence`、`elapsedMs`。
 - **扩展管理页 → LexiFlow → Service worker**：查看 `api` 阶段结果和请求耗时。

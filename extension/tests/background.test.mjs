@@ -3,11 +3,13 @@ import test from 'node:test';
 import { createServer } from 'node:http';
 const nativeFetch = globalThis.fetch;
 let listener;
-globalThis.chrome = { runtime: { id: 'extension-id', getURL: path => `chrome-extension://extension-id/${path}`, getManifest: () => ({ version_name: '1.2.3' }), onMessage: { addListener(value) { listener = value; } } } };
+globalThis.chrome = { tabs:{query:async()=>[],sendMessage:async()=>{}}, runtime: { id: 'extension-id', getURL: path => `chrome-extension://extension-id/${path}`, getManifest: () => ({ version_name: '1.2.3' }), onMessage: { addListener(value) { listener = value; } } } };
 await import('../dist/background.js');
-let statusBody = { softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null,publishedDataset:null };
+let statusBody = { softwareVersion:'1.2.3',apiContract:'caption-hints.v4',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null,publishedDataset:null };
 let postFetch, holdStatus = false, rejectStatus = false;
+let prefState = { commonWordCutoff:1500, hidden:[] };
 const statusCalls = [];
+const preferenceCalls = [];
 Object.defineProperty(globalThis, 'fetch', { configurable:true, get: () => (url, options) => {
   if (String(url).endsWith('/runtime-status')) {
     statusCalls.push({url:String(url),options});
@@ -15,11 +17,19 @@ Object.defineProperty(globalThis, 'fetch', { configurable:true, get: () => (url,
     if (holdStatus) return new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('abort','AbortError'))));
     return Promise.resolve({ok:true,json:async()=>statusBody});
   }
+  if (String(url).endsWith('/preferences')) {
+    preferenceCalls.push({url:String(url),options});
+    try { const action=JSON.parse(options.body); if(action.action==='setCutoff') prefState={...prefState,commonWordCutoff:action.commonWordCutoff};
+      if(action.action==='hide'&&!prefState.hidden.some(item=>item.entryId===action.entryId)) prefState={...prefState,hidden:[...prefState.hidden,{entryId:action.entryId,lemma:action.lemma,gloss:action.gloss}]};
+      if(action.action==='restore') prefState={...prefState,hidden:prefState.hidden.filter(item=>item.entryId!==action.entryId)};
+    } catch { /* harmless read request */ }
+    return Promise.resolve({ok:true,json:async()=>prefState});
+  }
   return postFetch(url, options);
 }, set: value => { postFetch = value; } });
-const source = { lexiconEntryId: "9007199254740993", lexiconVersion: 1, senseId: "00000000-0000-0000-0000-000000000002" };
-const payload = { captionTopicKey:'topic',trackKey:null,lastRequestedSnapshot:null,currentSnapshot:{captions:[{windowId:null,startMs:null,segments:[{key:'key1',text:'reliable',offsetMs:null,append:true,line:0}]}]}};
-const sender = (id, documentId='doc') => ({id:'extension-id',tab:{id},documentId});
+const source = { lexiconEntryId: "9007199254740993", frequencyRank:null };
+const payload = { previousSegments:[],currentSnapshot:{captions:[{segments:[{key:'key1',text:'reliable',append:true,line:0}]}]}};
+const sender = (id, documentId='doc') => ({id:'extension-id',tab:{id,url:'https://www.youtube.com/watch?v=abcdefghijk'},frameId:0,documentId});
 const send = (message, source) => new Promise(resolve => listener(message,source,resolve));
 
 test('isolates cancellation between tabs and documents with identical local sequence IDs', async () => {
@@ -32,7 +42,7 @@ test('isolates cancellation between tabs and documents with identical local sequ
   const first=send(message,sender(1));
   const second=send(message,sender(2));
   const nextDocument=send(message,sender(1,'next'));
-  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  for (let spin=0;spin<100 && requests.length<3;spin++) await new Promise(resolve=>setTimeout(resolve,1));
   await send({type:'cancel-caption-hint',requestId:message.requestId},sender(1));
   assert.equal(requests[0].aborted,true);
   assert.equal(requests[1].aborted,false);
@@ -52,12 +62,12 @@ test('rejects malformed request IDs and missing tab identity without fetching', 
 
 test('status gate is bodyless no-store GET; incompatible or invalid status prevents caption POST', async () => {
   let posts = 0;
-  globalThis.fetch = async () => { posts += 1; return {ok:true,json:async()=>({processedKeys:['key1'],hints:[]})}; };
+  globalThis.fetch = async () => { posts += 1; return {ok:true,json:async()=>({processedKeys:['key1'],lexiconVersion:1,hints:[]})}; };
   const readCount = statusCalls.length;
-  statusBody = {...statusBody,apiContract:'future-contract'};
-  assert.deepEqual(await send({type:'caption-hints',requestId:'mismatch',payload},sender(8)),{ok:false,reason:'invalid-response'});
+  statusBody = {...statusBody,apiContract:'caption-hints.v5'};
+  assert.deepEqual(await send({type:'caption-hints',requestId:'mismatch',payload},sender(8)),{ok:false,reason:'runtime-incompatible'});
   assert.equal(posts,0);
-  statusBody = {...statusBody,apiContract:'caption-hints.v2',softwareVersion:'01.2.3'};
+  statusBody = {...statusBody,apiContract:'caption-hints.v4',softwareVersion:'01.2.3'};
   assert.deepEqual(await send({type:'caption-hints',requestId:'invalid-status',payload},sender(8)),{ok:false,reason:'invalid-response'});
   assert.equal(posts,0);
   assert.ok(statusCalls.length >= readCount + 2);
@@ -66,40 +76,55 @@ test('status gate is bodyless no-store GET; incompatible or invalid status preve
   assert.equal(call.options.redirect,'error'); assert.equal(call.options.credentials,'omit');
   assert.equal(call.options.referrerPolicy,'no-referrer');
   assert.equal(Object.hasOwn(call.options,'body'),false);
-  statusBody = {softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null,publishedDataset:null};
+  statusBody = {softwareVersion:'1.2.3',apiContract:'caption-hints.v4',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null,publishedDataset:null};
 });
 
-test('status gate rejects a runtime software version that differs from the extension build', async () => {
+test('same contract accepts independent build hashes and a different published dataset', async () => {
   let posts = 0;
-  globalThis.fetch = async () => { posts += 1; return {ok:true,json:async()=>({processedKeys:['key1'],hints:[]})}; };
-  statusBody = {...statusBody,softwareVersion:'1.2.4',apiContract:'caption-hints.v2'};
-  assert.deepEqual(await send({type:'caption-hints',requestId:'software-version-mismatch',payload},sender(8)),{ok:false,reason:'runtime-incompatible'});
-  assert.equal(posts,0);
-  statusBody = {...statusBody,softwareVersion:'1.2.3'};
+  const original = statusBody;
+  globalThis.fetch = async () => { posts += 1; return {ok:true,json:async()=>({processedKeys:['key1'],lexiconVersion:4,hints:[]})}; };
+  try {
+    statusBody = {softwareVersion:'3.0.0-SNAPSHOT.20261121.gaabbccd.dirty.001122334455',
+      apiContract:'caption-hints.v4',mode:'formal',ready:true,reason:'OK',datasetVersion:4,
+      publishedDataset:{releaseId:'other-release',preparationId:'prep-2',ruleId:'rules-2',sqlVersion:'4',sha256:'b'.repeat(64)}};
+    const result = await send({type:'caption-hints',requestId:'independent-build',payload},sender(8));
+    assert.equal(result.ok,true);
+    assert.equal(result.runtimeMode,'formal');
+    assert.equal(posts,1);
+    const management = {id:'extension-id',url:'chrome-extension://extension-id/manage.html'};
+    assert.equal((await send({type:'local-preferences',action:'read'},management)).ok,true);
+    const readyStatus = await send({type:'runtime-status'},management);
+    assert.deepEqual(readyStatus.status,statusBody);
+  } finally { statusBody = original; }
 });
 
-test('initialization and a different published dataset fail closed before caption upload', async () => {
-  let posts = 0;
-  globalThis.fetch = async () => { posts += 1; return {ok:true,json:async()=>({processedKeys:['key1'],hints:[]})}; };
-  statusBody = {softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'formal',ready:false,reason:'INITIALIZING',datasetVersion:4,publishedDataset:null};
-  assert.deepEqual(await send({type:'caption-hints',requestId:'initializing',payload},sender(8)),{ok:false,reason:'runtime-initializing'});
-  statusBody = {softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'formal',ready:true,reason:'OK',datasetVersion:4,
-    publishedDataset:{releaseId:'other-release',preparationId:'prep-1',ruleId:'rules-1',sqlVersion:'4',sha256:'a'.repeat(64)}};
-  assert.deepEqual(await send({type:'caption-hints',requestId:'dataset-mismatch',payload},sender(8)),{ok:false,reason:'runtime-incompatible'});
-  assert.equal(posts,0);
-  statusBody = {softwareVersion:'1.2.3',apiContract:'caption-hints.v2',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null,publishedDataset:null};
+test('initializing, not-ready and failed backend validation do not send any business request', async () => {
+  const original = statusBody, reads = preferenceCalls.length;
+  const manage = {id:'extension-id',url:'chrome-extension://extension-id/manage.html'};
+  globalThis.fetch = () => assert.fail('must not send business request');
+  try {
+    for (const [reason, expected] of [['INITIALIZING','runtime-initializing'],['IDENTITY_MISMATCH','runtime-incompatible'],
+      ['SCHEMA_MISMATCH','runtime-incompatible'],['DEPENDENCY_UNAVAILABLE','backend_unavailable']]) {
+      statusBody = {softwareVersion:'1.2.4',apiContract:'caption-hints.v4',mode:'formal',ready:false,reason,
+        datasetVersion:reason==='SCHEMA_MISMATCH'?null:4,publishedDataset:null};
+      assert.deepEqual(await send({type:'caption-hints',requestId:reason,payload},sender(8)),{ok:false,reason:expected});
+      assert.equal((await send({type:'local-preferences',action:'read'},manage)).ok,false);
+    }
+    assert.equal(preferenceCalls.length,reads);
+  } finally { statusBody = original; }
 });
 
-test('runtime status proxy is restricted to the exact extension popup sender', async () => {
+test('runtime status proxy is restricted to the popup or management document', async () => {
   globalThis.fetch = () => assert.fail('caption POST must not occur in status-only calls');
   assert.deepEqual(await send({type:'runtime-status'},{id:'extension-id',url:'chrome-extension://extension-id/popup.html'}),
-    {ok:true,status:statusBody});
+    {ok:true,status:statusBody,origin:"http://127.0.0.1:18080"});
+  assert.equal((await send({type:'runtime-status'},{id:'extension-id',url:'chrome-extension://extension-id/manage.html#tab=9&page=current'})).ok,true);
   assert.deepEqual(await send({type:'runtime-status'},sender(9)),{ok:false,reason:'invalid-request'});
   assert.deepEqual(await send({type:'runtime-status'},{id:'external',url:'chrome-extension://extension-id/popup.html'}),{ok:false,reason:'invalid-request'});
 });
 
 test('cancelling during the status GET prevents the caption POST', async () => {
-  let posts=0; globalThis.fetch=async()=>{posts++;return {ok:true,json:async()=>({processedKeys:['key1'],hints:[]})};};
+  let posts=0; globalThis.fetch=async()=>{posts++;return {ok:true,json:async()=>({processedKeys:['key1'],lexiconVersion:1,hints:[]})};};
   holdStatus=true;
   const pending=send({type:'caption-hints',requestId:'cancel-during-gate',payload},sender(5));
   await Promise.resolve(); await Promise.resolve();
@@ -132,7 +157,7 @@ test('native fetch refuses 307 and 308 caption redirects without reaching their 
     if (request.url === '/source') {
       response.writeHead(redirectCode,{Location:'/target'}).end();
     } else {
-      response.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({processedKeys:['key1'],hints:[]}));
+      response.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({processedKeys:['key1'],lexiconVersion:1,hints:[]}));
     }
   });
   try {
@@ -145,6 +170,7 @@ test('native fetch refuses 307 and 308 caption redirects without reaching their 
       redirectCode = code;
       const before = received.length;
       globalThis.fetch = (url,options) => {
+        if (String(url).endsWith('/preferences')) return {ok:true,json:async()=>({commonWordCutoff:1500,hidden:[]})};
         assert.match(String(url),/^http:\/\/127\.0\.0\.1:\d+\/.*caption-hints$/);
         assert.equal(options.redirect,'error');
         assert.equal(options.credentials,'omit');
@@ -166,7 +192,7 @@ test('native fetch refuses 307 and 308 caption redirects without reaching their 
 test('binds response caption to request and does not accept unbound dictionary text', async () => {
   for (const body of [
     { caption: 'different', state: 'READY', hints: [{ ...source, startKey:'key1',endKey:'key1', startOffset: 0, endOffset: 8, chineseGloss: '可靠的' }] },
-    { processedKeys:['key1'], hints: [{ ...source, startKey:'key1',endKey:'key1', startOffset: 0, endOffset: 8, chineseGloss: '可靠的，可信的' }] }
+    { processedKeys:['key1'], lexiconVersion:1, hints: [{ ...source, startKey:'key1',endKey:'key1', startOffset: 0, endOffset: 8, chineseGloss: '可靠的，可信的' }] }
   ]) {
     globalThis.fetch = async () => ({ ok: true, json: async () => body });
     assert.deepEqual(await send({ type: 'caption-hints', requestId: 'bounded', payload }, sender(1)), { ok: false, reason: 'invalid-response' });
@@ -178,7 +204,7 @@ test('diagnostic logs expose stage outcome and duration but not input or model o
   const info = console.info;
   console.info = (...values) => logs.push(values);
   try {
-    globalThis.fetch = async () => ({ ok: true, json: async () => ({ processedKeys:['key1'],
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ processedKeys:['key1'], lexiconVersion:1,
       hints: [{ ...source, startKey:'key1',endKey:'key1', startOffset: 0, endOffset: 8, chineseGloss: '可靠的' }] }) });
     const result = await send({ type: 'caption-hints', requestId: 'bounded', payload }, sender(1));
     assert.equal(result.ok, true);
@@ -192,7 +218,7 @@ test('diagnostic logs expose stage outcome and duration but not input or model o
 });
 
 test('accepts only bounded fixed-cardinality Server-Timing fields', async () => {
-  const body = { processedKeys:['key1'], hints: [{ ...source, startKey:'key1',endKey:'key1', startOffset:0, endOffset:8, chineseGloss:'可靠的' }] };
+  const body = { processedKeys:['key1'], lexiconVersion:1, hints: [{ ...source, startKey:'key1',endKey:'key1', startOffset:0, endOffset:8, chineseGloss:'可靠的' }] };
   globalThis.fetch = async () => ({ ok:true, json:async () => body, headers:{ get:() => 'query;dur=12.5, rules;dur=0.25, api;dur=13, private;dur=42' } });
   const result = await send({type:'caption-hints',requestId:'metrics',payload},sender(1));
   assert.deepEqual(result.timings, {query:12.5,rules:.25,api:13});
@@ -212,7 +238,7 @@ test('503 is a fixed backend outcome and never includes the response body', asyn
 test('diagnostic console failure cannot change response or request cleanup', async () => {
   const info=console.info;console.info=()=>{throw new Error('diagnostic sink unavailable');};
   try {
-    const body={processedKeys:['key1'],hints:[]};
+    const body={processedKeys:['key1'],lexiconVersion:1,hints:[]};
     globalThis.fetch=async()=>({ok:true,json:async()=>body});
     assert.deepEqual(await send({type:'caption-hints',requestId:'console-fault',payload},sender(1)),{ok:true,body,runtimeMode:'demo'});
     await send({type:'cancel-caption-hint',requestId:'console-fault'},sender(1));
@@ -230,6 +256,8 @@ test('timeout is distinct from explicit cancellation', async () => {
       options.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
     });
     const request = send({type:'caption-hints',requestId:'deadline',payload},sender(1));
+    for(let n=0;n<20 && !deadline;n++) await Promise.resolve();
+    assert.equal(typeof deadline, "function");
     deadline();
     assert.deepEqual(await request,{ok:false,reason:'timeout'});
   } finally { globalThis.setTimeout=schedule; globalThis.clearTimeout=cancel; }
@@ -240,25 +268,33 @@ test('malformed JSON is an invalid response rather than a network failure', asyn
   assert.deepEqual(await send({type:'caption-hints',requestId:'json',payload},sender(1)),{ok:false,reason:'invalid-response'});
 });
 
-test('preferences only write explicit entry IDs to local storage and never fetch', async () => {
-  let values={};
-  chrome.storage={local:{ get:async key => ({[key]:values[key]}),set:async next => {values={...values,...next};} }};
-  globalThis.fetch=()=>assert.fail('preference action must not reach the server');
+test('preferences use explicit localhost actions, no browser-local durable storage, and strict sender boundaries', async () => {
+  const before=preferenceCalls.length; globalThis.fetch=async(_url,_options)=>({ok:true,json:async()=>prefState});
   const entryId=source.lexiconEntryId;
-  assert.deepEqual(await send({type:'local-preferences',action:'suppress',entryId,lexiconVersion:1},sender(1)),{ok:true,entryKeys:[`${entryId}@1`]});
-  assert.deepEqual(values,{'lexiflow.suppressed-entries-v2':[`${entryId}@1`]});
-  assert.deepEqual(await send({type:'local-preferences',action:'read'},sender(2)),{ok:true,entryKeys:[`${entryId}@1`]});
-  assert.deepEqual(await send({type:'local-preferences',action:'restore-all'},sender(1)),{ok:true,entryKeys:[]});
-  assert.deepEqual(await send({type:'local-preferences',action:'suppress',entryId,lexiconVersion:1},{}),{ok:false,reason:'invalid-request'});
+  const expected={commonWordCutoff:1500,hidden:[{entryId,lemma:'reliable',gloss:'可靠的'}]};
+  prefState=expected;
+  assert.deepEqual(await send({type:'local-preferences',action:'hide',entryId},sender(1)),{ok:true,...expected});
+  assert.equal(preferenceCalls[before].url.endsWith('/preferences'),true); assert.equal(preferenceCalls[before].options.redirect,'error'); assert.equal(preferenceCalls[before].options.credentials,'omit');
+  assert.deepEqual(JSON.parse(preferenceCalls[before].options.body),{action:'hide',entryId});
+  assert.deepEqual(await send({type:'local-preferences',action:'read'},sender(2)),{ok:true,...expected});
+  assert.deepEqual(await send({type:'local-preferences',action:'hide',entryId,lemma:'reliable',gloss:'可靠的'},{}),{ok:false,reason:'invalid-request'});
+  assert.equal(chrome.storage,undefined);
 });
 
-test('popup identity can read and restore all but cannot suppress; sender identity is exact', async () => {
-  let values = { 'lexiflow.suppressed-entries-v2': [`${source.lexiconEntryId}@1`] };
-  chrome.storage={local:{ get:async key => ({[key]:values[key]}),set:async next => {values={...values,...next};} }};
+test('popup cannot read or write preferences; management page may update cutoff', async () => {
+  prefState={commonWordCutoff:1500,hidden:[]}; globalThis.fetch=async url=>({ok:true,json:async()=>url.endsWith("/recent-hints")?{items:[]}:prefState});
   const popup = { id:'extension-id', url:'chrome-extension://extension-id/popup.html' };
-  assert.deepEqual(await send({type:'local-preferences',action:'read'},popup),{ok:true,entryKeys:[`${source.lexiconEntryId}@1`]});
-  assert.deepEqual(await send({type:'local-preferences',action:'restore-all'},popup),{ok:true,entryKeys:[]});
-  assert.deepEqual(await send({type:'local-preferences',action:'suppress',entryId:source.lexiconEntryId,lexiconVersion:1},popup),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-preferences',action:'read'},popup),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-preferences',action:'setCutoff',commonWordCutoff:2000},popup),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-preferences',action:'hide',entryId:source.lexiconEntryId},popup),{ok:false,reason:'invalid-request'});
+  const manage={id:'extension-id',url:'chrome-extension://extension-id/manage.html',tab:{id:31},frameId:0};
+  assert.deepEqual(await send({type:'local-recent'},manage),{ok:true,items:[]});
+  assert.deepEqual(await send({type:'local-preferences',action:'read'},manage),{ok:true,...prefState});
+  assert.deepEqual(await send({type:'local-preferences',action:'setCutoff',commonWordCutoff:2000},manage),{ok:true,...prefState});
+  assert.deepEqual(await send({type:'local-lexicon',query:'',sort:'frequency',page:1,pageSize:20},manage),{ok:false,reason:'unavailable'});
+  assert.deepEqual(await send({type:'local-recent'},popup),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-recent'},{...manage,id:'other-extension'}),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-recent'},{...manage,url:'https://www.youtube.com/manage.html'}),{ok:false,reason:'invalid-request'});
   assert.deepEqual(await send({type:'local-preferences',action:'read'}, { ...popup, tab:{id:3} }),{ok:false,reason:'invalid-request'});
   assert.deepEqual(await send({type:'local-preferences',action:'read'}, { ...popup, url:'chrome-extension://extension-id/not-popup.html' }),{ok:false,reason:'invalid-request'});
   assert.deepEqual(await send({type:'local-preferences',action:'restore-all'}, { ...popup, id:'external-id' }),{ok:false,reason:'invalid-request'});
@@ -267,11 +303,99 @@ test('popup identity can read and restore all but cannot suppress; sender identi
   assert.deepEqual(await send({type:'local-preferences',action:'read'}, {id:'external-id',tab:{id:9}}),{ok:false,reason:'invalid-request'});
 });
 
+test('a confirmed preference change refreshes top-level content without reading tab URLs', async () => {
+  const {query,sendMessage}=chrome.tabs;
+  const sent=[];
+  chrome.tabs.query=async()=>[{id:71},{id:72},{}];
+  chrome.tabs.sendMessage=async(...args)=>{sent.push(args); if(args[0]===72) throw new Error('no content script');};
+  try {
+    const manage={id:'extension-id',url:'chrome-extension://extension-id/manage.html',tab:{id:73},frameId:0};
+    const reply=await send({type:'local-preferences',action:'setCutoff',commonWordCutoff:1500},manage);
+    assert.equal(reply.ok,true);
+    assert.deepEqual(sent,[71,72].map(id=>[id,{type:'preferences-changed'},{frameId:0}]));
+  } finally { chrome.tabs.query=query; chrome.tabs.sendMessage=sendMessage; }
+});
+
+test('recent hints send only actual entry IDs to loopback and return only the seven-day totals', async () => {
+  const entryId=source.lexiconEntryId;
+  const item={entryId,lemma:'reliable',gloss:'可靠的',count:5,frequencyRank:71};
+  const manage={id:'extension-id',url:'chrome-extension://extension-id/manage.html'};
+  const requests=[];
+  globalThis.fetch=async(url,options)=>{
+    requests.push({url,options});
+    const body=JSON.parse(options.body);
+    return body.action==='record'?new Response(null,{status:204}):Response.json({items:[{...item,daily:[2,3]}],retentionDays:8});
+  };
+  const present={type:'local-presented',entryIds:[entryId,entryId]};
+  assert.deepEqual(await send(present,sender(31)),{ok:true});
+  assert.deepEqual(await send({type:'local-recent'},manage),{ok:true,items:[item]});
+  for (const request of [
+    {...present,caption:'synthetic text'},
+    {...present,entryIds:[]},
+    {...present,entryIds:['-1']},
+    {...present,entryIds:Array(129).fill(entryId)}
+  ]) assert.deepEqual(await send(request,sender(31)),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send(present,manage),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send(present,{...sender(31),frameId:1}),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-recent',days:8},manage),{ok:false,reason:'invalid-request'});
+  assert.equal(requests.length,2);
+  assert.deepEqual(requests.map(({options})=>JSON.parse(options.body)),[{action:'record',entryIds:[entryId,entryId]},{action:'read'}]);
+  for (const {url,options} of requests) {
+    assert.match(url,/^http:\/\/127\.0\.0\.1:[0-9]+\/api\/v1\/recent-hints$/);
+    assert.equal(options.method,'POST');
+    assert.equal(options.cache,'no-store');
+    assert.equal(options.redirect,'error');
+    assert.equal(options.credentials,'omit');
+    assert.equal(options.referrerPolicy,'no-referrer');
+  }
+});
+
+test('unavailable or malformed recent-hint responses cannot masquerade as an empty ranking', async () => {
+  const manage={id:'extension-id',url:'chrome-extension://extension-id/manage.html'};
+  let calls=0;
+  globalThis.fetch=async()=>{calls++;throw new Error('synthetic disconnect');};
+  assert.deepEqual(await send({type:'local-presented',entryIds:[source.lexiconEntryId]},sender(31)),{ok:false,reason:'network'});
+  assert.equal(calls,1,'a failed record is not replayed');
+  globalThis.fetch=async()=>new Response(null,{status:503});
+  assert.deepEqual(await send({type:'local-recent'},manage),{ok:false,reason:'backend_unavailable'});
+  globalThis.fetch=async()=>Response.json({items:[{entryId:source.lexiconEntryId,lemma:'reliable',gloss:'可靠的',count:0}]});
+  assert.deepEqual(await send({type:'local-recent'},manage),{ok:false,reason:'invalid-response'});
+});
+
+test('lexicon browsing is server-paged and exact management sender only', async () => {
+  let fetched;
+  globalThis.fetch=async(url,options)=>{fetched={url:String(url),options}; return {ok:true,json:async()=>({items:[{entryId:'7',lemma:'reliable',gloss:'可靠的',frequencyRank:321,hintState:'eligible'}],total:31,page:2,pageSize:20})};};
+  const manage={id:'extension-id',url:'chrome-extension://extension-id/manage.html'};
+  assert.deepEqual(await send({type:'local-lexicon',query:'reliable',sort:'alphabet',page:2,pageSize:20},manage),
+    {ok:true,items:[{entryId:'7',lemma:'reliable',gloss:'可靠的',frequencyRank:321,hintState:'eligible'}],total:31,page:2,pageSize:20});
+  assert.match(fetched.url,/\/api\/v1\/lexicon\?/); assert.match(fetched.url,/query=reliable/); assert.match(fetched.url,/sort=alphabet/); assert.match(fetched.url,/page=2/);
+  assert.equal(fetched.options.method,'GET'); assert.equal(fetched.options.cache,'no-store');
+  assert.deepEqual(await send({type:'local-lexicon',query:'x',sort:'frequency',page:0,pageSize:20},manage),{ok:false,reason:'invalid-request'});
+  assert.deepEqual(await send({type:'local-lexicon',query:'',sort:'frequency',page:1,pageSize:20},sender(3)),{ok:false,reason:'invalid-request'});
+});
+
+test('caption requests coalesce preference reads and apply an explicitly updated cutoff', async () => {
+  prefState={commonWordCutoff:1500,hidden:[]}; const popup={id:'extension-id',url:'chrome-extension://extension-id/popup.html'};
+  await send({type:'local-preferences',action:'read'},popup);
+  const reads=preferenceCalls.filter(call=>JSON.parse(call.options.body).action==='read').length;
+  const posts=[];
+  globalThis.fetch=async(url,options)=>{ posts.push(JSON.parse(options.body)); return {ok:true,json:async()=>({processedKeys:['key1'],lexiconVersion:1,hints:[]})}; };
+  await send({type:'caption-hints',requestId:'cutoff-a',payload},sender(81));
+  await send({type:'caption-hints',requestId:'cutoff-b',payload},sender(82));
+  assert.equal(preferenceCalls.filter(call=>JSON.parse(call.options.body).action==='read').length,reads);
+  assert.deepEqual(posts,[payload,payload]);
+  const manage={id:'extension-id',url:'chrome-extension://extension-id/manage.html'};
+  assert.deepEqual(await send({type:'local-preferences',action:'setCutoff',commonWordCutoff:2000},manage),{ok:true,commonWordCutoff:2000,hidden:[]});
+  await send({type:'caption-hints',requestId:'cutoff-c',payload},sender(83));
+  assert.deepEqual(posts[2],payload);
+  assert.equal(preferenceCalls.filter(call=>JSON.parse(call.options.body).action==='read').length,reads);
+});
+
 
 test('duplicate timing names without a duration invalidate the dimension in either order',async()=>{
   for (const header of ['query, query;dur=3, api;dur=4', 'query;dur=3, query, api;dur=4',
       'query ;dur=3, query;dur=4, api;dur=4']) {
-    globalThis.fetch=async()=>({ok:true,json:async()=>({processedKeys:['key1'],hints:[]}),headers:{get:()=>header}});
+    globalThis.fetch=async()=>({ok:true,json:async()=>({processedKeys:['key1'],lexiconVersion:1,hints:[]}),headers:{get:()=>header}});
     assert.deepEqual((await send({type:'caption-hints',requestId:'duplicates',payload},sender(1))).timings,{api:4});
   }
 });
@@ -326,14 +450,71 @@ test('capability body is size-bounded and the body read shares the 1.5-second de
   await new Promise(resolve=>setTimeout(resolve,0)); assert.equal(posts,0);
 
   const nativeSetTimeout=globalThis.setTimeout, nativeClearTimeout=globalThis.clearTimeout;
-  let deadline;
+  let deadline, enteredBody = false;
   globalThis.setTimeout=(callback,ms,...args)=>{if(ms===1500){deadline=callback;return 989;}return nativeSetTimeout(callback,ms,...args);};
   globalThis.clearTimeout=handle=>{if(handle!==989)nativeClearTimeout(handle);};
   try {
     globalThis.fetch=async (_url,options)=>{if(options.method==='POST'){posts++;return {ok:true};}
-      return {ok:true,headers:validHeaders,text:()=>new Promise(()=>{})};};
+      return {ok:true,headers:validHeaders,text:()=>{ enteredBody = true; return new Promise(()=>{}); }};};
     await send(message,{...sender(72),frameId:0,tab:{id:72,url:`https://www.youtube.com/watch?v=${videoId}`}});
-    await Promise.resolve(); await Promise.resolve(); assert.equal(typeof deadline,'function'); deadline();
+    for(let n=0;n<20;n++) await Promise.resolve();
+    assert.equal(enteredBody,true); assert.equal(typeof deadline,'function'); deadline();
     await Promise.resolve(); await Promise.resolve(); assert.equal(posts,0);
   } finally { globalThis.setTimeout=nativeSetTimeout; globalThis.clearTimeout=nativeClearTimeout; }
+});
+
+
+test("connection editor checks before storing; failure preserves the current route and sends no data to the candidate", async () => {
+  let stored = { backendConnection: { mode: "auto" } }, candidateContract = "caption-hints.v3", writes = 0, releaseProbe;
+  const owner = { id: "extension-id", url: "chrome-extension://extension-id/manage.html#tab=9&page=current" };
+  globalThis.chrome.storage = { local: {
+    async get() { return stored; },
+    async set(value) { stored = value; writes++; }
+  } };
+  await import("../dist/background.js?connection-editor"); // fresh worker with an existing configuration
+  const calls = [];
+  const custom = "http://localhost:19081";
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "fetch");
+  Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (url, init) => {
+    calls.push({ url: String(url), init });
+    if (String(url).endsWith("/runtime-status")) {
+      if (String(url).includes(":18081")) throw new Error("must not probe another channel");
+      if (String(url).startsWith(custom)) return { ok: true, json: async () => ({ ...statusBody, softwareVersion: "1.2.4", apiContract: candidateContract }) };
+      if (String(url).includes(":19082")) return new Promise(resolve => { releaseProbe = resolve; });
+      return { ok: true, json: async () => statusBody };
+    }
+    if (String(url).endsWith("/preferences")) return { ok: true, json: async () => ({ commonWordCutoff: 1500, hidden: [] }) };
+    return { ok: true, json: async () => ({ processedKeys: ["key1"], lexiconVersion:1, hints: [] }) };
+  } });
+  try {
+    const apply = (origin, contact = owner) => send({ type: "backend-connection", origin }, contact);
+    assert.deepEqual(await apply(custom, {id:"extension-id", url:"chrome-extension://extension-id/popup.html"}), {ok:false,reason:"invalid-request"});
+    assert.deepEqual(await apply(custom, sender(9)), { ok: false, reason: "invalid-request" });
+    assert.deepEqual(await apply("http://192.168.1.1:19081"), { ok: false, reason: "invalid-request" });
+    assert.deepEqual(calls, []);
+    assert.equal((await send({ type: "runtime-status" }, owner)).origin, "http://127.0.0.1:18080");
+    assert.deepEqual([...new Set(calls.map(call => call.url))].sort(), [
+      "http://127.0.0.1:18080/api/v1/runtime-status"
+    ]);
+    calls.length = 0;
+
+    assert.deepEqual(await apply(custom), { ok: false, reason: "protocol-mismatch", expected:"caption-hints.v4", actual:"caption-hints.v3" });
+    const probing = apply("http://127.0.0.1:19082");
+    assert.deepEqual(await apply(custom), { ok: false, reason: "busy" });
+    releaseProbe({ ok: false });
+    assert.deepEqual(await probing, { ok: false, reason: "network" });
+    assert.equal(writes, 0);
+    assert.equal((await send({ type: "runtime-status" }, owner)).origin, "http://127.0.0.1:18080");
+    assert.ok(calls.every(call => call.init.method === "GET" && !("body" in call.init) && call.init.redirect === "error"));
+
+    candidateContract = "caption-hints.v4";
+    assert.deepEqual(await apply(custom + "/"), { ok: true, status: { ...statusBody, softwareVersion: "1.2.4" }, origin: custom });
+    assert.deepEqual(stored, { backendConnection: { mode: "custom", origin: custom } });
+    assert.equal((await apply(custom)).ok, true);
+    assert.equal(writes, 1, "checking the active address does not reset the connection");
+    calls.length = 0;
+    assert.equal((await send({ type: "caption-hints", requestId: "confirmed", payload }, sender(8))).ok, true);
+    assert.ok(calls.some(call => call.url === custom + "/api/v1/caption-hints" && call.init.redirect === "error"));
+    assert.ok(calls.every(call => call.url.startsWith(custom + "/")));
+  } finally { Object.defineProperty(globalThis, "fetch", descriptor); }
 });

@@ -51,7 +51,7 @@ class SegmentAnalysisDisabledHttpTest {
                   .header("Content-Type", "application/json")
                   .POST(
                       HttpRequest.BodyPublishers.ofString(
-                          "{\"captionTopicKey\":\"topic\",\"trackKey\":null,\"lastRequestedSnapshot\":null,\"currentSnapshot\":{\"captions\":[{\"windowId\":null,\"startMs\":null,\"segments\":[{\"key\":\"a\",\"text\":\"reliable\",\"offsetMs\":null,\"append\":true,\"line\":0}]}]}}"))
+                          "{\"previousSegments\":[],\"currentSnapshot\":{\"captions\":[{\"segments\":[{\"key\":\"a\",\"text\":\"reliable\",\"append\":true,\"line\":0}]}]}}"))
                   .build(),
               HttpResponse.BodyHandlers.ofString());
     }

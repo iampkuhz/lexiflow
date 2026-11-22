@@ -41,6 +41,32 @@ class SqliteDatasetPackageIntegrationTest {
           published.schema);
       assertEquals(4, SqliteTestSupport.scalar(connection, "SELECT COUNT(*) FROM lexicon_lookup"));
       assertEquals(2, SqliteTestSupport.scalar(connection, "SELECT COUNT(*) FROM lexicon_entry"));
+      assertEquals(
+          1,
+          SqliteTestSupport.scalar(
+              connection, "SELECT frequency_rank FROM lexicon_entry WHERE lemma='reliable'"));
+      assertEquals(
+          77,
+          SqliteTestSupport.scalar(
+              connection, "SELECT bnc_rank FROM lexicon_entry WHERE lemma='reliable'"));
+      assertEquals(
+          1,
+          SqliteTestSupport.scalar(
+              connection, "SELECT COUNT(*) FROM lexicon_entry WHERE frequency_rank IS NULL"));
+      assertThrows(
+          java.sql.SQLException.class,
+          () ->
+              execute(
+                  connection, "UPDATE lexicon_entry SET frequency_rank=1 WHERE lemma='reliably'"));
+      execute(connection, "UPDATE lexicon_entry SET frequency_rank=3 WHERE lemma='reliable'");
+      try (var update =
+          connection.prepareStatement("UPDATE lexicon_dataset SET content_sha256=?")) {
+        update.setString(1, DatasetContentChecksum.calculate(connection));
+        update.executeUpdate();
+      }
+      assertThrows(
+          java.io.IOException.class,
+          () -> SqliteDatasetVerifier.verify(connection, published.schema));
     }
     Path wrong = SqliteTestSupport.newDatabase(temporary);
     SqliteTestSupport.createEmpty(wrong);
@@ -303,7 +329,7 @@ class SqliteDatasetPackageIntegrationTest {
     long version =
         SqliteTestSupport.publish(
             source,
-            SqliteTestSupport.row("reliable", "可靠的", List.of("dependable"), List.of("reliably")),
+            rankedRow("reliable", "可靠的", List.of("dependable"), List.of("reliably")),
             SqliteTestSupport.row("reliably", "可靠地", List.of(), List.of()));
     Path zip = temporary.toRealPath().resolve("package-" + System.nanoTime() + ".zip");
     SqliteDatasetExport.Result exported;
@@ -317,4 +343,31 @@ class SqliteDatasetPackageIntegrationTest {
   }
 
   private record Package(Path zip, String sha, long version, byte[] schema) {}
+
+  private static io.lexiflow.lexicon.application.importing.model.LexiconImportRow rankedRow(
+      String lemma, String gloss, List<String> aliases, List<String> inflections) {
+    var source =
+        new io.lexiflow.lexicon.application.importing.model.SourceReference(
+            "fixture", "MIT", "row-" + lemma);
+    return new io.lexiflow.lexicon.application.importing.model.LexiconImportRow(
+        lemma,
+        gloss,
+        "definition",
+        aliases,
+        inflections,
+        new io.lexiflow.lexicon.domain.model.LexiconPriority(5.0, 1, 900),
+        source,
+        source,
+        List.of(source),
+        true,
+        false,
+        "fixture",
+        gloss,
+        77L,
+        999L,
+        List.of(),
+        false,
+        false,
+        false);
+  }
 }

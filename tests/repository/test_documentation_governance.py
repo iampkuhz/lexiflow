@@ -366,10 +366,11 @@ class DocumentationTests(unittest.TestCase):
 
     def test_fences_and_anchors(self):
         text = '# 中文标题\n\n<a id="stable"></a>\n```plantuml\n@startuml\nA -> B\n@enduml\n```\n'
-        _outside, diagrams, errors = docs_check.parse(text)
+        parsed = docs_check.parse(text)
+        _outside, diagrams, errors = parsed
         self.assertFalse(errors)
         self.assertEqual(len(diagrams), 1)
-        self.assertEqual(docs_check.anchors(text), {"中文标题", "stable"})
+        self.assertEqual(docs_check.anchors_from_parsed(parsed), {"中文标题", "stable"})
         self.assertTrue(docs_check.parse("```plantuml\n@startuml")[2])
 
     def test_links_and_diagram_failures(self):

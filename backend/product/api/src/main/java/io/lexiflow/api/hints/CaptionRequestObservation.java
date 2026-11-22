@@ -115,16 +115,6 @@ public final class CaptionRequestObservation {
   }
 
   /**
-   * 生成唯一终态；只能由请求过滤器调用一次。
-   *
-   * @param finishedNanos 含义：请求出口的单调时钟读数。取值范围：与入口时钟同源。
-   * @return 仅由固定原因、数字计数和阶段耗时组成的终态事件。
-   */
-  public synchronized StructuredEvent terminal(long finishedNanos) {
-    return terminal(finishedNanos, 200);
-  }
-
-  /**
    * 生成唯一终态；若控制器未设置原因，则按最终 HTTP 状态确定固定兜底原因。
    *
    * @param finishedNanos 含义：请求出口的单调时钟读数。取值范围：与入口时钟同源。

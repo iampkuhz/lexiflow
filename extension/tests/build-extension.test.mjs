@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { EXTENSION_PACKAGE_FILES } from "../scripts/packaging/extension-archive-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const runtimeJs = ["background.js", "content.js", "popup.js", "youtube-bridge.js"];
+const runtimeJs = ["background.js", "content.js", "manage.js", "popup.js", "youtube-bridge.js"];
 async function files(directory, prefix = "") {
   const result = [];
   for (const item of await readdir(directory, { withFileTypes: true })) {
@@ -17,7 +17,7 @@ async function files(directory, prefix = "") {
   return result.sort();
 }
 
-test("production build contains only four runtime JavaScript bundles and package inputs", async () => {
+test("production build contains only the runtime bundles and package inputs", async () => {
   const dist = path.join(root, "dist");
   const names = await files(dist);
   assert.deepEqual(names, EXTENSION_PACKAGE_FILES.filter(name => name !== "expected-dataset.json").sort());
@@ -26,6 +26,8 @@ test("production build contains only four runtime JavaScript bundles and package
   assert.ok(names.includes("build-identity.json"));
   assert.ok(names.includes("popup.html"));
   assert.ok(names.includes("popup.css"));
+  assert.ok(names.includes("manage.html"));
+  assert.ok(names.includes("manage.css"));
   assert.ok(names.some(name => name.startsWith("assets/icon-")));
   assert.equal(names.some(name => name.includes("test")), false);
 });
@@ -38,5 +40,5 @@ test("test-only modules are compiled separately and share ESM chunks", async () 
   assert.equal((await stat(path.join(root, "dist"))).isDirectory(), true);
   const manifest = JSON.parse(await readFile(path.join(root, "dist/manifest.json"), "utf8"));
   assert.deepEqual(manifest.permissions, ["storage"]);
-  assert.deepEqual(manifest.host_permissions, ["http://127.0.0.1:18080/*"]);
+  assert.deepEqual(manifest.host_permissions, ["http://127.0.0.1/*", "http://localhost/*"]);
 });

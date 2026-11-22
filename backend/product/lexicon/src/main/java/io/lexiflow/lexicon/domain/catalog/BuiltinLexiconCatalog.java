@@ -1,6 +1,5 @@
 package io.lexiflow.lexicon.domain.catalog;
 
-import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import io.lexiflow.lexicon.domain.model.LexiconLookupResult;
@@ -21,6 +20,28 @@ public final class BuiltinLexiconCatalog implements LexiconCatalog {
           entry("context", "语境；上下文"),
           entry("caption", "字幕；说明文字"),
           entry("deliver", "交付；传达"));
+
+  /**
+   * Returns synthetic display data only for the explicit demo runtime.
+   *
+   * @param ids 含义：请求的稳定词条身份。取值范围：非 null 的正 long 集合。
+   * @return 内置合成词库中存在且可展示的词条，不包含未知身份。
+   */
+  public List<io.lexiflow.lexicon.domain.model.LexiconBrowseEntry> displayableByIds(
+      java.util.Collection<Long> ids) {
+    return ENTRIES.stream()
+        .filter(e -> ids.contains(e.entryId()))
+        .map(
+            e ->
+                new io.lexiflow.lexicon.domain.model.LexiconBrowseEntry(
+                    e.entryId(),
+                    e.normalizedForm(),
+                    e.finalGloss(),
+                    e.bncRank(),
+                    e.frequencyRank(),
+                    io.lexiflow.lexicon.domain.model.PublishedHintState.ELIGIBLE))
+        .toList();
+  }
 
   /**
    * 返回字幕中的测试候选，优先更长的词段。
@@ -69,12 +90,10 @@ public final class BuiltinLexiconCatalog implements LexiconCatalog {
         LexiconIdentity.entryId(lemma),
         LexiconIdentity.senseId(1, lemma),
         1,
-        "en",
         lemma,
-        lemma,
-        lemma.contains(" ") ? LexiconEntryKind.PHRASE : LexiconEntryKind.WORD,
         LexiconHintAction.HINT,
         gloss,
-        100);
+        100,
+        null);
   }
 }

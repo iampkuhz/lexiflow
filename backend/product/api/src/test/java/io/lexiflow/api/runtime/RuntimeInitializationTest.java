@@ -13,7 +13,7 @@ import org.junit.jupiter.api.io.TempDir;
 class RuntimeInitializationTest {
   private static final String SHA = "a".repeat(64);
   private static final String IDENTITY =
-      "{\"schemaVersion\":1,\"softwareVersion\":\"1.2.3\",\"buildIdentity\":{\"softwareVersion\":\"1.2.3\"},\"apiContract\":\"caption-hints.v2\",\"sqlVersion\":\"sql1\",\"dataset\":{\"releaseId\":\"rel\",\"preparationId\":\"prep\",\"ruleId\":\"rule\",\"bytes\":2,\"sha256\":\""
+      "{\"schemaVersion\":1,\"softwareVersion\":\"1.2.3\",\"buildIdentity\":{\"softwareVersion\":\"1.2.3\"},\"apiContract\":\"caption-hints.v4\",\"sqlVersion\":\"sql1\",\"dataset\":{\"releaseId\":\"rel\",\"preparationId\":\"prep\",\"ruleId\":\"rule\",\"bytes\":2,\"sha256\":\""
           + SHA
           + "\"}}";
   private static final String PROOF =

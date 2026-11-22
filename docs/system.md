@@ -17,7 +17,7 @@ LexiFlow 的请求与持久化关系如下：**E1** YouTube 页面将已渲染�
 
 ## 1.2. 核心业务模型
 
-Lexicon 保存跨内容复用的词汇知识及发布版本；Enrichment 接收 `CaptionContext`，据已发布资料决定当前词段是否提示。词条命中不等于提示，提示也不等于改变词库事实。资料改进须经 Lexicon 公开发布合同后才影响后续观看。
+Lexicon 保存跨内容复用的词汇知识及发布版本；Enrichment 接收 `CaptionIncrementalRequest`，据已发布资料决定当前词段是否提示。词条命中不等于提示，提示也不等于改变词库事实。资料改进须经 Lexicon 公开发布合同后才影响后续观看。
 
 两个业务领域各自包含 `domain` 与 `application` 包，`:adapters` 实现技术端口，`:api` 是唯一 Spring Boot 组合根。后台用例若增加，仍由所属业务模块实现并由同一应用装配，不新建产品 worker 进程。依赖方向、项目清单及代码位置见[模块边界](system/modules.md)；持久化字段见[词库持久化模型](system/lexicon/data-model.md)。
 

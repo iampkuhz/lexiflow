@@ -2,6 +2,9 @@
 set -Eeuo pipefail
 readonly ROOT=/var/lib/lexiflow
 readonly DB=/var/lib/lexiflow/lexicon.db
+readonly PREFERENCES_DIR=/var/lib/lexiflow/preferences
+readonly PREFERENCES_DB=/var/lib/lexiflow/preferences/preferences.db
+readonly PREFERENCES_MOUNT_INFO=/proc/self/mountinfo
 readonly RUN=/run/lexiflow
 readonly IDENTITY=/app/release-identity.env
 readonly IDENTITY_JSON=/app/release-identity.json
@@ -34,14 +37,13 @@ read_identity() {
     esac
   done < "$IDENTITY"
   [[ "$count" -eq 8 && "${seen_schema:-}${seen_software:-}${seen_contract:-}${seen_sql:-}${seen_release:-}${seen_preparation:-}${seen_rule:-}${seen_digest:-}" == 11111111 ]] || fail identity-invalid
-  [[ "$schema_version" == 1 && "$api_contract" == caption-hints.v2 ]] || fail identity-invalid
+  [[ "$schema_version" == 1 && "$api_contract" =~ ^caption-hints\.v[1-9][0-9]{0,8}$ ]] || fail identity-invalid
   bounded_id "$software_version" && bounded_id "$sql_version" && bounded_id "$release_id" && bounded_id "$preparation_id" && bounded_id "$rule_id" && hex64 "$dataset_sha256" || fail identity-invalid
   SOFTWARE_VERSION=$software_version API_CONTRACT=$api_contract SQL_VERSION=$sql_version \
     RELEASE_ID=$release_id PREPARATION_ID=$preparation_id RULE_ID=$rule_id DATASET_SHA256=$dataset_sha256
 }
-identity_line() { cat -- "$IDENTITY"; }
 volume_identity_line() {
-  printf 'schemaVersion=3|apiContract=caption-hints.v2|sqlVersion=%s|releaseId=%s|preparationId=%s|ruleId=%s|datasetSha256=%s' \
+  printf 'schemaVersion=4|sqlVersion=%s|releaseId=%s|preparationId=%s|ruleId=%s|datasetSha256=%s' \
     "$SQL_VERSION" "$RELEASE_ID" "$PREPARATION_ID" "$RULE_ID" "$DATASET_SHA256"
 }
 write_marker() {
@@ -161,8 +163,8 @@ http_status_body() {
 
 runtime_health() {
   http_status_body /internal/container-health || return 1
-  local health_re='^\{"softwareVersion":"[A-Za-z0-9._+-]+","apiContract":"caption-hints\.v2","mode":"formal","ready":true,"reason":"(OK|PREWARM_DEGRADED)","datasetVersion":[1-9][0-9]*,"publishedDataset":\{"releaseId":"[A-Za-z0-9._+-]+","preparationId":"[A-Za-z0-9._+-]+","ruleId":"[A-Za-z0-9._+-]+","sqlVersion":"[A-Za-z0-9._+-]+","sha256":"[0-9a-f]{64}"\}\}$'
-  [[ "$HTTP_BODY" =~ $health_re ]]
+  local health_re='^\{"softwareVersion":"[A-Za-z0-9._+-]+","apiContract":"caption-hints\.v[1-9][0-9]{0,8}","mode":"formal","ready":true,"reason":"(OK|PREWARM_DEGRADED)","datasetVersion":[1-9][0-9]*,"publishedDataset":\{"releaseId":"[A-Za-z0-9._+-]+","preparationId":"[A-Za-z0-9._+-]+","ruleId":"[A-Za-z0-9._+-]+","sqlVersion":"[A-Za-z0-9._+-]+","sha256":"[0-9a-f]{64}"\}\}$'
+  [[ "$HTTP_BODY" =~ $health_re && "$HTTP_BODY" == *\"apiContract\":\"$API_CONTRACT\"* ]]
 }
 
 
@@ -173,13 +175,35 @@ stop_api() {
   if [[ -n "$API_PID" ]]; then kill -TERM "$API_PID" 2>/dev/null || :; while kill -0 "$API_PID" 2>/dev/null && ((SECONDS < deadline)); do sleep 1; done; if kill -0 "$API_PID" 2>/dev/null; then kill -KILL "$API_PID" 2>/dev/null || :; rc=1; fi; wait "$API_PID" 2>/dev/null || :; fi
   API_PID=''; return "$rc"
 }
+verify_storage_volume() {
+  local kind=$1 file
+  case "$kind" in
+    lexicon) file=$DB;;
+    preferences) file=$PREFERENCES_DB;;
+    *) fail storage-role-invalid;;
+  esac
+  if [[ -e "$file" || -L "$file" ]]; then
+    [[ -f "$file" && ! -L "$file" && -O "$file" ]] || fail "$kind-storage-ownership-invalid"
+    timeout --kill-after=1s 15s java -Xms32m -Xmx128m -jar "$JAR" --verify-storage "$kind" "$file" >/dev/null 2>&1 ||
+      fail "$kind-storage-incompatible"
+  fi
+}
 runtime_start() {
+  [[ -d "$PREFERENCES_DIR" && ! -L "$PREFERENCES_DIR" && -O "$PREFERENCES_DIR" && -w "$PREFERENCES_DIR" ]] || fail preferences-volume-invalid
+  awk -v target="$PREFERENCES_DIR" '$5 == target { found=1 } END { exit !found }' "$PREFERENCES_MOUNT_INFO" 2>/dev/null || fail preferences-volume-not-mounted
+  local preference_item; local -a preference_entries=()
+  shopt -s nullglob dotglob; preference_entries=("$PREFERENCES_DIR"/*); shopt -u nullglob dotglob
+  for preference_item in ${preference_entries[@]+"${preference_entries[@]}"}; do
+    case "${preference_item##*/}" in preferences.db|preferences.db-journal) [[ -f "$preference_item" && ! -L "$preference_item" && -O "$preference_item" ]] || fail preferences-file-invalid;; *) fail preferences-volume-unknown-content;; esac
+  done
   local dataset_hash item; local -a entries=()
   [[ "$(id -u)" == 10001 ]] || fail runtime-user-invalid
   [[ -f "$JAR" && ! -L "$JAR" && -f "$DATASET" && ! -L "$DATASET" ]] || fail runtime-input-invalid
   [[ -d "$ROOT" && ! -L "$ROOT" && -O "$ROOT" && -d "$RUN" && ! -L "$RUN" && -O "$RUN" ]] || fail runtime-directory-invalid
   [[ "$(stat -c '%a' "$ROOT")" == 700 && "$(stat -c '%a' "$RUN")" == 700 ]] || fail runtime-directory-permissions
   read_identity
+  [[ "$(timeout --kill-after=1s 15s java -Xms32m -Xmx128m -jar "$JAR" --api-contract)" == "$API_CONTRACT" ]] || fail api-contract-artifact-mismatch
+  timeout --kill-after=1s 15s java -Xms32m -Xmx128m -jar "$JAR" --storage-contract >/dev/null || fail storage-contract-artifact-mismatch
   dataset_hash=$(sha256sum < "$DATASET" | cut -d ' ' -f1) || fail dataset-invalid
   [[ "$dataset_hash" == "$DATASET_SHA256" ]] || fail dataset-digest-mismatch
   if [[ -e "$DB" || -L "$DB" ]]; then [[ -f "$DB" && ! -L "$DB" && -O "$DB" ]] || fail sqlite-file-invalid; fi
@@ -187,12 +211,20 @@ runtime_start() {
   else
     # The named volume is expected to be empty. Never adopt existing unknown files.
     shopt -s nullglob dotglob; entries=("$ROOT"/*); shopt -u nullglob dotglob
-    ((${#entries[@]} == 0)) || fail volume-unknown-content
+    if ((${#entries[@]} != 0)); then
+      ((${#entries[@]} == 1)) && [[ "${entries[0]##*/}" == preferences && -d "$PREFERENCES_DIR" && ! -L "$PREFERENCES_DIR" ]] || fail volume-unknown-content
+    fi
     printf 'lexiflow-runtime\n' > "$ROOT/.lexiflow-owner"; chmod 0600 "$ROOT/.lexiflow-owner"
   fi
   shopt -s nullglob dotglob; entries=("$ROOT"/*); shopt -u nullglob dotglob
   for item in ${entries[@]+"${entries[@]}"}; do
     case "${item##*/}" in
+      preferences)
+        [[ -d "$PREFERENCES_DIR" && ! -L "$PREFERENCES_DIR" && -O "$PREFERENCES_DIR" ]] || fail preferences-volume-invalid
+        shopt -s nullglob dotglob; preference_entries=("$PREFERENCES_DIR"/*); shopt -u nullglob dotglob
+        for preference_item in ${preference_entries[@]+"${preference_entries[@]}"}; do
+          case "${preference_item##*/}" in preferences.db|preferences.db-journal) [[ -f "$preference_item" && ! -L "$preference_item" && -O "$preference_item" ]] || fail preferences-file-invalid;; *) fail preferences-volume-unknown-content;; esac
+        done;;
       .lexiflow-owner|.lexiflow-ready|.lexiflow-ready.pending|.lexiflow-initializing|.lexiflow-initializing.pending|lexicon.db|lexicon.db-journal) [[ ! -L "$item" ]] || fail volume-path-invalid;;
       *) fail volume-unknown-content;;
     esac
@@ -207,6 +239,15 @@ runtime_start() {
   fi
   if [[ -e "$DB" && ! -e "$ROOT/.lexiflow-ready" && ! -e "$ROOT/.lexiflow-ready.pending" \
       && ! -e "$ROOT/.lexiflow-initializing" && ! -e "$ROOT/.lexiflow-initializing.pending" ]]; then fail sqlite-initialization-proof-missing; fi
+  verify_storage_volume lexicon
+  verify_storage_volume preferences
+  if [[ ! -e "$PREFERENCES_DB" ]]; then
+    umask 077
+    timeout --kill-after=1s 30s java -Xms32m -Xmx128m -Djava.io.tmpdir=/tmp -jar "$JAR" --init-preferences "jdbc:sqlite:$PREFERENCES_DB" >/dev/null 2>&1 || fail preferences-initialize-failed
+  fi
+  [[ -f "$PREFERENCES_DB" && ! -L "$PREFERENCES_DB" && -O "$PREFERENCES_DB" ]] || fail preferences-database-unavailable
+  chmod 0600 "$PREFERENCES_DB" || fail preferences-database-permissions
+  export LEXIFLOW_PREFERENCES_JDBC_URL="jdbc:sqlite:$PREFERENCES_DB"
   prepare_run_state
   trap 'rc=$?; trap - EXIT; stop_api || rc=1; exit "$rc"' EXIT
   trap 'exit 129' HUP
@@ -245,7 +286,28 @@ runtime_start() {
 }
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   case "${1:-}" in
-    health) [[ "$#" -eq 1 ]] || exit 64; runtime_health;;
+    health) [[ "$#" -eq 1 ]] || exit 64; read_identity; runtime_health;;
+    check-volume)
+      [[ "$#" -eq 2 && "$(id -u)" == 10001 ]] || exit 64
+      read_identity
+      case "$2" in
+        lexicon)
+          [[ -f "$DB" && -f "$ROOT/.lexiflow-owner" && ! -L "$ROOT/.lexiflow-owner" &&
+              "$(cat "$ROOT/.lexiflow-owner")" == lexiflow-runtime &&
+              -f "$ROOT/.lexiflow-ready" && ! -L "$ROOT/.lexiflow-ready" &&
+              "$(cat "$ROOT/.lexiflow-ready")" == "$(volume_identity_line)" ]] || fail lexicon-storage-proof-missing;;
+        preferences)
+          [[ -f "$PREFERENCES_DB" ]] || fail preferences-storage-proof-missing;;
+        *) exit 64;;
+      esac
+      verify_storage_volume "$2"
+      printf 'PASS\n';;
+
+    init-preferences)
+      [[ "$#" -eq 1 && -d "$PREFERENCES_DIR" && ! -L "$PREFERENCES_DIR" && -w "$PREFERENCES_DIR" ]] || exit 64
+      awk -v target="$PREFERENCES_DIR" '$5 == target { found=1 } END { exit !found }' "$PREFERENCES_MOUNT_INFO" 2>/dev/null || exit 64
+      umask 077
+      exec java -Xms32m -Xmx128m -jar "$JAR" --init-preferences "jdbc:sqlite:$PREFERENCES_DB";;
     run|'') [[ "$#" -le 1 ]] || exit 64; runtime_start;;
     *) exit 64;;
   esac

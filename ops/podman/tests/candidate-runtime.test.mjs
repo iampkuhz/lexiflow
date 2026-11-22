@@ -69,19 +69,74 @@ async function lifecycleFunction(name, nextName, bindings) {
   return { execute: new Script(`${source.slice(start, end)}; ${name}`).runInContext(context), source };
 }
 
+test('candidate startup explicitly mounts an owned preferences volume alongside the lexicon volume', async () => {
+  const calls = [];
+  const { execute: run } = await lifecycleFunction('containerRun', 'removeContainer', {
+    ensurePreferenceVolume: (_, volume, token) => {
+      assert.equal(volume, 'owned-data');
+      assert.equal(token, 'owner');
+      return 'owned-data-preferences';
+    },
+    cmd: (_, label, args) => { calls.push([label, Array.from(args)]); return { ok: true }; },
+  });
+  run('', { name: 'candidate', volume: 'owned-data', image: 'image', token: 'owner' });
+  assert.equal(calls[0][0], 'container-run');
+  assert.ok(calls[0][1].includes('--image-volume=ignore'));
+  assert.deepEqual(calls[0][1].filter((value, index, all) => all[index - 1] === '--volume'), [
+    'owned-data:/var/lib/lexiflow',
+    'owned-data-preferences:/var/lib/lexiflow/preferences',
+  ]);
+});
+
+test('candidate reuses only the same owned preferences volume; collisions and drift are rejected', async () => {
+  let current;
+  let creations = 0;
+  const { execute: ensure } = await lifecycleFunction('ensurePreferenceVolume', 'proveAutoVolume', {
+    preferenceVolumes: new Map(),
+    inspectVolume: () => current,
+    createVolume: (_, name, token) => {
+      creations++;
+      current = { name, token, created: 1 };
+    },
+    assertOwned: (item, token) => assert.equal(item?.token, token),
+    volumeIdentity: ({ name, created }) => ({ name, created }),
+  });
+  current = { name: 'data-preferences', token: 'someone-else', created: 99 };
+  assert.throws(() => ensure('', 'data', 'owner'), /PREFERENCE_VOLUME_NAME_COLLISION/);
+  assert.equal(creations, 0);
+  current = undefined;
+  assert.equal(ensure('', 'data', 'owner'), 'data-preferences');
+  assert.equal(ensure('', 'data', 'owner'), 'data-preferences');
+  assert.equal(creations, 1);
+  current = { ...current, created: 2 };
+  assert.throws(() => ensure('', 'data', 'owner'), /PREFERENCE_VOLUME_IDENTITY_CHANGED/);
+});
+
 test('unknown-volume probe waits for exit and rejects timeout or successful exit', async () => {
   for (const exit of [{ State: { ExitCode: 1 } }, null, { State: { ExitCode: 0 } }]) {
     let waited = false;
     // The setup write precedes the wait, so distinguish it from retention probes.
     const { execute: probe, source } = await lifecycleFunction('incompatibleVolume', 'faultSqliteDatabase', {
       createVolume: () => {}, containerRun: () => ({ ok: true }),
-      cmd: (_, label) => { if (label !== 'incompatible-marker') assert.equal(waited, true); return { ok: true }; },
+      cmd: (_, label) => {
+        if (label !== 'incompatible-marker') assert.equal(waited, true);
+        return { ok: true, stderr: 'lexiflow-runtime: volume-unknown-content\n' };
+      },
       observeWait: async () => { await Promise.resolve(); waited = true; return exit; },
     });
     if (exit?.State.ExitCode === 1) assert.equal(await probe('', 'container', 'image', 'volume', 'owner', {}, []), true);
     else await assert.rejects(probe('', 'container', 'image', 'volume', 'owner', {}, []), /INCOMPATIBLE_VOLUME_NOT_REJECTED/);
     assert.match(source, /await incompatibleVolume\(root,badName/u);
   }
+});
+
+test('candidate does not count a missing preferences mount as an incompatible lexicon volume refusal', async () => {
+  const { execute: probe } = await lifecycleFunction('incompatibleVolume', 'faultSqliteDatabase', {
+    createVolume: () => {}, containerRun: () => ({ ok: true }),
+    cmd: () => ({ ok: true, stderr: 'lexiflow-runtime: preferences-volume-not-mounted\n' }),
+    observeWait: async () => ({ State: { ExitCode: 1 } }),
+  });
+  await assert.rejects(probe('', 'container', 'image', 'volume', 'owner', {}, []), /INCOMPATIBLE_VOLUME_REFUSAL_UNPROVEN/);
 });
 
 test('owned running-container cleanup confirms graceful stop before removal', async () => {

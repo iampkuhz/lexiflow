@@ -9,13 +9,20 @@ import * as fs from 'node:fs';
 import fsDefault from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { runInNewContext } from 'node:vm';
+import { runVersionStates } from '../test_tools/version-state-fixture.mjs';
 import { parseVersion, resolveCleanBuildIdentity, checkReleaseSource } from '../integrity/source-build-identity.mjs';
 import { evaluateTapSummary, runTests } from '../test_tools/run-release-tool-tests.mjs';
 
-const git = (cwd, ...args) => execFileSync('git', args, { cwd, stdio: 'ignore', timeout: 10_000, env: { ...process.env, GIT_AUTHOR_DATE: '2026-10-05T00:00:00Z', GIT_COMMITTER_DATE: '2026-10-05T18:00:00Z' } });
+// 只隔离本文件创建的合成仓库；首次 init 前即生效，不修改用户 Git 配置。
+const fixtureGitConfig = { 'maintenance.auto': 'false', 'gc.auto': '0', 'maintenance.autoDetach': 'false', 'gc.autoDetach': 'false' };
+const fixtureGitArgs = Object.entries(fixtureGitConfig).flatMap(([key, value]) => ['-c', `${key}=${value}`]);
+const git = (cwd, ...args) => execFileSync('git', [...fixtureGitArgs, ...args], { cwd, stdio: 'ignore', timeout: 10_000, env: { ...process.env, GIT_AUTHOR_DATE: '2026-10-05T00:00:00Z', GIT_COMMITTER_DATE: '2026-10-05T18:00:00Z' } });
 function createFixture({ head = true, ignore = false } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-release-'));
-  git(root, 'init', '-q'); git(root, 'config', 'user.email', 'fixture@example.invalid'); git(root, 'config', 'user.name', 'Fixture');
+  git(root, 'init', '-q');
+  // 完整复制的本地配置也约束 version-state-fixture Worker 后续的真实 Git 写入。
+  for (const [key, value] of Object.entries(fixtureGitConfig)) git(root, 'config', '--local', key, value);
+  git(root, 'config', 'user.email', 'fixture@example.invalid'); git(root, 'config', 'user.name', 'Fixture');
   mkdirSync(path.join(root, 'ops/release/integrity'), { recursive: true });
   writeFileSync(path.join(root, 'ops/release/version.txt'), '1.2.3\n');
   writeFileSync(path.join(root, 'source'), 'fixture');
@@ -31,23 +38,156 @@ function fixture({ head = true, ignore = false } = {}) {
   const key = JSON.stringify({ head, ignore });
   if (!fixtureSeeds.has(key)) fixtureSeeds.set(key, createFixture({ head, ignore }));
   const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-release-'));
-  try { cpSync(fixtureSeeds.get(key), root, { recursive: true }); return root; }
+  try {
+    // 完整复制静止 seed 的全部 .git/objects；任何成员消失仍直接失败，
+    // 不跳过文件、不重试半拷贝，也不复用 index/refs 或旧验证结果。
+    cpSync(fixtureSeeds.get(key), root, { recursive: true, filter: () => true });
+    return root;
+  }
   catch (error) { rmSync(root, { recursive: true, force: true }); throw error; }
 }
 const withFixture = (options, body) => { const root = fixture(options); try { body(root); } finally { rmSync(root, { recursive: true, force: true }); } };
 const summary = (n = 1) => `TAP version 13\n${Array.from({ length: n }, (_, i) => `ok ${i + 1} - valid`).join('\n')}\n1..${n}\n# tests ${n}\n# pass ${n}\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n`;
 
+test('synthetic Git isolates maintenance before init even with hostile inherited config', () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-maintenance-'));
+  const trace = path.join(directory, 'trace.jsonl');
+  const environment = { GIT_CONFIG_COUNT: '4', GIT_TRACE2_EVENT: trace };
+  for (const [index, [key, value]] of Object.entries(fixtureGitConfig).entries()) {
+    environment[`GIT_CONFIG_KEY_${index}`] = key;
+    environment[`GIT_CONFIG_VALUE_${index}`] = value === 'false' ? 'true' : '1';
+  }
+  const previous = Object.fromEntries(Object.keys(environment).map(key => [key, process.env[key]]));
+  const original = childProcess.execFileSync;
+  let root;
+  let observedInit = false;
+  childProcess.execFileSync = function (command, args, options) {
+    if (command === 'git') {
+      assert.deepEqual(args.slice(0, fixtureGitArgs.length), fixtureGitArgs);
+      if (!observedInit) {
+        root = options.cwd;
+        assert.equal(args[fixtureGitArgs.length], 'init');
+        assert.equal(fs.existsSync(path.join(root, '.git')), false);
+        // 在真实 init 发生之前读取真实命令作用域；相反的继承配置不能覆盖隔离。
+        for (const [key, value] of Object.entries(fixtureGitConfig)) {
+          assert.equal(original.call(this, 'git', [...fixtureGitArgs, 'config', '--get', key], {
+            ...options, stdio: 'pipe', encoding: 'utf8',
+          }).trim(), value);
+        }
+        observedInit = true;
+      }
+    }
+    return original.call(this, command, args, options);
+  };
+  try {
+    Object.assign(process.env, environment);
+    syncBuiltinESMExports();
+    assert.equal(createFixture(), root);
+    assert.equal(observedInit, true);
+    // seed 的本地配置必须随完整 .git 复制，供 Worker 中未加命令前缀的写操作使用。
+    for (const [key, value] of Object.entries(fixtureGitConfig)) {
+      assert.equal(original('git', ['-C', root, 'config', '--local', '--get', key], {
+        encoding: 'utf8', timeout: 10_000,
+      }).trim(), value);
+    }
+    const events = fs.readFileSync(trace, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    assert.ok(events.some(event => event.event === 'start' && event.argv.includes('commit')));
+    assert.equal(events.some(event => event.event === 'child_start'
+      && event.argv.some(arg => arg === 'maintenance' || arg === 'gc')), false);
+  } finally {
+    childProcess.execFileSync = original;
+    syncBuiltinESMExports();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    if (root) rmSync(root, { recursive: true, force: true });
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('fixture copy fails closed and removes its target when a source member disappears', () => {
+  const original = fsDefault.cpSync;
+  let lock;
+  let target;
+  let disappeared = false;
+  fsDefault.cpSync = function (source, destination, options) {
+    target = destination;
+    lock = path.join(source, '.git/objects/maintenance.lock');
+    writeFileSync(lock, 'synthetic disappearance');
+    return original(source, destination, { ...options, filter(from, to) {
+      const include = options.filter(from, to);
+      if (from === lock) { assert.equal(include, true); unlinkSync(lock); disappeared = true; }
+      return include;
+    } });
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => fixture(), error => error.code === 'ENOENT' && error.path === lock);
+    assert.equal(disappeared, true);
+    assert.equal(fs.existsSync(target), false);
+  } finally {
+    fsDefault.cpSync = original;
+    syncBuiltinESMExports();
+    if (lock) rmSync(lock, { force: true });
+    if (target) rmSync(target, { recursive: true, force: true });
+  }
+});
+
 test('copied version fixtures isolate worktree, index, refs and cleanup', () => {
   const first = fixture(), second = fixture();
+  const seed = fixtureSeeds.get(JSON.stringify({ head: true, ignore: false }));
+  const members = (root, prefix = '') => fs.readdirSync(path.join(root, prefix), { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name)).flatMap(entry => {
+      const name = path.join(prefix, entry.name);
+      return entry.isDirectory() ? [[name, 'directory'], ...members(root, name)]
+        : [[name, fs.readFileSync(path.join(root, name)).toString('hex')]];
+    });
+  const assertMembers = (actual, expected, label) => {
+    assert.deepEqual(actual.map(([name]) => name), expected.map(([name]) => name), `${label}: members`);
+    for (let i = 0; i < expected.length; i++) {
+      assert.equal(actual[i][1] === expected[i][1], true, `${label}: ${expected[i][0]} bytes`);
+    }
+  };
+  // Git 原生输出核对 path/OID/mode/stage；status 允许刷新 index 的本机 stat cache。
+  const indexFacts = root => execFileSync('git', ['-C', root, 'ls-files', '--stage', '-z'], {
+    encoding: 'utf8', timeout: 10_000,
+  });
   try {
+    const expectedMembers = members(seed);
+    // 此处尚无任何 Git 读取：完整树（包括原始 index）必须逐字节一致。
+    assertMembers(members(first), expectedMembers, 'first copy');
+    assertMembers(members(second), expectedMembers, 'second copy');
+    assert.ok(expectedMembers.some(([name]) => /^\.git\/objects\/[a-f0-9]{2}\//.test(name)));
+    assert.ok(expectedMembers.some(([name]) => name === '.git/index'));
+    assert.ok(expectedMembers.some(([name]) => name.startsWith('.git/refs/heads/')));
+    for (const [name] of expectedMembers) {
+      const identities = [seed, first, second].map(root => {
+        const stat = fs.statSync(path.join(root, name)); return `${stat.dev}:${stat.ino}`;
+      });
+      assert.equal(new Set(identities).size, 3, `${name}: no shared files or directories`);
+    }
+    const expectedIndex = indexFacts(seed);
+    assert.equal(indexFacts(first), expectedIndex);
+    assert.equal(indexFacts(second), expectedIndex);
     const expected = resolveCleanBuildIdentity(second);
     assert.deepEqual(resolveCleanBuildIdentity(first), expected);
+    assert.deepEqual(resolveCleanBuildIdentity(seed), expected);
+    const logicalMembers = expectedMembers.filter(([name]) => name !== '.git/index');
+    const assertUnchanged = label => {
+      for (const [name, root] of [['second', second], ['seed', seed]]) {
+        assert.equal(indexFacts(root), expectedIndex, `${label}: ${name} staged facts`);
+        assert.deepEqual(resolveCleanBuildIdentity(root), expected, `${label}: ${name} clean identity and HEAD`);
+        assertMembers(members(root).filter(([file]) => file !== '.git/index'), logicalMembers, `${label}: ${name}`);
+      }
+    };
     writeFileSync(path.join(first, 'source'), 'independent edit');
+    assert.throws(() => resolveCleanBuildIdentity(first), /release input must be clean/);
+    assertUnchanged('first worktree edit');
     git(first, 'add', 'source'); git(first, 'commit', '-qm', 'independent commit');
     assert.notEqual(resolveCleanBuildIdentity(first).sourceCommit, expected.sourceCommit);
-    assert.deepEqual(resolveCleanBuildIdentity(second), expected);
+    assertUnchanged('first commit');
     rmSync(first, { recursive: true, force: true });
-    assert.deepEqual(resolveCleanBuildIdentity(second), expected);
+    assertUnchanged('first cleanup');
   } finally { rmSync(first, { recursive: true, force: true }); rmSync(second, { recursive: true, force: true }); }
 });
 
@@ -71,8 +211,9 @@ test('release projection reads the version from the same full source scan and re
 });
 test('release source accepts clean root and ignored local output', () => withFixture({ ignore: true }, (root) => {
   mkdirSync(path.join(root, 'ignored')); writeFileSync(path.join(root, 'ignored/private'), 'x');
-  assert.equal(checkReleaseSource(root).softwareVersion, '1.2.3');
-  assert.match(checkReleaseSource(root).sourceCommit, /^[0-9a-f]{40,64}$/);
+  const source = checkReleaseSource(root);
+  assert.equal(source.softwareVersion, '1.2.3');
+  assert.match(source.sourceCommit, /^[0-9a-f]{40,64}$/);
 }));
 for (const [name, mutate] of [
   ['staged edit', (root) => { writeFileSync(path.join(root, 'source'), 'x'); git(root, 'add', 'source'); }],
@@ -170,8 +311,8 @@ test('build identity binds commit and content, not time, staging or ignored loca
     writeFileSync(path.join(root, 'untracked'), 'new input');
     assert.notEqual(resolveBuildIdentity(root).buildId, second.buildId);
     unlinkSync(path.join(root, 'source'));
-    assert.doesNotThrow(() => resolveBuildIdentity(root));
-    const beforeLicense = resolveBuildIdentity(root);
+    let beforeLicense;
+    assert.doesNotThrow(() => { beforeLicense = resolveBuildIdentity(root); });
     writeFileSync(path.join(root, 'LICENSE'), 'synthetic authorized notice');
     const withLicense = resolveBuildIdentity(root);
     assert.notEqual(withLicense.sourceSha256, beforeLicense.sourceSha256);
@@ -281,21 +422,24 @@ test('identity rejects file bytes changed and restored during an FD read', async
 
 test('snapshot date uses committer date in UTC+08 and ignores build clock and host timezone', async () => {
   const { resolveBuildIdentity } = await import('../integrity/source-build-identity.mjs');
-  withFixture({}, root => {
+  const root = fixture();
+  try {
     writeFileSync(path.join(root, 'ops/release/version.txt'), '2.0.0-SNAPSHOT\n');
     git(root, 'add', '.'); git(root, 'commit', '-qm', 'dated snapshot');
     const expected = resolveBuildIdentity(root);
     assert.match(expected.softwareVersion, /^2\.0\.0-SNAPSHOT\.20261006\.g[a-f0-9]{7}$/);
     assert.equal(checkReleaseSource(root).softwareVersion, expected.softwareVersion);
     const script = `import {resolveBuildIdentity} from ${JSON.stringify(new URL('../integrity/source-build-identity.mjs', import.meta.url).href)}; Date.now = () => 1; console.log(JSON.stringify(resolveBuildIdentity(process.argv[1])));`;
-    for (const TZ of ['UTC', 'Pacific/Honolulu', 'Pacific/Auckland']) {
-      const result = spawnSync(process.execPath, ['--input-type=module', '-e', script, root], {
+    // 三个独立 Node 进程仍各自执行真实完整解析；全部退出后才清理 fixture。
+    const results = await Promise.all(['UTC', 'Pacific/Honolulu', 'Pacific/Auckland'].map(TZ =>
+      new Promise(resolve => childProcess.execFile(process.execPath, ['--input-type=module', '-e', script, root], {
         encoding: 'utf8', timeout: 10000, env: { ...process.env, TZ },
-      });
+      }, (error, stdout, stderr) => resolve({ status: error ? error.code : 0, stdout, stderr })))));
+    for (const result of results) {
       assert.equal(result.status, 0, result.stderr);
       assert.deepEqual(JSON.parse(result.stdout), expected);
     }
-  });
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test('snapshot date must be a real calendar date and is bound into the development build ID', async () => {
@@ -315,87 +459,17 @@ test('snapshot date must be a real calendar date and is bound into the developme
 });
 
 test('combined snapshot metadata matches the two-command Git oracle across repository states', async () => {
-  const { resolveBuildIdentity } = await import('../integrity/source-build-identity.mjs');
-  for (const state of ['clean', 'staged', 'unstaged', 'untracked', 'head']) {
-    withFixture({}, root => {
-      if (state === 'staged') { writeFileSync(path.join(root, 'source'), 'staged'); git(root, 'add', 'source'); }
-      if (state === 'unstaged') writeFileSync(path.join(root, 'source'), 'unstaged');
-      if (state === 'untracked') writeFileSync(path.join(root, 'new-file'), 'new');
-      if (state === 'head') { git(root, 'commit', '--allow-empty', '-qm', 'second'); }
-      const original = childProcess.execFileSync;
-      let oracle = false;
-      const actualCommands = [];
-      const counts = { combined: 0, show: 0, status: 0, lsFiles: 0 };
-      childProcess.execFileSync = function (command, args, options) {
-        if (!oracle && command === 'git') actualCommands.push(args.slice(2));
-        if (command === 'git' && args.includes('--show-toplevel') && args.includes('--verify')) {
-          counts.combined++;
-          if (!oracle) return original.call(this, command, args, options);
-          const top = original.call(this, command, ['-C', root, 'rev-parse', '--show-toplevel'], options);
-          const head = original.call(this, command, ['-C', root, 'rev-parse', '--verify', 'HEAD^{commit}'], options);
-          return `${top}${head}`;
-        }
-        if (command === 'git' && args[2] === 'show') counts.show++;
-        if (command === 'git' && args[2] === 'status') counts.status++;
-        if (command === 'git' && args[2] === 'ls-files') counts.lsFiles++;
-        return original.call(this, command, args, options);
-      };
-      syncBuiltinESMExports();
-      try {
-        const identity = resolveBuildIdentity(root);
-        assert.equal(actualCommands.length, 16, `${state} physical Git commands`);
-        assert.deepEqual(counts, { combined: 4, show: 4, status: 4, lsFiles: 4 });
-        oracle = true;
-        assert.deepEqual(resolveBuildIdentity(root), identity, `${state} identity oracle`);
-        assert.deepEqual(counts, { combined: 8, show: 8, status: 8, lsFiles: 8 });
-      } finally { childProcess.execFileSync = original; syncBuiltinESMExports(); }
-    });
-  }
+  const cases = ['clean', 'staged', 'unstaged', 'untracked', 'head'].map(state => ({ state, root: fixture() }));
+  try { await runVersionStates(cases, 'oracle'); }
+  finally { for (const { root } of cases) rmSync(root, { recursive: true, force: true }); }
 });
 
 test('clean release identity keeps four Git snapshots, two stable scans, and rejects dirty states', async () => {
-  const { resolveBuildIdentity, resolveCleanBuildIdentity } = await import('../integrity/source-build-identity.mjs');
-  withFixture({ ignore: true }, root => {
-    mkdirSync(path.join(root, 'ignored')); writeFileSync(path.join(root, 'ignored/private'), 'ignored');
-    const original = childProcess.execFileSync;
-    const counts = { combined: 0, show: 0, status: 0, lsFiles: 0 };
-    let expectedBuffer = 100_000;
-    childProcess.execFileSync = function (command, args, options) {
-      if (command === 'git' && args.includes('--show-toplevel') && args.includes('--verify')) counts.combined++;
-      if (command === 'git' && args[2] === 'show') counts.show++;
-      if (command === 'git' && args[2] === 'status') {
-        counts.status++;
-        assert.equal(options.maxBuffer, expectedBuffer);
-      }
-      if (command === 'git' && args[2] === 'ls-files') counts.lsFiles++;
-      return original.call(this, command, args, options);
-    };
-    syncBuiltinESMExports();
-    try {
-      const clean = resolveCleanBuildIdentity(root);
-      assert.equal(clean.channel, 'release');
-      assert.equal(clean.dirty, false);
-      assert.deepEqual(counts, { combined: 4, show: 4, status: 4, lsFiles: 4 });
-      expectedBuffer = 8 * 1024 * 1024;
-      assert.deepEqual(resolveBuildIdentity(root), clean, 'ordinary resolver retains its existing status bound');
-      assert.deepEqual(counts, { combined: 8, show: 8, status: 8, lsFiles: 8 });
-    } finally { childProcess.execFileSync = original; syncBuiltinESMExports(); }
-  });
-  for (const [state, mutate] of [
-    ['staged', root => { writeFileSync(path.join(root, 'source'), 'dirty'); git(root, 'add', 'source'); }],
-    ['unstaged', root => writeFileSync(path.join(root, 'source'), 'dirty')],
-    ['untracked', root => writeFileSync(path.join(root, 'new-file'), 'dirty')],
-    ['deleted', root => unlinkSync(path.join(root, 'source'))],
-  ]) withFixture({}, root => {
-    mutate(root);
-    assert.equal(resolveBuildIdentity(root).dirty, true, `${state}: ordinary identity supports dirty trees`);
-    assert.throws(() => resolveCleanBuildIdentity(root), /release input must be clean/, state);
-  });
-  withFixture({}, root => {
-    writeFileSync(path.join(root, 'ops/release/version.txt'), '1.2.3-SNAPSHOT\n');
-    git(root, 'add', '.'); git(root, 'commit', '-qm', 'snapshot');
-    assert.equal(resolveCleanBuildIdentity(root).channel, 'snapshot');
-  });
+  const cases = ['clean', 'staged', 'unstaged', 'untracked', 'deleted', 'snapshot'].map(state => ({
+    state, root: fixture({ ignore: state === 'clean' }),
+  }));
+  try { await runVersionStates(cases, 'clean'); }
+  finally { for (const { root } of cases) rmSync(root, { recursive: true, force: true }); }
 });
 
 test('clean identity maps porcelain overflow to release rejection inside its four snapshots', async () => {
@@ -709,6 +783,74 @@ test('runner private child group does not escape real wrapper-group TERM and INT
   }
 });
 
+test('outer runner timeout and overflow clean nested private groups and preserve an external sentinel', async () => {
+  const wrapperModule = new URL('../test_tools/run-release-tool-tests.mjs', import.meta.url).href;
+  for (const mode of ['timeout', 'overflow']) {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-runner-nested-'));
+    const readyFile = path.join(root, 'ready'); const childReady = path.join(root, 'child-ready');
+    const heartbeatFile = path.join(root, 'heartbeat'); const workerReadyFile = path.join(root, 'worker-ready');
+    const sentinelReady = path.join(root, 'sentinel-ready');
+    const wrapperCode = `import fs from 'node:fs';import {runTests} from ${JSON.stringify(wrapperModule)};${publishRunnerHandshake.toString()};const pending=runTests({command:process.execPath,args:['-e',${JSON.stringify(runnerChildScript(childReady, heartbeatFile, workerReadyFile))}],timeoutMs:15000});const end=Date.now()+4000;while(!fs.existsSync(${JSON.stringify(childReady)})&&Date.now()<end)await new Promise(r=>setTimeout(r,10));if(!fs.existsSync(${JSON.stringify(childReady)}))process.exit(4);publishRunnerHandshake(${JSON.stringify(readyFile)},{wrapper:process.pid,...JSON.parse(fs.readFileSync(${JSON.stringify(childReady)},'utf8'))});${mode === 'overflow' ? "process.stdout.write('x'.repeat(1000));" : ''}await pending;`;
+    let sentinel; let ready;
+    try {
+      sentinel = spawnTracked(process.execPath, ['-e', `require('node:fs').writeFileSync(${JSON.stringify(sentinelReady)},'ready');setInterval(()=>{},1000)`], { detached: true });
+      const sentinelDeadline = Date.now() + 3000;
+      while (!fs.existsSync(sentinelReady) && Date.now() < sentinelDeadline) await new Promise(resolve => setTimeout(resolve, 10));
+      assert.ok(fs.existsSync(sentinelReady), 'independent sentinel handshake');
+      const pending = runTests({ command: process.execPath, args: ['--input-type=module', '-e', wrapperCode], timeoutMs: mode === 'timeout' ? 3000 : 10000, maxOutputBytes: mode === 'overflow' ? 64 : 10000 });
+      ready = await waitForRunnerHandshake(readyFile);
+      const result = await pending;
+      assert.equal(result.status, 'FAIL');
+      assert.equal(result.reason, mode === 'timeout' ? 'test process timed out' : 'test process output exceeded limit');
+      await assertRunnerPidsReaped([ready.wrapper, ready.supervisor, ready.worker]);
+      await assertSentinelAlive(sentinel.pid);
+    } finally {
+      if (ready) for (const leader of [ready.wrapper, ready.supervisor]) { try { process.kill(-leader, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; } }
+      if (sentinel?.pid) { try { process.kill(-sentinel.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; } await waitForExit(sentinel); }
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+for (const signal of ['SIGTERM', 'SIGINT']) {
+  test(`nested runners forward real external ${signal} and preserve an independent sentinel`, async () => {
+    const module = new URL('../test_tools/run-release-tool-tests.mjs', import.meta.url).href;
+    const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-runner-nested-external-'));
+    const childReady = path.join(root, 'child-ready'); const middleReady = path.join(root, 'middle-ready');
+    const readyFile = path.join(root, 'ready'); const resultFile = path.join(root, 'result');
+    const sentinelReady = path.join(root, 'sentinel-ready');
+    const middle = `import fs from 'node:fs';import {runTests} from ${JSON.stringify(module)};${publishRunnerHandshake.toString()};const pending=runTests({command:process.execPath,args:['-e',${JSON.stringify(runnerChildScript(childReady, path.join(root, 'heartbeat'), path.join(root, 'worker-ready')))}],timeoutMs:15000});while(!fs.existsSync(${JSON.stringify(childReady)}))await new Promise(r=>setTimeout(r,10));publishRunnerHandshake(${JSON.stringify(middleReady)},{middle:process.pid,...JSON.parse(fs.readFileSync(${JSON.stringify(childReady)},'utf8'))});const result=await pending;process.exitCode=result.status==='PASS'?0:1;`;
+    const outer = `import fs from 'node:fs';import {runTests} from ${JSON.stringify(module)};${publishRunnerHandshake.toString()};const pending=runTests({command:process.execPath,args:['--input-type=module','-e',${JSON.stringify(middle)}],timeoutMs:15000});while(!fs.existsSync(${JSON.stringify(middleReady)}))await new Promise(r=>setTimeout(r,10));publishRunnerHandshake(${JSON.stringify(readyFile)},{outer:process.pid,...JSON.parse(fs.readFileSync(${JSON.stringify(middleReady)},'utf8'))});const result=await pending;fs.writeFileSync(${JSON.stringify(resultFile)},JSON.stringify(result));process.exitCode=result.status==='PASS'?0:1;`;
+    let wrapper; let sentinel; let ready;
+    try {
+      sentinel = spawnTracked(process.execPath, ['-e', `require('node:fs').writeFileSync(${JSON.stringify(sentinelReady)},'ready');setInterval(()=>{},1000)`], { detached: true });
+      const deadline = Date.now() + 3000;
+      while (!fs.existsSync(sentinelReady) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+      assert.ok(fs.existsSync(sentinelReady), 'independent sentinel handshake');
+      wrapper = spawnTracked(process.execPath, ['--input-type=module', '-e', outer], { detached: true });
+      ready = await waitForRunnerHandshake(readyFile);
+      assert.equal(ready.outer, wrapper.pid);
+      await assertSentinelAlive(sentinel.pid);
+      process.kill(-wrapper.pid, signal);
+      const exit = await waitForExit(wrapper, 3000);
+      assert.equal(exit.code, 1, 'external cancellation must retain failed exit semantics');
+      const result = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
+      assert.equal(result.status, 'FAIL');
+      assert.equal(result.reason, 'test process cancelled');
+      await assertRunnerPidsReaped([ready.outer, ready.middle, ready.supervisor, ready.worker]);
+      await assertSentinelAlive(sentinel.pid);
+    } finally {
+      // Only this invocation's handshaken groups may be reaped; a dead leader is not proof of cleanup.
+      for (const pid of [ready?.supervisor, ready?.middle, wrapper?.pid].filter(Boolean)) {
+        try { process.kill(-pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+      }
+      if (wrapper) await waitForExit(wrapper, 3000).catch(() => {});
+      if (sentinel?.pid) { try { process.kill(-sentinel.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; } await waitForExit(sentinel); }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test('runner preserves TAP pass, nonzero exit, and spawn-error results', async () => {
   const { runTests } = await import('../test_tools/run-release-tool-tests.mjs');
   const tap = 'TAP version 13\n1..1\nok 1 - runner direct pass\n# tests 1\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n';
@@ -800,5 +942,292 @@ test('source file reads consume the same deadline and close the active file on e
     } finally {
       fsDefault.readSync = read; fsDefault.closeSync = close; syncBuiltinESMExports(); t.mock.restoreAll();
     }
+  });
+});
+
+// ownership 追加矩阵：原50项正文保持原字节；只使用当前测试创建的能力／子进程。
+function isolatedOwnershipEnv() {
+  const env = { ...process.env };
+  delete env.LEXIFLOW_RUNNER_CONTEXT;
+  delete env.LEXIFLOW_RUNNER_BOOTSTRAP;
+  delete env.NODE_TEST_CONTEXT; // 独立 fixture root 不是上级 Node test worker。
+  return env;
+}
+async function ownershipFixture(body) {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'lexiflow-ownership-'));
+  const children = []; const owned = new Set();
+  const track = (code, options = {}) => {
+    const child = spawnTracked(process.execPath, ['--input-type=module', '-e', code], { detached: true, env: isolatedOwnershipEnv(), stdio: ['ignore', 'ignore', 'pipe'], ...options });
+    child.stderr?.pipe(process.stderr, { end: false });
+    children.push(child); owned.add(child.pid); return child;
+  };
+  try { await body({ root, track, owned }); }
+  finally {
+    // 只对仍存活的本次直接子进程发信号；失效数值 PID 不作补杀。
+    for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    await Promise.all(children.map(child => waitForExit(child).catch(() => {})));
+    // 失败路径也保存并观察本 fixture 已发布的所有 owned PID，不按进程名收编。
+    const relays = new Set();
+    const collect = value => {
+      if (!value || typeof value !== 'object') return;
+      for (const [key, item] of Object.entries(value)) {
+        if (['supervisor', 'worker', 'middle', 'guard', 'outer', 'sentinel'].includes(key) && Number.isSafeInteger(item)) owned.add(item);
+        else if (key === 'relayDirectory' && typeof item === 'string' && path.basename(item).startsWith('lf-owned-')) relays.add(item);
+        else collect(item);
+      }
+    };
+    for (const name of fs.readdirSync(root)) { try { collect(JSON.parse(fs.readFileSync(path.join(root, name), 'utf8'))); } catch {} }
+    await assertRunnerPidsReaped([...owned]);
+    for (const directory of relays) rmSync(directory, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+const ownershipModule = new URL('../test_tools/runner-ownership-bootstrap.cjs', import.meta.url).href;
+const testRunnerModule = new URL('../test_tools/run-release-tool-tests.mjs', import.meta.url).href;
+const ownershipWaitCode = `const wait=async file=>{const until=Date.now()+3000;while(!fs.existsSync(file)){if(Date.now()>until)throw Error('fixture handshake');await new Promise(r=>setTimeout(r,5));}return JSON.parse(fs.readFileSync(file,'utf8'));};`;
+
+// 无载荷的协议测试在隔离 root 内执行，跨 run token 不等于继承同一 endpoint。
+test('ownership rejects stale cross-run duplicate and malformed registrations without numeric signals', async () => {
+  await ownershipFixture(async ({ root, track }) => {
+    const done = path.join(root, 'done');
+    const code = `import assert from 'node:assert/strict';import fs from 'node:fs';import net from 'node:net';import {openOwnership} from ${JSON.stringify(ownershipModule)};
+      const signals=[];const kill=process.kill;process.kill=(pid,signal)=>{signals.push({pid,signal});return kill(pid,signal)};
+      const leases=[];const raw=async(endpoint,message)=>new Promise((resolve,reject)=>{const s=net.createConnection(endpoint);s.on('error',()=>{});s.on('close',resolve);s.on('data',()=>reject(Error('invalid capability accepted')));s.on('connect',()=>{const text=typeof message==='string'?message:JSON.stringify(message)+'\\n';s.write(text.slice(0,7));setImmediate(()=>s.write(text.slice(7)));});});
+      try {
+        const first=await openOwnership(()=>{});const second=await openOwnership(()=>{});leases.push(first,second);
+        const a=JSON.parse(first.env.LEXIFLOW_RUNNER_BOOTSTRAP),b=JSON.parse(second.env.LEXIFLOW_RUNNER_BOOTSTRAP);
+        assert.notEqual(a.endpoint,b.endpoint);
+        await raw(b.endpoint,{op:'guard',token:a.token,leader:process.pid});
+        await raw(a.endpoint,{op:'reserve',parent:'invalid',seq:1});await raw(a.endpoint,'{malformed\\n');
+        await first.noSpawn();assert.equal(await first.finish(),true);
+        await raw(a.endpoint,{op:'guard',token:a.token,leader:process.pid});
+        await raw(a.endpoint,{op:'reserve',parent:a.token,seq:1});
+        await second.noSpawn();await assert.rejects(second.noSpawn());
+        assert.deepEqual(signals,[],'no nonzero or numeric-PID fallback on invalid registration');
+        fs.writeFileSync(${JSON.stringify(done)},JSON.stringify({status:'PASS',signals}));
+      } finally {await Promise.all(leases.map(l=>l.dispose()));}`;
+    const child = track(code);
+    assert.deepEqual(await waitForExit(child), { code: 0, signal: null });
+    assert.equal(JSON.parse(fs.readFileSync(done)).status, 'PASS');
+  });
+});
+
+test('ownership freezes registration before spawn and cancels guard-ready payload exactly once', async () => {
+  await ownershipFixture(async ({ root, track }) => {
+    const done = path.join(root, 'done'); const payload = path.join(root, 'payload');
+    const code = `import assert from 'node:assert/strict';import fs from 'node:fs';import net from 'node:net';import {spawn} from 'node:child_process';import {openOwnership} from ${JSON.stringify(ownershipModule)};
+      const leases=[];try {
+        const {runTests}=await import(${JSON.stringify(testRunnerModule)});
+        const startup=await runTests({timeoutMs:1,args:['-e',${JSON.stringify(`require('node:fs').writeFileSync(${JSON.stringify(payload)},'must not execute')`)}]});
+        assert.equal(startup.reason,'test process timed out');assert.equal(fs.existsSync(${JSON.stringify(payload)}),false);
+        const early=await openOwnership(()=>{});leases.push(early);
+        const stopping=early.cancel();await early.noSpawn();assert.equal(await stopping,true);
+        const boot=JSON.parse(early.env.LEXIFLOW_RUNNER_BOOTSTRAP);
+        await new Promise((resolve,reject)=>{const s=net.createConnection(boot.endpoint);s.on('error',()=>{});s.on('close',resolve);s.on('data',()=>reject(Error('spawn after freeze')));s.on('connect',()=>s.write(JSON.stringify({op:'reserve',seq:1,parent:boot.token})+'\\n'));});
+        const lease=await openOwnership(()=>{});leases.push(lease);
+        const child=spawn(process.execPath,['-e',${JSON.stringify(`require('node:fs').writeFileSync(${JSON.stringify(payload)},'must not execute');setInterval(()=>{},1000)`)}],{detached:true,stdio:['ignore','ignore','ignore','pipe'],env:lease.env});
+        const exited=new Promise(r=>child.once('close',(code,signal)=>r({code,signal})));
+        assert.equal(await lease.attach(child.pid),true);assert.equal(await lease.ready(),true);child.stdio[3].write('{"op":"armed"}\\n');
+        await new Promise((resolve,reject)=>{let text='';child.stdio[3].on('error',reject);child.stdio[3].on('data',c=>{text+=c;if(text.endsWith('\\n')){assert.equal(text,'{"op":"ready"}\\n');resolve();}});});
+        const active=JSON.parse(lease.env.LEXIFLOW_RUNNER_BOOTSTRAP);
+        await new Promise((resolve,reject)=>{const s=net.createConnection(active.endpoint);s.on('error',()=>{});s.on('close',resolve);s.on('data',()=>reject(Error('duplicate guard accepted')));s.on('connect',()=>s.write(JSON.stringify({op:'guard',token:active.token,leader:child.pid})+'\\n'));});
+        const results=await Promise.all(Array.from({length:8},()=>lease.cancel()));assert.ok(results.every(Boolean));
+        await exited;assert.equal(fs.existsSync(${JSON.stringify(payload)}),false);
+        assert.throws(()=>process.kill(-child.pid,0),{code:'ESRCH'});
+        assert.equal(await lease.finish(),true);fs.writeFileSync(${JSON.stringify(done)},JSON.stringify({status:'PASS',repeated:results.length}));
+      } finally {await Promise.all(leases.map(l=>l.dispose()));}`;
+    const child = track(code);
+    assert.deepEqual(await waitForExit(child), { code: 0, signal: null });
+    assert.equal(JSON.parse(fs.readFileSync(done)).repeated, 8);
+  });
+});
+
+test('ownership normal TAP exit cleans a surviving worker holding output before returning PASS', async () => {
+  await ownershipFixture(async ({ root, track }) => {
+    const readyFile = path.join(root, 'ready'); const workerFile = path.join(root, 'worker');
+    const sentinel = track(`setInterval(()=>{},1000)`);
+    const worker = `const fs=require('node:fs');${publishRunnerHandshake.toString()};process.on('SIGTERM',()=>{});publishRunnerHandshake(${JSON.stringify(workerFile)},{worker:process.pid});setInterval(()=>{},1000);`;
+    const code = `const fs=require('node:fs');${publishRunnerHandshake.toString()};const w=require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(worker)}],{stdio:['ignore','inherit','inherit']});const poll=()=>{if(!fs.existsSync(${JSON.stringify(workerFile)}))return setTimeout(poll,5);publishRunnerHandshake(${JSON.stringify(readyFile)},{supervisor:process.pid,...JSON.parse(fs.readFileSync(${JSON.stringify(workerFile)}))});process.stdout.write(${JSON.stringify(summary())},()=>process.exit(0));};poll();`;
+    const result = await runTests({ args: ['-e', code] });
+    const ready = await waitForRunnerHandshake(readyFile);
+    assert.equal(result.status, 'PASS', JSON.stringify(result));
+    await assertRunnerPidsReaped([ready.supervisor, ready.worker]);
+    assert.throws(() => process.kill(-ready.supervisor, 0), { code: 'ESRCH' }, 'whole group, not only payload exit');
+    await assertSentinelAlive(sentinel.pid);
+  });
+});
+
+test('ownership root cleans a prematurely exited middle layer leaf-to-root without PID fallback', async () => {
+  await ownershipFixture(async ({ root, track }) => {
+    const leafFile = path.join(root, 'leaf'); const done = path.join(root, 'done');
+    const middle = `import fs from 'node:fs';import {runTests} from ${JSON.stringify(testRunnerModule)};${publishRunnerHandshake.toString()};${ownershipWaitCode}void runTests({args:['-e',${JSON.stringify(runnerChildScript(leafFile, path.join(root, 'beat'), path.join(root, 'worker')))}]});await wait(${JSON.stringify(leafFile)});process.exit(9);`;
+    const code = `import fs from 'node:fs';import {runTests} from ${JSON.stringify(testRunnerModule)};const observed=[];const signals=[];const kill=process.kill;process.kill=(pid,signal)=>{signals.push(signal);try{return kill(pid,signal);}catch(e){if(e.code==='ESRCH')observed.push(-pid);throw e;}};const result=await runTests({args:['--input-type=module','-e',${JSON.stringify(middle)}]});fs.writeFileSync(${JSON.stringify(done)},JSON.stringify({result,observed,signals}));`;
+    const sentinel = track('setInterval(()=>{},1000)'); const outer = track(code);
+    assert.deepEqual(await waitForExit(outer), { code: 0, signal: null });
+    const ready = await waitForRunnerHandshake(leafFile); const result = JSON.parse(fs.readFileSync(done));
+    assert.equal(result.result.status, 'FAIL');
+    assert.notEqual(result.result.cleanup_succeeded, false, JSON.stringify(result));
+    assert.ok(result.observed.length >= 2);
+    assert.equal(result.observed[0], ready.supervisor, 'leaf group CLEAN precedes parent lease release');
+    assert.ok(result.signals.every(signal => signal === 0), 'root observes only; live guard owns group termination');
+    await assertRunnerPidsReaped([ready.supervisor, ready.worker]);
+    await assertSentinelAlive(sentinel.pid);
+  });
+});
+
+test('ownership depth-three cancellation preserves a live sibling until its own cancellation', async () => {
+  await ownershipFixture(async ({ root, track }) => {
+    const aLeaf = path.join(root, 'a-leaf'); const bLeaf = path.join(root, 'b-leaf'); const done = path.join(root, 'done');
+    const aMiddle = `import fs from 'node:fs';import {runTests} from ${JSON.stringify(testRunnerModule)};${ownershipWaitCode}await runTests({args:['-e',${JSON.stringify(runnerChildScript(aLeaf, path.join(root, 'a-beat'), path.join(root, 'a-worker')))}]});`;
+    const code = `import assert from 'node:assert/strict';import fs from 'node:fs';import {runTests} from ${JSON.stringify(testRunnerModule)};${ownershipWaitCode}
+      const a=runTests({args:['--input-type=module','-e',${JSON.stringify(aMiddle)}],timeoutMs:1500});
+      const b=runTests({args:['-e',${JSON.stringify(runnerChildScript(bLeaf, path.join(root, 'b-beat'), path.join(root, 'b-worker')))}]});
+      const ar=await wait(${JSON.stringify(aLeaf)}),br=await wait(${JSON.stringify(bLeaf)});const first=await a;
+      assert.equal(first.reason,'test process timed out');assert.notEqual(first.cleanup_succeeded,false);
+      assert.throws(()=>process.kill(ar.worker,0),{code:'ESRCH'});assert.doesNotThrow(()=>process.kill(br.worker,0));
+      process.emit('SIGTERM');const second=await b;assert.equal(second.reason,'test process cancelled');assert.notEqual(second.cleanup_succeeded,false);
+      fs.writeFileSync(${JSON.stringify(done)},JSON.stringify({first,second,ar,br}));`;
+    const sentinel = track('setInterval(()=>{},1000)'); const outer = track(code);
+    assert.deepEqual(await waitForExit(outer), { code: 0, signal: null });
+    const result = JSON.parse(fs.readFileSync(done));
+    await assertRunnerPidsReaped([result.ar.supervisor, result.ar.worker, result.br.supervisor, result.br.worker]);
+    await assertSentinelAlive(sentinel.pid);
+  });
+});
+
+test('ownership unexpected guard death fails closed and invalidates its numeric group capability', async () => {
+  await ownershipFixture(async ({ root, track }) => {
+    const readyFile = path.join(root, 'ready'); const done = path.join(root, 'done');
+    const payload = `const fs=require('node:fs');${publishRunnerHandshake.toString()};const cp=require('node:child_process');const rows=cp.execFileSync('/bin/ps',['-axo','pid=,ppid='],{encoding:'utf8'}).trim().split('\\n').map(r=>r.trim().split(/\\s+/).map(Number));const guard=rows.find(r=>r[1]===process.pid)[0];publishRunnerHandshake(${JSON.stringify(readyFile)},{supervisor:process.pid,guard});setInterval(()=>{},1000);`;
+    const code = `import fs from 'node:fs';import {runTests} from ${JSON.stringify(testRunnerModule)};const signals=[];const kill=process.kill;process.kill=(pid,signal)=>{signals.push(signal);return kill(pid,signal)};const result=await runTests({args:['-e',${JSON.stringify(payload)}]});fs.writeFileSync(${JSON.stringify(done)},JSON.stringify({result,signals}));`;
+    const sentinel = track('setInterval(()=>{},1000)'); const outer = track(code);
+    const ready = await waitForRunnerHandshake(readyFile);
+    // 唯一 owned guard 是该受控 leader 的直接子进程；不是 kill-by-name。
+    process.kill(ready.guard, 'SIGKILL');
+    await waitForExit(outer);
+    const result = JSON.parse(fs.readFileSync(done));
+    assert.equal(result.result.status, 'FAIL');
+    assert.equal(result.result.cleanup_succeeded, false, 'lost live guard must not claim normal CLEAN');
+    assert.ok(result.signals.every(signal => signal === 0));
+    await assertRunnerPidsReaped([ready.supervisor, ready.guard]);
+    await assertSentinelAlive(sentinel.pid);
+  });
+});
+
+test('ownership hardkill owner EOF fallback is separate from the normal cancellation barrier', async () => {
+  await ownershipFixture(async ({ root, track }) => {
+    const leafFile = path.join(root, 'leaf'); const readyFile = path.join(root, 'ready');
+    const middle = `import fs from 'node:fs';import {runTests} from ${JSON.stringify(testRunnerModule)};${publishRunnerHandshake.toString()};${ownershipWaitCode}void runTests({args:['-e',${JSON.stringify(runnerChildScript(leafFile, path.join(root, 'beat'), path.join(root, 'worker')))}]});const ready=await wait(${JSON.stringify(leafFile)});publishRunnerHandshake(${JSON.stringify(readyFile)},{middle:process.pid,relayDirectory:JSON.parse(process.env.LEXIFLOW_RUNNER_CONTEXT).endpoint.replace(/\\/[^/]+$/,''),...ready});`;
+    const code = `import {runTests} from ${JSON.stringify(testRunnerModule)};await runTests({args:['--input-type=module','-e',${JSON.stringify(middle)}]});`;
+    const sentinel = track('setInterval(()=>{},1000)'); const outer = track(code);
+    const ready = await waitForRunnerHandshake(readyFile);
+    outer.kill('SIGKILL');
+    assert.deepEqual(await waitForExit(outer), { code: null, signal: 'SIGKILL' });
+    await assertRunnerPidsReaped([ready.middle, ready.supervisor, ready.worker]);
+    await assertSentinelAlive(sentinel.pid);
+  });
+});
+
+test('ownership forged bootstrap and standalone guard cannot adopt or kill an external group', async () => {
+  await ownershipFixture(async ({ root, track }) => {
+    const readyFile = path.join(root, 'ready');
+    const guard = new URL('../test_tools/runner-group-guard.mjs', import.meta.url).pathname;
+    const code = `import assert from 'node:assert/strict';import fs from 'node:fs';import {spawnSync} from 'node:child_process';${publishRunnerHandshake.toString()};
+      const env={...process.env,LEXIFLOW_RUNNER_BOOTSTRAP:JSON.stringify({endpoint:'invalid',token:'invalid'}),NODE_OPTIONS:'--import='+${JSON.stringify(ownershipModule)}};
+      const forged=spawnSync(process.execPath,['-e','process.exit(99)'],{env,stdio:['ignore','ignore','ignore','pipe'],timeout:1500});
+      assert.equal(forged.status,1,'nonleader fails before self-group termination is installed');
+      const standalone=spawnSync(process.execPath,[${JSON.stringify(guard)}],{env:{...process.env,LEXIFLOW_RUNNER_GUARD:'{"endpoint":"invalid","token":"invalid"}'},stdio:'ignore',timeout:1500});
+      assert.equal(standalone.status,1);publishRunnerHandshake(${JSON.stringify(readyFile)},{sentinel:process.pid});setInterval(()=>{},1000);`;
+    const sentinel = track(code);
+    const ready = await waitForRunnerHandshake(readyFile);
+    assert.equal(ready.sentinel, sentinel.pid);
+    await assertSentinelAlive(sentinel.pid);
+  });
+});
+
+test('ownership root cancellation does not need a blocked middle event loop to relay signals', async () => {
+  await ownershipFixture(async ({ root, track }) => {
+    const leafFile = path.join(root, 'leaf'); const readyFile = path.join(root, 'ready'); const done = path.join(root, 'done');
+    const middle = `import fs from 'node:fs';import {runTests} from ${JSON.stringify(testRunnerModule)};${publishRunnerHandshake.toString()};${ownershipWaitCode}
+      void runTests({args:['-e',${JSON.stringify(runnerChildScript(leafFile, path.join(root, 'beat'), path.join(root, 'worker')))}]});
+      const ready=await wait(${JSON.stringify(leafFile)});publishRunnerHandshake(${JSON.stringify(readyFile)},{middle:process.pid,...ready});
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0);`;
+    const code = `import fs from 'node:fs';import {runTests} from ${JSON.stringify(testRunnerModule)};const events=[];const kill=process.kill;process.kill=(pid,signal)=>{try{const r=kill(pid,signal);events.push({pid,signal,at:performance.now(),status:'present'});return r;}catch(e){events.push({pid,signal,at:performance.now(),status:e.code});throw e;}};const result=await runTests({args:['--input-type=module','-e',${JSON.stringify(middle)}]});fs.writeFileSync(${JSON.stringify(done)},JSON.stringify({result,events}));process.exitCode=result.status==='PASS'?0:1;`;
+    const sentinel = track('setInterval(()=>{},1000)'); const outer = track(code);
+    const ready = await waitForRunnerHandshake(readyFile);
+    outer.kill('SIGTERM');
+    assert.deepEqual(await waitForExit(outer), { code: 1, signal: null });
+    const evidence = JSON.parse(fs.readFileSync(done)); const { result } = evidence;
+    assert.equal(result.reason, 'test process cancelled');
+    assert.notEqual(result.cleanup_succeeded, false, JSON.stringify(evidence));
+    await assertRunnerPidsReaped([ready.middle, ready.supervisor, ready.worker]);
+    await assertSentinelAlive(sentinel.pid);
+  });
+});
+
+test('ownership test-worker preload authenticates inherited group without reopening its private fd3', async () => {
+  await ownershipFixture(async ({ root, track }) => {
+    const file = path.join(root, 'nested.test.mjs'); const done = path.join(root, 'done');
+    writeFileSync(file, `import test from 'node:test';import assert from 'node:assert/strict';import {runTests} from ${JSON.stringify(testRunnerModule)};
+      test('real Node test worker registers a nested owned group',async()=>{
+        const result=await runTests({args:['-e',${JSON.stringify(`process.stdout.write(${JSON.stringify(summary())})`)}]});
+        assert.equal(result.status,'PASS');assert.equal(result.checks_run,1);
+      });`);
+    const code = `import fs from 'node:fs';import {runTests} from ${JSON.stringify(testRunnerModule)};const result=await runTests({args:['--test','--test-reporter=tap',${JSON.stringify(file)}]});fs.writeFileSync(${JSON.stringify(done)},JSON.stringify(result));`;
+    const outer = track(code); await waitForExit(outer);
+    const result = JSON.parse(fs.readFileSync(done));
+    assert.equal(result.status, 'PASS', JSON.stringify(result));
+    assert.equal(result.checks_run, 1);
+  });
+});
+
+test('ownership parent re-proves an expired failure tombstone without rewriting its first result', async () => {
+  await ownershipFixture(async ({ root, track }) => {
+    const done = path.join(root, 'done');
+    const code = `import assert from 'node:assert/strict';import fs from 'node:fs';import {spawn} from 'node:child_process';import {openOwnership} from ${JSON.stringify(ownershipModule)};
+      const parent=await openOwnership(()=>{}),boot=JSON.parse(parent.env.LEXIFLOW_RUNNER_BOOTSTRAP);
+      process.env.LEXIFLOW_RUNNER_CONTEXT=JSON.stringify({endpoint:boot.endpoint,token:boot.token});
+      const leaf=await openOwnership(()=>{});delete process.env.LEXIFLOW_RUNNER_CONTEXT;
+      const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});
+      const closed=new Promise(r=>child.once('close',r));
+      try {
+        await parent.noSpawn();await leaf.attach(child.pid);
+        assert.equal(await leaf.finish(),false,'live group without guard cannot be cleaned');
+        child.kill('SIGKILL');await closed;
+        assert.throws(()=>process.kill(-child.pid,0),{code:'ESRCH'});
+        assert.equal(await parent.finish(),true,'parent needs a fresh full-tree absence proof');
+        assert.equal(await leaf.finish(),false,'first failure is immutable, not retroactively PASS');
+        fs.writeFileSync(${JSON.stringify(done)},JSON.stringify({supervisor:child.pid,result:'PASS'}));
+      }finally{if(child.exitCode===null&&child.signalCode===null){child.kill('SIGKILL');await closed;}await leaf.dispose();await parent.dispose();}`;
+    const outer = track(code);
+    assert.deepEqual(await waitForExit(outer), { code: 0, signal: null });
+    assert.equal(JSON.parse(fs.readFileSync(done)).result, 'PASS');
+  });
+});
+
+test('ownership failed live descendant still blocks the parent and receives no numeric kill', async () => {
+  await ownershipFixture(async ({ root, track }) => {
+    const done = path.join(root, 'done');
+    const code = `import assert from 'node:assert/strict';import fs from 'node:fs';import {spawn} from 'node:child_process';import {openOwnership} from ${JSON.stringify(ownershipModule)};
+      const parent=await openOwnership(()=>{}),boot=JSON.parse(parent.env.LEXIFLOW_RUNNER_BOOTSTRAP);
+      process.env.LEXIFLOW_RUNNER_CONTEXT=JSON.stringify({endpoint:boot.endpoint,token:boot.token});
+      const leaf=await openOwnership(()=>{});delete process.env.LEXIFLOW_RUNNER_CONTEXT;
+      const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});
+      const closed=new Promise(r=>child.once('close',r));const kill=process.kill,signals=[];
+      process.kill=(pid,signal)=>{signals.push({pid,signal});return kill(pid,signal)};
+      try {
+        await parent.noSpawn();await leaf.attach(child.pid);
+        assert.equal(await leaf.finish(),false);const at=performance.now();
+        assert.equal(await parent.finish(),false,'failed child is never dropped or tolerated');
+        assert.ok(performance.now()-at<500,'parent barrier remains bounded, not another suite budget');
+        assert.doesNotThrow(()=>process.kill(-child.pid,0));
+        assert.ok(signals.length>0&&signals.every(x=>x.signal===0),'observer has no numeric kill fallback');
+        fs.writeFileSync(${JSON.stringify(done)},JSON.stringify({supervisor:child.pid,result:'PASS'}));
+      }finally{process.kill=kill;child.kill('SIGKILL');await closed;await leaf.dispose();await parent.dispose();}`;
+    const sentinel = track('setInterval(()=>{},1000)');
+    const outer = track(code);
+    assert.deepEqual(await waitForExit(outer), { code: 0, signal: null });
+    await assertSentinelAlive(sentinel.pid);
+    assert.equal(JSON.parse(fs.readFileSync(done)).result, 'PASS');
   });
 });

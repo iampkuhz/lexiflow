@@ -4,20 +4,20 @@
 
 [架构总览](../../system.md) → [共享词库合同](../lexicon.md) → 持久化模型。本文说明发布表结构与原子初始化边界。
 
-SQLite STRICT 由 Xerial JDBC `3.54.1.0` 访问，不复制 CSV：只存最终短释、统一 priority 和准确词形映射。INTEGER PRIMARY KEY 是 rowid alias，不另建主键 B-tree。正式数据库文件固定为 `/var/lib/lexiflow/lexicon.db`；原始文件按摘要受控保留，来源标识、许可和摘要每个数据集保存一次。规则命中、排除原因和来源原始字段不逐词入库，也不转存逐行 JSON 或审计表。
+SQLite STRICT 由 Xerial JDBC `3.54.1.0` 访问，不复制 CSV：只存最终短释、统一 priority、BNC 原始排名及准确词形映射。INTEGER PRIMARY KEY 是 rowid alias，不另建主键 B-tree。正式数据库文件固定为 `/var/lib/lexiflow/lexicon.db`；原始文件按摘要受控保留，来源标识、许可和摘要每个数据集保存一次。规则命中、排除原因和来源原始字段不逐词入库，也不转存逐行 JSON 或审计表。
 
 ## 1.1. 三张物理表与一个逻辑视图
 
 | 表 | 内容 | 关联与读取 |
 | --- | --- | --- |
 | `lexicon_dataset` | 全库一行版本、来源清单、计数、准备规则和生成身份 | 完整发布事务最后写入；版本变化使缓存失效 |
-| `lexicon_entry` | 五列：稳定 ID、lemma、短释、canonical 窗口标志、priority | `entry_id` 主键，`lemma` 唯一；每个词条只存一份结果 |
+| `lexicon_entry` | 七列：稳定 ID、lemma、短释、canonical 窗口标志、priority、可空原始 BNC 与展示名次 | `entry_id` 主键，`lemma` 唯一；每个词条只存一份结果 |
 | `lexicon_form` | 仅保存非 canonical 词形与词条 ID | PK `(normalized_form, entry_id)`，FK 指向 entry；索引支持反向查询 |
 | `lexicon_lookup` | 逻辑视图，合并 canonical lemma 与非 canonical 词形 | 重建原有完整查询映射，供批量查询及预热消费 |
 
 一个词条有多个形式，一个形式也可能对应多个词条。查询必须经 `lexicon_lookup` 取齐候选，包括不可展示词条，不能任取第一条。canonical lemma 由 entry 行的布尔标志重建，映射表不重复保存原形。准确词形不重复保存释义或评分。字段、索引及数据库注释以 [schema.sql](../../../infra/sqlite/schema.sql) 为准；以下说明不是本机数据查询结果。
 
-元数据表保留 13 列；entry 使用五列 `entry_id`、`lemma`、`gloss`、`canonical_form`、`priority`；物理映射仅保存非 canonical 形式。除 `lexicon_entry.gloss` 外均不可为 NULL。写入方显式提供所有字段；`dataset_id=1` 由单例约束保证，不声明 SQL DEFAULT。下表区分数据库约束与导入、发布时保证的业务语义。
+元数据表保留 13 列；entry 使用 `entry_id`、`lemma`、`gloss`、`canonical_form`、`priority`、`bnc_rank`、`frequency_rank`。物理映射仅保存非 canonical 形式。写入方显式提供所有字段；`dataset_id=1` 由单例约束保证，不声明 SQL DEFAULT。下表区分数据库约束与导入、发布时保证的业务语义。
 
 ### 1.1.1. `lexicon_dataset`：全库一行元数据
 
@@ -39,7 +39,7 @@ SQLite STRICT 由 Xerial JDBC `3.54.1.0` 访问，不复制 CSV：只存最终�
 
 发布逻辑另外保证版本处于安全整数范围、计数与实际存储行数一致，且每个存储词条至少有一个可查询形式；这些不是上述 SQL CHECK 的完整保证。
 
-### 1.1.2. `lexicon_entry`：每个词条五列
+### 1.1.2. `lexicon_entry`：每个词条七列
 
 | 字段 | SQL 类型 | 数据库约束 | 用途 |
 | --- | --- | --- | --- |
@@ -48,6 +48,8 @@ SQLite STRICT 由 Xerial JDBC `3.54.1.0` 访问，不复制 CSV：只存最终�
 | `gloss` | `TEXT` | 可为 NULL；非 NULL 时至少包含一个非空白字符 | 唯一安全默认中文短释；NULL 为 BLOCK，非 NULL 为 HINT |
 | `canonical_form` | `INTEGER` | `0` 或 `1`，不可为 NULL | lemma 是否落入词形查询窗口；构建期冻结，用于重建逻辑映射 |
 | `priority` | `INTEGER` | `0`～`1000` | HINT 展示与预热共用；0 表示不预热，不表示 BLOCK |
+| `bnc_rank` | `INTEGER` | 可空；非空时大于 0 | 原始 BNC，用于常见词过滤和词库浏览 |
+| `frequency_rank` | `INTEGER` | 可空；非空时为唯一正安全整数 | 按[语料词频规则](../lexicon.md#12-导入期证据到最终决定)从 1 连续编号，仅已排名规范单词有值 |
 
 `entry_id` 主键复用 rowid B-tree，`lemma` 唯一约束另建唯一索引；另有两个预热部分索引：
 
@@ -71,11 +73,11 @@ SQLite STRICT 由 Xerial JDBC `3.54.1.0` 访问，不复制 CSV：只存最终�
 
 `gloss` 为已校验默认中文短释；NULL 表示已完成处理但不可提示的 BLOCK，非空表示 HINT，不用 NULL 表示待处理。BLOCK 仍可能参与同形歧义和负向预热，不能全部删除。单独不足三个字母或超过查询窗口的形式不持久化；没有任何可查询形式的词条不持久化。完整短语独立判断，主词形不可查询但有合格别名的词条仍保留。
 
-运行时仅有统一 `priority`，HINT 展示与预热共用 0..1000 分数，0 不预热但不表示 BLOCK。`complex_list_count` 仅可用于构建期打分，不持久化；`ranked_word` 不作为 runtime 字段。排序策略简化不承诺旧排序等价，稳定身份、有效词条、lookup、gloss 与 BLOCK 歧义仍须等价，且需记录全量新旧排序差异并验证新策略。`americanizes` → `americanize` HINT 与 `americanizes` BLOCK 同形歧义须覆盖。精确 Zipf、原始排名和复杂标签只在导入计算中使用。
+运行时的统一 `priority` 用于 HINT 与预热；0 不预热但不表示 BLOCK。原始 BNC 过滤与展示名次独立，展示名次不影响提示选择和预热。精确 Zipf 与复杂标签只在导入计算中使用。同形候选完整保留，BLOCK 继续参与歧义判断。
 
-`entry_id` 是规范 `entry:en:<lemma>` 的 SHA-256 前八字节大端值取正 63 位，零映射为 1。SQLite STRICT 使用 INTEGER，Java 用 long，HTTP/扩展用范围 `1`～`9223372036854775807` 的十进制字符串，禁止转为 JavaScript Number。INTEGER PRIMARY KEY 为 rowid alias，不另建主键 B-tree。主键碰撞拒绝整批发布并回滚，不随机换 ID、不合并词条。`senseId` 在候选组装时按发布版本和 lemma 确定性派生，BLOCK 无义项，不另外存一列；Annotation 仍保留 entry、sense、version 三种身份。
+`entry_id` 是规范 `entry:<lemma>` 的 SHA-256 前八字节大端值取正 63 位，零映射为 1。SQLite STRICT 使用 INTEGER，Java 用 long，HTTP/扩展用范围 `1`～`9223372036854775807` 的十进制字符串，禁止转为 JavaScript Number。INTEGER PRIMARY KEY 为 rowid alias，不另建主键 B-tree。主键碰撞拒绝整批发布并回滚，不随机换 ID、不合并词条。`senseId` 在候选组装时按发布版本和 lemma 确定性派生，BLOCK 无义项，不另外存一列；领域内部仍保留 entry、sense、version 三种身份；提示 HTTP 只暴露词条身份与整个响应共享的词库版本。派生的 sense 身份不是长期可引用的义项资产。
 
-当前语言固定 `en`，不在每行重复存储。单词／短语类型由规范 lemma 派生，动作由 gloss 是否为空派生，不在观看时重新清洗或选义。
+单词／短语类型由规范 lemma 派生，动作由 gloss 是否为空派生，不在观看时重新清洗或选义。
 
 ## 1.3. 前置校验与原子发布
 

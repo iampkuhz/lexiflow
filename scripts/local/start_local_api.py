@@ -148,19 +148,26 @@ def main(arguments: Sequence[str] | None = None) -> int:
         if not database_url.strip():
             raise StartupBlocked("正常启动需要 JDBC_URL；未启动演示词库。")
         port = local_api_port(environment.get("LEXIFLOW_API_PORT"))
+        caption_debug = environment.get("LEXIFLOW_CAPTION_DEBUG_ENABLED", "false")
+        if caption_debug not in {"true", "false"}:
+            raise StartupBlocked(
+                "LEXIFLOW_CAPTION_DEBUG_ENABLED 只能为 true 或 false。"
+            )
         environment["SPRING_DATASOURCE_URL"] = database_url
         prepare_port(port)
         print(f"启动 LexiFlow API：http://127.0.0.1:{port}", flush=True)
-        print(
-            "本机字幕可读日志已开启，包含字幕正文与视频定位；请勿共享终端输出。",
-            flush=True,
-        )
+        if caption_debug == "true":
+            print(
+                "本机字幕可读日志已开启，包含字幕正文与视频定位；请勿共享终端输出。",
+                flush=True,
+            )
         command = [
             str(root / "backend/gradlew"),
             "-p",
             str(root / "backend"),
             ":api:bootRun",
-            f"--args=--server.address=127.0.0.1 --server.port={port}",
+            f"--args=--server.address=127.0.0.1 --server.port={port} "
+            f"--lexiflow.caption-debug.enabled={caption_debug}",
         ]
         os.execvpe(command[0], command, environment)
     except (

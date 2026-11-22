@@ -16,8 +16,7 @@ class CaptionDebugControllerTest {
   void consoleIsCompactWhileOriginalEventIdentityStillDeduplicates() {
     var lines = new java.util.ArrayList<String>();
     var controller =
-        new CaptionDebugController(
-            true, new StructuredEventLogger(null, Runnable::run, lines::add));
+        new CaptionDebugController(new StructuredEventLogger(null, Runnable::run, lines::add));
     String id = UUID.randomUUID().toString();
     var request =
         new CaptionDebugRequest(
@@ -42,16 +41,12 @@ class CaptionDebugControllerTest {
   }
 
   @Test
-  void capabilityDefaultsOnAndCanBeDisabledWithoutAnalysisFileSwitch() {
-    var enabled = new CaptionDebugController(true, new StructuredEventLogger());
-    var allowed = enabled.capability(EXTENSION_ORIGIN);
+  void registeredCapabilityIsUncachedAndRejectsOtherOrigins() {
+    var controller = new CaptionDebugController(new StructuredEventLogger());
+    var allowed = controller.capability(EXTENSION_ORIGIN);
     assertTrue(allowed.getBody().enabled());
     assertEquals("no-store", allowed.getHeaders().getFirst("Cache-Control"));
-    assertFalse(
-        new CaptionDebugController(false, new StructuredEventLogger())
-            .capability(EXTENSION_ORIGIN)
-            .getBody()
-            .enabled());
+    assertFalse(controller.capability("https://example.invalid").getBody().enabled());
   }
 
   @Test
@@ -59,7 +54,7 @@ class CaptionDebugControllerTest {
     // 本测试只验证请求合同；同步自有 sink 防止延迟日志污染后续 CLI 的严格 stdout 检查。
     var lines = new java.util.ArrayList<String>();
     var logger = new StructuredEventLogger(null, Runnable::run, lines::add);
-    var controller = new CaptionDebugController(true, logger);
+    var controller = new CaptionDebugController(logger);
     var request =
         new CaptionDebugRequest(
             UUID.randomUUID().toString(),
@@ -107,15 +102,9 @@ class CaptionDebugControllerTest {
                     request.eventId(), "final", "topic\nforged", null, null, null, "x"))
             .getStatusCode()
             .value());
-    assertEquals(
-        404,
-        new CaptionDebugController(false, logger)
-            .append(EXTENSION_ORIGIN, request)
-            .getStatusCode()
-            .value());
     assertEquals(403, controller.append("https://evil.invalid", request).getStatusCode().value());
     assertTrue(controller.capability(null).getBody().enabled());
-    assertEquals(1, lines.size(), "重复、禁用或被拒绝的请求不得追加日志");
+    assertEquals(1, lines.size(), "重复或被拒绝的请求不得追加日志");
     assertTrue(lines.getFirst().contains("实际显示的字幕\\u007C中文"));
   }
 }

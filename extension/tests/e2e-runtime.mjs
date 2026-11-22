@@ -1,11 +1,12 @@
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { once } from "node:events";
 
 const SAFE_ENV_KEYS = ["PATH", "HOME", "TMPDIR", "TMP", "TEMP", "USER", "LOGNAME", "LANG"];
 
 /** 为合成 E2E 构造封闭的 Gradle 启动合同，不继承应用配置或 Java 注入项。 */
-export function createApiLaunchSpec({ repositoryRoot, apiPort, javaHome, sourceEnv = process.env }) {
+export function createApiLaunchSpec({ repositoryRoot, apiPort, javaHome, preferencesDatabase, sourceEnv = process.env }) {
   if (!Number.isInteger(apiPort) || apiPort < 1 || apiPort > 65535) throw new TypeError("apiPort must be a valid TCP port");
+  if (!isAbsolute(preferencesDatabase)) throw new TypeError("isolated preferences path must be absolute");
   const safeEnv = Object.fromEntries(
     SAFE_ENV_KEYS.flatMap((key) => sourceEnv[key] === undefined ? [] : [[key, sourceEnv[key]]])
   );
@@ -13,6 +14,8 @@ export function createApiLaunchSpec({ repositoryRoot, apiPort, javaHome, sourceE
     if (/^LC_[A-Z0-9_]+$/u.test(key)) safeEnv[key] = value;
   }
   safeEnv.JAVA_HOME = javaHome;
+  safeEnv.TZ = "UTC";
+  safeEnv.LEXIFLOW_PREFERENCES_JDBC_URL = `jdbc:sqlite:${preferencesDatabase}`;
 
   return {
     command: resolve(repositoryRoot, "backend/gradlew"),

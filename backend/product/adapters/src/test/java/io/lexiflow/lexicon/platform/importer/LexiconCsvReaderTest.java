@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import io.lexiflow.lexicon.application.importing.LexiconImportPlan;
 import java.nio.file.Files;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class LexiconCsvReaderTest {
@@ -16,7 +17,7 @@ class LexiconCsvReaderTest {
         file, header() + "\n" + row("reliable", "可靠的, 值得信赖", "4.30", "toefl~CC-BY-4.0~reliable"));
 
     var rows = new LexiconCsvReader().read(file);
-    var plan = LexiconImportPlan.prepare(rows, 1, "a".repeat(64), Instant.EPOCH);
+    var plan = prepare(rows, 1, "a".repeat(64), Instant.EPOCH);
 
     assertEquals(1, plan.size());
     assertEquals("可靠的, 值得信赖", plan.getFirst().entry().senses().getFirst().chineseGloss());
@@ -40,8 +41,7 @@ class LexiconCsvReaderTest {
     var rows = new LexiconCsvReader().read(file);
 
     assertThrows(
-        IllegalArgumentException.class,
-        () -> LexiconImportPlan.prepare(rows, 1, "a".repeat(64), Instant.EPOCH));
+        IllegalArgumentException.class, () -> prepare(rows, 1, "a".repeat(64), Instant.EPOCH));
   }
 
   @Test
@@ -69,12 +69,12 @@ class LexiconCsvReaderTest {
     assertEquals("", rows.getFirst().chineseGloss());
     assertEquals("；银行", rows.getFirst().sourceGloss());
     assertEquals(LexiconCsvReader.PREPARATION_POLICY, rows.getFirst().hintPolicyReference());
-    var plan = LexiconImportPlan.prepare(rows, 1, "a".repeat(64), Instant.EPOCH);
+    var plan = prepare(rows, 1, "a".repeat(64), Instant.EPOCH);
     assertEquals(1, plan.size());
     assertEquals(
         "unsafe_default_candidate",
-        io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(
-            rows.getFirst()));
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(rows.getFirst())
+            .exclusionReason());
   }
 
   @Test
@@ -84,11 +84,11 @@ class LexiconCsvReaderTest {
     var rows = new LexiconCsvReader().read(file);
     assertEquals("", rows.getFirst().chineseGloss());
     assertEquals("银行；[残缺", rows.getFirst().sourceGloss());
-    assertEquals(1, LexiconImportPlan.prepare(rows, 1, "a".repeat(64), Instant.EPOCH).size());
+    assertEquals(1, prepare(rows, 1, "a".repeat(64), Instant.EPOCH).size());
     assertEquals(
         "unsafe_default_candidate",
-        io.lexiflow.lexicon.application.importing.policy.HintPreparation.exclusionReason(
-            rows.getFirst()));
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(rows.getFirst())
+            .exclusionReason());
   }
 
   @Test
@@ -119,5 +119,16 @@ class LexiconCsvReaderTest {
         "ecdict",
         "MIT",
         lemma);
+  }
+
+  private static List<LexiconImportPlan.PlannedEntry> prepare(
+      List<io.lexiflow.lexicon.application.importing.model.LexiconImportRow> rows,
+      long version,
+      String digest,
+      Instant at) {
+    var surfaces = LexiconImportPlan.canonicalSurfaceValidator();
+    return rows.stream()
+        .map(row -> LexiconImportPlan.prepareNext(row, version, digest, at, surfaces))
+        .toList();
   }
 }

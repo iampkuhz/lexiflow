@@ -56,7 +56,7 @@ async function fixture() {
     await mkdir(path.join(artifactRoot, 'licenses'), { recursive: true });
     await writeFile(path.join(artifactRoot, 'licenses/notice.txt'), notice);
     const descriptor = { schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit: commit,
-      jar: { path: 'app.jar', bytes: jar.length, sha256: sha(jar) }, apiContract: 'caption-hints.v2', sqlVersion: 'sql-test',
+      jar: { path: 'app.jar', bytes: jar.length, sha256: sha(jar) }, apiContract: 'caption-hints.v4', sqlVersion: 'sql-test',
       dataset: { path: 'dataset.zip', bytes: dataset.length, sha256: sha(dataset), releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rule-test' },
       notices: [{ path: 'licenses/notice.txt', bytes: notice.length, sha256: sha(notice) }] };
     const out = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lexiflow-pipeline-out-')));
@@ -138,7 +138,7 @@ test('CLI assemble 绑定单镜像候选、对应源码归档及 manifest identi
             { softwareVersion: imageCandidate.softwareVersion, sourceCommit: imageCandidate.sourceCommit, expectedDataset });
         const descriptor = { schemaVersion: 2, buildIdentity: imageCandidate.buildIdentity,
             softwareVersion: imageCandidate.softwareVersion, sourceCommit: imageCandidate.sourceCommit,
-            apiContract: 'caption-hints.v2', sqlVersion: 'sql-test',
+            apiContract: 'caption-hints.v4', sqlVersion: 'sql-test',
             dataset: { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rule-test' },
             platforms: ['linux/arm64'], artifacts, licenses };
         const req = await f.request('assemble-request.json', { repoRoot: f.root,

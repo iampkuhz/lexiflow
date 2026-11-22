@@ -1,4 +1,6 @@
-import { localApiPort } from "./extension-build-settings.mjs";
+import { apiContract } from "../../../scripts/contracts/contract-lock.mjs";
+import { LOCAL_TEST_PORT } from "../../../ops/podman/loopback-ports.mjs";
+import { channelManifest, localApiPort } from "./extension-build-settings.mjs";
 import { resolveBuildIdentity } from "../../../ops/release/integrity/source-build-identity.mjs";
 import { readFile, writeFile, mkdir, rm, cp } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -22,6 +24,7 @@ if (process.env.LEXIFLOW_EXPECTED_DATASET !== undefined) {
   catch (error) { throw new Error(`LEXIFLOW_EXPECTED_DATASET invalid: ${error.message}`); }
 }
 const identity = resolveBuildIdentity();
+const wireContract = apiContract();
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 await rm(testModules, { recursive: true, force: true });
@@ -32,9 +35,10 @@ const entries = [
   ["src/background.ts", "esm"],
   ["src/content.ts", "iife"],
   ["src/youtube-bridge.ts", "iife"],
-  ["src/popup.ts", "iife"]
+  ["src/popup.ts", "iife"],
+  ["src/manage.ts", "iife"]
 ];
-const testEntries = ["youtube-source", "caption-snapshot", "caption-source", "stream", "page-lifecycle", "caption-capture", "protocol", "caption-debug", "runtime-status", "diagnostics", "preferences"];
+const testEntries = ["youtube-source", "caption-snapshot", "caption-source", "caption-display", "stream", "page-lifecycle", "caption-capture", "protocol", "caption-debug", "runtime-status", "diagnostics", "preferences", "backend-target", "hint-vocabulary"];
 // Runtime stays as independent bundles. Test-only modules share chunks only in the ignored test output.
 try {
   for (const format of ["esm", "iife"]) {
@@ -50,7 +54,8 @@ try {
       target: "es2022",
       define: {
         __LEXIFLOW_API_PORT__: String(apiPort),
-        __LEXIFLOW_EXPECTED_DATASET__: JSON.stringify(JSON.stringify(expectedDataset)),
+        __LEXIFLOW_API_CONTRACT__: JSON.stringify(wireContract),
+        ...(apiPort === LOCAL_TEST_PORT ? { __LEXIFLOW_DEFAULT_ORIGIN__: JSON.stringify(`http://127.0.0.1:${apiPort}`) } : {}),
       },
       logLevel: "info",
     });
@@ -71,14 +76,15 @@ try {
       legalComments: "eof",
       define: {
         __LEXIFLOW_API_PORT__: String(apiPort),
-        __LEXIFLOW_EXPECTED_DATASET__: JSON.stringify(JSON.stringify(expectedDataset)),
+        __LEXIFLOW_API_CONTRACT__: JSON.stringify(wireContract),
+        ...(apiPort === LOCAL_TEST_PORT ? { __LEXIFLOW_DEFAULT_ORIGIN__: JSON.stringify(`http://127.0.0.1:${apiPort}`) } : {}),
       },
       logLevel: "info",
     });
   }
 } finally { await stop(); }
 
-for (const name of ["popup.html", "popup.css"]) {
+for (const name of ["popup.html", "popup.css", "manage.html", "manage.css"]) {
   await writeFile(resolve(dist, name), await readFile(resolve(root, "src", name)));
 }
 const manifest = JSON.parse(await readFile(resolve(root, "manifest.json"), "utf8"));
@@ -86,5 +92,6 @@ manifest.version = identity.chromeVersion;
 manifest.version_name = identity.softwareVersion;
 await writeFile(resolve(dist, "build-identity.json"), JSON.stringify(identity, null, 2) + "\n");
 if (expectedDataset) await writeFile(resolve(dist, "expected-dataset.json"), JSON.stringify(expectedDataset) + "\n");
-manifest.host_permissions = [`http://127.0.0.1:${apiPort}/*`];
+Object.assign(manifest, channelManifest(apiPort));
+manifest.action.default_title = manifest.name;
 await writeFile(resolve(dist, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");

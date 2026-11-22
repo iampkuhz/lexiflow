@@ -126,3 +126,12 @@ def input_member(root: Path, path: str, *, check: dict[str, Any] | None = None) 
     if missing or not files:
         raise AssertionError(f"unavailable input member: {path}")
     return files[0]["locator"]
+
+
+def formal_only_ids(root: Path) -> set[str]:
+    """读取真实声明供场景归属断言，不在生产中暴露测试查询。"""
+    from scripts.verification.planning.check_definitions import load_declarations
+
+    return set(
+        load_declarations(root)["scenario_policy"]["ci_quick"]["formal_only_check_ids"]
+    )

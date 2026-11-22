@@ -53,6 +53,18 @@ public final class SqliteDatasetVerifier {
         || forms != count(connection, "lexicon_lookup")
         || count(
                 connection,
+                "SELECT COALESCE(MAX(frequency_rank),0)-COUNT(DISTINCT frequency_rank) FROM lexicon_entry")
+            != 0
+        || count(
+                connection,
+                "SELECT COUNT(frequency_rank)-COUNT(DISTINCT frequency_rank) FROM lexicon_entry")
+            != 0
+        || count(
+                connection,
+                "SELECT COUNT(*) FROM lexicon_entry WHERE frequency_rank IS NOT NULL AND frequency_rank < 1")
+            != 0
+        || count(
+                connection,
                 "SELECT COUNT(*) FROM lexicon_form f LEFT JOIN lexicon_entry e USING(entry_id) WHERE e.entry_id IS NULL")
             != 0
         || count(

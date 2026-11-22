@@ -11,7 +11,7 @@ class AnnotationHintTest {
 
   @Test
   void retainsCanonicalEntryAndSenseIds() {
-    var hint = new AnnotationHint(0, 8, ENTRY_ID, SENSE_ID, 1, "可靠的");
+    var hint = new AnnotationHint(0, 8, ENTRY_ID, SENSE_ID, 1, "可靠的", "reliable", null);
 
     assertEquals(ENTRY_ID, hint.lexiconEntryId());
     assertEquals(SENSE_ID, hint.senseId());
@@ -19,7 +19,7 @@ class AnnotationHintTest {
 
   @Test
   void acceptsLargestPositiveLongWithoutNumberPrecisionLoss() {
-    var hint = new AnnotationHint(0, 8, Long.toString(Long.MAX_VALUE), SENSE_ID, 1, "可靠的");
+    var hint = new AnnotationHint(0, 8, Long.toString(Long.MAX_VALUE), SENSE_ID, 1, "可靠的", "reliable", null);
     assertEquals("9223372036854775807", hint.lexiconEntryId());
   }
 
@@ -29,17 +29,17 @@ class AnnotationHintTest {
         new String[] {"", " ", "not-a-uuid", "0", "-1", "01", "00", "9223372036854775808"}) {
       assertThrows(
           IllegalArgumentException.class,
-          () -> new AnnotationHint(0, 8, invalid, SENSE_ID, 1, "可靠的"));
+          () -> new AnnotationHint(0, 8, invalid, SENSE_ID, 1, "可靠的", "reliable", null));
       assertThrows(
           IllegalArgumentException.class,
-          () -> new AnnotationHint(0, 8, ENTRY_ID, invalid, 1, "可靠的"));
+          () -> new AnnotationHint(0, 8, ENTRY_ID, invalid, 1, "可靠的", "reliable", null));
     }
     assertThrows(
         IllegalArgumentException.class,
-        () -> new AnnotationHint(0, 8, ENTRY_ID, SENSE_ID.toUpperCase(), 1, "可靠的"));
+        () -> new AnnotationHint(0, 8, ENTRY_ID, SENSE_ID.toUpperCase(), 1, "可靠的", "reliable", null));
     assertThrows(
-        NullPointerException.class, () -> new AnnotationHint(0, 8, null, SENSE_ID, 1, "可靠的"));
+        NullPointerException.class, () -> new AnnotationHint(0, 8, null, SENSE_ID, 1, "可靠的", "reliable", null));
     assertThrows(
-        NullPointerException.class, () -> new AnnotationHint(0, 8, ENTRY_ID, null, 1, "可靠的"));
+        NullPointerException.class, () -> new AnnotationHint(0, 8, ENTRY_ID, null, 1, "可靠的", "reliable", null));
   }
 }

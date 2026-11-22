@@ -1,3 +1,4 @@
+import { channelManifest } from '../../../extension/scripts/build/extension-build-settings.mjs';
 import { deflateRawSync } from 'node:zlib';
 
 const crc32 = (buf) => {
@@ -44,7 +45,7 @@ export function jarBytes(identity, schema = Buffer.from('')) {
 export function extensionBytes(identity, expectedDataset = { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rules-test', sqlVersion: 'sql-test', sha256: '0'.repeat(64) }) {
   const build = `${JSON.stringify(identity)}\n`;
   const manifest = `${JSON.stringify({ manifest_version: 3, version: identity.chromeVersion, version_name: identity.softwareVersion,
-    permissions: ['storage'], host_permissions: ['http://127.0.0.1:18080/*'], background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' } })}\n`;
+    ...channelManifest(18080), background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' } })}\n`;
   const names = ['manifest.json', 'build-identity.json', 'expected-dataset.json', 'background.js', 'content.js', 'youtube-bridge.js', 'popup.js', 'popup.html', 'popup.css',
     'assets/icon-16.png', 'assets/icon-32.png', 'assets/icon-48.png', 'assets/icon-128.png', 'assets/logo.svg'];
   return makeZip(names.map(name => [name, name === 'manifest.json' ? manifest : name === 'build-identity.json' ? build

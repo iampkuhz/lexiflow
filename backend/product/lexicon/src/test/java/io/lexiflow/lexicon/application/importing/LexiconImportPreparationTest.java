@@ -31,7 +31,8 @@ class LexiconImportPreparationTest {
               consumer.accept(row("gamma", 4));
               return new LexiconImportRowSource.ReadReceipt(DIGEST, 5);
             },
-            2);
+            2,
+            () -> {});
     assertEquals(5, result.counts().sourceRowsTotal());
     assertEquals(3, result.counts().entries());
     assertEquals(3, result.statistics().preparedRows());
@@ -67,7 +68,8 @@ class LexiconImportPreparationTest {
               consumer.accept(row);
               return new LexiconImportRowSource.ReadReceipt(DIGEST, 1);
             },
-            1);
+            1,
+            () -> {});
     var prepared = result.prewarmEntries().getFirst().prepared();
     assertTrue(prepared.matchedRules().contains(prepared.decisiveRule()));
     assertEquals(1L, result.statistics().reasonCounts().get(prepared.decisiveRule()));
@@ -84,7 +86,8 @@ class LexiconImportPreparationTest {
               consumer.accept(row("ineligible", 7, false));
               return new LexiconImportRowSource.ReadReceipt(DIGEST, 5);
             },
-            5);
+            5,
+            () -> {});
     assertEquals(
         List.of("eligible"), result.prewarmEntries().stream().map(v -> v.entry().lemma()).toList());
     var zeroLimit =
@@ -94,7 +97,8 @@ class LexiconImportPreparationTest {
               consumer.accept(row("only", 1, true));
               return new LexiconImportRowSource.ReadReceipt(DIGEST, 1);
             },
-            0);
+            0,
+            () -> {});
     assertEquals(1, zeroLimit.counts().entries());
     assertTrue(zeroLimit.prewarmEntries().isEmpty());
   }
@@ -103,7 +107,7 @@ class LexiconImportPreparationTest {
   void permitsEmptyPreviewButRejectsBadReceiptAndReadFailure() {
     var empty =
         LexiconImportPreparation.inspect(
-            META, consumer -> new LexiconImportRowSource.ReadReceipt(DIGEST, 0), 0);
+            META, consumer -> new LexiconImportRowSource.ReadReceipt(DIGEST, 0), 0, () -> {});
     assertEquals(0, empty.counts().entries());
     assertThrows(IllegalArgumentException.class, empty::requirePublishable);
     assertThrows(
@@ -115,7 +119,8 @@ class LexiconImportPreparationTest {
                   consumer.accept(row("ghost", 1));
                   return new LexiconImportRowSource.ReadReceipt(DIGEST, 0);
                 },
-                0));
+                0,
+                () -> {}));
     assertThrows(
         IllegalStateException.class,
         () ->
@@ -124,7 +129,8 @@ class LexiconImportPreparationTest {
                 consumer -> {
                   throw new java.io.IOException("synthetic read fault");
                 },
-                0));
+                0,
+                () -> {}));
   }
 
   @Test
@@ -138,7 +144,8 @@ class LexiconImportPreparationTest {
                   consumer.accept(row("alpha", 1));
                   return new LexiconImportRowSource.ReadReceipt("b".repeat(64), 1);
                 },
-                0));
+                0,
+                () -> {}));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -149,7 +156,8 @@ class LexiconImportPreparationTest {
                   consumer.accept(row("alpha", 1));
                   return new LexiconImportRowSource.ReadReceipt(DIGEST, 2);
                 },
-                0));
+                0,
+                () -> {}));
   }
 
   @Test

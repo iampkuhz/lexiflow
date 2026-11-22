@@ -17,14 +17,14 @@ public final class LexiconIdentity {
    * 从规范英文 lemma 派生正 long 词条身份。
    *
    * @param lemma 含义：英文词条 lemma。取值范围：非空白英文表面；按 NFC、小写、空格归一化。
-   * @return SHA-256 前八字节大端非负值；零映射为 1。
+   * @return 对 UTF-8 的 {@code entry:<lemma>} 计算 SHA-256，取前八字节大端值的低 63 位；零映射为 1。
    */
   public static long entryId(String lemma) {
     var normalized = normalize(lemma);
     try {
       var digest =
           MessageDigest.getInstance("SHA-256")
-              .digest(("entry:en:" + normalized).getBytes(StandardCharsets.UTF_8));
+              .digest(("entry:" + normalized).getBytes(StandardCharsets.UTF_8));
       long value = ByteBuffer.wrap(digest, 0, Long.BYTES).getLong() & Long.MAX_VALUE;
       return value == 0 ? 1 : value;
     } catch (NoSuchAlgorithmException impossible) {

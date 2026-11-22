@@ -1,7 +1,7 @@
 import { CaptionViewport, readCaptionSource, type CaptionSource } from "./caption-source";
 import { CaptionSnapshotTracker } from "./caption-snapshot";
 import { YoutubeSourceMetadata } from "./youtube-source";
-import { MAX_CAPTION_LENGTH, type CaptionHintRequest } from "./protocol";
+import { MAX_CAPTION_LENGTH } from "./protocol";
 import type { CaptionEvent, CaptionStreamCoordinator } from "./stream";
 import type { PageLifecycle } from "./page-lifecycle";
 import { OVERLAY_ID } from "./overlay";
@@ -141,6 +141,7 @@ export class CaptionCapture {
       this.sourceRevision++; this.clearSource(); this.activeCaptionKey = undefined;
     }
     if (matched.trackKey !== null) this.lastKnownTrackKey = matched.trackKey;
+    if (!textUnchanged) this.nativeIdentity = "";
     if (nextIdentity) this.nativeIdentity = nextIdentity;
     this.trackKey = matched.trackKey;
     const key = `${videoId}\u0000${this.sourceRevision}\u0000${caption}`;
@@ -177,8 +178,8 @@ export class CaptionCapture {
       this.topic = resolved;
     }
     if (!this.acceptResult(expectedGeneration, ownSequence, videoId, expectedRevision, caption, nextIdentity, matched.trackKey)) return;
-    const request: CaptionHintRequest = { captionTopicKey: this.topic, trackKey: this.trackKey,
-      lastRequestedSnapshot: null, currentSnapshot: snapshot };
+    const request: CaptionEvent["request"] = { captionTopicKey: this.topic, trackKey: this.trackKey,
+      currentSnapshot: snapshot };
     this.dependencies.onAcquisition(this.dependencies.now() - observedAt);
     const event: CaptionEvent = { key, sequence: ownSequence, videoTimeMs, request };
     this.stream.submit(event);

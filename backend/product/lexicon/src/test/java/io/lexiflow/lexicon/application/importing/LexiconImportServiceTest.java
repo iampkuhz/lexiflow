@@ -28,12 +28,57 @@ class LexiconImportServiceTest {
           DIGEST, "source", "license", Instant.EPOCH, TestGenerationFixture.identity());
 
   @Test
+  void supplementalRowsUseTheirOwnDigestInPreparedProvenance() {
+    var row = row();
+    var supplementaryDigest = "b".repeat(64);
+    var metadata =
+        new LexiconImportMetadata(
+            DIGEST,
+            "main",
+            "license",
+            Instant.EPOCH,
+            TestGenerationFixture.identity(),
+            List.of(
+                new LexiconImportMetadata.Source(
+                    row.dictionary().sourceId(),
+                    row.dictionary().licenseId(),
+                    supplementaryDigest)));
+    var seen = new ArrayList<LexiconImportPlan.PlannedEntry>();
+    new LexiconImportService(
+            (input, raw, count, source, progress) -> {
+              try {
+                source.read(9, seen::add);
+              } catch (IOException failure) {
+                throw new IllegalStateException(failure);
+              }
+              return 9;
+            })
+        .publishStreaming(
+            metadata,
+            1,
+            1,
+            consumer -> {
+              consumer.accept(row);
+              return new LexiconImportRowSource.ReadReceipt(DIGEST, 1);
+            },
+            new LexiconImportObservation(LexiconImportObserver.NONE));
+    assertEquals(supplementaryDigest, seen.getFirst().entry().provenance().contentDigest());
+    assertEquals(DIGEST, metadata.digestFor("different-main-reference"));
+  }
+
+  @Test
   void rejectsInvalidCountsBeforeCallingPublicationPort() {
     var called = new AtomicBoolean();
     var service = new LexiconImportService(new FakePublicationRepository(called, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> service.publishStreaming(METADATA, 0, 1, consumer -> null));
+        () ->
+            service.publishStreaming(
+                METADATA,
+                0,
+                1,
+                consumer -> null,
+                new LexiconImportObservation(LexiconImportObserver.NONE)));
     assertEquals(false, called.get());
   }
 
@@ -61,7 +106,8 @@ class LexiconImportServiceTest {
             consumer -> {
               consumer.accept(row);
               return new LexiconImportRowSource.ReadReceipt(DIGEST, 2);
-            });
+            },
+            new LexiconImportObservation(LexiconImportObserver.NONE));
     assertEquals(7, actual);
     assertEquals(true, completed.get());
   }
@@ -100,7 +146,8 @@ class LexiconImportServiceTest {
             consumer -> {
               consumer.accept(row());
               return new LexiconImportRowSource.ReadReceipt(DIGEST, 1);
-            });
+            },
+            new LexiconImportObservation(LexiconImportObserver.NONE));
     assertEquals(9, result);
     assertEquals(1, seen.size());
     assertEquals(
@@ -129,7 +176,8 @@ class LexiconImportServiceTest {
                   consumer.accept(row());
                   consumer.accept(row());
                   return new LexiconImportRowSource.ReadReceipt(DIGEST, 2);
-                }));
+                },
+                new LexiconImportObservation(LexiconImportObserver.NONE)));
   }
 
   @Test
@@ -146,7 +194,8 @@ class LexiconImportServiceTest {
                 1,
                 consumer -> {
                   throw new IOException("synthetic source failure");
-                }));
+                },
+                new LexiconImportObservation(LexiconImportObserver.NONE)));
     assertEquals(false, completed.get());
   }
 
@@ -165,7 +214,8 @@ class LexiconImportServiceTest {
                 consumer -> {
                   consumer.accept(row());
                   return new LexiconImportRowSource.ReadReceipt("b".repeat(64), 2);
-                }));
+                },
+                new LexiconImportObservation(LexiconImportObserver.NONE)));
     assertEquals(false, completed.get());
   }
 
@@ -332,7 +382,11 @@ class LexiconImportServiceTest {
     var completed = new AtomicBoolean();
     var service =
         new LexiconImportService(new FakePublicationRepository(new AtomicBoolean(), completed));
-    assertThrows(RuntimeException.class, () -> service.publishStreaming(METADATA, 2, 1, source));
+    assertThrows(
+        RuntimeException.class,
+        () ->
+            service.publishStreaming(
+                METADATA, 2, 1, source, new LexiconImportObservation(LexiconImportObserver.NONE)));
     assertEquals(false, completed.get());
   }
 

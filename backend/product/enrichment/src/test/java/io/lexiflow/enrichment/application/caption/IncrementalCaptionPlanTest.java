@@ -11,14 +11,10 @@ class IncrementalCaptionPlanTest {
   void boundsContextByWholeSegmentCountAndUtf16Budget() {
     var request =
         new CaptionIncrementalRequest(
-            "topic",
-            null,
-            null,
+            List.of(),
             new CaptionIncrementalRequest.Snapshot(
                 List.of(
                     new CaptionIncrementalRequest.Group(
-                        null,
-                        null,
                         List.of(
                             segment("a", "x".repeat(25), false, 0),
                             segment("b", "😀".repeat(12), false, 0),
@@ -49,14 +45,10 @@ class IncrementalCaptionPlanTest {
 
   private static CaptionIncrementalRequest requestWithOldSegments(String first, String second) {
     return new CaptionIncrementalRequest(
-        "topic",
-        null,
-        null,
+        List.of(),
         new CaptionIncrementalRequest.Snapshot(
             List.of(
                 new CaptionIncrementalRequest.Group(
-                    null,
-                    null,
                     List.of(
                         segment("first", first, false, 0),
                         segment("second", second, false, 0),
@@ -67,17 +59,12 @@ class IncrementalCaptionPlanTest {
   void separatesVisualLinesAndGroups() {
     var request =
         new CaptionIncrementalRequest(
-            "topic",
-            null,
-            null,
+            List.of(),
             new CaptionIncrementalRequest.Snapshot(
                 List.of(
                     new CaptionIncrementalRequest.Group(
-                        null,
-                        null,
                         List.of(segment("old", "old", false, 0), segment("new", "new", true, 1))),
-                    new CaptionIncrementalRequest.Group(
-                        null, null, List.of(segment("other", "x", true, 0))))));
+                    new CaptionIncrementalRequest.Group(List.of(segment("other", "x", true, 0))))));
     var intervals = new IncrementalCaptionPlan().plan(request);
     assertEquals(2, intervals.size());
     assertEquals(1, intervals.getFirst().contextFirst());
@@ -88,14 +75,10 @@ class IncrementalCaptionPlanTest {
   void includesAtMostTwoWholeOldSegmentsWithinFortyEightUtf16Units() {
     var request =
         new CaptionIncrementalRequest(
-            "topic",
-            null,
-            null,
+            List.of(),
             new CaptionIncrementalRequest.Snapshot(
                 List.of(
                     new CaptionIncrementalRequest.Group(
-                        null,
-                        null,
                         List.of(
                             segment("one", "a".repeat(16), false, 0),
                                 segment("two", "b".repeat(16), false, 0),
@@ -109,6 +92,6 @@ class IncrementalCaptionPlanTest {
 
   private static CaptionIncrementalRequest.Segment segment(
       String key, String text, boolean append, long line) {
-    return new CaptionIncrementalRequest.Segment(key, text, null, append, line);
+    return new CaptionIncrementalRequest.Segment(key, text, append, line);
   }
 }

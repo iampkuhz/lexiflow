@@ -57,8 +57,11 @@ test("browser adapter requires an E2E-owned successful execution report", () => 
 });
 
 test("quality command preserves browser assertion diagnostics without corrupting stdout", async () => {
-  const root = await mkdtemp(join(tmpdir(), "lexiflow-quality-diagnostics-"));
+  const fixture = await mkdtemp(join(tmpdir(), "lexiflow-quality-diagnostics-"));
+  const root = join(fixture, "extension");
   try {
+    await mkdir(join(fixture, "scripts/contracts"), { recursive: true });
+    await writeFile(join(fixture, "scripts/contracts/version-contract.mjs"), 'console.log("PASS synthetic contract adapter");');
     for (const folder of ["scripts/checks", "tests", "node_modules/playwright"]) {
       await mkdir(join(root, folder), { recursive: true });
     }
@@ -86,6 +89,6 @@ test("quality command preserves browser assertion diagnostics without corrupting
     assert.equal(JSON.parse(result.stdout).status, "FAIL");
     assert.match(result.stderr, /AssertionError: synthetic-caption-mismatch\n    at fixture:42/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(fixture, { recursive: true, force: true });
   }
 });

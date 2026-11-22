@@ -220,15 +220,6 @@ def _base_bytes(root: Path, base: str, path: str) -> bytes | None:
         return None
 
 
-def formal_only_ids(root: Path) -> set[str]:
-    """读取唯一声明中的正式发行专属规范 Check ID。"""
-    from scripts.verification.planning.check_definitions import load_declarations
-
-    return set(
-        load_declarations(root)["scenario_policy"]["ci_quick"]["formal_only_check_ids"]
-    )
-
-
 def _high_path(path: str, policy: dict[str, Any]) -> bool:
     return path.startswith("config/engineering/") or any(
         _matches_pattern(path, pattern) for pattern in policy["high_risk_paths"]

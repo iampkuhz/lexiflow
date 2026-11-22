@@ -2,10 +2,8 @@ package io.lexiflow.enrichment.application.caption;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import io.lexiflow.enrichment.domain.model.CaptionContext;
-import io.lexiflow.enrichment.domain.model.HintState;
+import io.lexiflow.enrichment.domain.model.CaptionIncrementalRequest;
 import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
-import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import io.lexiflow.lexicon.domain.model.LexiconLookupResult;
@@ -25,13 +23,11 @@ class EnrichCaptionUseCaseTest {
             10L,
             UUID.fromString("00000000-0000-0000-0000-000000000011"),
             1,
-            "en",
             "reliable",
-            "reliable",
-            LexiconEntryKind.WORD,
             LexiconHintAction.HINT,
             "可靠的",
-            500);
+            500,
+            null);
     return forms ->
         new LexiconLookupResult(
             forms.contains("reliable") ? List.of(candidate) : List.of(),
@@ -43,17 +39,9 @@ class EnrichCaptionUseCaseTest {
   void returnsChineseGlossForKnownTermInsideTargetRange() {
     var caption = "We need reliable captions.";
 
-    var result =
-        useCase.enrich(
-            new CaptionContext(
-                UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                1,
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                caption,
-                0,
-                caption.length()));
+    var result = useCase.enrichIncrementalMeasured(request(caption)).result();
 
-    assertEquals(HintState.READY, result.state());
+    assertEquals(List.of("a"), result.processedKeys());
     assertEquals("可靠的", result.hints().getFirst().chineseGloss());
     assertEquals(
         "reliable",
@@ -65,39 +53,32 @@ class EnrichCaptionUseCaseTest {
   void preservesEnglishAndSafelyFallsBackForUnknownTerm() {
     var caption = "A quasar crossed the horizon.";
 
-    var result =
-        useCase.enrich(
-            new CaptionContext(
-                UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                1,
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                caption,
-                0,
-                caption.length()));
+    var result = useCase.enrichIncrementalMeasured(request(caption)).result();
 
-    assertEquals(HintState.NO_PENDING, result.state());
-    assertEquals(caption, result.caption());
+    assertEquals(List.of("a"), result.processedKeys());
     assertEquals(0, result.hints().size());
   }
 
   @Test
   void measuresQueryAndRulesUsingOneMonotonicClock() {
-    var ticks = new java.util.ArrayDeque<>(java.util.List.of(100L, 160L, 175L));
+    var ticks =
+        new java.util.ArrayDeque<>(java.util.List.of(100L, 105L, 105L, 108L, 110L, 170L, 185L));
     var measuredUseCase =
         new EnrichCaptionUseCase(catalog(), new DeterministicHintPolicy(), ticks::removeFirst);
-    var measured =
-        measuredUseCase.enrichMeasured(
-            new CaptionContext(
-                UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                1,
-                "a".repeat(64),
-                "reliable",
-                0,
-                8));
+    var measured = measuredUseCase.enrichIncrementalMeasured(request("reliable"));
     assertEquals(60, measured.queryNanos());
     assertEquals(15, measured.rulesNanos());
     assertEquals(1, measured.candidateCount());
-    assertEquals(HintState.READY, measured.result().state());
+    assertEquals(List.of("a"), measured.result().processedKeys());
     assertEquals(0, ticks.size());
+  }
+
+  private static CaptionIncrementalRequest request(String caption) {
+    return new CaptionIncrementalRequest(
+        List.of(),
+        new CaptionIncrementalRequest.Snapshot(
+            List.of(
+                new CaptionIncrementalRequest.Group(
+                    List.of(new CaptionIncrementalRequest.Segment("a", caption, true, 0))))));
   }
 }

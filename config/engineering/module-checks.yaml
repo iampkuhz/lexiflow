@@ -196,6 +196,8 @@ checks:
   - git
   - python-package-yaml
   input_paths:
+  - contracts/versions.lock.json
+  - scripts/contracts/contract-lock.mjs
   - tests/release
   - tests/__init__.py
   - tests/verification/declaration_fixtures.py
@@ -223,6 +225,8 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: contracts/versions.lock.json
+  - path: scripts/contracts/contract-lock.mjs
   - path: tests/release
   - path: tests/__init__.py
   - path: tests/verification/declaration_fixtures.py
@@ -360,8 +364,11 @@ checks:
   - python-package-yaml
   input_paths:
   - extension
+  - contracts/versions.lock.json
+  - scripts/contracts
   - infra/sqlite/schema.sql
   - ops/dataset
+  - ops/podman/loopback-ports.mjs
   - ops/podman/source-tools.Containerfile
   - ops/release/integrity
   - ops/release/version.txt
@@ -384,8 +391,11 @@ checks:
   scenarios: [repository-baseline, change-targeted]
   triggers:
   - path: extension
+  - path: contracts/versions.lock.json
+  - path: scripts/contracts
   - path: infra/sqlite
   - path: ops/dataset
+  - path: ops/podman/loopback-ports.mjs
   - path: ops/podman/source-tools.Containerfile
   - path: ops/release/integrity
   - path: ops/release/version.txt
@@ -422,6 +432,8 @@ checks:
   - mktemp
   - mkfifo
   input_paths:
+  - contracts/versions.lock.json
+  - scripts/contracts/contract-lock.mjs
   - extension/scripts/packaging
   - extension/scripts/build/expected-dataset.mjs
   - ops/release
@@ -445,6 +457,8 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline]
   triggers:
+  - path: contracts/versions.lock.json
+  - path: scripts/contracts/contract-lock.mjs
   - path: extension/scripts/packaging
   - path: extension/scripts/build/expected-dataset.mjs
   - path: ops/release/test_tools
@@ -487,6 +501,8 @@ checks:
   - mktemp
   - mkfifo
   input_paths:
+  - contracts/versions.lock.json
+  - scripts/contracts/contract-lock.mjs
   - extension/scripts/packaging
   - extension/scripts/build/expected-dataset.mjs
   - scripts/checks/deployment/run_deployment_contract_tests.py
@@ -511,6 +527,8 @@ checks:
   transaction_reuse: true
   scenarios: [change-targeted]
   triggers:
+  - path: contracts/versions.lock.json
+  - path: scripts/contracts/contract-lock.mjs
   - path: extension/scripts/packaging
   - path: extension/scripts/build/expected-dataset.mjs
   - path: scripts/checks/deployment/run_deployment_contract_tests.py
@@ -552,6 +570,8 @@ checks:
   - mktemp
   - mkfifo
   input_paths:
+  - contracts/versions.lock.json
+  - scripts/contracts/contract-lock.mjs
   - scripts/checks/deployment/run_deployment_contract_tests.py
   - ops/docker
   - ops/release
@@ -573,6 +593,8 @@ checks:
   transaction_reuse: true
   scenarios: [change-targeted]
   triggers:
+  - path: contracts/versions.lock.json
+  - path: scripts/contracts/contract-lock.mjs
   - path: scripts/checks/deployment/run_deployment_contract_tests.py
   - path: ops/docker
   - path: ops/release/test_tools
@@ -611,6 +633,8 @@ checks:
   - mktemp
   - mkfifo
   input_paths:
+  - contracts/versions.lock.json
+  - scripts/contracts/contract-lock.mjs
   - extension/scripts/packaging
   - extension/scripts/build/expected-dataset.mjs
   - scripts/checks/deployment/run_deployment_contract_tests.py
@@ -638,6 +662,8 @@ checks:
   transaction_reuse: true
   scenarios: [change-targeted]
   triggers:
+  - path: contracts/versions.lock.json
+  - path: scripts/contracts/contract-lock.mjs
   - path: extension/scripts/packaging
   - path: scripts/checks/deployment/run_deployment_contract_tests.py
   - path: infra/local/compose.yaml
@@ -689,7 +715,10 @@ checks:
   - mktemp
   - mkfifo
   input_paths:
+  - contracts/versions.lock.json
+  - scripts/contracts/contract-lock.mjs
   - extension/scripts/packaging
+  - extension/scripts/build/extension-build-settings.mjs
   - extension/scripts/build/expected-dataset.mjs
   - scripts/checks/deployment/run_deployment_contract_tests.py
   - infra/local/compose.yaml
@@ -706,7 +735,6 @@ checks:
   - scripts/agents/work_packages/work_package_contract_checks.py
   - ops/dataset/tests/dataset-generation-identity.test.mjs
   - ops/podman/tests/candidate-runtime.test.mjs
-  - ops/podman/tests/candidate-image-alias.test.mjs
   - ops/podman/tests/candidate.test.mjs
   - ops/podman/tests/command-barrier.test.mjs
   - ops/podman/tests/command-follow.test.mjs
@@ -714,9 +742,9 @@ checks:
   - ops/podman/tests/deployment.test.mjs
   - ops/podman/tests/deployment-slots.test.mjs
   - ops/podman/tests/image-slot-lock.test.mjs
-  - ops/podman/tests/isolated-candidate-archive.test.mjs
   - ops/podman/tests/java-runtime.test.mjs
   - ops/podman/tests/local-session.test.mjs
+  - ops/podman/tests/local-test-slot.test.mjs
   - ops/podman/tests/logs.test.mjs
   - ops/podman/tests/prepare-workspace.test.mjs
   - ops/podman/tests/process-lock.test.mjs
@@ -733,7 +761,10 @@ checks:
   transaction_reuse: true
   scenarios: [change-targeted]
   triggers:
+  - path: contracts/versions.lock.json
+  - path: scripts/contracts/contract-lock.mjs
   - path: extension/scripts/packaging
+  - path: extension/scripts/build/extension-build-settings.mjs
   - path: extension/scripts/build/expected-dataset.mjs
   - path: scripts/checks/deployment/run_deployment_contract_tests.py
   - path: infra/local/compose.yaml
@@ -758,7 +789,6 @@ checks:
   - path: scripts/agents/work_packages/work_package_contract_checks.py
   - path: ops/dataset/tests/dataset-generation-identity.test.mjs
   - path: ops/podman/tests/candidate-runtime.test.mjs
-  - path: ops/podman/tests/candidate-image-alias.test.mjs
   - path: ops/podman/tests/candidate.test.mjs
   - path: ops/podman/tests/command-barrier.test.mjs
   - path: ops/podman/tests/command-follow.test.mjs
@@ -766,9 +796,9 @@ checks:
   - path: ops/podman/tests/deployment.test.mjs
   - path: ops/podman/tests/deployment-slots.test.mjs
   - path: ops/podman/tests/image-slot-lock.test.mjs
-  - path: ops/podman/tests/isolated-candidate-archive.test.mjs
   - path: ops/podman/tests/java-runtime.test.mjs
   - path: ops/podman/tests/local-session.test.mjs
+  - path: ops/podman/tests/local-test-slot.test.mjs
   - path: ops/podman/tests/prepare-workspace.test.mjs
   - path: ops/podman/tests/process-lock.test.mjs
   - path: ops/podman/tests/source-base-image.test.mjs
@@ -792,6 +822,8 @@ checks:
   - mktemp
   - sha256-tool
   input_paths:
+  - contracts/versions.lock.json
+  - scripts/contracts/contract-lock.mjs
   - ops/release/test_tools/run-release-tool-tests.mjs
   - ops/release/tests/runtime-entry.test.mjs
   - ops/release/tests/lifecycle-fixture.mjs
@@ -800,6 +832,8 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: contracts/versions.lock.json
+  - path: scripts/contracts/contract-lock.mjs
   - path: ops/release/test_tools/run-release-tool-tests.mjs
   - path: ops/release/tests/runtime-entry.test.mjs
   - path: ops/release/tests/lifecycle-fixture.mjs
@@ -815,6 +849,8 @@ checks:
   - mktemp
   - sha256-tool
   input_paths:
+  - contracts/versions.lock.json
+  - scripts/contracts/contract-lock.mjs
   - ops/release/test_tools/run-release-tool-tests.mjs
   - ops/release/tests/lifecycle-install.test.mjs
   - ops/release/tests/lifecycle-fixture.mjs
@@ -823,6 +859,8 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: contracts/versions.lock.json
+  - path: scripts/contracts/contract-lock.mjs
   - path: ops/release/test_tools/run-release-tool-tests.mjs
   - path: ops/release/tests/lifecycle-install.test.mjs
   - path: ops/release/tests/lifecycle-fixture.mjs
@@ -839,6 +877,8 @@ checks:
   - mktemp
   - sha256-tool
   input_paths:
+  - contracts/versions.lock.json
+  - scripts/contracts/contract-lock.mjs
   - ops/release/test_tools/run-release-tool-tests.mjs
   - ops/release/tests/lifecycle.test.mjs
   - ops/release/tests/lifecycle-fixture.mjs
@@ -850,6 +890,8 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: contracts/versions.lock.json
+  - path: scripts/contracts/contract-lock.mjs
   - path: ops/release/test_tools/run-release-tool-tests.mjs
   - path: ops/release/tests/lifecycle.test.mjs
   - path: ops/release/tests/lifecycle-fixture.mjs
@@ -869,6 +911,8 @@ checks:
   - /bin/sh
   - mkfifo
   input_paths:
+  - contracts/versions.lock.json
+  - scripts/contracts/contract-lock.mjs
   - scripts/acceptance
   - scripts/environment
   - scripts/agents
@@ -882,6 +926,8 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: contracts/versions.lock.json
+  - path: scripts/contracts/contract-lock.mjs
   - path: scripts/acceptance
   - path: scripts/environment
   - path: scripts/agents
@@ -918,6 +964,8 @@ checks:
   - release-gradle-cache
   - release-npm-cache
   input_paths:
+  - contracts/versions.lock.json
+  - scripts/contracts/contract-lock.mjs
   - scripts/acceptance
   - scripts/agents
   - requirements-dev.txt
@@ -955,6 +1003,8 @@ checks:
   - ops/podman
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: contracts/versions.lock.json
+  - path: scripts/contracts/contract-lock.mjs
   - path: scripts/acceptance
   - path: scripts/agents
   - path: requirements-dev.txt
@@ -1008,6 +1058,8 @@ checks:
   - podman
   - candidate-runtime-request
   input_paths:
+  - contracts/versions.lock.json
+  - scripts/contracts/contract-lock.mjs
   - AGENTS.md
   - .gitignore
   - ops/release
@@ -1041,6 +1093,8 @@ checks:
   - scripts/checks/repository/catalog/task_catalog_rules.py
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: contracts/versions.lock.json
+  - path: scripts/contracts/contract-lock.mjs
   - path: ops/release/__init__.py
   - path: AGENTS.md
   - path: .gitignore

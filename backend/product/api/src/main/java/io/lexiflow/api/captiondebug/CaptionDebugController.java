@@ -3,7 +3,7 @@ package io.lexiflow.api.captiondebug;
 import io.lexiflow.observability.platform.StructuredEventLogger;
 import java.util.Objects;
 import java.util.UUID;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,26 +15,22 @@ import org.springframework.web.bind.annotation.RestController;
 
 /** 接收扩展确认已显示的事件；正文只进入有界本机控制台流。 */
 @RestController
+@ConditionalOnProperty(name = "lexiflow.caption-debug.enabled", havingValue = "true")
 @RequestMapping("/api/v1/caption-debug")
 public final class CaptionDebugController {
   private static final java.util.regex.Pattern VIDEO_ID =
       java.util.regex.Pattern.compile("[A-Za-z0-9_-]{11}");
   private static final java.util.regex.Pattern EXTENSION_ORIGIN =
       java.util.regex.Pattern.compile("chrome-extension://[a-p]{32}");
-  private final boolean enabled;
   private final StructuredEventLogger events;
   private final java.util.LinkedHashMap<UUID, Boolean> emitted = new java.util.LinkedHashMap<>();
 
   /**
-   * 创建默认开启且可显式关闭的调试端点。
+   * 仅在本机开发显式开启后装配调试端点。
    *
-   * @param consoleEnabled 本机可读日志开关。
    * @param events 固定格式观测输出。
    */
-  public CaptionDebugController(
-      @Value("${lexiflow.caption-debug.enabled:true}") boolean consoleEnabled,
-      StructuredEventLogger events) {
-    this.enabled = consoleEnabled;
+  public CaptionDebugController(StructuredEventLogger events) {
     this.events = Objects.requireNonNull(events);
   }
 
@@ -51,15 +47,15 @@ public final class CaptionDebugController {
       return ResponseEntity.status(HttpStatus.FORBIDDEN)
           .header("Cache-Control", "no-store")
           .body(new Capability(false));
-    return ResponseEntity.ok().header("Cache-Control", "no-store").body(new Capability(enabled));
+    return ResponseEntity.ok().header("Cache-Control", "no-store").body(new Capability(true));
   }
 
   /**
-   * 接收扩展确认已显示的事件；禁用或非本机请求均不输出。
+   * 接收扩展确认已显示的事件；非本机诊断来源不输出。
    *
    * @param origin 含义：请求来源。取值范围：受信扩展来源或本机无 Origin 请求。
    * @param request 含义：待验证显示事件。取值范围：符合固定协议与长度限制的请求。
-   * @return 不缓存的空响应；非法、禁用或来源不符分别返回错误状态。
+   * @return 不缓存的空响应；非法或来源不符分别返回错误状态。
    */
   @PostMapping
   public ResponseEntity<Void> append(
@@ -69,7 +65,6 @@ public final class CaptionDebugController {
       return ResponseEntity.status(HttpStatus.FORBIDDEN)
           .header("Cache-Control", "no-store")
           .build();
-    if (!enabled) return disabled();
     var parsed = parse(request);
     if (parsed == null) return badRequest();
     synchronized (emitted) {
@@ -133,10 +128,6 @@ public final class CaptionDebugController {
 
   private static boolean trustedOrigin(String origin) {
     return origin == null || EXTENSION_ORIGIN.matcher(origin).matches();
-  }
-
-  private static ResponseEntity<Void> disabled() {
-    return ResponseEntity.status(HttpStatus.NOT_FOUND).header("Cache-Control", "no-store").build();
   }
 
   private static ResponseEntity<Void> badRequest() {

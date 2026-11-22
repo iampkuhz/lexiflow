@@ -48,7 +48,7 @@ def result(data: dict) -> dict:
         "channel": "snapshot",
     }
     dataset = {"releaseId": "release", "preparationId": "preparation", "ruleId": "rule", "sqlVersion": "v1", "sha256": "9" * 64}
-    api = {"softwareVersion": identity["softwareVersion"], "apiContract": "caption-hints.v2", "mode": "formal", "datasetVersion": 1, "publishedDataset": dataset}
+    api = {"softwareVersion": identity["softwareVersion"], "apiContract": "caption-hints.v4", "mode": "formal", "datasetVersion": 1, "publishedDataset": dataset}
     return {
         "schemaVersion": "lexiflow.candidate-runtime.v2",
         "status": "PASS",

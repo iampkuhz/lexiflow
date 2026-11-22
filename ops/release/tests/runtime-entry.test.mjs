@@ -62,6 +62,10 @@ test('runtime Dockerfile is the locked one-image PID1 contract', async (t) => {
 
 test('runtime refuses unknown directory contents without cleanup or adoption', async (t) => {
   const f = await lifecycleFixture(t);
+  await (await import('node:fs/promises')).mkdir(f.preferences);
+  await (await import('node:fs/promises')).writeFile(f.preferencesDatabase, 'synthetic');
+  await (await import('node:fs/promises')).writeFile(f.preferencesMountInfo,
+    `12 1 0:99 / ${f.preferences} rw - tmpfs tmpfs rw\n`);
   const foreignTree = path.join(f.root, 'foreign-tree');
   await (await import('node:fs/promises')).mkdir(foreignTree);
   const result = runRuntime(f, 'runtime_start');
@@ -72,9 +76,10 @@ test('runtime refuses unknown directory contents without cleanup or adoption', a
 
 test('runtime entry validates the complete eight-field release identity and rejects duplicates', async (t) => {
   const f = await lifecycleFixture(t);
-  const valid = runRuntime(f, 'read_identity; identity_line');
+  const valid = runRuntime(f, 'read_identity; volume_identity_line');
   assert.equal(valid.status, 0, valid.stderr);
-  assert.equal(valid.stdout, f.identity);
+  const fields = Object.fromEntries(f.identity.trimEnd().split('\n').map(line => line.split('=')));
+  assert.equal(valid.stdout, `schemaVersion=4|sqlVersion=${fields.sqlVersion}|releaseId=${fields.releaseId}|preparationId=${fields.preparationId}|ruleId=${fields.ruleId}|datasetSha256=${fields.datasetSha256}`);
   const duplicate = f.identity + 'softwareVersion=another-version\n';
   await (await import('node:fs/promises')).writeFile(f.identityPath, duplicate);
   const result = runRuntime(f, 'read_identity');

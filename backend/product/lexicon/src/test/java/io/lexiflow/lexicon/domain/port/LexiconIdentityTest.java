@@ -15,7 +15,7 @@ class LexiconIdentityTest {
     assertTrue(first > 0);
     assertTrue(Long.toString(first).length() <= 19);
     assertNotEquals(first, LexiconIdentity.entryId("coffee au lait"));
-    assertEquals(4106666595944390966L, LexiconIdentity.entryId("reliable"));
+    assertEquals(6729899230243208557L, LexiconIdentity.entryId("reliable"));
     assertThrows(NullPointerException.class, () -> LexiconIdentity.entryId(null));
     assertThrows(IllegalArgumentException.class, () -> LexiconIdentity.entryId(" \t "));
   }

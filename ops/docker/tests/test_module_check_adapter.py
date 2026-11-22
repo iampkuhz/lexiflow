@@ -51,7 +51,7 @@ class DockerGroupContractTest(unittest.TestCase):
         self.assertEqual(set(flat), py | node)
         self.assertEqual(len(flat), len(set(flat)))
         self.assertEqual(
-            {"surface": 3, "shell": 5, "local": 5, "node": 22},
+            {"surface": 3, "shell": 5, "local": 5, "node": 21},
             {k: len(v) for k, v in groups.items()},
         )
         adapter._preflight(self.root, self.declarations, groups)
@@ -569,8 +569,8 @@ class IsolatedClassLaneTest(unittest.TestCase):
                     *synthetic_cases("test_contract", "ContainerHealthTransportTest", 8, retained=True),
                     *synthetic_cases("test_lifecycle_flow", "FlowTests", 12),
                 ])
-                captured["ids"] = adapter._lane_class_ids(suite)
-                _, remainder = adapter._lane_partition(suite)
+                lane, remainder = adapter._lane_partition(suite)
+                captured["ids"] = [case.id() for case in lane]
                 captured["retained"] = [case.id() for case in remainder]
                 return suite
             return unittest.TestSuite([_synthetic_case()])

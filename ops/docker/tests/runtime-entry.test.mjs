@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -78,17 +79,21 @@ test('HTTP parser rejects duplicate and conflicting framing headers', async (t) 
   assert.equal(result.stdout, '');
 });
 
-test('TERM reaches and waits for an initialization child', async () => {
-  const child = spawn('bash', ['-c', 'source "$1"; PG_PID=""; API_PID=""; INIT_PID=""; trap \'stop_children; exit 0\' TERM; sleep 60 & INIT_PID=$!; wait_active "$INIT_PID"', '--', entrypoint], {
-    stdio: 'ignore',
-  });
-  await new Promise((resolve) => setTimeout(resolve, 250));
-  const started = Date.now();
-  child.kill('SIGTERM');
-  const status = await new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.once('exit', (code, signal) => resolve({ code, signal }));
-  });
-  assert.ok(Date.now() - started < 5000);
-  assert.equal(status.code, 0);
+test('TERM reaches and waits for an initialization child', { timeout: 5000 }, async (t) => {
+  const script = `
+    source "$1"
+    trap 'rc=$?; trap - EXIT; stop_api || rc=1; exit "$rc"' EXIT
+    trap 'exit 143' TERM
+    bash -c 'trap "exit 0" TERM; printf "%s\\n" "$$"; while :; do sleep .1; done' & INIT_PID=$!
+    wait "$INIT_PID"
+  `;
+  const child = spawn('bash', ['-c', script, '--', entrypoint], { stdio: ['ignore', 'pipe', 'ignore'] });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM'); });
+  const exited = once(child, 'exit');
+  const [line] = await once(child.stdout, 'data');
+  const pid = Number(String(line).trim());
+  assert.ok(Number.isInteger(pid) && pid > 0);
+  assert.equal(child.kill('SIGTERM'), true);
+  assert.deepEqual(await exited, [143, null]);
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
 });

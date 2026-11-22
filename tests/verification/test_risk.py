@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import yaml
 
-from scripts.verification.planning.change_risk_assessment import assess, formal_only_ids
-from tests.verification.declaration_fixtures import write_declarations
+from scripts.verification.planning.change_risk_assessment import assess
+from tests.verification.declaration_fixtures import formal_only_ids, write_declarations
 
 
 class RiskAssessmentTest(unittest.TestCase):

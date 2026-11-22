@@ -129,12 +129,16 @@ public final class LexiconImportMain {
     if (stardict.matches(input)) {
       var selection = stardict.selectBasicVocabulary(input);
       var metadata =
-          new LexiconImportMetadata(
-              expectedSha256,
-              "ecdict-stardict:" + StardictCsvReader.PREPARATION_POLICY + ":" + selection.digest(),
-              "MIT",
-              Instant.EPOCH,
-              generation);
+          reviewedMetadata(
+              new LexiconImportMetadata(
+                  expectedSha256,
+                  "ecdict-stardict:"
+                      + StardictCsvReader.PREPARATION_POLICY
+                      + ":"
+                      + selection.digest(),
+                  "MIT",
+                  Instant.EPOCH,
+                  generation));
       inspectStardict(stardict, command, metadata, selection, 0, null)
           .inspection()
           .requirePublishable();
@@ -166,16 +170,17 @@ public final class LexiconImportMain {
     if (stardict.matches(command.input())) {
       var selection = stardict.selectBasicVocabulary(command.input());
       var metadata =
-          new LexiconImportMetadata(
-              digest,
-              command.batchSourceId()
-                  + ":"
-                  + StardictCsvReader.PREPARATION_POLICY
-                  + ":"
-                  + selection.digest(),
-              command.batchLicenseId(),
-              command.acquiredAt(),
-              generation);
+          reviewedMetadata(
+              new LexiconImportMetadata(
+                  digest,
+                  command.batchSourceId()
+                      + ":"
+                      + StardictCsvReader.PREPARATION_POLICY
+                      + ":"
+                      + selection.digest(),
+                  command.batchLicenseId(),
+                  command.acquiredAt(),
+                  generation));
       var preflight = inspectStardict(stardict, command, metadata, selection, 0, null);
       preflight.inspection().requirePublishable();
       return new LexiconImportService(repository)
@@ -383,7 +388,9 @@ public final class LexiconImportMain {
       return;
     }
     var metadata =
-        metadata(command, digest, StardictCsvReader.PREPARATION_POLICY + ":" + selection.digest());
+        reviewedMetadata(
+            metadata(
+                command, digest, StardictCsvReader.PREPARATION_POLICY + ":" + selection.digest()));
     if (observation != null) observation.start(LexiconImportObserver.Step.PREPARE);
     var preflight =
         inspectStardict(
@@ -494,6 +501,25 @@ public final class LexiconImportMain {
         java.util.Map.of());
   }
 
+  private static LexiconImportMetadata reviewedMetadata(LexiconImportMetadata main) {
+    var sources = new java.util.ArrayList<>(ReviewedPhraseCatalog.sources());
+    sources.add(
+        new LexiconImportMetadata.Source(
+            "lexiflow-reviewed-source-defaults", "MIT", ReviewedSourceDefaults.digest()));
+    sources.add(
+        new LexiconImportMetadata.Source(
+            "lexiflow-wordnet-lexical-evidence",
+            "LicenseRef-WordNet-3.0",
+            StardictLexicalEvidence.digest()));
+    return new LexiconImportMetadata(
+        main.sourceDigest(),
+        main.sourceId(),
+        main.licenseId(),
+        main.acquiredAt(),
+        main.generation(),
+        sources);
+  }
+
   private static LexiconImportRowSource stardictSource(
       StardictCsvReader reader,
       Arguments command,
@@ -504,9 +530,14 @@ public final class LexiconImportMain {
     return consumer -> {
       var actual = reader.read(command.input(), record -> consumer.accept(record.row()), selection);
       if (observation != null) observation.heartbeat(heartbeatStep);
+      if (actual.importableRows() == 0)
+        throw new IllegalArgumentException("source has no importable entries");
+      var reviewed = new java.util.ArrayList<>(ReviewedPhraseCatalog.publicationRows());
+      reviewed.addAll(ReviewedSourceDefaults.constructionRows());
+      reviewed.forEach(consumer);
       scan[0] = actual;
       return new LexiconImportRowSource.ReadReceipt(
-          sourceDigest(command.input()), actual.sourceRows());
+          sourceDigest(command.input()), actual.sourceRows() + reviewed.size());
     };
   }
 

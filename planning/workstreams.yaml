@@ -77,6 +77,7 @@ path_ownership:
     proposed_paths:
     - backend/product/api/**
     - contracts/api/**
+    - contracts/versions.lock.json
   - scope: backend.build
     owner: LF-WS-OPS
     proposed_paths:

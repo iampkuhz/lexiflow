@@ -1,3 +1,4 @@
+import { apiContract } from "../../../scripts/contracts/contract-lock.mjs";
 import { createHash } from 'node:crypto';
 import { lstat, readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
@@ -83,7 +84,7 @@ export async function prepareImageBuild(input) {
     if (![repoRoot, artifactRoot].every(value => typeof value === 'string' && path.isAbsolute(value))) reject('INPUT_INVALID');
     await assertNoSymlinkPath(repoRoot); await assertNoSymlinkPath(artifactRoot);
     if (!keys(descriptor, ['schemaVersion', 'softwareVersion', 'sourceCommit', 'jar', 'apiContract', 'sqlVersion', 'dataset', 'notices'])
-      || descriptor.schemaVersion !== 1 || descriptor.apiContract !== 'caption-hints.v2'
+      || descriptor.schemaVersion !== 1 || descriptor.apiContract !== apiContract()
       || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(descriptor.sourceCommit) || !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(descriptor.sqlVersion)) reject('DESCRIPTOR_INVALID');
     let identity;
     try { identity = resolveCleanBuildIdentity(repoRoot); } catch { reject('RELEASE_SOURCE_REJECTED'); }

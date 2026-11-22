@@ -1,3 +1,4 @@
+import { channelManifest } from '../../../extension/scripts/build/extension-build-settings.mjs';
 import nodeTest from 'node:test';
 let testQueue=Promise.resolve();
 function test(name, run) { nodeTest(name, async context => { const prior=testQueue; let finish; testQueue=new Promise(resolve=>{finish=resolve;}); await prior; try { return await run(context); } finally { finish(); } }); }
@@ -26,10 +27,11 @@ function extensionFiles(identity, apiPort) {
   const files = apiPort === 18081 ? PACKAGE_FILES.filter(name => name !== 'expected-dataset.json') : PACKAGE_FILES;
   return new Map(files.map(name => [name, Buffer.from(name === 'manifest.json'
     ? JSON.stringify({ manifest_version: 3, version: identity.chromeVersion, version_name: identity.softwareVersion,
-      permissions: ['storage'], host_permissions: [`http://127.0.0.1:${apiPort}/*`],
-      background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' } })
+      ...channelManifest(apiPort),
+      background: { service_worker: 'background.js' }, action: { default_popup: 'popup.html' }, options_page: 'manage.html' })
     : name === 'build-identity.json' ? JSON.stringify(identity)
-    : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>' : `synthetic:${name}`)]));
+    : name === 'popup.html' ? '<link href="popup.css"><script src="popup.js"></script>'
+    : name === 'manage.html' ? '<link href="manage.css"><script src="manage.js"></script>' : `synthetic:${name}`)]));
 }
 function writeExtension(directory, files) { for (const [name, bytes] of files) write(path.join(directory, name), bytes); }
 function fixture({ apiPort = 18081, failReady = false, failApply = false, structuredFailure = false, sourceDriftDuringBuild = false } = {}) {
@@ -153,6 +155,19 @@ function fixture({ apiPort = 18081, failReady = false, failApply = false, struct
     rejectJavaBasePull: () => { rejectJavaBasePull = true; },
     cleanup: () => fs.rmSync(base, { recursive: true }) };
 }
+
+test('a fresh source plan refuses an occupied test slot before preparing any artifacts', async () => {
+  const f = fixture();
+  try {
+    await f.setup();
+    await assert.rejects(runUnifiedDeployment({
+      ...f.ctx({ planOnly: true }),
+      ownedResources: async () => { throw new Error('DEPLOYMENT_TEST_SLOT_OCCUPIED'); },
+    }), /DEPLOYMENT_TEST_SLOT_OCCUPIED/);
+    assert.deepEqual(f.calls, ['progress:读取安装记录', 'progress:核对测试容器槽位']);
+    assert.equal(fs.existsSync(f.dir), false);
+  } finally { f.cleanup(); }
+});
 
 test('source actual planner uses Java inspect, then applies through built API image before activation', async () => {
   const f = fixture();
@@ -439,7 +454,7 @@ for (const apiPort of [18081]) test(`source installation packages API port ${api
     assert.deepEqual(descriptor.buildIdentity, state.buildIdentity);
     assert.equal(fs.readFileSync(`${zipPath}.sha256`, 'utf8'), `${descriptor.sha256}  ${path.basename(zipPath)}\n`);
     for (const [name, bytes] of await readExtensionFiles(zipPath, descriptor.sha256)) assert.deepEqual(fs.readFileSync(path.join(f.dir, 'extension', name)), bytes);
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.dir, 'extension/manifest.json'))).host_permissions, [`http://127.0.0.1:${apiPort}/*`]);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.dir, 'extension/manifest.json'))).host_permissions, channelManifest(apiPort).host_permissions);
   } finally { f.cleanup(); }
 });
 
@@ -584,6 +599,30 @@ test('database selection and mount contracts are SQLite-only', async () => {
     const compose=JSON.parse(renderCompose(root,{apiPort:18081,databaseFile}));
     assert.deepEqual(Object.keys(compose.services),['api']);
     assert.equal(compose.services.api.environment.SPRING_DATASOURCE_URL,'jdbc:sqlite:/var/lib/lexiflow/lexicon.db?mode=ro');
-    assert.deepEqual(compose.services.api.volumes,['${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro']);
+    assert.deepEqual(compose.services.api.volumes,[
+      '${LEXIFLOW_DATABASE_FILE:?LEXIFLOW_DATABASE_FILE is required}:/var/lib/lexiflow/lexicon.db:ro',
+      'lexiflow-preferences:/var/lib/lexiflow/preferences',
+    ]);
   } finally { fs.rmSync(root,{recursive:true,force:true}); }
+});
+
+
+test('source deployment rejects an installation bound to another slot without adopting it', async () => {
+  const f = fixture();
+  try {
+    await f.setup();
+    const current = await f.plan();
+    assert.equal(await runUnifiedDeployment(f.ctx({ confirmPlan: current.planHash })), 0);
+    const stateFile = path.join(f.dir, 'state.json');
+    const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    write(stateFile, JSON.stringify({ ...state, apiPort: 18080 }));
+    const before = fs.readFileSync(stateFile);
+    const prior = f.calls.length;
+    await assert.rejects(
+      runUnifiedDeployment({ ...f.ctx({ planOnly: true }), enforceFixedSlots: true }),
+      /DEPLOYMENT_SOURCE_SLOT_STATE_INVALID/,
+    );
+    assert.deepEqual(fs.readFileSync(stateFile), before);
+    assert.deepEqual(f.calls.slice(prior), ['progress:读取安装记录', 'progress:核对测试容器槽位']);
+  } finally { f.cleanup(); }
 });

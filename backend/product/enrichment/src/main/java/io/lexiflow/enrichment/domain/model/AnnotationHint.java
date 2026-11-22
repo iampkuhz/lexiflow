@@ -6,12 +6,13 @@ import java.util.UUID;
 /**
  * 与当前字幕范围和词库版本绑定的可展示中文提示。
  *
- * @param startOffset 词段半开区间起点。
- * @param endOffset 词段半开区间终点。
- * @param lexiconEntryId 候选词条稳定正 long 的规范十进制字符串。
- * @param senseId 候选词条内唯一且已确定的义项稳定标识。
- * @param lexiconVersion 候选词条版本。
- * @param chineseGloss 语境中的简短中文释义。
+ * @param startOffset 含义：提示词段半开区间起点。取值范围：非负 UTF-16 偏移。
+ * @param endOffset 含义：提示词段半开区间终点。取值范围：大于 startOffset 的 UTF-16 偏移。
+ * @param lexiconEntryId 含义：候选词条稳定身份。取值范围：正 long 的规范十进制字符串。
+ * @param senseId 含义：候选词条内已确定的义项身份。取值范围：规范 UUID。
+ * @param lexiconVersion 含义：候选词条所属版本。取值范围：正 long。
+ * @param chineseGloss 含义：语境中的简短中文释义。取值范围：非空白字符串。
+ * @param lemma 含义：匹配词条的真实规范主词形。取值范围：非空白字符串。
  */
 public record AnnotationHint(
     int startOffset,
@@ -19,7 +20,9 @@ public record AnnotationHint(
     String lexiconEntryId,
     String senseId,
     long lexiconVersion,
-    String chineseGloss) {
+    String chineseGloss,
+    String lemma,
+    Long frequencyRank) {
 
   /** 校验提示引用与词库版本。 */
   public AnnotationHint {
@@ -32,6 +35,8 @@ public record AnnotationHint(
       throw new IllegalArgumentException("lexiconVersion must be positive");
     }
     chineseGloss = required(chineseGloss, "chineseGloss");
+    lemma = required(lemma, "lemma");
+    if (frequencyRank != null && frequencyRank < 1) throw new IllegalArgumentException("frequencyRank must be positive");
   }
 
   private static String canonicalUuid(String value, String field) {

@@ -33,7 +33,7 @@ class CaptionRequestSinkFailureHttpTest {
   void eventSinkFailureDoesNotChangeRealHttpResponse() throws Exception {
     var response =
         post(
-            "{\"captionTopicKey\":\"topic\",\"trackKey\":null,\"lastRequestedSnapshot\":null,\"currentSnapshot\":{\"captions\":[{\"windowId\":null,\"startMs\":null,\"segments\":[{\"key\":\"sink\",\"text\":\"reliable\",\"offsetMs\":null,\"append\":true,\"line\":0}]}]}}");
+            "{\"previousSegments\":[],\"currentSnapshot\":{\"captions\":[{\"segments\":[{\"key\":\"sink\",\"text\":\"reliable\",\"append\":true,\"line\":0}]}]}}");
     assertEquals(200, response.statusCode());
     assertTrue(response.body().contains("可靠的"));
     assertTrue(response.headers().firstValue("X-Request-ID").isPresent());

@@ -1,7 +1,9 @@
-import type { CaptionSnapshot, CaptionSegment, Hint } from "./protocol";
+import type { CaptionSegment, Hint } from "./protocol";
 import { snapshotSegments, snapshotText, splitsSurrogate } from "./protocol";
 import type { CaptionSource } from "./caption-source";
 export type SourceMetadata = { windowId: string | null; startMs: number | null; offsetMs: number | null };
+type ObservedSegment = CaptionSegment & { offsetMs: number | null };
+export type ObservedCaptionSnapshot = { captions: { windowId: string | null; startMs: number | null; segments: ObservedSegment[] }[] };
 /** 优先完整保留旧前缀，其次取最长旧后缀与新前缀；不以 DOM 身份判断字幕边界。 */
 export function retainedOverlap(previous: string, current: string): number {
   for (let size = Math.min(previous.length, current.length); size > 0; size--) {
@@ -23,13 +25,13 @@ export function remapHints(previous: string, current: string, hints: Hint[]): Hi
 /** 页面内 key 不复用；保留段保持身份，新增后缀永远分配新身份。 */
 export class CaptionSnapshotTracker {
   private nextId = 0;
-  private previous: CaptionSnapshot = { captions: [] };
+  private previous: ObservedCaptionSnapshot = { captions: [] };
   constructor(private readonly prefix: string = crypto.randomUUID()) {}
   reset(): void { this.previous = { captions: [] }; }
-  capture(source: CaptionSource, metadata: (text: string, offset: number) => SourceMetadata = () => ({ windowId: null, startMs: null, offsetMs: null })): CaptionSnapshot {
+  capture(source: CaptionSource, metadata: (text: string, offset: number) => SourceMetadata = () => ({ windowId: null, startMs: null, offsetMs: null })): ObservedCaptionSnapshot {
     const oldText = snapshotText(this.previous), overlap = retainedOverlap(oldText, source.caption);
     const removed = oldText.length - overlap;
-    const kept: CaptionSegment[] = []; let offset = 0;
+    const kept: ObservedSegment[] = []; let offset = 0;
     for (const segment of snapshotSegments(this.previous)) {
       const end = offset + segment.text.length;
       if (end > removed) kept.push({ ...segment, text: segment.text.slice(Math.max(0, removed - offset)), append: false });
@@ -40,7 +42,7 @@ export class CaptionSnapshotTracker {
     for (const match of suffix.matchAll(/\s*\S+|\s+$/gu)) {
       kept.push({ key: `${this.prefix}-${++this.nextId}`, text: match[0], offsetMs: null, append: true, line: 0 });
     }
-    const captions: CaptionSnapshot["captions"] = []; offset = 0; let lastWindow = -1;
+    const captions: ObservedCaptionSnapshot["captions"] = []; offset = 0; let lastWindow = -1;
     for (const segment of kept) {
       const info = metadata(segment.text, offset);
       const firstText = offset + (segment.text.match(/^\s*/u)?.[0].length ?? 0);

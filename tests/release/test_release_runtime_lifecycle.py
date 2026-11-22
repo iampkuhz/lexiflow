@@ -33,7 +33,7 @@ def valid_result(
     }
     api_identity = {
         "softwareVersion": "1.2.3-SNAPSHOT.20261024.gabcdef0",
-        "apiContract": "caption-hints.v2",
+        "apiContract": "caption-hints.v4",
         "mode": "formal",
         "datasetVersion": dataset_version,
         "publishedDataset": identity,

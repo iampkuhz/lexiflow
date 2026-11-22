@@ -25,7 +25,12 @@ CREATE TABLE lexicon_entry (
     lemma TEXT NOT NULL UNIQUE CHECK (length(trim(lemma)) > 0),
     gloss TEXT CHECK (gloss IS NULL OR length(trim(gloss)) > 0),
     canonical_form INTEGER NOT NULL CHECK (canonical_form IN (0,1)),
-    priority INTEGER NOT NULL CHECK (priority BETWEEN 0 AND 1000)
+    priority INTEGER NOT NULL CHECK (priority BETWEEN 0 AND 1000),
+    bnc_rank INTEGER CHECK (bnc_rank IS NULL OR bnc_rank > 0),
+    frequency_rank INTEGER UNIQUE CHECK (
+        frequency_rank IS NULL OR
+        (frequency_rank BETWEEN 1 AND 9007199254740991 AND instr(lemma, ' ') = 0)
+    )
 ) STRICT;
 
 CREATE TABLE lexicon_form (
@@ -35,6 +40,8 @@ CREATE TABLE lexicon_form (
 ) STRICT, WITHOUT ROWID;
 
 CREATE INDEX lexicon_form_entry_idx ON lexicon_form(entry_id);
+CREATE INDEX lexicon_entry_frequency_rank_idx ON lexicon_entry(frequency_rank, lemma, entry_id);
+CREATE INDEX lexicon_entry_bnc_rank_idx ON lexicon_entry(bnc_rank, lemma, entry_id);
 CREATE INDEX lexicon_entry_prewarm_hint_idx ON lexicon_entry(priority DESC, entry_id)
     WHERE gloss IS NOT NULL AND priority > 0;
 CREATE INDEX lexicon_entry_prewarm_block_idx ON lexicon_entry(priority DESC, entry_id)

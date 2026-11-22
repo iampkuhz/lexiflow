@@ -47,7 +47,7 @@ Hook 使用本机已有 Podman；只有 Redis 检查依赖缺失时，才按需�
 
 ## 1.3. 显式 Verify 与 SQLite 边界
 
-[开发 SQLite 文件](../../infra/local/compose.yaml)及本机目录只服务本机导入和体验，绝不是测试夹具；不得把开发文件路径填入测试配置。每个适配器集成测试通过 `@TempDir` 创建隔离 SQLite 文件，载入唯一最新 `infra/sqlite/schema.sql`；不同测试不共享文件。仅 Redis 是可能需要隔离 lease 的外部测试服务。
+[开发 SQLite 文件](local-development.md#12-初始化本地配置再启动确定性-api)及本机目录只服务本机导入和体验，绝不是测试夹具；不得把开发文件路径填入测试配置。每个适配器集成测试通过 `@TempDir` 创建隔离 SQLite 文件，载入唯一最新 `infra/sqlite/schema.sql`；不同测试不共享文件。仅 Redis 是可能需要隔离 lease 的外部测试服务。[Redis Compose 声明](../../infra/local/compose.yaml)默认不启用，只允许在独立验证引擎显式使用其 profile，并在检查后清理。
 
 独立运行 Verify 时，调用者自行提供所需 Redis 地址；SQLite 测试数据库由测试夹具创建并仅对单个测试可见。API 运行采用只读 `mode=ro`，拒绝缺失数据库，不隐式建库或清库。
 

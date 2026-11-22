@@ -1,8 +1,10 @@
 package io.lexiflow.api.hints;
 
+import io.lexiflow.api.contract.WireSemantics;
 import io.lexiflow.api.hints.model.CaptionHintRequest;
 import io.lexiflow.api.hints.model.CaptionHintResponse;
 import io.lexiflow.enrichment.application.caption.EnrichCaptionUseCase;
+import io.lexiflow.enrichment.application.preferences.LocalPreferences;
 import io.lexiflow.observability.platform.StructuredEvent;
 import io.lexiflow.observability.platform.StructuredEventLogger;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,19 +20,28 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /** 为当前可见新增字幕提供不阻塞的词段级中文提示。 */
+@WireSemantics("segment-offset:utf16-code-unit;previous-same-key:suffix-only;processed-keys:current-append-order")
 @RestController
 @RequestMapping("/api/v1/caption-hints")
 public final class CaptionHintController {
   private final EnrichCaptionUseCase useCase;
   private final SegmentAnalysisLog analysisLog;
   private final StructuredEventLogger events;
+  private final Optional<LocalPreferences> preferences;
 
   /** 注入应用用例、敏感记录适配器及固定事件发件器。 */
   public CaptionHintController(
       EnrichCaptionUseCase useCase, SegmentAnalysisLog analysisLog, StructuredEventLogger events) {
+    this(useCase, analysisLog, events, Optional.empty());
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public CaptionHintController(EnrichCaptionUseCase useCase, SegmentAnalysisLog analysisLog,
+      StructuredEventLogger events, Optional<LocalPreferences> preferences) {
     this.useCase = Objects.requireNonNull(useCase, "useCase");
     this.analysisLog = Objects.requireNonNull(analysisLog, "analysisLog");
     this.events = Objects.requireNonNull(events, "events");
+    this.preferences = Objects.requireNonNull(preferences, "preferences");
   }
 
   /**
@@ -45,7 +56,7 @@ public final class CaptionHintController {
       @RequestBody CaptionHintRequest request, HttpServletRequest servletRequest) {
     var observation = observation(servletRequest);
     long validationStarted = System.nanoTime();
-    var conversion = toDomain(request);
+    var conversion = toDomain(request, preferences.map(p -> p.read().commonWordCutoff()).orElse(1500));
     observation.validation(System.nanoTime() - validationStarted);
     if (conversion.isEmpty()) {
       observation.reason(StructuredEvent.Reason.INVALID_REQUEST);
@@ -65,6 +76,8 @@ public final class CaptionHintController {
     var body =
         new CaptionHintResponse(
             result.processedKeys(),
+            measured.diagnostics().publishedVersion().isPresent()
+                ? measured.diagnostics().publishedVersion().getAsLong() : null,
             result.hints().stream()
                 .map(
                     hint ->
@@ -75,8 +88,7 @@ public final class CaptionHintController {
                             hint.endOffset(),
                             hint.chineseGloss(),
                             hint.lexiconEntryId(),
-                            hint.lexiconVersion(),
-                            hint.senseId()))
+                            hint.frequencyRank()))
                 .toList());
     if (!result.processedKeys().isEmpty()) {
       long analysisStarted = System.nanoTime();
@@ -117,9 +129,9 @@ public final class CaptionHintController {
   }
 
   private static Optional<io.lexiflow.enrichment.domain.model.CaptionIncrementalRequest> toDomain(
-      CaptionHintRequest request) {
+      CaptionHintRequest request, int cutoff) {
     try {
-      return Optional.of(Objects.requireNonNull(request).toDomain());
+      return Optional.of(Objects.requireNonNull(request).toDomain(cutoff));
     } catch (IllegalArgumentException | NullPointerException invalid) {
       return Optional.empty();
     }

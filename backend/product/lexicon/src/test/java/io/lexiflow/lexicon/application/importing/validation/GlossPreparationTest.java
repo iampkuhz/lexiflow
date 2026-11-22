@@ -38,8 +38,7 @@ class GlossPreparationTest {
     assertFalse(row("on the contrary", "相反", List.of(), List.of()).basicVocabulary());
     var normalized = row("parallelogram", "平行四边形；[机] 平行四边形", List.of(), List.of());
     assertEquals("平行四边形", normalized.chineseGloss());
-    var plan =
-        LexiconImportPlan.prepare(List.of(basic, normalized), 1, "a".repeat(64), Instant.EPOCH);
+    var plan = prepare(List.of(basic, normalized), 1, "a".repeat(64), Instant.EPOCH);
     assertEquals("fixture#1", plan.getLast().entry().senses().getFirst().provenanceReference());
   }
 
@@ -87,10 +86,21 @@ class GlossPreparationTest {
         "definition",
         aliases,
         forms,
-        LexiconPriority.unranked(),
+        LexiconPriority.fromRankedEvidence(0, 0, false),
         ref,
         ref,
         List.of(),
         true);
+  }
+
+  private static List<LexiconImportPlan.PlannedEntry> prepare(
+      List<io.lexiflow.lexicon.application.importing.model.LexiconImportRow> rows,
+      long version,
+      String digest,
+      Instant at) {
+    var surfaces = LexiconImportPlan.canonicalSurfaceValidator();
+    return rows.stream()
+        .map(row -> LexiconImportPlan.prepareNext(row, version, digest, at, surfaces))
+        .toList();
   }
 }

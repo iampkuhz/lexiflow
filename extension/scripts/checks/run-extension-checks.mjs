@@ -23,6 +23,16 @@ function report(status, phase, unitTests, browserSmoke, reason = "") {
 }
 
 async function main() {
+  for (const scope of ["extension-api", "sqlite-storage"]) {
+    const base = process.env.LEXIFLOW_CONTRACT_BASE;
+    const command = base ? ["check", "--scope", scope, "--base", base] : ["verify", "--scope", scope];
+    const checked = await execute("node", ["../scripts/contracts/version-contract.mjs", ...command, "--json"]);
+    if (checked.stdout || checked.stderr) process.stderr.write(checked.stdout + checked.stderr);
+    if (checked.exitCode !== 0) {
+      report(checked.exitCode === 2 ? "BLOCKED" : "FAIL", "build", 0, 0, "compatibility-contract-not-verified");
+      return;
+    }
+  }
   const build = await execute("npm", ["run", "build", "--", "test-modules"]);
   if (build.exitCode !== 0) {
     if (build.stdout || build.stderr) process.stderr.write(`${build.stdout}${build.stderr}`);

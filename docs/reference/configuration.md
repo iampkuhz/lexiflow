@@ -42,7 +42,7 @@ ownership 只扫描共享 Git 源码候选及冻结的共享 ignore，不进入�
 | [extension/manifest.json](../../extension/manifest.json) | [扩展构建](../../extension/scripts/build/build-extension.mjs)、Chrome | 构建解析与复制；扩展权限和入口声明 |
 | [extension/package.json](../../extension/package.json) | npm；[发行测试](../../extension/tests/release.test.mjs)也读取 | 工具命令与开发依赖声明 |
 | [extension/package-lock.json](../../extension/package-lock.json) | npm；[发行测试](../../extension/tests/release.test.mjs)也读取 | 依赖锁，不按普通手工配置拆分 |
-| [extension/tsconfig.json](../../extension/tsconfig.json) | [构建入口](../../extension/scripts/build/build-extension.mjs)调用 TypeScript | 编译器参数 |
+| [extension/tsconfig.json](../../extension/tsconfig.json) | [构建入口](../../extension/scripts/build/build-extension.mjs)调用 TypeScript | 编译器参数；同时拒绝未使用的局部声明和参数 |
 | [.codex/hooks.json](../../.codex/hooks.json) | Codex 客户端 Hook 配置 | 客户端适配，不复制检查规则；存在不证明客户端已经触发 |
 | [.qoder/settings.json](../../.qoder/settings.json) | Qoder 客户端 Hook 配置 | 手工客户端 Stop 适配；不提供仓库子代理委派链 |
 | [ci.yml](../../.github/workflows/ci.yml) | GitHub Actions | 分支／PR 的 quick 工作流，见[CI 与发行](../scenarios/github-actions.md) |
@@ -52,7 +52,7 @@ ownership 只扫描共享 Git 源码候选及冻结的共享 ignore，不进入�
 
 | 文件 | 已确认的消费者 | 性质与维护边界 |
 | --- | --- | --- |
-| [infra/local/compose.yaml](../../infra/local/compose.yaml) | Compose 工具 | 本机 Redis 服务声明；SQLite 开发文件由本机开发配置指定 |
+| [infra/local/compose.yaml](../../infra/local/compose.yaml) | Compose 工具 | 仅独立验证显式启用的 Redis profile；不是日常运行依赖 |
 | [ecdict-source.lock.json](../../ops/dataset/ecdict-source.lock.json) | [固定词库准备入口](../../ops/dataset/prepare_ecdict_bundle.py) | 来源锁；不是下载时生成的运行记录 |
 | [generation-inputs.json](../../ops/dataset/generation-inputs.json) | [生成身份](../../ops/dataset/dataset-generation-identity.mjs) | 数据生成版本的输入声明 |
 | [base-images.json](../../ops/docker/base-images.json) | [发行构建](../../ops/release/build/release-image-build-plan.mjs) | 基础镜像锁，随构建版本审查 |

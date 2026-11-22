@@ -2,9 +2,25 @@
 
 > 位置：[仓库生命周期](../README.md) → 离线词库导入。本流程准备本机已发布资料，不是每次代码交付的必经步骤。
 
-本机完整 CSV 导入以明确提供的 `stardict.csv` 为输入，不叠加 `ecdict.csv`。安装侧的[固定公开来源准备入口](../../ops/dataset/prepare_ecdict_bundle.py)则按来源锁组合 ECDICT CSV 与 StarDict 成员，输出精简 CSV 及含许可和行号映射的溯源 ZIP。溯源 ZIP 不是经批准的 SQLite 发行快照，两条路径的来源身份不可互换。来源文件不进入仓库，也不使用用户字幕、观看历史或熟悉度。API 只读消费已发布资料；来源校验、数据库初始化及重建均由离线命令完成。
+本机完整 CSV 导入以明确提供的单一准备 CSV 为输入。安装来源预筛不能把 `0:root` 关系当作无独立词义的证明；使用固定 ECDICT 完整原件补齐后，再导入新的准备文件。安装侧的[固定公开来源准备入口](../../ops/dataset/prepare_ecdict_bundle.py)则按来源锁组合 ECDICT CSV 与 StarDict 成员，输出精简 CSV 及含许可和行号映射的溯源 ZIP。溯源 ZIP 不是经批准的 SQLite 发行快照，两条路径的来源身份不可互换。来源文件不进入仓库，也不使用用户字幕、观看历史或熟悉度。API 只读消费已发布资料；来源校验、数据库初始化及重建均由离线命令完成。
 
-## 1.1. 校验来源
+## 1.1. 准备与校验来源
+
+固定公开来源的精简 CSV 先执行 Java 独立词义补齐。`ECDICT_BASE_CSV` 必须对应 `ops/dataset/ecdict-source.lock.json` 锁定的完整 `ecdict.csv`；两份原件只读，新输出不得存在：
+
+```bash
+export STARDICT_CSV='/absolute/path/prepared-core.csv'
+export ECDICT_BASE_CSV='/absolute/path/ecdict.csv'
+export LEXICON_PREPARED_OUTPUT='/absolute/path/prepared-complete.csv'
+python3 -m scripts.local.run_with_java_toolchain backend/gradlew -p backend :adapters:lexiconPrepare
+export STARDICT_CSV="$LEXICON_PREPARED_OUTPUT"
+```
+
+准备保留原精简文件全部物理行与字段，只补回具有确切 WordNet 独立 synset 和来源词性支持的词条；普通复数与根词共享全部 synset 时不另建身份。Java 导入同样检查独立义，移除混合来源行中属于根词的屈折形式，原始释义不改写。不能通过手工编辑发布表或伪造 generation 复用旧资料资格。
+
+离线词性证据来自固定 PWN3.0／OMW English2.0，精确 sense key 去重后按词性汇总原 `cntlist` 计数；仅在至少5次、严格领先且达到次位2倍时，选择来源中对应词性的第一个安全候选。无词性、并列、全零、没有对应来源候选或不安全首项均保留回退。原受核质量纠错另有完整来源锁，优先于计数规则。它不是现代义频概率，不解决同一词性的多义或具体字幕语境。证据 TSV、摘要和 WordNet 版权声明随程序保存，作为独立许可来源进入资料 manifest，不标为 MIT。
+
+`WordnetEvidenceMain` 只从固定摘要的公开 XML 重建计数/身份投影，不下载、不读取中文、不访问模型。静态投影的身份校验不等于全库中文语义准确率。
 
 准备合法取得的 StarDict CSV，确认文件摘要与首行：
 
@@ -53,3 +69,5 @@ LEXIFLOW_RELEASE_JDBC_URL='jdbc:sqlite:/absolute/path/to/lexicon.db' \
 ## 1.4. 发布语义
 
 完整来源预扫描、canonical 冲突验证及内容计数均在写入前完成；导入在单个 SQLite 事务中进行，来源摘要、计数、稳定身份与发布记录在提交前再次核验。业务查询通过逻辑 `lexicon_lookup` 视图获得 canonical 与非 canonical 的完整形式集合，保留同形歧义和 BLOCK 候选。唯一最新物理 SQL 为 `infra/sqlite/schema.sql`。
+
+跨词性改写还须命中本轮生产者实际核过的 `reviewed-pos-defaults.tsv`：完整原翻译 SHA 与所选短释同时匹配。历史词性占优不证明中文首项正确；未核、来源漂移或未准入行回退原策略。`file` 的动词首项、`ultrasonic` 的错误中文等不采用。该数据驱动准入不是全库语义 gold，不使用 COW 中文进入产品或再分发。

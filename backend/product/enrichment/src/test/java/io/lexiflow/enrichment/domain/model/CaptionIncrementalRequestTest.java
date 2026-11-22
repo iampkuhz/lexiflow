@@ -8,59 +8,59 @@ import org.junit.jupiter.api.Test;
 
 class CaptionIncrementalRequestTest {
   @Test
-  void acceptsPrefixTrimAndRejectsInPlaceGrowth() {
-    var previous = snapshot(segment("a", "reliable", true));
-    var current = snapshot(segment("a", "liable", true));
-    var request = new CaptionIncrementalRequest("topic", null, previous, current);
-    assertEquals("liable", request.current().captions().getFirst().segments().getFirst().text());
+  void validatesRetainedKeyUsingOnlyThePreviousText() {
+    var previous = List.of(new CaptionIncrementalRequest.PreviousSegment("a", "old word"));
+    var current = snapshot(segment("a", "word"), segment("b", " new"));
+    assertEquals(current, new CaptionIncrementalRequest(previous, current).current());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CaptionIncrementalRequest(previous, snapshot(segment("a", "word mutated"))));
+  }
+
+  @Test
+  void rejectsDuplicatesAndExcessiveTextInBothLists() {
+    assertThrows(
+        IllegalArgumentException.class, () -> new CaptionIncrementalRequest.Group(List.of()));
+    assertThrows(
+        IllegalArgumentException.class, () -> snapshot(segment("a", "one"), segment("a", "two")));
+    assertThrows(IllegalArgumentException.class, () -> snapshot(segment("a", "x".repeat(501))));
+    var previous = new CaptionIncrementalRequest.PreviousSegment("a", "word");
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CaptionIncrementalRequest(List.of(previous, previous), snapshot()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CaptionIncrementalRequest(List.of(previous), snapshot(segment("b", "word")), 1000));
+    var longPrevious = new CaptionIncrementalRequest.PreviousSegment("b", "x".repeat(497));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CaptionIncrementalRequest(List.of(previous, longPrevious), snapshot()));
+  }
+
+  @Test
+  void validatesCurrentLineAndUnicodeInBothLists() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CaptionIncrementalRequest.Segment("a", "x", true, -1));
+    assertThrows(IllegalArgumentException.class, () -> segment("a", "\uD800"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new CaptionIncrementalRequest(
-                "topic", null, previous, snapshot(segment("a", "reliable!", true))));
-  }
-
-  @Test
-  void rejectsDuplicateKeysAndTotalUtf16Limit() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new CaptionIncrementalRequest.Group(null, null, List.of()));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> snapshot(segment("a", "one", true), segment("a", "two", true)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> snapshot(segment("a", "x".repeat(300), true), segment("b", "y".repeat(201), true)));
-    assertEquals(
-        500,
-        snapshot(segment("a", "x".repeat(500), true))
-            .captions()
-            .getFirst()
-            .segments()
-            .getFirst()
-            .text()
-            .length());
-  }
-
-  @Test
-  void rejectsUnsafeNumbersAndSplitSurrogates() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new CaptionIncrementalRequest.Segment("a", "x", 9_007_199_254_740_992L, true, 0));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new CaptionIncrementalRequest.Segment("a", "x", null, true, -1));
-    assertThrows(IllegalArgumentException.class, () -> segment("a", "\uD83E", true));
+                List.of(new CaptionIncrementalRequest.PreviousSegment("a", "\uDC00")),
+                snapshot(segment("a", "word")), 1500));
+    assertEquals(2, segment("a", "😀").text().length());
   }
 
   private static CaptionIncrementalRequest.Snapshot snapshot(
       CaptionIncrementalRequest.Segment... segments) {
     return new CaptionIncrementalRequest.Snapshot(
-        List.of(new CaptionIncrementalRequest.Group(null, null, List.of(segments))));
+        segments.length == 0
+            ? List.of()
+            : List.of(new CaptionIncrementalRequest.Group(List.of(segments))));
   }
 
-  private static CaptionIncrementalRequest.Segment segment(
-      String key, String text, boolean append) {
-    return new CaptionIncrementalRequest.Segment(key, text, null, append, 0);
+  private static CaptionIncrementalRequest.Segment segment(String key, String text) {
+    return new CaptionIncrementalRequest.Segment(key, text, true, 0);
   }
 }

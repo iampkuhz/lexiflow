@@ -31,7 +31,7 @@ class LexiconReadinessHttpTest {
       assertEquals("no-store", status.headers().firstValue("Cache-Control").orElse(""));
       var json = new tools.jackson.databind.ObjectMapper().readTree(status.body());
       assertEquals(7, json.size());
-      assertEquals("caption-hints.v2", json.get("apiContract").asString());
+      assertEquals("caption-hints.v4", json.get("apiContract").asString());
       assertEquals("formal", json.get("mode").asString());
       assertFalse(json.get("ready").asBoolean());
       assertEquals("DEPENDENCY_UNAVAILABLE", json.get("reason").asString());
@@ -54,7 +54,7 @@ class LexiconReadinessHttpTest {
                   .header("Content-Type", "application/json")
                   .POST(
                       HttpRequest.BodyPublishers.ofString(
-                          "{\"captionTopicKey\":\"topic\",\"trackKey\":null,\"lastRequestedSnapshot\":null,\"currentSnapshot\":{\"captions\":[{\"windowId\":null,\"startMs\":null,\"segments\":[{\"key\":\"a\",\"text\":\"reliable\",\"offsetMs\":null,\"append\":true,\"line\":0}]}]}}"))
+                          "{\"previousSegments\":[],\"currentSnapshot\":{\"captions\":[{\"segments\":[{\"key\":\"a\",\"text\":\"reliable\",\"append\":true,\"line\":0}]}]}}"))
                   .build(),
               HttpResponse.BodyHandlers.ofString());
       assertEquals(503, response.statusCode());

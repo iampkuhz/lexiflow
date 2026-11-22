@@ -18,6 +18,22 @@ public final class DatasetPackageTables {
     Set<String> columnSet() {
       return Set.copyOf(columns);
     }
+
+    List<String> packageColumns() {
+      return columns.stream().map(column -> packageName(name, column)).toList();
+    }
+  }
+
+  static String packageName(String table, String column) {
+    if ("lexicon_entry".equals(table) && "bnc_rank".equals(column)) return "bncRank";
+    if ("lexicon_entry".equals(table) && "frequency_rank".equals(column)) return "frequencyRank";
+    return column;
+  }
+
+  static String sqlName(String table, String packageColumn) {
+    if ("lexicon_entry".equals(table) && "bncRank".equals(packageColumn)) return "bnc_rank";
+    if ("lexicon_entry".equals(table) && "frequencyRank".equals(packageColumn)) return "frequency_rank";
+    return packageColumn;
   }
 
   public static final Table DATASET =
@@ -41,7 +57,7 @@ public final class DatasetPackageTables {
   public static final Table ENTRY =
       new Table(
           "lexicon_entry",
-          List.of("entry_id", "lemma", "gloss", "canonical_form", "priority"),
+          List.of("entry_id", "lemma", "gloss", "canonical_form", "priority", "bnc_rank", "frequency_rank"),
           "entry_id");
   public static final Table FORM =
       new Table(
@@ -69,7 +85,13 @@ public final class DatasetPackageTables {
           Map.entry("gloss", "TEXT"),
           Map.entry("canonical_form", "INTEGER"),
           Map.entry("priority", "INTEGER"),
+          Map.entry("frequency_rank", "INTEGER"),
+          Map.entry("bnc_rank", "INTEGER"),
           Map.entry("normalized_form", "TEXT"));
+
+  static boolean nullable(String column) {
+    return Set.of("gloss", "frequency_rank", "bnc_rank").contains(column);
+  }
 
   private DatasetPackageTables() {}
 }
