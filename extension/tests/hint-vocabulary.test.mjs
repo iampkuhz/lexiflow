@@ -21,12 +21,14 @@ test("tracks zero and counts actual occurrences, not render calls or preference 
   assert.equal(list.snapshot()[0].hintCount, 3);
 });
 
-test("orders by published rank, isolates versions, and clears at the session boundary", () => {
+test("orders by actual count rather than rank, isolates versions, and clears at the session boundary", () => {
   const list = new HintVocabulary();
   const active = new Set(["segment-a"]);
   list.observe(active, [observation(), observation({ entryId:"11", english:"essential", frequencyRank:1 }),
-    observation({ entryId:"12", english:"some phrase", frequencyRank:null })]);
-  assert.deepEqual(list.snapshot().map(item=>item.frequencyRank), [1,127,null]);
+    observation({ entryId:"12", english:"some phrase", frequencyRank:null, occurrence:"a:14", displayed:true }),
+    observation({ entryId:"12", english:"some phrase", frequencyRank:null, occurrence:"a:25", displayed:true }),
+    observation({ occurrence:"a:5", displayed:true })]);
+  assert.deepEqual(list.snapshot().map(({ frequencyRank, hintCount }) => [frequencyRank, hintCount]), [[null,2],[127,1],[1,0]]);
   list.observe(active, [observation({ version:2, frequencyRank:4 })]);
   assert.deepEqual(list.snapshot().map(item=>item.frequencyRank), [4]);
   assert.equal(isVocabularyRow(list.snapshot()[0]), true);

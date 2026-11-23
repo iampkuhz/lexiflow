@@ -33,7 +33,7 @@ export class HintVocabulary {
 
   snapshot(): VocabularyRow[] {
     return [...this.rows.values()].sort((a, b) =>
-      (a.frequencyRank ?? Infinity) - (b.frequencyRank ?? Infinity) ||
+      b.hintCount - a.hintCount ||
       a.english.localeCompare(b.english, "en") || a.chinese.localeCompare(b.chinese, "zh-CN"))
       .map(row => ({ ...row }));
   }

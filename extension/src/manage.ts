@@ -1,6 +1,7 @@
 import { videoContext } from "./manage-context";
 import { attachManagementConnection } from "./manage-connection";
 import { attachCurrentVideo } from "./manage-current-video";
+import { createHintCard } from "./manage-hint-card";
 import type { HiddenPreference as Hidden, RecentItem } from "./preferences";
 type Lexicon = Hidden & { frequencyRank: number | null; hintState: "eligible" | "blocked" };
 type PreferencesReply = { ok: true; commonWordCutoff: number; hidden: Hidden[] } | { ok: false; reason?: string };
@@ -54,12 +55,12 @@ function syncRecentCard(card: HTMLElement): void {
   card.toggleAttribute("data-pending", pending);
   action.textContent = pending ? "确认" : "不再提示";
   action.dataset.action = pending ? "confirm" : "stage";
-  action.setAttribute("aria-label", `${action.textContent}「${card.querySelector(".recent-word")!.textContent}」`);
+  action.setAttribute("aria-label", `${action.textContent}「${card.querySelector(".hint-word")!.textContent}」`);
   if (saving) action.setAttribute("aria-disabled", "true"); else action.removeAttribute("aria-disabled");
   if (!pending) showRecentError(card, "");
   undo.hidden = !pending;
   undo.disabled = saving;
-  card.querySelector<HTMLElement>(".recent-count")!.hidden = pending;
+  card.querySelector<HTMLElement>(".hint-count")!.hidden = pending;
 }
 function setPending(id: string | null): void {
   const previous = state.pending;
@@ -89,25 +90,16 @@ function renderRecent(): void {
   if (searchStatus.textContent !== resultText) searchStatus.textContent = resultText;
   state.recentPage = Math.min(state.recentPage, Math.max(1, Math.ceil(total / pageSize)));
   const cards = items.slice((state.recentPage - 1) * pageSize, state.recentPage * pageSize).map(item => {
-    const card = make("li", "recent-card"); card.dataset.entry = item.entryId;
-    const term = make("div", "recent-term");
-    const word = make("span", "recent-word"); word.lang = "en"; word.textContent = item.lemma;
-    const gloss = make("span", "gloss recent-gloss"); gloss.textContent = item.gloss || "—";
-    term.append(word, gloss);
-    const rank = make("span", "hint-rank");
-    if (item.frequencyRank !== null) {
-      rank.textContent = `#${item.frequencyRank}`;
-      rank.setAttribute("aria-label", `词频第 ${item.frequencyRank} 名`);
-    }
-    const count = make("span", "number recent-count"); count.textContent = `${item.count} 次`;
+    const { card, rail } = createHintCard(item.lemma, item.gloss, item.frequencyRank, item.count);
+    card.classList.add("recent-card"); card.dataset.entry = item.entryId;
     const action = button("不再提示", "stage", item.entryId); action.className = "recent-action";
     const undo = button("撤销", "undo", item.entryId); undo.className = "recent-undo";
     undo.setAttribute("aria-label", `撤销「${item.lemma}」`);
     const actions = make("div", "recent-actions"); actions.append(undo, action);
-    const rail = make("div", "recent-rail"); rail.append(count, actions);
+    rail.append(actions);
     const error = make("p", "recent-save-error"); error.id = `recent-error-${item.entryId}`; error.hidden = true;
     action.setAttribute("aria-describedby", error.id);
-    card.append(rank, term, rail, error); syncRecentCard(card);
+    card.append(error); syncRecentCard(card);
     return card;
   });
   host.replaceChildren(...cards);
@@ -138,21 +130,21 @@ function renderLexicon(items: Lexicon[], total: number, page: number, pageSize: 
   pager("lexicon-pager", total, page, pageSize, "lexicon");
 }
 async function readPreferences(): Promise<void> {
-  const select = byId<HTMLSelectElement>("common-word-cutoff"), status = byId<HTMLDivElement>("cutoff-status"); select.disabled = true;
+  const select = byId<HTMLSelectElement>("common-word-cutoff"), status = byId("cutoff-status"); select.disabled = true;
   try {
     const result = await send<PreferencesReply>({ type: "local-preferences", action: "read" });
     if (!result || result.ok !== true || ![1000, 1500, 2000].includes(result.commonWordCutoff) || !Array.isArray(result.hidden)) throw new Error(describeReason(result && result.ok === false ? result.reason : undefined, "本机偏好响应无效"));
     state.hidden = result.hidden; select.value = String(result.commonWordCutoff); select.dataset.previous = select.value; select.disabled = false;
-    status.textContent = "当前设置仅保存在本机。"; status.dataset.kind = "success"; renderHidden(); renderRecent();
+    status.textContent = "仅保存在本机。"; delete status.dataset.kind; renderHidden(); renderRecent();
   } catch (error) { select.value = ""; select.disabled = true; status.textContent = `无法读取本机设置：${error instanceof Error ? error.message : "服务不可用"}`; status.dataset.kind = "error"; throw error; }
 }
 async function saveCutoff(): Promise<void> {
-  const select = byId<HTMLSelectElement>("common-word-cutoff"), status = byId<HTMLDivElement>("cutoff-status");
+  const select = byId<HTMLSelectElement>("common-word-cutoff"), status = byId("cutoff-status");
   const value = Number(select.value), previous = select.dataset.previous ?? "1500"; select.disabled = true;
   status.textContent = "正在保存本机设置…"; status.dataset.kind = "pending";
   try { const result = await send<PreferencesReply>({ type: "local-preferences", action: "setCutoff", commonWordCutoff: value });
     if (!result || result.ok !== true || result.commonWordCutoff !== value || !Array.isArray(result.hidden)) throw new Error(describeReason(result && result.ok === false ? result.reason : undefined, "本机服务拒绝保存"));
-    select.dataset.previous = String(value); status.textContent = `已保存：Top ${value}。新字幕提示将使用此设置。`; status.dataset.kind = "success";
+    select.dataset.previous = String(value); status.textContent = `已保存：前 ${value} 词。`; status.dataset.kind = "success";
   } catch (error) { select.value = previous; status.textContent = `保存失败，已恢复上次设置：${error instanceof Error ? error.message : "本机服务不可用"}`; status.dataset.kind = "error"; }
   finally { select.disabled = false; }
 }
