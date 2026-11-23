@@ -1,5 +1,9 @@
 export type VideoContext = { tabId: number; pageKey: string };
 
+export function isYouTubeVideoId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{11}$/u.test(value);
+}
+
 export function managementUrl(url: string, context?: VideoContext): string {
   return context ? `${url}#${new URLSearchParams({ tab: String(context.tabId), page: context.pageKey })}` : url;
 }

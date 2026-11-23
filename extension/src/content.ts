@@ -1,4 +1,4 @@
-import { isManagementUrl } from "./manage-context";
+import { isManagementUrl, isYouTubeVideoId } from "./manage-context";
 import { BilingualOverlay, type PresentedLine, type RenderedLine } from "./overlay";
 import { extractIncrementalText, rememberBounded } from "./caption-debug";
 import { MAX_CAPTION_LENGTH, MAX_PRESENTED_ENTRY_IDS, snapshotText, type ApiResult } from "./protocol";
@@ -61,7 +61,9 @@ function startEnhancement(): void {
     }
   }
   function videoIdFromLocation(): string | undefined {
-    const value = new URL(location.href).searchParams.get("v")?.trim();
+    const url = new URL(location.href);
+    if (url.pathname !== "/watch") return undefined;
+    const value = url.searchParams.get("v")?.trim();
     return value && value.length <= 256 ? value : undefined;
   }
   async function sha256(value: string): Promise<string> {
@@ -260,7 +262,7 @@ function startEnhancement(): void {
     capture?.invalidate();
   }, captureLivePage, reason => {
     if (detached) return;
-    if (reason === "navigation" || reason === "disabled") vocabulary.reset();
+    if (reason === "navigation") vocabulary.reset();
     if (reason) {
       if (reason !== "interrupted") record({ outcome: reason });
       interruptPresented(); debugSent.clear(); debugStarted.clear();
@@ -298,13 +300,16 @@ function startEnhancement(): void {
     if (detached || sender.id !== extensionId || !["page-enhancement", "page-vocabulary"].includes(message?.type)) return;
     if (message.type === "page-vocabulary" && !isManagementUrl(sender.url, chrome.runtime.getURL("manage.html"))) return;
     if (lifecycle.videoId !== videoIdFromLocation()) lifecycle.refreshPage();
-    if (!videoIdFromLocation()) { respond({ ok: false, reason: "not-video-page" }); return; }
+    const videoId = lifecycle.videoId;
+    if (!videoId) { respond({ ok: false, reason: "not-video-page" }); return; }
+    if (message.type === "page-vocabulary") {
+      if (lifecycle.navigating || message.pageKey !== lifecycle.pageKey || !isYouTubeVideoId(videoId)) {
+        respond({ ok: false }); return;
+      }
+      respond({ ok: true, pageKey: lifecycle.pageKey, videoId, rows: vocabulary.snapshot() }); return;
+    }
     if (lifecycle.navigating || !document.querySelector(".html5-video-player, #movie_player")) {
       respond({ ok: false }); return;
-    }
-    if (message.type === "page-vocabulary") {
-      if (message.pageKey !== lifecycle.pageKey) { respond({ ok: false }); return; }
-      respond({ ok: true, pageKey: lifecycle.pageKey, rows: vocabulary.snapshot() }); return;
     }
     if (message.action === "set") {
       if (!lifecycle.setEnabled(message.pageKey, message.enabled)) { respond({ ok: false }); return; }

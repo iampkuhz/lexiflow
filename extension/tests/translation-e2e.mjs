@@ -408,7 +408,7 @@ try {
     const saveCutoff = async (value) => {
       await cutoff.selectOption(String(value));
       await managePage.waitForFunction(expected =>
-        document.querySelector("#cutoff-status")?.textContent?.startsWith(`已保存：Top ${expected}。`), value);
+        document.querySelector("#cutoff-status")?.textContent?.startsWith(`已保存：前 ${expected} 词。`), value);
       assert.deepEqual(await readStoredPreferences(), { ...hiddenPreferences, commonWordCutoff: value });
     };
     await saveCutoff(1000);
@@ -424,7 +424,7 @@ try {
     const deliverRow = managePage.locator("#recent-list .recent-card").filter({
       has: managePage.getByText("deliver", { exact: true })
     });
-    assert.equal(await deliverRow.locator(".recent-count").textContent(), "24 次", "the browser shows only D through D-6");
+    assert.equal(await deliverRow.locator(".hint-count").textContent(), "24 次", "the browser shows only D through D-6");
     const summary = await postLocalRead("/api/v1/recent-hints");
     assert.equal(summary.status, 200);
     assert.equal(summary.headers.get("cache-control"), "no-store");
@@ -442,7 +442,7 @@ try {
     assert.deepEqual(await readStoredPreferences(), { commonWordCutoff: 1500, hidden: [] });
     await managePage.click("#recent-tab");
     await reliableRow.waitFor({ timeout: 10_000 });
-    assert.ok(Number.parseInt(await reliableRow.locator(".recent-count").textContent(), 10) > 0);
+    assert.ok(Number.parseInt(await reliableRow.locator(".hint-count").textContent(), 10) > 0);
     await deliverRow.hover();
     const stage = () => deliverRow.getByRole("button", { name: "不再提示「deliver」" }).click();
     await stage();

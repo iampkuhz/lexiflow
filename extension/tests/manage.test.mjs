@@ -14,7 +14,7 @@ async function openManage(t,{preferencesAvailable=true,clock=false,lexiconTotal,
  const page=await instance.newPage(pageOptions);page.setDefaultTimeout(8_000);t.after(()=>page.context().close());
  if(clock) await page.clock.install({time:new Date('2026-11-10T00:00:10Z')});
  await page.addInitScript(({initial,preferencesAvailable,lexiconTotal})=>{
-  const s={recent:structuredClone(initial.recent),hidden:structuredClone(initial.hidden),cutoff:1500,calls:[],lexPageSize:20,videoAvailable:true,backend:"http://127.0.0.1:19081"};window.__state=s;
+  const s={recent:structuredClone(initial.recent),hidden:structuredClone(initial.hidden),cutoff:1500,calls:[],lexPageSize:20,videoId:"LfxE2ETest1",videoAvailable:true,backend:"http://127.0.0.1:19081"};window.__state=s;
   const pref=()=>({ok:true,commonWordCutoff:s.cutoff,hidden:structuredClone(s.hidden)});
   const allLex=Array.from({length:26},(_,i)=>({entryId:String(200+i),lemma:String.fromCharCode(97+i)+'word',gloss:`释义 ${i}`,frequencyRank:i===25?null:i+1,hintState:i%4===0?'blocked':'eligible'}));
   const storage=()=>JSON.parse(localStorage.getItem("fixture:manage")??"{}");
@@ -27,7 +27,10 @@ async function openManage(t,{preferencesAvailable=true,clock=false,lexiconTotal,
      publishedDataset:null,privateInput:"fixture-secret"};
   window.chrome={tabs:{async sendMessage(tab,message){s.calls.push({tab,...message});
     return s.videoAvailable&&tab===42&&message.pageKey==="receipt"
-     ? {ok:true,pageKey:"receipt",rows:[{english:"zero",chinese:"零",frequencyRank:24,hintCount:0},{english:"missing",chinese:"无名次",frequencyRank:null,hintCount:2}]}
+     ? {ok:true,pageKey:"receipt",videoId:s.videoId,rows:[
+        {english:"protect",chinese:"保护",frequencyRank:null,hintCount:3},
+        {english:"tarnish",chinese:"失泽",frequencyRank:2902,hintCount:1},
+        {english:"zero",chinese:"零",frequencyRank:24,hintCount:0}]}
      : {ok:false};
   }},storage:{local:{get:async key=>({[key]:storage()[key]}),set:async value=>{
     localStorage.setItem("fixture:manage",JSON.stringify({...storage(),...value}));
@@ -57,8 +60,8 @@ test('same-position double click confirms, filters the result across refresh and
  const page=await openManage(t);
  const first=card(page,'101'), second=card(page,'102');
  const firstSlot=await first.boundingBox();
- assert.equal(await first.locator('.recent-count').textContent(),'6 次');
- await first.locator('.recent-word').hover();
+ assert.equal(await first.locator('.hint-count').textContent(),'6 次');
+ await first.locator('.hint-word').hover();
  const action=first.locator('.recent-action');
  await action.evaluate(el=>Promise.all(el.getAnimations().map(animation=>animation.finished)));
  const anchor=await action.boundingBox();
@@ -82,7 +85,7 @@ test('same-position double click confirms, filters the result across refresh and
  await page.waitForFunction(()=>document.querySelector('#hidden-count').textContent==='1');
  assert.match(await page.locator('#feedback').textContent(),/已恢复/);
  await page.click('#recent-tab');
- assert.deepEqual(await page.locator('#recent-list .recent-word').allTextContents(),['tarnish','protect']);
+ assert.deepEqual(await page.locator('#recent-list .hint-word').allTextContents(),['tarnish','protect']);
 });
 
 test('first click swaps the count for equal left Undo and fixed right Confirm; undo does not pin the action',async t=>{
@@ -90,26 +93,26 @@ test('first click swaps the count for equal left Undo and fixed right Confirm; u
  const first=card(page,'101'), second=card(page,'102');
  assert.equal(await page.locator('#recent-panel input[type=checkbox], #hide-selected').count(),0);
  const action=first.locator('.recent-action'), undo=first.locator('.recent-undo');
- await first.locator('.recent-word').hover();
+ await first.locator('.hint-word').hover();
  await action.evaluate(el=>Promise.all(el.getAnimations().map(animation=>animation.finished)));
  const anchor=await action.boundingBox();
  await page.mouse.click(anchor.x+anchor.width/2,anchor.y+anchor.height/2);
  assert.deepEqual(await mutations(page),[]);
  assert.equal(await action.textContent(),'确认');
  assert.equal(await undo.textContent(),'撤销');
- assert.equal(await first.locator('.recent-count').isHidden(),true);
+ assert.equal(await first.locator('.hint-count').isHidden(),true);
  assert.deepEqual(await action.boundingBox(),anchor);
  const left=await undo.boundingBox();
  assert.deepEqual([left.width,left.height,left.y],[anchor.width,anchor.height,anchor.y]);
  assert.ok(left.x+left.width<anchor.x);
  await undo.click();
  assert.equal(await undo.isHidden(),true);
- await second.locator('.recent-word').hover();
+ await second.locator('.hint-word').hover();
  await page.waitForFunction(()=>getComputedStyle(document.querySelector('.recent-card[data-entry="101"] .recent-action')).opacity==='0');
- assert.equal(await first.locator('.recent-count').isVisible(),true);
+ assert.equal(await first.locator('.hint-count').isVisible(),true);
  assert.deepEqual(await mutations(page),[]);
  await second.getByRole('button',{name:'不再提示「protect」'}).click();
- await first.locator('.recent-word').hover();
+ await first.locator('.hint-word').hover();
  await action.click();
  assert.equal(await second.getAttribute('data-pending'),null);
  assert.equal(await first.getAttribute('data-pending'),'');
@@ -119,7 +122,7 @@ test('first click swaps the count for equal left Undo and fixed right Confirm; u
 test('recent shows only the seven-day ranking and refreshes on the minute and on return',async t=>{
  const page=await openManage(t,{clock:true});
  const rows=page.locator('#recent-list .recent-card');
- const names=()=>rows.locator('.recent-word').allTextContents();
+ const names=()=>rows.locator('.hint-word').allTextContents();
  assert.equal(await page.locator('#recent-heading').textContent(),'近 7 天提示');
  assert.equal(await page.locator('#recent-page-size').inputValue(),'40');
  assert.deepEqual(await names(),['tarnish','protect']);
@@ -127,10 +130,10 @@ test('recent shows only the seven-day ranking and refreshes on the minute and on
  await page.clock.fastForward(60_000);
  await page.waitForFunction(()=>document.querySelector('#recent-count').textContent==='1');
  assert.deepEqual(await names(),['protect']);
- assert.equal(await rows.locator('.recent-count').textContent(),'7 次');
+ assert.equal(await rows.locator('.hint-count').textContent(),'7 次');
 
  // A pending confirmation stays stable; leaving the tab and hiding the document stop the minute reads.
- await card(page,'102').locator('.recent-word').hover();
+ await card(page,'102').locator('.hint-word').hover();
  await card(page,'102').getByRole('button',{name:'不再提示「protect」'}).click();
  const saved=await page.evaluate(()=>{const s=window.__state;return s.recent.pop();});
  await page.clock.fastForward(60_000);
@@ -179,18 +182,29 @@ test('unavailable recent statistics neither show stale counts nor pretend that t
  assert.equal(await page.locator('#recent-status').isHidden(),true);
 });
 
-test('cutoff is managed here, saves with feedback, and restores the confirmed choice on failure',async t=>{
- const page=await openManage(t);
- const select=page.getByLabel('不提示 BNC 高频前 N 词', { exact: true });
- assert.equal(await page.locator('#cutoff-source-note').textContent(),'BNC 是英国国家语料库，不按列表里的 # 名次过滤。');
- await page.waitForFunction(()=>document.querySelector('#cutoff-status').dataset.kind==='success');
- assert.equal(await select.inputValue(),'1500');await select.selectOption('2000');
- await page.waitForFunction(()=>document.querySelector('#cutoff-status').textContent.includes('已保存：Top 2000'));
- assert.equal(await select.inputValue(),'2000');
- await page.evaluate(()=>{const send=window.chrome.runtime.sendMessage;window.chrome.runtime.sendMessage=async m=>m.type==='local-preferences'&&m.action==='setCutoff'?{ok:false,reason:'network'}:send(m);});
- await select.selectOption('1000');await page.waitForFunction(()=>document.querySelector('#cutoff-status').textContent.includes('保存失败'));
- assert.equal(await select.inputValue(),'2000');
-});
+for (const width of [1120,320]) {
+ test(`cutoff explains BNC and keeps save feedback beside its control at ${width}px`,async t=>{
+  const page=await openManage(t,{pageOptions:{viewport:{width,height:800}}});
+  const select=page.getByLabel('不提示 BNC 高频前 N 词', { exact: true });
+  const status=page.locator('#cutoff-status');
+  assert.equal(await page.locator('h1 + section').getAttribute('id'),'preference-panel');
+  assert.equal(await page.locator('label[for=common-word-cutoff] + #cutoff-source-note').textContent(),'BNC 指英国国家语料库。');
+  assert.equal(await select.inputValue(),'1500');
+  await select.selectOption('2000');
+  await page.waitForFunction(()=>document.querySelector('#cutoff-status').dataset.kind==='success');
+  assert.equal(await status.textContent(),'已保存：前 2000 词。');
+  assert.equal(await select.inputValue(),'2000');
+  await page.evaluate(()=>{const send=window.chrome.runtime.sendMessage;window.chrome.runtime.sendMessage=async m=>m.type==='local-preferences'&&m.action==='setCutoff'?{ok:false,reason:'network'}:send(m);});
+  await select.selectOption('1000');
+  await page.waitForFunction(()=>document.querySelector('#cutoff-status').dataset.kind==='error');
+  assert.match(await status.textContent(),/保存失败.*无法连接本机服务/u);
+  assert.equal(await select.inputValue(),'2000');
+  const [control,feedback,panel]=await Promise.all([select,status,page.locator('#preference-panel')].map(node=>node.boundingBox()));
+  assert.ok(control.width>=150 && feedback.y>=control.y+control.height);
+  assert.ok(feedback.x===control.x && feedback.x+feedback.width<=panel.x+panel.width);
+  assert.ok(feedback.y+feedback.height<=panel.y+panel.height);
+ });
+}
 
 test('unavailable cutoff read does not present the first option as the saved value',async t=>{
  const page=await openManage(t,{preferencesAvailable:false});
@@ -210,7 +224,7 @@ test('saving waits for a reply, disables duplicate mutation, and displays failur
   };
  });
  const first=card(page,'101'), action=first.locator('.recent-action');
- await first.locator('.recent-word').hover();
+ await first.locator('.hint-word').hover();
  await action.click();
  await action.click();
  await page.waitForFunction(()=>typeof window.__rejectHide==='function');
@@ -285,12 +299,12 @@ test('recent uses two columns in rank order and fits 40 cards on a page with one
  const action = cards.first().locator('.recent-action');
  const opacity = () => action.evaluate(el=>getComputedStyle(el).opacity);
  assert.equal(await opacity(),'0');
- await cards.first().locator('.recent-word').hover();
+ await cards.first().locator('.hint-word').hover();
  await action.evaluate(el=>Promise.all(el.getAnimations().map(animation=>animation.finished)));
  assert.equal(await opacity(),'1');
  const metrics = await cards.first().evaluate(el=>({
   width:el.clientWidth, contentWidth:el.scrollWidth,
-  countOpacity:getComputedStyle(el.querySelector('.recent-count')).opacity
+  countOpacity:getComputedStyle(el.querySelector('.hint-count')).opacity
  }));
  assert.equal(metrics.contentWidth,metrics.width);
  assert.equal(metrics.countOpacity,'0');
@@ -298,11 +312,11 @@ test('recent uses two columns in rank order and fits 40 cards on a page with one
  await action.click();
  await page.waitForFunction(()=>document.querySelector('#recent-count').textContent==='45');
  assert.equal(await cards.count(),40);
- assert.equal(await cards.first().locator('.recent-word').textContent(),'example-2');
- assert.equal(await cards.last().locator('.recent-word').textContent(),'example-41');
+ assert.equal(await cards.first().locator('.hint-word').textContent(),'example-2');
+ assert.equal(await cards.last().locator('.hint-word').textContent(),'example-41');
  await page.locator('#recent-pager [data-step="1"]').click();
  assert.equal(await cards.count(),5);
- assert.equal(await cards.first().locator('.recent-word').textContent(),'example-42');
+ assert.equal(await cards.first().locator('.hint-word').textContent(),'example-42');
 });
 
 test('keyboard focus reveals the same single-item action and retains focus after saving', async t => {
@@ -362,7 +376,7 @@ test("recent filters locally before paging and restores only the explicit page s
  const rows=page.locator("#recent-list .recent-card"), query=page.locator("#recent-query"),
    size=page.locator("#recent-page-size"), pager=page.locator("#recent-pager");
  const pageLabel=()=>pager.locator("[data-page]").textContent();
- const firstWord=()=>rows.first().locator(".recent-word").textContent();
+ const firstWord=()=>rows.first().locator(".hint-word").textContent();
  const next=()=>pager.locator('[data-step="1"]').click();
  assert.equal(await size.inputValue(),"40");
  assert.equal(await rows.count(),40);
@@ -415,27 +429,136 @@ test("recent controls remain inside a narrow management tab",async t=>{
  assert.deepEqual(bounds,{overflow:false,documentOverflow:false,clipped:false});
 });
 
-test('management shows current-video zero and absent rank, then clears stale source without using another tab',async t=>{
- const page=await openManage(t,{hash:"#tab=42&page=receipt"});
+test('management shows the bound video and its counts, then clears stale source without using another tab',async t=>{
+ const page=await openManage(t,{hash:"#tab=42&page=receipt",clock:true});
+ const link=page.locator("#current-video-link");
  await page.click("#current-video-tab");
- await page.waitForFunction(()=> document.querySelectorAll("#current-video-list .current-word").length===2);
- assert.deepEqual(await page.locator(".current-word .hint-rank").allTextContents(),["#24",""]);
- assert.deepEqual(await page.locator(".current-count").allTextContents(),["提示 0 次","提示 2 次"]);
+ await link.waitFor({state:"visible"});
+ assert.equal(await link.getAttribute("href"),"https://www.youtube.com/watch?v=LfxE2ETest1");
+ assert.match(await link.textContent(),/LfxE2ETest1/u);
+ const current=page.locator("#current-video-list .hint-card");
+ assert.deepEqual(await current.locator(".hint-word").allTextContents(),["protect","tarnish","zero"]);
+ assert.deepEqual(await current.locator(".hint-rank").allTextContents(),["","#2902","#24"]);
+ assert.deepEqual(await current.locator(".hint-count").allTextContents(),["3 次","1 次","0 次"]);
+ assert.equal(await current.locator("button").count(),0);
  await page.click("#refresh-current-video");
  await page.waitForFunction(()=>window.__state.calls.filter(x=>x.type==="page-vocabulary").length===2);
  assert.deepEqual(await page.evaluate(()=>window.__state.calls.filter(x=>x.type==="page-vocabulary")),
    Array(2).fill({tab:42,type:"page-vocabulary",pageKey:"receipt"}));
  await page.evaluate(()=>{window.__state.videoAvailable=false;});
- await page.click("#refresh-current-video");
+ await page.clock.runFor(2000);
  await page.waitForFunction(()=>document.querySelector("#refresh-current-video").disabled);
- assert.equal(await page.locator(".current-word").count(),0);
+ assert.equal(await current.count(),0);
+ assert.equal(await link.isHidden(),true);
+ assert.equal(await link.getAttribute("href"),null);
  assert.match(await page.locator("#current-video-status").textContent(),/原视频已切换或关闭/u);
+});
+
+test('both lists align rank, English and gloss, with the gloss below English at wide and narrow widths',async t=>{
+ const page=await openManage(t,{hash:"#tab=42&page=receipt"});
+ const geometry=(selector,word)=>page.locator(selector).locator(".hint-card").filter({hasText:word}).evaluate(card=>{
+  const box=el=>el.getBoundingClientRect();
+  const [rank,english,gloss,count]=[".hint-rank",".hint-word",".hint-gloss",".hint-count"].map(s=>box(card.querySelector(s)));
+  return {rankWidth:rank.width,wordOffset:english.x-box(card).x,glossOffset:gloss.x-english.x,
+   glossBelow:gloss.y>=english.bottom,countInset:box(card).right-count.right,overflow:card.scrollWidth>card.clientWidth};
+ });
+ for (const width of [1120,320]) {
+  await page.setViewportSize({width,height:800});
+  await page.click("#recent-tab");
+  const recent=await geometry("#recent-list","tarnish");
+  await page.click("#current-video-tab");
+  const current=await geometry("#current-video-list","tarnish");
+  assert.deepEqual(current,recent);
+  assert.deepEqual(current,{rankWidth:60,wordOffset:80,glossOffset:0,glossBelow:true,countInset:12,overflow:false});
+ }
+});
+
+test('real content retains rendered hints while disabled and invalidates the old management session on navigation',async t=>{
+ const instance=await (browser??=chromium.launch({headless:true,...(chromePath?{executablePath:chromePath}:{})}));
+ const video=await instance.newPage();
+ video.setDefaultTimeout(8_000);
+ t.after(()=>video.context().close());
+ await video.route("https://lexiflow-watch.test/**",route=>route.fulfill({contentType:"text/html",body:`<!doctype html>
+  <div id="movie_player" class="html5-video-player" style="position:relative;width:700px;height:420px">
+    <video></video>
+    <div id="ytp-caption-window-container" style="position:absolute;bottom:40px;left:20px;font-size:24px">
+      <span class="ytp-caption-segment">A reliable result.</span>
+    </div>
+  </div>`}));
+ await video.goto("https://lexiflow-watch.test/watch?v=LfxE2ETest1");
+ await video.evaluate(()=>{
+  const handlers=[];
+  const id="fixture-extension",manage=`chrome-extension://${id}/manage.html`;
+  const state={requests:0,presented:0};window.__video=state;
+  window.__cue=text=>{
+   document.querySelector(".ytp-caption-segment").textContent=text;
+   document.querySelector("video").dispatchEvent(new Event("timeupdate",{bubbles:true}));
+  };
+  window.__message=message=>{
+   let reply;
+   const url=message.type==="page-vocabulary"?`${manage}#tab=42&page=${message.pageKey}`:`chrome-extension://${id}/popup.html`;
+   for(const handler of handlers)handler(message,{id,url},value=>{reply=value;});
+   return reply;
+  };
+  (window.chrome??={}).runtime={
+   id,getURL:name=>`chrome-extension://${id}/${name}`,onMessage:{addListener:fn=>handlers.push(fn)},
+   async sendMessage(message){
+    if(message.type==="local-preferences")return {ok:true,commonWordCutoff:1500,hidden:[]};
+    if(message.type==="local-presented"){state.presented+=message.entryIds.length;return {ok:true};}
+    if(message.type!=="caption-hints")return {ok:true};
+    state.requests++;
+    const segments=message.payload.currentSnapshot.captions.flatMap(group=>group.segments).filter(segment=>segment.append);
+    const target=segments.find(segment=>segment.text.includes("reliable"));
+    const startOffset=target?.text.indexOf("reliable")??-1;
+    return {ok:true,body:{lexiconVersion:1,processedKeys:segments.map(segment=>segment.key),
+     hints:target?[{startKey:target.key,endKey:target.key,startOffset,endOffset:startOffset+8,
+      chineseGloss:"可靠的",lexiconEntryId:"100",frequencyRank:2902}]:[]}};
+   }
+  };
+ });
+ await video.addScriptTag({path:resolve(dist,"content.js")});
+ await video.locator("#lexiflow-caption-overlay .gloss").waitFor({state:"visible"});
+ const send=message=>video.evaluate(message=>window.__message(message),message);
+ const {pageKey}=await send({type:"page-enhancement",action:"read"});
+ const before=await video.evaluate(()=>({...window.__video}));
+ assert.ok(before.presented>0);
+ const off=await send({type:"page-enhancement",action:"set",pageKey,enabled:false});
+ assert.equal(off.enabled,false);
+ assert.equal(off.pageKey,pageKey);
+ await video.evaluate(()=>window.__cue("Another reliable result."));
+ await video.locator("#lexiflow-caption-overlay .gloss").waitFor({state:"hidden"});
+
+ const page=await openManage(t,{hash:`#tab=42&page=${pageKey}`});
+ await page.exposeFunction("__readVideo",(tab,message)=>tab===42?send(message):{ok:false});
+ await page.evaluate(()=>{window.chrome.tabs.sendMessage=window.__readVideo;});
+ await page.click("#current-video-tab");
+ const word=page.locator("#current-video-list .hint-word"),count=page.locator("#current-video-list .hint-count");
+ await word.waitFor({state:"visible"});
+ assert.equal(await word.textContent(),"reliable");
+ assert.equal(await count.textContent(),"1 次");
+ assert.deepEqual(await video.evaluate(()=>({...window.__video})),before);
+
+ await video.evaluate(()=>{
+  document.dispatchEvent(new Event("yt-navigate-start"));
+  history.pushState({},"","/watch?v=LfxE2ENext1");
+  window.__cue("");
+  document.dispatchEvent(new Event("yt-navigate-finish"));
+ });
+ await page.click("#refresh-current-video");
+ await word.waitFor({state:"hidden"});
+ assert.equal(await page.locator("#current-video-link").isHidden(),true);
+ const next=await send({type:"page-enhancement",action:"read"});
+ assert.notEqual(next.pageKey,pageKey);
+ assert.deepEqual(await send({type:"page-vocabulary",pageKey:next.pageKey}),
+  {ok:true,videoId:"LfxE2ENext1",pageKey:next.pageKey,rows:[]});
+ await video.evaluate(()=>history.pushState({},"","/?v=LfxE2ENext1"));
+ assert.deepEqual(await send({type:"page-vocabulary",pageKey:next.pageKey}),{ok:false,reason:"not-video-page"});
 });
 
 test('direct management open does not guess a video; recent rankings preserve layout and counts',async t=>{
  const page=await openManage(t);
  assert.deepEqual(await page.locator(".recent-card .hint-rank").allTextContents(),["#2902",""]);
- assert.deepEqual(await page.locator(".recent-card .recent-count").allTextContents(),["6 次","4 次"]);
+ assert.deepEqual(await page.locator(".recent-card .hint-count").allTextContents(),["6 次","4 次"]);
  const geometry=await page.locator(".recent-card").evaluateAll(cards=>cards.map(card=>({
    left:getComputedStyle(card).paddingLeft,right:getComputedStyle(card).paddingRight,
    rankWidth:card.querySelector(".hint-rank").getBoundingClientRect().width
