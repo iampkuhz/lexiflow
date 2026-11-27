@@ -12,7 +12,7 @@ const datasetBytes = Buffer.from('synthetic-runtime-dataset');
 const identity = [
   'schemaVersion=1',
   'softwareVersion=2.1.0-test',
-  'apiContract=caption-hints.v4',
+  'apiContract=caption-hints.v5',
   `sqlVersion=${'b'.repeat(64)}`,
   'releaseId=1792210462122',
   'preparationId=lexiflow.deterministic-preparation.priority-v2',
@@ -61,7 +61,7 @@ export async function lifecycleFixture(t) {
   await writeFile(path.join(bin, 'stat'), '#!/bin/sh\n[ "$1" = -c ] && [ "$2" = %a ] || exit 2\n/usr/bin/stat -c %a "$3" 2>/dev/null && exit 0\nexec /usr/bin/stat -f %Lp "$3"\n', { mode: 0o700 });
   await writeFile(path.join(bin, 'timeout'), '#!/bin/sh\nshift 2\nexec "$@"\n', { mode: 0o700 });
   await writeFile(path.join(bin, 'id'), '#!/bin/sh\n[ "$1" = -u ] && { printf 10001; exit 0; }\nexit 2\n', { mode: 0o700 });
-  await writeFile(path.join(bin, 'java'), '#!/bin/sh\ncase "$*" in *--api-contract*) printf "%s\\n" caption-hints.v4; exit 0;; *--storage-contract*|*--verify-storage*) exit 0;; esac\nexit 37\n', { mode: 0o700 });
+  await writeFile(path.join(bin, 'java'), '#!/bin/sh\ncase "$*" in *--api-contract*) printf "%s\\n" caption-hints.v5; exit 0;; *--storage-contract*|*--verify-storage*) exit 0;; esac\nexit 37\n', { mode: 0o700 });
   let script = await readFile(sourceEntrypoint, 'utf8');
   for (const [name, value] of Object.entries({
     ROOT: root,

@@ -8,11 +8,11 @@ import java.util.Objects;
 /**
  * 请求级双快照；只含可见文字，不保存服务器字幕会话。
  *
- * @param captionTopicKey 字幕主题的不透明身份，非空且不超过 128 字符。
- * @param trackKey 来源轨道身份；无法可靠识别时为 null。
- * @param previous 上次成功确认请求在发送时冻结的可见快照；尚无成功请求时为 null。
- * @param current 本次可见快照，不能为空对象，允许无可见字幕。
- * @param commonWordCutoff 单词提示截止排名；仅允许 1000、1500、2000。
+ * @param captionTopicKey 含义：字幕主题的不透明身份。取值范围：非空且不超过 128 个 UTF-16 单元。
+ * @param trackKey 含义：来源轨道身份。取值范围：非空且不超过 128 个字符，无法可靠识别时为空。
+ * @param previous 含义：上次成功确认时冻结的可见快照。取值范围：可空，存在时为合法快照。
+ * @param current 含义：本次可见快照。取值范围：非空对象，允许不含可见字幕。
+ * @param commonWordCutoff 含义：单词提示截止排名。取值范围：1000、1500 或 2000。
  */
 public record CaptionIncrementalRequest(
     String captionTopicKey,
@@ -51,12 +51,25 @@ public record CaptionIncrementalRequest(
     this(topic, track, previous, current, 1500);
   }
 
-  /** 由客户端仅提交仍可见旧片段时构造比较快照。 */
+  /**
+   * 由客户端提交的仍可见旧片段构造比较快照，并采用默认截止值。 只保留同时存在于当前快照中的旧片段。
+   *
+   * @param previousSegments 含义：仍可见的旧字幕片段。取值范围：列表总文字不超过 500 个 UTF-16 单元。
+   * @param current 含义：本次当前可见快照。取值范围：非空快照对象。
+   */
   public CaptionIncrementalRequest(List<PreviousSegment> previousSegments, Snapshot current) {
     this(previousSegments, current, 1500);
   }
 
-  public CaptionIncrementalRequest(List<PreviousSegment> previousSegments, Snapshot current, int cutoff) {
+  /**
+   * 由客户端提交的仍可见旧片段构造比较快照。 截止值由调用方显式提供并由主构造器验证。
+   *
+   * @param previousSegments 含义：仍可见的旧字幕片段。取值范围：列表总文字不超过 500 个 UTF-16 单元。
+   * @param current 含义：本次当前可见快照。取值范围：非空快照对象。
+   * @param cutoff 含义：常见单词的排名截止值。取值范围：1000、1500 或 2000。
+   */
+  public CaptionIncrementalRequest(
+      List<PreviousSegment> previousSegments, Snapshot current, int cutoff) {
     this("caption", null, visiblePrevious(previousSegments, current), current, cutoff);
   }
 
@@ -75,18 +88,40 @@ public record CaptionIncrementalRequest(
       if (values.put(key, text) != null)
         throw new IllegalArgumentException("duplicate previous segment key");
     }
-    var currentKeys = current.captions().stream().flatMap(g -> g.segments().stream())
-        .map(Segment::key).collect(java.util.stream.Collectors.toSet());
+    var currentKeys =
+        current.captions().stream()
+            .flatMap(g -> g.segments().stream())
+            .map(Segment::key)
+            .collect(java.util.stream.Collectors.toSet());
     if (!currentKeys.containsAll(values.keySet()))
       throw new IllegalArgumentException("previous segment is not visible in current snapshot");
-    var groups = current.captions().stream().map(group -> {
-      var segments = group.segments().stream().filter(s -> values.containsKey(s.key()))
-          .map(s -> new Segment(s.key(), values.get(s.key()), s.offsetMs(), false, s.line())).toList();
-      return segments.isEmpty() ? null : new Group(group.windowId(), group.startMs(), segments);
-    }).filter(Objects::nonNull).toList();
+    var groups =
+        current.captions().stream()
+            .map(
+                group -> {
+                  var segments =
+                      group.segments().stream()
+                          .filter(s -> values.containsKey(s.key()))
+                          .map(
+                              s ->
+                                  new Segment(
+                                      s.key(), values.get(s.key()), s.offsetMs(), false, s.line()))
+                          .toList();
+                  return segments.isEmpty()
+                      ? null
+                      : new Group(group.windowId(), group.startMs(), segments);
+                })
+            .filter(Objects::nonNull)
+            .toList();
     return groups.isEmpty() ? null : new Snapshot(groups);
   }
 
+  /**
+   * 客户端提交的一个仍可见旧片段。 领域转换会验证键唯一、文字长度以及它仍处于当前可见快照。
+   *
+   * @param key 含义：片段稳定键。取值范围：非空且不超过 128 个字符。
+   * @param text 含义：旧片段可见文字。取值范围：非空且不超过 500 个字符。
+   */
   public record PreviousSegment(String key, String text) {}
 
   /**
@@ -132,7 +167,15 @@ public record CaptionIncrementalRequest(
       segments = List.copyOf(Objects.requireNonNull(segments, "segments"));
       if (segments.isEmpty()) throw new IllegalArgumentException("caption group must not be empty");
     }
-    public Group(List<Segment> segments) { this(null, null, segments); }
+
+    /**
+     * 创建不带来源窗口和起始时间的字幕组。
+     *
+     * @param segments 含义：按显示顺序排列的字幕片段。取值范围：非空列表。
+     */
+    public Group(List<Segment> segments) {
+      this(null, null, segments);
+    }
   }
 
   /**
@@ -154,6 +197,15 @@ public record CaptionIncrementalRequest(
         throw new IllegalArgumentException("segment line or text is invalid");
       }
     }
+
+    /**
+     * 创建不带来源时间偏移的可见字幕片段。
+     *
+     * @param key 含义：客户端稳定片段键。取值范围：非空且不超过 128 个字符。
+     * @param text 含义：当前片段文字。取值范围：非空且不超过 500 个 UTF-16 单元。
+     * @param append 含义：片段是否尚待本次处理。取值范围：true 或 false。
+     * @param line 含义：组内可视行号。取值范围：0 至 9,007,199,254,740,991。
+     */
     public Segment(String key, String text, boolean append, long line) {
       this(key, text, null, append, line);
     }

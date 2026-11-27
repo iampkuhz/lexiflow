@@ -55,7 +55,6 @@ public final class RecentHintsController {
   /**
    * 创建端点，并接收可选的本机计数服务和权威词库运行时。
    *
-   * @param frequencyRank 含义：已发布展示名次，缺失时为空。取值范围：可空正安全整数。
    * @param counts 含义：本机每日计数服务。取值范围：已初始化时存在，否则为空。
    * @param lexicon 含义：已发布或显式 demo 词库查询入口。取值范围：非 null。
    */
@@ -128,7 +127,11 @@ public final class RecentHintsController {
                   e -> {
                     var entry = byId.get(e.getKey());
                     return new Item(
-                        Long.toString(e.getKey()), entry.lemma(), entry.gloss(), entry.displayFrequencyRank(), e.getValue());
+                        Long.toString(e.getKey()),
+                        entry.lemma(),
+                        entry.gloss(),
+                        entry.displayFrequencyRank(),
+                        e.getValue());
                   })
               .toList();
       return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(new Result(items));

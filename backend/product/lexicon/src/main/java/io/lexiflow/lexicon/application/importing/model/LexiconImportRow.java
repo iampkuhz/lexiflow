@@ -152,7 +152,11 @@ public record LexiconImportRow(
         false);
   }
 
-  /** 取来源中较靠前的有效语料名次；没有来源名次时返回空，不以提示优先级代替。 */
+  /**
+   * 返回来源提供的有效语料名次中数值较小的一项。 没有来源名次时返回空，不使用提示优先级代替来源证据。
+   *
+   * @return 较靠前的 BNC 或 FRQ 正排名；两者均缺失时为空
+   */
   public Long effectiveSourceRank() {
     if (sourceBncRank == null) return sourceFrqRank;
     if (sourceFrqRank == null) return sourceBncRank;

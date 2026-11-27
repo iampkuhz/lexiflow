@@ -350,7 +350,7 @@ exec ${JSON.stringify(realGit)} "$@"
     for (const [name, format] of Object.entries(formats)) {
       const outfile = path.join(reference, `${name}.js`);
       execFileSync(path.join(extension, "node_modules/esbuild/bin/esbuild"), [`src/${name}.ts`,
-        "--bundle", `--format=${format}`, "--target=es2022", "--minify", "--legal-comments=eof", "--define:__LEXIFLOW_API_PORT__=18080", '--define:__LEXIFLOW_API_CONTRACT__="caption-hints.v4"',
+        "--bundle", `--format=${format}`, "--target=es2022", "--minify", "--legal-comments=eof", "--define:__LEXIFLOW_API_PORT__=18080", '--define:__LEXIFLOW_API_CONTRACT__="caption-hints.v5"',
         `--outfile=${outfile}`],
       { cwd: extension, stdio: "pipe" });
       assert.deepEqual(await readFile(path.join(extension, `dist/${name}.js`)), await readFile(outfile), `${name} CLI 字节等价`);

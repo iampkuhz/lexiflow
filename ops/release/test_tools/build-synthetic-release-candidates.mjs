@@ -67,7 +67,7 @@ export function syntheticDescriptor(identity, records, licenses, dataset, sqlSha
   const selected = { releaseId: `synthetic-${dataset.sha256}`,
     preparationId: `synthetic-${sha(dataset.preparationPolicy)}`, ruleId: 'synthetic-no-model' };
   return { schemaVersion: 2, buildIdentity: identity, softwareVersion: identity.softwareVersion,
-    sourceCommit: identity.sourceCommit, apiContract: 'caption-hints.v4', sqlVersion: sqlSha,
+    sourceCommit: identity.sourceCommit, apiContract: 'caption-hints.v5', sqlVersion: sqlSha,
     dataset: selected, platforms: ['linux/arm64'], licenses,
     artifacts: [...records, { role: 'dataset', path: `dataset/${dataset.file}`,
       bytes: dataset.bytes, sha256: dataset.sha256, licenseIds: ['dataset-license'],
@@ -139,7 +139,7 @@ export async function assembleSyntheticCandidates(raw) {
     const image = await buildCandidateImages({ repoRoot: ROOT, artifactRoot, outputParent: imageParent,
       endpoint: input.endpoint, platform: 'linux/arm64', descriptor: { schemaVersion: 1,
         softwareVersion: identity.softwareVersion, sourceCommit: identity.sourceCommit,
-        jar: { path: 'api.jar', ...fact(jar) }, apiContract: 'caption-hints.v4', sqlVersion: sqlSha,
+        jar: { path: 'api.jar', ...fact(jar) }, apiContract: 'caption-hints.v5', sqlVersion: sqlSha,
         dataset: { path: datasetPath, bytes: row.bytes, sha256: row.sha256, ...selected },
         notices: noticeRecords.map(({ path: noticePath, bytes, sha256 }) => ({ path: noticePath, bytes, sha256 })) } });
     const imageSha = sha(await bytes(path.join(image.candidateDirectory, 'candidate.json'), 2_000_000));
@@ -155,7 +155,7 @@ export async function assembleSyntheticCandidates(raw) {
     candidates.push({ candidateDirectory: assembled.candidateDirectory, candidateSha256 });
   }
   return { candidates, datasets: input.datasets.map(row => ({ version: row.datasetVersion, sha256: row.sha256 })),
-    softwareVersion: identity.softwareVersion, apiContract: 'caption-hints.v4' };
+    softwareVersion: identity.softwareVersion, apiContract: 'caption-hints.v5' };
 }
 
 export async function readSyntheticInput(stream) {

@@ -57,7 +57,7 @@ async function fixture() {
   const descriptor = {
     schemaVersion: 1, softwareVersion: '2.0.0', sourceCommit,
     jar: { path: 'app.jar', bytes: builtJar.length, sha256: hash(builtJar) },
-    apiContract: 'caption-hints.v4', sqlVersion: 'sql-test',
+    apiContract: 'caption-hints.v5', sqlVersion: 'sql-test',
     dataset: { path: 'dataset.zip', bytes: dataset.length, sha256: hash(dataset), releaseId: 'release-1', preparationId: 'prep-1', ruleId: 'rule-1' },
     notices: [{ path: 'licenses/notice.txt', bytes: notice.length, sha256: hash(notice) }],
   };

@@ -997,7 +997,7 @@ else: sys.exit(7)
 
 class ContainerHealthTransportTest(unittest.TestCase):
     SUMMARY = (
-        b'{"softwareVersion":"1.2.3","apiContract":"caption-hints.v4",'
+        b'{"softwareVersion":"1.2.3","apiContract":"caption-hints.v5",'
         b'"mode":"formal","ready":true,"reason":"OK","datasetVersion":42,'
         b'"publishedDataset":null}'
     )
@@ -1097,7 +1097,7 @@ class ContainerHealthTransportTest(unittest.TestCase):
             self.SUMMARY.replace(b'"ready":true', b'"ready":false'),
             self.SUMMARY.replace(b'"formal"', b'"demo"'),
             self.SUMMARY.replace(b'"OK"', b'"DEPENDENCY_UNAVAILABLE"'),
-            self.SUMMARY.replace(b"caption-hints.v4", b"other"),
+            self.SUMMARY.replace(b"caption-hints.v5", b"other"),
             self.SUMMARY.replace(b'"datasetVersion":42', b'"datasetVersion":0'),
             self.SUMMARY.replace(b'"datasetVersion":42', b'"datasetVersion":-1'),
             self.SUMMARY.replace(

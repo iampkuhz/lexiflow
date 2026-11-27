@@ -130,6 +130,7 @@ final class HintSelection {
    * @param lemma 含义：匹配词条的真实规范主词形。取值范围：非空字符串。
    * @param frequencyRank 含义：原始 BNC 排名。取值范围：可空；存在时为正数。
    * @param phrase 含义：候选是否为短语。取值范围：true 或 false。
+   * @param displayFrequencyRank 含义：连续展示用名次。取值范围：可空；存在时为正数。
    */
   static record CandidateMatch(
       int startOffset,

@@ -1,4 +1,4 @@
-package io.lexiflow.api.lexicon;
+package io.lexiflow.api.preferences;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import io.lexiflow.enrichment.application.preferences.LocalPreferences;
 import io.lexiflow.lexicon.application.port.LexiconReadRepository;
 import io.lexiflow.lexicon.domain.model.LexiconBrowseEntry;
 import io.lexiflow.lexicon.domain.model.LexiconBrowsePage;
@@ -17,8 +18,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
 class LexiconBrowseControllerTest {
+  private static final String ORIGIN = "chrome-extension://mnngbjikfoafikclcilgkhhkmcnmlinm";
+
   @Test
-  void normalizesExactQueryAndReturnsCanonicalLemmaAndPublishedState() {
+  void normalizesQueryAndReturnsCanonicalLemmaAndPublishedState() {
     var repository = mock(LexiconReadRepository.class);
     when(repository.browse("alias", true, 1, 20))
         .thenReturn(
@@ -30,30 +33,42 @@ class LexiconBrowseControllerTest {
                 1,
                 20));
     var response =
-        new LexiconBrowseController(Optional.of(repository)).browse(" ALIAS ", "frequency", 1, 20);
+        new LexiconBrowseController(Optional.of(repository), emptyPreferences())
+            .browse(ORIGIN, " ALIAS ", "frequency", 1, 20)
+            .getBody();
     assertEquals("42", response.items().getFirst().entryId());
     assertEquals("canonical", response.items().getFirst().lemma());
-    assertEquals(81L, response.items().getFirst().frequencyRank());
+    assertEquals(12L, response.items().getFirst().frequencyRank());
     assertEquals("eligible", response.items().getFirst().hintState());
     verify(repository).browse("alias", true, 1, 20);
   }
 
   @Test
   void rejectsUnboundedOrUnsupportedBrowseRequests() {
-    var controller = new LexiconBrowseController(Optional.of(mock(LexiconReadRepository.class)));
-    assertThrows(ResponseStatusException.class, () -> controller.browse("x", "random", 1, 20));
-    assertThrows(ResponseStatusException.class, () -> controller.browse("x", "frequency", 1, 101));
+    var controller =
+        new LexiconBrowseController(
+            Optional.of(mock(LexiconReadRepository.class)), emptyPreferences());
+    assertThrows(
+        ResponseStatusException.class, () -> controller.browse(ORIGIN, "x", "random", 1, 20));
+    assertThrows(
+        ResponseStatusException.class, () -> controller.browse(ORIGIN, "x", "frequency", 1, 101));
     assertThrows(
         ResponseStatusException.class,
-        () -> controller.browse("x".repeat(101), "frequency", 1, 20));
+        () -> controller.browse(ORIGIN, "x".repeat(101), "frequency", 1, 20));
   }
 
   @Test
   void returnsServiceUnavailableWithoutPublishedRepository() {
-    var controller = new LexiconBrowseController(Optional.empty());
+    var controller = new LexiconBrowseController(Optional.empty(), emptyPreferences());
     var error =
         assertThrows(
-            ResponseStatusException.class, () -> controller.browse("", "frequency", 1, 20));
+            ResponseStatusException.class, () -> controller.browse(ORIGIN, "", "frequency", 1, 20));
     assertEquals(HttpStatus.SERVICE_UNAVAILABLE, error.getStatusCode());
+  }
+
+  private static Optional<LocalPreferences> emptyPreferences() {
+    var preferences = mock(LocalPreferences.class);
+    when(preferences.read()).thenReturn(new LocalPreferences.State(1500, List.of()));
+    return Optional.of(preferences);
   }
 }

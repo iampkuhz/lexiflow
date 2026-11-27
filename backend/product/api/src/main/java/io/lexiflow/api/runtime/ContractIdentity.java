@@ -16,12 +16,20 @@ public final class ContractIdentity {
 
   private ContractIdentity() {}
 
-  /** 返回当前 API 合同代号。 */
+  /**
+   * 返回构建时锁定的当前 API 合同代号。 该值来自嵌入资源，不接受环境变量覆盖。
+   *
+   * @return 带版本号的 caption-hints 合同标识
+   */
   public static String apiContract() {
     return "caption-hints.v" + IDENTITY[0];
   }
 
-  /** 返回与打包 SQLite 合同绑定的结构摘要。 */
+  /**
+   * 返回与打包 SQLite 合同绑定的结构摘要。 摘要在构建时锁定，并由启动时存储校验使用。
+   *
+   * @return 小写十六进制 SHA-256 摘要
+   */
   public static String storageDigest() {
     return IDENTITY[1];
   }

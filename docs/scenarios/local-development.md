@@ -112,7 +112,7 @@ node ops/podman/commands/manage-local-test-slot.mjs start
 ```
 
 - **构建**：从当前源码重建 JAR、镜像及 Chrome ZIP。固定读取 `~/Library/Application Support/LexiFlow/Testing/dataset/dataset.zip` 和 `expected-dataset.json`；只使用经过核验的发布资料包，不读取正在运行的数据库。首次准备资料和 Temurin 25 工具链后无需重复配置。构建不启停服务；失败保留上次完整产物。
-- **预检**：从 `~/Library/Application Support/LexiFlow/Testing/current` 读取本次制品，核验并导入测试镜像，检查旧容器、保留卷与计划变化。`plan` 不停止服务。只有预检 PASS 且确认替换后才执行 `start`；它会重核计划、按原名替换，只保留一个测试容器。不删任何数据卷。报 `BLOCKED` 时处理具体原因，不绕过验证或另开端口。
+- **预检与替换**：从 `~/Library/Application Support/LexiFlow/Testing/current` 读取本次制品，核验并导入测试镜像，检查旧容器、保留卷与计划变化。`plan` 不停止服务；根据[试用交付规则](../../harness/README.md#试用交付与人工接手)核对授权，预检 `PASS` 后执行 `start`。它重核计划、按原名替换，只保留一个测试容器并保留数据卷；待配套服务和资料就绪才返回 `PASS`。
 - **Chrome**：第一次选择加载 `~/Library/Application Support/LexiFlow/Testing/current/chrome`，以后在原「LexiFlow 测试版」点重新加载，再刷新视频。测试 ZIP 固定是 `~/Library/Application Support/LexiFlow/Testing/current/extension.zip`。仅调整扩展界面且接口仍匹配，可只执行构建并重载扩展，不执行 `plan` 或 `start`。
 
 `18081` 只用于源码开发，`18082` 只用于隔离验收；正式发行不走这个入口。

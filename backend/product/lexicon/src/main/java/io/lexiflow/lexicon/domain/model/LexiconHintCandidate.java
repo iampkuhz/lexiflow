@@ -27,7 +27,7 @@ public record LexiconHintCandidate(
     Long frequencyRank,
     Long bncRank) {
 
-  /** 校验来源无关身份、准确词形和可靠提示与阻断互斥。 */
+  /** 校验候选身份、准确词形以及提示/阻断结果的互斥约束。 提示必须携带义项和短释；阻断候选不得暴露这两项内容。 */
   public LexiconHintCandidate {
     if (entryId < 1) throw new IllegalArgumentException("entryId must be positive");
     if (lexiconVersion < 1) throw new IllegalArgumentException("candidate version is invalid");
@@ -50,14 +50,50 @@ public record LexiconHintCandidate(
     }
   }
 
-  public LexiconHintCandidate(long entryId, UUID senseId, long lexiconVersion,
-      String normalizedForm, LexiconHintAction finalAction, String finalGloss, int priority,
+  /**
+   * 创建不含原始 BNC 排名的候选。 展示排名仍可提供，但原始来源排名设为空。
+   *
+   * @param entryId 含义：稳定词条身份。取值范围：正 long。
+   * @param senseId 含义：提示义项身份。取值范围：提示时非空，阻断时为空。
+   * @param lexiconVersion 含义：所属词库版本。取值范围：正 long。
+   * @param normalizedForm 含义：可匹配的规范词形。取值范围：非空且合法规范形式。
+   * @param finalAction 含义：发布后的最终动作。取值范围：HINT 或 BLOCK。
+   * @param finalGloss 含义：最终展示短释。取值范围：提示时非空，阻断时为空。
+   * @param priority 含义：发布优先级。取值范围：0 至 1000。
+   * @param frequencyRank 含义：连续展示排名。取值范围：可空；存在时为正 long。
+   */
+  public LexiconHintCandidate(
+      long entryId,
+      UUID senseId,
+      long lexiconVersion,
+      String normalizedForm,
+      LexiconHintAction finalAction,
+      String finalGloss,
+      int priority,
       Long frequencyRank) {
-    this(entryId, senseId, lexiconVersion, normalizedForm, finalAction, finalGloss, priority,
-        frequencyRank, null);
+    this(
+        entryId,
+        senseId,
+        lexiconVersion,
+        normalizedForm,
+        finalAction,
+        finalGloss,
+        priority,
+        frequencyRank,
+        null);
   }
 
-  /** 创建不含来源词频排名的提示候选。 */
+  /**
+   * 创建不含来源排名的提示候选。 两种排名均为空，其余身份和展示约束与主构造函数相同。
+   *
+   * @param entryId 含义：稳定词条身份。取值范围：正 long。
+   * @param senseId 含义：提示义项身份。取值范围：提示时非空，阻断时为空。
+   * @param lexiconVersion 含义：所属词库版本。取值范围：正 long。
+   * @param normalizedForm 含义：可匹配的规范词形。取值范围：非空且合法规范形式。
+   * @param finalAction 含义：发布后的最终动作。取值范围：HINT 或 BLOCK。
+   * @param finalGloss 含义：最终展示短释。取值范围：提示时非空，阻断时为空。
+   * @param priority 含义：发布优先级。取值范围：0 至 1000。
+   */
   public LexiconHintCandidate(
       long entryId,
       UUID senseId,

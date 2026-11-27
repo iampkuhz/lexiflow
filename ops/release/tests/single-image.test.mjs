@@ -36,7 +36,7 @@ async function fixture() {
   await writeFile(path.join(artifactRoot, 'licenses/notice.txt'), notice);
   await writeFile(path.join(artifactRoot, 'LICENSE'), rootLicense);
   const descriptor = { schemaVersion: 1, softwareVersion: identity.softwareVersion, sourceCommit: identity.sourceCommit,
-    jar: { path: 'api.jar', bytes: jar.length, sha256: hash(jar) }, apiContract: 'caption-hints.v4', sqlVersion: 'sql-test',
+    jar: { path: 'api.jar', bytes: jar.length, sha256: hash(jar) }, apiContract: 'caption-hints.v5', sqlVersion: 'sql-test',
     dataset: { path: 'dataset.zip', bytes: data.length, sha256: hash(data), releaseId: 'release-1', preparationId: 'prep-1', ruleId: 'rule-1' },
     notices: [{ path: 'LICENSE', bytes: rootLicense.length, sha256: hash(rootLicense) },
       { path: 'licenses/notice.txt', bytes: notice.length, sha256: hash(notice) }] };

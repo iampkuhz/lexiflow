@@ -9,7 +9,6 @@ import io.lexiflow.lexicon.application.port.LexiconPublicationRepository;
 import io.lexiflow.lexicon.application.port.LexiconRepository;
 import io.lexiflow.lexicon.domain.model.LexiconBrowseEntry;
 import io.lexiflow.lexicon.domain.model.LexiconBrowsePage;
-import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import io.lexiflow.lexicon.domain.model.PublishedHintState;
@@ -17,6 +16,7 @@ import io.lexiflow.lexicon.domain.port.LexiconIdentity;
 import io.lexiflow.lexicon.domain.port.LexiconSurfacePolicy;
 import java.io.IOException;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.util.ArrayList;
@@ -31,6 +31,16 @@ import org.springframework.transaction.support.TransactionTemplate;
 /** 两表词库的单一持久化实现；来源明细只在受控导入阶段使用。 */
 final class DefaultLexiconRepository implements LexiconRepository {
   private static final int BATCH_SIZE = 500;
+  // “数千”是独立词条，不归并偏好或过滤；只在无名次时复用 “a thousand” 的发布展示名次。
+  private static final String DISPLAY_RANK =
+      """
+      CASE WHEN e.lemma = 'thousands' AND e.frequency_rank IS NULL
+        THEN (SELECT frequency_rank FROM lexicon_entry WHERE entry_id = %d)
+        ELSE e.frequency_rank END AS frequency_rank
+      """
+          .formatted(LexiconIdentity.entryId("thousand"));
+  private static final String BROWSE_COLUMNS =
+      "e.entry_id,e.lemma,e.gloss,e.bnc_rank," + DISPLAY_RANK;
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transaction;
   private final Clock clock;
@@ -107,7 +117,9 @@ final class DefaultLexiconRepository implements LexiconRepository {
     var args = new ArrayList<Object>(unique);
     args.add(version);
     return jdbc.query(
-        "SELECT l.entry_id, l.normalized_form, e.lemma, e.gloss, e.priority, e.frequency_rank, e.bnc_rank FROM"
+        "SELECT l.entry_id, l.normalized_form, e.lemma, e.gloss, e.priority, e.bnc_rank,"
+            + DISPLAY_RANK
+            + " FROM"
             + " lexicon_lookup l JOIN lexicon_entry e USING (entry_id) WHERE l.normalized_form IN ("
             + placeholders
             + ") AND EXISTS (SELECT 1 FROM lexicon_dataset d "
@@ -121,56 +133,69 @@ final class DefaultLexiconRepository implements LexiconRepository {
     if (page < 1 || pageSize < 1 || pageSize > 100)
       throw new IllegalArgumentException("page is invalid");
     int offset = Math.multiplyExact(page - 1, pageSize);
-    String filter =
-        query == null || query.isEmpty()
-            ? ""
-            : " WHERE e.entry_id IN (SELECT entry_id FROM lexicon_lookup WHERE normalized_form ="
-                + " ?)";
-    Long totalValue =
-        filter.isEmpty()
-            ? jdbc.queryForObject(
-                "SELECT COUNT(*) FROM lexicon_entry e WHERE EXISTS (SELECT 1 FROM lexicon_dataset d"
-                    + " WHERE d.dataset_id=1) ",
-                Long.class)
-            : jdbc.queryForObject(
-                "SELECT COUNT(*) FROM lexicon_entry e WHERE EXISTS (SELECT 1 FROM lexicon_dataset d"
-                    + " WHERE d.dataset_id=1) AND e.entry_id IN (SELECT entry_id FROM"
-                    + " lexicon_lookup WHERE normalized_form = ?)",
-                Long.class,
-                query);
     String order =
         frequencySort
-            ? "e.bnc_rank ASC NULLS LAST,e.lemma COLLATE BINARY,e.entry_id"
-            : "e.lemma COLLATE BINARY,e.entry_id";
+            ? "bnc_rank ASC NULLS LAST,lemma COLLATE BINARY,entry_id"
+            : "lemma COLLATE BINARY,entry_id";
+    if (query == null || query.isEmpty()) {
+      Long total =
+          jdbc.queryForObject(
+              "SELECT COALESCE((SELECT entry_count FROM lexicon_dataset WHERE dataset_id=1),0)",
+              Long.class);
+      var items =
+          jdbc.query(
+              "SELECT "
+                  + BROWSE_COLUMNS
+                  + " FROM lexicon_entry e WHERE EXISTS "
+                  + "(SELECT 1 FROM lexicon_dataset WHERE dataset_id=1) ORDER BY "
+                  + order
+                  + " LIMIT ? OFFSET ?",
+              (result, row) -> browseEntry(result),
+              pageSize,
+              offset);
+      return new LexiconBrowsePage(items, total == null ? 0 : total, page, pageSize);
+    }
+    // COUNT 和分页共享一次词形扫描；只把排序后的当前页词项交给 JDBC。
     String sql =
-        "SELECT e.entry_id,e.lemma,e.gloss,e.bnc_rank,e.frequency_rank FROM lexicon_entry e WHERE EXISTS"
-            + " (SELECT 1 FROM lexicon_dataset d WHERE d.dataset_id=1)"
-            + (filter.isEmpty()
-                ? ""
-                : " AND e.entry_id IN (SELECT entry_id FROM lexicon_lookup WHERE normalized_form ="
-                    + " ?)")
-            + " ORDER BY "
-            + order
-            + " LIMIT ? OFFSET ?";
-    var args = new ArrayList<Object>();
-    if (!filter.isEmpty()) args.add(query);
-    args.add(pageSize);
-    args.add(offset);
-    var items =
-        jdbc.query(
-            sql,
-            (result, row) -> {
-              String gloss = result.getString("gloss");
-              return new LexiconBrowseEntry(
-                  result.getLong("entry_id"),
-                  result.getString("lemma"),
-                  gloss,
-                  nullableLong(result, "bnc_rank"),
-                  nullableLong(result, "frequency_rank"),
-                  gloss == null ? PublishedHintState.BLOCKED : PublishedHintState.ELIGIBLE);
-            },
-            args.toArray());
-    return new LexiconBrowsePage(items, totalValue == null ? 0 : totalValue, page, pageSize);
+        """
+        WITH matches AS MATERIALIZED (
+          SELECT DISTINCT entry_id FROM lexicon_lookup
+          WHERE EXISTS (SELECT 1 FROM lexicon_dataset WHERE dataset_id=1)
+            AND instr(normalized_form, ?) > 0
+        ), page_items AS (
+          SELECT %s FROM matches JOIN lexicon_entry e USING (entry_id)
+          ORDER BY %s LIMIT ? OFFSET ?
+        )
+        SELECT page_items.*, totals.total
+        FROM (SELECT COUNT(*) AS total FROM matches) totals LEFT JOIN page_items ON 1=1
+        ORDER BY %s
+        """
+            .formatted(BROWSE_COLUMNS, order, order);
+    return jdbc.query(
+        sql,
+        result -> {
+          if (!result.next()) return new LexiconBrowsePage(List.of(), 0, page, pageSize);
+          long total = result.getLong("total");
+          var items = new ArrayList<LexiconBrowseEntry>();
+          do {
+            if (result.getObject("entry_id") != null) items.add(browseEntry(result));
+          } while (result.next());
+          return new LexiconBrowsePage(items, total, page, pageSize);
+        },
+        query,
+        pageSize,
+        offset);
+  }
+
+  private static LexiconBrowseEntry browseEntry(ResultSet result) throws SQLException {
+    String gloss = result.getString("gloss");
+    return new LexiconBrowseEntry(
+        result.getLong("entry_id"),
+        result.getString("lemma"),
+        gloss,
+        nullableLong(result, "bnc_rank"),
+        nullableLong(result, "frequency_rank"),
+        gloss == null ? PublishedHintState.BLOCKED : PublishedHintState.ELIGIBLE);
   }
 
   @Override
@@ -183,7 +208,9 @@ final class DefaultLexiconRepository implements LexiconRepository {
       var marks = String.join(",", java.util.Collections.nCopies(batch.size(), "?"));
       items.addAll(
           jdbc.query(
-              "SELECT e.entry_id,e.lemma,e.gloss,e.bnc_rank,e.frequency_rank FROM lexicon_entry e WHERE e.gloss IS NOT NULL AND e.entry_id IN ("
+              "SELECT "
+                  + BROWSE_COLUMNS
+                  + " FROM lexicon_entry e WHERE e.gloss IS NOT NULL AND e.entry_id IN ("
                   + marks
                   + ") AND EXISTS (SELECT 1 FROM lexicon_dataset d WHERE d.dataset_id=1)",
               (r, row) ->
@@ -220,7 +247,9 @@ final class DefaultLexiconRepository implements LexiconRepository {
             + " UNION ALL SELECT normalized_form,priority FROM alias_rows) candidates ORDER BY"
             + " priority DESC,normalized_form LIMIT ?), selected AS (SELECT DISTINCT"
             + " normalized_form FROM top_rows) SELECT l.entry_id, l.normalized_form, e.lemma,"
-            + " e.gloss, e.priority, e.frequency_rank, e.bnc_rank FROM selected s JOIN lexicon_lookup l USING"
+            + " e.gloss, e.priority, e.bnc_rank,"
+            + DISPLAY_RANK
+            + " FROM selected s JOIN lexicon_lookup l USING"
             + " (normalized_form) JOIN lexicon_entry e USING (entry_id) WHERE EXISTS (SELECT 1 FROM"
             + " lexicon_dataset d WHERE d.dataset_id=1 AND d.lexicon_version=?) ORDER BY"
             + " l.normalized_form, l.entry_id",
@@ -287,7 +316,8 @@ final class DefaultLexiconRepository implements LexiconRepository {
           jdbc.update("DELETE FROM lexicon_dataset WHERE dataset_id = 1");
           jdbc.update("DELETE FROM lexicon_form");
           jdbc.update("DELETE FROM lexicon_entry");
-          jdbc.execute("CREATE TEMP TABLE lexicon_frequency_input (entry_id INTEGER PRIMARY KEY, source_rank INTEGER NOT NULL) STRICT");
+          jdbc.execute(
+              "CREATE TEMP TABLE lexicon_frequency_input (entry_id INTEGER PRIMARY KEY, source_rank INTEGER NOT NULL) STRICT");
           var writer = new BatchWriter();
           try {
             source.read(version, writer::add);
@@ -311,11 +341,12 @@ final class DefaultLexiconRepository implements LexiconRepository {
               || actualLookups != writer.lookups) {
             throw new IllegalStateException("persisted lexicon row counts are inconsistent");
           }
-          jdbc.update("WITH ranked AS MATERIALIZED (SELECT e.entry_id, ROW_NUMBER() OVER "
-              + "(ORDER BY f.source_rank, e.lemma COLLATE BINARY, e.entry_id) AS position "
-              + "FROM temp.lexicon_frequency_input f JOIN lexicon_entry e USING(entry_id)) "
-              + "UPDATE lexicon_entry SET frequency_rank=ranked.position FROM ranked "
-              + "WHERE lexicon_entry.entry_id=ranked.entry_id");
+          jdbc.update(
+              "WITH ranked AS MATERIALIZED (SELECT e.entry_id, ROW_NUMBER() OVER "
+                  + "(ORDER BY f.source_rank, e.lemma COLLATE BINARY, e.entry_id) AS position "
+                  + "FROM temp.lexicon_frequency_input f JOIN lexicon_entry e USING(entry_id)) "
+                  + "UPDATE lexicon_entry SET frequency_rank=ranked.position FROM ranked "
+                  + "WHERE lexicon_entry.entry_id=ranked.entry_id");
           jdbc.execute("DROP TABLE temp.lexicon_frequency_input");
           safe(() -> progress.persisted(writer.entries, writer.lookups));
           String contentSha256 = jdbc.execute(DatasetContentChecksum::calculate);
@@ -414,7 +445,10 @@ final class DefaultLexiconRepository implements LexiconRepository {
             });
         Long sourceRank = row.effectiveSourceRank();
         if (sourceRank != null && !entry.lemma().contains(" ")) {
-          jdbc.update("INSERT INTO temp.lexicon_frequency_input(entry_id, source_rank) VALUES (?, ?)", entry.entryId(), sourceRank);
+          jdbc.update(
+              "INSERT INTO temp.lexicon_frequency_input(entry_id, source_rank) VALUES (?, ?)",
+              entry.entryId(),
+              sourceRank);
         }
         for (String form : forms) formRows.add(new Object[] {form, entry.entryId()});
       }

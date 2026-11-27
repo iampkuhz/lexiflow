@@ -436,6 +436,7 @@ checks:
   - scripts/contracts/contract-lock.mjs
   - extension/scripts/packaging
   - extension/scripts/build/expected-dataset.mjs
+  - extension/scripts/build/extension-build-settings.mjs
   - ops/release
   - ops/docker
   - ops/podman
@@ -461,6 +462,7 @@ checks:
   - path: scripts/contracts/contract-lock.mjs
   - path: extension/scripts/packaging
   - path: extension/scripts/build/expected-dataset.mjs
+  - path: extension/scripts/build/extension-build-settings.mjs
   - path: ops/release/test_tools
   - path: ops/release/runner
   - path: ops/release/runtime
@@ -965,7 +967,7 @@ checks:
   - release-npm-cache
   input_paths:
   - contracts/versions.lock.json
-  - scripts/contracts/contract-lock.mjs
+  - scripts/contracts
   - scripts/acceptance
   - scripts/agents
   - requirements-dev.txt
@@ -1004,7 +1006,7 @@ checks:
   scenarios: [repository-baseline, change-targeted]
   triggers:
   - path: contracts/versions.lock.json
-  - path: scripts/contracts/contract-lock.mjs
+  - path: scripts/contracts
   - path: scripts/acceptance
   - path: scripts/agents
   - path: requirements-dev.txt

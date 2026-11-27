@@ -210,7 +210,7 @@ test('TERM during ready supervision shuts down API within stop budget', async (t
   await writeFile(f.preferencesMountInfo,`12 1 0:99 / ${f.preferences} rw - tmpfs tmpfs rw\n`);
   const pidFile = path.join(f.tmp, 'api.pid');
   await writeFile(path.join(f.bin, 'java'), `#!/bin/sh
-case "$*" in *--api-contract*) printf "%s\\n" caption-hints.v4; exit 0;; *--storage-contract*|*--verify-storage*) exit 0;; esac
+case "$*" in *--api-contract*) printf "%s\\n" caption-hints.v5; exit 0;; *--storage-contract*|*--verify-storage*) exit 0;; esac
 db=''; previous=''; for arg do [ "$previous" = --expected-file ] && db=$arg; previous=$arg; done
 if [ -n "$db" ]; then : > "$db"; exit 0; fi
 printf '%s\\n' "$$" > '${pidFile}'

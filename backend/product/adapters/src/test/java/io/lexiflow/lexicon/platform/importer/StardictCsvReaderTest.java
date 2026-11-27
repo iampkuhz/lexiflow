@@ -114,8 +114,8 @@ class StardictCsvReaderTest {
     assertTrue(falseWord.sourceOxfordBasic());
     assertFalse(falseWord.basicVocabulary());
     assertNull(
-        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(
-            falseWord).exclusionReason());
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(falseWord)
+            .exclusionReason());
     assertTrue(
         records.stream().allMatch(r -> r.row().hintPolicyReference().contains(reversed.digest())));
     var unknownOxford =
@@ -128,8 +128,8 @@ class StardictCsvReaderTest {
     assertNull(unknownOxford.sourceBncRank());
     assertEquals(
         "basic_vocabulary",
-        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(
-            unknownOxford).exclusionReason());
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(unknownOxford)
+            .exclusionReason());
   }
 
   @Test
@@ -158,8 +158,8 @@ class StardictCsvReaderTest {
     assertFalse(rankedOxford.basicVocabulary());
     assertEquals(1200L, rankedOxford.sourceBncRank());
     assertNull(
-        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(
-            rankedOxford).exclusionReason());
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(rankedOxford)
+            .exclusionReason());
 
     var frqOnly = row(records, "frqonlyoxford");
     assertNull(frqOnly.sourceBncRank());
@@ -167,15 +167,16 @@ class StardictCsvReaderTest {
     assertTrue(frqOnly.basicVocabulary());
     assertEquals(
         "basic_vocabulary",
-        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(frqOnly).exclusionReason());
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(frqOnly)
+            .exclusionReason());
 
     var rankedFunctionWord = row(records, "that");
     assertEquals(1200L, rankedFunctionWord.sourceBncRank());
     assertTrue(rankedFunctionWord.basicVocabulary());
     assertEquals(
         "basic_vocabulary",
-        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(
-            rankedFunctionWord).exclusionReason());
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(rankedFunctionWord)
+            .exclusionReason());
 
     var rootHitOnlyByOxfordInflection = row(records, "rankedroot");
     assertFalse(rootHitOnlyByOxfordInflection.sourceOxfordBasic());
@@ -183,7 +184,8 @@ class StardictCsvReaderTest {
     assertFalse(rootHitOnlyByOxfordInflection.basicVocabulary());
     assertNull(
         io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(
-            rootHitOnlyByOxfordInflection).exclusionReason());
+                rootHitOnlyByOxfordInflection)
+            .exclusionReason());
   }
 
   @Test
@@ -218,7 +220,8 @@ class StardictCsvReaderTest {
       assertFalse(root.prewarmEligible());
       assertEquals(
           "basic_vocabulary",
-          io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(root).exclusionReason());
+          io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(root)
+              .exclusionReason());
       assertFalse(
           rows.stream()
               .map(StardictCsvReader.SourceRecord::row)
@@ -404,7 +407,8 @@ class StardictCsvReaderTest {
     assertEquals(
         "empty_first_candidate",
         io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(
-            rows.getFirst().row()).exclusionReason());
+                rows.getFirst().row())
+            .exclusionReason());
     assertEquals("可靠的", rows.getLast().row().chineseGloss());
   }
 
@@ -464,8 +468,8 @@ class StardictCsvReaderTest {
     assertEquals("", record.row().chineseGloss());
     assertEquals("；银行", record.row().sourceGloss());
     var exclusion =
-        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(
-            record.row()).exclusionReason();
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(record.row())
+            .exclusionReason();
     assertEquals("empty_first_candidate", exclusion);
   }
 
@@ -495,7 +499,8 @@ class StardictCsvReaderTest {
     assertFalse(phrase.basicVocabulary());
     assertEquals(
         "all_basic_phrase",
-        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(phrase).exclusionReason());
+        io.lexiflow.lexicon.application.importing.policy.HintPreparation.prepare(phrase)
+            .exclusionReason());
     var mixed =
         rows.stream()
             .map(StardictCsvReader.SourceRecord::row)

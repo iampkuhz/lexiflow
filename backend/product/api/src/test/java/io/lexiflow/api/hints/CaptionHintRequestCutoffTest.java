@@ -16,7 +16,6 @@ class CaptionHintRequestCutoffTest {
     for (int cutoff : List.of(1000, 1500, 2000)) {
       assertEquals(cutoff, request.toDomain(cutoff).commonWordCutoff());
     }
-    assertThrows(
-        IllegalArgumentException.class, () -> request.toDomain(1001));
+    assertThrows(IllegalArgumentException.class, () -> request.toDomain(1001));
   }
 }

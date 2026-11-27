@@ -32,7 +32,8 @@ public final class DatasetPackageTables {
 
   static String sqlName(String table, String packageColumn) {
     if ("lexicon_entry".equals(table) && "bncRank".equals(packageColumn)) return "bnc_rank";
-    if ("lexicon_entry".equals(table) && "frequencyRank".equals(packageColumn)) return "frequency_rank";
+    if ("lexicon_entry".equals(table) && "frequencyRank".equals(packageColumn))
+      return "frequency_rank";
     return packageColumn;
   }
 
@@ -57,7 +58,14 @@ public final class DatasetPackageTables {
   public static final Table ENTRY =
       new Table(
           "lexicon_entry",
-          List.of("entry_id", "lemma", "gloss", "canonical_form", "priority", "bnc_rank", "frequency_rank"),
+          List.of(
+              "entry_id",
+              "lemma",
+              "gloss",
+              "canonical_form",
+              "priority",
+              "bnc_rank",
+              "frequency_rank"),
           "entry_id");
   public static final Table FORM =
       new Table(

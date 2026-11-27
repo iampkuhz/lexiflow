@@ -11,21 +11,19 @@
   <main>
     <h1>词汇提示管理</h1>
     <section id="preference-panel" aria-labelledby="cutoff-heading">
-      <h2 id="cutoff-heading">常见词过滤</h2>
-      <div class="cutoff-field">
-        <div>
-          <label for="common-word-cutoff">不提示 BNC 高频前 N 词</label>
-          <p class="note" id="cutoff-source-note">BNC 指英国国家语料库。</p>
-        </div>
-        <div class="cutoff-control">
-          <select id="common-word-cutoff" disabled aria-describedby="cutoff-source-note cutoff-status">
-            <option value="" selected disabled>正在读取…</option>
-            <option value="1000">前 1000 词</option>
-            <option value="1500">前 1500 词 · 默认</option>
-            <option value="2000">前 2000 词</option>
-          </select>
-          <p id="cutoff-status" role="status">正在读取本机设置…</p>
-        </div>
+      <div class="cutoff-copy">
+        <h2 id="cutoff-heading">常见词过滤</h2>
+        <p class="note" id="cutoff-source-note">略过英国国家语料库（BNC）中最常见的词。</p>
+      </div>
+      <div class="cutoff-control">
+        <label class="sr" for="common-word-cutoff">不提示 BNC 高频前 N 词</label>
+        <div class="select-field"><select id="common-word-cutoff" disabled aria-describedby="cutoff-source-note cutoff-status">
+          <option value="" selected disabled>正在读取…</option>
+          <option value="1000">前 1000 词</option>
+          <option value="1500">前 1500 词 · 默认</option>
+          <option value="2000">前 2000 词</option>
+        </select></div>
+        <p id="cutoff-status" role="status">正在读取本机设置…</p>
       </div>
     </section>
     <nav class="tabs" aria-label="管理内容">
@@ -37,25 +35,24 @@
     </nav>
     <section id="current-video-panel" class="panel" aria-labelledby="current-video-heading" hidden>
       <div class="bar"><h2 id="current-video-heading">当前视频的词汇提示</h2><button id="refresh-current-video" type="button" disabled>刷新</button></div>
-      <p id="current-video-source" hidden><a id="current-video-link" target="_blank" rel="noopener noreferrer"></a></p>
-      <p class="note">按本次观看的实际提示次数排列。# 是词库名次。</p>
+      <p id="current-video-source" hidden><a id="current-video-link" dir="auto" target="_blank" rel="noopener noreferrer"></a></p>
+      <p class="reading-note">按本次观看的实际提示次数排列。# 是词库名次。</p>
       <ul id="current-video-list" class="hint-list" role="list" aria-labelledby="current-video-heading"></ul>
       <p id="current-video-status" class="note" role="status">正在读取当前视频…</p>
     </section>
     <section id="recent-panel" class="panel">
       <div class="bar"><h2 id="recent-heading">近 7 天提示</h2></div>
-      <p class="panel-intro">按实际提示次数从多到少排列。</p>
-      <p class="note">含今天。# 是词库名次，不是列表序号。</p>
+      <p class="reading-note">统计含今天，按实际提示次数从多到少排列。# 是词库名次，不是列表序号。</p>
       <div class="recent-filters">
         <label class="sr" for="recent-query">搜索最近提示</label>
         <input id="recent-query" type="search" placeholder="搜索英文词条或中文提示" autocomplete="off" aria-controls="recent-list">
         <div class="recent-page-control">
           <label for="recent-page-size">每页</label>
-          <select id="recent-page-size" aria-label="每页显示条数" aria-controls="recent-list">
+          <div class="select-field"><select id="recent-page-size" aria-label="每页显示条数" aria-controls="recent-list">
             <option value="20">20 条</option>
             <option value="40" selected>40 条</option>
             <option value="80">80 条</option>
-          </select>
+          </select></div>
         </div>
       </div>
       <p id="recent-search-status" class="sr" role="status"></p>
@@ -65,18 +62,19 @@
       <nav class="pager" id="recent-pager" aria-label="最近提示分页" hidden><span data-total></span><button data-step="-1" type="button">上一页</button><span data-page></span><button data-step="1" type="button">下一页</button></nav>
     </section>
     <section id="hidden-panel" class="panel" hidden>
-      <div class="bar"><h2>已停止提示的词条</h2><span class="muted">仅本机</span></div>
-      <p class="note">恢复后，词条仍按当前筛选规则决定是否提示。</p>
-      <div id="hidden-list" class="list" role="table" aria-label="本机已停止提示词条"></div>
-      <p id="hidden-empty" class="empty" role="status" hidden></p>
+      <div class="bar"><h2>已停止提示的词条</h2></div>
+      <p class="reading-note">恢复后，词条仍按当前筛选规则决定是否提示。</p>
+      <ul id="hidden-list" class="hint-list" role="list" aria-label="本机已停止提示词条" hidden></ul>
+      <p id="hidden-empty" class="empty" role="status" hidden>没有已停止提示的词条。</p>
       <nav class="pager" id="hidden-pager" aria-label="已停止提示分页" hidden><span data-total></span><button data-step="-1" type="button">上一页</button><span data-page></span><button data-step="1" type="button">下一页</button></nav>
     </section>
     <section id="lexicon-panel" class="panel" hidden>
-      <div class="bar"><h2>词库查询</h2><span class="muted">只读 · 已发布词库</span></div>
-      <form id="lexicon-search" class="search"><label class="sr" for="query">英文词条、词形或短语</label><input id="query" type="search" placeholder="查英文词、词形或短语" autocomplete="off"><button type="submit">查询</button>
-        <label for="sort">排序</label><select id="sort"><option value="frequency">词频 · 常见优先</option><option value="alphabet">英文 A → Z</option></select></form>
-      <p class="note">词频排名越靠前越常见；暂无表示没有来源排名，不等于低频。</p>
-      <div id="lexicon-list" class="list" role="table" aria-label="已发布词库查询结果"></div>
+      <div class="bar"><h2>词库查询</h2></div>
+      <form id="lexicon-search" class="search"><label class="sr" for="query">输入完整或部分英文词形</label><input id="query" type="search" placeholder="输入部分英文，例如 act" autocomplete="off" maxlength="100">
+        <div class="search-sort"><label for="sort">排序</label><div class="select-field"><select id="sort"><option value="frequency">BNC 频率</option><option value="alphabet">英文 A → Z</option></select></div></div></form>
+      <p class="reading-note"># 是词库展示名次，不是 BNC 排序名次。</p>
+      <p id="lexicon-loading" class="note" role="status" hidden>正在查词…</p>
+      <ul id="lexicon-list" class="hint-list" role="list" aria-label="已发布词库查询结果" hidden></ul>
       <p id="lexicon-empty" class="empty" role="status" hidden></p>
       <nav class="pager" id="lexicon-pager" aria-label="词库分页" hidden><span data-total></span><button data-step="-1" type="button">上一页</button><span data-page></span><button data-step="1" type="button">下一页</button></nav>
     </section>

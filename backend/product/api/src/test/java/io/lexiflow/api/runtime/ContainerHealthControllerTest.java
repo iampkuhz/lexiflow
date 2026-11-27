@@ -57,7 +57,7 @@ class ContainerHealthControllerTest {
       when(runtime.probe()).thenReturn(new LexiconRuntime.State("formal", reason, 42L, true));
       var response = controller.health(request("127.0.0.1"));
       var body =
-          "{\"softwareVersion\":\"1.2.3\",\"apiContract\":\"caption-hints.v4\",\"mode\":\"formal\",\"ready\":true,\"reason\":\""
+          "{\"softwareVersion\":\"1.2.3\",\"apiContract\":\"caption-hints.v5\",\"mode\":\"formal\",\"ready\":true,\"reason\":\""
               + reason.name()
               + "\",\"datasetVersion\":42,\"publishedDataset\":{\"releaseId\":\"rel\",\"preparationId\":\"prep\",\"ruleId\":\"rule\",\"sqlVersion\":\"sql\",\"sha256\":\""
               + "a".repeat(64)
@@ -87,7 +87,7 @@ class ContainerHealthControllerTest {
 
     assertEquals(HttpStatus.OK, response.getStatusCode());
     assertEquals(
-        "{\"softwareVersion\":\"1.2.3\",\"apiContract\":\"caption-hints.v4\",\"mode\":\"formal\",\"ready\":true,\"reason\":\"OK\",\"datasetVersion\":42,\"publishedDataset\":null}",
+        "{\"softwareVersion\":\"1.2.3\",\"apiContract\":\"caption-hints.v5\",\"mode\":\"formal\",\"ready\":true,\"reason\":\"OK\",\"datasetVersion\":42,\"publishedDataset\":null}",
         new String(response.getBody(), java.nio.charset.StandardCharsets.UTF_8));
   }
 

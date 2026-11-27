@@ -30,7 +30,8 @@ class HintPreparationTest {
   void blocksBasicLowInformationAndAmbiguousGlossButNotRankedWord() {
     assertEquals("basic_vocabulary", HintPreparation.prepare(row("the", "这个")).exclusionReason());
     for (var phrase : List.of("the first", "not in", "on yesterday", "to be")) {
-      assertEquals("low_information_phrase", HintPreparation.prepare(row(phrase, "错误短释")).exclusionReason());
+      assertEquals(
+          "low_information_phrase", HintPreparation.prepare(row(phrase, "错误短释")).exclusionReason());
     }
     assertEquals(
         "unsafe_default_candidate",

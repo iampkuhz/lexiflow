@@ -9,9 +9,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import io.lexiflow.api.runtime.LexiconRuntime;
 import io.lexiflow.enrichment.application.preferences.RecentHintFrequency;
-import io.lexiflow.lexicon.domain.port.LexiconIdentity;
 import io.lexiflow.lexicon.domain.model.LexiconBrowseEntry;
 import io.lexiflow.lexicon.domain.model.PublishedHintState;
+import io.lexiflow.lexicon.domain.port.LexiconIdentity;
 import io.lexiflow.observability.platform.StructuredEventLogger;
 import java.time.Clock;
 import java.time.Instant;
@@ -75,25 +75,35 @@ class RecentHintsControllerTest {
 
   @Test
   void readsPublishedDisplayRankWithoutChangingCountOrReturningRawBnc() throws Exception {
-    var counts = new RecentHintFrequency(
-        new MemoryStore(), Clock.fixed(Instant.parse("2026-11-10T12:00:00Z"), ZoneId.of("UTC")));
+    var counts =
+        new RecentHintFrequency(
+            new MemoryStore(),
+            Clock.fixed(Instant.parse("2026-11-10T12:00:00Z"), ZoneId.of("UTC")));
     counts.record(List.of(9L, 9L, 7L));
     var runtime = mock(LexiconRuntime.class);
     when(runtime.displayableByIds(org.mockito.ArgumentMatchers.anyCollection()))
-        .thenReturn(List.of(
-            new LexiconBrowseEntry(9L, "program", "程序", 1660L, 187L, PublishedHintState.ELIGIBLE),
-            new LexiconBrowseEntry(7L, "word", "词", null, null, PublishedHintState.ELIGIBLE)));
-    mvc(counts, runtime).perform(
-            post("/api/v1/recent-hints").header("Origin", ORIGIN)
+        .thenReturn(
+            List.of(
+                new LexiconBrowseEntry(
+                    9L, "program", "程序", 1660L, 187L, PublishedHintState.ELIGIBLE),
+                new LexiconBrowseEntry(7L, "word", "词", null, null, PublishedHintState.ELIGIBLE)));
+    mvc(counts, runtime)
+        .perform(
+            post("/api/v1/recent-hints")
+                .header("Origin", ORIGIN)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"action\":\"read\"}"))
         .andExpect(status().isOk())
-        .andExpect(content().json("""
+        .andExpect(
+            content()
+                .json(
+                    """
             {"items":[
               {"entryId":"9","lemma":"program","gloss":"程序","frequencyRank":187,"count":2},
               {"entryId":"7","lemma":"word","gloss":"词","frequencyRank":null,"count":1}
             ]}
-            """, org.springframework.test.json.JsonCompareMode.STRICT));
+            """,
+                    org.springframework.test.json.JsonCompareMode.STRICT));
   }
 
   private static MockMvc mvc(RecentHintFrequency counts, LexiconRuntime runtime) {
@@ -115,8 +125,10 @@ class RecentHintsControllerTest {
     public Map<Long, Long> read(java.time.LocalDate today) {
       var ordered = new java.util.LinkedHashMap<Long, Long>();
       values.entrySet().stream()
-          .sorted(Map.Entry.<Long, Long>comparingByValue().reversed()
-              .thenComparing(Map.Entry.comparingByKey()))
+          .sorted(
+              Map.Entry.<Long, Long>comparingByValue()
+                  .reversed()
+                  .thenComparing(Map.Entry.comparingByKey()))
           .forEach(entry -> ordered.put(entry.getKey(), entry.getValue()));
       return java.util.Collections.unmodifiableMap(ordered);
     }

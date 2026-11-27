@@ -1,7 +1,7 @@
 {
   "extension-api": {
-    "version": 4,
-    "sha256": "ef3c05456c81b4c69c5c4a0a16a228619e46b6e1ea079d0516712fe663c58a66"
+    "version": 5,
+    "sha256": "e33fd71c9f664cd3b161f735541f0458968e39115ee91414b8f814780baf532d"
   },
   "sqlite-storage": {
     "version": 1,

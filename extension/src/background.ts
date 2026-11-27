@@ -4,7 +4,6 @@ import {
   REQUEST_TIMEOUT_MS,
   MAX_PRESENTED_ENTRY_IDS,
   isEntryId,
-  isFrequencyRank,
   isCaptionHintRequest,
   parseHintResponse,
   isStableId,
@@ -92,7 +91,7 @@ function cachePreferences(origin: string, revision: number, result: unknown) {
   const value = (result as { ok?: boolean })?.ok ? parsePreferences(result) : undefined;
   if (value) cachedPreferences = { origin, revision, value, loadedAt: Date.now() };
 }
-type LexiconItem = { entryId: string; lemma: string; gloss: string | null; frequencyRank: number | null; hintState: "eligible" | "blocked" };
+type LexiconItem = { entryId: string; lemma: string; gloss: string | null; frequencyRank: number | null; hintState: "eligible" | "blocked" | "hidden" };
 function parseLexicon(value: unknown): { items: LexiconItem[]; total: number; page: number; pageSize: number } | undefined {
   if (!value || typeof value !== "object") return;
   const page = value as { items?: unknown; total?: unknown; page?: unknown; pageSize?: unknown };
@@ -105,7 +104,7 @@ function parseLexicon(value: unknown): { items: LexiconItem[]; total: number; pa
     if (!isEntryId(item.entryId) || typeof item.lemma !== "string" || !item.lemma.length || item.lemma.length > 128 ||
         (item.gloss !== null && (typeof item.gloss !== "string" || !item.gloss.length || item.gloss.length > 24)) ||
         (item.frequencyRank !== null && (!Number.isSafeInteger(item.frequencyRank) || item.frequencyRank < 1)) ||
-        !["eligible", "blocked"].includes(item.hintState)) return;
+        !["eligible", "blocked", "hidden"].includes(item.hintState)) return;
     items.push(item);
   }
   return { items, total: page.total as number, page: page.page as number, pageSize: page.pageSize as number };
@@ -116,8 +115,7 @@ function parseRecent(value: unknown): RecentItem[] | undefined {
   const items: RecentItem[] = [], identities = new Set<string>();
   for (const item of value.items) {
     if (!isHiddenPreference(item) || !("count" in item) || typeof item.count !== "number" ||
-        !Number.isSafeInteger(item.count) || item.count < 1 || identities.has(item.entryId) ||
-        !("frequencyRank" in item) || !isFrequencyRank(item.frequencyRank)) return;
+        !Number.isSafeInteger(item.count) || item.count < 1 || identities.has(item.entryId)) return;
     const { entryId, lemma, gloss, count, frequencyRank } = item;
     identities.add(entryId);
     items.push({ entryId, lemma, gloss, count, frequencyRank });
@@ -414,7 +412,7 @@ chrome.runtime.onMessage.addListener(
       }
       const params = new URLSearchParams({ query: request.query, sort: request.sort, page: String(request.page), pageSize: String(request.pageSize) });
       void localDataRoute().then(({ origin }) => boundedFetch(`${endpoint(origin, "lexicon")}?${params}`,
-        { method: "GET", cache: "no-store", redirect: "error", credentials: "omit", referrerPolicy: "no-referrer" }))
+        { method: "POST", cache: "no-store", redirect: "error", credentials: "omit", referrerPolicy: "no-referrer" }))
         .then(async response => response.ok ? parseLexicon(await response.json()) : undefined)
         .then(body => sendResponse(body ? { ok: true, ...body } : { ok: false, reason: "unavailable" }))
         .catch(() => sendResponse({ ok: false, reason: "network" }));

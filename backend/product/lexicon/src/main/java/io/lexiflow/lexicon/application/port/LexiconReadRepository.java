@@ -35,16 +35,16 @@ public interface LexiconReadRepository {
   List<LexiconHintCandidate> findPrewarmForms(long version, LexiconHintAction action, int limit);
 
   /**
-   * 按规范词形或别名精确匹配已发布词条，并执行稳定分页。
+   * 按规范词形或别名的字面子串匹配已发布词条，并执行稳定分页。
    *
-   * @param normalizedExactQuery 含义：规范化后的精确词形查询。取值范围：非空或空串；空串表示不筛选。
+   * @param normalizedQuery 含义：规范化后的词形子串。取值范围：非空或空串；空串表示不筛选。
    * @param frequencySort 含义：是否按频率排序。取值范围：true 表示频率优先，false 表示字母序。
    * @param page 含义：结果页码。取值范围：从 1 开始的正整数。
    * @param pageSize 含义：每页条数。取值范围：正整数。
    * @return 稳定排序的已发布词条页及分页元数据。
    */
   default LexiconBrowsePage browse(
-      String normalizedExactQuery, boolean frequencySort, int page, int pageSize) {
+      String normalizedQuery, boolean frequencySort, int page, int pageSize) {
     return new LexiconBrowsePage(List.of(), 0, page, pageSize);
   }
 
