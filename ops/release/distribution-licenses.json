@@ -32,6 +32,16 @@
       "noticeSha256": "034e2e09da2e7525d414deb1e382455154c1246064e78ad451aa70ec804ebf69"
     },
     {
+      "id": "api-container-runtime-license",
+      "component": "API-runtime",
+      "licenseId": "Apache-2.0",
+      "licenseName": "Temurin container entrypoint: original Apache license",
+      "sourceUrl": "https://github.com/adoptium/containers/blob/31f6abccc683a0a47c5c49ad6bb95a2531bc1168/LICENSE",
+      "noticePath": "licenses/temurin-container/LICENSE",
+      "noticeBytes": 11357,
+      "noticeSha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
       "id": "api-java-dependencies",
       "component": "API-runtime",
       "licenseId": "Apache-2.0 AND MIT AND BSD-2-Clause AND CC0-1.0 AND EPL-2.0",

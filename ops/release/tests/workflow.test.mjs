@@ -71,10 +71,10 @@ function boundaries(f, overrides = {}) {
     bytes: 3, sha256: sha('runtime'), imageDigest: `sha256:${sha('runtime-image')}` }];
   const runCommand = async (command, args, settings) => {
     calls.push(['command', command, args, settings]);
-    if (args.includes(':api:bootJar')) {
-      const folder = path.join(f.root, 'backend/product/api/build/internal/boot');
+    if (args.includes(':api:releaseRuntimeBootJar')) {
+      const folder = path.join(f.root, 'backend/product/api/build/release/boot');
       await mkdir(folder, { recursive: true });
-      await writeFile(path.join(folder, 'api-internal.jar'), jarBytes(overrides.jarIdentity ?? targetIdentity));
+      await writeFile(path.join(folder, 'api-release-runtime.jar'), jarBytes(overrides.jarIdentity ?? targetIdentity));
     }
     if (command === 'node' && args.includes('extension/scripts/packaging/package-extension-release.mjs')) {
       const zip = Buffer.from('real extension zip');
@@ -325,6 +325,10 @@ test('real staging bytes and exact builder/assembler contracts precede private h
   assert.equal(identityReads, 0, 'tagCheck returns the complete first-point identity; no duplicate identity reader scan');
   const stages = b.calls.filter(call => ['images', 'assemble', 'verify'].includes(call[0]));
   assert.deepEqual(stages.map(call => call[0]), ['images', 'assemble', 'verify']);
+  const gradleBuild = b.calls.find(call => call[0] === 'command' && call[1] === 'python3'
+    && call[2].includes('backend/gradlew'));
+  assert.ok(gradleBuild?.[2].includes(':api:releaseRuntimeBootJar'));
+  assert.ok(!gradleBuild?.[2].includes(':api:bootJar'));
   const images = stages[0][1], assemble = stages[1][1];
   const dockerCalls = b.calls.filter(call => call[0] === 'docker');
   assert.deepEqual(dockerCalls.map(call => call[1][0]), ['version', 'info', 'image']);

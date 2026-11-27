@@ -122,6 +122,36 @@ test('计划平台唯一取自 canonical lock，不接受 descriptor 锁副本',
   } finally { await f.cleanup(); }
 });
 
+test('Temurin 构建树只进对应源码归档，镜像必须保留原始许可', async () => {
+  const f = await fixture();
+  try {
+    const source = 'licenses/api-base-extra-licenses-and-sources.tar.gz';
+    const license = 'licenses/temurin-container/LICENSE';
+    const licenseBytes = await readFile(path.join(repo, 'ops/release/notices', license));
+    const ledger = JSON.parse(await readFile(path.join(repo, 'ops/release/distribution-licenses.json'), 'utf8'));
+    const boundLicense = ledger.licenses.find(item => item.noticePath === license);
+    assert.equal(boundLicense.licenseId, 'Apache-2.0');
+    assert.equal(boundLicense.noticeBytes, licenseBytes.length);
+    assert.equal(boundLicense.noticeSha256, hash(licenseBytes));
+    const sourceBytes = Buffer.from('synthetic corresponding source');
+    await mkdir(path.join(f.artifactRoot, path.dirname(license)), { recursive: true });
+    for (const [file, bytes] of [[source, sourceBytes], [license, licenseBytes]]) {
+      await writeFile(path.join(f.artifactRoot, file), bytes);
+    }
+    const notices = [...f.descriptor.notices,
+      { path: source, bytes: sourceBytes.length, sha256: hash(sourceBytes) }];
+    await assert.rejects(prepareImageBuild(args(f, { ...f.descriptor, notices })), { message: 'NOTICES_INVALID' });
+    notices.push({ path: license, bytes: licenseBytes.length, sha256: hash(licenseBytes) });
+    const plan = await prepareImageBuild(args(f, { ...f.descriptor, notices }));
+    assert.ok(plan.notices.some(item => item.path === source));
+    const context = plan.platforms[0].contextFiles;
+    assert.ok(!context.some(item => item.path === source));
+    assert.ok(context.some(item => item.path === license
+      && item.target === 'notices/temurin-container/LICENSE'
+      && item.sha256 === boundLicense.noticeSha256));
+  } finally { await f.cleanup(); }
+});
+
 test('生产构建参数经真实 tar 配置交给只读发布消费者，缺失标签必须拒绝', async () => {
   const f = await fixture();
   try {

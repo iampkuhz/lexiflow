@@ -11,9 +11,11 @@ import { validateRelativePath, verifyContainedFile } from '../integrity/release-
 
 const LOCK = 'ops/docker/base-images.json';
 const TEMPLATE_PATHS = ['ops/docker/Dockerfile.runtime', 'ops/docker/runtime-entrypoint.sh'];
+const CONTAINER_SOURCES = 'licenses/api-base-extra-licenses-and-sources.tar.gz';
+const CONTAINER_LICENSE = 'licenses/temurin-container/LICENSE';
 const IMAGE_NOTICE_EXCLUSIONS = new Set(['licenses/api-java-notices-and-sources.tar.gz',
   'licenses/api-base-corresponding-sources.tar.gz',
-  'licenses/OpenJDK25U-jdk-sources_25.0.4.1_1.tar.gz']);
+  'licenses/OpenJDK25U-jdk-sources_25.0.4.1_1.tar.gz', CONTAINER_SOURCES]);
 const HASH = /^[a-f0-9]{64}$/;
 const reject = (reason) => { throw new Error(reason); };
 const keys = (value, fields) => value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -116,6 +118,7 @@ export async function prepareImageBuild(input) {
       await verifyContainedFile(artifactRoot, item.path, item.bytes, item.sha256);
       notices.push({ ...item, target });
     }
+    if (seen.has(CONTAINER_SOURCES) && !seen.has(CONTAINER_LICENSE)) reject('NOTICES_INVALID');
     const templates = [];
     for (const relative of TEMPLATE_PATHS) templates.push(await trackedBytes(repoRoot, relative));
     const sql = await trackedBytes(repoRoot, 'infra/sqlite/schema.sql', 16 * 1024 * 1024);

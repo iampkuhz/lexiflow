@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,8 +23,15 @@ class TestReleaseRuntimeArtifacts(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             repo = root / "repo"
+            adapter_entry = (
+                "BOOT-INF/lib/adapters-"
+                + (Path(__file__).resolve().parents[2] / "ops/release/version.txt")
+                .read_text(encoding="ascii")
+                .strip()
+                + ".jar"
+            )
             for path in (
-                "backend/product/api/build/internal/boot",
+                "backend/product/api/build/release/boot",
                 "extension/dist",
                 "ops/release",
                 "ops/docker",
@@ -42,6 +51,47 @@ class TestReleaseRuntimeArtifacts(unittest.TestCase):
             (java / "java").write_text("", encoding="utf-8")
 
             def fake_run(argv, *, cwd, env, timeout=1800):
+                tasks = [
+                    item
+                    for item in argv
+                    if item in {":api:bootJar", ":api:releaseRuntimeBootJar"}
+                ]
+                if argv[0].endswith("backend/gradlew") and tasks:
+                    self.assertEqual(
+                        tasks, [":api:bootJar", ":api:releaseRuntimeBootJar"]
+                    )
+                    release_only = artifacts._RELEASE_ONLY_RESOURCES
+                    for task in tasks:
+                        adapter = io.BytesIO()
+                        with zipfile.ZipFile(adapter, "w") as archive:
+                            common = {
+                                "lexicon/wordnet-3.0-license.txt": b"WordNet license",
+                                "lexicon/wordnet-notice.txt": b"WordNet notice",
+                                "io/lexiflow/Adapter.class": b"class",
+                            }
+                            for name, payload in common.items():
+                                archive.writestr(name, payload)
+                            if task == ":api:bootJar":
+                                for name in release_only:
+                                    archive.writestr(name, b"offline source evidence")
+                        archive_path = (
+                            repo
+                            / "backend/product/api/build"
+                            / (
+                                "internal/boot/api-internal.jar"
+                                if task == ":api:bootJar"
+                                else "release/boot/api-release-runtime.jar"
+                            )
+                        )
+                        archive_path.parent.mkdir(parents=True, exist_ok=True)
+                        with zipfile.ZipFile(archive_path, "w") as archive:
+                            archive.writestr("META-INF/MANIFEST.MF", b"manifest")
+                            archive.writestr("BOOT-INF/classpath.idx", b"adapter index")
+                            archive.writestr("BOOT-INF/layers.idx", b"layers")
+                            archive.writestr(
+                                "BOOT-INF/classes/application.yaml", b"runtime config"
+                            )
+                            archive.writestr(adapter_entry, adapter.getvalue())
                 if argv[:3] == ["npm", "run", "build"]:
                     identity = json.loads(env["LEXIFLOW_EXPECTED_DATASET"])
                     self.assertEqual(
@@ -231,7 +281,10 @@ class TestFixedSyntheticBridge(unittest.TestCase):
             repo, scratch = root / "repo", root / "scratch"
             scratch.mkdir()
             for name, data in (
-                ("backend/product/api/build/internal/boot/api-internal.jar", b"jar"),
+                (
+                    "backend/product/api/build/release/boot/api-release-runtime.jar",
+                    b"jar",
+                ),
                 (
                     "tmp/releases/2.0.0/" + "a" * 40 + "/lexiflow-extension-2.0.0.zip",
                     b"zip",

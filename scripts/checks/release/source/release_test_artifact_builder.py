@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import re
 import subprocess
+import zipfile
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -72,6 +74,90 @@ def _read_regular(path: Path, maximum: int) -> bytes:
         raise ConsumerError("FAIL", "release-artifact-invalid") from None
 
 
+_RELEASE_ONLY_RESOURCES = {
+    "lexicon/reviewed-phrases-review.properties",
+    "lexicon/reviewed-phrases-review.md",
+    "lexicon/reviewed-pos-defaults.tsv",
+    "lexicon/reviewed-source-defaults.tsv",
+    "lexicon/reviewed-source-defaults.sha256",
+    "lexicon/reviewed-phrases.tsv",
+    "lexicon/reviewed-phrases.sha256",
+    "lexicon/wordnet-lexical-evidence.tsv",
+    "lexicon/wordnet-lexical-evidence.sha256",
+}
+
+
+def _verify_release_runtime_archives(repo: Path) -> None:
+    """Compare real dev/release archives; only offline adapter evidence may differ."""
+    development_path = repo / "backend/product/api/build/internal/boot/api-internal.jar"
+    release_path = (
+        repo / "backend/product/api/build/release/boot/api-release-runtime.jar"
+    )
+    development_bytes = _read_regular(development_path, 1024**3)
+    release_bytes = _read_regular(release_path, 1024**3)
+    try:
+        with (
+            zipfile.ZipFile(io.BytesIO(development_bytes)) as development,
+            zipfile.ZipFile(io.BytesIO(release_bytes)) as release,
+        ):
+            development_names = set(development.namelist())
+            release_names = set(release.namelist())
+            adapter_entries = {
+                name
+                for name in development_names
+                if name.startswith("BOOT-INF/lib/adapters-") and name.endswith(".jar")
+            }
+            adapter_entry = next(iter(adapter_entries), "")
+            if (
+                development_names != release_names
+                or len(adapter_entries) != 1
+                or adapter_entry not in development_names
+                or adapter_entry not in release_names
+            ):
+                raise ConsumerError("FAIL", "release-runtime-archive-layout-invalid")
+            # All outer contents except the intentionally filtered adapter JAR,
+            # including Spring indexes, identities, schemas, and all third-party
+            # nested JARs, must remain byte-for-byte identical.
+            for name in development_names - {adapter_entry}:
+                if development.read(name) != release.read(name):
+                    raise ConsumerError("FAIL", "release-runtime-archive-content-drift")
+            with (
+                zipfile.ZipFile(
+                    io.BytesIO(development.read(adapter_entry))
+                ) as dev_adapter,
+                zipfile.ZipFile(
+                    io.BytesIO(release.read(adapter_entry))
+                ) as release_adapter,
+            ):
+                dev_files = set(dev_adapter.namelist())
+                release_files = set(release_adapter.namelist())
+                if dev_files - release_files != _RELEASE_ONLY_RESOURCES:
+                    raise ConsumerError(
+                        "FAIL", "release-runtime-resource-exclusions-invalid"
+                    )
+                if release_files - dev_files:
+                    raise ConsumerError(
+                        "FAIL", "release-runtime-resource-additions-invalid"
+                    )
+                for name in release_files:
+                    if dev_adapter.read(name) != release_adapter.read(name):
+                        raise ConsumerError(
+                            "FAIL", "release-runtime-adapter-content-drift"
+                        )
+                required_notices = {
+                    "lexicon/wordnet-3.0-license.txt",
+                    "lexicon/wordnet-notice.txt",
+                }
+                if not required_notices.issubset(release_files):
+                    raise ConsumerError(
+                        "FAIL", "release-runtime-license-notice-missing"
+                    )
+    except ConsumerError:
+        raise
+    except (OSError, EOFError, zipfile.BadZipFile, RuntimeError):
+        raise ConsumerError("FAIL", "release-runtime-archive-invalid") from None
+
+
 def build_local_inputs(
     repo: Path, scratch: Path, environ: Mapping[str, str]
 ) -> dict[str, object]:
@@ -120,10 +206,17 @@ def build_local_inputs(
     os.symlink(source_modules, gradle_home / "caches/modules-2")
     os.symlink(source_wrapper, gradle_home / "wrapper/dists")
     _run(
-        [str(repo / "backend/gradlew"), "--offline", "--no-daemon", ":api:bootJar"],
+        [
+            str(repo / "backend/gradlew"),
+            "--offline",
+            "--no-daemon",
+            ":api:bootJar",
+            ":api:releaseRuntimeBootJar",
+        ],
         cwd=repo / "backend",
         env=base,
     )
+    _verify_release_runtime_archives(repo)
     _run(
         ["npm", "ci", "--offline", "--cache", str(npm_cache)],
         cwd=repo / "extension",
@@ -268,7 +361,7 @@ def produce_candidates(
     sources = (
         (
             "api.jar",
-            repo / "backend/product/api/build/internal/boot/api-internal.jar",
+            repo / "backend/product/api/build/release/boot/api-release-runtime.jar",
             1024**3,
         ),
     )
