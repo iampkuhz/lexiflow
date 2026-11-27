@@ -1,0 +1,17 @@
+Princeton WordNet 3.0 / Open Multilingual Wordnet English 2.0
+Copyright 2006 Princeton University. See the accompanying unmodified
+wordnet-3.0-license.txt for the full copyright notice, license and disclaimer.
+Source: https://github.com/omwn/omw-data/releases/tag/v2.0
+Exact archive: https://github.com/omwn/omw-data/releases/download/v2.0/omw-en-2.0.tar.xz
+Archive SHA-256: 0e09dfb7f096bc3f10b9de68ffecf13839fa22ae46fd9b227cec890d204ca1dc
+XML SHA-256: 3ab4c3e4324a6d1676cf23ea3eafdd8f858f92969bf85108d049db6b7e4539bd
+
+LexiFlow derives the English word-form, part-of-speech, sense-identity and
+count projection for offline lexical evidence. It does not copy the WordNet
+definitions or examples into the Chinese prompt database.
+Projection SHA-256: 6677c4d85e918b6152c1a635ca9973162627341c67e864989f4d12fad1f5f9c9
+LexiFlow is not endorsed by Princeton University or Open Multilingual Wordnet.
+
+References: Christiane Fellbaum (ed.), WordNet: An Electronic Lexical
+Database, MIT Press, 1998; Francis Bond and Kyonghee Paik, A Survey of
+WordNets and their Licenses, 2012. OMW: https://omwn.org/

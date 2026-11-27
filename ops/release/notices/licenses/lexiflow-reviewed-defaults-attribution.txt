@@ -1,0 +1,11 @@
+LexiFlow contributors — editorial defaults and short constructions
+https://github.com/iampkuhz/lexiflow/blob/dd3cc30bd24d08cb2e4553523e7527220d77a8ce/LICENSE
+
+Of 25 records in the reviewed-source-defaults table, 21 select existing
+ECDICT-derived wording. They remain subject to the authorization applicable
+to the underlying data; the MIT terms for LexiFlow's editorial work do not
+replace those source terms. The other four are LexiFlow short formulations.
+Cambridge and Collins pages are factual references, not sources of
+redistributed proprietary dictionary entry text, and no endorsement is implied.
+
+Table SHA-256: f627766c3b4fdeff8b16b68cead824dbb5c14a47020ad642266211a06134ea12
