@@ -1,4 +1,9 @@
 import org.gradle.api.tasks.SourceSetContainer
+import org.gradle.api.attributes.Bundling
+import org.gradle.api.attributes.Category
+import org.gradle.api.attributes.LibraryElements
+import org.gradle.api.attributes.Usage
+import org.gradle.jvm.tasks.Jar
 import org.gradle.language.jvm.tasks.ProcessResources
 
 val repoRoot = rootProject.projectDir.parentFile
@@ -16,6 +21,38 @@ dependencies {
 }
 
 val platformSourceSets = extensions.getByType<SourceSetContainer>()
+
+// A release-only outgoing artifact keeps preparation evidence available to
+// source imports and the development JAR while removing it from runtime.
+val releaseRuntimeJar = tasks.register<Jar>("releaseRuntimeJar") {
+    from(platformSourceSets["main"].output)
+    archiveFileName.set(tasks.named<Jar>("jar").flatMap { it.archiveFileName })
+    destinationDirectory.set(layout.buildDirectory.dir("release-runtime"))
+    exclude(
+        "lexicon/reviewed-phrases-review.properties",
+        "lexicon/reviewed-phrases-review.md",
+        "lexicon/reviewed-pos-defaults.tsv",
+        "lexicon/reviewed-source-defaults.tsv",
+        "lexicon/reviewed-source-defaults.sha256",
+        "lexicon/reviewed-phrases.tsv",
+        "lexicon/reviewed-phrases.sha256",
+        "lexicon/wordnet-lexical-evidence.tsv",
+        "lexicon/wordnet-lexical-evidence.sha256",
+    )
+}
+
+configurations.create("releaseRuntimeElements") {
+    isCanBeConsumed = true
+    isCanBeResolved = false
+    extendsFrom(configurations.getByName("runtimeElements"))
+    attributes {
+        attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage.JAVA_RUNTIME))
+        attribute(Category.CATEGORY_ATTRIBUTE, objects.named(Category.LIBRARY))
+        attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements.JAR))
+        attribute(Bundling.BUNDLING_ATTRIBUTE, objects.named(Bundling.EXTERNAL))
+    }
+    outgoing.artifact(releaseRuntimeJar)
+}
 
 // 源码导入入口与 API JAR 使用同一生成器，不依赖 API 才能获得身份资源。
 tasks.named<ProcessResources>("processResources") {

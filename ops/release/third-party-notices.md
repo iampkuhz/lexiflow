@@ -21,8 +21,10 @@ API Java 依赖的逐 JAR 坐标、bootJar 内 JAR 摘要、原始许可/notice/
 
 镜像中的 `api-java-runtime-notices.tar.gz` 仅保留上述集合的原始许可/notice/POM、逐运行 JAR 身份及完整来源摘要；该小归档不声称包含完整源码。完整 `api-java-notices-and-sources.tar.gz` 仍原样置于公开自包含源码归档，运行镜像无需重复携带源码体。准备 notice 根时从 `ops/release/notices/` 复制受版本控制的小型原件及该运行索引归档，并补齐核准表中的大型外部材料。
 
+Temurin 容器项目的原始 Apache-2.0 `temurin-container/LICENSE` 随镜像保留，完整 `api-base-extra-licenses-and-sources.tar.gz` 仅随公开自包含源码归档提供；其中包含与固定基础镜像对应的容器构建定义及 entrypoint 源码。
+
 ## 1.2. 源码与资料的获取
 
 同版本 GitHub Release 单独提供自包含第三方对应源码归档，原始 notice 和对应源码全部位于该归档内；使用者按 `release.json` 的源码资产摘要及归档索引核对原件。GHCR 运行镜像可独立获取，运行时不需要下载或解包大型源码附件。公开附件仍为插件 ZIP、对应源码包和 `release.json`，不新增主安装 tar 或镜像 tar。索引中的上游 URL 表示来源，不能代替已要求随包提供的实物源码。保留源码的补丁和构建配置，不限制上游授予的修改、重建、重新链接或替换权利；读取和解包不要求维护者密钥。分发依据参见 [GPLv2 原文](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)、[GPLv3 原文](https://gcc.gnu.org/onlinedocs/gcc/Copying.html)及 [EPL-2.0 原文](https://www.eclipse.org/org/documents/epl-2.0/EPL-2.0.html)。
 
-资料只采用固定 ECDICT 来源；保留原 MIT 文本及来源绑定。其维护者针对[商业使用](https://github.com/skywind3000/ECDICT/issues/43#issuecomment-484829135)与[随包离线使用](https://github.com/skywind3000/ECDICT/issues/134#issuecomment-5902723743)的公开答复作为当前核对依据，不扩展为无关资料或第三方权利保证。实际资料仍须通过原 Java 来源审批、导出和 verify，并绑定到最终候选；许可 ledger 不代替这些验证，也不授予 Formal 或公开发行资格。
+资料按实际进入发行包的来源逐项获得再分发依据、保留原始许可与署名。对 ECDICT，维护者[允许随应用离线使用](https://github.com/skywind3000/ECDICT/issues/134#issuecomment-5902723743)，但[说明逐条出处记录已不存在，不提供上游授权担保](https://github.com/skywind3000/ECDICT/issues/134#issuecomment-6791197077)；原 MIT 文本与维护者许可不能代替实际派生字段的第三方来源核查。实际资料仍须通过原 Java 来源审批、导出和 verify，并绑定到最终候选；许可 ledger 不代替这些验证，也不授予 Formal 或公开发行资格。

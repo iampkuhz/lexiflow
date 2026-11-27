@@ -414,7 +414,7 @@ export async function prepareWorkflow(requestFile, options = {}) {
     const imageParent = path.join(request.outputParent, 'images');
     const releaseParent = path.join(request.outputParent, 'releases');
     for (const folder of [artifactRoot, imageParent, releaseParent]) await mkdir(folder, { mode: 0o700 });
-    await timed('compile', () => command('python3', ['-m', 'scripts.local.run_with_java_toolchain', 'backend/gradlew', '-p', 'backend', '--no-daemon', ':api:bootJar'],
+    await timed('compile', () => command('python3', ['-m', 'scripts.local.run_with_java_toolchain', 'backend/gradlew', '-p', 'backend', '--no-daemon', ':api:releaseRuntimeBootJar'],
       { cwd: root, env, timeout: 2_400_000, logFile: path.join(quality, 'gradle.log') }));
     await timed('npm-prepare', () => command('npm', ['ci'], { cwd: path.join(root, 'extension'), env, timeout: 900_000,
       logFile: path.join(quality, 'npm-ci.log') }));
@@ -426,7 +426,7 @@ export async function prepareWorkflow(requestFile, options = {}) {
       || extension.softwareVersion !== identity.softwareVersion || extension.sourceCommit !== identity.sourceCommit
       || extension.filename !== `lexiflow-extension-${identity.softwareVersion}.zip`) fail('EXTENSION_OUTPUT_INVALID');
     assertBuildIdentityMatches(extension.buildIdentity, identity);
-    const jarSource = path.join(root, 'backend/product/api/build/internal/boot/api-internal.jar');
+    const jarSource = path.join(root, 'backend/product/api/build/release/boot/api-release-runtime.jar');
     const zipSource = path.join(root, 'tmp/releases', identity.softwareVersion, identity.sourceCommit, extension.filename);
     const jar = await fileDigest(jarSource);
     const zip = await fileDigest(zipSource);

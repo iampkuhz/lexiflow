@@ -2,6 +2,7 @@ import io.lexiflow.buildlogic.GenerateSoftwareIdentityTask
 import io.lexiflow.buildlogic.IdentityVersionArgumentProvider
 import io.lexiflow.buildlogic.ValidateBootJarIdentityAction
 import org.gradle.jvm.tasks.Jar
+import org.gradle.api.artifacts.ProjectDependency
 import org.gradle.language.jvm.tasks.ProcessResources
 import org.springframework.boot.gradle.tasks.bundling.BootJar
 
@@ -20,6 +21,20 @@ dependencies {
     "implementation"(project(":adapters"))
     "testImplementation"("org.springframework.boot:spring-boot-starter-test")
 }
+
+val releaseAdaptersDependency = dependencies.project(
+    mapOf("path" to ":adapters", "configuration" to "releaseRuntimeElements"),
+)
+val releaseRuntimeClasspath = configurations.create("releaseRuntimeClasspath") {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+configurations.getByName("implementation").dependencies
+    .filterNot { it is ProjectDependency && it.name == "adapters" }
+    .forEach { releaseRuntimeClasspath.dependencies.add(it.copy()) }
+configurations.getByName("runtimeOnly").dependencies
+    .forEach { releaseRuntimeClasspath.dependencies.add(it.copy()) }
+dependencies.add("releaseRuntimeClasspath", releaseAdaptersDependency)
 
 // 类型化身份生成任务：执行阶段调用 Node，配置阶段不触发。
 val releaseMode = providers.gradleProperty("release").map { it == "true" }.getOrElse(false)
@@ -72,6 +87,36 @@ tasks.named<BootJar>("bootJar") {
     dependsOn(generateDataGeneration)
     archiveFileName.set("api-internal.jar")
     destinationDirectory.set(layout.buildDirectory.dir("internal/boot"))
+    manifest.from(generateSoftwareIdentity.flatMap { it.manifestFile })
+    inputs.file(generatedVersionFile)
+    inputs.file(identityJsonFile)
+    doLast(ValidateBootJarIdentityAction(
+        layout.buildDirectory.dir("generated/software-identity").get().asFile.absolutePath,
+    ))
+}
+
+// The regular bootJar remains the development/import artifact. Formal release
+// consumers use a separately assembled executable archive that omits only
+// offline dataset-preparation evidence and source tables. Keep legal notices,
+// runtime configuration, generated identity, and storage contracts intact.
+tasks.register<BootJar>("releaseRuntimeBootJar") {
+    val developmentBootJar = tasks.named<BootJar>("bootJar")
+    val developmentAdaptersJar = project(":adapters").tasks.named<Jar>("jar").get().archiveFile.get().asFile
+    val releaseAdaptersJar = project(":adapters").tasks.named<Jar>("releaseRuntimeJar").flatMap { it.archiveFile }
+    dependsOn(generateSoftwareIdentity)
+    dependsOn(generateDataGeneration)
+    dependsOn(tasks.named("resolveMainClassName"))
+    archiveFileName.set("api-release-runtime.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("release/boot"))
+    setClasspath(
+        files(releaseAdaptersJar).plus(
+            developmentBootJar.get().classpath!!.filter { it != developmentAdaptersJar },
+        ),
+    )
+    mainClass.set(developmentBootJar.flatMap { it.mainClass })
+    targetJavaVersion.set(developmentBootJar.flatMap { it.targetJavaVersion })
+    includeTools.set(developmentBootJar.flatMap { it.includeTools })
+    resolvedArtifacts(releaseRuntimeClasspath.incoming.artifacts.resolvedArtifacts)
     manifest.from(generateSoftwareIdentity.flatMap { it.manifestFile })
     inputs.file(generatedVersionFile)
     inputs.file(identityJsonFile)
