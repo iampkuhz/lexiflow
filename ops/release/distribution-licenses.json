@@ -82,6 +82,56 @@
       "noticeSha256": "ae3cb7a67d9b32db32a4a7c07453a266ea21790927d76f9677bc69b4f47578de"
     },
     {
+      "id": "dataset-lexiflow-reviewed-defaults",
+      "component": "dataset",
+      "licenseId": "MIT",
+      "licenseName": "LexiFlow authored editorial defaults and attribution",
+      "sourceUrl": "https://github.com/iampkuhz/lexiflow/blob/a3433ff97407dd5f94e5b0551da04c9fca1bf357/LICENSE",
+      "noticePath": "licenses/lexiflow-reviewed-defaults-attribution.txt",
+      "noticeBytes": 688,
+      "noticeSha256": "b5ebe13a7426672a9bfbf69487d95d1c8d009a750a1f7bbc095cb73c864427bb"
+    },
+    {
+      "id": "dataset-nasa-phrase-attribution",
+      "component": "dataset",
+      "licenseId": "LicenseRef-NASA-Factual-Use",
+      "licenseName": "NASA factual reference and independent wording notice",
+      "sourceUrl": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "noticePath": "licenses/nasa-phrase-attribution.txt",
+      "noticeBytes": 492,
+      "noticeSha256": "8a6d7aab3018be3bda7c36aa5a4d257c382c8c6473670833e7cee60b50f1a47c"
+    },
+    {
+      "id": "dataset-nci-phrase-attribution",
+      "component": "dataset",
+      "licenseId": "LicenseRef-NCI-Text-Reuse",
+      "licenseName": "National Cancer Institute text reuse and source attribution",
+      "sourceUrl": "https://www.cancer.gov/policies/copyright-reuse",
+      "noticePath": "licenses/nci-phrase-attribution.txt",
+      "noticeBytes": 1437,
+      "noticeSha256": "cb339ecfb79d81284987981b5929d4463e41699e379ac5d1f5c5863aac07a197"
+    },
+    {
+      "id": "dataset-wordnet-license",
+      "component": "dataset",
+      "licenseId": "LicenseRef-WordNet-3.0",
+      "licenseName": "Princeton WordNet 3.0 original license and disclaimer",
+      "sourceUrl": "https://wordnet.princeton.edu/license-and-commercial-use",
+      "noticePath": "licenses/wordnet-3.0-license.txt",
+      "noticeBytes": 1625,
+      "noticeSha256": "7731175a77952e259390b496fab905e57118b8d19ad3a8383c67eee724ff443f"
+    },
+    {
+      "id": "dataset-wordnet-source-attribution",
+      "component": "dataset",
+      "licenseId": "LicenseRef-WordNet-3.0",
+      "licenseName": "Exact OMW English 2.0 WordNet source and derivative attribution",
+      "sourceUrl": "https://github.com/omwn/omw-data/releases/tag/v2.0",
+      "noticePath": "licenses/wordnet-source-attribution.txt",
+      "noticeBytes": 1092,
+      "noticeSha256": "2b996f0904a87bea7d3ccccf9ef0ae5a3d784b8c09fea3fa520345f3f3c6319f"
+    },
+    {
       "id": "extension-runtime-notice",
       "component": "extension-third-party",
       "licenseId": "MIT",

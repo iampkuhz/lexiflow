@@ -1,0 +1,21 @@
+National Cancer Institute (NCI), National Institutes of Health.
+The six Chinese short glosses are authored by LexiFlow and use the following
+sources for factual verification; they are not official NCI translations.
+The National Cancer Institute (NCI) does not endorse this translation and no endorsement by NCI should be inferred.
+Reuse policy: https://www.cancer.gov/policies/copyright-reuse
+
+neural tissue — NCI Dictionary of Cancer Terms, “neural” and “tissue”:
+https://www.cancer.gov/publications/dictionaries/cancer-terms/def/neural
+https://www.cancer.gov/publications/dictionaries/cancer-terms/def/tissue
+fatty tissue — NCI Dictionary of Cancer Terms, “fatty breast tissue”;
+NCI SEER Training Modules, “Connective Tissue”:
+https://www.cancer.gov/publications/dictionaries/cancer-terms/def/fatty-breast-tissue
+https://training.seer.cancer.gov/anatomy/cells_tissues_membranes/tissues/connective.html
+nerve cell — NCI Dictionary of Cancer Terms, “nerve cell”:
+https://www.cancer.gov/publications/dictionaries/cancer-terms/def/nerve-cell
+spinal cord — NCI Dictionary of Cancer Terms, “spinal cord”:
+https://www.cancer.gov/publications/dictionaries/cancer-terms/def/spinal-cord
+nerve fiber and fatty substance — NCI SEER Training Modules, “Nerve Tissue”:
+https://training.seer.cancer.gov/anatomy/nervous/tissue.html
+
+No NCI logos, trademarks, images, examples or original definitions are included.
