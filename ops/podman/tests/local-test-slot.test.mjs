@@ -120,7 +120,7 @@ test('fresh slot creates only owned volumes; changing publication changes only t
 
 const artifactRecord = { role: 'lexiflow-local-test', imageId: 'sha256:' + nextId,
   tag: 'localhost/lexiflow-test:' + 'a'.repeat(64) + '-000000000000', imageSha256: 'a'.repeat(64),
-  extensionSha256: candidate.extensionSha256, apiContract: 'caption-hints.v4' };
+  extensionSha256: candidate.extensionSha256, apiContract: 'caption-hints.v5' };
 
 test('one physical Chrome directory is stable across builds; stale plans are not carried forward', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'lexiflow-test-publish-'));

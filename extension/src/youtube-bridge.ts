@@ -1,9 +1,12 @@
+import { installYouTubeVideoTitleSource } from "./youtube-video-title";
+
 /** MAIN-world 被动采集 JSON3 字幕；不主动请求、不上传预加载文字，不触及 SABR 二进制。 */
 (() => {
   const key = Symbol.for("lexiflow.nativeCaptionBridge");
   const main = window as Window & { [key]?: boolean };
   if (main[key]) return;
   main[key] = true;
+  installYouTubeVideoTitleSource();
   const cache = new Map<string, unknown>();
   const emit = (track: unknown): void => window.postMessage({ type: "lexiflow-native-captions", track }, location.origin);
   const ingest = (urlText: string, body: unknown): void => {

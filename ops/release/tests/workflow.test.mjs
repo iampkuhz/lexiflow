@@ -347,7 +347,7 @@ test('real staging bytes and exact builder/assembler contracts precede private h
   assert.deepEqual(assemble.descriptor.artifacts.filter(a => a.role === 'runtime-image'), [
     { role: 'runtime-image', platform: 'linux/arm64', licenseIds: ['license-0', 'license-1', 'license-2'] },
   ]);
-  assert.equal(assemble.descriptor.apiContract, 'caption-hints.v4');
+  assert.equal(assemble.descriptor.apiContract, 'caption-hints.v5');
   assert.deepEqual(assemble.descriptor.dataset, { releaseId: 'r1', preparationId: 'p1', ruleId: 'rule1' });
   assert.deepEqual(assemble.descriptor.artifacts.filter(a => a.role === 'license').map(a => a.path), ['notice.txt']);
   assert.deepEqual(await readFile(path.join(images.artifactRoot, 'api.jar')), expectedJar);

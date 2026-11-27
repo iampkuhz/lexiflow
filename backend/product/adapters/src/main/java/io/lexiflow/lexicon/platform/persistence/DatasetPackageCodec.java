@@ -639,11 +639,13 @@ public final class DatasetPackageCodec {
     var packed = object(rowValue, Set.copyOf(table.packageColumns()));
     if (!List.copyOf(packed.keySet()).equals(table.packageColumns())) throw new IOException(BAD);
     var row = new java.util.LinkedHashMap<String, Object>();
-    for (String column : table.columns()) row.put(column, packed.get(DatasetPackageTables.packageName(table.name(), column)));
+    for (String column : table.columns())
+      row.put(column, packed.get(DatasetPackageTables.packageName(table.name(), column)));
     for (String column : table.columns()) {
       Object value = row.get(column);
       if (value == null) {
-        if (!Set.of("gloss", "frequency_rank", "bnc_rank").contains(column)) throw new IOException(BAD);
+        if (!Set.of("gloss", "frequency_rank", "bnc_rank").contains(column))
+          throw new IOException(BAD);
         continue;
       }
       String type = DatasetPackageTables.TYPES.get(column);

@@ -11,8 +11,8 @@ import { nextRecord } from '../../scripts/contracts/version-contract.mjs';
 test('only the two canonical version records are accepted within the byte budget', () => {
   const lock = readLock();
   assert.deepEqual(parseLock(encodeLock(lock)), lock);
-  for (const bad of [encodeLock(lock).repeat(100), encodeLock(lock).replace('"version": 4', '"version": 0'),
-    encodeLock(lock).replace('"version": 4', '"version": 4, "version": 4'),
+  for (const bad of [encodeLock(lock).repeat(100), encodeLock(lock).replace(/"version": \d+/u, '"version": 0'),
+    encodeLock(lock).replace(/"version": \d+/u, '"version": 4, "version": 4'),
     encodeLock(lock).replace('"sqlite-storage"', '"unknown"')])
     assert.throws(() => parseLock(bad));
 });
@@ -43,7 +43,7 @@ test('projection separates layout, advisory open replies, strict fields, and dec
   const api = 'backend/product/api/src/main/java/io/lexiflow/api/';
   await changed('extension/src/manage.html','LexiFlow','LexiFlow UI',result=>assert.deepEqual(result,baseline));
   await changed('extension/src/backend-target.ts','18080','18081',result=>assert.deepEqual(result,baseline));
-  await changed(api+'lexicon/LexiconBrowseController.java','long total, int page, int pageSize)',
+  await changed(api+'preferences/LexiconBrowseController.java','long total, int page, int pageSize)',
     'long total, int page, int pageSize, @WireAdvisory String label)',result=>assert.deepEqual(result,baseline));
   await changed(api+'runtime/RuntimeStatus.java','PublishedDataset publishedDataset)',
     'PublishedDataset publishedDataset, String label)',result=>assert.notDeepEqual(result,baseline));

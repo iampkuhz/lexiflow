@@ -19,7 +19,9 @@ class AnnotationHintTest {
 
   @Test
   void acceptsLargestPositiveLongWithoutNumberPrecisionLoss() {
-    var hint = new AnnotationHint(0, 8, Long.toString(Long.MAX_VALUE), SENSE_ID, 1, "可靠的", "reliable", null);
+    var hint =
+        new AnnotationHint(
+            0, 8, Long.toString(Long.MAX_VALUE), SENSE_ID, 1, "可靠的", "reliable", null);
     assertEquals("9223372036854775807", hint.lexiconEntryId());
   }
 
@@ -36,10 +38,13 @@ class AnnotationHintTest {
     }
     assertThrows(
         IllegalArgumentException.class,
-        () -> new AnnotationHint(0, 8, ENTRY_ID, SENSE_ID.toUpperCase(), 1, "可靠的", "reliable", null));
+        () ->
+            new AnnotationHint(0, 8, ENTRY_ID, SENSE_ID.toUpperCase(), 1, "可靠的", "reliable", null));
     assertThrows(
-        NullPointerException.class, () -> new AnnotationHint(0, 8, null, SENSE_ID, 1, "可靠的", "reliable", null));
+        NullPointerException.class,
+        () -> new AnnotationHint(0, 8, null, SENSE_ID, 1, "可靠的", "reliable", null));
     assertThrows(
-        NullPointerException.class, () -> new AnnotationHint(0, 8, ENTRY_ID, null, 1, "可靠的", "reliable", null));
+        NullPointerException.class,
+        () -> new AnnotationHint(0, 8, ENTRY_ID, null, 1, "可靠的", "reliable", null));
   }
 }

@@ -1,17 +1,18 @@
-import { isEntryId } from "./protocol";
+import { isEntryId, isFrequencyRank } from "./protocol";
 
-export type HiddenPreference = { entryId: string; lemma: string; gloss: string };
+export type HiddenPreference = { entryId: string; lemma: string; gloss: string; frequencyRank: number | null };
 export type Preferences = { commonWordCutoff: 1000 | 1500 | 2000; hidden: HiddenPreference[] };
 export type PreferenceAction = "read" | "setCutoff" | "hide" | "restore";
 export type PreferenceResult = ({ ok: true } & Preferences) | { ok: false; reason: string };
-export type RecentItem = HiddenPreference & { count: number; frequencyRank: number | null };
+export type RecentItem = HiddenPreference & { count: number };
 export const isCutoff = (value: unknown): value is Preferences["commonWordCutoff"] =>
   value === 1000 || value === 1500 || value === 2000;
 export function isHiddenPreference(value: unknown): value is HiddenPreference {
   if (!value || typeof value !== "object") return false;
   const item = value as HiddenPreference;
   return isEntryId(item.entryId) && typeof item.lemma === "string" && item.lemma.length > 0 && item.lemma.length <= 128 &&
-    typeof item.gloss === "string" && item.gloss.length > 0 && item.gloss.length <= 24;
+    typeof item.gloss === "string" && item.gloss.length > 0 && item.gloss.length <= 24 &&
+    isFrequencyRank(item.frequencyRank);
 }
 export function parsePreferences(value: unknown): Preferences | undefined {
   if (!value || typeof value !== "object") return;

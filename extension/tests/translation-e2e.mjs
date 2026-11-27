@@ -305,13 +305,13 @@ try {
     await vocabularyPopup.click("#open-manage");
     vocabularyPage = await opened;
     await vocabularyPage.locator("#current-video-tab").click();
-    const row = vocabularyPage.locator("#current-video-list .current-word").filter({hasText:"reliable"});
+    const row = vocabularyPage.locator("#current-video-list .hint-card").filter({has:vocabularyPage.getByText("reliable", {exact:true})});
     await row.waitFor();
-    const countBeforeRedraw = await row.locator(".current-count").textContent();
-    assert.match(countBeforeRedraw, /^提示 [1-9]\d* 次$/u);
+    const countBeforeRedraw = await row.locator(".hint-count").textContent();
+    assert.match(countBeforeRedraw, /^[1-9]\d* 次$/u);
     await page.evaluate(() => dispatchEvent(new Event("resize")));
     await vocabularyPage.locator("#refresh-current-video").click();
-    assert.equal(await row.locator(".current-count").textContent(), countBeforeRedraw);
+    assert.equal(await row.locator(".hint-count").textContent(), countBeforeRedraw);
     await vocabularyPage.screenshot({path:resolve(evidenceRoot,"manage-current-video.png")});
   } finally { await vocabularyPage?.close(); await vocabularyPopup.close(); await page.bringToFront(); }
   // When YouTube opens before localhost preferences are reachable, English renders first.

@@ -10,7 +10,7 @@ const http = [
   ['hints/CaptionHintController.java', '/api/v1/caption-hints', 'PostMapping'],
   ['preferences/PreferencesController.java', '/api/v1/preferences', 'PostMapping'],
   ['preferences/RecentHintsController.java', '/api/v1/recent-hints', 'PostMapping'],
-  ['lexicon/LexiconBrowseController.java', '/api/v1/lexicon', 'GetMapping'],
+  ['preferences/LexiconBrowseController.java', '/api/v1/lexicon', 'PostMapping'],
 ];
 const javaModels = [
   java + 'runtime/RuntimeStatus.java', java + 'hints/model/CaptionHintRequest.java',
@@ -45,7 +45,7 @@ function close(tokens, from) {
 }
 
 // Only these reply records have an already-tolerant receiver. Request and status DTOs are closed.
-const openReplies = new Set(['lexicon/LexiconBrowseController.java:Item', 'lexicon/LexiconBrowseController.java:Response',
+const openReplies = new Set(['preferences/LexiconBrowseController.java:Item', 'preferences/LexiconBrowseController.java:Response',
   'preferences/RecentHintsController.java:Item', 'preferences/RecentHintsController.java:Result']);
 function recordFields(tokens, row) {
   const end = close(tokens, row + 2), fields = [];

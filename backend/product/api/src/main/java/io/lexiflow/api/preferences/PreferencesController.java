@@ -1,6 +1,10 @@
 package io.lexiflow.api.preferences;
 
+import io.lexiflow.api.runtime.LexiconNotReadyException;
+import io.lexiflow.api.runtime.LexiconRuntime;
 import io.lexiflow.enrichment.application.preferences.LocalPreferences;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
@@ -12,9 +16,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
-import io.lexiflow.api.runtime.LexiconRuntime;
 
-/** 暴露仅供指定本机 Chrome 扩展使用的显式偏好接口。 请求必须来自固定扩展 Origin，并携带精确的 JSON action 字段。 */
+/** 暴露仅供指定本机 Chrome 扩展使用的显式偏好接口。 请求必须来自固定扩展 Origin，并携带与操作相符的精确 JSON 字段。 */
 @RestController
 @RequestMapping("/api/v1/preferences")
 public final class PreferencesController {
@@ -37,7 +40,8 @@ public final class PreferencesController {
    * @param preferences 含义：可选的本机偏好服务。取值范围：存在时为已装配服务，否则为空。
    */
   @org.springframework.beans.factory.annotation.Autowired
-  public PreferencesController(java.util.Optional<LocalPreferences> preferences,
+  public PreferencesController(
+      java.util.Optional<LocalPreferences> preferences,
       java.util.Optional<LexiconRuntime> lexicon) {
     this.preferences = preferences;
     this.lexicon = lexicon;
@@ -53,7 +57,7 @@ public final class PreferencesController {
   @PostMapping(
       consumes = MediaType.APPLICATION_JSON_VALUE,
       produces = MediaType.APPLICATION_JSON_VALUE)
-  public ResponseEntity<LocalPreferences.State> post(
+  public ResponseEntity<Result> post(
       @RequestHeader(value = "Origin", required = false) String origin,
       @RequestBody Map<String, Object> body) {
     if (!ExtensionOrigins.allowed(origin)) throw new ResponseStatusException(HttpStatus.FORBIDDEN);
@@ -80,10 +84,15 @@ public final class PreferencesController {
               requireKeys(body, "action", "entryId");
               String id = string(body, "entryId");
               long numericId = positiveId(id);
-              var entry = lexicon.orElseThrow(
-                  () -> new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE))
-                  .displayableByIds(java.util.List.of(numericId)).stream().findFirst()
-                  .orElseThrow(() -> new IllegalArgumentException("entryId is not displayable"));
+              var entry =
+                  lexicon
+                      .orElseThrow(
+                          () -> new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE))
+                      .displayableByIds(java.util.List.of(numericId))
+                      .stream()
+                      .findFirst()
+                      .orElseThrow(
+                          () -> new IllegalArgumentException("entryId is not displayable"));
               yield service.hide(id, entry.lemma(), entry.gloss());
             }
             case "restore" -> {
@@ -92,11 +101,51 @@ public final class PreferencesController {
             }
             default -> throw new IllegalArgumentException("unsupported action");
           };
-      return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(result);
+      return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(project(result));
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
     }
   }
+
+  private Result project(LocalPreferences.State state) {
+    var ranks = new HashMap<String, Long>();
+    if (!state.hidden().isEmpty() && lexicon.isPresent()) {
+      var ids = state.hidden().stream().map(item -> Long.parseLong(item.entryId())).toList();
+      try {
+        for (var item : lexicon.orElseThrow().displayableByIds(ids)) {
+          ranks.put(Long.toString(item.entryId()), item.displayFrequencyRank());
+        }
+      } catch (LexiconNotReadyException ignored) {
+        // 未就绪时保留用户原有偏好和恢复入口；不猜测名次。
+      }
+    }
+    return new Result(
+        state.commonWordCutoff(),
+        state.hidden().stream()
+            .map(
+                item ->
+                    new HiddenItem(
+                        item.entryId(), item.lemma(), item.gloss(), ranks.get(item.entryId())))
+            .toList());
+  }
+
+  /**
+   * 返回当前偏好和只读词库展示投影。 名次仅从当前可用词库读取；词库未就绪时保留偏好但不猜测名次。
+   *
+   * @param commonWordCutoff 含义：常见单词过滤截止排名。取值范围：应用偏好允许的整数值。
+   * @param hidden 含义：用户显式隐藏的词条投影。取值范围：不可变列表，词库名次可空。
+   */
+  public record Result(int commonWordCutoff, List<HiddenItem> hidden) {}
+
+  /**
+   * 已停止提示的稳定词条及其可选词库展示名次。 词条文本来自隐藏操作时的词库投影，名次可以因词库未就绪而为空。
+   *
+   * @param entryId 含义：被隐藏词条的稳定身份。取值范围：正 long 的十进制字符串。
+   * @param lemma 含义：被隐藏词条的规范主词形。取值范围：非空字符串。
+   * @param gloss 含义：隐藏时记录的词条短释。取值范围：非空字符串。
+   * @param frequencyRank 含义：只读词库展示名次。取值范围：可空；存在时为正 long。
+   */
+  public record HiddenItem(String entryId, String lemma, String gloss, Long frequencyRank) {}
 
   private static String string(Map<String, Object> b, String k) {
     Object v = b.get(k);
@@ -110,7 +159,7 @@ public final class PreferencesController {
       if (id < 1 || !Long.toString(id).equals(value)) throw new NumberFormatException();
       return id;
     } catch (NumberFormatException invalid) {
-      throw new IllegalArgumentException("entryId must be a positive decimal integer");
+      throw new IllegalArgumentException("entryId must be a positive decimal integer", invalid);
     }
   }
 

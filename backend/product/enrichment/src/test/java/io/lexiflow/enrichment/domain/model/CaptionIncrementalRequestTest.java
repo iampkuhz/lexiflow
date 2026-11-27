@@ -30,7 +30,8 @@ class CaptionIncrementalRequestTest {
         () -> new CaptionIncrementalRequest(List.of(previous, previous), snapshot()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CaptionIncrementalRequest(List.of(previous), snapshot(segment("b", "word")), 1000));
+        () ->
+            new CaptionIncrementalRequest(List.of(previous), snapshot(segment("b", "word")), 1000));
     var longPrevious = new CaptionIncrementalRequest.PreviousSegment("b", "x".repeat(497));
     assertThrows(
         IllegalArgumentException.class,
@@ -48,7 +49,8 @@ class CaptionIncrementalRequestTest {
         () ->
             new CaptionIncrementalRequest(
                 List.of(new CaptionIncrementalRequest.PreviousSegment("a", "\uDC00")),
-                snapshot(segment("a", "word")), 1500));
+                snapshot(segment("a", "word")),
+                1500));
     assertEquals(2, segment("a", "😀").text().length());
   }
 

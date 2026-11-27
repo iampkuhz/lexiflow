@@ -109,7 +109,7 @@ function createChrome(behaviour = {}) {
       if (message.type === "backend-connection") return behaviour.apply?.(message);
       if (message.type === "runtime-status") {
         if (behaviour.statusReject) return Promise.reject(new Error("status unavailable"));
-        return Promise.resolve(behaviour.statusResponse ?? {ok:true,status:{softwareVersion:"1.2.3",apiContract:"caption-hints.v4",mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null,publishedDataset:null}});
+        return Promise.resolve(behaviour.statusResponse ?? {ok:true,status:{softwareVersion:"1.2.3",apiContract:"caption-hints.v5",mode:"demo",ready:false,reason:"DEMO_MODE",datasetVersion:null,publishedDataset:null}});
       }
       return behaviour.preferenceResponse !== undefined ? Promise.resolve(behaviour.preferenceResponse) : Promise.resolve({ ok: true, commonWordCutoff: 1500, hiddenCount: 2 });
     } },
@@ -401,7 +401,7 @@ test('service status renders formal readiness, degraded warmup, demo, missing da
   [{mode:'formal',ready:false,reason:'SCHEMA_MISMATCH',datasetVersion:null,publishedDataset:null},'资料结构不匹配，请使用匹配的服务与资料。',false]
  ];
  for(const [state,expected] of cases){
-  const value={softwareVersion:'1.2.3',apiContract:'caption-hints.v4',...state};
+  const value={softwareVersion:'1.2.3',apiContract:'caption-hints.v5',...state};
   const {doc}=freshSetup({statusResponse:{ok:true,status:value}});await flush();
   assert.equal(doc.getElementById('service-status').textContent,expected);
 
@@ -418,7 +418,7 @@ test('protocol mismatch and unreachable states are fixed safe messages and hide 
 });
 
 test('server-reported publication and schema failures remain visible',async()=>{
- const base={softwareVersion:'1.2.4',apiContract:'caption-hints.v4',mode:'formal',ready:false,datasetVersion:null,publishedDataset:null};
+ const base={softwareVersion:'1.2.4',apiContract:'caption-hints.v5',mode:'formal',ready:false,datasetVersion:null,publishedDataset:null};
  const identity=freshSetup({statusResponse:{ok:true,status:{...base,reason:'IDENTITY_MISMATCH'}}});await flush();
  assert.match(identity.doc.getElementById('service-status').textContent,/服务发行资料身份校验失败/u);
  const invalid=freshSetup({statusResponse:{ok:false,reason:'invalid-response'}});await flush();
@@ -469,7 +469,7 @@ test('packaged popup includes no default hidden features or disclosure controls'
    ["enhance-toggle","caption-line-limit"]);
 });
 test('healthy service connection is one line and normal page state is conveyed by the switch',async()=>{
- const status={softwareVersion:'1.2.3',apiContract:'caption-hints.v4',mode:'formal',ready:true,reason:'OK',datasetVersion:7,publishedDataset:{releaseId:'r',preparationId:'p',ruleId:'rules',sqlVersion:'4',sha256:'a'.repeat(64)}};
+ const status={softwareVersion:'1.2.3',apiContract:'caption-hints.v5',mode:'formal',ready:true,reason:'OK',datasetVersion:7,publishedDataset:{releaseId:'r',preparationId:'p',ruleId:'rules',sqlVersion:'4',sha256:'a'.repeat(64)}};
  for(const enabled of [true,false]){
   const {doc}=freshSetup({statusResponse:{ok:true,status},readResponse:{ok:true,enabled,pageKey:'p'}});await flush();
   assert.match(doc.getElementById('backend-target').textContent,/^● 已连接 127\.0\.0\.1:\d+$/u);

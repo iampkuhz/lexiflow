@@ -1,6 +1,6 @@
 import { bounded } from "./message-deadline";
 import { createHintCard } from "./manage-hint-card";
-import { isYouTubeVideoId, type VideoContext } from "./manage-context";
+import { isYouTubeVideoId, normalizeVideoTitle, type VideoContext } from "./manage-context";
 import { isVocabularyRow, type VocabularyRow } from "./hint-vocabulary";
 
 /** A management tab reads one acknowledged video session, never another active tab. */
@@ -11,15 +11,17 @@ export function attachCurrentVideo(context: VideoContext | undefined): (active: 
   const source = document.querySelector<HTMLElement>("#current-video-source")!;
   const link = document.querySelector<HTMLAnchorElement>("#current-video-link")!;
   let generation = 0, timer: number | undefined, active = false, expiry = false, rendered = JSON.stringify([]);
-  const show = (message: string, rows: VocabularyRow[] = [], videoId?: string): void => {
+  const show = (message: string, rows: VocabularyRow[] = [], videoId?: string, title?: string): void => {
     if (status.textContent !== message) status.textContent = message;
     const address = videoId ? `youtube.com/watch?v=${videoId}` : "";
-    if (link.textContent !== address) {
-      source.hidden = !address;
-      if (address) link.href = `https://www.${address}`;
+    source.hidden = !address;
+    const href = address ? `https://www.${address}` : null;
+    if (link.getAttribute("href") !== href) {
+      if (href) link.href = href;
       else link.removeAttribute("href");
-      link.textContent = address;
     }
+    const label = title ?? address;
+    if (link.textContent !== label) link.textContent = label;
     const next = JSON.stringify(rows);
     if (rendered === next) return;
     rendered = next;
@@ -44,13 +46,13 @@ export function attachCurrentVideo(context: VideoContext | undefined): (active: 
     const id = ++generation;
     try {
       const reply = await bounded(chrome.tabs.sendMessage(context.tabId, { type: "page-vocabulary", pageKey: context.pageKey })) as
-        { ok?: boolean; pageKey?: string; videoId?: unknown; rows?: unknown } | undefined;
+        { ok?: boolean; pageKey?: string; videoId?: unknown; title?: unknown; rows?: unknown } | undefined;
       if (id !== generation) return;
       if (!reply?.ok || reply.pageKey !== context.pageKey || !isYouTubeVideoId(reply.videoId) ||
           !Array.isArray(reply.rows) || !reply.rows.every(isVocabularyRow)) {
         expire(); return;
       }
-      show(reply.rows.length ? "" : "这个视频还没有词汇提示。", reply.rows, reply.videoId);
+      show(reply.rows.length ? "" : "这个视频还没有词汇提示。", reply.rows, reply.videoId, normalizeVideoTitle(reply.title));
     } catch { if (id === generation) show("无法读取原视频，请刷新或从视频页重新打开管理页。"); }
     finally {
       if (id === generation && active && !expiry && !document.hidden) timer = window.setTimeout(() => void read(), 2000);

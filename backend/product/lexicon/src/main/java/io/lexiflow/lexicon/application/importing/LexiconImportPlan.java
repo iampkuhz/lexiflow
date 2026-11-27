@@ -18,7 +18,15 @@ import java.util.List;
 public final class LexiconImportPlan {
   private LexiconImportPlan() {}
 
-  /** 在同一行序列上执行全量规范表面校验并准备发布记录。 */
+  /**
+   * 在同一行序列上执行全量规范表面校验并准备发布记录。 返回顺序与输入顺序一致，任何 canonical 表面冲突都会使整个调用失败。
+   *
+   * @param rows 含义：已解析的词库来源行。取值范围：按导入顺序排列的列表。
+   * @param version 含义：目标词库发布版本。取值范围：正 long。
+   * @param sourceDigest 含义：整个来源文件摘要。取值范围：非空摘要字符串。
+   * @param acquiredAt 含义：来源获取时刻。取值范围：非空时间点。
+   * @return 与输入顺序一致的已验证发布计划
+   */
   public static List<PlannedEntry> prepare(
       List<LexiconImportRow> rows, long version, String sourceDigest, Instant acquiredAt) {
     var surfaces = canonicalSurfaceValidator();

@@ -16,7 +16,8 @@ public final class PreferencesNoStoreFilter extends OncePerRequestFilter {
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
     return !"/api/v1/preferences".equals(request.getRequestURI())
-        && !"/api/v1/recent-hints".equals(request.getRequestURI());
+        && !"/api/v1/recent-hints".equals(request.getRequestURI())
+        && !"/api/v1/lexicon".equals(request.getRequestURI());
   }
 
   /** 为偏好请求校验来源、设置缓存头并处理预检。 */

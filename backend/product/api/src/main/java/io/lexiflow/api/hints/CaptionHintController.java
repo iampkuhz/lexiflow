@@ -20,7 +20,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /** 为当前可见新增字幕提供不阻塞的词段级中文提示。 */
-@WireSemantics("segment-offset:utf16-code-unit;previous-same-key:suffix-only;processed-keys:current-append-order")
+@WireSemantics(
+    "segment-offset:utf16-code-unit;previous-same-key:suffix-only;processed-keys:current-append-order")
 @RestController
 @RequestMapping("/api/v1/caption-hints")
 public final class CaptionHintController {
@@ -35,9 +36,20 @@ public final class CaptionHintController {
     this(useCase, analysisLog, events, Optional.empty());
   }
 
+  /**
+   * 装配字幕提示用例、记录适配器和本机显式偏好。
+   *
+   * @param useCase 含义：确定性字幕提示用例。取值范围：非空。
+   * @param analysisLog 含义：字幕分析记录适配器。取值范围：非空。
+   * @param events 含义：结构化事件记录器。取值范围：非空。
+   * @param preferences 含义：本机显式偏好服务。取值范围：非空 Optional，无服务时使用默认截止值。
+   */
   @org.springframework.beans.factory.annotation.Autowired
-  public CaptionHintController(EnrichCaptionUseCase useCase, SegmentAnalysisLog analysisLog,
-      StructuredEventLogger events, Optional<LocalPreferences> preferences) {
+  public CaptionHintController(
+      EnrichCaptionUseCase useCase,
+      SegmentAnalysisLog analysisLog,
+      StructuredEventLogger events,
+      Optional<LocalPreferences> preferences) {
     this.useCase = Objects.requireNonNull(useCase, "useCase");
     this.analysisLog = Objects.requireNonNull(analysisLog, "analysisLog");
     this.events = Objects.requireNonNull(events, "events");
@@ -56,7 +68,8 @@ public final class CaptionHintController {
       @RequestBody CaptionHintRequest request, HttpServletRequest servletRequest) {
     var observation = observation(servletRequest);
     long validationStarted = System.nanoTime();
-    var conversion = toDomain(request, preferences.map(p -> p.read().commonWordCutoff()).orElse(1500));
+    var conversion =
+        toDomain(request, preferences.map(p -> p.read().commonWordCutoff()).orElse(1500));
     observation.validation(System.nanoTime() - validationStarted);
     if (conversion.isEmpty()) {
       observation.reason(StructuredEvent.Reason.INVALID_REQUEST);
@@ -77,7 +90,8 @@ public final class CaptionHintController {
         new CaptionHintResponse(
             result.processedKeys(),
             measured.diagnostics().publishedVersion().isPresent()
-                ? measured.diagnostics().publishedVersion().getAsLong() : null,
+                ? measured.diagnostics().publishedVersion().getAsLong()
+                : null,
             result.hints().stream()
                 .map(
                     hint ->

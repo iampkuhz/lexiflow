@@ -165,7 +165,8 @@ class PreparationPipelineTest {
         assertNull(HintPreparation.prepare(reviewed).exclusionReason(), source);
         var unsafe =
             rowWithSource(lemma, "原始释义", "不…安全", false, allBasic, true, null, 0, List.of(), source);
-        assertEquals("unsafe_default_candidate", HintPreparation.prepare(unsafe).exclusionReason(), source);
+        assertEquals(
+            "unsafe_default_candidate", HintPreparation.prepare(unsafe).exclusionReason(), source);
         var unmarked =
             rowWithSource(
                 lemma, "原始释义", "受核短释", false, allBasic, false, null, 0, List.of(), source);
@@ -188,7 +189,9 @@ class PreparationPipelineTest {
           rowWithSource(
               "the majority", "原始释义", "指定短释", false, false, true, null, 0, List.of(), source);
       assertEquals(
-          "low_information_phrase", HintPreparation.prepare(lowInformation).exclusionReason(), source);
+          "low_information_phrase",
+          HintPreparation.prepare(lowInformation).exclusionReason(),
+          source);
       var allBasic =
           rowWithSource(
               "stream of data", "原始释义", "指定短释", false, true, true, null, 0, List.of(), source);

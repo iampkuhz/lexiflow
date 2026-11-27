@@ -31,7 +31,7 @@ class SqliteLexiconRepositoryIntegrationTest {
   @TempDir Path temporary;
 
   @Test
-  void browseUsesExactAliasesStableFrequencySortAndPagination() throws Exception {
+  void browseMatchesLiteralSubstringsAcrossAliasesAndPagesUniqueEntries() throws Exception {
     Path file = SqliteTestSupport.newDatabase(temporary);
     SqliteTestSupport.initialize(file);
     var source =
@@ -42,7 +42,7 @@ class SqliteLexiconRepositoryIntegrationTest {
             "alpha",
             "甲",
             "definition",
-            List.of("first"),
+            List.of("first", "alphanumeric"),
             List.of(),
             new io.lexiflow.lexicon.domain.model.LexiconPriority(5.0, 1, 900),
             source,
@@ -91,6 +91,20 @@ class SqliteLexiconRepositoryIntegrationTest {
       assertEquals(3, first.total());
       assertEquals(1, repository.browse("", true, 2, 2).items().size());
       assertEquals("beta", repository.browse("second", false, 1, 20).items().getFirst().lemma());
+      assertEquals("beta", repository.browse("econ", false, 1, 20).items().getFirst().lemma());
+      assertEquals(1, repository.browse("alpha", false, 1, 20).total());
+      for (var sort : List.of(true, false)) {
+        var matched = repository.browse("a", sort, 1, 2);
+        assertEquals(
+            List.of("alpha", "beta"), matched.items().stream().map(v -> v.lemma()).toList());
+        assertEquals(3, matched.total());
+        assertEquals("gamma", repository.browse("a", sort, 2, 2).items().getFirst().lemma());
+        var beyond = repository.browse("a", sort, 3, 2);
+        assertTrue(beyond.items().isEmpty());
+        assertEquals(3, beyond.total());
+      }
+      assertEquals(0, repository.browse("%", true, 1, 20).total());
+      assertEquals(0, repository.browse("_", false, 1, 20).total());
       assertNull(repository.browse("beta", true, 1, 20).items().getFirst().frequencyRank());
       assertEquals(0, repository.browse("not-present", true, 1, 20).total());
       assertEquals(
@@ -109,6 +123,66 @@ class SqliteLexiconRepositoryIntegrationTest {
       assertNull(displayable.getLast().frequencyRank());
       assertEquals(2L, displayable.getFirst().displayFrequencyRank());
       assertEquals(1L, displayable.getLast().displayFrequencyRank());
+    }
+  }
+
+  @Test
+  void thousandsSharesOnlyTheDisplayRankOfThousand() throws Exception {
+    Path file = SqliteTestSupport.newDatabase(temporary);
+    SqliteTestSupport.initialize(file);
+    var source =
+        new io.lexiflow.lexicon.application.importing.model.SourceReference(
+            "fixture", "MIT", "rank");
+    long version =
+        SqliteTestSupport.publish(
+            file,
+            new io.lexiflow.lexicon.application.importing.model.LexiconImportRow(
+                "thousand",
+                "一千",
+                "definition",
+                List.of(),
+                List.of(),
+                new io.lexiflow.lexicon.domain.model.LexiconPriority(5.0, 1, 900),
+                source,
+                source,
+                List.of(source),
+                true,
+                false,
+                "fixture",
+                "一千",
+                631L,
+                null,
+                List.of(),
+                false,
+                false,
+                false),
+            SqliteTestSupport.row("thousands", "数千", List.of(), List.of()),
+            SqliteTestSupport.row("mother-of-thousands", "落地生根", List.of(), List.of()));
+    try (var persistence = SqlitePersistence.open(SqliteTestSupport.url(file))) {
+      var repository = persistence.repository();
+      var canonical =
+          repository.browse("thousand", true, 1, 20).items().stream()
+              .filter(item -> item.lemma().equals("thousand"))
+              .findFirst()
+              .orElseThrow();
+      var plural =
+          repository.browse("thousands", true, 1, 20).items().stream()
+              .filter(item -> item.lemma().equals("thousands"))
+              .findFirst()
+              .orElseThrow();
+      assertNotEquals(canonical.entryId(), plural.entryId());
+      assertNull(plural.frequencyRank());
+      assertEquals(1L, canonical.displayFrequencyRank());
+      assertEquals(canonical.displayFrequencyRank(), plural.displayFrequencyRank());
+      assertEquals(plural, repository.findDisplayableByIds(List.of(plural.entryId())).getFirst());
+      var candidate = repository.findByForms(version, List.of("thousands")).getFirst();
+      assertEquals(plural.entryId(), candidate.entryId());
+      assertEquals(plural.displayFrequencyRank(), candidate.frequencyRank());
+      assertNull(
+          repository
+              .findByForms(version, List.of("mother-of-thousands"))
+              .getFirst()
+              .frequencyRank());
     }
   }
 

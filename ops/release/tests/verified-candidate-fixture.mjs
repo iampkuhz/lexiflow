@@ -69,7 +69,7 @@ async function makeFixture(baseVersion = '2.0.0', proofBridge = false) {
       await hashFile(noticePath, notice, [id]);
     }
     const dataset = { releaseId: 'release-test', preparationId: 'prep-test', ruleId: 'rules-test' };
-    const sqlVersion = 'sql-test'; const apiContract = 'caption-hints.v4';
+    const sqlVersion = 'sql-test'; const apiContract = 'caption-hints.v5';
     const dataBytes = Buffer.from('synthetic published dataset'); const dataSha = hash(dataBytes);
     const dataPath = 'data/dataset.bin'; await mkdir(path.dirname(path.join(artifactRoot, dataPath)), { recursive: true });
     await writeFile(path.join(artifactRoot, dataPath), dataBytes);

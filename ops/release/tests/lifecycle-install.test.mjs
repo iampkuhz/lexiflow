@@ -17,7 +17,7 @@ test('preferences initialization is an explicit bounded command using only its o
   const f=await lifecycleFixture(t);await mkdir(f.preferences);
   await writeFile(f.preferencesMountInfo,`12 1 0:99 / ${f.preferences} rw - tmpfs tmpfs rw\n`);
   const log=path.join(f.tmp,'preferences-init');
-  await writeFile(path.join(f.bin,'java'),`#!/bin/sh\ncase "$*" in *--api-contract*) printf "%s\\n" caption-hints.v4; exit 0;; *--storage-contract*|*--verify-storage*) exit 0;; esac\nprintf '%s\\n' "$*" > '${log}'\nexit 0\n`,{mode:0o700});
+  await writeFile(path.join(f.bin,'java'),`#!/bin/sh\ncase "$*" in *--api-contract*) printf "%s\\n" caption-hints.v5; exit 0;; *--storage-contract*|*--verify-storage*) exit 0;; esac\nprintf '%s\\n' "$*" > '${log}'\nexit 0\n`,{mode:0o700});
   const result=spawnSync('/bin/bash',[f.entry,'init-preferences'],{encoding:'utf8',env:{...process.env,PATH:`${f.bin}${path.delimiter}${process.env.PATH}`}});
   assert.equal(result.status,0,`${result.stderr}\n${await readFile(log,'utf8').catch(()=>'<no-java-log>')}`);
   assert.match(await readFile(log,'utf8'),new RegExp(`--init-preferences jdbc:sqlite:${f.preferencesDatabase.replaceAll('/','\\/')}`,'u'));
@@ -27,7 +27,7 @@ test('runtime bootstraps an empty separate preferences mount before starting the
   const f=await lifecycleFixture(t);await allowRuntimeUid(f);await mkdir(f.preferences);
   await writeFile(f.preferencesMountInfo,`12 1 0:99 / ${f.preferences} rw - tmpfs tmpfs rw\n`);
   const log=path.join(f.tmp,'java-calls');
-  await writeFile(path.join(f.bin,'java'),`#!/bin/sh\ncase "$*" in *--api-contract*) printf "%s\\n" caption-hints.v4; exit 0;; *--storage-contract*|*--verify-storage*) exit 0;; esac\nprintf '%s\\n' "$*" >> '${log}'\nprevious=; for arg do if [ "$previous" = --init-preferences ]; then p=${'${arg#jdbc:sqlite:}'}; : > "$p"; exit 0; fi; previous=$arg; done\nexpect=0; db=; for arg do if [ "$expect" = 1 ]; then db=$arg; expect=0; elif [ "$arg" = --expected-file ]; then expect=1; fi; done\nif [ -n "$db" ]; then : > "$db"; exit 0; fi\nsleep 0.1\n`,{mode:0o700});
+  await writeFile(path.join(f.bin,'java'),`#!/bin/sh\ncase "$*" in *--api-contract*) printf "%s\\n" caption-hints.v5; exit 0;; *--storage-contract*|*--verify-storage*) exit 0;; esac\nprintf '%s\\n' "$*" >> '${log}'\nprevious=; for arg do if [ "$previous" = --init-preferences ]; then p=${'${arg#jdbc:sqlite:}'}; : > "$p"; exit 0; fi; previous=$arg; done\nexpect=0; db=; for arg do if [ "$expect" = 1 ]; then db=$arg; expect=0; elif [ "$arg" = --expected-file ]; then expect=1; fi; done\nif [ -n "$db" ]; then : > "$db"; exit 0; fi\nsleep 0.1\n`,{mode:0o700});
   const result=runRuntime(f,'http_status_body() { HTTP_BODY="{\\"datasetVersion\\":42}"; return 0; }; runtime_health() { [ -f "$RUN/verified.json" ] && [ ! -e "$RUN/initializing" ] || return 1; return 0; }; runtime_start');
   assert.equal(result.status,0,`${result.stderr}\n${await readFile(log,'utf8').catch(()=>'<no-java-log>')}`);
   const calls=await readFile(log,'utf8');
@@ -39,7 +39,7 @@ test('runtime bootstraps an empty separate preferences mount before starting the
 test('runtime refuses to initialize a preferences directory that is not a separate mount', async t => {
   const f=await lifecycleFixture(t);await allowRuntimeUid(f);await mkdir(f.preferences);
   const log=path.join(f.tmp,'java-calls');
-  await writeFile(path.join(f.bin,'java'),`#!/bin/sh\ncase "$*" in *--api-contract*) printf "%s\\n" caption-hints.v4; exit 0;; *--storage-contract*|*--verify-storage*) exit 0;; esac\nprintf started > '${log}'\nexit 0\n`,{mode:0o700});
+  await writeFile(path.join(f.bin,'java'),`#!/bin/sh\ncase "$*" in *--api-contract*) printf "%s\\n" caption-hints.v5; exit 0;; *--storage-contract*|*--verify-storage*) exit 0;; esac\nprintf started > '${log}'\nexit 0\n`,{mode:0o700});
   const result=runRuntime(f,'runtime_start');
   assert.equal(result.status,1);assert.match(result.stderr,/preferences-volume-not-mounted/u);
   assert.equal(await readFile(log,'utf8').then(()=>true,()=>false),false);
@@ -71,7 +71,7 @@ test('existing corrupt database or marker refuses unchanged', async t => {
 test('offline initializer runs before read-only API and missing database never reaches API after init failure', async t => {
   const f = await lifecycleFixture(t); await allowRuntimeUid(f); await addPreferencesVolume(f);
   const log = path.join(f.tmp, 'java-calls');
-  await writeFile(path.join(f.bin, 'java'), `#!/bin/sh\ncase "$*" in *--api-contract*) printf "%s\\n" caption-hints.v4; exit 0;; *--storage-contract*|*--verify-storage*) exit 0;; esac\nprintf '%s\\n' "$*" >> '${log}'\nexpect=0; db=; for arg do if [ "$expect" = 1 ]; then db=$arg; expect=0; elif [ "$arg" = --expected-file ]; then expect=1; fi; done\nif [ -n "$db" ]; then : > "$db"; exit 0; fi\nsleep 0.1\n`, { mode: 0o700 });
+  await writeFile(path.join(f.bin, 'java'), `#!/bin/sh\ncase "$*" in *--api-contract*) printf "%s\\n" caption-hints.v5; exit 0;; *--storage-contract*|*--verify-storage*) exit 0;; esac\nprintf '%s\\n' "$*" >> '${log}'\nexpect=0; db=; for arg do if [ "$expect" = 1 ]; then db=$arg; expect=0; elif [ "$arg" = --expected-file ]; then expect=1; fi; done\nif [ -n "$db" ]; then : > "$db"; exit 0; fi\nsleep 0.1\n`, { mode: 0o700 });
   const result = runRuntime(f, 'http_status_body() { HTTP_BODY="{\\"datasetVersion\\":42}"; return 0; }; runtime_health() { [ -f "$RUN/verified.json" ] && [ ! -e "$RUN/initializing" ] || return 1; return 0; }; runtime_start');
   assert.equal(result.status, 0, result.stderr);
   const calls = await readFile(log, 'utf8').catch(error => { error.message += `\n${result.stderr}`; throw error; });
@@ -86,7 +86,7 @@ test('offline initializer runs before read-only API and missing database never r
 test('initializer failure keeps initialization gate and never launches API or creates database', async t => {
   const f = await lifecycleFixture(t); await allowRuntimeUid(f); await addPreferencesVolume(f);
   const log = path.join(f.tmp, 'java-calls');
-  await writeFile(path.join(f.bin, 'java'), `#!/bin/sh\ncase "$*" in *--api-contract*) printf "%s\\n" caption-hints.v4; exit 0;; *--storage-contract*|*--verify-storage*) exit 0;; esac\nprintf '%s\\n' "$*" >> '${log}'\nexit 9\n`, { mode: 0o700 });
+  await writeFile(path.join(f.bin, 'java'), `#!/bin/sh\ncase "$*" in *--api-contract*) printf "%s\\n" caption-hints.v5; exit 0;; *--storage-contract*|*--verify-storage*) exit 0;; esac\nprintf '%s\\n' "$*" >> '${log}'\nexit 9\n`, { mode: 0o700 });
   const result = runRuntime(f, 'runtime_start');
   assert.equal(result.status, 1);
   assert.match(result.stderr, /dataset-initialize-failed/u);
@@ -102,7 +102,7 @@ test('an API-only bump does not change the installed volume identity', async t =
   const f = await lifecycleFixture(t);
   const previous = runRuntime(f, 'read_identity; volume_identity_line');
   assert.equal(previous.status, 0);
-  await writeFile(f.identityPath, f.identity.replace('caption-hints.v4', 'caption-hints.v5'));
+  await writeFile(f.identityPath, f.identity.replace('caption-hints.v5', 'caption-hints.v6'));
   const next = runRuntime(f, 'read_identity; volume_identity_line');
   assert.equal(next.status, 0);
   assert.equal(next.stdout, previous.stdout);

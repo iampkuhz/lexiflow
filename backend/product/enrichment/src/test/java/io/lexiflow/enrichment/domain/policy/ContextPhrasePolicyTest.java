@@ -2,7 +2,6 @@ package io.lexiflow.enrichment.domain.policy;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.util.ArrayList;
@@ -61,14 +60,7 @@ class ContextPhrasePolicyTest {
     var word = candidate(1, "tissue", "tissue", "薄的织物", 910, false);
     var phrase = candidate(2, "neural tissue", "neural tissue", "神经组织", 0, true);
     var block =
-        new LexiconHintCandidate(
-            3,
-            null,
-            1,
-            "neural tissue",
-            LexiconHintAction.BLOCK,
-            null,
-            0);
+        new LexiconHintCandidate(3, null, 1, "neural tissue", LexiconHintAction.BLOCK, null, 0);
     assertEquals(List.of("薄的织物"), glosses("neural tissue", List.of(word)));
     assertEquals(List.of("薄的织物"), glosses("neural tissue", List.of(word, block)));
     assertEquals(List.of("薄的织物"), glosses("neural tissue", List.of(word, phrase, block)));
@@ -103,12 +95,6 @@ class ContextPhrasePolicyTest {
   private static LexiconHintCandidate candidate(
       long id, String form, String lemma, String gloss, int priority, boolean phrase) {
     return new LexiconHintCandidate(
-        id,
-        new UUID(0, id),
-        1,
-        form,
-        LexiconHintAction.HINT,
-        gloss,
-        priority);
+        id, new UUID(0, id), 1, form, LexiconHintAction.HINT, gloss, priority);
   }
 }

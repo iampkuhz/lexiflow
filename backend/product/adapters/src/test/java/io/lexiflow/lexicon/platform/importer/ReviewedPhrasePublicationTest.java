@@ -3,6 +3,7 @@ package io.lexiflow.lexicon.platform.importer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import io.lexiflow.lexicon.domain.port.LexiconIdentity;
 import io.lexiflow.lexicon.platform.persistence.DatasetPackageCodec;
 import io.lexiflow.lexicon.platform.persistence.SqliteDatasetExport;
 import io.lexiflow.lexicon.platform.persistence.SqlitePersistence;
@@ -57,10 +58,11 @@ class ReviewedPhrasePublicationTest {
         var stmt = connection.createStatement()) {
       try (var rows =
           stmt.executeQuery(
-              "SELECT gloss, frequency_rank FROM lexicon_entry WHERE lemma='tissue'")) {
+              "SELECT gloss, bnc_rank, frequency_rank FROM lexicon_entry WHERE lemma='tissue'")) {
         rows.next();
         assertEquals("组织", rows.getString(1));
         assertEquals(2784, rows.getLong(2));
+        assertEquals(10, rows.getLong(3));
       }
       try (var rows =
           stmt.executeQuery(
@@ -129,11 +131,29 @@ class ReviewedPhrasePublicationTest {
                     .repository()
                     .findByForms(persistence.repository().publishedVersion(), List.of(form))
                     .stream()
-                    .filter(c -> c.normalizedForm().equals(pair.getFirst()))
+                    .filter(c -> c.entryId() == LexiconIdentity.entryId(pair.getFirst()))
                     .findFirst()
-                    .orElseThrow();
+                    .orElseThrow(
+                        () ->
+                            new AssertionError(
+                                "missing published form: " + pair.getFirst() + " / " + form));
+            assertEquals(form, actual.normalizedForm());
             assertEquals(pair.getLast(), actual.finalGloss());
-            assertEquals(2784L, actual.frequencyRank());
+            assertEquals(2784L, actual.bncRank());
+            var rankedLemmas =
+                List.of(
+                    "attribute",
+                    "cook",
+                    "ease",
+                    "efficiently",
+                    "equal",
+                    "mostly",
+                    "nerve",
+                    "plane",
+                    "spinal",
+                    "tissue",
+                    "wrap");
+            assertEquals((long) rankedLemmas.indexOf(pair.getFirst()) + 1, actual.frequencyRank());
           }
         }
 

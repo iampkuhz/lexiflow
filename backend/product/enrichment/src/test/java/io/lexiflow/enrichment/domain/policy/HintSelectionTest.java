@@ -10,7 +10,8 @@ class HintSelectionTest {
   void preservesPriorityAndSuppressesIdenticalRangeAmbiguityIncludingHiddenMatch() {
     var lowerPriority = match(0, 6, "1", "低", 1, 1);
     var higherPriority = match(5, 9, "2", "高", 9, 1);
-    var hiddenAmbiguity = new HintSelection.CandidateMatch(10, 14, "3", null, 1, null, 99, null, null, false, null);
+    var hiddenAmbiguity =
+        new HintSelection.CandidateMatch(10, 14, "3", null, 1, null, 99, null, null, false, null);
     var visibleAmbiguity = match(10, 14, "4", "不应展示", 99, 1);
     var selected =
         HintSelection.select(
@@ -47,7 +48,17 @@ class HintSelectionTest {
   void preservesAmbiguityBeforeApplyingCommonWordCutoff() {
     var overCutoff =
         new HintSelection.CandidateMatch(
-            0, 4, id(9), "00000000-0000-0000-0000-000000000009", 1, "甲", 10, "alpha", 1200L, false, null);
+            0,
+            4,
+            id(9),
+            "00000000-0000-0000-0000-000000000009",
+            1,
+            "甲",
+            10,
+            "alpha",
+            1200L,
+            false,
+            null);
     var other = match(0, 4, id(10), "乙", 9, 1);
     var result = HintSelection.select(List.of(overCutoff, other), 1500);
     assertEquals(1, result.ambiguous());
@@ -69,7 +80,8 @@ class HintSelectionTest {
               988,
               "grind",
               5538L,
-              false, null);
+              false,
+              null);
       for (var blocked : List.of(false, true)) {
         var ground =
             new HintSelection.CandidateMatch(
@@ -82,7 +94,8 @@ class HintSelectionTest {
                 498,
                 "ground",
                 455L,
-                false, null);
+                false,
+                null);
         for (var cutoff : List.of(1000, 1500, 2000)) {
           var result = HintSelection.select(List.of(ground, grind), cutoff);
           assertEquals(1, result.ambiguous());
@@ -108,7 +121,8 @@ class HintSelectionTest {
               988,
               "grind",
               5538L,
-              false, null);
+              false,
+              null);
       var result = HintSelection.select(List.of(grind), 1500);
       assertEquals(0, result.ambiguous());
       assertEquals(
@@ -131,17 +145,29 @@ class HintSelectionTest {
             10,
             "alpha",
             1200L,
-            false, 8L);
+            false,
+            8L);
     assertEquals(
         List.of("11"),
         HintSelection.select(List.of(rankedWord), 1000).hints().stream()
             .map(hint -> hint.lexiconEntryId())
             .toList());
-    assertEquals(8L, HintSelection.select(List.of(rankedWord), 1000).hints().getFirst().frequencyRank());
+    assertEquals(
+        8L, HintSelection.select(List.of(rankedWord), 1000).hints().getFirst().frequencyRank());
     assertEquals(List.of(), HintSelection.select(List.of(rankedWord), 1500).hints());
     var commonWord =
         new HintSelection.CandidateMatch(
-            0, 5, id(12), "00000000-0000-0000-0000-000000000009", 1, "释义", 10, "beta", 900L, false, null);
+            0,
+            5,
+            id(12),
+            "00000000-0000-0000-0000-000000000009",
+            1,
+            "释义",
+            10,
+            "beta",
+            900L,
+            false,
+            null);
     assertEquals(List.of(), HintSelection.select(List.of(commonWord), 1000).hints());
     var phrase =
         new HintSelection.CandidateMatch(
@@ -154,7 +180,8 @@ class HintSelectionTest {
             10,
             "alpha beta",
             100L,
-            true, null);
+            true,
+            null);
     assertEquals(
         List.of("13"),
         HintSelection.select(List.of(phrase), 1000).hints().stream()
@@ -164,7 +191,8 @@ class HintSelectionTest {
 
   @Test
   void countsUniqueAmbiguityIncludingBlockedEvidenceAndOnlyFinalOverlapDrops() {
-    var hiddenAmbiguity = new HintSelection.CandidateMatch(15, 18, id(3), null, 1, null, 10, null, null, false, null);
+    var hiddenAmbiguity =
+        new HintSelection.CandidateMatch(15, 18, id(3), null, 1, null, 10, null, null, false, null);
     var visibleAmbiguity = match(15, 18, id(4), "隐藏", 10, 1);
     var result =
         HintSelection.select(
@@ -173,7 +201,8 @@ class HintSelectionTest {
                 match(3, 7, id(2), "重叠淘汰", 9, 1),
                 match(10, 14, id(1), "重复词条不计入重叠", 8, 1),
                 hiddenAmbiguity,
-                visibleAmbiguity), 1500);
+                visibleAmbiguity),
+            1500);
     assertEquals(1, result.ambiguous());
     assertEquals(1, result.overlapDropped());
     assertEquals(
@@ -192,7 +221,17 @@ class HintSelectionTest {
   private static HintSelection.CandidateMatch match(
       int start, int end, String id, String gloss, int priority, long version) {
     return new HintSelection.CandidateMatch(
-        start, end, id, "00000000-0000-0000-0000-000000000009", version, gloss, priority, "fixture", null, false, null);
+        start,
+        end,
+        id,
+        "00000000-0000-0000-0000-000000000009",
+        version,
+        gloss,
+        priority,
+        "fixture",
+        null,
+        false,
+        null);
   }
 
   private static String id(int suffix) {

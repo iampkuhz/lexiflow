@@ -4,6 +4,11 @@ export function isYouTubeVideoId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9_-]{11}$/u.test(value);
 }
 
+export function normalizeVideoTitle(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 300) return undefined;
+  return value.replace(/\s+/gu, " ").trim() || undefined;
+}
+
 export function managementUrl(url: string, context?: VideoContext): string {
   return context ? `${url}#${new URLSearchParams({ tab: String(context.tabId), page: context.pageKey })}` : url;
 }

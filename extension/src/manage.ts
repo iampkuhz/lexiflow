@@ -3,7 +3,7 @@ import { attachManagementConnection } from "./manage-connection";
 import { attachCurrentVideo } from "./manage-current-video";
 import { createHintCard } from "./manage-hint-card";
 import type { HiddenPreference as Hidden, RecentItem } from "./preferences";
-type Lexicon = Hidden & { frequencyRank: number | null; hintState: "eligible" | "blocked" };
+type Lexicon = Omit<Hidden, "gloss"> & { gloss: string | null; hintState: "eligible" | "blocked" | "hidden" };
 type PreferencesReply = { ok: true; commonWordCutoff: number; hidden: Hidden[] } | { ok: false; reason?: string };
 type RecentReply = { ok: true; items: RecentItem[] } | { ok: false; reason?: string };
 type LexiconReply = { ok: true; items: Lexicon[]; total: number; page: number; pageSize: number } | { ok: false; reason?: string };
@@ -17,7 +17,7 @@ function readRecentPageSize(value: unknown): RecentPageSize {
 }
 const matchText = (value: string): string => value.normalize("NFKC").trim().toLowerCase()
   .replace(/’/gu, "'").replace(/\s+/gu, " ");
-const state = { tab: "recent", recent: [] as RecentItem[], hidden: [] as Hidden[], pending: null as string | null, recentPage: 1, recentSize: DEFAULT_RECENT_PAGE_SIZE as RecentPageSize, recentQuery: "", hiddenPage: 1, query: "", sort: "frequency", lexPage: 1, lexTotal: 0, request: 0, busy: false };
+const state = { tab: "recent", recent: [] as RecentItem[], hidden: [] as Hidden[], pending: null as string | null, recentPage: 1, recentSize: DEFAULT_RECENT_PAGE_SIZE as RecentPageSize, recentQuery: "", hiddenPage: 1, query: "", sort: "frequency", lexPage: 1, request: 0, busy: false };
 const byId = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const make = <K extends keyof HTMLElementTagNameMap>(tag: K, className = ""): HTMLElementTagNameMap[K] => { const node = document.createElement(tag); node.className = className; return node; };
 function send<T>(message: object): Promise<T> { return chrome.runtime.sendMessage(message) as Promise<T>; }
@@ -36,8 +36,6 @@ function pager(id: string, total: number, page: number, size: number, action: st
   (nav.querySelector('[data-step="1"]') as HTMLButtonElement).disabled = page >= pages;
   nav.dataset.action = action;
 }
-function cell(row: HTMLElement, text: string, className = ""): HTMLElement { const n = make("span", className); n.setAttribute("role", "cell"); n.textContent = text; row.append(n); return n; }
-function heading(row: HTMLElement, labels: string[]): void { row.className += " head"; row.setAttribute("role", "row"); for (const label of labels) { const n = make("span"); n.setAttribute("role", "columnheader"); n.textContent = label; row.append(n); } }
 const tabs = ["recent", "current-video", "hidden", "lexicon", "connection"];
 let showCurrentVideo: ((active: boolean) => void) | undefined;
 function showTabs(): void {
@@ -113,20 +111,32 @@ function renderRecent(): void {
 function renderHidden(): void {
   const items = state.hidden, total = items.length, pages = Math.max(1, Math.ceil(total / PAGE_SIZE)); state.hiddenPage = Math.min(state.hiddenPage, pages);
   byId("hidden-count").textContent = String(total);
-  const host = byId<HTMLDivElement>("hidden-list"); host.replaceChildren();
-  if (!total) { byId<HTMLParagraphElement>("hidden-empty").textContent = "没有已停止提示的词条。"; byId("hidden-empty").hidden = false; byId("hidden-pager").hidden = true; return; }
-  byId("hidden-empty").hidden = true; const head = make("div", "row hidden-row"); heading(head, ["已停止提示的词条", "中文提示", "操作"]); host.append(head);
-  for (const item of items.slice((state.hiddenPage - 1) * PAGE_SIZE, state.hiddenPage * PAGE_SIZE)) { const row = make("div", "row hidden-row"); row.setAttribute("role", "row"); cell(row, item.lemma); cell(row, item.gloss || "—", "gloss"); const action = make("span"); action.setAttribute("role", "cell"); action.append(button("恢复提示", "restore", item.entryId)); row.append(action); host.append(row); }
+  const host = byId<HTMLUListElement>("hidden-list");
+  host.hidden = total === 0;
+  byId("hidden-empty").hidden = total > 0;
+  host.replaceChildren(...items.slice((state.hiddenPage - 1) * PAGE_SIZE, state.hiddenPage * PAGE_SIZE).map(item => {
+    const { card, rail } = createHintCard(item.lemma, item.gloss, item.frequencyRank);
+    const restore = button("恢复提示", "restore", item.entryId);
+    restore.className = "restore-action";
+    restore.setAttribute("aria-label", `恢复提示「${item.lemma}」`);
+    rail.append(restore);
+    return card;
+  }));
   pager("hidden-pager", total, state.hiddenPage, PAGE_SIZE, "hidden");
 }
 function renderLexicon(items: Lexicon[], total: number, page: number, pageSize: number): void {
-  const host = byId<HTMLDivElement>("lexicon-list"); host.replaceChildren(); state.lexTotal = total;
-  byId<HTMLParagraphElement>("lexicon-empty").hidden = total !== 0;
-  byId<HTMLParagraphElement>("lexicon-empty").textContent = state.query ? `当前词库没有查到「${state.query}」。可换用原形或检查拼写。` : "当前没有词条。";
-  if (!total) { byId("lexicon-pager").hidden = true; return; }
-  const head = make("div", "row lex-row"); heading(head, ["英文词条", "词频排名", "中文提示", "系统提示"]); host.append(head);
-  const fmt = new Intl.NumberFormat("zh-CN");
-  for (const item of items) { const row = make("div", `row lex-row ${item.hintState === "eligible" ? "eligible-row" : "blocked-row"}`); row.setAttribute("role", "row"); cell(row, item.lemma); cell(row, item.frequencyRank === null ? "暂无" : fmt.format(item.frequencyRank), "number rank"); cell(row, item.gloss || "—", "gloss lex-gloss"); const status = cell(row, item.hintState === "eligible" ? "可提示" : "系统不提示", "row-state lex-state"); status.classList.add(item.hintState); host.append(row); }
+  const host = byId<HTMLUListElement>("lexicon-list");
+  host.hidden = items.length === 0;
+  const empty = byId("lexicon-empty");
+  empty.hidden = items.length !== 0;
+  empty.textContent = total > 0 ? "这一页没有词条。" : state.query ? `没有查到包含「${state.query}」的词条。` : "当前没有词条。";
+  host.replaceChildren(...items.map(item => {
+    const { card, rail } = createHintCard(item.lemma, item.gloss, item.frequencyRank);
+    const status = make("span", `row-state ${item.hintState}`);
+    status.textContent = { eligible: "可提示", blocked: "系统不提示", hidden: "已停止提示" }[item.hintState];
+    rail.append(status);
+    return card;
+  }));
   pager("lexicon-pager", total, page, pageSize, "lexicon");
 }
 async function readPreferences(): Promise<void> {
@@ -177,12 +187,39 @@ function scheduleRecentRefresh(): void {
     refreshVisibleRecent(); scheduleRecentRefresh();
   }, 60_000 - Date.now() % 60_000);
 }
+let lexiconReading = false, lexiconQueued = false;
+function queueLexicon(reset = true): void {
+  ++state.request; lexiconQueued = true;
+  feedback();
+  byId("lexicon-loading").hidden = false;
+  byId("lexicon-empty").hidden = true;
+  if (reset) {
+    byId("lexicon-list").hidden = true;
+    byId("lexicon-pager").hidden = true;
+  }
+  void readLexicon();
+}
 async function readLexicon(): Promise<void> {
-  const id = ++state.request; feedback();
-  try { const result = await send<LexiconReply>({ type: "local-lexicon", query: state.query, sort: state.sort, page: state.lexPage, pageSize: PAGE_SIZE }); if (id !== state.request) return;
-    if (!result || result.ok !== true || !Array.isArray(result.items) || !Number.isInteger(result.total) || !Number.isInteger(result.page) || !Number.isInteger(result.pageSize)) throw new Error(describeReason(result && result.ok === false ? result.reason : undefined, "词库响应无效"));
+  if (lexiconReading || !lexiconQueued || state.tab !== "lexicon") return;
+  lexiconReading = true; lexiconQueued = false;
+  const id = state.request, { query, sort, lexPage: page } = state;
+  try {
+    const result = await send<LexiconReply>({ type: "local-lexicon", query, sort, page, pageSize: PAGE_SIZE });
+    if (id !== state.request) return;
+    if (!result || result.ok !== true || !Array.isArray(result.items) || result.items.length > PAGE_SIZE ||
+        !Number.isSafeInteger(result.total) || result.total < result.items.length || result.page !== page || result.pageSize !== PAGE_SIZE)
+      throw new Error(describeReason(result && result.ok === false ? result.reason : undefined, "词库响应无效"));
     renderLexicon(result.items, result.total, result.page, result.pageSize);
-  } catch (error) { if (id !== state.request) return; byId("lexicon-list").replaceChildren(); byId("lexicon-empty").hidden = true; byId("lexicon-pager").hidden = true; feedback(`词库查询失败：${error instanceof Error ? error.message : "本机服务不可用"}`, true); }
+  } catch (error) {
+    if (id !== state.request) return;
+    byId("lexicon-list").hidden = true;
+    byId("lexicon-pager").hidden = true;
+    feedback(`词库查询失败：${error instanceof Error ? error.message : "本机服务不可用"}`, true);
+  } finally {
+    lexiconReading = false;
+    if (id === state.request) byId("lexicon-loading").hidden = true;
+    if (lexiconQueued) void readLexicon();
+  }
 }
 async function refreshManage(): Promise<void> {
   try { await readPreferences(); }
@@ -275,11 +312,24 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("keydown", () => document.documentElement.removeAttribute("data-pointer-input"), true);
   showCurrentVideo = attachCurrentVideo(videoContext(location.hash));
   attachManagementConnection(() => { void refreshManage(); });
-  for (const name of tabs) byId<HTMLButtonElement>(`${name}-tab`).addEventListener("click", () => { if (name !== state.tab && !state.busy) setPending(null); state.tab = name; showTabs(); feedback(); if (name === "lexicon") void readLexicon(); else if (name === "recent") refreshVisibleRecent(); });
+  for (const name of tabs) byId<HTMLButtonElement>(`${name}-tab`).addEventListener("click", () => {
+    if (name !== state.tab && !state.busy) setPending(null);
+    if (state.tab === "lexicon" && name !== "lexicon") { ++state.request; lexiconQueued = false; }
+    state.tab = name; showTabs(); feedback();
+    if (name === "lexicon") queueLexicon(); else if (name === "recent") refreshVisibleRecent();
+  });
   document.addEventListener("visibilitychange", () => { refreshVisibleRecent(); scheduleRecentRefresh(); });
   byId<HTMLSelectElement>("common-word-cutoff").addEventListener("change", () => { void saveCutoff(); });
-  byId<HTMLFormElement>("lexicon-search").addEventListener("submit", event => { event.preventDefault(); state.query = byId<HTMLInputElement>("query").value.trim().toLocaleLowerCase().replace(/’/g, "'").replace(/\s+/g, " "); state.lexPage = 1; if (state.tab !== "lexicon") { state.tab = "lexicon"; showTabs(); } void readLexicon(); });
-  byId<HTMLSelectElement>("sort").addEventListener("change", event => { state.sort = (event.currentTarget as HTMLSelectElement).value; state.lexPage = 1; void readLexicon(); });
+  const lexiconQuery = byId<HTMLInputElement>("query");
+  const applyLexiconQuery = () => {
+    const query = lexiconQuery.value.normalize("NFC").trim().toLowerCase().replace(/’/g, "'").replace(/\s+/g, " ");
+    if (query === state.query || state.tab !== "lexicon") return;
+    state.query = query; state.lexPage = 1; queueLexicon();
+  };
+  lexiconQuery.addEventListener("input", event => { if (!(event as InputEvent).isComposing) applyLexiconQuery(); });
+  lexiconQuery.addEventListener("compositionend", applyLexiconQuery);
+  byId("lexicon-search").addEventListener("submit", event => { event.preventDefault(); applyLexiconQuery(); });
+  byId<HTMLSelectElement>("sort").addEventListener("change", event => { state.sort = (event.currentTarget as HTMLSelectElement).value; state.lexPage = 1; queueLexicon(); });
   byId("recent-list").addEventListener("click", event => {
     const b = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-action]");
     const card = b?.closest<HTMLElement>(".recent-card"), id = b?.dataset.entry;
@@ -298,7 +348,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const b = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-step]");
     if (!b || b.disabled) return;
     const step = Number(b.dataset.step);
-    if (id === "lexicon-pager") { state.lexPage = Math.max(1, state.lexPage + step); void readLexicon(); }
+    if (id === "lexicon-pager") { if (!lexiconReading) { state.lexPage = Math.max(1, state.lexPage + step); queueLexicon(false); } }
     else if (id === "hidden-pager") { state.hiddenPage = Math.max(1, state.hiddenPage + step); renderHidden(); }
     else if (!state.busy) { setPending(null); state.recentPage = Math.max(1, state.recentPage + step); renderRecent(); }
   });

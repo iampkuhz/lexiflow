@@ -59,7 +59,8 @@ class ReviewedPhraseCatalogTest {
                 "publicEvidenceSha256=[0-9a-f]+", "publicEvidenceSha256=" + "0".repeat(64)),
             review.replaceFirst(
                 "evidenceSha256=[0-9a-f]+",
-                review.lines()
+                review
+                    .lines()
                     .filter(line -> line.startsWith("publicEvidenceSha256="))
                     .findFirst()
                     .orElseThrow()

@@ -3,7 +3,7 @@ import test from "node:test";
 import { parseRuntimeStatus, readRuntimeStatus, RUNTIME_STATUS_URL } from "../build/test-modules/runtime-status.js";
 
 const publishedDataset={releaseId:"release-1",preparationId:"prep-1",ruleId:"rules-1",sqlVersion:"4",sha256:"a".repeat(64)};
-const valid = { softwareVersion:"1.2.3", apiContract:"caption-hints.v4", mode:"formal", ready:true, reason:"OK", datasetVersion:4, publishedDataset };
+const valid = { softwareVersion:"1.2.3", apiContract:"caption-hints.v5", mode:"formal", ready:true, reason:"OK", datasetVersion:4, publishedDataset };
 test("accepts exact ready and degraded formal runtime shapes", () => {
   assert.deepEqual(parseRuntimeStatus(valid), valid);
   assert.equal(parseRuntimeStatus({...valid, ready:true, reason:"PREWARM_DEGRADED"}).ready, true);
@@ -56,9 +56,9 @@ test("wire version is exact; software and publication identities are diagnostics
   assert.equal(parseRuntimeStatus({...changed, publishedDataset:null}).ready, true);
   const original = globalThis.fetch;
   try {
-    for (const apiContract of ["caption-hints.v3", "caption-hints.v5"]) {
+    for (const apiContract of ["caption-hints.v3", "caption-hints.v6"]) {
       globalThis.fetch = async () => ({ok:true,json:async()=>({...changed,apiContract})});
-      assert.deepEqual(await readRuntimeStatus(),{ok:false,reason:"protocol-mismatch",expected:"caption-hints.v4",actual:apiContract});
+      assert.deepEqual(await readRuntimeStatus(),{ok:false,reason:"protocol-mismatch",expected:"caption-hints.v5",actual:apiContract});
     }
     const {apiContract: _absent, ...withoutContract} = changed;
     globalThis.fetch = async () => ({ok:true,json:async()=>withoutContract});

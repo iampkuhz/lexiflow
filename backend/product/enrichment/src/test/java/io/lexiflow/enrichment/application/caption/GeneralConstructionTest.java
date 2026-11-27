@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import io.lexiflow.enrichment.domain.model.CaptionIncrementalRequest;
 import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
-import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.util.List;
@@ -103,13 +102,7 @@ class GeneralConstructionTest {
   private static LexiconHintCandidate candidate(
       long id, String form, String gloss, boolean phrase) {
     return new LexiconHintCandidate(
-        id,
-        new UUID(0, id),
-        1,
-        form,
-        LexiconHintAction.HINT,
-        gloss,
-        phrase ? 0 : 900);
+        id, new UUID(0, id), 1, form, LexiconHintAction.HINT, gloss, phrase ? 0 : 900);
   }
 
   private static CaptionIncrementalRequest request(CaptionIncrementalRequest.Segment... segments) {

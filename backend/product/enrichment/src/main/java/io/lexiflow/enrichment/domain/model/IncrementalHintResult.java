@@ -6,8 +6,8 @@ import java.util.Objects;
 /**
  * 按当前显示顺序排列、定位到片段 key 的增量提示。
  *
- * @param processedKeys 本次所有 append 片段的 key，按显示顺序排列，包含未命中提示的片段。
- * @param hints 定位到新增片段、可跨紧邻旧尾词的非重叠提示列表，可为空。
+ * @param processedKeys 含义：本次所有待处理片段键。取值范围：不可变列表，按显示顺序包含未命中项。
+ * @param hints 含义：返回的非重叠提示。取值范围：不可变列表，可跨紧邻旧尾词并可为空。
  */
 public record IncrementalHintResult(List<String> processedKeys, List<Hint> hints) {
   /** 冻结本次处理 key 与提示顺序。 */
@@ -28,6 +28,7 @@ public record IncrementalHintResult(List<String> processedKeys, List<Hint> hints
    * @param lexiconVersion 含义：本次响应使用的词库发布版本。取值范围：正 long。
    * @param senseId 含义：已发布词义的稳定身份。取值范围：非空字符串。
    * @param lemma 含义：匹配词条的真实规范主词形。取值范围：非空字符串。
+   * @param frequencyRank 含义：只读词库提供的展示排名。取值范围：可空；存在时为正 long。
    */
   public record Hint(
       String startKey,

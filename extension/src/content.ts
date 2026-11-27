@@ -11,6 +11,7 @@ import { CaptionCapture } from "./caption-capture";
 import { CAPTION_LINE_LIMIT_KEY, captionLineLimit } from "./caption-display";
 import { TEST_CHANNEL } from "./backend-target";
 import { HintVocabulary } from "./hint-vocabulary";
+import { readYouTubeVideoTitle } from "./youtube-video-title";
 
 // 两个隔离世界共享同一 DOM；同步认领页面，避免两套脚本同时接管播放器。
 const owner = TEST_CHANNEL ? "test" : "formal";
@@ -306,7 +307,11 @@ function startEnhancement(): void {
       if (lifecycle.navigating || message.pageKey !== lifecycle.pageKey || !isYouTubeVideoId(videoId)) {
         respond({ ok: false }); return;
       }
-      respond({ ok: true, pageKey: lifecycle.pageKey, videoId, rows: vocabulary.snapshot() }); return;
+      const title = readYouTubeVideoTitle(videoId);
+      if (lifecycle.navigating || message.pageKey !== lifecycle.pageKey || videoId !== videoIdFromLocation()) {
+        respond({ ok: false }); return;
+      }
+      respond({ ok: true, pageKey: lifecycle.pageKey, videoId, ...(title ? { title } : {}), rows: vocabulary.snapshot() }); return;
     }
     if (lifecycle.navigating || !document.querySelector(".html5-video-player, #movie_player")) {
       respond({ ok: false }); return;

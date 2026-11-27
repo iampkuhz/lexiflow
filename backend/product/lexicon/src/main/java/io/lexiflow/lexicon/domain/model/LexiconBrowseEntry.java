@@ -11,7 +11,12 @@ package io.lexiflow.lexicon.domain.model;
  * @param hintState 含义：发布提示资格状态。取值范围：ELIGIBLE 或 BLOCKED。
  */
 public record LexiconBrowseEntry(
-    long entryId, String lemma, String gloss, Long frequencyRank, Long displayFrequencyRank, PublishedHintState hintState) {
+    long entryId,
+    String lemma,
+    String gloss,
+    Long frequencyRank,
+    Long displayFrequencyRank,
+    PublishedHintState hintState) {
   /** 校验发布身份、正排名及短释与提示状态的一致性。 */
   public LexiconBrowseEntry {
     if (entryId < 1 || lemma == null || lemma.isBlank() || hintState == null)

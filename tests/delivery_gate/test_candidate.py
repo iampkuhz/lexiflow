@@ -144,7 +144,7 @@ class CandidateChainTests(unittest.TestCase):
         self.f.create_submission()
         submission = load_submission(self.f.root, self.f.submission_id)
         dataset = {"releaseId": "release", "preparationId": "preparation", "ruleId": "rule", "sqlVersion": "v1", "sha256": "9" * 64}
-        api_identity = {"softwareVersion": self.identity["softwareVersion"], "apiContract": "caption-hints.v4", "mode": "formal", "datasetVersion": 1, "publishedDataset": dataset}
+        api_identity = {"softwareVersion": self.identity["softwareVersion"], "apiContract": "caption-hints.v5", "mode": "formal", "datasetVersion": 1, "publishedDataset": dataset}
         self.runtime = {
             "schemaVersion": "lexiflow.candidate-runtime.v2",
             "status": "PASS",

@@ -13,6 +13,7 @@ import java.util.UUID;
  * @param lexiconVersion 含义：候选词条所属版本。取值范围：正 long。
  * @param chineseGloss 含义：语境中的简短中文释义。取值范围：非空白字符串。
  * @param lemma 含义：匹配词条的真实规范主词形。取值范围：非空白字符串。
+ * @param frequencyRank 含义：只读词库提供的展示排名。取值范围：可空；存在时为正 long。
  */
 public record AnnotationHint(
     int startOffset,
@@ -36,7 +37,8 @@ public record AnnotationHint(
     }
     chineseGloss = required(chineseGloss, "chineseGloss");
     lemma = required(lemma, "lemma");
-    if (frequencyRank != null && frequencyRank < 1) throw new IllegalArgumentException("frequencyRank must be positive");
+    if (frequencyRank != null && frequencyRank < 1)
+      throw new IllegalArgumentException("frequencyRank must be positive");
   }
 
   private static String canonicalUuid(String value, String field) {

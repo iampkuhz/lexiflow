@@ -41,6 +41,24 @@ class PreferencesNoStoreFilterTest {
   }
 
   @Test
+  void browseWithPersonalStateUsesTheSameOriginAndNoStorePolicy() throws Exception {
+    var filter = new PreferencesNoStoreFilter();
+    var request = new MockHttpServletRequest("POST", "/api/v1/lexicon");
+    var denied = new MockHttpServletResponse();
+    filter.doFilter(
+        request, denied, (req, res) -> fail("browse without extension Origin must be denied"));
+    assertEquals(403, denied.getStatus());
+    var origin = "chrome-extension://mnngbjikfoafikclcilgkhhkmcnmlinm";
+    request.addHeader("Origin", origin);
+    var allowed = new MockHttpServletResponse();
+    filter.doFilter(
+        request,
+        allowed,
+        (req, res) -> assertEquals("no-store", allowed.getHeader("Cache-Control")));
+    assertEquals(origin, allowed.getHeader("Access-Control-Allow-Origin"));
+  }
+
+  @Test
   void wrongOriginAndExtraHeadersAreDenied() throws Exception {
     var filter = new PreferencesNoStoreFilter();
     for (String origin : new String[] {"http://localhost", "chrome-extension://wrong"}) {

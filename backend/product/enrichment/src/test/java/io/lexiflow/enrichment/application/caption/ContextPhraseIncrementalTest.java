@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import io.lexiflow.enrichment.domain.model.CaptionIncrementalRequest;
 import io.lexiflow.enrichment.domain.policy.DeterministicHintPolicy;
-import io.lexiflow.lexicon.domain.model.LexiconEntryKind;
 import io.lexiflow.lexicon.domain.model.LexiconHintAction;
 import io.lexiflow.lexicon.domain.model.LexiconHintCandidate;
 import java.util.List;
@@ -14,13 +13,7 @@ import org.junit.jupiter.api.Test;
 class ContextPhraseIncrementalTest {
   private final LexiconHintCandidate phrase =
       new LexiconHintCandidate(
-          1,
-          new UUID(0, 1),
-          1,
-          "neural tissue",
-          LexiconHintAction.HINT,
-          "神经组织",
-          0);
+          1, new UUID(0, 1), 1, "neural tissue", LexiconHintAction.HINT, "神经组织", 0);
 
   @Test
   void sameLineAppendCompletesPhraseButOldOnlyPhraseIsNeverReemitted() {

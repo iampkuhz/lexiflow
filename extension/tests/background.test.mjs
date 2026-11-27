@@ -5,7 +5,7 @@ const nativeFetch = globalThis.fetch;
 let listener;
 globalThis.chrome = { tabs:{query:async()=>[],sendMessage:async()=>{}}, runtime: { id: 'extension-id', getURL: path => `chrome-extension://extension-id/${path}`, getManifest: () => ({ version_name: '1.2.3' }), onMessage: { addListener(value) { listener = value; } } } };
 await import('../dist/background.js');
-let statusBody = { softwareVersion:'1.2.3',apiContract:'caption-hints.v4',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null,publishedDataset:null };
+let statusBody = { softwareVersion:'1.2.3',apiContract:'caption-hints.v5',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null,publishedDataset:null };
 let postFetch, holdStatus = false, rejectStatus = false;
 let prefState = { commonWordCutoff:1500, hidden:[] };
 const statusCalls = [];
@@ -64,10 +64,10 @@ test('status gate is bodyless no-store GET; incompatible or invalid status preve
   let posts = 0;
   globalThis.fetch = async () => { posts += 1; return {ok:true,json:async()=>({processedKeys:['key1'],lexiconVersion:1,hints:[]})}; };
   const readCount = statusCalls.length;
-  statusBody = {...statusBody,apiContract:'caption-hints.v5'};
+  statusBody = {...statusBody,apiContract:'caption-hints.v6'};
   assert.deepEqual(await send({type:'caption-hints',requestId:'mismatch',payload},sender(8)),{ok:false,reason:'runtime-incompatible'});
   assert.equal(posts,0);
-  statusBody = {...statusBody,apiContract:'caption-hints.v4',softwareVersion:'01.2.3'};
+  statusBody = {...statusBody,apiContract:'caption-hints.v5',softwareVersion:'01.2.3'};
   assert.deepEqual(await send({type:'caption-hints',requestId:'invalid-status',payload},sender(8)),{ok:false,reason:'invalid-response'});
   assert.equal(posts,0);
   assert.ok(statusCalls.length >= readCount + 2);
@@ -76,7 +76,7 @@ test('status gate is bodyless no-store GET; incompatible or invalid status preve
   assert.equal(call.options.redirect,'error'); assert.equal(call.options.credentials,'omit');
   assert.equal(call.options.referrerPolicy,'no-referrer');
   assert.equal(Object.hasOwn(call.options,'body'),false);
-  statusBody = {softwareVersion:'1.2.3',apiContract:'caption-hints.v4',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null,publishedDataset:null};
+  statusBody = {softwareVersion:'1.2.3',apiContract:'caption-hints.v5',mode:'demo',ready:false,reason:'DEMO_MODE',datasetVersion:null,publishedDataset:null};
 });
 
 test('same contract accepts independent build hashes and a different published dataset', async () => {
@@ -85,7 +85,7 @@ test('same contract accepts independent build hashes and a different published d
   globalThis.fetch = async () => { posts += 1; return {ok:true,json:async()=>({processedKeys:['key1'],lexiconVersion:4,hints:[]})}; };
   try {
     statusBody = {softwareVersion:'3.0.0-SNAPSHOT.20261121.gaabbccd.dirty.001122334455',
-      apiContract:'caption-hints.v4',mode:'formal',ready:true,reason:'OK',datasetVersion:4,
+      apiContract:'caption-hints.v5',mode:'formal',ready:true,reason:'OK',datasetVersion:4,
       publishedDataset:{releaseId:'other-release',preparationId:'prep-2',ruleId:'rules-2',sqlVersion:'4',sha256:'b'.repeat(64)}};
     const result = await send({type:'caption-hints',requestId:'independent-build',payload},sender(8));
     assert.equal(result.ok,true);
@@ -105,7 +105,7 @@ test('initializing, not-ready and failed backend validation do not send any busi
   try {
     for (const [reason, expected] of [['INITIALIZING','runtime-initializing'],['IDENTITY_MISMATCH','runtime-incompatible'],
       ['SCHEMA_MISMATCH','runtime-incompatible'],['DEPENDENCY_UNAVAILABLE','backend_unavailable']]) {
-      statusBody = {softwareVersion:'1.2.4',apiContract:'caption-hints.v4',mode:'formal',ready:false,reason,
+      statusBody = {softwareVersion:'1.2.4',apiContract:'caption-hints.v5',mode:'formal',ready:false,reason,
         datasetVersion:reason==='SCHEMA_MISMATCH'?null:4,publishedDataset:null};
       assert.deepEqual(await send({type:'caption-hints',requestId:reason,payload},sender(8)),{ok:false,reason:expected});
       assert.equal((await send({type:'local-preferences',action:'read'},manage)).ok,false);
@@ -271,7 +271,7 @@ test('malformed JSON is an invalid response rather than a network failure', asyn
 test('preferences use explicit localhost actions, no browser-local durable storage, and strict sender boundaries', async () => {
   const before=preferenceCalls.length; globalThis.fetch=async(_url,_options)=>({ok:true,json:async()=>prefState});
   const entryId=source.lexiconEntryId;
-  const expected={commonWordCutoff:1500,hidden:[{entryId,lemma:'reliable',gloss:'可靠的'}]};
+  const expected={commonWordCutoff:1500,hidden:[{entryId,lemma:'reliable',gloss:'可靠的',frequencyRank:321}]};
   prefState=expected;
   assert.deepEqual(await send({type:'local-preferences',action:'hide',entryId},sender(1)),{ok:true,...expected});
   assert.equal(preferenceCalls[before].url.endsWith('/preferences'),true); assert.equal(preferenceCalls[before].options.redirect,'error'); assert.equal(preferenceCalls[before].options.credentials,'omit');
@@ -364,12 +364,12 @@ test('unavailable or malformed recent-hint responses cannot masquerade as an emp
 
 test('lexicon browsing is server-paged and exact management sender only', async () => {
   let fetched;
-  globalThis.fetch=async(url,options)=>{fetched={url:String(url),options}; return {ok:true,json:async()=>({items:[{entryId:'7',lemma:'reliable',gloss:'可靠的',frequencyRank:321,hintState:'eligible'}],total:31,page:2,pageSize:20})};};
+  globalThis.fetch=async(url,options)=>{fetched={url:String(url),options}; return {ok:true,json:async()=>({items:[{entryId:'7',lemma:'reliable',gloss:'可靠的',frequencyRank:321,hintState:'hidden'}],total:31,page:2,pageSize:20})};};
   const manage={id:'extension-id',url:'chrome-extension://extension-id/manage.html'};
   assert.deepEqual(await send({type:'local-lexicon',query:'reliable',sort:'alphabet',page:2,pageSize:20},manage),
-    {ok:true,items:[{entryId:'7',lemma:'reliable',gloss:'可靠的',frequencyRank:321,hintState:'eligible'}],total:31,page:2,pageSize:20});
+    {ok:true,items:[{entryId:'7',lemma:'reliable',gloss:'可靠的',frequencyRank:321,hintState:'hidden'}],total:31,page:2,pageSize:20});
   assert.match(fetched.url,/\/api\/v1\/lexicon\?/); assert.match(fetched.url,/query=reliable/); assert.match(fetched.url,/sort=alphabet/); assert.match(fetched.url,/page=2/);
-  assert.equal(fetched.options.method,'GET'); assert.equal(fetched.options.cache,'no-store');
+  assert.equal(fetched.options.method,'POST'); assert.equal(fetched.options.cache,'no-store');
   assert.deepEqual(await send({type:'local-lexicon',query:'x',sort:'frequency',page:0,pageSize:20},manage),{ok:false,reason:'invalid-request'});
   assert.deepEqual(await send({type:'local-lexicon',query:'',sort:'frequency',page:1,pageSize:20},sender(3)),{ok:false,reason:'invalid-request'});
 });
@@ -498,7 +498,7 @@ test("connection editor checks before storing; failure preserves the current rou
     ]);
     calls.length = 0;
 
-    assert.deepEqual(await apply(custom), { ok: false, reason: "protocol-mismatch", expected:"caption-hints.v4", actual:"caption-hints.v3" });
+    assert.deepEqual(await apply(custom), { ok: false, reason: "protocol-mismatch", expected:"caption-hints.v5", actual:"caption-hints.v3" });
     const probing = apply("http://127.0.0.1:19082");
     assert.deepEqual(await apply(custom), { ok: false, reason: "busy" });
     releaseProbe({ ok: false });
@@ -507,7 +507,7 @@ test("connection editor checks before storing; failure preserves the current rou
     assert.equal((await send({ type: "runtime-status" }, owner)).origin, "http://127.0.0.1:18080");
     assert.ok(calls.every(call => call.init.method === "GET" && !("body" in call.init) && call.init.redirect === "error"));
 
-    candidateContract = "caption-hints.v4";
+    candidateContract = "caption-hints.v5";
     assert.deepEqual(await apply(custom + "/"), { ok: true, status: { ...statusBody, softwareVersion: "1.2.4" }, origin: custom });
     assert.deepEqual(stored, { backendConnection: { mode: "custom", origin: custom } });
     assert.equal((await apply(custom)).ok, true);
