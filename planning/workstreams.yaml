@@ -11636,6 +11636,28 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-OPS-2584
+        title: 独立验收并晋升 v3.0.0 正式发行候选
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: planning/workstreams.yaml
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [ops/release/version.txt, ops/release/notes/3.0.0.md, planning/workstreams.yaml, tmp/quality/**, tmp/phase-tools/v3-release-runtime-scope/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 对经主线审核的 v3.0.0 单容器私有候选独立验收、只读晋升预检并交付唯一正式审批入口。
+        deliverable: 核准词库、锁定候选、独立验收与审查收据，以及获批后的公开发行制品与真实渠道安装证据。
+        acceptance_criteria:
+        - 核准的现有词库、词频规则、发布资料、许可、对应源码和插件逐项绑定到精确 ARM64 候选，不复用其他发行证据。
+        - 原生送验、完整 repository-baseline 验证及只读独立审查由不同真实 actor 执行；Catalog 绑定同一候选的运行证据。
+        - 只读晋升预检不重建、不上传；正式公开保留 release-public 的单次真实人审，agent 不代批。
+        - 获批后核对精确镜像可匿名拉取、三个发行附件与实际渠道安装；实装验证一条 Podman 命令初始化内置词库及同版 Chrome 插件。
+        acceptance_evidence: [精确候选及摘要、独立验收和审查收据、只读晋升结果、GitHub 运行与批准、公开制品与实装证据。]
+        validation_command: node ops/release/workflow/run-release-workflow.mjs formal validate <uuid>
+        required_check_ids: [eng.release.version, eng.release.lifecycle-runtime, eng.release.candidate-runtime]
+        depends_on: []
       - id: LF-TSK-OPS-2580
         title: 减少 Podman 镜像和构建的实际载荷
         priority: P1

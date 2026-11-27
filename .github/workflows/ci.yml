@@ -59,6 +59,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA:contracts/versions.lock.json" 2>/dev/null; then
+            # 先完成固定 Wrapper 的下载，避免首次下载日志混入 SQLite 合同 JSON。
+            backend/gradlew --version
             for scope in extension-api sqlite-storage; do
               node scripts/contracts/version-contract.mjs check --scope "$scope" --base "$BASE_SHA"
             done
