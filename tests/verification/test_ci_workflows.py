@@ -293,6 +293,7 @@ class WorkflowContractTest(unittest.TestCase):
             run,
         )
         self.assertIn('podman --url "$LEXIFLOW_RELEASE_ARM64_DOCKER_HOST" info', run)
+        self.assertNotIn("compose version", run)
         self.assertNotIn("scripts/check_changes.py", run)
         self.assertNotIn("run_repository_checks.py", run)
         self.assertNotIn("scripts.acceptance validate", run)
