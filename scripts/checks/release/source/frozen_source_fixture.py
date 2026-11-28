@@ -42,6 +42,7 @@ FIXED_FILES = frozenset(
         ".gitignore",
         "AGENTS.md",
         "infra/sqlite/schema.sql",
+        "infra/sqlite/preferences.sql",
         "ops/release/build/release-image-build-plan.mjs",
         "ops/release/integrity/extension-archive-integrity.mjs",
         "ops/release/integrity/artifact-build-identity.mjs",

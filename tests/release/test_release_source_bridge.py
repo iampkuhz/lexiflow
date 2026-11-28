@@ -57,8 +57,12 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
             resolve_child_check,
             snapshot_check_inputs,
         )
+        from scripts.verification.planning.check_definitions import load_declarations
 
         root = Path(__file__).resolve().parents[2]
+        declarations = {
+            row["check_id"]: row for row in load_declarations(root)["checks"]
+        }
         for check_id in (
             "eng.release.lifecycle-runtime",
             "eng.release.candidate-runtime",
@@ -97,7 +101,9 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
                 )
             )
             self.assertIn("extension/package-lock.json", files)
-            self.assertIn("infra/sqlite/schema.sql", files)
+            for schema in ("infra/sqlite/schema.sql", "infra/sqlite/preferences.sql"):
+                self.assertIn(schema, files)
+                self.assertIn({"path": schema}, declarations[check_id]["triggers"])
 
     def test_real_frozen_fixture_executes_gradle_generation_identity(self) -> None:
         """只从真实 lifecycle 冻结闭包建 fixture，执行 bootJar 固定资料生成器。"""
@@ -121,6 +127,10 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
             output,
         )
         fixture = Path(result["fixture"])
+        for schema in ("infra/sqlite/schema.sql", "infra/sqlite/preferences.sql"):
+            self.assertEqual(
+                (fixture / schema).read_bytes(), (root / schema).read_bytes()
+            )
         executed = subprocess.run(
             [
                 "node",
@@ -271,6 +281,23 @@ class ReleaseSourceBridgeTests(unittest.TestCase):
         with self.assertRaises(bridge.BridgeError) as caught:
             bridge.consume_verify_snapshot(root, context, snapshot, out)
         self.assertEqual(caught.exception.code, "release-generation-closure-incomplete")
+        self.assertEqual(list(out.iterdir()), [])
+
+    def test_source_bridge_rejects_snapshot_without_preferences_schema(self) -> None:
+        from scripts.verification.planning.check_definitions import load_declarations
+
+        root = self._repo("missing-preferences-schema")
+        check = load_declarations(root)["checks"][0]
+        schema = "infra/sqlite/preferences.sql"
+        self.assertTrue((root / schema).is_file())
+        check["input_paths"].remove(schema)
+        write_declarations(root / "config/engineering/module-checks.yaml", [check])
+        context, snapshot = self._consumer_inputs(root, bridge.CHECK_ID)[1:]
+        out = self.base / "missing-preferences-schema-out"
+        out.mkdir()
+        with self.assertRaises(bridge.BridgeError) as caught:
+            bridge.consume_verify_snapshot(root, context, snapshot, out)
+        self.assertEqual(caught.exception.code, "release-closure-incomplete")
         self.assertEqual(list(out.iterdir()), [])
 
     def _repo(self, name: str = "repo", check_id: str = bridge.CHECK_ID) -> Path:
