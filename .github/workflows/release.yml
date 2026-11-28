@@ -167,7 +167,6 @@ jobs:
           test "$(git rev-parse refs/remotes/origin/main)" = "$EXPECTED_COMMIT"
           "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/integrity/source-build-identity.mjs --plan "$RELEASE_TAG"
           podman --url "$LEXIFLOW_RELEASE_ARM64_DOCKER_HOST" info >/dev/null
-          podman --url "$LEXIFLOW_RELEASE_ARM64_DOCKER_HOST" compose version
       - name: 构建并验证 ARM64 发行候选
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
