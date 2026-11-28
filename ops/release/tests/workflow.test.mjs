@@ -120,7 +120,7 @@ function boundaries(f, overrides = {}) {
     LEXIFLOW_CANDIDATE_RUNTIME_REQUEST: path.join(root, 'tmp/quality/release-workflow/1.2.3/candidate-runtime-request.json'),
   });
   return { calls, candidateDirectory, options: { root: f.root, platform: 'darwin', arch: 'arm64',
-    tagChecker: () => targetIdentity, identityReader: () => targetIdentity, ledgerTrackedCheck: () => {},
+    sourceChecker: () => targetIdentity, identityReader: () => targetIdentity, ledgerTrackedCheck: () => {},
     endpointChecker: async () => {},
     baseImageLoader: async () => [{ platform: 'linux/amd64' }, { platform: 'linux/arm64',
       javaRuntime: { reference: `registry.example/java@${armJavaId}`, imageId: armJavaId },
@@ -488,7 +488,7 @@ test('bad license, digest, tag and command failure cannot hand off', async t => 
     async f => { await writeFile(path.join(f.root, 'ops/release/distribution-licenses.json'),
       JSON.stringify({ schema_version: 'lexiflow.distribution-licenses.v1', licenses: [] })); },
     async f => { f.body.dataset.sha256 = sha('wrong'); await writeFile(f.request, JSON.stringify(f.body)); },
-    async (_f, b) => { b.options.tagChecker = () => { throw Error('wrong tag'); }; },
+    async (_f, b) => { b.options.sourceChecker = () => { throw Error('wrong planned source'); }; },
     async (_f, b) => { b.options.runCommand = async () => { throw Error('child failed'); }; },
   ].entries()) {
     const f = await fixture(t), b = boundaries(f); await mutate(f, b);
@@ -536,7 +536,7 @@ test('existing version-scoped handoff, duplicate JSON, symlink and oversize requ
 test('source drift during preparation never writes a handoff', async t => {
   const f = await fixture(t); const b = boundaries(f);
   let reads = 0;
-  b.options.tagChecker = () => ++reads === 1 ? targetIdentity : previousIdentity;
+  b.options.sourceChecker = () => ++reads === 1 ? targetIdentity : previousIdentity;
   assert.deepEqual(await prepareWorkflow(f.request, b.options), { status: 'BLOCKED', reason: 'WORKFLOW_FAILED' });
   await assert.rejects(readFile(path.join(f.root, 'tmp/quality/release-workflow/1.2.3/handoff.json')));
 });

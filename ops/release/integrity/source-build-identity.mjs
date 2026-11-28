@@ -239,10 +239,26 @@ export function chromeVersion(softwareVersion) {
   return `${numeric}.${softwareVersion === numeric ? 1 : 0}`;
 }
 
-/** 标签仅匹配干净正式源码；不创建标签，也不将开发输入晋升为正式版。 */
+function plannedIdentity(tag, root) {
+  const identity = resolveCleanBuildIdentity(root);
+  if (identity.channel !== 'release' || tag !== `v${identity.softwareVersion}`) throw new Error('release tag identity mismatch');
+  return identity;
+}
+
+/** 计划标签只命名干净主线候选，不要求 Git tag，也不授予公开发行资格。 */
+export function checkPlannedRelease(tag, root = repositoryRoot) {
+  const identity = plannedIdentity(tag, root);
+  try {
+    // 信任启动方从真实远端拉取的固定主线 ref，不接受调用者指定的分支。
+    gitOutput(root, performance.now() + 15_000, 'merge-base', '--is-ancestor',
+      identity.sourceCommit, 'refs/remotes/origin/main');
+  } catch { throw new Error('release candidate source must be integrated into origin/main'); }
+  return identity;
+}
+
+/** 正式发布还要求实际 Git 标签精确指向制品源码。 */
 export function checkReleaseTag(tag, root = repositoryRoot) {
-  const identity = resolveBuildIdentity(root);
-  if (identity.dirty || identity.channel !== 'release' || tag !== `v${identity.softwareVersion}`) throw new Error('release tag identity mismatch');
+  const identity = plannedIdentity(tag, root);
   let taggedCommit;
   try { taggedCommit = gitOutput(root, performance.now() + 15_000, 'rev-parse', '--verify', `refs/tags/${tag}^{commit}`).trim(); }
   catch { throw new Error('release tag unavailable'); }
@@ -257,6 +273,7 @@ export function checkReleaseSource(repoRoot = repositoryRoot) {
 
 async function main(args) {
   if (args.length === 0) { console.log(JSON.stringify(resolveBuildIdentity())); return; }
+  if (args.length === 2 && args[0] === '--plan') { console.log(JSON.stringify(checkPlannedRelease(args[1]))); return; }
   if (args.length === 2 && args[0] === '--tag') { console.log(JSON.stringify(checkReleaseTag(args[1]))); return; }
   if (args.length !== 1 || args[0] !== '--release') throw new Error('invalid arguments');
   console.log(JSON.stringify(checkReleaseSource()));

@@ -98,6 +98,60 @@ test('initializer failure keeps initialization gate and never launches API or cr
   assert.equal(await readFile(path.join(f.run, 'verified.json'), 'utf8').then(() => true, () => false), false);
 });
 
+for (const [scenario, ready, initial, initializerSucceeds, postCheckSucceeds] of [
+  ['empty interrupted database', false, '', true, true],
+  ['invalid interrupted database', false, 'invalid', false, false],
+  ['structure validation failure after recovery', false, '', true, false],
+  ['established corrupt database with stale initializing marker', true, 'invalid', false, false],
+]) {
+  test(`lexicon recovery: ${scenario}`, async t => {
+    const f = await lifecycleFixture(t);
+    await addPreferencesVolume(f);
+    const identity = runRuntime(f, 'read_identity; volume_identity_line');
+    assert.equal(identity.status, 0, identity.stderr);
+    await writeFile(path.join(f.root, '.lexiflow-owner'), 'lexiflow-runtime\n');
+    await writeFile(path.join(f.root, '.lexiflow-initializing'), identity.stdout + '\n');
+    if (ready) await writeFile(path.join(f.root, '.lexiflow-ready'), identity.stdout + '\n');
+    await writeFile(f.database, initial);
+    const log = path.join(f.tmp, 'recovery-calls');
+    await writeFile(path.join(f.bin, 'java'), `#!/bin/sh
+case "$*" in
+  *--api-contract*) printf '%s\\n' caption-hints.v5;;
+  *--storage-contract*|*'--verify-storage preferences'*) ;;
+  *'--verify-storage lexicon'*)
+    printf '%s\\n' verify >> '${log}'
+    [ "$(cat '${f.database}')" = valid ] && ${postCheckSucceeds ? 'true' : 'false'};;
+  *'--release-dataset initialize'*)
+    printf '%s\\n' initialize >> '${log}'
+    ${initializerSucceeds ? `printf valid > '${f.database}'` : 'exit 37'};;
+  *-Dserver.address=*) printf '%s\\n' api >> '${log}'; sleep 0.1;;
+  *) exit 39;;
+esac
+`, { mode: 0o700 });
+    const result = runRuntime(f, 'http_status_body() { HTTP_BODY="{\\"datasetVersion\\":42}"; return 0; }; runtime_health() { [ -f "$RUN/verified.json" ] && [ ! -e "$RUN/initializing" ]; }; runtime_start');
+    const calls = (await readFile(log, 'utf8')).trim().split('\n');
+    if (ready) {
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /lexicon-storage-incompatible/u);
+      assert.deepEqual(calls, ['verify']);
+    } else if (!initializerSucceeds) {
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /dataset-initialize-failed/u);
+      assert.deepEqual(calls, ['initialize']);
+    } else if (!postCheckSucceeds) {
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /lexicon-storage-incompatible/u);
+      assert.deepEqual(calls, ['initialize', 'verify']);
+    } else {
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(calls, ['initialize', 'verify', 'api']);
+      assert.equal(await readFile(path.join(f.root, '.lexiflow-ready'), 'utf8'), identity.stdout + '\n');
+    }
+    assert.equal(await readFile(f.database, 'utf8'), initializerSucceeds ? 'valid' : initial);
+    assert.equal(await readFile(f.preferencesDatabase, 'utf8'), 'synthetic');
+  });
+}
+
 test('an API-only bump does not change the installed volume identity', async t => {
   const f = await lifecycleFixture(t);
   const previous = runRuntime(f, 'read_identity; volume_identity_line');

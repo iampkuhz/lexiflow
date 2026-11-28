@@ -84,7 +84,7 @@ class TestReleaseSubject(unittest.TestCase):
         self._git("add", "ops/release/version.txt", "source.txt")
         self._git("commit", "-qm", "target fixture")
         self.commit = self._git("rev-parse", "HEAD")
-        self._git("tag", "v1.2.3")
+        self._git("update-ref", "refs/remotes/origin/main", self.commit)
         identity = self._identity("v1.2.3")
         self.candidates = (Path(self.temp.name) / "candidates").resolve()
         self.candidates.mkdir()
@@ -163,7 +163,7 @@ class TestReleaseSubject(unittest.TestCase):
             [
                 "node",
                 "ops/release/integrity/source-build-identity.mjs",
-                "--tag",
+                "--plan",
                 tag,
             ],
             cwd=self.root,
@@ -175,7 +175,7 @@ class TestReleaseSubject(unittest.TestCase):
 
     def _refresh_target_source(self):
         self.commit = self._git("rev-parse", "HEAD")
-        self._git("tag", "-f", "v1.2.3")
+        self._git("update-ref", "refs/remotes/origin/main", self.commit)
         identity = self._identity()
         marker_path = self.candidates / "target/candidate.json"
         self._write_json(marker_path, {"buildIdentity": identity})
@@ -192,12 +192,23 @@ class TestReleaseSubject(unittest.TestCase):
         )
         self._write_json(self.handoff_file, self.handoff)
 
-    def test_clean_tagged_candidate_handoff_is_accepted(self):
+    def test_untagged_candidate_handoff_subject_is_unchanged_when_tag_is_created(self):
+        self.assertEqual(self._git("tag", "--list", "v1.2.3"), "")
         subject = read_release_subject(self.root)
         self.assertEqual(subject["commit_sha"], self.commit)
         self.assertEqual(
             subject["target"]["candidate_sha256"], self.target["candidateSha256"]
         )
+        self._git("tag", "v1.2.3")
+        verify_release_subject(self.root, subject)
+        self.assertEqual(read_release_subject(self.root), subject)
+
+    def test_unintegrated_candidate_is_rejected_even_if_tagged(self):
+        self._git("tag", "v1.2.3")
+        self._git("update-ref", "refs/remotes/origin/main", "HEAD^")
+        with self.assertRaises(RecordError) as rejected:
+            read_release_subject(self.root)
+        self.assertEqual(rejected.exception.code, "release-source-not-integrated")
 
     def test_stable_host_binding_schema_and_exact_shape_are_required(self):
         original = dict(self.handoff)
@@ -452,6 +463,11 @@ class TestReleaseSubject(unittest.TestCase):
             read_release_subject(self.root)
 
     def test_dirty_source_and_wrong_tag_are_rejected(self):
+        self._write_json(self.handoff_file, {**self.handoff, "releaseTag": "v1.2.4"})
+        with self.assertRaises(RecordError) as rejected:
+            read_release_subject(self.root)
+        self.assertEqual(rejected.exception.code, "release-tag-drift")
+        self._write_json(self.handoff_file, self.handoff)
         (self.root / "source.txt").write_text("dirty\n")
         with self.assertRaises(RecordError):
             read_release_subject(self.root)
@@ -530,7 +546,7 @@ class TestReleaseSubject(unittest.TestCase):
         )
         self._git("commit", "-qm", "add synthetic formal Task")
         self.commit = self._git("rev-parse", "HEAD")
-        self._git("tag", "-f", "v1.2.3")
+        self._git("update-ref", "refs/remotes/origin/main", self.commit)
         identity = self._identity()
         target_marker = self.candidates / "target/candidate.json"
         self._write_json(target_marker, {"buildIdentity": identity})

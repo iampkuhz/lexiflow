@@ -196,6 +196,7 @@ checks:
   - git
   - python-package-yaml
   input_paths:
+  - .github/workflows/release.yml
   - contracts/versions.lock.json
   - scripts/contracts/contract-lock.mjs
   - tests/release
@@ -225,6 +226,7 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: .github/workflows/release.yml
   - path: contracts/versions.lock.json
   - path: scripts/contracts/contract-lock.mjs
   - path: tests/release
@@ -913,6 +915,7 @@ checks:
   - /bin/sh
   - mkfifo
   input_paths:
+  - .github/workflows/release.yml
   - contracts/versions.lock.json
   - scripts/contracts/contract-lock.mjs
   - scripts/acceptance
@@ -928,6 +931,7 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: .github/workflows/release.yml
   - path: contracts/versions.lock.json
   - path: scripts/contracts/contract-lock.mjs
   - path: scripts/acceptance

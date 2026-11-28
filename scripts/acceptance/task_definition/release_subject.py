@@ -299,7 +299,7 @@ def _producer_build_identity(repo: Path, tag: str) -> dict[str, Any]:
         )
     try:
         result = subprocess.run(
-            ["node", str(script), "--tag", tag],
+            ["node", str(script), "--plan", tag],
             cwd=repo,
             capture_output=True,
             timeout=25,
@@ -381,12 +381,15 @@ def read_release_subject(repo: Path, *, verify_identity: bool = True) -> dict[st
     if _git(repo, "status", "--porcelain", "--untracked-files=all"):
         raise RecordError("release-source-dirty", "repository must be clean")
     tag = handoff["releaseTag"]
-    if not isinstance(tag, str) or not re.fullmatch(
-        r"v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", tag
-    ):
-        raise RecordError("release-tag-drift", "release tag invalid")
-    if _git(repo, "rev-parse", "--verify", f"refs/tags/{tag}^{{commit}}") != commit:
-        raise RecordError("release-tag-drift", "tag must resolve to current commit")
+    if tag != f"v{version}":
+        raise RecordError("release-tag-drift", "planned tag must match source version")
+    try:
+        _git(repo, "merge-base", "--is-ancestor", commit, "refs/remotes/origin/main")
+    except RecordError:
+        raise RecordError(
+            "release-source-not-integrated",
+            "candidate source must belong to origin/main",
+        ) from None
     identity = handoff["buildIdentity"]
     if not isinstance(identity, dict) or identity.get("sourceCommit") != commit:
         raise RecordError("release-build-identity-drift", "source commit mismatch")

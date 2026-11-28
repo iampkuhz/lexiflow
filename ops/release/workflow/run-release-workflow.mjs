@@ -12,7 +12,7 @@ import { buildCandidateImages } from '../build/release-image-builder.mjs';
 import { assembleReleaseCandidate } from '../build/release-candidate-assembler.mjs';
 import { verifyReleaseCandidate } from '../integrity/release-candidate-verifier.mjs';
 import { verifyJarIdentity } from '../integrity/artifact-build-identity.mjs';
-import { checkReleaseTag, resolveBuildIdentity, assertBuildIdentityMatches } from '../integrity/source-build-identity.mjs';
+import { checkPlannedRelease, checkReleaseTag, resolveBuildIdentity, assertBuildIdentityMatches } from '../integrity/source-build-identity.mjs';
 import { loadBaseImageLock } from '../build/release-image-build-plan.mjs';
 import { validateRelativePath } from '../integrity/release-artifact-manifest.mjs';
 import { runRunnerCommand } from '../runner/runner.mjs';
@@ -319,7 +319,7 @@ export async function prepareWorkflow(requestFile, options = {}) {
   const assemble = options.assembleReleaseCandidate ?? assembleReleaseCandidate;
   const verify = options.verifyReleaseCandidate ?? verifyReleaseCandidate;
   const command = options.runCommand ?? runCommand;
-  const tagCheck = options.tagChecker ?? checkReleaseTag;
+  const sourceCheck = options.sourceChecker ?? checkPlannedRelease;
   const baseLoad = options.baseImageLoader ?? loadBaseImageLock;
   const endpointCheck = options.endpointChecker ?? (async endpoint => {
     const socket = endpoint.slice('unix://'.length);
@@ -365,7 +365,7 @@ export async function prepareWorkflow(requestFile, options = {}) {
     await safePath(request.outputParent, 'directory');
     if (within(root, request.outputParent) || within(request.outputParent, root)
       || (await readdir(request.outputParent)).length !== 0) fail('OUTPUT_PARENT_INVALID');
-    const identity = tagCheck(request.releaseTag, root);
+    const identity = sourceCheck(request.releaseTag, root);
     const quality = releaseWorkflowDirectory(root);
     await safePath(quality, 'directory', true);
     try {
@@ -493,7 +493,7 @@ export async function prepareWorkflow(requestFile, options = {}) {
     const proof = await timed('candidate-verify', () => verify(target));
     if (proof.candidateSha256 !== candidateSha256 || proof.buildIdentity.buildId !== identity.buildId) fail('CANDIDATE_VERIFY_FAILED');
     failurePhase = 'handoff-finalize';
-    assertBuildIdentityMatches(tagCheck(request.releaseTag, root), identity);
+    assertBuildIdentityMatches(sourceCheck(request.releaseTag, root), identity);
     if ((await readBoundedJson(requestFile)).sha256 !== requestSha256) fail('REQUEST_CHANGED');
     const finalHostBinding = hostBindingResolver();
     if (JSON.stringify(finalHostBinding) !== JSON.stringify(initialHostBinding)) fail('HOST_BINDING_DRIFT');

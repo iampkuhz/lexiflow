@@ -19,9 +19,9 @@
 ## 1.2. 这台电脑只需先准备一次
 
 1. **自动配置 runner。** 在源码根执行下方 `runner deps` 和 `runner setup`；工具通过已登录的 `gh` 获取短期 token，校验并安装官方 macOS ARM64 包、注册 `lexiflow-release` 标签并启动服务，无需网页复制命令。缺登录或权限时按[Runner 管理](first-release/preparation.md#16-runner-安装与日常管理)操作。以完成原生验收的同一 OS 用户运行，只用于受保护发行，不接不可信 PR。
-2. **留专用源码与资料目录。** 同一电脑可以有独立发行 clone；不要把 `LEXIFLOW_RELEASE_WORKSPACE` 指向日常开发 checkout 或现有 `.local/podman` 安装。验证期间不编辑/移动该源码；输入、候选和证据保持原路径。在推正式 tag 前先让这个 clone 的 HEAD 对齐已提交的精确源码，并准备私有请求；自动构建不等待人审。
+2. **留专用源码与资料目录。** 同一电脑可以有独立发行 clone；不要把 `LEXIFLOW_RELEASE_WORKSPACE` 指向日常开发 checkout 或现有 `.local/podman` 安装。验证期间不编辑/移动该源码；输入、候选和证据保持原路径。候选从受保护 main 的精确已提交 commit 准备，自动构建不等待人审。
 3. **核对工具和测试环境。** 运行 `runner doctor`；Homebrew 管理公共 CLI，既有工具链提供 Temurin Java 25。工程 Python 依赖、Playwright、隔离 Redis 与实际 Docker/Podman endpoint 仍按[验证环境](../verification-environment.md)准备。内部候选验收使用18082且保持正式18080/开发18081不动；最终公开安装另核对正式18080的切换窗口，不杀未知进程、不清库、不接到日常数据。
-4. **配置 GitHub。** 建立无审批的 `release-internal` 和要求 owner 人工批准的 `release-public`，内部构建和预检均设 `deployment: false`，只在 Actions 展示执行与错误、不新增内部 Deployment；正式公开仍保留 Deployment。两者只允许正式 `v*` tag；仅正式发布 job 允许发布写权限，单维护者允许本人审批，管理员 bypass 保持关闭；开启 immutable releases。按[配置表](first-release/preparation.md#11-github-配置字段)填写本机路径、测试资源与 secret；确认全部准备后才设 `LEXIFLOW_RELEASE_RUNNER_READY=true`。
+4. **配置 GitHub。** 建立无审批的 `release-internal` 和要求 owner 人工批准的 `release-public`，内部构建和预检均设 `deployment: false`，只在 Actions 展示执行与错误、不新增内部 Deployment；正式公开仍保留 Deployment。`release-internal` 仅增加精确 `main` 分支策略，`release-public` 保持正式 `v*` tag 限制；仅正式发布 job 允许发布写权限，单维护者允许本人审批，管理员 bypass 保持关闭；开启 immutable releases。按[配置表](first-release/preparation.md#11-github-配置字段)填写本机路径、测试资源与既有 secret；不新增 secret。确认全部准备后才设 `LEXIFLOW_RELEASE_RUNNER_READY=true`。
 5. **完成首发材料和验收准备。** 核准五类组件的许可与 notice、导出真实已发布资料、准备精确目标候选的构建请求，并安排独立 Formal 验证/审查。目标必须实际完成干净初始化、同卷重启、初始化中断恢复和故障验收；详细材料见[准备页](first-release/preparation.md#12-首次发行材料)，不能伪造或跳 Gate。
 
 ```sh
@@ -40,22 +40,24 @@ Runner Online 只说明机器已接入，不代表五步准备或 Formal 已完�
 | --- | --- | --- |
 | 1. 固定版本 | 审核并提交源码/许可，推到默认分支；`ops/release/version.txt` 为正式 `x.y.z`，同版本 tag/Release/GHCR 未使用 | 分支 Quick checks |
 | 2. 准备 | 专用 clone 对齐已提交 commit，更新私有请求，确认输出目录空、材料齐全 | 无人工审批；固定路径与隔离能力供自动构建使用 |
-| 3. 推 tag | 在干净目标 commit 创建并推 `v<版本>` | 托管 source 检查主线归属；本机 runner 自动构建私有候选并留下 handoff，不重复跑完整基线、不等待人审 |
-| 4. 独立验收 | 在原 checkout 通过 `formal` 入口送验 handoff，由不同原生 actor 使用同一受控环境完成 Formal，取得 `submission_id` | 独立 validator 执行完整发行基线，再只读审查和核链；无需制造开发 diff |
-| 5. 晋升 | 原 tag 手动运行 workflow，填写 submission 和 `PUBLISH`，自动预检后仅批准一次正式发布 | 自动只读预检 → 唯一人审 → 写前重核 → 推 GHCR → 上传并核对 Release 资产 → 公开发布 |
+| 3. 准备候选 | 从 `refs/heads/main` 显式 dispatch `operation=prepare`，填写 `expected_commit` 与预期 `release_tag` | 本机 runner 构建精确主线提交的私有候选并留下 handoff；不创建/推送 tag，不重复跑完整基线、不等待人审 |
+| 4. 独立验收并打标签 | 在原 checkout 通过 `formal` 入口送验 handoff，由不同原生 actor 使用同一受控环境完成 Formal；`formal check` 通过后运行 `python3 -m scripts.acceptance consume-candidate --submission-id <uuid> --candidate-directory <absolute>` | 原候选、正式版本、`origin/main` 祖先关系、提交及制品摘要再次精确核对；只在完全匹配后创建新 tag，既有 tag 不动 |
+| 5. 晋升 | 从 `refs/tags/<release_tag>` 显式 dispatch `operation=publish`，填写同一 `submission_id` 和 `PUBLISH`，自动预检后仅批准一次正式发布 | 核实真实 tag、同一 submission、唯一真实人类 GitHub 审批且无管理员绕过；自动只读预检 → 唯一人审 → 写前重核 → 推 GHCR → 上传并核对 Release 资产 → 公开发布 |
 
 下列只在上述前置已满足、由负责人决定发布后运行；占位值必须替换。不创建同名 draft，不 force/move tag。
 
 ```sh
-# 干净的目标源码根；该 commit 已审核并推送，版本和远端身份未使用。
+# 打标签前：候选和 Formal 已通过。命令只复核精确原候选；只有成功后才创建新 tag。
+python3 -m scripts.acceptance consume-candidate --submission-id '<SUBMISSION_UUID>' --candidate-directory '<候选绝对路径>'
+# 仅在命令成功后执行；TAG 必须是该候选的 release_tag，且本地不存在该 tag。
 TAG='v<正式版本>'
 git tag -a "$TAG" -m "正式发行 $TAG"
-node ops/release/integrity/source-build-identity.mjs --tag "$TAG"
-# 身份核对成功后才运行这一行：
+# 仅推送刚创建且指向已验收 commit 的精确 tag；不移动或覆盖既有 tag。
 git push origin "refs/tags/$TAG"
 
-# 等准备与独立 Formal 全部通过后，触发晋升；不是紧接着推 tag 就执行。
+# 正式 tag 已创建并推送后，才显式触发晋升；不是候选 dispatch。
 gh workflow run release.yml --repo iampkuhz/lexiflow --ref "$TAG" \
+  -f operation=publish \
   -f release_tag="$TAG" -f submission_id='<本次SUBMISSION_UUID>' \
   -f publish_confirmation=PUBLISH
 ```

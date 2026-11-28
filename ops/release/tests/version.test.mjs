@@ -347,6 +347,23 @@ test('formal tag requires clean numeric version and tag at exact HEAD', async ()
     assert.throws(() => checkReleaseTag('v1.2.3', root));
   });
 });
+test('planned release has the same identity before tagging and requires integrated clean source', async () => {
+  const { checkPlannedRelease, checkReleaseTag } = await import('../integrity/source-build-identity.mjs');
+  withFixture({}, root => {
+    assert.throws(() => checkPlannedRelease('v1.2.3', root), /origin\/main/);
+    git(root, 'update-ref', 'refs/remotes/origin/main', 'HEAD');
+    assert.throws(() => checkPlannedRelease('v1.2.4', root), /tag identity mismatch/);
+    const planned = checkPlannedRelease('v1.2.3', root);
+    assert.throws(() => checkReleaseTag('v1.2.3', root), /tag unavailable/);
+    writeFileSync(path.join(root, 'source'), 'dirty');
+    assert.throws(() => checkPlannedRelease('v1.2.3', root), /must be clean/);
+    git(root, 'add', '.'); git(root, 'commit', '-qm', 'not yet integrated');
+    assert.throws(() => checkPlannedRelease('v1.2.3', root), /origin\/main/);
+    git(root, 'checkout', '--detach', 'refs/remotes/origin/main');
+    git(root, 'tag', 'v1.2.3');
+    assert.deepEqual(checkReleaseTag('v1.2.3', root), planned);
+  });
+});
 test('build identity refuses symlinks rather than hashing external private input', async () => {
   const { resolveBuildIdentity } = await import('../integrity/source-build-identity.mjs');
   const { symlinkSync } = await import('node:fs');

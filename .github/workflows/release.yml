@@ -1,22 +1,29 @@
 name: 发行候选与正式发布
-run-name: ${{ github.event_name == 'push' && '私有候选构建' || '正式发行晋升' }} · ${{ github.ref_name }}
+run-name: ${{ inputs.operation == 'prepare' && '私有候选构建' || '正式发行晋升' }} · ${{ inputs.release_tag }}
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
-      submission_id:
-        description: 原生正式验收提交 UUID
+      operation:
+        description: 操作
         required: true
+        type: choice
+        options: [prepare, publish]
+      expected_commit:
+        description: prepare 时必须与本次 main 事件提交及当前 origin/main 一致
+        required: false
         type: string
       release_tag:
-        description: 已准备的发行标签
+        description: 预定正式发行标签（vX.Y.Z）
         required: true
         type: string
+      submission_id:
+        description: publish 时的原生正式验收提交 UUID
+        required: false
+        type: string
       publish_confirmation:
-        description: 明确输入 PUBLISH
-        required: true
+        description: publish 时明确输入 PUBLISH
+        required: false
         type: string
       confirmed_recovery:
         description: 仅在已核实远端精确镜像与事务现场后勾选；不跳过候选校验或审批
@@ -27,48 +34,100 @@ on:
 permissions:
   contents: read
 
-# 专用 Mac 仅有一台；标签准备和经人工批准的晋升不得并发运行，即使针对不同标签也不例外。
+# 专用 Mac 仅有一台；准备和经人工批准的晋升不得并发运行。
 concurrency:
   group: lexiflow-release-host
   cancel-in-progress: false
 
 jobs:
   source:
-    name: 验证正式发行标签来源
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && inputs.publish_confirmation == 'PUBLISH' && inputs.release_tag == github.ref_name)
+    name: 在托管运行器验证操作与来源
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
-      commit: ${{ steps.identity.outputs.commit }}
+      operation: ${{ steps.admit.outputs.operation }}
+      commit: ${{ steps.admit.outputs.commit }}
+      release_tag: ${{ steps.admit.outputs.release_tag }}
     steps:
-      - name: 检出仓库
+      - name: 检出事件提交
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: 配置 Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
-      - name: 验证精确的发行标签来源
-        id: identity
+      - name: 验证请求并固定来源
+        id: admit
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          test "$GITHUB_REF" = "refs/tags/$RELEASE_TAG"
-          node ops/release/integrity/source-build-identity.mjs --tag "$RELEASE_TAG"
-          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
-          git merge-base --is-ancestor "$(git rev-parse HEAD)" refs/remotes/origin/main
-          printf 'commit=%s\n' "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: 确认专用运行器已就绪
-        env:
+          OPERATION: ${{ inputs.operation }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SUBMISSION_ID: ${{ inputs.submission_id }}
+          PUBLISH_CONFIRMATION: ${{ inputs.publish_confirmation }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_SHA: ${{ github.sha }}
+          EVENT_REF_PROTECTED: ${{ github.ref_protected }}
+          GH_TOKEN: ${{ github.token }}
           RUNNER_READY: ${{ vars.LEXIFLOW_RELEASE_RUNNER_READY }}
         run: |
+          set -euo pipefail
           test "$RUNNER_READY" = true
+          test "$EVENT_REF_PROTECTED" = true
+          test "$(git rev-parse HEAD)" = "$EVENT_SHA"
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          VERSION="$(cat ops/release/version.txt)"
+          test "$RELEASE_TAG" = "v$VERSION"
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          if [ "$OPERATION" = prepare ]; then
+            test "$EVENT_REF" = refs/heads/main
+            [[ "$EXPECTED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+            test "$EXPECTED_COMMIT" = "$EVENT_SHA"
+            test "$EXPECTED_COMMIT" = "$(git rev-parse refs/remotes/origin/main)"
+            curl --fail --silent --show-error \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=$EXPECTED_COMMIT&per_page=100" \
+              | node -e '
+                let input = "";
+                process.stdin.setEncoding("utf8");
+                process.stdin.on("data", chunk => input += chunk);
+                process.stdin.on("end", () => {
+                  let data;
+                  try { data = JSON.parse(input); } catch { process.exit(2); }
+                  const ok = (data.workflow_runs || []).some(run =>
+                    run.path === ".github/workflows/ci.yml" && run.event === "push" &&
+                    run.head_branch === "main" && run.head_sha === process.env.EXPECTED_COMMIT &&
+                    run.status === "completed" && run.conclusion === "success");
+                  if (!ok) process.exit(1);
+                });
+              '
+            node ops/release/integrity/source-build-identity.mjs --plan "$RELEASE_TAG"
+            # Command failure is distinct from a successful lookup returning no tag.
+            REMOTE_TAGS="$(git ls-remote --refs --tags origin "refs/tags/$RELEASE_TAG")"
+            test -z "$REMOTE_TAGS"
+          elif [ "$OPERATION" = publish ]; then
+            test "$EVENT_REF" = "refs/tags/$RELEASE_TAG"
+            test "$PUBLISH_CONFIRMATION" = PUBLISH
+            [[ "$SUBMISSION_ID" =~ ^[0-9a-fA-F-]{36}$ ]]
+            test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+            node ops/release/integrity/source-build-identity.mjs --tag "$RELEASE_TAG"
+            git merge-base --is-ancestor "$(git rev-parse HEAD)" refs/remotes/origin/main
+          else
+            echo "invalid operation" >&2; exit 2
+          fi
+          printf 'operation=%s\ncommit=%s\nrelease_tag=%s\n' "$OPERATION" "$(git rev-parse HEAD)" "$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
   prepare:
     name: 构建私有 ARM64 候选
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: success() && needs.source.outputs.operation == 'prepare'
     needs: source
     runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
     environment:
@@ -85,13 +144,12 @@ jobs:
       LEXIFLOW_RELEASE_GRADLE_CACHE: ${{ vars.LEXIFLOW_RELEASE_GRADLE_CACHE }}
       LEXIFLOW_RELEASE_NPM_CACHE: ${{ vars.LEXIFLOW_RELEASE_NPM_CACHE }}
     steps:
-      # 已配置的固定 checkout 是唯一来源与证据根；不得在含回执的工作区中执行 checkout 或清理。
       - name: 拒绝不安全或已变更的固定源码目录
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
           LEXIFLOW_RELEASE_NODE_BIN: ${{ vars.LEXIFLOW_RELEASE_NODE_BIN }}
           EXPECTED_COMMIT: ${{ needs.source.outputs.commit }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ needs.source.outputs.release_tag }}
         run: |
           test -n "$WORKSPACE"
           test -d "$WORKSPACE/.git"
@@ -105,10 +163,12 @@ jobs:
           test ! -e "$WORKSPACE/tmp/quality/release-workflow/$VERSION"
           cd "$WORKSPACE"
           test -x "$LEXIFLOW_RELEASE_NODE_BIN/node"
-          "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/integrity/source-build-identity.mjs --tag "$RELEASE_TAG"
-          podman info >/dev/null
-          podman compose version
-      - name: 构建并验证完整的 ARM64 发行候选
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "$EXPECTED_COMMIT"
+          "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/integrity/source-build-identity.mjs --plan "$RELEASE_TAG"
+          podman --url "$LEXIFLOW_RELEASE_ARM64_DOCKER_HOST" info >/dev/null
+          podman --url "$LEXIFLOW_RELEASE_ARM64_DOCKER_HOST" compose version
+      - name: 构建并验证 ARM64 发行候选
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
           REQUEST_FILE: ${{ vars.LEXIFLOW_RELEASE_REQUEST_FILE }}
@@ -120,11 +180,11 @@ jobs:
           cd "$WORKSPACE"
           test -x "$LEXIFLOW_RELEASE_NODE_BIN/node"
           "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs prepare "$REQUEST_FILE"
-      # 准备阶段仅留下私有交接，不构成验证证据。完整仓库基线由独立原生验证器负责；Actions 不得预先对同一候选运行完整套件。
+      # 完整仓库基线由独立原生验证器负责；Actions 仅构建和交接。
 
   promotion-precheck:
     name: 复核独立验收证据
-    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && inputs.publish_confirmation == 'PUBLISH' && inputs.release_tag == github.ref_name
+    if: success() && needs.source.outputs.operation == 'publish'
     needs: source
     runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
     environment:
@@ -141,13 +201,13 @@ jobs:
       LEXIFLOW_RELEASE_GRADLE_CACHE: ${{ vars.LEXIFLOW_RELEASE_GRADLE_CACHE }}
       LEXIFLOW_RELEASE_NPM_CACHE: ${{ vars.LEXIFLOW_RELEASE_NPM_CACHE }}
     steps:
-      - name: 在原始固定源码目录中重新消费不可变原生证据
+      - name: 在原始固定源码目录中消费不可变原生证据
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
           LEXIFLOW_RELEASE_NODE_BIN: ${{ vars.LEXIFLOW_RELEASE_NODE_BIN }}
           EXPECTED_COMMIT: ${{ needs.source.outputs.commit }}
           SUBMISSION_ID: ${{ inputs.submission_id }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TAG: ${{ needs.source.outputs.release_tag }}
         run: |
           test -n "$WORKSPACE"
           test -n "$EXPECTED_COMMIT"
@@ -172,7 +232,7 @@ jobs:
 
   promotion:
     name: 发布已批准的正式发行
-    if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/tags/v') && inputs.publish_confirmation == 'PUBLISH' && inputs.release_tag == github.ref_name
+    if: success() && needs.source.outputs.operation == 'publish'
     needs: [source, promotion-precheck]
     runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
     environment: release-public
@@ -189,19 +249,22 @@ jobs:
       LEXIFLOW_RELEASE_GRADLE_CACHE: ${{ vars.LEXIFLOW_RELEASE_GRADLE_CACHE }}
       LEXIFLOW_RELEASE_NPM_CACHE: ${{ vars.LEXIFLOW_RELEASE_NPM_CACHE }}
     steps:
-      - name: 仅在受保护审批及最新原生证据检查后发布
+      - name: 仅在受保护审批及最新证据检查后发布
         env:
           WORKSPACE: ${{ vars.LEXIFLOW_RELEASE_WORKSPACE }}
           LEXIFLOW_RELEASE_NODE_BIN: ${{ vars.LEXIFLOW_RELEASE_NODE_BIN }}
+          EXPECTED_COMMIT: ${{ needs.source.outputs.commit }}
           SUBMISSION_ID: ${{ inputs.submission_id }}
-          RELEASE_TAG: ${{ inputs.release_tag }}
+          RELEASE_TAG: ${{ needs.source.outputs.release_tag }}
           CONFIRMED_RECOVERY: ${{ inputs.confirmed_recovery }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LEXIFLOW_RELEASE_CONFIG_TOKEN: ${{ secrets.LEXIFLOW_RELEASE_CONFIG_TOKEN }}
         run: |
           test -n "$WORKSPACE"
+          test -n "$EXPECTED_COMMIT"
           test -d "$WORKSPACE/.git"
           test -x "$WORKSPACE/.local/lexiflow-python/bin/python3"
+          test "$(git -C "$WORKSPACE" rev-parse HEAD)" = "$EXPECTED_COMMIT"
           export PATH="$WORKSPACE/.local/lexiflow-python/bin:$LEXIFLOW_RELEASE_NODE_BIN:$PATH"
           cd "$WORKSPACE"
           test -x "$LEXIFLOW_RELEASE_NODE_BIN/node"
