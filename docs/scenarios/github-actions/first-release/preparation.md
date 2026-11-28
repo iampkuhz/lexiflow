@@ -6,7 +6,7 @@
 
 ## 1.1. GitHub 配置字段
 
-管理员按[仓库管理员准备](../../github-actions.md#13-仓库管理员准备)配置私有与正式发布两个 Environment、唯一 runner、隔离服务、不可变发行与权限。`release-internal` 无人工审批，仅给测试能力；`release-public` 保留 owner required reviewer，单维护者设置 `prevent_self_review=false`、`can_admins_bypass=false`。两者仅允许正式 `v*` tag。当前电脑可以承载 runner，但使用专用源码与隔离数据，不能让其他 workflow 或不可信 PR 在此执行。所需变量如下：
+管理员按[仓库管理员准备](../../github-actions.md#13-仓库管理员准备)配置私有与正式发布两个 Environment、唯一 runner、隔离服务、不可变发行与权限。`release-internal` 无人工审批，仅给测试能力，并仅增加精确 `main` 分支策略；`release-public` 保留 owner required reviewer，单维护者设置 `prevent_self_review=false`、`can_admins_bypass=false`，仅允许正式 `v*` tag。不要增加 secret 或放宽公开环境策略。当前电脑可以承载 runner，但使用专用源码与隔离数据，不能让其他 workflow 或不可信 PR 在此执行。所需变量如下：
 
 | 配置位置 | 名称 | 要填什么 |
 | --- | --- | --- |
@@ -39,6 +39,18 @@ environment:
 正式发布引用 `release-public`，保留默认 Deployment 和唯一人审；仅正式发布阶段公开已验收的精确镜像与三个附件，内部产物仍留在本机隔离候选目录。所有 job 在 Actions 中仍有状态和日志。该设置不兼容 GitHub App 自定义 deployment protection rule；不要通过删除必要保护来规避。参见 [GitHub 无部署对象的环境](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/control-deployments#using-environments-without-deployments)。
 
 Environment 标识切换须同步发布器的真实环境 id/名称核验、保护、变量和 Secret。新域配置并读回后才切换；Secret 无法从 GitHub 读回明文，须通过已授权来源安全注入。缺配置则停止，不回退宽权限或借用旧审批。既有标签的 workflow 不随 main 改变，不为展示调整移动正式标签或重建已发布制品；停用旧环境前确认无活动运行，禁止重跑已退役环境的旧流程以免自动生成无保护环境。`deployment: false` 不会删除既有历史记录。
+
+### 1.1.1. 预标签候选 dispatch
+
+候选准备使用手动 dispatch，且只接受 `operation=prepare`、`refs/heads/main`、`expected_commit` 与 `release_tag`。`expected_commit` 必须逐字匹配此次主线 checkout；`release_tag` 指定将来正式版本的 tag 名，目标 tag 必须尚不存在。该阶段只在 `release-internal` 增加精确 `main` 的 Environment 部署分支策略；main ruleset 要求 PR 与既有 GitHub Actions CI 必过、review 数为 0，并禁止删除或强推。不改 `release-public` 的正式 tag 规则或准入标准；不因 tag push 构建，不创建或推送 tag，也不需要新 secret。托管 `source` 只作单一准入 job，后续准备才进入隔离专用 runner。候选准备仅使用隔离测试能力，不含发布凭据。
+
+正式候选复用现有本机 `prepare <request>` 与 `formal submit`、`validate`、`review`、`check` 流程。正式主体允许 tag 尚不存在，但仍绑定预期版本、`origin/main` 祖先关系、精确 commit 和全部候选制品。Formal 链通过后，打标签前执行：
+
+```sh
+python3 -m scripts.acceptance consume-candidate --submission-id <uuid> --candidate-directory <absolute>
+```
+
+命令只核验原候选的精确字节、submission、提交与版本；成功是维护者创建新本地正式 tag 的前置条件，不会替代人工显式的 Git 操作。随后只推送该精确新 tag。任何不匹配均失败关闭；不得修改或移动已存在 tag 或历史资料。
 
 ## 1.2. 首次发行材料
 
@@ -105,7 +117,7 @@ python3 -m scripts.local.run_with_java_toolchain java \
 
 按 1.1 先准备固定 Node、Java、Python、浏览器及基础镜像/隔离服务，再进入 private。候选生成后不升级 macOS、CLT 或其他已冻结工具，不切换用户、临时根、socket 或资料；系统与工具变更应先安排在下一候选之前。private 不重复完整发行基线；完整基线只由独立 validator 对该候选执行一次。promotion 消费同一候选和原生证明，不重新构建制品。
 
-正式链齐备后先执行 1.3 的本机只读 `resume`，通过才 dispatch。只读预检直接检查镜像归档真实标签、对应源码/许可绑定以及资料/扩展绑定，和 publish 共用静态资产判据；不复制大型附件、不生成假远端 digest，也不需要发布 token。通过预检不代表远端一定可用，正式写入前仍重核候选、审批和远端身份。
+正式链齐备后，先由 `formal check` 核对完整 receipt/hash DAG，再按 1.1.1 用 `consume-candidate` 在发 tag 前复核原候选。标签推送后才从正式 tag 显式 dispatch 发布流程；promotion 的只读预检直接检查镜像归档真实标签、对应源码/许可绑定以及资料/扩展绑定，和 publish 共用静态资产判据；不复制大型附件、不生成假远端 digest，也不需要发布 token。通过预检不代表远端一定可用，正式写入前仍重核候选、审批和远端身份。
 
 已证未发生本次远端写入的候选或 registry 拒绝以 `published=false` 表达；不能仅因存在错误阶段就要求未知写入恢复。真正未知写入仍以 `published=unknown` 保守停止，并保留事件；响应异常按 1.1 只读确认，禁止以自动重传、自动 dispatch、删除现场或盲目抬高超时代替定位。一次 private 加一次 promotion 是正常预算，不是对网络、权限变化或偶发浏览器故障的成功率承诺。
 
@@ -128,11 +140,11 @@ python3 -m scripts.local.run_with_java_toolchain java \
 # 按计划核对 receipt/hash DAG；缺依赖或人类批准不补签、不绕过。
 "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs formal check '<同一SUBMISSION_UUID>'
 
-# 负责人只读晋升预检，不发布、不需要发布 token。
-"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume '<同一SUBMISSION_UUID>' "$TAG"
+# 正式链通过后、创建 tag 前，核对并消费原始候选；该入口成功后才允许推送新 tag。
+python3 -m scripts.acceptance consume-candidate --submission-id '<同一SUBMISSION_UUID>' --candidate-directory '<候选绝对路径>'
 ```
 
-`formal` 只把固定角色命令交给既有 Delivery Gate，保留实际 Codex 身份来源；它不代替审阅或授予独立身份。`formal review` 必须传入审查者按 [Delivery Gate 的证据合同](../../../reference/delivery-gate.md#12-阶段核对要点)写成的实际意见文件。审查须核对完整发行链、`repository-baseline` 与同一候选的实际运行 stdout 绑定；没有阻断问题也须记录具体核对证据。命令返回 `BLOCKED/FAIL` 时保留记录，按具体缺项处理。正式链 PASS 且 `resume` 返回 `status=PASS` 后才进入手动晋升。不要编辑/格式化/切换源码、移动候选/请求、重新构建 JAR/ZIP 或另换验收机；任何输入变化都使后续复核失效。
+`formal` 只把固定角色命令交给既有 Delivery Gate，保留实际 Codex 身份来源；它不代替审阅或授予独立身份。`formal review` 必须传入审查者按 [Delivery Gate 的证据合同](../../../reference/delivery-gate.md#12-阶段核对要点)写成的实际意见文件。审查须核对完整发行链、`repository-baseline` 与同一候选的实际运行 stdout 绑定；没有阻断问题也须记录具体核对证据。正式验收主体可没有 tag；Formal 链通过后，`consume-candidate` 必须再次确认原候选及 submission、提交、版本和摘要完全一致；成功后维护者才显式创建并推送新 tag。不得编辑/格式化/切换源码、移动候选/请求、重新构建 JAR/ZIP 或另换验收机；任何输入变化都使后续复核失效。正式 tag 推送后从 `refs/tags/<release_tag>` 以 `operation=publish` 触发 workflow，填写同一 `submission_id` 与 `PUBLISH`；它须验证实际 tag、同一原生 submission、同一唯一真实人类 GitHub 批准及无管理员绕过，方可继续晋升。
 
 发行交接使用操作系统稳定宿主标识与实际用户的摘要绑定，不使用可变化的主机名；原始系统标识不写入交接或日志。准备、正式验收和晋升仍分别重新核对同一宿主用户、规范仓库根、精确提交及候选摘要。来源不可用或宿主、用户、路径、候选变化时停止，不允许手填身份兜底；系统重装或主机克隆不承诺复用旧交接。当前实现见 [宿主绑定](../../../../ops/release/host_resources/release_host_identity.py)。
 

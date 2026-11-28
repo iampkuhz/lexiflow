@@ -229,7 +229,7 @@ runtime_start() {
       *) fail volume-unknown-content;;
     esac
   done
-  local expected marker
+  local expected marker interrupted_initialization=false
   expected=$(volume_identity_line)
   for marker in "$ROOT/.lexiflow-ready" "$ROOT/.lexiflow-ready.pending" "$ROOT/.lexiflow-initializing" "$ROOT/.lexiflow-initializing.pending"; do
     if [[ -e "$marker" || -L "$marker" ]]; then [[ -f "$marker" && ! -L "$marker" && "$(cat "$marker")" == "$expected" ]] || fail volume-identity-mismatch; fi
@@ -237,9 +237,17 @@ runtime_start() {
   if [[ -e "$ROOT/.lexiflow-ready" || -e "$ROOT/.lexiflow-ready.pending" ]]; then
     [[ -f "$DB" && ! -L "$DB" ]] || fail sqlite-marker-without-database
   fi
-  if [[ -e "$DB" && ! -e "$ROOT/.lexiflow-ready" && ! -e "$ROOT/.lexiflow-ready.pending" \
-      && ! -e "$ROOT/.lexiflow-initializing" && ! -e "$ROOT/.lexiflow-initializing.pending" ]]; then fail sqlite-initialization-proof-missing; fi
-  verify_storage_volume lexicon
+  if [[ -e "$DB" && ! -e "$ROOT/.lexiflow-ready" && ! -e "$ROOT/.lexiflow-ready.pending" ]]; then
+    [[ -e "$ROOT/.lexiflow-initializing" || -e "$ROOT/.lexiflow-initializing.pending" ]] || fail sqlite-initialization-proof-missing
+    # An owned first installation can be interrupted before SQLite commits the schema.
+    # Let the trusted initializer recover its transaction before checking the schema read-only.
+    if [[ -e "$DB-journal" || -L "$DB-journal" ]]; then
+      [[ -f "$DB-journal" && ! -L "$DB-journal" && -O "$DB-journal" ]] || fail lexicon-storage-ownership-invalid
+    fi
+    interrupted_initialization=true
+  else
+    verify_storage_volume lexicon
+  fi
   verify_storage_volume preferences
   if [[ ! -e "$PREFERENCES_DB" ]]; then
     umask 077
@@ -265,6 +273,7 @@ runtime_start() {
   if wait "$INIT_PID"; then INIT_PID=''; else INIT_PID=''; fail dataset-initialize-failed; fi
   [[ -f "$DB" && ! -L "$DB" && -O "$DB" ]] || fail sqlite-file-missing
   chmod 0600 "$DB" || fail sqlite-file-permissions
+  if [[ "$interrupted_initialization" == true ]]; then verify_storage_volume lexicon; fi
   unset LEXIFLOW_RELEASE_JDBC_URL
   [[ -f "$RUN/initializing" && ! -L "$RUN/initializing" ]] || fail run-state-missing
   export SPRING_DATASOURCE_URL="jdbc:sqlite:$DB?mode=ro"

@@ -3,7 +3,7 @@
 > 位置：[仓库生命周期](../README.md) → GitHub Actions。普通工程反馈与正式发行是两层；任何快速检查都不是 Formal receipt。
 
 
-首次在 GitHub 发布请从[第一次 Release 操作手册](github-actions/first-release.md)按顺序执行：先管理员配置与材料，后标签候选、原生验收和手动晋升。本页保留工作流模型与合同，不以流程图代替实际操作步骤。
+首次在 GitHub 发布请从[第一次 Release 操作手册](github-actions/first-release.md)按顺序执行：先管理员配置与材料，后主线候选、原生验收、打标签和手动晋升。本页保留工作流模型与合同，不以流程图代替实际操作步骤。
 
 ## 1.1. 分支与 PR：共享快速入口
 
@@ -11,7 +11,7 @@
 | --- | --- | --- |
 | 检查 PR | `python3 -m scripts.triggers.run_ci_quick_checks quick --base <完整commit>`；新分支用 `--all` | 必需与受影响 Check 完成；不等于 full Verify/Formal |
 | 下载并测试扩展包 | 从同次 quick run 下载 ZIP，校验 `.zip.sha256` 后加载解压目录 | artifact 对应目标 commit；Smoke 不替代真实观看或发行验收 |
-| 准备正式候选 | 从受保护的 `v*` tag 触发 release workflow | 单一 Mac/Podman 私有候选与固定交接完成，后续独立执行完整 Repository Verify |
+| 准备正式候选 | 从 `refs/heads/main` 显式 dispatch `operation=prepare`，填写 `expected_commit` 与 `release_tag` | 精确主线提交的私有候选与固定交接完成；不创建或推送 tag，后续独立执行完整 Repository Verify |
 | 晋升公开发行 | 原标签手动续办，已有独立 Formal 链、唯一人审授权与 `PUBLISH` | release资产摘要复核并发布；缺证/漂移立即停止 |
 
 `.github/workflows/ci.yml` 在分支 push、`pull_request` 和手动运行时调用：
@@ -127,9 +127,9 @@ shasum -a 256 -c lexiflow-extension-<softwareVersion>.zip.sha256
 
 ## 1.2. 正式标签：完整验证与独立验收
 
-`.github/workflows/release.yml` 将 `v*` 标签准备与显式手动晋升分开。标签阶段及手动晋升先在托管运行器验证精确标签属于已集成 `origin/main`，并核对 commit、干净源码与三段正式版本完全一致；SNAPSHOT、dirty 输入或标签漂移均拒绝。随后唯一专用 Apple Silicon macOS/Podman runner 构建 JAR、扩展和 ARM64 镜像，组装真实候选并留下固定本机 handoff。
+`.github/workflows/release.yml` 将打标签前的私有候选准备与正式 tag 上的显式手动晋升分开。`operation=prepare` 只能从 `refs/heads/main` 手动 dispatch；`expected_commit` 必须匹配本次受保护主线 checkout 的精确提交，`release_tag` 是预期正式版本标签名，目标标签必须尚不存在。此阶段不创建或推送 tag。只在 `release-internal` 增加精确 `main` 的 Environment 部署分支策略；main ruleset 要求 PR 与现有 GitHub Actions CI 通过、review 数为 0，并禁止删除或强推。不得新增 secret，也不改变 `release-public` 的既有准入标准。托管 `source` 是单一准入 job，先确认主线来源、提交、干净源码及三段正式版本一致，再由唯一专用 Apple Silicon macOS/Podman runner 构建 JAR、扩展和 ARM64 镜像，组装真实候选并留下固定本机 handoff。
 
-Actions 的职责止于构建和交接，不先跑开发差异报告或完整 Repository Verify。负责人在原 checkout 用正式发行 Task 的 `submit --release-handoff` 送验干净提交和精确候选；独立原生 validator 负责完整 `repository-baseline`，reviewer 只读复核，`check` 只核 receipt/hash DAG。普通代码 Task 仍使用开发报告送验，两种输入不混用。
+Actions 的职责止于构建和交接，不先跑开发差异报告或完整 Repository Verify。负责人在原 checkout 用现有 `prepare <request>` 生成候选，再以正式发行 Task 的 `submit --release-handoff` 送验干净提交和精确候选；正式验收主体可没有 tag，但仍绑定预期版本、`origin/main` 祖先关系、提交和精确制品摘要。独立原生 validator 负责完整 `repository-baseline`，reviewer 只读复核，`check` 只核 receipt/hash DAG。正式链通过后，使用 `python3 -m scripts.acceptance consume-candidate --submission-id <uuid> --candidate-directory <absolute>` 再次核对原候选，只有该精确主体仍匹配才创建新正式 tag；不得改写或移动既有 tag。普通代码 Task 仍使用开发报告送验，两种输入不混用。
 
 下图只表示成功路径；任何来源、候选、验证、证据或保护前置失败均以 `FAIL` / `BLOCKED` 停止，不进入后续发布。
 
@@ -143,28 +143,26 @@ skinparam nodesep 40
 skinparam ranksep 35
 skinparam activityBackgroundColor #EAF2FF
 skinparam activityBorderColor #46699A
-title 正式发行的构建与独立验收
+title 正式发行<U+FF1A>打标签前验收与晋升
 start
-:S1 核对标签源;
-:S2 构建并交接候选;
-:S3 独立验收候选;
-:S4 只读晋升预检;
-:S5 人工批准发布;
-:S6 发布原候选;
+:S1 主线候选准备;
+:S2 原生独立验收;
+:S3 消费候选打标签;
+:S4 标签触发晋升;
+:S5 唯一审批发布;
 stop
 @enduml
 ```
 
-S1→S2 是 GitHub 托管 source job 到专用 runner prepare job；S2→S3 是原 checkout 的原生交接，不是 Actions 自动签证。S3→S4 由负责人从原标签手动 dispatch，填写原 submission 和 `PUBLISH`；构建和只读预检使用无审批的 `release-internal`，S4→S5→S6 仅在 promotion Environment 要求一次人工批准再发布。单维护者可按既定保护批准本人触发的发行，但不能代替独立自动验证或原生角色。
+S1 是从 `refs/heads/main` 手动 dispatch `operation=prepare` 并完成私有候选准备；S2 是原 checkout 的原生 Formal，不是 Actions 自动签证。Formal 通过后，S3 运行 `consume-candidate` 重核原候选；成功后维护者显式创建并推送新 tag。随后负责人从 `refs/tags/<release_tag>` 显式 dispatch `operation=publish`，填写同一 `submission_id` 与 `PUBLISH`；workflow 核实真实 tag 与同一 submission，S4 的只读预检必须 PASS 才能进入公开 job，使用无审批的 `release-internal`；S5 在 `release-public` 获得本次唯一真实人类审批且无管理员绕过后发布。单维护者可按既定保护批准本人触发的发行，但不能代替独立自动验证或原生角色。
 
 | 节点 | 命令或操作 | 成功判据 |
 | --- | --- | --- |
-| S1 核对标签源 | `node ops/release/integrity/source-build-identity.mjs --tag <tag>` | 精确 tag、commit、干净输入、正式版本与 runner readiness 匹配 |
-| S2 构建并交接候选 | `node ops/release/workflow/run-release-workflow.mjs prepare <request>` | 私有环境仅允许正式 tag、无需人工审批；候选身份、制品及固定 handoff 完整，不签验收 |
-| S3 独立验收候选 | `"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs formal <action> <id>` | 以固定 handoff 送验；不同真实 actor 完成完整基线、只读审查及 DAG 核对，无需开发 diff |
-| S4 只读晋升预检 | `"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume <submission> <tag>` | 从原标签重核既有候选和 Formal，不构建、不测试、不发布 |
-| S5 人工批准发布 | GitHub Environment `release-public` | 唯一一次人类审批，owner 按保护规则批准；不是测试或独立验收结果 |
-| S6 发布原候选 | `"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume <submission> <tag> --publish` | 实际写入前重核新鲜证据、固定资产、当前保护和本次运行批准；只有此步取得发布凭据，远端状态确认 |
+| S1 主线候选准备 | workflow `operation=prepare`；本机现有 `prepare <request>` | 仅 `refs/heads/main`；精确核验 `expected_commit`、目标 `release_tag` 不存在及正式版本；私有候选、无发布凭据，不创建 tag |
+| S2 独立验收候选 | `"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs formal <action> <id>` | 固定 handoff 送验；不同真实 actor 完成完整基线、只读审查及 DAG 核对，无需开发 diff |
+| S3 消费候选并打标签 | `python3 -m scripts.acceptance consume-candidate --submission-id <uuid> --candidate-directory <absolute>`，成功后维护者显式创建新 tag | 重新验证同一正式主体和精确候选；既有 tag 不改动 |
+| S4 标签触发晋升 | workflow `operation=publish`，ref 为 `refs/tags/<release_tag>` | 显式填写同一 `submission_id` 与 `PUBLISH`；只读预检不构建、不重新验收或发布 |
+| S5 唯一审批并发布 | GitHub Environment `release-public` | 同一运行唯一真实人类审批、管理员不能绕过；批准后重核并只晋升原候选 |
 
 内部构建和只读预检均在 `release-internal` 下显式设置 `deployment: false`，保留实际打包、验证、隔离能力和失败阻断，不创建内部 Deployment；正式公开使用 `release-public` 并保留部署记录。Actions 日志、独立验收与审查及 Gate 不隐藏、不省略。此开关不决定是否上传制品；内部候选仅本机保存，正式阶段才公开原制品。具体配置见[发行准备](github-actions/first-release/preparation.md#11-github-配置字段)。
 
@@ -229,7 +227,7 @@ GHCR 与 Release 不具备原子事务。镜像已上传不等于发行成功；
 
 本机入口 `node ops/release/workflow/run-release-workflow.mjs prepare /absolute/private-request.json` 的请求含 `releaseTag`、`dataset`（`path`/`sha256`/`releaseId`/`preparationId`/`ruleId`/`sqlVersion`）、`noticesRoot`、已存在且为空的 `outputParent`、本机 Podman Unix `endpoint`。JAR、扩展、SQL、基础镜像锁和许可关联由固定源码派生，不接受任意shell或完整descriptor。新单容器验收不要求历史双镜像 previous 候选，失败恢复由目标本身真实中断与重试证明。
 
-`prepare` 留下同版本目录的固定 `handoff.json` 与 runtime request；这些私有文件不上传。原 checkout 的真实不同原生 actor 完成 Formal 后，负责人从原正式tag手动dispatch填写submission与 `PUBLISH`，自动只读预检，再经 promotion 唯一一次人工批准发布。运行环境和精确命令见[准备页](github-actions/first-release/preparation.md)。
+`prepare` 留下同版本目录的固定 `handoff.json` 与 runtime request；这些私有文件不上传。原 checkout 的真实不同原生 actor 完成 Formal 后，负责人先以 `consume-candidate` 对原始候选作最终精确复核，再创建并推送正式 tag。随后从 `refs/tags/<release_tag>` dispatch `operation=publish`，填写同一 `submission_id` 与 `PUBLISH`；workflow 核验真实 tag 与同一 submission，执行自动只读预检，再由 `release-public` 要求本次唯一人类 GitHub 审批后发布。该审批必须是唯一真实审批且无管理员绕过。运行环境和精确命令见[准备页](github-actions/first-release/preparation.md)。
 
 ## 1.9. 安装与开发隔离
 

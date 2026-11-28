@@ -11636,6 +11636,28 @@ workstreams:
       name: phase2-pipeline
       phase: P2
       seed_tasks:
+      - id: LF-TSK-OPS-2586
+        title: 打标签前独立验收并晋升 v3.0.2 正式候选
+        priority: P0
+        task_version: 1
+        change_version: 1.0.0
+        task_source: planning/workstreams.yaml
+        estimated_minutes: 90
+        kind: implementation
+        lifecycle_state: READY
+        allowed_files: [ops/release/version.txt, ops/release/notes/3.0.2.md, planning/workstreams.yaml, tmp/quality/**, tmp/phase-tools/pretag-release-candidate/**]
+        forbidden_files: [secrets/**, .local/**, data/**, .env]
+        expected_output: 对无正式标签的精确主线候选独立验收，验收通过后创建正式标签并晋升原制品。
+        deliverable: 核准词库、固定候选及验收收据、公开发行，以及无凭据按精确版本安装验证。
+        acceptance_criteria:
+        - 核准的现有词库、词频规则、资料和第三方声明逐项绑定到原 ARM64 候选；首次初始化被中断后能恢复，已就绪坏库仍拒绝。
+        - 不同真实 actor 对干净精确主线、原始候选和完整 repository-baseline 验收和审查；通过并消费同一候选证据后才创建标签。
+        - 正式晋升只核验真实标签并发布原制品，不重建或移动旧标签，保留唯一真实人审。
+        - 按 3.0.2 标签以无发布凭据的普通用户重新拉取公开镜像，核对摘要与就绪；恢复日常服务并保留已有数据。
+        acceptance_evidence: [原候选与摘要、独立验收与审查、公开晋升及真实渠道运行证据。]
+        validation_command: node ops/release/workflow/run-release-workflow.mjs formal validate <uuid>
+        required_check_ids: [eng.release.version, eng.release.lifecycle-runtime, eng.release.candidate-runtime]
+        depends_on: []
       - id: LF-TSK-OPS-2585
         title: 独立验收并晋升 v3.0.1 正式发行候选
         priority: P0
