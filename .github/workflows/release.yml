@@ -127,7 +127,7 @@ jobs:
 
   prepare:
     name: 构建私有 ARM64 候选
-    if: success() && needs.source.outputs.operation == 'prepare'
+    if: success() && needs.source.outputs.operation == 'prepare' && github.ref == 'refs/heads/main'
     needs: source
     runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
     environment:
@@ -184,7 +184,7 @@ jobs:
 
   promotion-precheck:
     name: 复核独立验收证据
-    if: success() && needs.source.outputs.operation == 'publish'
+    if: success() && needs.source.outputs.operation == 'publish' && startsWith(github.ref, 'refs/tags/v') && inputs.release_tag == github.ref_name
     needs: source
     runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
     environment:
@@ -218,6 +218,10 @@ jobs:
           export PATH="$WORKSPACE/.local/lexiflow-python/bin:$LEXIFLOW_RELEASE_NODE_BIN:$PATH"
           cd "$WORKSPACE"
           test -x "$LEXIFLOW_RELEASE_NODE_BIN/node"
+          # 托管验证不会更新固定工作区的 refs；仅获取精确标签，不强制覆盖。
+          TAG_REF="refs/tags/$RELEASE_TAG"
+          git -c credential.helper= fetch --no-tags --no-recurse-submodules origin "$TAG_REF:$TAG_REF"
+          test "$(git rev-parse "${TAG_REF}^{commit}")" = "$EXPECTED_COMMIT"
           PROMOTION_STATUS=0
           RESULT="$("$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG")" || PROMOTION_STATUS=$?
           printf '%s\n' "$RESULT"
@@ -232,7 +236,7 @@ jobs:
 
   promotion:
     name: 发布已批准的正式发行
-    if: success() && needs.source.outputs.operation == 'publish'
+    if: success() && needs.source.outputs.operation == 'publish' && startsWith(github.ref, 'refs/tags/v') && inputs.release_tag == github.ref_name
     needs: [source, promotion-precheck]
     runs-on: [self-hosted, macOS, ARM64, lexiflow-release]
     environment: release-public
@@ -268,6 +272,7 @@ jobs:
           export PATH="$WORKSPACE/.local/lexiflow-python/bin:$LEXIFLOW_RELEASE_NODE_BIN:$PATH"
           cd "$WORKSPACE"
           test -x "$LEXIFLOW_RELEASE_NODE_BIN/node"
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$EXPECTED_COMMIT"
           if [ "$CONFIRMED_RECOVERY" = "true" ]; then
             "$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish --confirmed-recovery
           else

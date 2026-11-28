@@ -214,20 +214,23 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertNotIn("if", package)
         self.assertNotIn("if", upload)
 
-    def test_release_requires_clean_tag_before_protected_native_runner(self):
+    def test_release_binds_untagged_main_and_protected_tag_promotion(self):
         value = workflow("release.yml")
-        self.assertEqual(set(value["on"]), {"push", "workflow_dispatch"})
-        self.assertEqual(value["on"]["push"], {"tags": ["v*"]})
+        self.assertEqual(set(value["on"]), {"workflow_dispatch"})
         self.assertEqual(
             set(value["on"]["workflow_dispatch"]["inputs"]),
             {
+                "operation",
+                "expected_commit",
                 "submission_id",
                 "release_tag",
                 "publish_confirmation",
                 "confirmed_recovery",
             },
         )
-        recovery = value["on"]["workflow_dispatch"]["inputs"]["confirmed_recovery"]
+        inputs = value["on"]["workflow_dispatch"]["inputs"]
+        self.assertEqual(inputs["operation"]["options"], ["prepare", "publish"])
+        recovery = inputs["confirmed_recovery"]
         self.assertEqual(recovery["type"], "boolean")
         self.assertEqual(recovery["default"], "false")
         self.assertEqual(recovery["required"], "false")
@@ -249,7 +252,25 @@ class WorkflowContractTest(unittest.TestCase):
             'ops/release/integrity/source-build-identity.mjs --tag "$RELEASE_TAG"',
             "\n".join(step.get("run", "") for step in source["steps"]),
         )
+        for required in (
+            'test "$EVENT_REF_PROTECTED" = true',
+            'test "$EVENT_REF" = refs/heads/main',
+            'test "$EXPECTED_COMMIT" = "$EVENT_SHA"',
+            'test "$EXPECTED_COMMIT" = "$(git rev-parse refs/remotes/origin/main)"',
+            "actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=$EXPECTED_COMMIT",
+            'run.conclusion === "success"',
+            'source-build-identity.mjs --plan "$RELEASE_TAG"',
+            'test -z "$REMOTE_TAGS"',
+            'test "$EVENT_REF" = "refs/tags/$RELEASE_TAG"',
+            'test "$PUBLISH_CONFIRMATION" = PUBLISH',
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, source_run)
         full = value["jobs"]["prepare"]
+        self.assertIn("success()", full["if"])
+        self.assertIn("github.ref == 'refs/heads/main'", full["if"])
+        self.assertEqual(full["permissions"], {"contents": "read"})
+        self.assertNotIn("secrets.", str(full))
         self.assertEqual(full["needs"], "source")
         self.assertEqual(
             full["runs-on"], ["self-hosted", "macOS", "ARM64", "lexiflow-release"]
@@ -271,6 +292,7 @@ class WorkflowContractTest(unittest.TestCase):
             '"$LEXIFLOW_RELEASE_NODE_BIN/node" ops/release/workflow/run-release-workflow.mjs prepare "$REQUEST_FILE"',
             run,
         )
+        self.assertIn('podman --url "$LEXIFLOW_RELEASE_ARM64_DOCKER_HOST" info', run)
         self.assertNotIn("scripts/check_changes.py", run)
         self.assertNotIn("run_repository_checks.py", run)
         self.assertNotIn("scripts.acceptance validate", run)
@@ -321,6 +343,19 @@ class WorkflowContractTest(unittest.TestCase):
         )
         self.assertNotIn("continue-on-error", str(publish))
         self.assertNotIn("GITHUB_TOKEN", str(dry))
+        self.assertIn("success()", dry["if"])
+        self.assertIn("success()", publish["if"])
+        self.assertNotIn("always()", dry["if"])
+        self.assertNotIn("always()", publish["if"])
+        self.assertIn('TAG_REF="refs/tags/$RELEASE_TAG"', dry_run)
+        self.assertIn(
+            'git -c credential.helper= fetch --no-tags --no-recurse-submodules origin "$TAG_REF:$TAG_REF"',
+            dry_run,
+        )
+        self.assertIn(
+            'test "$(git rev-parse "${TAG_REF}^{commit}")" = "$EXPECTED_COMMIT"',
+            dry_run,
+        )
         self.assertIn("inputs.release_tag == github.ref_name", dry["if"])
         self.assertIn("inputs.release_tag == github.ref_name", publish["if"])
         self.assertIn("refs/tags/v", dry["if"])
@@ -337,6 +372,10 @@ class WorkflowContractTest(unittest.TestCase):
             "${{ inputs.confirmed_recovery }}",
         )
         promotion_run = promotion_step["run"]
+        self.assertIn(
+            'test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$EXPECTED_COMMIT"',
+            promotion_run,
+        )
         self.assertIn('if [ "$CONFIRMED_RECOVERY" = "true" ]; then', promotion_run)
         self.assertIn(
             'resume "$SUBMISSION_ID" "$RELEASE_TAG" --publish --confirmed-recovery',
