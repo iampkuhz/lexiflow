@@ -993,6 +993,7 @@ checks:
   - backend/verification/quality-gates
   - extension
   - infra/sqlite/schema.sql
+  - infra/sqlite/preferences.sql
   - scripts/environment
   - tests/verification
   - tests/release
@@ -1041,6 +1042,7 @@ checks:
   - path: backend/verification/quality-gates
   - path: extension
   - path: infra/sqlite/schema.sql
+  - path: infra/sqlite/preferences.sql
   - path: scripts/environment
   - path: tests/verification
   - path: tests/release
@@ -1082,6 +1084,7 @@ checks:
   - backend/verification/quality-gates
   - extension
   - infra/sqlite/schema.sql
+  - infra/sqlite/preferences.sql
   - scripts/environment
   - scripts/checks/release/source
   - scripts/checks/release/candidate
@@ -1126,6 +1129,7 @@ checks:
   - path: backend/verification/quality-gates
   - path: extension
   - path: infra/sqlite/schema.sql
+  - path: infra/sqlite/preferences.sql
   - path: scripts/environment
   - path: scripts/checks/release/source
   - path: scripts/checks/release/candidate
