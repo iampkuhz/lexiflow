@@ -196,7 +196,6 @@ checks:
   - git
   - python-package-yaml
   input_paths:
-  - .github/workflows/release.yml
   - contracts/versions.lock.json
   - scripts/contracts/contract-lock.mjs
   - tests/release
@@ -226,7 +225,6 @@ checks:
   transaction_reuse: true
   scenarios: [repository-baseline, change-targeted]
   triggers:
-  - path: .github/workflows/release.yml
   - path: contracts/versions.lock.json
   - path: scripts/contracts/contract-lock.mjs
   - path: tests/release
@@ -970,6 +968,7 @@ checks:
   - release-gradle-cache
   - release-npm-cache
   input_paths:
+  - .github/workflows/release.yml
   - contracts/versions.lock.json
   - scripts/contracts
   - scripts/acceptance
@@ -1010,6 +1009,7 @@ checks:
   - ops/podman
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: .github/workflows/release.yml
   - path: contracts/versions.lock.json
   - path: scripts/contracts
   - path: scripts/acceptance
@@ -1066,6 +1066,7 @@ checks:
   - podman
   - candidate-runtime-request
   input_paths:
+  - .github/workflows/release.yml
   - contracts/versions.lock.json
   - scripts/contracts/contract-lock.mjs
   - AGENTS.md
@@ -1102,6 +1103,7 @@ checks:
   - scripts/checks/repository/catalog/task_catalog_rules.py
   scenarios: [repository-baseline, change-targeted]
   triggers:
+  - path: .github/workflows/release.yml
   - path: contracts/versions.lock.json
   - path: scripts/contracts/contract-lock.mjs
   - path: ops/release/__init__.py
